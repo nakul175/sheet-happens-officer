@@ -41,6 +41,12 @@ log "building"
 npx next build
 printf 'RELEASE=%s\n' "$SHA" > release.env
 install -m 755 deploy/job.sh "$ROOT/bin/job.sh"
+# The droplet's /etc/cron.d/sho is root-owned and was written by cloud-init. A server built before the
+# reminders job existed gets it from the deploy user's own crontab, once and without root (SHO-US-7.4).
+if ! grep -qs 'job.sh reminders' /etc/cron.d/sho; then
+  { crontab -l 2>/dev/null | grep -v '# sho-managed' || true; echo '0 8 * * * /opt/sho/bin/job.sh reminders # sho-managed'; } | crontab - \
+    && log "reminders cron installed for $(id -un)" || log "WARNING: could not install the reminders cron"
+fi
 
 PREV="$(readlink -f "$CUR" 2>/dev/null || true)"
 switch "$REL"

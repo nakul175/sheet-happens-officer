@@ -79,6 +79,7 @@ write_files:
       PATH=/usr/local/bin:/usr/bin:/bin
       17 3 * * * deploy /opt/sho/bin/job.sh purge-trash
       37 3 * * * deploy /opt/sho/bin/job.sh purge-old
+      0 8 * * * deploy /opt/sho/bin/job.sh reminders
       5 8 * * * deploy /opt/sho/bin/job.sh check
 
   - path: /etc/logrotate.d/sho

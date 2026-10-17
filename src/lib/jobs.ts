@@ -7,15 +7,55 @@ import { purgeOld } from "@/lib/feed";
 import { ApiError } from "@/lib/http";
 import { notify } from "@/lib/notify";
 import { purgeTrash } from "@/lib/tasks";
+import { startOfTodayIST } from "@/lib/dates";
 
 type Job = { name: string; about: string; run: () => Promise<unknown> };
 
 export const JOBS: Job[] = [
   { name: "purge-trash", about: "Removes tasks that have been in Trash for 30 days", run: () => purgeTrash() },
   { name: "purge-old", about: "Removes notifications after 90 days and action and audit logs after 12 months", run: () => purgeOld() },
+  { name: "reminders", about: "Due-tomorrow, due-today and overdue reminders to the holder of each open task, 8:00 am India time", run: () => sendReminders() },
   { name: "check", about: "Tells the Super Admin when a job failed or did not run", run: () => checkJobs() },
 ];
 const DAILY_GRACE_HOURS = 30;
+
+const DAY_MS = 86400_000;
+/** Which reminder, if any, a task due `due` gets on the day starting at `today` (SHO-US-7.4). */
+export function reminderFor(due: Date, today: Date): { type: "TASK_DUE_TOMORROW" | "TASK_DUE_TODAY" | "TASK_OVERDUE"; daysOverdue?: number } | null {
+  const diff = Math.round((due.getTime() - today.getTime()) / DAY_MS);
+  if (diff === 1) return { type: "TASK_DUE_TOMORROW" };
+  if (diff === 0) return { type: "TASK_DUE_TODAY" };
+  const late = -diff;
+  // First overdue day, then once a week, nothing after 4 weeks overdue.
+  if (late >= 1 && late <= 28 && (late - 1) % 7 === 0) return { type: "TASK_OVERDUE", daysOverdue: late };
+  return null;
+}
+
+/** Holder = the assignee; while a task awaits approval the approver is the assignee (SHO-US-4.6). */
+export async function sendReminders(now = new Date()) {
+  const today = startOfTodayIST(now);
+  const tasks = await db.task.findMany({
+    where: {
+      completedAt: null, deletedAt: null, blocked: false, project: { archivedAt: null },
+      dueDate: { gte: new Date(today.getTime() - 28 * DAY_MS), lte: new Date(today.getTime() + DAY_MS) },
+    },
+    select: { id: true, title: true, projectId: true, assigneeId: true, dueDate: true, assignee: { select: { deactivatedAt: true } } },
+  });
+  const already = await db.notification.findMany({
+    where: { type: { in: ["TASK_DUE_TOMORROW", "TASK_DUE_TODAY", "TASK_OVERDUE"] }, createdAt: { gte: today } },
+    select: { taskId: true, type: true },
+  });
+  const done = new Set(already.map((n) => `${n.taskId}|${n.type}`));
+  const rows: { recipientId: string; type: string; taskId: string; projectId: string; data: { title: string; daysOverdue?: number } }[] = [];
+  for (const t of tasks) {
+    if (t.assignee.deactivatedAt || !t.dueDate) continue;
+    const r = reminderFor(t.dueDate, today);
+    if (!r || done.has(`${t.id}|${r.type}`)) continue;
+    rows.push({ recipientId: t.assigneeId, type: r.type, taskId: t.id, projectId: t.projectId, data: { title: t.title, ...(r.daysOverdue ? { daysOverdue: r.daysOverdue } : {}) } });
+  }
+  if (rows.length) await db.notification.createMany({ data: rows });
+  return { sent: rows.length };
+}
 
 export function requireJobSecret(req: Request) {
   const secret = process.env.JOB_SECRET ?? "";

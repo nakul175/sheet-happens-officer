@@ -37,6 +37,9 @@ export function noticeText(n: N) {
     PROJECT_ROLE_CHANGED: `${who} changed your role in ${p} to ${String(d.role ?? "").toLowerCase()}.`,
     REMOVED_FROM_PROJECT: `${who} removed you from ${p}.`,
     ORG_ROLE_CHANGED: `${who} changed your role to ${String(d.role ?? "").toLowerCase()}.`,
+    TASK_DUE_TOMORROW: `${t} is due tomorrow.`,
+    TASK_DUE_TODAY: `${t} is due today.`,
+    TASK_OVERDUE: `${t} is overdue${d.daysOverdue ? ` by ${d.daysOverdue} ${d.daysOverdue === 1 ? "day" : "days"}` : ""}.`,
     JOB_FAILED: `Scheduled job "${d.job}" failed${d.error ? `: ${d.error}` : ""}.`,
     JOB_MISSED: `Scheduled job "${d.job}" did not run on its day.`,
   };
