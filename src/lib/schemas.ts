@@ -44,6 +44,8 @@ export const projectCreate = z.object({
   name: z.string().trim().min(1).max(200),
   description: z.string().trim().max(5000).nullish(),
   leaderId: z.string().min(1, "Choose a Leader."),
+  // SHO-US-14.17: people added in the same step. Editor unless Viewer is chosen.
+  members: z.array(z.object({ userId: z.string().min(1), role: z.enum(["EDITOR", "VIEWER"]).default("EDITOR") })).max(50).optional(),
 });
 export const projectUpdate = z.object({
   name: z.string().trim().min(1).max(200).optional(),
