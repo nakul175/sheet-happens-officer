@@ -6,11 +6,21 @@ import { generatePassword, hashPassword, superAdminEmails } from "@/lib/auth";
 import { sendMail, signInDetailsMail } from "@/lib/email";
 import { releasePerson } from "@/lib/people";
 
-/** SHO-US-2.5. Members see active names only; Admins see everything. */
+/**
+ * SHO-US-2.5 and SHO-US-14.4. Everyone sees each active person's organisation role and the projects they lead.
+ * Led projects are only those the viewer can see: their own projects (Admins: all live projects).
+ * Members see active names only; Admins see everything.
+ */
 export async function listTeam(user: Actor) {
   const users = await db.user.findMany({ orderBy: { name: "asc" } });
+  const led = await db.projectMember.findMany({
+    where: { role: "LEADER", project: { archivedAt: null, typeId: "wst_project", ...(isAdmin(user) ? {} : { members: { some: { userId: user.id } } }) } },
+    select: { userId: true, project: { select: { id: true, name: true } } },
+    orderBy: { project: { name: "asc" } },
+  });
+  const leads = (id: string) => led.filter((l) => l.userId === id).map((l) => l.project);
   if (!isAdmin(user)) {
-    return users.filter(isActive).map((u) => ({ id: u.id, name: u.name }));
+    return users.filter(isActive).map((u) => ({ id: u.id, name: u.name, orgRole: u.orgRole, leads: leads(u.id) }));
   }
   return users.map((u) => ({
     id: u.id,
@@ -18,6 +28,7 @@ export async function listTeam(user: Actor) {
     email: u.email,
     orgRole: u.orgRole,
     status: u.deactivatedAt ? "DEACTIVATED" : !u.emailVerifiedAt ? "UNVERIFIED" : "ACTIVE",
+    leads: leads(u.id),
   }));
 }
 

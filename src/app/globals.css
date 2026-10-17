@@ -29,4 +29,9 @@ body {
 }
 
 a { color: var(--navy); }
-a:hover { color: var(--navy-dark); }
+@media (hover: hover) { a:hover { color: var(--navy-dark); } }
+
+/* SHO-US-10.9: Reduce motion turns off slide and fade animations everywhere. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
+}

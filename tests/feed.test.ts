@@ -24,7 +24,7 @@ describe("notifications", () => {
 });
 
 describe("activity log", () => {
-  it("is for the Leader and Admins only", async () => {
+  it("is for the Leader and Admins in full, and for Editors on their own tasks only", async () => {
     const lead = await account("lead");
     const ed = await account("ed");
     const p = await project(lead, lead, [{ who: ed }]);
@@ -32,8 +32,8 @@ describe("activity log", () => {
     const r = await lead.c.get(`/api/projects/${p.id}/activity`);
     expect(r.status).toBe(200);
     expect(r.json.items[0]).toMatchObject({ who: "Ed", via: "screen" });
-    expect(r.json.items[0].what).toMatch(/created a task "Logged"/);
-    expect((await ed.c.get(`/api/projects/${p.id}/activity`)).status).toBe(403);
+    expect(r.json.items[0].what).toMatch(/added "Logged" to To do/); // SHO-US-14.14
+    expect((await ed.c.get(`/api/projects/${p.id}/activity`)).status).toBe(200);
     const out = await account("out");
     expect((await out.c.get(`/api/projects/${p.id}/activity`)).status).toBe(404);
   });

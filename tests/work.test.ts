@@ -27,7 +27,7 @@ describe("people and roles (2.x)", () => {
     const email = `ghost${Date.now()}@aplyd.com`;
     await ghost.post("/api/auth/signup", { name: "Ghost", email, password: "correct-horse-9" });
     const asMember = (await m.c.get("/api/team")).json.people as Record<string, unknown>[];
-    expect(asMember.every((p) => Object.keys(p).sort().join() === "id,name")).toBe(true);
+    expect(asMember.every((p) => Object.keys(p).sort().join() === "id,leads,name,orgRole" /* SHO-US-14.4 AC3 adds role and led projects */)).toBe(true);
     expect(asMember.some((p) => p.name === "Ghost")).toBe(false);
     const asSuper = (await sa.c.get("/api/team")).json.people as Record<string, string>[];
     expect(asSuper.find((p) => p.email === email)?.status).toBe("UNVERIFIED");
@@ -355,7 +355,10 @@ describe("approver (4.6)", () => {
     const held = (await boss.c.get(`/api/tasks/${t}`)).json.task;
     expect(held.assignee.id).toBe(boss.id);
     expect(held.awaitingApproval).toBe(true);
-    expect((await boss.c.get("/api/my-tasks")).json.later.some((x: { id: string }) => x.id === t)).toBe(true);
+    // SHO-US-14.16: a task held for approval is listed in "Waiting on me", no longer under Later.
+    const mineNow = (await boss.c.get("/api/my-tasks")).json;
+    expect(mineNow.waitingOnMe.some((x: { id: string }) => x.id === t)).toBe(true);
+    expect(mineNow.later.some((x: { id: string }) => x.id === t)).toBe(false);
     expect((await other.c.post(`/api/tasks/${t}/send-back`)).status).toBe(403);
     expect((await boss.c.post(`/api/tasks/${t}/send-back`)).status).toBe(200);
     expect((await boss.c.get(`/api/tasks/${t}`)).json.task.assignee.id).toBe(worker.id);

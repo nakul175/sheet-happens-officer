@@ -4,9 +4,9 @@ import { api } from "@/components/api";
 import { Modal } from "@/components/ui";
 import "./undo.css";
 
-type Toast = { id: string; label: string; notified: boolean };
+type Toast = { id: string; ids?: string[]; label: string; notified: boolean }; // `ids` is a whole bulk change (SHO-US-14.11)
 type Conflict = { field: string; before: string; after: string; now: string };
-type Ask = { id: string; label: string; changedBy: string[]; conflicts: Conflict[] };
+type Ask = { id: string; ids?: string[]; label: string; changedBy: string[]; conflicts: Conflict[] };
 
 /** Ask the host to undo an action (used by the Activity screen). */
 export function requestUndo(id: string) {
@@ -35,8 +35,9 @@ export function UndoHost() {
     timer.current = setTimeout(() => setNote(null), 7000);
   }, []);
 
-  const run = useCallback(async (id: string, anyway: boolean) => {
-    const r = await api<{ label: string; noticesSent: boolean; needsConfirm?: string; conflicts?: Conflict[]; changedBy?: string[]; tooOld?: boolean }>("POST", `/api/actions/${id}/undo`, { anyway });
+  const run = useCallback(async (id: string, anyway: boolean, ids?: string[]) => {
+    const r = await api<{ label: string; noticesSent: boolean; needsConfirm?: string; conflicts?: Conflict[]; changedBy?: string[]; tooOld?: boolean }>(
+      "POST", ids ? "/api/actions/bulk-undo" : `/api/actions/${id}/undo`, ids ? { ids, anyway } : { anyway });
     if (r.ok) {
       setAsk(null);
       say(`Undone: ${r.data.label.toLowerCase()}.${r.data.noticesSent ? " Notices already sent cannot be recalled." : ""}`);
@@ -44,7 +45,7 @@ export function UndoHost() {
       if (window.dispatchEvent(ev)) setTimeout(() => window.location.reload(), 900);
     } else if (r.status === 409 && r.data.needsConfirm === "conflict") {
       setToast(null);
-      setAsk({ id, label: r.data.label ?? "this change", changedBy: r.data.changedBy ?? [], conflicts: r.data.conflicts ?? [] });
+      setAsk({ id, ids, label: r.data.label ?? "this change", changedBy: r.data.changedBy ?? [], conflicts: r.data.conflicts ?? [] });
     } else {
       setAsk(null);
       say(r.error ?? "Could not undo.");
@@ -53,8 +54,8 @@ export function UndoHost() {
 
   useEffect(() => {
     const onUndo = (e: Event) => {
-      const d = (e as CustomEvent<{ id: string; label: string; notified: boolean }>).detail;
-      show({ id: d.id, label: d.label, notified: d.notified });
+      const d = (e as CustomEvent<{ id: string; ids?: string[]; label: string; notified: boolean }>).detail;
+      show({ id: d.id, ids: d.ids, label: d.label, notified: d.notified });
     };
     const onAsk = (e: Event) => run((e as CustomEvent<{ id: string }>).detail.id, false);
     window.addEventListener("sho:undo", onUndo);
@@ -67,7 +68,7 @@ export function UndoHost() {
       {toast && (
         <div className="undo-toast" role="status">
           <span>{toast.label}.{toast.notified && <small>Anyone already notified will not be un-notified.</small>}</span>
-          <button onClick={() => run(toast.id, false)}>Undo</button>
+          <button onClick={() => run(toast.id, false, toast.ids)}>Undo</button>
         </div>
       )}
       {note && !toast && <div className="undo-toast" role="status"><span>{note}</span></div>}
@@ -85,7 +86,7 @@ export function UndoHost() {
           <p className="hint">&ldquo;Undo anyway&rdquo; reverts only what you changed, keeps their other edits, and tells them you overrode their change.</p>
           <div className="actions">
             <button className="btn ghost" onClick={() => setAsk(null)}>Keep their change</button>
-            <button className="btn" onClick={() => run(ask.id, true)}>Undo anyway</button>
+            <button className="btn" onClick={() => run(ask.id, true, ask.ids)}>Undo anyway</button>
           </div>
         </Modal>
       )}

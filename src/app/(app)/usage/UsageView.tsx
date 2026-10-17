@@ -29,7 +29,7 @@ export default function UsageView() {
             <div className="scroll" style={{ marginTop: 14 }}>
               <table className="tbl stack">
                 <thead><tr><th>Person</th><th>Calls this week</th><th>Calls this month</th><th>Cost this month</th></tr></thead>
-                <tbody>{u.data!.people.map((p) => <tr key={p.id}><td>{p.name}</td><td>{p.weekCalls}</td><td>{p.monthCalls}</td><td>${p.monthCostUsd.toFixed(2)}</td></tr>)}</tbody>
+                <tbody>{u.data!.people.map((p) => <tr key={p.id}><td data-label="Person">{p.name}</td><td data-label="This week">{p.weekCalls}</td><td data-label="This month">{p.monthCalls}</td><td data-label="Cost this month">${p.monthCostUsd.toFixed(2)}</td></tr>)}</tbody>
               </table>
             </div>
           )}
