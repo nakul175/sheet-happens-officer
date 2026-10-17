@@ -1,61 +1,40 @@
 import { z } from "zod";
 
-export const taskStatus = z.enum(["TODO", "IN_PROGRESS", "BLOCKED", "DONE"]);
-export const taskPriority = z.enum(["LOW", "MEDIUM", "HIGH", "URGENT"]);
+// Domain rule: exactly aplyd.com, checked on the server (SHO-US-1.1 AC2).
+export const ALLOWED_DOMAIN = "aplyd.com";
+export const DOMAIN_MESSAGE = "Use your @aplyd.com email address.";
+export const PASSWORD_MESSAGE = "Use at least 8 characters, with at least one letter and one number.";
 
-const isoDate = z.iso.datetime({ offset: true }).transform((s) => new Date(s));
+export const emailField = z
+  .string()
+  .trim()
+  .toLowerCase()
+  .pipe(z.email())
+  .refine((e) => e.slice(e.lastIndexOf("@") + 1) === ALLOWED_DOMAIN, { message: DOMAIN_MESSAGE });
 
-export const sessionInput = z.object({
-  email: z.string().trim().toLowerCase().pipe(z.email()),
-  name: z.string().trim().min(1).max(100).optional(),
+// Max 128 so a huge password cannot be used to burn CPU in the hash.
+export const passwordField = z
+  .string()
+  .min(8, PASSWORD_MESSAGE)
+  .max(128, PASSWORD_MESSAGE)
+  .refine((p) => /[A-Za-z]/.test(p) && /[0-9]/.test(p), { message: PASSWORD_MESSAGE });
+
+export const signUpInput = z.object({
+  name: z.string().trim().min(1).max(100),
+  email: emailField,
+  password: passwordField,
 });
 
-export const projectCreate = z.object({
-  name: z.string().trim().min(1).max(200),
-  description: z.string().trim().max(5000).nullish(),
+// Sign-in does not apply the domain rule: a wrong-domain email must look like any other failure.
+export const signInInput = z.object({
+  email: z.string().trim().toLowerCase().max(254),
+  password: z.string().min(1).max(128),
 });
 
-export const projectUpdate = z.object({
-  name: z.string().trim().min(1).max(200).optional(),
-  description: z.string().trim().max(5000).nullish(),
-  archived: z.boolean().optional(),
-});
+export const tokenInput = z.object({ token: z.string().min(20).max(200) });
 
-export const taskCreate = z.object({
-  projectId: z.string().min(1),
-  parentId: z.string().min(1).nullish(),
-  title: z.string().trim().min(1).max(500),
-  description: z.string().trim().max(20000).nullish(),
-  status: taskStatus.optional(),
-  priority: taskPriority.optional(),
-  dueDate: isoDate.nullish(),
-  assigneeIds: z.array(z.string().min(1)).max(50).optional(),
-});
+export const resendInput = z.object({ email: emailField });
 
-export const taskUpdate = z.object({
-  title: z.string().trim().min(1).max(500).optional(),
-  description: z.string().trim().max(20000).nullish(),
-  status: taskStatus.optional(),
-  priority: taskPriority.optional(),
-  dueDate: isoDate.nullish(),
-  projectId: z.string().min(1).optional(),
-  // Move within a column: caller supplies the neighbours' ids; server computes position.
-  beforeId: z.string().min(1).optional(),
-  afterId: z.string().min(1).optional(),
-});
-
-export const taskQuery = z.object({
-  projectId: z.string().min(1).optional(),
-  status: taskStatus.optional(),
-  assigneeId: z.string().min(1).optional(),
-  parentId: z.string().min(1).optional(),
-  topLevel: z.enum(["true", "false"]).optional(),
-  dueBefore: isoDate.optional(),
-  q: z.string().trim().min(1).max(200).optional(),
-  limit: z.coerce.number().int().min(1).max(200).default(100),
-  cursor: z.string().min(1).optional(),
-});
-
-export const assigneeSet = z.object({
-  userIds: z.array(z.string().min(1)).max(50),
-});
+export const resetInput = z
+  .object({ token: z.string().min(20).max(200), password: passwordField, confirm: z.string() })
+  .refine((v) => v.password === v.confirm, { message: "Passwords do not match.", path: ["confirm"] });
