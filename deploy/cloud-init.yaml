@@ -93,14 +93,16 @@ write_files:
       }
 
 runcmd:
+  # apt may be busy with the first-boot security update; wait for the lock instead of failing
+  - export DEBIAN_FRONTEND=noninteractive
   # Node 22 LTS
   - curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
-  - apt-get install -y nodejs
+  - apt-get -o DPkg::Lock::Timeout=600 install -y nodejs
   # Caddy (official repository)
   - curl -1sLf https://dl.cloudsmith.io/public/caddy/stable/gpg.key | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
   - curl -1sLf https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt > /etc/apt/sources.list.d/caddy-stable.list
-  - apt-get update
-  - apt-get install -y caddy
+  - apt-get -o DPkg::Lock::Timeout=600 update
+  - apt-get -o DPkg::Lock::Timeout=600 install -y caddy
   - install -m 644 /etc/sho/Caddyfile /etc/caddy/Caddyfile
   - systemctl restart caddy
   # Folders owned by the deploy user
