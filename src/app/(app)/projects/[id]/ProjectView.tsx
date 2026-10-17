@@ -118,7 +118,7 @@ function Inner({ id }: { id: string }) {
         <span className="sp" />
         <Link href={`/projects/${id}/members`}>Members</Link>
         <Link href={`/projects/${id}/trash`}>Trash</Link>
-        {p && (p.role === "LEADER") && <Link href={`/projects/${id}/activity`}>Activity</Link>}
+        {p && (p.role !== "VIEWER") && <Link href={`/projects/${id}/activity`}>Activity</Link>}
       </div>
       {err && <div className="err" role="alert">{err}</div>}
       {(pr.loading || tk.loading) && <div className="skel">Loading…</div>}

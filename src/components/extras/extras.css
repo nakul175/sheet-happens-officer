@@ -50,3 +50,11 @@
 @media (max-width: 1023px), (pointer: coarse) { .nav .navbtn { min-height: 44px; display: flex; align-items: center; } }
 .cc-host { z-index: 80; }
 @media (min-width: 600px) { .cc-host { left: auto; width: min(440px, 100vw); box-shadow: -12px 0 32px rgba(23,27,34,.2); border-left: 1px solid var(--line); } }
+
+/* SHO-US-14.14 readable activity */
+.actlist .item.act { align-items: flex-start; }
+.act-s { overflow-wrap: anywhere; }
+.actlist .item .meta { flex-wrap: nowrap; flex: none; }
+@media (max-width: 1023px) { .actlist .item .meta { flex-basis: 100%; flex-wrap: wrap; padding-left: 0; } }
+.actlist .item .t small { display: block; margin-top: 2px; }
+.act-s strong { font-weight: 600; }
