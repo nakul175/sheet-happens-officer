@@ -5,7 +5,7 @@ import { ago, api, useGet } from "@/components/api";
 import { Confirm } from "@/components/ui";
 import { Page } from "../../../Shell";
 
-type Item = { id: string; title: string; isSubtask: boolean; deletedAt: string; deletedBy: { name: string } | null; daysLeft: number };
+type Item = { id: string; title: string; isSubtask: boolean; parentTitle?: string | null; deletedAt: string; deletedBy: { name: string } | null; daysLeft: number };
 
 export default function Trash({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -33,7 +33,7 @@ export default function Trash({ params }: { params: Promise<{ id: string }> }) {
             <tbody>
               {tr.data.items.map((i) => (
                 <tr key={i.id}>
-                  <td>{i.title}{i.isSubtask && <> <span className="chip grey">Subtask</span></>}</td>
+                  <td>{i.title}{i.isSubtask && <> <span className="chip grey">Subtask{i.parentTitle ? ` of ${i.parentTitle}` : ""}</span></>}</td>
                   <td>{i.deletedBy?.name ?? "—"}</td>
                   <td>{ago(i.deletedAt)}</td>
                   <td>{i.daysLeft} day{i.daysLeft === 1 ? "" : "s"}</td>
@@ -44,7 +44,7 @@ export default function Trash({ params }: { params: Promise<{ id: string }> }) {
           </table>
         </div>
       )}
-      {ask && <Confirm title="Restore with its parent?" yes="Restore both" onNo={() => setAsk(null)} body={`"${ask.item.title}" belongs to "${ask.parent}", which is also in Trash. Restore both?`} onYes={() => restore(ask.item, true)} />}
+      {ask && <Confirm title="Restore with its parent?" yes="Restore both" onNo={() => setAsk(null)} body={`The parent task "${ask.parent}" is also in Trash. Restore both "${ask.parent}" and "${ask.item.title}"?`} onYes={() => restore(ask.item, true)} />}
     </Page>
   );
 }

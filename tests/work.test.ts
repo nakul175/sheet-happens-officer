@@ -425,6 +425,22 @@ describe("trash (6.1, 6.2)", () => {
     expect((await ed.c.get(`/api/tasks/${sub}`)).status).toBe(200);
   });
 
+  it("lists a subtask deleted on its own even when its parent is later in Trash, but not one deleted together with its parent", async () => {
+    const lead = await account("lead");
+    const p = await project(lead, lead, []);
+    const t = await task(lead, p.id);
+    const early = await task(lead, p.id, { parentId: t });
+    const together = await task(lead, p.id, { parentId: t });
+    expect((await lead.c.del(`/api/tasks/${early}`)).status).toBe(204);
+    await new Promise((r) => setTimeout(r, 15)); // a later timestamp for the parent's own deletion
+    expect((await lead.c.del(`/api/tasks/${t}`)).status).toBe(204);
+    const items = (await lead.c.get(`/api/projects/${p.id}/trash`)).json.items as { id: string; isSubtask: boolean; parentTitle: string | null }[];
+    expect(items.map((i) => i.id).sort()).toEqual([t, early].sort());
+    expect(items.find((i) => i.id === early)?.isSubtask).toBe(true);
+    expect(items.find((i) => i.id === early)?.parentTitle).toBeTruthy();
+    expect(items.some((i) => i.id === together)).toBe(false);
+  });
+
   it("restores a deleted parent with its subtask after a confirmation", async () => {
     const lead = await account("lead");
     const p = await project(lead, lead);
