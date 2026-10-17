@@ -10,5 +10,6 @@
 @media (max-width: 1023px) {
   .card :not(p, small, .hint, .sub, .t, h1, h2, h3) > a:not(.btn), .box :not(p, small, .hint, .sub, .t) > a:not(.btn), .tbl td > a:not(.btn), .list li > a:not(.btn) { display: inline-flex; align-items: center; min-height: 44px; min-width: 44px; }
   label:has(> input[type="checkbox"]), label:has(> input[type="radio"]) { display: inline-flex; align-items: center; gap: 4px; min-height: 44px; }
+  .dcard > div > a, .dcard a { display: inline-flex; align-items: center; min-height: 44px; min-width: 44px; }
   .tt { min-height: 44px; }
 }
