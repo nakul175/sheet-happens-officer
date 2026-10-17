@@ -54,12 +54,12 @@ export default function AuditView() {
             <tbody>
               {rows.map((r) => (
                 <tr key={r.id}>
-                  <td>{new Date(r.at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", dateStyle: "medium", timeStyle: "short" })}</td>
-                  <td>{r.who ?? "—"}{r.email && <div className="hint">{r.email}</div>}</td>
-                  <td><span className="chip">{r.event}</span></td>
-                  <td>{r.ip ?? ""}</td>
-                  <td>{r.channel === "Concierge" ? <span className="chip gold">via concierge</span> : "on screen"}</td>
-                  <td className="hint">{r.target ?? ""}</td>
+                  <td data-label="When">{new Date(r.at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", dateStyle: "medium", timeStyle: "short" })}</td>
+                  <td data-label="Who">{r.who ?? "—"}{r.email && <div className="hint">{r.email}</div>}</td>
+                  <td data-label="Event"><span className="chip">{r.event}</span></td>
+                  <td data-label="IP">{r.ip ?? ""}</td>
+                  <td data-label="How">{r.channel === "Concierge" ? <span className="chip gold">via concierge</span> : "on screen"}</td>
+                  <td data-label="Target" className="hint">{r.target ?? ""}</td>
                 </tr>
               ))}
             </tbody>

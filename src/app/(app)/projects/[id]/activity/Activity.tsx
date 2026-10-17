@@ -36,11 +36,11 @@ export default function Activity({ params }: { params: Promise<{ id: string }> }
             <tbody>
               {rows.map((r) => (
                 <tr key={r.id}>
-                  <td title={new Date(r.at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}>{ago(r.at)}</td>
-                  <td>{r.who}</td>
-                  <td>{r.what}{r.change && <div className="hint">{r.change}</div>}</td>
-                  <td>{r.via === "concierge" ? <span className="chip gold">via concierge</span> : "on screen"}</td>
-                  <td>
+                  <td data-label="When" title={new Date(r.at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}>{ago(r.at)}</td>
+                  <td data-label="Who">{r.who}</td>
+                  <td data-label="What">{r.what}{r.change && <div className="hint">{r.change}</div>}</td>
+                  <td data-label="How">{r.via === "concierge" ? <span className="chip gold">via concierge</span> : "on screen"}</td>
+                  <td data-label="Undo">
                     {r.undo === "available" && <button className="btn ghost sm" onClick={() => requestUndo(r.id)}>Undo</button>}
                     {r.undo === "too_old" && <span className="hint" title="Undo works for 30 days">Too old to undo</span>}
                     {r.undo === "undone" && <span className="hint">Undone</span>}

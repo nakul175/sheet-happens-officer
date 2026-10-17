@@ -34,11 +34,11 @@ export default function Trash({ params }: { params: Promise<{ id: string }> }) {
             <tbody>
               {tr.data.items.map((i) => (
                 <tr key={i.id}>
-                  <td>{i.title}{i.isSubtask && <> <span className="chip grey">Subtask{i.parentTitle ? ` of ${i.parentTitle}` : ""}</span></>}</td>
-                  <td>{i.deletedBy?.name ?? "—"}</td>
-                  <td>{ago(i.deletedAt)}</td>
-                  <td>{i.daysLeft} day{i.daysLeft === 1 ? "" : "s"}</td>
-                  <td>{canRestore && <button className="btn ghost sm" onClick={() => restore(i)}>Restore</button>}</td>
+                  <td data-label="Item">{i.title}{i.isSubtask && <> <span className="chip grey">Subtask{i.parentTitle ? ` of ${i.parentTitle}` : ""}</span></>}</td>
+                  <td data-label="Deleted by">{i.deletedBy?.name ?? "—"}</td>
+                  <td data-label="Deleted">{ago(i.deletedAt)}</td>
+                  <td data-label="Time left">{i.daysLeft} day{i.daysLeft === 1 ? "" : "s"}</td>
+                  <td data-label="Restore">{canRestore && <button className="btn ghost sm" onClick={() => restore(i)}>Restore</button>}</td>
                 </tr>
               ))}
             </tbody>

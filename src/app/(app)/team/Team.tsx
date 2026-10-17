@@ -41,11 +41,11 @@ export default function Team() {
                 const self = p.id === me.id;
                 return (
                   <tr key={p.id}>
-                    <td><b style={{ fontWeight: 500 }}>{p.name}</b>{self && " (you)"}</td>
-                    <td>{p.email}</td>
-                    <td><span className={`chip${p.orgRole === "MEMBER" ? " grey" : ""}`}>{roleLabel(p.orgRole!)}</span></td>
-                    <td><span className={`chip ${sc}`}>{sl}</span></td>
-                    <td>
+                    <td data-label="Name"><b style={{ fontWeight: 500 }}>{p.name}</b>{self && " (you)"}</td>
+                    <td data-label="Email">{p.email}</td>
+                    <td data-label="Role"><span className={`chip${p.orgRole === "MEMBER" ? " grey" : ""}`}>{roleLabel(p.orgRole!)}</span></td>
+                    <td data-label="Status"><span className={`chip ${sc}`}>{sl}</span></td>
+                    <td data-label="Actions">
                       <span className="pills">
                         {p.status === "ACTIVE" && p.orgRole !== "SUPER_ADMIN" && (
                           me.orgRole === "SUPER_ADMIN"
