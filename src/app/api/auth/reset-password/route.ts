@@ -10,7 +10,7 @@ export const POST = handle(async (req: Request) => {
   if (!userId) throw new ApiError(400, "This link has expired or was already used.");
   const user = await db.user.findUniqueOrThrow({ where: { id: userId } });
   await db.$transaction([
-    db.user.update({ where: { id: userId }, data: { passwordHash: await hashPassword(password) } }),
+    db.user.update({ where: { id: userId }, data: { passwordHash: await hashPassword(password), tempPasswordAt: null } }),
     db.session.updateMany({ where: { userId, revokedAt: null }, data: { revokedAt: new Date() } }),
     db.loginAttempt.deleteMany({ where: { email: user.email } }),
   ]);

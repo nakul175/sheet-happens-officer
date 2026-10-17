@@ -1,4 +1,4 @@
-import { createHash, randomBytes, scrypt, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes, randomInt, scrypt, timingSafeEqual } from "node:crypto";
 import { cookies } from "next/headers";
 import { db } from "@/lib/db";
 import { ApiError } from "@/lib/http";
@@ -20,6 +20,19 @@ const scryptAsync = (pw: string, salt: Buffer) =>
   new Promise<Buffer>((resolve, reject) =>
     scrypt(pw, salt, 64, { N: 16384, r: 8, p: 1 }, (err, key) => (err ? reject(err) : resolve(key))),
   );
+
+/** SHO-US-15.2. 12 characters, letters and digits, no look-alikes (0/O, 1/l/I). Always has both a letter and a digit. */
+export function generatePassword(): string {
+  const letters = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+  const digits = "23456789";
+  for (;;) {
+    const pw = Array.from({ length: 12 }, () => {
+      const pool = randomInt(0, 4) === 0 ? digits : letters;
+      return pool[randomInt(0, pool.length)];
+    }).join("");
+    if (/[A-Za-z]/.test(pw) && /[0-9]/.test(pw)) return pw;
+  }
+}
 
 export async function hashPassword(password: string): Promise<string> {
   const salt = randomBytes(16);

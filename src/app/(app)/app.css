@@ -226,3 +226,7 @@ textarea.in { min-height: 90px; resize: vertical; }
 }
 @media (max-width: 1023px), (pointer: coarse) { .box label { min-height: 44px; } }
 @media (max-width: 1023px), (pointer: coarse) { .modal a:not(.btn) { display: inline-flex; align-items: center; min-height: 44px; } }
+
+.pwbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; padding: 10px 28px; background: #fff4d6; border-bottom: 1px solid #f0d58a; color: #5c4300; font-size: 14px; }
+.pwbar span { flex: 0 1 auto; }
+.pwbar a { color: #272c6e; font-weight: 600; text-decoration: underline; text-underline-offset: 3px; min-height: 36px; display: inline-flex; align-items: center; }

@@ -70,6 +70,8 @@ model User {
   emailVerifiedAt    DateTime?
   orgRole            OrgRole   @default(MEMBER)
   deactivatedAt      DateTime?
+  // SHO-US-15.3: set when a Super Admin issued the password; cleared when the person sets their own.
+  tempPasswordAt     DateTime?
   conciergeHidden    Boolean   @default(false)
   voiceNoticeAckedAt DateTime?
   createdAt          DateTime  @default(now())
