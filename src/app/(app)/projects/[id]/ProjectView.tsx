@@ -14,6 +14,7 @@ import { InlineCells, inlineEditable, useInlineEdit } from "@/components/inline"
 import { ListControls } from "./ListControls";
 import { apiQuery, groupTasks, isFiltered, readState, sameState, type ListState } from "./listview";
 import { SaveViewDialog, type SavedView } from "./SavedViews";
+import { BulkBar, type BulkResult } from "./BulkBar";
 
 type T = {
   id: string; title: string; updatedAt: string; sectionId: string; priority: string; dueDate: string | null; blocked: boolean; completedAt: string | null; isIdea?: boolean;
@@ -51,6 +52,8 @@ function Inner({ id }: { id: string }) {
   const refresh = useCallback(() => { pr.reload(); tk.reload(); setExtra({}); }, [pr, tk]);
   const inline = useInlineEdit(refresh);
   const vw = useGet<{ views: SavedView[]; max: number }>(`/api/projects/${id}/views`);
+  const [sel, setSel] = useState<Set<string>>(new Set()); // ticked tasks (SHO-US-14.11)
+  const [bulk, setBulk] = useState<BulkResult | null>(null);
   const [viewDialog, setViewDialog] = useState<null | "save" | "rename" | "delete">(null);
 
   if (!pr.data && isNetworkFailure(pr.status)) {
@@ -81,6 +84,7 @@ function Inner({ id }: { id: string }) {
     const n = { ...ls, ...patch };
     router.replace(urlWith({ assignee: n.assignee || null, f: n.flags.join(",") || null, priority: n.priority || null, sort: n.sort === "date" ? null : n.sort, group: n.group === "section" ? null : n.group }), { scroll: false });
     setExtra({});
+    setSel(new Set());
   };
 
   async function loadMore(s: S, all: boolean) {
@@ -113,8 +117,10 @@ function Inner({ id }: { id: string }) {
     const t = secs?.flatMap((x) => tasksOf(x)).find((x) => x.id === taskId);
     return !!t && (t.canClose || !!t.completedAt);
   };
+  const pick = (ids: string[], on: boolean) => setSel((cur) => { const n = new Set(cur); for (const i of ids) { if (on) n.add(i); else n.delete(i); } return n; });
   const rowOf = (t: T) => (
-    <div key={t.id} className="item click" {...rowKeys(() => openTask(t.id))}>
+    <div key={t.id} className={`item click${canWrite ? " sel-row" : ""}${sel.has(t.id) ? " picked" : ""}`} {...rowKeys(() => openTask(t.id))}>
+      {canWrite && <label className="sel" onClick={(e) => e.stopPropagation()}><input type="checkbox" checked={sel.has(t.id)} aria-label={`Select "${t.title}"`} onChange={(e) => pick([t.id], e.target.checked)} /></label>}
       <Tick id={t.id} title={t.title} done={!!t.completedAt} allowed={canWrite && (t.canClose || !!t.completedAt)} onDone={refresh} />
       <div className="t"><b>{t.title}</b>{t.subtasks.total > 0 && <small>{t.subtasks.total - t.subtasks.open} of {t.subtasks.total} subtasks</small>}</div>
       <div className="meta">
@@ -167,6 +173,12 @@ function Inner({ id }: { id: string }) {
       )}
       {err && <div className="err" role="alert">{err}</div>}
       {inline.notice}
+      {bulk && (
+        <div className={bulk.skipped.length ? "box warn" : "ok"} role="status" style={{ marginBottom: 12 }}>
+          <div className="bulk-msg"><span>{bulk.message}.</span><button className="link" onClick={() => setBulk(null)}>Dismiss</button></div>
+          {bulk.skipped.length > 0 && <details><summary>Which tasks were skipped</summary><ul>{bulk.skipped.map((x) => <li key={x.id}>{x.title}: {x.reason}</li>)}</ul></details>}
+        </div>
+      )}
       {(pr.loading || tk.loading) && !secs && <div className="skel">Loading…</div>}
       {secs && filtered && secs.every((x) => !x.tasks.length) && (
         <div className="card nomatch"><b>No tasks match</b><button className="btn ghost" onClick={() => setList({ assignee: "", flags: [], priority: "" })}>Clear filters</button></div>
@@ -178,6 +190,7 @@ function Inner({ id }: { id: string }) {
         return (
           <section key={s.id} aria-label={s.name}>
             <div className="grp" style={{ display: "flex", alignItems: "center" }}>
+              {canWrite && list.length > 0 && <label className="selall"><input type="checkbox" checked={list.every((t) => sel.has(t.id))} aria-label={`Select all in ${s.name}`} onChange={(e) => pick(list.map((t) => t.id), e.target.checked)} /></label>}
               <span>{s.name} · {s.total}{s.isDone && " (done)"}</span>
               {manage && <SectionMenu s={s} secs={secs} projectId={id} onDialog={(kind) => setDialog({ kind, s })} onDone={refresh} onErr={setErr} />}
             </div>
@@ -200,7 +213,10 @@ function Inner({ id }: { id: string }) {
 
       {secs && view === "list" && ls.group !== "section" && groupTasks(secs.flatMap((x) => x.tasks), ls.group, todayIST(), ls.sort).map((g) => (
         <section key={g.key} aria-label={g.name}>
-          <div className="grp"><span>{g.name} · {g.tasks.length}</span></div>
+          <div className="grp">
+            {canWrite && <label className="selall"><input type="checkbox" checked={g.tasks.every((t) => sel.has(t.id))} aria-label={`Select all in ${g.name}`} onChange={(e) => pick(g.tasks.map((t) => t.id), e.target.checked)} /></label>}
+            <span>{g.name} · {g.tasks.length}</span>
+          </div>
           <div className="list">{g.tasks.map(rowOf)}</div>
         </section>
       ))}
@@ -257,6 +273,10 @@ function Inner({ id }: { id: string }) {
       )}
       {secs && p && p.role !== "LEADER" && <p className="hint" style={{ marginTop: 16 }}>Only the Leader and Admins can change sections.</p>}
 
+      {view === "list" && canWrite && sel.size > 0 && p && secs && (
+        <BulkBar projectId={id} ids={[...sel]} people={p.members} sections={secs} onClear={() => setSel(new Set())}
+          onDone={(r) => { setBulk(r); setSel(new Set()); refresh(); }} />
+      )}
       {viewDialog && <SaveViewDialog kind={viewDialog} projectId={id} state={ls} view={activeView} onClose={() => setViewDialog(null)}
         onDone={(afterDelete) => { setViewDialog(null); vw.reload(); if (afterDelete) router.replace(urlWith({ assignee: null, f: null, priority: null, sort: null, group: null }), { scroll: false }); }} />}
       {open && <TaskModal id={open} me={me.id} onClose={closeTask} onChanged={refresh} />}
