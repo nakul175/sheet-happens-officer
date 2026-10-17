@@ -1,15 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { AuthShell } from "@/components/AuthShell";
 import styles from "@/components/auth.module.css";
 import { post, rememberEmail } from "@/components/client";
+import s from "./signin.module.css";
 
-export function SignInForm() {
+export function SignInForm({ justReset }: { justReset: boolean }) {
   const router = useRouter();
-  const justReset = useSearchParams().get("reset") === "1";
   const [error, setError] = useState<string | null>(null);
   const [needsVerify, setNeedsVerify] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -39,8 +38,14 @@ export function SignInForm() {
   }
 
   return (
-    <AuthShell>
-      <h1>Sign in</h1>
+    <div className={styles.col}>
+      <div className={`${styles.brand} ${s.brand}`}>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src="/logo-mark.svg" alt="" />
+        <span>Sheet Happens Officer</span>
+      </div>
+      <section className={styles.card}>
+      <h2>Sign in</h2>
       <form onSubmit={submit} className={styles.card} style={{ border: 0, padding: 0 }} noValidate>
         {justReset && !error && <div role="status" className={styles.notice}>Password changed. Sign in with your new password.</div>}
         {error && (
@@ -66,7 +71,8 @@ export function SignInForm() {
         </div>
         <button type="submit" disabled={busy} className={styles.primary}>{busy ? "Signing in…" : "Sign in"}</button>
       </form>
+      </section>
       <div className={styles.foot}>Not signed up yet? <Link href="/signup">Sign up</Link></div>
-    </AuthShell>
+    </div>
   );
 }
