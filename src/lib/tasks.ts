@@ -516,20 +516,50 @@ export async function myTasks(user: Actor) {
   });
   const today = startOfTodayIST();
   const weekEnd = addDays(today, 8); // today plus the next seven days
-  const groups = { overdue: [] as unknown[], next7: [] as unknown[], later: [] as unknown[] };
+  // SHO-US-14.16: what waits on me, and what I handed to an approver, since when.
+  const sent = await db.task.findMany({
+    where: {
+      completedAt: null, deletedAt: null, previousAssigneeId: user.id, approverId: { not: null }, assigneeId: { not: user.id },
+      project: { archivedAt: null, members: { some: { userId: user.id } } },
+    },
+    include: { ...taskInclude, project: { select: { id: true, name: true, typeId: true, stage: { select: { name: true } }, members: { where: { userId: user.id }, select: { role: true } } } }, parent: { select: { id: true, title: true } } },
+    orderBy: [...ORDER],
+  });
+  const since = await waitingSince([...rows.filter(awaiting), ...sent.filter(awaiting)].map((t) => t.id));
+  const days = (id: string, fallback: Date) => Math.max(0, Math.floor((Date.now() - (since.get(id) ?? fallback).getTime()) / 86400_000));
+  const groups = { waitingOnMe: [] as unknown[], overdue: [] as unknown[], next7: [] as unknown[], later: [] as unknown[], waitingOnOthers: [] as unknown[] };
+  const shape = (t: (typeof rows)[number]) => ({
+    ...present(t, { id: user.id, role: (t.project.members[0]?.role ?? "VIEWER") as Role }),
+    project: { id: t.project.id, name: t.project.name, type: t.project.typeId === "wst_deal" ? "DEAL" : "PROJECT", stage: t.project.stage?.name ?? null },
+    parent: t.parent,
+    relation: t.assigneeId === user.id ? "ASSIGNEE" : "COLLABORATOR",
+  });
   for (const t of rows) {
-    const role = (t.project.members[0]?.role ?? "VIEWER") as Role;
-    const item = {
-      ...present(t, { id: user.id, role }),
-      project: { id: t.project.id, name: t.project.name, type: t.project.typeId === "wst_deal" ? "DEAL" : "PROJECT", stage: t.project.stage?.name ?? null },
-      parent: t.parent,
-      relation: t.assigneeId === user.id ? "ASSIGNEE" : "COLLABORATOR",
-    };
-    if (t.dueDate && t.dueDate < today) groups.overdue.push(item);
+    const item = shape(t);
+    // A task held for my approval is not "later"; it sits in its own group at the top.
+    if (awaiting(t) && t.assigneeId === user.id) groups.waitingOnMe.push({ ...item, waitingDays: days(t.id, t.updatedAt) });
+    else if (t.dueDate && t.dueDate < today) groups.overdue.push(item);
     else if (t.dueDate && t.dueDate < weekEnd) groups.next7.push(item);
     else groups.later.push(item);
   }
+  for (const t of sent) if (awaiting(t)) groups.waitingOnOthers.push({ ...shape(t), waitingDays: days(t.id, t.updatedAt) });
   return groups;
+}
+
+/** When each task last went to its approver: the newest action that put it in the approver's hands. */
+async function waitingSince(ids: string[]) {
+  const out = new Map<string, Date>();
+  if (!ids.length) return out;
+  const rows = await db.actionLog.findMany({
+    where: { targetType: "task", targetId: { in: ids }, action: { in: ["task.sent_for_approval", "task.assigned", "task.approver_changed"] }, undoneAt: null },
+    orderBy: { createdAt: "desc" },
+    select: { targetId: true, createdAt: true, afterState: true },
+  });
+  for (const r of rows) {
+    const after = (r.afterState ?? {}) as { assigneeId?: string; approverId?: string };
+    if (!out.has(r.targetId) && after.assigneeId) out.set(r.targetId, r.createdAt);
+  }
+  return out;
 }
 
 
