@@ -4,18 +4,21 @@ import Link from "next/link";
 import { use, useCallback, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Suspense } from "react";
-import { PRIORITY, ROLE, api, dueLabel, dueState, rowKeys, initials, isNetworkFailure, isOverdue, useGet } from "@/components/api";
+import { PRIORITY, ROLE, api, dueLabel, dueState, rowKeys, initials, isNetworkFailure, isOverdue, todayIST, useGet } from "@/components/api";
 import { TaskModal } from "@/components/TaskModal";
 import { Tick } from "@/components/TaskParts";
 import { Confirm, Field, LoadFailed, Menu, Modal } from "@/components/ui";
 import { DealPanel, type DealBlock } from "@/components/DealPanel";
 import { Page, useMe } from "../../Shell";
+import { ListControls } from "./ListControls";
+import { apiQuery, groupTasks, isFiltered, readState, type ListState } from "./listview";
 
 type T = {
   id: string; title: string; sectionId: string; priority: string; dueDate: string | null; blocked: boolean; completedAt: string | null; isIdea?: boolean;
   assignee: { id: string; name: string }; collaborators: { id: string; name: string }[]; awaitingApproval: boolean; canClose: boolean; subtasks: { total: number; open: number };
 };
 type S = { id: string; name: string; isDone: boolean; total: number; tasks: T[]; nextCursor: string | null };
+type Summary = { open: number; overdue: number; blocked: number; awaiting: number };
 type Proj = {
   id: string; name: string; archived: boolean; role: string; type?: "PROJECT" | "DEAL"; deal?: DealBlock | null;
   sections: { id: string; name: string; isDone: boolean }[];
@@ -31,7 +34,10 @@ function Inner({ id }: { id: string }) {
   const view = sp.get("view") === "board" ? "board" : "list";
   const open = sp.get("task");
   const pr = useGet<{ project: Proj }>(`/api/projects/${id}`);
-  const tk = useGet<{ sections: S[] }>(`/api/projects/${id}/tasks`);
+  const ls = readState(sp);
+  const filtered = isFiltered(ls);
+  const wide = filtered || ls.sort !== "date" || ls.group !== "section"; // the server sent every matching task, not one page per section
+  const tk = useGet<{ sections: S[]; summary?: Summary }>(`/api/projects/${id}/tasks${apiQuery(ls)}`);
   const [extra, setExtra] = useState<Record<string, T[]>>({}); // pages beyond the first, by section
   const [adding, setAdding] = useState(false);
   const [dialog, setDialog] = useState<null | { kind: "rename" | "delete" | "addSection"; s?: S }>(null);
@@ -52,9 +58,21 @@ function Inner({ id }: { id: string }) {
   const secs = tk.data?.sections;
   const canWrite = !!p && p.role !== "VIEWER" && !p.archived;
   const manage = !!p && p.role === "LEADER" && !p.archived;
-  const setView = (v: string) => router.push(`${path}${v === "board" ? "?view=board" : ""}`, { scroll: false });
-  const openTask = (tid: string) => router.push(`${path}?${view === "board" ? "view=board&" : ""}task=${tid}`, { scroll: false });
-  const closeTask = () => router.push(`${path}${view === "board" ? "?view=board" : ""}`, { scroll: false });
+  // The address keeps the view, the open task and the filter, sort and group choices.
+  const urlWith = (over: Record<string, string | null>) => {
+    const q = new URLSearchParams(sp.toString());
+    for (const [k, v] of Object.entries(over)) { if (v) q.set(k, v); else q.delete(k); }
+    const t = q.toString();
+    return `${path}${t ? `?${t}` : ""}`;
+  };
+  const setView = (v: string) => router.push(urlWith({ view: v === "board" ? "board" : null, task: null }), { scroll: false });
+  const openTask = (tid: string) => router.push(urlWith({ task: tid }), { scroll: false });
+  const closeTask = () => router.push(urlWith({ task: null }), { scroll: false });
+  const setList = (patch: Partial<ListState>) => {
+    const n = { ...ls, ...patch };
+    router.replace(urlWith({ assignee: n.assignee || null, f: n.flags.join(",") || null, priority: n.priority || null, sort: n.sort === "date" ? null : n.sort, group: n.group === "section" ? null : n.group }), { scroll: false });
+    setExtra({});
+  };
 
   async function loadMore(s: S, all: boolean) {
     const cursorList = extra[s.id] ?? [];
@@ -86,12 +104,31 @@ function Inner({ id }: { id: string }) {
     const t = secs?.flatMap((x) => tasksOf(x)).find((x) => x.id === taskId);
     return !!t && (t.canClose || !!t.completedAt);
   };
+  const rowOf = (t: T) => (
+    <div key={t.id} className="item click" {...rowKeys(() => openTask(t.id))}>
+      <Tick id={t.id} title={t.title} done={!!t.completedAt} allowed={canWrite && (t.canClose || !!t.completedAt)} onDone={refresh} />
+      <div className="t"><b>{t.title}</b>{t.subtasks.total > 0 && <small>{t.subtasks.total - t.subtasks.open} of {t.subtasks.total} subtasks</small>}</div>
+      <div className="meta">
+        {t.awaitingApproval && <span className="chip gold">Awaiting approval</span>}
+        {t.isIdea && <span className="chip gold">Idea</span>}{t.blocked && <span className="chip red">Blocked</span>}
+        <span>{t.assignee.name}</span>
+        <span className={`pri-${t.priority}`}>{PRIORITY[t.priority]}</span>
+        <span className={!t.completedAt && isOverdue(t.dueDate) ? "over" : undefined}>{dueState(t.dueDate, !!t.completedAt)}</span>
+      </div>
+    </div>
+  );
   const archivedBanner = p?.archived && <div className="box warn" style={{ marginBottom: 12 }}>This project is archived and read-only.</div>;
 
   return (
     <Page dock={view === "list"} bar={view === "board"} docTitle={p?.name}
       title={<span className="crumb"><Link href={p?.type === "DEAL" ? "/deals" : "/projects"}>{p?.type === "DEAL" ? "Deals" : "Projects"}</Link> / <span style={{ color: "var(--ink)" }}>{p?.name ?? "…"}</span></span>}
-      sub={p && <span className="chip">You: {ROLE[p.role]}</span>}
+      sub={p && <><span className="chip">You: {ROLE[p.role]}</span>{tk.data?.summary && (
+        <span className="lc-sum">
+          {tk.data.summary.overdue > 0 && <span className="chip red">{tk.data.summary.overdue} overdue</span>}
+          {tk.data.summary.blocked > 0 && <span className="chip red">{tk.data.summary.blocked} blocked</span>}
+          {tk.data.summary.awaiting > 0 && <span className="chip gold">{tk.data.summary.awaiting} awaiting approval</span>}
+        </span>
+      )}</>}
       actions={canWrite && <button className="btn" onClick={() => setAdding(true)}>+ Add task</button>}>
       {archivedBanner}
       {p?.deal && <DealPanel projectId={id} deal={p.deal} canWrite={canWrite} onChange={refresh} />}
@@ -105,10 +142,17 @@ function Inner({ id }: { id: string }) {
         <Link href={`/projects/${id}/trash`}>Trash</Link>
         {p && (p.role === "LEADER") && <Link href={`/projects/${id}/activity`}>Activity</Link>}
       </div>
+      {p && secs && (
+        <ListControls state={ls} members={p.members} onChange={setList} showGroup={view === "list"}
+          found={wide && filtered ? secs.reduce((n, x) => n + x.tasks.length, 0) : null} />
+      )}
       {err && <div className="err" role="alert">{err}</div>}
-      {(pr.loading || tk.loading) && <div className="skel">Loading…</div>}
+      {(pr.loading || tk.loading) && !secs && <div className="skel">Loading…</div>}
+      {secs && filtered && secs.every((x) => !x.tasks.length) && (
+        <div className="card nomatch"><b>No tasks match</b><button className="btn ghost" onClick={() => setList({ assignee: "", flags: [], priority: "" })}>Clear filters</button></div>
+      )}
 
-      {secs && view === "list" && secs.map((s) => {
+      {secs && view === "list" && ls.group === "section" && secs.filter((s) => !filtered || s.tasks.length > 0).map((s) => {
         const list = tasksOf(s);
         const more = s.isDone ? s.total > list.length : !!s.nextCursor && list.length < s.total;
         return (
@@ -118,23 +162,11 @@ function Inner({ id }: { id: string }) {
               {manage && <SectionMenu s={s} secs={secs} projectId={id} onDialog={(kind) => setDialog({ kind, s })} onDone={refresh} onErr={setErr} />}
             </div>
             <div className="list">
-              {list.map((t) => (
-                <div key={t.id} className="item click" {...rowKeys(() => openTask(t.id))}>
-                  <Tick id={t.id} title={t.title} done={!!t.completedAt} allowed={canWrite && (t.canClose || !!t.completedAt)} onDone={refresh} />
-                  <div className="t"><b>{t.title}</b>{t.subtasks.total > 0 && <small>{t.subtasks.total - t.subtasks.open} of {t.subtasks.total} subtasks</small>}</div>
-                  <div className="meta">
-                    {t.awaitingApproval && <span className="chip gold">Awaiting approval</span>}
-                    {t.isIdea && <span className="chip gold">Idea</span>}{t.blocked && <span className="chip red">Blocked</span>}
-                    <span>{t.assignee.name}</span>
-                    <span className={`pri-${t.priority}`}>{PRIORITY[t.priority]}</span>
-                    <span className={!t.completedAt && isOverdue(t.dueDate) ? "over" : undefined}>{dueState(t.dueDate, !!t.completedAt)}</span>
-                  </div>
-                </div>
-              ))}
+              {list.map(rowOf)}
               {!list.length && <div className="item"><span className="hint">No tasks here.</span></div>}
-              {canWrite && !s.isDone && <QuickAdd projectId={id} sectionId={s.id} onAdded={refresh} />}
+              {canWrite && !s.isDone && !wide && <QuickAdd projectId={id} sectionId={s.id} onAdded={refresh} />}
             </div>
-            {s.isDone && s.total > 10 && (
+            {s.isDone && s.total > 10 && !wide && (
               <p className="hint">
                 {list.length < s.total
                   ? <>Done is collapsed: the {list.length} most recent · <button className="link" onClick={() => loadMore(s, true)}>Show all {s.total}</button></>
@@ -145,6 +177,13 @@ function Inner({ id }: { id: string }) {
           </section>
         );
       })}
+
+      {secs && view === "list" && ls.group !== "section" && groupTasks(secs.flatMap((x) => x.tasks), ls.group, todayIST(), ls.sort).map((g) => (
+        <section key={g.key} aria-label={g.name}>
+          <div className="grp"><span>{g.name} · {g.tasks.length}</span></div>
+          <div className="list">{g.tasks.map(rowOf)}</div>
+        </section>
+      ))}
 
       {secs && view === "board" && (
         <div className="board">

@@ -8,7 +8,7 @@ import {
 import { addDays, formatDueDate, parseDueDate, startOfTodayIST } from "@/lib/dates";
 import { auditTx, logAction, notify } from "@/lib/notify";
 
-const taskInclude = {
+export const taskInclude = {
   assignee: { select: { id: true, name: true } },
   approver: { select: { id: true, name: true } },
   collaborators: { select: { user: { select: { id: true, name: true } } } },
@@ -67,7 +67,7 @@ async function loadTask(user: Actor, id: string, o: { write?: boolean; deleted?:
   return { t, a };
 }
 
-const ORDER = [{ dueDate: { sort: "asc", nulls: "last" } }, { createdAt: "asc" }, { id: "asc" }] as const;
+export const ORDER = [{ dueDate: { sort: "asc", nulls: "last" } }, { createdAt: "asc" }, { id: "asc" }] as const;
 
 async function requireWorker(tx: Tx, projectId: string, userId: string, what: string) {
   const m = await activeMember(tx, projectId, userId, WORKERS);
