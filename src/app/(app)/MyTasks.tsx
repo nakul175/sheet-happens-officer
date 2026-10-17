@@ -44,6 +44,8 @@ function Inner() {
   const [mode, setMode] = useState<"date" | "project">("date");
   const [done, setDone] = useState<{ projectId: string; name: string }[]>([]);
   const [dismissed, setDismissed] = useState<string[]>([]);
+  // Reads the saved choice from browser storage after mount (reading it during render would not match the server HTML).
+  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { try { if (localStorage.getItem(GROUP_KEY(me.id)) === "project") setMode("project"); } catch { /* storage blocked: stay By date */ } }, [me.id]);
   const pick = (m: "date" | "project") => { setMode(m); try { localStorage.setItem(GROUP_KEY(me.id), m); } catch { /* ignore */ } };
   const router = useRouter();
