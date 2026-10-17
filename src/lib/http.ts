@@ -62,7 +62,8 @@ export function handle<A extends unknown[]>(fn: (...args: A) => Promise<Response
       }
       if (code === "P2025") return Response.json({ error: "Resource not found" }, { status: 404 });
       if (code === "P2003") return Response.json({ error: "Referenced record does not exist" }, { status: 400 });
-      console.error(err);
+      // Name and database code only: an error's message or fields can carry chat or task text.
+      console.error("unexpected error", (err as Error)?.name ?? typeof err, code ?? "");
       return Response.json({ error: "Internal server error" }, { status: 500 });
     }
   };

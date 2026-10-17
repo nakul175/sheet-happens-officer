@@ -3,6 +3,8 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { createContext, useContext, useEffect, useRef, useState } from "react";
 import { ago, api, initials, useGet } from "@/components/api";
+import { ConciergeProvider, useConcierge } from "@/components/concierge/ConciergeProvider";
+import { ConciergeBar, ConciergeDock, ConciergeFab } from "@/components/concierge/Concierge";
 
 export type Me = { id: string; name: string; email: string; orgRole: "MEMBER" | "ADMIN" | "SUPER_ADMIN"; crm?: boolean; review?: boolean };
 const MeCtx = createContext<Me | null>(null);
@@ -81,6 +83,7 @@ export function Shell({ user, children }: { user: Me; children: React.ReactNode 
   if (user.orgRole === "SUPER_ADMIN") items.push(["/usage", "Usage"], ["/audit", "Audit log"]);
   return (
     <MeCtx.Provider value={user}>
+      <ConciergeProvider>
       <div className="shell">
         {open && <div className="veil" onClick={() => setMenu(null)} />}
         <aside className={`side${open ? " open" : ""}`} aria-label="Main">
@@ -105,17 +108,18 @@ export function Shell({ user, children }: { user: Me; children: React.ReactNode 
           {children}
         </div>
       </div>
+      </ConciergeProvider>
     </MeCtx.Provider>
   );
 }
 
 /** Page frame. `dock` reserves the 340 px concierge column on wide screens (list screens only). */
 export function Page({ title, sub, actions, dock, bar, children }: { title?: React.ReactNode; sub?: React.ReactNode; actions?: React.ReactNode; dock?: boolean; bar?: boolean; children: React.ReactNode }) {
-  const [sheet, setSheet] = useState(false);
   const slot = dock || bar;
+  const hidden = useConcierge()?.hidden ?? false; // a hidden concierge gives its space back
   return (
     <>
-      <main className={`content${dock ? " with-dock" : ""}${bar ? " with-bar" : ""}`}>
+      <main className={`content${dock && !hidden ? " with-dock" : ""}${bar && !hidden ? " with-bar" : ""}`}>
         {(title || actions) && (
           <div className="head">
             <div className="grow">
@@ -127,14 +131,9 @@ export function Page({ title, sub, actions, dock, bar, children }: { title?: Rea
         )}
         {children}
       </main>
-      {dock && <aside className="dock" aria-label="Concierge"><strong>Concierge</strong>The assistant arrives in a later release. This column is kept free for it.</aside>}
-      {bar && <aside className="bardock" aria-label="Concierge"><strong>Concierge</strong> The assistant arrives in a later release. This bar is kept free for it.</aside>}
-      {slot && (
-        <>
-          <button className="fab" aria-label="Concierge" aria-expanded={sheet} onClick={() => setSheet(!sheet)}>💬</button>
-          {sheet && <div className="fabsheet" role="dialog" aria-label="Concierge"><strong>Concierge</strong>The assistant arrives in a later release.<button className="link" onClick={() => setSheet(false)}>Close</button></div>}
-        </>
-      )}
+      {dock && <ConciergeDock />}
+      {bar && <ConciergeBar />}
+      {slot && <ConciergeFab kind={dock ? "dock" : "bar"} />}
     </>
   );
 }

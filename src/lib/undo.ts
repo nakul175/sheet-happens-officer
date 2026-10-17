@@ -325,15 +325,11 @@ async function present(conflicts: Conflict[]) {
   return conflicts.map((c) => ({ field: FIELD_LABEL[c.field] ?? c.field, before: show(c.field, c.before), after: show(c.field, c.after), now: show(c.field, c.now) }));
 }
 
-/**
- * Undo one logged action. Returns what happened; throws 409 with the three values when the data changed since,
- * unless `anyway` is set, in which case only the fields the action touched are reverted (AC3).
- */
-export async function undoAction(user: Actor, logId: string, anyway = false) {
+async function prepare(user: Actor, logId: string) {
   const row = await db.actionLog.findUnique({ where: { id: logId } });
   if (!row) throw notFound("Action");
-  if (!row.projectId) return undoRecord(user, row, anyway); // organisations, contacts and notes belong to no project
   const projectId = row.projectId;
+  if (!projectId) throw bad("This kind of action cannot be undone.");
   const a = await projectAccess(user, projectId);
   requireWrite(a);
   const archiveKind = row.action === "project.archived" || row.action === "project.unarchived";
@@ -344,15 +340,36 @@ export async function undoAction(user: Actor, logId: string, anyway = false) {
   if (Date.now() - row.createdAt.getTime() > UNDO_DAYS * 86400_000) throw bad("Too old to undo", { tooOld: true });
 
   const p = await plan(row, user, projectId);
-  if (p.conflicts.length && !anyway) {
-    const later = await db.actionLog.findMany({ where: { targetType: row.targetType, targetId: row.targetId, createdAt: { gt: row.createdAt }, id: { not: row.id } }, include: { actor: { select: { name: true } } } });
-    throw bad("This changed after your action.", {
-      needsConfirm: "conflict",
-      label: UNDO_LABELS[row.action],
-      changedBy: [...new Set(later.filter((l) => l.actorId !== user.id).map((l) => l.actor.name))],
-      conflicts: await present(p.conflicts),
-    });
-  }
+  return { row, projectId, p };
+}
+
+async function conflictError(row: Awaited<ReturnType<typeof prepare>>["row"], p: Plan, userId: string) {
+  const later = await db.actionLog.findMany({ where: { targetType: row.targetType, targetId: row.targetId, createdAt: { gt: row.createdAt }, id: { not: row.id } }, include: { actor: { select: { name: true } } } });
+  return bad("This changed after your action.", {
+    needsConfirm: "conflict",
+    label: UNDO_LABELS[row.action],
+    changedBy: [...new Set(later.filter((l) => l.actorId !== userId).map((l) => l.actor.name))],
+    conflicts: await present(p.conflicts),
+  });
+}
+
+/** Everything undoAction checks, with nothing written. Used to test a whole concierge card before reversing any of it. */
+export async function checkUndo(user: Actor, logId: string) {
+  const own = await db.actionLog.findUnique({ where: { id: logId }, select: { projectId: true } });
+  if (own && !own.projectId) return; // organisation, contact and note rows are never part of a concierge card
+  const { row, p } = await prepare(user, logId);
+  if (p.conflicts.length) throw await conflictError(row, p, user.id);
+}
+
+/**
+ * Undo one logged action. Returns what happened; throws 409 with the three values when the data changed since,
+ * unless `anyway` is set, in which case only the fields the action touched are reverted (AC3).
+ */
+export async function undoAction(user: Actor, logId: string, anyway = false) {
+  const rec = await db.actionLog.findUnique({ where: { id: logId } });
+  if (rec && !rec.projectId) return undoRecord(user, rec, anyway); // organisations, contacts and notes belong to no project
+  const { row, projectId, p } = await prepare(user, logId);
+  if (p.conflicts.length && !anyway) throw await conflictError(row, p, user.id);
 
   // Deleting and restoring have their own transactions.
   if (row.action === "task.deleted") await restoreTask(user, row.targetId, true, { byUndo: true });

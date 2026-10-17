@@ -60,10 +60,12 @@ export async function logAction(
     primary?: boolean;
   },
 ) {
+  const ctx = reqCtx.getStore();
+  const channel = o.channel ?? ctx?.channel ?? "SCREEN";
   const row = await tx.actionLog.create({
     data: {
       actorId: o.actorId,
-      channel: o.channel ?? "SCREEN",
+      channel,
       projectId: o.projectId ?? null,
       targetType: o.targetType,
       targetId: o.targetId,
@@ -72,7 +74,7 @@ export async function logAction(
       afterState: o.after as Json | undefined,
     },
   });
-  const ctx = reqCtx.getStore();
+  ctx?.logIds?.push(row.id);
   if (ctx && o.primary !== false && UNDO_LABELS[o.action]) {
     ctx.undoId = row.id;
     ctx.undoLabel = UNDO_LABELS[o.action];
@@ -80,7 +82,7 @@ export async function logAction(
   const event = AUDITED[o.action];
   if (event) {
     await tx.auditLog.create({
-      data: { event, actorId: o.actorId, targetType: o.targetType, targetId: o.targetId, channel: o.channel ?? "SCREEN", data: { projectId: o.projectId } },
+      data: { event, actorId: o.actorId, targetType: o.targetType, targetId: o.targetId, channel, data: { projectId: o.projectId } },
     });
   }
   return row;
@@ -109,6 +111,6 @@ const AUDITED: Record<string, string> = {
 
 export async function auditTx(tx: Tx, event: string, o: { actorId?: string | null; targetId?: string; targetType?: string; data?: Record<string, unknown> }) {
   await tx.auditLog.create({
-    data: { event, actorId: o.actorId ?? null, targetType: o.targetId ? o.targetType ?? "user" : null, targetId: o.targetId, channel: "SCREEN", data: o.data as Json | undefined },
+    data: { event, actorId: o.actorId ?? null, targetType: o.targetId ? o.targetType ?? "user" : null, targetId: o.targetId, channel: reqCtx.getStore()?.channel ?? "SCREEN", data: o.data as Json | undefined },
   });
 }
