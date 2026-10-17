@@ -30,7 +30,8 @@ function leftNote(d: Record<string, unknown>) {
 function handoverText(who: string, d: Record<string, unknown>, p: string) {
   const from = String(d.fromName ?? "A person");
   const bits: string[] = [];
-  const moved = Number(d.moved ?? 0), approver = Number(d.approver ?? 0), cleared = Number(d.cleared ?? 0);
+  const moved = Number(d.moved ?? 0), toMe = Number(d.movedToYou ?? 0), approver = Number(d.approver ?? 0), cleared = Number(d.cleared ?? 0);
+  if (toMe) bits.push(`${plural(toMe, "open task")} ${toMe === 1 ? "is" : "are"} now yours`); // a per-task hand-over split between the Leader and others (SHO-BUG-7)
   if (moved) bits.push(d.toYou ? `${plural(moved, "open task")} ${moved === 1 ? "is" : "are"} now yours` : `${plural(moved, "open task")} went to ${String(d.to ?? "someone else")}`);
   if (approver) bits.push(`you now approve ${plural(approver, "task")} that ${from} used to approve`);
   if (cleared) bits.push(`${plural(cleared, "task")} no longer ${cleared === 1 ? "has" : "have"} an approver`);
