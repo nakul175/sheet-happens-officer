@@ -1,4 +1,5 @@
 import { ensureNextStep } from "@/lib/deals";
+import { crmProjectWhere } from "@/lib/crm";
 import { linksOfTask } from "@/lib/records";
 import { db } from "@/lib/db";
 import { ApiError, notFound } from "@/lib/http";
@@ -504,7 +505,8 @@ export async function myTasks(user: Actor) {
     where: {
       completedAt: null,
       deletedAt: null,
-      project: { archivedAt: null, members: { some: { userId: user.id } } },
+      // Deal tasks are left out while the CRM is hidden from this person (SHO-BUG-2).
+      project: { archivedAt: null, members: { some: { userId: user.id } }, ...crmProjectWhere(user) },
       OR: [{ assigneeId: user.id }, { collaborators: { some: { userId: user.id } } }],
     },
     include: {

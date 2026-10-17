@@ -5,7 +5,7 @@ import {
 } from "@/lib/access";
 import { logAction, notify } from "@/lib/notify";
 import { openTaskCount, releasePerson, resolveHandover, type Released } from "@/lib/people";
-import { WORKSTREAM_DEAL, WORKSTREAM_PROJECT, crmVisible } from "@/lib/crm";
+import { WORKSTREAM_DEAL, WORKSTREAM_PROJECT } from "@/lib/crm";
 import { dealBlock } from "@/lib/deals";
 
 const DEFAULT_SECTIONS = ["To do", "In progress", "Done"];
@@ -79,9 +79,7 @@ export async function getProject(user: Actor, projectId: string) {
     db.task.count({ where: { projectId, deletedAt: null, completedAt: null } }),
   ]);
   const manage = a.role === "LEADER";
-  const isDeal = a.project.typeId === WORKSTREAM_DEAL;
-  // A hidden CRM looks like it does not exist (CRM_VISIBLE).
-  if (isDeal && !crmVisible(user)) throw notFound("Project");
+  const isDeal = a.project.typeId === WORKSTREAM_DEAL; // a hidden deal was already "not found" in projectAccess (CRM_VISIBLE)
   const deal = isDeal ? await dealBlock(projectId) : null;
   return {
     type: isDeal ? "DEAL" : "PROJECT",
