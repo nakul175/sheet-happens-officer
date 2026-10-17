@@ -225,3 +225,4 @@ textarea.in { min-height: 90px; resize: vertical; }
   .tabs a, .head a, .crumb a, .sub a { display: inline-flex; align-items: center; min-height: 44px; padding: 0 4px; }
 }
 @media (max-width: 1023px), (pointer: coarse) { .box label { min-height: 44px; } }
+@media (max-width: 1023px), (pointer: coarse) { .modal a:not(.btn) { display: inline-flex; align-items: center; min-height: 44px; } }
