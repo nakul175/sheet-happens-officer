@@ -1,4 +1,4 @@
-import { api, type Res } from "@/components/api";
+import { api, type Res } from "../api";
 import type { Card, Disabled, Message, QuickActionId, State } from "./types";
 
 /** Typed client for the concierge routes in the contract. Never throws (see `api`). */

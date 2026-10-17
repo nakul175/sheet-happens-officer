@@ -67,7 +67,6 @@ export function Panel({ variant, onClose }: { variant: Variant; onClose?: () => 
       {count > 0 && <button className="link" onClick={() => { setClearErr(null); setConfirmClear(true); }}>Clear my chat</button>}
       {!bar && <button className="link" onClick={() => c.setHidden(true)}>Hide</button>}
       {onClose && <button className="link" onClick={onClose}>Close</button>}
-      {bar && <button className="link" onClick={() => setExpanded(false)}>Collapse</button>}
     </header>
   );
   const errBox = c.error && <div className="err cc-err" role="alert">{c.error} <button className="link" onClick={c.dismissError}>Dismiss</button></div>;
@@ -149,9 +148,9 @@ export function ConciergeFab({ kind }: { kind: "dock" | "bar" }) {
   }, [open]);
   if (!c) return null;
   const close = () => { setOpen(false); setTimeout(() => btn.current?.focus(), 0); };
-  if (c.hidden) return <div className={`cc-showwrap ${kind}`}><ShowButton /></div>;
+  if (c.hidden) return <div className={`cc-showwrap k-${kind}`}><ShowButton /></div>;
   return (
-    <div className={`cc-fabwrap ${kind}`}>
+    <div className={`cc-fabwrap k-${kind}`}>
       <button ref={btn} className="fab" aria-label="Concierge" aria-expanded={open} onClick={() => setOpen(!open)}>💬</button>
       {open && (
         <div className="cc-sheet" role="dialog" aria-label="Concierge">
