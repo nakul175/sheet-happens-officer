@@ -1,4 +1,4 @@
-.wrap { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 48px 16px; }
+.wrap { min-height: 100vh; min-height: 100dvh; display: flex; align-items: center; justify-content: center; padding: 48px 16px; }
 .col { width: 100%; max-width: 400px; display: flex; flex-direction: column; gap: 28px; }
 .brand { display: flex; align-items: center; gap: 10px; font-size: 20px; font-weight: 600; letter-spacing: -0.01em; }
 .brand img { width: 34px; height: 34px; object-fit: contain; }
@@ -9,7 +9,7 @@
 .row { display: flex; justify-content: space-between; align-items: baseline; }
 .label { font-size: 13px; font-weight: 500; }
 .small { font-size: 13px; }
-.input { height: 44px; border: 1px solid var(--field); border-radius: 8px; padding: 0 12px; font: inherit; font-size: 15px; color: var(--ink); background: #fff; }
+.input { height: 44px; border: 1px solid var(--field); border-radius: 8px; padding: 0 12px; font: inherit; font-size: 16px; color: var(--ink); background: #fff; }
 .input:focus-visible { outline: 2px solid var(--navy); outline-offset: 1px; }
 .hint { font-size: 12px; color: var(--muted); }
 .primary, .secondary { display: flex; align-items: center; justify-content: center; height: 44px; border-radius: 8px; font: inherit; font-size: 15px; font-weight: 500; text-decoration: none; cursor: pointer; }

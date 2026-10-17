@@ -150,7 +150,23 @@ export function ConciergeFab({ kind }: { kind: "dock" | "bar" }) {
     const esc = (e: KeyboardEvent) => { if (e.key === "Escape" && !document.querySelector(".scrim")) setOpen(false); };
     document.addEventListener("keydown", esc);
     document.querySelector<HTMLTextAreaElement>(".cc-sheet textarea")?.focus();
-    return () => document.removeEventListener("keydown", esc);
+    // SHO-US-10.3: iOS Safari does not shrink the page when the keyboard opens, so follow the visible area.
+    const vv = window.visualViewport;
+    const fit = () => {
+      if (!vv) return;
+      document.documentElement.style.setProperty("--vvh", `${vv.height}px`);
+      document.documentElement.style.setProperty("--vvt", `${vv.offsetTop}px`);
+    };
+    fit();
+    vv?.addEventListener("resize", fit);
+    vv?.addEventListener("scroll", fit);
+    return () => {
+      document.removeEventListener("keydown", esc);
+      vv?.removeEventListener("resize", fit);
+      vv?.removeEventListener("scroll", fit);
+      document.documentElement.style.removeProperty("--vvh");
+      document.documentElement.style.removeProperty("--vvt");
+    };
   }, [open]);
   if (!c) return null;
   const close = () => { setOpen(false); setTimeout(() => btn.current?.focus(), 0); };

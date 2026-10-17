@@ -1,4 +1,4 @@
-.wrap{min-height:100vh;display:grid;grid-template-columns:minmax(0,1.25fr) minmax(0,1fr)}
+.wrap{min-height:100vh;min-height:100dvh;display:grid;grid-template-columns:minmax(0,1.25fr) minmax(0,1fr)}
 .brandtop{display:none}
 .hero{padding:72px 56px 56px 72px;display:flex;flex-direction:column;justify-content:center;gap:20px;max-width:760px;margin-left:auto;width:100%}
 .headline{margin:0;font-size:clamp(40px,4.6vw,64px);font-weight:600;letter-spacing:-.025em;line-height:1.04;color:var(--navy)}

@@ -1,4 +1,5 @@
 "use client";
+import { finePointer } from "@/components/client";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useGet } from "@/components/api";
@@ -23,7 +24,7 @@ export default function SearchView() {
   return (
     <Page title="Search" sub="Projects and tasks you can see">
       <div className="card" style={{ display: "flex", gap: 14, flexWrap: "wrap", alignItems: "center", marginBottom: 14 }}>
-        <input className="in" style={{ flex: 1, minWidth: 220 }} type="search" autoFocus placeholder="Search projects and tasks" aria-label="Search" value={q} onChange={(e) => setQ(e.target.value)} />
+        <input className="in" style={{ flex: 1, minWidth: 220 }} type="search" autoFocus={finePointer()} placeholder="Search projects and tasks" aria-label="Search" value={q} onChange={(e) => setQ(e.target.value)} />
         <label style={{ display: "flex", gap: 6, alignItems: "center" }}>
           <input type="checkbox" checked={archived} onChange={(e) => setArchived(e.target.checked)} /> Include archived
         </label>

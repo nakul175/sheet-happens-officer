@@ -1,4 +1,5 @@
 "use client";
+import { finePointer } from "@/components/client";
 import Link from "next/link";
 import { use, useCallback, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
@@ -268,7 +269,7 @@ function NewTask({ p, onClose, onAdded }: { p: Proj; onClose: () => void; onAdde
         setBusy(false);
         if (r.ok) onAdded(); else setErr(r.error ?? "Could not add the task.");
       }}>
-        <Field label="Title">{(id) => <input id={id} className="in" value={title} required maxLength={500} autoFocus onChange={(e) => setTitle(e.target.value)} />}</Field>
+        <Field label="Title">{(id) => <input id={id} className="in" value={title} required maxLength={500} autoFocus={finePointer()} onChange={(e) => setTitle(e.target.value)} />}</Field>
         <Field label="Section">{(id) => <select id={id} className="in" value={section} onChange={(e) => setSection(e.target.value)}>{p.sections.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select>}</Field>
         <Field label="Assignee">{(id) => <select id={id} className="in" value={assignee} onChange={(e) => setAssignee(e.target.value)}>{workers.map((w) => <option key={w.userId} value={w.userId}>{w.name}</option>)}</select>}</Field>
         <Field label="Due date (optional)">{(id) => <input id={id} className="in" type="date" value={due} onChange={(e) => setDue(e.target.value)} />}</Field>
@@ -288,7 +289,7 @@ function SectionName({ title, yes, initial = "", onSave, onClose, onDone }: { ti
     <Modal small label={title} onClose={onClose}>
       <h2>{title}</h2>
       <form onSubmit={async (e) => { e.preventDefault(); setBusy(true); const r = await onSave(v.trim()); setBusy(false); if (r.ok) onDone(); else setErr(r.error ?? "Could not save."); }}>
-        <Field label="Section name">{(id) => <input id={id} className="in" value={v} maxLength={60} autoFocus onChange={(e) => setV(e.target.value)} />}</Field>
+        <Field label="Section name">{(id) => <input id={id} className="in" value={v} maxLength={60} autoFocus={finePointer()} onChange={(e) => setV(e.target.value)} />}</Field>
         {err && <div className="err" role="alert">{err}</div>}
         <div className="actions"><button type="button" className="btn ghost" onClick={onClose}>Cancel</button><button className="btn" disabled={busy || !v.trim()}>{yes}</button></div>
       </form>
