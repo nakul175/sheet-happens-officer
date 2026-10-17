@@ -1,5 +1,6 @@
 import { connection } from "next/server";
 import { ZodError, type ZodType } from "zod";
+import { reqCtx, type ReqCtx } from "@/lib/reqctx";
 
 export class ApiError extends Error {
   constructor(
@@ -32,8 +33,18 @@ export function parseQuery<T>(url: URL, schema: ZodType<T>): T {
 export function handle<A extends unknown[]>(fn: (...args: A) => Promise<Response>) {
   return async (...args: A): Promise<Response> => {
     await connection(); // every API answer is per request; nothing is prerendered at build time
+    const ctx: ReqCtx = {};
     try {
-      return await fn(...args);
+      const res = await reqCtx.run(ctx, () => fn(...args));
+      // The Undo toast needs to know which action this call logged (SHO-US-6.4).
+      if (ctx.undoId && res.status < 300) {
+        try {
+          res.headers.set("x-undo-id", ctx.undoId);
+          res.headers.set("x-undo-label", ctx.undoLabel ?? "Done");
+          if (ctx.notified) res.headers.set("x-undo-notified", "1");
+        } catch { /* immutable headers: no toast */ }
+      }
+      return res;
     } catch (err) {
       if (err instanceof ApiError) {
         return Response.json({ error: err.message, ...err.extra }, { status: err.status });
