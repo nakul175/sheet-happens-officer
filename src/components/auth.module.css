@@ -1,0 +1,25 @@
+.wrap { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 48px 16px; }
+.col { width: 100%; max-width: 400px; display: flex; flex-direction: column; gap: 28px; }
+.brand { display: flex; align-items: center; gap: 10px; font-size: 20px; font-weight: 600; letter-spacing: -0.01em; }
+.brand img { width: 34px; height: 34px; object-fit: contain; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 32px; display: flex; flex-direction: column; gap: 20px; }
+.card h1 { margin: 0; font-size: 24px; font-weight: 600; letter-spacing: -0.01em; }
+.lead { margin: 0; font-size: 15px; line-height: 1.6; color: var(--ink-2); }
+.field { display: flex; flex-direction: column; gap: 6px; }
+.row { display: flex; justify-content: space-between; align-items: baseline; }
+.label { font-size: 13px; font-weight: 500; }
+.small { font-size: 13px; }
+.input { height: 44px; border: 1px solid var(--field); border-radius: 8px; padding: 0 12px; font: inherit; font-size: 15px; color: var(--ink); background: #fff; }
+.input:focus-visible { outline: 2px solid var(--navy); outline-offset: 1px; }
+.hint { font-size: 12px; color: var(--muted); }
+.primary, .secondary { display: flex; align-items: center; justify-content: center; height: 44px; border-radius: 8px; font: inherit; font-size: 15px; font-weight: 500; text-decoration: none; cursor: pointer; }
+.primary { background: var(--navy); color: #fff; border: 0; }
+.primary:hover { background: var(--navy-dark); color: #fff; }
+.primary:disabled { opacity: 0.6; cursor: default; }
+.secondary { border: 1px solid var(--field); color: var(--ink); background: transparent; }
+.alert { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 12px 14px; border-radius: 8px; background: var(--danger-bg); border: 1px solid var(--danger-line); color: var(--danger); font-size: 14px; line-height: 1.4; }
+.alert a, .alert button { color: var(--danger); font-weight: 500; }
+.notice { padding: 12px 14px; border-radius: 8px; background: var(--ok-bg); border: 1px solid var(--ok-line); color: var(--ok); font-size: 14px; line-height: 1.4; }
+.foot { text-align: center; font-size: 14px; color: var(--muted); }
+.linkbtn { background: none; border: 0; padding: 0; font: inherit; color: var(--navy); text-decoration: underline; cursor: pointer; }
+.center { text-align: center; font-size: 14px; }
