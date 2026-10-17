@@ -22,6 +22,8 @@ export const POST = handle(async (req: Request) => {
   if (!user || !ok) {
     await db.loginAttempt.create({ data: { email, success: false } });
     await audit("SIGN_IN_FAILED", { actorId: user?.id, ip, data: { email } });
+    // The failure that tips the account over the limit is itself the lockout event (SHO-US-6.5 AC5).
+    if (failures + 1 >= LOCKOUT_FAILURES) await audit("SIGN_IN_LOCKED", { actorId: user?.id, ip, data: { email } });
     throw new ApiError(401, WRONG);
   }
   if (user.deactivatedAt) {
