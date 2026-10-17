@@ -243,3 +243,9 @@ textarea.in { min-height: 90px; resize: vertical; }
 @media (max-width: 599px) {
   .vlab { display: inline; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
 }
+
+/* Merge fixes found by the phone-size suite: select-all boxes and linked chips keep 44 px tap areas. */
+@media (max-width: 1023px), (pointer: coarse) {
+  .selall { min-width: 44px; justify-content: center; }
+  a.chip { display: inline-flex; align-items: center; min-height: 44px; margin: 4px 4px 4px 0; padding-top: 0; padding-bottom: 0; }
+}
