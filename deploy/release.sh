@@ -49,7 +49,7 @@ sudo systemctl restart sho
 if healthy; then
   log "healthy: $SHA is live"
   # Keep the newest releases only; never the one just released.
-  find "$ROOT/releases" -mindepth 1 -maxdepth 1 -type d -printf '%T@ %p\n' | sort -rn | tail -n +$((KEEP + 1)) | cut -d' ' -f2- | grep -vx "$REL" | xargs -r rm -rf
+  find "$ROOT/releases" -mindepth 1 -maxdepth 1 -type d -printf '%T@ %p\n' | sort -rn | tail -n +$((KEEP + 1)) | cut -d' ' -f2- | { grep -vx "$REL" || true; } | xargs -r rm -rf
   exit 0
 fi
 
