@@ -1,0 +1,92 @@
+import { db } from "@/lib/db";
+import { ApiError, notFound } from "@/lib/http";
+import { projectAccess, requireManage, type Actor } from "@/lib/access";
+import { logAction } from "@/lib/notify";
+
+const MAX_SECTIONS = 8;
+
+async function sectionIn(projectId: string, sectionId: string) {
+  const s = await db.section.findFirst({ where: { id: sectionId, projectId } });
+  if (!s) throw notFound("Section");
+  return s;
+}
+
+/** SHO-US-5.4 AC1/AC5. Appended at the end. */
+export async function addSection(user: Actor, projectId: string, name: string) {
+  const a = await projectAccess(user, projectId, { write: true });
+  requireManage(a);
+  const existing = await db.section.count({ where: { projectId } });
+  if (existing >= MAX_SECTIONS) throw new ApiError(409, "A project can have up to 8 sections.");
+  return db.$transaction(async (tx) => {
+    const s = await tx.section.create({ data: { projectId, name, position: existing } });
+    await logAction(tx, { actorId: user.id, projectId, targetType: "section", targetId: s.id, action: "section.added", after: { name } });
+    return s;
+  });
+}
+
+/** Rename, move left or right, or mark as the done Section. */
+export async function updateSection(
+  user: Actor,
+  projectId: string,
+  sectionId: string,
+  input: { name?: string; move?: "left" | "right"; isDone?: boolean },
+) {
+  const a = await projectAccess(user, projectId, { write: true });
+  requireManage(a);
+  const s = await sectionIn(projectId, sectionId);
+  if (input.isDone === false && s.isDone) {
+    throw new ApiError(409, "Mark another section as the done section first.");
+  }
+  await db.$transaction(async (tx) => {
+    if (input.name !== undefined) {
+      await tx.section.update({ where: { id: s.id }, data: { name: input.name } });
+      await logAction(tx, { actorId: user.id, projectId, targetType: "section", targetId: s.id, action: "section.renamed", before: { name: s.name }, after: { name: input.name } });
+    }
+    if (input.move) {
+      const all = await tx.section.findMany({ where: { projectId }, orderBy: { position: "asc" } });
+      const i = all.findIndex((x) => x.id === s.id);
+      const j = input.move === "left" ? i - 1 : i + 1;
+      if (j >= 0 && j < all.length) {
+        [all[i], all[j]] = [all[j], all[i]];
+        for (const [pos, sec] of all.entries()) await tx.section.update({ where: { id: sec.id }, data: { position: pos } });
+        await logAction(tx, { actorId: user.id, projectId, targetType: "section", targetId: s.id, action: "section.moved", after: { move: input.move } });
+      }
+    }
+    if (input.isDone && !s.isDone) {
+      // Completion follows the done Section: tasks in the new one become complete, tasks in the old one reopen.
+      const open = await tx.task.findMany({ where: { sectionId: s.id, completedAt: null, deletedAt: null, approverId: { not: null }, parentId: null } });
+      if (open.length) throw new ApiError(409, "Tasks waiting on an approver are in that section; close or move them first.");
+      const old = await tx.section.findFirst({ where: { projectId, isDone: true } });
+      if (old) {
+        await tx.section.update({ where: { id: old.id }, data: { isDone: false } });
+        await tx.task.updateMany({ where: { sectionId: old.id, parentId: null }, data: { completedAt: null } });
+      }
+      await tx.section.update({ where: { id: s.id }, data: { isDone: true } });
+      await tx.task.updateMany({ where: { sectionId: s.id, parentId: null, completedAt: null, deletedAt: null }, data: { completedAt: new Date() } });
+      await logAction(tx, { actorId: user.id, projectId, targetType: "section", targetId: s.id, action: "section.done_changed", before: { doneSectionId: old?.id }, after: { doneSectionId: s.id } });
+    }
+  });
+}
+
+/** SHO-US-5.4 AC2/AC6. The tasks must go somewhere; the done Section and the last Section are protected. */
+export async function deleteSection(user: Actor, projectId: string, sectionId: string, moveTo?: string) {
+  const a = await projectAccess(user, projectId, { write: true });
+  requireManage(a);
+  const s = await sectionIn(projectId, sectionId);
+  if (s.isDone) throw new ApiError(409, "Mark another section as the done section before deleting this one.");
+  if ((await db.section.count({ where: { projectId } })) <= 1) throw new ApiError(409, "The last section cannot be deleted.");
+  if (!moveTo || moveTo === sectionId) throw new ApiError(400, "Choose another section to receive this section's tasks.");
+  const dest = await sectionIn(projectId, moveTo);
+  await db.$transaction(async (tx) => {
+    const tasks = await tx.task.findMany({ where: { sectionId } });
+    if (dest.isDone && tasks.some((t) => t.approverId && !t.completedAt && !t.deletedAt && !t.parentId)) {
+      throw new ApiError(409, "Some tasks wait on an approver. Choose a section that is not the done section.");
+    }
+    await tx.task.updateMany({ where: { sectionId }, data: { sectionId: dest.id } });
+    if (dest.isDone) await tx.task.updateMany({ where: { sectionId: dest.id, parentId: null, completedAt: null, deletedAt: null }, data: { completedAt: new Date() } });
+    await tx.section.delete({ where: { id: sectionId } });
+    const rest = await tx.section.findMany({ where: { projectId }, orderBy: { position: "asc" } });
+    for (const [pos, sec] of rest.entries()) await tx.section.update({ where: { id: sec.id }, data: { position: pos } });
+    await logAction(tx, { actorId: user.id, projectId, targetType: "section", targetId: sectionId, action: "section.deleted", before: { name: s.name }, after: { movedTo: dest.id, tasks: tasks.length } });
+  });
+}

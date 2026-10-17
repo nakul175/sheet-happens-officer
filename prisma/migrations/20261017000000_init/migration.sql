@@ -126,6 +126,7 @@ CREATE TABLE "Task" (
     "description" TEXT,
     "priority" "TaskPriority" NOT NULL DEFAULT 'MEDIUM',
     "blocked" BOOLEAN NOT NULL DEFAULT false,
+    "blockedReason" TEXT,
     "dueDate" TIMESTAMP(3),
     "position" DOUBLE PRECISION NOT NULL DEFAULT 0,
     "assigneeId" TEXT NOT NULL,
@@ -135,6 +136,7 @@ CREATE TABLE "Task" (
     "deletedAt" TIMESTAMP(3),
     "deletedById" TEXT,
     "completedAt" TIMESTAMP(3),
+    "previousSectionId" TEXT,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
 

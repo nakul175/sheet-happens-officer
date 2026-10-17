@@ -4,6 +4,7 @@ export class ApiError extends Error {
   constructor(
     public status: number,
     message: string,
+    public extra?: Record<string, unknown>,
   ) {
     super(message);
   }
@@ -33,7 +34,7 @@ export function handle<A extends unknown[]>(fn: (...args: A) => Promise<Response
       return await fn(...args);
     } catch (err) {
       if (err instanceof ApiError) {
-        return Response.json({ error: err.message }, { status: err.status });
+        return Response.json({ error: err.message, ...err.extra }, { status: err.status });
       }
       if (err instanceof ZodError) {
         return Response.json(
@@ -42,6 +43,10 @@ export function handle<A extends unknown[]>(fn: (...args: A) => Promise<Response
         );
       }
       const code = (err as { code?: string })?.code;
+      if (code === "P2002") return Response.json({ error: "That already exists" }, { status: 409 });
+      if (/at most 8 sections/.test(String((err as Error)?.message))) {
+        return Response.json({ error: "A project can have up to 8 sections." }, { status: 409 });
+      }
       if (code === "P2025") return Response.json({ error: "Resource not found" }, { status: 404 });
       if (code === "P2003") return Response.json({ error: "Referenced record does not exist" }, { status: 400 });
       console.error(err);

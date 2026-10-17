@@ -186,6 +186,7 @@ model Task {
   description        String?
   priority           TaskPriority       @default(MEDIUM)
   blocked            Boolean            @default(false)
+  blockedReason      String?
   dueDate            DateTime?
   // Float position lets us reorder within a Section without rewriting every row.
   position           Float              @default(0)
@@ -202,6 +203,8 @@ model Task {
   deletedById        String?
   deletedBy          User?              @relation("TaskDeleter", fields: [deletedById], references: [id])
   completedAt        DateTime?
+  // Where a completed task returns to when reopened (SHO-US-4.5). Plain id, no foreign key.
+  previousSectionId  String?
   createdAt          DateTime           @default(now())
   updatedAt          DateTime           @updatedAt
   collaborators      TaskCollaborator[]
