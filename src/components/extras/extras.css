@@ -58,3 +58,11 @@
 @media (max-width: 1023px) { .actlist .item .meta { flex-basis: 100%; flex-wrap: wrap; padding-left: 0; } }
 .actlist .item .t small { display: block; margin-top: 2px; }
 .act-s strong { font-weight: 600; }
+
+/* SHO-US-14.6 shortcuts sheet */
+.keys { margin: 0; display: grid; gap: 2px; }
+.keys > div { display: flex; gap: 12px; align-items: center; min-height: 34px; border-bottom: 1px solid var(--line); }
+.keys dt { flex: 0 0 120px; white-space: nowrap; }
+.keys dd { margin: 0; font-size: 14px; }
+.keys .kbd { font-size: 12px; padding: 2px 7px; }
+.keys dt { font-size: 13px; }
