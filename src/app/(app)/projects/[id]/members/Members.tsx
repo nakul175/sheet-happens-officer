@@ -1,8 +1,8 @@
 "use client";
 import Link from "next/link";
 import { use, useState } from "react";
-import { ROLE, api, useGet } from "@/components/api";
-import { Confirm, Field } from "@/components/ui";
+import { ROLE, api, isNetworkFailure, useGet } from "@/components/api";
+import { Confirm, Field, LoadFailed } from "@/components/ui";
 import { Page } from "../../../Shell";
 
 type M = { userId: string; name: string; role: string; active: boolean; email?: string };
@@ -18,6 +18,7 @@ export default function Members({ params }: { params: Promise<{ id: string }> })
   const [err, setErr] = useState<string | null>(null);
   const [dlg, setDlg] = useState<null | { kind: "remove" | "viewer" | "leader" | "archive"; m?: M }>(null);
   const p = pr.data?.project;
+  if (!p && isNetworkFailure(pr.status)) return <Page title="Members"><LoadFailed onRetry={pr.reload} /></Page>;
   if (pr.error && !p) return <Page title="This project isn't available"><div className="card empty">It may not exist, or you are not a member.<br /><Link href="/projects">Back to Projects</Link></div></Page>;
   const manage = p?.role === "LEADER" && !p?.archived;
   const inProject = new Set(p?.members.map((m) => m.userId));

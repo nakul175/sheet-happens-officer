@@ -1,8 +1,9 @@
 "use client";
 import Link from "next/link";
 import { use, useEffect, useState } from "react";
-import { ago, api, useGet } from "@/components/api";
+import { ago, api, isNetworkFailure, useGet } from "@/components/api";
 import { requestUndo } from "@/components/UndoHost";
+import { LoadFailed } from "@/components/ui";
 import { Page } from "../../../Shell";
 
 type Row = { id: string; at: string; who: string; via: string; what: string; change: string | null; undo: "available" | "undone" | "too_old" | "none" };
@@ -19,6 +20,7 @@ export default function Activity({ params }: { params: Promise<{ id: string }> }
     window.addEventListener("sho:undone", done);
     return () => window.removeEventListener("sho:undone", done);
   }, [reload]);
+  if (!a.data && isNetworkFailure(a.status)) return <Page title="Activity"><LoadFailed onRetry={a.reload} /></Page>;
   if (a.status === 403 || a.status === 404) {
     return <Page title="Activity"><div className="card empty">{a.status === 403 ? "Only the project Leader and Admins can see Activity." : "This project isn't available."}<br /><Link href={`/projects/${id}`}>Back to the project</Link></div></Page>;
   }

@@ -69,3 +69,14 @@ export function Menu({ label, children }: { label: string; children: (close: () 
     </div>
   );
 }
+
+/** SHO-US-14.2: shown when a screen could not load because the server did not answer. Retry reloads without leaving the page. */
+export function LoadFailed({ onRetry }: { onRetry: () => void }) {
+  return (
+    <div className="card empty" role="alert">
+      <b>Could not reach the server.</b>
+      <p className="hint" style={{ margin: "6px 0 12px" }}>Check your connection, then try again. Nothing was lost.</p>
+      <button className="btn" onClick={onRetry}>Retry</button>
+    </div>
+  );
+}

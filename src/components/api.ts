@@ -24,6 +24,10 @@ export async function api<T = Record<string, any>>(method: string, path: string,
   }
 }
 
+/** SHO-US-14.2: no answer from the server, or a server fault. Never a statement about the person's access. */
+export const isNetworkFailure = (status: number) => status === 0 || status >= 500;
+export const COULD_NOT_REACH = "Could not reach the server.";
+
 /** GET a path; `reload()` fetches again. `data` stays on screen while reloading. */
 export function useGet<T = Record<string, any>>(path: string | null) { // eslint-disable-line @typescript-eslint/no-explicit-any
   const [state, setState] = useState<{ data: T | null; error: string | null; status: number; loading: boolean }>({ data: null, error: null, status: 0, loading: true });
@@ -34,7 +38,8 @@ export function useGet<T = Record<string, any>>(path: string | null) { // eslint
     const mine = ++seq.current;
     api<T>("GET", path).then((r) => {
       if (mine !== seq.current) return;
-      setState({ data: r.ok ? r.data : null, error: r.ok ? null : r.error ?? "Error", status: r.status, loading: false });
+      // A dropped connection must not wipe what is already on screen or look like a permission problem.
+      setState((prev) => ({ data: r.ok ? r.data : isNetworkFailure(r.status) ? prev.data : null, error: r.ok ? null : isNetworkFailure(r.status) ? COULD_NOT_REACH : r.error ?? "Error", status: r.status, loading: false }));
     });
   }, [path, tick]);
   const reload = useCallback(() => setTick((n) => n + 1), []);

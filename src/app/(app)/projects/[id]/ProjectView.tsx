@@ -4,10 +4,10 @@ import Link from "next/link";
 import { use, useCallback, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Suspense } from "react";
-import { PRIORITY, ROLE, api, dueLabel, initials, isOverdue, useGet } from "@/components/api";
+import { PRIORITY, ROLE, api, dueLabel, initials, isNetworkFailure, isOverdue, useGet } from "@/components/api";
 import { TaskModal } from "@/components/TaskModal";
 import { Tick } from "@/components/TaskParts";
-import { Confirm, Field, Menu, Modal } from "@/components/ui";
+import { Confirm, Field, LoadFailed, Menu, Modal } from "@/components/ui";
 import { DealPanel, type DealBlock } from "@/components/DealPanel";
 import { Page, useMe } from "../../Shell";
 
@@ -42,6 +42,9 @@ function Inner({ id }: { id: string }) {
 
   const refresh = useCallback(() => { pr.reload(); tk.reload(); setExtra({}); }, [pr, tk]);
 
+  if (!pr.data && isNetworkFailure(pr.status)) {
+    return <Page title="Project"><LoadFailed onRetry={refresh} /></Page>;
+  }
   if (pr.status === 404 || (pr.error && !pr.data)) {
     return <Page title="This project isn't available"><div className="card empty">It may not exist, or you are not a member.<br /><Link href="/projects">Back to Projects</Link></div></Page>;
   }

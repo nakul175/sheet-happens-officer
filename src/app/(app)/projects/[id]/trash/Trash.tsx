@@ -1,8 +1,8 @@
 "use client";
 import Link from "next/link";
 import { use, useState } from "react";
-import { ago, api, useGet } from "@/components/api";
-import { Confirm } from "@/components/ui";
+import { ago, api, isNetworkFailure, useGet } from "@/components/api";
+import { Confirm, LoadFailed } from "@/components/ui";
 import { Page } from "../../../Shell";
 
 type Item = { id: string; title: string; isSubtask: boolean; parentTitle?: string | null; deletedAt: string; deletedBy: { name: string } | null; daysLeft: number };
@@ -14,6 +14,7 @@ export default function Trash({ params }: { params: Promise<{ id: string }> }) {
   const [err, setErr] = useState<string | null>(null);
   const [ask, setAsk] = useState<null | { item: Item; parent: string }>(null);
   const p = pr.data?.project;
+  if (!tr.data && (isNetworkFailure(tr.status) || isNetworkFailure(pr.status))) return <Page title="Trash"><LoadFailed onRetry={() => { tr.reload(); pr.reload(); }} /></Page>;
   if (tr.error && !tr.data) return <Page title="This project isn't available"><div className="card empty"><Link href="/projects">Back to Projects</Link></div></Page>;
   const canRestore = !!p && p.role === "LEADER" && !p.archived;
   async function restore(item: Item, confirmParent = false) {

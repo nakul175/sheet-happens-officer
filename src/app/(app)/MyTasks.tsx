@@ -5,6 +5,7 @@ import { Suspense, useEffect, useState } from "react";
 import { PRIORITY, api, dueLabel, isOverdue, todayIST, useGet } from "@/components/api";
 import { TaskModal } from "@/components/TaskModal";
 import { Tick } from "@/components/TaskParts";
+import { LoadFailed } from "@/components/ui";
 import { Page, useMe } from "./Shell";
 
 type Item = {
@@ -89,7 +90,8 @@ function Inner() {
         </div>
       )}>
       {loading && !data && <div className="skel">Loading…</div>}
-      {error && <div className="err" role="alert">{error}</div>}
+      {error && !data && <LoadFailed onRetry={reload} />}
+      {error && data && <div className="err" role="alert">{error} <button className="link" onClick={reload}>Retry</button></div>}
       {prompts.map((p) => (
         <div key={p.projectId} className="card" style={{ marginBottom: 10, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
           <b>What is next for {p.name}?</b>
