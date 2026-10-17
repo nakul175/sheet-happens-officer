@@ -21,7 +21,7 @@ export class Client {
     if (set) this.cookie = set.split(";")[0];
     const text = await res.text();
     const json = text && res.headers.get("content-type")?.includes("json") ? JSON.parse(text) : null;
-    return { status: res.status, json, setCookie: set };
+    return { status: res.status, json, setCookie: set, headers: res.headers };
   }
   get = (p: string) => this.call("GET", p);
   post = (p: string, b?: unknown) => this.call("POST", p, b ?? {});

@@ -133,7 +133,7 @@ export async function createTask(
     await notify(tx, [assigneeId], "TASK_ASSIGNED", { actorId: user.id, taskId: created.id, projectId, data: { title: created.title } });
     await notify(tx, collaboratorIds, "COLLABORATOR_ADDED", { actorId: user.id, taskId: created.id, projectId, data: { title: created.title } });
     await notify(tx, [input.approverId], "APPROVER_NAMED", { actorId: user.id, taskId: created.id, projectId, data: { title: created.title } });
-    if (input.approverId) await auditTx(tx, "APPROVER_CHANGED", { actorId: user.id, targetId: created.id, data: { projectId, approverId: input.approverId, when: "created" } });
+    if (input.approverId) await auditTx(tx, "APPROVER_CHANGED", { actorId: user.id, targetType: "task", targetId: created.id, data: { projectId, approverId: input.approverId, when: "created" } });
     await logAction(tx, { actorId: user.id, projectId, targetType: "task", targetId: created.id, action: "task.created", after: { title: created.title, assigneeId, sectionId, parentId: input.parentId ?? null } });
     return created.id;
   });
