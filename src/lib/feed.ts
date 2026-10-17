@@ -70,10 +70,11 @@ export function noticeText(n: N) {
     TASK_OVERDUE: `${t} is overdue${d.daysOverdue ? ` by ${d.daysOverdue} ${d.daysOverdue === 1 ? "day" : "days"}` : ""}.`,
     JOB_FAILED: `Scheduled job "${d.job}" failed${d.error ? `: ${d.error}` : ""}.`,
     JOB_MISSED: `Scheduled job "${d.job}" did not run on its day.`,
+    CONCIERGE_BUDGET_80: `The concierge has used $${d.spend} of its $${d.ceiling} monthly budget (${d.percent} percent). At the ceiling it pauses until ${d.resumes}.`,
   };
   // A deleted task cannot be opened, so its notice links to the project Trash (SHO-US-7.3 AC1).
   const href = n.type === "TASK_DELETED" && n.projectId ? `/projects/${n.projectId}/trash`
-    : n.taskId ? `/tasks/${n.taskId}` : n.projectId ? `/projects/${n.projectId}` : n.type.startsWith("JOB_") ? "/audit" : "/";
+    : n.taskId ? `/tasks/${n.taskId}` : n.projectId ? `/projects/${n.projectId}` : n.type.startsWith("JOB_") ? "/audit" : n.type.startsWith("CONCIERGE_") ? "/usage" : "/";
   return { text: text[n.type] ?? `${who} made a change.`, href };
 }
 

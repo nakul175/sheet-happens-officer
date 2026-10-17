@@ -8,12 +8,16 @@ import { ApiError } from "@/lib/http";
 import { notify } from "@/lib/notify";
 import { purgeTrash } from "@/lib/tasks";
 import { startOfTodayIST } from "@/lib/dates";
+import { purgeChat } from "@/lib/concierge/thread";
+import { warnIfNearCeiling } from "@/lib/concierge/limits";
 
 type Job = { name: string; about: string; run: () => Promise<unknown> };
 
 export const JOBS: Job[] = [
   { name: "purge-trash", about: "Removes tasks that have been in Trash for 30 days", run: () => purgeTrash() },
   { name: "purge-old", about: "Removes notifications after 90 days and action and audit logs after 12 months", run: () => purgeOld() },
+  { name: "purge-chat", about: "Deletes concierge chat messages after 90 days", run: () => purgeChat() },
+  { name: "concierge-budget", about: "Tells the Super Admin once a month when concierge spend reaches 80 percent of the ceiling", run: async () => ({ warned: await warnIfNearCeiling() }) },
   { name: "reminders", about: "Due-tomorrow, due-today and overdue reminders to the holder of each open task, 8:00 am India time", run: () => sendReminders() },
   { name: "check", about: "Tells the Super Admin when a job failed or did not run", run: () => checkJobs() },
 ];

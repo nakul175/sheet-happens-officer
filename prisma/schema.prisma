@@ -316,8 +316,12 @@ model ModelUsage {
   inputTokens  Int
   outputTokens Int
   costUsd      Decimal  @db.Decimal(12, 6)
+  // True on exactly one row per message the person sent (the first model call of that message).
+  // Later calls of the same message, retries and quick actions (model "quick:<id>") are false.
+  counted      Boolean  @default(false)
   createdAt    DateTime @default(now())
 
+  @@index([userId, counted, createdAt])
   @@index([userId, createdAt])
   @@index([createdAt])
 }
