@@ -67,7 +67,23 @@ One-time setup, in order:
    address and confirm the verification email lands in the inbox, not junk.
 8. Point an external uptime check at `https://app.sheethappensofficer.com/api/health`.
 
-Scheduled jobs (`/etc/cron.d/sho`, IST): `purge-trash` 03:17, `purge-old` 03:37, `check`
+Scheduled jobs (`/etc/cron.d/sho`, IST): `purge-trash` 03:17, `purge-old` 03:37, `purge-chat` 03:47
+(chat older than 90 days), `concierge-budget` 03:57 (80 percent notice), `reminders` 08:00, `check`
 08:05. Each run is recorded; a failure or a missed day puts a notice in the Super Admin's
 bell, and the last runs are shown on the Audit log page. Rollback by hand is a redeploy of
 an earlier commit; migrations are forward-only.
+
+### Concierge settings (SHO-US-9.1, 9.2)
+
+The concierge sends task text to Anthropic only when the owner switches it on. Set in GitHub
+(Settings > Secrets and variables > Actions):
+
+| Name | Kind | Meaning |
+| --- | --- | --- |
+| `ANTHROPIC_API_KEY` | secret | The provider key. Never stored in the repo. |
+| `MODEL_DATA_APPROVED` | variable | Must be exactly `true` to allow any request to the provider. Empty or anything else = off (default). |
+| `MODEL_NAME` | variable, optional | Default `claude-haiku-5-5`. |
+| `MONTHLY_CEILING_USD` | variable, optional | Default `100`. |
+| `WEEKLY_MESSAGE_CAP` | variable, optional | Default `200` messages per person per week (Monday 00:00 India time). |
+
+Unset values are simply left out of `/etc/sho/app.env`; the deploy still succeeds and the concierge shows "not switched on yet".
