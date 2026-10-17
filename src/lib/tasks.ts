@@ -1,3 +1,5 @@
+import { ensureNextStep } from "@/lib/deals";
+import { linksOfTask } from "@/lib/records";
 import { db } from "@/lib/db";
 import { ApiError, notFound } from "@/lib/http";
 import {
@@ -37,6 +39,7 @@ export function present(t: TaskRow, viewer?: { id: string; role: Role }) {
     dueDate: formatDueDate(t.dueDate),
     blocked: t.blocked,
     blockedReason: t.blockedReason,
+    isIdea: t.isIdea,
     completedAt: t.completedAt,
     assignee: t.assignee,
     approver: t.approver,
@@ -152,6 +155,7 @@ export async function getTask(user: Actor, id: string) {
     section: { id: section.id, name: section.name, isDone: section.isDone },
     project: { id: a.project.id, name: a.project.name, archived: !!a.project.archivedAt },
     subtaskList: subtasks.map((s) => present(s, viewer)),
+    links: await linksOfTask(id),
   };
 }
 
@@ -235,6 +239,7 @@ export async function updateTask(
       });
     }
     await logAction(tx, { actorId: user.id, projectId: t.projectId, targetType: "task", targetId: id, action: "task.updated", before, after: data });
+    if ("dueDate" in data) await ensureNextStep(tx, t.projectId, user.id);
   });
 }
 
@@ -351,6 +356,7 @@ export async function completeTask(user: Actor, id: string, completeAll = false)
       }
     }
     await logAction(tx, { actorId: user.id, projectId: t.projectId, targetType: "task", targetId: id, action: "task.completed", before: { sectionId: t.sectionId, completedAt: null, previousSectionId: t.previousSectionId }, after: { completedAt: now.toISOString(), subtasksCompleted: openSubs.length, subtaskIds: openSubs.map((s) => s.id) } });
+    if (!t.parentId) await ensureNextStep(tx, t.projectId, user.id);
   });
 }
 
@@ -407,6 +413,7 @@ export async function deleteTask(user: Actor, id: string, o: { byUndo?: boolean 
       actorId: user.id, taskId: id, projectId: t.projectId, data: { title: t.title },
     });
     await logAction(tx, { actorId: user.id, projectId: t.projectId, targetType: "task", targetId: id, action: "task.deleted", before: { title: t.title, sectionId: t.sectionId, deletedAt: null }, after: { deletedAt: now.toISOString() } });
+    await ensureNextStep(tx, t.projectId, user.id);
   });
 }
 
@@ -489,7 +496,11 @@ export async function myTasks(user: Actor) {
       project: { archivedAt: null, members: { some: { userId: user.id } } },
       OR: [{ assigneeId: user.id }, { collaborators: { some: { userId: user.id } } }],
     },
-    include: { ...taskInclude, project: { select: { id: true, name: true, members: { where: { userId: user.id }, select: { role: true } } } }, parent: { select: { id: true, title: true } } },
+    include: {
+      ...taskInclude,
+      project: { select: { id: true, name: true, typeId: true, stage: { select: { name: true } }, members: { where: { userId: user.id }, select: { role: true } } } },
+      parent: { select: { id: true, title: true } },
+    },
     orderBy: [...ORDER],
   });
   const today = startOfTodayIST();
@@ -499,7 +510,7 @@ export async function myTasks(user: Actor) {
     const role = (t.project.members[0]?.role ?? "VIEWER") as Role;
     const item = {
       ...present(t, { id: user.id, role }),
-      project: { id: t.project.id, name: t.project.name },
+      project: { id: t.project.id, name: t.project.name, type: t.project.typeId === "wst_deal" ? "DEAL" : "PROJECT", stage: t.project.stage?.name ?? null },
       parent: t.parent,
       relation: t.assigneeId === user.id ? "ASSIGNEE" : "COLLABORATOR",
     };
@@ -508,4 +519,16 @@ export async function myTasks(user: Actor) {
     else groups.later.push(item);
   }
   return groups;
+}
+
+
+/** SHO-US-13.2: Editors flag or unflag an idea; logged with before and after, undoable. */
+export async function setIdea(user: Actor, id: string, isIdea: boolean) {
+  const { t } = await loadTask(user, id, { write: true });
+  if (t.parentId) throw new ApiError(400, "Only a top-level task can be an idea.");
+  if (t.isIdea === isIdea) return;
+  await db.$transaction(async (tx) => {
+    await tx.task.update({ where: { id }, data: { isIdea } });
+    await logAction(tx, { actorId: user.id, projectId: t.projectId, targetType: "task", targetId: id, action: "task.idea_changed", before: { isIdea: t.isIdea }, after: { isIdea } });
+  });
 }

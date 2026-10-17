@@ -7,15 +7,16 @@ import { PRIORITY, ROLE, api, dueLabel, initials, isOverdue, useGet } from "@/co
 import { TaskModal } from "@/components/TaskModal";
 import { Tick } from "@/components/TaskParts";
 import { Confirm, Field, Menu, Modal } from "@/components/ui";
+import { DealPanel, type DealBlock } from "@/components/DealPanel";
 import { Page, useMe } from "../../Shell";
 
 type T = {
-  id: string; title: string; sectionId: string; priority: string; dueDate: string | null; blocked: boolean; completedAt: string | null;
+  id: string; title: string; sectionId: string; priority: string; dueDate: string | null; blocked: boolean; completedAt: string | null; isIdea?: boolean;
   assignee: { id: string; name: string }; collaborators: { id: string; name: string }[]; awaitingApproval: boolean; canClose: boolean; subtasks: { total: number; open: number };
 };
 type S = { id: string; name: string; isDone: boolean; total: number; tasks: T[]; nextCursor: string | null };
 type Proj = {
-  id: string; name: string; archived: boolean; role: string;
+  id: string; name: string; archived: boolean; role: string; type?: "PROJECT" | "DEAL"; deal?: DealBlock | null;
   sections: { id: string; name: string; isDone: boolean }[];
   members: { userId: string; name: string; role: string; active: boolean }[];
 };
@@ -85,10 +86,11 @@ function Inner({ id }: { id: string }) {
 
   return (
     <Page dock={view === "list"} bar={view === "board"}
-      title={<span className="crumb"><Link href="/projects">Projects</Link> / <span style={{ color: "var(--ink)" }}>{p?.name ?? "…"}</span></span>}
+      title={<span className="crumb"><Link href={p?.type === "DEAL" ? "/deals" : "/projects"}>{p?.type === "DEAL" ? "Deals" : "Projects"}</Link> / <span style={{ color: "var(--ink)" }}>{p?.name ?? "…"}</span></span>}
       sub={p && <span className="chip">You: {ROLE[p.role]}</span>}
       actions={canWrite && <button className="btn" onClick={() => setAdding(true)}>+ Add task</button>}>
       {archivedBanner}
+      {p?.deal && <DealPanel projectId={id} deal={p.deal} canWrite={canWrite} onChange={refresh} />}
       <div className="tabs">
         <div className="seg" role="tablist" aria-label="View">
           <button role="tab" aria-selected={view === "list"} aria-current={view === "list"} onClick={() => setView("list")}>List</button>
@@ -118,7 +120,7 @@ function Inner({ id }: { id: string }) {
                   <div className="t"><b>{t.title}</b>{t.subtasks.total > 0 && <small>{t.subtasks.total - t.subtasks.open} of {t.subtasks.total} subtasks</small>}</div>
                   <div className="meta">
                     {t.awaitingApproval && <span className="chip gold">Awaiting approval</span>}
-                    {t.blocked && <span className="chip red">Blocked</span>}
+                    {t.isIdea && <span className="chip gold">Idea</span>}{t.blocked && <span className="chip red">Blocked</span>}
                     <span>{t.assignee.name}</span>
                     <span className={`pri-${t.priority}`}>{PRIORITY[t.priority]}</span>
                     <span className={!t.completedAt && isOverdue(t.dueDate) ? "over" : undefined}>{dueLabel(t.dueDate)}</span>
@@ -158,7 +160,7 @@ function Inner({ id }: { id: string }) {
                     <span className={!t.completedAt && isOverdue(t.dueDate) ? "over" : undefined} style={isOverdue(t.dueDate) && !t.completedAt ? { color: "var(--danger)" } : undefined}>{dueLabel(t.dueDate)}</span>
                     <span className={`pri-${t.priority}`}>{PRIORITY[t.priority]}</span>
                     {t.subtasks.total > 0 && <span>{t.subtasks.total - t.subtasks.open} of {t.subtasks.total}</span>}
-                    {t.blocked && <span className="chip red">Blocked</span>}
+                    {t.isIdea && <span className="chip gold">Idea</span>}{t.blocked && <span className="chip red">Blocked</span>}
                     {t.awaitingApproval && <span className="chip gold">Awaiting</span>}
                     <span className="avs" style={{ marginLeft: "auto" }} aria-label={`Assignee ${t.assignee.name}${t.collaborators.length ? `; collaborators ${t.collaborators.map((c) => c.name).join(", ")}` : ""}`}>
                       <span className="av sm" title={`Assignee: ${t.assignee.name}`}>{initials(t.assignee.name)}</span>

@@ -80,6 +80,7 @@ write_files:
       17 3 * * * deploy /opt/sho/bin/job.sh purge-trash
       37 3 * * * deploy /opt/sho/bin/job.sh purge-old
       0 8 * * * deploy /opt/sho/bin/job.sh reminders
+      50 7 * * * deploy /opt/sho/bin/job.sh stalled-deals
       5 8 * * * deploy /opt/sho/bin/job.sh check
 
   - path: /etc/logrotate.d/sho

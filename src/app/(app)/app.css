@@ -157,3 +157,14 @@ textarea.in { min-height: 90px; resize: vertical; }
 }
 @media (min-width: 881px) { .bardock { display: flex; } }
 @media (min-width: 1280px) { .with-dock { margin-right: 340px; } .dock { display: block; } }
+
+/* CRM: pipeline board (SHO-US-12.6). Columns scroll inside the board; on a phone they become a vertical list. */
+.dboard { display: flex; gap: 12px; overflow-x: auto; padding-bottom: 8px; align-items: flex-start; }
+.dcol { flex: 0 0 260px; background: #f1f3f8; border: 1px solid var(--line); border-radius: 12px; padding: 10px; display: flex; flex-direction: column; gap: 8px; }
+.dcol.over { outline: 2px solid var(--navy); }
+.dcol header { font-size: 14px; }
+.dcard { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 10px; font-size: 14px; display: flex; flex-direction: column; gap: 3px; cursor: grab; }
+.sub2 { font-size: 12px; color: var(--muted); }
+.sub2.over, .sub2 .over { color: var(--danger); font-weight: 600; }
+.mhead { font-size: 12px; color: var(--muted); padding: 6px 10px; }
+@media (max-width: 700px) { .dboard { flex-direction: column; overflow: visible; } .dcol { flex: none; width: 100%; } .dcard { cursor: default; } }

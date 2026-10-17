@@ -7,6 +7,7 @@ import { formatDueDate } from "@/lib/dates";
 import { auditTx, logAction, notify } from "@/lib/notify";
 import { deleteTask, restoreTask } from "@/lib/tasks";
 import { UNDO_DAYS, UNDO_LABELS, isUndoable } from "@/lib/undoable";
+import { undoRecord } from "@/lib/records";
 
 type Conflict = { field: string; before: unknown; after: unknown; now: unknown };
 type Plan = { conflicts: Conflict[]; apply: (tx: Tx) => Promise<void>; subject?: string; fields?: string };
@@ -142,6 +143,62 @@ async function plan(row: any, user: Actor, projectId: string): Promise<Plan> {
       if (t.deletedAt) throw bad("This task is already in Trash.");
       return { conflicts: [], subject: t.title, apply: async () => {} };
     }
+    case "deal.stage_changed": {
+      const p = await db.project.findUniqueOrThrow({ where: { id: projectId } });
+      if (!b.stageId || !(await db.stage.findFirst({ where: { id: b.stageId, pipelineId: p.pipelineId ?? "" } }))) throw bad("The earlier stage no longer exists.");
+      return {
+        conflicts: p.stageId !== f.stageId ? [{ field: "stage", before: b.stage, after: f.stage, now: p.stageId }] : [], subject: p.name, fields: "Stage",
+        apply: async (tx) => { await tx.project.update({ where: { id: projectId }, data: { stageId: b.stageId, stageReason: b.reason ?? null, stageChangedAt: new Date() } }); },
+      };
+    }
+    case "deal.converted": {
+      // Undo returns the task and its subtasks to their original project and Section, and archives the new deal (12.2 AC4).
+      const task = await db.task.findUnique({ where: { id }, include: { project: true } });
+      if (!task || task.projectId !== projectId) throw bad("The task is no longer in this deal, so the conversion cannot be undone.");
+      if (task.deletedAt) throw bad("The task is in Trash. Restore it first.");
+      const src = await db.project.findUnique({ where: { id: b.sourceProjectId } });
+      if (!src) throw bad("The original project no longer exists.");
+      if (src.archivedAt) throw bad("The original project is archived. Unarchive it first.");
+      return {
+        conflicts: [], subject: task.title,
+        apply: async (tx) => {
+          const sec = (await tx.section.findFirst({ where: { id: b.sectionId, projectId: src.id } })) ?? (await tx.section.findFirstOrThrow({ where: { projectId: src.id, isDone: false }, orderBy: { position: "asc" } }));
+          await tx.task.update({ where: { id }, data: { projectId: src.id, sectionId: sec.id, previousSectionId: b.previousSectionId ?? null, isIdea: !!b.isIdea } });
+          if (Array.isArray(b.subtaskIds) && b.subtaskIds.length) await tx.task.updateMany({ where: { id: { in: b.subtaskIds } }, data: { projectId: src.id, sectionId: sec.id } });
+          await tx.project.update({ where: { id: projectId }, data: { archivedAt: new Date() } });
+        },
+      };
+    }
+    case "task.link_added": {
+      const l = await db.taskLink.findUnique({ where: { id: f.linkId } });
+      if (!l) throw bad("That link is already gone.");
+      return { conflicts: [], subject: "the link", apply: async (tx) => { await tx.taskLink.delete({ where: { id: f.linkId } }); } };
+    }
+    case "task.link_removed": {
+      const t = await liveTask(id, projectId);
+      if (await db.taskLink.findFirst({ where: { taskId: id, organisationId: b.organisationId ?? null, contactId: b.contactId ?? null } })) throw bad("That link is back already.");
+      return { conflicts: [], subject: t.title, apply: async (tx) => { await tx.taskLink.create({ data: { id: b.linkId, taskId: id, organisationId: b.organisationId ?? null, contactId: b.contactId ?? null } }); } };
+    }
+    case "task.idea_changed": {
+      const t = await liveTask(id, projectId);
+      return {
+        conflicts: t.isIdea !== f.isIdea ? [{ field: "isIdea", before: b.isIdea, after: f.isIdea, now: t.isIdea }] : [], subject: t.title, fields: "Idea",
+        apply: async (tx) => { await tx.task.update({ where: { id }, data: { isIdea: !!b.isIdea } }); },
+      };
+    }
+    case "deal.details_updated": {
+      const d = await db.dealDetails.findUnique({ where: { projectId } });
+      if (!d) throw bad("This deal no longer exists.");
+      const keys = Object.keys(f);
+      const now: Record<string, unknown> = {
+        whyPursue: d.whyPursue, need: d.need, serviceLine: d.serviceLine, value: d.value === null ? null : Number(d.value), currency: d.currency,
+        probability: d.probability, expectedClose: d.expectedClose?.toISOString().slice(0, 10) ?? null, introducedBy: d.introducedBy,
+        submissionDeadline: d.submissionDeadline?.toISOString().slice(0, 10) ?? null,
+      };
+      const data: Record<string, unknown> = {};
+      for (const k of keys) data[k] = (k === "expectedClose" || k === "submissionDeadline") && b[k] ? new Date(`${b[k]}T00:00:00Z`) : b[k] ?? null;
+      return { conflicts: fieldConflicts(keys, b, f, now), subject: "the deal", fields: keys.join(", "), apply: async (tx) => { await tx.dealDetails.update({ where: { projectId }, data }); } };
+    }
     case "project.updated": {
       const p = await db.project.findUniqueOrThrow({ where: { id: projectId } });
       const keys = Object.keys(f);
@@ -274,7 +331,8 @@ async function present(conflicts: Conflict[]) {
  */
 export async function undoAction(user: Actor, logId: string, anyway = false) {
   const row = await db.actionLog.findUnique({ where: { id: logId } });
-  if (!row || !row.projectId) throw notFound("Action");
+  if (!row) throw notFound("Action");
+  if (!row.projectId) return undoRecord(user, row, anyway); // organisations, contacts and notes belong to no project
   const projectId = row.projectId;
   const a = await projectAccess(user, projectId);
   requireWrite(a);

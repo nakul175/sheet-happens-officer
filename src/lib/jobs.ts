@@ -6,6 +6,7 @@ import { db } from "@/lib/db";
 import { purgeOld } from "@/lib/feed";
 import { ApiError } from "@/lib/http";
 import { notify } from "@/lib/notify";
+import { notifyStalledDeals } from "@/lib/deals";
 import { purgeTrash } from "@/lib/tasks";
 import { startOfTodayIST } from "@/lib/dates";
 
@@ -15,6 +16,7 @@ export const JOBS: Job[] = [
   { name: "purge-trash", about: "Removes tasks that have been in Trash for 30 days", run: () => purgeTrash() },
   { name: "purge-old", about: "Removes notifications after 90 days and action and audit logs after 12 months", run: () => purgeOld() },
   { name: "reminders", about: "Due-tomorrow, due-today and overdue reminders to the holder of each open task, 8:00 am India time", run: () => sendReminders() },
+  { name: "stalled-deals", about: "Tells the Leader of each deal with no activity for 30 days, once per stall, 7:50 am India time", run: () => notifyStalledDeals() },
   { name: "check", about: "Tells the Super Admin when a job failed or did not run", run: () => checkJobs() },
 ];
 const DAILY_GRACE_HOURS = 30;

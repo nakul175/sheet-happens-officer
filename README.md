@@ -67,7 +67,7 @@ One-time setup, in order:
    address and confirm the verification email lands in the inbox, not junk.
 8. Point an external uptime check at `https://app.sheethappensofficer.com/api/health`.
 
-Scheduled jobs (`/etc/cron.d/sho`, IST): `purge-trash` 03:17, `purge-old` 03:37, `check`
+Scheduled jobs (`/etc/cron.d/sho`, IST): `purge-trash` 03:17, `purge-old` 03:37, `stalled-deals` 07:50, `check`
 08:05. Each run is recorded; a failure or a missed day puts a notice in the Super Admin's
 bell, and the last runs are shown on the Audit log page. Rollback by hand is a redeploy of
 an earlier commit; migrations are forward-only.

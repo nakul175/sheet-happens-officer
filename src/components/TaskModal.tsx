@@ -3,18 +3,22 @@ import Link from "next/link";
 import { useState } from "react";
 import { PRIORITY, ROLE, api, dueLabel, useGet } from "@/components/api";
 import { Confirm, Modal } from "@/components/ui";
+import { ConvertDialog } from "@/components/ConvertDialog";
+import { TaskLinks } from "@/components/TaskLinks";
+import { useMe } from "@/app/(app)/Shell";
 
 type P = { id: string; name: string };
 type Sub = { id: string; title: string; completedAt: string | null; canClose: boolean };
 type Task = {
   id: string; projectId: string; parentId: string | null; createdById: string; title: string; description: string | null; priority: string;
-  dueDate: string | null; blocked: boolean; blockedReason: string | null; completedAt: string | null;
+  dueDate: string | null; blocked: boolean; blockedReason: string | null; completedAt: string | null; isIdea?: boolean;
   assignee: P; approver: P | null; collaborators: P[]; awaitingApproval: boolean; updatedAt: string; canClose: boolean;
   section: { id: string; name: string; isDone: boolean }; project: { id: string; name: string; archived: boolean };
   subtaskList: Sub[];
+  links?: { id: string; organisation: { id: string; name: string } | null; contact: { id: string; name: string; organisationId: string } | null }[];
 };
 type Project = {
-  id: string; role: string; archived: boolean; sections: { id: string; name: string; isDone: boolean }[];
+  id: string; role: string; type?: "PROJECT" | "DEAL"; archived: boolean; sections: { id: string; name: string; isDone: boolean }[];
   members: { userId: string; name: string; role: string; active: boolean }[];
 };
 
@@ -30,6 +34,8 @@ export function TaskModal({ id, me, onClose, onChanged, asPage }: { id: string; 
   const [newSub, setNewSub] = useState("");
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [convert, setConvert] = useState(false);
+  const meCtx = useMe();
 
   const body = (inner: React.ReactNode) => (asPage ? <div className="modal" style={{ margin: "0 auto" }}>{inner}</div> : <Modal label="Task" onClose={onClose}>{inner}</Modal>);
 
@@ -224,6 +230,15 @@ export function TaskModal({ id, me, onClose, onChanged, asPage }: { id: string; 
               )}
             </div>
           )}
+          {meCtx.crm && canEdit && !task.parentId && project?.type !== "DEAL" && !holding && (
+            <div className="box" style={{ display: "flex", gap: 12, alignItems: "center", justifyContent: "space-between", flexWrap: "wrap" }}>
+              <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 14 }}>
+                <input type="checkbox" checked={!!task.isIdea} disabled={busy} onChange={(e) => run(api("POST", `/api/tasks/${id}/idea`, { isIdea: e.target.checked }))} /> Idea
+              </label>
+              {!done && !task.awaitingApproval && <button className="btn ghost sm" disabled={busy} onClick={() => setConvert(true)}>Convert to deal</button>}
+            </div>
+          )}
+          {meCtx.crm && !task.parentId && <TaskLinks taskId={id} links={task.links ?? []} canEdit={canEdit && !holding} onChanged={() => { t.reload(); onChanged?.(); }} />}
           <div className="actions" style={{ justifyContent: "flex-start" }}>
             {canEdit && !done && task.approver && !task.awaitingApproval && !task.parentId && task.assignee.id === me && (
               <button className="btn" disabled={busy} onClick={() => run(api("POST", `/api/tasks/${id}/send-for-approval`, {}))}>Send for approval</button>
@@ -247,6 +262,7 @@ export function TaskModal({ id, me, onClose, onChanged, asPage }: { id: string; 
           )}
         </>,
       )}
+      {convert && <ConvertDialog task={task} meId={me} onClose={() => setConvert(false)} />}
       {confirm && (
         <Confirm title="Open subtasks" yes="Complete them all" busy={busy} onNo={() => setConfirm(null)}
           body={`This task has ${confirm.n} open subtask${confirm.n === 1 ? "" : "s"}. Complete them too?`}
