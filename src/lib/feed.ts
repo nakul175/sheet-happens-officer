@@ -53,7 +53,7 @@ export function noticeText(n: N) {
     COLLABORATOR_REMOVED: `${who} removed you from ${t}.`,
     APPROVER_NAMED: `${who} named you the approver of ${t}.`,
     SENT_FOR_APPROVAL: `${who} sent ${t} to you for approval.`,
-    SENT_BACK: `${who} sent ${t} back to you.`,
+    SENT_BACK: `${who} sent ${t} back to you.${d.approverCleared ? " It no longer has an approver." : ""}`,
     TASK_BLOCKED: `${who} marked ${t} as blocked${d.reason ? `: ${d.reason}` : ""}.`,
     TASK_DELETED: `${who} moved ${t} to Trash.`,
     REMOVED_AS_ASSIGNEE: `${who} took ${t} off you; someone else now holds it.`,

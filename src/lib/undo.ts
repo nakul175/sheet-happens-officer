@@ -57,11 +57,14 @@ async function plan(row: any, user: Actor, projectId: string): Promise<Plan> {
     }
     case "task.assigned": case "task.sent_for_approval": case "task.sent_back": {
       const t = await liveTask(id, projectId);
+      // A send-back that cleared the approver (SHO-BUG-6) recorded it, so Undo puts the approver back too.
+      const keys = "approverId" in f ? ["assigneeId", "approverId"] : ["assigneeId"];
       return {
-        conflicts: fieldConflicts(["assigneeId"], b, f, { assigneeId: t.assigneeId }), subject: t.title, fields: "Assignee",
+        conflicts: fieldConflicts(keys, b, f, { assigneeId: t.assigneeId, approverId: t.approverId }), subject: t.title, fields: "Assignee",
         apply: async (tx) => {
           if (!(await activeMember(tx, projectId, b.assigneeId, WORKERS))) throw bad("The previous assignee can no longer take this task.");
-          await tx.task.update({ where: { id }, data: { assigneeId: b.assigneeId, previousAssigneeId: b.previousAssigneeId ?? null } });
+          if ("approverId" in f && b.approverId && !(await activeMember(tx, projectId, b.approverId, WORKERS))) throw bad("The previous approver can no longer take that role.");
+          await tx.task.update({ where: { id }, data: { assigneeId: b.assigneeId, previousAssigneeId: b.previousAssigneeId ?? null, ...("approverId" in f ? { approverId: b.approverId ?? null } : {}) } });
         },
       };
     }

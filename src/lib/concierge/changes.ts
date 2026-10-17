@@ -257,7 +257,7 @@ async function blockedReason(user: Actor, op: Op, L: Loaded): Promise<string | n
         return canClose(user.id, a.role, t) ? null : t.approverId ? "Only the approver, the Leader or an Admin can close this task." : "You cannot complete this task.";
       case "task.reopen": return t.completedAt ? null : "This task is not complete.";
       case "task.assign": {
-        if (t.approverId && user.id === t.assigneeId && op.assigneeId !== t.approverId) return "With an approver, this task can only be handed to the approver.";
+        if (t.approverId && user.id === t.assigneeId && op.assigneeId !== t.approverId && a.role !== "LEADER") return "With an approver, this task can only be handed to the approver.";
         return (await activeMember(db, t.projectId, op.assigneeId, WORKERS)) ? null : `${U(L, op.assigneeId).name} must be an active Leader or Editor of this project.`;
       }
       case "task.section": {

@@ -420,6 +420,42 @@ describe("approver (4.6)", () => {
     expect((await lead.c.get(`/api/tasks/${t}`)).json.task.assignee.id).toBe(lead.id);
   });
 
+  it("clears the approver when a send-back can only go to the Leader who approves, so the task is not stuck (SHO-BUG-6)", async () => {
+    const sa = await superAdmin();
+    const { lead, worker, boss, other, p, t } = await setup();
+    const get = async () => (await lead.c.get(`/api/tasks/${t}`)).json.task;
+    expect((await lead.c.put(`/api/tasks/${t}/approver`, { approverId: lead.id })).status).toBe(200);
+    expect((await worker.c.post(`/api/tasks/${t}/send-for-approval`)).status).toBe(200);
+    expect((await lead.c.del(`/api/projects/${p.id}/members/${worker.id}?handoverTo=${other.id}`)).status).toBe(204);
+    // Nobody to send back to: the Leader holds it, approves nothing of their own, and can act on it.
+    const sb = await lead.c.post(`/api/tasks/${t}/send-back`);
+    expect(sb.status, JSON.stringify(sb.json)).toBe(200);
+    expect(await get()).toMatchObject({ assignee: { id: lead.id }, approver: null, awaitingApproval: false, previousAssigneeId: null });
+    const row = await db.actionLog.findUniqueOrThrow({ where: { id: sb.headers.get("x-undo-id")! } });
+    expect(row.beforeState).toMatchObject({ assigneeId: lead.id, approverId: lead.id });
+    expect(row.afterState).toMatchObject({ assigneeId: lead.id, approverId: null });
+    // Undo restores the approver, and with it the waiting state.
+    expect((await lead.c.post(`/api/actions/${row.id}/undo`)).status).toBe(200);
+    expect(await get()).toMatchObject({ assignee: { id: lead.id }, approver: { id: lead.id }, awaitingApproval: true });
+    // An Admin sending it back clears it the same way, and the Leader's notice says so.
+    expect((await sa.c.post(`/api/tasks/${t}/send-back`)).status).toBe(200);
+    expect(await get()).toMatchObject({ approver: null, awaitingApproval: false });
+    const notes = (await lead.c.get("/api/notifications")).json.items as { text: string }[];
+    expect(notes.some((n) => n.text === 'Root sent "needs review" back to you. It no longer has an approver.')).toBe(true);
+    // From there the Leader can reassign it and name an approver again.
+    expect((await lead.c.post(`/api/tasks/${t}/assign`, { assigneeId: other.id })).status).toBe(200);
+    expect((await lead.c.put(`/api/tasks/${t}/approver`, { approverId: boss.id })).status).toBe(200);
+  });
+
+  it("lets the Leader hand on a task they hold even though it has an approver; an Editor still cannot (SHO-BUG-6)", async () => {
+    const { lead, worker, boss, other, p } = await setup();
+    const t = await task(lead, p.id, { title: "Leader holds", assigneeId: lead.id, approverId: boss.id });
+    expect((await lead.c.post(`/api/tasks/${t}/assign`, { assigneeId: other.id })).status).toBe(200);
+    expect((await lead.c.get(`/api/tasks/${t}`)).json.task).toMatchObject({ assignee: { id: other.id }, approver: { id: boss.id }, awaitingApproval: false });
+    expect((await other.c.post(`/api/tasks/${t}/assign`, { assigneeId: worker.id })).status).toBe(403); // the assignee may only hand it to the approver
+    expect((await other.c.post(`/api/tasks/${t}/assign`, { assigneeId: boss.id })).status).toBe(200);
+  });
+
   it("hands a removed approver's tasks to the Leader, who also becomes the holder when awaiting", async () => {
     const { lead, worker, boss, p, t } = await setup();
     const t2 = await task(worker, p.id);
