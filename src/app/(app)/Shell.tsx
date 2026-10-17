@@ -7,7 +7,7 @@ import { ConciergeProvider, useConcierge } from "@/components/concierge/Concierg
 import { ConciergeBar, ConciergeDock, ConciergeFab } from "@/components/concierge/Concierge";
 import { Extras, NewTaskButton, SearchButton } from "@/components/extras/Extras";
 
-export type Me = { id: string; name: string; email: string; orgRole: "MEMBER" | "ADMIN" | "SUPER_ADMIN"; crm?: boolean; review?: boolean };
+export type Me = { id: string; name: string; email: string; orgRole: "MEMBER" | "ADMIN" | "SUPER_ADMIN"; crm?: boolean; review?: boolean; startGuide?: boolean };
 const MeCtx = createContext<Me | null>(null);
 export const useMe = () => useContext(MeCtx)!;
 export const roleLabel = (r: Me["orgRole"]) => (r === "SUPER_ADMIN" ? "Super Admin" : r === "ADMIN" ? "Admin" : "Member");

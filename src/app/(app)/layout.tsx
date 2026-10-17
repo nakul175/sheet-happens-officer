@@ -14,7 +14,7 @@ async function Gate({ children }: { children: React.ReactNode }) {
   } catch {
     redirect("/signin");
   }
-  return <><Shell user={{ ...(publicUser(user) as Me), crm: crmVisible(user), review: await leadsAnyDeal(user) }}>{children}</Shell><UndoHost /></>;
+  return <><Shell user={{ ...(publicUser(user) as Me), crm: crmVisible(user), review: await leadsAnyDeal(user), startGuide: !user.startGuideDismissedAt }}>{children}</Shell><UndoHost /></>;
 }
 
 export default function AppLayout({ children }: LayoutProps<"/">) {

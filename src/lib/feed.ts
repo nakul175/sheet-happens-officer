@@ -61,6 +61,7 @@ export function noticeText(n: N) {
     RESTORED_TO_LEADER: `${t} was restored to you because its owner is no longer on the project.`,
     MADE_LEADER: `${who} made you Leader of ${p}.`,
     PROJECT_ARCHIVED: `${who} archived ${p}. It is now read-only.`,
+    JOIN_REQUESTED: `${who} asked to be added to one of your projects.`,
     ADDED_TO_PROJECT: `${who} added you to ${p} as ${String(d.role ?? "Editor").toLowerCase()}.`,
     PROJECT_ROLE_CHANGED: `${who} changed your role in ${p} to ${String(d.role ?? "").toLowerCase()}.${leftNote(d)}`,
     REMOVED_FROM_PROJECT: `${who} removed you from ${p}.${leftNote(d)}`,
@@ -77,7 +78,7 @@ export function noticeText(n: N) {
   };
   // A deleted task cannot be opened, so its notice links to the project Trash (SHO-US-7.3 AC1).
   const href = n.type === "TASK_DELETED" && n.projectId ? `/projects/${n.projectId}/trash`
-    : n.taskId ? `/tasks/${n.taskId}` : n.projectId ? `/projects/${n.projectId}` : n.type.startsWith("JOB_") ? "/audit" : n.type.startsWith("CONCIERGE_") ? "/usage" : "/";
+    : n.taskId ? `/tasks/${n.taskId}` : n.projectId ? `/projects/${n.projectId}` : n.type === "JOIN_REQUESTED" ? "/projects" : n.type.startsWith("JOB_") ? "/audit" : n.type.startsWith("CONCIERGE_") ? "/usage" : "/";
   return { text: text[n.type] ?? `${who} made a change.`, href };
 }
 

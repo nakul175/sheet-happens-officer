@@ -5,8 +5,14 @@ import { api, useGet } from "@/components/api";
 import { Confirm, Field } from "@/components/ui";
 import { Page, roleLabel, useMe } from "../Shell";
 
-type P = { id: string; name: string; email?: string; orgRole?: "MEMBER" | "ADMIN" | "SUPER_ADMIN"; status?: "ACTIVE" | "UNVERIFIED" | "DEACTIVATED" };
+type P = { id: string; name: string; email?: string; orgRole?: "MEMBER" | "ADMIN" | "SUPER_ADMIN"; leads?: { id: string; name: string }[]; status?: "ACTIVE" | "UNVERIFIED" | "DEACTIVATED" };
 const STATUS: Record<string, [string, string]> = { ACTIVE: ["Active", "green"], UNVERIFIED: ["Unverified", "gold"], DEACTIVATED: ["Deactivated", "grey"] };
+
+/** SHO-US-14.4 AC3: the projects a person leads (only those the viewer can see). */
+function Leads({ p }: { p: P }) {
+  if (!p.leads?.length) return null;
+  return <span className="pills"><span className="hint">Leads</span>{p.leads.map((l) => <Link key={l.id} className="chip" href={`/projects/${l.id}`}>{l.name}</Link>)}</span>;
+}
 
 export default function Team() {
   const me = useMe();
@@ -29,12 +35,19 @@ export default function Team() {
       {t.loading && <div className="skel">Loading…</div>}
       {t.error && <div className="err" role="alert">{t.error}</div>}
       {t.data && !admin && (
-        <div className="list">{people.map((p) => <div className="item" key={p.id}><span className="av sm">{p.name[0]}</span><div className="t"><b>{p.name}</b></div></div>)}</div>
+        <div className="list">{people.map((p) => (
+          <div className="item" key={p.id}>
+            <span className="av sm">{p.name[0]}</span>
+            <div className="t"><b>{p.name}{p.id === me.id && " (you)"}</b></div>
+            {p.orgRole && <span className={`chip${p.orgRole === "MEMBER" ? " grey" : ""}`}>{roleLabel(p.orgRole)}</span>}
+            <Leads p={p} />
+          </div>
+        ))}</div>
       )}
       {t.data && admin && (
         <div className="scroll">
           <table className="tbl stack">
-            <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Status</th><th>Actions</th></tr></thead>
+            <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Leads</th><th>Status</th><th>Actions</th></tr></thead>
             <tbody>
               {people.map((p) => {
                 const [sl, sc] = STATUS[p.status ?? "ACTIVE"];
@@ -44,6 +57,7 @@ export default function Team() {
                     <td data-label="Name"><b style={{ fontWeight: 500 }}>{p.name}</b>{self && " (you)"}</td>
                     <td data-label="Email">{p.email}</td>
                     <td data-label="Role"><span className={`chip${p.orgRole === "MEMBER" ? " grey" : ""}`}>{roleLabel(p.orgRole!)}</span></td>
+                    <td data-label="Leads"><Leads p={p} /></td>
                     <td data-label="Status"><span className={`chip ${sc}`}>{sl}</span></td>
                     <td data-label="Actions">
                       <span className="pills">

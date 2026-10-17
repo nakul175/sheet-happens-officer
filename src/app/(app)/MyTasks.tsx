@@ -6,6 +6,7 @@ import { PRIORITY, api, dueLabel, dueState, rowKeys, isOverdue, todayIST, useGet
 import { TaskModal } from "@/components/TaskModal";
 import { Tick } from "@/components/TaskParts";
 import { LoadFailed } from "@/components/ui";
+import { StartGuide, guide } from "@/components/extras/StartGuide";
 import { Page, useMe } from "./Shell";
 
 type Item = {
@@ -45,6 +46,7 @@ function Inner() {
   const [mode, setMode] = useState<"date" | "project">("date");
   const [done, setDone] = useState<{ projectId: string; name: string }[]>([]);
   const [dismissed, setDismissed] = useState<string[]>([]);
+  const [guideGone, setGuideGone] = useState(guide.gone); // SHO-US-14.4
   // Reads the saved choice from browser storage after mount (reading it during render would not match the server HTML).
   // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { try { if (localStorage.getItem(GROUP_KEY(me.id)) === "project") setMode("project"); } catch { /* storage blocked: stay By date */ } }, [me.id]);
@@ -90,6 +92,7 @@ function Inner() {
           <button aria-pressed={mode === "project"} onClick={() => pick("project")}>By project</button>
         </div>
       )}>
+      {me.startGuide && !guideGone && <StartGuide onDismiss={() => setGuideGone(true)} />}
       {loading && !data && <div className="skel">Loading…</div>}
       {error && !data && <LoadFailed onRetry={reload} />}
       {error && data && <div className="err" role="alert">{error} <button className="link" onClick={reload}>Retry</button></div>}
