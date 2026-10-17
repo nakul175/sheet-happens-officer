@@ -220,3 +220,8 @@ textarea.in { min-height: 90px; resize: vertical; }
   .content { padding-bottom: calc(150px + env(safe-area-inset-bottom, 0px)); }
   .fab, .cc-showwrap { bottom: calc(72px + env(safe-area-inset-bottom, 0px)); }
 }
+@media (max-width: 1023px), (pointer: coarse) {
+  .sub-item { min-height: 44px; display: flex; align-items: center; gap: 8px; cursor: pointer; }
+  .tabs a, .head a, .crumb a, .sub a { display: inline-flex; align-items: center; min-height: 44px; padding: 0 4px; }
+}
+@media (max-width: 1023px), (pointer: coarse) { .box label { min-height: 44px; } }

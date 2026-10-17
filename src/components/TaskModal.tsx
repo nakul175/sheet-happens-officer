@@ -219,11 +219,11 @@ export function TaskModal({ id, me, onClose, onChanged, asPage }: { id: string; 
             <div className="field">
               <span className="lbl">Subtasks {task.subtaskList.length > 0 && `(${task.subtaskList.filter((s) => s.completedAt).length} of ${task.subtaskList.length})`}</span>
               {task.subtaskList.map((s) => (
-                <div className="sub-item" key={s.id}>
+                <label className="sub-item" key={s.id}>
                   <input type="checkbox" aria-label={`Mark "${s.title}" ${s.completedAt ? "not done" : "done"}`} checked={!!s.completedAt} disabled={!canEdit || busy || (!s.canClose && !s.completedAt)}
                     onChange={() => run(api("POST", `/api/tasks/${s.id}/${s.completedAt ? "reopen" : "complete"}`, {}))} />
                   <span style={s.completedAt ? { textDecoration: "line-through", color: "var(--muted)" } : undefined}>{s.title}</span>
-                </div>
+                </label>
               ))}
               {canEdit && (
                 <form className="addrow" onSubmit={async (e) => { e.preventDefault(); const v = newSub.trim(); if (!v) return; await run(api("POST", `/api/projects/${task.projectId}/tasks`, { title: v, parentId: id }), () => setNewSub("")); }}>
