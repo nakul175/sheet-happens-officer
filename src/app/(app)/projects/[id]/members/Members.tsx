@@ -7,7 +7,7 @@ import { Page } from "../../../Shell";
 
 type M = { userId: string; name: string; role: string; active: boolean; email?: string };
 type Proj = { id: string; name: string; archived: boolean; role: string; members: M[] };
-type Person = { id: string; name: string; email?: string };
+type Person = { id: string; name: string; email?: string; status?: "ACTIVE" | "UNVERIFIED" | "DEACTIVATED" };
 
 export default function Members({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -21,7 +21,7 @@ export default function Members({ params }: { params: Promise<{ id: string }> })
   if (pr.error && !p) return <Page title="This project isn't available"><div className="card empty">It may not exist, or you are not a member.<br /><Link href="/projects">Back to Projects</Link></div></Page>;
   const manage = p?.role === "LEADER" && !p?.archived;
   const inProject = new Set(p?.members.map((m) => m.userId));
-  const found = q.trim().length < 1 ? [] : (team.data?.people ?? []).filter((x) => !inProject.has(x.id) && (x.name + " " + (x.email ?? "")).toLowerCase().includes(q.trim().toLowerCase())).slice(0, 8);
+  const found = q.trim().length < 1 ? [] : (team.data?.people ?? []).filter((x) => (!x.status || x.status === "ACTIVE") && !inProject.has(x.id) && (x.name + " " + (x.email ?? "")).toLowerCase().includes(q.trim().toLowerCase())).slice(0, 8);
 
   async function add(userId: string) {
     const r = await api("POST", `/api/projects/${id}/members`, { userId, role: addRole });
@@ -55,6 +55,7 @@ export default function Members({ params }: { params: Promise<{ id: string }> })
       </div>
       {manage && (
         <>
+          <h2 className="grp">Project settings</h2>
           <div className="box">
             <b>Change leader</b>
             <p className="hint">The new Leader takes over. Choose what happens to the current Leader.</p>
@@ -116,6 +117,9 @@ function ChangeLeader({ p, id, onClose, onDone }: { p: Proj; id: string; onClose
   const cands = p.members.filter((m) => m.active && m.role !== "LEADER");
   const [next, setNext] = useState(cands[0]?.userId ?? "");
   const [prev, setPrev] = useState("EDITOR");
+  const [taker, setTaker] = useState("");
+  const takers = p.members.filter((m) => m.active && m.role !== "VIEWER" && m.role !== "LEADER");
+  const needsTaker = prev === "VIEWER" || prev === "REMOVE";
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   return (
@@ -123,16 +127,23 @@ function ChangeLeader({ p, id, onClose, onDone }: { p: Proj; id: string; onClose
       body="The new Leader is told. The current Leader keeps the role you choose here."
       onYes={async () => {
         setBusy(true);
-        const r = await api("POST", `/api/projects/${id}/leader`, { newLeaderId: next, previousRole: prev, handoverTo: next });
+        const r = await api("POST", `/api/projects/${id}/leader`, { newLeaderId: next, previousRole: prev, handoverTo: needsTaker && taker ? taker : next });
         setBusy(false);
         if (r.ok) onDone(); else setErr(r.error ?? "Could not change the leader.");
       }}>
       {!cands.length ? <p className="hint">Add another member first. A Leader must come from the project&apos;s members.</p> : (
         <>
           <Field label="New leader">{(i) => <select id={i} className="in" value={next} onChange={(e) => setNext(e.target.value)}>{cands.map((m) => <option key={m.userId} value={m.userId}>{m.name} ({ROLE[m.role]})</option>)}</select>}</Field>
-          <Field label="The current Leader becomes" hint={prev === "REMOVE" || prev === "VIEWER" ? "Their open tasks go to the new Leader." : undefined}>
+          <Field label="The current Leader becomes" hint={needsTaker ? "Choose who takes their open tasks. The default is the new Leader." : undefined}>
             {(i) => <select id={i} className="in" value={prev} onChange={(e) => setPrev(e.target.value)}><option value="EDITOR">Editor</option><option value="VIEWER">Viewer</option><option value="REMOVE">Removed from the project</option></select>}
           </Field>
+          {needsTaker && (
+            <Field label="Who takes their open tasks?">
+              {(i) => <select id={i} className="in" value={taker || next} onChange={(e) => setTaker(e.target.value)}>
+                {[...takers.filter((m) => m.userId === next), ...takers.filter((m) => m.userId !== next)].map((m) => <option key={m.userId} value={m.userId}>{m.name} ({ROLE[m.role]}){m.userId === next ? ", new Leader" : ""}</option>)}
+              </select>}
+            </Field>
+          )}
         </>
       )}
     </Confirm>
@@ -141,10 +152,12 @@ function ChangeLeader({ p, id, onClose, onDone }: { p: Proj; id: string; onClose
 
 function Archive({ id, archived, onClose, onDone }: { id: string; archived: boolean; onClose: () => void; onDone: () => void }) {
   const [err, setErr] = useState<string | null>(null);
+  const list = useGet<{ projects: { id: string; openTasks: number }[] }>(archived ? null : "/api/projects");
+  const open = list.data?.projects.find((x) => x.id === id)?.openTasks;
   const [busy, setBusy] = useState(false);
   return (
     <Confirm title={archived ? "Unarchive this project?" : "Archive this project?"} yes={archived ? "Unarchive" : "Archive"} danger={!archived} busy={busy} error={err} onNo={onClose}
-      body={archived ? "The project becomes editable again." : "Nobody can change anything while it is archived. Everyone with an open task is told."}
+      body={archived ? "The project becomes editable again." : `Nobody can change anything while it is archived. ${open === undefined ? "" : `${open} open task${open === 1 ? "" : "s"}: `}everyone with an open task is told.`}
       onYes={async () => { setBusy(true); const r = await api("POST", `/api/projects/${id}/${archived ? "unarchive" : "archive"}`, {}); setBusy(false); if (r.ok) onDone(); else setErr(r.error ?? "Could not do that."); }} />
   );
 }

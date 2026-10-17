@@ -2,6 +2,7 @@ import { db } from "@/lib/db";
 import { ApiError, notFound } from "@/lib/http";
 import { activeMember, isActive, isAdmin, leaderId, type Actor } from "@/lib/access";
 import { auditTx, notify } from "@/lib/notify";
+import { superAdminEmails } from "@/lib/auth";
 import { releasePerson } from "@/lib/people";
 
 /** SHO-US-2.5. Members see active names only; Admins see everything. */
@@ -19,12 +20,15 @@ export async function listTeam(user: Actor) {
   }));
 }
 
+/** SHO-US-2.1 AC3: a listed address is protected whatever its stored role says. */
+const isSuper = (u: { orgRole: string; email: string }) => u.orgRole === "SUPER_ADMIN" || superAdminEmails().includes(u.email.toLowerCase());
+
 /** SHO-US-2.2. Only the Super Admin; Super Admin itself can never be granted or removed here. */
 export async function setOrgRole(actor: Actor, targetId: string, role: "MEMBER" | "ADMIN") {
   if (actor.orgRole !== "SUPER_ADMIN") throw new ApiError(403, "Only the Super Admin can change roles.");
   const target = await db.user.findUnique({ where: { id: targetId } });
   if (!target) throw notFound("Person");
-  if (target.orgRole === "SUPER_ADMIN") throw new ApiError(403, "The Super Admin role is set in server configuration only.");
+  if (isSuper(target)) throw new ApiError(403, "The Super Admin role is set in server configuration only.");
   if (!isActive(target)) throw new ApiError(409, "Only active people can change role.");
   if (target.orgRole === role) return target;
   await db.$transaction(async (tx) => {
@@ -35,8 +39,8 @@ export async function setOrgRole(actor: Actor, targetId: string, role: "MEMBER" 
   return { ...target, orgRole: role };
 }
 
-function mayAct(actor: Actor, target: { orgRole: string }) {
-  if (target.orgRole === "SUPER_ADMIN") return false; // protected in the app
+function mayAct(actor: Actor, target: { orgRole: string; email: string }) {
+  if (isSuper(target)) return false; // protected in the app
   if (target.orgRole === "ADMIN") return actor.orgRole === "SUPER_ADMIN";
   return isAdmin(actor);
 }
@@ -52,7 +56,9 @@ export async function deactivate(actor: Actor, targetId: string, reassign: strin
   const memberships = await db.projectMember.findMany({ where: { userId: targetId }, include: { project: true } });
   const leads = memberships.filter((m) => m.role === "LEADER");
   if (leads.length) {
-    throw new ApiError(409, "Name a new Leader first for: " + leads.map((m) => m.project.name).join(", "));
+    throw new ApiError(409, "Name a new Leader first for: " + leads.map((m) => m.project.name).join(", "), {
+      leads: leads.map((m) => ({ id: m.projectId, name: m.project.name })),
+    });
   }
   if (reassign !== "leaders") {
     const named = await db.user.findUnique({ where: { id: reassign } });

@@ -1,4 +1,5 @@
 "use client";
+import Link from "next/link";
 import { useState } from "react";
 import { api, useGet } from "@/components/api";
 import { Confirm, Field } from "@/components/ui";
@@ -12,6 +13,7 @@ export default function Team() {
   const t = useGet<{ people: P[] }>("/api/team");
   const [err, setErr] = useState<string | null>(null);
   const [deact, setDeact] = useState<P | null>(null);
+  const [done, setDone] = useState<null | { name: string; moved: number; fellBack: string[] }>(null);
   const admin = me.orgRole !== "MEMBER";
   const people = t.data?.people ?? [];
   const active = people.filter((p) => !p.status || p.status === "ACTIVE");
@@ -65,19 +67,26 @@ export default function Team() {
           </table>
         </div>
       )}
-      {deact && <Deactivate p={deact} others={active.filter((x) => x.id !== deact.id)} onClose={() => setDeact(null)} onDone={() => { setDeact(null); t.reload(); }} />}
+      {deact && <Deactivate p={deact} others={active.filter((x) => x.id !== deact.id)} onClose={() => setDeact(null)} onDone={(r) => { setDone({ name: deact.name, moved: r.moved, fellBack: r.fellBack }); setDeact(null); t.reload(); }} />}
+      {done && (
+        <Confirm title={`${done.name} is deactivated`} yes="Close" onNo={() => setDone(null)} onYes={() => setDone(null)}
+          body={`${done.moved} open task${done.moved === 1 ? " was" : "s were"} handed over.`}>
+          {done.fellBack.length > 0 && <p className="hint">The Leader took the tasks in {done.fellBack.join(", ")}, because the person you named is not on {done.fellBack.length === 1 ? "that project" : "those projects"}.</p>}
+        </Confirm>
+      )}
     </Page>
   );
 }
 
-function Deactivate({ p, others, onClose, onDone }: { p: P; others: P[]; onClose: () => void; onDone: () => void }) {
+function Deactivate({ p, others, onClose, onDone }: { p: P; others: P[]; onClose: () => void; onDone: (r: { moved: number; fellBack: string[] }) => void }) {
   const [to, setTo] = useState("leaders");
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [leads, setLeads] = useState<{ id: string; name: string }[]>([]);
   return (
     <Confirm title={`Deactivate ${p.name}?`} yes="Deactivate" danger busy={busy} error={err} onNo={onClose}
       body="They are signed out everywhere and can no longer sign in. Their open tasks must go to someone. Their history stays."
-      onYes={async () => { setBusy(true); const r = await api("POST", `/api/team/${p.id}/deactivate`, { reassign: to }); setBusy(false); if (r.ok) onDone(); else setErr(r.error ?? "Could not deactivate."); }}>
+      onYes={async () => { setBusy(true); const r = await api("POST", `/api/team/${p.id}/deactivate`, { reassign: to }); setBusy(false); if (r.ok) onDone({ moved: r.data.moved ?? 0, fellBack: r.data.fellBack ?? [] }); else { setLeads(r.data.leads ?? []); setErr(r.error ?? "Could not deactivate."); } }}>
       <Field label="Who takes their open tasks?">
         {(id) => (
           <select id={id} className="in" value={to} onChange={(e) => setTo(e.target.value)}>
@@ -87,6 +96,12 @@ function Deactivate({ p, others, onClose, onDone }: { p: P; others: P[]; onClose
         )}
       </Field>
       <p className="hint">If the person you name is not on a project, that project&apos;s Leader takes those tasks.</p>
+      {leads.length > 0 && (
+        <div className="box warn">
+          <b>{p.name} leads {leads.length === 1 ? "a project" : "projects"}.</b> Hand over the leadership first, then deactivate:
+          <ul>{leads.map((l) => <li key={l.id}><Link href={`/projects/${l.id}/members`}>{l.name}: Change leader</Link></li>)}</ul>
+        </div>
+      )}
     </Confirm>
   );
 }
