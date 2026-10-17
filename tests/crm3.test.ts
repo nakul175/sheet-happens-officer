@@ -1,6 +1,6 @@
 // CRM slice 3: idea flag (13.2), convert to deal (12.2), Home data (13.1, 12.5 AC3).
 import { describe, expect, it } from "vitest";
-import { account, istDate, project, task, type Account } from "./helpers";
+import { account, istDate, project, superAdmin, task, type Account } from "./helpers";
 
 let seq = 0;
 async function pipes(a: Account) {
@@ -78,6 +78,9 @@ describe("convert a task to a deal (12.2)", () => {
 
     const act = JSON.stringify((await lead.c.get(`/api/projects/${p.id}/activity`)).json);
     expect(act).toMatch(/to the deal/); // SHO-US-14.14 wording
+    // The audit row names the task that became the deal (SHO-BUG-4).
+    const sa = await superAdmin();
+    expect(((await sa.c.get(`/api/audit?event=DEAL_CONVERTED&person=${ed.id}`)).json.items as { target: string | null }[])[0]?.target).toBe('Task "Ministry of Health lead"');
     // The source project no longer lists the task.
     expect(JSON.stringify((await lead.c.get(`/api/projects/${p.id}/tasks`)).json)).not.toContain(t);
   });

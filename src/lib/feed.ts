@@ -197,17 +197,20 @@ export async function auditLog(user: Actor, q: z.infer<typeof auditQuery>) {
   const events = await db.auditLog.findMany({ distinct: ["event"], select: { event: true }, orderBy: { event: "asc" } });
   const page = rows.slice(0, 100);
   const byType = (t: string[]) => [...new Set(page.filter((r) => r.targetType && t.includes(r.targetType) && r.targetId).map((r) => r.targetId!))];
+  // A "deal" target is the deal's project row (DEAL_CREATED, DEAL_CLOSED), or the task that became one (DEAL_CONVERTED) (SHO-BUG-4).
   const [us, ps, ts, ss] = await Promise.all([
     db.user.findMany({ where: { id: { in: byType(["user", "member"]) } }, select: { id: true, name: true } }),
-    db.project.findMany({ where: { id: { in: byType(["project"]) } }, select: { id: true, name: true } }),
-    db.task.findMany({ where: { id: { in: byType(["task"]) } }, select: { id: true, title: true } }),
+    db.project.findMany({ where: { id: { in: byType(["project", "deal"]) } }, select: { id: true, name: true } }),
+    db.task.findMany({ where: { id: { in: byType(["task", "deal"]) } }, select: { id: true, title: true } }),
     db.section.findMany({ where: { id: { in: byType(["section"]) } }, select: { id: true, name: true } }),
   ]);
   const label = new Map<string, string>([
     ...us.map((x) => [`user:${x.id}`, `Person "${x.name}"`] as [string, string]),
     ...us.map((x) => [`member:${x.id}`, `Member "${x.name}"`] as [string, string]),
     ...ps.map((x) => [`project:${x.id}`, `Project "${x.name}"`] as [string, string]),
+    ...ps.map((x) => [`deal:${x.id}`, `Deal "${x.name}"`] as [string, string]),
     ...ts.map((x) => [`task:${x.id}`, `Task "${x.title}"`] as [string, string]),
+    ...ts.map((x) => [`deal:${x.id}`, `Task "${x.title}"`] as [string, string]),
     ...ss.map((x) => [`section:${x.id}`, `Section "${x.name}"`] as [string, string]),
   ]);
   return {

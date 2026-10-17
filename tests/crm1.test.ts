@@ -260,6 +260,19 @@ describe("stages (10.3)", () => {
     expect(p.openTasks).toBe(1);
   });
 
+  it("names the deal in the audit log when it is created and when it is closed (SHO-BUG-4)", async () => {
+    const sa = await superAdmin();
+    const lead = await account("audlead");
+    const { r, body, pipes } = await deal(lead, lead);
+    const id = r.json.deal.id as string;
+    const step = (await lead.c.get(`/api/projects/${id}`)).json.project.deal.nextStep.id;
+    expect((await lead.c.post(`/api/tasks/${step}/complete`, {})).status).toBe(200);
+    expect((await lead.c.post(`/api/projects/${id}/stage`, { stageId: pipes.proactive.stages.find((s: { name: string }) => s.name === "Won").id })).status).toBe(200);
+    const target = async (event: string) => ((await sa.c.get(`/api/audit?event=${event}&person=${lead.id}`)).json.items as { target: string | null }[])[0]?.target;
+    expect(await target("DEAL_CLOSED")).toBe(`Deal "${body.name}"`);
+    expect(await target("DEAL_CREATED")).toBe(`Deal "${body.name}"`);
+  });
+
   it("makes no stage change possible on a plain project", async () => {
     const m = await account("noproj");
     const p = await project(m, m);
