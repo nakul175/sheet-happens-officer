@@ -10,7 +10,7 @@ type Pr = { id: string; name: string; description: string | null; archived: bool
 function Card({ p, admin }: { p: Pr; admin: boolean }) {
   return (
     <Link href={`/projects/${p.id}`} className="card pcard">
-      <h3>{p.name}</h3>
+      <h2>{p.name}</h2>
       <p>{p.description || "No description"}</p>
       <div className="meta" style={{ justifyContent: "flex-start" }}>
         <span className="chip">{p.myRole ? `You: ${ROLE[p.myRole]}` : admin ? "Admin view" : "Member"}</span>

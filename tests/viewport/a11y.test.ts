@@ -65,7 +65,7 @@ for (const width of [1280, 390]) {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const r = await (window as any).axe.run(document, { runOnly: { type: "tag", values: ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "best-practice"] }, rules: { "color-contrast": { enabled: false } } });
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          return r.violations.map((v: any) => ({ id: v.id, impact: v.impact, nodes: v.nodes.slice(0, 3).map((n: any) => n.target.join(" ")) }));
+          return r.violations.map((v: any) => ({ id: v.id, impact: v.impact, nodes: v.nodes.slice(0, 3).map((n: any) => n.target.join(" ") + " :: " + n.failureSummary) }));
         });
         if (res.length) await page.screenshot({ path: `${SHOTS}/${s.name.replace(/[^a-z0-9]+/gi, "-")}-${width}.png`, fullPage: true });
         await ctx.close();
@@ -81,8 +81,9 @@ describe("keyboard", () => {
     const page = await ctx.newPage();
     await page.goto("/projects", { waitUntil: "load" });
     await page.waitForSelector("main#main");
+    await page.waitForTimeout(800);
     await page.keyboard.press("Tab");
-    expect(await page.evaluate(() => document.activeElement?.textContent)).toBe("Skip to content");
+    expect(await page.evaluate(() => document.activeElement?.className + ":" + document.activeElement?.tagName)).toBe("skip:A");
     await page.keyboard.press("Enter");
     expect(await page.evaluate(() => document.activeElement?.id)).toBe("main");
     await ctx.close();

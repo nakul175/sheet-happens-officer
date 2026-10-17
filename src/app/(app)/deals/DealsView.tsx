@@ -32,7 +32,7 @@ export default function DealsView() {
       </>}>
       <div className="tabs" style={{ marginBottom: 12 }}>
         <div className="seg" role="tablist" aria-label="Pipeline">
-          {pipes.data?.pipelines.map((p) => <button key={p.id} role="tab" aria-selected={cur?.id === p.id} aria-pressed={cur?.id === p.id} onClick={() => setPipe(p.id)}>{p.name}</button>)}
+          {pipes.data?.pipelines.map((p) => <button key={p.id} role="tab" aria-selected={cur?.id === p.id} onClick={() => setPipe(p.id)}>{p.name}</button>)}
         </div>
         <span className="sp" />
         <div className="seg" role="group" aria-label="Layout">

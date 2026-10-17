@@ -194,8 +194,8 @@ function Inner({ id }: { id: string }) {
       {p?.deal && <DealPanel projectId={id} deal={p.deal} canWrite={canWrite} onChange={refresh} />}
       <div className="tabs">
         <div className="seg" role="tablist" aria-label="View">
-          <button role="tab" aria-selected={view === "list"} aria-current={view === "list"} onClick={() => setView("list")}>List</button>
-          <button role="tab" aria-selected={view === "board"} aria-current={view === "board"} onClick={() => setView("board")}>Board</button>
+          <button role="tab" aria-selected={view === "list"} onClick={() => setView("list")}>List</button>
+          <button role="tab" aria-selected={view === "board"} onClick={() => setView("board")}>Board</button>
         </div>
         {views.length > 0 && (
           <div className="vtabs" role="group" aria-label="Saved views">
@@ -279,9 +279,9 @@ function Inner({ id }: { id: string }) {
               onDragOver={(e) => { if (dragId && canWrite && canDrop(dragId, s)) { e.preventDefault(); setOverCol(s.id); } }}
               onDragLeave={() => setOverCol((c) => (c === s.id ? null : c))}
               onDrop={(e) => { e.preventDefault(); setOverCol(null); const tid = dragId; setDragId(null); if (tid && canWrite && canDrop(tid, s)) { const from = secs.flatMap((x) => tasksOf(x)).find((x) => x.id === tid); if (from && from.sectionId !== s.id) moveTo(tid, s.id); } }}>
-              <h4>{s.name} <span className="n">{s.total}</span>
+              <h2>{s.name} <span className="n">{s.total}</span>
                 {manage && <SectionMenu s={s} secs={secs} projectId={id} onDialog={(kind) => setDialog({ kind, s })} onDone={refresh} onErr={setErr} />}
-              </h4>
+              </h2>
               {tasksOf(s).map((t) => (
                 <div key={t.id} className="bcard" draggable={canWrite && mouse} onDragStart={() => setDragId(t.id)} onDragEnd={() => { setDragId(null); setOverCol(null); }}
                   onClick={() => openTask(t.id)} tabIndex={0} onKeyDown={(e) => { if (e.key === "Enter") openTask(t.id); }}>
