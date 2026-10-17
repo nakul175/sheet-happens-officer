@@ -76,7 +76,7 @@ export function ListControls({ state, members, onChange, showGroup, found, onSav
         <div className="lc-chips" aria-label="Active filters">
           {state.assignee && (
             <button type="button" className="chip lc-chip" onClick={() => onChange({ assignee: "" })} aria-label={`Remove filter ${goneName?.name ?? "person"}`}>
-              {gone ? `${goneName?.name ?? "A person"}: person no longer on project` : workers.find((m) => m.userId === state.assignee)?.name ?? "Person"} ×
+              {gone ? `${goneName ? `${goneName.name}: p` : "P"}erson no longer on project` : workers.find((m) => m.userId === state.assignee)?.name ?? "Person"} ×
             </button>
           )}
           {state.priority && <button type="button" className="chip lc-chip" onClick={() => onChange({ priority: "" })} aria-label={`Remove filter ${PRIORITY[state.priority]} priority`}>{PRIORITY[state.priority]} priority ×</button>}

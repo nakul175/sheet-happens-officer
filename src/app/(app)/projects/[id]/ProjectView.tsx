@@ -12,7 +12,8 @@ import { DealPanel, type DealBlock } from "@/components/DealPanel";
 import { Page, useMe } from "../../Shell";
 import { InlineCells, inlineEditable, useInlineEdit } from "@/components/inline";
 import { ListControls } from "./ListControls";
-import { apiQuery, groupTasks, isFiltered, readState, type ListState } from "./listview";
+import { apiQuery, groupTasks, isFiltered, readState, sameState, type ListState } from "./listview";
+import { SaveViewDialog, type SavedView } from "./SavedViews";
 
 type T = {
   id: string; title: string; updatedAt: string; sectionId: string; priority: string; dueDate: string | null; blocked: boolean; completedAt: string | null; isIdea?: boolean;
@@ -49,6 +50,8 @@ function Inner({ id }: { id: string }) {
 
   const refresh = useCallback(() => { pr.reload(); tk.reload(); setExtra({}); }, [pr, tk]);
   const inline = useInlineEdit(refresh);
+  const vw = useGet<{ views: SavedView[]; max: number }>(`/api/projects/${id}/views`);
+  const [viewDialog, setViewDialog] = useState<null | "save" | "rename" | "delete">(null);
 
   if (!pr.data && isNetworkFailure(pr.status)) {
     return <Page title="Project"><LoadFailed onRetry={refresh} /></Page>;
@@ -70,6 +73,10 @@ function Inner({ id }: { id: string }) {
   const setView = (v: string) => router.push(urlWith({ view: v === "board" ? "board" : null, task: null }), { scroll: false });
   const openTask = (tid: string) => router.push(urlWith({ task: tid }), { scroll: false });
   const closeTask = () => router.push(urlWith({ task: null }), { scroll: false });
+  const views = vw.data?.views ?? [];
+  const maxViews = vw.data?.max ?? 10;
+  const activeView = view === "list" ? views.find((v) => sameState(v.state, ls)) : undefined;
+  const openView = (v: SavedView) => router.push(urlWith({ view: null, task: null, assignee: v.state.assignee || null, f: v.state.flags.join(",") || null, priority: v.state.priority || null, sort: v.state.sort === "date" ? null : v.state.sort, group: v.state.group === "section" ? null : v.state.group }), { scroll: false });
   const setList = (patch: Partial<ListState>) => {
     const n = { ...ls, ...patch };
     router.replace(urlWith({ assignee: n.assignee || null, f: n.flags.join(",") || null, priority: n.priority || null, sort: n.sort === "date" ? null : n.sort, group: n.group === "section" ? null : n.group }), { scroll: false });
@@ -137,6 +144,11 @@ function Inner({ id }: { id: string }) {
           <button role="tab" aria-selected={view === "list"} aria-current={view === "list"} onClick={() => setView("list")}>List</button>
           <button role="tab" aria-selected={view === "board"} aria-current={view === "board"} onClick={() => setView("board")}>Board</button>
         </div>
+        {views.length > 0 && (
+          <div className="vtabs" role="group" aria-label="Saved views">
+            {views.map((v) => <button key={v.id} className="vtab" aria-pressed={activeView?.id === v.id} onClick={() => openView(v)}>{v.name}</button>)}
+          </div>
+        )}
         <span className="sp" />
         <Link href={`/projects/${id}/members`}>Members</Link>
         <Link href={`/projects/${id}/trash`}>Trash</Link>
@@ -144,7 +156,14 @@ function Inner({ id }: { id: string }) {
       </div>
       {p && secs && (
         <ListControls state={ls} members={p.members} onChange={setList} showGroup={view === "list"}
-          found={wide && filtered ? secs.reduce((n, x) => n + x.tasks.length, 0) : null} />
+          found={wide && filtered ? secs.reduce((n, x) => n + x.tasks.length, 0) : null}
+          onSave={view === "list" && !activeView && (filtered || ls.sort !== "date" || ls.group !== "section") ? () => setViewDialog("save") : undefined}
+          saveWhy={views.length >= maxViews ? `You have ${maxViews} saved views in this project, the most allowed. Delete one to save another.` : null}>
+          {activeView && <>
+            <button type="button" className="btn ghost" onClick={() => setViewDialog("rename")}>Rename view</button>
+            <button type="button" className="btn ghost" onClick={() => setViewDialog("delete")}>Delete view</button>
+          </>}
+        </ListControls>
       )}
       {err && <div className="err" role="alert">{err}</div>}
       {inline.notice}
@@ -238,6 +257,8 @@ function Inner({ id }: { id: string }) {
       )}
       {secs && p && p.role !== "LEADER" && <p className="hint" style={{ marginTop: 16 }}>Only the Leader and Admins can change sections.</p>}
 
+      {viewDialog && <SaveViewDialog kind={viewDialog} projectId={id} state={ls} view={activeView} onClose={() => setViewDialog(null)}
+        onDone={(afterDelete) => { setViewDialog(null); vw.reload(); if (afterDelete) router.replace(urlWith({ assignee: null, f: null, priority: null, sort: null, group: null }), { scroll: false }); }} />}
       {open && <TaskModal id={open} me={me.id} onClose={closeTask} onChanged={refresh} />}
       {adding && p && <NewTask p={p} onClose={() => setAdding(false)} onAdded={() => { setAdding(false); refresh(); }} />}
       {dialog?.kind === "addSection" && <SectionName title="Add section" yes="Add section" onClose={() => setDialog(null)} onSave={(name) => api("POST", `/api/projects/${id}/sections`, { name })} onDone={() => { setDialog(null); refresh(); }} />}

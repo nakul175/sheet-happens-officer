@@ -90,6 +90,7 @@ model User {
   auditLogs           AuditLog[]
   chatMessages        ChatMessage[]
   modelUsage          ModelUsage[]
+  savedViews          SavedView[]
 
   @@index([workspaceId])
 }
@@ -160,6 +161,7 @@ model Project {
   sections       Section[]
   tasks          Task[]
   actionLogs     ActionLog[]
+  savedViews     SavedView[]
 
   @@index([workspaceId])
   @@index([typeId])
@@ -563,4 +565,22 @@ model TaskLink {
   @@index([taskId])
   @@index([organisationId])
   @@index([contactId])
+}
+
+// SHO-US-14.10: a person's own saved filter for one project (personal only, up to 10 per project).
+model SavedView {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  projectId String
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  name      String
+  // { assignee, flags, priority, sort, group } exactly as the list reads them from the address.
+  state     Json
+  position  Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, projectId, name])
+  @@index([userId, projectId, position])
 }

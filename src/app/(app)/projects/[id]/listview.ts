@@ -72,3 +72,7 @@ export function groupTasks<T extends Row>(tasks: T[], by: "assignee" | "week", t
   }
   return [...groups.values()].sort((a, b) => a.order.localeCompare(b.order));
 }
+
+/** Same filter, sort and group, whatever order the flags were ticked in. */
+export const sameState = (a: ListState, b: ListState) =>
+  a.assignee === b.assignee && a.priority === b.priority && a.sort === b.sort && a.group === b.group && [...a.flags].sort().join() === [...b.flags].sort().join();

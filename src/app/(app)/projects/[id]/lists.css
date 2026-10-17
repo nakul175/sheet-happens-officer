@@ -23,3 +23,8 @@
   .lc-sel select { width: 100%; }
 }
 .lc-sum { display: inline-flex; gap: 6px; flex-wrap: wrap; margin-left: 8px; }
+.vtabs { display: contents; }
+.vtab { font: inherit; font-size: 14px; background: var(--card); border: 1px solid var(--field); border-radius: 8px; padding: 7px 14px; cursor: pointer; color: var(--ink-2); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vtab[aria-pressed="true"] { background: var(--navy); border-color: var(--navy); color: #fff; }
+.vtab:focus-visible { outline: 2px solid var(--gold); outline-offset: 1px; }
+@media (max-width: 1023px), (pointer: coarse) { .vtab { min-height: 44px; } }
