@@ -24,6 +24,21 @@ export const UNDO_LABELS: Record<string, string> = {
   "section.renamed": "Section renamed",
   "section.moved": "Section moved",
   "section.done_changed": "Done section changed",
+  "deal.stage_changed": "Stage changed",
+  "deal.details_updated": "Deal details edited",
+  "deal.converted": "Task converted to a deal",
+  "organisation.created": "Organisation added",
+  "organisation.updated": "Organisation edited",
+  "organisation.archived": "Organisation archived",
+  "organisation.unarchived": "Organisation unarchived",
+  "contact.created": "Contact added",
+  "contact.updated": "Contact edited",
+  "contact.removed": "Contact removed",
+  "note.created": "Note added",
+  "note.removed": "Note deleted",
+  "task.idea_changed": "Idea flag changed",
+  "task.link_added": "Link added",
+  "task.link_removed": "Link removed",
 };
 export const isUndoable = (action: string) => action in UNDO_LABELS;
 export const UNDO_DAYS = 30;

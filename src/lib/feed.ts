@@ -68,6 +68,9 @@ export function noticeText(n: N) {
     TASK_DUE_TOMORROW: `${t} is due tomorrow.`,
     TASK_DUE_TODAY: `${t} is due today.`,
     TASK_OVERDUE: `${t} is overdue${d.daysOverdue ? ` by ${d.daysOverdue} ${d.daysOverdue === 1 ? "day" : "days"}` : ""}.`,
+    DEAL_STAGE_CHANGED: `${who} moved ${p} to ${d.stage ?? "another stage"}.`,
+    DEAL_NEEDS_NEXT_STEP: `${p} needs a next step.`,
+    DEAL_STALLED: `${p} has had no activity for 30 days.`,
     JOB_FAILED: `Scheduled job "${d.job}" failed${d.error ? `: ${d.error}` : ""}.`,
     JOB_MISSED: `Scheduled job "${d.job}" did not run on its day.`,
     CONCIERGE_BUDGET_80: `The concierge has used $${d.spend} of its $${d.ceiling} monthly budget (${d.percent} percent). At the ceiling it pauses until ${d.resumes}.`,
@@ -129,6 +132,14 @@ const ACTION_WORDS: Record<string, string> = {
   "task.moved": "moved a task",
   "task.deleted": "moved a task to Trash",
   "task.restored": "restored a task from Trash",
+  "deal.created": "created the deal",
+  "deal.stage_changed": "moved the deal to another stage",
+  "deal.details_updated": "edited the deal details",
+  "deal.party_added": "added an organisation to the deal",
+  "deal.party_removed": "removed an organisation from the deal",
+  "deal.converted": "converted a task to this deal",
+  "task.moved_to_deal": "moved this task to a deal",
+  "task.idea_changed": "changed the Idea flag",
   "tasks.reassigned": "handed a person's open tasks to someone else",
   "tasks.collaborations_dropped": "took a person off tasks as a collaborator",
   "tasks.approver_reassigned": "moved a person's approver duties to the Leader",
@@ -140,7 +151,7 @@ const KEY_WORDS: Record<string, string> = {
   sectionId: "section", assigneeId: "assignee", approverId: "approver", leaderId: "leader", userId: "person",
   newLeaderId: "leader", movedTo: "moved to", dueDate: "due date", blockedReason: "blocked because",
 };
-const SKIP = new Set(["title", "name", "id", "updatedAt", "description", "completedAt", "subtasksCompleted"]);
+const SKIP = new Set(["title", "name", "id", "updatedAt", "description", "completedAt", "subtasksCompleted", "stageId"]);
 
 /** Ids in before/after state are shown as names. `names` maps section and user ids to labels. */
 function describe(a: { action: string; beforeState: unknown; afterState: unknown; targetId: string }, names: Map<string, string>) {

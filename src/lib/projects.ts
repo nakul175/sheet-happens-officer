@@ -5,6 +5,8 @@ import {
 } from "@/lib/access";
 import { logAction, notify } from "@/lib/notify";
 import { openTaskCount, releasePerson, resolveHandover, type Released } from "@/lib/people";
+import { WORKSTREAM_DEAL, WORKSTREAM_PROJECT, crmVisible } from "@/lib/crm";
+import { dealBlock } from "@/lib/deals";
 
 const DEFAULT_SECTIONS = ["To do", "In progress", "Done"];
 
@@ -32,6 +34,8 @@ export async function createProject(user: Actor, input: { name: string; descript
 export async function listProjects(user: Actor, archived: boolean) {
   const projects = await db.project.findMany({
     where: {
+      // SHO-US-10.4: deals have their own place; this list is for type Project only.
+      typeId: WORKSTREAM_PROJECT,
       archivedAt: archived ? { not: null } : null,
       ...(isAdmin(user) ? {} : { members: { some: { userId: user.id } } }),
     },
@@ -63,7 +67,13 @@ export async function getProject(user: Actor, projectId: string) {
     db.task.count({ where: { projectId, deletedAt: null, completedAt: null } }),
   ]);
   const manage = a.role === "LEADER";
+  const isDeal = a.project.typeId === WORKSTREAM_DEAL;
+  // A hidden CRM looks like it does not exist (CRM_VISIBLE).
+  if (isDeal && !crmVisible(user)) throw notFound("Project");
+  const deal = isDeal ? await dealBlock(projectId) : null;
   return {
+    type: isDeal ? "DEAL" : "PROJECT",
+    deal,
     id: a.project.id,
     name: a.project.name,
     description: a.project.description,

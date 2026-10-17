@@ -49,12 +49,15 @@ enum ChatRole {
 }
 
 model Workspace {
-  id        String    @id @default(cuid())
-  name      String
-  createdAt DateTime  @default(now())
-  users     User[]
-  projects  Project[]
-  tasks     Task[]
+  id            String         @id @default(cuid())
+  name          String
+  createdAt     DateTime       @default(now())
+  users         User[]
+  projects      Project[]
+  tasks         Task[]
+  organisations Organisation[]
+  contacts      Contact[]
+  notes         Note[]
 }
 
 model User {
@@ -132,20 +135,35 @@ model LoginAttempt {
 }
 
 model Project {
-  id          String          @id @default(cuid())
-  workspaceId String
-  workspace   Workspace       @relation(fields: [workspaceId], references: [id])
-  name        String
-  description String?
-  archivedAt  DateTime?
-  createdAt   DateTime        @default(now())
-  updatedAt   DateTime        @updatedAt
-  members     ProjectMember[]
-  sections    Section[]
-  tasks       Task[]
-  actionLogs  ActionLog[]
+  id             String          @id @default(cuid())
+  workspaceId    String
+  workspace      Workspace       @relation(fields: [workspaceId], references: [id])
+  name           String
+  description    String?
+  archivedAt     DateTime?
+  // CRM (SHO-E10). The column default keeps the previous build working: a project created
+  // by the old code is a plain Project. A null pipeline/stage means "Active" (type Project).
+  typeId         String          @default("wst_project")
+  type           WorkstreamType  @relation(fields: [typeId], references: [id])
+  pipelineId     String?
+  pipeline       Pipeline?       @relation(fields: [pipelineId], references: [id])
+  stageId        String?
+  stage          Stage?          @relation(fields: [stageId], references: [id])
+  stageReason    String?
+  stageChangedAt DateTime?
+  deal           DealDetails?
+  parties        DealParty[]
+  notes          Note[]
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  members        ProjectMember[]
+  sections       Section[]
+  tasks          Task[]
+  actionLogs     ActionLog[]
 
   @@index([workspaceId])
+  @@index([typeId])
+  @@index([stageId])
 }
 
 model ProjectMember {
@@ -208,6 +226,9 @@ model Task {
   completedAt        DateTime?
   // Where a completed task returns to when reopened (SHO-US-4.5). Plain id, no foreign key.
   previousSectionId  String?
+  // CRM (SHO-US-13.2): a task flagged as an early idea.
+  isIdea             Boolean            @default(false)
+  links              TaskLink[]
   createdAt          DateTime           @default(now())
   updatedAt          DateTime           @updatedAt
   collaborators      TaskCollaborator[]
@@ -333,4 +354,213 @@ model JobRun {
   lastFinishedAt DateTime?
   lastStatus     String?
   lastError      String?
+}
+
+// ---------------------------------------------------------------------------
+// CRM: Workstream types, pipelines, deals, organisations (SHO-E10 to SHO-E13).
+// All additive. Rules Prisma cannot express are in the migration SQL.
+// ---------------------------------------------------------------------------
+
+enum StageCategory {
+  NOT_STARTED
+  ACTIVE
+  PAUSED
+  DONE
+  LOST
+}
+
+enum Currency {
+  INR
+  USD
+  EUR
+}
+
+enum PartyRole {
+  BUYER
+  FUNDER
+  IMPLEMENTING_OFFICE
+  PARTNER
+  OTHER
+}
+
+enum OrgLevel {
+  GROUP
+  LEGAL_ENTITY
+  BUYING_OFFICE
+}
+
+enum NoteKind {
+  MEETING
+  CALL
+  INTRODUCTION
+  OTHER
+}
+
+// "Workstream" is the concept; Project is the table. Types are configuration rows.
+model WorkstreamType {
+  id        String     @id
+  key       String     @unique
+  name      String
+  projects  Project[]
+  pipelines Pipeline[]
+}
+
+model Pipeline {
+  id       String         @id
+  typeId   String
+  type     WorkstreamType @relation(fields: [typeId], references: [id])
+  key      String         @unique
+  name     String
+  position Int
+  stages   Stage[]
+  projects Project[]
+
+  @@index([typeId])
+}
+
+model Stage {
+  id             String        @id
+  pipelineId     String
+  pipeline       Pipeline      @relation(fields: [pipelineId], references: [id])
+  name           String
+  position       Int
+  category       StageCategory
+  needsReason    Boolean       @default(false)
+  requiredFields String[]
+  projects       Project[]
+
+  @@index([pipelineId, position])
+}
+
+model DealDetails {
+  projectId          String    @id
+  project            Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  workspaceId        String
+  whyPursue          String
+  need               String?
+  serviceLine        String?
+  // Unknown stays null; it is never stored as zero.
+  value              Decimal?  @db.Decimal(16, 2)
+  currency           Currency?
+  probability        Int?
+  expectedClose      DateTime? @db.Date
+  introducedBy       String?
+  submissionDeadline DateTime? @db.Date
+  createdAt          DateTime  @default(now())
+
+  @@index([workspaceId])
+}
+
+model DealParty {
+  id             String       @id @default(cuid())
+  projectId      String
+  project        Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+  role           PartyRole
+  createdAt      DateTime     @default(now())
+
+  @@unique([projectId, organisationId, role])
+  @@index([organisationId])
+}
+
+model Organisation {
+  id          String         @id @default(cuid())
+  workspaceId String
+  workspace   Workspace      @relation(fields: [workspaceId], references: [id])
+  name        String
+  kind        String?
+  country     String?
+  level       OrgLevel?
+  parentId    String?
+  parent      Organisation?  @relation("OrgTree", fields: [parentId], references: [id])
+  children    Organisation[] @relation("OrgTree")
+  createdById String
+  archivedAt  DateTime?
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+  contacts    Contact[]
+  parties     DealParty[]
+  notes       Note[]
+  links       TaskLink[]
+
+  @@index([workspaceId, name])
+  @@index([parentId])
+}
+
+model Contact {
+  id             String           @id @default(cuid())
+  workspaceId    String
+  workspace      Workspace        @relation(fields: [workspaceId], references: [id])
+  organisationId String
+  organisation   Organisation     @relation(fields: [organisationId], references: [id])
+  name           String
+  role           String?
+  email          String?
+  phone          String?
+  createdById    String
+  // Removal is a soft delete so Undo can restore it (30 days, via the action log).
+  removedAt      DateTime?
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+  knownBy        ContactKnownBy[]
+  noteLinks      NoteContact[]
+  links          TaskLink[]
+
+  @@index([organisationId])
+  @@index([workspaceId])
+}
+
+model ContactKnownBy {
+  contactId String
+  contact   Contact @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  userId    String
+
+  @@id([contactId, userId])
+}
+
+model Note {
+  id             String        @id @default(cuid())
+  workspaceId    String
+  workspace      Workspace     @relation(fields: [workspaceId], references: [id])
+  organisationId String
+  organisation   Organisation  @relation(fields: [organisationId], references: [id])
+  // Optional deal; only deal members (and Admins) see a note with a deal.
+  projectId      String?
+  project        Project?      @relation(fields: [projectId], references: [id])
+  kind           NoteKind
+  date           DateTime      @db.Date
+  text           String
+  authorId       String
+  removedAt      DateTime?
+  createdAt      DateTime      @default(now())
+  contacts       NoteContact[]
+
+  @@index([organisationId, date])
+  @@index([projectId])
+}
+
+model NoteContact {
+  noteId    String
+  note      Note    @relation(fields: [noteId], references: [id], onDelete: Cascade)
+  contactId String
+  contact   Contact @relation(fields: [contactId], references: [id])
+
+  @@id([noteId, contactId])
+}
+
+// A task points at one organisation or one contact (exactly one; enforced in SQL).
+model TaskLink {
+  id             String        @id @default(cuid())
+  taskId         String
+  task           Task          @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  organisationId String?
+  organisation   Organisation? @relation(fields: [organisationId], references: [id])
+  contactId      String?
+  contact        Contact?      @relation(fields: [contactId], references: [id])
+  createdAt      DateTime      @default(now())
+
+  @@index([taskId])
+  @@index([organisationId])
+  @@index([contactId])
 }

@@ -48,8 +48,9 @@ export async function logAction(
   tx: Tx,
   o: {
     actorId: string;
-    projectId: string;
-    targetType: "task" | "project" | "section" | "member";
+    /** Null for CRM records that belong to no project (organisations, contacts, notes). */
+    projectId: string | null;
+    targetType: "task" | "project" | "section" | "member" | "deal" | "organisation" | "contact" | "note";
     targetId: string;
     action: string;
     before?: unknown;
@@ -65,7 +66,7 @@ export async function logAction(
     data: {
       actorId: o.actorId,
       channel,
-      projectId: o.projectId,
+      projectId: o.projectId ?? null,
       targetType: o.targetType,
       targetId: o.targetId,
       action: o.action,
@@ -101,6 +102,11 @@ const AUDITED: Record<string, string> = {
   "task.restored": "TASK_RESTORED",
   "task.approver_changed": "APPROVER_CHANGED",
   "tasks.approver_reassigned": "APPROVER_CHANGED",
+  "organisation.parent_changed": "ORGANISATION_PARENT_CHANGED",
+  "organisation.archived": "ORGANISATION_ARCHIVED",
+  "organisation.unarchived": "ORGANISATION_UNARCHIVED",
+  "deal.created": "DEAL_CREATED",
+  "deal.converted": "DEAL_CONVERTED",
 };
 
 export async function auditTx(tx: Tx, event: string, o: { actorId?: string | null; targetId?: string; targetType?: string; data?: Record<string, unknown> }) {
