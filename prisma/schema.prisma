@@ -1,6 +1,8 @@
-// Layer 1 data model.
-// Every row carries workspaceId so multi-team isolation can be enforced later
-// without a migration. Nothing enforces it yet (by design).
+// Sheet Happens Officer data model, v2 (approved 17 Oct 2026, spec section 4).
+// Replaces the Layer 1 model in one clean initial migration.
+// Workspace is kept from Layer 1; User, Project and Task still carry workspaceId.
+// Rules Prisma cannot express (one Leader per project, at most 8 Sections,
+// one done Section) are enforced in the migration SQL.
 
 generator client {
   provider = "prisma-client"
@@ -12,11 +14,16 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-enum TaskStatus {
-  TODO
-  IN_PROGRESS
-  BLOCKED
-  DONE
+enum OrgRole {
+  MEMBER
+  ADMIN
+  SUPER_ADMIN
+}
+
+enum ProjectRole {
+  VIEWER
+  EDITOR
+  LEADER
 }
 
 enum TaskPriority {
@@ -24,6 +31,21 @@ enum TaskPriority {
   MEDIUM
   HIGH
   URGENT
+}
+
+enum AuthTokenType {
+  VERIFY
+  RESET
+}
+
+enum ActionChannel {
+  SCREEN
+  CONCIERGE
+}
+
+enum ChatRole {
+  USER
+  ASSISTANT
 }
 
 model Workspace {
@@ -36,68 +58,269 @@ model Workspace {
 }
 
 model User {
-  id          String       @id @default(cuid())
-  workspaceId String
-  workspace   Workspace    @relation(fields: [workspaceId], references: [id])
-  email       String       @unique
-  name        String
-  createdAt   DateTime     @default(now())
-  assignments TaskAssignee[]
-  createdTasks Task[]      @relation("TaskCreator")
+  id                 String    @id @default(cuid())
+  workspaceId        String
+  workspace          Workspace @relation(fields: [workspaceId], references: [id])
+  email              String    @unique
+  name               String
+  passwordHash       String
+  emailVerifiedAt    DateTime?
+  orgRole            OrgRole   @default(MEMBER)
+  deactivatedAt      DateTime?
+  conciergeHidden    Boolean   @default(false)
+  voiceNoticeAckedAt DateTime?
+  createdAt          DateTime  @default(now())
+
+  memberships         ProjectMember[]
+  assignedTasks       Task[]             @relation("TaskAssignee")
+  approvingTasks      Task[]             @relation("TaskApprover")
+  previouslyAssigned  Task[]             @relation("TaskPreviousAssignee")
+  createdTasks        Task[]             @relation("TaskCreator")
+  deletedTasks        Task[]             @relation("TaskDeleter")
+  collaborations      TaskCollaborator[]
+  sessions            Session[]
+  authTokens          AuthToken[]
+  notifications       Notification[]     @relation("NotificationRecipient")
+  notificationsCaused Notification[]     @relation("NotificationActor")
+  actionLogs          ActionLog[]        @relation("ActionActor")
+  actionsUndone       ActionLog[]        @relation("ActionUndoneBy")
+  auditLogs           AuditLog[]
+  chatMessages        ChatMessage[]
+  modelUsage          ModelUsage[]
 
   @@index([workspaceId])
+}
+
+model Session {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String    @unique
+  // Fixed 30 days from sign-in; not extended by use.
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model AuthToken {
+  id        String        @id @default(cuid())
+  userId    String
+  user      User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      AuthTokenType
+  tokenHash String        @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime      @default(now())
+
+  @@index([userId, type])
+}
+
+// Supports the 5-failures-in-15-minutes lockout and sign-in / reset rate limits.
+model LoginAttempt {
+  id        String   @id @default(cuid())
+  email     String
+  success   Boolean
+  createdAt DateTime @default(now())
+
+  @@index([email, createdAt])
 }
 
 model Project {
-  id          String    @id @default(cuid())
+  id          String          @id @default(cuid())
   workspaceId String
-  workspace   Workspace @relation(fields: [workspaceId], references: [id])
+  workspace   Workspace       @relation(fields: [workspaceId], references: [id])
   name        String
   description String?
   archivedAt  DateTime?
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+  members     ProjectMember[]
+  sections    Section[]
   tasks       Task[]
+  actionLogs  ActionLog[]
 
   @@index([workspaceId])
+}
+
+model ProjectMember {
+  projectId String
+  project   Project     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role      ProjectRole
+  createdAt DateTime    @default(now())
+
+  @@id([projectId, userId])
+  @@index([userId])
+}
+
+// A project's board column. At most 8 per project; at most one is the done Section.
+model Section {
+  id        String   @id @default(cuid())
+  projectId String
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  name      String
+  position  Int
+  isDone    Boolean  @default(false)
+  createdAt DateTime @default(now())
+  tasks     Task[]
+
+  @@index([projectId, position])
 }
 
 model Task {
-  id          String         @id @default(cuid())
-  workspaceId String
-  workspace   Workspace      @relation(fields: [workspaceId], references: [id])
-  projectId   String
-  project     Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  parentId    String?
-  parent      Task?          @relation("Subtasks", fields: [parentId], references: [id], onDelete: Cascade)
-  subtasks    Task[]         @relation("Subtasks")
-  title       String
-  description String?
-  status      TaskStatus     @default(TODO)
-  priority    TaskPriority   @default(MEDIUM)
-  dueDate     DateTime?
-  // Float position lets us reorder within a column without rewriting every row.
-  position    Float          @default(0)
-  createdById String
-  createdBy   User           @relation("TaskCreator", fields: [createdById], references: [id])
-  completedAt DateTime?
-  createdAt   DateTime       @default(now())
-  updatedAt   DateTime       @updatedAt
-  assignees   TaskAssignee[]
+  id                 String             @id @default(cuid())
+  workspaceId        String
+  workspace          Workspace          @relation(fields: [workspaceId], references: [id])
+  projectId          String
+  project            Project            @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  sectionId          String
+  section            Section            @relation(fields: [sectionId], references: [id])
+  parentId           String?
+  parent             Task?              @relation("Subtasks", fields: [parentId], references: [id], onDelete: Cascade)
+  subtasks           Task[]             @relation("Subtasks")
+  title              String
+  description        String?
+  priority           TaskPriority       @default(MEDIUM)
+  blocked            Boolean            @default(false)
+  dueDate            DateTime?
+  // Float position lets us reorder within a Section without rewriting every row.
+  position           Float              @default(0)
+  assigneeId         String
+  assignee           User               @relation("TaskAssignee", fields: [assigneeId], references: [id])
+  approverId         String?
+  approver           User?              @relation("TaskApprover", fields: [approverId], references: [id])
+  previousAssigneeId String?
+  previousAssignee   User?              @relation("TaskPreviousAssignee", fields: [previousAssigneeId], references: [id])
+  createdById        String
+  createdBy          User               @relation("TaskCreator", fields: [createdById], references: [id])
+  // Soft delete: Trash for 30 days, then purged by the scheduled job.
+  deletedAt          DateTime?
+  deletedById        String?
+  deletedBy          User?              @relation("TaskDeleter", fields: [deletedById], references: [id])
+  completedAt        DateTime?
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+  collaborators      TaskCollaborator[]
 
   @@index([workspaceId])
-  @@index([projectId, status, position])
+  @@index([projectId, sectionId, position])
   @@index([parentId])
   @@index([dueDate])
+  @@index([assigneeId])
+  @@index([approverId])
+  @@index([deletedAt])
 }
 
-model TaskAssignee {
-  taskId     String
-  task       Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
-  userId     String
-  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  assignedAt DateTime @default(now())
+model TaskCollaborator {
+  taskId    String
+  task      Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
 
   @@id([taskId, userId])
   @@index([userId])
+}
+
+// In-app bell. Removed after 90 days.
+model Notification {
+  id          String    @id @default(cuid())
+  recipientId String
+  recipient   User      @relation("NotificationRecipient", fields: [recipientId], references: [id], onDelete: Cascade)
+  actorId     String?
+  actor       User?     @relation("NotificationActor", fields: [actorId], references: [id])
+  type        String
+  // Plain ids, no foreign keys: a notice can outlive a purged task.
+  taskId      String?
+  projectId   String?
+  data        Json?
+  readAt      DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@index([recipientId, createdAt])
+  @@index([createdAt])
+}
+
+// Project action log. Kept 12 months; Undo works for 30 days.
+model ActionLog {
+  id          String        @id @default(cuid())
+  actorId     String
+  actor       User          @relation("ActionActor", fields: [actorId], references: [id])
+  channel     ActionChannel
+  projectId   String?
+  project     Project?      @relation(fields: [projectId], references: [id])
+  // Plain ids, no foreign keys: the log outlives purged tasks.
+  targetType  String
+  targetId    String
+  action      String
+  beforeState Json?
+  afterState  Json?
+  undoneAt    DateTime?
+  undoneById  String?
+  undoneBy    User?         @relation("ActionUndoneBy", fields: [undoneById], references: [id])
+  createdAt   DateTime      @default(now())
+
+  @@index([projectId, createdAt])
+  @@index([actorId, createdAt])
+  @@index([createdAt])
+}
+
+// Organisation audit log. Super Admin only; kept 12 months.
+// Never holds passwords, tokens or chat text. ip is set for sign-in events only.
+model AuditLog {
+  id         String         @id @default(cuid())
+  actorId    String?
+  actor      User?          @relation(fields: [actorId], references: [id])
+  event      String
+  targetType String?
+  targetId   String?
+  channel    ActionChannel?
+  ip         String?
+  data       Json?
+  createdAt  DateTime       @default(now())
+
+  @@index([createdAt])
+  @@index([actorId, createdAt])
+  @@index([event, createdAt])
+}
+
+// Concierge thread, one per user. Deleted after 90 days or on "Clear my chat".
+model ChatMessage {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role      ChatRole
+  content   String
+  createdAt DateTime @default(now())
+
+  @@index([userId, createdAt])
+  @@index([createdAt])
+}
+
+// One row per model call; drives the monthly ceiling and the weekly per-person cap.
+model ModelUsage {
+  id           String   @id @default(cuid())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id])
+  model        String
+  inputTokens  Int
+  outputTokens Int
+  costUsd      Decimal  @db.Decimal(12, 6)
+  createdAt    DateTime @default(now())
+
+  @@index([userId, createdAt])
+  @@index([createdAt])
+}
+
+// Last-run record per scheduled job (visible to the Super Admin).
+model JobRun {
+  job            String    @id
+  lastStartedAt  DateTime?
+  lastFinishedAt DateTime?
+  lastStatus     String?
+  lastError      String?
 }
