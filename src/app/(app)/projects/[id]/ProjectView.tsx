@@ -1,13 +1,15 @@
 "use client";
 import { finePointer } from "@/components/client";
 import Link from "next/link";
-import { use, useCallback, useState } from "react";
+import { use, useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Suspense } from "react";
 import { PRIORITY, ROLE, api, dueLabel, dueState, rowKeys, initials, isNetworkFailure, isOverdue, useGet } from "@/components/api";
 import { TaskModal } from "@/components/TaskModal";
 import { Tick } from "@/components/TaskParts";
 import { Confirm, Field, LoadFailed, Menu, Modal } from "@/components/ui";
+import { MoveSheet } from "@/components/MoveSheet";
+import "@/components/board.css";
 import { DealPanel, type DealBlock } from "@/components/DealPanel";
 import { Page, useMe } from "../../Shell";
 
@@ -22,6 +24,13 @@ type Proj = {
   members: { userId: string; name: string; role: string; active: boolean }[];
 };
 const MAX_SECTIONS = 8;
+// SHO-US-10.6 AC6: dragging is for devices with a mouse. On a touch screen it would fight scrolling, so Move to… is used.
+const MOUSE = "(hover: hover) and (pointer: fine)";
+const useMouse = () => useSyncExternalStore(
+  (cb) => { const m = window.matchMedia(MOUSE); m.addEventListener("change", cb); return () => m.removeEventListener("change", cb); },
+  () => window.matchMedia(MOUSE).matches,
+  () => false,
+);
 
 function Inner({ id }: { id: string }) {
   const me = useMe();
@@ -39,6 +48,29 @@ function Inner({ id }: { id: string }) {
   const [dragId, setDragId] = useState<string | null>(null);
   const [overCol, setOverCol] = useState<string | null>(null);
   const [ask, setAsk] = useState<null | { taskId: string; sectionId: string; n: number }>(null);
+  const [moving, setMoving] = useState<T | null>(null); // task whose Move to… sheet is open
+  const [cur, setCur] = useState(0); // column in view on a phone
+  const mouse = useMouse();
+  const boardEl = useRef<HTMLDivElement>(null);
+  const raf = useRef(0);
+  useEffect(() => () => cancelAnimationFrame(raf.current), []);
+  const onBoardScroll = () => {
+    cancelAnimationFrame(raf.current);
+    raf.current = requestAnimationFrame(() => {
+      const b = boardEl.current; if (!b) return;
+      const cols = Array.from(b.querySelectorAll<HTMLElement>(":scope > .col"));
+      const x = b.scrollLeft + 1; let at = 0;
+      cols.forEach((c, i) => { if (c.offsetLeft - b.offsetLeft <= x + 40) at = i; });
+      if (b.scrollLeft + b.clientWidth >= b.scrollWidth - 2) at = cols.length - 1;
+      setCur(at);
+    });
+  };
+  const jump = (i: number) => {
+    const b = boardEl.current; const c = b?.querySelectorAll<HTMLElement>(":scope > .col")[i];
+    if (!b || !c) return;
+    setCur(i);
+    b.scrollTo({ left: c.offsetLeft - b.offsetLeft, behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+  };
 
   const refresh = useCallback(() => { pr.reload(); tk.reload(); setExtra({}); }, [pr, tk]);
 
@@ -147,7 +179,11 @@ function Inner({ id }: { id: string }) {
       })}
 
       {secs && view === "board" && (
-        <div className="board">
+        <>
+        <div className="bswitch" role="tablist" aria-label="Board columns">
+          {secs.map((s, i) => <button key={s.id} role="tab" aria-selected={cur === i} onClick={() => jump(i)}>{s.name}<b>{s.total}</b></button>)}
+        </div>
+        <div className="board" ref={boardEl} onScroll={onBoardScroll}>
           {secs.map((s) => (
             <div key={s.id} className={`col${overCol === s.id ? " over" : ""}`} aria-label={s.name}
               onDragOver={(e) => { if (dragId && canWrite && canDrop(dragId, s)) { e.preventDefault(); setOverCol(s.id); } }}
@@ -157,7 +193,7 @@ function Inner({ id }: { id: string }) {
                 {manage && <SectionMenu s={s} secs={secs} projectId={id} onDialog={(kind) => setDialog({ kind, s })} onDone={refresh} onErr={setErr} />}
               </h4>
               {tasksOf(s).map((t) => (
-                <div key={t.id} className="bcard" draggable={canWrite} onDragStart={() => setDragId(t.id)} onDragEnd={() => { setDragId(null); setOverCol(null); }}
+                <div key={t.id} className="bcard" draggable={canWrite && mouse} onDragStart={() => setDragId(t.id)} onDragEnd={() => { setDragId(null); setOverCol(null); }}
                   onClick={() => openTask(t.id)} tabIndex={0} onKeyDown={(e) => { if (e.key === "Enter") openTask(t.id); }}>
                   <div>{t.title}</div>
                   <div className="row2">
@@ -173,10 +209,8 @@ function Inner({ id }: { id: string }) {
                     </span>
                   </div>
                   {canWrite && (
-                    <select className="in" aria-label={`Move "${t.title}" to`} style={{ marginTop: 8, padding: "3px 6px", fontSize: 12 }} value={s.id}
-                      onClick={(e) => e.stopPropagation()} onChange={(e) => moveTo(t.id, e.target.value)}>
-                      {secs.filter((x) => !x.isDone || t.canClose || x.id === s.id).map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
-                    </select>
+                    <button className="btn ghost sm bmove" aria-label={`Move "${t.title}" to…`} aria-haspopup="dialog"
+                      onClick={(e) => { e.stopPropagation(); setMoving(t); }}>Move to…</button>
                   )}
                 </div>
               ))}
@@ -189,6 +223,13 @@ function Inner({ id }: { id: string }) {
             </div>
           ))}
         </div>
+        </>
+      )}
+      {moving && secs && (
+        <MoveSheet title={`Move to… ${moving.title.length > 60 ? moving.title.slice(0, 57) + "…" : moving.title}`}
+          options={secs.filter((x) => !x.isDone || moving.canClose || x.id === moving.sectionId).map((x) => ({ id: x.id, name: x.name, current: x.id === moving.sectionId }))}
+          onClose={() => setMoving(null)}
+          onPick={(sid) => { const t = moving; setMoving(null); void moveTo(t.id, sid); }} />
       )}
       {secs && manage && (
         <div style={{ marginTop: 16 }}>
