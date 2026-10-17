@@ -101,8 +101,8 @@ const AUDITED: Record<string, string> = {
   "tasks.approver_reassigned": "APPROVER_CHANGED",
 };
 
-export async function auditTx(tx: Tx, event: string, o: { actorId?: string | null; targetId?: string; data?: Record<string, unknown> }) {
+export async function auditTx(tx: Tx, event: string, o: { actorId?: string | null; targetId?: string; targetType?: string; data?: Record<string, unknown> }) {
   await tx.auditLog.create({
-    data: { event, actorId: o.actorId ?? null, targetType: o.targetId ? "user" : null, targetId: o.targetId, channel: "SCREEN", data: o.data as Json | undefined },
+    data: { event, actorId: o.actorId ?? null, targetType: o.targetId ? o.targetType ?? "user" : null, targetId: o.targetId, channel: "SCREEN", data: o.data as Json | undefined },
   });
 }

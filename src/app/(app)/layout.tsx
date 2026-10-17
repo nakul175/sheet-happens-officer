@@ -2,6 +2,7 @@ import { Suspense } from "react";
 import { redirect } from "next/navigation";
 import { currentUser, publicUser } from "@/lib/auth";
 import { Shell, type Me } from "./Shell";
+import { UndoHost } from "@/components/UndoHost";
 import "./app.css";
 
 async function Gate({ children }: { children: React.ReactNode }) {
@@ -11,7 +12,7 @@ async function Gate({ children }: { children: React.ReactNode }) {
   } catch {
     redirect("/signin");
   }
-  return <Shell user={publicUser(user) as Me}>{children}</Shell>;
+  return <><Shell user={publicUser(user) as Me}>{children}</Shell><UndoHost /></>;
 }
 
 export default function AppLayout({ children }: LayoutProps<"/">) {

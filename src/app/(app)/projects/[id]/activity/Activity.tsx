@@ -1,16 +1,24 @@
 "use client";
 import Link from "next/link";
-import { use, useState } from "react";
+import { use, useEffect, useState } from "react";
 import { ago, api, useGet } from "@/components/api";
+import { requestUndo } from "@/components/UndoHost";
 import { Page } from "../../../Shell";
 
-type Row = { id: string; at: string; who: string; via: string; what: string; change: string | null };
+type Row = { id: string; at: string; who: string; via: string; what: string; change: string | null; undo: "available" | "undone" | "too_old" | "none" };
 
 export default function Activity({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const a = useGet<{ items: Row[]; nextCursor: string | null }>(`/api/projects/${id}/activity`);
   const [more, setMore] = useState<Row[]>([]);
   const [cursor, setCursor] = useState<string | null | undefined>(undefined);
+  const { reload } = a;
+  useEffect(() => {
+    // After an Undo, refresh this list instead of reloading the page.
+    const done = (e: Event) => { e.preventDefault(); setMore([]); setCursor(undefined); reload(); };
+    window.addEventListener("sho:undone", done);
+    return () => window.removeEventListener("sho:undone", done);
+  }, [reload]);
   if (a.status === 403 || a.status === 404) {
     return <Page title="Activity"><div className="card empty">{a.status === 403 ? "Only the project Leader and Admins can see Activity." : "This project isn't available."}<br /><Link href={`/projects/${id}`}>Back to the project</Link></div></Page>;
   }
@@ -22,7 +30,7 @@ export default function Activity({ params }: { params: Promise<{ id: string }> }
       {!!rows.length && (
         <div className="scroll">
           <table className="tbl stack">
-            <thead><tr><th>When</th><th>Who</th><th>What</th><th>How</th></tr></thead>
+            <thead><tr><th>When</th><th>Who</th><th>What</th><th>How</th><th></th></tr></thead>
             <tbody>
               {rows.map((r) => (
                 <tr key={r.id}>
@@ -30,6 +38,11 @@ export default function Activity({ params }: { params: Promise<{ id: string }> }
                   <td>{r.who}</td>
                   <td>{r.what}{r.change && <div className="hint">{r.change}</div>}</td>
                   <td>{r.via === "concierge" ? <span className="chip gold">via concierge</span> : "on screen"}</td>
+                  <td>
+                    {r.undo === "available" && <button className="btn ghost sm" onClick={() => requestUndo(r.id)}>Undo</button>}
+                    {r.undo === "too_old" && <span className="hint" title="Undo works for 30 days">Too old to undo</span>}
+                    {r.undo === "undone" && <span className="hint">Undone</span>}
+                  </td>
                 </tr>
               ))}
             </tbody>

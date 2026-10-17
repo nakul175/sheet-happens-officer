@@ -396,12 +396,13 @@ export async function moveTask(user: Actor, id: string, sectionId: string, compl
 }
 
 // ---------------------------------------------------------------- delete, restore, trash (6.1, 6.2)
-export async function deleteTask(user: Actor, id: string) {
+export async function deleteTask(user: Actor, id: string, o: { byUndo?: boolean } = {}) {
   const { t } = await loadTask(user, id, { write: true });
   await db.$transaction(async (tx) => {
     const now = new Date();
     await tx.task.updateMany({ where: { OR: [{ id }, { parentId: id }], deletedAt: null }, data: { deletedAt: now, deletedById: user.id } });
     const leader = await leaderId(tx, t.projectId);
+    if (o.byUndo) return; // Undo logs its own row and sends no notice
     await notify(tx, [leader, t.assigneeId, t.approverId, ...t.collaborators.map((c) => c.user.id)], "TASK_DELETED", {
       actorId: user.id, taskId: id, projectId: t.projectId, data: { title: t.title },
     });
