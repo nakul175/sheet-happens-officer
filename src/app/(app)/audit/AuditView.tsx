@@ -3,7 +3,7 @@ import { useState } from "react";
 import { ago, api, useGet } from "@/components/api";
 import { Page, useMe } from "../Shell";
 
-type Row = { id: string; at: string; who: string | null; email: string | null; event: string; ip: string | null; target: string | null };
+type Row = { id: string; at: string; who: string | null; email: string | null; event: string; ip: string | null; channel: string; target: string | null };
 type Res = { events: string[]; items: Row[]; nextCursor: string | null };
 type JobRow = { job: string; about: string; lastFinishedAt: string | null; lastStatus: string | null; lastError: string | null };
 
@@ -50,7 +50,7 @@ export default function AuditView() {
       {!!rows.length && (
         <div className="scroll">
           <table className="tbl stack">
-            <thead><tr><th>When (IST)</th><th>Who</th><th>Event</th><th>IP</th><th>Target</th></tr></thead>
+            <thead><tr><th>When (IST)</th><th>Who</th><th>Event</th><th>IP</th><th>How</th><th>Target</th></tr></thead>
             <tbody>
               {rows.map((r) => (
                 <tr key={r.id}>
@@ -58,6 +58,7 @@ export default function AuditView() {
                   <td>{r.who ?? "—"}{r.email && <div className="hint">{r.email}</div>}</td>
                   <td><span className="chip">{r.event}</span></td>
                   <td>{r.ip ?? ""}</td>
+                  <td>{r.channel === "Concierge" ? <span className="chip gold">via concierge</span> : "on screen"}</td>
                   <td className="hint">{r.target ?? ""}</td>
                 </tr>
               ))}

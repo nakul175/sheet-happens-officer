@@ -34,7 +34,7 @@ export async function setOrgRole(actor: Actor, targetId: string, role: "MEMBER" 
   await db.$transaction(async (tx) => {
     await tx.user.update({ where: { id: targetId }, data: { orgRole: role } });
     await notify(tx, [targetId], "ORG_ROLE_CHANGED", { actorId: actor.id, data: { role } });
-    await auditTx(tx, "ORG_ROLE_CHANGED", { actorId: actor.id, targetId, data: { role } });
+    await auditTx(tx, role === "ADMIN" ? "ADMIN_PROMOTED" : "ADMIN_DEMOTED", { actorId: actor.id, targetId, data: { role } });
   });
   return { ...target, orgRole: role };
 }
@@ -78,7 +78,6 @@ export async function deactivate(actor: Actor, targetId: string, reassign: strin
       }
       const r = await releasePerson(tx, { projectId: m.projectId, userId: targetId, newAssigneeId: newAssignee, actorId: actor.id });
       moved += r.moved;
-      if (r.moved && newAssignee !== leader) await notify(tx, [leader], "TASKS_REASSIGNED_SUMMARY", { actorId: actor.id, projectId: m.projectId, data: { count: r.moved, fromUserId: targetId } });
     }
     await tx.user.update({ where: { id: targetId }, data: { deactivatedAt: new Date() } });
     await tx.session.updateMany({ where: { userId: targetId, revokedAt: null }, data: { revokedAt: new Date() } });

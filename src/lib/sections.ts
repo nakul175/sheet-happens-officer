@@ -19,7 +19,7 @@ export async function addSection(user: Actor, projectId: string, name: string) {
   if (existing >= MAX_SECTIONS) throw new ApiError(409, "A project can have up to 8 sections.");
   return db.$transaction(async (tx) => {
     const s = await tx.section.create({ data: { projectId, name, position: existing } });
-    await logAction(tx, { actorId: user.id, projectId, targetType: "section", targetId: s.id, action: "section.added", after: { name } });
+    await logAction(tx, { actorId: user.id, projectId, targetType: "section", targetId: s.id, action: "section.added", after: { name, position: existing } });
     return s;
   });
 }
@@ -49,7 +49,7 @@ export async function updateSection(
       if (j >= 0 && j < all.length) {
         [all[i], all[j]] = [all[j], all[i]];
         for (const [pos, sec] of all.entries()) await tx.section.update({ where: { id: sec.id }, data: { position: pos } });
-        await logAction(tx, { actorId: user.id, projectId, targetType: "section", targetId: s.id, action: "section.moved", after: { move: input.move } });
+        await logAction(tx, { actorId: user.id, projectId, targetType: "section", targetId: s.id, action: "section.moved", before: { position: i }, after: { move: input.move, position: j } });
       }
     }
     if (input.isDone && !s.isDone) {
@@ -57,13 +57,16 @@ export async function updateSection(
       const open = await tx.task.findMany({ where: { sectionId: s.id, completedAt: null, deletedAt: null, approverId: { not: null }, parentId: null } });
       if (open.length) throw new ApiError(409, "Tasks waiting on an approver are in that section; close or move them first.");
       const old = await tx.section.findFirst({ where: { projectId, isDone: true } });
+      let reopened: string[] = [];
       if (old) {
+        reopened = (await tx.task.findMany({ where: { sectionId: old.id, parentId: null, completedAt: { not: null } }, select: { id: true } })).map((x) => x.id);
         await tx.section.update({ where: { id: old.id }, data: { isDone: false } });
         await tx.task.updateMany({ where: { sectionId: old.id, parentId: null }, data: { completedAt: null } });
       }
+      const completed = (await tx.task.findMany({ where: { sectionId: s.id, parentId: null, completedAt: null, deletedAt: null }, select: { id: true } })).map((x) => x.id);
       await tx.section.update({ where: { id: s.id }, data: { isDone: true } });
       await tx.task.updateMany({ where: { sectionId: s.id, parentId: null, completedAt: null, deletedAt: null }, data: { completedAt: new Date() } });
-      await logAction(tx, { actorId: user.id, projectId, targetType: "section", targetId: s.id, action: "section.done_changed", before: { doneSectionId: old?.id }, after: { doneSectionId: s.id } });
+      await logAction(tx, { actorId: user.id, projectId, targetType: "section", targetId: s.id, action: "section.done_changed", before: { doneSectionId: old?.id ?? null, reopenedTaskIds: reopened.slice(0, 200) }, after: { doneSectionId: s.id, completedTaskIds: completed.slice(0, 200), reopened: reopened.length, completed: completed.length } });
     }
   });
 }
@@ -82,8 +85,16 @@ export async function deleteSection(user: Actor, projectId: string, sectionId: s
     if (dest.isDone && tasks.some((t) => t.approverId && !t.completedAt && !t.deletedAt && !t.parentId)) {
       throw new ApiError(409, "Some tasks wait on an approver. Choose a section that is not the done section.");
     }
+    const closing = dest.isDone ? tasks.filter((t) => !t.parentId && !t.completedAt && !t.deletedAt) : [];
     await tx.task.updateMany({ where: { sectionId }, data: { sectionId: dest.id } });
     if (dest.isDone) await tx.task.updateMany({ where: { sectionId: dest.id, parentId: null, completedAt: null, deletedAt: null }, data: { completedAt: new Date() } });
+    // One row per task that moved (and per task that closed because of it), so the log shows every write.
+    for (const t of tasks.filter((x) => !x.parentId)) {
+      await logAction(tx, { actorId: user.id, projectId, targetType: "task", targetId: t.id, action: "task.moved", before: { sectionId }, after: { sectionId: dest.id, viaSectionDelete: true }, primary: false });
+    }
+    for (const t of closing) {
+      await logAction(tx, { actorId: user.id, projectId, targetType: "task", targetId: t.id, action: "task.completed", before: { completedAt: null }, after: { completedAt: new Date().toISOString(), viaSectionDelete: true }, primary: false });
+    }
     await tx.section.delete({ where: { id: sectionId } });
     const rest = await tx.section.findMany({ where: { projectId }, orderBy: { position: "asc" } });
     for (const [pos, sec] of rest.entries()) await tx.section.update({ where: { id: sec.id }, data: { position: pos } });

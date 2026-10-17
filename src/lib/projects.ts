@@ -4,7 +4,7 @@ import {
   activeMember, isActive, isAdmin, projectAccess, requireManage, type Access, type Actor, type Role,
 } from "@/lib/access";
 import { logAction, notify } from "@/lib/notify";
-import { openTaskCount, releasePerson, resolveHandover } from "@/lib/people";
+import { openTaskCount, releasePerson, resolveHandover, type Released } from "@/lib/people";
 
 const DEFAULT_SECTIONS = ["To do", "In progress", "Done"];
 
@@ -98,7 +98,7 @@ export async function archiveProject(user: Actor, projectId: string) {
     const open = await tx.task.findMany({ where: { projectId, deletedAt: null, completedAt: null }, select: { assigneeId: true } });
     await tx.project.update({ where: { id: projectId }, data: { archivedAt: new Date() } });
     await notify(tx, open.map((t) => t.assigneeId), "PROJECT_ARCHIVED", { actorId: user.id, projectId, data: { project: a.project.name } });
-    await logAction(tx, { actorId: user.id, projectId, targetType: "project", targetId: projectId, action: "project.archived" });
+    await logAction(tx, { actorId: user.id, projectId, targetType: "project", targetId: projectId, action: "project.archived", before: { archivedAt: null }, after: { archivedAt: new Date().toISOString(), openTasks: open.length } });
     return { openTasks: open.length };
   });
 }
@@ -109,7 +109,7 @@ export async function unarchiveProject(user: Actor, projectId: string) {
   if (!a.project.archivedAt) throw new ApiError(409, "This project is not archived.");
   await db.$transaction(async (tx) => {
     await tx.project.update({ where: { id: projectId }, data: { archivedAt: null } });
-    await logAction(tx, { actorId: user.id, projectId, targetType: "project", targetId: projectId, action: "project.unarchived" });
+    await logAction(tx, { actorId: user.id, projectId, targetType: "project", targetId: projectId, action: "project.unarchived", before: { archivedAt: a.project.archivedAt!.toISOString() }, after: { archivedAt: null } });
   });
 }
 
@@ -147,13 +147,14 @@ export async function changeMemberRole(user: Actor, projectId: string, userId: s
   if (m.role === role) return;
   const target = role === "VIEWER" ? await requireHandoverIfNeeded(a, userId, handoverTo) : null;
   await db.$transaction(async (tx) => {
+    let rel: Released | null = null;
     if (role === "VIEWER") {
       const leader = a.project.members.find((x) => x.role === "LEADER")!.userId;
-      await releasePerson(tx, { projectId, userId, newAssigneeId: target ?? leader, actorId: user.id, keepCollaborations: true });
+      rel = await releasePerson(tx, { projectId, userId, newAssigneeId: target ?? leader, actorId: user.id, keepCollaborations: true });
     }
     await tx.projectMember.update({ where: { projectId_userId: { projectId, userId } }, data: { role } });
-    await notify(tx, [userId], "PROJECT_ROLE_CHANGED", { actorId: user.id, projectId, data: { project: a.project.name, role } });
-    await logAction(tx, { actorId: user.id, projectId, targetType: "member", targetId: userId, action: "member.role_changed", before: { role: m.role }, after: { role } });
+    await notify(tx, [userId], "PROJECT_ROLE_CHANGED", { actorId: user.id, projectId, data: { project: a.project.name, role, ...(rel?.note ?? {}) } });
+    await logAction(tx, { actorId: user.id, projectId, targetType: "member", targetId: userId, action: "member.role_changed", before: { role: m.role }, after: { role, handedOver: rel?.moved ?? 0 } });
   });
 }
 
@@ -167,10 +168,10 @@ export async function removeMember(user: Actor, projectId: string, userId: strin
   const target = await requireHandoverIfNeeded(a, userId, handoverTo);
   await db.$transaction(async (tx) => {
     const leader = a.project.members.find((x) => x.role === "LEADER")!.userId;
-    await releasePerson(tx, { projectId, userId, newAssigneeId: target ?? leader, actorId: user.id });
+    const rel = await releasePerson(tx, { projectId, userId, newAssigneeId: target ?? leader, actorId: user.id });
     await tx.projectMember.delete({ where: { projectId_userId: { projectId, userId } } });
-    await notify(tx, [userId], "REMOVED_FROM_PROJECT", { actorId: user.id, projectId, data: { project: a.project.name } });
-    await logAction(tx, { actorId: user.id, projectId, targetType: "member", targetId: userId, action: "member.removed", before: { role: m.role } });
+    await notify(tx, [userId], "REMOVED_FROM_PROJECT", { actorId: user.id, projectId, data: { project: a.project.name, ...rel.note } });
+    await logAction(tx, { actorId: user.id, projectId, targetType: "member", targetId: userId, action: "member.removed", before: { role: m.role }, after: { removed: true, handedOver: rel.moved } });
   });
 }
 
@@ -200,18 +201,19 @@ export async function changeLeader(
     // Demote first so the one-Leader index is never violated, then promote.
     await tx.projectMember.update({ where: { projectId_userId: { projectId, userId: old.userId } }, data: { role: "EDITOR" } });
     await tx.projectMember.update({ where: { projectId_userId: { projectId, userId: input.newLeaderId } }, data: { role: "LEADER" } });
+    let rel: Released | null = null;
     if (input.previousRole === "VIEWER") {
-      await releasePerson(tx, { projectId, userId: old.userId, newAssigneeId: target ?? input.newLeaderId, actorId: user.id, keepCollaborations: true });
+      rel = await releasePerson(tx, { projectId, userId: old.userId, newAssigneeId: target ?? input.newLeaderId, actorId: user.id, keepCollaborations: true });
       await tx.projectMember.update({ where: { projectId_userId: { projectId, userId: old.userId } }, data: { role: "VIEWER" } });
     } else if (input.previousRole === "REMOVE") {
-      await releasePerson(tx, { projectId, userId: old.userId, newAssigneeId: target ?? input.newLeaderId, actorId: user.id });
+      rel = await releasePerson(tx, { projectId, userId: old.userId, newAssigneeId: target ?? input.newLeaderId, actorId: user.id });
       await tx.projectMember.delete({ where: { projectId_userId: { projectId, userId: old.userId } } });
     }
     await notify(tx, [input.newLeaderId], "MADE_LEADER", { actorId: user.id, projectId, data: { project: a.project.name } });
     await notify(tx, [old.userId], input.previousRole === "REMOVE" ? "REMOVED_FROM_PROJECT" : "PROJECT_ROLE_CHANGED", {
-      actorId: user.id, projectId, data: { project: a.project.name, role: input.previousRole },
+      actorId: user.id, projectId, data: { project: a.project.name, role: input.previousRole, ...(rel?.note ?? {}) },
     });
-    await logAction(tx, { actorId: user.id, projectId, targetType: "project", targetId: projectId, action: "project.leader_changed", before: { leaderId: old.userId }, after: { leaderId: input.newLeaderId, previousRole: input.previousRole } });
+    await logAction(tx, { actorId: user.id, projectId, targetType: "project", targetId: projectId, action: "project.leader_changed", before: { leaderId: old.userId }, after: { leaderId: input.newLeaderId, previousRole: input.previousRole, handedOver: rel?.moved ?? 0 } });
   });
 }
 

@@ -11,6 +11,10 @@ export async function api<T = Record<string, any>>(method: string, path: string,
       headers: body === undefined ? undefined : { "content-type": "application/json" },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
+    const undoId = res.headers.get("x-undo-id");
+    if (undoId && res.ok && typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("sho:undo", { detail: { id: undoId, label: res.headers.get("x-undo-label") ?? "Done", notified: res.headers.get("x-undo-notified") === "1" } }));
+    }
     const data = (res.headers.get("content-type")?.includes("json") ? await res.json() : {}) as any; // eslint-disable-line @typescript-eslint/no-explicit-any
     const error = res.ok ? undefined : data?.issues?.[0]?.message ?? data?.error ?? "Something went wrong. Try again.";
     if (res.status === 401 && typeof window !== "undefined") window.location.href = "/signin";

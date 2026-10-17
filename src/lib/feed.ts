@@ -5,12 +5,36 @@ import { db } from "@/lib/db";
 import { ApiError } from "@/lib/http";
 import { currentSessionId, deviceLabel, hashPassword, verifyPassword } from "@/lib/auth";
 import { projectAccess, requireManage, type Actor } from "@/lib/access";
+import { UNDO_DAYS, isUndoable } from "@/lib/undoable";
 import { passwordField } from "@/lib/schemas";
 
 const NOTE_DAYS = 90;
 const LOG_MONTHS = 12;
 
 type N = { type: string; actor: { name: string } | null; taskId: string | null; projectId: string | null; data: unknown };
+
+const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? "" : "s"}`;
+
+/** Tail for a person who lost access: tasks named when few, counted when 5 or more (SHO-US-7.2 AC3). */
+function leftNote(d: Record<string, unknown>) {
+  const count = Number(d.handedOverCount ?? 0);
+  const titles = Array.isArray(d.handedOver) ? (d.handedOver as string[]) : [];
+  const dropped = Number(d.droppedCount ?? 0);
+  const parts: string[] = [];
+  if (count) parts.push(titles.length ? `Your open ${count === 1 ? "task" : "tasks"} ${titles.map((x) => `"${x}"`).join(", ")} ${count === 1 ? "was" : "were"} handed to someone else.` : `${plural(count, "open task")} of yours were handed to someone else.`);
+  if (dropped) parts.push(`You were taken off ${plural(dropped, "task")} as a collaborator.`);
+  return parts.length ? " " + parts.join(" ") : "";
+}
+
+function handoverText(who: string, d: Record<string, unknown>, p: string) {
+  const from = String(d.fromName ?? "A person");
+  const bits: string[] = [];
+  const moved = Number(d.moved ?? 0), approver = Number(d.approver ?? 0), cleared = Number(d.cleared ?? 0);
+  if (moved) bits.push(d.toYou ? `${plural(moved, "open task")} ${moved === 1 ? "is" : "are"} now yours` : `${plural(moved, "open task")} went to ${String(d.to ?? "someone else")}`);
+  if (approver) bits.push(`you now approve ${plural(approver, "task")} that ${from} used to approve`);
+  if (cleared) bits.push(`${plural(cleared, "task")} no longer ${cleared === 1 ? "has" : "have"} an approver`);
+  return `${who} handed over ${from}'s work in ${p}: ${bits.join("; ")}.`;
+}
 
 /** Text and link for one notice. Wording is plain and says who did what. */
 export function noticeText(n: N) {
@@ -28,14 +52,18 @@ export function noticeText(n: N) {
     APPROVER_NAMED: `${who} named you the approver of ${t}.`,
     SENT_FOR_APPROVAL: `${who} sent ${t} to you for approval.`,
     SENT_BACK: `${who} sent ${t} back to you.`,
-    TASK_BLOCKED: `${who} marked ${t} as blocked.`,
+    TASK_BLOCKED: `${who} marked ${t} as blocked${d.reason ? `: ${d.reason}` : ""}.`,
     TASK_DELETED: `${who} moved ${t} to Trash.`,
+    REMOVED_AS_ASSIGNEE: `${who} took ${t} off you; someone else now holds it.`,
+    APPROVER_CLEARED: `${t} no longer has an approver, because the approver is not on the project any more.`,
+    CHANGE_OVERRIDDEN: `${who} undid their own change and replaced your change to ${t}${d.fields ? ` (${d.fields})` : ""}.`,
+    TASKS_HANDED_OVER: handoverText(who, d, p),
     RESTORED_TO_LEADER: `${t} was restored to you because its owner is no longer on the project.`,
     MADE_LEADER: `${who} made you Leader of ${p}.`,
     PROJECT_ARCHIVED: `${who} archived ${p}. It is now read-only.`,
     ADDED_TO_PROJECT: `${who} added you to ${p} as ${String(d.role ?? "Editor").toLowerCase()}.`,
-    PROJECT_ROLE_CHANGED: `${who} changed your role in ${p} to ${String(d.role ?? "").toLowerCase()}.`,
-    REMOVED_FROM_PROJECT: `${who} removed you from ${p}.`,
+    PROJECT_ROLE_CHANGED: `${who} changed your role in ${p} to ${String(d.role ?? "").toLowerCase()}.${leftNote(d)}`,
+    REMOVED_FROM_PROJECT: `${who} removed you from ${p}.${leftNote(d)}`,
     ORG_ROLE_CHANGED: `${who} changed your role to ${String(d.role ?? "").toLowerCase()}.`,
     TASK_DUE_TOMORROW: `${t} is due tomorrow.`,
     TASK_DUE_TODAY: `${t} is due today.`,
@@ -43,7 +71,9 @@ export function noticeText(n: N) {
     JOB_FAILED: `Scheduled job "${d.job}" failed${d.error ? `: ${d.error}` : ""}.`,
     JOB_MISSED: `Scheduled job "${d.job}" did not run on its day.`,
   };
-  const href = n.taskId ? `/tasks/${n.taskId}` : n.projectId ? `/projects/${n.projectId}` : n.type.startsWith("JOB_") ? "/audit" : "/";
+  // A deleted task cannot be opened, so its notice links to the project Trash (SHO-US-7.3 AC1).
+  const href = n.type === "TASK_DELETED" && n.projectId ? `/projects/${n.projectId}/trash`
+    : n.taskId ? `/tasks/${n.taskId}` : n.projectId ? `/projects/${n.projectId}` : n.type.startsWith("JOB_") ? "/audit" : "/";
   return { text: text[n.type] ?? `${who} made a change.`, href };
 }
 
@@ -98,6 +128,10 @@ const ACTION_WORDS: Record<string, string> = {
   "task.moved": "moved a task",
   "task.deleted": "moved a task to Trash",
   "task.restored": "restored a task from Trash",
+  "tasks.reassigned": "handed a person's open tasks to someone else",
+  "tasks.collaborations_dropped": "took a person off tasks as a collaborator",
+  "tasks.approver_reassigned": "moved a person's approver duties to the Leader",
+  undo: "undid an action",
 };
 const name = (s: unknown) => (typeof s === "string" ? s : undefined);
 
@@ -112,7 +146,7 @@ function describe(a: { action: string; beforeState: unknown; afterState: unknown
   const b = (a.beforeState ?? {}) as Record<string, unknown>;
   const f = (a.afterState ?? {}) as Record<string, unknown>;
   const label = name(f.title) ?? name(b.title) ?? name(f.name) ?? name(b.name) ?? names.get(`t:${a.targetId}`);
-  const base = ACTION_WORDS[a.action] ?? a.action;
+  const base = a.action === "undo" ? `undid "${String(f.label ?? "an action").toLowerCase()}"` : ACTION_WORDS[a.action] ?? a.action;
   const show = (v: unknown) => (v === null || v === undefined || v === "" ? "none" : typeof v === "string" ? names.get(v) ?? v : String(v));
   const detail: string[] = [];
   for (const k of Object.keys(f)) {
@@ -152,6 +186,8 @@ export async function projectActivity(user: Actor, projectId: string, cursor?: s
       at: r.createdAt.toISOString(),
       who: r.actor.name,
       via: r.channel === "CONCIERGE" ? "concierge" : "screen",
+      undo: r.undoneAt ? "undone" : !isUndoable(r.action) ? "none"
+        : Date.now() - r.createdAt.getTime() > UNDO_DAYS * 86400_000 ? "too_old" : "available",
       ...describe(r, names),
     })),
     nextCursor: more ? page[page.length - 1].id : null,
@@ -186,6 +222,20 @@ export async function auditLog(user: Actor, q: z.infer<typeof auditQuery>) {
   });
   const events = await db.auditLog.findMany({ distinct: ["event"], select: { event: true }, orderBy: { event: "asc" } });
   const page = rows.slice(0, 100);
+  const byType = (t: string[]) => [...new Set(page.filter((r) => r.targetType && t.includes(r.targetType) && r.targetId).map((r) => r.targetId!))];
+  const [us, ps, ts, ss] = await Promise.all([
+    db.user.findMany({ where: { id: { in: byType(["user", "member"]) } }, select: { id: true, name: true } }),
+    db.project.findMany({ where: { id: { in: byType(["project"]) } }, select: { id: true, name: true } }),
+    db.task.findMany({ where: { id: { in: byType(["task"]) } }, select: { id: true, title: true } }),
+    db.section.findMany({ where: { id: { in: byType(["section"]) } }, select: { id: true, name: true } }),
+  ]);
+  const label = new Map<string, string>([
+    ...us.map((x) => [`user:${x.id}`, `Person "${x.name}"`] as [string, string]),
+    ...us.map((x) => [`member:${x.id}`, `Member "${x.name}"`] as [string, string]),
+    ...ps.map((x) => [`project:${x.id}`, `Project "${x.name}"`] as [string, string]),
+    ...ts.map((x) => [`task:${x.id}`, `Task "${x.title}"`] as [string, string]),
+    ...ss.map((x) => [`section:${x.id}`, `Section "${x.name}"`] as [string, string]),
+  ]);
   return {
     events: events.map((e) => e.event),
     items: page.map((r) => ({
@@ -195,7 +245,8 @@ export async function auditLog(user: Actor, q: z.infer<typeof auditQuery>) {
       email: r.actor?.email ?? null,
       event: r.event,
       ip: r.ip,
-      target: r.targetType ? `${r.targetType} ${r.targetId}` : null,
+      channel: r.channel === "CONCIERGE" ? "Concierge" : "Screen",
+      target: r.targetType ? label.get(`${r.targetType}:${r.targetId}`) ?? `${r.targetType} (removed)` : null,
     })),
     nextCursor: rows.length > 100 ? page[page.length - 1].id : null,
   };
@@ -243,6 +294,7 @@ export async function signOutOthers(user: Actor) {
     where: { userId: user.id, revokedAt: null, ...(keep ? { id: { not: keep } } : {}) },
     data: { revokedAt: new Date() },
   });
+  await db.auditLog.create({ data: { event: "SIGN_OUT_EVERYWHERE", actorId: user.id, channel: "SCREEN", data: { sessionsEnded: String(r.count) } } });
   return r.count;
 }
 
