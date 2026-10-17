@@ -82,7 +82,9 @@ describe("keyboard", () => {
     await page.goto("/projects", { waitUntil: "load" });
     await page.waitForSelector("main#main");
     await page.waitForTimeout(800);
+    // Headless Chromium spends the first Tab on the document itself; the next stop must be the skip link.
     await page.keyboard.press("Tab");
+    if (await page.evaluate(() => document.activeElement === document.body)) await page.keyboard.press("Tab");
     expect(await page.evaluate(() => document.activeElement?.className + ":" + document.activeElement?.tagName)).toBe("skip:A");
     await page.keyboard.press("Enter");
     expect(await page.evaluate(() => document.activeElement?.id)).toBe("main");

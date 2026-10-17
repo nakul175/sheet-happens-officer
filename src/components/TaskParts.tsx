@@ -48,8 +48,9 @@ export function AvatarGroup({ assignee, collaborators, className }: { assignee: 
   }, [open]);
   return (
     <span className={`avwrap ${className ?? ""}`} ref={box}>
-      <button type="button" className="avs avbtn" aria-expanded={open} aria-label={`People: ${assignee.name}${collaborators.length ? ` and ${collaborators.length} collaborator${collaborators.length === 1 ? "" : "s"}` : ""}. Show names`}
+      <button type="button" className="avs avbtn" aria-expanded={open}
         onClick={(e) => { e.stopPropagation(); setOpen((v) => !v); }} onKeyDown={(e) => e.stopPropagation()}>
+        <span className="sr-only">{`People: ${assignee.name}${collaborators.length ? ` and ${collaborators.length} collaborator${collaborators.length === 1 ? "" : "s"}` : ""}. Show names`}</span>
         <span className="av sm" aria-hidden>{initials(assignee.name)}</span>
         {collaborators.slice(0, 3).map((c) => <span key={c.id} className="av sm collab" aria-hidden>{initials(c.name)}</span>)}
         {collaborators.length > 3 && <span className="av sm collab" aria-hidden>+{collaborators.length - 3}</span>}

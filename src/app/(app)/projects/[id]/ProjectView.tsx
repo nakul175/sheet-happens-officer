@@ -295,7 +295,7 @@ function Inner({ id }: { id: string }) {
                     <AvatarGroup assignee={t.assignee} collaborators={t.collaborators} />
                   </div>
                   {canWrite && (
-                    <button className="btn ghost sm bmove" aria-label={`Move "${t.title}" to…`} aria-haspopup="dialog"
+                    <button className="btn ghost sm bmove" aria-label={`Move to… "${t.title}"`} aria-haspopup="dialog"
                       onClick={(e) => { e.stopPropagation(); setMoving(t); }}>Move to…</button>
                   )}
                 </div>
