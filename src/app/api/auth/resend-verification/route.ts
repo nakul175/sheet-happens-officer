@@ -14,6 +14,6 @@ export const POST = handle(async (req: Request) => {
   }
   return Response.json({
     status: "ok",
-    message: "If this address needs a new link, it has been sent. You can ask for up to 3 an hour.",
+    message: "If this address needs a new link, it has been sent. You can ask up to 3 times an hour; if you have asked that often already, try again later.",
   });
 });

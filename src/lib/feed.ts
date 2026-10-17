@@ -202,7 +202,7 @@ export async function auditLog(user: Actor, q: z.infer<typeof auditQuery>) {
 }
 
 // ---- profile ----
-export const profileInput = z.object({ name: z.string().trim().min(1).max(80) });
+export const profileInput = z.object({ name: z.string().trim().min(1).max(100) });
 export const passwordChange = z
   .object({ current: z.string().min(1), password: passwordField, confirm: z.string() })
   .refine((v) => v.password === v.confirm, { message: "Passwords do not match.", path: ["confirm"] });

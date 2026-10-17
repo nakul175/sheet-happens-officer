@@ -13,6 +13,6 @@ export const POST = handle(async (req: Request) => {
   }
   return Response.json({
     status: "ok",
-    message: "If an account exists for this address, a reset link is on its way.",
+    message: "If an account exists for this address, a reset link is on its way. You can ask up to 3 times an hour; if you have asked that often already, try again later.",
   });
 });

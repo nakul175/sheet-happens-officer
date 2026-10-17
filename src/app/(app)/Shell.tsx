@@ -66,8 +66,8 @@ export function Shell({ user, children }: { user: Me; children: React.ReactNode 
   const [menu, setMenu] = useState<string | null>(null);
   const open = menu === path;
   const here = (p: string) => (p === "/" ? path === "/" : path === p || path.startsWith(p + "/"));
-  const items: [string, string][] = [["/", "My tasks"], ["/projects", "Projects"], ["/team", "Team"]];
-  if (user.orgRole === "SUPER_ADMIN") items.push(["/audit", "Audit log"]);
+  const items: [string, string][] = [["/", "My tasks"], ["/projects", "Projects"], ["/team", "Team"], ["/search", "Search"]];
+  if (user.orgRole === "SUPER_ADMIN") items.push(["/usage", "Usage"], ["/audit", "Audit log"]);
   return (
     <MeCtx.Provider value={user}>
       <div className="shell">

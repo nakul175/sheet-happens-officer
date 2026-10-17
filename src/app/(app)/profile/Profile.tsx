@@ -24,7 +24,7 @@ export default function Profile() {
           setNameMsg(r.ok ? { ok: true, text: "Saved. Your new name shows after the page reloads." } : { ok: false, text: r.error ?? "Could not save." });
         }}>
           <h2 style={{ margin: "0 0 12px", fontSize: 17 }}>Profile</h2>
-          <Field label="Name">{(id) => <input id={id} className="in" value={name} maxLength={80} onChange={(e) => setName(e.target.value)} />}</Field>
+          <Field label="Name">{(id) => <input id={id} className="in" value={name} maxLength={100} onChange={(e) => setName(e.target.value)} />}</Field>
           <Field label="Email" hint="Your email is your sign-in and cannot be changed here.">{(id) => <input id={id} className="in" value={me.email} readOnly />}</Field>
           {nameMsg && <div className={nameMsg.ok ? "ok" : "err"} role="status">{nameMsg.text}</div>}
           <button className="btn" disabled={!name.trim() || name.trim() === me.name}>Save name</button>
@@ -60,6 +60,10 @@ export default function Profile() {
               const r = await api("POST", "/api/profile/sessions/sign-out-others", {});
               if (r.ok) { setOutMsg(`Signed out of ${r.data.signedOut} other device${r.data.signedOut === 1 ? "" : "s"}.`); ses.reload(); }
             }}>Sign out of all other devices</button>
+            <button className="btn ghost" onClick={async () => {
+              const r = await api("POST", "/api/profile/sessions/sign-out-all", {});
+              if (r.ok) window.location.href = "/signin";
+            }}>Sign out everywhere</button>
           </div>
         </section>
       </div>
