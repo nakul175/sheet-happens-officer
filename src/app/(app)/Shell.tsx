@@ -6,7 +6,7 @@ import { ago, api, initials, useGet } from "@/components/api";
 import { ConciergeProvider, useConcierge } from "@/components/concierge/ConciergeProvider";
 import { ConciergeBar, ConciergeDock, ConciergeFab } from "@/components/concierge/Concierge";
 
-export type Me = { id: string; name: string; email: string; orgRole: "MEMBER" | "ADMIN" | "SUPER_ADMIN"; crm?: boolean; review?: boolean };
+export type Me = { id: string; name: string; email: string; orgRole: "MEMBER" | "ADMIN" | "SUPER_ADMIN"; crm?: boolean; review?: boolean; compact?: boolean };
 const MeCtx = createContext<Me | null>(null);
 export const useMe = () => useContext(MeCtx)!;
 export const roleLabel = (r: Me["orgRole"]) => (r === "SUPER_ADMIN" ? "Super Admin" : r === "ADMIN" ? "Admin" : "Member");
@@ -120,8 +120,23 @@ function TabBar({ user, here, more }: { user: Me; here: (p: string) => boolean; 
   );
 }
 
+/** SHO-US-14.12: Comfortable or Compact rows. Saved on the person; shown from 1024 px wide (phones keep full-size rows for touch). */
+function DensityToggle({ compact, onChange }: { compact: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <button className="density" aria-pressed={compact} title="Show more rows on one screen" onClick={() => onChange(!compact)}>
+      <span aria-hidden>{compact ? "☰" : "≡"}</span> Compact
+    </button>
+  );
+}
+
 export function Shell({ user, children }: { user: Me; children: React.ReactNode }) {
   const path = usePathname();
+  const [compact, setCompact] = useState(!!user.compact);
+  const chooseDensity = async (v: boolean) => {
+    setCompact(v);
+    const r = await api("PUT", "/api/profile/density", { compact: v });
+    if (!r.ok) setCompact(!v); // not saved: go back to what is saved
+  };
   const [menu, setMenu] = useState<string | null>(null);
   const open = menu === path;
   const here = (p: string) => (p === "/" ? path === "/" : path === p || path.startsWith(p + "/"));
@@ -149,7 +164,7 @@ export function Shell({ user, children }: { user: Me; children: React.ReactNode 
   return (
     <MeCtx.Provider value={user}>
       <ConciergeProvider>
-      <div className="shell">
+      <div className="shell" data-density={compact ? "compact" : undefined}>
         {open && <div className="veil" onClick={() => setMenu(null)} />}
         <aside ref={drawer} className={`side${open ? " open" : ""}`} aria-label="Main">
           <Link href="/" className="brand"><img src="/logo-icon.svg" alt="" />Sheet Happens Officer</Link>
@@ -168,6 +183,7 @@ export function Shell({ user, children }: { user: Me; children: React.ReactNode 
             <button className="burger" aria-label="Open menu" onClick={() => setMenu(path)}>☰</button>
             <span className="top-brand"><img src="/logo-icon.svg" alt="" />SHO</span>
             <span className="grow" />
+            <DensityToggle compact={compact} onChange={chooseDensity} />
             <Bell />
           </header>
           {children}

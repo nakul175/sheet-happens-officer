@@ -7,6 +7,7 @@ import { leadsAnyDeal } from "@/lib/review";
 import { UndoHost } from "@/components/UndoHost";
 import "./app.css";
 import "./touch.css";
+import "./density.css";
 
 async function Gate({ children }: { children: React.ReactNode }) {
   let user;
@@ -15,7 +16,7 @@ async function Gate({ children }: { children: React.ReactNode }) {
   } catch {
     redirect("/signin");
   }
-  return <><Shell user={{ ...(publicUser(user) as Me), crm: crmVisible(user), review: await leadsAnyDeal(user) }}>{children}</Shell><UndoHost /></>;
+  return <><Shell user={{ ...(publicUser(user) as Me), compact: user.compactRows, crm: crmVisible(user), review: await leadsAnyDeal(user) }}>{children}</Shell><UndoHost /></>;
 }
 
 export default function AppLayout({ children }: LayoutProps<"/">) {
