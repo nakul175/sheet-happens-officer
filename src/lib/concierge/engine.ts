@@ -183,13 +183,13 @@ export async function sendMessage(user: Actor, text: string, now = new Date()) {
 }
 
 /** POST /quick/[id]: a plain query, no model call, no cap. */
-export async function quickAction(user: Actor, id: string, now = new Date()) {
-  const a = await quickAnswer(user, id, now);
+export async function quickAction(user: Actor, id: string, now = new Date(), projectId?: string) {
+  const a = await quickAnswer(user, id, now, projectId);
   await dropPendingChoices(user.id);
   const asked = await addMessage(user.id, "USER", { kind: "text", text: a.q.label });
   const links = a.tasks.map((t) => ({ label: t.title, href: hrefOf.task(t.id) }));
   const reply = await addMessage(user.id, "ASSISTANT", { kind: "answer", text: a.text, ...(links.length ? { links } : {}) });
-  await recordQuickAction(user.id, a.q.id);
+  await recordQuickAction(user.id, id);
   return { messages: [present(asked), present(reply)] };
 }
 

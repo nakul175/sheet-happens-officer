@@ -8,7 +8,7 @@ export const conciergeApi = {
     api<{ hidden: boolean; voiceNoticeAcked: boolean }>("PATCH", "/api/concierge/preferences", p),
   send: (text: string) => api<{ messages: Message[]; disabled?: Disabled }>("POST", "/api/concierge/messages", { text }),
   clear: () => api<{ ok: true }>("DELETE", "/api/concierge/messages"),
-  quick: (id: QuickActionId) => api<{ messages: Message[] }>("POST", `/api/concierge/quick/${encodeURIComponent(id)}`, {}),
+  quick: (id: QuickActionId, projectId?: string) => api<{ messages: Message[] }>("POST", `/api/concierge/quick/${encodeURIComponent(id)}`, projectId ? { projectId } : {}),
   improve: (text: string) => api<{ improved: string }>("POST", "/api/concierge/improve", { text }),
   choose: (messageId: string, choiceId: string) =>
     api<{ messages: Message[] }>("POST", `/api/concierge/choices/${encodeURIComponent(messageId)}`, { choiceId }),

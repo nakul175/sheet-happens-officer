@@ -41,3 +41,12 @@
 .ppl .hint { padding: 10px; margin: 0; }
 .nudge { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; background: #eef0f9; border: 1px solid #cfd3ee; border-radius: 12px; padding: 10px 14px; margin-bottom: 12px; font-size: 14px; }
 .nudge .grow { flex: 1; min-width: 160px; }
+
+/* SHO-US-14.15 sidebar entry for the concierge */
+.nav .navbtn { color: #d7d9ef; background: none; border: 0; text-align: left; font: inherit; font-size: 14px; font-weight: 500; padding: 9px 10px; border-radius: 8px; cursor: pointer; }
+.nav .navbtn:hover { background: rgba(255,255,255,.08); color: #fff; }
+.nav .navbtn small { opacity: .7; font-weight: 400; }
+.nav .navbtn:focus-visible { outline: 2px solid var(--gold); outline-offset: -2px; }
+@media (max-width: 1023px), (pointer: coarse) { .nav .navbtn { min-height: 44px; display: flex; align-items: center; } }
+.cc-host { z-index: 80; }
+@media (min-width: 600px) { .cc-host { left: auto; width: min(440px, 100vw); box-shadow: -12px 0 32px rgba(23,27,34,.2); border-left: 1px solid var(--line); } }
