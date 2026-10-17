@@ -27,7 +27,7 @@ describe("people and roles (2.x)", () => {
     const email = `ghost${Date.now()}@aplyd.com`;
     await ghost.post("/api/auth/signup", { name: "Ghost", email, password: "correct-horse-9" });
     const asMember = (await m.c.get("/api/team")).json.people as Record<string, unknown>[];
-    expect(asMember.every((p) => Object.keys(p).sort().join() === "id,name")).toBe(true);
+    expect(asMember.every((p) => Object.keys(p).sort().join() === "id,leads,name,orgRole" /* SHO-US-14.4 AC3 adds role and led projects */)).toBe(true);
     expect(asMember.some((p) => p.name === "Ghost")).toBe(false);
     const asSuper = (await sa.c.get("/api/team")).json.people as Record<string, string>[];
     expect(asSuper.find((p) => p.email === email)?.status).toBe("UNVERIFIED");

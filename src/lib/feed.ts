@@ -4,7 +4,8 @@ import { z } from "zod";
 import { db } from "@/lib/db";
 import { ApiError } from "@/lib/http";
 import { currentSessionId, deviceLabel, hashPassword, verifyPassword } from "@/lib/auth";
-import { projectAccess, requireManage, type Actor } from "@/lib/access";
+import { projectAccess, type Actor } from "@/lib/access";
+import { idsIn, sentence, whenText } from "@/lib/activity-text";
 import { UNDO_DAYS, isUndoable } from "@/lib/undoable";
 import { passwordField } from "@/lib/schemas";
 
@@ -61,6 +62,7 @@ export function noticeText(n: N) {
     RESTORED_TO_LEADER: `${t} was restored to you because its owner is no longer on the project.`,
     MADE_LEADER: `${who} made you Leader of ${p}.`,
     PROJECT_ARCHIVED: `${who} archived ${p}. It is now read-only.`,
+    JOIN_REQUESTED: `${who} asked to be added to one of your projects.`,
     ADDED_TO_PROJECT: `${who} added you to ${p} as ${String(d.role ?? "Editor").toLowerCase()}.`,
     PROJECT_ROLE_CHANGED: `${who} changed your role in ${p} to ${String(d.role ?? "").toLowerCase()}.${leftNote(d)}`,
     REMOVED_FROM_PROJECT: `${who} removed you from ${p}.${leftNote(d)}`,
@@ -77,7 +79,7 @@ export function noticeText(n: N) {
   };
   // A deleted task cannot be opened, so its notice links to the project Trash (SHO-US-7.3 AC1).
   const href = n.type === "TASK_DELETED" && n.projectId ? `/projects/${n.projectId}/trash`
-    : n.taskId ? `/tasks/${n.taskId}` : n.projectId ? `/projects/${n.projectId}` : n.type.startsWith("JOB_") ? "/audit" : n.type.startsWith("CONCIERGE_") ? "/usage" : "/";
+    : n.taskId ? `/tasks/${n.taskId}` : n.projectId ? `/projects/${n.projectId}` : n.type === "JOIN_REQUESTED" ? "/projects" : n.type.startsWith("JOB_") ? "/audit" : n.type.startsWith("CONCIERGE_") ? "/usage" : "/";
   return { text: text[n.type] ?? `${who} made a change.`, href };
 }
 
@@ -117,78 +119,22 @@ export async function markAllRead(user: Actor) {
   await db.notification.updateMany({ where: { recipientId: user.id, readAt: null }, data: { readAt: new Date() } });
 }
 
-// ---- project activity (Leader and Admins) ----
-const ACTION_WORDS: Record<string, string> = {
-  "project.created": "created the project",
-  "project.updated": "edited the project",
-  "project.archived": "archived the project",
-  "project.unarchived": "unarchived the project",
-  "project.leader_changed": "changed the project Leader",
-  "member.added": "added a member",
-  "member.removed": "removed a member",
-  "member.role_changed": "changed a member's role",
-  "section.added": "added a section",
-  "section.deleted": "deleted a section",
-  "section.renamed": "renamed a section",
-  "section.moved": "moved a section",
-  "section.done_changed": "changed which section counts as done",
-  "task.created": "created a task",
-  "task.updated": "edited a task",
-  "task.assigned": "reassigned a task",
-  "task.collaborator_added": "added a collaborator to a task",
-  "task.collaborator_removed": "removed a collaborator from a task",
-  "task.approver_changed": "changed a task's approver",
-  "task.sent_for_approval": "sent a task for approval",
-  "task.sent_back": "sent a task back",
-  "task.completed": "completed a task",
-  "task.reopened": "reopened a task",
-  "task.moved": "moved a task",
-  "task.deleted": "moved a task to Trash",
-  "task.restored": "restored a task from Trash",
-  "deal.created": "created the deal",
-  "deal.stage_changed": "moved the deal to another stage",
-  "deal.details_updated": "edited the deal details",
-  "deal.party_added": "added an organisation to the deal",
-  "deal.party_removed": "removed an organisation from the deal",
-  "deal.converted": "converted a task to this deal",
-  "task.moved_to_deal": "moved this task to a deal",
-  "task.idea_changed": "changed the Idea flag",
-  "tasks.reassigned": "handed a person's open tasks to someone else",
-  "tasks.collaborations_dropped": "took a person off tasks as a collaborator",
-  "tasks.approver_reassigned": "moved a person's approver duties to the Leader",
-  undo: "undid an action",
-};
-const name = (s: unknown) => (typeof s === "string" ? s : undefined);
-
-const KEY_WORDS: Record<string, string> = {
-  sectionId: "section", assigneeId: "assignee", approverId: "approver", leaderId: "leader", userId: "person",
-  newLeaderId: "leader", movedTo: "moved to", dueDate: "due date", blockedReason: "blocked because",
-};
-const SKIP = new Set(["title", "name", "id", "updatedAt", "description", "completedAt", "subtasksCompleted", "stageId"]);
-
-/** Ids in before/after state are shown as names. `names` maps section and user ids to labels. */
-function describe(a: { action: string; beforeState: unknown; afterState: unknown; targetId: string }, names: Map<string, string>) {
-  const b = (a.beforeState ?? {}) as Record<string, unknown>;
-  const f = (a.afterState ?? {}) as Record<string, unknown>;
-  const label = name(f.title) ?? name(b.title) ?? name(f.name) ?? name(b.name) ?? names.get(`t:${a.targetId}`);
-  const base = a.action === "undo" ? `undid "${String(f.label ?? "an action").toLowerCase()}"` : ACTION_WORDS[a.action] ?? a.action;
-  const show = (v: unknown) => (v === null || v === undefined || v === "" ? "none" : typeof v === "string" ? names.get(v) ?? v : String(v));
-  const detail: string[] = [];
-  for (const k of Object.keys(f)) {
-    if (SKIP.has(k) && !(k === "name" && a.action === "section.renamed")) continue;
-    const from = b[k], to = f[k];
-    if ((typeof to === "object" && to !== null) || (typeof from === "object" && from !== null)) continue;
-    if (from === to) continue;
-    if (/^(subtasks|tasks)/.test(k)) continue;
-    detail.push(`${KEY_WORDS[k] ?? k}: ${show(from)} → ${show(to)}`);
-  }
-  return { what: label ? `${base} "${label}"` : base, change: detail.slice(0, 4).join(" · ") || null };
-}
-
+// ---- project activity (SHO-US-6.3, 14.14) ----
+/**
+ * Leader and Admins see the whole project. An Editor sees what happened on tasks they are on
+ * (assignee, collaborator or approver), not the whole project. Viewers see nothing here.
+ * Every row is a sentence: names, never ids; India-time dates; no field names.
+ */
 export async function projectActivity(user: Actor, projectId: string, cursor?: string, limit = 50) {
-  requireManage(await projectAccess(user, projectId));
+  const a = await projectAccess(user, projectId);
+  if (a.role === "VIEWER") throw new ApiError(403, "Only people who work on this project can see Activity.");
+  const leader = a.role === "LEADER";
+  const mine = leader ? null : (await db.task.findMany({
+    where: { projectId, OR: [{ assigneeId: user.id }, { approverId: user.id }, { collaborators: { some: { userId: user.id } } }] },
+    select: { id: true },
+  })).map((t) => t.id);
   const rows = await db.actionLog.findMany({
-    where: { projectId },
+    where: { projectId, ...(mine ? { targetType: "task", targetId: { in: mine } } : {}) },
     orderBy: [{ createdAt: "desc" }, { id: "desc" }],
     take: limit + 1,
     ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
@@ -196,24 +142,26 @@ export async function projectActivity(user: Actor, projectId: string, cursor?: s
   });
   const more = rows.length > limit;
   const page = rows.slice(0, limit);
-  const ids = new Set<string>();
-  for (const r of page) for (const st of [r.beforeState, r.afterState]) for (const v of Object.values((st ?? {}) as Record<string, unknown>)) if (typeof v === "string" && v.length > 20) ids.add(v);
-  const [users, sections] = await Promise.all([
-    db.user.findMany({ where: { id: { in: [...ids] } }, select: { id: true, name: true } }),
-    db.section.findMany({ where: { id: { in: [...ids] } }, select: { id: true, name: true } }),
+  const ids = [...new Set(page.flatMap((r) => idsIn(r)))];
+  const [users, sections, tasks] = await Promise.all([
+    db.user.findMany({ where: { id: { in: ids } }, select: { id: true, name: true } }),
+    db.section.findMany({ where: { id: { in: ids } }, select: { id: true, name: true } }),
+    db.task.findMany({ where: { id: { in: ids } }, select: { id: true, title: true } }),
   ]);
-  const tasks = await db.task.findMany({ where: { id: { in: page.filter((r) => r.targetType === "task").map((r) => r.targetId) } }, select: { id: true, title: true } });
   const names = new Map<string, string>([...users, ...sections].map((x) => [x.id, x.name] as [string, string]));
   for (const t of tasks) names.set(`t:${t.id}`, t.title);
   return {
     items: page.map((r) => ({
       id: r.id,
-      at: r.createdAt.toISOString(),
+      ts: r.createdAt.getTime(),
+      when: whenText(r.createdAt),
       who: r.actor.name,
+      what: sentence(r, names),
+      // "How" is only worth a word when it was not the screen (SHO-US-14.14 AC4).
       via: r.channel === "CONCIERGE" ? "concierge" : "screen",
-      undo: r.undoneAt ? "undone" : !isUndoable(r.action) ? "none"
+      // Undo stays on the row (AC5); an Editor can only undo their own actions, as the server enforces.
+      undo: r.undoneAt ? "undone" : !isUndoable(r.action) || (!leader && r.actorId !== user.id) ? "none"
         : Date.now() - r.createdAt.getTime() > UNDO_DAYS * 86400_000 ? "too_old" : "available",
-      ...describe(r, names),
     })),
     nextCursor: more ? page[page.length - 1].id : null,
   };

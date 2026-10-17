@@ -7,6 +7,7 @@ import { api, dueLabel, dueState, rowKeys, isOverdue, todayIST, useGet } from "@
 import { TaskModal } from "@/components/TaskModal";
 import { Pri, Tick } from "@/components/TaskParts";
 import { Confirm, LoadFailed } from "@/components/ui";
+import { StartGuide, guide } from "@/components/extras/StartGuide";
 import { Page, useMe } from "./Shell";
 
 type Item = {
@@ -72,11 +73,13 @@ function Inner() {
   const [mode, setMode] = useState<"date" | "project">("date");
   const [done, setDone] = useState<{ projectId: string; name: string }[]>([]);
   const [dismissed, setDismissed] = useState<string[]>([]);
+  const [guideGone, setGuideGone] = useState(guide.gone); // SHO-US-14.4
   // Reads the saved choice from browser storage after mount (reading it during render would not match the server HTML).
   // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { try { if (localStorage.getItem(GROUP_KEY(me.id)) === "project") setMode("project"); } catch { /* storage blocked: stay By date */ } }, [me.id]);
   const pick = (m: "date" | "project") => { setMode(m); try { localStorage.setItem(GROUP_KEY(me.id), m); } catch { /* ignore */ } };
   const router = useRouter();
+  useEffect(() => { window.addEventListener("sho:task-added", reload); return () => window.removeEventListener("sho:task-added", reload); }, [reload]); // SHO-US-14.5
   const open = useSearchParams().get("task");
   const wait = data?.waitingOnMe ?? [];
   const others = data?.waitingOnOthers ?? [];
@@ -133,6 +136,7 @@ function Inner() {
           <button aria-pressed={mode === "project"} onClick={() => pick("project")}>By project</button>
         </div>
       )}>
+      {me.startGuide && !guideGone && <StartGuide onDismiss={() => setGuideGone(true)} />}
       {loading && !data && <div className="skel">Loading…</div>}
       {error && !data && <LoadFailed onRetry={reload} />}
       {error && data && <div className="err" role="alert">{error} <button className="link" onClick={reload}>Retry</button></div>}

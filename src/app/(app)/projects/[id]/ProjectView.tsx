@@ -37,6 +37,11 @@ const useMouse = () => useSyncExternalStore(
   () => window.matchMedia(MOUSE).matches,
   () => false,
 );
+/** SHO-US-14.17 AC3: the "Add people" banner stays dismissed on this device (a per-person convenience, so browser storage is enough). */
+function nudgeSeen(projectId: string, set?: boolean) {
+  const k = `sho.addpeople.${projectId}`;
+  try { if (set) localStorage.setItem(k, "1"); return localStorage.getItem(k) === "1"; } catch { return false; }
+}
 
 function Inner({ id }: { id: string }) {
   const me = useMe();
@@ -51,7 +56,8 @@ function Inner({ id }: { id: string }) {
   const wide = filtered || ls.sort !== "date" || ls.group !== "section"; // the server sent every matching task, not one page per section
   const tk = useGet<{ sections: S[]; summary?: Summary }>(`/api/projects/${id}/tasks${apiQuery(ls)}`);
   const [extra, setExtra] = useState<Record<string, T[]>>({}); // pages beyond the first, by section
-  const [adding, setAdding] = useState(false);
+  const [adding, setAdding] = useState(sp.get("new") === "1"); // SHO-US-14.17: a new project asks for its first task
+  const [nudgeOff, setNudgeOff] = useState(false);
   const [dialog, setDialog] = useState<null | { kind: "rename" | "delete" | "addSection"; s?: S }>(null);
   const [err, setErr] = useState<string | null>(null);
   const [dragId, setDragId] = useState<string | null>(null);
@@ -87,6 +93,8 @@ function Inner({ id }: { id: string }) {
   const [sel, setSel] = useState<Set<string>>(new Set()); // ticked tasks (SHO-US-14.11)
   const [bulk, setBulk] = useState<BulkResult | null>(null);
   const [viewDialog, setViewDialog] = useState<null | "save" | "rename" | "delete">(null);
+  useEffect(() => { if (sp.get("new") === "1") window.history.replaceState(null, "", window.location.pathname); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { window.addEventListener("sho:task-added", refresh); return () => window.removeEventListener("sho:task-added", refresh); }, [refresh]); // SHO-US-14.5
 
   if (!pr.data && isNetworkFailure(pr.status)) {
     return <Page title="Project"><LoadFailed onRetry={refresh} /></Page>;
@@ -176,6 +184,13 @@ function Inner({ id }: { id: string }) {
       )}</>}
       actions={canWrite && <button className="btn" onClick={() => setAdding(true)}>+ Add task</button>}>
       {archivedBanner}
+      {manage && p && p.members.filter((m) => m.active).length === 1 && !nudgeOff && !nudgeSeen(p.id) && (
+        <div className="nudge" role="region" aria-label="Add people">
+          <span className="grow"><b>Only you are in this project.</b> Add the people who will work on it.</span>
+          <Link className="btn sm" href={`/projects/${id}/members`}>Add people</Link>
+          <button className="btn ghost sm" onClick={() => { nudgeSeen(p.id, true); setNudgeOff(true); }}>Dismiss</button>
+        </div>
+      )}
       {p?.deal && <DealPanel projectId={id} deal={p.deal} canWrite={canWrite} onChange={refresh} />}
       <div className="tabs">
         <div className="seg" role="tablist" aria-label="View">
@@ -190,7 +205,7 @@ function Inner({ id }: { id: string }) {
         <span className="sp" />
         <Link href={`/projects/${id}/members`}>Members</Link>
         <Link href={`/projects/${id}/trash`}>Trash</Link>
-        {p && (p.role === "LEADER") && <Link href={`/projects/${id}/activity`}>Activity</Link>}
+        {p && (p.role !== "VIEWER") && <Link href={`/projects/${id}/activity`}>Activity</Link>}
       </div>
       {p && secs && (
         <ListControls state={ls} members={p.members} onChange={setList} showGroup={view === "list"}

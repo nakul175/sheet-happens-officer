@@ -6,8 +6,10 @@ import { ago, api, initials, useGet } from "@/components/api";
 import { ConciergeProvider, useConcierge } from "@/components/concierge/ConciergeProvider";
 import { ConciergeBar, ConciergeDock, ConciergeFab } from "@/components/concierge/Concierge";
 import { Bell } from "./Bell";
+import { ConciergeHost, ConciergeNavItem, openConcierge } from "@/components/concierge/Launcher";
+import { Extras, NewTaskButton, SearchButton } from "@/components/extras/Extras";
 
-export type Me = { id: string; name: string; email: string; orgRole: "MEMBER" | "ADMIN" | "SUPER_ADMIN"; crm?: boolean; review?: boolean; compact?: boolean };
+export type Me = { id: string; name: string; email: string; orgRole: "MEMBER" | "ADMIN" | "SUPER_ADMIN"; crm?: boolean; review?: boolean; compact?: boolean; startGuide?: boolean };
 const MeCtx = createContext<Me | null>(null);
 export const useMe = () => useContext(MeCtx)!;
 export const roleLabel = (r: Me["orgRole"]) => (r === "SUPER_ADMIN" ? "Super Admin" : r === "ADMIN" ? "Admin" : "Member");
@@ -43,6 +45,7 @@ function TabBar({ user, here, more }: { user: Me; here: (p: string) => boolean; 
       {open && (
         <div className="tabmore" role="menu" aria-label="More">
           {more.map(([h, l]) => <Link key={h} href={h} role="menuitem">{l}</Link>)}
+          <button role="menuitem" onClick={() => { setOpen(false); openConcierge(); }}>Concierge</button>
           <Link href="/profile" role="menuitem">Profile</Link>
           <button role="menuitem" onClick={async () => { await api("POST", "/api/auth/signout", {}); window.location.href = "/signin"; }}>Sign out</button>
         </div>
@@ -101,6 +104,7 @@ export function Shell({ user, children }: { user: Me; children: React.ReactNode 
   return (
     <MeCtx.Provider value={user}>
       <ConciergeProvider>
+      <Extras>
       <div className="shell" data-density={compact ? "compact" : undefined}>
         {open && <div className="veil" onClick={() => setMenu(null)} />}
         <aside ref={drawer} className={`side${open ? " open" : ""}`} aria-label="Main">
@@ -109,6 +113,7 @@ export function Shell({ user, children }: { user: Me; children: React.ReactNode 
             {items.map(([href, label]) => (
               <Link key={href} href={href} aria-current={here(href) ? "page" : undefined}>{label}</Link>
             ))}
+            <ConciergeNavItem onPick={() => setMenu(null)} />
           </nav>
           <Link href="/profile" className="me" aria-current={here("/profile") ? "page" : undefined}>
             <span className="av">{initials(user.name)}</span>
@@ -120,13 +125,17 @@ export function Shell({ user, children }: { user: Me; children: React.ReactNode 
             <button className="burger" aria-label="Open menu" onClick={() => setMenu(path)}>☰</button>
             <span className="top-brand"><img src="/logo-icon.svg" alt="" />SHO</span>
             <span className="grow" />
+            <SearchButton />
+            <NewTaskButton />
             <DensityToggle compact={compact} onChange={chooseDensity} />
             <Bell />
           </header>
           {children}
         </div>
         <TabBar user={user} here={here} more={more} />
+        <ConciergeHost />
       </div>
+      </Extras>
       </ConciergeProvider>
     </MeCtx.Provider>
   );

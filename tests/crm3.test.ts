@@ -77,7 +77,7 @@ describe("convert a task to a deal (12.2)", () => {
     expect(deal.deal.nextStep.id).toBe(t);
 
     const act = JSON.stringify((await lead.c.get(`/api/projects/${p.id}/activity`)).json);
-    expect(act).toMatch(/moved this task to a deal/);
+    expect(act).toMatch(/to the deal/); // SHO-US-14.14 wording
     // The source project no longer lists the task.
     expect(JSON.stringify((await lead.c.get(`/api/projects/${p.id}/tasks`)).json)).not.toContain(t);
   });

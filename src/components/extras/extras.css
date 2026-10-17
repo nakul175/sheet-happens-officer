@@ -1,0 +1,68 @@
+/* SHO-US-14.5, 14.6, 14.7: quick add, shortcuts help, command palette. */
+.qa .in { margin: 4px 0 12px; }
+.qa-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.qa-row > div { min-width: 0; }
+.qa-note { margin: -4px 0 4px; font-size: 13px; }
+.qa-note.bad { color: var(--danger); }
+.newtask { white-space: nowrap; }
+@media (max-width: 599px) { .qa-row { grid-template-columns: 1fr; gap: 0; } }
+
+/* Command palette */
+.pal-in { margin-bottom: 8px; }
+.pal-list { max-height: min(52vh, 420px); overflow-y: auto; margin: 0 -8px; }
+.pal-grp { font-size: 12px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); padding: 10px 8px 4px; }
+.pal-row { display: flex; flex-direction: column; gap: 1px; padding: 8px 10px; border-radius: 8px; cursor: pointer; min-height: 44px; justify-content: center; }
+.pal-row.on { background: #eef0f6; box-shadow: inset 3px 0 0 var(--gold); }
+.pal-l { font-size: 15px; overflow-wrap: anywhere; }
+.pal-row small { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+.pal-none { color: var(--muted); font-size: 14px; padding: 14px 8px; }
+.pal-foot { display: flex; gap: 14px; color: var(--muted); font-size: 12px; padding-top: 10px; margin-top: 6px; border-top: 1px solid var(--line); }
+.searchbtn { display: inline-flex; align-items: center; gap: 8px; background: var(--card); border: 1px solid var(--field); border-radius: 8px; padding: 6px 10px; font: inherit; font-size: 14px; color: var(--muted); cursor: pointer; min-height: 34px; }
+.searchbtn kbd, .kbd { font: inherit; font-size: 11px; border: 1px solid var(--field); border-radius: 4px; padding: 1px 5px; color: var(--ink-2); background: #fafbfc; }
+@media (max-width: 599px) { .searchbtn { display: none; } .pal-foot { display: none; } }
+@media (max-width: 1023px) { .searchbtn { min-height: 44px; } }
+
+/* SHO-US-14.4 start guide */
+.guide { background: #fffaf0; border: 1px solid #ecd9a6; border-radius: 12px; padding: 12px 16px; margin-bottom: 14px; }
+.guide-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+.guide ol { margin: 6px 0 0; padding-left: 20px; font-size: 14px; color: var(--ink-2); display: grid; gap: 4px; }
+.guide li b { color: var(--ink); font-weight: 600; }
+.lead-list { display: grid; gap: 8px; margin-top: 12px; text-align: left; }
+.lead-list .item { border: 1px solid var(--line); border-radius: 10px; background: var(--card); }
+
+/* SHO-US-14.17 add people while creating a project */
+.addppl { border: 0; padding: 0; margin: 0 0 12px; min-width: 0; }
+.addppl legend { padding: 0; margin-bottom: 2px; }
+.ppl { max-height: 260px; overflow-y: auto; border: 1px solid var(--line); border-radius: 10px; margin-top: 8px; background: #fff; }
+.ppl-row { display: flex; align-items: center; gap: 10px; padding: 2px 10px; border-bottom: 1px solid var(--line); min-height: 44px; }
+.ppl-row:last-child { border-bottom: 0; }
+.ppl-l { flex: 1; display: flex; align-items: center; gap: 4px; min-height: 44px; cursor: pointer; font-weight: 400 !important; font-size: 15px !important; color: var(--ink) !important; min-width: 0; overflow-wrap: anywhere; }
+.ppl-r { width: auto !important; flex: none; }
+.ppl .hint { padding: 10px; margin: 0; }
+.nudge { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; background: #eef0f9; border: 1px solid #cfd3ee; border-radius: 12px; padding: 10px 14px; margin-bottom: 12px; font-size: 14px; }
+.nudge .grow { flex: 1; min-width: 160px; }
+
+/* SHO-US-14.15 sidebar entry for the concierge */
+.nav .navbtn { color: #d7d9ef; background: none; border: 0; text-align: left; font: inherit; font-size: 14px; font-weight: 500; padding: 9px 10px; border-radius: 8px; cursor: pointer; }
+.nav .navbtn:hover { background: rgba(255,255,255,.08); color: #fff; }
+.nav .navbtn small { opacity: .7; font-weight: 400; }
+.nav .navbtn:focus-visible { outline: 2px solid var(--gold); outline-offset: -2px; }
+@media (max-width: 1023px), (pointer: coarse) { .nav .navbtn { min-height: 44px; display: flex; align-items: center; } }
+.cc-host { z-index: 80; }
+@media (min-width: 600px) { .cc-host { left: auto; width: min(440px, 100vw); box-shadow: -12px 0 32px rgba(23,27,34,.2); border-left: 1px solid var(--line); } }
+
+/* SHO-US-14.14 readable activity */
+.actlist .item.act { align-items: flex-start; }
+.act-s { overflow-wrap: anywhere; }
+.actlist .item .meta { flex-wrap: nowrap; flex: none; }
+@media (max-width: 1023px) { .actlist .item .meta { flex-basis: 100%; flex-wrap: wrap; padding-left: 0; } }
+.actlist .item .t small { display: block; margin-top: 2px; }
+.act-s strong { font-weight: 600; }
+
+/* SHO-US-14.6 shortcuts sheet */
+.keys { margin: 0; display: grid; gap: 2px; }
+.keys > div { display: flex; gap: 12px; align-items: center; min-height: 34px; border-bottom: 1px solid var(--line); }
+.keys dt { flex: 0 0 120px; white-space: nowrap; }
+.keys dd { margin: 0; font-size: 14px; }
+.keys .kbd { font-size: 12px; padding: 2px 7px; }
+.keys dt { font-size: 13px; }

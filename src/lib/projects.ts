@@ -11,10 +11,17 @@ import { dealBlock } from "@/lib/deals";
 const DEFAULT_SECTIONS = ["To do", "In progress", "Done"];
 
 /** SHO-US-3.1. The Leader is required and must be active; a creator who names someone else becomes an Editor. */
-export async function createProject(user: Actor, input: { name: string; description?: string | null; leaderId: string }) {
+export async function createProject(user: Actor, input: { name: string; description?: string | null; leaderId: string; members?: { userId: string; role: "EDITOR" | "VIEWER" }[] }) {
   const leader = await db.user.findUnique({ where: { id: input.leaderId } });
   if (!leader || !isActive(leader)) throw new ApiError(400, "Choose an active person as Leader.");
   const me = await db.user.findUniqueOrThrow({ where: { id: user.id } });
+  // SHO-US-14.17: the people added with the project must be active; the Leader and the creator already have a seat.
+  const wanted = new Map<string, "EDITOR" | "VIEWER">();
+  for (const m of input.members ?? []) if (m.userId !== leader.id && m.userId !== user.id) wanted.set(m.userId, m.role);
+  if (wanted.size) {
+    const found = await db.user.findMany({ where: { id: { in: [...wanted.keys()] } } });
+    if (found.length !== wanted.size || !found.every(isActive)) throw new ApiError(400, "Choose active people to add.");
+  }
   return db.$transaction(async (tx) => {
     const project = await tx.project.create({
       data: { workspaceId: me.workspaceId, name: input.name, description: input.description ?? null },
@@ -23,6 +30,11 @@ export async function createProject(user: Actor, input: { name: string; descript
     if (leader.id !== user.id) await tx.projectMember.create({ data: { projectId: project.id, userId: user.id, role: "EDITOR" } });
     for (const [i, name] of DEFAULT_SECTIONS.entries()) {
       await tx.section.create({ data: { projectId: project.id, name, position: i, isDone: i === DEFAULT_SECTIONS.length - 1 } });
+    }
+    for (const [userId, role] of wanted) {
+      await tx.projectMember.create({ data: { projectId: project.id, userId, role } });
+      await notify(tx, [userId], "ADDED_TO_PROJECT", { actorId: user.id, projectId: project.id, data: { project: project.name, role } });
+      await logAction(tx, { actorId: user.id, projectId: project.id, targetType: "member", targetId: userId, action: "member.added", after: { role }, primary: false });
     }
     await notify(tx, [leader.id], "MADE_LEADER", { actorId: user.id, projectId: project.id, data: { project: project.name } });
     await logAction(tx, { actorId: user.id, projectId: project.id, targetType: "project", targetId: project.id, action: "project.created", after: { name: project.name, leaderId: leader.id } });

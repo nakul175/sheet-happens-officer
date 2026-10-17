@@ -73,6 +73,8 @@ model User {
   conciergeHidden    Boolean   @default(false)
   voiceNoticeAckedAt DateTime?
   compactRows        Boolean   @default(false)
+  // SHO-US-14.4: when the start guide on My tasks was dismissed. Server side, so it stays gone on every device.
+  startGuideDismissedAt DateTime?
   createdAt          DateTime  @default(now())
 
   memberships         ProjectMember[]
