@@ -11,6 +11,7 @@ jobs:
     env:
       HOST: ${{ vars.DROPLET_HOST || 'app.sheethappensofficer.com' }}
       HOST_KEY: ${{ vars.DROPLET_HOST_KEY }}
+      APP_HOST: app.sheethappensofficer.com
     steps:
       - name: SSH key
         env:
@@ -40,10 +41,10 @@ jobs:
           OUT=$(ssh -o PubkeyAuthentication=no -o PreferredAuthentications=password -o NumberOfPasswordPrompts=0 -o ConnectTimeout=8 "root@$HOST" true 2>&1 || true)
           if echo "$OUT" | grep -q "Permission denied (publickey)"; then ok "root cannot log in with a password"; else bad "root password login: $OUT"; fi
           # HTTP goes to HTTPS, health answers, certificate has time left.
-          CODE=$(curl -s -o /dev/null -w '%{http_code} %{redirect_url}' "http://$HOST/")
+          CODE=$(curl -s -o /dev/null -w '%{http_code} %{redirect_url}' "http://$APP_HOST/")
           case "$CODE" in 30*https://*) ok "http redirects to https";; *) bad "http answered: $CODE";; esac
-          curl -fsS "https://$HOST/api/health" | grep -q '"ok":true' && ok "health answers over https" || bad "health"
-          END=$(echo | openssl s_client -servername "$HOST" -connect "$HOST:443" 2>/dev/null | openssl x509 -noout -enddate | cut -d= -f2)
+          curl -fsS "https://$APP_HOST/api/health" | grep -q '"ok":true' && ok "health answers over https" || bad "health"
+          END=$(echo | openssl s_client -servername "$APP_HOST" -connect "$APP_HOST:443" 2>/dev/null | openssl x509 -noout -enddate | cut -d= -f2)
           DAYS=$(( ($(date -d "$END" +%s) - $(date +%s)) / 86400 ))
           [ "$DAYS" -gt 14 ] && ok "certificate valid for $DAYS more days" || bad "certificate ends in $DAYS days"
           exit $FAILED
