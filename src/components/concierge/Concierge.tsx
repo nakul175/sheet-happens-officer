@@ -1,11 +1,12 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Confirm } from "@/components/ui";
 import { Composer } from "./Composer";
 import { useConcierge } from "./ConciergeProvider";
 import { resumeText } from "./logic";
 import { MessageView } from "./MessageView";
 import { PRIVACY_SENTENCE } from "./types";
+import "./phone.css";
 
 type Variant = "dock" | "bar" | "sheet";
 
@@ -145,9 +146,16 @@ export function ConciergeFab({ kind }: { kind: "dock" | "bar" }) {
   const c = useConcierge();
   const [open, setOpen] = useState(false);
   const btn = useRef<HTMLButtonElement>(null);
+  const pushed = useRef(false); // SHO-US-10.8: opening adds a history entry so the phone Back button closes the concierge instead of leaving the page
+  const closeIt = useCallback(() => {
+    if (pushed.current) { window.history.back(); return; } // the popstate handler closes it and returns focus
+    setOpen(false); setTimeout(() => btn.current?.focus(), 0);
+  }, []);
   useEffect(() => {
     if (!open) return;
-    const esc = (e: KeyboardEvent) => { if (e.key === "Escape" && !document.querySelector(".scrim")) setOpen(false); };
+    const esc = (e: KeyboardEvent) => { if (e.key === "Escape" && !document.querySelector(".scrim")) closeIt(); };
+    const back = () => { if (pushed.current) { pushed.current = false; setOpen(false); setTimeout(() => btn.current?.focus(), 0); } };
+    window.addEventListener("popstate", back);
     document.addEventListener("keydown", esc);
     document.querySelector<HTMLTextAreaElement>(".cc-sheet textarea")?.focus();
     // SHO-US-10.3: iOS Safari does not shrink the page when the keyboard opens, so follow the visible area.
@@ -162,18 +170,24 @@ export function ConciergeFab({ kind }: { kind: "dock" | "bar" }) {
     vv?.addEventListener("scroll", fit);
     return () => {
       document.removeEventListener("keydown", esc);
+      window.removeEventListener("popstate", back);
       vv?.removeEventListener("resize", fit);
       vv?.removeEventListener("scroll", fit);
       document.documentElement.style.removeProperty("--vvh");
       document.documentElement.style.removeProperty("--vvt");
     };
-  }, [open]);
+  }, [open, closeIt]);
   if (!c) return null;
-  const close = () => { setOpen(false); setTimeout(() => btn.current?.focus(), 0); };
+  const close = closeIt;
+  const toggle = () => {
+    if (open) { close(); return; }
+    try { window.history.pushState({ ...(window.history.state ?? {}), cc: 1 }, ""); pushed.current = true; } catch { /* no history: Close still works */ }
+    setOpen(true);
+  };
   if (c.hidden) return <div className={`cc-showwrap k-${kind}`}><ShowButton /></div>;
   return (
     <div className={`cc-fabwrap k-${kind}`}>
-      <button ref={btn} className="fab" aria-label="Concierge" aria-expanded={open} onClick={() => setOpen(!open)}>💬</button>
+      <button ref={btn} className="fab" aria-label="Concierge" aria-expanded={open} onClick={toggle}>💬</button>
       {open && (
         <div className="cc-sheet" role="dialog" aria-label="Concierge">
           <Panel variant="sheet" onClose={close} />
