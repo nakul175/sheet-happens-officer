@@ -11,6 +11,8 @@ const publicSans = Public_Sans({
 export const metadata: Metadata = {
   title: "Sheet Happens Officer",
   description: "Work manager for the APLYD team",
+  icons: { icon: [{ url: "/icons/icon-192.png", sizes: "192x192", type: "image/png" }], apple: "/icons/apple-touch-icon.png" },
+  appleWebApp: { capable: true, title: "SHO", statusBarStyle: "default" },
 };
 
 export const viewport: Viewport = {
