@@ -96,3 +96,12 @@ export const taskComplete = z.object({ completeAll: z.boolean().optional() });
 export const taskReopen = z.object({ sectionId: z.string().min(1).optional() });
 export const taskMove = z.object({ sectionId: z.string().min(1), completeAll: z.boolean().optional() });
 export const taskRestore = z.object({ confirmParent: z.boolean().optional() });
+
+// ---- concierge ----
+export const conciergeText = z.object({ text: z.string().min(1).max(2000) });
+export const conciergePrefs = z.object({ hidden: z.boolean().optional(), voiceNoticeAcked: z.literal(true).optional() });
+export const conciergeChoice = z.object({ choiceId: z.string().min(1).max(100) });
+export const conciergeConfirm = z.object({
+  handover: z.array(z.object({ taskId: z.string().min(1), assigneeId: z.string().min(1) })).max(500).optional(),
+});
+export const conciergeUndo = z.object({ anyway: z.boolean().optional() });
