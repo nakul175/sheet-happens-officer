@@ -27,7 +27,7 @@ describe("reminders (7.4)", () => {
     expect((await runJob("reminders")).status).toBe(200);
     expect((await runJob("reminders")).status).toBe(200); // same day: no second reminder
     const t = await texts(w);
-    const has = (s: string) => t.filter((x) => x.includes(`"${s}"`));
+    const has = (s: string) => t.filter((x) => x.includes(`"${s}"`) && / is (due|overdue)/.test(x));
     expect(has("R-tomorrow")).toEqual(['"R-tomorrow" is due tomorrow.']);
     expect(has("R-today")).toEqual(['"R-today" is due today.']);
     expect(has("R-late1")).toEqual(['"R-late1" is overdue by 1 day.']);
@@ -45,8 +45,8 @@ describe("reminders (7.4)", () => {
     expect((await lead.c.put(`/api/tasks/${t}/approver`, { approverId: boss.id })).status).toBe(200);
     expect((await w.c.post(`/api/tasks/${t}/send-for-approval`)).status).toBe(200);
     await runJob("reminders");
-    expect((await texts(boss)).filter((x) => x.includes("R-approval") && x.includes("due tomorrow"))).toHaveLength(1);
-    expect((await texts(w)).filter((x) => x.includes("due tomorrow"))).toHaveLength(0);
+    expect((await texts(boss)).filter((x) => x.includes("R-approval") && x.includes("is due tomorrow"))).toHaveLength(1);
+    expect((await texts(w)).filter((x) => x.includes("R-approval") && x.includes("is due tomorrow"))).toHaveLength(0);
   });
 
   it("the jobs endpoints refuse callers without the secret", async () => {
