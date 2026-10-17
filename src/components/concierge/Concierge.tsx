@@ -102,6 +102,12 @@ export function Panel({ variant, onClose }: { variant: Variant; onClose?: () => 
           <p className="cc-privacy">{PRIVACY_SENTENCE}</p>
         </>
       )}
+      {c.undoAsk && (
+        <Confirm title="This changed since" yes="Undo anyway" danger
+          body={`${c.undoAsk.changedBy.length ? c.undoAsk.changedBy.join(", ") + " changed " : "Something changed "}after this action. Undoing will overwrite: ${c.undoAsk.conflicts.map((x) => `${x.field} (now ${x.now})`).join("; ") || "later edits"}.`}
+          onNo={c.dismissUndoAsk}
+          onYes={() => c.undo(c.undoAsk!.cardId, true)} />
+      )}
       {confirmClear && (
         <Confirm title="Clear my chat?" yes="Clear my chat" danger error={clearErr}
           body="This deletes your whole conversation with the concierge. Changes already made stay as they are."

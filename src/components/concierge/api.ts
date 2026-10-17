@@ -15,7 +15,8 @@ export const conciergeApi = {
   confirm: (cardId: string, handover?: { taskId: string; assigneeId: string }[]) =>
     api<{ messages: Message[]; card: Card }>("POST", `/api/concierge/cards/${encodeURIComponent(cardId)}/confirm`, handover ? { handover } : {}),
   cancel: (cardId: string) => api<{ card: Card }>("POST", `/api/concierge/cards/${encodeURIComponent(cardId)}/cancel`, {}),
-  undo: (cardId: string) => api<{ messages: Message[] }>("POST", `/api/concierge/cards/${encodeURIComponent(cardId)}/undo`, {}),
+  undo: (cardId: string, anyway = false) =>
+    api<{ messages: Message[]; needsConfirm?: string; conflicts?: { field: string; before: string; after: string; now: string }[]; changedBy?: string[] }>("POST", `/api/concierge/cards/${encodeURIComponent(cardId)}/undo`, anyway ? { anyway: true } : {}),
 };
 
 export type { Res };

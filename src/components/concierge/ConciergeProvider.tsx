@@ -25,7 +25,9 @@ type Ctx = {
   choose: (m: Message, choiceId: string) => Promise<void>;
   confirm: (cardId: string, handover?: { taskId: string; assigneeId: string }[]) => Promise<void>;
   cancel: (cardId: string) => Promise<void>;
-  undo: (cardId: string) => Promise<void>;
+  undo: (cardId: string, anyway?: boolean) => Promise<void>;
+  undoAsk: { cardId: string; conflicts: { field: string; before: string; after: string; now: string }[]; changedBy: string[] } | null;
+  dismissUndoAsk: () => void;
   clearChat: () => Promise<string | null>;
   improve: (text: string) => Promise<string | null>;
   setHidden: (h: boolean) => Promise<void>;
@@ -41,6 +43,7 @@ export function ConciergeProvider({ children }: { children: React.ReactNode }) {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [available, setAvailable] = useState(true);
   const [disabled, setDisabled] = useState<Disabled | undefined>();
+  const [undoAsk, setUndoAsk] = useState<Ctx["undoAsk"]>(null);
   const [hidden, setHiddenState] = useState(false);
   const [voiceNoticeAcked, setVoice] = useState(true); // assume acked until told otherwise, so the mic never starts unannounced
   const [quickActions, setQuick] = useState<State["quickActions"]>([]);
@@ -82,6 +85,8 @@ export function ConciergeProvider({ children }: { children: React.ReactNode }) {
       if (!r.ok) { setError(r.error ?? "That did not send."); setDraft(t); return false; }
       add(r.data.messages ?? []);
       if (r.data.disabled) setDisabled(r.data.disabled);
+      // A capped or switched-off concierge stores nothing; give the person their text back.
+      if (r.data.disabled && !(r.data.messages ?? []).length) setDraft(t);
       return true;
     });
   }, [run, add]);
@@ -119,10 +124,12 @@ export function ConciergeProvider({ children }: { children: React.ReactNode }) {
     });
   }, [run]);
 
-  const undo = useCallback(async (cardId: string) => {
+  const undo = useCallback(async (cardId: string, anyway = false) => {
     await run(async () => {
-      const r = await conciergeApi.undo(cardId);
+      const r = await conciergeApi.undo(cardId, anyway);
+      if (r.status === 409 && r.data.needsConfirm === "conflict") { setUndoAsk({ cardId, conflicts: r.data.conflicts ?? [], changedBy: r.data.changedBy ?? [] }); return; }
       if (!r.ok) { setError(r.error ?? "That could not be undone."); return; }
+      setUndoAsk(null);
       const now = new Date().toISOString();
       setMessages((l) => l.map((m) => (m.result?.cardId === cardId ? { ...m, result: { ...m.result, undoneAt: m.result.undoneAt ?? now } } : m)));
       add(r.data.messages ?? []);
@@ -160,10 +167,10 @@ export function ConciergeProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const value = useMemo<Ctx>(() => ({
-    loaded, loadError, available, disabled, hidden, voiceNoticeAcked, quickActions, messages, busy, error, draft, setDraft,
+    undoAsk, dismissUndoAsk: () => setUndoAsk(null), loaded, loadError, available, disabled, hidden, voiceNoticeAcked, quickActions, messages, busy, error, draft, setDraft,
     dismissError: () => setError(null), retryLoad: () => { setLoaded(false); setTick((n) => n + 1); },
     send, quick, choose, confirm, cancel, undo, clearChat, improve, setHidden, ackVoice,
-  }), [loaded, loadError, available, disabled, hidden, voiceNoticeAcked, quickActions, messages, busy, error, draft, send, quick, choose, confirm, cancel, undo, clearChat, improve, setHidden, ackVoice]);
+  }), [undoAsk, loaded, loadError, available, disabled, hidden, voiceNoticeAcked, quickActions, messages, busy, error, draft, send, quick, choose, confirm, cancel, undo, clearChat, improve, setHidden, ackVoice]);
 
   return <C.Provider value={value}>{children}</C.Provider>;
 }
