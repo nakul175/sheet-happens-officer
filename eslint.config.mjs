@@ -12,6 +12,7 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    "deploy/**", // ops scripts run on the server with plain node
   ]),
 ]);
 
