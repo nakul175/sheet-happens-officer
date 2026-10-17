@@ -1,0 +1,69 @@
+name: Server checks
+
+# Manual run (Actions tab > Server checks > Run workflow). Read-only: it looks at the droplet from the
+# outside and from the deploy account, and prints a PASS/FAIL line per check (story 9.3, AC8).
+on:
+  workflow_dispatch:
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    env:
+      HOST: ${{ vars.DROPLET_HOST || 'app.sheethappensofficer.com' }}
+      HOST_KEY: ${{ vars.DROPLET_HOST_KEY }}
+    steps:
+      - name: SSH key
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          printf '%s\n' "$HOST_KEY" > ~/.ssh/known_hosts
+
+      - name: From the outside
+        run: |
+          ok() { echo "PASS  $1"; }
+          bad() { echo "FAIL  $1"; FAILED=1; }
+          FAILED=0
+          # Only 22, 80 and 443 may answer.
+          for p in 3000 5432 25060 8080; do
+            if timeout 4 bash -c "exec 3<>/dev/tcp/$HOST/$p" 2>/dev/null; then bad "port $p is open to the internet"; else ok "port $p is closed"; fi
+          done
+          for p in 22 80 443; do
+            if timeout 4 bash -c "exec 3<>/dev/tcp/$HOST/$p" 2>/dev/null; then ok "port $p answers"; else bad "port $p does not answer"; fi
+          done
+          # Password logins must be refused.
+          OUT=$(ssh -o BatchMode=no -o PubkeyAuthentication=no -o PreferredAuthentications=password,keyboard-interactive -o NumberOfPasswordPrompts=0 -o ConnectTimeout=8 "deploy@$HOST" true 2>&1 || true)
+          if echo "$OUT" | grep -q "Permission denied (publickey)"; then ok "SSH offers keys only"; else bad "SSH may accept passwords: $OUT"; fi
+          # Root login with a password must not be possible either.
+          OUT=$(ssh -o PubkeyAuthentication=no -o PreferredAuthentications=password -o NumberOfPasswordPrompts=0 -o ConnectTimeout=8 "root@$HOST" true 2>&1 || true)
+          if echo "$OUT" | grep -q "Permission denied (publickey)"; then ok "root cannot log in with a password"; else bad "root password login: $OUT"; fi
+          # HTTP goes to HTTPS, health answers, certificate has time left.
+          CODE=$(curl -s -o /dev/null -w '%{http_code} %{redirect_url}' "http://$HOST/")
+          case "$CODE" in 30*https://*) ok "http redirects to https";; *) bad "http answered: $CODE";; esac
+          curl -fsS "https://$HOST/api/health" | grep -q '"ok":true' && ok "health answers over https" || bad "health"
+          END=$(echo | openssl s_client -servername "$HOST" -connect "$HOST:443" 2>/dev/null | openssl x509 -noout -enddate | cut -d= -f2)
+          DAYS=$(( ($(date -d "$END" +%s) - $(date +%s)) / 86400 ))
+          [ "$DAYS" -gt 14 ] && ok "certificate valid for $DAYS more days" || bad "certificate ends in $DAYS days"
+          exit $FAILED
+
+      - name: On the server
+        run: |
+          ssh "deploy@$HOST" 'bash -s' <<'REMOTE'
+          ok() { echo "PASS  $1"; }
+          bad() { echo "FAIL  $1"; FAILED=1; }
+          FAILED=0
+          for s in sho caddy ufw cron unattended-upgrades; do
+            [ "$(systemctl is-active $s)" = active ] && ok "$s is running" || bad "$s is not running"
+          done
+          ss -tln | awk 'NR>1{print $4}' | grep -Eq '^(0\.0\.0\.0|\*|\[::\]):3000$' && bad "the app listens on all interfaces" || ok "the app listens on localhost only"
+          [ "$(stat -c %a /etc/sho/app.env)" = 600 ] && ok "app.env is private (600)" || bad "app.env mode is $(stat -c %a /etc/sho/app.env)"
+          [ "$(stat -c %a /etc/sho/local.env)" = 600 ] && ok "local.env is private (600)" || bad "local.env mode is $(stat -c %a /etc/sho/local.env)"
+          grep -q 'sslmode=require' /etc/sho/app.env && ok "database connection requires TLS" || bad "DATABASE_URL has no sslmode=require"
+          [ -f /etc/cron.d/sho ] && ok "job schedule present" || bad "no /etc/cron.d/sho"
+          echo "INFO  releases kept: $(ls /opt/sho/releases | wc -l); live: $(basename "$(readlink /opt/sho/current)")"
+          echo "INFO  disk: $(df -h / | awk 'NR==2{print $5" used of "$2}'); memory: $(free -m | awk '/Mem:/{print $3"/"$2" MB"}')"
+          echo "INFO  last job runs:"; tail -n 6 /var/log/sho/jobs.log 2>/dev/null || echo "  (no job log yet)"
+          exit $FAILED
+          REMOTE
