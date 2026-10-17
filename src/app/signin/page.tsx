@@ -1,11 +1,15 @@
+import { Suspense } from "react";
 import { SignInForm } from "./SignInForm";
 import { Hero } from "./Hero";
 import s from "./signin.module.css";
 
 export const metadata = { title: "Sign in · Sheet Happens Officer" };
 
-export default async function Page({ searchParams }: PageProps<"/signin">) {
-  const justReset = (await searchParams).reset === "1";
+async function Form({ params }: { params: PageProps<"/signin">["searchParams"] }) {
+  return <SignInForm justReset={(await params).reset === "1"} />;
+}
+
+export default function Page({ searchParams }: PageProps<"/signin">) {
   return (
     <main className={s.wrap}>
       <div className={s.brandtop}>
@@ -15,7 +19,9 @@ export default async function Page({ searchParams }: PageProps<"/signin">) {
       </div>
       <Hero />
       <div className={s.formside}>
-        <SignInForm justReset={justReset} />
+        <Suspense>
+          <Form params={searchParams} />
+        </Suspense>
       </div>
     </main>
   );

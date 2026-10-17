@@ -45,7 +45,7 @@ export function SignInForm({ justReset }: { justReset: boolean }) {
         <span>Sheet Happens Officer</span>
       </div>
       <section className={styles.card}>
-      <h2>Sign in</h2>
+      <h2 className={s.h2}>Sign in</h2>
       <form onSubmit={submit} className={styles.card} style={{ border: 0, padding: 0 }} noValidate>
         {justReset && !error && <div role="status" className={styles.notice}>Password changed. Sign in with your new password.</div>}
         {error && (
