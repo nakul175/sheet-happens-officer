@@ -124,6 +124,25 @@ describe("create a deal (12.1)", () => {
     expect(g.deal.details.value).toBeNull();
   });
 
+  it("logs the first next step as a created task and tells the Leader they hold it (SHO-BUG-5)", async () => {
+    const creator = await account("fcreator");
+    const leader = await account("fleader");
+    const { r } = await deal(creator, leader);
+    expect(r.status, JSON.stringify(r.json)).toBe(201);
+    const id = r.json.deal.id as string;
+    expect(r.headers.get("x-undo-id")).toBeNull(); // creating a deal offers no Undo toast, not even for its first step
+    const items = (await leader.c.get(`/api/projects/${id}/activity`)).json.items as { what: string }[];
+    expect(items.filter((i) => i.what === 'added "Call the buyer" to To do')).toHaveLength(1); // the task.created row (SHO-US-14.14 wording)
+    expect(items.some((i) => i.what.startsWith("created the deal"))).toBe(true);
+    const step = (await leader.c.get(`/api/projects/${id}`)).json.project.deal.nextStep;
+    const notes = (await leader.c.get("/api/notifications")).json.items as { text: string; href: string }[];
+    expect(notes.find((n) => n.text === 'Fcreator assigned you "Call the buyer".')?.href).toBe(`/tasks/${step.id}`);
+    // When the creator leads, nobody is told about their own step.
+    const solo = await account("fsolo");
+    expect((await deal(solo, solo)).r.status).toBe(201);
+    expect(((await solo.c.get("/api/notifications")).json.items as { text: string }[]).some((n) => /assigned you/.test(n.text))).toBe(false);
+  });
+
   it("hides deals from the Projects list but shows them in Deals", async () => {
     const m = await account("dlist");
     const { r } = await deal(m, m);
