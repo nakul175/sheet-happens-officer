@@ -196,6 +196,14 @@ export async function listTasks(
   return { sections: out };
 }
 
+/** SHO-US-14.8 AC4: the same stale-edit answer for every inline edit. */
+async function staleCheck(user: Actor, id: string, t: TaskRow, role: Role, expected?: string) {
+  if (expected && new Date(expected).getTime() !== t.updatedAt.getTime()) {
+    const last = await db.actionLog.findFirst({ where: { targetType: "task", targetId: id }, orderBy: { createdAt: "desc" }, include: { actor: { select: { name: true } } } });
+    throw new ApiError(409, "This task changed while you were editing it.", { stale: true, changedBy: last?.actor.name ?? null, current: present(t, { id: user.id, role }) });
+  }
+}
+
 // ---------------------------------------------------------------- edit (4.2, 4.4)
 export async function updateTask(
   user: Actor,
@@ -246,8 +254,9 @@ export async function updateTask(
 }
 
 // ---------------------------------------------------------------- assign, collaborators, approver (4.3, 4.6)
-export async function assignTask(user: Actor, id: string, assigneeId: string) {
-  const { t } = await loadTask(user, id, { write: true });
+export async function assignTask(user: Actor, id: string, assigneeId: string, expectedUpdatedAt?: string) {
+  const { t, a } = await loadTask(user, id, { write: true });
+  await staleCheck(user, id, t, a.role, expectedUpdatedAt);
   if (t.approverId && user.id === t.assigneeId && assigneeId !== t.approverId) {
     throw new ApiError(403, "With an approver, this task can only be handed to the approver.");
   }

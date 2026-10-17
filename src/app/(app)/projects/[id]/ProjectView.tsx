@@ -10,11 +10,12 @@ import { Tick } from "@/components/TaskParts";
 import { Confirm, Field, LoadFailed, Menu, Modal } from "@/components/ui";
 import { DealPanel, type DealBlock } from "@/components/DealPanel";
 import { Page, useMe } from "../../Shell";
+import { InlineCells, inlineEditable, useInlineEdit } from "@/components/inline";
 import { ListControls } from "./ListControls";
 import { apiQuery, groupTasks, isFiltered, readState, type ListState } from "./listview";
 
 type T = {
-  id: string; title: string; sectionId: string; priority: string; dueDate: string | null; blocked: boolean; completedAt: string | null; isIdea?: boolean;
+  id: string; title: string; updatedAt: string; sectionId: string; priority: string; dueDate: string | null; blocked: boolean; completedAt: string | null; isIdea?: boolean;
   assignee: { id: string; name: string }; collaborators: { id: string; name: string }[]; awaitingApproval: boolean; canClose: boolean; subtasks: { total: number; open: number };
 };
 type S = { id: string; name: string; isDone: boolean; total: number; tasks: T[]; nextCursor: string | null };
@@ -47,6 +48,7 @@ function Inner({ id }: { id: string }) {
   const [ask, setAsk] = useState<null | { taskId: string; sectionId: string; n: number }>(null);
 
   const refresh = useCallback(() => { pr.reload(); tk.reload(); setExtra({}); }, [pr, tk]);
+  const inline = useInlineEdit(refresh);
 
   if (!pr.data && isNetworkFailure(pr.status)) {
     return <Page title="Project"><LoadFailed onRetry={refresh} /></Page>;
@@ -111,9 +113,7 @@ function Inner({ id }: { id: string }) {
       <div className="meta">
         {t.awaitingApproval && <span className="chip gold">Awaiting approval</span>}
         {t.isIdea && <span className="chip gold">Idea</span>}{t.blocked && <span className="chip red">Blocked</span>}
-        <span>{t.assignee.name}</span>
-        <span className={`pri-${t.priority}`}>{PRIORITY[t.priority]}</span>
-        <span className={!t.completedAt && isOverdue(t.dueDate) ? "over" : undefined}>{dueState(t.dueDate, !!t.completedAt)}</span>
+        <InlineCells t={t} people={p?.members ?? []} editable={canWrite && inlineEditable(p!.role, t, me.id)} onEdit={inline.run} />
       </div>
     </div>
   );
@@ -147,6 +147,7 @@ function Inner({ id }: { id: string }) {
           found={wide && filtered ? secs.reduce((n, x) => n + x.tasks.length, 0) : null} />
       )}
       {err && <div className="err" role="alert">{err}</div>}
+      {inline.notice}
       {(pr.loading || tk.loading) && !secs && <div className="skel">Loading…</div>}
       {secs && filtered && secs.every((x) => !x.tasks.length) && (
         <div className="card nomatch"><b>No tasks match</b><button className="btn ghost" onClick={() => setList({ assignee: "", flags: [], priority: "" })}>Clear filters</button></div>
