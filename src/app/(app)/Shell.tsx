@@ -74,6 +74,52 @@ function Bell() {
   );
 }
 
+
+/** SHO-US-10.4: bottom tab bar under 600 px. The server still decides who may open Usage and Audit; this only decides what is listed. */
+function TabBar({ user, here, more }: { user: Me; here: (p: string) => boolean; more: [string, string][] }) {
+  const path = usePathname();
+  const [openAt, setOpenAt] = useState<string | null>(null); // the menu belongs to the page it was opened on
+  const open = openAt === path;
+  const setOpen = (v: boolean | ((x: boolean) => boolean)) => setOpenAt((cur) => ((typeof v === "function" ? v(cur === path) : v) ? path : null));
+  const [typing, setTyping] = useState(false);
+  const box = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    // The keyboard hides the bar (a field has focus), so it never sits on top of what is being typed.
+    const on = (e: FocusEvent) => setTyping(!!(e.target as HTMLElement | null)?.matches?.("input:not([type=checkbox]):not([type=radio]), textarea, select"));
+    const off = () => setTyping(false);
+    document.addEventListener("focusin", on);
+    document.addEventListener("focusout", off);
+    return () => { document.removeEventListener("focusin", on); document.removeEventListener("focusout", off); };
+  }, []);
+  useEffect(() => {
+    if (!open) return;
+    const esc = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
+    const away = (e: Event) => { if (!box.current?.contains(e.target as Node)) setOpen(false); };
+    document.addEventListener("keydown", esc);
+    document.addEventListener("pointerdown", away);
+    return () => { document.removeEventListener("keydown", esc); document.removeEventListener("pointerdown", away); };
+  }, [open]);
+  const tabs: [string, string, string][] = [["/", "My tasks", "✓"], ["/projects", "Projects", "▤"], ["/search", "Search", "⌕"]];
+  const moreHere = more.some(([h]) => here(h)) || here("/profile");
+  return (
+    <div className={`tabbar-wrap${typing ? " typing" : ""}`} ref={box}>
+      {open && (
+        <div className="tabmore" role="menu" aria-label="More">
+          {more.map(([h, l]) => <Link key={h} href={h} role="menuitem">{l}</Link>)}
+          <Link href="/profile" role="menuitem">Profile</Link>
+          <button role="menuitem" onClick={async () => { await api("POST", "/api/auth/signout", {}); window.location.href = "/signin"; }}>Sign out</button>
+        </div>
+      )}
+      <nav className="tabbar" aria-label="Main">
+        {tabs.map(([h, l, i]) => (
+          <Link key={h} href={h} aria-current={here(h) ? "page" : undefined}><span aria-hidden>{i}</span>{l}</Link>
+        ))}
+        <button aria-expanded={open} aria-haspopup="menu" aria-current={moreHere ? "true" : undefined} onClick={() => setOpen((v) => !v)}><span aria-hidden>⋯</span>More</button>
+      </nav>
+    </div>
+  );
+}
+
 export function Shell({ user, children }: { user: Me; children: React.ReactNode }) {
   const path = usePathname();
   const [menu, setMenu] = useState<string | null>(null);
@@ -81,12 +127,31 @@ export function Shell({ user, children }: { user: Me; children: React.ReactNode 
   const here = (p: string) => (p === "/" ? path === "/" : path === p || path.startsWith(p + "/"));
   const items: [string, string][] = [["/", "My tasks"], ["/projects", "Projects"], ...(user.crm ? [["/deals", "Deals"], ["/accounts", "Accounts"], ...(user.review ? [["/review", "Pipeline review"]] : [])] as [string, string][] : []), ["/team", "Team"], ["/search", "Search"]];
   if (user.orgRole === "SUPER_ADMIN") items.push(["/usage", "Usage"], ["/audit", "Audit log"]);
+  const more = items.filter(([h]) => !["/", "/projects", "/search"].includes(h));
+  const drawer = useRef<HTMLElement>(null);
+  useEffect(() => {
+    // Drawer (600 to 1023 px): Escape closes it, Tab stays inside it, and focus returns to the burger.
+    if (!open) return;
+    const el = drawer.current;
+    el?.querySelector<HTMLElement>("a")?.focus();
+    const key = (e: KeyboardEvent) => {
+      if (e.key === "Escape") { setMenu(null); return; }
+      if (e.key !== "Tab" || !el) return;
+      const f = [...el.querySelectorAll<HTMLElement>("a[href], button")];
+      if (!f.length) return;
+      const a = document.activeElement;
+      if (e.shiftKey && (a === f[0] || !el.contains(a))) { e.preventDefault(); f[f.length - 1].focus(); }
+      else if (!e.shiftKey && (a === f[f.length - 1] || !el.contains(a))) { e.preventDefault(); f[0].focus(); }
+    };
+    document.addEventListener("keydown", key);
+    return () => { document.removeEventListener("keydown", key); document.querySelector<HTMLElement>(".burger")?.focus(); };
+  }, [open]);
   return (
     <MeCtx.Provider value={user}>
       <ConciergeProvider>
       <div className="shell">
         {open && <div className="veil" onClick={() => setMenu(null)} />}
-        <aside className={`side${open ? " open" : ""}`} aria-label="Main">
+        <aside ref={drawer} className={`side${open ? " open" : ""}`} aria-label="Main">
           <Link href="/" className="brand"><img src="/logo-icon.svg" alt="" />Sheet Happens Officer</Link>
           <nav className="nav">
             {items.map(([href, label]) => (
@@ -107,6 +172,7 @@ export function Shell({ user, children }: { user: Me; children: React.ReactNode 
           </header>
           {children}
         </div>
+        <TabBar user={user} here={here} more={more} />
       </div>
       </ConciergeProvider>
     </MeCtx.Provider>

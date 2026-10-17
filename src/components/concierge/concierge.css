@@ -88,6 +88,7 @@
 .cc-show { font: inherit; font-size: 13px; font-weight: 500; background: var(--card); color: var(--navy); border: 1px solid var(--field); border-radius: 18px; padding: 7px 13px; cursor: pointer; box-shadow: 0 4px 12px rgba(0,0,0,.15); }
 .cc-show:hover { background: #eef0f6; }
 .cc-showwrap.k-bar { bottom: 12px; }
+@media (max-width: 599px) { .cc-showwrap.k-bar { bottom: calc(72px + env(safe-area-inset-bottom, 0px)); } }
 
 @media (min-width: 1024px) { .bardock.cc-barslot { display: flex; } .cc-fabwrap.k-bar { display: none; } }
 @media (max-width: 1279px) { .cc-fabwrap.k-dock .fab { display: grid; place-items: center; } }
