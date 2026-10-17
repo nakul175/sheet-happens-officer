@@ -50,6 +50,7 @@ function Inner() {
   useEffect(() => { try { if (localStorage.getItem(GROUP_KEY(me.id)) === "project") setMode("project"); } catch { /* storage blocked: stay By date */ } }, [me.id]);
   const pick = (m: "date" | "project") => { setMode(m); try { localStorage.setItem(GROUP_KEY(me.id), m); } catch { /* ignore */ } };
   const router = useRouter();
+  useEffect(() => { window.addEventListener("sho:task-added", reload); return () => window.removeEventListener("sho:task-added", reload); }, [reload]); // SHO-US-14.5
   const open = useSearchParams().get("task");
   const total = data ? data.overdue.length + data.next7.length + data.later.length : 0;
   const groups: ("overdue" | "next7" | "later")[] = ["overdue", "next7", "later"];

@@ -1,7 +1,7 @@
 "use client";
 import { finePointer } from "@/components/client";
 import Link from "next/link";
-import { use, useCallback, useState } from "react";
+import { use, useCallback, useEffect, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Suspense } from "react";
 import { PRIORITY, ROLE, api, dueLabel, dueState, rowKeys, initials, isNetworkFailure, isOverdue, useGet } from "@/components/api";
@@ -41,6 +41,7 @@ function Inner({ id }: { id: string }) {
   const [ask, setAsk] = useState<null | { taskId: string; sectionId: string; n: number }>(null);
 
   const refresh = useCallback(() => { pr.reload(); tk.reload(); setExtra({}); }, [pr, tk]);
+  useEffect(() => { window.addEventListener("sho:task-added", refresh); return () => window.removeEventListener("sho:task-added", refresh); }, [refresh]); // SHO-US-14.5
 
   if (!pr.data && isNetworkFailure(pr.status)) {
     return <Page title="Project"><LoadFailed onRetry={refresh} /></Page>;

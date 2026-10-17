@@ -1,0 +1,8 @@
+/* SHO-US-14.5, 14.6, 14.7: quick add, shortcuts help, command palette. */
+.qa .in { margin: 4px 0 12px; }
+.qa-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.qa-row > div { min-width: 0; }
+.qa-note { margin: -4px 0 4px; font-size: 13px; }
+.qa-note.bad { color: var(--danger); }
+.newtask { white-space: nowrap; }
+@media (max-width: 599px) { .qa-row { grid-template-columns: 1fr; gap: 0; } }
