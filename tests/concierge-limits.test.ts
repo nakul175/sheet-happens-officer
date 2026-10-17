@@ -221,9 +221,9 @@ describe("caps and ledger (9.2)", () => {
     const u = await account("eighty");
     await db.notification.deleteMany({ where: { type: "CONCIERGE_BUDGET_80" } });
     const spend0 = await monthSpendUsd();
-    // The next message costs 0.1 USD; set the ceiling so that it lands at 85 percent.
-    setFakeModel(() => ({ content: [say("ok")], stopReason: "end_turn", usage: { input: 1_000_000, output: 0, cacheWrite: 0, cacheRead: 0 } }));
-    const after = spend0 + 0.1;
+    // The next message costs 10 USD; set the ceiling so that it lands at 85 percent.
+    setFakeModel(() => ({ content: [say("ok")], stopReason: "end_turn", usage: { input: 100_000_000, output: 0, cacheWrite: 0, cacheRead: 0 } }));
+    const after = spend0 + 10;
     process.env.MONTHLY_CEILING_USD = String(after / 0.85);
     expect(await warnIfNearCeiling()).toBe(false); // not yet
     await sendMessage(actor(u), "hi"); // recordUsage notices the threshold right after the call

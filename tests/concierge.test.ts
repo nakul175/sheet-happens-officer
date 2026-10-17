@@ -320,11 +320,11 @@ describe("propose and confirm (8.3)", () => {
     expect(c.card!.handoverOptions!.map((o) => o.id).sort()).toEqual([lead.id, e2.id].sort());
     expect((await db.projectMember.count({ where: { projectId: p.id, userId: ed.id } }))).toBe(1);
     // Confirm needs a taker for each task, from the offered list.
-    await expect(confirmCard(actor(lead), c.id)).rejects.toMatchObject({ status: 400 });
-    await expect(confirmCard(actor(lead), c.id, [{ taskId: t1, assigneeId: e2.id }])).rejects.toMatchObject({ status: 400 });
-    await expect(confirmCard(actor(lead), c.id, [{ taskId: t1, assigneeId: e2.id }, { taskId: t2, assigneeId: ed.id }])).rejects.toMatchObject({ status: 400 });
+    await expect(confirmCard(actor(lead), c.id, undefined, true)).rejects.toMatchObject({ status: 400 });
+    await expect(confirmCard(actor(lead), c.id, [{ taskId: t1, assigneeId: e2.id }], true)).rejects.toMatchObject({ status: 400 });
+    await expect(confirmCard(actor(lead), c.id, [{ taskId: t1, assigneeId: e2.id }, { taskId: t2, assigneeId: ed.id }], true)).rejects.toMatchObject({ status: 400 });
     expect((await db.projectMember.count({ where: { projectId: p.id, userId: ed.id } }))).toBe(1);
-    const done = await confirmCard(actor(lead), c.id, [{ taskId: t1, assigneeId: e2.id }, { taskId: t2, assigneeId: lead.id }]);
+    const done = await confirmCard(actor(lead), c.id, [{ taskId: t1, assigneeId: e2.id }, { taskId: t2, assigneeId: lead.id }], true);
     expect(await db.projectMember.count({ where: { projectId: p.id, userId: ed.id } })).toBe(0);
     expect((await db.task.findUniqueOrThrow({ where: { id: t1 } })).assigneeId).toBe(e2.id);
     expect((await db.task.findUniqueOrThrow({ where: { id: t2 } })).assigneeId).toBe(lead.id);
@@ -395,7 +395,7 @@ describe("clarifying questions (8.4)", () => {
       () => [tu("find_tasks", { text: "budget" })],
       (req) => {
         const text = req.messages.map((m) => (typeof m.content === "string" ? m.content : "")).find((c) => c.includes("The person chose"))!;
-        const picked = /with id (\S+?):/.exec(text)![1];
+        const picked = /with id (\S+) from/.exec(text)![1];
         return [tu("propose_changes", { changes: [{ action: "edit_task", task_id: picked, due_date: "monday" }] })];
       },
     );
@@ -405,8 +405,8 @@ describe("clarifying questions (8.4)", () => {
     expect(card.card!.changes[0].before).toBe("Due Thursday 27 March 2031");
     expect((await state(actor(lead))).messages.find((m) => m.id === q.id)!.choiceAnswered).toBe(b);
     await expect(answerChoice(actor(lead), q.id, a, MONDAY)).rejects.toMatchObject({ status: 409 }); // answered once
-    // The continuation was not counted as a second message.
-    expect(await db.modelUsage.count({ where: { userId: lead.id, counted: true } })).toBe(1);
+    // The first call of the continuation counts too, so choice chains cannot dodge the weekly cap.
+    expect(await db.modelUsage.count({ where: { userId: lead.id, counted: true } })).toBe(2);
   });
 
   it("an id the person never picked cannot be used even after a pick for another record", async () => {
@@ -557,7 +557,7 @@ describe("undo of a card (8.5)", () => {
     script(() => [tu("propose_changes", { changes: [{ action: "create_project", name: "Chat-made project" }] })]);
     const c = cardOf((await ask(lead, "create a project called Chat-made project")).messages);
     expect(c.card!.irreversible).toBe(true);
-    const done = await confirmCard(actor(lead), c.id);
+    const done = await confirmCard(actor(lead), c.id, undefined, true);
     expect(done.messages[0].result!.undoable).toBe(false);
     const made = await db.project.findFirstOrThrow({ where: { name: "Chat-made project", members: { some: { userId: lead.id, role: "LEADER" } } } });
     expect(made).toBeTruthy();
