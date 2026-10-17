@@ -403,7 +403,7 @@ describe("approver (4.6)", () => {
 });
 
 describe("trash (6.1, 6.2)", () => {
-  it("moves a task and its subtasks to Trash, lets Editors restore, refuses Viewers", async () => {
+  it("moves a task and its subtasks to Trash, lets only the Leader restore, refuses Editors and Viewers", async () => {
     const lead = await account("lead");
     const ed = await account("editor");
     const viewer = await account("viewer");
@@ -419,7 +419,8 @@ describe("trash (6.1, 6.2)", () => {
     expect(trash[0].daysLeft).toBe(30);
     expect(trash[0].deletedBy.name).toBe("Editor");
     expect((await viewer.c.post(`/api/tasks/${t}/restore`)).status).toBe(403);
-    expect((await ed.c.post(`/api/tasks/${t}/restore`)).status).toBe(200);
+    expect((await ed.c.post(`/api/tasks/${t}/restore`)).status).toBe(403);
+    expect((await lead.c.post(`/api/tasks/${t}/restore`)).status).toBe(200);
     expect((await ed.c.get(`/api/tasks/${t}`)).json.task.sectionId).toBe(p.doing);
     expect((await ed.c.get(`/api/tasks/${sub}`)).status).toBe(200);
   });
@@ -448,6 +449,19 @@ describe("trash (6.1, 6.2)", () => {
     expect((await lead.c.post(`/api/tasks/${t}/restore`)).status).toBe(200);
     expect((await lead.c.get(`/api/tasks/${t}`)).json.task.assignee.id).toBe(lead.id);
     expect((await new Client().post("/api/jobs/purge-trash")).status).toBe(401);
+  });
+
+  it("also moves a restored subtask to the Leader when its assignee was deactivated while it sat in Trash", async () => {
+    const sa = await superAdmin();
+    const lead = await account("lead");
+    const ed = await account("editor");
+    const p = await project(lead, lead, [{ who: ed }]);
+    const t = await task(lead, p.id);
+    const sub = await task(ed, p.id, { parentId: t });
+    await lead.c.del(`/api/tasks/${t}`);
+    await sa.c.post(`/api/team/${ed.id}/deactivate`, { reassign: "leaders" });
+    expect((await lead.c.post(`/api/tasks/${t}/restore`)).status).toBe(200);
+    expect((await lead.c.get(`/api/tasks/${sub}`)).json.task.assignee.id).toBe(lead.id);
   });
 });
 

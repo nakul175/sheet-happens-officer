@@ -1,5 +1,5 @@
 import { db } from "@/lib/db";
-import { LOCKOUT_FAILURES, LOCKOUT_MINUTES, audit, clientIp, publicUser, startSession, verifyPassword } from "@/lib/auth";
+import { LOCKOUT_FAILURES, LOCKOUT_MINUTES, audit, clientIp, publicUser, startSession, superAdminEmails, verifyPassword } from "@/lib/auth";
 import { ApiError, handle, parseBody } from "@/lib/http";
 import { signInInput } from "@/lib/schemas";
 
@@ -29,6 +29,18 @@ export const POST = handle(async (req: Request) => {
     throw new ApiError(403, "This account is deactivated.");
   }
   if (!user.emailVerifiedAt) throw new ApiError(403, "Verify your email first.");
+
+  // SHO-US-2.1 AC4: the Super Admin list is read at every sign-in. Listed means Super Admin; unlisted means Member.
+  const listed = superAdminEmails().includes(user.email.toLowerCase());
+  if (listed && user.orgRole !== "SUPER_ADMIN") {
+    await db.user.update({ where: { id: user.id }, data: { orgRole: "SUPER_ADMIN" } });
+    await audit("ORG_ROLE_CHANGED", { actorId: user.id, data: { role: "SUPER_ADMIN", source: "SUPER_ADMIN_EMAILS" } });
+    user.orgRole = "SUPER_ADMIN";
+  } else if (!listed && user.orgRole === "SUPER_ADMIN" && superAdminEmails().length > 0) { // an empty list never demotes anyone
+    await db.user.update({ where: { id: user.id }, data: { orgRole: "MEMBER" } });
+    await audit("ORG_ROLE_CHANGED", { actorId: user.id, data: { role: "MEMBER", source: "SUPER_ADMIN_EMAILS" } });
+    user.orgRole = "MEMBER";
+  }
 
   await db.loginAttempt.deleteMany({ where: { email } });
   await startSession(user.id, req.headers.get("user-agent"));

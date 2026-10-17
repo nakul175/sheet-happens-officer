@@ -15,7 +15,7 @@ export default function Trash({ params }: { params: Promise<{ id: string }> }) {
   const [ask, setAsk] = useState<null | { item: Item; parent: string }>(null);
   const p = pr.data?.project;
   if (tr.error && !tr.data) return <Page title="This project isn't available"><div className="card empty"><Link href="/projects">Back to Projects</Link></div></Page>;
-  const canRestore = !!p && p.role !== "VIEWER" && !p.archived;
+  const canRestore = !!p && p.role === "LEADER" && !p.archived;
   async function restore(item: Item, confirmParent = false) {
     const r = await api("POST", `/api/tasks/${item.id}/restore`, { confirmParent });
     if (r.ok) { setAsk(null); setErr(null); tr.reload(); }

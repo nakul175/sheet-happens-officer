@@ -106,3 +106,12 @@ jobs:
           } | ssh "deploy@$HOST" 'umask 077 && cat > /etc/sho/app.env'
       - name: Release
         run: ssh "deploy@$HOST" "bash /opt/sho/releases/$GITHUB_SHA/deploy/release.sh $GITHUB_SHA"
+      - name: Email the owner if the release failed
+        if: failure()
+        env:
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          curl -sS -o /dev/null -w "owner email: HTTP %{http_code}\n" https://api.resend.com/emails \
+            -H "Authorization: Bearer $RESEND_API_KEY" -H "Content-Type: application/json" \
+            -d "{\"from\":\"Sheet Happens Officer <no-reply@sheethappensofficer.com>\",\"to\":[\"nakul.jain@aplyd.com\"],\"subject\":\"SHO release failed (previous release restored if the app was switched)\",\"text\":\"The release of ${GITHUB_SHA::7} failed. If the health check failed, the previous release was restored automatically. Details: $RUN_URL\"}" || true

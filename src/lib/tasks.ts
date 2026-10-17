@@ -1,7 +1,7 @@
 import { db } from "@/lib/db";
 import { ApiError, notFound } from "@/lib/http";
 import {
-  WORKERS, activeMember, leaderId, projectAccess, requireWrite, type Actor, type Role, type Tx,
+  WORKERS, activeMember, leaderId, projectAccess, requireManage, requireWrite, type Actor, type Role, type Tx,
 } from "@/lib/access";
 import { addDays, formatDueDate, parseDueDate, startOfTodayIST } from "@/lib/dates";
 import { logAction, notify } from "@/lib/notify";
@@ -400,7 +400,8 @@ export async function deleteTask(user: Actor, id: string) {
 }
 
 export async function restoreTask(user: Actor, id: string, confirmParent = false) {
-  const { t } = await loadTask(user, id, { write: true, deleted: true });
+  const { t, a } = await loadTask(user, id, { write: true, deleted: true });
+  requireManage(a); // SHO-US-3.3 AC1: only the Leader or an Admin restores from Trash
   if (!t.deletedAt) throw new ApiError(409, "This task is not in Trash.");
   const parent = t.parentId ? await db.task.findUnique({ where: { id: t.parentId } }) : null;
   const parentDeleted = !!parent?.deletedAt;
@@ -413,10 +414,17 @@ export async function restoreTask(user: Actor, id: string, confirmParent = false
     for (const x of targets) {
       const assigneeOk = await activeMember(tx, t.projectId, x.assigneeId, WORKERS);
       const approverOk = x.approverId ? await activeMember(tx, t.projectId, x.approverId, WORKERS) : null;
+      const subs = await tx.task.findMany({ where: { parentId: x.id, deletedAt: x.deletedAt }, select: { id: true, assigneeId: true } });
       await tx.task.updateMany({
         where: { OR: [{ id: x.id }, { parentId: x.id, deletedAt: x.deletedAt }] },
         data: { deletedAt: null, deletedById: null },
       });
+      // A subtask whose assignee left while it sat in Trash also goes to the Leader (SHO-US-6.2 AC3).
+      for (const s of subs) {
+        if (!(await activeMember(tx, t.projectId, s.assigneeId, WORKERS))) {
+          await tx.task.update({ where: { id: s.id }, data: { assigneeId: leader } });
+        }
+      }
       if (!assigneeOk) {
         await tx.task.update({ where: { id: x.id }, data: { assigneeId: leader } });
         await notify(tx, [leader], "RESTORED_TO_LEADER", { actorId: user.id, taskId: x.id, projectId: t.projectId, data: { title: x.title } });
