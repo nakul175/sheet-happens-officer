@@ -4,7 +4,7 @@ import Link from "next/link";
 import { use, useCallback, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Suspense } from "react";
-import { PRIORITY, ROLE, api, dueLabel, initials, isNetworkFailure, isOverdue, useGet } from "@/components/api";
+import { PRIORITY, ROLE, api, dueLabel, dueState, rowKeys, initials, isNetworkFailure, isOverdue, useGet } from "@/components/api";
 import { TaskModal } from "@/components/TaskModal";
 import { Tick } from "@/components/TaskParts";
 import { Confirm, Field, LoadFailed, Menu, Modal } from "@/components/ui";
@@ -89,7 +89,7 @@ function Inner({ id }: { id: string }) {
   const archivedBanner = p?.archived && <div className="box warn" style={{ marginBottom: 12 }}>This project is archived and read-only.</div>;
 
   return (
-    <Page dock={view === "list"} bar={view === "board"}
+    <Page dock={view === "list"} bar={view === "board"} docTitle={p?.name}
       title={<span className="crumb"><Link href={p?.type === "DEAL" ? "/deals" : "/projects"}>{p?.type === "DEAL" ? "Deals" : "Projects"}</Link> / <span style={{ color: "var(--ink)" }}>{p?.name ?? "…"}</span></span>}
       sub={p && <span className="chip">You: {ROLE[p.role]}</span>}
       actions={canWrite && <button className="btn" onClick={() => setAdding(true)}>+ Add task</button>}>
@@ -119,7 +119,7 @@ function Inner({ id }: { id: string }) {
             </div>
             <div className="list">
               {list.map((t) => (
-                <div key={t.id} className="item click" onClick={() => openTask(t.id)}>
+                <div key={t.id} className="item click" {...rowKeys(() => openTask(t.id))}>
                   <Tick id={t.id} title={t.title} done={!!t.completedAt} allowed={canWrite && (t.canClose || !!t.completedAt)} onDone={refresh} />
                   <div className="t"><b>{t.title}</b>{t.subtasks.total > 0 && <small>{t.subtasks.total - t.subtasks.open} of {t.subtasks.total} subtasks</small>}</div>
                   <div className="meta">
@@ -127,7 +127,7 @@ function Inner({ id }: { id: string }) {
                     {t.isIdea && <span className="chip gold">Idea</span>}{t.blocked && <span className="chip red">Blocked</span>}
                     <span>{t.assignee.name}</span>
                     <span className={`pri-${t.priority}`}>{PRIORITY[t.priority]}</span>
-                    <span className={!t.completedAt && isOverdue(t.dueDate) ? "over" : undefined}>{dueLabel(t.dueDate)}</span>
+                    <span className={!t.completedAt && isOverdue(t.dueDate) ? "over" : undefined}>{dueState(t.dueDate, !!t.completedAt)}</span>
                   </div>
                 </div>
               ))}
@@ -161,7 +161,7 @@ function Inner({ id }: { id: string }) {
                   onClick={() => openTask(t.id)} tabIndex={0} onKeyDown={(e) => { if (e.key === "Enter") openTask(t.id); }}>
                   <div>{t.title}</div>
                   <div className="row2">
-                    <span className={!t.completedAt && isOverdue(t.dueDate) ? "over" : undefined} style={isOverdue(t.dueDate) && !t.completedAt ? { color: "var(--danger)" } : undefined}>{dueLabel(t.dueDate)}</span>
+                    <span className={!t.completedAt && isOverdue(t.dueDate) ? "over" : undefined} style={isOverdue(t.dueDate) && !t.completedAt ? { color: "var(--danger)" } : undefined}>{dueState(t.dueDate, !!t.completedAt)}</span>
                     <span className={`pri-${t.priority}`}>{PRIORITY[t.priority]}</span>
                     {t.subtasks.total > 0 && <span>{t.subtasks.total - t.subtasks.open} of {t.subtasks.total}</span>}
                     {t.isIdea && <span className="chip gold">Idea</span>}{t.blocked && <span className="chip red">Blocked</span>}

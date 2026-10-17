@@ -64,6 +64,14 @@ export function dueLabel(d: string | null) {
 }
 export const todayIST = () => new Date(Date.now() + 5.5 * 3600_000).toISOString().slice(0, 10);
 export const isOverdue = (d: string | null) => !!d && d < todayIST();
+/** Date text that also says "Overdue" in words, so colour is not the only signal. */
+export const dueState = (d: string | null, done = false) => (!done && isOverdue(d) ? `Overdue · ${dueLabel(d)}` : dueLabel(d));
+/** Props that make a clickable row reachable and openable from the keyboard. */
+export const rowKeys = (open: () => void) => ({
+  tabIndex: 0, role: "link" as const,
+  onClick: open,
+  onKeyDown: (e: React.KeyboardEvent) => { if (e.target === e.currentTarget && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); open(); } },
+});
 
 export const PRIORITY: Record<string, string> = { LOW: "Low", MEDIUM: "Medium", HIGH: "High", URGENT: "Urgent" };
 export const ROLE: Record<string, string> = { LEADER: "Leader", EDITOR: "Editor", VIEWER: "Viewer" };

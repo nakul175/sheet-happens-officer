@@ -114,8 +114,10 @@ export function Shell({ user, children }: { user: Me; children: React.ReactNode 
 }
 
 /** Page frame. `dock` reserves the 340 px concierge column on wide screens (list screens only). */
-export function Page({ title, sub, actions, dock, bar, children }: { title?: React.ReactNode; sub?: React.ReactNode; actions?: React.ReactNode; dock?: boolean; bar?: boolean; children: React.ReactNode }) {
+export function Page({ title, docTitle, sub, actions, dock, bar, children }: { title?: React.ReactNode; docTitle?: string; sub?: React.ReactNode; actions?: React.ReactNode; dock?: boolean; bar?: boolean; children: React.ReactNode }) {
   const slot = dock || bar;
+  const tab = docTitle ?? (typeof title === "string" ? title : undefined);
+  useEffect(() => { if (tab) document.title = `${tab} · Sheet Happens Officer`; }, [tab]);
   const hidden = useConcierge()?.hidden ?? false; // a hidden concierge gives its space back
   return (
     <>

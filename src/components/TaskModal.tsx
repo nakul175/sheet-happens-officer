@@ -117,7 +117,10 @@ export function TaskModal({ id, me, onClose, onChanged, asPage }: { id: string; 
             </div>
           )}
           {err && <div className="err" role="alert">{err}</div>}
-          <input className="tt" aria-label="Title" defaultValue={task.title} key={task.title + task.updatedAt} readOnly={!canEdit || holding}
+          <textarea className="tt" rows={1} aria-label="Title" defaultValue={task.title} key={task.title + task.updatedAt} readOnly={!canEdit || holding} maxLength={500}
+            ref={(el) => { if (el) { el.style.height = "auto"; el.style.height = `${el.scrollHeight}px`; } }}
+            onInput={(e) => { const el = e.currentTarget; el.style.height = "auto"; el.style.height = `${el.scrollHeight}px`; }}
+            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); e.currentTarget.blur(); } }}
             onBlur={(e) => {
               const v = e.target.value.trim();
               if (!v) { setErr("Give the task a title."); e.target.value = task.title; }
@@ -201,7 +204,7 @@ export function TaskModal({ id, me, onClose, onChanged, asPage }: { id: string; 
               ) : task.blocked ? "Yes" : "No"}
               {task.blocked && (
                 canEdit && !holding ? (
-                  <input className="in" style={{ marginTop: 6 }} aria-label="Why is it blocked?" placeholder="Why is it blocked?" defaultValue={task.blockedReason ?? ""} key={task.updatedAt}
+                  <textarea className="in" rows={2} style={{ marginTop: 6, minHeight: 0 }} aria-label="Why is it blocked?" placeholder="Why is it blocked?" defaultValue={task.blockedReason ?? ""} key={task.updatedAt}
                     onBlur={(e) => { if ((e.target.value || null) !== (task.blockedReason ?? null)) save({ blockedReason: e.target.value || null }); }} />
                 ) : task.blockedReason ? <div className="hint">{task.blockedReason}</div> : null
               )}
