@@ -293,7 +293,9 @@ async function plan(row: any, user: Actor, projectId: string): Promise<Plan> {
         apply: async (tx) => {
           if (cur) await tx.section.update({ where: { id: cur.id }, data: { isDone: false } });
           await tx.section.update({ where: { id: b.doneSectionId }, data: { isDone: true } });
-          if (Array.isArray(f.completedTaskIds) && f.completedTaskIds.length) await tx.task.updateMany({ where: { id: { in: f.completedTaskIds } }, data: { completedAt: null } });
+          // Parents closed by the change reopen, and so do the subtasks that closed with them (SHO-BUG-3).
+          const closed = [...(Array.isArray(f.completedTaskIds) ? f.completedTaskIds : []), ...(Array.isArray(f.completedSubtaskIds) ? f.completedSubtaskIds : [])];
+          if (closed.length) await tx.task.updateMany({ where: { id: { in: closed } }, data: { completedAt: null } });
           if (Array.isArray(b.reopenedTaskIds) && b.reopenedTaskIds.length) await tx.task.updateMany({ where: { id: { in: b.reopenedTaskIds }, completedAt: null }, data: { completedAt: new Date() } });
         },
       };

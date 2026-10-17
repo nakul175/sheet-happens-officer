@@ -1,7 +1,10 @@
 // Integration tests for roles, projects, members, Sections and tasks (SHO-US-2.x to 6.2).
-// Server must run with SUPER_ADMIN_EMAILS=root.test@aplyd.com and the same EMAIL_OUTBOX_DIR.
+// Server must run with SUPER_ADMIN_EMAILS=root.test@aplyd.com and the same EMAIL_OUTBOX_DIR; DATABASE_URL points at the same database.
 import { describe, expect, it } from "vitest";
+import { PrismaClient } from "../src/generated/prisma/client";
 import { Client, account, admin, istDate, project, superAdmin, task, type Account } from "./helpers";
+
+const db = new PrismaClient();
 
 describe("people and roles (2.x)", () => {
   it("makes the configured address Super Admin", async () => {
@@ -202,6 +205,35 @@ describe("sections (5.4)", () => {
     expect((await lead.c.patch(`/api/projects/${p.id}/sections/${p.done}`, { isDone: false })).status).toBe(409);
     expect((await lead.c.del(`/api/projects/${p.id}/sections/${p.doing}?moveTo=${p.todo}`)).status).toBe(204);
     expect((await lead.c.get(`/api/tasks/${t}`)).json.task.sectionId).toBe(p.todo);
+  });
+
+  it("closes open subtasks with their parent when a section becomes the done section or is deleted into it, one log row each (SHO-BUG-3)", async () => {
+    const lead = await account("lead");
+    const p = await project(lead, lead);
+    const parent = await task(lead, p.id, { title: "Parent", sectionId: p.doing });
+    const subs = [await task(lead, p.id, { parentId: parent }), await task(lead, p.id, { parentId: parent })];
+    const all = [parent, ...subs].sort();
+    const completedAt = async (id: string) => (await lead.c.get(`/api/tasks/${id}`)).json.task.completedAt as string | null;
+    const completedRows = async (since: Date) => (await db.actionLog.findMany({ where: { projectId: p.id, action: "task.completed", createdAt: { gte: since } } })).map((r) => r.targetId).sort();
+
+    // "In progress" becomes the done section: the parent and both subtasks close, a task.completed row each.
+    let since = new Date();
+    const r = await lead.c.patch(`/api/projects/${p.id}/sections/${p.doing}`, { isDone: true });
+    expect(r.status, JSON.stringify(r.json)).toBe(200);
+    for (const id of all) expect(await completedAt(id)).not.toBeNull();
+    expect(await completedRows(since)).toEqual(all);
+    expect((await lead.c.get(`/api/tasks/${parent}`)).json.task.subtasks).toEqual({ total: 2, open: 0 });
+    // Undo reopens all three and puts the done flag back.
+    expect((await lead.c.post(`/api/actions/${r.headers.get("x-undo-id")}/undo`)).status).toBe(200);
+    for (const id of all) expect(await completedAt(id)).toBeNull();
+    expect((await lead.c.get(`/api/projects/${p.id}`)).json.project.sections.find((s: { isDone: boolean }) => s.isDone).id).toBe(p.done);
+
+    // Deleting "In progress" into the done section does the same.
+    since = new Date();
+    expect((await lead.c.del(`/api/projects/${p.id}/sections/${p.doing}?moveTo=${p.done}`)).status).toBe(204);
+    for (const id of all) expect(await completedAt(id)).not.toBeNull();
+    expect(await completedRows(since)).toEqual(all);
+    expect((await lead.c.get(`/api/tasks/${parent}`)).json.task.sectionId).toBe(p.done);
   });
 });
 
