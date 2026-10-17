@@ -60,10 +60,17 @@ export const superAdminEmails = () =>
     .map((e) => e.trim().toLowerCase())
     .filter(Boolean);
 
-export async function startSession(userId: string) {
+export function deviceLabel(ua?: string | null) {
+  if (!ua) return "Unknown device";
+  const browser = /Edg\//.test(ua) ? "Edge" : /OPR\//.test(ua) ? "Opera" : /Chrome\//.test(ua) ? "Chrome" : /Firefox\//.test(ua) ? "Firefox" : /Safari\//.test(ua) ? "Safari" : "Browser";
+  const os = /iPhone|iPad/.test(ua) ? "iPhone" : /Android/.test(ua) ? "Android" : /Mac OS X/.test(ua) ? "Mac" : /Windows/.test(ua) ? "Windows" : /Linux/.test(ua) ? "Linux" : "device";
+  return `${browser} on ${os}`;
+}
+
+export async function startSession(userId: string, userAgent?: string | null) {
   const token = newToken();
   const expiresAt = new Date(Date.now() + SESSION_DAYS * 24 * HOUR);
-  await db.session.create({ data: { userId, tokenHash: sha256(token), expiresAt } });
+  await db.session.create({ data: { userId, tokenHash: sha256(token), expiresAt, userAgent: userAgent?.slice(0, 300) ?? null } });
   const store = await cookies();
   store.set(SESSION_COOKIE, token, {
     httpOnly: true,
@@ -93,6 +100,10 @@ export async function currentUser() {
   const u = session?.user;
   if (!session || session.revokedAt || session.expiresAt <= new Date() || !u || u.deactivatedAt || !u.emailVerifiedAt) {
     throw new ApiError(401, "Not signed in");
+  }
+  // Last-active time for the Profile screen; written at most every 5 minutes.
+  if (Date.now() - session.lastSeenAt.getTime() > 5 * 60_000) {
+    await db.session.update({ where: { id: session.id }, data: { lastSeenAt: new Date() } });
   }
   return u;
 }
@@ -130,4 +141,11 @@ export async function consumeToken(raw: string, type: "VERIFY" | "RESET") {
   if (!t || t.type !== type || t.usedAt || t.expiresAt <= new Date()) return null;
   const claimed = await db.authToken.updateMany({ where: { id: t.id, usedAt: null }, data: { usedAt: new Date() } });
   return claimed.count === 1 ? t.userId : null;
+}
+
+/** The id of the session making this request, or null. */
+export async function currentSessionId() {
+  const token = (await cookies()).get(SESSION_COOKIE)?.value;
+  if (!token) return null;
+  return (await db.session.findUnique({ where: { tokenHash: sha256(token) } }))?.id ?? null;
 }

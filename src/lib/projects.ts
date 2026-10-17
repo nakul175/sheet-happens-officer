@@ -50,6 +50,8 @@ export async function listProjects(user: Actor, archived: boolean) {
     leader: p.members[0]?.user ?? null,
     openTasks: p._count.tasks,
     role: isAdmin(user) ? "LEADER" : mine.find((m) => m.projectId === p.id)?.role ?? null,
+    // The person's own seat, if any (Admins see every project but only some are theirs).
+    myRole: mine.find((m) => m.projectId === p.id)?.role ?? null,
   }));
 }
 

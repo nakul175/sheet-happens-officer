@@ -49,7 +49,28 @@ export async function logAction(
       afterState: o.after as Json | undefined,
     },
   });
+  const event = AUDITED[o.action];
+  if (event) {
+    await tx.auditLog.create({
+      data: { event, actorId: o.actorId, targetType: o.targetType, targetId: o.targetId, channel: "SCREEN", data: { projectId: o.projectId } },
+    });
+  }
 }
+
+// Project actions that are also security-relevant for the organisation audit log (SHO-US-6.5).
+const AUDITED: Record<string, string> = {
+  "project.created": "PROJECT_CREATED",
+  "project.archived": "PROJECT_ARCHIVED",
+  "project.unarchived": "PROJECT_UNARCHIVED",
+  "project.leader_changed": "PROJECT_LEADER_CHANGED",
+  "member.added": "MEMBER_ADDED",
+  "member.removed": "MEMBER_REMOVED",
+  "member.role_changed": "MEMBER_ROLE_CHANGED",
+  "section.deleted": "SECTION_DELETED",
+  "task.deleted": "TASK_DELETED",
+  "task.restored": "TASK_RESTORED",
+  "task.approver_changed": "APPROVER_CHANGED",
+};
 
 export async function auditTx(tx: Tx, event: string, o: { actorId?: string | null; targetId?: string; data?: Record<string, unknown> }) {
   await tx.auditLog.create({

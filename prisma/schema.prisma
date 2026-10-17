@@ -92,14 +92,17 @@ model User {
 }
 
 model Session {
-  id        String    @id @default(cuid())
-  userId    String
-  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  tokenHash String    @unique
+  id         String    @id @default(cuid())
+  userId     String
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash  String    @unique
   // Fixed 30 days from sign-in; not extended by use.
-  expiresAt DateTime
-  revokedAt DateTime?
-  createdAt DateTime  @default(now())
+  expiresAt  DateTime
+  revokedAt  DateTime?
+  // Shown on Profile as "Chrome on Mac · last active" (SHO-US-1.6).
+  userAgent  String?
+  lastSeenAt DateTime  @default(now())
+  createdAt  DateTime  @default(now())
 
   @@index([userId])
   @@index([expiresAt])

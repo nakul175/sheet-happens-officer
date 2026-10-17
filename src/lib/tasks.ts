@@ -50,11 +50,15 @@ export function present(t: TaskRow, viewer?: { id: string; role: Role }) {
   };
 }
 
-async function loadTask(user: Actor, id: string, o: { write?: boolean; deleted?: boolean } = {}) {
+async function loadTask(user: Actor, id: string, o: { write?: boolean; deleted?: boolean; holderCanDo?: boolean } = {}) {
   const t = await loadRow(id);
   if (!t || (t.deletedAt && !o.deleted)) throw notFound("Task");
   const a = await projectAccess(user, t.projectId, { write: o.write });
   if (o.write) requireWrite(a);
+  // The approver holding a task can only Close it or Send it back (SHO-US-4.6); the Leader and Admins keep full authority.
+  if (o.write && !o.holderCanDo && awaiting(t) && user.id === t.approverId && a.role !== "LEADER") {
+    throw new ApiError(403, "While you hold this task for approval you can only close it or send it back.");
+  }
   return { t, a };
 }
 
@@ -304,7 +308,7 @@ export async function sendForApproval(user: Actor, id: string) {
 }
 
 export async function sendBack(user: Actor, id: string) {
-  const { t, a } = await loadTask(user, id, { write: true });
+  const { t, a } = await loadTask(user, id, { write: true, holderCanDo: true });
   if (!awaiting(t)) throw new ApiError(409, "This task is not awaiting approval.");
   if (user.id !== t.approverId && a.role !== "LEADER") throw new ApiError(403, "Only the approver, the Leader or an Admin can send this back.");
   await db.$transaction(async (tx) => {
@@ -318,7 +322,7 @@ export async function sendBack(user: Actor, id: string) {
 
 // ---------------------------------------------------------------- complete, reopen, move (4.5)
 export async function completeTask(user: Actor, id: string, completeAll = false) {
-  const { t, a } = await loadTask(user, id, { write: true });
+  const { t, a } = await loadTask(user, id, { write: true, holderCanDo: true });
   if (!canClose(user.id, a.role, t)) {
     throw new ApiError(403, t.approverId ? "Only the approver, the Leader or an Admin can close this task." : "You cannot complete this task.");
   }
@@ -367,7 +371,7 @@ export async function reopenTask(user: Actor, id: string, sectionId?: string) {
 
 /** Dragging a card. Into the done Section completes, out of it reopens, otherwise only the Section changes. */
 export async function moveTask(user: Actor, id: string, sectionId: string, completeAll = false) {
-  const { t, a } = await loadTask(user, id, { write: true });
+  const { t, a } = await loadTask(user, id, { write: true, holderCanDo: true });
   if (t.parentId) throw new ApiError(409, "Subtasks move with their parent task.");
   const dest = await db.section.findFirst({ where: { id: sectionId, projectId: t.projectId } });
   if (!dest) throw notFound("Section");
@@ -445,6 +449,7 @@ export async function listTrash(user: Actor, projectId: string) {
 export async function purgeTrash(now = new Date()) {
   const cutoff = new Date(now.getTime() - 30 * 86400_000);
   const r = await db.task.deleteMany({ where: { deletedAt: { lte: cutoff } } });
+  if (r.count) await db.auditLog.create({ data: { event: "TASK_PURGED", channel: "SCREEN", data: { count: r.count } } });
   await db.jobRun.upsert({
     where: { job: "purge-trash" },
     create: { job: "purge-trash", lastStartedAt: now, lastFinishedAt: new Date(), lastStatus: "OK" },

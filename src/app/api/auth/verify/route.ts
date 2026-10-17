@@ -1,5 +1,5 @@
 import { db } from "@/lib/db";
-import { consumeToken } from "@/lib/auth";
+import { audit, consumeToken } from "@/lib/auth";
 import { ApiError, handle, parseBody } from "@/lib/http";
 import { tokenInput } from "@/lib/schemas";
 
@@ -9,5 +9,6 @@ export const POST = handle(async (req: Request) => {
   const userId = await consumeToken(token, "VERIFY");
   if (!userId) throw new ApiError(400, "This link has expired or was already used.");
   await db.user.update({ where: { id: userId }, data: { emailVerifiedAt: new Date() } });
+  await audit("EMAIL_VERIFIED", { actorId: userId });
   return Response.json({ status: "verified" });
 });
