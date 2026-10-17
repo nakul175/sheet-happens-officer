@@ -32,7 +32,7 @@ function Inner() {
           <div className="list">
             {data[key].map((t) => (
               <div key={t.id} className="item click" onClick={() => router.push(`/?task=${t.id}`, { scroll: false })}>
-                <Tick id={t.id} title={t.title} done={false} allowed={t.relation === "ASSIGNEE" && t.canClose} onDone={reload} />
+                <Tick id={t.id} title={t.title} done={false} allowed={t.canClose} onDone={reload} />
                 <div className="t">
                   <b><a href={`/tasks/${t.id}`} style={{ color: "inherit", textDecoration: "none" }} onClick={(e) => { e.preventDefault(); }}>{t.title}</a></b>
                   <small>{t.parent ? `Subtask of ${t.parent.title} · ` : ""}{t.project.name}</small>
