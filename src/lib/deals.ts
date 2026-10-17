@@ -34,6 +34,50 @@ export async function dealPipelines(user: Actor) {
   }));
 }
 
+/**
+ * SHO-US-10.2 AC3/AC4: a Super Admin removes a stage from a Deal pipeline. Deals sitting in it move to a stage the person picks
+ * (same pipeline). A pipeline always keeps one Done stage. Moving into Done or Lost is refused while any moving deal has an open task.
+ * Removed stages cannot be undone; each moved deal gets an action-log row (not offered as Undo) and its Leader a notice.
+ */
+export async function removeStage(user: Actor, pipelineId: string, stageId: string, moveToStageId?: string | null) {
+  requireCrm(user);
+  if (user.orgRole !== "SUPER_ADMIN") throw new ApiError(403, "Only the Super Admin can change pipeline stages.");
+  const pipeline = await db.pipeline.findFirst({ where: { id: pipelineId, typeId: WORKSTREAM_DEAL }, include: { stages: { orderBy: { position: "asc" } } } });
+  if (!pipeline) throw notFound("Pipeline");
+  const stage = pipeline.stages.find((s) => s.id === stageId);
+  if (!stage) throw notFound("Stage");
+  if (pipeline.stages.length <= 1) throw new ApiError(400, "A pipeline needs at least one stage.");
+  if (stage.category === "DONE" && !pipeline.stages.some((s) => s.id !== stage.id && s.category === "DONE")) {
+    throw new ApiError(400, "Every pipeline keeps a Done stage. Add another Done stage before removing this one.");
+  }
+  const deals = await db.project.findMany({ where: { stageId }, select: { id: true, name: true, stageReason: true, members: { where: { role: "LEADER" }, select: { userId: true } } } });
+  const target = moveToStageId ? pipeline.stages.find((s) => s.id === moveToStageId) : null;
+  if (deals.length && !target) throw new ApiError(409, `${deals.length} deal${deals.length === 1 ? " is" : "s are"} in "${stage.name}". Pick a stage to move ${deals.length === 1 ? "it" : "them"} to.`, { needsTarget: true, deals: deals.length });
+  if (target && target.id === stage.id) throw new ApiError(400, "Pick a different stage to move the deals to.");
+  if (target && (target.category === "DONE" || target.category === "LOST")) {
+    for (const d of deals) {
+      const open = await openTasks(d.id);
+      if (open.length) throw new ApiError(409, `"${d.name}" still has ${open.length} open task${open.length === 1 ? "" : "s"}, so it cannot move to ${target.name}.`, { openTasks: open.length, dealId: d.id });
+    }
+  }
+  await db.$transaction(async (tx) => {
+    for (const d of deals) {
+      await tx.project.update({ where: { id: d.id }, data: { stageId: target!.id, stageReason: target!.needsReason ? `Moved when "${stage.name}" was removed` : null, stageChangedAt: new Date() } });
+      await logAction(tx, {
+        actorId: user.id, projectId: d.id, targetType: "deal", targetId: d.id, action: "deal.stage_removed_move", primary: false,
+        before: { stageId: stage.id, stage: stage.name }, after: { stageId: target!.id, stage: target!.name },
+      });
+      const leader = d.members[0]?.userId;
+      if (leader) await notify(tx, [leader], "DEAL_STAGE_CHANGED", { actorId: user.id, projectId: d.id, data: { project: d.name, stage: target!.name } });
+    }
+    await tx.stage.delete({ where: { id: stage.id } });
+    const rest = pipeline.stages.filter((s) => s.id !== stage.id);
+    for (const [i, s] of rest.entries()) if (s.position !== i) await tx.stage.update({ where: { id: s.id }, data: { position: i } });
+    await auditTx(tx, "PIPELINE_STAGE_REMOVED", { actorId: user.id, targetId: pipeline.id, targetType: "pipeline", data: { pipeline: pipeline.name, stage: stage.name, movedTo: target?.name ?? null, deals: deals.length } });
+  });
+  return { moved: deals.length };
+}
+
 function normaliseValue(v: number | null | undefined, c: Currency | null | undefined) {
   if (v === null || v === undefined) return { value: null, currency: null as Currency | null };
   if (!(v > 0)) throw new ApiError(400, "Enter a value above zero, or leave it empty if it is not known yet.");
@@ -269,12 +313,13 @@ export const isStalled = (category: string | null | undefined, lastActivity: Dat
 const visibleTo = (user: Actor): Prisma.ProjectWhereInput => (isAdmin(user) ? {} : { members: { some: { userId: user.id } } });
 
 /** SHO-US-12.6 data and the Deals screen. `mine` limits to deals the person leads or holds a task in (AC6). */
-export async function listDeals(user: Actor, o: { archived?: boolean; mine?: boolean; pipelineId?: string } = {}) {
+export async function listDeals(user: Actor, o: { archived?: boolean; mine?: boolean; pipelineId?: string; organisationId?: string } = {}) {
   requireCrm(user);
   const projects = await db.project.findMany({
     where: {
       typeId: WORKSTREAM_DEAL, archivedAt: o.archived ? { not: null } : null, ...visibleTo(user),
       ...(o.pipelineId ? { pipelineId: o.pipelineId } : {}),
+      ...(o.organisationId ? { parties: { some: { organisationId: o.organisationId } } } : {}),
       ...(o.mine ? { OR: [{ members: { some: { userId: user.id, role: "LEADER" } } }, { tasks: { some: { assigneeId: user.id, deletedAt: null, completedAt: null } } }] } : {}),
     },
     orderBy: { createdAt: "desc" },
@@ -286,10 +331,13 @@ export async function listDeals(user: Actor, o: { archived?: boolean; mine?: boo
   });
   const signals = await dealSignals(projects);
   const now = Date.now();
+  // With an organisation filter, say which role that organisation holds on each deal (12.4 AC2).
+  const roles = new Map<string, string>();
+  if (o.organisationId) for (const r of await db.dealParty.findMany({ where: { organisationId: o.organisationId, projectId: { in: projects.map((x) => x.id) } }, select: { projectId: true, role: true } })) roles.set(r.projectId, roles.has(r.projectId) ? `${roles.get(r.projectId)}, ${r.role}` : r.role);
   return projects.map((p) => {
     const sig = signals.get(p.id)!;
     return {
-      id: p.id, name: p.name, archived: !!p.archivedAt,
+      id: p.id, name: p.name, archived: !!p.archivedAt, role: roles.get(p.id) ?? null,
       pipeline: p.pipeline ? { id: p.pipeline.id, key: p.pipeline.key, name: p.pipeline.name } : null,
       stage: p.stage ? { id: p.stage.id, name: p.stage.name, category: p.stage.category } : null,
       organisation: p.parties[0]?.organisation ?? null, leader: p.members[0]?.user ?? null,
@@ -342,8 +390,7 @@ export async function ensureNextStep(tx: Prisma.TransactionClient, projectId: st
   await notify(tx, [leader.userId], "DEAL_NEEDS_NEXT_STEP", { actorId, projectId, data: { project: p.name }, includeActor: true });
 }
 
-const PARTY_ROLES = ["BUYER", "FUNDER", "IMPLEMENTING_OFFICE", "PARTNER", "OTHER"] as const;
-export type PartyRoleName = (typeof PARTY_ROLES)[number];
+export type PartyRoleName = "BUYER" | "FUNDER" | "IMPLEMENTING_OFFICE" | "PARTNER" | "OTHER";
 
 /** SHO-US-12.4: parties are organisations. One Buyer (set at creation); other roles repeat. Archived organisations cannot be added. */
 export async function addParty(user: Actor, projectId: string, organisationId: string, role: PartyRoleName) {
@@ -370,7 +417,7 @@ export async function removeParty(user: Actor, projectId: string, partyId: strin
   if (row.role === "BUYER") throw new ApiError(400, "The Buyer cannot be removed. Every deal has one.");
   await db.$transaction(async (tx) => {
     await tx.dealParty.delete({ where: { id: partyId } });
-    await logAction(tx, { actorId: user.id, projectId, targetType: "deal", targetId: projectId, action: "deal.party_removed", before: { organisation: row.organisation.name, role: row.role } });
+    await logAction(tx, { actorId: user.id, projectId, targetType: "deal", targetId: projectId, action: "deal.party_removed", before: { partyId: row.id, organisationId: row.organisationId, organisation: row.organisation.name, role: row.role } });
   });
 }
 
@@ -386,7 +433,6 @@ export async function convertTaskToDeal(user: Actor, taskId: string, input: Conv
   if (!t || t.deletedAt) throw notFound("Task");
   const a = await projectAccess(user, t.projectId, { write: true });
   requireWrite(a);
-  if (a.project.typeId === WORKSTREAM_DEAL) throw new ApiError(400, "Only a task in a project can be converted to a deal.");
   if (t.parentId) throw new ApiError(400, "A subtask cannot be converted. Convert its parent task.");
   if (t.completedAt) throw new ApiError(409, "A completed task cannot become a deal. Reopen it first.");
   if (t.approverId && t.assigneeId === t.approverId) throw new ApiError(409, "This task is waiting for approval. Close it or send it back before converting.");
@@ -471,6 +517,8 @@ export async function convertTaskToDeal(user: Actor, taskId: string, input: Conv
       },
       after: { dealId: project.id, name, organisationId: org.id, pipeline: pipeline!.name, leaderId: leader.id },
     });
+    // A task taken out of a deal may have been that deal's only dated task: flag it like any other lost next step (12.5).
+    await ensureNextStep(tx, t.projectId, user.id);
     return project;
   });
 }

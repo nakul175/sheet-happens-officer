@@ -169,6 +169,18 @@ async function plan(row: any, user: Actor, projectId: string): Promise<Plan> {
         },
       };
     }
+    case "deal.party_added": {
+      const row = await db.dealParty.findUnique({ where: { id: f.partyId } });
+      if (!row) throw bad("That organisation is already off the deal.");
+      return { conflicts: [], subject: f.organisation ?? "the organisation", apply: async (tx) => { await tx.dealParty.delete({ where: { id: f.partyId } }); } };
+    }
+    case "deal.party_removed": {
+      if (!b.partyId || !b.organisationId) throw bad("This removal was logged before Undo existed for it.");
+      if (await db.dealParty.findFirst({ where: { projectId, organisationId: b.organisationId, role: b.role } })) throw bad("That organisation is back on the deal already.");
+      const org = await db.organisation.findUnique({ where: { id: b.organisationId } });
+      if (!org || org.archivedAt) throw bad("That organisation is archived, so it cannot go back on the deal.");
+      return { conflicts: [], subject: b.organisation ?? "the organisation", apply: async (tx) => { await tx.dealParty.create({ data: { id: b.partyId, projectId, organisationId: b.organisationId, role: b.role } }); } };
+    }
     case "task.link_added": {
       const l = await db.taskLink.findUnique({ where: { id: f.linkId } });
       if (!l) throw bad("That link is already gone.");

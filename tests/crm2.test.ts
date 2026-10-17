@@ -95,6 +95,23 @@ describe("parties (12.4)", () => {
     expect((await lead.c.post(`/api/projects/${d.id}/parties`, { organisationId: old, role: "OTHER" })).status).toBe(400);
   });
 
+  it("undoes adding and removing a party", async () => {
+    const lead = await account("pundo");
+    const d = await setup(lead);
+    const funder = (await lead.c.post("/api/orgs", { name: `UF ${Date.now()}` })).json.organisation.id;
+    const parties = async () => (await lead.c.get(`/api/projects/${d.id}`)).json.project.deal.parties as { id: string; role: string }[];
+    const add = await lead.c.post(`/api/projects/${d.id}/parties`, { organisationId: funder, role: "FUNDER" });
+    expect(add.headers.get("x-undo-label")).toBe("Organisation added to deal");
+    expect((await lead.c.post(`/api/actions/${add.headers.get("x-undo-id")}/undo`, {})).status).toBe(200);
+    expect((await parties()).some((p) => p.role === "FUNDER")).toBe(false);
+    await lead.c.post(`/api/projects/${d.id}/parties`, { organisationId: funder, role: "FUNDER" });
+    const id = (await parties()).find((p) => p.role === "FUNDER")!.id;
+    const rm = await lead.c.del(`/api/projects/${d.id}/parties/${id}`);
+    expect(rm.headers.get("x-undo-label")).toBe("Organisation removed from deal");
+    expect((await lead.c.post(`/api/actions/${rm.headers.get("x-undo-id")}/undo`, {})).status).toBe(200);
+    expect((await parties()).some((p) => p.role === "FUNDER")).toBe(true);
+  });
+
   it("shows a deal on every organisation involved, with the role, only to people who may see it", async () => {
     const lead = await account("porg");
     const stranger = await account("pstranger");

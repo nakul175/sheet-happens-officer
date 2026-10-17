@@ -155,3 +155,5 @@ export const conciergeConfirm = z.object({
   acknowledge: z.boolean().optional(),
 });
 export const conciergeUndo = z.object({ anyway: z.boolean().optional() });
+
+export const stageRemove = z.object({ moveToStageId: z.string().min(1).optional() });

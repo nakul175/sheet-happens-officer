@@ -9,6 +9,12 @@ import { ConciergeBar, ConciergeDock, ConciergeFab } from "@/components/concierg
 export type Me = { id: string; name: string; email: string; orgRole: "MEMBER" | "ADMIN" | "SUPER_ADMIN"; crm?: boolean; review?: boolean };
 const MeCtx = createContext<Me | null>(null);
 export const useMe = () => useContext(MeCtx)!;
+/** A deal page lives at /projects/[id]; it tells the sidebar to highlight Deals instead of Projects. */
+const NavHintCtx = createContext<(h: string | null) => void>(() => {});
+export function useNavHint(hint: string | null) {
+  const set = useContext(NavHintCtx);
+  useEffect(() => { set(hint); return () => set(null); }, [hint, set]);
+}
 export const roleLabel = (r: Me["orgRole"]) => (r === "SUPER_ADMIN" ? "Super Admin" : r === "ADMIN" ? "Admin" : "Member");
 
 type Note = { id: string; text: string; href: string; read: boolean; createdAt: string };
@@ -77,12 +83,17 @@ function Bell() {
 export function Shell({ user, children }: { user: Me; children: React.ReactNode }) {
   const path = usePathname();
   const [menu, setMenu] = useState<string | null>(null);
+  const [hint, setHint] = useState<string | null>(null);
   const open = menu === path;
-  const here = (p: string) => (p === "/" ? path === "/" : path === p || path.startsWith(p + "/"));
+  const here = (p: string) => {
+    if (hint && path.startsWith("/projects/")) return p === hint;
+    return p === "/" ? path === "/" : path === p || path.startsWith(p + "/");
+  };
   const items: [string, string][] = [["/", "My tasks"], ["/projects", "Projects"], ...(user.crm ? [["/deals", "Deals"], ["/accounts", "Accounts"], ...(user.review ? [["/review", "Pipeline review"]] : [])] as [string, string][] : []), ["/team", "Team"], ["/search", "Search"]];
   if (user.orgRole === "SUPER_ADMIN") items.push(["/usage", "Usage"], ["/audit", "Audit log"]);
   return (
     <MeCtx.Provider value={user}>
+      <NavHintCtx.Provider value={setHint}>
       <ConciergeProvider>
       <div className="shell">
         {open && <div className="veil" onClick={() => setMenu(null)} />}
@@ -109,6 +120,7 @@ export function Shell({ user, children }: { user: Me; children: React.ReactNode 
         </div>
       </div>
       </ConciergeProvider>
+      </NavHintCtx.Provider>
     </MeCtx.Provider>
   );
 }

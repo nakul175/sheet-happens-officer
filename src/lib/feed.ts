@@ -134,6 +134,7 @@ const ACTION_WORDS: Record<string, string> = {
   "task.restored": "restored a task from Trash",
   "deal.created": "created the deal",
   "deal.stage_changed": "moved the deal to another stage",
+  "deal.stage_removed_move": "was moved to another stage because a stage was removed",
   "deal.details_updated": "edited the deal details",
   "deal.party_added": "added an organisation to the deal",
   "deal.party_removed": "removed an organisation from the deal",
