@@ -1,0 +1,126 @@
+#cloud-config
+# Sheet Happens Officer: droplet bootstrap (SHO-US-9.3).
+# Paste this whole file into "User data" when creating the droplet (Ubuntu 24.04 LTS, BLR1).
+# Choose the sho_deploy SSH key in the same form; its public key is copied to the "deploy"
+# user below, which is the account GitHub Actions uses to release. Nothing here needs
+# editing unless the app address changes (see the Caddyfile block).
+timezone: Asia/Kolkata
+ssh_pwauth: false
+package_update: true
+package_upgrade: true
+packages:
+  - ca-certificates
+  - curl
+  - gnupg
+  - rsync
+  - ufw
+  - unattended-upgrades
+  - debian-keyring
+  - debian-archive-keyring
+  - apt-transport-https
+
+users:
+  - default
+  - name: deploy
+    shell: /bin/bash
+    lock_passwd: true
+
+write_files:
+  # Automatic security updates (Ubuntu's default unattended-upgrades policy).
+  - path: /etc/apt/apt.conf.d/20auto-upgrades
+    content: |
+      APT::Periodic::Update-Package-Lists "1";
+      APT::Periodic::Unattended-Upgrade "1";
+
+  # HTTPS in front of the app. Caddy fetches and renews the certificate itself once the
+  # A record for this name points at the droplet.
+  - path: /etc/sho/Caddyfile
+    content: |
+      app.sheethappensofficer.com {
+        encode gzip
+        reverse_proxy 127.0.0.1:3000
+      }
+
+  # The app as a service. Settings come from /etc/sho/app.env (written by each release from
+  # GitHub secrets) and /etc/sho/local.env (JOB_SECRET, generated on this machine).
+  - path: /etc/systemd/system/sho.service
+    content: |
+      [Unit]
+      Description=Sheet Happens Officer
+      After=network-online.target
+      Wants=network-online.target
+
+      [Service]
+      User=deploy
+      Group=deploy
+      WorkingDirectory=/opt/sho/current
+      EnvironmentFile=/etc/sho/app.env
+      EnvironmentFile=/etc/sho/local.env
+      EnvironmentFile=-/opt/sho/current/release.env
+      Environment=NODE_ENV=production
+      ExecStart=/usr/bin/node node_modules/next/dist/bin/next start -p 3000 -H 127.0.0.1
+      Restart=always
+      RestartSec=3
+
+      [Install]
+      WantedBy=multi-user.target
+
+  # The deploy user may restart the app and read its log, nothing else as root.
+  - path: /etc/sudoers.d/sho
+    permissions: "0440"
+    content: |
+      deploy ALL=(root) NOPASSWD: /usr/bin/systemctl restart sho, /usr/bin/systemctl reload caddy, /usr/bin/journalctl -u sho *
+
+  # Scheduled jobs, in IST (the droplet's time zone). /opt/sho/bin/job.sh is installed by each release.
+  - path: /etc/cron.d/sho
+    permissions: "0644"
+    content: |
+      SHELL=/bin/bash
+      PATH=/usr/local/bin:/usr/bin:/bin
+      17 3 * * * deploy /opt/sho/bin/job.sh purge-trash
+      37 3 * * * deploy /opt/sho/bin/job.sh purge-old
+      5 8 * * * deploy /opt/sho/bin/job.sh check
+
+  - path: /etc/logrotate.d/sho
+    content: |
+      /var/log/sho/*.log {
+        weekly
+        rotate 8
+        compress
+        missingok
+        notifempty
+        create 0640 deploy deploy
+      }
+
+runcmd:
+  # Node 22 LTS
+  - curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
+  - apt-get install -y nodejs
+  # Caddy (official repository)
+  - curl -1sLf https://dl.cloudsmith.io/public/caddy/stable/gpg.key | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+  - curl -1sLf https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt > /etc/apt/sources.list.d/caddy-stable.list
+  - apt-get update
+  - apt-get install -y caddy
+  - install -m 644 /etc/sho/Caddyfile /etc/caddy/Caddyfile
+  - systemctl restart caddy
+  # Folders owned by the deploy user
+  - mkdir -p /opt/sho/releases /opt/sho/bin /etc/sho /var/log/sho
+  - chown -R deploy:deploy /opt/sho /etc/sho /var/log/sho
+  - chmod 750 /etc/sho
+  # The deploy key chosen in the DigitalOcean form becomes the deploy user's key too
+  - install -d -m 700 -o deploy -g deploy /home/deploy/.ssh
+  - install -m 600 -o deploy -g deploy /root/.ssh/authorized_keys /home/deploy/.ssh/authorized_keys
+  # Secret for the cron-triggered jobs, created here and never leaving this machine
+  - bash -c 'umask 077; printf "JOB_SECRET=%s\n" "$(openssl rand -hex 24)" > /etc/sho/local.env; chown deploy:deploy /etc/sho/local.env'
+  # Swap so that "next build" has headroom on 4 GiB
+  - fallocate -l 2G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile && echo '/swapfile none swap sw 0 0' >> /etc/fstab
+  # Firewall: only web and SSH
+  - ufw default deny incoming
+  - ufw default allow outgoing
+  - ufw allow OpenSSH
+  - ufw allow 80/tcp
+  - ufw allow 443/tcp
+  - ufw --force enable
+  - systemctl daemon-reload
+  - systemctl enable sho
+  - touch /var/lib/sho-bootstrapped

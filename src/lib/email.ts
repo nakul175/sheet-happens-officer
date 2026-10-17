@@ -21,7 +21,8 @@ export async function sendMail(mail: Mail): Promise<void> {
     if (!res.ok) throw new Error(`Resend rejected the email (HTTP ${res.status})`);
     return;
   }
-  if (process.env.NODE_ENV === "production") throw new Error("RESEND_API_KEY is not set");
+  // The outbox is for development and CI only; production must name a key unless an outbox folder is set on purpose.
+  if (process.env.NODE_ENV === "production" && !process.env.EMAIL_OUTBOX_DIR) throw new Error("RESEND_API_KEY is not set");
   const dir = process.env.EMAIL_OUTBOX_DIR ?? ".outbox";
   await mkdir(dir, { recursive: true });
   const name = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}.json`;

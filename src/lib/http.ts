@@ -1,3 +1,4 @@
+import { connection } from "next/server";
 import { ZodError, type ZodType } from "zod";
 
 export class ApiError extends Error {
@@ -30,6 +31,7 @@ export function parseQuery<T>(url: URL, schema: ZodType<T>): T {
 /** Wrap a handler so thrown ApiError / ZodError / Prisma errors become JSON responses. */
 export function handle<A extends unknown[]>(fn: (...args: A) => Promise<Response>) {
   return async (...args: A): Promise<Response> => {
+    await connection(); // every API answer is per request; nothing is prerendered at build time
     try {
       return await fn(...args);
     } catch (err) {

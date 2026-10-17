@@ -37,8 +37,10 @@ export function noticeText(n: N) {
     PROJECT_ROLE_CHANGED: `${who} changed your role in ${p} to ${String(d.role ?? "").toLowerCase()}.`,
     REMOVED_FROM_PROJECT: `${who} removed you from ${p}.`,
     ORG_ROLE_CHANGED: `${who} changed your role to ${String(d.role ?? "").toLowerCase()}.`,
+    JOB_FAILED: `Scheduled job "${d.job}" failed${d.error ? `: ${d.error}` : ""}.`,
+    JOB_MISSED: `Scheduled job "${d.job}" did not run on its day.`,
   };
-  const href = n.taskId ? `/tasks/${n.taskId}` : n.projectId ? `/projects/${n.projectId}` : "/";
+  const href = n.taskId ? `/tasks/${n.taskId}` : n.projectId ? `/projects/${n.projectId}` : n.type.startsWith("JOB_") ? "/audit" : "/";
   return { text: text[n.type] ?? `${who} made a change.`, href };
 }
 

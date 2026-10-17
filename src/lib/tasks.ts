@@ -450,11 +450,6 @@ export async function purgeTrash(now = new Date()) {
   const cutoff = new Date(now.getTime() - 30 * 86400_000);
   const r = await db.task.deleteMany({ where: { deletedAt: { lte: cutoff } } });
   if (r.count) await db.auditLog.create({ data: { event: "TASK_PURGED", channel: "SCREEN", data: { count: r.count } } });
-  await db.jobRun.upsert({
-    where: { job: "purge-trash" },
-    create: { job: "purge-trash", lastStartedAt: now, lastFinishedAt: new Date(), lastStatus: "OK" },
-    update: { lastStartedAt: now, lastFinishedAt: new Date(), lastStatus: "OK", lastError: null },
-  });
   return r.count;
 }
 

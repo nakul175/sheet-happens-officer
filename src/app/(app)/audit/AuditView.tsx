@@ -1,10 +1,11 @@
 "use client";
 import { useState } from "react";
-import { api, useGet } from "@/components/api";
+import { ago, api, useGet } from "@/components/api";
 import { Page, useMe } from "../Shell";
 
 type Row = { id: string; at: string; who: string | null; email: string | null; event: string; ip: string | null; target: string | null };
 type Res = { events: string[]; items: Row[]; nextCursor: string | null };
+type JobRow = { job: string; about: string; lastFinishedAt: string | null; lastStatus: string | null; lastError: string | null };
 
 export default function AuditView() {
   const me = useMe();
@@ -12,6 +13,7 @@ export default function AuditView() {
   const qs = new URLSearchParams(Object.entries({ person, event, from, to }).filter(([, v]) => v)).toString();
   const team = useGet<{ people: { id: string; name: string }[] }>("/api/team");
   const a = useGet<Res>(me.orgRole === "SUPER_ADMIN" ? `/api/audit${qs ? `?${qs}` : ""}` : null);
+  const jobs = useGet<{ jobs: JobRow[] }>(me.orgRole === "SUPER_ADMIN" ? "/api/jobs" : null);
   const [more, setMore] = useState<{ key: string; rows: Row[]; next: string | null } | null>(null);
   if (me.orgRole !== "SUPER_ADMIN") return <Page title="This page isn't available"><div className="card empty">Only the Super Admin can see the audit log.</div></Page>;
   const extra = more?.key === qs ? more : null;
@@ -19,6 +21,22 @@ export default function AuditView() {
   const next = extra ? extra.next : a.data?.nextCursor;
   return (
     <Page title="Audit log" sub="Sign-ins, role changes and other sensitive events. Kept 12 months.">
+      {jobs.data && (
+        <div className="card" style={{ marginBottom: 14 }}>
+          <b style={{ fontSize: 14 }}>Scheduled jobs</b>
+          <div className="list" style={{ marginTop: 8, border: 0 }}>
+            {jobs.data.jobs.map((j) => (
+              <div className="item" key={j.job} style={{ padding: "8px 0" }}>
+                <div className="t"><b>{j.job}</b><small>{j.about}</small></div>
+                <div className="meta">
+                  <span>{j.lastFinishedAt ? `Last run ${ago(j.lastFinishedAt)}` : "Never run"}</span>
+                  {j.lastStatus && <span className={`chip ${j.lastStatus === "OK" ? "green" : "red"}`} title={j.lastError ?? undefined}>{j.lastStatus}</span>}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
       <div className="card" style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 14 }}>
         <label className="field" style={{ margin: 0 }}><span className="lbl">Person</span>
           <select className="in" value={person} onChange={(e) => setPerson(e.target.value)}><option value="">Everyone</option>{team.data?.people.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label>
