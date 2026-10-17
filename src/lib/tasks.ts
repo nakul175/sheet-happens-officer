@@ -18,7 +18,9 @@ const taskInclude = {
 type TaskRow = NonNullable<Awaited<ReturnType<typeof loadRow>>>;
 const loadRow = (id: string) => db.task.findUnique({ where: { id }, include: taskInclude });
 
-export const awaiting = (t: { approverId: string | null; assigneeId: string }) => !!t.approverId && t.assigneeId === t.approverId;
+/** SHO-US-14.1: a task waits for approval only while it is open; a closed task keeps its approver but is no longer waiting. */
+export const awaiting = (t: { approverId: string | null; assigneeId: string; completedAt?: Date | null }) =>
+  !!t.approverId && t.assigneeId === t.approverId && !t.completedAt;
 
 /** Who may close a task (SHO-US-4.3 AC6, 4.6 AC4). With an approver only the approver, Leader or Admin. */
 export function canClose(userId: string, role: Role, t: { approverId: string | null; assigneeId: string }) {
