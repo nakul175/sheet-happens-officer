@@ -437,16 +437,20 @@ export async function restoreTask(user: Actor, id: string, confirmParent = false
 
 export async function listTrash(user: Actor, projectId: string) {
   await projectAccess(user, projectId);
-  const rows = await db.task.findMany({
-    where: { projectId, deletedAt: { not: null }, OR: [{ parentId: null }, { parent: { deletedAt: null } }] },
-    include: { deletedBy: { select: { id: true, name: true } } },
+  const all = await db.task.findMany({
+    where: { projectId, deletedAt: { not: null } },
+    include: { deletedBy: { select: { id: true, name: true } }, parent: { select: { title: true, deletedAt: true } } },
     orderBy: { deletedAt: "desc" },
   });
+  // A subtask deleted together with its parent comes back with it, so only the parent is listed. A subtask deleted on its own
+  // earlier is listed even when its parent is in Trash too, so the "restore both" confirmation can be reached (SHO-US-6.2 AC2).
+  const rows = all.filter((t) => !t.parent?.deletedAt || t.parent.deletedAt.getTime() !== t.deletedAt!.getTime());
   const now = Date.now();
   return rows.map((t) => ({
     id: t.id,
     title: t.title,
     isSubtask: !!t.parentId,
+    parentTitle: t.parent?.title ?? null,
     deletedAt: t.deletedAt,
     deletedBy: t.deletedBy,
     daysLeft: Math.max(0, 30 - Math.floor((now - t.deletedAt!.getTime()) / 86400_000)),

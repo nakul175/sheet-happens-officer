@@ -11,7 +11,7 @@ import { Page, useMe } from "../../Shell";
 
 type T = {
   id: string; title: string; sectionId: string; priority: string; dueDate: string | null; blocked: boolean; completedAt: string | null;
-  assignee: { id: string; name: string }; awaitingApproval: boolean; canClose: boolean; subtasks: { total: number; open: number };
+  assignee: { id: string; name: string }; collaborators: { id: string; name: string }[]; awaitingApproval: boolean; canClose: boolean; subtasks: { total: number; open: number };
 };
 type S = { id: string; name: string; isDone: boolean; total: number; tasks: T[]; nextCursor: string | null };
 type Proj = {
@@ -65,6 +65,8 @@ function Inner({ id }: { id: string }) {
     if (r.ok) setExtra((m) => ({ ...m, [s.id]: [...cursorList, ...r.data.sections[0].tasks] }));
   }
 
+  const showFewer = (sectionId: string) => setExtra((m) => { const n = { ...m }; delete n[sectionId]; return n; });
+
   async function moveTo(taskId: string, sectionId: string, all = false) {
     const r = await api("POST", `/api/tasks/${taskId}/move`, { sectionId, completeAll: all });
     if (r.ok) { setAsk(null); setErr(null); refresh(); }
@@ -73,10 +75,16 @@ function Inner({ id }: { id: string }) {
   }
 
   const tasksOf = (s: S) => [...s.tasks, ...(extra[s.id] ?? [])];
+  // SHO-US-5.3 AC6: a task may only be dropped into Done by someone who may close it.
+  const canDrop = (taskId: string, to: S) => {
+    if (!to.isDone) return true;
+    const t = secs?.flatMap((x) => tasksOf(x)).find((x) => x.id === taskId);
+    return !!t && (t.canClose || !!t.completedAt);
+  };
   const archivedBanner = p?.archived && <div className="box warn" style={{ marginBottom: 12 }}>This project is archived and read-only.</div>;
 
   return (
-    <Page dock={view === "list"}
+    <Page dock={view === "list"} bar={view === "board"}
       title={<span className="crumb"><Link href="/projects">Projects</Link> / <span style={{ color: "var(--ink)" }}>{p?.name ?? "…"}</span></span>}
       sub={p && <span className="chip">You: {ROLE[p.role]}</span>}
       actions={canWrite && <button className="btn" onClick={() => setAdding(true)}>+ Add task</button>}>
@@ -120,8 +128,12 @@ function Inner({ id }: { id: string }) {
               {!list.length && <div className="item"><span className="hint">No tasks here.</span></div>}
               {canWrite && !s.isDone && <QuickAdd projectId={id} sectionId={s.id} onAdded={refresh} />}
             </div>
-            {s.isDone && s.total > list.length && (
-              <p className="hint">Showing the {list.length} most recent · <button className="link" onClick={() => loadMore(s, true)}>Show all {s.total}</button></p>
+            {s.isDone && s.total > 10 && (
+              <p className="hint">
+                {list.length < s.total
+                  ? <>Done is collapsed: the {list.length} most recent · <button className="link" onClick={() => loadMore(s, true)}>Show all {s.total}</button></>
+                  : <>Showing all {s.total} · <button className="link" onClick={() => showFewer(s.id)}>Collapse to the 10 most recent</button></>}
+              </p>
             )}
             {!s.isDone && more && <p><button className="link" onClick={() => loadMore(s, false)}>Load more</button></p>}
           </section>
@@ -132,9 +144,9 @@ function Inner({ id }: { id: string }) {
         <div className="board">
           {secs.map((s) => (
             <div key={s.id} className={`col${overCol === s.id ? " over" : ""}`} aria-label={s.name}
-              onDragOver={(e) => { if (dragId && canWrite) { e.preventDefault(); setOverCol(s.id); } }}
+              onDragOver={(e) => { if (dragId && canWrite && canDrop(dragId, s)) { e.preventDefault(); setOverCol(s.id); } }}
               onDragLeave={() => setOverCol((c) => (c === s.id ? null : c))}
-              onDrop={(e) => { e.preventDefault(); setOverCol(null); const tid = dragId; setDragId(null); if (tid && canWrite) { const from = secs.flatMap((x) => x.tasks).find((x) => x.id === tid); if (from && from.sectionId !== s.id) moveTo(tid, s.id); } }}>
+              onDrop={(e) => { e.preventDefault(); setOverCol(null); const tid = dragId; setDragId(null); if (tid && canWrite && canDrop(tid, s)) { const from = secs.flatMap((x) => tasksOf(x)).find((x) => x.id === tid); if (from && from.sectionId !== s.id) moveTo(tid, s.id); } }}>
               <h4>{s.name} <span className="n">{s.total}</span>
                 {manage && <SectionMenu s={s} secs={secs} projectId={id} onDialog={(kind) => setDialog({ kind, s })} onDone={refresh} onErr={setErr} />}
               </h4>
@@ -148,36 +160,37 @@ function Inner({ id }: { id: string }) {
                     {t.subtasks.total > 0 && <span>{t.subtasks.total - t.subtasks.open} of {t.subtasks.total}</span>}
                     {t.blocked && <span className="chip red">Blocked</span>}
                     {t.awaitingApproval && <span className="chip gold">Awaiting</span>}
-                    <span className="av sm" title={t.assignee.name} style={{ marginLeft: "auto" }}>{initials(t.assignee.name)}</span>
+                    <span className="avs" style={{ marginLeft: "auto" }} aria-label={`Assignee ${t.assignee.name}${t.collaborators.length ? `; collaborators ${t.collaborators.map((c) => c.name).join(", ")}` : ""}`}>
+                      <span className="av sm" title={`Assignee: ${t.assignee.name}`}>{initials(t.assignee.name)}</span>
+                      {t.collaborators.slice(0, 3).map((c) => <span key={c.id} className="av sm collab" title={`Collaborator: ${c.name}`}>{initials(c.name)}</span>)}
+                      {t.collaborators.length > 3 && <span className="av sm collab" title={t.collaborators.slice(3).map((c) => c.name).join(", ")}>+{t.collaborators.length - 3}</span>}
+                    </span>
                   </div>
                   {canWrite && (
                     <select className="in" aria-label={`Move "${t.title}" to`} style={{ marginTop: 8, padding: "3px 6px", fontSize: 12 }} value={s.id}
                       onClick={(e) => e.stopPropagation()} onChange={(e) => moveTo(t.id, e.target.value)}>
-                      {secs.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
+                      {secs.filter((x) => !x.isDone || t.canClose || x.id === s.id).map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
                     </select>
                   )}
                 </div>
               ))}
-              {s.isDone && s.total > tasksOf(s).length && <p className="hint" style={{ margin: 4 }}>{tasksOf(s).length} most recent · <button className="link" onClick={() => loadMore(s, true)}>Show all {s.total}</button></p>}
+              {s.isDone && s.total > 10 && (
+                tasksOf(s).length < s.total
+                  ? <p className="hint" style={{ margin: 4 }}>Collapsed: {tasksOf(s).length} most recent · <button className="link" onClick={() => loadMore(s, true)}>Show all {s.total}</button></p>
+                  : <p className="hint" style={{ margin: 4 }}>Showing all {s.total} · <button className="link" onClick={() => showFewer(s.id)}>Collapse</button></p>
+              )}
               {canWrite && !s.isDone && <QuickAdd compact projectId={id} sectionId={s.id} onAdded={refresh} />}
             </div>
           ))}
-          <div style={{ flex: "none", width: 220 }}>
-            {manage ? (
-              <>
-                <button className="btn ghost" disabled={secs.length >= MAX_SECTIONS} onClick={() => setDialog({ kind: "addSection" })}>+ Add section</button>
-                {secs.length >= MAX_SECTIONS && <p className="hint">A project can have up to {MAX_SECTIONS} sections.</p>}
-              </>
-            ) : <span className="hint">+ Add section — Leader and Admins only</span>}
-          </div>
         </div>
       )}
-      {secs && view === "list" && manage && (
+      {secs && manage && (
         <div style={{ marginTop: 16 }}>
           <button className="btn ghost" disabled={secs.length >= MAX_SECTIONS} onClick={() => setDialog({ kind: "addSection" })}>+ Add section</button>
           {secs.length >= MAX_SECTIONS && <span className="hint"> A project can have up to {MAX_SECTIONS} sections.</span>}
         </div>
       )}
+      {secs && p && p.role !== "LEADER" && <p className="hint" style={{ marginTop: 16 }}>Only the Leader and Admins can change sections.</p>}
 
       {open && <TaskModal id={open} me={me.id} onClose={closeTask} onChanged={refresh} />}
       {adding && p && <NewTask p={p} onClose={() => setAdding(false)} onAdded={() => { setAdding(false); refresh(); }} />}
