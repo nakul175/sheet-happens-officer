@@ -46,7 +46,11 @@ export default function ProjectsView() {
       {(live.loading || old.loading) && <div className="skel">Loading…</div>}
       {live.error && <div className="err" role="alert">{live.error}</div>}
       {live.data && active.length === 0 && (
-        <div className="card empty"><b>No projects yet.</b><br />Create one to start adding tasks.</div>
+        <div className="card empty">
+          {admin
+            ? <><b>No projects yet.</b><br />Create one to start adding tasks.</>
+            : <><b>Ask a project Leader to add you.</b><br />Projects you are added to show up here. You can also create a project of your own.</>}
+        </div>
       )}
       <div className="cards">{active.map((p) => <Card key={p.id} p={p} admin={admin} />)}</div>
       {archived.length > 0 && (

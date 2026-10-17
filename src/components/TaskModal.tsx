@@ -24,6 +24,7 @@ export function TaskModal({ id, me, onClose, onChanged, asPage }: { id: string; 
   const pr = useGet<{ project: Project }>(task ? `/api/projects/${task.projectId}` : null);
   const [err, setErr] = useState<string | null>(null);
   const [stale, setStale] = useState<string | null>(null);
+  const [lost, setLost] = useState<Record<string, unknown> | null>(null); // the edit that was refused as stale, so it can be re-applied
   const [confirm, setConfirm] = useState<null | { kind: "complete" | "move"; n: number; sectionId?: string }>(null);
   const [trash, setTrash] = useState(false);
   const [newSub, setNewSub] = useState("");
@@ -56,18 +57,25 @@ export function TaskModal({ id, me, onClose, onChanged, asPage }: { id: string; 
     const res = await r;
     setBusy(false);
     if (res.ok) {
-      setErr(null); setStale(null); after?.(); t.reload(); onChanged?.();
+      setErr(null); setStale(null); setLost(null); after?.(); t.reload(); onChanged?.();
       return res;
     }
     if (res.status === 409 && res.data.stale) {
-      setStale(`${res.data.changedBy ?? "Someone"} changed this task while you were editing. Your change was not saved.`);
+      setStale(`${res.data.changedBy ?? "Someone"} changed this task while you were editing. Your change was not saved; the fields now show the current values.`);
       t.reload();
     } else if (res.status === 409 && res.data.needsConfirm === "open_subtasks") {
       return res;
     } else setErr(res.error ?? "Something went wrong.");
     return res;
   }
-  const save = (patch: Record<string, unknown>) => run(api("PATCH", `/api/tasks/${id}`, { ...patch, expectedUpdatedAt: task.updatedAt }));
+  const save = async (patch: Record<string, unknown>) => {
+    const res = await run(api("PATCH", `/api/tasks/${id}`, { ...patch, expectedUpdatedAt: task.updatedAt }));
+    if (res && !res.ok && res.status === 409 && res.data.stale) setLost(patch);
+    return res;
+  };
+  const LABEL: Record<string, string> = { title: "Title", description: "Description", dueDate: "Due date", priority: "Priority", blocked: "Blocked", blockedReason: "Blocked reason" };
+  const describe = (patch: Record<string, unknown>) =>
+    Object.entries(patch).filter(([k]) => LABEL[k]).map(([k, v]) => `${LABEL[k]}: ${v === null || v === "" ? "(cleared)" : typeof v === "boolean" ? (v ? "Yes" : "No") : k === "priority" ? PRIORITY[String(v)] ?? String(v) : `"${String(v)}"`}`).join(", ");
 
   async function complete(all = false) {
     const res = await run(api("POST", `/api/tasks/${id}/complete`, { completeAll: all }), () => setConfirm(null));
@@ -90,10 +98,26 @@ export function TaskModal({ id, me, onClose, onChanged, asPage }: { id: string; 
             </span>
           </div>
           {task.project.archived && <div className="box warn">This project is archived and read-only.</div>}
-          {stale && <div className="box warn" role="alert">{stale}</div>}
+          {stale && (
+            <div className="box warn" role="alert">
+              {stale}
+              {lost && describe(lost) && (
+                <div style={{ marginTop: 6 }}>
+                  Your edit was: {describe(lost)}.{" "}
+                  <button className="link" disabled={busy} onClick={() => save(lost)}>Re-apply my edit</button>
+                  {" · "}<button className="link" onClick={() => { setStale(null); setLost(null); }}>Dismiss</button>
+                </div>
+              )}
+            </div>
+          )}
           {err && <div className="err" role="alert">{err}</div>}
           <input className="tt" aria-label="Title" defaultValue={task.title} key={task.title + task.updatedAt} readOnly={!canEdit || holding}
-            onBlur={(e) => { const v = e.target.value.trim(); if (v && v !== task.title) save({ title: v }); else e.target.value = task.title; }} />
+            onBlur={(e) => {
+              const v = e.target.value.trim();
+              if (!v) { setErr("Give the task a title."); e.target.value = task.title; }
+              else if (v !== task.title) save({ title: v });
+              else e.target.value = task.title;
+            }} />
           {task.awaitingApproval && (
             <div className="box warn">Waiting for <b>{task.approver?.name}</b> to approve this task.</div>
           )}
