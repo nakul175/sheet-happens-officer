@@ -103,5 +103,7 @@ export const conciergePrefs = z.object({ hidden: z.boolean().optional(), voiceNo
 export const conciergeChoice = z.object({ choiceId: z.string().min(1).max(100) });
 export const conciergeConfirm = z.object({
   handover: z.array(z.object({ taskId: z.string().min(1), assigneeId: z.string().min(1) })).max(500).optional(),
+  // Required (true) for a card marked irreversible: the person has seen "This can't be undone".
+  acknowledge: z.boolean().optional(),
 });
 export const conciergeUndo = z.object({ anyway: z.boolean().optional() });

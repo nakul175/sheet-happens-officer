@@ -108,8 +108,10 @@ export async function fingerprint(ops: Op[]): Promise<string> {
 }
 
 // ------------------------------------------------------------------ text
-const clip = (s: string, n = 80) => (s.length > n ? s.slice(0, n - 1) + "…" : s);
-const q = (s: string) => `'${clip(s)}'`;
+/** Long text is shown as an excerpt that says how much is not shown, so nothing is approved unseen. */
+export const EXCERPT = 300;
+export const excerpt = (s: string, n = EXCERPT) => (s.length > n ? `${s.slice(0, n)}… (+${s.length - n} more characters)` : s);
+const q = (s: string) => `'${s}'`;
 const PRIORITY: Record<string, string> = { LOW: "Low", MEDIUM: "Medium", HIGH: "High", URGENT: "Urgent" };
 const ROLE: Record<string, string> = { EDITOR: "Editor", VIEWER: "Viewer", LEADER: "Leader" };
 const dueText = (d: Date | string | null | undefined) => (d ? fullDate(typeof d === "string" ? new Date(Date.parse(`${d}T00:00:00Z`) - 5.5 * 3600_000) : d) : "none");
@@ -130,18 +132,21 @@ const P = (L: Loaded, id: string) => L.projects.get(id) ?? gone("Project");
 
 function describe(op: Op, L: Loaded): Described {
   const task = (id: string) => T(L, id);
-  const where = (t: TaskFull) => `${clip(t.title)} (${t.project.name})`;
+  const where = (t: TaskFull) => `${t.title} (${t.project.name})`;
   switch (op.k) {
     case "task.create": {
       const p = P(L, op.projectId);
-      const after = [op.due ? `Due ${dueText(op.due)}` : null, op.priority ? `Priority ${PRIORITY[op.priority]}` : null, op.assigneeId ? `Assigned to ${U(L, op.assigneeId).name}` : null].filter(Boolean).join("; ");
-      return { phrase: `Create task ${q(op.title)} in ${p.name}`, row: { label: `New task in ${p.name}`, after: `${clip(op.title)}${after ? `; ${after}` : ""}` } };
+      const after = [op.description ? `Description: ${excerpt(op.description)}` : null, op.due ? `Due ${dueText(op.due)}` : null, op.priority ? `Priority ${PRIORITY[op.priority]}` : null, op.assigneeId ? `Assigned to ${U(L, op.assigneeId).name}` : null].filter(Boolean).join("; ");
+      return { phrase: `Create task ${q(op.title)} in ${p.name}`, row: { label: `New task in ${p.name}`, after: `${op.title}${after ? `; ${after}` : ""}` } };
     }
     case "task.edit": {
       const t = task(op.taskId);
       const before: string[] = [], after: string[] = [];
       if (op.title !== undefined) { before.push(`Title ${q(t.title)}`); after.push(`Title ${q(op.title)}`); }
-      if (op.description !== undefined) { before.push(`Description ${t.description ? "set" : "none"}`); after.push(`Description ${op.description ? "changed" : "cleared"}`); }
+      if (op.description !== undefined) {
+        before.push(`Description: ${t.description ? excerpt(t.description) : "none"}`);
+        after.push(`Description: ${op.description ? excerpt(op.description) : "cleared"}`);
+      }
       if (op.due !== undefined) { before.push(`Due ${dueText(t.dueDate)}`); after.push(`Due ${dueText(op.due)}`); }
       if (op.priority !== undefined) { before.push(`Priority ${PRIORITY[t.priority]}`); after.push(`Priority ${PRIORITY[op.priority]}`); }
       const onlyDue = op.due !== undefined && op.title === undefined && op.description === undefined && op.priority === undefined;
@@ -181,10 +186,10 @@ function describe(op: Op, L: Loaded): Described {
       const t = task(op.taskId);
       return {
         phrase: op.blocked ? `Mark ${q(t.title)} as blocked` : `Clear Blocked on ${q(t.title)}`,
-        row: { label: where(t), before: t.blocked ? "Blocked" : "Not blocked", after: op.blocked ? `Blocked${op.reason ? `: ${clip(op.reason, 120)}` : ""}` : "Not blocked" },
+        row: { label: where(t), before: t.blocked ? "Blocked" : "Not blocked", after: op.blocked ? `Blocked${op.reason ? `: ${op.reason}` : ""}` : "Not blocked" },
       };
     }
-    case "project.create": return { phrase: `Create project ${q(op.name)}`, row: { label: "New project", after: `${clip(op.name)}; Leader ${U(L, op.leaderId).name}` } };
+    case "project.create": return { phrase: `Create project ${q(op.name)}`, row: { label: "New project", after: `${op.name}; Leader ${U(L, op.leaderId).name}${op.description ? `; Description: ${excerpt(op.description)}` : ""}` } };
     case "member.add": {
       const p = P(L, op.projectId); const u = U(L, op.userId);
       return { phrase: `Add ${u.name} to ${q(p.name)} as ${ROLE[op.role]}`, row: { label: p.name, after: `${u.name} joins as ${ROLE[op.role]}` } };
@@ -315,7 +320,7 @@ export async function buildCard(user: Actor, ops: Op[]): Promise<BuiltCard> {
     const op = leaving[0];
     const tasks = L.held.get(`${op.projectId}|${op.userId}`) ?? [];
     if (tasks.length) {
-      handover = tasks.map((t) => ({ taskId: t.id, taskTitle: clip(t.title, 120) }));
+      handover = tasks.map((t) => ({ taskId: t.id, taskTitle: t.title }));
       const members = await db.projectMember.findMany({ where: { projectId: op.projectId, role: { in: ["LEADER", "EDITOR"] }, userId: { not: op.userId }, user: { deactivatedAt: null, emailVerifiedAt: { not: null } } }, include: { user: { select: { name: true } } } });
       handoverOptions = members.map((m) => ({ id: m.userId, name: m.user.name })).sort((a, b) => a.name.localeCompare(b.name));
     }
@@ -359,8 +364,14 @@ export async function recheck(user: Actor, ops: Op[]) {
 }
 
 /** Applies the operations through the existing functions. Runs inside the caller's request context. */
-export async function execute(user: Actor, ops: Op[], handover: { taskId: string; assigneeId: string }[] = []) {
+export async function execute(user: Actor, ops: Op[], handover: { taskId: string; assigneeId: string }[] = [], onDone?: () => void) {
   const done: Op[] = [];
+  // Every task a leaving person holds must have a taker BEFORE the first write, so this cannot fail half way.
+  for (const op of ops) {
+    if (op.k !== "member.remove" && !(op.k === "member.role" && op.role === "VIEWER")) continue;
+    const held = await db.task.findMany({ where: { projectId: op.projectId, assigneeId: op.userId, completedAt: null, deletedAt: null }, select: { id: true } });
+    for (const t of held) if (!handover.find((h) => h.taskId === t.id)?.assigneeId) throw new ApiError(409, "Their tasks changed since the card was shown. Nothing was written.", { stale: true });
+  }
   for (const op of ops) {
     switch (op.k) {
       case "task.create":
@@ -399,6 +410,7 @@ export async function execute(user: Actor, ops: Op[], handover: { taskId: string
       }
     }
     done.push(op);
+    onDone?.();
   }
   return done;
 }

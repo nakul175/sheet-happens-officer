@@ -27,7 +27,7 @@ export function present(row: Row): Message {
   if (s.links?.length) m.links = s.links;
   if (s.choices) m.choices = s.choices;
   if (s.choiceAnswered) m.choiceAnswered = s.choiceAnswered;
-  if (s.card) m.card = { ...s.card, id: row.id };
+  if (s.card) m.card = { ...s.card, id: row.id, ...(s.internal?.state === "RUNNING" ? { canConfirm: false } : {}) };
   if (s.result) {
     const confirmed = s.internal?.confirmedAt ? Date.parse(s.internal.confirmedAt) : row.createdAt.getTime();
     const expired = !s.result.undoneAt && s.result.undoable && Date.now() - confirmed > UNDO_DAYS * 86400_000;
@@ -41,6 +41,15 @@ export async function addMessage(userId: string, role: "USER" | "ASSISTANT", sto
 }
 export async function saveStored(id: string, stored: Stored) {
   await db.chatMessage.update({ where: { id }, data: { content: JSON.stringify(stored) } });
+}
+
+/**
+ * Compare-and-swap on the stored JSON: writes only if the row still holds exactly `oldContent`.
+ * This is how a card, a choice or an Undo is claimed by one request when two arrive together.
+ */
+export async function casStored(id: string, oldContent: string, stored: Stored) {
+  const r = await db.chatMessage.updateMany({ where: { id, content: oldContent }, data: { content: JSON.stringify(stored) } });
+  return r.count === 1;
 }
 
 /** A message of this person's own, or 404. Another person's message id looks exactly like a missing one. */

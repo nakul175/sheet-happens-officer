@@ -25,12 +25,15 @@ type Row = {
   approverId: string | null; assigneeId: string; assignee: { name: string }; project: { id: string; name: string };
 };
 
+/** Names and titles go into prompts: no line breaks or control characters, so they cannot fake a new instruction block. */
+export const flat = (s: string) => s.replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]+/g, " ").replace(/\s+/g, " ").trim();
+
 export function toTaskRec(t: Row, today = startOfTodayIST()): TaskRec {
   return {
-    id: t.id, title: t.title, project: t.project.name, projectId: t.project.id,
+    id: t.id, title: flat(t.title), project: flat(t.project.name), projectId: t.project.id,
     due: formatDueDate(t.dueDate), dueText: t.dueDate ? fullDate(t.dueDate) : null,
-    assignee: t.assignee.name, priority: t.priority, blocked: t.blocked,
-    ...(t.blocked && t.blockedReason ? { blockedReason: t.blockedReason } : {}),
+    assignee: flat(t.assignee.name), priority: t.priority, blocked: t.blocked,
+    ...(t.blocked && t.blockedReason ? { blockedReason: flat(t.blockedReason) } : {}),
     done: !!t.completedAt, ...(t.completedAt ? { completedOn: shortDate(t.completedAt) } : {}),
     ...(awaiting(t) ? { awaitingApproval: true } : {}),
     ...(!t.completedAt && t.dueDate && t.dueDate < today ? { overdue: true } : {}),
@@ -107,9 +110,9 @@ export async function listProjects(user: Actor, text?: string): Promise<ProjectR
     },
   });
   return rows.map((p) => ({
-    id: p.id, name: p.name,
+    id: p.id, name: flat(p.name),
     role: isAdmin(user) ? "LEADER" : p.members.find((m) => m.userId === user.id)?.role ?? null,
-    leader: p.members.find((m) => m.role === "LEADER")?.user.name ?? null,
+    leader: flat(p.members.find((m) => m.role === "LEADER")?.user.name ?? "") || null,
     openTasks: p._count.tasks,
   }));
 }
@@ -139,8 +142,8 @@ export async function findPeople(user: Actor, text: string, projectId?: string, 
   });
   const by = new Map<string, PersonRec>();
   for (const r of rows) {
-    const cur = by.get(r.user.id) ?? { id: r.user.id, name: r.user.name, email: r.user.email, sharedProjects: [] };
-    if (cur.sharedProjects.length < 5) cur.sharedProjects.push(r.project.name);
+    const cur = by.get(r.user.id) ?? { id: r.user.id, name: flat(r.user.name), email: flat(r.user.email), sharedProjects: [] };
+    if (cur.sharedProjects.length < 5) cur.sharedProjects.push(flat(r.project.name));
     by.set(r.user.id, cur);
   }
   return [...by.values()].sort((a, b) => a.name.localeCompare(b.name)).slice(0, limit);
@@ -178,5 +181,5 @@ export async function personById(user: Actor, id: string): Promise<PersonRec | n
     where: { userId: id, project: visibleProjects(user), user: { deactivatedAt: null, emailVerifiedAt: { not: null } } },
     select: { user: { select: { id: true, name: true, email: true } }, project: { select: { name: true } } }, take: 5,
   });
-  return m.length ? { id: m[0].user.id, name: m[0].user.name, email: m[0].user.email, sharedProjects: m.map((x) => x.project.name) } : null;
+  return m.length ? { id: m[0].user.id, name: flat(m[0].user.name), email: flat(m[0].user.email), sharedProjects: m.map((x) => flat(x.project.name)) } : null;
 }

@@ -47,5 +47,13 @@ export type Stored = {
   /** Server-only. */
   proposal?: { ops: unknown[]; fingerprint: string };
   pending?: { request: string; question?: string; kind?: "task" | "project" | "person"; optionIds?: string[]; narrowFor?: string };
-  internal?: { logIds?: string[]; confirmedAt?: string; resultMessageId?: string; cardMessageId?: string };
+  internal?: {
+    logIds?: string[]; confirmedAt?: string; resultMessageId?: string; cardMessageId?: string;
+    /** Card: RUNNING while it is being applied, PARTIAL when it stopped half way. */
+    state?: "RUNNING" | "PARTIAL"; runningAt?: string;
+    /** Result: an Undo is in progress, and which action rows it has already reversed. */
+    undoing?: boolean; undoingAt?: string; undoneIds?: string[];
+    /** A user message that only repeats a picked option; never replayed to the model. */
+    fromChoice?: boolean;
+  };
 };

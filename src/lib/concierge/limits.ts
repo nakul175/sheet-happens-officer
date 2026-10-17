@@ -76,14 +76,18 @@ export async function warnIfNearCeiling(now = new Date()) {
   const spend = await monthSpendUsd(now);
   if (spend < ceiling * WARN_AT) return false;
   const monthStart = monthStartIST(now);
-  const already = await db.notification.findFirst({ where: { type: "CONCIERGE_BUDGET_80", createdAt: { gte: monthStart } } });
-  if (already) return false;
   const admins = await db.user.findMany({ where: { orgRole: "SUPER_ADMIN", deactivatedAt: null }, select: { id: true } });
   if (!admins.length) return false;
-  await notify(db, admins.map((a) => a.id), "CONCIERGE_BUDGET_80", {
-    data: { spend: Math.round(spend * 100) / 100, ceiling, percent: Math.round((spend / ceiling) * 100), resumes: fullDate(nextMonthStartIST(now)) },
+  // One transaction under an advisory lock: two calls at the 80 percent mark cannot both find "no notice yet".
+  return db.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(4120801)`;
+    const already = await tx.notification.findFirst({ where: { type: "CONCIERGE_BUDGET_80", createdAt: { gte: monthStart } } });
+    if (already) return false;
+    await notify(tx, admins.map((a) => a.id), "CONCIERGE_BUDGET_80", {
+      data: { spend: Math.round(spend * 100) / 100, ceiling, percent: Math.round((spend / ceiling) * 100), resumes: fullDate(nextMonthStartIST(now)) },
+    });
+    return true;
   });
-  return true;
 }
 
 /** Checked before every model call inside a message: only the month can stop a message half way. */
