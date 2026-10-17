@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import { ROLE, api, useGet } from "@/components/api";
-import { LoadFailed } from "@/components/ui";
+import { LoadFailed, Skeleton } from "@/components/ui";
 import { Page, useMe } from "../Shell";
 
 type Pr = { id: string; name: string; description: string | null; archived: boolean; leader: { id: string; name: string } | null; openTasks: number; role: string | null; myRole: string | null };
@@ -68,7 +68,7 @@ export default function ProjectsView() {
           <Link className="btn" href="/projects/new">+ New project</Link>
         </>
       }>
-      {(live.loading || old.loading) && <div className="skel">Loading…</div>}
+      {(live.loading || old.loading) && <Skeleton />}
       {live.error && !live.data && <LoadFailed onRetry={live.reload} />}
       {live.error && live.data && <div className="err" role="alert">{live.error} <button className="link" onClick={live.reload}>Retry</button></div>}
       {live.data && active.length === 0 && (

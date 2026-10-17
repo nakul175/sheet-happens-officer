@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import { api, useGet } from "@/components/api";
-import { Confirm, Field } from "@/components/ui";
+import { Confirm, Field, Skeleton } from "@/components/ui";
 import { Page, roleLabel, useMe } from "../Shell";
 
 type P = { id: string; name: string; email?: string; orgRole?: "MEMBER" | "ADMIN" | "SUPER_ADMIN"; leads?: { id: string; name: string }[]; status?: "ACTIVE" | "UNVERIFIED" | "DEACTIVATED" };
@@ -32,7 +32,7 @@ export default function Team() {
   return (
     <Page dock title="Team" sub={admin ? "Everyone in the workspace" : "People you can add to projects"}>
       {err && <div className="err" role="alert">{err}</div>}
-      {t.loading && <div className="skel">Loading…</div>}
+      {t.loading && <Skeleton />}
       {t.error && <div className="err" role="alert">{t.error}</div>}
       {t.data && !admin && (
         <div className="list">{people.map((p) => (

@@ -93,3 +93,15 @@ export function LoadFailed({ onRetry }: { onRetry: () => void }) {
     </div>
   );
 }
+
+/** SHO-US-14.2 AC1: after 400 ms of loading, grey rows in the shape of the final layout. Before that nothing flashes. */
+export function Skeleton({ rows = 5, kind = "list" }: { rows?: number; kind?: "list" | "cards" }) {
+  const [show, setShow] = useState(false);
+  useEffect(() => { const t = setTimeout(() => setShow(true), 400); return () => clearTimeout(t); }, []);
+  return (
+    <div role="status" aria-live="polite" aria-busy="true" className={`skel-wrap ${kind}`}>
+      <span className="sr-only">Loading</span>
+      {show && Array.from({ length: rows }, (_, i) => <div key={i} className="skel-row" aria-hidden="true" />)}
+    </div>
+  );
+}

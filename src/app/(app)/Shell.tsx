@@ -106,6 +106,7 @@ export function Shell({ user, children }: { user: Me; children: React.ReactNode 
       <ConciergeProvider>
       <Extras>
       <div className="shell" data-density={compact ? "compact" : undefined}>
+        <a className="skip" href="#main" onClick={(e) => { e.preventDefault(); const m = document.getElementById("main"); m?.focus(); m?.scrollIntoView(); }}>Skip to content</a>
         {open && <div className="veil" onClick={() => setMenu(null)} />}
         <aside ref={drawer} className={`side${open ? " open" : ""}`} aria-label="Main">
           <Link href="/" className="brand"><img src="/logo-icon.svg" alt="" />Sheet Happens Officer</Link>
@@ -149,7 +150,7 @@ export function Page({ title, docTitle, sub, actions, dock, bar, children }: { t
   const hidden = useConcierge()?.hidden ?? false; // a hidden concierge gives its space back
   return (
     <>
-      <main className={`content${dock && !hidden ? " with-dock" : ""}${bar && !hidden ? " with-bar" : ""}`}>
+      <main id="main" tabIndex={-1} className={`content${dock && !hidden ? " with-dock" : ""}${bar && !hidden ? " with-bar" : ""}`}>
         {(title || actions) && (
           <div className="head">
             <div className="grow">

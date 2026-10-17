@@ -1,5 +1,6 @@
 "use client";
 import { useGet } from "@/components/api";
+import { Skeleton } from "@/components/ui";
 import { Page, useMe } from "../Shell";
 
 type Res = {
@@ -15,7 +16,7 @@ export default function UsageView() {
   const m = u.data?.month;
   return (
     <Page title="Usage" sub="Assistant calls, tokens and cost this month. Counts only; no chat text is shown here.">
-      {u.loading && <div className="skel">Loading…</div>}
+      {u.loading && <Skeleton />}
       {u.error && <div className="err" role="alert">{u.error}</div>}
       {m && (
         <>

@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import { api, useGet } from "@/components/api";
-import { Field, Modal } from "@/components/ui";
+import { Field, Modal, Skeleton } from "@/components/ui";
 import { Page } from "../Shell";
 
 type O = { id: string; name: string; kind: string | null; country: string | null; parent: { id: string; name: string } | null; openDeals: number };
@@ -52,7 +52,7 @@ export default function AccountsView() {
           {[...new Set((kinds.data?.organisations ?? []).map((o) => o.kind).filter((k): k is string => !!k))].sort().map((k) => <option key={k} value={k}>{k}</option>)}
         </select>
       </div>
-      {loading && !data && <div className="skel">Loading…</div>}
+      {loading && !data && <Skeleton />}
       {error && <div className="err" role="alert">{error}</div>}
       {data && rows.length === 0 && <div className="card empty"><b>No organisations found.</b></div>}
       {rows.length > 0 && (

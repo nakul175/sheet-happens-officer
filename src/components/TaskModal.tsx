@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import { PRIORITY, ROLE, api, dueLabel, useGet } from "@/components/api";
-import { Confirm, Modal } from "@/components/ui";
+import { Confirm, Modal, Skeleton } from "@/components/ui";
 import { ConvertDialog } from "@/components/ConvertDialog";
 import { TaskLinks } from "@/components/TaskLinks";
 import { useMe } from "@/app/(app)/Shell";
@@ -39,7 +39,7 @@ export function TaskModal({ id, me, onClose, onChanged, asPage }: { id: string; 
 
   const body = (inner: React.ReactNode) => (asPage ? <div className="modal" style={{ margin: "0 auto" }}>{inner}</div> : <Modal label="Task" onClose={onClose}>{inner}</Modal>);
 
-  if (t.loading) return body(<div className="skel">Loading…</div>);
+  if (t.loading) return body(<Skeleton />);
   if (!task) {
     return body(
       <>

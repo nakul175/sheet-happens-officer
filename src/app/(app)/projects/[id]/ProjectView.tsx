@@ -7,7 +7,7 @@ import { Suspense } from "react";
 import { PRIORITY, ROLE, api, dueLabel, dueState, rowKeys, initials, isNetworkFailure, isOverdue, todayIST, useGet } from "@/components/api";
 import { TaskModal } from "@/components/TaskModal";
 import { AvatarGroup, Pri, Tick } from "@/components/TaskParts";
-import { Confirm, Field, LoadFailed, Menu, Modal } from "@/components/ui";
+import { Confirm, Field, LoadFailed, Menu, Modal, Skeleton } from "@/components/ui";
 import { MoveSheet } from "@/components/MoveSheet";
 import "@/components/board.css";
 import { DealPanel, type DealBlock } from "@/components/DealPanel";
@@ -226,7 +226,7 @@ function Inner({ id }: { id: string }) {
           {bulk.skipped.length > 0 && <details><summary>Which tasks were skipped</summary><ul>{bulk.skipped.map((x) => <li key={x.id}>{x.title}: {x.reason}</li>)}</ul></details>}
         </div>
       )}
-      {(pr.loading || tk.loading) && !secs && <div className="skel">Loading…</div>}
+      {(pr.loading || tk.loading) && !secs && <Skeleton />}
       {secs && filtered && secs.every((x) => !x.tasks.length) && (
         <div className="card nomatch"><b>No tasks match</b><button className="btn ghost" onClick={() => setList({ assignee: "", flags: [], priority: "" })}>Clear filters</button></div>
       )}

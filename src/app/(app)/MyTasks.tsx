@@ -6,7 +6,8 @@ import "./approvals.css";
 import { api, dueLabel, dueState, rowKeys, isOverdue, todayIST, useGet } from "@/components/api";
 import { TaskModal } from "@/components/TaskModal";
 import { Pri, Tick } from "@/components/TaskParts";
-import { Confirm, LoadFailed } from "@/components/ui";
+import { Confirm, LoadFailed, Skeleton } from "@/components/ui";
+import { useExtras } from "@/components/extras/Extras";
 import { StartGuide, guide } from "@/components/extras/StartGuide";
 import { Page, useMe } from "./Shell";
 
@@ -69,6 +70,7 @@ const GROUP_KEY = (id: string) => `sho.home.group.${id}`;
 
 function Inner() {
   const me = useMe();
+  const { canAdd, openAdd } = useExtras();
   const { data, error, loading, reload } = useGet<Groups>("/api/my-tasks");
   const [mode, setMode] = useState<"date" | "project">("date");
   const [done, setDone] = useState<{ projectId: string; name: string }[]>([]);
@@ -137,7 +139,7 @@ function Inner() {
         </div>
       )}>
       {me.startGuide && !guideGone && <StartGuide onDismiss={() => setGuideGone(true)} />}
-      {loading && !data && <div className="skel">Loading…</div>}
+      {loading && !data && <Skeleton />}
       {error && !data && <LoadFailed onRetry={reload} />}
       {error && data && <div className="err" role="alert">{error} <button className="link" onClick={reload}>Retry</button></div>}
       {prompts.map((p) => (
@@ -148,7 +150,7 @@ function Inner() {
         </div>
       ))}
       {data && total === 0 && needs.length === 0 && others.length === 0 && (
-        <div className="card empty"><b>Nothing on your plate.</b><br />Tasks assigned to you, or that you collaborate on, show up here.</div>
+        <div className="card empty"><b>Nothing on your plate.</b><br />Tasks assigned to you, or that you collaborate on, show up here.<div className="empty-act"><Link className="btn" href="/projects">Open a project</Link>{canAdd && <button className="btn ghost" onClick={openAdd}>New task</button>}</div></div>
       )}
       {wait.length > 0 && (
         <section aria-label="Waiting on me">

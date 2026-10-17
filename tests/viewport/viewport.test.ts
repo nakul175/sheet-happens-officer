@@ -53,7 +53,7 @@ async function check(ctx: BrowserContext, path: string, width: number, wait?: st
   const page = await ctx.newPage();
   try {
     await page.goto(path, { waitUntil: "load" });
-    await page.waitForFunction(() => !document.querySelector(".skel"), undefined, { timeout: 15000 }).catch(() => {});
+    await page.waitForFunction(() => !document.querySelector(".skel, .skel-wrap"), undefined, { timeout: 15000 }).catch(() => {});
     if (wait) await page.waitForSelector(wait, { timeout: 10000 });
     await page.waitForTimeout(400);
     const found: Finding[] = await page.evaluate(collect, width < PHONE_MAX);
