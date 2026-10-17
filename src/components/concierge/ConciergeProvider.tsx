@@ -23,7 +23,7 @@ type Ctx = {
   send: (text: string) => Promise<boolean>;
   quick: (id: QuickActionId) => Promise<void>;
   choose: (m: Message, choiceId: string) => Promise<void>;
-  confirm: (cardId: string, handover?: { taskId: string; assigneeId: string }[]) => Promise<void>;
+  confirm: (cardId: string, handover?: { taskId: string; assigneeId: string }[], acknowledge?: boolean) => Promise<void>;
   cancel: (cardId: string) => Promise<void>;
   undo: (cardId: string, anyway?: boolean) => Promise<void>;
   undoAsk: { cardId: string; conflicts: { field: string; before: string; after: string; now: string }[]; changedBy: string[] } | null;
@@ -107,9 +107,10 @@ export function ConciergeProvider({ children }: { children: React.ReactNode }) {
     });
   }, [run, add]);
 
-  const confirm = useCallback(async (cardId: string, handover?: { taskId: string; assigneeId: string }[]) => {
+  const confirm = useCallback(async (cardId: string, handover?: { taskId: string; assigneeId: string }[], acknowledge?: boolean) => {
     await run(async () => {
-      const r = await conciergeApi.confirm(cardId, handover);
+      const r = await conciergeApi.confirm(cardId, handover, acknowledge);
+      if (r.status === 409 && r.data.partial) { add(freshMessages(r.data)); if (r.data.card) setMessages((l) => patchCard(l, r.data.card)); setError("Part of that was applied and part was not. The message below lists what changed, with Undo."); return; }
       if (r.status === 409) { add(freshMessages(r.data)); setError("That changed since I prepared it, so nothing was written. Check the new card below."); return; }
       if (!r.ok) { setError(r.error ?? "That did not work."); return; }
       if (r.data.card) setMessages((l) => patchCard(l, r.data.card));

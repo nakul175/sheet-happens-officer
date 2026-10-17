@@ -8,6 +8,7 @@ import type { Card, Message } from "./types";
 function CardView({ card }: { card: Card }) {
   const c = useConcierge()!;
   const [picked, setPicked] = useState<Record<string, string>>(() => initialPicks(card));
+  const [ack, setAck] = useState(false);
   const pending = card.status === "PENDING";
   const ready = handoverComplete(card, picked);
   const options = card.handoverOptions ?? [];
@@ -41,7 +42,12 @@ function CardView({ card }: { card: Card }) {
           ))}
         </div>
       )}
-      {card.irreversible && pending && <p className="cc-warn" role="note">This can&apos;t be undone.</p>}
+      {card.irreversible && pending && (
+        <label className="cc-warn" role="note">
+          <input type="checkbox" checked={ack} disabled={c.busy} onChange={(e) => setAck(e.target.checked)} />{" "}
+          This can&apos;t be undone. I understand.
+        </label>
+      )}
       {pending && card.blockedReason && <p className="cc-blocked" role="alert">{card.blockedReason}</p>}
       {card.status === "STALE" && <p className="cc-note">This changed since I prepared it. Nothing was written.</p>}
       {card.status === "CONFIRMED" && <p className="cc-note">Confirmed.</p>}
@@ -49,8 +55,8 @@ function CardView({ card }: { card: Card }) {
       {pending && (
         <div className="cc-actions">
           {canShowConfirm(card) && (
-            <button className="btn sm" disabled={c.busy || !ready}
-              onClick={() => c.confirm(card.id, card.handover?.length ? card.handover.map((h) => ({ taskId: h.taskId, assigneeId: picked[h.taskId] })) : undefined)}>
+            <button className="btn sm" disabled={c.busy || !ready || (!!card.irreversible && !ack)}
+              onClick={() => c.confirm(card.id, card.handover?.length ? card.handover.map((h) => ({ taskId: h.taskId, assigneeId: picked[h.taskId] })) : undefined, card.irreversible ? true : undefined)}>
               Confirm
             </button>
           )}
