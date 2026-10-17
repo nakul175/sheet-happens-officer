@@ -7,9 +7,22 @@ export function Modal({ onClose, small, label, children }: { onClose: () => void
   useEffect(() => {
     const prev = document.activeElement as HTMLElement | null;
     ref.current?.focus();
-    const esc = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
-    document.addEventListener("keydown", esc);
-    return () => { document.removeEventListener("keydown", esc); prev?.focus?.(); };
+    // SHO-US-10.7: the page behind a dialog must not scroll.
+    const before = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const keys = (e: KeyboardEvent) => {
+      if (e.key === "Escape") { onClose(); return; }
+      // SHO-US-14.3: keep Tab inside the dialog.
+      if (e.key !== "Tab" || !ref.current) return;
+      const items = Array.from(ref.current.querySelectorAll<HTMLElement>('a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])')).filter((el) => el.offsetParent !== null);
+      if (!items.length) { e.preventDefault(); return; }
+      const first = items[0], last = items[items.length - 1], at = document.activeElement;
+      if (e.shiftKey && (at === first || at === ref.current)) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && at === last) { e.preventDefault(); first.focus(); }
+      else if (!ref.current.contains(at)) { e.preventDefault(); first.focus(); }
+    };
+    document.addEventListener("keydown", keys);
+    return () => { document.removeEventListener("keydown", keys); document.body.style.overflow = before; prev?.focus?.(); };
   }, [onClose]);
   return (
     <div className="scrim" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
@@ -66,6 +79,17 @@ export function Menu({ label, children }: { label: string; children: (close: () 
     <div className="menu" ref={box}>
       <button className="kebab" ref={btn} aria-label={label} aria-expanded={open} aria-haspopup="menu" onClick={(e) => { e.stopPropagation(); setOpen(!open); }}>⋯</button>
       {open && <div role="menu" onClick={(e) => e.stopPropagation()}>{children(() => setOpen(false))}</div>}
+    </div>
+  );
+}
+
+/** SHO-US-14.2: shown when a screen could not load because the server did not answer. Retry reloads without leaving the page. */
+export function LoadFailed({ onRetry }: { onRetry: () => void }) {
+  return (
+    <div className="card empty" role="alert">
+      <b>Could not reach the server.</b>
+      <p className="hint" style={{ margin: "6px 0 12px" }}>Check your connection, then try again. Nothing was lost.</p>
+      <button className="btn" onClick={onRetry}>Retry</button>
     </div>
   );
 }

@@ -1,12 +1,13 @@
 "use client";
+import { finePointer } from "@/components/client";
 import Link from "next/link";
 import { use, useCallback, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Suspense } from "react";
-import { PRIORITY, ROLE, api, dueLabel, initials, isOverdue, useGet } from "@/components/api";
+import { PRIORITY, ROLE, api, dueLabel, dueState, rowKeys, initials, isNetworkFailure, isOverdue, useGet } from "@/components/api";
 import { TaskModal } from "@/components/TaskModal";
 import { Tick } from "@/components/TaskParts";
-import { Confirm, Field, Menu, Modal } from "@/components/ui";
+import { Confirm, Field, LoadFailed, Menu, Modal } from "@/components/ui";
 import { DealPanel, type DealBlock } from "@/components/DealPanel";
 import { Page, useMe } from "../../Shell";
 
@@ -41,6 +42,9 @@ function Inner({ id }: { id: string }) {
 
   const refresh = useCallback(() => { pr.reload(); tk.reload(); setExtra({}); }, [pr, tk]);
 
+  if (!pr.data && isNetworkFailure(pr.status)) {
+    return <Page title="Project"><LoadFailed onRetry={refresh} /></Page>;
+  }
   if (pr.status === 404 || (pr.error && !pr.data)) {
     return <Page title="This project isn't available"><div className="card empty">It may not exist, or you are not a member.<br /><Link href="/projects">Back to Projects</Link></div></Page>;
   }
@@ -85,7 +89,7 @@ function Inner({ id }: { id: string }) {
   const archivedBanner = p?.archived && <div className="box warn" style={{ marginBottom: 12 }}>This project is archived and read-only.</div>;
 
   return (
-    <Page dock={view === "list"} bar={view === "board"}
+    <Page dock={view === "list"} bar={view === "board"} docTitle={p?.name}
       title={<span className="crumb"><Link href={p?.type === "DEAL" ? "/deals" : "/projects"}>{p?.type === "DEAL" ? "Deals" : "Projects"}</Link> / <span style={{ color: "var(--ink)" }}>{p?.name ?? "…"}</span></span>}
       sub={p && <span className="chip">You: {ROLE[p.role]}</span>}
       actions={canWrite && <button className="btn" onClick={() => setAdding(true)}>+ Add task</button>}>
@@ -115,7 +119,7 @@ function Inner({ id }: { id: string }) {
             </div>
             <div className="list">
               {list.map((t) => (
-                <div key={t.id} className="item click" onClick={() => openTask(t.id)}>
+                <div key={t.id} className="item click" {...rowKeys(() => openTask(t.id))}>
                   <Tick id={t.id} title={t.title} done={!!t.completedAt} allowed={canWrite && (t.canClose || !!t.completedAt)} onDone={refresh} />
                   <div className="t"><b>{t.title}</b>{t.subtasks.total > 0 && <small>{t.subtasks.total - t.subtasks.open} of {t.subtasks.total} subtasks</small>}</div>
                   <div className="meta">
@@ -123,7 +127,7 @@ function Inner({ id }: { id: string }) {
                     {t.isIdea && <span className="chip gold">Idea</span>}{t.blocked && <span className="chip red">Blocked</span>}
                     <span>{t.assignee.name}</span>
                     <span className={`pri-${t.priority}`}>{PRIORITY[t.priority]}</span>
-                    <span className={!t.completedAt && isOverdue(t.dueDate) ? "over" : undefined}>{dueLabel(t.dueDate)}</span>
+                    <span className={!t.completedAt && isOverdue(t.dueDate) ? "over" : undefined}>{dueState(t.dueDate, !!t.completedAt)}</span>
                   </div>
                 </div>
               ))}
@@ -157,7 +161,7 @@ function Inner({ id }: { id: string }) {
                   onClick={() => openTask(t.id)} tabIndex={0} onKeyDown={(e) => { if (e.key === "Enter") openTask(t.id); }}>
                   <div>{t.title}</div>
                   <div className="row2">
-                    <span className={!t.completedAt && isOverdue(t.dueDate) ? "over" : undefined} style={isOverdue(t.dueDate) && !t.completedAt ? { color: "var(--danger)" } : undefined}>{dueLabel(t.dueDate)}</span>
+                    <span className={!t.completedAt && isOverdue(t.dueDate) ? "over" : undefined} style={isOverdue(t.dueDate) && !t.completedAt ? { color: "var(--danger)" } : undefined}>{dueState(t.dueDate, !!t.completedAt)}</span>
                     <span className={`pri-${t.priority}`}>{PRIORITY[t.priority]}</span>
                     {t.subtasks.total > 0 && <span>{t.subtasks.total - t.subtasks.open} of {t.subtasks.total}</span>}
                     {t.isIdea && <span className="chip gold">Idea</span>}{t.blocked && <span className="chip red">Blocked</span>}
@@ -268,7 +272,7 @@ function NewTask({ p, onClose, onAdded }: { p: Proj; onClose: () => void; onAdde
         setBusy(false);
         if (r.ok) onAdded(); else setErr(r.error ?? "Could not add the task.");
       }}>
-        <Field label="Title">{(id) => <input id={id} className="in" value={title} required maxLength={500} autoFocus onChange={(e) => setTitle(e.target.value)} />}</Field>
+        <Field label="Title">{(id) => <input id={id} className="in" value={title} required maxLength={500} autoFocus={finePointer()} onChange={(e) => setTitle(e.target.value)} />}</Field>
         <Field label="Section">{(id) => <select id={id} className="in" value={section} onChange={(e) => setSection(e.target.value)}>{p.sections.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select>}</Field>
         <Field label="Assignee">{(id) => <select id={id} className="in" value={assignee} onChange={(e) => setAssignee(e.target.value)}>{workers.map((w) => <option key={w.userId} value={w.userId}>{w.name}</option>)}</select>}</Field>
         <Field label="Due date (optional)">{(id) => <input id={id} className="in" type="date" value={due} onChange={(e) => setDue(e.target.value)} />}</Field>
@@ -288,7 +292,7 @@ function SectionName({ title, yes, initial = "", onSave, onClose, onDone }: { ti
     <Modal small label={title} onClose={onClose}>
       <h2>{title}</h2>
       <form onSubmit={async (e) => { e.preventDefault(); setBusy(true); const r = await onSave(v.trim()); setBusy(false); if (r.ok) onDone(); else setErr(r.error ?? "Could not save."); }}>
-        <Field label="Section name">{(id) => <input id={id} className="in" value={v} maxLength={60} autoFocus onChange={(e) => setV(e.target.value)} />}</Field>
+        <Field label="Section name">{(id) => <input id={id} className="in" value={v} maxLength={60} autoFocus={finePointer()} onChange={(e) => setV(e.target.value)} />}</Field>
         {err && <div className="err" role="alert">{err}</div>}
         <div className="actions"><button type="button" className="btn ghost" onClick={onClose}>Cancel</button><button className="btn" disabled={busy || !v.trim()}>{yes}</button></div>
       </form>

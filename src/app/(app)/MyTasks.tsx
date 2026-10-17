@@ -2,9 +2,10 @@
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { Suspense, useEffect, useState } from "react";
-import { PRIORITY, api, dueLabel, isOverdue, todayIST, useGet } from "@/components/api";
+import { PRIORITY, api, dueLabel, dueState, rowKeys, isOverdue, todayIST, useGet } from "@/components/api";
 import { TaskModal } from "@/components/TaskModal";
 import { Tick } from "@/components/TaskParts";
+import { LoadFailed } from "@/components/ui";
 import { Page, useMe } from "./Shell";
 
 type Item = {
@@ -74,7 +75,7 @@ function Inner() {
   );
   const slotOf = (t: Item) => (mode === "project" && me.crm ? t.project.id : groups.find((g) => data?.[g].some((x) => x.id === t.id)) ?? "later");
   const row = (t: Item) => (
-    <div key={t.id} className="item click" onClick={() => router.push(`/?task=${t.id}`, { scroll: false })}>
+    <div key={t.id} className="item click" {...rowKeys(() => router.push(`/?task=${t.id}`, { scroll: false }))}>
       <Tick id={t.id} title={t.title} done={false} allowed={t.canClose} onDone={() => { if (t.project.type === "DEAL") setDone((d) => [...d, { projectId: t.project.id, name: t.project.name, slot: slotOf(t) }]); reload(); }} />
       <div className="t">
         <b><a href={`/tasks/${t.id}`} style={{ color: "inherit", textDecoration: "none" }} onClick={(e) => { e.preventDefault(); }}>{t.title}</a></b>
@@ -86,7 +87,7 @@ function Inner() {
         {t.awaitingApproval && <span className="chip gold">Awaiting approval</span>}
         {t.blocked && <span className="chip red">Blocked</span>}
         <span className={`pri-${t.priority}`}>{PRIORITY[t.priority]}</span>
-        <span className={isOverdue(t.dueDate) ? "over" : undefined}>{dueLabel(t.dueDate)}</span>
+        <span className={isOverdue(t.dueDate) ? "over" : undefined}>{dueState(t.dueDate)}</span>
       </div>
     </div>
   );
@@ -99,7 +100,8 @@ function Inner() {
         </div>
       )}>
       {loading && !data && <div className="skel">Loading…</div>}
-      {error && <div className="err" role="alert">{error}</div>}
+      {error && !data && <LoadFailed onRetry={reload} />}
+      {error && data && <div className="err" role="alert">{error} <button className="link" onClick={reload}>Retry</button></div>}
       {data && total === 0 && needs.length === 0 && (
         <div className="card empty"><b>Nothing on your plate.</b><br />Tasks assigned to you, or that you collaborate on, show up here.</div>
       )}

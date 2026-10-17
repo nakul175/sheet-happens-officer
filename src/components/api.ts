@@ -24,6 +24,10 @@ export async function api<T = Record<string, any>>(method: string, path: string,
   }
 }
 
+/** SHO-US-14.2: no answer from the server, or a server fault. Never a statement about the person's access. */
+export const isNetworkFailure = (status: number) => status === 0 || status >= 500;
+export const COULD_NOT_REACH = "Could not reach the server.";
+
 /** GET a path; `reload()` fetches again. `data` stays on screen while reloading. */
 export function useGet<T = Record<string, any>>(path: string | null) { // eslint-disable-line @typescript-eslint/no-explicit-any
   const [state, setState] = useState<{ data: T | null; error: string | null; status: number; loading: boolean }>({ data: null, error: null, status: 0, loading: true });
@@ -34,7 +38,8 @@ export function useGet<T = Record<string, any>>(path: string | null) { // eslint
     const mine = ++seq.current;
     api<T>("GET", path).then((r) => {
       if (mine !== seq.current) return;
-      setState({ data: r.ok ? r.data : null, error: r.ok ? null : r.error ?? "Error", status: r.status, loading: false });
+      // A dropped connection must not wipe what is already on screen or look like a permission problem.
+      setState((prev) => ({ data: r.ok ? r.data : isNetworkFailure(r.status) ? prev.data : null, error: r.ok ? null : isNetworkFailure(r.status) ? COULD_NOT_REACH : r.error ?? "Error", status: r.status, loading: false }));
     });
   }, [path, tick]);
   const reload = useCallback(() => setTick((n) => n + 1), []);
@@ -59,6 +64,14 @@ export function dueLabel(d: string | null) {
 }
 export const todayIST = () => new Date(Date.now() + 5.5 * 3600_000).toISOString().slice(0, 10);
 export const isOverdue = (d: string | null) => !!d && d < todayIST();
+/** Date text that also says "Overdue" in words, so colour is not the only signal. */
+export const dueState = (d: string | null, done = false) => (!done && isOverdue(d) ? `Overdue · ${dueLabel(d)}` : dueLabel(d));
+/** Props that make a clickable row reachable and openable from the keyboard. */
+export const rowKeys = (open: () => void) => ({
+  tabIndex: 0, role: "link" as const,
+  onClick: open,
+  onKeyDown: (e: React.KeyboardEvent) => { if (e.target === e.currentTarget && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); open(); } },
+});
 
 export const PRIORITY: Record<string, string> = { LOW: "Low", MEDIUM: "Medium", HIGH: "High", URGENT: "Urgent" };
 export const ROLE: Record<string, string> = { LEADER: "Leader", EDITOR: "Editor", VIEWER: "Viewer" };
