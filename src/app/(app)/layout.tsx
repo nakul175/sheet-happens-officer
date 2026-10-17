@@ -6,6 +6,7 @@ import { crmVisible } from "@/lib/crm";
 import { leadsAnyDeal } from "@/lib/review";
 import { UndoHost } from "@/components/UndoHost";
 import "./app.css";
+import "./touch.css";
 
 async function Gate({ children }: { children: React.ReactNode }) {
   let user;

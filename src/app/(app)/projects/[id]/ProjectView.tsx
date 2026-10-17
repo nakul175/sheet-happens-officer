@@ -4,9 +4,9 @@ import Link from "next/link";
 import { use, useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Suspense } from "react";
-import { PRIORITY, ROLE, api, dueLabel, dueState, rowKeys, initials, isNetworkFailure, isOverdue, useGet } from "@/components/api";
+import { PRIORITY, ROLE, api, dueLabel, dueState, rowKeys, isNetworkFailure, isOverdue, useGet } from "@/components/api";
 import { TaskModal } from "@/components/TaskModal";
-import { Tick } from "@/components/TaskParts";
+import { AvatarGroup, Pri, Tick } from "@/components/TaskParts";
 import { Confirm, Field, LoadFailed, Menu, Modal } from "@/components/ui";
 import { MoveSheet } from "@/components/MoveSheet";
 import "@/components/board.css";
@@ -153,12 +153,12 @@ function Inner({ id }: { id: string }) {
               {list.map((t) => (
                 <div key={t.id} className="item click" {...rowKeys(() => openTask(t.id))}>
                   <Tick id={t.id} title={t.title} done={!!t.completedAt} allowed={canWrite && (t.canClose || !!t.completedAt)} onDone={refresh} />
-                  <div className="t"><b>{t.title}</b>{t.subtasks.total > 0 && <small>{t.subtasks.total - t.subtasks.open} of {t.subtasks.total} subtasks</small>}</div>
+                  <div className="t"><b className="ttl">{t.title}</b>{t.subtasks.total > 0 && <small>{t.subtasks.total - t.subtasks.open} of {t.subtasks.total} subtasks</small>}</div>
                   <div className="meta">
                     {t.awaitingApproval && <span className="chip gold">Awaiting approval</span>}
                     {t.isIdea && <span className="chip gold">Idea</span>}{t.blocked && <span className="chip red">Blocked</span>}
-                    <span>{t.assignee.name}</span>
-                    <span className={`pri-${t.priority}`}>{PRIORITY[t.priority]}</span>
+                    <Pri p={t.priority} />
+                    <AvatarGroup assignee={t.assignee} collaborators={t.collaborators} />
                     <span className={!t.completedAt && isOverdue(t.dueDate) ? "over" : undefined}>{dueState(t.dueDate, !!t.completedAt)}</span>
                   </div>
                 </div>
@@ -198,15 +198,11 @@ function Inner({ id }: { id: string }) {
                   <div>{t.title}</div>
                   <div className="row2">
                     <span className={!t.completedAt && isOverdue(t.dueDate) ? "over" : undefined} style={isOverdue(t.dueDate) && !t.completedAt ? { color: "var(--danger)" } : undefined}>{dueState(t.dueDate, !!t.completedAt)}</span>
-                    <span className={`pri-${t.priority}`}>{PRIORITY[t.priority]}</span>
+                    <Pri p={t.priority} />
                     {t.subtasks.total > 0 && <span>{t.subtasks.total - t.subtasks.open} of {t.subtasks.total}</span>}
                     {t.isIdea && <span className="chip gold">Idea</span>}{t.blocked && <span className="chip red">Blocked</span>}
                     {t.awaitingApproval && <span className="chip gold">Awaiting</span>}
-                    <span className="avs" style={{ marginLeft: "auto" }} aria-label={`Assignee ${t.assignee.name}${t.collaborators.length ? `; collaborators ${t.collaborators.map((c) => c.name).join(", ")}` : ""}`}>
-                      <span className="av sm" title={`Assignee: ${t.assignee.name}`}>{initials(t.assignee.name)}</span>
-                      {t.collaborators.slice(0, 3).map((c) => <span key={c.id} className="av sm collab" title={`Collaborator: ${c.name}`}>{initials(c.name)}</span>)}
-                      {t.collaborators.length > 3 && <span className="av sm collab" title={t.collaborators.slice(3).map((c) => c.name).join(", ")}>+{t.collaborators.length - 3}</span>}
-                    </span>
+                    <AvatarGroup assignee={t.assignee} collaborators={t.collaborators} />
                   </div>
                   {canWrite && (
                     <button className="btn ghost sm bmove" aria-label={`Move "${t.title}" to…`} aria-haspopup="dialog"

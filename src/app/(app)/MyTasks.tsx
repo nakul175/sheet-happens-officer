@@ -2,9 +2,9 @@
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { Suspense, useEffect, useState } from "react";
-import { PRIORITY, api, dueLabel, dueState, rowKeys, isOverdue, todayIST, useGet } from "@/components/api";
+import { api, dueLabel, dueState, rowKeys, isOverdue, todayIST, useGet } from "@/components/api";
 import { TaskModal } from "@/components/TaskModal";
-import { Tick } from "@/components/TaskParts";
+import { Pri, Tick } from "@/components/TaskParts";
 import { LoadFailed } from "@/components/ui";
 import { Page, useMe } from "./Shell";
 
@@ -68,7 +68,7 @@ function Inner() {
     <div key={t.id} className="item click" {...rowKeys(() => router.push(`/?task=${t.id}`, { scroll: false }))}>
       <Tick id={t.id} title={t.title} done={false} allowed={t.canClose} onDone={() => { if (t.project.type === "DEAL") setDone((d) => [...d, { projectId: t.project.id, name: t.project.name }]); reload(); }} />
       <div className="t">
-        <b><a href={`/tasks/${t.id}`} style={{ color: "inherit", textDecoration: "none" }} onClick={(e) => { e.preventDefault(); }}>{t.title}</a></b>
+        <b className="ttl"><a href={`/tasks/${t.id}`} style={{ color: "inherit", textDecoration: "none" }} onClick={(e) => { e.preventDefault(); }}>{t.title}</a></b>
         <small>{t.parent ? `Subtask of ${t.parent.title} · ` : ""}{t.project.name}</small>
       </div>
       <div className="meta">
@@ -76,7 +76,7 @@ function Inner() {
         {t.relation === "COLLABORATOR" && <span className="chip grey">Collaborator</span>}
         {t.awaitingApproval && <span className="chip gold">Awaiting approval</span>}
         {t.blocked && <span className="chip red">Blocked</span>}
-        <span className={`pri-${t.priority}`}>{PRIORITY[t.priority]}</span>
+        <Pri p={t.priority} />
         <span className={isOverdue(t.dueDate) ? "over" : undefined}>{dueState(t.dueDate)}</span>
       </div>
     </div>

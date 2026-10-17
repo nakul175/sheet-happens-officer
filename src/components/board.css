@@ -22,7 +22,7 @@
 .msheet-head strong { font-size: 15px; color: var(--navy); }
 .msheet ul { list-style: none; margin: 0; padding: 0; }
 .msheet-row { display: flex; width: 100%; align-items: center; justify-content: space-between; gap: 12px; min-height: 48px; padding: 0 16px; background: none; border: 0; border-bottom: 1px solid var(--line); font: inherit; font-size: 16px; color: var(--ink); text-align: left; cursor: pointer; overflow-wrap: anywhere; }
-.msheet-row:hover:not(:disabled) { background: #eef0f6; }
+@media (hover: hover) { .msheet-row:hover:not(:disabled) { background: #eef0f6; } }
 .msheet-row:disabled { color: var(--muted); cursor: default; }
 .msheet-row small { color: var(--muted); font-size: 12px; }
 .msheet-row:focus-visible { outline: 2px solid var(--gold); outline-offset: -2px; }
