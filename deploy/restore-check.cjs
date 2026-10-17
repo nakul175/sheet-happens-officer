@@ -1,5 +1,5 @@
 // Compares row counts of production and a restored copy (story 9.3, AC3). Run on the droplet by
-// .github/workflows/restore-check.yml. The restored database's URL arrives on stdin, never as an
+// .github/workflows/restore-check.yml. The restored database's URL is read from a private temp file, never an
 // argument, and nothing here prints a connection string.
 const { Client } = require("pg");
 const fs = require("node:fs");
@@ -19,7 +19,7 @@ async function counts(url) {
   const env = Object.fromEntries(fs.readFileSync("/etc/sho/app.env", "utf8").split("\n").filter(Boolean).map((l) => {
     const i = l.indexOf("="); return [l.slice(0, i), l.slice(i + 1).replace(/^'|'$/g, "")];
   }));
-  const restoreUrl = fs.readFileSync(0, "utf8").trim();
+  const restoreUrl = fs.readFileSync("/tmp/rc.url", "utf8").trim();
   if (!restoreUrl || !env.DATABASE_URL) throw new Error("missing a connection string");
   const [prod, rest] = [await counts(env.DATABASE_URL), await counts(restoreUrl)];
   let bad = 0;

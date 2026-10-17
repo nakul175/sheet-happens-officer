@@ -27,8 +27,9 @@ jobs:
           RESTORE_DATABASE_URL: ${{ secrets.RESTORE_DATABASE_URL }}
         run: |
           [ -n "$RESTORE_DATABASE_URL" ] || { echo "RESTORE_DATABASE_URL secret is missing"; exit 1; }
+          printf '%s\n' "$RESTORE_DATABASE_URL" | ssh "deploy@$HOST" 'umask 077; cat > /tmp/rc.url'
           scp deploy/restore-check.cjs "deploy@$HOST:/tmp/restore-check.cjs"
-          ssh "deploy@$HOST" 'rm -rf /tmp/rc && mkdir /tmp/rc && cd /tmp/rc && npm init -y >/dev/null && npm i pg --no-audit --no-fund --loglevel=error && cp /tmp/restore-check.cjs . && node restore-check.cjs' <<<"$RESTORE_DATABASE_URL"
+          ssh "deploy@$HOST" 'rm -rf /tmp/rc && mkdir /tmp/rc && cd /tmp/rc && npm init -y >/dev/null && npm i pg --no-audit --no-fund --loglevel=error && cp /tmp/restore-check.cjs . && node restore-check.cjs'
       - name: Clean up
         if: always()
-        run: ssh "deploy@$HOST" 'rm -rf /tmp/rc /tmp/restore-check.cjs'
+        run: ssh "deploy@$HOST" 'rm -rf /tmp/rc /tmp/restore-check.cjs /tmp/rc.url'
