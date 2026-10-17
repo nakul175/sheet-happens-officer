@@ -8,7 +8,7 @@
 //   ANTHROPIC_API_KEY    the provider key
 //   MODEL_DATA_APPROVED  must be exactly "true" or no request is ever sent to any provider
 //   MODEL_USD_IN_PER_MTOK, MODEL_USD_OUT_PER_MTOK, MODEL_USD_CACHE_WRITE_PER_MTOK, MODEL_USD_CACHE_READ_PER_MTOK
-//   MODEL_RETRY_DELAY_MS (default 2000), MODEL_TIMEOUT_MS (default 20000)
+//   MODEL_RETRY_DELAY_MS (default 2000), MODEL_TIMEOUT_MS (default 15000)
 
 export type ToolDef = { name: string; description: string; input_schema: Record<string, unknown> };
 export type ContentBlock =
@@ -65,7 +65,7 @@ export function modelConfig(env: NodeJS.ProcessEnv = process.env): ModelConfig {
     apiKey: env.ANTHROPIC_API_KEY ?? "",
     approved: env.MODEL_DATA_APPROVED === "true",
     retryDelayMs: num(env.MODEL_RETRY_DELAY_MS, 2000),
-    timeoutMs: num(env.MODEL_TIMEOUT_MS, 20000),
+    timeoutMs: num(env.MODEL_TIMEOUT_MS, 15000),
     // Anthropic pricing page, read 17 Oct 2026: Haiku 5.5 (prompts up to 100k tokens).
     price: {
       inPerMTok: num(env.MODEL_USD_IN_PER_MTOK, 0.1),

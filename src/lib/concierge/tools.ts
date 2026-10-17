@@ -113,13 +113,20 @@ function lookalikes(t: Turn): { kind: Kind; ids: string[] }[] {
   return out;
 }
 
-/** The first id in a proposal that the person has not picked but that could be one of several. */
+/**
+ * A proposal that names exactly ONE record out of several that matched is a guess. Naming two or more of the
+ * same group is a deliberate bulk request ("all of them"), which the card then shows in full.
+ */
 function guessed(t: Turn, ids: { kind: Kind; id: string }[]) {
   const sets = [...t.ambiguous, ...lookalikes(t)];
+  const used = new Set(ids.map((x) => `${x.kind}|${x.id}`));
   for (const { kind, id } of ids) {
     if (t.chosen.has(id) || id === t.user.id) continue;
-    const s = sets.find((x) => x.kind === kind && x.ids.includes(id));
-    if (s) return { kind, ids: s.ids };
+    for (const s of sets) {
+      if (s.kind !== kind || !s.ids.includes(id)) continue;
+      const hit = s.ids.filter((x) => used.has(`${kind}|${x}`));
+      if (hit.length === 1) return { kind, ids: s.ids };
+    }
   }
   return null;
 }
