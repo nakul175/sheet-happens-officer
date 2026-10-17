@@ -18,6 +18,7 @@ export async function notify(
   type: string,
   o: { actorId?: string | null; taskId?: string; projectId?: string; data?: Record<string, unknown>; includeActor?: boolean },
 ) {
+  if (reqCtx.getStore()?.muteNotify) return; // SHO-US-14.11: a bulk action sends its own summary notices
   const seen = sent.get(tx) ?? new Set<string>();
   sent.set(tx, seen);
   const ids = [...new Set(recipients.filter((x): x is string => !!x))]

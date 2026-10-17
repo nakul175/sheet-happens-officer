@@ -89,7 +89,7 @@ export const taskUpdate = z.object({
   // The updatedAt the person saw when they opened the task; a different value means someone else saved first.
   expectedUpdatedAt: z.string().optional(),
 });
-export const taskAssign = z.object({ assigneeId: z.string().min(1) });
+export const taskAssign = z.object({ assigneeId: z.string().min(1), expectedUpdatedAt: z.string().optional() });
 export const taskCollaborator = z.object({ userId: z.string().min(1) });
 export const taskApprover = z.object({ approverId: z.string().min(1).nullable() });
 export const taskComplete = z.object({ completeAll: z.boolean().optional() });

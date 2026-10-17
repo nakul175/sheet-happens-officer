@@ -355,7 +355,10 @@ describe("approver (4.6)", () => {
     const held = (await boss.c.get(`/api/tasks/${t}`)).json.task;
     expect(held.assignee.id).toBe(boss.id);
     expect(held.awaitingApproval).toBe(true);
-    expect((await boss.c.get("/api/my-tasks")).json.later.some((x: { id: string }) => x.id === t)).toBe(true);
+    // SHO-US-14.16: a task held for approval is listed in "Waiting on me", no longer under Later.
+    const mineNow = (await boss.c.get("/api/my-tasks")).json;
+    expect(mineNow.waitingOnMe.some((x: { id: string }) => x.id === t)).toBe(true);
+    expect(mineNow.later.some((x: { id: string }) => x.id === t)).toBe(false);
     expect((await other.c.post(`/api/tasks/${t}/send-back`)).status).toBe(403);
     expect((await boss.c.post(`/api/tasks/${t}/send-back`)).status).toBe(200);
     expect((await boss.c.get(`/api/tasks/${t}`)).json.task.assignee.id).toBe(worker.id);

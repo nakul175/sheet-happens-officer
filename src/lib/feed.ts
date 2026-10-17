@@ -44,7 +44,7 @@ export function noticeText(n: N) {
   const p = d.project ? `"${d.project}"` : "a project";
   const text: Record<string, string> = {
     TASK_ASSIGNED: `${who} assigned you ${t}.`,
-    TASKS_REASSIGNED: `${who} moved tasks over to you.`,
+    TASKS_REASSIGNED: d.count ? `${who} assigned you ${d.count} tasks${d.project ? ` in ${p}` : ""}.` : `${who} moved tasks over to you.`,
     TASKS_REASSIGNED_SUMMARY: `${d.count ?? "Some"} tasks in ${p} were handed to a new owner by ${who}.`,
     APPROVER_REASSIGNED: `${who} changed who approves tasks in ${p}.`,
     COLLABORATOR_ADDED: `${who} added you as a collaborator on ${t}.`,
@@ -81,24 +81,37 @@ export function noticeText(n: N) {
   return { text: text[n.type] ?? `${who} made a change.`, href };
 }
 
-export async function listNotifications(user: Actor) {
-  const [rows, unread] = await Promise.all([
-    db.notification.findMany({
-      where: { recipientId: user.id },
-      orderBy: { createdAt: "desc" },
-      take: 30,
-      include: { actor: { select: { name: true } } },
-    }),
-    db.notification.count({ where: { recipientId: user.id, readAt: null } }),
-  ]);
+/** SHO-US-14.13: newest first, 50 at a time; `before` is the `next` value of the previous page. `filter=unread` hides read items. */
+export async function listNotifications(user: Actor, o: { filter?: string; before?: string; limit?: number } = {}) {
+  const limit = Math.min(Math.max(o.limit ?? 50, 1), 200);
+  const [at, cursorId] = (o.before ?? "").split("|");
+  const when = at && !Number.isNaN(Date.parse(at)) ? new Date(at) : null;
+  const rows = await db.notification.findMany({
+    where: {
+      recipientId: user.id,
+      ...(o.filter === "unread" ? { readAt: null } : {}),
+      ...(when ? { OR: [{ createdAt: { lt: when } }, { createdAt: when, id: { lt: cursorId ?? "" } }] } : {}),
+    },
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    take: limit + 1,
+    include: { actor: { select: { name: true } } },
+  });
+  const unread = await db.notification.count({ where: { recipientId: user.id, readAt: null } });
+  const page = rows.slice(0, limit);
+  const last = page.at(-1);
   return {
     unread,
-    items: rows.map((n) => ({ id: n.id, ...noticeText(n), read: !!n.readAt, createdAt: n.createdAt.toISOString() })),
+    items: page.map((n) => ({ id: n.id, ...noticeText(n), read: !!n.readAt, createdAt: n.createdAt.toISOString() })),
+    next: rows.length > limit && last ? `${last.createdAt.toISOString()}|${last.id}` : null,
   };
 }
 
 export async function markRead(user: Actor, id: string) {
   await db.notification.updateMany({ where: { id, recipientId: user.id, readAt: null }, data: { readAt: new Date() } });
+}
+/** SHO-US-14.13 AC4: keep a notice unread until I have acted on it. */
+export async function markUnread(user: Actor, id: string) {
+  await db.notification.updateMany({ where: { id, recipientId: user.id, readAt: { not: null } }, data: { readAt: null } });
 }
 export async function markAllRead(user: Actor) {
   await db.notification.updateMany({ where: { recipientId: user.id, readAt: null }, data: { readAt: new Date() } });

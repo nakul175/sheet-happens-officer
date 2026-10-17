@@ -2,10 +2,11 @@
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { Suspense, useEffect, useState } from "react";
+import "./approvals.css";
 import { api, dueLabel, dueState, rowKeys, isOverdue, todayIST, useGet } from "@/components/api";
 import { TaskModal } from "@/components/TaskModal";
 import { Pri, Tick } from "@/components/TaskParts";
-import { LoadFailed } from "@/components/ui";
+import { Confirm, LoadFailed } from "@/components/ui";
 import { Page, useMe } from "./Shell";
 
 type Item = {
@@ -13,7 +14,33 @@ type Item = {
   project: { id: string; name: string; type?: "PROJECT" | "DEAL"; stage?: string | null }; parent: { id: string; title: string } | null; awaitingApproval: boolean; isIdea?: boolean;
 };
 type NeedsStep = { id: string; name: string; stage: string | null };
-type Groups = { overdue: Item[]; next7: Item[]; later: Item[]; needsNextStep?: NeedsStep[] };
+type Waiting = Item & { waitingDays: number; approver: { id: string; name: string } | null; assignee: { id: string; name: string } };
+type Groups = { waitingOnMe?: Waiting[]; waitingOnOthers?: Waiting[]; overdue: Item[]; next7: Item[]; later: Item[]; needsNextStep?: NeedsStep[] };
+
+const waitText = (d: number) => (d === 0 ? "Waiting since today" : `Waiting ${d} day${d === 1 ? "" : "s"}`);
+
+/** SHO-US-14.16: Close or Send back from the row. Both are logged, so the Undo toast follows. */
+function ApprovalButtons({ t, onDone }: { t: Waiting; onDone: () => void }) {
+  const [busy, setBusy] = useState(false);
+  const [ask, setAsk] = useState<number | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  async function go(path: "complete" | "send-back", all = false) {
+    setBusy(true);
+    const r = await api("POST", `/api/tasks/${t.id}/${path}`, path === "complete" ? { completeAll: all } : {});
+    setBusy(false);
+    if (r.ok) { setAsk(null); setErr(null); onDone(); }
+    else if (r.status === 409 && r.data.needsConfirm === "open_subtasks") setAsk(r.data.openSubtasks as number);
+    else setErr(r.error ?? "Could not do that.");
+  }
+  return (
+    <span className="aw-act" onClick={(e) => e.stopPropagation()}>
+      <button className="btn sm" disabled={busy} onClick={() => go("complete")} aria-label={`Close "${t.title}"`}>Close</button>
+      <button className="btn ghost sm" disabled={busy} onClick={() => go("send-back")} aria-label={`Send back "${t.title}"`}>Send back</button>
+      {err && <span className="err" role="alert" style={{ margin: 0 }}>{err}</span>}
+      {ask !== null && <Confirm title="Open subtasks" yes="Complete them all" busy={busy} onNo={() => setAsk(null)} body={`"${t.title}" has ${ask} open subtask${ask === 1 ? "" : "s"}. Complete them too?`} onYes={() => go("complete", true)} />}
+    </span>
+  );
+}
 
 /** One dated task for a deal with no next step (SHO-US-12.5 AC2, AC3). */
 function AddNext({ projectId, meId, label, onDone, onCancel }: { projectId: string; meId: string; label: string; onDone: () => void; onCancel?: () => void }) {
@@ -51,10 +78,27 @@ function Inner() {
   const pick = (m: "date" | "project") => { setMode(m); try { localStorage.setItem(GROUP_KEY(me.id), m); } catch { /* ignore */ } };
   const router = useRouter();
   const open = useSearchParams().get("task");
-  const total = data ? data.overdue.length + data.next7.length + data.later.length : 0;
+  const wait = data?.waitingOnMe ?? [];
+  const others = data?.waitingOnOthers ?? [];
+  const total = data ? wait.length + data.overdue.length + data.next7.length + data.later.length : 0;
   const groups: ("overdue" | "next7" | "later")[] = ["overdue", "next7", "later"];
   const labels = { overdue: "Overdue", next7: "Next 7 days", later: "Later" };
   const all = data ? [...data.overdue, ...data.next7, ...data.later] : [];
+  const waitRow = (t: Waiting, mine: boolean) => (
+    <div key={t.id} className="item click nt" {...rowKeys(() => router.push(`/?task=${t.id}`, { scroll: false }))}>
+      <div className="t">
+        <b>{t.title}</b>
+        <small>{t.parent ? `Subtask of ${t.parent.title} · ` : ""}{t.project.name}{mine ? "" : ` · with ${t.assignee.name}`}</small>
+      </div>
+      <div className="meta">
+        <span className={t.waitingDays >= 3 ? "over" : undefined}>{waitText(t.waitingDays)}</span>
+        {t.blocked && <span className="chip red">Blocked</span>}
+        <Pri p={t.priority} />
+        <span className={isOverdue(t.dueDate) ? "over" : undefined}>{dueState(t.dueDate)}</span>
+        {mine && t.canClose && <ApprovalButtons t={t} onDone={reload} />}
+      </div>
+    </div>
+  );
   const needs = data?.needsNextStep ?? [];
   const byProject = (() => {
     const m = new Map<string, { project: Item["project"]; items: Item[] }>();
@@ -99,8 +143,14 @@ function Inner() {
           <button className="btn ghost sm" onClick={() => setDismissed((d) => [...d, p.projectId])}>Not now</button>
         </div>
       ))}
-      {data && total === 0 && needs.length === 0 && (
+      {data && total === 0 && needs.length === 0 && others.length === 0 && (
         <div className="card empty"><b>Nothing on your plate.</b><br />Tasks assigned to you, or that you collaborate on, show up here.</div>
+      )}
+      {wait.length > 0 && (
+        <section aria-label="Waiting on me">
+          <div className="grp gold">Waiting on me · {wait.length}</div>
+          <div className="list">{wait.map((t) => waitRow(t, true))}</div>
+        </section>
       )}
       {data && (!me.crm || mode === "date") && groups.map((key) => data[key].length > 0 && (
         <section key={key} aria-label={labels[key]}>
@@ -123,6 +173,12 @@ function Inner() {
           )}
         </section>
       ))}
+      {others.length > 0 && (
+        <section aria-label="Waiting on others">
+          <div className="grp">Waiting on others · {others.length}</div>
+          <div className="list">{others.map((t) => waitRow(t, false))}</div>
+        </section>
+      )}
       {data && (!me.crm || mode === "date") && needs.length > 0 && (
         <section aria-label="Deals that need a next step">
           <div className="grp red">Deals that need a next step · {needs.length}</div>

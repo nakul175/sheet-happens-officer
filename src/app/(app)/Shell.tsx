@@ -5,75 +5,12 @@ import { createContext, useContext, useEffect, useRef, useState } from "react";
 import { ago, api, initials, useGet } from "@/components/api";
 import { ConciergeProvider, useConcierge } from "@/components/concierge/ConciergeProvider";
 import { ConciergeBar, ConciergeDock, ConciergeFab } from "@/components/concierge/Concierge";
+import { Bell } from "./Bell";
 
 export type Me = { id: string; name: string; email: string; orgRole: "MEMBER" | "ADMIN" | "SUPER_ADMIN"; crm?: boolean; review?: boolean; compact?: boolean };
 const MeCtx = createContext<Me | null>(null);
 export const useMe = () => useContext(MeCtx)!;
 export const roleLabel = (r: Me["orgRole"]) => (r === "SUPER_ADMIN" ? "Super Admin" : r === "ADMIN" ? "Admin" : "Member");
-
-type Note = { id: string; text: string; href: string; read: boolean; createdAt: string };
-
-function Bell() {
-  const { data, reload } = useGet<{ unread: number; items: Note[] }>("/api/notifications");
-  const [open, setOpen] = useState(false);
-  const box = useRef<HTMLDivElement>(null);
-  const router = useRouter();
-  const [fresh, setFresh] = useState<Set<string>>(new Set()); // shown as new while the panel stays open
-  async function toggle() {
-    if (open) { setOpen(false); return; }
-    setOpen(true);
-    // SHO-US-7.1 AC2: opening the panel marks what it shows as read; the new ones stay highlighted until it closes.
-    const r = await api<{ unread: number; items: Note[] }>("GET", "/api/notifications");
-    const ids = r.ok ? r.data.items.filter((n) => !n.read).map((n) => n.id) : [];
-    setFresh(new Set(ids));
-    if (ids.length) await api("POST", "/api/notifications/read-all", {});
-    reload();
-  }
-  useEffect(() => {
-    const t = setInterval(reload, 60_000);
-    return () => clearInterval(t);
-  }, [reload]);
-  useEffect(() => {
-    if (!open) return;
-    const away = (e: MouseEvent) => { if (!box.current?.contains(e.target as Node)) setOpen(false); };
-    const esc = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
-    document.addEventListener("mousedown", away);
-    document.addEventListener("keydown", esc);
-    return () => { document.removeEventListener("mousedown", away); document.removeEventListener("keydown", esc); };
-  }, [open]);
-  const unread = data?.unread ?? 0;
-  return (
-    <div className="wrapper" ref={box}>
-      <button className="bell" aria-label={unread ? `Notifications, ${unread} unread` : "Notifications"} aria-expanded={open}
-        onClick={toggle}>
-        🔔{unread > 0 && <span className="badge">{unread > 99 ? "99+" : unread}</span>}
-      </button>
-      {open && (
-        <div className="panel" role="dialog" aria-label="Notifications">
-          <header>
-            <span>Notifications</span>
-            {unread > 0 && <button className="link" onClick={async () => { await api("POST", "/api/notifications/read-all", {}); reload(); }}>Mark all as read</button>}
-          </header>
-          {!data?.items.length && <div className="empty">You are all caught up.</div>}
-          {data?.items.map((n) => (
-            <Link key={n.id} href={n.href} className={`row${!n.read || fresh.has(n.id) ? " unread" : ""}`}
-              onClick={async (e) => {
-                e.preventDefault();
-                setOpen(false);
-                if (!n.read) await api("POST", `/api/notifications/${n.id}/read`, {});
-                reload();
-                router.push(n.href);
-              }}>
-              {n.text}
-              <small>{ago(n.createdAt)}</small>
-            </Link>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
 
 /** SHO-US-10.4: bottom tab bar under 600 px. The server still decides who may open Usage and Audit; this only decides what is listed. */
 function TabBar({ user, here, more }: { user: Me; here: (p: string) => boolean; more: [string, string][] }) {

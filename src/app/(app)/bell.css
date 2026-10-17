@@ -1,0 +1,19 @@
+/* SHO-US-14.13 */
+.bell-tabs { display: flex; gap: 6px; padding: 8px 14px; border-bottom: 1px solid var(--line); }
+.bell-tabs button { font: inherit; font-size: 13px; background: none; border: 1px solid var(--field); border-radius: 16px; padding: 4px 12px; cursor: pointer; color: var(--ink-2); }
+.bell-tabs button[aria-pressed="true"] { background: var(--navy); border-color: var(--navy); color: #fff; }
+.panel .bell-row { display: flex; align-items: stretch; padding: 0; }
+.bell-main { flex: 1; min-width: 0; padding: 11px 6px 11px 14px; color: var(--ink); text-decoration: none; font-size: 14px; overflow-wrap: anywhere; position: relative; }
+.bell-main small { display: block; color: var(--muted); margin-top: 2px; }
+.bell-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--gold); margin-right: 8px; }
+.bell-tog { flex: none; align-self: center; font: inherit; font-size: 12px; background: none; border: 0; color: var(--navy); text-decoration: underline; cursor: pointer; padding: 6px 12px 6px 6px; max-width: 84px; text-align: right; }
+.bell-more { display: block; width: 100%; padding: 12px; }
+@media (max-width: 1023px), (pointer: coarse) {
+  .bell-tabs button { min-height: 44px; padding: 0 16px; }
+  .bell-tog { min-height: 44px; min-width: 44px; }
+  .bell-more { min-height: 44px; }
+}
+@media (max-width: 599px) {
+  /* a full-width sheet under the header on a phone */
+  .panel { position: fixed; left: 8px; right: 8px; top: calc(60px + env(safe-area-inset-top, 0px)); width: auto; max-width: none; max-height: calc(100dvh - 140px - env(safe-area-inset-bottom, 0px)); }
+}
