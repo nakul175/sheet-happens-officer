@@ -5,7 +5,7 @@ import { createContext, useContext, useEffect, useRef, useState } from "react";
 import { ago, api, initials, useGet } from "@/components/api";
 import { ConciergeProvider, useConcierge } from "@/components/concierge/ConciergeProvider";
 import { ConciergeBar, ConciergeDock, ConciergeFab } from "@/components/concierge/Concierge";
-import { Extras, NewTaskButton } from "@/components/extras/Extras";
+import { Extras, NewTaskButton, SearchButton } from "@/components/extras/Extras";
 
 export type Me = { id: string; name: string; email: string; orgRole: "MEMBER" | "ADMIN" | "SUPER_ADMIN"; crm?: boolean; review?: boolean };
 const MeCtx = createContext<Me | null>(null);
@@ -170,6 +170,7 @@ export function Shell({ user, children }: { user: Me; children: React.ReactNode 
             <button className="burger" aria-label="Open menu" onClick={() => setMenu(path)}>☰</button>
             <span className="top-brand"><img src="/logo-icon.svg" alt="" />SHO</span>
             <span className="grow" />
+            <SearchButton />
             <NewTaskButton />
             <Bell />
           </header>

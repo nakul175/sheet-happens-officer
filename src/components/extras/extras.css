@@ -6,3 +6,18 @@
 .qa-note.bad { color: var(--danger); }
 .newtask { white-space: nowrap; }
 @media (max-width: 599px) { .qa-row { grid-template-columns: 1fr; gap: 0; } }
+
+/* Command palette */
+.pal-in { margin-bottom: 8px; }
+.pal-list { max-height: min(52vh, 420px); overflow-y: auto; margin: 0 -8px; }
+.pal-grp { font-size: 12px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); padding: 10px 8px 4px; }
+.pal-row { display: flex; flex-direction: column; gap: 1px; padding: 8px 10px; border-radius: 8px; cursor: pointer; min-height: 44px; justify-content: center; }
+.pal-row.on { background: #eef0f6; box-shadow: inset 3px 0 0 var(--gold); }
+.pal-l { font-size: 15px; overflow-wrap: anywhere; }
+.pal-row small { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+.pal-none { color: var(--muted); font-size: 14px; padding: 14px 8px; }
+.pal-foot { display: flex; gap: 14px; color: var(--muted); font-size: 12px; padding-top: 10px; margin-top: 6px; border-top: 1px solid var(--line); }
+.searchbtn { display: inline-flex; align-items: center; gap: 8px; background: var(--card); border: 1px solid var(--field); border-radius: 8px; padding: 6px 10px; font: inherit; font-size: 14px; color: var(--muted); cursor: pointer; min-height: 34px; }
+.searchbtn kbd, .kbd { font: inherit; font-size: 11px; border: 1px solid var(--field); border-radius: 4px; padding: 1px 5px; color: var(--ink-2); background: #fafbfc; }
+@media (max-width: 599px) { .searchbtn { display: none; } .pal-foot { display: none; } }
+@media (max-width: 1023px) { .searchbtn { min-height: 44px; } }

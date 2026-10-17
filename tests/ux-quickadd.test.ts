@@ -51,3 +51,19 @@ describe("quick add targets", () => {
     expect(t.json.task?.assignee?.id ?? t.json.assignee?.id).toBe(ed.id);
   });
 });
+
+// SHO-US-14.7 AC3: the palette uses /api/search, which must never show a project the person is not in.
+describe("palette search visibility", () => {
+  it("hides tasks of projects I do not belong to, shows project and assignee for those I do", async () => {
+    const a = await account("pa");
+    const b = await account("pb");
+    const mine = await project(a, a);
+    const theirs = await project(b, b);
+    await task(a, mine.id, { title: "Zebrafish plan" });
+    await task(b, theirs.id, { title: "Zebrafish secret" });
+    const r = (await a.c.get("/api/search?q=zebra")).json;
+    expect(r.tasks.map((t: { title: string }) => t.title)).toEqual(["Zebrafish plan"]);
+    expect(r.tasks[0].assignee).toBe("Pa");
+    expect(r.tasks[0].project.id).toBe(mine.id);
+  });
+});

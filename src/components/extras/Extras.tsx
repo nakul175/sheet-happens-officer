@@ -1,11 +1,13 @@
 "use client";
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { useGet } from "@/components/api";
+import { Palette, type Command } from "./Palette";
 import { QuickAdd, type Target } from "./QuickAdd";
 import "./extras.css";
 
-type Ctx = { canAdd: boolean; openAdd: () => void };
-const X = createContext<Ctx>({ canAdd: false, openAdd: () => {} });
+type Ctx = { canAdd: boolean; openAdd: () => void; openPalette: () => void };
+const X = createContext<Ctx>({ canAdd: false, openAdd: () => {}, openPalette: () => {} });
 export const useExtras = () => useContext(X);
 
 /** True when a key press belongs to a field, so single-key shortcuts must not fire (SHO-US-14.5 AC5, 14.6 AC3). */
@@ -27,7 +29,8 @@ type Targets = { projects: Target[]; lastProjectId: string | null };
 
 export function Extras({ children }: { children: React.ReactNode }) {
   const t = useGet<Targets>("/api/quick-add");
-  const [dialog, setDialog] = useState<"add" | null>(null);
+  const router = useRouter();
+  const [dialog, setDialog] = useState<"add" | "palette" | null>(null);
   const [fresh, setFresh] = useState(0);
   const projects = t.data?.projects ?? [];
   const canAdd = projects.length > 0;
@@ -37,6 +40,8 @@ export function Extras({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     const key = (e: KeyboardEvent) => {
+      // Ctrl or Cmd+K works anywhere, also inside a field; it toggles.
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === "k") { e.preventDefault(); setDialog((d) => (d === "palette" ? null : "palette")); return; }
       if (e.key.toLowerCase() === "c" && !e.shiftKey && plainKey(e) && canAdd) { e.preventDefault(); setDialog("add"); }
     };
     document.addEventListener("keydown", key);
@@ -50,11 +55,22 @@ export function Extras({ children }: { children: React.ReactNode }) {
     return () => window.removeEventListener("sho:task-added", on);
   }, [reload]);
 
-  const value = useMemo(() => ({ canAdd, openAdd }), [canAdd, openAdd]);
+  const openPalette = useCallback(() => setDialog("palette"), []);
+  const close = useCallback(() => setDialog(null), []);
+  const commands = useMemo<Command[]>(() => [
+    ...(canAdd ? [{ id: "new-task", label: "New task", hint: "Press C", words: "add create", run: () => setTimeout(() => setDialog("add"), 0) }] : []),
+    { id: "new-project", label: "New project", words: "add create", run: () => router.push("/projects/new") },
+    { id: "go-my", label: "Go to My tasks", words: "home", run: () => router.push("/") },
+    { id: "go-projects", label: "Go to Projects", run: () => router.push("/projects") },
+    { id: "go-team", label: "Go to Team", words: "people", run: () => router.push("/team") },
+    { id: "go-search", label: "Open the Search screen", run: () => router.push("/search") },
+  ], [canAdd, router]);
+  const value = useMemo(() => ({ canAdd, openAdd, openPalette }), [canAdd, openAdd, openPalette]);
   return (
     <X.Provider value={value}>
       {children}
-      {dialog === "add" && <QuickAdd key={fresh} projects={projects} lastId={t.data?.lastProjectId ?? null} onClose={() => setDialog(null)} />}
+      {dialog === "add" && <QuickAdd key={fresh} projects={projects} lastId={t.data?.lastProjectId ?? null} onClose={close} />}
+      {dialog === "palette" && <Palette commands={commands} onClose={close} />}
     </X.Provider>
   );
 }
@@ -64,4 +80,12 @@ export function NewTaskButton() {
   const { canAdd, openAdd } = useExtras();
   if (!canAdd) return null;
   return <button className="btn sm newtask" onClick={openAdd}>+ New task</button>;
+}
+
+/** Top-bar entry to the palette; shows the shortcut. Hidden on phones, where the Search tab does the job. */
+export function SearchButton() {
+  const { openPalette } = useExtras();
+  const [mac, setMac] = useState(false);
+  useEffect(() => setMac(/Mac|iPhone|iPad/.test(navigator.platform)), []); // eslint-disable-line react-hooks/set-state-in-effect
+  return <button className="searchbtn" onClick={openPalette} aria-label="Search and commands">Search <kbd>{mac ? "⌘K" : "Ctrl K"}</kbd></button>;
 }
