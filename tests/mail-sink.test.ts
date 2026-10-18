@@ -137,8 +137,10 @@ afterEach(async () => {
 });
 
 function resendCalls() {
-  return fetchSpy.mock.calls.filter((call) => String(call[0]).includes("api.resend.com"));
+  return fetchSpy.mock.calls.filter((call: readonly unknown[]) => String(call[0]).includes("api.resend.com"));
 }
+
+const pause = () => new Promise((resolve) => setTimeout(resolve, 5));
 
 describe("AC1 staging mail is captured", () => {
   it("writes verify, reset and sign-in details for a ZZ test address and serves them within 60s", async () => {
@@ -146,7 +148,9 @@ describe("AC1 staging mail is captured", () => {
     const logs = captureLogs();
     try {
       await sendMail(verifyMail(ZZ_TO, "zz-verify-token"));
+      await pause();
       await sendMail(resetMail(ZZ_TO, "zz-reset-token"));
+      await pause();
       await sendMail(signInDetailsMail(ZZ_TO, "ZZ-TEST", "A Super Admin", PASSWORD));
       await sendMail(signInDetailsMail(OTHER_TO, "ZZ-TEST", "A Super Admin", PASSWORD));
       expect(resendCalls()).toEqual([]);
@@ -254,7 +258,7 @@ describe("production fail-closed", () => {
 
     delete process.env.RESEND_API_KEY;
     delete process.env.EMAIL_OUTBOX_DIR;
-    process.env.NODE_ENV = "production";
+    (process.env as { NODE_ENV?: string }).NODE_ENV = "production";
     await expect(sendMail(verifyMail(ZZ_TO, "zz-verify-token"))).rejects.toThrow("RESEND_API_KEY is not set");
   });
 });
