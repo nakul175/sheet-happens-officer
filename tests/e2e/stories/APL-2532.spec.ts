@@ -4,7 +4,7 @@
 // creator cannot be signed in here; AC4 checks the same rule with the roles this server actually has.
 // There is no tests/e2e/jim-gate.ts. CRM_VISIBLE is read from the live /api/orgs answer, never a hard skip.
 // Credentials come from the environment. workers is 1 in playwright.config.ts. Traces stay off.
-import { test, expect, zz } from "../support";
+import { test, expect, login, zz } from "../support";
 import { ymd, type Who } from "../g2";
 import { raw } from "../helpers/jim-http";
 
@@ -300,9 +300,11 @@ test("AC6: create, edit, parent change, archive and unarchive are logged with no
   expect((await admin.api.post(`/api/actions/${edited.headers["x-undo-id"]}/undo`, { anyway: false })).status).toBe(200);
   expect((await load(admin, id)).country).toBeNull();
 
-  const pass = process.env.SHO_ADMIN_PASS ?? "";
+  // The password the admin fixture actually signed in with (shard or SHO_ADMIN). Missing means skip the check, not the test.
+  let pass = "";
+  try { pass = login("ADMIN").password; } catch { /* no sign-in password configured */ }
   let body = await (await admin.page.request.get(`/api/audit?event=ORGANISATION_PARENT_CHANGED&person=${admin.user.id}`)).text();
-  expect(body.includes(pass)).toBe(false);
+  if (pass) expect(body.includes(pass)).toBe(false);
   const seenParent = new Set((JSON.parse(body).items as { id: string }[]).map((i) => i.id));
   const moved = await raw(admin, "PATCH", `/api/orgs/${id}`, { parentId: parent.id });
   expect(moved.status).toBe(200);
@@ -315,7 +317,7 @@ test("AC6: create, edit, parent change, archive and unarchive are logged with no
   expect(parentLog?.before).toMatchObject({ parentId: null });
   expect(parentLog?.after).toMatchObject({ parentId: parent.id });
   body = await (await admin.page.request.get(`/api/audit?event=ORGANISATION_PARENT_CHANGED&person=${admin.user.id}`)).text();
-  expect(body.includes(pass)).toBe(false);
+  if (pass) expect(body.includes(pass)).toBe(false);
   const parentAudit = (JSON.parse(body).items as { id: string; event: string; at: string }[]).find((i) => !seenParent.has(i.id));
   expect(parentAudit?.event).toBe("ORGANISATION_PARENT_CHANGED");
   expect(Date.now() - Date.parse(parentAudit!.at)).toBeLessThan(120_000);
@@ -342,7 +344,7 @@ test("AC6: create, edit, parent change, archive and unarchive are logged with no
   expect(archRow?.before).toMatchObject({ archivedAt: null });
   expect(typeof archRow?.after?.archivedAt).toBe("string");
   body = await (await admin.page.request.get(`/api/audit?event=ORGANISATION_ARCHIVED&person=${admin.user.id}`)).text();
-  expect(body.includes(pass)).toBe(false);
+  if (pass) expect(body.includes(pass)).toBe(false);
   const archItems = JSON.parse(body).items as { event: string; at: string }[];
   expect(archItems[0]?.event).toBe("ORGANISATION_ARCHIVED");
   expect(Date.now() - Date.parse(archItems[0].at)).toBeLessThan(120_000);
@@ -360,7 +362,7 @@ test("AC6: create, edit, parent change, archive and unarchive are logged with no
   expect(openRow?.after).toMatchObject({ archivedAt: null });
   expect(typeof openRow?.before?.archivedAt).toBe("string");
   body = await (await admin.page.request.get(`/api/audit?event=ORGANISATION_UNARCHIVED&person=${admin.user.id}`)).text();
-  expect(body.includes(pass)).toBe(false);
+  if (pass) expect(body.includes(pass)).toBe(false);
   const unItems = JSON.parse(body).items as { event: string; at: string }[];
   expect(unItems[0]?.event).toBe("ORGANISATION_UNARCHIVED");
   expect(Date.now() - Date.parse(unItems[0].at)).toBeLessThan(120_000);
