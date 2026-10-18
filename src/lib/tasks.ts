@@ -4,10 +4,11 @@ import { linksOfTask } from "@/lib/records";
 import { db } from "@/lib/db";
 import { ApiError, notFound } from "@/lib/http";
 import {
-  WORKERS, activeMember, leaderId, projectAccess, requireManage, requireWrite, type Actor, type Role, type Tx,
+  WORKERS, activeMember, canManage, leaderId, projectAccess, requireManage, requireWrite, type Actor, type Role, type Tx,
 } from "@/lib/access";
 import { addDays, formatDueDate, parseDueDate, startOfTodayIST } from "@/lib/dates";
 import { auditTx, logAction, notify } from "@/lib/notify";
+import { reqCtx } from "@/lib/reqctx";
 
 export const taskInclude = {
   assignee: { select: { id: true, name: true } },
@@ -420,7 +421,7 @@ export async function moveTask(user: Actor, id: string, sectionId: string, compl
 
 // ---------------------------------------------------------------- delete, restore, trash (6.1, 6.2)
 export async function deleteTask(user: Actor, id: string, o: { byUndo?: boolean } = {}) {
-  const { t } = await loadTask(user, id, { write: true });
+  const { t, a } = await loadTask(user, id, { write: true });
   await db.$transaction(async (tx) => {
     const now = new Date();
     await tx.task.updateMany({ where: { OR: [{ id }, { parentId: id }], deletedAt: null }, data: { deletedAt: now, deletedById: user.id } });
@@ -430,13 +431,16 @@ export async function deleteTask(user: Actor, id: string, o: { byUndo?: boolean 
       actorId: user.id, taskId: id, projectId: t.projectId, data: { title: t.title },
     });
     await logAction(tx, { actorId: user.id, projectId: t.projectId, targetType: "task", targetId: id, action: "task.deleted", before: { title: t.title, sectionId: t.sectionId, deletedAt: null }, after: { deletedAt: now.toISOString() } });
+    // Undoing a delete is a restore from Trash, so only those who may restore get the Undo toast (APL-2649).
+    const ctx = reqCtx.getStore();
+    if (ctx && !canManage(a)) { ctx.undoId = undefined; ctx.undoLabel = undefined; }
     await ensureNextStep(tx, t.projectId, user.id);
   });
 }
 
-export async function restoreTask(user: Actor, id: string, confirmParent = false, o: { byUndo?: boolean } = {}) {
+export async function restoreTask(user: Actor, id: string, confirmParent = false, o: { skipLog?: boolean } = {}) {
   const { t, a } = await loadTask(user, id, { write: true, deleted: true });
-  if (!o.byUndo) requireManage(a); // SHO-US-3.3 AC1: only the Leader or an Admin restores from Trash
+  requireManage(a); // SHO-US-3.3 AC1: only the Leader or an Admin restores from Trash
   if (!t.deletedAt) throw new ApiError(409, "This task is not in Trash.");
   const parent = t.parentId ? await db.task.findUnique({ where: { id: t.parentId } }) : null;
   const parentDeleted = !!parent?.deletedAt;
@@ -469,7 +473,7 @@ export async function restoreTask(user: Actor, id: string, confirmParent = false
         await notify(tx, [leader, assigneeOk ? x.assigneeId : null], "APPROVER_CLEARED", { actorId: user.id, taskId: x.id, projectId: t.projectId, data: { title: x.title } });
       }
     }
-    if (!o.byUndo) await logAction(tx, { actorId: user.id, projectId: t.projectId, targetType: "task", targetId: id, action: "task.restored", before: { deletedAt: t.deletedAt!.toISOString(), title: t.title }, after: { deletedAt: null, restoredParent: parentDeleted } });
+    if (!o.skipLog) await logAction(tx, { actorId: user.id, projectId: t.projectId, targetType: "task", targetId: id, action: "task.restored", before: { deletedAt: t.deletedAt!.toISOString(), title: t.title }, after: { deletedAt: null, restoredParent: parentDeleted } });
   });
 }
 

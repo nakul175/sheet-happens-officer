@@ -294,8 +294,9 @@ describe("propose and confirm (8.3)", () => {
     expect((await db.task.findUniqueOrThrow({ where: { id: t } })).deletedAt).not.toBeNull();
     expect(done.messages[0].result!.noticeSent).toBe(true);
     expect(await db.notification.count({ where: { recipientId: lead.id, type: "TASK_DELETED", taskId: t } })).toBe(1);
-    await undoCard(actor(ed), c.id);
-    expect((await db.task.findUniqueOrThrow({ where: { id: t } })).deletedAt).toBeNull();
+    // Undo of a delete is a restore, so an Editor is refused like on the Trash page (SHO-BUG-8).
+    await expect(undoCard(actor(ed), c.id)).rejects.toThrow("Only the project Leader or an Admin can do this.");
+    expect((await db.task.findUniqueOrThrow({ where: { id: t } })).deletedAt).not.toBeNull();
   });
 
   it("member removal: lists every task, needs a taker for each, says it cannot be undone, and has no Undo (AC8, 8.5 AC5)", async () => {
