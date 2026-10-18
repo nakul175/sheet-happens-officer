@@ -9,7 +9,6 @@ export default defineConfig({
     include: ["e2e/**/*.spec.ts"],
     fileParallelism: false,
     maxWorkers: 1,
-    minWorkers: 1,
     testTimeout: 180000,
     hookTimeout: 180000,
   },

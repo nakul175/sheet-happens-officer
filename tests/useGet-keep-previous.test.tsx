@@ -8,11 +8,11 @@ import { useGet } from "@/components/api";
 import AuditView from "@/app/(app)/audit/AuditView";
 import SearchView from "@/app/(app)/search/SearchView";
 
-vi.mock("@/app/(app)/Shell", () => {
-  const { createElement: h } = require("react") as typeof import("react");
+vi.mock("@/app/(app)/Shell", async () => {
+  const { createElement: h } = await import("react");
   return {
-    useMe: () => ({ id: "u1", name: "Nakul", email: "nakul17+zztest-admin@aplyd.com", orgRole: "SUPER_ADMIN", crm: false }),
-    Page: ({ title, children }: { title?: unknown; children?: unknown }) => h("main", null, title ? h("h1", null, title) : null, children),
+    useMe: () => ({ id: "u1", name: "Nakul", email: "nakul17+zztest-admin@aplyd.com", orgRole: "SUPER_ADMIN" as const, crm: false }),
+    Page: ({ title, children }: { title?: ReactNode; children?: ReactNode }) => h("main", null, title ? h("h1", null, title) : null, children),
   };
 });
 
@@ -93,7 +93,7 @@ describe("stale-while-loading is opt-in", () => {
     await render(createElement(Switcher, { keep: false }));
     await settle(() => { take("/api/search?q=alpha").resolve(json({ items: ["ZZ-TEST-A-result"] })); });
     expect(document.body.textContent).toContain("ZZ-TEST-A-result");
-    await act(async () => { (globalThis as { go: (p: string) => void }).go("/api/search?q=beta"); });
+    await act(async () => { (globalThis as unknown as { go: (p: string) => void }).go("/api/search?q=beta"); });
     expect(document.body.textContent).not.toContain("ZZ-TEST-A-result");
     expect(document.querySelector("ul")?.getAttribute("data-loading")).toBe("true");
     await act(async () => { root!.unmount(); });
@@ -103,7 +103,7 @@ describe("stale-while-loading is opt-in", () => {
 
     await render(createElement(Switcher, { keep: true }));
     await settle(() => { take("/api/search?q=alpha").resolve(json({ items: ["ZZ-TEST-A-result"] })); });
-    await act(async () => { (globalThis as { go: (p: string) => void }).go("/api/search?q=beta"); });
+    await act(async () => { (globalThis as unknown as { go: (p: string) => void }).go("/api/search?q=beta"); });
     expect(document.body.textContent, "previous results stay while the next query loads").toContain("ZZ-TEST-A-result");
     expect(document.querySelector("ul")?.getAttribute("data-loading")).toBe("true");
     await settle(() => { take("/api/search?q=beta").resolve(json({ items: ["ZZ-TEST-B-result"] })); });

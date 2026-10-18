@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Skeleton } from "@/components/ui";
 import { ago, api, useGet } from "@/components/api";
 import { Page, useMe } from "../Shell";
@@ -17,7 +17,7 @@ export default function AuditView() {
   const jobs = useGet<{ jobs: JobRow[] }>(me.orgRole === "SUPER_ADMIN" ? "/api/jobs" : null);
   // The event list and the rows share one fetch. Remember the last list so the dropdown does not collapse to "All events" while the next filter loads.
   const [knownEvents, setKnownEvents] = useState<string[]>([]);
-  useEffect(() => { if (a.data?.events) setKnownEvents(a.data.events); }, [a.data]);
+  if (a.data?.events && a.data.events !== knownEvents) setKnownEvents(a.data.events);
   const events = a.data?.events ?? knownEvents;
   const [more, setMore] = useState<{ key: string; rows: Row[]; next: string | null } | null>(null);
   if (me.orgRole !== "SUPER_ADMIN") return <Page title="This page isn't available"><div className="card empty">Only the Super Admin can see the audit log.</div></Page>;
