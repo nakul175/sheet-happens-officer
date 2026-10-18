@@ -10,7 +10,7 @@ async function ideaProject(admin: Who, later: Later, label: string) {
   const p = await newProject(admin, later, { label });
   const title = zz(label);
   const id = await newTask(admin, p.id, { title, dueDate: ymd(3), assigneeId: admin.user.id });
-  return { projectId: p.id, id, title };
+  return { projectId: p.id, id, title, project: p.name };
 }
 
 test("AC1: an Editor turns Idea on and the chip shows in the project list, the board, Home and Search", async ({ admin, later }) => {
@@ -34,7 +34,10 @@ test("AC1: an Editor turns Idea on and the chip shows in the project list, the b
 
   await admin.page.goto("/search");
   await admin.page.getByLabel("Search").fill(t.title);
-  const row = admin.page.locator(".item", { hasText: t.title });
+  // The project and the task share this title. The project link is the one with no task query; the Idea chip is on the task.
+  const project = admin.page.getByRole("link", { name: t.project, exact: true }).and(admin.page.locator('a[href^="/projects/"]:not([href*="?task="])'));
+  await expect(project).toHaveAttribute("href", /^\/projects\/[^?]*$/);
+  const row = admin.page.locator("a[href*='?task=']", { hasText: t.title });
   await expect(row).toBeVisible();
   await expect(row.locator(".chip", { hasText: "Idea" })).toBeVisible();
 });
