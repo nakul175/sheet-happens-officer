@@ -10,7 +10,9 @@ import { PASS, passwordOk } from "./qa";
 // qa:TC uses the AC id already on the test. Pam has not published a separate hash for these cases.
 const tag = (id: string) => ({ annotation: [{ type: "ac", description: id }, { type: "qa:TC", description: id }] });
 
-const skeleton = (page: Page) => page.getByRole("status", { name: "Loading", exact: true });
+// The status role's accessible name is empty: "Loading" is only text inside it. The grey rows are aria-hidden and have no role.
+const skeleton = (page: Page) => page.getByRole("status").filter({ hasText: "Loading" });
+const skeletonRows = (page: Page) => skeleton(page).locator("[aria-hidden='true']");
 
 test.beforeAll(() => {
   test.skip(!PASS, "Set SHO_QA_PASS (the password for nakul17+ aliases).");
@@ -49,7 +51,7 @@ test.describe("SHO-BUG-12 / APL-2647", () => {
     const i = await ids(admin, later);
     const page = admin.page;
     await open(page, SCREENS[0].path(i), SCREENS[0].api(i), async (r) => { await new Promise((x) => setTimeout(x, DELAY)); await r.continue(); });
-    await expect(skeleton(page).locator(".skel-row")).not.toHaveCount(0);
+    await expect(skeletonRows(page)).not.toHaveCount(0);
     await expect(page.getByRole("alert", { name: LOAD_FAILED })).toHaveCount(0);
     await expect(page.getByRole("button", { name: "Retry" })).toHaveCount(0);
   });
@@ -59,10 +61,10 @@ test.describe("SHO-BUG-12 / APL-2647", () => {
       const i = await ids(admin, later);
       const page = admin.page;
       await open(page, s.path(i), s.api(i), async (r) => { await new Promise((x) => setTimeout(x, DELAY)); await r.continue(); });
-      await expect(skeleton(page).locator(".skel-row")).not.toHaveCount(0, { timeout: DELAY - 500 });
+      await expect(skeletonRows(page)).not.toHaveCount(0, { timeout: DELAY - 500 });
       await expect(page.getByText(LOAD_FAILED)).toHaveCount(0);
       await expect(page.getByText("Loading…")).toHaveCount(0);
-      await expect(page.locator(".skel-wrap")).toHaveCount(0, { timeout: 15_000 }); // gone once the answer arrives
+      await expect(skeleton(page)).toHaveCount(0, { timeout: 15_000 }); // gone once the answer arrives
       await expect(page.getByText(LOAD_FAILED)).toHaveCount(0);
     });
   }

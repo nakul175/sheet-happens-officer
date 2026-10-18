@@ -60,7 +60,7 @@ test("AC3: the Unread filter hides read items, and an empty result says 'All cau
   await panel.getByRole("button", { name: `${zz("triage-filter")} 0` }).click();
   await panel.getByRole("button", { name: /^Unread/ }).click();
   expect((await member.api.get("/api/notifications?filter=unread")).json.items.every((n: { read: boolean }) => !n.read)).toBe(true);
-  await expect(panel.locator(".bell-row:not(.unread)")).toHaveCount(0);
+  await expect.poll(async () => (await panel.getByRole("link").count()) - (await panel.getByRole("img", { name: "Unread" }).count())).toBe(0);
   expect((await member.api.post("/api/notifications/read-all")).status).toBeLessThan(300);
   await p.reload();
   await bell(p).click();
@@ -68,7 +68,7 @@ test("AC3: the Unread filter hides read items, and an empty result says 'All cau
   const panel2 = p.getByRole("dialog", { name: "Notifications" });
   // If someone else's activity raised a new notice in the meantime, the filter must still show unread items only.
   if ((await unread(member)) === 0) await expect(panel2.getByText("All caught up")).toBeVisible();
-  else await expect(panel2.locator(".bell-row:not(.unread)")).toHaveCount(0);
+  else await expect.poll(async () => (await panel2.getByRole("link").count()) - (await panel2.getByRole("img", { name: "Unread" }).count())).toBe(0);
 });
 
 test("AC4: marking an item unread raises the badge by 1", tag("APL-2572 AC4"), async ({ admin, member, later }) => {
@@ -90,7 +90,7 @@ test("AC5: with more than 50 items, older ones load on request", tag("APL-2572 A
   await p.goto("/");
   await bell(p).click();
   const panel = p.getByRole("dialog", { name: "Notifications" });
-  await expect(panel.locator(".bell-row")).toHaveCount(50);
+  await expect(panel.getByRole("link")).toHaveCount(50);
   await panel.getByRole("button", { name: /Load older/ }).click();
-  await expect.poll(() => panel.locator(".bell-row").count()).toBeGreaterThan(50);
+  await expect.poll(() => panel.getByRole("link").count()).toBeGreaterThan(50);
 });
