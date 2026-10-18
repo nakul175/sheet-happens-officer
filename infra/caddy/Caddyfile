@@ -1,0 +1,136 @@
+# Sheet Happens Officer edge config.
+#
+# Mirrors the live /etc/caddy/Caddyfile. CI validates this file and does not
+# copy it onto the droplet.
+#
+# basic_auth reads {env.SHO_QA_BASIC_AUTH_HASH} (bcrypt). Set that variable
+# when loading the config, or substitute the hash from the server backup.
+# Do not commit a hash.
+#
+# https://caddyserver.com/docs/caddyfile/directives orders header before
+# basic_auth. A "-" deletion defers that whole header handler until a
+# response is written, and deferred changes do not run when a later handler
+# returns an error (modules/caddyhttp/headers/headers.go). basic_auth
+# returns 401 without writing, so handle_errors writes that response and
+# applies the same fields there, including -Server. The site-level header
+# still runs for responses that are written (reverse_proxy and the port-80
+# redir), which overwrites upstream copies of these fields.
+
+(staging_security) {
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options nosniff
+		X-Frame-Options DENY
+		Referrer-Policy no-referrer
+		X-Robots-Tag "noindex, nofollow"
+		-Server
+	}
+
+	handle_errors {
+		header {
+			Strict-Transport-Security "max-age=31536000"
+			X-Content-Type-Options nosniff
+			X-Frame-Options DENY
+			Referrer-Policy no-referrer
+			X-Robots-Tag "noindex, nofollow"
+			-Server
+		}
+		respond ""
+	}
+}
+
+# Production site. Same two directives as the live block. No staging snippet.
+app.sheethappensofficer.com {
+	encode gzip
+	reverse_proxy 127.0.0.1:3000
+}
+
+# Staging and pr hosts. Explicit port-80 sites replace Caddy's automatic
+# HTTP redirect for these names only, and answer 301. The plain host blocks
+# stay on 443 with automatic certificates. app.sheethappensofficer.com is
+# not listed here, so its automatic redirect is unchanged.
+http://staging.sheethappensofficer.com, http://pr1.staging.sheethappensofficer.com, http://pr2.staging.sheethappensofficer.com, http://pr3.staging.sheethappensofficer.com, http://pr4.staging.sheethappensofficer.com, http://pr5.staging.sheethappensofficer.com, http://pr6.staging.sheethappensofficer.com, http://pr7.staging.sheethappensofficer.com, http://pr8.staging.sheethappensofficer.com {
+	import staging_security
+	redir https://{http.request.host}{uri} 301
+}
+
+staging.sheethappensofficer.com {
+	encode gzip
+	import staging_security
+	basic_auth {
+		sho-qa {env.SHO_QA_BASIC_AUTH_HASH}
+	}
+	reverse_proxy 127.0.0.1:3001
+}
+
+pr1.staging.sheethappensofficer.com {
+	encode gzip
+	import staging_security
+	basic_auth {
+		sho-qa {env.SHO_QA_BASIC_AUTH_HASH}
+	}
+	reverse_proxy 127.0.0.1:3101
+}
+
+pr2.staging.sheethappensofficer.com {
+	encode gzip
+	import staging_security
+	basic_auth {
+		sho-qa {env.SHO_QA_BASIC_AUTH_HASH}
+	}
+	reverse_proxy 127.0.0.1:3102
+}
+
+pr3.staging.sheethappensofficer.com {
+	encode gzip
+	import staging_security
+	basic_auth {
+		sho-qa {env.SHO_QA_BASIC_AUTH_HASH}
+	}
+	reverse_proxy 127.0.0.1:3103
+}
+
+pr4.staging.sheethappensofficer.com {
+	encode gzip
+	import staging_security
+	basic_auth {
+		sho-qa {env.SHO_QA_BASIC_AUTH_HASH}
+	}
+	reverse_proxy 127.0.0.1:3104
+}
+
+pr5.staging.sheethappensofficer.com {
+	encode gzip
+	import staging_security
+	basic_auth {
+		sho-qa {env.SHO_QA_BASIC_AUTH_HASH}
+	}
+	reverse_proxy 127.0.0.1:3105
+}
+
+pr6.staging.sheethappensofficer.com {
+	encode gzip
+	import staging_security
+	basic_auth {
+		sho-qa {env.SHO_QA_BASIC_AUTH_HASH}
+	}
+	reverse_proxy 127.0.0.1:3106
+}
+
+pr7.staging.sheethappensofficer.com {
+	encode gzip
+	import staging_security
+	basic_auth {
+		sho-qa {env.SHO_QA_BASIC_AUTH_HASH}
+	}
+	reverse_proxy 127.0.0.1:3107
+}
+
+pr8.staging.sheethappensofficer.com {
+	encode gzip
+	import staging_security
+	basic_auth {
+		sho-qa {env.SHO_QA_BASIC_AUTH_HASH}
+	}
+	reverse_proxy 127.0.0.1:3108
+}
