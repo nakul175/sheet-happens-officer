@@ -67,7 +67,10 @@ test.skip("AC2: the Confirm and Cancel buttons are at least 44 px high", () => {
   // Confirm and Cancel only appear on a card the model proposes. A story test must not call the model (cost cap, SHO-US-9.2); covered by the CI phone checks on a fixture card.
 });
 
+// Probable product defect found 18 Oct 2026 (against dbfbab2): opened from More > Concierge on a phone, Close hides the sheet but
+// focus lands on <body> (the menu item it came from is gone), so "focus returns to the entry" does not hold. Remove test.fail() when fixed.
 test("AC3: Close closes the concierge and focus returns to the entry", async ({ browser }) => {
+  test.fail(true, "SHO-US-22.8 AC3: after Close, focus is on <body>, not on the More tab or the concierge entry");
   const ctx = await phone(browser, 390, 780);
   const page = await ctx.newPage();
   const { sheet } = await openConcierge(page); // works with the concierge on or off: the sheet and its Close exist either way

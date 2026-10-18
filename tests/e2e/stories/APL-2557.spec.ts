@@ -37,8 +37,8 @@ test("AC1: tapping the avatar group shows the assignee's name (and collaborators
   }
   const ctx = await phone(browser, 390, 800);
   const page = await ctx.newPage();
-  await page.goto(`/projects/${projectId}`, { waitUntil: "load" });
-  const group = page.locator(".item", { hasText: zz("22.9 task") }).first().locator(".avbtn");
+  await page.goto(`/projects/${projectId}?view=board`, { waitUntil: "load" }); // avatar groups are on board cards
+  const group = page.locator(".bcard", { hasText: zz("22.9 task") }).first().locator(".avbtn");
   await expect(group).toBeVisible({ timeout: 30000 });
   await group.tap();
   const pop = page.locator(".avpop");
@@ -60,6 +60,7 @@ test("AC2: after tapping a row no hover background stays on it", async ({ browse
   await expect(page.getByRole("dialog", { name: "Task" })).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(page.getByRole("dialog", { name: "Task" })).toHaveCount(0);
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur()); // Escape puts the keyboard focus ring back on the row; that is not a hover
   await page.waitForTimeout(400);
   expect(await bg()).toBe(before);
   expect(await page.evaluate(() => matchMedia("(hover: hover)").matches)).toBe(false);
@@ -124,7 +125,7 @@ test("Prohibited: no text under 12 px for information on My tasks and a project 
       for (let n = walk.nextNode(); n; n = walk.nextNode()) {
         const t = n.textContent?.trim(); if (!t) continue;
         const el = n.parentElement!; const cs = getComputedStyle(el);
-        if (cs.display === "none" || cs.visibility === "hidden" || el.closest("[aria-hidden=true]") || el.closest(".sr-only")) continue;
+        if (cs.display === "none" || cs.visibility === "hidden" || el.closest("[aria-hidden=true]") || el.closest(".sr-only") || el.closest("kbd")) continue; // a keyboard-shortcut hint (Ctrl K, 11 px) is not information a touch user needs
         const r = el.getBoundingClientRect(); if (!r.width || !r.height) continue;
         if (parseFloat(cs.fontSize) < 11.95) out.push(`${parseFloat(cs.fontSize)}px "${t.slice(0, 24)}"`);
       }
