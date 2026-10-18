@@ -1,18 +1,23 @@
-# Story-level Playwright specs (tests/e2e/stories) against staging or a pr1-pr4 preview (input "target", checked against TARGET_ALLOWLIST;
+# Story-level Playwright specs (tests/e2e/stories) against staging or a pr1-pr8 preview (input "target", checked against TARGET_ALLOWLIST;
 # production is refused). Started by hand only (Actions > Staging e2e > Run workflow).
 # The specs live on the branch the run is started from ("Use workflow from", e.g. qa/story-e2e): every job checks out that same commit.
-# Input "specs": space-separated issue ids (APL-2481) or globs (APL-26*, tests/e2e/stories/APL-25*.spec.ts); empty runs every spec.
+# Input "specs": space-separated values only (a comma is not a separator). Issue ids (APL-2481) or globs
+# (APL-26*, tests/e2e/stories/APL-25*.spec.ts); empty runs every spec.
 # Secrets (repository settings): STAGING_USER, STAGING_PASS, SHO_ADMIN_EMAIL, SHO_ADMIN_PASS, SHO_MEMBER_EMAIL, SHO_MEMBER_PASS,
 # and ZZ_TEST_01_EMAIL / ZZ_TEST_01_PASS ... ZZ_TEST_20_EMAIL / ZZ_TEST_20_PASS (01-05 Super Admins, 06-20 plain Members).
 # The previews use the same STAGING_USER / STAGING_PASS basic-auth gate as staging.
-# They reach the jobs as environment variables only and are never echoed. Runs queue in one group so two never run at once.
+# They reach the jobs as environment variables only and are never echoed. Runs for the same target share one group.
+# A blank target, "staging", and the staging host all use the group suffix "staging". cancel-in-progress is false,
+# so a new dispatch waits and does not cancel the queued run. A different preview slot has its own group.
 #
 # How a run is split:
 #   plan        checks "target" first, then picks the spec files once and splits them into the parallel set and SERIAL_SPECS.
 #               Every shard and the serial job get BASE_URL=https://<target>.
 #   e2e         20 shards of the parallel set (--shard=N/20, workers=1 each). Shard N signs in as ZZ_TEST_NN (SHARD_*), names its
 #               data ZZ-TEST-NN (ZZ_PREFIX), and gets a partner account of the other role (PEER_*). At most max_parallel run at once.
-#   e2e-serial  the SERIAL_SPECS files, alone, after every shard has finished, as the shared SHO_ADMIN / SHO_MEMBER accounts.
+#   e2e-serial  the SERIAL_SPECS files, alone, after every shard has finished. On staging it signs in as SHO_ADMIN / SHO_MEMBER.
+#               On a pr1-pr8 preview those accounts are not seeded, so it signs in as ZZ_TEST_01 (SHARD_*, Super Admin) and
+#               ZZ_TEST_06 (PEER_*, plain Member). support.ts on qa/story-e2e picks the account whose *_ROLE matches.
 #   report      merges every job's blob report into one HTML report.
 #
 # max_parallel: the staging database is shared with production and allows 25 connections. Do not raise it above 5 until NJ approves
@@ -27,7 +32,7 @@ on:
   workflow_dispatch:
     inputs:
       specs:
-        description: "Issue ids or globs, space-separated (e.g. APL-2481 APL-26*). Empty = all specs."
+        description: "Space-separated values only (commas are not separators). Issue ids or globs, e.g. APL-2481 APL-26*. Empty = all specs."
         required: false
         default: ""
         type: string
@@ -38,7 +43,7 @@ on:
         type: choice
         options: ["off", "retain-on-failure"]
       target:
-        description: "Host to test: staging.sheethappensofficer.com or pr1-pr4.staging.sheethappensofficer.com. Production is refused."
+        description: "Host to test: staging.sheethappensofficer.com or pr1-pr8.staging.sheethappensofficer.com. Production is refused."
         required: false
         default: staging.sheethappensofficer.com
         type: string
@@ -52,12 +57,14 @@ permissions:
   contents: read
 
 concurrency:
-  group: staging-e2e
+  # Keyed on the target. A blank input, "staging", and the staging host share one group.
+  # cancel-in-progress stays false: a newer dispatch waits; it does not cancel the queued run.
+  group: staging-e2e-${{ (inputs.target == '' || inputs.target == 'staging' || inputs.target == 'staging.sheethappensofficer.com') && 'staging' || inputs.target }}
   cancel-in-progress: false
 
 env:
-  # The only hosts a run may target: staging, or Oscar's preview slots pr1-pr4. Matched against the whole host.
-  TARGET_ALLOWLIST: '^(staging\.sheethappensofficer\.com|pr[1-4]\.staging\.sheethappensofficer\.com)$'
+  # The only hosts a run may target: staging, or Oscar's preview slots pr1-pr8. Matched against the whole host.
+  TARGET_ALLOWLIST: '^(staging\.sheethappensofficer\.com|pr[1-8]\.staging\.sheethappensofficer\.com)$'
   # Only for `prisma generate` during npm ci; nothing connects to it.
   DATABASE_URL: postgresql://unused:unused@127.0.0.1:1/unused
   DIRECT_DATABASE_URL: postgresql://unused:unused@127.0.0.1:1/unused
@@ -74,6 +81,7 @@ jobs:
     timeout-minutes: 5
     outputs:
       base_url: ${{ steps.target.outputs.base_url }}
+      preview: ${{ steps.target.outputs.preview }}
       parallel: ${{ steps.pick.outputs.parallel }}
       serial: ${{ steps.pick.outputs.serial }}
     steps:
@@ -86,10 +94,14 @@ jobs:
             echo "::error::Refusing to run against production ($TARGET)."; exit 1
           fi
           if ! [[ "$TARGET" =~ $TARGET_ALLOWLIST ]]; then
-            echo "::error::Target '$TARGET' is not allowed. Use staging.sheethappensofficer.com or pr1-pr4.staging.sheethappensofficer.com."; exit 1
+            echo "::error::Target '$TARGET' is not allowed. Use staging.sheethappensofficer.com or pr1-pr8.staging.sheethappensofficer.com."; exit 1
           fi
           echo "Target: https://$TARGET"
+          preview=false
+          if [[ "$TARGET" =~ ^pr[1-8]\.staging\.sheethappensofficer\.com$ ]]; then preview=true; fi
+          echo "Preview slot: $preview"
           echo "base_url=https://$TARGET" >> "$GITHUB_OUTPUT"
+          echo "preview=$preview" >> "$GITHUB_OUTPUT"
 
       - uses: actions/checkout@v4
 
@@ -153,7 +165,9 @@ jobs:
     timeout-minutes: 120
     strategy:
       fail-fast: false
-      max-parallel: ${{ inputs.max_parallel }}
+      # The dispatch input is a string even with type: number. max-parallel rejects "5" ("Unexpected value '5'").
+      # fromJSON makes it a number. Default stays 5 so the matrix still evaluates when the input is left blank.
+      max-parallel: ${{ fromJSON(inputs.max_parallel || '5') }}
       matrix:
         # nn picks the shard's own ZZ_TEST_NN account; peer is the partner of the other role (shard N with N+5, members with 01-05),
         # chosen so no two of any 5 consecutive shards share an account.
@@ -270,22 +284,38 @@ jobs:
     steps:
       - name: Check the secrets are set (names only, never values)
         env:
+          PREVIEW: ${{ needs.plan.outputs.preview }}
           STAGING_USER: ${{ secrets.STAGING_USER }}
           STAGING_PASS: ${{ secrets.STAGING_PASS }}
           SHO_ADMIN_EMAIL: ${{ secrets.SHO_ADMIN_EMAIL }}
           SHO_ADMIN_PASS: ${{ secrets.SHO_ADMIN_PASS }}
           SHO_MEMBER_EMAIL: ${{ secrets.SHO_MEMBER_EMAIL }}
           SHO_MEMBER_PASS: ${{ secrets.SHO_MEMBER_PASS }}
+          # Names here are not the ones support.ts reads. This step only checks they are non-empty.
+          ZZ01_EMAIL: ${{ secrets.ZZ_TEST_01_EMAIL }}
+          ZZ01_PASS: ${{ secrets.ZZ_TEST_01_PASS }}
+          ZZ06_EMAIL: ${{ secrets.ZZ_TEST_06_EMAIL }}
+          ZZ06_PASS: ${{ secrets.ZZ_TEST_06_PASS }}
         run: |
           missing=""
           for n in STAGING_USER STAGING_PASS SHO_ADMIN_EMAIL SHO_ADMIN_PASS SHO_MEMBER_EMAIL SHO_MEMBER_PASS; do
             [ -n "${!n}" ] || missing="$missing $n"
           done
+          if [ "$PREVIEW" = "true" ]; then
+            [ -n "$ZZ01_EMAIL" ] || missing="$missing ZZ_TEST_01_EMAIL"
+            [ -n "$ZZ01_PASS" ] || missing="$missing ZZ_TEST_01_PASS"
+            [ -n "$ZZ06_EMAIL" ] || missing="$missing ZZ_TEST_06_EMAIL"
+            [ -n "$ZZ06_PASS" ] || missing="$missing ZZ_TEST_06_PASS"
+          fi
           if [ -n "$missing" ]; then
             echo "::error::Missing repository secrets:$missing. Add them in Settings > Secrets and variables > Actions."
             exit 1
           fi
-          echo "All six secrets are set."
+          if [ "$PREVIEW" = "true" ]; then
+            echo "Preview slot: ZZ_TEST_01 and ZZ_TEST_06 are set. Serial sign-in will use those, not SHO_ADMIN / SHO_MEMBER."
+          else
+            echo "All six secrets are set."
+          fi
 
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -297,15 +327,30 @@ jobs:
 
       - name: Run the serial specs (workers=1)
         env:
+          PREVIEW: ${{ needs.plan.outputs.preview }}
           STAGING_USER: ${{ secrets.STAGING_USER }}
           STAGING_PASS: ${{ secrets.STAGING_PASS }}
           SHO_ADMIN_EMAIL: ${{ secrets.SHO_ADMIN_EMAIL }}
           SHO_ADMIN_PASS: ${{ secrets.SHO_ADMIN_PASS }}
           SHO_MEMBER_EMAIL: ${{ secrets.SHO_MEMBER_EMAIL }}
           SHO_MEMBER_PASS: ${{ secrets.SHO_MEMBER_PASS }}
+          # support.ts account() walks SHARD then PEER and keeps the one whose *_ROLE matches.
+          # ZZ_TEST_01 is a Super Admin. ZZ_TEST_02 is too (01-05); the member peer is ZZ_TEST_06.
+          SHARD_EMAIL: ${{ needs.plan.outputs.preview == 'true' && secrets.ZZ_TEST_01_EMAIL || '' }}
+          SHARD_PASS: ${{ needs.plan.outputs.preview == 'true' && secrets.ZZ_TEST_01_PASS || '' }}
+          SHARD_ROLE: ${{ needs.plan.outputs.preview == 'true' && 'ADMIN' || '' }}
+          PEER_EMAIL: ${{ needs.plan.outputs.preview == 'true' && secrets.ZZ_TEST_06_EMAIL || '' }}
+          PEER_PASS: ${{ needs.plan.outputs.preview == 'true' && secrets.ZZ_TEST_06_PASS || '' }}
+          PEER_ROLE: ${{ needs.plan.outputs.preview == 'true' && 'MEMBER' || '' }}
           FILES: ${{ needs.plan.outputs.serial }}
           TRACE: ${{ inputs.trace }}
         run: |
+          if [ "$PREVIEW" = "true" ]; then
+            # SHO_ADMIN / SHO_MEMBER are not seeded on pr1-pr8. Unset them so a missing ZZ secret
+            # fails in support.ts before any sign-in request, instead of posting those accounts (401, then 429).
+            unset SHO_ADMIN_EMAIL SHO_ADMIN_PASS SHO_MEMBER_EMAIL SHO_MEMBER_PASS
+            echo "Preview slot: SHARD_ROLE=ADMIN (ZZ_TEST_01), PEER_ROLE=MEMBER (ZZ_TEST_06)."
+          fi
           read -ra files <<< "$FILES"
           npx playwright test --workers=1 --reporter=list,blob --trace="$TRACE" "${files[@]}"
 
