@@ -2,14 +2,15 @@
 // SUPER_ADMIN_EMAILS is server config. A new nakul17+ alias is not on that list, so sign-up leaves them a Member.
 import { readFileSync } from "node:fs";
 import { test, expect } from "../support";
-import { PASS, RUN, alias, deactivate, passwordOk, personByEmail, signUp, zz } from "./qa";
-
-function madePass() {
-  if (passwordOk(PASS)) return PASS;
-  return `Zz${RUN}a9`;
-}
+import { PASS, alias, deactivate, passwordOk, personByEmail, signUp, zz } from "./qa";
 
 test.describe("SHO-US-2.1 / APL-2480", () => {
+  test.beforeAll(() => {
+    test.skip(!PASS, "Set SHO_QA_PASS (the shared password for the nakul17+ accounts).");
+    if (!PASS) return;
+    if (!passwordOk(PASS)) throw new Error("SHO_QA_PASS must be at least 8 characters with a letter and a number.");
+  });
+
   test("AC1: the listed address (SHO_ADMIN_EMAIL) is the Super Admin and the Team page shows it", async ({ admin }) => {
     const me = (await admin.api.get("/api/auth/me")).json.user;
     expect(me.orgRole).toBe("SUPER_ADMIN");
@@ -25,7 +26,7 @@ test.describe("SHO-US-2.1 / APL-2480", () => {
     expect(signin).toContain('data: { orgRole: "SUPER_ADMIN" }');
     const email = alias("2480", "other", "aplyd.com");
     expect(email.toLowerCase()).not.toBe(String(admin.user.email).toLowerCase());
-    const signed = await signUp(anon.request, zz("other"), email, madePass());
+    const signed = await signUp(anon.request, zz("other"), email);
     expect(signed.status, signed.body).toBe(201);
     const person = await personByEmail(admin.api, email);
     expect(person?.status).toBe("UNVERIFIED");

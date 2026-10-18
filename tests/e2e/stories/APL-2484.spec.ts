@@ -2,14 +2,15 @@
 import { test, expect, RUN, type Json } from "../support";
 import { PASS, alias, deactivate, passwordOk, personByEmail, signUp, zz } from "./qa";
 
-function madePass() {
-  if (passwordOk(PASS)) return PASS;
-  return `Zz${RUN}a9`;
-}
-
 const SLOW = { timeout: 90_000 }; // the Team table can be long on a busy workspace
 
 test.describe("SHO-US-2.5 / APL-2484", () => {
+  test.beforeAll(() => {
+    test.skip(!PASS, "Set SHO_QA_PASS (the shared password for the nakul17+ accounts).");
+    if (!PASS) return;
+    if (!passwordOk(PASS)) throw new Error("SHO_QA_PASS must be at least 8 characters with a letter and a number.");
+  });
+
   test("AC1: a Member sees active people's names only, with no email, status or management action", async ({ member }) => {
     await member.page.goto("/team");
     await expect(member.page.getByRole("heading", { name: "Team" }).first()).toBeVisible(SLOW);
@@ -61,7 +62,7 @@ test.describe("SHO-US-2.5 / APL-2484", () => {
     test.setTimeout(180_000);
     const email = alias("2484", "unverified", "aplyd.com");
     const name = zz("unverified");
-    const signed = await signUp(anon.request, name, email, madePass());
+    const signed = await signUp(anon.request, name, email);
     expect(signed.status, signed.body).toBe(201);
     const person = await personByEmail(admin.api, email);
     expect(person?.status).toBe("UNVERIFIED");
