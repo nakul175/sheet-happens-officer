@@ -10,9 +10,10 @@ import { PASS, passwordOk } from "./qa";
 // Pam has not published a TC hash. The marker is the literal "qa:TC missing".
 const tag = (id: string) => ({ annotation: [{ type: "ac", description: id }, { type: "qa:TC", description: "qa:TC missing" }] });
 
-// The status role's accessible name is empty: "Loading" is only text inside it. The grey rows are aria-hidden and have no role.
+// The status role's accessible name is empty: "Loading" is only text inside it. There is no aria-label.
+// The grey bars are aria-hidden and have no role, name, or text, so the skeleton is the status plus that text.
 const skeleton = (page: Page) => page.getByRole("status").filter({ hasText: "Loading" });
-const skeletonRows = (page: Page) => skeleton(page).locator("[aria-hidden='true']");
+const skeletonRows = (page: Page) => skeleton(page).getByText("Loading", { exact: true });
 
 test.beforeAll(() => {
   test.skip(!PASS, "Set SHO_QA_PASS (the password for nakul17+ aliases).");

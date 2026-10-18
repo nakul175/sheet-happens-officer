@@ -4,7 +4,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import type { Page } from "@playwright/test";
 import { test, expect } from "../support";
-import { bell, withUnread } from "../helpers/jim-bell";
+import { withUnread } from "../helpers/jim-bell";
 import { PASS, passwordOk } from "./qa";
 
 // Pam has not published a TC hash. The marker is the literal "qa:TC missing".
@@ -16,6 +16,7 @@ test.beforeAll(() => {
 });
 
 const RULE = "label-content-name-mismatch";
+const bell = (page: Page) => page.getByRole("button", { name: /^Notifications/ });
 
 /** The bell's result for the Label in Name rule: violation, pass, incomplete (cannot judge), inapplicable or not run. */
 async function labelInName(page: Page) {
