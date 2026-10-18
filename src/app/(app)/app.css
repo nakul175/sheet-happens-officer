@@ -143,8 +143,8 @@ textarea.in.blocked-reason { display: block; margin-top: 6px; min-height: 0; lin
 .comment-form { margin-top: 10px; }
 .comment-form label { display: block; font-size: 14px; margin-bottom: 4px; }
 #mention-list { list-style: none; margin: 4px 0; padding: 4px; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
-#mention-list button { width: 100%; text-align: left; background: transparent; border: 0; padding: 8px; min-height: 44px; cursor: pointer; }
-#mention-list button.on, #mention-list button:hover { background: #f3f6f4; }
+#mention-list [role="option"] { display: block; width: 100%; text-align: left; background: transparent; padding: 8px; min-height: 44px; cursor: pointer; }
+#mention-list [role="option"].on, #mention-list [role="option"]:hover { background: #f3f6f4; }
 .box.warn { background: #fff8e8; border-color: #ecd9a6; }
 .box.dng { background: var(--danger-bg); border-color: var(--danger-line); }
 .skel { color: var(--muted); padding: 24px 0; }

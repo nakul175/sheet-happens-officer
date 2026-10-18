@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState, type FormEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { ago, api, useGet } from "@/components/api";
 
 type Person = { id: string; name: string };
@@ -30,6 +30,7 @@ export function Comments({ taskId, onChanged }: { taskId: string; onChanged?: ()
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [closed, setClosed] = useState(false);
+  const posting = useRef(false);
 
   const members = list.data?.members ?? [];
   const query = closed ? null : queryAt(text, caret);
@@ -52,6 +53,23 @@ export function Comments({ taskId, onChanged }: { taskId: string; onChanged?: ()
     setCaret(start + name.length + 2);
     setClosed(true);
     setActive(0);
+  }
+
+  async function submitNew(e: FormEvent) {
+    e.preventDefault();
+    if (posting.current || !text.trim()) return;
+    posting.current = true;
+    try {
+      await send(`/api/tasks/${taskId}/comments`, "POST", { text }, () => { setText(""); setCaret(0); });
+    } finally {
+      posting.current = false;
+    }
+  }
+
+  function pressAdd(e: ReactPointerEvent<HTMLButtonElement>) {
+    if (e.button !== 0 || e.currentTarget.disabled) return;
+    // On a phone the tab bar can cover this button before pointerup, so the click never arrives.
+    e.currentTarget.form?.requestSubmit();
   }
 
   async function send(path: string, method: string, body: unknown, after?: () => void) {
@@ -102,12 +120,13 @@ export function Comments({ taskId, onChanged }: { taskId: string; onChanged?: ()
         ))}
       </div>
       {data?.canComment && (
-        <form className="comment-form" onSubmit={(e) => { e.preventDefault(); void send(`/api/tasks/${taskId}/comments`, "POST", { text }, () => { setText(""); setCaret(0); }); }}>
+        <form className="comment-form" onSubmit={(e) => { void submitNew(e); }}>
           <label htmlFor="new-comment">Add a comment</label>
           <textarea
             id="new-comment" className="in" rows={3} maxLength={5000} value={text}
             placeholder="Write a comment. Type @ to mention someone."
             aria-autocomplete="list" aria-controls="mention-list"
+            aria-activedescendant={matches.length ? `mention-opt-${matches[shown].id}` : undefined}
             onChange={(e) => { setText(e.target.value); setCaret(e.target.selectionStart ?? e.target.value.length); setClosed(false); setActive(0); }}
             onClick={(e) => setCaret((e.target as HTMLTextAreaElement).selectionStart ?? 0)}
             onKeyUp={(e) => setCaret((e.target as HTMLTextAreaElement).selectionStart ?? 0)}
@@ -122,14 +141,33 @@ export function Comments({ taskId, onChanged }: { taskId: string; onChanged?: ()
           {matches.length > 0 && (
             <ul id="mention-list" role="listbox" aria-label="Mention a project member">
               {matches.map((m, i) => (
-                <li key={m.id} role="option" aria-selected={i === shown}>
-                  <button type="button" className={i === shown ? "on" : ""} onMouseDown={(e) => { e.preventDefault(); insert(m.name); }}>{m.name}</button>
-                </li>
+                <li
+                  key={m.id}
+                  id={`mention-opt-${m.id}`}
+                  role="option"
+                  aria-selected={i === shown}
+                  tabIndex={-1}
+                  className={i === shown ? "on" : ""}
+                  onMouseDown={(e) => { e.preventDefault(); insert(m.name); }}
+                  onKeyDown={(e) => {
+                    if (e.key === "ArrowDown") { e.preventDefault(); setActive((n) => (n + 1) % matches.length); }
+                    else if (e.key === "ArrowUp") { e.preventDefault(); setActive((n) => (n - 1 + matches.length) % matches.length); }
+                    else if (e.key === "Enter") { e.preventDefault(); insert(m.name); }
+                    else if (e.key === "Escape") { e.preventDefault(); setClosed(true); }
+                  }}
+                >{m.name}</li>
               ))}
             </ul>
           )}
           {err && <p className="hint" role="alert">{err}</p>}
-          <div className="actions"><button className="btn sm" type="submit" disabled={busy || !text.trim()}>Add comment</button></div>
+          <div className="actions">
+            <button
+              className="btn sm"
+              type="submit"
+              disabled={busy || !text.trim()}
+              onPointerDown={pressAdd}
+            >Add comment</button>
+          </div>
         </form>
       )}
     </section>
