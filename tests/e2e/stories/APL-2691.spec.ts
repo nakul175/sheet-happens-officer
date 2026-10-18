@@ -2,6 +2,7 @@
 // One test per acceptance criterion. ZZ-TEST deals and organisations are archived afterwards.
 // The Super Admin acts as Leader. workers is 1 in playwright.config.ts. Traces stay off.
 // Pam's ids sit in the title, next to the acceptance-criteria tag, the same way the other story specs do.
+// A missing SHO_QA_PASS skips the file. The password is never written here.
 import { test, expect, zz } from "../support";
 import { getTask, newTask, ymd, type Who } from "../g2";
 
@@ -51,6 +52,10 @@ async function openTasks(admin: Who, dealId: string, step: { id: string; title: 
   }
   return { titles, ids };
 }
+
+test.beforeAll(() => {
+  test.skip(!process.env.SHO_QA_PASS, "Set SHO_QA_PASS (the password for nakul17+ aliases).");
+});
 
 test.describe("APL-2691", { tag: "@APL-2691" }, () => {
   test.describe.configure({ timeout: 180_000 });
