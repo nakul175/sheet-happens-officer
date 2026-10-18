@@ -67,6 +67,7 @@ env:
   TARGET_ALLOWLIST: '^(staging\.sheethappensofficer\.com|pr[1-8]\.staging\.sheethappensofficer\.com)$'
   # Only for `prisma generate` during npm ci; nothing connects to it.
   DATABASE_URL: postgresql://unused:unused@127.0.0.1:1/unused
+  DIRECT_DATABASE_URL: postgresql://unused:unused@127.0.0.1:1/unused
   PLAYWRIGHT_HTML_OPEN: never
   # Specs that read or change org-wide state another shard would disturb (counts, Trash, Activity, people, notifications, a shared
   # account's password or sessions), so they run in the e2e-serial job, alone. APL-2610 covers APL-2671 too. Ids are file names.
