@@ -8,6 +8,8 @@ import { configDefaults, defineConfig } from "vitest/config";
 // Phone checks and the production smoke have their own commands.
 export default defineConfig({
   resolve: { alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) } },
+  // scripts/** holds node:test files (assert-playwright-ran.test.mjs). Vitest's default
+  // include matches *.test.mjs and fails them with "No test suite found", which blocks deploy.yml.
   test: {
     testTimeout: 30000,
     fileParallelism: false,
@@ -17,6 +19,7 @@ export default defineConfig({
       "tests/viewport/**",
       "tests/smoke/**",
       "tests/crm-visible-modes-server.test.ts",
+      "scripts/**",
     ],
   },
 });
