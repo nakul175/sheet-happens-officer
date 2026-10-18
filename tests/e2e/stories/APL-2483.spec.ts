@@ -135,14 +135,15 @@ test.describe("SHO-US-2.4 / APL-2483", () => {
     later(() => admin.api.del(`/api/projects/${p.id}/members/${member.user.id}?handoverTo=${admin.user.id}`));
     const title = zz("handed over");
     await task(admin, p.id, leaver.id, { title });
-    const read = async () => (await member.api.get("/api/notifications?limit=200")).json as { unread: number; items: { text: string }[] };
+    const read = async () => (await member.api.get("/api/notifications?limit=200")).json as { unread: number; items: { id: string; text: string }[] };
     const before = await read();
     expect((await admin.api.post(`/api/team/${leaver.id}/deactivate`, { reassign: member.user.id })).status).toBe(200);
     const after = await read();
     expect(after.unread, "the receiver has a new unread notice").toBeGreaterThan(before.unread);
     // Only notices that arrived after the deactivation. The handover notice is generic (src/lib/feed.ts:30/46/62)
     // and names neither the project nor the task, so match its wording, not the earlier "added you to" notice.
-    const fresh = after.items.slice(0, after.items.length - before.items.length);
+    const seen = new Set(before.items.map((n) => n.id));
+    const fresh = after.items.filter((n) => !seen.has(n.id));
     expect(fresh.some((n) => /handed over/i.test(n.text) && /open task/i.test(n.text)), JSON.stringify(fresh.map((n) => n.text))).toBe(true);
   });
 
