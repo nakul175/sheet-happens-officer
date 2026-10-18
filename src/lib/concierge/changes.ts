@@ -7,6 +7,7 @@ import { db } from "@/lib/db";
 import { ApiError } from "@/lib/http";
 import { WORKERS, activeMember, projectAccess, type Actor } from "@/lib/access";
 import { formatDueDate } from "@/lib/dates";
+import type { Handover } from "@/lib/people";
 import { addMember, changeMemberRole, createProject, removeMember } from "@/lib/projects";
 import {
   addCollaborator, assignTask, awaiting, canClose, completeTask, createTask, deleteTask, moveTask, removeCollaborator, reopenTask,
@@ -256,7 +257,7 @@ async function blockedReason(user: Actor, op: Op, L: Loaded): Promise<string | n
         return canClose(user.id, a.role, t) ? null : t.approverId ? "Only the approver, the Leader or an Admin can close this task." : "You cannot complete this task.";
       case "task.reopen": return t.completedAt ? null : "This task is not complete.";
       case "task.assign": {
-        if (t.approverId && user.id === t.assigneeId && op.assigneeId !== t.approverId) return "With an approver, this task can only be handed to the approver.";
+        if (t.approverId && user.id === t.assigneeId && op.assigneeId !== t.approverId && a.role !== "LEADER") return "With an approver, this task can only be handed to the approver.";
         return (await activeMember(db, t.projectId, op.assigneeId, WORKERS)) ? null : `${U(L, op.assigneeId).name} must be an active Leader or Editor of this project.`;
       }
       case "task.section": {
@@ -397,15 +398,17 @@ export async function execute(user: Actor, ops: Op[], handover: { taskId: string
       case "member.add": await addMember(user, op.projectId, op.userId, op.role); break;
       case "member.role":
       case "member.remove": {
-        // Each task goes to the person chosen for it, one by one, before the member leaves (no "leave unassigned").
+        // Each task goes to the person chosen for it (no "leave unassigned"), inside the one removal transaction, so the
+        // notices and the member.removed row come out exactly as from the Members screen (SHO-BUG-7).
         const held = await db.task.findMany({ where: { projectId: op.projectId, assigneeId: op.userId, completedAt: null, deletedAt: null }, select: { id: true } });
+        const picks: Handover[] = [];
         for (const t of held) {
           const to = handover.find((h) => h.taskId === t.id)?.assigneeId;
           if (!to) throw new ApiError(400, "Choose who takes each of their tasks first.");
-          await assignTask(user, t.id, to);
+          picks.push({ taskId: t.id, assigneeId: to });
         }
-        if (op.k === "member.role") await changeMemberRole(user, op.projectId, op.userId, op.role);
-        else await removeMember(user, op.projectId, op.userId);
+        if (op.k === "member.role") await changeMemberRole(user, op.projectId, op.userId, op.role, undefined, picks);
+        else await removeMember(user, op.projectId, op.userId, undefined, picks);
         break;
       }
     }

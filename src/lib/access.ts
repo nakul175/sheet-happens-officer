@@ -1,3 +1,4 @@
+import type { Prisma } from "@/generated/prisma/client";
 import { db } from "@/lib/db";
 import { ApiError, notFound } from "@/lib/http";
 
@@ -8,6 +9,26 @@ export type Actor = { id: string; orgRole: OrgRole; name?: string };
 
 export const isAdmin = (u: { orgRole: OrgRole }) => u.orgRole !== "MEMBER";
 
+// The CRM visibility lever (CRM_VISIBLE; documented in crm.ts, which re-exports these). It lives here so
+// projectAccess can apply it without an import cycle (crm.ts imports access.ts). Read at call time: a restart is enough.
+export type CrmMode = "all" | "admins" | "off";
+export const WORKSTREAM_PROJECT = "wst_project";
+export const WORKSTREAM_DEAL = "wst_deal";
+
+export function crmMode(): CrmMode {
+  const m = (process.env.CRM_VISIBLE ?? "all").trim().toLowerCase();
+  return m === "off" || m === "admins" ? m : "all";
+}
+
+export function crmVisible(user: Pick<Actor, "orgRole">) {
+  const m = crmMode();
+  return m === "all" || (m === "admins" && isAdmin(user));
+}
+
+/** Project `where` fragment: deals are left out for a person the CRM is hidden from (SHO-BUG-2). Spread it into any project filter. */
+export const crmProjectWhere = (user: Pick<Actor, "orgRole">): Prisma.ProjectWhereInput =>
+  crmVisible(user) ? {} : { typeId: { not: WORKSTREAM_DEAL } };
+
 /**
  * Loads a project the person may see. Non-members get "not found", never "forbidden"
  * (SHO-US-3.2 AC4). Admins and the Super Admin act as Leader everywhere.
@@ -16,6 +37,8 @@ export async function projectAccess(user: Actor, projectId: string, opts: { writ
   const project = await db.project.findUnique({ where: { id: projectId }, include: { members: true } });
   const member = project?.members.find((m) => m.userId === user.id) ?? null;
   if (!project || (!member && !isAdmin(user))) throw notFound("Project");
+  // A hidden CRM looks like it does not exist: a deal, and so every task, section and log row in it, is "not found" (SHO-BUG-2).
+  if (project.typeId === WORKSTREAM_DEAL && !crmVisible(user)) throw notFound("Project");
   const role: Role = isAdmin(user) ? "LEADER" : member!.role;
   if (opts.write && project.archivedAt) throw new ApiError(409, "This project is archived and read-only.");
   return { project, role, member, admin: isAdmin(user) };

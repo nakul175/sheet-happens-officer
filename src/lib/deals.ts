@@ -100,12 +100,16 @@ export async function createDeal(
       },
     });
     await tx.dealParty.create({ data: { projectId: project.id, organisationId: org.id, role: "BUYER" } });
-    await tx.task.create({
+    const firstStep = await tx.task.create({
       data: {
         workspaceId: u.workspaceId, projectId: project.id, sectionId: sections[0].id, title: step, dueDate: parseDueDate(input.nextStep.dueDate),
         assigneeId: leader.id, createdById: user.id,
       },
     });
+    // The first step is a task like any other: the Leader hears they hold it and the log shows it was created (SHO-BUG-5).
+    // Not the primary row: the Undo toast after creating a deal must not offer to undo its required first step.
+    await notify(tx, [leader.id], "TASK_ASSIGNED", { actorId: user.id, taskId: firstStep.id, projectId: project.id, data: { title: firstStep.title } });
+    await logAction(tx, { actorId: user.id, projectId: project.id, targetType: "task", targetId: firstStep.id, action: "task.created", after: { title: firstStep.title, assigneeId: leader.id, sectionId: sections[0].id, parentId: null }, primary: false });
     await notify(tx, [leader.id], "MADE_LEADER", { actorId: user.id, projectId: project.id, data: { project: project.name } });
     await logAction(tx, { actorId: user.id, projectId: project.id, targetType: "deal", targetId: project.id, action: "deal.created", after: { name, organisationId: org.id, pipeline: pipeline.name, leaderId: leader.id } });
     return project;
