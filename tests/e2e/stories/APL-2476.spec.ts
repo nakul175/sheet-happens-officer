@@ -1,9 +1,15 @@
 // SHO-US-1.3 Sign in with email and password (APL-2476). Acceptance criteria AC1 to AC5.
 import type { Page } from "@playwright/test";
 import { test, expect, RUN, login } from "../support";
+import { PASS, passwordOk, alias, zz, signUp, personByEmail, deactivate, waitForSinkMail } from "./qa";
 
 const alertOf = (p: Page) => p.locator('[role="alert"]:not(#__next-route-announcer__)');
 const WRONG = "Email or password is incorrect.";
+
+function needPass() {
+  test.skip(!PASS, "Set SHO_QA_PASS (the shared password for the nakul17+ accounts).");
+  test.skip(!passwordOk(PASS), "SHO_QA_PASS must be at least 8 characters with a letter and a number.");
+}
 
 test.describe("SHO-US-1.3 / APL-2476", () => {
   test("AC1: the right password lands on My tasks with a 30-day session cookie that page scripts cannot read", async ({ anon }) => {
@@ -40,8 +46,32 @@ test.describe("SHO-US-1.3 / APL-2476", () => {
     expect(ok.status()).toBe(200);
   });
 
-  test.skip("AC3: an unverified account with the right password sees Verify your email first with a Resend link", async () => {
-    // Needs an unverified account whose password is known; the only way to make one is a real sign-up that emails a real inbox.
+  test("AC3: an unverified account with the right password sees Verify your email first with a Resend link", async ({ anon, admin, later }) => {
+    needPass();
+    const email = alias("2476", "ac3", "aplyd.com");
+    expect((await signUp(anon.request, zz("ac3"), email)).status).toBe(201);
+    await waitForSinkMail(email, "Verify");
+    const person = await personByEmail(admin.api, email);
+    expect(person?.status).toBe("UNVERIFIED");
+    later(() => deactivate(admin.api, person!.id));
+
+    const wrong = await anon.request.post("/api/auth/signin", { data: { email, password: `not-${PASS}` } });
+    expect(wrong.status()).toBe(401);
+    expect((await wrong.json()).error).toBe(WRONG);
+
+    await anon.goto("/signin");
+    await anon.getByLabel("Work email").fill(email);
+    await anon.getByLabel("Password").fill(PASS);
+    await anon.getByRole("button", { name: "Sign in" }).click();
+    const alert = alertOf(anon);
+    await expect(alert).toContainText("Verify your email first.");
+    await expect(alert.getByRole("button", { name: "Resend link" })).toBeVisible();
+    expect((await anon.request.get("/api/auth/me")).status()).toBe(401);
+
+    await alert.getByRole("button", { name: "Resend link" }).click();
+    await expect(anon).toHaveURL(/\/check-email/);
+    const resent = await waitForSinkMail(email, "Verify");
+    expect(resent.to?.toLowerCase()).toBe(email.toLowerCase());
   });
 
   test("AC4: five failed tries lock the email for 15 minutes, for an address with no account too, and the password is no longer checked", async ({ anon }) => {
@@ -60,7 +90,28 @@ test.describe("SHO-US-1.3 / APL-2476", () => {
     await expect(alertOf(anon)).toContainText("Too many attempts. Try again in 15 minutes.");
   });
 
-  test.skip("AC5: a deactivated account with the right password is refused with This account is deactivated", async () => {
-    // Needs a deactivated account whose password is known. People added from the Team page get an emailed password nobody can read here.
+  test("AC5: a deactivated account with the right password is refused with This account is deactivated", async ({ anon, admin, later }) => {
+    needPass();
+    const email = alias("2476", "ac5", "aplyd.com");
+    expect((await signUp(anon.request, zz("ac5"), email)).status).toBe(201);
+    const token = (await waitForSinkMail(email, "Verify")).token;
+    expect((await anon.request.post("/api/auth/verify", { data: { token } })).ok()).toBe(true);
+    const person = await personByEmail(admin.api, email);
+    later(() => deactivate(admin.api, person!.id));
+    expect((await anon.request.post("/api/auth/signin", { data: { email, password: PASS } })).status()).toBe(200);
+    await anon.request.post("/api/auth/signout");
+    expect((await admin.api.post(`/api/team/${person!.id}/deactivate`, { reassign: "leaders" })).status).toBe(200);
+
+    const refused = await anon.request.post("/api/auth/signin", { data: { email, password: PASS } });
+    expect(refused.status()).toBe(403);
+    const body = await refused.json();
+    expect(body.error).toBe("This account is deactivated.");
+    expect(JSON.stringify(body)).not.toMatch(/orgRole|project/i);
+    await anon.goto("/signin");
+    await anon.getByLabel("Work email").fill(email);
+    await anon.getByLabel("Password").fill(PASS);
+    await anon.getByRole("button", { name: "Sign in" }).click();
+    await expect(alertOf(anon)).toContainText("This account is deactivated.");
+    expect((await anon.request.get("/api/auth/me")).status()).toBe(401);
   });
 });

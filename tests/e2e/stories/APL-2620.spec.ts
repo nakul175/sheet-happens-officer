@@ -1,9 +1,8 @@
 // SHO-US-23.1 Two company domains can sign up (APL-2620). Acceptance criteria AC1 to AC4.
-// A successful sign-up creates a real unverified account and emails a real domain, so AC1 is checked on the two routes that create nothing
-// (forgot password, resend verification) and the sign-up itself is left to a manual run.
+// Sign-up uses a nakul17+ alias. The verification link is read from the test mail sink, and the account is deactivated afterwards.
 import type { Page } from "@playwright/test";
 import { test, expect, RUN, login } from "../support";
-import { why } from "../helpers/jim-http";
+import { PASS, passwordOk, alias, zz, signUp, personByEmail, deactivate, waitForSinkMail } from "./qa";
 
 const alertOf = (p: Page) => p.locator('[role="alert"]:not(#__next-route-announcer__)');
 const MESSAGE = "Use your @aplyd.com or @athenainfonomics.com email address.";
@@ -24,9 +23,21 @@ test.describe("SHO-US-23.1 / APL-2620", () => {
     await expect(anon).toHaveURL(/\/check-reset/);
   });
 
-  test.skip("AC1 (sign-up): an @athenainfonomics.com colleague signs up and gets the verification email", why(
-    "Creates a real unverified account and sends a verification email to a real company mailbox. A browser session cannot read that inbox.",
-  ), async () => {});
+  test("AC1 (sign-up): an @athenainfonomics.com colleague signs up and gets the verification email", async ({ anon, admin, later }) => {
+    test.skip(!PASS, "Set SHO_QA_PASS (the shared password for the nakul17+ accounts).");
+    test.skip(!passwordOk(PASS), "SHO_QA_PASS must be at least 8 characters with a letter and a number.");
+    const email = alias("2620", "ac1", "athenainfonomics.com");
+    const signed = await signUp(anon.request, zz("athena"), email);
+    expect(signed.status, signed.body).toBe(201);
+    expect(signed.json.status).toBe("check_email");
+    const person = await personByEmail(admin.api, email);
+    expect(person?.status).toBe("UNVERIFIED");
+    later(() => deactivate(admin.api, person!.id));
+    const mail = await waitForSinkMail(email, "Verify");
+    expect(mail.to?.toLowerCase()).toBe(email.toLowerCase());
+    expect(mail.text).toContain("/verify?token=");
+    expect((await anon.request.get("/api/auth/me")).status(), "sign-up does not sign them in").toBe(401);
+  });
 
   test("AC2: look-alike and foreign domains are refused with the new message on sign-up, resend and forgot password", async ({ anon }) => {
     for (const email of refused) {

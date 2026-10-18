@@ -170,6 +170,12 @@ test("AC6: editing the profile and ending other sessions both take effect", asyn
 
 const PRODUCTION_HOSTS = new Set(["sheethappensofficer.com", "www.sheethappensofficer.com", "app.sheethappensofficer.com"]);
 
+function mailLinkHost(text: string | null | undefined) {
+  const raw = text?.match(/https?:\/\/[^\s"'<>]+/)?.[0] ?? "http://invalid";
+  const url = new URL(raw);
+  return { host: url.host.toLowerCase(), hostname: url.hostname.toLowerCase() };
+}
+
 test("AC7: staging auth mail is in the test mail sink within 60 seconds and each link completes", async ({ anon, admin, later }) => {
   test.setTimeout(240_000);
   const email = alias("2465", "ac7", "aplyd.com");
@@ -182,9 +188,9 @@ test("AC7: staging auth mail is in the test mail sink within 60 seconds and each
   const second = await waitForSinkMail(email, "Verify", first.token);
   expect(second.token).not.toBe(first.token);
   for (const mail of [first, second]) {
-    const host = mail.text?.match(/https?:\/\/([^/\s]+)/)?.[1]?.toLowerCase() ?? "";
-    expect(PRODUCTION_HOSTS.has(host), "the link stays on staging").toBe(false);
-    expect(host).toBe(new URL(BASE_URL).hostname);
+    const link = mailLinkHost(mail.text);
+    expect(PRODUCTION_HOSTS.has(link.hostname), "the link stays on staging").toBe(false);
+    expect(link.host).toBe(new URL(BASE_URL).host);
   }
   await anon.goto(`/verify?token=${second.token}`);
   await expect(anon.getByRole("heading", { name: "Email verified" })).toBeVisible();
@@ -195,9 +201,9 @@ test("AC7: staging auth mail is in the test mail sink within 60 seconds and each
   expect((await anon.request.post("/api/auth/forgot-password", { data: { email } })).ok()).toBe(true);
   const reset = await waitForSinkMail(email, "Reset");
   expect(reset.to?.toLowerCase()).toBe(email.toLowerCase());
-  const resetHost = reset.text?.match(/https?:\/\/([^/\s]+)/)?.[1]?.toLowerCase() ?? "";
-  expect(PRODUCTION_HOSTS.has(resetHost)).toBe(false);
-  expect(resetHost).toBe(new URL(BASE_URL).hostname);
+  const resetLink = mailLinkHost(reset.text);
+  expect(PRODUCTION_HOSTS.has(resetLink.hostname)).toBe(false);
+  expect(resetLink.host).toBe(new URL(BASE_URL).host);
   const updated = nextPass(PASS);
   await anon.goto(`/reset?token=${reset.token}`);
   await anon.getByLabel("New password", { exact: true }).fill(updated);

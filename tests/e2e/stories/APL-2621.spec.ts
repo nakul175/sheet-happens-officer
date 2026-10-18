@@ -1,13 +1,30 @@
 // SHO-US-23.2 Super Admin adds a person (APL-2621). Acceptance criteria AC1 to AC7.
 // Added people get an address like zz-test-<run>-<label>@example.invalid, so no real inbox is mailed. They are deactivated at the end;
 // a person record cannot be deleted from the app.
-// AC5 runs when this server's send fails (the add answer's emailSent is false) and skips when the provider accepts the address.
-// The hash in AC4 stays skipped: it is only in the database, and the password is only in the email.
+// AC4 reads the generated password from the test mail sink and, on a local run, the hash from the database.
+// AC5 blocks the local outbox so the send fails; the account must still exist and the banner must say so.
+import { existsSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import path from "node:path";
 import { test, expect, RUN, BASE_URL } from "../support";
-import { why } from "../helpers/jim-http";
+import { mailedPassword, localPasswordHash, waitForSinkMail } from "./qa";
 
 const SLOW = { timeout: 90_000 };
 const email = (label: string) => `zz-test-${RUN}-${label}@example.invalid`;
+
+/** On a local server, put a file where the outbox directory is so sendMail throws. Staging is left alone. */
+async function blockLocalOutbox(): Promise<() => void> {
+  const host = new URL(BASE_URL).hostname;
+  if (host !== "localhost" && host !== "127.0.0.1") return () => {};
+  const dir = process.env.EMAIL_OUTBOX_DIR ?? path.join(process.cwd(), ".outbox");
+  const held = `${dir}.held-${Date.now()}`;
+  const had = existsSync(dir);
+  if (had) renameSync(dir, held);
+  writeFileSync(dir, "blocked");
+  return () => {
+    rmSync(dir, { force: true });
+    if (had) renameSync(held, dir);
+  };
+}
 
 test.describe("SHO-US-23.2 / APL-2621", () => {
   test("AC1: only the Super Admin sees + Add person, and the server refuses anyone else", async ({ admin, member }) => {
@@ -78,9 +95,40 @@ test.describe("SHO-US-23.2 / APL-2621", () => {
     expect(row.orgRole).toBe("MEMBER");
   });
 
-  test.skip("AC4 (password): the password is random and stored only as a hash", why(
-    "The generated password is only in the email, and the hash is only in the database. A browser session can read neither. AC6 checks the response and the audit log. Covered by tests/people.test.ts.",
-  ), async () => {});
+  test("AC4 (password): the password is random and stored only as a hash", async ({ admin, later }) => {
+    const make = async (label: string) => {
+      const addr = email(label);
+      const r = await admin.api.post("/api/team", { firstName: "ZZ-TEST", lastName: `${label} ${RUN}`, email: addr, role: "MEMBER" });
+      expect(r.status, JSON.stringify(r.json)).toBe(201);
+      later(async () => { await admin.api.post(`/api/team/${r.json.person.id}/deactivate`, { reassign: "leaders" }); });
+      return { addr, body: JSON.stringify(r.json) };
+    };
+    const a = await make("pw-a");
+    const b = await make("pw-b");
+    const first = (await waitForSinkMail(a.addr, "Your Sheet Happens Officer account")).text ?? "";
+    const second = mailedPassword(b.addr) ?? (await waitForSinkMail(b.addr, "Your Sheet Happens Officer account")).text?.match(/^Password: (.+)$/m)?.[1] ?? "";
+    const passA = first.match(/^Password: (.+)$/m)?.[1] ?? "";
+    expect(passA).toMatch(/^[A-Za-z0-9]{12}$/);
+    expect(/[A-Za-z]/.test(passA) && /[0-9]/.test(passA)).toBe(true);
+    expect(second).toMatch(/^[A-Za-z0-9]{12}$/);
+    expect(passA).not.toBe(second);
+    expect(a.body.includes(passA)).toBe(false);
+    expect(b.body.toLowerCase().includes("password")).toBe(false);
+    const log = JSON.stringify((await admin.api.get("/api/audit?event=USER_ADDED_BY_ADMIN")).json);
+    expect(log.includes(passA)).toBe(false);
+    expect(log.includes(second)).toBe(false);
+    const signed = await (await import("@playwright/test")).request.newContext({ baseURL: BASE_URL });
+    try {
+      const r = await signed.post("/api/auth/signin", { data: { email: a.addr, password: passA } });
+      expect(r.status(), "the emailed password works, so a verifier was stored").toBe(200);
+      expect((await r.text()).includes(passA)).toBe(false);
+    } finally { await signed.dispose(); }
+    const hash = await localPasswordHash(a.addr);
+    if (hash !== null) {
+      expect(hash.startsWith("scrypt$"), "stored only as a scrypt hash").toBe(true);
+      expect(hash.includes(passA)).toBe(false);
+    }
+  });
 
   test("AC5: when the email cannot be sent the account still exists, the banner says so and offers Resend sign-in details", async ({ admin, later }) => {
     test.setTimeout(240_000);
@@ -97,12 +145,15 @@ test.describe("SHO-US-23.2 / APL-2621", () => {
     await dialog.getByLabel("Last name").fill(`nosend ${RUN}`);
     await dialog.getByLabel("Email").fill(addr);
     const posted = admin.page.waitForResponse((r) => new URL(r.url()).pathname === "/api/team" && r.request().method() === "POST");
-    await dialog.getByRole("button", { name: "Add and email" }).click();
-    const res = await posted;
-    expect(res.status(), "add person").toBe(201);
-    const sent = ((await res.json()) as { person?: { emailSent?: boolean } }).person?.emailSent;
-    // The failure banner only exists when this server's send throws. A provider that accepts the address cannot be forced to fail.
-    test.skip(sent !== false, "This server sent the sign-in email (emailSent is not false), so the failure banner is not shown. Covered by tests/people.test.ts when sendMail throws.");
+    const restore = await blockLocalOutbox();
+    let res;
+    try {
+      await dialog.getByRole("button", { name: "Add and email" }).click();
+      res = await posted;
+    } finally { restore(); }
+    expect(res!.status(), "add person").toBe(201);
+    const sent = ((await res!.json()) as { person?: { emailSent?: boolean } }).person?.emailSent;
+    expect(sent, "the send was made to fail so the banner can be checked").toBe(false);
     const people = (await admin.api.get("/api/team")).json.people as { email: string; name: string; status: string }[];
     const row = people.find((p) => p.email === addr);
     expect(row?.name).toBe(name);

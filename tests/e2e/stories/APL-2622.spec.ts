@@ -1,8 +1,7 @@
 // SHO-US-23.3 New person gets sign-in details by email (APL-2622). Acceptance criteria AC1 to AC5.
-// The emailed password is only ever in the person's inbox, so what the email says and what the person sees at first sign-in are manual.
-// Resend sign-in details is exercised on throw-away "ZZ-TEST" people at an .invalid address.
-import { test, expect, RUN } from "../support";
-import { why } from "../helpers/jim-http";
+// The emailed password is read from the test mail sink. People are ZZ-TEST names at an .invalid address and are deactivated afterwards.
+import { test, expect, RUN, BASE_URL } from "../support";
+import { mailedPassword, nextPass, waitForSinkMail, signInAs } from "./qa";
 
 const mk = async (admin: { api: { post: (p: string, b?: unknown) => Promise<{ status: number; json: any }>; get: (p: string) => Promise<{ status: number; json: any }> } }, later: (f: () => Promise<unknown>) => void, label: string) => {
   const r = await admin.api.post("/api/team", { firstName: "ZZ-TEST", lastName: `${label} ${RUN}`, email: `zz-test-${RUN}-${label}@example.invalid`, role: "MEMBER" });
@@ -13,17 +12,54 @@ const mk = async (admin: { api: { post: (p: string, b?: unknown) => Promise<{ st
 };
 
 test.describe("SHO-US-23.3 / APL-2622", () => {
-  test.skip("AC1: the email shows the sign-in link, the username and the password", why(
-    "Needs a real mailbox to read the email. Staging has no inbox a test can open. Covered by tests/people.test.ts against the local outbox.",
-  ), async () => {});
+  test("AC1: the email shows the sign-in link, the username and the password", async ({ admin, later }) => {
+    const p = await mk(admin, later, "mail");
+    const mail = await waitForSinkMail(p.email, "Your Sheet Happens Officer account");
+    expect(mail.text).toContain("/signin");
+    expect(mail.text).toContain(`Username: ${p.email}`);
+    expect(mail.text).toMatch(/^Password: \S+$/m);
+    const pass = mail.text?.match(/^Password: (.+)$/m)?.[1] ?? "";
+    expect(JSON.stringify((await admin.api.get(`/api/team/${p.id}`)).json).includes(pass)).toBe(false);
+  });
 
-  test.skip("AC2: the password stays valid until the person changes it", why(
-    "Needs the emailed password, which is only in the inbox. Covered by tests/people.test.ts. (SHO-US-23.5 will replace this rule with a forced change at first sign-in.)",
-  ), async () => {});
+  test("AC2: the password stays valid until the person changes it", async ({ admin, browser, later }) => {
+    const p = await mk(admin, later, "keep");
+    const pass = mailedPassword(p.email) ?? (await waitForSinkMail(p.email, "Your Sheet Happens Officer account")).text?.match(/^Password: (.+)$/m)?.[1];
+    expect(pass, "emailed password").toBeTruthy();
+    const first = await signInAs(browser, p.email, pass!);
+    later(() => first.ctx.close());
+    expect((await first.api.get("/api/auth/me")).status).toBe(200);
+    await first.ctx.close();
+    const second = await signInAs(browser, p.email, pass!);
+    later(() => second.ctx.close());
+    const updated = nextPass(pass!);
+    const changed = await second.api.post("/api/profile/password", { current: pass, password: updated, confirm: updated });
+    expect(changed.status, JSON.stringify(changed.json)).toBe(200);
+    const fresh = await browser.newContext({ baseURL: BASE_URL });
+    later(() => fresh.close());
+    expect((await fresh.request.post("/api/auth/signin", { data: { email: p.email, password: pass } })).status()).toBe(401);
+    const ok = await fresh.request.post("/api/auth/signin", { data: { email: p.email, password: updated } });
+    const body = await ok.text();
+    expect(body.includes(updated)).toBe(false);
+    expect(ok.status()).toBe(200);
+  });
 
-  test.skip("AC3: the first sign-in shows a closable 'Set your own password' banner linking to Profile", why(
-    "Needs the emailed password to sign in as the new person. Staging has no inbox a test can open.",
-  ), async () => {});
+  test("AC3: the first sign-in shows a closable 'Set your own password' banner linking to Profile", async ({ admin, browser, later }) => {
+    const p = await mk(admin, later, "banner");
+    const pass = (await waitForSinkMail(p.email, "Your Sheet Happens Officer account")).text?.match(/^Password: (.+)$/m)?.[1];
+    expect(pass).toBeTruthy();
+    const who = await signInAs(browser, p.email, pass!);
+    later(() => who.ctx.close());
+    await who.page.goto("/");
+    const bar = who.page.getByRole("status").filter({ hasText: "Set your own password" });
+    await expect(bar).toBeVisible();
+    await expect(bar).toContainText("The emailed one still works until you do.");
+    await expect(bar.getByRole("link", { name: "Change password" })).toHaveAttribute("href", "/profile");
+    await bar.getByRole("button", { name: "Close this message" }).click();
+    await expect(bar).toHaveCount(0);
+    await who.page.reload();
+    await expect(who.page.getByRole("status").filter({ hasText: "Set your own password" })).toHaveCount(0);
+  });
 
   test("AC4: Resend sign-in details answers with an emailed/not-emailed flag only, never a password, and is for the Super Admin only", async ({ admin, member, later }) => {
     const p = await mk(admin, later, "resend");
