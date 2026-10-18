@@ -599,6 +599,64 @@ describe("approver (4.6)", () => {
 });
 
 describe("trash (6.1, 6.2)", () => {
+  it("restores a done task after the done flag moved as complete, still in its section (APL-2610 AC6)", async () => {
+    const lead = await account("lead");
+    const p = await project(lead, lead);
+    const done = await task(lead, p.id, { title: "Done then trashed" });
+    const sub = await task(lead, p.id, { parentId: done });
+    expect((await lead.c.post(`/api/tasks/${done}/complete`, { completeAll: true })).status).toBe(200);
+    const row = (id: string) => db.task.findUniqueOrThrow({ where: { id } });
+    const before = { task: await row(done), sub: await row(sub) };
+    expect(before.task.sectionId).toBe(p.done);
+    expect(before.task.completedAt).not.toBeNull();
+    expect(before.sub.completedAt).not.toBeNull();
+    expect((await lead.c.del(`/api/tasks/${done}`)).status).toBeLessThan(300);
+
+    // The done flag leaves the section this task sits in. Trash keeps it complete there (APL-2678).
+    expect((await lead.c.patch(`/api/projects/${p.id}/sections/${p.doing}`, { isDone: true })).status).toBe(200);
+    const since = new Date();
+    expect((await lead.c.post(`/api/tasks/${done}/restore`)).status).toBe(200);
+
+    const kept = (t: { completedAt: Date | null; completedWithParent: boolean; sectionId: string; previousSectionId: string | null }) => ({
+      completedAt: t.completedAt?.toISOString() ?? null, completedWithParent: t.completedWithParent, sectionId: t.sectionId, previousSectionId: t.previousSectionId,
+    });
+    const afterTask = await row(done);
+    const afterSub = await row(sub);
+    expect(kept(afterTask)).toEqual(kept(before.task));
+    expect(kept(afterSub)).toEqual(kept(before.sub));
+    expect(afterTask.deletedAt).toBeNull();
+    expect(afterSub.deletedAt).toBeNull();
+    expect(await db.actionLog.count({ where: { projectId: p.id, action: { in: ["task.reopened", "task.moved"] }, createdAt: { gte: since } } })).toBe(0);
+    const detail = (await lead.c.get(`/api/tasks/${done}`)).json.task;
+    expect(detail.completedAt).toBe(before.task.completedAt!.toISOString());
+    expect(detail.sectionId).toBe(p.done);
+    expect(detail.section.isDone).toBe(false);
+    const board = (await lead.c.get(`/api/projects/${p.id}/tasks`)).json.sections as { id: string; tasks: { id: string }[] }[];
+    expect(board.find((s) => s.id === p.done)!.tasks.some((t) => t.id === done)).toBe(true);
+    expect(board.find((s) => s.id === p.doing)!.tasks.some((t) => t.id === done)).toBe(false);
+  });
+
+  it("restore otherwise is unchanged: a done task stays done in the done section, and an open task stays open in its own", async () => {
+    const lead = await account("lead");
+    const p = await project(lead, lead);
+    const done = await task(lead, p.id, { title: "Still done" });
+    const sub = await task(lead, p.id, { parentId: done });
+    const open = await task(lead, p.id, { title: "Still open", sectionId: p.doing });
+    expect((await lead.c.post(`/api/tasks/${done}/complete`, { completeAll: true })).status).toBe(200);
+    expect((await lead.c.del(`/api/tasks/${done}`)).status).toBeLessThan(300);
+    expect((await lead.c.del(`/api/tasks/${open}`)).status).toBeLessThan(300);
+    expect((await lead.c.post(`/api/tasks/${done}/restore`)).status).toBe(200);
+    expect((await lead.c.post(`/api/tasks/${open}/restore`)).status).toBe(200);
+    const gotDone = (await lead.c.get(`/api/tasks/${done}`)).json.task;
+    expect(gotDone.completedAt).not.toBeNull();
+    expect(gotDone.sectionId).toBe(p.done);
+    expect(gotDone.subtasks).toEqual({ total: 1, open: 0 });
+    expect((await lead.c.get(`/api/tasks/${sub}`)).json.task.completedAt).not.toBeNull();
+    const gotOpen = (await lead.c.get(`/api/tasks/${open}`)).json.task;
+    expect(gotOpen.completedAt).toBeNull();
+    expect(gotOpen.sectionId).toBe(p.doing);
+  });
+
   it("moves a task and its subtasks to Trash, lets only the Leader restore, refuses Editors and Viewers", async () => {
     const lead = await account("lead");
     const ed = await account("editor");

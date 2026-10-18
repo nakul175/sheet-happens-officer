@@ -466,6 +466,8 @@ export async function restoreTask(user: Actor, id: string, confirmParent = false
       const assigneeOk = await activeMember(tx, t.projectId, x.assigneeId, WORKERS);
       const approverOk = x.approverId ? await activeMember(tx, t.projectId, x.approverId, WORKERS) : null;
       const subs = await tx.task.findMany({ where: { parentId: x.id, deletedAt: x.deletedAt }, select: { id: true, assigneeId: true } });
+      // Restore only lifts Trash. A done task whose section lost the done flag stays
+      // complete in that section: no reopen, no move to the current done section (APL-2610 AC6).
       await tx.task.updateMany({
         where: { OR: [{ id: x.id }, { parentId: x.id, deletedAt: x.deletedAt }] },
         data: { deletedAt: null, deletedById: null },
