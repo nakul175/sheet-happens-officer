@@ -103,7 +103,9 @@ test.describe("APL-2669 a malformed expectedUpdatedAt is a bad request", () => {
       const r = await worker.patch(`/api/tasks/${taskId}`, { data: { title: "New", expectedUpdatedAt } });
       const body = await r.json();
       expect(r.status(), JSON.stringify({ expectedUpdatedAt, body })).toBe(400);
-      expect(body.code).toBe("invalid_version");
+      expect(body).toEqual({
+        error: { code: "invalid_version", message: "expectedUpdatedAt must be a full ISO 8601 date-time with a time and a zone." },
+      });
     }
     expect(await taskNow()).toEqual(before);
     expect(await updatedCount()).toBe(rows);
@@ -116,7 +118,7 @@ test.describe("APL-2669 a malformed expectedUpdatedAt is a bad request", () => {
       const r = await worker.patch(`/api/tasks/${taskId}`, { data: { title: "New", expectedUpdatedAt } });
       const body = await r.json();
       expect(r.status()).toBe(409);
-      expect(body.code).toBe("version_conflict");
+      expect(body).toEqual({ error: { code: "version_conflict", message: "This task changed while you were editing it." } });
       expect(await taskNow()).toEqual(before);
     }
   });
@@ -132,7 +134,7 @@ test.describe("APL-2669 a malformed expectedUpdatedAt is a bad request", () => {
     const hiddenBody = await hidden.json();
     expect(await current.json()).toEqual(hiddenBody);
     expect(await missing.json()).toEqual(hiddenBody);
-    expect(hiddenBody).toEqual({ error: "Task not found" });
+    expect(hiddenBody).toEqual({ error: { code: "not_found", message: "Task not found" } });
     expect(JSON.stringify(hiddenBody)).not.toMatch(/Original|New|invalid_version|version_conflict/);
     expect(await taskNow()).toEqual(before);
   });

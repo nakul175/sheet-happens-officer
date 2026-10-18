@@ -35,23 +35,22 @@ describe("classifyExpectedUpdatedAt (APL-2669)", () => {
   it("refuses an invalid timestamp and an empty one with 400 invalid_version", () => {
     for (const v of MALFORMED) {
       expect(() => classifyExpectedUpdatedAt(v)).toThrowError(
-        expect.objectContaining({ status: 400, extra: { code: "invalid_version" } }),
+        expect.objectContaining({ status: 400, code: "invalid_version" }),
       );
     }
-    expect(() => classifyExpectedUpdatedAt(null)).toThrowError(
-      expect.objectContaining({ status: 400, extra: { code: "invalid_version" } }),
-    );
   });
 
-  it("refuses a missing timestamp with 400 and does not call it invalid_version", () => {
-    try {
-      classifyExpectedUpdatedAt(undefined);
-      expect.unreachable();
-    } catch (e) {
-      expect(e).toBeInstanceOf(ApiError);
-      expect((e as ApiError).status).toBe(400);
-      expect((e as ApiError).message).toBe("expectedUpdatedAt is required");
-      expect((e as ApiError).extra).toBeUndefined();
+  it("refuses a missing or null timestamp with 400 version_required", () => {
+    for (const v of [undefined, null]) {
+      try {
+        classifyExpectedUpdatedAt(v);
+        expect.unreachable();
+      } catch (e) {
+        expect(e).toBeInstanceOf(ApiError);
+        expect((e as ApiError).status).toBe(400);
+        expect((e as ApiError).code).toBe("version_required");
+        expect((e as ApiError).message).toBe("expectedUpdatedAt is required");
+      }
     }
   });
 });
@@ -81,8 +80,9 @@ describe("PATCH /api/tasks/:id expectedUpdatedAt (APL-2669)", () => {
     for (const expectedUpdatedAt of MALFORMED) {
       const r = await worker.c.patch(`/api/tasks/${id}`, { title: "New", expectedUpdatedAt });
       expect(r.status, JSON.stringify({ expectedUpdatedAt, body: r.json })).toBe(400);
-      expect(r.json.code).toBe("invalid_version");
-      expect(r.json.error).toMatch(/ISO 8601/);
+      expect(r.json).toEqual({
+        error: { code: "invalid_version", message: "expectedUpdatedAt must be a full ISO 8601 date-time with a time and a zone." },
+      });
     }
     expect(await shown(worker, id)).toEqual({ title: "Original", updatedAt: T0 });
     expect(await updatedRows(id)).toBe(rows);
@@ -93,8 +93,9 @@ describe("PATCH /api/tasks/:id expectedUpdatedAt (APL-2669)", () => {
     for (const expectedUpdatedAt of ["2026-10-18T09:59:59.000Z", "2026-10-18T10:00:01.000Z"]) {
       const r = await worker.c.patch(`/api/tasks/${id}`, { title: "New", expectedUpdatedAt });
       expect(r.status).toBe(409);
-      expect(r.json.code).toBe("version_conflict");
-      expect(r.json.stale).toBe(true);
+      expect(r.json).toEqual({
+        error: { code: "version_conflict", message: "This task changed while you were editing it." },
+      });
       expect(await shown(worker, id)).toEqual({ title: "Original", updatedAt: T0 });
     }
   });
@@ -120,7 +121,7 @@ describe("PATCH /api/tasks/:id expectedUpdatedAt (APL-2669)", () => {
     expect(missing.status).toBe(404);
     expect(current.json).toEqual(hidden.json);
     expect(missing.json).toEqual(hidden.json);
-    expect(hidden.json).toEqual({ error: "Task not found" });
+    expect(hidden.json).toEqual({ error: { code: "not_found", message: "Task not found" } });
     expect(JSON.stringify(hidden.json)).not.toMatch(/Original|invalid_version|version_conflict|does-not-exist/);
     expect(await shown(worker, id)).toEqual({ title: "Original", updatedAt: T0 });
     expect(await updatedRows(id)).toBe(0);

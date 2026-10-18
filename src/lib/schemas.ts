@@ -91,8 +91,9 @@ export const taskCreate = z.object({
   collaboratorIds: z.array(z.string().min(1)).max(50).optional(),
 });
 // The updatedAt the person saw when they opened the task; a different value means someone else saved first.
-// Required (SHO-BUG-13, APL-2668): without it a change could silently overwrite someone else's edit.
-const taskVersion = z.string({ error: "expectedUpdatedAt is required" }).min(1, "expectedUpdatedAt is required");
+// APL-2669 / APL-2670: kept as unknown so a missing, empty or malformed token is classified
+// only after the caller can see the task. A string schema would answer 400 before that 404.
+const taskVersion = z.unknown().optional();
 export const taskUpdate = z.object({
   title: title.optional(),
   description: z.string().trim().max(20000).nullish(),
@@ -100,9 +101,7 @@ export const taskUpdate = z.object({
   priority: taskPriority.optional(),
   blocked: z.boolean().optional(),
   blockedReason: z.string().trim().max(300).nullish(),
-  // APL-2669: classified only after the caller can see the task, so a stranger still gets 404.
-  // A string schema would turn "" and non-strings into a validation error before that check.
-  expectedUpdatedAt: z.unknown().optional(),
+  expectedUpdatedAt: taskVersion,
 });
 export const taskAssign = z.object({ assigneeId: z.string().min(1), expectedUpdatedAt: taskVersion });
 export const taskCollaborator = z.object({ userId: z.string().min(1) });

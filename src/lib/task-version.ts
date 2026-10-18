@@ -1,26 +1,28 @@
 import { ApiError } from "@/lib/http";
+import {
+  INVALID_VERSION, INVALID_VERSION_MESSAGE, VERSION_REQUIRED, VERSION_REQUIRED_MESSAGE,
+} from "@/lib/version-error";
 
 /**
- * APL-2669 v1.3: the task edit token is expectedUpdatedAt, an ISO 8601 date-time
- * with a time and a zone (Z or an offset). Date-only values, zone-less values,
- * empty strings, and anything that is not that shape are a bad request.
- * A missing token is refused separately, with the same message the other
- * task mutations already use.
+ * APL-2669 / APL-2670: expectedUpdatedAt is the version.
+ * Absent and null are missing. Every other value must be a full ISO 8601 date-time
+ * with a time and a zone (Z or an offset). The caller compares the returned instant
+ * with Date#getTime, not as a string.
  */
 const ISO_DATE_TIME_WITH_ZONE =
   /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(\.\d{1,9})?(Z|[+-]\d{2}:\d{2})$/;
 
 export function classifyExpectedUpdatedAt(value: unknown): number {
-  if (value === undefined) throw new ApiError(400, "expectedUpdatedAt is required");
+  if (value === undefined || value === null) {
+    throw new ApiError(400, VERSION_REQUIRED_MESSAGE, undefined, VERSION_REQUIRED);
+  }
   if (typeof value !== "string" || !isIsoDateTimeWithZone(value)) {
-    throw new ApiError(400, "expectedUpdatedAt must be a full ISO 8601 date-time with a time and a zone.", {
-      code: "invalid_version",
-    });
+    throw new ApiError(400, INVALID_VERSION_MESSAGE, undefined, INVALID_VERSION);
   }
   return Date.parse(value);
 }
 
-/** A real calendar date plus a clock time and a zone. Compared later as an instant. */
+/** A real calendar date plus a clock time and a zone. */
 function isIsoDateTimeWithZone(value: string): boolean {
   const m = ISO_DATE_TIME_WITH_ZONE.exec(value);
   if (!m) return false;

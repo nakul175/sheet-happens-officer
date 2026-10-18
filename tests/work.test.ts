@@ -370,9 +370,8 @@ describe("tasks (4.x, 5.x)", () => {
     expect((await patchTask(lead, t, { dueDate: istDate(3) })).status).toBe(200);
     const r = await ed.c.patch(`/api/tasks/${t}`, { title: "mine", expectedUpdatedAt: seen });
     expect(r.status).toBe(409);
-    expect(r.json.stale).toBe(true);
-    expect(r.json.changedBy).toBe("Lead");
-    expect(r.json.current.dueDate).toBe(istDate(3));
+    expect(r.json).toEqual({ error: { code: "version_conflict", message: "This task changed while you were editing it." } });
+    expect((await ed.c.get(`/api/tasks/${t}`)).json.task.dueDate).toBe(istDate(3));
     const fresh = (await ed.c.get(`/api/tasks/${t}`)).json.task.updatedAt;
     expect((await ed.c.patch(`/api/tasks/${t}`, { title: "mine", expectedUpdatedAt: fresh })).status).toBe(200);
   });
@@ -401,9 +400,7 @@ describe("tasks (4.x, 5.x)", () => {
     expect((await patchTask(lead, t, { title: "Theirs" })).status).toBe(200);
     const r = await ed.c.patch(`/api/tasks/${t}`, { title: "Mine", expectedUpdatedAt: seen });
     expect(r.status).toBe(409);
-    expect(r.json.error).toBe("This task changed while you were editing it.");
-    expect(r.json.changedBy).toBe("Lead");
-    expect(r.json.current.title).toBe("Theirs");
+    expect(r.json).toEqual({ error: { code: "version_conflict", message: "This task changed while you were editing it." } });
     expect((await ed.c.get(`/api/tasks/${t}`)).json.task.title).toBe("Theirs");
   });
 
@@ -496,7 +493,7 @@ describe("a version on assign, move, complete and approver (APL-2668)", () => {
       const rows = await logs(s.t);
       const r = await m.send(s, m.body(s));
       expect(r.status).toBe(400);
-      expect(JSON.stringify(r.json)).toMatch(/expectedUpdatedAt is required/);
+      expect(r.json).toEqual({ error: { code: "version_required", message: "expectedUpdatedAt is required" } });
       const after = await shown(s);
       expect(m.applied(s, after)).toBe(false);
       expect(after.updatedAt).toBe(before.updatedAt);
@@ -509,11 +506,8 @@ describe("a version on assign, move, complete and approver (APL-2668)", () => {
       expect((await patchTask(s.other, s.t, { title: "Theirs" })).status).toBe(200);
       const r = await m.send(s, { ...m.body(s), expectedUpdatedAt: seen });
       expect(r.status).toBe(409);
-      expect(r.json.error).toBe("This task changed while you were editing it.");
-      expect(r.json.stale).toBe(true);
-      expect(r.json.changedBy).toBe("Other");
-      expect(r.json.current.id).toBe(s.t);
-      expect(r.json.current.title).toBe("Theirs");
+      expect(r.json).toEqual({ error: { code: "version_conflict", message: "This task changed while you were editing it." } });
+      expect((await shown(s)).title).toBe("Theirs");
       expect(m.applied(s, await shown(s))).toBe(false);
     });
 
@@ -535,7 +529,7 @@ describe("a version on assign, move, complete and approver (APL-2668)", () => {
       () => moveTask(me, s.t, s.p.doing, ""),
       () => completeTask(me, s.t, ""),
       () => setApprover(me, s.t, s.ed.id, ""),
-    ]) await expect(call()).rejects.toMatchObject({ status: 400, message: "expectedUpdatedAt is required" });
+    ]) await expect(call()).rejects.toMatchObject({ status: 400, code: "invalid_version", message: "expectedUpdatedAt must be a full ISO 8601 date-time with a time and a zone." });
     expect((await shown(s)).updatedAt).toBe(before.updatedAt);
     expect(await logs(s.t)).toBe(rows);
   });
