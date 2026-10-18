@@ -140,8 +140,10 @@ test.describe("SHO-US-2.4 / APL-2483", () => {
     expect((await admin.api.post(`/api/team/${leaver.id}/deactivate`, { reassign: member.user.id })).status).toBe(200);
     const after = await read();
     expect(after.unread, "the receiver has a new unread notice").toBeGreaterThan(before.unread);
-    // The wording of this notice is not in the story; it must name the project or the task.
-    expect(after.items.some((n) => n.text.includes(p.name) || n.text.includes(title))).toBe(true);
+    // Only notices that arrived after the deactivation. The handover notice is generic (src/lib/feed.ts:30/46/62)
+    // and names neither the project nor the task, so match its wording, not the earlier "added you to" notice.
+    const fresh = after.items.slice(0, after.items.length - before.items.length);
+    expect(fresh.some((n) => /handed over/i.test(n.text) && /open task/i.test(n.text)), JSON.stringify(fresh.map((n) => n.text))).toBe(true);
   });
 
   test("AC6: a subtask assigned to the leaver is reassigned by the same rules as a task", async ({ admin, later }) => {

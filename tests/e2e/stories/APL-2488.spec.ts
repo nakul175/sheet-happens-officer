@@ -86,12 +86,12 @@ test("AC5: a role change to Viewer for a member with open tasks follows 3.3 AC5 
 });
 
 test("AC1 + AC2 (Admin half): the Super Admin, who does not lead the project, can add and remove a member; an Editor Leader is not needed", async ({ admin, member, later }) => {
-  // The Member leads; the Super Admin only holds the organisation role. Not run yet: relies on the API letting the Super Admin name another Leader.
+  // The Member leads; the Super Admin only holds the organisation role. createProject allows any active person as Leader (src/lib/projects.ts:16); GET /api/projects/:id exposes the Leader only via members.
   const p = await newProject(admin, later, { label: "3.4 admin not leader", leader: member });
   const g = await ghost(admin, later, "byadmin");
   const add = await admin.api.post(`/api/projects/${p.id}/members`, { userId: g.id });
   expect(add.status, JSON.stringify(add.json)).toBe(201);
   const d = (await admin.api.get(`/api/projects/${p.id}`)).json.project;
-  expect(d.leaderId ?? d.leader?.id, "the Member is the Leader, not the Super Admin").toBe(member.user.id);
+  expect((d.members as { userId: string; role: string }[]).find((m) => m.role === "LEADER")?.userId, "the Member is the Leader, not the Super Admin").toBe(member.user.id);
   expect((await admin.api.del(`/api/projects/${p.id}/members/${g.id}`)).status).toBe(204);
 });

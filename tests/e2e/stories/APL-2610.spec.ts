@@ -2,7 +2,7 @@
 // Acceptance criteria: AC1 done flag, AC2 Activity rows, AC3 delete into done, AC4 flag moved away, AC5 no reminder for a closed subtask.
 // AC1 and AC3 allow either fix ("refused with a reason" OR "parent and both subtasks completed"), so each test accepts both and says which it saw.
 // Tests marked [needs PR #6] check the reopen half, which is only fixed by PR #6 (src/lib/sections.ts reopenedSubtasks, src/lib/undo.ts).
-// Covers Jim's PR #6 steps: (1) flag done, 3 complete + 3 rows; (2) flag back, 3 reopen; (3) undo, 3 close; (4) delete into done, 3 complete + 3 rows; plus the accepted pre-ticked subtask case.
+// Covers Jim's PR #6 steps: (1) flag done, 3 complete + 3 rows; (2) flag back, 3 reopen; (3) undo, 3 close; (4) delete into done, 3 complete + 3 rows; plus the pre-ticked subtask case (PENDING NJ's AC4 decision).
 // Run them on a build that has that PR; on main they fail by design, and that failure is the bug.
 // AC5 note: the reminder job needs a job secret that a browser session does not have, so the test checks the input the job reads
 // (src/lib/jobs.ts sendReminders only picks tasks with completedAt null): a closed subtask must be gone from the assignee's My tasks.
@@ -101,8 +101,8 @@ test("AC5: a subtask closed with its parent is no longer an open task for its ho
 });
 
 test("AC4 [needs PR #6] (PENDING AC4 decision (NJ): asserts PR #6 behaviour, not the written AC): a subtask ticked done BEFORE its parent entered the done section also reopens with the parent", async ({ admin, later }) => {
-  // Not a defect: Jim's notes for PR #6 accept that every done subtask of a reopened parent reopens (src/lib/sections.ts reopenedSubtasks),
-  // including one that was completed on its own earlier. The AC4 wording "completed with them" is read loosely here.
+  // PENDING AC4 decision (NJ, via Michael on APL-2610): PR #6 reopens every done subtask of a reopened parent (src/lib/sections.ts reopenedSubtasks),
+  // including one completed on its own earlier. The written AC4 says "completed with them", so a pass here does NOT pass AC4 as written.
   const t = await tree(admin, later, "bug3 preticked");
   expect((await admin.api.post(`/api/tasks/${t.subs[0]}/complete`)).status).toBe(200); // ticked on its own, parent still open
   expect(await states(admin, t.all)).toEqual([false, true, false]);
