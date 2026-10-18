@@ -1,14 +1,20 @@
 // APL-2682. Idempotently ensures the throwaway staging Editor exists.
 //
 // The person zz-test-editor@example.invalid is an ordinary active, verified member and
-// Editor of the "ZZ-TEST QA" project only. The project and its default sections are
-// created when they are missing. An existing password is never replaced.
+// Editor of the "ZZ-TEST QA" project only. zz-test-leader@example.invalid is the Leader
+// of that project. The project and its default sections are created when they are missing.
+// An existing password is never replaced.
 //
 // The password is read from STAGING_EDITOR_PASSWORD_FILE (the staging secret file)
 // or, if that is unset, from STAGING_EDITOR_PASSWORD. It is never printed.
 //
-// Refuses production before opening a connection: the database host or name matches
-// PROD_DB_HOST / PROD_DB_NAME when those are set, or the host is app.sheethappensofficer.com.
+// Refuses before opening a connection unless the database host is local, or the database
+// name is exactly sho_staging. A DigitalOcean managed host (*.db.ondigitalocean.com) and
+// any other non-local host are refused for every other database name. This does not
+// depend on PROD_DB_HOST or PROD_DB_NAME. Those still refuse as well, and database names
+// are compared to PROD_DB_NAME without regard to case. The host app.sheethappensofficer.com
+// is always refused. A URL that sets host or dbname in the query is refused, so those
+// parameters cannot replace the host or database in the authority.
 // Requires an explicit staging confirmation: --confirm-staging or SHO_STAGING_CONFIRM=1.
 // STAGING_WORKSPACE_ID is required. An unset id refuses before connecting; there is no
 // fallback to the oldest workspace.
@@ -22,10 +28,14 @@ import { passwordField } from "../src/lib/schemas";
 import { Prisma, PrismaClient } from "../src/generated/prisma/client";
 
 export const EDITOR_EMAIL = "zz-test-editor@example.invalid";
+export const LEADER_EMAIL = "zz-test-leader@example.invalid";
 export const QA_PROJECT_NAME = "ZZ-TEST QA";
 // Same three sections createProject writes (src/lib/projects.ts). The last one is Done.
 const DEFAULT_SECTIONS = ["To do", "In progress", "Done"];
 const PROD_APP_HOST = "app.sheethappensofficer.com";
+const STAGING_DB_NAME = "sho_staging";
+// libpq lets these query keys replace the host and database. Refuse them instead of applying them.
+const OVERRIDE_PARAMS = ["host", "hostaddr", "hostname", "dbname", "database"];
 
 export class ScriptRefusal extends Error {
   constructor(message: string) {
@@ -47,19 +57,45 @@ function isProdAppHost(host: string): boolean {
   return normalized === PROD_APP_HOST || normalized.endsWith(`.${PROD_APP_HOST}`);
 }
 
-function parseTarget(raw: string): DatabaseTarget | null {
-  try {
-    const url = new URL(raw);
-    const host = normalizeHost(url.hostname);
-    if (!host) return null;
-    const name = decodeURIComponent(url.pathname.replace(/^\//, "").split("/")[0] ?? "");
-    return { host, name };
-  } catch {
-    return null;
-  }
+function isLocalHost(host: string): boolean {
+  if (host === "localhost" || host === "::1") return true;
+  const parts = host.split(".");
+  if (parts.length !== 4) return false;
+  return parts.every((part) => /^\d{1,3}$/.test(part) && Number(part) <= 255) && parts[0] === "127";
 }
 
-/** A refusal message, or null when this environment is not production. Never includes the URL. */
+/** WHATWG URL parse. libpq host and dbname query keys are refused, not applied. */
+function parseDatabaseUrl(raw: string): DatabaseTarget | { refusal: string } {
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    return { refusal: "Refusing to run: the database URL is not valid." };
+  }
+  const keys = [...url.searchParams.keys()].map((key) => key.toLowerCase());
+  if (keys.some((key) => OVERRIDE_PARAMS.includes(key))) {
+    return { refusal: "Refusing to run: the database URL must not set host or dbname in the query." };
+  }
+  const host = normalizeHost(url.hostname);
+  const name = decodeURIComponent((url.pathname.replace(/^\//, "").split("/")[0] ?? "").trim());
+  if (!host || !name) return { refusal: "Refusing to run: the database URL is not valid." };
+  return { host, name };
+}
+
+function targetRefusal(target: DatabaseTarget, prodHost: string, prodName: string): string | null {
+  if (isProdAppHost(target.host) || (prodHost && target.host === prodHost)) {
+    return "Refusing to run: the database host is production.";
+  }
+  if (!isLocalHost(target.host) && target.name !== STAGING_DB_NAME) {
+    return "Refusing to run: a non-local database host is allowed only when the database name is sho_staging.";
+  }
+  if (prodName && target.name.toLowerCase() === prodName.toLowerCase()) {
+    return "Refusing to run: the database name is production.";
+  }
+  return null;
+}
+
+/** A refusal message, or null when this environment is allowed. Never includes the URL. */
 export function productionRefusal(env: NodeJS.ProcessEnv): string | null {
   const databaseUrl = env.DATABASE_URL ?? "";
   if (!databaseUrl) return "Refusing to run: DATABASE_URL is not set.";
@@ -68,18 +104,19 @@ export function productionRefusal(env: NodeJS.ProcessEnv): string | null {
   const prodName = (env.PROD_DB_NAME ?? "").trim();
   for (const raw of urls) {
     if (raw.toLowerCase().includes(PROD_APP_HOST)) return "Refusing to run: the database host is production.";
-    const target = parseTarget(raw);
-    if (!target) return "Refusing to run: the database URL is not valid.";
-    if (isProdAppHost(target.host) || (prodHost && target.host === prodHost)) {
-      return "Refusing to run: the database host is production.";
-    }
-    if (prodName && target.name === prodName) return "Refusing to run: the database name is production.";
+    const target = parseDatabaseUrl(raw);
+    if ("refusal" in target) return target.refusal;
+    const refusal = targetRefusal(target, prodHost, prodName);
+    if (refusal) return refusal;
   }
   const appUrl = env.APP_URL ?? "";
   if (appUrl) {
     if (appUrl.toLowerCase().includes(PROD_APP_HOST)) return "Refusing to run: the app host is production.";
-    const app = parseTarget(appUrl);
-    if (app && isProdAppHost(app.host)) return "Refusing to run: the app host is production.";
+    try {
+      if (isProdAppHost(new URL(appUrl).hostname)) return "Refusing to run: the app host is production.";
+    } catch {
+      // An unparseable app URL is not a database target.
+    }
   }
   return null;
 }
@@ -139,15 +176,89 @@ async function resolveWorkspace(db: PrismaClient, workspaceId: string) {
   return row;
 }
 
+async function ensurePerson(
+  tx: Prisma.TransactionClient,
+  opts: {
+    email: string;
+    name: string;
+    workspaceId: string;
+    projectId: string;
+    role: "EDITOR" | "LEADER";
+    passwordHash: string | null;
+  },
+): Promise<{ id: string; passwordSet: boolean }> {
+  let user = await tx.user.findUnique({ where: { email: opts.email } });
+  let passwordSet = false;
+  if (!user) {
+    if (!opts.passwordHash) throw new ScriptRefusal("Set STAGING_EDITOR_PASSWORD or STAGING_EDITOR_PASSWORD_FILE.");
+    user = await tx.user.create({
+      data: {
+        workspaceId: opts.workspaceId,
+        email: opts.email,
+        name: opts.name,
+        passwordHash: opts.passwordHash,
+        orgRole: "MEMBER",
+        emailVerifiedAt: new Date(),
+      },
+    });
+    passwordSet = true;
+  } else {
+    const data: Prisma.UserUncheckedUpdateInput = {};
+    if (user.orgRole !== "MEMBER") data.orgRole = "MEMBER";
+    if (!user.emailVerifiedAt) data.emailVerifiedAt = new Date();
+    if (user.deactivatedAt) data.deactivatedAt = null;
+    if (user.workspaceId !== opts.workspaceId) data.workspaceId = opts.workspaceId;
+    if (Object.keys(data).length) user = await tx.user.update({ where: { id: user.id }, data });
+  }
+
+  if (opts.role === "LEADER") {
+    const other = await tx.projectMember.findFirst({
+      where: { projectId: opts.projectId, role: "LEADER", NOT: { userId: user.id } },
+    });
+    if (other) {
+      await tx.projectMember.update({
+        where: { projectId_userId: { projectId: opts.projectId, userId: other.userId } },
+        data: { role: "EDITOR" },
+      });
+    }
+  }
+
+  const memberships = await tx.projectMember.findMany({ where: { userId: user.id } });
+  let onProject = false;
+  for (const membership of memberships) {
+    if (membership.projectId !== opts.projectId) {
+      await tx.projectMember.delete({ where: { projectId_userId: { projectId: membership.projectId, userId: user.id } } });
+      continue;
+    }
+    onProject = true;
+    if (membership.role !== opts.role) {
+      await tx.projectMember.update({
+        where: { projectId_userId: { projectId: membership.projectId, userId: user.id } },
+        data: { role: opts.role },
+      });
+    }
+  }
+  if (!onProject) {
+    await tx.projectMember.create({ data: { projectId: opts.projectId, userId: user.id, role: opts.role } });
+  }
+  return { id: user.id, passwordSet };
+}
+
 export async function ensureStagingEditor(
   db: PrismaClient,
   opts: { password: string | null; workspaceId: string },
-): Promise<{ userId: string; projectId: string; passwordSet: boolean }> {
+): Promise<{ userId: string; leaderId: string; projectId: string; editorPasswordSet: boolean; leaderPasswordSet: boolean }> {
   const workspace = await resolveWorkspace(db, opts.workspaceId);
-  const already = await db.user.findUnique({ where: { email: EDITOR_EMAIL }, select: { id: true } });
-  if (!already && !opts.password) throw new ScriptRefusal("Set STAGING_EDITOR_PASSWORD or STAGING_EDITOR_PASSWORD_FILE.");
-  // Hash outside the transaction. The stored hash is written only when the person is created.
-  const passwordHash = !already && opts.password ? await hashWithApp(opts.password) : null;
+  const existing = await db.user.findMany({
+    where: { email: { in: [EDITOR_EMAIL, LEADER_EMAIL] } },
+    select: { email: true },
+  });
+  const have = new Set(existing.map((row) => row.email));
+  if ((!have.has(EDITOR_EMAIL) || !have.has(LEADER_EMAIL)) && !opts.password) {
+    throw new ScriptRefusal("Set STAGING_EDITOR_PASSWORD or STAGING_EDITOR_PASSWORD_FILE.");
+  }
+  // Hash outside the transaction. The stored hash is written only when a person is created.
+  const passwordHash = opts.password ? await hashWithApp(opts.password) : null;
 
   return db.$transaction(async (tx) => {
     let project = await tx.project.findFirst({
@@ -167,49 +278,29 @@ export async function ensureStagingEditor(
       }
     }
 
-    let user = await tx.user.findUnique({ where: { email: EDITOR_EMAIL } });
-    let passwordSet = false;
-    if (!user) {
-      if (!passwordHash) throw new ScriptRefusal("Set STAGING_EDITOR_PASSWORD or STAGING_EDITOR_PASSWORD_FILE.");
-      user = await tx.user.create({
-        data: {
-          workspaceId: workspace.id,
-          email: EDITOR_EMAIL,
-          name: "ZZ Test Editor",
-          passwordHash,
-          orgRole: "MEMBER",
-          emailVerifiedAt: new Date(),
-        },
-      });
-      passwordSet = true;
-    } else {
-      const data: Prisma.UserUncheckedUpdateInput = {};
-      if (user.orgRole !== "MEMBER") data.orgRole = "MEMBER";
-      if (!user.emailVerifiedAt) data.emailVerifiedAt = new Date();
-      if (user.deactivatedAt) data.deactivatedAt = null;
-      if (user.workspaceId !== workspace.id) data.workspaceId = workspace.id;
-      if (Object.keys(data).length) user = await tx.user.update({ where: { id: user.id }, data });
-    }
-
-    const memberships = await tx.projectMember.findMany({ where: { userId: user.id } });
-    let onProject = false;
-    for (const membership of memberships) {
-      if (membership.projectId !== project.id) {
-        await tx.projectMember.delete({ where: { projectId_userId: { projectId: membership.projectId, userId: user.id } } });
-        continue;
-      }
-      onProject = true;
-      if (membership.role !== "EDITOR") {
-        await tx.projectMember.update({
-          where: { projectId_userId: { projectId: membership.projectId, userId: user.id } },
-          data: { role: "EDITOR" },
-        });
-      }
-    }
-    if (!onProject) {
-      await tx.projectMember.create({ data: { projectId: project.id, userId: user.id, role: "EDITOR" } });
-    }
-    return { userId: user.id, projectId: project.id, passwordSet };
+    const editor = await ensurePerson(tx, {
+      email: EDITOR_EMAIL,
+      name: "ZZ Test Editor",
+      workspaceId: workspace.id,
+      projectId: project.id,
+      role: "EDITOR",
+      passwordHash,
+    });
+    const leader = await ensurePerson(tx, {
+      email: LEADER_EMAIL,
+      name: "ZZ Test Leader",
+      workspaceId: workspace.id,
+      projectId: project.id,
+      role: "LEADER",
+      passwordHash,
+    });
+    return {
+      userId: editor.id,
+      leaderId: leader.id,
+      projectId: project.id,
+      editorPasswordSet: editor.passwordSet,
+      leaderPasswordSet: leader.passwordSet,
+    };
   });
 }
 
@@ -225,9 +316,13 @@ export async function runStagingEditor(env: NodeJS.ProcessEnv, argv: readonly st
     const workspaceId = env.STAGING_WORKSPACE_ID?.trim() ?? "";
     if (!workspaceId) throw new ScriptRefusal("Refusing to run: STAGING_WORKSPACE_ID is not set.");
     db = await connect(env.DATABASE_URL ?? "");
-    const existing = await db.user.findUnique({ where: { email: EDITOR_EMAIL }, select: { id: true } });
+    const existing = await db.user.findMany({
+      where: { email: { in: [EDITOR_EMAIL, LEADER_EMAIL] } },
+      select: { email: true },
+    });
+    const have = new Set(existing.map((row) => row.email));
     let password: string | null = null;
-    if (!existing) {
+    if (!have.has(EDITOR_EMAIL) || !have.has(LEADER_EMAIL)) {
       password = checkedPassword(readPassword(env));
       secrets.push(password);
     }
@@ -236,10 +331,13 @@ export async function runStagingEditor(env: NodeJS.ProcessEnv, argv: readonly st
       [
         "staging editor ready",
         `user: ${result.userId}`,
+        `leader: ${result.leaderId}`,
         `project: ${result.projectId}`,
         "orgRole: MEMBER",
         "projectRole: EDITOR",
-        `password: ${result.passwordSet ? "set" : "unchanged"}`,
+        "leaderRole: LEADER",
+        `editorPassword: ${result.editorPasswordSet ? "set" : "unchanged"}`,
+        `leaderPassword: ${result.leaderPasswordSet ? "set" : "unchanged"}`,
       ].join("\n"),
     );
     return 0;
