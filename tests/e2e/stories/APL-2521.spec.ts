@@ -21,16 +21,27 @@ type Row = { id: string; at: string; who: string | null; email: string | null; e
 const audit = async (admin: any, q: string) => (await admin.api.get(`/api/audit?${q}`)).json.items as Row[];
 
 test("AC1: listed events each leave a row with time, actor, event, target and channel", async ({ admin, member, later }) => {
+  // Remember the rows that exist now, so a row left by an earlier run cannot satisfy this test.
+  const EVENTS = ["PROJECT_CREATED", "MEMBER_ADDED", "TASK_DELETED", "TASK_RESTORED"];
+  const seen = new Set<string>();
+  for (const event of EVENTS) for (const r of await audit(admin, `event=${event}&person=${admin.user.id}`)) seen.add(r.id);
   const p = await proj(admin, "audit-rows", later);
   expect((await admin.api.post(`/api/projects/${p}/members`, { userId: member.user.id, role: "EDITOR" })).status).toBe(201);
   later(() => admin.api.del(`/api/projects/${p}/members/${member.user.id}?handoverTo=${admin.user.id}`));
   const t = await mk(admin, p, zz("audited"));
   expect((await admin.api.del(`/api/tasks/${t}`)).status).toBe(204);
   expect((await admin.api.post(`/api/tasks/${t}/restore`)).status).toBe(200);
-  for (const event of ["PROJECT_CREATED", "MEMBER_ADDED", "TASK_DELETED", "TASK_RESTORED"]) {
-    const rows = await audit(admin, `event=${event}&person=${admin.user.id}`);
+  // What each new row must name. A project's creator may also be logged as a member, so MEMBER_ADDED is matched on the Member's name.
+  const names: Record<string, string> = {
+    PROJECT_CREATED: zz("audit-rows"),
+    MEMBER_ADDED: `"${member.user.name}"`,
+    TASK_DELETED: zz("audited"),
+    TASK_RESTORED: zz("audited"),
+  };
+  for (const event of EVENTS) {
+    const rows = (await audit(admin, `event=${event}&person=${admin.user.id}`)).filter((r) => !seen.has(r.id) && (r.target ?? "").includes(names[event]));
+    expect(rows, `exactly one new ${event} row from this test`).toHaveLength(1);
     const row = rows[0];
-    expect(row, `a ${event} row exists`).toBeTruthy();
     expect(row.who).toBe(admin.user.name);
     expect(row.channel).toBe("Screen");
     expect(Number.isNaN(Date.parse(row.at))).toBe(false);
@@ -62,7 +73,8 @@ test("AC2: nobody but the Super Admin can open or query the audit log, Admins in
 test("AC3: no password, token or email link is stored in the rows", async ({ admin }) => {
   const res = await admin.page.request.get("/api/audit");
   const body = await res.text();
-  expect(body).not.toContain(process.env.SHO_ADMIN_PASS!);
+  // A boolean on purpose: a failing `expect(body).not.toContain(secret)` prints the secret in the test report.
+  expect(body.includes(process.env.SHO_ADMIN_PASS!), "the Super Admin password appears in the audit log").toBe(false);
   expect(body).not.toMatch(/token=|passwordHash|"password"|\$2[aby]\$|argon2/i);
   for (const r of JSON.parse(body).items as Row[]) expect(Object.keys(r).sort()).toEqual(["at", "channel", "email", "event", "id", "ip", "target", "who"]);
 });

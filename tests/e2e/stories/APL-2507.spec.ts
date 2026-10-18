@@ -56,7 +56,9 @@ test("AC3 (grouping): removing a person from a project with 6 of their tasks giv
   expect((await admin.api.del(`/api/projects/${p}/members/${member.user.id}?handoverTo=${admin.user.id}`)).status).toBeLessThan(300);
   const hits = (await texts(member)).filter((x) => x.includes(`removed you from "${zz("remove-many")}"`));
   expect(hits, "one notice for the whole event").toHaveLength(1);
-  expect(hits[0]).toMatch(/6/); // the tail line carries the count
+  // Blank out every quoted name first: the project name carries the run id, which can contain a "6" on its own.
+  // With 5 or more tasks the tail gives a count and does not list titles (feed.ts leftNote).
+  expect(hits[0].replace(/"[^"]*"/g, '""'), "the tail carries the count").toMatch(/\b6 open tasks\b/);
 });
 
 test("AC4: a changed project role and a changed Admin status each give a notice naming the new role and who made the change", async ({ admin, member, later }) => {
