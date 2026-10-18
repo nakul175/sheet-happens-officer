@@ -1,11 +1,11 @@
 // Production SIGTERM drain (APL-2688 / APL-2689). Builds this app and spawns real
-// `next start` — the command Pam's tester runs — with a CPU burner beside it.
-// The burst matches that tester: connect every socket, write the request, SIGTERM
-// 40ms later, without waiting for handlers. Sockets still between accept and
-// dispatch must return 200. `npm test` excludes this file because `next build`
-// rewrites `.next`. Run: npx vitest run -c vitest.shutdown.config.mts
+// `next start` — the command Pam's tester runs — pinned to two cores, with a CPU
+// burner on those cores. The droplet is 2 vCPU / 4 GiB behind Caddy. The burst
+// matches that tester: connect every socket, write the request, SIGTERM 40ms
+// later, then a new connection at +16ms and +143ms must be refused. `npm test`
+// excludes this file because `next build` rewrites `.next`.
+// Run: npx vitest run -c vitest.shutdown.config.mts
 import net from "node:net";
-import os from "node:os";
 import path from "node:path";
 import { spawn, execFileSync, type ChildProcess } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -16,9 +16,12 @@ const root = path.join(fileURLToPath(new URL(".", import.meta.url)), "..");
 const databaseUrl = process.env.DATABASE_URL ?? "postgresql://sho:sho@127.0.0.1:5432/sho_test?schema=public";
 
 function startBurners(): ChildProcess[] {
-  const n = Math.min(4, Math.max(2, os.cpus().length));
-  const code = "setInterval(() => { const end = Date.now() + 40; while (Date.now() < end) Math.sqrt(Math.random()); }, 0);";
-  return Array.from({ length: n }, () => spawn(process.execPath, ["-e", code], { stdio: "ignore" }));
+  // The droplet is 2 vCPU. Pin the load to two cores so accept() falls behind the
+  // way it did there, and leave the other cores for this test process.
+  // Short slices. Two tight spins on the only two cores would keep the server
+  // off-CPU longer than the 16ms probe, which is harsher than the droplet.
+  const code = "setInterval(() => { const end = Date.now() + 4; while (Date.now() < end) Math.sqrt(Math.random()); }, 0);";
+  return Array.from({ length: 2 }, () => spawn("taskset", ["-c", "0,1", process.execPath, "-e", code], { stdio: "ignore" }));
 }
 
 function stopBurners(burners: ChildProcess[]) {
@@ -40,7 +43,7 @@ function freePort(): Promise<number> {
 }
 
 function startNext(port: number, env: Record<string, string>) {
-  const child = spawn(process.execPath, ["node_modules/next/dist/bin/next", "start", "-p", String(port), "-H", "127.0.0.1"], {
+  const child = spawn("taskset", ["-c", "0,1", process.execPath, "node_modules/next/dist/bin/next", "start", "-p", String(port), "-H", "127.0.0.1"], {
     cwd: root,
     env: {
       ...process.env,
@@ -134,27 +137,29 @@ function readResponse(socket: net.Socket): Promise<{ status: number; body: strin
   });
 }
 
-/** Connect only after the process has unlistened, so the probe is not another in-flight socket. */
-function connectAfterUnlisten(proc: ReturnType<typeof startNext>, port: number): Promise<"refused" | "open"> {
-  return proc.waitFor(/sho unlistened/, 10_000).then(
-    () =>
-      new Promise((resolve) => {
-        const socket = net.connect({ port, host: "127.0.0.1" });
-        const timer = setTimeout(() => {
-          socket.destroy();
-          resolve("refused");
-        }, 500);
-        socket.once("connect", () => {
-          clearTimeout(timer);
-          socket.end();
-          resolve("open");
-        });
-        socket.once("error", () => {
-          clearTimeout(timer);
-          resolve("refused");
-        });
-      }),
-  );
+function probe(port: number): Promise<"refused" | "open"> {
+  return new Promise((resolve) => {
+    const socket = net.connect({ port, host: "127.0.0.1" });
+    const timer = setTimeout(() => {
+      socket.destroy();
+      resolve("refused");
+    }, 300);
+    socket.once("connect", () => {
+      clearTimeout(timer);
+      socket.destroy();
+      resolve("open");
+    });
+    socket.once("error", () => {
+      clearTimeout(timer);
+      resolve("refused");
+    });
+  });
+}
+
+/** Times match the droplet tester: a new TCP connection at +16ms and +143ms. */
+function probeAt(port: number, t0: number, at: number): Promise<"refused" | "open"> {
+  const wait = Math.max(0, t0 + at - Date.now());
+  return new Promise((resolve) => setTimeout(() => resolve(probe(port)), wait));
 }
 
 describe("next start SIGTERM", () => {
@@ -182,43 +187,42 @@ describe("next start SIGTERM", () => {
         socket.write(`GET /api/shutdown-slow?ms=2000 HTTP/1.1\r\nHost: 127.0.0.1:${port}\r\nConnection: close\r\n\r\n`);
       }
       await new Promise((resolve) => setTimeout(resolve, 40));
+      const t0 = Date.now();
       proc.child.kill("SIGTERM");
-      const late = await connectAfterUnlisten(proc, port);
+      const [late16, late143] = await Promise.all([probeAt(port, t0, 16), probeAt(port, t0, 143)]);
       const settled = await pending;
       const result = await proc.exited;
-      return { settled, late, result, hits: proc.hits() - hitsBefore };
+      return { settled, late16, late143, result, hits: proc.hits() - hitsBefore };
     } finally {
       stop(proc.child);
       stopBurners(burners);
     }
   }
 
-  it("drains 40 requests written 40ms before SIGTERM under CPU contention", async () => {
-    const { settled, late, result, hits } = await burst(40);
-    expect(hits).toBe(40);
+  async function expectBurst(concurrency: number) {
+    const { settled, late16, late143, result, hits } = await burst(concurrency);
+    expect(hits).toBe(concurrency);
     expect(settled.filter((response) => response.reset)).toEqual([]);
     for (const response of settled) {
       expect(response.status).toBe(200);
       expect(response.body).toContain("done");
     }
-    expect(late).toBe("refused");
+    expect([late16, late143]).toEqual(["refused", "refused"]);
     expect(result.code).toBe(0);
     expect(result.stdout).toContain(CLEAN_LOG);
     expect(result.stdout).not.toContain(TIMEOUT_LOG);
+  }
+
+  it("drains 6 requests and refuses connections at 16ms and 143ms", async () => {
+    await expectBurst(6);
   }, 120_000);
 
-  it("drains 100 requests written 40ms before SIGTERM under CPU contention", async () => {
-    const { settled, late, result, hits } = await burst(100);
-    expect(hits).toBe(100);
-    expect(settled.filter((response) => response.reset)).toEqual([]);
-    for (const response of settled) {
-      expect(response.status).toBe(200);
-      expect(response.body).toContain("done");
-    }
-    expect(late).toBe("refused");
-    expect(result.code).toBe(0);
-    expect(result.stdout).toContain(CLEAN_LOG);
-    expect(result.stdout).not.toContain(TIMEOUT_LOG);
+  it("drains 40 requests written 40ms before SIGTERM on two pinned cores", async () => {
+    await expectBurst(40);
+  }, 120_000);
+
+  it("drains 100 requests written 40ms before SIGTERM on two pinned cores", async () => {
+    await expectBurst(100);
   }, 120_000);
 
   it("logs the timeout line and exits 1 when a request outlives the drain", async () => {

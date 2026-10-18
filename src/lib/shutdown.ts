@@ -14,21 +14,28 @@
 // The reset itself is earlier than the idle sweep. A client can finish connect() and
 // write the request before this process emits 'connection'. server.close() in that
 // window drops the kernel accept queue, and those sockets die with ECONNRESET without
-// ever reaching a handler. Once a handler has started, the socket has an unfinished
-// response and survives closeIdleConnections().
+// ever reaching a handler. Waiting for the queue to drain through the event loop
+// keeps the listener open (new connections are still accepted) and, on a 2-vCPU
+// box, the queue is still not empty when that wait gives up (~840ms here, drops
+// observed ~900ms later). Those sockets are not in the connection list, so a
+// request counter still logs a clean drain.
 //
-// Production listens from server.js, which sets NEXT_MANUAL_SIG_HANDLE and passes the
-// http.Server it created. On SIGTERM this module tracks sockets from the 'connection'
-// event, holds closeIdleConnections(), and lets the accept queue become connection
-// events before unlisten. Next's own server.close() is wrapped to do the same, so a
-// process still started with `next start` cannot reset accepted-but-undispatched
-// sockets after the hook is installed. Then it waits for every accepted socket that
-// has not finished a response, and closes only sockets that are idle after a response.
-// The whole wait stays inside SHUTDOWN_DRAIN_MS. A clean drain is logged only when
-// none of those sockets dropped.
+// On SIGTERM a C handler listen(fd, 0)s first (new handshakes are refused while
+// the completed queue stays accept()able), accept()s that queue, then
+// shutdown(SHUT_RD)s the listening socket before returning. shutdown() first
+// drops the queue, and accept() without listen(0) still takes a handshake that
+// arrives while the loop is preempted. It tracks every
+// socket from 'connection' (including the ones just pulled off the queue), holds
+// closeIdleConnections() for the drain, and only then lets Node close the listener.
+// Next's own server.close() takes the same path. A clean drain is logged only when
+// the queue was seized and none of those sockets dropped. The wait stays inside
+// SHUTDOWN_DRAIN_MS.
 
+import fs from "node:fs";
 import http from "node:http";
-import type net from "node:net";
+import { createRequire } from "node:module";
+import net from "node:net";
+import path from "node:path";
 
 export const CLEAN_LOG = "graceful shutdown: drained in-flight requests";
 export const TIMEOUT_LOG = "graceful shutdown: drain timed out";
@@ -46,6 +53,8 @@ type ShutdownState = {
   shuttingDown: boolean;
   /** While true, closeIdleConnections() is a no-op so an undispatched socket is not reset. */
   holdIdleSweep: boolean;
+  /** The kernel accept queue could not be pulled before the listener was closed. */
+  queueDrainFailed: boolean;
   dropped: number;
   sockets: Map<net.Socket, Tracked>;
 };
@@ -54,6 +63,7 @@ const state: ShutdownState = ((globalThis as { __shoShutdown?: ShutdownState }).
   installed: false,
   shuttingDown: false,
   holdIdleSweep: false,
+  queueDrainFailed: false,
   dropped: 0,
   sockets: new Map(),
 });
@@ -158,6 +168,162 @@ function backfill(server: http.Server) {
   for (const socket of acceptedSockets(server)) noteSocket(socket);
 }
 
+// Linux x86_64 / arm64: O_NONBLOCK and SOCK_CLOEXEC. The droplet is Ubuntu amd64.
+const SOCK_NONBLOCK = 0x800;
+const SOCK_CLOEXEC = 0x80000;
+const SHUT_RD = 0;
+const EAGAIN = 11;
+const EINTR = 4;
+const EBADF = 9;
+const ENOTCONN = 107;
+
+type Libc = {
+  accept4: (fd: number) => number;
+  listen: (fd: number) => number;
+  shutdown: (fd: number) => number;
+  errno: () => number;
+};
+
+let libcCache: Libc | null | undefined;
+
+type NativeAccept = {
+  arm: (fd: number) => number;
+  seized: () => boolean;
+  ok: () => boolean;
+  take: () => number[];
+};
+
+let nativeCache: NativeAccept | null | undefined;
+let wakeSocket: net.Socket | null = null;
+
+function loadNative(): NativeAccept | null {
+  if (nativeCache !== undefined) return nativeCache;
+  if (process.platform !== "linux") {
+    nativeCache = null;
+    return null;
+  }
+  try {
+    const require = createRequire(path.join(process.cwd(), "package.json"));
+    const koffi = require("koffi") as {
+      load: (name: string) => { func: (signature: string) => (...args: unknown[]) => unknown };
+      alloc: (type: string, length: number) => unknown;
+      decode: (value: unknown, type: string, length?: number) => unknown;
+    };
+    const so = path.join(process.cwd(), "src/lib/sho-accept.so");
+    const lib = koffi.load(so);
+    const arm = lib.func("int sho_arm(int fd)");
+    const seized = lib.func("int sho_seized(void)");
+    const seizeOk = lib.func("int sho_seize_ok(void)");
+    const take = lib.func("int sho_take(int *out, int cap)");
+    nativeCache = {
+      arm: (fd) => arm(fd) as number,
+      seized: () => (seized() as number) !== 0,
+      ok: () => (seizeOk() as number) !== 0,
+      take: () => {
+        const out = koffi.alloc("int", 8192);
+        const n = take(out, 8192) as number;
+        if (n <= 0) return [];
+        const decoded = koffi.decode(out, "int", n);
+        if (typeof decoded === "number") return [decoded];
+        if (Array.isArray(decoded) || ArrayBuffer.isView(decoded)) return Array.from(decoded as ArrayLike<number>, (fd) => Number(fd));
+        return [];
+      },
+    };
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    console.error(`graceful shutdown: signal handler not installed (${detail})`);
+    nativeCache = null;
+  }
+  return nativeCache;
+}
+
+function loadLibc(): Libc | null {
+  if (libcCache !== undefined) return libcCache;
+  if (process.platform !== "linux") {
+    libcCache = null;
+    return null;
+  }
+  try {
+    // Resolve from the app root. instrumentation.register() is webpack-bundled, so a
+    // relative require from the bundle would not find node_modules.
+    const require = createRequire(path.join(process.cwd(), "package.json"));
+    const koffi = require("koffi") as {
+      load: (name: string) => { func: (signature: string) => (...args: unknown[]) => unknown };
+      decode: (value: unknown, type: string) => number;
+    };
+    const lib = koffi.load("libc.so.6");
+    const accept4 = lib.func("int accept4(int sockfd, void *addr, void *addrlen, int flags)");
+    const listen = lib.func("int listen(int sockfd, int backlog)");
+    const shutdown = lib.func("int shutdown(int sockfd, int how)");
+    const errnoLoc = lib.func("int *__errno_location(void)");
+    libcCache = {
+      accept4: (fd) => accept4(fd, null, null, SOCK_NONBLOCK | SOCK_CLOEXEC) as number,
+      listen: (fd) => listen(fd, 0) as number,
+      shutdown: (fd) => shutdown(fd, SHUT_RD) as number,
+      errno: () => koffi.decode(errnoLoc(), "int"),
+    };
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    console.error(`graceful shutdown: cannot read the accept queue (${detail})`);
+    libcCache = null;
+  }
+  return libcCache;
+}
+
+function listenFd(server: http.Server): number | null {
+  const fd = (server as http.Server & { _handle?: { fd?: number } | null })._handle?.fd;
+  return typeof fd === "number" && fd >= 0 ? fd : null;
+}
+
+/**
+ * Take every completed handshake still sitting in the kernel queue, then refuse
+ * new ones. shutdown(SHUT_RD) is synchronous: connect() fails with ECONNREFUSED
+ * before uv_close runs. libuv's close of this fd is deferred to the next poll,
+ * which is what left the listener open for ~800ms and then reset whatever had
+ * not been accept()ed yet.
+ */
+function seizeAcceptQueue(server: http.Server): { fds: number[]; ok: boolean } {
+  const lib = loadLibc();
+  const fd = listenFd(server);
+  if (!lib || fd == null) return { fds: [], ok: false };
+  // Same order as the signal handler: refuse new handshakes before draining.
+  lib.listen(fd);
+  const fds: number[] = [];
+  for (;;) {
+    const client = lib.accept4(fd);
+    if (client >= 0) {
+      if (fds.length > 1_000_000) return { fds, ok: false };
+      fds.push(client);
+      continue;
+    }
+    const err = lib.errno();
+    if (err === EINTR) continue;
+    if (err === EAGAIN) break;
+    return { fds, ok: false };
+  }
+  if (lib.shutdown(fd) !== 0) {
+    const err = lib.errno();
+    if (err !== ENOTCONN && err !== EBADF) return { fds, ok: false };
+  }
+  return { fds, ok: true };
+}
+
+function adopt(server: http.Server, fd: number) {
+  try {
+    const socket = new net.Socket({ fd, allowHalfOpen: true });
+    socket.setNoDelay(true);
+    track(socket);
+    server.emit("connection", socket);
+  } catch {
+    state.dropped++;
+    try {
+      fs.closeSync(fd);
+    } catch {
+      // The socket owns the fd once net.Socket has taken it.
+    }
+  }
+}
+
 function holdIdleSweep(server: http.Server) {
   if (originalCloseIdle.has(server)) return;
   const orig = server.closeIdleConnections.bind(server);
@@ -172,18 +338,19 @@ function guardNextClose(server: http.Server) {
   if (originalClose.has(server)) return;
   const orig = server.close.bind(server) as (cb?: (err?: Error) => void) => void;
   originalClose.set(server, orig);
-  // Next's own SIGTERM handler calls server.close(), which resets the accept queue
-  // and closeIdleConnections(). Send that call through the same hold + yield.
+  // Next's SIGTERM handler calls server.close() synchronously, which resets the
+  // kernel queue. Seize that queue first, and do not defer the unlisten.
   server.close = ((cb?: (err?: Error) => void) => {
     state.holdIdleSweep = true;
-    void acceptQueued([server]).then(() => {
-      backfill(server);
-      try {
-        orig(cb);
-      } catch (err) {
-        if (cb) cb(err instanceof Error ? err : undefined);
-      }
-    });
+    const seized = seizeAcceptQueue(server);
+    if (!seized.ok) state.queueDrainFailed = true;
+    try {
+      orig(cb);
+    } catch (err) {
+      if (cb) cb(err instanceof Error ? err : undefined);
+    }
+    for (const fd of seized.fds) adopt(server, fd);
+    backfill(server);
     return server;
   }) as http.Server["close"];
 }
@@ -204,29 +371,6 @@ function watchServer(server: http.Server) {
     });
   });
   backfill(server);
-}
-
-/**
- * SIGTERM can run before this poll's accept callbacks. server.close() then resets
- * the kernel queue and those sockets die with ECONNRESET, never reaching a handler.
- * Keep polling until the number of accept()ed sockets stops growing.
- */
-async function acceptQueued(servers: http.Server[]): Promise<void> {
-  // A single stable read is not enough under CPU contention: the accept queue
-  // pauses between polls, and closing then resets the sockets still queued.
-  const earliest = Date.now() + 40;
-  const cap = earliest + 800;
-  let previous = -1;
-  let stable = 0;
-  while (Date.now() < cap) {
-    await new Promise<void>((resolve) => setImmediate(resolve));
-    let count = 0;
-    for (const server of servers) count += acceptedSockets(server).length;
-    if (count === previous) stable++;
-    else stable = 0;
-    previous = count;
-    if (Date.now() >= earliest && stable >= 3) return;
-  }
 }
 
 /** Accepted, mid-response, or holding bytes of a request that has not finished. */
@@ -295,22 +439,31 @@ async function onSigterm(servers: http.Server[], options: ShutdownOptions) {
   state.holdIdleSweep = true;
   // Client aborts from before this signal are not a failed drain.
   state.dropped = 0;
+  state.queueDrainFailed = false;
   const drainMs = options.drainMs != null && Number.isFinite(options.drainMs) && options.drainMs > 0 ? options.drainMs : shutdownDrainMs();
   const deadline = Date.now() + drainMs;
-  // server.close() resets the kernel accept queue. Sockets the client already
-  // connected, but Node has not emitted 'connection' for, die with ECONNRESET
-  // and never reach a handler. Let that queue become connection events first.
-  await acceptQueued(servers);
-  for (const server of servers) backfill(server);
+  // The C handler may already have accept()ed the kernel queue and refused new
+  // handshakes, including while this thread was inside a synchronous chunk of
+  // Next. JS cannot do that: it only runs when the event loop turns.
+  const native = loadNative();
+  const seized =
+    native?.seized() && servers[0]
+      ? [{ server: servers[0], fds: native.take(), ok: native.ok() }]
+      : servers.map((server) => ({ server, ...seizeAcceptQueue(server) }));
+  if (seized.some((item) => !item.ok)) state.queueDrainFailed = true;
   for (const server of servers) stopAccepting(server);
   options.onStoppedAccepting?.();
   if (process.env.SHUTDOWN_TEST_SLOW_MS) process.stdout.write("sho unlistened\n");
+  for (const item of seized) {
+    for (const fd of item.fds) adopt(item.server, fd);
+  }
+  for (const server of servers) backfill(server);
   const quiet = await waitForSockets(deadline);
   state.holdIdleSweep = false;
   for (const server of servers) closeIdle(server);
   // closeIdleConnections destroys sockets on a later turn; count those drops too.
   await sleep(0);
-  const clean = quiet && state.dropped === 0 && inFlight() === 0;
+  const clean = quiet && state.dropped === 0 && inFlight() === 0 && !state.queueDrainFailed;
   try {
     await (options.disconnect ?? disconnectPrisma)();
   } catch (err) {
@@ -338,4 +491,28 @@ export function installGracefulShutdown(options: ShutdownOptions = {}) {
   process.on("SIGTERM", () => {
     void onSigterm(servers, options);
   });
+  // Installed last so it replaces Node's handler. The C handler accept()s and
+  // shutdown(SHUT_RD)s before it returns, including while JS is busy. A helper
+  // thread does not: on 2 vCPU it was still waiting for a core at +16ms.
+  armNative(servers, options);
+}
+
+function armNative(servers: http.Server[], options: ShutdownOptions) {
+  const native = loadNative();
+  if (!native) return;
+  const armOne = (server: http.Server) => {
+    const fd = listenFd(server);
+    if (fd == null) return;
+    const wakeFd = native.arm(fd);
+    if (wakeFd < 0 || wakeSocket) return;
+    wakeSocket = new net.Socket({ fd: wakeFd });
+    wakeSocket.on("data", () => {
+      void onSigterm(servers, options);
+    });
+    wakeSocket.unref();
+  };
+  for (const server of servers) {
+    if (server.listening) armOne(server);
+    else server.once("listening", () => armOne(server));
+  }
 }

@@ -105,6 +105,30 @@ function writeRequest(socket: net.Socket, port: number) {
   socket.write(`GET /slow HTTP/1.1\r\nHost: 127.0.0.1:${port}\r\nConnection: close\r\n\r\n`);
 }
 
+function probe(port: number): Promise<"refused" | "open"> {
+  return new Promise((resolve) => {
+    const socket = net.connect({ port, host: "127.0.0.1" });
+    const timer = setTimeout(() => {
+      socket.destroy();
+      resolve("refused");
+    }, 300);
+    socket.once("connect", () => {
+      clearTimeout(timer);
+      socket.destroy();
+      resolve("open");
+    });
+    socket.once("error", () => {
+      clearTimeout(timer);
+      resolve("refused");
+    });
+  });
+}
+
+function probeAt(port: number, t0: number, at: number): Promise<"refused" | "open"> {
+  const wait = Math.max(0, t0 + at - Date.now());
+  return new Promise((resolve) => setTimeout(() => resolve(probe(port)), wait));
+}
+
 describe("shutdownDrainMs", () => {
   it("uses 15s when the env var is missing or outside 10–25s", () => {
     expect(shutdownDrainMs({})).toBe(DEFAULT_DRAIN_MS);
@@ -257,6 +281,63 @@ describe("SIGTERM drain", () => {
       const outcome = result.stdout.split("\n").filter((line) => line.startsWith("graceful shutdown:"));
       expect(outcome).toEqual([CLEAN_LOG]);
       expect(result.stdout.indexOf("prisma disconnected")).toBeLessThan(result.stdout.indexOf(CLEAN_LOG));
+    } finally {
+      stop(proc.child);
+    }
+  });
+
+  it("refuses connections at 16ms and 143ms after SIGTERM", async () => {
+    const proc = startChild({ DELAY_MS: "800", DRAIN_MS: "8000" });
+    try {
+      const ready = await proc.waitFor(/ready (\d+)/);
+      const port = Number(ready[1]);
+      const sockets = await Promise.all(Array.from({ length: 6 }, () => openSocket(port)));
+      const responses = Promise.all(sockets.map((socket) => expectResponse(socket)));
+      for (const socket of sockets) writeRequest(socket, port);
+      await proc.waitFor(/hit/);
+      const t0 = Date.now();
+      proc.child.kill("SIGTERM");
+      const probes = await Promise.all([probeAt(port, t0, 16), probeAt(port, t0, 143)]);
+      expect(probes).toEqual(["refused", "refused"]);
+      const settled = await responses;
+      expect(settled).toHaveLength(6);
+      for (const response of settled) {
+        expect(response.status).toBe(200);
+        expect(response.body).toContain("done");
+      }
+      const result = await proc.exited;
+      expect(result.code).toBe(0);
+      expect(result.stdout).toContain(CLEAN_LOG);
+      expect(result.stdout).not.toContain(TIMEOUT_LOG);
+    } finally {
+      stop(proc.child);
+    }
+  });
+
+  it("finishes 40 sockets that were only in the kernel queue while the loop was blocked", async () => {
+    const proc = startChild({ DELAY_MS: "200", DRAIN_MS: "8000", SPIN_MS: "400", SHUTDOWN_TEST_SLOW_MS: "1" });
+    try {
+      const ready = await proc.waitFor(/ready (\d+)/);
+      const port = Number(ready[1]);
+      const spin = fetch(`http://127.0.0.1:${port}/spin`).then(async (res) => ({ status: res.status, body: await res.text() }));
+      await proc.waitFor(/spin/);
+      const sockets = await Promise.all(Array.from({ length: 40 }, () => openSocket(port)));
+      const responses = Promise.all(sockets.map((socket) => expectResponse(socket)));
+      for (const socket of sockets) writeRequest(socket, port);
+      proc.child.kill("SIGTERM");
+      await proc.waitFor(/sho unlistened/);
+      expect(await probe(port)).toBe("refused");
+      const settled = await responses;
+      expect(settled).toHaveLength(40);
+      for (const response of settled) {
+        expect(response.status).toBe(200);
+        expect(response.body).toContain("done");
+      }
+      expect(await spin).toEqual({ status: 200, body: "done" });
+      const result = await proc.exited;
+      expect(result.code).toBe(0);
+      expect(result.stdout).toContain(CLEAN_LOG);
+      expect(result.stdout).not.toContain(TIMEOUT_LOG);
     } finally {
       stop(proc.child);
     }
