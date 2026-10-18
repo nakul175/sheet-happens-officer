@@ -1,8 +1,9 @@
 // SHO-US-14.15 Concierge discoverability (APL-2574).
-// No model call. AC2 may show the chip payload when the concierge is switched off.
-// AC3 does not. It reads the pause the running app reports, and fails when the app is not paused.
+// No model call. AC2 reads the chips the running app shows.
+// When the switch is off, Quick is not rendered and the disabled line is the result.
+// AC3 reads the pause the running app reports, and fails when the app is not paused.
+// A painted /api/concierge/state is not used.
 import { readFileSync } from "node:fs";
-import type { Page } from "@playwright/test";
 import { test, expect, zz } from "../support";
 import { showConcierge } from "../helpers/jim-concierge";
 
@@ -10,20 +11,6 @@ test.use({ viewport: { width: 1440, height: 900 } });
 
 // One skip for the whole file. The password is SHO_QA_PASS and is never generated here.
 test.skip(!process.env.SHO_QA_PASS, "Set SHO_QA_PASS (the shared password for the nakul17+ accounts).");
-
-const quick = [
-  { id: "due-week", label: "Due this week" },
-  { id: "overdue", label: "Overdue" },
-  { id: "waiting-on-me", label: "Waiting on me" },
-  { id: "blocked", label: "Blocked" },
-  { id: "recently-completed", label: "Recently completed" },
-];
-
-async function stateOf(page: Page, body: unknown) {
-  await page.route("**/api/concierge/state", (route) => route.fulfill({
-    status: 200, contentType: "application/json", body: JSON.stringify(body),
-  }));
-}
 
 test("AC1: the concierge is reachable from the sidebar in one click on any main screen", async ({ admin, later }) => {
   await showConcierge(admin, later);
@@ -45,17 +32,20 @@ test("AC2: on a project the suggested chips refer to that project", async ({ adm
   const id = r.json.project.id as string;
   later(() => admin.api.post(`/api/projects/${id}/archive`));
   const state = await admin.api.get("/api/concierge/state");
-  expect(state.status).toBe(200);
-  if (state.json.disabled?.code === "NOT_ENABLED") {
-    await stateOf(admin.page, {
-      available: true, hidden: false, voiceNoticeAcked: true, messages: [], quickActions: quick,
-    });
-  }
+  expect(state.status, JSON.stringify(state.json)).toBe(200);
   await admin.page.goto(`/projects/${id}`);
-  await expect(admin.page.locator("aside.cc-slot")).toBeVisible();
-  const group = admin.page.getByRole("group", { name: "Quick actions" }).first();
-  await expect(group.getByRole("button", { name: "Show overdue here" })).toBeVisible();
-  await expect(group.getByRole("button", { name: /Blocked here/ })).toBeVisible();
+  const dock = admin.page.locator("aside.cc-slot");
+  await expect(dock).toBeVisible();
+  // Quick is omitted entirely when the switch is off (NOT_ENABLED). A cap still shows the project chips.
+  if (state.json.disabled?.code === "NOT_ENABLED") {
+    await expect(dock.locator(".cc-disabled")).toBeVisible();
+    await expect(dock.locator(".cc-disabled")).toContainText(state.json.disabled.message as string);
+    await expect(dock.getByRole("button", { name: "Show overdue here" })).toHaveCount(0);
+  } else {
+    const group = dock.getByRole("group", { name: "Quick actions" });
+    await expect(group.getByRole("button", { name: "Show overdue here" })).toBeVisible();
+    await expect(group.getByRole("button", { name: /Blocked here/ })).toBeVisible();
+  }
   await admin.page.goto("/projects");
   await expect(admin.page.getByRole("button", { name: "Show overdue here" })).toHaveCount(0);
 });

@@ -1,16 +1,15 @@
 // SHO-US-8.5 Undo from the chat (APL-2514).
-// One test per acceptance criterion. Confirm and Undo on a concierge card call the same undo as the screen
-// (undoAction). These tests drive that undo on staging with ZZ-TEST tasks. A painted card or toast is not
-// a result, and this file does not post /api/concierge/messages.
-// AC6 cannot age a stored message. The 30-day refusal is read from the source (@static), not from a painted button.
+// The live checks confirm a concierge card and read the thread. They skip, via requireModel, when the switch
+// is off, and they do not post /api/concierge/messages in that case. A painted card is not a result.
+// AC6 cannot age a stored message. The 30-day refusal is read from the source (@static).
 import { readFileSync } from "node:fs";
 import { test, expect, zz } from "../support";
 import { newProject, newTask } from "../g2";
-import { cleanChat } from "../helpers/jim-http";
-import { dueIn, showConcierge, taskOf } from "../helpers/jim-concierge";
+import { chatMessages, cleanChat } from "../helpers/jim-http";
+import { ask, cardOf, dueIn, postJson, requireModel, showConcierge, taskOf } from "../helpers/jim-concierge";
 import { editTask, notices } from "../helpers/claude-a";
 
-test.describe.configure({ timeout: 90_000 });
+test.describe.configure({ timeout: 150_000 });
 test.use({ viewport: { width: 1440, height: 900 } });
 
 // One skip for the whole file. The password is SHO_QA_PASS and is never generated here.
@@ -19,23 +18,34 @@ test.skip(!process.env.SHO_QA_PASS, "Set SHO_QA_PASS (the shared password for th
 const read = (path: string) => readFileSync(path, "utf8");
 
 test("AC1: Undo puts a concierge move back to the earlier date and the thread says so", async ({ admin, later }) => {
+  await requireModel(admin);
   await showConcierge(admin, later);
   await cleanChat(admin, later);
   const project = await newProject(admin, later, { label: "us85-undo" });
   const title = zz("undo-me");
   const due = dueIn(4);
   const id = await newTask(admin, project.id, { title, assigneeId: admin.user.id, dueDate: due });
-  const moved = dueIn(10);
-  const edited = await editTask(admin, id, { dueDate: moved });
-  expect(edited.status, JSON.stringify(edited.json)).toBe(200);
-  expect(edited.headers["x-undo-id"], "the move is undoable").toBeTruthy();
-  expect((await taskOf(admin, id)).dueDate).toBe(moved);
-  const back = await admin.api.post(`/api/actions/${edited.headers["x-undo-id"]}/undo`, {});
+  const asked = await ask(admin, `Move "${title}" to Monday.`);
+  expect(asked.status, JSON.stringify(asked.json)).toBe(200);
+  const card = cardOf(asked.messages);
+  expect(card?.canConfirm, JSON.stringify(asked.messages)).toBe(true);
+  expect((await taskOf(admin, id)).dueDate, "nothing is written before Confirm").toBe(due);
+  const done = await postJson(admin, `/api/concierge/cards/${card!.id}/confirm`, {});
+  expect(done.status, JSON.stringify(done.json)).toBe(200);
+  expect((await taskOf(admin, id)).dueDate).not.toBe(due);
+  const back = await postJson(admin, `/api/concierge/cards/${card!.id}/undo`, {});
   expect(back.status, JSON.stringify(back.json)).toBe(200);
   expect((await taskOf(admin, id)).dueDate).toBe(due);
+  const thread = (await chatMessages(admin)).map((m) => m.text).join("\n");
+  expect(thread).toContain("Undone");
+  expect(thread).toContain("put back");
+  const p = admin.page;
+  await p.goto(`/projects/${project.id}`);
+  await expect(p.locator("aside.cc-slot")).toContainText("Undone");
+  await expect(p.locator("aside.cc-slot")).toContainText("put back");
 });
 
-// @static: the thread copy is in the source. The undo above is the live check.
+// @static: the thread copy is in the source. The card undo above is the live check.
 test("AC1 source: undo of a card calls undoAction and the thread says it was put back", { tag: "@static" }, () => {
   const cards = read("src/lib/concierge/cards.ts");
   expect(cards).toContain("await undoAction(user, r.id, anyway)");
@@ -43,20 +53,27 @@ test("AC1 source: undo of a card calls undoAction and the thread says it was put
 });
 
 test("AC2: Undo warns when the task changed since, and overwrites nothing", async ({ admin, member, later }) => {
+  await requireModel(admin);
   await showConcierge(admin, later);
   await cleanChat(admin, later);
   const project = await newProject(admin, later, { label: "us85-conflict", members: [{ who: member, role: "EDITOR" }] });
   const title = zz("conflict");
   const due = dueIn(3);
   const id = await newTask(admin, project.id, { title, assigneeId: admin.user.id, dueDate: due });
-  const first = await editTask(admin, id, { dueDate: dueIn(8) });
-  expect(first.status, JSON.stringify(first.json)).toBe(200);
+  const asked = await ask(admin, `Move "${title}" to Monday.`);
+  expect(asked.status, JSON.stringify(asked.json)).toBe(200);
+  const card = cardOf(asked.messages);
+  expect(card?.canConfirm, JSON.stringify(asked.messages)).toBe(true);
+  const done = await postJson(admin, `/api/concierge/cards/${card!.id}/confirm`, {});
+  expect(done.status, JSON.stringify(done.json)).toBe(200);
   const patched = dueIn(12);
   expect((await editTask(member, id, { dueDate: patched })).status).toBe(200);
-  const refused = await admin.api.post(`/api/actions/${first.headers["x-undo-id"]}/undo`, {});
+  const refused = await postJson(admin, `/api/concierge/cards/${card!.id}/undo`, {});
   expect(refused.status, JSON.stringify(refused.json)).toBe(409);
   expect(refused.json.needsConfirm).toBe("conflict");
   expect((await taskOf(admin, id)).dueDate).toBe(patched);
+  const returned = (refused.json.messages as { text?: string }[] | undefined) ?? [];
+  if (returned.length) expect(returned.map((m) => m.text ?? "").join("\n")).not.toContain("put back");
 });
 
 // @static: the conflict check is in the source. The 409 above is the live check.
@@ -65,20 +82,30 @@ test("AC2 source: undo asks before it overwrites a task that changed", { tag: "@
 });
 
 test("AC3: when the action notified someone, the thread says the notice cannot be unsent", async ({ admin, member, later }) => {
+  await requireModel(admin);
   await showConcierge(admin, later);
   await cleanChat(admin, later);
   const project = await newProject(admin, later, { label: "us85-notice", members: [{ who: member, role: "EDITOR" }] });
   const title = zz("notice");
   const id = await newTask(admin, project.id, { title, assigneeId: admin.user.id });
   const before = (await notices(member)).map((n) => n.id);
-  const edited = await editTask(admin, id, { assigneeId: member.user.id });
-  expect(edited.status, JSON.stringify(edited.json)).toBe(200);
+  const asked = await ask(admin, `Assign "${title}" to the person with email ${member.user.email}.`);
+  expect(asked.status, JSON.stringify(asked.json)).toBe(200);
+  const card = cardOf(asked.messages);
+  expect(card?.canConfirm, JSON.stringify(asked.messages)).toBe(true);
+  const done = await postJson(admin, `/api/concierge/cards/${card!.id}/confirm`, {});
+  expect(done.status, JSON.stringify(done.json)).toBe(200);
+  expect((await taskOf(admin, id)).assignee.id).toBe(member.user.id);
   const sent = (await notices(member)).find((n) => !before.includes(n.id) && n.text.includes(title));
   expect(sent, "the assignee was notified").toBeTruthy();
-  const back = await admin.api.post(`/api/actions/${edited.headers["x-undo-id"]}/undo`, {});
+  const back = await postJson(admin, `/api/concierge/cards/${card!.id}/undo`, {});
   expect(back.status, JSON.stringify(back.json)).toBe(200);
   expect((await taskOf(admin, id)).assignee.id).toBe(admin.user.id);
   expect((await notices(member)).some((n) => n.id === sent!.id), "the notice is still there after Undo").toBe(true);
+  const thread = (await chatMessages(admin)).map((m) => m.text).join("\n");
+  expect(thread).toContain("cannot be unsent");
+  await admin.page.goto(`/projects/${project.id}`);
+  await expect(admin.page.locator("aside.cc-slot")).toContainText("cannot be unsent");
 });
 
 // @static: the unsent-notice copy is in the source. The notice that remains above is the live check.
@@ -88,26 +115,37 @@ test("AC3 source: the thread says a notice cannot be unsent", { tag: "@static" }
 });
 
 test("AC4: Undo reverses every change on a card, and the thread lists them", async ({ admin, later }) => {
+  await requireModel(admin);
   await showConcierge(admin, later);
   await cleanChat(admin, later);
   const project = await newProject(admin, later, { label: "us85-whole" });
   const title = zz("whole");
   const due = dueIn(2);
-  const id = await newTask(admin, project.id, { title, assigneeId: admin.user.id, dueDate: due });
-  const dueEdit = await editTask(admin, id, { dueDate: dueIn(9) });
-  const priEdit = await editTask(admin, id, { priority: "HIGH" });
-  expect(dueEdit.status, JSON.stringify(dueEdit.json)).toBe(200);
-  expect(priEdit.status, JSON.stringify(priEdit.json)).toBe(200);
-  for (const row of [priEdit, dueEdit]) {
-    const back = await admin.api.post(`/api/actions/${row.headers["x-undo-id"]}/undo`, {});
-    expect(back.status, JSON.stringify(back.json)).toBe(200);
-  }
-  const task = await taskOf(admin, id);
-  expect(task.dueDate).toBe(due);
-  expect(task.priority).toBe("MEDIUM");
+  const id = await newTask(admin, project.id, { title, assigneeId: admin.user.id, dueDate: due, priority: "MEDIUM" });
+  const before = await taskOf(admin, id);
+  const asked = await ask(admin, `Set the priority of "${title}" to high and move it to Monday.`);
+  expect(asked.status, JSON.stringify(asked.json)).toBe(200);
+  const card = cardOf(asked.messages);
+  expect(card?.canConfirm, JSON.stringify(asked.messages)).toBe(true);
+  const described = JSON.stringify(card).toLowerCase();
+  expect(described, "the card covers the priority").toMatch(/high|priority/);
+  expect(described, "the card covers the date").toMatch(/monday|due/);
+  const done = await postJson(admin, `/api/concierge/cards/${card!.id}/confirm`, {});
+  expect(done.status, JSON.stringify(done.json)).toBe(200);
+  const moved = await taskOf(admin, id);
+  expect(moved.dueDate !== before.dueDate || moved.priority !== before.priority, "confirm wrote the card").toBe(true);
+  const back = await postJson(admin, `/api/concierge/cards/${card!.id}/undo`, {});
+  expect(back.status, JSON.stringify(back.json)).toBe(200);
+  const restored = await taskOf(admin, id);
+  expect(restored.dueDate).toBe(before.dueDate);
+  expect(restored.priority).toBe(before.priority);
+  const thread = (await chatMessages(admin)).map((m) => m.text).join("\n");
+  expect(thread).toContain("Reversed");
+  await admin.page.goto(`/projects/${project.id}`);
+  await expect(admin.page.locator("aside.cc-slot")).toContainText("Reversed");
 });
 
-// @static: the reversed-line copy is in the source. The two undos above are the live check.
+// @static: the reversed-line copy is in the source. The card undo above is the live check.
 test("AC4 source: undo lists every reversed change on the card", { tag: "@static" }, () => {
   const cards = read("src/lib/concierge/cards.ts");
   expect(cards).toContain("const lines = rs.result.summary.map((x) => `- Reversed: ${x}`)");
@@ -115,18 +153,40 @@ test("AC4 source: undo lists every reversed change on the card", { tag: "@static
 });
 
 test("AC5: a member-removal card says it cannot be undone, and the done message has no Undo", async ({ admin, member, later }) => {
+  await requireModel(admin);
   await showConcierge(admin, later);
   await cleanChat(admin, later);
   const project = await newProject(admin, later, { label: "us85-irrev", members: [{ who: member, role: "EDITOR" }] });
   const title = zz("handover");
   const id = await newTask(admin, project.id, { title, assigneeId: member.user.id });
-  expect((await admin.api.del(`/api/projects/${project.id}/members/${member.user.id}?handoverTo=${admin.user.id}`)).status).toBe(204);
-  const members = (await admin.api.get(`/api/projects/${project.id}`)).json.project.members as { userId: string }[];
-  expect(members.some((m) => m.userId === member.user.id)).toBe(false);
+  const asked = await ask(admin, `Remove the person with email ${member.user.email} from ${project.name}.`);
+  expect(asked.status, JSON.stringify(asked.json)).toBe(200);
+  const card = cardOf(asked.messages);
+  expect(card?.irreversible, JSON.stringify(asked.messages)).toBe(true);
+  expect(card?.handover?.some((h) => h.taskId === id && h.taskTitle === title)).toBe(true);
+  const p = admin.page;
+  await p.goto(`/projects/${project.id}`);
+  const dock = p.locator("aside.cc-slot");
+  await expect(dock.locator(".cc-warn")).toContainText("This can't be undone");
+  const refused = await postJson(admin, `/api/concierge/cards/${card!.id}/confirm`, {});
+  expect(refused.status, JSON.stringify(refused.json)).toBe(400);
+  const still = (await admin.api.get(`/api/projects/${project.id}`)).json.project.members as { userId: string }[];
+  expect(still.some((m) => m.userId === member.user.id)).toBe(true);
+  const done = await postJson(admin, `/api/concierge/cards/${card!.id}/confirm`, {
+    acknowledge: true,
+    handover: [{ taskId: id, assigneeId: admin.user.id }],
+  });
+  expect(done.status, JSON.stringify(done.json)).toBe(200);
+  const result = (done.json.messages as { result?: { undoable?: boolean } }[])[0]?.result;
+  expect(result?.undoable).toBe(false);
   expect((await taskOf(admin, id)).assignee.id).toBe(admin.user.id);
+  const gone = (await admin.api.get(`/api/projects/${project.id}`)).json.project.members as { userId: string }[];
+  expect(gone.some((m) => m.userId === member.user.id)).toBe(false);
+  await p.reload();
+  await expect(dock.getByRole("button", { name: "Undo" })).toHaveCount(0);
 });
 
-// @static: the irreversible copy is in the source. The removal above is the live check.
+// @static: the irreversible copy is in the source. The removal card above is the live check.
 test("AC5 source: a member-removal card cannot be undone", { tag: "@static" }, () => {
   const changes = read("src/lib/concierge/changes.ts");
   expect(changes).toContain("irreversible = tasks.length > 0");

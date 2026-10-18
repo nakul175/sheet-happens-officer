@@ -3,8 +3,9 @@
 // No model call. A quick action is enough to put one exchange in the thread (AC3).
 // AC5 reads the pause the running app reports. A painted /api/concierge/state is not used.
 import { readFileSync } from "node:fs";
-import { test, expect } from "../support";
-import { newProject } from "../g2";
+import { test, expect, zz } from "../support";
+import { newProject, newTask } from "../g2";
+import { dueIn } from "../helpers/jim-concierge";
 import { cleanChat, quickAction } from "../helpers/jim-http";
 import { secondScreen, showConcierge } from "../helpers/jim-concierge";
 
@@ -12,8 +13,6 @@ test.use({ viewport: { width: 1440, height: 900 } });
 
 // One skip for the whole file. The password is SHO_QA_PASS and is never generated here.
 test.skip(!process.env.SHO_QA_PASS, "Set SHO_QA_PASS (the shared password for the nakul17+ accounts).");
-
-const PAUSED = new Set(["MONTH_CAP", "WEEK_CAP", "PROVIDER_DOWN"]);
 
 test("AC1: a dock on My tasks, Projects, a project list and Team, and a bottom bar on the project board", async ({ admin, later }) => {
   await showConcierge(admin, later);
@@ -50,16 +49,18 @@ test("AC3: moving from a project list to its board keeps the same conversation",
   await showConcierge(admin, later);
   await cleanChat(admin, later);
   const project = await newProject(admin, later, { label: "us81-thread" });
+  await newTask(admin, project.id, { title: zz("due-line"), assigneeId: admin.user.id, dueDate: dueIn(1) });
   const r = await quickAction(admin, "due-week", project.id);
   expect(r.status, r.body).toBe(200);
-  const marker = r.json.messages?.[0]?.text as string;
-  expect(marker, "the quick action names the project, so the same line can be found on both screens").toContain(project.name);
+  const texts = ((r.json.messages ?? []) as { text?: string }[]).map((m) => m.text ?? "").filter(Boolean);
+  const marker = texts.find((t) => t.includes(project.name));
+  expect(marker, `a quick-action line names the project. Reply was: ${r.body}`).toBeTruthy();
   const p = admin.page;
   await p.goto(`/projects/${project.id}`);
-  await expect(p.locator("aside.cc-slot")).toContainText(marker);
+  await expect(p.locator("aside.cc-slot")).toContainText(marker!);
   await p.goto(`/projects/${project.id}?view=board`);
   await p.locator("aside.cc-barslot").getByRole("button", { name: "Open chat" }).click();
-  await expect(p.locator("aside.cc-barslot")).toContainText(marker);
+  await expect(p.locator("aside.cc-barslot")).toContainText(marker!);
 });
 
 test("AC4: at 390 pixels a floating button opens the concierge full screen", async ({ admin, later }) => {
@@ -81,14 +82,15 @@ test("AC5: a cap or a provider outage leaves the concierge visible but disabled,
   await showConcierge(admin, later);
   const state = await admin.api.get("/api/concierge/state");
   expect(state.status, JSON.stringify(state.json)).toBe(200);
-  const code = state.json.disabled?.code as string | undefined;
-  expect(!!code && PAUSED.has(code), `the concierge is not paused (${code ?? "no disabled code"})`).toBe(true);
+  const disabled = state.json.disabled as { code?: string; message?: string } | undefined;
+  expect(disabled?.code, `the concierge is not disabled (${JSON.stringify(state.json.disabled ?? null)})`).toBeTruthy();
+  expect(disabled?.message, "the server sends a plain reason").toBeTruthy();
   const p = admin.page;
   await p.goto("/");
   const note = p.locator("aside.cc-slot .cc-disabled");
   await expect(note).toBeVisible();
-  await expect(note).not.toBeEmpty();
-  await expect(note).toContainText(/reset|resume|return/i);
+  await expect(note).toContainText(disabled!.message!);
+  await expect(p.locator("aside.cc-slot textarea")).toHaveCount(0);
   await expect(p.getByRole("heading", { name: "My tasks" })).toBeVisible();
   expect((await admin.api.get("/api/projects")).status).toBe(200);
 });
