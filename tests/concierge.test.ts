@@ -369,10 +369,15 @@ describe("propose and confirm (8.3)", () => {
     expect(viaChat.map((r) => (r.afterState as { count?: number; handedOver?: number }).count ?? (r.afterState as { handedOver?: number }).handedOver).sort()).toEqual([1, 2, 3]);
     expect(viaChat[2].afterState).toMatchObject({ removed: true, handedOver: 3 });
     // The same removal from the screen (the third editor, all tasks to one taker) writes the same kind of rows.
+    // Read those rows by the member they name. A createdAt cutoff taken with new Date() after the setup tasks
+    // races them: task.created stores a null beforeState, and that timestamp is often the same millisecond as
+    // the clock read, so createdAt >= cutoff includes it and Object.keys throws (SHO-BUG-7 flake).
     for (let i = 0; i < 3; i++) await task(e3, p.id, { title: `E3 ${i}` });
-    const screenSince = new Date();
     expect((await lead.c.del(`/api/projects/${p.id}/members/${e3.id}?handoverTo=${e2.id}`)).status).toBe(204);
-    const viaScreen = await db.actionLog.findMany({ where: { projectId: p.id, channel: "SCREEN", createdAt: { gte: screenSince } }, orderBy: [{ createdAt: "asc" }, { id: "asc" }] });
+    const viaScreen = await db.actionLog.findMany({
+      where: { projectId: p.id, channel: "SCREEN", targetId: e3.id, action: { in: ["tasks.reassigned", "member.removed"] } },
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+    });
     expect(shape(viaChat)).toEqual([shape(viaScreen)[0], shape(viaScreen)[0], shape(viaScreen)[1]]);
     expect(viaScreen[1].afterState).toMatchObject({ removed: true, handedOver: 3 });
   });
