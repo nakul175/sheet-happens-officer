@@ -1,0 +1,238 @@
+# Builds one release tarball per commit and deploys that file.
+# Called by deploy.yml (staging) and release.yml (production). Not run on its own.
+name: Ship a release
+
+on:
+  workflow_call:
+    inputs:
+      tier:
+        description: staging or production
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: write
+
+concurrency:
+  group: sho-artifact-${{ github.sha }}
+  cancel-in-progress: false
+
+jobs:
+  gates:
+    name: Test and pack the release
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    outputs:
+      digest: ${{ steps.final.outputs.digest }}
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: sho
+          POSTGRES_PASSWORD: sho
+          POSTGRES_DB: sho_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U sho"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      DATABASE_URL: postgresql://sho:sho@localhost:5432/sho_test?schema=public
+      DIRECT_DATABASE_URL: postgresql://sho:sho@localhost:5432/sho_test?schema=public
+      EMAIL_OUTBOX_DIR: ${{ github.workspace }}/.outbox-ci
+      SUPER_ADMIN_EMAILS: root.test@aplyd.com
+      APP_URL: http://localhost:3100
+      TASKBOARD_URL: http://localhost:3100
+      JOB_SECRET: ci-only-not-a-real-secret-0123
+    steps:
+      - name: Check the tier
+        env:
+          TIER: ${{ inputs.tier }}
+        run: |
+          case "$TIER" in
+            staging|production) ;;
+            *) echo "::error::unknown tier"; exit 1 ;;
+          esac
+
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+      - run: npm run lint
+      - name: Release script checks
+        run: bash deploy/test-release.sh
+
+      - name: Reuse the tarball already built for this commit
+        id: early
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash deploy/resolve-artifact.sh download-if-present
+
+      - name: Apply migrations for the build
+        if: steps.early.outputs.hit != 'true'
+        run: npx prisma migrate deploy
+
+      - name: Build once
+        if: steps.early.outputs.hit != 'true'
+        run: npm run build
+
+      - name: Pack the release tarball
+        if: steps.early.outputs.hit != 'true'
+        run: bash deploy/pack-release.sh
+
+      - name: Store the canonical tarball
+        if: steps.early.outputs.hit != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ github.sha }}
+          path: |
+            dist/sho-release.tar.gz
+            dist/sho-release.tar.gz.sha256
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Use the first tarball built for this commit
+        id: final
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash deploy/resolve-artifact.sh require-canonical
+
+      - name: Record the digest
+        run: |
+          d=$(tr -d '[:space:]' < dist/sho-release.tar.gz.sha256)
+          [ "$d" = "${{ steps.final.outputs.digest }}" ]
+          echo "RELEASE=${GITHUB_SHA}" >> "$GITHUB_ENV"
+          echo "ARTIFACT_SHA256=$d" >> "$GITHUB_ENV"
+          {
+            echo "### Release artifact"
+            echo "- Commit \`$GITHUB_SHA\`"
+            echo "- Digest \`$d\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-this-run
+          path: |
+            dist/sho-release.tar.gz
+            dist/sho-release.tar.gz.sha256
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Test the packed release
+        run: |
+          set -euo pipefail
+          root="${RUNNER_TEMP}/sho-release"
+          rm -rf "$root"
+          mkdir -p "$root"
+          tar -xzf dist/sho-release.tar.gz -C "$root"
+          pushd "$root" >/dev/null
+          npx prisma migrate deploy
+          NODE_ENV=production node node_modules/next/dist/bin/next start -p 3100 -H 127.0.0.1 > "${RUNNER_TEMP}/server.log" 2>&1 &
+          echo $! > "${RUNNER_TEMP}/server.pid"
+          popd >/dev/null
+          ok=0
+          for _ in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:3100/api/health >/dev/null; then ok=1; break; fi
+            sleep 2
+          done
+          [ "$ok" = 1 ] || { echo "packed release did not become healthy"; exit 1; }
+          curl -fsS http://127.0.0.1:3100/api/version > "${RUNNER_TEMP}/version.json"
+          node -e '
+            const j = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+            if (j.sha !== process.env.RELEASE || j.digest !== process.env.ARTIFACT_SHA256) {
+              console.error(JSON.stringify(j));
+              process.exit(1);
+            }
+          ' "${RUNNER_TEMP}/version.json"
+          npm test
+
+      - name: Server log (on failure)
+        if: failure()
+        run: tail -n 200 "${RUNNER_TEMP}/server.log" || true
+
+  deploy-staging:
+    name: Deploy to staging
+    needs: gates
+    if: inputs.tier == 'staging' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      HOST: ${{ vars.DROPLET_HOST || 'app.sheethappensofficer.com' }}
+      HOST_KEY: ${{ vars.DROPLET_HOST_KEY }}
+      DIGEST: ${{ needs.gates.outputs.digest }}
+      DATABASE_URL: ${{ secrets.STAGING_DATABASE_URL }}
+      DIRECT_DATABASE_URL: ${{ secrets.STAGING_DIRECT_DATABASE_URL }}
+      RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      MODEL_DATA_APPROVED: ${{ vars.MODEL_DATA_APPROVED }}
+      MODEL_NAME: ${{ vars.MODEL_NAME }}
+      MONTHLY_CEILING_USD: ${{ vars.MONTHLY_CEILING_USD }}
+      WEEKLY_MESSAGE_CAP: ${{ vars.WEEKLY_MESSAGE_CAP }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-this-run
+      - name: SSH key
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+        run: bash deploy/ci-ssh.sh
+      - name: Release to staging
+        run: bash deploy/push-release.sh staging
+      - name: Email the owner if the release failed
+        if: failure()
+        env:
+          TIER: staging
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: bash deploy/ci-fail-mail.sh
+
+  deploy-production:
+    name: Deploy to production
+    needs: gates
+    if: inputs.tier == 'production' && startsWith(github.ref, 'refs/tags/rel-')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment:
+      name: production
+      url: https://app.sheethappensofficer.com
+    env:
+      HOST: ${{ vars.DROPLET_HOST || 'app.sheethappensofficer.com' }}
+      HOST_KEY: ${{ vars.DROPLET_HOST_KEY }}
+      DIGEST: ${{ needs.gates.outputs.digest }}
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      DIRECT_DATABASE_URL: ${{ secrets.DIRECT_DATABASE_URL }}
+      RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      MODEL_DATA_APPROVED: ${{ vars.MODEL_DATA_APPROVED }}
+      MODEL_NAME: ${{ vars.MODEL_NAME }}
+      MONTHLY_CEILING_USD: ${{ vars.MONTHLY_CEILING_USD }}
+      WEEKLY_MESSAGE_CAP: ${{ vars.WEEKLY_MESSAGE_CAP }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-this-run
+      - name: Check the production environment
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash deploy/check-production-environment.sh
+      - name: SSH key
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+        run: bash deploy/ci-ssh.sh
+      - name: Release to production
+        run: bash deploy/push-release.sh production
+      - name: Email the owner if the release failed
+        if: failure()
+        env:
+          TIER: production
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: bash deploy/ci-fail-mail.sh

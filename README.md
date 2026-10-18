@@ -40,14 +40,25 @@ EMAIL_OUTBOX_DIR=/tmp/sho-outbox SUPER_ADMIN_EMAILS=root.test@aplyd.com APP_URL=
 EMAIL_OUTBOX_DIR=/tmp/sho-outbox TASKBOARD_URL=http://localhost:3100 npm test
 ```
 
-## Deploy (story 9.3)
+## Deploy (story 9.3, process v3 P1 and P2)
 
 One DigitalOcean droplet (Ubuntu 24.04, BLR1) runs the app behind Caddy; DigitalOcean Managed
-Postgres holds the data. Every push to `main` runs `.github/workflows/deploy.yml`: lint, build
-and tests against a throwaway Postgres, then an rsync of the source to
-`/opt/sho/releases/<sha>` and `deploy/release.sh`, which installs, migrates, builds, switches
-the `current` symlink, restarts the service and checks `/api/health`. A failed health check
-puts the previous release back and fails the run (GitHub emails the person who pushed).
+Postgres holds the data. A push to `main` runs `.github/workflows/deploy.yml`, which tests the
+commit and deploys it to **staging only** (`/opt/sho-staging`, `sho-staging` on port 3001).
+It does not write `/etc/sho/app.env` or restart production.
+
+Production deploys from a `rel-*` tag (`.github/workflows/release.yml`) through the GitHub
+environment `production`. That environment is created in repository settings, with required
+reviewer `nakul175` and prevent self-review. CI builds one release tarball and its SHA-256
+per commit; staging and production both install that file. `deploy/release.sh` does not build
+on the droplet. It migrates, switches the `current` symlink, restarts, and checks `/api/health`
+and `/api/version`. A failed health check puts the previous code back. Migrations are
+forward-only. On production, a pending migration is preceded by `pg_dump` of
+`DIRECT_DATABASE_URL`; if the dump fails, the migration does not start.
+
+`/api/version` returns `{ "sha", "digest" }` for the running build. Production `DATABASE_URL`
+is the PgBouncer pool (port 25061, `pgbouncer=true`). `DIRECT_DATABASE_URL` is the direct
+database, used for migrations and the backup.
 
 One-time setup, in order:
 
@@ -61,13 +72,17 @@ One-time setup, in order:
    network** connection string.
 5. In GoDaddy, add an A record `app` → the droplet's IP.
 6. GitHub repository secrets: `SSH_PRIVATE_KEY` (the private half of `sho_deploy`),
-   `DATABASE_URL`, `RESEND_API_KEY` (a Resend key with sending access for
-   `sheethappensofficer.com`). Optional secret: `DIRECT_DATABASE_URL`, the direct (non-PgBouncer)
-   connection string for migrations, needed once `DATABASE_URL` points at PgBouncer; unset, migrations
-   use `DATABASE_URL`. Optional variables: `DROPLET_HOST` (IP, if DNS is not live yet)
-   and `DROPLET_HOST_KEY` (one `ssh-keyscan -t ed25519 <ip>` line, which pins the host key).
-7. Run the workflow (push to `main` or "Run workflow"), then sign up with the Super Admin
-   address and confirm the verification email lands in the inbox, not junk.
+   `STAGING_DATABASE_URL` (the staging database, not the production pool), `RESEND_API_KEY`
+   (a Resend key with sending access for `sheethappensofficer.com`). Optional staging secret:
+   `STAGING_DIRECT_DATABASE_URL`. Production secrets live on the `production` environment, not
+   in the repository: `DATABASE_URL` (PgBouncer, port 25061, `pgbouncer=true`) and
+   `DIRECT_DATABASE_URL` (direct database, required for migrations and the backup), plus
+   `RESEND_API_KEY` if it should differ from the repository secret. Optional variables:
+   `DROPLET_HOST` (IP, if DNS is not live yet) and `DROPLET_HOST_KEY` (one
+   `ssh-keyscan -t ed25519 <ip>` line, which pins the host key).
+7. Run the staging workflow (push to `main` or "Run workflow"). Production ships only when a
+   `rel-*` tag is pushed and the production environment reviewer approves. Then sign up with
+   the Super Admin address and confirm the verification email lands in the inbox, not junk.
 8. Point an external uptime check at `https://app.sheethappensofficer.com/api/health`.
 
 Scheduled jobs (`/etc/cron.d/sho`, IST): `purge-trash` 03:17, `purge-old` 03:37, `purge-chat` 03:47
@@ -75,7 +90,9 @@ Scheduled jobs (`/etc/cron.d/sho`, IST): `purge-trash` 03:17, `purge-old` 03:37,
 next step or no activity for 30 days), `reminders` 08:00, `check`
 08:05. Each run is recorded; a failure or a missed day puts a notice in the Super Admin's
 bell, and the last runs are shown on the Audit log page. Rollback by hand is a redeploy of
-an earlier commit; migrations are forward-only.
+an earlier `rel-*` tag; migrations are forward-only. The droplet needs `postgresql-client`
+(`pg_dump`) before a production migration, and the deploy user needs passwordless sudo to
+restart `sho-staging` the same way it can restart `sho`.
 
 ### Concierge settings (SHO-US-9.1, 9.2)
 
@@ -90,4 +107,4 @@ The concierge sends task text to Anthropic only when the owner switches it on. S
 | `MONTHLY_CEILING_USD` | variable, optional | Default `100`. |
 | `WEEKLY_MESSAGE_CAP` | variable, optional | Default `200` messages per person per week (Monday 00:00 India time). |
 
-Unset values are simply left out of `/etc/sho/app.env`; the deploy still succeeds and the concierge shows "not switched on yet".
+Unset values are simply left out of the environment's `app.env`; the deploy still succeeds and the concierge shows "not switched on yet". Staging writes `/etc/sho-staging/app.env`. Production writes `/etc/sho/app.env`.

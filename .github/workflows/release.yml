@@ -1,0 +1,32 @@
+# Tags rel-* deploy the release tarball already built for that commit to production.
+# A dry-run tag rel-test-* uses this same workflow and the same approval gate.
+#
+# NJ creates the GitHub environment named "production" before the first tag
+# (Settings > Environments). It is not created by this file. Set:
+#   - Required reviewer: nakul175
+#   - Prevent self-review: on
+#   - Deployment branches: allow tags. Do not limit this environment to the main branch,
+#     or a rel-* tag cannot deploy.
+# Environment secrets, same names as today: DATABASE_URL (PgBouncer port 25061,
+# pgbouncer=true), DIRECT_DATABASE_URL (direct database, required), RESEND_API_KEY,
+# and ANTHROPIC_API_KEY if the concierge is on. SSH_PRIVATE_KEY can stay a repository secret.
+name: Release to production
+
+on:
+  push:
+    tags: ["rel-*"]
+
+permissions:
+  contents: read
+  actions: write
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  ship:
+    uses: ./.github/workflows/ship.yml
+    with:
+      tier: production
+    secrets: inherit
