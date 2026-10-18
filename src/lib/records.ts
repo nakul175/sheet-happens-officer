@@ -288,7 +288,8 @@ async function planRecord(row: { action: string; targetId: string; beforeState: 
     case "organisation.created": case "organisation.archived": case "organisation.unarchived": {
       const o = await db.organisation.findUnique({ where: { id } });
       if (!o) throw bad("This organisation no longer exists.");
-      const archive = row.action !== "organisation.unarchived";
+      // Undo reverses the logged action. Creating an organisation is undone by archiving it.
+      const archive = row.action === "organisation.created" || row.action === "organisation.unarchived";
       if (archive === !!o.archivedAt) throw bad(archive ? "This organisation is already archived." : "This organisation is not archived any more.");
       return { conflicts: [], apply: async (tx) => { await tx.organisation.update({ where: { id }, data: { archivedAt: archive ? new Date() : null } }); } };
     }
