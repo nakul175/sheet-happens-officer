@@ -3,7 +3,7 @@
 // Projects, deals and organisations are ZZ-TEST and archived afterwards.
 // Pam left no qa:TC cases on this issue.
 import { test, expect, zz } from "../support";
-import { newProject, ymd, type Who } from "../g2";
+import { newProject, type Who } from "../g2";
 import { pipelines, type Pipe } from "../helpers/deal-board";
 import { createDeal, createOrg, dealBody, projectOf } from "../helpers/claude-a";
 import { cast, gateFile, noSecret } from "../helpers/qa-alias";
