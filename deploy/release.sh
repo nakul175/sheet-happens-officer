@@ -31,6 +31,8 @@ set -a
 # shellcheck disable=SC1091
 . /etc/sho/local.env
 set +a
+# Migrations go to DIRECT_DATABASE_URL (bypassing PgBouncer); until it is set, use DATABASE_URL (APL-2685).
+export DIRECT_DATABASE_URL="${DIRECT_DATABASE_URL:-$DATABASE_URL}"
 export NODE_ENV=production NODE_OPTIONS=--max-old-space-size=3072
 
 log "installing packages"

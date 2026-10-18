@@ -13,7 +13,6 @@ const eslintConfig = defineConfig([
     "build/**",
     "next-env.d.ts",
     "deploy/**", // ops scripts run on the server with plain node
-    "tests/e2e/**", // Playwright story specs: their fixtures are not React hooks and the API replies are untyped JSON
   ]),
 ]);
 
