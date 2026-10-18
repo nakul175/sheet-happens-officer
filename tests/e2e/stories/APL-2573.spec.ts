@@ -1,9 +1,9 @@
 // SHO-US-14.14 Readable activity (APL-2573). AC3 needs the optional Member account.
-import { test, expect, zz } from "../support";
+import { test, expect, zz, type Who, type Later } from "../support";
 
 const year = new Date(Date.now() + 5.5 * 3600_000).getUTCFullYear();
 
-async function seed(admin: any, later: any, member?: any) {
+async function seed(admin: Who, later: Later, member?: Who) {
   const r = await admin.api.post("/api/projects", { name: zz("activity"), leaderId: admin.user.id });
   expect(r.status).toBe(201);
   const id = r.json.project.id as string;
@@ -12,7 +12,7 @@ async function seed(admin: any, later: any, member?: any) {
   return id;
 }
 type Row = { who: string; what: string; when: string; via: string; undo: string };
-const rows = async (a: any, id: string) => (await a.api.get(`/api/projects/${id}/activity`)).json.items as Row[];
+const rows = async (a: Who, id: string) => (await a.api.get(`/api/projects/${id}/activity`)).json.items as Row[];
 
 test("AC1: no activity row has a database id, a field name or an ISO timestamp", async ({ admin, later }) => {
   const id = await seed(admin, later);

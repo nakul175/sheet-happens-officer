@@ -4,23 +4,23 @@
 // Data: every project and task is named "ZZ-TEST ..."; the person created for AC5 is "ZZ-TEST ..." at example.invalid (no inbox) and is
 // deactivated afterwards. AC2 briefly makes the Member an Admin and puts the role back in a finally block.
 import { readFileSync } from "node:fs";
-import { test, expect, zz, RUN, login } from "../support";
+import { test, expect, zz, RUN, login, type Who } from "../support";
 import { getTask } from "../g2";
 
-async function proj(admin: any, label: string, later: (f: () => Promise<unknown>) => void) {
+async function proj(admin: Who, label: string, later: (f: () => Promise<unknown>) => void) {
   const r = await admin.api.post("/api/projects", { name: zz(label), leaderId: admin.user.id });
   expect(r.status, JSON.stringify(r.json)).toBe(201);
   const id = r.json.project.id as string;
   later(() => admin.api.post(`/api/projects/${id}/archive`));
   return id;
 }
-const mk = async (admin: any, p: string, title: string, extra: Record<string, unknown> = {}) => {
+const mk = async (admin: Who, p: string, title: string, extra: Record<string, unknown> = {}) => {
   const r = await admin.api.post(`/api/projects/${p}/tasks`, { title, ...extra });
   expect(r.status, JSON.stringify(r.json)).toBe(201);
   return r.json.task.id as string;
 };
 type Row = { id: string; at: string; who: string | null; email: string | null; event: string; ip: string | null; channel: string; target: string | null };
-const audit = async (admin: any, q: string) => (await admin.api.get(`/api/audit?${q}`)).json.items as Row[];
+const audit = async (admin: Who, q: string) => (await admin.api.get(`/api/audit?${q}`)).json.items as Row[];
 
 test("AC1: listed events each leave a row with time, actor, event, target and channel", async ({ admin, member, later }) => {
   // Remember the rows that exist now, so a row left by an earlier run cannot satisfy this test.
