@@ -1,8 +1,8 @@
 // SHO-US-14.8 Inline editing in lists (Linear APL-2567).
 // Choosing a different assignee needs a second worker in the project, so most checks use the Member account.
-import { test, expect, zz } from "../support";
+import { test, expect, zz, type Json } from "../support";
 
-type Who = { api: import("../support").Api; user: Record<string, any>; page: import("@playwright/test").Page };
+type Who = { api: import("../support").Api; user: Json; page: import("@playwright/test").Page };
 type Later = (f: () => Promise<unknown>) => void;
 
 async function setup(admin: Who, member: Who, later: Later, label: string, role: "EDITOR" | "VIEWER" = "EDITOR") {

@@ -7,11 +7,11 @@
 import { execFileSync } from "node:child_process";
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
-import { test, expect, zz, BASE_URL, type Api } from "../support";
+import { test, expect, zz, BASE_URL, type Api, type Later, type Page, type Who } from "../support";
 import { PASS, passwordOk } from "./qa";
 
-// qa:TC uses the AC id already on the test. Pam has not published a separate hash for these cases.
-const tag = (id: string) => ({ annotation: [{ type: "ac", description: id }, { type: "qa:TC", description: id }] });
+// Pam has not published a TC hash. The marker is the literal "qa:TC missing".
+const tag = (id: string) => ({ annotation: [{ type: "ac", description: id }, { type: "qa:TC", description: "qa:TC missing" }] });
 
 test.beforeAll(() => {
   test.skip(!PASS, "Set SHO_QA_PASS (the password for nakul17+ aliases).");
@@ -59,26 +59,26 @@ function ageNotification(id: string, recipientId: string) {
   expect(out).toContain("UPDATE 1");
 }
 
-async function proj(admin: any, label: string, later: (f: () => Promise<unknown>) => void) {
+async function proj(admin: Who, label: string, later: Later) {
   const r = await admin.api.post("/api/projects", { name: zz(label), leaderId: admin.user.id });
   expect(r.status, JSON.stringify(r.json)).toBe(201);
   const id = r.json.project.id as string;
   later(() => admin.api.post(`/api/projects/${id}/archive`));
   return id;
 }
-const withMember = async (admin: any, member: any, label: string, later: (f: () => Promise<unknown>) => void) => {
+const withMember = async (admin: Who, member: Who, label: string, later: Later) => {
   const p = await proj(admin, label, later);
   expect((await admin.api.post(`/api/projects/${p}/members`, { userId: member.user.id, role: "EDITOR" })).status).toBe(201);
   later(() => admin.api.del(`/api/projects/${p}/members/${member.user.id}?handoverTo=${admin.user.id}`));
   return p;
 };
-const mk = async (who: any, p: string, title: string, extra: Record<string, unknown> = {}) => {
+const mk = async (who: Who, p: string, title: string, extra: Record<string, unknown> = {}) => {
   const r = await who.api.post(`/api/projects/${p}/tasks`, { title, ...extra });
   expect(r.status, JSON.stringify(r.json)).toBe(201);
   return r.json.task.id as string;
 };
 /** Open the bell panel and wait until it is really showing (the page can still be settling after a load). */
-async function openBell(page: any) {
+async function openBell(page: Page) {
   await page.goto("/");
   await page.waitForLoadState("networkidle");
   const dlg = page.getByRole("dialog", { name: "Notifications" });
@@ -90,7 +90,7 @@ async function openBell(page: any) {
   return dlg;
 }
 type N = { id: string; text: string; href: string; read: boolean; createdAt: string };
-const inbox = async (who: any) => (await who.api.get("/api/notifications?limit=200")).json as { unread: number; items: N[] };
+const inbox = async (who: Who) => (await who.api.get("/api/notifications?limit=200")).json as { unread: number; items: N[] };
 
 test("AC1: a new notification raises the count and appears first in the panel", tag("APL-2506 AC1"), async ({ admin, member, later }) => {
   const p = await withMember(admin, member, "bell-new", later);

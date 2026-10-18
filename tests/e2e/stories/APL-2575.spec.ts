@@ -2,11 +2,11 @@
 // AC3 uses a nakul17+ approver who starts with nothing waiting, then deactivates that person.
 // The file skips only when SHO_QA_PASS is unset.
 import type { APIRequestContext, Browser } from "@playwright/test";
-import { test, expect, zz, type Api } from "../support";
+import { test, expect, zz, type Api, type Later, type Who } from "../support";
 import { PASS, alias, deactivate, passwordOk, signInAs, signUp, sinkToken } from "./qa";
 
-// qa:TC uses the AC id already on the test. Pam has not published a separate hash for these cases.
-const tag = (id: string) => ({ annotation: [{ type: "ac", description: id }, { type: "qa:TC", description: id }] });
+// Pam has not published a TC hash. The marker is the literal "qa:TC missing".
+const tag = (id: string) => ({ annotation: [{ type: "ac", description: id }, { type: "qa:TC", description: "qa:TC missing" }] });
 
 test.beforeAll(() => {
   test.skip(!PASS, "Set SHO_QA_PASS (the password for nakul17+ aliases).");
@@ -28,7 +28,7 @@ async function freshPerson(browser: Browser, request: APIRequestContext, adminAp
   return who;
 }
 
-async function held(admin: any, member: any, later: any, label: string) {
+async function held(admin: Who, member: Who, later: Later, label: string) {
   const r = await admin.api.post("/api/projects", { name: zz("approvals"), leaderId: admin.user.id });
   expect(r.status).toBe(201);
   const id = r.json.project.id as string;

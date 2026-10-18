@@ -1,12 +1,12 @@
 // SHO-US-14.2 Honest loading, empty, error and offline states (Linear APL-2561).
 // Network failures and slow loads are simulated in the browser (route interception), so nothing on the server is touched.
 // The file skips only when SHO_QA_PASS is unset. The slow project load expects the skeleton (APL-2647 is on main).
-import { test, expect, zz } from "../support";
+import { test, expect, zz, type Later, type Who } from "../support";
 import { newProject } from "../g2";
 import { PASS, passwordOk } from "./qa";
 
-// qa:TC uses the AC id already on the test. Pam has not published a separate hash for these cases.
-const tag = (id: string) => ({ annotation: [{ type: "ac", description: id }, { type: "qa:TC", description: id }] });
+// Pam has not published a TC hash. The marker is the literal "qa:TC missing".
+const tag = (id: string) => ({ annotation: [{ type: "ac", description: id }, { type: "qa:TC", description: "qa:TC missing" }] });
 
 const skeleton = (page: import("@playwright/test").Page) => page.getByRole("status", { name: "Loading", exact: true });
 
@@ -15,7 +15,7 @@ test.beforeAll(() => {
   if (!passwordOk(PASS)) throw new Error("SHO_QA_PASS must be at least 8 characters with a letter and a number.");
 });
 
-async function project(admin: { api: import("../support").Api; user: Record<string, any> }, later: (f: () => Promise<unknown>) => void, label: string) {
+async function project(admin: Who, later: Later, label: string) {
   const r = await admin.api.post("/api/projects", { name: zz(label), leaderId: admin.user.id });
   expect(r.status).toBe(201);
   const id = r.json.project.id as string;
@@ -99,10 +99,10 @@ test("AC5: Retry succeeds and the screen loads without a full page reload", tag(
   await page.route(re, (r) => r.abort("connectionfailed"));
   await page.goto(`/projects/${p.id}`);
   await expect(page.getByText("Could not reach the server.")).toBeVisible();
-  await page.evaluate(() => { (window as any).__noReload = "still here"; });
+  await page.evaluate(() => { (window as Window & { __noReload?: string }).__noReload = "still here"; });
   await page.unroute(re); // the network is back
   await page.getByRole("button", { name: "Retry" }).click();
   await expect(page.getByRole("heading", { level: 1, name: p.name })).toBeVisible();
   await expect(page.getByText("Could not reach the server.")).toHaveCount(0);
-  expect(await page.evaluate(() => (window as any).__noReload)).toBe("still here"); // same document: no reload
+  expect(await page.evaluate(() => (window as Window & { __noReload?: string }).__noReload)).toBe("still here"); // same document: no reload
 });

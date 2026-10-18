@@ -7,8 +7,8 @@ import { test, expect, zz } from "../support";
 import { newProject, newTask, type Who } from "../g2";
 import { PASS, passwordOk } from "./qa";
 
-// qa:TC uses the AC id already on the test. Pam has not published a separate hash for these cases.
-const tag = (id: string) => ({ annotation: [{ type: "ac", description: id }, { type: "qa:TC", description: id }] });
+// Pam has not published a TC hash. The marker is the literal "qa:TC missing".
+const tag = (id: string) => ({ annotation: [{ type: "ac", description: id }, { type: "qa:TC", description: "qa:TC missing" }] });
 
 const skeleton = (page: Page) => page.getByRole("status", { name: "Loading", exact: true });
 

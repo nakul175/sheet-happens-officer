@@ -2,11 +2,11 @@
 // Acceptance criteria: AC1 sections ordered by due date, AC2 paging, AC3 non-member, AC4 Done section collapsed to 10,
 // AC5 archived project read-only.
 // Data: every project and task is named "ZZ-TEST ..."; projects are archived afterwards.
-import { test, expect, zz } from "../support";
+import { test, expect, zz, type Who } from "../support";
 
 const ist = (d: number) => new Date(Date.now() + 5.5 * 3600e3 + d * 864e5).toISOString().slice(0, 10);
 
-async function proj(admin: any, label: string, later: (f: () => Promise<unknown>) => void) {
+async function proj(admin: Who, label: string, later: (f: () => Promise<unknown>) => void) {
   const r = await admin.api.post("/api/projects", { name: zz(label), leaderId: admin.user.id });
   expect(r.status, JSON.stringify(r.json)).toBe(201);
   const id = r.json.project.id as string;
@@ -14,7 +14,7 @@ async function proj(admin: any, label: string, later: (f: () => Promise<unknown>
   const s = (await admin.api.get(`/api/projects/${id}`)).json.project.sections as { id: string; isDone: boolean }[];
   return { id, todo: s[0].id, done: s.find((x) => x.isDone)!.id };
 }
-const mk = async (admin: any, p: string, title: string, extra: Record<string, unknown> = {}) => {
+const mk = async (admin: Who, p: string, title: string, extra: Record<string, unknown> = {}) => {
   const r = await admin.api.post(`/api/projects/${p}/tasks`, { title, ...extra });
   expect(r.status, JSON.stringify(r.json)).toBe(201);
   return r.json.task.id as string;
@@ -25,8 +25,8 @@ test("AC1: tasks sit under their Sections, soonest due first, undated last", asy
   const c = await mk(admin, p.id, zz("no date"));
   const b = await mk(admin, p.id, zz("in 5"), { dueDate: ist(5) });
   const a = await mk(admin, p.id, zz("in 1"), { dueDate: ist(1) });
-  const api = (await admin.api.get(`/api/projects/${p.id}/tasks`)).json.sections.find((s: any) => s.id === p.todo);
-  expect(api.tasks.map((t: any) => t.id)).toEqual([a, b, c]);
+  const api = (await admin.api.get(`/api/projects/${p.id}/tasks`)).json.sections.find((s: { id: string }) => s.id === p.todo);
+  expect(api.tasks.map((t: { id: string }) => t.id)).toEqual([a, b, c]);
   await admin.page.goto(`/projects/${p.id}`);
   const rows = admin.page.locator(`section[aria-label="To do"] .item.click .ttl`);
   await expect(rows).toHaveText([zz("in 1"), zz("in 5"), zz("no date")]);
@@ -41,7 +41,7 @@ test("AC2: a long list loads page by page in the same order", async ({ admin, la
   expect(first.nextCursor).toBeTruthy();
   const second = (await admin.api.get(`/api/projects/${p.id}/tasks?sectionId=${p.todo}&limit=3&cursor=${first.nextCursor}`)).json.sections[0];
   const third = (await admin.api.get(`/api/projects/${p.id}/tasks?sectionId=${p.todo}&limit=3&cursor=${second.nextCursor}`)).json.sections[0];
-  const all = [...first.tasks, ...second.tasks, ...third.tasks].map((t: any) => t.id);
+  const all = [...first.tasks, ...second.tasks, ...third.tasks].map((t) => t.id);
   expect(all).toEqual(made); // same order, no repeats, none skipped
 });
 

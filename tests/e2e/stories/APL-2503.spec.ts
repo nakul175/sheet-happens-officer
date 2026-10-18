@@ -3,9 +3,9 @@
 // AC3 deactivated assignee falls back to the Leader; AC4 Editor and Viewer see the list but cannot restore; AC5 list columns.
 // Data: every project and task is named "ZZ-TEST ..."; the one person AC3 creates is named "ZZ-TEST ..." with an address at
 // example.invalid (no real inbox) and is deactivated afterwards. Projects are archived afterwards.
-import { test, expect, zz, RUN } from "../support";
+import { test, expect, zz, RUN, type Who } from "../support";
 
-async function proj(admin: any, label: string, later: (f: () => Promise<unknown>) => void) {
+async function proj(admin: Who, label: string, later: (f: () => Promise<unknown>) => void) {
   const r = await admin.api.post("/api/projects", { name: zz(label), leaderId: admin.user.id });
   expect(r.status, JSON.stringify(r.json)).toBe(201);
   const id = r.json.project.id as string;
@@ -13,7 +13,7 @@ async function proj(admin: any, label: string, later: (f: () => Promise<unknown>
   const s = (await admin.api.get(`/api/projects/${id}`)).json.project.sections as { id: string; isDone: boolean }[];
   return { id, todo: s[0].id, doing: s[1].id };
 }
-const mk = async (admin: any, p: string, title: string, extra: Record<string, unknown> = {}) => {
+const mk = async (admin: Who, p: string, title: string, extra: Record<string, unknown> = {}) => {
   const r = await admin.api.post(`/api/projects/${p}/tasks`, { title, ...extra });
   expect(r.status, JSON.stringify(r.json)).toBe(201);
   return r.json.task.id as string;
@@ -27,7 +27,7 @@ test("AC1: restoring returns the task with its subtasks to its old Section and o
   const sub = await mk(admin, p.id, zz("middle child"), { parentId: t });
   expect((await admin.api.del(`/api/tasks/${t}`)).status).toBe(204);
   expect((await admin.api.post(`/api/tasks/${t}/restore`)).status).toBe(200);
-  const sec = (await admin.api.get(`/api/projects/${p.id}/tasks?sectionId=${p.doing}`)).json.sections[0].tasks.map((x: any) => x.id);
+  const sec = (await admin.api.get(`/api/projects/${p.id}/tasks?sectionId=${p.doing}`)).json.sections[0].tasks.map((x: { id: string }) => x.id);
   expect(sec).toEqual([first, t, last]);
   expect((await admin.api.get(`/api/tasks/${sub}`)).status).toBe(200);
 });

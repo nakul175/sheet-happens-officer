@@ -7,8 +7,8 @@ import { test, expect } from "../support";
 import { bell, withUnread } from "../helpers/jim-bell";
 import { PASS, passwordOk } from "./qa";
 
-// qa:TC uses the AC id already on the test. Pam has not published a separate hash for these cases.
-const tag = (id: string) => ({ annotation: [{ type: "ac", description: id }, { type: "qa:TC", description: id }] });
+// Pam has not published a TC hash. The marker is the literal "qa:TC missing".
+const tag = (id: string) => ({ annotation: [{ type: "ac", description: id }, { type: "qa:TC", description: "qa:TC missing" }] });
 
 test.beforeAll(() => {
   test.skip(!PASS, "Set SHO_QA_PASS (the password for nakul17+ aliases).");

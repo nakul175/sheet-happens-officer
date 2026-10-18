@@ -2,9 +2,9 @@
 // Acceptance criteria: AC1 add a Section, AC2 delete only after choosing where tasks go, AC3 authority,
 // AC4 done Section completes tasks, AC5 limit of 8, AC6 done Section protected (proposed, not confirmed by the owner).
 // Data: every project and task is named "ZZ-TEST ..."; projects are archived afterwards.
-import { test, expect, zz } from "../support";
+import { test, expect, zz, type Who, type Page } from "../support";
 
-async function proj(admin: any, label: string, later: (f: () => Promise<unknown>) => void) {
+async function proj(admin: Who, label: string, later: (f: () => Promise<unknown>) => void) {
   const r = await admin.api.post("/api/projects", { name: zz(label), leaderId: admin.user.id });
   expect(r.status, JSON.stringify(r.json)).toBe(201);
   const id = r.json.project.id as string;
@@ -12,12 +12,12 @@ async function proj(admin: any, label: string, later: (f: () => Promise<unknown>
   const s = (await admin.api.get(`/api/projects/${id}`)).json.project.sections as { id: string; name: string; isDone: boolean }[];
   return { id, todo: s[0].id, doing: s[1].id, done: s.find((x) => x.isDone)!.id };
 }
-const mk = async (admin: any, p: string, title: string, extra: Record<string, unknown> = {}) => {
+const mk = async (admin: Who, p: string, title: string, extra: Record<string, unknown> = {}) => {
   const r = await admin.api.post(`/api/projects/${p}/tasks`, { title, ...extra });
   expect(r.status, JSON.stringify(r.json)).toBe(201);
   return r.json.task.id as string;
 };
-const calm = async (page: any) => { // fold an open concierge so it cannot cover the controls
+const calm = async (page: Page) => { // fold an open concierge so it cannot cover the controls
   const fold = page.locator('aside[aria-label="Concierge"]').getByRole("button", { name: "Collapse" });
   if (await fold.count()) await fold.first().click();
 };

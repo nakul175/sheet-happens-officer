@@ -5,11 +5,11 @@
 // Data: every project and task is named "ZZ-TEST ..."; projects are archived afterwards.
 // The file skips only when SHO_QA_PASS is unset.
 import type { APIRequestContext, Browser } from "@playwright/test";
-import { test, expect, zz, type Api } from "../support";
+import { test, expect, zz, type Api, type Later, type Who } from "../support";
 import { PASS, alias, archiveProject, deactivate, passwordOk, signInAs, signUp, sinkToken } from "./qa";
 
-// qa:TC uses the AC id already on the test. Pam has not published a separate hash for these cases.
-const tag = (id: string) => ({ annotation: [{ type: "ac", description: id }, { type: "qa:TC", description: id }] });
+// Pam has not published a TC hash. The marker is the literal "qa:TC missing".
+const tag = (id: string) => ({ annotation: [{ type: "ac", description: id }, { type: "qa:TC", description: "qa:TC missing" }] });
 
 test.beforeAll(() => {
   test.skip(!PASS, "Set SHO_QA_PASS (the password for nakul17+ aliases).");
@@ -38,7 +38,7 @@ async function freshPerson(browser: Browser, request: APIRequestContext, adminAp
   return who;
 }
 
-async function withMember(admin: any, member: any, label: string, later: (f: () => Promise<unknown>) => void) {
+async function withMember(admin: Who, member: Who, label: string, later: Later) {
   const r = await admin.api.post("/api/projects", { name: zz(label), leaderId: admin.user.id });
   expect(r.status, JSON.stringify(r.json)).toBe(201);
   const p = r.json.project.id as string;
@@ -47,12 +47,12 @@ async function withMember(admin: any, member: any, label: string, later: (f: () 
   later(() => admin.api.del(`/api/projects/${p}/members/${member.user.id}?handoverTo=${admin.user.id}`));
   return { id: p, name: zz(label) };
 }
-const mk = async (who: any, p: string, title: string, extra: Record<string, unknown> = {}) => {
+const mk = async (who: Who, p: string, title: string, extra: Record<string, unknown> = {}) => {
   const r = await who.api.post(`/api/projects/${p}/tasks`, { title, ...extra });
   expect(r.status, JSON.stringify(r.json)).toBe(201);
   return r.json.task.id as string;
 };
-const texts = async (who: any) => ((await who.api.get("/api/notifications?limit=200")).json.items as { text: string }[]).map((n) => n.text);
+const texts = async (who: Who) => ((await who.api.get("/api/notifications?limit=200")).json.items as { text: string }[]).map((n) => n.text);
 
 test("AC1: being assigned a task gives one notice naming the task and who assigned it", tag("APL-2507 AC1"), async ({ admin, member, later }) => {
   const p = await withMember(admin, member, "assign-notice", later);
