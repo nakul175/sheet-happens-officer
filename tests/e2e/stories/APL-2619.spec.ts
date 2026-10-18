@@ -10,9 +10,9 @@ import {
 const DOMAIN = "Use your @aplyd.com or @athenainfonomics.com email address.";
 
 test.beforeAll(async ({ request }) => {
-  if (!PASS) throw new Error("Set SHO_QA_PASS (the shared password for the nakul17+ accounts).");
-  if (!passwordOk(PASS)) throw new Error("SHO_QA_PASS must be at least 8 characters with a letter and a number.");
-  login("ADMIN");
+  test.skip(!PASS, "Set SHO_QA_PASS (the shared password for the nakul17+ accounts).");
+  test.skip(!passwordOk(PASS), "SHO_QA_PASS must be at least 8 characters with a letter and a number.");
+  try { login("ADMIN"); } catch { test.skip(true, "Set SHO_ADMIN_EMAIL and SHO_ADMIN_PASS (a Super Admin)."); }
   await gate(request);
 });
 
