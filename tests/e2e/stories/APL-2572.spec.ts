@@ -1,7 +1,6 @@
 // SHO-US-14.13 Notification triage (APL-2572). Needs the optional Member account (it receives the notices).
-// AC3 runs whenever PR #23 is live (tests/e2e/helpers/jim-gate.ts) and skips otherwise: until then the Unread tab can list read rows.
+// AC3 runs at desktop and phone width. It is the Unread filter from this story, not a gate on another PR.
 import { test, expect, zz } from "../support";
-import { notLive, prLive } from "../helpers/jim-gate";
 
 async function give(admin: any, member: any, later: any, n: number) {
   const r = await admin.api.post("/api/projects", { name: zz("bell"), leaderId: admin.user.id });
@@ -43,26 +42,39 @@ test("AC2: clicking an item opens its task and marks it read", async ({ admin, m
 });
 
 test("AC3: the Unread filter hides read items, and an empty result says 'All caught up'", async ({ admin, member, later }) => {
-  test.setTimeout(120_000);
-  const gate = await prLive(23, admin, null, later);
-  test.skip(!gate.deployed, notLive(gate, "the Unread tab can still list read rows."));
-  await give(admin, member, later, 2);
+  test.setTimeout(180_000);
   const p = member.page;
-  await p.goto("/");
-  await bell(p).click();
-  const panel = p.getByRole("dialog", { name: "Notifications" });
-  await panel.getByRole("button", { name: /^Mark as read: / }).first().click();
-  await panel.getByRole("button", { name: /^Unread/ }).click();
-  expect((await member.api.get("/api/notifications?filter=unread")).json.items.every((n: { read: boolean }) => !n.read)).toBe(true);
-  await expect(panel.locator(".bell-row:not(.unread)")).toHaveCount(0);
-  expect((await member.api.post("/api/notifications/read-all")).status).toBeLessThan(300);
-  await p.reload();
-  await bell(p).click();
-  await p.getByRole("dialog", { name: "Notifications" }).getByRole("button", { name: /^Unread/ }).click();
-  const panel2 = p.getByRole("dialog", { name: "Notifications" });
-  // If someone else's activity raised a new notice in the meantime, the filter must still show unread items only.
-  if ((await unread(member)) === 0) await expect(panel2.getByText("All caught up")).toBeVisible();
-  else await expect(panel2.locator(".bell-row:not(.unread)")).toHaveCount(0);
+  for (const viewport of [{ width: 1280, height: 800 }, { width: 390, height: 844 }]) {
+    await give(admin, member, later, 2);
+    await p.setViewportSize(viewport);
+    await p.goto("/");
+    await expect(bell(p)).toBeVisible();
+    await bell(p).click();
+    const panel = p.getByRole("dialog", { name: "Notifications" });
+    const mark = panel.getByRole("button", { name: /^Mark as read: / }).first();
+    await expect(mark).toBeVisible();
+    await mark.click();
+    const unreadTab = panel.getByRole("button", { name: /^Unread/ });
+    await expect(unreadTab).toBeVisible();
+    await unreadTab.click();
+    await expect.poll(async () => {
+      const items = (await member.api.get("/api/notifications?filter=unread")).json.items as { read: boolean }[];
+      return items.every((n) => !n.read);
+    }).toBe(true);
+    await expect(panel.locator(".bell-row:not(.unread)")).toHaveCount(0);
+    expect((await member.api.post("/api/notifications/read-all")).status).toBeLessThan(300);
+    await p.reload();
+    await expect(bell(p)).toBeVisible();
+    await bell(p).click();
+    const panel2 = p.getByRole("dialog", { name: "Notifications" });
+    const unreadAgain = panel2.getByRole("button", { name: /^Unread/ });
+    await expect(unreadAgain).toBeVisible();
+    await unreadAgain.click();
+    // If someone else's activity raised a new notice in the meantime, the filter must still show unread items only.
+    if ((await unread(member)) === 0) await expect(panel2.getByText("All caught up")).toBeVisible();
+    else await expect(panel2.locator(".bell-row:not(.unread)")).toHaveCount(0);
+    await p.keyboard.press("Escape");
+  }
 });
 
 test("AC4: marking an item unread raises the badge by 1", async ({ admin, member, later }) => {
