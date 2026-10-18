@@ -10,7 +10,7 @@ async function Form({ params }: { params: PageProps<"/signin">["searchParams"] }
   const sp = await params;
   // Only a safe path is handed to the form. A bad `next` is dropped, so sign-in goes home.
   const next = safeReturnPath(typeof sp.next === "string" ? sp.next : undefined) ?? undefined;
-  return <SignInForm justReset={sp.reset === "1"} next={next} />;
+  return <SignInForm justReset={sp.reset === "1"} sessionExpired={sp.expired === "1"} next={next} />;
 }
 
 export default function Page({ searchParams }: PageProps<"/signin">) {

@@ -167,4 +167,33 @@ describe("APL-2652 sign-in returns to the deep link", () => {
       expect(await page.getByRole("heading", { name: "Set your own password" }).count()).toBe(0);
     } finally { await ctx.close(); }
   });
+
+  it("an expired session keeps expired=1 and the return path, and stays put on /signin", async () => {
+    const ctx = await browser.newContext({ viewport: { width: 1024, height: 800 }, baseURL: BASE });
+    const page = await ctx.newPage();
+    try {
+      const signed = await ctx.request.post("/api/auth/signin", { data: { email: memberEmail, password: PW } });
+      expect(signed.ok()).toBe(true);
+      let tripped = false;
+      await page.route(`**/api/tasks/${visibleId}`, async (route) => {
+        if (!tripped) {
+          tripped = true;
+          await route.fulfill({ status: 401, contentType: "application/json", body: JSON.stringify({ error: "Not signed in" }) });
+          return;
+        }
+        await route.continue();
+      });
+      await page.goto(`/tasks/${visibleId}`);
+      await page.getByText("Your session has expired, please sign in again").waitFor({ timeout: 20000 });
+      const url = new URL(page.url());
+      expect(url.origin).toBe(origin());
+      expect(url.pathname).toBe("/signin");
+      expect(url.searchParams.get("expired")).toBe("1");
+      expect(url.searchParams.get("next")).toBe(`/tasks/${visibleId}`);
+      // The sign-in screen must not redirect again: the query is still here when they submit.
+      expect(new URL(page.url()).pathname).toBe("/signin");
+      await signIn(page, memberEmail, PW);
+      await landedOnTask(page, visibleId, visibleTitle);
+    } finally { await ctx.close(); }
+  });
 });

@@ -83,12 +83,28 @@ export function safeReturnPath(input: string | null | undefined): string | null 
 /**
  * The sign-in URL that comes back to `from` when that path is safe.
  * Anything else is plain `/signin`, which signs in to the home page.
+ * `expired` keeps APL-2664's `expired=1` (the screen says the session ended).
  * The result is always a relative `/signin` URL, never an absolute or protocol-relative one.
  */
-export function signInHref(from: string | null | undefined): string {
+export function signInHref(from: string | null | undefined, opts?: { expired?: boolean }): string {
+  const params = new URLSearchParams();
+  if (opts?.expired) params.set("expired", "1");
   const safe = safeReturnPath(from);
-  if (!safe || safe === "/") return "/signin";
-  const href = `/signin?next=${encodeURIComponent(safe)}`;
-  if (!href.startsWith("/signin?next=") || href.startsWith("//") || href.includes("\\") || href.includes("://")) return "/signin";
+  if (safe && safe !== "/") params.set("next", safe);
+  const q = params.toString();
+  const href = q ? `/signin?${q}` : "/signin";
+  if (!href.startsWith("/signin") || href.startsWith("//") || href.includes("\\") || href.includes("://")) {
+    return opts?.expired ? "/signin?expired=1" : "/signin";
+  }
   return href;
+}
+
+/**
+ * Where a 401 sends the browser. Null when `pathname` is already `/signin`, so that
+ * screen is not reloaded and its `next` query is left alone (APL-2664).
+ * Otherwise `/signin?expired=1` plus a safe return path (APL-2652).
+ */
+export function sessionSignInTarget(pathname: string, search = ""): string | null {
+  if (pathname === "/signin") return null;
+  return signInHref(`${pathname}${search}`, { expired: true });
 }
