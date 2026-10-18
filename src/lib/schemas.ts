@@ -90,6 +90,9 @@ export const taskCreate = z.object({
   approverId: z.string().min(1).optional(),
   collaboratorIds: z.array(z.string().min(1)).max(50).optional(),
 });
+// The updatedAt the person saw when they opened the task; a different value means someone else saved first.
+// Required (SHO-BUG-13, APL-2668): without it a change could silently overwrite someone else's edit.
+const taskVersion = z.string({ error: "expectedUpdatedAt is required" }).min(1, "expectedUpdatedAt is required");
 export const taskUpdate = z.object({
   title: title.optional(),
   description: z.string().trim().max(20000).nullish(),
@@ -97,16 +100,14 @@ export const taskUpdate = z.object({
   priority: taskPriority.optional(),
   blocked: z.boolean().optional(),
   blockedReason: z.string().trim().max(300).nullish(),
-  // The updatedAt the person saw when they opened the task; a different value means someone else saved first.
-  // Required (SHO-BUG-13): without it a save could silently overwrite someone else's edit.
-  expectedUpdatedAt: z.string({ error: "expectedUpdatedAt is required" }).min(1, "expectedUpdatedAt is required"),
+  expectedUpdatedAt: taskVersion,
 });
-export const taskAssign = z.object({ assigneeId: z.string().min(1), expectedUpdatedAt: z.string().optional() });
+export const taskAssign = z.object({ assigneeId: z.string().min(1), expectedUpdatedAt: taskVersion });
 export const taskCollaborator = z.object({ userId: z.string().min(1) });
-export const taskApprover = z.object({ approverId: z.string().min(1).nullable() });
-export const taskComplete = z.object({ completeAll: z.boolean().optional() });
+export const taskApprover = z.object({ approverId: z.string().min(1).nullable(), expectedUpdatedAt: taskVersion });
+export const taskComplete = z.object({ completeAll: z.boolean().optional(), expectedUpdatedAt: taskVersion });
 export const taskReopen = z.object({ sectionId: z.string().min(1).optional() });
-export const taskMove = z.object({ sectionId: z.string().min(1), completeAll: z.boolean().optional() });
+export const taskMove = z.object({ sectionId: z.string().min(1), completeAll: z.boolean().optional(), expectedUpdatedAt: taskVersion });
 export const taskRestore = z.object({ confirmParent: z.boolean().optional() });
 
 // ---- CRM: organisations and deals (SHO-E10 to SHO-E13) ----

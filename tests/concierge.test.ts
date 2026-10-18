@@ -1,7 +1,8 @@
 // SHO-US-8.1 to 8.8: reads, proposals and cards, clarification, undo and privacy of the concierge.
 // Calls src/lib directly with a scripted fake model; the live server (same database) sets up people and work.
-import { describe, expect, it } from "vitest";
-import { account, istDate, project, superAdmin, task, type Account, patchTask } from "./helpers";
+import { describe, expect, it, vi } from "vitest";
+import * as changes from "@/lib/concierge/changes";
+import { account, istDate, project, superAdmin, task, type Account, patchTask, withVersion } from "./helpers";
 import { MONDAY, actor, db, lastData, lastResultText, say, script, tu, useFakeModel } from "./concierge-helpers";
 import { fakeCallCount, setFakeModel, type ModelRequest } from "../src/lib/model";
 import { answerChoice, quickAction, sendMessage } from "../src/lib/concierge/engine";
@@ -37,10 +38,10 @@ describe("reads (8.2)", () => {
     const trashed = await task(lead, p.id, { title: "Trashed late", dueDate: istDate(-5) });
     expect((await lead.c.del(`/api/tasks/${trashed}`)).status).toBe(204);
     const done = await task(lead, p.id, { title: "Finished thing" });
-    expect((await lead.c.post(`/api/tasks/${done}/complete`)).status).toBe(200);
+    expect((await lead.c.post(`/api/tasks/${done}/complete`, await withVersion(lead, done))).status).toBe(200);
     // Waiting on me: the editor's task with lead as approver, sent for approval.
     const review = await task(ed, p.id, { title: "Needs sign-off" });
-    expect((await lead.c.put(`/api/tasks/${review}/approver`, { approverId: lead.id })).status).toBe(200);
+    expect((await lead.c.put(`/api/tasks/${review}/approver`, await withVersion(lead, review, { approverId: lead.id }))).status).toBe(200);
     expect((await ed.c.post(`/api/tasks/${review}/send-for-approval`)).status).toBe(200);
     script(() => { throw new Error("no model call expected"); });
 
@@ -260,6 +261,64 @@ describe("propose and confirm (8.3)", () => {
     // The fresh card is good.
     await confirmCard(actor(lead), fresh.id);
     expect((await dueOf(t))?.toISOString()).toContain("2031-03-23");
+  });
+
+  it("carries the card-time updatedAt into execute, so a save after Confirm is refused and not overwritten (APL-2667)", async () => {
+    const { lead, ed, p } = await team();
+    const t = await task(lead, p.id, { title: "Budget", dueDate: "2031-03-20" });
+    script(...moveBudget());
+    const c = cardOf((await ask(lead, "Move the budget task to Monday", MONDAY)).messages);
+    const stored = JSON.parse((await db.chatMessage.findUniqueOrThrow({ where: { id: c.id } })).content) as { proposal: { versions: Record<string, string> } };
+    const atCard = (await db.task.findUniqueOrThrow({ where: { id: t } })).updatedAt.toISOString();
+    const dueAtCard = (await db.task.findUniqueOrThrow({ where: { id: t } })).dueDate?.toISOString();
+    expect(stored.proposal.versions[t]).toBe(atCard);
+
+    // The Confirm fingerprint still matches. The save lands after that check and before the write.
+    const real = changes.fingerprint;
+    const spy = vi.spyOn(changes, "fingerprint").mockImplementationOnce(async (ops) => {
+      const fp = await real(ops);
+      expect((await patchTask(ed, t, { title: "Saved after confirm" })).status).toBe(200);
+      return fp;
+    });
+    try {
+      const err = await confirmCard(actor(lead), c.id).catch((e) => e);
+      expect(spy).toHaveBeenCalledOnce();
+      expect(err).toMatchObject({ status: 409, message: "This task changed while you were editing it." });
+      expect(err.extra.stale).toBe(true);
+      expect(err.extra.changedBy).toBe(ed.name);
+    } finally {
+      spy.mockRestore();
+    }
+    const row = await db.task.findUniqueOrThrow({ where: { id: t } });
+    expect(row.title).toBe("Saved after confirm");
+    expect(row.dueDate?.toISOString()).toBe(dueAtCard);
+    expect(await conciergeLogs(lead.id)).toHaveLength(0);
+    expect(JSON.parse((await db.chatMessage.findUniqueOrThrow({ where: { id: c.id } })).content).card.status).toBe("PENDING");
+  });
+
+  it("several ops on one task in one card still apply (APL-2667)", async () => {
+    const { lead, ed, p } = await team();
+    const t = await task(ed, p.id, { title: "Chain task", dueDate: "2031-03-20" });
+    script(
+      () => [tu("find_tasks", { text: "chain task" })],
+      (r) => {
+        const id = lastData(r).tasks[0].id as string;
+        return [tu("propose_changes", { changes: [
+          { action: "edit_task", task_id: id, priority: "HIGH" },
+          { action: "move_task_to_section", task_id: id, section: "In progress" },
+          { action: "assign_task", task_id: id, person_id: "me" },
+          { action: "edit_task", task_id: id, title: "Chain revised" },
+        ] })];
+      },
+    );
+    const c = cardOf((await ask(lead, "Update the chain task")).messages);
+    expect(c.card!.changes).toHaveLength(4);
+    await confirmCard(actor(lead), c.id);
+    const row = await db.task.findUniqueOrThrow({ where: { id: t } });
+    expect(row.priority).toBe("HIGH");
+    expect(row.sectionId).toBe(p.doing);
+    expect(row.assigneeId).toBe(lead.id);
+    expect(row.title).toBe("Chain revised");
   });
 
   it("more than 10 changes: no card, the person is asked to narrow; exactly 10 is fine (AC6)", async () => {

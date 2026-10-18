@@ -1,6 +1,6 @@
 // SHO-US-14.8: the server side of inline edits (stale check on assign; edits log an undoable action).
 import { describe, expect, it } from "vitest";
-import { account, istDate, project, task, patchTask } from "./helpers";
+import { account, istDate, project, task, patchTask, withVersion } from "./helpers";
 
 describe("inline editing (14.8)", () => {
   it("assign accepts the expected version and refuses a stale one with the stale-edit answer", async () => {
@@ -40,7 +40,7 @@ describe("inline editing (14.8)", () => {
     const p = await project(lead, lead, [{ who: view, role: "VIEWER" }, { who: ed }]);
     const t = await task(lead, p.id, { assigneeId: ed.id, approverId: lead.id });
     expect((await patchTask(view, t, { priority: "LOW" })).status).toBe(403);
-    expect((await view.c.post(`/api/tasks/${t}/assign`, { assigneeId: lead.id })).status).toBe(403);
+    expect((await view.c.post(`/api/tasks/${t}/assign`, await withVersion(view, t, { assigneeId: lead.id }))).status).toBe(403);
     expect((await ed.c.post(`/api/tasks/${t}/send-for-approval`)).status).toBe(200);
     expect((await lead.c.get(`/api/tasks/${t}`)).json.task.awaitingApproval).toBe(true);
     expect((await patchTask(lead, t, { priority: "LOW" })).status).toBe(200); // the Leader keeps full authority
