@@ -370,7 +370,7 @@ describe("tasks (4.x, 5.x)", () => {
     expect((await patchTask(lead, t, { dueDate: istDate(3) })).status).toBe(200);
     const r = await ed.c.patch(`/api/tasks/${t}`, { title: "mine", expectedUpdatedAt: seen });
     expect(r.status).toBe(409);
-    expect(r.json).toEqual({ error: { code: "version_conflict", message: "This task changed while you were editing it." } });
+    expect(r.json).toEqual({ error: { code: "version_conflict", message: "Lead changed this task while you were editing it." } });
     expect((await ed.c.get(`/api/tasks/${t}`)).json.task.dueDate).toBe(istDate(3));
     const fresh = (await ed.c.get(`/api/tasks/${t}`)).json.task.updatedAt;
     expect((await ed.c.patch(`/api/tasks/${t}`, { title: "mine", expectedUpdatedAt: fresh })).status).toBe(200);
@@ -400,7 +400,7 @@ describe("tasks (4.x, 5.x)", () => {
     expect((await patchTask(lead, t, { title: "Theirs" })).status).toBe(200);
     const r = await ed.c.patch(`/api/tasks/${t}`, { title: "Mine", expectedUpdatedAt: seen });
     expect(r.status).toBe(409);
-    expect(r.json).toEqual({ error: { code: "version_conflict", message: "This task changed while you were editing it." } });
+    expect(r.json).toEqual({ error: { code: "version_conflict", message: "Lead changed this task while you were editing it." } });
     expect((await ed.c.get(`/api/tasks/${t}`)).json.task.title).toBe("Theirs");
   });
 
@@ -506,7 +506,7 @@ describe("a version on assign, move, complete and approver (APL-2668)", () => {
       expect((await patchTask(s.other, s.t, { title: "Theirs" })).status).toBe(200);
       const r = await m.send(s, { ...m.body(s), expectedUpdatedAt: seen });
       expect(r.status).toBe(409);
-      expect(r.json).toEqual({ error: { code: "version_conflict", message: "This task changed while you were editing it." } });
+      expect(r.json).toEqual({ error: { code: "version_conflict", message: "Other changed this task while you were editing it." } });
       expect((await shown(s)).title).toBe("Theirs");
       expect(m.applied(s, await shown(s))).toBe(false);
     });

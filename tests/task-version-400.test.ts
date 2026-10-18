@@ -94,7 +94,7 @@ describe("PATCH /api/tasks/:id expectedUpdatedAt (APL-2669)", () => {
       const r = await worker.c.patch(`/api/tasks/${id}`, { title: "New", expectedUpdatedAt });
       expect(r.status).toBe(409);
       expect(r.json).toEqual({
-        error: { code: "version_conflict", message: "This task changed while you were editing it." },
+        error: { code: "version_conflict", message: "Lead changed this task while you were editing it." },
       });
       expect(await shown(worker, id)).toEqual({ title: "Original", updatedAt: T0 });
     }

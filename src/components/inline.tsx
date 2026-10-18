@@ -3,7 +3,7 @@
 // the cells are only read-only here when the server would refuse anyway (see `inlineEditable`).
 import { useEffect, useRef, useState } from "react";
 import { PRIORITY, api, dueState, isOverdue, todayIST } from "@/components/api";
-import { errorMessage, isVersionConflict } from "@/lib/version-error";
+import { conflictActor, errorMessage, isVersionConflict } from "@/lib/version-error";
 import { Pri } from "@/components/TaskParts";
 import "./inline.css";
 
@@ -33,7 +33,7 @@ export function useInlineEdit(onChanged: () => void) {
     setBusy(false);
     if (r.ok) { setErr(null); setStale(null); onChanged(); return; }
     if (isVersionConflict(r.status, r.data)) {
-      setStale({ taskId: t.id, title: t.title, who: "Someone", change, what });
+      setStale({ taskId: t.id, title: t.title, who: conflictActor(r.error), change, what });
       setErr(null);
       onChanged();
     } else setErr(errorMessage(r.error, "Could not save the change."));

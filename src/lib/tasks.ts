@@ -11,7 +11,7 @@ import { auditTx, logAction, notify } from "@/lib/notify";
 import { reqCtx } from "@/lib/reqctx";
 import { classifyExpectedUpdatedAt } from "@/lib/task-version";
 import {
-  NOT_FOUND, NOT_FOUND_MESSAGE, VERSION_CONFLICT, VERSION_CONFLICT_MESSAGE,
+  NOT_FOUND, NOT_FOUND_MESSAGE, VERSION_CONFLICT, versionConflictMessage,
 } from "@/lib/version-error";
 
 export const taskInclude = {
@@ -206,8 +206,9 @@ export async function listTasks(
  *  extra stays on the thrown error for bulk and the concierge. HTTP routes drop it (APL-2670). */
 async function versionConflict(user: Actor, id: string, t: TaskRow, role: Role): Promise<never> {
   const last = await db.actionLog.findFirst({ where: { targetType: "task", targetId: id }, orderBy: { createdAt: "desc" }, include: { actor: { select: { name: true } } } });
-  throw new ApiError(409, VERSION_CONFLICT_MESSAGE, {
-    stale: true, changedBy: last?.actor.name ?? null, current: present(t, { id: user.id, role }),
+  const who = last?.actor.name ?? null;
+  throw new ApiError(409, versionConflictMessage(who), {
+    stale: true, changedBy: who, current: present(t, { id: user.id, role }),
   }, VERSION_CONFLICT);
 }
 

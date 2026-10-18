@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import { PRIORITY, ROLE, api, dueLabel, useGet } from "@/components/api";
-import { errorMessage, isVersionConflict } from "@/lib/version-error";
+import { errorMessage, isVersionConflict, versionConflictMessage } from "@/lib/version-error";
 import { fitBlockedReason } from "@/components/blocked-reason";
 import { Confirm, Modal, Skeleton } from "@/components/ui";
 import { ConvertDialog } from "@/components/ConvertDialog";
@@ -70,7 +70,7 @@ export function TaskModal({ id, me, onClose, onChanged, asPage }: { id: string; 
       return res;
     }
     if (isVersionConflict(res.status, res.data)) {
-      setStale("Someone changed this task while you were editing. Your change was not saved; the fields now show the current values.");
+      setStale(`${errorMessage(res.error, versionConflictMessage(null))} Your change was not saved; the fields now show the current values.`);
       t.reload();
     } else if (res.status === 409 && res.data.needsConfirm === "open_subtasks") {
       return res;

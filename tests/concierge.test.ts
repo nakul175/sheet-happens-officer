@@ -283,7 +283,7 @@ describe("propose and confirm (8.3)", () => {
     try {
       const err = await confirmCard(actor(lead), c.id).catch((e) => e);
       expect(spy).toHaveBeenCalledOnce();
-      expect(err).toMatchObject({ status: 409, message: "This task changed while you were editing it." });
+      expect(err).toMatchObject({ status: 409, message: `${ed.name} changed this task while you were editing it.` });
       expect(err.extra.stale).toBe(true);
       expect(err.extra.changedBy).toBe(ed.name);
     } finally {

@@ -9,7 +9,7 @@ import { account, project, task } from "./helpers";
 const T0 = "2026-10-18T10:00:00.000Z";
 const REQUIRED = { error: { code: "version_required", message: "expectedUpdatedAt is required" } };
 const INVALID = { error: { code: "invalid_version", message: "expectedUpdatedAt must be a full ISO 8601 date-time with a time and a zone." } };
-const CONFLICT = { error: { code: "version_conflict", message: "This task changed while you were editing it." } };
+const CONFLICT = { error: { code: "version_conflict", message: "Lead changed this task while you were editing it." } };
 const MISSING = { error: { code: "not_found", message: "Task not found" } };
 
 describe("one error shape for a task version (APL-2670)", () => {

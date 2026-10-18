@@ -118,7 +118,7 @@ test.describe("APL-2669 a malformed expectedUpdatedAt is a bad request", () => {
       const r = await worker.patch(`/api/tasks/${taskId}`, { data: { title: "New", expectedUpdatedAt } });
       const body = await r.json();
       expect(r.status()).toBe(409);
-      expect(body).toEqual({ error: { code: "version_conflict", message: "This task changed while you were editing it." } });
+      expect(body).toEqual({ error: { code: "version_conflict", message: "Lead changed this task while you were editing it." } });
       expect(await taskNow()).toEqual(before);
     }
   });

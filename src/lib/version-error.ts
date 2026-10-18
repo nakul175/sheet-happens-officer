@@ -12,7 +12,19 @@ export type VersionCode = typeof VERSION_REQUIRED | typeof INVALID_VERSION | typ
 
 export const VERSION_REQUIRED_MESSAGE = "expectedUpdatedAt is required";
 export const INVALID_VERSION_MESSAGE = "expectedUpdatedAt must be a full ISO 8601 date-time with a time and a zone.";
-export const VERSION_CONFLICT_MESSAGE = "This task changed while you were editing it.";
+/** The name stays inside the message. APL-2670 allows no other keys on the body. */
+export function versionConflictMessage(name: string | null | undefined) {
+  const who = name?.trim() ? name.trim() : "Someone";
+  return `${who} changed this task while you were editing it.`;
+}
+
+const CONFLICT_SUFFIX = " changed this task while you were editing it.";
+
+/** The person named by a version_conflict message. */
+export function conflictActor(error: unknown) {
+  const message = errorMessage(error, versionConflictMessage(null));
+  return message.endsWith(CONFLICT_SUFFIX) ? message.slice(0, -CONFLICT_SUFFIX.length) : "Someone";
+}
 export const NOT_FOUND_MESSAGE = "Task not found";
 
 const CODES: readonly string[] = [VERSION_REQUIRED, INVALID_VERSION, VERSION_CONFLICT, NOT_FOUND];
