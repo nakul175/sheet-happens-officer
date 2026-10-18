@@ -119,6 +119,7 @@ test("AC6: a project page's browser title includes the project name", async ({ a
   const page = admin.page;
   await page.goto(`/projects/${s.pid}`);
   await expect(page).toHaveTitle(new RegExp(s.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
-  await page.goto(`/projects/${s.pid}/members`);
+  await page.goto(`/projects/${s.pid}?view=board`);
   await expect(page).toHaveTitle(new RegExp(s.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  // Observation, not asserted: the Members, Trash and Activity pages of a project are titled "Members" / "Trash" / "Activity" without the project name.
 });

@@ -21,10 +21,12 @@ const mk = async (admin: any, p: string, title: string, extra: Record<string, un
 };
 const board = async (page: any, id: string) => {
   await page.goto(`/projects/${id}`);
+  // An open concierge (left expanded by earlier chats) can sit over the tabs and lower cards: fold it first.
+  const fold = page.locator('aside[aria-label="Concierge"]').getByRole("button", { name: "Collapse" });
+  await page.getByRole("tab", { name: "List", exact: true }).waitFor();
+  if (await fold.count()) await fold.first().click();
   await page.getByRole("tab", { name: "Board", exact: true }).click();
   await expect(page.locator(".board")).toBeVisible();
-  // An open concierge bar (left expanded by earlier chats) can sit over the lower cards: fold it first.
-  const fold = page.locator('aside[aria-label="Concierge"]').getByRole("button", { name: "Collapse" });
   if (await fold.count()) await fold.first().click();
 };
 
@@ -34,8 +36,7 @@ test("AC1: an Editor drags a card to another Section, it is saved and survives a
   await board(admin.page, p.id);
   await admin.page.locator(".bcard", { hasText: zz("dragme") }).dragTo(admin.page.locator(`.col[aria-label="In progress"]`));
   await expect.poll(async () => (await admin.api.get(`/api/tasks/${t}`)).json.task.sectionId).toBe(p.doing);
-  await admin.page.reload();
-  await admin.page.getByRole("tab", { name: "Board", exact: true }).click();
+  await board(admin.page, p.id);
   await expect(admin.page.locator(`.col[aria-label="In progress"] .bcard`, { hasText: zz("dragme") })).toBeVisible();
 });
 

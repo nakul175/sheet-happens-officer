@@ -22,9 +22,11 @@ test("AC1: the members panel finds a person by name and adds them (screen)", asy
   await admin.page.getByLabel("Search by name or email").fill(String(member.user.name).split(" ")[0]);
   const row = admin.page.locator(".item", { hasText: String(member.user.name) }).filter({ has: admin.page.getByRole("button", { name: "Add" }) }).first();
   await row.getByRole("button", { name: "Add" }).click();
-  await expect(admin.page.locator(".item", { hasText: String(member.user.name) }).first()).toBeVisible();
-  const d = (await admin.api.get(`/api/projects/${p.id}`)).json.project;
-  expect(d.members.some((m: { userId: string }) => m.userId === member.user.id)).toBe(true);
+  await expect.poll(async () => {
+    const d = (await admin.api.get(`/api/projects/${p.id}`)).json.project;
+    return d.members.some((m: { userId: string }) => m.userId === member.user.id);
+  }, { timeout: 15_000 }).toBe(true);
+  await expect(admin.page.locator(".item", { hasText: String(member.user.name) }).getByRole("combobox").first()).toBeVisible(); // now listed with a role picker
 });
 
 test("AC1: a deactivated person is not accepted as a new member", async ({ admin, later }) => {
@@ -63,7 +65,6 @@ test("AC3: the removal dialog offers people to take the tasks and no 'leave unas
   const dlg = admin.page.getByRole("dialog");
   await expect(dlg.getByText("Who takes their tasks?")).toBeVisible();
   await expect(dlg.getByText(/unassigned/i)).toHaveCount(0);
-  await dlg.getByRole("button", { name: "Cancel" }).click().catch(() => {});
 });
 
 test("AC4: the Leader cannot be removed or have their role changed here; the message points to Change Leader", async ({ admin, member, later }) => {
