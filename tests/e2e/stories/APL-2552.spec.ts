@@ -33,7 +33,7 @@ test("AC1: under 600 px a bottom bar with 4 tabs is visible, each 44 px high, th
   await expect(tabs).toHaveCount(4);
   await expect(tabs.nth(0)).toContainText("My tasks");
   await expect(tabs.nth(3)).toContainText("More");
-  for (let i = 0; i < 4; i++) { const b = (await tabs.nth(i).boundingBox())!; expect(b.height).toBeGreaterThanOrEqual(44); expect(b.width).toBeGreaterThanOrEqual(44); }
+  for (let i = 0; i < 4; i++) { await expect(tabs.nth(i)).toBeVisible(); const b = (await tabs.nth(i).boundingBox())!; expect(b.height).toBeGreaterThanOrEqual(44); expect(b.width).toBeGreaterThanOrEqual(44); }
   await expect(tabs.nth(0)).toHaveAttribute("aria-current", "page");
   // It sits at the bottom edge and pads for the home indicator.
   const nb = (await page.locator("nav.tabbar").boundingBox())!;

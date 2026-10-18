@@ -4,7 +4,7 @@ import { test as base, expect, type APIRequestContext, type Browser, type Browse
 export { expect };
 
 /** One id per run so names never clash between runs. */
-export const RUN = Date.now().toString(36);
+export const RUN = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 /** Every record a spec creates is named with this prefix, so a person can find and delete leftovers. */
 export const zz = (label: string) => `ZZ-TEST ${label} ${RUN}`;
 
