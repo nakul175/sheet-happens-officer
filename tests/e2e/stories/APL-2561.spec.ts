@@ -1,13 +1,13 @@
 // SHO-US-14.2 Honest loading, empty, error and offline states (Linear APL-2561).
 // Network failures and slow loads are simulated in the browser (route interception), so nothing on the server is touched.
 // The project-screen slow load runs whenever PR #12 is live on staging (tests/e2e/helpers/jim-gate.ts) and skips otherwise.
-import { test, expect, zz } from "../support";
+import { test, expect, zz, type Json } from "../support";
 import { newProject } from "../g2";
 import { notLive, prLive } from "../helpers/jim-gate";
 
 const WHY = "a slow project load shows \"Could not reach the server.\" instead of a skeleton without it.";
 
-async function project(admin: { api: import("../support").Api; user: Record<string, any> }, later: (f: () => Promise<unknown>) => void, label: string) {
+async function project(admin: { api: import("../support").Api; user: Json }, later: (f: () => Promise<unknown>) => void, label: string) {
   const r = await admin.api.post("/api/projects", { name: zz(label), leaderId: admin.user.id });
   expect(r.status).toBe(201);
   const id = r.json.project.id as string;
@@ -92,10 +92,10 @@ test("AC5: Retry succeeds and the screen loads without a full page reload", asyn
   await page.route(re, (r) => r.abort("connectionfailed"));
   await page.goto(`/projects/${p.id}`);
   await expect(page.getByText("Could not reach the server.")).toBeVisible();
-  await page.evaluate(() => { (window as any).__noReload = "still here"; });
+  await page.evaluate(() => { (window as Window & { __noReload?: string }).__noReload = "still here"; });
   await page.unroute(re); // the network is back
   await page.getByRole("button", { name: "Retry" }).click();
   await expect(page.getByText(p.name).first()).toBeVisible();
   await expect(page.getByText("Could not reach the server.")).toHaveCount(0);
-  expect(await page.evaluate(() => (window as any).__noReload)).toBe("still here"); // same document: no reload
+  expect(await page.evaluate(() => (window as Window & { __noReload?: string }).__noReload)).toBe("still here"); // same document: no reload
 });

@@ -1,11 +1,11 @@
 // SHO-US-4.3 Assign a task and add collaborators (Linear APL-2493).
 // The Super Admin acts as Leader; the plain Member (SHO_MEMBER_*) is the assignee / collaborator / Viewer. Member tests skip without it.
-import { test, expect, zz } from "../support";
+import { test, expect, zz, type Api } from "../support";
 import { ghost, getTask, newProject, newTask } from "../g2";
 
-const mentions = async (who: { api: any }, text: string) =>
+const mentions = async (who: { api: Api }, text: string) =>
   ((await who.api.get("/api/notifications")).json.items as { text: string }[]).filter((n) => n.text.includes(text)).length;
-const inMyTasks = async (who: { api: any }, id: string) => JSON.stringify((await who.api.get("/api/my-tasks")).json).includes(id);
+const inMyTasks = async (who: { api: Api }, id: string) => JSON.stringify((await who.api.get("/api/my-tasks")).json).includes(id);
 
 test("AC1: an assignee sees the task in My tasks and is notified; so is an added collaborator", async ({ admin, member, later }) => {
   const p = await newProject(admin, later, { label: "4.3 ac1", members: [{ who: member, role: "EDITOR" }] });

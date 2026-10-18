@@ -1,8 +1,8 @@
 // SHO-US-14.7 Global search and command palette (Linear APL-2566).
-import { test, expect, zz, RUN } from "../support";
+import { test, expect, zz, RUN, type Json } from "../support";
 import { newProject } from "../g2";
 
-type Who = { api: import("../support").Api; user: Record<string, any>; page: import("@playwright/test").Page };
+type Who = { api: import("../support").Api; user: Json; page: import("@playwright/test").Page };
 
 async function projectWithTask(admin: Who, later: (f: () => Promise<unknown>) => void, label: string, title: string) {
   const r = await admin.api.post("/api/projects", { name: zz(label), leaderId: admin.user.id });
@@ -42,14 +42,14 @@ test("AC2: two letters show matching tasks within 500 ms, with project and assig
   const box = page.getByRole("combobox", { name: /Search tasks/ });
   // Two letters: results for a task appear in well under 500 ms. Timed inside the page, from the second letter to the first result row.
   await page.evaluate(() => {
-    const w = window as any;
+    const w = window as Window & { __t0?: number; __t1?: number };
     w.__t0 = undefined; w.__t1 = undefined;
     document.addEventListener("input", (e) => { const el = e.target as HTMLInputElement; if (el.getAttribute("role") === "combobox" && el.value.length === 2 && w.__t0 === undefined) w.__t0 = performance.now(); }, true);
     new MutationObserver(() => { if (w.__t0 !== undefined && w.__t1 === undefined && document.querySelector("[role=dialog] [role=option] small")) w.__t1 = performance.now(); }).observe(document.body, { childList: true, subtree: true });
   });
   await box.pressSequentially("Zq");
   await expect(palette(page).getByRole("option").filter({ has: page.locator("small") }).first()).toBeVisible({ timeout: 5000 });
-  const ms = await page.evaluate(() => (window as any).__t1 - (window as any).__t0);
+  const ms = await page.evaluate(() => (window as unknown as { __t1: number }).__t1 - (window as unknown as { __t0: number }).__t0);
   expect(ms, "first results after the second letter").toBeLessThan(500);
   // Finish the unique word: our task is the first hit, with its project and its assignee.
   await box.pressSequentially(word.slice(2));
