@@ -1,7 +1,7 @@
 // Integration tests for reminders (7.4), search (3.2/3.6 AC6), Usage (9.2 AC3) and sign-out everywhere (1.6 AC3).
 // Server must run with SUPER_ADMIN_EMAILS=root.test@aplyd.com, JOB_SECRET set and the same EMAIL_OUTBOX_DIR.
 import { describe, expect, it } from "vitest";
-import { Client, PW, account, istDate, project, superAdmin, task } from "./helpers";
+import { Client, PW, account, istDate, project, superAdmin, task, patchTask } from "./helpers";
 
 const SECRET = process.env.JOB_SECRET ?? "";
 const runJob = (name: string) => fetch(`${process.env.TASKBOARD_URL ?? "http://localhost:3000"}/api/jobs/${name}`, { method: "POST", headers: { authorization: `Bearer ${SECRET}` } });
@@ -23,7 +23,7 @@ describe("reminders (7.4)", () => {
     const done = await mk("R-done", istDate(1));
     const blocked = await mk("R-blocked", istDate(1));
     expect((await w.c.post(`/api/tasks/${done}/complete`)).status).toBe(200);
-    expect((await lead.c.patch(`/api/tasks/${blocked}`, { blocked: true })).status).toBe(200);
+    expect((await patchTask(lead, blocked, { blocked: true })).status).toBe(200);
     expect((await runJob("reminders")).status).toBe(200);
     expect((await runJob("reminders")).status).toBe(200); // same day: no second reminder
     const t = await texts(w);

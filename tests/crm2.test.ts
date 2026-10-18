@@ -1,6 +1,6 @@
 // CRM slice 2: next step notices (12.5), parties (12.4), board data (12.6 AC2, AC3, AC6).
 import { describe, expect, it } from "vitest";
-import { account, istDate, task, type Account } from "./helpers";
+import { account, istDate, task, type Account, patchTask } from "./helpers";
 
 let seq = 0;
 async function setup(leader: Account, bid = false) {
@@ -52,7 +52,7 @@ describe("next step notices (12.5)", () => {
     const lead = await account("nstrash");
     const d = await setup(lead);
     const t = (await d.nextId())!;
-    expect((await lead.c.patch(`/api/tasks/${t}`, { dueDate: null })).status).toBe(200);
+    expect((await patchTask(lead, t, { dueDate: null })).status).toBe(200);
     expect(await notices(lead, d.id)).toHaveLength(1);
     const d2 = await setup(lead);
     const t2 = (await d2.nextId())!;
