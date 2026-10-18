@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const TYPECHECK = "next typegen && tsc --noEmit";
+const TYPECHECK = "node scripts/typecheck.mjs";
 
 const SKIP_TOP = new Set(["node_modules", ".next", ".git", ".outbox", ".outbox-ci", "coverage", "test-results", "out", "build"]);
 
@@ -26,7 +26,7 @@ function cpProject(dir: string) {
       const top = rel.split(path.sep)[0];
       if (SKIP_TOP.has(top)) return false;
       if (top.startsWith(".env") && top !== ".env.example") return false;
-      if (rel.endsWith(".tsbuildinfo")) return false;
+      if (rel === "next-env.d.ts" || rel.endsWith(".tsbuildinfo")) return false;
       return true;
     },
   });
@@ -90,13 +90,22 @@ function baseline(dir: string) {
   git(dir, ["commit", "-m", "baseline"]);
 }
 
-/** Porcelain paths that are not inside .next. Empty means nothing changed outside .next. */
-function changesOutsideNext(dir: string): string[] {
-  return git(dir, ["status", "--porcelain"]).split("\n").filter((line) => {
-    if (!line.trim()) return false;
-    const file = line.slice(3);
-    return file !== ".next" && !file.startsWith(".next/");
-  });
+/** `git status --porcelain --ignored` lines outside .next. Ignored root files count. */
+function statusOutsideNext(dir: string): string[] {
+  return git(dir, ["status", "--porcelain", "--ignored"])
+    .split("\n")
+    .map((line) => line.trimEnd())
+    .filter((line) => {
+      if (!line.trim()) return false;
+      const file = line.slice(3);
+      return file !== ".next" && file !== ".next/" && !file.startsWith(".next/");
+    })
+    .sort();
+}
+
+function assertFreshRoot(dir: string) {
+  expect(existsSync(path.join(dir, "next-env.d.ts")), "fresh checkout has no next-env.d.ts").toBe(false);
+  expect(existsSync(path.join(dir, "tsconfig.tsbuildinfo")), "fresh checkout has no tsconfig.tsbuildinfo").toBe(false);
 }
 
 function runTypecheck(cwd: string) {
@@ -120,8 +129,15 @@ describe("One command type-checks the project, in CI", () => {
 
       const script = scriptOf(dir);
       expect(script).toBe(TYPECHECK);
-      expect(script.indexOf("tsc --noEmit")).toBeGreaterThan(script.indexOf("next typegen"));
+      const runner = readFileSync(path.join(dir, "scripts", "typecheck.mjs"), "utf8");
+      const typegenAt = runner.indexOf('["typegen"]');
+      const tscAt = runner.indexOf('"--noEmit"');
+      expect(typegenAt).toBeGreaterThanOrEqual(0);
+      expect(tscAt).toBeGreaterThan(typegenAt);
+      expect(runner).toContain(".next/cache/tsconfig.tsbuildinfo");
+      assertFreshRoot(dir);
       baseline(dir);
+      const before = statusOutsideNext(dir);
 
       const first = runTypecheck(dir);
       expect(first.error, first.output).toBeUndefined();
@@ -130,14 +146,16 @@ describe("One command type-checks the project, in CI", () => {
       expect(existsSync(routes), "next typegen wrote into .next").toBe(true);
       expect(readTrace(trace), "tsc ran").toEqual(["tsc"]);
       expect(statSync(trace).mtimeMs).toBeGreaterThanOrEqual(statSync(routes).mtimeMs);
-      expect(changesOutsideNext(dir), "git status is clean outside .next").toEqual([]);
+      expect(statusOutsideNext(dir), "git status --porcelain --ignored is unchanged outside .next").toEqual(before);
+      assertFreshRoot(dir);
 
       expect(existsSync(path.join(dir, ".next")), ".next present for the second run").toBe(true);
       const second = runTypecheck(dir);
       expect(second.error, second.output).toBeUndefined();
       expect(second.status, second.output).toBe(0);
       expect(readTrace(trace)).toEqual(["tsc", "tsc"]);
-      expect(changesOutsideNext(dir), "git status is clean outside .next").toEqual([]);
+      expect(statusOutsideNext(dir), "git status --porcelain --ignored is unchanged outside .next").toEqual(before);
+      assertFreshRoot(dir);
     } finally {
       cleanup(dir, trace);
     }
@@ -149,14 +167,18 @@ describe("One command type-checks the project, in CI", () => {
     try {
       const rel = path.join("src", "zz-test-type-error.ts");
       writeFileSync(path.join(dir, rel), 'const n: number = "x";\n');
+      assertFreshRoot(dir);
       baseline(dir);
+      const before = statusOutsideNext(dir);
 
       const result = runTypecheck(dir);
       expect(result.error, result.output).toBeUndefined();
       expect(result.status, result.output).not.toBe(0);
       expect(result.output).toMatch(/zz-test-type-error\.ts(?:\(|:)1\b/);
       expect(existsSync(path.join(dir, ".next", "types", "routes.d.ts")), "typegen may write into .next").toBe(true);
-      expect(changesOutsideNext(dir), "git status is clean outside .next").toEqual([]);
+      // qa:TC-APL2676-8bfc1379@v2 — nothing outside .next, including ignored next-env.d.ts and tsbuildinfo.
+      expect(statusOutsideNext(dir), "git status --porcelain --ignored changed outside .next").toEqual(before);
+      assertFreshRoot(dir);
       expect(existsSync(path.join(dir, "dist"))).toBe(false);
       expect(existsSync(path.join(dir, "src", "zz-test-type-error.js"))).toBe(false);
       expect(readTrace(trace)).toEqual(["tsc"]);
@@ -165,10 +187,10 @@ describe("One command type-checks the project, in CI", () => {
     }
   }, 120_000);
 
-  // TC-APL2676-8399450a@v1 · Typegen failure stops the script before tsc
+  // qa:TC-APL2676-8399450a@v2 · Typegen failure stops the script before tsc
   // Pre: clean clone; break next config in a scratch copy.
   // Expected: npm run typecheck exits non-zero and tsc does not run.
-  it("A typegen failure stops the script before tsc (TC-APL2676-8399450a@v1)", () => {
+  it("A typegen failure stops the script before tsc (qa:TC-APL2676-8399450a@v2)", () => {
     const dir = freshClone();
     const trace = prepare(dir);
     try {
