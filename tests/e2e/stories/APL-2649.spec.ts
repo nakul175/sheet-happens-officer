@@ -3,7 +3,8 @@
 // An Editor's delete does not carry an Undo id, so the toast is not raised.
 import { test, expect } from "../support";
 import { newProject, newTask, type Who } from "../g2";
-import { deleteTask, undoToast } from "../helpers/jim-http";
+import { deleteTask } from "../helpers/jim-http";
+import { clickAboveTabBar } from "../helpers/screen-row";
 
 test.beforeAll(() => {
   test.skip(!process.env.SHO_QA_PASS, "Set SHO_QA_PASS (the shared password for the nakul17+ accounts).");
@@ -12,9 +13,10 @@ test.beforeAll(() => {
 /** Open the task on its project page and move it to Trash through the task's own dialog. */
 async function trashFromScreen(who: Who, projectId: string, taskId: string) {
   await who.page.goto(`/projects/${projectId}?task=${taskId}`);
-  await who.page.getByRole("button", { name: "Move to Trash" }).click();
+  await clickAboveTabBar(who.page.getByRole("dialog", { name: "Task" }).getByRole("button", { name: "Move to Trash" }));
   await who.page.getByRole("dialog", { name: "Move to Trash?" }).getByRole("button", { name: "Move to Trash" }).click();
   await expect(who.page.getByRole("dialog", { name: "Move to Trash?" })).toHaveCount(0);
+  await expect(who.page.getByRole("dialog", { name: "Task" })).toHaveCount(0);
 }
 
 test.describe("APL-2649", () => {
@@ -24,8 +26,8 @@ test.describe("APL-2649", () => {
     const p = await newProject(admin, later, { label: "2649 editor", members: [{ who: member, role: "EDITOR" }] });
     const t = await newTask(admin, p.id);
     await trashFromScreen(member, p.id, t);
-    await member.page.waitForTimeout(1000); // the toast is raised as soon as the answer arrives; give it time to (not) appear
-    await expect(undoToast(member).getByRole("button", { name: "Undo" })).toHaveCount(0);
+    await expect.poll(async () => (await member.api.get(`/api/tasks/${t}`)).status).toBe(404);
+    await expect(member.page.getByRole("status").filter({ hasText: "Task deleted" })).toHaveCount(0);
     expect((await member.api.get(`/api/tasks/${t}`)).status).toBe(404); // the delete itself went through
     // The server sends no Undo id either, so no other screen can raise the toast.
     const t2 = await newTask(admin, p.id);
@@ -40,7 +42,7 @@ test.describe("APL-2649", () => {
     const p = await newProject(admin, later, { label: "2649 leader" });
     const t = await newTask(admin, p.id);
     await trashFromScreen(admin, p.id, t);
-    const toast = undoToast(admin);
+    const toast = admin.page.getByRole("status").filter({ hasText: "Task deleted." });
     await expect(toast).toContainText("Task deleted.");
     await expect.poll(async () => (await admin.api.get(`/api/tasks/${t}`)).status).toBe(404);
     await toast.getByRole("button", { name: "Undo" }).click();

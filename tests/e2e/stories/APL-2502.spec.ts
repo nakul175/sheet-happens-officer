@@ -4,6 +4,7 @@
 // Data: every project and task is named "ZZ-TEST ..."; projects are archived afterwards.
 import { test, expect, zz, type Who } from "../support";
 import { localSql, runLocalJob, sourceOf, sqlId } from "../helpers/local-clock";
+import { clickAboveTabBar } from "../helpers/screen-row";
 
 test.beforeAll(() => {
   test.skip(!process.env.SHO_QA_PASS, "Set SHO_QA_PASS (the shared password for the nakul17+ accounts).");
@@ -30,7 +31,7 @@ test("AC1: deleting a task with subtasks takes both out of the views, lists them
   const t = await mk(admin, p.id, zz("parent to delete"));
   const sub = await mk(admin, p.id, zz("its subtask"), { parentId: t });
   await admin.page.goto(`/projects/${p.id}?task=${t}`);
-  await admin.page.getByRole("button", { name: "Move to Trash" }).click();
+  await clickAboveTabBar(admin.page.getByRole("dialog", { name: "Task" }).getByRole("button", { name: "Move to Trash" }));
   await admin.page.getByRole("dialog", { name: "Move to Trash?" }).getByRole("button", { name: "Move to Trash" }).click();
   const toast = admin.page.getByRole("status").filter({ hasText: "Task deleted" });
   await expect(toast).toBeVisible();
@@ -63,11 +64,6 @@ test("APL-2502 AC2: purge-trash removes a task that has been in Trash for 30 day
   const aged = await mk(admin, p.id, zz("aged out"));
   expect((await admin.api.del(`/api/tasks/${fresh}`)).status).toBe(204);
   expect((await admin.api.del(`/api/tasks/${aged}`)).status).toBe(204);
-  const body = sourceOf("src/lib/tasks.ts", "export async function purgeTrash", "export async function myTasks");
-  expect(body).toContain("const cutoff = new Date(now.getTime() - 30 * 86400_000)");
-  expect(body).toContain("deletedAt: { lte: cutoff }");
-  expect(body).toContain('event: "TASK_PURGED"');
-  expect(sourceOf("src/lib/jobs.ts", "export const JOBS", "const DAILY_GRACE_HOURS")).toContain('name: "purge-trash", about: "Removes tasks that have been in Trash for 30 days"');
   const kept = (await admin.api.get(`/api/projects/${p.id}/trash`)).json.items.find((i: { id: string; daysLeft: number }) => i.id === fresh);
   expect(kept.daysLeft).toBe(30);
 
@@ -84,6 +80,16 @@ test("APL-2502 AC2: purge-trash removes a task that has been in Trash for 30 day
     const after = (await admin.api.get("/api/audit?event=TASK_PURGED")).json.items as { id: string }[];
     expect(after.length, "one audit row for the purge run").toBe(before.length + 1);
   }
+});
+
+// qa:TC missing
+test("APL-2502 AC2: purge-trash keeps a task for 30 days before it removes it @static", async () => {
+  test.info().annotations.push({ type: "qa:TC", description: "qa:TC missing" });
+  const body = sourceOf("src/lib/tasks.ts", "export async function purgeTrash", "export async function myTasks");
+  expect(body).toContain("const cutoff = new Date(now.getTime() - 30 * 86400_000)");
+  expect(body).toContain("deletedAt: { lte: cutoff }");
+  expect(body).toContain('event: "TASK_PURGED"');
+  expect(sourceOf("src/lib/jobs.ts", "export const JOBS", "const DAILY_GRACE_HOURS")).toContain('name: "purge-trash", about: "Removes tasks that have been in Trash for 30 days"');
 });
 
 // qa:TC missing
