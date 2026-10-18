@@ -93,7 +93,8 @@ async function withMode<T>(mode: "admins" | "all" | "unset", fn: () => Promise<T
 }
 
 async function bellOf(who: Account, orgRole: "MEMBER" | "ADMIN", mode: "admins" | "all" | "unset"): Promise<BellPage> {
-  return withMode(mode, () => listNotifications({ id: who.id, orgRole, name: who.name }));
+  const page = await withMode(mode, () => listNotifications({ id: who.id, orgRole, name: who.name }));
+  return { unread: page.unread, items: page.items.map((item) => ({ text: item.text, href: item.href })) };
 }
 
 /** The same check the hidden bell must fail: a deal name, task title, stage, or deal href. */
@@ -109,7 +110,8 @@ function assertNoDealLeak(body: string, label: string) {
 function httpBell(who: Account) {
   return who.c.get("/api/notifications").then((r) => {
     expect(r.status, JSON.stringify(r.json)).toBe(200);
-    return r.json as { unread: number; items: { text: string; href: string | null }[] };
+    const items = (r.json.items as { text: string; href: string | null }[]).map((item) => ({ text: item.text, href: item.href }));
+    return { unread: r.json.unread as number, items };
   });
 }
 
