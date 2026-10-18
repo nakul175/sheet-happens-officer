@@ -4,13 +4,14 @@ import { Skeleton } from "@/components/ui";
 export type UsageRole = "MEMBER" | "ADMIN" | "SUPER_ADMIN";
 
 /**
- * What GET /api/usage returns. `messages` and `quickActions` stay on the type so a later
+ * What GET /api/usage returns. `ceiling.percent` is the display string ("13%", "0%", "<1%", "120%"),
+ * not a bare integer. `messages` and `quickActions` stay on the type so a later
  * section can read them; this screen does not show them (APL-2641).
  */
 export type UsagePayload = {
   monthStart: string;
   weekStart: string;
-  ceiling: { usd: number; spendUsd: number; percent: number };
+  ceiling: { usd: number; spendUsd: number; percent: string };
   month: { calls: number; inputTokens: number; outputTokens: number; costUsd: number; messages?: number };
   quickActions?: { id: string; label: string; count: number }[];
   people: { id: string; name: string; monthCalls: number; weekCalls: number; monthCostUsd: number }[];
@@ -32,10 +33,21 @@ export function usagePath(role: UsageRole): "/api/usage" | null {
 
 export const formatUsd = (n: number) => `$${n.toFixed(2)}`;
 
-/** Bar width. The painted percentage is the API figure, which can pass 100 when calls already running finish. */
-export function meterWidth(percent: number) {
-  if (!Number.isFinite(percent) || percent <= 0) return 0;
-  return Math.min(100, percent);
+/**
+ * Bar width from the display string `/api/usage` returns.
+ * The bar stops at 100. The percentage text does not.
+ * "<1%" paints the true share, which stays under 1.
+ */
+export function meterWidth(percent: string, spendUsd = 0, ceilingUsd = 0) {
+  if (percent === "<1%") {
+    if (!(ceilingUsd > 0) || !(spendUsd > 0)) return 0;
+    const raw = (spendUsd / ceilingUsd) * 100;
+    if (!Number.isFinite(raw) || raw <= 0) return 0;
+    return Math.min(raw, 0.99);
+  }
+  const n = Number.parseInt(percent, 10);
+  if (!Number.isFinite(n) || n <= 0) return 0;
+  return Math.min(100, n);
 }
 
 export function UsageContents({ role, loading, error, data }: {
@@ -60,12 +72,12 @@ export function UsageContents({ role, loading, error, data }: {
   );
 }
 
-/** Spend to date, the monthly ceiling and the percentage used, taken from `ceiling` as /api/usage returns it. */
+/** Spend to date, the monthly ceiling and the percentage used. `percent` is the display string `/api/usage` returns; this does not add another % sign. */
 export function SpendCeiling({ ceiling }: { ceiling: UsagePayload["ceiling"] }) {
   const amount = formatUsd(ceiling.spendUsd);
   const cap = formatUsd(ceiling.usd);
-  const pct = `${ceiling.percent}%`;
-  const width = meterWidth(ceiling.percent);
+  const pct = ceiling.percent;
+  const width = meterWidth(ceiling.percent, ceiling.spendUsd, ceiling.usd);
   return (
     <section className="card">
       <h2 className="usage-h" id="usage-ceiling">Spend against the monthly ceiling</h2>
