@@ -80,7 +80,7 @@ async function dealState(projectId: string) {
 }
 
 describe("APL-2691 Move to Won dialog", () => {
-  it("@APL-2691 TC1 AC1: Move to Won shows an alert with 21, the first 20 tasks, and how many remain", async () => {
+  it("@APL-2691 qa:TC-APL2691-8d4e9e0b@v1 TC1 AC1: Move to Won shows an alert with 21, the first 20 tasks, and how many remain", async () => {
     const { dialog, alert } = await openStage(wonId, "Won");
     const text = await alert.innerText();
     expect(text).toContain("21");
@@ -97,7 +97,7 @@ describe("APL-2691 Move to Won dialog", () => {
     await dialog.getByRole("button", { name: "Cancel" }).click();
   }, 60000);
 
-  it("@APL-2691 TC2 AC2: Move to Lost says 1 open task and lists that task", async () => {
+  it("@APL-2691 qa:TC-APL2691-c3d4c477@v1 TC2 AC2: Move to Lost says 1 open task and lists that task", async () => {
     const { dialog, alert } = await openStage(lostId, "Lost");
     const text = await alert.innerText();
     expect(text).toContain("1 open task");
@@ -113,7 +113,7 @@ describe("APL-2691 Move to Won dialog", () => {
     await dialog.getByRole("button", { name: "Cancel" }).click();
   }, 60000);
 
-  it("@APL-2691 TC4: the dialog points at the alert with aria-describedby and focus moves to it", async () => {
+  it("@APL-2691 qa:TC-APL2691-b797e18b@v1 TC4: the dialog points at the alert with aria-describedby and focus moves to it", async () => {
     await page.goto(`/projects/${wonId}`);
     await page.getByRole("group", { name: "Stage" }).getByRole("button", { name: "Won", exact: true }).click();
     await page.waitForFunction(() => {

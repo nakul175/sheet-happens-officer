@@ -64,7 +64,7 @@ async function pipelines(a: Account) {
 }
 
 describe("open tasks that block Won (APL-2691)", () => {
-  it("@APL-2691 TC3 AC3: Won returns 409 with openTasks 21 and does not move, close, or archive the deal", async () => {
+  it("@APL-2691 qa:TC-APL2691-6ec60bba@v1 TC3 AC3: Won returns 409 with openTasks 21 and does not move, close, or archive the deal", async () => {
     const sa = await superAdmin();
     const lead = await admin(sa, "won2691");
     const pipes = await pipelines(lead);

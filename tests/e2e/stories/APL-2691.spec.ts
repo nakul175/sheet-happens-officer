@@ -1,7 +1,7 @@
 // APL-2691: Move to Won / Lost shows why it is refused (APL-2529 AC6).
 // One test per acceptance criterion. ZZ-TEST deals and organisations are archived afterwards.
 // The Super Admin acts as Leader. workers is 1 in playwright.config.ts. Traces stay off.
-// Pam has not published qa:TC-APL2691 ids, so the tags are the ones on the acceptance criteria.
+// Pam's ids sit in the title, next to the acceptance-criteria tag, the same way the other story specs do.
 import { test, expect, zz } from "../support";
 import { getTask, newTask, ymd, type Who } from "../g2";
 
@@ -56,7 +56,7 @@ test.describe("APL-2691", { tag: "@APL-2691" }, () => {
   test.describe.configure({ timeout: 180_000 });
 
   test(
-    "AC1: the Move to Won dialog shows an alert containing 21 within 10s, lists the first 20 open tasks, and nothing is closed or archived",
+    "@APL-2691 qa:TC-APL2691-8d4e9e0b@v1 AC1: the Move to Won dialog shows an alert containing 21 within 10s, lists the first 20 open tasks, and nothing is closed or archived",
     { tag: ["@APL-2691", "@AC1"] },
     async ({ admin, later }) => {
       const step = zz("won step");
@@ -84,7 +84,7 @@ test.describe("APL-2691", { tag: "@APL-2691" }, () => {
   );
 
   test(
-    'AC2: Move to Lost says "1 open task" and lists that task',
+    '@APL-2691 qa:TC-APL2691-c3d4c477@v1 AC2: Move to Lost says "1 open task" and lists that task',
     { tag: ["@APL-2691", "@AC2"] },
     async ({ admin, later }) => {
       const step = zz("lost step");
@@ -110,7 +110,7 @@ test.describe("APL-2691", { tag: "@APL-2691" }, () => {
   );
 
   test(
-    "AC3: POST /api/projects/{id}/stage with Won still returns 409 with openTasks 21",
+    "@APL-2691 qa:TC-APL2691-6ec60bba@v1 AC3: POST /api/projects/{id}/stage with Won still returns 409 with openTasks 21",
     { tag: ["@APL-2691", "@AC3"] },
     async ({ admin, later }) => {
       const step = zz("api step");
