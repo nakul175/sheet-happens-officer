@@ -106,11 +106,11 @@ async function plan(row: any, user: Actor, projectId: string): Promise<Plan> {
       return {
         conflicts: [], subject: t.title,
         apply: async (tx) => {
-          if (t.parentId) { await tx.task.update({ where: { id }, data: { completedAt: null } }); return; }
+          if (t.parentId) { await tx.task.update({ where: { id }, data: { completedAt: null, completedWithParent: false } }); return; }
           const sec = b.sectionId ? await tx.section.findFirst({ where: { id: b.sectionId, projectId, isDone: false } }) : null;
           const dest = sec ?? (await tx.section.findFirstOrThrow({ where: { projectId, isDone: false }, orderBy: { position: "asc" } }));
           await tx.task.update({ where: { id }, data: { completedAt: null, sectionId: dest.id, previousSectionId: b.previousSectionId ?? null } });
-          if (Array.isArray(f.subtaskIds) && f.subtaskIds.length) await tx.task.updateMany({ where: { id: { in: f.subtaskIds } }, data: { completedAt: null } });
+          if (Array.isArray(f.subtaskIds) && f.subtaskIds.length) await tx.task.updateMany({ where: { id: { in: f.subtaskIds } }, data: { completedAt: null, completedWithParent: false } });
         },
       };
     }
@@ -122,7 +122,10 @@ async function plan(row: any, user: Actor, projectId: string): Promise<Plan> {
         apply: async (tx) => {
           if (t.parentId) { await tx.task.update({ where: { id }, data: { completedAt: new Date(b.completedAt ?? Date.now()) } }); return; }
           const done = await tx.section.findFirstOrThrow({ where: { projectId, isDone: true } });
-          await tx.task.update({ where: { id }, data: { completedAt: new Date(b.completedAt ?? Date.now()), sectionId: done.id, previousSectionId: t.sectionId } });
+          const at = new Date(b.completedAt ?? Date.now());
+          await tx.task.update({ where: { id }, data: { completedAt: at, sectionId: done.id, previousSectionId: t.sectionId } });
+          // The subtasks that reopened with it close with it again (APL-2610 AC4).
+          if (Array.isArray(f.subtaskIds) && f.subtaskIds.length) await tx.task.updateMany({ where: { id: { in: f.subtaskIds }, completedAt: null }, data: { completedAt: at, completedWithParent: true } });
         },
       };
     }
@@ -298,9 +301,11 @@ async function plan(row: any, user: Actor, projectId: string): Promise<Plan> {
           await tx.section.update({ where: { id: b.doneSectionId }, data: { isDone: true } });
           // Parents closed by the change reopen, and so do the subtasks that closed with them (SHO-BUG-3).
           const closed = [...(Array.isArray(f.completedTaskIds) ? f.completedTaskIds : []), ...(Array.isArray(f.completedSubtaskIds) ? f.completedSubtaskIds : [])];
-          if (closed.length) await tx.task.updateMany({ where: { id: { in: closed } }, data: { completedAt: null } });
-          const reopened = [...(Array.isArray(b.reopenedTaskIds) ? b.reopenedTaskIds : []), ...(Array.isArray(b.reopenedSubtaskIds) ? b.reopenedSubtaskIds : [])];
-          if (reopened.length) await tx.task.updateMany({ where: { id: { in: reopened }, completedAt: null }, data: { completedAt: new Date() } });
+          if (closed.length) await tx.task.updateMany({ where: { id: { in: closed } }, data: { completedAt: null, completedWithParent: false } });
+          const now = new Date();
+          if (Array.isArray(b.reopenedTaskIds) && b.reopenedTaskIds.length) await tx.task.updateMany({ where: { id: { in: b.reopenedTaskIds }, completedAt: null }, data: { completedAt: now } });
+          // Only subtasks that had closed with their parent were reopened, so they close with it again (APL-2610 AC4).
+          if (Array.isArray(b.reopenedSubtaskIds) && b.reopenedSubtaskIds.length) await tx.task.updateMany({ where: { id: { in: b.reopenedSubtaskIds }, completedAt: null }, data: { completedAt: now, completedWithParent: true } });
         },
       };
     }

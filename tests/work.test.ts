@@ -248,6 +248,38 @@ describe("sections (5.4)", () => {
     expect(await completedRows(since)).toEqual(all);
     expect((await lead.c.get(`/api/tasks/${parent}`)).json.task.sectionId).toBe(p.done);
   });
+
+  it("moving the done flag away reopens only the subtasks that closed with their parent; one ticked done on its own stays done (APL-2610 AC4, APL-2671)", async () => {
+    const lead = await account("lead");
+    const p = await project(lead, lead);
+    const parent = await task(lead, p.id, { title: "Parent", sectionId: p.doing });
+    const own = await task(lead, p.id, { parentId: parent });
+    const cascade = await task(lead, p.id, { parentId: parent });
+    const completedAt = async (id: string) => (await lead.c.get(`/api/tasks/${id}`)).json.task.completedAt as string | null;
+
+    // A is ticked done on its own; then "In progress" becomes the done section, which closes the parent and B with it.
+    expect((await lead.c.post(`/api/tasks/${own}/complete`)).status).toBe(200);
+    const ownAt = await completedAt(own);
+    expect((await lead.c.patch(`/api/projects/${p.id}/sections/${p.doing}`, { isDone: true })).status).toBe(200);
+    for (const id of [parent, own, cascade]) expect(await completedAt(id)).not.toBeNull();
+    expect(await completedAt(own)).toBe(ownAt);
+
+    // Moving the done flag back reopens the parent and B; A stays done.
+    const back = await lead.c.patch(`/api/projects/${p.id}/sections/${p.done}`, { isDone: true });
+    expect(back.status, JSON.stringify(back.json)).toBe(200);
+    expect(await completedAt(parent)).toBeNull();
+    expect(await completedAt(cascade)).toBeNull();
+    expect(await completedAt(own)).toBe(ownAt);
+    expect((await lead.c.get(`/api/tasks/${parent}`)).json.task.subtasks).toEqual({ total: 2, open: 1 });
+    // Undo of that move closes the parent and B again; A is untouched throughout.
+    expect((await lead.c.post(`/api/actions/${back.headers.get("x-undo-id")}/undo`)).status).toBe(200);
+    for (const id of [parent, own, cascade]) expect(await completedAt(id)).not.toBeNull();
+    expect(await completedAt(own)).toBe(ownAt);
+    // And after that undo, B still counts as closed with its parent: moving the flag back again reopens it, not A.
+    expect((await lead.c.patch(`/api/projects/${p.id}/sections/${p.done}`, { isDone: true })).status).toBe(200);
+    expect(await completedAt(cascade)).toBeNull();
+    expect(await completedAt(own)).toBe(ownAt);
+  });
 });
 
 describe("tasks (4.x, 5.x)", () => {
@@ -348,6 +380,50 @@ describe("tasks (4.x, 5.x)", () => {
     const back = (await lead.c.get(`/api/tasks/${t}`)).json.task;
     expect(back.sectionId).toBe(p.doing);
     expect(back.completedAt).toBeNull();
+  });
+
+  it("reopening a parent reopens the subtasks that closed with it and leaves ones ticked done on their own done (APL-2610 AC4, APL-2671 AC1-AC3)", async () => {
+    const lead = await account("lead");
+    const p = await project(lead, lead);
+    const completedAt = async (id: string) => (await lead.c.get(`/api/tasks/${id}`)).json.task.completedAt as string | null;
+
+    // AC1: both subtasks close with the parent, so both reopen with it.
+    const t1 = await task(lead, p.id, { sectionId: p.doing });
+    const both = [await task(lead, p.id, { parentId: t1 }), await task(lead, p.id, { parentId: t1 })];
+    expect((await lead.c.post(`/api/tasks/${t1}/complete`, { completeAll: true })).status).toBe(200);
+    for (const id of both) expect(await completedAt(id)).not.toBeNull();
+    expect((await lead.c.post(`/api/tasks/${t1}/reopen`)).status).toBe(200);
+    for (const id of both) expect(await completedAt(id)).toBeNull();
+
+    // AC2/AC3: A is ticked done on its own, B closes with the parent; reopening the parent reopens B only.
+    const t2 = await task(lead, p.id, { sectionId: p.doing });
+    const a = await task(lead, p.id, { parentId: t2 });
+    const b = await task(lead, p.id, { parentId: t2 });
+    expect((await lead.c.post(`/api/tasks/${a}/complete`)).status).toBe(200);
+    const aAt = await completedAt(a);
+    expect((await lead.c.post(`/api/tasks/${t2}/complete`, { completeAll: true })).status).toBe(200);
+    expect(await completedAt(b)).not.toBeNull();
+    const reopen = await lead.c.post(`/api/tasks/${t2}/reopen`);
+    expect(reopen.status).toBe(200);
+    expect(await completedAt(t2)).toBeNull();
+    expect(await completedAt(b)).toBeNull();
+    expect(await completedAt(a)).toBe(aAt);
+    expect((await lead.c.get(`/api/tasks/${t2}`)).json.task.subtasks).toEqual({ total: 2, open: 1 });
+
+    // Undo of the reopen closes the parent and B again, and B still reopens with the parent next time.
+    expect((await lead.c.post(`/api/actions/${reopen.headers.get("x-undo-id")}/undo`)).status).toBe(200);
+    for (const id of [t2, a, b]) expect(await completedAt(id)).not.toBeNull();
+    expect((await lead.c.post(`/api/tasks/${t2}/reopen`)).status).toBe(200);
+    expect(await completedAt(b)).toBeNull();
+    expect(await completedAt(a)).toBe(aAt);
+
+    // A subtask that closed with its parent, then was reopened and ticked on its own, is now its own: it stays done.
+    expect((await lead.c.post(`/api/tasks/${t2}/complete`, { completeAll: true })).status).toBe(200);
+    expect((await lead.c.post(`/api/tasks/${t2}/reopen`)).status).toBe(200);
+    expect((await lead.c.post(`/api/tasks/${b}/complete`)).status).toBe(200);
+    expect((await lead.c.post(`/api/tasks/${t2}/complete`)).status).toBe(200);
+    expect((await lead.c.post(`/api/tasks/${t2}/reopen`)).status).toBe(200);
+    expect(await completedAt(b)).not.toBeNull();
   });
 
   it("completes by dragging to Done and reopens by dragging out, honouring who may close", async () => {
