@@ -115,9 +115,10 @@ test("APL-2538 > AC3: Not listed? New organisation creates the organisation inli
   await expect(dialog.getByLabel("Organisation (buyer)")).toHaveValue(orgId);
   await dialog.getByLabel("Deal name").fill(dealName);
   await dialog.getByLabel("Why are we pursuing this?").fill("ZZ-TEST inline");
+  // The task is already on /projects/<source>. Wait until the address is a different project.
+  const landed = admin.page.waitForURL((u) => u.pathname.startsWith("/projects/") && !u.href.includes(p.id));
   await dialog.getByRole("button", { name: "Convert to deal" }).click();
-  await admin.page.waitForURL(/\/projects\//);
-  expect(admin.page.url()).not.toContain(p.id);
+  await landed;
   const dealId = new URL(admin.page.url()).pathname.split("/").pop()!;
   expect((await projectOf(admin, dealId)).deal.organisation.id).toBe(orgId);
 });
