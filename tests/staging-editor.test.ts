@@ -23,7 +23,9 @@ const dbHost = target.hostname;
 const dbName = decodeURIComponent(target.pathname.replace(/^\//, ""));
 
 function env(over: Record<string, string | undefined> = {}): NodeJS.ProcessEnv {
-  return {
+  const hasNodeEnv = Object.prototype.hasOwnProperty.call(over, "NODE_ENV");
+  const { NODE_ENV: nodeEnv, ...rest } = over;
+  const result: Record<string, string | undefined> = {
     DATABASE_URL: databaseUrl,
     DIRECT_DATABASE_URL: process.env.DIRECT_DATABASE_URL ?? databaseUrl,
     APP_URL: "http://localhost:3100",
@@ -32,9 +34,10 @@ function env(over: Record<string, string | undefined> = {}): NodeJS.ProcessEnv {
     STAGING_EDITOR_PASSWORD: PASSWORD,
     PROD_DB_HOST: "",
     PROD_DB_NAME: "",
-    ...over,
-    NODE_ENV: "test",
+    ...rest,
   };
+  if (!(hasNodeEnv && nodeEnv === undefined)) result.NODE_ENV = hasNodeEnv ? nodeEnv : "test";
+  return result as NodeJS.ProcessEnv;
 }
 
 async function capture(run: () => Promise<number>) {
@@ -140,6 +143,66 @@ describe("staging editor (APL-2682)", () => {
         }),
         argv: ["--confirm-staging"],
         message: "exactly sho_staging",
+      },
+      {
+        name: "localhost sho_test without NODE_ENV",
+        env: env({
+          DATABASE_URL: "postgresql://example:example@localhost:5432/sho_test",
+          DIRECT_DATABASE_URL: "postgresql://example:example@localhost:5432/sho_test",
+          NODE_ENV: undefined,
+          PROD_DB_HOST: "",
+          PROD_DB_NAME: "",
+        }),
+        argv: ["--confirm-staging"],
+        message: "exactly sho_staging",
+      },
+      {
+        name: "localhost sho_test in production",
+        env: env({
+          DATABASE_URL: "postgresql://example:example@localhost:5432/sho_test",
+          DIRECT_DATABASE_URL: "postgresql://example:example@localhost:5432/sho_test",
+          NODE_ENV: "production",
+          PROD_DB_HOST: "",
+          PROD_DB_NAME: "",
+        }),
+        argv: ["--confirm-staging"],
+        message: "exactly sho_staging",
+      },
+      {
+        name: "remote sho_test in test",
+        env: env({
+          DATABASE_URL: "postgresql://example:example@db.example.com:5432/sho_test",
+          DIRECT_DATABASE_URL: "postgresql://example:example@db.example.com:5432/sho_test",
+          NODE_ENV: "test",
+          PROD_DB_HOST: "",
+          PROD_DB_NAME: "",
+        }),
+        argv: ["--confirm-staging"],
+        message: "exactly sho_staging",
+      },
+      {
+        name: "digitalocean sho_test in test",
+        env: env({
+          DATABASE_URL: "postgresql://example:example@private-db-postgresql-nyc1-12345.db.ondigitalocean.com:25060/sho_test",
+          DIRECT_DATABASE_URL: "postgresql://example:example@private-db-postgresql-nyc1-12345.db.ondigitalocean.com:25060/sho_test",
+          NODE_ENV: "test",
+          PROD_DB_HOST: "",
+          PROD_DB_NAME: "",
+        }),
+        argv: ["--confirm-staging"],
+        message: "exactly sho_staging",
+      },
+      {
+        name: "PROD_DB_NAME sho_test",
+        env: env({
+          DATABASE_URL: "postgresql://example:example@localhost:5432/sho_test",
+          DIRECT_DATABASE_URL: "postgresql://example:example@localhost:5432/sho_test",
+          NODE_ENV: "test",
+          PROD_DB_HOST: "",
+          PROD_DB_NAME: "sho_test",
+        }),
+        argv: ["--confirm-staging"],
+        message: "database name is production",
       },
       {
         name: "digitalocean host",
