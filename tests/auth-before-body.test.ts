@@ -75,7 +75,7 @@ describe("auth before body (APL-2651)", () => {
     const viewer = await account("view");
     const outsider = await account("out");
     const orgAdmin = await admin(sa, "orgad");
-    const p = await project(lead, lead, [{ who: editor }, { who: viewer }]);
+    const p = await project(lead, lead, [{ who: editor }, { who: viewer, role: "VIEWER" }]);
     const taskId = await task(lead, p.id);
     const view = await lead.c.post(`/api/projects/${p.id}/views`, { name: "Overdue", state: viewState });
     expect(view.status).toBe(201);
@@ -93,7 +93,6 @@ describe("auth before body (APL-2651)", () => {
     const viewPath = `/api/views/${viewId}`;
     const contactPath = `/api/contacts/${contactId}`;
 
-    // AC2. Resource id is in the URL, so access is decided before the body is read.
     const hit = (who: { c: Client }, method: string, path: string, body: object | "{") =>
       body === "{" ? send(method, path, "{", who.c.cookie) : call(who.c, method, path, body);
 
