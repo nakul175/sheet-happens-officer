@@ -1,5 +1,5 @@
-// Helpers for the APL-2624, 2640, 2646, 2647, 2648 and 2649 story specs. Credentials come from the environment through ../support.
-import { expect, zz, type Json } from "../support";
+// Helpers for the APL-2624, 2640, 2646, 2647, 2648 and 2649 story specs and the jim-gate probes. Credentials come from the environment through ../support.
+import { test, expect, zz, type Json } from "../support";
 import type { Who } from "../g2";
 
 /** A call made on the person's own signed-in session that keeps the response headers (the shared `api()` drops them). */
@@ -55,3 +55,32 @@ export async function newDeal(leader: Who, later: (fn: () => Promise<unknown>) =
 
 /** Details for `test.skip(title, why(reason), body)`: the reason is shown in the Playwright report next to the skipped test. */
 export const why = (description: string) => ({ annotation: { type: "skip", description } });
+
+/** The concierge's quick actions (src/lib/concierge/reads.ts QUICK_ACTIONS). */
+export const QUICK = ["due-week", "overdue", "waiting-on-me", "blocked", "recently-completed"];
+
+/** POST a quick action scoped to a project, as `who`; returns the raw body too, so a name can be searched for anywhere in it. */
+export async function quickAction(who: Who, id: string, projectId: string) {
+  const r = await raw(who, "POST", `/api/concierge/quick/${id}`, { projectId });
+  return { status: r.status, json: r.json, body: JSON.stringify(r.json) };
+}
+
+/** The person's stored concierge chat, as /api/concierge/state returns it. */
+export async function chatMessages(who: Who) {
+  return ((await who.api.get("/api/concierge/state")).json.messages ?? []) as { id: string; role: string; text: string }[];
+}
+
+/**
+ * Clears `who`'s concierge chat after the test, so the ZZ-TEST names a quick action writes there do not stay.
+ * The only delete is "Clear my chat" (DELETE /api/concierge/messages, the whole thread), so it runs only when the chat was
+ * empty before the test: a chat that already held messages is left as it was, and the test says so in an annotation.
+ * Call it before the test (or a probe) asks the concierge anything. Calling it twice for one person is harmless.
+ */
+export async function cleanChat(who: Who, later: (fn: () => Promise<unknown>) => void) {
+  const before = (await chatMessages(who)).length;
+  if (before) {
+    test.info().annotations.push({ type: "leftover", description: `The ${who.user.orgRole} account's concierge chat already held ${before} messages, so the ones this test adds are left there (Clear my chat removes the whole thread).` });
+    return;
+  }
+  later(async () => { if ((await chatMessages(who)).length) await who.api.del("/api/concierge/messages"); });
+}

@@ -3,15 +3,17 @@
 // 1. /api/health answers { release: <git SHA> } (deploy/release.sh). If that is the PR's head commit, the PR is live.
 // 2. Otherwise a probe looks for a behaviour only that PR has. A probe that ACTS (creates a ZZ-TEST project) cleans up through `later`.
 // Each answer is worked out once per run and recorded on every test that asks, as a "deployed" annotation.
+// conciergeLive and crmModeLive answer the same way for two server settings a spec may depend on: whether the concierge is
+// switched on, and which CRM_VISIBLE mode staging was started with (the browser can read it but not change it).
 import { test, expect, BASE_URL } from "../support";
 import { getTask, newProject, newTask, type Who } from "../g2";
-import { deleteTask } from "./jim-http";
+import { cleanChat, deleteTask, newDeal, quickAction } from "./jim-http";
 
 type Later = (fn: () => Promise<unknown>) => void;
 export type Gate = { pr: number; deployed: boolean; how: string };
 
 /** Head commits of the open PRs these specs cover (GitHub, 18 Oct 2026). A later push to a PR falls through to the probe. */
-const HEADS: Record<number, string> = { 6: "13a836e8b6", 9: "87721120b9", 12: "72d2a3d88b", 14: "375e04c33c" };
+const HEADS: Record<number, string> = { 6: "13a836e8b6", 9: "87721120b9", 10: "c47be5f552", 12: "72d2a3d88b", 14: "375e04c33c" };
 
 let releaseOnce: Promise<string | null> | null = null;
 /** The git SHA the app under test (BASE_URL: staging or a pr1-pr4 preview) says it runs, or null when /api/health does not say. */
@@ -42,6 +44,18 @@ const PROBES: Record<number, (admin: Who, member: Who | null, later: Later) => P
     const p = await newProject(admin, later, { label: "gate pr14", members: [{ who: member, role: "EDITOR" }] });
     const del = await deleteTask(member, await newTask(admin, p.id));
     return { deployed: del.status === 204 && !del.undoId, how: `probe: Editor's delete answered ${del.status} ${del.undoId ? "with" : "without"} x-undo-id` };
+  },
+  // PR #10 (APL-2646): a Member's quick action scoped to a deal CRM_VISIBLE hides answers "I can't find that." without the deal's name.
+  // On main the label names the deal. Under CRM_VISIBLE=all nothing is hidden, so the two builds answer alike and the probe cannot tell.
+  10: async (admin, member, later) => {
+    if (!member) return { deployed: false, how: "probe needs the Member account (SHO_MEMBER_*)" };
+    const mode = await crmModeLive(admin, member);
+    if (mode !== "admins") return { deployed: false, how: `probe needs CRM_VISIBLE=admins and staging runs ${mode}` };
+    await cleanChat(member, later);
+    const deal = await newDeal(admin, later, "gate pr10", [member]);
+    const r = await quickAction(member, "due-week", deal.id);
+    const hid = r.status === 200 && r.json.messages?.at(-1)?.text === "I can't find that." && !r.body.includes(deal.name);
+    return { deployed: hid, how: `probe: a Member's quick action on a hidden deal answered ${r.status} ${hid ? "without" : "with"} the deal's name` };
   },
   // PR #12 (APL-2647): useGet returns `failed: !loading && ...`. A client-only fix, so the probe reads the JS staging serves
   // (no screen under test is involved), and falls back to the Person page, which drops its "Loading…" text in that PR.
@@ -94,3 +108,52 @@ export async function prLive(pr: keyof typeof HEADS, admin: Who, member: Who | n
 
 /** The skip reason for a gate that said no. */
 export const notLive = (g: Gate, what: string) => `PR #${g.pr} is not live on this staging build (${g.how}); ${what}`;
+
+export type Concierge = { live: boolean; how: string };
+let conciergeOnce: Promise<Concierge> | null = null;
+
+/**
+ * Whether the concierge is switched on in the build under test: /api/concierge/state answers and does not say NOT_ENABLED.
+ * A person's weekly cap or a provider outage still counts as on: quick actions answer without the model.
+ */
+export async function conciergeLive(who: Who): Promise<Concierge> {
+  conciergeOnce ??= (async () => {
+    const s = await who.api.get("/api/concierge/state");
+    if (s.status !== 200) return { live: false, how: `GET /api/concierge/state answered ${s.status}` };
+    const code = s.json.disabled?.code as string | undefined;
+    if (code === "NOT_ENABLED") return { live: false, how: "the concierge state says NOT_ENABLED" };
+    return { live: true, how: code ? `on, paused for this account (${code}); quick actions still answer` : "on" };
+  })();
+  const c = await conciergeOnce;
+  test.info().annotations.push({ type: "concierge", description: `${c.live ? "on" : "off"} (${c.how})` });
+  return c;
+}
+
+/** The skip reason for a concierge that is off. */
+export const conciergeOff = (c: Concierge) => `The concierge is off on this staging build (${c.how}).`;
+
+/** "all or admins" when there is no Member to tell them apart: the Admin sees deals in both. */
+export type CrmLive = "all" | "admins" | "off" | "all or admins";
+const modes = new Map<boolean, Promise<CrmLive>>();
+
+/**
+ * The CRM_VISIBLE mode staging runs, read from who may list deals: nobody under off, only Admins under admins, everyone under all.
+ * A hidden CRM answers 404 (src/lib/crm.ts requireCrm).
+ */
+export async function crmModeLive(admin: Who, member: Who | null): Promise<CrmLive> {
+  const key = !!member;
+  if (!modes.has(key)) {
+    modes.set(key, (async () => {
+      const a = await admin.api.get("/api/deals");
+      if (a.status === 404) return "off";
+      expect(a.status, "the Admin's deal list").toBe(200);
+      if (!member) return "all or admins";
+      const m = await member.api.get("/api/deals");
+      expect([200, 404], "the Member's deal list").toContain(m.status);
+      return m.status === 404 ? "admins" : "all";
+    })());
+  }
+  const mode = await modes.get(key)!;
+  test.info().annotations.push({ type: "CRM_VISIBLE", description: mode });
+  return mode;
+}
