@@ -2,6 +2,8 @@
 // day puts a notice in every Super Admin's bell. Jobs are triggered by the server's cron
 // through POST /api/jobs/<name> with the JOB_SECRET; nothing here is reachable from a session.
 import { timingSafeEqual } from "node:crypto";
+import type { Prisma } from "@/generated/prisma/client";
+import type { OrgRole } from "@/lib/access";
 import { db } from "@/lib/db";
 import { purgeOld } from "@/lib/feed";
 import { ApiError } from "@/lib/http";
@@ -11,6 +13,7 @@ import { purgeTrash } from "@/lib/tasks";
 import { startOfTodayIST } from "@/lib/dates";
 import { purgeChat } from "@/lib/concierge/thread";
 import { warnIfNearCeiling } from "@/lib/concierge/limits";
+import { crmMode, crmProjectWhere } from "@/lib/crm";
 
 type Job = { name: string; about: string; run: () => Promise<unknown> };
 
@@ -37,14 +40,35 @@ export function reminderFor(due: Date, today: Date): { type: "TASK_DUE_TOMORROW"
   return null;
 }
 
+/**
+ * Which open tasks may produce a reminder.
+ * `crmProjectWhere` is applied for the assignee: under `all` and unset it is empty, so this matches
+ * the previous project filter. Under `off` a deal is left out for every assignee. Under `admins` a
+ * deal is left out unless the assignee is an Admin or the Super Admin (APL-2729).
+ */
+export function reminderTaskWhere(today: Date): Prisma.TaskWhereInput {
+  const dueDate = { gte: new Date(today.getTime() - 28 * DAY_MS), lte: new Date(today.getTime() + DAY_MS) };
+  const open = { completedAt: null, deletedAt: null, blocked: false, dueDate };
+  const projectFor = (role: OrgRole): Prisma.ProjectWhereInput => ({ archivedAt: null, ...crmProjectWhere({ orgRole: role }) });
+  const mode = crmMode();
+  if (mode !== "admins") {
+    // off hides deals from every role, including the Super Admin. all (and unset) hides them from nobody.
+    return { ...open, project: projectFor(mode === "off" ? "SUPER_ADMIN" : "MEMBER") };
+  }
+  return {
+    ...open,
+    OR: [
+      { project: projectFor("MEMBER") },
+      { project: projectFor("ADMIN"), assignee: { orgRole: { not: "MEMBER" } } },
+    ],
+  };
+}
+
 /** Holder = the assignee; while a task awaits approval the approver is the assignee (SHO-US-4.6). */
 export async function sendReminders(now = new Date()) {
   const today = startOfTodayIST(now);
   const tasks = await db.task.findMany({
-    where: {
-      completedAt: null, deletedAt: null, blocked: false, project: { archivedAt: null },
-      dueDate: { gte: new Date(today.getTime() - 28 * DAY_MS), lte: new Date(today.getTime() + DAY_MS) },
-    },
+    where: reminderTaskWhere(today),
     select: { id: true, title: true, projectId: true, assigneeId: true, dueDate: true, assignee: { select: { deactivatedAt: true } } },
   });
   const already = await db.notification.findMany({
