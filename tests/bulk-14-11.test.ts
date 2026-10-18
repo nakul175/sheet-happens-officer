@@ -1,6 +1,9 @@
 // SHO-US-14.11: bulk actions in one request, skip-and-say, 50 limit, one Undo.
 import { describe, expect, it } from "vitest";
+import { PrismaClient } from "../src/generated/prisma/client";
 import { account, bulkWithVersions, istDate, project, task } from "./helpers";
+
+const db = new PrismaClient();
 
 const notices = async (who: { c: { get: (p: string) => Promise<{ json: { items: { text: string }[] } }> } }) => (await who.c.get("/api/notifications")).json.items.map((i) => i.text);
 
@@ -98,4 +101,35 @@ describe("bulk actions (14.11)", () => {
     expect(bad.status).toBe(400);
     expect((await lead.c.get(`/api/tasks/${t}`)).json.task.assignee.id).toBe(lead.id);
   });
+
+  it("undoes every id in a bulk Undo past 500 (APL-2680)", async () => {
+    const OVER = 501; // one past the old lookup cap, so the second page has to run
+    const lead = await account("lead");
+    const p = await project(lead, lead);
+    const proj = await db.project.findUniqueOrThrow({ where: { id: p.id }, select: { workspaceId: true } });
+    const doneAt = new Date("2026-02-01T00:00:00Z");
+    const tasks = await db.task.createManyAndReturn({
+      data: Array.from({ length: OVER }, (_, i) => ({
+        workspaceId: proj.workspaceId, projectId: p.id, sectionId: p.done, title: `bulk ${i}`,
+        assigneeId: lead.id, createdById: lead.id, completedAt: doneAt, previousSectionId: p.todo, position: i,
+      })),
+      select: { id: true },
+    });
+    const logs = await db.actionLog.createManyAndReturn({
+      data: tasks.map((t) => ({
+        actorId: lead.id, channel: "SCREEN" as const, projectId: p.id, targetType: "task", targetId: t.id, action: "task.completed",
+        beforeState: { sectionId: p.todo, completedAt: null, previousSectionId: p.todo },
+        afterState: { completedAt: doneAt.toISOString(), subtasksCompleted: 0, subtaskIds: [] },
+      })),
+      select: { id: true },
+    });
+    expect(logs).toHaveLength(OVER);
+
+    const u = await lead.c.post("/api/actions/bulk-undo", { ids: logs.map((l) => l.id) });
+    expect(u.status, JSON.stringify(u.json)).toBe(200);
+    expect(u.json.count).toBe(OVER);
+    const left = await db.task.count({ where: { id: { in: tasks.map((t) => t.id) }, OR: [{ completedAt: { not: null } }, { sectionId: { not: p.todo } }] } });
+    expect(left).toBe(0);
+    expect(await db.actionLog.count({ where: { id: { in: logs.map((l) => l.id) }, undoneAt: null } })).toBe(0);
+  }, 180000);
 });

@@ -237,6 +237,77 @@ describe("sections (5.4)", () => {
     expect(await completedRows(since)).toEqual(all);
     expect((await lead.c.get(`/api/tasks/${parent}`)).json.task.sectionId).toBe(p.done);
   });
+
+  it("restores every task when a done-section change affects more than 200 (APL-2680)", async () => {
+    const OVER = 201; // one past the old cap on reopened, completed and subtask id lists
+    const lead = await account("lead");
+    const p = await project(lead, lead);
+    const proj = await db.project.findUniqueOrThrow({ where: { id: p.id }, select: { workspaceId: true } });
+    const base = { workspaceId: proj.workspaceId, projectId: p.id, assigneeId: lead.id, createdById: lead.id };
+    await db.task.createMany({
+      data: Array.from({ length: OVER }, (_, i) => ({ ...base, sectionId: p.done, title: `was done ${i}`, completedAt: new Date("2026-01-15T00:00:00Z"), position: i })),
+    });
+    await db.task.createMany({
+      data: Array.from({ length: OVER }, (_, i) => ({ ...base, sectionId: p.doing, title: `will close ${i}`, position: i })),
+    });
+    const parents = await db.task.findMany({ where: { projectId: p.id, sectionId: p.doing, parentId: null }, select: { id: true }, orderBy: { position: "asc" } });
+    expect(parents).toHaveLength(OVER);
+    await db.task.createMany({
+      data: parents.map((parent, i) => ({ ...base, sectionId: p.doing, parentId: parent.id, title: `sub ${i}`, position: i })),
+    });
+
+    const r = await lead.c.patch(`/api/projects/${p.id}/sections/${p.doing}`, { isDone: true });
+    expect(r.status, JSON.stringify(r.json)).toBe(200);
+    const logId = r.headers.get("x-undo-id");
+    const row = await db.actionLog.findUniqueOrThrow({ where: { id: logId! } });
+    const before = row.beforeState as { reopenedTaskIds: string[] };
+    const after = row.afterState as { completedTaskIds: string[]; completedSubtaskIds: string[]; reopened: number; completed: number; completedSubtasks: number };
+    expect(before.reopenedTaskIds).toHaveLength(OVER);
+    expect(after.completedTaskIds).toHaveLength(OVER);
+    expect(after.completedSubtaskIds).toHaveLength(OVER);
+    expect(after).toMatchObject({ reopened: OVER, completed: OVER, completedSubtasks: OVER });
+
+    const count = (title: string, open: boolean) => db.task.count({ where: { projectId: p.id, title: { startsWith: title }, completedAt: open ? null : { not: null } } });
+    expect(await count("was done ", true)).toBe(OVER);
+    expect(await count("will close ", false)).toBe(OVER);
+    expect(await count("sub ", false)).toBe(OVER);
+
+    const u = await lead.c.post(`/api/actions/${logId}/undo`);
+    expect(u.status, JSON.stringify(u.json)).toBe(200);
+    expect(await count("was done ", false)).toBe(OVER);
+    expect(await count("will close ", true)).toBe(OVER);
+    expect(await count("sub ", true)).toBe(OVER);
+    expect((await lead.c.get(`/api/projects/${p.id}`)).json.project.sections.find((s: { isDone: boolean }) => s.isDone).id).toBe(p.done);
+  }, 120000);
+
+  it("refuses a capped done-section record and leaves every task as it is (APL-2680)", async () => {
+    const lead = await account("lead");
+    const p = await project(lead, lead);
+    const reopened = [await task(lead, p.id, { title: "old a", sectionId: p.todo }), await task(lead, p.id, { title: "old b", sectionId: p.todo })];
+    for (const id of reopened) expect((await lead.c.post(`/api/tasks/${id}/complete`, await withVersion(lead, id))).status).toBe(200);
+    const closing = [
+      await task(lead, p.id, { title: "new a", sectionId: p.doing }),
+      await task(lead, p.id, { title: "new b", sectionId: p.doing }),
+      await task(lead, p.id, { title: "new c", sectionId: p.doing }),
+    ];
+    const r = await lead.c.patch(`/api/projects/${p.id}/sections/${p.doing}`, { isDone: true });
+    expect(r.status, JSON.stringify(r.json)).toBe(200);
+    const logId = r.headers.get("x-undo-id")!;
+    const row = await db.actionLog.findUniqueOrThrow({ where: { id: logId } });
+    const after = row.afterState as { completedTaskIds: string[] };
+    expect(after.completedTaskIds).toHaveLength(3);
+    // The shape the old cap left behind: the count says 3, the list keeps 1.
+    await db.actionLog.update({ where: { id: logId }, data: { afterState: { ...after, completedTaskIds: after.completedTaskIds.slice(0, 1) } } });
+
+    const stamp = async (id: string) => (await db.task.findUniqueOrThrow({ where: { id }, select: { completedAt: true } })).completedAt?.toISOString() ?? null;
+    const beforeUndo = await Promise.all([...reopened, ...closing].map(stamp));
+    const u = await lead.c.post(`/api/actions/${logId}/undo`, { anyway: true });
+    expect(u.status, JSON.stringify(u.json)).toBe(409);
+    expect(u.json.error).toBe("Undo was not applied. This record lists only 1 of 3 completed tasks, so nothing was changed.");
+    expect(await Promise.all([...reopened, ...closing].map(stamp))).toEqual(beforeUndo);
+    expect((await db.actionLog.findUniqueOrThrow({ where: { id: logId } })).undoneAt).toBeNull();
+    expect((await lead.c.get(`/api/projects/${p.id}`)).json.project.sections.find((s: { isDone: boolean }) => s.isDone).id).toBe(p.doing);
+  });
 });
 
 describe("tasks (4.x, 5.x)", () => {

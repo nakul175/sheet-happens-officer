@@ -203,6 +203,18 @@ textarea.in.blocked-reason { display: block; margin-top: 6px; min-height: 0; lin
   .bell, .burger { min-width: 44px; min-height: 44px; display: inline-flex; align-items: center; justify-content: center; }
 }
 
+/* APL-2673: 8 px between inline-edit cells, the Complete tick, and the select checkbox at phone width. */
+@media (max-width: 1023px), (pointer: coarse) {
+  /* .ic-wrap > .ic-hit outranks .ic-cell so side margins stay 0 and the 10 px flex gap remains. */
+  .ic-wrap > .ic-hit { margin-left: 0; margin-right: 0; }
+  /* .item .sel outranks .sel. 7 px on the right leaves 8 px before the tick's 44 px hit area. */
+  .item .sel { margin-right: 7px; }
+}
+@media (max-width: 1023px) {
+  /* 7 px plus the 12 px row gap clears the tick's 11 px hit area by 8 px. */
+  .ic-gap { margin-top: 7px; }
+}
+
 /* SHO-US-22.4: bottom tab bar (phones only) */
 .tabbar-wrap { display: none; }
 @media (max-width: 1023px) {
