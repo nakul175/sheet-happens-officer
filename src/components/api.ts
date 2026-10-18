@@ -28,23 +28,55 @@ export async function api<T = Record<string, any>>(method: string, path: string,
 export const isNetworkFailure = (status: number) => status === 0 || status >= 500;
 export const COULD_NOT_REACH = "Could not reach the server.";
 
-/** GET a path; `reload()` fetches again. `data` stays on screen while reloading.
+const responseCode = (data: unknown): string | null => {
+  if (!data || typeof data !== "object" || !("code" in data)) return null;
+  const code = (data as { code?: unknown }).code;
+  return typeof code === "string" ? code : null;
+};
+
+type Got<T> = { forPath: string | null; req: number; data: T | null; error: string | null; status: number; code: string | null; loading: boolean };
+
+/** GET a path; `reload()` fetches again. Data stays on screen while the same path reloads.
+ * A different path reports loading, no error and no data in that same render, so the previous page cannot stick.
+ * Only the latest request for the current path may paint. A late answer for an older path is ignored.
+ * `code` is the error body's code (for example PASSWORD_CHANGE_REQUIRED) and is cleared with the error when the path changes.
  * `failed` is true only once an answer came back as a network failure: status starts at 0, so an in-flight request must never read as one. */
 export function useGet<T = Record<string, any>>(path: string | null) { // eslint-disable-line @typescript-eslint/no-explicit-any
-  const [state, setState] = useState<{ data: T | null; error: string | null; status: number; loading: boolean }>({ data: null, error: null, status: 0, loading: true });
+  const [state, setState] = useState<Got<T>>({ forPath: path, req: 0, data: null, error: null, status: 0, code: null, loading: true });
   const [tick, setTick] = useState(0);
+  const [seenPath, setSeenPath] = useState(path);
+  const [generation, setGeneration] = useState(0);
   const seq = useRef(0);
+  // A new path gets a new generation during this render, so the previous answer is not shown.
+  let gen = generation;
+  if (path !== seenPath) {
+    gen = generation + 1;
+    setSeenPath(path);
+    setGeneration(gen);
+  }
   useEffect(() => {
     if (!path) return;
     const mine = ++seq.current;
-    api<T>("GET", path).then((r) => {
+    const requested = path;
+    const stamp = gen;
+    api<T>("GET", requested).then((r) => {
       if (mine !== seq.current) return;
-      // A dropped connection must not wipe what is already on screen or look like a permission problem.
-      setState((prev) => ({ data: r.ok ? r.data : isNetworkFailure(r.status) ? prev.data : null, error: r.ok ? null : isNetworkFailure(r.status) ? COULD_NOT_REACH : r.error ?? "Error", status: r.status, loading: false }));
+      setState((prev) => ({
+        forPath: requested,
+        req: stamp,
+        // A dropped connection on this same request must not wipe what is already on screen or look like a permission problem.
+        data: r.ok ? r.data : isNetworkFailure(r.status) ? (prev.forPath === requested && prev.req === stamp ? prev.data : null) : null,
+        error: r.ok ? null : isNetworkFailure(r.status) ? COULD_NOT_REACH : r.error ?? "Error",
+        status: r.status,
+        code: r.ok ? null : responseCode(r.data),
+        loading: false,
+      }));
     });
-  }, [path, tick]);
+  }, [path, tick, gen]);
   const reload = useCallback(() => { setState((p) => (p.data ? p : { ...p, loading: true, error: null })); setTick((n) => n + 1); }, []);
-  return { ...state, failed: !state.loading && isNetworkFailure(state.status), reload };
+  const fresh = state.forPath === path && state.req === gen;
+  const shown = fresh ? state : { data: null as T | null, error: null as string | null, status: 0, code: null as string | null, loading: path !== null };
+  return { data: shown.data, error: shown.error, status: shown.status, code: shown.code, loading: shown.loading, failed: path !== null && !shown.loading && isNetworkFailure(shown.status), reload };
 }
 
 export const initials = (name: string) =>
