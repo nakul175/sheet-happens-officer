@@ -3,6 +3,7 @@
 // Results are trimmed records; nothing is ever read from memory or from earlier turns.
 import { db } from "@/lib/db";
 import { isAdmin, projectAccess, type Actor } from "@/lib/access";
+import { crmProjectWhere } from "@/lib/crm";
 import { ApiError } from "@/lib/http";
 import { addDays, formatDueDate, startOfTodayIST } from "@/lib/dates";
 import { awaiting } from "@/lib/tasks";
@@ -40,11 +41,14 @@ export function toTaskRec(t: Row, today = startOfTodayIST()): TaskRec {
   };
 }
 
-/** Projects the person may see right now. */
+/** Projects the person may see right now. Deals are left out while the CRM is hidden from them (SHO-BUG-2). */
 export const visibleProjects = (user: Actor) => ({
   archivedAt: null,
   ...(isAdmin(user) ? {} : { members: { some: { userId: user.id } } }),
+  ...crmProjectWhere(user),
 });
+/** Projects the person belongs to: their own work, whatever their org role. */
+const myProjects = (user: Actor) => ({ archivedAt: null, members: { some: { userId: user.id } }, ...crmProjectWhere(user) });
 
 const byProjectThenDue = (a: TaskRec, b: TaskRec) =>
   a.project.localeCompare(b.project) || (a.due ?? "9999").localeCompare(b.due ?? "9999") || a.title.localeCompare(b.title);
@@ -52,28 +56,29 @@ const byProjectThenDue = (a: TaskRec, b: TaskRec) =>
 export type MyFilter = "due_week" | "overdue" | "waiting_on_me" | "blocked" | "recently_completed" | "all_open";
 
 /** The person's own open work (assignee or collaborator, in projects they belong to), by filter. */
-export async function myTasks(user: Actor, filter: MyFilter, o: { limit?: number; now?: Date } = {}) {
+export async function myTasks(user: Actor, filter: MyFilter, o: { limit?: number; now?: Date; projectId?: string } = {}) {
   const today = startOfTodayIST(o.now);
   const limit = o.limit ?? 30;
   const mine = {
     deletedAt: null,
-    project: { archivedAt: null, members: { some: { userId: user.id } } },
+    project: myProjects(user),
     OR: [{ assigneeId: user.id }, { collaborators: { some: { userId: user.id } } }],
   };
   let where: Record<string, unknown>;
+  const here = o.projectId ? { projectId: o.projectId } : {}; // SHO-US-14.15: a quick action asked from a project screen
   switch (filter) {
     case "due_week": where = { ...mine, completedAt: null, dueDate: { gte: today, lt: addDays(today, 8) } }; break; // today and the next 7 days
     case "overdue": where = { ...mine, completedAt: null, dueDate: { lt: today } }; break;
     case "blocked": where = { ...mine, completedAt: null, blocked: true }; break;
     case "waiting_on_me":
       // Awaiting approval and I am the approver (the approver holds it, so assignee = approver = me).
-      where = { deletedAt: null, project: { archivedAt: null, members: { some: { userId: user.id } } }, completedAt: null, approverId: user.id, assigneeId: user.id };
+      where = { deletedAt: null, project: myProjects(user), completedAt: null, approverId: user.id, assigneeId: user.id };
       break;
     case "recently_completed": where = { ...mine, completedAt: { gte: addDays(today, -7) } }; break;
     default: where = { ...mine, completedAt: null };
   }
   const rows = await db.task.findMany({
-    where, select,
+    where: { ...where, ...here }, select,
     orderBy: filter === "recently_completed" ? [{ completedAt: "desc" }] : [{ dueDate: { sort: "asc", nulls: "last" } }, { createdAt: "asc" }],
     take: limit + 1,
   });
@@ -158,10 +163,14 @@ export const QUICK_ACTIONS = [
   { id: "recently-completed", label: "Recently completed", filter: "recently_completed" as const, empty: "completed in the last 7 days" },
 ];
 
-export async function quickAnswer(user: Actor, id: string, now = new Date()) {
-  const q = QUICK_ACTIONS.find((x) => x.id === id);
-  if (!q) throw new ApiError(404, "No such quick action");
-  const { tasks, truncated } = await myTasks(user, q.filter, { now });
+export async function quickAnswer(user: Actor, id: string, now = new Date(), projectId?: string) {
+  const base = QUICK_ACTIONS.find((x) => x.id === id);
+  if (!base) throw new ApiError(404, "No such quick action");
+  // Asked from a project screen (SHO-US-14.15): only that project, and only if the person is in it.
+  const scope = projectId ? await db.project.findFirst({ where: { id: projectId, members: { some: { userId: user.id } } }, select: { id: true, name: true } }) : null;
+  if (projectId && !scope) throw new ApiError(404, "Project not found");
+  const q = scope ? { ...base, label: `${base.label} in ${flat(scope.name)}` } : base;
+  const { tasks, truncated } = await myTasks(user, q.filter, { now, projectId: scope?.id });
   if (!tasks.length) return { q, text: "I found nothing.", tasks };
   const lines = tasks.map((t) => `${t.title} (${t.project}${t.dueText ? `, due ${t.dueText}` : ""}${t.completedOn ? `, completed ${t.completedOn}` : ""})`);
   const head = `${q.label}: ${tasks.length}${truncated ? "+" : ""} task${tasks.length === 1 ? "" : "s"}`;

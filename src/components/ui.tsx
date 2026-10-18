@@ -6,8 +6,8 @@ export function Modal({ onClose, small, label, children }: { onClose: () => void
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const prev = document.activeElement as HTMLElement | null;
-    ref.current?.focus();
-    // SHO-US-10.7: the page behind a dialog must not scroll.
+    (ref.current?.querySelector<HTMLElement>("[data-autofocus]") ?? ref.current)?.focus(); // SHO-US-14.5: a dialog can name the field that gets focus
+    // SHO-US-22.7: the page behind a dialog must not scroll.
     const before = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     const keys = (e: KeyboardEvent) => {
@@ -90,6 +90,18 @@ export function LoadFailed({ onRetry }: { onRetry: () => void }) {
       <b>Could not reach the server.</b>
       <p className="hint" style={{ margin: "6px 0 12px" }}>Check your connection, then try again. Nothing was lost.</p>
       <button className="btn" onClick={onRetry}>Retry</button>
+    </div>
+  );
+}
+
+/** SHO-US-14.2 AC1: after 400 ms of loading, grey rows in the shape of the final layout. Before that nothing flashes. */
+export function Skeleton({ rows = 5, kind = "list" }: { rows?: number; kind?: "list" | "cards" }) {
+  const [show, setShow] = useState(false);
+  useEffect(() => { const t = setTimeout(() => setShow(true), 400); return () => clearTimeout(t); }, []);
+  return (
+    <div role="status" aria-live="polite" aria-busy="true" className={`skel-wrap ${kind}`}>
+      <span className="sr-only">Loading</span>
+      {show && Array.from({ length: rows }, (_, i) => <div key={i} className="skel-row" aria-hidden="true" />)}
     </div>
   );
 }

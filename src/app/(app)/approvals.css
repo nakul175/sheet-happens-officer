@@ -1,0 +1,4 @@
+/* SHO-US-14.16: Waiting on me / Waiting on others */
+.grp.gold { color: #6d4a07; }
+.aw-act { display: inline-flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+@media (max-width: 1023px) { .item.nt .meta { padding-left: 0; } }

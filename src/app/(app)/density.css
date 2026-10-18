@@ -1,0 +1,29 @@
+/* SHO-US-14.12: hierarchy and density. Metadata is quiet text, the title is the one thing that looks interactive. */
+.item .ttl { color: var(--ink); }
+.item.click .ttl { text-decoration: underline; text-decoration-color: transparent; text-underline-offset: 3px; transition: text-decoration-color .12s; }
+@media (hover: hover) { .item.click:hover .ttl { text-decoration-color: currentColor; } }
+.item.click:focus-visible .ttl { text-decoration-color: currentColor; }
+.pri svg { flex: none; }
+.density { display: none; background: var(--card); border: 1px solid var(--field); border-radius: 8px; color: var(--ink-2); font: inherit; font-size: 13px; font-weight: 500; padding: 6px 10px; cursor: pointer; }
+.density[aria-pressed="true"] { background: var(--navy); border-color: var(--navy); color: #fff; }
+.density:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+@media (min-width: 1024px) { .density { display: inline-flex; align-items: center; gap: 6px; } }
+
+/* Compact rows: single line, about 36 px each. Desktop only; phones keep full-size rows so taps stay 44 px. */
+@media (min-width: 1024px) {
+  [data-density="compact"] .content { padding-top: 14px; }
+  [data-density="compact"] h1.pt { font-size: 20px; }
+  [data-density="compact"] .sub { margin: 2px 0 8px; }
+  [data-density="compact"] .head { margin-bottom: 2px; }
+  [data-density="compact"] .tabs { margin: 2px 0 8px; }
+  [data-density="compact"] .grp { margin: 10px 0 4px; }
+  [data-density="compact"] .item { padding: 3px 12px; min-height: 34px; gap: 10px; font-size: 13.5px; }
+  [data-density="compact"] .item .t { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+  [data-density="compact"] .item .t b { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block; }
+  [data-density="compact"] .item .t small { flex: 0 100 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  [data-density="compact"] .meta { gap: 8px; font-size: 12.5px; flex-wrap: nowrap; }
+  [data-density="compact"] .meta .pri-t { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  [data-density="compact"] .meta .chip { padding: 1px 7px; }
+  [data-density="compact"] .item .av.sm { width: 22px; height: 22px; font-size: 12px; }
+  [data-density="compact"] .tick { width: 18px; height: 18px; }
+}

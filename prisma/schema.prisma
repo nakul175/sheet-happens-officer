@@ -70,8 +70,13 @@ model User {
   emailVerifiedAt    DateTime?
   orgRole            OrgRole   @default(MEMBER)
   deactivatedAt      DateTime?
+  // SHO-US-15.3: set when a Super Admin issued the password; cleared when the person sets their own.
+  tempPasswordAt     DateTime?
   conciergeHidden    Boolean   @default(false)
   voiceNoticeAckedAt DateTime?
+  compactRows        Boolean   @default(false)
+  // SHO-US-14.4: when the start guide on My tasks was dismissed. Server side, so it stays gone on every device.
+  startGuideDismissedAt DateTime?
   createdAt          DateTime  @default(now())
 
   memberships         ProjectMember[]
@@ -90,6 +95,7 @@ model User {
   auditLogs           AuditLog[]
   chatMessages        ChatMessage[]
   modelUsage          ModelUsage[]
+  savedViews          SavedView[]
 
   @@index([workspaceId])
 }
@@ -160,6 +166,7 @@ model Project {
   sections       Section[]
   tasks          Task[]
   actionLogs     ActionLog[]
+  savedViews     SavedView[]
 
   @@index([workspaceId])
   @@index([typeId])
@@ -563,4 +570,22 @@ model TaskLink {
   @@index([taskId])
   @@index([organisationId])
   @@index([contactId])
+}
+
+// SHO-US-14.10: a person's own saved filter for one project (personal only, up to 10 per project).
+model SavedView {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  projectId String
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  name      String
+  // { assignee, flags, priority, sort, group } exactly as the list reads them from the address.
+  state     Json
+  position  Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, projectId, name])
+  @@index([userId, projectId, position])
 }

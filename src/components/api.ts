@@ -42,7 +42,7 @@ export function useGet<T = Record<string, any>>(path: string | null) { // eslint
       setState((prev) => ({ data: r.ok ? r.data : isNetworkFailure(r.status) ? prev.data : null, error: r.ok ? null : isNetworkFailure(r.status) ? COULD_NOT_REACH : r.error ?? "Error", status: r.status, loading: false }));
     });
   }, [path, tick]);
-  const reload = useCallback(() => setTick((n) => n + 1), []);
+  const reload = useCallback(() => { setState((p) => (p.data ? p : { ...p, loading: true, error: null })); setTick((n) => n + 1); }, []);
   return { ...state, reload };
 }
 

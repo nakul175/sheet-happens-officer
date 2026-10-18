@@ -44,3 +44,5 @@ next-env.d.ts
 
 !.env.example
 .outbox/
+.outbox-ci/
+/test-results/

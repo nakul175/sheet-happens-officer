@@ -1,0 +1,17 @@
+/* SHO-US-22.9: large text and 200 percent zoom (a 360 px phone at 200 percent is about 180 px wide). Nothing may be wider than the screen. */
+@media (max-width: 1023px) {
+  .fgrid { grid-template-columns: minmax(0, 1fr); }
+  .fgrid > *, .modal select.in, .modal input.in, .modal textarea.in, .field > * { min-width: 0; max-width: 100%; }
+  .pills { flex-wrap: wrap; }
+  .tabs { row-gap: 0; }
+}
+
+/* SHO-US-22.11: links that stand on their own line, checkbox labels and the task title field are 44 px high on phones. */
+@media (max-width: 1023px) {
+  .card :not(p, small, .hint, .sub, .t, h1, h2, h3) > a:not(.btn), .box :not(p, small, .hint, .sub, .t) > a:not(.btn), .tbl td > a:not(.btn), .list li > a:not(.btn) { display: inline-flex; align-items: center; min-height: 44px; min-width: 44px; }
+  label:has(> input[type="checkbox"]), label:has(> input[type="radio"]) { display: inline-flex; align-items: center; gap: 4px; min-height: 44px; }
+  .dcard > div > a, .dcard a { display: inline-flex; align-items: center; min-height: 44px; min-width: 44px; }
+  .tt { min-height: 44px; }
+  /* SHO-US-15.4: person names on the Team list are links inside a bold tag; keep a 44 px tap area. */
+  .tbl td b > a, .item .t b > a { display: inline-flex; align-items: center; min-height: 44px; min-width: 44px; }
+}

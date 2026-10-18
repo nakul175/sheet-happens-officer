@@ -1,5 +1,6 @@
 import type { Prisma } from "@/generated/prisma/client";
 import type { Tx } from "@/lib/access";
+import { db } from "@/lib/db";
 import { reqCtx } from "@/lib/reqctx";
 import { UNDO_LABELS } from "@/lib/undoable";
 
@@ -18,8 +19,12 @@ export async function notify(
   type: string,
   o: { actorId?: string | null; taskId?: string; projectId?: string; data?: Record<string, unknown>; includeActor?: boolean },
 ) {
-  const seen = sent.get(tx) ?? new Set<string>();
-  sent.set(tx, seen);
+  if (reqCtx.getStore()?.muteNotify) return; // SHO-US-14.11: a bulk action sends its own summary notices
+  // The dedupe set lives as long as the client it is keyed on. A transaction client dies with its transaction;
+  // the process-wide `db` client would keep the set for the life of the process and silently drop every later
+  // notice with the same key (SHO-BUG-1). So a caller that passes `db` gets no cross-call dedupe at all.
+  const seen = tx === db ? new Set<string>() : sent.get(tx) ?? new Set<string>();
+  if (tx !== db) sent.set(tx, seen);
   const ids = [...new Set(recipients.filter((x): x is string => !!x))]
     .filter((id) => o.includeActor || id !== o.actorId)
     .filter((id) => {

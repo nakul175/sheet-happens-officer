@@ -1,25 +1,27 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { usePathname } from "next/navigation";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Confirm } from "@/components/ui";
 import { Composer } from "./Composer";
 import { useConcierge } from "./ConciergeProvider";
 import { resumeText } from "./logic";
 import { MessageView } from "./MessageView";
-import { PRIVACY_SENTENCE } from "./types";
+import { PRIVACY_SENTENCE, type QuickActionId } from "./types";
+import "./phone.css";
 
 type Variant = "dock" | "bar" | "sheet";
 
+/** SHO-US-14.15 AC3: paused is one line that says why and when it returns. Nothing else is disabled beside it. */
+export const isPaused = (c: { loaded: boolean; loadError: string | null; available: boolean; disabled?: unknown }) => c.loaded && !c.loadError && (!c.available || !!c.disabled);
 function DisabledNotice() {
   const c = useConcierge()!;
-  if (c.available && !c.disabled) return null;
+  if (!isPaused(c)) return null;
   const d = c.disabled;
   const when = d ? resumeText(d) : null;
+  const msg = d?.message ?? "The concierge is not available for you right now.";
   return (
     <div className="cc-disabled" role="status">
-      <strong>The concierge is paused.</strong>{" "}
-      {d?.message ?? "It is not available for you right now."}
-      {when && <> It resumes on {when}.</>}
-      <div className="cc-note">The rest of the app works as usual.</div>
+      {msg}{when && !msg.includes("resume") && !msg.includes("resets") && <> It returns on {when}.</>}
     </div>
   );
 }
@@ -30,7 +32,7 @@ function Thread({ variant }: { variant: Variant }) {
   useEffect(() => { end.current?.scrollIntoView?.({ block: "end" }); }, [c.messages.length, c.busy, variant]);
   return (
     <div className="cc-thread" role="log" aria-label="Conversation" aria-live="polite">
-      {c.loaded && !c.loadError && c.messages.length === 0 && <p className="cc-empty">Ask about your tasks, or tell me what to change. Nothing changes until you tap Confirm.</p>}
+      {c.loaded && !c.loadError && !isPaused(c) && c.messages.length === 0 && <p className="cc-empty">Ask about your tasks, or tell me what to change. Nothing changes until you tap Confirm.</p>}
       <ul>{c.messages.map((m) => <MessageView key={m.id} m={m} />)}</ul>
       {c.busy && <p className="cc-thinking" role="status">Working on it…</p>}
       <div ref={end} />
@@ -38,12 +40,23 @@ function Thread({ variant }: { variant: Variant }) {
   );
 }
 
+/** Chips follow the screen: on a project they are about that project (SHO-US-14.15 AC2). */
 function Quick({ off, onUsed }: { off: boolean; onUsed?: () => void }) {
   const c = useConcierge()!;
+  const path = usePathname();
+  const project = /^\/projects\/([^/]+)/.exec(path)?.[1];
+  const here = project && project !== "new" ? project : null;
+  const chips: { key: string; id: QuickActionId; label: string; projectId?: string }[] = here
+    ? [
+        { key: "o", id: "overdue", label: "Show overdue here", projectId: here },
+        { key: "d", id: "due-week", label: "Due this week here", projectId: here },
+        { key: "b", id: "blocked", label: "Blocked here", projectId: here },
+      ]
+    : c.quickActions.map((q) => ({ key: q.id, id: q.id, label: q.label }));
   return (
     <div className="cc-quick" role="group" aria-label="Quick actions">
-      {c.quickActions.map((q) => (
-        <button key={q.id} className="cc-chip" disabled={off || c.busy} onClick={() => { c.quick(q.id); onUsed?.(); }}>{q.label}</button>
+      {chips.map((q) => (
+        <button key={q.key} className="cc-chip" disabled={off || c.busy} onClick={() => { c.quick(q.id, q.projectId); onUsed?.(); }}>{q.label}</button>
       ))}
     </div>
   );
@@ -54,7 +67,10 @@ export function Panel({ variant, onClose }: { variant: Variant; onClose?: () => 
   const [confirmClear, setConfirmClear] = useState(false);
   const [clearErr, setClearErr] = useState<string | null>(null);
   const [expanded, setExpanded] = useState(c.messages.length > 0); // bar variant only
-  const off = !c.loaded || !!c.loadError || !c.available || !!c.disabled;
+  const paused = isPaused(c);
+  const off = !c.loaded || !!c.loadError || paused; // composer
+  // Quick actions are plain queries that need no model, so they keep working when a cap pauses the concierge.
+  const quickOff = !c.loaded || !!c.loadError || c.disabled?.code === "NOT_ENABLED" || (!c.available && !c.disabled);
   const bar = variant === "bar";
   const count = c.messages.length;
   const [seen, setSeen] = useState(count);
@@ -79,7 +95,7 @@ export function Panel({ variant, onClose }: { variant: Variant; onClose?: () => 
           {expanded && (
             <div className="cc-barthread">
               {head}<DisabledNotice />{loadErr || <Thread variant={variant} />}
-              {!c.loadError && <Quick off={off} />}
+              {!c.loadError && <Quick off={quickOff} />}
               <p className="cc-privacy">{PRIVACY_SENTENCE}</p>
             </div>
           )}
@@ -87,7 +103,7 @@ export function Panel({ variant, onClose }: { variant: Variant; onClose?: () => 
           {errBox}
           <div className="cc-barrow">
             <strong>Concierge</strong>
-            <Composer off={off} compact />
+            {!paused && <Composer off={off} compact />}
             <button className="link" aria-expanded={expanded} onClick={() => setExpanded(!expanded)}>{expanded ? "Collapse" : "Open chat"}</button>
             <button className="link" onClick={() => c.setHidden(true)}>Hide</button>
           </div>
@@ -97,8 +113,8 @@ export function Panel({ variant, onClose }: { variant: Variant; onClose?: () => 
         <>
           {head}<DisabledNotice />{loadErr || <Thread variant={variant} />}
           {errBox}
-          {!c.loadError && <Quick off={off} />}
-          <Composer off={off} />
+          {!c.loadError && !(paused && c.disabled?.code === "NOT_ENABLED") && <Quick off={quickOff} />}
+          {!paused && <Composer off={off} />}
           <p className="cc-privacy">{PRIVACY_SENTENCE}</p>
         </>
       )}
@@ -118,7 +134,7 @@ export function Panel({ variant, onClose }: { variant: Variant; onClose?: () => 
   );
 }
 
-/** Small button that brings a hidden concierge back. */
+/** Small button that brings a hidden concierge back. Not used on its own any more: a floating pill covered content (SHO-US-14.15 AC4), so Show lives in the sidebar. */
 export function ShowButton() {
   const c = useConcierge()!;
   return <button className="cc-show" onClick={() => c.setHidden(false)}>Show concierge</button>;
@@ -145,12 +161,19 @@ export function ConciergeFab({ kind }: { kind: "dock" | "bar" }) {
   const c = useConcierge();
   const [open, setOpen] = useState(false);
   const btn = useRef<HTMLButtonElement>(null);
+  const pushed = useRef(false); // SHO-US-22.8: opening adds a history entry so the phone Back button closes the concierge instead of leaving the page
+  const closeIt = useCallback(() => {
+    if (pushed.current) { window.history.back(); return; } // the popstate handler closes it and returns focus
+    setOpen(false); setTimeout(() => btn.current?.focus(), 0);
+  }, []);
   useEffect(() => {
     if (!open) return;
-    const esc = (e: KeyboardEvent) => { if (e.key === "Escape" && !document.querySelector(".scrim")) setOpen(false); };
+    const esc = (e: KeyboardEvent) => { if (e.key === "Escape" && !document.querySelector(".scrim")) closeIt(); };
+    const back = () => { if (pushed.current) { pushed.current = false; setOpen(false); setTimeout(() => btn.current?.focus(), 0); } };
+    window.addEventListener("popstate", back);
     document.addEventListener("keydown", esc);
     document.querySelector<HTMLTextAreaElement>(".cc-sheet textarea")?.focus();
-    // SHO-US-10.3: iOS Safari does not shrink the page when the keyboard opens, so follow the visible area.
+    // SHO-US-22.3: iOS Safari does not shrink the page when the keyboard opens, so follow the visible area.
     const vv = window.visualViewport;
     const fit = () => {
       if (!vv) return;
@@ -162,18 +185,24 @@ export function ConciergeFab({ kind }: { kind: "dock" | "bar" }) {
     vv?.addEventListener("scroll", fit);
     return () => {
       document.removeEventListener("keydown", esc);
+      window.removeEventListener("popstate", back);
       vv?.removeEventListener("resize", fit);
       vv?.removeEventListener("scroll", fit);
       document.documentElement.style.removeProperty("--vvh");
       document.documentElement.style.removeProperty("--vvt");
     };
-  }, [open]);
+  }, [open, closeIt]);
   if (!c) return null;
-  const close = () => { setOpen(false); setTimeout(() => btn.current?.focus(), 0); };
-  if (c.hidden) return <div className={`cc-showwrap k-${kind}`}><ShowButton /></div>;
+  const close = closeIt;
+  const toggle = () => {
+    if (open) { close(); return; }
+    try { window.history.pushState({ ...(window.history.state ?? {}), cc: 1 }, ""); pushed.current = true; } catch { /* no history: Close still works */ }
+    setOpen(true);
+  };
+  if (c.hidden) return null; // SHO-US-14.15 AC4: no floating "Show" pill over rows; use Concierge in the menu
   return (
     <div className={`cc-fabwrap k-${kind}`}>
-      <button ref={btn} className="fab" aria-label="Concierge" aria-expanded={open} onClick={() => setOpen(!open)}>💬</button>
+      <button ref={btn} className="fab" aria-label="Concierge" aria-expanded={open} onClick={toggle}>💬</button>
       {open && (
         <div className="cc-sheet" role="dialog" aria-label="Concierge">
           <Panel variant="sheet" onClose={close} />

@@ -6,7 +6,7 @@ import { requestUndo } from "@/components/UndoHost";
 import { LoadFailed } from "@/components/ui";
 import { Page } from "../../../Shell";
 
-type Row = { id: string; at: string; who: string; via: string; what: string; change: string | null; undo: "available" | "undone" | "too_old" | "none" };
+type Row = { id: string; ts: number; when: string; who: string; via: string; what: string; undo: "available" | "undone" | "too_old" | "none" };
 
 export default function Activity({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -22,7 +22,7 @@ export default function Activity({ params }: { params: Promise<{ id: string }> }
   }, [reload]);
   if (!a.data && isNetworkFailure(a.status)) return <Page title="Activity"><LoadFailed onRetry={a.reload} /></Page>;
   if (a.status === 403 || a.status === 404) {
-    return <Page title="Activity"><div className="card empty">{a.status === 403 ? "Only the project Leader and Admins can see Activity." : "This project isn't available."}<br /><Link href={`/projects/${id}`}>Back to the project</Link></div></Page>;
+    return <Page title="Activity"><div className="card empty">{a.status === 403 ? "Only people who work on this project can see Activity." : "This project isn't available."}<br /><Link href={`/projects/${id}`}>Back to the project</Link></div></Page>;
   }
   const next = cursor === undefined ? a.data?.nextCursor : cursor;
   const rows = [...(a.data?.items ?? []), ...more];
@@ -30,25 +30,21 @@ export default function Activity({ params }: { params: Promise<{ id: string }> }
     <Page title="Activity" sub={<Link href={`/projects/${id}`}>← Project</Link>}>
       {a.data && !rows.length && <div className="card empty">Nothing has happened yet.</div>}
       {!!rows.length && (
-        <div className="scroll">
-          <table className="tbl stack">
-            <thead><tr><th>When</th><th>Who</th><th>What</th><th>How</th><th></th></tr></thead>
-            <tbody>
-              {rows.map((r) => (
-                <tr key={r.id}>
-                  <td title={new Date(r.at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}>{ago(r.at)}</td>
-                  <td>{r.who}</td>
-                  <td>{r.what}{r.change && <div className="hint">{r.change}</div>}</td>
-                  <td>{r.via === "concierge" ? <span className="chip gold">via concierge</span> : "on screen"}</td>
-                  <td>
-                    {r.undo === "available" && <button className="btn ghost sm" onClick={() => requestUndo(r.id)}>Undo</button>}
-                    {r.undo === "too_old" && <span className="hint" title="Undo works for 30 days">Too old to undo</span>}
-                    {r.undo === "undone" && <span className="hint">Undone</span>}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <div className="list actlist">
+          {rows.map((r) => (
+            <div className="item act" key={r.id}>
+              <div className="t">
+                <span className="act-s"><strong>{r.who}</strong> {r.what}</span>
+                <small title={r.when}>{ago(new Date(r.ts).toISOString())} · {r.when}</small>
+              </div>
+              <div className="meta">
+                {r.via === "concierge" && <span className="chip gold">via concierge</span>}
+                {r.undo === "available" && <button className="btn ghost sm" onClick={() => requestUndo(r.id)}>Undo</button>}
+                {r.undo === "too_old" && <span className="hint" title="Undo works for 30 days">Too old to undo</span>}
+                {r.undo === "undone" && <span className="hint">Undone</span>}
+              </div>
+            </div>
+          ))}
         </div>
       )}
       {next && <p><button className="btn ghost" onClick={async () => { const r = await api<{ items: Row[]; nextCursor: string | null }>("GET", `/api/projects/${id}/activity?cursor=${next}`); if (r.ok) { setMore((m) => [...m, ...r.data.items]); setCursor(r.data.nextCursor); } }}>Load more</button></p>}

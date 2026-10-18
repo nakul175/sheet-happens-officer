@@ -1,7 +1,10 @@
 // Integration tests for roles, projects, members, Sections and tasks (SHO-US-2.x to 6.2).
-// Server must run with SUPER_ADMIN_EMAILS=root.test@aplyd.com and the same EMAIL_OUTBOX_DIR.
+// Server must run with SUPER_ADMIN_EMAILS=root.test@aplyd.com and the same EMAIL_OUTBOX_DIR; DATABASE_URL points at the same database.
 import { describe, expect, it } from "vitest";
+import { PrismaClient } from "../src/generated/prisma/client";
 import { Client, account, admin, istDate, project, superAdmin, task, type Account } from "./helpers";
+
+const db = new PrismaClient();
 
 describe("people and roles (2.x)", () => {
   it("makes the configured address Super Admin", async () => {
@@ -27,7 +30,7 @@ describe("people and roles (2.x)", () => {
     const email = `ghost${Date.now()}@aplyd.com`;
     await ghost.post("/api/auth/signup", { name: "Ghost", email, password: "correct-horse-9" });
     const asMember = (await m.c.get("/api/team")).json.people as Record<string, unknown>[];
-    expect(asMember.every((p) => Object.keys(p).sort().join() === "id,name")).toBe(true);
+    expect(asMember.every((p) => Object.keys(p).sort().join() === "id,leads,name,orgRole" /* SHO-US-14.4 AC3 adds role and led projects */)).toBe(true);
     expect(asMember.some((p) => p.name === "Ghost")).toBe(false);
     const asSuper = (await sa.c.get("/api/team")).json.people as Record<string, string>[];
     expect(asSuper.find((p) => p.email === email)?.status).toBe("UNVERIFIED");
@@ -203,6 +206,35 @@ describe("sections (5.4)", () => {
     expect((await lead.c.del(`/api/projects/${p.id}/sections/${p.doing}?moveTo=${p.todo}`)).status).toBe(204);
     expect((await lead.c.get(`/api/tasks/${t}`)).json.task.sectionId).toBe(p.todo);
   });
+
+  it("closes open subtasks with their parent when a section becomes the done section or is deleted into it, one log row each (SHO-BUG-3)", async () => {
+    const lead = await account("lead");
+    const p = await project(lead, lead);
+    const parent = await task(lead, p.id, { title: "Parent", sectionId: p.doing });
+    const subs = [await task(lead, p.id, { parentId: parent }), await task(lead, p.id, { parentId: parent })];
+    const all = [parent, ...subs].sort();
+    const completedAt = async (id: string) => (await lead.c.get(`/api/tasks/${id}`)).json.task.completedAt as string | null;
+    const completedRows = async (since: Date) => (await db.actionLog.findMany({ where: { projectId: p.id, action: "task.completed", createdAt: { gte: since } } })).map((r) => r.targetId).sort();
+
+    // "In progress" becomes the done section: the parent and both subtasks close, a task.completed row each.
+    let since = new Date();
+    const r = await lead.c.patch(`/api/projects/${p.id}/sections/${p.doing}`, { isDone: true });
+    expect(r.status, JSON.stringify(r.json)).toBe(200);
+    for (const id of all) expect(await completedAt(id)).not.toBeNull();
+    expect(await completedRows(since)).toEqual(all);
+    expect((await lead.c.get(`/api/tasks/${parent}`)).json.task.subtasks).toEqual({ total: 2, open: 0 });
+    // Undo reopens all three and puts the done flag back.
+    expect((await lead.c.post(`/api/actions/${r.headers.get("x-undo-id")}/undo`)).status).toBe(200);
+    for (const id of all) expect(await completedAt(id)).toBeNull();
+    expect((await lead.c.get(`/api/projects/${p.id}`)).json.project.sections.find((s: { isDone: boolean }) => s.isDone).id).toBe(p.done);
+
+    // Deleting "In progress" into the done section does the same.
+    since = new Date();
+    expect((await lead.c.del(`/api/projects/${p.id}/sections/${p.doing}?moveTo=${p.done}`)).status).toBe(204);
+    for (const id of all) expect(await completedAt(id)).not.toBeNull();
+    expect(await completedRows(since)).toEqual(all);
+    expect((await lead.c.get(`/api/tasks/${parent}`)).json.task.sectionId).toBe(p.done);
+  });
 });
 
 describe("tasks (4.x, 5.x)", () => {
@@ -355,7 +387,10 @@ describe("approver (4.6)", () => {
     const held = (await boss.c.get(`/api/tasks/${t}`)).json.task;
     expect(held.assignee.id).toBe(boss.id);
     expect(held.awaitingApproval).toBe(true);
-    expect((await boss.c.get("/api/my-tasks")).json.later.some((x: { id: string }) => x.id === t)).toBe(true);
+    // SHO-US-14.16: a task held for approval is listed in "Waiting on me", no longer under Later.
+    const mineNow = (await boss.c.get("/api/my-tasks")).json;
+    expect(mineNow.waitingOnMe.some((x: { id: string }) => x.id === t)).toBe(true);
+    expect(mineNow.later.some((x: { id: string }) => x.id === t)).toBe(false);
     expect((await other.c.post(`/api/tasks/${t}/send-back`)).status).toBe(403);
     expect((await boss.c.post(`/api/tasks/${t}/send-back`)).status).toBe(200);
     expect((await boss.c.get(`/api/tasks/${t}`)).json.task.assignee.id).toBe(worker.id);
@@ -383,6 +418,42 @@ describe("approver (4.6)", () => {
     expect((await lead.c.del(`/api/projects/${p.id}/members/${worker.id}?handoverTo=${lead.id}`)).status).toBe(204);
     expect((await boss.c.post(`/api/tasks/${t}/send-back`)).status).toBe(200);
     expect((await lead.c.get(`/api/tasks/${t}`)).json.task.assignee.id).toBe(lead.id);
+  });
+
+  it("clears the approver when a send-back can only go to the Leader who approves, so the task is not stuck (SHO-BUG-6)", async () => {
+    const sa = await superAdmin();
+    const { lead, worker, boss, other, p, t } = await setup();
+    const get = async () => (await lead.c.get(`/api/tasks/${t}`)).json.task;
+    expect((await lead.c.put(`/api/tasks/${t}/approver`, { approverId: lead.id })).status).toBe(200);
+    expect((await worker.c.post(`/api/tasks/${t}/send-for-approval`)).status).toBe(200);
+    expect((await lead.c.del(`/api/projects/${p.id}/members/${worker.id}?handoverTo=${other.id}`)).status).toBe(204);
+    // Nobody to send back to: the Leader holds it, approves nothing of their own, and can act on it.
+    const sb = await lead.c.post(`/api/tasks/${t}/send-back`);
+    expect(sb.status, JSON.stringify(sb.json)).toBe(200);
+    expect(await get()).toMatchObject({ assignee: { id: lead.id }, approver: null, awaitingApproval: false, previousAssigneeId: null });
+    const row = await db.actionLog.findUniqueOrThrow({ where: { id: sb.headers.get("x-undo-id")! } });
+    expect(row.beforeState).toMatchObject({ assigneeId: lead.id, approverId: lead.id });
+    expect(row.afterState).toMatchObject({ assigneeId: lead.id, approverId: null });
+    // Undo restores the approver, and with it the waiting state.
+    expect((await lead.c.post(`/api/actions/${row.id}/undo`)).status).toBe(200);
+    expect(await get()).toMatchObject({ assignee: { id: lead.id }, approver: { id: lead.id }, awaitingApproval: true });
+    // An Admin sending it back clears it the same way, and the Leader's notice says so.
+    expect((await sa.c.post(`/api/tasks/${t}/send-back`)).status).toBe(200);
+    expect(await get()).toMatchObject({ approver: null, awaitingApproval: false });
+    const notes = (await lead.c.get("/api/notifications")).json.items as { text: string }[];
+    expect(notes.some((n) => n.text === 'Root sent "needs review" back to you. It no longer has an approver.')).toBe(true);
+    // From there the Leader can reassign it and name an approver again.
+    expect((await lead.c.post(`/api/tasks/${t}/assign`, { assigneeId: other.id })).status).toBe(200);
+    expect((await lead.c.put(`/api/tasks/${t}/approver`, { approverId: boss.id })).status).toBe(200);
+  });
+
+  it("lets the Leader hand on a task they hold even though it has an approver; an Editor still cannot (SHO-BUG-6)", async () => {
+    const { lead, worker, boss, other, p } = await setup();
+    const t = await task(lead, p.id, { title: "Leader holds", assigneeId: lead.id, approverId: boss.id });
+    expect((await lead.c.post(`/api/tasks/${t}/assign`, { assigneeId: other.id })).status).toBe(200);
+    expect((await lead.c.get(`/api/tasks/${t}`)).json.task).toMatchObject({ assignee: { id: other.id }, approver: { id: boss.id }, awaitingApproval: false });
+    expect((await other.c.post(`/api/tasks/${t}/assign`, { assigneeId: worker.id })).status).toBe(403); // the assignee may only hand it to the approver
+    expect((await other.c.post(`/api/tasks/${t}/assign`, { assigneeId: boss.id })).status).toBe(200);
   });
 
   it("hands a removed approver's tasks to the Leader, who also becomes the holder when awaiting", async () => {

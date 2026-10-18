@@ -21,7 +21,7 @@ type Ctx = {
   dismissError: () => void;
   retryLoad: () => void;
   send: (text: string) => Promise<boolean>;
-  quick: (id: QuickActionId) => Promise<void>;
+  quick: (id: QuickActionId, projectId?: string) => Promise<void>;
   choose: (m: Message, choiceId: string) => Promise<void>;
   confirm: (cardId: string, handover?: { taskId: string; assigneeId: string }[], acknowledge?: boolean) => Promise<void>;
   cancel: (cardId: string) => Promise<void>;
@@ -91,9 +91,9 @@ export function ConciergeProvider({ children }: { children: React.ReactNode }) {
     });
   }, [run, add]);
 
-  const quick = useCallback(async (qid: QuickActionId) => {
+  const quick = useCallback(async (qid: QuickActionId, projectId?: string) => {
     await run(async () => {
-      const r = await conciergeApi.quick(qid);
+      const r = await conciergeApi.quick(qid, projectId);
       if (!r.ok) setError(r.error ?? "That did not work."); else add(r.data.messages ?? []);
     });
   }, [run, add]);

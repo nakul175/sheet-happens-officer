@@ -5,3 +5,8 @@
 .undo-cmp { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 14px; }
 .undo-cmp th, .undo-cmp td { text-align: left; padding: 6px 8px; border-bottom: 1px solid rgba(0,0,0,.1); vertical-align: top; }
 .undo-cmp th { font-size: 12px; opacity: .7; font-weight: 600; }
+
+/* SHO-US-22.8 AC5: the toast never covers the tab bar, the board's concierge bar or the concierge entry. */
+@media (max-width: 599px) { .undo-toast { bottom: calc(72px + env(safe-area-inset-bottom, 0px)); } }
+@media (min-width: 1024px) { body:has(.bardock) .undo-toast { bottom: calc(64px + env(safe-area-inset-bottom, 0px)); } }
+body:has(.cc-sheet) .undo-toast { bottom: auto; top: calc(64px + env(safe-area-inset-top, 0px)); z-index: 90; }

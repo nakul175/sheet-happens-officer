@@ -1,5 +1,6 @@
 "use client";
 import Link from "next/link";
+import { Skeleton } from "@/components/ui";
 import { useState } from "react";
 import { api, dueLabel, isOverdue, useGet } from "@/components/api";
 import { ConvertDialog } from "@/components/ConvertDialog";
@@ -36,7 +37,7 @@ export default function ReviewView() {
   async function drop(t: Idea) { await api("POST", `/api/tasks/${t.id}/idea`, { isIdea: false }); reload(); }
   return (
     <Page title="Pipeline review" sub="What needs a decision this week">
-      {loading && !data && <div className="skel">Loading…</div>}
+      {loading && !data && <Skeleton />}
       {error && <div className="err" role="alert">{error}</div>}
       {data && (
         <>

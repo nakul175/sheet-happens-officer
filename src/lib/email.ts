@@ -42,3 +42,10 @@ export const resetMail = (to: string, token: string): Mail => ({
   subject: "Reset your Sheet Happens Officer password",
   text: `Set a new password:\n\n${appUrl()}/reset?token=${token}\n\nThis link works once and expires in 1 hour. If you did not ask for this, ignore this email.`,
 });
+
+/** SHO-US-15.3. The one place a generated password is written into an email. Never logged or audited. */
+export const signInDetailsMail = (to: string, firstName: string, addedBy: string, password: string): Mail => ({
+  to,
+  subject: "Your Sheet Happens Officer account",
+  text: `Hi ${firstName},\n\n${addedBy} added you to Sheet Happens Officer. Sign in here:\n\n${appUrl()}/signin\n\nUsername: ${to}\nPassword: ${password}\n\nThis password stays valid until you change it. We suggest you set your own after you sign in: open Profile, then Change password.\n\nIf you did not expect this email, ignore it and tell ${addedBy}. Do not forward this email, because it contains your password.`,
+});

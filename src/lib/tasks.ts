@@ -1,4 +1,5 @@
 import { ensureNextStep } from "@/lib/deals";
+import { crmProjectWhere } from "@/lib/crm";
 import { linksOfTask } from "@/lib/records";
 import { db } from "@/lib/db";
 import { ApiError, notFound } from "@/lib/http";
@@ -8,7 +9,7 @@ import {
 import { addDays, formatDueDate, parseDueDate, startOfTodayIST } from "@/lib/dates";
 import { auditTx, logAction, notify } from "@/lib/notify";
 
-const taskInclude = {
+export const taskInclude = {
   assignee: { select: { id: true, name: true } },
   approver: { select: { id: true, name: true } },
   collaborators: { select: { user: { select: { id: true, name: true } } } },
@@ -67,7 +68,7 @@ async function loadTask(user: Actor, id: string, o: { write?: boolean; deleted?:
   return { t, a };
 }
 
-const ORDER = [{ dueDate: { sort: "asc", nulls: "last" } }, { createdAt: "asc" }, { id: "asc" }] as const;
+export const ORDER = [{ dueDate: { sort: "asc", nulls: "last" } }, { createdAt: "asc" }, { id: "asc" }] as const;
 
 async function requireWorker(tx: Tx, projectId: string, userId: string, what: string) {
   const m = await activeMember(tx, projectId, userId, WORKERS);
@@ -196,6 +197,14 @@ export async function listTasks(
   return { sections: out };
 }
 
+/** SHO-US-14.8 AC4: the same stale-edit answer for every inline edit. */
+async function staleCheck(user: Actor, id: string, t: TaskRow, role: Role, expected?: string) {
+  if (expected && new Date(expected).getTime() !== t.updatedAt.getTime()) {
+    const last = await db.actionLog.findFirst({ where: { targetType: "task", targetId: id }, orderBy: { createdAt: "desc" }, include: { actor: { select: { name: true } } } });
+    throw new ApiError(409, "This task changed while you were editing it.", { stale: true, changedBy: last?.actor.name ?? null, current: present(t, { id: user.id, role }) });
+  }
+}
+
 // ---------------------------------------------------------------- edit (4.2, 4.4)
 export async function updateTask(
   user: Actor,
@@ -246,9 +255,11 @@ export async function updateTask(
 }
 
 // ---------------------------------------------------------------- assign, collaborators, approver (4.3, 4.6)
-export async function assignTask(user: Actor, id: string, assigneeId: string) {
-  const { t } = await loadTask(user, id, { write: true });
-  if (t.approverId && user.id === t.assigneeId && assigneeId !== t.approverId) {
+export async function assignTask(user: Actor, id: string, assigneeId: string, expectedUpdatedAt?: string) {
+  const { t, a } = await loadTask(user, id, { write: true });
+  await staleCheck(user, id, t, a.role, expectedUpdatedAt);
+  // The assignee may only hand a task with an approver on to that approver; the Leader and Admins keep full authority (SHO-BUG-6).
+  if (t.approverId && user.id === t.assigneeId && assigneeId !== t.approverId && a.role !== "LEADER") {
     throw new ApiError(403, "With an approver, this task can only be handed to the approver.");
   }
   await db.$transaction(async (tx) => {
@@ -325,10 +336,19 @@ export async function sendBack(user: Actor, id: string) {
   await db.$transaction(async (tx) => {
     const prev = t.previousAssigneeId ? await activeMember(tx, t.projectId, t.previousAssigneeId, WORKERS) : null;
     const target = prev ? prev.userId : await leaderId(tx, t.projectId);
-    await tx.task.update({ where: { id }, data: { assigneeId: target, previousAssigneeId: null } });
-    await notify(tx, [target], "SENT_BACK", { actorId: user.id, taskId: id, projectId: t.projectId, data: { title: t.title, toLeader: !prev } });
+    // With nobody to send back to, the task goes to the Leader. When the Leader is the approver it would still be
+    // "awaiting approval" in their own hands, and neither Reassign nor Change approver is open to them from there, so the
+    // approver is cleared in the same write; Undo puts it back (SHO-BUG-6).
+    const clearApprover = target === t.approverId;
+    const approver = clearApprover ? { approverId: null } : {};
+    await tx.task.update({ where: { id }, data: { assigneeId: target, previousAssigneeId: null, ...approver } });
+    await notify(tx, [target], "SENT_BACK", { actorId: user.id, taskId: id, projectId: t.projectId, data: { title: t.title, toLeader: !prev, ...(clearApprover ? { approverCleared: true } : {}) } });
     await notify(tx, [t.assigneeId], "REMOVED_AS_ASSIGNEE", { actorId: user.id, taskId: id, projectId: t.projectId, data: { title: t.title } });
-    await logAction(tx, { actorId: user.id, projectId: t.projectId, targetType: "task", targetId: id, action: "task.sent_back", before: { assigneeId: t.assigneeId, previousAssigneeId: t.previousAssigneeId }, after: { assigneeId: target, previousAssigneeId: null } });
+    await logAction(tx, {
+      actorId: user.id, projectId: t.projectId, targetType: "task", targetId: id, action: "task.sent_back",
+      before: { assigneeId: t.assigneeId, previousAssigneeId: t.previousAssigneeId, ...(clearApprover ? { approverId: t.approverId } : {}) },
+      after: { assigneeId: target, previousAssigneeId: null, ...approver },
+    });
   });
 }
 
@@ -495,7 +515,8 @@ export async function myTasks(user: Actor) {
     where: {
       completedAt: null,
       deletedAt: null,
-      project: { archivedAt: null, members: { some: { userId: user.id } } },
+      // Deal tasks are left out while the CRM is hidden from this person (SHO-BUG-2).
+      project: { archivedAt: null, members: { some: { userId: user.id } }, ...crmProjectWhere(user) },
       OR: [{ assigneeId: user.id }, { collaborators: { some: { userId: user.id } } }],
     },
     include: {
@@ -507,20 +528,50 @@ export async function myTasks(user: Actor) {
   });
   const today = startOfTodayIST();
   const weekEnd = addDays(today, 8); // today plus the next seven days
-  const groups = { overdue: [] as unknown[], next7: [] as unknown[], later: [] as unknown[] };
+  // SHO-US-14.16: what waits on me, and what I handed to an approver, since when.
+  const sent = await db.task.findMany({
+    where: {
+      completedAt: null, deletedAt: null, previousAssigneeId: user.id, approverId: { not: null }, assigneeId: { not: user.id },
+      project: { archivedAt: null, members: { some: { userId: user.id } } },
+    },
+    include: { ...taskInclude, project: { select: { id: true, name: true, typeId: true, stage: { select: { name: true } }, members: { where: { userId: user.id }, select: { role: true } } } }, parent: { select: { id: true, title: true } } },
+    orderBy: [...ORDER],
+  });
+  const since = await waitingSince([...rows.filter(awaiting), ...sent.filter(awaiting)].map((t) => t.id));
+  const days = (id: string, fallback: Date) => Math.max(0, Math.floor((Date.now() - (since.get(id) ?? fallback).getTime()) / 86400_000));
+  const groups = { waitingOnMe: [] as unknown[], overdue: [] as unknown[], next7: [] as unknown[], later: [] as unknown[], waitingOnOthers: [] as unknown[] };
+  const shape = (t: (typeof rows)[number]) => ({
+    ...present(t, { id: user.id, role: (t.project.members[0]?.role ?? "VIEWER") as Role }),
+    project: { id: t.project.id, name: t.project.name, type: t.project.typeId === "wst_deal" ? "DEAL" : "PROJECT", stage: t.project.stage?.name ?? null },
+    parent: t.parent,
+    relation: t.assigneeId === user.id ? "ASSIGNEE" : "COLLABORATOR",
+  });
   for (const t of rows) {
-    const role = (t.project.members[0]?.role ?? "VIEWER") as Role;
-    const item = {
-      ...present(t, { id: user.id, role }),
-      project: { id: t.project.id, name: t.project.name, type: t.project.typeId === "wst_deal" ? "DEAL" : "PROJECT", stage: t.project.stage?.name ?? null },
-      parent: t.parent,
-      relation: t.assigneeId === user.id ? "ASSIGNEE" : "COLLABORATOR",
-    };
-    if (t.dueDate && t.dueDate < today) groups.overdue.push(item);
+    const item = shape(t);
+    // A task held for my approval is not "later"; it sits in its own group at the top.
+    if (awaiting(t) && t.assigneeId === user.id) groups.waitingOnMe.push({ ...item, waitingDays: days(t.id, t.updatedAt) });
+    else if (t.dueDate && t.dueDate < today) groups.overdue.push(item);
     else if (t.dueDate && t.dueDate < weekEnd) groups.next7.push(item);
     else groups.later.push(item);
   }
+  for (const t of sent) if (awaiting(t)) groups.waitingOnOthers.push({ ...shape(t), waitingDays: days(t.id, t.updatedAt) });
   return groups;
+}
+
+/** When each task last went to its approver: the newest action that put it in the approver's hands. */
+async function waitingSince(ids: string[]) {
+  const out = new Map<string, Date>();
+  if (!ids.length) return out;
+  const rows = await db.actionLog.findMany({
+    where: { targetType: "task", targetId: { in: ids }, action: { in: ["task.sent_for_approval", "task.assigned", "task.approver_changed"] }, undoneAt: null },
+    orderBy: { createdAt: "desc" },
+    select: { targetId: true, createdAt: true, afterState: true },
+  });
+  for (const r of rows) {
+    const after = (r.afterState ?? {}) as { assigneeId?: string; approverId?: string };
+    if (!out.has(r.targetId) && after.assigneeId) out.set(r.targetId, r.createdAt);
+  }
+  return out;
 }
 
 

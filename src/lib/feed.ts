@@ -4,7 +4,8 @@ import { z } from "zod";
 import { db } from "@/lib/db";
 import { ApiError } from "@/lib/http";
 import { currentSessionId, deviceLabel, hashPassword, verifyPassword } from "@/lib/auth";
-import { projectAccess, requireManage, type Actor } from "@/lib/access";
+import { projectAccess, type Actor } from "@/lib/access";
+import { idsIn, sentence, whenText } from "@/lib/activity-text";
 import { UNDO_DAYS, isUndoable } from "@/lib/undoable";
 import { passwordField } from "@/lib/schemas";
 
@@ -29,7 +30,8 @@ function leftNote(d: Record<string, unknown>) {
 function handoverText(who: string, d: Record<string, unknown>, p: string) {
   const from = String(d.fromName ?? "A person");
   const bits: string[] = [];
-  const moved = Number(d.moved ?? 0), approver = Number(d.approver ?? 0), cleared = Number(d.cleared ?? 0);
+  const moved = Number(d.moved ?? 0), toMe = Number(d.movedToYou ?? 0), approver = Number(d.approver ?? 0), cleared = Number(d.cleared ?? 0);
+  if (toMe) bits.push(`${plural(toMe, "open task")} ${toMe === 1 ? "is" : "are"} now yours`); // a per-task hand-over split between the Leader and others (SHO-BUG-7)
   if (moved) bits.push(d.toYou ? `${plural(moved, "open task")} ${moved === 1 ? "is" : "are"} now yours` : `${plural(moved, "open task")} went to ${String(d.to ?? "someone else")}`);
   if (approver) bits.push(`you now approve ${plural(approver, "task")} that ${from} used to approve`);
   if (cleared) bits.push(`${plural(cleared, "task")} no longer ${cleared === 1 ? "has" : "have"} an approver`);
@@ -44,14 +46,14 @@ export function noticeText(n: N) {
   const p = d.project ? `"${d.project}"` : "a project";
   const text: Record<string, string> = {
     TASK_ASSIGNED: `${who} assigned you ${t}.`,
-    TASKS_REASSIGNED: `${who} moved tasks over to you.`,
+    TASKS_REASSIGNED: d.count ? `${who} assigned you ${d.count} tasks${d.project ? ` in ${p}` : ""}.` : `${who} moved tasks over to you.`,
     TASKS_REASSIGNED_SUMMARY: `${d.count ?? "Some"} tasks in ${p} were handed to a new owner by ${who}.`,
     APPROVER_REASSIGNED: `${who} changed who approves tasks in ${p}.`,
     COLLABORATOR_ADDED: `${who} added you as a collaborator on ${t}.`,
     COLLABORATOR_REMOVED: `${who} removed you from ${t}.`,
     APPROVER_NAMED: `${who} named you the approver of ${t}.`,
     SENT_FOR_APPROVAL: `${who} sent ${t} to you for approval.`,
-    SENT_BACK: `${who} sent ${t} back to you.`,
+    SENT_BACK: `${who} sent ${t} back to you.${d.approverCleared ? " It no longer has an approver." : ""}`,
     TASK_BLOCKED: `${who} marked ${t} as blocked${d.reason ? `: ${d.reason}` : ""}.`,
     TASK_DELETED: `${who} moved ${t} to Trash.`,
     REMOVED_AS_ASSIGNEE: `${who} took ${t} off you; someone else now holds it.`,
@@ -61,6 +63,7 @@ export function noticeText(n: N) {
     RESTORED_TO_LEADER: `${t} was restored to you because its owner is no longer on the project.`,
     MADE_LEADER: `${who} made you Leader of ${p}.`,
     PROJECT_ARCHIVED: `${who} archived ${p}. It is now read-only.`,
+    JOIN_REQUESTED: `${who} asked to be added to one of your projects.`,
     ADDED_TO_PROJECT: `${who} added you to ${p} as ${String(d.role ?? "Editor").toLowerCase()}.`,
     PROJECT_ROLE_CHANGED: `${who} changed your role in ${p} to ${String(d.role ?? "").toLowerCase()}.${leftNote(d)}`,
     REMOVED_FROM_PROJECT: `${who} removed you from ${p}.${leftNote(d)}`,
@@ -77,106 +80,62 @@ export function noticeText(n: N) {
   };
   // A deleted task cannot be opened, so its notice links to the project Trash (SHO-US-7.3 AC1).
   const href = n.type === "TASK_DELETED" && n.projectId ? `/projects/${n.projectId}/trash`
-    : n.taskId ? `/tasks/${n.taskId}` : n.projectId ? `/projects/${n.projectId}` : n.type.startsWith("JOB_") ? "/audit" : n.type.startsWith("CONCIERGE_") ? "/usage" : "/";
+    : n.taskId ? `/tasks/${n.taskId}` : n.projectId ? `/projects/${n.projectId}` : n.type === "JOIN_REQUESTED" ? "/projects" : n.type.startsWith("JOB_") ? "/audit" : n.type.startsWith("CONCIERGE_") ? "/usage" : "/";
   return { text: text[n.type] ?? `${who} made a change.`, href };
 }
 
-export async function listNotifications(user: Actor) {
-  const [rows, unread] = await Promise.all([
-    db.notification.findMany({
-      where: { recipientId: user.id },
-      orderBy: { createdAt: "desc" },
-      take: 30,
-      include: { actor: { select: { name: true } } },
-    }),
-    db.notification.count({ where: { recipientId: user.id, readAt: null } }),
-  ]);
+/** SHO-US-14.13: newest first, 50 at a time; `before` is the `next` value of the previous page. `filter=unread` hides read items. */
+export async function listNotifications(user: Actor, o: { filter?: string; before?: string; limit?: number } = {}) {
+  const limit = Math.min(Math.max(o.limit ?? 50, 1), 200);
+  const [at, cursorId] = (o.before ?? "").split("|");
+  const when = at && !Number.isNaN(Date.parse(at)) ? new Date(at) : null;
+  const rows = await db.notification.findMany({
+    where: {
+      recipientId: user.id,
+      ...(o.filter === "unread" ? { readAt: null } : {}),
+      ...(when ? { OR: [{ createdAt: { lt: when } }, { createdAt: when, id: { lt: cursorId ?? "" } }] } : {}),
+    },
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    take: limit + 1,
+    include: { actor: { select: { name: true } } },
+  });
+  const unread = await db.notification.count({ where: { recipientId: user.id, readAt: null } });
+  const page = rows.slice(0, limit);
+  const last = page.at(-1);
   return {
     unread,
-    items: rows.map((n) => ({ id: n.id, ...noticeText(n), read: !!n.readAt, createdAt: n.createdAt.toISOString() })),
+    items: page.map((n) => ({ id: n.id, ...noticeText(n), read: !!n.readAt, createdAt: n.createdAt.toISOString() })),
+    next: rows.length > limit && last ? `${last.createdAt.toISOString()}|${last.id}` : null,
   };
 }
 
 export async function markRead(user: Actor, id: string) {
   await db.notification.updateMany({ where: { id, recipientId: user.id, readAt: null }, data: { readAt: new Date() } });
 }
+/** SHO-US-14.13 AC4: keep a notice unread until I have acted on it. */
+export async function markUnread(user: Actor, id: string) {
+  await db.notification.updateMany({ where: { id, recipientId: user.id, readAt: { not: null } }, data: { readAt: null } });
+}
 export async function markAllRead(user: Actor) {
   await db.notification.updateMany({ where: { recipientId: user.id, readAt: null }, data: { readAt: new Date() } });
 }
 
-// ---- project activity (Leader and Admins) ----
-const ACTION_WORDS: Record<string, string> = {
-  "project.created": "created the project",
-  "project.updated": "edited the project",
-  "project.archived": "archived the project",
-  "project.unarchived": "unarchived the project",
-  "project.leader_changed": "changed the project Leader",
-  "member.added": "added a member",
-  "member.removed": "removed a member",
-  "member.role_changed": "changed a member's role",
-  "section.added": "added a section",
-  "section.deleted": "deleted a section",
-  "section.renamed": "renamed a section",
-  "section.moved": "moved a section",
-  "section.done_changed": "changed which section counts as done",
-  "task.created": "created a task",
-  "task.updated": "edited a task",
-  "task.assigned": "reassigned a task",
-  "task.collaborator_added": "added a collaborator to a task",
-  "task.collaborator_removed": "removed a collaborator from a task",
-  "task.approver_changed": "changed a task's approver",
-  "task.sent_for_approval": "sent a task for approval",
-  "task.sent_back": "sent a task back",
-  "task.completed": "completed a task",
-  "task.reopened": "reopened a task",
-  "task.moved": "moved a task",
-  "task.deleted": "moved a task to Trash",
-  "task.restored": "restored a task from Trash",
-  "deal.created": "created the deal",
-  "deal.stage_changed": "moved the deal to another stage",
-  "deal.stage_removed_move": "was moved to another stage because a stage was removed",
-  "deal.details_updated": "edited the deal details",
-  "deal.party_added": "added an organisation to the deal",
-  "deal.party_removed": "removed an organisation from the deal",
-  "deal.converted": "converted a task to this deal",
-  "task.moved_to_deal": "moved this task to a deal",
-  "task.idea_changed": "changed the Idea flag",
-  "tasks.reassigned": "handed a person's open tasks to someone else",
-  "tasks.collaborations_dropped": "took a person off tasks as a collaborator",
-  "tasks.approver_reassigned": "moved a person's approver duties to the Leader",
-  undo: "undid an action",
-};
-const name = (s: unknown) => (typeof s === "string" ? s : undefined);
-
-const KEY_WORDS: Record<string, string> = {
-  sectionId: "section", assigneeId: "assignee", approverId: "approver", leaderId: "leader", userId: "person",
-  newLeaderId: "leader", movedTo: "moved to", dueDate: "due date", blockedReason: "blocked because",
-};
-const SKIP = new Set(["title", "name", "id", "updatedAt", "description", "completedAt", "subtasksCompleted", "stageId"]);
-
-/** Ids in before/after state are shown as names. `names` maps section and user ids to labels. */
-function describe(a: { action: string; beforeState: unknown; afterState: unknown; targetId: string }, names: Map<string, string>) {
-  const b = (a.beforeState ?? {}) as Record<string, unknown>;
-  const f = (a.afterState ?? {}) as Record<string, unknown>;
-  const label = name(f.title) ?? name(b.title) ?? name(f.name) ?? name(b.name) ?? names.get(`t:${a.targetId}`);
-  const base = a.action === "undo" ? `undid "${String(f.label ?? "an action").toLowerCase()}"` : ACTION_WORDS[a.action] ?? a.action;
-  const show = (v: unknown) => (v === null || v === undefined || v === "" ? "none" : typeof v === "string" ? names.get(v) ?? v : String(v));
-  const detail: string[] = [];
-  for (const k of Object.keys(f)) {
-    if (SKIP.has(k) && !(k === "name" && a.action === "section.renamed")) continue;
-    const from = b[k], to = f[k];
-    if ((typeof to === "object" && to !== null) || (typeof from === "object" && from !== null)) continue;
-    if (from === to) continue;
-    if (/^(subtasks|tasks)/.test(k)) continue;
-    detail.push(`${KEY_WORDS[k] ?? k}: ${show(from)} → ${show(to)}`);
-  }
-  return { what: label ? `${base} "${label}"` : base, change: detail.slice(0, 4).join(" · ") || null };
-}
-
+// ---- project activity (SHO-US-6.3, 14.14) ----
+/**
+ * Leader and Admins see the whole project. An Editor sees what happened on tasks they are on
+ * (assignee, collaborator or approver), not the whole project. Viewers see nothing here.
+ * Every row is a sentence: names, never ids; India-time dates; no field names.
+ */
 export async function projectActivity(user: Actor, projectId: string, cursor?: string, limit = 50) {
-  requireManage(await projectAccess(user, projectId));
+  const a = await projectAccess(user, projectId);
+  if (a.role === "VIEWER") throw new ApiError(403, "Only people who work on this project can see Activity.");
+  const leader = a.role === "LEADER";
+  const mine = leader ? null : (await db.task.findMany({
+    where: { projectId, OR: [{ assigneeId: user.id }, { approverId: user.id }, { collaborators: { some: { userId: user.id } } }] },
+    select: { id: true },
+  })).map((t) => t.id);
   const rows = await db.actionLog.findMany({
-    where: { projectId },
+    where: { projectId, ...(mine ? { targetType: "task", targetId: { in: mine } } : {}) },
     orderBy: [{ createdAt: "desc" }, { id: "desc" }],
     take: limit + 1,
     ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
@@ -184,24 +143,26 @@ export async function projectActivity(user: Actor, projectId: string, cursor?: s
   });
   const more = rows.length > limit;
   const page = rows.slice(0, limit);
-  const ids = new Set<string>();
-  for (const r of page) for (const st of [r.beforeState, r.afterState]) for (const v of Object.values((st ?? {}) as Record<string, unknown>)) if (typeof v === "string" && v.length > 20) ids.add(v);
-  const [users, sections] = await Promise.all([
-    db.user.findMany({ where: { id: { in: [...ids] } }, select: { id: true, name: true } }),
-    db.section.findMany({ where: { id: { in: [...ids] } }, select: { id: true, name: true } }),
+  const ids = [...new Set(page.flatMap((r) => idsIn(r)))];
+  const [users, sections, tasks] = await Promise.all([
+    db.user.findMany({ where: { id: { in: ids } }, select: { id: true, name: true } }),
+    db.section.findMany({ where: { id: { in: ids } }, select: { id: true, name: true } }),
+    db.task.findMany({ where: { id: { in: ids } }, select: { id: true, title: true } }),
   ]);
-  const tasks = await db.task.findMany({ where: { id: { in: page.filter((r) => r.targetType === "task").map((r) => r.targetId) } }, select: { id: true, title: true } });
   const names = new Map<string, string>([...users, ...sections].map((x) => [x.id, x.name] as [string, string]));
   for (const t of tasks) names.set(`t:${t.id}`, t.title);
   return {
     items: page.map((r) => ({
       id: r.id,
-      at: r.createdAt.toISOString(),
+      ts: r.createdAt.getTime(),
+      when: whenText(r.createdAt),
       who: r.actor.name,
+      what: sentence(r, names),
+      // "How" is only worth a word when it was not the screen (SHO-US-14.14 AC4).
       via: r.channel === "CONCIERGE" ? "concierge" : "screen",
-      undo: r.undoneAt ? "undone" : !isUndoable(r.action) ? "none"
+      // Undo stays on the row (AC5); an Editor can only undo their own actions, as the server enforces.
+      undo: r.undoneAt ? "undone" : !isUndoable(r.action) || (!leader && r.actorId !== user.id) ? "none"
         : Date.now() - r.createdAt.getTime() > UNDO_DAYS * 86400_000 ? "too_old" : "available",
-      ...describe(r, names),
     })),
     nextCursor: more ? page[page.length - 1].id : null,
   };
@@ -236,17 +197,20 @@ export async function auditLog(user: Actor, q: z.infer<typeof auditQuery>) {
   const events = await db.auditLog.findMany({ distinct: ["event"], select: { event: true }, orderBy: { event: "asc" } });
   const page = rows.slice(0, 100);
   const byType = (t: string[]) => [...new Set(page.filter((r) => r.targetType && t.includes(r.targetType) && r.targetId).map((r) => r.targetId!))];
+  // A "deal" target is the deal's project row (DEAL_CREATED, DEAL_CLOSED), or the task that became one (DEAL_CONVERTED) (SHO-BUG-4).
   const [us, ps, ts, ss] = await Promise.all([
     db.user.findMany({ where: { id: { in: byType(["user", "member"]) } }, select: { id: true, name: true } }),
-    db.project.findMany({ where: { id: { in: byType(["project"]) } }, select: { id: true, name: true } }),
-    db.task.findMany({ where: { id: { in: byType(["task"]) } }, select: { id: true, title: true } }),
+    db.project.findMany({ where: { id: { in: byType(["project", "deal"]) } }, select: { id: true, name: true } }),
+    db.task.findMany({ where: { id: { in: byType(["task", "deal"]) } }, select: { id: true, title: true } }),
     db.section.findMany({ where: { id: { in: byType(["section"]) } }, select: { id: true, name: true } }),
   ]);
   const label = new Map<string, string>([
     ...us.map((x) => [`user:${x.id}`, `Person "${x.name}"`] as [string, string]),
     ...us.map((x) => [`member:${x.id}`, `Member "${x.name}"`] as [string, string]),
     ...ps.map((x) => [`project:${x.id}`, `Project "${x.name}"`] as [string, string]),
+    ...ps.map((x) => [`deal:${x.id}`, `Deal "${x.name}"`] as [string, string]),
     ...ts.map((x) => [`task:${x.id}`, `Task "${x.title}"`] as [string, string]),
+    ...ts.map((x) => [`deal:${x.id}`, `Task "${x.title}"`] as [string, string]),
     ...ss.map((x) => [`section:${x.id}`, `Section "${x.name}"`] as [string, string]),
   ]);
   return {
@@ -281,7 +245,7 @@ export async function changePassword(user: Actor, current: string, password: str
   if (!(await verifyPassword(current, u.passwordHash))) throw new ApiError(400, "Your current password is not correct.");
   const keep = await currentSessionId();
   await db.$transaction([
-    db.user.update({ where: { id: user.id }, data: { passwordHash: await hashPassword(password) } }),
+    db.user.update({ where: { id: user.id }, data: { passwordHash: await hashPassword(password), tempPasswordAt: null } }),
     db.session.updateMany({ where: { userId: user.id, revokedAt: null, ...(keep ? { id: { not: keep } } : {}) }, data: { revokedAt: new Date() } }),
     db.auditLog.create({ data: { event: "PASSWORD_CHANGED", actorId: user.id, channel: "SCREEN" } }),
   ]);

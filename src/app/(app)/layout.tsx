@@ -1,4 +1,5 @@
 import { Suspense } from "react";
+import { Skeleton } from "@/components/ui";
 import { redirect } from "next/navigation";
 import { currentUser, publicUser } from "@/lib/auth";
 import { Shell, type Me } from "./Shell";
@@ -6,6 +7,8 @@ import { crmVisible } from "@/lib/crm";
 import { leadsAnyDeal } from "@/lib/review";
 import { UndoHost } from "@/components/UndoHost";
 import "./app.css";
+import "./touch.css";
+import "./density.css";
 
 async function Gate({ children }: { children: React.ReactNode }) {
   let user;
@@ -14,12 +17,12 @@ async function Gate({ children }: { children: React.ReactNode }) {
   } catch {
     redirect("/signin");
   }
-  return <><Shell user={{ ...(publicUser(user) as Me), crm: crmVisible(user), review: await leadsAnyDeal(user) }}>{children}</Shell><UndoHost /></>;
+  return <><Shell user={{ ...(publicUser(user) as Me), compact: user.compactRows, tempPassword: !!user.tempPasswordAt, crm: crmVisible(user), review: await leadsAnyDeal(user), startGuide: !user.startGuideDismissedAt }}>{children}</Shell><UndoHost /></>;
 }
 
 export default function AppLayout({ children }: LayoutProps<"/">) {
   return (
-    <Suspense fallback={<div className="skel" style={{ padding: 24 }}>Loading…</div>}>
+    <Suspense fallback={<div style={{ padding: 24 }}><Skeleton /></div>}>
       <Gate>{children}</Gate>
     </Suspense>
   );

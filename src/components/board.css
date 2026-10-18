@@ -1,0 +1,31 @@
+/* SHO-US-22.6: board on phones. One column fills the width (the next peeks by 12 px), a strip jumps between columns,
+   and Move to… opens a sheet. Desktop keeps drag and drop. */
+.bswitch { display: none; }
+.bmove { margin-top: 8px; }
+.bcard { overflow-wrap: anywhere; min-width: 0; }
+.col { min-width: 0; }
+@media (min-width: 600px) { .col { min-width: 220px; } }
+@media (max-width: 599px) {
+  .bswitch { display: flex; gap: 6px; overflow-x: auto; margin: 0 0 10px; padding: 2px 0; scrollbar-width: none; }
+  .bswitch::-webkit-scrollbar { display: none; }
+  .bswitch button { flex: 0 0 auto; min-height: 44px; padding: 0 14px; border: 1px solid var(--field); border-radius: 22px; background: var(--card); color: var(--ink-2); font: inherit; font-size: 14px; font-weight: 500; cursor: pointer; white-space: nowrap; }
+  .bswitch button b { font-weight: 600; margin-left: 6px; color: var(--muted); }
+  .bswitch button[aria-selected="true"] { background: var(--navy); color: #fff; border-color: var(--navy); }
+  .bswitch button[aria-selected="true"] b { color: #fff; }
+  .board { gap: 8px; scroll-snap-type: x mandatory; overscroll-behavior-x: contain; margin-right: calc(-1 * (14px + env(safe-area-inset-right, 0px))); padding-right: 0; }
+  .board > .col { flex: 0 0 calc(100% - 20px); width: calc(100% - 20px); max-width: none; min-width: 0; scroll-snap-align: start; }
+  .board > .col:last-child { flex-basis: calc(100% - 14px - env(safe-area-inset-right, 0px)); width: auto; }
+}
+.msheet-scrim { position: fixed; inset: 0; z-index: 80; background: rgba(23,27,34,.45); display: flex; align-items: flex-end; justify-content: center; }
+.msheet { background: var(--card); width: 100%; max-width: 480px; border-radius: 16px 16px 0 0; padding: 4px 0 env(safe-area-inset-bottom, 0px); max-height: 80vh; max-height: 80dvh; overflow-y: auto; animation: msheet-up .18s ease-out; }
+.msheet-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 16px; border-bottom: 1px solid var(--line); min-height: 52px; overflow-wrap: anywhere; }
+.msheet-head strong { font-size: 15px; color: var(--navy); }
+.msheet ul { list-style: none; margin: 0; padding: 0; }
+.msheet-row { display: flex; width: 100%; align-items: center; justify-content: space-between; gap: 12px; min-height: 48px; padding: 0 16px; background: none; border: 0; border-bottom: 1px solid var(--line); font: inherit; font-size: 16px; color: var(--ink); text-align: left; cursor: pointer; overflow-wrap: anywhere; }
+@media (hover: hover) { .msheet-row:hover:not(:disabled) { background: #eef0f6; } }
+.msheet-row:disabled { color: var(--muted); cursor: default; }
+.msheet-row small { color: var(--muted); font-size: 12px; }
+.msheet-row:focus-visible { outline: 2px solid var(--gold); outline-offset: -2px; }
+@keyframes msheet-up { from { transform: translateY(24px); opacity: .6; } to { transform: none; opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .msheet { animation: none; } }
+@media (min-width: 600px) { .msheet-scrim { align-items: center; } .msheet { border-radius: 14px; } }

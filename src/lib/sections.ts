@@ -1,6 +1,6 @@
 import { db } from "@/lib/db";
 import { ApiError, notFound } from "@/lib/http";
-import { projectAccess, requireManage, type Actor } from "@/lib/access";
+import { projectAccess, requireManage, type Actor, type Tx } from "@/lib/access";
 import { logAction } from "@/lib/notify";
 
 const MAX_SECTIONS = 8;
@@ -9,6 +9,21 @@ async function sectionIn(projectId: string, sectionId: string) {
   const s = await db.section.findFirst({ where: { id: sectionId, projectId } });
   if (!s) throw notFound("Section");
   return s;
+}
+
+/**
+ * A parent closed by a Section change takes its open subtasks with it, one log row each, exactly as
+ * completeTask does (SHO-BUG-3): a complete parent never has an open subtask. Returns the subtask ids.
+ */
+async function completeSubtasks(tx: Tx, o: { projectId: string; actorId: string; parentIds: string[]; now: Date; via: Record<string, unknown> }) {
+  if (!o.parentIds.length) return [] as string[];
+  const subs = await tx.task.findMany({ where: { parentId: { in: o.parentIds }, completedAt: null, deletedAt: null }, select: { id: true, parentId: true } });
+  if (!subs.length) return [] as string[];
+  await tx.task.updateMany({ where: { id: { in: subs.map((s) => s.id) } }, data: { completedAt: o.now } });
+  for (const s of subs) {
+    await logAction(tx, { actorId: o.actorId, projectId: o.projectId, targetType: "task", targetId: s.id, action: "task.completed", before: { completedAt: null }, after: { completedAt: o.now.toISOString(), withParent: s.parentId, ...o.via }, primary: false });
+  }
+  return subs.map((s) => s.id);
 }
 
 /** SHO-US-5.4 AC1/AC5. Appended at the end. */
@@ -63,10 +78,20 @@ export async function updateSection(
         await tx.section.update({ where: { id: old.id }, data: { isDone: false } });
         await tx.task.updateMany({ where: { sectionId: old.id, parentId: null }, data: { completedAt: null } });
       }
+      const now = new Date();
       const completed = (await tx.task.findMany({ where: { sectionId: s.id, parentId: null, completedAt: null, deletedAt: null }, select: { id: true } })).map((x) => x.id);
       await tx.section.update({ where: { id: s.id }, data: { isDone: true } });
-      await tx.task.updateMany({ where: { sectionId: s.id, parentId: null, completedAt: null, deletedAt: null }, data: { completedAt: new Date() } });
-      await logAction(tx, { actorId: user.id, projectId, targetType: "section", targetId: s.id, action: "section.done_changed", before: { doneSectionId: old?.id ?? null, reopenedTaskIds: reopened.slice(0, 200) }, after: { doneSectionId: s.id, completedTaskIds: completed.slice(0, 200), reopened: reopened.length, completed: completed.length } });
+      await tx.task.updateMany({ where: { id: { in: completed } }, data: { completedAt: now } });
+      // One row per task that closed, and their open subtasks close with them (SHO-BUG-3), so the log shows every write.
+      const subtasks = await completeSubtasks(tx, { projectId, actorId: user.id, parentIds: completed, now, via: { viaDoneSection: true } });
+      for (const id of completed) {
+        await logAction(tx, { actorId: user.id, projectId, targetType: "task", targetId: id, action: "task.completed", before: { completedAt: null }, after: { completedAt: now.toISOString(), viaDoneSection: true }, primary: false });
+      }
+      await logAction(tx, {
+        actorId: user.id, projectId, targetType: "section", targetId: s.id, action: "section.done_changed",
+        before: { doneSectionId: old?.id ?? null, reopenedTaskIds: reopened.slice(0, 200) },
+        after: { doneSectionId: s.id, completedTaskIds: completed.slice(0, 200), completedSubtaskIds: subtasks.slice(0, 200), reopened: reopened.length, completed: completed.length, completedSubtasks: subtasks.length },
+      });
     }
   });
 }
@@ -85,15 +110,18 @@ export async function deleteSection(user: Actor, projectId: string, sectionId: s
     if (dest.isDone && tasks.some((t) => t.approverId && !t.completedAt && !t.deletedAt && !t.parentId)) {
       throw new ApiError(409, "Some tasks wait on an approver. Choose a section that is not the done section.");
     }
+    const now = new Date();
     const closing = dest.isDone ? tasks.filter((t) => !t.parentId && !t.completedAt && !t.deletedAt) : [];
     await tx.task.updateMany({ where: { sectionId }, data: { sectionId: dest.id } });
-    if (dest.isDone) await tx.task.updateMany({ where: { sectionId: dest.id, parentId: null, completedAt: null, deletedAt: null }, data: { completedAt: new Date() } });
+    if (dest.isDone) await tx.task.updateMany({ where: { sectionId: dest.id, parentId: null, completedAt: null, deletedAt: null }, data: { completedAt: now } });
+    // Open subtasks of a parent that closed here close with it, one row each (SHO-BUG-3).
+    await completeSubtasks(tx, { projectId, actorId: user.id, parentIds: closing.map((t) => t.id), now, via: { viaSectionDelete: true } });
     // One row per task that moved (and per task that closed because of it), so the log shows every write.
     for (const t of tasks.filter((x) => !x.parentId)) {
       await logAction(tx, { actorId: user.id, projectId, targetType: "task", targetId: t.id, action: "task.moved", before: { sectionId }, after: { sectionId: dest.id, viaSectionDelete: true }, primary: false });
     }
     for (const t of closing) {
-      await logAction(tx, { actorId: user.id, projectId, targetType: "task", targetId: t.id, action: "task.completed", before: { completedAt: null }, after: { completedAt: new Date().toISOString(), viaSectionDelete: true }, primary: false });
+      await logAction(tx, { actorId: user.id, projectId, targetType: "task", targetId: t.id, action: "task.completed", before: { completedAt: null }, after: { completedAt: now.toISOString(), viaSectionDelete: true }, primary: false });
     }
     await tx.section.delete({ where: { id: sectionId } });
     const rest = await tx.section.findMany({ where: { projectId }, orderBy: { position: "asc" } });

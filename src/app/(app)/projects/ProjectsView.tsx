@@ -1,8 +1,8 @@
 "use client";
 import Link from "next/link";
 import { useState } from "react";
-import { ROLE, useGet } from "@/components/api";
-import { LoadFailed } from "@/components/ui";
+import { ROLE, api, useGet } from "@/components/api";
+import { LoadFailed, Skeleton } from "@/components/ui";
 import { Page, useMe } from "../Shell";
 
 type Pr = { id: string; name: string; description: string | null; archived: boolean; leader: { id: string; name: string } | null; openTasks: number; role: string | null; myRole: string | null };
@@ -10,7 +10,7 @@ type Pr = { id: string; name: string; description: string | null; archived: bool
 function Card({ p, admin }: { p: Pr; admin: boolean }) {
   return (
     <Link href={`/projects/${p.id}`} className="card pcard">
-      <h3>{p.name}</h3>
+      <h2>{p.name}</h2>
       <p>{p.description || "No description"}</p>
       <div className="meta" style={{ justifyContent: "flex-start" }}>
         <span className="chip">{p.myRole ? `You: ${ROLE[p.myRole]}` : admin ? "Admin view" : "Member"}</span>
@@ -19,6 +19,30 @@ function Card({ p, admin }: { p: Pr; admin: boolean }) {
         {p.archived && <span className="chip grey">Read-only</span>}
       </div>
     </Link>
+  );
+}
+
+/** SHO-US-14.4 AC4: no projects yet. Names the Leaders and lets the person ask one of them, which tells that Leader. */
+function Leaders() {
+  const l = useGet<{ kind: "LEADER" | "ADMIN"; people: { id: string; name: string }[] }>("/api/leaders");
+  const [sent, setSent] = useState<Record<string, string>>({});
+  const [all, setAll] = useState(false);
+  async function ask(id: string) {
+    const r = await api("POST", `/api/leaders/${id}/request`, {});
+    setSent((x) => ({ ...x, [id]: r.ok ? "Asked. They have been told." : r.error ?? "Could not send that." }));
+  }
+  if (!l.data?.people.length) return null;
+  return (
+    <div className="lead-list" aria-label={l.data.kind === "LEADER" ? "Leaders" : "Admins"}>
+      <b>{l.data.kind === "LEADER" ? "Leaders you can ask" : "Admins you can ask"}</b>
+      {l.data.people.slice(0, all ? undefined : 6).map((p) => (
+        <div className="item" key={p.id}>
+          <div className="t"><b>{p.name}</b></div>
+          {sent[p.id] ? <span className="hint" role="status">{sent[p.id]}</span> : <button className="btn ghost sm" onClick={() => ask(p.id)}>Request to be added</button>}
+        </div>
+      ))}
+      {!all && l.data.people.length > 6 && <button className="btn ghost sm" onClick={() => setAll(true)}>Show all {l.data.people.length}</button>}
+    </div>
   );
 }
 
@@ -44,14 +68,14 @@ export default function ProjectsView() {
           <Link className="btn" href="/projects/new">+ New project</Link>
         </>
       }>
-      {(live.loading || old.loading) && <div className="skel">Loading…</div>}
+      {(live.loading || old.loading) && <Skeleton />}
       {live.error && !live.data && <LoadFailed onRetry={live.reload} />}
       {live.error && live.data && <div className="err" role="alert">{live.error} <button className="link" onClick={live.reload}>Retry</button></div>}
       {live.data && active.length === 0 && (
         <div className="card empty">
           {admin
             ? <><b>No projects yet.</b><br />Create one to start adding tasks.</>
-            : <><b>Ask a project Leader to add you.</b><br />Projects you are added to show up here. You can also create a project of your own.</>}
+            : <><b>Ask a project Leader to add you.</b><br />Projects you are added to show up here. You can also create a project of your own.<Leaders /></>}
         </div>
       )}
       <div className="cards">{active.map((p) => <Card key={p.id} p={p} admin={admin} />)}</div>

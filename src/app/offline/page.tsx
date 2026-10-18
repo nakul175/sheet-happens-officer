@@ -2,7 +2,7 @@ import Link from "next/link";
 
 export const metadata = { title: "You are offline · Sheet Happens Officer" };
 
-// SHO-US-10.10: shown when the phone has no connection. Nothing from the account is stored for offline use.
+// SHO-US-22.10: shown when the phone has no connection. Nothing from the account is stored for offline use.
 export default function Offline() {
   return (
     <main style={{ maxWidth: 420, margin: "20vh auto 0", padding: "0 16px", textAlign: "center" }}>

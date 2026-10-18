@@ -1,6 +1,6 @@
 "use client";
 
-/** SHO-US-10.3: autofocus only with a mouse; on touch it pops the keyboard open and shifts the page. */
+/** SHO-US-22.3: autofocus only with a mouse; on touch it pops the keyboard open and shifts the page. */
 export function finePointer(): boolean {
   return typeof window !== "undefined" && window.matchMedia("(hover: hover) and (pointer: fine)").matches;
 }

@@ -333,6 +333,49 @@ describe("propose and confirm (8.3)", () => {
     expect(await db.auditLog.count({ where: { event: "MEMBER_REMOVED", actorId: lead.id, channel: "CONCIERGE" } })).toBe(1);
   });
 
+  it("member removal hands the tasks over inside the removal, as the Members screen does: one notice per taker, no per-task rows (SHO-BUG-7)", async () => {
+    const { lead, ed, p } = await team();
+    const e2 = await account("second");
+    const e3 = await account("third");
+    for (const e of [e2, e3]) expect((await lead.c.post(`/api/projects/${p.id}/members`, { userId: e.id, role: "EDITOR" })).status).toBe(201);
+    const held = [await task(ed, p.id, { title: "Ed one" }), await task(ed, p.id, { title: "Ed two" }), await task(ed, p.id, { title: "Ed three" })];
+    const removeCard = (name: string) => script(
+      () => [tu("list_projects", {}), tu("find_people", { text: name })],
+      (r) => {
+        const content = r.messages.at(-1)!.content as { content: string }[];
+        const people = JSON.parse(content[1].content).untrusted_data.people as { id: string; name: string }[];
+        return [tu("propose_changes", { changes: [{ action: "remove_member", project_id: p.id, person_id: people.find((x) => x.name === name)!.id }] })];
+      },
+    );
+    removeCard("Editor");
+    const c = cardOf((await ask(lead, "Remove the editor from the project")).messages);
+    const since = new Date();
+    // Two tasks to the second editor, one to the Leader (who is also the actor).
+    await confirmCard(actor(lead), c.id, [{ taskId: held[0], assigneeId: e2.id }, { taskId: held[1], assigneeId: e2.id }, { taskId: held[2], assigneeId: lead.id }], true);
+    expect(await db.projectMember.count({ where: { projectId: p.id, userId: ed.id } })).toBe(0);
+    expect((await db.task.findMany({ where: { id: { in: held } }, orderBy: { createdAt: "asc" } })).map((t) => t.assigneeId)).toEqual([e2.id, e2.id, lead.id]);
+    // Notices: one hand-over notice to the second editor, none per task, none to the actor; the leaver's says what left them.
+    const notes = await db.notification.findMany({ where: { projectId: p.id, createdAt: { gte: since } } });
+    expect(notes.filter((n) => n.type === "TASKS_HANDED_OVER").map((n) => n.recipientId)).toEqual([e2.id]);
+    expect(notes.filter((n) => n.type === "REMOVED_AS_ASSIGNEE" || n.type === "TASK_ASSIGNED" || n.type === "SENT_FOR_APPROVAL")).toHaveLength(0);
+    expect(notes.find((n) => n.type === "REMOVED_FROM_PROJECT" && n.recipientId === ed.id)!.data).toMatchObject({ handedOverCount: 3, handedOver: expect.arrayContaining(["Ed one", "Ed two", "Ed three"]) });
+    expect(((await e2.c.get("/api/notifications")).json.items as { text: string }[]).map((n) => n.text)).toContain("Lead handed over Editor's work in a project: 2 open tasks are now yours.");
+    // Log rows: the screen path's, with the tasks.reassigned row repeated per new owner, and the removal row counting all three.
+    const shape = (rows: { action: string; beforeState: unknown; afterState: unknown }[]) =>
+      rows.map((r) => [r.action, Object.keys(r.beforeState as object).sort(), Object.keys(r.afterState as object).sort()]);
+    const viaChat = await db.actionLog.findMany({ where: { projectId: p.id, channel: "CONCIERGE" }, orderBy: [{ createdAt: "asc" }, { id: "asc" }] });
+    expect(viaChat.map((r) => r.action)).toEqual(["tasks.reassigned", "tasks.reassigned", "member.removed"]);
+    expect(viaChat.map((r) => (r.afterState as { count?: number; handedOver?: number }).count ?? (r.afterState as { handedOver?: number }).handedOver).sort()).toEqual([1, 2, 3]);
+    expect(viaChat[2].afterState).toMatchObject({ removed: true, handedOver: 3 });
+    // The same removal from the screen (the third editor, all tasks to one taker) writes the same kind of rows.
+    for (let i = 0; i < 3; i++) await task(e3, p.id, { title: `E3 ${i}` });
+    const screenSince = new Date();
+    expect((await lead.c.del(`/api/projects/${p.id}/members/${e3.id}?handoverTo=${e2.id}`)).status).toBe(204);
+    const viaScreen = await db.actionLog.findMany({ where: { projectId: p.id, channel: "SCREEN", createdAt: { gte: screenSince } }, orderBy: [{ createdAt: "asc" }, { id: "asc" }] });
+    expect(shape(viaChat)).toEqual([shape(viaScreen)[0], shape(viaScreen)[0], shape(viaScreen)[1]]);
+    expect(viaScreen[1].afterState).toMatchObject({ removed: true, handedOver: 3 });
+  });
+
   it("an Editor cannot remove members from chat: no Confirm", async () => {
     const { ed, p } = await team();
     const e2 = await account("editor2");

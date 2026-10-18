@@ -45,6 +45,7 @@ export default function Members({ params }: { params: Promise<{ id: string }> })
         {p?.members.map((m) => (
           <div className="item" key={m.userId}>
             <div className="t"><b>{m.name}{!m.active && " (deactivated)"}</b>{m.email && <small>{m.email}</small>}</div>
+            <span className="vlab" aria-hidden>Role</span>
             {manage && m.role !== "LEADER" ? (
               <select className="in" style={{ width: "auto" }} aria-label={`Role of ${m.name}`} value={m.role} onChange={(e) => setRole(m, e.target.value)}>
                 <option value="EDITOR">Editor</option><option value="VIEWER">Viewer</option>

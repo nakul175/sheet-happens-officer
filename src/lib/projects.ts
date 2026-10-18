@@ -4,17 +4,24 @@ import {
   activeMember, isActive, isAdmin, projectAccess, requireManage, type Access, type Actor, type Role,
 } from "@/lib/access";
 import { logAction, notify } from "@/lib/notify";
-import { openTaskCount, releasePerson, resolveHandover, type Released } from "@/lib/people";
-import { WORKSTREAM_DEAL, WORKSTREAM_PROJECT, crmVisible } from "@/lib/crm";
+import { openTaskCount, releasePerson, resolveHandover, type Handover, type Released } from "@/lib/people";
+import { WORKSTREAM_DEAL, WORKSTREAM_PROJECT } from "@/lib/crm";
 import { dealBlock } from "@/lib/deals";
 
 const DEFAULT_SECTIONS = ["To do", "In progress", "Done"];
 
 /** SHO-US-3.1. The Leader is required and must be active; a creator who names someone else becomes an Editor. */
-export async function createProject(user: Actor, input: { name: string; description?: string | null; leaderId: string }) {
+export async function createProject(user: Actor, input: { name: string; description?: string | null; leaderId: string; members?: { userId: string; role: "EDITOR" | "VIEWER" }[] }) {
   const leader = await db.user.findUnique({ where: { id: input.leaderId } });
   if (!leader || !isActive(leader)) throw new ApiError(400, "Choose an active person as Leader.");
   const me = await db.user.findUniqueOrThrow({ where: { id: user.id } });
+  // SHO-US-14.17: the people added with the project must be active; the Leader and the creator already have a seat.
+  const wanted = new Map<string, "EDITOR" | "VIEWER">();
+  for (const m of input.members ?? []) if (m.userId !== leader.id && m.userId !== user.id) wanted.set(m.userId, m.role);
+  if (wanted.size) {
+    const found = await db.user.findMany({ where: { id: { in: [...wanted.keys()] } } });
+    if (found.length !== wanted.size || !found.every(isActive)) throw new ApiError(400, "Choose active people to add.");
+  }
   return db.$transaction(async (tx) => {
     const project = await tx.project.create({
       data: { workspaceId: me.workspaceId, name: input.name, description: input.description ?? null },
@@ -23,6 +30,11 @@ export async function createProject(user: Actor, input: { name: string; descript
     if (leader.id !== user.id) await tx.projectMember.create({ data: { projectId: project.id, userId: user.id, role: "EDITOR" } });
     for (const [i, name] of DEFAULT_SECTIONS.entries()) {
       await tx.section.create({ data: { projectId: project.id, name, position: i, isDone: i === DEFAULT_SECTIONS.length - 1 } });
+    }
+    for (const [userId, role] of wanted) {
+      await tx.projectMember.create({ data: { projectId: project.id, userId, role } });
+      await notify(tx, [userId], "ADDED_TO_PROJECT", { actorId: user.id, projectId: project.id, data: { project: project.name, role } });
+      await logAction(tx, { actorId: user.id, projectId: project.id, targetType: "member", targetId: userId, action: "member.added", after: { role }, primary: false });
     }
     await notify(tx, [leader.id], "MADE_LEADER", { actorId: user.id, projectId: project.id, data: { project: project.name } });
     await logAction(tx, { actorId: user.id, projectId: project.id, targetType: "project", targetId: project.id, action: "project.created", after: { name: project.name, leaderId: leader.id } });
@@ -67,9 +79,7 @@ export async function getProject(user: Actor, projectId: string) {
     db.task.count({ where: { projectId, deletedAt: null, completedAt: null } }),
   ]);
   const manage = a.role === "LEADER";
-  const isDeal = a.project.typeId === WORKSTREAM_DEAL;
-  // A hidden CRM looks like it does not exist (CRM_VISIBLE).
-  if (isDeal && !crmVisible(user)) throw notFound("Project");
+  const isDeal = a.project.typeId === WORKSTREAM_DEAL; // a hidden deal was already "not found" in projectAccess (CRM_VISIBLE)
   const deal = isDeal ? await dealBlock(projectId) : null;
   return {
     type: isDeal ? "DEAL" : "PROJECT",
@@ -137,30 +147,36 @@ export async function addMember(user: Actor, projectId: string, userId: string, 
   });
 }
 
-async function requireHandoverIfNeeded(a: Access, userId: string, handoverTo: string | undefined | null) {
+/**
+ * A single taker for the person's open tasks, or null when there are none. The concierge card names a taker per
+ * task instead (SHO-BUG-7); then no single taker is needed, and a task that appears in between goes to the Leader.
+ */
+async function requireHandoverIfNeeded(a: Access, userId: string, handoverTo: string | undefined | null, handover?: Handover[]) {
   const open = await openTaskCount(db, a.project.id, userId);
   if (!open) return null;
   const target = await resolveHandover(db, a.project.id, userId, handoverTo);
-  if (!target) {
-    throw new ApiError(409, `Choose a Leader or Editor to take ${open} open task${open === 1 ? "" : "s"} first.`);
+  if (target) return target;
+  if (handover?.length) {
+    const held = await db.task.findMany({ where: { projectId: a.project.id, assigneeId: userId, completedAt: null, deletedAt: null }, select: { id: true } });
+    if (held.every((t) => handover.some((h) => h.taskId === t.id && h.assigneeId))) return null;
   }
-  return target;
+  throw new ApiError(409, `Choose a Leader or Editor to take ${open} open task${open === 1 ? "" : "s"} first.`);
 }
 
 /** SHO-US-3.4 AC3/AC4/AC5 and SHO-US-3.3 AC5. */
-export async function changeMemberRole(user: Actor, projectId: string, userId: string, role: "EDITOR" | "VIEWER", handoverTo?: string | null) {
+export async function changeMemberRole(user: Actor, projectId: string, userId: string, role: "EDITOR" | "VIEWER", handoverTo?: string | null, handover?: Handover[]) {
   const a = await projectAccess(user, projectId, { write: true });
   requireManage(a);
   const m = a.project.members.find((x) => x.userId === userId);
   if (!m) throw notFound("Member");
   if (m.role === "LEADER") throw new ApiError(409, "Use Change Leader to replace the project's Leader.");
   if (m.role === role) return;
-  const target = role === "VIEWER" ? await requireHandoverIfNeeded(a, userId, handoverTo) : null;
+  const target = role === "VIEWER" ? await requireHandoverIfNeeded(a, userId, handoverTo, handover) : null;
   await db.$transaction(async (tx) => {
     let rel: Released | null = null;
     if (role === "VIEWER") {
       const leader = a.project.members.find((x) => x.role === "LEADER")!.userId;
-      rel = await releasePerson(tx, { projectId, userId, newAssigneeId: target ?? leader, actorId: user.id, keepCollaborations: true });
+      rel = await releasePerson(tx, { projectId, userId, newAssigneeId: target ?? leader, actorId: user.id, keepCollaborations: true, handover });
     }
     await tx.projectMember.update({ where: { projectId_userId: { projectId, userId } }, data: { role } });
     await notify(tx, [userId], "PROJECT_ROLE_CHANGED", { actorId: user.id, projectId, data: { project: a.project.name, role, ...(rel?.note ?? {}) } });
@@ -169,16 +185,16 @@ export async function changeMemberRole(user: Actor, projectId: string, userId: s
 }
 
 /** SHO-US-3.4 AC3. Removal that cannot be undone once tasks have been handed over (decided in SHO-US-8.3). */
-export async function removeMember(user: Actor, projectId: string, userId: string, handoverTo?: string | null) {
+export async function removeMember(user: Actor, projectId: string, userId: string, handoverTo?: string | null, handover?: Handover[]) {
   const a = await projectAccess(user, projectId, { write: true });
   requireManage(a);
   const m = a.project.members.find((x) => x.userId === userId);
   if (!m) throw notFound("Member");
   if (m.role === "LEADER") throw new ApiError(409, "Use Change Leader to replace the project's Leader.");
-  const target = await requireHandoverIfNeeded(a, userId, handoverTo);
+  const target = await requireHandoverIfNeeded(a, userId, handoverTo, handover);
   await db.$transaction(async (tx) => {
     const leader = a.project.members.find((x) => x.role === "LEADER")!.userId;
-    const rel = await releasePerson(tx, { projectId, userId, newAssigneeId: target ?? leader, actorId: user.id });
+    const rel = await releasePerson(tx, { projectId, userId, newAssigneeId: target ?? leader, actorId: user.id, handover });
     await tx.projectMember.delete({ where: { projectId_userId: { projectId, userId } } });
     await notify(tx, [userId], "REMOVED_FROM_PROJECT", { actorId: user.id, projectId, data: { project: a.project.name, ...rel.note } });
     await logAction(tx, { actorId: user.id, projectId, targetType: "member", targetId: userId, action: "member.removed", before: { role: m.role }, after: { removed: true, handedOver: rel.moved } });

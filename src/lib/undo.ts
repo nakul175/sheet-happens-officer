@@ -57,11 +57,14 @@ async function plan(row: any, user: Actor, projectId: string): Promise<Plan> {
     }
     case "task.assigned": case "task.sent_for_approval": case "task.sent_back": {
       const t = await liveTask(id, projectId);
+      // A send-back that cleared the approver (SHO-BUG-6) recorded it, so Undo puts the approver back too.
+      const keys = "approverId" in f ? ["assigneeId", "approverId"] : ["assigneeId"];
       return {
-        conflicts: fieldConflicts(["assigneeId"], b, f, { assigneeId: t.assigneeId }), subject: t.title, fields: "Assignee",
+        conflicts: fieldConflicts(keys, b, f, { assigneeId: t.assigneeId, approverId: t.approverId }), subject: t.title, fields: "Assignee",
         apply: async (tx) => {
           if (!(await activeMember(tx, projectId, b.assigneeId, WORKERS))) throw bad("The previous assignee can no longer take this task.");
-          await tx.task.update({ where: { id }, data: { assigneeId: b.assigneeId, previousAssigneeId: b.previousAssigneeId ?? null } });
+          if ("approverId" in f && b.approverId && !(await activeMember(tx, projectId, b.approverId, WORKERS))) throw bad("The previous approver can no longer take that role.");
+          await tx.task.update({ where: { id }, data: { assigneeId: b.assigneeId, previousAssigneeId: b.previousAssigneeId ?? null, ...("approverId" in f ? { approverId: b.approverId ?? null } : {}) } });
         },
       };
     }
@@ -305,7 +308,9 @@ async function plan(row: any, user: Actor, projectId: string): Promise<Plan> {
         apply: async (tx) => {
           if (cur) await tx.section.update({ where: { id: cur.id }, data: { isDone: false } });
           await tx.section.update({ where: { id: b.doneSectionId }, data: { isDone: true } });
-          if (Array.isArray(f.completedTaskIds) && f.completedTaskIds.length) await tx.task.updateMany({ where: { id: { in: f.completedTaskIds } }, data: { completedAt: null } });
+          // Parents closed by the change reopen, and so do the subtasks that closed with them (SHO-BUG-3).
+          const closed = [...(Array.isArray(f.completedTaskIds) ? f.completedTaskIds : []), ...(Array.isArray(f.completedSubtaskIds) ? f.completedSubtaskIds : [])];
+          if (closed.length) await tx.task.updateMany({ where: { id: { in: closed } }, data: { completedAt: null } });
           if (Array.isArray(b.reopenedTaskIds) && b.reopenedTaskIds.length) await tx.task.updateMany({ where: { id: { in: b.reopenedTaskIds }, completedAt: null }, data: { completedAt: new Date() } });
         },
       };

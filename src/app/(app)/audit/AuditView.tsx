@@ -1,5 +1,6 @@
 "use client";
 import { useState } from "react";
+import { Skeleton } from "@/components/ui";
 import { ago, api, useGet } from "@/components/api";
 import { Page, useMe } from "../Shell";
 
@@ -45,7 +46,7 @@ export default function AuditView() {
         <label className="field" style={{ margin: 0 }}><span className="lbl">From</span><input className="in" type="date" value={from} onChange={(e) => setFrom(e.target.value)} /></label>
         <label className="field" style={{ margin: 0 }}><span className="lbl">To</span><input className="in" type="date" value={to} onChange={(e) => setTo(e.target.value)} /></label>
       </div>
-      {a.loading && <div className="skel">Loading…</div>}
+      {a.loading && <Skeleton />}
       {a.data && !rows.length && <div className="card empty">No events match.</div>}
       {!!rows.length && (
         <div className="scroll">
@@ -54,12 +55,12 @@ export default function AuditView() {
             <tbody>
               {rows.map((r) => (
                 <tr key={r.id}>
-                  <td>{new Date(r.at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", dateStyle: "medium", timeStyle: "short" })}</td>
-                  <td>{r.who ?? "—"}{r.email && <div className="hint">{r.email}</div>}</td>
-                  <td><span className="chip">{r.event}</span></td>
-                  <td>{r.ip ?? ""}</td>
-                  <td>{r.channel === "Concierge" ? <span className="chip gold">via concierge</span> : "on screen"}</td>
-                  <td className="hint">{r.target ?? ""}</td>
+                  <td data-label="When">{new Date(r.at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", dateStyle: "medium", timeStyle: "short" })}</td>
+                  <td data-label="Who">{r.who ?? "—"}{r.email && <div className="hint">{r.email}</div>}</td>
+                  <td data-label="Event"><span className="chip">{r.event}</span></td>
+                  <td data-label="IP">{r.ip ?? ""}</td>
+                  <td data-label="How">{r.channel === "Concierge" ? <span className="chip gold">via concierge</span> : "on screen"}</td>
+                  <td data-label="Target" className="hint">{r.target ?? ""}</td>
                 </tr>
               ))}
             </tbody>

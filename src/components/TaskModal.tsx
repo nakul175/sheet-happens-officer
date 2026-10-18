@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import { PRIORITY, ROLE, api, dueLabel, useGet } from "@/components/api";
-import { Confirm, Modal } from "@/components/ui";
+import { Confirm, Modal, Skeleton } from "@/components/ui";
 import { ConvertDialog } from "@/components/ConvertDialog";
 import { TaskLinks } from "@/components/TaskLinks";
 import { useMe } from "@/app/(app)/Shell";
@@ -39,7 +39,7 @@ export function TaskModal({ id, me, onClose, onChanged, asPage }: { id: string; 
 
   const body = (inner: React.ReactNode) => (asPage ? <div className="modal" style={{ margin: "0 auto" }}>{inner}</div> : <Modal label="Task" onClose={onClose}>{inner}</Modal>);
 
-  if (t.loading) return body(<div className="skel">Loading…</div>);
+  if (t.loading) return body(<Skeleton />);
   if (!task) {
     return body(
       <>
@@ -219,11 +219,11 @@ export function TaskModal({ id, me, onClose, onChanged, asPage }: { id: string; 
             <div className="field">
               <span className="lbl">Subtasks {task.subtaskList.length > 0 && `(${task.subtaskList.filter((s) => s.completedAt).length} of ${task.subtaskList.length})`}</span>
               {task.subtaskList.map((s) => (
-                <div className="sub-item" key={s.id}>
+                <label className="sub-item" key={s.id}>
                   <input type="checkbox" aria-label={`Mark "${s.title}" ${s.completedAt ? "not done" : "done"}`} checked={!!s.completedAt} disabled={!canEdit || busy || (!s.canClose && !s.completedAt)}
                     onChange={() => run(api("POST", `/api/tasks/${s.id}/${s.completedAt ? "reopen" : "complete"}`, {}))} />
                   <span style={s.completedAt ? { textDecoration: "line-through", color: "var(--muted)" } : undefined}>{s.title}</span>
-                </div>
+                </label>
               ))}
               {canEdit && (
                 <form className="addrow" onSubmit={async (e) => { e.preventDefault(); const v = newSub.trim(); if (!v) return; await run(api("POST", `/api/projects/${task.projectId}/tasks`, { title: v, parentId: id }), () => setNewSub("")); }}>

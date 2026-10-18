@@ -1,8 +1,9 @@
 import { z } from "zod";
 
-// Domain rule: exactly aplyd.com, checked on the server (SHO-US-1.1 AC2).
-export const ALLOWED_DOMAIN = "aplyd.com";
-export const DOMAIN_MESSAGE = "Use your @aplyd.com email address.";
+// Domain rule for self-signup: exactly these two, checked on the server (SHO-US-1.1 AC2, SHO-US-15.1).
+// A Super Admin adding a person is not bound by it (SHO-US-15.2, decision D1).
+export const ALLOWED_DOMAINS: readonly string[] = ["aplyd.com", "athenainfonomics.com"];
+export const DOMAIN_MESSAGE = "Use your @aplyd.com or @athenainfonomics.com email address.";
 export const PASSWORD_MESSAGE = "Use at least 8 characters, with at least one letter and one number.";
 
 export const emailField = z
@@ -10,7 +11,7 @@ export const emailField = z
   .trim()
   .toLowerCase()
   .pipe(z.email())
-  .refine((e) => e.slice(e.lastIndexOf("@") + 1) === ALLOWED_DOMAIN, { message: DOMAIN_MESSAGE });
+  .refine((e) => ALLOWED_DOMAINS.includes(e.slice(e.lastIndexOf("@") + 1)), { message: DOMAIN_MESSAGE });
 
 // Max 128 so a huge password cannot be used to burn CPU in the hash.
 export const passwordField = z
@@ -18,6 +19,14 @@ export const passwordField = z
   .min(8, PASSWORD_MESSAGE)
   .max(128, PASSWORD_MESSAGE)
   .refine((p) => /[A-Za-z]/.test(p) && /[0-9]/.test(p), { message: PASSWORD_MESSAGE });
+
+// SHO-US-15.2. Any valid email: the Super Admin decides who is let in.
+export const addPersonInput = z.object({
+  firstName: z.string().trim().min(1, "Enter a first name.").max(50),
+  lastName: z.string().trim().min(1, "Enter a last name.").max(50),
+  email: z.string().trim().toLowerCase().max(254).pipe(z.email("Enter a valid email address.")),
+  role: z.enum(["MEMBER", "ADMIN"]),
+});
 
 export const signUpInput = z.object({
   name: z.string().trim().min(1).max(100),
@@ -44,6 +53,8 @@ export const projectCreate = z.object({
   name: z.string().trim().min(1).max(200),
   description: z.string().trim().max(5000).nullish(),
   leaderId: z.string().min(1, "Choose a Leader."),
+  // SHO-US-14.17: people added in the same step. Editor unless Viewer is chosen.
+  members: z.array(z.object({ userId: z.string().min(1), role: z.enum(["EDITOR", "VIEWER"]).default("EDITOR") })).max(50).optional(),
 });
 export const projectUpdate = z.object({
   name: z.string().trim().min(1).max(200).optional(),
@@ -89,7 +100,7 @@ export const taskUpdate = z.object({
   // The updatedAt the person saw when they opened the task; a different value means someone else saved first.
   expectedUpdatedAt: z.string().optional(),
 });
-export const taskAssign = z.object({ assigneeId: z.string().min(1) });
+export const taskAssign = z.object({ assigneeId: z.string().min(1), expectedUpdatedAt: z.string().optional() });
 export const taskCollaborator = z.object({ userId: z.string().min(1) });
 export const taskApprover = z.object({ approverId: z.string().min(1).nullable() });
 export const taskComplete = z.object({ completeAll: z.boolean().optional() });
