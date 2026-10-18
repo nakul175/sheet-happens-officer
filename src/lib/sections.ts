@@ -94,7 +94,7 @@ export async function updateSection(
       }
       await logAction(tx, {
         actorId: user.id, projectId, targetType: "section", targetId: s.id, action: "section.done_changed",
-        // Every id is kept, including subtasks that reopened with their parent. Cutting the lists at 200 made Undo skip the rest and still succeed (APL-2680).
+        // Every id is kept. Cutting the lists at 200 made Undo skip the rest and still succeed (APL-2680).
         before: { doneSectionId: old?.id ?? null, reopenedTaskIds: reopened, reopenedSubtaskIds: reopenedSubtasks },
         after: { doneSectionId: s.id, completedTaskIds: completed, completedSubtaskIds: subtasks, reopened: reopened.length, reopenedSubtasks: reopenedSubtasks.length, completed: completed.length, completedSubtasks: subtasks.length },
       });
