@@ -75,6 +75,7 @@ test("APL-2505 > AC3: Undo anyway reverts only my fields, keeps their other edit
   await admin.page.goto(`/projects/${p.id}/activity`);
   await admin.page.locator(".item.act", { hasText: `renamed "${original}"` }).getByRole("button", { name: "Undo" }).click();
   const dialog = admin.page.getByRole("dialog", { name: "Undo conflict" });
+  await expect(dialog).toBeVisible();
   const done = admin.page.waitForResponse((r) => r.url().includes("/undo") && r.request().method() === "POST");
   await dialog.getByRole("button", { name: "Undo anyway" }).click();
   const res = await done;
