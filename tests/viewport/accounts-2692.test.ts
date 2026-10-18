@@ -1,106 +1,53 @@
-// APL-2692 (APL-2536 AC5): at 390x844 the organisation page and the Accounts list
-// must not scroll the document sideways. A wide table may scroll inside its own box,
-// and that box has to be a keyboard target. Desktop columns stay where they are.
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { pathToFileURL } from "node:url";
+// APL-2692 (APL-2536 AC5): the organisation page and the Accounts list must not
+// scroll the document sideways at 390x844. A wide table may scroll inside its
+// own region, and that region has to be reached with Tab. Desktop stays one row.
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { chromium, type Browser } from "playwright-core";
+import { chromium, type Browser, type Page } from "playwright-core";
+import { BASE, istDate, PW, SUPER_EMAIL, superAdmin } from "../helpers";
 
-const NAME = "ZZ-TEST-11 narrow org mve8ij02tlmf";
-const DEAL = "ZZ-TEST-11 narrow deal mve8ij02tlmf";
+const PHONE = { width: 390, height: 844 };
+const DESK = { width: 1280, height: 800 };
 
-function chrome() {
-  if (process.env.PW_CHROMIUM && existsSync(process.env.PW_CHROMIUM)) return process.env.PW_CHROMIUM;
-  for (const p of ["/usr/bin/google-chrome", "/usr/bin/google-chrome-stable", "/usr/bin/chromium"]) {
-    if (existsSync(p)) return p;
-  }
-  return undefined;
+let browser: Browser;
+let orgId = "";
+let dealId = "";
+let orgName = "";
+let dealName = "";
+
+beforeAll(async () => {
+  if (!/^(localhost|127\.0\.0\.1)$/.test(new URL(BASE).hostname)) throw new Error(`Refusing to run against ${BASE}: use a local server with a test database.`);
+  browser = await chromium.launch({ executablePath: process.env.PW_CHROMIUM || undefined });
+  const root = await superAdmin();
+  const stamp = Date.now();
+  orgName = `ZZ APL2692 ${stamp} narrow org mve8ij02tlmf`;
+  dealName = `ZZ APL2692 ${stamp} narrow deal mve8ij02tlmf`;
+  const org = await root.c.post("/api/orgs", { name: orgName, kind: "Ministry" });
+  expect(org.status, JSON.stringify(org.json)).toBe(201);
+  orgId = org.json.organisation.id as string;
+  const pipes = (await root.c.get("/api/deals/pipelines")).json.pipelines as { id: string; key: string }[];
+  const deal = await root.c.post("/api/deals", {
+    name: dealName, organisationId: orgId, pipelineId: pipes.find((x) => x.key === "DEAL_PROACTIVE")!.id, leaderId: root.id,
+    whyPursue: "Test deal", nextStep: { title: "Call the buyer", dueDate: istDate(3) },
+  });
+  expect(deal.status, JSON.stringify(deal.json)).toBe(201);
+  dealId = deal.json.deal.id as string;
+}, 60000);
+
+afterAll(async () => { await browser?.close(); });
+
+async function openAt(viewport: { width: number; height: number }, path: string, ready: string) {
+  const ctx = await browser.newContext({ viewport, deviceScaleFactor: 1, baseURL: BASE });
+  const signed = await ctx.request.post("/api/auth/signin", { data: { email: SUPER_EMAIL, password: PW } });
+  expect(signed.ok(), "sign in").toBe(true);
+  const page = await ctx.newPage();
+  await page.goto(path, { waitUntil: "load" });
+  await page.waitForSelector(ready, { timeout: 15000 });
+  return page;
 }
 
-const href = (rel: string) => pathToFileURL(join(process.cwd(), rel)).href;
+type Box = { label: string | null; role: string | null; tab: string | null; cls: string; extra: number; right: number; left: number; width: number; height: number };
 
-function documentHtml(main: string) {
-  const sheets = [
-    "src/app/globals.css",
-    "src/app/(app)/app.css",
-    "src/app/(app)/touch.css",
-    "src/app/(app)/density.css",
-    "src/app/(app)/bell.css",
-    "src/components/extras/extras.css",
-    "src/app/(app)/accounts/scroll.css",
-  ].map((p) => `<link rel="stylesheet" href="${href(p)}" />`).join("");
-  const font = `@font-face{font-family:"Public Sans";src:url("${href("src/app/fonts/PublicSans-Regular.woff2")}") format("woff2");font-weight:400}
-@font-face{font-family:"Public Sans";src:url("${href("src/app/fonts/PublicSans-Medium.woff2")}") format("woff2");font-weight:500}
-@font-face{font-family:"Public Sans";src:url("${href("src/app/fonts/PublicSans-SemiBold.woff2")}") format("woff2");font-weight:600}
-:root{--font-public-sans:"Public Sans"}`;
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<style>${font}</style>${sheets}</head><body>
-<div class="shell">
-  <a class="skip" href="#main">Skip to content</a>
-  <aside class="side" aria-label="Main"><a class="brand" href="/">Sheet Happens Officer</a>
-    <nav class="nav"><a href="/accounts" aria-current="page">Accounts</a></nav></aside>
-  <div class="main">
-    <header class="top">
-      <button class="burger" aria-label="Open menu">☰</button>
-      <span class="top-brand">SHO</span><span class="grow"></span>
-      <button class="btn sm newtask">+ New task</button>
-      <div class="wrapper"><button class="bell" aria-label="Notifications">🔔<span class="badge">8</span></button></div>
-    </header>
-    ${main}
-  </div>
-  <div class="tabbar-wrap"><nav class="tabbar" aria-label="Main">
-    <a href="/">My tasks</a><a href="/projects">Projects</a><a href="/search">Search</a><button>More</button>
-  </nav></div>
-</div></body></html>`;
-}
-
-/** Accounts list with a search filled in, the same state as /accounts?q=… */
-function accountsMain(scroll: string) {
-  return `<main id="main" class="content" tabindex="-1">
-    <div class="head"><div class="grow"><h1 class="pt">Accounts</h1><p class="sub">Organisations you can start deals with</p></div>
-      <button class="btn">+ New organisation</button></div>
-    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
-      <input class="in" style="max-width:360px" aria-label="Search organisations" value="${NAME}" />
-      <select class="in" style="max-width:200px" aria-label="Kind"><option>All kinds</option><option>Ministry</option><option>Public Intsitution</option></select>
-    </div>
-    <div ${scroll}>
-      <table class="tbl"><thead><tr><th>Name</th><th>Kind</th><th>Country</th><th>Under</th><th>Open deals</th></tr></thead>
-        <tbody><tr><td><a href="/accounts/x">${NAME}</a></td><td>Ministry</td><td>—</td><td>—</td><td>0</td></tr></tbody></table>
-    </div>
-  </main>`;
-}
-
-/** Organisation page, with and without the open-deals table. */
-function orgMain(deals: boolean) {
-  const table = deals
-    ? `<div class="acct-scroll" tabindex="0" aria-label="Open deals"><table class="tbl">
-        <thead><tr><th>Deal</th><th>Role</th><th>Stage</th><th>Leader</th></tr></thead>
-        <tbody><tr><td><a href="/projects/x">${DEAL}</a></td><td>Buyer</td><td>Lead <span style="color:var(--muted)">Proactive</span></td><td>Ada</td></tr></tbody></table></div>`
-    : `<div class="card empty">No deals you can see yet.</div>`;
-  return `<main id="main" class="content" tabindex="-1">
-    <div class="head"><div class="grow"><h1 class="pt">${NAME}</h1><p class="sub crumb"><a href="/accounts">Accounts</a></p></div>
-      <a class="btn" href="/deals/new?org=x">+ Deal</a>
-      <button class="btn ghost">Archive</button>
-      <button class="btn ghost">History</button></div>
-    <p class="meta" style="justify-content:flex-start"><span class="chip">Ministry</span></p>
-    <div class="grp">Open deals</div>
-    ${table}
-  </main>`;
-}
-
-const NOW = `class="acct-scroll" tabindex="0" aria-label="Accounts"`;
-const THEN = `style="overflow-x:auto"`;
-
-type Box = { label: string | null; tab: string | null; extra: number; right: number; left: number; width: number; height: number; cls: string };
-type Measure = {
-  scrollWidth: number; clientWidth: number; innerWidth: number; bodyScrollWidth: number;
-  boxes: Box[]; headers: { text: string; x: number; w: number }[]; display: string;
-};
-
-function measure(): Measure {
+function scrollers(): { innerWidth: number; scrollWidth: number; boxes: Box[] } {
   const de = document.documentElement;
   const boxes: Box[] = [];
   for (const el of document.querySelectorAll<HTMLElement>("body *")) {
@@ -110,144 +57,146 @@ function measure(): Measure {
     if (extra <= 1) continue;
     const r = el.getBoundingClientRect();
     boxes.push({
-      label: el.getAttribute("aria-label"), tab: el.getAttribute("tabindex"), extra,
+      label: el.getAttribute("aria-label"), role: el.getAttribute("role"), tab: el.getAttribute("tabindex"),
+      cls: typeof el.className === "string" ? el.className : "", extra,
       right: r.right, left: r.left, width: r.width, height: r.height,
-      cls: typeof el.className === "string" ? el.className : "",
     });
   }
-  const table = document.querySelector("table.tbl");
-  const headers = [...document.querySelectorAll("table.tbl th")].map((th) => {
-    const r = th.getBoundingClientRect();
-    return { text: (th.textContent || "").trim(), x: Math.round(r.x), w: Math.round(r.width) };
-  });
-  return {
-    scrollWidth: de.scrollWidth, clientWidth: de.clientWidth, innerWidth: window.innerWidth,
-    bodyScrollWidth: document.body.scrollWidth, boxes, headers,
-    display: table ? getComputedStyle(table).display : "",
-  };
+  return { innerWidth: window.innerWidth, scrollWidth: de.scrollWidth, boxes };
 }
 
-let browser: Browser;
-let dir = "";
+function pageFits(m: { scrollWidth: number; innerWidth: number }) {
+  expect(m.scrollWidth, "documentElement.scrollWidth").toBeLessThanOrEqual(m.innerWidth + 1);
+}
 
-beforeAll(async () => {
-  dir = mkdtempSync(join(tmpdir(), "apl-2692-"));
-  const args = ["--no-sandbox", "--disable-dev-shm-usage"];
-  if (process.env.PW_CHROMIUM && existsSync(process.env.PW_CHROMIUM)) {
-    browser = await chromium.launch({ executablePath: process.env.PW_CHROMIUM, args });
-    return;
+/** Tab from the top of the page until the named region is focused. Does not call focus() on it. */
+async function tabToRegion(page: Page, label: string) {
+  await page.evaluate(() => { (document.activeElement as HTMLElement | null)?.blur(); });
+  for (let i = 0; i < 40; i++) {
+    await page.keyboard.press("Tab");
+    const hit = await page.evaluate((want) => {
+      const el = document.activeElement;
+      return el instanceof HTMLElement && el.classList.contains("acct-scroll") && el.getAttribute("aria-label") === want;
+    }, label);
+    if (hit) return;
   }
+  const stuck = await page.evaluate(() => {
+    const el = document.activeElement as HTMLElement | null;
+    return el ? `${el.tagName} ${el.className} ${el.getAttribute("aria-label") ?? ""}`.trim() : "none";
+  });
+  throw new Error(`Tab never reached the ${label} region. Last focus: ${stuck}`);
+}
+
+async function focusOutline(page: Page) {
+  return page.evaluate(() => {
+    const el = document.activeElement;
+    if (!(el instanceof HTMLElement)) return null;
+    const s = getComputedStyle(el);
+    const probe = document.createElement("span");
+    probe.style.color = getComputedStyle(document.documentElement).getPropertyValue("--gold").trim();
+    document.body.appendChild(probe);
+    const gold = getComputedStyle(probe).color;
+    probe.remove();
+    return { style: s.outlineStyle, width: s.outlineWidth, offset: s.outlineOffset, color: s.outlineColor, gold };
+  });
+}
+
+async function arrowScrolls(page: Page) {
+  await page.keyboard.down("ArrowRight");
   try {
-    browser = await chromium.launch({ args });
-  } catch {
-    const executablePath = chrome();
-    if (!executablePath) throw new Error("No Chromium. Set PW_CHROMIUM.");
-    browser = await chromium.launch({ executablePath, args });
+    await page.waitForFunction(() => {
+      const el = document.activeElement;
+      return el instanceof HTMLElement && el.classList.contains("acct-scroll") && el.scrollLeft > 0;
+    }, undefined, { timeout: 3000 });
+  } finally {
+    await page.keyboard.up("ArrowRight");
   }
-});
-afterAll(async () => {
-  await browser?.close();
-  if (dir) rmSync(dir, { recursive: true, force: true });
-});
-
-async function open(html: string, width: number, height: number) {
-  const file = join(dir, `p-${width}-${Math.random().toString(16).slice(2)}.html`);
-  writeFileSync(file, html);
-  const page = await (await browser.newContext({ viewport: { width, height }, deviceScaleFactor: 1 })).newPage();
-  await page.goto(pathToFileURL(file).href);
-  await page.evaluate(() => document.fonts.ready);
-  return page;
+  expect(await page.evaluate(() => (document.activeElement as HTMLElement).scrollLeft)).toBeGreaterThan(0);
 }
 
-function pageFits(m: Measure) {
-  expect(m.scrollWidth, "document scrollWidth").toBeLessThanOrEqual(m.innerWidth + 1);
-  expect(m.scrollWidth - m.clientWidth, "document scrollWidth - clientWidth").toBeLessThanOrEqual(1);
-  expect(m.bodyScrollWidth, "body scrollWidth").toBeLessThanOrEqual(m.innerWidth + 1);
+function expectRegion(m: { innerWidth: number; boxes: Box[] }, label: string) {
+  expect(m.boxes.map((b) => b.cls), "the table wrapper is the element that scrolls").toEqual(["acct-scroll"]);
+  const box = m.boxes[0];
+  expect(box.label).toBe(label);
+  expect(box.role).toBe("region");
+  expect(box.tab).toBe("0");
+  expect(box.extra).toBeGreaterThan(1);
+  expect(box.left).toBeGreaterThanOrEqual(-1);
+  expect(box.right).toBeLessThanOrEqual(m.innerWidth + 1);
+  expect(box.width).toBeGreaterThanOrEqual(44);
+  expect(box.height).toBeGreaterThanOrEqual(44);
 }
 
-describe("APL-2692 accounts sideways scroll", () => {
-  it("puts the keyboard target on the table wrapper in both views", () => {
-    const list = readFileSync("src/app/(app)/accounts/AccountsView.tsx", "utf8");
-    const org = readFileSync("src/app/(app)/accounts/[id]/OrgView.tsx", "utf8");
-    expect(list).toContain('className="acct-scroll" tabIndex={0} aria-label="Accounts"');
-    expect(org).toContain('className="acct-scroll" tabIndex={0} aria-label="Open deals"');
-    expect(list).not.toContain("overflowX");
-    expect(org).not.toContain("overflowX");
+describe("@APL-2692 accounts sideways scroll", () => {
+  it("@APL-2692 @AC1 @AC2 @TC1 /accounts?q= at 390x844 fits, and Tab then ArrowRight scrolls the Accounts region", async () => {
+    const page = await openAt(PHONE, `/accounts?q=${encodeURIComponent(orgName)}`, `a[href="/accounts/${orgId}"]`);
+    try {
+      expect(await page.locator('input[aria-label="Search organisations"]').inputValue()).toBe(orgName);
+      const m = await page.evaluate(scrollers);
+      pageFits(m);
+      expectRegion(m, "Accounts");
+      await tabToRegion(page, "Accounts");
+      const outline = await focusOutline(page);
+      expect(outline?.style).toBe("solid");
+      expect(outline?.width).toBe("2px");
+      expect(outline?.offset).toBe("2px");
+      expect(outline?.color).toBe(outline?.gold);
+      await arrowScrolls(page);
+    } finally { await page.context().close(); }
   });
 
-  it("AC1 and AC2: /accounts?q= at 390x844 does not scroll the page, and the table scroller is inside its box", async () => {
-    const page = await open(documentHtml(accountsMain(NOW)), 390, 844);
-    const m = await page.evaluate(measure);
-    pageFits(m);
-    expect(m.boxes, "sideways scrollers").toHaveLength(1);
-    const box = m.boxes[0];
-    expect(box.cls).toContain("acct-scroll");
-    expect(box.label).toBe("Accounts");
-    expect(box.tab).toBe("0");
-    expect(box.left).toBeGreaterThanOrEqual(-1);
-    expect(box.right).toBeLessThanOrEqual(m.innerWidth + 1);
-    expect(box.width).toBeGreaterThanOrEqual(44);
-    expect(box.height).toBeGreaterThanOrEqual(44);
-    expect(box.extra).toBeGreaterThan(1);
-    const scroller = page.locator(".acct-scroll");
-    await scroller.focus();
-    expect(await page.evaluate(() => document.activeElement?.classList.contains("acct-scroll"))).toBe(true);
-    const before = await scroller.evaluate((el) => el.scrollLeft);
-    await page.keyboard.down("ArrowRight");
-    await page.waitForTimeout(80);
-    await page.keyboard.up("ArrowRight");
-    const after = await scroller.evaluate((el) => el.scrollLeft);
-    expect(after).toBeGreaterThan(before);
-    await page.context().close();
+  it("@APL-2692 @AC1 @AC2 @TC2 /accounts/{id} at 390x844 fits, and Tab then ArrowRight scrolls the Open deals region", async () => {
+    const page = await openAt(PHONE, `/accounts/${orgId}`, `a[href="/projects/${dealId}"]`);
+    try {
+      const m = await page.evaluate(scrollers);
+      pageFits(m);
+      expectRegion(m, "Open deals");
+      await tabToRegion(page, "Open deals");
+      const outline = await focusOutline(page);
+      expect(outline?.style).toBe("solid");
+      expect(outline?.width).toBe("2px");
+      expect(outline?.offset).toBe("2px");
+      expect(outline?.color).toBe(outline?.gold);
+      await arrowScrolls(page);
+    } finally { await page.context().close(); }
   });
 
-  it("AC1 and AC2: /accounts/{id} at 390x844 does not scroll the page", async () => {
-    const bare = await open(documentHtml(orgMain(false)), 390, 844);
-    pageFits(await bare.evaluate(measure));
-    expect((await bare.evaluate(measure)).boxes).toEqual([]);
-    await bare.context().close();
-
-    const page = await open(documentHtml(orgMain(true)), 390, 844);
-    const m = await page.evaluate(measure);
-    pageFits(m);
-    expect(m.boxes).toHaveLength(1);
-    expect(m.boxes[0].label).toBe("Open deals");
-    expect(m.boxes[0].tab).toBe("0");
-    expect(m.boxes[0].right).toBeLessThanOrEqual(m.innerWidth + 1);
-    expect(m.boxes[0].width).toBeGreaterThanOrEqual(44);
-    expect(m.boxes[0].height).toBeGreaterThanOrEqual(44);
-    const scroller = page.locator(".acct-scroll");
-    await scroller.focus();
-    expect(await page.evaluate(() => document.activeElement?.classList.contains("acct-scroll"))).toBe(true);
-    await page.keyboard.down("ArrowRight");
-    await page.waitForTimeout(80);
-    await page.keyboard.up("ArrowRight");
-    expect(await scroller.evaluate((el) => el.scrollLeft)).toBeGreaterThan(0);
-    await page.context().close();
-  });
-
-  it("AC3: at 1280x800 the columns sit where they did before this change", async () => {
-    for (const [now, then] of [
-      [accountsMain(NOW), accountsMain(THEN)],
-      [orgMain(true), orgMain(true).replace('class="acct-scroll" tabindex="0" aria-label="Open deals"', THEN)],
-    ] as const) {
-      const next = await open(documentHtml(now), 1280, 800);
-      const prev = await open(documentHtml(then), 1280, 800);
-      const a = await next.evaluate(measure);
-      const b = await prev.evaluate(measure);
-      pageFits(a);
-      pageFits(b);
-      expect(a.boxes, "desktop table should fit without a sideways scroller").toEqual([]);
-      expect(b.boxes).toEqual([]);
-      expect(a.display).toBe("table");
-      expect(a.headers.map((h) => h.text)).toEqual(b.headers.map((h) => h.text));
-      expect(a.headers.length).toBeGreaterThan(0);
-      for (let i = 0; i < a.headers.length; i++) {
-        expect(Math.abs(a.headers[i].x - b.headers[i].x)).toBeLessThanOrEqual(1);
-        expect(Math.abs(a.headers[i].w - b.headers[i].w)).toBeLessThanOrEqual(1);
-      }
-      await next.context().close();
-      await prev.context().close();
+  it("@APL-2692 @AC3 @TC3 at 1280x800 both account pages keep one fitting table row", async () => {
+    const cases = [
+      { path: `/accounts?q=${encodeURIComponent(orgName)}`, ready: `a[href="/accounts/${orgId}"]`, headers: ["Name", "Kind", "Country", "Under", "Open deals"] },
+      { path: `/accounts/${orgId}`, ready: `a[href="/projects/${dealId}"]`, headers: ["Deal", "Role", "Stage", "Leader"] },
+    ];
+    for (const c of cases) {
+      const page = await openAt(DESK, c.path, c.ready);
+      try {
+        const layout = await page.evaluate(() => {
+          const de = document.documentElement;
+          const wrap = document.querySelector<HTMLElement>(".acct-scroll");
+          const table = wrap?.querySelector<HTMLElement>("table.tbl") ?? null;
+          const headers = [...document.querySelectorAll(".acct-scroll table.tbl th")].map((th) => {
+            const r = th.getBoundingClientRect();
+            return { text: (th.textContent || "").trim(), y: r.y };
+          });
+          const overflowing = [...document.querySelectorAll<HTMLElement>("body *")].filter((el) => {
+            const ox = getComputedStyle(el).overflowX;
+            return (ox === "auto" || ox === "scroll") && el.scrollWidth - el.clientWidth > 1;
+          }).map((el) => (typeof el.className === "string" ? el.className : el.tagName));
+          return {
+            scrollWidth: de.scrollWidth, innerWidth: window.innerWidth,
+            display: table ? getComputedStyle(table).display : "",
+            tableWidth: table ? table.getBoundingClientRect().width : -1,
+            wrapClient: wrap ? wrap.clientWidth : -1,
+            headers, overflowing,
+          };
+        });
+        pageFits(layout);
+        expect(layout.overflowing, c.path).toEqual([]);
+        expect(layout.display, c.path).toBe("table");
+        expect(Math.abs(layout.tableWidth - layout.wrapClient), c.path).toBeLessThanOrEqual(1);
+        expect(layout.headers.map((h) => h.text), c.path).toEqual(c.headers);
+        const y = layout.headers[0]?.y ?? 0;
+        for (const h of layout.headers) expect(Math.abs(h.y - y), c.path).toBeLessThanOrEqual(1);
+      } finally { await page.context().close(); }
     }
   });
 });

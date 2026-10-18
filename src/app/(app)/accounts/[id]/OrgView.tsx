@@ -118,7 +118,7 @@ export default function OrgView({ params }: { params: Promise<{ id: string }> })
       <div className="grp">Open deals</div>
       {o && o.deals.length === 0 && <div className="card empty">No deals you can see yet.</div>}
       {o && o.deals.length > 0 && (
-        <div className="acct-scroll" tabIndex={0} aria-label="Open deals"><table className="tbl"><thead><tr><th>Deal</th><th>Role</th><th>Stage</th><th>Leader</th></tr></thead>
+        <div className="acct-scroll" tabIndex={0} role="region" aria-label="Open deals"><table className="tbl"><thead><tr><th>Deal</th><th>Role</th><th>Stage</th><th>Leader</th></tr></thead>
           <tbody>{o.deals.map((d) => <tr key={d.projectId}><td><Link href={`/projects/${d.projectId}`}>{d.name}</Link></td><td>{d.role}</td><td>{d.stage?.name ?? "—"} <span style={{ color: "var(--muted)" }}>{d.pipeline}</span></td><td>{d.leader?.name ?? "—"}</td></tr>)}</tbody></table></div>
       )}
 
