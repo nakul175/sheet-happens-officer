@@ -6,11 +6,11 @@ import { qaEmail, signInAlias } from "./qa-alias";
 let seq = 0;
 
 export const test = base.extend({
-  member: async ({ browser, admin }, use) => {
+  member: async ({ browser, admin }, run) => {
     const label = `m${++seq}`;
     const signed = await signInAlias(browser, qaEmail(label), zz(label));
     try {
-      await use(signed.who);
+      await run(signed.who);
     } finally {
       try { await admin.api.post(`/api/team/${signed.who.user.id}/deactivate`, { reassign: "leaders" }); } catch { /* already gone */ }
       await signed.ctx.close();
