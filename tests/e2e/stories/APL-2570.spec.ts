@@ -1,7 +1,7 @@
 // SHO-US-14.11 Bulk actions (APL-2570). Needs the optional Member account for the second person.
-import { test, expect, zz } from "../support";
+import { test, expect, zz, type Who, type Later } from "../support";
 
-async function proj(admin: any, member: any, later: any, n: number, extra: (i: number) => object = () => ({})) {
+async function proj(admin: Who, member: Who, later: Later, n: number, extra: (i: number) => object = () => ({})) {
   const r = await admin.api.post("/api/projects", { name: zz("bulk"), leaderId: admin.user.id });
   expect(r.status).toBe(201);
   const id = r.json.project.id as string;
