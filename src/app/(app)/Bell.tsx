@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ago, api } from "@/components/api";
+import { bellEmptyText, responseApplies, visibleNotes, type BellFilter } from "./bell-list";
 import "./bell.css";
 
 type Note = { id: string; text: string; href: string; read: boolean; createdAt: string };
@@ -13,7 +14,7 @@ const PAGE = 50;
 
 export function Bell() {
   const [open, setOpen] = useState(false);
-  const [filter, setFilter] = useState<"all" | "unread">("all");
+  const [filter, setFilter] = useState<BellFilter>("all");
   const [page, setPage] = useState<Page | null>(null);
   const [more, setMore] = useState<Note[]>([]); // older pages the person asked for
   const [next, setNext] = useState<string | null>(null);
@@ -22,10 +23,16 @@ export function Bell() {
   const box = useRef<HTMLDivElement>(null);
   const router = useRouter();
   const keep = useRef(PAGE); // how many are on screen, so a refresh does not throw away older pages
+  const filterRef = useRef<BellFilter>("all");
+  const loadSeq = useRef(0);
+  filterRef.current = filter;
 
-  const load = useCallback(async (f: "all" | "unread", reset = false) => {
+  const load = useCallback(async (f: BellFilter, reset = false) => {
+    const mine = ++loadSeq.current;
     const limit = reset ? PAGE : Math.min(Math.max(keep.current, PAGE), 200);
     const r = await api<Page>("GET", `/api/notifications?limit=${limit}${f === "unread" ? "&filter=unread" : ""}`);
+    // Mark-read reloads All. If Unread was selected while that was in flight, drop the All page.
+    if (!responseApplies(f, filterRef.current, mine, loadSeq.current)) return;
     if (!r.ok) { setFailed(true); return; }
     setFailed(false);
     setPage(r.data);
@@ -46,12 +53,15 @@ export function Bell() {
   }, [open]);
 
   const unread = page?.unread ?? 0;
-  const items = [...(page?.items ?? []), ...more];
+  const items = visibleNotes(filter, [...(page?.items ?? []), ...more]);
   async function older() {
     if (!next) return;
+    const mine = loadSeq.current;
+    const f = filterRef.current;
     setLoadingMore(true);
-    const r = await api<Page>("GET", `/api/notifications?limit=${PAGE}&before=${encodeURIComponent(next)}${filter === "unread" ? "&filter=unread" : ""}`);
+    const r = await api<Page>("GET", `/api/notifications?limit=${PAGE}&before=${encodeURIComponent(next)}${f === "unread" ? "&filter=unread" : ""}`);
     setLoadingMore(false);
+    if (!responseApplies(f, filterRef.current, mine, loadSeq.current)) return;
     if (!r.ok) { setFailed(true); return; }
     setMore((m) => [...m, ...r.data.items]);
     setNext(r.data.next);
@@ -59,7 +69,8 @@ export function Bell() {
   }
   async function setRead(n: Note, read: boolean) {
     await api("POST", `/api/notifications/${n.id}/${read ? "read" : "unread"}`, {});
-    await load(filter);
+    // The tab may have moved to Unread while the mark request was in flight.
+    await load(filterRef.current);
   }
   return (
     <div className="wrapper" ref={box}>
@@ -71,14 +82,14 @@ export function Bell() {
         <div className="panel" role="dialog" aria-label="Notifications">
           <header>
             <span>Notifications</span>
-            {unread > 0 && <button className="link" onClick={async () => { await api("POST", "/api/notifications/read-all", {}); await load(filter); }}>Mark all as read</button>}
+            {unread > 0 && <button className="link" onClick={async () => { await api("POST", "/api/notifications/read-all", {}); await load(filterRef.current); }}>Mark all as read</button>}
           </header>
           <div className="bell-tabs" role="group" aria-label="Show">
-            <button aria-pressed={filter === "all"} onClick={() => setFilter("all")}>All</button>
-            <button aria-pressed={filter === "unread"} onClick={() => setFilter("unread")}>Unread{unread > 0 ? ` · ${unread}` : ""}</button>
+            <button aria-pressed={filter === "all"} onClick={() => { filterRef.current = "all"; setFilter("all"); }}>All</button>
+            <button aria-pressed={filter === "unread"} onClick={() => { filterRef.current = "unread"; setFilter("unread"); }}>Unread{unread > 0 ? ` · ${unread}` : ""}</button>
           </div>
           {failed && <div className="empty">Could not load notifications. <button className="link" onClick={() => load(filter, true)}>Try again</button></div>}
-          {!failed && page && !items.length && <div className="empty">{filter === "unread" ? "All caught up" : "No notifications yet."}</div>}
+          {!failed && page && !items.length && <div className="empty">{bellEmptyText(filter)}</div>}
           {items.map((n) => (
             <div key={n.id} className={`row bell-row${!n.read ? " unread" : ""}`}>
               <Link href={n.href} className="bell-main"
@@ -86,7 +97,7 @@ export function Bell() {
                   e.preventDefault();
                   setOpen(false);
                   if (!n.read) await api("POST", `/api/notifications/${n.id}/read`, {});
-                  load(filter);
+                  load(filterRef.current);
                   router.push(n.href);
                 }}>
                 {!n.read && <span className="bell-dot" aria-label="Unread" role="img" />}
