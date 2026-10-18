@@ -9,7 +9,7 @@ import {
 import { addDays, formatDueDate, parseDueDate, startOfTodayIST } from "@/lib/dates";
 import { auditTx, logAction, notify } from "@/lib/notify";
 import { reqCtx } from "@/lib/reqctx";
-import { attachCommentCounts, commentCount } from "@/lib/comments";
+import { attachCommentCounts, commentCount, purgeExpiredComments } from "@/lib/comments";
 import { commentsEnabled } from "@/lib/flags";
 
 export const taskInclude = {
@@ -528,10 +528,11 @@ export async function listTrash(user: Actor, projectId: string) {
   }));
 }
 
-/** Scheduled job: removes tasks that have been in Trash for 30 days. Nothing is removed earlier. */
+/** Scheduled job: removes tasks that have been in Trash for 30 days. Nothing is removed earlier. Also purges soft-deleted comments past 30×24h. */
 export async function purgeTrash(now = new Date()) {
   const cutoff = new Date(now.getTime() - 30 * 86400_000);
   const r = await db.task.deleteMany({ where: { deletedAt: { lte: cutoff } } });
+  await purgeExpiredComments(now);
   if (r.count) await db.auditLog.create({ data: { event: "TASK_PURGED", channel: "SCREEN", data: { count: r.count } } });
   return r.count;
 }

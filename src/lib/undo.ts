@@ -6,7 +6,7 @@ import { WORKERS, activeMember, projectAccess, requireManage, requireWrite, type
 import { formatDueDate } from "@/lib/dates";
 import { auditTx, logAction, notify } from "@/lib/notify";
 import { deleteTask, restoreTask } from "@/lib/tasks";
-import { UNDO_DAYS, UNDO_LABELS, isUndoable } from "@/lib/undoable";
+import { UNDO_LABELS, isTooOldToUndo, isUndoable } from "@/lib/undoable";
 import { undoRecord } from "@/lib/records";
 
 type Conflict = { field: string; before: unknown; after: unknown; now: unknown };
@@ -382,7 +382,7 @@ async function prepare(user: Actor, logId: string) {
   if (row.action === "task.deleted") requireManage(a);
   if (row.undoneAt) throw bad("This action was already undone.");
   if (!isUndoable(row.action)) throw bad("This kind of action cannot be undone.");
-  if (Date.now() - row.createdAt.getTime() > UNDO_DAYS * 86400_000) throw bad("Too old to undo", { tooOld: true });
+  if (isTooOldToUndo(row.createdAt)) throw bad("Too old to undo", { tooOld: true });
 
   const p = await plan(row, user, projectId);
   return { row, projectId, p };

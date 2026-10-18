@@ -6,6 +6,7 @@ import { ApiError, notFound } from "@/lib/http";
 import { canManage, isActive, projectAccess, requireWrite, type Actor, type Tx } from "@/lib/access";
 import { commentsEnabled } from "@/lib/flags";
 import { logAction, notify } from "@/lib/notify";
+import { UNDO_DAYS, isTooOldToUndo } from "@/lib/undoable";
 
 export const COMMENT_MAX = 5000;
 export const COMMENTS_PER_TASK = 200;
@@ -44,11 +45,13 @@ async function openTask(user: Actor, taskId: string, write: boolean) {
   // A person who cannot see the project gets the same "Task not found" as a missing id (no existence leak).
   let a;
   try {
-    a = await projectAccess(user, t.projectId, { write });
+    // Write is checked here, not via projectAccess: an archived project answers 403 project_archived, not 409.
+    a = await projectAccess(user, t.projectId);
   } catch (e) {
     if (e instanceof ApiError && e.status === 404) throw notFound("Task");
     throw e;
   }
+  if (write && a.project.archivedAt) throw new ApiError(403, "This project is archived and read-only.", { code: "project_archived" });
   if (write) requireWrite(a);
   const members = await activeMembers(t.projectId);
   return { t, a, members };
@@ -110,7 +113,8 @@ export async function listComments(user: Actor, taskId: string) {
   const canWrite = a.role !== "VIEWER" && !a.project.archivedAt;
   return {
     comments: rows.map((c) => presentOne(c, names, user, canWrite, canManage(a))),
-    members: members.map((m) => ({ id: m.id, name: m.name })),
+    // The person writing the comment is its author, so the @ picker leaves them out.
+    members: members.filter((m) => m.id !== user.id).map((m) => ({ id: m.id, name: m.name })),
     canComment: canWrite,
   };
 }
@@ -127,11 +131,12 @@ export async function commentExcerpts(user: Actor, taskId: string) {
   }));
 }
 
-async function notifyComment(tx: Tx, user: Actor, t: { id: string; projectId: string; title: string; assigneeId: string; approverId: string | null; completedAt: Date | null }, mentionIds: string[]) {
+async function notifyComment(tx: Tx, user: Actor, t: { id: string; projectId: string; title: string; assigneeId: string; approverId: string | null; previousAssigneeId: string | null; completedAt: Date | null }, mentionIds: string[]) {
   const data = { title: t.title };
   await notify(tx, mentionIds, "COMMENT_MENTION", { actorId: user.id, taskId: t.id, projectId: t.projectId, data });
+  // While a task awaits approval the approver is the assignee. The original assignee is still told.
   const holders = [t.assigneeId];
-  if (awaiting(t) && t.approverId) holders.push(t.approverId);
+  if (awaiting(t) && t.previousAssigneeId) holders.push(t.previousAssigneeId);
   await notify(tx, holders, "COMMENT_ADDED", { actorId: user.id, taskId: t.id, projectId: t.projectId, data });
 }
 
@@ -211,4 +216,20 @@ export async function attachCommentCounts<T extends { id: string }>(rows: T[]): 
 export async function commentCount(taskId: string) {
   if (!commentsEnabled()) return undefined;
   return db.comment.count({ where: { taskId, removedAt: null } });
+}
+
+/**
+ * Removes soft-deleted comments only when elapsed time is greater than 30×24h.
+ * Exactly 30×24h stays, so Undo still restores them. `isTooOldToUndo` is the only decision.
+ */
+export async function purgeExpiredComments(now = new Date()) {
+  const edge = new Date(now.getTime() - UNDO_DAYS * 86400_000);
+  const rows = await db.comment.findMany({
+    where: { removedAt: { lte: edge } },
+    select: { id: true, removedAt: true },
+  });
+  const ids = rows.filter((r) => r.removedAt && isTooOldToUndo(r.removedAt, now.getTime())).map((r) => r.id);
+  if (!ids.length) return 0;
+  const r = await db.comment.deleteMany({ where: { id: { in: ids } } });
+  return r.count;
 }

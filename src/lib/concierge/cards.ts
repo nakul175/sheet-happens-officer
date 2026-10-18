@@ -5,7 +5,7 @@ import { ApiError } from "@/lib/http";
 import type { Actor } from "@/lib/access";
 import { reqCtx, type ReqCtx } from "@/lib/reqctx";
 import { checkUndo, undoAction } from "@/lib/undo";
-import { UNDO_DAYS, isUndoable } from "@/lib/undoable";
+import { isTooOldToUndo, isUndoable } from "@/lib/undoable";
 import { buildCard, checkHandover, execute, fingerprint, recheck, summaryOf, type Op } from "@/lib/concierge/changes";
 import { addMessage, casStored, ownMessage, parse, present } from "@/lib/concierge/thread";
 import type { Card, Message, Stored } from "@/lib/concierge/types";
@@ -120,7 +120,7 @@ export async function undoCard(user: Actor, cardId: string, anyway = false) {
   if (!rs.result.undoable) throw new ApiError(409, "This can't be undone.");
   if (rs.result.undoneAt) throw new ApiError(409, "This was already undone.");
   const confirmedAt = rs.internal.confirmedAt ? Date.parse(rs.internal.confirmedAt) : resultRow.createdAt.getTime();
-  if (Date.now() - confirmedAt > UNDO_DAYS * 86400_000) throw new ApiError(409, "Too old to undo", { tooOld: true });
+  if (isTooOldToUndo(confirmedAt)) throw new ApiError(409, "Too old to undo", { tooOld: true });
   if (rs.internal.undoing && Date.now() - Date.parse(rs.internal.undoingAt ?? "0") < UNDOING_STALE_MS) throw new ApiError(409, "This is already being undone.");
 
   // Claim the Undo for this card.

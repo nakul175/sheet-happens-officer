@@ -44,3 +44,12 @@ export const UNDO_LABELS: Record<string, string> = {
 };
 export const isUndoable = (action: string) => action in UNDO_LABELS;
 export const UNDO_DAYS = 30;
+
+/**
+ * True only when the elapsed time is greater than 30×24h.
+ * Exactly 30×24h is still inside the window (Undo works; a soft-deleted comment is kept).
+ */
+export function isTooOldToUndo(at: Date | number, now = Date.now()) {
+  const then = at instanceof Date ? at.getTime() : at;
+  return now - then > UNDO_DAYS * 86400_000;
+}
