@@ -376,13 +376,19 @@ describe("CRM_VISIBLE modes are tested against a real server per mode", () => {
     const stalledText = `"${dealName}" has had no activity for 30 days.`;
     const taskText = `Someone assigned you "${taskTitle}".`;
     const plainText = `Someone assigned you "${plainTitle}".`;
+    // ADDED_TO_PROJECT is written with the deal's projectId (projects.ts addMember). The packing
+    // project is the non-deal control: its sentence and href stay in every mode.
+    const addedDealText = `Someone added you to "${dealName}" as editor.`;
+    const addedPlainText = `Someone added you to "Packing ${tag}" as editor.`;
     await db.notification.createMany({
       data: [member.id, admin.id, outsider.id].flatMap((recipientId) => [
         { recipientId, type: "DEAL_STAGE_CHANGED", projectId: dealId, data: { project: dealName, stage: "Proposal" } },
         { recipientId, type: "DEAL_NEEDS_NEXT_STEP", projectId: dealId, data: { project: dealName } },
         { recipientId, type: "DEAL_STALLED", projectId: dealId, data: { project: dealName } },
         { recipientId, type: "TASK_ASSIGNED", projectId: dealId, taskId: kickoffTaskId, data: { title: taskTitle, project: dealName } },
+        { recipientId, type: "ADDED_TO_PROJECT", projectId: dealId, data: { project: dealName, role: "EDITOR" } },
         { recipientId, type: "TASK_ASSIGNED", projectId: plain.id, taskId: plainTaskId, data: { title: plainTitle, project: `Packing ${tag}` } },
+        { recipientId, type: "ADDED_TO_PROJECT", projectId: plain.id, data: { project: `Packing ${tag}`, role: "EDITOR" } },
       ]),
     });
 
@@ -428,10 +434,12 @@ describe("CRM_VISIBLE modes are tested against a real server per mode", () => {
 
     // APL-2716. Under admins a non-admin gets the generic sentence. Under all (this server is
     // CRM_VISIBLE=on, which crmMode reads as all) a non-member keeps main's sentence and href.
-    // Off still redacts everyone, because the CRM is hidden. A non-deal notice stays as stored.
+    // Off still redacts everyone, because the CRM is hidden. A non-deal task notice and a
+    // non-deal ADDED_TO_PROJECT stay as stored. An on-deal ADDED_TO_PROJECT follows the deal.
     const dealHref = `/projects/${dealId}`;
     const taskHref = `/tasks/${kickoffTaskId}`;
     const plainHref = `/tasks/${plainTaskId}`;
+    const plainProjectHref = `/projects/${plain.id}`;
     const controls: { mode: Mode; who: { cookie: string }; user: string; sees: boolean; tc: string }[] = [
       { mode: "on", who: admin, user: "admin", sees: true, tc: "qa:TC-APL2716-a8042ed1@v1" },
       { mode: "admins", who: admin, user: "admin", sees: true, tc: "qa:TC-APL2716-3abdb652@v1" },
@@ -450,22 +458,25 @@ describe("CRM_VISIBLE modes are tested against a real server per mode", () => {
       const label = `${row.tc} mode=${modeLabel} user=${row.user} sees=${row.sees ? "yes" : "no"}`;
       expect(bell.status, label).toBe(200);
       const page = bellItems(bell.text);
-      expect(page.items, label).toHaveLength(5);
-      expect(page.unread, `${label} unread count`).toBe(5);
+      expect(page.items, label).toHaveLength(7);
+      expect(page.unread, `${label} unread count`).toBe(7);
       expect(page.items, `qa:TC-APL2716-4811612d@v1 ${label}`).toContainEqual({ text: plainText, href: plainHref });
+      expect(page.items, `${label} non-deal membership`).toContainEqual({ text: addedPlainText, href: plainProjectHref });
       if (row.sees) {
         expect(page.items, `qa:TC-APL2716-3abdb652@v1 ${label} deal name`).toContainEqual({ text: stageText, href: dealHref });
         expect(page.items, `qa:TC-APL2716-85782555@v1 ${label}`).toContainEqual({ text: nextStepText, href: dealHref });
         expect(page.items, `qa:TC-APL2716-fcc1861b@v1 ${label}`).toContainEqual({ text: stalledText, href: dealHref });
         expect(page.items, `${label} task title`).toContainEqual({ text: taskText, href: taskHref });
+        expect(page.items, `${label} added to deal`).toContainEqual({ text: addedDealText, href: dealHref });
       } else {
-        const hidden = page.items.filter((item) => item.text !== plainText);
-        expect(hidden, label).toHaveLength(4);
+        const hidden = page.items.filter((item) => item.text !== plainText && item.text !== addedPlainText);
+        expect(hidden, label).toHaveLength(5);
         for (const item of hidden) {
           expect(item.text, `qa:TC-APL2716-3abdb652@v1 ${label}`).toBe(hiddenText);
           expect(item.href, `${label} href`).toBeNull();
         }
         expect(bell.text, `${label} deal name`).not.toContain(dealName);
+        expect(page.items.map((item) => item.text), `${label} added to deal`).not.toContain(addedDealText);
         expect(bell.text, `${label} task title`).not.toContain(taskTitle);
         expect(bell.text, `${label} stage`).not.toContain("Proposal");
         expect(bell.text, `${label} deal href`).not.toContain(dealHref);
@@ -497,22 +508,25 @@ describe("CRM_VISIBLE modes are tested against a real server per mode", () => {
         const label = `qa:TC-APL2716-a8042ed1@v1 mode=${row.label} user=${reader.user} redacted=${redacted ? "yes" : "no"}`;
         expect(bell.status, label).toBe(200);
         const page = bellItems(bell.text);
-        expect(page.items, label).toHaveLength(5);
-        expect(page.unread, `${label} unread count`).toBe(5);
+        expect(page.items, label).toHaveLength(7);
+        expect(page.unread, `${label} unread count`).toBe(7);
         expect(page.items, `qa:TC-APL2716-4811612d@v1 ${label}`).toContainEqual({ text: plainText, href: plainHref });
+        expect(page.items, `${label} non-deal membership`).toContainEqual({ text: addedPlainText, href: plainProjectHref });
         if (!redacted) {
           expect(page.items, `qa:TC-APL2716-3abdb652@v1 ${label}`).toContainEqual({ text: stageText, href: dealHref });
           expect(page.items, `qa:TC-APL2716-85782555@v1 ${label}`).toContainEqual({ text: nextStepText, href: dealHref });
           expect(page.items, `qa:TC-APL2716-fcc1861b@v1 ${label}`).toContainEqual({ text: stalledText, href: dealHref });
           expect(page.items, `${label} task title`).toContainEqual({ text: taskText, href: taskHref });
+          expect(page.items, `${label} added to deal`).toContainEqual({ text: addedDealText, href: dealHref });
         } else {
-          const hidden = page.items.filter((item) => item.text !== plainText);
-          expect(hidden, label).toHaveLength(4);
+          const hidden = page.items.filter((item) => item.text !== plainText && item.text !== addedPlainText);
+          expect(hidden, label).toHaveLength(5);
           for (const item of hidden) {
             expect(item.text, `qa:TC-APL2716-3abdb652@v1 ${label}`).toBe(hiddenText);
             expect(item.href, `${label} href`).toBeNull();
           }
           expect(bell.text, `qa:TC-APL2716-d2ec503b@v1 ${label} deal name`).not.toContain(dealName);
+          expect(page.items.map((item) => item.text), `${label} added to deal`).not.toContain(addedDealText);
           expect(bell.text, `${label} task title`).not.toContain(taskTitle);
           expect(bell.text, `${label} stage`).not.toContain("Proposal");
           expect(bell.text, `${label} deal href`).not.toContain(dealHref);
