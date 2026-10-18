@@ -169,8 +169,8 @@ describe("CRM_VISIBLE and concierge quick actions (SHO-BUG-11)", () => {
     expect(late.json.messages.map((m: { text: string }) => m.text)).toEqual([`Overdue in ${dealName}`, expect.stringContaining(`Late step ${tag}`)]);
   });
 
-  // qa:TC-APL2646-4346ccb6@v1 · ACa. Due this week on an archived project is the non-member refusal.
-  // qa:TC-APL2646-e08272d4@v1 · ACa. The name is absent from the stored thread and from the next model request.
+  // qa:TC-APL2646-4346ccb6@v2 · ACa. Due this week on an archived project is the non-member refusal.
+  // qa:TC-APL2646-e08272d4@v2 · ACa. The name is absent from the stored thread and from the next model request.
   it("ACa: an archived project a member belongs to is the same 404 as a project they cannot see, and the name never reaches the response, the thread, or the model", async () => {
     const lead = await account("acalead");
     const member = await account("acamem");
@@ -224,8 +224,8 @@ describe("CRM_VISIBLE and concierge quick actions (SHO-BUG-11)", () => {
     expect(JSON.stringify(seen)).not.toContain(tag);
   });
 
-  // qa:TC-APL2646-1311c0f3@v1 · ACb. Hidden deal and a project the caller is not in: same status, headers, and body.
-  // qa:TC-APL2646-2010a576@v1 · ACb. The next model request does not name the deal, and CRM_VISIBLE=all still does.
+  // qa:TC-APL2646-1311c0f3@v2 · ACb. Hidden deal and a project the caller is not in: same status, headers, and body.
+  // qa:TC-APL2646-2010a576@v2 · ACb. The next model request does not name the deal, and CRM_VISIBLE=all still does.
   it("ACb: a hidden deal and a project the person is not in return the same status, headers, and body", async () => {
     const { ad, member, tag, dealName, dealId, otherId } = await hiddenDeal("acb");
     script(() => { throw new Error("no model call expected"); });
@@ -291,7 +291,8 @@ describe("CRM_VISIBLE and concierge quick actions (SHO-BUG-11)", () => {
     });
   });
 
-  // qa:TC-APL2646-1e6ed728@v1 · ACc. APL-2609 AC4 on this branch, with no test.fail. PR #73 is not changed.
+  // qa:TC-APL2646-1e6ed728@v2 · ACc. APL-2609 AC4 on this branch, with no test.fail. PR #73 is not changed.
+  // qa:TC-APL2646-df616fe9@v2 · ACc. Due this week does not show a hidden deal's name (the 1280 and 390 screens are the story spec).
   it("ACc: under admins a deal member's due-week is the reference refusal, and the thread has no 'Due this week in <deal>'", async () => {
     const { member, dealName, dealId, otherId } = await hiddenDeal("acc");
     script(() => { throw new Error("no model call expected"); });
