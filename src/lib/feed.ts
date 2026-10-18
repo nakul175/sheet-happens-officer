@@ -4,7 +4,7 @@ import { z } from "zod";
 import { db } from "@/lib/db";
 import { ApiError } from "@/lib/http";
 import { currentSessionId, deviceLabel, hashPassword, verifyPassword } from "@/lib/auth";
-import { WORKSTREAM_DEAL, crmVisible, isAdmin, projectAccess, type Actor } from "@/lib/access";
+import { WORKSTREAM_DEAL, crmMode, crmVisible, projectAccess, type Actor } from "@/lib/access";
 import { idsIn, sentence, whenText } from "@/lib/activity-text";
 import { UNDO_DAYS, isUndoable } from "@/lib/undoable";
 import { passwordField } from "@/lib/schemas";
@@ -105,21 +105,26 @@ export function redactDealNotice(type: string): { text: string; href: null } | n
 }
 
 /**
- * Deal ids this person must not read in the bell.
- * The CRM is hidden from them, or they are not on the deal and not an Admin.
+ * Deal ids whose notices are replaced in the bell.
+ *
+ * Redaction is gated on the CRM being hidden from this reader. That is
+ * `crmMode() === "admins"` and they are not an Admin, or `crmMode() === "off"`.
+ * `crmVisible` is false in exactly those cases.
+ *
+ * Under `all` and unset, `crmMode()` is `"all"` and this returns nothing, so the
+ * bell matches main: a non-member still gets the stored sentence and href.
+ * Membership is not a reason to redact.
  */
 async function hiddenDealIds(user: Actor, projectIds: (string | null)[]): Promise<Set<string>> {
-  const ids = [...new Set(projectIds.filter((id): id is string => !!id))];
   const hidden = new Set<string>();
+  if (crmMode() === "all" || crmVisible(user)) return hidden;
+  const ids = [...new Set(projectIds.filter((id): id is string => !!id))];
   if (!ids.length) return hidden;
   const deals = await db.project.findMany({
     where: { id: { in: ids }, typeId: WORKSTREAM_DEAL },
-    select: { id: true, members: { where: { userId: user.id }, select: { userId: true }, take: 1 } },
+    select: { id: true },
   });
-  for (const deal of deals) {
-    const sees = crmVisible(user) && (isAdmin(user) || deal.members.length > 0);
-    if (!sees) hidden.add(deal.id);
-  }
+  for (const deal of deals) hidden.add(deal.id);
   return hidden;
 }
 

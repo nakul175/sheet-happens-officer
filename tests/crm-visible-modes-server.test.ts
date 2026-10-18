@@ -35,6 +35,8 @@ type Running = {
 };
 
 const running = new Map<Mode, Running>();
+/** CRM_VISIBLE=all and an unset CRM_VISIBLE. Not part of the three-mode process check. */
+const extra = new Map<"all" | "unset", Running>();
 const seed: { userIds: string[]; emails: string[]; projectId?: string; plainProjectId?: string; orgId?: string } = { userIds: [], emails: [] };
 
 /** Removes this run's users, deal and organisation so the shared test database stays clear. */
@@ -104,20 +106,25 @@ async function waitForHealth(port: number, child: ChildProcess, timeoutMs: numbe
   throw new Error(`CRM_VISIBLE mode cannot start (no healthy response on port ${port})`);
 }
 
-/** Starts one mode. Throws, and stops the process, when that mode cannot start. */
-async function startModeServer(mode: Mode, opts: { bin?: string; args?: string[]; timeoutMs?: number } = {}): Promise<Running> {
+/**
+ * Starts one mode. Throws, and stops the process, when that mode cannot start.
+ * `crm` overrides CRM_VISIBLE. `null` removes it, which crmMode() reads as all.
+ */
+async function startModeServer(mode: Mode, opts: { bin?: string; args?: string[]; timeoutMs?: number; crm?: string | null } = {}): Promise<Running> {
   const port = await freePort();
-  const outbox = mkdtempSync(path.join(tmpdir(), `sho-crm-${mode}-`));
+  const label = opts.crm === null ? "unset" : opts.crm ?? mode;
+  const outbox = mkdtempSync(path.join(tmpdir(), `sho-crm-${label}-`));
   const env: NodeJS.ProcessEnv = {
     ...process.env,
     NODE_ENV: "production",
-    CRM_VISIBLE: mode,
     EMAIL_OUTBOX_DIR: outbox,
     APP_URL: `http://127.0.0.1:${port}`,
     PORT: String(port),
     SUPER_ADMIN_EMAILS: "root.test@aplyd.com",
     JOB_SECRET: process.env.JOB_SECRET || "replace-with-a-token-of-at-least-16-chars",
   };
+  if (opts.crm === null) delete env.CRM_VISIBLE;
+  else env.CRM_VISIBLE = opts.crm ?? mode;
   const bin = opts.bin ?? "npx";
   const args = opts.args ?? ["next", "start", "-H", "127.0.0.1", "-p", String(port)];
   const logFd = openSync(path.join(outbox, "server.log"), "a");
@@ -295,15 +302,23 @@ describe("CRM_VISIBLE modes are tested against a real server per mode", () => {
     if (!existsSync(path.join(root, ".next", "BUILD_ID"))) {
       throw new Error("CRM_VISIBLE mode cannot start: the production build is missing (.next/BUILD_ID)");
     }
-    await Promise.all(MODES.map(async (mode) => {
-      const server = await startModeServer(mode);
-      running.set(server.mode, server);
-    }));
+    const [on, admins, off, all, unset] = await Promise.all([
+      startModeServer("on"),
+      startModeServer("admins"),
+      startModeServer("off"),
+      startModeServer("on", { crm: "all" }),
+      startModeServer("on", { crm: null }),
+    ]);
+    running.set("on", on);
+    running.set("admins", admins);
+    running.set("off", off);
+    extra.set("all", all);
+    extra.set("unset", unset);
   }, 180_000);
 
   afterAll(async () => {
     try { await cleanupSeed(); } finally {
-      for (const server of running.values()) killGroup(server.pid);
+      for (const server of [...running.values(), ...extra.values()]) killGroup(server.pid);
       await db.$disconnect();
     }
   });
@@ -397,10 +412,11 @@ describe("CRM_VISIBLE modes are tested against a real server per mode", () => {
     }
 
     // APL-2698 AC3. The open server is CRM_VISIBLE=on; crmMode() treats that as all.
+    // APL-2716 AC3 supersedes the earlier "no" for a non-member under all: the bell matches main and names the deal.
     const bellOnly: { mode: Mode; who: { cookie: string }; user: string; visible: boolean; modeLabel: string; tc: string }[] = [
       { mode: "on", who: admin, user: "admin", visible: true, modeLabel: "all", tc: "qa:TC-APL2698-513157e4@v1" },
       { mode: "off", who: member, user: "member", visible: false, modeLabel: "off", tc: "qa:TC-APL2698-2c0a1372@v1" },
-      { mode: "on", who: outsider, user: "member with no access to the deal", visible: false, modeLabel: "all", tc: "qa:TC-APL2698-be2ba3d5@v1" },
+      { mode: "on", who: outsider, user: "member with no access to the deal", visible: true, modeLabel: "all", tc: "qa:TC-APL2716-a8042ed1@v1" },
     ];
     for (const row of bellOnly) {
       const server = running.get(row.mode)!;
@@ -410,8 +426,9 @@ describe("CRM_VISIBLE modes are tested against a real server per mode", () => {
       assertBellDealName(bell.text, dealName, row.visible, label);
     }
 
-    // APL-2716. Admin and the on-deal member across all, admins and off.
-    // A reader who cannot see the deal gets the generic sentence. A non-deal notice stays as stored.
+    // APL-2716. Under admins a non-admin gets the generic sentence. Under all (this server is
+    // CRM_VISIBLE=on, which crmMode reads as all) a non-member keeps main's sentence and href.
+    // Off still redacts everyone, because the CRM is hidden. A non-deal notice stays as stored.
     const dealHref = `/projects/${dealId}`;
     const taskHref = `/tasks/${kickoffTaskId}`;
     const plainHref = `/tasks/${plainTaskId}`;
@@ -422,7 +439,7 @@ describe("CRM_VISIBLE modes are tested against a real server per mode", () => {
       { mode: "on", who: member, user: "on-deal member", sees: true, tc: "qa:TC-APL2716-a8042ed1@v1" },
       { mode: "admins", who: member, user: "member", sees: false, tc: "qa:TC-APL2716-3abdb652@v1" },
       { mode: "off", who: member, user: "on-deal member", sees: false, tc: "qa:TC-APL2716-d2ec503b@v1" },
-      { mode: "on", who: outsider, user: "member with no access", sees: false, tc: "qa:TC-APL2698-be2ba3d5@v1" },
+      { mode: "on", who: outsider, user: "member with no access", sees: true, tc: "qa:TC-APL2716-a8042ed1@v1" },
       { mode: "admins", who: outsider, user: "member with no access", sees: false, tc: "qa:TC-APL2716-85782555@v1" },
       { mode: "off", who: outsider, user: "member with no access", sees: false, tc: "qa:TC-APL2716-fcc1861b@v1" },
     ];
@@ -455,6 +472,54 @@ describe("CRM_VISIBLE modes are tested against a real server per mode", () => {
         expect(bell.text, `${label} task href`).not.toContain(taskHref);
         expect(bell.text, `qa:TC-APL2716-85782555@v1 ${label}`).not.toContain("needs a next step");
         expect(bell.text, `qa:TC-APL2716-fcc1861b@v1 ${label}`).not.toContain("no activity");
+      }
+    }
+
+    // qa:TC-APL2698-be2ba3d5@v1 expected the name to be absent for a non-member under all.
+    // APL-2716 AC3 (qa:TC-APL2716-a8042ed1@v1) requires that all and unset match main, so the name stays.
+    // One real server per mode: admins, CRM_VISIBLE=all, and CRM_VISIBLE unset.
+    const modeServers = [
+      { label: "admins" as const, server: running.get("admins")!, redactNonAdmin: true },
+      { label: "all" as const, server: extra.get("all")!, redactNonAdmin: false },
+      { label: "unset" as const, server: extra.get("unset")!, redactNonAdmin: false },
+    ];
+    expect(environ(listeningPids(extra.get("all")!.port)[0]).CRM_VISIBLE).toBe("all");
+    expect(environ(listeningPids(extra.get("unset")!.port)[0]).CRM_VISIBLE).toBeUndefined();
+    const readers = [
+      { who: admin, user: "admin", nonAdmin: false },
+      { who: member, user: "on-deal member", nonAdmin: true },
+      { who: outsider, user: "non-member", nonAdmin: true },
+    ];
+    for (const row of modeServers) {
+      for (const reader of readers) {
+        const redacted = row.redactNonAdmin && reader.nonAdmin;
+        const bell = await call(row.server.base, reader.who.cookie, "GET", "/api/notifications");
+        const label = `qa:TC-APL2716-a8042ed1@v1 mode=${row.label} user=${reader.user} redacted=${redacted ? "yes" : "no"}`;
+        expect(bell.status, label).toBe(200);
+        const page = bellItems(bell.text);
+        expect(page.items, label).toHaveLength(5);
+        expect(page.unread, `${label} unread count`).toBe(5);
+        expect(page.items, `qa:TC-APL2716-4811612d@v1 ${label}`).toContainEqual({ text: plainText, href: plainHref });
+        if (!redacted) {
+          expect(page.items, `qa:TC-APL2716-3abdb652@v1 ${label}`).toContainEqual({ text: stageText, href: dealHref });
+          expect(page.items, `qa:TC-APL2716-85782555@v1 ${label}`).toContainEqual({ text: nextStepText, href: dealHref });
+          expect(page.items, `qa:TC-APL2716-fcc1861b@v1 ${label}`).toContainEqual({ text: stalledText, href: dealHref });
+          expect(page.items, `${label} task title`).toContainEqual({ text: taskText, href: taskHref });
+        } else {
+          const hidden = page.items.filter((item) => item.text !== plainText);
+          expect(hidden, label).toHaveLength(4);
+          for (const item of hidden) {
+            expect(item.text, `qa:TC-APL2716-3abdb652@v1 ${label}`).toBe(hiddenText);
+            expect(item.href, `${label} href`).toBeNull();
+          }
+          expect(bell.text, `qa:TC-APL2716-d2ec503b@v1 ${label} deal name`).not.toContain(dealName);
+          expect(bell.text, `${label} task title`).not.toContain(taskTitle);
+          expect(bell.text, `${label} stage`).not.toContain("Proposal");
+          expect(bell.text, `${label} deal href`).not.toContain(dealHref);
+          expect(bell.text, `${label} task href`).not.toContain(taskHref);
+          expect(bell.text, `qa:TC-APL2716-85782555@v1 ${label}`).not.toContain("needs a next step");
+          expect(bell.text, `qa:TC-APL2716-fcc1861b@v1 ${label}`).not.toContain("no activity");
+        }
       }
     }
   }, 120_000);
