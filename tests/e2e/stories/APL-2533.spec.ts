@@ -196,7 +196,8 @@ test("AC3: Known by lists one or more active members, defaults to the creator, k
   const dlg = admin.page.getByRole("dialog", { name: "New contact" });
   await expect(dlg.getByRole("checkbox", { name: admin.user.name, exact: true })).toBeChecked();
   const name = zz("default known");
-  await dlg.getByLabel("Name").fill(name);
+  // A Known-by surname can contain "name", so the label match is not only the Name field.
+  await dlg.getByRole("textbox", { name: "Name", exact: true }).fill(name);
   await dlg.getByRole("checkbox", { name: admin.user.name, exact: true }).uncheck();
   await expect(dlg.getByRole("button", { name: "Save" })).toBeDisabled();
   await dlg.getByRole("checkbox", { name: admin.user.name, exact: true }).check();
@@ -300,7 +301,8 @@ test("AC5: any signed-in Member sees all contacts, changes are logged with no pr
   later(() => admin.api.del(`/api/contacts/${id}`));
   expect((await contactsOf(admin, org.id)).some((c) => c.id === id)).toBe(true);
   await admin.page.goto(`/accounts/${org.id}`);
-  await expect(admin.page.getByText(name)).toBeVisible();
+  // The note form also lists the contact in a label. The contacts list is the bold name.
+  await expect(admin.page.locator("b", { hasText: name })).toBeVisible();
 
   const denied = await member.api.get(`/api/orgs/${org.id}/history`);
   expect(denied.status).toBe(404);
