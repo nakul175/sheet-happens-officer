@@ -15,7 +15,7 @@ export type Gate = { pr: number; deployed: boolean; how: string };
 
 /** Head commits of the open PRs these specs cover (GitHub, 18 Oct 2026). A later push to a PR falls through to the probe. */
 const HEADS: Record<number, string> = {
-  6: "6e63623207eb590234141fe02381a72d697a0641",
+  6: "07454a62a82d2aa91e4e6f68cdb2e44abdeddb5d",
   9: "87721120b9",
   10: "c47be5f552",
   12: "72d2a3d88b",
