@@ -5,6 +5,7 @@ import { installGracefulShutdown } from "../src/lib/shutdown";
 
 const delayMs = Number(process.env.DELAY_MS ?? "0");
 const drainMs = Number(process.env.DRAIN_MS ?? "5000");
+const keepAliveMs = Number(process.env.KEEPALIVE_MS ?? "5000");
 
 const server = http.createServer(async (req, res) => {
   if (req.url === "/slow") {
@@ -13,8 +14,9 @@ const server = http.createServer(async (req, res) => {
   }
   res.end("done");
 });
-// Node's default. The keep-alive test checks that idle sockets do not wait this out.
-server.keepAliveTimeout = 5000;
+// The drain waits this long after the last request so accepted-but-unparsed sockets
+// can still be handled. Tests pass a short value; production uses Node's 5s default.
+server.keepAliveTimeout = Number.isFinite(keepAliveMs) && keepAliveMs > 0 ? keepAliveMs : 5000;
 
 server.listen(0, "127.0.0.1", () => {
   installGracefulShutdown({

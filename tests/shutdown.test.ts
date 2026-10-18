@@ -2,6 +2,7 @@
 // against a real HTTP server, so the signal, the exit code, and an in-flight
 // response are the ones systemd would see.
 import http from "node:http";
+import net from "node:net";
 import path from "node:path";
 import { spawn, type ChildProcess } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -65,6 +66,45 @@ function stop(child: ChildProcess) {
   if (child.exitCode == null && child.signalCode == null) child.kill("SIGKILL");
 }
 
+function openSocket(port: number): Promise<net.Socket> {
+  return new Promise((resolve, reject) => {
+    const socket = net.connect({ port, host: "127.0.0.1" });
+    const fail = (err: Error) => {
+      socket.off("connect", onConnect);
+      reject(err);
+    };
+    const onConnect = () => {
+      socket.off("error", fail);
+      resolve(socket);
+    };
+    socket.once("error", fail);
+    socket.once("connect", onConnect);
+  });
+}
+
+function expectResponse(socket: net.Socket): Promise<{ status: number; body: string }> {
+  return new Promise((resolve, reject) => {
+    let buf = "";
+    const timer = setTimeout(() => reject(new Error(`no response: ${buf.slice(0, 160)}`)), 8000);
+    socket.on("data", (chunk: Buffer) => {
+      buf += chunk.toString();
+    });
+    socket.on("error", (err: Error) => {
+      clearTimeout(timer);
+      reject(err);
+    });
+    socket.on("end", () => {
+      clearTimeout(timer);
+      const head = buf.split("\r\n\r\n")[0] ?? "";
+      resolve({ status: Number(head.split(" ")[1]), body: buf });
+    });
+  });
+}
+
+function writeRequest(socket: net.Socket, port: number) {
+  socket.write(`GET /slow HTTP/1.1\r\nHost: 127.0.0.1:${port}\r\nConnection: close\r\n\r\n`);
+}
+
 describe("shutdownDrainMs", () => {
   it("uses 15s when the env var is missing or outside 10–25s", () => {
     expect(shutdownDrainMs({})).toBe(DEFAULT_DRAIN_MS);
@@ -84,7 +124,7 @@ describe("shutdownDrainMs", () => {
 
 describe("SIGTERM drain", () => {
   it("finishes an in-flight request, refuses a new one, disconnects, and exits 0", async () => {
-    const proc = startChild({ DELAY_MS: "1500", DRAIN_MS: "5000" });
+    const proc = startChild({ DELAY_MS: "1500", DRAIN_MS: "5000", KEEPALIVE_MS: "300" });
     try {
       const ready = await proc.waitFor(/ready (\d+)/);
       const port = Number(ready[1]);
@@ -134,8 +174,8 @@ describe("SIGTERM drain", () => {
     }
   });
 
-  it("does not hold the process open for an idle keep-alive socket", async () => {
-    const proc = startChild({ DELAY_MS: "0", DRAIN_MS: "8000" });
+  it("waits out the keep-alive grace, then closes an idle socket", async () => {
+    const proc = startChild({ DELAY_MS: "0", DRAIN_MS: "8000", KEEPALIVE_MS: "400" });
     try {
       const ready = await proc.waitFor(/ready (\d+)/);
       const port = Number(ready[1]);
@@ -152,12 +192,64 @@ describe("SIGTERM drain", () => {
         proc.child.kill("SIGTERM");
         const result = await proc.exited;
         expect(result.code).toBe(0);
-        // keepAliveTimeout on the fixture is 5s. Idle sockets must not consume it.
-        expect(Date.now() - started).toBeLessThan(3000);
+        const elapsed = Date.now() - started;
+        // Grace is the keep-alive timeout (400ms). Idle sockets are closed after that,
+        // so the process does not sit for a second full timeout.
+        expect(elapsed).toBeGreaterThanOrEqual(350);
+        expect(elapsed).toBeLessThan(2000);
         expect(result.stdout).toContain(CLEAN_LOG);
       } finally {
         agent.destroy();
       }
+    } finally {
+      stop(proc.child);
+    }
+  });
+
+  it("returns 200 for 40 connections accepted before SIGTERM whose requests arrive during the grace", async () => {
+    const proc = startChild({ DELAY_MS: "200", DRAIN_MS: "10000", KEEPALIVE_MS: "1000" });
+    try {
+      const ready = await proc.waitFor(/ready (\d+)/);
+      const port = Number(ready[1]);
+      const sockets = await Promise.all(Array.from({ length: 40 }, () => openSocket(port)));
+      const responses = Promise.all(sockets.map((socket) => expectResponse(socket)));
+      // Let the server accept every socket. SIGTERM then used to closeIdleConnections()
+      // and reset any of them whose HTTP request was not parsed yet.
+      await new Promise((resolve) => setTimeout(resolve, 40));
+      proc.child.kill("SIGTERM");
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      for (const socket of sockets) writeRequest(socket, port);
+      const settled = await responses;
+      expect(settled).toHaveLength(40);
+      for (const response of settled) {
+        expect(response.status).toBe(200);
+        expect(response.body).toContain("done");
+      }
+      const result = await proc.exited;
+      expect(result.code).toBe(0);
+      const outcome = result.stdout.split("\n").filter((line) => line.startsWith("graceful shutdown:"));
+      expect(outcome).toEqual([CLEAN_LOG]);
+      expect(result.stdout.indexOf("prisma disconnected")).toBeLessThan(result.stdout.indexOf(CLEAN_LOG));
+    } finally {
+      stop(proc.child);
+    }
+  });
+
+  it("exits non-zero when an in-flight request is dropped", async () => {
+    const proc = startChild({ DELAY_MS: "2000", DRAIN_MS: "8000", KEEPALIVE_MS: "300" });
+    try {
+      const ready = await proc.waitFor(/ready (\d+)/);
+      const port = Number(ready[1]);
+      const socket = await openSocket(port);
+      socket.write(`GET /slow HTTP/1.1\r\nHost: 127.0.0.1:${port}\r\nConnection: close\r\n\r\n`);
+      await proc.waitFor(/hit/);
+      proc.child.kill("SIGTERM");
+      await new Promise((resolve) => setTimeout(resolve, 40));
+      socket.destroy();
+      const result = await proc.exited;
+      expect(result.code).toBe(1);
+      const outcome = result.stdout.split("\n").filter((line) => line.startsWith("graceful shutdown:"));
+      expect(outcome).toEqual([TIMEOUT_LOG]);
     } finally {
       stop(proc.child);
     }
