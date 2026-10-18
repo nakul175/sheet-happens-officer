@@ -1,6 +1,5 @@
 "use client";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
 import { useState } from "react";
 import { api, useGet } from "@/components/api";
 import { Field, Modal, Skeleton } from "@/components/ui";
@@ -37,10 +36,9 @@ function NewOrg({ onClose, onDone }: { onClose: () => void; onDone: (id: string)
   );
 }
 
-export default function AccountsView() {
-  const params = useSearchParams();
-  const [q, setQ] = useState(() => params.get("q") ?? "");
-  const [kind, setKind] = useState(() => params.get("kind") ?? "");
+export default function AccountsView({ initialQuery = "", initialKind = "" }: { initialQuery?: string; initialKind?: string }) {
+  const [q, setQ] = useState(initialQuery);
+  const [kind, setKind] = useState(initialKind);
   const [adding, setAdding] = useState(false);
   const qs = [q ? `q=${encodeURIComponent(q)}` : "", kind ? `kind=${encodeURIComponent(kind)}` : ""].filter(Boolean).join("&");
   const { data, loading, error, reload } = useGet<{ organisations: O[] }>(`/api/orgs${qs ? `?${qs}` : ""}`);

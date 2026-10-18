@@ -3,12 +3,13 @@
 // own region, and that region has to be reached with Tab. Desktop stays one row.
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { chromium, type Browser, type Page } from "playwright-core";
-import { BASE, istDate, PW, SUPER_EMAIL, superAdmin } from "../helpers";
+import { BASE, istDate, PW, SUPER_EMAIL, superAdmin, type Account } from "../helpers";
 
 const PHONE = { width: 390, height: 844 };
 const DESK = { width: 1280, height: 800 };
 
 let browser: Browser;
+let root: Account | undefined;
 let orgId = "";
 let dealId = "";
 let orgName = "";
@@ -17,23 +18,40 @@ let dealName = "";
 beforeAll(async () => {
   if (!/^(localhost|127\.0\.0\.1)$/.test(new URL(BASE).hostname)) throw new Error(`Refusing to run against ${BASE}: use a local server with a test database.`);
   browser = await chromium.launch({ executablePath: process.env.PW_CHROMIUM || undefined });
-  const root = await superAdmin();
+  root = await superAdmin();
   const stamp = Date.now();
-  orgName = `ZZ APL2692 ${stamp} narrow org mve8ij02tlmf`;
-  dealName = `ZZ APL2692 ${stamp} narrow deal mve8ij02tlmf`;
-  const org = await root.c.post("/api/orgs", { name: orgName, kind: "Ministry" });
+  orgName = `ZZ-TEST ${stamp} narrow org mve8ij02tlmf`;
+  dealName = `ZZ-TEST ${stamp} narrow deal mve8ij02tlmf`;
+  const org = await root.c.post("/api/orgs", { name: orgName, kind: "ZZ-TEST" });
   expect(org.status, JSON.stringify(org.json)).toBe(201);
   orgId = org.json.organisation.id as string;
   const pipes = (await root.c.get("/api/deals/pipelines")).json.pipelines as { id: string; key: string }[];
   const deal = await root.c.post("/api/deals", {
     name: dealName, organisationId: orgId, pipelineId: pipes.find((x) => x.key === "DEAL_PROACTIVE")!.id, leaderId: root.id,
-    whyPursue: "Test deal", nextStep: { title: "Call the buyer", dueDate: istDate(3) },
+    whyPursue: "ZZ-TEST pursue this organisation", nextStep: { title: "ZZ-TEST call the buyer", dueDate: istDate(3) },
   });
   expect(deal.status, JSON.stringify(deal.json)).toBe(201);
   dealId = deal.json.deal.id as string;
 }, 60000);
 
-afterAll(async () => { await browser?.close(); });
+afterAll(async () => {
+  try {
+    // Archive only the organisation and deal this file created. Nothing else is touched.
+    if (root && dealId) {
+      const deal = await root.c.post(`/api/projects/${dealId}/archive`);
+      expect([200, 409]).toContain(deal.status);
+    }
+    if (root && orgId) {
+      const org = await root.c.post(`/api/orgs/${orgId}/archive`, { archive: true });
+      expect([200, 409]).toContain(org.status);
+      const left = await root.c.get(`/api/orgs?q=${encodeURIComponent(orgName)}`);
+      const names = (left.json?.organisations ?? []) as { id: string; name: string }[];
+      expect(names.filter((o) => o.id === orgId)).toEqual([]);
+    }
+  } finally {
+    await browser?.close();
+  }
+});
 
 async function openAt(viewport: { width: number; height: number }, path: string, ready: string) {
   const ctx = await browser.newContext({ viewport, deviceScaleFactor: 1, baseURL: BASE });
@@ -161,7 +179,7 @@ describe("@APL-2692 accounts sideways scroll", () => {
     } finally { await page.context().close(); }
   });
 
-  it("@APL-2692 @AC3 @TC3 at 1280x800 both account pages keep one fitting table row", async () => {
+  it("@APL-2692 @AC3 @TC3 at 1280x800 the columns sit where they did before this change", async () => {
     const cases = [
       { path: `/accounts?q=${encodeURIComponent(orgName)}`, ready: `a[href="/accounts/${orgId}"]`, headers: ["Name", "Kind", "Country", "Under", "Open deals"] },
       { path: `/accounts/${orgId}`, ready: `a[href="/projects/${dealId}"]`, headers: ["Deal", "Role", "Stage", "Leader"] },
@@ -173,29 +191,43 @@ describe("@APL-2692 accounts sideways scroll", () => {
           const de = document.documentElement;
           const wrap = document.querySelector<HTMLElement>(".acct-scroll");
           const table = wrap?.querySelector<HTMLElement>("table.tbl") ?? null;
-          const headers = [...document.querySelectorAll(".acct-scroll table.tbl th")].map((th) => {
+          const headers = () => [...(table?.querySelectorAll("th") ?? [])].map((th) => {
             const r = th.getBoundingClientRect();
-            return { text: (th.textContent || "").trim(), y: r.y };
+            return { text: (th.textContent || "").trim(), x: Math.round(r.x), w: Math.round(r.width) };
           });
-          const overflowing = [...document.querySelectorAll<HTMLElement>("body *")].filter((el) => {
+          const overflowing = () => [...document.querySelectorAll<HTMLElement>("body *")].filter((el) => {
             const ox = getComputedStyle(el).overflowX;
             return (ox === "auto" || ox === "scroll") && el.scrollWidth - el.clientWidth > 1;
           }).map((el) => (typeof el.className === "string" ? el.className : el.tagName));
-          return {
+          const shot = () => ({
             scrollWidth: de.scrollWidth, innerWidth: window.innerWidth,
             display: table ? getComputedStyle(table).display : "",
-            tableWidth: table ? table.getBoundingClientRect().width : -1,
-            wrapClient: wrap ? wrap.clientWidth : -1,
-            headers, overflowing,
-          };
+            headers: headers(), overflowing: overflowing(),
+          });
+          const now = shot();
+          // The previous wrapper was only overflow-x:auto. Drop the new class so the columns can be compared in place.
+          if (wrap) {
+            wrap.classList.remove("acct-scroll");
+            wrap.style.overflowX = "auto";
+            wrap.style.maxWidth = "";
+            wrap.style.minWidth = "";
+          }
+          const then = shot();
+          return { now, then };
         });
-        pageFits(layout);
-        expect(layout.overflowing, c.path).toEqual([]);
-        expect(layout.display, c.path).toBe("table");
-        expect(Math.abs(layout.tableWidth - layout.wrapClient), c.path).toBeLessThanOrEqual(1);
-        expect(layout.headers.map((h) => h.text), c.path).toEqual(c.headers);
-        const y = layout.headers[0]?.y ?? 0;
-        for (const h of layout.headers) expect(Math.abs(h.y - y), c.path).toBeLessThanOrEqual(1);
+        pageFits(layout.now);
+        pageFits(layout.then);
+        expect(layout.now.overflowing, c.path).toEqual([]);
+        expect(layout.then.overflowing, c.path).toEqual([]);
+        expect(layout.now.display, c.path).toBe("table");
+        expect(layout.then.display, c.path).toBe("table");
+        expect(layout.now.headers.map((h) => h.text), c.path).toEqual(c.headers);
+        expect(layout.now.headers.map((h) => h.text), c.path).toEqual(layout.then.headers.map((h) => h.text));
+        expect(layout.now.headers.length, c.path).toBeGreaterThan(0);
+        for (let i = 0; i < layout.now.headers.length; i++) {
+          expect(Math.abs(layout.now.headers[i].x - layout.then.headers[i].x), c.path).toBeLessThanOrEqual(1);
+          expect(Math.abs(layout.now.headers[i].w - layout.then.headers[i].w), c.path).toBeLessThanOrEqual(1);
+        }
       } finally { await page.context().close(); }
     }
   });
