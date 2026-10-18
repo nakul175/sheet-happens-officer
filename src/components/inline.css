@@ -11,13 +11,8 @@
 .ic-pop > button[aria-pressed="true"] { font-weight: 600; box-shadow: inset 3px 0 0 var(--gold); }
 .ic-date { display: flex; flex-direction: column; gap: 4px; padding: 6px 10px; font-size: 12px; font-weight: 600; color: var(--muted); }
 @media (max-width: 1023px), (pointer: coarse) {
-  /* APL-2673: side margins stay 0 so neighbouring 44 px cells keep the 10 px flex gap. */
-  .ic-cell { min-height: 44px; min-width: 44px; padding: 0 8px; margin: 0; }
+  .ic-cell { min-height: 44px; min-width: 44px; padding: 0 8px; margin: 0 -8px; }
   .ic-pop > button { min-height: 44px; }
-}
-@media (max-width: 1023px) {
-  /* APL-2673: 7 px plus the 12 px row gap clears the Complete tick's 11 px hit area by 8 px. */
-  .ic-wrap { margin-top: 7px; }
 }
 @media (max-width: 599px) {
   /* a bottom sheet above the tab bar, so it never runs off the screen edge */

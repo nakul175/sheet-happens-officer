@@ -1,6 +1,6 @@
 // APL-2673: SHO-US-22.2 AC2. At 390 px, inline-edit cells and the Complete tick have at least 8 px between hit areas.
 // Hit area is the border box plus a negative ::after inset, and the gap is the larger of the two axes.
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -22,7 +22,7 @@ function chromePath() {
 const href = (rel: string) => pathToFileURL(join(process.cwd(), rel)).href;
 
 function row(title: string, cells: string[]) {
-  const buttons = cells.map((text) => `<span class="ic-wrap"><button type="button" class="ic-cell" aria-label="${text}">${text}</button></span>`).join("");
+  const buttons = cells.map((text) => `<span class="ic-wrap ic-gap"><button type="button" class="ic-cell ic-hit" aria-label="${text}">${text}</button></span>`).join("");
   return `<div class="item click sel-row">
     <label class="sel"><input type="checkbox" aria-label="Select ${title}" /></label>
     <button class="tick" aria-label="Complete ${title}"></button>
@@ -125,6 +125,11 @@ async function openAt(width: number) {
 }
 
 describe("APL-2673 inline-edit hit areas", () => {
+  it("marks each editable cell with the phone gap classes", () => {
+    const src = readFileSync("src/components/inline.tsx", "utf8");
+    expect(src).toContain('className="ic-wrap ic-gap"');
+    expect(src).toContain("ic-cell ic-hit");
+  });
   for (const width of WIDTHS) {
     it(`keeps at least 8 px between adjacent targets at ${width} px`, async () => {
       const page: Page = await openAt(width);
