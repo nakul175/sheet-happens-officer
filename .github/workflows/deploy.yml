@@ -89,12 +89,10 @@ jobs:
             echo "::warning::DROPLET_HOST_KEY is not set; trusting the host key seen now"
             ssh-keyscan -H "$HOST" > ~/.ssh/known_hosts 2>/dev/null
           fi
-      # APL-2625: scripts/purge-zz-test.ts is a one-off staging purge and is never deployed.
       - name: Upload the release
         run: >-
           rsync -az --delete
           --exclude .git --exclude node_modules --exclude .next --exclude '.env*' --exclude '.outbox*'
-          --exclude scripts/purge-zz-test.ts
           ./ "deploy@$HOST:/opt/sho/releases/$GITHUB_SHA/"
       - name: Write settings and secrets on the server
         env:

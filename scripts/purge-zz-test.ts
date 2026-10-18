@@ -1,7 +1,7 @@
 // APL-2625 option 1. One-off purge of leftover ZZ-TEST people on staging.
 //
-// This script is never deployed: deploy.yml excludes it from the release rsync, and it
-// refuses to run from /opt/sho. It is dry-run unless --apply is passed.
+// This script is not part of a release and is not on a schedule. It refuses to run
+// from /opt/sho. It is dry-run unless --apply is passed.
 //
 // It runs only when SHO_ALLOW_TEST_PURGE=1 and --workspace is exactly STAGING_WORKSPACE_ID.
 // It refuses production before opening a connection (PROD_DB_HOST, PROD_DB_NAME, or
