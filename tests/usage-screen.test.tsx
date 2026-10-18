@@ -1,6 +1,6 @@
-// SHO-US-9.2 AC6: the Usage screen shows spend to date against the monthly ceiling
-// from the figures /api/usage already returns. Any other role is refused, and no chat text is shown.
-// ceiling.percent is the display string (the % sign is already in it). The screen does not work it out again.
+// SHO-US-9.2 AC6: the Usage screen shows spend to date against the monthly ceiling.
+// The percentage is percentUsedLabel(spend, ceiling). It is not ceiling.percent, so the old
+// one-decimal figure (12.5 for 10 of 80, 1 for 1 of 101) does not appear on the screen.
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { UsageContents, meterWidth, usagePath, usageTitle, type UsagePayload, type UsageRole } from "@/app/(app)/usage/screen";
@@ -8,12 +8,15 @@ import { percentUsedLabel } from "@/lib/usage-percent";
 
 const CHAT = "PRIVATE-CHAT-TEXT";
 
+/** The one-decimal figure a stub of the old /api/usage still sends. */
+const oldDecimal = (spend: number, ceiling: number) => (ceiling > 0 ? Math.round((spend / ceiling) * 1000) / 10 : 0);
+
 function payload(ceiling?: Partial<UsagePayload["ceiling"]>): UsagePayload & { chatText: string } {
   return {
     monthStart: "2026-09-30T18:30:00.000Z",
     weekStart: "2026-10-11T18:30:00.000Z",
-    // 10 of 80 is 13%. A different string here proves the screen prints the API figure.
-    ceiling: { usd: 80, spendUsd: 10, percent: "15%", ...ceiling },
+    // 10 of 80. The stored percent is the old 12.5. The screen shows 13%.
+    ceiling: { usd: 80, spendUsd: 10, percent: oldDecimal(10, 80), ...ceiling },
     month: { calls: 3, inputTokens: 1200, outputTokens: 340, costUsd: 10, messages: 17 },
     quickActions: [{ id: "overdue", label: "Overdue tasks", count: 4 }],
     people: [{ id: "p1", name: "Asha", monthCalls: 3, weekCalls: 1, monthCostUsd: 10 }],
@@ -35,44 +38,54 @@ describe("Usage screen (SHO-US-9.2 AC6)", () => {
     expect(html).toContain("Monthly ceiling");
     expect(html).toContain("$80.00");
     expect(html).toContain("Percentage used");
-    // The API said 15%. 10 of 80 is 13%, and the old one-decimal formula was 12.5. The screen prints the API string.
-    expect(html).toContain("15%");
-    expect(html).not.toContain("13%");
+    expect(oldDecimal(10, 80)).toBe(12.5);
+    expect(html).toContain("<dt>Percentage used</dt><dd>13%</dd>");
     expect(html).not.toContain("12.5%");
-    expect(html).not.toContain("15%%");
-    expect(html).toContain('aria-valuetext="$10.00 of $80.00, 15% used"');
-    expect(html).toContain('style="width:15%"');
+    expect(html).toContain('aria-valuetext="$10.00 of $80.00, 13% used"');
+    expect(html).toContain('style="width:13%"');
     expect(html).not.toContain(CHAT);
     expect(html).not.toContain("Overdue tasks");
     expect(html).not.toContain("Messages this month");
+
+    // A stale percent of 15 does not override 10 of 80.
+    const stale = htmlFor("SUPER_ADMIN", payload({ percent: 15 }));
+    expect(stale).toContain("<dt>Percentage used</dt><dd>13%</dd>");
+    expect(stale).not.toContain("15%");
   });
 
-  it("prints the display string for 0, under 1%, the 12.5 half-up case, 100% and over 100%", () => {
-    const cases = [
-      { spendUsd: 0, usd: 80, percent: percentUsedLabel(0, 80), width: "0%" },
-      { spendUsd: 0.01, usd: 80, percent: percentUsedLabel(0.01, 80), width: null },
-      { spendUsd: 10, usd: 80, percent: percentUsedLabel(10, 80), width: "13%" },
-      { spendUsd: 100, usd: 100, percent: percentUsedLabel(100, 100), width: "100%" },
-      { spendUsd: 120, usd: 100, percent: percentUsedLabel(120, 100), width: "100%" },
-    ] as const;
-    expect(cases.map((c) => c.percent)).toEqual(["0%", "<1%", "13%", "100%", "120%"]);
-
-    for (const c of cases) {
-      const html = htmlFor("SUPER_ADMIN", payload({ usd: c.usd, spendUsd: c.spendUsd, percent: c.percent }));
-      const shown = c.percent === "<1%" ? "&lt;1%" : c.percent;
-      expect(html).toContain(`<dt>Percentage used</dt><dd>${shown}</dd>`);
+  it("prints 0%, <1%, 13%, 12%, 112% and 120% even when percent is the old one-decimal figure", () => {
+    const rows: { spend: number; cap: number; label: string; width: string | null }[] = [
+      { spend: 0, cap: 80, label: "0%", width: "0%" },
+      { spend: 1, cap: 200, label: "<1%", width: null },
+      { spend: 1, cap: 1000, label: "<1%", width: null },
+      { spend: 1, cap: 101, label: "<1%", width: null },
+      { spend: 1, cap: 100, label: "1%", width: "1%" },
+      { spend: 10, cap: 80, label: "13%", width: "13%" },
+      { spend: 124, cap: 1000, label: "12%", width: "12%" },
+      { spend: 120, cap: 100, label: "120%", width: "100%" },
+      { spend: 112.4, cap: 100, label: "112%", width: "100%" },
+      { spend: 239, cap: 200, label: "120%", width: "100%" },
+    ];
+    for (const row of rows) {
+      expect(percentUsedLabel(row.spend, row.cap), `${row.spend} of ${row.cap}`).toBe(row.label);
+      const html = htmlFor("SUPER_ADMIN", payload({
+        usd: row.cap,
+        spendUsd: row.spend,
+        percent: oldDecimal(row.spend, row.cap),
+      }));
+      const shown = row.label === "<1%" ? "&lt;1%" : row.label;
+      expect(html, `${row.spend} of ${row.cap}`).toContain(`<dt>Percentage used</dt><dd>${shown}</dd>`);
       expect(html).not.toContain(`${shown}%`);
-      expect(html).toContain(`aria-valuetext="$${c.spendUsd.toFixed(2)} of $${c.usd.toFixed(2)}, ${shown} used"`);
-      if (c.width) expect(html).toContain(`style="width:${c.width}"`);
+      expect(html).toContain(`aria-valuetext="$${row.spend.toFixed(2)} of $${row.cap.toFixed(2)}, ${shown} used"`);
+      if (row.width) expect(html).toContain(`style="width:${row.width}"`);
+      if (row.label === "<1%") expect(html).not.toContain(">1%<");
       expect(html).not.toContain(CHAT);
     }
-
-    const under = meterWidth("<1%", 0.01, 80);
+    // 1 of 101 is 0.99%. The old one-decimal figure rounds that to 1, and the screen still says <1%.
+    expect(oldDecimal(1, 101)).toBe(1);
+    const under = meterWidth("<1%", 1, 101);
     expect(under).toBeGreaterThan(0);
     expect(under).toBeLessThan(1);
-    expect(meterWidth("120%", 120, 100)).toBe(100);
-    expect(meterWidth("0%", 0, 80)).toBe(0);
-    expect(meterWidth("100%", 100, 100)).toBe(100);
   });
 
   it("refuses every role other than Super Admin and shows no figures and no chat text", () => {
@@ -83,7 +96,7 @@ describe("Usage screen (SHO-US-9.2 AC6)", () => {
       expect(html).toContain("Only the Super Admin can see usage.");
       expect(html).not.toContain("$10.00");
       expect(html).not.toContain("$80.00");
-      expect(html).not.toContain("15%");
+      expect(html).not.toContain("13%");
       expect(html).not.toContain("Asha");
       expect(html).not.toContain(CHAT);
       expect(html).not.toContain("Overdue tasks");

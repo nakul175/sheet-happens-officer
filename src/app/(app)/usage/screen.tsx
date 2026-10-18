@@ -1,17 +1,19 @@
 "use client";
 import { Skeleton } from "@/components/ui";
+import { percentUsedLabel } from "@/lib/usage-percent";
 
 export type UsageRole = "MEMBER" | "ADMIN" | "SUPER_ADMIN";
 
 /**
- * What GET /api/usage returns. `ceiling.percent` is the display string ("13%", "0%", "<1%", "120%"),
- * not a bare integer. `messages` and `quickActions` stay on the type so a later
- * section can read them; this screen does not show them (APL-2641).
+ * What GET /api/usage returns. `ceiling.percent` is a whole number (0 when the label is "0%" or "<1%").
+ * The screen prints percentUsedLabel(spend, ceiling) and does not echo that number, so an old one-decimal
+ * percent still shows 13% for 10 of 80 and "<1%" for 1 of 101.
+ * `messages` and `quickActions` stay on the type so a later section can read them; this screen does not show them (APL-2641).
  */
 export type UsagePayload = {
   monthStart: string;
   weekStart: string;
-  ceiling: { usd: number; spendUsd: number; percent: string };
+  ceiling: { usd: number; spendUsd: number; percent: number };
   month: { calls: number; inputTokens: number; outputTokens: number; costUsd: number; messages?: number };
   quickActions?: { id: string; label: string; count: number }[];
   people: { id: string; name: string; monthCalls: number; weekCalls: number; monthCostUsd: number }[];
@@ -34,8 +36,7 @@ export function usagePath(role: UsageRole): "/api/usage" | null {
 export const formatUsd = (n: number) => `$${n.toFixed(2)}`;
 
 /**
- * Bar width from the display string `/api/usage` returns.
- * The bar stops at 100. The percentage text does not.
+ * Bar width from the display label. The bar stops at 100. The percentage text does not.
  * "<1%" paints the true share, which stays under 1.
  */
 export function meterWidth(percent: string, spendUsd = 0, ceilingUsd = 0) {
@@ -72,12 +73,12 @@ export function UsageContents({ role, loading, error, data }: {
   );
 }
 
-/** Spend to date, the monthly ceiling and the percentage used. `percent` is the display string `/api/usage` returns; this does not add another % sign. */
+/** Spend to date, the monthly ceiling and the percentage used. The label comes from spend and ceiling, not from `ceiling.percent`. */
 export function SpendCeiling({ ceiling }: { ceiling: UsagePayload["ceiling"] }) {
   const amount = formatUsd(ceiling.spendUsd);
   const cap = formatUsd(ceiling.usd);
-  const pct = ceiling.percent;
-  const width = meterWidth(ceiling.percent, ceiling.spendUsd, ceiling.usd);
+  const pct = percentUsedLabel(ceiling.spendUsd, ceiling.usd);
+  const width = meterWidth(pct, ceiling.spendUsd, ceiling.usd);
   return (
     <section className="card">
       <h2 className="usage-h" id="usage-ceiling">Spend against the monthly ceiling</h2>
