@@ -34,7 +34,9 @@ type Running = {
 };
 
 const running = new Map<Mode, Running>();
-const seed: { userIds: string[]; emails: string[]; projectId?: string; orgId?: string } = { userIds: [], emails: [] };
+const seed: { userIds: string[]; emails: string[]; projectId?: string; projectIds: string[]; orgId?: string; orgIds: string[] } = {
+  userIds: [], emails: [], projectIds: [], orgIds: [],
+};
 
 /** Removes this run's users, deal and organisation so the shared test database stays clear. */
 async function cleanupSeed() {
@@ -45,17 +47,19 @@ async function cleanupSeed() {
     })
     : [];
   const userIds = users.map((user) => user.id);
+  const projectIds = [...new Set([...(seed.projectId ? [seed.projectId] : []), ...seed.projectIds])];
+  const orgIds = [...new Set([...(seed.orgId ? [seed.orgId] : []), ...seed.orgIds])];
   if (userIds.length) {
     await db.modelUsage.deleteMany({ where: { userId: { in: userIds } } });
     await db.actionLog.deleteMany({
-      where: { OR: [{ actorId: { in: userIds } }, ...(seed.projectId ? [{ projectId: seed.projectId }] : [])] },
+      where: { OR: [{ actorId: { in: userIds } }, ...(projectIds.length ? [{ projectId: { in: projectIds } }] : [])] },
     });
     await db.auditLog.deleteMany({ where: { actorId: { in: userIds } } });
-  } else if (seed.projectId) {
-    await db.actionLog.deleteMany({ where: { projectId: seed.projectId } });
+  } else if (projectIds.length) {
+    await db.actionLog.deleteMany({ where: { projectId: { in: projectIds } } });
   }
-  if (seed.projectId) await db.project.deleteMany({ where: { id: seed.projectId } });
-  if (seed.orgId) await db.organisation.deleteMany({ where: { id: seed.orgId } });
+  if (projectIds.length) await db.project.deleteMany({ where: { id: { in: projectIds } } });
+  if (orgIds.length) await db.organisation.deleteMany({ where: { id: { in: orgIds } } });
   if (seed.emails.length) await db.loginAttempt.deleteMany({ where: { email: { in: seed.emails } } });
   if (userIds.length) await db.user.deleteMany({ where: { id: { in: userIds } } });
 }
@@ -359,4 +363,101 @@ describe("CRM_VISIBLE modes are tested against a real server per mode", () => {
     await expect(startModeServer("on", { bin: process.execPath, args: ["-e", "process.exit(1)"], timeoutMs: 3_000 })).rejects.toThrow(/cannot start/);
     await expect(startModeServer("off", { bin: process.execPath, args: ["-e", "setInterval(() => {}, 1e9)"], timeoutMs: 800 })).rejects.toThrow(/cannot start/);
   }, 30_000);
+
+  it("The person page redacts a hidden deal (APL-2728 AC1-AC3)", async () => {
+    const open = running.get("on");
+    expect(open, "the on server is running").toBeTruthy();
+    const dealName = "ZZ-TEST Acme renewal";
+    const taskTitle = "ZZ-TEST Acme kickoff";
+    const plainName = `ZZ-TEST Shared ${tag}`;
+    const memberEmail = `nakul17+zz-2728-${runId}-member@aplyd.com`;
+    const repEmail = `nakul17+zz-2728-${runId}-rep@aplyd.com`;
+    const adminEmail = `nakul17+zz-2728-${runId}-admin@aplyd.com`;
+    seed.emails.push(memberEmail, repEmail, adminEmail);
+    const member = await signIn(open!, `ZZ-TEST member ${runId}`, memberEmail);
+    const rep = await signIn(open!, `ZZ-TEST rep ${runId}`, repEmail);
+    const admin = await signIn(open!, `ZZ-TEST admin ${runId}`, adminEmail);
+    seed.userIds.push(member.id, rep.id, admin.id);
+    await db.user.update({ where: { id: admin.id }, data: { orgRole: "ADMIN" } });
+
+    const pipes = await call(open!.base, admin.cookie, "GET", "/api/deals/pipelines");
+    expect(pipes.status, pipes.text).toBe(200);
+    const pipe = (pipes.json?.pipelines as { id: string; key: string }[]).find((p) => p.key === "DEAL_PROACTIVE");
+    expect(pipe?.id).toBeTruthy();
+    const org = await call(open!.base, admin.cookie, "POST", "/api/orgs", { name: `ZZ-TEST Buyer ${tag}` });
+    expect(org.status, org.text).toBe(201);
+    const organisationId = (org.json?.organisation as { id: string }).id;
+    seed.orgIds.push(organisationId);
+    const made = await call(open!.base, admin.cookie, "POST", "/api/deals", {
+      name: dealName, organisationId, pipelineId: pipe!.id, leaderId: rep.id, whyPursue: tag,
+      nextStep: { title: taskTitle, dueDate: istDate(3) },
+    });
+    expect(made.status, made.text).toBe(201);
+    const dealId = (made.json?.deal as { id: string }).id;
+    seed.projectIds.push(dealId);
+    expect((await call(open!.base, admin.cookie, "POST", `/api/projects/${dealId}/members`, { userId: member.id, role: "EDITOR" })).status).toBe(201);
+    const plain = await call(open!.base, admin.cookie, "POST", "/api/projects", { name: plainName, leaderId: rep.id });
+    expect(plain.status, plain.text).toBe(201);
+    const plainId = (plain.json?.project as { id: string }).id;
+    seed.projectIds.push(plainId);
+    expect((await call(open!.base, rep.cookie, "POST", `/api/projects/${plainId}/members`, { userId: member.id, role: "EDITOR" })).status).toBe(201);
+    const stage = await db.project.findUnique({ where: { id: dealId }, select: { stage: { select: { name: true } } } });
+    const stageName = stage?.stage?.name ?? "";
+    expect(stageName).toBeTruthy();
+
+    const hiddenLabel = "A deal you can't view.";
+    const assertHidden = (text: string, json: Record<string, unknown> | null) => {
+      expect(text).not.toContain(dealName);
+      expect(text).not.toContain(dealId);
+      expect(text).not.toContain(`/projects/${dealId}`);
+      expect(text).not.toContain(taskTitle);
+      expect(text).not.toContain(stageName);
+      const projects = ((json?.person as { projects?: { id?: string; name?: string; href?: null }[] })?.projects) ?? [];
+      expect(projects).toContainEqual({ name: hiddenLabel, href: null });
+      expect(projects.some((p) => p.id === dealId)).toBe(false);
+      expect(projects.some((p) => p.id === plainId)).toBe(true);
+    };
+    const assertVisible = (text: string) => {
+      expect(text).toContain(dealName);
+      expect(text).toContain(dealId);
+      expect(text).not.toContain(hiddenLabel);
+    };
+
+    let allServer: Running | undefined;
+    try {
+      allServer = await startModeServer("all" as Mode);
+      const cases: { mode: string; server: Running; user: "member" | "admin"; hidden: boolean }[] = [
+        { mode: "on", server: open!, user: "member", hidden: false },
+        { mode: "on", server: open!, user: "admin", hidden: false },
+        { mode: "all", server: allServer, user: "member", hidden: false },
+        { mode: "all", server: allServer, user: "admin", hidden: false },
+        { mode: "admins", server: running.get("admins")!, user: "member", hidden: true },
+        { mode: "admins", server: running.get("admins")!, user: "admin", hidden: false },
+        { mode: "off", server: running.get("off")!, user: "member", hidden: true },
+        { mode: "off", server: running.get("off")!, user: "admin", hidden: true },
+      ];
+      const people = { member, admin };
+      for (const example of cases) {
+        const who = people[example.user];
+        const res = await call(example.server.base, who.cookie, "GET", `/api/team/${rep.id}`);
+        const label = `CRM_VISIBLE=${example.mode} user=${example.user}`;
+        expect(res.status, `${label} ${res.text}`).toBe(200);
+        if (example.hidden) assertHidden(res.text, res.json);
+        else assertVisible(res.text);
+      }
+
+      const admins = running.get("admins")!;
+      const started = Date.now();
+      const burst = await Promise.all(Array.from({ length: 48 }, () => call(admins.base, member.cookie, "GET", `/api/team/${rep.id}`)));
+      const ms = Date.now() - started;
+      expect(burst).toHaveLength(48);
+      for (const res of burst) {
+        expect(res.status).toBe(200);
+        assertHidden(res.text, res.json);
+      }
+      console.log(`APL-2728 load: 48 concurrent GET /api/team/:id on CRM_VISIBLE=admins in ${ms}ms`);
+    } finally {
+      if (allServer) killGroup(allServer.pid);
+    }
+  }, 120_000);
 });

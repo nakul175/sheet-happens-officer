@@ -6,7 +6,13 @@ import { api, useGet } from "@/components/api";
 import { LoadFailed, Skeleton } from "@/components/ui";
 import { Page, roleLabel, useMe } from "../../Shell";
 
-type Proj = { id: string; name: string; role?: string; openTasks?: number };
+type Proj = { id?: string; name: string; href?: string | null; role?: string; openTasks?: number };
+
+/** A hidden deal is generic text with no link. A visible project keeps /projects/<id>. */
+export function personProjectHref(project: { id?: string; href?: string | null }): string | null {
+  if (project.href === null || !project.id) return null;
+  return `/projects/${project.id}`;
+}
 type Person = {
   id: string; name: string; projects: Proj[];
   email?: string; orgRole?: "MEMBER" | "ADMIN" | "SUPER_ADMIN"; status?: "ACTIVE" | "UNVERIFIED" | "DEACTIVATED"; joinedAt?: string; openTasks?: number;
@@ -99,13 +105,16 @@ export default function PersonPage() {
               <table className="tbl stack">
                 <thead><tr><th>Project</th>{admin && <th>Their role</th>}{admin && <th>Open tasks</th>}</tr></thead>
                 <tbody>
-                  {p.projects.map((x) => (
-                    <tr key={x.id}>
-                      <td><Link href={`/projects/${x.id}`}>{x.name}</Link></td>
-                      {admin && <td>{ROLE[x.role ?? ""] ?? x.role}</td>}
-                      {admin && <td>{x.openTasks}</td>}
-                    </tr>
-                  ))}
+                  {p.projects.map((x, i) => {
+                    const href = personProjectHref(x);
+                    return (
+                      <tr key={x.id ?? `hidden-deal-${i}`}>
+                        <td>{href ? <Link href={href}>{x.name}</Link> : x.name}</td>
+                        {admin && <td>{ROLE[x.role ?? ""] ?? x.role}</td>}
+                        {admin && <td>{x.openTasks}</td>}
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>

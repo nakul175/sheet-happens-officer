@@ -1,6 +1,7 @@
 import { db } from "@/lib/db";
 import { ApiError, notFound } from "@/lib/http";
 import { activeMember, isActive, isAdmin, leaderId, type Actor } from "@/lib/access";
+import { WORKSTREAM_DEAL, crmProjectWhere, crmVisible } from "@/lib/crm";
 import { auditTx, notify } from "@/lib/notify";
 import { generatePassword, hashPassword, superAdminEmails } from "@/lib/auth";
 import { sendMail, signInDetailsMail } from "@/lib/email";
@@ -173,22 +174,46 @@ export async function resendSignIn(actor: Actor & { name?: string }, targetId: s
   return { emailSent };
 }
 
-/** SHO-US-15.4. Members see a name and shared projects. Admins see the rest. */
+/**
+ * APL-2716 redaction for a deal this viewer may not see.
+ * Generic text only: no deal name, no id, no href. The stored name is not read.
+ */
+export const HIDDEN_DEAL_LABEL = "A deal you can't view.";
+
+const hiddenDealRows = (count: number) => Array.from({ length: count }, () => ({ name: HIDDEN_DEAL_LABEL, href: null as null }));
+
+/** SHO-US-15.4. Members see a name and shared projects. Admins see the rest. A hidden deal is generic text (APL-2728). */
 export async function getPerson(actor: Actor, targetId: string) {
   const target = await db.user.findUnique({ where: { id: targetId } });
   const admin = isAdmin(actor);
   if (!target || (!admin && !isActive(target))) throw notFound("Person");
   const mine = admin ? null : new Set((await db.projectMember.findMany({ where: { userId: actor.id }, select: { projectId: true } })).map((m) => m.projectId));
+  // crmProjectWhere drops deals when the CRM is hidden, so those names are never selected.
   const rows = await db.projectMember.findMany({
-    where: { userId: targetId, project: { archivedAt: null } },
+    where: { userId: targetId, project: { archivedAt: null, ...crmProjectWhere(actor) } },
     include: { project: { select: { id: true, name: true } } },
     orderBy: { project: { name: "asc" } },
   });
   const shown = mine ? rows.filter((m) => mine.has(m.projectId)) : rows;
-  if (!admin) return { id: target.id, name: target.name, projects: shown.map((m) => ({ id: m.project.id, name: m.project.name })) };
+  const hiddenDeals = crmVisible(actor) ? 0 : await db.projectMember.count({
+    where: {
+      userId: targetId,
+      ...(mine ? { projectId: { in: [...mine] } } : {}),
+      project: { archivedAt: null, typeId: WORKSTREAM_DEAL },
+    },
+  });
+  const redacted = hiddenDealRows(hiddenDeals);
+  if (!admin) return { id: target.id, name: target.name, projects: [...shown.map((m) => ({ id: m.project.id, name: m.project.name })), ...redacted] };
   const open = await db.task.groupBy({
     by: ["projectId"],
-    where: { assigneeId: targetId, completedAt: null, deletedAt: null, parentId: null },
+    where: {
+      assigneeId: targetId,
+      completedAt: null,
+      deletedAt: null,
+      parentId: null,
+      // A hidden deal's tasks must not add to the open-task count.
+      ...(crmVisible(actor) ? {} : { project: crmProjectWhere(actor) }),
+    },
     _count: { _all: true },
   });
   const byProject = new Map(open.map((o) => [o.projectId, o._count._all]));
@@ -200,6 +225,6 @@ export async function getPerson(actor: Actor, targetId: string) {
     status: target.deactivatedAt ? "DEACTIVATED" : !target.emailVerifiedAt ? "UNVERIFIED" : "ACTIVE",
     joinedAt: target.createdAt.toISOString(),
     openTasks: open.reduce((n, o) => n + o._count._all, 0),
-    projects: shown.map((m) => ({ id: m.project.id, name: m.project.name, role: m.role, openTasks: byProject.get(m.projectId) ?? 0 })),
+    projects: [...shown.map((m) => ({ id: m.project.id, name: m.project.name, role: m.role, openTasks: byProject.get(m.projectId) ?? 0 })), ...redacted],
   };
 }

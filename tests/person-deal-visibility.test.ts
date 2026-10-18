@@ -1,0 +1,205 @@
+// APL-2728. The person page must follow the APL-2716 rule: a deal CRM_VISIBLE hides is generic
+// text only, with no deal name and no href. These call getPerson in this process and flip
+// CRM_VISIBLE; crmMode() reads it at call time. Setup uses the live server and a local database.
+// Names are ZZ-TEST. Addresses are nakul17+ aliases.
+import { afterAll, describe, expect, it } from "vitest";
+import { crmMode } from "@/lib/crm";
+import { getPerson } from "@/lib/team";
+import { account, istDate, project, superAdmin, task, type Account } from "./helpers";
+
+const HIDDEN_DEAL_LABEL = "A deal you can't view.";
+const DEAL_NAME = "ZZ-TEST Acme renewal";
+const TASK_TITLE = "ZZ-TEST Acme kickoff";
+const RUN = `${Date.now().toString(36)}${process.pid.toString(36)}`;
+let seq = 0;
+const people: Account[] = [];
+const projectIds: string[] = [];
+
+async function withMode<T>(mode: "all" | "admins" | "off", fn: () => Promise<T>): Promise<T> {
+  const prev = process.env.CRM_VISIBLE;
+  process.env.CRM_VISIBLE = mode;
+  try {
+    return await fn();
+  } finally {
+    if (prev === undefined) delete process.env.CRM_VISIBLE;
+    else process.env.CRM_VISIBLE = prev;
+  }
+}
+
+async function zzAccount(role: string) {
+  const n = seq++;
+  const slug = role.toLowerCase().replace(/[^a-z0-9]+/g, "") || "user";
+  const email = `nakul17+zz-2728-${RUN}-${slug}-${n}@aplyd.com`;
+  const who = await account(`ZZ-TEST ${role} ${RUN}-${n}`, email);
+  people.push(who);
+  return who;
+}
+
+const actor = (who: Account, orgRole: "MEMBER" | "ADMIN" | "SUPER_ADMIN") => ({ id: who.id, orgRole });
+
+describe("APL-2728 person page hides a deal CRM_VISIBLE conceals", () => {
+  let member: Account;
+  let rep: Account;
+  let adminUser: Account;
+  let outsider: Account;
+  let dealId = "";
+  let plainId = "";
+  let plainName = "";
+  let stageName = "";
+
+  afterAll(async () => {
+    const sa = await superAdmin();
+    const problems: string[] = [];
+    for (const id of projectIds) {
+      const added = await sa.c.post(`/api/projects/${id}/members`, { userId: sa.id, role: "EDITOR" });
+      if (added.status !== 201 && !(added.status === 409 && /already a member/.test(added.json?.error ?? ""))) {
+        problems.push(`add member ${id}: ${added.status}`);
+      }
+      const led = await sa.c.post(`/api/projects/${id}/leader`, { newLeaderId: sa.id, previousRole: "EDITOR" });
+      if (led.status !== 200 && !(led.status === 400 && /already the Leader/.test(led.json?.error ?? ""))) {
+        problems.push(`change leader ${id}: ${led.status}`);
+      }
+      const archived = await sa.c.post(`/api/projects/${id}/archive`);
+      if (archived.status !== 200) problems.push(`archive ${id}: ${archived.status} ${JSON.stringify(archived.json)}`);
+    }
+    for (const who of people) {
+      if (who.id === sa.id) continue;
+      const off = await sa.c.post(`/api/team/${who.id}/deactivate`, { reassign: "leaders" });
+      if (off.status !== 200 && !(off.status === 409 && /already deactivated/.test(off.json?.error ?? ""))) {
+        problems.push(`deactivate ${who.email}: ${off.status} ${JSON.stringify(off.json)}`);
+      }
+    }
+    expect(problems, problems.join("\n")).toEqual([]);
+  });
+
+  it("seeds a shared deal and a shared project", async () => {
+    const sa = await superAdmin();
+    member = await zzAccount("member");
+    rep = await zzAccount("rep");
+    adminUser = await zzAccount("admin");
+    outsider = await zzAccount("outsider");
+    expect((await sa.c.patch(`/api/team/${adminUser.id}`, { orgRole: "ADMIN" })).status).toBe(200);
+
+    const pipes = await sa.c.get("/api/deals/pipelines");
+    expect(pipes.status, JSON.stringify(pipes.json)).toBe(200);
+    const pipe = (pipes.json.pipelines as { id: string; key: string }[]).find((p) => p.key === "DEAL_PROACTIVE");
+    expect(pipe?.id).toBeTruthy();
+    const org = await sa.c.post("/api/orgs", { name: `ZZ-TEST Buyer ${RUN}` });
+    expect(org.status, JSON.stringify(org.json)).toBe(201);
+    const made = await sa.c.post("/api/deals", {
+      name: DEAL_NAME,
+      organisationId: org.json.organisation.id,
+      pipelineId: pipe!.id,
+      leaderId: rep.id,
+      whyPursue: "ZZ-TEST fit",
+      nextStep: { title: TASK_TITLE, dueDate: istDate(3) },
+    });
+    expect(made.status, JSON.stringify(made.json)).toBe(201);
+    dealId = made.json.deal.id as string;
+    projectIds.push(dealId);
+    expect((await sa.c.post(`/api/projects/${dealId}/members`, { userId: member.id, role: "EDITOR" })).status).toBe(201);
+    const stage = made.json.deal.stage?.name ?? made.json.deal.stageName;
+    stageName = typeof stage === "string" ? stage : "Lead";
+
+    plainName = `ZZ-TEST Shared ${RUN}`;
+    const madePlain = await sa.c.post("/api/projects", { name: plainName, leaderId: rep.id });
+    expect(madePlain.status, JSON.stringify(madePlain.json)).toBe(201);
+    plainId = madePlain.json.project.id as string;
+    projectIds.push(plainId);
+    expect((await rep.c.post(`/api/projects/${plainId}/members`, { userId: member.id, role: "EDITOR" })).status).toBe(201);
+    expect((await rep.c.post(`/api/projects/${plainId}/members`, { userId: outsider.id, role: "EDITOR" })).status).toBe(201);
+    await task(rep, plainId, { title: `ZZ-TEST Shared task ${RUN}`, assigneeId: rep.id });
+  });
+
+  function body(person: unknown) {
+    return JSON.stringify(person);
+  }
+
+  function assertHidden(person: { projects: { id?: string; name: string; href?: string | null; role?: string; openTasks?: number }[] }) {
+    const text = body(person);
+    expect(text).not.toContain(DEAL_NAME);
+    expect(text).not.toContain(dealId);
+    expect(text).not.toContain(`/projects/${dealId}`);
+    expect(text).not.toContain(TASK_TITLE);
+    if (stageName) expect(text).not.toContain(stageName);
+    expect(person.projects).toContainEqual({ name: HIDDEN_DEAL_LABEL, href: null });
+    expect(person.projects.find((p) => p.id === dealId)).toBeUndefined();
+    const hidden = person.projects.find((p) => p.href === null);
+    expect(hidden).toEqual({ name: HIDDEN_DEAL_LABEL, href: null });
+    expect(hidden).not.toHaveProperty("id");
+    expect(hidden).not.toHaveProperty("role");
+    expect(hidden).not.toHaveProperty("openTasks");
+    expect(person.projects).toContainEqual(expect.objectContaining({ id: plainId, name: plainName }));
+  }
+
+  // Mutation check: on main today this returns the deal id and "ZZ-TEST Acme renewal".
+  it("AC1 admins: a non-admin sees generic text only, with no deal name and no href", async () => {
+    expect(dealId).toBeTruthy();
+    const person = await withMode("admins", () => getPerson(actor(member, "MEMBER"), rep.id));
+    expect(crmMode()).toBe("all");
+    assertHidden(person);
+    expect(person).toEqual({
+      id: rep.id,
+      name: rep.name,
+      projects: [
+        { id: plainId, name: plainName },
+        { name: HIDDEN_DEAL_LABEL, href: null },
+      ],
+    });
+    const outsiderView = await withMode("admins", () => getPerson(actor(outsider, "MEMBER"), rep.id));
+    expect(body(outsiderView)).not.toContain(DEAL_NAME);
+    expect(body(outsiderView)).not.toContain(dealId);
+    expect(body(outsiderView)).not.toContain(HIDDEN_DEAL_LABEL);
+    expect(outsiderView.projects).toEqual([{ id: plainId, name: plainName }]);
+  });
+
+  it("AC1 off: a non-admin sees generic text only, with no deal name and no href", async () => {
+    const person = await withMode("off", () => getPerson(actor(member, "MEMBER"), rep.id));
+    assertHidden(person);
+  });
+
+  it("AC1 off: an admin is hidden too, and the open-task count drops the deal", async () => {
+    const person = await withMode("off", () => getPerson(actor(adminUser, "ADMIN"), rep.id));
+    assertHidden(person);
+    expect(person.openTasks).toBe(1);
+    const plain = person.projects.find((p) => p.id === plainId);
+    expect(plain).toMatchObject({ id: plainId, name: plainName, role: "LEADER", openTasks: 1 });
+  });
+
+  it("AC2 admins: an admin still sees the deal, identical to all mode", async () => {
+    const asAdmins = await withMode("admins", () => getPerson(actor(adminUser, "ADMIN"), rep.id));
+    const asAll = await withMode("all", () => getPerson(actor(adminUser, "ADMIN"), rep.id));
+    expect(asAdmins).toEqual(asAll);
+    expect(body(asAdmins)).toContain(DEAL_NAME);
+    expect(body(asAdmins)).toContain(dealId);
+    expect(asAdmins.projects).toContainEqual(expect.objectContaining({ id: dealId, name: DEAL_NAME, role: "LEADER", openTasks: 1 }));
+    expect(asAdmins.openTasks).toBe(2);
+    expect(asAdmins.email).toBe(rep.email);
+  });
+
+  it("AC3 all: member and admin both see the deal as they do today", async () => {
+    const memberView = await withMode("all", () => getPerson(actor(member, "MEMBER"), rep.id));
+    const adminView = await withMode("all", () => getPerson(actor(adminUser, "ADMIN"), rep.id));
+    expect(memberView).toEqual({
+      id: rep.id,
+      name: rep.name,
+      projects: [
+        { id: dealId, name: DEAL_NAME },
+        { id: plainId, name: plainName },
+      ],
+    });
+    expect(body(memberView)).not.toContain(HIDDEN_DEAL_LABEL);
+    expect(adminView.projects).toContainEqual(expect.objectContaining({ id: dealId, name: DEAL_NAME }));
+    expect(adminView.openTasks).toBe(2);
+  });
+
+  it("load: 48 concurrent hidden person reads stay redacted", async () => {
+    const started = Date.now();
+    const results = await withMode("admins", () => Promise.all(Array.from({ length: 48 }, () => getPerson(actor(member, "MEMBER"), rep.id))));
+    const ms = Date.now() - started;
+    expect(results).toHaveLength(48);
+    for (const person of results) assertHidden(person);
+    expect(ms).toBeLessThan(30_000);
+    console.log(`APL-2728 load: 48 concurrent getPerson (CRM_VISIBLE=admins, member) in ${ms}ms`);
+  }, 60_000);
+});
