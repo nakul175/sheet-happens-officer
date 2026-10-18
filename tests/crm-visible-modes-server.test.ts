@@ -176,6 +176,23 @@ async function signIn(server: Running, name: string, email: string) {
 
 type Read = { name: string; status: number; text: string; hiddenStatus: number; mustName: boolean };
 
+/** Notification sentences from a bell response. Throws when the body is not that list. */
+function notificationTexts(body: string): string[] {
+  const parsed = JSON.parse(body) as { items?: { text?: unknown }[] };
+  if (!Array.isArray(parsed.items)) throw new Error("bell response has no notification list");
+  return parsed.items.map((item) => (typeof item.text === "string" ? item.text : ""));
+}
+
+/**
+ * APL-2698. The bell row is mustName=false: other reads may omit the deal name, but notification
+ * text includes it only when this person may see the deal, and the check fails when a hidden name is present.
+ */
+function assertBellDealName(body: string, dealName: string, visible: boolean, label = "mustName=false") {
+  const present = notificationTexts(body).some((text) => text.includes(dealName));
+  if (visible) expect(present, `${label} notification text names the deal`).toBe(true);
+  else expect(present, `${label} notification text leaked the deal name`).toBe(false);
+}
+
 /** My tasks, search, the bell, every concierge quick action, and the deal API. */
 async function readPaths(base: string, cookie: string, dealId: string, name: string): Promise<Read[]> {
   const my = await call(base, cookie, "GET", "/api/my-tasks");
@@ -250,6 +267,14 @@ function isInGroup(ancestor: number, pid: number) {
   return false;
 }
 
+describe("bell mustName=false check (APL-2698 AC2)", () => {
+  it("fails when a hidden bell response includes the deal name", () => {
+    const name = "Acme renewal ZZ-TEST-local";
+    const body = JSON.stringify({ items: [{ text: `Someone moved "${name}" to Proposal.` }] });
+    expect(() => assertBellDealName(body, name, false)).toThrow(/leaked the deal name/);
+  });
+});
+
 describe("CRM_VISIBLE modes are tested against a real server per mode", () => {
   beforeAll(async () => {
     if (!existsSync(path.join(root, ".next", "BUILD_ID"))) {
@@ -299,9 +324,22 @@ describe("CRM_VISIBLE modes are tested against a real server per mode", () => {
     expect((made.json?.deal as { name: string }).name).toBe(dealName);
     const task = await db.task.findFirst({ where: { projectId: dealId, deletedAt: null }, select: { id: true } });
     expect(task?.id).toBeTruthy();
-    // Membership only, with no bell row: a notice would store the deal name, and the bell does not filter those.
     await db.projectMember.create({ data: { projectId: dealId, userId: admin.id, role: "EDITOR" } });
     await db.taskCollaborator.create({ data: { taskId: task!.id, userId: admin.id } });
+    // A bell row stores the deal name. The mustName=false check asserts that name is filtered
+    // out of notification text whenever this person cannot see the deal (APL-2698).
+    const outsiderEmail = `outsider.${tag}@aplyd.com`.toLowerCase();
+    seed.emails.push(outsiderEmail);
+    const outsider = await signIn(open!, `outsider ${tag}`, outsiderEmail);
+    seed.userIds.push(outsider.id);
+    await db.notification.createMany({
+      data: [member.id, admin.id, outsider.id].map((recipientId) => ({
+        recipientId,
+        type: "DEAL_STAGE_CHANGED",
+        projectId: dealId,
+        data: { project: dealName, stage: "Proposal" },
+      })),
+    });
 
     const people = { member, admin };
     const examples: { mode: Mode; user: "member" | "admin"; visible: boolean }[] = [
@@ -318,14 +356,27 @@ describe("CRM_VISIBLE modes are tested against a real server per mode", () => {
       for (const read of reads) {
         const wanted = example.visible ? 200 : read.hiddenStatus;
         expect(read.status, `${label} ${read.name}`).toBe(wanted);
-        if (!example.visible || read.mustName) {
-          if (example.visible) expect(read.text, `${label} ${read.name}`).toContain(dealName);
-          else expect(read.text, `${label} ${read.name}`).not.toContain(dealName);
-        }
+        if (!read.mustName) assertBellDealName(read.text, dealName, example.visible, label);
+        else if (example.visible) expect(read.text, `${label} ${read.name}`).toContain(dealName);
+        else expect(read.text, `${label} ${read.name}`).not.toContain(dealName);
       }
       const joined = reads.map((read) => read.text).join("\n");
       if (example.visible) expect(joined, label).toContain(dealName);
       else expect(joined, label).not.toContain(dealName);
+    }
+
+    // APL-2698 AC3. The open server is CRM_VISIBLE=on; crmMode() treats that as all.
+    const bellOnly: { mode: Mode; who: { cookie: string }; user: string; visible: boolean; modeLabel: string }[] = [
+      { mode: "on", who: admin, user: "admin", visible: true, modeLabel: "all" },
+      { mode: "off", who: member, user: "member", visible: false, modeLabel: "off" },
+      { mode: "on", who: outsider, user: "member with no access to the deal", visible: false, modeLabel: "all" },
+    ];
+    for (const row of bellOnly) {
+      const server = running.get(row.mode)!;
+      const bell = await call(server.base, row.who.cookie, "GET", "/api/notifications");
+      const label = `mode=${row.modeLabel} user=${row.user} visible=${row.visible ? "yes" : "no"}`;
+      expect(bell.status, label).toBe(200);
+      assertBellDealName(bell.text, dealName, row.visible, label);
     }
   }, 120_000);
 

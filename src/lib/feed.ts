@@ -4,7 +4,7 @@ import { z } from "zod";
 import { db } from "@/lib/db";
 import { ApiError } from "@/lib/http";
 import { currentSessionId, deviceLabel, hashPassword, verifyPassword } from "@/lib/auth";
-import { projectAccess, type Actor } from "@/lib/access";
+import { WORKSTREAM_DEAL, crmVisible, isAdmin, projectAccess, type Actor } from "@/lib/access";
 import { idsIn, sentence, whenText } from "@/lib/activity-text";
 import { UNDO_DAYS, isUndoable } from "@/lib/undoable";
 import { passwordField } from "@/lib/schemas";
@@ -84,6 +84,33 @@ export function noticeText(n: N) {
   return { text: text[n.type] ?? `${who} made a change.`, href };
 }
 
+/** Deal names this person must not read in the bell: the CRM is hidden, or they are not on the deal and not an Admin. */
+async function hiddenDealNames(user: Actor, projectIds: (string | null)[]): Promise<Map<string, string>> {
+  const ids = [...new Set(projectIds.filter((id): id is string => !!id))];
+  const hidden = new Map<string, string>();
+  if (!ids.length) return hidden;
+  const deals = await db.project.findMany({
+    where: { id: { in: ids }, typeId: WORKSTREAM_DEAL },
+    select: { id: true, name: true, members: { where: { userId: user.id }, select: { userId: true }, take: 1 } },
+  });
+  for (const deal of deals) {
+    const sees = crmVisible(user) && (isAdmin(user) || deal.members.length > 0);
+    if (!sees && deal.name) hidden.set(deal.id, deal.name);
+  }
+  return hidden;
+}
+
+/** Notice data with the deal name removed, so the sentence cannot repeat it. */
+function withoutDealName(data: unknown, dealName: string): unknown {
+  if (!data || typeof data !== "object" || Array.isArray(data)) return data;
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(data as Record<string, unknown>)) {
+    if (key === "project") continue;
+    out[key] = typeof value === "string" ? value.split(dealName).join("") : value;
+  }
+  return out;
+}
+
 /** SHO-US-14.13: newest first, 50 at a time; `before` is the `next` value of the previous page. `filter=unread` hides read items. */
 export async function listNotifications(user: Actor, o: { filter?: string; before?: string; limit?: number } = {}) {
   const limit = Math.min(Math.max(o.limit ?? 50, 1), 200);
@@ -101,10 +128,17 @@ export async function listNotifications(user: Actor, o: { filter?: string; befor
   });
   const unread = await db.notification.count({ where: { recipientId: user.id, readAt: null } });
   const page = rows.slice(0, limit);
+  const hiddenDeals = await hiddenDealNames(user, page.map((n) => n.projectId));
   const last = page.at(-1);
   return {
     unread,
-    items: page.map((n) => ({ id: n.id, ...noticeText(n), read: !!n.readAt, createdAt: n.createdAt.toISOString() })),
+    items: page.map((n) => {
+      const dealName = n.projectId ? hiddenDeals.get(n.projectId) : undefined;
+      const notice = noticeText(dealName ? { ...n, data: withoutDealName(n.data, dealName) } : n);
+      // The name can also sit in a sentence built from another field. Strip it from the text the bell shows.
+      const text = dealName ? notice.text.split(dealName).join("a project") : notice.text;
+      return { id: n.id, text, href: notice.href, read: !!n.readAt, createdAt: n.createdAt.toISOString() };
+    }),
     next: rows.length > limit && last ? `${last.createdAt.toISOString()}|${last.id}` : null,
   };
 }
