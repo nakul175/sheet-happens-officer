@@ -113,10 +113,26 @@ version_ok() {
 
 switch() { ln -sfn "$1" "$CUR.new" && mv -T "$CUR.new" "$CUR"; }
 
+# Today's live tree has no release.env. Write one before that tree is asked to serve again.
+note_backfill() {
+  local dir="$1"
+  [ -d "${dir:-}" ] || return 0
+  [ -f "$dir/release.env" ] && return 0
+  if [ ! -f "$dir/package.json" ] && [ ! -d "$dir/.next" ]; then
+    return 0
+  fi
+  if backfill_release_env "$dir"; then
+    log "backfilled release.env for $(basename "$dir") (digest unknown)"
+  else
+    log "left $(basename "$dir") without release.env"
+  fi
+}
+
 rollback() {
   log "rolling back the code only (migrations are forward-only and were not reverted)"
   sudo journalctl -u "$SERVICE" -n 80 --no-pager || true
   if [ -n "${PREV:-}" ] && [ -d "$PREV" ] && [ "$PREV" != "$REL" ]; then
+    note_backfill "$PREV"
     switch "$PREV"
     sudo systemctl restart "$SERVICE" || true
     if healthy; then log "rolled back to $(basename "$PREV")"; else log "the previous release did not come up either"; fi
@@ -314,10 +330,12 @@ fi
 
 PREV="$(readlink -f "$CUR" 2>/dev/null || true)"
 if [ -n "${PREV:-}" ] && [ -d "$PREV" ] && [ "$PREV" != "$REL" ]; then
+  note_backfill "$PREV"
   ln -sfn "$PREV" "$ROOT/previous"
   basename "$PREV" > "$ROOT/previous-sha"
   log "rollback target $(basename "$PREV")"
 elif [ -L "$ROOT/previous" ] || [ -d "$ROOT/previous" ]; then
+  note_backfill "$(readlink -f "$ROOT/previous" 2>/dev/null || true)"
   log "rollback target $(basename "$(readlink -f "$ROOT/previous")") kept"
 else
   log "rollback target none"

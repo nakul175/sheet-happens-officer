@@ -54,15 +54,18 @@ through the GitHub environment `production`. A `rel-test-*` tag only runs
 `.github/workflows/rehearse.yml`: it waits for the same approval and does not SSH. The
 production job also requires a QA status on the commit (`qa/gate` = success, description
 `READY <digest>` or `WITH_EXCEPTION <digest>`). The status creator must be the person named
-in the repository variable `QA_GATE_LOGIN`. The check stops if that variable is empty, if it
-names a bot, or if anyone else created the status. The digest staging recorded for that
+in `QA_GATE_LOGIN`, or the GitHub App named in `QA_GATE_APP` (its `[bot]` login). The check
+stops if neither is set. `github-actions[bot]`, the token the staging job uses, is never
+accepted. The digest staging recorded for that
 commit, and the commit being on `main`, are required too. Staging posts that digest from a
 separate job whose script writes only the `staging/digest` context. The deploy job itself
 cannot write commit statuses. CI builds one release tarball and its SHA-256 per commit;
 staging and production both install that file. `deploy/release.sh` does not build on the
 droplet. It migrates, switches the `current` symlink, restarts, and checks `/api/health`
 and `/api/version`. A failed health check puts the previous code back and records it at
-`/opt/sho/previous`. Migrations are forward-only. On production, a pending migration must be
+`/opt/sho/previous`. A previous or current tree with no `release.env` gets one written from
+its git commit, or from `.next/BUILD_ID`, with the digest set to `unknown`, so today's live
+release can be rolled back and still report a version. Migrations are forward-only. On production, a pending migration must be
 marked `-- expand-only` (or the directory contains a file named `expand-only`). The only way
 past that marker is to run the release workflow by hand from the tag with
 `allow_contract_migration` set. A repository variable cannot skip it. The script
@@ -105,7 +108,8 @@ migrations have `pg_dump` and `pg_restore`. Keep at least 2 GiB free on the depl
    `DATABASE_URL` (PgBouncer, port 25061, `pgbouncer=true`) and `DIRECT_DATABASE_URL` (direct
    database, required for migrations and the backup). Repository variables: `PROD_DB_HOST`,
    `PROD_DB_NAME`, `QA_GATE_LOGIN` (the GitHub login of the person who posts `qa/gate`; not a
-   bot), and `DROPLET_HOST_KEY` (one `ssh-keyscan -t ed25519 <ip>` line). Production
+   bot), optional `QA_GATE_APP` (the GitHub App login, including `[bot]`, if that app posts
+   `qa/gate` instead), and `DROPLET_HOST_KEY` (one `ssh-keyscan -t ed25519 <ip>` line). Production
    refuses to deploy when `DROPLET_HOST_KEY` or the production database identity is empty.
    `DROPLET_HOST` is optional. `ROLLBACK_REVIEWER` is Oscar's GitHub login. `OSCAR_EMAIL` is optional.
 7. In repository settings, NJ creates the `production` environment (required reviewer

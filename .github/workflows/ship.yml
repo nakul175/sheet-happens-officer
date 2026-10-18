@@ -290,6 +290,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           DIGEST: ${{ needs.gates.outputs.digest }}
           QA_GATE_LOGIN: ${{ vars.QA_GATE_LOGIN }}
+          QA_GATE_APP: ${{ vars.QA_GATE_APP }}
         run: bash deploy/qa-gate.sh
       - name: Require the rel-* tag ruleset
         env:

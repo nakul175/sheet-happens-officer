@@ -49,19 +49,21 @@ if [ -z "${TARGET:-}" ] || [ ! -d "$TARGET" ]; then
   echo "rollback target is not on the droplet"
   exit 1
 fi
-CHECK_VERSION=0
-if [ -f "$TARGET/release.env" ]; then
-  # shellcheck disable=SC1091
-  . "$TARGET/release.env"
-  assert_sha "${RELEASE:-}"
-  assert_digest "${ARTIFACT_SHA256:-}"
-  CHECK_VERSION=1
-elif [ -f "$TARGET/package.json" ] || [ -d "$TARGET/.next" ]; then
-  CHECK_VERSION=0
-else
-  echo "rollback target is not an app tree"
-  exit 1
+backfilled=0
+if [ ! -f "$TARGET/release.env" ]; then
+  if [ ! -f "$TARGET/package.json" ] && [ ! -d "$TARGET/.next" ]; then
+    echo "rollback target is not an app tree"
+    exit 1
+  fi
+  backfill_release_env "$TARGET" || {
+    echo "could not backfill release.env from git metadata or BUILD_ID"
+    exit 1
+  }
+  backfilled=1
 fi
+# shellcheck disable=SC1091
+. "$TARGET/release.env"
+assert_release_identity
 
 CUR="$ROOT/current"
 if [ "$HARNESS" = 1 ]; then
@@ -95,17 +97,17 @@ version_ok() {
 
 switch() { ln -sfn "$1" "$CUR.new" && mv -T "$CUR.new" "$CUR"; }
 
-if [ "$CHECK_VERSION" = 1 ]; then
-  log "rollback target $(basename "$TARGET") (no migration)"
+if [ "$backfilled" = 1 ]; then
+  log "backfilled release.env for $(basename "$TARGET") (digest unknown)"
 else
-  log "rollback target $(basename "$TARGET") has no release.env; checking health only"
+  log "rollback target $(basename "$TARGET") (no migration)"
 fi
 switch "$TARGET"
 if ! sudo systemctl restart "$SERVICE"; then
   echo "restart failed"
   exit 1
 fi
-if healthy && { [ "$CHECK_VERSION" = 0 ] || version_ok; }; then
+if healthy && version_ok; then
   log "rolled back to $(basename "$TARGET")"
   exit 0
 fi

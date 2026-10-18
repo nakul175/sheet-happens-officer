@@ -17,15 +17,33 @@ qa_gate_decide() {
     "READY $digest"|"WITH_EXCEPTION $digest") ;;
     *) echo "qa/gate must say READY or WITH_EXCEPTION for this digest"; return 1 ;;
   esac
-  [ -n "$expect" ] || { echo "QA_GATE_LOGIN is unset"; return 1; }
+  local app="${QA_GATE_APP:-}"
+  # The person in QA_GATE_LOGIN, or the GitHub App in QA_GATE_APP. Never the
+  # GITHUB_TOKEN that posts staging/digest (github-actions[bot]).
+  [ -n "$expect" ] || [ -n "$app" ] || { echo "QA_GATE_LOGIN is unset"; return 1; }
   case "$expect" in
-    *'[bot]') echo "QA_GATE_LOGIN must be a person"; return 1 ;;
+    "") ;;
+    'github-actions[bot]'|*'[bot]') echo "QA_GATE_LOGIN must be a person"; return 1 ;;
+  esac
+  case "$app" in
+    "") ;;
+    'github-actions[bot]') echo "QA_GATE_APP must not be the staging token"; return 1 ;;
+    *'[bot]') ;;
+    *) echo "QA_GATE_APP must be the GitHub App login"; return 1 ;;
   esac
   case "$qa_login" in
-    ""|*'[bot]') echo "qa/gate must be set by the QA identity"; return 1 ;;
+    'github-actions[bot]') echo "qa/gate must not be set by the staging token"; return 1 ;;
   esac
-  [ "$qa_login" = "$expect" ] || { echo "qa/gate was not set by the QA identity"; return 1; }
-  echo "QA gate passed for $tag"
+  if [ -n "$expect" ] && [ "$qa_login" = "$expect" ]; then
+    echo "QA gate passed for $tag"
+    return 0
+  fi
+  if [ -n "$app" ] && [ "$qa_login" = "$app" ]; then
+    echo "QA gate passed for $tag"
+    return 0
+  fi
+  echo "qa/gate was not set by the QA identity"
+  return 1
 }
 
 qa_gate_live() {

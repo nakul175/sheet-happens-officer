@@ -212,7 +212,18 @@ case "$url" in
     exit 0
     ;;
   */api/version)
-    printf '{"sha":"%s","digest":"%s"}\n' "$EXPECT_SHA" "$EXPECT_DIGEST"
+    root=sho
+    case "$url" in
+      *:3001/*) root=sho-staging ;;
+    esac
+    envfile="${SHO_PREFIX:-}/opt/${root}/current/release.env"
+    sha="${EXPECT_SHA:-}"
+    dig="${EXPECT_DIGEST:-}"
+    if [ -n "${SHO_PREFIX:-}" ] && [ -f "$envfile" ]; then
+      sha=$(sed -n 's/^RELEASE=//p' "$envfile" | head -1)
+      dig=$(sed -n 's/^ARTIFACT_SHA256=//p' "$envfile" | head -1)
+    fi
+    printf '{"sha":"%s","digest":"%s"}\n' "$sha" "$dig"
     exit 0
     ;;
 esac
@@ -511,6 +522,37 @@ grep -q 'because it is the rollback target' "$WORK/out"
 [ ! -d "$WORK/root/opt/sho/releases/junk1" ] || fail "prune did not delete an unreferenced old tree"
 pass "prune keeps the tree the previous symlink points at"
 
+new_tree
+write_env production
+old=ffffffffffffffffffffffffffffffffffffffff
+old_dir="$WORK/root/opt/sho/releases/$old"
+mkdir -p "$old_dir/.next"
+echo '{}' > "$old_dir/package.json"
+printf '%s\n' 'LiveBuild_1' > "$old_dir/.next/BUILD_ID"
+ln -s "$old_dir" "$WORK/root/opt/sho/current"
+run_rel production >"$WORK/out"
+grep -q 'backfilled release.env' "$WORK/out"
+grep -q '^RELEASE=LiveBuild_1$' "$old_dir/release.env"
+grep -q '^ARTIFACT_SHA256=unknown$' "$old_dir/release.env"
+[ "$(readlink -f "$WORK/root/opt/sho/previous")" = "$old_dir" ]
+pass "a release backfills release.env on the outgoing tree"
+
+new_tree
+write_env production
+run_rel production >"$WORK/out"
+kept=abababababababababababababababababababab
+kept_dir="$WORK/root/opt/sho/releases/$kept"
+mkdir -p "$kept_dir/.next"
+echo '{}' > "$kept_dir/package.json"
+printf '%s\n' 'KeptBuild' > "$kept_dir/.next/BUILD_ID"
+ln -sfn "$kept_dir" "$WORK/root/opt/sho/previous"
+run_rel production >"$WORK/out"
+grep -q 'kept' "$WORK/out"
+grep -q '^RELEASE=KeptBuild$' "$kept_dir/release.env"
+grep -q '^ARTIFACT_SHA256=unknown$' "$kept_dir/release.env"
+[ "$(readlink -f "$WORK/root/opt/sho/previous")" = "$kept_dir" ]
+pass "a same-SHA redeploy backfills release.env on the kept previous tree"
+
 # --- rollback ----------------------------------------------------------------
 
 new_tree
@@ -535,17 +577,52 @@ pass "rollback rejects a directory outside the release tree"
 
 live=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
 live_dir="$WORK/root/opt/sho/releases/$live"
-mkdir -p "$live_dir"
+mkdir -p "$live_dir/.next"
 echo '{}' > "$live_dir/package.json"
+printf '%s\n' 'LiveBuild_1' > "$live_dir/.next/BUILD_ID"
 ln -sfn "$live_dir" "$WORK/root/opt/sho/previous"
 env PATH="$STUB:$PATH" SHO_TIER=production SHO_PREFIX="$WORK/root" \
-  HARNESS_LOG="$HARNESS_LOG" EXPECT_SHA=wrong EXPECT_DIGEST=wrong \
+  HARNESS_LOG="$HARNESS_LOG" \
   bash deploy/rollback.sh --harness >"$WORK/out"
-grep -q 'has no release.env; checking health only' "$WORK/out"
+grep -q 'backfilled release.env' "$WORK/out"
+grep -q 'digest unknown' "$WORK/out"
 grep -q "rolled back to $live" "$WORK/out"
+grep -q '^RELEASE=LiveBuild_1$' "$live_dir/release.env"
+grep -q '^ARTIFACT_SHA256=unknown$' "$live_dir/release.env"
 [ "$(readlink -f "$WORK/root/opt/sho/current")" = "$live_dir" ]
 if grep -q 'npx prisma' "$HARNESS_LOG"; then fail "rollback of a live tree ran a migration"; fi
-pass "rollback of today's live tree checks health and does not need release.env"
+pass "rollback backfills today's live tree from BUILD_ID"
+
+gitlive=1111111111111111111111111111111111111111
+git_dir="$WORK/root/opt/sho/releases/$gitlive"
+mkdir -p "$git_dir/.next"
+echo '{}' > "$git_dir/package.json"
+printf '%s\n' 'NotThis' > "$git_dir/.next/BUILD_ID"
+git -C "$git_dir" init -q
+git -C "$git_dir" config user.email harness@example.com
+git -C "$git_dir" config user.name harness
+git -C "$git_dir" add package.json
+git -C "$git_dir" -c commit.gpgsign=false commit -q -m harness
+git_sha=$(git -C "$git_dir" rev-parse HEAD)
+ln -sfn "$git_dir" "$WORK/root/opt/sho/previous"
+env PATH="$STUB:$PATH" SHO_TIER=production SHO_PREFIX="$WORK/root" \
+  HARNESS_LOG="$HARNESS_LOG" \
+  bash deploy/rollback.sh --harness >"$WORK/out"
+grep -q "^RELEASE=${git_sha}$" "$git_dir/release.env"
+grep -q '^ARTIFACT_SHA256=unknown$' "$git_dir/release.env"
+if grep -q 'NotThis' "$git_dir/release.env"; then fail "BUILD_ID won over the git commit"; fi
+pass "rollback prefers the git commit when backfilling release.env"
+
+bare=dddddddddddddddddddddddddddddddddddddddd
+mkdir -p "$WORK/root/opt/sho/releases/$bare"
+echo '{}' > "$WORK/root/opt/sho/releases/$bare/package.json"
+ln -sfn "$WORK/root/opt/sho/releases/$bare" "$WORK/root/opt/sho/previous"
+if env PATH="$STUB:$PATH" SHO_TIER=production SHO_PREFIX="$WORK/root" \
+  bash deploy/rollback.sh --harness >"$WORK/out" 2>&1; then
+  fail "rollback invented a release identity"
+fi
+grep -q 'git metadata or BUILD_ID' "$WORK/out"
+pass "rollback does not invent a release identity"
 
 empty=eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
 mkdir -p "$WORK/root/opt/sho/releases/$empty"
@@ -628,25 +705,46 @@ fi
 if qa_gate_decide rel-2026.10.18.1 tag yes "$digest" "$digest" success "READY $other" pam >/dev/null 2>&1; then
   fail "qa gate accepted a QA record for a different digest"
 fi
-unset QA_GATE_LOGIN
+unset QA_GATE_LOGIN QA_GATE_APP
 if qa_gate_decide rel-2026.10.18.1 tag yes "$digest" "$digest" success "READY $digest" pam >"$WORK/out" 2>&1; then
   fail "qa gate ran without QA_GATE_LOGIN"
 fi
 grep -q 'QA_GATE_LOGIN is unset' "$WORK/out"
 export QA_GATE_LOGIN='github-actions[bot]'
 if qa_gate_decide rel-2026.10.18.1 tag yes "$digest" "$digest" success "READY $digest" 'github-actions[bot]' >"$WORK/out" 2>&1; then
-  fail "qa gate accepted a bot as the QA identity"
+  fail "qa gate accepted the staging token as the QA identity"
 fi
 grep -q 'must be a person' "$WORK/out"
 export QA_GATE_LOGIN=pam
-if qa_gate_decide rel-2026.10.18.1 tag yes "$digest" "$digest" success "READY $digest" 'github-actions[bot]' >"$WORK/out" 2>&1; then
-  fail "qa gate accepted a status created by a bot"
+export QA_GATE_APP='sho-qa[bot]'
+qa_gate_decide rel-2026.10.18.1 tag yes "$digest" "$digest" success "READY $digest" 'sho-qa[bot]' >/dev/null
+qa_gate_decide rel-2026.10.18.1 tag yes "$digest" "$digest" success "READY $digest" pam >/dev/null
+if qa_gate_decide rel-2026.10.18.1 tag yes "$digest" "$digest" success "READY $digest" 'other-app[bot]' >"$WORK/out" 2>&1; then
+  fail "qa gate accepted an app that is not configured"
 fi
-grep -q 'QA identity' "$WORK/out"
+export QA_GATE_APP='github-actions[bot]'
+if qa_gate_decide rel-2026.10.18.1 tag yes "$digest" "$digest" success "READY $digest" pam >"$WORK/out" 2>&1; then
+  fail "qa gate allowed the staging token to be configured as the app"
+fi
+grep -q 'must not be the staging token' "$WORK/out"
+export QA_GATE_APP='sho-qa[bot]'
+if qa_gate_decide rel-2026.10.18.1 tag yes "$digest" "$digest" success "READY $digest" 'github-actions[bot]' >"$WORK/out" 2>&1; then
+  fail "qa gate accepted a status created by the staging token"
+fi
+grep -q 'must not be set by the staging token' "$WORK/out"
 if qa_gate_decide rel-2026.10.18.1 tag yes "$digest" "$digest" success "READY $digest" someone-else >"$WORK/out" 2>&1; then
   fail "qa gate accepted a status created by a different person"
 fi
 grep -q 'was not set by the QA identity' "$WORK/out"
+unset QA_GATE_LOGIN
+qa_gate_decide rel-2026.10.18.1 tag yes "$digest" "$digest" success "READY $digest" 'sho-qa[bot]' >/dev/null || fail "qa gate rejected the configured app"
+export QA_GATE_APP=not-an-app
+export QA_GATE_LOGIN=pam
+if qa_gate_decide rel-2026.10.18.1 tag yes "$digest" "$digest" success "READY $digest" pam >"$WORK/out" 2>&1; then
+  fail "qa gate allowed an app variable that is not an app"
+fi
+grep -q 'GitHub App login' "$WORK/out"
+unset QA_GATE_APP
 pass "qa gate matches the tag, the ancestor, the digest, and the QA identity"
 
 window_out=$(mktemp)

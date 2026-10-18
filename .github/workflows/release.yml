@@ -15,7 +15,8 @@
 # to the release managers (sample: deploy/rel-tag-ruleset.json).
 # QA records the decision on the commit before the tag deploys:
 #   context qa/gate, state success, description "READY <digest>" or
-#   "WITH_EXCEPTION <digest>", and creator.login equal to the variable QA_GATE_LOGIN.
+#   "WITH_EXCEPTION <digest>". creator.login must be QA_GATE_LOGIN (a person) or
+#   QA_GATE_APP (a GitHub App login). github-actions[bot] is never accepted.
 # The digest is the staging/digest status. QA_GATE_LOGIN must be a person.
 name: Release to production
 

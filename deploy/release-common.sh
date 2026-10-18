@@ -15,6 +15,48 @@ assert_digest() {
   [[ "${1:-}" =~ ^[0-9a-f]{64}$ ]] || { echo "artifact digest must be 64 hex characters"; return 1; }
 }
 
+# A tree from before this pipeline has no release.env. Record its git commit, or the
+# Next.js BUILD_ID when the tree has no git metadata, and mark the digest unknown.
+# An existing release.env is left as it is.
+backfill_release_env() {
+  local dir="$1" id=""
+  [ -d "$dir" ] || return 1
+  [ -f "$dir/release.env" ] && return 0
+  if [ -e "$dir/.git" ]; then
+    id=$(git -c safe.directory="$dir" -C "$dir" rev-parse HEAD 2>/dev/null || true)
+  fi
+  if [[ ! "$id" =~ ^[0-9a-f]{40}$ ]]; then
+    id=""
+    if [ -f "$dir/.next/BUILD_ID" ]; then
+      id=$(tr -d '[:space:]' < "$dir/.next/BUILD_ID")
+    fi
+    case "$id" in
+      ""|*[!A-Za-z0-9._-]*) return 1 ;;
+    esac
+  fi
+  printf 'RELEASE=%s\nARTIFACT_SHA256=unknown\n' "$id" > "$dir/release.env"
+  chmod 644 "$dir/release.env"
+}
+
+# RELEASE and ARTIFACT_SHA256 are already loaded. A backfilled digest is the word unknown.
+assert_release_identity() {
+  case "${ARTIFACT_SHA256:-}" in
+    unknown) ;;
+    *) assert_digest "${ARTIFACT_SHA256:-}" || return 1 ;;
+  esac
+  if [[ "${RELEASE:-}" =~ ^[0-9a-f]{40}$ ]]; then
+    return 0
+  fi
+  if [ "${ARTIFACT_SHA256:-}" = unknown ]; then
+    case "${RELEASE:-}" in
+      ""|*[!A-Za-z0-9._-]*) echo "backfilled release identity is not usable"; return 1 ;;
+      *) return 0 ;;
+    esac
+  fi
+  echo "release sha must be 40 hex characters"
+  return 1
+}
+
 _RELEASE_COMMON_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
 # Parse a URL from the environment. The value is never printed and is not passed as an argument.
