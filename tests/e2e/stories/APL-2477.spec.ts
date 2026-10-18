@@ -32,7 +32,8 @@ test.describe("SHO-US-1.4 / APL-2477", () => {
     try { login("ADMIN"); } catch { test.skip(true, "Set SHO_ADMIN_EMAIL and SHO_ADMIN_PASS (a Super Admin)."); }
   });
 
-  test("AC1: asking for a reset gives the same neutral answer whether or not an account exists", async ({ anon }) => {
+  // qa:TC missing
+  test("AC1: asking for a reset gives the same neutral answer whether or not an account exists", { annotation: { type: "qa:TC", description: "missing" } }, async ({ anon }) => {
     const a = await anon.request.post("/api/auth/forgot-password", { data: { email: ghost("a") } });
     const b = await anon.request.post("/api/auth/forgot-password", { data: { email: ghost("b") } });
     expect(a.status()).toBe(200);
@@ -45,7 +46,8 @@ test.describe("SHO-US-1.4 / APL-2477", () => {
     await expect(anon).toHaveURL(/\/check-reset/);
   });
 
-  test("AC1 (link sent only if an account exists): a reset email arrives for a real account and none for an unknown one", async ({ anon, admin, later }) => {
+  // qa:TC missing
+  test("AC1 (link sent only if an account exists): a reset email arrives for a real account and none for an unknown one", { annotation: { type: "qa:TC", description: "missing" } }, async ({ anon, admin, later }) => {
     needPass();
     const email = await verified(anon, admin, later, "ac1");
     const unknown = ghost("ac1-none");
@@ -60,7 +62,8 @@ test.describe("SHO-US-1.4 / APL-2477", () => {
     expect((await matchingMails(unknown, "Reset")).length, "no reset email for an unknown address").toBe(0);
   });
 
-  test("AC2: a valid link plus a good password changes the password, ends other sessions, and the link works once", async ({ anon, admin, browser, later }) => {
+  // qa:TC missing
+  test("AC2: a valid link plus a good password changes the password, ends other sessions, and the link works once", { annotation: { type: "qa:TC", description: "missing" } }, async ({ anon, admin, browser, later }) => {
     needPass();
     const email = await verified(anon, admin, later, "ac2");
     const here = await signInAs(browser, email, PASS);
@@ -91,7 +94,8 @@ test.describe("SHO-US-1.4 / APL-2477", () => {
     expect((await second.json()).error).toBe("This link has expired or was already used.");
   });
 
-  test("AC3: a foreign domain, a rule-breaking password and mismatched fields each show their own message", async ({ anon }) => {
+  // qa:TC missing
+  test("AC3: a foreign domain, a rule-breaking password and mismatched fields each show their own message", { annotation: { type: "qa:TC", description: "missing" } }, async ({ anon }) => {
     await anon.goto("/forgot");
     await anon.getByLabel("Work email").fill("someone@gmail.com");
     await anon.getByRole("button", { name: "Send reset link" }).click();
@@ -109,7 +113,8 @@ test.describe("SHO-US-1.4 / APL-2477", () => {
     await expect(alertOf(anon)).toContainText("Passwords do not match.");
   });
 
-  test("AC4: an unknown, expired or used link lands on Link expired with a way to request a new reset link", async ({ anon }) => {
+  // qa:TC missing
+  test("AC4: an unknown, expired or used link lands on Link expired with a way to request a new reset link", { annotation: { type: "qa:TC", description: "missing" } }, async ({ anon }) => {
     await anon.goto(`/reset?token=${token}`);
     await anon.getByLabel("New password", { exact: true }).fill(`Zz${RUN}9x`);
     await anon.getByLabel("Confirm new password").fill(`Zz${RUN}9x`);
@@ -120,7 +125,8 @@ test.describe("SHO-US-1.4 / APL-2477", () => {
     await expect(anon).toHaveURL(/\/forgot/);
   });
 
-  test("AC5: repeated requests for an address always get one message that never says whether an account exists", async ({ anon }) => {
+  // qa:TC missing
+  test("AC5: repeated requests for an address always get one message that never says whether an account exists", { annotation: { type: "qa:TC", description: "missing" } }, async ({ anon }) => {
     const email = ghost("limit");
     const first = await (await anon.request.post("/api/auth/forgot-password", { data: { email } })).json();
     for (let i = 0; i < 4; i++) {
@@ -131,7 +137,8 @@ test.describe("SHO-US-1.4 / APL-2477", () => {
     expect(JSON.stringify(first)).toContain("try again later");
   });
 
-  test("AC5 (limit): the 4th request in an hour sends no email for a real account", async ({ anon, admin, later }) => {
+  // qa:TC missing
+  test("AC5 (limit): the 4th request in an hour sends no email for a real account", { annotation: { type: "qa:TC", description: "missing" } }, async ({ anon, admin, later }) => {
     needPass();
     const email = await verified(anon, admin, later, "ac5");
     let previous = "";
@@ -148,7 +155,8 @@ test.describe("SHO-US-1.4 / APL-2477", () => {
     expect((await matchingMails(email, "Reset")).length, "no fourth reset email").toBe(before);
   });
 
-  test("AC6: after a reset, a locked-out person can sign in at once with the new password", async ({ anon, admin, later }) => {
+  // qa:TC missing
+  test("AC6: after a reset, a locked-out person can sign in at once with the new password", { annotation: { type: "qa:TC", description: "missing" } }, async ({ anon, admin, later }) => {
     needPass();
     const email = await verified(anon, admin, later, "ac6");
     for (let i = 0; i < 5; i++) {

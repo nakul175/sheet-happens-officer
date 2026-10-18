@@ -17,7 +17,8 @@ test.describe("SHO-US-1.2 / APL-2475", () => {
     try { login("ADMIN"); } catch { test.skip(true, "Set SHO_ADMIN_EMAIL and SHO_ADMIN_PASS (a Super Admin)."); }
   });
 
-  test("AC1: an unused link under 24 hours old verifies the account once, and a second use fails", async ({ anon, admin, later }) => {
+  // qa:TC missing
+  test("AC1: an unused link under 24 hours old verifies the account once, and a second use fails", { annotation: { type: "qa:TC", description: "missing" } }, async ({ anon, admin, later }) => {
     needPass();
     const email = alias("2475", "ac1", "aplyd.com");
     const signed = await signUp(anon.request, zz("ac1"), email);
@@ -41,7 +42,8 @@ test.describe("SHO-US-1.2 / APL-2475", () => {
     await expect(anon).toHaveURL(/\/expired/);
   });
 
-  test("AC2: an unknown, expired or used link shows the Link expired screen with a way to get a new one, and verifies nobody", async ({ anon }) => {
+  // qa:TC missing
+  test("AC2: an unknown, expired or used link shows the Link expired screen with a way to get a new one, and verifies nobody", { annotation: { type: "qa:TC", description: "missing" } }, async ({ anon }) => {
     const bogus = "x".repeat(40);
     const api = await anon.request.post("/api/auth/verify", { data: { token: bogus } });
     expect(api.status()).toBe(400);
@@ -59,7 +61,8 @@ test.describe("SHO-US-1.2 / APL-2475", () => {
     await expect(anon).toHaveURL(/\/expired/);
   });
 
-  test("AC3: asking for a new link emails a new one and kills every earlier link", async ({ anon, admin, later }) => {
+  // qa:TC missing
+  test("AC3: asking for a new link emails a new one and kills every earlier link", { annotation: { type: "qa:TC", description: "missing" } }, async ({ anon, admin, later }) => {
     needPass();
     const email = alias("2475", "ac3", "aplyd.com");
     expect((await signUp(anon.request, zz("ac3"), email)).status).toBe(201);
@@ -83,7 +86,8 @@ test.describe("SHO-US-1.2 / APL-2475", () => {
     expect((await personByEmail(admin.api, email))?.status).toBe("ACTIVE");
   });
 
-  test("AC4: the resend answer is the same for an unknown address and for a verified one, so it reveals nothing", async ({ anon, admin, later }) => {
+  // qa:TC missing
+  test("AC4: the resend answer is the same for an unknown address and for a verified one, so it reveals nothing", { annotation: { type: "qa:TC", description: "missing" } }, async ({ anon, admin, later }) => {
     needPass();
     const email = alias("2475", "ac4-known", "aplyd.com");
     expect((await signUp(anon.request, zz("ac4"), email)).status).toBe(201);
@@ -107,7 +111,8 @@ test.describe("SHO-US-1.2 / APL-2475", () => {
     }
   });
 
-  test("AC4 (limit): the 4th request in an hour sends no email for a real unverified account", async ({ anon, admin, later }) => {
+  // qa:TC missing
+  test("AC4 (limit): the 4th request in an hour sends no email for a real unverified account", { annotation: { type: "qa:TC", description: "missing" } }, async ({ anon, admin, later }) => {
     needPass();
     const email = alias("2475", "ac4-limit", "aplyd.com");
     expect((await signUp(anon.request, zz("limit"), email)).status).toBe(201);

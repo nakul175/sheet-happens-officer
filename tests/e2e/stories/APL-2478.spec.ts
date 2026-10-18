@@ -9,7 +9,8 @@ test.describe("SHO-US-1.5 / APL-2478", () => {
     try { login("ADMIN"); } catch { test.skip(true, "Set SHO_ADMIN_EMAIL and SHO_ADMIN_PASS (a Super Admin)."); }
   });
 
-  test("AC1: a signed-in person stays signed in on return, and the 30 days run from sign-in, not from activity", async ({ anon }) => {
+  // qa:TC missing
+  test("AC1: a signed-in person stays signed in on return, and the 30 days run from sign-in, not from activity", { annotation: { type: "qa:TC", description: "missing" } }, async ({ anon }) => {
     const r = await anon.request.post("/api/auth/signin", { data: { email: login("ADMIN").email, password: login("ADMIN").password } });
     expect(r.status()).toBe(200);
     const cookie = async () => (await anon.context().cookies()).find((c) => c.name === "sho_session")!;
@@ -27,7 +28,8 @@ test.describe("SHO-US-1.5 / APL-2478", () => {
     await anon.request.post("/api/auth/signout");
   });
 
-  test("AC1 (after 30 days): the session ends 30 days after sign-in, and a deactivated person's session is not extended", async ({ anon, admin, browser, later }) => {
+  // qa:TC missing
+  test("AC1 (after 30 days): the session ends 30 days after sign-in, and a deactivated person's session is not extended", { annotation: { type: "qa:TC", description: "missing" } }, async ({ anon, admin, browser, later }) => {
     test.skip(!PASS, "Set SHO_QA_PASS (the shared password for the nakul17+ accounts).");
     test.skip(!passwordOk(PASS), "SHO_QA_PASS must be at least 8 characters with a letter and a number.");
     const email = alias("2478", "ac1", "aplyd.com");
@@ -65,7 +67,8 @@ test.describe("SHO-US-1.5 / APL-2478", () => {
     expect((await anon.request.post("/api/auth/signin", { data: { email, password: PASS } })).status()).toBe(403);
   });
 
-  test("AC2: Sign out ends the session and protected screens send the person to Sign in", async ({ anon }) => {
+  // qa:TC missing
+  test("AC2: Sign out ends the session and protected screens send the person to Sign in", { annotation: { type: "qa:TC", description: "missing" } }, async ({ anon }) => {
     await anon.request.post("/api/auth/signin", { data: { email: login("ADMIN").email, password: login("ADMIN").password } });
     await anon.goto("/profile");
     await expect(anon.locator("#main").getByRole("heading", { level: 1, name: "Profile" })).toBeVisible();
@@ -78,7 +81,8 @@ test.describe("SHO-US-1.5 / APL-2478", () => {
     expect((await anon.request.get("/api/auth/me")).status()).toBe(401);
   });
 
-  test("AC3: no endpoint signs a person in with an email alone", async ({ anon }) => {
+  // qa:TC missing
+  test("AC3: no endpoint signs a person in with an email alone", { annotation: { type: "qa:TC", description: "missing" } }, async ({ anon }) => {
     const email = login("ADMIN").email;
     // The sign-in route needs a password.
     const noPw = await anon.request.post("/api/auth/signin", { data: { email } });

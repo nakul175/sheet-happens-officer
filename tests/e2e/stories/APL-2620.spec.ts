@@ -16,7 +16,8 @@ test.describe("SHO-US-23.1 / APL-2620", () => {
     try { login("ADMIN"); } catch { test.skip(true, "Set SHO_ADMIN_EMAIL and SHO_ADMIN_PASS (a Super Admin)."); }
   });
 
-  test("AC1: forgot-password and resend-verification accept aplyd.com and athenainfonomics.com", async ({ anon }) => {
+  // qa:TC missing
+  test("AC1: forgot-password and resend-verification accept aplyd.com and athenainfonomics.com", { annotation: { type: "qa:TC", description: "missing" } }, async ({ anon }) => {
     for (const email of [`zz-test-${RUN}-a@aplyd.com`, `zz-test-${RUN}-b@athenainfonomics.com`]) {
       for (const path of ["/api/auth/forgot-password", "/api/auth/resend-verification"]) {
         const r = await anon.request.post(path, { data: { email } });
@@ -29,7 +30,8 @@ test.describe("SHO-US-23.1 / APL-2620", () => {
     await expect(anon).toHaveURL(/\/check-reset/);
   });
 
-  test("AC1 (sign-up): an @athenainfonomics.com colleague signs up and gets the verification email", async ({ anon, admin, later }) => {
+  // qa:TC missing
+  test("AC1 (sign-up): an @athenainfonomics.com colleague signs up and gets the verification email", { annotation: { type: "qa:TC", description: "missing" } }, async ({ anon, admin, later }) => {
     test.skip(!PASS, "Set SHO_QA_PASS (the shared password for the nakul17+ accounts).");
     test.skip(!passwordOk(PASS), "SHO_QA_PASS must be at least 8 characters with a letter and a number.");
     const email = alias("2620", "ac1", "athenainfonomics.com");
@@ -45,7 +47,8 @@ test.describe("SHO-US-23.1 / APL-2620", () => {
     expect((await anon.request.get("/api/auth/me")).status(), "sign-up does not sign them in").toBe(401);
   });
 
-  test("AC2: look-alike and foreign domains are refused with the new message on sign-up, resend and forgot password", async ({ anon }) => {
+  // qa:TC missing
+  test("AC2: look-alike and foreign domains are refused with the new message on sign-up, resend and forgot password", { annotation: { type: "qa:TC", description: "missing" } }, async ({ anon }) => {
     for (const email of refused) {
       for (const [path, data] of [
         ["/api/auth/signup", { name: "ZZ-TEST Domain", email, password: pw }],
@@ -65,7 +68,8 @@ test.describe("SHO-US-23.1 / APL-2620", () => {
     await expect(alertOf(anon)).toContainText(MESSAGE);
   });
 
-  test("AC3: sign-in is unchanged, so a wrong-domain email fails like any other", async ({ anon }) => {
+  // qa:TC missing
+  test("AC3: sign-in is unchanged, so a wrong-domain email fails like any other", { annotation: { type: "qa:TC", description: "missing" } }, async ({ anon }) => {
     const wrongDomain = await anon.request.post("/api/auth/signin", { data: { email: `zz-test-${RUN}-d@gmail.com`, password: "not-a-real-one-1" } });
     const unknown = await anon.request.post("/api/auth/signin", { data: { email: `zz-test-${RUN}-e@aplyd.com`, password: "not-a-real-one-1" } });
     expect(wrongDomain.status()).toBe(401);
@@ -74,7 +78,8 @@ test.describe("SHO-US-23.1 / APL-2620", () => {
     expect((await unknown.json()).error).toBe("Email or password is incorrect.");
   });
 
-  test("AC4: existing accounts and the Super Admin are untouched", async ({ anon, admin }) => {
+  // qa:TC missing
+  test("AC4: existing accounts and the Super Admin are untouched", { annotation: { type: "qa:TC", description: "missing" } }, async ({ anon, admin }) => {
     const r = await anon.request.post("/api/auth/signin", { data: { email: login("ADMIN").email, password: login("ADMIN").password } });
     expect(r.status()).toBe(200);
     expect((await r.json()).user.orgRole).toBe("SUPER_ADMIN");

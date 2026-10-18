@@ -33,7 +33,8 @@ test.describe("SHO-US-23.2 / APL-2621", () => {
     try { login("ADMIN"); } catch { test.skip(true, "Set SHO_ADMIN_EMAIL and SHO_ADMIN_PASS (a Super Admin)."); }
   });
 
-  test("AC1: only the Super Admin sees + Add person, and the server refuses anyone else", async ({ admin, member }) => {
+  // qa:TC missing
+  test("AC1: only the Super Admin sees + Add person, and the server refuses anyone else", { annotation: { type: "qa:TC", description: "missing" } }, async ({ admin, member }) => {
     await admin.page.goto("/team");
     await expect(admin.page.getByRole("button", { name: "+ Add person" })).toBeVisible(SLOW);
     await member.page.goto("/team");
@@ -45,7 +46,8 @@ test.describe("SHO-US-23.2 / APL-2621", () => {
     expect(people.some((p) => p.email === email("nope"))).toBe(false);
   });
 
-  test("AC2: the form has First name, Last name, Email and Role (Member by default, Admin), and never offers Super Admin", async ({ admin }) => {
+  // qa:TC missing
+  test("AC2: the form has First name, Last name, Email and Role (Member by default, Admin), and never offers Super Admin", { annotation: { type: "qa:TC", description: "missing" } }, async ({ admin }) => {
     test.setTimeout(240_000);
     await admin.page.goto("/team");
     await admin.page.getByRole("button", { name: "+ Add person" }).click({ timeout: 90_000 });
@@ -61,7 +63,8 @@ test.describe("SHO-US-23.2 / APL-2621", () => {
     expect(r.status).toBe(400);
   });
 
-  test("AC3: an email that already exists is refused; for a deactivated person the message offers Reactivate", async ({ admin, later }) => {
+  // qa:TC missing
+  test("AC3: an email that already exists is refused; for a deactivated person the message offers Reactivate", { annotation: { type: "qa:TC", description: "missing" } }, async ({ admin, later }) => {
     const body = { firstName: "ZZ-TEST", lastName: `dup ${RUN}`, email: email("dup"), role: "MEMBER" };
     const first = await admin.api.post("/api/team", body);
     expect(first.status).toBe(201);
@@ -79,7 +82,8 @@ test.describe("SHO-US-23.2 / APL-2621", () => {
     expect(gone.json.error).toMatch(/Reactivate/);
   });
 
-  test("AC4: saving through the form creates an Active person named 'First Last' and shows the result", async ({ admin, later }) => {
+  // qa:TC missing
+  test("AC4: saving through the form creates an Active person named 'First Last' and shows the result", { annotation: { type: "qa:TC", description: "missing" } }, async ({ admin, later }) => {
     test.setTimeout(240_000);
     const addr = email("form");
     later(async () => {
@@ -101,7 +105,8 @@ test.describe("SHO-US-23.2 / APL-2621", () => {
     expect(row.orgRole).toBe("MEMBER");
   });
 
-  test("AC4 (password): the password is random and stored only as a hash", async ({ admin, later }) => {
+  // qa:TC missing
+  test("AC4 (password): the password is random and stored only as a hash", { annotation: { type: "qa:TC", description: "missing" } }, async ({ admin, later }) => {
     const make = async (label: string) => {
       const addr = email(label);
       const r = await admin.api.post("/api/team", { firstName: "ZZ-TEST", lastName: `${label} ${RUN}`, email: addr, role: "MEMBER" });
@@ -136,7 +141,8 @@ test.describe("SHO-US-23.2 / APL-2621", () => {
     }
   });
 
-  test("AC5: when the email cannot be sent the account still exists, the banner says so and offers Resend sign-in details", async ({ admin, later }) => {
+  // qa:TC missing
+  test("AC5: when the email cannot be sent the account still exists, the banner says so and offers Resend sign-in details", { annotation: { type: "qa:TC", description: "missing" } }, async ({ admin, later }) => {
     test.setTimeout(240_000);
     const addr = email("nosend");
     const name = `ZZ-TEST nosend ${RUN}`;
@@ -172,7 +178,8 @@ test.describe("SHO-US-23.2 / APL-2621", () => {
     await expect(admin.page.locator("tbody tr", { hasText: addr }).getByRole("button", { name: "Resend sign-in details" })).toBeVisible();
   });
 
-  test("AC6: the audit log records who added whom and with which role, and never the password", async ({ admin, later }) => {
+  // qa:TC missing
+  test("AC6: the audit log records who added whom and with which role, and never the password", { annotation: { type: "qa:TC", description: "missing" } }, async ({ admin, later }) => {
     const body = { firstName: "ZZ-TEST", lastName: `audit ${RUN}`, email: email("audit"), role: "ADMIN" };
     const r = await admin.api.post("/api/team", body);
     expect(r.status).toBe(201);
@@ -188,7 +195,8 @@ test.describe("SHO-US-23.2 / APL-2621", () => {
     expect(JSON.stringify(row).toLowerCase().includes("password")).toBe(false);
   });
 
-  test("AC7: any email domain works, because only self-signup is limited", async ({ admin, later }) => {
+  // qa:TC missing
+  test("AC7: any email domain works, because only self-signup is limited", { annotation: { type: "qa:TC", description: "missing" } }, async ({ admin, later }) => {
     const addr = `zz-test-${RUN}-any@zz-test-other-domain.invalid`;
     const r = await admin.api.post("/api/team", { firstName: "ZZ-TEST", lastName: `any ${RUN}`, email: addr, role: "MEMBER" });
     expect(r.status, JSON.stringify(r.json)).toBe(201);

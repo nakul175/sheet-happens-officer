@@ -18,7 +18,8 @@ test.describe("SHO-US-1.3 / APL-2476", () => {
     try { login("ADMIN"); } catch { test.skip(true, "Set SHO_ADMIN_EMAIL and SHO_ADMIN_PASS (a Super Admin)."); }
   });
 
-  test("AC1: the right password lands on My tasks with a 30-day session cookie that page scripts cannot read", async ({ anon }) => {
+  // qa:TC missing
+  test("AC1: the right password lands on My tasks with a 30-day session cookie that page scripts cannot read", { annotation: { type: "qa:TC", description: "missing" } }, async ({ anon }) => {
     await anon.goto("/signin");
     await anon.getByLabel("Work email").fill(login("ADMIN").email);
     await anon.getByLabel("Password").fill(login("ADMIN").password);
@@ -34,7 +35,8 @@ test.describe("SHO-US-1.3 / APL-2476", () => {
     expect(await anon.evaluate(() => document.cookie)).not.toContain("sho_session");
   });
 
-  test("AC2: a wrong password and an unknown email get the same message, on the page and in the API", async ({ anon }) => {
+  // qa:TC missing
+  test("AC2: a wrong password and an unknown email get the same message, on the page and in the API", { annotation: { type: "qa:TC", description: "missing" } }, async ({ anon }) => {
     await anon.goto("/signin");
     await anon.getByLabel("Work email").fill(`zz-test-${RUN}-ghost@aplyd.com`);
     await anon.getByLabel("Password").fill("not-the-password-1");
@@ -52,7 +54,8 @@ test.describe("SHO-US-1.3 / APL-2476", () => {
     expect(ok.status()).toBe(200);
   });
 
-  test("AC3: an unverified account with the right password sees Verify your email first with a Resend link", async ({ anon, admin, later }) => {
+  // qa:TC missing
+  test("AC3: an unverified account with the right password sees Verify your email first with a Resend link", { annotation: { type: "qa:TC", description: "missing" } }, async ({ anon, admin, later }) => {
     needPass();
     const email = alias("2476", "ac3", "aplyd.com");
     expect((await signUp(anon.request, zz("ac3"), email)).status).toBe(201);
@@ -80,7 +83,8 @@ test.describe("SHO-US-1.3 / APL-2476", () => {
     expect(resent.to?.toLowerCase()).toBe(email.toLowerCase());
   });
 
-  test("AC4: five failed tries lock the email for 15 minutes, for an address with no account too, and the password is no longer checked", async ({ anon }) => {
+  // qa:TC missing
+  test("AC4: five failed tries lock the email for 15 minutes, for an address with no account too, and the password is no longer checked", { annotation: { type: "qa:TC", description: "missing" } }, async ({ anon }) => {
     const email = `zz-test-${RUN}-lock@example.invalid`; // no account, so no real person is locked out
     for (let i = 0; i < 5; i++) {
       const r = await anon.request.post("/api/auth/signin", { data: { email, password: `wrong-pass-${i}9` } });
@@ -96,7 +100,8 @@ test.describe("SHO-US-1.3 / APL-2476", () => {
     await expect(alertOf(anon)).toContainText("Too many attempts. Try again in 15 minutes.");
   });
 
-  test("AC5: a deactivated account with the right password is refused with This account is deactivated", async ({ anon, admin, later }) => {
+  // qa:TC missing
+  test("AC5: a deactivated account with the right password is refused with This account is deactivated", { annotation: { type: "qa:TC", description: "missing" } }, async ({ anon, admin, later }) => {
     needPass();
     const email = alias("2476", "ac5", "aplyd.com");
     expect((await signUp(anon.request, zz("ac5"), email)).status).toBe(201);
