@@ -3,6 +3,7 @@
 // (forgot password, resend verification) and the sign-up itself is left to a manual run.
 import type { Page } from "@playwright/test";
 import { test, expect, RUN, login } from "../support";
+import { why } from "../helpers/jim-http";
 
 const alertOf = (p: Page) => p.locator('[role="alert"]:not(#__next-route-announcer__)');
 const MESSAGE = "Use your @aplyd.com or @athenainfonomics.com email address.";
@@ -23,9 +24,9 @@ test.describe("SHO-US-23.1 / APL-2620", () => {
     await expect(anon).toHaveURL(/\/check-reset/);
   });
 
-  test.skip("AC1 (sign-up): an @athenainfonomics.com colleague signs up and gets the verification email", async () => {
-    // Creates a real account and sends a real email to a real company mailbox. Run by hand.
-  });
+  test.skip("AC1 (sign-up): an @athenainfonomics.com colleague signs up and gets the verification email", why(
+    "Creates a real unverified account and sends a verification email to a real company mailbox. A browser session cannot read that inbox.",
+  ), async () => {});
 
   test("AC2: look-alike and foreign domains are refused with the new message on sign-up, resend and forgot password", async ({ anon }) => {
     for (const email of refused) {

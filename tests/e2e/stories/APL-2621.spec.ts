@@ -1,7 +1,10 @@
 // SHO-US-23.2 Super Admin adds a person (APL-2621). Acceptance criteria AC1 to AC7.
 // Added people get an address like zz-test-<run>-<label>@example.invalid, so no real inbox is mailed. They are deactivated at the end;
 // a person record cannot be deleted from the app.
+// AC5 runs when this server's send fails (the add answer's emailSent is false) and skips when the provider accepts the address.
+// The hash in AC4 stays skipped: it is only in the database, and the password is only in the email.
 import { test, expect, RUN, BASE_URL } from "../support";
+import { why } from "../helpers/jim-http";
 
 const SLOW = { timeout: 90_000 };
 const email = (label: string) => `zz-test-${RUN}-${label}@example.invalid`;
@@ -75,12 +78,41 @@ test.describe("SHO-US-23.2 / APL-2621", () => {
     expect(row.orgRole).toBe("MEMBER");
   });
 
-  test.skip("AC4 (password): the password is random and stored only as a hash", async () => {
-    // A hash in the database cannot be seen from a browser. Covered by tests/people.test.ts.
-  });
+  test.skip("AC4 (password): the password is random and stored only as a hash", why(
+    "The generated password is only in the email, and the hash is only in the database. A browser session can read neither. AC6 checks the response and the audit log. Covered by tests/people.test.ts.",
+  ), async () => {});
 
-  test.skip("AC5: when the email cannot be sent the account still exists, the banner says so and offers Resend sign-in details", async () => {
-    // Needs the mail provider to fail on demand; staging sends through the real one. Covered by tests/people.test.ts.
+  test("AC5: when the email cannot be sent the account still exists, the banner says so and offers Resend sign-in details", async ({ admin, later }) => {
+    test.setTimeout(240_000);
+    const addr = email("nosend");
+    const name = `ZZ-TEST nosend ${RUN}`;
+    later(async () => {
+      const row = ((await admin.api.get("/api/team")).json.people as { id: string; email: string; status: string }[]).find((p) => p.email === addr);
+      if (row && row.status !== "DEACTIVATED") await admin.api.post(`/api/team/${row.id}/deactivate`, { reassign: "leaders" });
+    });
+    await admin.page.goto("/team");
+    await admin.page.getByRole("button", { name: "+ Add person" }).click({ timeout: 90_000 });
+    const dialog = admin.page.getByRole("dialog", { name: "Add person" });
+    await dialog.getByLabel("First name").fill("ZZ-TEST");
+    await dialog.getByLabel("Last name").fill(`nosend ${RUN}`);
+    await dialog.getByLabel("Email").fill(addr);
+    const posted = admin.page.waitForResponse((r) => new URL(r.url()).pathname === "/api/team" && r.request().method() === "POST");
+    await dialog.getByRole("button", { name: "Add and email" }).click();
+    const res = await posted;
+    expect(res.status(), "add person").toBe(201);
+    const sent = ((await res.json()) as { person?: { emailSent?: boolean } }).person?.emailSent;
+    // The failure banner only exists when this server's send throws. A provider that accepts the address cannot be forced to fail.
+    test.skip(sent !== false, "This server sent the sign-in email (emailSent is not false), so the failure banner is not shown. Covered by tests/people.test.ts when sendMail throws.");
+    const people = (await admin.api.get("/api/team")).json.people as { email: string; name: string; status: string }[];
+    const row = people.find((p) => p.email === addr);
+    expect(row?.name).toBe(name);
+    expect(row?.status).toBe("ACTIVE");
+    const banner = admin.page.getByRole("status").filter({ hasText: "did not send" });
+    await expect(banner).toBeVisible({ timeout: 30_000 });
+    await expect(banner).toContainText("Resend sign-in details");
+    const shown = await banner.innerText();
+    expect(shown.includes("Password:")).toBe(false);
+    await expect(admin.page.locator("tbody tr", { hasText: addr }).getByRole("button", { name: "Resend sign-in details" })).toBeVisible();
   });
 
   test("AC6: the audit log records who added whom and with which role, and never the password", async ({ admin, later }) => {
@@ -90,12 +122,13 @@ test.describe("SHO-US-23.2 / APL-2621", () => {
     const id = r.json.person.id as string;
     later(async () => { await admin.api.post(`/api/team/${id}/deactivate`, { reassign: "leaders" }); });
     expect(r.json.person.orgRole).toBe("ADMIN");
-    expect(JSON.stringify(r.json), "the response must not carry a password").not.toMatch(/password/i);
+    const added = JSON.stringify(r.json);
+    expect(added.toLowerCase().includes("password"), "the response must not carry a password").toBe(false);
     const log = (await admin.api.get("/api/audit?event=USER_ADDED_BY_ADMIN")).json.items as { who: string; email: string; event: string; target: string }[];
     const row = log.find((i) => i.target.includes(`ZZ-TEST audit ${RUN}`));
     expect(row, "an audit row for the new person").toBeTruthy();
     expect(row!.email).toBe((admin.user.email as string).toLowerCase());
-    expect(JSON.stringify(row)).not.toMatch(/password/i);
+    expect(JSON.stringify(row).toLowerCase().includes("password")).toBe(false);
   });
 
   test("AC7: any email domain works, because only self-signup is limited", async ({ admin, later }) => {

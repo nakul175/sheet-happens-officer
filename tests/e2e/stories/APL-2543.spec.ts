@@ -3,9 +3,10 @@
 // through the API stamps that activity as now, and a browser session cannot rewrite those timestamps
 // (tests/crm5.test.ts does it with SQL). The stalled-deals job also needs JOB_SECRET, which a signed-in
 // session does not have, and running it here would notify real Leaders on staging.
-// AC4 and AC6 are the parts a session can see. The rest are skipped with the reason.
+// AC4 and AC6 are the parts a session can see. The rest stay skipped: a 30-day history, or the stalled-deals cron.
 import { test, expect, zz } from "../support";
 import { ymd, type Who } from "../g2";
+import { why } from "../helpers/jim-http";
 
 type Later = (fn: () => Promise<unknown>) => void;
 
@@ -27,22 +28,17 @@ async function makeDeal(admin: Who, later: Later, label: string) {
   return { id, name };
 }
 
-test.skip("AC1: Stalled shows on the card, the list and the deal page, and any logged change counts as activity", () => {
-  // Reason: the chip is rendered only when the deal's last activity is more than 30 days old.
-  // Nothing a session can POST sets createdAt, stageChangedAt, task updatedAt or the action log backwards.
-  // Covered by tests/crm5.test.ts "flags a deal after 30 quiet days…".
-});
+test.skip("AC1: Stalled shows on the card, the list and the deal page, and any logged change counts as activity", why(
+  "Needs a deal whose last activity is more than 30 days old. A session cannot move createdAt, stageChangedAt, task updatedAt or the action log backwards (30-day history). Covered by tests/crm5.test.ts.",
+), () => {});
 
-test.skip("AC2: any later activity clears the Stalled flag", () => {
-  // Reason: clearing the flag needs a deal that is already stalled. A session cannot age one, so it cannot watch the flag go off.
-  // Covered by tests/crm5.test.ts, which adds a task after ageing the deal and expects stalled to be false.
-});
+test.skip("AC2: any later activity clears the Stalled flag", why(
+  "Clearing the flag needs a deal that is already stalled. A session cannot age one (30-day history). Covered by tests/crm5.test.ts.",
+), () => {});
 
-test.skip("AC3: one in-app notice per stall, and a new one only after new activity and 30 more quiet days", () => {
-  // Reason: the notice is sent by the stalled-deals job. That route needs JOB_SECRET (a cron secret, not a person signing in)
-  // and a deal whose activity is 30 days old. Calling it against staging would write notices for real Leaders.
-  // Covered by tests/crm5.test.ts, which runs the job against a local database.
-});
+test.skip("AC3: one in-app notice per stall, and a new one only after new activity and 30 more quiet days", why(
+  "The notice is sent by the stalled-deals cron. That route needs JOB_SECRET and a deal quiet for 30 days, and running it on staging would notify real Leaders. Covered by tests/crm5.test.ts.",
+), () => {});
 
 test("AC4: 30 days is a fixed part of the product, not a setting on the deal", async ({ admin, later }) => {
   await admin.page.goto("/review");
@@ -63,11 +59,9 @@ test("AC4: 30 days is a fixed part of the product, not a setting on the deal", a
   expect("stallDays" in block).toBe(false);
 });
 
-test.skip("AC5: archived, Paused, Done and Lost deals are never flagged", () => {
-  // Reason: a new deal in those stages is also not stalled, because its last activity is now.
-  // That would pass even if the stage rule were missing. Proving "never" needs 30 quiet days, which a session cannot arrange.
-  // Covered by tests/crm5.test.ts "never flags Paused, Done, Lost or archived deals".
-});
+test.skip("AC5: archived, Paused, Done and Lost deals are never flagged", why(
+  "Proving those stages are never stalled needs 30 quiet days. A new deal in those stages is also not stalled, so a session cannot show the stage rule (30-day history). Covered by tests/crm5.test.ts.",
+), () => {});
 
 test("AC6: stalled-deals is on the job list the daily check reads, with the same fields as the other jobs", async ({ admin }) => {
   const jobs = (await admin.api.get("/api/jobs")).json.jobs as { job: string; about: string; lastStartedAt: string | null; lastFinishedAt: string | null; lastStatus: string | null; lastError: string | null }[];

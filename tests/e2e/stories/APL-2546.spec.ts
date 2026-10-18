@@ -6,6 +6,7 @@
 // The plain Member is the person who must not see someone else's deal.
 import { test, expect, zz } from "../support";
 import { newProject, newTask, ymd, type Who } from "../g2";
+import { why } from "../helpers/jim-http";
 
 type Later = (fn: () => Promise<unknown>) => void;
 type Review = { needsNextStep: { id: string }[]; overdueNextStep: { id: string }[]; stalled: { id: string }[]; ideas: { id: string; canEdit?: boolean }[] };
@@ -61,12 +62,9 @@ test("AC1: Admins see every deal on the review, everyone else only the deals on 
   await expect(admin.page.getByText(hidden.name)).toHaveCount(0);
 });
 
-test.skip("AC2: Drop removes the Idea flag and the task stays", () => {
-  // Reason: the review lists an idea only when the task was created more than 30 days ago.
-  // A session cannot change createdAt, so the Drop button is never rendered for a task this spec creates.
-  // The button calls POST /api/tasks/:id/idea { isIdea: false }, which APL-2545 AC5 undoes, and the task stays.
-  // Covered with a backdated row by tests/crm5.test.ts.
-});
+test.skip("AC2: Drop removes the Idea flag and the task stays", why(
+  "The review lists an idea only when the task was created more than 30 days ago. A session cannot change createdAt, so Drop is never rendered (30-day history). Covered by tests/crm5.test.ts.",
+), () => {});
 
 test("AC3: Convert to deal opens the conversion dialog, and a Viewer is not offered it", async ({ admin, member, later }) => {
   test.setTimeout(180_000);

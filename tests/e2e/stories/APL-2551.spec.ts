@@ -3,6 +3,7 @@
 // AC2, AC3 and AC4's keyboard parts need a real iPhone / Android keyboard (the story says so); they are skipped with that reason.
 import { test, expect, zz, login, BASE_URL } from "../support";
 import { collect } from "../../viewport/checks";
+import { why } from "../helpers/jim-http";
 import type { Browser } from "@playwright/test";
 
 async function phone(browser: Browser, width: number, height = 800, touch = true, who: "admin" | "member" = "admin") {
@@ -46,9 +47,9 @@ test("AC1: every input, select and textarea is at least 16 px at 320 and 600 px"
   expect(bad).toEqual([]);
 });
 
-test.skip("AC2: tapping a field on an iPhone does not zoom the page", () => {
-  // Needs a real iPhone: desktop Chromium does not auto-zoom. The 16 px rule it depends on is tested in AC1; the viewport rule in SHO-US-22.1.
-});
+test.skip("AC2: tapping a field on an iPhone does not zoom the page", why(
+  "Needs a real iPhone. Desktop Chromium does not auto-zoom when a field is tapped. The 16 px rule is AC1.",
+), () => {});
 
 test("AC3: the concierge composer and Send are fully visible on a phone (keyboard part needs a device)", async ({ browser }) => {
   const ctx = await phone(browser, 390, 844);
@@ -69,9 +70,9 @@ test("AC3: the concierge composer and Send are fully visible on a phone (keyboar
   await ctx.close();
 });
 
-test.skip("AC3: composer and Send stay visible with the on-screen keyboard open", () => {
-  // Needs a real iPhone and Android keyboard (visualViewport resizes); not reproducible in desktop Chromium.
-});
+test.skip("AC3: composer and Send stay visible with the on-screen keyboard open", why(
+  "Needs a real iPhone or Android on-screen keyboard. Desktop Chromium does not resize visualViewport.",
+), () => {});
 
 test("AC4: in the task panel the description field and the footer actions are reachable (keyboard part needs a device)", async ({ browser }) => {
   const ctx = await phone(browser, 390, 844);

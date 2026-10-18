@@ -2,6 +2,7 @@
 // Runs against staging. Data: a ZZ-TEST project with ZZ-TEST tasks, archived afterwards. AC7 needs SHO_MEMBER_EMAIL / SHO_MEMBER_PASS.
 // Skipped (need a real iPhone / keyboard, as the story says): AC3 on-device, AC5.
 import { test, expect, zz, login, BASE_URL } from "../support";
+import { why } from "../helpers/jim-http";
 import type { Browser } from "@playwright/test";
 
 async function phone(browser: Browser, width: number, height = 800, touch = true, who: "admin" | "member" = "admin") {
@@ -86,9 +87,9 @@ test("AC3 (stylesheet part): the phone sheet height uses dvh, not 100vh alone", 
   for (const r of rules) if (/100vh/.test(r)) expect(r).toMatch(/100dvh/);
 });
 
-test.skip("AC3 (on a device): with Safari's toolbar visible the sheet's bottom edge is visible", () => {
-  // Needs a real iPhone with Safari's toolbar; desktop Chromium has no dynamic toolbar. The dvh rule is checked in the test above.
-});
+test.skip("AC3 (on a device): with Safari's toolbar visible the sheet's bottom edge is visible", why(
+  "Needs a real iPhone with Safari's toolbar. Desktop Chromium has no dynamic toolbar. The dvh rule is the stylesheet test above.",
+), () => {});
 
 test("AC4: Escape closes the sheet and focus returns to the task row", async ({ browser }) => {
   const ctx = await phone(browser, 390, 800);
@@ -120,9 +121,9 @@ test("AC4: the Back gesture closes the sheet", async ({ browser }) => {
   await ctx.close();
 });
 
-test.skip("AC5: with the keyboard open and the description focused, the field and footer are visible", () => {
-  // Needs a real on-screen keyboard (visualViewport resizes); not reproducible in desktop Chromium.
-});
+test.skip("AC5: with the keyboard open and the description focused, the field and footer are visible", why(
+  "Needs a real on-screen keyboard. Desktop Chromium does not open one, so the field and footer cannot be checked above it.",
+), () => {});
 
 test("AC6: at 600 px and wider the centred dialog is used, with the same scroll lock", async ({ browser }) => {
   const ctx = await phone(browser, 800, 800, false);

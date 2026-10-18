@@ -1,6 +1,7 @@
 // SHO-US-22.10 Installable web app (APL-2558). Epic SHO-E22.
 // Runs against staging. Creates no data. AC2 and AC3 need a real Android / iPhone and are skipped with that reason.
 import { test, expect } from "../support";
+import { why } from "../helpers/jim-http";
 
 type Icon = { src: string; sizes: string; type?: string; purpose?: string };
 
@@ -35,13 +36,13 @@ test("AC1: the pages link the manifest and an apple-touch icon of 180 x 180 px",
   expect([png.readUInt32BE(16), png.readUInt32BE(20)]).toEqual([180, 180]);
 });
 
-test.skip("AC2: Chrome on Android offers install", () => {
-  // Needs a real Android device with Chrome (the story says "verified on a device"). The manifest rules that Chrome checks are tested in AC1.
-});
+test.skip("AC2: Chrome on Android offers install", why(
+  "Needs a real Android device with Chrome. The story says install is verified on a device. The manifest rules are AC1.",
+), () => {});
 
-test.skip("AC3: iOS Safari Add to Home Screen shows the SHO icon and name and opens without browser bars", () => {
-  // Needs a real iPhone. The tags it reads (apple-touch-icon, apple-mobile-web-app-capable, title SHO) are checked below.
-});
+test.skip("AC3: iOS Safari Add to Home Screen shows the SHO icon and name and opens without browser bars", why(
+  "Needs a real iPhone. Add to Home Screen cannot be driven from desktop Chromium. The apple-touch tags are the next test.",
+), () => {});
 
 test("AC3 (tags only): the page declares itself a web app for iOS, titled SHO", async ({ anon }) => {
   await anon.goto("/signin");
