@@ -1,7 +1,11 @@
 // SHO-US-14.2 Honest loading, empty, error and offline states (Linear APL-2561).
 // Network failures and slow loads are simulated in the browser (route interception), so nothing on the server is touched.
+// The project-screen slow load runs whenever PR #12 is live on staging (tests/e2e/helpers/jim-gate.ts) and skips otherwise.
 import { test, expect, zz } from "../support";
 import { newProject } from "../g2";
+import { notLive, prLive } from "../helpers/jim-gate";
+
+const WHY = "a slow project load shows \"Could not reach the server.\" instead of a skeleton without it.";
 
 async function project(admin: { api: import("../support").Api; user: Record<string, any> }, later: (f: () => Promise<unknown>) => void, label: string) {
   const r = await admin.api.post("/api/projects", { name: zz(label), leaderId: admin.user.id });
@@ -20,11 +24,9 @@ test("AC1: a load slower than 400 ms shows a skeleton of the layout (My tasks)",
   await expect(page.locator(".skel-row")).toHaveCount(0, { timeout: 8000 }); // gone when the data arrives
 });
 
-// PRODUCT DEFECT (found while writing this spec): useGet starts with status 0 and ProjectView treats status 0 as a network
-// failure (src/app/(app)/projects/[id]/ProjectView.tsx line 99 and isNetworkFailure in src/components/api.ts). So while a project
-// loads slowly the screen shows "Could not reach the server." instead of a skeleton. The same pattern is in Activity, Members and Trash.
-// test.fail() keeps this visible: when the product is fixed this test will start passing and Playwright will flag it.
-test.fail("AC1 and AC2 (project screen): a slow load shows a skeleton and does not claim the server is unreachable", async ({ admin, later }) => {
+test("AC1 and AC2 (project screen): a slow load shows a skeleton and does not claim the server is unreachable", async ({ admin, later }) => {
+  const gate = await prLive(12, admin, null, later);
+  test.skip(!gate.deployed, notLive(gate, WHY));
   const p = await project(admin, later, "14.2 slow");
   const page = admin.page;
   await page.route(new RegExp(`/api/projects/${p.id}(/tasks)?(\\?|$)`), async (r) => { await new Promise((x) => setTimeout(x, 2500)); await r.continue(); });
