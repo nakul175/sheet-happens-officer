@@ -10,7 +10,8 @@
 # Variables: PROD_DB_HOST and PROD_DB_NAME. A staging pool URL must set
 # connection_limit=2 and pool_timeout, and its host plus database must differ from those.
 # actions: write is granted so the called gates job can upload the tarball.
-# The deploy job itself requests actions: read.
+# statuses: write is granted so the digest-record job can post staging/digest.
+# The deploy job itself requests actions: read and cannot write statuses.
 name: Test and deploy to staging
 
 on:

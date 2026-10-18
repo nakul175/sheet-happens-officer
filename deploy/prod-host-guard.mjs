@@ -1,5 +1,5 @@
 // Stop tests and seed data from running against production unless the run is the
-// read-only smoke. NJ's tag is @readonly. @prod-safe is accepted as the same allow-list.
+// read-only smoke. NJ's tag is exactly @readonly, with @write excluded exactly.
 // ZZ-TEST seeding is refused against production in every case.
 import { pathToFileURL } from "node:url";
 
@@ -31,13 +31,15 @@ function identity(raw) {
 }
 
 export function productionTarget(env = process.env) {
+  const prodHost = (env.PROD_DB_HOST || "").trim().toLowerCase();
+  const prodName = (env.PROD_DB_NAME || "").trim().toLowerCase();
+  if (!prodHost || !prodName) {
+    throw new Error("PROD_DB_HOST and PROD_DB_NAME must be set");
+  }
   const hosts = [env.TASKBOARD_URL, env.APP_URL, env.BASE_URL, env.PLAYWRIGHT_TEST_BASE_URL]
     .map(hostname)
     .filter(Boolean);
   if (hosts.some((host) => PROD_APP_HOSTS.has(host))) return true;
-  const prodHost = (env.PROD_DB_HOST || "").toLowerCase();
-  const prodName = (env.PROD_DB_NAME || "").toLowerCase();
-  if (!prodHost || !prodName) return false;
   return [env.DATABASE_URL, env.DIRECT_DATABASE_URL].some((raw) => {
     const id = identity(raw);
     return id !== null && id.host === prodHost && id.database === prodName;
@@ -58,9 +60,7 @@ function flagValues(argv, name) {
 export function readonlySmoke(argv) {
   const grep = flagValues(argv, "--grep");
   const invert = flagValues(argv, "--grep-invert");
-  const allowed = grep.some((value) => value.includes("@readonly") || value.includes("@prod-safe"));
-  const writesExcluded = invert.some((value) => value.includes("@write"));
-  return allowed && writesExcluded;
+  return grep.length === 1 && grep[0] === "@readonly" && invert.length === 1 && invert[0] === "@write";
 }
 
 export function zzTestRequested(env = process.env, argv = []) {

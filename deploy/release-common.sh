@@ -26,10 +26,13 @@ json_get() {
   node -e 'const j=JSON.parse(process.argv[1]); const v=j[process.argv[2]]; process.stdout.write(v===undefined||v===null?"":String(v))' "$1" "$2"
 }
 
-# True when both identity variables are set and this parsed URL is that database.
+# True when this parsed URL is the production database. Unset identity variables fail closed.
 is_prod_db() {
   local facts="$1" host db prod_host prod_name
-  [ -n "${PROD_DB_HOST:-}" ] && [ -n "${PROD_DB_NAME:-}" ] || return 1
+  if [ -z "${PROD_DB_HOST:-}" ] || [ -z "${PROD_DB_NAME:-}" ]; then
+    echo "PROD_DB_HOST and PROD_DB_NAME must be set"
+    return 2
+  fi
   host=$(json_get "$facts" host)
   db=$(json_get "$facts" database)
   prod_host=$(printf '%s' "$PROD_DB_HOST" | tr '[:upper:]' '[:lower:]')
@@ -61,21 +64,26 @@ assert_push_target() {
 # host and database differ and the URL sets connection_limit=2 and pool_timeout.
 # Values are never printed.
 assert_database_urls() {
-  local tier="$1" app direct pool
+  local tier="$1" app direct pool prod_rc
+  if [ -z "${PROD_DB_HOST:-}" ] || [ -z "${PROD_DB_NAME:-}" ]; then
+    echo "PROD_DB_HOST and PROD_DB_NAME must be set"
+    return 1
+  fi
   [ -n "${DATABASE_URL:-}" ] || { echo "DATABASE_URL is missing"; return 1; }
   app=$(db_facts "$DATABASE_URL") || { echo "DATABASE_URL could not be read"; return 1; }
   pool=$(json_get "$app" pool)
+  set +e
+  is_prod_db "$app"
+  prod_rc=$?
+  set -e
+  [ "$prod_rc" != 2 ] || return 1
   case "$tier" in
     staging)
-      if is_prod_db "$app"; then
+      if [ "$prod_rc" = 0 ]; then
         echo "refusing to point staging at the production database"
         return 1
       fi
       if [ "$pool" = true ]; then
-        if [ -z "${PROD_DB_HOST:-}" ] || [ -z "${PROD_DB_NAME:-}" ]; then
-          echo "refusing to use a staging PgBouncer pool until PROD_DB_HOST and PROD_DB_NAME identify production"
-          return 1
-        fi
         [ "$(json_get "$app" connectionLimit)" = "2" ] || { echo "staging pool URL must set connection_limit=2"; return 1; }
         case "$(json_get "$app" poolTimeout)" in
           ''|*[!0-9]*) echo "staging pool URL must set pool_timeout"; return 1 ;;
@@ -99,7 +107,7 @@ assert_database_urls() {
       [ -n "${DIRECT_DATABASE_URL:-}" ] || { echo "DIRECT_DATABASE_URL is required for production migrations"; return 1; }
       [ "$(json_get "$app" port)" = "25061" ] || { echo "production DATABASE_URL must use the PgBouncer port 25061"; return 1; }
       [ "$(json_get "$app" pgbouncer)" = true ] || { echo "production DATABASE_URL must include pgbouncer=true"; return 1; }
-      if [ -n "${PROD_DB_HOST:-}" ] && [ -n "${PROD_DB_NAME:-}" ] && ! is_prod_db "$app"; then
+      if [ "$prod_rc" != 0 ]; then
         echo "production DATABASE_URL does not match PROD_DB_HOST and PROD_DB_NAME"
         return 1
       fi

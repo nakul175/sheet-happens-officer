@@ -53,13 +53,19 @@ Production deploys from an annotated tag `rel-YYYY.MM.DD.N` (`.github/workflows/
 through the GitHub environment `production`. A `rel-test-*` tag only runs
 `.github/workflows/rehearse.yml`: it waits for the same approval and does not SSH. The
 production job also requires a QA status on the commit (`qa/gate` = success, description
-`READY <digest>` or `WITH_EXCEPTION <digest>`), the digest staging recorded for that commit,
-and the commit being on `main`. CI builds one release tarball and its SHA-256 per commit;
+`READY <digest>` or `WITH_EXCEPTION <digest>`). The status creator must be the person named
+in the repository variable `QA_GATE_LOGIN`. The check stops if that variable is empty, if it
+names a bot, or if anyone else created the status. The digest staging recorded for that
+commit, and the commit being on `main`, are required too. Staging posts that digest from a
+separate job whose script writes only the `staging/digest` context. The deploy job itself
+cannot write commit statuses. CI builds one release tarball and its SHA-256 per commit;
 staging and production both install that file. `deploy/release.sh` does not build on the
 droplet. It migrates, switches the `current` symlink, restarts, and checks `/api/health`
 and `/api/version`. A failed health check puts the previous code back and records it at
 `/opt/sho/previous`. Migrations are forward-only. On production, a pending migration must be
-marked `-- expand-only` (or the directory contains a file named `expand-only`). The script
+marked `-- expand-only` (or the directory contains a file named `expand-only`). The only way
+past that marker is to run the release workflow by hand from the tag with
+`allow_contract_migration` set. A repository variable cannot skip it. The script
 then checks free disk, takes a `pg_dump` of `DIRECT_DATABASE_URL`, checks it with
 `pg_restore --list`, and keeps the newest seven dumps. If any of that fails, the migration
 does not start.
@@ -73,9 +79,11 @@ environment.
 `/api/version` returns `{ "sha", "digest" }` for the running build. Production `DATABASE_URL`
 is the PgBouncer pool (port 25061, `pgbouncer=true`). `DIRECT_DATABASE_URL` is the direct
 database, used for migrations and the backup. Staging may use its own pool on port 25061
-when `PROD_DB_HOST` and `PROD_DB_NAME` show it is not the production database, the URL sets
+when `PROD_DB_HOST` and `PROD_DB_NAME` are set and show it is not the production database, the URL sets
 `connection_limit=2` and `pool_timeout`, and `STAGING_DIRECT_DATABASE_URL` is the direct
-database.
+database. If either variable is empty, the deploy and the test host guard stop. `npm test`
+needs both set to an identity that is not the database under test (for example
+`prod.db.invalid` and `prod`).
 
 One-time setup, in order:
 
@@ -96,9 +104,10 @@ migrations have `pg_dump` and `pg_restore`. Keep at least 2 GiB free on the depl
    Production secrets live on the `production` environment, not in the repository:
    `DATABASE_URL` (PgBouncer, port 25061, `pgbouncer=true`) and `DIRECT_DATABASE_URL` (direct
    database, required for migrations and the backup). Repository variables: `PROD_DB_HOST`,
-   `PROD_DB_NAME`, and `DROPLET_HOST_KEY` (one `ssh-keyscan -t ed25519 <ip>` line). Production
-   refuses to deploy when `DROPLET_HOST_KEY` is empty. `DROPLET_HOST` is optional.
-   `ROLLBACK_REVIEWER` is Oscar's GitHub login. `OSCAR_EMAIL` is optional.
+   `PROD_DB_NAME`, `QA_GATE_LOGIN` (the GitHub login of the person who posts `qa/gate`; not a
+   bot), and `DROPLET_HOST_KEY` (one `ssh-keyscan -t ed25519 <ip>` line). Production
+   refuses to deploy when `DROPLET_HOST_KEY` or the production database identity is empty.
+   `DROPLET_HOST` is optional. `ROLLBACK_REVIEWER` is Oscar's GitHub login. `OSCAR_EMAIL` is optional.
 7. In repository settings, NJ creates the `production` environment (required reviewer
    `nakul175`, prevent self-review, tags allowed) and the `rollback` environment (required
    reviewer Oscar, prevent self-review). NJ also adds an active tag ruleset for

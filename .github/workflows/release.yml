@@ -9,13 +9,14 @@
 #     environment to the main branch, or a rel-* tag cannot deploy.
 # Environment secrets, same names as today: DATABASE_URL (PgBouncer port 25061,
 # pgbouncer=true), DIRECT_DATABASE_URL (direct database, required).
-# Optional environment variable ALLOW_CONTRACT_MIGRATION=true lets one release
-# apply a migration that is not marked expand-only. Remove it afterwards.
+# A contract migration is allowed only by running this workflow by hand from the
+# tag with allow_contract_migration set. A repository variable cannot skip the marker.
 # Also create an active tag ruleset that restricts creating refs/tags/rel-*
 # to the release managers (sample: deploy/rel-tag-ruleset.json).
 # QA records the decision on the commit before the tag deploys:
 #   context qa/gate, state success, description "READY <digest>" or
-#   "WITH_EXCEPTION <digest>". The digest is the staging/digest status.
+#   "WITH_EXCEPTION <digest>", and creator.login equal to the variable QA_GATE_LOGIN.
+# The digest is the staging/digest status. QA_GATE_LOGIN must be a person.
 name: Release to production
 
 on:

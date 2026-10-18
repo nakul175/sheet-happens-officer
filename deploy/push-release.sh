@@ -11,6 +11,12 @@ case "${SHO_ALLOW_CONTRACT_MIGRATION:-}" in
   ""|1) ;;
   *) echo "::error::SHO_ALLOW_CONTRACT_MIGRATION must be empty or 1"; exit 1 ;;
 esac
+case "${PROD_DB_HOST:-}" in
+  ""|*[!A-Za-z0-9._-]*) echo "::error::PROD_DB_HOST must be set"; exit 1 ;;
+esac
+case "${PROD_DB_NAME:-}" in
+  ""|*[!A-Za-z0-9._-]*) echo "::error::PROD_DB_NAME must be set"; exit 1 ;;
+esac
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck source=release-common.sh
@@ -82,7 +88,7 @@ echo "Uploading the release tarball"
 echo "Installing $GITHUB_SHA on $tier"
 remote_log=$(mktemp)
 set +e
-"${SSH[@]}" "deploy@$HOST" "SHO_TIER='$tier' SHO_ALLOW_CONTRACT_MIGRATION='${SHO_ALLOW_CONTRACT_MIGRATION:-}' bash '$ROOT/incoming/release.sh' '$GITHUB_SHA' '$ROOT/incoming/$GITHUB_SHA.tar.gz' '$DIGEST'" | tee "$remote_log"
+"${SSH[@]}" "deploy@$HOST" "SHO_TIER='$tier' SHO_ALLOW_CONTRACT_MIGRATION='${SHO_ALLOW_CONTRACT_MIGRATION:-}' PROD_DB_HOST='${PROD_DB_HOST}' PROD_DB_NAME='${PROD_DB_NAME}' bash '$ROOT/incoming/release.sh' '$GITHUB_SHA' '$ROOT/incoming/$GITHUB_SHA.tar.gz' '$DIGEST'" | tee "$remote_log"
 remote_rc=${PIPESTATUS[0]}
 set -e
 if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then

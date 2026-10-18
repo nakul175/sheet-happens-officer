@@ -317,8 +317,9 @@ if [ -n "${PREV:-}" ] && [ -d "$PREV" ] && [ "$PREV" != "$REL" ]; then
   ln -sfn "$PREV" "$ROOT/previous"
   basename "$PREV" > "$ROOT/previous-sha"
   log "rollback target $(basename "$PREV")"
+elif [ -L "$ROOT/previous" ] || [ -d "$ROOT/previous" ]; then
+  log "rollback target $(basename "$(readlink -f "$ROOT/previous")") kept"
 else
-  rm -f "$ROOT/previous" "$ROOT/previous-sha"
   log "rollback target none"
 fi
 switch "$REL"
@@ -330,7 +331,17 @@ if ! sudo systemctl restart "$SERVICE"; then
 fi
 if healthy && version_ok; then
   log "healthy: $SHA is live"
-  find "$ROOT/releases" -mindepth 1 -maxdepth 1 -type d -printf '%T@ %p\n' | sort -rn | tail -n +$((KEEP + 1)) | cut -d' ' -f2- | { grep -vx "$REL" || true; } | xargs -r rm -rf
+  keep_prev="$(readlink -f "$ROOT/previous" 2>/dev/null || true)"
+  find "$ROOT/releases" -mindepth 1 -maxdepth 1 -type d -printf '%T@ %p\n' | sort -rn | tail -n +$((KEEP + 1)) | cut -d' ' -f2- \
+    | while IFS= read -r path; do
+        [ -n "$path" ] || continue
+        [ "$path" = "$REL" ] && continue
+        if [ -n "$keep_prev" ] && [ "$path" = "$keep_prev" ]; then
+          log "keeping $(basename "$path") because it is the rollback target"
+          continue
+        fi
+        rm -rf "$path"
+      done
   case "$TARBALL" in
     "$ROOT"/incoming/*) rm -f "$TARBALL" "${TARBALL}.sha256" ;;
   esac

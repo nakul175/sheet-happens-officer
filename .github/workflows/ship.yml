@@ -74,6 +74,8 @@ jobs:
       APP_URL: http://localhost:3100
       TASKBOARD_URL: http://localhost:3100
       JOB_SECRET: ci-only-not-a-real-secret-0123
+      PROD_DB_HOST: prod.db.invalid
+      PROD_DB_NAME: prod
     steps:
       - name: Check the tier
         env:
@@ -195,7 +197,8 @@ jobs:
     permissions:
       contents: read
       actions: read
-      statuses: write
+    outputs:
+      deployed: ${{ steps.deployed.outputs.deployed }}
     env:
       HOST: ${{ vars.DROPLET_HOST || 'app.sheethappensofficer.com' }}
       HOST_KEY: ${{ vars.DROPLET_HOST_KEY }}
@@ -237,17 +240,10 @@ jobs:
           PROD_DB_HOST: ${{ vars.PROD_DB_HOST }}
           PROD_DB_NAME: ${{ vars.PROD_DB_NAME }}
         run: bash deploy/push-release.sh staging
-      - name: Record the digest staging is running
+      - name: Note that staging was updated
+        id: deployed
         if: steps.window.outputs.skip != 'true' && success()
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh api --method POST "/repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}/statuses" \
-            -f state=success \
-            -f context='staging/digest' \
-            -f description="$DIGEST" \
-            -f target_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
-          echo "Recorded staging/digest for this commit." >> "$GITHUB_STEP_SUMMARY"
+        run: echo "deployed=true" >> "$GITHUB_OUTPUT"
       - name: Email the owner if the release failed
         if: failure()
         env:
@@ -255,6 +251,25 @@ jobs:
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: bash deploy/ci-fail-mail.sh
+
+  record-staging-digest:
+    name: Record the staging digest
+    needs: [gates, deploy-staging]
+    if: needs.deploy-staging.result == 'success' && needs.deploy-staging.outputs.deployed == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      statuses: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Post staging/digest
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DIGEST: ${{ needs.gates.outputs.digest }}
+        run: |
+          bash deploy/record-staging-digest.sh
+          echo "Recorded staging/digest for this commit." >> "$GITHUB_STEP_SUMMARY"
 
   qa-gate:
     name: QA gate
@@ -274,6 +289,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           DIGEST: ${{ needs.gates.outputs.digest }}
+          QA_GATE_LOGIN: ${{ vars.QA_GATE_LOGIN }}
         run: bash deploy/qa-gate.sh
       - name: Require the rel-* tag ruleset
         env:
@@ -322,7 +338,7 @@ jobs:
           WEEKLY_MESSAGE_CAP: ${{ vars.WEEKLY_MESSAGE_CAP }}
           PROD_DB_HOST: ${{ vars.PROD_DB_HOST }}
           PROD_DB_NAME: ${{ vars.PROD_DB_NAME }}
-          SHO_ALLOW_CONTRACT_MIGRATION: ${{ (inputs.allow_contract_migration || vars.ALLOW_CONTRACT_MIGRATION == 'true') && '1' || '' }}
+          SHO_ALLOW_CONTRACT_MIGRATION: ${{ inputs.allow_contract_migration && '1' || '' }}
         run: bash deploy/push-release.sh production
       - name: Email the owner if the release failed
         if: failure()
@@ -360,6 +376,8 @@ jobs:
           TASKBOARD_URL: https://app.sheethappensofficer.com
           APP_URL: https://app.sheethappensofficer.com
           BASE_URL: https://app.sheethappensofficer.com
+          PROD_DB_HOST: ${{ vars.PROD_DB_HOST }}
+          PROD_DB_NAME: ${{ vars.PROD_DB_NAME }}
           SMOKE_EMAIL: ${{ secrets.SMOKE_EMAIL }}
           SMOKE_PASSWORD: ${{ secrets.SMOKE_PASSWORD }}
           RELEASE: ${{ github.sha }}

@@ -67,8 +67,15 @@ run_env() {
 run_env staging fail \
   DATABASE_URL='postgresql://u:supersecret@db.example:25061/sho?sslmode=require&pgbouncer=true' \
   RESEND_API_KEY='re_test'
-grep -q 'PgBouncer' "$ENV_ERR"
-pass "staging env rejects an unidentified PgBouncer pool"
+grep -q 'PROD_DB_HOST and PROD_DB_NAME must be set' "$ENV_ERR"
+pass "staging env fails closed when the production database identity is unset"
+
+run_env production fail \
+  DATABASE_URL='postgresql://u:test-only@127.0.0.1:25061/prod?sslmode=require&pgbouncer=true' \
+  DIRECT_DATABASE_URL='postgresql://u:test-only@127.0.0.1:25060/prod?sslmode=require' \
+  RESEND_API_KEY='re_test'
+grep -q 'PROD_DB_HOST and PROD_DB_NAME must be set' "$ENV_ERR"
+pass "production env fails closed when the production database identity is unset"
 
 run_env staging fail \
   PROD_DB_HOST=prod.db.example \
@@ -98,6 +105,8 @@ grep -q '^DIRECT_DATABASE_URL=' "$ENV_OUT"
 pass "staging pool is allowed when it is not production and the limit is 2"
 
 run_env staging ok \
+  PROD_DB_HOST=prod.db.example \
+  PROD_DB_NAME=prod \
   DATABASE_URL='postgresql://u:test-only@127.0.0.1:5432/staging?sslmode=require' \
   RESEND_API_KEY='re_test'
 grep -q "APP_URL='https://staging.sheethappensofficer.com'" "$ENV_OUT"
@@ -106,12 +115,16 @@ if grep -q 'app.sheethappensofficer.com' "$ENV_OUT"; then fail "staging env used
 pass "staging env points at staging"
 
 run_env production fail \
+  PROD_DB_HOST=127.0.0.1 \
+  PROD_DB_NAME=prod \
   DATABASE_URL='postgresql://u:test-only@127.0.0.1:25061/prod?sslmode=require&pgbouncer=true' \
   RESEND_API_KEY='re_test'
 grep -q 'DIRECT_DATABASE_URL' "$ENV_ERR"
 pass "production env requires DIRECT_DATABASE_URL"
 
 run_env production fail \
+  PROD_DB_HOST=127.0.0.1 \
+  PROD_DB_NAME=prod \
   DATABASE_URL='postgresql://u:test-only@127.0.0.1:25061/prod?sslmode=require&pgbouncer=true' \
   DIRECT_DATABASE_URL='postgresql://u:supersecret@127.0.0.1:25061/prod?sslmode=require&pgbouncer=true' \
   RESEND_API_KEY='re_test'
@@ -119,6 +132,8 @@ grep -q 'direct connection' "$ENV_ERR"
 pass "production env rejects a direct URL aimed at the pool"
 
 run_env production ok \
+  PROD_DB_HOST=127.0.0.1 \
+  PROD_DB_NAME=prod \
   DATABASE_URL='postgresql://u:test-only@127.0.0.1:25061/prod?sslmode=require&pgbouncer=true' \
   DIRECT_DATABASE_URL='postgresql://u:test-only@127.0.0.1:25060/prod?sslmode=require' \
   RESEND_API_KEY='re_test'
@@ -283,6 +298,7 @@ EOF
 run_rel() {
   local tier="$1"
   shift
+  # Harness app.env uses 127.0.0.1. Production's database name is prod; staging's is staging.
   env -u DATABASE_URL -u DIRECT_DATABASE_URL \
     PATH="$STUB:$PATH" \
     SHO_TIER="$tier" \
@@ -291,6 +307,8 @@ run_rel() {
     MIGRATE_STATUS_FILE="$MIGRATE_STATUS_FILE" \
     EXPECT_SHA="$SHA" \
     EXPECT_DIGEST="$DIGEST" \
+    PROD_DB_HOST=127.0.0.1 \
+    PROD_DB_NAME=prod \
     "$@" \
     bash deploy/release.sh --harness "$SHA" "$TAR" "$DIGEST"
 }
@@ -446,6 +464,53 @@ grep -q 'contract migration override' "$WORK/out"
 grep -q 'npx prisma migrate deploy' "$HARNESS_LOG"
 pass "contract migrations fail closed unless the override is set"
 
+new_tree
+write_env production
+run_rel production >"$WORK/out"
+old=cccccccccccccccccccccccccccccccccccccccc
+old_dir="$WORK/root/opt/sho/releases/$old"
+mkdir -p "$old_dir"
+echo marker > "$old_dir/marker"
+touch -d '2019-01-01' "$old_dir"
+ln -sfn "$old_dir" "$WORK/root/opt/sho/previous"
+printf '%s\n' "$old" > "$WORK/root/opt/sho/previous-sha"
+for i in 1 2 3 4; do
+  junk="$WORK/root/opt/sho/releases/junk$i"
+  mkdir -p "$junk"
+  echo x > "$junk/x"
+  touch -d "2020-0${i}-15" "$junk"
+done
+run_rel production >"$WORK/out"
+grep -q 'kept' "$WORK/out"
+[ -L "$WORK/root/opt/sho/previous" ] || fail "same-SHA redeploy removed the previous symlink"
+[ "$(readlink -f "$WORK/root/opt/sho/previous")" = "$old_dir" ] || fail "same-SHA redeploy retargeted previous"
+[ "$(cat "$WORK/root/opt/sho/previous-sha")" = "$old" ]
+[ -f "$old_dir/marker" ] || fail "same-SHA redeploy pruned the previous tree"
+[ ! -d "$WORK/root/opt/sho/releases/junk1" ] || fail "prune did not run on the same-SHA redeploy"
+[ "$(readlink -f "$WORK/root/opt/sho/current")" = "$WORK/root/opt/sho/releases/$SHA" ]
+pass "same-SHA redeploy keeps the previous symlink and its tree"
+
+new_tree
+write_env production
+old=dddddddddddddddddddddddddddddddddddddddd
+old_dir="$WORK/root/opt/sho/releases/$old"
+mkdir -p "$old_dir"
+echo marker > "$old_dir/marker"
+touch -d '2019-01-01' "$old_dir"
+ln -s "$old_dir" "$WORK/root/opt/sho/current"
+for i in 1 2 3 4; do
+  junk="$WORK/root/opt/sho/releases/junk$i"
+  mkdir -p "$junk"
+  echo x > "$junk/x"
+  touch -d "2020-0${i}-15" "$junk"
+done
+run_rel production >"$WORK/out"
+grep -q 'because it is the rollback target' "$WORK/out"
+[ "$(readlink -f "$WORK/root/opt/sho/previous")" = "$old_dir" ]
+[ -f "$old_dir/marker" ] || fail "prune deleted the tree previous points at"
+[ ! -d "$WORK/root/opt/sho/releases/junk1" ] || fail "prune did not delete an unreferenced old tree"
+pass "prune keeps the tree the previous symlink points at"
+
 # --- rollback ----------------------------------------------------------------
 
 new_tree
@@ -468,6 +533,30 @@ if env PATH="$STUB:$PATH" SHO_TIER=production SHO_PREFIX="$WORK/root" \
 fi
 pass "rollback rejects a directory outside the release tree"
 
+live=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+live_dir="$WORK/root/opt/sho/releases/$live"
+mkdir -p "$live_dir"
+echo '{}' > "$live_dir/package.json"
+ln -sfn "$live_dir" "$WORK/root/opt/sho/previous"
+env PATH="$STUB:$PATH" SHO_TIER=production SHO_PREFIX="$WORK/root" \
+  HARNESS_LOG="$HARNESS_LOG" EXPECT_SHA=wrong EXPECT_DIGEST=wrong \
+  bash deploy/rollback.sh --harness >"$WORK/out"
+grep -q 'has no release.env; checking health only' "$WORK/out"
+grep -q "rolled back to $live" "$WORK/out"
+[ "$(readlink -f "$WORK/root/opt/sho/current")" = "$live_dir" ]
+if grep -q 'npx prisma' "$HARNESS_LOG"; then fail "rollback of a live tree ran a migration"; fi
+pass "rollback of today's live tree checks health and does not need release.env"
+
+empty=eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+mkdir -p "$WORK/root/opt/sho/releases/$empty"
+ln -sfn "$WORK/root/opt/sho/releases/$empty" "$WORK/root/opt/sho/previous"
+if env PATH="$STUB:$PATH" SHO_TIER=production SHO_PREFIX="$WORK/root" \
+  bash deploy/rollback.sh --harness >"$WORK/out" 2>&1; then
+  fail "rollback accepted a directory that is not an app tree"
+fi
+grep -q 'not an app tree' "$WORK/out"
+pass "rollback rejects a previous tree that is not an app"
+
 # --- host guard --------------------------------------------------------------
 
 run_guard() {
@@ -477,6 +566,7 @@ run_guard() {
     shift
   done
   env -u PROD_DB_HOST -u PROD_DB_NAME -u DATABASE_URL -u DIRECT_DATABASE_URL -u ZZ_PREFIX -u APP_URL -u BASE_URL \
+    PROD_DB_HOST=prod.example PROD_DB_NAME=prod \
     "${assignments[@]}" node deploy/prod-host-guard.mjs "$@"
 }
 if run_guard TASKBOARD_URL=https://app.sheethappensofficer.com --grep @write >"$WORK/out" 2>&1; then
@@ -487,7 +577,15 @@ if grep -q 'postgresql://' "$WORK/out"; then fail "host guard printed a connecti
 pass "@write against the production host exits non-zero"
 
 run_guard TASKBOARD_URL=https://app.sheethappensofficer.com --grep @readonly --grep-invert @write
-run_guard TASKBOARD_URL=https://app.sheethappensofficer.com --grep @prod-safe --grep-invert @write
+if run_guard TASKBOARD_URL=https://app.sheethappensofficer.com --grep @prod-safe --grep-invert @write >"$WORK/out" 2>&1; then
+  fail "@prod-safe was treated as the read-only smoke"
+fi
+if run_guard TASKBOARD_URL=https://app.sheethappensofficer.com --grep '@readonly|' --grep-invert @write >"$WORK/out" 2>&1; then
+  fail "a grep regex was treated as the read-only smoke"
+fi
+if run_guard TASKBOARD_URL=https://app.sheethappensofficer.com --grep @readonly --grep-invert @writeXXX >"$WORK/out" 2>&1; then
+  fail "a grep-invert substring was treated as the read-only smoke"
+fi
 run_guard TASKBOARD_URL=http://localhost:3100 --grep @write
 if run_guard TASKBOARD_URL=https://app.sheethappensofficer.com ZZ_PREFIX=ZZ-TEST-01 --seed --grep @readonly --grep-invert @write >"$WORK/out" 2>&1; then
   fail "ZZ-TEST seeding was allowed against production"
@@ -499,7 +597,12 @@ if PROD_DB_HOST=db.example PROD_DB_NAME=prod \
   fail "@write was allowed against the production database"
 fi
 if grep -q 'supersecret' "$WORK/out"; then fail "host guard printed a password"; fi
-pass "read-only smoke is allowed and ZZ-TEST seeding is refused"
+if env -u PROD_DB_HOST -u PROD_DB_NAME TASKBOARD_URL=http://localhost:3100 \
+  node deploy/prod-host-guard.mjs --grep @readonly --grep-invert @write >"$WORK/out" 2>&1; then
+  fail "host guard ran without the production database identity"
+fi
+grep -q 'PROD_DB_HOST and PROD_DB_NAME must be set' "$WORK/out"
+pass "read-only smoke is exact, ZZ-TEST seeding is refused, and an unset identity fails closed"
 
 # --- qa gate, window, ruleset, ssh ------------------------------------------
 
@@ -507,24 +610,44 @@ digest=$(printf 'a%.0s' {1..64})
 other=$(printf 'b%.0s' {1..64})
 # shellcheck source=qa-gate.sh
 . deploy/qa-gate.sh
-qa_gate_decide rel-2026.10.18.1 tag yes "$digest" "$digest" success "READY $digest" >/dev/null
-qa_gate_decide rel-2026.10.18.2 tag yes "$digest" "$digest" success "WITH_EXCEPTION $digest" >/dev/null
-if qa_gate_decide rel-test-1 tag yes "$digest" "$digest" success "READY $digest" >/dev/null 2>&1; then
+export QA_GATE_LOGIN=pam
+qa_gate_decide rel-2026.10.18.1 tag yes "$digest" "$digest" success "READY $digest" pam >/dev/null
+qa_gate_decide rel-2026.10.18.2 tag yes "$digest" "$digest" success "WITH_EXCEPTION $digest" pam >/dev/null
+if qa_gate_decide rel-test-1 tag yes "$digest" "$digest" success "READY $digest" pam >/dev/null 2>&1; then
   fail "qa gate accepted a rehearsal tag"
 fi
-if qa_gate_decide rel-2026.10.18.1 commit yes "$digest" "$digest" success "READY $digest" >/dev/null 2>&1; then
+if qa_gate_decide rel-2026.10.18.1 commit yes "$digest" "$digest" success "READY $digest" pam >/dev/null 2>&1; then
   fail "qa gate accepted a lightweight tag"
 fi
-if qa_gate_decide rel-2026.10.18.1 tag no "$digest" "$digest" success "READY $digest" >/dev/null 2>&1; then
+if qa_gate_decide rel-2026.10.18.1 tag no "$digest" "$digest" success "READY $digest" pam >/dev/null 2>&1; then
   fail "qa gate accepted a commit that is not on main"
 fi
-if qa_gate_decide rel-2026.10.18.1 tag yes "$digest" "$other" success "READY $digest" >/dev/null 2>&1; then
+if qa_gate_decide rel-2026.10.18.1 tag yes "$digest" "$other" success "READY $digest" pam >/dev/null 2>&1; then
   fail "qa gate accepted a digest staging did not report"
 fi
-if qa_gate_decide rel-2026.10.18.1 tag yes "$digest" "$digest" success "READY $other" >/dev/null 2>&1; then
+if qa_gate_decide rel-2026.10.18.1 tag yes "$digest" "$digest" success "READY $other" pam >/dev/null 2>&1; then
   fail "qa gate accepted a QA record for a different digest"
 fi
-pass "qa gate matches the tag, the ancestor, the digest and the QA record"
+unset QA_GATE_LOGIN
+if qa_gate_decide rel-2026.10.18.1 tag yes "$digest" "$digest" success "READY $digest" pam >"$WORK/out" 2>&1; then
+  fail "qa gate ran without QA_GATE_LOGIN"
+fi
+grep -q 'QA_GATE_LOGIN is unset' "$WORK/out"
+export QA_GATE_LOGIN='github-actions[bot]'
+if qa_gate_decide rel-2026.10.18.1 tag yes "$digest" "$digest" success "READY $digest" 'github-actions[bot]' >"$WORK/out" 2>&1; then
+  fail "qa gate accepted a bot as the QA identity"
+fi
+grep -q 'must be a person' "$WORK/out"
+export QA_GATE_LOGIN=pam
+if qa_gate_decide rel-2026.10.18.1 tag yes "$digest" "$digest" success "READY $digest" 'github-actions[bot]' >"$WORK/out" 2>&1; then
+  fail "qa gate accepted a status created by a bot"
+fi
+grep -q 'QA identity' "$WORK/out"
+if qa_gate_decide rel-2026.10.18.1 tag yes "$digest" "$digest" success "READY $digest" someone-else >"$WORK/out" 2>&1; then
+  fail "qa gate accepted a status created by a different person"
+fi
+grep -q 'was not set by the QA identity' "$WORK/out"
+pass "qa gate matches the tag, the ancestor, the digest, and the QA identity"
 
 window_out=$(mktemp)
 window_at() {
@@ -593,7 +716,24 @@ fi
 grep -q '!rel-test-\*' .github/workflows/release.yml
 grep -q 'rel-test-' .github/workflows/ship.yml
 grep -q 'actions: read' .github/workflows/ship.yml
-pass "workflows keep rehearsals, secrets and production deploys apart"
+deploy_job=$(awk '/^  deploy-staging:/{f=1} /^  record-staging-digest:/{f=0} f' .github/workflows/ship.yml)
+case "$deploy_job" in
+  *statuses:*) fail "the staging deploy job can still write commit statuses" ;;
+esac
+digest_job=$(awk '/^  record-staging-digest:/{f=1} /^  qa-gate:/{f=0} f' .github/workflows/ship.yml)
+case "$digest_job" in
+  *"statuses: write"*) ;;
+  *) fail "the digest job cannot post the staging digest" ;;
+esac
+grep -q "context='staging/digest'" deploy/record-staging-digest.sh
+if grep -q 'qa/gate' deploy/record-staging-digest.sh; then
+  fail "the digest script can name the QA status"
+fi
+if grep -q 'vars.ALLOW_CONTRACT_MIGRATION' .github/workflows/ship.yml .github/workflows/release.yml; then
+  fail "ALLOW_CONTRACT_MIGRATION is still a repository variable"
+fi
+grep -q 'allow_contract_migration' .github/workflows/release.yml
+pass "workflows keep rehearsals, secrets, statuses and the contract override apart"
 
 rm -rf /tmp/sho-rel.*
 echo "all release checks passed"
