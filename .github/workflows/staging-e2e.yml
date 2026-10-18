@@ -1,0 +1,134 @@
+# Story-level Playwright specs (tests/e2e/stories) against STAGING. Started by hand only (Actions > Staging e2e > Run workflow).
+# Input "specs": space-separated issue ids (APL-2481) or globs (APL-26*, tests/e2e/stories/APL-25*.spec.ts); empty runs every spec.
+# Secrets (repository settings): STAGING_USER, STAGING_PASS, SHO_ADMIN_EMAIL, SHO_ADMIN_PASS, SHO_MEMBER_EMAIL, SHO_MEMBER_PASS.
+# They reach the job as environment variables only and are never echoed. Runs queue in one group so two never touch staging at once.
+#
+# Traces are OFF unless the "trace" input asks for them. A trace cannot be redacted: it holds the sign-in request body (the password),
+# the basic-auth header (STAGING_USER:STAGING_PASS in base64, which GitHub's log masking does not catch) and any password typed into a
+# field (APL-2476). With traces on, the uploaded report and results carry those secrets to anyone who can download the run's artifacts.
+name: Staging e2e
+
+on:
+  workflow_dispatch:
+    inputs:
+      specs:
+        description: "Issue ids or globs, space-separated (e.g. APL-2481 APL-26*). Empty = all specs."
+        required: false
+        default: ""
+        type: string
+      trace:
+        description: "Playwright traces. They contain passwords (see the comment at the top of this file)."
+        required: false
+        default: "off"
+        type: choice
+        options: ["off", "retain-on-failure"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: staging-e2e
+  cancel-in-progress: false
+
+jobs:
+  e2e:
+    name: Story specs against staging
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      STAGING_URL: https://staging.sheethappensofficer.com
+      # Only for `prisma generate` during npm ci; nothing connects to it.
+      DATABASE_URL: postgresql://unused:unused@127.0.0.1:1/unused
+      PLAYWRIGHT_HTML_OPEN: never
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+
+      - name: Check the secrets are set (names only, never values)
+        env:
+          STAGING_USER: ${{ secrets.STAGING_USER }}
+          STAGING_PASS: ${{ secrets.STAGING_PASS }}
+          SHO_ADMIN_EMAIL: ${{ secrets.SHO_ADMIN_EMAIL }}
+          SHO_ADMIN_PASS: ${{ secrets.SHO_ADMIN_PASS }}
+          SHO_MEMBER_EMAIL: ${{ secrets.SHO_MEMBER_EMAIL }}
+          SHO_MEMBER_PASS: ${{ secrets.SHO_MEMBER_PASS }}
+        run: |
+          missing=""
+          for n in STAGING_USER STAGING_PASS SHO_ADMIN_EMAIL SHO_ADMIN_PASS SHO_MEMBER_EMAIL SHO_MEMBER_PASS; do
+            [ -n "${!n}" ] || missing="$missing $n"
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::Missing repository secrets:$missing. Add them in Settings > Secrets and variables > Actions."
+            exit 1
+          fi
+          echo "All six secrets are set."
+
+      - name: Pick the spec files
+        id: pick
+        env:
+          SPECS: ${{ inputs.specs }}
+        run: |
+          shopt -s nullglob
+          files=()
+          read -ra toks <<< "$SPECS"   # split on spaces without expanding globs against the repo root
+          for tok in "${toks[@]}"; do
+            if ! [[ "$tok" =~ ^[A-Za-z0-9_.*?/-]+$ ]] || [[ "$tok" == *..* ]]; then
+              echo "::error::Not an issue id or glob: $tok"; exit 1
+            fi
+            if [[ "$tok" =~ ^[A-Za-z]+-[0-9]+$ ]]; then
+              pattern="tests/e2e/stories/${tok^^}.spec.ts"
+            elif [[ "$tok" == */* ]]; then
+              pattern="$tok"
+            else
+              pattern="tests/e2e/stories/$tok"
+              [[ "$pattern" == *.ts ]] || pattern="$pattern.spec.ts"
+            fi
+            matched=()
+            for f in $pattern; do
+              [[ -f "$f" && "$f" == tests/e2e/stories/*.spec.ts ]] && matched+=("$f")
+            done
+            if [ ${#matched[@]} -eq 0 ]; then echo "::error::No spec file matches: $tok"; exit 1; fi
+            files+=("${matched[@]}")
+          done
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "Running every spec in tests/e2e/stories."
+          else
+            printf 'Running %s\n' "${files[@]}" | sort -u
+          fi
+          printf '%s\n' "${files[@]}" | sort -u > "$RUNNER_TEMP/specs.txt"
+
+      - name: Run the specs (workers=1)
+        env:
+          STAGING_USER: ${{ secrets.STAGING_USER }}
+          STAGING_PASS: ${{ secrets.STAGING_PASS }}
+          SHO_ADMIN_EMAIL: ${{ secrets.SHO_ADMIN_EMAIL }}
+          SHO_ADMIN_PASS: ${{ secrets.SHO_ADMIN_PASS }}
+          SHO_MEMBER_EMAIL: ${{ secrets.SHO_MEMBER_EMAIL }}
+          SHO_MEMBER_PASS: ${{ secrets.SHO_MEMBER_PASS }}
+          TRACE: ${{ inputs.trace }}
+        run: |
+          mapfile -t files < <(grep -v '^$' "$RUNNER_TEMP/specs.txt")
+          npx playwright test --workers=1 --reporter=list,html --trace="$TRACE" "${files[@]}"
+
+      - name: Upload the HTML report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: staging-e2e-report
+          path: playwright-report/
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Upload traces and failure screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: staging-e2e-results
+          path: test-results/e2e/
+          if-no-files-found: ignore
+          retention-days: 14
