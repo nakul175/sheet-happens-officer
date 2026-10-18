@@ -122,6 +122,19 @@ async function openTasks(projectId: string) {
   return db.task.findMany({ where: { projectId, deletedAt: null, completedAt: null }, select: { id: true, title: true, parentId: true }, orderBy: { createdAt: "asc" } });
 }
 
+/** AC6: how many tasks are still open, and the first 20, in the order they were created. */
+export function openTaskBlock(open: { id: string; title: string }[]) {
+  return { openTasks: open.length, tasks: open.slice(0, 20).map((t) => ({ id: t.id, title: t.title })) };
+}
+
+/** The open-task refusal for Won or Lost, without moving the deal. Same list the 409 returns. */
+export async function closingTasks(user: Actor, projectId: string) {
+  requireCrm(user);
+  const a = await projectAccess(user, projectId);
+  if (a.project.typeId !== WORKSTREAM_DEAL || !a.project.pipelineId) throw new ApiError(400, "Only deals have stages.");
+  return openTaskBlock(await openTasks(projectId));
+}
+
 const FIELD_NAMES: Record<string, string> = {
   whyPursue: "why to pursue", need: "need", serviceLine: "service line", value: "value", probability: "probability",
   expectedClose: "expected close", submissionDeadline: "submission deadline", introducedBy: "introduced by",
@@ -146,9 +159,7 @@ export async function moveStage(user: Actor, projectId: string, input: { stageId
   if (stage.category === "DONE" || stage.category === "LOST") {
     const open = await openTasks(projectId);
     if (open.length) {
-      throw new ApiError(409, `${open.length} task${open.length === 1 ? " is" : "s are"} still open. Complete or delete ${open.length === 1 ? "it" : "them"} before marking this deal ${stage.name}.`, {
-        openTasks: open.length, tasks: open.slice(0, 20).map((t) => ({ id: t.id, title: t.title })),
-      });
+      throw new ApiError(409, `${open.length} task${open.length === 1 ? " is" : "s are"} still open. Complete or delete ${open.length === 1 ? "it" : "them"} before marking this deal ${stage.name}.`, openTaskBlock(open));
     }
   }
   const details = await db.dealDetails.findUnique({ where: { projectId } });

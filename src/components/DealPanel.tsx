@@ -21,6 +21,16 @@ const LABELS: Record<string, string> = { value: "Value", currency: "Currency", e
 
 export type Blocked = { openTasks: number; tasks: { id: string; title: string; assignee?: string | null }[] };
 
+/** Won and Lost are the stages a deal cannot enter while a task is open (SHO-US-10.3 AC6). */
+export const stageClosesDeal = (category: string) => category === "DONE" || category === "LOST";
+
+/** The alert payload: a positive count, and at most the first 20 tasks the server named. */
+export function closingAlert(data: { openTasks?: number; tasks?: Blocked["tasks"] } | null | undefined): Blocked | null {
+  const openTasks = data?.openTasks ?? 0;
+  if (openTasks <= 0) return null;
+  return { openTasks, tasks: (data?.tasks ?? []).slice(0, 20) };
+}
+
 export type StageInitial = { err?: string | null; blocked?: Blocked | null; need?: string[] };
 export function StageDialog({ projectId, stage, deal, initial, onClose, onDone }: { projectId: string; stage: Stage; deal: Pick<DealBlock, "details">; initial?: StageInitial; onClose: () => void; onDone: () => void }) {
   const [reason, setReason] = useState("");
@@ -48,7 +58,8 @@ export function StageDialog({ projectId, stage, deal, initial, onClose, onDone }
     const r = await api("POST", `/api/projects/${projectId}/stage`, body);
     setBusy(false);
     if (r.ok) { onDone(); return; }
-    if (r.data?.openTasks) setBlocked({ openTasks: r.data.openTasks, tasks: r.data.tasks ?? [] });
+    const next = closingAlert(r.data);
+    if (next) setBlocked(next);
     if (r.data?.needsFields) setNeed(r.data.needsFields);
     setErr(r.error ?? "Could not move the deal.");
   }
@@ -166,15 +177,25 @@ function DealNotes({ projectId, orgId }: { projectId: string; orgId: string | nu
 }
 
 export function DealPanel({ projectId, deal, canWrite, onChange }: { projectId: string; deal: DealBlock; canWrite: boolean; onChange: () => void }) {
-  const [pick, setPick] = useState<Stage | null>(null);
+  const [pick, setPick] = useState<null | { stage: Stage; blocked: Blocked | null }>(null);
   const [edit, setEdit] = useState(false);
   const d = deal.details;
   const cur = deal.stage?.id;
+  // APL-2691: Won asks for no reason, so the dialog used to open before the 409 existed and showed no alert.
+  // Read the same open-task list the move would refuse with, then open the dialog with that alert already in it.
+  async function choose(s: Stage) {
+    let blocked: Blocked | null = null;
+    if (stageClosesDeal(s.category)) {
+      const r = await api<{ openTasks?: number; tasks?: Blocked["tasks"] }>("GET", `/api/projects/${projectId}/stage`);
+      if (r.ok) blocked = closingAlert(r.data);
+    }
+    setPick({ stage: s, blocked });
+  }
   return (
     <div className="card" style={{ marginBottom: 14 }}>
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }} role="group" aria-label="Stage">
         {deal.pipeline?.stages.map((s) => (
-          <button key={s.id} className={`btn sm${s.id === cur ? "" : " ghost"}`} aria-current={s.id === cur ? "step" : undefined} disabled={!canWrite || s.id === cur} onClick={() => setPick(s)}>{s.name}</button>
+          <button key={s.id} className={`btn sm${s.id === cur ? "" : " ghost"}`} aria-current={s.id === cur ? "step" : undefined} disabled={!canWrite || s.id === cur} onClick={() => void choose(s)}>{s.name}</button>
         ))}
       </div>
       <div className="meta" style={{ justifyContent: "flex-start", marginTop: 10 }}>
@@ -196,7 +217,7 @@ export function DealPanel({ projectId, deal, canWrite, onChange }: { projectId: 
       </p>
       <DealNotes projectId={projectId} orgId={deal.organisation?.id ?? null} />
       <Parties projectId={projectId} deal={deal} canWrite={canWrite} onChange={onChange} />
-      {pick && deal && <StageDialog projectId={projectId} stage={pick} deal={deal} onClose={() => setPick(null)} onDone={() => { setPick(null); onChange(); }} />}
+      {pick && deal && <StageDialog projectId={projectId} stage={pick.stage} deal={deal} initial={{ blocked: pick.blocked }} onClose={() => setPick(null)} onDone={() => { setPick(null); onChange(); }} />}
       {edit && d && <DetailsDialog projectId={projectId} deal={deal} onClose={() => setEdit(false)} onDone={() => { setEdit(false); onChange(); }} />}
     </div>
   );
