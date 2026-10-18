@@ -159,8 +159,13 @@ describe("15.3 sign-in details", () => {
 });
 
 describe("15.4 person profile", () => {
-  // qa:TC-APL2664-b7b130bf@v1 — the API response itself, not only the page.
-  it("Allowed users see what their role allows: worker qa:TC-APL2664-b7b130bf@v1", async () => {
+  // qa:TC-APL2664-b7b130bf@v2 — the live API response. The page case does not stringify its own fixture.
+  // The server must already be up. From a built tree:
+  //   EMAIL_OUTBOX_DIR=/tmp/sho-outbox SUPER_ADMIN_EMAILS=root.test@aplyd.com APP_URL=http://localhost:3100 \
+  //     JOB_SECRET=ci-only-not-a-real-secret-0123 npx next start -p 3100
+  //   EMAIL_OUTBOX_DIR=/tmp/sho-outbox TASKBOARD_URL=http://localhost:3100 npx vitest run tests/people.test.ts
+  // npm test with no TASKBOARD_URL calls http://localhost:3000 and refuses the connection.
+  it("Allowed users see what their role allows: worker qa:TC-APL2664-b7b130bf@v2", async () => {
     const sa = await superAdmin();
     const lead = await account("lead");
     const worker = await account("worker");
@@ -180,6 +185,8 @@ describe("15.4 person profile", () => {
     expect(pr.status).toBeUndefined();
     expect(pr.joinedAt).toBeUndefined();
     expect(pr.openTasks).toBeUndefined();
+    expect(pr.projects[0]).not.toHaveProperty("role");
+    expect(body).not.toContain("Member");
     expect(body).not.toContain(p2.email);
     expect(body).not.toContain(priv.id);
     expect(body).not.toContain(privateName);
