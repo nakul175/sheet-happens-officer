@@ -127,6 +127,23 @@ test.describe("SHO-US-2.4 / APL-2483", () => {
     // The receiver's own notice sits in a bell nobody here can open (the person's password is only emailed).
   });
 
+  test("AC5 (receiver): the named person who receives a task is told", async ({ admin, member, later }) => {
+    const leaver = await person(admin, later, "leaver5r");
+    const p = await project(admin, later, "2.4 ac5 receiver");
+    await add(admin, p.id, leaver.id, "EDITOR");
+    await add(admin, p.id, member.user.id, "EDITOR");
+    later(() => admin.api.del(`/api/projects/${p.id}/members/${member.user.id}?handoverTo=${admin.user.id}`));
+    const title = zz("handed over");
+    await task(admin, p.id, leaver.id, { title });
+    const read = async () => (await member.api.get("/api/notifications?limit=200")).json as { unread: number; items: { text: string }[] };
+    const before = await read();
+    expect((await admin.api.post(`/api/team/${leaver.id}/deactivate`, { reassign: member.user.id })).status).toBe(200);
+    const after = await read();
+    expect(after.unread, "the receiver has a new unread notice").toBeGreaterThan(before.unread);
+    // The wording of this notice is not in the story; it must name the project or the task.
+    expect(after.items.some((n) => n.text.includes(p.name) || n.text.includes(title))).toBe(true);
+  });
+
   test("AC6: a subtask assigned to the leaver is reassigned by the same rules as a task", async ({ admin, later }) => {
     const leaver = await person(admin, later, "leaver6");
     const taker = await person(admin, later, "taker6");

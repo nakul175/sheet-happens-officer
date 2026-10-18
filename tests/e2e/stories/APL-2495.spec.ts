@@ -41,8 +41,9 @@ test("AC2: reopening clears completedAt and returns the task to the Section it c
 
 test("AC3: completing a task with open subtasks warns; 'Complete all' closes them with one log row each; no silent completion", async ({ admin, later }) => {
   const p = await newProject(admin, later, { label: "4.5 subtasks" });
-  const parent = await newTask(admin, p.id, { sectionId: p.doing });
-  const subs = [await newTask(admin, p.id, { parentId: parent }), await newTask(admin, p.id, { parentId: parent })];
+  const names = [zz("4.5 sub parent"), zz("4.5 sub one"), zz("4.5 sub two")];
+  const parent = await newTask(admin, p.id, { title: names[0], sectionId: p.doing });
+  const subs = [await newTask(admin, p.id, { title: names[1], parentId: parent }), await newTask(admin, p.id, { title: names[2], parentId: parent })];
   const warn = await admin.api.post(`/api/tasks/${parent}/complete`);
   expect(warn.status).toBe(409);
   expect(warn.json.needsConfirm).toBe("open_subtasks");
@@ -50,8 +51,19 @@ test("AC3: completing a task with open subtasks warns; 'Complete all' closes the
   for (const s of subs) expect((await getTask(admin, s)).completedAt).toBeNull(); // nothing completed silently
   expect((await admin.api.post(`/api/tasks/${parent}/complete`, { completeAll: true })).status).toBe(200);
   for (const s of [parent, ...subs]) expect((await getTask(admin, s)).completedAt).not.toBeNull();
-  const items = (await admin.api.get(`/api/projects/${p.id}/activity`)).json.items as { what: string }[];
-  expect(items.filter((i) => /completed/.test(i.what)).length).toBe(3); // one for the parent, one for each subtask
+  const rows = ((await admin.api.get(`/api/projects/${p.id}/activity`)).json.items as { what: string }[]).map((i) => i.what).filter((w) => /^completed /.test(w));
+  for (const n of names) expect(rows.filter((w) => w.includes(n)), `exactly one completed row for "${n}"`).toHaveLength(1); // parent and each subtask
+});
+
+test("AC2: when the Section it came from no longer exists, a reopened task returns to the first non-Done Section", async ({ admin, later }) => {
+  const p = await newProject(admin, later, { label: "4.5 gone section" });
+  const t = await newTask(admin, p.id, { sectionId: p.doing });
+  expect((await admin.api.post(`/api/tasks/${t}/complete`)).status).toBe(200);
+  expect((await admin.api.del(`/api/projects/${p.id}/sections/${p.doing}?moveTo=${p.todo}`)).status).toBe(204); // the remembered Section goes
+  expect((await admin.api.post(`/api/tasks/${t}/reopen`)).status).toBe(200);
+  const got = await getTask(admin, t);
+  expect(got.completedAt).toBeNull();
+  expect(got.sectionId, "the first non-Done Section").toBe(p.todo);
 });
 
 test("AC3: the tick on a task with open subtasks asks 'Complete them all' or Cancel (screen)", async ({ admin, later }) => {

@@ -64,8 +64,20 @@ test.describe("SHO-US-2.3 / APL-2482", () => {
     expect(await statusOf(admin, adminPerson.id)).toBe("DEACTIVATED");
   });
 
-  test.skip("AC2 (Admin acting on an Admin): an Admin who is not the Super Admin is refused", async () => {
-    // Needs a second signed-in Admin account; none can be made without a readable password. Covered by tests/work.test.ts.
+  test("AC2 (Admin acting on an Admin): an Admin who is not the Super Admin is refused, for deactivating and for reactivating", async ({ admin, member, later }) => {
+    // The plain Member is made an Admin for the length of this test only. The role is put back in the finally block and again by `later`.
+    later(() => admin.api.patch(`/api/team/${member.user.id}`, { orgRole: "MEMBER" }));
+    const target = await person(admin, later, "adminfoe", "ADMIN");
+    expect((await admin.api.patch(`/api/team/${member.user.id}`, { orgRole: "ADMIN" })).status).toBe(200);
+    try {
+      expect((await member.api.post(`/api/team/${target.id}/deactivate`, { reassign: "leaders" })).status, "an Admin may not deactivate an Admin").toBe(403);
+      expect(await statusOf(admin, target.id)).toBe("ACTIVE");
+      expect((await admin.api.post(`/api/team/${target.id}/deactivate`, { reassign: "leaders" })).status).toBe(200);
+      expect((await member.api.post(`/api/team/${target.id}/reactivate`)).status, "an Admin may not reactivate an Admin").toBe(403);
+      expect(await statusOf(admin, target.id)).toBe("DEACTIVATED");
+    } finally {
+      await admin.api.patch(`/api/team/${member.user.id}`, { orgRole: "MEMBER" });
+    }
   });
 
   test("AC3: reactivating restores the person and their old project membership, but does not hand reassigned tasks back", async ({ admin, later }) => {

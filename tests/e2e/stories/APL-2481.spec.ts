@@ -40,8 +40,16 @@ test.describe("SHO-US-2.2 / APL-2481", () => {
     }
   });
 
-  test.skip("AC1 (notice): the person is notified of the change", async () => {
-    // The notice lands in the added person's own bell; nobody here knows their password to read it.
+  test("AC1 (notice): the person is notified of the change, in both directions", async ({ admin, member, later }) => {
+    // The plain Member is the person whose bell is read. The role is put back by `later` even if an assertion fails.
+    later(() => admin.api.patch(`/api/team/${member.user.id}`, { orgRole: "MEMBER" }));
+    const count = async (role: string) =>
+      (((await member.api.get("/api/notifications?limit=200")).json.items as { text: string }[]).filter((n) => n.text.includes(`${admin.user.name} changed your role to ${role}`))).length;
+    const [a0, m0] = [await count("admin"), await count("member")];
+    expect((await admin.api.patch(`/api/team/${member.user.id}`, { orgRole: "ADMIN" })).status).toBe(200);
+    expect(await count("admin"), "one new notice for the promotion").toBe(a0 + 1);
+    expect((await admin.api.patch(`/api/team/${member.user.id}`, { orgRole: "MEMBER" })).status).toBe(200);
+    expect(await count("member"), "one new notice for the demotion").toBe(m0 + 1);
   });
 
   test("AC2: a Member cannot change any org role, and the API refuses it", async ({ admin, member, later }) => {

@@ -104,13 +104,14 @@ test.describe("SHO-US-23.2 / APL-2621", () => {
     expect(r.status, JSON.stringify(r.json)).toBe(201);
     const id = r.json.person.id as string;
     later(async () => { await admin.api.post(`/api/team/${id}/deactivate`, { reassign: "leaders" }); });
-    // The same address cannot self-sign-up: the domain rule still applies there.
+    // A different, never-added address on that domain cannot self-sign-up: the domain rule still applies there.
+    // (The added address would be refused as a duplicate, which would not prove the domain rule.)
     const anon = await (await import("@playwright/test")).request.newContext({
       baseURL: process.env.STAGING_URL ?? "https://staging.sheethappensofficer.com",
       httpCredentials: process.env.STAGING_USER ? { username: process.env.STAGING_USER, password: process.env.STAGING_PASS ?? "" } : undefined,
     });
     try {
-      const s = await anon.post("/api/auth/signup", { data: { name: "ZZ-TEST Any", email: addr, password: `Zz${RUN}9x` } });
+      const s = await anon.post("/api/auth/signup", { data: { name: "ZZ-TEST Any", email: `zz-test-${RUN}-selfsignup@zz-test-other-domain.invalid`, password: `Zz${RUN}9x` } });
       expect(s.status()).toBe(400);
     } finally { await anon.dispose(); }
   });
