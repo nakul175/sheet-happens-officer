@@ -4,7 +4,7 @@ import Link from "next/link";
 import { use, useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Suspense } from "react";
-import { PRIORITY, ROLE, api, dueLabel, dueState, rowKeys, initials, isNetworkFailure, isOverdue, todayIST, useGet } from "@/components/api";
+import { PRIORITY, ROLE, api, dueLabel, dueState, rowKeys, initials, isOverdue, todayIST, useGet } from "@/components/api";
 import { TaskModal } from "@/components/TaskModal";
 import { AvatarGroup, Pri, Tick } from "@/components/TaskParts";
 import { Confirm, Field, LoadFailed, Menu, Modal, Skeleton } from "@/components/ui";
@@ -96,7 +96,7 @@ function Inner({ id }: { id: string }) {
   useEffect(() => { if (sp.get("new") === "1") window.history.replaceState(null, "", window.location.pathname); }, []); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { window.addEventListener("sho:task-added", refresh); return () => window.removeEventListener("sho:task-added", refresh); }, [refresh]); // SHO-US-14.5
 
-  if (!pr.data && isNetworkFailure(pr.status)) {
+  if (!pr.data && pr.failed) {
     return <Page title="Project"><LoadFailed onRetry={refresh} /></Page>;
   }
   if (pr.status === 404 || (pr.error && !pr.data)) {
