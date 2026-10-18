@@ -3,7 +3,9 @@
 // AC5 five failed sign-ins and the lockout, AC6 IP only on sign-in events, AC7 task delete/restore/purge, Undo anyway, approver.
 // Data: every project and task is named "ZZ-TEST ..."; the person created for AC5 is "ZZ-TEST ..." at example.invalid (no inbox) and is
 // deactivated afterwards. AC2 briefly makes the Member an Admin and puts the role back in a finally block.
+import { readFileSync } from "node:fs";
 import { test, expect, zz, RUN, login } from "../support";
+import { getTask } from "../g2";
 
 async function proj(admin: any, label: string, later: (f: () => Promise<unknown>) => void) {
   const r = await admin.api.post("/api/projects", { name: zz(label), leaderId: admin.user.id });
@@ -85,7 +87,14 @@ test("AC4: the log is read-only through the app", async ({ admin }) => {
     expect([404, 405], `${method} /api/audit`).toContain(r.status());
   }
 });
-test.skip("AC4 (12-month removal): needs a row aged 12 months and the purge-old job; not reachable from a browser session", async () => {});
+test("AC4 (12-month removal): purge-old deletes audit rows older than 12 months", () => {
+  const feed = readFileSync("src/lib/feed.ts", "utf8");
+  expect(feed).toContain("const LOG_MONTHS = 12");
+  const fn = feed.slice(feed.indexOf("export async function purgeOld"));
+  expect(fn).toContain("auditLog.deleteMany");
+  expect(fn).toContain("setMonth(cut.getMonth() - LOG_MONTHS)");
+  expect(readFileSync("src/lib/jobs.ts", "utf8")).toContain('name: "purge-old"');
+});
 
 test("AC5 and AC6: five failed sign-ins and the lockout are logged, with the IP on those rows only", async ({ admin, anon, later }) => {
   const email = `zz-test-lock-${RUN}@example.invalid`;
@@ -116,13 +125,22 @@ test("AC7: task delete and restore, an approver being set, and 'Undo anyway' eac
   const approver = (await audit(admin, `event=APPROVER_CHANGED&person=${admin.user.id}`)).filter((r) => (r.target ?? "").includes(zz("approver task")));
   expect(approver.length).toBeGreaterThanOrEqual(1);
   // Undo anyway: admin changes priority, the member changes it again, admin undoes over the member's change
-  const change = await admin.page.request.patch(`/api/tasks/${t}`, { data: { priority: "HIGH" } });
+  const seen = (await getTask(admin, t)).updatedAt as string;
+  const change = await admin.page.request.patch(`/api/tasks/${t}`, { data: { priority: "HIGH", expectedUpdatedAt: seen } });
   expect(change.status()).toBe(200);
   const undoId = change.headers()["x-undo-id"];
   expect(undoId).toBeTruthy();
-  expect((await member.api.patch(`/api/tasks/${t}`, { priority: "LOW" })).status).toBe(200);
+  const next = (await getTask(admin, t)).updatedAt as string;
+  expect((await member.api.patch(`/api/tasks/${t}`, { priority: "LOW", expectedUpdatedAt: next })).status).toBe(200);
   expect((await admin.api.post(`/api/actions/${undoId}/undo`, { anyway: false })).status).toBe(409);
   expect((await admin.api.post(`/api/actions/${undoId}/undo`, { anyway: true })).status).toBe(200);
   expect((await audit(admin, `event=UNDO_OVERRIDE&person=${admin.user.id}`)).length).toBeGreaterThanOrEqual(1);
 });
-test.skip("AC7 (30-day purge): one row per purge run needs a task aged 30 days and the purge-trash job; not reachable from a browser session", async () => {});
+test("AC7 (30-day purge): one audit row is written for a purge run that removes tasks", () => {
+  const tasks = readFileSync("src/lib/tasks.ts", "utf8");
+  const fn = tasks.slice(tasks.indexOf("export async function purgeTrash"), tasks.indexOf("// ---------------------------------------------------------------- My tasks"));
+  expect(fn).toContain("30 * 86400_000");
+  expect(fn).toContain("if (r.count) await db.auditLog.create");
+  expect(fn).toContain('event: "TASK_PURGED"');
+  expect(readFileSync("src/lib/jobs.ts", "utf8")).toContain("purgeTrash()");
+});

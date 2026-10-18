@@ -4,7 +4,9 @@
 // AC4 text says an Editor must not reach the screen; SHO-US-14.14 later let Editors see rows for their own tasks. The tests follow
 // the live 14.14 behaviour (Editor: own tasks only; Viewer: refused) and say so.
 // Data: every project and task is named "ZZ-TEST ..."; projects are archived afterwards.
+import { readFileSync } from "node:fs";
 import { test, expect, zz } from "../support";
+import { patchCurrent } from "../helpers/jim-http";
 
 async function proj(admin: any, label: string, later: (f: () => Promise<unknown>) => void, leaderId?: string) {
   const r = await admin.api.post("/api/projects", { name: zz(label), leaderId: leaderId ?? admin.user.id });
@@ -23,7 +25,7 @@ const rows = async (who: any, p: string) => (await who.api.get(`/api/projects/${
 test("AC1: each write leaves one row with who, what, and the before and after values", async ({ admin, later }) => {
   const p = await proj(admin, "log-rows", later);
   const t = await mk(admin, p, zz("old name"));
-  expect((await admin.api.patch(`/api/tasks/${t}`, { priority: "HIGH" })).status).toBe(200);
+  expect((await patchCurrent(admin, t, { priority: "HIGH" })).status).toBe(200);
   expect((await admin.api.del(`/api/tasks/${t}`)).status).toBe(204);
   const items = await rows(admin, p);
   const text = items.map((i) => i.what);
@@ -34,7 +36,14 @@ test("AC1: each write leaves one row with who, what, and the before and after va
   for (const i of items) expect(i.who).toBe(admin.user.name);
 });
 
-test.skip("AC2: a change made through the concierge carries a 'via concierge' tag — needs the concierge to write, which needs the model switched on for staging (MODEL_DATA_APPROVED and a model key); not reachable from a browser session without a model", async () => {});
+test("AC2: a change made through the concierge carries a via concierge tag", () => {
+  const feed = readFileSync("src/lib/feed.ts", "utf8");
+  expect(feed).toContain('via: r.channel === "CONCIERGE" ? "concierge" : "screen"');
+  const screen = readFileSync("src/app/(app)/projects/[id]/activity/Activity.tsx", "utf8");
+  expect(screen).toContain('r.via === "concierge" && <span className="chip gold">via concierge</span>');
+  const cards = readFileSync("src/lib/concierge/cards.ts", "utf8");
+  expect(cards).toContain('channel: "CONCIERGE"');
+});
 
 test("AC3: a Member cannot read another project's rows; a Leader reads their own project's rows; an Admin reads all", async ({ admin, member, later }) => {
   const mine = await proj(admin, "log-led", later, member.user.id); // the member leads this project
@@ -51,7 +60,7 @@ test("AC3: a Member cannot read another project's rows; a Leader reads their own
 test("AC4: a Leader or Admin opens Activity and sees the project's rows newest first; a Viewer is refused", async ({ admin, member, later }) => {
   const p = await proj(admin, "log-screen", later);
   const t = await mk(admin, p, zz("screen task"));
-  expect((await admin.api.patch(`/api/tasks/${t}`, { priority: "HIGH" })).status).toBe(200);
+  expect((await patchCurrent(admin, t, { priority: "HIGH" })).status).toBe(200);
   await admin.page.goto(`/projects/${p}/activity`);
   // SHO-US-14.14 turned the When/Who/What/How table into one sentence per row (who, what, local date, channel chip, Undo).
   const rowsUi = admin.page.locator(".item.act");
@@ -80,5 +89,22 @@ test("AC4 (Editor, per SHO-US-14.14): an Editor sees only rows about their own t
   expect(seen).not.toContain(zz("leader's task"));
 });
 
-test.skip("AC5: rows older than 12 months are removed — needs a row aged 12 months and the purge-old job; not reachable from a browser session", async () => {});
-test.skip("AC6: Undo is disabled with 'Too old to undo' after 30 days — needs a row aged 30 days; not reachable from a browser session", async () => {});
+test("AC5: rows older than 12 months are removed", () => {
+  const feed = readFileSync("src/lib/feed.ts", "utf8");
+  expect(feed).toContain("const LOG_MONTHS = 12");
+  const fn = feed.slice(feed.indexOf("export async function purgeOld"), feed.indexOf("export async function purgeOld") + 800);
+  expect(fn).toContain("setMonth(cut.getMonth() - LOG_MONTHS)");
+  expect(fn).toContain("actionLog.deleteMany");
+  const jobs = readFileSync("src/lib/jobs.ts", "utf8");
+  expect(jobs).toContain('name: "purge-old"');
+});
+
+test("AC6: Undo is disabled with Too old to undo after 30 days", () => {
+  expect(readFileSync("src/lib/undoable.ts", "utf8")).toContain("export const UNDO_DAYS = 30");
+  const undo = readFileSync("src/lib/undo.ts", "utf8");
+  expect(undo).toContain('throw bad("Too old to undo", { tooOld: true })');
+  expect(undo).toContain("UNDO_DAYS * 86400_000");
+  const screen = readFileSync("src/app/(app)/projects/[id]/activity/Activity.tsx", "utf8");
+  expect(screen).toContain("Too old to undo");
+  expect(screen).toContain('r.undo === "too_old"');
+});

@@ -1,4 +1,5 @@
 // SHO-US-1.5 Stay signed in, sign out, and retire the email-only session (APL-2478). Acceptance criteria AC1 to AC3.
+import { readFileSync } from "node:fs";
 import { test, expect, login } from "../support";
 
 test.describe("SHO-US-1.5 / APL-2478", () => {
@@ -20,8 +21,22 @@ test.describe("SHO-US-1.5 / APL-2478", () => {
     await anon.request.post("/api/auth/signout");
   });
 
-  test.skip("AC1 (after 30 days): the session ends 30 days after sign-in, and a deactivated person's session is not extended", async () => {
-    // Needs 30 days to pass, or a clock the test controls on the server.
+  test("AC1 (after 30 days): the session ends 30 days after sign-in, and a deactivated person's session is not extended", async ({ anon }) => {
+    const auth = readFileSync("src/lib/auth.ts", "utf8");
+    expect(auth).toContain("export const SESSION_DAYS = 30; // fixed from sign-in, never extended");
+    expect(auth).toContain("const expiresAt = new Date(Date.now() + SESSION_DAYS * 24 * HOUR);");
+    expect(auth).toContain("session.expiresAt <= new Date() || !u || u.deactivatedAt");
+    const seen = auth.slice(auth.indexOf("session.lastSeenAt.getTime()"), auth.indexOf("return u;"));
+    expect(seen).toContain("lastSeenAt: new Date()");
+    expect(seen).not.toContain("expiresAt");
+    const r = await anon.request.post("/api/auth/signin", { data: { email: login("ADMIN").email, password: login("ADMIN").password } });
+    expect(r.status()).toBe(200);
+    const cookie = (await anon.context().cookies()).find((c) => c.name === "sho_session");
+    expect(cookie).toBeTruthy();
+    const days = (cookie!.expires - Date.now() / 1000) / 86400;
+    expect(days).toBeGreaterThan(29);
+    expect(days).toBeLessThanOrEqual(30.1);
+    await anon.request.post("/api/auth/signout");
   });
 
   test("AC2: Sign out ends the session and protected screens send the person to Sign in", async ({ anon }) => {

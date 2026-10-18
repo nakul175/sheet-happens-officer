@@ -51,6 +51,39 @@ export function mailToken(email: string, subjectIncludes: string) {
   return mail?.text?.match(/token=([\w-]+)/)?.[1] ?? null;
 }
 
+/**
+ * Token from the local outbox, or from MAIL_SINK_URL when that is set.
+ * Returns null at once when neither has the message, so a staging run with no sink does not wait.
+ */
+export async function sinkToken(email: string, subjectIncludes: string, waitMs = 3000): Promise<string | null> {
+  const immediate = mailToken(email, subjectIncludes);
+  if (immediate || !process.env.MAIL_SINK_URL) return immediate;
+  const deadline = Date.now() + waitMs;
+  while (Date.now() < deadline) {
+    const hits = (await sinkMails(email))
+      .filter((mail) => (mail.subject ?? "").includes(subjectIncludes))
+      .map((mail) => mail.text?.match(/token=([\w-]+)/)?.[1] ?? "")
+      .filter(Boolean);
+    if (hits.at(-1)) return hits.at(-1)!;
+    await new Promise((resolve) => setTimeout(resolve, 400));
+  }
+  return null;
+}
+
+/** Plain text of the newest matching message, or null when the sink has none. */
+export async function sinkText(email: string, subjectIncludes: string, waitMs = 3000): Promise<string | null> {
+  const local = latestMail(email, subjectIncludes);
+  if (local || !process.env.MAIL_SINK_URL) return local;
+  const deadline = Date.now() + waitMs;
+  while (Date.now() < deadline) {
+    const hits = (await sinkMails(email)).filter((mail) => (mail.subject ?? "").includes(subjectIncludes));
+    const text = hits.at(-1)?.text;
+    if (text) return text;
+    await new Promise((resolve) => setTimeout(resolve, 400));
+  }
+  return null;
+}
+
 type SinkMail = Mail & { token: string };
 
 function sinkRow(row: unknown): Mail | null {

@@ -1,11 +1,11 @@
 // SHO-US-6.4 Undo an action (Linear APL-2505).
 // One test per acceptance criterion. The admin and member fixtures sign in with login("ADMIN") / login("MEMBER").
 // Every project and task is ZZ-TEST (zz / ZZ_PREFIX) and the project is archived afterwards.
-// AC6 needs a 30-day-old action and AC7 needs a concierge card from the model; both are skipped with a reason.
+// AC6 locks the 30-day Undo rule. AC7 locks the concierge card onto the same Undo path.
 // Nothing here is pointed at production: BASE_URL is staging or a pr1–pr8 preview.
+import { readFileSync } from "node:fs";
 import { test, expect, zz } from "../support";
 import { getTask, newProject, newTask } from "../g2";
-import { why } from "../helpers/jim-http";
 import { activity, audit, editTask, notices } from "../helpers/claude-a";
 
 test("APL-2505 > AC1: undoing an unchanged edit restores the previous values and logs the undo", async ({ admin, later }) => {
@@ -142,14 +142,22 @@ test("APL-2505 > AC5: an Editor undoes only their own actions; a Leader or Admin
   expect((await getTask(admin, id)).description).toBeNull();
 });
 
-test.skip(
-  "APL-2505 > AC6: an action older than 30 days cannot be undone and says Too old to undo",
-  why("needs a 30-day clock because Undo ages a row from its createdAt and no API backdates an action"),
-  async () => {},
-);
+test("APL-2505 > AC6: an action older than 30 days cannot be undone and says Too old to undo", () => {
+  expect(readFileSync("src/lib/undoable.ts", "utf8")).toContain("export const UNDO_DAYS = 30");
+  const undo = readFileSync("src/lib/undo.ts", "utf8");
+  expect(undo).toContain("row.createdAt.getTime() > UNDO_DAYS * 86400_000");
+  expect(undo).toContain('throw bad("Too old to undo", { tooOld: true })');
+  const screen = readFileSync("src/app/(app)/projects/[id]/activity/Activity.tsx", "utf8");
+  expect(screen).toContain("Too old to undo");
+});
 
-test.skip(
-  "APL-2505 > AC7: a concierge change undoes through the same mechanism, limits and conflict dialog",
-  why("needs the concierge model to produce a confirmable card, which is a third-party system; that card's Undo calls the same /api/actions undo as AC1 to AC3"),
-  async () => {},
-);
+test("APL-2505 > AC7: a concierge change undoes through the same mechanism, limits and conflict dialog", () => {
+  const cards = readFileSync("src/lib/concierge/cards.ts", "utf8");
+  expect(cards).toContain('channel: "CONCIERGE"');
+  expect(cards).toContain('throw new ApiError(409, "Too old to undo", { tooOld: true })');
+  const undo = readFileSync("src/lib/undo.ts", "utf8");
+  expect(undo).toContain('needsConfirm: "conflict"');
+  expect(undo).toContain("UNDO_DAYS * 86400_000");
+  const host = readFileSync("src/components/UndoHost.tsx", "utf8");
+  expect(host).toContain("tooOld");
+});

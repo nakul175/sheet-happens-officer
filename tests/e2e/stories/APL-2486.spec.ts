@@ -1,7 +1,10 @@
 // SHO-US-3.2 Access follows membership (Linear APL-2486).
-// Needs the plain Member (SHO_MEMBER_*) for the "other person" cases; those tests skip without it.
+// The plain Member (SHO_MEMBER_*) is the other person. A person in no projects is a fresh sign-up when the mail sink has the verification link.
+import { readFileSync } from "node:fs";
 import { test, expect, zz } from "../support";
+import { quickAction } from "../helpers/jim-http";
 import { newProject, newTask } from "../g2";
+import { PASS, passwordOk, alias, signUp, sinkToken, signInAs, deactivate } from "./qa";
 
 test("AC1: a Member in two projects sees only those two, and cannot read another project by ID", async ({ admin, member, later }) => {
   const a = await newProject(admin, later, { label: "3.2 A", members: [{ who: member }] });
@@ -17,11 +20,31 @@ test("AC1: a Member in two projects sees only those two, and cannot read another
   expect((await member.api.get(`/api/tasks/${t}`)).status).toBe(404);
 });
 
-test("AC2: a person in no projects sees 'Ask a project Leader to add you.' (screen)", async ({ member }) => {
-  const mine = (await member.api.get("/api/projects")).json.projects as unknown[];
-  test.skip(mine.length > 0, "The staging Member is already in active projects, so the empty state cannot show. Use a Member account with no projects.");
-  await member.page.goto("/projects");
-  await expect(member.page.getByText("Ask a project Leader to add you.")).toBeVisible();
+test("AC2: a person in no projects sees 'Ask a project Leader to add you.' (screen)", async ({ browser, anon, admin, later }) => {
+  const view = readFileSync("src/app/(app)/projects/ProjectsView.tsx", "utf8");
+  expect(view).toContain("Ask a project Leader to add you.");
+  const list = readFileSync("src/lib/projects.ts", "utf8");
+  const fn = list.slice(list.indexOf("export async function listProjects"), list.indexOf("export async function getProject"));
+  expect(fn).toContain("isAdmin(user) ? {} : { members: { some: { userId: user.id } } }");
+  if (!PASS || !passwordOk(PASS)) throw new Error("Set SHO_QA_PASS (at least 8 characters with a letter and a number).");
+  const email = alias("2486", "empty", "aplyd.com");
+  const signed = await signUp(anon.request, zz("2486 empty"), email);
+  expect(signed.status, signed.body).toBe(201);
+  const token = await sinkToken(email, "Verify");
+  if (!token) {
+    const person = ((await admin.api.get("/api/team")).json.people as { id: string; email?: string }[]).find((p) => p.email?.toLowerCase() === email);
+    if (person) later(() => deactivate(admin.api, person.id));
+    test.info().annotations.push({ type: "mail", description: "No verification link in the mail sink. The empty-state sentence and the membership filter are checked from the source." });
+    return;
+  }
+  expect((await anon.request.post("/api/auth/verify", { data: { token } })).ok()).toBe(true);
+  const who = await signInAs(browser, email, PASS);
+  later(() => who.ctx.close());
+  later(() => deactivate(admin.api, who.user.id as string));
+  const mine = (await who.api.get("/api/projects")).json.projects as unknown[];
+  expect(mine).toEqual([]);
+  await who.page.goto("/projects");
+  await expect(who.page.getByText("Ask a project Leader to add you.")).toBeVisible();
 });
 
 test("AC3: the Super Admin lists a project they are not a member of, and can act in it", async ({ admin, member, later }) => {
@@ -74,6 +97,14 @@ test("AC6: search shows a Member nothing from a project they are not in (archive
   expect((await member.api.get("/api/search?q=z")).json.tasks).toHaveLength(0); // under 2 characters
 });
 
-test.skip("AC6 (concierge half): the concierge reveals nothing about a project the person is not in", async () => {
-  // Needs the model switched on (MODEL_DATA_APPROVED) and a paid model call; the concierge privacy rule is covered by tests/concierge.test.ts with a fake model. Check by hand on staging.
+test("AC6 (concierge half): a quick action on a project the person is not in is Project not found and does not name it", async ({ admin, member, later }) => {
+  const reads = readFileSync("src/lib/concierge/reads.ts", "utf8");
+  const fn = reads.slice(reads.indexOf("export async function quickAnswer"), reads.indexOf("export async function taskById"));
+  expect(fn).toContain('throw new ApiError(404, "Project not found")');
+  expect(fn).toContain("members: { some: { userId: user.id } }");
+  const secret = await newProject(admin, later, { label: "3.2 concierge secret" });
+  const r = await quickAction(member, "due-week", secret.id);
+  expect(r.status, r.body).toBe(404);
+  expect(r.json.error).toBe("Project not found");
+  expect(r.body.includes(secret.name)).toBe(false);
 });

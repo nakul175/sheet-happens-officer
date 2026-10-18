@@ -4,9 +4,7 @@
 //
 // Accounts are nakul17+zz-*@gmail.com aliases created for this run. Every record uses the ZZ-TEST prefix
 // and is archived afterwards. Password comes from SHO_QA_PASS and is never written here.
-// Point BASE_URL at the app under test (local next dev). Production hosts are refused by tests/e2e/base-url.ts.
-//
-// This file is not on origin/qa/story-e2e. It stays local and is not pushed.
+// Point BASE_URL at the app under test. Production hosts are refused by tests/e2e/base-url.ts.
 import { writeFileSync } from "node:fs";
 import { test, expect, type APIRequestContext, type Browser, type BrowserContext } from "@playwright/test";
 import { BASE_URL, zz } from "../support";
@@ -108,8 +106,7 @@ const shapes: Record<string, unknown> = {};
 
 test.beforeAll(async ({ browser, playwright }) => {
   test.setTimeout(180_000);
-  // The suite on this branch loads every story spec. Missing SHO_QA_PASS skips this file instead of failing collection.
-  test.skip(!PASS, "Set SHO_QA_PASS (the shared password for the nakul17+zz accounts).");
+  if (!PASS) throw new Error("Set SHO_QA_PASS (the shared password for the nakul17+zz accounts).");
   anon = await playwright.request.newContext({ baseURL: BASE_URL });
   const page = await browser.newPage();
   const health = await page.goto("/api/health");
@@ -159,9 +156,9 @@ test.beforeAll(async ({ browser, playwright }) => {
 });
 
 test.afterAll(async () => {
-  // beforeAll skips, or throws before an account is signed in. Reading .request on that
-  // account throws TypeError and hides the real failure. AC3 is the last test, so the
-  // hook error is reported on it.
+  // beforeAll throws before an account is signed in, and sign-in can stop before every account exists.
+  // Reading .request or .ctx on that account throws TypeError and hides the real failure.
+  // AC3 is the last test, so the hook error is reported on it.
   if (projectId && sa?.request) await send(sa.request, "POST", `/api/projects/${projectId}/archive`).catch(() => undefined);
   if (orgId && sa?.request) await send(sa.request, "POST", `/api/orgs/${orgId}/archive`).catch(() => undefined);
   if (lead?.request) await send(lead.request, "DELETE", "/api/concierge/messages").catch(() => undefined);

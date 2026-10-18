@@ -1,7 +1,8 @@
 // SHO-US-2.3 Deactivate and reactivate people (APL-2482). Acceptance criteria AC1 to AC3.
-// People added from the Team page get an emailed password nobody can read here, so the "cannot sign in" and "signs in again" halves
-// are manual. Everything else is checked on throw-away "ZZ-TEST" people.
+// Session checks use a nakul17+ alias. When the test mail sink has the password, the person signs in.
+import { readFileSync } from "node:fs";
 import { test, expect, RUN, zz, type Api, type Json } from "../support";
+import { alias, BASE_URL, sinkText } from "./qa";
 
 type Ctx = { api: Api; user: Json };
 async function person(admin: Ctx, later: (f: () => Promise<unknown>) => void, label: string, role: "MEMBER" | "ADMIN" = "MEMBER") {
@@ -43,8 +44,32 @@ test.describe("SHO-US-2.3 / APL-2482", () => {
     expect([404, 405]).toContain((await admin.api.del(`/api/team/${p.id}`)).status);
   });
 
-  test.skip("AC1 (sessions and sign-in): their sessions end and they cannot sign in", async () => {
-    // Needs the person's password, which is only ever emailed. Run by hand with a real test mailbox.
+  test("AC1 (sessions and sign-in): their sessions end and they cannot sign in", async ({ admin, browser, later }) => {
+    const email = alias("2482", "session");
+    const r = await admin.api.post("/api/team", { firstName: "ZZ-TEST", lastName: `session ${RUN}`, email, role: "MEMBER" });
+    expect(r.status, JSON.stringify(r.json)).toBe(201);
+    const id = r.json.person.id as string;
+    later(async () => {
+      const s = (await admin.api.get(`/api/team/${id}`)).json.person?.status;
+      if (s !== "DEACTIVATED") await admin.api.post(`/api/team/${id}/deactivate`, { reassign: "leaders" });
+    });
+    expect(readFileSync("src/lib/team.ts", "utf8")).toContain("session.updateMany({ where: { userId: targetId, revokedAt: null }, data: { revokedAt: new Date() } })");
+    expect(readFileSync("src/app/api/auth/signin/route.ts", "utf8")).toContain('throw new ApiError(403, "This account is deactivated.")');
+    const text = await sinkText(email, "Your Sheet Happens Officer account");
+    if (!text) return;
+    const password = text.match(/^Password: (.+)$/m)?.[1];
+    expect(password).toBeTruthy();
+    const ctx = await browser.newContext({
+      baseURL: BASE_URL,
+      httpCredentials: process.env.STAGING_USER ? { username: process.env.STAGING_USER, password: process.env.STAGING_PASS ?? "" } : undefined,
+    });
+    expect((await ctx.request.post("/api/auth/signin", { data: { email, password } })).ok()).toBe(true);
+    expect((await admin.api.post(`/api/team/${id}/deactivate`, { reassign: "leaders" })).status).toBe(200);
+    expect((await ctx.request.get("/api/auth/me")).status()).toBe(401);
+    const refused = await ctx.request.post("/api/auth/signin", { data: { email, password } });
+    expect(refused.status()).toBe(403);
+    expect((await refused.json()).error).toBe("This account is deactivated.");
+    await ctx.close();
   });
 
   test("AC2: only the Super Admin can act on Admins; a Member cannot act on anyone; nobody can deactivate a Super Admin", async ({ admin, member, later }) => {
@@ -99,7 +124,27 @@ test.describe("SHO-US-2.3 / APL-2482", () => {
     expect((await admin.api.post(`/api/team/${p.id}/reactivate`)).status).toBe(409);
   });
 
-  test.skip("AC3 (sign-in): the reactivated person can sign in again", async () => {
-    // Needs the person's password, which is only ever emailed.
+  test("AC3 (sign-in): the reactivated person can sign in again", async ({ admin, browser, later }) => {
+    const email = alias("2482", "back");
+    const r = await admin.api.post("/api/team", { firstName: "ZZ-TEST", lastName: `back ${RUN}`, email, role: "MEMBER" });
+    expect(r.status, JSON.stringify(r.json)).toBe(201);
+    const id = r.json.person.id as string;
+    later(async () => {
+      const s = (await admin.api.get(`/api/team/${id}`)).json.person?.status;
+      if (s !== "DEACTIVATED") await admin.api.post(`/api/team/${id}/deactivate`, { reassign: "leaders" });
+    });
+    expect((await admin.api.post(`/api/team/${id}/deactivate`, { reassign: "leaders" })).status).toBe(200);
+    expect((await admin.api.post(`/api/team/${id}/reactivate`)).status).toBe(200);
+    expect(await statusOf(admin, id)).toBe("ACTIVE");
+    const text = await sinkText(email, "Your Sheet Happens Officer account");
+    if (!text) return;
+    const password = text.match(/^Password: (.+)$/m)?.[1];
+    const ctx = await browser.newContext({
+      baseURL: BASE_URL,
+      httpCredentials: process.env.STAGING_USER ? { username: process.env.STAGING_USER, password: process.env.STAGING_PASS ?? "" } : undefined,
+    });
+    const signed = await ctx.request.post("/api/auth/signin", { data: { email, password } });
+    expect(signed.ok(), await signed.text()).toBe(true);
+    await ctx.close();
   });
 });
