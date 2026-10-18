@@ -439,7 +439,7 @@ export async function deleteTask(user: Actor, id: string, o: { byUndo?: boolean 
   });
 }
 
-export async function restoreTask(user: Actor, id: string, confirmParent = false, o: { byUndo?: boolean } = {}) {
+export async function restoreTask(user: Actor, id: string, confirmParent = false, o: { skipLog?: boolean } = {}) {
   const { t, a } = await loadTask(user, id, { write: true, deleted: true });
   requireManage(a); // SHO-US-3.3 AC1: only the Leader or an Admin restores from Trash
   if (!t.deletedAt) throw new ApiError(409, "This task is not in Trash.");
@@ -474,7 +474,7 @@ export async function restoreTask(user: Actor, id: string, confirmParent = false
         await notify(tx, [leader, assigneeOk ? x.assigneeId : null], "APPROVER_CLEARED", { actorId: user.id, taskId: x.id, projectId: t.projectId, data: { title: x.title } });
       }
     }
-    if (!o.byUndo) await logAction(tx, { actorId: user.id, projectId: t.projectId, targetType: "task", targetId: id, action: "task.restored", before: { deletedAt: t.deletedAt!.toISOString(), title: t.title }, after: { deletedAt: null, restoredParent: parentDeleted } });
+    if (!o.skipLog) await logAction(tx, { actorId: user.id, projectId: t.projectId, targetType: "task", targetId: id, action: "task.restored", before: { deletedAt: t.deletedAt!.toISOString(), title: t.title }, after: { deletedAt: null, restoredParent: parentDeleted } });
   });
 }
 

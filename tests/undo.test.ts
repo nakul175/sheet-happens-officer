@@ -8,6 +8,9 @@ const db = new PrismaClient();
 
 const activity = async (lead: Account, projectId: string) =>
   (await lead.c.get(`/api/projects/${projectId}/activity`)).json.items as { id: string; what: string; undo: string; via: string }[];
+// The delete's own log row: an Editor's delete sends no x-undo-* headers once Undo is hidden from them (APL-2649).
+const deleteRow = (taskId: string, actorId: string) =>
+  db.actionLog.findFirstOrThrow({ where: { action: "task.deleted", targetId: taskId, actorId }, orderBy: { createdAt: "desc" } });
 const notices = async (who: Account) => (await who.c.get("/api/notifications")).json.items as { text: string; href: string }[];
 
 describe("undo (6.4)", () => {
@@ -87,9 +90,8 @@ describe("undo (6.4)", () => {
     const ed = await account("editor");
     const p = await project(lead, lead, [{ who: ed }]);
     const t = await task(lead, p.id, { title: "Oops", assigneeId: ed.id });
-    const del = await ed.c.del(`/api/tasks/${t}`);
-    const id = del.headers.get("x-undo-id")!;
-    expect(del.headers.get("x-undo-label")).toBe("Task deleted");
+    expect((await ed.c.del(`/api/tasks/${t}`)).status).toBeLessThan(300);
+    const { id } = await deleteRow(t, ed.id);
     const restore = await ed.c.post(`/api/tasks/${t}/restore`); // the unauthorised restore from Trash
     expect(restore.status).toBe(403);
     const u = await ed.c.post(`/api/actions/${id}/undo`);
@@ -113,10 +115,9 @@ describe("undo (6.4)", () => {
     const p = await project(lead, lead, [{ who: ed }]);
     for (const who of [lead, sa]) {
       const t = await task(lead, p.id, { title: "Oops", assigneeId: ed.id });
-      const del = await ed.c.del(`/api/tasks/${t}`);
-      expect(del.headers.get("x-undo-notified")).toBe("1");
+      expect((await ed.c.del(`/api/tasks/${t}`)).status).toBeLessThan(300);
       expect((await ed.c.get(`/api/tasks/${t}`)).status).toBe(404);
-      const id = del.headers.get("x-undo-id")!;
+      const { id } = await deleteRow(t, ed.id);
       const u = await who.c.post(`/api/actions/${id}/undo`);
       expect(u.status, JSON.stringify(u.json)).toBe(200);
       expect(u.json.noticesSent).toBe(true);
