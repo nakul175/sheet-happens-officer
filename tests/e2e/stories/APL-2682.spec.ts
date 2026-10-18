@@ -60,14 +60,17 @@ async function capture(run: () => Promise<number>) {
   }
 }
 
+// qa:TC-APL2682-3efefb0a@v1
 describe("APL-2682 staging editor", () => {
   it("refuses a non-local host, an uppercase name, a query-host bypass, and a DigitalOcean host", async () => {
     const cases: { name: string; url: string; message: string; nodeEnv?: string; unsetNodeEnv?: boolean; prodName?: string }[] = [
+      // qa:TC-APL2682-c0ead628@v1
       {
         name: "wrong database name",
         url: "postgresql://example:example@db.example.com:5432/sho_prod",
         message: "exactly sho_staging",
       },
+      // qa:TC-APL2682-b8d734f4@v1
       {
         name: "uppercase staging name",
         url: "postgresql://example:example@private-db-postgresql-nyc1-12345.db.ondigitalocean.com:25060/SHO_STAGING",
@@ -83,6 +86,7 @@ describe("APL-2682 staging editor", () => {
         url: "postgresql://example:example@db.example.com:5432/sho-staging",
         message: "exactly sho_staging",
       },
+      // qa:TC-APL2682-44aceb49@v1
       {
         name: "host query bypass",
         url: "postgresql://example:example@localhost:5432/sho_staging?host=private-db-postgresql-nyc1-12345.db.ondigitalocean.com",
@@ -134,6 +138,19 @@ describe("APL-2682 staging editor", () => {
         nodeEnv: "test",
         prodName: "sho_test",
       },
+      // qa:TC-APL2682-3ff6e3e4@v1
+      {
+        name: "uppercase prod name",
+        url: "postgresql://example:example@db.example.com:5432/SHO_PROD",
+        message: "database name is production",
+        prodName: "sho_prod",
+      },
+      {
+        name: "mixed-case prod name",
+        url: "postgresql://example:example@db.example.com:5432/Sho_Prod",
+        message: "database name is production",
+        prodName: "sho_prod",
+      },
       {
         name: "digitalocean host",
         url: "postgresql://example:example@private-db-postgresql-nyc1-12345.db.ondigitalocean.com:25060/defaultdb",
@@ -160,20 +177,21 @@ describe("APL-2682 staging editor", () => {
     }
   });
 
-  it("does not treat a different case of the production database name as a match", async () => {
+  // qa:TC-APL2682-3ff6e3e4@v1
+  it("refuses a different case of the production database name before connecting", async () => {
     const name = decodeURIComponent(new URL(databaseUrl).pathname.replace(/^\//, "").split("/")[0] ?? "");
     expect(name).not.toBe(name.toUpperCase());
     let connected = false;
     const connect: DbConnect = () => {
       connected = true;
-      throw new Error("stop-before-query");
+      throw new Error("connected");
     };
     const { code, text } = await capture(() =>
       runStagingEditor(env({ PROD_DB_NAME: name.toUpperCase() }), ["--confirm-staging"], connect),
     );
-    expect(connected).toBe(true);
+    expect(connected).toBe(false);
     expect(code).toBe(1);
-    expect(text).not.toContain("database name is production");
+    expect(text).toContain("database name is production");
     expect(text).not.toContain(PASSWORD);
     expect(text).not.toContain("postgresql://");
   });
@@ -200,6 +218,8 @@ describe("APL-2682 staging editor", () => {
       }
     });
 
+    // qa:TC-APL2682-0843a4a6@v1
+    // qa:TC-APL2682-8bc1699b@v1
     it("makes a ZZ-TEST user the Leader and leaves an existing password in place", async () => {
       const workspace = await db.workspace.create({ data: { name: "ZZ-TEST disposable editor" } });
       const project = await db.project.create({ data: { workspaceId: workspace.id, name: QA_PROJECT_NAME, typeId: "wst_project" } });
