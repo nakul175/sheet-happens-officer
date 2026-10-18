@@ -10,8 +10,11 @@ export async function search(user: Actor, q: string, includeArchived: boolean, i
   const text = q.trim();
   if (text.length < 2) return { projects: [], tasks: [], organisations: [], contacts: [] };
   // visibleProjects is membership (Admins see every project), the CRM lever, and live rows.
-  // Include archived puts archived rows back without putting the membership limit onto an Admin (APL-2684).
-  const visible = includeArchived ? { ...visibleProjects(user), archivedAt: undefined } : visibleProjects(user);
+  // Include archived drops the archive key entirely, so an Admin is not limited to projects they belong to (APL-2684).
+  const live = visibleProjects(user);
+  const includingArchived = { ...live };
+  delete includingArchived.archivedAt;
+  const visible = includeArchived ? includingArchived : live;
   const crm = crmVisible(user);
   const me = await db.user.findUniqueOrThrow({ where: { id: user.id }, select: { workspaceId: true } });
   const [organisations, contacts] = crm && !ideasOnly ? await Promise.all([
@@ -20,7 +23,7 @@ export async function search(user: Actor, q: string, includeArchived: boolean, i
   ]) : [[], []];
   const [projects, tasks] = await Promise.all([
     db.project.findMany({
-      where: { ...visibleProjects(user), ...(includeArchived ? { archivedAt: undefined } : {}), name: { contains: text, mode: "insensitive" } },
+      where: { ...(includeArchived ? includingArchived : visibleProjects(user)), name: { contains: text, mode: "insensitive" } },
       orderBy: { name: "asc" }, take: 20, select: { id: true, name: true, archivedAt: true, typeId: true },
     }),
     db.task.findMany({
