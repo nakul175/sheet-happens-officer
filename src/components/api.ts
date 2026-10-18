@@ -3,6 +3,11 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 export type Res<T = Record<string, any>> = { ok: boolean; status: number; error?: string; data: T }; // eslint-disable-line @typescript-eslint/no-explicit-any
 
+/** Where an expired session lands. The sign-in screen reads `expired=1`. */
+export const sessionNav = {
+  toSignIn() { window.location.href = "/signin?expired=1"; },
+};
+
 /** Call the JSON API. Never throws; network trouble comes back as status 0 with a message. */
 export async function api<T = Record<string, any>>(method: string, path: string, body?: unknown): Promise<Res<T>> { // eslint-disable-line @typescript-eslint/no-explicit-any
   try {
@@ -17,7 +22,8 @@ export async function api<T = Record<string, any>>(method: string, path: string,
     }
     const data = (res.headers.get("content-type")?.includes("json") ? await res.json() : {}) as any; // eslint-disable-line @typescript-eslint/no-explicit-any
     const error = res.ok ? undefined : data?.issues?.[0]?.message ?? data?.error ?? "Something went wrong. Try again.";
-    if (res.status === 401 && typeof window !== "undefined") window.location.href = "/signin";
+    // A 401 still goes to sign-in. The query only asks that screen to say why (APL-2664). Signing in is unchanged.
+    if (res.status === 401 && typeof window !== "undefined" && window.location.pathname !== "/signin") sessionNav.toSignIn();
     return { ok: res.ok, status: res.status, error, data };
   } catch {
     return { ok: false, status: 0, error: "Could not reach the server. Check your connection and try again.", data: {} as T };

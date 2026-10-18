@@ -7,7 +7,7 @@ import styles from "@/components/auth.module.css";
 import { post, rememberEmail } from "@/components/client";
 import s from "./signin.module.css";
 
-export function SignInForm({ justReset }: { justReset: boolean }) {
+export function SignInForm({ justReset, sessionExpired = false }: { justReset: boolean; sessionExpired?: boolean }) {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
   const [needsVerify, setNeedsVerify] = useState<string | null>(null);
@@ -47,6 +47,7 @@ export function SignInForm({ justReset }: { justReset: boolean }) {
       <section className={styles.card}>
       <h2 className={s.h2}>Sign in</h2>
       <form onSubmit={submit} className={styles.card} style={{ border: 0, padding: 0 }} noValidate>
+        {sessionExpired && !error && <div role="alert" className={styles.alert}>Your session has expired, please sign in again</div>}
         {justReset && !error && <div role="status" className={styles.notice}>Password changed. Sign in with your new password.</div>}
         {error && (
           <div role="alert" className={styles.alert}>

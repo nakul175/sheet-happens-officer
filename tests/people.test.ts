@@ -159,6 +159,32 @@ describe("15.3 sign-in details", () => {
 });
 
 describe("15.4 person profile", () => {
+  // qa:TC-APL2664-b7b130bf@v1 — the API response itself, not only the page.
+  it("Allowed users see what their role allows: worker qa:TC-APL2664-b7b130bf@v1", async () => {
+    const sa = await superAdmin();
+    const lead = await account("lead");
+    const worker = await account("worker");
+    const p2 = await account("p2");
+    const shared = await project(sa, lead, [{ who: worker }, { who: p2 }]);
+    const priv = await project(sa, lead, [{ who: p2 }]);
+    const sharedName = (await lead.c.get(`/api/projects/${shared.id}`)).json.project.name as string;
+    const privateName = (await lead.c.get(`/api/projects/${priv.id}`)).json.project.name as string;
+    const r = await worker.c.get(`/api/team/${p2.id}`);
+    expect(r.status).toBe(200);
+    const body = JSON.stringify(r.json);
+    const pr = r.json.person;
+    expect(pr.name).toBe(p2.name);
+    expect(pr.projects).toEqual([{ id: shared.id, name: sharedName }]);
+    expect(pr.email).toBeUndefined();
+    expect(pr.orgRole).toBeUndefined();
+    expect(pr.status).toBeUndefined();
+    expect(pr.joinedAt).toBeUndefined();
+    expect(pr.openTasks).toBeUndefined();
+    expect(body).not.toContain(p2.email);
+    expect(body).not.toContain(priv.id);
+    expect(body).not.toContain(privateName);
+  });
+
   it("a Member sees a name and shared projects only", async () => {
     const sa = await superAdmin();
     const lead = await account("lead");

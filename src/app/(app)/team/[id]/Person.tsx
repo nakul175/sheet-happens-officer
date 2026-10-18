@@ -57,10 +57,10 @@ export default function PersonPage() {
 
   return (
     <Page title={p?.name ?? "Person"} sub={admin && p?.email ? `${p.email} · ${roleLabel(p.orgRole!)}` : undefined} docTitle={p?.name ?? "Person"}>
+      {/* APL-2664 AC3: a member sees the name and shared projects only, so email and role stay off this line. */}
       <p><Link href="/team">← Back to Team</Link></p>
       {g.loading && <Skeleton />}
       {missing && <div className="err" role="alert">Not found</div>}
-      {expired && <div className="err" role="alert">Your session has expired, please sign in again</div>}
       {denied && <div className="card empty" role="alert">{"You don't have access to this person"}</div>}
       {serverFault && (
         <div className="card empty" role="alert">
@@ -68,8 +68,7 @@ export default function PersonPage() {
           <button className="btn" onClick={g.reload}>Retry</button>
         </div>
       )}
-      {unreachable && <LoadFailed onRetry={g.reload} />}
-      {g.error && !missing && !expired && !denied && !serverFault && !unreachable && <LoadFailed onRetry={g.reload} />}
+      {(unreachable || (g.error && !missing && !expired && !denied && !serverFault)) && <LoadFailed onRetry={g.reload} />}
       {note && <div className={note.ok ? "ok" : "err"} role="status">{note.text}</div>}
       {p && (
         <>
