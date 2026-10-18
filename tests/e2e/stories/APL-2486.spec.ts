@@ -1,7 +1,8 @@
 // SHO-US-3.2 Access follows membership (Linear APL-2486).
-// Needs the plain Member (SHO_MEMBER_*) for the "other person" cases; those tests skip without it.
-import { test, expect, zz } from "../support";
-import { newProject, newTask } from "../g2";
+// The plain Member (SHO_MEMBER_*) is the other person. Task writes send expectedUpdatedAt, which main requires.
+import { test, expect, login, zz } from "../support";
+import { getTask, newProject, newTask } from "../g2";
+import { quickAction } from "../helpers/jim-http";
 
 test("AC1: a Member in two projects sees only those two, and cannot read another project by ID", async ({ admin, member, later }) => {
   const a = await newProject(admin, later, { label: "3.2 A", members: [{ who: member }] });
@@ -18,8 +19,14 @@ test("AC1: a Member in two projects sees only those two, and cannot read another
 });
 
 test("AC2: a person in no projects sees 'Ask a project Leader to add you.' (screen)", async ({ member }) => {
-  const mine = (await member.api.get("/api/projects")).json.projects as unknown[];
-  test.skip(mine.length > 0, "The staging Member is already in active projects, so the empty state cannot show. Use a Member account with no projects.");
+  // The shared Member may already belong to projects. The screen is what an empty list renders,
+  // so this answers /api/projects with an empty list and checks that copy.
+  await member.page.route("**/api/projects**", async (route) => {
+    if (route.request().method() !== "GET") return route.continue();
+    const url = new URL(route.request().url());
+    if (url.pathname !== "/api/projects") return route.continue();
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ projects: [] }) });
+  });
   await member.page.goto("/projects");
   await expect(member.page.getByText("Ask a project Leader to add you.")).toBeVisible();
 });
@@ -55,7 +62,8 @@ test("AC5: an archived project stays readable to its members, hidden from non-me
   const archivedList = ((await member.api.get("/api/projects?archived=true")).json.projects as { id: string }[]).map((p) => p.id);
   expect(archivedList).toContain(mem.id);
   expect(archivedList).not.toContain(out.id);
-  expect((await admin.api.patch(`/api/tasks/${t}`, { title: zz("changed") })).status).toBe(409);
+  const seen = (await getTask(admin, t)).updatedAt as string;
+  expect((await admin.api.patch(`/api/tasks/${t}`, { title: zz("changed"), expectedUpdatedAt: seen })).status).toBe(409);
   expect((await admin.api.post(`/api/projects/${mem.id}/tasks`, { title: zz("new") })).status).toBe(409);
 });
 
@@ -74,6 +82,12 @@ test("AC6: search shows a Member nothing from a project they are not in (archive
   expect((await member.api.get("/api/search?q=z")).json.tasks).toHaveLength(0); // under 2 characters
 });
 
-test.skip("AC6 (concierge half): the concierge reveals nothing about a project the person is not in", async () => {
-  // Needs the model switched on (MODEL_DATA_APPROVED) and a paid model call; the concierge privacy rule is covered by tests/concierge.test.ts with a fake model. Check by hand on staging.
+test("AC6 (concierge half): the concierge reveals nothing about a project the person is not in", async ({ admin, member, later }) => {
+  const secret = await newProject(admin, later, { label: "3.2 concierge secret" });
+  const r = await quickAction(member, "due-week", secret.id);
+  const pass = login("MEMBER").password;
+  expect(r.body.includes(secret.name), "the answer does not name the project").toBe(false);
+  expect(r.body.includes(pass)).toBe(false);
+  expect(r.status, r.body).toBe(404);
+  expect(r.json.error).toBe("Project not found");
 });

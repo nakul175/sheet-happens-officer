@@ -1,6 +1,5 @@
 // SHO-US-14.9 Filters, sort and group on lists (APL-2568).
 import { test, expect, zz, type Api } from "../support";
-import { why } from "../helpers/jim-http";
 
 const day = (n: number) => new Date(Date.now() + 5.5 * 3600_000 + n * 86400_000).toISOString().slice(0, 10);
 
@@ -69,6 +68,37 @@ test("AC4: when nothing matches it says 'No tasks match' and Clear filters bring
   await expect(p.getByText(zz("soon")).first()).toBeVisible();
 });
 
-test.skip("AC5: filtering 500 tasks responds within 300 ms", why(
-  "Seeding 500 tasks on the shared staging server is too heavy, and a 300 ms budget cannot be separated from the network in a remote browser. Measure it on a prepared project locally.",
-), () => {});
+test("AC5: filtering 500 tasks responds within 300 ms", async ({ admin, later }) => {
+  test.setTimeout(10 * 60_000);
+  const r = await admin.api.post("/api/projects", { name: zz("filters-500"), leaderId: admin.user.id });
+  expect(r.status).toBe(201);
+  const id = r.json.project.id as string;
+  later(() => admin.api.post(`/api/projects/${id}/archive`));
+  const overdueDay = day(-3);
+  const soonDay = day(30);
+  const total = 500;
+  const overdueCount = 400;
+  for (let i = 0; i < total; i += 4) {
+    const made = await Promise.all(Array.from({ length: Math.min(4, total - i) }, (_, k) => {
+      const n = i + k;
+      return admin.api.post(`/api/projects/${id}/tasks`, {
+        title: zz(`row-${n}`),
+        dueDate: n < overdueCount ? overdueDay : soonDay,
+      });
+    }));
+    for (const t of made) expect(t.status, JSON.stringify(t.json)).toBe(201);
+  }
+  const path = `/api/projects/${id}/tasks?f=overdue`;
+  const time = async () => {
+    const t0 = Date.now();
+    const res = await admin.api.get(path);
+    return { ms: Date.now() - t0, res };
+  };
+  await time(); // warm the connection
+  const timed = await time();
+  expect(timed.res.status, JSON.stringify(timed.res.json)).toBe(200);
+  expect(timed.res.json.matched).toBe(overdueCount);
+  expect(timed.res.json.truncated).toBe(false);
+  test.info().annotations.push({ type: "timing", description: `${timed.ms} ms for ${total} tasks, ${overdueCount} overdue` });
+  expect(timed.ms, `filtering ${total} tasks took ${timed.ms} ms`).toBeLessThanOrEqual(300);
+});

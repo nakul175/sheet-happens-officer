@@ -1,15 +1,18 @@
 // APL-2469 · [SHO-E5] Views and screens. One test per acceptance criterion.
-// Pam qa:TC: none on the issue. Password comes from SHO_QA_PASS. Names use ZZ-TEST. Emails are nakul17+ aliases.
+// Pam qa:TC: none on the issue. Names use ZZ-TEST. The Super Admin and the plain Member are the two people.
 import type { Page } from "@playwright/test";
 import { test, login } from "../support";
-import { why } from "../helpers/jim-http";
-import { PASS, passwordOk, gate, verifiedUser, deactivate, makeProject, archiveProject, expect, zz, RUN } from "./qa";
+import { makeProject, archiveProject, expect, zz, RUN } from "./qa";
 
 test.beforeAll(async ({ request }) => {
-  test.skip(!PASS, "Set SHO_QA_PASS (the shared password for the nakul17+ accounts).");
-  test.skip(!passwordOk(PASS), "SHO_QA_PASS must be at least 8 characters with a letter and a number.");
-  try { login("ADMIN"); } catch { test.skip(true, "Set SHO_ADMIN_EMAIL and SHO_ADMIN_PASS (a Super Admin)."); }
-  await gate(request);
+  login("ADMIN");
+  login("MEMBER");
+  const res = await request.get("/api/health");
+  const body = await res.text();
+  expect(res.status(), body).toBe(200);
+  const json = JSON.parse(body) as { ok?: boolean; release?: unknown };
+  expect(json.ok).toBe(true);
+  expect(typeof json.release === "string" && json.release.length >= 7, "release SHA from /api/health").toBe(true);
 });
 
 const calm = async (page: Page) => {
@@ -17,10 +20,7 @@ const calm = async (page: Page) => {
   if (await fold.count()) await fold.first().click();
 };
 
-test("AC1: opening the app lands on My tasks and shows the member's open tasks", async ({ admin, browser, anon, later }) => {
-  const member = await verifiedUser(browser, anon.request, "2469", "ac1");
-  later(() => member.ctx.close());
-  later(() => deactivate(admin.api, member.user.id as string));
+test("AC1: opening the app lands on My tasks and shows the member's open tasks", async ({ admin, member, later }) => {
   const project = await makeProject(admin.api, "home", admin.user.id as string);
   later(() => archiveProject(admin.api, project.id, admin.user.id as string));
   expect((await admin.api.post(`/api/projects/${project.id}/members`, { userId: member.user.id, role: "EDITOR" })).status).toBe(201);
@@ -34,10 +34,7 @@ test("AC1: opening the app lands on My tasks and shows the member's open tasks",
   await expect(member.page.locator(".item", { hasText: title })).toBeVisible();
 });
 
-test("AC2: the project list view lists the tasks a member can see, with their key fields", async ({ admin, browser, anon, later }) => {
-  const member = await verifiedUser(browser, anon.request, "2469", "ac2");
-  later(() => member.ctx.close());
-  later(() => deactivate(admin.api, member.user.id as string));
+test("AC2: the project list view lists the tasks a member can see, with their key fields", async ({ admin, member, later }) => {
   const project = await makeProject(admin.api, "list", admin.user.id as string);
   later(() => archiveProject(admin.api, project.id, admin.user.id as string));
   expect((await admin.api.post(`/api/projects/${project.id}/members`, { userId: member.user.id, role: "EDITOR" })).status).toBe(201);
@@ -123,22 +120,19 @@ test("AC4: opening a task row or card shows the detail overlay without leaving t
   expect(new URL(admin.page.url()).pathname).toBe(`/projects/${project.id}`);
 });
 
-test("AC5: the Team page lists people as specified in SHO-US-2.5", async ({ admin, browser, anon, later }) => {
-  const member = await verifiedUser(browser, anon.request, "2469", "ac5");
-  later(() => member.ctx.close());
-  later(() => deactivate(admin.api, member.user.id as string));
+test("AC5: the Team page lists people as specified in SHO-US-2.5", async ({ admin, member }) => {
   await admin.page.goto("/team");
   await expect(admin.page.getByRole("heading", { name: "Team" })).toBeVisible();
   for (const heading of ["Name", "Email", "Role", "Status", "Actions"]) {
     await expect(admin.page.getByRole("columnheader", { name: heading, exact: true })).toBeVisible();
   }
-  const row = admin.page.locator("tr", { hasText: member.email });
-  await expect(row).toContainText(member.name);
+  const row = admin.page.locator("tr", { hasText: String(member.user.email) });
+  await expect(row).toContainText(String(member.user.name));
   await expect(row).toContainText("Member");
   await expect(row).toContainText("Active");
-  await row.getByRole("link", { name: member.name }).click();
+  await row.getByRole("link", { name: String(member.user.name) }).click();
   await expect(admin.page).toHaveURL(new RegExp(`/team/${member.user.id}$`));
-  await expect(admin.page.getByRole("heading", { name: member.name })).toBeVisible();
+  await expect(admin.page.getByRole("heading", { name: String(member.user.name) })).toBeVisible();
 });
 
 test("AC6: the branded shell works on a desktop and a phone-width browser", async ({ admin, later }) => {
@@ -176,18 +170,53 @@ test("AC6: the branded shell works on a desktop and a phone-width browser", asyn
   }
 });
 
-const MOCKUP_SCREENS = [
-  ["My tasks", "By date groups, task rows, quick add"],
-  ["Project list", "column headers, task rows, Blocked flag"],
-  ["Project board", "Section columns, cards, add Section"],
-  ["Task detail", "overlay over the page, fields, subtasks"],
-  ["Team", "people grouped by role, deactivated shown"],
-] as const;
+test("AC7: each screen matches the approved mockup at 1440x900 and 390x844", async ({ admin, later }) => {
+  const project = await makeProject(admin.api, "mockup", admin.user.id as string);
+  later(() => archiveProject(admin.api, project.id, admin.user.id as string));
+  const title = zz("mockup");
+  expect((await admin.api.post(`/api/projects/${project.id}/tasks`, { title, priority: "HIGH" })).status).toBe(201);
 
-test.skip(
-  "AC7: each screen matches the approved mockup at 1440x900 and 390x844 (manual visual check)",
-  why(MOCKUP_SCREENS.map(([screen, keys]) =>
-    `${screen} at desktop 1440x900 and phone 390x844: confirm side by side with the Design canvas mockup — app shell with navy #2C2F71 header and gold #D99D29 accent, concierge dock at the bottom, key elements in the mockup's order (${keys}). No element clipped, overlapping or horizontally scrolling. Attach a screenshot of this screen at each viewport. Spacing and copy differences are noted, not failed, unless an element is missing or misplaced.`,
-  ).join(" ")),
-  () => {},
-);
+  for (const size of [{ width: 1440, height: 900, phone: false }, { width: 390, height: 844, phone: true }] as const) {
+    await admin.page.setViewportSize({ width: size.width, height: size.height });
+
+    await admin.page.goto("/");
+    await expect(admin.page.getByRole("heading", { name: "My tasks" })).toBeVisible();
+    await expect(admin.page.getByText(/open task/)).toBeVisible();
+
+    await admin.page.goto(`/projects/${project.id}`);
+    await calm(admin.page);
+    const row = admin.page.locator(".item", { hasText: title });
+    await expect(row).toBeVisible();
+    await expect(row.locator(".pri-t")).toHaveText("High");
+
+    await admin.page.goto(`/projects/${project.id}?view=board`);
+    await calm(admin.page);
+    await expect(admin.page.locator('.col[aria-label="To do"] .bcard', { hasText: title })).toBeVisible();
+    await expect(admin.page.getByRole("button", { name: "+ Add section" })).toBeVisible();
+
+    await admin.page.locator(".bcard", { hasText: title }).click();
+    await expect(admin.page.getByRole("dialog", { name: "Task" })).toBeVisible();
+    expect(new URL(admin.page.url()).pathname).toBe(`/projects/${project.id}`);
+
+    await admin.page.goto("/team");
+    await expect(admin.page.getByRole("heading", { name: "Team" })).toBeVisible();
+    await expect(admin.page.getByRole("columnheader", { name: "Role", exact: true })).toBeVisible();
+
+    const brand = await admin.page.evaluate(() => {
+      const css = getComputedStyle(document.documentElement);
+      return {
+        navy: css.getPropertyValue("--navy").trim().toLowerCase(),
+        gold: css.getPropertyValue("--gold").trim().toLowerCase(),
+        overflow: document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1,
+      };
+    });
+    expect(brand.navy).toBe("#2c2f71");
+    expect(brand.gold).toBe("#d99d29");
+    expect(brand.overflow, `${size.width}x${size.height} stays within the width`).toBe(true);
+    if (size.phone) {
+      await expect(admin.page.locator(".tabbar")).toBeVisible();
+    } else {
+      await expect(admin.page.locator("aside.side")).toBeVisible();
+    }
+  }
+});

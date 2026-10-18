@@ -21,7 +21,7 @@ function boardTitles(stages: Stage[]) {
 
 async function crmPipes(who: Who, hidden: string) {
   const r = await who.api.get("/api/deals/pipelines");
-  test.skip(r.status === 404, hidden);
+  if (r.status === 404) throw new Error(hidden);
   expect(r.status, JSON.stringify(r.json)).toBe(200);
   return r.json.pipelines as Pipe[];
 }
@@ -110,8 +110,27 @@ test("AC2: a pipeline's board columns are that pipeline's stages, with On hold, 
   await expect(admin.page.getByText(deal.name)).toHaveCount(0);
 });
 
-test.skip("AC3: Home, Organisation, Deal and Pipeline screens share one list and board component", () => {
-  // Reason: NJ removed this criterion on 18 Oct 2026. The shared view is APL-2642, after crm/close-gaps. There is no single view engine to open.
+test("AC3: Home, Organisation, Deal and Pipeline screens each open their list or board", async ({ admin, later }) => {
+  // NJ removed the single shared component on 18 Oct 2026 (the shared view is APL-2642). Each screen still opens.
+  test.setTimeout(180_000);
+  await crmPipes(admin, CRM_OFF);
+  const deal = await makeDeal(admin, later, { label: "2531 screens" });
+  await admin.page.setViewportSize({ width: 1400, height: 900 });
+
+  await admin.page.goto("/");
+  await expect(admin.page.getByRole("heading", { name: "My tasks" })).toBeVisible();
+
+  await admin.page.goto(`/accounts/${deal.orgId}`);
+  await expect(admin.page.getByRole("link", { name: deal.name })).toBeVisible();
+
+  await admin.page.goto(`/projects/${deal.id}`);
+  await expect(admin.page.getByText(deal.step).first()).toBeVisible();
+
+  await admin.page.goto("/deals");
+  await expect(admin.page.getByRole("region", { name: "Lead" })).toBeVisible();
+  await expect(admin.page.locator(".dcard", { hasText: deal.name })).toBeVisible();
+  await admin.page.getByRole("tab", { name: "Bid" }).click();
+  await expect(admin.page.getByRole("region", { name: "Identified" })).toBeVisible();
 });
 
 test("AC4: archiving leaves a deal off the live list, and Trash still only holds deleted tasks", async ({ admin, later }) => {
