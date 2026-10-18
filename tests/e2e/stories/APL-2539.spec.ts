@@ -14,7 +14,8 @@ test("APL-2539 > AC1: the panel shows the pipeline, the organisation and the sta
   await admin.page.goto(`/projects/${deal.id}`);
   const panel = dealPanel(admin.page);
   await expect(panel.getByText(pipes.pro.name, { exact: true })).toBeVisible();
-  await expect(panel.getByRole("link", { name: org.name })).toHaveAttribute("href", `/accounts/${org.id}`);
+  // The same organisation is also the Buyer chip. The organisation line is the meta row next to the pipeline.
+  await expect(panel.locator(".meta").getByRole("link", { name: org.name })).toHaveAttribute("href", `/accounts/${org.id}`);
   await expect(panel.getByRole("button", { name: "Lead", exact: true })).toHaveAttribute("aria-current", "step");
   await expect(panel.getByRole("button", { name: "On hold", exact: true })).toBeEnabled();
   await expect(panel.getByRole("button", { name: "Won", exact: true })).toBeEnabled();
