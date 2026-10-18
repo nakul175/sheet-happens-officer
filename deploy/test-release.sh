@@ -68,7 +68,34 @@ run_env staging fail \
   DATABASE_URL='postgresql://u:supersecret@db.example:25061/sho?sslmode=require&pgbouncer=true' \
   RESEND_API_KEY='re_test'
 grep -q 'PgBouncer' "$ENV_ERR"
-pass "staging env rejects the production pool"
+pass "staging env rejects an unidentified PgBouncer pool"
+
+run_env staging fail \
+  PROD_DB_HOST=prod.db.example \
+  PROD_DB_NAME=prod \
+  DATABASE_URL='postgresql://u:test-only@staging.db.example:25061/sho_staging?sslmode=require&pgbouncer=true&pool_timeout=10' \
+  DIRECT_DATABASE_URL='postgresql://u:test-only@staging.db.example:25060/sho_staging?sslmode=require' \
+  RESEND_API_KEY='re_test'
+grep -q 'connection_limit=2' "$ENV_ERR"
+pass "staging pool requires connection_limit=2"
+
+run_env staging fail \
+  PROD_DB_HOST=db.example \
+  PROD_DB_NAME=sho \
+  DATABASE_URL='postgresql://u:supersecret@db.example:25061/sho?sslmode=require&pgbouncer=true&connection_limit=2&pool_timeout=10' \
+  DIRECT_DATABASE_URL='postgresql://u:test-only@db.example:25060/other?sslmode=require' \
+  RESEND_API_KEY='re_test'
+grep -q 'production database' "$ENV_ERR"
+pass "staging pool refuses the production host and database"
+
+run_env staging ok \
+  PROD_DB_HOST=prod.db.example \
+  PROD_DB_NAME=prod \
+  DATABASE_URL='postgresql://u:test-only@staging.db.example:25061/sho_staging?sslmode=require&pgbouncer=true&connection_limit=2&pool_timeout=10' \
+  DIRECT_DATABASE_URL='postgresql://u:test-only@staging.db.example:25060/sho_staging?sslmode=require' \
+  RESEND_API_KEY='re_test'
+grep -q '^DIRECT_DATABASE_URL=' "$ENV_OUT"
+pass "staging pool is allowed when it is not production and the limit is 2"
 
 run_env staging ok \
   DATABASE_URL='postgresql://u:test-only@127.0.0.1:5432/staging?sslmode=require' \
@@ -141,13 +168,13 @@ new_tree() {
   echo '{}' > "$SRC/package.json"
   echo '{}' > "$SRC/node_modules/next/package.json"
   echo 'datasource db { provider = "postgresql" }' > "$SRC/prisma/schema.prisma"
+  mkdir -p "$SRC/prisma/migrations/20261018000000_harness"
+  printf '%s\n' '-- expand-only' 'select 1;' > "$SRC/prisma/migrations/20261018000000_harness/migration.sql"
   echo 'export {}' > "$SRC/src/generated/prisma/client.ts"
   echo engine > "$SRC/src/generated/prisma/libquery_engine-test.node"
   echo '#!/bin/bash' > "$SRC/deploy/job.sh"
   TAR="$WORK/release.tar.gz"
-  tar -C "$SRC" -czf "$TAR" .
-  DIGEST=$(sha256sum "$TAR" | awk '{print $1}')
-  printf '%s\n' "$DIGEST" > "$TAR.sha256"
+  pack_tar
   SHA=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
   STUB="$WORK/bin"
   mkdir -p "$STUB"
@@ -203,7 +230,35 @@ if [ "${PG_DUMP_EMPTY:-}" = 1 ]; then : > "$file"; exit 0; fi
 printf 'PGDMP' > "$file"
 exit 0
 EOF
-  chmod 755 "$STUB/sudo" "$STUB/curl" "$STUB/npx" "$STUB/pg_dump"
+  cat > "$STUB/pg_restore" <<'EOF'
+#!/bin/bash
+echo pg_restore >> "$HARNESS_LOG"
+if [ "${PG_RESTORE_FAIL:-}" = 1 ]; then exit 1; fi
+if [ "${PG_RESTORE_EMPTY:-}" = 1 ]; then exit 0; fi
+echo "TOC"
+exit 0
+EOF
+  cat > "$STUB/df" <<'EOF'
+#!/bin/bash
+echo "Filesystem 1024-blocks Used Available Capacity Mounted"
+if [ "${DF_LOW:-}" = 1 ]; then
+  echo "tmpfs 100 90 100 90% /"
+else
+  echo "tmpfs 900000000 1000 800000000 1% /"
+fi
+exit 0
+EOF
+  chmod 755 "$STUB/sudo" "$STUB/curl" "$STUB/npx" "$STUB/pg_dump" "$STUB/pg_restore" "$STUB/df"
+}
+
+pack_tar() {
+  tar -C "$SRC" -czf "$TAR" .
+  DIGEST=$(sha256sum "$TAR" | awk '{print $1}')
+  printf '%s\n' "$DIGEST" > "$TAR.sha256"
+}
+
+set_pending() {
+  printf '%s\n' 'Following migration have not yet been applied:' '20261018000000_harness' > "$MIGRATE_STATUS_FILE"
 }
 
 write_env() {
@@ -268,7 +323,7 @@ pass "staging install skips the backup and restarts sho-staging"
 
 new_tree
 write_env staging
-printf '%s\n' 'Following migration have not yet been applied:' > "$MIGRATE_STATUS_FILE"
+set_pending
 run_rel staging PG_DUMP_FAIL=1 >"$WORK/out"
 if grep -q '^pg_dump$' "$HARNESS_LOG"; then fail "staging backed up while migrations were pending"; fi
 grep -q 'npx prisma migrate deploy' "$HARNESS_LOG"
@@ -276,7 +331,7 @@ pass "staging applies migrations without a production backup"
 
 new_tree
 write_env production
-printf '%s\n' 'Following migration have not yet been applied:' > "$MIGRATE_STATUS_FILE"
+set_pending
 set +e
 run_rel production PG_DUMP_FAIL=1 >"$WORK/out" 2>&1
 rc=$?
@@ -289,10 +344,13 @@ pass "production backup failure stops the migration"
 
 new_tree
 write_env production
-printf '%s\n' 'Following migration have not yet been applied:' > "$MIGRATE_STATUS_FILE"
+set_pending
 run_rel production >"$WORK/out"
 grep -q '^pg_dump$' "$HARNESS_LOG"
 grep -q 'npx prisma migrate deploy' "$HARNESS_LOG"
+grep -q 'expand-only: yes' "$WORK/out"
+grep -q 'restore check passed' "$WORK/out"
+grep -q 'rollback target none' "$WORK/out"
 backup=$(find "$WORK/root/opt/sho/backups" -type f -name '*.dump' -print -quit)
 [ -n "$backup" ] && [ -s "$backup" ] || fail "backup file missing"
 [ "$(readlink -f "$WORK/root/opt/sho/current")" = "$WORK/root/opt/sho/releases/$SHA" ]
@@ -332,7 +390,210 @@ set -e
 [ "$rc" != 0 ] || fail "health failure was treated as success"
 grep -q 'forward-only' "$WORK/out"
 [ "$(readlink -f "$WORK/root/opt/sho-staging/current")" = "$WORK/root/opt/sho-staging/releases/previous" ]
+[ "$(cat "$WORK/root/opt/sho-staging/previous-sha")" = previous ]
 pass "failed health check restores the previous code only"
+
+new_tree
+write_env production
+set +e
+run_rel production DF_LOW=1 >"$WORK/out" 2>&1
+rc=$?
+set -e
+[ "$rc" != 0 ] || fail "low disk was accepted"
+grep -q 'not enough free disk' "$WORK/out"
+[ ! -d "$WORK/root/opt/sho/releases/$SHA" ] || fail "low disk extracted a release"
+pass "low disk stops the release before extract"
+
+new_tree
+write_env production
+set_pending
+set +e
+run_rel production PG_RESTORE_FAIL=1 >"$WORK/out" 2>&1
+rc=$?
+set -e
+[ "$rc" != 0 ] || fail "restore check failure continued"
+grep -q 'restore check failed' "$WORK/out"
+if grep -q 'npx prisma migrate deploy' "$HARNESS_LOG"; then fail "migrate ran after a failed restore check"; fi
+pass "restore check failure stops the migration"
+
+new_tree
+write_env production
+set_pending
+mkdir -p "$WORK/root/opt/sho/backups"
+echo old > "$WORK/root/opt/sho/backups/old.dump"
+touch -d '2020-01-01' "$WORK/root/opt/sho/backups/old.dump"
+run_rel production KEEP_DUMPS=1 >"$WORK/out"
+[ ! -f "$WORK/root/opt/sho/backups/old.dump" ] || fail "old backup was kept"
+[ "$(find "$WORK/root/opt/sho/backups" -type f -name '*.dump' | wc -l)" = 1 ]
+grep -q 'removed 1 old database backup' "$WORK/out"
+pass "backup retention keeps the newest dump"
+
+new_tree
+printf '%s\n' 'select 1;' > "$SRC/prisma/migrations/20261018000000_harness/migration.sql"
+pack_tar
+write_env production
+set_pending
+set +e
+run_rel production >"$WORK/out" 2>&1
+rc=$?
+set -e
+[ "$rc" != 0 ] || fail "contract migration was applied"
+grep -q 'not marked expand-only' "$WORK/out"
+if grep -q '^pg_dump$' "$HARNESS_LOG"; then fail "backup ran for a contract migration"; fi
+: > "$HARNESS_LOG"
+run_rel production SHO_ALLOW_CONTRACT_MIGRATION=1 >"$WORK/out" 2>&1
+grep -q 'contract migration override' "$WORK/out"
+grep -q 'npx prisma migrate deploy' "$HARNESS_LOG"
+pass "contract migrations fail closed unless the override is set"
+
+# --- rollback ----------------------------------------------------------------
+
+new_tree
+write_env production
+mkdir -p "$WORK/root/opt/sho/releases/$SHA"
+printf 'RELEASE=%s\nARTIFACT_SHA256=%s\n' "$SHA" "$DIGEST" > "$WORK/root/opt/sho/releases/$SHA/release.env"
+ln -s "$WORK/root/opt/sho/releases/$SHA" "$WORK/root/opt/sho/previous"
+env PATH="$STUB:$PATH" SHO_TIER=production SHO_PREFIX="$WORK/root" \
+  HARNESS_LOG="$HARNESS_LOG" EXPECT_SHA="$SHA" EXPECT_DIGEST="$DIGEST" \
+  bash deploy/rollback.sh --harness >"$WORK/out"
+grep -q 'no migration' "$WORK/out"
+grep -q "rolled back to $SHA" "$WORK/out"
+[ "$(readlink -f "$WORK/root/opt/sho/current")" = "$WORK/root/opt/sho/releases/$SHA" ]
+if grep -q 'npx prisma' "$HARNESS_LOG"; then fail "rollback ran a migration"; fi
+pass "rollback switches the symlink and does not migrate"
+
+if env PATH="$STUB:$PATH" SHO_TIER=production SHO_PREFIX="$WORK/root" \
+  bash deploy/rollback.sh --harness /tmp/not-a-release >"$WORK/out" 2>&1; then
+  fail "rollback accepted a directory outside /opt/sho/releases"
+fi
+pass "rollback rejects a directory outside the release tree"
+
+# --- host guard --------------------------------------------------------------
+
+run_guard() {
+  local assignments=()
+  while [ $# -gt 0 ] && [[ "$1" == *=* ]]; do
+    assignments+=("$1")
+    shift
+  done
+  env -u PROD_DB_HOST -u PROD_DB_NAME -u DATABASE_URL -u DIRECT_DATABASE_URL -u ZZ_PREFIX -u APP_URL -u BASE_URL \
+    "${assignments[@]}" node deploy/prod-host-guard.mjs "$@"
+}
+if run_guard TASKBOARD_URL=https://app.sheethappensofficer.com --grep @write >"$WORK/out" 2>&1; then
+  fail "@write was allowed against production"
+fi
+grep -q 'refusing' "$WORK/out"
+if grep -q 'postgresql://' "$WORK/out"; then fail "host guard printed a connection string"; fi
+pass "@write against the production host exits non-zero"
+
+run_guard TASKBOARD_URL=https://app.sheethappensofficer.com --grep @readonly --grep-invert @write
+run_guard TASKBOARD_URL=https://app.sheethappensofficer.com --grep @prod-safe --grep-invert @write
+run_guard TASKBOARD_URL=http://localhost:3100 --grep @write
+if run_guard TASKBOARD_URL=https://app.sheethappensofficer.com ZZ_PREFIX=ZZ-TEST-01 --seed --grep @readonly --grep-invert @write >"$WORK/out" 2>&1; then
+  fail "ZZ-TEST seeding was allowed against production"
+fi
+grep -q 'ZZ-TEST' "$WORK/out"
+if PROD_DB_HOST=db.example PROD_DB_NAME=prod \
+  DATABASE_URL='postgresql://u:supersecret@db.example:25061/prod?sslmode=require&pgbouncer=true' \
+  node deploy/prod-host-guard.mjs --grep @write >"$WORK/out" 2>&1; then
+  fail "@write was allowed against the production database"
+fi
+if grep -q 'supersecret' "$WORK/out"; then fail "host guard printed a password"; fi
+pass "read-only smoke is allowed and ZZ-TEST seeding is refused"
+
+# --- qa gate, window, ruleset, ssh ------------------------------------------
+
+digest=$(printf 'a%.0s' {1..64})
+other=$(printf 'b%.0s' {1..64})
+# shellcheck source=qa-gate.sh
+. deploy/qa-gate.sh
+qa_gate_decide rel-2026.10.18.1 tag yes "$digest" "$digest" success "READY $digest" >/dev/null
+qa_gate_decide rel-2026.10.18.2 tag yes "$digest" "$digest" success "WITH_EXCEPTION $digest" >/dev/null
+if qa_gate_decide rel-test-1 tag yes "$digest" "$digest" success "READY $digest" >/dev/null 2>&1; then
+  fail "qa gate accepted a rehearsal tag"
+fi
+if qa_gate_decide rel-2026.10.18.1 commit yes "$digest" "$digest" success "READY $digest" >/dev/null 2>&1; then
+  fail "qa gate accepted a lightweight tag"
+fi
+if qa_gate_decide rel-2026.10.18.1 tag no "$digest" "$digest" success "READY $digest" >/dev/null 2>&1; then
+  fail "qa gate accepted a commit that is not on main"
+fi
+if qa_gate_decide rel-2026.10.18.1 tag yes "$digest" "$other" success "READY $digest" >/dev/null 2>&1; then
+  fail "qa gate accepted a digest staging did not report"
+fi
+if qa_gate_decide rel-2026.10.18.1 tag yes "$digest" "$digest" success "READY $other" >/dev/null 2>&1; then
+  fail "qa gate accepted a QA record for a different digest"
+fi
+pass "qa gate matches the tag, the ancestor, the digest and the QA record"
+
+window_out=$(mktemp)
+window_at() {
+  : > "$window_out"
+  env GITHUB_OUTPUT="$window_out" GITHUB_EVENT_NAME="$1" GITHUB_REF="$2" SHO_NOW_IST="$3" bash deploy/staging-window.sh >/dev/null
+  tr -d '[:space:]' < "$window_out"
+}
+[ "$(window_at push refs/heads/main 16:00)" = "skip=true" ]
+[ "$(window_at push refs/heads/main 18:29)" = "skip=true" ]
+[ "$(window_at push refs/heads/main 15:59)" = "skip=false" ]
+[ "$(window_at push refs/heads/main 18:30)" = "skip=false" ]
+[ "$(window_at push refs/tags/rc-2026.10.18.1 17:00)" = "skip=false" ]
+[ "$(window_at workflow_dispatch refs/heads/main 17:00)" = "skip=false" ]
+pass "automatic staging deploys are held from 16:00 to 18:30 IST"
+
+rules=$(mktemp)
+cat > "$rules" <<'JSON'
+{"rulesets":[{"name":"Protect rel tags","target":"tag","enforcement":"active","conditions":{"ref_name":{"include":["refs/tags/rel-*"],"exclude":[]}},"rules":[{"type":"creation"}],"bypass_actors":[{"actor_type":"Team"}]}]}
+JSON
+bash deploy/check-tag-ruleset.sh --fixture "$rules" >/dev/null
+printf '%s' '{"rulesets":[]}' > "$rules"
+if bash deploy/check-tag-ruleset.sh --fixture "$rules" >/dev/null 2>&1; then
+  fail "missing tag ruleset was accepted"
+fi
+pass "rel-* tag creation requires a ruleset"
+
+home=$(mktemp -d)
+scan=$(mktemp -d)
+cat > "$scan/ssh-keyscan" <<'EOF'
+#!/bin/bash
+echo scanned > "$HOME/scanned"
+echo "example.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFakeKeyForTestsOnly"
+EOF
+chmod 755 "$scan/ssh-keyscan"
+if env HOME="$home" PATH="$scan:$PATH" SHO_TIER=production HOST=example.com SSH_PRIVATE_KEY='not-a-real-key' \
+  bash deploy/ci-ssh.sh >"$WORK/out" 2>&1; then
+  fail "production ssh trusted an unpinned host key"
+fi
+grep -q 'DROPLET_HOST_KEY' "$WORK/out"
+[ ! -f "$home/scanned" ] || fail "production ssh scanned the host key"
+rm -rf "$home"
+home=$(mktemp -d)
+env HOME="$home" PATH="$scan:$PATH" SHO_TIER=staging HOST=example.com SSH_PRIVATE_KEY='not-a-real-key' \
+  bash deploy/ci-ssh.sh >"$WORK/out" 2>&1
+[ -f "$home/scanned" ] || fail "staging did not keep the first-use warning path"
+pass "production ssh fails closed without DROPLET_HOST_KEY"
+
+sha40=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+cat > "$rules" <<JSON
+{"sha":"$sha40","artifacts":[
+  {"id":9,"name":"release-$sha40","expired":false,"created_at":"2026-10-18T02:00:00Z","workflow_run":{"head_sha":"$sha40","path":".github/workflows/other.yml"}},
+  {"id":4,"name":"release-$sha40","expired":false,"created_at":"2026-10-18T01:00:00Z","workflow_run":{"head_sha":"$sha40","path":".github/workflows/ship.yml"}},
+  {"id":3,"name":"release-$sha40","expired":false,"created_at":"2026-10-18T00:00:00Z","workflow_run":{"head_sha":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","path":".github/workflows/ship.yml"}}
+]}
+JSON
+chosen=$(node deploy/select-artifact.mjs < "$rules")
+[ "$chosen" = 4 ] || fail "artifact selector chose $chosen"
+pass "canonical artifact is the oldest one built by ship.yml for this commit"
+
+if grep -n 'secrets: inherit' .github/workflows/*.yml; then
+  fail "a workflow still inherits every secret"
+fi
+if grep -n 'push-release\|ci-ssh\|SSH_PRIVATE_KEY' .github/workflows/rehearse.yml; then
+  fail "the rehearsal workflow can deploy"
+fi
+grep -q '!rel-test-\*' .github/workflows/release.yml
+grep -q 'rel-test-' .github/workflows/ship.yml
+grep -q 'actions: read' .github/workflows/ship.yml
+pass "workflows keep rehearsals, secrets and production deploys apart"
 
 rm -rf /tmp/sho-rel.*
 echo "all release checks passed"

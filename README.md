@@ -45,20 +45,37 @@ EMAIL_OUTBOX_DIR=/tmp/sho-outbox TASKBOARD_URL=http://localhost:3100 npm test
 One DigitalOcean droplet (Ubuntu 24.04, BLR1) runs the app behind Caddy; DigitalOcean Managed
 Postgres holds the data. A push to `main` runs `.github/workflows/deploy.yml`, which tests the
 commit and deploys it to **staging only** (`/opt/sho-staging`, `sho-staging` on port 3001).
-It does not write `/etc/sho/app.env` or restart production.
+It does not write `/etc/sho/app.env` or restart production. From 16:00 until 18:30 IST that
+automatic deploy is held so regression keeps the candidate it started with. Deploy that
+candidate with an `rc-*` tag, or run the staging workflow by hand.
 
-Production deploys from a `rel-*` tag (`.github/workflows/release.yml`) through the GitHub
-environment `production`. That environment is created in repository settings, with required
-reviewer `nakul175` and prevent self-review. CI builds one release tarball and its SHA-256
-per commit; staging and production both install that file. `deploy/release.sh` does not build
-on the droplet. It migrates, switches the `current` symlink, restarts, and checks `/api/health`
-and `/api/version`. A failed health check puts the previous code back. Migrations are
-forward-only. On production, a pending migration is preceded by `pg_dump` of
-`DIRECT_DATABASE_URL`; if the dump fails, the migration does not start.
+Production deploys from an annotated tag `rel-YYYY.MM.DD.N` (`.github/workflows/release.yml`)
+through the GitHub environment `production`. A `rel-test-*` tag only runs
+`.github/workflows/rehearse.yml`: it waits for the same approval and does not SSH. The
+production job also requires a QA status on the commit (`qa/gate` = success, description
+`READY <digest>` or `WITH_EXCEPTION <digest>`), the digest staging recorded for that commit,
+and the commit being on `main`. CI builds one release tarball and its SHA-256 per commit;
+staging and production both install that file. `deploy/release.sh` does not build on the
+droplet. It migrates, switches the `current` symlink, restarts, and checks `/api/health`
+and `/api/version`. A failed health check puts the previous code back and records it at
+`/opt/sho/previous`. Migrations are forward-only. On production, a pending migration must be
+marked `-- expand-only` (or the directory contains a file named `expand-only`). The script
+then checks free disk, takes a `pg_dump` of `DIRECT_DATABASE_URL`, checks it with
+`pg_restore --list`, and keeps the newest seven dumps. If any of that fails, the migration
+does not start.
+
+After a production deploy, the `@readonly` Playwright smoke runs against
+`https://app.sheethappensofficer.com`. `@write` tests and `ZZ-TEST` seeding are refused
+against that host. A failed smoke switches back to `/opt/sho/previous` and mails the owner.
+`.github/workflows/rollback.yml` is the same switch, without a migration, for the `rollback`
+environment.
 
 `/api/version` returns `{ "sha", "digest" }` for the running build. Production `DATABASE_URL`
 is the PgBouncer pool (port 25061, `pgbouncer=true`). `DIRECT_DATABASE_URL` is the direct
-database, used for migrations and the backup.
+database, used for migrations and the backup. Staging may use its own pool on port 25061
+when `PROD_DB_HOST` and `PROD_DB_NAME` show it is not the production database, the URL sets
+`connection_limit=2` and `pool_timeout`, and `STAGING_DIRECT_DATABASE_URL` is the direct
+database.
 
 One-time setup, in order:
 
@@ -67,32 +84,41 @@ One-time setup, in order:
 3. Create the droplet (BLR1, 2 vCPU / 4 GiB, Ubuntu 24.04) with the `sho_deploy` public key
    and `deploy/cloud-init.yaml` pasted into **User data**. It installs Node 22, Caddy, the
    `deploy` user, the `sho` service, cron for the jobs, the firewall and automatic security
-   updates, and generates `JOB_SECRET` locally.
+   updates, and generates `JOB_SECRET` locally. Install `postgresql-client` so production
+migrations have `pg_dump` and `pg_restore`. Keep at least 2 GiB free on the deploy disk.
 4. In the database's settings, add the droplet as a trusted source; copy the **private
    network** connection string.
 5. In GoDaddy, add an A record `app` → the droplet's IP.
 6. GitHub repository secrets: `SSH_PRIVATE_KEY` (the private half of `sho_deploy`),
-   `STAGING_DATABASE_URL` (the staging database, not the production pool), `RESEND_API_KEY`
-   (a Resend key with sending access for `sheethappensofficer.com`). Optional staging secret:
-   `STAGING_DIRECT_DATABASE_URL`. Production secrets live on the `production` environment, not
-   in the repository: `DATABASE_URL` (PgBouncer, port 25061, `pgbouncer=true`) and
-   `DIRECT_DATABASE_URL` (direct database, required for migrations and the backup), plus
-   `RESEND_API_KEY` if it should differ from the repository secret. Optional variables:
-   `DROPLET_HOST` (IP, if DNS is not live yet) and `DROPLET_HOST_KEY` (one
-   `ssh-keyscan -t ed25519 <ip>` line, which pins the host key).
-7. Run the staging workflow (push to `main` or "Run workflow"). Production ships only when a
-   `rel-*` tag is pushed and the production environment reviewer approves. Then sign up with
-   the Super Admin address and confirm the verification email lands in the inbox, not junk.
-8. Point an external uptime check at `https://app.sheethappensofficer.com/api/health`.
+   `STAGING_DATABASE_URL` (the staging database), `RESEND_API_KEY` (a Resend key with sending
+   access for `sheethappensofficer.com`), `SMOKE_EMAIL` and `SMOKE_PASSWORD` (the production
+   smoke account). When staging uses PgBouncer, `STAGING_DIRECT_DATABASE_URL` is required.
+   Production secrets live on the `production` environment, not in the repository:
+   `DATABASE_URL` (PgBouncer, port 25061, `pgbouncer=true`) and `DIRECT_DATABASE_URL` (direct
+   database, required for migrations and the backup). Repository variables: `PROD_DB_HOST`,
+   `PROD_DB_NAME`, and `DROPLET_HOST_KEY` (one `ssh-keyscan -t ed25519 <ip>` line). Production
+   refuses to deploy when `DROPLET_HOST_KEY` is empty. `DROPLET_HOST` is optional.
+   `ROLLBACK_REVIEWER` is Oscar's GitHub login. `OSCAR_EMAIL` is optional.
+7. In repository settings, NJ creates the `production` environment (required reviewer
+   `nakul175`, prevent self-review, tags allowed) and the `rollback` environment (required
+   reviewer Oscar, prevent self-review). NJ also adds an active tag ruleset for
+   `refs/tags/rel-*` so only release managers can create those tags. A sample is
+   `deploy/rel-tag-ruleset.json`; replace `actor_id` with the release-manager team id.
+8. Run the staging workflow (push to `main`, an `rc-*` tag, or "Run workflow"). Production
+   ships only when an annotated `rel-YYYY.MM.DD.N` tag is pushed, the QA status is on that
+   commit, and the production environment reviewer approves. A `rel-test-*` tag waits for
+   that approval and does not deploy. Then sign up with the Super Admin address and confirm
+   the verification email lands in the inbox, not junk.
+9. Point an external uptime check at `https://app.sheethappensofficer.com/api/health`.
 
 Scheduled jobs (`/etc/cron.d/sho`, IST): `purge-trash` 03:17, `purge-old` 03:37, `purge-chat` 03:47
 (chat older than 90 days), `concierge-budget` 03:57 (80 percent notice), `stalled-deals` 07:50 (deals with no
 next step or no activity for 30 days), `reminders` 08:00, `check`
 08:05. Each run is recorded; a failure or a missed day puts a notice in the Super Admin's
-bell, and the last runs are shown on the Audit log page. Rollback by hand is a redeploy of
-an earlier `rel-*` tag; migrations are forward-only. The droplet needs `postgresql-client`
-(`pg_dump`) before a production migration, and the deploy user needs passwordless sudo to
-restart `sho-staging` the same way it can restart `sho`.
+bell, and the last runs are shown on the Audit log page. Rollback by hand is
+`.github/workflows/rollback.yml` (no migration). Migrations are forward-only. The deploy
+user needs passwordless sudo to restart `sho-staging` and to run
+`journalctl -u sho-staging -n 80 --no-pager`, the same way it can restart `sho`.
 
 ### Concierge settings (SHO-US-9.1, 9.2)
 

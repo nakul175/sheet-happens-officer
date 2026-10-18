@@ -1,22 +1,33 @@
 # A push to main deploys to staging only (/opt/sho-staging). It does not write
 # /etc/sho/app.env, restart sho, or copy a release into /opt/sho.
-# Production is .github/workflows/release.yml, on tags rel-*, after the production
-# environment's required reviewer approves.
+# From 16:00 until 18:30 IST that automatic deploy is held. Deploy the release
+# candidate with an rc-* tag, or run this workflow by hand, including during that window.
+# Production is .github/workflows/release.yml. A rel-test-* tag never reaches it.
 #
-# Staging secrets (repository): STAGING_DATABASE_URL (required), STAGING_DIRECT_DATABASE_URL
-# (optional; migrations fall back to STAGING_DATABASE_URL), RESEND_API_KEY, SSH_PRIVATE_KEY.
-# Optional: ANTHROPIC_API_KEY and the MODEL_* variables. STAGING_DATABASE_URL must be the
-# staging database, not the production PgBouncer pool.
+# Staging secrets (repository): STAGING_DATABASE_URL, STAGING_DIRECT_DATABASE_URL
+# (required when the staging URL is a PgBouncer pool), RESEND_API_KEY, SSH_PRIVATE_KEY.
+# Optional: ANTHROPIC_API_KEY and the MODEL_* variables.
+# Variables: PROD_DB_HOST and PROD_DB_NAME. A staging pool URL must set
+# connection_limit=2 and pool_timeout, and its host plus database must differ from those.
+# actions: write is granted so the called gates job can upload the tarball.
+# The deploy job itself requests actions: read.
 name: Test and deploy to staging
 
 on:
   push:
     branches: [main]
+    tags: ["rc-*"]
   workflow_dispatch:
+    inputs:
+      sha:
+        description: Full commit SHA of the ref you selected. Leave empty to deploy that ref as-is.
+        required: false
+        type: string
 
 permissions:
   contents: read
   actions: write
+  statuses: write
 
 concurrency:
   group: deploy-staging
@@ -27,4 +38,10 @@ jobs:
     uses: ./.github/workflows/ship.yml
     with:
       tier: staging
-    secrets: inherit
+      confirm_sha: ${{ github.event_name == 'workflow_dispatch' && inputs.sha || '' }}
+    secrets:
+      STAGING_DATABASE_URL: ${{ secrets.STAGING_DATABASE_URL }}
+      STAGING_DIRECT_DATABASE_URL: ${{ secrets.STAGING_DIRECT_DATABASE_URL }}
+      RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+      SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}

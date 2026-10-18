@@ -1,7 +1,7 @@
 # Reference unit for staging. The workflow does not install this file and does not change Caddy.
 # Compare it with the live sho-staging.service. release.sh expects these paths and port 3001.
 # The deploy user also needs a sudoers line, added on the droplet by hand:
-#   deploy ALL=(root) NOPASSWD: /usr/bin/systemctl restart sho-staging, /usr/bin/journalctl -u sho-staging *
+#   deploy ALL=(root) NOPASSWD: /usr/bin/systemctl restart sho-staging, /usr/bin/journalctl -u sho-staging -n 80 --no-pager
 [Unit]
 Description=Sheet Happens Officer (staging)
 After=network-online.target

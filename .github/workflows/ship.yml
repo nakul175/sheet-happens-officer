@@ -9,10 +9,35 @@ on:
         description: staging or production
         required: true
         type: string
+      allow_contract_migration:
+        description: Allow a pending production migration that is not marked expand-only
+        required: false
+        type: boolean
+        default: false
+      confirm_sha:
+        description: When set, the checked-out commit must be this SHA
+        required: false
+        type: string
+        default: ""
+    secrets:
+      STAGING_DATABASE_URL:
+        required: false
+      STAGING_DIRECT_DATABASE_URL:
+        required: false
+      RESEND_API_KEY:
+        required: false
+      ANTHROPIC_API_KEY:
+        required: false
+      SSH_PRIVATE_KEY:
+        required: false
+      SMOKE_EMAIL:
+        required: false
+      SMOKE_PASSWORD:
+        required: false
 
 permissions:
   contents: read
-  actions: write
+  actions: read
 
 concurrency:
   group: sho-artifact-${{ github.sha }}
@@ -23,6 +48,9 @@ jobs:
     name: Test and pack the release
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    permissions:
+      contents: read
+      actions: write
     outputs:
       digest: ${{ steps.final.outputs.digest }}
     services:
@@ -159,32 +187,67 @@ jobs:
   deploy-staging:
     name: Deploy to staging
     needs: gates
-    if: inputs.tier == 'staging' && github.ref == 'refs/heads/main'
+    if: >-
+      inputs.tier == 'staging' &&
+      (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/rc-') || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    permissions:
+      contents: read
+      actions: read
+      statuses: write
     env:
       HOST: ${{ vars.DROPLET_HOST || 'app.sheethappensofficer.com' }}
       HOST_KEY: ${{ vars.DROPLET_HOST_KEY }}
       DIGEST: ${{ needs.gates.outputs.digest }}
-      DATABASE_URL: ${{ secrets.STAGING_DATABASE_URL }}
-      DIRECT_DATABASE_URL: ${{ secrets.STAGING_DIRECT_DATABASE_URL }}
-      RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
-      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-      MODEL_DATA_APPROVED: ${{ vars.MODEL_DATA_APPROVED }}
-      MODEL_NAME: ${{ vars.MODEL_NAME }}
-      MONTHLY_CEILING_USD: ${{ vars.MONTHLY_CEILING_USD }}
-      WEEKLY_MESSAGE_CAP: ${{ vars.WEEKLY_MESSAGE_CAP }}
     steps:
       - uses: actions/checkout@v4
+      - name: Confirm the requested commit
+        env:
+          CONFIRM_SHA: ${{ inputs.confirm_sha }}
+        run: |
+          if [ -n "$CONFIRM_SHA" ] && [ "$CONFIRM_SHA" != "$GITHUB_SHA" ]; then
+            echo "::error::This workflow checked out $GITHUB_SHA, not the requested commit. Run it from that commit."
+            exit 1
+          fi
+      - name: Hold automatic deploys during regression
+        id: window
+        run: bash deploy/staging-window.sh
       - uses: actions/download-artifact@v4
+        if: steps.window.outputs.skip != 'true'
         with:
           name: release-this-run
       - name: SSH key
+        if: steps.window.outputs.skip != 'true'
         env:
           SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          SHO_TIER: staging
         run: bash deploy/ci-ssh.sh
       - name: Release to staging
+        if: steps.window.outputs.skip != 'true'
+        env:
+          DATABASE_URL: ${{ secrets.STAGING_DATABASE_URL }}
+          DIRECT_DATABASE_URL: ${{ secrets.STAGING_DIRECT_DATABASE_URL }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          MODEL_DATA_APPROVED: ${{ vars.MODEL_DATA_APPROVED }}
+          MODEL_NAME: ${{ vars.MODEL_NAME }}
+          MONTHLY_CEILING_USD: ${{ vars.MONTHLY_CEILING_USD }}
+          WEEKLY_MESSAGE_CAP: ${{ vars.WEEKLY_MESSAGE_CAP }}
+          PROD_DB_HOST: ${{ vars.PROD_DB_HOST }}
+          PROD_DB_NAME: ${{ vars.PROD_DB_NAME }}
         run: bash deploy/push-release.sh staging
+      - name: Record the digest staging is running
+        if: steps.window.outputs.skip != 'true' && success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api --method POST "/repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}/statuses" \
+            -f state=success \
+            -f context='staging/digest' \
+            -f description="$DIGEST" \
+            -f target_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          echo "Recorded staging/digest for this commit." >> "$GITHUB_STEP_SUMMARY"
       - name: Email the owner if the release failed
         if: failure()
         env:
@@ -193,12 +256,39 @@ jobs:
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: bash deploy/ci-fail-mail.sh
 
+  qa-gate:
+    name: QA gate
+    needs: gates
+    if: inputs.tier == 'production' && startsWith(github.ref, 'refs/tags/rel-') && !startsWith(github.ref, 'refs/tags/rel-test-')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      statuses: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+      - name: Require the QA record for this commit and digest
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DIGEST: ${{ needs.gates.outputs.digest }}
+        run: bash deploy/qa-gate.sh
+      - name: Require the rel-* tag ruleset
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash deploy/check-tag-ruleset.sh
+
   deploy-production:
     name: Deploy to production
-    needs: gates
-    if: inputs.tier == 'production' && startsWith(github.ref, 'refs/tags/rel-')
+    needs: [gates, qa-gate]
+    if: inputs.tier == 'production' && startsWith(github.ref, 'refs/tags/rel-') && !startsWith(github.ref, 'refs/tags/rel-test-')
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    permissions:
+      contents: read
+      actions: read
     environment:
       name: production
       url: https://app.sheethappensofficer.com
@@ -206,14 +296,6 @@ jobs:
       HOST: ${{ vars.DROPLET_HOST || 'app.sheethappensofficer.com' }}
       HOST_KEY: ${{ vars.DROPLET_HOST_KEY }}
       DIGEST: ${{ needs.gates.outputs.digest }}
-      DATABASE_URL: ${{ secrets.DATABASE_URL }}
-      DIRECT_DATABASE_URL: ${{ secrets.DIRECT_DATABASE_URL }}
-      RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
-      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-      MODEL_DATA_APPROVED: ${{ vars.MODEL_DATA_APPROVED }}
-      MODEL_NAME: ${{ vars.MODEL_NAME }}
-      MONTHLY_CEILING_USD: ${{ vars.MONTHLY_CEILING_USD }}
-      WEEKLY_MESSAGE_CAP: ${{ vars.WEEKLY_MESSAGE_CAP }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
@@ -226,13 +308,77 @@ jobs:
       - name: SSH key
         env:
           SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          SHO_TIER: production
         run: bash deploy/ci-ssh.sh
       - name: Release to production
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DIRECT_DATABASE_URL: ${{ secrets.DIRECT_DATABASE_URL }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          MODEL_DATA_APPROVED: ${{ vars.MODEL_DATA_APPROVED }}
+          MODEL_NAME: ${{ vars.MODEL_NAME }}
+          MONTHLY_CEILING_USD: ${{ vars.MONTHLY_CEILING_USD }}
+          WEEKLY_MESSAGE_CAP: ${{ vars.WEEKLY_MESSAGE_CAP }}
+          PROD_DB_HOST: ${{ vars.PROD_DB_HOST }}
+          PROD_DB_NAME: ${{ vars.PROD_DB_NAME }}
+          SHO_ALLOW_CONTRACT_MIGRATION: ${{ (inputs.allow_contract_migration || vars.ALLOW_CONTRACT_MIGRATION == 'true') && '1' || '' }}
         run: bash deploy/push-release.sh production
       - name: Email the owner if the release failed
         if: failure()
         env:
           TIER: production
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: bash deploy/ci-fail-mail.sh
+
+  prod-smoke:
+    name: Read-only production smoke
+    needs: [gates, deploy-production]
+    if: needs.deploy-production.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    env:
+      HOST: ${{ vars.DROPLET_HOST || 'app.sheethappensofficer.com' }}
+      HOST_KEY: ${{ vars.DROPLET_HOST_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install dependencies
+        env:
+          DATABASE_URL: postgresql://unused:unused@127.0.0.1:1/unused
+          DIRECT_DATABASE_URL: postgresql://unused:unused@127.0.0.1:1/unused
+        run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - name: Run the @readonly smoke
+        env:
+          TASKBOARD_URL: https://app.sheethappensofficer.com
+          APP_URL: https://app.sheethappensofficer.com
+          BASE_URL: https://app.sheethappensofficer.com
+          SMOKE_EMAIL: ${{ secrets.SMOKE_EMAIL }}
+          SMOKE_PASSWORD: ${{ secrets.SMOKE_PASSWORD }}
+          RELEASE: ${{ github.sha }}
+          ARTIFACT_SHA256: ${{ needs.gates.outputs.digest }}
+        run: npx playwright test --grep @readonly --grep-invert @write
+      - name: Roll back after a failed smoke
+        if: failure()
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          SHO_TIER: production
+        run: |
+          bash deploy/ci-ssh.sh
+          bash deploy/push-rollback.sh
+          echo "Smoke failed. Rolled production back to /opt/sho/previous." >> "$GITHUB_STEP_SUMMARY"
+      - name: Email the owner if the smoke failed
+        if: failure()
+        env:
+          TIER: prod-smoke
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          OSCAR_EMAIL: ${{ vars.OSCAR_EMAIL }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: bash deploy/ci-fail-mail.sh

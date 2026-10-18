@@ -6,13 +6,10 @@ set -euo pipefail
 if [ "${1:-}" = --fixture ]; then
   meta=$(cat "${2:?fixture}")
 else
-  err=$(mktemp)
-  if ! meta=$(gh api "/repos/${GITHUB_REPOSITORY}/environments/production" 2>"$err"); then
-    echo "::error::Cannot read the production environment. Create it in Settings > Environments with required reviewer nakul175 and prevent self-review, then re-run. $(head -c 300 "$err")"
-    rm -f "$err"
+  if ! meta=$(gh api "/repos/${GITHUB_REPOSITORY}/environments/production" 2>/dev/null); then
+    echo "::error::Cannot read the production environment (request failed). Create it in Settings > Environments with required reviewer nakul175 and prevent self-review, then re-run."
     exit 1
   fi
-  rm -f "$err"
 fi
 
 if ! echo "$meta" | jq -e '

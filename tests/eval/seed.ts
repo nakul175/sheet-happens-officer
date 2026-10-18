@@ -1,5 +1,6 @@
 // Synthetic fixtures in the throwaway database. One workspace per run, so prompts cannot see each other.
 import { randomBytes } from "node:crypto";
+import { assertProdSeed } from "../../deploy/prod-host-guard.mjs";
 import { db } from "../../src/lib/db";
 import { EVAL_NOW, fixtureDue } from "./clock";
 import type { FixtureSpec, Prompt, World } from "./types";
@@ -29,6 +30,7 @@ export function assertFixture(prompt: Prompt) {
 }
 
 export async function seed(prompt: Prompt, run: number): Promise<{ world: World; workspaceId: string }> {
+  assertProdSeed(process.env, prompt.id);
   assertFixture(prompt);
   const f: FixtureSpec = prompt.fixture;
   const tag = `${prompt.id}.${run}.${randomBytes(4).toString("hex")}`;

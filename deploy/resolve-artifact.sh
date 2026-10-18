@@ -8,9 +8,13 @@ mode="${1:?mode}"
 name="release-${GITHUB_SHA:?}"
 : "${GITHUB_REPOSITORY:?}" "${GH_TOKEN:?}"
 
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+
 lookup() {
-  gh api "/repos/${GITHUB_REPOSITORY}/actions/artifacts?name=${name}&per_page=100" \
-    --jq "[.artifacts[] | select(.name==\"${name}\" and .expired==false)] | sort_by(.created_at) | .[0].id // empty"
+  local page enriched
+  page=$(gh api "/repos/${GITHUB_REPOSITORY}/actions/artifacts?name=${name}&per_page=100")
+  enriched=$(printf '%s' "$page" | node "$SCRIPT_DIR/attach-workflow-path.mjs")
+  printf '%s' "$enriched" | GITHUB_SHA="$GITHUB_SHA" node "$SCRIPT_DIR/select-artifact.mjs" || true
 }
 
 download() {

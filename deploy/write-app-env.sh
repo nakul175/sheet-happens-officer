@@ -31,7 +31,10 @@ for v in ANTHROPIC_API_KEY MODEL_DATA_APPROVED MODEL_NAME MONTHLY_CEILING_USD WE
 done
 
 if [ "$tier" = staging ]; then
-  export DIRECT_DATABASE_URL="${DIRECT_DATABASE_URL:-$DATABASE_URL}"
+  app_facts=$(db_facts "$DATABASE_URL") || { echo "::error::DATABASE_URL could not be read" >&2; exit 1; }
+  if [ "$(json_get "$app_facts" pool)" != true ]; then
+    export DIRECT_DATABASE_URL="${DIRECT_DATABASE_URL:-$DATABASE_URL}"
+  fi
 fi
 assert_database_urls "$tier" >&2
 

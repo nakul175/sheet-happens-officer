@@ -1,24 +1,40 @@
-# Tags rel-* deploy the release tarball already built for that commit to production.
-# A dry-run tag rel-test-* uses this same workflow and the same approval gate.
+# Tags rel-YYYY.MM.DD.N deploy the tarball already built for that commit.
+# rel-test-* does not match this workflow. Rehearsals use rehearse.yml and never SSH.
 #
 # NJ creates the GitHub environment named "production" before the first tag
 # (Settings > Environments). It is not created by this file. Set:
 #   - Required reviewer: nakul175
 #   - Prevent self-review: on
-#   - Deployment branches: allow tags. Do not limit this environment to the main branch,
-#     or a rel-* tag cannot deploy.
+#   - Deployment branches and tags: allow the rel-* tags. Do not limit this
+#     environment to the main branch, or a rel-* tag cannot deploy.
 # Environment secrets, same names as today: DATABASE_URL (PgBouncer port 25061,
-# pgbouncer=true), DIRECT_DATABASE_URL (direct database, required), RESEND_API_KEY,
-# and ANTHROPIC_API_KEY if the concierge is on. SSH_PRIVATE_KEY can stay a repository secret.
+# pgbouncer=true), DIRECT_DATABASE_URL (direct database, required).
+# Optional environment variable ALLOW_CONTRACT_MIGRATION=true lets one release
+# apply a migration that is not marked expand-only. Remove it afterwards.
+# Also create an active tag ruleset that restricts creating refs/tags/rel-*
+# to the release managers (sample: deploy/rel-tag-ruleset.json).
+# QA records the decision on the commit before the tag deploys:
+#   context qa/gate, state success, description "READY <digest>" or
+#   "WITH_EXCEPTION <digest>". The digest is the staging/digest status.
 name: Release to production
 
 on:
   push:
-    tags: ["rel-*"]
+    tags:
+      - "rel-*"
+      - "!rel-test-*"
+  workflow_dispatch:
+    inputs:
+      allow_contract_migration:
+        description: Allow a pending migration that is not marked expand-only
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
   actions: write
+  statuses: read
 
 concurrency:
   group: deploy-production
@@ -29,4 +45,10 @@ jobs:
     uses: ./.github/workflows/ship.yml
     with:
       tier: production
-    secrets: inherit
+      allow_contract_migration: ${{ github.event_name == 'workflow_dispatch' && inputs.allow_contract_migration }}
+    secrets:
+      SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+      RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      SMOKE_EMAIL: ${{ secrets.SMOKE_EMAIL }}
+      SMOKE_PASSWORD: ${{ secrets.SMOKE_PASSWORD }}

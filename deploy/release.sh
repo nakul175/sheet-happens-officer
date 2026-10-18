@@ -125,6 +125,23 @@ rollback() {
   fi
 }
 
+free_kb() {
+  df -Pk "$1" | awk 'NR==2 {print $4}'
+}
+
+require_disk() {
+  local avail min
+  avail=$(free_kb "$1") || { echo "could not check free disk"; exit 1; }
+  case "$avail" in
+    ''|*[!0-9]*) echo "could not read free disk"; exit 1 ;;
+  esac
+  min=${SHO_MIN_FREE_KB:-2097152}
+  if [ "$avail" -lt "$min" ]; then
+    echo "not enough free disk (${avail} KiB free, need ${min} KiB)"
+    exit 1
+  fi
+}
+
 [ -f "$TARBALL" ] || { echo "No release tarball at $TARBALL"; exit 1; }
 actual=$(sha256sum "$TARBALL" | awk '{print $1}')
 [ "$actual" = "$DIGEST" ] || { echo "release tarball digest does not match"; exit 1; }
@@ -134,6 +151,7 @@ if [ -f "${TARBALL}.sha256" ]; then
 fi
 
 mkdir -p "$ROOT/releases" "$ROOT/bin"
+require_disk "$ROOT"
 [ -f "$ENV_DIR/app.env" ] || { echo "$ENV_DIR/app.env is missing"; exit 1; }
 [ -f "$ENV_DIR/local.env" ] || { echo "$ENV_DIR/local.env is missing (JOB_SECRET stays on the droplet)"; exit 1; }
 
@@ -167,14 +185,16 @@ set -a
 . "$ENV_DIR/local.env"
 set +a
 
-if [ "$SHO_TIER" = production ]; then
-  [ -n "${DIRECT_DATABASE_URL:-}" ] || { echo "DIRECT_DATABASE_URL is required for production migrations"; exit 1; }
+app_facts=$(db_facts "$DATABASE_URL") || { echo "DATABASE_URL could not be read"; exit 1; }
+if [ "$SHO_TIER" = production ] || [ "$(json_get "$app_facts" pool)" = true ]; then
+  [ -n "${DIRECT_DATABASE_URL:-}" ] || { echo "DIRECT_DATABASE_URL is required for migrations through PgBouncer"; exit 1; }
 else
   export DIRECT_DATABASE_URL="${DIRECT_DATABASE_URL:-$DATABASE_URL}"
 fi
 assert_database_urls "$SHO_TIER"
 export NODE_ENV=production
-log "migration connection port $(node -e 'const u=new URL(process.env.DIRECT_DATABASE_URL); if(!u.port) process.exit(2); console.log(u.port)')"
+direct_facts=$(db_facts "$DIRECT_DATABASE_URL") || { echo "DIRECT_DATABASE_URL could not be read"; exit 1; }
+log "migration connection port $(json_get "$direct_facts" port)"
 
 cd "$REL"
 status_file=$(mktemp)
@@ -193,11 +213,29 @@ else
   echo "refusing to continue: migration status was not recognised (exit $status_rc)"
   exit 1
 fi
-rm -f "$status_file"
 
 if [ "$pending" = 1 ] && [ "$SHO_TIER" = production ]; then
+  [ -f "$SCRIPT_DIR/expand-only.mjs" ] || { echo "expand-only.mjs is missing; refusing to migrate production"; exit 1; }
+  set +e
+  node "$SCRIPT_DIR/expand-only.mjs" "$status_file" "$REL/prisma/migrations"
+  expand_rc=$?
+  set -e
+  if [ "$expand_rc" = 4 ]; then
+    echo "refusing to migrate production: the pending migrations could not be named"
+    exit 1
+  fi
+  if [ "$expand_rc" != 0 ] && [ "${SHO_ALLOW_CONTRACT_MIGRATION:-}" != 1 ]; then
+    echo "refusing to migrate production: a pending migration is not marked expand-only"
+    exit 1
+  fi
+  if [ "$expand_rc" != 0 ]; then
+    log "contract migration override is set; continuing"
+  fi
+  rm -f "$status_file"
   command -v pg_dump >/dev/null || { echo "pg_dump is not installed; refusing to migrate production"; exit 1; }
+  command -v pg_restore >/dev/null || { echo "pg_restore is not installed; refusing to migrate production"; exit 1; }
   [ -f "$SCRIPT_DIR/pg-dump.mjs" ] || { echo "pg-dump.mjs is missing; refusing to migrate production"; exit 1; }
+  require_disk "$ROOT"
   mkdir -p "$ROOT/backups"
   chmod 700 "$ROOT/backups"
   backup="$ROOT/backups/${SHA}-$(date -u +%Y%m%dT%H%M%SZ).dump"
@@ -213,10 +251,31 @@ if [ "$pending" = 1 ] && [ "$SHO_TIER" = production ]; then
     exit 1
   fi
   chmod 600 "$backup"
-  log "database backup $(basename "$backup") ($(wc -c < "$backup") bytes)"
+  restore_list=$(mktemp)
+  if ! pg_restore --list "$backup" >"$restore_list"; then
+    rm -f "$restore_list"
+    echo "restore check failed; production migration was not started"
+    exit 1
+  fi
+  if [ ! -s "$restore_list" ]; then
+    rm -f "$restore_list"
+    echo "restore check returned an empty listing; production migration was not started"
+    exit 1
+  fi
+  rm -f "$restore_list"
+  log "restore check passed for $(basename "$backup") ($(wc -c < "$backup") bytes)"
+  keep_dumps=${KEEP_DUMPS:-7}
+  old_dumps=()
+  mapfile -t old_dumps < <(find "$ROOT/backups" -maxdepth 1 -type f -name '*.dump' -printf '%T@ %p\n' | sort -rn | awk '{print $2}' | tail -n +"$((keep_dumps + 1))")
+  if [ "${#old_dumps[@]}" -gt 0 ]; then
+    rm -f "${old_dumps[@]}"
+    log "removed ${#old_dumps[@]} old database backup(s); keeping ${keep_dumps}"
+  fi
 elif [ "$pending" = 1 ]; then
+  rm -f "$status_file"
   log "pending migrations on staging; no production backup is taken here"
 else
+  rm -f "$status_file"
   log "no pending migrations"
 fi
 
@@ -254,6 +313,14 @@ else
 fi
 
 PREV="$(readlink -f "$CUR" 2>/dev/null || true)"
+if [ -n "${PREV:-}" ] && [ -d "$PREV" ] && [ "$PREV" != "$REL" ]; then
+  ln -sfn "$PREV" "$ROOT/previous"
+  basename "$PREV" > "$ROOT/previous-sha"
+  log "rollback target $(basename "$PREV")"
+else
+  rm -f "$ROOT/previous" "$ROOT/previous-sha"
+  log "rollback target none"
+fi
 switch "$REL"
 log "restarting $SERVICE"
 if ! sudo systemctl restart "$SERVICE"; then
