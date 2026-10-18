@@ -6,7 +6,7 @@ import { ApiError } from "@/lib/http";
 import { currentSessionId, deviceLabel, hashPassword, verifyPassword } from "@/lib/auth";
 import { projectAccess, type Actor } from "@/lib/access";
 import { idsIn, sentence, whenText } from "@/lib/activity-text";
-import { UNDO_DAYS, isUndoable } from "@/lib/undoable";
+import { isTooOldToUndo, isUndoable } from "@/lib/undoable";
 import { passwordField } from "@/lib/schemas";
 
 const NOTE_DAYS = 90;
@@ -162,7 +162,7 @@ export async function projectActivity(user: Actor, projectId: string, cursor?: s
       via: r.channel === "CONCIERGE" ? "concierge" : "screen",
       // Undo stays on the row (AC5); an Editor can only undo their own actions, as the server enforces.
       undo: r.undoneAt ? "undone" : !isUndoable(r.action) || (!leader && r.actorId !== user.id) ? "none"
-        : Date.now() - r.createdAt.getTime() > UNDO_DAYS * 86400_000 ? "too_old" : "available",
+        : isTooOldToUndo(r.createdAt) ? "too_old" : "available",
     })),
     nextCursor: more ? page[page.length - 1].id : null,
   };
