@@ -12,7 +12,7 @@ const APEX = [
 ];
 
 test.describe("APL-2661", { tag: "@APL-2661" }, () => {
-  test("AC1 apex and www over http and https return 301 to the app", async ({ request }) => {
+  test("AC1 apex and www over http and https return 301 to the app", { tag: "@readonly" }, async ({ request }) => {
     for (const url of APEX) {
       const res = await request.get(url, { maxRedirects: 0 });
       expect(res.status(), url).toBe(301);
@@ -21,7 +21,7 @@ test.describe("APL-2661", { tag: "@APL-2661" }, () => {
     }
   });
 
-  test("AC2 app and staging keep their own response instead of redirecting to the apex", async ({ request }) => {
+  test("AC2 app and staging keep their own response instead of redirecting to the apex", { tag: "@readonly" }, async ({ request }) => {
     const app = await request.get("https://app.sheethappensofficer.com/", { maxRedirects: 0 });
     expect(app.status(), "app").toBe(200);
     expect(app.headers()["content-type"] ?? "", "app").toContain("text/html");
