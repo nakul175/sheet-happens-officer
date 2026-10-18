@@ -17,6 +17,7 @@ import { ListControls } from "./ListControls";
 import { apiQuery, groupTasks, isFiltered, readState, sameState, type ListState } from "./listview";
 import { SaveViewDialog, type SavedView } from "./SavedViews";
 import { BulkBar, type BulkResult } from "./BulkBar";
+import { canDropOnSection, completeTickAllowed, moveMenuSections } from "@/lib/approver-ui";
 
 type T = {
   id: string; title: string; updatedAt: string; sectionId: string; priority: string; dueDate: string | null; blocked: boolean; completedAt: string | null; isIdea?: boolean;
@@ -143,25 +144,27 @@ function Inner({ id }: { id: string }) {
 
   const showFewer = (sectionId: string) => setExtra((m) => { const n = { ...m }; delete n[sectionId]; return n; });
 
+  // APL-2668: a change is made on the version the page shows.
+  const versionOf = (taskId: string) => secs?.flatMap((x) => tasksOf(x)).find((x) => x.id === taskId)?.updatedAt ?? "";
   async function moveTo(taskId: string, sectionId: string, all = false) {
-    const r = await api("POST", `/api/tasks/${taskId}/move`, { sectionId, completeAll: all });
+    const r = await api("POST", `/api/tasks/${taskId}/move`, { sectionId, completeAll: all, expectedUpdatedAt: versionOf(taskId) });
     if (r.ok) { setAsk(null); setErr(null); refresh(); }
+    else if (r.status === 409 && r.data.stale) { setAsk(null); setErr(r.error ?? "This task changed while you were editing it."); refresh(); }
     else if (r.status === 409 && r.data.needsConfirm === "open_subtasks") setAsk({ taskId, sectionId, n: r.data.openSubtasks });
     else setErr(r.error ?? "Could not move the task.");
   }
 
   const tasksOf = (s: S) => [...s.tasks, ...(extra[s.id] ?? [])];
-  // SHO-US-5.3 AC6: a task may only be dropped into Done by someone who may close it.
+  // SHO-US-5.3 AC6 / APL-2660 AC4: a task may only be dropped into Done by someone who may close it.
   const canDrop = (taskId: string, to: S) => {
-    if (!to.isDone) return true;
     const t = secs?.flatMap((x) => tasksOf(x)).find((x) => x.id === taskId);
-    return !!t && (t.canClose || !!t.completedAt);
+    return canDropOnSection(t, to.isDone);
   };
   const pick = (ids: string[], on: boolean) => setSel((cur) => { const n = new Set(cur); for (const i of ids) { if (on) n.add(i); else n.delete(i); } return n; });
   const rowOf = (t: T) => (
     <div key={t.id} className={`item click${canWrite ? " sel-row" : ""}${sel.has(t.id) ? " picked" : ""}`} {...rowKeys(() => openTask(t.id))}>
       {canWrite && <label className="sel" onClick={(e) => e.stopPropagation()}><input type="checkbox" checked={sel.has(t.id)} aria-label={`Select "${t.title}"`} onChange={(e) => pick([t.id], e.target.checked)} /></label>}
-      <Tick id={t.id} title={t.title} done={!!t.completedAt} allowed={canWrite && (t.canClose || !!t.completedAt)} onDone={refresh} />
+      <Tick id={t.id} title={t.title} done={!!t.completedAt} allowed={completeTickAllowed({ canWrite, canClose: t.canClose, completedAt: t.completedAt })} version={t.updatedAt} onDone={refresh} onStale={refresh} />
       <div className="t"><b className="ttl">{t.title}</b>{t.subtasks.total > 0 && <small>{t.subtasks.total - t.subtasks.open} of {t.subtasks.total} subtasks</small>}</div>
       <div className="meta">
         {t.awaitingApproval && <span className="chip gold">Awaiting approval</span>}
@@ -313,7 +316,7 @@ function Inner({ id }: { id: string }) {
       )}
       {moving && secs && (
         <MoveSheet title={`Move to… ${moving.title.length > 60 ? moving.title.slice(0, 57) + "…" : moving.title}`}
-          options={secs.filter((x) => !x.isDone || moving.canClose || x.id === moving.sectionId).map((x) => ({ id: x.id, name: x.name, current: x.id === moving.sectionId }))}
+          options={moveMenuSections(secs, moving).map((x) => ({ id: x.id, name: x.name, current: x.id === moving.sectionId }))}
           onClose={() => setMoving(null)}
           onPick={(sid) => { const t = moving; setMoving(null); void moveTo(t.id, sid); }} />
       )}
@@ -326,7 +329,7 @@ function Inner({ id }: { id: string }) {
       {secs && p && p.role !== "LEADER" && <p className="hint" style={{ marginTop: 16 }}>Only the Leader and Admins can change sections.</p>}
 
       {view === "list" && canWrite && sel.size > 0 && p && secs && (
-        <BulkBar projectId={id} ids={[...sel]} people={p.members} sections={secs} onClear={() => setSel(new Set())}
+        <BulkBar projectId={id} ids={[...sel]} versions={Object.fromEntries([...sel].map((t) => [t, versionOf(t)]))} people={p.members} sections={secs} onClear={() => setSel(new Set())}
           onDone={(r) => { setBulk(r); setSel(new Set()); refresh(); }} />
       )}
       {viewDialog && <SaveViewDialog kind={viewDialog} projectId={id} state={ls} view={activeView} onClose={() => setViewDialog(null)}
