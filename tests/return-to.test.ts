@@ -2,7 +2,7 @@
 // The cases at the top do not need a server. The "signed-out redirect" cases hit TASKBOARD_URL.
 import { describe, expect, it } from "vitest";
 import { account, BASE } from "./helpers";
-import { safeReturnPath, signInHref } from "@/lib/return-to";
+import { safeReturnPath, sessionSignInTarget, signInHref } from "@/lib/return-to";
 
 const BASE_ORIGIN = "http://return.invalid";
 
@@ -102,9 +102,29 @@ describe("APL-2652 safe return path", () => {
     const href = signInHref("/tasks/T1");
     expect(href).toBe("/signin?next=%2Ftasks%2FT1");
     expect(safeReturnPath(new URL(href, BASE_ORIGIN).searchParams.get("next"))).toBe("/tasks/T1");
+    const expired = signInHref("/tasks/T1", { expired: true });
+    expect(expired).toBe("/signin?expired=1&next=%2Ftasks%2FT1");
+    expect(new URL(expired, BASE_ORIGIN).searchParams.get("expired")).toBe("1");
+    expect(safeReturnPath(new URL(expired, BASE_ORIGIN).searchParams.get("next"))).toBe("/tasks/T1");
     const withQuery = signInHref("/projects/abc?task=T1");
     expect(safeReturnPath(new URL(withQuery, BASE_ORIGIN).searchParams.get("next"))).toBe("/projects/abc?task=T1");
     expectSafe(safeReturnPath("/tasks/T1"));
+  });
+
+  it("APL-2664 a 401 keeps expired=1, adds a safe return path, and does not leave /signin", () => {
+    expect(sessionSignInTarget("/tasks/T1")).toBe("/signin?expired=1&next=%2Ftasks%2FT1");
+    expect(sessionSignInTarget("/projects/abc", "?task=T1")).toBe("/signin?expired=1&next=%2Fprojects%2Fabc%3Ftask%3DT1");
+    expect(sessionSignInTarget("/")).toBe("/signin?expired=1");
+    // Already on the sign-in screen: do not navigate, so next in the query is left as it is.
+    expect(sessionSignInTarget("/signin")).toBeNull();
+    expect(sessionSignInTarget("/signin", "?next=%2Ftasks%2FT1&expired=1")).toBeNull();
+    for (const bad of ["https://evil.example", "//evil.example", "/\\evil.example", "javascript:alert(1)", "/%2f%2fevil.example", "/%5Cevil.example"]) {
+      const href = sessionSignInTarget(bad);
+      expect(href, bad).toBe("/signin?expired=1");
+      expect(href, bad).not.toContain("evil.example");
+      expect(href, bad).not.toContain("javascript");
+      expect(new URL(href!, BASE_ORIGIN).origin).toBe(BASE_ORIGIN);
+    }
   });
 });
 
