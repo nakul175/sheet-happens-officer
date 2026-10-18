@@ -5,7 +5,7 @@
 import { afterAll, describe, expect, it } from "vitest";
 import { crmMode } from "@/lib/crm";
 import { getPerson } from "@/lib/team";
-import { account, istDate, project, superAdmin, task, type Account } from "./helpers";
+import { account, istDate, superAdmin, task, type Account } from "./helpers";
 
 const HIDDEN_DEAL_LABEL = "A deal you can't view.";
 const DEAL_NAME = "ZZ-TEST Acme renewal";
@@ -162,7 +162,7 @@ describe("APL-2728 person page hides a deal CRM_VISIBLE conceals", () => {
     const person = await withMode("off", () => getPerson(actor(adminUser, "ADMIN"), rep.id));
     assertHidden(person);
     expect(person.openTasks).toBe(1);
-    const plain = person.projects.find((p) => p.id === plainId);
+    const plain = person.projects.find((p) => "id" in p && p.id === plainId);
     expect(plain).toMatchObject({ id: plainId, name: plainName, role: "LEADER", openTasks: 1 });
   });
 

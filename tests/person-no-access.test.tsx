@@ -61,10 +61,13 @@ async function openPerson() {
   await act(async () => {
     root!.render(<Person />);
   });
-  for (let i = 0; i < 20; i++) {
+  // Real requests (the 404 case) take longer than a handful of microtasks. Stop once the page
+  // has an answer; keep going when it is still the bare shell.
+  for (let i = 0; i < 40; i++) {
     await act(async () => {
-      await new Promise((r) => setTimeout(r, 0));
+      await new Promise((r) => setTimeout(r, i < 5 ? 0 : 25));
     });
+    if (document.body.querySelector("[role=alert], table.tbl, .hint, .pwbar")) break;
   }
   return document.body;
 }
