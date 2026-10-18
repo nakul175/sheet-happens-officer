@@ -167,13 +167,15 @@ export async function quickAnswer(user: Actor, id: string, now = new Date(), pro
   const base = QUICK_ACTIONS.find((x) => x.id === id);
   if (!base) throw new ApiError(404, "No such quick action");
   // Asked from a project screen (SHO-US-14.15): only that project, and only if the person is in it.
-  // A deal hidden by CRM_VISIBLE is not in scope either, so its name never reaches the chat (SHO-BUG-11).
-  const member = projectId ? { id: projectId, members: { some: { userId: user.id } } } : null;
-  const scope = member ? await db.project.findFirst({ where: { ...member, ...crmProjectWhere(user) }, select: { id: true, name: true } }) : null;
-  if (member && !scope) {
-    if (!(await db.project.count({ where: member }))) throw new ApiError(404, "Project not found");
-    return { q: base, text: "I can't find that.", tasks: [] as TaskRec[] };
-  }
+  // A deal hidden by CRM_VISIBLE is out of scope too. The same 404 as a missing project, so the
+  // answer does not reveal that the deal exists (SHO-BUG-11).
+  const scope = projectId
+    ? await db.project.findFirst({
+        where: { id: projectId, members: { some: { userId: user.id } }, ...crmProjectWhere(user) },
+        select: { id: true, name: true },
+      })
+    : null;
+  if (projectId && !scope) throw new ApiError(404, "Project not found");
   const q = scope ? { ...base, label: `${base.label} in ${flat(scope.name)}` } : base;
   const { tasks, truncated } = await myTasks(user, q.filter, { now, projectId: scope?.id });
   if (!tasks.length) return { q, text: "I found nothing.", tasks };

@@ -46,7 +46,7 @@ describe("CRM_VISIBLE and concierge quick actions (SHO-BUG-11)", () => {
   useFakeModel();
   afterEach(() => { jar.cookie = ""; });
 
-  it("a hidden deal's projectId yields \"I can't find that.\" and its name reaches neither the response, the chat nor the model", async () => {
+  it("a hidden deal's projectId is 404 Project not found, and its name reaches neither the response, the chat nor the model", async () => {
     const sa = await superAdmin();
     const ad = await admin(sa, "cqadmin");
     const lead = await account("cqlead");
@@ -67,18 +67,15 @@ describe("CRM_VISIBLE and concierge quick actions (SHO-BUG-11)", () => {
     script(() => { throw new Error("no model call expected"); });
 
     const hidden = async (who: Account) => {
-      for (const { id, label } of QUICK_ACTIONS) {
+      for (const { id } of QUICK_ACTIONS) {
         const before = await storedChat(who.id);
         const r = await quick(who, id, dealId);
-        expect(r.status, r.body).toBe(200);
-        expect(r.json.messages.map((m: { role: string; text: string }) => [m.role, m.text])).toEqual([["USER", label], ["ASSISTANT", "I can't find that."]]);
-        expect(r.json.messages[1].links).toBeUndefined();
+        expect(r.status, r.body).toBe(404);
+        expect(r.json.error).toBe("Project not found");
         expect(r.body).not.toContain(dealName);
         expect(r.body).not.toContain(tag);
-        const after = await storedChat(who.id);
-        expect(after.length).toBeGreaterThan(before.length); // the exchange was stored...
-        expect(after).not.toContain(dealName); // ...without the deal's name or any of its task titles
-        expect(after).not.toContain(tag);
+        // A 404 is thrown before the chat is written, so the deal is not stored either.
+        expect(await storedChat(who.id)).toBe(before);
       }
     };
     const visible = async (who: Account, title: string) => {
@@ -96,9 +93,10 @@ describe("CRM_VISIBLE and concierge quick actions (SHO-BUG-11)", () => {
       await hidden(ed);
       // The Admin's chat already holds the deal from the visible answer above; check this mode's rows only.
       const since = new Date();
-      for (const { id, label } of QUICK_ACTIONS) {
+      for (const { id } of QUICK_ACTIONS) {
         const r = await quick(ad, id, dealId);
-        expect(r.json.messages.map((m: { text: string }) => m.text)).toEqual([label, "I can't find that."]);
+        expect(r.status, r.body).toBe(404);
+        expect(r.json.error).toBe("Project not found");
         expect(r.body).not.toContain(dealName);
       }
       expect(JSON.stringify(await db.chatMessage.findMany({ where: { userId: ad.id, createdAt: { gte: since } } }))).not.toContain(dealName);

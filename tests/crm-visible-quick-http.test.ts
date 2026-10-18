@@ -65,16 +65,16 @@ describe.skipIf(!built)("POST /api/concierge/quick/:id with a hidden deal, over 
 
     const hidden = async (mode: Mode, who: Account) => {
       const since = new Date();
-      for (const { id, label } of QUICK_ACTIONS) {
+      for (const { id } of QUICK_ACTIONS) {
         const r = await quick(mode, who, id, dealId);
-        expect(r.status, `${mode} ${id}: ${r.body}`).toBe(200);
-        expect(r.json.messages.map((m: { role: string; text: string }) => [m.role, m.text])).toEqual([["USER", label], ["ASSISTANT", "I can't find that."]]);
+        expect(r.status, `${mode} ${id}: ${r.body}`).toBe(404);
+        expect(r.json.error).toBe("Project not found");
         expect(r.body).not.toContain(dealName);
         expect(r.body).not.toContain(tag);
       }
       const stored = await storedSince(who.id, since);
-      expect(stored).toContain("I can't find that."); // the exchanges were stored...
-      expect(stored).not.toContain(dealName); // ...without the deal's name or its task titles
+      expect(stored).not.toContain("I can't find that.");
+      expect(stored).not.toContain(dealName);
       expect(stored).not.toContain(tag);
     };
 
