@@ -48,9 +48,9 @@ test("AC1: tasks awaiting my approval sit in a group at the top of My tasks with
   const group = p.getByRole("region", { name: "Waiting on me" });
   await expect(group).toBeVisible();
   await expect(group.getByText(title)).toBeVisible();
-  await expect(group.locator(".item").filter({ hasText: title }).getByText("Waiting since today", { exact: true })).toBeVisible();
+  await expect(group.getByRole("link", { name: title }).getByText("Waiting since today", { exact: true })).toBeVisible();
   // at the top of the task groups (the first-run Start guide card, when shown, sits above all groups)
-  const labels = await p.locator("main.content").last().locator("section[aria-label]").evaluateAll((els) => els.map((e) => e.getAttribute("aria-label")).filter((l) => l !== "Start guide"));
+  const labels = await p.getByRole("main").getByRole("region").evaluateAll((els) => els.map((e) => e.getAttribute("aria-label")).filter((l) => l !== "Start guide"));
   expect(labels[0]).toBe("Waiting on me");
   expect((await admin.api.get("/api/my-tasks")).json.waitingOnMe.map((x: { id: string }) => x.id)).toContain(t);
 });

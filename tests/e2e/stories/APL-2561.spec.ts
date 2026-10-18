@@ -8,7 +8,9 @@ import { PASS, passwordOk } from "./qa";
 // Pam has not published a TC hash. The marker is the literal "qa:TC missing".
 const tag = (id: string) => ({ annotation: [{ type: "ac", description: id }, { type: "qa:TC", description: "qa:TC missing" }] });
 
-const skeleton = (page: import("@playwright/test").Page) => page.getByRole("status", { name: "Loading", exact: true });
+// The status role's accessible name is empty: "Loading" is only text inside it. The grey rows are aria-hidden and have no role.
+const skeleton = (page: import("@playwright/test").Page) => page.getByRole("status").filter({ hasText: "Loading" });
+const skeletonRows = (page: import("@playwright/test").Page) => skeleton(page).locator("[aria-hidden='true']");
 
 test.beforeAll(() => {
   test.skip(!PASS, "Set SHO_QA_PASS (the password for nakul17+ aliases).");
@@ -29,7 +31,7 @@ test("AC1: a load slower than 400 ms shows a skeleton of the layout (My tasks)",
   await page.goto("/", { waitUntil: "commit" });
   const skel = skeleton(page);
   await expect(skel).toHaveAttribute("aria-busy", "true", { timeout: 2000 });
-  await expect(skel.locator(".skel-row")).not.toHaveCount(0, { timeout: 2000 });
+  await expect(skeletonRows(page)).not.toHaveCount(0, { timeout: 2000 });
   await expect(skel).toHaveCount(0, { timeout: 8000 }); // gone when the data arrives
 });
 
@@ -38,8 +40,7 @@ test("AC1 and AC2 (project screen): a slow load shows a skeleton and does not cl
   const page = admin.page;
   await page.route(new RegExp(`/api/projects/${p.id}(/tasks)?(\\?|$)`), async (r) => { await new Promise((x) => setTimeout(x, 2500)); await r.continue(); });
   await page.goto(`/projects/${p.id}`, { waitUntil: "commit" });
-  const skel = skeleton(page);
-  await expect(skel.locator(".skel-row")).not.toHaveCount(0);
+  await expect(skeletonRows(page)).not.toHaveCount(0);
   await expect(page.getByRole("alert", { name: "Could not reach the server." })).toHaveCount(0);
 });
 

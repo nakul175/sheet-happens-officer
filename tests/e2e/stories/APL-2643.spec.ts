@@ -19,7 +19,7 @@ const RULE = "label-content-name-mismatch";
 
 /** The bell's result for the Label in Name rule: violation, pass, incomplete (cannot judge), inapplicable or not run. */
 async function labelInName(page: Page) {
-  const r = await new AxeBuilder({ page }).include("button.bell").withRules([RULE]).analyze();
+  const r = await new AxeBuilder({ page }).include("button[aria-label^='Notifications']").withRules([RULE]).analyze();
   const on = (list: { id: string }[]) => list.some((x) => x.id === RULE);
   return { violations: r.violations.filter((x) => x.id === RULE), ran: on(r.violations) || on(r.passes) || on(r.incomplete) || on(r.inapplicable) };
 }
@@ -27,14 +27,14 @@ async function labelInName(page: Page) {
 test.describe("SHO-BUG-9 / APL-2643", () => {
   test("AC1 (3 unread): the bell is named \"Notifications, 3 unread\" and shows 3", tag("APL-2643 AC1"), async ({ admin }) => {
     await withUnread(admin.page, () => 3);
-    await expect(bell(admin.page).locator(".badge")).toHaveText("3");
+    await expect(bell(admin.page).getByText("3", { exact: true })).toBeVisible();
     await expect(bell(admin.page)).toHaveAttribute("aria-label", "Notifications, 3 unread");
     await expect(admin.page.getByRole("button", { name: "Notifications, 3 unread", exact: true })).toBeVisible();
   });
 
   test("AC1 (more than 99 unread): the bell shows 99+ and is named \"Notifications, 99+ unread\"", tag("APL-2643 AC1"), async ({ admin }) => {
     await withUnread(admin.page, () => 120);
-    await expect(bell(admin.page).locator(".badge")).toHaveText("99+");
+    await expect(bell(admin.page).getByText("99+", { exact: true })).toBeVisible();
     await expect(bell(admin.page)).toHaveAttribute("aria-label", "Notifications, 99+ unread");
     await expect(admin.page.getByRole("button", { name: "Notifications, 99+ unread", exact: true })).toBeVisible();
   });
@@ -48,11 +48,11 @@ test.describe("SHO-BUG-9 / APL-2643", () => {
     await bell(admin.page).click(); // opening the panel loads the count again
     await reloaded;
     await expect(bell(admin.page)).toHaveAttribute("aria-label", "Notifications");
-    await expect(bell(admin.page).locator(".badge")).toHaveCount(0);
+    await expect(bell(admin.page)).toHaveText("🔔");
     await admin.page.keyboard.press("Escape");
     await admin.page.reload();
     await expect(bell(admin.page)).toHaveAttribute("aria-label", "Notifications");
-    await expect(bell(admin.page).locator(".badge")).toHaveCount(0);
+    await expect(bell(admin.page)).toHaveText("🔔");
   });
 
   test("AC3 (0 unread): axe label-content-name-mismatch finds no violation on the bell", tag("APL-2643 AC3"), async ({ admin }) => {
@@ -65,7 +65,7 @@ test.describe("SHO-BUG-9 / APL-2643", () => {
 
   test("AC3 (more than 99 unread): axe label-content-name-mismatch finds no violation on the bell", tag("APL-2643 AC3"), async ({ admin }) => {
     await withUnread(admin.page, () => 120);
-    await expect(bell(admin.page).locator(".badge")).toHaveText("99+");
+    await expect(bell(admin.page).getByText("99+", { exact: true })).toBeVisible();
     const r = await labelInName(admin.page);
     expect(r.ran, `axe ran ${RULE}`).toBe(true);
     expect(r.violations).toEqual([]);

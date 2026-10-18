@@ -113,7 +113,7 @@ test("AC2: opening an item marks it read and the count drops; Mark all as read c
   const start = (await inbox(member)).unread;
   expect(start).toBeGreaterThanOrEqual(2);
   const d1 = await openBell(member.page);
-  await d1.locator(".bell-main", { hasText: zz("read two") }).click();
+  await d1.getByRole("link", { name: zz("read two") }).click();
   await expect.poll(async () => (await inbox(member)).unread).toBe(start - 1);
   const d2 = await openBell(member.page); // the click opened the task; start again from a clean page
   // dispatch the click on the button itself: a closing-panel scrim can sit over it for a moment
