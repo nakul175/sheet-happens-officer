@@ -42,7 +42,8 @@ test("APL-2540 > AC1: a deal has one Buyer, set at creation, and other roles can
   await admin.page.goto(`/projects/${deal.id}`);
   const panel = dealPanel(admin.page);
   await expect(panel.getByRole("button", { name: `Remove ${buyer.name}` })).toHaveCount(0);
-  await expect(panel.getByRole("button", { name: `Remove ${funder.name}` })).toBeVisible();
+  // The same organisation is Funder and Partner, so Remove is on two chips. The Funder chip is the one this step added first.
+  await expect(panel.locator("span", { hasText: "Funder:" }).getByRole("button", { name: `Remove ${funder.name}`, exact: true })).toBeVisible();
   await panel.getByRole("button", { name: "+ Add organisation" }).click();
   await expect(panel.getByLabel("Role").locator("option")).toHaveText(["Funder", "Implementing office", "Partner", "Other"]);
   const funderParty = now.find((p) => p.organisation.id === funder.id && p.role === "FUNDER")!;
@@ -104,7 +105,8 @@ test("APL-2540 > AC4: an archived organisation stays on existing deals and canno
   const still = await partiesOf(admin, deal.id);
   expect(still.some((p) => p.role === "BUYER" && p.organisation.id === buyer.id)).toBe(true);
   await admin.page.goto(`/projects/${deal.id}`);
-  await expect(dealPanel(admin.page).getByRole("link", { name: buyer.name })).toBeVisible();
+  const kept = dealPanel(admin.page);
+  await expect(kept.locator(".meta").getByRole("link", { name: buyer.name })).toBeVisible();
 
   const fresh = dealBody({ name: zz("refused deal"), organisationId: buyer.id, pipelineId: pipes.pro.id, leaderId: admin.user.id });
   const refused = await admin.api.post("/api/deals", fresh);
