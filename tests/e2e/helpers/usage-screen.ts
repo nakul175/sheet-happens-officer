@@ -1,5 +1,7 @@
 // Shared checks for the Usage screen (APL-2519, APL-2641). The screen prints figures from /api/usage.
-// The percentage is the share of the ceiling. PR #34 prints ceiling.percent, which the API rounds to one decimal.
+// The percentage shown is the nearest whole number, and a half goes up. Zero spend is 0%.
+// A nonzero share under 1% is "<1%", decided before that rounding. Over 100% is the real rounded figure, not capped.
+// Stubs still send the one-decimal figure /api/usage stores. PR #34 prints that figure unchanged.
 // Quick actions are not added into the message total.
 import type { Locator, Page } from "@playwright/test";
 import { expect, type Api } from "../support";
@@ -41,8 +43,8 @@ export type UsageBody = {
 };
 
 /**
- * Percentage /api/usage stores and PR #34 prints with no further rounding:
- * one decimal, half up. 10 of 80 is 12.5.
+ * Percentage /api/usage stores today: one decimal, half up. 10 of 80 is 12.5.
+ * Stubs send this so a screen that only echoes ceiling.percent still shows the decimal.
  */
 export function apiPercent(spendUsd: number, ceilingUsd: number) {
   if (!(ceilingUsd > 0)) return 0;
@@ -50,19 +52,20 @@ export function apiPercent(spendUsd: number, ceilingUsd: number) {
 }
 
 /**
- * AC6 names the percentage and gives no rounding rule. 10 of 80 may be shown as
- * "12.5%" (the one decimal PR #34 prints) or "13%" (the nearest whole number).
+ * The percentage AC6 shows. Nearest whole number, and a half goes up (12.5 is 13).
+ * Zero spend is "0%". A nonzero share under 1% is "<1%" before rounding, so 0.5 stays "<1%".
+ * Over 100% is that same rounded figure, not capped (119.5 is "120%").
  */
-export function acceptedPercents(spendUsd: number, ceilingUsd: number) {
-  const ratio = ceilingUsd > 0 ? (spendUsd / ceilingUsd) * 100 : 0;
-  const tenth = apiPercent(spendUsd, ceilingUsd);
-  const whole = Math.round(ratio);
-  return [...new Set([`${tenth}%`, `${whole}%`])];
+export function percentLabel(spendUsd: number, ceilingUsd: number): string {
+  if (!(spendUsd > 0)) return "0%";
+  const ratio = (spendUsd / ceilingUsd) * 100;
+  if (ratio < 1) return "<1%";
+  return `${Math.round(ratio)}%`;
 }
 
 /**
- * A fixed /api/usage payload. Spend is 10 of a ceiling of 80, so the percentage is 12.5.
- * Quick actions add up to 10. The message total stays 17.
+ * A fixed /api/usage payload. Spend is 10 of a ceiling of 80. The stored percent stays 12.5.
+ * The screen should show 13%. Quick actions add up to 10. The message total stays 17.
  */
 export function sampleUsage(patch: Partial<UsageBody> = {}): UsageBody {
   const spendUsd = 10;
@@ -104,17 +107,6 @@ export function usageCard(page: Page, heading: string) {
 /** The figure next to a label inside one usage card. Each label sits in its own row. */
 export function figure(card: Locator, label: string) {
   return card.locator(".usage-figs > div", { hasText: label }).locator("dd");
-}
-
-/**
- * The percentage on screen is 12.5% or 13% for this spend and ceiling, and the meter's
- * spoken value uses that same text. PR #34 builds both from `${ceiling.percent}%`.
- */
-export async function expectPercent(card: Locator, meter: Locator, spendUsd: number, ceilingUsd: number) {
-  const shown = (await figure(card, "Percentage used").innerText()).trim();
-  expect(acceptedPercents(spendUsd, ceilingUsd), `${usd(spendUsd)} of ${usd(ceilingUsd)}`).toContain(shown);
-  await expect(meter).toHaveAttribute("aria-valuetext", `${usd(spendUsd)} of ${usd(ceilingUsd)}, ${shown} used`);
-  return shown;
 }
 
 const BLOCKS = ".usage-h, .usage-figs dt, .usage-figs dd, .usage-count, .usage-split .hint";
