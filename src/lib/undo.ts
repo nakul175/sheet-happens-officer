@@ -6,7 +6,7 @@ import { WORKERS, activeMember, projectAccess, requireManage, requireWrite, type
 import { formatDueDate } from "@/lib/dates";
 import { auditTx, logAction, notify } from "@/lib/notify";
 import { deleteTask, restoreTask } from "@/lib/tasks";
-import { UNDO_DAYS, UNDO_LABELS, isUndoable } from "@/lib/undoable";
+import { UNDO_LABELS, isTooOldToUndo, isUndoable } from "@/lib/undoable";
 import { undoRecord } from "@/lib/records";
 
 type Conflict = { field: string; before: unknown; after: unknown; now: unknown };
@@ -20,6 +20,7 @@ const bad = (msg: string, extra?: Record<string, unknown>) => new ApiError(409, 
 const NOTIFYING = new Set([
   "task.created", "task.assigned", "task.sent_for_approval", "task.sent_back", "task.approver_changed", "task.collaborator_added",
   "task.collaborator_removed", "task.deleted", "project.archived", "member.added", "member.removed", "member.role_changed", "project.leader_changed",
+  "comment.added",
 ]);
 
 const FIELD_LABEL: Record<string, string> = {
@@ -155,6 +156,22 @@ async function plan(row: any, user: Actor, projectId: string): Promise<Plan> {
           await tx.task.update({ where: { id }, data: { sectionId: b.sectionId } });
         },
       };
+    }
+    case "comment.added": {
+      const commentId = String(f.commentId ?? "");
+      const c = await db.comment.findUnique({ where: { id: commentId } });
+      if (!c) throw bad("This comment no longer exists.");
+      if (c.removedAt) throw bad("This comment is already deleted.");
+      const task = await liveTask(id, projectId);
+      return { conflicts: [], subject: task.title, apply: async (tx) => { await tx.comment.update({ where: { id: commentId }, data: { removedAt: new Date() } }); } };
+    }
+    case "comment.removed": {
+      const commentId = String(f.commentId ?? "");
+      const c = await db.comment.findUnique({ where: { id: commentId } });
+      if (!c) throw bad("This comment no longer exists.");
+      if (!c.removedAt) throw bad("This comment is already back.");
+      const task = await liveTask(id, projectId);
+      return { conflicts: [], subject: task.title, apply: async (tx) => { await tx.comment.update({ where: { id: commentId }, data: { removedAt: null } }); } };
     }
     case "task.deleted": {
       const t = await taskOf(id, projectId);
@@ -365,7 +382,7 @@ async function prepare(user: Actor, logId: string) {
   if (row.action === "task.deleted") requireManage(a);
   if (row.undoneAt) throw bad("This action was already undone.");
   if (!isUndoable(row.action)) throw bad("This kind of action cannot be undone.");
-  if (Date.now() - row.createdAt.getTime() > UNDO_DAYS * 86400_000) throw bad("Too old to undo", { tooOld: true });
+  if (isTooOldToUndo(row.createdAt)) throw bad("Too old to undo", { tooOld: true });
 
   const p = await plan(row, user, projectId);
   return { row, projectId, p };
@@ -406,9 +423,12 @@ export async function undoAction(user: Actor, logId: string, anyway = false) {
   await db.$transaction(async (tx) => {
     await p.apply(tx);
     await tx.actionLog.update({ where: { id: row.id }, data: { undoneAt: new Date(), undoneById: user.id } });
+    const commentId = (row.afterState as { commentId?: string } | null)?.commentId
+      ?? (row.beforeState as { commentId?: string } | null)?.commentId;
     await logAction(tx, {
       actorId: user.id, projectId, targetType: row.targetType as "task", targetId: row.targetId, action: "undo",
-      before: { undoes: row.id, action: row.action }, after: { undoes: row.id, label: UNDO_LABELS[row.action], anyway: anyway && p.conflicts.length > 0 },
+      before: { undoes: row.id, action: row.action, ...(commentId ? { commentId } : {}) },
+      after: { undoes: row.id, label: UNDO_LABELS[row.action], anyway: anyway && p.conflicts.length > 0, ...(commentId ? { commentId } : {}) },
     });
     if (anyway && p.conflicts.length) {
       const later = await tx.actionLog.findMany({ where: { targetType: row.targetType, targetId: row.targetId, createdAt: { gt: row.createdAt }, id: { not: row.id }, actorId: { not: user.id } }, select: { actorId: true } });

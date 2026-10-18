@@ -3,6 +3,7 @@
 import { db } from "@/lib/db";
 import { projectAccess, type Actor } from "@/lib/access";
 import { startOfTodayIST } from "@/lib/dates";
+import { attachCommentCounts } from "@/lib/comments";
 import { ORDER, awaiting, present, taskInclude } from "@/lib/tasks";
 
 export const PRIORITIES = ["LOW", "MEDIUM", "HIGH", "URGENT"] as const;
@@ -50,11 +51,12 @@ export async function listFiltered(user: Actor, projectId: string, f: ListFilter
     take: CAP + 1,
   });
   const kept = (f.flags.includes("awaiting") ? rows.filter(awaiting) : rows).slice(0, CAP);
-  const out = sections.map((s) => {
+  const out = [];
+  for (const s of sections) {
     const mine = kept.filter((t) => t.sectionId === s.id);
     if (s.isDone) mine.sort((x, y) => (y.completedAt?.getTime() ?? 0) - (x.completedAt?.getTime() ?? 0));
-    return { id: s.id, name: s.name, isDone: s.isDone, total: mine.length, tasks: mine.map((t) => present(t, viewer)), nextCursor: null };
-  });
+    out.push({ id: s.id, name: s.name, isDone: s.isDone, total: mine.length, tasks: await attachCommentCounts(mine.map((t) => present(t, viewer))), nextCursor: null });
+  }
   return { sections: out, filtered: true, truncated: rows.length > CAP, matched: kept.length };
 }
 

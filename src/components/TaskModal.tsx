@@ -6,6 +6,7 @@ import { fitBlockedReason } from "@/components/blocked-reason";
 import { Confirm, Modal, Skeleton } from "@/components/ui";
 import { ConvertDialog } from "@/components/ConvertDialog";
 import { TaskLinks } from "@/components/TaskLinks";
+import { Comments } from "@/components/Comments";
 import { closeControlOffered } from "@/lib/approver-ui";
 import { useMe } from "@/app/(app)/Shell";
 
@@ -18,6 +19,7 @@ type Task = {
   section: { id: string; name: string; isDone: boolean }; project: { id: string; name: string; archived: boolean };
   subtaskList: Sub[];
   links?: { id: string; organisation: { id: string; name: string } | null; contact: { id: string; name: string; organisationId: string } | null }[];
+  commentsEnabled?: boolean;
 };
 type Project = {
   id: string; role: string; type?: "PROJECT" | "DEAL"; archived: boolean; sections: { id: string; name: string; isDone: boolean }[];
@@ -267,6 +269,7 @@ export function TaskModal({ id, me, onClose, onChanged, asPage }: { id: string; 
               <button className="btn ghost sm" style={{ color: "var(--danger)", borderColor: "var(--danger-line)" }} onClick={() => setTrash(true)}>Move to Trash</button>
             </div>
           )}
+          {task.commentsEnabled && <Comments taskId={id} onChanged={onChanged} />}
         </>,
       )}
       {convert && <ConvertDialog task={task} meId={me} onClose={() => setConvert(false)} />}

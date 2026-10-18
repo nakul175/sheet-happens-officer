@@ -6,7 +6,8 @@ import { ApiError } from "@/lib/http";
 import { currentSessionId, deviceLabel, hashPassword, verifyPassword } from "@/lib/auth";
 import { projectAccess, type Actor } from "@/lib/access";
 import { idsIn, sentence, whenText } from "@/lib/activity-text";
-import { UNDO_DAYS, isUndoable } from "@/lib/undoable";
+import { purgeExpiredComments } from "@/lib/comments";
+import { isTooOldToUndo, isUndoable } from "@/lib/undoable";
 import { passwordField } from "@/lib/schemas";
 
 const NOTE_DAYS = 90;
@@ -46,6 +47,8 @@ export function noticeText(n: N) {
   const p = d.project ? `"${d.project}"` : "a project";
   const text: Record<string, string> = {
     TASK_ASSIGNED: `${who} assigned you ${t}.`,
+    COMMENT_ADDED: `${who} commented on ${t}.`,
+    COMMENT_MENTION: `${who} mentioned you on ${t}.`,
     TASKS_REASSIGNED: d.count ? `${who} assigned you ${d.count} tasks${d.project ? ` in ${p}` : ""}.` : `${who} moved tasks over to you.`,
     TASKS_REASSIGNED_SUMMARY: `${d.count ?? "Some"} tasks in ${p} were handed to a new owner by ${who}.`,
     APPROVER_REASSIGNED: `${who} changed who approves tasks in ${p}.`,
@@ -162,7 +165,7 @@ export async function projectActivity(user: Actor, projectId: string, cursor?: s
       via: r.channel === "CONCIERGE" ? "concierge" : "screen",
       // Undo stays on the row (AC5); an Editor can only undo their own actions, as the server enforces.
       undo: r.undoneAt ? "undone" : !isUndoable(r.action) || (!leader && r.actorId !== user.id) ? "none"
-        : Date.now() - r.createdAt.getTime() > UNDO_DAYS * 86400_000 ? "too_old" : "available",
+        : isTooOldToUndo(r.createdAt) ? "too_old" : "available",
     })),
     nextCursor: more ? page[page.length - 1].id : null,
   };
@@ -276,13 +279,14 @@ export async function signOutOthers(user: Actor) {
 }
 
 // ---- retention ----
-export async function purgeOld() {
-  const now = Date.now();
-  const notes = await db.notification.deleteMany({ where: { createdAt: { lt: new Date(now - NOTE_DAYS * 86400_000) } } });
-  const cut = new Date();
+export async function purgeOld(now = new Date()) {
+  const ms = now.getTime();
+  const notes = await db.notification.deleteMany({ where: { createdAt: { lt: new Date(ms - NOTE_DAYS * 86400_000) } } });
+  const cut = new Date(ms);
   cut.setMonth(cut.getMonth() - LOG_MONTHS);
   const actions = await db.actionLog.deleteMany({ where: { createdAt: { lt: cut } } });
   const audits = await db.auditLog.deleteMany({ where: { createdAt: { lt: cut } } });
-  const sessions = await db.session.deleteMany({ where: { expiresAt: { lt: new Date(now - 7 * 86400_000) } } });
-  return { notifications: notes.count, actionLogs: actions.count, auditLogs: audits.count, sessions: sessions.count };
+  const sessions = await db.session.deleteMany({ where: { expiresAt: { lt: new Date(ms - 7 * 86400_000) } } });
+  const comments = await purgeExpiredComments(now);
+  return { notifications: notes.count, actionLogs: actions.count, auditLogs: audits.count, sessions: sessions.count, comments };
 }
