@@ -2,7 +2,7 @@
 // One test per acceptance criterion. The admin and member fixtures sign in with login("ADMIN") / login("MEMBER").
 // Every project and task is ZZ-TEST (zz / ZZ_PREFIX) and the project is archived afterwards.
 // AC6 needs a 30-day-old action and AC7 needs a concierge card from the model; both are skipped with a reason.
-// Nothing here is pointed at production: BASE_URL is staging or a pr1–pr4 preview.
+// Nothing here is pointed at production: BASE_URL is staging or a pr1–pr8 preview.
 import { test, expect, zz } from "../support";
 import { getTask, newProject, newTask } from "../g2";
 import { why } from "../helpers/jim-http";

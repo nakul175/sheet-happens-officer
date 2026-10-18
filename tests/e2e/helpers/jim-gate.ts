@@ -28,7 +28,7 @@ const HEADS: Record<number, string> = {
 };
 
 let releaseOnce: Promise<string | null> | null = null;
-/** The git SHA the app under test (BASE_URL: staging or a pr1-pr4 preview) says it runs, or null when /api/health does not say. */
+/** The git SHA the app under test (BASE_URL: staging or a pr1-pr8 preview) says it runs, or null when /api/health does not say. */
 export function stagingRelease(who: Who) {
   releaseOnce ??= who.api.get(`${BASE_URL}/api/health`).then((r) => (typeof r.json.release === "string" && r.json.release ? r.json.release : null), () => null);
   return releaseOnce;
