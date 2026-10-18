@@ -91,10 +91,10 @@ export const taskCreate = z.object({
   collaboratorIds: z.array(z.string().min(1)).max(50).optional(),
 });
 // The updatedAt the person saw when they opened the task; a different value means someone else saved first.
-// Required (SHO-BUG-13, APL-2668): without it a change could silently overwrite someone else's edit.
-// APL-2670: absent and null are refused in parseTaskBody as version_required, and "" as invalid_version,
-// before this schema runs, so those answers do not depend on Zod's issues list.
-const taskVersion = z.string({ error: "expectedUpdatedAt is required" }).min(1, "expectedUpdatedAt is required");
+// Required (SHO-BUG-13, APL-2668). APL-2670 checks it after the task is loaded: absent and null are
+// version_required, and "" or any non-ISO value is invalid_version. The schema lets those through
+// so the answer is not Zod's issues list, and someone who cannot see the task still gets 404.
+const taskVersion = z.unknown().optional();
 export const taskUpdate = z.object({
   title: title.optional(),
   description: z.string().trim().max(20000).nullish(),

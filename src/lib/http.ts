@@ -1,10 +1,7 @@
 import { connection } from "next/server";
 import { ZodError, type ZodType } from "zod";
 import { reqCtx, type ReqCtx } from "@/lib/reqctx";
-import {
-  INVALID_VERSION, INVALID_VERSION_MESSAGE, VERSION_REQUIRED, VERSION_REQUIRED_MESSAGE,
-  isVersionCode, versionErrorBody, versionProblem,
-} from "@/lib/version-error";
+import { NOT_FOUND, isVersionCode, versionErrorBody } from "@/lib/version-error";
 
 export class ApiError extends Error {
   constructor(
@@ -17,28 +14,20 @@ export class ApiError extends Error {
   }
 }
 
-export const notFound = (what = "Resource") => new ApiError(404, `${what} not found`);
+export const notFound = (what = "Resource") => new ApiError(404, `${what} not found`, undefined, NOT_FOUND);
 
 /** Parse a JSON body against a schema; throws ApiError(400) on failure. */
 export async function parseBody<T>(req: Request, schema: ZodType<T>): Promise<T> {
   return schema.parse(await readJson(req));
 }
 
-function versionApiError(code: typeof VERSION_REQUIRED | typeof INVALID_VERSION): ApiError {
-  if (code === INVALID_VERSION) return new ApiError(400, INVALID_VERSION_MESSAGE, undefined, code);
-  return new ApiError(400, VERSION_REQUIRED_MESSAGE, undefined, VERSION_REQUIRED);
-}
-
 /**
  * APL-2670: task edits, assign, move, complete and setApprover.
- * A missing or null version, and an empty-string version, are answered here — before the
- * schema — so every route returns the same body instead of a Zod issues list or a plain string.
+ * The version itself is checked after the task is loaded, so someone who cannot see it
+ * gets 404 before a missing or malformed expectedUpdatedAt is discussed.
  */
 export async function parseTaskBody<T>(req: Request, schema: ZodType<T>): Promise<T> {
-  const raw = await readJson(req);
-  const problem = versionProblem(raw);
-  if (problem) throw versionApiError(problem);
-  return schema.parse(raw);
+  return parseBody(req, schema);
 }
 
 async function readJson(req: Request): Promise<unknown> {
@@ -60,7 +49,7 @@ export function withVersionErrors<A extends unknown[]>(fn: (...args: A) => Promi
     try {
       return await fn(...args);
     } catch (err) {
-      if (err instanceof ApiError && isVersionCode(err.code)) {
+      if (err instanceof ApiError && (isVersionCode(err.code) || err.code === NOT_FOUND)) {
         return Response.json(versionErrorBody(err.code, err.message), { status: err.status });
       }
       throw err;

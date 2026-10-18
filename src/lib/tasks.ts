@@ -5,6 +5,7 @@ import { db } from "@/lib/db";
 import { ApiError, notFound } from "@/lib/http";
 import {
   INVALID_VERSION, INVALID_VERSION_MESSAGE, VERSION_CONFLICT, VERSION_CONFLICT_MESSAGE, VERSION_REQUIRED, VERSION_REQUIRED_MESSAGE,
+  classifyVersionValue,
 } from "@/lib/version-error";
 import {
   WORKERS, activeMember, canManage, leaderId, projectAccess, requireManage, requireWrite, type Actor, type Role, type Tx,
@@ -201,11 +202,13 @@ export async function listTasks(
   return { sections: out };
 }
 
-/** SHO-BUG-13, APL-2668, APL-2670: every task change says which version it was made on.
- *  Absent or null is version_required. An empty string is invalid_version, not missing. */
+/** SHO-BUG-13, APL-2668, APL-2670: every task change names the ISO timestamp it was made on.
+ *  Call this only after the task has been loaded, so a hidden task is 404 first.
+ *  Absent or null is version_required. "" and any other non-ISO value is invalid_version. */
 function requireVersion(expected: unknown): asserts expected is string {
-  if (expected === "") throw new ApiError(400, INVALID_VERSION_MESSAGE, undefined, INVALID_VERSION);
-  if (typeof expected !== "string") throw new ApiError(400, VERSION_REQUIRED_MESSAGE, undefined, VERSION_REQUIRED);
+  const problem = classifyVersionValue(expected);
+  if (problem === INVALID_VERSION) throw new ApiError(400, INVALID_VERSION_MESSAGE, undefined, INVALID_VERSION);
+  if (problem === VERSION_REQUIRED) throw new ApiError(400, VERSION_REQUIRED_MESSAGE, undefined, VERSION_REQUIRED);
 }
 
 /** SHO-US-14.8 AC4: the same stale-edit answer for every inline edit. */
@@ -222,12 +225,12 @@ export async function updateTask(
   id: string,
   input: {
     title?: string; description?: string | null; dueDate?: string | null; priority?: "LOW" | "MEDIUM" | "HIGH" | "URGENT";
-    blocked?: boolean; blockedReason?: string | null; expectedUpdatedAt: string;
+    blocked?: boolean; blockedReason?: string | null; expectedUpdatedAt?: unknown;
   },
 ) {
   // SHO-BUG-13: every edit says which version it was made on, so a concurrent save is never silently overwritten.
-  requireVersion(input.expectedUpdatedAt);
   const { t, a } = await loadTask(user, id, { write: true });
+  requireVersion(input.expectedUpdatedAt);
   await staleCheck(user, id, t, a.role, input.expectedUpdatedAt);
   const data: Record<string, unknown> = {};
   const before: Record<string, unknown> = {};
@@ -263,9 +266,9 @@ export async function updateTask(
 }
 
 // ---------------------------------------------------------------- assign, collaborators, approver (4.3, 4.6)
-export async function assignTask(user: Actor, id: string, assigneeId: string, expectedUpdatedAt: string) {
-  requireVersion(expectedUpdatedAt);
+export async function assignTask(user: Actor, id: string, assigneeId: string, expectedUpdatedAt: unknown) {
   const { t, a } = await loadTask(user, id, { write: true });
+  requireVersion(expectedUpdatedAt);
   await staleCheck(user, id, t, a.role, expectedUpdatedAt);
   // The assignee may only hand a task with an approver on to that approver; the Leader and Admins keep full authority (SHO-BUG-6).
   if (t.approverId && user.id === t.assigneeId && assigneeId !== t.approverId && a.role !== "LEADER") {
@@ -304,9 +307,9 @@ export async function removeCollaborator(user: Actor, id: string, userId: string
   });
 }
 
-export async function setApprover(user: Actor, id: string, approverId: string | null, expectedUpdatedAt: string) {
-  requireVersion(expectedUpdatedAt);
+export async function setApprover(user: Actor, id: string, approverId: string | null, expectedUpdatedAt: unknown) {
   const { t, a } = await loadTask(user, id, { write: true });
+  requireVersion(expectedUpdatedAt);
   await staleCheck(user, id, t, a.role, expectedUpdatedAt);
   if (t.parentId) throw new ApiError(400, "Subtasks do not have an approver.");
   if (user.id === t.assigneeId) throw new ApiError(403, "The assignee cannot change their own task's approver.");
@@ -368,9 +371,9 @@ export async function sendBack(user: Actor, id: string) {
 }
 
 // ---------------------------------------------------------------- complete, reopen, move (4.5)
-export async function completeTask(user: Actor, id: string, expectedUpdatedAt: string, completeAll = false) {
-  requireVersion(expectedUpdatedAt);
+export async function completeTask(user: Actor, id: string, expectedUpdatedAt: unknown, completeAll = false) {
   const { t, a } = await loadTask(user, id, { write: true, holderCanDo: true });
+  requireVersion(expectedUpdatedAt);
   await staleCheck(user, id, t, a.role, expectedUpdatedAt);
   if (!canClose(user.id, a.role, t)) {
     throw new ApiError(403, t.approverId ? "Only the approver, the Leader or an Admin can close this task." : "You cannot complete this task.");
@@ -429,9 +432,9 @@ export async function reopenTask(user: Actor, id: string, sectionId?: string) {
 }
 
 /** Dragging a card. Into the done Section completes, out of it reopens, otherwise only the Section changes. */
-export async function moveTask(user: Actor, id: string, sectionId: string, expectedUpdatedAt: string, completeAll = false) {
-  requireVersion(expectedUpdatedAt);
+export async function moveTask(user: Actor, id: string, sectionId: string, expectedUpdatedAt: unknown, completeAll = false) {
   const { t, a } = await loadTask(user, id, { write: true, holderCanDo: true });
+  requireVersion(expectedUpdatedAt);
   await staleCheck(user, id, t, a.role, expectedUpdatedAt);
   if (t.parentId) throw new ApiError(409, "Subtasks move with their parent task.");
   const dest = await db.section.findFirst({ where: { id: sectionId, projectId: t.projectId } });

@@ -76,25 +76,29 @@ describe("missing task version (APL-2670)", () => {
     expect(await db.actionLog.count({ where: { targetType: "task", targetId: s.t } })).toBe(logs);
   });
 
-  it("AC2: an empty-string version on edit is 400 invalid_version and changes nothing", async () => {
+  it("AC2: an empty string and a non-ISO value are 400 invalid_version and change nothing", async () => {
     const s = await setup();
     const before = await stamp(s.worker, s.t);
     const logs = await db.actionLog.count({ where: { targetType: "task", targetId: s.t } });
-    const r = await s.worker.c.patch(`/api/tasks/${s.t}`, { title: "New", expectedUpdatedAt: "" });
-    expect(r.status).toBe(400);
-    expectVersionError(r.json, "invalid_version");
-    expect(r.json.error.code).not.toBe("version_required");
+    for (const value of ["", "abc"]) {
+      const r = await s.worker.c.patch(`/api/tasks/${s.t}`, { title: "New", expectedUpdatedAt: value });
+      expect(r.status, JSON.stringify(value)).toBe(400);
+      expectVersionError(r.json, "invalid_version");
+      expect((r.json as { error: { code: string } }).error.code).not.toBe("version_required");
+    }
     expect(await stamp(s.worker, s.t)).toEqual(before);
     expect(await db.actionLog.count({ where: { targetType: "task", targetId: s.t } })).toBe(logs);
   });
 
-  it("AC2: an empty-string version is invalid_version on assign, move, complete and setApprover too", async () => {
+  it("AC2: an empty string and a non-ISO value are invalid_version on assign, move, complete and setApprover too", async () => {
     const s = await setup();
     const before = await stamp(s.worker, s.t);
     for (const route of routes(s).filter((r) => r.name !== "edit")) {
-      const r = await route.send({ ...route.fields, expectedUpdatedAt: "" });
-      expect(r.status, route.name).toBe(400);
-      expectVersionError(r.json, "invalid_version");
+      for (const value of ["", "abc"]) {
+        const r = await route.send({ ...route.fields, expectedUpdatedAt: value });
+        expect(r.status, `${route.name} ${JSON.stringify(value)}`).toBe(400);
+        expectVersionError(r.json, "invalid_version");
+      }
     }
     expect(await stamp(s.worker, s.t)).toEqual(before);
   });
@@ -107,14 +111,20 @@ describe("missing task version (APL-2670)", () => {
     expect((await patchTask(s.other, s.t, { title: "Theirs" })).status).toBe(200);
     const stale = await s.worker.c.patch(`/api/tasks/${s.t}`, { title: "Mine", expectedUpdatedAt: seen });
 
+    const outsider = await account("outsider");
+    const hidden = await outsider.c.patch(`/api/tasks/${s.t}`, { title: "New", expectedUpdatedAt: "abc" });
+
     expect(missing.status).toBe(400);
     expect(malformed.status).toBe(400);
     expect(stale.status).toBe(409);
+    expect(hidden.status).toBe(404);
     expectVersionError(missing.json, "version_required");
     expectVersionError(malformed.json, "invalid_version");
     expectVersionError(stale.json, "version_conflict");
+    expectVersionError(hidden.json, "not_found");
     sameShape(missing.json, malformed.json);
     sameShape(malformed.json, stale.json);
+    sameShape(stale.json, hidden.json);
     expect((await stamp(s.worker, s.t)).title).toBe("Theirs");
   });
 
@@ -133,7 +143,7 @@ describe("missing task version (APL-2670)", () => {
     for (let i = 0; i < 48; i++) {
       const route = routes(s)[i % 5];
       const form = i % 3;
-      const body = form === 0 ? { ...route.fields } : form === 1 ? { ...route.fields, expectedUpdatedAt: null } : { ...route.fields, expectedUpdatedAt: "" };
+      const body = form === 0 ? { ...route.fields } : form === 1 ? { ...route.fields, expectedUpdatedAt: null } : { ...route.fields, expectedUpdatedAt: i % 2 === 0 ? "" : "abc" };
       calls.push(route.send(body));
     }
     const results = await Promise.all(calls);

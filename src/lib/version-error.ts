@@ -1,11 +1,13 @@
-// APL-2670: a missing task version is one error, whatever route received it.
-// The field is expectedUpdatedAt (the updatedAt the person saw). Absent and null are
-// "version_required". An empty string is malformed ("invalid_version"), not missing.
-// A present value that is not the task's current updatedAt is "version_conflict".
+// APL-2670: a missing expectedUpdatedAt is one error, whatever route received it.
+// The token stays the ISO timestamp the person saw (no integer version field).
+// Absent and null are "version_required". "" and any other non-ISO value are
+// "invalid_version". A real ISO timestamp that is not the task's current updatedAt
+// is "version_conflict". A task the caller cannot see is "not_found".
 
 export const VERSION_REQUIRED = "version_required";
 export const INVALID_VERSION = "invalid_version";
 export const VERSION_CONFLICT = "version_conflict";
+export const NOT_FOUND = "not_found";
 
 export type VersionCode = typeof VERSION_REQUIRED | typeof INVALID_VERSION | typeof VERSION_CONFLICT;
 
@@ -15,24 +17,34 @@ export const VERSION_CONFLICT_MESSAGE = "This task changed while you were editin
 
 const CODES: readonly string[] = [VERSION_REQUIRED, INVALID_VERSION, VERSION_CONFLICT];
 
+/** The form Date.toISOString() produces, plus an offset. Not a date-only string. */
+const ISO_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
+
 export function isVersionCode(code: unknown): code is VersionCode {
   return typeof code === "string" && CODES.includes(code);
 }
 
+export function isIsoTimestamp(value: unknown): value is string {
+  return typeof value === "string" && ISO_TIMESTAMP.test(value) && !Number.isNaN(Date.parse(value));
+}
+
+/** Absent or null is missing. Anything else that is not an ISO timestamp is malformed. A valid timestamp is null. */
+export function classifyVersionValue(value: unknown): typeof VERSION_REQUIRED | typeof INVALID_VERSION | null {
+  if (value === undefined || value === null) return VERSION_REQUIRED;
+  if (!isIsoTimestamp(value)) return INVALID_VERSION;
+  return null;
+}
+
 /**
- * What is wrong with the version on a JSON body, or null when a value is present.
- * Only absent, null and "" are decided here. Other malformed values are left for the schema.
+ * What is wrong with expectedUpdatedAt on a JSON body, or null when a real ISO timestamp is present.
  */
 export function versionProblem(body: unknown): typeof VERSION_REQUIRED | typeof INVALID_VERSION | null {
   if (body === null || typeof body !== "object" || Array.isArray(body)) return VERSION_REQUIRED;
   if (!Object.prototype.hasOwnProperty.call(body, "expectedUpdatedAt")) return VERSION_REQUIRED;
-  const value = (body as Record<string, unknown>).expectedUpdatedAt;
-  if (value === null || value === undefined) return VERSION_REQUIRED;
-  if (value === "") return INVALID_VERSION;
-  return null;
+  return classifyVersionValue((body as Record<string, unknown>).expectedUpdatedAt);
 }
 
-/** The only JSON body a version error may use: { error: { code, message } }. */
-export function versionErrorBody(code: VersionCode, message: string) {
+/** The only JSON body these errors may use: { error: { code, message } }. */
+export function versionErrorBody(code: string, message: string) {
   return { error: { code, message } };
 }

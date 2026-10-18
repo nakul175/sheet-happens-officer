@@ -77,6 +77,13 @@ describe("APL-2670 story: a missing task version always gives one error shape", 
     await unchanged();
   });
 
+  it("AC1 assign null", async () => {
+    const r = await send("POST", `/api/tasks/${taskId}/assign`, { assigneeId: other.id, expectedUpdatedAt: null });
+    expect(r.status).toBe(400);
+    expectVersionError(r.json, "version_required");
+    await unchanged();
+  });
+
   it("AC1 move absent", async () => {
     const r = await send("POST", `/api/tasks/${taskId}/move`, { sectionId: doing });
     expect(r.status).toBe(400);
@@ -105,19 +112,30 @@ describe("APL-2670 story: a missing task version always gives one error shape", 
     await unchanged();
   });
 
+  it("AC2 non-ISO version is invalid_version", async () => {
+    const r = await send("PATCH", `/api/tasks/${taskId}`, { title: "New", expectedUpdatedAt: "abc" });
+    expect(r.status).toBe(400);
+    expectVersionError(r.json, "invalid_version");
+    await unchanged();
+  });
+
   it("AC3 missing, malformed and stale bodies have the same keys", async () => {
     const missing = await send("PATCH", `/api/tasks/${taskId}`, { title: "New" });
-    const malformed = await send("PATCH", `/api/tasks/${taskId}`, { title: "New", expectedUpdatedAt: "" });
+    const malformed = await send("PATCH", `/api/tasks/${taskId}`, { title: "New", expectedUpdatedAt: "abc" });
     expect((await other.c.patch(`/api/tasks/${taskId}`, { title: "Theirs", expectedUpdatedAt: version })).status).toBe(200);
     const fresh = (await worker.c.get(`/api/tasks/${taskId}`)).json.task.updatedAt as string;
     const stale = await send("PATCH", `/api/tasks/${taskId}`, { title: "Mine", expectedUpdatedAt: version });
+    const outsider = await account("outsider");
+    const hiddenRes = await outsider.c.patch(`/api/tasks/${taskId}`, { title: "New", expectedUpdatedAt: "abc" });
 
     expect(missing.status).toBe(400);
     expect(malformed.status).toBe(400);
     expect(stale.status).toBe(409);
+    expect(hiddenRes.status).toBe(404);
     expectVersionError(missing.json, "version_required");
     expectVersionError(malformed.json, "invalid_version");
     expectVersionError(stale.json, "version_conflict");
+    expectVersionError(hiddenRes.json, "not_found");
     const shape = (json: unknown) => {
       const body = json as { error: Record<string, unknown> };
       return Object.keys(body).sort().join(",") + "|" + Object.keys(body.error).sort().join(",");
@@ -125,6 +143,7 @@ describe("APL-2670 story: a missing task version always gives one error shape", 
     expect(shape(missing.json)).toBe("error|code,message");
     expect(shape(malformed.json)).toBe(shape(missing.json));
     expect(shape(stale.json)).toBe(shape(missing.json));
+    expect(shape(hiddenRes.json)).toBe(shape(missing.json));
     const row = (await (await api.get(`/api/tasks/${taskId}`)).json()).task;
     expect(row.title).toBe("Theirs");
     expect(row.updatedAt).toBe(fresh);
