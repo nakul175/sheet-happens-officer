@@ -1,9 +1,9 @@
 // Scheduled-job notices (SHO-US-9.3 AC6, SHO-BUG-1). Runs the job runner in this one process, as the server does:
 // each failing job must reach the Super Admin's bell, and the same job failing again within 20 hours adds nothing.
 import { describe, expect, it } from "vitest";
-import { superAdmin } from "./helpers";
+import { account, istDate, project, superAdmin, task } from "./helpers";
 import { db } from "./concierge-helpers";
-import { JOBS, runJob } from "../src/lib/jobs";
+import { JOBS, runJob, sendReminders } from "../src/lib/jobs";
 
 describe("job failure notices (9.3 AC6)", () => {
   it("tells the Super Admin about every failing job, once per job per day, within one process", async () => {
@@ -27,5 +27,27 @@ describe("job failure notices (9.3 AC6)", () => {
       await db.jobRun.deleteMany({ where: { job: { in: names } } });
       await db.notification.deleteMany({ where: { type: "JOB_FAILED", data: { path: ["job"], string_starts_with: "test-fail-" } } });
     }
+  });
+});
+
+describe("due reminders and subtasks (APL-2610 AC5)", () => {
+  it("sends no reminder for a subtask with a due date that closed with its parent, while an open one gets it", async () => {
+    const lead = await account("lead");
+    const p = await project(lead, lead);
+    const dueTomorrow = istDate(1);
+    // A subtask due tomorrow that closes with its parent (cascade), and a control subtask, also due tomorrow, under an open parent.
+    const parent = await task(lead, p.id, { title: "Parent" });
+    const closed = await task(lead, p.id, { parentId: parent, title: "Closed with parent", dueDate: dueTomorrow });
+    const other = await task(lead, p.id, { title: "Open parent" });
+    const open = await task(lead, p.id, { parentId: other, title: "Still open", dueDate: dueTomorrow });
+    expect((await lead.c.post(`/api/tasks/${parent}/complete`, { completeAll: true })).status).toBe(200);
+    const sub = await db.task.findUniqueOrThrow({ where: { id: closed } });
+    expect(sub.completedAt).not.toBeNull();
+    expect(sub.completedWithParent).toBe(true);
+
+    await sendReminders();
+    const sent = async (taskId: string) => db.notification.count({ where: { taskId, type: { in: ["TASK_DUE_TOMORROW", "TASK_DUE_TODAY", "TASK_OVERDUE"] } } });
+    expect(await sent(open)).toBe(1); // the job ran and does remind an open subtask due tomorrow
+    expect(await sent(closed)).toBe(0); // nothing for the one that closed with its parent
   });
 });

@@ -249,6 +249,42 @@ describe("sections (5.4)", () => {
     expect((await lead.c.get(`/api/tasks/${parent}`)).json.task.sectionId).toBe(p.done);
   });
 
+  it("moving the done flag leaves tasks in Trash untouched: a trashed done task stays done, a trashed open task stays open (APL-2678)", async () => {
+    const lead = await account("lead");
+    const p = await project(lead, lead);
+    // A completed parent (with a subtask that closed with it) in the done section, then moved to Trash.
+    const trashedDone = await task(lead, p.id, { title: "Trashed done" });
+    const trashedSub = await task(lead, p.id, { parentId: trashedDone });
+    expect((await lead.c.post(`/api/tasks/${trashedDone}/complete`, { completeAll: true })).status).toBe(200);
+    expect((await lead.c.del(`/api/tasks/${trashedDone}`)).status).toBeLessThan(300);
+    // An open task in the section about to become the done section, also moved to Trash.
+    const trashedOpen = await task(lead, p.id, { title: "Trashed open", sectionId: p.doing });
+    expect((await lead.c.del(`/api/tasks/${trashedOpen}`)).status).toBeLessThan(300);
+    // A live completed task in the done section, which should reopen as before.
+    const live = await task(lead, p.id, { title: "Live done" });
+    expect((await lead.c.post(`/api/tasks/${live}/complete`)).status).toBe(200);
+    const row = (id: string) => db.task.findUniqueOrThrow({ where: { id } });
+    const before = { done: await row(trashedDone), sub: await row(trashedSub), open: await row(trashedOpen) };
+    expect(before.done.deletedAt).not.toBeNull();
+    expect(before.done.completedAt).not.toBeNull();
+
+    const r = await lead.c.patch(`/api/projects/${p.id}/sections/${p.doing}`, { isDone: true });
+    expect(r.status, JSON.stringify(r.json)).toBe(200);
+    expect((await row(live)).completedAt).toBeNull();
+    // Untouched: completion, section and Trash state are the same, and the row was not written at all (updatedAt).
+    const state = (t: Awaited<ReturnType<typeof row>>) => ({ completedAt: t.completedAt?.toISOString() ?? null, completedWithParent: t.completedWithParent, sectionId: t.sectionId, deletedAt: t.deletedAt?.toISOString() ?? null, updatedAt: t.updatedAt.toISOString() });
+    for (const [id, was] of [[trashedDone, before.done], [trashedSub, before.sub], [trashedOpen, before.open]] as const) {
+      expect(state(await row(id))).toEqual(state(was));
+    }
+    // The section row does not list the trashed task, so Undo leaves it alone too.
+    const log = await db.actionLog.findFirstOrThrow({ where: { projectId: p.id, action: "section.done_changed" }, orderBy: { createdAt: "desc" } });
+    expect((log.beforeState as { reopenedTaskIds: string[] }).reopenedTaskIds).toEqual([live]);
+    expect((await lead.c.post(`/api/actions/${r.headers.get("x-undo-id")}/undo`)).status).toBe(200);
+    for (const [id, was] of [[trashedDone, before.done], [trashedSub, before.sub], [trashedOpen, before.open]] as const) {
+      expect(state(await row(id))).toEqual(state(was));
+    }
+  });
+
   it("moving the done flag away reopens only the subtasks that closed with their parent; one ticked done on its own stays done (APL-2610 AC4, APL-2671)", async () => {
     const lead = await account("lead");
     const p = await project(lead, lead);

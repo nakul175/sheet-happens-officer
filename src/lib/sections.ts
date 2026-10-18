@@ -76,9 +76,10 @@ export async function updateSection(
       let reopened: string[] = [];
       let reopenedSubtasks: string[] = [];
       if (old) {
-        reopened = (await tx.task.findMany({ where: { sectionId: old.id, parentId: null, completedAt: { not: null } }, select: { id: true } })).map((x) => x.id);
+        // Tasks in Trash are left as they are (APL-2678).
+        reopened = (await tx.task.findMany({ where: { sectionId: old.id, parentId: null, completedAt: { not: null }, deletedAt: null }, select: { id: true } })).map((x) => x.id);
         await tx.section.update({ where: { id: old.id }, data: { isDone: false } });
-        await tx.task.updateMany({ where: { sectionId: old.id, parentId: null }, data: { completedAt: null } });
+        await tx.task.updateMany({ where: { id: { in: reopened } }, data: { completedAt: null } });
         // Subtasks that closed with their parent reopen with it; ones ticked done on their own stay done (APL-2610 AC4).
         reopenedSubtasks = await reopenSubtasks(tx, reopened);
       }
