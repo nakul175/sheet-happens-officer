@@ -14,7 +14,7 @@ type Later = (fn: () => Promise<unknown>) => void;
 export type Gate = { pr: number; deployed: boolean; how: string };
 
 /** Head commits of the open PRs these specs cover (GitHub, 18 Oct 2026). A later push to a PR falls through to the probe. */
-const HEADS: Record<number, string> = { 6: "13a836e8b6", 9: "87721120b9", 10: "c47be5f552", 12: "72d2a3d88b", 14: "375e04c33c", 18: "cd09cf0832" };
+const HEADS: Record<number, string> = { 6: "76b41b8ed22674e4e4e22b55be87386e70337133", 9: "87721120b9", 10: "c47be5f552", 12: "72d2a3d88b", 14: "40d0793d4b6418053241e1cbdc7fec448fa5825c", 18: "cd09cf0832" };
 
 let releaseOnce: Promise<string | null> | null = null;
 /** The git SHA the app under test (BASE_URL: staging or a pr1-pr4 preview) says it runs, or null when /api/health does not say. */
