@@ -1,7 +1,7 @@
 // Integration tests for CRM slice 1: types, pipelines, organisations, deals, stages (SHO-US-10.1 to 10.4, 11.1, 12.1, 12.3).
 // Server must run with SUPER_ADMIN_EMAILS=root.test@aplyd.com and the same EMAIL_OUTBOX_DIR.
 import { describe, expect, it } from "vitest";
-import { account, admin, istDate, project, superAdmin, task, type Account } from "./helpers";
+import { account, admin, istDate, project, superAdmin, task, type Account, withVersion } from "./helpers";
 
 let seq = 0;
 async function pipelines(a: Account) {
@@ -252,7 +252,7 @@ describe("stages (10.3)", () => {
     expect(blocked.json.tasks[0].title).toBe("Call the buyer");
     // Close the only open task, then it passes.
     const p = (await lead.c.get(`/api/projects/${id}`)).json.project;
-    expect((await lead.c.post(`/api/tasks/${blocked.json.tasks[0].id}/complete`, {})).status).toBe(200);
+    expect((await lead.c.post(`/api/tasks/${blocked.json.tasks[0].id}/complete`, await withVersion(lead, blocked.json.tasks[0].id))).status).toBe(200);
     expect((await lead.c.post(`/api/projects/${id}/stage`, { stageId: won })).status).toBe(200);
     const after = (await lead.c.get(`/api/projects/${id}`)).json.project;
     expect(after.deal.stage.name).toBe("Won");
@@ -266,7 +266,7 @@ describe("stages (10.3)", () => {
     const { r, body, pipes } = await deal(lead, lead);
     const id = r.json.deal.id as string;
     const step = (await lead.c.get(`/api/projects/${id}`)).json.project.deal.nextStep.id;
-    expect((await lead.c.post(`/api/tasks/${step}/complete`, {})).status).toBe(200);
+    expect((await lead.c.post(`/api/tasks/${step}/complete`, await withVersion(lead, step))).status).toBe(200);
     expect((await lead.c.post(`/api/projects/${id}/stage`, { stageId: pipes.proactive.stages.find((s: { name: string }) => s.name === "Won").id })).status).toBe(200);
     const target = async (event: string) => ((await sa.c.get(`/api/audit?event=${event}&person=${lead.id}`)).json.items as { target: string | null }[])[0]?.target;
     expect(await target("DEAL_CLOSED")).toBe(`Deal "${body.name}"`);

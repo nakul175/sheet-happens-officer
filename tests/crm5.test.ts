@@ -2,7 +2,7 @@
 // Server must run with SUPER_ADMIN_EMAILS=root.test@aplyd.com, JOB_SECRET set, the same EMAIL_OUTBOX_DIR; DATABASE_URL points at the same database.
 import { describe, expect, it } from "vitest";
 import { PrismaClient } from "../src/generated/prisma/client";
-import { Client, account, admin, istDate, project, superAdmin, task, type Account } from "./helpers";
+import { Client, account, admin, istDate, project, superAdmin, task, type Account, withVersion } from "./helpers";
 
 const db = new PrismaClient();
 const SECRET = process.env.JOB_SECRET ?? "";
@@ -41,7 +41,7 @@ describe("Monday review (13.3)", () => {
     const late = await mkDeal(lead, { due: istDate(-3) });
     const none = await mkDeal(lead);
     const t = (await lead.c.get("/api/deals")).json.deals.find((d: { id: string }) => d.id === none.id).nextStep.id;
-    await lead.c.post(`/api/tasks/${t}/complete`);
+    await lead.c.post(`/api/tasks/${t}/complete`, await withVersion(lead, t));
     const mine = await review(lead);
     expect(ids(mine.overdueNextStep)).toContain(late.id);
     expect(ids(mine.needsNextStep)).toContain(none.id);

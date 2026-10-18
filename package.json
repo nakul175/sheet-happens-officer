@@ -8,6 +8,7 @@
     "start": "node --import tsx server.js",
     "lint": "eslint",
     "test": "vitest run",
+    "eval:concierge": "tsx tests/eval/runner.ts",
     "test:viewport": "vitest run -c vitest.viewport.config.mts",
     "db:migrate": "prisma migrate dev",
     "postinstall": "prisma generate"
