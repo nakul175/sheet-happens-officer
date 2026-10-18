@@ -3,7 +3,7 @@
 // Mail is read from EMAIL_OUTBOX_DIR (or .outbox), the same folder the dev server writes when Resend is off.
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
-import type { APIRequestContext, Browser, BrowserContext, Page } from "@playwright/test";
+import type { APIRequestContext, Browser, BrowserContext, Locator, Page } from "@playwright/test";
 import { api, expect, zz, RUN, BASE_URL, type Api, type Json } from "../support";
 
 export { zz, RUN, BASE_URL, expect };
@@ -224,6 +224,27 @@ const UI = { timeout: 90_000 };
 /** One Team table row whose text contains `text`. Callers assert a count of 1, so a shared `.first()` is not used. */
 export function teamRow(page: Page, text: string) {
   return page.locator("#main tbody tr").filter({ hasText: text });
+}
+
+/**
+ * The columns of one Team row.
+ * At 1024px and wider the header row is visible. Below that it is hidden and each cell shows its data-label.
+ */
+export async function expectTeamColumns(page: Page, row: Locator, labels: readonly string[]) {
+  const head = page.locator("#main table thead");
+  if (await head.isVisible()) {
+    for (const label of labels) {
+      await expect(head.getByRole("columnheader", { name: label, exact: true })).toHaveCount(1);
+    }
+    return;
+  }
+  for (const label of labels) {
+    const cell = row.locator(`td[data-label="${label}"]`);
+    await expect(cell).toHaveCount(1);
+    await expect(cell).toBeVisible();
+    const content = await cell.evaluate((el) => getComputedStyle(el, "::before").content);
+    expect(content.replace(/^["']|["']$/g, "")).toBe(label);
+  }
 }
 
 /** One Member-list item whose link is exactly `name`. */

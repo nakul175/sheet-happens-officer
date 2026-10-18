@@ -2,7 +2,7 @@
 import { test, expect, RUN, type Json } from "../support";
 import {
   PASS, alias, deactivate, passwordOk, personByEmail, signUp, zz,
-  addPersonOnTeam, deactivateOnTeam, memberItem, teamRow, type Api,
+  addPersonOnTeam, deactivateOnTeam, expectTeamColumns, memberItem, teamRow, type Api,
 } from "./qa";
 
 const SLOW = { timeout: 90_000 }; // the Team table can be long on a busy workspace
@@ -56,11 +56,10 @@ test.describe("SHO-US-2.5 / APL-2484", () => {
     later(() => retire(admin.api, email));
     await addPersonOnTeam(admin.page, name.slice(0, space), name.slice(space + 1), email);
 
-    const table = admin.page.locator("#main table");
-    for (const h of ["Name", "Email", "Role", "Status", "Actions"]) await expect(table.getByRole("columnheader", { name: h, exact: true })).toHaveCount(1);
     await expect(admin.page.locator("#main").getByRole("button", { name: "+ Add person" })).toBeVisible();
     const row = teamRow(admin.page, email);
     await expect(row).toHaveCount(1, SLOW);
+    await expectTeamColumns(admin.page, row, ["Name", "Email", "Role", "Status", "Actions"]);
     await expect(row).toContainText(email);
     await expect(row.locator(".chip", { hasText: "Member" })).toBeVisible();
     await expect(row.locator(".chip.green", { hasText: "Active" })).toBeVisible();
