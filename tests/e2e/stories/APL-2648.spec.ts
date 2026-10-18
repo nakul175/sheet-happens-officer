@@ -1,17 +1,15 @@
 // SHO-BUG-13 Task PATCH without a version silently overwrites a concurrent edit (Linear APL-2648, PR #13).
 // The issue's four unnumbered acceptance criteria are taken in order as AC1 to AC4.
 // The Super Admin acts as Leader and as "the other person" where one session is enough; the plain Member (SHO_MEMBER_*) is User B
-// in the two-person case. Every edit this spec makes on purpose sends a version, so it works before and after PR #13.
-// Staging runs main, where PR #13 is not merged: the missing-version checks are skipped until it is.
+// in the two-person case. Every edit this spec makes on purpose sends a version. A PATCH that omits it is refused.
 import { test, expect, zz } from "../support";
 import { getTask, newProject, newTask } from "../g2";
-import { patchCurrent, why } from "../helpers/jim-http";
+import { patchCurrent } from "../helpers/jim-http";
 
-const NOT_MERGED = "Needs PR #13 (SHO-BUG-13) merged to main and deployed to staging: on main a PATCH without expectedUpdatedAt still saves.";
 const STALE = "This task changed while you were editing it.";
 
 test.describe("SHO-BUG-13 / APL-2648", () => {
-  test.skip("AC1: a task PATCH without expectedUpdatedAt is refused with 400 and changes nothing", why(NOT_MERGED), async ({ admin, later }) => {
+  test("AC1: a task PATCH without expectedUpdatedAt is refused with 400 and changes nothing", async ({ admin, later }) => {
     const p = await newProject(admin, later, { label: "bug13 no version" });
     const t = await newTask(admin, p.id, { title: zz("original"), priority: "LOW" });
     const before = await getTask(admin, t);
@@ -24,7 +22,7 @@ test.describe("SHO-BUG-13 / APL-2648", () => {
     expect(after.updatedAt).toBe(before.updatedAt);
   });
 
-  test.skip("AC1 (two people): User B's change survives User A's PATCH that omits the version", why(NOT_MERGED), async ({ admin, member, later }) => {
+  test("AC1 (two people): User B's change survives User A's PATCH that omits the version", async ({ admin, member, later }) => {
     const p = await newProject(admin, later, { label: "bug13 two people", members: [{ who: member, role: "EDITOR" }] });
     const t = await newTask(admin, p.id, { title: zz("v1") });
     const theirs = zz("B's title");
