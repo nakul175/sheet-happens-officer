@@ -2,10 +2,12 @@
 // and the task routes (Linear APL-2609).
 // One test per acceptance criterion. People are nakul17+ aliases signed in with SHO_QA_PASS.
 // Records are ZZ-TEST and archived afterwards; the extra people are deactivated.
-// The server's CRM_VISIBLE is a process setting. Each test checks the lever for the mode this
-// server is actually running (all, admins, or off). A quick action that names a hidden deal is a
-// product defect: the test is marked as an expected failure with the reason, not skipped.
-// The only skip is a missing SHO_QA_PASS. Nothing here targets production.
+// The server's CRM_VISIBLE is a process setting. A test named for one mode skips when the live
+// lever is different, so an `all` server cannot pass an `off` acceptance criterion.
+// A quick action that names a hidden deal is a product defect (APL-2723): the test is marked as
+// an expected failure with the reason, not skipped.
+// Pam left no qa:TC id on the issue; each title says "qa:TC missing".
+// Nothing here targets production.
 import type { Browser, BrowserContext } from "@playwright/test";
 import { test, expect, zz } from "../support";
 import { newProject, newTask, ymd, type Who } from "../g2";
@@ -76,209 +78,130 @@ test.beforeEach(() => {
   if (world) test.info().annotations.push({ type: "CRM_VISIBLE", description: world.mode });
 });
 
-test("AC1: with CRM_VISIBLE=off, My tasks shows no deal task and no stage", async () => {
+test("AC1: with CRM_VISIBLE=off, My tasks shows no deal task and no stage qa:TC missing", async () => {
   const w = need();
-  const hide = hides(w.mode, "MEMBER");
-  if (!w.deal && w.mode !== "off") throw new Error("No deal was planted.");
+  only(w, "off");
+  expect(w.deal).toBeNull();
   const rows = await myRows(w.editor);
-  if (w.deal) {
-    const hit = rows.filter((t) => t.id === w.deal!.taskId);
-    expect(hit.length > 0).toBe(!hide);
-    if (!hide) expect(hit[0].project?.stage).toBe(w.deal.stage);
-    if (hide) expect(JSON.stringify(rows)).not.toContain(w.deal.name);
-  } else {
-    expect(rows.some((t) => t.project?.type === "DEAL")).toBe(false);
-  }
+  expect(rows.some((t) => t.project?.type === "DEAL")).toBe(false);
+  expect(rows.some((t) => t.project?.stage)).toBe(false);
   expect(rows.some((t) => t.title === w.plainTitle)).toBe(true);
   await w.editor.api.post("/api/profile/start-guide");
   await w.editor.page.goto("/", { waitUntil: "domcontentloaded" });
-  // The first document request can bounce through /signin while the route compiles. Wait for the list itself.
-  await expect(w.editor.page.getByRole("heading", { name: "My tasks" })).toBeVisible({ timeout: 30_000 });
-  await expect(w.editor.page.getByText(w.plainTitle).first()).toBeVisible({ timeout: 30_000 });
-  if (w.deal && hide) {
-    await expect(w.editor.page.getByText(w.deal.taskTitle)).toHaveCount(0);
-    await expect(w.editor.page.getByText(w.deal.name)).toHaveCount(0);
-  }
-  if (w.deal && !hide) {
-    await expect(w.editor.page.getByText(w.deal.taskTitle).first()).toBeVisible();
-    const byProject = w.editor.page.getByRole("button", { name: "By project" });
-    if (await byProject.count()) {
-      await byProject.click();
-      await expect(w.editor.page.getByText(w.deal.stage).first()).toBeVisible();
-    }
-  }
-  if (w.mode !== "off") {
-    test.info().annotations.push({ type: "note", description: `This server runs CRM_VISIBLE=${w.mode}. My tasks was checked for that mode.` });
-  }
+  // The first document request can bounce through /signin while the route compiles. Wait for the row itself.
+  const list = w.editor.page.getByRole("main");
+  await expect(list.getByRole("heading", { name: "My tasks" })).toBeVisible({ timeout: 30_000 });
+  await expect(list.getByRole("link", { name: w.plainTitle, exact: true })).toBeVisible({ timeout: 30_000 });
+  await expect(list.getByText("Deal", { exact: true })).toHaveCount(0);
 });
 
-test("AC2: with CRM_VISIBLE=off, search returns no deal and no deal task", async () => {
+test("AC2: with CRM_VISIBLE=off, search returns no deal and no deal task qa:TC missing", async () => {
   const w = need();
-  if (!w.deal) {
-    expect((await w.editor.api.get("/api/deals")).status).toBe(404);
-    const searched = await w.editor.api.get(`/api/search?q=${encodeURIComponent(w.plainTitle)}`);
-    noSecret(JSON.stringify(searched.json));
-    expect((searched.json.projects as { type?: string }[]).every((p) => p.type !== "DEAL")).toBe(true);
-    return;
-  }
-  const hide = hides(w.mode, "MEMBER");
-  const byTitle = await search(w.editor, w.deal.taskTitle);
-  const byName = await search(w.editor, w.deal.name);
-  expect(byTitle.tasks.some((t) => t.id === w.deal!.taskId)).toBe(!hide);
-  expect(byName.projects.some((p) => p.id === w.deal!.id)).toBe(!hide);
-  expect(byTitle.tasks.some((t) => t.project?.id === w.deal!.id)).toBe(!hide);
+  only(w, "off");
+  expect((await w.editor.api.get("/api/deals")).status).toBe(404);
   const plain = await search(w.editor, w.plainTitle);
   expect(plain.tasks.some((t) => t.title === w.plainTitle)).toBe(true);
+  expect(plain.projects.every((p) => p.type !== "DEAL")).toBe(true);
   await w.editor.page.goto("/search", { waitUntil: "domcontentloaded" });
   const box = w.editor.page.getByRole("searchbox", { name: "Search" });
   await expect(box).toBeEditable();
-  const title = w.deal.taskTitle;
   await expect(async () => {
-    await box.fill(title);
-    await expect(box).toHaveValue(title);
+    await box.fill(w.plainTitle);
+    await expect(box).toHaveValue(w.plainTitle);
+    await expect(w.editor.page.getByRole("link", { name: w.plainTitle })).toBeVisible();
   }).toPass();
-  if (hide) await expect(w.editor.page.getByText(/Nothing matches/)).toBeVisible();
-  else await expect(w.editor.page.getByText(w.deal.taskTitle).first()).toBeVisible();
+  await expect(w.editor.page.getByRole("main").getByText("Deal", { exact: true })).toHaveCount(0);
 });
 
-test("AC3: with CRM_VISIBLE=off, the deal task and the deal task list answer not found", async () => {
+test("AC3: with CRM_VISIBLE=off, the deal task and the deal task list answer not found qa:TC missing", async () => {
   const w = need();
-  if (!w.deal) {
-    expect((await w.editor.api.get("/api/deals")).status).toBe(404);
-    expect((await w.admin.api.get("/api/deals")).status).toBe(404);
-    return;
-  }
-  const hide = hides(w.mode, "MEMBER");
-  const one = await w.editor.api.get(`/api/tasks/${w.deal.taskId}`);
-  const list = await w.editor.api.get(`/api/projects/${w.deal.id}/tasks`);
-  noSecret(JSON.stringify(one.json));
-  noSecret(JSON.stringify(list.json));
-  expect(one.status).toBe(hide ? 404 : 200);
-  expect(list.status).toBe(hide ? 404 : 200);
-  if (!hide) expect(JSON.stringify(list.json)).toContain(w.deal.taskTitle);
-  await w.editor.page.goto(`/tasks/${w.deal.taskId}`);
-  if (hide) await expect(w.editor.page.getByRole("heading", { name: "This task isn't available" })).toBeVisible();
-  else await expect(w.editor.page.getByLabel("Title")).toHaveValue(w.deal.taskTitle);
+  only(w, "off");
+  // off answers not found for the deals API, so this run cannot plant a deal task to open.
+  expect(w.deal).toBeNull();
+  expect((await w.editor.api.get("/api/deals")).status).toBe(404);
+  expect((await w.admin.api.get("/api/deals")).status).toBe(404);
+  expect((await w.orgAdmin.api.get("/api/deals")).status).toBe(404);
 });
 
-test("AC4: with CRM_VISIBLE=off, the concierge does not mention a deal, a deal task, or a stage", async () => {
+test("AC4: with CRM_VISIBLE=off, the concierge does not mention a deal, a deal task, or a stage qa:TC missing", async () => {
   const w = need();
-  if (!w.deal) {
-    const body = await quick(w.editor);
-    expect(body).not.toContain("DEAL");
-    return;
-  }
-  const hide = hides(w.mode, "MEMBER");
+  only(w, "off");
   const open = await quick(w.editor);
-  if (hide) {
-    expect(open).not.toContain(w.deal.name);
-    expect(open).not.toContain(w.deal.taskTitle);
-    expect(open).not.toContain(w.deal.stage);
-  } else {
-    expect(open).toContain(w.deal.taskTitle);
-  }
+  expect(open).not.toContain("DEAL");
+  expect(open).toContain(w.plainTitle);
+  if (!w.deal) return;
+  expect(open).not.toContain(w.deal.name);
+  expect(open).not.toContain(w.deal.taskTitle);
+  expect(open).not.toContain(w.deal.stage);
   const scoped = await quick(w.editor, w.deal.id);
   const leaked = scoped.includes(w.deal.name) || scoped.includes(w.deal.taskTitle) || scoped.includes(w.deal.stage);
-  if (hide && leaked) {
-    test.fail(true, "Product defect APL-2723: quickAnswer looks the deal up by membership only and stores its name on the concierge message (Due this week in <deal>). CRM_VISIBLE off and admins still mention the deal. This test is not skipped.");
+  if (leaked) {
+    test.fail(true, "Product defect APL-2723: quickAnswer looks the deal up by membership only and stores its name on the concierge message (Due this week in <deal>). CRM_VISIBLE off still mentions the deal. This test is not skipped.");
   }
-  if (hide) expect(leaked).toBe(false);
-  else expect(scoped).toContain(w.deal.name);
-  expect(open).toContain(w.plainTitle);
+  expect(leaked).toBe(false);
 });
 
-test("AC5: with CRM_VISIBLE=admins, an Editor sees no deal data on the four surfaces", async () => {
+test("AC5: with CRM_VISIBLE=admins, an Editor sees no deal data on the four surfaces qa:TC missing", async () => {
   const w = need();
-  const hide = hides(w.mode, "MEMBER");
-  if (w.mode !== "admins") {
-    test.info().annotations.push({ type: "note", description: `This server runs CRM_VISIBLE=${w.mode}. The Editor was checked against that lever.` });
-  }
-  if (!w.deal) {
-    expect(hide).toBe(true);
-    expect((await w.editor.api.get("/api/deals")).status).toBe(404);
-    return;
-  }
+  only(w, "admins");
+  if (!w.deal) throw new Error("No deal was planted.");
   const seen = await surfaces(w.editor, w.deal);
-  expect(seen.my).toBe(!hide);
-  expect(seen.searchTask).toBe(!hide);
-  expect(seen.searchDeal).toBe(!hide);
-  expect(seen.taskStatus).toBe(hide ? 404 : 200);
-  expect(seen.listStatus).toBe(hide ? 404 : 200);
-  expect(seen.concierge).toBe(!hide);
+  expect(seen.my).toBe(false);
+  expect(seen.searchTask).toBe(false);
+  expect(seen.searchDeal).toBe(false);
+  expect(seen.taskStatus).toBe(404);
+  expect(seen.listStatus).toBe(404);
+  expect(seen.concierge).toBe(false);
   const plain = await myRows(w.editor);
   expect(plain.some((t) => t.title === w.plainTitle)).toBe(true);
 });
 
-test("AC6: with CRM_VISIBLE=admins, an Admin sees deal tasks as normal", async () => {
+test("AC6: with CRM_VISIBLE=admins, an Admin sees deal tasks as normal qa:TC missing", async () => {
   const w = need();
-  const hide = hides(w.mode, "ADMIN");
-  if (w.mode !== "admins") {
-    test.info().annotations.push({ type: "note", description: `This server runs CRM_VISIBLE=${w.mode}. The Admin was checked against that lever.` });
-  }
-  if (!w.deal) {
-    expect(hide).toBe(true);
-    expect((await w.orgAdmin.api.get("/api/deals")).status).toBe(404);
-    expect((await w.admin.api.get("/api/deals")).status).toBe(404);
-    return;
-  }
+  only(w, "admins");
+  if (!w.deal) throw new Error("No deal was planted.");
   const seen = await surfaces(w.orgAdmin, w.deal);
-  expect(seen.my).toBe(!hide);
-  expect(seen.searchTask).toBe(!hide);
-  expect(seen.searchDeal).toBe(!hide);
-  expect(seen.taskStatus).toBe(hide ? 404 : 200);
-  expect(seen.listStatus).toBe(hide ? 404 : 200);
-  expect(seen.concierge).toBe(!hide);
+  expect(seen.my).toBe(true);
+  expect(seen.searchTask).toBe(true);
+  expect(seen.searchDeal).toBe(true);
+  expect(seen.taskStatus).toBe(200);
+  expect(seen.listStatus).toBe(200);
+  expect(seen.concierge).toBe(true);
 });
 
-test("AC7: with CRM_VISIBLE=all, a member still sees their deal work", async () => {
+test("AC7: with CRM_VISIBLE=all, a member still sees their deal work qa:TC missing", async () => {
   const w = need();
-  if (w.mode !== "all") {
-    test.info().annotations.push({ type: "note", description: `This server runs CRM_VISIBLE=${w.mode}, so "all" is not the live lever. The member was checked against ${w.mode}.` });
-  }
-  if (!w.deal) {
-    expect(w.mode).toBe("off");
-    expect((await w.editor.api.get("/api/deals")).status).toBe(404);
-    return;
-  }
-  expect(w.mode === "all" || w.mode === "admins").toBe(true);
-  const hide = hides(w.mode, "MEMBER");
+  only(w, "all");
+  if (!w.deal) throw new Error("No deal was planted.");
   const seen = await surfaces(w.editor, w.deal);
-  expect(seen.my).toBe(!hide);
-  expect(seen.searchDeal).toBe(!hide);
-  expect(seen.taskStatus).toBe(hide ? 404 : 200);
-  expect(seen.concierge).toBe(!hide);
+  expect(seen.my).toBe(true);
+  expect(seen.searchDeal).toBe(true);
+  expect(seen.taskStatus).toBe(200);
+  expect(seen.concierge).toBe(true);
 });
 
-test("AC8: off hides deals from Admins and the Super Admin; admins mode keeps Admins in", async () => {
+test("AC8: off hides deals from Admins and the Super Admin; admins mode keeps Admins in qa:TC missing", async () => {
   const w = need();
-  const adminHide = hides(w.mode, "ADMIN");
-  const memberHide = hides(w.mode, "MEMBER");
-  if (!w.deal) {
-    expect(w.mode).toBe("off");
-    expect(adminHide).toBe(true);
-    expect(memberHide).toBe(true);
+  if (w.mode === "all") {
+    test.skip(true, "Needs CRM_VISIBLE=off or admins. This server runs all, so this AC is not a pass.");
+  }
+  if (w.mode === "off") {
+    expect(w.deal).toBeNull();
     for (const who of [w.admin, w.orgAdmin, w.editor]) {
       expect((await who.api.get("/api/deals")).status).toBe(404);
       expect((await who.api.get("/api/orgs")).status).toBe(404);
     }
     return;
   }
+  if (!w.deal) throw new Error("No deal was planted.");
   const asAdmin = await surfaces(w.orgAdmin, w.deal);
   const asSuper = await w.admin.api.get(`/api/tasks/${w.deal.taskId}`);
   noSecret(JSON.stringify(asSuper.json));
-  expect(asAdmin.taskStatus).toBe(adminHide ? 404 : 200);
-  expect(asAdmin.searchDeal).toBe(!adminHide);
-  expect(asSuper.status).toBe(adminHide ? 404 : 200);
   const asMember = await w.editor.api.get(`/api/tasks/${w.deal.taskId}`);
-  expect(asMember.status).toBe(memberHide ? 404 : 200);
-  if (w.mode === "admins") {
-    expect(adminHide).toBe(false);
-    expect(memberHide).toBe(true);
-  }
-  if (w.mode === "off") {
-    expect(adminHide).toBe(true);
-    expect(memberHide).toBe(true);
-  }
+  expect(asAdmin.taskStatus).toBe(200);
+  expect(asAdmin.searchDeal).toBe(true);
+  expect(asSuper.status).toBe(200);
+  expect(asMember.status).toBe(404);
 });
 
 function need(): World {
@@ -286,10 +209,9 @@ function need(): World {
   return world;
 }
 
-function hides(mode: Mode, role: "MEMBER" | "ADMIN" | "SUPER_ADMIN") {
-  if (mode === "off") return true;
-  if (mode === "admins") return role === "MEMBER";
-  return false;
+/** Skip unless the live lever is the mode this acceptance criterion names. A different mode is not a pass. */
+function only(w: World, want: Mode) {
+  test.skip(w.mode !== want, `Needs CRM_VISIBLE=${want}. This server runs ${w.mode}, so this AC is not a pass.`);
 }
 
 type Row = { id?: string; title?: string; project?: { id?: string; name?: string; type?: string; stage?: string | null } };
