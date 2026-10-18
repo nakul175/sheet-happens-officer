@@ -1,5 +1,6 @@
 // SHO-US-14.6 Keyboard shortcuts and help sheet (Linear APL-2565).
 import { test, expect, zz } from "../support";
+import { newProject } from "../g2";
 
 type Who = { api: import("../support").Api; user: Record<string, any>; page: import("@playwright/test").Page };
 
@@ -18,7 +19,8 @@ async function listProject(admin: Who, later: (f: () => Promise<unknown>) => voi
   return { pid, ids };
 }
 
-test("AC1: pressing ? opens a sheet that lists every shortcut", async ({ admin }) => {
+test("AC1: pressing ? opens a sheet that lists every shortcut", async ({ admin, later }) => {
+  await newProject(admin, later, { label: "14.6 shortcuts" }); // "+ New task" only renders when there is a project this person can add to
   const page = admin.page;
   await page.goto("/");
   await expect(page.getByRole("button", { name: "+ New task" })).toBeVisible(); // the page is hydrated: key handlers are attached
@@ -75,6 +77,7 @@ test("AC3: no single-key shortcut fires while focus is in an input, textarea or 
   // A textarea: the task title in the panel.
   await page.goto(`/projects/${s.pid}?task=${s.ids[0]}`);
   const title = page.getByRole("dialog", { name: "Task" }).getByLabel("Title");
+  await expect(title).toBeEditable(); // the title stays read-only until the project role has loaded
   await title.click();
   await page.keyboard.press("End");
   await page.keyboard.type("?c");
@@ -91,7 +94,8 @@ test("AC3: no single-key shortcut fires while focus is in an input, textarea or 
   await expect(page.getByRole("dialog", { name: "New task" })).toBeVisible(); // still the same dialog, nothing replaced it
 });
 
-test("AC4: browser and screen-reader keys (anything with Ctrl, Alt or Meta) are not overridden", async ({ admin }) => {
+test("AC4: browser and screen-reader keys (anything with Ctrl, Alt or Meta) are not overridden", async ({ admin, later }) => {
+  await newProject(admin, later, { label: "14.6 modifiers" }); // "+ New task" only renders when there is a project this person can add to
   const page = admin.page;
   await page.goto("/");
   await expect(page.getByRole("button", { name: "+ New task" })).toBeVisible();

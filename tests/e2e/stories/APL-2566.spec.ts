@@ -1,5 +1,6 @@
 // SHO-US-14.7 Global search and command palette (Linear APL-2566).
 import { test, expect, zz, RUN } from "../support";
+import { newProject } from "../g2";
 
 type Who = { api: import("../support").Api; user: Record<string, any>; page: import("@playwright/test").Page };
 
@@ -17,7 +18,8 @@ async function projectWithTask(admin: Who, later: (f: () => Promise<unknown>) =>
 const ready = (page: import("@playwright/test").Page) => expect(page.getByRole("button", { name: "+ New task" })).toBeVisible(); // hydrated: key handlers are attached
 const palette = (page: import("@playwright/test").Page) => page.getByRole("dialog", { name: "Search and commands" });
 
-test("AC1: Ctrl+K opens the palette on any screen with focus in the field", async ({ admin }) => {
+test("AC1: Ctrl+K opens the palette on any screen with focus in the field", async ({ admin, later }) => {
+  await newProject(admin, later, { label: "14.7 palette" }); // "+ New task" only renders when there is a project this person can add to
   const page = admin.page;
   for (const path of ["/", "/projects", "/team", "/search", "/profile"]) {
     await page.goto(path);
@@ -88,7 +90,8 @@ test("AC4: typing 'new' lists New task and New project", async ({ admin, later }
   await expect(palette(page).getByRole("option", { name: /^New project/ })).toBeVisible();
 });
 
-test("AC5: Escape closes the palette and returns focus to where it was", async ({ admin }) => {
+test("AC5: Escape closes the palette and returns focus to where it was", async ({ admin, later }) => {
+  await newProject(admin, later, { label: "14.7 focus" }); // "+ New task" only renders when there is a project this person can add to
   const page = admin.page;
   await page.goto("/projects");
   await ready(page);

@@ -1,6 +1,7 @@
 // SHO-US-14.2 Honest loading, empty, error and offline states (Linear APL-2561).
 // Network failures and slow loads are simulated in the browser (route interception), so nothing on the server is touched.
 import { test, expect, zz } from "../support";
+import { newProject } from "../g2";
 
 async function project(admin: { api: import("../support").Api; user: Record<string, any> }, later: (f: () => Promise<unknown>) => void, label: string) {
   const r = await admin.api.post("/api/projects", { name: zz(label), leaderId: admin.user.id });
@@ -65,7 +66,8 @@ test("AC3 (server 403): the same message for a project the server refuses", asyn
   await expect(page.getByText("Could not reach the server.")).toHaveCount(0);
 });
 
-test("AC4: an empty My tasks says what the screen is for and offers the next step", async ({ admin }) => {
+test("AC4: an empty My tasks says what the screen is for and offers the next step", async ({ admin, later }) => {
+  await newProject(admin, later, { label: "14.2 plate" }); // "+ New task" only renders when there is a project this person can add to
   const page = admin.page;
   await page.route("**/api/my-tasks", (r) => r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ overdue: [], next7: [], later: [], waitingOnMe: [], waitingOnOthers: [] }) }));
   await page.goto("/");

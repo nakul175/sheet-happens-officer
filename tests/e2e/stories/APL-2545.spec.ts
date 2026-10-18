@@ -17,7 +17,8 @@ test("AC1: an Editor turns Idea on and the chip shows in the project list, the b
   test.setTimeout(180_000);
   const t = await ideaProject(admin, later, "idea chip");
   await admin.page.goto(`/projects/${t.projectId}?task=${t.id}`);
-  await admin.page.getByRole("checkbox", { name: "Idea" }).check();
+  // The row's "Select \"…idea…\"" checkbox also matches a loose "Idea" name. The flag lives on the task panel.
+  await admin.page.getByRole("dialog", { name: "Task" }).getByRole("checkbox", { name: "Idea", exact: true }).check();
   await expect.poll(async () => (await getTask(admin, t.id)).isIdea).toBe(true);
   await admin.page.keyboard.press("Escape");
   await expect(admin.page.locator(".item", { hasText: t.title }).locator(".chip", { hasText: "Idea" })).toBeVisible();

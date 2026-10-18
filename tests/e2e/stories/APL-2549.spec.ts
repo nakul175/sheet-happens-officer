@@ -26,11 +26,12 @@ test.beforeEach(async ({ admin, later }) => {
 });
 
 test("AC1: no sideways scroll at 320, 344, 360, 375, 390, 412, 440, 600 and 768 px", async ({ browser }) => {
+  test.setTimeout(180_000); // 9 widths × 6 screens. A page that never reaches load still fails; this only gives the loop room to finish.
   for (const w of WIDTHS) {
     const ctx = await phone(browser, w);
     const page = await ctx.newPage();
     for (const path of ["/", "/projects", `/projects/${projectId}`, "/team", "/search", "/profile"]) {
-      await page.goto(path, { waitUntil: "load" });
+      await page.goto(path, { waitUntil: "load", timeout: 30_000 });
       await page.waitForTimeout(300);
       const m = await page.evaluate(() => ({ sw: document.documentElement.scrollWidth, bw: document.body.scrollWidth, iw: window.innerWidth }));
       expect(Math.max(m.sw, m.bw), `${path} at ${w}px scrolls sideways`).toBeLessThanOrEqual(m.iw + 1);
