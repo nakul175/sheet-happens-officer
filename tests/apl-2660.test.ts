@@ -1,14 +1,73 @@
 // APL-2660: approver edge cases from APL-2522 that the first staging run did not cover.
 // One test per acceptance criterion. The scenario name is the test title.
-import { describe, expect, it } from "vitest";
+// Thrown-away people and projects use ZZ-TEST names and nakul17+ aliases, then afterAll archives
+// the projects and deactivates the people. Self-signup only accepts @aplyd.com, so the alias is
+// nakul17+…@aplyd.com.
+import { afterAll, describe, expect, it } from "vitest";
 import { canDropOnSection, closeControlOffered, completeTickAllowed, moveMenuSections } from "@/lib/approver-ui";
-import { account, admin, project, superAdmin, task, type Account } from "./helpers";
+import { account, superAdmin, task, type Account } from "./helpers";
 
-type Note = { id: string; text: string; href: string };
+type Note = { id: string; text: string; href: string; createdAt: string };
 type BoardTask = { id: string; canClose: boolean; sectionId: string; completedAt: string | null };
 type BoardSection = { id: string; name: string; isDone: boolean; tasks: BoardTask[] };
+type Proj = { id: string; name: string; todo: string; doing: string; done: string };
 
-const notes = async (who: Account) => (await who.c.get("/api/notifications")).json.items as Note[];
+const RUN = `${Date.now().toString(36)}${process.pid.toString(36)}`;
+let seq = 0;
+const people: Account[] = [];
+const projectIds: string[] = [];
+
+/** A throwaway person. The display name starts with ZZ-TEST; the address is a run-unique nakul17+ alias. */
+async function zzAccount(role: string) {
+  const n = seq++;
+  const slug = role.toLowerCase().replace(/[^a-z0-9]+/g, "") || "user";
+  const email = `nakul17+zz-2660-${RUN}-${slug}-${n}@aplyd.com`;
+  const who = await account(`ZZ-TEST ${role} ${RUN}-${n}`, email);
+  people.push(who);
+  return who;
+}
+
+async function zzProject(creator: Account, leader: Account, members: { who: Account; role?: "EDITOR" | "VIEWER" }[] = []): Promise<Proj> {
+  const name = `ZZ-TEST ${RUN}-${seq++}`;
+  const r = await creator.c.post("/api/projects", { name, leaderId: leader.id });
+  expect(r.status, JSON.stringify(r.json)).toBe(201);
+  const id = r.json.project.id as string;
+  projectIds.push(id);
+  for (const m of members) {
+    expect((await leader.c.post(`/api/projects/${id}/members`, { userId: m.who.id, role: m.role ?? "EDITOR" })).status).toBe(201);
+  }
+  const p = await leader.c.get(`/api/projects/${id}`);
+  const sections = p.json.project.sections as { id: string; name: string; isDone: boolean }[];
+  return { id, name, todo: sections[0].id, doing: sections[1].id, done: sections.find((s) => s.isDone)!.id };
+}
+
+const zzTitle = (label: string) => `ZZ-TEST ${label} ${RUN}-${seq++}`;
+
+async function zzTask(who: Account, projectId: string, body: Record<string, unknown> = {}) {
+  const given = typeof body.title === "string" ? body.title : "task";
+  const title = given.startsWith("ZZ-TEST") ? given : zzTitle(given);
+  return task(who, projectId, { ...body, title });
+}
+
+/**
+ * Every page, not the default first 50. `limit` is capped at 200 by the API, so follow `next`
+ * (`before`) until the inbox is exhausted. A new notice cannot sit on a later page unseen.
+ */
+const notes = async (who: Account) => {
+  const items: Note[] = [];
+  let cursor: string | null = null;
+  for (let page = 0; page < 25; page++) {
+    const q = new URLSearchParams({ limit: "200" });
+    if (cursor) q.set("before", cursor);
+    const r = await who.c.get(`/api/notifications?${q.toString()}`);
+    expect(r.status, JSON.stringify(r.json)).toBe(200);
+    items.push(...(r.json.items as Note[]));
+    cursor = (r.json.next as string | null) ?? null;
+    if (!cursor) return items;
+  }
+  throw new Error("notifications still paging after 25 pages of 200");
+};
+
 const taskOf = async (who: Account, id: string) => (await who.c.get(`/api/tasks/${id}`)).json.task as {
   assignee: { id: string }; approver: { id: string } | null; awaitingApproval: boolean; completedAt: string | null;
   canClose: boolean; sectionId: string; section: { id: string; isDone: boolean };
@@ -27,19 +86,44 @@ const card = (sections: BoardSection[], id: string) => {
 };
 
 describe("APL-2660 approver edge cases", () => {
+  afterAll(async () => {
+    const sa = await superAdmin();
+    const problems: string[] = [];
+    for (const id of projectIds) {
+      const added = await sa.c.post(`/api/projects/${id}/members`, { userId: sa.id, role: "EDITOR" });
+      if (added.status !== 201 && !(added.status === 409 && /already a member/.test(added.json?.error ?? ""))) {
+        problems.push(`add member ${id}: ${added.status} ${JSON.stringify(added.json)}`);
+      }
+      const led = await sa.c.post(`/api/projects/${id}/leader`, { newLeaderId: sa.id, previousRole: "EDITOR" });
+      if (led.status !== 200 && !(led.status === 400 && /already the Leader/.test(led.json?.error ?? ""))) {
+        problems.push(`change leader ${id}: ${led.status} ${JSON.stringify(led.json)}`);
+      }
+      const archived = await sa.c.post(`/api/projects/${id}/archive`);
+      if (archived.status !== 200) problems.push(`archive ${id}: ${archived.status} ${JSON.stringify(archived.json)}`);
+    }
+    for (const who of people) {
+      if (who.id === sa.id) continue;
+      const off = await sa.c.post(`/api/team/${who.id}/deactivate`, { reassign: "leaders" });
+      if (off.status !== 200 && !(off.status === 409 && /already deactivated/.test(off.json?.error ?? ""))) {
+        problems.push(`deactivate ${who.email}: ${off.status} ${JSON.stringify(off.json)}`);
+      }
+    }
+    expect(problems, problems.join("\n")).toEqual([]);
+  });
+
   it("AC1 (set by a plain creator): an Editor who created a task and is not a Leader or Admin names a valid approver, and a Viewer, non-member, deactivated person or the current assignee is refused", async () => {
     const sa = await superAdmin();
-    const lead = await account("lead");
-    const creator = await account("creator");
-    const worker = await account("worker");
-    const editor = await account("editor");
-    const viewer = await account("viewer");
-    const outsider = await account("outsider");
-    const gone = await account("gone");
-    const p = await project(lead, lead, [
+    const lead = await zzAccount("lead");
+    const creator = await zzAccount("creator");
+    const worker = await zzAccount("worker");
+    const editor = await zzAccount("editor");
+    const viewer = await zzAccount("viewer");
+    const outsider = await zzAccount("outsider");
+    const gone = await zzAccount("gone");
+    const p = await zzProject(lead, lead, [
       { who: creator }, { who: worker }, { who: editor }, { who: gone }, { who: viewer, role: "VIEWER" },
     ]);
-    const t = await task(creator, p.id, { title: "Plain creator", assigneeId: worker.id });
+    const t = await zzTask(creator, p.id, { title: "Plain creator", assigneeId: worker.id });
     const put = (id: string) => creator.c.put(`/api/tasks/${t}/approver`, { approverId: id });
 
     expect((await put(editor.id)).status).toBe(200);
@@ -55,11 +139,11 @@ describe("APL-2660 approver edge cases", () => {
   });
 
   it("AC2 (close by the approver): the approver holds the task and selects Close, and the task completes", async () => {
-    const lead = await account("lead");
-    const worker = await account("worker");
-    const boss = await account("boss");
-    const p = await project(lead, lead, [{ who: worker }, { who: boss }]);
-    const t = await task(lead, p.id, { title: "Ready to close", assigneeId: worker.id, approverId: boss.id });
+    const lead = await zzAccount("lead");
+    const worker = await zzAccount("worker");
+    const boss = await zzAccount("boss");
+    const p = await zzProject(lead, lead, [{ who: worker }, { who: boss }]);
+    const t = await zzTask(lead, p.id, { title: "Ready to close", assigneeId: worker.id, approverId: boss.id });
     expect((await worker.c.post(`/api/tasks/${t}/send-for-approval`)).status).toBe(200);
     const held = await taskOf(boss, t);
     expect(held.assignee.id).toBe(boss.id);
@@ -73,12 +157,12 @@ describe("APL-2660 approver edge cases", () => {
   });
 
   it("AC3 (close by another Editor refused): an Editor who is neither the approver, the Leader nor an Admin is refused in the UI and on the server, and the task stays open", async () => {
-    const lead = await account("lead");
-    const worker = await account("worker");
-    const boss = await account("boss");
-    const bystander = await account("bystander");
-    const p = await project(lead, lead, [{ who: worker }, { who: boss }, { who: bystander }]);
-    const t = await task(lead, p.id, { title: "Not theirs to close", assigneeId: worker.id, approverId: boss.id });
+    const lead = await zzAccount("lead");
+    const worker = await zzAccount("worker");
+    const boss = await zzAccount("boss");
+    const bystander = await zzAccount("bystander");
+    const p = await zzProject(lead, lead, [{ who: worker }, { who: boss }, { who: bystander }]);
+    const t = await zzTask(lead, p.id, { title: "Not theirs to close", assigneeId: worker.id, approverId: boss.id });
 
     const detail = await taskOf(bystander, t);
     expect(detail.canClose).toBe(false);
@@ -96,16 +180,17 @@ describe("APL-2660 approver edge cases", () => {
 
   it("AC4 (board drag to Done): a person who may not close it is refused, the task stays open, and Move to omits Done; the approver, the Leader or an Admin dragging it to Done completes it", async () => {
     const sa = await superAdmin();
-    const lead = await account("lead");
-    const worker = await account("worker");
-    const boss = await account("boss");
-    const bystander = await account("bystander");
-    const orgAdmin = await admin(sa, "orgadmin");
-    const p = await project(lead, lead, [{ who: worker }, { who: boss }, { who: bystander }]);
-    const blocked = await task(lead, p.id, { title: "No drop", assigneeId: worker.id, approverId: boss.id });
-    const forBoss = await task(lead, p.id, { title: "Boss drops", assigneeId: worker.id, approverId: boss.id });
-    const forLead = await task(lead, p.id, { title: "Leader drops", assigneeId: worker.id, approverId: boss.id });
-    const forAdmin = await task(lead, p.id, { title: "Admin drops", assigneeId: worker.id, approverId: boss.id });
+    const lead = await zzAccount("lead");
+    const worker = await zzAccount("worker");
+    const boss = await zzAccount("boss");
+    const bystander = await zzAccount("bystander");
+    const orgAdmin = await zzAccount("orgadmin");
+    expect((await sa.c.patch(`/api/team/${orgAdmin.id}`, { orgRole: "ADMIN" })).status).toBe(200);
+    const p = await zzProject(lead, lead, [{ who: worker }, { who: boss }, { who: bystander }]);
+    const blocked = await zzTask(lead, p.id, { title: "No drop", assigneeId: worker.id, approverId: boss.id });
+    const forBoss = await zzTask(lead, p.id, { title: "Boss drops", assigneeId: worker.id, approverId: boss.id });
+    const forLead = await zzTask(lead, p.id, { title: "Leader drops", assigneeId: worker.id, approverId: boss.id });
+    const forAdmin = await zzTask(lead, p.id, { title: "Admin drops", assigneeId: worker.id, approverId: boss.id });
 
     const mine = card(await board(bystander, p.id), blocked);
     expect(canDropOnSection(mine, true)).toBe(false);
@@ -124,14 +209,14 @@ describe("APL-2660 approver edge cases", () => {
   });
 
   it("AC5 (send back: who is notified): the previous assignee receives the notice, nobody else is notified, and the task stays open with them as assignee", async () => {
-    const lead = await account("lead");
-    const worker = await account("worker");
-    const boss = await account("boss");
-    const collab = await account("collab");
-    const bystander = await account("bystander");
-    const p = await project(lead, lead, [{ who: worker }, { who: boss }, { who: collab }, { who: bystander }]);
-    const title = "Notice only the sender";
-    const t = await task(lead, p.id, { title, assigneeId: worker.id, approverId: boss.id, collaboratorIds: [collab.id] });
+    const lead = await zzAccount("lead");
+    const worker = await zzAccount("worker");
+    const boss = await zzAccount("boss");
+    const collab = await zzAccount("collab");
+    const bystander = await zzAccount("bystander");
+    const p = await zzProject(lead, lead, [{ who: worker }, { who: boss }, { who: collab }, { who: bystander }]);
+    const title = zzTitle("notice only the sender");
+    const t = await zzTask(lead, p.id, { title, assigneeId: worker.id, approverId: boss.id, collaboratorIds: [collab.id] });
     expect((await worker.c.post(`/api/tasks/${t}/send-for-approval`)).status).toBe(200);
     const before = new Map<string, Set<string>>();
     for (const who of [worker, boss, lead, collab, bystander]) before.set(who.id, new Set((await notes(who)).map((n) => n.id)));
@@ -139,7 +224,7 @@ describe("APL-2660 approver edge cases", () => {
     expect((await boss.c.post(`/api/tasks/${t}/send-back`)).status).toBe(200);
     const fresh = async (who: Account) => (await notes(who)).filter((n) => !before.get(who.id)!.has(n.id));
     const toWorker = await fresh(worker);
-    expect(toWorker.map((n) => n.text)).toEqual([`Boss sent "${title}" back to you.`]);
+    expect(toWorker.map((n) => n.text)).toEqual([`${boss.name} sent "${title}" back to you.`]);
     for (const who of [boss, lead, collab, bystander]) {
       expect((await fresh(who)).filter((n) => n.text.includes(title))).toEqual([]);
     }
@@ -152,11 +237,11 @@ describe("APL-2660 approver edge cases", () => {
   it("AC6 (send back with the Leader as approver): the previous assignee has left, been deactivated or made a Viewer, and Send back leaves the task not awaiting approval and reassignable", async () => {
     const sa = await superAdmin();
     for (const kind of ["left", "deactivated", "viewer"] as const) {
-      const lead = await account("lead");
-      const worker = await account("worker");
-      const spare = await account("spare");
-      const p = await project(lead, lead, [{ who: worker }, { who: spare }]);
-      const t = await task(lead, p.id, { title: kind, assigneeId: worker.id, approverId: lead.id });
+      const lead = await zzAccount("lead");
+      const worker = await zzAccount("worker");
+      const spare = await zzAccount("spare");
+      const p = await zzProject(lead, lead, [{ who: worker }, { who: spare }]);
+      const t = await zzTask(lead, p.id, { title: kind, assigneeId: worker.id, approverId: lead.id });
       expect((await worker.c.post(`/api/tasks/${t}/send-for-approval`)).status).toBe(200);
       if (kind === "left") expect((await lead.c.del(`/api/projects/${p.id}/members/${worker.id}`)).status).toBe(204);
       else if (kind === "deactivated") expect((await sa.c.post(`/api/team/${worker.id}/deactivate`, { reassign: "leaders" })).status).toBe(200);
@@ -175,14 +260,14 @@ describe("APL-2660 approver edge cases", () => {
 
   it("AC7 (approver deactivated): the Leader becomes the approver and the holder of tasks awaiting approval, and gets one notice per project with the count", async () => {
     const sa = await superAdmin();
-    const lead = await account("lead");
-    const worker = await account("worker");
-    const boss = await account("boss");
-    const p1 = await project(lead, lead, [{ who: worker }, { who: boss }]);
-    const p2 = await project(lead, lead, [{ who: worker }, { who: boss }]);
-    const waiting = await task(lead, p1.id, { title: "Awaiting", assigneeId: worker.id, approverId: boss.id });
-    const quiet = await task(lead, p1.id, { title: "Open", assigneeId: worker.id, approverId: boss.id });
-    const elsewhere = await task(lead, p2.id, { title: "Other project", assigneeId: worker.id, approverId: boss.id });
+    const lead = await zzAccount("lead");
+    const worker = await zzAccount("worker");
+    const boss = await zzAccount("boss");
+    const p1 = await zzProject(lead, lead, [{ who: worker }, { who: boss }]);
+    const p2 = await zzProject(lead, lead, [{ who: worker }, { who: boss }]);
+    const waiting = await zzTask(lead, p1.id, { title: "Awaiting", assigneeId: worker.id, approverId: boss.id });
+    const quiet = await zzTask(lead, p1.id, { title: "Open", assigneeId: worker.id, approverId: boss.id });
+    const elsewhere = await zzTask(lead, p2.id, { title: "Other project", assigneeId: worker.id, approverId: boss.id });
     expect((await worker.c.post(`/api/tasks/${waiting}/send-for-approval`)).status).toBe(200);
     const before = new Set((await notes(lead)).map((n) => n.id));
 
@@ -209,10 +294,10 @@ describe("APL-2660 approver edge cases", () => {
   it("AC8 (Leader is the assignee): when the approver is deactivated or removed, the approver is cleared and the Leader gets the approver cleared message", async () => {
     const sa = await superAdmin();
     for (const kind of ["deactivated", "removed"] as const) {
-      const lead = await account("lead");
-      const ed = await account("ed");
-      const p = await project(lead, lead, [{ who: ed }]);
-      const t = await task(lead, p.id, { title: `Leader holds ${kind}`, assigneeId: lead.id, approverId: ed.id });
+      const lead = await zzAccount("lead");
+      const ed = await zzAccount("ed");
+      const p = await zzProject(lead, lead, [{ who: ed }]);
+      const t = await zzTask(lead, p.id, { title: `Leader holds ${kind}`, assigneeId: lead.id, approverId: ed.id });
       const before = new Set((await notes(lead)).map((n) => n.id));
       if (kind === "deactivated") expect((await sa.c.post(`/api/team/${ed.id}/deactivate`, { reassign: "leaders" })).status).toBe(200);
       else expect((await lead.c.del(`/api/projects/${p.id}/members/${ed.id}`)).status).toBe(204);
