@@ -43,7 +43,9 @@ test("APL-2536 > AC1: the organisation page shows open deals, contacts, notes, t
   await expect(admin.page.getByText(noteText).first()).toBeVisible();
   await expect(admin.page.getByRole("link", { name: taskTitle })).toBeVisible();
   await expect(admin.page.locator("[aria-current=page]").filter({ hasText: leaf.name })).toBeVisible();
-  await expect(admin.page.getByRole("link", { name: parent.name })).toBeVisible();
+  // The parent is also the breadcrumb. The tree card is the one that highlights this organisation.
+  const tree = admin.page.locator(".card", { has: admin.page.locator("b[aria-current=page]", { hasText: leaf.name }) });
+  await expect(tree.getByRole("link", { name: parent.name })).toBeVisible();
   await expect(admin.page.getByText("Organisation tree")).toBeVisible();
 });
 
@@ -127,14 +129,15 @@ test("APL-2536 > AC4: Accounts is searchable by name, filterable by kind, and co
   expect((await admin.api.post(`/api/projects/${closed.id}/stage`, { stageId: won.id })).status).toBe(200);
   expect((await admin.api.post(`/api/projects/${lead.id}/parties`, { organisationId: funder.id, role: "FUNDER" })).status).toBe(201);
 
-  const count = async (id: string) => {
-    const rows = (await admin.api.get(`/api/orgs?q=${encodeURIComponent(zz("open"))}`)).json.organisations as { id: string; openDeals: number }[];
-    return rows.find((row) => row.id === id)?.openDeals;
+  // zz("open") is "<prefix> open <RUN>", which never contains-matches "<prefix> open active <RUN>". Ask for each organisation by its own name.
+  const count = async (org: { id: string; name: string }) => {
+    const rows = (await admin.api.get(`/api/orgs?q=${encodeURIComponent(org.name)}`)).json.organisations as { id: string; openDeals: number }[];
+    return rows.find((row) => row.id === org.id)?.openDeals;
   };
-  expect(await count(active.id), "a Lead deal counts").toBe(1);
-  expect(await count(pausedOrg.id), "On hold still counts as open").toBe(1);
-  expect(await count(wonOrg.id), "Won is not an open deal").toBe(0);
-  expect(await count(funder.id), "a Funder role counts").toBe(1);
+  expect(await count(active), "a Lead deal counts").toBe(1);
+  expect(await count(pausedOrg), "On hold still counts as open").toBe(1);
+  expect(await count(wonOrg), "Won is not an open deal").toBe(0);
+  expect(await count(funder), "a Funder role counts").toBe(1);
 
   const found = (await admin.api.get(`/api/orgs?q=${encodeURIComponent(active.name)}`)).json.organisations as { id: string }[];
   expect(found.map((row) => row.id)).toContain(active.id);
