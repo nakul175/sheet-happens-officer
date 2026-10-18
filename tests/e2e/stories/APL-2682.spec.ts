@@ -25,7 +25,9 @@ function schemaDatabaseUrl(base: string, name: string) {
 }
 
 function env(over: Record<string, string | undefined> = {}): NodeJS.ProcessEnv {
-  return {
+  const hasNodeEnv = Object.prototype.hasOwnProperty.call(over, "NODE_ENV");
+  const { NODE_ENV: nodeEnv, ...rest } = over;
+  const result: Record<string, string | undefined> = {
     DATABASE_URL: databaseUrl,
     DIRECT_DATABASE_URL: process.env.DIRECT_DATABASE_URL ?? databaseUrl,
     APP_URL: "http://localhost:3100",
@@ -34,9 +36,10 @@ function env(over: Record<string, string | undefined> = {}): NodeJS.ProcessEnv {
     STAGING_EDITOR_PASSWORD: PASSWORD,
     PROD_DB_HOST: "",
     PROD_DB_NAME: "",
-    ...over,
-    NODE_ENV: "test",
+    ...rest,
   };
+  if (!(hasNodeEnv && nodeEnv === undefined)) result.NODE_ENV = hasNodeEnv ? nodeEnv : "test";
+  return result as NodeJS.ProcessEnv;
 }
 
 async function capture(run: () => Promise<number>) {
@@ -59,7 +62,7 @@ async function capture(run: () => Promise<number>) {
 
 describe("APL-2682 staging editor", () => {
   it("refuses a non-local host, an uppercase name, a query-host bypass, and a DigitalOcean host", async () => {
-    const cases: { name: string; url: string; message: string }[] = [
+    const cases: { name: string; url: string; message: string; nodeEnv?: string; unsetNodeEnv?: boolean; prodName?: string }[] = [
       {
         name: "wrong database name",
         url: "postgresql://example:example@db.example.com:5432/sho_prod",
@@ -101,6 +104,37 @@ describe("APL-2682 staging editor", () => {
         message: "exactly sho_staging",
       },
       {
+        name: "localhost sho_test without NODE_ENV",
+        url: "postgresql://example:example@localhost:5432/sho_test",
+        message: "exactly sho_staging",
+        unsetNodeEnv: true,
+      },
+      {
+        name: "localhost sho_test in production",
+        url: "postgresql://example:example@localhost:5432/sho_test",
+        message: "exactly sho_staging",
+        nodeEnv: "production",
+      },
+      {
+        name: "remote sho_test in test",
+        url: "postgresql://example:example@db.example.com:5432/sho_test",
+        message: "exactly sho_staging",
+        nodeEnv: "test",
+      },
+      {
+        name: "digitalocean sho_test in test",
+        url: "postgresql://example:example@private-db-postgresql-nyc1-12345.db.ondigitalocean.com:25060/sho_test",
+        message: "exactly sho_staging",
+        nodeEnv: "test",
+      },
+      {
+        name: "PROD_DB_NAME sho_test",
+        url: "postgresql://example:example@localhost:5432/sho_test",
+        message: "database name is production",
+        nodeEnv: "test",
+        prodName: "sho_test",
+      },
+      {
         name: "digitalocean host",
         url: "postgresql://example:example@private-db-postgresql-nyc1-12345.db.ondigitalocean.com:25060/defaultdb",
         message: "exactly sho_staging",
@@ -112,7 +146,10 @@ describe("APL-2682 staging editor", () => {
         connected = true;
         throw new Error("connected");
       };
-      const over: Record<string, string> = { DATABASE_URL: item.url, DIRECT_DATABASE_URL: item.url };
+      const over: Record<string, string | undefined> = { DATABASE_URL: item.url, DIRECT_DATABASE_URL: item.url };
+      if (item.unsetNodeEnv) over.NODE_ENV = undefined;
+      else if (item.nodeEnv) over.NODE_ENV = item.nodeEnv;
+      if (item.prodName) over.PROD_DB_NAME = item.prodName;
       const { code, text } = await capture(() => runStagingEditor(env(over), ["--confirm-staging"], connect));
       expect(code, item.name).toBe(1);
       expect(connected, item.name).toBe(false);

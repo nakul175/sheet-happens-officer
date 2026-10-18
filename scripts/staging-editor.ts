@@ -18,10 +18,11 @@
 // is always refused. A URL that sets host or dbname in the query is refused, so those
 // parameters cannot replace the host or database in the authority.
 //
-// Vitest is the one extra name: when NODE_ENV is test and the database name is exactly
-// sho_test, that name is allowed on any host. The exception is the name, not the host.
-// It does not allow any other name, and it does not skip the production host, PROD_DB_NAME,
-// query-parameter, or confirmation checks.
+// Vitest may use the database name sho_test only when NODE_ENV is test and the host is
+// loopback: localhost, ::1, or an address in 127.0.0.0/8. CI reaches Postgres at localhost
+// (the workflow service is published on localhost, not under a service hostname), so no
+// other host is listed. A remote host whose database is sho_test is refused. The exception
+// does not skip the production host, PROD_DB_NAME, query-parameter, or confirmation checks.
 // Requires an explicit staging confirmation: --confirm-staging or SHO_STAGING_CONFIRM=1.
 // STAGING_WORKSPACE_ID is required. An unset id refuses before connecting; there is no
 // fallback to the oldest workspace.
@@ -41,7 +42,7 @@ export const QA_PROJECT_NAME = "ZZ-TEST QA";
 const DEFAULT_SECTIONS = ["To do", "In progress", "Done"];
 const PROD_APP_HOST = "app.sheethappensofficer.com";
 const STAGING_DB_NAME = "sho_staging";
-// Exact name the vitest harness uses. Allowed only when NODE_ENV is test, on any host.
+// Exact name the vitest harness uses. Allowed only when NODE_ENV is test and the host is loopback.
 const TEST_DB_NAME = "sho_test";
 // libpq lets these query keys replace the host and database. Refuse them instead of applying them.
 const OVERRIDE_PARAMS = ["host", "hostaddr", "hostname", "dbname", "database"];
@@ -66,6 +67,13 @@ function isProdAppHost(host: string): boolean {
   return normalized === PROD_APP_HOST || normalized.endsWith(`.${PROD_APP_HOST}`);
 }
 
+function isLoopback(host: string): boolean {
+  if (host === "localhost" || host === "::1") return true;
+  const parts = host.split(".");
+  if (parts.length !== 4) return false;
+  return parts.every((part) => /^\d{1,3}$/.test(part) && Number(part) <= 255) && parts[0] === "127";
+}
+
 /** WHATWG URL parse. libpq host and dbname query keys are refused, not applied. */
 function parseDatabaseUrl(raw: string): DatabaseTarget | { refusal: string } {
   let url: URL;
@@ -88,7 +96,7 @@ function targetRefusal(target: DatabaseTarget, prodHost: string, prodName: strin
   if (isProdAppHost(target.host) || (prodHost && target.host === prodHost)) {
     return "Refusing to run: the database host is production.";
   }
-  const testDb = allowTestDb && target.name === TEST_DB_NAME;
+  const testDb = allowTestDb && target.name === TEST_DB_NAME && isLoopback(target.host);
   if (target.name !== STAGING_DB_NAME && !testDb) {
     return "Refusing to run: the database name must be exactly sho_staging.";
   }
