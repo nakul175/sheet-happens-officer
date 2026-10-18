@@ -146,7 +146,7 @@ function expectRegion(m: { innerWidth: number; boxes: Box[] }, label: string) {
 }
 
 describe("@APL-2692 accounts sideways scroll", () => {
-  it("@APL-2692 @AC1 @AC2 @TC1 /accounts?q= at 390x844 fits, and Tab then ArrowRight scrolls the Accounts region", async () => {
+  it("@APL-2692 @AC1 @AC2 @TC1 qa:TC-APL2692-e8a8f77d@v1 /accounts?q= at 390x844 fits, and Tab then ArrowRight scrolls the Accounts region", async () => {
     const page = await openAt(PHONE, `/accounts?q=${encodeURIComponent(orgName)}`, `a[href="/accounts/${orgId}"]`);
     try {
       expect(await page.locator('input[aria-label="Search organisations"]').inputValue()).toBe(orgName);
@@ -163,7 +163,7 @@ describe("@APL-2692 accounts sideways scroll", () => {
     } finally { await page.context().close(); }
   });
 
-  it("@APL-2692 @AC1 @AC2 @TC2 /accounts/{id} at 390x844 fits, and Tab then ArrowRight scrolls the Open deals region", async () => {
+  it("@APL-2692 @AC1 @AC2 @TC2 qa:TC-APL2692-ac9f3be3@v1 /accounts/{id} at 390x844 fits, and Tab then ArrowRight scrolls the Open deals region", async () => {
     const page = await openAt(PHONE, `/accounts/${orgId}`, `a[href="/projects/${dealId}"]`);
     try {
       const m = await page.evaluate(scrollers);
@@ -179,7 +179,29 @@ describe("@APL-2692 accounts sideways scroll", () => {
     } finally { await page.context().close(); }
   });
 
-  it("@APL-2692 @AC3 @TC3 at 1280x800 the columns sit where they did before this change", async () => {
+  it("@APL-2692 @AC2 qa:TC-APL2692-ba37a1a0@v1 the inner scroller stays inside the page and Tab then ArrowRight moves it", async () => {
+    const cases = [
+      { path: `/accounts?q=${encodeURIComponent(orgName)}`, ready: `a[href="/accounts/${orgId}"]`, label: "Accounts" },
+      { path: `/accounts/${orgId}`, ready: `a[href="/projects/${dealId}"]`, label: "Open deals" },
+    ];
+    for (const c of cases) {
+      const page = await openAt(PHONE, c.path, c.ready);
+      try {
+        const m = await page.evaluate(scrollers);
+        pageFits(m);
+        expectRegion(m, c.label);
+        await tabToRegion(page, c.label);
+        const outline = await focusOutline(page);
+        expect(outline?.style, c.label).toBe("solid");
+        expect(outline?.width, c.label).toBe("2px");
+        expect(outline?.offset, c.label).toBe("2px");
+        expect(outline?.color, c.label).toBe(outline?.gold);
+        await arrowScrolls(page);
+      } finally { await page.context().close(); }
+    }
+  });
+
+  it("@APL-2692 @AC3 @TC3 qa:TC-APL2692-07e24120@v1 at 1280x800 the columns sit where they did before this change", async () => {
     const cases = [
       { path: `/accounts?q=${encodeURIComponent(orgName)}`, ready: `a[href="/accounts/${orgId}"]`, headers: ["Name", "Kind", "Country", "Under", "Open deals"] },
       { path: `/accounts/${orgId}`, ready: `a[href="/projects/${dealId}"]`, headers: ["Deal", "Role", "Stage", "Leader"] },

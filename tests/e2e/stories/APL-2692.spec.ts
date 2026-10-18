@@ -2,7 +2,9 @@
 // do not scroll the document sideways. AC v1.1 allows the table to scroll inside
 // its own region when that region stays in the page and Tab can reach it.
 // At 1280 the columns sit where they did before the wrapper change.
-// Pam qa:TC: none on the issue. Names use ZZ-TEST and are archived afterwards.
+// Pam qa:TC: e8a8f77d (TC1, accounts list), ac9f3be3 (TC2, organisation page),
+// 07e24120 (TC3, desktop columns), ba37a1a0 (AC2 inner scroller).
+// Names use ZZ-TEST and are archived afterwards.
 import type { Page } from "@playwright/test";
 import { test, expect, zz } from "../support";
 import type { Who } from "../g2";
@@ -128,7 +130,7 @@ function expectRegion(m: Measure, label: string) {
 test.describe("APL-2692", { tag: "@APL-2692" }, () => {
   test.describe.configure({ timeout: 120_000 });
 
-  test("AC1: at 390x844 the document does not scroll sideways", { tag: ["@APL-2692", "@AC1"] }, async ({ admin, later }) => {
+  test("qa:TC-APL2692-e8a8f77d@v1 qa:TC-APL2692-ac9f3be3@v1 AC1: at 390x844 the document does not scroll sideways", { tag: ["@APL-2692", "@AC1"] }, async ({ admin, later }) => {
     const { org, deal } = await seed(admin, later, "ac1");
     await admin.page.setViewportSize(PHONE);
 
@@ -144,7 +146,7 @@ test.describe("APL-2692", { tag: "@APL-2692" }, () => {
     documentFits(await measure(admin.page), "/accounts/{id}");
   });
 
-  test("AC2: the table scroller stays inside the page and Tab then ArrowRight moves it", { tag: ["@APL-2692", "@AC2"] }, async ({ admin, later }) => {
+  test("qa:TC-APL2692-ba37a1a0@v1 AC2: the table scroller stays inside the page and Tab then ArrowRight moves it", { tag: ["@APL-2692", "@AC2"] }, async ({ admin, later }) => {
     const { org, deal } = await seed(admin, later, "ac2");
     await admin.page.setViewportSize(PHONE);
 
@@ -177,7 +179,7 @@ test.describe("APL-2692", { tag: "@APL-2692" }, () => {
     await arrowScrolls(admin.page);
   });
 
-  test("AC3: at 1280x800 the columns sit where they did before this change", { tag: ["@APL-2692", "@AC3"] }, async ({ admin, later }) => {
+  test("qa:TC-APL2692-07e24120@v1 AC3: at 1280x800 the columns sit where they did before this change", { tag: ["@APL-2692", "@AC3"] }, async ({ admin, later }) => {
     const { org, deal } = await seed(admin, later, "ac3");
     const cases = [
       {
