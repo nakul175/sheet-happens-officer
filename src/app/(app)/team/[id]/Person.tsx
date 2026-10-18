@@ -19,7 +19,9 @@ export default function PersonPage() {
   const me = useMe();
   const g = useGet<{ person: Person }>(`/api/team/${id}`);
   const [note, setNote] = useState<null | { ok: boolean; text: string }>(null);
-  const p = g.data?.person;
+  // APL-2664: 403 is "no access", never the load-failed / retry state, and never this person's details.
+  const denied = !g.loading && g.status === 403;
+  const p = denied ? undefined : g.data?.person;
   const admin = me.orgRole !== "MEMBER";
   const self = p?.id === me.id;
 
@@ -40,7 +42,8 @@ export default function PersonPage() {
       <p><Link href="/team">← Back to Team</Link></p>
       {g.loading && <Skeleton />}
       {g.error && g.status === 404 && <div className="err" role="alert">This person was not found.</div>}
-      {g.error && g.status !== 404 && <LoadFailed onRetry={g.reload} />}
+      {denied && <div className="card empty" role="alert">{"You don't have access to this person"}</div>}
+      {g.error && g.status !== 404 && g.status !== 403 && <LoadFailed onRetry={g.reload} />}
       {note && <div className={note.ok ? "ok" : "err"} role="status">{note.text}</div>}
       {p && (
         <>
