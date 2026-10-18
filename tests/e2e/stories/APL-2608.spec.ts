@@ -1,20 +1,20 @@
 // SHO-BUG-1 Job-failure notices stop after the first one per process (Linear APL-2608).
-// One test per acceptance criterion.
+// One test per acceptance criterion. Pam left no qa:TC id on the issue; each title says "qa:TC missing".
 // On a local test database the scenario runs in one process: two failing jobs, a missed run,
 // the 20-hour rule, and two Super Admins. Names are ZZ-TEST. Emails are nakul17+ aliases.
 // The rows that process creates are deleted before it exits. It refuses any database that is
 // not on localhost, so staging and production are never written.
-// Against a remote app the same tests do not call POST /api/jobs (that database is shared).
-// They sign in with SHO_QA_PASS and check the bell stores two different notices.
+// There is no sanctioned way to fail a job on staging (runLocalJob refuses a remote host;
+// APL-2637 is the manual retest). These tests are @manual. The staging workflow leaves @manual
+// out. On any other host the test is an expected failure. A stand-in notice is not a pass.
 // The only skip is a missing SHO_QA_PASS.
 import { execFile } from "node:child_process";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import net from "node:net";
-import { test, expect, zz } from "../support";
-import { newProject, newTask } from "../g2";
-import { QA_PASS, cast, noSecret } from "../helpers/qa-alias";
+import { test, expect } from "../support";
+import { QA_PASS } from "../helpers/qa-alias";
 
 type JobReport = {
   jobA: string;
@@ -43,95 +43,48 @@ test.beforeAll(async () => {
   report = await runScenario();
 });
 
-test("AC1: two different failing jobs each leave a JOB_FAILED notice for the Super Admin", async ({ browser, later }) => {
-  if (report) {
-    expect(report.admins).toBeGreaterThanOrEqual(2);
-    expect(report.failedA).toBe(report.admins);
-    expect(report.failedB).toBe(report.admins);
-    expect(report.created.every((u) => u.name.startsWith("ZZ-TEST") && u.email.startsWith("nakul17+"))).toBe(true);
-    return;
-  }
-  const notes = await twoNotices(browser, later, "ac1");
-  expect(notes).toHaveLength(2);
-});
+const MANUAL = "No sanctioned path forces a job failure on this host. runLocalJob refuses a remote host, and APL-2637 is still the manual staging retest. @manual: a stand-in notice is not a pass.";
 
-test("AC2: after a JOB_FAILED notice, a missed run still stores JOB_MISSED", async ({ browser, later }) => {
-  if (report) {
-    expect(report.failedA).toBeGreaterThan(0);
-    expect(report.missedM).toBe(report.admins);
-    return;
-  }
-  const notes = await twoNotices(browser, later, "ac2");
-  expect(new Set(notes).size).toBe(2);
-});
-
-test("AC3: the same job failing again within 20 hours adds no JOB_FAILED, and a JOB_MISSED for it is still stored", async ({ browser, later }) => {
-  if (report) {
-    expect(report.failedAAfterRepeat).toBe(report.admins);
-    expect(report.failedAAfterRepeat).toBe(report.failedA);
-    expect(report.missedA).toBe(report.admins);
-    expect(report.missedB).toBe(0);
-    return;
-  }
-  const notes = await twoNotices(browser, later, "ac3");
-  expect(notes).toHaveLength(2);
-});
-
-test("AC4: two active Super Admins each get one notice when a job fails", async ({ browser, later }) => {
-  if (report) {
-    expect(report.perAdminFailedA).toHaveLength(report.admins);
-    expect(report.perAdminFailedA.every((n) => n === 1)).toBe(true);
-    return;
-  }
-  const { admin, people: [member] } = await cast(browser, later, ["jobs-member"]);
-  const jobs = await admin.api.get("/api/jobs");
-  noSecret(JSON.stringify(jobs.json));
-  expect(jobs.status).toBe(200);
-  expect((jobs.json.jobs as { job: string }[]).map((j) => j.job)).toEqual(
-    expect.arrayContaining(["reminders", "stalled-deals", "check"]),
-  );
-  const hidden = await member.api.get("/api/jobs");
-  noSecret(JSON.stringify(hidden.json));
-  expect(hidden.status).toBe(404);
-  test.info().annotations.push({
-    type: "note",
-    description: "A second Super Admin is only created on a local test database. This host was not given one, and POST /api/jobs was not called.",
-  });
-});
-
-test("AC5: a second, different job notice in the same process is stored", async ({ browser, later }) => {
-  if (report) {
-    expect(report.failedA).toBe(report.admins);
-    expect(report.failedB).toBe(report.admins);
-    expect(report.jobA).not.toBe(report.jobB);
-    return;
-  }
-  const notes = await twoNotices(browser, later, "ac5");
-  expect(notes).toHaveLength(2);
-});
-
-/** Two different bell notices for one person, created through the app. Remote hosts only. */
-async function twoNotices(browser: Parameters<typeof cast>[0], later: (fn: () => Promise<unknown>) => void, tag: string) {
-  test.info().annotations.push({
-    type: "note",
-    description: "Scheduled jobs were not failed on this host (POST /api/jobs is not called against a remote database). Two different notices were stored instead.",
-  });
-  const { admin, people: [member] } = await cast(browser, later, [`jobs-${tag}`]);
-  const project = await newProject(admin, later, { label: `jobs ${tag}`, members: [{ who: member, role: "EDITOR" }] });
-  const first = zz(`notice ${tag} a`);
-  const second = zz(`notice ${tag} b`);
-  await newTask(admin, project.id, { title: first, assigneeId: member.user.id });
-  await newTask(admin, project.id, { title: second, assigneeId: member.user.id });
-  const inbox = await member.api.get("/api/notifications?limit=200");
-  noSecret(JSON.stringify(inbox.json));
-  expect(inbox.status).toBe(200);
-  const texts = ((inbox.json.items ?? []) as { text: string }[]).map((n) => n.text);
-  expect(texts.some((t) => t.includes(first))).toBe(true);
-  expect(texts.some((t) => t.includes(second))).toBe(true);
-  await member.page.goto("/");
-  await expect(member.page.getByRole("button", { name: /^Notifications/ })).toBeVisible();
-  return [first, second];
+function jobReport(): JobReport {
+  if (report) return report;
+  test.fail(true, MANUAL);
+  throw new Error(MANUAL);
 }
+
+test("AC1: two different failing jobs each leave a JOB_FAILED notice for the Super Admin @manual qa:TC missing", () => {
+  const done = jobReport();
+  expect(done.admins).toBeGreaterThanOrEqual(2);
+  expect(done.failedA).toBe(done.admins);
+  expect(done.failedB).toBe(done.admins);
+  expect(done.created.every((u) => u.name.startsWith("ZZ-TEST") && u.email.startsWith("nakul17+"))).toBe(true);
+});
+
+test("AC2: after a JOB_FAILED notice, a missed run still stores JOB_MISSED @manual qa:TC missing", () => {
+  const done = jobReport();
+  expect(done.failedA).toBeGreaterThan(0);
+  expect(done.missedM).toBe(done.admins);
+});
+
+test("AC3: the same job failing again within 20 hours adds no JOB_FAILED, and a JOB_MISSED for it is still stored @manual qa:TC missing", () => {
+  const done = jobReport();
+  expect(done.failedAAfterRepeat).toBe(done.admins);
+  expect(done.failedAAfterRepeat).toBe(done.failedA);
+  expect(done.missedA).toBe(done.admins);
+  expect(done.missedB).toBe(0);
+});
+
+test("AC4: two active Super Admins each get one notice when a job fails @manual qa:TC missing", () => {
+  const done = jobReport();
+  expect(done.perAdminFailedA).toHaveLength(done.admins);
+  expect(done.perAdminFailedA.every((n) => n === 1)).toBe(true);
+});
+
+test("AC5: a second, different job notice in the same process is stored @manual qa:TC missing", () => {
+  const done = jobReport();
+  expect(done.failedA).toBe(done.admins);
+  expect(done.failedB).toBe(done.admins);
+  expect(done.jobA).not.toBe(done.jobB);
+});
 
 function databaseUrl(): URL | null {
   const raw = process.env.DATABASE_URL ?? "";
