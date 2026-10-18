@@ -1,12 +1,17 @@
 import { connection } from "next/server";
 import { ZodError, type ZodType } from "zod";
 import { reqCtx, type ReqCtx } from "@/lib/reqctx";
+import {
+  INVALID_VERSION, INVALID_VERSION_MESSAGE, VERSION_REQUIRED, VERSION_REQUIRED_MESSAGE,
+  isVersionCode, versionErrorBody, versionProblem,
+} from "@/lib/version-error";
 
 export class ApiError extends Error {
   constructor(
     public status: number,
     message: string,
     public extra?: Record<string, unknown>,
+    public code?: string,
   ) {
     super(message);
   }
@@ -16,13 +21,51 @@ export const notFound = (what = "Resource") => new ApiError(404, `${what} not fo
 
 /** Parse a JSON body against a schema; throws ApiError(400) on failure. */
 export async function parseBody<T>(req: Request, schema: ZodType<T>): Promise<T> {
-  let raw: unknown;
+  return schema.parse(await readJson(req));
+}
+
+function versionApiError(code: typeof VERSION_REQUIRED | typeof INVALID_VERSION): ApiError {
+  if (code === INVALID_VERSION) return new ApiError(400, INVALID_VERSION_MESSAGE, undefined, code);
+  return new ApiError(400, VERSION_REQUIRED_MESSAGE, undefined, VERSION_REQUIRED);
+}
+
+/**
+ * APL-2670: task edits, assign, move, complete and setApprover.
+ * A missing or null version, and an empty-string version, are answered here — before the
+ * schema — so every route returns the same body instead of a Zod issues list or a plain string.
+ */
+export async function parseTaskBody<T>(req: Request, schema: ZodType<T>): Promise<T> {
+  const raw = await readJson(req);
+  const problem = versionProblem(raw);
+  if (problem) throw versionApiError(problem);
+  return schema.parse(raw);
+}
+
+async function readJson(req: Request): Promise<unknown> {
   try {
-    raw = await req.json();
+    return await req.json();
   } catch {
     throw new ApiError(400, "Body must be valid JSON");
   }
-  return schema.parse(raw);
+}
+
+/**
+ * Turn a version ApiError into the one body { error: { code, message } }.
+ * Other errors are rethrown so the shared handler keeps their existing shape.
+ * Only the task mutation routes use this: a concierge confirm that hits the same
+ * check still carries who changed the card.
+ */
+export function withVersionErrors<A extends unknown[]>(fn: (...args: A) => Promise<Response>) {
+  return async (...args: A): Promise<Response> => {
+    try {
+      return await fn(...args);
+    } catch (err) {
+      if (err instanceof ApiError && isVersionCode(err.code)) {
+        return Response.json(versionErrorBody(err.code, err.message), { status: err.status });
+      }
+      throw err;
+    }
+  };
 }
 
 export function parseQuery<T>(url: URL, schema: ZodType<T>): T {

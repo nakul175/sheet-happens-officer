@@ -3,6 +3,26 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 export type Res<T = Record<string, any>> = { ok: boolean; status: number; error?: string; data: T }; // eslint-disable-line @typescript-eslint/no-explicit-any
 
+/** A version error is `{ error: { code, message } }`. Older answers used a string. */
+function errorText(data: { issues?: { message?: string }[]; error?: unknown } | null | undefined): string | undefined {
+  const issue = data?.issues?.[0]?.message;
+  if (issue) return issue;
+  const error = data?.error;
+  if (typeof error === "string") return error;
+  if (error && typeof error === "object" && "message" in error && typeof (error as { message: unknown }).message === "string") {
+    return (error as { message: string }).message;
+  }
+  return undefined;
+}
+
+/** APL-2670: a stale edit is 409 version_conflict. Older answers set data.stale instead. */
+export function isVersionConflict(status: number, data: { stale?: unknown; error?: unknown } | null | undefined) {
+  if (status !== 409 || !data) return false;
+  if (data.stale === true) return true;
+  const error = data.error;
+  return !!error && typeof error === "object" && (error as { code?: unknown }).code === "version_conflict";
+}
+
 /** Call the JSON API. Never throws; network trouble comes back as status 0 with a message. */
 export async function api<T = Record<string, any>>(method: string, path: string, body?: unknown): Promise<Res<T>> { // eslint-disable-line @typescript-eslint/no-explicit-any
   try {
@@ -16,7 +36,7 @@ export async function api<T = Record<string, any>>(method: string, path: string,
       window.dispatchEvent(new CustomEvent("sho:undo", { detail: { id: undoId, label: res.headers.get("x-undo-label") ?? "Done", notified: res.headers.get("x-undo-notified") === "1" } }));
     }
     const data = (res.headers.get("content-type")?.includes("json") ? await res.json() : {}) as any; // eslint-disable-line @typescript-eslint/no-explicit-any
-    const error = res.ok ? undefined : data?.issues?.[0]?.message ?? data?.error ?? "Something went wrong. Try again.";
+    const error = res.ok ? undefined : errorText(data) ?? "Something went wrong. Try again.";
     if (res.status === 401 && typeof window !== "undefined") window.location.href = "/signin";
     return { ok: res.ok, status: res.status, error, data };
   } catch {

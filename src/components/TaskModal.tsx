@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { useState } from "react";
-import { PRIORITY, ROLE, api, dueLabel, useGet } from "@/components/api";
+import { PRIORITY, ROLE, api, dueLabel, isVersionConflict, useGet } from "@/components/api";
 import { fitBlockedReason } from "@/components/blocked-reason";
 import { Confirm, Modal, Skeleton } from "@/components/ui";
 import { ConvertDialog } from "@/components/ConvertDialog";
@@ -68,7 +68,7 @@ export function TaskModal({ id, me, onClose, onChanged, asPage }: { id: string; 
       setErr(null); setStale(null); setLost(null); after?.(); t.reload(); onChanged?.();
       return res;
     }
-    if (res.status === 409 && res.data.stale) {
+    if (isVersionConflict(res.status, res.data)) {
       setStale(`${res.data.changedBy ?? "Someone"} changed this task while you were editing. Your change was not saved; the fields now show the current values.`);
       t.reload();
     } else if (res.status === 409 && res.data.needsConfirm === "open_subtasks") {
@@ -78,7 +78,7 @@ export function TaskModal({ id, me, onClose, onChanged, asPage }: { id: string; 
   }
   const save = async (patch: Record<string, unknown>) => {
     const res = await run(api("PATCH", `/api/tasks/${id}`, { ...patch, expectedUpdatedAt: task.updatedAt }));
-    if (res && !res.ok && res.status === 409 && res.data.stale) setLost(patch);
+    if (res && !res.ok && isVersionConflict(res.status, res.data)) setLost(patch);
     return res;
   };
   const LABEL: Record<string, string> = { title: "Title", description: "Description", dueDate: "Due date", priority: "Priority", blocked: "Blocked", blockedReason: "Blocked reason" };

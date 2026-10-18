@@ -12,7 +12,8 @@ describe("inline editing (14.8)", () => {
     expect((await patchTask(lead, t, { priority: "HIGH" })).status).toBe(200); // someone else saves first
     const r = await lead.c.post(`/api/tasks/${t}/assign`, { assigneeId: meera.id, expectedUpdatedAt: seen });
     expect(r.status).toBe(409);
-    expect(r.json.stale).toBe(true);
+    // APL-2670: a stale version is version_conflict and nothing else.
+    expect(r.json).toEqual({ error: { code: "version_conflict", message: "This task changed while you were editing it." } });
     expect((await lead.c.get(`/api/tasks/${t}`)).json.task.assignee.id).toBe(lead.id);
     const fresh = (await lead.c.get(`/api/tasks/${t}`)).json.task.updatedAt as string;
     const ok = await lead.c.post(`/api/tasks/${t}/assign`, { assigneeId: meera.id, expectedUpdatedAt: fresh });

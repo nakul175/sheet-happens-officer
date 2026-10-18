@@ -1,11 +1,11 @@
 import { currentUser } from "@/lib/auth";
-import { handle, parseBody } from "@/lib/http";
+import { handle, parseTaskBody, withVersionErrors } from "@/lib/http";
 import { taskComplete } from "@/lib/schemas";
 import { completeTask } from "@/lib/tasks";
 
-export const POST = handle(async (req: Request, ctx: { params: Promise<{ id: string }> }) => {
+export const POST = handle(withVersionErrors(async (req: Request, ctx: { params: Promise<{ id: string }> }) => {
   const me = await currentUser();
-  const body = await parseBody(req, taskComplete);
+  const body = await parseTaskBody(req, taskComplete);
   await completeTask(me, (await ctx.params).id, body.expectedUpdatedAt, body.completeAll);
   return Response.json({ status: "ok" });
-});
+}));

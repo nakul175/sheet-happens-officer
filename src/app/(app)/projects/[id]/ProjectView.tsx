@@ -4,7 +4,7 @@ import Link from "next/link";
 import { use, useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Suspense } from "react";
-import { PRIORITY, ROLE, api, dueLabel, dueState, rowKeys, initials, isOverdue, todayIST, useGet } from "@/components/api";
+import { PRIORITY, ROLE, api, dueLabel, dueState, rowKeys, initials, isOverdue, isVersionConflict, todayIST, useGet } from "@/components/api";
 import { TaskModal } from "@/components/TaskModal";
 import { AvatarGroup, Pri, Tick } from "@/components/TaskParts";
 import { Confirm, Field, LoadFailed, Menu, Modal, Skeleton } from "@/components/ui";
@@ -148,7 +148,7 @@ function Inner({ id }: { id: string }) {
   async function moveTo(taskId: string, sectionId: string, all = false) {
     const r = await api("POST", `/api/tasks/${taskId}/move`, { sectionId, completeAll: all, expectedUpdatedAt: versionOf(taskId) });
     if (r.ok) { setAsk(null); setErr(null); refresh(); }
-    else if (r.status === 409 && r.data.stale) { setAsk(null); setErr(r.error ?? "This task changed while you were editing it."); refresh(); }
+    else if (isVersionConflict(r.status, r.data)) { setAsk(null); setErr(r.error ?? "This task changed while you were editing it."); refresh(); }
     else if (r.status === 409 && r.data.needsConfirm === "open_subtasks") setAsk({ taskId, sectionId, n: r.data.openSubtasks });
     else setErr(r.error ?? "Could not move the task.");
   }

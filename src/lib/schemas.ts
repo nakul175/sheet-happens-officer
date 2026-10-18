@@ -92,6 +92,8 @@ export const taskCreate = z.object({
 });
 // The updatedAt the person saw when they opened the task; a different value means someone else saved first.
 // Required (SHO-BUG-13, APL-2668): without it a change could silently overwrite someone else's edit.
+// APL-2670: absent and null are refused in parseTaskBody as version_required, and "" as invalid_version,
+// before this schema runs, so those answers do not depend on Zod's issues list.
 const taskVersion = z.string({ error: "expectedUpdatedAt is required" }).min(1, "expectedUpdatedAt is required");
 export const taskUpdate = z.object({
   title: title.optional(),

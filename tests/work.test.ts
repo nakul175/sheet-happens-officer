@@ -361,7 +361,7 @@ describe("tasks (4.x, 5.x)", () => {
     expect((await lead.c.post(`/api/projects/${p.id}/tasks`, { title: "v", assigneeId: viewer.id })).status).toBe(400);
   });
 
-  it("refuses a stale save and names who changed the task", async () => {
+  it("refuses a stale save and keeps the other person's edit", async () => {
     const lead = await account("lead");
     const ed = await account("editor");
     const p = await project(lead, lead, [{ who: ed }]);
@@ -370,9 +370,9 @@ describe("tasks (4.x, 5.x)", () => {
     expect((await patchTask(lead, t, { dueDate: istDate(3) })).status).toBe(200);
     const r = await ed.c.patch(`/api/tasks/${t}`, { title: "mine", expectedUpdatedAt: seen });
     expect(r.status).toBe(409);
-    expect(r.json.stale).toBe(true);
-    expect(r.json.changedBy).toBe("Lead");
-    expect(r.json.current.dueDate).toBe(istDate(3));
+    // APL-2670: the conflict body is exactly { error: { code, message } }.
+    expect(r.json).toEqual({ error: { code: "version_conflict", message: "This task changed while you were editing it." } });
+    expect((await ed.c.get(`/api/tasks/${t}`)).json.task.dueDate).toBe(istDate(3));
     const fresh = (await ed.c.get(`/api/tasks/${t}`)).json.task.updatedAt;
     expect((await ed.c.patch(`/api/tasks/${t}`, { title: "mine", expectedUpdatedAt: fresh })).status).toBe(200);
   });
@@ -392,7 +392,7 @@ describe("tasks (4.x, 5.x)", () => {
     expect(await db.actionLog.count({ where: { targetType: "task", targetId: t, action: "task.updated" } })).toBe(0);
   });
 
-  it("refuses a stale version with 409 and the current values", async () => {
+  it("refuses a stale version with 409 version_conflict and leaves the task as it is", async () => {
     const lead = await account("lead");
     const ed = await account("editor");
     const p = await project(lead, lead, [{ who: ed }]);
@@ -401,9 +401,7 @@ describe("tasks (4.x, 5.x)", () => {
     expect((await patchTask(lead, t, { title: "Theirs" })).status).toBe(200);
     const r = await ed.c.patch(`/api/tasks/${t}`, { title: "Mine", expectedUpdatedAt: seen });
     expect(r.status).toBe(409);
-    expect(r.json.error).toBe("This task changed while you were editing it.");
-    expect(r.json.changedBy).toBe("Lead");
-    expect(r.json.current.title).toBe("Theirs");
+    expect(r.json).toEqual({ error: { code: "version_conflict", message: "This task changed while you were editing it." } });
     expect((await ed.c.get(`/api/tasks/${t}`)).json.task.title).toBe("Theirs");
   });
 
@@ -503,17 +501,14 @@ describe("a version on assign, move, complete and approver (APL-2668)", () => {
       expect(await logs(s.t)).toBe(rows);
     });
 
-    it(`${name}: refuses a stale version with 409, who changed it and the current values`, async () => {
+    it(`${name}: refuses a stale version with 409 version_conflict and leaves the task as it is`, async () => {
       const s = await setup();
       const seen = (await shown(s)).updatedAt;
       expect((await patchTask(s.other, s.t, { title: "Theirs" })).status).toBe(200);
       const r = await m.send(s, { ...m.body(s), expectedUpdatedAt: seen });
       expect(r.status).toBe(409);
-      expect(r.json.error).toBe("This task changed while you were editing it.");
-      expect(r.json.stale).toBe(true);
-      expect(r.json.changedBy).toBe("Other");
-      expect(r.json.current.id).toBe(s.t);
-      expect(r.json.current.title).toBe("Theirs");
+      expect(r.json).toEqual({ error: { code: "version_conflict", message: "This task changed while you were editing it." } });
+      expect((await shown(s)).title).toBe("Theirs");
       expect(m.applied(s, await shown(s))).toBe(false);
     });
 
@@ -525,7 +520,7 @@ describe("a version on assign, move, complete and approver (APL-2668)", () => {
     });
   }
 
-  it("the lib functions bulk and the concierge call refuse an empty version with 400 and change nothing", async () => {
+  it("the lib functions bulk and the concierge call refuse an empty version as invalid_version and change nothing", async () => {
     const s = await setup();
     const me = { id: s.lead.id, orgRole: "MEMBER" as const };
     const before = await shown(s);
@@ -535,7 +530,7 @@ describe("a version on assign, move, complete and approver (APL-2668)", () => {
       () => moveTask(me, s.t, s.p.doing, ""),
       () => completeTask(me, s.t, ""),
       () => setApprover(me, s.t, s.ed.id, ""),
-    ]) await expect(call()).rejects.toMatchObject({ status: 400, message: "expectedUpdatedAt is required" });
+    ]) await expect(call()).rejects.toMatchObject({ status: 400, code: "invalid_version", message: "expectedUpdatedAt is not a valid version" });
     expect((await shown(s)).updatedAt).toBe(before.updatedAt);
     expect(await logs(s.t)).toBe(rows);
   });

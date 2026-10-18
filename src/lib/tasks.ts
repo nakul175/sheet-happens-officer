@@ -4,6 +4,9 @@ import { linksOfTask } from "@/lib/records";
 import { db } from "@/lib/db";
 import { ApiError, notFound } from "@/lib/http";
 import {
+  INVALID_VERSION, INVALID_VERSION_MESSAGE, VERSION_CONFLICT, VERSION_CONFLICT_MESSAGE, VERSION_REQUIRED, VERSION_REQUIRED_MESSAGE,
+} from "@/lib/version-error";
+import {
   WORKERS, activeMember, canManage, leaderId, projectAccess, requireManage, requireWrite, type Actor, type Role, type Tx,
 } from "@/lib/access";
 import { addDays, formatDueDate, parseDueDate, startOfTodayIST } from "@/lib/dates";
@@ -198,16 +201,18 @@ export async function listTasks(
   return { sections: out };
 }
 
-/** SHO-BUG-13, APL-2668: every task change says which version it was made on; refused before any read or write without one. */
-function requireVersion(expected: string | undefined): asserts expected is string {
-  if (!expected) throw new ApiError(400, "expectedUpdatedAt is required");
+/** SHO-BUG-13, APL-2668, APL-2670: every task change says which version it was made on.
+ *  Absent or null is version_required. An empty string is invalid_version, not missing. */
+function requireVersion(expected: unknown): asserts expected is string {
+  if (expected === "") throw new ApiError(400, INVALID_VERSION_MESSAGE, undefined, INVALID_VERSION);
+  if (typeof expected !== "string") throw new ApiError(400, VERSION_REQUIRED_MESSAGE, undefined, VERSION_REQUIRED);
 }
 
 /** SHO-US-14.8 AC4: the same stale-edit answer for every inline edit. */
 async function staleCheck(user: Actor, id: string, t: TaskRow, role: Role, expected?: string) {
   if (expected && new Date(expected).getTime() !== t.updatedAt.getTime()) {
     const last = await db.actionLog.findFirst({ where: { targetType: "task", targetId: id }, orderBy: { createdAt: "desc" }, include: { actor: { select: { name: true } } } });
-    throw new ApiError(409, "This task changed while you were editing it.", { stale: true, changedBy: last?.actor.name ?? null, current: present(t, { id: user.id, role }) });
+    throw new ApiError(409, VERSION_CONFLICT_MESSAGE, { stale: true, changedBy: last?.actor.name ?? null, current: present(t, { id: user.id, role }) }, VERSION_CONFLICT);
   }
 }
 
@@ -221,7 +226,7 @@ export async function updateTask(
   },
 ) {
   // SHO-BUG-13: every edit says which version it was made on, so a concurrent save is never silently overwritten.
-  if (!input.expectedUpdatedAt) throw new ApiError(400, "expectedUpdatedAt is required");
+  requireVersion(input.expectedUpdatedAt);
   const { t, a } = await loadTask(user, id, { write: true });
   await staleCheck(user, id, t, a.role, input.expectedUpdatedAt);
   const data: Record<string, unknown> = {};

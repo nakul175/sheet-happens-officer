@@ -2,7 +2,7 @@
 // SHO-US-14.8: change the assignee, date or priority right in a list row. The server still decides who may edit;
 // the cells are only read-only here when the server would refuse anyway (see `inlineEditable`).
 import { useEffect, useRef, useState } from "react";
-import { PRIORITY, api, dueState, isOverdue, todayIST } from "@/components/api";
+import { PRIORITY, api, dueState, isOverdue, isVersionConflict, todayIST } from "@/components/api";
 import { Pri } from "@/components/TaskParts";
 import "./inline.css";
 
@@ -31,7 +31,7 @@ export function useInlineEdit(onChanged: () => void) {
       : await api("PATCH", `/api/tasks/${t.id}`, { ...change.patch, expectedUpdatedAt: t.updatedAt });
     setBusy(false);
     if (r.ok) { setErr(null); setStale(null); onChanged(); return; }
-    if (r.status === 409 && r.data.stale) {
+    if (isVersionConflict(r.status, r.data)) {
       setStale({ taskId: t.id, title: t.title, who: r.data.changedBy ?? "Someone", change, what });
       setErr(null);
       onChanged();
