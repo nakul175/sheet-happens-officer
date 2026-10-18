@@ -5,7 +5,7 @@
 import { test, login } from "../support";
 import {
   PASS, passwordOk, alias, zz, RUN, gate, signUp, signInAs, personByEmail, deactivate,
-  addPersonOnTeam, deactivateOnTeam, teamRow, makeProject, archiveProject, expect, type Api,
+  addPersonOnTeam, deactivateOnTeam, expectTeamColumns, teamRow, makeProject, archiveProject, expect, type Api,
 } from "./qa";
 
 type Who = { api: Api; user: { id?: string; name?: string; email?: string } };
@@ -223,11 +223,12 @@ test("AC6: the Team page shows people by role, and deactivated people are shown 
   await addPersonOnTeam(admin.page, adminFirst, adminLast, adminEmail, "ADMIN");
   await deactivateOnTeam(admin.page, memberName);
 
-  await expect(admin.page.locator("#main table").getByRole("columnheader", { name: "Role", exact: true })).toHaveCount(1);
   const memberRow = teamRow(admin.page, memberEmail);
   const adminRow = teamRow(admin.page, adminEmail);
   await expect(memberRow).toHaveCount(1);
   await expect(adminRow).toHaveCount(1);
+  await expectTeamColumns(admin.page, memberRow, ["Role"]);
+  await expectTeamColumns(admin.page, adminRow, ["Role"]);
   await expect(memberRow.locator(".chip", { hasText: "Member" })).toBeVisible();
   await expect(memberRow.locator(".chip.grey", { hasText: "Deactivated" })).toBeVisible();
   await expect(adminRow.locator(".chip", { hasText: "Admin" })).toBeVisible();
