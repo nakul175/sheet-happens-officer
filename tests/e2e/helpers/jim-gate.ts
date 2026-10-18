@@ -25,6 +25,8 @@ const HEADS: Record<number, string> = {
   21: "73f27cd720e6e3494eb011b3fb61115214bd10c0",
   23: "5d29c0f0e116d5ce0bc01dc098adbd52005a2be9",
   24: "72ee2713b4b52e8a636af5696006302b5548fcc8",
+  // PR #32 (APL-2659). A later push falls through to the probe, same as the others.
+  32: "947cbc9714b23915997ff34f409611206018c7f3",
 };
 
 let releaseOnce: Promise<string | null> | null = null;
@@ -200,6 +202,18 @@ const PROBES: Record<number, (admin: Who, member: Who | null, later: Later) => P
       const hit = blob.includes("ic-gap") && blob.includes("ic-hit");
       return { deployed: hit, how: `probe: served CSS/JS ${hit ? "includes" : "lacks"} ic-gap and ic-hit` };
     } finally { await page.close(); }
+  },
+  // PR #32 (APL-2659): a quick action scoped to an archived project the person belongs to is "Project not found"
+  // (myProjects leaves archived rows out) and the name is not in the answer. On main the membership lookup still
+  // finds it and the label names it. PR #10 hides deals the CRM hides; it does not hide archived projects.
+  // The chat is cleared afterwards when this probe was the one that filled it (cleanChat).
+  32: async (admin, _member, later) => {
+    await cleanChat(admin, later);
+    const p = await newProject(admin, later, { label: "gate pr32" });
+    expect((await admin.api.post(`/api/projects/${p.id}/archive`)).status, "probe archives the project").toBe(200);
+    const r = await quickAction(admin, "due-week", p.id);
+    const hid = r.status === 404 && r.json.error === "Project not found" && !r.body.includes(p.name);
+    return { deployed: hid, how: `probe: a quick action on an archived project answered ${r.status} ${hid ? "without" : "with"} its name` };
   },
 };
 
