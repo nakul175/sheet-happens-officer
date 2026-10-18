@@ -16,6 +16,12 @@ npx prisma migrate dev
 SUPER_ADMIN_EMAILS=you@aplyd.com npm run dev
 ```
 
+After any pull that changes the Prisma schema (`prisma/schema.prisma` or migrations), run:
+
+```bash
+npx prisma generate
+```
+
 Without `RESEND_API_KEY`, emails are written as JSON files to `.outbox/` (or
 `EMAIL_OUTBOX_DIR`), so verification and reset links can be opened from there.
 
