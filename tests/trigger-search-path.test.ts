@@ -196,7 +196,7 @@ describe("trigger search_path on a pooled preview slot (APL-2700)", () => {
     expect(session.rows[0]?.search_path).toBe('"$user", public');
   });
 
-  it("creates and updates a task in the slot while the pooled search_path stays public", async () => {
+  it("task create and update work on a pooled slot", async () => {
     const session = await pool.query<{ search_path: string }>("SHOW search_path");
     expect(session.rows[0]?.search_path).toBe('"$user", public');
     const unseen = await pool.query(`SELECT id FROM "Section" WHERE id = $1`, [secA1]);
@@ -274,7 +274,7 @@ describe("trigger search_path on a pooled preview slot (APL-2700)", () => {
     expect(n.rows[0]?.n).toBe(CONCURRENT_CREATES);
   });
 
-  it("keeps public-schema create, update, and both trigger rules when search_path is public", async () => {
+  it("prod public-schema behaviour is unchanged", async () => {
     const taskFn = await readDef(pool, "public", TASK_FN);
     const maxFn = await readDef(pool, "public", MAX_FN);
     expect(taskFn.proconfig).toEqual(["search_path=public"]);
