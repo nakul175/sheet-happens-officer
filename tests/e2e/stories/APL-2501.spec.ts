@@ -21,8 +21,8 @@ test("AC1: at 1280 px the shell shows the sidebar, the content and a 340 px conc
   const p = await proj(admin, "shell-wide", later);
   await admin.page.setViewportSize({ width: 1280, height: 800 });
   await admin.page.goto(`/projects/${p}`);
-  await expect(admin.page.locator("aside nav.nav, .shell nav.nav").first()).toBeVisible();
-  await expect(admin.page.locator("main.content, main#main").first()).toBeVisible();
+  await expect(admin.page.getByRole("complementary", { name: "Main" }).getByRole("navigation")).toBeVisible();
+  await expect(admin.page.getByRole("main")).toBeVisible();
   const dock = admin.page.locator('aside[aria-label="Concierge"]');
   await expect(dock).toBeVisible();
   const w = (await dock.boundingBox())!.width;
@@ -35,8 +35,8 @@ test("AC2: at 390 px the sidebar collapses and no page scrolls sideways", async 
   await admin.page.setViewportSize({ width: 390, height: 800 });
   for (const path of ["/", "/projects", `/projects/${p}`, "/team"]) {
     await admin.page.goto(path);
-    await expect(admin.page.locator("main").first()).toBeVisible();
-    await expect(admin.page.locator("aside.side, aside[aria-label='Main']").first()).toBeHidden();
+    await expect(admin.page.getByRole("main")).toBeVisible();
+    await expect(admin.page.getByRole("complementary", { name: "Main" })).toBeHidden();
     const fits = await admin.page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1);
     expect(fits, `${path} scrolls sideways at 390 px`).toBe(true);
   }
@@ -45,7 +45,7 @@ test("AC2: at 390 px the sidebar collapses and no page scrolls sideways", async 
 test("AC3: the icon-only mark shows at 24 px and the text uses Public Sans", async ({ admin }) => {
   await admin.page.setViewportSize({ width: 1280, height: 800 });
   await admin.page.goto("/");
-  const img = admin.page.locator(".brand img").first();
+  const img = admin.page.getByRole("link", { name: "Sheet Happens Officer", exact: true }).locator("img");
   await expect(img).toHaveAttribute("src", "/logo-icon.svg");
   const box = (await img.boundingBox())!;
   expect(Math.round(box.width)).toBeGreaterThanOrEqual(24);
@@ -76,7 +76,7 @@ test("AC4: Usage and Audit log are for the Super Admin only; a Member who types 
   await expect(memberNav.getByRole("link", { name: "Audit log" })).toHaveCount(0);
   for (const path of ["/usage", "/audit"]) {
     await member.page.goto(path);
-    await expect(member.page.getByText("This page isn't available").first()).toBeVisible();
+    await expect(member.page.getByRole("heading", { name: "This page isn't available", exact: true })).toBeVisible();
   }
   expect((await member.api.get("/api/audit")).status).toBe(404);
 });
@@ -97,12 +97,17 @@ test("AC5: the bell shows the unread count, lists notices newest first with link
   expect(count).toBeGreaterThanOrEqual(2);
   await bell.click();
   const panel = member.page.getByRole("dialog", { name: "Notifications" });
-  const rows = panel.locator(".bell-main");
-  await expect(rows.first()).toContainText(zz("second notice")); // newest first
-  await expect(rows.nth(1)).toContainText(zz("first notice"));
-  await expect(rows.first()).toHaveAttribute("href", new RegExp(`/tasks/${t2}`));
+  const secondTitle = zz("second notice");
+  const firstTitle = zz("first notice");
+  const second = panel.getByRole("link", { name: `"${secondTitle}"` });
+  const first = panel.getByRole("link", { name: `"${firstTitle}"` });
+  await expect(second).toContainText(secondTitle);
+  await expect(first).toContainText(firstTitle);
+  // Newest first: the second notice sits above the first.
+  expect((await second.boundingBox())!.y).toBeLessThan((await first.boundingBox())!.y);
+  await expect(second).toHaveAttribute("href", new RegExp(`/tasks/${t2}`));
   // SHO-US-14.13: opening the panel marks nothing read; clicking a notice does
   expect((await member.api.get("/api/notifications")).json.unread).toBe(count);
-  await clickClear(rows.first());
+  await clickClear(second);
   await expect.poll(async () => (await member.api.get("/api/notifications")).json.unread).toBe(count - 1);
 });

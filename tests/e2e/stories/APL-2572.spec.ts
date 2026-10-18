@@ -9,14 +9,24 @@ async function give(admin: Who, member: Who, later: Later, n: number) {
   const id = r.json.project.id as string;
   later(() => admin.api.post(`/api/projects/${id}/archive`));
   expect((await admin.api.post(`/api/projects/${id}/members`, { userId: member.user.id, role: "EDITOR" })).status).toBe(201);
-  for (let i = 0; i < n; i++) expect((await admin.api.post(`/api/projects/${id}/tasks`, { title: `${zz("note")} ${i}`, assigneeId: member.user.id })).status).toBe(201);
-  return id;
+  const titles: string[] = [];
+  for (let i = 0; i < n; i++) {
+    // The project id keeps this title off every other notice in the run, including "1" inside "10".
+    const title = `${zz("note")} ${id} ${i}`;
+    expect((await admin.api.post(`/api/projects/${id}/tasks`, { title, assigneeId: member.user.id })).status).toBe(201);
+    titles.push(title);
+  }
+  return titles;
 }
+/** The bell quotes the task title in the link and in the mark button's accessible name. */
+const quoted = (title: string) => `"${title}"`;
+const marked = (admin: Who, read: boolean, title: string) =>
+  `${read ? "Mark as unread" : "Mark as read"}: ${admin.user.name} assigned you ${quoted(title)}.`;
 const unread = async (member: Who) => (await member.api.get("/api/notifications")).json.unread as number;
 const bell = (p: Page) => p.getByRole("button", { name: /^Notifications/ });
 
 test("AC1: opening the bell leaves 5 unread items unread and the badge stays", async ({ admin, member, later }) => {
-  await give(admin, member, later, 5);
+  const titles = await give(admin, member, later, 5);
   const before = await unread(member);
   expect(before).toBeGreaterThanOrEqual(5);
   const p = member.page;
@@ -29,20 +39,21 @@ test("AC1: opening the bell leaves 5 unread items unread and the badge stays", a
   });
   await bell(p).click();
   const panel = p.getByRole("dialog", { name: "Notifications" });
-  await expect(panel.getByText(`${zz("note")} 0`).first()).toBeVisible();
-  await expect(panel.locator(".bell-dot").first()).toBeVisible();
+  const note = panel.getByRole("link", { name: quoted(titles[0]) });
+  await expect(note).toBeVisible();
+  await expect(note.getByRole("img", { name: "Unread" })).toBeVisible();
   expect((await (await opened).json()).unread).toBe(before);
   expect(await unread(member)).toBe(before);
   await expect(bell(p)).toHaveAttribute("aria-label", new RegExp(`${before} unread`));
 });
 
 test("AC2: clicking an item opens its task and marks it read", async ({ admin, member, later }) => {
-  await give(admin, member, later, 1);
+  const titles = await give(admin, member, later, 1);
   const before = await unread(member);
   const p = member.page;
   await p.goto("/");
   await bell(p).click();
-  await clickClear(p.getByRole("dialog", { name: "Notifications" }).getByRole("link", { name: new RegExp(zz("note")) }).first());
+  await clickClear(p.getByRole("dialog", { name: "Notifications" }).getByRole("link", { name: quoted(titles[0]) }));
   await expect(p).toHaveURL(/task=|\/projects\//);
   await expect.poll(() => unread(member)).toBe(before - 1);
 });
@@ -51,13 +62,13 @@ test("AC3: the Unread filter hides read items, and an empty result says 'All cau
   test.setTimeout(180_000);
   const p = member.page;
   for (const viewport of [{ width: 1280, height: 800 }, { width: 390, height: 844 }]) {
-    await give(admin, member, later, 2);
+    const titles = await give(admin, member, later, 2);
     await p.setViewportSize(viewport);
     await p.goto("/");
     await expect(bell(p)).toBeVisible();
     await bell(p).click();
     const panel = p.getByRole("dialog", { name: "Notifications" });
-    const mark = panel.getByRole("button", { name: /^Mark as read: / }).first();
+    const mark = panel.getByRole("button", { name: marked(admin, false, titles[0]), exact: true });
     await expect(mark).toBeVisible();
     await clickClear(mark);
     const unreadTab = panel.getByRole("button", { name: /^Unread/ });
@@ -84,13 +95,13 @@ test("AC3: the Unread filter hides read items, and an empty result says 'All cau
 });
 
 test("AC4: marking an item unread raises the badge by 1", async ({ admin, member, later }) => {
-  await give(admin, member, later, 1);
+  const titles = await give(admin, member, later, 1);
   expect((await member.api.post("/api/notifications/read-all")).status).toBeLessThan(300);
   const p = member.page;
   await p.goto("/");
   await bell(p).click();
   const panel = p.getByRole("dialog", { name: "Notifications" });
-  await clickClear(panel.getByRole("button", { name: /^Mark as unread/ }).first());
+  await clickClear(panel.getByRole("button", { name: marked(admin, true, titles[0]), exact: true }));
   await expect(bell(p)).toHaveAttribute("aria-label", /1 unread/);
   expect(await unread(member)).toBe(1);
 });

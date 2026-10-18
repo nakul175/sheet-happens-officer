@@ -148,7 +148,7 @@ test("AC2: a contact is not a user and cannot be an assignee, collaborator, appr
   expect((await admin.api.get(`/api/team/${contactId}`)).status).toBe(404);
 
   await admin.page.goto("/team");
-  await expect(admin.page.getByRole("link", { name: admin.user.name }).first()).toBeVisible();
+  await expect(admin.page.getByRole("main").getByRole("link", { name: admin.user.name, exact: true })).toBeVisible();
   await expect(admin.page.getByText(name)).toHaveCount(0);
   await expect(admin.page.getByText(email)).toHaveCount(0);
 
@@ -363,18 +363,22 @@ test("AC5: any signed-in Member sees all contacts, changes are logged with no pr
 
   await admin.page.goto(`/accounts/${org.id}`);
   await admin.page.getByRole("button", { name: "History" }).click();
-  // Two contact.created rows can share a displayed second, so the time text is not a row id.
-  // The history list is the action-log order (createdAt desc). x-undo-id is that log entry's id.
-  const logged = (await admin.api.get(`/api/orgs/${org.id}/history`)).json.items as { id: string; action: string }[];
-  const historyRows = admin.page.locator(".list:has(.row) .row");
-  await expect(historyRows).toHaveCount(logged.length);
-  const rowFor = (id: string | undefined) => {
+  // The History line is who · action · the clock time. Two rows can share a second, so the time
+  // alone is not the name. The action in that line keeps created, updated and removed apart.
+  const logged = (await admin.api.get(`/api/orgs/${org.id}/history`)).json.items as { id: string; at: string; who: string; action: string }[];
+  const historyList = admin.page.locator("div.grp:text-is('History') + div.list");
+  await expect(historyList.locator(".row")).toHaveCount(logged.length);
+  const rowFor = async (id: string | undefined) => {
     expect(id, "x-undo-id").toBeTruthy();
-    const index = logged.findIndex((i) => i.id === id);
-    expect(index, id).toBeGreaterThanOrEqual(0);
-    return historyRows.nth(index);
+    const item = logged.find((i) => i.id === id);
+    expect(item, id).toBeTruthy();
+    const line = await admin.page.evaluate(
+      ({ who, action, at }) => `${who} · ${action} · ${new Date(at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}`,
+      item!,
+    );
+    return historyList.getByText(line, { exact: true });
   };
-  await expect(rowFor(made.headers["x-undo-id"])).toContainText("contact.created");
-  await expect(rowFor(edited.headers["x-undo-id"])).toContainText("contact.updated");
-  await expect(rowFor(removed.headers["x-undo-id"])).toContainText("contact.removed");
+  await expect(await rowFor(made.headers["x-undo-id"])).toContainText("contact.created");
+  await expect(await rowFor(edited.headers["x-undo-id"])).toContainText("contact.updated");
+  await expect(await rowFor(removed.headers["x-undo-id"])).toContainText("contact.removed");
 });
