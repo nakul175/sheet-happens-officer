@@ -41,7 +41,14 @@ async function openTask(user: Actor, taskId: string, write: boolean) {
   requireFlag();
   const t = await db.task.findUnique({ where: { id: taskId } });
   if (!t || t.deletedAt) throw notFound("Task");
-  const a = await projectAccess(user, t.projectId, { write });
+  // A person who cannot see the project gets the same "Task not found" as a missing id (no existence leak).
+  let a;
+  try {
+    a = await projectAccess(user, t.projectId, { write });
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 404) throw notFound("Task");
+    throw e;
+  }
   if (write) requireWrite(a);
   const members = await activeMembers(t.projectId);
   return { t, a, members };

@@ -423,9 +423,12 @@ export async function undoAction(user: Actor, logId: string, anyway = false) {
   await db.$transaction(async (tx) => {
     await p.apply(tx);
     await tx.actionLog.update({ where: { id: row.id }, data: { undoneAt: new Date(), undoneById: user.id } });
+    const commentId = (row.afterState as { commentId?: string } | null)?.commentId
+      ?? (row.beforeState as { commentId?: string } | null)?.commentId;
     await logAction(tx, {
       actorId: user.id, projectId, targetType: row.targetType as "task", targetId: row.targetId, action: "undo",
-      before: { undoes: row.id, action: row.action }, after: { undoes: row.id, label: UNDO_LABELS[row.action], anyway: anyway && p.conflicts.length > 0 },
+      before: { undoes: row.id, action: row.action, ...(commentId ? { commentId } : {}) },
+      after: { undoes: row.id, label: UNDO_LABELS[row.action], anyway: anyway && p.conflicts.length > 0, ...(commentId ? { commentId } : {}) },
     });
     if (anyway && p.conflicts.length) {
       const later = await tx.actionLog.findMany({ where: { targetType: row.targetType, targetId: row.targetId, createdAt: { gt: row.createdAt }, id: { not: row.id }, actorId: { not: user.id } }, select: { actorId: true } });
