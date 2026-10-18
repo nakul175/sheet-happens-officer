@@ -1,7 +1,7 @@
 import { currentUser } from "@/lib/auth";
 import { handle, parseBody } from "@/lib/http";
 import { taskUpdate } from "@/lib/schemas";
-import { deleteTask, getTask, updateTask } from "@/lib/tasks";
+import { assertCanUpdateTask, deleteTask, getTask, updateTask } from "@/lib/tasks";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -11,8 +11,10 @@ export const GET = handle(async (_req: Request, ctx: Ctx) =>
 
 export const PATCH = handle(async (req: Request, ctx: Ctx) => {
   const me = await currentUser();
-  await updateTask(me, (await ctx.params).id, await parseBody(req, taskUpdate));
-  return Response.json({ task: await getTask(me, (await ctx.params).id) });
+  const id = (await ctx.params).id;
+  await assertCanUpdateTask(me, id);
+  await updateTask(me, id, await parseBody(req, taskUpdate));
+  return Response.json({ task: await getTask(me, id) });
 });
 
 export const DELETE = handle(async (_req: Request, ctx: Ctx) => {
