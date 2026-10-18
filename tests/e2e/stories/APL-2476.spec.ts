@@ -1,6 +1,6 @@
 // SHO-US-1.3 Sign in with email and password (APL-2476). Acceptance criteria AC1 to AC5.
 import type { Page } from "@playwright/test";
-import { test, expect, RUN } from "../support";
+import { test, expect, RUN, login } from "../support";
 
 const alertOf = (p: Page) => p.locator('[role="alert"]:not(#__next-route-announcer__)');
 const WRONG = "Email or password is incorrect.";
@@ -8,8 +8,8 @@ const WRONG = "Email or password is incorrect.";
 test.describe("SHO-US-1.3 / APL-2476", () => {
   test("AC1: the right password lands on My tasks with a 30-day session cookie that page scripts cannot read", async ({ anon }) => {
     await anon.goto("/signin");
-    await anon.getByLabel("Work email").fill(process.env.SHO_ADMIN_EMAIL!);
-    await anon.getByLabel("Password").fill(process.env.SHO_ADMIN_PASS!);
+    await anon.getByLabel("Work email").fill(login("ADMIN").email);
+    await anon.getByLabel("Password").fill(login("ADMIN").password);
     await anon.getByRole("button", { name: "Sign in" }).click();
     await expect(anon).toHaveURL(/\/$/);
     await expect(anon.getByRole("heading", { name: /my tasks/i }).first()).toBeVisible();
@@ -30,13 +30,13 @@ test.describe("SHO-US-1.3 / APL-2476", () => {
     await expect(alertOf(anon)).toContainText(WRONG);
 
     // One wrong try on the real account (well under the lockout of 5); the next good sign-in clears it.
-    const real = await anon.request.post("/api/auth/signin", { data: { email: process.env.SHO_ADMIN_EMAIL, password: "not-the-password-1" } });
+    const real = await anon.request.post("/api/auth/signin", { data: { email: login("ADMIN").email, password: "not-the-password-1" } });
     const none = await anon.request.post("/api/auth/signin", { data: { email: `zz-test-${RUN}-ghost2@aplyd.com`, password: "not-the-password-1" } });
     expect(real.status()).toBe(401);
     expect(none.status()).toBe(401);
     expect(await real.json()).toEqual(await none.json());
     expect((await none.json()).error).toBe(WRONG);
-    const ok = await anon.request.post("/api/auth/signin", { data: { email: process.env.SHO_ADMIN_EMAIL, password: process.env.SHO_ADMIN_PASS } });
+    const ok = await anon.request.post("/api/auth/signin", { data: { email: login("ADMIN").email, password: login("ADMIN").password } });
     expect(ok.status()).toBe(200);
   });
 

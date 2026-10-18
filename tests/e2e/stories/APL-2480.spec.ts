@@ -7,7 +7,7 @@ test.describe("SHO-US-2.1 / APL-2480", () => {
     const me = (await admin.api.get("/api/auth/me")).json.user;
     expect(me.orgRole).toBe("SUPER_ADMIN");
     await admin.page.goto("/team");
-    const row = admin.page.locator("tr", { hasText: process.env.SHO_ADMIN_EMAIL!.toLowerCase() }).first();
+    const row = admin.page.locator("tr", { hasText: String(admin.user.email).toLowerCase() }).first();
     await expect(row).toContainText("Super Admin", { timeout: 60_000 });
   });
 
@@ -18,7 +18,7 @@ test.describe("SHO-US-2.1 / APL-2480", () => {
   test("AC2: an address that is not on the list is a Member", async ({ member, admin }) => {
     expect((await member.api.get("/api/auth/me")).json.user.orgRole).toBe("MEMBER");
     const people = (await admin.api.get("/api/team")).json.people as { email: string; orgRole: string }[];
-    expect(people.find((p) => p.email === process.env.SHO_MEMBER_EMAIL!.toLowerCase())?.orgRole).toBe("MEMBER");
+    expect(people.find((p) => p.email === String(member.user.email).toLowerCase())?.orgRole).toBe("MEMBER");
   });
 
   test("AC3: nobody can demote or deactivate the Super Admin in the app", async ({ admin, member }) => {
@@ -37,7 +37,7 @@ test.describe("SHO-US-2.1 / APL-2480", () => {
     expect(row.status).toBe("ACTIVE");
     // The screen offers no way to do it.
     await admin.page.goto("/team");
-    const mine = admin.page.locator("tr", { hasText: process.env.SHO_ADMIN_EMAIL!.toLowerCase() }).first();
+    const mine = admin.page.locator("tr", { hasText: String(admin.user.email).toLowerCase() }).first();
     await expect(mine).toBeVisible({ timeout: 60_000 });
     await expect(mine.getByRole("button", { name: /Deactivate|Make Member|Make Admin/ })).toHaveCount(0);
   });

@@ -29,10 +29,10 @@ test("Closing a deal writes an audit row that names the deal, not 'deal (removed
   const mine = (log.json.items as { target: string | null }[]).filter((i) => i.target && i.target.includes(dealName));
   expect(mine, "an audit row names this deal").toHaveLength(1);
   expect(mine[0].target).toBe(`Deal "${dealName}"`);
-  expect((log.json.items as { target: string | null }[]).filter((i) => i.target === "deal (removed)")).toHaveLength(0);
+  expect((log.json.items as { who: string | null; target: string | null }[]).filter((i) => i.who === admin.user.name && i.target === "deal (removed)")).toHaveLength(0);
 });
 
 test("The Audit screen shows the deal's name on the closed row", async ({ admin }) => {
   await admin.page.goto("/audit");
-  await expect(admin.page.getByText("deal (removed)")).toHaveCount(0);
+  await expect(admin.page.locator("tr", { hasText: admin.user.email }).filter({ hasText: "deal (removed)" })).toHaveCount(0); // this admin's rows only
 });

@@ -1,6 +1,6 @@
 // SHO-BUG-7 Removing a member through the concierge sends one notice per task instead of the screen's single handover notice  (Linear APL-2614)
 // No numbered ACs in the issue; follows its "Expected" and "Test" paragraphs.
-import { test, expect, zz } from "../support";
+import { test, expect, zz, RUN } from "../support";
 
 test("Reference (screen path): removing a member who holds 3 tasks sends the leaver no per-task notices and logs the removal once", async ({ admin, member, later }) => {
   const pr = await admin.api.post("/api/projects", { name: zz("handover"), leaderId: admin.user.id });
@@ -13,12 +13,12 @@ test("Reference (screen path): removing a member who holds 3 tasks sends the lea
   }
   expect((await admin.api.del(`/api/projects/${pid}/members/${member.user.id}?handoverTo=${admin.user.id}`)).status).toBe(204);
   const after = (await member.api.get("/api/notifications")).json.items as { text: string }[];
-  const mine = after.filter((n) => /took ".*ZZ-TEST held/.test(n.text));
+  const mine = after.filter((n) => /took "ZZ-TEST[^"]* held/.test(n.text) && n.text.includes(RUN));
   expect(mine, "no 'took <task> off you' notice per task").toHaveLength(0);
   expect(after.filter((n) => /removed you from/.test(n.text) && n.text.includes(zz("handover"))), "exactly one removal notice").toHaveLength(1);
   const act = (await admin.api.get(`/api/projects/${pid}/activity`)).json.items as { what: string }[];
   expect(act.filter((a) => /^removed /.test(a.what))).toHaveLength(1);
-  expect(act.filter((a) => /^assigned "ZZ-TEST held/.test(a.what)), "no per-task reassignment rows on the screen path").toHaveLength(0);
+  expect(act.filter((a) => /^assigned "ZZ-TEST[^"]* held/.test(a.what)), "no per-task reassignment rows on the screen path").toHaveLength(0);
 });
 
 test.skip("Concierge path: a confirmed 'remove member' card writes the same notices and log row as the screen", () => {

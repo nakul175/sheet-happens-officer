@@ -34,11 +34,11 @@ test.describe("SHO-US-1.1 / APL-2474", () => {
       expect(JSON.stringify(await r.json()), email).toContain(DOMAIN_MESSAGE);
     }
     const team = (await admin.api.get("/api/team")).json.people as { email: string }[];
-    expect(team.some((p) => p.email.startsWith(`zz-test-${RUN}`))).toBe(false);
+    expect(team.some((p) => p.email.startsWith(`zz-test-${RUN}@`))).toBe(false);
   });
 
   test("AC3: an email that already has an account is refused with a Sign in link, and no second account appears", async ({ anon, admin }) => {
-    const email = process.env.SHO_ADMIN_EMAIL!.toLowerCase();
+    const email = String(admin.user.email).toLowerCase();
     test.skip(!/@(aplyd\.com|athenainfonomics\.com)$/.test(email), "The admin account is not on a sign-up domain, so the domain rule answers first.");
     await fillSignUp(anon, "ZZ-TEST Again", email, okPw);
     const alert = alertOf(anon);

@@ -94,7 +94,7 @@ test.describe("SHO-US-23.2 / APL-2621", () => {
     const log = (await admin.api.get("/api/audit?event=USER_ADDED_BY_ADMIN")).json.items as { who: string; email: string; event: string; target: string }[];
     const row = log.find((i) => i.target.includes(`ZZ-TEST audit ${RUN}`));
     expect(row, "an audit row for the new person").toBeTruthy();
-    expect(row!.email).toBe(process.env.SHO_ADMIN_EMAIL!.toLowerCase());
+    expect(row!.email).toBe((admin.user.email as string).toLowerCase());
     expect(JSON.stringify(row)).not.toMatch(/password/i);
   });
 

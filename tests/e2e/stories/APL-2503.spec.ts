@@ -49,7 +49,7 @@ test("AC2: restoring a subtask whose parent is also in Trash asks to restore bot
 
 test("AC3: when the assignee has been deactivated, the restored task goes to the Leader", async ({ admin, later }) => {
   const p = await proj(admin, "restore-gone", later);
-  const email = `zz-test-${RUN}@example.invalid`;
+  const email = `zz-test-${RUN}-leaver@example.invalid`;
   const add = await admin.api.post("/api/team", { firstName: "ZZ-TEST", lastName: `leaver ${RUN}`, email, role: "MEMBER" });
   expect(add.status, JSON.stringify(add.json)).toBe(201);
   const id = (add.json.person?.id ?? add.json.user?.id ?? add.json.id) as string;

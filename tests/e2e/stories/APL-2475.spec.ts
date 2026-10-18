@@ -33,8 +33,8 @@ test.describe("SHO-US-1.2 / APL-2475", () => {
     // Needs two links from a real unverified mailbox to prove the old one stopped working.
   });
 
-  test("AC4: the resend answer is the same for an unknown address and for a verified one, so it reveals nothing", async ({ anon }) => {
-    const verified = process.env.SHO_ADMIN_EMAIL!.toLowerCase(); // already verified: no email is sent to it
+  test("AC4: the resend answer is the same for an unknown address and for a verified one, so it reveals nothing", async ({ anon, admin }) => {
+    const verified = String(admin.user.email).toLowerCase(); // already verified: no email is sent to it
     test.skip(!/@(aplyd\.com|athenainfonomics\.com)$/.test(verified), "The admin account is not on a sign-up domain.");
     const a = await anon.request.post("/api/auth/resend-verification", { data: { email: ghost } });
     const b = await anon.request.post("/api/auth/resend-verification", { data: { email: verified } });

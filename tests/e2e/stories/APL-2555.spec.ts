@@ -1,12 +1,12 @@
 // SHO-US-22.7 Task panel as a full-screen sheet (APL-2555). Epic SHO-E22.
 // Runs against staging. Data: a ZZ-TEST project with ZZ-TEST tasks, archived afterwards. AC7 needs SHO_MEMBER_EMAIL / SHO_MEMBER_PASS.
 // Skipped (need a real iPhone / keyboard, as the story says): AC3 on-device, AC5.
-import { test, expect, zz } from "../support";
+import { test, expect, zz, login } from "../support";
 import type { Browser } from "@playwright/test";
 
 async function phone(browser: Browser, width: number, height = 800, touch = true, who: "admin" | "member" = "admin") {
-  const email = who === "admin" ? process.env.SHO_ADMIN_EMAIL! : process.env.SHO_MEMBER_EMAIL!;
-  const password = who === "admin" ? process.env.SHO_ADMIN_PASS! : process.env.SHO_MEMBER_PASS!;
+  const email = who === "admin" ? login("ADMIN").email : login("MEMBER").email;
+  const password = who === "admin" ? login("ADMIN").password : login("MEMBER").password;
   const ctx = await browser.newContext({
     baseURL: process.env.STAGING_URL ?? "https://staging.sheethappensofficer.com",
     httpCredentials: process.env.STAGING_USER ? { username: process.env.STAGING_USER, password: process.env.STAGING_PASS ?? "" } : undefined,

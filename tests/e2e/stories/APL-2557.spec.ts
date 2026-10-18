@@ -1,12 +1,12 @@
 // SHO-US-22.9 Touch, motion and zoom behaviour (APL-2557). Epic SHO-E22.
 // Runs against staging. Data: one ZZ-TEST project with ZZ-TEST tasks, archived afterwards. The collaborator part of AC1 uses SHO_MEMBER_EMAIL / SHO_MEMBER_PASS when set.
-import { test, expect, zz, hasMember } from "../support";
+import { test, expect, zz, hasMember, login } from "../support";
 import { collect } from "../../viewport/checks";
 import type { Browser } from "@playwright/test";
 
 async function phone(browser: Browser, width: number, height = 800, touch = true, who: "admin" | "member" = "admin") {
-  const email = who === "admin" ? process.env.SHO_ADMIN_EMAIL! : process.env.SHO_MEMBER_EMAIL!;
-  const password = who === "admin" ? process.env.SHO_ADMIN_PASS! : process.env.SHO_MEMBER_PASS!;
+  const email = who === "admin" ? login("ADMIN").email : login("MEMBER").email;
+  const password = who === "admin" ? login("ADMIN").password : login("MEMBER").password;
   const ctx = await browser.newContext({
     baseURL: process.env.STAGING_URL ?? "https://staging.sheethappensofficer.com",
     httpCredentials: process.env.STAGING_USER ? { username: process.env.STAGING_USER, password: process.env.STAGING_PASS ?? "" } : undefined,
@@ -29,7 +29,7 @@ test.beforeEach(async ({ admin, later }) => {
 test("AC1: tapping the avatar group shows the assignee's name (and collaborators' when there are any)", async ({ browser, admin }) => {
   let collaborator = "";
   if (hasMember()) {
-    const me = await (await (await browser.newContext({ baseURL: process.env.STAGING_URL ?? "https://staging.sheethappensofficer.com", httpCredentials: process.env.STAGING_USER ? { username: process.env.STAGING_USER, password: process.env.STAGING_PASS ?? "" } : undefined })).request.post("/api/auth/signin", { data: { email: process.env.SHO_MEMBER_EMAIL, password: process.env.SHO_MEMBER_PASS } })).json();
+    const me = await (await (await browser.newContext({ baseURL: process.env.STAGING_URL ?? "https://staging.sheethappensofficer.com", httpCredentials: process.env.STAGING_USER ? { username: process.env.STAGING_USER, password: process.env.STAGING_PASS ?? "" } : undefined })).request.post("/api/auth/signin", { data: { email: login("MEMBER").email, password: login("MEMBER").password } })).json();
     expect((await admin.api.post(`/api/projects/${projectId}/members`, { userId: me.user.id, role: "EDITOR" })).status).toBe(201);
     expect((await admin.api.post(`/api/tasks/${taskId}/collaborators`, { userId: me.user.id })).status).toBeLessThan(300);
     collaborator = me.user.name;

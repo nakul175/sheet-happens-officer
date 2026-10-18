@@ -1,12 +1,12 @@
 // SHO-US-22.5 Lists and tables on phones (APL-2553). Epic SHO-E22.
 // Runs against staging. Data: ZZ-TEST projects (one with a 96-character name) and one ZZ-TEST person with a 41-character surname
 // (added at an address on the reserved .invalid domain, so no real inbox is mailed; deactivated afterwards).
-import { test, expect, zz, RUN } from "../support";
+import { test, expect, zz, RUN, login } from "../support";
 import type { Browser } from "@playwright/test";
 
 async function phone(browser: Browser, width: number, height = 800, touch = true, who: "admin" | "member" = "admin") {
-  const email = who === "admin" ? process.env.SHO_ADMIN_EMAIL! : process.env.SHO_MEMBER_EMAIL!;
-  const password = who === "admin" ? process.env.SHO_ADMIN_PASS! : process.env.SHO_MEMBER_PASS!;
+  const email = who === "admin" ? login("ADMIN").email : login("MEMBER").email;
+  const password = who === "admin" ? login("ADMIN").password : login("MEMBER").password;
   const ctx = await browser.newContext({
     baseURL: process.env.STAGING_URL ?? "https://staging.sheethappensofficer.com",
     httpCredentials: process.env.STAGING_USER ? { username: process.env.STAGING_USER, password: process.env.STAGING_PASS ?? "" } : undefined,
@@ -91,7 +91,7 @@ test("AC2: a 96-character project name takes at most 2 lines at 320 px, and Add 
 test("AC3: a 41-character surname wraps or truncates with the full text available and nothing overflows", async ({ browser, admin, later }) => {
   const surname = "Verylongsurnamethatkeepsgoingandgoing".padEnd(41, "g");
   expect(surname.length).toBe(41);
-  const email = `zz-test-${RUN}@example.invalid`;
+  const email = `zz-test-${RUN}-surname@example.invalid`;
   const r = await admin.api.post("/api/team", { firstName: "ZZ-TEST", lastName: surname, email, role: "MEMBER" });
   expect(r.status, JSON.stringify(r.json)).toBe(201);
   const pid = r.json.user?.id ?? r.json.person?.id ?? r.json.id;

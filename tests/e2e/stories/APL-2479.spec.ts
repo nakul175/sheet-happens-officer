@@ -1,7 +1,7 @@
 // SHO-US-1.6 Manage my own profile and sessions (APL-2479). Acceptance criteria AC1 to AC4.
 // These change a person's name, password and sessions, so they run on the plain Member account (SHO_MEMBER_EMAIL / SHO_MEMBER_PASS)
 // and put the name and password back at the end. They skip when no Member account is configured.
-import { test, expect, RUN, zz } from "../support";
+import { test, expect, RUN, zz, login } from "../support";
 
 const PASSWORD_MESSAGE = "Use at least 8 characters, with at least one letter and one number.";
 
@@ -29,7 +29,7 @@ test.describe("SHO-US-1.6 / APL-2479", () => {
   });
 
   test("AC2: changing the password needs the current one, applies the rule, ends other sessions and keeps this one", async ({ member, browser }) => {
-    const current = process.env.SHO_MEMBER_PASS!;
+    const current = login("MEMBER").password;
     const next = `Zz${RUN}9q`;
     const other = await browser.newContext({
       baseURL: process.env.STAGING_URL ?? "https://staging.sheethappensofficer.com",
@@ -37,7 +37,7 @@ test.describe("SHO-US-1.6 / APL-2479", () => {
     });
     let changed = false;
     try {
-      const s = await other.request.post("/api/auth/signin", { data: { email: process.env.SHO_MEMBER_EMAIL, password: current } });
+      const s = await other.request.post("/api/auth/signin", { data: { email: login("MEMBER").email, password: current } });
       expect(s.ok()).toBe(true);
       expect((await other.request.get("/api/auth/me")).status()).toBe(200);
 
@@ -75,7 +75,7 @@ test.describe("SHO-US-1.6 / APL-2479", () => {
       httpCredentials: process.env.STAGING_USER ? { username: process.env.STAGING_USER, password: process.env.STAGING_PASS ?? "" } : undefined,
     });
     try {
-      await other.request.post("/api/auth/signin", { data: { email: process.env.SHO_MEMBER_EMAIL, password: process.env.SHO_MEMBER_PASS } });
+      await other.request.post("/api/auth/signin", { data: { email: login("MEMBER").email, password: login("MEMBER").password } });
       expect((await other.request.get("/api/auth/me")).status()).toBe(200);
       await member.page.goto("/profile");
       await member.page.getByRole("button", { name: "Sign out everywhere" }).click();

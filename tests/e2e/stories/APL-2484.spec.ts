@@ -58,7 +58,7 @@ test.describe("SHO-US-2.5 / APL-2484", () => {
   test("AC4: the Super Admin's own row has no management action", async ({ admin }) => {
     test.setTimeout(240_000);
     await admin.page.goto("/team");
-    const mine = admin.page.locator("tr", { hasText: process.env.SHO_ADMIN_EMAIL!.toLowerCase() }).first();
+    const mine = admin.page.locator("tr", { hasText: String(admin.user.email).toLowerCase() }).first();
     await expect(mine).toContainText("Super Admin", SLOW);
     await expect(mine.getByRole("button", { name: /Deactivate|Reactivate|Make Admin|Make Member|Resend sign-in details/ })).toHaveCount(0);
   });

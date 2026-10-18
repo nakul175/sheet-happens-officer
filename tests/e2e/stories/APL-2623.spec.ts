@@ -19,7 +19,7 @@ test.describe("SHO-US-23.4 / APL-2623", () => {
     await me.click();
     await expect(admin.page).toHaveURL(/\/profile$/);
     await expect(admin.page.getByRole("heading", { name: "Profile" }).first()).toBeVisible();
-    await expect(admin.page.getByText(process.env.SHO_ADMIN_EMAIL!.toLowerCase()).first()).toBeVisible();
+    await expect(admin.page.getByText((admin.user.email as string).toLowerCase()).first()).toBeVisible();
   });
 
   test("AC2: every name on the Team page is a link to that person's profile, for a Member and for an Admin", async ({ admin, member }) => {
@@ -28,12 +28,13 @@ test.describe("SHO-US-23.4 / APL-2623", () => {
     await member.page.goto("/team");
     const items = member.page.locator(".list .item");
     await expect(items.first()).toBeVisible(SLOW);
-    expect(await member.page.locator(".list .item .t b a[href^='/team/']").count()).toBe(await items.count());
+    // One snapshot of the list, so people other runs add or deactivate meanwhile cannot skew two separate counts.
+    expect(await items.evaluateAll((els) => els.filter((e) => !e.querySelector(".t b a[href^='/team/']")).length)).toBe(0);
     // Admin table.
     await admin.page.goto("/team");
     const rows = admin.page.locator("table.tbl tbody tr");
     await expect(rows.first()).toBeVisible(SLOW);
-    expect(await admin.page.locator("table.tbl tbody td[data-label='Name'] a[href^='/team/']").count()).toBe(await rows.count());
+    expect(await rows.evaluateAll((els) => els.filter((e) => !e.querySelector("td[data-label='Name'] a[href^='/team/']")).length)).toBe(0);
     // And a click really opens the person.
     const first = admin.page.locator("table.tbl tbody td[data-label='Name'] a[href^='/team/']").first();
     const name = (await first.textContent())!.trim();
@@ -50,7 +51,7 @@ test.describe("SHO-US-23.4 / APL-2623", () => {
     expect(Object.keys(raw.json.person).sort()).toEqual(["id", "name", "projects"]);
     await member.page.goto(`/team/${admin.user.id}`);
     await expect(member.page.getByRole("heading", { name: "Projects you share" })).toBeVisible(SLOW);
-    await expect(member.page.getByText(process.env.SHO_ADMIN_EMAIL!.toLowerCase())).toHaveCount(0);
+    await expect(member.page.getByText((admin.user.email as string).toLowerCase())).toHaveCount(0);
     await expect(member.page.getByText(/Joined|open task/)).toHaveCount(0);
   });
 

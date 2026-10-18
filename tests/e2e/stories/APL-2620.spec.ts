@@ -2,7 +2,7 @@
 // A successful sign-up creates a real unverified account and emails a real domain, so AC1 is checked on the two routes that create nothing
 // (forgot password, resend verification) and the sign-up itself is left to a manual run.
 import type { Page } from "@playwright/test";
-import { test, expect, RUN } from "../support";
+import { test, expect, RUN, login } from "../support";
 
 const alertOf = (p: Page) => p.locator('[role="alert"]:not(#__next-route-announcer__)');
 const MESSAGE = "Use your @aplyd.com or @athenainfonomics.com email address.";
@@ -57,7 +57,7 @@ test.describe("SHO-US-23.1 / APL-2620", () => {
   });
 
   test("AC4: existing accounts and the Super Admin are untouched", async ({ anon, admin }) => {
-    const r = await anon.request.post("/api/auth/signin", { data: { email: process.env.SHO_ADMIN_EMAIL, password: process.env.SHO_ADMIN_PASS } });
+    const r = await anon.request.post("/api/auth/signin", { data: { email: login("ADMIN").email, password: login("ADMIN").password } });
     expect(r.status()).toBe(200);
     expect((await r.json()).user.orgRole).toBe("SUPER_ADMIN");
     const people = (await admin.api.get("/api/team")).json.people as { orgRole: string }[];

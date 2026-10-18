@@ -1,9 +1,9 @@
 // SHO-US-1.5 Stay signed in, sign out, and retire the email-only session (APL-2478). Acceptance criteria AC1 to AC3.
-import { test, expect } from "../support";
+import { test, expect, login } from "../support";
 
 test.describe("SHO-US-1.5 / APL-2478", () => {
   test("AC1: a signed-in person stays signed in on return, and the 30 days run from sign-in, not from activity", async ({ anon }) => {
-    const r = await anon.request.post("/api/auth/signin", { data: { email: process.env.SHO_ADMIN_EMAIL, password: process.env.SHO_ADMIN_PASS } });
+    const r = await anon.request.post("/api/auth/signin", { data: { email: login("ADMIN").email, password: login("ADMIN").password } });
     expect(r.status()).toBe(200);
     const cookie = async () => (await anon.context().cookies()).find((c) => c.name === "sho_session")!;
     const before = await cookie();
@@ -25,7 +25,7 @@ test.describe("SHO-US-1.5 / APL-2478", () => {
   });
 
   test("AC2: Sign out ends the session and protected screens send the person to Sign in", async ({ anon }) => {
-    await anon.request.post("/api/auth/signin", { data: { email: process.env.SHO_ADMIN_EMAIL, password: process.env.SHO_ADMIN_PASS } });
+    await anon.request.post("/api/auth/signin", { data: { email: login("ADMIN").email, password: login("ADMIN").password } });
     await anon.goto("/profile");
     await expect(anon.getByRole("heading", { name: "Profile" }).first()).toBeVisible();
     await anon.getByRole("button", { name: "Sign out", exact: true }).click();
@@ -38,7 +38,7 @@ test.describe("SHO-US-1.5 / APL-2478", () => {
   });
 
   test("AC3: no endpoint signs a person in with an email alone", async ({ anon }) => {
-    const email = process.env.SHO_ADMIN_EMAIL!;
+    const email = login("ADMIN").email;
     // The sign-in route needs a password.
     const noPw = await anon.request.post("/api/auth/signin", { data: { email } });
     expect(noPw.status()).toBe(400);

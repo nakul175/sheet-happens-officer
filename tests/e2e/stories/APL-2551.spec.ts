@@ -1,13 +1,13 @@
 // SHO-US-22.3 Forms that do not zoom or hide under the keyboard (APL-2551). Epic SHO-E22.
 // Runs against staging. Data: one ZZ-TEST project and tasks, archived afterwards.
 // AC2, AC3 and AC4's keyboard parts need a real iPhone / Android keyboard (the story says so); they are skipped with that reason.
-import { test, expect, zz } from "../support";
+import { test, expect, zz, login } from "../support";
 import { collect } from "../../viewport/checks";
 import type { Browser } from "@playwright/test";
 
 async function phone(browser: Browser, width: number, height = 800, touch = true, who: "admin" | "member" = "admin") {
-  const email = who === "admin" ? process.env.SHO_ADMIN_EMAIL! : process.env.SHO_MEMBER_EMAIL!;
-  const password = who === "admin" ? process.env.SHO_ADMIN_PASS! : process.env.SHO_MEMBER_PASS!;
+  const email = who === "admin" ? login("ADMIN").email : login("MEMBER").email;
+  const password = who === "admin" ? login("ADMIN").password : login("MEMBER").password;
   const ctx = await browser.newContext({
     baseURL: process.env.STAGING_URL ?? "https://staging.sheethappensofficer.com",
     httpCredentials: process.env.STAGING_USER ? { username: process.env.STAGING_USER, password: process.env.STAGING_PASS ?? "" } : undefined,

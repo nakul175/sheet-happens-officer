@@ -3,7 +3,7 @@
 // AC5 five failed sign-ins and the lockout, AC6 IP only on sign-in events, AC7 task delete/restore/purge, Undo anyway, approver.
 // Data: every project and task is named "ZZ-TEST ..."; the person created for AC5 is "ZZ-TEST ..." at example.invalid (no inbox) and is
 // deactivated afterwards. AC2 briefly makes the Member an Admin and puts the role back in a finally block.
-import { test, expect, zz, RUN } from "../support";
+import { test, expect, zz, RUN, login } from "../support";
 
 async function proj(admin: any, label: string, later: (f: () => Promise<unknown>) => void) {
   const r = await admin.api.post("/api/projects", { name: zz(label), leaderId: admin.user.id });
@@ -74,7 +74,7 @@ test("AC3: no password, token or email link is stored in the rows", async ({ adm
   const res = await admin.page.request.get("/api/audit");
   const body = await res.text();
   // A boolean on purpose: a failing `expect(body).not.toContain(secret)` prints the secret in the test report.
-  expect(body.includes(process.env.SHO_ADMIN_PASS!), "the Super Admin password appears in the audit log").toBe(false);
+  expect(body.includes(login("ADMIN").password), "the Super Admin password appears in the audit log").toBe(false);
   expect(body).not.toMatch(/token=|passwordHash|"password"|\$2[aby]\$|argon2/i);
   for (const r of JSON.parse(body).items as Row[]) expect(Object.keys(r).sort()).toEqual(["at", "channel", "email", "event", "id", "ip", "target", "who"]);
 });

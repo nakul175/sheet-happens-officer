@@ -1,7 +1,7 @@
 // SHO-US-14.4 First-run orientation (Linear APL-2563).
 // The start guide is shown once per account. A spec can only see it on an account that has not dismissed it yet, so AC1, AC2 and AC5
 // skip with a reason when the Member account has already dismissed it (dismissing is permanent for that account, by design).
-import { test, expect, zz } from "../support";
+import { test, expect, zz, login } from "../support";
 
 type Who = { api: import("../support").Api; user: Record<string, any>; page: import("@playwright/test").Page };
 
@@ -37,7 +37,7 @@ test("AC4: a person with no projects sees the Leaders by name and a Request to b
   await row.getByRole("button", { name: "Request to be added" }).click();
   await expect(row.getByText("Asked. They have been told.")).toBeVisible();
   const n = await admin.api.get("/api/notifications");
-  expect(JSON.stringify(n.json)).toContain("asked to be added");
+  expect(JSON.stringify(n.json)).toContain(`${member.user.name} asked to be added`); // this Member's request, not another shard's
 });
 
 test("AC1: first sign-in shows the start guide above everything else on My tasks", async ({ member }) => {
@@ -73,7 +73,7 @@ test("AC2: Dismiss removes the guide for good, also on another device", async ({
   await page.reload();
   await expect(page.getByRole("region", { name: "Start guide" })).toHaveCount(0);
   // A second browser with its own cookies: a different "device".
-  const r = await anon.context().request.post("/api/auth/signin", { data: { email: process.env.SHO_MEMBER_EMAIL, password: process.env.SHO_MEMBER_PASS } });
+  const r = await anon.context().request.post("/api/auth/signin", { data: { email: login("MEMBER").email, password: login("MEMBER").password } });
   expect(r.ok()).toBe(true);
   await anon.goto("/");
   await expect(anon.getByRole("heading", { name: "My tasks" })).toBeVisible();

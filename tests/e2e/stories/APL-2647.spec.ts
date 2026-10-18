@@ -3,7 +3,7 @@
 // Slow and failed loads are simulated in the browser (route interception), so nothing on the server is touched.
 // The slow-load checks run whenever PR #12 is live on staging (tests/e2e/helpers/jim-gate.ts) and skip otherwise; the real-failure checks always run.
 import type { Page } from "@playwright/test";
-import { test, expect } from "../support";
+import { test, expect, zz } from "../support";
 import { newProject, newTask, type Who } from "../g2";
 import { notLive, prLive } from "../helpers/jim-gate";
 
@@ -81,6 +81,6 @@ test.describe("SHO-BUG-12 / APL-2647", () => {
     fail = false;
     await page.getByRole("button", { name: "Retry" }).click();
     await expect(page.getByText(LOAD_FAILED)).toHaveCount(0, { timeout: 15_000 });
-    await expect(page.getByText("ZZ-TEST task", { exact: false }).first()).toBeVisible();
+    await expect(page.getByText(zz("task"), { exact: false }).first()).toBeVisible();
   });
 });

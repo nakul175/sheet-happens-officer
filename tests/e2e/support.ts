@@ -5,8 +5,8 @@ export { expect };
 
 /** One id per run so names never clash between runs. */
 export const RUN = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
-/** Every record a spec creates is named with this prefix, so a person can find and delete leftovers. */
-export const zz = (label: string) => `ZZ-TEST ${label} ${RUN}`;
+/** Every record a spec creates is named with this prefix, so a person can find and delete leftovers. CI shards set ZZ_PREFIX=ZZ-TEST-NN. */
+export const zz = (label: string) => `${process.env.ZZ_PREFIX || "ZZ-TEST"} ${label} ${RUN}`;
 
 function need(name: string): string {
   const v = process.env[name];
@@ -45,12 +45,35 @@ async function signIn(ctx: BrowserContext, email: string, password: string) {
   return (await r.json()).user as Json;
 }
 
-export const hasMember = () => !!(process.env.SHO_MEMBER_EMAIL && process.env.SHO_MEMBER_PASS);
+type Role = "ADMIN" | "MEMBER";
+type Account = { email: string; password: string; from: string };
+
+/**
+ * The account a fixture signs in as. A CI shard sets SHARD_EMAIL / SHARD_PASS / SHARD_ROLE (its own ZZ_TEST_NN account) and
+ * PEER_EMAIL / PEER_PASS / PEER_ROLE (a ZZ account of the other role); the role each one names uses it. Otherwise, and in the
+ * serial job and local runs, it is SHO_ADMIN_* / SHO_MEMBER_* as before.
+ */
+function account(role: Role): Account | null {
+  const env = process.env;
+  for (const k of ["SHARD", "PEER"]) {
+    if (env[`${k}_ROLE`] === role && env[`${k}_EMAIL`] && env[`${k}_PASS`]) return { email: env[`${k}_EMAIL`]!, password: env[`${k}_PASS`]!, from: `${k}_*` };
+  }
+  const k = role === "ADMIN" ? "SHO_ADMIN" : "SHO_MEMBER";
+  return env[`${k}_EMAIL`] && env[`${k}_PASS`] ? { email: env[`${k}_EMAIL`]!, password: env[`${k}_PASS`]!, from: `${k}_*` } : null;
+}
+
+/** The email and password the `admin` / `member` fixture signs in with, for specs that sign in by hand. */
+export function login(role: Role): Account {
+  const k = role === "ADMIN" ? "SHO_ADMIN" : "SHO_MEMBER";
+  return account(role) ?? { email: need(`${k}_EMAIL`), password: need(`${k}_PASS`), from: `${k}_*` };
+}
+
+export const hasMember = () => !!account("MEMBER");
 
 type Fixtures = {
-  /** A page signed in as the Super Admin from SHO_ADMIN_EMAIL / SHO_ADMIN_PASS. */
+  /** A page signed in as the Super Admin: login("ADMIN"), which is SHO_ADMIN_EMAIL / SHO_ADMIN_PASS outside CI shards. */
   admin: { page: Page; api: Api; user: Json };
-  /** A page signed in as the plain Member from SHO_MEMBER_EMAIL / SHO_MEMBER_PASS. Skips the test when those are not set. */
+  /** A page signed in as the plain Member: login("MEMBER"), SHO_MEMBER_* outside CI shards. Skips the test when none is set. */
   member: { page: Page; api: Api; user: Json };
   /** Register a clean-up. Runs after the test, newest first, and never fails the test. */
   later: (fn: () => Promise<unknown>) => void;
@@ -58,25 +81,33 @@ type Fixtures = {
   anon: Page;
 };
 
-async function as(browser: Browser, email: string, pw: string) {
+/** The fixtures promise a Super Admin and a plain Member; a ZZ account with another role would test the wrong thing. */
+const WANT: Record<Role, string> = { ADMIN: "SUPER_ADMIN", MEMBER: "MEMBER" };
+
+async function as(browser: Browser, role: Role) {
+  const { email, password: pw, from } = login(role);
   const ctx = await browser.newContext({
     baseURL: process.env.STAGING_URL ?? "https://staging.sheethappensofficer.com",
     httpCredentials: process.env.STAGING_USER ? { username: process.env.STAGING_USER, password: process.env.STAGING_PASS ?? "" } : undefined,
   });
   const user = await signIn(ctx, email, pw);
+  if (from !== "SHO_ADMIN_*" && from !== "SHO_MEMBER_*" && user.orgRole !== WANT[role]) {
+    await ctx.close();
+    throw new Error(`The ${role} account from ${from} is ${user.orgRole} on staging, not ${WANT[role]}. Fix its role (Super Admins come from SUPER_ADMIN_EMAILS).`);
+  }
   const page = await ctx.newPage();
   return { ctx, page, api: api(ctx.request), user };
 }
 
 export const test = base.extend<Fixtures>({
   admin: async ({ browser }, use) => {
-    const s = await as(browser, need("SHO_ADMIN_EMAIL"), need("SHO_ADMIN_PASS"));
+    const s = await as(browser, "ADMIN");
     await use({ page: s.page, api: s.api, user: s.user });
     await s.ctx.close();
   },
   member: async ({ browser }, use, info) => {
     if (!hasMember()) { info.skip(true, "Needs SHO_MEMBER_EMAIL and SHO_MEMBER_PASS (a plain Member account on staging)."); return; }
-    const s = await as(browser, need("SHO_MEMBER_EMAIL"), need("SHO_MEMBER_PASS"));
+    const s = await as(browser, "MEMBER");
     await use({ page: s.page, api: s.api, user: s.user });
     await s.ctx.close();
   },
