@@ -6,7 +6,7 @@ import { PrismaClient } from "../src/generated/prisma/client";
 import { projectActivity } from "../src/lib/feed";
 import { account, admin, BASE, patchTask, PW, superAdmin, task, type Account } from "./helpers";
 
-/** AC1–AC3 stay on Pam's @v1 markers. AC4–AC6 are tagged with AC ids until Pam's v2 TC ids land. No AC7. */
+/** Pam's TC ids. AC7 has no TC id yet; that case is the toast test at the bottom. */
 
 const TITLE = "Fix invoice";
 const DELETED = `moved "${TITLE}" to Trash`;
@@ -209,7 +209,7 @@ describe("APL-2674 activity delete undo", () => {
     expect((trash.json.items as { id: string }[]).some((item) => item.id === id)).toBe(true);
   }, 60_000);
 
-  it("APL-2674-AC4@v2 Leader and Admin see Undo on anyone's delete and it restores as Trash does", async () => {
+  it("qa:TC-APL2674-d0b5b573@v2 Leader and Admin see Undo on anyone's delete and it restores as Trash does", async () => {
     const leader = await account("leader");
     const erin = await account("erin");
     const root = await superAdmin();
@@ -255,7 +255,7 @@ describe("APL-2674 activity delete undo", () => {
     await likeTrash(root);
   }, 180_000);
 
-  it("APL-2674-AC4@v2 Another Editor and a Viewer see no Undo on someone else's delete", async () => {
+  it("qa:TC-APL2674-db4b7af8@v2 Another Editor and a Viewer see no Undo on someone else's delete", async () => {
     const leader = await account("leader");
     const erin = await account("erin");
     const other = await account("other");
@@ -291,7 +291,7 @@ describe("APL-2674 activity delete undo", () => {
     expect((trash.json.items as { id: string }[]).some((item) => item.id === id)).toBe(true);
   }, 90_000);
 
-  it("APL-2674-AC5@v2 Activity Undo sends one POST /api/actions/{actionId}/undo with {\"anyway\":false}", async () => {
+  it("qa:TC-APL2674-a4fde780@v2 Activity Undo sends one POST /api/actions/{actionId}/undo with {\"anyway\":false}", async () => {
     const leader = await account("leader");
     const editor = await account("editor");
     const projectId = await alpha(leader, editor);
@@ -320,7 +320,7 @@ describe("APL-2674 activity delete undo", () => {
     expect(posts).toEqual([{ path: `/api/actions/${actionId}/undo`, body: '{"anyway":false}' }]);
   }, 90_000);
 
-  it("APL-2674-AC6@v2 An activity row older than 30 days shows Too old to undo and no Undo", async () => {
+  it("An activity row older than 30 days shows Too old to undo to people who could undo it", async () => {
     const leader = await account("leader");
     const editor = await account("editor");
     const other = await account("other");
@@ -356,15 +356,44 @@ describe("APL-2674 activity delete undo", () => {
     }
   }, 120_000);
 
-  it("APL-2674-AC6@v2 Exactly 30×24h still shows Undo; one millisecond later is Too old to undo", async () => {
+  it("qa:TC-APL2674-d3c54eaf@v3 Exactly 30×24h still shows Undo", async () => {
     const leader = await account("leader");
     const editor = await account("editor");
     const projectId = await alpha(leader, editor);
     const exactTask = await task(editor, projectId, { title: TITLE });
-    const plusTask = await task(editor, projectId, { title: "Fix invoice 2" });
     expect((await editor.c.del(`/api/tasks/${exactTask}`)).status).toBe(204);
-    expect((await editor.c.del(`/api/tasks/${plusTask}`)).status).toBe(204);
     const exactId = await ageLog(exactTask, editor.id, "task.deleted", 0);
+    const name = await displayName(editor);
+
+    const realNow = Date.now;
+    const T = realNow();
+    try {
+      Date.now = () => T;
+      await setLogTime(exactId, new Date(T - WINDOW));
+      const feed = await projectActivity({ id: leader.id, orgRole: "MEMBER" }, projectId);
+      expect(feed.items.find((item) => item.id === exactId)?.undo).toBe("available");
+    } finally {
+      Date.now = realNow;
+    }
+
+    // A live page request cannot land on a 1ms boundary. The frozen feed call above is the exact check.
+    await setLogTime(exactId, new Date(Date.now() - WINDOW + 60_000));
+    const ctx = await signedIn(leader.email);
+    try {
+      const page = await openActivity(ctx, projectId);
+      await clickUndo(page, name);
+      await expect.poll(async () => (await leader.c.get(`/api/tasks/${exactTask}`)).status, { timeout: 20_000 }).toBe(200);
+    } finally {
+      await ctx.close();
+    }
+  }, 90_000);
+
+  it("qa:TC-APL2674-6b35ff98@v3 30×24h plus 1 ms shows Too old to undo", async () => {
+    const leader = await account("leader");
+    const editor = await account("editor");
+    const projectId = await alpha(leader, editor);
+    const plusTask = await task(editor, projectId, { title: "Fix invoice 2" });
+    expect((await editor.c.del(`/api/tasks/${plusTask}`)).status).toBe(204);
     const plusId = await ageLog(plusTask, editor.id, "task.deleted", 0);
     const name = await displayName(editor);
     const plusWhat = 'moved "Fix invoice 2" to Trash';
@@ -373,31 +402,24 @@ describe("APL-2674 activity delete undo", () => {
     const T = realNow();
     try {
       Date.now = () => T;
-      await setLogTime(exactId, new Date(T - WINDOW));
       await setLogTime(plusId, new Date(T - WINDOW - 1));
       const feed = await projectActivity({ id: leader.id, orgRole: "MEMBER" }, projectId);
-      expect(feed.items.find((item) => item.id === exactId)?.undo).toBe("available");
       expect(feed.items.find((item) => item.id === plusId)?.undo).toBe("too_old");
     } finally {
       Date.now = realNow;
     }
 
-    // A page request cannot land on a 1ms boundary. The frozen feed call above is the exact 30×24h check.
-    await setLogTime(exactId, new Date(Date.now() - WINDOW + 60_000));
     await setLogTime(plusId, new Date(Date.now() - WINDOW - 1));
     const ctx = await signedIn(leader.email);
     try {
       const page = await openActivity(ctx, projectId);
-      await deleteRow(page, name).getByRole("button", { name: "Undo" }).waitFor({ state: "visible", timeout: 30_000 });
       await expectTooOld(page, name, plusWhat);
-      await clickUndo(page, name);
-      await expect.poll(async () => (await leader.c.get(`/api/tasks/${exactTask}`)).status, { timeout: 20_000 }).toBe(200);
     } finally {
       await ctx.close();
     }
   }, 90_000);
 
-  it("APL-2674-AC6@v2 An old task.updated row also shows Too old to undo and no Undo", async () => {
+  it("qa:TC-APL2674-8633ebdd@v1 An old task.updated row also shows Too old to undo and no Undo", async () => {
     const leader = await account("leader");
     const editor = await account("editor");
     const projectId = await alpha(leader, editor);
@@ -415,5 +437,48 @@ describe("APL-2674 activity delete undo", () => {
       await ctx.close();
     }
     expect((await editor.c.get(`/api/tasks/${id}`)).json.task.title).toBe(RENAMED_TO);
+  }, 90_000);
+
+  // AC v2.3 leaves AC7 as the v2.1 toast: 10 seconds, then it is gone, and the task stays in Trash.
+  // Pam has not assigned a TC id for this case.
+  it("APL-2674-AC7@v2 Undo toast disappears after 10 seconds and the task stays restorable", async () => {
+    const leader = await account("leader");
+    const editor = await account("editor");
+    const projectId = await alpha(leader, editor);
+    const id = await task(leader, projectId, { title: TITLE });
+    const leaderName = await displayName(leader);
+
+    const ctx = await signedIn(leader.email);
+    try {
+      const page = await ctx.newPage();
+      await page.goto(`/projects/${projectId}`, { waitUntil: "load", timeout: 45_000 });
+      await page.locator(".item.click", { hasText: TITLE }).click();
+      await page.getByRole("button", { name: "Move to Trash" }).click();
+      const dialog = page.getByRole("dialog", { name: "Move to Trash?" });
+      await dialog.getByRole("button", { name: "Move to Trash" }).click();
+
+      const toast = page.locator(".undo-toast");
+      await toast.waitFor({ state: "visible", timeout: 20_000 });
+      expect(await toast.innerText()).toContain("Task deleted");
+      await toast.getByRole("button", { name: "Undo" }).waitFor({ state: "visible" });
+      await toast.waitFor({ state: "hidden", timeout: 15_000 });
+
+      await page.goto(`/projects/${projectId}/trash`, { waitUntil: "load", timeout: 45_000 });
+      const row = page.locator("tr", { hasText: TITLE });
+      await row.waitFor({ state: "visible", timeout: 30_000 });
+      expect(await row.innerText()).toContain("30 days");
+
+      await page.goto(`/projects/${projectId}/activity`, { waitUntil: "load", timeout: 45_000 });
+      await deleteRow(page, leaderName).getByRole("button", { name: "Undo" }).waitFor({ state: "visible", timeout: 30_000 });
+
+      await page.goto(`/projects/${projectId}/trash`, { waitUntil: "load", timeout: 45_000 });
+      await page.locator("tr", { hasText: TITLE }).getByRole("button", { name: "Restore" }).click();
+      await expect.poll(async () => (await leader.c.get(`/api/tasks/${id}`)).status, { timeout: 20_000 }).toBe(200);
+    } finally {
+      await ctx.close();
+    }
+
+    const trash = await leader.c.get(`/api/projects/${projectId}/trash`);
+    expect((trash.json.items as { id: string }[]).some((item) => item.id === id)).toBe(false);
   }, 90_000);
 });
