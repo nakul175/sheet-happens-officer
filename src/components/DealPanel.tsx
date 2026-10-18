@@ -31,6 +31,11 @@ export function closingAlert(data: { openTasks?: number; tasks?: Blocked["tasks"
   return { openTasks, tasks: (data?.tasks ?? []).slice(0, 20) };
 }
 
+/** One open task stays singular ("1 open task"); every other count is plural. */
+export function openTaskAlertText(openTasks: number) {
+  return `Close or move these ${openTasks} open task${openTasks === 1 ? "" : "s"} first:`;
+}
+
 export type StageInitial = { err?: string | null; blocked?: Blocked | null; need?: string[] };
 export function StageDialog({ projectId, stage, deal, initial, onClose, onDone }: { projectId: string; stage: Stage; deal: Pick<DealBlock, "details">; initial?: StageInitial; onClose: () => void; onDone: () => void }) {
   const [reason, setReason] = useState("");
@@ -76,7 +81,7 @@ export function StageDialog({ projectId, stage, deal, initial, onClose, onDone }
       ))}
       {blocked && (
         <div className="err" role="alert">
-          Close or move these {blocked.openTasks} open task{blocked.openTasks === 1 ? "" : "s"} first:
+          {openTaskAlertText(blocked.openTasks)}
           <ul style={{ margin: "6px 0 0 18px" }}>
             {blocked.tasks.map((t) => <li key={t.id}><Link href={`/projects/${projectId}?task=${t.id}`}>{t.title}</Link>{t.assignee ? ` · ${t.assignee}` : ""}</li>)}
           </ul>

@@ -1,6 +1,6 @@
 // APL-2691: the Move to Won dialog must show the open-task refusal (SHO-US-10.3 AC6) before anyone clicks Move.
 import { describe, expect, it } from "vitest";
-import { closingAlert, stageClosesDeal } from "../src/components/DealPanel";
+import { closingAlert, openTaskAlertText, stageClosesDeal } from "../src/components/DealPanel";
 import { openTaskBlock } from "../src/lib/deals";
 import { account, admin, istDate, project, superAdmin, task, withVersion, type Account } from "./helpers";
 
@@ -22,6 +22,10 @@ describe("closing alert payload", () => {
     expect(closingAlert({ openTasks: 1 })).toEqual({ openTasks: 1, tasks: [] });
     expect(openTaskBlock(tasks)).toEqual({ openTasks: 21, tasks: tasks.slice(0, 20).map(({ id, title }) => ({ id, title })) });
     expect(openTaskBlock([])).toEqual({ openTasks: 0, tasks: [] });
+    expect(openTaskAlertText(21)).toContain("21");
+    expect(openTaskAlertText(21)).toContain("open tasks");
+    expect(openTaskAlertText(1)).toContain("1 open task");
+    expect(openTaskAlertText(1)).not.toContain("open tasks");
   });
 });
 
@@ -65,6 +69,7 @@ describe("open tasks that block Won (APL-2691)", () => {
     const won = pro.stages.find((s) => s.name === "Won")!.id;
     const blocked = await lead.c.post(`/api/projects/${id}/stage`, { stageId: won });
     expect(blocked.status).toBe(409);
+    expect(blocked.json.openTasks).toBe(21);
     expect(blocked.json.error).toContain("21 tasks are still open");
     expect(blocked.json.tasks).toEqual(preview.json.tasks);
     expect((await lead.c.get(`/api/projects/${id}`)).json.project.archived).toBe(false);
