@@ -747,6 +747,26 @@ fi
 if run_guard TASKBOARD_URL=https://app.sheethappensofficer.com --grep @readonly -g @readonly -G @write >"$WORK/out" 2>&1; then
   fail "two grep flags were accepted as one exact token"
 fi
+run_guard TASKBOARD_URL=https://app.sheethappensofficer.com -g@readonly -G@write
+if run_guard TASKBOARD_URL=https://app.sheethappensofficer.com '-g.*' -G @write >"$WORK/out" 2>&1; then
+  fail "attached -g.* was treated as the read-only smoke"
+fi
+if run_guard TASKBOARD_URL=https://app.sheethappensofficer.com -g @readonly '-G@nope' >"$WORK/out" 2>&1; then
+  fail "attached -G@nope was treated as the read-only smoke"
+fi
+if run_guard TASKBOARD_URL=https://app.sheethappensofficer.com '-gfoo' -G @write >"$WORK/out" 2>&1; then
+  fail "attached -gfoo was treated as the read-only smoke"
+fi
+if run_guard TASKBOARD_URL=https://app.sheethappensofficer.com '-g=foo' -G @write >"$WORK/out" 2>&1; then
+  fail "attached -g=foo was treated as the read-only smoke"
+fi
+if run_guard TASKBOARD_URL=https://app.sheethappensofficer.com --grep @readonly --grep-invert @write '-g.*' '-G@nope' >"$WORK/out" 2>&1; then
+  fail "extra attached grep flags were allowed beside the exact pair"
+fi
+if run_guard TASKBOARD_URL=https://app.sheethappensofficer.com --grep @readonly --grep-invert @write --headed >"$WORK/out" 2>&1; then
+  fail "an unknown option was allowed beside the exact pair"
+fi
+pass "attached and extra grep flags fail closed"
 run_guard TASKBOARD_URL=http://localhost:3100 --grep @write
 if run_guard TASKBOARD_URL=https://app.sheethappensofficer.com ZZ_PREFIX=ZZ-TEST-01 --seed --grep @readonly --grep-invert @write >"$WORK/out" 2>&1; then
   fail "ZZ-TEST seeding was allowed against production"
@@ -780,6 +800,15 @@ if grep -q 'exports is not defined' "$WORK/out"; then
 fi
 if playwright_list -g '@readonly|' -G @write >"$WORK/out" 2>&1; then
   fail "playwright test --list accepted a short-flag regex"
+fi
+if grep -q 'exports is not defined' "$WORK/out"; then
+  fail "playwright transformed the host guard into a broken module"
+fi
+if playwright_list --grep @readonly --grep-invert @write '-g.*' '-G@nope' >"$WORK/out" 2>&1; then
+  fail "playwright test --list accepted attached extra grep flags"
+fi
+if grep -q 'writes stay off production' "$WORK/out"; then
+  fail "playwright listed the @write test"
 fi
 if grep -q 'exports is not defined' "$WORK/out"; then
   fail "playwright transformed the host guard into a broken module"

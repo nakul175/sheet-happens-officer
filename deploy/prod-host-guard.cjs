@@ -46,31 +46,56 @@ function productionTarget(env = process.env) {
   });
 }
 
-// Exact flag names only. `-g` must not also match `-grep`, and `=` is a value form.
-function flagValues(argv, names) {
-  const wanted = Array.isArray(names) ? names : [names];
-  const values = [];
-  for (let i = 0; i < argv.length; i += 1) {
-    const arg = argv[i];
-    for (const name of wanted) {
-      if (arg === name) {
-        values.push(argv[i + 1] ?? "");
-        break;
-      }
-      const prefix = `${name}=`;
-      if (arg.startsWith(prefix)) {
-        values.push(arg.slice(prefix.length));
-        break;
-      }
-    }
+// Commander accepts `-gVALUE` and `-GVALUE` with no separator, and ORs extra greps.
+// One `@readonly` grep and one `@write` grep-invert are allowed. A second grep, an
+// attached value that is not that token, or any other option is refused.
+// `--list` does not select tests; the harness uses it to prove Playwright can load this file.
+function takeFlag(argv, index, arg, name) {
+  if (arg === name) return { value: argv[index + 1] ?? "", index: index + 1 };
+  const eq = `${name}=`;
+  if (arg.startsWith(eq)) return { value: arg.slice(eq.length), index };
+  if (name.length === 2 && arg.startsWith(name) && arg.length > name.length) {
+    return { value: arg.slice(name.length), index };
   }
-  return values;
+  return null;
 }
 
 function readonlySmoke(argv) {
-  const grep = flagValues(argv, ["--grep", "-g"]);
-  const invert = flagValues(argv, ["--grep-invert", "-G"]);
-  return grep.length === 1 && grep[0] === "@readonly" && invert.length === 1 && invert[0] === "@write";
+  const greps = [];
+  const inverts = [];
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = argv[i];
+    if (arg === "--list") continue;
+    if (!arg.startsWith("-") || arg === "-") continue;
+
+    if (arg === "--grep-invert" || arg.startsWith("--grep-invert=")) {
+      const taken = takeFlag(argv, i, arg, "--grep-invert");
+      inverts.push(taken.value);
+      i = taken.index;
+      continue;
+    }
+    if (arg.startsWith("--grep")) {
+      if (arg !== "--grep" && !arg.startsWith("--grep=")) return false;
+      const taken = takeFlag(argv, i, arg, "--grep");
+      greps.push(taken.value);
+      i = taken.index;
+      continue;
+    }
+    if (arg === "-g" || (arg.startsWith("-g") && !arg.startsWith("--"))) {
+      const taken = takeFlag(argv, i, arg, "-g");
+      greps.push(taken.value);
+      i = taken.index;
+      continue;
+    }
+    if (arg === "-G" || (arg.startsWith("-G") && !arg.startsWith("--"))) {
+      const taken = takeFlag(argv, i, arg, "-G");
+      inverts.push(taken.value);
+      i = taken.index;
+      continue;
+    }
+    return false;
+  }
+  return greps.length === 1 && greps[0] === "@readonly" && inverts.length === 1 && inverts[0] === "@write";
 }
 
 function zzTestRequested(env = process.env, argv = []) {
