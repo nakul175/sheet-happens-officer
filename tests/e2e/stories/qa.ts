@@ -119,6 +119,53 @@ async function sinkMails(email: string): Promise<Mail[]> {
   return found;
 }
 
+type QaMail = { to: string; subject: string; text: string; sentAt: string };
+
+/** X-QA-Token for GET /api/qa/mail. Authorization stays Basic when the staging gate is configured. */
+function qaMailHeaders(token: string): Record<string, string> {
+  const headers: Record<string, string> = { "x-qa-token": token };
+  const user = process.env.STAGING_USER;
+  if (user) headers.authorization = `Basic ${Buffer.from(`${user}:${process.env.STAGING_PASS ?? ""}`, "utf8").toString("base64")}`;
+  return headers;
+}
+
+/**
+ * Newest captured message from the APL-2681 sink (GET /api/qa/mail).
+ * Polls for up to 60 seconds. The error names neither the address, the body, nor the token.
+ */
+export async function waitForQaMail(to: string, subject: string, options: { timeoutMs?: number; baseUrl?: string; since?: string } = {}): Promise<QaMail> {
+  const token = process.env.MAIL_SINK_TOKEN ?? "";
+  if (!token) throw new Error("MAIL_SINK_TOKEN is not set");
+  const timeoutMs = options.timeoutMs ?? 60_000;
+  const base = (options.baseUrl ?? BASE_URL).replace(/\/$/, "");
+  const deadline = Date.now() + timeoutMs;
+  let lastError = "no matching message";
+  while (Date.now() <= deadline) {
+    try {
+      const url = new URL("/api/qa/mail", base);
+      url.searchParams.set("to", to);
+      if (options.since) url.searchParams.set("since", options.since);
+      const res = await fetch(url, { headers: qaMailHeaders(token), signal: AbortSignal.timeout(5_000) });
+      if (res.status === 200) {
+        const messages = (await res.json()) as QaMail[];
+        const hit = Array.isArray(messages) ? messages.find((message) => (message.subject ?? "").includes(subject)) : undefined;
+        if (hit?.text) return hit;
+        lastError = "no matching message";
+      } else if (res.status === 404 || res.status === 401 || res.status === 400) {
+        throw new Error(`Mail sink returned HTTP ${res.status}`);
+      } else {
+        lastError = `HTTP ${res.status}`;
+      }
+    } catch (err) {
+      if (err instanceof Error && err.message.startsWith("Mail sink returned HTTP")) throw err;
+      lastError = "request failed";
+    }
+    if (Date.now() >= deadline) break;
+    await new Promise((resolve) => setTimeout(resolve, Math.min(250, deadline - Date.now())));
+  }
+  throw new Error(`Timed out after ${timeoutMs}ms waiting for mail (${lastError})`);
+}
+
 /** The next matching message in the sink. `previousToken` skips a link that was already read. Gives up after 60 seconds. */
 export async function waitForSinkMail(email: string, subjectIncludes: string, previousToken?: string | null): Promise<SinkMail> {
   const deadline = Date.now() + 60_000;
