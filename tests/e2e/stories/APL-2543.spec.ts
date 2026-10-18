@@ -4,7 +4,7 @@
 // (tests/crm5.test.ts does it with SQL). The stalled-deals job also needs JOB_SECRET, which a signed-in
 // session does not have, and running it here would notify real Leaders on staging.
 // AC4 and AC6 are the parts a session can see. The rest stay skipped: a 30-day history, or the stalled-deals cron.
-import { test, expect, zz } from "../support";
+import { test, expect, zz, withTaskVersion } from "../support";
 import { storyGate } from "../helpers/qa-alias";
 import { ageDeal, ageNotification, runLocalJob } from "../helpers/own-row";
 import { ymd, type Who } from "../g2";
@@ -112,7 +112,7 @@ test("AC5: archived, Paused, Done and Lost deals are never flagged", async ({ ad
   expect((await admin.api.post(`/api/projects/${hold.id}/stage`, { stageId: stage("On hold").id, reason: "ZZ-TEST pause" })).status).toBe(200);
   for (const deal of [won, lost]) {
     const step = (await admin.api.get(`/api/projects/${deal.id}`)).json.project.deal.nextStep.id as string;
-    expect((await admin.api.post(`/api/tasks/${step}/complete`, {})).status).toBe(200);
+    expect((await admin.api.post(`/api/tasks/${step}/complete`, await withTaskVersion(admin.api, step))).status).toBe(200);
   }
   expect((await admin.api.post(`/api/projects/${won.id}/stage`, { stageId: stage("Won").id })).status).toBe(200);
   expect((await admin.api.post(`/api/projects/${lost.id}/stage`, { stageId: stage("Lost").id, reason: "ZZ-TEST lost" })).status).toBe(200);

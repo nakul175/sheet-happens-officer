@@ -2,7 +2,7 @@
 // One test per acceptance criterion. ZZ-TEST deals, organisations and people are archived or deactivated afterwards.
 // The Super Admin acts as Leader except where AC1 needs someone else to move the stage. The plain Member is that Editor,
 // and in AC4 the Viewer. workers is 1 in playwright.config.ts. Traces stay off.
-import { expect, zz } from "../support";
+import { expect, zz, withTaskVersion } from "../support";
 import { test } from "../helpers/story-people";
 import { storyGate } from "../helpers/qa-alias";
 import { getTask, ghost, newProject, newTask, ymd, type Who } from "../g2";
@@ -74,7 +74,7 @@ test("AC1: the stage changes, the log keeps the before-state, Undo restores it, 
   const d = await makeDeal(admin, later, { label: "2529 undo", leaderId: member.user.id, step: zz("leader step") });
   expect((await admin.api.post(`/api/projects/${d.id}/members`, { userId: assignee.id, role: "EDITOR" })).status).toBe(201);
   const stepId = (await projectOf(admin, d.id)).deal.nextStep!.id;
-  expect((await admin.api.post(`/api/tasks/${stepId}/assign`, { assigneeId: assignee.id })).status).toBe(200);
+  expect((await admin.api.post(`/api/tasks/${stepId}/assign`, await withTaskVersion(admin.api, stepId, { assigneeId: assignee.id }))).status).toBe(200);
   expect((await getTask(admin, stepId)).assignee.id).toBe(assignee.id);
 
   await member.page.goto("/");
@@ -175,7 +175,7 @@ test("AC3: a stage that lists empty required fields refuses the move until they 
 
   if (stage.category === "DONE" || stage.category === "LOST") {
     const step = (await projectOf(admin, id)).deal.nextStep!.id;
-    expect((await admin.api.post(`/api/tasks/${step}/complete`, {})).status).toBe(200);
+    expect((await admin.api.post(`/api/tasks/${step}/complete`, await withTaskVersion(admin.api, step))).status).toBe(200);
   }
   const details = (await projectOf(admin, id)).deal.details ?? {};
   const missing = stage.requiredFields.filter((k) => empty(details[k]));
@@ -277,7 +277,7 @@ test("AC6: Won and Lost are refused while a task is open, the dialog lists the f
   await dialog.getByRole("button", { name: "Cancel" }).click();
   expect((await projectOf(admin, wonDeal.id)).deal.stage.name).toBe("Lead");
 
-  for (const task of made) expect((await admin.api.post(`/api/tasks/${task.id}/complete`, {})).status, task.title).toBe(200);
+  for (const task of made) expect((await admin.api.post(`/api/tasks/${task.id}/complete`, await withTaskVersion(admin.api, task.id))).status, task.title).toBe(200);
   const stamps = [];
   for (const task of made) stamps.push((await getTask(admin, task.id)).completedAt as string);
   expect(stamps.every(Boolean)).toBe(true);
@@ -307,7 +307,7 @@ test("AC6: Won and Lost are refused while a task is open, the dialog lists the f
   await dialog.getByRole("button", { name: "Cancel" }).click();
 
   const lostStep = (await projectOf(admin, lostDeal.id)).deal.nextStep!.id;
-  expect((await admin.api.post(`/api/tasks/${lostStep}/complete`, {})).status).toBe(200);
+  expect((await admin.api.post(`/api/tasks/${lostStep}/complete`, await withTaskVersion(admin.api, lostStep))).status).toBe(200);
   const lostStamp = (await getTask(admin, lostStep)).completedAt;
   await admin.page.getByRole("group", { name: "Stage" }).getByRole("button", { name: "Lost", exact: true }).click();
   dialog = admin.page.getByRole("dialog", { name: "Move to Lost" });
@@ -325,7 +325,7 @@ test("AC7: a stage change does not set completedAt and does not touch a Section"
   const d = await makeDeal(admin, later, { label: "2529 sections", step: zz("stays open") });
   const step = (await projectOf(admin, d.id)).deal.nextStep!;
   const doneId = await newTask(admin, d.id, { title: zz("already done") });
-  expect((await admin.api.post(`/api/tasks/${doneId}/complete`, {})).status).toBe(200);
+  expect((await admin.api.post(`/api/tasks/${doneId}/complete`, await withTaskVersion(admin.api, doneId))).status).toBe(200);
   const openBefore = await getTask(admin, step.id);
   const doneBefore = await getTask(admin, doneId);
   const sections = (await projectOf(admin, d.id)).sections;

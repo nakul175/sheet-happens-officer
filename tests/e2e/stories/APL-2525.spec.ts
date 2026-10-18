@@ -2,7 +2,7 @@
 // One test per acceptance criterion. People are nakul17+ aliases signed in with SHO_QA_PASS.
 // Deals, organisations and tasks are ZZ-TEST and archived afterwards.
 // Pam left no qa:TC cases on this issue.
-import { test, expect, zz } from "../support";
+import { test, expect, zz, withTaskVersion } from "../support";
 import { getTask, newProject, newTask, ymd, type Who } from "../g2";
 import { pipelines, type Stage } from "../helpers/deal-board";
 import { createDeal, createOrg, dealBody, projectOf } from "../helpers/claude-a";
@@ -122,7 +122,7 @@ test("AC4: the next step is the earliest-due open dated task", async ({ browser,
   const first = await projectOf(admin, deal.id);
   expect(first.deal.nextStep.title).toBe(sooner);
   expect(first.deal.nextStep.id).toBe(soonerId);
-  expect((await admin.api.post(`/api/tasks/${soonerId}/complete`, {})).status).toBe(200);
+  expect((await admin.api.post(`/api/tasks/${soonerId}/complete`, await withTaskVersion(admin.api, soonerId))).status).toBe(200);
   const second = await projectOf(admin, deal.id);
   expect(second.deal.nextStep.title).toBe(laterTitle);
   expect(second.deal.nextStep.dueDate).toBe(ymd(12));
@@ -144,7 +144,7 @@ test("AC5: Won and Lost are refused while a task is open, and a finished move le
   expect(lostOpen.status).toBe(409);
   expect((await getTask(admin, stepId)).completedAt).toBeNull();
   expect((await projectOf(admin, deal.id)).archived).toBe(false);
-  expect((await admin.api.post(`/api/tasks/${stepId}/complete`, {})).status).toBe(200);
+  expect((await admin.api.post(`/api/tasks/${stepId}/complete`, await withTaskVersion(admin.api, stepId))).status).toBe(200);
   const closedAt = (await getTask(admin, stepId)).completedAt as string;
   const moved = await admin.api.post(`/api/projects/${deal.id}/stage`, { stageId: won.id });
   expect(moved.status, JSON.stringify(moved.json)).toBe(200);
@@ -165,7 +165,7 @@ test("AC6: a working deal with no next step or no logged activity for 30 days no
   later(() => admin.api.post(`/api/projects/${empty.id}/leader`, { newLeaderId: admin.user.id, previousRole: "EDITOR" }));
   const notes = async () => ((await leader.api.get("/api/notifications?limit=200")).json.items ?? []) as { text: string; href: string }[];
   const stepId = (await projectOf(admin, empty.id)).deal.nextStep.id as string;
-  expect((await admin.api.post(`/api/tasks/${stepId}/complete`, {})).status).toBe(200);
+  expect((await admin.api.post(`/api/tasks/${stepId}/complete`, await withTaskVersion(admin.api, stepId))).status).toBe(200);
   const needs = (await notes()).filter((n) => n.text.includes(empty.name) && n.text.includes("needs a next step"));
   expect(needs).toHaveLength(1);
 

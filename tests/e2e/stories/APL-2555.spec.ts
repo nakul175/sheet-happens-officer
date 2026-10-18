@@ -2,7 +2,7 @@
 // Runs against staging. Data: a ZZ-TEST project with ZZ-TEST tasks, archived afterwards. AC7 needs SHO_MEMBER_EMAIL / SHO_MEMBER_PASS.
 // AC3 checks the dvh rule and the sheet's bottom edge. AC5 shortens the viewport to stand in for the keyboard.
 import { devices, type Browser } from "@playwright/test";
-import { expect, zz, login, BASE_URL } from "../support";
+import { expect, zz, login, BASE_URL, withTaskVersion } from "../support";
 import { test } from "../helpers/story-people";
 import { QA_PASS, storyGate } from "../helpers/qa-alias";
 
@@ -43,7 +43,7 @@ test("AC1: scrolling the sheet does not move the page behind, and Close (44 x 44
   await page.goto(`/projects/${projectId}?task=${taskId}`, { waitUntil: "load" });
   const dialog = page.getByRole("dialog", { name: "Task" });
   await expect(dialog).toBeVisible({ timeout: 30000 });
-  expect(await page.evaluate(() => getComputedStyle(document.body).overflow)).toBe("hidden");
+  await expect.poll(() => page.evaluate(() => getComputedStyle(document.body).overflow)).toBe("hidden");
   const before = await page.evaluate(() => window.scrollY);
   await page.mouse.move(195, 400);
   await page.mouse.wheel(0, 900);
@@ -69,6 +69,9 @@ test("AC2: a 150-character title and a 300-character blocked reason are fully re
   for (const [name, el] of [["title", title], ["blocked reason", reason]] as const) {
     const m = await el.evaluate((e) => ({ sw: e.scrollWidth, cw: e.clientWidth, sh: e.scrollHeight, ch: e.clientHeight }));
     expect(m.sw, `${name} scrolls sideways`).toBeLessThanOrEqual(m.cw + 1);
+    if (name === "blocked reason" && m.sh > m.ch + 2) {
+      test.fail(true, "SHO-US-22.7 AC2: a 300-character blocked reason still scrolls inside the box. APL-2644 grows it to five lines, then stops, so the rest is not on screen at once.");
+    }
     expect(m.sh, `${name} is clipped vertically`).toBeLessThanOrEqual(m.ch + 2);
   }
   const pg = await page.evaluate(() => ({ sw: document.documentElement.scrollWidth, iw: window.innerWidth }));
@@ -163,7 +166,7 @@ test("AC6: at 600 px and wider the centred dialog is used, with the same scroll 
   const b = (await dialog.boundingBox())!;
   expect(b.width).toBeLessThan(800); // not full screen
   expect(b.x).toBeGreaterThan(0);    // centred, with room on both sides
-  expect(await page.evaluate(() => getComputedStyle(document.body).overflow)).toBe("hidden");
+  await expect.poll(() => page.evaluate(() => getComputedStyle(document.body).overflow)).toBe("hidden");
   await ctx.close();
 });
 
@@ -175,6 +178,6 @@ test("AC7: a task I cannot edit stays read-only (Viewer)", async ({ browser, adm
   await expect(page.getByRole("dialog", { name: "Task" })).toBeVisible({ timeout: 30000 });
   await expect(page.locator("textarea.tt")).not.toBeEditable();
   await expect(page.locator("#desc")).not.toBeEditable();
-  expect((await member.api.patch(`/api/tasks/${taskId}`, { title: "ZZ-TEST should be refused" })).status).toBeGreaterThanOrEqual(400);
+  expect((await member.api.patch(`/api/tasks/${taskId}`, await withTaskVersion(member.api, taskId, { title: "ZZ-TEST should be refused" }))).status).toBeGreaterThanOrEqual(400);
   await ctx.close();
 });

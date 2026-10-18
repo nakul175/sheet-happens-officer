@@ -3,7 +3,7 @@
 // are archived or deactivated afterwards. The plain Member is the second person.
 // There is no tests/e2e/jim-gate.ts. CRM_VISIBLE is read from the live /api/orgs answer, never a hard skip.
 // Credentials come from the environment. workers is 1 in playwright.config.ts. Traces stay off.
-import { expect, zz, RUN } from "../support";
+import { expect, zz, RUN, withTaskVersion } from "../support";
 import { test } from "../helpers/story-people";
 import { storyGate } from "../helpers/qa-alias";
 
@@ -158,13 +158,13 @@ test("AC2: a contact is not a user and cannot be an assignee, collaborator, appr
   expect((await admin.api.post(`/api/projects/${project.id}/members`, { userId: worker.id, role: "EDITOR" })).status).toBe(201);
   const taskId = await newTask(admin, project.id, { title: zz("held by the worker"), assigneeId: worker.id });
 
-  const asAssignee = await admin.api.post(`/api/tasks/${taskId}/assign`, { assigneeId: contactId });
+  const asAssignee = await admin.api.post(`/api/tasks/${taskId}/assign`, await withTaskVersion(admin.api, taskId, { assigneeId: contactId }));
   expect(asAssignee.status).toBe(400);
   expect(asAssignee.json.error).toContain("assignee");
   const asCollaborator = await admin.api.post(`/api/tasks/${taskId}/collaborators`, { userId: contactId });
   expect(asCollaborator.status).toBe(400);
   expect(asCollaborator.json.error).toContain("member");
-  const asApprover = await admin.api.put(`/api/tasks/${taskId}/approver`, { approverId: contactId });
+  const asApprover = await admin.api.put(`/api/tasks/${taskId}/approver`, await withTaskVersion(admin.api, taskId, { approverId: contactId }));
   expect(asApprover.status).toBe(400);
   expect(asApprover.json.error).toContain("approver");
   const asMember = await admin.api.post(`/api/projects/${project.id}/members`, { userId: contactId, role: "EDITOR" });

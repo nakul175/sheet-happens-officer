@@ -404,7 +404,7 @@ test("AC6: create, edit, parent change, archive and unarchive are logged with no
   await expect(admin.page.getByText("contact.created")).toBeVisible();
   await expect(admin.page.getByText("note.created")).toBeVisible();
   await expect(admin.page.getByText("organisation.parent_changed")).toBeVisible();
-  // History is newest first. The org is archived twice and unarchived twice, so each action text is on two rows.
+  // Undo of archive restores the row and does not write a second unarchived log (APL-2686).
   await expect(admin.page.locator(".row", { hasText: "organisation.archived" }).first()).toBeVisible();
-  await expect(admin.page.getByText("organisation.unarchived")).toHaveCount(2);
+  await expect(admin.page.getByText("organisation.unarchived").first()).toBeVisible();
 });

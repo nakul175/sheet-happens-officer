@@ -4,7 +4,7 @@
 // so Drop (AC2) is skipped and the Convert button on the review row cannot be rendered. AC3 opens the same
 // conversion dialog from the task the row would link to, and checks a Viewer is not offered it.
 // The plain Member is the person who must not see someone else's deal.
-import { expect, zz } from "../support";
+import { expect, zz, withTaskVersion } from "../support";
 import { test } from "../helpers/story-people";
 import { storyGate } from "../helpers/qa-alias";
 import { ageTaskCreated } from "../helpers/own-row";
@@ -121,7 +121,7 @@ test("AC4: a review row opens the deal it describes", async ({ admin, later }) =
   test.setTimeout(120_000);
   const d = await makeDeal(admin, later, { label: "open row" });
   const step = ((await admin.api.get("/api/deals")).json.deals as { id: string; nextStep: { id: string } | null }[]).find((x) => x.id === d.id)!.nextStep!.id;
-  expect((await admin.api.post(`/api/tasks/${step}/complete`, {})).status).toBe(200);
+  expect((await admin.api.post(`/api/tasks/${step}/complete`, await withTaskVersion(admin.api, step))).status).toBe(200);
   expect(ids((await review(admin)).needsNextStep)).toContain(d.id);
 
   await admin.page.goto("/review");
@@ -136,7 +136,7 @@ test("AC5: at 390 px the review does not scroll sideways", async ({ admin, later
   test.setTimeout(120_000);
   const d = await makeDeal(admin, later, { label: "narrow" });
   const step = ((await admin.api.get("/api/deals")).json.deals as { id: string; nextStep: { id: string } | null }[]).find((x) => x.id === d.id)!.nextStep!.id;
-  expect((await admin.api.post(`/api/tasks/${step}/complete`, {})).status).toBe(200);
+  expect((await admin.api.post(`/api/tasks/${step}/complete`, await withTaskVersion(admin.api, step))).status).toBe(200);
   await admin.page.setViewportSize({ width: 390, height: 800 });
   await admin.page.goto("/review");
   await expect(admin.page.getByRole("heading", { name: "Pipeline review" })).toBeVisible();
