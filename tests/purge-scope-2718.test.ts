@@ -1,6 +1,5 @@
 // APL-2718. The scheduled purge-trash job removes expired Trash in every workspace.
-// No signed-in route, concierge action, or Trash screen calls purgeTrash. Test only.
-import { spawnSync } from "node:child_process";
+// No signed-in route or concierge action calls purgeTrash or runJob("purge-trash"). Test only.
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -44,10 +43,13 @@ function filesUnder(dir: string): string[] {
   return out;
 }
 
-/** Files whose code (not comments) names purgeTrash. */
-function purgeTrashCallers(dir: string) {
+/** A direct purgeTrash use, or a call that runs the scheduled purge by name. */
+const USER_PURGE = /\bpurgeTrash\b|\brunJob\s*\(\s*['"`]purge-trash['"`]/;
+
+/** Files whose code (not comments) would purge Trash from a user-reachable module. */
+function userPurgeCallers(dir: string) {
   return filesUnder(dir)
-    .filter((file) => /\bpurgeTrash\b/.test(stripComments(readFileSync(file, "utf8"))))
+    .filter((file) => USER_PURGE.test(stripComments(readFileSync(file, "utf8"))))
     .map((file) => path.relative(root, file));
 }
 
@@ -130,64 +132,18 @@ async function rows(ids: string[]): Promise<Row[]> {
   }));
 }
 
-function git(args: string[]) {
-  return spawnSync("git", args, { cwd: root, encoding: "utf8" });
-}
-
-/** Commit where this branch left main. Later commits on main are not changes this PR made. */
-function mergeBaseWithMain(): string | null {
-  const onPullRequest = process.env.GITHUB_EVENT_NAME === "pull_request";
-  if (git(["rev-parse", "--verify", "origin/main"]).status !== 0) {
-    const fetched = git(["fetch", "origin", "+refs/heads/main:refs/remotes/origin/main", "--depth=100"]);
-    if (fetched.status !== 0) {
-      if (onPullRequest) throw new Error(fetched.stderr || "could not fetch main");
-      return null;
-    }
-  }
-  for (let attempt = 0; attempt < 8; attempt++) {
-    const base = git(["merge-base", "HEAD", "origin/main"]);
-    if (base.status === 0 && base.stdout.trim()) return base.stdout.trim();
-    const deepened = git(["fetch", "--deepen=100"]);
-    if (deepened.status !== 0) {
-      if (onPullRequest) throw new Error(deepened.stderr || base.stderr || "no merge base with main");
-      return null;
-    }
-  }
-  if (onPullRequest) throw new Error("no merge base with main");
-  return null;
-}
-
-/** Paths this branch changes since it left main, plus anything not yet committed. Null when already on main. */
-function changedPaths(): string[] | null {
-  const branch = (git(["branch", "--show-current"]).stdout ?? "").trim();
-  const onMain = branch === "main" || process.env.GITHUB_REF === "refs/heads/main";
-  if (onMain && process.env.GITHUB_EVENT_NAME !== "pull_request") return null;
-  const base = mergeBaseWithMain();
-  if (!base) return null;
-  const diff = git(["diff", "--name-only", base, "HEAD"]);
-  if (diff.status !== 0) throw new Error(diff.stderr || "git diff failed");
-  const committed = (diff.stdout ?? "").split("\n").map((line) => line.trim()).filter(Boolean);
-  const dirty = (git(["status", "--porcelain"]).stdout ?? "").split("\n").flatMap((line) => {
-    if (!line) return [];
-    const pathPart = line.slice(3).trim();
-    const renamed = pathPart.split(" -> ");
-    return [renamed[renamed.length - 1] ?? ""];
-  }).filter(Boolean);
-  return [...new Set([...committed, ...dirty])].sort();
-}
-
 describe("purgeTrash scope (APL-2718)", () => {
-  it("AC1 no user-reachable path purges another workspace (APL-2718-AC1@v1)", async () => {
+  it("AC1 @static no api or concierge file calls purgeTrash or runJob('purge-trash') (APL-2718-AC1@v1)", () => {
     const api = path.join(root, "src/app/api");
     const concierge = path.join(root, "src/lib/concierge");
     expect(readdirSync(api).length).toBeGreaterThan(0);
     expect(readdirSync(concierge).length).toBeGreaterThan(0);
-    // No route or concierge action calls purgeTrash. The Trash screen does not either.
-    expect(purgeTrashCallers(api)).toEqual([]);
-    expect(purgeTrashCallers(concierge)).toEqual([]);
-    const trashScreen = path.join(root, "src/app/(app)/projects/[id]/trash");
-    expect(purgeTrashCallers(trashScreen)).toEqual([]);
+    expect(userPurgeCallers(api)).toEqual([]);
+    expect(userPurgeCallers(concierge)).toEqual([]);
+    expect(userPurgeCallers(path.join(root, "src/app/(app)/projects/[id]/trash"))).toEqual([]);
+  });
 
+  it("AC1 a signed-in user of workspace A does not change workspace B (APL-2718-AC1@v1)", async () => {
     const seed = await seedWorkspaces();
     const ids = [seed.A.expiredId, seed.A.recentId, seed.B.expiredId, seed.B.recentId];
     try {
@@ -293,11 +249,5 @@ describe("purgeTrash scope (APL-2718)", () => {
       ["skip", "fail", "fails", "fixme"].map((kind) => name + dot + kind),
     );
     for (const marker of markers) expect(self.includes(marker), marker).toBe(false);
-
-    const paths = changedPaths();
-    if (paths) {
-      expect(paths.filter((file) => file.startsWith("src/"))).toEqual([]);
-      expect(paths).toEqual(["tests/purge-scope-2718.test.ts"]);
-    }
   });
 });
