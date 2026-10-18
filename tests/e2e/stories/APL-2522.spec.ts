@@ -1,20 +1,16 @@
 // APL-2522 story spec for the edge cases tracked by APL-2660.
 // workers=1: the cases in this file run one after another, and the suite runs one file at a time.
 // Production hosts are refused. Point TASKBOARD_URL at a local server, never at production.
+// Vitest rewrites the live BASE_URL to "/", so the guard reads the value from process start.
 // Thrown-away people and projects use ZZ-TEST names and nakul17+ aliases, then afterAll archives
 // the projects and deactivates the people. Self-signup only accepts @aplyd.com, so the alias is
 // nakul17+…@aplyd.com.
 import { afterAll, describe, expect, it } from "vitest";
 import { canDropOnSection, closeControlOffered, completeTickAllowed, moveMenuSections } from "@/lib/approver-ui";
+import { assertStoryTargetAllowed } from "../base-url";
 import { account, superAdmin, task, withVersion, type Account } from "../../helpers";
 
-const PRODUCTION = new Set(["sheethappensofficer.com", "www.sheethappensofficer.com", "app.sheethappensofficer.com"]);
-for (const raw of [process.env.TASKBOARD_URL, process.env.BASE_URL, process.env.STAGING_URL]) {
-  if (!raw) continue;
-  let host = "";
-  try { host = new URL(raw).hostname.toLowerCase().replace(/\.$/, ""); } catch { host = raw; }
-  if (PRODUCTION.has(host)) throw new Error(`Refusing to run story tests against production (${host}).`);
-}
+assertStoryTargetAllowed();
 
 type Note = { id: string; text: string; href: string; createdAt: string };
 type BoardTask = { id: string; canClose: boolean; sectionId: string; completedAt: string | null };
