@@ -82,7 +82,7 @@ test("AC4: in the task panel the description field and the footer actions are re
   await desc.scrollIntoViewIfNeeded();
   await expect(desc).toBeVisible();
   await desc.fill("ZZ-TEST description");
-  await page.getByLabel("Title").first().focus(); // leaves the field: the panel saves on blur
+  await page.locator("textarea.tt").focus(); // leaves the field: the panel saves on blur
   const close = page.getByRole("button", { name: "Close" }).first();
   await close.scrollIntoViewIfNeeded();
   await expect(close).toBeInViewport();
@@ -104,7 +104,7 @@ test("AC6: a 150-character title wraps and stays editable without sideways scrol
   const ctx = await phone(browser, 320, 700);
   const page = await ctx.newPage();
   await page.goto(`/projects/${projectId}?task=${longId}`, { waitUntil: "load" });
-  const title = page.getByLabel("Title").first();
+  const title = page.locator("textarea.tt");
   await expect(title).toBeVisible();
   const m = await page.evaluate(() => ({ sw: document.documentElement.scrollWidth, iw: window.innerWidth }));
   expect(m.sw).toBeLessThanOrEqual(m.iw + 1);

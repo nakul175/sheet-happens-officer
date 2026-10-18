@@ -53,13 +53,17 @@ test("AC1: scrolling the sheet does not move the page behind, and Close (44 x 44
   await ctx.close();
 });
 
+// Product defect found 18 Oct 2026 (against dbfbab2): for an editor the 300-character blocked reason sits in a 2-row text box
+// (scrollHeight 206 px in a 56 px box), so most of it is hidden until you scroll inside the box. The title is fine.
+// The story's "After" says reasons are wrapped and AC2 says fully readable. Remove test.fail() once the box grows to fit.
 test("AC2: a 150-character title and a 300-character blocked reason are fully readable by wrapping", async ({ browser }) => {
+  test.fail(true, "SHO-US-22.7 AC2: blocked-reason box is 2 rows high, text needs scrolling inside it");
   expect(LONGTITLE.length).toBe(150);
   expect(LONGREASON.length).toBe(300);
   const ctx = await phone(browser, 320, 700);
   const page = await ctx.newPage();
   await page.goto(`/projects/${projectId}?task=${longId}`, { waitUntil: "load" });
-  const title = page.getByLabel("Title").first();
+  const title = page.locator("textarea.tt");
   await expect(title).toBeVisible({ timeout: 30000 });
   const reason = page.getByLabel("Why is it blocked?");
   await expect(reason).toBeVisible();
@@ -77,9 +81,10 @@ test("AC3 (stylesheet part): the phone sheet height uses dvh, not 100vh alone", 
   await admin.page.goto(`/projects/${projectId}?task=${taskId}`);
   const hrefs = await admin.page.$$eval('link[rel="stylesheet"]', (l) => l.map((x) => (x as HTMLLinkElement).href));
   const css = (await Promise.all(hrefs.map(async (h) => (await admin.page.request.get(h)).text()))).join("\n");
-  const rule = css.match(/\.modal\s*\{[^}]*min-height:\s*100vh[^}]*\}/g) ?? [];
-  expect(rule.length).toBeGreaterThan(0);
-  for (const r of rule) expect(r).toMatch(/100dvh/);
+  // The build may keep both lines or fold them into one; either way a dvh height must be there and no bare 100vh.
+  const rules = css.match(/\.modal\s*\{[^}]*min-height:[^}]*\}/g) ?? [];
+  expect(rules.some((r) => /min-height:\s*100dvh/.test(r)), "a .modal rule with min-height 100dvh").toBe(true);
+  for (const r of rules) if (/100vh/.test(r)) expect(r).toMatch(/100dvh/);
 });
 
 test.skip("AC3 (on a device): with Safari's toolbar visible the sheet's bottom edge is visible", () => {
@@ -107,7 +112,7 @@ test("AC4: the Back gesture closes the sheet", async ({ browser }) => {
   const ctx = await phone(browser, 390, 800);
   const page = await ctx.newPage();
   await page.goto(`/projects/${projectId}`, { waitUntil: "load" });
-  await page.locator(".item.click", { hasText: zz("22.7 task") }).first().click();
+  await page.locator(".item.click", { hasText: zz("22.7 task") }).first().locator(".t b").first().click();
   const dialog = page.getByRole("dialog", { name: "Task" });
   await expect(dialog).toBeVisible();
   await page.goBack();
@@ -139,7 +144,7 @@ test("AC7: a task I cannot edit stays read-only (Viewer)", async ({ browser, adm
   const page = await ctx.newPage();
   await page.goto(`/projects/${projectId}?task=${taskId}`, { waitUntil: "load" });
   await expect(page.getByRole("dialog", { name: "Task" })).toBeVisible({ timeout: 30000 });
-  await expect(page.getByLabel("Title").first()).not.toBeEditable();
+  await expect(page.locator("textarea.tt")).not.toBeEditable();
   await expect(page.locator("#desc")).not.toBeEditable();
   expect((await member.api.patch(`/api/tasks/${taskId}`, { title: "ZZ-TEST should be refused" })).status).toBeGreaterThanOrEqual(400);
   await ctx.close();
