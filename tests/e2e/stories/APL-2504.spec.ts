@@ -26,7 +26,9 @@ const mk = async (who: any, p: string, title: string, extra: Record<string, unkn
 };
 const rows = async (who: any, p: string) => (await who.api.get(`/api/projects/${p}/activity`)).json.items as { what: string; who: string; via: string; undo: string }[];
 
+// qa:TC APL-2504 AC1
 test("AC1: each write leaves one row with who, what, and the before and after values", async ({ admin, later }) => {
+  test.info().annotations.push({ type: "qa:TC", description: "APL-2504 AC1" });
   const p = await proj(admin, "log-rows", later);
   const t = await mk(admin, p, zz("old name"));
   expect((await patchCurrent(admin, t, { priority: "HIGH" })).status).toBe(200);
@@ -40,7 +42,9 @@ test("AC1: each write leaves one row with who, what, and the before and after va
   for (const i of items) expect(i.who).toBe(admin.user.name);
 });
 
+// qa:TC APL-2504 AC2
 test("APL-2504 AC2: a change made through the concierge carries a via concierge tag", async ({ admin, later }) => {
+  test.info().annotations.push({ type: "qa:TC", description: "APL-2504 AC2" });
   const p = await proj(admin, "log-via", later);
   const t = await mk(admin, p, zz("screen write"));
   expect((await patchCurrent(admin, t, { priority: "HIGH" })).status).toBe(200);
@@ -66,7 +70,9 @@ test("APL-2504 AC2: a change made through the concierge carries a via concierge 
   }
 });
 
+// qa:TC APL-2504 AC3
 test("AC3: a Member cannot read another project's rows; a Leader reads their own project's rows; an Admin reads all", async ({ admin, member, later }) => {
+  test.info().annotations.push({ type: "qa:TC", description: "APL-2504 AC3" });
   const mine = await proj(admin, "log-led", later, member.user.id); // the member leads this project
   const other = await proj(admin, "log-other", later); // the member is not in this one
   await mk(admin, mine, zz("led task"));
@@ -78,16 +84,21 @@ test("AC3: a Member cannot read another project's rows; a Leader reads their own
   expect((await admin.api.get(`/api/projects/${mine}/activity`)).status).toBe(200);
 });
 
+// qa:TC APL-2504 AC4
 test("AC4: a Leader or Admin opens Activity and sees the project's rows newest first; a Viewer is refused", async ({ admin, member, later }) => {
+  test.info().annotations.push({ type: "qa:TC", description: "APL-2504 AC4" });
   const p = await proj(admin, "log-screen", later);
   const t = await mk(admin, p, zz("screen task"));
   expect((await patchCurrent(admin, t, { priority: "HIGH" })).status).toBe(200);
   await admin.page.goto(`/projects/${p}/activity`);
   // SHO-US-14.14 turned the When/Who/What/How table into one sentence per row (who, what, local date, channel chip, Undo).
   const rowsUi = admin.page.locator(".item.act");
-  await expect(rowsUi.first()).toContainText(`${admin.user.name} changed priority from Medium to High`); // newest first
-  await expect(rowsUi.first().locator("small")).toContainText(/\d{1,2} \w{3}, /); // local date and time
-  await expect(rowsUi.last()).toContainText("created the project");
+  const changed = `${admin.user.name} changed priority from Medium to High`;
+  await expect(rowsUi.filter({ hasText: changed })).toHaveCount(1);
+  const texts = await rowsUi.allInnerTexts();
+  expect(texts[0], "newest row").toContain(changed); // newest first
+  expect(texts[0]).toMatch(/\d{1,2} \w{3}, /); // local date and time
+  expect(texts[texts.length - 1]).toContain("created the project");
   // Viewer: no Activity link and the API refuses
   expect((await admin.api.post(`/api/projects/${p}/members`, { userId: member.user.id, role: "VIEWER" })).status).toBe(201);
   later(() => admin.api.del(`/api/projects/${p}/members/${member.user.id}?handoverTo=${admin.user.id}`));
@@ -99,7 +110,9 @@ test("AC4: a Leader or Admin opens Activity and sees the project's rows newest f
   await expect(member.page.getByText("Only people who work on this project can see Activity.")).toBeVisible();
 });
 
+// qa:TC APL-2504 AC4
 test("AC4 (Editor, per SHO-US-14.14): an Editor sees only rows about their own tasks", async ({ admin, member, later }) => {
+  test.info().annotations.push({ type: "qa:TC", description: "APL-2504 AC4" });
   const p = await proj(admin, "log-editor", later);
   expect((await admin.api.post(`/api/projects/${p}/members`, { userId: member.user.id, role: "EDITOR" })).status).toBe(201);
   later(() => admin.api.del(`/api/projects/${p}/members/${member.user.id}?handoverTo=${admin.user.id}`));
@@ -110,7 +123,9 @@ test("AC4 (Editor, per SHO-US-14.14): an Editor sees only rows about their own t
   expect(seen).not.toContain(zz("leader's task"));
 });
 
+// qa:TC APL-2504 AC5
 test("APL-2504 AC5: rows older than 12 months are removed and a newer row stays", async ({ admin, later }) => {
+  test.info().annotations.push({ type: "qa:TC", description: "APL-2504 AC5" });
   const p = await proj(admin, "log-year", later);
   const t = await mk(admin, p, zz("kept row"));
   expect(sourceOf("src/lib/feed.ts", "const LOG_MONTHS")).toContain("const LOG_MONTHS = 12");
@@ -132,7 +147,9 @@ test("APL-2504 AC5: rows older than 12 months are removed and a newer row stays"
   }
 });
 
+// qa:TC APL-2504 AC6
 test("APL-2504 AC6: Undo is disabled with Too old to undo after 30 days", async ({ admin, later }) => {
+  test.info().annotations.push({ type: "qa:TC", description: "APL-2504 AC6" });
   const p = await proj(admin, "log-old", later);
   const t = await mk(admin, p, zz("age me"));
   expect((await patchCurrent(admin, t, { priority: "LOW" })).status).toBe(200);
@@ -151,7 +168,8 @@ test("APL-2504 AC6: Undo is disabled with Too old to undo after 30 days", async 
     expect(refused.status).toBe(409);
     expect(refused.json.error).toBe("Too old to undo");
     await admin.page.goto(`/projects/${p}/activity`);
-    const line = admin.page.locator(".item.act", { hasText: "changed priority" });
+    const line = admin.page.locator(".item.act").filter({ hasText: zz("age me") }).filter({ hasText: "changed priority" });
+    await expect(line).toHaveCount(1);
     await expect(line.getByText("Too old to undo")).toBeVisible();
     await expect(line.getByRole("button", { name: "Undo" })).toHaveCount(0);
   }

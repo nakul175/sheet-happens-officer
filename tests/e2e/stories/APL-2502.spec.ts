@@ -23,13 +23,15 @@ const mk = async (admin: any, p: string, title: string, extra: Record<string, un
   return r.json.task.id as string;
 };
 
+// qa:TC APL-2502 AC1
 test("AC1: deleting a task with subtasks takes both out of the views, lists them in Trash, and the toast offers Undo", async ({ admin, later }) => {
+  test.info().annotations.push({ type: "qa:TC", description: "APL-2502 AC1" });
   const p = await proj(admin, "trash-del", later);
   const t = await mk(admin, p.id, zz("parent to delete"));
   const sub = await mk(admin, p.id, zz("its subtask"), { parentId: t });
   await admin.page.goto(`/projects/${p.id}?task=${t}`);
   await admin.page.getByRole("button", { name: "Move to Trash" }).click();
-  await admin.page.getByRole("button", { name: "Move to Trash" }).last().click();
+  await admin.page.getByRole("dialog", { name: "Move to Trash?" }).getByRole("button", { name: "Move to Trash" }).click();
   const toast = admin.page.getByRole("status").filter({ hasText: "Task deleted" });
   await expect(toast).toBeVisible();
   await expect(toast.getByRole("button", { name: "Undo" })).toBeVisible();
@@ -41,7 +43,9 @@ test("AC1: deleting a task with subtasks takes both out of the views, lists them
   await expect(admin.page.getByRole("cell", { name: zz("parent to delete") })).toBeVisible();
 });
 
+// qa:TC APL-2502 AC2
 test("AC2: an item stays in Trash for 30 days before it is removed (the purge itself runs from the server's cron)", async ({ admin, later }) => {
+  test.info().annotations.push({ type: "qa:TC", description: "APL-2502 AC2" });
   const p = await proj(admin, "trash-days", later);
   const t = await mk(admin, p.id, zz("kept 30 days"));
   expect((await admin.api.del(`/api/tasks/${t}`)).status).toBe(204);
@@ -51,7 +55,9 @@ test("AC2: an item stays in Trash for 30 days before it is removed (the purge it
   await expect(admin.page.getByRole("row", { name: new RegExp(zz("kept 30 days")) })).toContainText("30 days");
 });
 
+// qa:TC APL-2502 AC2
 test("APL-2502 AC2: purge-trash removes a task that has been in Trash for 30 days and keeps a newer one", async ({ admin, later }) => {
+  test.info().annotations.push({ type: "qa:TC", description: "APL-2502 AC2" });
   const p = await proj(admin, "trash-purge", later);
   const fresh = await mk(admin, p.id, zz("still kept"));
   const aged = await mk(admin, p.id, zz("aged out"));
@@ -80,7 +86,9 @@ test("APL-2502 AC2: purge-trash removes a task that has been in Trash for 30 day
   }
 });
 
+// qa:TC APL-2502 AC3
 test("AC3: a Viewer cannot delete", async ({ admin, member, later }) => {
+  test.info().annotations.push({ type: "qa:TC", description: "APL-2502 AC3" });
   const p = await proj(admin, "trash-viewer", later);
   expect((await admin.api.post(`/api/projects/${p.id}/members`, { userId: member.user.id, role: "VIEWER" })).status).toBe(201);
   later(() => admin.api.del(`/api/projects/${p.id}/members/${member.user.id}?handoverTo=${admin.user.id}`));
@@ -92,7 +100,9 @@ test("AC3: a Viewer cannot delete", async ({ admin, member, later }) => {
   expect((await admin.api.get(`/api/tasks/${t}`)).status).toBe(200);
 });
 
+// qa:TC APL-2502 AC4
 test("AC4: when an Editor deletes a task the Leader is told, and the deleter is not", async ({ admin, member, later }) => {
+  test.info().annotations.push({ type: "qa:TC", description: "APL-2502 AC4" });
   const p = await proj(admin, "trash-notify", later);
   expect((await admin.api.post(`/api/projects/${p.id}/members`, { userId: member.user.id, role: "EDITOR" })).status).toBe(201);
   later(() => admin.api.del(`/api/projects/${p.id}/members/${member.user.id}?handoverTo=${admin.user.id}`));
@@ -106,7 +116,9 @@ test("AC4: when an Editor deletes a task the Leader is told, and the deleter is 
   expect(theirs.some((n) => n.text.includes(zz("who is told")) && /to Trash/.test(n.text))).toBe(false);
 });
 
+// qa:TC APL-2502 AC5
 test("AC5: the Leader restores a task with its subtasks to its original Section; an Editor cannot restore", async ({ admin, member, later }) => {
+  test.info().annotations.push({ type: "qa:TC", description: "APL-2502 AC5" });
   const p = await proj(admin, "trash-restore", later);
   expect((await admin.api.post(`/api/projects/${p.id}/members`, { userId: member.user.id, role: "EDITOR" })).status).toBe(201);
   later(() => admin.api.del(`/api/projects/${p.id}/members/${member.user.id}?handoverTo=${admin.user.id}`));

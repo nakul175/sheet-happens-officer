@@ -1,5 +1,6 @@
 // SHO-BUG Hide Undo toast for Editors after delete (Linear APL-2649, PR #14; follow-up to APL-2640). Acceptance criteria AC1 and AC2.
 // The Super Admin acts as Leader and Admin; the plain Member (SHO_MEMBER_*) is the Editor. Projects are ZZ-TEST and archived afterwards.
+// An Editor's delete does not carry an Undo id, so the toast is not raised.
 import { test, expect } from "../support";
 import { newProject, newTask, type Who } from "../g2";
 import { deleteTask, undoToast } from "../helpers/jim-http";
@@ -17,7 +18,9 @@ async function trashFromScreen(who: Who, projectId: string, taskId: string) {
 }
 
 test.describe("APL-2649", () => {
+  // qa:TC APL-2649 AC1
   test("AC1: an Editor who deletes a task does not see the Undo toast", async ({ admin, member, later }) => {
+    test.info().annotations.push({ type: "qa:TC", description: "APL-2649 AC1" });
     const p = await newProject(admin, later, { label: "2649 editor", members: [{ who: member, role: "EDITOR" }] });
     const t = await newTask(admin, p.id);
     await trashFromScreen(member, p.id, t);
@@ -31,7 +34,9 @@ test.describe("APL-2649", () => {
     expect(del.undoId).toBeNull();
   });
 
+  // qa:TC APL-2649 AC2
   test("AC2: a Leader or Admin who deletes a task still sees the Undo toast, and Undo brings the task back", async ({ admin, later }) => {
+    test.info().annotations.push({ type: "qa:TC", description: "APL-2649 AC2" });
     const p = await newProject(admin, later, { label: "2649 leader" });
     const t = await newTask(admin, p.id);
     await trashFromScreen(admin, p.id, t);
