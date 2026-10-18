@@ -165,7 +165,8 @@ test("APL-2505 > AC6: an action older than 30 days cannot be undone and says Too
     expect(refused.json.error).toBe("Too old to undo");
     expect(refused.json.tooOld).toBe(true);
     await admin.page.goto(`/projects/${p.id}/activity`);
-    const line = admin.page.locator(".item.act", { hasText: "renamed" }).first();
+    const line = admin.page.locator(".item.act").filter({ hasText: `renamed "${zz("aged before")}"` });
+    await expect(line).toHaveCount(1);
     await expect(line.getByText("Too old to undo")).toBeVisible();
     await expect(line.getByRole("button", { name: "Undo" })).toHaveCount(0);
     expect((await getTask(admin, id)).title).toBe(zz("aged after"));

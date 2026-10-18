@@ -96,7 +96,8 @@ test("AC4: Undo restores a task, a project and a membership change", async ({ ad
 
   const undo = async (what: string, undone: string) => {
     await admin.page.goto(`/projects/${project.id}/activity`);
-    const row = admin.page.locator(".item.act", { hasText: what }).first();
+    const row = admin.page.locator(".item.act").filter({ hasText: what }).filter({ hasNotText: "added " });
+    await expect(row, what).toHaveCount(1);
     await row.getByRole("button", { name: "Undo" }).click();
     // The toast names this undo. A previous "Undone:" line can still be on screen after the last one.
     await expect(admin.page.getByText(`Undone: ${undone}.`)).toBeVisible();
