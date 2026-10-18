@@ -6,12 +6,13 @@
 import { test, expect, BASE_URL } from "../support";
 import { getTask, newProject, newTask, type Who } from "../g2";
 import { deleteTask } from "./jim-http";
+import { bell, withUnread } from "./jim-bell";
 
 type Later = (fn: () => Promise<unknown>) => void;
 export type Gate = { pr: number; deployed: boolean; how: string };
 
 /** Head commits of the open PRs these specs cover (GitHub, 18 Oct 2026). A later push to a PR falls through to the probe. */
-const HEADS: Record<number, string> = { 6: "13a836e8b6", 9: "87721120b9", 12: "72d2a3d88b", 14: "375e04c33c" };
+const HEADS: Record<number, string> = { 6: "13a836e8b6", 9: "87721120b9", 12: "72d2a3d88b", 14: "375e04c33c", 18: "cd09cf0832" };
 
 let releaseOnce: Promise<string | null> | null = null;
 /** The git SHA the app under test (BASE_URL: staging or a pr1-pr4 preview) says it runs, or null when /api/health does not say. */
@@ -23,6 +24,17 @@ export function stagingRelease(who: Who) {
 const REFUSED = "Only the project Leader or an Admin can do this.";
 
 const PROBES: Record<number, (admin: Who, member: Who | null, later: Later) => Promise<Omit<Gate, "pr">>> = {
+  // PR #18 (APL-2643): over 99 unread, the bell's name says the "99+" it paints. On main it says the raw total.
+  // A client-only fix with no server signal, so this is the same check as that spec's over-99 test; the release check comes first.
+  18: async (admin) => {
+    const page = await admin.page.context().newPage();
+    try {
+      await withUnread(page, () => 120);
+      await bell(page).locator(".badge").waitFor(); // the count has rendered
+      const name = await bell(page).getAttribute("aria-label");
+      return { deployed: name === "Notifications, 99+ unread", how: `probe: bell at 120 unread is named "${name}"` };
+    } finally { await page.close(); }
+  },
   // PR #9 (APL-2640): an Editor's Undo of their own delete is refused like a restore from Trash. On main it restores.
   9: async (admin, member, later) => {
     if (!member) return { deployed: false, how: "probe needs the Member account (SHO_MEMBER_*)" };
