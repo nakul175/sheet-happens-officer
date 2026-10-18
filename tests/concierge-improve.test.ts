@@ -2,18 +2,20 @@
 // The provider call is mocked; nothing here talks to a real model or a database.
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-const usageCreate = vi.fn(async () => ({ id: "usage-1" }));
-const chatCreate = vi.fn(async () => ({ id: "should-not-be-written" }));
+type UsageWrite = { data: { counted: boolean; model: string; userId: string } };
+
+const usageCreate = vi.fn(async (_row: UsageWrite) => ({ id: "usage-1" }));
+const chatCreate = vi.fn(async (_row: unknown) => ({ id: "should-not-be-written" }));
 
 vi.mock("@/lib/db", () => ({
   db: {
     modelUsage: {
       aggregate: vi.fn(async () => ({ _sum: { costUsd: 0 } })),
       count: vi.fn(async () => 0),
-      create: (...args: unknown[]) => usageCreate(...args),
+      create: (row: UsageWrite) => usageCreate(row),
     },
     chatMessage: {
-      create: (...args: unknown[]) => chatCreate(...args),
+      create: (row: unknown) => chatCreate(row),
     },
   },
 }));
@@ -95,8 +97,7 @@ describe("improve my prompt (APL-2694)", () => {
     expect(body.model).not.toMatch(/opus|sonnet/i);
     expect(body.tools).toBeUndefined();
     expect(usageCreate).toHaveBeenCalledTimes(1);
-    const row = usageCreate.mock.calls[0][0] as { data: { counted: boolean; model: string; userId: string } };
-    expect(row.data).toMatchObject({ counted: true, model: "claude-haiku-5-5", userId: "user-1" });
+    expect(usageCreate.mock.calls[0][0].data).toMatchObject({ counted: true, model: "claude-haiku-5-5", userId: "user-1" });
 
     // AC3: the rewrite is not a chat message. Nothing is posted until Send.
     expect(chatCreate).not.toHaveBeenCalled();
