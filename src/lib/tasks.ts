@@ -9,7 +9,7 @@ import {
 import { addDays, formatDueDate, parseDueDate, startOfTodayIST } from "@/lib/dates";
 import { auditTx, logAction, notify } from "@/lib/notify";
 import { reqCtx } from "@/lib/reqctx";
-import { classifyTaskVersion } from "@/lib/task-version";
+import { classifyExpectedUpdatedAt } from "@/lib/task-version";
 
 export const taskInclude = {
   assignee: { select: { id: true, name: true } },
@@ -54,7 +54,6 @@ export function present(t: TaskRow, viewer?: { id: string; role: Role }) {
     createdById: t.createdById,
     subtasks: { total: t.subtasks.length, open: t.subtasks.filter((s) => !s.completedAt).length },
     updatedAt: t.updatedAt,
-    version: t.version,
     ...(viewer ? { canClose: canClose(viewer.id, viewer.role, t) } : {}),
   };
 }
@@ -213,15 +212,15 @@ async function staleCheck(user: Actor, id: string, t: TaskRow, role: Role, expec
   }
 }
 
-/** APL-2669: a well-formed version that is not the task's current one. */
-async function versionConflict(user: Actor, id: string, t: TaskRow, role: Role, source: Tx | typeof db = db): Promise<never> {
-  const last = await source.actionLog.findFirst({ where: { targetType: "task", targetId: id }, orderBy: { createdAt: "desc" }, include: { actor: { select: { name: true } } } });
+/** APL-2669: a well-formed timestamp that is not the task's current instant. */
+async function versionConflict(user: Actor, id: string, t: TaskRow, role: Role): Promise<never> {
+  const last = await db.actionLog.findFirst({ where: { targetType: "task", targetId: id }, orderBy: { createdAt: "desc" }, include: { actor: { select: { name: true } } } });
   throw new ApiError(409, "This task changed while you were editing it.", {
     code: "version_conflict", stale: true, changedBy: last?.actor.name ?? null, current: present(t, { id: user.id, role }),
   });
 }
 
-/** See the task, or the same 404 whether it is missing or hidden. Happens before the version is read (APL-2669 AC4). */
+/** See the task, or the same 404 whether it is missing or hidden. Happens before the timestamp is read (APL-2669 AC4). */
 async function loadForEdit(user: Actor, id: string) {
   try {
     return await loadTask(user, id, { write: true });
@@ -238,23 +237,14 @@ export async function updateTask(
   input: {
     title?: string; description?: string | null; dueDate?: string | null; priority?: "LOW" | "MEDIUM" | "HIGH" | "URGENT";
     blocked?: boolean; blockedReason?: string | null;
-    /** APL-2669: positive integer the editor saw. Classified only after loadForEdit. */
-    version?: unknown;
-    /** Internal callers (bulk date, concierge) still send the timestamp token. */
-    expectedUpdatedAt?: string;
+    /** APL-2669: the updatedAt the editor saw. Classified only after loadForEdit. */
+    expectedUpdatedAt?: unknown;
   },
 ) {
-  // Visibility first: a stranger gets 404 before a bad version can become 400 (APL-2669 AC4).
+  // Visibility first: a stranger gets 404 before a bad timestamp can become 400 (APL-2669 AC4).
   const { t, a } = await loadForEdit(user, id);
-  // HTTP edits send `version`. Bulk and the concierge still pass the timestamp they already hold.
-  let expectedInt: number | undefined;
-  if (input.expectedUpdatedAt !== undefined && input.version === undefined) {
-    if (!input.expectedUpdatedAt) throw new ApiError(400, "expectedUpdatedAt is required");
-    await staleCheck(user, id, t, a.role, input.expectedUpdatedAt);
-  } else {
-    expectedInt = classifyTaskVersion(input.version);
-    if (expectedInt !== t.version) await versionConflict(user, id, t, a.role);
-  }
+  const expectedMs = classifyExpectedUpdatedAt(input.expectedUpdatedAt);
+  if (expectedMs !== t.updatedAt.getTime()) await versionConflict(user, id, t, a.role);
   const data: Record<string, unknown> = {};
   const before: Record<string, unknown> = {};
   const set = (k: string, v: unknown, old: unknown) => {
@@ -276,18 +266,7 @@ export async function updateTask(
   if (!Object.keys(data).length) return;
   // The updatedAt this write stored. A later op in the same concierge card follows this, not a re-read.
   return db.$transaction(async (tx) => {
-    // Compare-and-set on the integer when the caller sent one, so two saves of the same version cannot both land.
-    const wrote = await tx.task.updateMany({
-      where: expectedInt === undefined ? { id } : { id, version: expectedInt },
-      data: { ...data, version: { increment: 1 } },
-    });
-    if (wrote.count !== 1) {
-      const fresh = await tx.task.findUnique({ where: { id }, include: taskInclude });
-      if (!fresh || fresh.deletedAt) throw notFound("Task");
-      // Stay on this transaction's connection. A second connection here deadlocks the pool under a burst.
-      await versionConflict(user, id, fresh, a.role, tx);
-    }
-    const row = await tx.task.findUniqueOrThrow({ where: { id }, select: { updatedAt: true } });
+    const row = await tx.task.update({ where: { id }, data });
     if (newlyBlocked) {
       await notify(tx, [await leaderId(tx, t.projectId)], "TASK_BLOCKED", {
         actorId: user.id, taskId: id, projectId: t.projectId, data: { title: t.title, reason: input.blockedReason ?? null },
@@ -296,7 +275,7 @@ export async function updateTask(
     await logAction(tx, { actorId: user.id, projectId: t.projectId, targetType: "task", targetId: id, action: "task.updated", before, after: data });
     if ("dueDate" in data) await ensureNextStep(tx, t.projectId, user.id);
     return row.updatedAt;
-  }, { maxWait: 10_000, timeout: 15_000 });
+  });
 }
 
 // ---------------------------------------------------------------- assign, collaborators, approver (4.3, 4.6)

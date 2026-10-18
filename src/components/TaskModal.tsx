@@ -13,7 +13,7 @@ type Sub = { id: string; title: string; completedAt: string | null; canClose: bo
 type Task = {
   id: string; projectId: string; parentId: string | null; createdById: string; title: string; description: string | null; priority: string;
   dueDate: string | null; blocked: boolean; blockedReason: string | null; completedAt: string | null; isIdea?: boolean;
-  assignee: P; approver: P | null; collaborators: P[]; awaitingApproval: boolean; updatedAt: string; version: number; canClose: boolean;
+  assignee: P; approver: P | null; collaborators: P[]; awaitingApproval: boolean; updatedAt: string; canClose: boolean;
   section: { id: string; name: string; isDone: boolean }; project: { id: string; name: string; archived: boolean };
   subtaskList: Sub[];
   links?: { id: string; organisation: { id: string; name: string } | null; contact: { id: string; name: string; organisationId: string } | null }[];
@@ -77,7 +77,7 @@ export function TaskModal({ id, me, onClose, onChanged, asPage }: { id: string; 
     return res;
   }
   const save = async (patch: Record<string, unknown>) => {
-    const res = await run(api("PATCH", `/api/tasks/${id}`, { ...patch, version: task.version }));
+    const res = await run(api("PATCH", `/api/tasks/${id}`, { ...patch, expectedUpdatedAt: task.updatedAt }));
     if (res && !res.ok && res.status === 409 && res.data.stale) setLost(patch);
     return res;
   };

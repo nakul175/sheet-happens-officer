@@ -1,115 +1,120 @@
-// APL-2669: a task version that is not a positive integer is 400 invalid_version.
-// A different positive integer is 409 version_conflict. The current one saves and becomes the next integer.
-// Someone who cannot see the task gets 404 before the version is looked at, with one body for every case.
+// APL-2669 v1.3: expectedUpdatedAt stays an ISO timestamp.
+// Anything that is not a full ISO 8601 date-time with a time and a zone is 400 invalid_version.
+// A different instant is 409 version_conflict. The same instant saves.
+// Someone who cannot see the task gets 404 before the timestamp is looked at.
 import { describe, expect, it } from "vitest";
 import { db } from "@/lib/db";
-import { classifyTaskVersion } from "@/lib/task-version";
+import { classifyExpectedUpdatedAt } from "@/lib/task-version";
 import { ApiError } from "@/lib/http";
-import { account, project, task, BASE } from "./helpers";
+import { account, project, task } from "./helpers";
 
-const MALFORMED = ["abc", "", " 3 ", "3", 0, -1, 1.5, true, [], {}] as const;
+const T0 = "2026-10-18T10:00:00.000Z";
+const MALFORMED = [
+  "abc",
+  "",
+  " ",
+  "2026-13-40T99:00:00Z",
+  "18/10/2026",
+  "2026-10-18",
+  "2026-10-18T10:00:00",
+  "2026-10-18T10:00:00.000",
+  1760781600000,
+  true,
+  [],
+  {},
+] as const;
 
-describe("classifyTaskVersion (APL-2669)", () => {
-  it("accepts only a positive integer", () => {
-    expect(classifyTaskVersion(1)).toBe(1);
-    expect(classifyTaskVersion(3)).toBe(3);
-    for (const v of MALFORMED) {
-      expect(() => classifyTaskVersion(v)).toThrowError(expect.objectContaining({ status: 400, extra: { code: "invalid_version" } }));
-    }
-    expect(() => classifyTaskVersion(1e309)).toThrowError(expect.objectContaining({ extra: { code: "invalid_version" } }));
-    for (const v of [undefined, null]) {
-      expect(() => classifyTaskVersion(v)).toThrowError(expect.objectContaining({ status: 400, extra: { code: "version_required" } }));
-    }
+describe("classifyExpectedUpdatedAt (APL-2669)", () => {
+  it("accepts a full ISO date-time and compares it as an instant", () => {
+    const instant = Date.parse(T0);
+    expect(classifyExpectedUpdatedAt(T0)).toBe(instant);
+    expect(classifyExpectedUpdatedAt("2026-10-18T10:00:00Z")).toBe(instant);
+    expect(classifyExpectedUpdatedAt("2026-10-18T15:30:00.000+05:30")).toBe(instant);
   });
 
-  it("does not treat the thrown error as an ApiError of any other status", () => {
+  it("refuses an invalid timestamp and an empty one with 400 invalid_version", () => {
+    for (const v of MALFORMED) {
+      expect(() => classifyExpectedUpdatedAt(v)).toThrowError(
+        expect.objectContaining({ status: 400, extra: { code: "invalid_version" } }),
+      );
+    }
+    expect(() => classifyExpectedUpdatedAt(null)).toThrowError(
+      expect.objectContaining({ status: 400, extra: { code: "invalid_version" } }),
+    );
+  });
+
+  it("refuses a missing timestamp with 400 and does not call it invalid_version", () => {
     try {
-      classifyTaskVersion("abc");
+      classifyExpectedUpdatedAt(undefined);
       expect.unreachable();
     } catch (e) {
       expect(e).toBeInstanceOf(ApiError);
       expect((e as ApiError).status).toBe(400);
+      expect((e as ApiError).message).toBe("expectedUpdatedAt is required");
+      expect((e as ApiError).extra).toBeUndefined();
     }
   });
 });
 
-describe("PATCH /api/tasks/:id version (APL-2669)", () => {
+describe("PATCH /api/tasks/:id expectedUpdatedAt (APL-2669)", () => {
   async function fixture() {
     const lead = await account("lead");
     const worker = await account("worker");
     const outsider = await account("outsider");
     const p = await project(lead, lead, [{ who: worker }]);
     const id = await task(lead, p.id, { title: "Original" });
-    await db.task.update({ where: { id }, data: { version: 3 } });
-    return { worker, outsider, id };
+    await db.task.update({ where: { id }, data: { updatedAt: new Date(T0) } });
+    return { lead, worker, outsider, id, projectId: p.id };
   }
 
   const shown = async (worker: Awaited<ReturnType<typeof fixture>>["worker"], id: string) => {
-    const task = (await worker.c.get(`/api/tasks/${id}`)).json.task as { title: string; version: number };
-    return { title: task.title, version: task.version };
+    const row = (await worker.c.get(`/api/tasks/${id}`)).json.task as { title: string; updatedAt: string };
+    return { title: row.title, updatedAt: row.updatedAt };
   };
 
-  const updatedRows = (id: string) => db.actionLog.count({ where: { targetType: "task", targetId: id, action: "task.updated" } });
+  const updatedRows = (id: string) =>
+    db.actionLog.count({ where: { targetType: "task", targetId: id, action: "task.updated" } });
 
-  it("a missing or null version is 400 version_required and writes nothing", async () => {
+  it("AC1: an invalid or empty expectedUpdatedAt is 400 invalid_version and writes nothing", async () => {
     const { worker, id } = await fixture();
     const rows = await updatedRows(id);
-    const absent = await worker.c.patch(`/api/tasks/${id}`, { title: "New" });
-    const nil = await worker.c.patch(`/api/tasks/${id}`, { title: "New", version: null });
-    expect(absent.status).toBe(400);
-    expect(absent.json.code).toBe("version_required");
-    expect(nil.status).toBe(400);
-    expect(nil.json.code).toBe("version_required");
-    expect(await shown(worker, id)).toEqual({ title: "Original", version: 3 });
-    expect(await updatedRows(id)).toBe(rows);
-  });
-
-  it("AC1: any version that is not a positive integer is 400 invalid_version and writes nothing", async () => {
-    const { worker, id } = await fixture();
-    const rows = await updatedRows(id);
-    for (const v of MALFORMED) {
-      const r = await worker.c.patch(`/api/tasks/${id}`, { title: "New", version: v });
-      expect(r.status, JSON.stringify({ v, body: r.json })).toBe(400);
+    for (const expectedUpdatedAt of MALFORMED) {
+      const r = await worker.c.patch(`/api/tasks/${id}`, { title: "New", expectedUpdatedAt });
+      expect(r.status, JSON.stringify({ expectedUpdatedAt, body: r.json })).toBe(400);
       expect(r.json.code).toBe("invalid_version");
+      expect(r.json.error).toMatch(/ISO 8601/);
     }
-    const raw = await fetch(`${BASE}/api/tasks/${id}`, {
-      method: "PATCH",
-      headers: { "content-type": "application/json", cookie: worker.c.cookie },
-      body: '{"title":"New","version":1e309}',
-    });
-    const overflow = await raw.json() as { code?: string };
-    expect(raw.status).toBe(400);
-    expect(overflow.code).toBe("invalid_version");
-    expect(await shown(worker, id)).toEqual({ title: "Original", version: 3 });
+    expect(await shown(worker, id)).toEqual({ title: "Original", updatedAt: T0 });
     expect(await updatedRows(id)).toBe(rows);
   });
 
-  it("AC2: a well-formed version that is not the current one is 409 version_conflict", async () => {
+  it("AC2: a valid timestamp that is not the current instant is 409 version_conflict", async () => {
     const { worker, id } = await fixture();
-    for (const v of [2, 4]) {
-      const r = await worker.c.patch(`/api/tasks/${id}`, { title: "New", version: v });
-      expect(r.status, JSON.stringify(r.json)).toBe(409);
+    for (const expectedUpdatedAt of ["2026-10-18T09:59:59.000Z", "2026-10-18T10:00:01.000Z"]) {
+      const r = await worker.c.patch(`/api/tasks/${id}`, { title: "New", expectedUpdatedAt });
+      expect(r.status).toBe(409);
       expect(r.json.code).toBe("version_conflict");
-      expect(await shown(worker, id)).toEqual({ title: "Original", version: 3 });
+      expect(r.json.stale).toBe(true);
+      expect(await shown(worker, id)).toEqual({ title: "Original", updatedAt: T0 });
     }
   });
 
-  it("AC3: the current version saves and the task is at the next version", async () => {
+  it("AC3: the current timestamp saves and updatedAt moves forward", async () => {
     const { worker, id } = await fixture();
     const rows = await updatedRows(id);
-    const r = await worker.c.patch(`/api/tasks/${id}`, { title: "New", version: 3 });
-    expect(r.status, JSON.stringify(r.json)).toBe(200);
+    const r = await worker.c.patch(`/api/tasks/${id}`, { title: "New", expectedUpdatedAt: T0 });
+    expect(r.status).toBe(200);
     expect(r.json.task.title).toBe("New");
-    expect(r.json.task.version).toBe(4);
-    expect(await shown(worker, id)).toEqual({ title: "New", version: 4 });
+    expect(Date.parse(r.json.task.updatedAt)).toBeGreaterThan(Date.parse(T0));
+    expect((await shown(worker, id)).title).toBe("New");
     expect(await updatedRows(id)).toBe(rows + 1);
   });
 
-  it("AC4: a user who cannot see the task gets the same 404 before the version is checked", async () => {
+  it("AC4: a user who cannot see the task gets the same 404 before the timestamp is checked", async () => {
     const { worker, outsider, id } = await fixture();
-    const hidden = await outsider.c.patch(`/api/tasks/${id}`, { title: "New", version: "abc" });
-    const current = await outsider.c.patch(`/api/tasks/${id}`, { title: "New", version: 3 });
-    const missing = await outsider.c.patch("/api/tasks/does-not-exist", { title: "New", version: "abc" });
+    const hidden = await outsider.c.patch(`/api/tasks/${id}`, { title: "New", expectedUpdatedAt: "abc" });
+    const current = await outsider.c.patch(`/api/tasks/${id}`, { title: "New", expectedUpdatedAt: T0 });
+    const missing = await outsider.c.patch("/api/tasks/does-not-exist", { title: "New", expectedUpdatedAt: "abc" });
     expect(hidden.status).toBe(404);
     expect(current.status).toBe(404);
     expect(missing.status).toBe(404);
@@ -117,7 +122,18 @@ describe("PATCH /api/tasks/:id version (APL-2669)", () => {
     expect(missing.json).toEqual(hidden.json);
     expect(hidden.json).toEqual({ error: "Task not found" });
     expect(JSON.stringify(hidden.json)).not.toMatch(/Original|invalid_version|version_conflict|does-not-exist/);
-    expect(await shown(worker, id)).toEqual({ title: "Original", version: 3 });
+    expect(await shown(worker, id)).toEqual({ title: "Original", updatedAt: T0 });
     expect(await updatedRows(id)).toBe(0);
+  });
+
+  it("AC5: the same instant succeeds with Z, an offset, or no fractional seconds", async () => {
+    const { worker, id } = await fixture();
+    for (const expectedUpdatedAt of [T0, "2026-10-18T15:30:00.000+05:30", "2026-10-18T10:00:00Z"]) {
+      await db.task.update({ where: { id }, data: { title: "Original", updatedAt: new Date(T0) } });
+      const r = await worker.c.patch(`/api/tasks/${id}`, { title: "New", expectedUpdatedAt });
+      expect(r.status, JSON.stringify({ expectedUpdatedAt, body: r.json })).toBe(200);
+      expect(r.json.task.title).toBe("New");
+      expect(Date.parse(r.json.task.updatedAt)).toBeGreaterThan(Date.parse(T0));
+    }
   });
 });

@@ -24,11 +24,11 @@ describe("inline editing (14.8)", () => {
     const lead = await account("lead");
     const p = await project(lead, lead);
     const t = await task(lead, p.id);
-    const seen = (await lead.c.get(`/api/tasks/${t}`)).json.task.version as number;
-    const r = await lead.c.patch(`/api/tasks/${t}`, { dueDate: istDate(1), version: seen });
+    const seen = (await lead.c.get(`/api/tasks/${t}`)).json.task.updatedAt as string;
+    const r = await lead.c.patch(`/api/tasks/${t}`, { dueDate: istDate(1), expectedUpdatedAt: seen });
     expect(r.status).toBe(200);
     const undo = r.headers.get("x-undo-id")!;
-    expect((await lead.c.patch(`/api/tasks/${t}`, { dueDate: istDate(3), version: seen })).status).toBe(409);
+    expect((await lead.c.patch(`/api/tasks/${t}`, { dueDate: istDate(3), expectedUpdatedAt: seen })).status).toBe(409);
     expect((await lead.c.post(`/api/actions/${undo}/undo`, { anyway: true })).status).toBe(200);
     expect((await lead.c.get(`/api/tasks/${t}`)).json.task.dueDate).toBe(null);
   });

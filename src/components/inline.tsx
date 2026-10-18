@@ -6,7 +6,7 @@ import { PRIORITY, api, dueState, isOverdue, todayIST } from "@/components/api";
 import { Pri } from "@/components/TaskParts";
 import "./inline.css";
 
-export type Cell = { id: string; title: string; assignee: { id: string; name: string }; dueDate: string | null; priority: string; updatedAt: string; version: number; completedAt: string | null; awaitingApproval: boolean };
+export type Cell = { id: string; title: string; assignee: { id: string; name: string }; dueDate: string | null; priority: string; updatedAt: string; completedAt: string | null; awaitingApproval: boolean };
 export type Person = { userId: string; name: string; role: string; active: boolean };
 type Change = { kind: "assign"; assigneeId: string } | { kind: "patch"; patch: Record<string, unknown> };
 export type StaleNote = { taskId: string; title: string; who: string; change: Change; what: string };
@@ -28,7 +28,7 @@ export function useInlineEdit(onChanged: () => void) {
     setBusy(true);
     const r = change.kind === "assign"
       ? await api("POST", `/api/tasks/${t.id}/assign`, { assigneeId: change.assigneeId, expectedUpdatedAt: t.updatedAt })
-      : await api("PATCH", `/api/tasks/${t.id}`, { ...change.patch, version: t.version });
+      : await api("PATCH", `/api/tasks/${t.id}`, { ...change.patch, expectedUpdatedAt: t.updatedAt });
     setBusy(false);
     if (r.ok) { setErr(null); setStale(null); onChanged(); return; }
     if (r.status === 409 && r.data.stale) {
