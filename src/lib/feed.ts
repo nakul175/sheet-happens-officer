@@ -84,42 +84,35 @@ export function noticeText(n: N) {
   return { text: text[n.type] ?? `${who} made a change.`, href };
 }
 
-/** Deal names this person must not read in the bell: the CRM is hidden, or they are not on the deal and not an Admin. */
-async function hiddenDealNames(user: Actor, projectIds: (string | null)[]): Promise<Map<string, string>> {
+/** Shown instead of any sentence built from a deal this person may not open. */
+export const HIDDEN_DEAL_TEXT = "A deal you can't view was updated.";
+
+/**
+ * Deal ids this person must not read in the bell.
+ * The CRM is hidden from them, or they are not on the deal and not an Admin.
+ */
+async function hiddenDealIds(user: Actor, projectIds: (string | null)[]): Promise<Set<string>> {
   const ids = [...new Set(projectIds.filter((id): id is string => !!id))];
-  const hidden = new Map<string, string>();
+  const hidden = new Set<string>();
   if (!ids.length) return hidden;
   const deals = await db.project.findMany({
     where: { id: { in: ids }, typeId: WORKSTREAM_DEAL },
-    select: { id: true, name: true, members: { where: { userId: user.id }, select: { userId: true }, take: 1 } },
+    select: { id: true, members: { where: { userId: user.id }, select: { userId: true }, take: 1 } },
   });
   for (const deal of deals) {
     const sees = crmVisible(user) && (isAdmin(user) || deal.members.length > 0);
-    if (!sees && deal.name) hidden.set(deal.id, deal.name);
+    if (!sees) hidden.add(deal.id);
   }
   return hidden;
 }
 
 /**
- * Drops a deal name only when a stored value is exactly that name.
- * A short name such as "A" must stay inside "Asha" or "A stage".
+ * A notice the reader may see is built from its stored fields.
+ * A hidden deal is one fixed sentence and no link: stored names, titles, stages and ids are not read.
  */
-export function withoutExactDealName(data: unknown, dealName: string): unknown {
-  if (!dealName || !data || typeof data !== "object" || Array.isArray(data)) return data;
-  const out: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(data as Record<string, unknown>)) {
-    if (typeof value === "string" && value === dealName) {
-      if (key === "project") continue;
-      out[key] = "a project";
-    } else out[key] = value;
-  }
-  return out;
-}
-
-/** Replaces the deal name only where the sentence quotes that whole name, as in `"A"`. */
-export function withoutQuotedDealName(text: string, dealName: string): string {
-  if (!dealName) return text;
-  return text.split(`"${dealName}"`).join("a project");
+export function noticeForReader(n: N, hidden: boolean): { text: string; href: string | null } {
+  if (hidden) return { text: HIDDEN_DEAL_TEXT, href: null };
+  return noticeText(n);
 }
 
 /** SHO-US-14.13: newest first, 50 at a time; `before` is the `next` value of the previous page. `filter=unread` hides read items. */
@@ -139,15 +132,13 @@ export async function listNotifications(user: Actor, o: { filter?: string; befor
   });
   const unread = await db.notification.count({ where: { recipientId: user.id, readAt: null } });
   const page = rows.slice(0, limit);
-  const hiddenDeals = await hiddenDealNames(user, page.map((n) => n.projectId));
+  const hiddenDeals = await hiddenDealIds(user, page.map((n) => n.projectId));
   const last = page.at(-1);
   return {
     unread,
     items: page.map((n) => {
-      const dealName = n.projectId ? hiddenDeals.get(n.projectId) : undefined;
-      const notice = noticeText(dealName ? { ...n, data: withoutExactDealName(n.data, dealName) } : n);
-      const text = dealName ? withoutQuotedDealName(notice.text, dealName) : notice.text;
-      return { id: n.id, text, href: notice.href, read: !!n.readAt, createdAt: n.createdAt.toISOString() };
+      const notice = noticeForReader(n, !!n.projectId && hiddenDeals.has(n.projectId));
+      return { id: n.id, text: notice.text, href: notice.href, read: !!n.readAt, createdAt: n.createdAt.toISOString() };
     }),
     next: rows.length > limit && last ? `${last.createdAt.toISOString()}|${last.id}` : null,
   };

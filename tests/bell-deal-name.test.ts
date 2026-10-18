@@ -1,10 +1,10 @@
-// APL-2698. A short deal name is removed only as a whole stored value or a whole quoted name.
-// Mail and push never render a stored deal name; the bell is the only sentence builder.
+// APL-2698 and APL-2716. A hidden deal is replaced with one sentence, so a short name
+// such as "A" is never copied into other words. Mail and push never render a stored deal.
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { noticeText, withoutExactDealName, withoutQuotedDealName } from "@/lib/feed";
+import { HIDDEN_DEAL_TEXT, noticeForReader } from "@/lib/feed";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 
@@ -19,32 +19,35 @@ function filesUnder(dir: string): string[] {
   return out;
 }
 
-describe("hidden deal name replacement", () => {
-  it("removes a one-letter deal name without changing Asha, Assigned or A stage", () => {
-    const data = { project: "A", stage: "A stage", title: "Call Asha", note: "Assigned" };
-    const stored = withoutExactDealName(data, "A") as Record<string, unknown>;
-    expect(stored.project).toBeUndefined();
-    expect(stored.stage).toBe("A stage");
-    expect(stored.title).toBe("Call Asha");
-    expect(stored.note).toBe("Assigned");
+describe("hidden deal notice", () => {
+  const stored = {
+    type: "DEAL_STAGE_CHANGED",
+    actor: null,
+    taskId: null,
+    projectId: "deal-1",
+    data: { project: "A", stage: "A stage", title: "Call Asha", note: "Assigned" },
+  };
 
-    const notice = noticeText({
-      type: "DEAL_STAGE_CHANGED",
-      actor: null,
-      taskId: null,
-      projectId: "deal",
-      data: stored,
-    });
-    const text = withoutQuotedDealName(notice.text, "A");
-    expect(text).toBe("Someone moved a project to A stage.");
-    expect(text).not.toContain('"A"');
-    expect(text).toContain("A stage");
+  it("replaces a one-letter deal with the whole sentence and no link", () => {
+    const hidden = noticeForReader(stored, true);
+    expect(hidden).toEqual({ text: HIDDEN_DEAL_TEXT, href: null });
+    expect(hidden.text).toBe("A deal you can't view was updated.");
+    expect(hidden.text).not.toContain("Asha");
+    expect(hidden.text).not.toContain("Assigned");
+    expect(hidden.text).not.toContain("A stage");
+    expect(hidden.href).toBeNull();
+  });
 
-    const nearby = withoutQuotedDealName('Someone moved "A" to A stage. Call Asha about the Assigned work.', "A");
-    expect(nearby).toBe("Someone moved a project to A stage. Call Asha about the Assigned work.");
-    expect(nearby).toContain("Asha");
-    expect(nearby).toContain("Assigned");
-    expect(nearby).toContain("A stage");
+  it("builds a visible notice from the stored fields, and a short name stays quoted", () => {
+    const stage = noticeForReader(stored, false);
+    expect(stage).toEqual({ text: 'Someone moved "A" to A stage.', href: "/projects/deal-1" });
+    expect(stage.text).toContain("A stage");
+    expect(stage.text).not.toContain("Asha");
+
+    const task = noticeForReader({ ...stored, type: "TASK_ASSIGNED", taskId: "task-1", data: { title: "Call Asha", project: "A" } }, false);
+    expect(task).toEqual({ text: 'Someone assigned you "Call Asha".', href: "/tasks/task-1" });
+    expect(task.text).toContain("Asha");
+    expect(task.text).not.toContain('"A"');
   });
 });
 

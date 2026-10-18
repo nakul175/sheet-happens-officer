@@ -34,7 +34,7 @@ type Running = {
 };
 
 const running = new Map<Mode, Running>();
-const seed: { userIds: string[]; emails: string[]; projectId?: string; orgId?: string } = { userIds: [], emails: [] };
+const seed: { userIds: string[]; emails: string[]; projectId?: string; plainProjectId?: string; orgId?: string } = { userIds: [], emails: [] };
 
 /** Removes this run's users, deal and organisation so the shared test database stays clear. */
 async function cleanupSeed() {
@@ -55,6 +55,7 @@ async function cleanupSeed() {
     await db.actionLog.deleteMany({ where: { projectId: seed.projectId } });
   }
   if (seed.projectId) await db.project.deleteMany({ where: { id: seed.projectId } });
+  if (seed.plainProjectId) await db.project.deleteMany({ where: { id: seed.plainProjectId } });
   if (seed.orgId) await db.organisation.deleteMany({ where: { id: seed.orgId } });
   if (seed.emails.length) await db.loginAttempt.deleteMany({ where: { email: { in: seed.emails } } });
   if (userIds.length) await db.user.deleteMany({ where: { id: { in: userIds } } });
@@ -181,6 +182,18 @@ function notificationTexts(body: string): string[] {
   const parsed = JSON.parse(body) as { items?: { text?: unknown }[] };
   if (!Array.isArray(parsed.items)) throw new Error("bell response has no notification list");
   return parsed.items.map((item) => (typeof item.text === "string" ? item.text : ""));
+}
+
+function bellItems(body: string): { unread: number; items: { text: string; href: string | null }[] } {
+  const parsed = JSON.parse(body) as { unread?: unknown; items?: { text?: unknown; href?: unknown }[] };
+  if (!Array.isArray(parsed.items) || typeof parsed.unread !== "number") throw new Error("bell response has no notification list");
+  return {
+    unread: parsed.unread,
+    items: parsed.items.map((item) => ({
+      text: typeof item.text === "string" ? item.text : "",
+      href: typeof item.href === "string" ? item.href : null,
+    })),
+  };
 }
 
 /**
@@ -327,19 +340,34 @@ describe("CRM_VISIBLE modes are tested against a real server per mode", () => {
     expect(task?.id).toBeTruthy();
     await db.projectMember.create({ data: { projectId: dealId, userId: admin.id, role: "EDITOR" } });
     await db.taskCollaborator.create({ data: { taskId: task!.id, userId: admin.id } });
-    // A bell row stores the deal name. The mustName=false check asserts that name is filtered
-    // out of notification text whenever this person cannot see the deal (APL-2698).
+    // Bell rows store the deal name, a deal task title and the deal id. APL-2698 checks the
+    // name. APL-2716 checks that a hidden reader gets one generic sentence and no deal link.
     const outsiderEmail = `outsider.${tag}@aplyd.com`.toLowerCase();
     seed.emails.push(outsiderEmail);
     const outsider = await signIn(open!, `outsider ${tag}`, outsiderEmail);
     seed.userIds.push(outsider.id);
+    const taskTitle = `ZZ-TEST Acme kickoff ${runId}`;
+    const kickoffTaskId = `kickoff-${tag}`;
+    const plainTitle = `Pack the cartons ${tag}`;
+    const plainTaskId = `plain-${tag}`;
+    const dealRow = await db.project.findUnique({ where: { id: dealId }, select: { workspaceId: true } });
+    expect(dealRow?.workspaceId).toBeTruthy();
+    const plain = await db.project.create({ data: { workspaceId: dealRow!.workspaceId, name: `Packing ${tag}`, typeId: "wst_project" } });
+    seed.plainProjectId = plain.id;
+    const hiddenText = "A deal you can't view was updated.";
+    const stageText = `Someone moved "${dealName}" to Proposal.`;
+    const nextStepText = `"${dealName}" needs a next step.`;
+    const stalledText = `"${dealName}" has had no activity for 30 days.`;
+    const taskText = `Someone assigned you "${taskTitle}".`;
+    const plainText = `Someone assigned you "${plainTitle}".`;
     await db.notification.createMany({
-      data: [member.id, admin.id, outsider.id].map((recipientId) => ({
-        recipientId,
-        type: "DEAL_STAGE_CHANGED",
-        projectId: dealId,
-        data: { project: dealName, stage: "Proposal" },
-      })),
+      data: [member.id, admin.id, outsider.id].flatMap((recipientId) => [
+        { recipientId, type: "DEAL_STAGE_CHANGED", projectId: dealId, data: { project: dealName, stage: "Proposal" } },
+        { recipientId, type: "DEAL_NEEDS_NEXT_STEP", projectId: dealId, data: { project: dealName } },
+        { recipientId, type: "DEAL_STALLED", projectId: dealId, data: { project: dealName } },
+        { recipientId, type: "TASK_ASSIGNED", projectId: dealId, taskId: kickoffTaskId, data: { title: taskTitle, project: dealName } },
+        { recipientId, type: "TASK_ASSIGNED", projectId: plain.id, taskId: plainTaskId, data: { title: plainTitle, project: `Packing ${tag}` } },
+      ]),
     });
 
     const people = { member, admin };
@@ -379,6 +407,54 @@ describe("CRM_VISIBLE modes are tested against a real server per mode", () => {
       const label = `${row.tc} mode=${row.modeLabel} user=${row.user} visible=${row.visible ? "yes" : "no"}`;
       expect(bell.status, label).toBe(200);
       assertBellDealName(bell.text, dealName, row.visible, label);
+    }
+
+    // APL-2716. Admin and the on-deal member across all, admins and off.
+    // A reader who cannot see the deal gets the generic sentence. A non-deal notice stays as stored.
+    const dealHref = `/projects/${dealId}`;
+    const taskHref = `/tasks/${kickoffTaskId}`;
+    const plainHref = `/tasks/${plainTaskId}`;
+    const controls: { mode: Mode; who: { cookie: string }; user: string; sees: boolean; tc: string }[] = [
+      { mode: "on", who: admin, user: "admin", sees: true, tc: "qa:TC-APL2716-a8042ed1@v1" },
+      { mode: "admins", who: admin, user: "admin", sees: true, tc: "qa:TC-APL2716-3abdb652@v1" },
+      { mode: "off", who: admin, user: "admin", sees: false, tc: "qa:TC-APL2716-d2ec503b@v1" },
+      { mode: "on", who: member, user: "on-deal member", sees: true, tc: "qa:TC-APL2716-a8042ed1@v1" },
+      { mode: "admins", who: member, user: "member", sees: false, tc: "qa:TC-APL2716-3abdb652@v1" },
+      { mode: "off", who: member, user: "on-deal member", sees: false, tc: "qa:TC-APL2716-d2ec503b@v1" },
+      { mode: "on", who: outsider, user: "member with no access", sees: false, tc: "qa:TC-APL2698-be2ba3d5@v1" },
+      { mode: "admins", who: outsider, user: "member with no access", sees: false, tc: "qa:TC-APL2716-85782555@v1" },
+      { mode: "off", who: outsider, user: "member with no access", sees: false, tc: "qa:TC-APL2716-fcc1861b@v1" },
+    ];
+    for (const row of controls) {
+      const server = running.get(row.mode)!;
+      const modeLabel = row.mode === "on" ? "all" : row.mode;
+      const bell = await call(server.base, row.who.cookie, "GET", "/api/notifications");
+      const label = `${row.tc} mode=${modeLabel} user=${row.user} sees=${row.sees ? "yes" : "no"}`;
+      expect(bell.status, label).toBe(200);
+      const page = bellItems(bell.text);
+      expect(page.items, label).toHaveLength(5);
+      expect(page.unread, `${label} unread count`).toBe(5);
+      expect(page.items, `qa:TC-APL2716-4811612d@v1 ${label}`).toContainEqual({ text: plainText, href: plainHref });
+      if (row.sees) {
+        expect(page.items, `qa:TC-APL2716-3abdb652@v1 ${label} deal name`).toContainEqual({ text: stageText, href: dealHref });
+        expect(page.items, `qa:TC-APL2716-85782555@v1 ${label}`).toContainEqual({ text: nextStepText, href: dealHref });
+        expect(page.items, `qa:TC-APL2716-fcc1861b@v1 ${label}`).toContainEqual({ text: stalledText, href: dealHref });
+        expect(page.items, `${label} task title`).toContainEqual({ text: taskText, href: taskHref });
+      } else {
+        const hidden = page.items.filter((item) => item.text !== plainText);
+        expect(hidden, label).toHaveLength(4);
+        for (const item of hidden) {
+          expect(item.text, `qa:TC-APL2716-3abdb652@v1 ${label}`).toBe(hiddenText);
+          expect(item.href, `${label} href`).toBeNull();
+        }
+        expect(bell.text, `${label} deal name`).not.toContain(dealName);
+        expect(bell.text, `${label} task title`).not.toContain(taskTitle);
+        expect(bell.text, `${label} stage`).not.toContain("Proposal");
+        expect(bell.text, `${label} deal href`).not.toContain(dealHref);
+        expect(bell.text, `${label} task href`).not.toContain(taskHref);
+        expect(bell.text, `qa:TC-APL2716-85782555@v1 ${label}`).not.toContain("needs a next step");
+        expect(bell.text, `qa:TC-APL2716-fcc1861b@v1 ${label}`).not.toContain("no activity");
+      }
     }
   }, 120_000);
 
