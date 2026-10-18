@@ -17,6 +17,7 @@ async function proj(admin: Who, label: string, later: (f: () => Promise<unknown>
   return id;
 }
 
+// qa:TC missing
 test("AC1: at 1280 px the shell shows the sidebar, the content and a 340 px concierge slot on list screens", async ({ admin, later }) => {
   const p = await proj(admin, "shell-wide", later);
   await admin.page.setViewportSize({ width: 1280, height: 800 });
@@ -30,6 +31,7 @@ test("AC1: at 1280 px the shell shows the sidebar, the content and a 340 px conc
   expect(Math.round(w)).toBeLessThanOrEqual(344);
 });
 
+// qa:TC missing
 test("AC2: at 390 px the sidebar collapses and no page scrolls sideways", async ({ admin, later }) => {
   const p = await proj(admin, "shell-phone", later);
   await admin.page.setViewportSize({ width: 390, height: 800 });
@@ -42,6 +44,7 @@ test("AC2: at 390 px the sidebar collapses and no page scrolls sideways", async 
   }
 });
 
+// qa:TC missing
 test("AC3: the icon-only mark shows at 24 px and the text uses Public Sans", async ({ admin }) => {
   await admin.page.setViewportSize({ width: 1280, height: 800 });
   await admin.page.goto("/");
@@ -62,6 +65,7 @@ test("AC3: the icon-only mark shows at 24 px and the text uses Public Sans", asy
   expect(font).toMatch(/Public[_ ]Sans/i);
 });
 
+// qa:TC missing
 test("AC4: Usage and Audit log are for the Super Admin only; a Member who types the address gets the refusal", async ({ admin, member }) => {
   await admin.page.setViewportSize({ width: 1280, height: 800 });
   await member.page.setViewportSize({ width: 1280, height: 800 });
@@ -81,6 +85,7 @@ test("AC4: Usage and Audit log are for the Super Admin only; a Member who types 
   expect((await member.api.get("/api/audit")).status).toBe(404);
 });
 
+// qa:TC missing
 test("AC5: the bell shows the unread count, lists notices newest first with links, and shows no count when there are none", async ({ admin, member, later }) => {
   const p = await proj(admin, "shell-bell", later);
   expect((await admin.api.post(`/api/projects/${p}/members`, { userId: member.user.id, role: "EDITOR" })).status).toBe(201);
