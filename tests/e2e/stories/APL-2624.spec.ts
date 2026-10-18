@@ -1,8 +1,8 @@
 // SHO-US-23.5 Temporary password must be changed at first sign-in (APL-2624). Acceptance criteria AC1 to AC7.
 // Added people are ZZ-TEST names on nakul17+ aliases. The emailed password is read from the test mail sink.
 // SHO-US-23.5 is not in this tree. Tests of the forced wall are annotated with test.fail when the run shows the old banner behaviour.
-import { test, expect } from "../support";
-import { alias, RUN, mailedPassword, nextPass, waitForSinkMail, signInAs, deactivate, type Api } from "./qa";
+import { test, expect, login } from "../support";
+import { alias, RUN, mailedPassword, nextPass, waitForSinkMail, signInAs, deactivate, PASS, passwordOk, type Api } from "./qa";
 
 async function added(admin: { api: Api }, later: (fn: () => Promise<unknown>) => void, tag: string) {
   const email = alias("2624", tag, "aplyd.com");
@@ -20,6 +20,12 @@ async function added(admin: { api: Api }, later: (fn: () => Promise<unknown>) =>
 const UNBUILT = "Product gap: forced password change (SHO-US-23.5 / APL-2624) is not in this build. PR #8 is not merged. The app still shows a closable banner and the emailed password stays valid (SHO-E23 D2).";
 
 test.describe("SHO-US-23.5 / APL-2624", () => {
+  test.beforeAll(() => {
+    test.skip(!PASS, "Set SHO_QA_PASS (the shared password for the nakul17+ accounts).");
+    test.skip(!passwordOk(PASS), "SHO_QA_PASS must be at least 8 characters with a letter and a number.");
+    try { login("ADMIN"); } catch { test.skip(true, "Set SHO_ADMIN_EMAIL and SHO_ADMIN_PASS (a Super Admin)."); }
+  });
+
   test("AC1: after signing in with a Super-Admin-issued password, every screen but 'Set your own password' and sign-out is blocked", async ({ admin, browser, later }) => {
     test.fail(true, UNBUILT);
     const p = await added(admin, later, "ac1");

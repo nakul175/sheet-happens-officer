@@ -5,8 +5,8 @@
 // AC5 blocks the local outbox so the send fails; the account must still exist and the banner must say so.
 import { existsSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { test, expect, RUN, BASE_URL } from "../support";
-import { mailedPassword, localPasswordHash, waitForSinkMail } from "./qa";
+import { test, expect, RUN, BASE_URL, login } from "../support";
+import { mailedPassword, localPasswordHash, waitForSinkMail, PASS, passwordOk } from "./qa";
 
 const SLOW = { timeout: 90_000 };
 const email = (label: string) => `zz-test-${RUN}-${label}@example.invalid`;
@@ -27,6 +27,12 @@ async function blockLocalOutbox(): Promise<() => void> {
 }
 
 test.describe("SHO-US-23.2 / APL-2621", () => {
+  test.beforeAll(() => {
+    test.skip(!PASS, "Set SHO_QA_PASS (the shared password for the nakul17+ accounts).");
+    test.skip(!passwordOk(PASS), "SHO_QA_PASS must be at least 8 characters with a letter and a number.");
+    try { login("ADMIN"); } catch { test.skip(true, "Set SHO_ADMIN_EMAIL and SHO_ADMIN_PASS (a Super Admin)."); }
+  });
+
   test("AC1: only the Super Admin sees + Add person, and the server refuses anyone else", async ({ admin, member }) => {
     await admin.page.goto("/team");
     await expect(admin.page.getByRole("button", { name: "+ Add person" })).toBeVisible(SLOW);
