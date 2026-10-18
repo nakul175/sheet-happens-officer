@@ -13,7 +13,7 @@ import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { db } from "../src/lib/db";
 import { QUICK_ACTIONS } from "../src/lib/concierge/reads";
-import { istDate, PW, SUPER_EMAIL } from "./helpers";
+import { istDate, PW } from "./helpers";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const DEAL = "Acme renewal";
@@ -242,10 +242,10 @@ describe("CRM_VISIBLE modes are tested against a real server per mode", () => {
     const open = running.get("on");
     expect(open, "the on server is running").toBeTruthy();
     const stamp = Date.now();
-    const sa = await signIn(open!, "root", SUPER_EMAIL);
     const member = await signIn(open!, "member", `member.${stamp}@aplyd.com`);
     const admin = await signIn(open!, "admin", `admin.${stamp}@aplyd.com`);
-    expect((await call(open!.base, sa.cookie, "PATCH", `/api/team/${admin.id}`, { orgRole: "ADMIN" })).status).toBe(200);
+    // Role lives on the user row, which every mode's server reads. Skip the shared Super Admin account.
+    await db.user.update({ where: { id: admin.id }, data: { orgRole: "ADMIN" } });
 
     const pipes = await call(open!.base, member.cookie, "GET", "/api/deals/pipelines");
     expect(pipes.status, pipes.text).toBe(200);
