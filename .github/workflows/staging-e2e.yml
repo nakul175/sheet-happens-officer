@@ -2,17 +2,21 @@
 # production is refused). Started by hand only (Actions > Staging e2e > Run workflow).
 # The specs live on the branch the run is started from ("Use workflow from", e.g. qa/story-e2e): every job checks out that same commit.
 # Input "specs": space-separated issue ids (APL-2481) or globs (APL-26*, tests/e2e/stories/APL-25*.spec.ts); empty runs every spec.
-# Secrets (repository settings): STAGING_USER, STAGING_PASS, SHO_ADMIN_EMAIL, SHO_ADMIN_PASS, SHO_MEMBER_EMAIL, SHO_MEMBER_PASS,
-# and ZZ_TEST_01_EMAIL / ZZ_TEST_01_PASS ... ZZ_TEST_20_EMAIL / ZZ_TEST_20_PASS (01-05 Super Admins, 06-20 plain Members).
+# Secrets (repository settings): STAGING_USER, STAGING_PASS, SHO_QA_PASS, SHO_ADMIN_EMAIL, SHO_ADMIN_PASS, SHO_MEMBER_EMAIL,
+# SHO_MEMBER_PASS, and ZZ_TEST_01_EMAIL / ZZ_TEST_01_PASS ... ZZ_TEST_20_EMAIL / ZZ_TEST_20_PASS (01-05 Super Admins, 06-20 plain Members).
+# SHO_QA_PASS is the shared password for the nakul17+ story accounts. Story specs skip without it, and Playwright then exits 0.
 # The previews use the same STAGING_USER / STAGING_PASS basic-auth gate as staging.
 # They reach the jobs as environment variables only and are never echoed. Runs queue in one group so two never run at once.
+# This workflow is workflow_dispatch only. It does not run on pull_request or pull_request_target, so a fork cannot read these secrets.
 #
 # How a run is split:
 #   plan        checks "target" first, then picks the spec files once and splits them into the parallel set and SERIAL_SPECS.
 #               Every shard and the serial job get BASE_URL=https://<target>.
 #   e2e         20 shards of the parallel set (--shard=N/20, workers=1 each). Shard N signs in as ZZ_TEST_NN (SHARD_*), names its
 #               data ZZ-TEST-NN (ZZ_PREFIX), and gets a partner account of the other role (PEER_*). At most max_parallel run at once.
+#               After the tests, the job reads the Playwright JSON report and fails if nothing ran or every test was skipped.
 #   e2e-serial  the SERIAL_SPECS files, alone, after every shard has finished, as the shared SHO_ADMIN / SHO_MEMBER accounts.
+#               The same JSON-report check runs after these tests.
 #   report      merges every job's blob report into one HTML report.
 #
 # max_parallel: the staging database is shared with production and allows 25 connections. Do not raise it above 5 until NJ approves
@@ -192,6 +196,7 @@ jobs:
           SHO_ADMIN_PASS: ${{ secrets.SHO_ADMIN_PASS }}
           SHO_MEMBER_EMAIL: ${{ secrets.SHO_MEMBER_EMAIL }}
           SHO_MEMBER_PASS: ${{ secrets.SHO_MEMBER_PASS }}
+          SHO_QA_PASS: ${{ secrets.SHO_QA_PASS }}
           SHARD_EMAIL: ${{ secrets[format('ZZ_TEST_{0}_EMAIL', matrix.nn)] }}
           SHARD_PASS: ${{ secrets[format('ZZ_TEST_{0}_PASS', matrix.nn)] }}
           PEER_EMAIL: ${{ secrets[format('ZZ_TEST_{0}_EMAIL', matrix.peer)] }}
@@ -200,7 +205,7 @@ jobs:
           PEER: ${{ matrix.peer }}
         run: |
           missing=""
-          for n in STAGING_USER STAGING_PASS SHO_ADMIN_EMAIL SHO_ADMIN_PASS SHO_MEMBER_EMAIL SHO_MEMBER_PASS; do
+          for n in STAGING_USER STAGING_PASS SHO_ADMIN_EMAIL SHO_ADMIN_PASS SHO_MEMBER_EMAIL SHO_MEMBER_PASS SHO_QA_PASS; do
             [ -n "${!n}" ] || missing="$missing $n"
           done
           [ -n "$SHARD_EMAIL" ] || missing="$missing ZZ_TEST_${NN}_EMAIL"
@@ -238,15 +243,27 @@ jobs:
           SHO_ADMIN_PASS: ${{ secrets.SHO_ADMIN_PASS }}
           SHO_MEMBER_EMAIL: ${{ secrets.SHO_MEMBER_EMAIL }}
           SHO_MEMBER_PASS: ${{ secrets.SHO_MEMBER_PASS }}
+          SHO_QA_PASS: ${{ secrets.SHO_QA_PASS }}
           SHARD_EMAIL: ${{ secrets[format('ZZ_TEST_{0}_EMAIL', matrix.nn)] }}
           SHARD_PASS: ${{ secrets[format('ZZ_TEST_{0}_PASS', matrix.nn)] }}
           PEER_EMAIL: ${{ secrets[format('ZZ_TEST_{0}_EMAIL', matrix.peer)] }}
           PEER_PASS: ${{ secrets[format('ZZ_TEST_{0}_PASS', matrix.peer)] }}
+          PLAYWRIGHT_JSON_OUTPUT_FILE: playwright-report.json
           FILES: ${{ needs.plan.outputs.parallel }}
           TRACE: ${{ inputs.trace }}
         run: |
           read -ra files <<< "$FILES"
-          npx playwright test --shard=${{ matrix.shard }}/20 --workers=1 --reporter=list,blob --trace="$TRACE" "${files[@]}"
+          npx playwright test --shard=${{ matrix.shard }}/20 --workers=1 --reporter=list,blob,json --trace="$TRACE" "${files[@]}"
+
+      - name: Fail when no test ran
+        if: always()
+        run: |
+          if [ ! -f scripts/ci/assert-playwright-ran.mjs ]; then
+            echo "expected=0 unexpected=0 flaky=0 skipped=0 total=0 run=0"
+            echo "::error::No tests ran. The count check could not start, so this job is not a pass."
+            exit 1
+          fi
+          node scripts/ci/assert-playwright-ran.mjs playwright-report.json
 
       - name: Upload the blob report
         if: always()
@@ -276,16 +293,17 @@ jobs:
           SHO_ADMIN_PASS: ${{ secrets.SHO_ADMIN_PASS }}
           SHO_MEMBER_EMAIL: ${{ secrets.SHO_MEMBER_EMAIL }}
           SHO_MEMBER_PASS: ${{ secrets.SHO_MEMBER_PASS }}
+          SHO_QA_PASS: ${{ secrets.SHO_QA_PASS }}
         run: |
           missing=""
-          for n in STAGING_USER STAGING_PASS SHO_ADMIN_EMAIL SHO_ADMIN_PASS SHO_MEMBER_EMAIL SHO_MEMBER_PASS; do
+          for n in STAGING_USER STAGING_PASS SHO_ADMIN_EMAIL SHO_ADMIN_PASS SHO_MEMBER_EMAIL SHO_MEMBER_PASS SHO_QA_PASS; do
             [ -n "${!n}" ] || missing="$missing $n"
           done
           if [ -n "$missing" ]; then
             echo "::error::Missing repository secrets:$missing. Add them in Settings > Secrets and variables > Actions."
             exit 1
           fi
-          echo "All six secrets are set."
+          echo "All required secrets are set."
 
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -303,11 +321,23 @@ jobs:
           SHO_ADMIN_PASS: ${{ secrets.SHO_ADMIN_PASS }}
           SHO_MEMBER_EMAIL: ${{ secrets.SHO_MEMBER_EMAIL }}
           SHO_MEMBER_PASS: ${{ secrets.SHO_MEMBER_PASS }}
+          SHO_QA_PASS: ${{ secrets.SHO_QA_PASS }}
+          PLAYWRIGHT_JSON_OUTPUT_FILE: playwright-report.json
           FILES: ${{ needs.plan.outputs.serial }}
           TRACE: ${{ inputs.trace }}
         run: |
           read -ra files <<< "$FILES"
-          npx playwright test --workers=1 --reporter=list,blob --trace="$TRACE" "${files[@]}"
+          npx playwright test --workers=1 --reporter=list,blob,json --trace="$TRACE" "${files[@]}"
+
+      - name: Fail when no test ran
+        if: always()
+        run: |
+          if [ ! -f scripts/ci/assert-playwright-ran.mjs ]; then
+            echo "expected=0 unexpected=0 flaky=0 skipped=0 total=0 run=0"
+            echo "::error::No tests ran. The count check could not start, so this job is not a pass."
+            exit 1
+          fi
+          node scripts/ci/assert-playwright-ran.mjs playwright-report.json
 
       - name: Upload the blob report
         if: always()
