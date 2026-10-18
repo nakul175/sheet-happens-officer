@@ -596,7 +596,7 @@ describe("clarifying questions (8.4)", () => {
     return stored;
   }
 
-  it('APL-2693 AC1: Assign "<title>". ends the turn as a question asking to whom', async () => {
+  it('@APL-2693 qa:TC-APL2693-1c6f93c0@v1 AC1: Assign "<title>". ends the turn as a question asking to whom', async () => {
     const lead = await account("lead");
     const p = await project(lead, lead);
     const title = "Budget";
@@ -613,7 +613,7 @@ describe("clarifying questions (8.4)", () => {
     await expectNoProposal(lead.id);
   });
 
-  it("APL-2693 AC2: propose_changes with person_id me stores no card, proposal, or ops", async () => {
+  it("@APL-2693 qa:TC-APL2693-5b73ac53@v1 AC2: propose_changes with person_id me stores no card, proposal, or ops", async () => {
     const lead = await account("lead");
     const p = await project(lead, lead);
     const title = "Budget";
@@ -631,7 +631,7 @@ describe("clarifying questions (8.4)", () => {
     expect(stored.links).toBeUndefined();
   });
 
-  it('APL-2693 AC3: Assign "<title>" to <member>. still returns a confirm card', async () => {
+  it('@APL-2693 qa:TC-APL2693-c3ef4e71@v1 AC3: Assign "<title>" to <member>. still returns a confirm card', async () => {
     const { lead, ed, p } = await team();
     const title = "Budget";
     const id = await task(lead, p.id, { title });
@@ -652,7 +652,7 @@ describe("clarifying questions (8.4)", () => {
     expect((await db.task.findUniqueOrThrow({ where: { id } })).assigneeId).toBe(before);
   });
 
-  it('APL-2693: trailing whitespace, no period, and a title containing " to " still ask whom', async () => {
+  it('@APL-2693 qa:TC-APL2693-d6323812@v1: trailing whitespace, no period, and a title containing " to " still ask whom', async () => {
     const lead = await account("lead");
     const p = await project(lead, lead);
     const plain = await task(lead, p.id, { title: "Budget" });
@@ -681,7 +681,7 @@ describe("clarifying questions (8.4)", () => {
     expect(await before(quoted)).toBe(quotedBefore);
   });
 
-  it("APL-2693: an unknown member (to Zzyzx) asks whom, even if the model proposes me", async () => {
+  it("@APL-2693 qa:TC-APL2693-3a8023aa@v1: an unknown member (to Zzyzx) asks whom, even if the model proposes me", async () => {
     const lead = await account("lead");
     const p = await project(lead, lead);
     const title = "Budget";
@@ -697,7 +697,7 @@ describe("clarifying questions (8.4)", () => {
     await expectNoProposal(lead.id);
   });
 
-  it("APL-2693: a task the user cannot see has no card and does not leak", async () => {
+  it("@APL-2693 qa:TC-APL2693-e8ddab42@v1: a task the user cannot see has no card and does not leak", async () => {
     const { lead, out, p } = await team();
     const secret = "Secret acquisition plan";
     const id = await task(lead, p.id, { title: secret, assigneeId: lead.id });
