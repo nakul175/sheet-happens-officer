@@ -4,7 +4,7 @@ import { spawnSync } from "node:child_process";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { PrismaClient } from "../src/generated/prisma/client";
 import { hashPassword } from "../src/lib/auth";
 import { runJob } from "../src/lib/jobs";
@@ -13,6 +13,10 @@ import { BASE, Client, PW } from "./helpers";
 const db = new PrismaClient();
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const DAY = 86_400_000;
+// Fixed clock for the seed and for the scheduled job. purgeTrash() reads `new Date()`
+// and the job passes no argument, so the job runs with Date faked to this instant.
+// 1990 keeps every other row in the test database outside the 30-day window.
+const CLOCK = new Date("1990-06-15T12:00:00.000Z");
 
 type Side = {
   label: "A" | "B";
@@ -48,11 +52,11 @@ function purgeTrashCallers(dir: string) {
 }
 
 async function seedWorkspaces(): Promise<Seed> {
-  const now = new Date();
-  const stamp = `${now.getTime().toString(36)}-${Math.random().toString(16).slice(2, 8)}`;
+  const stamp = `${Date.now().toString(36)}-${Math.random().toString(16).slice(2, 8)}`;
   const passwordHash = await hashPassword(PW);
-  const expiredAt = new Date(now.getTime() - 31 * DAY);
-  const recentAt = new Date(now.getTime() - 1 * DAY);
+  const verifiedAt = new Date();
+  const expiredAt = new Date(CLOCK.getTime() - 31 * DAY);
+  const recentAt = new Date(CLOCK.getTime() - 1 * DAY);
   return db.$transaction(async (tx) => {
     const side = async (label: "A" | "B"): Promise<Side> => {
       const workspace = await tx.workspace.create({ data: { name: `ZZ-TEST workspace ${label}` } });
@@ -63,7 +67,7 @@ async function seedWorkspaces(): Promise<Seed> {
           email,
           name: `ZZ-TEST Purge ${label}`,
           passwordHash,
-          emailVerifiedAt: now,
+          emailVerifiedAt: verifiedAt,
           // ADMIN is the highest role a ZZ-TEST address can hold. Super Admin is
           // SUPER_ADMIN_EMAILS only, and sign-in demotes any other address.
           // An Admin acts as Leader on every project, including the other workspace.
@@ -94,7 +98,7 @@ async function seedWorkspaces(): Promise<Seed> {
       const recent = await task(`ZZ-TEST recent ${label}`, recentAt);
       return { label, workspaceId: workspace.id, projectId: project.id, userId: user.id, email, expiredId: expired.id, recentId: recent.id };
     };
-    return { A: await side("A"), B: await side("B"), now };
+    return { A: await side("A"), B: await side("B"), now: CLOCK };
   });
 }
 
@@ -213,30 +217,20 @@ describe("purgeTrash scope (APL-2718)", () => {
 
   it("AC2 the scheduled purge-trash job removes 31-day trash in every workspace (APL-2718-AC2@v1)", async () => {
     const seed = await seedWorkspaces();
-    const ours = [seed.A.expiredId, seed.A.recentId, seed.B.expiredId, seed.B.recentId];
-    // The job reads the clock when it runs, a moment after this. Cover that gap so a row
-    // deleted a few milliseconds under 30 days is not counted in the audit total.
-    const cutoff = new Date(Date.now() + 60_000 - 30 * DAY);
-    const parked = await db.task.findMany({
-      where: { deletedAt: { lte: cutoff }, id: { notIn: ours } },
-      select: { id: true, deletedAt: true },
-    });
     const previous = await db.jobRun.findUnique({ where: { job: "purge-trash" } });
+    const prior = new Set((await db.auditLog.findMany({ where: { event: "TASK_PURGED" }, select: { id: true } })).map((row) => row.id));
     const auditIds: string[] = [];
+    let out: Awaited<ReturnType<typeof runJob>> | undefined;
     try {
-      // Other rows already past 30 days would be purged too, and the audit count would not be 2.
-      // Move only those out of the window for this run, then put their deletedAt back.
-      if (parked.length) {
-        await db.task.updateMany({
-          where: { id: { in: parked.map((row) => row.id) } },
-          data: { deletedAt: new Date(seed.now.getTime() - DAY) },
-        });
-      }
-      expect(await db.task.count({ where: { deletedAt: { lte: cutoff }, id: { notIn: ours } } })).toBe(0);
-
-      const prior = new Set((await db.auditLog.findMany({ where: { event: "TASK_PURGED" }, select: { id: true } })).map((row) => row.id));
-      const out = await runJob("purge-trash");
+      vi.useFakeTimers({ now: CLOCK, toFake: ["Date"] });
+      out = await runJob("purge-trash");
+    } finally {
+      vi.useRealTimers();
+    }
+    try {
       expect(out).toEqual({ job: "purge-trash", status: "OK", result: 2 });
+      const started = await db.jobRun.findUniqueOrThrow({ where: { job: "purge-trash" } });
+      expect(started.lastStartedAt?.toISOString()).toBe(CLOCK.toISOString());
 
       const created = await db.auditLog.findMany({
         where: { event: "TASK_PURGED", id: { notIn: [...prior] } },
@@ -252,15 +246,11 @@ describe("purgeTrash scope (APL-2718)", () => {
       const recentB = await db.task.findUniqueOrThrow({ where: { id: seed.B.recentId } });
       expect(recentA.workspaceId).toBe(seed.A.workspaceId);
       expect(recentB.workspaceId).toBe(seed.B.workspaceId);
-      expect(recentA.deletedAt?.toISOString()).toBe(new Date(seed.now.getTime() - DAY).toISOString());
-      expect(recentB.deletedAt?.toISOString()).toBe(new Date(seed.now.getTime() - DAY).toISOString());
+      expect(recentA.deletedAt?.toISOString()).toBe(new Date(CLOCK.getTime() - DAY).toISOString());
+      expect(recentB.deletedAt?.toISOString()).toBe(new Date(CLOCK.getTime() - DAY).toISOString());
       expect(recentA.title).toBe("ZZ-TEST recent A");
       expect(recentB.title).toBe("ZZ-TEST recent B");
     } finally {
-      for (const row of parked) {
-        const still = await db.task.findUnique({ where: { id: row.id }, select: { id: true } });
-        if (still) await db.task.update({ where: { id: row.id }, data: { deletedAt: row.deletedAt } });
-      }
       if (previous) {
         await db.jobRun.update({
           where: { job: "purge-trash" },
