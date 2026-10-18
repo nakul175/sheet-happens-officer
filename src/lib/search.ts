@@ -1,6 +1,7 @@
-// SHO-US-3.2 AC6 and 3.6 AC6: search over the projects and tasks the person may see.
-// Members find only their own projects; Admins find all. Archived projects are left out
-// unless the person asks for them.
+// SHO-US-3.2 AC6 and 3.6 AC6, APL-2684: search over the projects and tasks the person may see.
+// Members find only their own projects. Admins and Super Admins find every project, including
+// archived ones they are not members of, once Include archived is on. Archived projects stay
+// out of the results until then.
 import { db } from "@/lib/db";
 import { isAdmin, type Actor } from "@/lib/access";
 import { WORKSTREAM_DEAL, crmProjectWhere, crmVisible } from "@/lib/crm";
@@ -8,6 +9,8 @@ import { WORKSTREAM_DEAL, crmProjectWhere, crmVisible } from "@/lib/crm";
 export async function search(user: Actor, q: string, includeArchived: boolean, ideasOnly = false) {
   const text = q.trim();
   if (text.length < 2) return { projects: [], tasks: [], organisations: [], contacts: [] };
+  // Membership and archive are separate filters. Include archived must not put the membership
+  // limit back onto an Admin or Super Admin (APL-2684).
   const visible = {
     ...(isAdmin(user) ? {} : { members: { some: { userId: user.id } } }),
     ...(includeArchived ? {} : { archivedAt: null }),

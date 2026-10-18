@@ -62,6 +62,9 @@ describe("cron health", () => {
   });
 });
 
+// Not on the shared helpers import: PR #13 adds patchTask there and PR #20 adds withVersion.
+import { admin } from "./helpers";
+
 describe("search (3.2 AC6, 3.6 AC6)", () => {
   it("finds only what the person may see, leaves archived out unless asked, and shows Admins everything", async () => {
     const sa = await superAdmin();
@@ -83,6 +86,27 @@ describe("search (3.2 AC6, 3.6 AC6)", () => {
     expect(withArch).toEqual([`${tag} archived task`, `${tag} visible`]);
     expect((await q(out, "&archived=true")).json.tasks).toHaveLength(0);
     expect((await q(sa)).json.tasks.map((t: { title: string }) => t.title).sort()).toEqual([`${tag} hidden`, `${tag} visible`]);
+    const ad = await admin(sa, "searchadmin");
+    const titles = async (who: { c: Client }, extra = "") => (await q(who, extra)).json.tasks.map((t: { title: string }) => t.title).sort();
+    // APL-2684: with Include archived on, an Admin and the Super Admin see the archived project they are not members of.
+    expect(await titles(sa, "&archived=true")).toEqual([`${tag} archived task`, `${tag} hidden`, `${tag} visible`]);
+    expect(await titles(ad, "&archived=true")).toEqual([`${tag} archived task`, `${tag} hidden`, `${tag} visible`]);
+    expect(await titles(ad)).toEqual([`${tag} hidden`, `${tag} visible`]);
+    const nameOf = async (id: string) => (await lead.c.get(`/api/projects/${id}`)).json.project.name as string;
+    const idsFor = async (who: { c: Client }, name: string, extra = "") =>
+      ((await who.c.get(`/api/search?q=${encodeURIComponent(name)}${extra}`)).json.projects as { id: string }[]).map((p) => p.id);
+    const oldName = await nameOf(old.id);
+    const secretName = await nameOf(secret.id);
+    expect(await idsFor(sa, oldName, "&archived=true")).toContain(old.id);
+    expect(await idsFor(ad, oldName, "&archived=true")).toContain(old.id);
+    expect(await idsFor(me, oldName, "&archived=true")).toContain(old.id);
+    expect(await idsFor(out, oldName, "&archived=true")).not.toContain(old.id);
+    expect(await idsFor(sa, oldName)).not.toContain(old.id);
+    expect(await idsFor(ad, oldName)).not.toContain(old.id);
+    // Members still see only their own projects, flag on or off.
+    expect(await idsFor(me, secretName, "&archived=true")).not.toContain(secret.id);
+    expect(await idsFor(out, secretName, "&archived=true")).not.toContain(secret.id);
+    expect(await idsFor(ad, secretName, "&archived=true")).toContain(secret.id);
     expect((await me.c.get("/api/search?q=z")).json.tasks).toHaveLength(0); // too short
     expect((await new Client().get(`/api/search?q=${tag}`)).status).toBe(401);
     expect(a).toBeTruthy();
