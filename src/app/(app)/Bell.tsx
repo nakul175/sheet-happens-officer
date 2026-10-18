@@ -25,7 +25,6 @@ export function Bell() {
   const keep = useRef(PAGE); // how many are on screen, so a refresh does not throw away older pages
   const filterRef = useRef<BellFilter>("all");
   const loadSeq = useRef(0);
-  filterRef.current = filter;
 
   const load = useCallback(async (f: BellFilter, reset = false) => {
     const mine = ++loadSeq.current;
