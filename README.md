@@ -29,6 +29,7 @@ Settings (environment variables):
 | `SUPER_ADMIN_EMAILS` | Comma-separated addresses that become Super Admin at sign-up |
 | `RESEND_API_KEY`, `EMAIL_FROM` | Email sending; without a key, mail goes to the outbox folder (never in production) |
 | `JOB_SECRET` | Bearer token for `POST /api/jobs/<name>` (at least 16 characters) |
+| `SHUTDOWN_DRAIN_MS` | How long SIGTERM waits for in-flight requests before exiting (integer milliseconds, 10000–25000; default 15000). Sits under systemd's 90s stop grace |
 
 ## Test
 
@@ -46,8 +47,10 @@ One DigitalOcean droplet (Ubuntu 24.04, BLR1) runs the app behind Caddy; Digital
 Postgres holds the data. Every push to `main` runs `.github/workflows/deploy.yml`: lint, build
 and tests against a throwaway Postgres, then an rsync of the source to
 `/opt/sho/releases/<sha>` and `deploy/release.sh`, which installs, migrates, builds, switches
-the `current` symlink, restarts the service and checks `/api/health`. A failed health check
-puts the previous release back and fails the run (GitHub emails the person who pushed).
+the `current` symlink, restarts the service and checks `/api/health`. That restart
+sends SIGTERM; the app stops accepting connections, finishes in-flight requests,
+disconnects Prisma, and exits. A failed health check puts the previous release back
+and fails the run (GitHub emails the person who pushed).
 
 One-time setup, in order:
 
