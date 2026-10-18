@@ -143,6 +143,7 @@ function resendCalls() {
 const pause = () => new Promise((resolve) => setTimeout(resolve, 5));
 
 describe("AC1 staging mail is captured", () => {
+  // qa:TC-2681-01@v1
   it("writes verify, reset and sign-in details for a ZZ test address and serves them within 60s", async () => {
     arm();
     const logs = captureLogs();
@@ -186,6 +187,7 @@ describe("AC1 staging mail is captured", () => {
     }
   });
 
+  // qa:TC-2681-02@v1
   it("accepts the staging and pr1-pr4 hosts and stores a plus-tag ZZ address", async () => {
     for (const host of ["staging.sheethappensofficer.com", "pr1.staging.sheethappensofficer.com", "pr4.staging.sheethappensofficer.com"]) {
       arm({ APP_URL: `https://${host}` });
@@ -217,26 +219,31 @@ describe("production fail-closed", () => {
     }
   }
 
+  // qa:TC-2681-03@v1
   it("MAIL_SINK=staging on the production host throws and writes nothing", async () => {
     await refuses({ APP_URL: "https://app.sheethappensofficer.com" }, /not a staging host/);
     const denied = await endpoint(`http://127.0.0.1/api/qa/mail?to=${encodeURIComponent(ZZ_TO)}`, TOKEN);
     expect(denied.status).toBe(404);
   });
 
+  // qa:TC-2681-04@v1
   it("an empty token throws and writes nothing", async () => {
     await refuses({ MAIL_SINK_TOKEN: "" }, /MAIL_SINK_TOKEN is empty/);
   });
 
+  // qa:TC-2681-05@v1
   it("an unknown host throws and writes nothing", async () => {
     await refuses({ APP_URL: "https://unknown.example" }, /not a staging host/);
     await refuses({ APP_URL: "https://staging.sheethappensofficer.com.evil.example" }, /not a staging host/);
     await refuses({ APP_URL: "https://pr5.staging.sheethappensofficer.com" }, /not a staging host/);
   });
 
+  // qa:TC-2681-06@v1
   it("a MAIL_SINK value other than staging throws and does not fall back", async () => {
     await refuses({ MAIL_SINK: "on" }, /exactly "staging"/);
   });
 
+  // qa:TC-2681-07@v1
   it("MAIL_SINK unset keeps the existing outbox and Resend paths", async () => {
     arm({ MAIL_SINK: undefined, RESEND_API_KEY: undefined, NODE_ENV: "test" });
     await sendMail(verifyMail(ZZ_TO, "zz-verify-token"));
@@ -264,6 +271,7 @@ describe("production fail-closed", () => {
 });
 
 describe("AC2 waitForMail and the endpoint", () => {
+  // qa:TC-2681-08@v1
   it("waitForMail resolves for a captured message and times out cleanly", async () => {
     expect(MAIL_WAIT_MS).toBe(60_000);
     arm();
@@ -286,6 +294,7 @@ describe("AC2 waitForMail and the endpoint", () => {
     });
   });
 
+  // qa:TC-2681-09@v1
   it("is 404 when the sink is off, 401 for a wrong or missing token, and 400 for a non-ZZ address", async () => {
     arm({ MAIL_SINK: undefined });
     expect((await endpoint(`http://127.0.0.1/api/qa/mail?to=${encodeURIComponent(ZZ_TO)}`, TOKEN)).status).toBe(404);
@@ -304,6 +313,7 @@ describe("AC2 waitForMail and the endpoint", () => {
     expect(mailboxSpecsSkip()).toBe(true);
   });
 
+  // qa:TC-2681-10@v1
   it("purges outbox files older than 24h when the mailbox is read", async () => {
     arm();
     const stale = new Date(Date.now() - 25 * 60 * 60 * 1000).toISOString();
@@ -316,6 +326,7 @@ describe("AC2 waitForMail and the endpoint", () => {
     expect(await files()).not.toContain("old.json");
   });
 
+  // qa:TC-2681-11@v1
   it("waitForMail sends X-QA-Token and basic auth when the e2e config provides it", async () => {
     arm();
     process.env.STAGING_USER = "zz-test-gate";
@@ -344,6 +355,7 @@ describe("AC2 waitForMail and the endpoint", () => {
     expect(plainHeaders.get("authorization")).toBeNull();
   });
 
+  // qa:TC-2681-12@v1
   it("skips outbox files over 256 KB and returns at most the newest 20", async () => {
     arm();
     await writeFile(path.join(outbox, "big.json"), JSON.stringify({
@@ -377,6 +389,7 @@ describe("AC2 waitForMail and the endpoint", () => {
 });
 
 describe("constant-time token compare", () => {
+  // qa:TC-2681-13@v1
   it("a wrong token of the same length and of a different length is 401 and does not throw", async () => {
     arm();
     const sameLength = "zz-test-sink-tokEn";
@@ -396,6 +409,7 @@ describe("constant-time token compare", () => {
 });
 
 describe("AC3 logs", () => {
+  // qa:TC-2681-14@v1
   it("does not log the sink token, the password, or a dropped address or body", async () => {
     arm();
     const logs = captureLogs();
