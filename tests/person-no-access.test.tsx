@@ -1,8 +1,7 @@
 /**
  * @vitest-environment jsdom
  */
-// APL-2664: the person page shows a no-access state when GET /api/team/:id answers 403,
-// keeps LoadFailed for a real network failure, and still shows the person to an Admin.
+// APL-2664 v1.1. One test per scenario (outline rows included). Pam's qa:TC markers from the issue are named on the cases they cover.
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -36,9 +35,8 @@ vi.mock("@/app/(app)/Shell", async (importOriginal) => {
 const SECRET_NAME = "P2 Secret Name";
 const SECRET_EMAIL = "p2.secret@example.com";
 const SECRET_PROJECT = "P2 Secret Project";
-const VISIBLE_NAME = "P2 Visible Name";
-const VISIBLE_EMAIL = "p2.visible@example.com";
-const VISIBLE_PROJECT = "P2 Visible Project";
+const SHARED_PROJECT = "Shared With Worker";
+const PRIVATE_PROJECT = "Only P2 Project";
 const NO_ACCESS = "You don't have access to this person";
 
 let root: Root | undefined;
@@ -47,8 +45,12 @@ function json(status: number, body: unknown) {
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 }
 
+function retryButton(page: HTMLElement) {
+  return [...page.querySelectorAll("button")].find((b) => b.textContent === "Retry");
+}
+
 async function openPerson() {
-  document.body.innerHTML = "";
+  document.body.replaceChildren();
   const host = document.createElement("div");
   document.body.appendChild(host);
   root = createRoot(host);
@@ -65,83 +67,159 @@ async function openPerson() {
 
 beforeEach(() => {
   harness.me = { id: "worker", name: "Worker", email: "worker@aplyd.com", orgRole: "MEMBER" };
+  document.title = "";
 });
 
 afterEach(() => {
   act(() => root?.unmount());
   root = undefined;
-  document.body.innerHTML = "";
+  document.body.replaceChildren();
   vi.unstubAllGlobals();
 });
 
-describe("Person page shows a no-access state on 403", () => {
-  it("A user without access sees a no-access message", async () => {
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+describe("Person page shows a plain state for each failure", () => {
+  // qa:TC-APL2664-7beb43b5@v1 (message, not LoadFailed) and qa:TC-APL2664-61d8fa83@v1 (no leaked detail)
+  it("A 403 shows a no-access message and no details", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
       expect(String(input)).toBe("/api/team/p2");
       return json(403, {
         error: `Forbidden for ${SECRET_NAME} <${SECRET_EMAIL}> on ${SECRET_PROJECT}`,
-        person: {
-          id: "p2",
-          name: SECRET_NAME,
-          email: SECRET_EMAIL,
-          projects: [{ id: "proj-secret", name: SECRET_PROJECT }],
-        },
+        code: "OTHER",
+        person: { id: "p2", name: SECRET_NAME, email: SECRET_EMAIL, projects: [{ id: "proj-secret", name: SECRET_PROJECT }] },
       });
-    });
-    vi.stubGlobal("fetch", fetchMock);
-
-    const page = await openPerson();
-    const text = page.textContent ?? "";
-
-    expect(text).toContain(NO_ACCESS);
-    expect(page.querySelector("[role=alert]")?.textContent).toBe(NO_ACCESS);
-    expect(text).not.toContain("Could not load");
-    expect(text).not.toContain("Could not reach");
-    expect(text).not.toMatch(/retry/i);
-    expect(text).not.toContain(SECRET_NAME);
-    expect(text).not.toContain(SECRET_EMAIL);
-    expect(text).not.toContain(SECRET_PROJECT);
-    expect(fetchMock).toHaveBeenCalledOnce();
-  });
-
-  it("A real network failure still shows LoadFailed", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => {
-      throw new TypeError("Failed to fetch");
     }));
 
     const page = await openPerson();
-    const text = page.textContent ?? "";
+    const html = page.innerHTML;
 
-    expect(text).toContain("Could not reach the server.");
-    expect(page.querySelector("button")?.textContent).toBe("Retry");
-    expect(text).not.toContain(NO_ACCESS);
+    expect(page.querySelector("[role=alert]")?.textContent).toBe(NO_ACCESS);
+    expect(html).not.toContain("Could not load");
+    expect(retryButton(page)).toBeUndefined();
+    expect(html).not.toContain(SECRET_NAME);
+    expect(html).not.toContain(SECRET_EMAIL);
+    expect(html).not.toContain(SECRET_PROJECT);
+    expect(document.title).not.toContain(SECRET_NAME);
+    expect(document.title).not.toContain(SECRET_EMAIL);
+    expect(document.title).not.toContain(SECRET_PROJECT);
   });
 
-  it("Allowed users still see the person", async () => {
+  it("Other failures show plain messages: answers 401", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => json(401, { error: `Session ended for ${SECRET_NAME}` })));
+    const page = await openPerson();
+    expect(page.textContent).toContain("Your session has expired, please sign in again");
+    expect(retryButton(page)).toBeUndefined();
+    expect(page.textContent).not.toContain(NO_ACCESS);
+    expect(page.innerHTML).not.toContain(SECRET_NAME);
+  });
+
+  it("Other failures show plain messages: answers 404", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => json(404, { error: "Person not found" })));
+    const page = await openPerson();
+    expect(page.querySelector("[role=alert]")?.textContent).toBe("Not found");
+    expect(retryButton(page)).toBeUndefined();
+    expect(page.textContent).not.toContain(NO_ACCESS);
+    expect(page.textContent).not.toContain("Could not load");
+  });
+
+  it("Other failures show plain messages: answers 500, 502 or 503", async () => {
+    for (const status of [500, 502, 503]) {
+      vi.stubGlobal("fetch", vi.fn(async () => json(status, { error: `fault ${SECRET_NAME}` })));
+      const page = await openPerson();
+      expect(page.textContent, String(status)).toContain("Something went wrong, try again");
+      expect(retryButton(page)?.textContent, String(status)).toBe("Retry");
+      expect(page.textContent, String(status)).not.toContain(NO_ACCESS);
+      expect(page.innerHTML, String(status)).not.toContain(SECRET_NAME);
+      act(() => root?.unmount());
+    }
+  });
+
+  // qa:TC-APL2664-c35d2187@v1
+  it("Other failures show plain messages: fails with a network error", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => {
+      throw new TypeError("Failed to fetch");
+    }));
+    const page = await openPerson();
+    expect(page.textContent).toContain("Could not reach the server.");
+    expect(retryButton(page)?.textContent).toBe("Retry");
+    expect(page.textContent).not.toContain(NO_ACCESS);
+  });
+
+  // qa:TC-APL2664-e9ae6840@v1
+  it("Allowed users see what their role allows: admin", async () => {
     harness.me = { id: "admin", name: "Admin", email: "admin@aplyd.com", orgRole: "ADMIN" };
+    const joined = "2026-01-15T00:00:00.000Z";
+    const joinedText = new Date(joined).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
       expect(String(input)).toBe("/api/team/p2");
       return json(200, {
         person: {
           id: "p2",
-          name: VISIBLE_NAME,
-          email: VISIBLE_EMAIL,
+          name: "P2 Visible Name",
+          email: "p2.visible@example.com",
           orgRole: "MEMBER",
           status: "ACTIVE",
-          joinedAt: "2026-01-15T00:00:00.000Z",
+          joinedAt: joined,
           openTasks: 2,
-          projects: [{ id: "proj-1", name: VISIBLE_PROJECT, role: "EDITOR", openTasks: 2 }],
+          projects: [
+            { id: "proj-shared", name: SHARED_PROJECT, role: "EDITOR", openTasks: 1 },
+            { id: "proj-private", name: PRIVATE_PROJECT, role: "LEADER", openTasks: 1 },
+          ],
         },
       });
     }));
 
     const page = await openPerson();
     const text = page.textContent ?? "";
-
-    expect(text).toContain(VISIBLE_NAME);
-    expect(text).toContain(VISIBLE_EMAIL);
-    expect(text).toContain(VISIBLE_PROJECT);
+    expect(text).toContain("P2 Visible Name");
+    expect(text).toContain("p2.visible@example.com");
+    expect(text).toContain("Member");
+    expect(text).toContain("Active");
+    expect(text).toContain(joinedText);
+    expect(text).toContain("2 open tasks");
+    expect(text).toContain(SHARED_PROJECT);
+    expect(text).toContain(PRIVATE_PROJECT);
     expect(text).not.toContain(NO_ACCESS);
     expect(text).not.toContain("Could not reach the server.");
+  });
+
+  it("Allowed users see what their role allows: worker", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => json(200, {
+      person: {
+        id: "p2",
+        name: "P2 Visible Name",
+        projects: [{ id: "proj-shared", name: SHARED_PROJECT }],
+      },
+    })));
+
+    const page = await openPerson();
+    const text = page.textContent ?? "";
+    expect(text).toContain("P2 Visible Name");
+    expect(text).toContain(SHARED_PROJECT);
+    expect(text).toContain("Projects you share");
+    expect(text).not.toContain("p2.visible@example.com");
+    expect(text).not.toContain(PRIVATE_PROJECT);
+    expect(text).not.toContain("Active");
+    expect(text).not.toContain("Joined");
+    expect(text).not.toContain("open task");
+    expect(text).not.toContain(NO_ACCESS);
+  });
+
+  it("A forced password change is not shown as no-access", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => json(403, {
+      error: "Set your own password first.",
+      code: "PASSWORD_CHANGE_REQUIRED",
+      person: { id: "p2", name: SECRET_NAME, email: SECRET_EMAIL, projects: [{ id: "proj-secret", name: SECRET_PROJECT }] },
+    })));
+
+    const page = await openPerson();
+    const text = page.textContent ?? "";
+    expect(text).toContain("Set your own password");
+    expect(text).toContain("The emailed one still works until you do.");
+    expect(page.querySelector("a[href='/profile']")?.textContent).toBe("Change password");
+    expect(text).not.toContain(NO_ACCESS);
+    expect(page.innerHTML).not.toContain(SECRET_NAME);
+    expect(page.innerHTML).not.toContain(SECRET_EMAIL);
+    expect(page.innerHTML).not.toContain(SECRET_PROJECT);
+    expect(document.title).not.toContain(SECRET_NAME);
   });
 });

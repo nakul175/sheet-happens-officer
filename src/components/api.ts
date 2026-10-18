@@ -30,8 +30,14 @@ export const COULD_NOT_REACH = "Could not reach the server.";
 
 /** GET a path; `reload()` fetches again. `data` stays on screen while reloading.
  * `failed` is true only once an answer came back as a network failure: status starts at 0, so an in-flight request must never read as one. */
+const responseCode = (data: unknown): string | null => {
+  if (!data || typeof data !== "object" || !("code" in data)) return null;
+  const code = (data as { code?: unknown }).code;
+  return typeof code === "string" ? code : null;
+};
+
 export function useGet<T = Record<string, any>>(path: string | null) { // eslint-disable-line @typescript-eslint/no-explicit-any
-  const [state, setState] = useState<{ data: T | null; error: string | null; status: number; loading: boolean }>({ data: null, error: null, status: 0, loading: true });
+  const [state, setState] = useState<{ data: T | null; error: string | null; status: number; code: string | null; loading: boolean }>({ data: null, error: null, status: 0, code: null, loading: true });
   const [tick, setTick] = useState(0);
   const seq = useRef(0);
   useEffect(() => {
@@ -40,7 +46,7 @@ export function useGet<T = Record<string, any>>(path: string | null) { // eslint
     api<T>("GET", path).then((r) => {
       if (mine !== seq.current) return;
       // A dropped connection must not wipe what is already on screen or look like a permission problem.
-      setState((prev) => ({ data: r.ok ? r.data : isNetworkFailure(r.status) ? prev.data : null, error: r.ok ? null : isNetworkFailure(r.status) ? COULD_NOT_REACH : r.error ?? "Error", status: r.status, loading: false }));
+      setState((prev) => ({ data: r.ok ? r.data : isNetworkFailure(r.status) ? prev.data : null, error: r.ok ? null : isNetworkFailure(r.status) ? COULD_NOT_REACH : r.error ?? "Error", status: r.status, code: r.ok ? null : responseCode(r.data), loading: false }));
     });
   }, [path, tick]);
   const reload = useCallback(() => { setState((p) => (p.data ? p : { ...p, loading: true, error: null })); setTick((n) => n + 1); }, []);

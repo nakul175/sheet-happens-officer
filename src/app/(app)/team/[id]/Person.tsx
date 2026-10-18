@@ -19,9 +19,16 @@ export default function PersonPage() {
   const me = useMe();
   const g = useGet<{ person: Person }>(`/api/team/${id}`);
   const [note, setNote] = useState<null | { ok: boolean; text: string }>(null);
-  // APL-2664: 403 is "no access", never the load-failed / retry state, and never this person's details.
-  const denied = !g.loading && g.status === 403;
-  const p = denied ? undefined : g.data?.person;
+  // APL-2664 v1.1. Each failed read has its own plain message. A 403 is no access, except the
+  // forced-password 403 (APL-2624), which keeps the existing set-password flow.
+  const settled = !g.loading;
+  const passwordChange = settled && g.status === 403 && g.code === "PASSWORD_CHANGE_REQUIRED";
+  const denied = settled && g.status === 403 && !passwordChange;
+  const expired = settled && g.status === 401;
+  const missing = settled && g.status === 404;
+  const serverFault = settled && (g.status === 500 || g.status === 502 || g.status === 503);
+  const unreachable = settled && g.status === 0 && !!g.error;
+  const p = denied || passwordChange || expired || missing ? undefined : g.data?.person;
   const admin = me.orgRole !== "MEMBER";
   const self = p?.id === me.id;
 
@@ -37,13 +44,32 @@ export default function PersonPage() {
     if (r.ok) { setNote({ ok: true, text: `${p.name} is now ${to === "ADMIN" ? "an Admin" : "a Member"}.` }); g.reload(); } else setNote({ ok: false, text: r.error ?? "Could not change the role." });
   }
 
+  if (passwordChange) {
+    return (
+      <Page title="Set your own password" docTitle="Set your own password">
+        <div className="pwbar" role="status">
+          <span>Set your own password. The emailed one still works until you do.</span>
+          <Link href="/profile">Change password</Link>
+        </div>
+      </Page>
+    );
+  }
+
   return (
-    <Page title={p?.name ?? "Person"} sub={p?.email ? `${p.email} · ${roleLabel(p.orgRole!)}` : undefined} docTitle={p?.name ?? "Person"}>
+    <Page title={p?.name ?? "Person"} sub={admin && p?.email ? `${p.email} · ${roleLabel(p.orgRole!)}` : undefined} docTitle={p?.name ?? "Person"}>
       <p><Link href="/team">← Back to Team</Link></p>
       {g.loading && <Skeleton />}
-      {g.error && g.status === 404 && <div className="err" role="alert">This person was not found.</div>}
+      {missing && <div className="err" role="alert">Not found</div>}
+      {expired && <div className="err" role="alert">Your session has expired, please sign in again</div>}
       {denied && <div className="card empty" role="alert">{"You don't have access to this person"}</div>}
-      {g.error && g.status !== 404 && g.status !== 403 && <LoadFailed onRetry={g.reload} />}
+      {serverFault && (
+        <div className="card empty" role="alert">
+          <p>Something went wrong, try again</p>
+          <button className="btn" onClick={g.reload}>Retry</button>
+        </div>
+      )}
+      {unreachable && <LoadFailed onRetry={g.reload} />}
+      {g.error && !missing && !expired && !denied && !serverFault && !unreachable && <LoadFailed onRetry={g.reload} />}
       {note && <div className={note.ok ? "ok" : "err"} role="status">{note.text}</div>}
       {p && (
         <>
