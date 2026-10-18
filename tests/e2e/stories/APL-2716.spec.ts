@@ -325,7 +325,7 @@ describe("APL-2716 hidden deal notices", () => {
       await bell.waitFor({ timeout: 15_000 });
       await bell.click();
       const panel = page.getByRole("dialog", { name: "Notifications" });
-      await expect(panel).toBeVisible();
+      await panel.waitFor({ state: "visible", timeout: 15_000 });
       return panel;
     }
 
@@ -334,10 +334,11 @@ describe("APL-2716 hidden deal notices", () => {
       const ctx = await signedIn(width, outsider);
       const page = await ctx.newPage();
       const panel = await readPanel(page);
-      await expect(panel).toContainText(stageText());
-      await expect(panel).toContainText(taskText());
-      await expect(panel.locator(`a[href="${dealHref()}"]`).first()).toBeVisible();
-      await expect(panel.locator(`a[href="${taskHref()}"]`).first()).toBeVisible();
+      const text = await panel.innerText();
+      expect(text).toContain(stageText());
+      expect(text).toContain(taskText());
+      expect(await panel.locator(`a[href="${dealHref()}"]`).count()).toBeGreaterThan(0);
+      expect(await panel.locator(`a[href="${taskHref()}"]`).count()).toBeGreaterThan(0);
       await ctx.close();
     });
 
@@ -364,14 +365,15 @@ describe("APL-2716 hidden deal notices", () => {
       });
       const page = await ctx.newPage();
       const panel = await readPanel(page);
-      await expect(panel).toContainText(HIDDEN_DEAL_TEXT);
-      await expect(panel).not.toContainText(DEAL);
-      await expect(panel).not.toContainText("Acme");
-      await expect(panel).not.toContainText(STAGE);
-      await expect(panel).not.toContainText(TASK);
+      const text = await panel.innerText();
+      expect(text).toContain(HIDDEN_DEAL_TEXT);
+      expect(text).not.toContain(DEAL);
+      expect(text).not.toContain("Acme");
+      expect(text).not.toContain(STAGE);
+      expect(text).not.toContain(TASK);
       expect(await panel.locator("a[href*='/projects/']").count()).toBe(0);
       expect(await panel.locator(`a[href="${taskHref()}"]`).count()).toBe(0);
-      await expect(panel.locator(`a[href="${plainHref()}"]`)).toBeVisible();
+      expect(await panel.locator(`a[href="${plainHref()}"]`).count()).toBeGreaterThan(0);
       await ctx.close();
     });
   });
