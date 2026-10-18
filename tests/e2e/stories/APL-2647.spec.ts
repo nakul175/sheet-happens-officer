@@ -1,13 +1,19 @@
 // SHO-BUG-12 Slow load shows 'Could not reach the server' because in-flight status 0 is treated as a network failure (Linear APL-2647, PR #12).
 // The issue's four unnumbered acceptance criteria are taken in order as AC1 to AC4.
 // Slow and failed loads are simulated in the browser (route interception), so nothing on the server is touched.
-// The slow-load checks run whenever PR #12 is live on staging (tests/e2e/helpers/jim-gate.ts) and skip otherwise; the real-failure checks always run.
+// The file skips only when SHO_QA_PASS is unset. Slow loads expect the skeleton (the fix is on main).
 import type { Page } from "@playwright/test";
 import { test, expect, zz } from "../support";
 import { newProject, newTask, type Who } from "../g2";
-import { notLive, prLive } from "../helpers/jim-gate";
+import { PASS, passwordOk } from "./qa";
 
-const WHY = "a slow first load shows LoadFailed without it.";
+const tag = (id: string) => ({ annotation: [{ type: "ac", description: id }] });
+
+test.beforeAll(() => {
+  test.skip(!PASS, "Set SHO_QA_PASS (the password for nakul17+ aliases).");
+  if (!passwordOk(PASS)) throw new Error("SHO_QA_PASS must be at least 8 characters with a letter and a number.");
+});
+
 const DELAY = 2500;
 const LOAD_FAILED = "Could not reach the server.";
 
@@ -36,9 +42,7 @@ async function open(page: Page, path: string, api: RegExp, handle: Parameters<Pa
 }
 
 test.describe("SHO-BUG-12 / APL-2647", () => {
-  test("AC1: a request still in flight is never shown as a network failure (ProjectView)", async ({ admin, later }) => {
-    const gate = await prLive(12, admin, null, later);
-    test.skip(!gate.deployed, notLive(gate, WHY));
+  test("AC1: a request still in flight is never shown as a network failure (ProjectView)", tag("APL-2647 AC1"), async ({ admin, later }) => {
     const i = await ids(admin, later);
     const page = admin.page;
     await open(page, SCREENS[0].path(i), SCREENS[0].api(i), async (r) => { await new Promise((x) => setTimeout(x, DELAY)); await r.continue(); });
@@ -48,9 +52,7 @@ test.describe("SHO-BUG-12 / APL-2647", () => {
   });
 
   for (const s of SCREENS) {
-    test(`AC2 and AC4 (${s.name}): a first load slower than 400 ms shows the shared Skeleton, not LoadFailed or "Loading…"`, async ({ admin, later }) => {
-      const gate = await prLive(12, admin, null, later);
-      test.skip(!gate.deployed, notLive(gate, WHY));
+    test(`AC2 and AC4 (${s.name}): a first load slower than 400 ms shows the shared Skeleton, not LoadFailed or "Loading…"`, tag(`APL-2647 AC2 AC4 ${s.name}`), async ({ admin, later }) => {
       const i = await ids(admin, later);
       const page = admin.page;
       await open(page, s.path(i), s.api(i), async (r) => { await new Promise((x) => setTimeout(x, DELAY)); await r.continue(); });
@@ -63,7 +65,7 @@ test.describe("SHO-BUG-12 / APL-2647", () => {
   }
 
   for (const s of SCREENS) {
-    test(`AC3 and AC4 (${s.name}): a real network error still shows "Could not reach the server." with Retry`, async ({ admin, later }) => {
+    test(`AC3 and AC4 (${s.name}): a real network error still shows "Could not reach the server." with Retry`, tag(`APL-2647 AC3 AC4 ${s.name}`), async ({ admin, later }) => {
       const i = await ids(admin, later);
       const page = admin.page;
       await open(page, s.path(i), s.api(i), (r) => r.abort("internetdisconnected"));
@@ -72,7 +74,7 @@ test.describe("SHO-BUG-12 / APL-2647", () => {
     });
   }
 
-  test("AC3 (5xx, ProjectView): a 503 shows LoadFailed, and Retry loads the project once the server answers", async ({ admin, later }) => {
+  test("AC3 (5xx, ProjectView): a 503 shows LoadFailed, and Retry loads the project once the server answers", tag("APL-2647 AC3"), async ({ admin, later }) => {
     const i = await ids(admin, later);
     const page = admin.page;
     let fail = true;

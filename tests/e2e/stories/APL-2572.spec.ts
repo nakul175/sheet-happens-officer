@@ -1,7 +1,14 @@
 // SHO-US-14.13 Notification triage (APL-2572). Needs the optional Member account (it receives the notices).
-// AC3 runs whenever PR #23 is live (tests/e2e/helpers/jim-gate.ts) and skips otherwise: until then the Unread tab can list read rows.
+// The file skips only when SHO_QA_PASS is unset. AC3 always checks the Unread tab (APL-2672 is on main).
 import { test, expect, zz } from "../support";
-import { notLive, prLive } from "../helpers/jim-gate";
+import { PASS, passwordOk } from "./qa";
+
+const tag = (id: string) => ({ annotation: [{ type: "ac", description: id }] });
+
+test.beforeAll(() => {
+  test.skip(!PASS, "Set SHO_QA_PASS (the password for nakul17+ aliases).");
+  if (!passwordOk(PASS)) throw new Error("SHO_QA_PASS must be at least 8 characters with a letter and a number.");
+});
 
 async function give(admin: any, member: any, later: any, n: number) {
   const r = await admin.api.post("/api/projects", { name: zz("bell"), leaderId: admin.user.id });
@@ -15,7 +22,7 @@ async function give(admin: any, member: any, later: any, n: number) {
 const unread = async (member: any) => (await member.api.get("/api/notifications")).json.unread as number;
 const bell = (p: any) => p.getByRole("button", { name: /^Notifications/ });
 
-test("AC1: opening the bell leaves 5 unread items unread and the badge stays", async ({ admin, member, later }) => {
+test("AC1: opening the bell leaves 5 unread items unread and the badge stays", tag("APL-2572 AC1"), async ({ admin, member, later }) => {
   await give(admin, member, later, 5);
   const before = await unread(member);
   expect(before).toBeGreaterThanOrEqual(5);
@@ -31,7 +38,7 @@ test("AC1: opening the bell leaves 5 unread items unread and the badge stays", a
   await expect(bell(p)).toHaveAttribute("aria-label", new RegExp(`${before} unread`));
 });
 
-test("AC2: clicking an item opens its task and marks it read", async ({ admin, member, later }) => {
+test("AC2: clicking an item opens its task and marks it read", tag("APL-2572 AC2"), async ({ admin, member, later }) => {
   await give(admin, member, later, 1);
   const before = await unread(member);
   const p = member.page;
@@ -42,10 +49,8 @@ test("AC2: clicking an item opens its task and marks it read", async ({ admin, m
   await expect.poll(() => unread(member)).toBe(before - 1);
 });
 
-test("AC3: the Unread filter hides read items, and an empty result says 'All caught up'", async ({ admin, member, later }) => {
+test("AC3: the Unread filter hides read items, and an empty result says 'All caught up'", tag("APL-2572 AC3"), async ({ admin, member, later }) => {
   test.setTimeout(120_000);
-  const gate = await prLive(23, admin, null, later);
-  test.skip(!gate.deployed, notLive(gate, "the Unread tab can still list read rows."));
   await give(admin, member, later, 2);
   const p = member.page;
   await p.goto("/");
@@ -65,7 +70,7 @@ test("AC3: the Unread filter hides read items, and an empty result says 'All cau
   else await expect(panel2.locator(".bell-row:not(.unread)")).toHaveCount(0);
 });
 
-test("AC4: marking an item unread raises the badge by 1", async ({ admin, member, later }) => {
+test("AC4: marking an item unread raises the badge by 1", tag("APL-2572 AC4"), async ({ admin, member, later }) => {
   await give(admin, member, later, 1);
   expect((await member.api.post("/api/notifications/read-all")).status).toBeLessThan(300);
   const p = member.page;
@@ -77,7 +82,7 @@ test("AC4: marking an item unread raises the badge by 1", async ({ admin, member
   expect(await unread(member)).toBe(1);
 });
 
-test("AC5: with more than 50 items, older ones load on request", async ({ admin, member, later }) => {
+test("AC5: with more than 50 items, older ones load on request", tag("APL-2572 AC5"), async ({ admin, member, later }) => {
   test.setTimeout(240_000);
   await give(admin, member, later, 52);
   const p = member.page;

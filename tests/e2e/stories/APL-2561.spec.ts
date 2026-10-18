@@ -1,11 +1,16 @@
 // SHO-US-14.2 Honest loading, empty, error and offline states (Linear APL-2561).
 // Network failures and slow loads are simulated in the browser (route interception), so nothing on the server is touched.
-// The project-screen slow load runs whenever PR #12 is live on staging (tests/e2e/helpers/jim-gate.ts) and skips otherwise.
+// The file skips only when SHO_QA_PASS is unset. The slow project load expects the skeleton (APL-2647 is on main).
 import { test, expect, zz } from "../support";
 import { newProject } from "../g2";
-import { notLive, prLive } from "../helpers/jim-gate";
+import { PASS, passwordOk } from "./qa";
 
-const WHY = "a slow project load shows \"Could not reach the server.\" instead of a skeleton without it.";
+const tag = (id: string) => ({ annotation: [{ type: "ac", description: id }] });
+
+test.beforeAll(() => {
+  test.skip(!PASS, "Set SHO_QA_PASS (the password for nakul17+ aliases).");
+  if (!passwordOk(PASS)) throw new Error("SHO_QA_PASS must be at least 8 characters with a letter and a number.");
+});
 
 async function project(admin: { api: import("../support").Api; user: Record<string, any> }, later: (f: () => Promise<unknown>) => void, label: string) {
   const r = await admin.api.post("/api/projects", { name: zz(label), leaderId: admin.user.id });
@@ -15,7 +20,7 @@ async function project(admin: { api: import("../support").Api; user: Record<stri
   return { id, name: zz(label) };
 }
 
-test("AC1: a load slower than 400 ms shows a skeleton of the layout (My tasks)", async ({ admin }) => {
+test("AC1: a load slower than 400 ms shows a skeleton of the layout (My tasks)", tag("APL-2561 AC1"), async ({ admin }) => {
   const page = admin.page;
   await page.route("**/api/my-tasks", async (r) => { await new Promise((x) => setTimeout(x, 2500)); await r.continue(); });
   await page.goto("/", { waitUntil: "commit" });
@@ -24,9 +29,7 @@ test("AC1: a load slower than 400 ms shows a skeleton of the layout (My tasks)",
   await expect(page.locator(".skel-row")).toHaveCount(0, { timeout: 8000 }); // gone when the data arrives
 });
 
-test("AC1 and AC2 (project screen): a slow load shows a skeleton and does not claim the server is unreachable", async ({ admin, later }) => {
-  const gate = await prLive(12, admin, null, later);
-  test.skip(!gate.deployed, notLive(gate, WHY));
+test("AC1 and AC2 (project screen): a slow load shows a skeleton and does not claim the server is unreachable", tag("APL-2561 AC1 AC2"), async ({ admin, later }) => {
   const p = await project(admin, later, "14.2 slow");
   const page = admin.page;
   await page.route(new RegExp(`/api/projects/${p.id}(/tasks)?(\\?|$)`), async (r) => { await new Promise((x) => setTimeout(x, 2500)); await r.continue(); });
@@ -36,7 +39,7 @@ test("AC1 and AC2 (project screen): a slow load shows a skeleton and does not cl
   await expect(page.locator(".skel-row").first()).toBeVisible();
 });
 
-test("AC2: a dead network or a 5xx says 'Could not reach the server' with Retry, never 'not a member'", async ({ admin, later }) => {
+test("AC2: a dead network or a 5xx says 'Could not reach the server' with Retry, never 'not a member'", tag("APL-2561 AC2"), async ({ admin, later }) => {
   const p = await project(admin, later, "14.2 down");
   const page = admin.page;
   await page.route(new RegExp(`/api/projects/${p.id}(\\?|$)`), (r) => r.abort("connectionfailed"));
@@ -51,7 +54,7 @@ test("AC2: a dead network or a 5xx says 'Could not reach the server' with Retry,
   await expect(page.getByText(/isn't available|not a member/i)).toHaveCount(0);
 });
 
-test("AC3: a real 404 or 403 still shows the 'isn't available / not a member' message", async ({ admin }) => {
+test("AC3: a real 404 or 403 still shows the 'isn't available / not a member' message", tag("APL-2561 AC3"), async ({ admin }) => {
   const page = admin.page;
   await page.goto("/projects/zz-test-does-not-exist");
   await expect(page.getByText("This project isn't available")).toBeVisible();
@@ -59,7 +62,7 @@ test("AC3: a real 404 or 403 still shows the 'isn't available / not a member' me
   await expect(page.getByText("Could not reach the server.")).toHaveCount(0);
 });
 
-test("AC3 (server 403): the same message for a project the server refuses", async ({ admin, later }) => {
+test("AC3 (server 403): the same message for a project the server refuses", tag("APL-2561 AC3"), async ({ admin, later }) => {
   const p = await project(admin, later, "14.2 forbidden");
   const page = admin.page;
   await page.route(new RegExp(`/api/projects/${p.id}(\\?|$)`), (r) => r.fulfill({ status: 403, contentType: "application/json", body: JSON.stringify({ error: "Not a member." }) }));
@@ -68,7 +71,7 @@ test("AC3 (server 403): the same message for a project the server refuses", asyn
   await expect(page.getByText("Could not reach the server.")).toHaveCount(0);
 });
 
-test("AC4: an empty My tasks says what the screen is for and offers the next step", async ({ admin, later }) => {
+test("AC4: an empty My tasks says what the screen is for and offers the next step", tag("APL-2561 AC4"), async ({ admin, later }) => {
   await newProject(admin, later, { label: "14.2 plate" }); // "+ New task" only renders when there is a project this person can add to
   const page = admin.page;
   await page.route("**/api/my-tasks", (r) => r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ overdue: [], next7: [], later: [], waitingOnMe: [], waitingOnOthers: [] }) }));
@@ -79,13 +82,13 @@ test("AC4: an empty My tasks says what the screen is for and offers the next ste
   await expect(page.getByRole("button", { name: "New task" }).first()).toBeVisible();
 });
 
-test("AC4 (project): an empty project says so", async ({ admin, later }) => {
+test("AC4 (project): an empty project says so", tag("APL-2561 AC4"), async ({ admin, later }) => {
   const p = await project(admin, later, "14.2 empty");
   await admin.page.goto(`/projects/${p.id}`);
   await expect(admin.page.getByText("No tasks here.").first()).toBeVisible();
 });
 
-test("AC5: Retry succeeds and the screen loads without a full page reload", async ({ admin, later }) => {
+test("AC5: Retry succeeds and the screen loads without a full page reload", tag("APL-2561 AC5"), async ({ admin, later }) => {
   const p = await project(admin, later, "14.2 retry");
   const page = admin.page;
   const re = new RegExp(`/api/projects/${p.id}(\\?|$)`);
