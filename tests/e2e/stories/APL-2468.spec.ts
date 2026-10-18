@@ -1,6 +1,7 @@
 // APL-2468 · [SHO-E4] Tasks. One test per acceptance criterion.
 // Pam qa:TC: none on the issue. Password comes from SHO_QA_PASS. Names use ZZ-TEST. Emails are nakul17+ aliases.
 import { test, login } from "../support";
+import { runVitest } from "../helpers/named-suite";
 import {
   PASS, passwordOk, gate, verifiedUser, deactivate, makeProject, archiveProject, expect, zz,
 } from "./qa";
@@ -193,7 +194,16 @@ test("AC6: a Viewer cannot write a task", async ({ admin, browser, anon, later }
   expect((await viewer.api.get(`/api/tasks/${id}`)).status).toBe(200);
 });
 
-test.fixme("AC7: the automated task suite passes against the amended schema", async () => {
-  // The criterion names "the automated test suite" and a historical count (47 on 17 October 2026) without a command or a file list.
-  // It is not a behaviour of the running app, so it is not asserted here.
+const TASK_SPECS = [
+  "tests/work.test.ts",
+  "tests/undo.test.ts",
+  "tests/approvals-14-16.test.ts",
+  "tests/blocked-reason.test.ts",
+  "tests/bulk-14-11.test.ts",
+];
+
+test("AC7: the five task spec files pass, with none skipped", async () => {
+  test.setTimeout(15 * 60_000);
+  const report = await runVitest(TASK_SPECS);
+  expect(report.numPassedTests).toBe(report.numTotalTests);
 });
