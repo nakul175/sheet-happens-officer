@@ -180,9 +180,14 @@ const PROBES: Record<number, (admin: Who, member: Who | null, later: Later) => P
         await route.fulfill(json({ unread: 1, items: [unread, read], next: null }));
       });
       await page.goto("/", { waitUntil: "domcontentloaded" });
+      // A click on the bell before hydration is lost, and the panel stays shut, so the seeded
+      // row never appears. The badge names "1 unread" only after the seeded list has been applied.
+      await expect(bell(page)).toHaveAttribute("aria-label", "Notifications, 1 unread");
       await bell(page).click();
       const panel = page.getByRole("dialog", { name: "Notifications" });
-      await panel.getByRole("button", { name: "Mark as read: ZZ gate unread" }).click();
+      const markRead = panel.getByRole("button", { name: "Mark as read: ZZ gate unread" });
+      await expect(markRead).toBeVisible();
+      await markRead.click();
       await expect.poll(() => staleArmed).toBe(true); // the All reload is in flight; Unread has not been selected yet
       await panel.getByRole("button", { name: /^Unread/ }).click();
       await expect(panel.getByText("All caught up")).toBeVisible();
