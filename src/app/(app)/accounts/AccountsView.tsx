@@ -4,6 +4,7 @@ import { useState } from "react";
 import { api, useGet } from "@/components/api";
 import { Field, Modal, Skeleton } from "@/components/ui";
 import { Page } from "../Shell";
+import "./scroll.css";
 
 type O = { id: string; name: string; kind: string | null; country: string | null; parent: { id: string; name: string } | null; openDeals: number };
 
@@ -56,7 +57,7 @@ export default function AccountsView() {
       {error && <div className="err" role="alert">{error}</div>}
       {data && rows.length === 0 && <div className="card empty"><b>No organisations found.</b></div>}
       {rows.length > 0 && (
-        <div style={{ overflowX: "auto" }}>
+        <div className="acct-scroll" tabIndex={0} aria-label="Accounts">
           <table className="tbl">
             <thead><tr><th>Name</th><th>Kind</th><th>Country</th><th>Under</th><th>Open deals</th></tr></thead>
             <tbody>{rows.map((o) => (
