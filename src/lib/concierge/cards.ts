@@ -36,6 +36,7 @@ const UNDOING_STALE_MS = 2 * 60_000;
 /**
  * A confirmed card offers Undo only when this person can reverse every logged action.
  * Undoing a delete is a restore from Trash, so it takes the same Leader or Admin check as checkUndo (APL-2675).
+ * A card that both deletes and edits hides Undo for the whole card when that check fails.
  */
 async function offerUndo(user: Actor, rows: { action: string; projectId: string | null }[]) {
   const live = rows.filter((r) => isUndoable(r.action));

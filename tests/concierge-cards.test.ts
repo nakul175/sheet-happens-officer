@@ -1,5 +1,5 @@
 // @APL-2675: a concierge delete card offers Undo only to a Leader or an Admin (same rule as Trash restore).
-// Seeds ZZ-TEST rows and nakul17+ aliases on the local test database, then removes them.
+// Seeds this file's own project and nakul17+apl2675-* people, then removes only those rows.
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { undoView } from "../src/components/concierge/logic";
 import type { Actor } from "../src/lib/access";
@@ -23,33 +23,37 @@ const editor: Actor = { id: "", orgRole: "MEMBER", name: "Editor" };
 const leader: Actor = { id: "", orgRole: "MEMBER", name: "Leader" };
 const superAdmin: Actor = { id: "", orgRole: "SUPER_ADMIN", name: "Super Admin" };
 let projectId = "";
+let decoyProjectId = "";
+let decoyUserId = "";
+
+/** This file's project ids only: the one it created, plus any still owned by its nakul17+apl2675-* people. */
+async function ownProjectIds(userIds: string[]) {
+  const ids = new Set<string>();
+  if (projectId) ids.add(projectId);
+  if (userIds.length) {
+    const memberships = await db.projectMember.findMany({ where: { userId: { in: userIds } }, select: { projectId: true } });
+    for (const m of memberships) ids.add(m.projectId);
+  }
+  return [...ids];
+}
 
 async function cleanup() {
   const users = await db.user.findMany({ where: { email: { in: Object.values(EMAILS) } }, select: { id: true } });
   const ids = users.map((u) => u.id);
-  const projects = await db.project.findMany({ where: { name: { startsWith: "ZZ-TEST" } }, select: { id: true } });
-  const pids = projects.map((p) => p.id);
-  if (!ids.length && !pids.length) return;
-  const userIn = ids.length ? ids : ["__none__"];
-  const projectIn = pids.length ? pids : ["__none__"];
-  await db.notification.deleteMany({ where: { OR: [{ projectId: { in: projectIn } }, { recipientId: { in: userIn } }, { actorId: { in: userIn } }] } });
-  await db.actionLog.deleteMany({ where: { OR: [{ projectId: { in: projectIn } }, { actorId: { in: userIn } }, { undoneById: { in: userIn } }] } });
-  await db.auditLog.deleteMany({ where: { OR: [{ actorId: { in: userIn } }, { targetId: { in: [...userIn, ...projectIn] } }] } });
-  await db.chatMessage.deleteMany({ where: { userId: { in: userIn } } });
-  await db.task.deleteMany({
-    where: {
-      OR: [
-        { projectId: { in: projectIn } },
-        { assigneeId: { in: userIn } },
-        { createdById: { in: userIn } },
-        { deletedById: { in: userIn } },
-        { approverId: { in: userIn } },
-        { previousAssigneeId: { in: userIn } },
-      ],
-    },
-  });
-  if (pids.length) await db.project.deleteMany({ where: { id: { in: pids } } });
-  if (ids.length) await db.user.deleteMany({ where: { id: { in: ids } } });
+  const pids = await ownProjectIds(ids);
+  if (pids.length) {
+    await db.notification.deleteMany({ where: { projectId: { in: pids } } });
+    await db.actionLog.deleteMany({ where: { projectId: { in: pids } } });
+    await db.auditLog.deleteMany({ where: { targetId: { in: pids } } });
+    await db.project.deleteMany({ where: { id: { in: pids } } });
+  }
+  if (ids.length) {
+    await db.notification.deleteMany({ where: { OR: [{ recipientId: { in: ids } }, { actorId: { in: ids } }] } });
+    await db.actionLog.deleteMany({ where: { OR: [{ actorId: { in: ids } }, { undoneById: { in: ids } }] } });
+    await db.auditLog.deleteMany({ where: { OR: [{ actorId: { in: ids } }, { targetId: { in: ids } }] } });
+    await db.chatMessage.deleteMany({ where: { userId: { in: ids } } });
+    await db.user.deleteMany({ where: { id: { in: ids } } });
+  }
 }
 
 async function person(email: string, name: string, orgRole: Actor["orgRole"], workspaceId: string): Promise<Actor> {
@@ -95,9 +99,36 @@ describe("@APL-2675 Concierge delete card offers Undo only to people who may res
       leaderId: leader.id,
       members: [{ userId: editor.id, role: "EDITOR" }],
     })).id;
+    // A different ZZ-TEST project must survive this file's cleanup.
+    const decoyEmail = "nakul17+not-apl2675@gmail.com";
+    const leftover = await db.user.findUnique({ where: { email: decoyEmail }, select: { id: true } });
+    if (leftover) {
+      const memberships = await db.projectMember.findMany({ where: { userId: leftover.id }, select: { projectId: true } });
+      const leftoverIds = memberships.map((m) => m.projectId);
+      if (leftoverIds.length) {
+        await db.notification.deleteMany({ where: { projectId: { in: leftoverIds } } });
+        await db.actionLog.deleteMany({ where: { projectId: { in: leftoverIds } } });
+        await db.project.deleteMany({ where: { id: { in: leftoverIds } } });
+      }
+      await db.notification.deleteMany({ where: { OR: [{ recipientId: leftover.id }, { actorId: leftover.id }] } });
+      await db.actionLog.deleteMany({ where: { OR: [{ actorId: leftover.id }, { undoneById: leftover.id }] } });
+      await db.auditLog.deleteMany({ where: { OR: [{ actorId: leftover.id }, { targetId: leftover.id }] } });
+      await db.user.delete({ where: { id: leftover.id } });
+    }
+    const decoy = await person(decoyEmail, "Decoy", "MEMBER", workspace.id);
+    decoyUserId = decoy.id;
+    decoyProjectId = (await createProject(decoy, { name: "ZZ-TEST leave-me", leaderId: decoy.id })).id;
   });
 
-  afterAll(cleanup);
+  afterAll(async () => {
+    await cleanup();
+    expect(await db.project.findUnique({ where: { id: decoyProjectId }, select: { name: true } })).toEqual({ name: "ZZ-TEST leave-me" });
+    await db.notification.deleteMany({ where: { OR: [{ projectId: decoyProjectId }, { recipientId: decoyUserId }, { actorId: decoyUserId }] } });
+    await db.actionLog.deleteMany({ where: { OR: [{ projectId: decoyProjectId }, { actorId: decoyUserId }, { undoneById: decoyUserId }] } });
+    await db.auditLog.deleteMany({ where: { OR: [{ actorId: decoyUserId }, { targetId: { in: [decoyProjectId, decoyUserId] } }] } });
+    await db.project.deleteMany({ where: { id: decoyProjectId } });
+    await db.user.deleteMany({ where: { id: decoyUserId } });
+  });
 
   it("@APL-2675 @AC1 undoable on a confirmed delete card follows the Trash restore rule", async () => {
     const cases = [
@@ -141,5 +172,26 @@ describe("@APL-2675 Concierge delete card offers Undo only to people who may res
     expect(err).toMatchObject({ status: 403, message: "Only the project Leader or an Admin can do this." });
     expect((await db.task.findUniqueOrThrow({ where: { id: taskId } })).deletedAt).not.toBeNull();
     expect(await db.actionLog.count({ where: { action: "undo", targetId: taskId } })).toBe(0);
+  });
+
+  it("@APL-2675 a mixed delete-and-edit card hides Undo for the whole card", async () => {
+    const toTrash = await taskT1();
+    const toEdit = await createTask(leader, projectId, { title: "T1 edit" });
+    const cardId = await pendingCard(editor, [
+      { k: "task.delete", taskId: toTrash },
+      { k: "task.edit", taskId: toEdit, title: "T1 edit revised" },
+    ]);
+    const done = await confirmCard(editor, cardId);
+    const result = done.messages[0].result!;
+    expect(result.undoable).toBe(false);
+    expect(undoView(result)).toBe("none");
+    expect((await db.task.findUniqueOrThrow({ where: { id: toTrash } })).deletedAt).not.toBeNull();
+    expect((await db.task.findUniqueOrThrow({ where: { id: toEdit } })).title).toBe("T1 edit revised");
+    const err = await undoCard(editor, cardId).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ApiError);
+    expect(err).toMatchObject({ status: 403, message: "Only the project Leader or an Admin can do this." });
+    expect((await db.task.findUniqueOrThrow({ where: { id: toTrash } })).deletedAt).not.toBeNull();
+    expect((await db.task.findUniqueOrThrow({ where: { id: toEdit } })).title).toBe("T1 edit revised");
+    expect(await db.actionLog.count({ where: { action: "undo", targetId: { in: [toTrash, toEdit] } } })).toBe(0);
   });
 });
