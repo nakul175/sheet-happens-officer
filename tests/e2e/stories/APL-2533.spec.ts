@@ -362,7 +362,25 @@ test("AC5: any signed-in Member sees all contacts, changes are logged with no pr
 
   await admin.page.goto(`/accounts/${org.id}`);
   await admin.page.getByRole("button", { name: "History" }).click();
-  await expect(admin.page.getByText("contact.created")).toBeVisible();
-  await expect(admin.page.getByText("contact.updated")).toBeVisible();
-  await expect(admin.page.getByText("contact.removed")).toBeVisible();
+  // The searchable contact is a second contact.created, and both deletes are contact.removed.
+  // A page-wide getByText matches every one of those rows and strict mode fails.
+  // One row is the action plus the time of that log entry.
+  const logged = (await admin.api.get(`/api/orgs/${org.id}/history`)).json.items as { action: string; at: string; after: { name?: string; role?: string } | null }[];
+  const history = admin.page.locator(".list", { hasText: "contact.created" });
+  const atText = (iso: string) => admin.page.evaluate(
+    (d) => new Date(d).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" }),
+    iso,
+  );
+  const oneRow = async (action: string, at: string) => {
+    await expect(history.locator(".row", { hasText: action }).filter({ hasText: await atText(at) })).toBeVisible();
+  };
+  const createdLog = logged.find((i) => i.action === "contact.created" && i.after?.name === name);
+  expect(createdLog?.at, "contact.created for this contact").toBeTruthy();
+  await oneRow("contact.created", createdLog!.at);
+  const updatedLog = logged.find((i) => i.action === "contact.updated" && i.after?.role === "Lead");
+  expect(updatedLog?.at, "contact.updated").toBeTruthy();
+  await oneRow("contact.updated", updatedLog!.at);
+  const removedLog = logged.find((i) => i.action === "contact.removed");
+  expect(removedLog?.at, "contact.removed").toBeTruthy();
+  await oneRow("contact.removed", removedLog!.at);
 });
