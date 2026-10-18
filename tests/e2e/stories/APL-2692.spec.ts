@@ -4,6 +4,7 @@
 // At 1280 the columns sit where they did before the wrapper change.
 // Pam qa:TC: e8a8f77d (TC1, accounts list), ac9f3be3 (TC2, organisation page),
 // 07e24120 (TC3, desktop columns), ba37a1a0 (AC2 inner scroller).
+// Without SHO_QA_PASS the file skips in beforeAll. The password is never written here.
 // Names use ZZ-TEST and are archived afterwards.
 import type { Page } from "@playwright/test";
 import { test, expect, zz } from "../support";
@@ -129,6 +130,10 @@ function expectRegion(m: Measure, label: string) {
 
 test.describe("APL-2692", { tag: "@APL-2692" }, () => {
   test.describe.configure({ timeout: 120_000 });
+
+  test.beforeAll(() => {
+    test.skip(!process.env.SHO_QA_PASS, "Set SHO_QA_PASS (the password for nakul17+ aliases).");
+  });
 
   test("qa:TC-APL2692-e8a8f77d@v1 qa:TC-APL2692-ac9f3be3@v1 AC1: at 390x844 the document does not scroll sideways", { tag: ["@APL-2692", "@AC1"] }, async ({ admin, later }) => {
     const { org, deal } = await seed(admin, later, "ac1");
