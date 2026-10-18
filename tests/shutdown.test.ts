@@ -206,6 +206,33 @@ describe("SIGTERM drain", () => {
     }
   });
 
+  it("returns 200 for 100 requests written before SIGTERM, including ones not yet dispatched", async () => {
+    const proc = startChild({ DELAY_MS: "400", DRAIN_MS: "8000" });
+    try {
+      const ready = await proc.waitFor(/ready (\d+)/);
+      const port = Number(ready[1]);
+      const sockets = await Promise.all(Array.from({ length: 100 }, () => openSocket(port)));
+      const responses = Promise.all(sockets.map((socket) => expectResponse(socket)));
+      // Pam's shape: every client is connected and the request bytes are written,
+      // then SIGTERM 40ms later, before every handler has started.
+      for (const socket of sockets) writeRequest(socket, port);
+      await new Promise((resolve) => setTimeout(resolve, 40));
+      proc.child.kill("SIGTERM");
+      const settled = await responses;
+      expect(settled).toHaveLength(100);
+      for (const response of settled) {
+        expect(response.status).toBe(200);
+        expect(response.body).toContain("done");
+      }
+      const result = await proc.exited;
+      expect(result.code).toBe(0);
+      expect(result.stdout).toContain(CLEAN_LOG);
+      expect(result.stdout).not.toContain(TIMEOUT_LOG);
+    } finally {
+      stop(proc.child);
+    }
+  });
+
   it("returns 200 for 40 connections accepted before SIGTERM whose requests arrive during the grace", async () => {
     const proc = startChild({ DELAY_MS: "200", DRAIN_MS: "10000", KEEPALIVE_MS: "1000" });
     try {

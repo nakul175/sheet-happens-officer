@@ -11,11 +11,21 @@
 // the `request` event. A counter attached there never sees sockets that are accepted
 // but not yet parsed, so the process can log a clean drain while those sockets are reset.
 //
-// Production therefore listens from server.js, which sets NEXT_MANUAL_SIG_HANDLE and
-// passes the http.Server it created. On SIGTERM this module unlistens first (without
-// the idle sweep), then waits for every accepted socket that has not finished a
-// response, then closes only sockets that are idle after a response. The whole wait
-// stays inside SHUTDOWN_DRAIN_MS.
+// The reset itself is earlier than the idle sweep. A client can finish connect() and
+// write the request before this process emits 'connection'. server.close() in that
+// window drops the kernel accept queue, and those sockets die with ECONNRESET without
+// ever reaching a handler. Once a handler has started, the socket has an unfinished
+// response and survives closeIdleConnections().
+//
+// Production listens from server.js, which sets NEXT_MANUAL_SIG_HANDLE and passes the
+// http.Server it created. On SIGTERM this module tracks sockets from the 'connection'
+// event, holds closeIdleConnections(), and lets the accept queue become connection
+// events before unlisten. Next's own server.close() is wrapped to do the same, so a
+// process still started with `next start` cannot reset accepted-but-undispatched
+// sockets after the hook is installed. Then it waits for every accepted socket that
+// has not finished a response, and closes only sockets that are idle after a response.
+// The whole wait stays inside SHUTDOWN_DRAIN_MS. A clean drain is logged only when
+// none of those sockets dropped.
 
 import http from "node:http";
 import type net from "node:net";
@@ -34,6 +44,8 @@ type Tracked = { phase: SocketPhase };
 type ShutdownState = {
   installed: boolean;
   shuttingDown: boolean;
+  /** While true, closeIdleConnections() is a no-op so an undispatched socket is not reset. */
+  holdIdleSweep: boolean;
   dropped: number;
   sockets: Map<net.Socket, Tracked>;
 };
@@ -41,9 +53,13 @@ type ShutdownState = {
 const state: ShutdownState = ((globalThis as { __shoShutdown?: ShutdownState }).__shoShutdown ??= {
   installed: false,
   shuttingDown: false,
+  holdIdleSweep: false,
   dropped: 0,
   sockets: new Map(),
 });
+
+const originalCloseIdle = new WeakMap<http.Server, () => void>();
+const originalClose = new WeakMap<http.Server, (cb?: (err?: Error) => void) => void>();
 
 export type ShutdownOptions = {
   /** Override SHUTDOWN_DRAIN_MS. Tests and server.js (when the slow-request seam is on) pass this. */
@@ -105,12 +121,81 @@ function track(socket: net.Socket): Tracked {
   return tracked;
 }
 
+type HttpMessage = http.ServerResponse & { finished?: boolean };
+
+function noteSocket(socket: net.Socket) {
+  const tracked = track(socket);
+  if (tracked.phase === "idle") return;
+  const msg = (socket as net.Socket & { _httpMessage?: HttpMessage })._httpMessage;
+  if (msg && !msg.finished) {
+    if (tracked.phase !== "handling") {
+      tracked.phase = "handling";
+      msg.once("finish", () => {
+        tracked.phase = "idle";
+      });
+    }
+    return;
+  }
+  if (msg?.finished) tracked.phase = "idle";
+}
+
+/** Sockets Node has already accept()ed. The kernel backlog is not in this list. */
+function acceptedSockets(server: http.Server): net.Socket[] {
+  const sym = Object.getOwnPropertySymbols(server).find((name) => String(name) === "Symbol(http.server.connections)");
+  if (!sym) return [];
+  const list = (server as unknown as Record<symbol, { all?: () => unknown[] }>)[sym];
+  if (!list || typeof list.all !== "function") return [];
+  const sockets: net.Socket[] = [];
+  for (const item of list.all()) {
+    if (!item || typeof item !== "object") continue;
+    const socket = "socket" in item ? (item as { socket?: net.Socket }).socket : (item as net.Socket);
+    if (socket && typeof socket.on === "function") sockets.push(socket);
+  }
+  return sockets;
+}
+
+function backfill(server: http.Server) {
+  for (const socket of acceptedSockets(server)) noteSocket(socket);
+}
+
+function holdIdleSweep(server: http.Server) {
+  if (originalCloseIdle.has(server)) return;
+  const orig = server.closeIdleConnections.bind(server);
+  originalCloseIdle.set(server, orig);
+  server.closeIdleConnections = () => {
+    if (state.holdIdleSweep) return;
+    orig();
+  };
+}
+
+function guardNextClose(server: http.Server) {
+  if (originalClose.has(server)) return;
+  const orig = server.close.bind(server) as (cb?: (err?: Error) => void) => void;
+  originalClose.set(server, orig);
+  // Next's own SIGTERM handler calls server.close(), which resets the accept queue
+  // and closeIdleConnections(). Send that call through the same hold + yield.
+  server.close = ((cb?: (err?: Error) => void) => {
+    state.holdIdleSweep = true;
+    void acceptQueued([server]).then(() => {
+      backfill(server);
+      try {
+        orig(cb);
+      } catch (err) {
+        if (cb) cb(err instanceof Error ? err : undefined);
+      }
+    });
+    return server;
+  }) as http.Server["close"];
+}
+
 function watchServer(server: http.Server) {
+  holdIdleSweep(server);
+  guardNextClose(server);
+  // Count from accept, not from the request handler. Next dispatches later, and a
+  // socket in between is not in any request counter.
   server.on("connection", (socket) => {
     track(socket);
   });
-  // If a request is observed without a connection event (already-accepted socket),
-  // count it from here. prepend so a synchronous res.end() is still observed.
   server.prependListener("request", (req, res) => {
     const tracked = track(req.socket);
     tracked.phase = "handling";
@@ -118,6 +203,30 @@ function watchServer(server: http.Server) {
       tracked.phase = "idle";
     });
   });
+  backfill(server);
+}
+
+/**
+ * SIGTERM can run before this poll's accept callbacks. server.close() then resets
+ * the kernel queue and those sockets die with ECONNRESET, never reaching a handler.
+ * Keep polling until the number of accept()ed sockets stops growing.
+ */
+async function acceptQueued(servers: http.Server[]): Promise<void> {
+  // A single stable read is not enough under CPU contention: the accept queue
+  // pauses between polls, and closing then resets the sockets still queued.
+  const earliest = Date.now() + 40;
+  const cap = earliest + 800;
+  let previous = -1;
+  let stable = 0;
+  while (Date.now() < cap) {
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    let count = 0;
+    for (const server of servers) count += acceptedSockets(server).length;
+    if (count === previous) stable++;
+    else stable = 0;
+    previous = count;
+    if (Date.now() >= earliest && stable >= 3) return;
+  }
 }
 
 /** Accepted, mid-response, or holding bytes of a request that has not finished. */
@@ -136,20 +245,22 @@ function inFlight(): number {
  */
 function stopAccepting(server: http.Server) {
   if (!server.listening) return;
-  const closeIdle = server.closeIdleConnections;
-  server.closeIdleConnections = () => {};
+  // The saved close skips the wrapper so this unlisten is not deferred twice.
+  // holdIdleSweep is already set, so the idle sweep inside close() does nothing.
+  const orig = originalClose.get(server);
   try {
-    server.close();
+    if (orig) orig();
+    else server.close();
   } catch {
     // Already closing. New connections are still refused once the handle is down.
-  } finally {
-    server.closeIdleConnections = closeIdle;
   }
 }
 
 function closeIdle(server: http.Server) {
+  const orig = originalCloseIdle.get(server);
   try {
-    server.closeIdleConnections();
+    if (orig) orig();
+    else server.closeIdleConnections();
   } catch {
     // The deadline still ends the process if idle sockets cannot be closed.
   }
@@ -179,14 +290,23 @@ function report(line: string, code: number, options: ShutdownOptions) {
 async function onSigterm(servers: http.Server[], options: ShutdownOptions) {
   if (state.shuttingDown) return;
   state.shuttingDown = true;
+  // Block Next's server.close() (and ours) from resetting accepted sockets that
+  // have not been dispatched to a handler yet.
+  state.holdIdleSweep = true;
   // Client aborts from before this signal are not a failed drain.
   state.dropped = 0;
   const drainMs = options.drainMs != null && Number.isFinite(options.drainMs) && options.drainMs > 0 ? options.drainMs : shutdownDrainMs();
   const deadline = Date.now() + drainMs;
-  // Unlisten before counting so a connection that arrives after SIGTERM is not served.
+  // server.close() resets the kernel accept queue. Sockets the client already
+  // connected, but Node has not emitted 'connection' for, die with ECONNRESET
+  // and never reach a handler. Let that queue become connection events first.
+  await acceptQueued(servers);
+  for (const server of servers) backfill(server);
   for (const server of servers) stopAccepting(server);
   options.onStoppedAccepting?.();
+  if (process.env.SHUTDOWN_TEST_SLOW_MS) process.stdout.write("sho unlistened\n");
   const quiet = await waitForSockets(deadline);
+  state.holdIdleSweep = false;
   for (const server of servers) closeIdle(server);
   // closeIdleConnections destroys sockets on a later turn; count those drops too.
   await sleep(0);
