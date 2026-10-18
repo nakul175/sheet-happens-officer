@@ -53,10 +53,16 @@ async function withMode(mode: string, fn: () => Promise<void>) {
 /** Everything the person's chat holds, as stored. */
 const storedChat = async (userId: string) => JSON.stringify(await db.chatMessage.findMany({ where: { userId } }));
 
-/** Rows written at or after `since`, without id and createdAt (the only fields the AC allows to differ). */
-async function storedDelta(userId: string, since: Date) {
-  const rows = await db.chatMessage.findMany({ where: { userId, createdAt: { gte: since } }, orderBy: [{ createdAt: "asc" }, { id: "asc" }] });
-  return rows.map((row) => ({ userId: row.userId, role: row.role, content: row.content }));
+/** Ids already stored, so a later read can ignore them without comparing clocks. */
+async function chatCursor(userId: string) {
+  const rows = await db.chatMessage.findMany({ where: { userId }, select: { id: true } });
+  return new Set(rows.map((row) => row.id));
+}
+
+/** Rows written after `before`, without id and createdAt (the only fields the AC allows to differ). */
+async function storedDelta(userId: string, before: Set<string>) {
+  const rows = await db.chatMessage.findMany({ where: { userId }, orderBy: [{ createdAt: "asc" }, { id: "asc" }] });
+  return rows.filter((row) => !before.has(row.id)).map((row) => ({ userId: row.userId, role: row.role, content: row.content }));
 }
 
 /** A deal the Member and an Admin both belong to, plus a plain project neither of them belongs to. */
@@ -192,14 +198,14 @@ describe("CRM_VISIBLE and concierge quick actions (SHO-BUG-11)", () => {
 
     for (const mode of ["all", "admins"] as const) {
       await withMode(mode, async () => {
-        const since = new Date();
+        const before = await chatCursor(member.id);
         const r = await quick(member, "due-week", projectId);
         expect(r.status, r.body).toBe(reference.status);
         expect(r.headers).toBe(reference.headers);
         expect(r.body).toBe(reference.body);
         expect(r.body).not.toContain(name);
         expect(r.body).not.toContain(tag);
-        expect(await storedDelta(member.id, since)).toEqual([]);
+        expect(await storedDelta(member.id, before)).toEqual([]);
         const thread = await storedChat(member.id);
         expect(thread).not.toContain(name);
         expect(thread).not.toContain(tag);
@@ -223,12 +229,12 @@ describe("CRM_VISIBLE and concierge quick actions (SHO-BUG-11)", () => {
 
     const pair = async (who: Account, leftId: string, rightId: string) => {
       for (const { id } of QUICK_ACTIONS) {
-        const leftSince = new Date();
+        const leftBefore = await chatCursor(who.id);
         const left = await quick(who, id, leftId);
-        const leftRows = await storedDelta(who.id, leftSince);
-        const rightSince = new Date();
+        const leftRows = await storedDelta(who.id, leftBefore);
+        const rightBefore = await chatCursor(who.id);
         const right = await quick(who, id, rightId);
-        const rightRows = await storedDelta(who.id, rightSince);
+        const rightRows = await storedDelta(who.id, rightBefore);
         expect(left.status, `${id} ${left.body}`).toBe(404);
         expect(left.json.error).toBe("Project not found");
         expect(right.status).toBe(left.status);
@@ -256,16 +262,16 @@ describe("CRM_VISIBLE and concierge quick actions (SHO-BUG-11)", () => {
       await pair(member, dealId, otherId);
       // An Admin can see a plain project they are not in, so the reference is a Member's non-member refusal.
       for (const { id } of QUICK_ACTIONS) {
-        const refSince = new Date();
+        const refBefore = await chatCursor(member.id);
         const ref = await quick(member, id, otherId);
-        const refRows = await storedDelta(member.id, refSince);
-        const since = new Date();
+        const refRows = await storedDelta(member.id, refBefore);
+        const before = await chatCursor(ad.id);
         const r = await quick(ad, id, dealId);
         expect(r.status, r.body).toBe(ref.status);
         expect(r.headers).toBe(ref.headers);
         expect(r.body).toBe(ref.body);
         expect(r.body).not.toContain(dealName);
-        expect(await storedDelta(ad.id, since)).toEqual(refRows);
+        expect(await storedDelta(ad.id, before)).toEqual(refRows);
         expect(await storedChat(ad.id)).not.toContain(dealName);
         expect(await storedChat(ad.id)).not.toContain(`Due this week in ${dealName}`);
       }
@@ -290,12 +296,12 @@ describe("CRM_VISIBLE and concierge quick actions (SHO-BUG-11)", () => {
       const reference = await quick(member, "due-week", otherId);
       expect(reference.status).toBe(404);
       expect(reference.json.error).toBe("Project not found");
-      const since = new Date();
+      const before = await chatCursor(member.id);
       const r = await quick(member, "due-week", dealId);
       expect(r.status).toBe(reference.status);
       expect(r.headers).toBe(reference.headers);
       expect(r.body).toBe(reference.body);
-      const stored = JSON.stringify(await db.chatMessage.findMany({ where: { userId: member.id, createdAt: { gte: since } } }));
+      const stored = JSON.stringify(await storedDelta(member.id, before));
       expect(stored).not.toContain(`Due this week in ${dealName}`);
       expect(stored).not.toContain(dealName);
     });
