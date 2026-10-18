@@ -14,9 +14,10 @@
 #               Every shard and the serial job get BASE_URL=https://<target>.
 #   e2e         20 shards of the parallel set (--shard=N/20, workers=1 each). Shard N signs in as ZZ_TEST_NN (SHARD_*), names its
 #               data ZZ-TEST-NN (ZZ_PREFIX), and gets a partner account of the other role (PEER_*). At most max_parallel run at once.
-#               After the tests, the job reads the Playwright JSON report and fails if nothing ran or every test was skipped.
+#               A shard with no tests passes. A shard whose tests were all skipped fails. Each shard uploads its JSON counts.
 #   e2e-serial  the SERIAL_SPECS files, alone, after every shard has finished, as the shared SHO_ADMIN / SHO_MEMBER accounts.
-#               The same JSON-report check runs after these tests.
+#               The same per-job rule applies, and it uploads its JSON counts too.
+#   counts      once, after every shard (if: always()), sums those counts and fails when run is 0 or skipped equals total.
 #   report      merges every job's blob report into one HTML report.
 #
 # max_parallel: the staging database is shared with production and allows 25 connections. Do not raise it above 5 until NJ approves
@@ -255,15 +256,25 @@ jobs:
           read -ra files <<< "$FILES"
           npx playwright test --shard=${{ matrix.shard }}/20 --workers=1 --reporter=list,blob,json --trace="$TRACE" "${files[@]}"
 
-      - name: Fail when no test ran
+      - name: Fail this shard when every test was skipped
         if: always()
         run: |
           if [ ! -f scripts/ci/assert-playwright-ran.mjs ]; then
             echo "expected=0 unexpected=0 flaky=0 skipped=0 total=0 run=0"
-            echo "::error::No tests ran. The count check could not start, so this job is not a pass."
-            exit 1
+            printf '%s\n' '{"expected":0,"unexpected":0,"flaky":0,"skipped":0,"total":0,"run":0}' > playwright-counts.json
+            echo "Empty shard: count check script is not on disk."
+            exit 0
           fi
-          node scripts/ci/assert-playwright-ran.mjs playwright-report.json
+          node scripts/ci/assert-playwright-ran.mjs --mode shard --report playwright-report.json --counts-out playwright-counts.json
+
+      - name: Upload shard counts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-counts-${{ matrix.nn }}
+          path: playwright-counts.json
+          if-no-files-found: ignore
+          retention-days: 14
 
       - name: Upload the blob report
         if: always()
@@ -329,15 +340,25 @@ jobs:
           read -ra files <<< "$FILES"
           npx playwright test --workers=1 --reporter=list,blob,json --trace="$TRACE" "${files[@]}"
 
-      - name: Fail when no test ran
+      - name: Fail the serial job when every test was skipped
         if: always()
         run: |
           if [ ! -f scripts/ci/assert-playwright-ran.mjs ]; then
             echo "expected=0 unexpected=0 flaky=0 skipped=0 total=0 run=0"
-            echo "::error::No tests ran. The count check could not start, so this job is not a pass."
-            exit 1
+            printf '%s\n' '{"expected":0,"unexpected":0,"flaky":0,"skipped":0,"total":0,"run":0}' > playwright-counts.json
+            echo "Empty shard: count check script is not on disk."
+            exit 0
           fi
-          node scripts/ci/assert-playwright-ran.mjs playwright-report.json
+          node scripts/ci/assert-playwright-ran.mjs --mode shard --report playwright-report.json --counts-out playwright-counts.json
+
+      - name: Upload serial counts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-counts-serial
+          path: playwright-counts.json
+          if-no-files-found: ignore
+          retention-days: 14
 
       - name: Upload the blob report
         if: always()
@@ -347,6 +368,22 @@ jobs:
           path: blob-report/
           if-no-files-found: ignore
           retention-days: 14
+
+  counts:
+    name: Fail when nothing ran
+    needs: [e2e, e2e-serial]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          pattern: playwright-counts-*
+          path: shard-counts
+      - name: Merge the shard counts
+        run: node scripts/ci/assert-playwright-ran.mjs --mode aggregate --dir shard-counts
 
   report:
     name: Merge the reports
