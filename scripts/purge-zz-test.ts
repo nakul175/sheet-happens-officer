@@ -1,24 +1,41 @@
 // APL-2625 option 1. One-off purge of leftover ZZ-TEST people on staging.
 //
 // This script is not part of a release and is not on a schedule. It refuses to run
-// from /opt/sho. It is dry-run unless --apply is passed.
+// when the working directory or the script path is /opt/sho or anything under it,
+// after symlinks are resolved. It is dry-run unless --apply is passed.
+// --apply also requires --confirm=<database name> equal to current_database().
 //
 // It runs only when SHO_ALLOW_TEST_PURGE=1 and --workspace is exactly STAGING_WORKSPACE_ID.
-// It refuses production before opening a connection (PROD_DB_HOST, PROD_DB_NAME, or
-// app.sheethappensofficer.com). It deletes only deactivated people whose email matches
-// zz-test-*@example.invalid, who are older than 24 hours, and who have no audit-log rows.
+// PROD_DB_HOST and PROD_DB_NAME must both be set. It refuses production before opening a
+// connection (those values, or app.sheethappensofficer.com). It deletes only deactivated
+// people whose email matches zz-test-*@example.invalid, who are older than 24 hours, and
+// who have no audit-log rows. It refuses instead of changing a row that is not one of
+// those people: a SET NULL foreign key, or a task delete that would cascade such a row.
 // Output is counts, ids, and those zz-test emails. No passwords or connection strings.
 //
-//   SHO_ALLOW_TEST_PURGE=1 STAGING_WORKSPACE_ID=<id> \
+//   SHO_ALLOW_TEST_PURGE=1 STAGING_WORKSPACE_ID=<id> PROD_DB_HOST=<host> PROD_DB_NAME=<name> \
 //     npx tsx scripts/purge-zz-test.ts --workspace <id>
-//   SHO_ALLOW_TEST_PURGE=1 STAGING_WORKSPACE_ID=<id> \
-//     npx tsx scripts/purge-zz-test.ts --workspace <id> --apply
+//   SHO_ALLOW_TEST_PURGE=1 STAGING_WORKSPACE_ID=<id> PROD_DB_HOST=<host> PROD_DB_NAME=<name> \
+//     npx tsx scripts/purge-zz-test.ts --workspace <id> --apply --confirm=<database name>
 
+import { lstatSync, readlinkSync, realpathSync } from "node:fs";
+import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { Prisma, PrismaClient } from "../src/generated/prisma/client";
 
 const PROD_APP_HOST = "app.sheethappensofficer.com";
+const DEPLOY_ROOT = "/opt/sho";
 const DAY_MS = 24 * 60 * 60 * 1000;
+const MODIFY_RELATIONS = [
+  "Task.approverId",
+  "Task.previousAssigneeId",
+  "Task.deletedById",
+  "Task.assigneeId",
+  "Task.createdById",
+  "Notification.actorId",
+  "ActionLog.undoneById",
+  "AuditLog.actorId",
+] as const;
 const EMAIL_RE = /^zz-test-[^@]+@example\.invalid$/;
 const COUNT_TABLES = [
   "User",
@@ -41,6 +58,21 @@ type Db = PrismaClient | Prisma.TransactionClient;
 type TaskRef = { id: string; parentId: string | null; assigneeId: string; createdById: string };
 type Person = { id: string; email: string };
 type Plan = { people: Person[]; taskIds: string[]; counts: Record<CountTable, number> };
+type ModifyRelation = (typeof MODIFY_RELATIONS)[number];
+type Safety = {
+  relations: Record<ModifyRelation, number>;
+  cascade: {
+    task: number;
+    collaborator: number;
+    collaboratorOutside: number;
+    descendantOutside: number;
+    assigneeOutside: number;
+    createdByOutside: number;
+    taskLink: number;
+  };
+};
+
+export type PurgeLocations = { cwd?: string; scriptPath?: string };
 
 class ScriptRefusal extends Error {
   constructor(message: string) {
@@ -76,9 +108,14 @@ function parseTarget(raw: string): { host: string; name: string } | null {
 export function productionRefusal(env: NodeJS.ProcessEnv): string | null {
   const databaseUrl = env.DATABASE_URL ?? "";
   if (!databaseUrl) return "Refusing to run: DATABASE_URL is not set.";
+  const prodHostRaw = env.PROD_DB_HOST ?? "";
+  const prodNameRaw = env.PROD_DB_NAME ?? "";
+  if (!prodHostRaw.trim() || !prodNameRaw.trim()) {
+    return "Refusing to run: PROD_DB_HOST and PROD_DB_NAME must be set.";
+  }
   const urls = [databaseUrl, env.DIRECT_DATABASE_URL].filter((value): value is string => !!value);
-  const prodHost = normalizeHost(env.PROD_DB_HOST ?? "");
-  const prodName = (env.PROD_DB_NAME ?? "").trim();
+  const prodHost = normalizeHost(prodHostRaw);
+  const prodName = prodNameRaw.trim();
   for (const raw of urls) {
     if (raw.toLowerCase().includes(PROD_APP_HOST)) return "Refusing to run: the database host is production.";
     const target = parseTarget(raw);
@@ -116,9 +153,49 @@ function flagValue(argv: readonly string[], name: string): string | undefined {
   return undefined;
 }
 
-function assertNotDeployed() {
-  const here = fileURLToPath(import.meta.url);
-  if (here.startsWith("/opt/sho/") || process.cwd().startsWith("/opt/sho/")) {
+/** Resolve a path, following symlinks even when the final target does not exist. */
+export function canonicalPath(input: string): string {
+  const seen = new Set<string>();
+  return walkPath(path.resolve(input), seen);
+}
+
+function walkPath(absolute: string, seen: Set<string>): string {
+  if (seen.has(absolute)) return absolute;
+  seen.add(absolute);
+  try {
+    return realpathSync(absolute);
+  } catch {
+    // The leaf may be missing. Follow any symlink that does exist.
+  }
+  const parts = absolute.split("/").filter(Boolean);
+  let acc = "/";
+  for (const part of parts) {
+    const next = path.join(acc, part);
+    let linked = false;
+    try {
+      if (lstatSync(next).isSymbolicLink()) {
+        const target = readlinkSync(next);
+        acc = walkPath(path.resolve(path.dirname(next), target), seen);
+        linked = true;
+      }
+    } catch {
+      acc = next;
+      continue;
+    }
+    if (!linked) acc = next;
+  }
+  return acc;
+}
+
+export function isDeployedLocation(input: string): boolean {
+  const resolved = canonicalPath(input);
+  return resolved === DEPLOY_ROOT || resolved.startsWith(`${DEPLOY_ROOT}/`);
+}
+
+function assertNotDeployed(locations?: PurgeLocations) {
+  const cwd = locations?.cwd ?? process.cwd();
+  const scriptPath = locations?.scriptPath ?? fileURLToPath(import.meta.url);
+  if (isDeployedLocation(cwd) || isDeployedLocation(scriptPath)) {
     throw new ScriptRefusal("Refusing to run: this script is not deployed.");
   }
 }
@@ -252,6 +329,113 @@ async function countsFor(db: Db, ids: string[], emails: string[], taskIds: strin
   };
 }
 
+function emptyRelations(): Record<ModifyRelation, number> {
+  return Object.fromEntries(MODIFY_RELATIONS.map((name) => [name, 0])) as Record<ModifyRelation, number>;
+}
+
+function emptyCascade(): Safety["cascade"] {
+  return {
+    task: 0,
+    collaborator: 0,
+    collaboratorOutside: 0,
+    descendantOutside: 0,
+    assigneeOutside: 0,
+    createdByOutside: 0,
+    taskLink: 0,
+  };
+}
+
+async function cascadeTaskIds(db: Db, roots: string[]): Promise<{ all: string[]; outside: string[] }> {
+  const all = [...roots];
+  const outside: string[] = [];
+  if (!roots.length) return { all, outside };
+  const seen = new Set(roots);
+  let frontier = roots;
+  while (frontier.length) {
+    const children = await db.task.findMany({ where: { parentId: { in: frontier } }, select: { id: true } });
+    frontier = [];
+    for (const child of children) {
+      if (seen.has(child.id)) continue;
+      seen.add(child.id);
+      all.push(child.id);
+      outside.push(child.id);
+      frontier.push(child.id);
+    }
+  }
+  return { all, outside };
+}
+
+async function safetyReport(db: Db, plan: Plan): Promise<Safety> {
+  const relations = emptyRelations();
+  const cascade = emptyCascade();
+  const purgeIds = plan.people.map((person) => person.id);
+  if (!purgeIds.length) return { relations, cascade };
+  const { all, outside } = await cascadeTaskIds(db, plan.taskIds);
+  const surviving = all.length ? { id: { notIn: all } } : {};
+  const [approver, previous, deletedBy, assignee, createdBy, actor, undoneBy, auditActor, collaborators, collaboratorsOutside, assigneeOutside, createdByOutside, taskLinks] =
+    await Promise.all([
+      db.task.count({ where: { ...surviving, approverId: { in: purgeIds } } }),
+      db.task.count({ where: { ...surviving, previousAssigneeId: { in: purgeIds } } }),
+      db.task.count({ where: { ...surviving, deletedById: { in: purgeIds } } }),
+      db.task.count({ where: { ...surviving, assigneeId: { in: purgeIds } } }),
+      db.task.count({ where: { ...surviving, createdById: { in: purgeIds } } }),
+      db.notification.count({ where: { actorId: { in: purgeIds }, NOT: { recipientId: { in: purgeIds } } } }),
+      db.actionLog.count({ where: { undoneById: { in: purgeIds }, NOT: { actorId: { in: purgeIds } } } }),
+      db.auditLog.count({ where: { actorId: { in: purgeIds } } }),
+      all.length ? db.taskCollaborator.count({ where: { taskId: { in: all } } }) : Promise.resolve(0),
+      all.length ? db.taskCollaborator.count({ where: { taskId: { in: all }, NOT: { userId: { in: purgeIds } } } }) : Promise.resolve(0),
+      plan.taskIds.length ? db.task.count({ where: { id: { in: plan.taskIds }, NOT: { assigneeId: { in: purgeIds } } } }) : Promise.resolve(0),
+      plan.taskIds.length ? db.task.count({ where: { id: { in: plan.taskIds }, NOT: { createdById: { in: purgeIds } } } }) : Promise.resolve(0),
+      all.length ? db.taskLink.count({ where: { taskId: { in: all } } }) : Promise.resolve(0),
+    ]);
+  relations["Task.approverId"] = approver;
+  relations["Task.previousAssigneeId"] = previous;
+  relations["Task.deletedById"] = deletedBy;
+  relations["Task.assigneeId"] = assignee;
+  relations["Task.createdById"] = createdBy;
+  relations["Notification.actorId"] = actor;
+  relations["ActionLog.undoneById"] = undoneBy;
+  relations["AuditLog.actorId"] = auditActor;
+  cascade.task = all.length;
+  cascade.collaborator = collaborators;
+  cascade.collaboratorOutside = collaboratorsOutside;
+  cascade.descendantOutside = outside.length;
+  cascade.assigneeOutside = assigneeOutside;
+  cascade.createdByOutside = createdByOutside;
+  cascade.taskLink = taskLinks;
+  return { relations, cascade };
+}
+
+function formatSafety(safety: Safety): string {
+  const lines = MODIFY_RELATIONS.map((name) => `${name}: ${safety.relations[name]}`);
+  lines.push(
+    `cascade Task: ${safety.cascade.task}`,
+    `cascade TaskCollaborator: ${safety.cascade.collaborator}`,
+    `cascade TaskCollaborator.outside: ${safety.cascade.collaboratorOutside}`,
+    `cascade Task.descendantOutside: ${safety.cascade.descendantOutside}`,
+    `cascade Task.assigneeOutside: ${safety.cascade.assigneeOutside}`,
+    `cascade Task.createdByOutside: ${safety.cascade.createdByOutside}`,
+    `cascade TaskLink: ${safety.cascade.taskLink}`,
+  );
+  return lines.join("\n");
+}
+
+function blockMessage(safety: Safety): string | null {
+  const cascadeHit =
+    safety.cascade.collaboratorOutside > 0 ||
+    safety.cascade.descendantOutside > 0 ||
+    safety.cascade.assigneeOutside > 0 ||
+    safety.cascade.createdByOutside > 0;
+  const modifyHit = MODIFY_RELATIONS.some((name) => safety.relations[name] > 0);
+  if (!modifyHit && !cascadeHit) return null;
+  return `Refusing to run: purge would change rows that are not ZZ-TEST.\n${formatSafety(safety)}`;
+}
+
+async function currentDatabase(db: PrismaClient): Promise<string> {
+  const rows = await db.$queryRaw<Array<{ name: string }>>`SELECT current_database() AS name`;
+  return rows[0]?.name ?? "";
+}
+
 async function buildPlan(db: Db, workspaceId: string): Promise<Plan> {
   const cutoff = new Date(Date.now() - DAY_MS);
   const rows = await db.user.findMany({
@@ -291,11 +475,25 @@ function formatPlan(workspaceId: string, apply: boolean, plan: Plan): string {
   return lines.join("\n");
 }
 
-export async function runPurge(env: NodeJS.ProcessEnv, argv: readonly string[], connect: DbConnect = defaultConnect): Promise<number> {
+async function refuseIfUnsafe(db: Db, workspaceId: string, apply: boolean): Promise<Plan> {
+  const plan = await buildPlan(db, workspaceId);
+  const safety = await safetyReport(db, plan);
+  const blocked = blockMessage(safety);
+  if (blocked) throw new ScriptRefusal(blocked);
+  console.log(`${formatPlan(workspaceId, apply, plan)}\n${formatSafety(safety)}`);
+  return plan;
+}
+
+export async function runPurge(
+  env: NodeJS.ProcessEnv,
+  argv: readonly string[],
+  connect: DbConnect = defaultConnect,
+  locations?: PurgeLocations,
+): Promise<number> {
   const secrets = [env.DATABASE_URL ?? "", env.DIRECT_DATABASE_URL ?? ""];
   let db: PrismaClient | null = null;
   try {
-    assertNotDeployed();
+    assertNotDeployed(locations);
     if (env.SHO_ALLOW_TEST_PURGE !== "1") throw new ScriptRefusal("Refusing to run without SHO_ALLOW_TEST_PURGE=1.");
     const refusal = productionRefusal(env);
     if (refusal) throw new ScriptRefusal(refusal);
@@ -304,20 +502,27 @@ export async function runPurge(env: NodeJS.ProcessEnv, argv: readonly string[], 
     if (!workspaceId || !configured || workspaceId !== configured) {
       throw new ScriptRefusal("Refusing to run: --workspace does not match the configured staging workspace.");
     }
+    const apply = argv.includes("--apply");
     db = await connect(env.DATABASE_URL ?? "");
     const workspace = await db.workspace.findUnique({ where: { id: workspaceId }, select: { id: true } });
     if (!workspace) throw new ScriptRefusal("Refusing to run: the staging workspace was not found.");
-    const apply = argv.includes("--apply");
     if (!apply) {
-      console.log(formatPlan(workspaceId, false, await buildPlan(db, workspaceId)));
+      await refuseIfUnsafe(db, workspaceId, false);
       return 0;
     }
-    const deleted = await db.$transaction(async (tx) => {
+    const confirm = flagValue(argv, "--confirm")?.trim() ?? "";
+    const current = await currentDatabase(db);
+    if (!confirm || confirm !== current) {
+      throw new ScriptRefusal("Refusing to run: --confirm must match the current database.");
+    }
+    await db.$transaction(async (tx) => {
       const plan = await buildPlan(tx, workspaceId);
+      const safety = await safetyReport(tx, plan);
+      const blocked = blockMessage(safety);
+      if (blocked) throw new ScriptRefusal(blocked);
       await applyDeletes(tx, plan);
-      return plan;
+      console.log(`${formatPlan(workspaceId, true, plan)}\n${formatSafety(safety)}`);
     });
-    console.log(formatPlan(workspaceId, true, deleted));
     return 0;
   } catch (err) {
     const message = err instanceof ScriptRefusal ? err.message : scrub(err instanceof Error ? err.message : "The script failed.", secrets);
