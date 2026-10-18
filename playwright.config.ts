@@ -2,6 +2,7 @@ import { defineConfig } from "@playwright/test";
 import { BASE_URL } from "./tests/e2e/base-url";
 
 // Story-level browser tests (tests/e2e/stories/<issue-id>.spec.ts).
+// The release gate lives in tests/e2e/smoke and uses playwright.smoke.config.ts (workflow input suite=smoke).
 // They run against STAGING by default and read every credential from the environment:
 //   STAGING_USER, STAGING_PASS     the basic-auth gate in front of staging
 //   SHO_ADMIN_EMAIL, SHO_ADMIN_PASS   a Super Admin account on staging

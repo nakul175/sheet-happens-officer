@@ -2,7 +2,10 @@
 # production is refused). Started by hand only (Actions > Staging e2e > Run workflow).
 # The specs live on the branch the run is started from ("Use workflow from", e.g. qa/story-e2e): every job checks out that same commit.
 # Input "specs": space-separated values only (a comma is not a separator). Issue ids (APL-2481) or globs
-# (APL-26*, tests/e2e/stories/APL-25*.spec.ts); empty runs every spec.
+# (APL-26*, tests/e2e/stories/APL-25*.spec.ts); empty runs every story spec.
+# Input "suite": stories (default, unchanged) or smoke. smoke runs tests/e2e/smoke once (not across the 20 shards)
+# via playwright.smoke.config.ts. A specs value that points at tests/e2e/smoke/*.spec.ts also selects those files.
+# @write smoke tests sign in as ZZ_TEST_01 (Super Admin) and ZZ_TEST_06 (Member) and refuse any host that is not staging.
 # Secrets (repository settings): STAGING_USER, STAGING_PASS, SHO_ADMIN_EMAIL, SHO_ADMIN_PASS, SHO_MEMBER_EMAIL, SHO_MEMBER_PASS,
 # and ZZ_TEST_01_EMAIL / ZZ_TEST_01_PASS ... ZZ_TEST_20_EMAIL / ZZ_TEST_20_PASS (01-05 Super Admins, 06-20 plain Members).
 # The previews use the same STAGING_USER / STAGING_PASS basic-auth gate as staging.
@@ -32,10 +35,18 @@ on:
   workflow_dispatch:
     inputs:
       specs:
-        description: "Space-separated values only (commas are not separators). Issue ids or globs, e.g. APL-2481 APL-26*. Empty = all specs."
+        description: "Space-separated values only (commas are not separators). Issue ids or globs, e.g. APL-2481 APL-26*. Empty = all specs in the suite."
         required: false
         default: ""
         type: string
+      suite:
+        description: "stories (default) runs tests/e2e/stories. smoke runs the release gate in tests/e2e/smoke."
+        required: false
+        default: stories
+        type: choice
+        options:
+          - stories
+          - smoke
       trace:
         description: "Playwright traces. They contain passwords (see the comment at the top of this file)."
         required: false
@@ -83,6 +94,7 @@ jobs:
       preview: ${{ steps.target.outputs.preview }}
       parallel: ${{ steps.pick.outputs.parallel }}
       serial: ${{ steps.pick.outputs.serial }}
+      smoke: ${{ steps.pick.outputs.smoke }}
     steps:
       - name: Check the target host
         id: target
@@ -119,42 +131,66 @@ jobs:
         id: pick
         env:
           SPECS: ${{ inputs.specs }}
+          SUITE: ${{ inputs.suite }}
         run: |
           shopt -s nullglob
+          # Default stays "stories" so a dispatch that leaves the new input blank behaves as before.
+          SUITE="${SUITE:-stories}"
+          if [ "$SUITE" != "stories" ] && [ "$SUITE" != "smoke" ]; then
+            echo "::error::suite must be stories or smoke (got: $SUITE)."; exit 1
+          fi
+          root="tests/e2e/stories"
+          [ "$SUITE" = "smoke" ] && root="tests/e2e/smoke"
           files=()
+          smoke=()
           read -ra toks <<< "$SPECS"   # split on spaces without expanding globs against the repo root
           for tok in "${toks[@]}"; do
             if ! [[ "$tok" =~ ^[A-Za-z0-9_.*?/-]+$ ]] || [[ "$tok" == *..* ]]; then
               echo "::error::Not an issue id or glob: $tok"; exit 1
             fi
             if [[ "$tok" =~ ^[A-Za-z]+-[0-9]+$ ]]; then
-              pattern="tests/e2e/stories/${tok^^}.spec.ts tests/e2e/stories/${tok^^}-*.spec.ts"   # an issue's split files too
+              pattern="$root/${tok^^}.spec.ts $root/${tok^^}-*.spec.ts"   # an issue's split files too
             elif [[ "$tok" == */* ]]; then
               pattern="$tok"
             else
-              pattern="tests/e2e/stories/$tok"
+              pattern="$root/$tok"
               [[ "$pattern" == *.ts ]] || pattern="$pattern.spec.ts"
             fi
             matched=()
             for f in $pattern; do
-              [[ -f "$f" && "$f" == tests/e2e/stories/*.spec.ts ]] && matched+=("$f")
+              if [[ -f "$f" && "$f" == tests/e2e/smoke/*.spec.ts ]]; then
+                matched+=("$f"); smoke+=("$f")
+              elif [[ -f "$f" && "$f" == tests/e2e/stories/*.spec.ts ]]; then
+                matched+=("$f"); files+=("$f")
+              fi
             done
             if [ ${#matched[@]} -eq 0 ]; then echo "::error::No spec file matches: $tok"; exit 1; fi
-            files+=("${matched[@]}")
           done
-          if [ ${#files[@]} -eq 0 ]; then
-            files=(tests/e2e/stories/*.spec.ts)
-            [ ${#files[@]} -gt 0 ] || { echo "::error::No spec files in tests/e2e/stories on this branch. Start the run from the branch with the specs (e.g. qa/story-e2e)."; exit 1; }
+          if [ ${#files[@]} -eq 0 ] && [ ${#smoke[@]} -eq 0 ]; then
+            if [ "$SUITE" = "smoke" ]; then
+              smoke=(tests/e2e/smoke/*.spec.ts)
+              [ ${#smoke[@]} -gt 0 ] || { echo "::error::No spec files in tests/e2e/smoke on this branch."; exit 1; }
+            else
+              files=(tests/e2e/stories/*.spec.ts)
+              [ ${#files[@]} -gt 0 ] || { echo "::error::No spec files in tests/e2e/stories on this branch. Start the run from the branch with the specs (e.g. qa/story-e2e)."; exit 1; }
+            fi
           fi
           parallel=(); serial=()
-          for f in $(printf '%s\n' "${files[@]}" | sort -u); do
-            id=$(basename "$f" .spec.ts)
-            if [[ " $SERIAL_SPECS " == *" $id "* ]]; then serial+=("$f"); else parallel+=("$f"); fi
-          done
+          if [ ${#files[@]} -gt 0 ]; then
+            for f in $(printf '%s\n' "${files[@]}" | sort -u); do
+              id=$(basename "$f" .spec.ts)
+              if [[ " $SERIAL_SPECS " == *" $id "* ]]; then serial+=("$f"); else parallel+=("$f"); fi
+            done
+          fi
+          if [ ${#smoke[@]} -gt 0 ]; then
+            smoke=($(printf '%s\n' "${smoke[@]}" | sort -u))
+          fi
           echo "Parallel shards (${#parallel[@]} files):"; printf '  %s\n' "${parallel[@]}"
           echo "Serial job (${#serial[@]} files):"; printf '  %s\n' "${serial[@]}"
+          echo "Smoke job (${#smoke[@]} files):"; printf '  %s\n' "${smoke[@]}"
           echo "parallel=${parallel[*]}" >> "$GITHUB_OUTPUT"
           echo "serial=${serial[*]}" >> "$GITHUB_OUTPUT"
+          echo "smoke=${smoke[*]}" >> "$GITHUB_OUTPUT"
 
   e2e:
     name: Shard ${{ matrix.nn }} of 20 (${{ matrix.role }})
@@ -362,9 +398,79 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
 
+  e2e-smoke:
+    name: Smoke suite (one job)
+    needs: plan
+    if: needs.plan.outputs.smoke != ''
+    runs-on: ubuntu-latest
+    # Install plus the checks. The checks themselves are capped by Playwright's per-test timeouts
+    # (30s, 60s for the concierge) so the gate stays under 10 minutes. One job, not 20 shards:
+    # sharding this few files would leave empty shards, and would sign in twenty times.
+    timeout-minutes: 25
+    env:
+      BASE_URL: ${{ needs.plan.outputs.base_url }}
+      ZZ_PREFIX: ZZ-TEST-SMOKE
+      SHARD_ROLE: ADMIN
+      PEER_ROLE: MEMBER
+      PLAYWRIGHT_BLOB_OUTPUT_NAME: report-smoke.zip
+    steps:
+      - name: Check the secrets are set (names only, never values)
+        env:
+          STAGING_USER: ${{ secrets.STAGING_USER }}
+          STAGING_PASS: ${{ secrets.STAGING_PASS }}
+          ZZ01_EMAIL: ${{ secrets.ZZ_TEST_01_EMAIL }}
+          ZZ01_PASS: ${{ secrets.ZZ_TEST_01_PASS }}
+          ZZ06_EMAIL: ${{ secrets.ZZ_TEST_06_EMAIL }}
+          ZZ06_PASS: ${{ secrets.ZZ_TEST_06_PASS }}
+        run: |
+          missing=""
+          for n in STAGING_USER STAGING_PASS; do
+            [ -n "${!n}" ] || missing="$missing $n"
+          done
+          [ -n "$ZZ01_EMAIL" ] || missing="$missing ZZ_TEST_01_EMAIL"
+          [ -n "$ZZ01_PASS" ] || missing="$missing ZZ_TEST_01_PASS"
+          [ -n "$ZZ06_EMAIL" ] || missing="$missing ZZ_TEST_06_EMAIL"
+          [ -n "$ZZ06_PASS" ] || missing="$missing ZZ_TEST_06_PASS"
+          if [ -n "$missing" ]; then
+            echo "::error::Missing repository secrets:$missing. Add them in Settings > Secrets and variables > Actions."
+            exit 1
+          fi
+          echo "Smoke: ZZ_TEST_01 (Super Admin) and ZZ_TEST_06 (Member) are set."
+
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+
+      - name: Run the smoke suite (workers=1)
+        env:
+          STAGING_USER: ${{ secrets.STAGING_USER }}
+          STAGING_PASS: ${{ secrets.STAGING_PASS }}
+          SHARD_EMAIL: ${{ secrets.ZZ_TEST_01_EMAIL }}
+          SHARD_PASS: ${{ secrets.ZZ_TEST_01_PASS }}
+          PEER_EMAIL: ${{ secrets.ZZ_TEST_06_EMAIL }}
+          PEER_PASS: ${{ secrets.ZZ_TEST_06_PASS }}
+          FILES: ${{ needs.plan.outputs.smoke }}
+          TRACE: ${{ inputs.trace }}
+        run: |
+          read -ra files <<< "$FILES"
+          npx playwright test -c playwright.smoke.config.ts --workers=1 --reporter=list,blob --trace="$TRACE" "${files[@]}"
+
+      - name: Upload the blob report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: blob-report-smoke
+          path: blob-report/
+          if-no-files-found: ignore
+          retention-days: 14
+
   report:
     name: Merge the reports
-    needs: [plan, e2e, e2e-serial]
+    needs: [plan, e2e, e2e-serial, e2e-smoke]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 20
