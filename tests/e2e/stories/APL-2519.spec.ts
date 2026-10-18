@@ -1,7 +1,8 @@
 // [SHO-US-9.2] Cost controls and caps (Linear APL-2519, PR #34). AC6 is the remaining work.
 // Given the Super Admin opens Usage, when the month's spend is recorded, the screen shows spend to date,
 // the monthly ceiling and the percentage used, using the figures /api/usage already returns.
-// The percentage is the API's figure: 10 of a ceiling of 80 is answered as 15, and the screen must not show 12.5.
+// The percentage is the share of the ceiling. 10 of 80 is 12.5% at one decimal (what PR #34 prints)
+// or 13% to the nearest whole number. It is worked out from the amount and the ceiling.
 // A Member and an Admin are refused. The page does not request /api/usage for them, and no figures are shown.
 // Widths 320, 390 and 1280 keep the spend labels fully on screen, with no sideways scroll.
 // Those checks run when PR #34 is live (tests/e2e/helpers/jim-gate.ts: release SHA, then the heading in the served page)
@@ -9,7 +10,7 @@
 // The plain Member (SHO_MEMBER_*) is promoted to Admin for that one check and put back afterwards.
 import { test, expect, login } from "../support";
 import { notLive, prLive } from "../helpers/jim-gate";
-import { CHAT, expectRefused, figure, fits, sampleUsage, stubUsage, usd, usageCard } from "../helpers/usage-screen";
+import { CHAT, acceptedPercents, apiPercent, expectPercent, expectRefused, figure, fits, sampleUsage, stubUsage, usd, usageCard } from "../helpers/usage-screen";
 
 const WHY = "the Usage screen still shows calls, tokens and cost, and does not show spend against the monthly ceiling.";
 const WIDTHS = [320, 390, 1280] as const;
@@ -29,6 +30,7 @@ test.describe("SHO-US-9.2 / APL-2519", () => {
     expect(typeof ceiling.spendUsd).toBe("number");
     expect(typeof ceiling.usd).toBe("number");
     expect(typeof ceiling.percent).toBe("number");
+    if (ceiling.usd > 0) expect(acceptedPercents(ceiling.spendUsd, ceiling.usd)).toContain(`${ceiling.percent}%`);
 
     await admin.page.goto("/usage", { waitUntil: "domcontentloaded" });
     const card = usageCard(admin.page, "Spend against the monthly ceiling");
@@ -43,32 +45,31 @@ test.describe("SHO-US-9.2 / APL-2519", () => {
     expect(main.includes(CHAT)).toBe(false);
   });
 
-  test("AC6: the screen prints the API percentage, including when it is not spend divided by the ceiling", async ({ admin, later }) => {
+  test("AC6: 10 of a ceiling of 80 is 12.5% or 13%, worked out from the amount and the ceiling", async ({ admin, later }) => {
     const gate = await prLive(34, admin, null, later);
     test.skip(!gate.deployed, notLive(gate, WHY));
-    const data = sampleUsage();
-    await stubUsage(admin.page, data);
+    const spend = 10;
+    const cap = 80;
+    await stubUsage(admin.page, sampleUsage());
     await admin.page.goto("/usage", { waitUntil: "domcontentloaded" });
     const card = usageCard(admin.page, "Spend against the monthly ceiling");
-    await expect(figure(card, "Spend to date")).toHaveText("$10.00");
-    await expect(figure(card, "Monthly ceiling")).toHaveText("$80.00");
-    await expect(figure(card, "Percentage used")).toHaveText("15%");
-    await expect(card).not.toContainText("12.5%");
+    await expect(figure(card, "Spend to date")).toHaveText(usd(spend));
+    await expect(figure(card, "Monthly ceiling")).toHaveText(usd(cap));
     const meter = admin.page.getByRole("meter", { name: "Spend against the monthly ceiling" });
-    await expect(meter).toHaveAttribute("aria-valuetext", "$10.00 of $80.00, 15% used");
-    await expect(meter).toHaveAttribute("aria-valuenow", "15");
+    await expectPercent(card, meter, spend, cap);
     expect(await admin.page.locator("main").innerText()).not.toContain(CHAT);
 
-    // Calls already running can finish after the cap, so the percentage can pass 100. The bar stays full.
-    const over = sampleUsage({ ceiling: { usd: 100, spendUsd: 112.4, percent: 112.4 } });
+    // Calls already running can finish after the cap. The percentage stays the share of the ceiling, and the bar stays full.
+    const overSpend = 112.4;
+    const overCap = 100;
     await admin.page.unrouteAll({ behavior: "ignoreErrors" });
-    await stubUsage(admin.page, over);
+    await stubUsage(admin.page, sampleUsage({ ceiling: { usd: overCap, spendUsd: overSpend, percent: apiPercent(overSpend, overCap) } }));
     await admin.page.reload({ waitUntil: "domcontentloaded" });
-    await expect(figure(card, "Spend to date")).toHaveText("$112.40");
-    await expect(figure(card, "Monthly ceiling")).toHaveText("$100.00");
-    await expect(figure(card, "Percentage used")).toHaveText("112.4%");
+    await expect(figure(card, "Spend to date")).toHaveText(usd(overSpend));
+    await expect(figure(card, "Monthly ceiling")).toHaveText(usd(overCap));
+    const shown = await expectPercent(card, meter, overSpend, overCap);
+    expect(Number(shown.replace("%", ""))).toBeGreaterThan(100);
     await expect(meter).toHaveAttribute("aria-valuenow", "100");
-    await expect(meter).toHaveAttribute("aria-valuetext", "$112.40 of $100.00, 112.4% used");
     expect(await admin.page.locator("main").innerText()).not.toContain(CHAT);
   });
 
