@@ -21,7 +21,7 @@ test.describe("SHO-US-2.5 / APL-2484", () => {
     if (person && person.status !== "DEACTIVATED") await deactivate(api, person.id);
   }
 
-  test("AC1: a Member sees active people's names only, with no email, status or management action", async ({ admin, member, later }) => {
+  test("AC1: a Member sees active people's names only, with no email, status or management action (qa:TC missing)", async ({ admin, member, later }) => {
     test.setTimeout(240_000);
     const name = zz("ac1");
     const email = zzEmail("ac1");
@@ -48,7 +48,7 @@ test.describe("SHO-US-2.5 / APL-2484", () => {
     expect(created).not.toHaveProperty("status");
   });
 
-  test("AC2: an Admin or Super Admin also sees email, role and status columns and the actions their role allows", async ({ admin, later }) => {
+  test("AC2: an Admin or Super Admin also sees email, role and status columns and the actions their role allows (qa:TC missing)", async ({ admin, later }) => {
     test.setTimeout(240_000);
     const name = zz("ac2");
     const email = zzEmail("ac2");
@@ -71,7 +71,7 @@ test.describe("SHO-US-2.5 / APL-2484", () => {
     expect(person?.orgRole).toBe("MEMBER");
   });
 
-  test("AC3: deactivated people show a grey Deactivated chip to Admins and are hidden from Members", async ({ admin, member, later }) => {
+  test("AC3: deactivated people show a grey Deactivated chip to Admins and are hidden from Members (qa:TC missing)", async ({ admin, member, later }) => {
     test.setTimeout(240_000);
     const name = zz("hidden");
     const email = zzEmail("hidden");
@@ -94,7 +94,7 @@ test.describe("SHO-US-2.5 / APL-2484", () => {
     await expect(member.page.locator("#main").getByText(name, { exact: true })).toHaveCount(0);
   });
 
-  test("AC3 (unverified): unverified people show an Unverified status to Admins and are hidden from Members", async ({ anon, admin, member, later }) => {
+  test("AC3 (unverified): unverified people show an Unverified status to Admins and are hidden from Members (qa:TC missing)", async ({ anon, admin, member, later }) => {
     test.setTimeout(180_000);
     const email = alias("2484", "unverified", "aplyd.com");
     const name = zz("unverified");
@@ -115,7 +115,7 @@ test.describe("SHO-US-2.5 / APL-2484", () => {
     await expect(member.page.locator("#main").getByText(name, { exact: true })).toHaveCount(0);
   });
 
-  test("AC4: the Super Admin's own row has no management action", async ({ admin, later }) => {
+  test("AC4: the Super Admin's own row has no management action (qa:TC missing)", async ({ admin, later }) => {
     test.setTimeout(240_000);
     const name = zz("ac4");
     const email = zzEmail("ac4");
