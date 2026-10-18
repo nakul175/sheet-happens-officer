@@ -1,19 +1,20 @@
-// APL-2691: the Move to Won dialog must show the open-task refusal (SHO-US-10.3 AC6) before anyone clicks Move.
+// APL-2691: the Move to Won dialog shows the open-task refusal from the list already on the page.
 import { describe, expect, it } from "vitest";
-import { closingAlert, openTaskAlertText, stageClosesDeal } from "../src/components/DealPanel";
+import { closingAlert, LOAD_OPEN_TASKS, moreOpenTasks, openTaskAlertText, openTaskFeed, planClosing, stageClosesDeal } from "../src/components/DealPanel";
 import { openTaskBlock } from "../src/lib/deals";
-import { account, admin, istDate, project, superAdmin, task, withVersion, type Account } from "./helpers";
+import { admin, istDate, superAdmin, task, withVersion, type Account } from "./helpers";
+
+const row = (id: string, done = false) => ({ id, title: id, completedAt: done ? "2026-01-01" : null, assignee: null });
+const section = (tasks: ReturnType<typeof row>[], total = tasks.length, nextCursor: string | null = null, isDone = false) => ({ isDone, total, nextCursor, tasks });
 
 describe("closing alert payload", () => {
-  it("names a closing stage and ignores every other category", () => {
+  it("@APL-2691 TC6: names a closing stage, keeps the first 20, and says how many remain", () => {
     expect(stageClosesDeal("DONE")).toBe(true);
     expect(stageClosesDeal("LOST")).toBe(true);
     expect(stageClosesDeal("ACTIVE")).toBe(false);
     expect(stageClosesDeal("PAUSED")).toBe(false);
     expect(stageClosesDeal("NOT_STARTED")).toBe(false);
-  });
 
-  it("keeps the count and the first 20 titles, and stays quiet when nothing is open", () => {
     expect(closingAlert(null)).toBeNull();
     expect(closingAlert({ openTasks: 0, tasks: [] })).toBeNull();
     expect(closingAlert({})).toBeNull();
@@ -26,6 +27,32 @@ describe("closing alert payload", () => {
     expect(openTaskAlertText(21)).toContain("open tasks");
     expect(openTaskAlertText(1)).toContain("1 open task");
     expect(openTaskAlertText(1)).not.toContain("open tasks");
+    expect(moreOpenTasks(21, 20)).toBe("and 1 more");
+    expect(moreOpenTasks(25, 20)).toBe("and 5 more");
+    expect(moreOpenTasks(1, 1)).toBeNull();
+    expect(moreOpenTasks(20, 20)).toBeNull();
+  });
+
+  it("@APL-2691 TC8: plans the dialog from the list the page already has", () => {
+    const tasks = Array.from({ length: 21 }, (_, i) => ({ id: `t${i}`, title: `Task ${i}` }));
+    expect(planClosing({ pending: true, status: "ready", openCount: 21, tasks })).toEqual({ kind: "ignore" });
+    expect(planClosing({ pending: false, status: "loading", openCount: 0, tasks: [] })).toEqual({ kind: "wait" });
+    expect(planClosing({ pending: false, status: "error", openCount: 0, tasks: [] })).toEqual({ kind: "open", blocked: null, loadError: LOAD_OPEN_TASKS });
+    expect(planClosing({ pending: false, status: "partial", openCount: 21, tasks })).toEqual({ kind: "fetch" });
+    expect(planClosing({ pending: false, status: "ready", openCount: 21, tasks })).toEqual({
+      kind: "open", blocked: { openTasks: 21, tasks: tasks.slice(0, 20) }, loadError: null,
+    });
+    expect(planClosing({ pending: false, status: "ready", openCount: 0, tasks: [] })).toEqual({ kind: "open", blocked: null, loadError: null });
+    const one = planClosing({ pending: false, status: "ready", openCount: 1, tasks: tasks.slice(0, 1) });
+    expect(one).toEqual({ kind: "open", blocked: { openTasks: 1, tasks: tasks.slice(0, 1) }, loadError: null });
+    expect(openTaskAlertText(1)).toContain("1 open task");
+
+    const ready = openTaskFeed([section([row("a"), row("b", true)])], 1, false);
+    expect(ready).toEqual({ status: "ready", openCount: 1, tasks: [{ id: "a", title: "a", assignee: null }] });
+    expect(openTaskFeed([section([row("a")])], undefined, false).openCount).toBe(1);
+    expect(openTaskFeed([section([row("a")])], 5, true).status).toBe("partial");
+    expect(openTaskFeed([section([row("a")], 21, "next")], 21, false).status).toBe("partial");
+    expect(openTaskFeed([section([row("a")], 30, "next", true)], 1, false).status).toBe("ready");
   });
 });
 
@@ -36,7 +63,7 @@ async function pipelines(a: Account) {
 }
 
 describe("open tasks that block Won (APL-2691)", () => {
-  it("returns the same first 20 the move refuses with, and does not move, close or archive the deal", async () => {
+  it("@APL-2691 TC3 AC3: Won returns 409 with openTasks 21 and does not move, close, or archive the deal", async () => {
     const sa = await superAdmin();
     const lead = await admin(sa, "won2691");
     const pipes = await pipelines(lead);
@@ -56,13 +83,6 @@ describe("open tasks that block Won (APL-2691)", () => {
       extra.push({ id: await task(lead, id, { title }), title });
     }
     const named = [{ id: stepId, title: step }, ...extra];
-
-    const preview = await lead.c.get(`/api/projects/${id}/stage`);
-    expect(preview.status, JSON.stringify(preview.json)).toBe(200);
-    expect(preview.json.openTasks).toBe(21);
-    expect(preview.json.tasks).toHaveLength(20);
-    const returned = (preview.json.tasks as { id: string; title: string }[]).map((t) => t.title);
-    expect(named.map((t) => t.title).filter((t) => !returned.includes(t))).toHaveLength(1);
     expect((await lead.c.get(`/api/projects/${id}`)).json.project.deal.stage.name).toBe("Lead");
     expect((await lead.c.get(`/api/tasks/${stepId}`)).json.task.completedAt).toBeNull();
 
@@ -71,23 +91,17 @@ describe("open tasks that block Won (APL-2691)", () => {
     expect(blocked.status).toBe(409);
     expect(blocked.json.openTasks).toBe(21);
     expect(blocked.json.error).toContain("21 tasks are still open");
-    expect(blocked.json.tasks).toEqual(preview.json.tasks);
+    expect(blocked.json.tasks).toHaveLength(20);
+    const returned = (blocked.json.tasks as { id: string; title: string }[]).map((t) => t.title);
+    expect(named.map((t) => t.title).filter((t) => !returned.includes(t))).toHaveLength(1);
+    expect((await lead.c.get(`/api/projects/${id}`)).json.project.deal.stage.name).toBe("Lead");
     expect((await lead.c.get(`/api/projects/${id}`)).json.project.archived).toBe(false);
+    expect((await lead.c.get(`/api/tasks/${stepId}`)).json.task.completedAt).toBeNull();
 
     for (const item of named) expect((await lead.c.post(`/api/tasks/${item.id}/complete`, await withVersion(lead, item.id))).status, item.title).toBe(200);
-    const clear = await lead.c.get(`/api/projects/${id}/stage`);
-    expect(clear.json).toEqual({ openTasks: 0, tasks: [] });
     expect((await lead.c.post(`/api/projects/${id}/stage`, { stageId: won })).status).toBe(200);
     const after = (await lead.c.get(`/api/projects/${id}`)).json.project;
     expect(after.deal.stage.name).toBe("Won");
     expect(after.archived).toBe(false);
-  });
-
-  it("refuses the preview on a plain project", async () => {
-    const m = await account("plain2691");
-    const p = await project(m, m);
-    const r = await m.c.get(`/api/projects/${p.id}/stage`);
-    expect(r.status).toBe(400);
-    expect(r.json.error).toBe("Only deals have stages.");
   });
 });

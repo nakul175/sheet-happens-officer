@@ -76,25 +76,29 @@ async function dealState(projectId: string) {
 }
 
 describe("APL-2691 Move to Won dialog", () => {
-  it("AC1: Move to Won shows an alert with 21 and the first 20 tasks, and changes nothing", async () => {
+  it("@APL-2691 TC1 AC1: Move to Won shows an alert with 21, the first 20 tasks, and how many remain", async () => {
     const { dialog, alert } = await openStage(wonId, "Won");
-    expect(await alert.innerText()).toContain("21");
+    const text = await alert.innerText();
+    expect(text).toContain("21");
+    expect(text).toContain("and 1 more");
     const shown = (await dialog.getByRole("link").allTextContents()).map((t) => t.trim());
     expect(shown).toHaveLength(20);
     expect(wonTitles.filter((t) => !shown.includes(t))).toHaveLength(1);
     await dialog.getByRole("button", { name: "Move deal" }).click();
     await alert.waitFor({ state: "visible", timeout: WITHIN });
     expect(await alert.innerText()).toContain("21");
+    expect(await alert.innerText()).toContain("and 1 more");
     expect(await dealState(wonId)).toEqual({ stage: "Lead", archived: false });
     expect((await lead.c.get(`/api/tasks/${wonTaskIds[0]}`)).json.task.completedAt).toBeNull();
     await dialog.getByRole("button", { name: "Cancel" }).click();
   }, 60000);
 
-  it("AC2: Move to Lost says 1 open task and lists that task", async () => {
+  it("@APL-2691 TC2 AC2: Move to Lost says 1 open task and lists that task", async () => {
     const { dialog, alert } = await openStage(lostId, "Lost");
     const text = await alert.innerText();
     expect(text).toContain("1 open task");
     expect(text).not.toContain("open tasks");
+    expect(text).not.toMatch(/and \d+ more/);
     expect((await dialog.getByRole("link").allTextContents()).map((t) => t.trim())).toEqual([lostStep]);
     await dialog.getByLabel("Reason (required)").fill("ZZ-TEST lost");
     await dialog.getByRole("button", { name: "Move deal" }).click();
@@ -105,7 +109,52 @@ describe("APL-2691 Move to Won dialog", () => {
     await dialog.getByRole("button", { name: "Cancel" }).click();
   }, 60000);
 
-  it("moves to Won once every task is closed, and does not archive the deal or restamp the tasks", async () => {
+  it("@APL-2691 TC4: the dialog points at the alert with aria-describedby and focus moves to it", async () => {
+    await page.goto(`/projects/${wonId}`);
+    await page.getByRole("group", { name: "Stage" }).getByRole("button", { name: "Won", exact: true }).click();
+    await page.waitForFunction(() => {
+      const dialog = document.querySelector('[role="dialog"][aria-label="Move to Won"]');
+      const id = dialog?.getAttribute("aria-describedby");
+      if (!id || !dialog) return false;
+      const alert = document.getElementById(id);
+      return !!alert
+        && dialog.contains(alert)
+        && alert.getAttribute("role") === "alert"
+        && document.activeElement === alert
+        && (alert.textContent ?? "").includes("21")
+        && (alert.textContent ?? "").includes("and 1 more");
+    }, undefined, { timeout: WITHIN });
+    await page.getByRole("dialog", { name: "Move to Won" }).getByRole("button", { name: "Cancel" }).click();
+  }, 60000);
+
+  it("@APL-2691 TC5: a second click while the list loads opens one dialog, and a failed load is said in it", async () => {
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const pattern = `**/api/projects/${wonId}/tasks**`;
+    await page.route(pattern, async (route) => {
+      await gate;
+      await route.fulfill({ status: 500, contentType: "application/json", body: "{\"error\":\"nope\"}" });
+    });
+    try {
+      await page.goto(`/projects/${wonId}`);
+      const won = page.getByRole("group", { name: "Stage" }).getByRole("button", { name: "Won", exact: true });
+      await won.waitFor({ state: "visible", timeout: WITHIN });
+      await won.click();
+      await won.click();
+      release();
+      const dialog = page.getByRole("dialog", { name: "Move to Won" });
+      await dialog.waitFor({ state: "visible", timeout: WITHIN });
+      expect(await page.getByRole("dialog", { name: "Move to Won" }).count()).toBe(1);
+      expect(await dialog.getByRole("alert").innerText()).toContain("Could not load the open tasks.");
+      expect(await dialog.getByRole("button", { name: "Move deal" }).isEnabled()).toBe(true);
+      await dialog.getByRole("button", { name: "Cancel" }).click();
+    } finally {
+      release();
+      await page.unroute(pattern);
+    }
+  }, 60000);
+
+  it("@APL-2691 TC7: moves to Won once every task is closed, and does not archive the deal or restamp the tasks", async () => {
     const stamps: string[] = [];
     for (const id of wonTaskIds) {
       expect((await lead.c.post(`/api/tasks/${id}/complete`, await withVersion(lead, id))).status).toBe(200);

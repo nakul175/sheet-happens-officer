@@ -10,7 +10,7 @@ import { AvatarGroup, Pri, Tick } from "@/components/TaskParts";
 import { Confirm, Field, LoadFailed, Menu, Modal, Skeleton } from "@/components/ui";
 import { MoveSheet } from "@/components/MoveSheet";
 import "@/components/board.css";
-import { DealPanel, type DealBlock } from "@/components/DealPanel";
+import { DealPanel, openTaskFeed, type DealBlock, type OpenTaskFeed } from "@/components/DealPanel";
 import { Page, useMe } from "../../Shell";
 import { InlineCells, inlineEditable, useInlineEdit } from "@/components/inline";
 import { ListControls } from "./ListControls";
@@ -104,6 +104,10 @@ function Inner({ id }: { id: string }) {
   }
   const p = pr.data?.project;
   const secs = tk.data?.sections;
+  // APL-2691: Won and Lost read this list. It is the one the page already asked for, not a second query.
+  const openFeed: OpenTaskFeed = secs
+    ? openTaskFeed(secs, tk.data?.summary?.open, filtered)
+    : { status: tk.failed || tk.error ? "error" : "loading", openCount: 0, tasks: [] };
   const canWrite = !!p && p.role !== "VIEWER" && !p.archived;
   const manage = !!p && p.role === "LEADER" && !p.archived;
   // The address keeps the view, the open task and the filter, sort and group choices.
@@ -194,7 +198,7 @@ function Inner({ id }: { id: string }) {
           <button className="btn ghost sm" onClick={() => { nudgeSeen(p.id, true); setNudgeOff(true); }}>Dismiss</button>
         </div>
       )}
-      {p?.deal && <DealPanel projectId={id} deal={p.deal} canWrite={canWrite} onChange={refresh} />}
+      {p?.deal && <DealPanel projectId={id} deal={p.deal} canWrite={canWrite} onChange={refresh} feed={openFeed} />}
       <div className="tabs">
         <div className="seg" role="tablist" aria-label="View">
           <button role="tab" aria-selected={view === "list"} onClick={() => setView("list")}>List</button>

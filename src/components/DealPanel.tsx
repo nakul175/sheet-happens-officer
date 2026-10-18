@@ -1,6 +1,6 @@
 "use client";
 import Link from "next/link";
-import { useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { api, dueLabel, isOverdue, useGet } from "@/components/api";
 import { Field, Modal } from "@/components/ui";
 
@@ -36,12 +36,54 @@ export function openTaskAlertText(openTasks: number) {
   return `Close or move these ${openTasks} open task${openTasks === 1 ? "" : "s"} first:`;
 }
 
-export type StageInitial = { err?: string | null; blocked?: Blocked | null; need?: string[] };
+/** Past the 20 titles the dialog lists, say how many are left. */
+export function moreOpenTasks(openTasks: number, shown: number) {
+  const n = openTasks - shown;
+  return n > 0 ? `and ${n} more` : null;
+}
+
+export const LOAD_OPEN_TASKS = "Could not load the open tasks.";
+
+export type OpenTaskFeed = {
+  status: "loading" | "ready" | "error" | "partial";
+  openCount: number;
+  tasks: { id: string; title: string; assignee?: string | null }[];
+};
+
+type FeedTask = { id: string; title: string; completedAt: string | null; assignee?: { name: string } | null };
+type FeedSection = { isDone: boolean; total: number; nextCursor: string | null; tasks: FeedTask[] };
+
+/** Open tasks from the list the deal page already loaded. `partial` means that list is filtered or cut short. */
+export function openTaskFeed(sections: FeedSection[], summaryOpen: number | undefined, filtered: boolean): OpenTaskFeed {
+  const tasks = sections.flatMap((s) => s.tasks.filter((t) => !t.completedAt)).map((t) => ({ id: t.id, title: t.title, assignee: t.assignee?.name ?? null }));
+  const openCount = summaryOpen ?? tasks.length;
+  const partial = filtered || sections.some((s) => !s.isDone && (s.nextCursor != null || s.total > s.tasks.length));
+  return { status: partial ? "partial" : "ready", openCount, tasks };
+}
+
+export type ClosingPlan =
+  | { kind: "ignore" }
+  | { kind: "wait" }
+  | { kind: "fetch" }
+  | { kind: "open"; blocked: Blocked | null; loadError: string | null };
+
+/** What to do with a Won or Lost click. A second click while the first is still waiting is ignored. */
+export function planClosing(o: { pending: boolean; status: OpenTaskFeed["status"]; openCount: number; tasks: OpenTaskFeed["tasks"] }): ClosingPlan {
+  if (o.pending) return { kind: "ignore" };
+  if (o.status === "loading") return { kind: "wait" };
+  if (o.status === "error") return { kind: "open", blocked: null, loadError: LOAD_OPEN_TASKS };
+  if (o.status === "partial") return { kind: "fetch" };
+  return { kind: "open", blocked: closingAlert({ openTasks: o.openCount, tasks: o.tasks }), loadError: null };
+}
+
+export type StageInitial = { err?: string | null; blocked?: Blocked | null; need?: string[]; loadError?: string | null };
 export function StageDialog({ projectId, stage, deal, initial, onClose, onDone }: { projectId: string; stage: Stage; deal: Pick<DealBlock, "details">; initial?: StageInitial; onClose: () => void; onDone: () => void }) {
+  const alertId = useId();
   const [reason, setReason] = useState("");
   const [fields, setFields] = useState<Record<string, string>>({});
   const [need, setNeed] = useState<string[]>(initial?.need ?? []);
   const [err, setErr] = useState<string | null>(initial?.err ?? null);
+  const [loadError, setLoadError] = useState<string | null>(initial?.loadError ?? null);
   const [blocked, setBlocked] = useState<Blocked | null>(initial?.blocked ?? null);
   const [busy, setBusy] = useState(false);
   const d = deal.details;
@@ -66,10 +108,13 @@ export function StageDialog({ projectId, stage, deal, initial, onClose, onDone }
     const next = closingAlert(r.data);
     if (next) setBlocked(next);
     if (r.data?.needsFields) setNeed(r.data.needsFields);
+    setLoadError(null);
     setErr(r.error ?? "Could not move the deal.");
   }
+  const problem = !blocked && (loadError || err);
+  const more = blocked ? moreOpenTasks(blocked.openTasks, blocked.tasks.length) : null;
   return (
-    <Modal onClose={onClose} label={`Move to ${stage.name}`}>
+    <Modal onClose={onClose} label={`Move to ${stage.name}`} describedBy={blocked || problem ? alertId : undefined}>
       <h2>Move to {stage.name}</h2>
       {stage.needsReason && <Field label="Reason (required)">{(id) => <textarea id={id} className="in" value={reason} onChange={(e) => setReason(e.target.value)} />}</Field>}
       {ask.map((k) => (
@@ -79,15 +124,19 @@ export function StageDialog({ projectId, stage, deal, initial, onClose, onDone }
             : <input id={id} className="in" type={k === "value" || k === "probability" ? "number" : k.includes("Close") || k.includes("Deadline") ? "date" : "text"} value={fields[k] ?? ""} onChange={(e) => setFields({ ...fields, [k]: e.target.value })} />}
         </Field>
       ))}
-      {blocked && (
-        <div className="err" role="alert">
-          {openTaskAlertText(blocked.openTasks)}
-          <ul style={{ margin: "6px 0 0 18px" }}>
-            {blocked.tasks.map((t) => <li key={t.id}><Link href={`/projects/${projectId}?task=${t.id}`}>{t.title}</Link>{t.assignee ? ` · ${t.assignee}` : ""}</li>)}
-          </ul>
+      {(blocked || problem) && (
+        <div id={alertId} className="err" role="alert" tabIndex={-1} data-autofocus>
+          {blocked ? (
+            <>
+              {openTaskAlertText(blocked.openTasks)}
+              <ul style={{ margin: "6px 0 0 18px" }}>
+                {blocked.tasks.map((t) => <li key={t.id}><Link href={`/projects/${projectId}?task=${t.id}`}>{t.title}</Link>{t.assignee ? ` · ${t.assignee}` : ""}</li>)}
+              </ul>
+              {more && <p>{more}</p>}
+            </>
+          ) : problem}
         </div>
       )}
-      {err && !blocked && <div className="err" role="alert">{err}</div>}
       <div className="actions">
         <button className="btn ghost" onClick={onClose}>Cancel</button>
         <button className="btn" disabled={busy || (stage.needsReason && !reason.trim())} onClick={go}>Move deal</button>
@@ -181,21 +230,57 @@ function DealNotes({ projectId, orgId }: { projectId: string; orgId: string | nu
   );
 }
 
-export function DealPanel({ projectId, deal, canWrite, onChange }: { projectId: string; deal: DealBlock; canWrite: boolean; onChange: () => void }) {
-  const [pick, setPick] = useState<null | { stage: Stage; blocked: Blocked | null }>(null);
+export function DealPanel({ projectId, deal, canWrite, onChange, feed }: { projectId: string; deal: DealBlock; canWrite: boolean; onChange: () => void; feed: OpenTaskFeed }) {
+  const [pick, setPick] = useState<null | { stage: Stage; blocked: Blocked | null; loadError: string | null }>(null);
+  const [armed, setArmed] = useState<Stage | null>(null);
   const [edit, setEdit] = useState(false);
+  const pending = useRef(false);
+  const ticket = useRef(0); // a closed or replaced click ignores a list that arrives later
   const d = deal.details;
   const cur = deal.stage?.id;
-  // APL-2691: Won asks for no reason, so the dialog used to open before the 409 existed and showed no alert.
-  // Read the same open-task list the move would refuse with, then open the dialog with that alert already in it.
-  async function choose(s: Stage) {
-    let blocked: Blocked | null = null;
-    if (stageClosesDeal(s.category)) {
-      const r = await api<{ openTasks?: number; tasks?: Blocked["tasks"] }>("GET", `/api/projects/${projectId}/stage`);
-      if (r.ok) blocked = closingAlert(r.data);
-    }
-    setPick({ stage: s, blocked });
+  const close = useCallback(() => { ticket.current += 1; pending.current = false; setArmed(null); setPick(null); }, []);
+  // APL-2691: the alert is part of the dialog's first paint, from the task list already on the page.
+  // A second click while that list is still loading does nothing. A failed load is said in the dialog.
+  function openFrom(s: Stage, source: OpenTaskFeed) {
+    const plan = planClosing({ pending: false, status: source.status, openCount: source.openCount, tasks: source.tasks });
+    if (plan.kind !== "open") return;
+    setPick({ stage: s, blocked: plan.blocked, loadError: plan.loadError });
+    setArmed(null);
   }
+  async function loadFull(s: Stage, mine: number) {
+    const r = await api<{ sections?: FeedSection[]; summary?: { open: number } }>("GET", `/api/projects/${projectId}/tasks?limit=100`);
+    if (mine !== ticket.current) return;
+    if (!r.ok) setPick({ stage: s, blocked: null, loadError: r.error ?? LOAD_OPEN_TASKS });
+    else {
+      const next = openTaskFeed(r.data.sections ?? [], r.data.summary?.open, false);
+      setPick({ stage: s, blocked: closingAlert({ openTasks: next.openCount, tasks: next.tasks }), loadError: null });
+    }
+    setArmed(null);
+  }
+  function choose(s: Stage) {
+    if (!stageClosesDeal(s.category)) {
+      if (pending.current) return; // the list for a Won or Lost click is still loading
+      setPick({ stage: s, blocked: null, loadError: null });
+      return;
+    }
+    const plan = planClosing({ pending: pending.current, status: feed.status, openCount: feed.openCount, tasks: feed.tasks });
+    if (plan.kind === "ignore") return;
+    pending.current = true;
+    if (plan.kind === "wait") { setArmed(s); return; }
+    if (plan.kind === "fetch") { void loadFull(s, ticket.current); return; }
+    openFrom(s, feed);
+  }
+  // The click landed before the page's list arrived. Opening here keeps that click to one render once the list is known.
+  if (armed && feed.status !== "loading") openFrom(armed, feed);
+  useEffect(() => {
+    if (!armed || feed.status !== "partial") return;
+    const stage = armed;
+    const mine = ticket.current;
+    void loadFull(stage, mine);
+    return () => { ticket.current += 1; };
+    // loadFull awaits the existing task list, then opens the dialog. The state update is not synchronous.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [armed, feed.status]);
   return (
     <div className="card" style={{ marginBottom: 14 }}>
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }} role="group" aria-label="Stage">
@@ -222,7 +307,7 @@ export function DealPanel({ projectId, deal, canWrite, onChange }: { projectId: 
       </p>
       <DealNotes projectId={projectId} orgId={deal.organisation?.id ?? null} />
       <Parties projectId={projectId} deal={deal} canWrite={canWrite} onChange={onChange} />
-      {pick && deal && <StageDialog projectId={projectId} stage={pick.stage} deal={deal} initial={{ blocked: pick.blocked }} onClose={() => setPick(null)} onDone={() => { setPick(null); onChange(); }} />}
+      {pick && deal && <StageDialog projectId={projectId} stage={pick.stage} deal={deal} initial={{ blocked: pick.blocked, loadError: pick.loadError }} onClose={close} onDone={() => { close(); onChange(); }} />}
       {edit && d && <DetailsDialog projectId={projectId} deal={deal} onClose={() => setEdit(false)} onDone={() => { setEdit(false); onChange(); }} />}
     </div>
   );
