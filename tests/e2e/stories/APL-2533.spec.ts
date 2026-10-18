@@ -54,8 +54,7 @@ async function proactive(who: Who) {
   return pipe!;
 }
 
-// qa:TC missing
-test("AC1: a name saves a contact, role email and phone are optional, any Member adds, only the creator and an Admin edit or remove, and an archived organisation refuses a new contact", async ({ admin, member, later }) => {
+test("qa:TC missing AC1: a name saves a contact, role email and phone are optional, any Member adds, only the creator and an Admin edit or remove, and an archived organisation refuses a new contact", async ({ admin, member, later }) => {
   test.setTimeout(180_000);
   await memberCrm(member);
   const org = await makeOrg(admin, later, "contacts org");
@@ -132,8 +131,7 @@ test("AC1: a name saves a contact, role email and phone are optional, any Member
   await expect(member.page.locator(".item", { hasText: bareName })).toBeVisible();
 });
 
-// qa:TC missing
-test("AC2: a contact is not a user and cannot be an assignee, collaborator, approver or project member", async ({ admin, later }) => {
+test("qa:TC missing AC2: a contact is not a user and cannot be an assignee, collaborator, approver or project member", async ({ admin, later }) => {
   test.setTimeout(120_000);
   const org = await makeOrg(admin, later, "not a user");
   const name = zz("not a user contact");
@@ -188,8 +186,7 @@ test("AC2: a contact is not a user and cannot be an assignee, collaborator, appr
   await expect(dialog.getByText(name)).toHaveCount(0);
 });
 
-// qa:TC missing
-test("AC3: Known by lists one or more active members, defaults to the creator, keeps a deactivated member greyed with their name, and refuses adding a deactivated person", async ({ admin, later }) => {
+test("qa:TC missing AC3: Known by lists one or more active members, defaults to the creator, keeps a deactivated member greyed with their name, and refuses adding a deactivated person", async ({ admin, later }) => {
   test.setTimeout(180_000);
   const org = await makeOrg(admin, later, "known by");
   const person = await ghost(admin, later, "known");
@@ -243,8 +240,7 @@ test("AC3: Known by lists one or more active members, defaults to the creator, k
   expect((await contactsOf(admin, org.id)).find((c) => c.id === saved.id)?.knownBy.map((k) => k.id).sort()).toEqual([admin.user.id, person.id].sort());
 });
 
-// qa:TC missing
-test("AC4: Last spoke is the date of the newest note on that contact the viewer may see, and a hidden deal note is never counted", async ({ admin, member, later }) => {
+test("qa:TC missing AC4: Last spoke is the date of the newest note on that contact the viewer may see, and a hidden deal note is never counted", async ({ admin, member, later }) => {
   test.setTimeout(180_000);
   await memberCrm(member);
   const org = await makeOrg(admin, later, "spoke org");
@@ -294,8 +290,7 @@ test("AC4: Last spoke is the date of the newest note on that contact the viewer 
   await expect(member.page.getByText(hiddenText)).toBeVisible();
 });
 
-// qa:TC missing
-test("AC5: any signed-in Member sees all contacts, changes are logged with no project and shown in organisation History to Admins only, and undo uses the contact labels", async ({ admin, member, later }) => {
+test("qa:TC missing AC5: any signed-in Member sees all contacts, changes are logged with no project and shown in organisation History to Admins only, and undo uses the contact labels", async ({ admin, member, later }) => {
   test.setTimeout(180_000);
   await memberCrm(member);
   const org = await makeOrg(admin, later, "contact log");

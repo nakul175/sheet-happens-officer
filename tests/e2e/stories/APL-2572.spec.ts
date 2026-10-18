@@ -25,8 +25,7 @@ const marked = (admin: Who, read: boolean, title: string) =>
 const unread = async (member: Who) => (await member.api.get("/api/notifications")).json.unread as number;
 const bell = (p: Page) => p.getByRole("button", { name: /^Notifications/ });
 
-// qa:TC missing
-test("AC1: opening the bell leaves 5 unread items unread and the badge stays", async ({ admin, member, later }) => {
+test("qa:TC missing AC1: opening the bell leaves 5 unread items unread and the badge stays", async ({ admin, member, later }) => {
   const titles = await give(admin, member, later, 5);
   const before = await unread(member);
   expect(before).toBeGreaterThanOrEqual(5);
@@ -48,8 +47,7 @@ test("AC1: opening the bell leaves 5 unread items unread and the badge stays", a
   await expect(bell(p)).toHaveAttribute("aria-label", new RegExp(`${before} unread`));
 });
 
-// qa:TC missing
-test("AC2: clicking an item opens its task and marks it read", async ({ admin, member, later }) => {
+test("qa:TC missing AC2: clicking an item opens its task and marks it read", async ({ admin, member, later }) => {
   const titles = await give(admin, member, later, 1);
   const before = await unread(member);
   const p = member.page;
@@ -60,8 +58,7 @@ test("AC2: clicking an item opens its task and marks it read", async ({ admin, m
   await expect.poll(() => unread(member)).toBe(before - 1);
 });
 
-// qa:TC missing
-test("AC3: the Unread filter hides read items, and an empty result says 'All caught up'", async ({ admin, member, later }) => {
+test("qa:TC missing AC3: the Unread filter hides read items, and an empty result says 'All caught up'", async ({ admin, member, later }) => {
   test.setTimeout(180_000);
   const p = member.page;
   for (const viewport of [{ width: 1280, height: 800 }, { width: 390, height: 844 }]) {
@@ -97,8 +94,7 @@ test("AC3: the Unread filter hides read items, and an empty result says 'All cau
   }
 });
 
-// qa:TC missing
-test("AC4: marking an item unread raises the badge by 1", async ({ admin, member, later }) => {
+test("qa:TC missing AC4: marking an item unread raises the badge by 1", async ({ admin, member, later }) => {
   const titles = await give(admin, member, later, 1);
   expect((await member.api.post("/api/notifications/read-all")).status).toBeLessThan(300);
   const p = member.page;
@@ -110,8 +106,7 @@ test("AC4: marking an item unread raises the badge by 1", async ({ admin, member
   expect(await unread(member)).toBe(1);
 });
 
-// qa:TC missing
-test("AC5: with more than 50 items, older ones load on request", async ({ admin, member, later }) => {
+test("qa:TC missing AC5: with more than 50 items, older ones load on request", async ({ admin, member, later }) => {
   test.setTimeout(240_000);
   await give(admin, member, later, 52);
   const p = member.page;

@@ -173,8 +173,7 @@ test.afterAll(async () => {
   await anon?.dispose().catch(() => undefined);
 });
 
-// qa:TC missing
-test("AC1: no session, malformed or schema-invalid body, returns 401 with no validation details", async () => {
+test("qa:TC missing AC1: no session, malformed or schema-invalid body, returns 401 with no validation details", async () => {
   const cases: [string, string, Body][] = [
     ["POST", "/api/actions/bulk-undo", MALFORMED],
     ["POST", "/api/actions/bulk-undo", { ids: [] }],
@@ -202,8 +201,7 @@ test("AC1: no session, malformed or schema-invalid body, returns 401 with no val
   await test.info().attach("ac1-routes", { body: JSON.stringify(rows, null, 2), contentType: "application/json" });
 });
 
-// qa:TC missing
-test("AC2: signed-in without access gets 403 or the existing not-found answer, not 400", async () => {
+test("qa:TC missing AC2: signed-in without access gets 403 or the existing not-found answer, not 400", async () => {
   const memberPath = `/api/projects/${projectId}/members/${editor.user.id}`;
   const sectionPath = `/api/projects/${projectId}/sections/${doing}`;
   const taskPath = `/api/tasks/${taskId}`;
@@ -243,8 +241,7 @@ test("AC2: signed-in without access gets 403 or the existing not-found answer, n
   await test.info().attach("ac2-routes", { body: JSON.stringify(rows, null, 2), contentType: "application/json" });
 });
 
-// qa:TC missing
-test("AC2 bulk-undo: another person's action is 403; a signed-in invalid body stays 400", async () => {
+test("qa:TC missing AC2 bulk-undo: another person's action is 403; a signed-in invalid body stays 400", async () => {
   // The ids are inside the body, so a signed-in caller with a bad body is 400 on this route (no target to authorise yet).
   expectBadJson(await send(editor.request, "POST", "/api/actions/bulk-undo", MALFORMED));
   expectValidation(await send(editor.request, "POST", "/api/actions/bulk-undo", { ids: [] }));
@@ -267,8 +264,7 @@ test("AC2 bulk-undo: another person's action is 403; a signed-in invalid body st
   expect(undone.json).toMatchObject({ count: 1 });
 });
 
-// qa:TC missing
-test("AC3: an authorised caller with a bad body still gets today's 400 shape, and a valid body still works", async () => {
+test("qa:TC missing AC3: an authorised caller with a bad body still gets today's 400 shape, and a valid body still works", async () => {
   const memberPath = `/api/projects/${projectId}/members/${editor.user.id}`;
   const sectionPath = `/api/projects/${projectId}/sections/${doing}`;
   const taskPath = `/api/tasks/${taskId}`;
