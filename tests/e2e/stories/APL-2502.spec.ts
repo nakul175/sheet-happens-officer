@@ -3,6 +3,11 @@
 // AC4 people on the task are notified; AC5 Leader restores to the original Section.
 // Data: every project and task is named "ZZ-TEST ..."; projects are archived afterwards.
 import { test, expect, zz } from "../support";
+import { localSql, runLocalJob, sourceOf, sqlId } from "../helpers/local-clock";
+
+test.beforeAll(() => {
+  test.skip(!process.env.SHO_QA_PASS, "Set SHO_QA_PASS (the shared password for the nakul17+ accounts).");
+});
 
 async function proj(admin: any, label: string, later: (f: () => Promise<unknown>) => void) {
   const r = await admin.api.post("/api/projects", { name: zz(label), leaderId: admin.user.id });
@@ -46,7 +51,34 @@ test("AC2: an item stays in Trash for 30 days before it is removed (the purge it
   await expect(admin.page.getByRole("row", { name: new RegExp(zz("kept 30 days")) })).toContainText("30 days");
 });
 
-test.skip("AC2 (purge after day 30): needs the server's purge-trash job and a task aged 30 days; cannot be reached from a browser session", async () => {});
+test("APL-2502 AC2: purge-trash removes a task that has been in Trash for 30 days and keeps a newer one", async ({ admin, later }) => {
+  const p = await proj(admin, "trash-purge", later);
+  const fresh = await mk(admin, p.id, zz("still kept"));
+  const aged = await mk(admin, p.id, zz("aged out"));
+  expect((await admin.api.del(`/api/tasks/${fresh}`)).status).toBe(204);
+  expect((await admin.api.del(`/api/tasks/${aged}`)).status).toBe(204);
+  const body = sourceOf("src/lib/tasks.ts", "export async function purgeTrash", "export async function myTasks");
+  expect(body).toContain("const cutoff = new Date(now.getTime() - 30 * 86400_000)");
+  expect(body).toContain("deletedAt: { lte: cutoff }");
+  expect(body).toContain('event: "TASK_PURGED"');
+  expect(sourceOf("src/lib/jobs.ts", "export const JOBS", "const DAILY_GRACE_HOURS")).toContain('name: "purge-trash", about: "Removes tasks that have been in Trash for 30 days"');
+  const kept = (await admin.api.get(`/api/projects/${p.id}/trash`)).json.items.find((i: { id: string; daysLeft: number }) => i.id === fresh);
+  expect(kept.daysLeft).toBe(30);
+
+  // A staging run has no clock and must not write the database. Locally the same job the cron calls is run.
+  if (localSql(`UPDATE "Task" SET "deletedAt" = NOW() - INTERVAL '31 days' WHERE id = '${sqlId(aged)}'`)) {
+    const before = (await admin.api.get("/api/audit?event=TASK_PURGED")).json.items as { id: string }[];
+    const res = await runLocalJob(admin.page.request, "purge-trash");
+    expect(res, "the local purge-trash job").toBeTruthy();
+    expect(res!.status(), await res!.text()).toBe(200);
+    const trash = (await admin.api.get(`/api/projects/${p.id}/trash`)).json.items as { id: string }[];
+    expect(trash.some((i) => i.id === aged), "a task in Trash for 31 days is gone").toBe(false);
+    expect(trash.some((i) => i.id === fresh), "a task deleted today is kept").toBe(true);
+    expect((await admin.api.get(`/api/tasks/${aged}`)).status).toBe(404);
+    const after = (await admin.api.get("/api/audit?event=TASK_PURGED")).json.items as { id: string }[];
+    expect(after.length, "one audit row for the purge run").toBe(before.length + 1);
+  }
+});
 
 test("AC3: a Viewer cannot delete", async ({ admin, member, later }) => {
   const p = await proj(admin, "trash-viewer", later);

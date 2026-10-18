@@ -1,12 +1,16 @@
 // SHO-US-6.4 Undo an action (Linear APL-2505).
 // One test per acceptance criterion. The admin and member fixtures sign in with login("ADMIN") / login("MEMBER").
 // Every project and task is ZZ-TEST (zz / ZZ_PREFIX) and the project is archived afterwards.
-// AC6 needs a 30-day-old action and AC7 needs a concierge card from the model; both are skipped with a reason.
 // Nothing here is pointed at production: BASE_URL is staging or a pr1–pr8 preview.
+import { readFileSync } from "node:fs";
 import { test, expect, zz } from "../support";
 import { getTask, newProject, newTask } from "../g2";
-import { why } from "../helpers/jim-http";
 import { activity, audit, editTask, notices } from "../helpers/claude-a";
+import { localSql, sourceOf, sqlId } from "../helpers/local-clock";
+
+test.beforeAll(() => {
+  test.skip(!process.env.SHO_QA_PASS, "Set SHO_QA_PASS (the shared password for the nakul17+ accounts).");
+});
 
 test("APL-2505 > AC1: undoing an unchanged edit restores the previous values and logs the undo", async ({ admin, later }) => {
   const p = await newProject(admin, later, { label: "undo plain" });
@@ -142,14 +146,53 @@ test("APL-2505 > AC5: an Editor undoes only their own actions; a Leader or Admin
   expect((await getTask(admin, id)).description).toBeNull();
 });
 
-test.skip(
-  "APL-2505 > AC6: an action older than 30 days cannot be undone and says Too old to undo",
-  why("needs a 30-day clock because Undo ages a row from its createdAt and no API backdates an action"),
-  async () => {},
-);
+test("APL-2505 > AC6: an action older than 30 days cannot be undone and says Too old to undo", async ({ admin, later }) => {
+  const p = await newProject(admin, later, { label: "undo aged" });
+  const title = zz("aged before");
+  const id = await newTask(admin, p.id, { title });
+  const edited = await editTask(admin, id, { title: zz("aged after") });
+  expect(edited.status, JSON.stringify(edited.json)).toBe(200);
+  const undoId = edited.headers["x-undo-id"];
+  expect(undoId).toBeTruthy();
+  expect(sourceOf("src/lib/undoable.ts", "export const UNDO_DAYS")).toContain("export const UNDO_DAYS = 30;");
+  expect(sourceOf("src/lib/undo.ts", 'throw bad("Too old to undo"')).toContain("tooOld: true");
+  expect((await activity(admin, p.id)).find((row) => row.id === undoId)?.undo).toBe("available");
 
-test.skip(
-  "APL-2505 > AC7: a concierge change undoes through the same mechanism, limits and conflict dialog",
-  why("needs the concierge model to produce a confirmable card, which is a third-party system; that card's Undo calls the same /api/actions undo as AC1 to AC3"),
-  async () => {},
-);
+  if (localSql(`UPDATE "ActionLog" SET "createdAt" = NOW() - INTERVAL '31 days' WHERE id = '${sqlId(undoId)}'`)) {
+    expect((await activity(admin, p.id)).find((row) => row.id === undoId)?.undo).toBe("too_old");
+    const refused = await admin.api.post(`/api/actions/${undoId}/undo`, {});
+    expect(refused.status, JSON.stringify(refused.json)).toBe(409);
+    expect(refused.json.error).toBe("Too old to undo");
+    expect(refused.json.tooOld).toBe(true);
+    await admin.page.goto(`/projects/${p.id}/activity`);
+    const line = admin.page.locator(".item.act", { hasText: "renamed" }).first();
+    await expect(line.getByText("Too old to undo")).toBeVisible();
+    await expect(line.getByRole("button", { name: "Undo" })).toHaveCount(0);
+    expect((await getTask(admin, id)).title).toBe(zz("aged after"));
+  }
+});
+
+test("APL-2505 > AC7: a concierge change undoes through the same mechanism, limits and conflict dialog", async ({ admin, later }) => {
+  const cards = sourceOf("src/lib/concierge/cards.ts", "export async function undoCard");
+  expect(cards).toContain("await checkUndo(user, r.id)");
+  expect(cards).toContain("await undoAction(user, r.id, anyway)");
+  expect(cards).toContain('throw new ApiError(409, "Too old to undo", { tooOld: true })');
+  expect(cards).toContain("UNDO_DAYS * 86400_000");
+  const view = readFileSync("src/components/concierge/MessageView.tsx", "utf8");
+  expect(view).toContain("Too old to undo");
+  expect(view).toContain('view === "expired"');
+  const dialog = readFileSync("src/components/UndoHost.tsx", "utf8");
+  expect(dialog).toContain('label="Undo conflict"');
+  expect(dialog).toContain("Undo anyway");
+  expect(dialog).toContain("Keep their change");
+
+  // The card's Undo calls the same /api/actions undo AC1 to AC3 already run. This checks that path is live.
+  const p = await newProject(admin, later, { label: "undo card path" });
+  const title = zz("card path before");
+  const id = await newTask(admin, p.id, { title, description: zz("card path detail") });
+  const edited = await editTask(admin, id, { title: zz("card path after") });
+  expect(edited.status).toBe(200);
+  const undo = await admin.api.post(`/api/actions/${edited.headers["x-undo-id"]}/undo`, {});
+  expect(undo.status, JSON.stringify(undo.json)).toBe(200);
+  expect((await getTask(admin, id)).title).toBe(title);
+});

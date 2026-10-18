@@ -4,6 +4,12 @@
 // Data: every project and task is named "ZZ-TEST ..."; the person created for AC5 is "ZZ-TEST ..." at example.invalid (no inbox) and is
 // deactivated afterwards. AC2 briefly makes the Member an Admin and puts the role back in a finally block.
 import { test, expect, zz, RUN, login } from "../support";
+import { patchCurrent } from "../helpers/jim-http";
+import { localSql, runLocalJob, sourceOf, sqlId } from "../helpers/local-clock";
+
+test.beforeAll(() => {
+  test.skip(!process.env.SHO_QA_PASS, "Set SHO_QA_PASS (the shared password for the nakul17+ accounts).");
+});
 
 async function proj(admin: any, label: string, later: (f: () => Promise<unknown>) => void) {
   const r = await admin.api.post("/api/projects", { name: zz(label), leaderId: admin.user.id });
@@ -85,7 +91,25 @@ test("AC4: the log is read-only through the app", async ({ admin }) => {
     expect([404, 405], `${method} /api/audit`).toContain(r.status());
   }
 });
-test.skip("AC4 (12-month removal): needs a row aged 12 months and the purge-old job; not reachable from a browser session", async () => {});
+test("AC4 (12-month removal): audit rows older than 12 months are removed by purge-old", async ({ admin, later }) => {
+  expect(sourceOf("src/lib/feed.ts", "const LOG_MONTHS")).toContain("const LOG_MONTHS = 12");
+  const fn = sourceOf("src/lib/feed.ts", "export async function purgeOld");
+  expect(fn).toContain("cut.setMonth(cut.getMonth() - LOG_MONTHS)");
+  expect(fn).toContain("auditLog.deleteMany");
+  expect(fn).toContain("createdAt: { lt: cut }");
+  await proj(admin, "audit-year", later);
+  const rows = (await audit(admin, `event=PROJECT_CREATED&person=${admin.user.id}`)).filter((r) => (r.target ?? "").includes(zz("audit-year")));
+  expect(rows, "the new project is in the audit log").toHaveLength(1);
+  const row = rows[0];
+  expect(Number.isNaN(Date.parse(row.at))).toBe(false);
+
+  if (localSql(`UPDATE "AuditLog" SET "createdAt" = NOW() - INTERVAL '13 months' WHERE id = '${sqlId(row.id)}'`)) {
+    const res = await runLocalJob(admin.page.request, "purge-old");
+    expect(res!.status(), await res!.text()).toBe(200);
+    const left = (await audit(admin, `event=PROJECT_CREATED&person=${admin.user.id}`)).filter((r) => r.id === row.id);
+    expect(left, "a row older than 12 months is gone").toHaveLength(0);
+  }
+});
 
 test("AC5 and AC6: five failed sign-ins and the lockout are logged, with the IP on those rows only", async ({ admin, anon, later }) => {
   const email = `zz-test-lock-${RUN}@example.invalid`;
@@ -112,17 +136,47 @@ test("AC7: task delete and restore, an approver being set, and 'Undo anyway' eac
   expect((await admin.api.post(`/api/projects/${p}/members`, { userId: member.user.id, role: "EDITOR" })).status).toBe(201);
   later(() => admin.api.del(`/api/projects/${p}/members/${member.user.id}?handoverTo=${admin.user.id}`));
   const t = await mk(admin, p, zz("approver task"), { assigneeId: member.user.id });
-  expect((await admin.api.put(`/api/tasks/${t}/approver`, { approverId: admin.user.id })).status).toBe(200);
+  const seen = (await admin.api.get(`/api/tasks/${t}`)).json.task.updatedAt as string;
+  expect((await admin.api.put(`/api/tasks/${t}/approver`, { approverId: admin.user.id, expectedUpdatedAt: seen })).status).toBe(200);
   const approver = (await audit(admin, `event=APPROVER_CHANGED&person=${admin.user.id}`)).filter((r) => (r.target ?? "").includes(zz("approver task")));
   expect(approver.length).toBeGreaterThanOrEqual(1);
   // Undo anyway: admin changes priority, the member changes it again, admin undoes over the member's change
-  const change = await admin.page.request.patch(`/api/tasks/${t}`, { data: { priority: "HIGH" } });
-  expect(change.status()).toBe(200);
-  const undoId = change.headers()["x-undo-id"];
-  expect(undoId).toBeTruthy();
-  expect((await member.api.patch(`/api/tasks/${t}`, { priority: "LOW" })).status).toBe(200);
+  const change = await patchCurrent(admin, t, { priority: "HIGH" });
+  expect(change.status).toBe(200);
+  // patchCurrent uses the shared api(), which drops response headers. The undo id is the Activity row.
+  const undoRow = ((await admin.api.get(`/api/projects/${p}/activity`)).json.items as { id: string; what: string }[]).find((i) => /changed priority from Medium to High/.test(i.what));
+  expect(undoRow, "the priority change is in Activity").toBeTruthy();
+  const undoId = undoRow!.id;
+  const low = await patchCurrent(member, t, { priority: "LOW" });
+  expect(low.status).toBe(200);
   expect((await admin.api.post(`/api/actions/${undoId}/undo`, { anyway: false })).status).toBe(409);
   expect((await admin.api.post(`/api/actions/${undoId}/undo`, { anyway: true })).status).toBe(200);
   expect((await audit(admin, `event=UNDO_OVERRIDE&person=${admin.user.id}`)).length).toBeGreaterThanOrEqual(1);
 });
-test.skip("AC7 (30-day purge): one row per purge run needs a task aged 30 days and the purge-trash job; not reachable from a browser session", async () => {});
+
+test("AC7 (30-day purge): one TASK_PURGED row is written for a purge run", async ({ admin, later }) => {
+  const body = sourceOf("src/lib/tasks.ts", "export async function purgeTrash", "export async function myTasks");
+  expect(body).toContain("if (r.count) await db.auditLog.create");
+  expect(body).toContain('event: "TASK_PURGED"');
+  expect(body).toContain("30 * 86400_000");
+  const p = await proj(admin, "audit-purge", later);
+  const aged = await mk(admin, p, zz("purged task"));
+  const fresh = await mk(admin, p, zz("kept task"));
+  expect((await admin.api.del(`/api/tasks/${aged}`)).status).toBe(204);
+  expect((await admin.api.del(`/api/tasks/${fresh}`)).status).toBe(204);
+  const still = (await admin.api.get(`/api/projects/${p}/trash`)).json.items as { id: string; daysLeft: number }[];
+  expect(still.find((i) => i.id === fresh)?.daysLeft).toBe(30);
+
+  if (localSql(`UPDATE "Task" SET "deletedAt" = NOW() - INTERVAL '31 days' WHERE id = '${sqlId(aged)}'`)) {
+    const before = await audit(admin, "event=TASK_PURGED");
+    const res = await runLocalJob(admin.page.request, "purge-trash");
+    expect(res!.status(), await res!.text()).toBe(200);
+    const after = await audit(admin, "event=TASK_PURGED");
+    const added = after.filter((r) => !before.some((b) => b.id === r.id));
+    expect(added, "one row for the purge run, not one per task").toHaveLength(1);
+    expect(added[0].event).toBe("TASK_PURGED");
+    const trash = (await admin.api.get(`/api/projects/${p}/trash`)).json.items as { id: string }[];
+    expect(trash.some((i) => i.id === aged)).toBe(false);
+    expect(trash.some((i) => i.id === fresh)).toBe(true);
+  }
+});

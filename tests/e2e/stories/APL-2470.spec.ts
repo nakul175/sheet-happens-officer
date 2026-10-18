@@ -2,14 +2,15 @@
 // Pam qa:TC: none on the issue. Password comes from SHO_QA_PASS. Names use ZZ-TEST. Emails are nakul17+ aliases.
 // Undo of deactivation and bulk reassignment is excluded, per the epic.
 import { test, login } from "../support";
+import { patchCurrent } from "../helpers/jim-http";
 import {
   PASS, passwordOk, gate, verifiedUser, deactivate, makeProject, archiveProject, expect, zz,
 } from "./qa";
 
 test.beforeAll(async ({ request }) => {
   test.skip(!PASS, "Set SHO_QA_PASS (the shared password for the nakul17+ accounts).");
-  test.skip(!passwordOk(PASS), "SHO_QA_PASS must be at least 8 characters with a letter and a number.");
-  try { login("ADMIN"); } catch { test.skip(true, "Set SHO_ADMIN_EMAIL and SHO_ADMIN_PASS (a Super Admin)."); }
+  if (!passwordOk(PASS)) throw new Error("SHO_QA_PASS must be at least 8 characters with a letter and a number.");
+  login("ADMIN");
   await gate(request);
 });
 
@@ -67,7 +68,7 @@ test("AC3: a write records who, what, when and the before-state", async ({ admin
   const after = zz("after");
   const created = await admin.api.post(`/api/projects/${project.id}/tasks`, { title: before });
   const id = created.json.task.id as string;
-  expect((await admin.api.patch(`/api/tasks/${id}`, { title: after })).status).toBe(200);
+  expect((await patchCurrent(admin, id, { title: after })).status).toBe(200);
   const items = (await admin.api.get(`/api/projects/${project.id}/activity`)).json.items as Act[];
   const row = items.find((item) => item.what.includes(before) && item.what.includes(after));
   expect(row, "the rename names the title from before the write").toBeTruthy();
@@ -88,7 +89,7 @@ test("AC4: Undo restores a task, a project and a membership change", async ({ ad
   const after = zz("retitled");
   const created = await admin.api.post(`/api/projects/${project.id}/tasks`, { title: before });
   const taskId = created.json.task.id as string;
-  expect((await admin.api.patch(`/api/tasks/${taskId}`, { title: after })).status).toBe(200);
+  expect((await patchCurrent(admin, taskId, { title: after })).status).toBe(200);
   const renamed = zz("renamed project");
   expect((await admin.api.patch(`/api/projects/${project.id}`, { name: renamed })).status).toBe(200);
   expect((await admin.api.patch(`/api/projects/${project.id}/members/${editor.user.id}`, { role: "VIEWER" })).status).toBe(200);
@@ -119,8 +120,8 @@ test("AC5: Undo warns when the data changed after the action, before it proceeds
   const third = zz("three");
   const created = await admin.api.post(`/api/projects/${project.id}/tasks`, { title: original });
   const id = created.json.task.id as string;
-  expect((await admin.api.patch(`/api/tasks/${id}`, { title: second })).status).toBe(200);
-  expect((await admin.api.patch(`/api/tasks/${id}`, { title: third })).status).toBe(200);
+  expect((await patchCurrent(admin, id, { title: second })).status).toBe(200);
+  expect((await patchCurrent(admin, id, { title: third })).status).toBe(200);
   const items = (await admin.api.get(`/api/projects/${project.id}/activity`)).json.items as Act[];
   const first = items.find((item) => item.what.includes(original) && item.what.includes(second));
   expect(first?.undo).toBe("available");
