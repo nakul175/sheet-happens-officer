@@ -7,7 +7,7 @@
 //
 // Self-check:
 // - [x] Throwaway schema only, dropped only that schema
-// - [x] Guard allows only localhost, 127.0.0.1, or a sho_test_ database, and refuses defaultdb, sho_staging, public, and sho_pr*
+// - [x] Guard requires localhost or 127.0.0.1 AND a sho_test_* database, and refuses overrides, sockets, defaultdb, sho_staging, public, and sho_pr*
 // - [x] Pooled test name contains SIMULATED; it is a search_path simulation
 // - [x] Public pin is proven with schema-qualified ALTER FUNCTION on the throwaway
 // - [x] Prod migration path documented as schema=public (direct connection)
@@ -17,8 +17,9 @@ import { readFileSync, readdirSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
+import { parse } from "pg-connection-string";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { triggerTestAllowed, type TriggerTestTarget } from "./trigger-test-guard";
+import { connectionTarget, triggerTestAllowed, type TriggerTestTarget } from "./trigger-test-guard";
 
 const MIGRATION = "20261018203100_pin_trigger_search_path";
 const MIGRATIONS = path.join(process.cwd(), "prisma/migrations");
@@ -55,16 +56,11 @@ export function isThrowawaySchema(name: string): boolean {
   return /^sho_test_trg_[a-z0-9]+$/.test(name);
 }
 
-/** Host, database, and the schema this file will create. Nothing connects before this. */
+/** Host and database from pg's parser, plus the schema this file will create. Nothing connects before this. */
 function targetFromEnv(): TriggerTestTarget | undefined {
   const raw = process.env.DATABASE_URL;
   if (!raw) return undefined;
-  try {
-    const url = new URL(raw);
-    return { host: url.hostname, database: decodeURIComponent(url.pathname.replace(/^\//, "")), schema: SLOT };
-  } catch {
-    return undefined;
-  }
+  return connectionTarget(raw, SLOT);
 }
 
 const target = targetFromEnv();
@@ -96,8 +92,14 @@ function connectionString(): string {
   }
   const raw = process.env.DATABASE_URL;
   if (!raw) throw new Error("DATABASE_URL is missing");
-  const url = new URL(raw);
-  url.searchParams.delete("schema");
+  const parsed = parse(raw);
+  const url = new URL("postgresql://localhost");
+  if (parsed.user) url.username = parsed.user;
+  if (parsed.password) url.password = parsed.password;
+  url.hostname = parsed.host ?? "";
+  if (parsed.port) url.port = String(parsed.port);
+  url.pathname = `/${parsed.database ?? ""}`;
+  url.search = "";
   return url.toString();
 }
 
