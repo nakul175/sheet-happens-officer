@@ -5,7 +5,7 @@
 // nakul17+…@aplyd.com.
 import { afterAll, describe, expect, it } from "vitest";
 import { canDropOnSection, closeControlOffered, completeTickAllowed, moveMenuSections } from "@/lib/approver-ui";
-import { account, superAdmin, task, type Account } from "./helpers";
+import { account, superAdmin, task, withVersion, type Account } from "./helpers";
 
 type Note = { id: string; text: string; href: string; createdAt: string };
 type BoardTask = { id: string; canClose: boolean; sectionId: string; completedAt: string | null };
@@ -124,7 +124,7 @@ describe("APL-2660 approver edge cases", () => {
       { who: creator }, { who: worker }, { who: editor }, { who: gone }, { who: viewer, role: "VIEWER" },
     ]);
     const t = await zzTask(creator, p.id, { title: "Plain creator", assigneeId: worker.id });
-    const put = (id: string) => creator.c.put(`/api/tasks/${t}/approver`, { approverId: id });
+    const put = async (id: string) => creator.c.put(`/api/tasks/${t}/approver`, await withVersion(creator, t, { approverId: id }));
 
     expect((await put(editor.id)).status).toBe(200);
     expect((await taskOf(creator, t)).approver?.id).toBe(editor.id);
@@ -150,7 +150,7 @@ describe("APL-2660 approver edge cases", () => {
     expect(held.awaitingApproval).toBe(true);
     // Close on the task detail posts complete.
     expect(closeControlOffered({ canEdit: true, done: false, canClose: held.canClose })).toBe(true);
-    expect((await boss.c.post(`/api/tasks/${t}/complete`)).status).toBe(200);
+    expect((await boss.c.post(`/api/tasks/${t}/complete`, await withVersion(boss, t))).status).toBe(200);
     const done = await taskOf(boss, t);
     expect(done.completedAt).not.toBeNull();
     expect(done.section.isDone).toBe(true);
@@ -170,8 +170,8 @@ describe("APL-2660 approver edge cases", () => {
     const row = card(await board(bystander, p.id), t);
     expect(completeTickAllowed({ canWrite: true, canClose: row.canClose, completedAt: row.completedAt })).toBe(false);
 
-    expect((await bystander.c.post(`/api/tasks/${t}/complete`)).status).toBe(403);
-    expect((await bystander.c.post(`/api/tasks/${t}/move`, { sectionId: p.done })).status).toBe(403);
+    expect((await bystander.c.post(`/api/tasks/${t}/complete`, await withVersion(bystander, t))).status).toBe(403);
+    expect((await bystander.c.post(`/api/tasks/${t}/move`, await withVersion(bystander, t, { sectionId: p.done }))).status).toBe(403);
     const stayed = await taskOf(lead, t);
     expect(stayed.completedAt).toBeNull();
     expect(stayed.sectionId).not.toBe(p.done);
@@ -195,7 +195,7 @@ describe("APL-2660 approver edge cases", () => {
     const mine = card(await board(bystander, p.id), blocked);
     expect(canDropOnSection(mine, true)).toBe(false);
     expect(moveMenuSections(await board(bystander, p.id), mine).some((s) => s.isDone)).toBe(false);
-    expect((await bystander.c.post(`/api/tasks/${blocked}/move`, { sectionId: p.done })).status).toBe(403);
+    expect((await bystander.c.post(`/api/tasks/${blocked}/move`, await withVersion(bystander, blocked, { sectionId: p.done }))).status).toBe(403);
     expect((await taskOf(lead, blocked)).completedAt).toBeNull();
 
     for (const [who, id] of [[boss, forBoss], [lead, forLead], [orgAdmin, forAdmin]] as const) {
@@ -203,7 +203,7 @@ describe("APL-2660 approver edge cases", () => {
       expect(row.canClose).toBe(true);
       expect(canDropOnSection(row, true)).toBe(true);
       expect(moveMenuSections(await board(who, p.id), row).some((s) => s.isDone && s.name === "Done")).toBe(true);
-      expect((await who.c.post(`/api/tasks/${id}/move`, { sectionId: p.done })).status).toBe(200);
+      expect((await who.c.post(`/api/tasks/${id}/move`, await withVersion(who, id, { sectionId: p.done }))).status).toBe(200);
       expect((await taskOf(who, id)).completedAt).not.toBeNull();
     }
   });
@@ -251,7 +251,7 @@ describe("APL-2660 approver edge cases", () => {
       const got = await taskOf(lead, t);
       expect(got.awaitingApproval).toBe(false);
       expect(got.completedAt).toBeNull();
-      expect((await lead.c.post(`/api/tasks/${t}/assign`, { assigneeId: spare.id })).status).toBe(200);
+      expect((await lead.c.post(`/api/tasks/${t}/assign`, await withVersion(lead, t, { assigneeId: spare.id }))).status).toBe(200);
       const moved = await taskOf(lead, t);
       expect(moved.assignee.id).toBe(spare.id);
       expect(moved.awaitingApproval).toBe(false);
