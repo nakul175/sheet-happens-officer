@@ -100,15 +100,26 @@ async function hiddenDealNames(user: Actor, projectIds: (string | null)[]): Prom
   return hidden;
 }
 
-/** Notice data with the deal name removed, so the sentence cannot repeat it. */
-function withoutDealName(data: unknown, dealName: string): unknown {
-  if (!data || typeof data !== "object" || Array.isArray(data)) return data;
+/**
+ * Drops a deal name only when a stored value is exactly that name.
+ * A short name such as "A" must stay inside "Asha" or "A stage".
+ */
+export function withoutExactDealName(data: unknown, dealName: string): unknown {
+  if (!dealName || !data || typeof data !== "object" || Array.isArray(data)) return data;
   const out: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(data as Record<string, unknown>)) {
-    if (key === "project") continue;
-    out[key] = typeof value === "string" ? value.split(dealName).join("") : value;
+    if (typeof value === "string" && value === dealName) {
+      if (key === "project") continue;
+      out[key] = "a project";
+    } else out[key] = value;
   }
   return out;
+}
+
+/** Replaces the deal name only where the sentence quotes that whole name, as in `"A"`. */
+export function withoutQuotedDealName(text: string, dealName: string): string {
+  if (!dealName) return text;
+  return text.split(`"${dealName}"`).join("a project");
 }
 
 /** SHO-US-14.13: newest first, 50 at a time; `before` is the `next` value of the previous page. `filter=unread` hides read items. */
@@ -134,9 +145,8 @@ export async function listNotifications(user: Actor, o: { filter?: string; befor
     unread,
     items: page.map((n) => {
       const dealName = n.projectId ? hiddenDeals.get(n.projectId) : undefined;
-      const notice = noticeText(dealName ? { ...n, data: withoutDealName(n.data, dealName) } : n);
-      // The name can also sit in a sentence built from another field. Strip it from the text the bell shows.
-      const text = dealName ? notice.text.split(dealName).join("a project") : notice.text;
+      const notice = noticeText(dealName ? { ...n, data: withoutExactDealName(n.data, dealName) } : n);
+      const text = dealName ? withoutQuotedDealName(notice.text, dealName) : notice.text;
       return { id: n.id, text, href: notice.href, read: !!n.readAt, createdAt: n.createdAt.toISOString() };
     }),
     next: rows.length > limit && last ? `${last.createdAt.toISOString()}|${last.id}` : null,

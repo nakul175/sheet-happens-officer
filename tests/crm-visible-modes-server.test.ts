@@ -268,7 +268,8 @@ function isInGroup(ancestor: number, pid: number) {
 }
 
 describe("bell mustName=false check (APL-2698 AC2)", () => {
-  it("fails when a hidden bell response includes the deal name", () => {
+  // qa:TC-APL2698-53c26943@v1 · AC2. A hidden bell response that includes the deal name fails the check.
+  it("qa:TC-APL2698-53c26943@v1 fails when a hidden bell response includes the deal name", () => {
     const name = "Acme renewal ZZ-TEST-local";
     const body = JSON.stringify({ items: [{ text: `Someone moved "${name}" to Proposal.` }] });
     expect(() => assertBellDealName(body, name, false)).toThrow(/leaked the deal name/);
@@ -342,16 +343,17 @@ describe("CRM_VISIBLE modes are tested against a real server per mode", () => {
     });
 
     const people = { member, admin };
-    const examples: { mode: Mode; user: "member" | "admin"; visible: boolean }[] = [
+    // Pam's AC1 cases. `on` is covered below as the everyone mode (crmMode reads it as all).
+    const examples: { mode: Mode; user: "member" | "admin"; visible: boolean; tc?: string }[] = [
       { mode: "on", user: "member", visible: true },
-      { mode: "admins", user: "member", visible: false },
+      { mode: "admins", user: "member", visible: false, tc: "qa:TC-APL2698-9a92c751@v1" },
       { mode: "admins", user: "admin", visible: true },
-      { mode: "off", user: "admin", visible: false },
+      { mode: "off", user: "admin", visible: false, tc: "qa:TC-APL2698-448f7d2f@v1" },
     ];
     for (const example of examples) {
       const server = running.get(example.mode)!;
       const who = people[example.user];
-      const label = `mode=${example.mode} user=${example.user} visible=${example.visible ? "yes" : "no"}`;
+      const label = `${example.tc ? example.tc + " " : ""}mode=${example.mode} user=${example.user} visible=${example.visible ? "yes" : "no"}`;
       const reads = await readPaths(server.base, who.cookie, dealId, dealName);
       for (const read of reads) {
         const wanted = example.visible ? 200 : read.hiddenStatus;
@@ -366,15 +368,15 @@ describe("CRM_VISIBLE modes are tested against a real server per mode", () => {
     }
 
     // APL-2698 AC3. The open server is CRM_VISIBLE=on; crmMode() treats that as all.
-    const bellOnly: { mode: Mode; who: { cookie: string }; user: string; visible: boolean; modeLabel: string }[] = [
-      { mode: "on", who: admin, user: "admin", visible: true, modeLabel: "all" },
-      { mode: "off", who: member, user: "member", visible: false, modeLabel: "off" },
-      { mode: "on", who: outsider, user: "member with no access to the deal", visible: false, modeLabel: "all" },
+    const bellOnly: { mode: Mode; who: { cookie: string }; user: string; visible: boolean; modeLabel: string; tc: string }[] = [
+      { mode: "on", who: admin, user: "admin", visible: true, modeLabel: "all", tc: "qa:TC-APL2698-513157e4@v1" },
+      { mode: "off", who: member, user: "member", visible: false, modeLabel: "off", tc: "qa:TC-APL2698-2c0a1372@v1" },
+      { mode: "on", who: outsider, user: "member with no access to the deal", visible: false, modeLabel: "all", tc: "qa:TC-APL2698-be2ba3d5@v1" },
     ];
     for (const row of bellOnly) {
       const server = running.get(row.mode)!;
       const bell = await call(server.base, row.who.cookie, "GET", "/api/notifications");
-      const label = `mode=${row.modeLabel} user=${row.user} visible=${row.visible ? "yes" : "no"}`;
+      const label = `${row.tc} mode=${row.modeLabel} user=${row.user} visible=${row.visible ? "yes" : "no"}`;
       expect(bell.status, label).toBe(200);
       assertBellDealName(bell.text, dealName, row.visible, label);
     }
