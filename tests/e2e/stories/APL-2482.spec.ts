@@ -4,7 +4,7 @@
 import { readFileSync } from "node:fs";
 import type { Browser } from "@playwright/test";
 import { test, expect, RUN, login, zz, type Api, type Json } from "../support";
-import { alias, BASE_URL, signInAs, sinkText } from "./qa";
+import { PASS, alias, BASE_URL, passwordOk, signInAs, sinkText } from "./qa";
 
 type Ctx = { api: Api; user: Json };
 async function person(admin: Ctx, later: (f: () => Promise<unknown>) => void, label: string, role: "MEMBER" | "ADMIN" = "MEMBER") {
@@ -56,6 +56,12 @@ async function openMember(browser: Browser, admin: Ctx, later: (f: () => Promise
 }
 
 test.describe("SHO-US-2.3 / APL-2482", () => {
+  test.beforeAll(() => {
+    test.skip(!PASS, "Set SHO_QA_PASS (the shared password for the nakul17+ accounts).");
+    if (!PASS) return;
+    if (!passwordOk(PASS)) throw new Error("SHO_QA_PASS must be at least 8 characters with a letter and a number.");
+  });
+
   test("AC1: an Admin deactivates a Member: they are kept (never deleted), cannot be given new tasks, and their open tasks are handed over", async ({ admin, later }) => {
     const p = await person(admin, later, "leaver");
     const proj = await project(admin, later, "2.3 ac1");
