@@ -118,8 +118,13 @@ export async function createDeal(
 
 // ---- stages (SHO-US-10.3) ----
 
+/** Tasks still open on a deal, including subtasks. Won and Lost refuse while any of these remain. */
+export function blockingTaskWhere(projectId: string) {
+  return { projectId, deletedAt: null, completedAt: null };
+}
+
 async function openTasks(projectId: string) {
-  return db.task.findMany({ where: { projectId, deletedAt: null, completedAt: null }, select: { id: true, title: true, parentId: true }, orderBy: { createdAt: "asc" } });
+  return db.task.findMany({ where: blockingTaskWhere(projectId), select: { id: true, title: true, parentId: true }, orderBy: { createdAt: "asc" } });
 }
 
 /** AC6: how many tasks are still open, and the first 20, in the order they were created. */

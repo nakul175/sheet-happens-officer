@@ -50,6 +50,7 @@ describe("closing alert payload", () => {
     const ready = openTaskFeed([section([row("a"), row("b", true)])], 1, false);
     expect(ready).toEqual({ status: "ready", openCount: 1, tasks: [{ id: "a", title: "a", assignee: null }] });
     expect(openTaskFeed([section([row("a")])], undefined, false).openCount).toBe(1);
+    expect(openTaskFeed([section([row("a")])], 1, false, 2).openCount).toBe(2);
     expect(openTaskFeed([section([row("a")])], 5, true).status).toBe("partial");
     expect(openTaskFeed([section([row("a")], 21, "next")], 21, false).status).toBe("partial");
     expect(openTaskFeed([section([row("a")], 30, "next", true)], 1, false).status).toBe("ready");
@@ -103,5 +104,33 @@ describe("open tasks that block Won (APL-2691)", () => {
     const after = (await lead.c.get(`/api/projects/${id}`)).json.project;
     expect(after.deal.stage.name).toBe("Won");
     expect(after.archived).toBe(false);
+  });
+
+  it("@APL-2691 TC9: the refusal count includes a subtask, and the task list reports that same count", async () => {
+    const sa = await superAdmin();
+    const lead = await admin(sa, "sub2691");
+    const pipes = await pipelines(lead);
+    const pro = pipes.find((p) => p.key === "DEAL_PROACTIVE")!;
+    const orgId = (await lead.c.post("/api/orgs", { name: `Org sub 2691 ${Date.now()}` })).json.organisation.id as string;
+    const step = `Parent step ${Date.now()}`;
+    const made = await lead.c.post("/api/deals", {
+      name: `Deal sub 2691 ${Date.now()}`, organisationId: orgId, pipelineId: pro.id, leaderId: lead.id, whyPursue: "fit",
+      nextStep: { title: step, dueDate: istDate(3) },
+    });
+    expect(made.status, JSON.stringify(made.json)).toBe(201);
+    const id = made.json.deal.id as string;
+    const stepId = (await lead.c.get(`/api/projects/${id}`)).json.project.deal.nextStep.id as string;
+    expect((await lead.c.post(`/api/projects/${id}/tasks`, { title: `Child ${Date.now()}`, parentId: stepId })).status).toBe(201);
+
+    const listed = await lead.c.get(`/api/projects/${id}/tasks`);
+    expect(listed.status).toBe(200);
+    expect(listed.json.summary.open).toBe(1);
+    expect(listed.json.summary.openTasks).toBe(2);
+
+    const won = pro.stages.find((s) => s.name === "Won")!.id;
+    const blocked = await lead.c.post(`/api/projects/${id}/stage`, { stageId: won });
+    expect(blocked.status).toBe(409);
+    expect(blocked.json.openTasks).toBe(listed.json.summary.openTasks);
+    expect((await lead.c.get(`/api/projects/${id}`)).json.project.deal.stage.name).toBe("Lead");
   });
 });

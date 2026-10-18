@@ -16,6 +16,7 @@ let wonTaskIds: string[] = [];
 let lostId = "";
 let lostStep = "";
 let lostStepId = "";
+let subId = "";
 
 beforeAll(async () => {
   if (!/^(localhost|127\.0\.0\.1)$/.test(new URL(BASE).hostname)) throw new Error(`Refusing to run the Won dialog check against ${BASE}: use a local server with a test database.`);
@@ -51,6 +52,9 @@ beforeAll(async () => {
   const lost = await make("lost", lostStep);
   lostId = lost.id;
   lostStepId = lost.stepId;
+  const sub = await make("sub", `Parent ${Date.now()}`);
+  subId = sub.id;
+  expect((await lead.c.post(`/api/projects/${subId}/tasks`, { title: `Child ${Date.now()}`, parentId: sub.stepId })).status).toBe(201);
 
   ctx = await browser.newContext({ viewport: { width: 1280, height: 900 }, baseURL: BASE });
   const signed = await ctx.request.post("/api/auth/signin", { data: { email: lead.email, password: PW } });
@@ -152,6 +156,24 @@ describe("APL-2691 Move to Won dialog", () => {
       release();
       await page.unroute(pattern);
     }
+  }, 60000);
+
+  it("@APL-2691 TC9: the dialog count includes a subtask and matches the refusal", async () => {
+    const listed = await lead.c.get(`/api/projects/${subId}/tasks`);
+    expect(listed.json.summary.open).toBe(1);
+    expect(listed.json.summary.openTasks).toBe(2);
+    const { dialog, alert } = await openStage(subId, "Won");
+    const text = await alert.innerText();
+    expect(text).toContain("2 open tasks");
+    expect(text).toContain("and 1 more");
+    const project = (await lead.c.get(`/api/projects/${subId}`)).json.project;
+    const won = (project.deal.pipeline.stages as { id: string; name: string }[]).find((s) => s.name === "Won")!.id;
+    const blocked = await lead.c.post(`/api/projects/${subId}/stage`, { stageId: won });
+    expect(blocked.status).toBe(409);
+    expect(blocked.json.openTasks).toBe(2);
+    expect(text).toContain(`${blocked.json.openTasks} open task`);
+    expect(await dealState(subId)).toEqual({ stage: "Lead", archived: false });
+    await dialog.getByRole("button", { name: "Cancel" }).click();
   }, 60000);
 
   it("@APL-2691 TC7: moves to Won once every task is closed, and does not archive the deal or restamp the tasks", async () => {

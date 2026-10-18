@@ -53,10 +53,11 @@ export type OpenTaskFeed = {
 type FeedTask = { id: string; title: string; completedAt: string | null; assignee?: { name: string } | null };
 type FeedSection = { isDone: boolean; total: number; nextCursor: string | null; tasks: FeedTask[] };
 
-/** Open tasks from the list the deal page already loaded. `partial` means that list is filtered or cut short. */
-export function openTaskFeed(sections: FeedSection[], summaryOpen: number | undefined, filtered: boolean): OpenTaskFeed {
+/** Open tasks from the list the deal page already loaded. `partial` means that list is filtered or cut short.
+ * `refusalCount` is the server's Won/Lost count, which includes subtasks. It wins over the top-level total. */
+export function openTaskFeed(sections: FeedSection[], summaryOpen: number | undefined, filtered: boolean, refusalCount?: number): OpenTaskFeed {
   const tasks = sections.flatMap((s) => s.tasks.filter((t) => !t.completedAt)).map((t) => ({ id: t.id, title: t.title, assignee: t.assignee?.name ?? null }));
-  const openCount = summaryOpen ?? tasks.length;
+  const openCount = refusalCount ?? summaryOpen ?? tasks.length;
   const partial = filtered || sections.some((s) => !s.isDone && (s.nextCursor != null || s.total > s.tasks.length));
   return { status: partial ? "partial" : "ready", openCount, tasks };
 }
@@ -248,11 +249,11 @@ export function DealPanel({ projectId, deal, canWrite, onChange, feed }: { proje
     setArmed(null);
   }
   async function loadFull(s: Stage, mine: number) {
-    const r = await api<{ sections?: FeedSection[]; summary?: { open: number } }>("GET", `/api/projects/${projectId}/tasks?limit=100`);
+    const r = await api<{ sections?: FeedSection[]; summary?: { open: number; openTasks?: number } }>("GET", `/api/projects/${projectId}/tasks?limit=100`);
     if (mine !== ticket.current) return;
     if (!r.ok) setPick({ stage: s, blocked: null, loadError: r.error ?? LOAD_OPEN_TASKS });
     else {
-      const next = openTaskFeed(r.data.sections ?? [], r.data.summary?.open, false);
+      const next = openTaskFeed(r.data.sections ?? [], r.data.summary?.open, false, r.data.summary?.openTasks);
       setPick({ stage: s, blocked: closingAlert({ openTasks: next.openCount, tasks: next.tasks }), loadError: null });
     }
     setArmed(null);

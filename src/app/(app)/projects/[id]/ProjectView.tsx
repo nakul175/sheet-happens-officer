@@ -23,7 +23,7 @@ type T = {
   assignee: { id: string; name: string }; collaborators: { id: string; name: string }[]; awaitingApproval: boolean; canClose: boolean; subtasks: { total: number; open: number };
 };
 type S = { id: string; name: string; isDone: boolean; total: number; tasks: T[]; nextCursor: string | null };
-type Summary = { open: number; overdue: number; blocked: number; awaiting: number };
+type Summary = { open: number; overdue: number; blocked: number; awaiting: number; openTasks?: number };
 type Proj = {
   id: string; name: string; archived: boolean; role: string; type?: "PROJECT" | "DEAL"; deal?: DealBlock | null;
   sections: { id: string; name: string; isDone: boolean }[];
@@ -104,9 +104,9 @@ function Inner({ id }: { id: string }) {
   }
   const p = pr.data?.project;
   const secs = tk.data?.sections;
-  // APL-2691: Won and Lost read this list. It is the one the page already asked for, not a second query.
+  // APL-2691: Won and Lost read this list. The count includes subtasks, the same set the move refuses.
   const openFeed: OpenTaskFeed = secs
-    ? openTaskFeed(secs, tk.data?.summary?.open, filtered)
+    ? openTaskFeed(secs, tk.data?.summary?.open, filtered, tk.data?.summary?.openTasks)
     : { status: tk.failed || tk.error ? "error" : "loading", openCount: 0, tasks: [] };
   const canWrite = !!p && p.role !== "VIEWER" && !p.archived;
   const manage = !!p && p.role === "LEADER" && !p.archived;
