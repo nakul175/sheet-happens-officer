@@ -3,7 +3,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useState } from "react";
 import { api, useGet } from "@/components/api";
-import { LoadFailed } from "@/components/ui";
+import { LoadFailed, Skeleton } from "@/components/ui";
 import { Page, roleLabel, useMe } from "../../Shell";
 
 type Proj = { id: string; name: string; role?: string; openTasks?: number };
@@ -38,7 +38,7 @@ export default function PersonPage() {
   return (
     <Page title={p?.name ?? "Person"} sub={p?.email ? `${p.email} · ${roleLabel(p.orgRole!)}` : undefined} docTitle={p?.name ?? "Person"}>
       <p><Link href="/team">← Back to Team</Link></p>
-      {g.loading && <div className="skel">Loading…</div>}
+      {g.loading && <Skeleton />}
       {g.error && g.status === 404 && <div className="err" role="alert">This person was not found.</div>}
       {g.error && g.status !== 404 && <LoadFailed onRetry={g.reload} />}
       {note && <div className={note.ok ? "ok" : "err"} role="status">{note.text}</div>}

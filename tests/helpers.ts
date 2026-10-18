@@ -81,6 +81,22 @@ export const task = async (who: Account, projectId: string, body: Record<string,
   return r.json.task.id as string;
 };
 
+/** PATCH a task on the version it is at right now (SHO-BUG-13: the server refuses an edit without one). */
+export const patchTask = async (who: Account, id: string, body: Record<string, unknown>) => {
+  const seen = (await who.c.get(`/api/tasks/${id}`)).json?.task?.updatedAt ?? new Date(0).toISOString();
+  return who.c.patch(`/api/tasks/${id}`, { ...body, expectedUpdatedAt: seen });
+};
+
+/** The version a task is at right now, as the page would show it (SHO-BUG-13, APL-2668: a change without one is refused). */
+export const versionNow = async (who: Account, id: string) => (await who.c.get(`/api/tasks/${id}`)).json?.task?.updatedAt ?? new Date(0).toISOString();
+
+/** A body for assign, move, complete or approver, made on the version the task is at right now. */
+export const withVersion = async (who: Account, id: string, body: Record<string, unknown> = {}) => ({ ...body, expectedUpdatedAt: await versionNow(who, id) });
+
+/** A bulk body carrying the version each selected task is at right now. */
+export const bulkWithVersions = async (who: Account, taskIds: string[], body: Record<string, unknown>) =>
+  ({ taskIds, versions: Object.fromEntries(await Promise.all(taskIds.map(async (id) => [id, await versionNow(who, id)]))), ...body });
+
 export function istDate(offsetDays: number) {
   const ist = new Date(Date.now() + 5.5 * 3600_000 + offsetDays * 86400_000);
   return ist.toISOString().slice(0, 10);

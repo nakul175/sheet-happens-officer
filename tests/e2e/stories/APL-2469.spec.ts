@@ -1,14 +1,15 @@
 // APL-2469 · [SHO-E5] Views and screens. One test per acceptance criterion.
 // Pam qa:TC: none on the issue. Password comes from SHO_QA_PASS. Names use ZZ-TEST. Emails are nakul17+ aliases.
+import { readFileSync } from "node:fs";
 import type { Page } from "@playwright/test";
 import { test, login } from "../support";
-import { why } from "../helpers/jim-http";
+import { patchCurrent } from "../helpers/jim-http";
 import { PASS, passwordOk, gate, verifiedUser, deactivate, makeProject, archiveProject, expect, zz, RUN } from "./qa";
 
 test.beforeAll(async ({ request }) => {
-  test.skip(!PASS, "Set SHO_QA_PASS (the shared password for the nakul17+ accounts).");
-  test.skip(!passwordOk(PASS), "SHO_QA_PASS must be at least 8 characters with a letter and a number.");
-  try { login("ADMIN"); } catch { test.skip(true, "Set SHO_ADMIN_EMAIL and SHO_ADMIN_PASS (a Super Admin)."); }
+  if (!PASS) throw new Error("Set SHO_QA_PASS (the shared password for the nakul17+ accounts).");
+  if (!passwordOk(PASS)) throw new Error("SHO_QA_PASS must be at least 8 characters with a letter and a number.");
+  login("ADMIN");
   await gate(request);
 });
 
@@ -178,16 +179,83 @@ test("AC6: the branded shell works on a desktop and a phone-width browser", asyn
 
 const MOCKUP_SCREENS = [
   ["My tasks", "By date groups, task rows, quick add"],
-  ["Project list", "column headers, task rows, Blocked flag"],
+  ["Project list", "task rows, Blocked flag"],
   ["Project board", "Section columns, cards, add Section"],
   ["Task detail", "overlay over the page, fields, subtasks"],
-  ["Team", "people grouped by role, deactivated shown"],
+  ["Team", "Role and Status columns, Deactivated status"],
 ] as const;
 
-test.skip(
-  "AC7: each screen matches the approved mockup at 1440x900 and 390x844 (manual visual check)",
-  why(MOCKUP_SCREENS.map(([screen, keys]) =>
-    `${screen} at desktop 1440x900 and phone 390x844: confirm side by side with the Design canvas mockup — app shell with navy #2C2F71 header and gold #D99D29 accent, concierge dock at the bottom, key elements in the mockup's order (${keys}). No element clipped, overlapping or horizontally scrolling. Attach a screenshot of this screen at each viewport. Spacing and copy differences are noted, not failed, unless an element is missing or misplaced.`,
-  ).join(" ")),
-  () => {},
-);
+test("AC7: each screen shows the mockup's key elements at 1440x900 and 390x844", async ({ admin, later }) => {
+  test.setTimeout(180_000);
+  const project = await makeProject(admin.api, "mockup", admin.user.id as string);
+  later(() => archiveProject(admin.api, project.id, admin.user.id as string));
+  const title = zz("mockup row");
+  const made = await admin.api.post(`/api/projects/${project.id}/tasks`, { title, assigneeId: admin.user.id });
+  expect(made.status, JSON.stringify(made.json)).toBe(201);
+  const taskId = made.json.task.id as string;
+  expect((await patchCurrent(admin, taskId, { blocked: true, blockedReason: "ZZ-TEST hold" })).status).toBe(200);
+  expect((await admin.api.post(`/api/projects/${project.id}/tasks`, { title: zz("mockup sub"), parentId: taskId })).status).toBe(201);
+  const team = readFileSync("src/app/(app)/team/Team.tsx", "utf8");
+  expect(team).toContain('DEACTIVATED: ["Deactivated", "grey"]');
+
+  const brand = async (page: Page) => {
+    const got = await page.evaluate(() => {
+      const css = getComputedStyle(document.documentElement);
+      return {
+        navy: css.getPropertyValue("--navy").trim().toLowerCase(),
+        gold: css.getPropertyValue("--gold").trim().toLowerCase(),
+        wide: document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1,
+      };
+    });
+    expect(got.navy).toBe("#2c2f71");
+    expect(got.gold).toBe("#d99d29");
+    expect(got.wide).toBe(true);
+  };
+  const shot = async (page: Page, name: string) => {
+    await test.info().attach(name, { body: await page.screenshot({ fullPage: true }), contentType: "image/png" });
+  };
+
+  for (const [width, height, dock] of [[1440, 900, "aside.dock"], [390, 844, "button.fab"]] as const) {
+    await admin.page.setViewportSize({ width, height });
+    await admin.page.goto("/");
+    await calm(admin.page);
+    await expect(admin.page.getByRole("heading", { name: "My tasks" })).toBeVisible();
+    await expect(admin.page.getByRole("button", { name: "By date" })).toBeVisible();
+    await expect(admin.page.getByText(title).first()).toBeVisible();
+    await expect(admin.page.getByRole("button", { name: "+ New task" })).toBeVisible();
+    await expect(admin.page.locator(dock).first()).toBeVisible();
+    await brand(admin.page);
+    await shot(admin.page, `My tasks ${width}x${height}`);
+
+    await admin.page.goto(`/projects/${project.id}`);
+    await calm(admin.page);
+    await expect(admin.page.locator(".item", { hasText: title })).toBeVisible();
+    await expect(admin.page.locator(".item", { hasText: title }).getByText("Blocked")).toBeVisible();
+    await brand(admin.page);
+    await shot(admin.page, `Project list ${width}x${height}`);
+
+    await admin.page.goto(`/projects/${project.id}?view=board`);
+    await calm(admin.page);
+    await expect(admin.page.locator(".col", { hasText: "To do" })).toBeVisible();
+    await expect(admin.page.locator(".bcard", { hasText: title })).toBeVisible();
+    await expect(admin.page.getByRole("button", { name: "+ Add section" })).toBeVisible();
+    await brand(admin.page);
+    await shot(admin.page, `Project board ${width}x${height}`);
+
+    await admin.page.locator(".bcard", { hasText: title }).click();
+    const dialog = admin.page.getByRole("dialog", { name: "Task" });
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByLabel("Title", { exact: true })).toBeVisible();
+    await expect(dialog.getByLabel("New subtask")).toBeVisible();
+    expect(new URL(admin.page.url()).pathname).toBe(`/projects/${project.id}`);
+    await brand(admin.page);
+    await shot(admin.page, `Task detail ${width}x${height}`);
+
+    await admin.page.goto("/team");
+    await expect(admin.page.getByRole("columnheader", { name: "Role", exact: true })).toBeVisible();
+    await expect(admin.page.getByRole("columnheader", { name: "Status", exact: true })).toBeVisible();
+    await brand(admin.page);
+    await shot(admin.page, `Team ${width}x${height}`);
+  }
+  expect(MOCKUP_SCREENS.map(([screen]) => screen)).toEqual(["My tasks", "Project list", "Project board", "Task detail", "Team"]);
+});
