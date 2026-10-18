@@ -5,16 +5,27 @@
 // Each answer is worked out once per run and recorded on every test that asks, as a "deployed" annotation.
 // conciergeLive and crmModeLive answer the same way for two server settings a spec may depend on: whether the concierge is
 // switched on, and which CRM_VISIBLE mode staging was started with (the browser can read it but not change it).
-import { test, expect, BASE_URL } from "../support";
+import { test, expect, BASE_URL, zz } from "../support";
 import { getTask, newProject, newTask, type Who } from "../g2";
-import { cleanChat, deleteTask, newDeal, quickAction } from "./jim-http";
+import { cleanChat, deleteTask, newDeal, quickAction, raw } from "./jim-http";
 import { bell, withUnread } from "./jim-bell";
 
 type Later = (fn: () => Promise<unknown>) => void;
 export type Gate = { pr: number; deployed: boolean; how: string };
 
 /** Head commits of the open PRs these specs cover (GitHub, 18 Oct 2026). A later push to a PR falls through to the probe. */
-const HEADS: Record<number, string> = { 6: "76b41b8ed22674e4e4e22b55be87386e70337133", 9: "87721120b9", 10: "c47be5f552", 12: "72d2a3d88b", 14: "40d0793d4b6418053241e1cbdc7fec448fa5825c", 18: "cd09cf0832" };
+const HEADS: Record<number, string> = {
+  6: "76b41b8ed22674e4e4e22b55be87386e70337133",
+  9: "87721120b9",
+  10: "c47be5f552",
+  12: "72d2a3d88b",
+  14: "40d0793d4b6418053241e1cbdc7fec448fa5825c",
+  18: "cd09cf0832",
+  19: "bc206f3734ad2f4db66dd41c132cf816219b0d83",
+  21: "73f27cd720e6e3494eb011b3fb61115214bd10c0",
+  23: "5d29c0f0e116d5ce0bc01dc098adbd52005a2be9",
+  24: "72ee2713b4b52e8a636af5696006302b5548fcc8",
+};
 
 let releaseOnce: Promise<string | null> | null = null;
 /** The git SHA the app under test (BASE_URL: staging or a pr1-pr4 preview) says it runs, or null when /api/health does not say. */
@@ -95,6 +106,100 @@ const PROBES: Record<number, (admin: Who, member: Who | null, later: Later) => P
     expect((await admin.api.post(`/api/tasks/${parent}/reopen`, {})).status).toBe(200);
     const open = !(await getTask(admin, sub)).completedAt;
     return { deployed: open, how: `probe: manual reopen of a parent left its cascaded subtask ${open ? "open" : "done"}` };
+  },
+  // PR #19 (APL-2686): Undo of "Organisation archived" clears archivedAt. On main it archives again and answers 409
+  // ("This organisation is already archived."). The same branch reverses "Organisation unarchived"; one direction is enough to tell.
+  // The organisation is a ZZ-TEST record and is archived again through `later`.
+  19: async (admin, _member, later) => {
+    const crm = await admin.api.get("/api/orgs");
+    if (crm.status === 404) return { deployed: false, how: "probe needs the CRM and GET /api/orgs answered 404" };
+    const made = await admin.api.post("/api/orgs", { name: zz("gate pr19") });
+    expect(made.status, "probe creates an organisation").toBe(201);
+    const id = made.json.organisation.id as string;
+    later(() => admin.api.post(`/api/orgs/${id}/archive`, { archive: true }));
+    const archived = await raw(admin, "POST", `/api/orgs/${id}/archive`, { archive: true });
+    const undoId = archived.headers["x-undo-id"];
+    if (archived.status !== 200 || archived.headers["x-undo-label"] !== "Organisation archived" || !undoId) {
+      return { deployed: false, how: `probe: archive answered ${archived.status} ${archived.headers["x-undo-label"] ?? "without a label"}` };
+    }
+    const u = await admin.api.post(`/api/actions/${undoId}/undo`, { anyway: false });
+    const org = (await admin.api.get(`/api/orgs/${id}`)).json.organisation as { archived?: boolean } | undefined;
+    const cleared = u.status === 200 && org?.archived === false;
+    return { deployed: cleared, how: `probe: Undo of Organisation archived answered ${u.status} and left the organisation ${org?.archived ? "archived" : "unarchived"}` };
+  },
+  // PR #21 (APL-2684): Include archived search returns an archived project to an Admin who is not a member.
+  // main already skips the membership filter for isAdmin (the PR restates that in comments), so this probe reports the
+  // behaviour live on main as well as on the PR. A build that still hides the project stays "not live".
+  // The project is led by the Member, so the Super Admin has no seat, and it is archived through `later`.
+  21: async (admin, member, later) => {
+    if (!member) return { deployed: false, how: "probe needs the Member account (SHO_MEMBER_*)" };
+    const p = await newProject(admin, later, { label: "gate pr21", leader: member, creator: member });
+    expect((await member.api.post(`/api/projects/${p.id}/archive`)).status).toBe(200);
+    const found = await admin.api.get(`/api/search?q=${encodeURIComponent(p.name)}&archived=true`);
+    const seen = ((found.json.projects ?? []) as { id: string }[]).some((x) => x.id === p.id);
+    return { deployed: seen, how: `probe: Include archived ${seen ? "lists" : "hides"} an archived project the Super Admin is not a member of` };
+  },
+  // PR #23 (APL-2672): a Mark-as-read reload of All that lands after Unread is selected must not paint read rows.
+  // On main that late page replaces the Unread list. Client only: the notifications API is answered in the browser,
+  // so nothing is written on the server (same idea as the PR #18 probe).
+  23: async (admin) => {
+    const page = await admin.page.context().newPage();
+    const hold = { release: () => {} };
+    try {
+      let armStale = false;
+      let staleArmed = false;
+      const staleHeld = new Promise<void>((resolve) => { hold.release = () => resolve(); });
+      const now = new Date().toISOString();
+      const unread = { id: "gate-u", text: "ZZ gate unread", href: "/projects", read: false, createdAt: now };
+      const read = { id: "gate-r", text: "ZZ gate read", href: "/projects", read: true, createdAt: now };
+      const json = (body: unknown) => ({ status: 200, contentType: "application/json", body: JSON.stringify(body) });
+      await page.route((u) => u.pathname === "/api/notifications" || u.pathname.startsWith("/api/notifications/"), async (route) => {
+        const req = route.request();
+        const url = new URL(req.url());
+        if (req.method() === "POST") { armStale = true; await route.fulfill(json({})); return; }
+        if (req.method() !== "GET" || url.pathname !== "/api/notifications") { await route.continue(); return; }
+        if (url.searchParams.get("filter") === "unread") {
+          await route.fulfill(json({ unread: 0, items: [], next: null }));
+          return;
+        }
+        if (armStale) {
+          armStale = false;
+          staleArmed = true;
+          await staleHeld;
+          await route.fulfill(json({ unread: 0, items: [{ ...unread, read: true }, read], next: null }));
+          return;
+        }
+        await route.fulfill(json({ unread: 1, items: [unread, read], next: null }));
+      });
+      await page.goto("/", { waitUntil: "domcontentloaded" });
+      await bell(page).click();
+      const panel = page.getByRole("dialog", { name: "Notifications" });
+      await panel.getByRole("button", { name: "Mark as read: ZZ gate unread" }).click();
+      await expect.poll(() => staleArmed).toBe(true); // the All reload is in flight; Unread has not been selected yet
+      await panel.getByRole("button", { name: /^Unread/ }).click();
+      await expect(panel.getByText("All caught up")).toBeVisible();
+      hold.release();
+      await page.waitForTimeout(600); // the late All page has arrived; a panel that still accepts it has painted by now
+      const readRows = await panel.locator(".bell-row:not(.unread)").count();
+      return { deployed: readRows === 0, how: `probe: a late All page left ${readRows} read row(s) on the Unread tab` };
+    } finally { hold.release(); await page.close(); }
+  },
+  // PR #24 (APL-2673): phone inline-edit cells carry ic-gap and ic-hit, and app.css spaces them 8 px from each other and the tick.
+  // A client-only fix. The probe reads the CSS and JS the page loads (no project is created). On main those class names are absent.
+  24: async (admin) => {
+    const page = await admin.page.context().newPage();
+    try {
+      const parts: Promise<string>[] = [];
+      page.on("response", (r) => {
+        const kind = r.request().resourceType();
+        const type = r.headers()["content-type"] ?? "";
+        if (kind === "stylesheet" || kind === "script" || type.includes("css") || type.includes("javascript")) parts.push(r.text().catch(() => ""));
+      });
+      await page.goto("/projects", { waitUntil: "load" });
+      const blob = [await page.content(), ...(await Promise.all(parts))].join("\n");
+      const hit = blob.includes("ic-gap") && blob.includes("ic-hit");
+      return { deployed: hit, how: `probe: served CSS/JS ${hit ? "includes" : "lacks"} ic-gap and ic-hit` };
+    } finally { await page.close(); }
   },
 };
 

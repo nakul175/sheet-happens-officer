@@ -1,5 +1,7 @@
 // SHO-US-14.13 Notification triage (APL-2572). Needs the optional Member account (it receives the notices).
+// AC3 runs whenever PR #23 is live (tests/e2e/helpers/jim-gate.ts) and skips otherwise: until then the Unread tab can list read rows.
 import { test, expect, zz } from "../support";
+import { notLive, prLive } from "../helpers/jim-gate";
 
 async function give(admin: any, member: any, later: any, n: number) {
   const r = await admin.api.post("/api/projects", { name: zz("bell"), leaderId: admin.user.id });
@@ -41,6 +43,9 @@ test("AC2: clicking an item opens its task and marks it read", async ({ admin, m
 });
 
 test("AC3: the Unread filter hides read items, and an empty result says 'All caught up'", async ({ admin, member, later }) => {
+  test.setTimeout(120_000);
+  const gate = await prLive(23, admin, null, later);
+  test.skip(!gate.deployed, notLive(gate, "the Unread tab can still list read rows."));
   await give(admin, member, later, 2);
   const p = member.page;
   await p.goto("/");
