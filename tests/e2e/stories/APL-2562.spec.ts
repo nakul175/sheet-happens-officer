@@ -1,11 +1,11 @@
 // SHO-US-14.3 Keyboard and accessibility fixes (Linear APL-2562).
 import { readFileSync } from "node:fs";
-import { test, expect, zz } from "../support";
+import { test, expect, zz, type Json } from "../support";
 
 const AXE = readFileSync("node_modules/axe-core/axe.min.js", "utf8");
 type Page = import("@playwright/test").Page;
 
-async function seed(admin: { api: import("../support").Api; user: Record<string, any> }, later: (f: () => Promise<unknown>) => void, label: string) {
+async function seed(admin: { api: import("../support").Api; user: Json }, later: (f: () => Promise<unknown>) => void, label: string) {
   const r = await admin.api.post("/api/projects", { name: zz(label), leaderId: admin.user.id });
   expect(r.status).toBe(201);
   const pid = r.json.project.id as string;
@@ -22,7 +22,7 @@ const ist = (offset: number) => new Date(Date.now() + 5.5 * 3600_000 + offset * 
 
 /** Press Tab until the focused element satisfies `ok`, at most `max` times. */
 async function tabTo(page: Page, ok: () => boolean | Promise<boolean>, max = 80) {
-  for (let i = 0; i < max; i++) { await page.keyboard.press("Tab"); if (await page.evaluate(ok as any)) return true; }
+  for (let i = 0; i < max; i++) { await page.keyboard.press("Tab"); if (await page.evaluate(ok as () => boolean | Promise<boolean>)) return true; }
   return false;
 }
 
@@ -102,11 +102,11 @@ test("AC5: axe-core reports 0 violations on the reviewed screens (WCAG 2 A/AA an
     await page.waitForTimeout(400);
     await page.evaluate(AXE);
     return page.evaluate(async () => {
-      const r = await (window as any).axe.run(document, { runOnly: { type: "tag", values: ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "best-practice"] }, rules: { "color-contrast": { enabled: false } } });
+      const r = await (window as unknown as { axe: { run: (node: Document, options: unknown) => Promise<{ violations: { id: string; nodes: { target: string[] }[] }[] }> } }).axe.run(document, { runOnly: { type: "tag", values: ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "best-practice"] }, rules: { "color-contrast": { enabled: false } } });
       // Known defect, reported on the Linear issue: with unread notices the bell's aria-label ("Notifications, 3 unread") does not contain its visible text (WCAG 2.5.3 label-content-name-mismatch). It depends on the account having unread notices, so it is set aside here instead of making the run depend on inbox state.
       return r.violations
-        .filter((v: any) => !(v.id === "label-content-name-mismatch" && v.nodes.every((n: any) => n.target.join(" ") === ".bell")))
-        .map((v: any) => ({ id: v.id, nodes: v.nodes.slice(0, 2).map((n: any) => n.target.join(" ")) }));
+        .filter((v) => !(v.id === "label-content-name-mismatch" && v.nodes.every((n) => n.target.join(" ") === ".bell")))
+        .map((v) => ({ id: v.id, nodes: v.nodes.slice(0, 2).map((n) => n.target.join(" ")) }));
     });
   };
   const bad: Record<string, unknown> = {};

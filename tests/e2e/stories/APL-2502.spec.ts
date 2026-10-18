@@ -3,9 +3,9 @@
 // AC4 people on the task are notified; AC5 Leader restores to the original Section.
 // Data: every project and task is named "ZZ-TEST ..."; projects are archived afterwards.
 import { readFileSync } from "node:fs";
-import { test, expect, zz } from "../support";
+import { test, expect, zz, type Who } from "../support";
 
-async function proj(admin: any, label: string, later: (f: () => Promise<unknown>) => void) {
+async function proj(admin: Who, label: string, later: (f: () => Promise<unknown>) => void) {
   const r = await admin.api.post("/api/projects", { name: zz(label), leaderId: admin.user.id });
   expect(r.status, JSON.stringify(r.json)).toBe(201);
   const id = r.json.project.id as string;
@@ -13,7 +13,7 @@ async function proj(admin: any, label: string, later: (f: () => Promise<unknown>
   const s = (await admin.api.get(`/api/projects/${id}`)).json.project.sections as { id: string; isDone: boolean }[];
   return { id, todo: s[0].id, doing: s[1].id };
 }
-const mk = async (admin: any, p: string, title: string, extra: Record<string, unknown> = {}) => {
+const mk = async (admin: Who, p: string, title: string, extra: Record<string, unknown> = {}) => {
   const r = await admin.api.post(`/api/projects/${p}/tasks`, { title, ...extra });
   expect(r.status, JSON.stringify(r.json)).toBe(201);
   return r.json.task.id as string;
@@ -29,7 +29,7 @@ test("AC1: deleting a task with subtasks takes both out of the views, lists them
   const toast = admin.page.getByRole("status").filter({ hasText: "Task deleted" });
   await expect(toast).toBeVisible();
   await expect(toast.getByRole("button", { name: "Undo" })).toBeVisible();
-  const list = (await admin.api.get(`/api/projects/${p.id}/tasks`)).json.sections.flatMap((s: any) => s.tasks).map((x: any) => x.id);
+  const list = (await admin.api.get(`/api/projects/${p.id}/tasks`)).json.sections.flatMap((s: { tasks: { id: string }[] }) => s.tasks).map((x: { id: string }) => x.id);
   expect(list).not.toContain(t);
   expect(list).not.toContain(sub);
   expect((await admin.api.get(`/api/tasks/${sub}`)).status).toBe(404);
@@ -41,7 +41,7 @@ test("AC2: an item stays in Trash for 30 days before it is removed (the purge it
   const p = await proj(admin, "trash-days", later);
   const t = await mk(admin, p.id, zz("kept 30 days"));
   expect((await admin.api.del(`/api/tasks/${t}`)).status).toBe(204);
-  const item = (await admin.api.get(`/api/projects/${p.id}/trash`)).json.items.find((i: any) => i.id === t);
+  const item = (await admin.api.get(`/api/projects/${p.id}/trash`)).json.items.find((i: { id: string }) => i.id === t);
   expect(item.daysLeft).toBe(30);
   await admin.page.goto(`/projects/${p.id}/trash`);
   await expect(admin.page.getByRole("row", { name: new RegExp(zz("kept 30 days")) })).toContainText("30 days");

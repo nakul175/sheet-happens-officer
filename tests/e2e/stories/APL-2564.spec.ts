@@ -1,7 +1,7 @@
 // SHO-US-14.5 Quick add from anywhere (Linear APL-2564).
-import { test, expect, zz } from "../support";
+import { test, expect, zz, type Json } from "../support";
 
-type Who = { api: import("../support").Api; user: Record<string, any>; page: import("@playwright/test").Page };
+type Who = { api: import("../support").Api; user: Json; page: import("@playwright/test").Page };
 
 async function project(admin: Who, later: (f: () => Promise<unknown>) => void, label: string) {
   const r = await admin.api.post("/api/projects", { name: zz(label), leaderId: admin.user.id });
@@ -24,14 +24,14 @@ test("AC1: pressing C on a screen where I can write focuses a title field within
     await page.goto(path);
     await expect(page.getByRole("button", { name: "+ New task" })).toBeVisible(); // the targets have loaded
     await page.evaluate(() => {
-      const w = window as any;
+      const w = window as Window & { __t0?: number; __t1?: number };
       w.__t0 = undefined; w.__t1 = undefined;
       document.addEventListener("keydown", (e) => { if (e.key === "c" && w.__t0 === undefined) w.__t0 = performance.now(); }, true);
       document.addEventListener("focusin", (e) => { if ((e.target as HTMLElement).id === "qa-title" && w.__t1 === undefined) w.__t1 = performance.now(); }, true);
     });
     await page.keyboard.press("c");
     await expect(page.locator("#qa-title")).toBeFocused();
-    const ms = await page.evaluate(() => (window as any).__t1 - (window as any).__t0);
+    const ms = await page.evaluate(() => (window as unknown as { __t1: number }).__t1 - (window as unknown as { __t0: number }).__t0);
     expect(ms, `title focused ${Math.round(ms)} ms after C on ${path}`).toBeLessThan(200);
     await page.keyboard.press("Escape");
   }
