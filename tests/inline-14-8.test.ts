@@ -1,6 +1,6 @@
 // SHO-US-14.8: the server side of inline edits (stale check on assign; edits log an undoable action).
 import { describe, expect, it } from "vitest";
-import { account, istDate, project, task } from "./helpers";
+import { account, istDate, project, task, patchTask } from "./helpers";
 
 describe("inline editing (14.8)", () => {
   it("assign accepts the expected version and refuses a stale one with the stale-edit answer", async () => {
@@ -9,7 +9,7 @@ describe("inline editing (14.8)", () => {
     const p = await project(lead, lead, [{ who: meera }]);
     const t = await task(lead, p.id, { dueDate: istDate(2) });
     const seen = (await lead.c.get(`/api/tasks/${t}`)).json.task.updatedAt as string;
-    expect((await lead.c.patch(`/api/tasks/${t}`, { priority: "HIGH" })).status).toBe(200); // someone else saves first
+    expect((await patchTask(lead, t, { priority: "HIGH" })).status).toBe(200); // someone else saves first
     const r = await lead.c.post(`/api/tasks/${t}/assign`, { assigneeId: meera.id, expectedUpdatedAt: seen });
     expect(r.status).toBe(409);
     expect(r.json.stale).toBe(true);
@@ -39,10 +39,10 @@ describe("inline editing (14.8)", () => {
     const ed = await account("ed");
     const p = await project(lead, lead, [{ who: view, role: "VIEWER" }, { who: ed }]);
     const t = await task(lead, p.id, { assigneeId: ed.id, approverId: lead.id });
-    expect((await view.c.patch(`/api/tasks/${t}`, { priority: "LOW" })).status).toBe(403);
+    expect((await patchTask(view, t, { priority: "LOW" })).status).toBe(403);
     expect((await view.c.post(`/api/tasks/${t}/assign`, { assigneeId: lead.id })).status).toBe(403);
     expect((await ed.c.post(`/api/tasks/${t}/send-for-approval`)).status).toBe(200);
     expect((await lead.c.get(`/api/tasks/${t}`)).json.task.awaitingApproval).toBe(true);
-    expect((await lead.c.patch(`/api/tasks/${t}`, { priority: "LOW" })).status).toBe(200); // the Leader keeps full authority
+    expect((await patchTask(lead, t, { priority: "LOW" })).status).toBe(200); // the Leader keeps full authority
   });
 });

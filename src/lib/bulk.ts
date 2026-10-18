@@ -62,7 +62,7 @@ export async function bulkChange(user: Actor, projectId: string, input: Input) {
         await assignTask(user, id, input.assigneeId!);
       } else if (input.action === "date") {
         if ((formatDueDate(t.dueDate) ?? null) === (input.dueDate ?? null)) { skipped.push({ id, title: t.title, reason: "already up to date" }); continue; }
-        await updateTask(user, id, { dueDate: input.dueDate ?? null });
+        await updateTask(user, id, { dueDate: input.dueDate ?? null, expectedUpdatedAt: t.updatedAt.toISOString() });
       } else if (input.action === "move") {
         if (t.sectionId === input.sectionId) { skipped.push({ id, title: t.title, reason: "already up to date" }); continue; }
         await moveTask(user, id, input.sectionId!);
@@ -127,9 +127,27 @@ async function noticesFor(user: Actor, projectId: string, projectName: string, a
   });
 }
 
+/** One lookup page. Postgres binds one parameter per id; paging reads a long batch without dropping the tail (APL-2680). */
+const UNDO_LOOKUP_CHUNK = 500;
+
+/**
+ * Rows still open for Undo, newest first. Already-reversed rows are left out so a retry finishes the rest.
+ * Every requested id is looked up; the old `slice(0, 500)` skipped the rest and still reported success.
+ */
+async function loadOpenUndoRows(ids: string[]) {
+  const unique = [...new Set(ids)];
+  const rows: Awaited<ReturnType<typeof db.actionLog.findMany>> = [];
+  for (let i = 0; i < unique.length; i += UNDO_LOOKUP_CHUNK) {
+    const chunk = unique.slice(i, i + UNDO_LOOKUP_CHUNK);
+    rows.push(...await db.actionLog.findMany({ where: { id: { in: chunk }, undoneAt: null } }));
+  }
+  rows.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime() || b.id.localeCompare(a.id));
+  return rows;
+}
+
 /** One Undo for a whole bulk change. All of it is checked first; rows already reversed are skipped, so a retry finishes the rest. */
 export async function undoMany(user: Actor, ids: string[], anyway = false) {
-  const rows = await db.actionLog.findMany({ where: { id: { in: ids.slice(0, 500) }, undoneAt: null }, orderBy: [{ createdAt: "desc" }, { id: "desc" }] });
+  const rows = await loadOpenUndoRows(ids);
   const todo = rows.filter((r) => isUndoable(r.action));
   if (!todo.length) throw new ApiError(409, "This was already undone.");
   if (!anyway) for (const r of todo) await checkUndo(user, r.id);

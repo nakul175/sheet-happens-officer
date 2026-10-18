@@ -364,6 +364,10 @@ export async function recheck(user: Actor, ops: Op[]) {
   return null;
 }
 
+/** The version an edit is made on. The card's own versions were already checked by the fingerprint at Confirm. */
+const versionOf = async (taskId: string) =>
+  (await db.task.findUnique({ where: { id: taskId }, select: { updatedAt: true } }))?.updatedAt.toISOString() ?? "";
+
 /** Applies the operations through the existing functions. Runs inside the caller's request context. */
 export async function execute(user: Actor, ops: Op[], handover: { taskId: string; assigneeId: string }[] = [], onDone?: () => void) {
   const done: Op[] = [];
@@ -380,6 +384,7 @@ export async function execute(user: Actor, ops: Op[], handover: { taskId: string
         break;
       case "task.edit":
         await updateTask(user, op.taskId, {
+          expectedUpdatedAt: await versionOf(op.taskId),
           ...(op.title !== undefined ? { title: op.title } : {}), ...(op.description !== undefined ? { description: op.description } : {}),
           ...(op.due !== undefined ? { dueDate: op.due } : {}), ...(op.priority !== undefined ? { priority: op.priority } : {}),
         });
@@ -393,7 +398,7 @@ export async function execute(user: Actor, ops: Op[], handover: { taskId: string
       case "task.send_back": await sendBack(user, op.taskId); break;
       case "task.collab": await (op.add ? addCollaborator(user, op.taskId, op.userId) : removeCollaborator(user, op.taskId, op.userId)); break;
       case "task.approver": await setApprover(user, op.taskId, op.approverId); break;
-      case "task.blocked": await updateTask(user, op.taskId, { blocked: op.blocked, ...(op.blocked ? { blockedReason: op.reason ?? null } : {}) }); break;
+      case "task.blocked": await updateTask(user, op.taskId, { expectedUpdatedAt: await versionOf(op.taskId), blocked: op.blocked, ...(op.blocked ? { blockedReason: op.reason ?? null } : {}) }); break;
       case "project.create": await createProject(user, { name: op.name, description: op.description, leaderId: op.leaderId }); break;
       case "member.add": await addMember(user, op.projectId, op.userId, op.role); break;
       case "member.role":

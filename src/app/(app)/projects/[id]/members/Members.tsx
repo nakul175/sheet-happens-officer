@@ -1,8 +1,8 @@
 "use client";
 import Link from "next/link";
 import { use, useState } from "react";
-import { ROLE, api, isNetworkFailure, useGet } from "@/components/api";
-import { Confirm, Field, LoadFailed } from "@/components/ui";
+import { ROLE, api, useGet } from "@/components/api";
+import { Confirm, Field, LoadFailed, Skeleton } from "@/components/ui";
 import { Page } from "../../../Shell";
 
 type M = { userId: string; name: string; role: string; active: boolean; email?: string };
@@ -18,7 +18,7 @@ export default function Members({ params }: { params: Promise<{ id: string }> })
   const [err, setErr] = useState<string | null>(null);
   const [dlg, setDlg] = useState<null | { kind: "remove" | "viewer" | "leader" | "archive"; m?: M }>(null);
   const p = pr.data?.project;
-  if (!p && isNetworkFailure(pr.status)) return <Page title="Members"><LoadFailed onRetry={pr.reload} /></Page>;
+  if (!p && pr.failed) return <Page title="Members"><LoadFailed onRetry={pr.reload} /></Page>;
   if (pr.error && !p) return <Page title="This project isn't available"><div className="card empty">It may not exist, or you are not a member.<br /><Link href="/projects">Back to Projects</Link></div></Page>;
   const manage = p?.role === "LEADER" && !p?.archived;
   const inProject = new Set(p?.members.map((m) => m.userId));
@@ -41,6 +41,7 @@ export default function Members({ params }: { params: Promise<{ id: string }> })
     <Page title="Members" sub={p && <><Link href={`/projects/${id}`}>← {p.name}</Link> · <span className="chip">You: {ROLE[p.role]}</span></>}>
       {err && <div className="err" role="alert">{err}</div>}
       {p?.archived && <div className="box warn" style={{ marginBottom: 12 }}>This project is archived and read-only.</div>}
+      {pr.loading && !p && <Skeleton />}
       <div className="list">
         {p?.members.map((m) => (
           <div className="item" key={m.userId}>
