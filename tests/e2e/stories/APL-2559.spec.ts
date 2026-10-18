@@ -18,7 +18,7 @@ const SUITE = path.join(ROOT, "tests/viewport/viewport.test.ts");
 const SHOTS = path.join(ROOT, "test-results/viewport");
 
 test.beforeAll(() => {
-  test.skip(!PASS, "Set SHO_QA_PASS (the password for nakul17+ aliases).");
+  test.skip(!PASS, "APL-2559: set SHO_QA_PASS (password for nakul17+ aliases).");
 });
 
 const CLEAN = `<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"></head>

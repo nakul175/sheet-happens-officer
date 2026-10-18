@@ -34,7 +34,7 @@ type JobReport = {
 let report: JobReport | null = null;
 
 test.beforeAll(() => {
-  test.skip(!QA_PASS, "Set SHO_QA_PASS (the password for nakul17+ aliases).");
+  test.skip(!QA_PASS, "APL-2608: set SHO_QA_PASS (password for nakul17+ aliases).");
 });
 
 test.beforeAll(async () => {
