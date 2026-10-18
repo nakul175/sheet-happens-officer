@@ -101,7 +101,8 @@ test("AC1: the stage changes, the log keeps the before-state, Undo restores it, 
   expect(told[0].text).toContain(admin.user.name);
   expect(told[0].href).toBe(`/projects/${d.id}`);
   await member.page.getByRole("button", { name: /Notifications/ }).click();
-  await expect(member.page.getByRole("dialog", { name: "Notifications" }).locator("a", { hasText: d.name })).toContainText("to Conversation");
+  // The same deal is also the "made you Leader" bell item. The stage notice is the one that says moved.
+  await expect(member.page.getByRole("dialog", { name: "Notifications" }).locator("a", { hasText: d.name }).filter({ hasText: /moved/ })).toContainText("to Conversation");
 
   const moverNotes = (await admin.api.get("/api/notifications?limit=200")).json.items as { text: string }[];
   expect(moverNotes.some((n) => n.text.includes(d.name) && n.text.includes("to Conversation")), "the mover is not told").toBe(false);
