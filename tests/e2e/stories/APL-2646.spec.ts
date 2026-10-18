@@ -40,6 +40,11 @@ async function storedDelta(who: Who, before: Set<string>) {
 
 const chatIds = async (who: Who) => new Set((await chatMessages(who)).map((m) => m.id));
 
+// File-level skip. Runs before the admin fixture, which throws "Set SHO_ADMIN_EMAIL" when that variable is unset.
+test.beforeAll(() => {
+  test.skip(!process.env.SHO_QA_PASS, "Set SHO_QA_PASS (the password for nakul17+ aliases).");
+});
+
 /** Skips unless the concierge is on and PR #10 is live. Hidden-deal cases also need CRM_VISIBLE=admins. */
 async function ready(admin: Who, member: Who, later: Later, opts: { admins?: boolean } = {}) {
   const c = await conciergeLive(admin);
