@@ -6,6 +6,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { PrismaClient } from "../src/generated/prisma/client";
 import { verifyPassword } from "../src/lib/auth";
 import { EDITOR_EMAIL, QA_PROJECT_NAME, runStagingEditor, type DbConnect } from "../scripts/staging-editor";
+import { Client } from "./helpers";
 
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) throw new Error("DATABASE_URL is required for this test.");
@@ -114,6 +115,8 @@ describe("staging editor (APL-2682)", () => {
         message: "database host is production",
       },
       { name: "missing confirmation", env: env({ SHO_STAGING_CONFIRM: undefined }), argv: [], message: "without staging confirmation" },
+      { name: "missing workspace", env: env({ STAGING_WORKSPACE_ID: undefined }), argv: ["--confirm-staging"], message: "STAGING_WORKSPACE_ID is not set" },
+      { name: "blank workspace", env: env({ STAGING_WORKSPACE_ID: "  " }), argv: ["--confirm-staging"], message: "STAGING_WORKSPACE_ID is not set" },
     ];
     for (const item of cases) {
       let connected = false;
@@ -220,5 +223,39 @@ describe("staging editor (APL-2682)", () => {
       { name: "In progress", isDone: false },
       { name: "Done", isDone: true },
     ]);
+  });
+
+  it("lets the Editor edit a task and returns 403 for Trash restore", async () => {
+    const ready = await capture(() => runStagingEditor(env(), ["--confirm-staging"]));
+    expect(ready.code, ready.text).toBe(0);
+    const project = await db.project.findFirstOrThrow({ where: { workspaceId, name: QA_PROJECT_NAME } });
+    const leader = await db.user.create({
+      data: {
+        workspaceId,
+        email: `qa-leader-${workspaceId.slice(-8).toLowerCase()}@example.invalid`,
+        name: "QA Leader",
+        passwordHash: "not-used",
+        orgRole: "MEMBER",
+        emailVerifiedAt: new Date(),
+      },
+    });
+    await db.projectMember.create({ data: { projectId: project.id, userId: leader.id, role: "LEADER" } });
+
+    const editor = new Client();
+    const signin = await editor.post("/api/auth/signin", { email: EDITOR_EMAIL, password: PASSWORD });
+    expect(signin.status, JSON.stringify(signin.json)).toBe(200);
+    const created = await editor.post(`/api/projects/${project.id}/tasks`, { title: "QA edit" });
+    expect(created.status, JSON.stringify(created.json)).toBe(201);
+    const taskId = created.json.task.id as string;
+    const seen = (await editor.get(`/api/tasks/${taskId}`)).json.task.updatedAt as string;
+    const edited = await editor.patch(`/api/tasks/${taskId}`, { title: "QA edited", expectedUpdatedAt: seen });
+    expect(edited.status, JSON.stringify(edited.json)).toBe(200);
+    expect(edited.json.task.title).toBe("QA edited");
+    expect((await editor.del(`/api/tasks/${taskId}`)).status).toBe(204);
+    const restore = await editor.post(`/api/tasks/${taskId}/restore`);
+    expect(restore.status).toBe(403);
+    const row = await db.task.findUniqueOrThrow({ where: { id: taskId } });
+    expect(row.deletedAt).not.toBeNull();
+    expect(row.title).toBe("QA edited");
   });
 });

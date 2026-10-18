@@ -10,8 +10,10 @@
 // Refuses production before opening a connection: the database host or name matches
 // PROD_DB_HOST / PROD_DB_NAME when those are set, or the host is app.sheethappensofficer.com.
 // Requires an explicit staging confirmation: --confirm-staging or SHO_STAGING_CONFIRM=1.
+// STAGING_WORKSPACE_ID is required. An unset id refuses before connecting; there is no
+// fallback to the oldest workspace.
 //
-//   SHO_STAGING_CONFIRM=1 STAGING_EDITOR_PASSWORD_FILE=/path/to/secret \
+//   SHO_STAGING_CONFIRM=1 STAGING_WORKSPACE_ID=<id> STAGING_EDITOR_PASSWORD_FILE=/path/to/secret \
 //     npx tsx scripts/staging-editor.ts --confirm-staging
 
 import { readFileSync, statSync } from "node:fs";
@@ -131,20 +133,15 @@ export function defaultConnect(databaseUrl: string): PrismaClient {
   return new PrismaClient({ datasourceUrl: databaseUrl, errorFormat: "minimal" });
 }
 
-async function resolveWorkspace(db: PrismaClient, workspaceId: string | undefined) {
-  if (workspaceId) {
-    const row = await db.workspace.findUnique({ where: { id: workspaceId } });
-    if (!row) throw new ScriptRefusal("Refusing to run: STAGING_WORKSPACE_ID does not match a workspace.");
-    return row;
-  }
-  const row = await db.workspace.findFirst({ orderBy: { createdAt: "asc" } });
-  if (!row) throw new ScriptRefusal("Refusing to run: no workspace exists.");
+async function resolveWorkspace(db: PrismaClient, workspaceId: string) {
+  const row = await db.workspace.findUnique({ where: { id: workspaceId } });
+  if (!row) throw new ScriptRefusal("Refusing to run: STAGING_WORKSPACE_ID does not match a workspace.");
   return row;
 }
 
 export async function ensureStagingEditor(
   db: PrismaClient,
-  opts: { password: string | null; workspaceId?: string },
+  opts: { password: string | null; workspaceId: string },
 ): Promise<{ userId: string; projectId: string; passwordSet: boolean }> {
   const workspace = await resolveWorkspace(db, opts.workspaceId);
   const already = await db.user.findUnique({ where: { email: EDITOR_EMAIL }, select: { id: true } });
@@ -225,6 +222,8 @@ export async function runStagingEditor(env: NodeJS.ProcessEnv, argv: readonly st
     if (!confirmed(env, argv)) {
       throw new ScriptRefusal("Refusing to run without staging confirmation (--confirm-staging or SHO_STAGING_CONFIRM=1).");
     }
+    const workspaceId = env.STAGING_WORKSPACE_ID?.trim() ?? "";
+    if (!workspaceId) throw new ScriptRefusal("Refusing to run: STAGING_WORKSPACE_ID is not set.");
     db = await connect(env.DATABASE_URL ?? "");
     const existing = await db.user.findUnique({ where: { email: EDITOR_EMAIL }, select: { id: true } });
     let password: string | null = null;
@@ -232,10 +231,7 @@ export async function runStagingEditor(env: NodeJS.ProcessEnv, argv: readonly st
       password = checkedPassword(readPassword(env));
       secrets.push(password);
     }
-    const result = await ensureStagingEditor(db, {
-      password,
-      workspaceId: env.STAGING_WORKSPACE_ID?.trim() || undefined,
-    });
+    const result = await ensureStagingEditor(db, { password, workspaceId });
     console.log(
       [
         "staging editor ready",
