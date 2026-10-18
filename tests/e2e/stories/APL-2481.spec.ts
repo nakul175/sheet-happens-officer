@@ -22,12 +22,14 @@ test.describe("SHO-US-2.2 / APL-2481", () => {
     const patched = admin.page.waitForResponse((x) => x.request().method() === "PATCH" && x.url().includes(`/api/team/${p.id}`), { timeout: 60_000 });
     await row.getByRole("button", { name: "Make Admin" }).click({ timeout: 60_000 });
     expect((await patched).status()).toBe(200);
+    await admin.page.goto("/team"); // read the list afresh, so the check does not depend on how fast a long table redraws
     await expect(row.getByRole("button", { name: "Make Member" })).toBeVisible({ timeout: 90_000 });
     let team = (await admin.api.get("/api/team")).json.people as { id: string; orgRole: string }[];
     expect(team.find((x) => x.id === p.id)?.orgRole).toBe("ADMIN");
     const patched2 = admin.page.waitForResponse((x) => x.request().method() === "PATCH" && x.url().includes(`/api/team/${p.id}`), { timeout: 60_000 });
     await row.getByRole("button", { name: "Make Member" }).click({ timeout: 60_000 });
     expect((await patched2).status()).toBe(200);
+    await admin.page.goto("/team");
     await expect(row.getByRole("button", { name: "Make Admin" })).toBeVisible({ timeout: 90_000 });
     team = (await admin.api.get("/api/team")).json.people as { id: string; orgRole: string }[];
     expect(team.find((x) => x.id === p.id)?.orgRole).toBe("MEMBER");

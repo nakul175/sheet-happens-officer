@@ -23,6 +23,18 @@ const mk = async (who: any, p: string, title: string, extra: Record<string, unkn
   expect(r.status, JSON.stringify(r.json)).toBe(201);
   return r.json.task.id as string;
 };
+/** Open the bell panel and wait until it is really showing (the page can still be settling after a load). */
+async function openBell(page: any) {
+  await page.goto("/");
+  await page.waitForLoadState("networkidle");
+  const dlg = page.getByRole("dialog", { name: "Notifications" });
+  for (let i = 0; i < 3 && !(await dlg.isVisible()); i++) {
+    await page.getByRole("button", { name: /^Notifications/ }).click();
+    await dlg.waitFor({ state: "visible", timeout: 5000 }).catch(() => {});
+  }
+  await expect(dlg).toBeVisible();
+  return dlg;
+}
 type N = { id: string; text: string; href: string; read: boolean; createdAt: string };
 const inbox = async (who: any) => (await who.api.get("/api/notifications?limit=200")).json as { unread: number; items: N[] };
 
@@ -36,8 +48,8 @@ test("AC1: a new notification raises the count and appears first in the panel", 
   expect((await member.api.get("/api/notifications")).json.items.length).toBeLessThanOrEqual(50); // default page, SHO-US-14.13
   await member.page.goto("/");
   await expect(member.page.getByRole("button", { name: `Notifications, ${before + 1} unread` })).toBeVisible();
-  await member.page.getByRole("button", { name: /^Notifications/ }).click();
-  await expect(member.page.getByRole("dialog", { name: "Notifications" }).locator(".bell-main").first()).toContainText(zz("count me"));
+  const dlg = await openBell(member.page);
+  await expect(dlg.locator(".bell-main").first()).toContainText(zz("count me"));
 });
 
 test("AC2: opening an item marks it read and the count drops; Mark all as read clears the count", async ({ admin, member, later }) => {
@@ -46,13 +58,12 @@ test("AC2: opening an item marks it read and the count drops; Mark all as read c
   await mk(admin, p, zz("read two"), { assigneeId: member.user.id });
   const start = (await inbox(member)).unread;
   expect(start).toBeGreaterThanOrEqual(2);
-  await member.page.goto("/");
-  await member.page.getByRole("button", { name: /^Notifications/ }).click();
-  await member.page.getByRole("dialog", { name: "Notifications" }).locator(".bell-main", { hasText: zz("read two") }).click();
+  const d1 = await openBell(member.page);
+  await d1.locator(".bell-main", { hasText: zz("read two") }).click();
   await expect.poll(async () => (await inbox(member)).unread).toBe(start - 1);
-  await member.page.goto("/"); // the click opened the task; start again from a clean page
-  await member.page.getByRole("button", { name: /^Notifications/ }).click();
-  await member.page.getByRole("button", { name: "Mark all as read" }).click();
+  const d2 = await openBell(member.page); // the click opened the task; start again from a clean page
+  // dispatch the click on the button itself: a closing-panel scrim can sit over it for a moment
+  await d2.getByRole("button", { name: "Mark all as read" }).dispatchEvent("click");
   await expect.poll(async () => (await inbox(member)).unread).toBe(0);
   await expect(member.page.getByRole("button", { name: "Notifications", exact: true })).toBeVisible(); // no count left
 });

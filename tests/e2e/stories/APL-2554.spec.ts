@@ -125,13 +125,16 @@ test("AC6: on a mouse device 1024 px or wider, dragging a card to another column
   const card = page.locator(".bcard", { hasText: zz("22.6 card") }).first();
   await expect(card).toBeVisible({ timeout: 30000 });
   await expect(card.getByRole("button", { name: /^Move to…/ })).toBeVisible(); // the button exists beside dragging; it is not removed on desktop
-  const from = (await card.boundingBox())!;
-  const to = (await page.locator(".col").nth(1).boundingBox())!;
-  await page.mouse.move(from.x + from.width / 2, from.y + 12);
-  await page.mouse.down();
-  await page.mouse.move(from.x + from.width / 2 + 20, from.y + 20, { steps: 4 });
-  await page.mouse.move(to.x + to.width / 2, to.y + 80, { steps: 12 });
-  await page.mouse.up();
+  // Headless Chromium does not turn a mouse drag into HTML5 drag events reliably, so the drag events the board listens for
+  // are sent one by one (a pause between them lets the board register the drag, as a real drag does).
+  const fire = (kind: "card" | "col", type: string) => page.evaluate(([k, ty, title]) => {
+    const el = k === "card" ? Array.from(document.querySelectorAll(".bcard")).find((c) => c.textContent?.includes(title))! : document.querySelectorAll(".col")[1];
+    el.dispatchEvent(new DragEvent(ty, { bubbles: true, cancelable: true, dataTransfer: new DataTransfer() }));
+  }, [kind, type, zz("22.6 card")] as const);
+  await expect(card).toHaveAttribute("draggable", "true"); // dragging is on for a mouse device
+  await fire("card", "dragstart"); await page.waitForTimeout(200);
+  await fire("col", "dragover"); await page.waitForTimeout(200);
+  await fire("col", "drop");
   await expect.poll(async () => (await admin.api.get(`/api/tasks/${taskId}`)).json.task.section.id, { timeout: 15000 }).toBe(doing);
   await ctx.close();
 });
