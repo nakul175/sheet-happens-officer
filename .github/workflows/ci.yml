@@ -57,10 +57,11 @@ jobs:
         run: npm run build
       - name: Start the app
         run: |
-          (npx next start -p 3100 > server.log 2>&1 &)
-          url="${APP_HEALTH_URL:-http://localhost:3100/api/health}"
-          attempts="${APP_HEALTH_ATTEMPTS:-30}"
-          pause="${APP_HEALTH_PAUSE:-2}"
+          # ZZ-TEST deliberate failure for APL-2696: do not start the app.
+          : > server.log
+          url="${APP_HEALTH_URL:-http://127.0.0.1:9/api/health}"
+          attempts="${APP_HEALTH_ATTEMPTS:-2}"
+          pause="${APP_HEALTH_PAUSE:-0}"
           ready=0
           for i in $(seq 1 "$attempts"); do
             if curl -fsS "$url"; then
