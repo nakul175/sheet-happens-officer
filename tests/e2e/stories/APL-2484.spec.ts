@@ -1,5 +1,6 @@
 // SHO-US-2.5 Team page by role (APL-2484). Acceptance criteria AC1 to AC4.
 import { test, expect, RUN, type Json } from "../support";
+import { PASS, alias, deactivate, passwordOk, personByEmail, signUp, zz } from "./qa";
 
 const SLOW = { timeout: 90_000 }; // the Team table can be long on a busy workspace
 
@@ -51,8 +52,24 @@ test.describe("SHO-US-2.5 / APL-2484", () => {
     await expect(member.page.getByText(name)).toHaveCount(0);
   });
 
-  test.skip("AC3 (unverified): unverified people show an Unverified status to Admins and are hidden from Members", async () => {
-    // The only way to make an unverified account is a real sign-up that emails a real inbox. Covered by tests/work.test.ts.
+  test("AC3 (unverified): unverified people show an Unverified status to Admins and are hidden from Members", async ({ anon, admin, member, later }) => {
+    test.setTimeout(180_000);
+    if (!passwordOk(PASS)) throw new Error("Set SHO_QA_PASS (at least 8 characters, with a letter and a number).");
+    const email = alias("2484", "unverified", "aplyd.com");
+    const name = zz("unverified");
+    const signed = await signUp(anon.request, name, email);
+    expect(signed.status, signed.body).toBe(201);
+    const person = await personByEmail(admin.api, email);
+    expect(person?.status).toBe("UNVERIFIED");
+    later(() => deactivate(admin.api, person!.id));
+    await admin.page.goto("/team");
+    const row = admin.page.locator("tr", { hasText: name });
+    await expect(row).toContainText("Unverified", SLOW);
+    const seen = (await member.api.get("/api/team")).json.people as { id?: string; name?: string }[];
+    expect(seen.some((p) => p.id === person!.id || p.name === name)).toBe(false);
+    await member.page.goto("/team");
+    await expect(member.page.locator(".list .item").first()).toBeVisible(SLOW);
+    await expect(member.page.getByText(name)).toHaveCount(0);
   });
 
   test("AC4: the Super Admin's own row has no management action", async ({ admin }) => {
