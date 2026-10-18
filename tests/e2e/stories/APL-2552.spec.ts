@@ -16,7 +16,6 @@ async function phone(browser: Browser, width: number, height = 800, touch = true
   return ctx;
 }
 
-test.describe.configure({ retries: 2 }); // the phone-size runs share one server; two retries absorb a dropped request
 let projectId = "";
 test.beforeEach(async ({ admin, later }) => {
   const r = await admin.api.post("/api/projects", { name: zz("22.4 nav"), leaderId: admin.user.id });

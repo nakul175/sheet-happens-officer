@@ -17,7 +17,6 @@ async function phone(browser: Browser, width: number, height = 800, touch = true
   return ctx;
 }
 
-test.describe.configure({ retries: 2 }); // the phone-size runs share one server; two retries absorb a dropped request
 const LONGTITLE = ("Title words ".repeat(13)).slice(0, 150);
 const LONGREASON = ("Blocked because the supplier has not replied ".repeat(8)).slice(0, 300);
 let projectId = "", taskId = "", longId = "";

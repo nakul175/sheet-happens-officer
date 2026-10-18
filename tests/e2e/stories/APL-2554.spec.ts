@@ -16,7 +16,6 @@ async function phone(browser: Browser, width: number, height = 800, touch = true
   return ctx;
 }
 
-test.describe.configure({ retries: 2 }); // the phone-size runs share one server; two retries absorb a dropped request
 const LONGTITLE = "W".repeat(100);
 let projectId = "", todo = "", doing = "", done = "", taskId = "", parentId = "", longId = "";
 test.beforeEach(async ({ admin, later }) => {

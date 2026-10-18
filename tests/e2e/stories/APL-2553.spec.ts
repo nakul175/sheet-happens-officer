@@ -17,8 +17,6 @@ async function phone(browser: Browser, width: number, height = 800, touch = true
   return ctx;
 }
 
-// The shared phone-size runs hit one server hard; two retries absorb a dropped request without hiding a real failure.
-test.describe.configure({ retries: 2 });
 
 let projectId = "";
 test.beforeEach(async ({ admin, later }) => {
