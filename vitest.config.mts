@@ -9,6 +9,7 @@ export default defineConfig({
     testTimeout: 30000,
     fileParallelism: false,
     setupFiles: ["./tests/setup.ts"],
-    exclude: [...configDefaults.exclude, "tests/viewport/**"],
+    // Phone checks and the production smoke have their own commands.
+    exclude: [...configDefaults.exclude, "tests/viewport/**", "tests/smoke/**"],
   },
 });
