@@ -1,5 +1,7 @@
-// Staging mail sink reader (APL-2681). Polls GET /api/qa/mail with MAIL_SINK_TOKEN.
-// Mailbox-dependent specs skip only when that token is absent:
+// Staging mail sink reader (APL-2681). Polls GET /api/qa/mail.
+// The token goes in X-QA-Token. Authorization is reserved for Caddy basic auth
+// (STAGING_USER / STAGING_PASS) when the e2e config provides it.
+// Mailbox-dependent specs skip only when MAIL_SINK_TOKEN is absent:
 //   test.skip(!process.env.MAIL_SINK_TOKEN, "MAIL_SINK_TOKEN is not set");
 
 export const MAIL_WAIT_MS = 60_000;
@@ -18,6 +20,17 @@ export function mailboxSpecsSkip(): boolean {
 }
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** Basic auth for the staging gate when the e2e config names a user, plus the sink token on its own header. */
+export function mailSinkHeaders(token: string): Record<string, string> {
+  const headers: Record<string, string> = { "x-qa-token": token };
+  const user = process.env.STAGING_USER;
+  if (user) {
+    const pass = process.env.STAGING_PASS ?? "";
+    headers.authorization = `Basic ${Buffer.from(`${user}:${pass}`, "utf8").toString("base64")}`;
+  }
+  return headers;
+}
 
 function subjectMatches(subject: string, want: string | RegExp): boolean {
   if (typeof want === "string") return subject === want || subject.includes(want);
@@ -42,7 +55,7 @@ export async function waitForMail(to: string, subject: string | RegExp, options:
       url.searchParams.set("to", to);
       if (options.since) url.searchParams.set("since", options.since);
       const res = await fetch(url, {
-        headers: { authorization: `Bearer ${token}` },
+        headers: mailSinkHeaders(token),
         signal: AbortSignal.timeout(5_000),
       });
       if (res.status === 200) {
