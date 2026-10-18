@@ -12,23 +12,15 @@ const MAX_LENGTH = 2048;
 const MAX_DECODES = 5;
 
 /**
- * APL-2652 off switch. Unset means on.
- * `off`, `false`, `no` and `0` restore today's sign-in: no `next`, no `expired`, a 401 goes to `/signin`.
+ * APL-2652 off switch. Unset means off.
+ * Only `1` or `on` enables the return path. Anything else, including empty, matches main.
  * Read at call time so a test can flip it without restarting the process.
+ * A tab the server rendered with the flag on sets `window.__SHO_RETURN_TO` (not a cookie).
  */
 export function returnToEnabled(): boolean {
-  const raw = process.env.SIGNIN_RETURN_TO;
-  if (raw == null || raw.trim() === "") return true;
-  return !/^(0|off|false|no)$/i.test(raw.trim());
-}
-
-/** The browser copy of the flag. The proxy sets `sho_return_to`; otherwise the env var applies. */
-export function returnToActive(): boolean {
-  if (typeof document !== "undefined") {
-    const match = /(?:^|; )sho_return_to=([01])(?:;|$)/.exec(document.cookie);
-    if (match) return match[1] === "1";
-  }
-  return returnToEnabled();
+  if (typeof window !== "undefined" && (window as Window & { __SHO_RETURN_TO?: number }).__SHO_RETURN_TO === 1) return true;
+  const raw = process.env.SIGNIN_RETURN_TO?.trim().toLowerCase();
+  return raw === "1" || raw === "on";
 }
 
 /** Request header set by `src/proxy.ts` to the path that was asked for. The layout overwrites any client-supplied value by reading it only after the proxy replaces it. */
@@ -74,7 +66,8 @@ function canonicalPath(value: string): string | null {
   try {
     const url = new URL(value, BASE);
     if (url.origin !== BASE || url.hostname !== "return.invalid" || url.username !== "" || url.password !== "") return null;
-    const path = `${url.pathname}${url.search}${url.hash}`;
+    // AC1: the fragment is not part of the return path. The browser never sent it.
+    const path = `${url.pathname}${url.search}`;
     if (!path.startsWith("/") || path.startsWith("//") || path.includes("\\") || /[\u0000-\u001F\u007F]/.test(path)) return null;
     return path;
   } catch {
@@ -83,7 +76,8 @@ function canonicalPath(value: string): string | null {
 }
 
 /**
- * A same-origin path (`/tasks/T1`, optionally with a query or hash), or null.
+ * A same-origin path (`/tasks/T1`, optionally with a query), or null.
+ * A fragment is dropped.
  * Null means "send them home": the value is missing, empty, or not a safe path.
  */
 export function safeReturnPath(input: string | null | undefined): string | null {

@@ -1,9 +1,11 @@
 // APL-2652. Same-origin return path after sign-in, and the signed-out redirect that carries it.
 // The cases at the top do not need a server. The "signed-out redirect" cases hit TASKBOARD_URL.
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { NextRequest } from "next/server";
 import { api } from "@/components/api";
+import { proxy } from "@/proxy";
 import { account, BASE, project, task } from "./helpers";
-import { isSignInScreen, returnToActive, returnToEnabled, safeReturnPath, sessionSignInTarget, signedOutSignInHref, signInHref } from "@/lib/return-to";
+import { isSignInScreen, returnToEnabled, safeReturnPath, sessionSignInTarget, signedOutSignInHref, signInHref } from "@/lib/return-to";
 
 const BASE_ORIGIN = "http://return.invalid";
 
@@ -16,15 +18,28 @@ function expectSafe(path: string | null) {
 }
 
 describe("APL-2652 safe return path", () => {
-  it("keeps a same-origin deep link, including a query and a hash", () => {
+  const previous = process.env.SIGNIN_RETURN_TO;
+  beforeEach(() => {
+    process.env.SIGNIN_RETURN_TO = "on";
+  });
+  afterEach(() => {
+    if (previous === undefined) delete process.env.SIGNIN_RETURN_TO;
+    else process.env.SIGNIN_RETURN_TO = previous;
+  });
+
+  it("keeps a same-origin deep link and drops the fragment", () => {
     expect(safeReturnPath("/tasks/T1")).toBe("/tasks/T1");
     expect(safeReturnPath("  /tasks/T1  ")).toBe("/tasks/T1");
     expect(safeReturnPath("/tasks/T1?x=1")).toBe("/tasks/T1?x=1");
     expect(safeReturnPath("/projects/abc?task=T1")).toBe("/projects/abc?task=T1");
-    expect(safeReturnPath("/projects/abc?task=T1#panel")).toBe("/projects/abc?task=T1#panel");
+    // AC1 v1.2: path and query stay; the #fragment is not part of next.
+    expect(safeReturnPath("/projects/abc?task=T1#panel")).toBe("/projects/abc?task=T1");
+    expect(safeReturnPath("/tasks/T1?tab=comments#c9")).toBe("/tasks/T1?tab=comments");
+    expect(signInHref("/tasks/T1?tab=comments#c9")).toBe("/signin?next=%2Ftasks%2FT1%3Ftab%3Dcomments");
     expect(safeReturnPath("/")).toBe("/");
     expect(safeReturnPath("%2Ftasks%2FT1")).toBe("/tasks/T1");
     expect(safeReturnPath("%2Fprojects%2Fabc%3Ftask%3DT1")).toBe("/projects/abc?task=T1");
+    expect(safeReturnPath("%2Ftasks%2FT1%3Ftab%3Dcomments%23c9")).toBe("/tasks/T1?tab=comments");
   });
 
   it("AC2 rejects absolute, protocol-relative, backslash and javascript targets", () => {
@@ -291,14 +306,21 @@ describe("SIGNIN_RETURN_TO", () => {
     else process.env.SIGNIN_RETURN_TO = previous;
   }
 
-  it("defaults on, and keeps expired=1 with the safe return path", () => {
+  it("defaults off, and only 1 or on enables the return path", () => {
     delete process.env.SIGNIN_RETURN_TO;
-    expect(returnToEnabled()).toBe(true);
-    expect(signInHref("/tasks/T1", { expired: true })).toBe("/signin?expired=1&next=%2Ftasks%2FT1");
-    expect(signedOutSignInHref("/tasks/T1")).toBe("/signin?next=%2Ftasks%2FT1");
-    for (const on of ["on", "1", "true", "yes"]) {
+    expect(returnToEnabled()).toBe(false);
+    expect(signInHref("/tasks/T1", { expired: true })).toBe("/signin");
+    expect(signedOutSignInHref("/tasks/T1")).toBe("/signin");
+    expect(sessionSignInTarget("/tasks/T1")).toBe("/signin");
+    for (const off of ["", "0", "off", "false", "no", "true", "yes", "enable"]) {
+      process.env.SIGNIN_RETURN_TO = off;
+      expect(returnToEnabled(), JSON.stringify(off)).toBe(false);
+      expect(signInHref("/tasks/T1", { expired: true }), JSON.stringify(off)).toBe("/signin");
+    }
+    for (const on of ["1", "on", "ON", "On", " 1 ", " on "]) {
       process.env.SIGNIN_RETURN_TO = on;
-      expect(returnToEnabled(), on).toBe(true);
+      expect(returnToEnabled(), JSON.stringify(on)).toBe(true);
+      expect(signInHref("/tasks/T1", { expired: true }), JSON.stringify(on)).toBe("/signin?expired=1&next=%2Ftasks%2FT1");
     }
     restoreEnv();
   });
@@ -350,41 +372,41 @@ describe("SIGNIN_RETURN_TO", () => {
     }
   });
 
-  it("the browser cookie turns the same 401 off and on", async () => {
-    const realFetch = globalThis.fetch;
-    const realWindow = (globalThis as { window?: unknown }).window;
-    const realDocument = (globalThis as { document?: { cookie: string } }).document;
-    const assigned: string[] = [];
-    (globalThis as { window?: unknown }).window = {
-      location: {
-        pathname: "/tasks/T1",
-        search: "",
-        set href(value: string) { assigned.push(value); },
-        get href() { return assigned.at(-1) ?? ""; },
-      },
-      dispatchEvent() {},
-    };
-    globalThis.fetch = (async () =>
-      new Response(JSON.stringify({ error: "Not signed in" }), {
-        status: 401,
-        headers: { "content-type": "application/json" },
-      })) as typeof fetch;
-    delete process.env.SIGNIN_RETURN_TO;
+  it("TC-APL2652-0f4e53e7@v1 sends no sho_return_to cookie", async () => {
+    const previousWindow = (globalThis as { window?: unknown }).window;
     try {
-      (globalThis as { document?: { cookie: string } }).document = { cookie: "sho_return_to=0" };
-      expect(returnToActive()).toBe(false);
-      await api("GET", "/api/tasks/T1");
-      expect(assigned).toEqual(["/signin"]);
-
-      assigned.length = 0;
-      (globalThis as { document?: { cookie: string } }).document = { cookie: "sho_return_to=1" };
-      expect(returnToActive()).toBe(true);
-      await api("GET", "/api/tasks/T1");
-      expect(assigned).toEqual([signInHref("/tasks/T1", { expired: true })]);
+      for (const value of [undefined, "", "0", "off", "false", "true", "yes", "on", "1", "ON"] as const) {
+        if (value === undefined) delete process.env.SIGNIN_RETURN_TO;
+        else process.env.SIGNIN_RETURN_TO = value;
+        const res = proxy(new NextRequest("http://localhost:3100/tasks/T1?tab=comments"));
+        const setCookie = typeof res.headers.getSetCookie === "function" ? res.headers.getSetCookie() : [];
+        const joined = [...setCookie, res.headers.get("set-cookie") ?? ""].join("\n");
+        expect(joined, value ?? "unset").not.toMatch(/sho_return_to/i);
+        expect(joined.trim(), value ?? "unset").toBe("");
+      }
+      // A document from the running server matches main: no sho_return_to cookie, flag on or off.
+      for (const path of ["/signin", "/signin?expired=1", "/tasks/T1"]) {
+        const res = await fetch(BASE + path, { redirect: "manual" });
+        const setCookie = typeof res.headers.getSetCookie === "function" ? res.headers.getSetCookie() : [];
+        const joined = [...setCookie, res.headers.get("set-cookie") ?? ""].join("\n");
+        expect(joined, path).not.toMatch(/sho_return_to/i);
+        await res.arrayBuffer();
+      }
+      // A cookie does not turn the client path on. Only the server-rendered window flag does.
+      delete process.env.SIGNIN_RETURN_TO;
+      (globalThis as { window?: Window & { __SHO_RETURN_TO?: number }; document?: { cookie: string } }).document = { cookie: "sho_return_to=1" };
+      (globalThis as { window?: { location: { pathname: string; search: string }; __SHO_RETURN_TO?: number } }).window = {
+        location: { pathname: "/tasks/T1", search: "" },
+      };
+      expect(returnToEnabled()).toBe(false);
+      (globalThis as { window?: { location: { pathname: string; search: string }; __SHO_RETURN_TO?: number } }).window = {
+        location: { pathname: "/tasks/T1", search: "" },
+        __SHO_RETURN_TO: 1,
+      };
+      expect(returnToEnabled()).toBe(true);
     } finally {
-      globalThis.fetch = realFetch;
-      (globalThis as { window?: unknown }).window = realWindow;
-      (globalThis as { document?: { cookie: string } }).document = realDocument;
+      (globalThis as { window?: unknown }).window = previousWindow;
+      delete (globalThis as { document?: { cookie: string } }).document;
       restoreEnv();
     }
   });
@@ -449,13 +471,15 @@ describe("APL-2652 signed-out redirect", () => {
     expect(evil.html).not.toContain('\\"next\\":\\"https://evil.example\\"');
   });
 
-  it("a no-access task and a missing task return the same 404 body and headers", async () => {
+  it("a no-access 404 and a not-found 404 match in status, title and body apart from the id", async () => {
     const owner = await account("nfowner");
     const outsider = await account("nfout");
     const p = await project(owner, owner);
     const hidden = await task(owner, p.id, { title: "APL2652 hidden task", description: "APL2652 secret body" });
-    const missing = "cmmissingtask000000000000";
-    const read = async (id: string) => {
+    const missing = "c".repeat(hidden.length);
+    const apartFromId = (text: string) => text.split(hidden).join("ID").split(missing).join("ID");
+    const titleOf = (html: string) => html.match(/<title[^>]*>([^<]*)<\/title>/i)?.[1] ?? "";
+    const readApi = async (id: string) => {
       const res = await fetch(`${BASE}/api/tasks/${id}`, { headers: { cookie: outsider.c.cookie }, redirect: "manual" });
       const body = Buffer.from(await res.arrayBuffer());
       const headers = [...res.headers.entries()]
@@ -464,14 +488,41 @@ describe("APL-2652 signed-out redirect", () => {
         .sort((a, b) => a[0].localeCompare(b[0]));
       return { status: res.status, body, headers };
     };
-    const denied = await read(hidden);
-    const gone = await read(missing);
+    const readPage = async (id: string) => {
+      const res = await fetch(`${BASE}/tasks/${id}`, { headers: { cookie: outsider.c.cookie }, redirect: "manual" });
+      const html = await res.text();
+      return { status: res.status, html, title: titleOf(html) };
+    };
+    const denied = await readApi(hidden);
+    const gone = await readApi(missing);
     expect(denied.status).toBe(404);
-    expect(gone.status).toBe(404);
-    expect(Buffer.compare(denied.body, gone.body)).toBe(0);
+    expect(gone.status).toBe(denied.status);
+    const deniedJson = JSON.parse(denied.body.toString("utf8")) as { error?: string; title?: string };
+    const goneJson = JSON.parse(gone.body.toString("utf8")) as { error?: string; title?: string };
+    expect(deniedJson.title ?? null).toBe(goneJson.title ?? null);
+    expect(deniedJson.error).toBe("Task not found");
+    expect(goneJson.error).toBe(deniedJson.error);
+    expect(apartFromId(denied.body.toString("utf8"))).toBe(apartFromId(gone.body.toString("utf8")));
     expect(denied.body.toString("utf8")).toBe(JSON.stringify({ error: "Task not found" }));
     expect(denied.body.toString("utf8")).not.toContain("APL2652");
+    expect(denied.body.toString("utf8")).not.toContain(hidden);
+    expect(gone.body.toString("utf8")).not.toContain(missing);
     expect(denied.headers).toEqual(gone.headers);
+
+    const hiddenPage = await readPage(hidden);
+    const missingPage = await readPage(missing);
+    expect(hiddenPage.status).toBe(missingPage.status);
+    expect(hiddenPage.title).toBe("Task · Sheet Happens Officer");
+    expect(missingPage.title).toBe(hiddenPage.title);
+    expect(hiddenPage.html).not.toContain("APL2652 hidden task");
+    expect(hiddenPage.html).not.toContain("APL2652 secret body");
+    expect(missingPage.html).not.toContain("APL2652 hidden task");
+    expect(missingPage.html).not.toContain("APL2652 secret body");
+    expect(hiddenPage.html).not.toContain("Project not found");
+    expect(missingPage.html).not.toContain("Project not found");
+    // The flight script order is not stable. The document the person sees, apart from the id, is.
+    const visible = (html: string) => apartFromId(html).replace(/<script[\s\S]*?<\/script>/gi, "");
+    expect(visible(hiddenPage.html)).toBe(visible(missingPage.html));
   });
 
   it("a signed-in person is not sent to sign-in", async () => {
