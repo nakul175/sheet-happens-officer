@@ -1,8 +1,9 @@
 // SHO-US-1.1 Sign up with name, email and password (APL-2474). Acceptance criteria AC1 to AC4.
-// Sign-up is only exercised where it is refused: a successful sign-up creates a real unverified account and sends a real
-// email to a real company domain, which a staging run must not do.
+// New accounts use nakul17+ aliases on the company domains and are deactivated afterwards. ZZ-TEST names only.
 import type { Page } from "@playwright/test";
 import { test, expect, RUN } from "../support";
+import { PASS, alias, deactivate, passwordOk, personByEmail, signUp, sinkToken, zz } from "./qa";
+import { verifyMail } from "../../../src/lib/email";
 
 const alertOf = (p: Page) => p.locator('[role="alert"]:not(#__next-route-announcer__)');
 const DOMAIN_MESSAGE = "Use your @aplyd.com or @athenainfonomics.com email address."; // 1.1 AC2 wording, widened by SHO-US-23.1
@@ -19,8 +20,25 @@ async function fillSignUp(page: import("@playwright/test").Page, name: string, e
 }
 
 test.describe("SHO-US-1.1 / APL-2474", () => {
-  test.skip("AC1: a valid new @aplyd.com sign-up creates an unverified account and shows Check your email", async () => {
-    // Needs a real mailbox to receive and read the verification link, and would create a real account. Run by hand.
+  test("AC1: a valid new @aplyd.com sign-up creates an unverified account and shows Check your email", async ({ anon, admin, later }) => {
+    test.setTimeout(120_000);
+    if (!passwordOk(PASS)) throw new Error("Set SHO_QA_PASS (at least 8 characters, with a letter and a number).");
+    const email = alias("2474", "ac1", "aplyd.com");
+    const name = zz("ac1");
+    await fillSignUp(anon, name, email, PASS);
+    await expect(anon).toHaveURL(/\/check-email/);
+    await expect(anon.getByRole("heading", { name: "Check your email" })).toBeVisible();
+    const person = await personByEmail(admin.api, email);
+    expect(person?.status).toBe("UNVERIFIED");
+    later(() => deactivate(admin.api, person!.id));
+    const built = verifyMail(email, "token");
+    expect(built.subject).toContain("Verify your email");
+    expect(built.text).toContain("/verify?token=token");
+    const token = await sinkToken(email, "Verify");
+    if (token) {
+      const opened = await anon.request.post("/api/auth/verify", { data: { token } });
+      expect(opened.ok()).toBe(true);
+    }
   });
 
   test("AC2: a look-alike or foreign domain is refused on the page and on the server, and nothing is created", async ({ anon, admin }) => {
@@ -37,9 +55,14 @@ test.describe("SHO-US-1.1 / APL-2474", () => {
     expect(team.some((p) => p.email.startsWith(`zz-test-${RUN}@`))).toBe(false);
   });
 
-  test("AC3: an email that already has an account is refused with a Sign in link, and no second account appears", async ({ anon, admin }) => {
-    const email = String(admin.user.email).toLowerCase();
-    test.skip(!/@(aplyd\.com|athenainfonomics\.com)$/.test(email), "The admin account is not on a sign-up domain, so the domain rule answers first.");
+  test("AC3: an email that already has an account is refused with a Sign in link, and no second account appears", async ({ anon, admin, later }) => {
+    if (!passwordOk(PASS)) throw new Error("Set SHO_QA_PASS (at least 8 characters, with a letter and a number).");
+    const email = alias("2474", "ac3", "aplyd.com");
+    const created = await signUp(anon.request, zz("again"), email);
+    expect(created.status, created.body).toBe(201);
+    const person = await personByEmail(admin.api, email);
+    expect(person?.id).toBeTruthy();
+    later(() => deactivate(admin.api, person!.id));
     await fillSignUp(anon, "ZZ-TEST Again", email, okPw);
     const alert = alertOf(anon);
     await expect(alert).toContainText("An account with this email already exists.");
