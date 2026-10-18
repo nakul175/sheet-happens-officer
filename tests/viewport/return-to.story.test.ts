@@ -37,13 +37,16 @@ async function signIn(page: Page, email: string, password: string) {
   await page.getByRole("button", { name: "Sign in" }).click();
 }
 
-/** The asked-for task, on /tasks/id or on the project page the task screen opens. */
-async function landedOnTask(page: Page, id: string, title: string) {
-  // The title is in the project list and in the open task, so more than one match is expected.
-  await page.getByText(title).first().waitFor({ state: "visible", timeout: 20000 });
+/** The asked-for task, still on /tasks/<id>, with the query that was opened. */
+async function landedOnTask(page: Page, id: string, title: string, search = "") {
+  const titleBox = page.locator("textarea.tt");
+  await titleBox.waitFor({ state: "visible", timeout: 20000 });
+  expect(await titleBox.inputValue()).toBe(title);
   const url = new URL(page.url());
   expect(url.origin).toBe(origin());
-  expect(url.pathname === `/tasks/${id}` || url.searchParams.get("task") === id, page.url()).toBe(true);
+  expect(url.pathname, page.url()).toBe(`/tasks/${id}`);
+  expect(url.search, page.url()).toBe(search);
+  expect(url.hash, page.url()).toBe("");
   expect(url.hostname).not.toBe("evil.example");
 }
 
@@ -87,6 +90,21 @@ describe("APL-2652 sign-in returns to the deep link", () => {
     } finally { await ctx.close(); }
   });
 
+  it("AC1 a query is kept and the fragment is dropped", async () => {
+    const { ctx, page } = await signedOutPage();
+    try {
+      await page.goto(`/tasks/${visibleId}?tab=comments#c9`);
+      await page.getByRole("heading", { name: "Sign in" }).waitFor();
+      const url = new URL(page.url());
+      expect(url.pathname).toBe("/signin");
+      expect(url.searchParams.get("next")).toBe(`/tasks/${visibleId}?tab=comments`);
+      expect(url.hash).toBe("");
+      expect(page.url()).not.toContain("c9");
+      await signIn(page, memberEmail, PW);
+      await landedOnTask(page, visibleId, visibleTitle, "?tab=comments");
+    } finally { await ctx.close(); }
+  });
+
   it("AC2 off-site and malformed next values stay on the home page", async () => {
     for (const next of ["https://evil.example", "//evil.example", "/\\evil.example", "javascript:alert(1)"]) {
       const { ctx, page } = await signedOutPage();
@@ -114,13 +132,14 @@ describe("APL-2652 sign-in returns to the deep link", () => {
   it("AC3 a task the person cannot see shows the not-found page and no detail", async () => {
     const { ctx, page } = await signedOutPage();
     try {
-      const leaked = page.waitForResponse((r) => r.url().includes(`/api/tasks/${hiddenId}`) && r.request().method() === "GET");
       await page.goto(`/signin?next=${encodeURIComponent(`/tasks/${hiddenId}`)}`);
       await signIn(page, outsiderEmail, PW);
       await page.getByRole("heading", { name: "This task isn't available" }).waitFor({ timeout: 20000 });
-      const res = await leaked;
-      expect(res.status()).toBe(404);
-      const body = await res.text();
+      const doc = await page.request.get(`/tasks/${hiddenId}`);
+      const api = await page.request.get(`/api/tasks/${hiddenId}`);
+      expect(doc.status()).toBe(404);
+      expect(api.status()).toBe(404);
+      const body = await api.text();
       expect(body).not.toContain(hiddenTitle);
       expect(body).not.toContain(hiddenDetail);
       expect(await page.getByText(hiddenTitle).count()).toBe(0);

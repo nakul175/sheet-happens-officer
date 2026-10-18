@@ -129,6 +129,34 @@ describe("APL-2652 safe return path", () => {
     }
   });
 
+  it("rejects encoded whitespace, and accepts at most five decodes of a safe path", () => {
+    for (const next of [
+      "/tasks/a%20b",
+      "/tasks/a%2520b",
+      "%20/tasks/T1",
+      "/tasks/T1%20",
+      "/tasks/T1?tab=a%20b",
+      "/%20/evil.example",
+      "/tasks/a b",
+      "/tasks/a\u00A0b",
+    ]) {
+      expect(safeReturnPath(next), next).toBeNull();
+      expect(signInHref(next), next).toBe("/signin");
+    }
+    const encode = (value: string, times: number) => {
+      let out = value;
+      for (let i = 0; i < times; i++) out = encodeURIComponent(out);
+      return out;
+    };
+    expect(safeReturnPath(encode("/tasks/T1?tab=comments", 5))).toBe("/tasks/T1?tab=comments");
+    expect(safeReturnPath(encode("/tasks/T1", 1))).toBe("/tasks/T1");
+    expect(safeReturnPath(encode("/tasks/T1", 6))).toBeNull();
+    expect(safeReturnPath(encode("//evil.example", 5))).toBeNull();
+    expect(safeReturnPath(encode("https://evil.example", 5))).toBeNull();
+    expect(safeReturnPath(encode("/\\evil.example", 5))).toBeNull();
+    expect(safeReturnPath(encode("/tasks/a b", 3))).toBeNull();
+  });
+
   it("rejects a missing, empty or oversized value", () => {
     expect(safeReturnPath(null)).toBeNull();
     expect(safeReturnPath(undefined)).toBeNull();
@@ -287,6 +315,20 @@ async function documentTarget(path: string) {
   return { status: res.status, html, target: header ?? embedded };
 }
 
+/**
+ * Whether the running server is sending people back. Unset SIGNIN_RETURN_TO is off
+ * (deploy.yml and the lint workflow leave it unset). Phone checks set it to on.
+ * The probe reads the server, so these cases do not depend on this process's env.
+ */
+let serverReturnTo: Promise<boolean> | null = null;
+function serverReturnToEnabled() {
+  serverReturnTo ??= documentTarget("/tasks/return-to-probe").then((doc) => {
+    if (!doc.target) return false;
+    try { return new URL(doc.target, BASE).searchParams.has("next"); } catch { return false; }
+  });
+  return serverReturnTo;
+}
+
 function assertSameOriginSignIn(target: string, next: string | null) {
   const url = new URL(target, BASE);
   expect(url.origin).toBe(new URL(BASE).origin);
@@ -378,7 +420,7 @@ describe("SIGNIN_RETURN_TO", () => {
       for (const value of [undefined, "", "0", "off", "false", "true", "yes", "on", "1", "ON"] as const) {
         if (value === undefined) delete process.env.SIGNIN_RETURN_TO;
         else process.env.SIGNIN_RETURN_TO = value;
-        const res = proxy(new NextRequest("http://localhost:3100/tasks/T1?tab=comments"));
+        const res = await proxy(new NextRequest("http://localhost:3100/tasks/T1?tab=comments"));
         const setCookie = typeof res.headers.getSetCookie === "function" ? res.headers.getSetCookie() : [];
         const joined = [...setCookie, res.headers.get("set-cookie") ?? ""].join("\n");
         expect(joined, value ?? "unset").not.toMatch(/sho_return_to/i);
@@ -414,14 +456,20 @@ describe("SIGNIN_RETURN_TO", () => {
 
 describe("APL-2652 signed-out redirect", () => {
   it("AC1 sends a signed-out deep link to sign-in with that path, and does not reuse another path", async () => {
+    const enabled = await serverReturnToEnabled();
     for (const [path, next] of [
       ["/tasks/alpha-return", "/tasks/alpha-return"],
       ["/projects/beta-return?task=1", "/projects/beta-return?task=1"],
     ] as const) {
       const doc = await documentTarget(path);
       expect(doc.target, path).toBeTruthy();
-      assertSameOriginSignIn(doc.target!, next);
-      expect(new URL(doc.target!, BASE).pathname).toBe("/signin");
+      const url = new URL(doc.target!, BASE);
+      expect(url.pathname).toBe("/signin");
+      if (enabled) assertSameOriginSignIn(doc.target!, next);
+      else {
+        expect(url.searchParams.get("next"), path).toBeNull();
+        assertSameOriginSignIn(doc.target!, null);
+      }
     }
   });
 
@@ -450,6 +498,18 @@ describe("APL-2652 signed-out redirect", () => {
   it("expired=1 shows the session alert, and a safe return path is kept with it", async () => {
     const sentence = "Your session has expired, please sign in again";
     const alert = `<div role="alert"[^>]*>${sentence}</div>`;
+    const enabled = await serverReturnToEnabled();
+    if (!enabled) {
+      // Unset or off: next and expired are ignored, the same as main.
+      for (const path of [`/signin?expired=1&next=${encodeURIComponent("/tasks/T1")}`, "/signin?expired=1", "/signin"]) {
+        const doc = await documentTarget(path);
+        expect(doc.status, path).toBe(200);
+        expect(doc.target, path).toBeNull();
+        expect(doc.html, path).not.toContain(sentence);
+        expect(doc.html, path).not.toContain('\\"next\\":\\"/tasks/T1\\"');
+      }
+      return;
+    }
     const both = await documentTarget(`/signin?expired=1&next=${encodeURIComponent("/tasks/T1")}`);
     expect(both.status).toBe(200);
     expect(both.target).toBeNull();
@@ -511,7 +571,10 @@ describe("APL-2652 signed-out redirect", () => {
 
     const hiddenPage = await readPage(hidden);
     const missingPage = await readPage(missing);
-    expect(hiddenPage.status).toBe(missingPage.status);
+    expect(hiddenPage.status).toBe(404);
+    expect(missingPage.status).toBe(404);
+    expect(hiddenPage.html).toContain("This task isn't available");
+    expect(missingPage.html).toContain("This task isn't available");
     expect(hiddenPage.title).toBe("Task · Sheet Happens Officer");
     expect(missingPage.title).toBe(hiddenPage.title);
     expect(hiddenPage.html).not.toContain("APL2652 hidden task");

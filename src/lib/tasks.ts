@@ -1,4 +1,5 @@
 import type { Prisma } from "@/generated/prisma/client";
+import { assertTaskReadable } from "@/lib/task-access";
 import { ensureNextStep } from "@/lib/deals";
 import { crmProjectWhere } from "@/lib/crm";
 import { linksOfTask } from "@/lib/records";
@@ -105,6 +106,11 @@ export function stampBlockedFlagVersion(raw: unknown, updatedAt: Date): unknown 
   if (!Object.keys(body).every((k) => k === "blocked" || k === "blockedReason" || k === "expectedUpdatedAt")) return raw;
   if (typeof body.expectedUpdatedAt === "string" && body.expectedUpdatedAt.length > 0) return raw;
   return { ...body, expectedUpdatedAt: updatedAt.toISOString() };
+}
+
+/** The task page may show this id. Missing and no-access both throw "Task not found". */
+export async function visibleTask(user: Actor, id: string) {
+  await assertTaskReadable(user, id);
 }
 
 export const ORDER = [{ dueDate: { sort: "asc", nulls: "last" } }, { createdAt: "asc" }, { id: "asc" }] as const;

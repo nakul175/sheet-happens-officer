@@ -26,9 +26,14 @@ export function returnToEnabled(): boolean {
 /** Request header set by `src/proxy.ts` to the path that was asked for. The layout overwrites any client-supplied value by reading it only after the proxy replaces it. */
 export const RETURN_PATH_HEADER = "x-sho-return-path";
 
+/** Space, tab, and the other whitespace a return path must not carry. `%20` decodes to a space. */
+const WHITESPACE = /[\s\u00A0\u1680\u2000-\u200A\u2028\u2029\u202F\u205F\u3000\uFEFF]/;
+
 function isDangerous(value: string): boolean {
-  if (/[\\\u0000-\u001F\u007F\u2028\u2029]/.test(value)) return true;
-  if (value.startsWith("//") || value.startsWith("\\")) return true;
+  if (WHITESPACE.test(value)) return true;
+  if (/[\\\u0000-\u001F\u007F]/.test(value)) return true;
+  // Protocol-relative `//` and a backslash, including after a prefix. Browsers treat `\` as `/`.
+  if (value.includes("//") || value.includes("\\")) return true;
   // A scheme (`https:`, `javascript:`) at the start is an absolute URL, not a path.
   if (/^[a-zA-Z][a-zA-Z+\-.]*:/.test(value)) return true;
   return false;
@@ -50,7 +55,14 @@ function decodeAll(value: string): string[] | null {
     current = next;
     layers.push(current);
   }
-  return null;
+  // Five decodes are allowed when the result is fully decoded. A sixth encoding is rejected.
+  if (isDangerous(current)) return null;
+  try {
+    if (decodeURIComponent(current) !== current) return null;
+  } catch {
+    return null;
+  }
+  return layers;
 }
 
 function originStays(value: string): boolean {
@@ -68,7 +80,8 @@ function canonicalPath(value: string): string | null {
     if (url.origin !== BASE || url.hostname !== "return.invalid" || url.username !== "" || url.password !== "") return null;
     // AC1: the fragment is not part of the return path. The browser never sent it.
     const path = `${url.pathname}${url.search}`;
-    if (!path.startsWith("/") || path.startsWith("//") || path.includes("\\") || /[\u0000-\u001F\u007F]/.test(path)) return null;
+    // The URL parser re-encodes a space as `%20`. That is still whitespace, so it is not a safe path.
+    if (!path.startsWith("/") || path.includes("//") || path.includes("\\") || WHITESPACE.test(path) || /%(?:20|09|0a|0d)/i.test(path) || /[\u0000-\u001F\u007F]/.test(path)) return null;
     return path;
   } catch {
     return null;
