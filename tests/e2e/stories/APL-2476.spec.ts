@@ -1,6 +1,7 @@
 // SHO-US-1.3 Sign in with email and password (APL-2476). Acceptance criteria AC1 to AC5.
 import type { Page } from "@playwright/test";
 import { test, expect, RUN, login } from "../support";
+import { PASS, alias, deactivate, passwordOk, personByEmail, signUp, zz } from "./qa";
 
 const alertOf = (p: Page) => p.locator('[role="alert"]:not(#__next-route-announcer__)');
 const WRONG = "Email or password is incorrect.";
@@ -40,8 +41,23 @@ test.describe("SHO-US-1.3 / APL-2476", () => {
     expect(ok.status()).toBe(200);
   });
 
-  test.skip("AC3: an unverified account with the right password sees Verify your email first with a Resend link", async () => {
-    // Needs an unverified account whose password is known; the only way to make one is a real sign-up that emails a real inbox.
+  test("AC3: an unverified account with the right password sees Verify your email first with a Resend link", async ({ anon, admin, later }) => {
+    test.setTimeout(120_000);
+    if (!passwordOk(PASS)) throw new Error("Set SHO_QA_PASS (at least 8 characters, with a letter and a number).");
+    const email = alias("2476", "ac3", "aplyd.com");
+    expect((await signUp(anon.request, zz("ac3"), email)).status).toBe(201);
+    const person = await personByEmail(admin.api, email);
+    expect(person?.status).toBe("UNVERIFIED");
+    later(() => deactivate(admin.api, person!.id));
+    const api = await anon.request.post("/api/auth/signin", { data: { email, password: PASS } });
+    expect(api.status()).toBe(403);
+    expect((await api.json()).error).toBe("Verify your email first.");
+    await anon.goto("/signin");
+    await anon.getByLabel("Work email").fill(email);
+    await anon.getByLabel("Password").fill(PASS);
+    await anon.getByRole("button", { name: "Sign in" }).click();
+    await expect(alertOf(anon)).toContainText("Verify your email first.");
+    await expect(anon.getByRole("button", { name: "Resend link" })).toBeVisible();
   });
 
   test("AC4: five failed tries lock the email for 15 minutes, for an address with no account too, and the password is no longer checked", async ({ anon }) => {
@@ -60,7 +76,16 @@ test.describe("SHO-US-1.3 / APL-2476", () => {
     await expect(alertOf(anon)).toContainText("Too many attempts. Try again in 15 minutes.");
   });
 
-  test.skip("AC5: a deactivated account with the right password is refused with This account is deactivated", async () => {
-    // Needs a deactivated account whose password is known. People added from the Team page get an emailed password nobody can read here.
+  test("AC5: a deactivated account with the right password is refused with This account is deactivated", async ({ anon, admin, later }) => {
+    test.setTimeout(120_000);
+    if (!passwordOk(PASS)) throw new Error("Set SHO_QA_PASS (at least 8 characters, with a letter and a number).");
+    const email = alias("2476", "ac5", "aplyd.com");
+    expect((await signUp(anon.request, zz("ac5"), email)).status).toBe(201);
+    const person = await personByEmail(admin.api, email);
+    later(() => deactivate(admin.api, person!.id));
+    await deactivate(admin.api, person!.id);
+    const refused = await anon.request.post("/api/auth/signin", { data: { email, password: PASS } });
+    expect(refused.status()).toBe(403);
+    expect((await refused.json()).error).toBe("This account is deactivated.");
   });
 });
