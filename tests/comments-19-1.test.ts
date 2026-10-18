@@ -4,7 +4,7 @@
 // server is started with the flag off, so the HTTP cases prove the routes and the task payload
 // do not change for users.
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { account, admin, project, superAdmin, task } from "./helpers";
+import { account, admin, project, superAdmin, task, withVersion } from "./helpers";
 import { actor, db, lastData, say, script, tu, useFakeModel } from "./concierge-helpers";
 import { sentence } from "../src/lib/activity-text";
 import { addComment, commentExcerpts, editComment, listComments, removeComment } from "../src/lib/comments";
@@ -93,7 +93,7 @@ describe("flag on (AC1–AC8)", () => {
 
   it("AC2 the approver holding a task is told about a new comment", async () => {
     const { lead, worker, t1 } = await cast();
-    expect((await lead.c.put(`/api/tasks/${t1}/approver`, { approverId: lead.id })).status).toBe(200);
+    expect((await lead.c.put(`/api/tasks/${t1}/approver`, await withVersion(lead, t1, { approverId: lead.id }))).status).toBe(200);
     expect((await worker.c.post(`/api/tasks/${t1}/send-for-approval`, {})).status).toBe(200);
     await addComment(actor(worker), t1, { text: "Ready for a look" });
     expect(await notices(lead.id, t1, "COMMENT_ADDED")).toHaveLength(1);
@@ -137,7 +137,7 @@ describe("flag on (AC1–AC8)", () => {
     await removeComment(actor(lead), t1, created.id);
     expect((await listComments(actor(worker), t1)).comments).toHaveLength(0);
     const again = await addComment(actor(worker), t1, { text: "Still here" });
-    await removeComment(actor(adm), t1, again.id);
+    await removeComment(actor(adm, "ADMIN"), t1, again.id);
     expect(await db.comment.count({ where: { id: again.id, removedAt: null } })).toBe(0);
   });
 
