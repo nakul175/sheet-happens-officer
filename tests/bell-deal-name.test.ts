@@ -4,7 +4,7 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { HIDDEN_DEAL_TEXT, noticeForReader } from "@/lib/feed";
+import { HIDDEN_DEAL_TEXT, noticeForReader, redactDealNotice } from "@/lib/feed";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 
@@ -48,6 +48,46 @@ describe("hidden deal notice", () => {
     expect(task).toEqual({ text: 'Someone assigned you "Call Asha".', href: "/tasks/task-1" });
     expect(task.text).toContain("Asha");
     expect(task.text).not.toContain('"A"');
+  });
+});
+
+const dealName = "ZZ-TEST Acme renewal";
+
+describe.each([
+  {
+    type: "DEAL_STAGE_CHANGED",
+    tc: "qa:TC-APL2716-3abdb652@v1",
+    data: { project: dealName, stage: "Proposal" },
+    adminText: `Someone moved "${dealName}" to Proposal.`,
+    absent: ["Acme", "Proposal"],
+  },
+  {
+    type: "DEAL_NEEDS_NEXT_STEP",
+    tc: "qa:TC-APL2716-85782555@v1",
+    data: { project: dealName },
+    adminText: `"${dealName}" needs a next step.`,
+    absent: ["Acme"],
+  },
+  {
+    type: "DEAL_STALLED",
+    tc: "qa:TC-APL2716-fcc1861b@v1",
+    data: { project: dealName },
+    adminText: `"${dealName}" has had no activity for 30 days.`,
+    absent: ["Acme"],
+  },
+])("$type", ({ type, tc, data, adminText, absent }) => {
+  const notice = { type, actor: null, taskId: null, projectId: "deal-1", data };
+
+  it(`${tc} redacts a hidden ${type} notice to the generic sentence`, () => {
+    expect(redactDealNotice(type)).toEqual({ text: HIDDEN_DEAL_TEXT, href: null });
+    const hidden = noticeForReader(notice, true);
+    expect(hidden).toEqual({ text: HIDDEN_DEAL_TEXT, href: null });
+    for (const word of [dealName, ...absent]) expect(hidden.text, word).not.toContain(word);
+    expect(JSON.stringify(hidden)).not.toContain("/projects/");
+  });
+
+  it(`${tc} leaves the admin ${type} sentence unchanged`, () => {
+    expect(noticeForReader(notice, false)).toEqual({ text: adminText, href: "/projects/deal-1" });
   });
 });
 

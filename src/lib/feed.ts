@@ -84,8 +84,25 @@ export function noticeText(n: N) {
   return { text: text[n.type] ?? `${who} made a change.`, href };
 }
 
-/** Shown instead of any sentence built from a deal this person may not open. */
+/**
+ * The one sentence for a deal notice the reader may not see.
+ * AC v1.1 wording. Change this constant when that wording changes.
+ */
 export const HIDDEN_DEAL_TEXT = "A deal you can't view was updated.";
+
+/** Structured redaction for the three deal notices. The stored fields are not read. */
+const DEAL_NOTICE_REDACTION: Record<string, string> = {
+  DEAL_STAGE_CHANGED: HIDDEN_DEAL_TEXT,
+  DEAL_NEEDS_NEXT_STEP: HIDDEN_DEAL_TEXT,
+  DEAL_STALLED: HIDDEN_DEAL_TEXT,
+};
+
+/** The redacted form of a deal notice, or null when this type is not one of the three. */
+export function redactDealNotice(type: string): { text: string; href: null } | null {
+  const text = DEAL_NOTICE_REDACTION[type];
+  if (!text) return null;
+  return { text, href: null };
+}
 
 /**
  * Deal ids this person must not read in the bell.
@@ -108,11 +125,12 @@ async function hiddenDealIds(user: Actor, projectIds: (string | null)[]): Promis
 
 /**
  * A notice the reader may see is built from its stored fields.
- * A hidden deal is one fixed sentence and no link: stored names, titles, stages and ids are not read.
+ * A hidden deal uses the structured redaction for the three deal notices, and the same
+ * sentence for any other notice stored on that deal. Stored names, titles and stages are not read.
  */
 export function noticeForReader(n: N, hidden: boolean): { text: string; href: string | null } {
-  if (hidden) return { text: HIDDEN_DEAL_TEXT, href: null };
-  return noticeText(n);
+  if (!hidden) return noticeText(n);
+  return redactDealNotice(n.type) ?? { text: HIDDEN_DEAL_TEXT, href: null };
 }
 
 /** SHO-US-14.13: newest first, 50 at a time; `before` is the `next` value of the previous page. `filter=unread` hides read items. */

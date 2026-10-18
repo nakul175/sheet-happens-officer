@@ -12,6 +12,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { db } from "../src/lib/db";
+import { HIDDEN_DEAL_TEXT } from "../src/lib/feed";
 import { QUICK_ACTIONS } from "../src/lib/concierge/reads";
 import { istDate, PW } from "./helpers";
 
@@ -354,7 +355,7 @@ describe("CRM_VISIBLE modes are tested against a real server per mode", () => {
     expect(dealRow?.workspaceId).toBeTruthy();
     const plain = await db.project.create({ data: { workspaceId: dealRow!.workspaceId, name: `Packing ${tag}`, typeId: "wst_project" } });
     seed.plainProjectId = plain.id;
-    const hiddenText = "A deal you can't view was updated.";
+    const hiddenText = HIDDEN_DEAL_TEXT;
     const stageText = `Someone moved "${dealName}" to Proposal.`;
     const nextStepText = `"${dealName}" needs a next step.`;
     const stalledText = `"${dealName}" has had no activity for 30 days.`;
