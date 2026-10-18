@@ -6,6 +6,7 @@
 import { test, expect, zz, RUN } from "../support";
 import { ghost, newProject, newTask, ymd, type Who } from "../g2";
 import { raw } from "../helpers/jim-http";
+import { clickClear, setChecked } from "../helpers/phone-hit";
 import type { Page } from "@playwright/test";
 
 type Later = (fn: () => Promise<unknown>) => void;
@@ -59,12 +60,12 @@ test("AC1: a name saves a contact, role email and phone are optional, any Member
   const org = await makeOrg(admin, later, "contacts org");
 
   await member.page.goto(`/accounts/${org.id}`);
-  await member.page.getByRole("button", { name: "+ Contact" }).click();
+  await clickClear(member.page.getByRole("button", { name: "+ Contact" }));
   const dlg = member.page.getByRole("dialog", { name: "New contact" });
   await expect(dlg.getByRole("button", { name: "Save" })).toBeDisabled();
   const bareName = zz("bare contact");
   await dlg.getByLabel("Name").fill(bareName);
-  await dlg.getByRole("button", { name: "Save" }).click();
+  await clickClear(dlg.getByRole("button", { name: "Save" }));
   await expect(dlg).toHaveCount(0);
   const bareRow = member.page.locator(".item", { hasText: bareName });
   await expect(bareRow).toBeVisible();
@@ -107,16 +108,16 @@ test("AC1: a name saves a contact, role email and phone are optional, any Member
   expect((await admin.api.patch(`/api/contacts/${fullId}`, { role: "Advisor" })).status, "an Admin who did not create it may edit").toBe(200);
   expect((await contactsOf(member, org.id)).find((c) => c.id === fullId)?.role).toBe("Advisor");
   await member.page.reload();
-  await fullRow.getByRole("button", { name: "Edit" }).click();
+  await clickClear(fullRow.getByRole("button", { name: "Edit" }));
   const edit = member.page.getByRole("dialog", { name: "Edit contact" });
   await edit.getByLabel("Role").fill("Trustee");
-  await edit.getByRole("button", { name: "Save" }).click();
+  await clickClear(edit.getByRole("button", { name: "Save" }));
   await expect(edit).toHaveCount(0);
   expect((await contactsOf(admin, org.id)).find((c) => c.id === fullId)?.role).toBe("Trustee");
 
-  await fullRow.getByRole("button", { name: "Remove" }).click();
+  await clickClear(fullRow.getByRole("button", { name: "Remove" }));
   const confirm = member.page.getByRole("dialog", { name: "Remove contact?" });
-  await confirm.getByRole("button", { name: "Remove" }).click();
+  await clickClear(confirm.getByRole("button", { name: "Remove" }));
   await expect(member.page.locator(".item", { hasText: fullName })).toHaveCount(0);
   expect((await contactsOf(admin, org.id)).some((c) => c.id === fullId)).toBe(false);
 
@@ -192,17 +193,17 @@ test("AC3: Known by lists one or more active members, defaults to the creator, k
   const personName = `ZZ-TEST known ${RUN}`;
 
   await admin.page.goto(`/accounts/${org.id}`);
-  await admin.page.getByRole("button", { name: "+ Contact" }).click();
+  await clickClear(admin.page.getByRole("button", { name: "+ Contact" }));
   const dlg = admin.page.getByRole("dialog", { name: "New contact" });
   await expect(dlg.getByRole("checkbox", { name: admin.user.name, exact: true })).toBeChecked();
   const name = zz("default known");
   // A Known-by surname can contain "name", so the label match is not only the Name field.
   await dlg.getByRole("textbox", { name: "Name", exact: true }).fill(name);
-  await dlg.getByRole("checkbox", { name: admin.user.name, exact: true }).uncheck();
+  await setChecked(dlg.getByRole("checkbox", { name: admin.user.name, exact: true }), false);
   await expect(dlg.getByRole("button", { name: "Save" })).toBeDisabled();
-  await dlg.getByRole("checkbox", { name: admin.user.name, exact: true }).check();
-  await dlg.getByRole("checkbox", { name: personName, exact: true }).check();
-  await dlg.getByRole("button", { name: "Save" }).click();
+  await setChecked(dlg.getByRole("checkbox", { name: admin.user.name, exact: true }), true);
+  await setChecked(dlg.getByRole("checkbox", { name: personName, exact: true }), true);
+  await clickClear(dlg.getByRole("button", { name: "Save" }));
   await expect(dlg).toHaveCount(0);
 
   const saved = (await contactsOf(admin, org.id)).find((c) => c.name === name)!;
@@ -362,25 +363,18 @@ test("AC5: any signed-in Member sees all contacts, changes are logged with no pr
 
   await admin.page.goto(`/accounts/${org.id}`);
   await admin.page.getByRole("button", { name: "History" }).click();
-  // The searchable contact is a second contact.created, and both deletes are contact.removed.
-  // A page-wide getByText matches every one of those rows and strict mode fails.
-  // One row is the action plus the time of that log entry.
-  const logged = (await admin.api.get(`/api/orgs/${org.id}/history`)).json.items as { action: string; at: string; after: { name?: string; role?: string } | null }[];
-  const history = admin.page.locator(".list", { hasText: "contact.created" });
-  const atText = (iso: string) => admin.page.evaluate(
-    (d) => new Date(d).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" }),
-    iso,
-  );
-  const oneRow = async (action: string, at: string) => {
-    await expect(history.locator(".row", { hasText: action }).filter({ hasText: await atText(at) })).toBeVisible();
+  // Two contact.created rows can share a displayed second, so the time text is not a row id.
+  // The history list is the action-log order (createdAt desc). x-undo-id is that log entry's id.
+  const logged = (await admin.api.get(`/api/orgs/${org.id}/history`)).json.items as { id: string; action: string }[];
+  const historyRows = admin.page.locator(".list:has(.row) .row");
+  await expect(historyRows).toHaveCount(logged.length);
+  const rowFor = (id: string | undefined) => {
+    expect(id, "x-undo-id").toBeTruthy();
+    const index = logged.findIndex((i) => i.id === id);
+    expect(index, id).toBeGreaterThanOrEqual(0);
+    return historyRows.nth(index);
   };
-  const createdLog = logged.find((i) => i.action === "contact.created" && i.after?.name === name);
-  expect(createdLog?.at, "contact.created for this contact").toBeTruthy();
-  await oneRow("contact.created", createdLog!.at);
-  const updatedLog = logged.find((i) => i.action === "contact.updated" && i.after?.role === "Lead");
-  expect(updatedLog?.at, "contact.updated").toBeTruthy();
-  await oneRow("contact.updated", updatedLog!.at);
-  const removedLog = logged.find((i) => i.action === "contact.removed");
-  expect(removedLog?.at, "contact.removed").toBeTruthy();
-  await oneRow("contact.removed", removedLog!.at);
+  await expect(rowFor(made.headers["x-undo-id"])).toContainText("contact.created");
+  await expect(rowFor(edited.headers["x-undo-id"])).toContainText("contact.updated");
+  await expect(rowFor(removed.headers["x-undo-id"])).toContainText("contact.removed");
 });

@@ -7,6 +7,7 @@
 //    the person clicks a notice, and the panel shows up to 50. The test checks the 14.13 behaviour.
 // Data: every project and task is named "ZZ-TEST ...".
 import { test, expect, zz, type Who } from "../support";
+import { clickClear } from "../helpers/phone-hit";
 
 async function proj(admin: Who, label: string, later: (f: () => Promise<unknown>) => void) {
   const r = await admin.api.post("/api/projects", { name: zz(label), leaderId: admin.user.id });
@@ -102,6 +103,6 @@ test("AC5: the bell shows the unread count, lists notices newest first with link
   await expect(rows.first()).toHaveAttribute("href", new RegExp(`/tasks/${t2}`));
   // SHO-US-14.13: opening the panel marks nothing read; clicking a notice does
   expect((await member.api.get("/api/notifications")).json.unread).toBe(count);
-  await rows.first().click();
+  await clickClear(rows.first());
   await expect.poll(async () => (await member.api.get("/api/notifications")).json.unread).toBe(count - 1);
 });

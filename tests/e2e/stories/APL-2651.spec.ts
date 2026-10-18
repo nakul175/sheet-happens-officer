@@ -57,6 +57,9 @@ function expectSignedOut(r: Res) {
 
 function expectAccess(r: Res, status: number, error: string) {
   expect(r.status).toBe(status);
+  // AC v1.1 and PR #29 (tests/auth-before-body.test.ts) require a string, e.g. { error: "Project not found" }.
+  // PR #50's loadForEdit rewrites a task 404 into { error: { code: "not_found", message: "Task not found" } }
+  // via withVersionErrors. That stack disagrees with the AC, so this assertion stays the string.
   expect(r.json).toEqual({ error });
   expect(r.status).not.toBe(400);
   noValidation(r);
