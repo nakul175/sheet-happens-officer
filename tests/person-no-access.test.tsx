@@ -5,9 +5,7 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { sessionNav } from "@/components/api";
 import Person from "@/app/(app)/team/[id]/Person";
-import { SignInForm } from "@/app/signin/SignInForm";
 
 type Role = "MEMBER" | "ADMIN" | "SUPER_ADMIN";
 
@@ -42,6 +40,7 @@ const PRIVATE_PROJECT = "Only P2 Project";
 const NO_ACCESS = "You don't have access to this person";
 
 let root: Root | undefined;
+let restoreLocation: (() => void) | undefined;
 
 function json(status: number, body: unknown) {
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
@@ -77,6 +76,8 @@ afterEach(() => {
   act(() => root?.unmount());
   root = undefined;
   document.body.replaceChildren();
+  restoreLocation?.();
+  restoreLocation = undefined;
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
@@ -110,21 +111,19 @@ describe("Person page shows a plain state for each failure", () => {
   });
 
   it("Other failures show plain messages: answers 401 qa:TC-APL2664-3d261d73@v1", async () => {
-    const toSignIn = vi.spyOn(sessionNav, "toSignIn").mockImplementation(() => {});
+    // The visible session-expired sentence is deferred to APL-2652. This case only checks the existing redirect.
+    const original = Object.getOwnPropertyDescriptor(window, "location");
+    const location = { href: window.location.href };
+    Object.defineProperty(window, "location", { configurable: true, writable: true, value: location });
+    restoreLocation = () => { if (original) Object.defineProperty(window, "location", original); };
     vi.stubGlobal("fetch", vi.fn(async () => json(401, { error: `Session ended for ${SECRET_NAME}` })));
     const page = await openPerson();
-    // v1.1 wants the sentence shown. api() already leaves this page for /signin, so the sentence stays there.
-    expect(toSignIn).toHaveBeenCalledOnce();
+    expect(location.href).toBe("/signin");
+    expect(location.href).not.toContain("expired");
     expect(retryButton(page)).toBeUndefined();
+    expect(page.textContent).not.toContain("Your session has expired");
     expect(page.textContent).not.toContain(NO_ACCESS);
     expect(page.innerHTML).not.toContain(SECRET_NAME);
-    act(() => root?.unmount());
-    const host = document.createElement("div");
-    document.body.appendChild(host);
-    root = createRoot(host);
-    await act(async () => { root!.render(<SignInForm justReset={false} sessionExpired />); });
-    expect(document.body.textContent).toContain("Your session has expired, please sign in again");
-    expect(retryButton(document.body)).toBeUndefined();
   });
 
   it("Other failures show plain messages: answers 404 qa:TC-APL2664-a3ea3ce6@v1", async () => {

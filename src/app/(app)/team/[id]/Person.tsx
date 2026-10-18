@@ -24,6 +24,7 @@ export default function PersonPage() {
   const settled = !g.loading;
   const passwordChange = settled && g.status === 403 && g.code === "PASSWORD_CHANGE_REQUIRED";
   const denied = settled && g.status === 403 && !passwordChange;
+  // A 401 relies on the existing redirect in api(). The visible session-expired sentence is deferred to APL-2652.
   const expired = settled && g.status === 401;
   const missing = settled && g.status === 404;
   const serverFault = settled && (g.status === 500 || g.status === 502 || g.status === 503);

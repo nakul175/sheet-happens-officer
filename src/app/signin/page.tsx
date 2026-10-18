@@ -6,8 +6,7 @@ import s from "./signin.module.css";
 export const metadata = { title: "Sign in · Sheet Happens Officer" };
 
 async function Form({ params }: { params: PageProps<"/signin">["searchParams"] }) {
-  const q = await params;
-  return <SignInForm justReset={q.reset === "1"} sessionExpired={q.expired === "1"} />;
+  return <SignInForm justReset={(await params).reset === "1"} />;
 }
 
 export default function Page({ searchParams }: PageProps<"/signin">) {
