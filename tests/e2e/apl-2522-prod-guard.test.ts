@@ -3,7 +3,7 @@
 import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { assertStoryTargetAllowed } from "./base-url";
+import { assertStoryTargetAllowed, startingBaseUrl } from "./base-url";
 
 const PROD = "https://sheethappensofficer.com";
 const PROD_APP = "https://app.sheethappensofficer.com";
@@ -71,5 +71,48 @@ describe("APL-2522 spec prod guard", () => {
     expect(() => assertStoryTargetAllowed({ NODE_ENV: "test", TASKBOARD_URL: LOCAL, STAGING_URL: STAGING }, STAGING)).not.toThrow();
     expect(() => assertStoryTargetAllowed({ NODE_ENV: "test", TASKBOARD_URL: "not a url" }, STAGING)).not.toThrow();
     expect(() => assertStoryTargetAllowed({ NODE_ENV: "test", TASKBOARD_URL: "sheethappensofficer.com" }, STAGING)).toThrow(/Refusing to run story tests against production \(sheethappensofficer\.com\)/);
+  });
+
+  it("refuses the production IP on any port, with or without a scheme", () => {
+    const env = { NODE_ENV: "test" } as NodeJS.ProcessEnv;
+    for (const value of ["http://168.144.144.69:3000", "168.144.144.69:3000", "https://168.144.144.69:443"]) {
+      let message = "";
+      try {
+        assertStoryTargetAllowed({ ...env, TASKBOARD_URL: value }, STAGING);
+      } catch (error) {
+        message = error instanceof Error ? error.message : "";
+      }
+      expect(message, value).toBe("Refusing to run story tests against production (168.144.144.69).");
+      expect(message).not.toContain(":3000");
+      expect(message).not.toContain(":443");
+    }
+  });
+
+  it("refuses a production host written with a port or a path and no scheme", () => {
+    const env = { NODE_ENV: "test" } as NodeJS.ProcessEnv;
+    for (const value of ["app.sheethappensofficer.com:443", "app.sheethappensofficer.com/tasks"]) {
+      expect(() => assertStoryTargetAllowed({ ...env, STAGING_URL: value }, LOCAL), value).toThrow(
+        "Refusing to run story tests against production (app.sheethappensofficer.com).",
+      );
+    }
+  });
+
+  it("fails closed when the starting BASE_URL cannot be read, and the error quotes no value", () => {
+    const hidden = "https://user:s3cret@sheethappensofficer.com";
+    const unread = { environ: null, underVitest: true, liveBaseUrl: hidden } as const;
+    for (const platform of ["darwin", "linux"] as const) {
+      let message = "";
+      try {
+        startingBaseUrl({ ...unread, platform });
+      } catch (error) {
+        message = error instanceof Error ? error.message : "";
+      }
+      expect(message, platform).toBe("Refusing to run: the starting BASE_URL could not be read.");
+      expect(message).not.toContain("s3cret");
+      expect(message).not.toContain("sheethappensofficer");
+    }
+    const image = Buffer.from("OTHER=1\0BASE_URL=https://staging.sheethappensofficer.com\0", "latin1");
+    expect(startingBaseUrl({ platform: "linux", environ: image, underVitest: true, liveBaseUrl: "/" })).toBe("https://staging.sheethappensofficer.com");
+    expect(startingBaseUrl({ platform: "linux", environ: Buffer.from("OTHER=1\0", "latin1"), underVitest: true, liveBaseUrl: hidden })).toBeUndefined();
   });
 });

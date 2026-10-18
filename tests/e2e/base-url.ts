@@ -1,6 +1,7 @@
 // The APL-2522 spec calls this before its tests run.
 // Vitest replaces the BASE_URL it was given with "/" before the spec file loads.
 // The value from process start is still in the process image (on Linux, /proc/self/environ).
+// If that image cannot be read, the original value is hidden and the guard fails closed.
 // TASKBOARD_URL and STAGING_URL are read from the live environment. The rewritten slot is not.
 import { readFileSync } from "node:fs";
 
@@ -8,38 +9,72 @@ const PRODUCTION_HOSTS = new Set([
   "sheethappensofficer.com",
   "www.sheethappensofficer.com",
   "app.sheethappensofficer.com",
+  "168.144.144.69",
 ]);
 
-/** BASE_URL as it was when this process started, before Vitest rewrote it to "/". */
+const UNREADABLE = "Refusing to run: the starting BASE_URL could not be read.";
+
+export type StartingBaseUrl = {
+  platform: NodeJS.Platform;
+  /** Process image, or null when it cannot be read. Ignored off Linux. */
+  environ: Buffer | null;
+  underVitest: boolean;
+  liveBaseUrl: string | undefined;
+};
+
+function baseUrlFromEnviron(environ: Buffer): string | undefined {
+  const marker = "BASE_URL=";
+  for (const entry of environ.toString("latin1").split("\0")) {
+    if (!entry.startsWith(marker)) continue;
+    const value = entry.slice(marker.length);
+    return value === "" ? undefined : value;
+  }
+  return undefined;
+}
+
+/**
+ * BASE_URL as it was when the process started.
+ * Throws, without quoting any value, when that original value cannot be known.
+ * An absent BASE_URL in a readable process image is known: it was not set.
+ */
+export function startingBaseUrl(input: StartingBaseUrl): string | undefined {
+  if (input.platform === "linux" && input.environ) {
+    return baseUrlFromEnviron(input.environ);
+  }
+  if (!input.underVitest) {
+    const current = input.liveBaseUrl;
+    if (current == null || current === "" || current === "/") return undefined;
+    return current;
+  }
+  throw new Error(UNREADABLE);
+}
+
+/** BASE_URL from process start. Vitest has already rewritten the live value to "/". */
 export function baseUrlAtProcessStart(): string | undefined {
+  let environ: Buffer | null = null;
   if (process.platform === "linux") {
     try {
-      const marker = "BASE_URL=";
-      for (const entry of readFileSync("/proc/self/environ").toString("latin1").split("\0")) {
-        if (!entry.startsWith(marker)) continue;
-        const value = entry.slice(marker.length);
-        return value === "" ? undefined : value;
-      }
-      return undefined;
+      environ = readFileSync("/proc/self/environ");
     } catch {
-      // The process image could not be read; fall through.
+      environ = null;
     }
   }
-  // Playwright and other runners do not rewrite BASE_URL. Vitest does, and then this slot is "/".
-  if (process.env.VITEST) return undefined;
-  const current = process.env.BASE_URL;
-  if (current == null || current === "" || current === "/") return undefined;
-  return current;
+  return startingBaseUrl({
+    platform: process.platform,
+    environ,
+    underVitest: Boolean(process.env.VITEST),
+    liveBaseUrl: process.env.BASE_URL,
+  });
 }
 
 function hostOf(raw: string | undefined): string | null {
-  if (raw == null || raw === "") return null;
+  if (raw == null || raw === "" || raw === "/") return null;
+  const candidate = raw.includes("://") ? raw : `http://${raw}`;
   try {
-    const host = new URL(raw).hostname.toLowerCase().replace(/\.$/, "");
+    const host = new URL(candidate).hostname.toLowerCase().replace(/\.$/, "");
     return host || null;
   } catch {
-    const bare = raw.toLowerCase().replace(/\.$/, "");
-    return bare === "/" ? null : bare;
+    return null;
   }
 }
 
