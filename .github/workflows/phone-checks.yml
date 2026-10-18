@@ -15,7 +15,8 @@ permissions:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  # A run for refs/heads/main is never cancelled. Every other ref cancels the previous run in this group.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   viewport:
