@@ -1,8 +1,8 @@
 // APL-2658. Each CRM_VISIBLE mode is its own `next start` process and its own environment.
 // Michael's scenario names the open mode `on`. crmMode() treats every value other than `admins` and `off`
 // as everyone, so the server for that row is started with CRM_VISIBLE=on.
-// The production build must exist (CI runs `npm run build` before `npm test`). A mode that never answers
-// /api/health fails the suite.
+// Run with `npm run test:crm-modes` after `npm run build`. `npm test` does not start these servers.
+// A missing build, or a mode that never answers /api/health, fails this file.
 import "dotenv/config";
 import { spawn, type ChildProcess } from "node:child_process";
 import { closeSync, existsSync, mkdtempSync, openSync, readdirSync, readFileSync, readlinkSync } from "node:fs";
@@ -16,7 +16,10 @@ import { QUICK_ACTIONS } from "../src/lib/concierge/reads";
 import { istDate, PW } from "./helpers";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
-const DEAL = "Acme renewal";
+// Run-scoped so a shared test database cannot mix this seed with another spec's "Acme renewal".
+const runId = `${Date.now().toString(36)}-${process.pid}`;
+const tag = `ZZ-TEST-${runId}`;
+const dealName = `Acme renewal ${tag}`;
 const MODES = ["on", "admins", "off"] as const;
 type Mode = (typeof MODES)[number];
 
@@ -31,6 +34,31 @@ type Running = {
 };
 
 const running = new Map<Mode, Running>();
+const seed: { userIds: string[]; emails: string[]; projectId?: string; orgId?: string } = { userIds: [], emails: [] };
+
+/** Removes this run's users, deal and organisation so the shared test database stays clear. */
+async function cleanupSeed() {
+  const users = seed.emails.length || seed.userIds.length
+    ? await db.user.findMany({
+      where: { OR: [{ id: { in: seed.userIds } }, { email: { in: seed.emails } }] },
+      select: { id: true },
+    })
+    : [];
+  const userIds = users.map((user) => user.id);
+  if (userIds.length) {
+    await db.modelUsage.deleteMany({ where: { userId: { in: userIds } } });
+    await db.actionLog.deleteMany({
+      where: { OR: [{ actorId: { in: userIds } }, ...(seed.projectId ? [{ projectId: seed.projectId }] : [])] },
+    });
+    await db.auditLog.deleteMany({ where: { actorId: { in: userIds } } });
+  } else if (seed.projectId) {
+    await db.actionLog.deleteMany({ where: { projectId: seed.projectId } });
+  }
+  if (seed.projectId) await db.project.deleteMany({ where: { id: seed.projectId } });
+  if (seed.orgId) await db.organisation.deleteMany({ where: { id: seed.orgId } });
+  if (seed.emails.length) await db.loginAttempt.deleteMany({ where: { email: { in: seed.emails } } });
+  if (userIds.length) await db.user.deleteMany({ where: { id: { in: userIds } } });
+}
 
 function freePort(): Promise<number> {
   return new Promise((resolve, reject) => {
@@ -86,7 +114,7 @@ async function startModeServer(mode: Mode, opts: { bin?: string; args?: string[]
     APP_URL: `http://127.0.0.1:${port}`,
     PORT: String(port),
     SUPER_ADMIN_EMAILS: "root.test@aplyd.com",
-    JOB_SECRET: process.env.JOB_SECRET || "0123456789abcdef0123",
+    JOB_SECRET: process.env.JOB_SECRET || "replace-with-a-token-of-at-least-16-chars",
   };
   const bin = opts.bin ?? "npx";
   const args = opts.args ?? ["next", "start", "-H", "127.0.0.1", "-p", String(port)];
@@ -149,9 +177,9 @@ async function signIn(server: Running, name: string, email: string) {
 type Read = { name: string; status: number; text: string; hiddenStatus: number; mustName: boolean };
 
 /** My tasks, search, the bell, every concierge quick action, and the deal API. */
-async function readPaths(base: string, cookie: string, dealId: string): Promise<Read[]> {
+async function readPaths(base: string, cookie: string, dealId: string, name: string): Promise<Read[]> {
   const my = await call(base, cookie, "GET", "/api/my-tasks");
-  const search = await call(base, cookie, "GET", `/api/search?q=${encodeURIComponent(DEAL)}`);
+  const search = await call(base, cookie, "GET", `/api/search?q=${encodeURIComponent(name)}`);
   const bell = await call(base, cookie, "GET", "/api/notifications");
   const quicks = [];
   for (const q of QUICK_ACTIONS) quicks.push(await call(base, cookie, "POST", `/api/concierge/quick/${q.id}`, {}));
@@ -234,16 +262,21 @@ describe("CRM_VISIBLE modes are tested against a real server per mode", () => {
   }, 180_000);
 
   afterAll(async () => {
-    for (const server of running.values()) killGroup(server.pid);
-    await db.$disconnect();
+    try { await cleanupSeed(); } finally {
+      for (const server of running.values()) killGroup(server.pid);
+      await db.$disconnect();
+    }
   });
 
   it("Hidden deals stay hidden through every read path", async () => {
     const open = running.get("on");
     expect(open, "the on server is running").toBeTruthy();
-    const stamp = Date.now();
-    const member = await signIn(open!, "member", `member.${stamp}@aplyd.com`);
-    const admin = await signIn(open!, "admin", `admin.${stamp}@aplyd.com`);
+    const memberEmail = `member.${tag}@aplyd.com`.toLowerCase();
+    const adminEmail = `admin.${tag}@aplyd.com`.toLowerCase();
+    seed.emails.push(memberEmail, adminEmail);
+    const member = await signIn(open!, `member ${tag}`, memberEmail);
+    const admin = await signIn(open!, `admin ${tag}`, adminEmail);
+    seed.userIds.push(member.id, admin.id);
     // Role lives on the user row, which every mode's server reads. Skip the shared Super Admin account.
     await db.user.update({ where: { id: admin.id }, data: { orgRole: "ADMIN" } });
 
@@ -252,16 +285,18 @@ describe("CRM_VISIBLE modes are tested against a real server per mode", () => {
     const pipelines = pipes.json?.pipelines as { id: string; key: string }[];
     const pipe = pipelines.find((p) => p.key === "DEAL_PROACTIVE");
     expect(pipe?.id).toBeTruthy();
-    const org = await call(open!.base, member.cookie, "POST", "/api/orgs", { name: `Buyer ${stamp}` });
+    const org = await call(open!.base, member.cookie, "POST", "/api/orgs", { name: `Buyer ${tag}` });
     expect(org.status, org.text).toBe(201);
     const organisationId = (org.json?.organisation as { id: string }).id;
+    seed.orgId = organisationId;
     const made = await call(open!.base, member.cookie, "POST", "/api/deals", {
-      name: DEAL, organisationId, pipelineId: pipe!.id, leaderId: member.id, whyPursue: "fit",
-      nextStep: { title: "Send the pack", dueDate: istDate(2) },
+      name: dealName, organisationId, pipelineId: pipe!.id, leaderId: member.id, whyPursue: tag,
+      nextStep: { title: `Send the pack ${tag}`, dueDate: istDate(2) },
     });
     expect(made.status, made.text).toBe(201);
     const dealId = (made.json?.deal as { id: string; name: string }).id;
-    expect((made.json?.deal as { name: string }).name).toBe(DEAL);
+    seed.projectId = dealId;
+    expect((made.json?.deal as { name: string }).name).toBe(dealName);
     const task = await db.task.findFirst({ where: { projectId: dealId, deletedAt: null }, select: { id: true } });
     expect(task?.id).toBeTruthy();
     // Membership only, with no bell row: a notice would store the deal name, and the bell does not filter those.
@@ -279,18 +314,18 @@ describe("CRM_VISIBLE modes are tested against a real server per mode", () => {
       const server = running.get(example.mode)!;
       const who = people[example.user];
       const label = `mode=${example.mode} user=${example.user} visible=${example.visible ? "yes" : "no"}`;
-      const reads = await readPaths(server.base, who.cookie, dealId);
+      const reads = await readPaths(server.base, who.cookie, dealId, dealName);
       for (const read of reads) {
         const wanted = example.visible ? 200 : read.hiddenStatus;
         expect(read.status, `${label} ${read.name}`).toBe(wanted);
         if (!example.visible || read.mustName) {
-          if (example.visible) expect(read.text, `${label} ${read.name}`).toContain(DEAL);
-          else expect(read.text, `${label} ${read.name}`).not.toContain(DEAL);
+          if (example.visible) expect(read.text, `${label} ${read.name}`).toContain(dealName);
+          else expect(read.text, `${label} ${read.name}`).not.toContain(dealName);
         }
       }
       const joined = reads.map((read) => read.text).join("\n");
-      if (example.visible) expect(joined, label).toContain(DEAL);
-      else expect(joined, label).not.toContain(DEAL);
+      if (example.visible) expect(joined, label).toContain(dealName);
+      else expect(joined, label).not.toContain(dealName);
     }
   }, 120_000);
 
