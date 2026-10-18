@@ -8,7 +8,6 @@ import { getTask, newProject, newTask } from "../g2";
 import { patchCurrent, why } from "../helpers/jim-http";
 
 const NOT_MERGED = "Needs PR #13 (SHO-BUG-13) merged to main and deployed to staging: on main a PATCH without expectedUpdatedAt still saves.";
-const TWO_SESSIONS = "Needs the Admin and the Member signed in together, which needs a staging window.";
 const STALE = "This task changed while you were editing it.";
 
 test.describe("SHO-BUG-13 / APL-2648", () => {
@@ -25,7 +24,7 @@ test.describe("SHO-BUG-13 / APL-2648", () => {
     expect(after.updatedAt).toBe(before.updatedAt);
   });
 
-  test.skip("AC1 (two people): User B's change survives User A's PATCH that omits the version", why(`${NOT_MERGED} ${TWO_SESSIONS}`), async ({ admin, member, later }) => {
+  test.skip("AC1 (two people): User B's change survives User A's PATCH that omits the version", why(NOT_MERGED), async ({ admin, member, later }) => {
     const p = await newProject(admin, later, { label: "bug13 two people", members: [{ who: member, role: "EDITOR" }] });
     const t = await newTask(admin, p.id, { title: zz("v1") });
     const theirs = zz("B's title");

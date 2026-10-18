@@ -1,13 +1,13 @@
 // SHO-BUG-12 Slow load shows 'Could not reach the server' because in-flight status 0 is treated as a network failure (Linear APL-2647, PR #12).
 // The issue's four unnumbered acceptance criteria are taken in order as AC1 to AC4.
 // Slow and failed loads are simulated in the browser (route interception), so nothing on the server is touched.
-// Staging runs main, where PR #12 is not merged: the slow-load checks are skipped until it is; the real-failure checks run now.
+// The slow-load checks run whenever PR #12 is live on staging (tests/e2e/helpers/jim-gate.ts) and skip otherwise; the real-failure checks always run.
 import type { Page } from "@playwright/test";
 import { test, expect } from "../support";
 import { newProject, newTask, type Who } from "../g2";
-import { why } from "../helpers/jim-http";
+import { notLive, prLive } from "../helpers/jim-gate";
 
-const NOT_MERGED = "Needs PR #12 (SHO-BUG-12) merged to main and deployed to staging: on main a slow first load shows LoadFailed.";
+const WHY = "a slow first load shows LoadFailed without it.";
 const DELAY = 2500;
 const LOAD_FAILED = "Could not reach the server.";
 
@@ -36,7 +36,9 @@ async function open(page: Page, path: string, api: RegExp, handle: Parameters<Pa
 }
 
 test.describe("SHO-BUG-12 / APL-2647", () => {
-  test.skip("AC1: a request still in flight is never shown as a network failure (ProjectView)", why(NOT_MERGED), async ({ admin, later }) => {
+  test("AC1: a request still in flight is never shown as a network failure (ProjectView)", async ({ admin, later }) => {
+    const gate = await prLive(12, admin, null, later);
+    test.skip(!gate.deployed, notLive(gate, WHY));
     const i = await ids(admin, later);
     const page = admin.page;
     await open(page, SCREENS[0].path(i), SCREENS[0].api(i), async (r) => { await new Promise((x) => setTimeout(x, DELAY)); await r.continue(); });
@@ -46,7 +48,9 @@ test.describe("SHO-BUG-12 / APL-2647", () => {
   });
 
   for (const s of SCREENS) {
-    test.skip(`AC2 and AC4 (${s.name}): a first load slower than 400 ms shows the shared Skeleton, not LoadFailed or "Loading…"`, why(NOT_MERGED), async ({ admin, later }) => {
+    test(`AC2 and AC4 (${s.name}): a first load slower than 400 ms shows the shared Skeleton, not LoadFailed or "Loading…"`, async ({ admin, later }) => {
+      const gate = await prLive(12, admin, null, later);
+      test.skip(!gate.deployed, notLive(gate, WHY));
       const i = await ids(admin, later);
       const page = admin.page;
       await open(page, s.path(i), s.api(i), async (r) => { await new Promise((x) => setTimeout(x, DELAY)); await r.continue(); });

@@ -1,28 +1,31 @@
 // SHO-BUG-8 Editor can undo their own delete, skipping the Leader/Admin check (Linear APL-2640, PR #9). Acceptance criteria AC1 to AC4.
 // The Super Admin acts as Leader; the plain Member (SHO_MEMBER_*) is the Editor. Projects are ZZ-TEST and archived afterwards.
-// Staging runs main, where PR #9 is not merged, so the Editor checks are skipped until it is.
+// The Editor checks run whenever PR #9 is live on staging (tests/e2e/helpers/jim-gate.ts) and skip otherwise.
 import { test, expect } from "../support";
 import { newProject, newTask } from "../g2";
-import { deleteTask, raw, why } from "../helpers/jim-http";
+import { deleteTask, raw } from "../helpers/jim-http";
+import { notLive, prLive } from "../helpers/jim-gate";
 
-const NOT_MERGED = "Needs PR #9 (SHO-BUG-8) merged to main and deployed to staging: on main the Editor's Undo of a delete still succeeds.";
-const TWO_SESSIONS = "Needs the Admin and the Member signed in together, which needs a staging window.";
+const WHY = "an Editor's Undo of a delete still succeeds without it.";
 const REFUSED = "Only the project Leader or an Admin can do this.";
 
 test.describe("SHO-BUG-8 / APL-2640", () => {
-  test.skip("AC1: an Editor's Undo of their own delete is refused with the unauthorised-restore rule and message, and nothing is restored", why(`${NOT_MERGED} ${TWO_SESSIONS}`), async ({ admin, member, later }) => {
+  test("AC1: an Editor's Undo of their own delete is refused with the unauthorised-restore rule and message, and nothing is restored", async ({ admin, member, later }) => {
+    const gate = await prLive(9, admin, member, later);
+    test.skip(!gate.deployed, notLive(gate, WHY));
     const p = await newProject(admin, later, { label: "bug8 editor undo", members: [{ who: member, role: "EDITOR" }] });
     const t = await newTask(admin, p.id, { assigneeId: member.user.id });
-    const del = await deleteTask(member, t);
-    expect(del.status).toBe(204);
+    expect((await deleteTask(member, t)).status).toBe(204);
     const restore = await member.api.post(`/api/tasks/${t}/restore`); // the unauthorised restore from Trash
     expect(restore.status).toBe(403);
-    if (del.undoId) { // APL-2649 (PR #14) also drops the Undo id for an Editor; then there is nothing to undo at all
-      const u = await member.api.post(`/api/actions/${del.undoId}/undo`);
-      expect(u.status).toBe(403);
-      expect(u.json.error).toBe(restore.json.error);
-      expect(u.json.error).toBe(REFUSED);
-    }
+    // The action-log id from the Leader's Activity: PR #14 stops sending the Editor an Undo id, but the row can still be undone by id.
+    const items = (await admin.api.get(`/api/projects/${p.id}/activity`)).json.items as { id: string; what: string }[];
+    const row = items.find((i) => /to Trash/.test(i.what));
+    expect(row, "the delete's Activity row").toBeTruthy();
+    const u = await member.api.post(`/api/actions/${row!.id}/undo`, {});
+    expect(u.status).toBe(403);
+    expect(u.json.error).toBe(restore.json.error);
+    expect(u.json.error).toBe(REFUSED);
     expect((await member.api.get(`/api/tasks/${t}`)).status).toBe(404);
     const trash = (await admin.api.get(`/api/projects/${p.id}/trash`)).json.items as { id: string }[];
     expect(trash.some((x) => x.id === t), "still in Trash").toBe(true);
@@ -45,7 +48,9 @@ test.describe("SHO-BUG-8 / APL-2640", () => {
     expect(items.find((i) => i.id === del.undoId)?.undo).toBe("undone");
   });
 
-  test.skip("AC3: the check is on the server: an Editor calling the Undo and bulk-Undo routes directly is refused", why(`${NOT_MERGED} ${TWO_SESSIONS}`), async ({ admin, member, later }) => {
+  test("AC3: the check is on the server: an Editor calling the Undo and bulk-Undo routes directly is refused", async ({ admin, member, later }) => {
+    const gate = await prLive(9, admin, member, later);
+    test.skip(!gate.deployed, notLive(gate, WHY));
     const p = await newProject(admin, later, { label: "bug8 server check", members: [{ who: member, role: "EDITOR" }] });
     const t = await newTask(admin, p.id);
     // The action-log id comes from the Leader's Activity, so the check does not rely on the Editor being given an Undo id.
@@ -62,7 +67,9 @@ test.describe("SHO-BUG-8 / APL-2640", () => {
     expect((await admin.api.get(`/api/tasks/${t}`)).status).toBe(404);
   });
 
-  test.skip("AC4: an Editor's Undo of a delete is refused and the Leader's Undo of the same delete succeeds", why(`${NOT_MERGED} ${TWO_SESSIONS}`), async ({ admin, member, later }) => {
+  test("AC4: an Editor's Undo of a delete is refused and the Leader's Undo of the same delete succeeds", async ({ admin, member, later }) => {
+    const gate = await prLive(9, admin, member, later);
+    test.skip(!gate.deployed, notLive(gate, WHY));
     const p = await newProject(admin, later, { label: "bug8 both", members: [{ who: member, role: "EDITOR" }] });
     const t = await newTask(admin, p.id);
     expect((await deleteTask(member, t)).status).toBe(204);
