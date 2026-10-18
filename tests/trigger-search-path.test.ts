@@ -10,7 +10,7 @@
 // - [x] Guard requires localhost or 127.0.0.1 AND a sho_test_* database, and refuses overrides, sockets, defaultdb, sho_staging, public, and sho_pr*
 // - [x] Pooled test name contains SIMULATED; it is a search_path simulation
 // - [x] Public pin is proven with schema-qualified ALTER FUNCTION on the throwaway
-// - [x] migrate deploy is deploy/release.sh line 41; live schema=public is pending /etc/sho/app.env
+// - [x] Release script line 41 runs the Prisma migration command; live schema=public is pending /etc/sho/app.env
 import "dotenv/config";
 import { randomUUID } from "node:crypto";
 import { readFileSync, readdirSync, statSync } from "node:fs";
