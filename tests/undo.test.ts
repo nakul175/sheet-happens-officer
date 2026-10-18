@@ -2,7 +2,7 @@
 // Server must run with SUPER_ADMIN_EMAILS=root.test@aplyd.com and DATABASE_URL pointing at the same database.
 import { describe, expect, it } from "vitest";
 import { PrismaClient } from "../src/generated/prisma/client";
-import { account, project, superAdmin, task, type Account, patchTask } from "./helpers";
+import { account, project, superAdmin, task, type Account, patchTask, withVersion } from "./helpers";
 
 const db = new PrismaClient();
 
@@ -103,18 +103,18 @@ describe("undo (6.4)", () => {
     const p = await project(lead, lead, [{ who: ed }]);
     const t = await task(lead, p.id, { title: "Flow", assigneeId: lead.id });
     const sub = await task(lead, p.id, { parentId: t });
-    const done = await lead.c.post(`/api/tasks/${t}/complete`, { completeAll: true });
+    const done = await lead.c.post(`/api/tasks/${t}/complete`, await withVersion(lead, t, { completeAll: true }));
     expect(done.status).toBe(200);
     expect((await lead.c.post(`/api/actions/${done.headers.get("x-undo-id")}/undo`)).status).toBe(200);
     const open = (await lead.c.get(`/api/tasks/${t}`)).json.task;
     expect(open.completedAt).toBeNull();
     expect((await lead.c.get(`/api/tasks/${sub}`)).json.task.completedAt).toBeNull();
 
-    const mv = await lead.c.post(`/api/tasks/${t}/move`, { sectionId: p.doing });
+    const mv = await lead.c.post(`/api/tasks/${t}/move`, await withVersion(lead, t, { sectionId: p.doing }));
     expect((await lead.c.post(`/api/actions/${mv.headers.get("x-undo-id")}/undo`)).status).toBe(200);
     expect((await lead.c.get(`/api/tasks/${t}`)).json.task.sectionId).toBe(p.todo);
 
-    const as = await lead.c.post(`/api/tasks/${t}/assign`, { assigneeId: ed.id });
+    const as = await lead.c.post(`/api/tasks/${t}/assign`, await withVersion(lead, t, { assigneeId: ed.id }));
     expect((await lead.c.post(`/api/actions/${as.headers.get("x-undo-id")}/undo`)).status).toBe(200);
     expect((await lead.c.get(`/api/tasks/${t}`)).json.task.assignee.id).toBe(lead.id);
 
@@ -166,9 +166,9 @@ describe("notices (7.1 to 7.3)", () => {
     const ed = await account("editor");
     const p = await project(lead, lead, [{ who: ed }]);
     const t = await task(lead, p.id, { title: "Handed", assigneeId: ed.id });
-    await lead.c.post(`/api/tasks/${t}/assign`, { assigneeId: lead.id });
+    await lead.c.post(`/api/tasks/${t}/assign`, await withVersion(lead, t, { assigneeId: lead.id }));
     expect((await notices(ed)).some((n) => /took "Handed" off you/.test(n.text))).toBe(true);
-    await lead.c.post(`/api/tasks/${t}/assign`, { assigneeId: ed.id });
+    await lead.c.post(`/api/tasks/${t}/assign`, await withVersion(lead, t, { assigneeId: ed.id }));
     await lead.c.del(`/api/tasks/${t}`);
     const del = (await notices(ed)).find((n) => /moved "Handed" to Trash/.test(n.text))!;
     expect(del.href).toBe(`/projects/${p.id}/trash`);
@@ -218,7 +218,7 @@ describe("action log and audit log (6.3, 6.5)", () => {
     const t = await task(lead, p.id, { title: "Parent", assigneeId: ed.id });
     const sub = await task(lead, p.id, { parentId: t, assigneeId: ed.id });
     await task(lead, p.id, { assigneeId: ed.id });
-    await lead.c.post(`/api/tasks/${t}/complete`, { completeAll: true });
+    await lead.c.post(`/api/tasks/${t}/complete`, await withVersion(lead, t, { completeAll: true }));
     await lead.c.del(`/api/projects/${p.id}/members/${ed.id}?handoverTo=${lead.id}`);
     const rows = await db.actionLog.findMany({ where: { projectId: p.id }, orderBy: { createdAt: "asc" } });
     const acts = rows.map((r) => r.action);

@@ -20,6 +20,8 @@ export const bulkInput = z.object({
   assigneeId: z.string().min(1).optional(),
   dueDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use a date like 2026-10-31.").nullable().optional(),
   sectionId: z.string().min(1).optional(),
+  // APL-2668: the updatedAt the page showed for each selected task. Required for assign, move and complete.
+  versions: z.record(z.string(), z.string()).optional(),
 });
 type Input = z.infer<typeof bulkInput>;
 
@@ -30,6 +32,8 @@ export async function bulkChange(user: Actor, projectId: string, input: Input) {
   if (ids.length > BULK_MAX) throw new ApiError(400, `You can change up to ${BULK_MAX} tasks at once. You selected ${ids.length}. Select fewer and try again.`, { tooMany: true, max: BULK_MAX });
   const a = await projectAccess(user, projectId, { write: true });
   requireWrite(a);
+  // APL-2668: every task says which version the page showed, or nothing is changed.
+  if (input.action !== "date" && ids.some((id) => !input.versions?.[id])) throw new ApiError(400, "expectedUpdatedAt is required");
 
   // Check the target once, for everyone: a bad target fails the whole request before anything changes.
   if (input.action === "assign") {
@@ -59,22 +63,22 @@ export async function bulkChange(user: Actor, projectId: string, input: Input) {
     try {
       if (input.action === "assign") {
         if (t.assigneeId === input.assigneeId) { skipped.push({ id, title: t.title, reason: "already up to date" }); continue; }
-        await assignTask(user, id, input.assigneeId!);
+        await assignTask(user, id, input.assigneeId!, input.versions![id]);
       } else if (input.action === "date") {
         if ((formatDueDate(t.dueDate) ?? null) === (input.dueDate ?? null)) { skipped.push({ id, title: t.title, reason: "already up to date" }); continue; }
         await updateTask(user, id, { dueDate: input.dueDate ?? null, expectedUpdatedAt: t.updatedAt.toISOString() });
       } else if (input.action === "move") {
         if (t.sectionId === input.sectionId) { skipped.push({ id, title: t.title, reason: "already up to date" }); continue; }
-        await moveTask(user, id, input.sectionId!);
+        await moveTask(user, id, input.sectionId!, input.versions![id]);
       } else {
         if (t.completedAt) { skipped.push({ id, title: t.title, reason: "already complete" }); continue; }
-        await completeTask(user, id, false);
+        await completeTask(user, id, input.versions![id], false);
       }
       changed.push(t);
     } catch (e) {
       // Whatever went wrong, this task is named as skipped; the others carry on.
       const reason = e instanceof ApiError
-        ? (e.status === 403 ? "no permission" : e.extra?.needsConfirm === "open_subtasks" ? "has open subtasks" : e.status === 404 ? "not found" : "could not be changed")
+        ? (e.status === 403 ? "no permission" : e.extra?.stale ? "changed by someone else" : e.extra?.needsConfirm === "open_subtasks" ? "has open subtasks" : e.status === 404 ? "not found" : "could not be changed")
         : "could not be changed";
       skipped.push({ id, title: t.title, reason });
     }

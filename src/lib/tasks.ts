@@ -197,6 +197,11 @@ export async function listTasks(
   return { sections: out };
 }
 
+/** SHO-BUG-13, APL-2668: every task change says which version it was made on; refused before any read or write without one. */
+function requireVersion(expected: string | undefined): asserts expected is string {
+  if (!expected) throw new ApiError(400, "expectedUpdatedAt is required");
+}
+
 /** SHO-US-14.8 AC4: the same stale-edit answer for every inline edit. */
 async function staleCheck(user: Actor, id: string, t: TaskRow, role: Role, expected?: string) {
   if (expected && new Date(expected).getTime() !== t.updatedAt.getTime()) {
@@ -250,7 +255,8 @@ export async function updateTask(
 }
 
 // ---------------------------------------------------------------- assign, collaborators, approver (4.3, 4.6)
-export async function assignTask(user: Actor, id: string, assigneeId: string, expectedUpdatedAt?: string) {
+export async function assignTask(user: Actor, id: string, assigneeId: string, expectedUpdatedAt: string) {
+  requireVersion(expectedUpdatedAt);
   const { t, a } = await loadTask(user, id, { write: true });
   await staleCheck(user, id, t, a.role, expectedUpdatedAt);
   // The assignee may only hand a task with an approver on to that approver; the Leader and Admins keep full authority (SHO-BUG-6).
@@ -289,8 +295,10 @@ export async function removeCollaborator(user: Actor, id: string, userId: string
   });
 }
 
-export async function setApprover(user: Actor, id: string, approverId: string | null) {
+export async function setApprover(user: Actor, id: string, approverId: string | null, expectedUpdatedAt: string) {
+  requireVersion(expectedUpdatedAt);
   const { t, a } = await loadTask(user, id, { write: true });
+  await staleCheck(user, id, t, a.role, expectedUpdatedAt);
   if (t.parentId) throw new ApiError(400, "Subtasks do not have an approver.");
   if (user.id === t.assigneeId) throw new ApiError(403, "The assignee cannot change their own task's approver.");
   const isAwaiting = awaiting(t);
@@ -348,8 +356,10 @@ export async function sendBack(user: Actor, id: string) {
 }
 
 // ---------------------------------------------------------------- complete, reopen, move (4.5)
-export async function completeTask(user: Actor, id: string, completeAll = false) {
+export async function completeTask(user: Actor, id: string, expectedUpdatedAt: string, completeAll = false) {
+  requireVersion(expectedUpdatedAt);
   const { t, a } = await loadTask(user, id, { write: true, holderCanDo: true });
+  await staleCheck(user, id, t, a.role, expectedUpdatedAt);
   if (!canClose(user.id, a.role, t)) {
     throw new ApiError(403, t.approverId ? "Only the approver, the Leader or an Admin can close this task." : "You cannot complete this task.");
   }
@@ -403,15 +413,16 @@ export async function reopenTask(user: Actor, id: string, sectionId?: string) {
 }
 
 /** Dragging a card. Into the done Section completes, out of it reopens, otherwise only the Section changes. */
-export async function moveTask(user: Actor, id: string, sectionId: string, completeAll = false) {
+export async function moveTask(user: Actor, id: string, sectionId: string, expectedUpdatedAt: string, completeAll = false) {
+  requireVersion(expectedUpdatedAt);
   const { t, a } = await loadTask(user, id, { write: true, holderCanDo: true });
+  await staleCheck(user, id, t, a.role, expectedUpdatedAt);
   if (t.parentId) throw new ApiError(409, "Subtasks move with their parent task.");
   const dest = await db.section.findFirst({ where: { id: sectionId, projectId: t.projectId } });
   if (!dest) throw notFound("Section");
   if (dest.id === t.sectionId) return;
-  if (dest.isDone) return completeTask(user, id, completeAll);
+  if (dest.isDone) return completeTask(user, id, expectedUpdatedAt, completeAll);
   if (t.completedAt) return reopenTask(user, id, dest.id);
-  void a;
   await db.$transaction(async (tx) => {
     await tx.task.update({ where: { id }, data: { sectionId: dest.id } });
     await logAction(tx, { actorId: user.id, projectId: t.projectId, targetType: "task", targetId: id, action: "task.moved", before: { sectionId: t.sectionId }, after: { sectionId: dest.id } });

@@ -1,7 +1,7 @@
 // SHO-US-8.1 to 8.8: reads, proposals and cards, clarification, undo and privacy of the concierge.
 // Calls src/lib directly with a scripted fake model; the live server (same database) sets up people and work.
 import { describe, expect, it } from "vitest";
-import { account, istDate, project, superAdmin, task, type Account, patchTask } from "./helpers";
+import { account, istDate, project, superAdmin, task, type Account, patchTask, withVersion } from "./helpers";
 import { MONDAY, actor, db, lastData, lastResultText, say, script, tu, useFakeModel } from "./concierge-helpers";
 import { fakeCallCount, setFakeModel, type ModelRequest } from "../src/lib/model";
 import { answerChoice, quickAction, sendMessage } from "../src/lib/concierge/engine";
@@ -37,10 +37,10 @@ describe("reads (8.2)", () => {
     const trashed = await task(lead, p.id, { title: "Trashed late", dueDate: istDate(-5) });
     expect((await lead.c.del(`/api/tasks/${trashed}`)).status).toBe(204);
     const done = await task(lead, p.id, { title: "Finished thing" });
-    expect((await lead.c.post(`/api/tasks/${done}/complete`)).status).toBe(200);
+    expect((await lead.c.post(`/api/tasks/${done}/complete`, await withVersion(lead, done))).status).toBe(200);
     // Waiting on me: the editor's task with lead as approver, sent for approval.
     const review = await task(ed, p.id, { title: "Needs sign-off" });
-    expect((await lead.c.put(`/api/tasks/${review}/approver`, { approverId: lead.id })).status).toBe(200);
+    expect((await lead.c.put(`/api/tasks/${review}/approver`, await withVersion(lead, review, { approverId: lead.id }))).status).toBe(200);
     expect((await ed.c.post(`/api/tasks/${review}/send-for-approval`)).status).toBe(200);
     script(() => { throw new Error("no model call expected"); });
 

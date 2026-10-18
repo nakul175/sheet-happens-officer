@@ -364,7 +364,7 @@ export async function recheck(user: Actor, ops: Op[]) {
   return null;
 }
 
-/** The version an edit is made on. The card's own versions were already checked by the fingerprint at Confirm. */
+/** The version a change is made on. The card's own versions were already checked by the fingerprint at Confirm. */
 const versionOf = async (taskId: string) =>
   (await db.task.findUnique({ where: { id: taskId }, select: { updatedAt: true } }))?.updatedAt.toISOString() ?? "";
 
@@ -389,15 +389,15 @@ export async function execute(user: Actor, ops: Op[], handover: { taskId: string
           ...(op.due !== undefined ? { dueDate: op.due } : {}), ...(op.priority !== undefined ? { priority: op.priority } : {}),
         });
         break;
-      case "task.section": await moveTask(user, op.taskId, op.sectionId); break;
-      case "task.assign": await assignTask(user, op.taskId, op.assigneeId); break;
-      case "task.complete": await completeTask(user, op.taskId, true); break;
+      case "task.section": await moveTask(user, op.taskId, op.sectionId, await versionOf(op.taskId)); break;
+      case "task.assign": await assignTask(user, op.taskId, op.assigneeId, await versionOf(op.taskId)); break;
+      case "task.complete": await completeTask(user, op.taskId, await versionOf(op.taskId), true); break;
       case "task.reopen": await reopenTask(user, op.taskId); break;
       case "task.delete": await deleteTask(user, op.taskId); break;
       case "task.send_for_approval": await sendForApproval(user, op.taskId); break;
       case "task.send_back": await sendBack(user, op.taskId); break;
       case "task.collab": await (op.add ? addCollaborator(user, op.taskId, op.userId) : removeCollaborator(user, op.taskId, op.userId)); break;
-      case "task.approver": await setApprover(user, op.taskId, op.approverId); break;
+      case "task.approver": await setApprover(user, op.taskId, op.approverId, await versionOf(op.taskId)); break;
       case "task.blocked": await updateTask(user, op.taskId, { expectedUpdatedAt: await versionOf(op.taskId), blocked: op.blocked, ...(op.blocked ? { blockedReason: op.reason ?? null } : {}) }); break;
       case "project.create": await createProject(user, { name: op.name, description: op.description, leaderId: op.leaderId }); break;
       case "member.add": await addMember(user, op.projectId, op.userId, op.role); break;
