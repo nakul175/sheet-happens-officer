@@ -7,7 +7,7 @@
 import { execFileSync } from "node:child_process";
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
-import { test, expect, zz, BASE_URL } from "../support";
+import { test, expect, zz, BASE_URL, type Api } from "../support";
 import { PASS, passwordOk } from "./qa";
 
 // qa:TC uses the AC id already on the test. Pam has not published a separate hash for these cases.
@@ -18,7 +18,7 @@ test.beforeAll(() => {
   if (!passwordOk(PASS)) throw new Error("SHO_QA_PASS must be at least 8 characters with a letter and a number.");
 });
 
-async function version(who: { api: { get: (p: string) => Promise<{ status: number; json: Record<string, any> }> } }, id: string) {
+async function version(who: { api: Api }, id: string) {
   const seen = await who.api.get(`/api/tasks/${id}`);
   expect(seen.status, JSON.stringify(seen.json)).toBe(200);
   return seen.json.task.updatedAt as string;
