@@ -25,14 +25,15 @@ function env(over: Record<string, string | undefined> = {}): NodeJS.ProcessEnv {
     APP_URL: "http://localhost:3100",
     SHO_ALLOW_TEST_PURGE: "1",
     STAGING_WORKSPACE_ID: workspaceId,
-    PROD_DB_HOST: "",
-    PROD_DB_NAME: "",
+    PROD_DB_HOST: "prod.example.invalid",
+    PROD_DB_NAME: "sho_prod",
     ...over,
     NODE_ENV: "test",
   };
 }
 
-const argv = (apply = false) => (apply ? ["--workspace", workspaceId, "--apply"] : ["--workspace", workspaceId]);
+const argv = (apply = false) =>
+  apply ? ["--workspace", workspaceId, "--apply", `--confirm=${dbName}`] : ["--workspace", workspaceId];
 
 async function capture(run: () => Promise<number>) {
   const lines: string[] = [];
@@ -129,6 +130,9 @@ describe("purge zz-test people (APL-2625)", () => {
       { name: "PROD_DB_NAME", env: env({ PROD_DB_NAME: dbName }), argv: argv(true), message: "database name is production" },
       { name: "production direct url", env: env({ DIRECT_DATABASE_URL: fakeUrl }), argv: argv(true), message: "database host is production" },
       { name: "workspace mismatch", env: env(), argv: ["--workspace", otherWorkspaceId, "--apply"], message: "does not match the configured staging workspace" },
+      { name: "blank PROD_DB_HOST", env: env({ PROD_DB_HOST: "  " }), argv: argv(true), message: "PROD_DB_HOST and PROD_DB_NAME must be set" },
+      { name: "empty PROD_DB_NAME", env: env({ PROD_DB_NAME: "" }), argv: argv(true), message: "PROD_DB_HOST and PROD_DB_NAME must be set" },
+      { name: "missing PROD_DB_HOST", env: env({ PROD_DB_HOST: undefined }), argv: argv(false), message: "PROD_DB_HOST and PROD_DB_NAME must be set" },
     ];
     for (const item of cases) {
       let connected = false;
@@ -156,6 +160,7 @@ describe("purge zz-test people (APL-2625)", () => {
     const { code, text } = await capture(() => runPurge(env(), argv(false)));
     expect(code, text).toBe(0);
     expect(text).toContain("mode: dry-run");
+    expect(text).toContain("cascade TaskCollaborator.outside: 0");
     expect(text).toMatch(/^User: 1$/m);
     expect(text).toMatch(/^Session: 1$/m);
     expect(listedIds(text)).toEqual([eligible.id]);
