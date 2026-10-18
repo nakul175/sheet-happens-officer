@@ -3,7 +3,7 @@
 // athenainfonomics.com self-signup belongs to SHO-E23 and is not re-tested here.
 import type { Page } from "@playwright/test";
 import { test, login } from "../support";
-import { PASS, passwordOk, alias, zz, gate, signUp, signInAs, mailToken, nextPass, personByEmail, deactivate, expect, BASE_URL } from "./qa";
+import { PASS, passwordOk, alias, zz, gate, signUp, signInAs, mailToken, nextPass, personByEmail, deactivate, expect, BASE_URL, waitForSinkMail } from "./qa";
 
 const DOMAIN = "Use your @aplyd.com or @athenainfonomics.com email address.";
 const alertOf = (p: Page) => p.locator('[role="alert"]:not(#__next-route-announcer__)');
@@ -168,7 +168,45 @@ test("AC6: editing the profile and ending other sessions both take effect", asyn
   expect((await here.api.get("/api/auth/me")).status).toBe(200);
 });
 
-test.fixme("AC7: production email delivers every verification and reset message to real inboxes", async () => {
-  // The criterion needs the production email setup and real inboxes, exercised on the seven auth screens.
-  // This suite must not touch production, and a local outbox is not a real inbox. Left for a manual production check.
+const PRODUCTION_HOSTS = new Set(["sheethappensofficer.com", "www.sheethappensofficer.com", "app.sheethappensofficer.com"]);
+
+test("AC7: staging auth mail is in the test mail sink within 60 seconds and each link completes", async ({ anon, admin, later }) => {
+  test.setTimeout(240_000);
+  const email = alias("2465", "ac7", "aplyd.com");
+  expect(email.startsWith("nakul17+"), "the address is a nakul17+ alias").toBe(true);
+  expect((await signUp(anon.request, zz("ac7"), email)).status).toBe(201);
+  const first = await waitForSinkMail(email, "Verify");
+  expect(first.to?.toLowerCase()).toBe(email.toLowerCase());
+
+  expect((await anon.request.post("/api/auth/resend-verification", { data: { email } })).ok()).toBe(true);
+  const second = await waitForSinkMail(email, "Verify", first.token);
+  expect(second.token).not.toBe(first.token);
+  for (const mail of [first, second]) {
+    const host = mail.text?.match(/https?:\/\/([^/\s]+)/)?.[1]?.toLowerCase() ?? "";
+    expect(PRODUCTION_HOSTS.has(host), "the link stays on staging").toBe(false);
+    expect(host).toBe(new URL(BASE_URL).hostname);
+  }
+  await anon.goto(`/verify?token=${second.token}`);
+  await expect(anon.getByRole("heading", { name: "Email verified" })).toBeVisible();
+  const person = await personByEmail(admin.api, email);
+  expect(person?.status).toBe("ACTIVE");
+  later(() => deactivate(admin.api, person!.id));
+
+  expect((await anon.request.post("/api/auth/forgot-password", { data: { email } })).ok()).toBe(true);
+  const reset = await waitForSinkMail(email, "Reset");
+  expect(reset.to?.toLowerCase()).toBe(email.toLowerCase());
+  const resetHost = reset.text?.match(/https?:\/\/([^/\s]+)/)?.[1]?.toLowerCase() ?? "";
+  expect(PRODUCTION_HOSTS.has(resetHost)).toBe(false);
+  expect(resetHost).toBe(new URL(BASE_URL).hostname);
+  const updated = nextPass(PASS);
+  await anon.goto(`/reset?token=${reset.token}`);
+  await anon.getByLabel("New password", { exact: true }).fill(updated);
+  await anon.getByLabel("Confirm new password").fill(updated);
+  await anon.getByRole("button", { name: "Save and sign in" }).click();
+  await expect(anon).toHaveURL(/\/signin\?reset=1/);
+  expect((await anon.request.post("/api/auth/signin", { data: { email, password: PASS } })).status()).toBe(401);
+  const neu = await anon.request.post("/api/auth/signin", { data: { email, password: updated } });
+  const body = await neu.text();
+  expect(body.includes(updated)).toBe(false);
+  expect(neu.status()).toBe(200);
 });

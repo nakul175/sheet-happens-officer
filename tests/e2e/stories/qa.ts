@@ -51,6 +51,56 @@ export function mailToken(email: string, subjectIncludes: string) {
   return mail?.text?.match(/token=([\w-]+)/)?.[1] ?? null;
 }
 
+type SinkMail = Mail & { token: string };
+
+function sinkRow(row: unknown): Mail | null {
+  if (!row || typeof row !== "object") return null;
+  const rec = row as { to?: unknown; To?: unknown; subject?: unknown; Subject?: unknown; text?: unknown; Text?: unknown };
+  const to = typeof rec.to === "string" ? rec.to
+    : typeof rec.To === "string" ? rec.To
+    : Array.isArray(rec.To) ? rec.To.map((item) => (item && typeof item === "object" && "Address" in item ? String((item as { Address?: unknown }).Address ?? "") : "")).filter(Boolean).join(",")
+    : "";
+  const subject = typeof rec.subject === "string" ? rec.subject : typeof rec.Subject === "string" ? rec.Subject : "";
+  const text = typeof rec.text === "string" ? rec.text : typeof rec.Text === "string" ? rec.Text : "";
+  if (!to && !subject) return null;
+  return { to, subject, text };
+}
+
+/** JSON messages from the staging test mail sink: the outbox folder, and MAIL_SINK_URL when that folder is exposed over HTTP. */
+async function sinkMails(email: string): Promise<Mail[]> {
+  const want = email.toLowerCase();
+  const found = mailsTo(email);
+  const url = process.env.MAIL_SINK_URL;
+  if (!url) return found;
+  try {
+    const res = await fetch(url, { signal: AbortSignal.timeout(5_000) });
+    if (!res.ok) return found;
+    const json = await res.json() as unknown;
+    const rows = Array.isArray(json) ? json : (json && typeof json === "object" ? ((json as { messages?: unknown; items?: unknown }).messages ?? (json as { items?: unknown }).items) : []);
+    if (!Array.isArray(rows)) return found;
+    for (const row of rows) {
+      const mail = sinkRow(row);
+      if (mail?.to?.toLowerCase() === want) found.push(mail);
+    }
+  } catch { /* the sink is not up yet; the caller keeps polling */ }
+  return found;
+}
+
+/** The next matching message in the sink. `previousToken` skips a link that was already read. Gives up after 60 seconds. */
+export async function waitForSinkMail(email: string, subjectIncludes: string, previousToken?: string | null): Promise<SinkMail> {
+  const deadline = Date.now() + 60_000;
+  while (Date.now() < deadline) {
+    const hits = (await sinkMails(email))
+      .filter((mail) => (mail.subject ?? "").includes(subjectIncludes))
+      .map((mail) => ({ ...mail, token: mail.text?.match(/token=([\w-]+)/)?.[1] ?? "" }))
+      .filter((mail) => mail.token && mail.token !== previousToken);
+    const hit = hits.at(-1);
+    if (hit) return hit;
+    await new Promise((resolve) => setTimeout(resolve, 1_000));
+  }
+  throw new Error(`No ${subjectIncludes} message for ${email} in the test mail sink within 60 seconds.`);
+}
+
 export function latestMail(email: string, subjectIncludes: string) {
   const mail = mailsTo(email).filter((m) => (m.subject ?? "").includes(subjectIncludes)).at(-1);
   return mail?.text ?? null;
