@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ago, api } from "@/components/api";
+import { bellBadge, bellName } from "./bell-label";
 import "./bell.css";
 
 type Note = { id: string; text: string; href: string; read: boolean; createdAt: string };
@@ -46,6 +47,7 @@ export function Bell() {
   }, [open]);
 
   const unread = page?.unread ?? 0;
+  const badge = bellBadge(unread);
   const items = [...(page?.items ?? []), ...more];
   async function older() {
     if (!next) return;
@@ -63,9 +65,9 @@ export function Bell() {
   }
   return (
     <div className="wrapper" ref={box}>
-      <button className="bell" aria-label={unread ? `Notifications, ${unread} unread` : "Notifications"} aria-expanded={open}
+      <button className="bell" aria-label={bellName(unread)} aria-expanded={open}
         onClick={() => { const o = !open; setOpen(o); if (o) load(filter); }}>
-        🔔{unread > 0 && <span className="badge">{unread > 99 ? "99+" : unread}</span>}
+        🔔{badge && <span className="badge">{badge}</span>}
       </button>
       {open && (
         <div className="panel" role="dialog" aria-label="Notifications">

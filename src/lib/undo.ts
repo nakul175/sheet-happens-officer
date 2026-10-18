@@ -42,6 +42,26 @@ function fieldConflicts(keys: string[], before: any, after: any, now: Record<str
   return keys.filter((k) => !same(now[k], after[k])).map((k) => ({ field: k, before: before[k], after: after[k], now: now[k] }));
 }
 
+/**
+ * A done-section row stores a full count beside each id list. A list shorter than its count was
+ * capped, and applying it would restore only the listed tasks. Refuse instead (APL-2680).
+ * `reopenedSubtaskIds` is written by the reopen-with-parent change; older rows simply omit it.
+ */
+function refuseShortDoneLists(before: Record<string, unknown>, after: Record<string, unknown>) {
+  const gap = (label: string, ids: unknown, total: unknown) => {
+    if (typeof total !== "number" || !Number.isFinite(total)) return null;
+    const listed = Array.isArray(ids) ? ids.length : 0;
+    return total > listed ? `${listed} of ${total} ${label}` : null;
+  };
+  const gaps = [
+    gap("reopened tasks", before.reopenedTaskIds, after.reopened),
+    gap("completed tasks", after.completedTaskIds, after.completed),
+    gap("completed subtasks", after.completedSubtaskIds, after.completedSubtasks),
+    gap("reopened subtasks", before.reopenedSubtaskIds, after.reopenedSubtasks),
+  ].filter((x): x is string => !!x);
+  if (gaps.length) throw bad(`Undo was not applied. This record lists only ${gaps.join(", ")}, so nothing was changed.`);
+}
+
 async function plan(row: any, user: Actor, projectId: string): Promise<Plan> {
   const b = (row.beforeState ?? {}) as any;
   const f = (row.afterState ?? {}) as any;
@@ -294,6 +314,7 @@ async function plan(row: any, user: Actor, projectId: string): Promise<Plan> {
     case "section.done_changed": {
       const cur = await db.section.findFirst({ where: { projectId, isDone: true } });
       if (!b.doneSectionId || !(await db.section.findFirst({ where: { id: b.doneSectionId, projectId } }))) throw bad("The earlier done section no longer exists.");
+      refuseShortDoneLists(b, f);
       return {
         conflicts: cur && cur.id !== f.doneSectionId ? [{ field: "sectionId", before: b.doneSectionId, after: f.doneSectionId, now: cur.id }] : [], subject: "the done section", fields: "Done section",
         apply: async (tx) => {
