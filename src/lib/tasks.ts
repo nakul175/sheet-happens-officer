@@ -243,8 +243,9 @@ export async function updateTask(
     newlyBlocked = !t.blocked;
   }
   if (!Object.keys(data).length) return;
-  await db.$transaction(async (tx) => {
-    await tx.task.update({ where: { id }, data });
+  // The updatedAt this write stored. A later op in the same concierge card follows this, not a re-read.
+  return db.$transaction(async (tx) => {
+    const row = await tx.task.update({ where: { id }, data });
     if (newlyBlocked) {
       await notify(tx, [await leaderId(tx, t.projectId)], "TASK_BLOCKED", {
         actorId: user.id, taskId: id, projectId: t.projectId, data: { title: t.title, reason: input.blockedReason ?? null },
@@ -252,6 +253,7 @@ export async function updateTask(
     }
     await logAction(tx, { actorId: user.id, projectId: t.projectId, targetType: "task", targetId: id, action: "task.updated", before, after: data });
     if ("dueDate" in data) await ensureNextStep(tx, t.projectId, user.id);
+    return row.updatedAt;
   });
 }
 
@@ -264,14 +266,15 @@ export async function assignTask(user: Actor, id: string, assigneeId: string, ex
   if (t.approverId && user.id === t.assigneeId && assigneeId !== t.approverId && a.role !== "LEADER") {
     throw new ApiError(403, "With an approver, this task can only be handed to the approver.");
   }
-  await db.$transaction(async (tx) => {
+  return db.$transaction(async (tx) => {
     await requireWorker(tx, t.projectId, assigneeId, "The assignee");
     const toApprover = t.approverId === assigneeId && t.assigneeId !== assigneeId;
-    await tx.task.update({ where: { id }, data: { assigneeId, ...(toApprover ? { previousAssigneeId: t.assigneeId } : {}) } });
+    const row = await tx.task.update({ where: { id }, data: { assigneeId, ...(toApprover ? { previousAssigneeId: t.assigneeId } : {}) } });
     await notify(tx, [assigneeId], toApprover ? "SENT_FOR_APPROVAL" : "TASK_ASSIGNED", { actorId: user.id, taskId: id, projectId: t.projectId, data: { title: t.title } });
     // SHO-US-7.2 AC3: the person who held it is told it moved on.
     if (t.assigneeId !== assigneeId) await notify(tx, [t.assigneeId], "REMOVED_AS_ASSIGNEE", { actorId: user.id, taskId: id, projectId: t.projectId, data: { title: t.title } });
     await logAction(tx, { actorId: user.id, projectId: t.projectId, targetType: "task", targetId: id, action: "task.assigned", before: { assigneeId: t.assigneeId, previousAssigneeId: t.previousAssigneeId }, after: { assigneeId, previousAssigneeId: toApprover ? t.assigneeId : t.previousAssigneeId } });
+    return row.updatedAt;
   });
 }
 
@@ -307,17 +310,18 @@ export async function setApprover(user: Actor, id: string, approverId: string | 
   if (!isAwaiting && a.role !== "LEADER" && t.createdById !== user.id) {
     throw new ApiError(403, "Only the Leader, an Admin or the task's creator can set the approver.");
   }
-  await db.$transaction(async (tx) => {
+  return db.$transaction(async (tx) => {
     if (approverId) {
       if (approverId === t.assigneeId && !isAwaiting) throw new ApiError(400, "The approver cannot be the assignee.");
       if (approverId === t.approverId) throw new ApiError(409, "That person is already the approver.");
       await requireWorker(tx, t.projectId, approverId, "The approver");
     }
     const data = isAwaiting && approverId ? { approverId, assigneeId: approverId } : { approverId };
-    await tx.task.update({ where: { id }, data });
+    const row = await tx.task.update({ where: { id }, data });
     await notify(tx, [approverId], isAwaiting ? "SENT_FOR_APPROVAL" : "APPROVER_NAMED", { actorId: user.id, taskId: id, projectId: t.projectId, data: { title: t.title } });
     if (isAwaiting && approverId) await notify(tx, [t.assigneeId], "REMOVED_AS_ASSIGNEE", { actorId: user.id, taskId: id, projectId: t.projectId, data: { title: t.title } });
     await logAction(tx, { actorId: user.id, projectId: t.projectId, targetType: "task", targetId: id, action: "task.approver_changed", before: { approverId: t.approverId, assigneeId: t.assigneeId }, after: data });
+    return row.updatedAt;
   });
 }
 
@@ -326,10 +330,11 @@ export async function sendForApproval(user: Actor, id: string) {
   if (!t.approverId) throw new ApiError(409, "This task has no approver.");
   if (awaiting(t)) throw new ApiError(409, "This task is already awaiting approval.");
   if (user.id !== t.assigneeId) throw new ApiError(403, "Only the assignee can send a task for approval.");
-  await db.$transaction(async (tx) => {
-    await tx.task.update({ where: { id }, data: { assigneeId: t.approverId!, previousAssigneeId: t.assigneeId } });
+  return db.$transaction(async (tx) => {
+    const row = await tx.task.update({ where: { id }, data: { assigneeId: t.approverId!, previousAssigneeId: t.assigneeId } });
     await notify(tx, [t.approverId], "SENT_FOR_APPROVAL", { actorId: user.id, taskId: id, projectId: t.projectId, data: { title: t.title } });
     await logAction(tx, { actorId: user.id, projectId: t.projectId, targetType: "task", targetId: id, action: "task.sent_for_approval", before: { assigneeId: t.assigneeId, previousAssigneeId: t.previousAssigneeId }, after: { assigneeId: t.approverId, previousAssigneeId: t.assigneeId } });
+    return row.updatedAt;
   });
 }
 
@@ -337,7 +342,7 @@ export async function sendBack(user: Actor, id: string) {
   const { t, a } = await loadTask(user, id, { write: true, holderCanDo: true });
   if (!awaiting(t)) throw new ApiError(409, "This task is not awaiting approval.");
   if (user.id !== t.approverId && a.role !== "LEADER") throw new ApiError(403, "Only the approver, the Leader or an Admin can send this back.");
-  await db.$transaction(async (tx) => {
+  return db.$transaction(async (tx) => {
     const prev = t.previousAssigneeId ? await activeMember(tx, t.projectId, t.previousAssigneeId, WORKERS) : null;
     const target = prev ? prev.userId : await leaderId(tx, t.projectId);
     // With nobody to send back to, the task goes to the Leader. When the Leader is the approver it would still be
@@ -345,7 +350,7 @@ export async function sendBack(user: Actor, id: string) {
     // approver is cleared in the same write; Undo puts it back (SHO-BUG-6).
     const clearApprover = target === t.approverId;
     const approver = clearApprover ? { approverId: null } : {};
-    await tx.task.update({ where: { id }, data: { assigneeId: target, previousAssigneeId: null, ...approver } });
+    const row = await tx.task.update({ where: { id }, data: { assigneeId: target, previousAssigneeId: null, ...approver } });
     await notify(tx, [target], "SENT_BACK", { actorId: user.id, taskId: id, projectId: t.projectId, data: { title: t.title, toLeader: !prev, ...(clearApprover ? { approverCleared: true } : {}) } });
     await notify(tx, [t.assigneeId], "REMOVED_AS_ASSIGNEE", { actorId: user.id, taskId: id, projectId: t.projectId, data: { title: t.title } });
     await logAction(tx, {
@@ -353,6 +358,7 @@ export async function sendBack(user: Actor, id: string) {
       before: { assigneeId: t.assigneeId, previousAssigneeId: t.previousAssigneeId, ...(clearApprover ? { approverId: t.approverId } : {}) },
       after: { assigneeId: target, previousAssigneeId: null, ...approver },
     });
+    return row.updatedAt;
   });
 }
 
@@ -369,13 +375,14 @@ export async function completeTask(user: Actor, id: string, expectedUpdatedAt: s
   if (openSubs.length && !completeAll) {
     throw new ApiError(409, `This task has ${openSubs.length} open subtask${openSubs.length === 1 ? "" : "s"}.`, { needsConfirm: "open_subtasks", openSubtasks: openSubs.length });
   }
-  await db.$transaction(async (tx) => {
+  return db.$transaction(async (tx) => {
     const now = new Date();
+    let row: { updatedAt: Date };
     if (t.parentId) {
-      await tx.task.update({ where: { id }, data: { completedAt: now } });
+      row = await tx.task.update({ where: { id }, data: { completedAt: now } });
     } else {
       const done = await tx.section.findFirstOrThrow({ where: { projectId: t.projectId, isDone: true } });
-      await tx.task.update({ where: { id }, data: { completedAt: now, sectionId: done.id, previousSectionId: t.sectionId === done.id ? t.previousSectionId : t.sectionId } });
+      row = await tx.task.update({ where: { id }, data: { completedAt: now, sectionId: done.id, previousSectionId: t.sectionId === done.id ? t.previousSectionId : t.sectionId } });
       if (openSubs.length) {
         await tx.task.updateMany({ where: { id: { in: openSubs.map((s) => s.id) } }, data: { completedAt: now } });
         for (const sub of openSubs) {
@@ -385,17 +392,19 @@ export async function completeTask(user: Actor, id: string, expectedUpdatedAt: s
     }
     await logAction(tx, { actorId: user.id, projectId: t.projectId, targetType: "task", targetId: id, action: "task.completed", before: { sectionId: t.sectionId, completedAt: null, previousSectionId: t.previousSectionId }, after: { completedAt: now.toISOString(), subtasksCompleted: openSubs.length, subtaskIds: openSubs.map((s) => s.id) } });
     if (!t.parentId) await ensureNextStep(tx, t.projectId, user.id);
+    return row.updatedAt;
   });
 }
 
 export async function reopenTask(user: Actor, id: string, sectionId?: string) {
   const { t } = await loadTask(user, id, { write: true });
   if (!t.completedAt) throw new ApiError(409, "This task is not complete.");
-  await db.$transaction(async (tx) => {
+  return db.$transaction(async (tx) => {
+    let row: { updatedAt: Date };
     if (t.parentId) {
       const parent = await tx.task.findUniqueOrThrow({ where: { id: t.parentId } });
       if (parent.completedAt) throw new ApiError(409, "Reopen the parent task first.");
-      await tx.task.update({ where: { id }, data: { completedAt: null } });
+      row = await tx.task.update({ where: { id }, data: { completedAt: null } });
     } else {
       let dest: string | null = null;
       if (sectionId) {
@@ -407,9 +416,10 @@ export async function reopenTask(user: Actor, id: string, sectionId?: string) {
         const prev = t.previousSectionId ? await tx.section.findFirst({ where: { id: t.previousSectionId, projectId: t.projectId, isDone: false } }) : null;
         dest = (prev ?? (await tx.section.findFirst({ where: { projectId: t.projectId, isDone: false }, orderBy: { position: "asc" } })) ?? (await tx.section.findFirstOrThrow({ where: { projectId: t.projectId }, orderBy: { position: "asc" } }))).id;
       }
-      await tx.task.update({ where: { id }, data: { completedAt: null, sectionId: dest, previousSectionId: null } });
+      row = await tx.task.update({ where: { id }, data: { completedAt: null, sectionId: dest, previousSectionId: null } });
     }
     await logAction(tx, { actorId: user.id, projectId: t.projectId, targetType: "task", targetId: id, action: "task.reopened", before: { completedAt: t.completedAt, sectionId: t.sectionId }, after: { completedAt: null } });
+    return row.updatedAt;
   });
 }
 
@@ -424,20 +434,23 @@ export async function moveTask(user: Actor, id: string, sectionId: string, expec
   if (dest.id === t.sectionId) return;
   if (dest.isDone) return completeTask(user, id, expectedUpdatedAt, completeAll);
   if (t.completedAt) return reopenTask(user, id, dest.id);
-  await db.$transaction(async (tx) => {
-    await tx.task.update({ where: { id }, data: { sectionId: dest.id } });
+  return db.$transaction(async (tx) => {
+    const row = await tx.task.update({ where: { id }, data: { sectionId: dest.id } });
     await logAction(tx, { actorId: user.id, projectId: t.projectId, targetType: "task", targetId: id, action: "task.moved", before: { sectionId: t.sectionId }, after: { sectionId: dest.id } });
+    return row.updatedAt;
   });
 }
 
 // ---------------------------------------------------------------- delete, restore, trash (6.1, 6.2)
 export async function deleteTask(user: Actor, id: string, o: { byUndo?: boolean } = {}) {
   const { t, a } = await loadTask(user, id, { write: true });
-  await db.$transaction(async (tx) => {
+  return db.$transaction(async (tx) => {
     const now = new Date();
     await tx.task.updateMany({ where: { OR: [{ id }, { parentId: id }], deletedAt: null }, data: { deletedAt: now, deletedById: user.id } });
+    // Still inside this transaction, so the updatedAt is the one this write stored, not a later save.
+    const row = await tx.task.findUniqueOrThrow({ where: { id }, select: { updatedAt: true } });
+    if (o.byUndo) return row.updatedAt; // Undo logs its own row and sends no notice
     const leader = await leaderId(tx, t.projectId);
-    if (o.byUndo) return; // Undo logs its own row and sends no notice
     await notify(tx, [leader, t.assigneeId, t.approverId, ...t.collaborators.map((c) => c.user.id)], "TASK_DELETED", {
       actorId: user.id, taskId: id, projectId: t.projectId, data: { title: t.title },
     });
@@ -446,6 +459,7 @@ export async function deleteTask(user: Actor, id: string, o: { byUndo?: boolean 
     const ctx = reqCtx.getStore();
     if (ctx && !canManage(a)) { ctx.undoId = undefined; ctx.undoLabel = undefined; }
     await ensureNextStep(tx, t.projectId, user.id);
+    return row.updatedAt;
   });
 }
 
