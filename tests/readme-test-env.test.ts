@@ -1,11 +1,10 @@
 // APL-2654: the README Test section must tell a developer which env vars the vitest process needs.
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { PrismaClient } from "../src/generated/prisma/client";
 import { describe, expect, it } from "vitest";
 
-const MISSING_ENV = /Environment variable not found/;
 const PLACEHOLDER_SECRET = /replace-with|placeholder|changeme|example-token/i;
 
 function testSection(readme: string): string {
@@ -59,39 +58,78 @@ function npmTestEnv(section: string): Record<string, string> {
   return command.env;
 }
 
-/** Start the same client the suite imports, with only the env the README's npm test line sets. */
-function startSuite(env: Record<string, string>): { status: number | null; output: string } {
-  const dir = mkdtempSync(join(tmpdir(), "sho-readme-"));
-  const file = join(dir, "probe.mts");
-  const client = join(process.cwd(), "src/generated/prisma/client.ts");
-  writeFileSync(
-    file,
-    `import { PrismaClient } from ${JSON.stringify(client)};
-const db = new PrismaClient();
-let missingEnv = false;
-try {
-  await db.$connect();
-} catch (e) {
-  const message = e instanceof Error ? e.message : String(e);
-  if (${MISSING_ENV.toString()}.test(message)) {
-    console.error(message);
-    missingEnv = true;
+/**
+ * The README publishes postgresql://USER:PASSWORD@localhost/taskboard.
+ * Prepare that login on the suite's server so a fresh `npm test` can actually query it.
+ */
+async function ensureReadmeDatabase(): Promise<void> {
+  const admin = new PrismaClient();
+  try {
+    await admin.$executeRawUnsafe(`DO $$ BEGIN
+      IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'USER') THEN
+        CREATE ROLE "USER" LOGIN PASSWORD 'PASSWORD';
+      END IF;
+    END $$;`);
+    const found = await admin.$queryRawUnsafe<Array<{ exists: boolean }>>(
+      `SELECT EXISTS (SELECT 1 FROM pg_database WHERE datname = 'taskboard') AS exists`,
+    );
+    if (!found[0]?.exists) await admin.$executeRawUnsafe(`CREATE DATABASE taskboard OWNER "USER"`);
+    await admin.$executeRawUnsafe(`GRANT CONNECT ON DATABASE taskboard TO "USER"`);
+  } finally {
+    await admin.$disconnect();
   }
-} finally {
-  await db.$disconnect().catch(() => undefined);
 }
-if (missingEnv || !process.env.DATABASE_URL || !process.env.JOB_SECRET) {
-  if (!missingEnv) console.error("missing-env error");
-  process.exit(2);
-}
-let host = "";
-try { host = new URL(process.env.DATABASE_URL).hostname; } catch { host = ""; }
-console.log("using-host=" + host);
-console.log("suite-started");
+
+/** `npm test` with only the README's variables. PATH is the harness, not a documented setting. */
+function runFreshNpmTest(env: Record<string, string>): { status: number | null; output: string } {
+  // Inside the repo so Node can resolve vitest, and under node_modules so the main suite does not collect the probe.
+  const cache = join(process.cwd(), "node_modules", ".cache");
+  mkdirSync(cache, { recursive: true });
+  const dir = mkdtempSync(join(cache, "sho-readme-"));
+  const probe = join(dir, "probe.test.ts");
+  const config = join(dir, "vitest.config.mts");
+  const root = process.cwd();
+  writeFileSync(
+    config,
+    `import { defineConfig } from "vitest/config";
+export default defineConfig({
+  root: ${JSON.stringify(dir)},
+  resolve: { alias: { "@": ${JSON.stringify(join(root, "src"))} } },
+  test: { include: [${JSON.stringify(probe)}], exclude: [], testTimeout: 20000 },
+});
+`,
+  );
+  writeFileSync(
+    probe,
+    `import { PrismaClient } from ${JSON.stringify(join(root, "src/generated/prisma/client.ts"))};
+import { expect, it } from "vitest";
+
+it("queries with the README database url and accepts the README job secret", async () => {
+  if (!process.env.DATABASE_URL) throw new Error("needed DATABASE_URL");
+  const url = new URL(process.env.DATABASE_URL);
+  console.log("using-db=" + url.hostname + url.pathname);
+  const db = new PrismaClient();
+  try {
+    const rows = await db.$queryRawUnsafe("SELECT 1 AS ok");
+    if (!Array.isArray(rows) || rows.length !== 1 || Number(rows[0]?.ok) !== 1) {
+      throw new Error("database query returned no row");
+    }
+    console.log("query-ok");
+  } finally {
+    await db.$disconnect();
+  }
+  if (!process.env.JOB_SECRET) throw new Error("needed JOB_SECRET");
+  const { requireJobSecret } = await import(${JSON.stringify(join(root, "src/lib/jobs.ts"))});
+  expect(() => requireJobSecret(new Request("http://127.0.0.1/api/jobs/check", {
+    method: "POST",
+    headers: { authorization: "Bearer " + process.env.JOB_SECRET },
+  }))).not.toThrow();
+  console.log("job-secret-ok");
+});
 `,
   );
   try {
-    // npm test sets NODE_ENV=test itself; the README does not have to list it.
+    // `npm test` runs vitest, which sets NODE_ENV=test. It is not a README setting.
     const childEnv: NodeJS.ProcessEnv = {
       PATH: process.env.PATH,
       HOME: process.env.HOME,
@@ -99,11 +137,11 @@ console.log("suite-started");
       NODE_ENV: "test",
     };
     for (const [key, value] of Object.entries(env)) childEnv[key] = value;
-    const result = spawnSync(join(process.cwd(), "node_modules/.bin/tsx"), [file], {
-      cwd: process.cwd(),
+    const result = spawnSync("npm", ["test", "--", "--config", config], {
+      cwd: root,
       env: childEnv,
       encoding: "utf8",
-      timeout: 20000,
+      timeout: 45000,
     });
     return { status: result.status, output: `${result.stdout ?? ""}\n${result.stderr ?? ""}` };
   } finally {
@@ -171,34 +209,46 @@ describe("README tells a developer which env vars the test process needs", () =>
   const readme = readFileSync("README.md", "utf8");
   const section = testSection(readme);
 
-  it("Following the README runs the tests", () => {
+  it("qa:TC-APL2654-cdae42ba@v1: README lists DATABASE_URL and JOB_SECRET, each with its purpose", () => {
     const purpose = purposes(section);
     for (const name of ["DATABASE_URL", "JOB_SECRET"] as const) {
       expect(purpose[name], `${name} purpose`).toBeTruthy();
       expect(purpose[name].split("\n")).toHaveLength(1);
       expect(purpose[name]).not.toMatch(/<br\s*\/?>/i);
+      expect(purpose[name].toUpperCase()).not.toBe(name);
     }
-
-    const env = npmTestEnv(section);
-    expect(env.DATABASE_URL).toBeTruthy();
-    expect(env.JOB_SECRET).toBeTruthy();
-
-    const started = startSuite(env);
-    expect(started.output).not.toMatch(MISSING_ENV);
-    expect(started.output).not.toMatch(/missing-env error/);
-    expect(started.output).toContain("using-host=localhost");
-    expect(started.output).toContain("suite-started");
-    expect(started.status).toBe(0);
-
-    const withoutDatabase = { ...env };
-    delete withoutDatabase.DATABASE_URL;
-    const missed = startSuite(withoutDatabase);
-    expect(missed.output).toMatch(MISSING_ENV);
-    expect(missed.status).not.toBe(0);
   });
 
-  it("No secret values are published", () => {
+  it("qa:TC-APL2654-57913ce9@v1: npm test from a fresh setup using only the README", async () => {
+    await ensureReadmeDatabase();
+    const started = runFreshNpmTest(npmTestEnv(section));
+    expect(started.output).toContain("using-db=localhost/taskboard");
+    expect(started.output).toContain("query-ok");
+    expect(started.output).toContain("job-secret-ok");
+    expect(started.status).toBe(0);
+  }, 60_000);
+
+  it("qa:TC-APL2654-76a2f259@v1: placeholders only, no real secrets", () => {
     expect(reviewProblems(section)).toEqual([]);
     expect(reviewProblems(readme)).toEqual([]);
   });
+
+  it("qa:TC-APL2654-a0844401@v1: omit each variable in turn and show both are needed", async () => {
+    await ensureReadmeDatabase();
+    const env = npmTestEnv(section);
+    const withoutDatabase = { ...env };
+    delete withoutDatabase.DATABASE_URL;
+    const missedDatabase = runFreshNpmTest(withoutDatabase);
+    expect(missedDatabase.status).not.toBe(0);
+    expect(missedDatabase.output).toContain("needed DATABASE_URL");
+    expect(missedDatabase.output).not.toContain("query-ok");
+
+    const withoutSecret = { ...env };
+    delete withoutSecret.JOB_SECRET;
+    const missedSecret = runFreshNpmTest(withoutSecret);
+    expect(missedSecret.status).not.toBe(0);
+    expect(missedSecret.output).toContain("query-ok");
+    expect(missedSecret.output).toContain("needed JOB_SECRET");
+    expect(missedSecret.output).not.toContain("job-secret-ok");
+  }, 90_000);
 });
