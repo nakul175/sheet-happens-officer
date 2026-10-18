@@ -1,6 +1,6 @@
 // SHO-US-14.15 Concierge discoverability (APL-2574).
-// No model call. When staging has the concierge switched off, the page is shown the payload that turns the
-// chips on, or the paused payload, so the wording can be read from the build staging serves.
+// No model call. AC2 may show the chip payload when the concierge is switched off.
+// AC3 does not. It reads the pause the running app reports, and fails when the app is not paused.
 import { readFileSync } from "node:fs";
 import type { Page } from "@playwright/test";
 import { test, expect, zz } from "../support";
@@ -65,23 +65,18 @@ test("AC3: when paused, one line says why and when it returns, with no disabled 
   const state = await admin.api.get("/api/concierge/state");
   expect(state.status).toBe(200);
   const code = state.json.disabled?.code as string | undefined;
-  const live = code === "MONTH_CAP" || code === "WEEK_CAP" || code === "NOT_ENABLED";
-  if (!live) {
-    await stateOf(admin.page, {
-      available: false, hidden: false, voiceNoticeAcked: true, messages: [], quickActions: quick,
-      disabled: {
-        code: "MONTH_CAP",
-        message: "The concierge is paused for the rest of this month. It resumes on 1 November 2026. Screens and quick actions keep working.",
-        resumesAt: "2026-10-31T18:30:00.000Z",
-      },
-    });
-  }
+  const paused = code === "MONTH_CAP" || code === "WEEK_CAP" || code === "NOT_ENABLED";
+  expect(paused, `the concierge is not paused (${code ?? "no disabled code"})`).toBe(true);
   await admin.page.goto("/");
   const note = admin.page.locator("aside.cc-slot .cc-disabled");
   await expect(note).toBeVisible();
   await expect(note).toContainText(/resume|reset|return|not switched on/i);
   await expect(admin.page.locator("aside.cc-slot textarea")).toHaveCount(0);
   await expect(admin.page.locator("aside.cc-slot button[disabled]")).toHaveCount(0);
+});
+
+// @static: the pause copy is in the source. The disabled line above is the live check.
+test("AC3 source: a pause says why and when the concierge returns", { tag: "@static" }, () => {
   const limits = readFileSync("src/lib/concierge/limits.ts", "utf8");
   expect(limits).toContain("It resumes on");
   expect(limits).toContain("The count resets on");
@@ -107,10 +102,6 @@ test("AC4: after Hide, no floating Show button covers a row or a button; Show li
 
 test("AC5: pressing the accepted shortcut focuses the concierge input", async ({ admin, later }) => {
   await showConcierge(admin, later);
-  const launcher = readFileSync("src/components/concierge/Launcher.tsx", "utf8");
-  const panel = readFileSync("src/components/concierge/Concierge.tsx", "utf8");
-  expect(launcher).not.toMatch(/metaKey|ctrlKey|altKey/);
-  expect(panel).not.toMatch(/metaKey|ctrlKey|altKey/);
   const p = admin.page;
   await p.goto("/");
   await p.locator("h1, h2").first().click();
@@ -118,4 +109,12 @@ test("AC5: pressing the accepted shortcut focuses the concierge input", async ({
   await p.keyboard.press("Meta+K");
   const focused = await p.evaluate(() => document.activeElement?.className ?? "");
   expect(focused).not.toMatch(/cc-input/);
+});
+
+// @static: the source has no shortcut. The key presses above are the live check.
+test("AC5 source: the launcher and the panel do not listen for a modifier shortcut", { tag: "@static" }, () => {
+  const launcher = readFileSync("src/components/concierge/Launcher.tsx", "utf8");
+  const panel = readFileSync("src/components/concierge/Concierge.tsx", "utf8");
+  expect(launcher).not.toMatch(/metaKey|ctrlKey|altKey/);
+  expect(panel).not.toMatch(/metaKey|ctrlKey|altKey/);
 });

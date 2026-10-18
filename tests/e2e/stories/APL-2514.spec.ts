@@ -33,6 +33,10 @@ test("AC1: Undo puts a concierge move back to the earlier date and the thread sa
   const back = await admin.api.post(`/api/actions/${edited.headers["x-undo-id"]}/undo`, {});
   expect(back.status, JSON.stringify(back.json)).toBe(200);
   expect((await taskOf(admin, id)).dueDate).toBe(due);
+});
+
+// @static: the thread copy is in the source. The undo above is the live check.
+test("AC1 source: undo of a card calls undoAction and the thread says it was put back", { tag: "@static" }, () => {
   const cards = read("src/lib/concierge/cards.ts");
   expect(cards).toContain("await undoAction(user, r.id, anyway)");
   expect(cards).toContain("Undone. Everything on that card was put back:");
@@ -53,6 +57,10 @@ test("AC2: Undo warns when the task changed since, and overwrites nothing", asyn
   expect(refused.status, JSON.stringify(refused.json)).toBe(409);
   expect(refused.json.needsConfirm).toBe("conflict");
   expect((await taskOf(admin, id)).dueDate).toBe(patched);
+});
+
+// @static: the conflict check is in the source. The 409 above is the live check.
+test("AC2 source: undo asks before it overwrites a task that changed", { tag: "@static" }, () => {
   expect(read("src/lib/concierge/cards.ts")).toContain("if (!anyway) for (const r of todo) await checkUndo(user, r.id)");
 });
 
@@ -71,6 +79,10 @@ test("AC3: when the action notified someone, the thread says the notice cannot b
   expect(back.status, JSON.stringify(back.json)).toBe(200);
   expect((await taskOf(admin, id)).assignee.id).toBe(admin.user.id);
   expect((await notices(member)).some((n) => n.id === sent!.id), "the notice is still there after Undo").toBe(true);
+});
+
+// @static: the unsent-notice copy is in the source. The notice that remains above is the live check.
+test("AC3 source: the thread says a notice cannot be unsent", { tag: "@static" }, () => {
   expect(read("src/lib/concierge/cards.ts")).toContain("Notices already sent to other people cannot be unsent.");
   expect(read("src/components/concierge/MessageView.tsx")).toContain("A notice cannot be unsent");
 });
@@ -93,6 +105,10 @@ test("AC4: Undo reverses every change on a card, and the thread lists them", asy
   const task = await taskOf(admin, id);
   expect(task.dueDate).toBe(due);
   expect(task.priority).toBe("MEDIUM");
+});
+
+// @static: the reversed-line copy is in the source. The two undos above are the live check.
+test("AC4 source: undo lists every reversed change on the card", { tag: "@static" }, () => {
   const cards = read("src/lib/concierge/cards.ts");
   expect(cards).toContain("const lines = rs.result.summary.map((x) => `- Reversed: ${x}`)");
   expect(cards).toContain("for (const r of todo)");
@@ -108,6 +124,10 @@ test("AC5: a member-removal card says it cannot be undone, and the done message 
   const members = (await admin.api.get(`/api/projects/${project.id}`)).json.project.members as { userId: string }[];
   expect(members.some((m) => m.userId === member.user.id)).toBe(false);
   expect((await taskOf(admin, id)).assignee.id).toBe(admin.user.id);
+});
+
+// @static: the irreversible copy is in the source. The removal above is the live check.
+test("AC5 source: a member-removal card cannot be undone", { tag: "@static" }, () => {
   const changes = read("src/lib/concierge/changes.ts");
   expect(changes).toContain("irreversible = tasks.length > 0");
   expect(changes).toContain("await removeMember(user, op.projectId, op.userId, undefined, picks)");

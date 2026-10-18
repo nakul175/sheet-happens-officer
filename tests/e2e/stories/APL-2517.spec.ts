@@ -43,6 +43,10 @@ test("AC1: no screen or endpoint returns another person's chat", async ({ admin,
   expect(JSON.stringify(audit.json)).not.toContain(sentence);
   await admin.page.goto("/");
   await expect(admin.page.locator("aside.cc-slot")).not.toContainText(sentence);
+});
+
+// @static: the privacy comment is in the source. The other account above is the live check.
+test("AC1 source: nothing in the thread module reads another person's chat", { tag: "@static" }, () => {
   expect(read("src/lib/concierge/thread.ts")).toContain("there is no function that reads another person's chat");
 });
 
@@ -82,6 +86,10 @@ test("AC3: a change made through chat is in the action log, and the chat text is
   expect(rows.some((r) => r.via === "screen")).toBe(true);
   expect(JSON.stringify(rows)).not.toContain(marker);
   expect(JSON.stringify(rows)).not.toContain("Due this week in");
+});
+
+// @static: the channel label is in the source. The activity list above is the live check.
+test("AC3 source: a concierge change is labelled concierge and the chat text is not logged", { tag: "@static" }, () => {
   const cards = read("src/lib/concierge/cards.ts");
   expect(cards).toContain('channel: "CONCIERGE"');
   expect(read("src/lib/feed.ts")).toContain('via: r.channel === "CONCIERGE" ? "concierge" : "screen"');
@@ -92,8 +100,6 @@ test("AC4: Clear my chat deletes the thread, and the audit log records only that
   await showConcierge(admin, later);
   await showConcierge(member, later);
   const who = (await chatMessages(admin)).length === 0 ? admin : (await chatMessages(member)).length === 0 ? member : null;
-  expect(read("src/lib/concierge/thread.ts")).toContain('event: "CHAT_CLEARED"');
-  expect(read("src/lib/concierge/thread.ts")).toContain("chatMessage.deleteMany");
   if (!who) {
     const before = await chatMessages(admin);
     await admin.page.goto("/");
@@ -129,6 +135,12 @@ test("AC4: Clear my chat deletes the thread, and the audit log records only that
   expect(JSON.stringify(audit.json)).not.toContain(project.name);
 });
 
+// @static: the clear event is in the source. Clear my chat above is the live check.
+test("AC4 source: clearing the chat deletes the rows and audits only that it was cleared", { tag: "@static" }, () => {
+  expect(read("src/lib/concierge/thread.ts")).toContain('event: "CHAT_CLEARED"');
+  expect(read("src/lib/concierge/thread.ts")).toContain("chatMessage.deleteMany");
+});
+
 test("AC5: the concierge states the privacy promise and does not claim privacy from database access", async ({ admin, later }) => {
   await showConcierge(admin, later);
   const p = admin.page;
@@ -137,5 +149,9 @@ test("AC5: the concierge states the privacy promise and does not claim privacy f
   await expect(line).toHaveText(PROMISE);
   const panel = (await p.locator("aside.cc-slot").innerText()).toLowerCase();
   expect(panel).not.toContain("database");
+});
+
+// @static: the promise string is in the source. The line on the page above is the live check.
+test("AC5 source: the privacy promise is the line the concierge shows", { tag: "@static" }, () => {
   expect(read("src/lib/concierge/thread.ts")).toContain(PROMISE);
 });

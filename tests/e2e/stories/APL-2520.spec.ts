@@ -1,7 +1,8 @@
 // SHO-US-9.3 Production deployment and backups (APL-2520).
 // What a browser can see is checked on staging: HTTPS, /api/health and /api/health/jobs.
 // The droplet, the backup cluster and the owner's mailbox are not opened from here, and production is not requested.
-// AC2, AC4, AC5 and AC7 read the repo (@static). AC3 (restore drill) and AC8 (firewall and SSH) are @static and @manual.
+// AC2, AC4, AC5 and AC7 read the repo (@static). AC6's source reads are separate @static tests.
+// AC3 (restore drill) and AC8 (firewall and SSH) are @static and @manual.
 // None of those is a live acceptance result. The staging run excludes both tags.
 import { readFileSync } from "node:fs";
 import { test, expect, BASE_URL } from "../support";
@@ -40,6 +41,10 @@ test("AC6: the jobs health page reports the check job's last run, and is not sta
   const j = await r.json();
   expect(j.ok).toBe(true);
   if (j.lastCheck) expect(j.ageHours).toBeLessThan(36);
+});
+
+// @static: the stale window is in the source. The jobs page above is the live check.
+test("AC6 source: the jobs health route treats 36 hours as stale", { tag: "@static" }, () => {
   expect(read("src/app/api/health/jobs/route.ts")).toContain("const STALE_HOURS = 36");
 });
 
@@ -47,6 +52,10 @@ test("AC6: the Super Admin can reach the notification bell (job notices land the
   const r = await admin.api.get("/api/notifications");
   expect(r.status).toBe(200);
   expect(Array.isArray(r.json.items)).toBe(true);
+});
+
+// @static: the job notice names are in the source. The bell above is the live check.
+test("AC6 source: job failure and a missed job are notice kinds", { tag: "@static" }, () => {
   const feed = read("src/lib/feed.ts");
   expect(feed).toContain("JOB_FAILED");
   expect(feed).toContain("JOB_MISSED");

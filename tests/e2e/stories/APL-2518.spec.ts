@@ -1,7 +1,8 @@
 // SHO-US-9.1 Provider-agnostic model wrapper (APL-2518).
-// One test per acceptance criterion. The wrapper is called here with the fake provider, so nothing is sent to
-// Anthropic and no staging message is posted. Staging is checked for the live switch, the usage page, and
-// that the endpoints a session can read do not carry a key or the quick-action line.
+// AC1, AC2 and AC4 call the wrapper in this process with the fake provider (@static). They do not call staging.
+// AC3's live check reads the switch the running app reports. Its fake-provider proof is @static.
+// AC5's live check reads the endpoints a session can see. Its source proof is @static.
+// No test posts /api/concierge/messages.
 import { readFileSync } from "node:fs";
 import { test, expect, zz } from "../support";
 import { newProject } from "../g2";
@@ -44,7 +45,8 @@ test.afterEach(() => {
   proc.NODE_ENV = nodeEnv;
 });
 
-test("AC1: changing the configured model leaves the concierge working with no code change", async ({ admin }) => {
+// @static: generate() runs in this process with the fake provider. It does not call staging.
+test("AC1: changing the configured model leaves the concierge working with no code change", { tag: "@static" }, async ({ admin }) => {
   expect((await admin.api.get("/api/health")).json.ok).toBe(true);
   setFakeModel(() => ok);
   const names = ["claude-haiku-5-5", "claude-sonnet-stand-in"];
@@ -56,7 +58,8 @@ test("AC1: changing the configured model leaves the concierge working with no co
   expect(read("src/lib/model.ts")).toContain('model: env.MODEL_NAME || "claude-haiku-5-5"');
 });
 
-test("AC2: a message uses the default small model and the usage record shows that name", async ({ admin }) => {
+// @static: generate() runs in this process with the fake provider. It does not call staging.
+test("AC2: a message uses the default small model and the usage record shows that name", { tag: "@static" }, async ({ admin }) => {
   setFakeModel(() => ok);
   const bare = cfg({ MODEL_DATA_APPROVED: "true", MODEL_RETRY_DELAY_MS: "0" });
   expect(bare.model).toBe("claude-haiku-5-5");
@@ -77,6 +80,18 @@ test("AC2: a message uses the default small model and the usage record shows tha
 });
 
 test("AC3: while MODEL_DATA_APPROVED is off, nothing is sent to a provider and the concierge says it is not enabled yet", async ({ admin }) => {
+  const state = await admin.api.get("/api/concierge/state");
+  expect(state.status).toBe(200);
+  expect(state.json.disabled?.code, "the concierge is switched on, so this check cannot see the not-enabled line").toBe("NOT_ENABLED");
+  await admin.page.setViewportSize({ width: 1440, height: 900 });
+  await admin.page.goto("/");
+  await expect(admin.page.locator("aside.cc-slot .cc-disabled")).toContainText(/not switched on yet|not enabled/i);
+  await expect(admin.page.locator("aside.cc-slot textarea")).toHaveCount(0);
+  expect((await admin.api.get("/api/projects")).status, "the rest of the app still answers").toBe(200);
+});
+
+// @static: the off switch is exercised in this process with the fake provider, and the copy is in the source.
+test("AC3 source: an off switch never looks up a provider and says the concierge is not switched on", { tag: "@static" }, async () => {
   setFakeModel(() => ok);
   const before = fakeCallCount();
   const off = cfg({ MODEL_DATA_APPROVED: "false" });
@@ -85,29 +100,10 @@ test("AC3: while MODEL_DATA_APPROVED is off, nothing is sent to a provider and t
   expect(fakeCallCount()).toBe(before);
   expect(read("src/lib/model.ts")).toContain("when it is off, no provider is even looked up");
   expect(read("src/lib/concierge/limits.ts")).toContain("The concierge is not switched on yet.");
-
-  const state = await admin.api.get("/api/concierge/state");
-  expect(state.status).toBe(200);
-  const liveOff = state.json.disabled?.code === "NOT_ENABLED";
-  if (!liveOff) {
-    await admin.page.route("**/api/concierge/state", (route) => route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({
-        available: false,
-        disabled: { code: "NOT_ENABLED", message: "The concierge is not switched on yet." },
-        hidden: false, voiceNoticeAcked: true, quickActions: [], messages: state.json.messages ?? [],
-      }),
-    }));
-  }
-  await admin.page.setViewportSize({ width: 1440, height: 900 });
-  await admin.page.goto("/");
-  await expect(admin.page.locator("aside.cc-slot .cc-disabled")).toContainText(/not switched on yet|not enabled/i);
-  await expect(admin.page.locator("aside.cc-slot textarea")).toHaveCount(0);
-  expect((await admin.api.get("/api/projects")).status, "the rest of the app still answers").toBe(200);
 });
 
-test("AC4: a provider error is retried once after 2 seconds, then the concierge shows a disabled reason", async ({ admin }) => {
+// @static: the retry runs in this process with the fake provider. It does not call staging.
+test("AC4: a provider error is retried once after 2 seconds, then the concierge shows a disabled reason", { tag: "@static" }, async ({ admin }) => {
   const src = read("src/lib/model.ts");
   expect(src).toContain("retryDelayMs: num(env.MODEL_RETRY_DELAY_MS, 2000)");
   expect(src).toContain("for (let attempt = 0; attempt < 2; attempt++)");
@@ -151,6 +147,10 @@ test("AC5: an API key, chat text and task text are not written to the usage, aud
   const act = JSON.stringify(activity.json);
   expect(act).not.toContain(`Due this week in ${project.name}`);
   expect(act).not.toContain(token);
+});
+
+// @static: the wrapper's logging rules are in the source. The endpoints above are the live check.
+test("AC5 source: the model wrapper does not touch the database or log", { tag: "@static" }, () => {
   const model = read("src/lib/model.ts");
   expect(model).toContain("Nothing here touches the database");
   expect(model).toContain("nothing here logs");
