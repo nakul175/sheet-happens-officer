@@ -2,7 +2,7 @@
 // Server must run with SUPER_ADMIN_EMAILS=root.test@aplyd.com and DATABASE_URL pointing at the same database.
 import { describe, expect, it } from "vitest";
 import { PrismaClient } from "../src/generated/prisma/client";
-import { account, project, superAdmin, task, type Account } from "./helpers";
+import { account, project, superAdmin, task, type Account, patchTask } from "./helpers";
 
 const db = new PrismaClient();
 
@@ -16,7 +16,7 @@ describe("undo (6.4)", () => {
     const ed = await account("editor");
     const p = await project(lead, lead, [{ who: ed }]);
     const t = await task(ed, p.id, { title: "Before", priority: "LOW" });
-    const r = await ed.c.patch(`/api/tasks/${t}`, { title: "After" });
+    const r = await patchTask(ed, t, { title: "After" });
     expect(r.headers.get("x-undo-id")).toBeTruthy();
     expect(r.headers.get("x-undo-label")).toBe("Task edited");
     const u = await ed.c.post(`/api/actions/${r.headers.get("x-undo-id")}/undo`);
@@ -35,8 +35,8 @@ describe("undo (6.4)", () => {
     const ed = await account("editor");
     const p = await project(lead, lead, [{ who: ed }]);
     const t = await task(ed, p.id, { title: "Keep", priority: "LOW" });
-    const mine = await ed.c.patch(`/api/tasks/${t}`, { priority: "HIGH" });
-    await lead.c.patch(`/api/tasks/${t}`, { priority: "URGENT", description: "their note" });
+    const mine = await patchTask(ed, t, { priority: "HIGH" });
+    await patchTask(lead, t, { priority: "URGENT", description: "their note" });
     const id = mine.headers.get("x-undo-id");
     const w = await ed.c.post(`/api/actions/${id}/undo`);
     expect(w.status).toBe(409);
@@ -61,7 +61,7 @@ describe("undo (6.4)", () => {
     const viewer = await account("viewer");
     const p = await project(lead, lead, [{ who: ed }, { who: other }, { who: viewer, role: "VIEWER" }]);
     const t = await task(ed, p.id, { title: "Mine" });
-    const r = await ed.c.patch(`/api/tasks/${t}`, { title: "Edited" });
+    const r = await patchTask(ed, t, { title: "Edited" });
     const id = r.headers.get("x-undo-id");
     expect((await other.c.post(`/api/actions/${id}/undo`)).status).toBe(403);
     expect((await viewer.c.post(`/api/actions/${id}/undo`)).status).toBe(403);
@@ -73,7 +73,7 @@ describe("undo (6.4)", () => {
     const lead = await account("lead");
     const p = await project(lead, lead);
     const t = await task(lead, p.id, { title: "Old" });
-    const r = await lead.c.patch(`/api/tasks/${t}`, { title: "Older" });
+    const r = await patchTask(lead, t, { title: "Older" });
     const id = r.headers.get("x-undo-id")!;
     await db.actionLog.update({ where: { id }, data: { createdAt: new Date(Date.now() - 31 * 86400_000) } });
     const u = await lead.c.post(`/api/actions/${id}/undo`);
@@ -157,7 +157,7 @@ describe("notices (7.1 to 7.3)", () => {
     const ed = await account("editor");
     const p = await project(lead, lead, [{ who: ed }]);
     const t = await task(ed, p.id, { title: "Stuck" });
-    await ed.c.patch(`/api/tasks/${t}`, { blocked: true, blockedReason: "Waiting for the client" });
+    await patchTask(ed, t, { blocked: true, blockedReason: "Waiting for the client" });
     expect((await notices(lead)).some((n) => /marked "Stuck" as blocked: Waiting for the client/.test(n.text))).toBe(true);
   });
 

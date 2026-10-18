@@ -98,7 +98,8 @@ export const taskUpdate = z.object({
   blocked: z.boolean().optional(),
   blockedReason: z.string().trim().max(300).nullish(),
   // The updatedAt the person saw when they opened the task; a different value means someone else saved first.
-  expectedUpdatedAt: z.string().optional(),
+  // Required (SHO-BUG-13): without it a save could silently overwrite someone else's edit.
+  expectedUpdatedAt: z.string({ error: "expectedUpdatedAt is required" }).min(1, "expectedUpdatedAt is required"),
 });
 export const taskAssign = z.object({ assigneeId: z.string().min(1), expectedUpdatedAt: z.string().optional() });
 export const taskCollaborator = z.object({ userId: z.string().min(1) });

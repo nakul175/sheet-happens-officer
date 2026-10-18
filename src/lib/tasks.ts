@@ -211,18 +211,13 @@ export async function updateTask(
   id: string,
   input: {
     title?: string; description?: string | null; dueDate?: string | null; priority?: "LOW" | "MEDIUM" | "HIGH" | "URGENT";
-    blocked?: boolean; blockedReason?: string | null; expectedUpdatedAt?: string;
+    blocked?: boolean; blockedReason?: string | null; expectedUpdatedAt: string;
   },
 ) {
+  // SHO-BUG-13: every edit says which version it was made on, so a concurrent save is never silently overwritten.
+  if (!input.expectedUpdatedAt) throw new ApiError(400, "expectedUpdatedAt is required");
   const { t, a } = await loadTask(user, id, { write: true });
-  if (input.expectedUpdatedAt && new Date(input.expectedUpdatedAt).getTime() !== t.updatedAt.getTime()) {
-    const last = await db.actionLog.findFirst({ where: { targetType: "task", targetId: id }, orderBy: { createdAt: "desc" }, include: { actor: { select: { name: true } } } });
-    throw new ApiError(409, "This task changed while you were editing it.", {
-      stale: true,
-      changedBy: last?.actor.name ?? null,
-      current: present(t, { id: user.id, role: a.role }),
-    });
-  }
+  await staleCheck(user, id, t, a.role, input.expectedUpdatedAt);
   const data: Record<string, unknown> = {};
   const before: Record<string, unknown> = {};
   const set = (k: string, v: unknown, old: unknown) => {
