@@ -33,7 +33,7 @@ async function ready(admin: Who, member: Who | null) {
 }
 
 test.describe("SHO-BUG-11 / APL-2646", () => {
-  test("AC1: a hidden deal's projectId yields a refusal and its name never reaches the chat", async ({ admin, member, later }) => {
+  test("AC1: a hidden deal's projectId yields a refusal and its name never reaches the chat", { annotation: { type: "qa:TC", description: "missing" } }, async ({ admin, member, later }) => {
     await cleanChat(member, later);
     const { c, mode } = await ready(admin, member);
     expect(c.how.length).toBeGreaterThan(0);
@@ -61,7 +61,7 @@ test.describe("SHO-BUG-11 / APL-2646", () => {
     await expectHidden(member, deal);
   });
 
-  test("AC2: holds for CRM_VISIBLE=admins (Member) and CRM_VISIBLE=off (Member and Admin)", async ({ admin, member, later }) => {
+  test("AC2: holds for CRM_VISIBLE=admins (Member) and CRM_VISIBLE=off (Member and Admin)", { annotation: { type: "qa:TC", description: "missing" } }, async ({ admin, member, later }) => {
     await cleanChat(member, later);
     await cleanChat(admin, later);
     const { c, mode } = await ready(admin, member);
@@ -89,7 +89,7 @@ test.describe("SHO-BUG-11 / APL-2646", () => {
     expect(offish.body).not.toContain(deal.name);
   });
 
-  test("AC3: when the deal is visible (an Admin under admins), quick actions behave as today and name it", async ({ admin, later }) => {
+  test("AC3: when the deal is visible (an Admin under admins), quick actions behave as today and name it", { annotation: { type: "qa:TC", description: "missing" } }, async ({ admin, later }) => {
     await cleanChat(admin, later);
     const { c, mode } = await ready(admin, null);
     if (mode === "off") {
@@ -103,7 +103,7 @@ test.describe("SHO-BUG-11 / APL-2646", () => {
     expect(r.json.messages?.[0]?.text).toBe(`Due this week in ${deal.name}`);
   });
 
-  test("AC4: the HTTP quick-action route, called with a hidden deal's projectId, leaves the name out of the response and the stored chat", async ({ admin, member, later }) => {
+  test("AC4: the HTTP quick-action route, called with a hidden deal's projectId, leaves the name out of the response and the stored chat", { annotation: { type: "qa:TC", description: "missing" } }, async ({ admin, member, later }) => {
     await cleanChat(member, later);
     const { c, mode } = await ready(admin, member);
     if (!c.live || mode !== "admins") {

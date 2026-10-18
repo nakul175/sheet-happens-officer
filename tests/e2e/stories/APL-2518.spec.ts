@@ -46,7 +46,7 @@ test.afterEach(() => {
 });
 
 // @static: generate() runs in this process with the fake provider. It does not call staging.
-test("AC1: changing the configured model leaves the concierge working with no code change", { tag: "@static" }, async ({ admin }) => {
+test("AC1: changing the configured model leaves the concierge working with no code change", { tag: "@static", annotation: { type: "qa:TC", description: "missing" } }, async ({ admin }) => {
   expect((await admin.api.get("/api/health")).json.ok).toBe(true);
   setFakeModel(() => ok);
   const names = ["claude-haiku-5-5", "claude-sonnet-stand-in"];
@@ -59,7 +59,7 @@ test("AC1: changing the configured model leaves the concierge working with no co
 });
 
 // @static: generate() runs in this process with the fake provider. It does not call staging.
-test("AC2: a message uses the default small model and the usage record shows that name", { tag: "@static" }, async ({ admin }) => {
+test("AC2: a message uses the default small model and the usage record shows that name", { tag: "@static", annotation: { type: "qa:TC", description: "missing" } }, async ({ admin }) => {
   setFakeModel(() => ok);
   const bare = cfg({ MODEL_DATA_APPROVED: "true", MODEL_RETRY_DELAY_MS: "0" });
   expect(bare.model).toBe("claude-haiku-5-5");
@@ -79,7 +79,7 @@ test("AC2: a message uses the default small model and the usage record shows tha
   await expect(admin.page.getByText("no chat text is shown here")).toBeVisible();
 });
 
-test("AC3: while MODEL_DATA_APPROVED is off, nothing is sent to a provider and the concierge says it is not enabled yet", async ({ admin }) => {
+test("AC3: while MODEL_DATA_APPROVED is off, nothing is sent to a provider and the concierge says it is not enabled yet", { annotation: { type: "qa:TC", description: "missing" } }, async ({ admin }) => {
   const state = await admin.api.get("/api/concierge/state");
   expect(state.status).toBe(200);
   expect(state.json.disabled?.code, "the concierge is switched on, so this check cannot see the not-enabled line").toBe("NOT_ENABLED");
@@ -91,7 +91,7 @@ test("AC3: while MODEL_DATA_APPROVED is off, nothing is sent to a provider and t
 });
 
 // @static: the off switch is exercised in this process with the fake provider, and the copy is in the source.
-test("AC3 source: an off switch never looks up a provider and says the concierge is not switched on", { tag: "@static" }, async () => {
+test("AC3 source: an off switch never looks up a provider and says the concierge is not switched on", { tag: "@static", annotation: { type: "qa:TC", description: "missing" } }, async () => {
   setFakeModel(() => ok);
   const before = fakeCallCount();
   const off = cfg({ MODEL_DATA_APPROVED: "false" });
@@ -103,7 +103,7 @@ test("AC3 source: an off switch never looks up a provider and says the concierge
 });
 
 // @static: the retry runs in this process with the fake provider. It does not call staging.
-test("AC4: a provider error is retried once after 2 seconds, then the concierge shows a disabled reason", { tag: "@static" }, async ({ admin }) => {
+test("AC4: a provider error is retried once after 2 seconds, then the concierge shows a disabled reason", { tag: "@static", annotation: { type: "qa:TC", description: "missing" } }, async ({ admin }) => {
   const src = read("src/lib/model.ts");
   expect(src).toContain("retryDelayMs: num(env.MODEL_RETRY_DELAY_MS, 2000)");
   expect(src).toContain("for (let attempt = 0; attempt < 2; attempt++)");
@@ -124,7 +124,7 @@ test("AC4: a provider error is retried once after 2 seconds, then the concierge 
   }
 });
 
-test("AC5: an API key, chat text and task text are not written to the usage, audit or activity the session can read", async ({ admin, later }) => {
+test("AC5: an API key, chat text and task text are not written to the usage, audit or activity the session can read", { annotation: { type: "qa:TC", description: "missing" } }, async ({ admin, later }) => {
   await showConcierge(admin, later);
   await cleanChat(admin, later);
   const project = await newProject(admin, later, { label: "us91-secret" });
@@ -150,7 +150,7 @@ test("AC5: an API key, chat text and task text are not written to the usage, aud
 });
 
 // @static: the wrapper's logging rules are in the source. The endpoints above are the live check.
-test("AC5 source: the model wrapper does not touch the database or log", { tag: "@static" }, () => {
+test("AC5 source: the model wrapper does not touch the database or log", { tag: "@static", annotation: { type: "qa:TC", description: "missing" } }, () => {
   const model = read("src/lib/model.ts");
   expect(model).toContain("Nothing here touches the database");
   expect(model).toContain("nothing here logs");

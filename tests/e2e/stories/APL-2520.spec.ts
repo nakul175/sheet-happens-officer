@@ -13,7 +13,7 @@ const read = (path: string) => readFileSync(path, "utf8");
 // One skip for the whole file. The password is SHO_QA_PASS and is never generated here.
 test.skip(!process.env.SHO_QA_PASS, "Set SHO_QA_PASS (the shared password for the nakul17+ accounts).");
 
-test("AC1: the app is served over HTTPS and its health check passes", async ({ admin }) => {
+test("AC1: the app is served over HTTPS and its health check passes", { annotation: { type: "qa:TC", description: "missing" } }, async ({ admin }) => {
   const host = new URL(base).hostname;
   const local = host === "127.0.0.1" || host === "localhost" || host === "::1";
   if (!local) {
@@ -28,7 +28,7 @@ test("AC1: the app is served over HTTPS and its health check passes", async ({ a
   expect(typeof j.release === "string" && j.release.length >= 7, "the release (commit) is reported").toBe(true);
 });
 
-test("AC1: health answers 200 with ok true and nothing secret in the body", async ({ admin }) => {
+test("AC1: health answers 200 with ok true and nothing secret in the body", { annotation: { type: "qa:TC", description: "missing" } }, async ({ admin }) => {
   const r = await admin.page.request.get("/api/health");
   expect(r.status()).toBe(200);
   const text = await r.text();
@@ -38,7 +38,7 @@ test("AC1: health answers 200 with ok true and nothing secret in the body", asyn
   expect(text.toLowerCase()).not.toMatch(/sk-ant-|anthropic_api_key|postgres:\/\//);
 });
 
-test("AC6: the jobs health page reports the check job's last run, and is not stale", async ({ admin }) => {
+test("AC6: the jobs health page reports the check job's last run, and is not stale", { annotation: { type: "qa:TC", description: "missing" } }, async ({ admin }) => {
   const r = await admin.page.request.get("/api/health/jobs");
   expect(r.status(), "503 means the check job has not finished in 36 hours").toBe(200);
   const j = await r.json();
@@ -47,25 +47,25 @@ test("AC6: the jobs health page reports the check job's last run, and is not sta
 });
 
 // @static: the stale window is in the source. The jobs page above is the live check.
-test("AC6 source: the jobs health route treats 36 hours as stale", { tag: "@static" }, () => {
+test("AC6 source: the jobs health route treats 36 hours as stale", { tag: "@static", annotation: { type: "qa:TC", description: "missing" } }, () => {
   expect(read("src/app/api/health/jobs/route.ts")).toContain("const STALE_HOURS = 36");
 });
 
-test("AC6: the Super Admin can reach the notification bell (job notices land there)", async ({ admin }) => {
+test("AC6: the Super Admin can reach the notification bell (job notices land there)", { annotation: { type: "qa:TC", description: "missing" } }, async ({ admin }) => {
   const r = await admin.api.get("/api/notifications");
   expect(r.status).toBe(200);
   expect(Array.isArray(r.json.items)).toBe(true);
 });
 
 // @static: the job notice names are in the source. The bell above is the live check.
-test("AC6 source: job failure and a missed job are notice kinds", { tag: "@static" }, () => {
+test("AC6 source: job failure and a missed job are notice kinds", { tag: "@static", annotation: { type: "qa:TC", description: "missing" } }, () => {
   const feed = read("src/lib/feed.ts");
   expect(feed).toContain("JOB_FAILED");
   expect(feed).toContain("JOB_MISSED");
 });
 
 // @static: the release script is not a failed deploy on staging.
-test("AC2: a failed health check after a deploy restores the previous release and emails the owner", { tag: "@static" }, () => {
+test("AC2: a failed health check after a deploy restores the previous release and emails the owner", { tag: "@static", annotation: { type: "qa:TC", description: "missing" } }, () => {
   const release = read("deploy/release.sh");
   const deploy = read(".github/workflows/deploy.yml");
   expect(release).toContain("health check failed; rolling back");
@@ -79,7 +79,7 @@ test("AC2: a failed health check after a deploy restores the previous release an
 });
 
 // @static @manual: a restore drill is a step a person records. The workflow file is not that drill.
-test("AC3: a backup restore into a test database was rehearsed and recorded", { tag: ["@static", "@manual"] }, () => {
+test("AC3: a backup restore into a test database was rehearsed and recorded", { tag: ["@static", "@manual"], annotation: { type: "qa:TC", description: "missing" } }, () => {
   const workflow = read(".github/workflows/restore-check.yml");
   const script = read("deploy/restore-check.cjs");
   expect(workflow).toContain("name: Restore check");
@@ -90,7 +90,7 @@ test("AC3: a backup restore into a test database was rehearsed and recorded", { 
 });
 
 // @static: source and gitignore do not show the server logs.
-test("AC4: no secret is committed or logged", { tag: "@static" }, () => {
+test("AC4: no secret is committed or logged", { tag: "@static", annotation: { type: "qa:TC", description: "missing" } }, () => {
   const health = read("src/app/api/health/route.ts");
   const model = read("src/lib/model.ts");
   const deploy = read(".github/workflows/deploy.yml");
@@ -103,7 +103,7 @@ test("AC4: no secret is committed or logged", { tag: "@static" }, () => {
 });
 
 // @static: the mail template does not show which folder the message landed in.
-test("AC5: a sign-up verification email reaches the inbox, not junk", { tag: "@static" }, () => {
+test("AC5: a sign-up verification email reaches the inbox, not junk", { tag: "@static", annotation: { type: "qa:TC", description: "missing" } }, () => {
   const mail = read("src/lib/email.ts");
   const signup = read("src/app/api/auth/signup/route.ts");
   expect(mail).toContain('subject: "Verify your email for Sheet Happens Officer"');
@@ -114,7 +114,7 @@ test("AC5: a sign-up verification email reaches the inbox, not junk", { tag: "@s
 });
 
 // @static: the workflow text is not a five-minute outage on the live check.
-test("AC7: the external uptime check emails the owner when /api/health fails for 5 minutes", { tag: "@static" }, () => {
+test("AC7: the external uptime check emails the owner when /api/health fails for 5 minutes", { tag: "@static", annotation: { type: "qa:TC", description: "missing" } }, () => {
   const readme = read("README.md");
   const ops = read(".github/workflows/ops-checks.yml");
   expect(readme).toContain("Point an external uptime check at `https://app.sheethappensofficer.com/api/health`");
@@ -124,7 +124,7 @@ test("AC7: the external uptime check emails the owner when /api/health fails for
 });
 
 // @static @manual: firewall and SSH are checked on the droplet by a person. Cloud-init text is not that check.
-test("AC8: only web and SSH are open, password SSH is off, the database accepts the droplet only", { tag: ["@static", "@manual"] }, () => {
+test("AC8: only web and SSH are open, password SSH is off, the database accepts the droplet only", { tag: ["@static", "@manual"], annotation: { type: "qa:TC", description: "missing" } }, () => {
   const cloud = read("deploy/cloud-init.yaml");
   const ops = read(".github/workflows/ops-checks.yml");
   const readme = read("README.md");

@@ -71,7 +71,7 @@ async function raiseRealUndo(page: Page, taskId: string, expectedUpdatedAt: stri
   }, { taskId, expectedUpdatedAt, priority });
 }
 
-test("AC1: the concierge fills the visible screen with the composer inside it (keyboard part needs a device)", async ({ browser }) => {
+test("AC1: the concierge fills the visible screen with the composer inside it (keyboard part needs a device)", { annotation: { type: "qa:TC", description: "missing" } }, async ({ browser }) => {
   const ctx = await phone(browser, 390, 780);
   const page = await ctx.newPage();
   try {
@@ -98,7 +98,7 @@ test("AC1: the concierge fills the visible screen with the composer inside it (k
   } finally { await ctx.close(); }
 });
 
-test("AC2: the quick chips are at least 44 px high", async ({ browser }) => {
+test("AC2: the quick chips are at least 44 px high", { annotation: { type: "qa:TC", description: "missing" } }, async ({ browser }) => {
   const ctx = await phone(browser, 390, 780);
   const page = await ctx.newPage();
   try {
@@ -114,7 +114,7 @@ test("AC2: the quick chips are at least 44 px high", async ({ browser }) => {
   } finally { await ctx.close(); }
 });
 
-test("AC3: Close closes the concierge and focus returns to the entry", async ({ browser }) => {
+test("AC3: Close closes the concierge and focus returns to the entry", { annotation: { type: "qa:TC", description: "missing" } }, async ({ browser }) => {
   const ctx = await phone(browser, 390, 780);
   const page = await ctx.newPage();
   try {
@@ -126,7 +126,7 @@ test("AC3: Close closes the concierge and focus returns to the entry", async ({ 
   } finally { await ctx.close(); }
 });
 
-test("AC3: Back closes the concierge", async ({ browser }) => {
+test("AC3: Back closes the concierge", { annotation: { type: "qa:TC", description: "missing" } }, async ({ browser }) => {
   const ctx = await phone(browser, 390, 780);
   const page = await ctx.newPage();
   try {
@@ -136,7 +136,7 @@ test("AC3: Back closes the concierge", async ({ browser }) => {
   } finally { await ctx.close(); }
 });
 
-test("AC4: when the concierge is switched off the notice shows and the rest of the app works", async ({ browser }) => {
+test("AC4: when the concierge is switched off the notice shows and the rest of the app works", { annotation: { type: "qa:TC", description: "missing" } }, async ({ browser }) => {
   const ctx = await phone(browser, 390, 780);
   const page = await ctx.newPage();
   try {
@@ -155,7 +155,7 @@ test("AC4: when the concierge is switched off the notice shows and the rest of t
   } finally { await ctx.close(); }
 });
 
-test("AC5: the undo toast does not overlap the entry or a bottom bar", async ({ browser, admin }) => {
+test("AC5: the undo toast does not overlap the entry or a bottom bar", { annotation: { type: "qa:TC", description: "missing" } }, async ({ browser, admin }) => {
   const id = await newTask(admin, projectId, { title: zz("toast"), priority: "MEDIUM" });
   const ctx = await phone(browser, 390, 780);
   const page = await ctx.newPage();
@@ -186,7 +186,7 @@ test("AC5: the undo toast does not overlap the entry or a bottom bar", async ({ 
 
 // @static: a card cannot be shown without a model call or a painted payload. The phone rule is the check.
 // Kept outside the phone describe so it does not sign in or launch a browser.
-test("AC2: the Confirm and Cancel buttons are at least 44 px high", { tag: "@static" }, () => {
+test("AC2: the Confirm and Cancel buttons are at least 44 px high", { tag: "@static", annotation: { type: "qa:TC", description: "missing" } }, () => {
   const css = readFileSync("src/components/concierge/phone.css", "utf8");
   expect(css).toContain(".cc-actions .btn, .cc-result .btn, .cc-rewrite .btn, .cc-voice-notice .btn { min-height: 44px; min-width: 44px; }");
   expect(css).toContain(".cc-chip { min-height: 44px;");

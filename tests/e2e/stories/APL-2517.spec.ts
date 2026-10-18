@@ -17,7 +17,7 @@ test.skip(!process.env.SHO_QA_PASS, "Set SHO_QA_PASS (the shared password for th
 const PROMISE = "Your chats are not visible anywhere in the app to anyone else, and are deleted from the app after 90 days.";
 const read = (path: string) => readFileSync(path, "utf8");
 
-test("AC1: no screen or endpoint returns another person's chat", async ({ admin, member, later }) => {
+test("AC1: no screen or endpoint returns another person's chat", { annotation: { type: "qa:TC", description: "missing" } }, async ({ admin, member, later }) => {
   await showConcierge(admin, later);
   await showConcierge(member, later);
   await cleanChat(member, later);
@@ -46,12 +46,12 @@ test("AC1: no screen or endpoint returns another person's chat", async ({ admin,
 });
 
 // @static: the privacy comment is in the source. The other account above is the live check.
-test("AC1 source: nothing in the thread module reads another person's chat", { tag: "@static" }, () => {
+test("AC1 source: nothing in the thread module reads another person's chat", { tag: "@static", annotation: { type: "qa:TC", description: "missing" } }, () => {
   expect(read("src/lib/concierge/thread.ts")).toContain("there is no function that reads another person's chat");
 });
 
 // @static: reading the retention source does not show that staging deleted a message.
-test("AC2: a message older than 90 days is deleted by the retention job", { tag: "@static" }, async ({ admin }) => {
+test("AC2: a message older than 90 days is deleted by the retention job", { tag: "@static", annotation: { type: "qa:TC", description: "missing" } }, async ({ admin }) => {
   const health = await admin.api.get("/api/health");
   expect(health.status).toBe(200);
   expect(health.json.ok).toBe(true);
@@ -68,7 +68,7 @@ test("AC2: a message older than 90 days is deleted by the retention job", { tag:
   expect(release).toContain("install_cron purge-chat '47 3 * * *'");
 });
 
-test("AC3: a change made through chat is in the action log, and the chat text is not", async ({ admin, later }) => {
+test("AC3: a change made through chat is in the action log, and the chat text is not", { annotation: { type: "qa:TC", description: "missing" } }, async ({ admin, later }) => {
   await showConcierge(admin, later);
   await cleanChat(admin, later);
   const project = await newProject(admin, later, { label: "us88-log" });
@@ -89,14 +89,14 @@ test("AC3: a change made through chat is in the action log, and the chat text is
 });
 
 // @static: the channel label is in the source. The activity list above is the live check.
-test("AC3 source: a concierge change is labelled concierge and the chat text is not logged", { tag: "@static" }, () => {
+test("AC3 source: a concierge change is labelled concierge and the chat text is not logged", { tag: "@static", annotation: { type: "qa:TC", description: "missing" } }, () => {
   const cards = read("src/lib/concierge/cards.ts");
   expect(cards).toContain('channel: "CONCIERGE"');
   expect(read("src/lib/feed.ts")).toContain('via: r.channel === "CONCIERGE" ? "concierge" : "screen"');
   expect(cards).not.toContain("marker");
 });
 
-test("AC4: Clear my chat deletes the thread, and the audit log records only that it was cleared", async ({ admin, member, later }) => {
+test("AC4: Clear my chat deletes the thread, and the audit log records only that it was cleared", { annotation: { type: "qa:TC", description: "missing" } }, async ({ admin, member, later }) => {
   await showConcierge(admin, later);
   await showConcierge(member, later);
   const who = (await chatMessages(admin)).length === 0 ? admin : (await chatMessages(member)).length === 0 ? member : null;
@@ -136,12 +136,12 @@ test("AC4: Clear my chat deletes the thread, and the audit log records only that
 });
 
 // @static: the clear event is in the source. Clear my chat above is the live check.
-test("AC4 source: clearing the chat deletes the rows and audits only that it was cleared", { tag: "@static" }, () => {
+test("AC4 source: clearing the chat deletes the rows and audits only that it was cleared", { tag: "@static", annotation: { type: "qa:TC", description: "missing" } }, () => {
   expect(read("src/lib/concierge/thread.ts")).toContain('event: "CHAT_CLEARED"');
   expect(read("src/lib/concierge/thread.ts")).toContain("chatMessage.deleteMany");
 });
 
-test("AC5: the concierge states the privacy promise and does not claim privacy from database access", async ({ admin, later }) => {
+test("AC5: the concierge states the privacy promise and does not claim privacy from database access", { annotation: { type: "qa:TC", description: "missing" } }, async ({ admin, later }) => {
   await showConcierge(admin, later);
   const p = admin.page;
   await p.goto("/");
@@ -152,6 +152,6 @@ test("AC5: the concierge states the privacy promise and does not claim privacy f
 });
 
 // @static: the promise string is in the source. The line on the page above is the live check.
-test("AC5 source: the privacy promise is the line the concierge shows", { tag: "@static" }, () => {
+test("AC5 source: the privacy promise is the line the concierge shows", { tag: "@static", annotation: { type: "qa:TC", description: "missing" } }, () => {
   expect(read("src/lib/concierge/thread.ts")).toContain(PROMISE);
 });

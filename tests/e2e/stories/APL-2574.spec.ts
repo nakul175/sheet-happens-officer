@@ -12,7 +12,7 @@ test.use({ viewport: { width: 1440, height: 900 } });
 // One skip for the whole file. The password is SHO_QA_PASS and is never generated here.
 test.skip(!process.env.SHO_QA_PASS, "Set SHO_QA_PASS (the shared password for the nakul17+ accounts).");
 
-test("AC1: the concierge is reachable from the sidebar in one click on any main screen", async ({ admin, later }) => {
+test("AC1: the concierge is reachable from the sidebar in one click on any main screen", { annotation: { type: "qa:TC", description: "missing" } }, async ({ admin, later }) => {
   await showConcierge(admin, later);
   const p = admin.page;
   for (const path of ["/", "/projects", "/team"]) {
@@ -25,7 +25,7 @@ test("AC1: the concierge is reachable from the sidebar in one click on any main 
   await expect(p.locator(".cc-slot, .cc-barslot, .cc-host").first()).toBeVisible();
 });
 
-test("AC2: on a project the suggested chips refer to that project", async ({ admin, later }) => {
+test("AC2: on a project the suggested chips refer to that project", { annotation: { type: "qa:TC", description: "missing" } }, async ({ admin, later }) => {
   await showConcierge(admin, later);
   const r = await admin.api.post("/api/projects", { name: zz("chips"), leaderId: admin.user.id });
   expect(r.status).toBe(201);
@@ -50,7 +50,7 @@ test("AC2: on a project the suggested chips refer to that project", async ({ adm
   await expect(admin.page.getByRole("button", { name: "Show overdue here" })).toHaveCount(0);
 });
 
-test("AC3: when paused, one line says why and when it returns, with no disabled controls beside it", async ({ admin, later }) => {
+test("AC3: when paused, one line says why and when it returns, with no disabled controls beside it", { annotation: { type: "qa:TC", description: "missing" } }, async ({ admin, later }) => {
   await showConcierge(admin, later);
   const state = await admin.api.get("/api/concierge/state");
   expect(state.status).toBe(200);
@@ -66,14 +66,14 @@ test("AC3: when paused, one line says why and when it returns, with no disabled 
 });
 
 // @static: the pause copy is in the source. The disabled line above is the live check.
-test("AC3 source: a pause says why and when the concierge returns", { tag: "@static" }, () => {
+test("AC3 source: a pause says why and when the concierge returns", { tag: "@static", annotation: { type: "qa:TC", description: "missing" } }, () => {
   const limits = readFileSync("src/lib/concierge/limits.ts", "utf8");
   expect(limits).toContain("It resumes on");
   expect(limits).toContain("The count resets on");
   expect(readFileSync("src/components/concierge/Concierge.tsx", "utf8")).toContain("paused is one line that says why and when it returns");
 });
 
-test("AC4: after Hide, no floating Show button covers a row or a button; Show lives in the sidebar", async ({ admin, later }) => {
+test("AC4: after Hide, no floating Show button covers a row or a button; Show lives in the sidebar", { annotation: { type: "qa:TC", description: "missing" } }, async ({ admin, later }) => {
   await showConcierge(admin, later);
   const r = await admin.api.post("/api/projects", { name: zz("hidden"), leaderId: admin.user.id });
   const id = r.json.project.id as string;
@@ -90,7 +90,7 @@ test("AC4: after Hide, no floating Show button covers a row or a button; Show li
   await expect(p.locator("aside.cc-slot")).toBeVisible();
 });
 
-test("AC5: pressing the accepted shortcut focuses the concierge input", async ({ admin, later }) => {
+test("AC5: pressing the accepted shortcut focuses the concierge input", { annotation: { type: "qa:TC", description: "missing" } }, async ({ admin, later }) => {
   await showConcierge(admin, later);
   const p = admin.page;
   await p.goto("/");
@@ -102,7 +102,7 @@ test("AC5: pressing the accepted shortcut focuses the concierge input", async ({
 });
 
 // @static: the source has no shortcut. The key presses above are the live check.
-test("AC5 source: the launcher and the panel do not listen for a modifier shortcut", { tag: "@static" }, () => {
+test("AC5 source: the launcher and the panel do not listen for a modifier shortcut", { tag: "@static", annotation: { type: "qa:TC", description: "missing" } }, () => {
   const launcher = readFileSync("src/components/concierge/Launcher.tsx", "utf8");
   const panel = readFileSync("src/components/concierge/Concierge.tsx", "utf8");
   expect(launcher).not.toMatch(/metaKey|ctrlKey|altKey/);

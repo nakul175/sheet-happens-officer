@@ -14,7 +14,7 @@ test.use({ viewport: { width: 1440, height: 900 } });
 // One skip for the whole file. The password is SHO_QA_PASS and is never generated here.
 test.skip(!process.env.SHO_QA_PASS, "Set SHO_QA_PASS (the shared password for the nakul17+ accounts).");
 
-test("AC1: a dock on My tasks, Projects, a project list and Team, and a bottom bar on the project board", async ({ admin, later }) => {
+test("AC1: a dock on My tasks, Projects, a project list and Team, and a bottom bar on the project board", { annotation: { type: "qa:TC", description: "missing" } }, async ({ admin, later }) => {
   await showConcierge(admin, later);
   const project = await newProject(admin, later, { label: "us81-dock" });
   const p = admin.page;
@@ -28,7 +28,7 @@ test("AC1: a dock on My tasks, Projects, a project list and Team, and a bottom b
   await expect(p.locator("aside.cc-slot")).toHaveCount(0);
 });
 
-test("AC2: hiding the concierge stays hidden after a reload and a sign-in on another session", async ({ admin, browser, later }) => {
+test("AC2: hiding the concierge stays hidden after a reload and a sign-in on another session", { annotation: { type: "qa:TC", description: "missing" } }, async ({ admin, browser, later }) => {
   await showConcierge(admin, later);
   const p = admin.page;
   await p.goto("/");
@@ -45,7 +45,7 @@ test("AC2: hiding the concierge stays hidden after a reload and a sign-in on ano
   await expect(other.locator("aside.cc-slot")).toBeVisible();
 });
 
-test("AC3: moving from a project list to its board keeps the same conversation", async ({ admin, later }) => {
+test("AC3: moving from a project list to its board keeps the same conversation", { annotation: { type: "qa:TC", description: "missing" } }, async ({ admin, later }) => {
   await showConcierge(admin, later);
   await cleanChat(admin, later);
   const project = await newProject(admin, later, { label: "us81-thread" });
@@ -63,7 +63,7 @@ test("AC3: moving from a project list to its board keeps the same conversation",
   await expect(p.locator("aside.cc-barslot")).toContainText(marker!);
 });
 
-test("AC4: at 390 pixels a floating button opens the concierge full screen", async ({ admin, later }) => {
+test("AC4: at 390 pixels a floating button opens the concierge full screen", { annotation: { type: "qa:TC", description: "missing" } }, async ({ admin, later }) => {
   await showConcierge(admin, later);
   const p = admin.page;
   await p.setViewportSize({ width: 390, height: 844 });
@@ -78,7 +78,7 @@ test("AC4: at 390 pixels a floating button opens the concierge full screen", asy
   expect(box && box.width > 300 && box.height > 600, "the sheet covers the phone").toBe(true);
 });
 
-test("AC5: a cap or a provider outage leaves the concierge visible but disabled, with a plain reason, and the app still works", async ({ admin, later }) => {
+test("AC5: a cap or a provider outage leaves the concierge visible but disabled, with a plain reason, and the app still works", { annotation: { type: "qa:TC", description: "missing" } }, async ({ admin, later }) => {
   await showConcierge(admin, later);
   const state = await admin.api.get("/api/concierge/state");
   expect(state.status, JSON.stringify(state.json)).toBe(200);
@@ -96,7 +96,7 @@ test("AC5: a cap or a provider outage leaves the concierge visible but disabled,
 });
 
 // @static: the pause copy is in the source. The disabled line above is the live check.
-test("AC5 source: a cap or an outage tells the person the rest of the app still works", { tag: "@static" }, () => {
+test("AC5 source: a cap or an outage tells the person the rest of the app still works", { tag: "@static", annotation: { type: "qa:TC", description: "missing" } }, () => {
   const limits = readFileSync("src/lib/concierge/limits.ts", "utf8");
   for (const name of ["MONTH_CAP", "WEEK_CAP", "PROVIDER_DOWN"]) expect(limits).toContain(name);
   expect(limits).toContain("Screens and quick actions keep working");

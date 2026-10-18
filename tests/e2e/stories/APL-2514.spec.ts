@@ -17,7 +17,7 @@ test.skip(!process.env.SHO_QA_PASS, "Set SHO_QA_PASS (the shared password for th
 
 const read = (path: string) => readFileSync(path, "utf8");
 
-test("AC1: Undo puts a concierge move back to the earlier date and the thread says so", async ({ admin, later }) => {
+test("AC1: Undo puts a concierge move back to the earlier date and the thread says so", { annotation: { type: "qa:TC", description: "missing" } }, async ({ admin, later }) => {
   await requireModel(admin);
   await showConcierge(admin, later);
   await cleanChat(admin, later);
@@ -46,13 +46,13 @@ test("AC1: Undo puts a concierge move back to the earlier date and the thread sa
 });
 
 // @static: the thread copy is in the source. The card undo above is the live check.
-test("AC1 source: undo of a card calls undoAction and the thread says it was put back", { tag: "@static" }, () => {
+test("AC1 source: undo of a card calls undoAction and the thread says it was put back", { tag: "@static", annotation: { type: "qa:TC", description: "missing" } }, () => {
   const cards = read("src/lib/concierge/cards.ts");
   expect(cards).toContain("await undoAction(user, r.id, anyway)");
   expect(cards).toContain("Undone. Everything on that card was put back:");
 });
 
-test("AC2: Undo warns when the task changed since, and overwrites nothing", async ({ admin, member, later }) => {
+test("AC2: Undo warns when the task changed since, and overwrites nothing", { annotation: { type: "qa:TC", description: "missing" } }, async ({ admin, member, later }) => {
   await requireModel(admin);
   await showConcierge(admin, later);
   await cleanChat(admin, later);
@@ -77,11 +77,11 @@ test("AC2: Undo warns when the task changed since, and overwrites nothing", asyn
 });
 
 // @static: the conflict check is in the source. The 409 above is the live check.
-test("AC2 source: undo asks before it overwrites a task that changed", { tag: "@static" }, () => {
+test("AC2 source: undo asks before it overwrites a task that changed", { tag: "@static", annotation: { type: "qa:TC", description: "missing" } }, () => {
   expect(read("src/lib/concierge/cards.ts")).toContain("if (!anyway) for (const r of todo) await checkUndo(user, r.id)");
 });
 
-test("AC3: when the action notified someone, the thread says the notice cannot be unsent", async ({ admin, member, later }) => {
+test("AC3: when the action notified someone, the thread says the notice cannot be unsent", { annotation: { type: "qa:TC", description: "missing" } }, async ({ admin, member, later }) => {
   await requireModel(admin);
   await showConcierge(admin, later);
   await cleanChat(admin, later);
@@ -109,12 +109,12 @@ test("AC3: when the action notified someone, the thread says the notice cannot b
 });
 
 // @static: the unsent-notice copy is in the source. The notice that remains above is the live check.
-test("AC3 source: the thread says a notice cannot be unsent", { tag: "@static" }, () => {
+test("AC3 source: the thread says a notice cannot be unsent", { tag: "@static", annotation: { type: "qa:TC", description: "missing" } }, () => {
   expect(read("src/lib/concierge/cards.ts")).toContain("Notices already sent to other people cannot be unsent.");
   expect(read("src/components/concierge/MessageView.tsx")).toContain("A notice cannot be unsent");
 });
 
-test("AC4: Undo reverses every change on a card, and the thread lists them", async ({ admin, later }) => {
+test("AC4: Undo reverses every change on a card, and the thread lists them", { annotation: { type: "qa:TC", description: "missing" } }, async ({ admin, later }) => {
   await requireModel(admin);
   await showConcierge(admin, later);
   await cleanChat(admin, later);
@@ -146,13 +146,13 @@ test("AC4: Undo reverses every change on a card, and the thread lists them", asy
 });
 
 // @static: the reversed-line copy is in the source. The card undo above is the live check.
-test("AC4 source: undo lists every reversed change on the card", { tag: "@static" }, () => {
+test("AC4 source: undo lists every reversed change on the card", { tag: "@static", annotation: { type: "qa:TC", description: "missing" } }, () => {
   const cards = read("src/lib/concierge/cards.ts");
   expect(cards).toContain("const lines = rs.result.summary.map((x) => `- Reversed: ${x}`)");
   expect(cards).toContain("for (const r of todo)");
 });
 
-test("AC5: a member-removal card says it cannot be undone, and the done message has no Undo", async ({ admin, member, later }) => {
+test("AC5: a member-removal card says it cannot be undone, and the done message has no Undo", { annotation: { type: "qa:TC", description: "missing" } }, async ({ admin, member, later }) => {
   await requireModel(admin);
   await showConcierge(admin, later);
   await cleanChat(admin, later);
@@ -187,7 +187,7 @@ test("AC5: a member-removal card says it cannot be undone, and the done message 
 });
 
 // @static: the irreversible copy is in the source. The removal card above is the live check.
-test("AC5 source: a member-removal card cannot be undone", { tag: "@static" }, () => {
+test("AC5 source: a member-removal card cannot be undone", { tag: "@static", annotation: { type: "qa:TC", description: "missing" } }, () => {
   const changes = read("src/lib/concierge/changes.ts");
   expect(changes).toContain("irreversible = tasks.length > 0");
   expect(changes).toContain("await removeMember(user, op.projectId, op.userId, undefined, picks)");
@@ -200,7 +200,7 @@ test("AC5 source: a member-removal card cannot be undone", { tag: "@static" }, (
 });
 
 // @static: the 30-day copy is in the source. A painted "Too old to undo" button is not a live message.
-test("AC6: a done message older than 30 days has Undo greyed out, saying it is too old", { tag: "@static" }, () => {
+test("AC6: a done message older than 30 days has Undo greyed out, saying it is too old", { tag: "@static", annotation: { type: "qa:TC", description: "missing" } }, () => {
   const thread = read("src/lib/concierge/thread.ts");
   const cards = read("src/lib/concierge/cards.ts");
   const days = read("src/lib/undoable.ts");
