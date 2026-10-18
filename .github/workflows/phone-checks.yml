@@ -36,6 +36,7 @@ jobs:
           --health-retries 12
     env:
       DATABASE_URL: postgresql://sho:sho@localhost:5432/sho_viewport?schema=public
+      DIRECT_DATABASE_URL: postgresql://sho:sho@localhost:5432/sho_viewport?schema=public
       EMAIL_OUTBOX_DIR: ${{ github.workspace }}/.outbox-ci
       SUPER_ADMIN_EMAILS: root.test@aplyd.com
       APP_URL: http://localhost:3100

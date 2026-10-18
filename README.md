@@ -23,7 +23,8 @@ Settings (environment variables):
 
 | Name | Purpose |
 |---|---|
-| `DATABASE_URL` | Postgres connection string |
+| `DATABASE_URL` | Postgres connection string used by the app (may point at PgBouncer) |
+| `DIRECT_DATABASE_URL` | Direct Postgres connection string for migrations, bypassing PgBouncer; optional, falls back to `DATABASE_URL` when unset |
 | `APP_URL` | Public address used in email links |
 | `SUPER_ADMIN_EMAILS` | Comma-separated addresses that become Super Admin at sign-up |
 | `RESEND_API_KEY`, `EMAIL_FROM` | Email sending; without a key, mail goes to the outbox folder (never in production) |
@@ -61,7 +62,9 @@ One-time setup, in order:
 5. In GoDaddy, add an A record `app` → the droplet's IP.
 6. GitHub repository secrets: `SSH_PRIVATE_KEY` (the private half of `sho_deploy`),
    `DATABASE_URL`, `RESEND_API_KEY` (a Resend key with sending access for
-   `sheethappensofficer.com`). Optional variables: `DROPLET_HOST` (IP, if DNS is not live yet)
+   `sheethappensofficer.com`). Optional secret: `DIRECT_DATABASE_URL`, the direct (non-PgBouncer)
+   connection string for migrations, needed once `DATABASE_URL` points at PgBouncer; unset, migrations
+   use `DATABASE_URL`. Optional variables: `DROPLET_HOST` (IP, if DNS is not live yet)
    and `DROPLET_HOST_KEY` (one `ssh-keyscan -t ed25519 <ip>` line, which pins the host key).
 7. Run the workflow (push to `main` or "Run workflow"), then sign up with the Super Admin
    address and confirm the verification email lands in the inbox, not junk.
