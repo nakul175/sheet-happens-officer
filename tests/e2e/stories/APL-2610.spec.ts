@@ -9,6 +9,9 @@
 // Data: one ZZ-TEST project per test, archived afterwards. No people are created; the Super Admin holds the subtasks. No secret is read or printed.
 import { test, expect, zz } from "../support";
 import { getTask, newProject, newTask, ymd, type Who } from "../g2";
+import { notLive, prLive } from "../helpers/jim-gate";
+
+const NEEDS_6 = "the reopen half is missing without it.";
 
 type Later = (fn: () => Promise<unknown>) => void;
 
@@ -68,6 +71,8 @@ test("AC3: deleting a section into the done section refuses with a reason, or co
 });
 
 test("AC4 [needs PR #6]: moving the done flag away reopens the parent and the subtasks that closed with it", async ({ admin, later }) => {
+  const gate = await prLive(6, admin, null, later);
+  test.skip(!gate.deployed, notLive(gate, NEEDS_6));
   const t = await tree(admin, later, "bug3 back");
   const on = await admin.api.patch(`/api/projects/${t.p.id}/sections/${t.p.doing}`, { isDone: true });
   test.skip((await expectRefusedOrCascaded(admin, t, on.status, on.json)) === "refused", "this build refuses the change (AC1 option 1), so there is nothing to reopen");
@@ -78,6 +83,8 @@ test("AC4 [needs PR #6]: moving the done flag away reopens the parent and the su
 });
 
 test("AC4 [needs PR #6]: undoing the move-back closes parent and subtasks again", async ({ admin, later }) => {
+  const gate = await prLive(6, admin, null, later);
+  test.skip(!gate.deployed, notLive(gate, NEEDS_6));
   const t = await tree(admin, later, "bug3 undo");
   const first = await admin.page.request.patch(`/api/projects/${t.p.id}/sections/${t.p.doing}`, { data: { isDone: true } });
   test.skip(first.status() !== 200, "this build refuses the change (AC1 option 1), so there is nothing to undo");
@@ -101,6 +108,8 @@ test("AC5: a subtask closed with its parent is no longer an open task for its ho
 });
 
 test("AC4 [needs PR #6] (PENDING AC4 decision (NJ): asserts PR #6 behaviour, not the written AC): a subtask ticked done BEFORE its parent entered the done section also reopens with the parent", async ({ admin, later }) => {
+  const gate = await prLive(6, admin, null, later);
+  test.skip(!gate.deployed, notLive(gate, NEEDS_6));
   // PENDING AC4 decision (NJ, via Michael on APL-2610): PR #6 reopens every done subtask of a reopened parent (src/lib/sections.ts reopenedSubtasks),
   // including one completed on its own earlier. The written AC4 says "completed with them", so a pass here does NOT pass AC4 as written.
   const t = await tree(admin, later, "bug3 preticked");
@@ -112,4 +121,47 @@ test("AC4 [needs PR #6] (PENDING AC4 decision (NJ): asserts PR #6 behaviour, not
   const back = await admin.api.patch(`/api/projects/${t.p.id}/sections/${t.p.done}`, { isDone: true });
   expect(back.status, JSON.stringify(back.json)).toBe(200);
   expect(await states(admin, t.all), "parent, the pre-ticked subtask and the other subtask are all open").toEqual([false, false, false]);
+});
+
+test("AC5 [needs PR #6]: a subtask with a due date that closed with its parent gets no reminder notification", async ({ admin, later }) => {
+  // The reminder job (src/lib/jobs.ts sendReminders, 8:00 am India time) needs a job secret a browser session does not have, so it is not
+  // triggered here. The test checks what the job reads (the subtask is complete) and that no reminder for this run's ZZ-TEST subtasks exists.
+  const gate = await prLive(6, admin, null, later);
+  test.skip(!gate.deployed, notLive(gate, NEEDS_6));
+  const t = await tree(admin, later, "bug3 no reminder");
+  const r = await admin.api.patch(`/api/projects/${t.p.id}/sections/${t.p.doing}`, { isDone: true });
+  expect(await expectRefusedOrCascaded(admin, t, r.status, r.json), "on a build with PR #6 the done flag cascades").toBe("cascade");
+  for (const s of t.subs) {
+    const sub = await getTask(admin, s);
+    expect(sub.completedAt, "closed with its parent, so sendReminders (completedAt: null) skips it").toBeTruthy();
+    expect(sub.dueDate, "control: the subtask still has its due date").toBe(ymd(1));
+  }
+  const items = (await admin.api.get("/api/notifications?limit=200")).json.items as Record<string, unknown>[];
+  const reminders = items.map((n) => JSON.stringify(n)).filter((n) => n.includes("ZZ-TEST") && /is due tomorrow|is due today|is overdue/.test(n));
+  for (const title of t.titles.slice(1)) expect(reminders.filter((n) => n.includes(title)), `no reminder for "${title}"`).toEqual([]);
+});
+
+test("APL-2678 [needs PR #6]: moving the done flag leaves a parent task in Trash untouched", async ({ admin, later }) => {
+  const gate = await prLive(6, admin, null, later);
+  test.skip(!gate.deployed, notLive(gate, NEEDS_6));
+  const p = await newProject(admin, later, { label: "bug3 trash" });
+  // Two completed parents in the done section: one moved to Trash, one left live as the control that does reopen.
+  const trashed = await newTask(admin, p.id, { title: zz("bug3 trashed parent") });
+  const live = await newTask(admin, p.id, { title: zz("bug3 live parent") });
+  for (const id of [trashed, live]) expect((await admin.api.post(`/api/tasks/${id}/complete`, {})).status).toBe(200);
+  const before = await getTask(admin, trashed);
+  expect(before.completedAt, "the parent is complete before it goes to Trash").toBeTruthy();
+  expect(before.sectionId).toBe(p.done);
+  expect((await admin.api.del(`/api/tasks/${trashed}`)).status).toBe(204);
+
+  const r = await admin.api.patch(`/api/projects/${p.id}/sections/${p.doing}`, { isDone: true });
+  expect(r.status, JSON.stringify(r.json)).toBe(200);
+  expect((await getTask(admin, live)).completedAt, "control: the live parent in the old done section reopened").toBeNull();
+  expect((await admin.api.get(`/api/tasks/${trashed}`)).status, "still in Trash").toBe(404);
+
+  // A task in Trash cannot be read, and restoring changes only deletedAt (and a gone assignee), so read it back through a restore.
+  expect((await admin.api.post(`/api/tasks/${trashed}/restore`)).status).toBe(200);
+  const after = await getTask(admin, trashed);
+  expect(after.completedAt, "completedAt unchanged by the flag move").toBe(before.completedAt);
+  expect(after.sectionId, "still in the section it was trashed from").toBe(before.sectionId);
 });

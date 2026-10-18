@@ -11,7 +11,7 @@ type Later = (fn: () => Promise<unknown>) => void;
 export type Gate = { pr: number; deployed: boolean; how: string };
 
 /** Head commits of the open PRs these specs cover (GitHub, 18 Oct 2026). A later push to a PR falls through to the probe. */
-const HEADS: Record<number, string> = { 6: "fb7daab3c0", 9: "87721120b9", 12: "72d2a3d88b", 14: "375e04c33c" };
+const HEADS: Record<number, string> = { 6: "13a836e8b6", 9: "87721120b9", 12: "72d2a3d88b", 14: "375e04c33c" };
 
 let releaseOnce: Promise<string | null> | null = null;
 /** The git SHA staging says it runs, or null when /api/health does not say. */
