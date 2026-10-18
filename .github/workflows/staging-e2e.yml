@@ -2,18 +2,25 @@
 # production is refused). Started by hand only (Actions > Staging e2e > Run workflow).
 # The specs live on the branch the run is started from ("Use workflow from", e.g. qa/story-e2e): every job checks out that same commit.
 # Input "specs": space-separated issue ids (APL-2481) or globs (APL-26*, tests/e2e/stories/APL-25*.spec.ts); empty runs every spec.
-# Secrets (repository settings): STAGING_USER, STAGING_PASS, SHO_ADMIN_EMAIL, SHO_ADMIN_PASS, SHO_MEMBER_EMAIL, SHO_MEMBER_PASS,
-# and ZZ_TEST_01_EMAIL / ZZ_TEST_01_PASS ... ZZ_TEST_20_EMAIL / ZZ_TEST_20_PASS (01-05 Super Admins, 06-20 plain Members).
+# Secrets (repository settings): STAGING_USER, STAGING_PASS, SHO_QA_PASS, SHO_ADMIN_EMAIL, SHO_ADMIN_PASS, SHO_MEMBER_EMAIL,
+# SHO_MEMBER_PASS, and ZZ_TEST_01_EMAIL / ZZ_TEST_01_PASS ... ZZ_TEST_20_EMAIL / ZZ_TEST_20_PASS (01-05 Super Admins, 06-20 plain Members).
+# SHO_QA_PASS is the shared password for the nakul17+ story accounts. Story specs skip without it, and Playwright then exits 0.
 # Optional, names only, never echoed: MAIL_SINK_TOKEN. Mailbox-dependent specs skip when it is absent.
 # The previews use the same STAGING_USER / STAGING_PASS basic-auth gate as staging.
 # They reach the jobs as environment variables only and are never echoed. Runs queue in one group so two never run at once.
+# This workflow is workflow_dispatch only. It does not run on pull_request or pull_request_target, so a fork cannot read these secrets.
 #
 # How a run is split:
 #   plan        checks "target" first, then picks the spec files once and splits them into the parallel set and SERIAL_SPECS.
 #               Every shard and the serial job get BASE_URL=https://<target>.
 #   e2e         20 shards of the parallel set (--shard=N/20, workers=1 each). Shard N signs in as ZZ_TEST_NN (SHARD_*), names its
 #               data ZZ-TEST-NN (ZZ_PREFIX), and gets a partner account of the other role (PEER_*). At most max_parallel run at once.
+#               A shard with no tests passes. A shard whose tests were all skipped fails. Each shard uploads its JSON counts.
 #   e2e-serial  the SERIAL_SPECS files, alone, after every shard has finished, as the shared SHO_ADMIN / SHO_MEMBER accounts.
+#               The same per-job rule applies, and it uploads its JSON counts too.
+#   counts      once, after every shard (if: always(), needs plan). Expected count files come from plan:
+#               20 when the parallel matrix runs, plus 1 when serial specs were picked. Fewer files, a failed
+#               download, or a missing-report marker fails the job. It also fails when run is 0 or skipped equals total.
 #   report      merges every job's blob report into one HTML report.
 #
 # max_parallel: staging uses its own separate sho_staging database and allows 25 connections. Do not raise it above 5 until NJ approves
@@ -77,6 +84,7 @@ jobs:
       base_url: ${{ steps.target.outputs.base_url }}
       parallel: ${{ steps.pick.outputs.parallel }}
       serial: ${{ steps.pick.outputs.serial }}
+      expected_counts: ${{ steps.pick.outputs.expected_counts }}
     steps:
       - name: Check the target host
         id: target
@@ -145,6 +153,9 @@ jobs:
           echo "Serial job (${#serial[@]} files):"; printf '  %s\n' "${serial[@]}"
           echo "parallel=${parallel[*]}" >> "$GITHUB_OUTPUT"
           echo "serial=${serial[*]}" >> "$GITHUB_OUTPUT"
+          expected=$(node scripts/ci/assert-playwright-ran.mjs --mode expected --parallel "${#parallel[@]}" --serial "${#serial[@]}")
+          echo "Count files expected: $expected"
+          echo "expected_counts=$expected" >> "$GITHUB_OUTPUT"
 
   e2e:
     name: Shard ${{ matrix.nn }} of 20 (${{ matrix.role }})
@@ -194,6 +205,7 @@ jobs:
           SHO_ADMIN_PASS: ${{ secrets.SHO_ADMIN_PASS }}
           SHO_MEMBER_EMAIL: ${{ secrets.SHO_MEMBER_EMAIL }}
           SHO_MEMBER_PASS: ${{ secrets.SHO_MEMBER_PASS }}
+          SHO_QA_PASS: ${{ secrets.SHO_QA_PASS }}
           SHARD_EMAIL: ${{ secrets[format('ZZ_TEST_{0}_EMAIL', matrix.nn)] }}
           SHARD_PASS: ${{ secrets[format('ZZ_TEST_{0}_PASS', matrix.nn)] }}
           PEER_EMAIL: ${{ secrets[format('ZZ_TEST_{0}_EMAIL', matrix.peer)] }}
@@ -203,7 +215,7 @@ jobs:
           PEER: ${{ matrix.peer }}
         run: |
           missing=""
-          for n in STAGING_USER STAGING_PASS SHO_ADMIN_EMAIL SHO_ADMIN_PASS SHO_MEMBER_EMAIL SHO_MEMBER_PASS; do
+          for n in STAGING_USER STAGING_PASS SHO_ADMIN_EMAIL SHO_ADMIN_PASS SHO_MEMBER_EMAIL SHO_MEMBER_PASS SHO_QA_PASS; do
             [ -n "${!n}" ] || missing="$missing $n"
           done
           [ -n "$SHARD_EMAIL" ] || missing="$missing ZZ_TEST_${NN}_EMAIL"
@@ -244,16 +256,37 @@ jobs:
           SHO_ADMIN_PASS: ${{ secrets.SHO_ADMIN_PASS }}
           SHO_MEMBER_EMAIL: ${{ secrets.SHO_MEMBER_EMAIL }}
           SHO_MEMBER_PASS: ${{ secrets.SHO_MEMBER_PASS }}
+          SHO_QA_PASS: ${{ secrets.SHO_QA_PASS }}
           SHARD_EMAIL: ${{ secrets[format('ZZ_TEST_{0}_EMAIL', matrix.nn)] }}
           SHARD_PASS: ${{ secrets[format('ZZ_TEST_{0}_PASS', matrix.nn)] }}
           PEER_EMAIL: ${{ secrets[format('ZZ_TEST_{0}_EMAIL', matrix.peer)] }}
           PEER_PASS: ${{ secrets[format('ZZ_TEST_{0}_PASS', matrix.peer)] }}
           MAIL_SINK_TOKEN: ${{ secrets.MAIL_SINK_TOKEN }}
+          PLAYWRIGHT_JSON_OUTPUT_FILE: playwright-report.json
           FILES: ${{ needs.plan.outputs.parallel }}
           TRACE: ${{ inputs.trace }}
         run: |
           read -ra files <<< "$FILES"
-          npx playwright test --shard=${{ matrix.shard }}/20 --workers=1 --reporter=list,blob --trace="$TRACE" "${files[@]}"
+          npx playwright test --shard=${{ matrix.shard }}/20 --workers=1 --reporter=list,blob,json --trace="$TRACE" "${files[@]}"
+
+      - name: Fail this shard when every test was skipped
+        if: always()
+        run: |
+          if [ ! -f scripts/ci/assert-playwright-ran.mjs ]; then
+            printf '%s\n' '{"missing":true}' > playwright-counts.json
+            echo "Missing Playwright JSON report (missing=true): count check script is not on disk."
+            exit 0
+          fi
+          node scripts/ci/assert-playwright-ran.mjs --mode shard --report playwright-report.json --counts-out playwright-counts.json
+
+      - name: Upload shard counts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-counts-${{ matrix.nn }}
+          path: playwright-counts.json
+          if-no-files-found: error
+          retention-days: 14
 
       - name: Upload the blob report
         if: always()
@@ -284,10 +317,11 @@ jobs:
           SHO_ADMIN_PASS: ${{ secrets.SHO_ADMIN_PASS }}
           SHO_MEMBER_EMAIL: ${{ secrets.SHO_MEMBER_EMAIL }}
           SHO_MEMBER_PASS: ${{ secrets.SHO_MEMBER_PASS }}
+          SHO_QA_PASS: ${{ secrets.SHO_QA_PASS }}
           MAIL_SINK_TOKEN: ${{ secrets.MAIL_SINK_TOKEN }}
         run: |
           missing=""
-          for n in STAGING_USER STAGING_PASS SHO_ADMIN_EMAIL SHO_ADMIN_PASS SHO_MEMBER_EMAIL SHO_MEMBER_PASS; do
+          for n in STAGING_USER STAGING_PASS SHO_ADMIN_EMAIL SHO_ADMIN_PASS SHO_MEMBER_EMAIL SHO_MEMBER_PASS SHO_QA_PASS; do
             [ -n "${!n}" ] || missing="$missing $n"
           done
           if [ -n "$missing" ]; then
@@ -297,7 +331,7 @@ jobs:
           if [ -z "${MAIL_SINK_TOKEN:-}" ]; then
             echo "::warning::MAIL_SINK_TOKEN is not set. Mailbox-dependent specs will skip."
           fi
-          echo "All six secrets are set."
+          echo "All required secrets are set."
 
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -315,12 +349,33 @@ jobs:
           SHO_ADMIN_PASS: ${{ secrets.SHO_ADMIN_PASS }}
           SHO_MEMBER_EMAIL: ${{ secrets.SHO_MEMBER_EMAIL }}
           SHO_MEMBER_PASS: ${{ secrets.SHO_MEMBER_PASS }}
+          SHO_QA_PASS: ${{ secrets.SHO_QA_PASS }}
           MAIL_SINK_TOKEN: ${{ secrets.MAIL_SINK_TOKEN }}
+          PLAYWRIGHT_JSON_OUTPUT_FILE: playwright-report.json
           FILES: ${{ needs.plan.outputs.serial }}
           TRACE: ${{ inputs.trace }}
         run: |
           read -ra files <<< "$FILES"
-          npx playwright test --workers=1 --reporter=list,blob --trace="$TRACE" "${files[@]}"
+          npx playwright test --workers=1 --reporter=list,blob,json --trace="$TRACE" "${files[@]}"
+
+      - name: Fail the serial job when every test was skipped
+        if: always()
+        run: |
+          if [ ! -f scripts/ci/assert-playwright-ran.mjs ]; then
+            printf '%s\n' '{"missing":true}' > playwright-counts.json
+            echo "Missing Playwright JSON report (missing=true): count check script is not on disk."
+            exit 0
+          fi
+          node scripts/ci/assert-playwright-ran.mjs --mode shard --report playwright-report.json --counts-out playwright-counts.json
+
+      - name: Upload serial counts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-counts-serial
+          path: playwright-counts.json
+          if-no-files-found: error
+          retention-days: 14
 
       - name: Upload the blob report
         if: always()
@@ -330,6 +385,23 @@ jobs:
           path: blob-report/
           if-no-files-found: ignore
           retention-days: 14
+
+  counts:
+    name: Fail when nothing ran
+    needs: [plan, e2e, e2e-serial]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: playwright-counts-*
+          path: shard-counts
+      - name: Merge the shard counts
+        env:
+          EXPECTED_COUNTS: ${{ needs.plan.outputs.expected_counts }}
+        run: node scripts/ci/assert-playwright-ran.mjs --mode aggregate --dir shard-counts --expected "$EXPECTED_COUNTS"
 
   report:
     name: Merge the reports
