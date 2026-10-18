@@ -92,9 +92,9 @@ test("AC1: with CRM_VISIBLE=off, My tasks shows no deal task and no stage", asyn
   expect(rows.some((t) => t.title === w.plainTitle)).toBe(true);
   await w.editor.api.post("/api/profile/start-guide");
   await w.editor.page.goto("/", { waitUntil: "domcontentloaded" });
-  await expect(w.editor.page.getByRole("heading", { name: "My tasks" })).toBeVisible();
-  await expect(w.editor.page.getByRole("status", { name: "Loading" })).toHaveCount(0, { timeout: 30_000 });
-  await expect(w.editor.page.getByText(w.plainTitle).first()).toBeVisible();
+  // The first document request can bounce through /signin while the route compiles. Wait for the list itself.
+  await expect(w.editor.page.getByRole("heading", { name: "My tasks" })).toBeVisible({ timeout: 30_000 });
+  await expect(w.editor.page.getByText(w.plainTitle).first()).toBeVisible({ timeout: 30_000 });
   if (w.deal && hide) {
     await expect(w.editor.page.getByText(w.deal.taskTitle)).toHaveCount(0);
     await expect(w.editor.page.getByText(w.deal.name)).toHaveCount(0);
