@@ -1,6 +1,6 @@
 // CRM slice 2: next step notices (12.5), parties (12.4), board data (12.6 AC2, AC3, AC6).
 import { describe, expect, it } from "vitest";
-import { account, istDate, task, type Account } from "./helpers";
+import { account, istDate, task, type Account, patchTask, withVersion } from "./helpers";
 
 let seq = 0;
 async function setup(leader: Account, bid = false) {
@@ -25,14 +25,14 @@ describe("next step notices (12.5)", () => {
     const d = await setup(lead);
     expect(await notices(lead, d.id)).toHaveLength(0);
     const t = await d.nextId();
-    expect((await lead.c.post(`/api/tasks/${t}/complete`, {})).status).toBe(200);
+    expect((await lead.c.post(`/api/tasks/${t}/complete`, await withVersion(lead, t!))).status).toBe(200);
     expect(await notices(lead, d.id)).toHaveLength(1);
     const row = (await lead.c.get(`/api/deals?pipelineId=${d.pipe.id}`)).json.deals.find((x: { id: string }) => x.id === d.id);
     expect(row.nextStep).toBeNull();
     expect(row.needsNextStep).toBe(true);
     // A second task without a date is not a next step, and completing it does not add another notice while one is unread.
     const undated = await task(lead, d.id, { title: "No date" });
-    expect((await lead.c.post(`/api/tasks/${undated}/complete`, {})).status).toBe(200);
+    expect((await lead.c.post(`/api/tasks/${undated}/complete`, await withVersion(lead, undated))).status).toBe(200);
     expect(await notices(lead, d.id)).toHaveLength(1);
   });
 
@@ -52,7 +52,7 @@ describe("next step notices (12.5)", () => {
     const lead = await account("nstrash");
     const d = await setup(lead);
     const t = (await d.nextId())!;
-    expect((await lead.c.patch(`/api/tasks/${t}`, { dueDate: null })).status).toBe(200);
+    expect((await patchTask(lead, t, { dueDate: null })).status).toBe(200);
     expect(await notices(lead, d.id)).toHaveLength(1);
     const d2 = await setup(lead);
     const t2 = (await d2.nextId())!;
@@ -65,7 +65,7 @@ describe("next step notices (12.5)", () => {
     const d = await setup(lead);
     const t = (await d.nextId())!;
     expect((await lead.c.post(`/api/projects/${d.id}/stage`, { stageId: d.stage("On hold"), reason: "Budget" })).status).toBe(200);
-    expect((await lead.c.post(`/api/tasks/${t}/complete`, {})).status).toBe(200);
+    expect((await lead.c.post(`/api/tasks/${t}/complete`, await withVersion(lead, t))).status).toBe(200);
     expect(await notices(lead, d.id)).toHaveLength(0);
     const row = (await lead.c.get(`/api/deals?pipelineId=${d.pipe.id}`)).json.deals.find((x: { id: string }) => x.id === d.id);
     expect(row.needsNextStep).toBe(false);

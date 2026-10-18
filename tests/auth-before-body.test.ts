@@ -121,7 +121,8 @@ describe("auth before body (APL-2651)", () => {
     }
 
     // AC3. The same people, once they are allowed, still see today's validation errors.
-    const badTitle = await hit(lead, "PATCH", taskPath, { title: "" });
+    const seen = (await lead.c.get(taskPath)).json.task.updatedAt as string;
+    const badTitle = await hit(lead, "PATCH", taskPath, { title: "", expectedUpdatedAt: seen });
     expectValidation(badTitle);
     expect(badTitle.json!.issues).toEqual([{ path: ["title"], message: "Give the task a title." }]);
     expectBadJson(await send("PATCH", taskPath, "{", lead.c.cookie));
@@ -151,7 +152,7 @@ describe("auth before body (APL-2651)", () => {
     expectBadJson(await hit(lead, "POST", "/api/concierge/messages", "{"));
 
     // A valid body still does what it did before.
-    const renamed = await hit(lead, "PATCH", taskPath, { title: "Still here" });
+    const renamed = await hit(lead, "PATCH", taskPath, { title: "Still here", expectedUpdatedAt: seen });
     expect(renamed.status).toBe(200);
     expect(renamed.json!.task).toMatchObject({ title: "Still here" });
 
@@ -172,7 +173,8 @@ describe("auth before body (APL-2651)", () => {
     expect(promoted.json).toEqual({ status: "ok" });
     expect((await hit(sa, "PATCH", `/api/team/${outsider.id}`, { orgRole: "MEMBER" })).status).toBe(200);
 
-    const bulk = await lead.c.post(`/api/projects/${p.id}/tasks/bulk`, { taskIds: [taskId], action: "move", sectionId: p.doing });
+    const movedAt = (await lead.c.get(taskPath)).json.task.updatedAt as string;
+    const bulk = await lead.c.post(`/api/projects/${p.id}/tasks/bulk`, { taskIds: [taskId], action: "move", sectionId: p.doing, versions: { [taskId]: movedAt } });
     expect(bulk.status).toBe(200);
     // The action belongs to the Leader. An Editor's valid body is refused on access, not validation.
     // An invalid body has no action ids, so a signed-in Editor still gets 400 (asserted above).

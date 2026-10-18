@@ -1,7 +1,7 @@
 // SHO-US-14.11: bulk actions in one request, skip-and-say, 50 limit, one Undo.
 import { describe, expect, it } from "vitest";
 import { PrismaClient } from "../src/generated/prisma/client";
-import { account, istDate, project, task } from "./helpers";
+import { account, bulkWithVersions, istDate, project, task } from "./helpers";
 
 const db = new PrismaClient();
 
@@ -15,7 +15,7 @@ describe("bulk actions (14.11)", () => {
     const p = await project(lead, lead, [{ who: meera }, { who: old }]);
     const ids: string[] = [];
     for (let i = 0; i < 5; i++) ids.push(await task(lead, p.id, { assigneeId: i < 3 ? old.id : lead.id }));
-    const r = await lead.c.post(`/api/projects/${p.id}/tasks/bulk`, { taskIds: ids, action: "assign", assigneeId: meera.id });
+    const r = await lead.c.post(`/api/projects/${p.id}/tasks/bulk`, await bulkWithVersions(lead, ids, { action: "assign", assigneeId: meera.id }));
     expect(r.status).toBe(200);
     expect(r.json.changed).toBe(5);
     expect(r.json.skipped).toEqual([]);
@@ -42,10 +42,10 @@ describe("bulk actions (14.11)", () => {
     const d = (await lead.c.post(`/api/projects/${p.id}/tasks/bulk`, { taskIds: [a, b], action: "date", dueDate: istDate(1) })).json;
     expect(d.changed).toBe(1);
     expect(d.message).toBe("1 changed, 1 skipped (already up to date)");
-    const m = (await lead.c.post(`/api/projects/${p.id}/tasks/bulk`, { taskIds: [a, b], action: "move", sectionId: p.doing })).json;
+    const m = (await lead.c.post(`/api/projects/${p.id}/tasks/bulk`, await bulkWithVersions(lead, [a, b], { action: "move", sectionId: p.doing }))).json;
     expect(m.changed).toBe(2);
     expect((await lead.c.get(`/api/tasks/${a}`)).json.task.section.id).toBe(p.doing);
-    const c = (await lead.c.post(`/api/projects/${p.id}/tasks/bulk`, { taskIds: [a, b], action: "complete" })).json;
+    const c = (await lead.c.post(`/api/projects/${p.id}/tasks/bulk`, await bulkWithVersions(lead, [a, b], { action: "complete" }))).json;
     expect(c.changed).toBe(2);
     expect((await lead.c.get(`/api/tasks/${a}`)).json.task.completedAt).toBeTruthy();
     const u = await lead.c.post("/api/actions/bulk-undo", { ids: c.undoIds });
@@ -65,7 +65,7 @@ describe("bulk actions (14.11)", () => {
     for (let i = 0; i < 4; i++) ids.push(await task(lead, p.id, { assigneeId: ed.id }));
     const held = await task(lead, p.id, { assigneeId: other.id, approverId: ed.id });
     expect((await other.c.post(`/api/tasks/${held}/send-for-approval`)).status).toBe(200); // ed now holds it and may only close or send back
-    const r = await ed.c.post(`/api/projects/${p.id}/tasks/bulk`, { taskIds: [...ids, held], action: "assign", assigneeId: other.id });
+    const r = await ed.c.post(`/api/projects/${p.id}/tasks/bulk`, await bulkWithVersions(ed, [...ids, held], { action: "assign", assigneeId: other.id }));
     expect(r.status).toBe(200);
     expect(r.json.changed).toBe(4);
     expect(r.json.message).toBe("4 changed, 1 skipped (no permission)");
@@ -78,12 +78,12 @@ describe("bulk actions (14.11)", () => {
     const p = await project(lead, lead);
     const first = await task(lead, p.id);
     const ids = [first, ...Array.from({ length: 50 }, (_, i) => `fake${i}`)];
-    const r = await lead.c.post(`/api/projects/${p.id}/tasks/bulk`, { taskIds: ids, action: "complete" });
+    const r = await lead.c.post(`/api/projects/${p.id}/tasks/bulk`, await bulkWithVersions(lead, ids, { action: "complete" }));
     expect(r.status).toBe(400);
     expect(r.json.error).toMatch(/up to 50 tasks at once/);
     expect((await lead.c.get(`/api/tasks/${first}`)).json.task.completedAt).toBeNull();
     // exactly 50 is allowed
-    const ok = await lead.c.post(`/api/projects/${p.id}/tasks/bulk`, { taskIds: ids.slice(0, 50), action: "complete" });
+    const ok = await lead.c.post(`/api/projects/${p.id}/tasks/bulk`, await bulkWithVersions(lead, ids.slice(0, 50), { action: "complete" }));
     expect(ok.status).toBe(200);
     expect(ok.json.changed).toBe(1);
     expect(ok.json.skipped.length).toBe(49);
@@ -95,9 +95,9 @@ describe("bulk actions (14.11)", () => {
     const out = await account("out");
     const p = await project(lead, lead, [{ who: view, role: "VIEWER" }]);
     const t = await task(lead, p.id);
-    expect((await view.c.post(`/api/projects/${p.id}/tasks/bulk`, { taskIds: [t], action: "complete" })).status).toBe(403);
-    expect((await out.c.post(`/api/projects/${p.id}/tasks/bulk`, { taskIds: [t], action: "complete" })).status).toBe(404);
-    const bad = await lead.c.post(`/api/projects/${p.id}/tasks/bulk`, { taskIds: [t], action: "assign", assigneeId: view.id });
+    expect((await view.c.post(`/api/projects/${p.id}/tasks/bulk`, await bulkWithVersions(view, [t], { action: "complete" }))).status).toBe(403);
+    expect((await out.c.post(`/api/projects/${p.id}/tasks/bulk`, await bulkWithVersions(out, [t], { action: "complete" }))).status).toBe(404);
+    const bad = await lead.c.post(`/api/projects/${p.id}/tasks/bulk`, await bulkWithVersions(lead, [t], { action: "assign", assigneeId: view.id }));
     expect(bad.status).toBe(400);
     expect((await lead.c.get(`/api/tasks/${t}`)).json.task.assignee.id).toBe(lead.id);
   });
