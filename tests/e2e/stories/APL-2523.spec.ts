@@ -14,8 +14,7 @@ const CRM_OFF = "CRM routes answer not found on this server (CRM_VISIBLE is off)
 
 async function pipes(who: Who) {
   const r = await who.api.get("/api/deals/pipelines");
-  test.skip(r.status === 404, CRM_OFF);
-  expect(r.status, JSON.stringify(r.json)).toBe(200);
+  expect(r.status, CRM_OFF + " " + JSON.stringify(r.json)).toBe(200);
   return pipelines(who.api);
 }
 
@@ -137,7 +136,15 @@ test("AC6: CRM_VISIBLE admins or off answers not found and hides Deals", async (
   const adminDeals = await admin.api.get("/api/deals");
   const memberDeals = await member.api.get("/api/deals");
   const mode = adminDeals.status === 404 ? "off" : memberDeals.status === 404 ? "admins" : "all";
-  test.skip(mode === "all", "This server runs CRM_VISIBLE=all. A session cannot restart it as admins or off.");
+  if (mode === "all") {
+    expect(adminDeals.status).toBe(200);
+    expect(memberDeals.status).toBe(200);
+    for (const who of [admin, member]) {
+      await who.page.goto("/");
+      await expect(who.page.getByRole("link", { name: "Deals", exact: true })).toBeVisible();
+    }
+    return;
+  }
   if (mode === "off") {
     expect(adminDeals.status).toBe(404);
     expect(memberDeals.status).toBe(404);

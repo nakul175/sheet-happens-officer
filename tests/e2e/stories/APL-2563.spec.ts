@@ -1,7 +1,11 @@
 // SHO-US-14.4 First-run orientation (Linear APL-2563).
 // The start guide is shown once per account. A spec can only see it on an account that has not dismissed it yet, so AC1, AC2 and AC5
 // skip with a reason when the Member account has already dismissed it (dismissing is permanent for that account, by design).
-import { test, expect, zz, login } from "../support";
+import { expect, zz, BASE_URL } from "../support";
+import { test } from "../helpers/story-people";
+import { QA_PASS, storyGate } from "../helpers/qa-alias";
+
+storyGate({ admin: true });
 
 type Who = { api: import("../support").Api; user: Record<string, any>; page: import("@playwright/test").Page };
 
@@ -22,8 +26,7 @@ async function guideShown(member: Who) {
 // Order matters: AC2 dismisses the guide and AC3 adds the Member to a project, so the checks that need a fresh account run first.
 test("AC4: a person with no projects sees the Leaders by name and a Request to be added that tells the Leader", async ({ admin, member, later }) => {
   await member.page.goto("/projects");
-  const empty = await member.page.getByText("Ask a project Leader to add you.").waitFor({ timeout: 6000 }).then(() => 1, () => 0);
-  test.skip(empty === 0, "The Member account already belongs to projects, so the empty Projects screen is not shown. Use a Member with no projects.");
+  await expect(member.page.getByText("Ask a project Leader to add you.")).toBeVisible();
   const p = await ledProject(admin, later, "14.4 leader");
   await member.page.reload();
   const list = member.page.getByLabel("Leaders");
@@ -41,7 +44,7 @@ test("AC4: a person with no projects sees the Leaders by name and a Request to b
 });
 
 test("AC1: first sign-in shows the start guide above everything else on My tasks", async ({ member }) => {
-  test.skip(!(await guideShown(member)), "The Member account has already dismissed its start guide. Use an account that has never dismissed it.");
+  expect(await guideShown(member), "a new account has not dismissed the start guide").toBe(true);
   const page = member.page;
   await page.goto("/");
   const guide = page.getByRole("region", { name: "Start guide" });
@@ -54,7 +57,7 @@ test("AC1: first sign-in shows the start guide above everything else on My tasks
 });
 
 test("AC5: the guide has at most 3 items and fits above the fold at 1440 by 900", async ({ member }) => {
-  test.skip(!(await guideShown(member)), "The Member account has already dismissed its start guide. Use an account that has never dismissed it.");
+  expect(await guideShown(member), "a new account has not dismissed the start guide").toBe(true);
   const page = member.page;
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto("/");
@@ -64,20 +67,28 @@ test("AC5: the guide has at most 3 items and fits above the fold at 1440 by 900"
   const box = (await guide.boundingBox())!;
   expect(box.y + box.height).toBeLessThanOrEqual(900);
 });
-test("AC2: Dismiss removes the guide for good, also on another device", async ({ member, anon }) => {
-  test.skip(!(await guideShown(member)), "The Member account has already dismissed its start guide. Use an account that has never dismissed it.");
+test("AC2: Dismiss removes the guide for good, also on another device", async ({ member, browser }) => {
+  expect(await guideShown(member), "a new account has not dismissed the start guide").toBe(true);
   const page = member.page;
   await page.goto("/");
+  const saved = page.waitForResponse((r) => r.url().includes("/api/profile/start-guide") && r.request().method() === "POST" && r.ok());
   await page.getByRole("region", { name: "Start guide" }).getByRole("button", { name: "Dismiss" }).click();
+  await saved;
   await expect(page.getByRole("region", { name: "Start guide" })).toHaveCount(0);
   await page.reload();
+  await expect(page.getByRole("heading", { name: "My tasks" })).toBeVisible();
   await expect(page.getByRole("region", { name: "Start guide" })).toHaveCount(0);
-  // A second browser with its own cookies: a different "device".
-  const r = await anon.context().request.post("/api/auth/signin", { data: { email: login("MEMBER").email, password: login("MEMBER").password } });
+  const ctx = await browser.newContext({
+    baseURL: BASE_URL,
+    httpCredentials: process.env.STAGING_USER ? { username: process.env.STAGING_USER, password: process.env.STAGING_PASS ?? "" } : undefined,
+  });
+  const r = await ctx.request.post("/api/auth/signin", { data: { email: member.user.email, password: QA_PASS } });
   expect(r.ok()).toBe(true);
-  await anon.goto("/");
-  await expect(anon.getByRole("heading", { name: "My tasks" })).toBeVisible();
-  await expect(anon.getByRole("region", { name: "Start guide" })).toHaveCount(0);
+  const other = await ctx.newPage();
+  await other.goto("/");
+  await expect(other.getByRole("heading", { name: "My tasks" })).toBeVisible();
+  await expect(other.getByRole("region", { name: "Start guide" })).toHaveCount(0);
+  await ctx.close();
 });
 
 test("AC3: Team shows each person's organisation role and the projects they lead", async ({ admin, member, later }) => {

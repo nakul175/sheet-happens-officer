@@ -1,4 +1,4 @@
-import { defineConfig } from "@playwright/test";
+import { defineConfig, devices } from "@playwright/test";
 import { BASE_URL } from "./tests/e2e/base-url";
 
 // Story-level browser tests (tests/e2e/stories/<issue-id>.spec.ts).
@@ -25,4 +25,9 @@ export default defineConfig({
     trace: "off",
   },
   outputDir: "test-results/e2e",
+  projects: [
+    // Phone stories (forms, the task sheet, the installable app) run on the mobile project.
+    { name: "chromium", testIgnore: /APL-2551\.spec\.ts|APL-2555\.spec\.ts|APL-2558\.spec\.ts/ },
+    { name: "mobile", testMatch: /APL-2551\.spec\.ts|APL-2555\.spec\.ts|APL-2558\.spec\.ts/, use: { ...devices["Pixel 5"] } },
+  ],
 });

@@ -4,9 +4,13 @@
 // so Drop (AC2) is skipped and the Convert button on the review row cannot be rendered. AC3 opens the same
 // conversion dialog from the task the row would link to, and checks a Viewer is not offered it.
 // The plain Member is the person who must not see someone else's deal.
-import { test, expect, zz } from "../support";
+import { expect, zz } from "../support";
+import { test } from "../helpers/story-people";
+import { storyGate } from "../helpers/qa-alias";
+import { ageTaskCreated } from "../helpers/own-row";
 import { newProject, newTask, ymd, type Who } from "../g2";
-import { why } from "../helpers/jim-http";
+
+storyGate({ admin: true });
 
 type Later = (fn: () => Promise<unknown>) => void;
 type Review = { needsNextStep: { id: string }[]; overdueNextStep: { id: string }[]; stalled: { id: string }[]; ideas: { id: string; canEdit?: boolean }[] };
@@ -62,9 +66,28 @@ test("AC1: Admins see every deal on the review, everyone else only the deals on 
   await expect(admin.page.getByText(hidden.name)).toHaveCount(0);
 });
 
-test.skip("AC2: Drop removes the Idea flag and the task stays", why(
-  "The review lists an idea only when the task was created more than 30 days ago. A session cannot change createdAt, so Drop is never rendered (30-day history). Covered by tests/crm5.test.ts.",
-), () => {});
+test("AC2: Drop removes the Idea flag and the task stays", async ({ admin, member, later }) => {
+  test.setTimeout(120_000);
+  const p = await newProject(admin, later, { label: "review drop" });
+  const title = zz("old idea");
+  const id = await newTask(admin, p.id, { title, dueDate: ymd(6), assigneeId: admin.user.id });
+  expect((await admin.api.post(`/api/tasks/${id}/idea`, { isIdea: true })).status).toBe(200);
+  expect((await admin.api.post(`/api/projects/${p.id}/members`, { userId: member.user.id, role: "VIEWER" })).status).toBe(201);
+  ageTaskCreated(id, 40);
+  expect(ids((await review(admin)).ideas)).toContain(id);
+  expect((await review(member)).ideas.find((i) => i.id === id)?.canEdit).toBe(false);
+  await admin.page.goto("/review");
+  const row = admin.page.locator("li, tr, .item, div", { hasText: title }).filter({ has: admin.page.getByRole("button", { name: "Drop" }) }).first();
+  await expect(row.getByRole("button", { name: "Drop" })).toBeVisible();
+  await row.getByRole("button", { name: "Drop" }).click();
+  await expect.poll(async () => ids((await review(admin)).ideas).includes(id)).toBe(false);
+  const task = await admin.api.get(`/api/tasks/${id}`);
+  expect(task.status).toBe(200);
+  expect(task.json.task.isIdea).toBe(false);
+  expect(task.json.task.title).toBe(title);
+  await member.page.goto("/review");
+  await expect(member.page.locator(".item", { hasText: title }).getByRole("button", { name: "Drop" })).toHaveCount(0);
+});
 
 test("AC3: Convert to deal opens the conversion dialog, and a Viewer is not offered it", async ({ admin, member, later }) => {
   test.setTimeout(180_000);

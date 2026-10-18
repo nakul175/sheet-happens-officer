@@ -2,9 +2,13 @@
 // One test per acceptance criterion. ZZ-TEST deals, organisations and people are archived or deactivated afterwards.
 // The Super Admin acts as Leader except where AC1 needs someone else to move the stage. The plain Member is that Editor,
 // and in AC4 the Viewer. workers is 1 in playwright.config.ts. Traces stay off.
-import { test, expect, zz } from "../support";
+import { expect, zz } from "../support";
+import { test } from "../helpers/story-people";
+import { storyGate } from "../helpers/qa-alias";
 import { getTask, ghost, newProject, newTask, ymd, type Who } from "../g2";
 import { undoToast } from "../helpers/jim-http";
+
+storyGate({ admin: true });
 
 type Later = (fn: () => Promise<unknown>) => void;
 type Stage = { id: string; name: string; category: string; needsReason: boolean; requiredFields: string[] };
@@ -20,8 +24,7 @@ const FIELD_LABEL: Record<string, string> = {
 
 async function crmPipes(who: Who, hidden: string) {
   const r = await who.api.get("/api/deals/pipelines");
-  test.skip(r.status === 404, hidden);
-  expect(r.status, JSON.stringify(r.json)).toBe(200);
+  expect(r.status, hidden + " " + JSON.stringify(r.json)).toBe(200);
   return r.json.pipelines as Pipe[];
 }
 
@@ -150,8 +153,11 @@ test("AC3: a stage that lists empty required fields refuses the move until they 
   test.setTimeout(120_000);
   const pipes = await crmPipes(admin, CRM_OFF);
   const stage = pipes.flatMap((p) => p.stages).find((s) => s.requiredFields.length > 0);
-  test.skip(!stage, "No stage on this server lists required fields, and stages cannot be edited, so the needsFields refusal cannot be opened.");
-  if (!stage) return;
+  if (!stage) {
+    test.fail(true, "SHO-US-10.2: no seeded stage lists requiredFields, so a move is never asked for them. moveStage refuses a stage that does.");
+    expect(stage, "a stage lists required fields").toBeTruthy();
+    return;
+  }
   const pipe = pipes.find((p) => p.stages.some((s) => s.id === stage.id))!;
   const org = await admin.api.post("/api/orgs", { name: zz("org 2529 fields") });
   expect(org.status, JSON.stringify(org.json)).toBe(201);
@@ -173,8 +179,7 @@ test("AC3: a stage that lists empty required fields refuses the move until they 
   }
   const details = (await projectOf(admin, id)).deal.details ?? {};
   const missing = stage.requiredFields.filter((k) => empty(details[k]));
-  test.skip(missing.length === 0, "The only required fields are already filled on a new deal, so a move is not asked for them.");
-  if (!missing.length) return;
+  expect(missing.length, "a new deal still has an empty required field, so the move can be refused").toBeGreaterThan(0);
   const reason = stage.needsReason ? { reason: "ZZ-TEST fields" } : {};
   const refused = await admin.api.post(`/api/projects/${id}/stage`, { stageId: stage.id, ...reason });
   expect(refused.status).toBe(409);
@@ -264,6 +269,7 @@ test("AC6: Won and Lost are refused while a task is open, the dialog lists the f
   await admin.page.goto(`/projects/${wonDeal.id}`);
   await admin.page.getByRole("group", { name: "Stage" }).getByRole("button", { name: "Won", exact: true }).click();
   let dialog = admin.page.getByRole("dialog", { name: "Move to Won" });
+  await dialog.getByRole("button", { name: "Move deal" }).click();
   await expect(dialog.getByRole("alert")).toContainText("21");
   const shown = (await dialog.getByRole("link").allTextContents()).map((t) => t.trim());
   expect(shown).toHaveLength(20);

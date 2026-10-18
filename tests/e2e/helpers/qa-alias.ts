@@ -23,14 +23,47 @@ export function qaEmail(label: string) {
   return `nakul17+${slug}-${RUN}@aplyd.com`;
 }
 
-/** First thing in the file: skip without SHO_QA_PASS, then read the release SHA from /api/health. */
-export function gateFile() {
+function passwordOk(pass: string) {
+  return pass.length >= 8 && pass.length <= 128 && /[A-Za-z]/.test(pass) && /[0-9]/.test(pass);
+}
+
+/** Signs the stable Super Admin up when this database does not have them yet. */
+async function ensureQaAdmin(request: APIRequestContext) {
+  const sign = await request.post("/api/auth/signin", { data: { email: QA_ADMIN_EMAIL, password: QA_PASS } });
+  const signed = await sign.text();
+  noSecret(signed);
+  if (sign.status() === 200) return;
+  const up = await request.post("/api/auth/signup", { data: { name: "ZZ-TEST QA Admin", email: QA_ADMIN_EMAIL, password: QA_PASS } });
+  const upText = await up.text();
+  noSecret(upText);
+  expect(up.status(), upText).toBe(201);
+  const token = await verifyToken(QA_ADMIN_EMAIL);
+  expect(token, `verification mail for ${QA_ADMIN_EMAIL}`).toBeTruthy();
+  const verified = await request.post("/api/auth/verify", { data: { token } });
+  const verifiedText = await verified.text();
+  noSecret(verifiedText);
+  expect(verified.ok(), verifiedText).toBe(true);
+}
+
+/**
+ * First thing in the file: skip without SHO_QA_PASS, then read the release SHA from /api/health.
+ * `admin` also signs up nakul17+zz-sa when the admin fixture is about to sign in as that address.
+ */
+export function storyGate(opts?: { admin?: boolean }) {
   test.beforeAll(async ({ playwright }) => {
     test.skip(!QA_PASS, "Set SHO_QA_PASS (the password for nakul17+ aliases).");
+    if (!passwordOk(QA_PASS)) throw new Error("SHO_QA_PASS must be at least 8 characters with a letter and a number.");
     const req = await playwright.request.newContext({ baseURL: BASE_URL });
-    try { await assertRelease(req); }
-    finally { await req.dispose(); }
+    try {
+      await assertRelease(req);
+      if (opts?.admin) await ensureQaAdmin(req);
+    } finally { await req.dispose(); }
   });
+}
+
+/** First thing in the file: skip without SHO_QA_PASS, then read the release SHA from /api/health. */
+export function gateFile() {
+  storyGate();
 }
 
 /** Release SHA from /api/health, checked before any account is used. */

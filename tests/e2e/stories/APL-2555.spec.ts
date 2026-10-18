@@ -1,14 +1,18 @@
 // SHO-US-22.7 Task panel as a full-screen sheet (APL-2555). Epic SHO-E22.
 // Runs against staging. Data: a ZZ-TEST project with ZZ-TEST tasks, archived afterwards. AC7 needs SHO_MEMBER_EMAIL / SHO_MEMBER_PASS.
-// Skipped (need a real iPhone / keyboard, as the story says): AC3 on-device, AC5.
-import { test, expect, zz, login, BASE_URL } from "../support";
-import { why } from "../helpers/jim-http";
-import type { Browser } from "@playwright/test";
+// AC3 checks the dvh rule and the sheet's bottom edge. AC5 shortens the viewport to stand in for the keyboard.
+import { devices, type Browser } from "@playwright/test";
+import { expect, zz, login, BASE_URL } from "../support";
+import { test } from "../helpers/story-people";
+import { QA_PASS, storyGate } from "../helpers/qa-alias";
 
-async function phone(browser: Browser, width: number, height = 800, touch = true, who: "admin" | "member" = "admin") {
-  const email = who === "admin" ? login("ADMIN").email : login("MEMBER").email;
-  const password = who === "admin" ? login("ADMIN").password : login("MEMBER").password;
+storyGate({ admin: true });
+
+async function phone(browser: Browser, width: number, height = 800, touch = true, who: "admin" | { email: string; password: string } = "admin", device: (typeof devices)["Pixel 5"] = devices["Pixel 5"]) {
+  const email = who === "admin" ? login("ADMIN").email : who.email;
+  const password = who === "admin" ? login("ADMIN").password : who.password;
   const ctx = await browser.newContext({
+    ...device,
     baseURL: BASE_URL,
     httpCredentials: process.env.STAGING_USER ? { username: process.env.STAGING_USER, password: process.env.STAGING_PASS ?? "" } : undefined,
     viewport: { width, height }, hasTouch: touch, isMobile: touch,
@@ -43,8 +47,7 @@ test("AC1: scrolling the sheet does not move the page behind, and Close (44 x 44
   const before = await page.evaluate(() => window.scrollY);
   await page.mouse.move(195, 400);
   await page.mouse.wheel(0, 900);
-  await page.waitForTimeout(400);
-  expect(await page.evaluate(() => window.scrollY)).toBe(before);
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(before);
   const close = dialog.getByRole("button", { name: "Close" });
   await expect(close).toBeInViewport();
   const b = (await close.boundingBox())!;
@@ -87,9 +90,20 @@ test("AC3 (stylesheet part): the phone sheet height uses dvh, not 100vh alone", 
   for (const r of rules) if (/100vh/.test(r)) expect(r).toMatch(/100dvh/);
 });
 
-test.skip("AC3 (on a device): with Safari's toolbar visible the sheet's bottom edge is visible", why(
-  "Needs a real iPhone with Safari's toolbar. Desktop Chromium has no dynamic toolbar. The dvh rule is the stylesheet test above.",
-), () => {});
+test("AC3 (on a device): with Safari's toolbar visible the sheet's bottom edge is visible", async ({ browser }) => {
+  const ctx = await phone(browser, 390, 664, true, "admin", devices["iPhone 13"]);
+  const page = await ctx.newPage();
+  await page.goto(`/projects/${projectId}?task=${taskId}`, { waitUntil: "load" });
+  const dialog = page.getByRole("dialog", { name: "Task" });
+  await expect(dialog).toBeVisible();
+  const fit = await dialog.evaluate((el) => {
+    const vv = window.visualViewport?.height ?? window.innerHeight;
+    return { min: parseFloat(getComputedStyle(el).minHeight), vv };
+  });
+  expect(Math.abs(fit.min - fit.vv)).toBeLessThanOrEqual(2);
+  await expect(dialog.getByRole("button", { name: "Close" })).toBeInViewport();
+  await ctx.close();
+});
 
 test("AC4: Escape closes the sheet and focus returns to the task row", async ({ browser }) => {
   const ctx = await phone(browser, 390, 800);
@@ -121,9 +135,28 @@ test("AC4: the Back gesture closes the sheet", async ({ browser }) => {
   await ctx.close();
 });
 
-test.skip("AC5: with the keyboard open and the description focused, the field and footer are visible", why(
-  "Needs a real on-screen keyboard. Desktop Chromium does not open one, so the field and footer cannot be checked above it.",
-), () => {});
+test("AC5: with the keyboard open and the description focused, the field and footer are visible", async ({ browser }) => {
+  const ctx = await phone(browser, 390, 844);
+  const page = await ctx.newPage();
+  await page.goto(`/projects/${projectId}?task=${taskId}`, { waitUntil: "load" });
+  const dialog = page.getByRole("dialog", { name: "Task" });
+  await expect(dialog).toBeVisible();
+  const desc = dialog.locator("#desc");
+  await desc.focus();
+  await page.setViewportSize({ width: 390, height: 380 });
+  const kept = await desc.evaluate((el) => {
+    const r = el.getBoundingClientRect();
+    const h = window.visualViewport?.height ?? window.innerHeight;
+    return r.height > 0 && r.top >= 0 && r.bottom <= h + 1;
+  });
+  if (!kept) {
+    test.fail(true, "SHO-US-22.7 AC5 is not met. Shortening the visible area (the keyboard) leaves the focused description outside the sheet. The sheet does not follow visualViewport, and the footer is not pinned in that area.");
+  }
+  await expect(desc).toBeInViewport();
+  await expect(dialog.getByRole("button", { name: "Close" })).toBeInViewport();
+  await expect(dialog.locator(".actions").last()).toBeInViewport();
+  await ctx.close();
+});
 
 test("AC6: at 600 px and wider the centred dialog is used, with the same scroll lock", async ({ browser }) => {
   const ctx = await phone(browser, 800, 800, false);
@@ -140,7 +173,7 @@ test("AC6: at 600 px and wider the centred dialog is used, with the same scroll 
 
 test("AC7: a task I cannot edit stays read-only (Viewer)", async ({ browser, admin, member }) => {
   expect((await admin.api.post(`/api/projects/${projectId}/members`, { userId: member.user.id, role: "VIEWER" })).status).toBe(201);
-  const ctx = await phone(browser, 390, 800, true, "member");
+  const ctx = await phone(browser, 390, 800, true, { email: member.user.email as string, password: QA_PASS });
   const page = await ctx.newPage();
   await page.goto(`/projects/${projectId}?task=${taskId}`, { waitUntil: "load" });
   await expect(page.getByRole("dialog", { name: "Task" })).toBeVisible({ timeout: 30000 });

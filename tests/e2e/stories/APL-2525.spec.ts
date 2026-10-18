@@ -7,7 +7,7 @@ import { getTask, newProject, newTask, ymd, type Who } from "../g2";
 import { pipelines, type Stage } from "../helpers/deal-board";
 import { createDeal, createOrg, dealBody, projectOf } from "../helpers/claude-a";
 import { cast, gateFile } from "../helpers/qa-alias";
-import { why } from "../helpers/jim-http";
+import { ageDeal, runLocalJob } from "../helpers/own-row";
 
 gateFile();
 
@@ -15,8 +15,7 @@ const CRM_OFF = "CRM routes answer not found on this server (CRM_VISIBLE is off)
 
 async function pipes(who: Who) {
   const r = await who.api.get("/api/deals/pipelines");
-  test.skip(r.status === 404, CRM_OFF);
-  expect(r.status, JSON.stringify(r.json)).toBe(200);
+  expect(r.status, CRM_OFF + " " + JSON.stringify(r.json)).toBe(200);
   return pipelines(who.api);
 }
 
@@ -155,9 +154,30 @@ test("AC5: Won and Lost are refused while a task is open, and a finished move le
   expect((await getTask(admin, stepId)).completedAt).toBe(closedAt);
 });
 
-test.skip("AC6: a working deal with no next step or no logged activity for 30 days notifies its Leader once", why(
-  "A deal is stalled only after 30 quiet days. A session cannot age createdAt, stageChangedAt or the action log, and running stalled-deals here would notify real Leaders. Covered by tests/crm5.test.ts.",
-), () => {});
+test("AC6: a working deal with no next step or no logged activity for 30 days notifies its Leader once", async ({ browser, later }) => {
+  test.setTimeout(180_000);
+  const { admin, people: [leader] } = await cast(browser, later, ["stall leader"]);
+  const { pro } = await pipes(admin);
+  const org = await createOrg(admin, later, "e12 stall org");
+  const quiet = await createDeal(admin, later, dealBody({ name: zz("e12 quiet"), organisationId: org.id, pipelineId: pro.id, leaderId: leader.user.id }));
+  const empty = await createDeal(admin, later, dealBody({ name: zz("e12 no step"), organisationId: org.id, pipelineId: pro.id, leaderId: leader.user.id }));
+  later(() => admin.api.post(`/api/projects/${quiet.id}/leader`, { newLeaderId: admin.user.id, previousRole: "EDITOR" }));
+  later(() => admin.api.post(`/api/projects/${empty.id}/leader`, { newLeaderId: admin.user.id, previousRole: "EDITOR" }));
+  const notes = async () => ((await leader.api.get("/api/notifications?limit=200")).json.items ?? []) as { text: string; href: string }[];
+  const stepId = (await projectOf(admin, empty.id)).deal.nextStep.id as string;
+  expect((await admin.api.post(`/api/tasks/${stepId}/complete`, {})).status).toBe(200);
+  const needs = (await notes()).filter((n) => n.text.includes(empty.name) && n.text.includes("needs a next step"));
+  expect(needs).toHaveLength(1);
+
+  ageDeal(quiet.id, 31);
+  const row = ((await leader.api.get("/api/deals")).json.deals as { id: string; stalled: boolean }[]).find((d) => d.id === quiet.id);
+  expect(row?.stalled).toBe(true);
+  await runLocalJob("stalled-deals");
+  const stalled = (await notes()).filter((n) => n.href.includes(quiet.id) && /no activity for 30 days/.test(n.text));
+  expect(stalled).toHaveLength(1);
+  await runLocalJob("stalled-deals");
+  expect((await notes()).filter((n) => n.href.includes(quiet.id) && /no activity for 30 days/.test(n.text))).toHaveLength(1);
+});
 
 test("AC7: on the pipeline board each deal sits in the column of its current stage", async ({ browser, later }) => {
   test.setTimeout(180_000);

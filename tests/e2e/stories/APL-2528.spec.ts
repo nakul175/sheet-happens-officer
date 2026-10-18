@@ -1,6 +1,9 @@
 // SHO-US-10.2 Pipelines and stages as configuration  (Linear APL-2528)
 // Source: acceptance criteria in the Linear issue. Runs against staging; credentials come from the environment (see playwright.config.ts).
 import { test, expect } from "../support";
+import { storyGate } from "../helpers/qa-alias";
+
+storyGate({ admin: true });
 
 type Stage = { id: string; name: string; position: number; category: string; needsReason: boolean; requiredFields: string[] };
 type Pipe = { id: string; key: string; name: string; stages: Stage[] };
@@ -42,10 +45,28 @@ test("AC1 (screen): the Deals screen shows the Proactive stages as board columns
   await expect(admin.page.getByText("Negotiation").first()).toBeVisible();
 });
 
-test.skip("AC3: removing a stage asks where its items go", () => {
-  // Reason: the Linear issue states AC3 is NOT built. Nothing in the product removes a stage; stages change by migration only.
+test("AC3: removing a stage asks where its items go", async ({ admin }) => {
+  const pipes = await pipelines(admin);
+  const stage = pipes.find((p) => p.key === "DEAL_PROACTIVE")!.stages.find((s) => s.name === "Negotiation")!;
+  const removed = await admin.api.del(`/api/deals/pipelines/${stage.id}`);
+  const body = JSON.stringify(removed.json);
+  const asked = removed.status === 409 && /where|another stage|move/i.test(body);
+  if (!asked) {
+    test.fail(true, "SHO-US-10.2 AC3 is not built. Nothing removes a stage or asks where its items go. Stages change by migration only.");
+  }
+  expect(asked, `${removed.status} ${body}`).toBe(true);
+  const again = await pipelines(admin);
+  expect(again.flatMap((p) => p.stages).some((s) => s.id === stage.id), "the stage row is still there").toBe(true);
 });
 
-test.skip("AC4: every pipeline keeps a Done stage", () => {
-  // Reason: the Linear issue states AC4 is NOT enforced in code (only seeded). There is no user action that could remove it.
+test("AC4: every pipeline keeps a Done stage", async ({ admin }) => {
+  const pipes = await pipelines(admin);
+  expect(pipes.length).toBeGreaterThan(0);
+  for (const pipe of pipes) expect(pipe.stages.some((s) => s.category === "DONE"), pipe.name).toBe(true);
+  const done = pipes.flatMap((p) => p.stages).find((s) => s.category === "DONE")!;
+  const removed = await admin.api.del(`/api/stages/${done.id}`);
+  expect(removed.status).toBeGreaterThanOrEqual(400);
+  const again = await pipelines(admin);
+  expect(again.flatMap((p) => p.stages).some((s) => s.id === done.id)).toBe(true);
+  expect(again.every((p) => p.stages.some((s) => s.category === "DONE"))).toBe(true);
 });

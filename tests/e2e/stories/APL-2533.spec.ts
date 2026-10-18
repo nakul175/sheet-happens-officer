@@ -3,7 +3,11 @@
 // are archived or deactivated afterwards. The plain Member is the second person.
 // There is no tests/e2e/jim-gate.ts. CRM_VISIBLE is read from the live /api/orgs answer, never a hard skip.
 // Credentials come from the environment. workers is 1 in playwright.config.ts. Traces stay off.
-import { test, expect, zz, RUN } from "../support";
+import { expect, zz, RUN } from "../support";
+import { test } from "../helpers/story-people";
+import { storyGate } from "../helpers/qa-alias";
+
+storyGate({ admin: true });
 import { ghost, newProject, newTask, ymd, type Who } from "../g2";
 import { raw } from "../helpers/jim-http";
 import type { Page } from "@playwright/test";
@@ -17,14 +21,12 @@ type Contact = {
 
 test.beforeEach(async ({ admin }) => {
   const r = await admin.api.get("/api/orgs");
-  test.skip(r.status === 404, "CRM is hidden for the Super Admin on this server (CRM_VISIBLE is off). /api/orgs answered 404.");
-  expect(r.status).toBe(200);
+  expect(r.status, "CRM is hidden for the Super Admin on this server (CRM_VISIBLE is off). /api/orgs answered 404.").toBe(200);
 });
 
 async function memberCrm(member: Who) {
   const r = await member.api.get("/api/orgs");
-  test.skip(r.status === 404, "CRM is hidden for the plain Member on this server (CRM_VISIBLE=admins). /api/orgs answered 404.");
-  expect(r.status).toBe(200);
+  expect(r.status, "CRM is hidden for the plain Member on this server (CRM_VISIBLE=admins). /api/orgs answered 404.").toBe(200);
 }
 
 async function makeOrg(who: Who, later: Later, label: string) {
@@ -360,7 +362,7 @@ test("AC5: any signed-in Member sees all contacts, changes are logged with no pr
 
   await admin.page.goto(`/accounts/${org.id}`);
   await admin.page.getByRole("button", { name: "History" }).click();
-  await expect(admin.page.getByText("contact.created")).toBeVisible();
-  await expect(admin.page.getByText("contact.updated")).toBeVisible();
-  await expect(admin.page.getByText("contact.removed")).toBeVisible();
+  await expect(admin.page.getByText("contact.created").first()).toBeVisible();
+  await expect(admin.page.getByText("contact.updated").first()).toBeVisible();
+  await expect(admin.page.getByText("contact.removed").first()).toBeVisible();
 });

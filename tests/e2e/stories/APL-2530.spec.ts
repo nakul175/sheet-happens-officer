@@ -2,8 +2,12 @@
 // One test per acceptance criterion. ZZ-TEST projects, deals and organisations are archived afterwards.
 // The Super Admin is the Admin. The plain Member creates the project in AC4 and moves the stage in AC3.
 // workers is 1 in playwright.config.ts. Traces stay off.
-import { test, expect, zz, RUN } from "../support";
+import { expect, zz, RUN } from "../support";
+import { test } from "../helpers/story-people";
+import { storyGate } from "../helpers/qa-alias";
 import { newProject, ymd, type Who } from "../g2";
+
+storyGate({ admin: true });
 
 type Later = (fn: () => Promise<unknown>) => void;
 type Pipe = { id: string; key: string; stages: { id: string; name: string }[] };
@@ -13,8 +17,7 @@ const CRM_MEMBER = "CRM is hidden from this Member (CRM_VISIBLE is admins or off
 
 async function crmOn(who: Who, hidden: string) {
   const r = await who.api.get("/api/deals/pipelines");
-  test.skip(r.status === 404, hidden);
-  expect(r.status, JSON.stringify(r.json)).toBe(200);
+  expect(r.status, hidden + " " + JSON.stringify(r.json)).toBe(200);
   return r.json.pipelines as Pipe[];
 }
 

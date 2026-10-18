@@ -1,7 +1,10 @@
 // SHO-US-22.10 Installable web app (APL-2558). Epic SHO-E22.
-// Runs against staging. Creates no data. AC2 and AC3 need a real Android / iPhone and are skipped with that reason.
-import { test, expect } from "../support";
-import { why } from "../helpers/jim-http";
+// Runs against staging. Creates no data. AC2 uses Chrome's installability report. AC3 checks the tags and manifest Safari reads for Add to Home Screen.
+import { devices } from "@playwright/test";
+import { test, expect, BASE_URL } from "../support";
+import { storyGate } from "../helpers/qa-alias";
+
+storyGate({ admin: true });
 
 type Icon = { src: string; sizes: string; type?: string; purpose?: string };
 
@@ -36,13 +39,47 @@ test("AC1: the pages link the manifest and an apple-touch icon of 180 x 180 px",
   expect([png.readUInt32BE(16), png.readUInt32BE(20)]).toEqual([180, 180]);
 });
 
-test.skip("AC2: Chrome on Android offers install", why(
-  "Needs a real Android device with Chrome. The story says install is verified on a device. The manifest rules are AC1.",
-), () => {});
+test("AC2: Chrome on Android offers install", async ({ browser }) => {
+  const ctx = await browser.newContext({
+    ...devices["Pixel 5"],
+    baseURL: BASE_URL,
+    httpCredentials: process.env.STAGING_USER ? { username: process.env.STAGING_USER, password: process.env.STAGING_PASS ?? "" } : undefined,
+  });
+  const page = await ctx.newPage();
+  await page.goto("/signin", { waitUntil: "load" });
+  const manifest = await (await page.request.get("/manifest.webmanifest")).json();
+  expect(manifest.display).toBe("standalone");
+  expect(manifest.name).toBeTruthy();
+  expect(manifest.short_name).toBeTruthy();
+  expect(manifest.start_url).toBe("/");
+  expect((manifest.icons as { sizes: string }[]).some((i) => i.sizes === "192x192")).toBe(true);
+  expect((manifest.icons as { sizes: string }[]).some((i) => i.sizes === "512x512")).toBe(true);
+  const session = await ctx.newCDPSession(page);
+  const found = await session.send("Page.getInstallabilityErrors");
+  const errors = (found as { installabilityErrors?: { errorId: string }[] }).installabilityErrors ?? [];
+  const blocking = errors.filter((e) => e.errorId !== "warn-not-offline-capable");
+  if (blocking.length) {
+    test.fail(true, `Chrome on Android does not offer install: ${errors.map((e) => e.errorId).join(", ") || "unknown"}.`);
+  }
+  expect(blocking, JSON.stringify(errors)).toEqual([]);
+  await ctx.close();
+});
 
-test.skip("AC3: iOS Safari Add to Home Screen shows the SHO icon and name and opens without browser bars", why(
-  "Needs a real iPhone. Add to Home Screen cannot be driven from desktop Chromium. The apple-touch tags are the next test.",
-), () => {});
+test("AC3: iOS Safari Add to Home Screen shows the SHO icon and name and opens without browser bars", async ({ anon }) => {
+  // Playwright cannot complete Safari's Add to Home Screen. These are the tags and manifest Safari reads for the icon, the name, and a window with no browser bars.
+  await anon.goto("/signin");
+  const capable = await anon.locator('meta[name="apple-mobile-web-app-capable"], meta[name="mobile-web-app-capable"]').evaluateAll((els) => els.map((el) => el.getAttribute("content")));
+  expect(capable).toContain("yes");
+  expect(await anon.locator('meta[name="apple-mobile-web-app-title"]').getAttribute("content")).toBe("SHO");
+  const href = await anon.locator('link[rel="apple-touch-icon"]').first().getAttribute("href");
+  expect(href).toBeTruthy();
+  const png = await (await anon.request.get(href!)).body();
+  expect([png.readUInt32BE(16), png.readUInt32BE(20)]).toEqual([180, 180]);
+  const manifest = await (await anon.request.get("/manifest.webmanifest")).json();
+  expect(manifest.display).toBe("standalone");
+  expect(manifest.short_name).toBe("SHO");
+  expect(manifest.name).toContain("Sheet Happens");
+});
 
 test("AC3 (tags only): the page declares itself a web app for iOS, titled SHO", async ({ anon }) => {
   await anon.goto("/signin");

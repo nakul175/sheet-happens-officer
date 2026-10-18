@@ -6,7 +6,11 @@
 // AC6's undo of Organisation archived / Organisation unarchived follows PR #19 (tests/e2e/helpers/jim-gate.ts):
 // when that fix is live both undos reverse the archive; until then both answer 409 and the organisation stays as it was.
 // Credentials come from the environment. workers is 1 in playwright.config.ts. Traces stay off.
-import { test, expect, login, zz } from "../support";
+import { expect, login, zz } from "../support";
+import { test } from "../helpers/story-people";
+import { storyGate } from "../helpers/qa-alias";
+
+storyGate({ admin: true });
 import { ymd, type Who } from "../g2";
 import { raw } from "../helpers/jim-http";
 import { notLive, prLive } from "../helpers/jim-gate";
@@ -21,15 +25,12 @@ type Hist = { action: string; before: Record<string, unknown> | null; after: Rec
 
 test.beforeEach(async ({ admin }) => {
   const r = await admin.api.get("/api/orgs");
-  test.skip(r.status === 404, "CRM is hidden for the Super Admin on this server (CRM_VISIBLE is off). /api/orgs answered 404.");
-  expect(r.status).toBe(200);
+  expect(r.status, "CRM is hidden for the Super Admin on this server (CRM_VISIBLE is off). /api/orgs answered 404.").toBe(200);
 });
 
-/** Skip when the plain Member's live session cannot see accounts (CRM_VISIBLE=admins). */
 async function memberCrm(member: Who) {
   const r = await member.api.get("/api/orgs");
-  test.skip(r.status === 404, "CRM is hidden for the plain Member on this server (CRM_VISIBLE=admins). /api/orgs answered 404.");
-  expect(r.status).toBe(200);
+  expect(r.status, "CRM is hidden for the plain Member on this server (CRM_VISIBLE=admins). /api/orgs answered 404.").toBe(200);
 }
 
 async function makeOrg(who: Who, later: Later, label: string, extra: Record<string, unknown> = {}) {

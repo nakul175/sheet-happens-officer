@@ -1,5 +1,9 @@
 // SHO-US-11.4 Link tasks to an organisation or contact  (Linear APL-2535)
-import { test, expect, zz, hasMember } from "../support";
+import { expect, zz } from "../support";
+import { test } from "../helpers/story-people";
+import { storyGate } from "../helpers/qa-alias";
+
+storyGate({ admin: true });
 
 let n = 0;
 async function setup(admin: any, later: (f: () => Promise<unknown>) => void) {
@@ -62,7 +66,6 @@ test("AC4: a task in Trash or in an archived project is not listed on the organi
 });
 
 test("AC5: the server refuses a Viewer's link change", async ({ admin, member, later }) => {
-  test.skip(!hasMember(), "needs SHO_MEMBER_EMAIL/PASS");
   const s = await setup(admin, later);
   const add = await admin.api.post(`/api/projects/${s.projectId}/members`, { userId: member.user.id, role: "VIEWER" });
   expect(add.status).toBe(201);
@@ -70,6 +73,15 @@ test("AC5: the server refuses a Viewer's link change", async ({ admin, member, l
   expect(r.status).toBe(403);
 });
 
-test.skip("AC5 (screen): the Links section renders read-only for a Viewer", () => {
-  // Reason: the Linear issue says this is NOT verified; the exact read-only markup is not specified, so it needs a person's look.
+test("AC5 (screen): the Links section renders read-only for a Viewer", async ({ admin, member, later }) => {
+  const s = await setup(admin, later);
+  expect((await admin.api.post(`/api/projects/${s.projectId}/members`, { userId: member.user.id, role: "VIEWER" })).status).toBe(201);
+  const orgName = (await admin.api.get(`/api/orgs/${s.org}`)).json.organisation.name as string;
+  expect((await admin.api.post(`/api/tasks/${s.taskId}/links`, { organisationId: s.org })).status).toBe(201);
+  await member.page.goto(`/projects/${s.projectId}?task=${s.taskId}`);
+  const links = member.page.locator(".box", { has: member.page.getByText("Links", { exact: true }) });
+  await expect(links).toBeVisible();
+  await expect(links.getByRole("link", { name: orgName })).toBeVisible();
+  await expect(links.getByRole("button", { name: "+ Link" })).toHaveCount(0);
+  await expect(links.getByRole("button", { name: "Remove link" })).toHaveCount(0);
 });

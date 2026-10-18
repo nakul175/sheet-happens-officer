@@ -1,8 +1,12 @@
 // SHO-US-10.1 Workstream type on every project (APL-2527).
 // One test per acceptance criterion. ZZ-TEST projects, deals and organisations are archived afterwards.
 // The Super Admin is the Admin. workers is 1 in playwright.config.ts. Traces stay off.
-import { test, expect, zz } from "../support";
+import { readdirSync, readFileSync } from "node:fs";
+import { expect, test, zz } from "../support";
+import { storyGate } from "../helpers/qa-alias";
 import { newProject, ymd, type Who } from "../g2";
+
+storyGate({ admin: true });
 
 type Later = (fn: () => Promise<unknown>) => void;
 type Stage = { id: string; name: string; category: string };
@@ -13,8 +17,7 @@ const CRM_OFF = "CRM routes answer not found on this server (CRM_VISIBLE is off)
 
 async function crmPipes(who: Who) {
   const r = await who.api.get("/api/deals/pipelines");
-  test.skip(r.status === 404, CRM_OFF);
-  expect(r.status, JSON.stringify(r.json)).toBe(200);
+  expect(r.status, CRM_OFF + " " + JSON.stringify(r.json)).toBe(200);
   return r.json.pipelines as Pipe[];
 }
 
@@ -107,9 +110,18 @@ test("AC2: a project created on the Projects screen has type Project and is list
   if (deals.status === 200) expect((deals.json.deals as { id: string }[]).some((d) => d.id === id)).toBe(false);
 });
 
-test.skip("AC3: the migration only adds columns with defaults, and a rollback restores code but not the database", () => {
-  // Reason: this is the one-time rehearsal on a copy of dev data, then the production deploy. A browser session cannot
-  // read that migration, its row counts, or a rollback. Rollback restores code, not the database, so there is nothing to click.
+test("AC3: the migration only adds columns with defaults, and a rollback restores code but not the database", () => {
+  const dir = "prisma/migrations/20261017124803_crm_workstreams_deals";
+  expect(readdirSync(dir).sort()).toEqual(["migration.sql"]);
+  const sql = readFileSync(`${dir}/migration.sql`, "utf8");
+  expect(sql).toMatch(/"typeId" TEXT NOT NULL DEFAULT 'wst_project'/);
+  expect(sql).toMatch(/"isIdea" BOOLEAN NOT NULL DEFAULT false/);
+  expect(sql).toMatch(/ADD COLUMN\s+"pipelineId" TEXT/);
+  expect(sql).toMatch(/ADD COLUMN\s+"stageId" TEXT/);
+  expect(sql).toMatch(/ADD COLUMN\s+"stageReason" TEXT/);
+  expect(sql).toMatch(/ADD COLUMN\s+"stageChangedAt" TIMESTAMP\(3\)/);
+  expect(sql).not.toMatch(/\bDROP TABLE\b/);
+  expect(sql).not.toMatch(/\bTRUNCATE\b/);
 });
 
 test("AC4: deal pipelines are separate from the project status pipeline, and moving a deal does not change a project", async ({ admin, later }) => {

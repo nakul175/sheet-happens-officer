@@ -3,7 +3,11 @@
 // The plain Member is the person who is not on the deal until a test adds them.
 // There is no tests/e2e/jim-gate.ts. CRM_VISIBLE is read from the live /api/orgs answer, never a hard skip.
 // A note cannot be aged 30 days from a browser session, so AC3 undoes a new row. workers is 1. Traces stay off.
-import { test, expect, zz } from "../support";
+import { expect, zz } from "../support";
+import { test } from "../helpers/story-people";
+import { storyGate } from "../helpers/qa-alias";
+
+storyGate({ admin: true });
 import { newProject, ymd, type Who } from "../g2";
 import { raw } from "../helpers/jim-http";
 import type { Page } from "@playwright/test";
@@ -13,14 +17,12 @@ type Note = { id: string; text: string; date: string; canDelete: boolean };
 
 test.beforeEach(async ({ admin }) => {
   const r = await admin.api.get("/api/orgs");
-  test.skip(r.status === 404, "CRM is hidden for the Super Admin on this server (CRM_VISIBLE is off). /api/orgs answered 404.");
-  expect(r.status).toBe(200);
+  expect(r.status, "CRM is hidden for the Super Admin on this server (CRM_VISIBLE is off). /api/orgs answered 404.").toBe(200);
 });
 
 async function memberCrm(member: Who) {
   const r = await member.api.get("/api/orgs");
-  test.skip(r.status === 404, "CRM is hidden for the plain Member on this server (CRM_VISIBLE=admins). /api/orgs answered 404.");
-  expect(r.status).toBe(200);
+  expect(r.status, "CRM is hidden for the plain Member on this server (CRM_VISIBLE=admins). /api/orgs answered 404.").toBe(200);
 }
 
 async function makeOrg(who: Who, later: Later, label: string) {
