@@ -3,7 +3,7 @@
 import type { Prisma } from "@/generated/prisma/client";
 import { db } from "@/lib/db";
 import { ApiError, notFound } from "@/lib/http";
-import { isActive, isAdmin, projectAccess, requireWrite, type Actor } from "@/lib/access";
+import { isActive, myProjects, projectAccess, requireWrite, visibleProjects, type Actor } from "@/lib/access";
 import { WORKSTREAM_DEAL, crmMode, crmVisible, requireCrm } from "@/lib/crm";
 import { formatDueDate, parseDueDate } from "@/lib/dates";
 import { auditTx, logAction, notify } from "@/lib/notify";
@@ -76,6 +76,7 @@ export async function createDeal(
   const { value, currency } = normaliseValue(input.value, input.currency);
   const probability = checkProbability(input.probability);
 
+  // project-lookup-ok: duplicate name check must see every deal for this buyer, including ones this person cannot open
   const dup = await db.project.findFirst({
     where: { workspaceId: u.workspaceId, typeId: WORKSTREAM_DEAL, name: { equals: name, mode: "insensitive" }, parties: { some: { organisationId: org.id, role: "BUYER" } } },
     select: { id: true },
@@ -270,14 +271,15 @@ export const isWorking = (category: string | null | undefined) => !!category && 
 export const isStalled = (category: string | null | undefined, lastActivity: Date, now = Date.now()) =>
   isWorking(category) && now - lastActivity.getTime() > STALL_DAYS * 86400_000;
 
-const visibleTo = (user: Actor): Prisma.ProjectWhereInput => (isAdmin(user) ? {} : { members: { some: { userId: user.id } } });
-
 /** SHO-US-12.6 data and the Deals screen. `mine` limits to deals the person leads or holds a task in (AC6). */
 export async function listDeals(user: Actor, o: { archived?: boolean; mine?: boolean; pipelineId?: string } = {}) {
   requireCrm(user);
   const projects = await db.project.findMany({
     where: {
-      typeId: WORKSTREAM_DEAL, archivedAt: o.archived ? { not: null } : null, ...visibleTo(user),
+      ...visibleProjects(user),
+      typeId: WORKSTREAM_DEAL,
+      // The archived screen asks for archived deals; visibleProjects otherwise leaves them out.
+      archivedAt: o.archived ? { not: null } : null,
       ...(o.pipelineId ? { pipelineId: o.pipelineId } : {}),
       ...(o.mine ? { OR: [{ members: { some: { userId: user.id, role: "LEADER" } } }, { tasks: { some: { assigneeId: user.id, deletedAt: null, completedAt: null } } }] } : {}),
     },
@@ -309,6 +311,7 @@ export async function listDeals(user: Actor, o: { archived?: boolean; mine?: boo
 
 /** The deal block on the project page: details, parties, pipeline stages, next step and flags. */
 export async function dealBlock(projectId: string) {
+  // project-lookup-ok: getProject already called projectAccess, which 404s a deal the CRM hides
   const p = await db.project.findUnique({
     where: { id: projectId },
     include: { stage: true, pipeline: { include: { stages: { orderBy: { position: "asc" } } } }, deal: true, parties: { include: { organisation: { select: { id: true, name: true } } }, orderBy: { createdAt: "asc" } } },
@@ -335,12 +338,13 @@ export async function dealBlock(projectId: string) {
 
 /** SHO-US-12.5 AC2: when a working deal is left with no dated open task, the Leader gets one notice (none while an unread one stands). */
 export async function ensureNextStep(tx: Prisma.TransactionClient, projectId: string, actorId: string | null) {
+  // project-lookup-ok: leader notice inside a task transaction; the caller already passed projectAccess
   const p = await tx.project.findUnique({ where: { id: projectId }, select: { name: true, typeId: true, archivedAt: true, stage: { select: { category: true } } } });
   if (!p || p.typeId !== WORKSTREAM_DEAL || p.archivedAt || !isWorking(p.stage?.category)) return;
   const open = await tx.task.count({ where: { projectId, deletedAt: null, completedAt: null, parentId: null, dueDate: { not: null } } });
   if (open > 0) return;
-  const leader = await tx.projectMember.findFirst({ where: { projectId, role: "LEADER" }, select: { userId: true } });
-  if (!leader) return;
+  const leader = await tx.projectMember.findFirst({ where: { projectId, role: "LEADER" }, select: { userId: true, user: { select: { orgRole: true } } } });
+  if (!leader || !crmVisible(leader.user)) return;
   const unread = await tx.notification.count({ where: { recipientId: leader.userId, projectId, type: "DEAL_NEEDS_NEXT_STEP", readAt: null } });
   if (unread) return;
   await notify(tx, [leader.userId], "DEAL_NEEDS_NEXT_STEP", { actorId, projectId, data: { project: p.name }, includeActor: true });
@@ -422,6 +426,7 @@ export async function convertTaskToDeal(user: Actor, taskId: string, input: Conv
   const { value, currency } = normaliseValue(input.value, input.currency);
   const probability = checkProbability(input.probability);
   if (dueDate) isoDate(dueDate);
+  // project-lookup-ok: duplicate name check must see every deal for this buyer, including ones this person cannot open
   const dup = await db.project.findFirst({
     where: { workspaceId: u.workspaceId, typeId: WORKSTREAM_DEAL, name: { equals: name, mode: "insensitive" }, parties: { some: { organisationId: org.id, role: "BUYER" } } },
     select: { id: true },
@@ -483,7 +488,12 @@ export async function convertTaskToDeal(user: Actor, taskId: string, input: Conv
 export async function dealsNeedingNextStep(user: Actor) {
   if (!crmVisible(user)) return [];
   const deals = await db.project.findMany({
-    where: { typeId: WORKSTREAM_DEAL, archivedAt: null, members: { some: { userId: user.id, role: "LEADER" } }, stage: { category: { in: [...WORKING_CATEGORIES] } } },
+    where: {
+      ...myProjects(user),
+      typeId: WORKSTREAM_DEAL,
+      members: { some: { userId: user.id, role: "LEADER" } },
+      stage: { category: { in: [...WORKING_CATEGORIES] } },
+    },
     select: { id: true, name: true, stage: { select: { name: true } } },
   });
   const sig = await db.task.groupBy({ by: ["projectId"], where: { projectId: { in: deals.map((d) => d.id) }, deletedAt: null, completedAt: null, parentId: null, dueDate: { not: null } }, _count: true });
@@ -494,9 +504,10 @@ export async function dealsNeedingNextStep(user: Actor) {
 /** SHO-US-12.7 AC3: one in-app notice to the Leader per stall. A new notice needs new activity first, then a new 30 days of silence. */
 export async function notifyStalledDeals(now = new Date()) {
   if (crmMode() === "off") return { stalled: 0, notified: 0, skipped: true };
+  // project-lookup-ok: scheduled job with no signed-in person; only a leader who can see the CRM is told
   const deals = await db.project.findMany({
     where: { typeId: WORKSTREAM_DEAL, archivedAt: null, stage: { category: { in: [...WORKING_CATEGORIES] } } },
-    include: { stage: true, members: { where: { role: "LEADER" }, select: { userId: true } } },
+    include: { stage: true, members: { where: { role: "LEADER" }, select: { userId: true, user: { select: { orgRole: true } } } } },
   });
   const signals = await dealSignals(deals);
   let stalled = 0, notified = 0;
@@ -504,11 +515,11 @@ export async function notifyStalledDeals(now = new Date()) {
     const last = signals.get(d.id)!.lastActivity;
     if (!isStalled(d.stage?.category, last, now.getTime())) continue;
     stalled++;
-    const leader = d.members[0]?.userId;
-    if (!leader) continue;
-    const already = await db.notification.findFirst({ where: { recipientId: leader, projectId: d.id, type: "DEAL_STALLED", createdAt: { gt: last } }, select: { id: true } });
+    const leader = d.members[0];
+    if (!leader || !crmVisible(leader.user)) continue;
+    const already = await db.notification.findFirst({ where: { recipientId: leader.userId, projectId: d.id, type: "DEAL_STALLED", createdAt: { gt: last } }, select: { id: true } });
     if (already) continue;
-    await db.$transaction((tx) => notify(tx, [leader], "DEAL_STALLED", { projectId: d.id, data: { project: d.name }, includeActor: true }));
+    await db.$transaction((tx) => notify(tx, [leader.userId], "DEAL_STALLED", { projectId: d.id, data: { project: d.name }, includeActor: true }));
     notified++;
   }
   return { stalled, notified };

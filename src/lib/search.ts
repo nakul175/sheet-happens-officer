@@ -2,17 +2,14 @@
 // Members find only their own projects; Admins find all. Archived projects are left out
 // unless the person asks for them.
 import { db } from "@/lib/db";
-import { isAdmin, type Actor } from "@/lib/access";
-import { WORKSTREAM_DEAL, crmProjectWhere, crmVisible } from "@/lib/crm";
+import { visibleProjects, type Actor } from "@/lib/access";
+import { WORKSTREAM_DEAL, crmVisible } from "@/lib/crm";
 
 export async function search(user: Actor, q: string, includeArchived: boolean, ideasOnly = false) {
   const text = q.trim();
   if (text.length < 2) return { projects: [], tasks: [], organisations: [], contacts: [] };
-  const visible = {
-    ...(isAdmin(user) ? {} : { members: { some: { userId: user.id } } }),
-    ...(includeArchived ? {} : { archivedAt: null }),
-    ...crmProjectWhere(user), // neither a deal nor its tasks while the CRM is hidden (SHO-BUG-2)
-  };
+  // Same filter as the project query below: visibleProjects, with archived rows put back only when asked for.
+  const visible = includeArchived ? { ...visibleProjects(user), archivedAt: undefined } : visibleProjects(user);
   const crm = crmVisible(user);
   const me = await db.user.findUniqueOrThrow({ where: { id: user.id }, select: { workspaceId: true } });
   const [organisations, contacts] = crm && !ideasOnly ? await Promise.all([
@@ -21,7 +18,7 @@ export async function search(user: Actor, q: string, includeArchived: boolean, i
   ]) : [[], []];
   const [projects, tasks] = await Promise.all([
     db.project.findMany({
-      where: { ...visible, name: { contains: text, mode: "insensitive" } },
+      where: { ...visibleProjects(user), ...(includeArchived ? { archivedAt: undefined } : {}), name: { contains: text, mode: "insensitive" } },
       orderBy: { name: "asc" }, take: 20, select: { id: true, name: true, archivedAt: true, typeId: true },
     }),
     db.task.findMany({

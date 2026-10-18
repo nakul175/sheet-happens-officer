@@ -5,7 +5,7 @@
 import { createHash } from "node:crypto";
 import { db } from "@/lib/db";
 import { ApiError } from "@/lib/http";
-import { WORKERS, activeMember, projectAccess, type Actor } from "@/lib/access";
+import { WORKERS, activeMember, crmVisible, isAdmin, projectAccess, WORKSTREAM_DEAL, type Actor } from "@/lib/access";
 import { formatDueDate } from "@/lib/dates";
 import type { Handover } from "@/lib/people";
 import { addMember, changeMemberRole, createProject, removeMember } from "@/lib/projects";
@@ -48,7 +48,7 @@ const loadTasks = (ids: string[]) => db.task.findMany({ where: { id: { in: ids }
 type Loaded = {
   tasks: Map<string, TaskFull>;
   users: Map<string, { id: string; name: string; email: string; deactivatedAt: Date | null; emailVerifiedAt: Date | null }>;
-  projects: Map<string, { id: string; name: string; archivedAt: Date | null; members: { userId: string; role: string }[] }>;
+  projects: Map<string, { id: string; name: string; typeId: string; archivedAt: Date | null; members: { userId: string; role: string }[] }>;
   sections: Map<string, { id: string; name: string; isDone: boolean; projectId: string }>;
   held: Map<string, { id: string; title: string }[]>; // "projectId|userId" -> open tasks the person holds
 };
@@ -73,7 +73,8 @@ async function load(ops: Op[]): Promise<Loaded> {
   const sectionIds = r.map((x) => x.sectionId).filter((x): x is string => !!x);
   const [users, projects, sections] = await Promise.all([
     db.user.findMany({ where: { id: { in: [...userIds] } }, select: { id: true, name: true, email: true, deactivatedAt: true, emailVerifiedAt: true } }),
-    db.project.findMany({ where: { id: { in: [...projectIds] } }, select: { id: true, name: true, archivedAt: true, members: { select: { userId: true, role: true } } } }),
+    // project-lookup-ok: card fingerprint must load every referenced project; buildCard drops any the person cannot see before text is built
+    db.project.findMany({ where: { id: { in: [...projectIds] } }, select: { id: true, name: true, typeId: true, archivedAt: true, members: { select: { userId: true, role: true } } } }),
     db.section.findMany({ where: { id: { in: sectionIds } }, select: { id: true, name: true, isDone: true, projectId: true } }),
   ]);
   const held = new Map<string, { id: string; title: string }[]>();
@@ -303,10 +304,35 @@ async function blockedReason(user: Actor, op: Op, L: Loaded): Promise<string | n
 // ------------------------------------------------------------------ cards
 export type BuiltCard = { card: Omit<Card, "id" | "status">; fingerprint: string; ops: Op[] };
 
+/** A project the person may read: membership (Admins see all) and the CRM lever. Archived projects stay visible; writes are refused later. */
+function projectVisibleTo(user: Actor, p: { typeId: string; members: { userId: string }[] }) {
+  if (p.typeId === WORKSTREAM_DEAL && !crmVisible(user)) return false;
+  if (!isAdmin(user) && !p.members.some((m) => m.userId === user.id)) return false;
+  return true;
+}
+
+/** Drop projects (and their tasks) the person cannot see, so a card never quotes a hidden deal's name. */
+function hideInvisible(user: Actor, L: Loaded) {
+  const hidden = new Set<string>();
+  for (const [id, p] of L.projects) {
+    if (!projectVisibleTo(user, p)) {
+      hidden.add(id);
+      p.name = "";
+      L.projects.delete(id);
+    }
+  }
+  for (const [id, t] of L.tasks) {
+    if (!hidden.has(t.projectId)) continue;
+    t.project.name = "";
+    L.tasks.delete(id);
+  }
+}
+
 /** Builds the card for these operations from the records as they are now. Throws ApiError(404) when a record is gone. */
 export async function buildCard(user: Actor, ops: Op[]): Promise<BuiltCard> {
   if (ops.length > MAX_CHANGES) throw new ApiError(400, "A card can hold at most 10 changes.");
   const L = await load(ops);
+  hideInvisible(user, L);
   const described = ops.map((op) => describe(op, L));
   let blocked: string | null = null;
   for (const op of ops) { blocked = blocked ?? (await blockedReason(user, op, L)); }
