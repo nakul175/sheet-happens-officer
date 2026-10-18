@@ -6,6 +6,8 @@ import path from "node:path";
 const STAGING_HOST = /^(staging\.sheethappensofficer\.com|pr[1-4]\.staging\.sheethappensofficer\.com)$/;
 
 const MAX_AGE_MS = 24 * 60 * 60 * 1000;
+const MAX_FILE_BYTES = 256 * 1024;
+const MAX_RESULTS = 20;
 
 export type SinkMessage = { to: string; subject: string; text: string; sentAt: string };
 
@@ -42,10 +44,9 @@ export function tokensEqual(given: string, expected: string): boolean {
   return timingSafeEqual(a, b);
 }
 
-export function bearerToken(header: string | null): string {
-  if (!header) return "";
-  const match = /^Bearer (.+)$/i.exec(header.trim());
-  return match?.[1] ?? "";
+/** The sink token travels in X-QA-Token. Authorization stays free for Caddy basic auth. */
+export function qaToken(header: string | null): string {
+  return header ?? "";
 }
 
 function appHost(appUrl: string | undefined): string | null {
@@ -106,7 +107,7 @@ const noStore = { "cache-control": "no-store" };
 export async function qaMailResponse(req: Request): Promise<Response> {
   const mode = sinkMode();
   if (!mode.active) return Response.json({ error: "Not found" }, { status: 404, headers: noStore });
-  if (!tokensEqual(bearerToken(req.headers.get("authorization")), mode.token)) {
+  if (!tokensEqual(qaToken(req.headers.get("x-qa-token")), mode.token)) {
     return Response.json({ error: "Not allowed" }, { status: 401, headers: noStore });
   }
   const url = new URL(req.url);
@@ -141,7 +142,8 @@ async function purgeOld(dir: string, now = Date.now()): Promise<void> {
       const info = await stat(full);
       if (!info.isFile()) return;
       let at = info.mtimeMs;
-      if (name.endsWith(".json")) {
+      // Files over 256 KB are not read. Age them by mtime so a large file cannot be pulled into memory.
+      if (name.endsWith(".json") && info.size <= MAX_FILE_BYTES) {
         try {
           const parsed = JSON.parse(await readFile(full, "utf8")) as { sentAt?: unknown };
           if (typeof parsed.sentAt === "string") {
@@ -166,8 +168,13 @@ async function readMatching(dir: string, to: string, since: number): Promise<Sin
   const rows: { file: string; message: SinkMessage }[] = [];
   for (const name of names) {
     if (!name.endsWith(".json")) continue;
+    const full = path.join(dir, name);
     try {
-      const parsed = JSON.parse(await readFile(path.join(dir, name), "utf8")) as Partial<SinkMessage>;
+      const info = await stat(full);
+      if (!info.isFile() || info.size > MAX_FILE_BYTES) continue;
+      const raw = await readFile(full);
+      if (raw.byteLength > MAX_FILE_BYTES) continue;
+      const parsed = JSON.parse(raw.toString("utf8")) as Partial<SinkMessage>;
       if (typeof parsed.to !== "string" || parsed.to.trim().toLowerCase() !== want) continue;
       if (typeof parsed.subject !== "string" || typeof parsed.text !== "string" || typeof parsed.sentAt !== "string") continue;
       const sent = Date.parse(parsed.sentAt);
@@ -176,5 +183,5 @@ async function readMatching(dir: string, to: string, since: number): Promise<Sin
     } catch { /* half-written file; the next read will see it */ }
   }
   rows.sort((a, b) => b.message.sentAt.localeCompare(a.message.sentAt) || b.file.localeCompare(a.file));
-  return rows.map((row) => row.message);
+  return rows.slice(0, MAX_RESULTS).map((row) => row.message);
 }

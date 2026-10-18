@@ -26,14 +26,14 @@ vi.mock("next/server", () => ({
 import { GET } from "../src/app/api/qa/mail/route";
 import { resetMail, sendMail, signInDetailsMail, verifyMail } from "../src/lib/email";
 import { isZzTestAddress } from "../src/lib/mail-sink";
-import { MAIL_WAIT_MS, mailboxSpecsSkip, waitForMail } from "./e2e/mail";
+import { MAIL_WAIT_MS, mailSinkHeaders, mailboxSpecsSkip, waitForMail } from "./e2e/mail";
 
 const TOKEN = "zz-test-sink-token";
 const PASSWORD = "ZzTemp9only";
 const ZZ_TO = "zz-test-ac1@example.com";
 const OTHER_TO = "not-a-zz-recipient@example.com";
 const STAGING = "https://staging.sheethappensofficer.com";
-const ENV_KEYS = ["MAIL_SINK", "MAIL_SINK_TOKEN", "EMAIL_OUTBOX_DIR", "APP_URL", "RESEND_API_KEY", "NODE_ENV", "BASE_URL", "EMAIL_FROM"] as const;
+const ENV_KEYS = ["MAIL_SINK", "MAIL_SINK_TOKEN", "EMAIL_OUTBOX_DIR", "APP_URL", "RESEND_API_KEY", "NODE_ENV", "BASE_URL", "EMAIL_FROM", "STAGING_USER", "STAGING_PASS"] as const;
 
 let restoreEnv: () => void;
 let outbox: string;
@@ -76,9 +76,9 @@ function arm(over: Partial<Record<(typeof ENV_KEYS)[number], string | undefined>
   }
 }
 
-async function endpoint(url: string, authorization?: string) {
-  const headers = new Headers();
-  if (authorization !== undefined) headers.set("authorization", authorization);
+async function endpoint(url: string, token?: string, extra?: Record<string, string>) {
+  const headers = new Headers(extra);
+  if (token !== undefined) headers.set("x-qa-token", token);
   const response = await GET(new Request(url, { headers }));
   const text = await response.text();
   let json: unknown = null;
@@ -169,7 +169,7 @@ describe("AC1 staging mail is captured", () => {
         expect(reset.text).toContain("zz-reset-token");
         expect(details.text).toContain(PASSWORD);
         expect(details.to).toBe(ZZ_TO);
-        const listed = await endpoint(`${baseUrl}/api/qa/mail?to=${encodeURIComponent(ZZ_TO)}`, `Bearer ${TOKEN}`);
+        const listed = await endpoint(`${baseUrl}/api/qa/mail?to=${encodeURIComponent(ZZ_TO)}`, TOKEN);
         expect(listed.status).toBe(200);
         expect(Array.isArray(listed.json)).toBe(true);
         expect((listed.json as { subject: string }[])[0].subject).toBe("Your Sheet Happens Officer account");
@@ -219,7 +219,7 @@ describe("production fail-closed", () => {
 
   it("MAIL_SINK=staging on the production host throws and writes nothing", async () => {
     await refuses({ APP_URL: "https://app.sheethappensofficer.com" }, /not a staging host/);
-    const denied = await endpoint(`http://127.0.0.1/api/qa/mail?to=${encodeURIComponent(ZZ_TO)}`, `Bearer ${TOKEN}`);
+    const denied = await endpoint(`http://127.0.0.1/api/qa/mail?to=${encodeURIComponent(ZZ_TO)}`, TOKEN);
     expect(denied.status).toBe(404);
   });
 
@@ -288,13 +288,17 @@ describe("AC2 waitForMail and the endpoint", () => {
 
   it("is 404 when the sink is off, 401 for a wrong or missing token, and 400 for a non-ZZ address", async () => {
     arm({ MAIL_SINK: undefined });
-    expect((await endpoint(`http://127.0.0.1/api/qa/mail?to=${encodeURIComponent(ZZ_TO)}`, `Bearer ${TOKEN}`)).status).toBe(404);
+    expect((await endpoint(`http://127.0.0.1/api/qa/mail?to=${encodeURIComponent(ZZ_TO)}`, TOKEN)).status).toBe(404);
 
     arm();
-    expect((await endpoint(`http://127.0.0.1/api/qa/mail?to=${encodeURIComponent(ZZ_TO)}`)).status).toBe(401);
-    expect((await endpoint(`http://127.0.0.1/api/qa/mail?to=${encodeURIComponent(ZZ_TO)}`, "Bearer")).status).toBe(401);
-    expect((await endpoint(`http://127.0.0.1/api/qa/mail?to=${encodeURIComponent(OTHER_TO)}`, `Bearer ${TOKEN}`)).status).toBe(400);
-    expect((await endpoint(`http://127.0.0.1/api/qa/mail?to=`, `Bearer ${TOKEN}`)).status).toBe(400);
+    const mailUrl = `http://127.0.0.1/api/qa/mail?to=${encodeURIComponent(ZZ_TO)}`;
+    expect((await endpoint(mailUrl)).status).toBe(401);
+    expect((await endpoint(mailUrl, "")).status).toBe(401);
+    expect((await endpoint(mailUrl, undefined, { authorization: `Bearer ${TOKEN}` })).status).toBe(401);
+    expect((await endpoint(`http://127.0.0.1/api/qa/mail?to=${encodeURIComponent(OTHER_TO)}`, TOKEN)).status).toBe(400);
+    expect((await endpoint(`http://127.0.0.1/api/qa/mail?to=`, TOKEN)).status).toBe(400);
+    const basic = Buffer.from("zz-test-gate:zz-test-pass", "utf8").toString("base64");
+    expect((await endpoint(mailUrl, TOKEN, { authorization: `Basic ${basic}` })).status).toBe(200);
     expect(mailboxSpecsSkip()).toBe(false);
     delete process.env.MAIL_SINK_TOKEN;
     expect(mailboxSpecsSkip()).toBe(true);
@@ -305,11 +309,70 @@ describe("AC2 waitForMail and the endpoint", () => {
     const stale = new Date(Date.now() - 25 * 60 * 60 * 1000).toISOString();
     await writeFile(path.join(outbox, "old.json"), JSON.stringify({ to: ZZ_TO, subject: "Old", text: "stale", sentAt: stale }));
     await sendMail(verifyMail(ZZ_TO, "zz-verify-token"));
-    const listed = await endpoint(`http://127.0.0.1/api/qa/mail?to=${encodeURIComponent(ZZ_TO)}&since=${encodeURIComponent(new Date(Date.now() - 60_000).toISOString())}`, `Bearer ${TOKEN}`);
+    const listed = await endpoint(`http://127.0.0.1/api/qa/mail?to=${encodeURIComponent(ZZ_TO)}&since=${encodeURIComponent(new Date(Date.now() - 60_000).toISOString())}`, TOKEN);
     expect(listed.status).toBe(200);
     expect(listed.json).toHaveLength(1);
     expect((listed.json as { subject: string }[])[0].subject).toContain("Verify");
     expect(await files()).not.toContain("old.json");
+  });
+
+  it("waitForMail sends X-QA-Token and basic auth when the e2e config provides it", async () => {
+    arm();
+    process.env.STAGING_USER = "zz-test-gate";
+    process.env.STAGING_PASS = "zz-test-pass";
+    await sendMail(verifyMail(ZZ_TO, "zz-verify-token"));
+    const basic = Buffer.from("zz-test-gate:zz-test-pass", "utf8").toString("base64");
+    await withServer(async (baseUrl) => {
+      await waitForMail(ZZ_TO, /Verify your email/, { baseUrl, timeoutMs: 5_000 });
+    });
+    const sent = fetchSpy.mock.calls.find((item: readonly unknown[]) => String(item[0]).includes("/api/qa/mail"));
+    const headers = new Headers((sent?.[1] as RequestInit | undefined)?.headers);
+    expect(headers.get("x-qa-token")).toBe(TOKEN);
+    expect(headers.get("authorization")).toBe(`Basic ${basic}`);
+    expect(headers.get("authorization")).not.toContain(TOKEN);
+    expect(mailSinkHeaders(TOKEN)).toEqual({ "x-qa-token": TOKEN, authorization: `Basic ${basic}` });
+
+    delete process.env.STAGING_USER;
+    delete process.env.STAGING_PASS;
+    fetchSpy.mockClear();
+    await withServer(async (baseUrl) => {
+      await waitForMail(ZZ_TO, /Verify your email/, { baseUrl, timeoutMs: 5_000 });
+    });
+    const plain = fetchSpy.mock.calls.find((item: readonly unknown[]) => String(item[0]).includes("/api/qa/mail"));
+    const plainHeaders = new Headers((plain?.[1] as RequestInit | undefined)?.headers);
+    expect(plainHeaders.get("x-qa-token")).toBe(TOKEN);
+    expect(plainHeaders.get("authorization")).toBeNull();
+  });
+
+  it("skips outbox files over 256 KB and returns at most the newest 20", async () => {
+    arm();
+    await writeFile(path.join(outbox, "big.json"), JSON.stringify({
+      to: ZZ_TO,
+      subject: "TOO-BIG",
+      text: "x".repeat(256 * 1024),
+      sentAt: new Date().toISOString(),
+    }));
+    expect((await stat(path.join(outbox, "big.json"))).size).toBeGreaterThan(256 * 1024);
+    const start = Date.now() - 21_000;
+    for (let i = 0; i < 21; i++) {
+      const sentAt = new Date(start + i * 1000).toISOString();
+      await writeFile(path.join(outbox, `n-${String(i).padStart(2, "0")}.json`), JSON.stringify({
+        to: ZZ_TO,
+        subject: `n-${i}`,
+        text: "zz-test body",
+        sentAt,
+      }));
+    }
+    const listed = await endpoint(`http://127.0.0.1/api/qa/mail?to=${encodeURIComponent(ZZ_TO)}`, TOKEN);
+    expect(listed.status).toBe(200);
+    const messages = listed.json as { subject: string; text: string }[];
+    const subjects = messages.map((message) => message.subject);
+    expect(messages).toHaveLength(20);
+    expect(subjects).not.toContain("TOO-BIG");
+    expect(subjects).not.toContain("n-0");
+    expect(subjects[0]).toBe("n-20");
+    expect(subjects).toContain("n-1");
+    expect(messages.some((message) => message.text.length > 256 * 1024)).toBe(false);
   });
 });
 
@@ -320,9 +383,9 @@ describe("constant-time token compare", () => {
     expect(sameLength.length).toBe(TOKEN.length);
     const longer = `${TOKEN}-extra`;
     expect(longer.length).not.toBe(TOKEN.length);
-    for (const header of [`Bearer ${sameLength}`, `Bearer ${longer}`, "Bearer no", `Bearer ${TOKEN}`]) {
-      const result = await endpoint(`http://127.0.0.1/api/qa/mail?to=${encodeURIComponent(ZZ_TO)}`, header);
-      expect(result.status, header).toBe(header.endsWith(TOKEN) ? 200 : 401);
+    for (const guess of [sameLength, longer, "no", TOKEN]) {
+      const result = await endpoint(`http://127.0.0.1/api/qa/mail?to=${encodeURIComponent(ZZ_TO)}`, guess);
+      expect(result.status, guess).toBe(guess === TOKEN ? 200 : 401);
     }
     expect(compared.length).toBeGreaterThan(0);
     for (const [left, right] of compared) {
