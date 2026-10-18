@@ -39,7 +39,7 @@ let dealId = "";
 test.describe.configure({ timeout: 180_000 });
 
 test.beforeAll(() => {
-  test.skip(!QA_PASS, "Set SHO_QA_PASS (the password for nakul17+ aliases).");
+  test.skip(!QA_PASS, "APL-2609: set SHO_QA_PASS (password for nakul17+ aliases).");
 });
 
 test.beforeAll(async ({ browser }) => {
@@ -183,7 +183,7 @@ test("AC7: with CRM_VISIBLE=all, a member still sees their deal work qa:TC missi
 test("AC8: off hides deals from Admins and the Super Admin; admins mode keeps Admins in qa:TC missing", async () => {
   const w = need();
   if (w.mode === "all") {
-    test.skip(true, "Needs CRM_VISIBLE=off or admins. This server runs all, so this AC is not a pass.");
+    test.skip(true, "APL-2609: Needs CRM_VISIBLE=off or admins. This server runs all, so this AC is not a pass.");
   }
   if (w.mode === "off") {
     expect(w.deal).toBeNull();
@@ -211,7 +211,7 @@ function need(): World {
 
 /** Skip unless the live lever is the mode this acceptance criterion names. A different mode is not a pass. */
 function only(w: World, want: Mode) {
-  test.skip(w.mode !== want, `Needs CRM_VISIBLE=${want}. This server runs ${w.mode}, so this AC is not a pass.`);
+  test.skip(w.mode !== want, `APL-2609: Needs CRM_VISIBLE=${want}. This server runs ${w.mode}, so this AC is not a pass.`);
 }
 
 type Row = { id?: string; title?: string; project?: { id?: string; name?: string; type?: string; stage?: string | null } };
