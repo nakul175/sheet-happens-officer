@@ -34,8 +34,8 @@ export type ShutdownOptions = {
 };
 
 /** Milliseconds to wait for in-flight requests. Out-of-range values use the default. */
-export function shutdownDrainMs(env: NodeJS.ProcessEnv = process.env): number {
-  const raw = env.SHUTDOWN_DRAIN_MS;
+export function shutdownDrainMs(env?: { SHUTDOWN_DRAIN_MS?: string }): number {
+  const raw = (env ?? process.env).SHUTDOWN_DRAIN_MS;
   if (raw == null || raw.trim() === "") return DEFAULT_DRAIN_MS;
   const n = Number(raw);
   if (!Number.isInteger(n) || n < MIN_DRAIN_MS || n > MAX_DRAIN_MS) return DEFAULT_DRAIN_MS;

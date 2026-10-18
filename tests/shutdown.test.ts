@@ -9,10 +9,11 @@ import { describe, expect, it } from "vitest";
 import { CLEAN_LOG, DEFAULT_DRAIN_MS, shutdownDrainMs, TIMEOUT_LOG } from "../src/lib/shutdown";
 
 const root = path.join(fileURLToPath(new URL(".", import.meta.url)), "..");
-const tsx = path.join(root, "node_modules", ".bin", "tsx");
 
 function startChild(env: Record<string, string>) {
-  const child = spawn(tsx, ["tests/shutdown-child.ts"], {
+  // `node --import tsx` is one process, so SIGTERM hits the handler. The tsx
+  // CLI is a parent that dies on SIGTERM before the drain finishes.
+  const child = spawn(process.execPath, ["--import", "tsx", "tests/shutdown-child.ts"], {
     cwd: root,
     env: { ...process.env, ...env },
     stdio: ["ignore", "pipe", "pipe"],
