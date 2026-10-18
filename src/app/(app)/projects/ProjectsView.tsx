@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import { ROLE, api, useGet } from "@/components/api";
-import { LoadFailed } from "@/components/ui";
+import { LoadFailed, Skeleton } from "@/components/ui";
 import { Page, useMe } from "../Shell";
 
 type Pr = { id: string; name: string; description: string | null; archived: boolean; leader: { id: string; name: string } | null; openTasks: number; role: string | null; myRole: string | null };
@@ -10,7 +10,7 @@ type Pr = { id: string; name: string; description: string | null; archived: bool
 function Card({ p, admin }: { p: Pr; admin: boolean }) {
   return (
     <Link href={`/projects/${p.id}`} className="card pcard">
-      <h3>{p.name}</h3>
+      <h2>{p.name}</h2>
       <p>{p.description || "No description"}</p>
       <div className="meta" style={{ justifyContent: "flex-start" }}>
         <span className="chip">{p.myRole ? `You: ${ROLE[p.myRole]}` : admin ? "Admin view" : "Member"}</span>
@@ -68,7 +68,7 @@ export default function ProjectsView() {
           <Link className="btn" href="/projects/new">+ New project</Link>
         </>
       }>
-      {(live.loading || old.loading) && <div className="skel">Loading…</div>}
+      {(live.loading || old.loading) && <Skeleton />}
       {live.error && !live.data && <LoadFailed onRetry={live.reload} />}
       {live.error && live.data && <div className="err" role="alert">{live.error} <button className="link" onClick={live.reload}>Retry</button></div>}
       {live.data && active.length === 0 && (

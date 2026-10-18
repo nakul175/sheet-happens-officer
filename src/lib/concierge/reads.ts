@@ -3,6 +3,7 @@
 // Results are trimmed records; nothing is ever read from memory or from earlier turns.
 import { db } from "@/lib/db";
 import { isAdmin, projectAccess, type Actor } from "@/lib/access";
+import { crmProjectWhere } from "@/lib/crm";
 import { ApiError } from "@/lib/http";
 import { addDays, formatDueDate, startOfTodayIST } from "@/lib/dates";
 import { awaiting } from "@/lib/tasks";
@@ -40,11 +41,14 @@ export function toTaskRec(t: Row, today = startOfTodayIST()): TaskRec {
   };
 }
 
-/** Projects the person may see right now. */
+/** Projects the person may see right now. Deals are left out while the CRM is hidden from them (SHO-BUG-2). */
 export const visibleProjects = (user: Actor) => ({
   archivedAt: null,
   ...(isAdmin(user) ? {} : { members: { some: { userId: user.id } } }),
+  ...crmProjectWhere(user),
 });
+/** Projects the person belongs to: their own work, whatever their org role. */
+const myProjects = (user: Actor) => ({ archivedAt: null, members: { some: { userId: user.id } }, ...crmProjectWhere(user) });
 
 const byProjectThenDue = (a: TaskRec, b: TaskRec) =>
   a.project.localeCompare(b.project) || (a.due ?? "9999").localeCompare(b.due ?? "9999") || a.title.localeCompare(b.title);
@@ -57,7 +61,7 @@ export async function myTasks(user: Actor, filter: MyFilter, o: { limit?: number
   const limit = o.limit ?? 30;
   const mine = {
     deletedAt: null,
-    project: { archivedAt: null, members: { some: { userId: user.id } } },
+    project: myProjects(user),
     OR: [{ assigneeId: user.id }, { collaborators: { some: { userId: user.id } } }],
   };
   let where: Record<string, unknown>;
@@ -68,7 +72,7 @@ export async function myTasks(user: Actor, filter: MyFilter, o: { limit?: number
     case "blocked": where = { ...mine, completedAt: null, blocked: true }; break;
     case "waiting_on_me":
       // Awaiting approval and I am the approver (the approver holds it, so assignee = approver = me).
-      where = { deletedAt: null, project: { archivedAt: null, members: { some: { userId: user.id } } }, completedAt: null, approverId: user.id, assigneeId: user.id };
+      where = { deletedAt: null, project: myProjects(user), completedAt: null, approverId: user.id, assigneeId: user.id };
       break;
     case "recently_completed": where = { ...mine, completedAt: { gte: addDays(today, -7) } }; break;
     default: where = { ...mine, completedAt: null };

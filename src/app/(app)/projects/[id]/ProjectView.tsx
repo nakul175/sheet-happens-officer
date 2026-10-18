@@ -7,7 +7,7 @@ import { Suspense } from "react";
 import { PRIORITY, ROLE, api, dueLabel, dueState, rowKeys, initials, isNetworkFailure, isOverdue, todayIST, useGet } from "@/components/api";
 import { TaskModal } from "@/components/TaskModal";
 import { AvatarGroup, Pri, Tick } from "@/components/TaskParts";
-import { Confirm, Field, LoadFailed, Menu, Modal } from "@/components/ui";
+import { Confirm, Field, LoadFailed, Menu, Modal, Skeleton } from "@/components/ui";
 import { MoveSheet } from "@/components/MoveSheet";
 import "@/components/board.css";
 import { DealPanel, type DealBlock } from "@/components/DealPanel";
@@ -30,7 +30,7 @@ type Proj = {
   members: { userId: string; name: string; role: string; active: boolean }[];
 };
 const MAX_SECTIONS = 8;
-// SHO-US-10.6 AC6: dragging is for devices with a mouse. On a touch screen it would fight scrolling, so Move to… is used.
+// SHO-US-22.6 AC6: dragging is for devices with a mouse. On a touch screen it would fight scrolling, so Move to… is used.
 const MOUSE = "(hover: hover) and (pointer: fine)";
 const useMouse = () => useSyncExternalStore(
   (cb) => { const m = window.matchMedia(MOUSE); m.addEventListener("change", cb); return () => m.removeEventListener("change", cb); },
@@ -194,8 +194,8 @@ function Inner({ id }: { id: string }) {
       {p?.deal && <DealPanel projectId={id} deal={p.deal} canWrite={canWrite} onChange={refresh} />}
       <div className="tabs">
         <div className="seg" role="tablist" aria-label="View">
-          <button role="tab" aria-selected={view === "list"} aria-current={view === "list"} onClick={() => setView("list")}>List</button>
-          <button role="tab" aria-selected={view === "board"} aria-current={view === "board"} onClick={() => setView("board")}>Board</button>
+          <button role="tab" aria-selected={view === "list"} onClick={() => setView("list")}>List</button>
+          <button role="tab" aria-selected={view === "board"} onClick={() => setView("board")}>Board</button>
         </div>
         {views.length > 0 && (
           <div className="vtabs" role="group" aria-label="Saved views">
@@ -226,7 +226,7 @@ function Inner({ id }: { id: string }) {
           {bulk.skipped.length > 0 && <details><summary>Which tasks were skipped</summary><ul>{bulk.skipped.map((x) => <li key={x.id}>{x.title}: {x.reason}</li>)}</ul></details>}
         </div>
       )}
-      {(pr.loading || tk.loading) && !secs && <div className="skel">Loading…</div>}
+      {(pr.loading || tk.loading) && !secs && <Skeleton />}
       {secs && filtered && secs.every((x) => !x.tasks.length) && (
         <div className="card nomatch"><b>No tasks match</b><button className="btn ghost" onClick={() => setList({ assignee: "", flags: [], priority: "" })}>Clear filters</button></div>
       )}
@@ -279,9 +279,9 @@ function Inner({ id }: { id: string }) {
               onDragOver={(e) => { if (dragId && canWrite && canDrop(dragId, s)) { e.preventDefault(); setOverCol(s.id); } }}
               onDragLeave={() => setOverCol((c) => (c === s.id ? null : c))}
               onDrop={(e) => { e.preventDefault(); setOverCol(null); const tid = dragId; setDragId(null); if (tid && canWrite && canDrop(tid, s)) { const from = secs.flatMap((x) => tasksOf(x)).find((x) => x.id === tid); if (from && from.sectionId !== s.id) moveTo(tid, s.id); } }}>
-              <h4>{s.name} <span className="n">{s.total}</span>
+              <h2>{s.name} <span className="n">{s.total}</span>
                 {manage && <SectionMenu s={s} secs={secs} projectId={id} onDialog={(kind) => setDialog({ kind, s })} onDone={refresh} onErr={setErr} />}
-              </h4>
+              </h2>
               {tasksOf(s).map((t) => (
                 <div key={t.id} className="bcard" draggable={canWrite && mouse} onDragStart={() => setDragId(t.id)} onDragEnd={() => { setDragId(null); setOverCol(null); }}
                   onClick={() => openTask(t.id)} tabIndex={0} onKeyDown={(e) => { if (e.key === "Enter") openTask(t.id); }}>
@@ -295,7 +295,7 @@ function Inner({ id }: { id: string }) {
                     <AvatarGroup assignee={t.assignee} collaborators={t.collaborators} />
                   </div>
                   {canWrite && (
-                    <button className="btn ghost sm bmove" aria-label={`Move "${t.title}" to…`} aria-haspopup="dialog"
+                    <button className="btn ghost sm bmove" aria-label={`Move to… "${t.title}"`} aria-haspopup="dialog"
                       onClick={(e) => { e.stopPropagation(); setMoving(t); }}>Move to…</button>
                   )}
                 </div>

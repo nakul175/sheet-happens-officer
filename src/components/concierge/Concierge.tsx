@@ -161,7 +161,7 @@ export function ConciergeFab({ kind }: { kind: "dock" | "bar" }) {
   const c = useConcierge();
   const [open, setOpen] = useState(false);
   const btn = useRef<HTMLButtonElement>(null);
-  const pushed = useRef(false); // SHO-US-10.8: opening adds a history entry so the phone Back button closes the concierge instead of leaving the page
+  const pushed = useRef(false); // SHO-US-22.8: opening adds a history entry so the phone Back button closes the concierge instead of leaving the page
   const closeIt = useCallback(() => {
     if (pushed.current) { window.history.back(); return; } // the popstate handler closes it and returns focus
     setOpen(false); setTimeout(() => btn.current?.focus(), 0);
@@ -173,7 +173,7 @@ export function ConciergeFab({ kind }: { kind: "dock" | "bar" }) {
     window.addEventListener("popstate", back);
     document.addEventListener("keydown", esc);
     document.querySelector<HTMLTextAreaElement>(".cc-sheet textarea")?.focus();
-    // SHO-US-10.3: iOS Safari does not shrink the page when the keyboard opens, so follow the visible area.
+    // SHO-US-22.3: iOS Safari does not shrink the page when the keyboard opens, so follow the visible area.
     const vv = window.visualViewport;
     const fit = () => {
       if (!vv) return;

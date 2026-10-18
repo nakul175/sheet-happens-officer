@@ -1,5 +1,6 @@
 "use client";
 import { useGet } from "@/components/api";
+import { Skeleton } from "@/components/ui";
 import { Page, useMe } from "../Shell";
 
 type Res = {
@@ -15,14 +16,14 @@ export default function UsageView() {
   const m = u.data?.month;
   return (
     <Page title="Usage" sub="Assistant calls, tokens and cost this month. Counts only; no chat text is shown here.">
-      {u.loading && <div className="skel">Loading…</div>}
+      {u.loading && <Skeleton />}
       {u.error && <div className="err" role="alert">{u.error}</div>}
       {m && (
         <>
           <div className="cards">
-            <div className="card"><small>Calls this month</small><h3>{m.calls}</h3></div>
-            <div className="card"><small>Tokens in / out</small><h3>{m.inputTokens.toLocaleString("en-IN")} / {m.outputTokens.toLocaleString("en-IN")}</h3></div>
-            <div className="card"><small>Cost this month (USD)</small><h3>${m.costUsd.toFixed(2)}</h3></div>
+            <div className="card"><small>Calls this month</small><div className="stat">{m.calls}</div></div>
+            <div className="card"><small>Tokens in / out</small><div className="stat">{m.inputTokens.toLocaleString("en-IN")} / {m.outputTokens.toLocaleString("en-IN")}</div></div>
+            <div className="card"><small>Cost this month (USD)</small><div className="stat">${m.costUsd.toFixed(2)}</div></div>
           </div>
           {!u.data!.people.length && <div className="card empty" style={{ marginTop: 14 }}>No assistant use yet. The assistant is not switched on.</div>}
           {!!u.data!.people.length && (

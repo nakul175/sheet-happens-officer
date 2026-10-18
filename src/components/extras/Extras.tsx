@@ -104,5 +104,5 @@ export function SearchButton() {
   const { openPalette } = useExtras();
   const [mac, setMac] = useState(false);
   useEffect(() => setMac(/Mac|iPhone|iPad/.test(navigator.platform)), []); // eslint-disable-line react-hooks/set-state-in-effect
-  return <button className="searchbtn" onClick={openPalette} aria-label="Search and commands">Search <kbd>{mac ? "⌘K" : "Ctrl K"}</kbd></button>;
+  return <button className="searchbtn" onClick={openPalette} aria-keyshortcuts="Control+K Meta+K">Search <kbd>{mac ? "⌘K" : "Ctrl K"}</kbd></button>;
 }

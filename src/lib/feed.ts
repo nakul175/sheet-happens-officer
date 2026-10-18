@@ -30,7 +30,8 @@ function leftNote(d: Record<string, unknown>) {
 function handoverText(who: string, d: Record<string, unknown>, p: string) {
   const from = String(d.fromName ?? "A person");
   const bits: string[] = [];
-  const moved = Number(d.moved ?? 0), approver = Number(d.approver ?? 0), cleared = Number(d.cleared ?? 0);
+  const moved = Number(d.moved ?? 0), toMe = Number(d.movedToYou ?? 0), approver = Number(d.approver ?? 0), cleared = Number(d.cleared ?? 0);
+  if (toMe) bits.push(`${plural(toMe, "open task")} ${toMe === 1 ? "is" : "are"} now yours`); // a per-task hand-over split between the Leader and others (SHO-BUG-7)
   if (moved) bits.push(d.toYou ? `${plural(moved, "open task")} ${moved === 1 ? "is" : "are"} now yours` : `${plural(moved, "open task")} went to ${String(d.to ?? "someone else")}`);
   if (approver) bits.push(`you now approve ${plural(approver, "task")} that ${from} used to approve`);
   if (cleared) bits.push(`${plural(cleared, "task")} no longer ${cleared === 1 ? "has" : "have"} an approver`);
@@ -52,7 +53,7 @@ export function noticeText(n: N) {
     COLLABORATOR_REMOVED: `${who} removed you from ${t}.`,
     APPROVER_NAMED: `${who} named you the approver of ${t}.`,
     SENT_FOR_APPROVAL: `${who} sent ${t} to you for approval.`,
-    SENT_BACK: `${who} sent ${t} back to you.`,
+    SENT_BACK: `${who} sent ${t} back to you.${d.approverCleared ? " It no longer has an approver." : ""}`,
     TASK_BLOCKED: `${who} marked ${t} as blocked${d.reason ? `: ${d.reason}` : ""}.`,
     TASK_DELETED: `${who} moved ${t} to Trash.`,
     REMOVED_AS_ASSIGNEE: `${who} took ${t} off you; someone else now holds it.`,
@@ -196,17 +197,20 @@ export async function auditLog(user: Actor, q: z.infer<typeof auditQuery>) {
   const events = await db.auditLog.findMany({ distinct: ["event"], select: { event: true }, orderBy: { event: "asc" } });
   const page = rows.slice(0, 100);
   const byType = (t: string[]) => [...new Set(page.filter((r) => r.targetType && t.includes(r.targetType) && r.targetId).map((r) => r.targetId!))];
+  // A "deal" target is the deal's project row (DEAL_CREATED, DEAL_CLOSED), or the task that became one (DEAL_CONVERTED) (SHO-BUG-4).
   const [us, ps, ts, ss] = await Promise.all([
     db.user.findMany({ where: { id: { in: byType(["user", "member"]) } }, select: { id: true, name: true } }),
-    db.project.findMany({ where: { id: { in: byType(["project"]) } }, select: { id: true, name: true } }),
-    db.task.findMany({ where: { id: { in: byType(["task"]) } }, select: { id: true, title: true } }),
+    db.project.findMany({ where: { id: { in: byType(["project", "deal"]) } }, select: { id: true, name: true } }),
+    db.task.findMany({ where: { id: { in: byType(["task", "deal"]) } }, select: { id: true, title: true } }),
     db.section.findMany({ where: { id: { in: byType(["section"]) } }, select: { id: true, name: true } }),
   ]);
   const label = new Map<string, string>([
     ...us.map((x) => [`user:${x.id}`, `Person "${x.name}"`] as [string, string]),
     ...us.map((x) => [`member:${x.id}`, `Member "${x.name}"`] as [string, string]),
     ...ps.map((x) => [`project:${x.id}`, `Project "${x.name}"`] as [string, string]),
+    ...ps.map((x) => [`deal:${x.id}`, `Deal "${x.name}"`] as [string, string]),
     ...ts.map((x) => [`task:${x.id}`, `Task "${x.title}"`] as [string, string]),
+    ...ts.map((x) => [`deal:${x.id}`, `Task "${x.title}"`] as [string, string]),
     ...ss.map((x) => [`section:${x.id}`, `Section "${x.name}"`] as [string, string]),
   ]);
   return {

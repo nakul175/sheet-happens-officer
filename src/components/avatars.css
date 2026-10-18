@@ -1,4 +1,4 @@
-/* SHO-US-10.9 / 14.12: avatar group with tap-to-show names. */
+/* SHO-US-22.9 / 14.12: avatar group with tap-to-show names. */
 .avwrap { position: relative; display: inline-flex; margin-left: auto; }
 .avbtn { background: none; border: 0; padding: 0; cursor: pointer; font: inherit; border-radius: 14px; position: relative; }
 .avbtn::after { content: ""; position: absolute; inset: -9px -9px; }

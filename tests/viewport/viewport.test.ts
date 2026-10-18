@@ -1,4 +1,4 @@
-// SHO-US-10.11: phone-size checks on every screen. Needs a running app (TASKBOARD_URL) on a TEST database, and a Chromium:
+// SHO-US-22.11: phone-size checks on every screen. Needs a running app (TASKBOARD_URL) on a TEST database, and a Chromium:
 //   locally set PW_CHROMIUM to a chrome binary; in CI run `npx playwright-core install --with-deps chromium` first.
 // It signs in as throw-away accounts it creates itself with invented names, and never touches any other database.
 // Fails with: screen, width, element, and a screenshot saved under test-results/viewport/.
@@ -53,7 +53,7 @@ async function check(ctx: BrowserContext, path: string, width: number, wait?: st
   const page = await ctx.newPage();
   try {
     await page.goto(path, { waitUntil: "load" });
-    await page.waitForFunction(() => !document.querySelector(".skel"), undefined, { timeout: 15000 }).catch(() => {});
+    await page.waitForFunction(() => !document.querySelector(".skel, .skel-wrap"), undefined, { timeout: 15000 }).catch(() => {});
     if (wait) await page.waitForSelector(wait, { timeout: 10000 });
     await page.waitForTimeout(400);
     const found: Finding[] = await page.evaluate(collect, width < PHONE_MAX);
@@ -83,7 +83,7 @@ for (const width of WIDTHS) {
   });
 }
 
-// The checks must catch what they claim to catch (SHO-US-10.11 AC2): a 400 px fixed-width element on a 320 px screen.
+// The checks must catch what they claim to catch (SHO-US-22.11 AC2): a 400 px fixed-width element on a 320 px screen.
 describe("the checks themselves", () => {
   const html = (body: string, meta = "width=device-width, initial-scale=1, viewport-fit=cover") =>
     `<!doctype html><meta name="viewport" content="${meta}"><body style="margin:0">${body}</body>`;

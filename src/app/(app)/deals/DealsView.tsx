@@ -1,5 +1,6 @@
 "use client";
 import Link from "next/link";
+import { Skeleton } from "@/components/ui";
 import { useState } from "react";
 import { dueLabel, isOverdue, useGet } from "@/components/api";
 import { money } from "@/components/DealPanel";
@@ -31,7 +32,7 @@ export default function DealsView() {
       </>}>
       <div className="tabs" style={{ marginBottom: 12 }}>
         <div className="seg" role="tablist" aria-label="Pipeline">
-          {pipes.data?.pipelines.map((p) => <button key={p.id} role="tab" aria-selected={cur?.id === p.id} aria-pressed={cur?.id === p.id} onClick={() => setPipe(p.id)}>{p.name}</button>)}
+          {pipes.data?.pipelines.map((p) => <button key={p.id} role="tab" aria-selected={cur?.id === p.id} onClick={() => setPipe(p.id)}>{p.name}</button>)}
         </div>
         <span className="sp" />
         <div className="seg" role="group" aria-label="Layout">
@@ -39,9 +40,9 @@ export default function DealsView() {
           <button aria-pressed={view === "list"} onClick={() => setView("list")}>List</button>
         </div>
       </div>
-      {loading && !data && <div className="skel">Loading…</div>}
+      {loading && !data && <Skeleton />}
       {error && <div className="err" role="alert">{error}</div>}
-      {data && deals.length === 0 && <div className="card empty"><b>No deals yet.</b><br />Create one to track an opportunity.</div>}
+      {data && deals.length === 0 && <div className="card empty"><b>No deals yet.</b><br />Create one to track an opportunity.<div className="empty-act"><Link className="btn" href="/deals/new">New deal</Link></div></div>}
       {data && cur && view === "board" && !old && <DealBoard deals={deals} stages={cur.stages} bid={cur.key === "DEAL_BID"} onChange={reload} />}
       {deals.length > 0 && (view === "list" || old) && (
         <div style={{ overflowX: "auto" }}>

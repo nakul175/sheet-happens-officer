@@ -3,7 +3,7 @@ import { useEffect, useRef } from "react";
 
 export type MoveOption = { id: string; name: string; current: boolean };
 
-/** SHO-US-10.6: bottom sheet that lists the sections a task can move to. Rows are 44 px; Escape or the dim area closes it; focus returns to the button. */
+/** SHO-US-22.6: bottom sheet that lists the sections a task can move to. Rows are 44 px; Escape or the dim area closes it; focus returns to the button. */
 export function MoveSheet({ title, options, onPick, onClose }: { title: string; options: MoveOption[]; onPick: (id: string) => void; onClose: () => void }) {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {

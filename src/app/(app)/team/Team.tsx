@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import { api, useGet } from "@/components/api";
-import { Confirm, Field, Modal } from "@/components/ui";
+import { Confirm, Field, Modal, Skeleton } from "@/components/ui";
 import { Page, roleLabel, useMe } from "../Shell";
 
 type P = { id: string; name: string; email?: string; orgRole?: "MEMBER" | "ADMIN" | "SUPER_ADMIN"; leads?: { id: string; name: string }[]; status?: "ACTIVE" | "UNVERIFIED" | "DEACTIVATED" };
@@ -44,7 +44,7 @@ export default function Team() {
       actions={me.orgRole === "SUPER_ADMIN" ? <button className="btn" onClick={() => setAdding(true)}>+ Add person</button> : undefined}>
       {err && <div className="err" role="alert">{err}</div>}
       {note && <div className={note.ok ? "ok" : "err"} role="status">{note.text} <button className="btn ghost sm" onClick={() => setNote(null)}>Close</button></div>}
-      {t.loading && <div className="skel">Loading…</div>}
+      {t.loading && <Skeleton />}
       {t.error && <div className="err" role="alert">{t.error}</div>}
       {t.data && !admin && (
         <div className="list">{people.map((p) => (

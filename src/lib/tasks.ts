@@ -1,4 +1,5 @@
 import { ensureNextStep } from "@/lib/deals";
+import { crmProjectWhere } from "@/lib/crm";
 import { linksOfTask } from "@/lib/records";
 import { db } from "@/lib/db";
 import { ApiError, notFound } from "@/lib/http";
@@ -257,7 +258,8 @@ export async function updateTask(
 export async function assignTask(user: Actor, id: string, assigneeId: string, expectedUpdatedAt?: string) {
   const { t, a } = await loadTask(user, id, { write: true });
   await staleCheck(user, id, t, a.role, expectedUpdatedAt);
-  if (t.approverId && user.id === t.assigneeId && assigneeId !== t.approverId) {
+  // The assignee may only hand a task with an approver on to that approver; the Leader and Admins keep full authority (SHO-BUG-6).
+  if (t.approverId && user.id === t.assigneeId && assigneeId !== t.approverId && a.role !== "LEADER") {
     throw new ApiError(403, "With an approver, this task can only be handed to the approver.");
   }
   await db.$transaction(async (tx) => {
@@ -334,10 +336,19 @@ export async function sendBack(user: Actor, id: string) {
   await db.$transaction(async (tx) => {
     const prev = t.previousAssigneeId ? await activeMember(tx, t.projectId, t.previousAssigneeId, WORKERS) : null;
     const target = prev ? prev.userId : await leaderId(tx, t.projectId);
-    await tx.task.update({ where: { id }, data: { assigneeId: target, previousAssigneeId: null } });
-    await notify(tx, [target], "SENT_BACK", { actorId: user.id, taskId: id, projectId: t.projectId, data: { title: t.title, toLeader: !prev } });
+    // With nobody to send back to, the task goes to the Leader. When the Leader is the approver it would still be
+    // "awaiting approval" in their own hands, and neither Reassign nor Change approver is open to them from there, so the
+    // approver is cleared in the same write; Undo puts it back (SHO-BUG-6).
+    const clearApprover = target === t.approverId;
+    const approver = clearApprover ? { approverId: null } : {};
+    await tx.task.update({ where: { id }, data: { assigneeId: target, previousAssigneeId: null, ...approver } });
+    await notify(tx, [target], "SENT_BACK", { actorId: user.id, taskId: id, projectId: t.projectId, data: { title: t.title, toLeader: !prev, ...(clearApprover ? { approverCleared: true } : {}) } });
     await notify(tx, [t.assigneeId], "REMOVED_AS_ASSIGNEE", { actorId: user.id, taskId: id, projectId: t.projectId, data: { title: t.title } });
-    await logAction(tx, { actorId: user.id, projectId: t.projectId, targetType: "task", targetId: id, action: "task.sent_back", before: { assigneeId: t.assigneeId, previousAssigneeId: t.previousAssigneeId }, after: { assigneeId: target, previousAssigneeId: null } });
+    await logAction(tx, {
+      actorId: user.id, projectId: t.projectId, targetType: "task", targetId: id, action: "task.sent_back",
+      before: { assigneeId: t.assigneeId, previousAssigneeId: t.previousAssigneeId, ...(clearApprover ? { approverId: t.approverId } : {}) },
+      after: { assigneeId: target, previousAssigneeId: null, ...approver },
+    });
   });
 }
 
@@ -504,7 +515,8 @@ export async function myTasks(user: Actor) {
     where: {
       completedAt: null,
       deletedAt: null,
-      project: { archivedAt: null, members: { some: { userId: user.id } } },
+      // Deal tasks are left out while the CRM is hidden from this person (SHO-BUG-2).
+      project: { archivedAt: null, members: { some: { userId: user.id } }, ...crmProjectWhere(user) },
       OR: [{ assigneeId: user.id }, { collaborators: { some: { userId: user.id } } }],
     },
     include: {

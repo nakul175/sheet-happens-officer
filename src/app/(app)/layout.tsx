@@ -1,4 +1,5 @@
 import { Suspense } from "react";
+import { Skeleton } from "@/components/ui";
 import { redirect } from "next/navigation";
 import { currentUser, publicUser } from "@/lib/auth";
 import { Shell, type Me } from "./Shell";
@@ -21,7 +22,7 @@ async function Gate({ children }: { children: React.ReactNode }) {
 
 export default function AppLayout({ children }: LayoutProps<"/">) {
   return (
-    <Suspense fallback={<div className="skel" style={{ padding: 24 }}>Loading…</div>}>
+    <Suspense fallback={<div style={{ padding: 24 }}><Skeleton /></div>}>
       <Gate>{children}</Gate>
     </Suspense>
   );

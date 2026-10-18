@@ -93,7 +93,9 @@ async function tellSuperAdmins(type: "JOB_FAILED" | "JOB_MISSED", job: string, e
   const already = await db.notification.findFirst({ where: { type, createdAt: { gte: since }, data: { path: ["job"], equals: job } } });
   if (already) return;
   const admins = await db.user.findMany({ where: { orgRole: "SUPER_ADMIN", deactivatedAt: null }, select: { id: true } });
-  await notify(db, admins.map((a) => a.id), type, { data: { job, error: error ?? null } });
+  // Inside a transaction, as every other caller: notify() dedupes per client, and the process-wide `db` client
+  // would make every job notice after the first one per Super Admin vanish until a restart (SHO-BUG-1).
+  await db.$transaction((tx) => notify(tx, admins.map((a) => a.id), type, { data: { job, error: error ?? null } }));
 }
 
 export async function jobStatus() {
