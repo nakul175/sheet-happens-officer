@@ -1,19 +1,8 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { isSignInScreen, sessionSignInTarget } from "@/lib/return-to";
+import { isSignInScreen, signInHref } from "@/lib/return-to";
 
 export type Res<T = Record<string, any>> = { ok: boolean; status: number; error?: string; data: T }; // eslint-disable-line @typescript-eslint/no-explicit-any
-
-/**
- * Where an expired session lands (APL-2652).
- * `/signin?expired=1` plus the safe return path. No navigation on `/signin` or `/signin/`.
- */
-export const sessionNav = {
-  toSignIn() {
-    const href = sessionSignInTarget(window.location.pathname, window.location.search);
-    if (href) window.location.href = href;
-  },
-};
 
 /** Call the JSON API. Never throws; network trouble comes back as status 0 with a message. */
 export async function api<T = Record<string, any>>(method: string, path: string, body?: unknown): Promise<Res<T>> { // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -29,8 +18,11 @@ export async function api<T = Record<string, any>>(method: string, path: string,
     }
     const data = (res.headers.get("content-type")?.includes("json") ? await res.json() : {}) as any; // eslint-disable-line @typescript-eslint/no-explicit-any
     const error = res.ok ? undefined : data?.issues?.[0]?.message ?? data?.error ?? "Something went wrong. Try again.";
-    // APL-2652. A 401 goes to sign-in with expired=1 and the return path, unless that screen is already showing.
-    if (res.status === 401 && typeof window !== "undefined" && !isSignInScreen(window.location.pathname)) sessionNav.toSignIn();
+    // APL-2652. A 401 uses signInHref so the URL carries expired=1 and the current safe path.
+    // Already being on /signin or /signin/ does not navigate.
+    if (res.status === 401 && typeof window !== "undefined" && !isSignInScreen(window.location.pathname)) {
+      window.location.href = signInHref(window.location.pathname + window.location.search, { expired: true });
+    }
     return { ok: res.ok, status: res.status, error, data };
   } catch {
     return { ok: false, status: 0, error: "Could not reach the server. Check your connection and try again.", data: {} as T };
