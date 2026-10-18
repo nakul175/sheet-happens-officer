@@ -1,7 +1,7 @@
 // Integration tests for reminders (7.4), search (3.2/3.6 AC6), Usage (9.2 AC3) and sign-out everywhere (1.6 AC3).
 // Server must run with SUPER_ADMIN_EMAILS=root.test@aplyd.com, JOB_SECRET set and the same EMAIL_OUTBOX_DIR.
 import { describe, expect, it } from "vitest";
-import { Client, PW, account, admin, istDate, project, superAdmin, task } from "./helpers";
+import { Client, PW, account, istDate, project, superAdmin, task } from "./helpers";
 
 const SECRET = process.env.JOB_SECRET ?? "";
 const runJob = (name: string) => fetch(`${process.env.TASKBOARD_URL ?? "http://localhost:3000"}/api/jobs/${name}`, { method: "POST", headers: { authorization: `Bearer ${SECRET}` } });
@@ -61,6 +61,9 @@ describe("cron health", () => {
     expect(typeof r.json.ok).toBe("boolean");
   });
 });
+
+// Not on the shared helpers import: PR #13 adds patchTask there and PR #20 adds withVersion.
+import { admin } from "./helpers";
 
 describe("search (3.2 AC6, 3.6 AC6)", () => {
   it("finds only what the person may see, leaves archived out unless asked, and shows Admins everything", async () => {
