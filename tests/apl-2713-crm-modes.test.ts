@@ -36,6 +36,8 @@ type ApiGroups = {
 };
 
 const running = new Map<Mode, Running>();
+const signed: { editor?: string; admin?: string } = {};
+const LOAD = 40;
 const seed: { userIds: string[]; emails: string[]; projectIds: string[]; orgId?: string; dealId?: string; kickoffId?: string; contractId?: string; plainId?: string } = {
   userIds: [], emails: [], projectIds: [],
 };
@@ -149,9 +151,11 @@ async function call(base: string, cookie: string, method: string, p: string, bod
 }
 
 function verifyToken(outbox: string, email: string) {
+  // Signup stores the address in lowercase (schemas.ts). Match the outbox the same way.
+  const want = email.toLowerCase();
   const files = readdirSync(outbox).filter((f) => f.endsWith(".json")).sort();
   const mails = files.map((f) => JSON.parse(readFileSync(path.join(outbox, f), "utf8")) as { to?: string; subject?: string; text?: string });
-  const mine = mails.filter((m) => m.to === email && /Verify/.test(m.subject ?? ""));
+  const mine = mails.filter((m) => (m.to ?? "").toLowerCase() === want && /Verify/.test(m.subject ?? ""));
   return mine.at(-1)?.text?.match(/token=([\w-]+)/)?.[1] ?? null;
 }
 
@@ -216,13 +220,15 @@ describe("CRM_VISIBLE modes hide handed-off deal tasks on a real server per mode
     const off = running.get("off");
     expect(open && admins && off, "each mode server is running").toBeTruthy();
 
-    const editorEmail = `editor.${tag}@aplyd.com`;
-    const approverEmail = `approver.${tag}@aplyd.com`;
-    const adminEmail = `admin.${tag}@aplyd.com`;
+    const editorEmail = `editor.${tag}@aplyd.com`.toLowerCase();
+    const approverEmail = `approver.${tag}@aplyd.com`.toLowerCase();
+    const adminEmail = `admin.${tag}@aplyd.com`.toLowerCase();
     seed.emails.push(editorEmail, approverEmail, adminEmail);
     const editor = await signIn(open!, "editor", editorEmail);
     const approver = await signIn(open!, "approver", approverEmail);
     const adminUser = await signIn(open!, "admin", adminEmail);
+    signed.editor = editor.cookie;
+    signed.admin = adminUser.cookie;
     seed.userIds.push(editor.id, approver.id, adminUser.id);
     await db.user.update({ where: { id: adminUser.id }, data: { orgRole: "ADMIN" } });
 
@@ -303,6 +309,34 @@ describe("CRM_VISIBLE modes hide handed-off deal tasks on a real server per mode
     for (const server of [open!, admins!, off!]) {
       const got = await myTasks(server, editor.cookie);
       expect(handed(got.body, seed.plainId!)?.title, server.mode).toBe(PLAIN);
+    }
+  }, 120_000);
+
+  // The handed-off query is on the My tasks read path. 40 concurrent GETs in each hidden case.
+  it("load: 40 concurrent GET /api/my-tasks in each hidden mode", async () => {
+    expect(signed.editor && signed.admin, "AC4 signed in editor and admin").toBeTruthy();
+    const hidden: { mode: Mode; who: "editor" | "admin"; cookie: string; plain: boolean }[] = [
+      { mode: "off", who: "editor", cookie: signed.editor!, plain: true },
+      { mode: "off", who: "admin", cookie: signed.admin!, plain: false },
+      { mode: "admins", who: "editor", cookie: signed.editor!, plain: true },
+    ];
+    for (const example of hidden) {
+      const server = running.get(example.mode)!;
+      const label = `mode=${example.mode} user=${example.who}`;
+      const results = await Promise.all(Array.from({ length: LOAD }, () => call(server.base, example.cookie, "GET", "/api/my-tasks").catch((err: unknown) => ({
+        status: 0,
+        text: err instanceof Error ? err.message : "request failed",
+        json: null,
+        cookie: example.cookie,
+      }))));
+      expect(results, label).toHaveLength(LOAD);
+      const failed = results.filter((res) => res.status !== 200);
+      expect(failed.map((res) => ({ status: res.status, text: res.text.slice(0, 200) })), label).toEqual([]);
+      for (const res of results) {
+        const body = res.json as unknown as ApiGroups;
+        assertHidden(`${label} load`, res.text, body);
+        if (example.plain) expect(res.text, label).toContain(PLAIN);
+      }
     }
   }, 120_000);
 });
