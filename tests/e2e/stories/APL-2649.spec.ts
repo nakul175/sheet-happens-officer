@@ -18,9 +18,9 @@ async function trashFromScreen(who: Who, projectId: string, taskId: string) {
 }
 
 test.describe("APL-2649", () => {
-  // qa:TC APL-2649 AC1
+  // qa:TC missing
   test("AC1: an Editor who deletes a task does not see the Undo toast", async ({ admin, member, later }) => {
-    test.info().annotations.push({ type: "qa:TC", description: "APL-2649 AC1" });
+    test.info().annotations.push({ type: "qa:TC", description: "qa:TC missing" });
     const p = await newProject(admin, later, { label: "2649 editor", members: [{ who: member, role: "EDITOR" }] });
     const t = await newTask(admin, p.id);
     await trashFromScreen(member, p.id, t);
@@ -34,9 +34,9 @@ test.describe("APL-2649", () => {
     expect(del.undoId).toBeNull();
   });
 
-  // qa:TC APL-2649 AC2
+  // qa:TC missing
   test("AC2: a Leader or Admin who deletes a task still sees the Undo toast, and Undo brings the task back", async ({ admin, later }) => {
-    test.info().annotations.push({ type: "qa:TC", description: "APL-2649 AC2" });
+    test.info().annotations.push({ type: "qa:TC", description: "qa:TC missing" });
     const p = await newProject(admin, later, { label: "2649 leader" });
     const t = await newTask(admin, p.id);
     await trashFromScreen(admin, p.id, t);

@@ -3,28 +3,28 @@
 // AC5 90-day retention, AC6 no email.
 // Note: AC1 says the latest 30; SHO-US-14.13 changed the panel to 50 at a time with Load older. The test follows 14.13.
 // Data: every project and task is named "ZZ-TEST ..."; projects are archived afterwards.
-import { test, expect, zz } from "../support";
+import { test, expect, zz, type Who, type Page } from "../support";
 
-async function proj(admin: any, label: string, later: (f: () => Promise<unknown>) => void) {
+async function proj(admin: Who, label: string, later: (f: () => Promise<unknown>) => void) {
   const r = await admin.api.post("/api/projects", { name: zz(label), leaderId: admin.user.id });
   expect(r.status, JSON.stringify(r.json)).toBe(201);
   const id = r.json.project.id as string;
   later(() => admin.api.post(`/api/projects/${id}/archive`));
   return id;
 }
-const withMember = async (admin: any, member: any, label: string, later: (f: () => Promise<unknown>) => void) => {
+const withMember = async (admin: Who, member: Who, label: string, later: (f: () => Promise<unknown>) => void) => {
   const p = await proj(admin, label, later);
   expect((await admin.api.post(`/api/projects/${p}/members`, { userId: member.user.id, role: "EDITOR" })).status).toBe(201);
   later(() => admin.api.del(`/api/projects/${p}/members/${member.user.id}?handoverTo=${admin.user.id}`));
   return p;
 };
-const mk = async (who: any, p: string, title: string, extra: Record<string, unknown> = {}) => {
+const mk = async (who: Who, p: string, title: string, extra: Record<string, unknown> = {}) => {
   const r = await who.api.post(`/api/projects/${p}/tasks`, { title, ...extra });
   expect(r.status, JSON.stringify(r.json)).toBe(201);
   return r.json.task.id as string;
 };
 /** Open the bell panel and wait until it is really showing (the page can still be settling after a load). */
-async function openBell(page: any) {
+async function openBell(page: Page) {
   await page.goto("/");
   await page.waitForLoadState("networkidle");
   const dlg = page.getByRole("dialog", { name: "Notifications" });
@@ -36,7 +36,7 @@ async function openBell(page: any) {
   return dlg;
 }
 type N = { id: string; text: string; href: string; read: boolean; createdAt: string };
-const inbox = async (who: any) => (await who.api.get("/api/notifications?limit=200")).json as { unread: number; items: N[] };
+const inbox = async (who: Who) => (await who.api.get("/api/notifications?limit=200")).json as { unread: number; items: N[] };
 
 test("AC1: a new notification raises the count and appears first in the panel", async ({ admin, member, later }) => {
   const p = await withMember(admin, member, "bell-new", later);

@@ -3,7 +3,7 @@
 // AC5 five failed sign-ins and the lockout, AC6 IP only on sign-in events, AC7 task delete/restore/purge, Undo anyway, approver.
 // Data: every project and task is named "ZZ-TEST ..."; the person created for AC5 is "ZZ-TEST ..." at example.invalid (no inbox) and is
 // deactivated afterwards. AC2 briefly makes the Member an Admin and puts the role back in a finally block.
-import { test, expect, zz, RUN, login } from "../support";
+import { test, expect, zz, RUN, login, type Who } from "../support";
 import { patchCurrent } from "../helpers/jim-http";
 import { localSql, runLocalJob, sourceOf, sqlId } from "../helpers/local-clock";
 
@@ -11,24 +11,24 @@ test.beforeAll(() => {
   test.skip(!process.env.SHO_QA_PASS, "Set SHO_QA_PASS (the shared password for the nakul17+ accounts).");
 });
 
-async function proj(admin: any, label: string, later: (f: () => Promise<unknown>) => void) {
+async function proj(admin: Who, label: string, later: (f: () => Promise<unknown>) => void) {
   const r = await admin.api.post("/api/projects", { name: zz(label), leaderId: admin.user.id });
   expect(r.status, JSON.stringify(r.json)).toBe(201);
   const id = r.json.project.id as string;
   later(() => admin.api.post(`/api/projects/${id}/archive`));
   return id;
 }
-const mk = async (admin: any, p: string, title: string, extra: Record<string, unknown> = {}) => {
+const mk = async (admin: Who, p: string, title: string, extra: Record<string, unknown> = {}) => {
   const r = await admin.api.post(`/api/projects/${p}/tasks`, { title, ...extra });
   expect(r.status, JSON.stringify(r.json)).toBe(201);
   return r.json.task.id as string;
 };
 type Row = { id: string; at: string; who: string | null; email: string | null; event: string; ip: string | null; channel: string; target: string | null };
-const audit = async (admin: any, q: string) => (await admin.api.get(`/api/audit?${q}`)).json.items as Row[];
+const audit = async (admin: Who, q: string) => (await admin.api.get(`/api/audit?${q}`)).json.items as Row[];
 
-// qa:TC APL-2521 AC1
+// qa:TC missing
 test("AC1: listed events each leave a row with time, actor, event, target and channel", async ({ admin, member, later }) => {
-  test.info().annotations.push({ type: "qa:TC", description: "APL-2521 AC1" });
+  test.info().annotations.push({ type: "qa:TC", description: "qa:TC missing" });
   // Remember the rows that exist now, so a row left by an earlier run cannot satisfy this test.
   const EVENTS = ["PROJECT_CREATED", "MEMBER_ADDED", "TASK_DELETED", "TASK_RESTORED"];
   const seen = new Set<string>();
@@ -63,9 +63,9 @@ test("AC1: listed events each leave a row with time, actor, event, target and ch
   await expect(admin.page.getByRole("columnheader")).toContainText(["When (IST)", "Who", "Event", "IP", "How", "Target"]);
 });
 
-// qa:TC APL-2521 AC2
+// qa:TC missing
 test("AC2: nobody but the Super Admin can open or query the audit log, Admins included", async ({ admin, member }) => {
-  test.info().annotations.push({ type: "qa:TC", description: "APL-2521 AC2" });
+  test.info().annotations.push({ type: "qa:TC", description: "qa:TC missing" });
   expect((await member.api.get("/api/audit")).status).toBe(404);
   await member.page.goto("/audit");
   await expect(member.page.getByRole("heading", { name: "This page isn't available" })).toBeVisible();
@@ -80,9 +80,9 @@ test("AC2: nobody but the Super Admin can open or query the audit log, Admins in
   }
 });
 
-// qa:TC APL-2521 AC3
+// qa:TC missing
 test("AC3: no password, token or email link is stored in the rows", async ({ admin }) => {
-  test.info().annotations.push({ type: "qa:TC", description: "APL-2521 AC3" });
+  test.info().annotations.push({ type: "qa:TC", description: "qa:TC missing" });
   const res = await admin.page.request.get("/api/audit");
   const body = await res.text();
   // A boolean on purpose: a failing `expect(body).not.toContain(secret)` prints the secret in the test report.
@@ -91,17 +91,17 @@ test("AC3: no password, token or email link is stored in the rows", async ({ adm
   for (const r of JSON.parse(body).items as Row[]) expect(Object.keys(r).sort()).toEqual(["at", "channel", "email", "event", "id", "ip", "target", "who"]);
 });
 
-// qa:TC APL-2521 AC4
+// qa:TC missing
 test("AC4: the log is read-only through the app", async ({ admin }) => {
-  test.info().annotations.push({ type: "qa:TC", description: "APL-2521 AC4" });
+  test.info().annotations.push({ type: "qa:TC", description: "qa:TC missing" });
   for (const method of ["POST", "PUT", "PATCH", "DELETE"] as const) {
     const r = await admin.page.request.fetch("/api/audit", { method, data: {} });
     expect([404, 405], `${method} /api/audit`).toContain(r.status());
   }
 });
-// qa:TC APL-2521 AC4
+// qa:TC missing
 test("AC4 (12-month removal): audit rows older than 12 months are removed by purge-old", async ({ admin, later }) => {
-  test.info().annotations.push({ type: "qa:TC", description: "APL-2521 AC4" });
+  test.info().annotations.push({ type: "qa:TC", description: "qa:TC missing" });
   expect(sourceOf("src/lib/feed.ts", "const LOG_MONTHS")).toContain("const LOG_MONTHS = 12");
   const fn = sourceOf("src/lib/feed.ts", "export async function purgeOld");
   expect(fn).toContain("cut.setMonth(cut.getMonth() - LOG_MONTHS)");
@@ -121,10 +121,9 @@ test("AC4 (12-month removal): audit rows older than 12 months are removed by pur
   }
 });
 
-// qa:TC APL-2521 AC5
-// qa:TC APL-2521 AC6
+// qa:TC missing
 test("AC5 and AC6: five failed sign-ins and the lockout are logged, with the IP on those rows only", async ({ admin, anon, later }) => {
-  test.info().annotations.push({ type: "qa:TC", description: "APL-2521 AC5, APL-2521 AC6" });
+  test.info().annotations.push({ type: "qa:TC", description: "qa:TC missing" });
   const email = `zz-test-lock-${RUN}@example.invalid`;
   const add = await admin.api.post("/api/team", { firstName: "ZZ-TEST", lastName: `lockout ${RUN}`, email, role: "MEMBER" });
   expect(add.status, JSON.stringify(add.json)).toBe(201);
@@ -144,9 +143,9 @@ test("AC5 and AC6: five failed sign-ins and the lockout are logged, with the IP 
   expect(all.filter((r) => !/^SIGN_IN/.test(r.event) && r.ip)).toHaveLength(0);
 });
 
-// qa:TC APL-2521 AC7
+// qa:TC missing
 test("AC7: task delete and restore, an approver being set, and 'Undo anyway' each leave an audit row", async ({ admin, member, later }) => {
-  test.info().annotations.push({ type: "qa:TC", description: "APL-2521 AC7" });
+  test.info().annotations.push({ type: "qa:TC", description: "qa:TC missing" });
   const p = await proj(admin, "audit-added", later);
   expect((await admin.api.post(`/api/projects/${p}/members`, { userId: member.user.id, role: "EDITOR" })).status).toBe(201);
   later(() => admin.api.del(`/api/projects/${p}/members/${member.user.id}?handoverTo=${admin.user.id}`));
@@ -169,9 +168,9 @@ test("AC7: task delete and restore, an approver being set, and 'Undo anyway' eac
   expect((await audit(admin, `event=UNDO_OVERRIDE&person=${admin.user.id}`)).length).toBeGreaterThanOrEqual(1);
 });
 
-// qa:TC APL-2521 AC7
+// qa:TC missing
 test("AC7 (30-day purge): one TASK_PURGED row is written for a purge run", async ({ admin, later }) => {
-  test.info().annotations.push({ type: "qa:TC", description: "APL-2521 AC7" });
+  test.info().annotations.push({ type: "qa:TC", description: "qa:TC missing" });
   const body = sourceOf("src/lib/tasks.ts", "export async function purgeTrash", "export async function myTasks");
   expect(body).toContain("if (r.count) await db.auditLog.create");
   expect(body).toContain('event: "TASK_PURGED"');

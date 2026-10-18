@@ -4,6 +4,7 @@ import { test as base, expect, type APIRequestContext, type Browser, type Browse
 import { BASE_URL } from "./base-url";
 
 export { expect, BASE_URL };
+export type { Page };
 
 /** One id per run so names never clash between runs. */
 export const RUN = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
@@ -16,6 +17,8 @@ function need(name: string): string {
   return v;
 }
 
+// Staging JSON has no schema here. `any` keeps `user.id` / `json.project` reads type-checking; a narrower type would force casts through the specs.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- open index signature for untyped API JSON
 export type Json = Record<string, any>;
 export type Api = {
   get: (p: string) => Promise<{ status: number; json: Json }>;
@@ -24,6 +27,11 @@ export type Api = {
   put: (p: string, b?: unknown) => Promise<{ status: number; json: Json }>;
   del: (p: string) => Promise<{ status: number; json: Json }>;
 };
+
+/** The signed-in `admin` / `member` fixture these specs receive. */
+export type Who = { page: Page; api: Api; user: Json };
+/** Clean-up registrar passed as the `later` fixture. */
+export type Later = (fn: () => Promise<unknown>) => void;
 
 export function api(req: APIRequestContext): Api {
   const call = async (method: string, p: string, data?: unknown) => {
@@ -101,6 +109,8 @@ async function as(browser: Browser, role: Role) {
   return { ctx, page, api: api(ctx.request), user };
 }
 
+// Playwright fixture callbacks are named `use`. That is the fixture runner, not React's `use`.
+/* eslint-disable react-hooks/rules-of-hooks -- Playwright fixture `use`, not a React hook */
 export const test = base.extend<Fixtures>({
   admin: async ({ browser }, use) => {
     const s = await as(browser, "ADMIN");
@@ -127,3 +137,4 @@ export const test = base.extend<Fixtures>({
     await ctx.close();
   },
 });
+/* eslint-enable react-hooks/rules-of-hooks */

@@ -4,7 +4,7 @@
 // AC4 text says an Editor must not reach the screen; SHO-US-14.14 later let Editors see rows for their own tasks. The tests follow
 // the live 14.14 behaviour (Editor: own tasks only; Viewer: refused) and say so.
 // Data: every project and task is named "ZZ-TEST ..."; projects are archived afterwards.
-import { test, expect, zz } from "../support";
+import { test, expect, zz, type Who } from "../support";
 import { patchCurrent } from "../helpers/jim-http";
 import { localSql, runLocalJob, sourceOf, sqlId } from "../helpers/local-clock";
 
@@ -12,23 +12,23 @@ test.beforeAll(() => {
   test.skip(!process.env.SHO_QA_PASS, "Set SHO_QA_PASS (the shared password for the nakul17+ accounts).");
 });
 
-async function proj(admin: any, label: string, later: (f: () => Promise<unknown>) => void, leaderId?: string) {
+async function proj(admin: Who, label: string, later: (f: () => Promise<unknown>) => void, leaderId?: string) {
   const r = await admin.api.post("/api/projects", { name: zz(label), leaderId: leaderId ?? admin.user.id });
   expect(r.status, JSON.stringify(r.json)).toBe(201);
   const id = r.json.project.id as string;
   later(() => admin.api.post(`/api/projects/${id}/archive`));
   return id;
 }
-const mk = async (who: any, p: string, title: string, extra: Record<string, unknown> = {}) => {
+const mk = async (who: Who, p: string, title: string, extra: Record<string, unknown> = {}) => {
   const r = await who.api.post(`/api/projects/${p}/tasks`, { title, ...extra });
   expect(r.status, JSON.stringify(r.json)).toBe(201);
   return r.json.task.id as string;
 };
-const rows = async (who: any, p: string) => (await who.api.get(`/api/projects/${p}/activity`)).json.items as { what: string; who: string; via: string; undo: string }[];
+const rows = async (who: Who, p: string) => (await who.api.get(`/api/projects/${p}/activity`)).json.items as { what: string; who: string; via: string; undo: string }[];
 
-// qa:TC APL-2504 AC1
+// qa:TC missing
 test("AC1: each write leaves one row with who, what, and the before and after values", async ({ admin, later }) => {
-  test.info().annotations.push({ type: "qa:TC", description: "APL-2504 AC1" });
+  test.info().annotations.push({ type: "qa:TC", description: "qa:TC missing" });
   const p = await proj(admin, "log-rows", later);
   const t = await mk(admin, p, zz("old name"));
   expect((await patchCurrent(admin, t, { priority: "HIGH" })).status).toBe(200);
@@ -42,9 +42,9 @@ test("AC1: each write leaves one row with who, what, and the before and after va
   for (const i of items) expect(i.who).toBe(admin.user.name);
 });
 
-// qa:TC APL-2504 AC2
+// qa:TC missing
 test("APL-2504 AC2: a change made through the concierge carries a via concierge tag", async ({ admin, later }) => {
-  test.info().annotations.push({ type: "qa:TC", description: "APL-2504 AC2" });
+  test.info().annotations.push({ type: "qa:TC", description: "qa:TC missing" });
   const p = await proj(admin, "log-via", later);
   const t = await mk(admin, p, zz("screen write"));
   expect((await patchCurrent(admin, t, { priority: "HIGH" })).status).toBe(200);
@@ -70,9 +70,9 @@ test("APL-2504 AC2: a change made through the concierge carries a via concierge 
   }
 });
 
-// qa:TC APL-2504 AC3
+// qa:TC missing
 test("AC3: a Member cannot read another project's rows; a Leader reads their own project's rows; an Admin reads all", async ({ admin, member, later }) => {
-  test.info().annotations.push({ type: "qa:TC", description: "APL-2504 AC3" });
+  test.info().annotations.push({ type: "qa:TC", description: "qa:TC missing" });
   const mine = await proj(admin, "log-led", later, member.user.id); // the member leads this project
   const other = await proj(admin, "log-other", later); // the member is not in this one
   await mk(admin, mine, zz("led task"));
@@ -84,9 +84,9 @@ test("AC3: a Member cannot read another project's rows; a Leader reads their own
   expect((await admin.api.get(`/api/projects/${mine}/activity`)).status).toBe(200);
 });
 
-// qa:TC APL-2504 AC4
+// qa:TC missing
 test("AC4: a Leader or Admin opens Activity and sees the project's rows newest first; a Viewer is refused", async ({ admin, member, later }) => {
-  test.info().annotations.push({ type: "qa:TC", description: "APL-2504 AC4" });
+  test.info().annotations.push({ type: "qa:TC", description: "qa:TC missing" });
   const p = await proj(admin, "log-screen", later);
   const t = await mk(admin, p, zz("screen task"));
   expect((await patchCurrent(admin, t, { priority: "HIGH" })).status).toBe(200);
@@ -110,9 +110,9 @@ test("AC4: a Leader or Admin opens Activity and sees the project's rows newest f
   await expect(member.page.getByText("Only people who work on this project can see Activity.")).toBeVisible();
 });
 
-// qa:TC APL-2504 AC4
+// qa:TC missing
 test("AC4 (Editor, per SHO-US-14.14): an Editor sees only rows about their own tasks", async ({ admin, member, later }) => {
-  test.info().annotations.push({ type: "qa:TC", description: "APL-2504 AC4" });
+  test.info().annotations.push({ type: "qa:TC", description: "qa:TC missing" });
   const p = await proj(admin, "log-editor", later);
   expect((await admin.api.post(`/api/projects/${p}/members`, { userId: member.user.id, role: "EDITOR" })).status).toBe(201);
   later(() => admin.api.del(`/api/projects/${p}/members/${member.user.id}?handoverTo=${admin.user.id}`));
@@ -123,9 +123,9 @@ test("AC4 (Editor, per SHO-US-14.14): an Editor sees only rows about their own t
   expect(seen).not.toContain(zz("leader's task"));
 });
 
-// qa:TC APL-2504 AC5
+// qa:TC missing
 test("APL-2504 AC5: rows older than 12 months are removed and a newer row stays", async ({ admin, later }) => {
-  test.info().annotations.push({ type: "qa:TC", description: "APL-2504 AC5" });
+  test.info().annotations.push({ type: "qa:TC", description: "qa:TC missing" });
   const p = await proj(admin, "log-year", later);
   const t = await mk(admin, p, zz("kept row"));
   expect(sourceOf("src/lib/feed.ts", "const LOG_MONTHS")).toContain("const LOG_MONTHS = 12");
@@ -147,9 +147,9 @@ test("APL-2504 AC5: rows older than 12 months are removed and a newer row stays"
   }
 });
 
-// qa:TC APL-2504 AC6
+// qa:TC missing
 test("APL-2504 AC6: Undo is disabled with Too old to undo after 30 days", async ({ admin, later }) => {
-  test.info().annotations.push({ type: "qa:TC", description: "APL-2504 AC6" });
+  test.info().annotations.push({ type: "qa:TC", description: "qa:TC missing" });
   const p = await proj(admin, "log-old", later);
   const t = await mk(admin, p, zz("age me"));
   expect((await patchCurrent(admin, t, { priority: "LOW" })).status).toBe(200);

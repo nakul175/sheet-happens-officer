@@ -16,9 +16,9 @@ test.beforeAll(async ({ request }) => {
 
 type Act = { id: string; who: string; what: string; when: string; ts: number; undo: string };
 
-// qa:TC APL-2470 AC1
+// qa:TC missing
 test("AC1: deleting a task moves it to the project Trash, to be purged after 30 days", async ({ admin, browser, anon, later }) => {
-  test.info().annotations.push({ type: "qa:TC", description: "APL-2470 AC1" });
+  test.info().annotations.push({ type: "qa:TC", description: "qa:TC missing" });
   const editor = await verifiedUser(browser, anon.request, "2470", "ac1");
   later(() => editor.ctx.close());
   later(() => deactivate(admin.api, editor.user.id as string));
@@ -45,9 +45,9 @@ test("AC1: deleting a task moves it to the project Trash, to be purged after 30 
   await expect(admin.page.getByText("Removes tasks that have been in Trash for 30 days")).toBeVisible();
 });
 
-// qa:TC APL-2470 AC2
+// qa:TC missing
 test("AC2: restoring a task from Trash puts it back in the project with its data", async ({ admin, later }) => {
-  test.info().annotations.push({ type: "qa:TC", description: "APL-2470 AC2" });
+  test.info().annotations.push({ type: "qa:TC", description: "qa:TC missing" });
   const project = await makeProject(admin.api, "restore", admin.user.id as string);
   later(() => archiveProject(admin.api, project.id, admin.user.id as string));
   const title = zz("back");
@@ -65,9 +65,9 @@ test("AC2: restoring a task from Trash puts it back in the project with its data
   expect(task.projectId).toBe(project.id);
 });
 
-// qa:TC APL-2470 AC3
+// qa:TC missing
 test("AC3: a write records who, what, when and the before-state", async ({ admin, later }) => {
-  test.info().annotations.push({ type: "qa:TC", description: "APL-2470 AC3" });
+  test.info().annotations.push({ type: "qa:TC", description: "qa:TC missing" });
   const project = await makeProject(admin.api, "log", admin.user.id as string);
   later(() => archiveProject(admin.api, project.id, admin.user.id as string));
   const before = zz("before");
@@ -83,9 +83,9 @@ test("AC3: a write records who, what, when and the before-state", async ({ admin
   expect(typeof row!.ts).toBe("number");
 });
 
-// qa:TC APL-2470 AC4
+// qa:TC missing
 test("AC4: Undo restores a task, a project and a membership change", async ({ admin, browser, anon, later }) => {
-  test.info().annotations.push({ type: "qa:TC", description: "APL-2470 AC4" });
+  test.info().annotations.push({ type: "qa:TC", description: "qa:TC missing" });
   const editor = await verifiedUser(browser, anon.request, "2470", "ac4");
   later(() => editor.ctx.close());
   later(() => deactivate(admin.api, editor.user.id as string));
@@ -121,9 +121,9 @@ test("AC4: Undo restores a task, a project and a membership change", async ({ ad
   }).toBe("EDITOR");
 });
 
-// qa:TC APL-2470 AC5
+// qa:TC missing
 test("AC5: Undo warns when the data changed after the action, before it proceeds", async ({ admin, later }) => {
-  test.info().annotations.push({ type: "qa:TC", description: "APL-2470 AC5" });
+  test.info().annotations.push({ type: "qa:TC", description: "qa:TC missing" });
   const project = await makeProject(admin.api, "conflict", admin.user.id as string);
   later(() => archiveProject(admin.api, project.id, admin.user.id as string));
   const original = zz("one");
@@ -153,9 +153,9 @@ test("AC5: Undo warns when the data changed after the action, before it proceeds
   expect((await admin.api.get(`/api/tasks/${id}`)).json.task.title).toBe(third);
 });
 
-// qa:TC APL-2470 AC6
+// qa:TC missing
 test("AC6: the Super Admin's organisation audit log shows org-level actions and what was acted on", async ({ admin, browser, anon, later }) => {
-  test.info().annotations.push({ type: "qa:TC", description: "APL-2470 AC6" });
+  test.info().annotations.push({ type: "qa:TC", description: "qa:TC missing" });
   const member = await verifiedUser(browser, anon.request, "2470", "ac6");
   later(() => member.ctx.close());
   later(() => deactivate(admin.api, member.user.id as string));

@@ -1,9 +1,9 @@
 // SHO-US-14.4 First-run orientation (Linear APL-2563).
 // The start guide is shown once per account. A spec can only see it on an account that has not dismissed it yet, so AC1, AC2 and AC5
 // skip with a reason when the Member account has already dismissed it (dismissing is permanent for that account, by design).
-import { test, expect, zz, login } from "../support";
+import { test, expect, zz, login, type Json } from "../support";
 
-type Who = { api: import("../support").Api; user: Record<string, any>; page: import("@playwright/test").Page };
+type Who = { api: import("../support").Api; user: Json; page: import("@playwright/test").Page };
 
 async function ledProject(admin: Who, later: (f: () => Promise<unknown>) => void, label: string, members: Who[] = []) {
   const r = await admin.api.post("/api/projects", { name: zz(label), leaderId: admin.user.id });

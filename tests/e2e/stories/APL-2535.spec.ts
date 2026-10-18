@@ -1,8 +1,8 @@
 // SHO-US-11.4 Link tasks to an organisation or contact  (Linear APL-2535)
-import { test, expect, zz, hasMember } from "../support";
+import { test, expect, zz, hasMember, type Json, type Who } from "../support";
 
 let n = 0;
-async function setup(admin: any, later: (f: () => Promise<unknown>) => void) {
+async function setup(admin: Who, later: (f: () => Promise<unknown>) => void) {
   const org = (await admin.api.post("/api/orgs", { name: `${zz("org")} ${n++}` })).json.organisation.id as string;
   later(() => admin.api.post(`/api/orgs/${org}/archive`, { archive: true }));
   const contact = (await admin.api.post(`/api/orgs/${org}/contacts`, { name: `${zz("contact")} ${n}` })).json.contact.id as string;
@@ -22,7 +22,7 @@ test("AC1: an Editor links an organisation or a contact and it shows on the task
   const s = await setup(admin, later);
   expect((await admin.api.post(`/api/tasks/${s.taskId}/links`, { organisationId: s.org })).status).toBe(201);
   expect((await admin.api.post(`/api/tasks/${s.taskId}/links`, { contactId: s.contact })).status).toBe(201);
-  const shown = (await admin.api.get(`/api/tasks/${s.taskId}`)).json.task.links as any[];
+  const shown = (await admin.api.get(`/api/tasks/${s.taskId}`)).json.task.links as Json[];
   expect(shown).toHaveLength(2);
   // On screen: the task overlay has a Links section.
   await admin.page.goto(`/projects/${s.projectId}?task=${s.taskId}`);

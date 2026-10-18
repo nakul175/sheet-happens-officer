@@ -12,9 +12,9 @@ test.beforeAll(() => {
 });
 
 test.describe("SHO-BUG-8 / APL-2640", () => {
-  // qa:TC APL-2640 AC1
+  // qa:TC missing
   test("AC1: an Editor's Undo of their own delete is refused with the unauthorised-restore rule and message, and nothing is restored", async ({ admin, member, later }) => {
-    test.info().annotations.push({ type: "qa:TC", description: "APL-2640 AC1" });
+    test.info().annotations.push({ type: "qa:TC", description: "qa:TC missing" });
     const p = await newProject(admin, later, { label: "bug8 editor undo", members: [{ who: member, role: "EDITOR" }] });
     const t = await newTask(admin, p.id, { assigneeId: member.user.id });
     expect((await deleteTask(member, t)).status).toBe(204);
@@ -33,9 +33,9 @@ test.describe("SHO-BUG-8 / APL-2640", () => {
     expect(trash.some((x) => x.id === t), "still in Trash").toBe(true);
   });
 
-  // qa:TC APL-2640 AC2
+  // qa:TC missing
   test("AC2: a Leader or Admin who undoes a delete within the window gets the task back and an action-log row is written", async ({ admin, later }) => {
-    test.info().annotations.push({ type: "qa:TC", description: "APL-2640 AC2" });
+    test.info().annotations.push({ type: "qa:TC", description: "qa:TC missing" });
     const p = await newProject(admin, later, { label: "bug8 leader undo" });
     const t = await newTask(admin, p.id);
     const del = await deleteTask(admin, t);
@@ -52,9 +52,9 @@ test.describe("SHO-BUG-8 / APL-2640", () => {
     expect(items.find((i) => i.id === del.undoId)?.undo).toBe("undone");
   });
 
-  // qa:TC APL-2640 AC3
+  // qa:TC missing
   test("AC3: the check is on the server: an Editor calling the Undo and bulk-Undo routes directly is refused", async ({ admin, member, later }) => {
-    test.info().annotations.push({ type: "qa:TC", description: "APL-2640 AC3" });
+    test.info().annotations.push({ type: "qa:TC", description: "qa:TC missing" });
     const p = await newProject(admin, later, { label: "bug8 server check", members: [{ who: member, role: "EDITOR" }] });
     const t = await newTask(admin, p.id);
     // The action-log id comes from the Leader's Activity, so the check does not rely on the Editor being given an Undo id.
@@ -71,9 +71,9 @@ test.describe("SHO-BUG-8 / APL-2640", () => {
     expect((await admin.api.get(`/api/tasks/${t}`)).status).toBe(404);
   });
 
-  // qa:TC APL-2640 AC4
+  // qa:TC missing
   test("AC4: an Editor's Undo of a delete is refused and the Leader's Undo of the same delete succeeds", async ({ admin, member, later }) => {
-    test.info().annotations.push({ type: "qa:TC", description: "APL-2640 AC4" });
+    test.info().annotations.push({ type: "qa:TC", description: "qa:TC missing" });
     const p = await newProject(admin, later, { label: "bug8 both", members: [{ who: member, role: "EDITOR" }] });
     const t = await newTask(admin, p.id);
     expect((await deleteTask(member, t)).status).toBe(204);

@@ -13,9 +13,9 @@ test.beforeAll(() => {
   test.skip(!process.env.SHO_QA_PASS, "Set SHO_QA_PASS (the shared password for the nakul17+ accounts).");
 });
 
-// qa:TC APL-2505 AC1
+// qa:TC missing
 test("APL-2505 > AC1: undoing an unchanged edit restores the previous values and logs the undo", async ({ admin, later }) => {
-  test.info().annotations.push({ type: "qa:TC", description: "APL-2505 AC1" });
+  test.info().annotations.push({ type: "qa:TC", description: "qa:TC missing" });
   const p = await newProject(admin, later, { label: "undo plain" });
   const title = zz("before title");
   const detail = zz("before detail");
@@ -35,9 +35,9 @@ test("APL-2505 > AC1: undoing an unchanged edit restores the previous values and
   await expect(admin.page.locator(".item.act", { hasText: 'undid "task edited"' })).toBeVisible();
 });
 
-// qa:TC APL-2505 AC2
+// qa:TC missing
 test("APL-2505 > AC2: a later edit of the same field warns with Before, After and Now, and does not revert it", async ({ admin, member, later }) => {
-  test.info().annotations.push({ type: "qa:TC", description: "APL-2505 AC2" });
+  test.info().annotations.push({ type: "qa:TC", description: "qa:TC missing" });
   const p = await newProject(admin, later, { label: "undo conflict", members: [{ who: member, role: "EDITOR" }] });
   const original = zz("conflict before");
   const mine = zz("conflict after");
@@ -70,9 +70,9 @@ test("APL-2505 > AC2: a later edit of the same field warns with Before, After an
   expect((await getTask(admin, id)).title).toBe(theirs);
 });
 
-// qa:TC APL-2505 AC3
+// qa:TC missing
 test("APL-2505 > AC3: Undo anyway reverts only my fields, keeps their other edits, notifies them and logs the override", async ({ admin, member, later }) => {
-  test.info().annotations.push({ type: "qa:TC", description: "APL-2505 AC3" });
+  test.info().annotations.push({ type: "qa:TC", description: "qa:TC missing" });
   const p = await newProject(admin, later, { label: "undo anyway", members: [{ who: member, role: "EDITOR" }] });
   const original = zz("anyway before");
   const mine = zz("anyway after");
@@ -105,9 +105,9 @@ test("APL-2505 > AC3: Undo anyway reverts only my fields, keeps their other edit
   expect(rows.some((row) => row.target === `Task "${original}"`)).toBe(true);
 });
 
-// qa:TC APL-2505 AC4
+// qa:TC missing
 test("APL-2505 > AC4: undoing an action that sent a notice says the notice was already delivered", async ({ admin, member, later }) => {
-  test.info().annotations.push({ type: "qa:TC", description: "APL-2505 AC4" });
+  test.info().annotations.push({ type: "qa:TC", description: "qa:TC missing" });
   const p = await newProject(admin, later, { label: "undo notice", members: [{ who: member, role: "EDITOR" }] });
   const title = zz("noticed task");
   const id = await newTask(admin, p.id, { title, assigneeId: member.user.id });
@@ -124,9 +124,9 @@ test("APL-2505 > AC4: undoing an action that sent a notice says the notice was a
   expect((await admin.api.get(`/api/tasks/${id}`)).status, "undo of create puts the task in Trash").toBe(404);
 });
 
-// qa:TC APL-2505 AC5
+// qa:TC missing
 test("APL-2505 > AC5: an Editor undoes only their own actions; a Leader or Admin undoes anyone's in the project", async ({ admin, member, later }) => {
-  test.info().annotations.push({ type: "qa:TC", description: "APL-2505 AC5" });
+  test.info().annotations.push({ type: "qa:TC", description: "qa:TC missing" });
   const p = await newProject(admin, later, { label: "undo who", members: [{ who: member, role: "EDITOR" }] });
   const title = zz("whose task");
   const id = await newTask(admin, p.id, { title, assigneeId: member.user.id });
@@ -157,9 +157,9 @@ test("APL-2505 > AC5: an Editor undoes only their own actions; a Leader or Admin
   expect((await getTask(admin, id)).description).toBeNull();
 });
 
-// qa:TC APL-2505 AC6
+// qa:TC missing
 test("APL-2505 > AC6: an action older than 30 days cannot be undone and says Too old to undo", async ({ admin, later }) => {
-  test.info().annotations.push({ type: "qa:TC", description: "APL-2505 AC6" });
+  test.info().annotations.push({ type: "qa:TC", description: "qa:TC missing" });
   const p = await newProject(admin, later, { label: "undo aged" });
   const title = zz("aged before");
   const id = await newTask(admin, p.id, { title });
@@ -186,9 +186,9 @@ test("APL-2505 > AC6: an action older than 30 days cannot be undone and says Too
   }
 });
 
-// qa:TC APL-2505 AC7
+// qa:TC missing
 test("APL-2505 > AC7: a concierge change undoes through the same mechanism, limits and conflict dialog", async ({ admin, later }) => {
-  test.info().annotations.push({ type: "qa:TC", description: "APL-2505 AC7" });
+  test.info().annotations.push({ type: "qa:TC", description: "qa:TC missing" });
   const cards = sourceOf("src/lib/concierge/cards.ts", "export async function undoCard");
   expect(cards).toContain("await checkUndo(user, r.id)");
   expect(cards).toContain("await undoAction(user, r.id, anyway)");
