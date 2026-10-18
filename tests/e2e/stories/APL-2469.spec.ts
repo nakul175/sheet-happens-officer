@@ -2,6 +2,7 @@
 // Pam qa:TC: none on the issue. Password comes from SHO_QA_PASS. Names use ZZ-TEST. Emails are nakul17+ aliases.
 import type { Page } from "@playwright/test";
 import { test, login } from "../support";
+import { why } from "../helpers/jim-http";
 import { PASS, passwordOk, gate, verifiedUser, deactivate, makeProject, archiveProject, expect, zz, RUN } from "./qa";
 
 test.beforeAll(async ({ request }) => {
@@ -175,7 +176,18 @@ test("AC6: the branded shell works on a desktop and a phone-width browser", asyn
   }
 });
 
-test.fixme("AC7: each screen matches the approved mockups on the Design canvas", async () => {
-  // The criterion says the screens match approved mockups, and names no file, pixel tolerance, or list of screens to compare.
-  // There is no mockup fixture in this repo to assert against.
-});
+const MOCKUP_SCREENS = [
+  ["My tasks", "By date groups, task rows, quick add"],
+  ["Project list", "column headers, task rows, Blocked flag"],
+  ["Project board", "Section columns, cards, add Section"],
+  ["Task detail", "overlay over the page, fields, subtasks"],
+  ["Team", "people grouped by role, deactivated shown"],
+] as const;
+
+test.skip(
+  "AC7: each screen matches the approved mockup at 1440x900 and 390x844 (manual visual check)",
+  why(MOCKUP_SCREENS.map(([screen, keys]) =>
+    `${screen} at desktop 1440x900 and phone 390x844: confirm side by side with the Design canvas mockup — app shell with navy #2C2F71 header and gold #D99D29 accent, concierge dock at the bottom, key elements in the mockup's order (${keys}). No element clipped, overlapping or horizontally scrolling. Attach a screenshot of this screen at each viewport. Spacing and copy differences are noted, not failed, unless an element is missing or misplaced.`,
+  ).join(" ")),
+  () => {},
+);
