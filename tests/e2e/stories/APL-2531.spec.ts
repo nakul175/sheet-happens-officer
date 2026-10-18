@@ -2,6 +2,8 @@
 // One test per acceptance criterion. ZZ-TEST deals, projects and organisations are archived afterwards.
 // The Super Admin is the Admin (the same rule covers an Admin and the Super Admin). The plain Member is the person
 // who is not on the admin's deal. workers is 1 in playwright.config.ts. Traces stay off.
+// AC3 was removed on 18 Oct 2026: the shared component is a later story. This file checks the screens keep their own views.
+import { readFileSync } from "node:fs";
 import { test, expect, zz } from "../support";
 import { newProject, newTask, ymd, type Who } from "../g2";
 
@@ -21,7 +23,7 @@ function boardTitles(stages: Stage[]) {
 
 async function crmPipes(who: Who, hidden: string) {
   const r = await who.api.get("/api/deals/pipelines");
-  test.skip(r.status === 404, hidden);
+  if (r.status === 404) throw new Error(hidden);
   expect(r.status, JSON.stringify(r.json)).toBe(200);
   return r.json.pipelines as Pipe[];
 }
@@ -110,8 +112,18 @@ test("AC2: a pipeline's board columns are that pipeline's stages, with On hold, 
   await expect(admin.page.getByText(deal.name)).toHaveCount(0);
 });
 
-test.skip("AC3: Home, Organisation, Deal and Pipeline screens share one list and board component", () => {
-  // Reason: NJ removed this criterion on 18 Oct 2026. The shared view is APL-2642, after crm/close-gaps. There is no single view engine to open.
+test("AC3: Home, Organisation, Deal and Pipeline keep their own views (the shared component was removed from this story)", () => {
+  const deals = readFileSync("src/app/(app)/deals/DealsView.tsx", "utf8");
+  const home = readFileSync("src/app/(app)/MyTasks.tsx", "utf8");
+  const org = readFileSync("src/app/(app)/accounts/[id]/OrgView.tsx", "utf8");
+  const project = readFileSync("src/app/(app)/projects/[id]/ProjectView.tsx", "utf8");
+  expect(deals).toContain("DealBoard");
+  expect(home).not.toContain("DealBoard");
+  expect(home).toContain("By date");
+  expect(org).not.toContain("DealBoard");
+  expect(org).toContain("No deals you can see yet.");
+  expect(project).not.toContain("DealBoard");
+  expect(project).toContain('className="board"');
 });
 
 test("AC4: archiving leaves a deal off the live list, and Trash still only holds deleted tasks", async ({ admin, later }) => {
