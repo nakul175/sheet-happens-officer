@@ -1,5 +1,6 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { deliverSinkMail } from "@/lib/mail-sink";
 
 export type Mail = { to: string; subject: string; text: string };
 
@@ -9,8 +10,16 @@ const FROM = process.env.EMAIL_FROM ?? "Sheet Happens Officer <no-reply@sheethap
  * Sends through Resend when RESEND_API_KEY is set (production).
  * Without a key, outside production, mail is written to a local outbox folder so
  * development and tests can read the links. In production a missing key is an error.
+ *
+ * MAIL_SINK is off unless it is exactly "staging" on a staging host with a token and
+ * an outbox directory (APL-2681). Any other value refuses to send or store, and never
+ * falls through to Resend or the development outbox.
  */
 export async function sendMail(mail: Mail): Promise<void> {
+  if (process.env.MAIL_SINK) {
+    await deliverSinkMail(mail, FROM);
+    return;
+  }
   const key = process.env.RESEND_API_KEY;
   if (key) {
     const res = await fetch("https://api.resend.com/emails", {
