@@ -51,8 +51,14 @@ test("AC3: the icon-only mark shows at 24 px and the text uses Public Sans", asy
   expect(Math.round(box.width)).toBeLessThanOrEqual(36);
   const svg = await admin.page.request.get("/logo-icon.svg");
   expect(svg.status()).toBe(200);
-  const font = await admin.page.evaluate(() => getComputedStyle(document.body).fontFamily);
-  expect(font).toMatch(/Public Sans/i);
+  // next/font names the face "Public Sans". A hashed build uses "__Public_Sans_…", so the
+  // computed family or the --font-public-sans token may contain a space or an underscore.
+  const font = await admin.page.evaluate(() => {
+    const applied = getComputedStyle(document.body).fontFamily;
+    const token = getComputedStyle(document.documentElement).getPropertyValue("--font-public-sans");
+    return `${applied} ${token}`;
+  });
+  expect(font).toMatch(/Public[_ ]Sans/i);
 });
 
 test("AC4: Usage and Audit log are for the Super Admin only; a Member who types the address gets the refusal", async ({ admin, member }) => {
