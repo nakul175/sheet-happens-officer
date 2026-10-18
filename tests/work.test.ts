@@ -207,7 +207,7 @@ describe("sections (5.4)", () => {
     expect((await lead.c.get(`/api/tasks/${t}`)).json.task.sectionId).toBe(p.todo);
   });
 
-  it("closes open subtasks with their parent when a section becomes the done section or is deleted into it, one log row each (SHO-BUG-3)", async () => {
+  it("closes open subtasks with their parent when a section becomes the done section or is deleted into it, one log row each, and reopens them with it (SHO-BUG-3)", async () => {
     const lead = await account("lead");
     const p = await project(lead, lead);
     const parent = await task(lead, p.id, { title: "Parent", sectionId: p.doing });
@@ -227,6 +227,19 @@ describe("sections (5.4)", () => {
     expect((await lead.c.post(`/api/actions/${r.headers.get("x-undo-id")}/undo`)).status).toBe(200);
     for (const id of all) expect(await completedAt(id)).toBeNull();
     expect((await lead.c.get(`/api/projects/${p.id}`)).json.project.sections.find((s: { isDone: boolean }) => s.isDone).id).toBe(p.done);
+
+    // Make it the done section again, then move the done flag back: the parent and both subtasks reopen together.
+    expect((await lead.c.patch(`/api/projects/${p.id}/sections/${p.doing}`, { isDone: true })).status).toBe(200);
+    for (const id of all) expect(await completedAt(id)).not.toBeNull();
+    const back = await lead.c.patch(`/api/projects/${p.id}/sections/${p.done}`, { isDone: true });
+    expect(back.status, JSON.stringify(back.json)).toBe(200);
+    for (const id of all) expect(await completedAt(id)).toBeNull();
+    expect((await lead.c.get(`/api/tasks/${parent}`)).json.task.subtasks).toEqual({ total: 2, open: 2 });
+    // Undo of that move closes all three again.
+    expect((await lead.c.post(`/api/actions/${back.headers.get("x-undo-id")}/undo`)).status).toBe(200);
+    for (const id of all) expect(await completedAt(id)).not.toBeNull();
+    expect((await lead.c.patch(`/api/projects/${p.id}/sections/${p.done}`, { isDone: true })).status).toBe(200);
+    for (const id of all) expect(await completedAt(id)).toBeNull();
 
     // Deleting "In progress" into the done section does the same.
     since = new Date();
