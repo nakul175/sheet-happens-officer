@@ -1,5 +1,6 @@
 // Shared checks for the Usage screen (APL-2519, APL-2641). The screen prints figures from /api/usage.
-// It does not work the percentage out again, and it does not add quick actions into the message total.
+// The percentage is the share of the ceiling. PR #34 prints ceiling.percent, which the API rounds to one decimal.
+// Quick actions are not added into the message total.
 import type { Locator, Page } from "@playwright/test";
 import { expect, type Api } from "../support";
 
@@ -40,15 +41,36 @@ export type UsageBody = {
 };
 
 /**
- * A fixed /api/usage payload. Spend is 10 of a ceiling of 80, which would be 12.5 percent.
- * The percentage on the payload is 15, so a screen that divides the two numbers itself is wrong.
+ * Percentage /api/usage stores and PR #34 prints with no further rounding:
+ * one decimal, half up. 10 of 80 is 12.5.
+ */
+export function apiPercent(spendUsd: number, ceilingUsd: number) {
+  if (!(ceilingUsd > 0)) return 0;
+  return Math.round((spendUsd / ceilingUsd) * 1000) / 10;
+}
+
+/**
+ * AC6 names the percentage and gives no rounding rule. 10 of 80 may be shown as
+ * "12.5%" (the one decimal PR #34 prints) or "13%" (the nearest whole number).
+ */
+export function acceptedPercents(spendUsd: number, ceilingUsd: number) {
+  const ratio = ceilingUsd > 0 ? (spendUsd / ceilingUsd) * 100 : 0;
+  const tenth = apiPercent(spendUsd, ceilingUsd);
+  const whole = Math.round(ratio);
+  return [...new Set([`${tenth}%`, `${whole}%`])];
+}
+
+/**
+ * A fixed /api/usage payload. Spend is 10 of a ceiling of 80, so the percentage is 12.5.
  * Quick actions add up to 10. The message total stays 17.
  */
 export function sampleUsage(patch: Partial<UsageBody> = {}): UsageBody {
+  const spendUsd = 10;
+  const ceilingUsd = 80;
   return {
     monthStart: "2026-09-30T18:30:00.000Z", // 1 October 2026, 00:00 India time
     weekStart: "2026-10-11T18:30:00.000Z",
-    ceiling: { usd: 80, spendUsd: 10, percent: 15 },
+    ceiling: { usd: ceilingUsd, spendUsd, percent: apiPercent(spendUsd, ceilingUsd) },
     month: { calls: 3, inputTokens: 1200, outputTokens: 340, costUsd: 10, messages: 17 },
     quickActions: QUICK_ROWS.map((q) => ({ ...q })),
     people: [{ id: "p1", name: "Asha", monthCalls: 3, weekCalls: 1, monthCostUsd: 10 }],
@@ -82,6 +104,17 @@ export function usageCard(page: Page, heading: string) {
 /** The figure next to a label inside one usage card. Each label sits in its own row. */
 export function figure(card: Locator, label: string) {
   return card.locator(".usage-figs > div", { hasText: label }).locator("dd");
+}
+
+/**
+ * The percentage on screen is 12.5% or 13% for this spend and ceiling, and the meter's
+ * spoken value uses that same text. PR #34 builds both from `${ceiling.percent}%`.
+ */
+export async function expectPercent(card: Locator, meter: Locator, spendUsd: number, ceilingUsd: number) {
+  const shown = (await figure(card, "Percentage used").innerText()).trim();
+  expect(acceptedPercents(spendUsd, ceilingUsd), `${usd(spendUsd)} of ${usd(ceilingUsd)}`).toContain(shown);
+  await expect(meter).toHaveAttribute("aria-valuetext", `${usd(spendUsd)} of ${usd(ceilingUsd)}, ${shown} used`);
+  return shown;
 }
 
 const BLOCKS = ".usage-h, .usage-figs dt, .usage-figs dd, .usage-count, .usage-split .hint";
