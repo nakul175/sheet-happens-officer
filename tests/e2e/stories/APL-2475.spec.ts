@@ -1,6 +1,6 @@
 // SHO-US-1.2 Verify email with a link (APL-2475). Acceptance criteria AC1 to AC4.
 // Verification links are read from the test mail sink. Accounts use nakul17+ aliases and are deactivated afterwards.
-import { test, expect, RUN } from "../support";
+import { test, expect, RUN, login } from "../support";
 import { PASS, passwordOk, alias, zz, signUp, personByEmail, deactivate, waitForSinkMail, matchingMails, localTokenIsHashed } from "./qa";
 
 const ghost = `zz-test-${RUN}-nobody@aplyd.com`; // never has an account
@@ -11,6 +11,12 @@ function needPass() {
 }
 
 test.describe("SHO-US-1.2 / APL-2475", () => {
+  test.beforeAll(() => {
+    test.skip(!PASS, "Set SHO_QA_PASS (the shared password for the nakul17+ accounts).");
+    test.skip(!passwordOk(PASS), "SHO_QA_PASS must be at least 8 characters with a letter and a number.");
+    try { login("ADMIN"); } catch { test.skip(true, "Set SHO_ADMIN_EMAIL and SHO_ADMIN_PASS (a Super Admin)."); }
+  });
+
   test("AC1: an unused link under 24 hours old verifies the account once, and a second use fails", async ({ anon, admin, later }) => {
     needPass();
     const email = alias("2475", "ac1", "aplyd.com");

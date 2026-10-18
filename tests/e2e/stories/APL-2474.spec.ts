@@ -25,6 +25,12 @@ async function fillSignUp(page: Page, name: string, email: string, password: str
 }
 
 test.describe("SHO-US-1.1 / APL-2474", () => {
+  test.beforeAll(() => {
+    test.skip(!PASS, "Set SHO_QA_PASS (the shared password for the nakul17+ accounts).");
+    test.skip(!passwordOk(PASS), "SHO_QA_PASS must be at least 8 characters with a letter and a number.");
+    try { login("ADMIN"); } catch { test.skip(true, "Set SHO_ADMIN_EMAIL and SHO_ADMIN_PASS (a Super Admin)."); }
+  });
+
   test("AC1: a valid new @aplyd.com or @athenainfonomics.com sign-up creates an unverified account and shows Check your email", async ({ anon, admin, later }) => {
     needPass();
     try { login("ADMIN"); } catch { test.skip(true, "Set SHO_ADMIN_EMAIL and SHO_ADMIN_PASS (a Super Admin)."); }

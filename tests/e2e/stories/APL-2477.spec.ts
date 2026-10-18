@@ -1,7 +1,7 @@
 // SHO-US-1.4 Reset a forgotten password (APL-2477). Acceptance criteria AC1 to AC6.
 // Reset links are read from the test mail sink. Accounts use nakul17+ aliases and are deactivated afterwards.
 import type { Page } from "@playwright/test";
-import { test, expect, RUN } from "../support";
+import { test, expect, RUN, login } from "../support";
 import { PASS, passwordOk, alias, zz, nextPass, signUp, personByEmail, deactivate, waitForSinkMail, matchingMails, signInAs } from "./qa";
 
 const alertOf = (p: Page) => p.locator('[role="alert"]:not(#__next-route-announcer__)');
@@ -26,6 +26,12 @@ async function verified(anon: { request: import("@playwright/test").APIRequestCo
 }
 
 test.describe("SHO-US-1.4 / APL-2477", () => {
+  test.beforeAll(() => {
+    test.skip(!PASS, "Set SHO_QA_PASS (the shared password for the nakul17+ accounts).");
+    test.skip(!passwordOk(PASS), "SHO_QA_PASS must be at least 8 characters with a letter and a number.");
+    try { login("ADMIN"); } catch { test.skip(true, "Set SHO_ADMIN_EMAIL and SHO_ADMIN_PASS (a Super Admin)."); }
+  });
+
   test("AC1: asking for a reset gives the same neutral answer whether or not an account exists", async ({ anon }) => {
     const a = await anon.request.post("/api/auth/forgot-password", { data: { email: ghost("a") } });
     const b = await anon.request.post("/api/auth/forgot-password", { data: { email: ghost("b") } });

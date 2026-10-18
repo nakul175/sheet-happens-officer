@@ -3,6 +3,12 @@ import { test, expect, login } from "../support";
 import { PASS, passwordOk, alias, zz, signUp, personByEmail, deactivate, waitForSinkMail, signInAs, expireLocalSessions } from "./qa";
 
 test.describe("SHO-US-1.5 / APL-2478", () => {
+  test.beforeAll(() => {
+    test.skip(!PASS, "Set SHO_QA_PASS (the shared password for the nakul17+ accounts).");
+    test.skip(!passwordOk(PASS), "SHO_QA_PASS must be at least 8 characters with a letter and a number.");
+    try { login("ADMIN"); } catch { test.skip(true, "Set SHO_ADMIN_EMAIL and SHO_ADMIN_PASS (a Super Admin)."); }
+  });
+
   test("AC1: a signed-in person stays signed in on return, and the 30 days run from sign-in, not from activity", async ({ anon }) => {
     const r = await anon.request.post("/api/auth/signin", { data: { email: login("ADMIN").email, password: login("ADMIN").password } });
     expect(r.status()).toBe(200);

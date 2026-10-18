@@ -10,6 +10,12 @@ const pw = `Zz${RUN}9x`;
 const refused = [`zz-test-${RUN}@mail.aplyd.com`, `zz-test-${RUN}@athenainfonomics.com.evil.com`, `zz-test-${RUN}@gmail.com`, `zz-test-${RUN}@aplyd.co`];
 
 test.describe("SHO-US-23.1 / APL-2620", () => {
+  test.beforeAll(() => {
+    test.skip(!PASS, "Set SHO_QA_PASS (the shared password for the nakul17+ accounts).");
+    test.skip(!passwordOk(PASS), "SHO_QA_PASS must be at least 8 characters with a letter and a number.");
+    try { login("ADMIN"); } catch { test.skip(true, "Set SHO_ADMIN_EMAIL and SHO_ADMIN_PASS (a Super Admin)."); }
+  });
+
   test("AC1: forgot-password and resend-verification accept aplyd.com and athenainfonomics.com", async ({ anon }) => {
     for (const email of [`zz-test-${RUN}-a@aplyd.com`, `zz-test-${RUN}-b@athenainfonomics.com`]) {
       for (const path of ["/api/auth/forgot-password", "/api/auth/resend-verification"]) {
