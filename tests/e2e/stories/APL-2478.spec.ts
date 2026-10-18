@@ -68,7 +68,7 @@ test.describe("SHO-US-1.5 / APL-2478", () => {
   test("AC2: Sign out ends the session and protected screens send the person to Sign in", async ({ anon }) => {
     await anon.request.post("/api/auth/signin", { data: { email: login("ADMIN").email, password: login("ADMIN").password } });
     await anon.goto("/profile");
-    await expect(anon.getByRole("heading", { name: "Profile" }).first()).toBeVisible();
+    await expect(anon.locator("#main").getByRole("heading", { level: 1, name: "Profile" })).toBeVisible();
     await anon.getByRole("button", { name: "Sign out", exact: true }).click();
     await expect(anon).toHaveURL(/\/signin/);
     for (const path of ["/", "/projects", "/team", "/profile"]) {

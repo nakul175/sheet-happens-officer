@@ -37,7 +37,7 @@ test.describe("SHO-US-23.2 / APL-2621", () => {
     await admin.page.goto("/team");
     await expect(admin.page.getByRole("button", { name: "+ Add person" })).toBeVisible(SLOW);
     await member.page.goto("/team");
-    await expect(member.page.locator(".list .item").first()).toBeVisible(SLOW);
+    await expect(member.page.locator(".list").getByRole("link", { name: member.user.name, exact: true })).toBeVisible(SLOW);
     await expect(member.page.getByRole("button", { name: /Add person/ })).toHaveCount(0);
     const r = await member.api.post("/api/team", { firstName: "ZZ-TEST", lastName: `nope ${RUN}`, email: email("nope"), role: "MEMBER" });
     expect(r.status).toBe(403);

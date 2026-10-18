@@ -24,7 +24,7 @@ test.describe("SHO-US-1.3 / APL-2476", () => {
     await anon.getByLabel("Password").fill(login("ADMIN").password);
     await anon.getByRole("button", { name: "Sign in" }).click();
     await expect(anon).toHaveURL(/\/$/);
-    await expect(anon.getByRole("heading", { name: /my tasks/i }).first()).toBeVisible();
+    await expect(anon.locator("#main").getByRole("heading", { level: 1, name: "My tasks" })).toBeVisible();
     const cookie = (await anon.context().cookies()).find((c) => c.name === "sho_session");
     expect(cookie, "session cookie").toBeTruthy();
     expect(cookie!.httpOnly).toBe(true);

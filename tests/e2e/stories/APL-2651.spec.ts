@@ -291,7 +291,8 @@ test("AC3: an authorised caller with a bad body still gets today's 400 shape, an
   const viewPath = `/api/views/${viewId}`;
   const contactPath = `/api/contacts/${contactId}`;
 
-  const badTitle = await send(lead.request, "PATCH", taskPath, { title: "" });
+  const seenAt = await taskVersion();
+  const badTitle = await send(lead.request, "PATCH", taskPath, { title: "", expectedUpdatedAt: seenAt });
   expectValidation(badTitle);
   expect(badTitle.json?.issues).toEqual([{ path: ["title"], message: "Give the task a title." }]);
   const badTaskJson = await send(lead.request, "PATCH", taskPath, MALFORMED);
