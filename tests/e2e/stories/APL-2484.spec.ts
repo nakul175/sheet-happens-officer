@@ -2,6 +2,11 @@
 import { test, expect, RUN, type Json } from "../support";
 import { PASS, alias, deactivate, passwordOk, personByEmail, signUp, zz } from "./qa";
 
+function madePass() {
+  if (passwordOk(PASS)) return PASS;
+  return `Zz${RUN}a9`;
+}
+
 const SLOW = { timeout: 90_000 }; // the Team table can be long on a busy workspace
 
 test.describe("SHO-US-2.5 / APL-2484", () => {
@@ -54,10 +59,9 @@ test.describe("SHO-US-2.5 / APL-2484", () => {
 
   test("AC3 (unverified): unverified people show an Unverified status to Admins and are hidden from Members", async ({ anon, admin, member, later }) => {
     test.setTimeout(180_000);
-    if (!passwordOk(PASS)) throw new Error("Set SHO_QA_PASS (at least 8 characters, with a letter and a number).");
     const email = alias("2484", "unverified", "aplyd.com");
     const name = zz("unverified");
-    const signed = await signUp(anon.request, name, email);
+    const signed = await signUp(anon.request, name, email, madePass());
     expect(signed.status, signed.body).toBe(201);
     const person = await personByEmail(admin.api, email);
     expect(person?.status).toBe("UNVERIFIED");

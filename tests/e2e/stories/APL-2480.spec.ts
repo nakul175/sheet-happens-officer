@@ -2,7 +2,12 @@
 // SUPER_ADMIN_EMAILS is server config. A new nakul17+ alias is not on that list, so sign-up leaves them a Member.
 import { readFileSync } from "node:fs";
 import { test, expect } from "../support";
-import { PASS, alias, deactivate, passwordOk, personByEmail, signUp, zz } from "./qa";
+import { PASS, RUN, alias, deactivate, passwordOk, personByEmail, signUp, zz } from "./qa";
+
+function madePass() {
+  if (passwordOk(PASS)) return PASS;
+  return `Zz${RUN}a9`;
+}
 
 test.describe("SHO-US-2.1 / APL-2480", () => {
   test("AC1: the listed address (SHO_ADMIN_EMAIL) is the Super Admin and the Team page shows it", async ({ admin }) => {
@@ -14,14 +19,13 @@ test.describe("SHO-US-2.1 / APL-2480", () => {
   });
 
   test("AC1 (sign-up path): the listed address signs up, verifies and becomes Super Admin; no other address does", async ({ anon, admin, later }) => {
-    if (!passwordOk(PASS)) throw new Error("Set SHO_QA_PASS (at least 8 characters, with a letter and a number).");
     const signup = readFileSync("src/app/api/auth/signup/route.ts", "utf8");
     const signin = readFileSync("src/app/api/auth/signin/route.ts", "utf8");
     expect(signup).toContain('orgRole: superAdminEmails().includes(email) ? "SUPER_ADMIN" : "MEMBER"');
     expect(signin).toContain('data: { orgRole: "SUPER_ADMIN" }');
     const email = alias("2480", "other", "aplyd.com");
     expect(email.toLowerCase()).not.toBe(String(admin.user.email).toLowerCase());
-    const signed = await signUp(anon.request, zz("other"), email);
+    const signed = await signUp(anon.request, zz("other"), email, madePass());
     expect(signed.status, signed.body).toBe(201);
     const person = await personByEmail(admin.api, email);
     expect(person?.status).toBe("UNVERIFIED");
