@@ -9,15 +9,19 @@
 // The password is read from STAGING_EDITOR_PASSWORD_FILE (the staging secret file)
 // or, if that is unset, from STAGING_EDITOR_PASSWORD. It is never printed.
 //
-// Refuses before opening a connection unless the database host is local, or the database
-// name is exactly sho_staging. The comparison is case-sensitive: SHO_STAGING, Sho_Staging,
-// and every other spelling are refused on a non-local host. A DigitalOcean managed host
-// (*.db.ondigitalocean.com) and any other non-local host are refused unless the name is
-// that exact string. This does not depend on PROD_DB_HOST or PROD_DB_NAME. Those still
-// refuse as well, and the database name matches PROD_DB_NAME exactly, including case.
-// The host app.sheethappensofficer.com is always refused. A URL that sets host or dbname
-// in the query is refused, so those parameters cannot replace the host or database in
-// the authority.
+// Refuses before opening a connection unless the database name is exactly sho_staging.
+// The comparison is case-sensitive and applies to every host, including localhost,
+// 127.0.0.1 and ::1. SHO_STAGING, Sho_Staging, sho, and every other spelling are refused.
+// A tunnel that presents another database as localhost/<prodname> is refused. This does
+// not depend on PROD_DB_HOST or PROD_DB_NAME. Those still refuse as well, and the database
+// name matches PROD_DB_NAME exactly, including case. The host app.sheethappensofficer.com
+// is always refused. A URL that sets host or dbname in the query is refused, so those
+// parameters cannot replace the host or database in the authority.
+//
+// Vitest is the one extra name: when NODE_ENV is test and the database name is exactly
+// sho_test, that name is allowed on any host. The exception is the name, not the host.
+// It does not allow any other name, and it does not skip the production host, PROD_DB_NAME,
+// query-parameter, or confirmation checks.
 // Requires an explicit staging confirmation: --confirm-staging or SHO_STAGING_CONFIRM=1.
 // STAGING_WORKSPACE_ID is required. An unset id refuses before connecting; there is no
 // fallback to the oldest workspace.
@@ -37,6 +41,8 @@ export const QA_PROJECT_NAME = "ZZ-TEST QA";
 const DEFAULT_SECTIONS = ["To do", "In progress", "Done"];
 const PROD_APP_HOST = "app.sheethappensofficer.com";
 const STAGING_DB_NAME = "sho_staging";
+// Exact name the vitest harness uses. Allowed only when NODE_ENV is test, on any host.
+const TEST_DB_NAME = "sho_test";
 // libpq lets these query keys replace the host and database. Refuse them instead of applying them.
 const OVERRIDE_PARAMS = ["host", "hostaddr", "hostname", "dbname", "database"];
 
@@ -60,13 +66,6 @@ function isProdAppHost(host: string): boolean {
   return normalized === PROD_APP_HOST || normalized.endsWith(`.${PROD_APP_HOST}`);
 }
 
-function isLocalHost(host: string): boolean {
-  if (host === "localhost" || host === "::1") return true;
-  const parts = host.split(".");
-  if (parts.length !== 4) return false;
-  return parts.every((part) => /^\d{1,3}$/.test(part) && Number(part) <= 255) && parts[0] === "127";
-}
-
 /** WHATWG URL parse. libpq host and dbname query keys are refused, not applied. */
 function parseDatabaseUrl(raw: string): DatabaseTarget | { refusal: string } {
   let url: URL;
@@ -85,12 +84,13 @@ function parseDatabaseUrl(raw: string): DatabaseTarget | { refusal: string } {
   return { host, name };
 }
 
-function targetRefusal(target: DatabaseTarget, prodHost: string, prodName: string): string | null {
+function targetRefusal(target: DatabaseTarget, prodHost: string, prodName: string, allowTestDb: boolean): string | null {
   if (isProdAppHost(target.host) || (prodHost && target.host === prodHost)) {
     return "Refusing to run: the database host is production.";
   }
-  if (!isLocalHost(target.host) && target.name !== STAGING_DB_NAME) {
-    return "Refusing to run: a non-local database host is allowed only when the database name is sho_staging.";
+  const testDb = allowTestDb && target.name === TEST_DB_NAME;
+  if (target.name !== STAGING_DB_NAME && !testDb) {
+    return "Refusing to run: the database name must be exactly sho_staging.";
   }
   if (prodName && target.name === prodName) {
     return "Refusing to run: the database name is production.";
@@ -109,7 +109,7 @@ export function productionRefusal(env: NodeJS.ProcessEnv): string | null {
     if (raw.toLowerCase().includes(PROD_APP_HOST)) return "Refusing to run: the database host is production.";
     const target = parseDatabaseUrl(raw);
     if ("refusal" in target) return target.refusal;
-    const refusal = targetRefusal(target, prodHost, prodName);
+    const refusal = targetRefusal(target, prodHost, prodName, env.NODE_ENV === "test");
     if (refusal) return refusal;
   }
   const appUrl = env.APP_URL ?? "";

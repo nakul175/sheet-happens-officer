@@ -63,22 +63,22 @@ describe("APL-2682 staging editor", () => {
       {
         name: "wrong database name",
         url: "postgresql://example:example@db.example.com:5432/sho_prod",
-        message: "non-local database host",
+        message: "exactly sho_staging",
       },
       {
         name: "uppercase staging name",
         url: "postgresql://example:example@private-db-postgresql-nyc1-12345.db.ondigitalocean.com:25060/SHO_STAGING",
-        message: "non-local database host",
+        message: "exactly sho_staging",
       },
       {
         name: "mixed-case staging name",
         url: "postgresql://example:example@private-db-postgresql-nyc1-12345.db.ondigitalocean.com:25060/Sho_Staging",
-        message: "non-local database host",
+        message: "exactly sho_staging",
       },
       {
         name: "near-miss staging name",
         url: "postgresql://example:example@db.example.com:5432/sho-staging",
-        message: "non-local database host",
+        message: "exactly sho_staging",
       },
       {
         name: "host query bypass",
@@ -91,9 +91,19 @@ describe("APL-2682 staging editor", () => {
         message: "must not set host or dbname",
       },
       {
+        name: "localhost other database name",
+        url: "postgresql://example:example@localhost:5432/sho",
+        message: "exactly sho_staging",
+      },
+      {
+        name: "loopback other database name",
+        url: "postgresql://example:example@127.0.0.1:5432/sho",
+        message: "exactly sho_staging",
+      },
+      {
         name: "digitalocean host",
         url: "postgresql://example:example@private-db-postgresql-nyc1-12345.db.ondigitalocean.com:25060/defaultdb",
-        message: "non-local database host",
+        message: "exactly sho_staging",
       },
     ];
     for (const item of cases) {

@@ -120,6 +120,28 @@ describe("staging editor (APL-2682)", () => {
       { name: "missing workspace", env: env({ STAGING_WORKSPACE_ID: undefined }), argv: ["--confirm-staging"], message: "STAGING_WORKSPACE_ID is not set" },
       { name: "blank workspace", env: env({ STAGING_WORKSPACE_ID: "  " }), argv: ["--confirm-staging"], message: "STAGING_WORKSPACE_ID is not set" },
       {
+        name: "localhost other database name",
+        env: env({
+          DATABASE_URL: "postgresql://example:example@localhost:5432/sho",
+          DIRECT_DATABASE_URL: "postgresql://example:example@localhost:5432/sho",
+          PROD_DB_HOST: "",
+          PROD_DB_NAME: "",
+        }),
+        argv: ["--confirm-staging"],
+        message: "exactly sho_staging",
+      },
+      {
+        name: "loopback other database name",
+        env: env({
+          DATABASE_URL: "postgresql://example:example@127.0.0.1:5432/sho",
+          DIRECT_DATABASE_URL: "postgresql://example:example@127.0.0.1:5432/sho",
+          PROD_DB_HOST: "",
+          PROD_DB_NAME: "",
+        }),
+        argv: ["--confirm-staging"],
+        message: "exactly sho_staging",
+      },
+      {
         name: "digitalocean host",
         env: env({
           DATABASE_URL: "postgresql://example:example@private-db-postgresql-nyc1-12345.db.ondigitalocean.com:25060/defaultdb",
@@ -128,7 +150,7 @@ describe("staging editor (APL-2682)", () => {
           PROD_DB_NAME: "",
         }),
         argv: ["--confirm-staging"],
-        message: "non-local database host",
+        message: "exactly sho_staging",
       },
       {
         name: "wrong database name",
@@ -139,7 +161,7 @@ describe("staging editor (APL-2682)", () => {
           PROD_DB_NAME: "",
         }),
         argv: ["--confirm-staging"],
-        message: "non-local database host",
+        message: "exactly sho_staging",
       },
       {
         name: "uppercase staging name",
@@ -150,7 +172,7 @@ describe("staging editor (APL-2682)", () => {
           PROD_DB_NAME: "",
         }),
         argv: ["--confirm-staging"],
-        message: "non-local database host",
+        message: "exactly sho_staging",
       },
       {
         name: "mixed-case staging name",
@@ -161,7 +183,7 @@ describe("staging editor (APL-2682)", () => {
           PROD_DB_NAME: "",
         }),
         argv: ["--confirm-staging"],
-        message: "non-local database host",
+        message: "exactly sho_staging",
       },
       {
         name: "near-miss staging name",
@@ -172,7 +194,7 @@ describe("staging editor (APL-2682)", () => {
           PROD_DB_NAME: "",
         }),
         argv: ["--confirm-staging"],
-        message: "non-local database host",
+        message: "exactly sho_staging",
       },
       {
         name: "host query bypass",
@@ -227,7 +249,7 @@ describe("staging editor (APL-2682)", () => {
     );
     expect(connected).toBe(true);
     expect(code).toBe(1);
-    expect(text).not.toContain("non-local database host");
+    expect(text).not.toContain("exactly sho_staging");
     expectNoSecrets(text, [PASSWORD, "example:example", "ondigitalocean.com"]);
   });
 
