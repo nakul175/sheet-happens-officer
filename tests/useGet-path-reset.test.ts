@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 // APL-2663 v1.1: useGet resets loading when the path changes.
-// One test per Gherkin scenario. Pam's cases are re-pinned to @v1.1 and named in the comments.
+// One test per Gherkin scenario. Pam's cases: six re-pinned to @v2, plus AC4 and AC5 at @v1.
 import { createElement, useEffect, useState } from "react";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
@@ -105,8 +105,8 @@ afterEach(async () => {
 });
 
 describe("useGet resets its loading state when the path changes", () => {
-  // qa:TC-APL2663-dd110f93@v1.1 — path change A to B shows loading, never A's data
-  // qa:TC-APL2663-4941e080@v1.1 — B's view shows the loading state for the whole 2 s delay
+  // qa:TC-APL2663-dd110f93@v2 — path change A to B shows loading, never A's data
+  // qa:TC-APL2663-4941e080@v2 — B's view shows the loading state for the whole 2 s delay
   it("Navigating from project A to project B shows loading, not A's data", async () => {
     installFetch({ timed: { [PATH_B]: { ms: 2000, body: { items: ITEMS_B } } } });
     const { log } = await mount(PATH_A);
@@ -135,8 +135,8 @@ describe("useGet resets its loading state when the path changes", () => {
     expect(section()?.querySelector("[role='status']")).toBeNull();
   });
 
-  // qa:TC-APL2663-1af30363@v1.1 — error on the old path is cleared (network and HTTP 500)
-  // qa:TC-APL2663-dfa02140@v1.1 — B failing shows B's own error only after B answers
+  // qa:TC-APL2663-1af30363@v2 — error on the old path is cleared (network and HTTP 500)
+  // qa:TC-APL2663-dfa02140@v2 — B failing shows B's own error only after B answers
   it("The error state belongs to the current path only", async () => {
     async function failA(how: "network" | "500") {
       const { log } = await mount(PATH_A);
@@ -192,8 +192,8 @@ describe("useGet resets its loading state when the path changes", () => {
     expect(coded.log.at(-1)).toMatchObject({ loading: false, code: null, data: { items: ITEMS_B } });
   });
 
-  // qa:TC-APL2663-55057f60@v1.1 — late success for the old path is ignored
-  // qa:TC-APL2663-e1d9e302@v1.1 — late failure is ignored, and A → B → A shows the latest A only
+  // qa:TC-APL2663-55057f60@v2 — late success or failure for the old path is ignored
+  // qa:TC-APL2663-e1d9e302@v2 — A → B → A shows only the latest request
   it("Only the latest request for the current path is shown", async () => {
     const first = await mount(PATH_A);
     await act(async () => { go(PATH_B); });
@@ -247,7 +247,7 @@ describe("useGet resets its loading state when the path changes", () => {
     expect(section()?.getAttribute("aria-label")).toBe("Project A");
   });
 
-  // qa:TC-APL2663-4941e080@v1.1 — loading is announced (aria-busy, polite live region) and focus stays
+  // qa:TC-APL2663-2437ecb8@v1 — skeleton is aria-busy and a polite live region announces Loading; focus stays
   it("Loading state is a busy skeleton announced politely", async () => {
     const keep = document.createElement("button");
     keep.type = "button";
@@ -260,34 +260,60 @@ describe("useGet resets its loading state when the path changes", () => {
     expect(document.activeElement).toBe(keep);
 
     await act(async () => { go(PATH_B); });
-    const live = section()?.querySelector<HTMLElement>("[aria-live='polite']");
-    expect(live, "skeleton in the B content area").toBeTruthy();
-    expect(live?.getAttribute("aria-busy")).toBe("true");
-    expect(live?.getAttribute("role")).toBe("status");
-    expect(live?.textContent).toContain("Loading");
-    expect(section()?.contains(live!)).toBe(true);
-    expect(document.activeElement).toBe(keep);
+    const content = section();
+    expect(content?.getAttribute("aria-label")).toBe("Project B");
+    const skeleton = content?.querySelector<HTMLElement>(".skel-wrap");
+    expect(skeleton, "skeleton in the B content area").toBeTruthy();
+    expect(content?.contains(skeleton!)).toBe(true);
+    // What a screen reader gets while B is loading.
+    expect({
+      role: skeleton?.getAttribute("role"),
+      live: skeleton?.getAttribute("aria-live"),
+      busy: skeleton?.getAttribute("aria-busy"),
+      announced: skeleton?.querySelector(".sr-only")?.textContent,
+    }).toEqual({ role: "status", live: "polite", busy: "true", announced: "Loading" });
+    expect(skeleton?.textContent).toContain("Loading");
+    const focusWhileLoading = document.activeElement;
+    expect(focusWhileLoading).toBe(keep);
 
     await settle(() => { take(PATH_B).resolve(json({ items: ITEMS_B })); });
-    expect(document.querySelector("[aria-busy='true']")).toBeNull();
+    expect(content?.querySelector("[aria-busy]"), "aria-busy removed from the content area").toBeNull();
+    expect(content?.querySelector(".skel-wrap")).toBeNull();
+    expect(content?.querySelector("[role='status']")).toBeNull();
     expect(bodyText()).toContain("ZZ-TEST-B-item1");
-    expect(document.activeElement).toBe(keep);
+    expect(document.activeElement, "focus is not moved when B loads").toBe(focusWhileLoading);
   });
 
-  // Boundary from Pam's AC1 note, now AC5: a same-path re-render must not reset or refetch.
+  // qa:TC-APL2663-e272862d@v1 — same-path re-render does not reset, refetch, or flash a skeleton
   it("Re-rendering on the same path does not reset", async () => {
     const { log } = await mount(PATH_B);
     await settle(() => { take(PATH_B).resolve(json({ items: ITEMS_B })); });
-    expect(log.at(-1)).toMatchObject({ loading: false, data: { items: ITEMS_B } });
-    const sent = calls.length;
+    expect(log.at(-1)).toMatchObject({ loading: false, failed: false, error: null, data: { items: ITEMS_B } });
+    const sent = calls.slice();
     const mark = log.length;
+    const content = section()!;
+    const flickers: string[] = [];
+    const watch = new MutationObserver((records) => {
+      for (const record of records) {
+        if (record.type === "attributes" && (record.attributeName === "aria-busy" || record.attributeName === "role")) flickers.push(record.attributeName ?? "attribute");
+        record.addedNodes.forEach((node) => {
+          if (!(node instanceof Element)) return;
+          if (node.matches(".skel-wrap, [role='status'], [aria-busy='true']") || node.querySelector(".skel-wrap, [role='status'], [aria-busy='true']")) flickers.push(node.className || node.tagName);
+        });
+      }
+    });
+    watch.observe(content, { childList: true, subtree: true, attributes: true, attributeFilter: ["aria-busy", "role"] });
 
     await act(async () => { rerenderSame(); });
+    watch.disconnect();
 
-    expect(calls.length, "no new request").toBe(sent);
-    expect(log.slice(mark).every((s) => s.loading === false && s.failed === false && s.data?.items[0] === "ZZ-TEST-B-item1")).toBe(true);
-    expect(section()?.querySelector("[role='status']")).toBeNull();
-    expect(section()?.querySelector(".skel-row, .skel-wrap")).toBeNull();
+    const paints = log.slice(mark);
+    expect(paints.length, "the parent re-rendered").toBeGreaterThan(0);
+    expect(paints.every((s) => s.loading === false && s.failed === false && s.error === null && JSON.stringify(s.data?.items) === JSON.stringify(ITEMS_B))).toBe(true);
+    expect(calls, "no new request").toEqual(sent);
+    expect(flickers, "no skeleton flicker").toEqual([]);
+    expect(content.querySelector(".skel-wrap, [role='status'], [aria-busy]")).toBeNull();
     expect(bodyText()).toContain("ZZ-TEST-B-item1");
+    expect(bodyText()).not.toContain("Loading");
   });
 });
