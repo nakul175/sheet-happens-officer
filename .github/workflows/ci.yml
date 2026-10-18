@@ -47,6 +47,10 @@ jobs:
         with:
           node-version: 22
           cache: npm
+      # Node 22 treats `node --test scripts/ci/` as a file and exits MODULE_NOT_FOUND.
+      # This glob is that directory on Node 22: every *.test.mjs under scripts/ci/.
+      - name: Node tests for scripts/ci
+        run: node --test "scripts/ci/**/*.test.mjs"
       - run: npm ci
       - name: Lint
         run: npm run lint
