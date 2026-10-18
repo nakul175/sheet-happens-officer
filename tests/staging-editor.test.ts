@@ -5,7 +5,7 @@ import path from "node:path";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { PrismaClient } from "../src/generated/prisma/client";
 import { verifyPassword } from "../src/lib/auth";
-import { EDITOR_EMAIL, QA_PROJECT_NAME, runStagingEditor, type DbConnect } from "../scripts/staging-editor";
+import { EDITOR_EMAIL, LEADER_EMAIL, QA_PROJECT_NAME, runStagingEditor, type DbConnect } from "../scripts/staging-editor";
 import { Client } from "./helpers";
 
 const databaseUrl = process.env.DATABASE_URL;
@@ -66,7 +66,9 @@ function expectNoSecrets(text: string, secrets: string[]) {
 
 async function wipe() {
   const users = await db.user.findMany({
-    where: workspaceId ? { OR: [{ workspaceId }, { email: EDITOR_EMAIL }] } : { email: EDITOR_EMAIL },
+    where: workspaceId
+      ? { OR: [{ workspaceId }, { email: { in: [EDITOR_EMAIL, LEADER_EMAIL] } }] }
+      : { email: { in: [EDITOR_EMAIL, LEADER_EMAIL] } },
     select: { id: true },
   });
   const ids = users.map((user) => user.id);
@@ -117,6 +119,67 @@ describe("staging editor (APL-2682)", () => {
       { name: "missing confirmation", env: env({ SHO_STAGING_CONFIRM: undefined }), argv: [], message: "without staging confirmation" },
       { name: "missing workspace", env: env({ STAGING_WORKSPACE_ID: undefined }), argv: ["--confirm-staging"], message: "STAGING_WORKSPACE_ID is not set" },
       { name: "blank workspace", env: env({ STAGING_WORKSPACE_ID: "  " }), argv: ["--confirm-staging"], message: "STAGING_WORKSPACE_ID is not set" },
+      {
+        name: "digitalocean host",
+        env: env({
+          DATABASE_URL: "postgresql://example:example@private-db-postgresql-nyc1-12345.db.ondigitalocean.com:25060/defaultdb",
+          DIRECT_DATABASE_URL: "postgresql://example:example@private-db-postgresql-nyc1-12345.db.ondigitalocean.com:25060/defaultdb",
+          PROD_DB_HOST: "",
+          PROD_DB_NAME: "",
+        }),
+        argv: ["--confirm-staging"],
+        message: "non-local database host",
+      },
+      {
+        name: "wrong database name",
+        env: env({
+          DATABASE_URL: "postgresql://example:example@db.example.com:5432/sho_prod",
+          DIRECT_DATABASE_URL: "postgresql://example:example@db.example.com:5432/sho_prod",
+          PROD_DB_HOST: "",
+          PROD_DB_NAME: "",
+        }),
+        argv: ["--confirm-staging"],
+        message: "non-local database host",
+      },
+      {
+        name: "uppercase staging name",
+        env: env({
+          DATABASE_URL: "postgresql://example:example@private-db-postgresql-nyc1-12345.db.ondigitalocean.com:25060/SHO_STAGING",
+          DIRECT_DATABASE_URL: "postgresql://example:example@private-db-postgresql-nyc1-12345.db.ondigitalocean.com:25060/SHO_STAGING",
+          PROD_DB_HOST: "",
+          PROD_DB_NAME: "",
+        }),
+        argv: ["--confirm-staging"],
+        message: "non-local database host",
+      },
+      {
+        name: "host query bypass",
+        env: env({
+          DATABASE_URL: "postgresql://example:example@localhost:5432/sho_test?host=private-db-postgresql-nyc1-12345.db.ondigitalocean.com",
+          DIRECT_DATABASE_URL: "postgresql://example:example@localhost:5432/sho_test?host=private-db-postgresql-nyc1-12345.db.ondigitalocean.com",
+          PROD_DB_HOST: "",
+          PROD_DB_NAME: "",
+        }),
+        argv: ["--confirm-staging"],
+        message: "must not set host or dbname",
+      },
+      {
+        name: "dbname query bypass",
+        env: env({
+          DATABASE_URL: "postgresql://example:example@localhost:5432/sho_test?dbname=defaultdb",
+          DIRECT_DATABASE_URL: "postgresql://example:example@localhost:5432/sho_test?dbname=defaultdb",
+          PROD_DB_HOST: "",
+          PROD_DB_NAME: "",
+        }),
+        argv: ["--confirm-staging"],
+        message: "must not set host or dbname",
+      },
+      {
+        name: "uppercase prod name",
+        env: env({ PROD_DB_NAME: dbName.toUpperCase() }),
+        argv: ["--confirm-staging"],
+        message: "database name is production",
+      },
     ];
     for (const item of cases) {
       let connected = false;
@@ -128,11 +191,28 @@ describe("staging editor (APL-2682)", () => {
       expect(code, item.name).toBe(1);
       expect(connected, item.name).toBe(false);
       expect(text, item.name).toContain(item.message);
-      expectNoSecrets(text, [PASSWORD, OTHER_PASSWORD, "example:example"]);
+      expectNoSecrets(text, [PASSWORD, OTHER_PASSWORD, "example:example", "ondigitalocean.com", "db.example.com"]);
     }
     expect(await db.user.count()).toBe(usersBefore);
     expect(await db.user.findUnique({ where: { id: canary.id } })).not.toBeNull();
     expect(await db.user.findUnique({ where: { email: EDITOR_EMAIL } })).toBeNull();
+    expect(await db.user.findUnique({ where: { email: LEADER_EMAIL } })).toBeNull();
+  });
+
+  it("allows a DigitalOcean host only when the database name is sho_staging", async () => {
+    let connected = false;
+    const connect: DbConnect = () => {
+      connected = true;
+      throw new Error("stop-before-query");
+    };
+    const url = "postgresql://example:example@private-db-postgresql-nyc1-12345.db.ondigitalocean.com:25060/sho_staging";
+    const { code, text } = await capture(() =>
+      runStagingEditor(env({ DATABASE_URL: url, DIRECT_DATABASE_URL: url, PROD_DB_HOST: "", PROD_DB_NAME: "" }), ["--confirm-staging"], connect),
+    );
+    expect(connected).toBe(true);
+    expect(code).toBe(1);
+    expect(text).not.toContain("non-local database host");
+    expectNoSecrets(text, [PASSWORD, "example:example", "ondigitalocean.com"]);
   });
 
   it("is idempotent and does not reset an existing password", async () => {
@@ -144,7 +224,9 @@ describe("staging editor (APL-2682)", () => {
         runStagingEditor(env({ STAGING_EDITOR_PASSWORD: undefined, STAGING_EDITOR_PASSWORD_FILE: file }), ["--confirm-staging"]),
       );
       expect(first.code, first.text).toBe(0);
-      expect(first.text).toContain("password: set");
+      expect(first.text).toContain("editorPassword: set");
+      expect(first.text).toContain("leaderPassword: set");
+      expect(first.text).toContain("leaderRole: LEADER");
       expectNoSecrets(first.text, [PASSWORD, OTHER_PASSWORD]);
 
       const created = await db.user.findUniqueOrThrow({ where: { email: EDITOR_EMAIL } });
@@ -158,14 +240,19 @@ describe("staging editor (APL-2682)", () => {
         updatedAt: project.updatedAt.toISOString(),
       };
 
+      const leaderBefore = await db.user.findUniqueOrThrow({ where: { email: LEADER_EMAIL } });
       const second = await capture(() => runStagingEditor(env({ STAGING_EDITOR_PASSWORD: OTHER_PASSWORD }), ["--confirm-staging"]));
       expect(second.code, second.text).toBe(0);
-      expect(second.text).toContain("password: unchanged");
+      expect(second.text).toContain("editorPassword: unchanged");
+      expect(second.text).toContain("leaderPassword: unchanged");
       expectNoSecrets(second.text, [PASSWORD, OTHER_PASSWORD]);
 
       const again = await db.user.findUniqueOrThrow({ where: { email: EDITOR_EMAIL } });
+      const leaderAgain = await db.user.findUniqueOrThrow({ where: { email: LEADER_EMAIL } });
       const projectAgain = await db.project.findFirstOrThrow({ where: { workspaceId, name: QA_PROJECT_NAME } });
       expect(again.passwordHash).toBe(before.hash);
+      expect(leaderAgain.passwordHash).toBe(leaderBefore.passwordHash);
+      expect(await verifyPassword(PASSWORD, leaderAgain.passwordHash)).toBe(true);
       expect(again.passwordHash.startsWith("scrypt$")).toBe(true);
       expect(await verifyPassword(PASSWORD, again.passwordHash)).toBe(true);
       expect(await verifyPassword(OTHER_PASSWORD, again.passwordHash)).toBe(false);
@@ -200,7 +287,9 @@ describe("staging editor (APL-2682)", () => {
 
     const { code, text } = await capture(() => runStagingEditor(env({ STAGING_EDITOR_PASSWORD: OTHER_PASSWORD }), ["--confirm-staging"]));
     expect(code, text).toBe(0);
-    expect(text).toContain("password: unchanged");
+    expect(text).toContain("editorPassword: unchanged");
+    expect(text).toContain("leaderPassword: set");
+    expect(text).toContain("leaderRole: LEADER");
     expectNoSecrets(text, [PASSWORD, OTHER_PASSWORD, hash]);
 
     const after = await db.user.findUniqueOrThrow({ where: { id: user.id } });
@@ -216,6 +305,10 @@ describe("staging editor (APL-2682)", () => {
     expect(memberships[0].projectId).toBe(qa.id);
     expect(memberships[0]?.role).toBe("EDITOR");
     expect(await db.projectMember.count({ where: { userId: user.id, role: "LEADER" } })).toBe(0);
+    const leaders = await db.projectMember.findMany({ where: { projectId: qa.id, role: "LEADER" }, include: { user: true } });
+    expect(leaders).toHaveLength(1);
+    expect(leaders[0]?.user.email).toBe(LEADER_EMAIL);
+    expect(leaders[0]?.user.orgRole).toBe("MEMBER");
 
     const sections = await db.section.findMany({ where: { projectId: qa.id }, orderBy: { position: "asc" } });
     expect(sections.map((section) => ({ name: section.name, isDone: section.isDone }))).toEqual([
@@ -229,17 +322,9 @@ describe("staging editor (APL-2682)", () => {
     const ready = await capture(() => runStagingEditor(env(), ["--confirm-staging"]));
     expect(ready.code, ready.text).toBe(0);
     const project = await db.project.findFirstOrThrow({ where: { workspaceId, name: QA_PROJECT_NAME } });
-    const leader = await db.user.create({
-      data: {
-        workspaceId,
-        email: `qa-leader-${workspaceId.slice(-8).toLowerCase()}@example.invalid`,
-        name: "QA Leader",
-        passwordHash: "not-used",
-        orgRole: "MEMBER",
-        emailVerifiedAt: new Date(),
-      },
-    });
-    await db.projectMember.create({ data: { projectId: project.id, userId: leader.id, role: "LEADER" } });
+    const leaders = await db.projectMember.findMany({ where: { projectId: project.id, role: "LEADER" }, include: { user: true } });
+    expect(leaders).toHaveLength(1);
+    expect(leaders[0]?.user.email).toBe(LEADER_EMAIL);
 
     const editor = new Client();
     const signin = await editor.post("/api/auth/signin", { email: EDITOR_EMAIL, password: PASSWORD });
