@@ -1,6 +1,9 @@
 // SHO-US-2.5 Team page by role (APL-2484). Acceptance criteria AC1 to AC4.
 import { test, expect, RUN, type Json } from "../support";
-import { PASS, alias, deactivate, passwordOk, personByEmail, signUp, zz } from "./qa";
+import {
+  PASS, alias, deactivate, passwordOk, personByEmail, signUp, zz,
+  addPersonOnTeam, deactivateOnTeam, memberItem, teamRow, type Api,
+} from "./qa";
 
 const SLOW = { timeout: 90_000 }; // the Team table can be long on a busy workspace
 
@@ -11,51 +14,85 @@ test.describe("SHO-US-2.5 / APL-2484", () => {
     if (!passwordOk(PASS)) throw new Error("SHO_QA_PASS must be at least 8 characters with a letter and a number.");
   });
 
-  test("AC1: a Member sees active people's names only, with no email, status or management action", async ({ member }) => {
+  const zzEmail = (label: string) => `zz-test-${RUN}-${label}@example.invalid`;
+
+  async function retire(api: Api, email: string) {
+    const person = await personByEmail(api, email);
+    if (person && person.status !== "DEACTIVATED") await deactivate(api, person.id);
+  }
+
+  test("AC1: a Member sees active people's names only, with no email, status or management action", async ({ admin, member, later }) => {
+    test.setTimeout(240_000);
+    const name = zz("ac1");
+    const email = zzEmail("ac1");
+    const space = name.indexOf(" ");
+    later(() => retire(admin.api, email));
+    await addPersonOnTeam(admin.page, name.slice(0, space), name.slice(space + 1), email);
+
     await member.page.goto("/team");
-    await expect(member.page.getByRole("heading", { name: "Team" }).first()).toBeVisible(SLOW);
-    await expect(member.page.locator(".list .item").first()).toBeVisible(SLOW);
-    await expect(member.page.getByRole("columnheader", { name: /Email|Status/ })).toHaveCount(0);
-    await expect(member.page.getByRole("button", { name: /Deactivate|Reactivate|Make Admin|Make Member|Resend sign-in details|Add person/ })).toHaveCount(0);
-    await expect(member.page.getByText(/@/).first()).toHaveCount(0); // no email address anywhere in the list
+    const main = member.page.locator("#main");
+    await expect(main.getByRole("heading", { name: "Team", exact: true })).toBeVisible(SLOW);
+    const item = memberItem(member.page, name);
+    await expect(item).toHaveCount(1, SLOW);
+    await expect(item.getByRole("link", { name, exact: true })).toBeVisible();
+    await expect(item.getByText(/@/)).toHaveCount(0);
+    await expect(item.getByText(/Active|Unverified|Deactivated/)).toHaveCount(0);
+    await expect(item.getByRole("button")).toHaveCount(0);
+    await expect(main.getByRole("columnheader", { name: /Email|Status/ })).toHaveCount(0);
+    await expect(main.getByRole("button", { name: /Deactivate|Reactivate|Make Admin|Make Member|Resend sign-in details|Add person/ })).toHaveCount(0);
+    await expect(main.locator(".list").getByText(/@/)).toHaveCount(0);
     const people = (await member.api.get("/api/team")).json.people as Json[];
-    expect(people.length).toBeGreaterThan(0);
-    for (const p of people) {
-      expect(p, "a Member's row").not.toHaveProperty("email");
-      expect(p).not.toHaveProperty("status");
-    }
+    const created = people.find((p) => p.name === name);
+    expect(created, "the person just added").toBeTruthy();
+    expect(created, "a Member's row").not.toHaveProperty("email");
+    expect(created).not.toHaveProperty("status");
   });
 
-  test("AC2: an Admin or Super Admin also sees email, role and status columns and the actions their role allows", async ({ admin }) => {
+  test("AC2: an Admin or Super Admin also sees email, role and status columns and the actions their role allows", async ({ admin, later }) => {
     test.setTimeout(240_000);
-    await admin.page.goto("/team");
-    for (const h of ["Name", "Email", "Role", "Status", "Actions"]) await expect(admin.page.getByRole("columnheader", { name: h, exact: true }).first()).toBeVisible(SLOW);
-    await expect(admin.page.getByRole("button", { name: "+ Add person" })).toBeVisible(SLOW);
-    await expect(admin.page.getByRole("button", { name: "Make Admin" }).first()).toBeVisible(SLOW);
-    await expect(admin.page.getByRole("button", { name: "Deactivate" }).first()).toBeVisible(SLOW);
-    const people = (await admin.api.get("/api/team")).json.people as Json[];
-    expect(people.every((p) => "email" in p && "status" in p && "orgRole" in p)).toBe(true);
+    const name = zz("ac2");
+    const email = zzEmail("ac2");
+    const space = name.indexOf(" ");
+    later(() => retire(admin.api, email));
+    await addPersonOnTeam(admin.page, name.slice(0, space), name.slice(space + 1), email);
+
+    const table = admin.page.locator("#main table");
+    for (const h of ["Name", "Email", "Role", "Status", "Actions"]) await expect(table.getByRole("columnheader", { name: h, exact: true })).toHaveCount(1);
+    await expect(admin.page.locator("#main").getByRole("button", { name: "+ Add person" })).toBeVisible();
+    const row = teamRow(admin.page, email);
+    await expect(row).toHaveCount(1, SLOW);
+    await expect(row).toContainText(email);
+    await expect(row.locator(".chip", { hasText: "Member" })).toBeVisible();
+    await expect(row.locator(".chip.green", { hasText: "Active" })).toBeVisible();
+    await expect(row.getByRole("button", { name: "Make Admin" })).toBeVisible();
+    await expect(row.getByRole("button", { name: "Deactivate" })).toBeVisible();
+    const person = await personByEmail(admin.api, email);
+    expect(person?.email).toBe(email);
+    expect(person?.status).toBe("ACTIVE");
+    expect(person?.orgRole).toBe("MEMBER");
   });
 
   test("AC3: deactivated people show a grey Deactivated chip to Admins and are hidden from Members", async ({ admin, member, later }) => {
     test.setTimeout(240_000);
-    const r = await admin.api.post("/api/team", { firstName: "ZZ-TEST", lastName: `hidden ${RUN}`, email: `zz-test-${RUN}-hidden@example.invalid`, role: "MEMBER" });
-    expect(r.status).toBe(201);
-    const id = r.json.person.id as string;
-    const name = `ZZ-TEST hidden ${RUN}`;
-    later(async () => { if ((await admin.api.get(`/api/team/${id}`)).json.person?.status !== "DEACTIVATED") await admin.api.post(`/api/team/${id}/deactivate`, { reassign: "leaders" }); });
-    expect((await admin.api.post(`/api/team/${id}/deactivate`, { reassign: "leaders" })).status).toBe(200);
+    const name = zz("hidden");
+    const email = zzEmail("hidden");
+    const space = name.indexOf(" ");
+    later(() => retire(admin.api, email));
+    await addPersonOnTeam(admin.page, name.slice(0, space), name.slice(space + 1), email);
+    const created = await personByEmail(admin.api, email);
+    expect(created?.id).toBeTruthy();
+    await deactivateOnTeam(admin.page, name);
 
-    await admin.page.goto("/team");
-    const row = admin.page.locator("tr", { hasText: name });
-    await expect(row).toContainText("Deactivated", SLOW);
+    const row = teamRow(admin.page, email);
+    await expect(row).toHaveCount(1);
     await expect(row.locator(".chip.grey", { hasText: "Deactivated" })).toBeVisible();
 
     const seen = (await member.api.get("/api/team")).json.people as Json[];
-    expect(seen.some((p) => p.id === id), "a Member must not see a deactivated person").toBe(false);
+    expect(seen.some((p) => p.id === created!.id), "a Member must not see a deactivated person").toBe(false);
     await member.page.goto("/team");
-    await expect(member.page.locator(".list .item").first()).toBeVisible(SLOW);
-    await expect(member.page.getByText(name)).toHaveCount(0);
+    await expect(memberItem(member.page, String(member.user.name))).toHaveCount(1, SLOW);
+    await expect(memberItem(member.page, name)).toHaveCount(0);
+    await expect(member.page.locator("#main").getByText(name, { exact: true })).toHaveCount(0);
   });
 
   test("AC3 (unverified): unverified people show an Unverified status to Admins and are hidden from Members", async ({ anon, admin, member, later }) => {
@@ -68,20 +105,32 @@ test.describe("SHO-US-2.5 / APL-2484", () => {
     expect(person?.status).toBe("UNVERIFIED");
     later(() => deactivate(admin.api, person!.id));
     await admin.page.goto("/team");
-    const row = admin.page.locator("tr", { hasText: name });
-    await expect(row).toContainText("Unverified", SLOW);
+    const row = teamRow(admin.page, email);
+    await expect(row).toHaveCount(1, SLOW);
+    await expect(row.locator(".chip.gold", { hasText: "Unverified" })).toBeVisible();
     const seen = (await member.api.get("/api/team")).json.people as { id?: string; name?: string }[];
     expect(seen.some((p) => p.id === person!.id || p.name === name)).toBe(false);
     await member.page.goto("/team");
-    await expect(member.page.locator(".list .item").first()).toBeVisible(SLOW);
-    await expect(member.page.getByText(name)).toHaveCount(0);
+    await expect(memberItem(member.page, String(member.user.name))).toHaveCount(1, SLOW);
+    await expect(memberItem(member.page, name)).toHaveCount(0);
+    await expect(member.page.locator("#main").getByText(name, { exact: true })).toHaveCount(0);
   });
 
-  test("AC4: the Super Admin's own row has no management action", async ({ admin }) => {
+  test("AC4: the Super Admin's own row has no management action", async ({ admin, later }) => {
     test.setTimeout(240_000);
-    await admin.page.goto("/team");
-    const mine = admin.page.locator("tr", { hasText: String(admin.user.email).toLowerCase() }).first();
-    await expect(mine).toContainText("Super Admin", SLOW);
+    const name = zz("ac4");
+    const email = zzEmail("ac4");
+    const space = name.indexOf(" ");
+    later(() => retire(admin.api, email));
+    await addPersonOnTeam(admin.page, name.slice(0, space), name.slice(space + 1), email);
+    const created = teamRow(admin.page, email);
+    await expect(created).toHaveCount(1, SLOW);
+    await expect(created.getByRole("button", { name: "Deactivate" })).toBeVisible();
+    await expect(created.getByRole("button", { name: "Make Admin" })).toBeVisible();
+
+    const mine = teamRow(admin.page, String(admin.user.email));
+    await expect(mine).toHaveCount(1);
+    await expect(mine.locator(".chip", { hasText: "Super Admin" })).toBeVisible();
     await expect(mine.getByRole("button", { name: /Deactivate|Reactivate|Make Admin|Make Member|Resend sign-in details/ })).toHaveCount(0);
   });
 });

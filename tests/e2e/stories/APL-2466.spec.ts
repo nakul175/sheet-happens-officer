@@ -5,7 +5,7 @@
 import { test, login } from "../support";
 import {
   PASS, passwordOk, alias, zz, RUN, gate, signUp, signInAs, personByEmail, deactivate,
-  makeProject, archiveProject, expect, type Api,
+  addPersonOnTeam, deactivateOnTeam, teamRow, makeProject, archiveProject, expect, type Api,
 } from "./qa";
 
 type Who = { api: Api; user: { id?: string; name?: string; email?: string } };
@@ -169,8 +169,15 @@ test("AC4: open tasks move to a chosen receiver, and a receiver outside the proj
   expect(["LEADER", "EDITOR"]).toContain(members.find((member) => member.userId === assigneeId)?.role);
 });
 
-test("AC5: the only Super Admin cannot be demoted or deactivated", async ({ admin }) => {
-  test.setTimeout(120_000);
+const zzEmail = (label: string) => `zz-test-${RUN}-${label}@example.invalid`;
+
+async function retire(api: Api, email: string) {
+  const person = await personByEmail(api, email);
+  if (person && person.status !== "DEACTIVATED") await deactivate(api, person.id);
+}
+
+test("AC5: the only Super Admin cannot be demoted or deactivated", async ({ admin, later }) => {
+  test.setTimeout(240_000);
   const id = admin.user.id as string;
   const demote = await admin.api.patch(`/api/team/${id}`, { orgRole: "MEMBER" });
   expect(demote.status).toBe(403);
@@ -179,25 +186,52 @@ test("AC5: the only Super Admin cannot be demoted or deactivated", async ({ admi
   expect(off.status).toBeGreaterThanOrEqual(400);
   expect(String(off.json.error)).toMatch(/cannot deactivate/);
   expect((await admin.api.get("/api/auth/me")).json.user.orgRole).toBe("SUPER_ADMIN");
-  await admin.page.goto("/team");
-  const mine = admin.page.locator("tr", { hasText: String(admin.user.email).toLowerCase() }).first();
-  await expect(mine).toContainText("Super Admin", { timeout: 60_000 });
-  await expect(mine.getByRole("button", { name: /Deactivate|Make Member/ })).toHaveCount(0);
+
+  const name = zz("ac5");
+  const email = zzEmail("ac5");
+  const space = name.indexOf(" ");
+  later(() => retire(admin.api, email));
+  await addPersonOnTeam(admin.page, name.slice(0, space), name.slice(space + 1), email);
+  const created = teamRow(admin.page, email);
+  await expect(created).toHaveCount(1, { timeout: 90_000 });
+  await expect(created.getByRole("button", { name: "Deactivate" })).toBeVisible();
+  await deactivateOnTeam(admin.page, name);
+
+  const mine = teamRow(admin.page, String(admin.user.email));
+  await expect(mine).toHaveCount(1);
+  await expect(mine.locator(".chip", { hasText: "Super Admin" })).toBeVisible();
+  await expect(mine.getByRole("button", { name: /Deactivate|Make Member|Make Admin|Reactivate/ })).toHaveCount(0);
 });
 
 test("AC6: the Team page shows people by role, and deactivated people are shown as deactivated", async ({ admin, later }) => {
-  test.setTimeout(180_000);
-  const member = await added(admin, later, "ac6-member");
-  const orgAdmin = await added(admin, later, "ac6-admin", "ADMIN");
-  expect((await admin.api.post(`/api/team/${member.id}/deactivate`, { reassign: "leaders" })).status).toBe(200);
+  test.setTimeout(240_000);
+  const memberName = zz("ac6-member");
+  const adminName = zz("ac6-admin");
+  const memberEmail = zzEmail("ac6-member");
+  const adminEmail = zzEmail("ac6-admin");
+  const split = (full: string) => {
+    const space = full.indexOf(" ");
+    return [full.slice(0, space), full.slice(space + 1)] as const;
+  };
+  later(async () => {
+    await retire(admin.api, memberEmail);
+    await retire(admin.api, adminEmail);
+  });
+  const [memberFirst, memberLast] = split(memberName);
+  const [adminFirst, adminLast] = split(adminName);
+  await addPersonOnTeam(admin.page, memberFirst, memberLast, memberEmail);
+  await addPersonOnTeam(admin.page, adminFirst, adminLast, adminEmail, "ADMIN");
+  await deactivateOnTeam(admin.page, memberName);
 
-  await admin.page.goto("/team");
-  await expect(admin.page.getByRole("columnheader", { name: "Role" })).toBeVisible({ timeout: 60_000 });
-  const memberRow = admin.page.locator("tr", { hasText: member.name });
-  const adminRow = admin.page.locator("tr", { hasText: orgAdmin.name });
-  await expect(memberRow).toContainText("Member");
-  await expect(memberRow).toContainText("Deactivated");
+  await expect(admin.page.locator("#main table").getByRole("columnheader", { name: "Role", exact: true })).toHaveCount(1);
+  const memberRow = teamRow(admin.page, memberEmail);
+  const adminRow = teamRow(admin.page, adminEmail);
+  await expect(memberRow).toHaveCount(1);
+  await expect(adminRow).toHaveCount(1);
+  await expect(memberRow.locator(".chip", { hasText: "Member" })).toBeVisible();
   await expect(memberRow.locator(".chip.grey", { hasText: "Deactivated" })).toBeVisible();
-  await expect(adminRow).toContainText("Admin");
-  await expect(admin.page.locator("tr", { hasText: String(admin.user.email).toLowerCase() }).first()).toContainText("Super Admin");
+  await expect(adminRow.locator(".chip", { hasText: "Admin" })).toBeVisible();
+  const mine = teamRow(admin.page, String(admin.user.email));
+  await expect(mine).toHaveCount(1);
+  await expect(mine.locator(".chip", { hasText: "Super Admin" })).toBeVisible();
 });

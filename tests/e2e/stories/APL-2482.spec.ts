@@ -1,7 +1,6 @@
 // SHO-US-2.3 Deactivate and reactivate people (APL-2482). Acceptance criteria AC1 to AC3.
 // Session checks use a ZZ-TEST person when the test mail sink has their password.
 // Otherwise they use the Member account from the environment, and that account is restored afterwards.
-import { readFileSync } from "node:fs";
 import type { Browser } from "@playwright/test";
 import { test, expect, RUN, login, zz, type Api, type Json } from "../support";
 import { PASS, alias, BASE_URL, passwordOk, signInAs, sinkText } from "./qa";
@@ -87,8 +86,6 @@ test.describe("SHO-US-2.3 / APL-2482", () => {
 
   test("AC1 (sessions and sign-in): their sessions end and they cannot sign in", async ({ admin, browser, later }) => {
     test.setTimeout(180_000);
-    expect(readFileSync("src/lib/team.ts", "utf8")).toContain("session.updateMany({ where: { userId: targetId, revokedAt: null }, data: { revokedAt: new Date() } })");
-
     const email = alias("2482", "session");
     const r = await admin.api.post("/api/team", { firstName: "ZZ-TEST", lastName: `session ${RUN}`, email, role: "MEMBER" });
     expect(r.status, JSON.stringify(r.json)).toBe(201);

@@ -219,6 +219,48 @@ export async function archiveProject(adminApi: Api, id: string, adminId: string)
   await adminApi.post(`/api/projects/${id}/archive`);
 }
 
+const UI = { timeout: 90_000 };
+
+/** One Team table row whose text contains `text`. Callers assert a count of 1, so a shared `.first()` is not used. */
+export function teamRow(page: Page, text: string) {
+  return page.locator("#main tbody tr").filter({ hasText: text });
+}
+
+/** One Member-list item whose link is exactly `name`. */
+export function memberItem(page: Page, name: string) {
+  return page.locator("#main .list .item").filter({ has: page.getByRole("link", { name, exact: true }) });
+}
+
+/** The Super Admin adds a person from the Team page. Cleanup stays with the caller. */
+export async function addPersonOnTeam(page: Page, first: string, last: string, email: string, role: "MEMBER" | "ADMIN" = "MEMBER") {
+  await page.goto("/team");
+  await page.locator("#main").getByRole("button", { name: "+ Add person" }).click(UI);
+  const dialog = page.getByRole("dialog", { name: "Add person" });
+  await dialog.getByLabel("First name").fill(first);
+  await dialog.getByLabel("Last name").fill(last);
+  await dialog.getByLabel("Email").fill(email);
+  if (role === "ADMIN") await dialog.getByLabel("Role").selectOption("ADMIN");
+  await dialog.getByRole("button", { name: "Add and email" }).click();
+  await expect(page.getByRole("status").filter({ hasText: `${first} ${last} was added` })).toBeVisible({ timeout: 120_000 });
+}
+
+/**
+ * Deactivate that person from their own Team row.
+ * The grey Deactivated chip is the result of this click, not of a status painted onto the page.
+ */
+export async function deactivateOnTeam(page: Page, name: string) {
+  const row = teamRow(page, name);
+  await expect(row).toHaveCount(1, UI);
+  await row.getByRole("button", { name: "Deactivate" }).click();
+  const dialog = page.getByRole("dialog", { name: `Deactivate ${name}?` });
+  await dialog.getByRole("button", { name: "Deactivate", exact: true }).click();
+  const done = page.getByRole("dialog", { name: `${name} is deactivated` });
+  await expect(done).toBeVisible({ timeout: 120_000 });
+  await done.getByRole("button", { name: "Close" }).click();
+  await expect(done).toBeHidden();
+  await expect(teamRow(page, name).locator(".chip.grey", { hasText: "Deactivated" })).toBeVisible(UI);
+}
+
 export async function makeProject(adminApi: Api, label: string, leaderId: string) {
   const name = zz(label);
   const created = await adminApi.post("/api/projects", { name, leaderId });
