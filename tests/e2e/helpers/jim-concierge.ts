@@ -39,6 +39,7 @@ export type ConciergeMessage = {
 /** Skip unless the concierge is switched on. A weekly cap or a provider pause still counts as on. */
 export async function requireConcierge(who: Who) {
   const c = await conciergeLive(who);
+  if (!c.live) test.info().annotations.push({ type: "skip", description: conciergeOff(c) });
   test.skip(!c.live, conciergeOff(c));
   return c;
 }

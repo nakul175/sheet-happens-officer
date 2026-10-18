@@ -1,9 +1,9 @@
 // SHO-US-8.6 Speak to the concierge (APL-2515).
 // One test per acceptance criterion. No message is sent, so none of these call the model.
 // A stand-in speech engine (helpers/jim-concierge.ts armDictation) stands in for a browser that can dictate.
-// The unsupported check uses the test browser as it is, and skips if that browser already has speech recognition.
+// AC2 removes SpeechRecognition before the page loads, so the hidden-microphone state does not depend on the browser.
 import { test, expect } from "../support";
-import { armDictation, requireModel, setDictation, showConcierge, startDictation } from "../helpers/jim-concierge";
+import { armDictation, requireConcierge, setDictation, showConcierge, startDictation } from "../helpers/jim-concierge";
 import { chatMessages } from "../helpers/jim-http";
 
 test.use({ viewport: { width: 1440, height: 900 } });
@@ -14,7 +14,7 @@ async function dock(who: { page: import("@playwright/test").Page }) {
 }
 
 test("AC1: dictation fills the input and sends nothing until Send", async ({ admin, later }) => {
-  await requireModel(admin);
+  await requireConcierge(admin);
   await showConcierge(admin, later);
   await armDictation(admin.page);
   await dock(admin);
@@ -28,21 +28,21 @@ test("AC1: dictation fills the input and sends nothing until Send", async ({ adm
 });
 
 test("AC2: a browser without speech recognition shows no microphone, and typing still works", async ({ admin, later }) => {
-  await requireModel(admin);
+  await requireConcierge(admin);
   await showConcierge(admin, later);
-  await dock(admin);
-  const supported = await admin.page.evaluate(() => {
+  await admin.page.addInitScript(() => {
     const w = window as unknown as { SpeechRecognition?: unknown; webkitSpeechRecognition?: unknown };
-    return !!(w.SpeechRecognition || w.webkitSpeechRecognition);
+    delete w.SpeechRecognition;
+    delete w.webkitSpeechRecognition;
   });
-  test.skip(supported, "This browser already has speech recognition, so it shows the microphone. The hidden-microphone state is what a browser without the API shows.");
+  await dock(admin);
   await expect(admin.page.locator("button.cc-mic")).toHaveCount(0);
   await admin.page.getByLabel("Message the concierge").fill("ZZ-TEST typed");
   await expect(admin.page.getByLabel("Message the concierge")).toHaveValue("ZZ-TEST typed");
 });
 
 test("AC3: a denied microphone explains how to allow it, and typing still works", async ({ admin, later }) => {
-  await requireModel(admin);
+  await requireConcierge(admin);
   await showConcierge(admin, later);
   await armDictation(admin.page);
   await dock(admin);
@@ -57,7 +57,7 @@ test("AC3: a denied microphone explains how to allow it, and typing still works"
 });
 
 test("AC4: the first use of the microphone shows the speech-service notice, and Got it is remembered", async ({ admin, later }) => {
-  await requireModel(admin);
+  await requireConcierge(admin);
   await showConcierge(admin, later);
   await armDictation(admin.page);
   await dock(admin);
@@ -83,7 +83,7 @@ test("AC4: the first use of the microphone shows the speech-service notice, and 
 });
 
 test("AC5: recording stops after 60 seconds or on silence and keeps the transcript; Cancel adds nothing", async ({ admin, later }) => {
-  await requireModel(admin);
+  await requireConcierge(admin);
   await showConcierge(admin, later);
   await armDictation(admin.page);
   await dock(admin);
@@ -108,7 +108,7 @@ test("AC5: recording stops after 60 seconds or on silence and keeps the transcri
 });
 
 test("AC6: dictation is set to English (India)", async ({ admin, later }) => {
-  await requireModel(admin);
+  await requireConcierge(admin);
   await showConcierge(admin, later);
   await armDictation(admin.page);
   await dock(admin);
