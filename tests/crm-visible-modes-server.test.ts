@@ -371,13 +371,11 @@ describe("CRM_VISIBLE modes are tested against a real server per mode", () => {
     const taskTitle = "ZZ-TEST Acme kickoff";
     const plainName = `ZZ-TEST Shared ${tag}`;
     const memberEmail = `nakul17+zz-2728-${runId}-member@aplyd.com`;
-    const repEmail = `nakul17+zz-2728-${runId}-rep@aplyd.com`;
     const adminEmail = `nakul17+zz-2728-${runId}-admin@aplyd.com`;
-    seed.emails.push(memberEmail, repEmail, adminEmail);
+    seed.emails.push(memberEmail, adminEmail);
     const member = await signIn(open!, `ZZ-TEST member ${runId}`, memberEmail);
-    const rep = await signIn(open!, `ZZ-TEST rep ${runId}`, repEmail);
     const admin = await signIn(open!, `ZZ-TEST admin ${runId}`, adminEmail);
-    seed.userIds.push(member.id, rep.id, admin.id);
+    seed.userIds.push(member.id, admin.id);
     await db.user.update({ where: { id: admin.id }, data: { orgRole: "ADMIN" } });
 
     const pipes = await call(open!.base, admin.cookie, "GET", "/api/deals/pipelines");
@@ -388,19 +386,21 @@ describe("CRM_VISIBLE modes are tested against a real server per mode", () => {
     expect(org.status, org.text).toBe(201);
     const organisationId = (org.json?.organisation as { id: string }).id;
     seed.orgIds.push(organisationId);
+    // Member A is an editor. The admin leads the deal, so it shows on GET /api/team/<adminId>.
     const made = await call(open!.base, admin.cookie, "POST", "/api/deals", {
-      name: dealName, organisationId, pipelineId: pipe!.id, leaderId: rep.id, whyPursue: tag,
+      name: dealName, organisationId, pipelineId: pipe!.id, leaderId: admin.id, whyPursue: tag,
       nextStep: { title: taskTitle, dueDate: istDate(3) },
     });
     expect(made.status, made.text).toBe(201);
     const dealId = (made.json?.deal as { id: string }).id;
     seed.projectIds.push(dealId);
     expect((await call(open!.base, admin.cookie, "POST", `/api/projects/${dealId}/members`, { userId: member.id, role: "EDITOR" })).status).toBe(201);
-    const plain = await call(open!.base, admin.cookie, "POST", "/api/projects", { name: plainName, leaderId: rep.id });
+    const plain = await call(open!.base, admin.cookie, "POST", "/api/projects", { name: plainName, leaderId: admin.id });
     expect(plain.status, plain.text).toBe(201);
     const plainId = (plain.json?.project as { id: string }).id;
     seed.projectIds.push(plainId);
-    expect((await call(open!.base, rep.cookie, "POST", `/api/projects/${plainId}/members`, { userId: member.id, role: "EDITOR" })).status).toBe(201);
+    expect((await call(open!.base, admin.cookie, "POST", `/api/projects/${plainId}/members`, { userId: member.id, role: "EDITOR" })).status).toBe(201);
+    expect((await call(open!.base, admin.cookie, "POST", `/api/projects/${plainId}/tasks`, { title: `ZZ-TEST Shared task ${tag}`, assigneeId: admin.id })).status).toBe(201);
     const stage = await db.project.findUnique({ where: { id: dealId }, select: { stage: { select: { name: true } } } });
     const stageName = stage?.stage?.name ?? "";
     expect(stageName).toBeTruthy();
@@ -426,29 +426,36 @@ describe("CRM_VISIBLE modes are tested against a real server per mode", () => {
     let allServer: Running | undefined;
     try {
       allServer = await startModeServer("all" as Mode);
-      const cases: { mode: string; server: Running; user: "member" | "admin"; hidden: boolean }[] = [
-        { mode: "on", server: open!, user: "member", hidden: false },
-        { mode: "on", server: open!, user: "admin", hidden: false },
-        { mode: "all", server: allServer, user: "member", hidden: false },
-        { mode: "all", server: allServer, user: "admin", hidden: false },
-        { mode: "admins", server: running.get("admins")!, user: "member", hidden: true },
-        { mode: "admins", server: running.get("admins")!, user: "admin", hidden: false },
-        { mode: "off", server: running.get("off")!, user: "member", hidden: true },
-        { mode: "off", server: running.get("off")!, user: "admin", hidden: true },
+      // Member path is GET /api/team/<adminId> as the editor. Admin path is the same URL as the admin.
+      const cases: { mode: string; server: Running; user: "member" | "admin"; path: "member" | "admin"; hidden: boolean }[] = [
+        { mode: "on", server: open!, user: "member", path: "member", hidden: false },
+        { mode: "on", server: open!, user: "admin", path: "admin", hidden: false },
+        { mode: "all", server: allServer, user: "member", path: "member", hidden: false },
+        { mode: "all", server: allServer, user: "admin", path: "admin", hidden: false },
+        { mode: "admins", server: running.get("admins")!, user: "member", path: "member", hidden: true },
+        { mode: "admins", server: running.get("admins")!, user: "admin", path: "admin", hidden: false },
+        { mode: "off", server: running.get("off")!, user: "member", path: "member", hidden: true },
+        { mode: "off", server: running.get("off")!, user: "admin", path: "admin", hidden: true },
       ];
       const people = { member, admin };
       for (const example of cases) {
         const who = people[example.user];
-        const res = await call(example.server.base, who.cookie, "GET", `/api/team/${rep.id}`);
-        const label = `CRM_VISIBLE=${example.mode} user=${example.user}`;
+        const res = await call(example.server.base, who.cookie, "GET", `/api/team/${admin.id}`);
+        const label = `CRM_VISIBLE=${example.mode} ${example.path} path`;
         expect(res.status, `${label} ${res.text}`).toBe(200);
         if (example.hidden) assertHidden(res.text, res.json);
         else assertVisible(res.text);
+        if (example.path === "admin" && example.mode === "off") {
+          expect((res.json?.person as { openTasks?: number }).openTasks).toBe(1);
+        }
+        if (example.path === "admin" && example.mode === "admins") {
+          expect((res.json?.person as { openTasks?: number }).openTasks).toBe(2);
+        }
       }
 
       const admins = running.get("admins")!;
       const started = Date.now();
-      const burst = await Promise.all(Array.from({ length: 48 }, () => call(admins.base, member.cookie, "GET", `/api/team/${rep.id}`)));
+      const burst = await Promise.all(Array.from({ length: 48 }, () => call(admins.base, member.cookie, "GET", `/api/team/${admin.id}`)));
       const ms = Date.now() - started;
       expect(burst).toHaveLength(48);
       for (const res of burst) {
