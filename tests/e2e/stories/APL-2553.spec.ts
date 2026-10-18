@@ -1,14 +1,14 @@
 // SHO-US-22.5 Lists and tables on phones (APL-2553). Epic SHO-E22.
 // Runs against staging. Data: ZZ-TEST projects (one with a 96-character name) and one ZZ-TEST person with a 41-character surname
 // (added at an address on the reserved .invalid domain, so no real inbox is mailed; deactivated afterwards).
-import { test, expect, zz, RUN, login } from "../support";
+import { test, expect, zz, RUN, login, BASE_URL } from "../support";
 import type { Browser } from "@playwright/test";
 
 async function phone(browser: Browser, width: number, height = 800, touch = true, who: "admin" | "member" = "admin") {
   const email = who === "admin" ? login("ADMIN").email : login("MEMBER").email;
   const password = who === "admin" ? login("ADMIN").password : login("MEMBER").password;
   const ctx = await browser.newContext({
-    baseURL: process.env.STAGING_URL ?? "https://staging.sheethappensofficer.com",
+    baseURL: BASE_URL,
     httpCredentials: process.env.STAGING_USER ? { username: process.env.STAGING_USER, password: process.env.STAGING_PASS ?? "" } : undefined,
     viewport: { width, height }, hasTouch: touch, isMobile: touch,
   });

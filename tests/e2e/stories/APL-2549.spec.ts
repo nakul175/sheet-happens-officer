@@ -1,6 +1,6 @@
 // SHO-US-22.1 Phone-ready foundations (APL-2549). Epic SHO-E22.
 // Runs against staging. Data: one ZZ-TEST project, archived afterwards.
-import { test, expect, zz, type Json, login } from "../support";
+import { test, expect, zz, type Json, login, BASE_URL } from "../support";
 import type { Browser } from "@playwright/test";
 
 const WIDTHS = [320, 344, 360, 375, 390, 412, 440, 600, 768];
@@ -8,7 +8,7 @@ const WIDTHS = [320, 344, 360, 375, 390, 412, 440, 600, 768];
 async function phone(browser: Browser, width: number, height = 800, touch = true) {
   const email = login("ADMIN").email, password = login("ADMIN").password;
   const ctx = await browser.newContext({
-    baseURL: process.env.STAGING_URL ?? "https://staging.sheethappensofficer.com",
+    baseURL: BASE_URL,
     httpCredentials: process.env.STAGING_USER ? { username: process.env.STAGING_USER, password: process.env.STAGING_PASS ?? "" } : undefined,
     viewport: { width, height }, hasTouch: touch, isMobile: touch,
   });

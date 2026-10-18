@@ -1,7 +1,9 @@
 // Shared helpers for the story specs. No credential is written here: all come from the environment.
 import { test as base, expect, type APIRequestContext, type Browser, type BrowserContext, type Page } from "@playwright/test";
 
-export { expect };
+import { BASE_URL } from "./base-url";
+
+export { expect, BASE_URL };
 
 /** One id per run so names never clash between runs. */
 export const RUN = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
@@ -87,7 +89,7 @@ const WANT: Record<Role, string> = { ADMIN: "SUPER_ADMIN", MEMBER: "MEMBER" };
 async function as(browser: Browser, role: Role) {
   const { email, password: pw, from } = login(role);
   const ctx = await browser.newContext({
-    baseURL: process.env.STAGING_URL ?? "https://staging.sheethappensofficer.com",
+    baseURL: BASE_URL,
     httpCredentials: process.env.STAGING_USER ? { username: process.env.STAGING_USER, password: process.env.STAGING_PASS ?? "" } : undefined,
   });
   const user = await signIn(ctx, email, pw);
@@ -118,7 +120,7 @@ export const test = base.extend<Fixtures>({
   },
   anon: async ({ browser }, use) => {
     const ctx = await browser.newContext({
-      baseURL: process.env.STAGING_URL ?? "https://staging.sheethappensofficer.com",
+      baseURL: BASE_URL,
       httpCredentials: process.env.STAGING_USER ? { username: process.env.STAGING_USER, password: process.env.STAGING_PASS ?? "" } : undefined,
     });
     await use(await ctx.newPage());

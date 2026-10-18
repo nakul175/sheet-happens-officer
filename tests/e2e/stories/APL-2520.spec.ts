@@ -1,8 +1,8 @@
 // SHO-US-9.3 Production deployment and backups  (Linear APL-2520)
 // Only what a browser can see is automated here: the health pages and HTTPS. Infrastructure criteria are skipped with the reason.
-import { test, expect } from "../support";
+import { test, expect, BASE_URL } from "../support";
 
-const base = process.env.STAGING_URL ?? "https://staging.sheethappensofficer.com";
+const base = BASE_URL;
 
 test("AC1: the app is served over HTTPS and its health check passes", async ({ admin }) => {
   test.skip(!base.startsWith("https://"), "HTTPS can only be checked against the real staging URL, not a local http server");

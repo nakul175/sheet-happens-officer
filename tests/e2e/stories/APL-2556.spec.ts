@@ -2,7 +2,7 @@
 // Runs against staging. Data: one ZZ-TEST project, archived afterwards. The concierge tests need the concierge switched ON on the
 // server (a model key and MODEL_DATA_APPROVED); when it is off they skip, and AC4 (the off notice) runs instead.
 // Skipped always: Confirm/Cancel (AC2 part) and the undo toast (AC5) need the concierge to propose a change through the model, which a story test must not trigger.
-import { test, expect, zz, login } from "../support";
+import { test, expect, zz, login, BASE_URL } from "../support";
 import type { Page } from "@playwright/test";
 import type { Browser } from "@playwright/test";
 
@@ -10,7 +10,7 @@ async function phone(browser: Browser, width: number, height = 800, touch = true
   const email = who === "admin" ? login("ADMIN").email : login("MEMBER").email;
   const password = who === "admin" ? login("ADMIN").password : login("MEMBER").password;
   const ctx = await browser.newContext({
-    baseURL: process.env.STAGING_URL ?? "https://staging.sheethappensofficer.com",
+    baseURL: BASE_URL,
     httpCredentials: process.env.STAGING_USER ? { username: process.env.STAGING_USER, password: process.env.STAGING_PASS ?? "" } : undefined,
     viewport: { width, height }, hasTouch: touch, isMobile: touch,
   });

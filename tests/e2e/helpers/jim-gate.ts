@@ -3,7 +3,7 @@
 // 1. /api/health answers { release: <git SHA> } (deploy/release.sh). If that is the PR's head commit, the PR is live.
 // 2. Otherwise a probe looks for a behaviour only that PR has. A probe that ACTS (creates a ZZ-TEST project) cleans up through `later`.
 // Each answer is worked out once per run and recorded on every test that asks, as a "deployed" annotation.
-import { test, expect } from "../support";
+import { test, expect, BASE_URL } from "../support";
 import { getTask, newProject, newTask, type Who } from "../g2";
 import { deleteTask } from "./jim-http";
 
@@ -14,9 +14,9 @@ export type Gate = { pr: number; deployed: boolean; how: string };
 const HEADS: Record<number, string> = { 6: "13a836e8b6", 9: "87721120b9", 12: "72d2a3d88b", 14: "375e04c33c" };
 
 let releaseOnce: Promise<string | null> | null = null;
-/** The git SHA staging says it runs, or null when /api/health does not say. */
+/** The git SHA the app under test (BASE_URL: staging or a pr1-pr4 preview) says it runs, or null when /api/health does not say. */
 export function stagingRelease(who: Who) {
-  releaseOnce ??= who.api.get("/api/health").then((r) => (typeof r.json.release === "string" && r.json.release ? r.json.release : null), () => null);
+  releaseOnce ??= who.api.get(`${BASE_URL}/api/health`).then((r) => (typeof r.json.release === "string" && r.json.release ? r.json.release : null), () => null);
   return releaseOnce;
 }
 

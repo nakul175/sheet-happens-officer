@@ -1,7 +1,7 @@
 // SHO-US-22.11 Automated phone checks in CI (APL-2559).
 // The acceptance criteria describe the GitHub Actions workflow (.github/workflows/phone-checks.yml)
 // and the viewport suite (tests/viewport, `npm run test:viewport`). They are not behaviour of the staging app.
-// This Playwright project runs against STAGING_URL. The viewport suite refuses any host that is not localhost,
+// This Playwright project runs against BASE_URL. The viewport suite refuses any host that is not localhost,
 // uses its own throw-away database, and must not be pointed at staging or production.
 // Nothing below signs in or calls the network. There is no test that reads or writes the production database,
 // and no real customer data is seeded from here.

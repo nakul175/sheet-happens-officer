@@ -1,12 +1,12 @@
 // SHO-US-22.2 Touch targets (APL-2550). Epic SHO-E22.
 // Runs against staging. Data: one ZZ-TEST project with two tasks, archived afterwards.
-import { test, expect, zz, login } from "../support";
+import { test, expect, zz, login, BASE_URL } from "../support";
 import { collect } from "../../viewport/checks";
 import type { Browser } from "@playwright/test";
 
 async function phone(browser: Browser, width: number, height = 800, touch = true) {
   const ctx = await browser.newContext({
-    baseURL: process.env.STAGING_URL ?? "https://staging.sheethappensofficer.com",
+    baseURL: BASE_URL,
     httpCredentials: process.env.STAGING_USER ? { username: process.env.STAGING_USER, password: process.env.STAGING_PASS ?? "" } : undefined,
     viewport: { width, height }, hasTouch: touch, isMobile: touch,
   });

@@ -1,7 +1,7 @@
 // SHO-US-23.2 Super Admin adds a person (APL-2621). Acceptance criteria AC1 to AC7.
 // Added people get an address like zz-test-<run>-<label>@example.invalid, so no real inbox is mailed. They are deactivated at the end;
 // a person record cannot be deleted from the app.
-import { test, expect, RUN } from "../support";
+import { test, expect, RUN, BASE_URL } from "../support";
 
 const SLOW = { timeout: 90_000 };
 const email = (label: string) => `zz-test-${RUN}-${label}@example.invalid`;
@@ -107,7 +107,7 @@ test.describe("SHO-US-23.2 / APL-2621", () => {
     // A different, never-added address on that domain cannot self-sign-up: the domain rule still applies there.
     // (The added address would be refused as a duplicate, which would not prove the domain rule.)
     const anon = await (await import("@playwright/test")).request.newContext({
-      baseURL: process.env.STAGING_URL ?? "https://staging.sheethappensofficer.com",
+      baseURL: BASE_URL,
       httpCredentials: process.env.STAGING_USER ? { username: process.env.STAGING_USER, password: process.env.STAGING_PASS ?? "" } : undefined,
     });
     try {

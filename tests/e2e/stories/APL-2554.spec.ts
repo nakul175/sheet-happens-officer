@@ -1,13 +1,13 @@
 // SHO-US-22.6 Board on phones (APL-2554). Epic SHO-E22.
 // Runs against staging. Data: ZZ-TEST projects with ZZ-TEST tasks, archived afterwards. AC3 needs SHO_MEMBER_EMAIL / SHO_MEMBER_PASS.
-import { test, expect, zz, login } from "../support";
+import { test, expect, zz, login, BASE_URL } from "../support";
 import type { Browser } from "@playwright/test";
 
 async function phone(browser: Browser, width: number, height = 800, touch = true, who: "admin" | "member" = "admin") {
   const email = who === "admin" ? login("ADMIN").email : login("MEMBER").email;
   const password = who === "admin" ? login("ADMIN").password : login("MEMBER").password;
   const ctx = await browser.newContext({
-    baseURL: process.env.STAGING_URL ?? "https://staging.sheethappensofficer.com",
+    baseURL: BASE_URL,
     httpCredentials: process.env.STAGING_USER ? { username: process.env.STAGING_USER, password: process.env.STAGING_PASS ?? "" } : undefined,
     viewport: { width, height }, hasTouch: touch, isMobile: touch,
   });

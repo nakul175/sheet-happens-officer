@@ -1,7 +1,7 @@
 // SHO-US-1.6 Manage my own profile and sessions (APL-2479). Acceptance criteria AC1 to AC4.
 // These change a person's name, password and sessions, so they run on the plain Member account (SHO_MEMBER_EMAIL / SHO_MEMBER_PASS)
 // and put the name and password back at the end. They skip when no Member account is configured.
-import { test, expect, RUN, zz, login } from "../support";
+import { test, expect, RUN, zz, login, BASE_URL } from "../support";
 
 const PASSWORD_MESSAGE = "Use at least 8 characters, with at least one letter and one number.";
 
@@ -32,7 +32,7 @@ test.describe("SHO-US-1.6 / APL-2479", () => {
     const current = login("MEMBER").password;
     const next = `Zz${RUN}9q`;
     const other = await browser.newContext({
-      baseURL: process.env.STAGING_URL ?? "https://staging.sheethappensofficer.com",
+      baseURL: BASE_URL,
       httpCredentials: process.env.STAGING_USER ? { username: process.env.STAGING_USER, password: process.env.STAGING_PASS ?? "" } : undefined,
     });
     let changed = false;
@@ -71,7 +71,7 @@ test.describe("SHO-US-1.6 / APL-2479", () => {
 
   test("AC3: Sign out everywhere ends every session, including this one, and goes to Sign in", async ({ member, browser }) => {
     const other = await browser.newContext({
-      baseURL: process.env.STAGING_URL ?? "https://staging.sheethappensofficer.com",
+      baseURL: BASE_URL,
       httpCredentials: process.env.STAGING_USER ? { username: process.env.STAGING_USER, password: process.env.STAGING_PASS ?? "" } : undefined,
     });
     try {
