@@ -119,7 +119,7 @@ function buildReply(turn: Turn, modelText: string, request: string): Stored {
     return {
       kind: "card", text: `${c.card.title}. Review it and tap Confirm to apply it.`,
       card: { id: "", status: "PENDING", ...c.card },
-      proposal: { ops: c.ops, fingerprint: c.fingerprint },
+      proposal: { ops: c.ops, fingerprint: c.fingerprint, versions: c.versions },
     };
   }
   if (turn.tooMany) {
