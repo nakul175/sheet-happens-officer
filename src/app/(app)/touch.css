@@ -12,4 +12,6 @@
   label:has(> input[type="checkbox"]), label:has(> input[type="radio"]) { display: inline-flex; align-items: center; gap: 4px; min-height: 44px; }
   .dcard > div > a, .dcard a { display: inline-flex; align-items: center; min-height: 44px; min-width: 44px; }
   .tt { min-height: 44px; }
+  /* SHO-US-15.4: person names on the Team list are links inside a bold tag; keep a 44 px tap area. */
+  .tbl td b > a, .item .t b > a { display: inline-flex; align-items: center; min-height: 44px; min-width: 44px; }
 }

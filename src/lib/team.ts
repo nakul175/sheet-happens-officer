@@ -2,7 +2,8 @@ import { db } from "@/lib/db";
 import { ApiError, notFound } from "@/lib/http";
 import { activeMember, isActive, isAdmin, leaderId, type Actor } from "@/lib/access";
 import { auditTx, notify } from "@/lib/notify";
-import { superAdminEmails } from "@/lib/auth";
+import { generatePassword, hashPassword, superAdminEmails } from "@/lib/auth";
+import { sendMail, signInDetailsMail } from "@/lib/email";
 import { releasePerson } from "@/lib/people";
 
 /**
@@ -107,4 +108,98 @@ export async function reactivate(actor: Actor, targetId: string) {
     await tx.user.update({ where: { id: targetId }, data: { deactivatedAt: null } });
     await auditTx(tx, "USER_REACTIVATED", { actorId: actor.id, targetId });
   });
+}
+
+type AddInput = { firstName: string; lastName: string; email: string; role: "MEMBER" | "ADMIN" };
+
+/** SHO-US-15.2. Super Admin only. The account is active at once; the password goes out by email and is never stored in clear. */
+export async function addPerson(actor: Actor & { name?: string }, input: AddInput) {
+  if (actor.orgRole !== "SUPER_ADMIN") throw new ApiError(403, "Only the Super Admin can add people.");
+  const existing = await db.user.findUnique({ where: { email: input.email } });
+  if (existing) {
+    throw new ApiError(409, existing.deactivatedAt ? "This person already has an account and is deactivated. Reactivate them from the Team list." : "A person with this email already exists.", {
+      existingId: existing.id,
+    });
+  }
+  const workspace =
+    (await db.workspace.findFirst({ orderBy: { createdAt: "asc" } })) ?? (await db.workspace.create({ data: { name: "Workspace" } }));
+  const password = generatePassword();
+  const now = new Date();
+  const user = await db.$transaction(async (tx) => {
+    const u = await tx.user.create({
+      data: {
+        workspaceId: workspace.id,
+        email: input.email,
+        name: `${input.firstName} ${input.lastName}`,
+        passwordHash: await hashPassword(password),
+        emailVerifiedAt: now,
+        tempPasswordAt: now,
+        // A listed Super Admin address stays Super Admin whatever role was picked (SHO-US-2.1 AC3).
+        orgRole: superAdminEmails().includes(input.email) ? "SUPER_ADMIN" : input.role,
+      },
+    });
+    await auditTx(tx, "USER_ADDED_BY_ADMIN", { actorId: actor.id, targetId: u.id, data: { role: u.orgRole } });
+    return u;
+  });
+  const emailSent = await sendDetails(user.email, input.firstName, actor.name ?? "A Super Admin", password);
+  return { id: user.id, name: user.name, email: user.email, orgRole: user.orgRole, emailSent };
+}
+
+async function sendDetails(to: string, firstName: string, by: string, password: string) {
+  try {
+    await sendMail(signInDetailsMail(to, firstName, by, password));
+    return true;
+  } catch {
+    return false; // the account exists; the Super Admin is told and can resend
+  }
+}
+
+/** SHO-US-15.3. New password, old one dead, every session signed out. The Super Admin never sees it. */
+export async function resendSignIn(actor: Actor & { name?: string }, targetId: string) {
+  if (actor.orgRole !== "SUPER_ADMIN") throw new ApiError(403, "Only the Super Admin can resend sign-in details.");
+  const target = await db.user.findUnique({ where: { id: targetId } });
+  if (!target) throw notFound("Person");
+  if (target.id === actor.id) throw new ApiError(409, "Use Profile to change your own password.");
+  if (target.deactivatedAt) throw new ApiError(409, "Reactivate this person first.");
+  const password = generatePassword();
+  const now = new Date();
+  await db.$transaction(async (tx) => {
+    await tx.user.update({ where: { id: targetId }, data: { passwordHash: await hashPassword(password), tempPasswordAt: now, emailVerifiedAt: target.emailVerifiedAt ?? now } });
+    await tx.session.updateMany({ where: { userId: targetId, revokedAt: null }, data: { revokedAt: now } });
+    await tx.loginAttempt.deleteMany({ where: { email: target.email } });
+    await auditTx(tx, "USER_SIGNIN_RESENT", { actorId: actor.id, targetId });
+  });
+  const emailSent = await sendDetails(target.email, target.name.split(" ")[0], actor.name ?? "A Super Admin", password);
+  return { emailSent };
+}
+
+/** SHO-US-15.4. Members see a name and shared projects. Admins see the rest. */
+export async function getPerson(actor: Actor, targetId: string) {
+  const target = await db.user.findUnique({ where: { id: targetId } });
+  const admin = isAdmin(actor);
+  if (!target || (!admin && !isActive(target))) throw notFound("Person");
+  const mine = admin ? null : new Set((await db.projectMember.findMany({ where: { userId: actor.id }, select: { projectId: true } })).map((m) => m.projectId));
+  const rows = await db.projectMember.findMany({
+    where: { userId: targetId, project: { archivedAt: null } },
+    include: { project: { select: { id: true, name: true } } },
+    orderBy: { project: { name: "asc" } },
+  });
+  const shown = mine ? rows.filter((m) => mine.has(m.projectId)) : rows;
+  if (!admin) return { id: target.id, name: target.name, projects: shown.map((m) => ({ id: m.project.id, name: m.project.name })) };
+  const open = await db.task.groupBy({
+    by: ["projectId"],
+    where: { assigneeId: targetId, completedAt: null, deletedAt: null, parentId: null },
+    _count: { _all: true },
+  });
+  const byProject = new Map(open.map((o) => [o.projectId, o._count._all]));
+  return {
+    id: target.id,
+    name: target.name,
+    email: target.email,
+    orgRole: target.orgRole,
+    status: target.deactivatedAt ? "DEACTIVATED" : !target.emailVerifiedAt ? "UNVERIFIED" : "ACTIVE",
+    joinedAt: target.createdAt.toISOString(),
+    openTasks: open.reduce((n, o) => n + o._count._all, 0),
+    projects: shown.map((m) => ({ id: m.project.id, name: m.project.name, role: m.role, openTasks: byProject.get(m.projectId) ?? 0 })),
+  };
 }

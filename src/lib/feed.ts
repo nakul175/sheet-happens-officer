@@ -245,7 +245,7 @@ export async function changePassword(user: Actor, current: string, password: str
   if (!(await verifyPassword(current, u.passwordHash))) throw new ApiError(400, "Your current password is not correct.");
   const keep = await currentSessionId();
   await db.$transaction([
-    db.user.update({ where: { id: user.id }, data: { passwordHash: await hashPassword(password) } }),
+    db.user.update({ where: { id: user.id }, data: { passwordHash: await hashPassword(password), tempPasswordAt: null } }),
     db.session.updateMany({ where: { userId: user.id, revokedAt: null, ...(keep ? { id: { not: keep } } : {}) }, data: { revokedAt: new Date() } }),
     db.auditLog.create({ data: { event: "PASSWORD_CHANGED", actorId: user.id, channel: "SCREEN" } }),
   ]);
