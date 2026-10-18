@@ -2,7 +2,7 @@
 // Acceptance criteria: AC1 done flag, AC2 Activity rows, AC3 delete into done, AC4 flag moved away, AC5 no reminder for a closed subtask.
 // AC1 and AC3 allow either fix ("refused with a reason" OR "parent and both subtasks completed"), so each test accepts both and says which it saw.
 // Tests marked [needs PR #6] check the reopen half, which is only fixed by PR #6 (src/lib/sections.ts reopenedSubtasks, src/lib/undo.ts).
-// Covers Jim's PR #6 steps: (1) flag done, 3 complete + 3 rows; (2) flag back, 3 reopen; (3) undo, 3 close; (4) delete into done, 3 complete + 3 rows; plus the pre-ticked subtask case (PENDING NJ's AC4 decision).
+// Covers Jim's PR #6 steps: (1) flag done, 3 complete + 3 rows; (2) flag back, 3 reopen; (3) undo, 3 close; (4) delete into done, 3 complete + 3 rows; plus the pre-ticked subtask case (AC4 as reworded by APL-2671).
 // Run them on a build that has that PR; on main they fail by design, and that failure is the bug.
 // AC5 note: the reminder job needs a job secret that a browser session does not have, so the test checks the input the job reads
 // (src/lib/jobs.ts sendReminders only picks tasks with completedAt null): a closed subtask must be gone from the assignee's My tasks.
@@ -107,20 +107,22 @@ test("AC5: a subtask closed with its parent is no longer an open task for its ho
   for (const s of t.subs) expect(await inMyTasks(admin, s), "a closed subtask is gone from My tasks, so no reminder").toBe(false);
 });
 
-test("AC4 [needs PR #6] (PENDING AC4 decision (NJ): asserts PR #6 behaviour, not the written AC): a subtask ticked done BEFORE its parent entered the done section also reopens with the parent", async ({ admin, later }) => {
+test("AC4 [needs PR #6] (APL-2671): a subtask ticked done BEFORE its parent entered the done section stays done when the done flag moves back", async ({ admin, later }) => {
   const gate = await prLive(6, admin, null, later);
   test.skip(!gate.deployed, notLive(gate, NEEDS_6));
-  // PENDING AC4 decision (NJ, via Michael on APL-2610): PR #6 reopens every done subtask of a reopened parent (src/lib/sections.ts reopenedSubtasks),
-  // including one completed on its own earlier. The written AC4 says "completed with them", so a pass here does NOT pass AC4 as written.
+  // AC4 as reworded (NJ decision 18 Oct 2026, APL-2671): only subtasks completed together with the parent reopen with it;
+  // a subtask ticked done on its own before the parent was completed stays done, with its own completedAt.
   const t = await tree(admin, later, "bug3 preticked");
   expect((await admin.api.post(`/api/tasks/${t.subs[0]}/complete`)).status).toBe(200); // ticked on its own, parent still open
   expect(await states(admin, t.all)).toEqual([false, true, false]);
+  const ticked = (await getTask(admin, t.subs[0])).completedAt;
   const on = await admin.api.patch(`/api/projects/${t.p.id}/sections/${t.p.doing}`, { isDone: true });
   test.skip(on.status !== 200, "this build refuses the change (AC1 option 1), so nothing reopens");
   expect(await states(admin, t.all), "all three are complete after the change").toEqual([true, true, true]);
   const back = await admin.api.patch(`/api/projects/${t.p.id}/sections/${t.p.done}`, { isDone: true });
   expect(back.status, JSON.stringify(back.json)).toBe(200);
-  expect(await states(admin, t.all), "parent, the pre-ticked subtask and the other subtask are all open").toEqual([false, false, false]);
+  expect(await states(admin, t.all), "parent and the cascaded subtask reopen; the pre-ticked subtask stays done").toEqual([false, true, false]);
+  expect((await getTask(admin, t.subs[0])).completedAt, "the pre-ticked subtask keeps its own completedAt").toBe(ticked);
 });
 
 test("AC5 [needs PR #6]: a subtask with a due date that closed with its parent gets no reminder notification", async ({ admin, later }) => {
@@ -164,4 +166,42 @@ test("APL-2678 [needs PR #6]: moving the done flag leaves a parent task in Trash
   const after = await getTask(admin, trashed);
   expect(after.completedAt, "completedAt unchanged by the flag move").toBe(before.completedAt);
   expect(after.sectionId, "still in the section it was trashed from").toBe(before.sectionId);
+});
+
+// APL-2671 (AC4 reworded): through the task's own Complete and Reopen, which the done-flag tests above do not use.
+/** A parent with two open subtasks held by the Super Admin. */
+async function family(admin: Who, later: Later, label: string) {
+  const p = await newProject(admin, later, { label });
+  const parent = await newTask(admin, p.id, { title: zz(`${label} parent`) });
+  const a = await newTask(admin, p.id, { title: zz(`${label} sub A`), parentId: parent, assigneeId: admin.user.id });
+  const b = await newTask(admin, p.id, { title: zz(`${label} sub B`), parentId: parent, assigneeId: admin.user.id });
+  return { parent, a, b };
+}
+
+test("APL-2671 AC2: a subtask ticked done on its own before the parent was completed stays done when the parent is reopened", async ({ admin, later }) => {
+  const gate = await prLive(6, admin, null, later);
+  test.skip(!gate.deployed, notLive(gate, NEEDS_6));
+  const f = await family(admin, later, "2671 ac2");
+  // Both subtasks ticked on their own, so nothing cascades when the parent completes.
+  for (const s of [f.a, f.b]) expect((await admin.api.post(`/api/tasks/${s}/complete`, {})).status).toBe(200);
+  const ticked = await Promise.all([f.a, f.b].map(async (s) => (await getTask(admin, s)).completedAt));
+  expect((await admin.api.post(`/api/tasks/${f.parent}/complete`, {})).status).toBe(200);
+  expect(await states(admin, [f.parent, f.a, f.b])).toEqual([true, true, true]);
+  expect((await admin.api.post(`/api/tasks/${f.parent}/reopen`, {})).status).toBe(200);
+  expect(await states(admin, [f.parent, f.a, f.b]), "the parent reopens; both subtasks ticked on their own stay done").toEqual([false, true, true]);
+  for (const [i, s] of [f.a, f.b].entries()) expect((await getTask(admin, s)).completedAt, "keeps its own completedAt").toBe(ticked[i]);
+});
+
+test("APL-2671 AC3: with A ticked alone and B cascaded under one parent, reopening the parent reopens only B", async ({ admin, later }) => {
+  const gate = await prLive(6, admin, null, later);
+  test.skip(!gate.deployed, notLive(gate, NEEDS_6));
+  const f = await family(admin, later, "2671 ac3");
+  expect((await admin.api.post(`/api/tasks/${f.a}/complete`, {})).status).toBe(200); // A ticked alone; B left open
+  const tickedA = (await getTask(admin, f.a)).completedAt;
+  expect((await admin.api.post(`/api/tasks/${f.parent}/complete`, { completeAll: true })).status).toBe(200); // B cascades
+  expect(await states(admin, [f.parent, f.a, f.b]), "parent, A and B are all done").toEqual([true, true, true]);
+  expect((await admin.api.post(`/api/tasks/${f.parent}/reopen`, {})).status).toBe(200);
+  expect(await states(admin, [f.parent, f.a, f.b]), "the parent and B reopen; A stays done").toEqual([false, true, false]);
+  expect((await getTask(admin, f.a)).completedAt, "A keeps its own completedAt").toBe(tickedA);
+  expect((await getTask(admin, f.parent)).subtasks, "the parent shows one open subtask of two").toEqual({ total: 2, open: 1 });
 });
