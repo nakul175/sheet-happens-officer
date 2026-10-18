@@ -151,6 +151,39 @@ describe("APL-2652 safe return path", () => {
     }
   });
 
+  it("a session that expires mid-use returns to the deep link", async () => {
+    const realFetch = globalThis.fetch;
+    const realWindow = (globalThis as { window?: unknown }).window;
+    const assigned: string[] = [];
+    (globalThis as { window?: unknown }).window = {
+      location: {
+        pathname: "/tasks/T1",
+        search: "",
+        set href(value: string) { assigned.push(value); },
+        get href() { return assigned.at(-1) ?? ""; },
+      },
+      dispatchEvent() {},
+    };
+    globalThis.fetch = (async () =>
+      new Response(JSON.stringify({ error: "Not signed in" }), {
+        status: 401,
+        headers: { "content-type": "application/json" },
+      })) as typeof fetch;
+    try {
+      // The person is already on the task. The next API call is the expired session.
+      expect((await api("GET", "/api/tasks/T1")).status).toBe(401);
+      const href = signInHref("/tasks/T1", { expired: true });
+      expect(assigned).toEqual([href]);
+      const url = new URL(href, BASE_ORIGIN);
+      expect(url.pathname).toBe("/signin");
+      expect(url.searchParams.get("expired")).toBe("1");
+      expect(safeReturnPath(url.searchParams.get("next"))).toBe("/tasks/T1");
+    } finally {
+      globalThis.fetch = realFetch;
+      (globalThis as { window?: unknown }).window = realWindow;
+    }
+  });
+
   it("a 401 from api() navigates with expired=1 and the return path, and stays on /signin and /signin/", async () => {
     const realFetch = globalThis.fetch;
     const realWindow = (globalThis as { window?: unknown }).window;

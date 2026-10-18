@@ -168,7 +168,7 @@ describe("APL-2652 sign-in returns to the deep link", () => {
     } finally { await ctx.close(); }
   });
 
-  it("an expired session keeps expired=1 and the return path, and stays put on /signin", async () => {
+  it("a session that expires mid-use returns to the deep link", async () => {
     const ctx = await browser.newContext({ viewport: { width: 1024, height: 800 }, baseURL: BASE });
     const page = await ctx.newPage();
     try {
