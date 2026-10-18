@@ -7,6 +7,7 @@ import { fitBlockedReason } from "@/components/blocked-reason";
 import { Confirm, Modal, Skeleton } from "@/components/ui";
 import { ConvertDialog } from "@/components/ConvertDialog";
 import { TaskLinks } from "@/components/TaskLinks";
+import { closeControlOffered } from "@/lib/approver-ui";
 import { useMe } from "@/app/(app)/Shell";
 
 type P = { id: string; name: string };
@@ -253,7 +254,7 @@ export function TaskModal({ id, me, onClose, onChanged, asPage }: { id: string; 
             {canEdit && task.awaitingApproval && (task.approver?.id === me || canManage) && (
               <button className="btn ghost" disabled={busy} onClick={() => run(api("POST", `/api/tasks/${id}/send-back`, {}))}>Send back</button>
             )}
-            {canEdit && !done && task.canClose && (
+            {closeControlOffered({ canEdit, done, canClose: task.canClose }) && (
               <button className="btn" disabled={busy} onClick={() => complete()}>{task.approver ? "Close task" : "Mark complete"}</button>
             )}
             {canEdit && done && <button className="btn ghost" disabled={busy} onClick={() => run(api("POST", `/api/tasks/${id}/reopen`, {}))}>Reopen</button>}
