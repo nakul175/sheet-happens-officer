@@ -1,3 +1,4 @@
+import { assertTaskReadable } from "@/lib/task-access";
 import { ensureNextStep } from "@/lib/deals";
 import { crmProjectWhere } from "@/lib/crm";
 import { linksOfTask } from "@/lib/records";
@@ -74,6 +75,11 @@ async function loadTask(user: Actor, id: string, o: { write?: boolean; deleted?:
     throw new ApiError(403, "While you hold this task for approval you can only close it or send it back.");
   }
   return { t, a };
+}
+
+/** The task page may show this id. Missing and no-access both throw "Task not found". */
+export async function visibleTask(user: Actor, id: string) {
+  await assertTaskReadable(user, id);
 }
 
 export const ORDER = [{ dueDate: { sort: "asc", nulls: "last" } }, { createdAt: "asc" }, { id: "asc" }] as const;
