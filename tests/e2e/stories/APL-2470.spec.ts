@@ -3,6 +3,7 @@
 // Undo of deactivation and bulk reassignment is excluded, per the epic.
 import { test, login } from "../support";
 import { patchCurrent } from "../helpers/jim-http";
+import { activityRow } from "../helpers/screen-row";
 import {
   PASS, passwordOk, gate, verifiedUser, deactivate, makeProject, archiveProject, expect, zz,
 } from "./qa";
@@ -56,7 +57,7 @@ test("AC2: restoring a task from Trash puts it back in the project with its data
   const id = created.json.task.id as string;
   expect((await admin.api.del(`/api/tasks/${id}`)).status).toBe(204);
   await admin.page.goto(`/projects/${project.id}/trash`);
-  const row = admin.page.locator("tr", { hasText: title });
+  const row = admin.page.getByRole("row", { name: new RegExp(title) });
   await row.getByRole("button", { name: "Restore" }).click();
   await expect.poll(async () => (await admin.api.get(`/api/tasks/${id}`)).status).toBe(200);
   const task = (await admin.api.get(`/api/tasks/${id}`)).json.task;
@@ -104,7 +105,7 @@ test("AC4: Undo restores a task, a project and a membership change", async ({ ad
 
   const undo = async (what: string, undone: string) => {
     await admin.page.goto(`/projects/${project.id}/activity`);
-    const row = admin.page.locator(".item.act").filter({ hasText: what }).filter({ hasNotText: "added " });
+    const row = activityRow(admin.page, what === "Viewer" ? /to Viewer/ : `to "${what}"`);
     await expect(row, what).toHaveCount(1);
     await row.getByRole("button", { name: "Undo" }).click();
     // The toast names this undo. A previous "Undone:" line can still be on screen after the last one.
@@ -143,7 +144,7 @@ test("AC5: Undo warns when the data changed after the action, before it proceeds
   expect((await admin.api.get(`/api/tasks/${id}`)).json.task.title).toBe(third);
 
   await admin.page.goto(`/projects/${project.id}/activity`);
-  const row = admin.page.locator(".item.act").filter({ hasText: original }).filter({ hasText: second });
+  const row = activityRow(admin.page, original, second);
   await expect(row).toHaveCount(1);
   await row.getByRole("button", { name: "Undo" }).click();
   const dialog = admin.page.getByRole("dialog", { name: "Undo conflict" });
@@ -172,7 +173,7 @@ test("AC6: the Super Admin's organisation audit log shows org-level actions and 
   await admin.page.goto("/audit");
   await expect(admin.page.getByRole("heading", { name: "Audit log" })).toBeVisible();
   const event = admin.page.getByLabel("Event");
-  await expect(event.locator("option", { hasText: "ADMIN_PROMOTED" })).toBeAttached();
   await event.selectOption("ADMIN_PROMOTED");
+  await expect(event).toHaveValue("ADMIN_PROMOTED");
   await expect(admin.page.getByText(`Person "${member.name}"`)).toBeVisible();
 });
