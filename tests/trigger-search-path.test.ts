@@ -3,12 +3,12 @@
 // - The only schema this file creates or drops is sho_test_trg_<random>.
 // - It never drops, migrates, or writes public or a sho_pr* schema.
 // - TRIGGER_TEST_ALLOW cannot override a refusal.
-// - The "pooled" case simulates a lost search_path. It does not open PgBouncer.
+// - The pooled case is SIMULATED. It does not open PgBouncer.
 //
 // Self-check:
 // - [x] Throwaway schema only, dropped only that schema
 // - [x] Guard allows only localhost, 127.0.0.1, or a sho_test_ database, and refuses defaultdb, sho_staging, public, and sho_pr*
-// - [x] Pooled test is a search_path simulation
+// - [x] Pooled test name contains SIMULATED; it is a search_path simulation
 // - [x] Public pin is proven with schema-qualified ALTER FUNCTION on the throwaway
 // - [x] Prod migration path documented as schema=public (direct connection)
 import "dotenv/config";
@@ -186,6 +186,8 @@ describe("@APL-2700 trigger search_path guards", () => {
     expect(readFileSync(path.join(process.cwd(), ".github/workflows/deploy.yml"), "utf8")).toContain("schema=public");
     expect(readFileSync(path.join(process.cwd(), "deploy/release.sh"), "utf8")).toContain(["prisma", command].join(" "));
     expect(readFileSync(path.join(MIGRATIONS, MIGRATION, "down.sql"), "utf8")).toContain("RESET search_path");
+    expect(src).toContain("SIMULATED");
+    expect(CONCURRENT_CREATES).toBeGreaterThanOrEqual(40);
   });
 });
 
@@ -278,9 +280,9 @@ describe.skipIf(!dbAllowed)("@APL-2700 trigger search_path in a throwaway schema
     expect(session.rows[0]?.search_path).toBe('"$user", public');
   });
 
-  // Simulates PgBouncer transaction mode: Prisma schema-qualifies SQL, and the
+  // SIMULATED PgBouncer transaction mode: Prisma schema-qualifies SQL, and the
   // session search_path stays at the role default. No PgBouncer process is used.
-  it("@APL-2700 qa:TC-APL2700-6f0a11c3@v1: task create and update work on a simulated pooled search_path", async () => {
+  it("@APL-2700 qa:TC-APL2700-6f0a11c3@v1: SIMULATED pooled search_path: task create and update work", async () => {
     const session = await pool!.query<{ search_path: string }>("SHOW search_path");
     expect(session.rows[0]?.search_path).toBe('"$user", public');
     const visible = await pool!.query<{ schemas: string[] }>("SELECT current_schemas(false) AS schemas");
@@ -333,7 +335,7 @@ describe.skipIf(!dbAllowed)("@APL-2700 trigger search_path in a throwaway schema
     expect(n.rows[0]?.n).toBe(8);
   });
 
-  it("@APL-2700 qa:TC-APL2700-6f0a11c6@v1: creates 40 tasks concurrently on the simulated pooled connection", async () => {
+  it("@APL-2700 qa:TC-APL2700-6f0a11c6@v1: load test: 40 concurrent task creates on the SIMULATED pooled search_path", async () => {
     const ids = Array.from({ length: CONCURRENT_CREATES }, (_, i) => `trg-load-${run}-${i}`);
     await Promise.all(
       ids.map((id, i) => insertTask(pool!, { id, projectId: projectLoad, sectionId: secLoad, title: `Load ${i}` })),
