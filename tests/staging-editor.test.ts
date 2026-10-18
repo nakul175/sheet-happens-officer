@@ -153,6 +153,28 @@ describe("staging editor (APL-2682)", () => {
         message: "non-local database host",
       },
       {
+        name: "mixed-case staging name",
+        env: env({
+          DATABASE_URL: "postgresql://example:example@private-db-postgresql-nyc1-12345.db.ondigitalocean.com:25060/Sho_Staging",
+          DIRECT_DATABASE_URL: "postgresql://example:example@private-db-postgresql-nyc1-12345.db.ondigitalocean.com:25060/Sho_Staging",
+          PROD_DB_HOST: "",
+          PROD_DB_NAME: "",
+        }),
+        argv: ["--confirm-staging"],
+        message: "non-local database host",
+      },
+      {
+        name: "near-miss staging name",
+        env: env({
+          DATABASE_URL: "postgresql://example:example@db.example.com:5432/sho-staging",
+          DIRECT_DATABASE_URL: "postgresql://example:example@db.example.com:5432/sho-staging",
+          PROD_DB_HOST: "",
+          PROD_DB_NAME: "",
+        }),
+        argv: ["--confirm-staging"],
+        message: "non-local database host",
+      },
+      {
         name: "host query bypass",
         env: env({
           DATABASE_URL: "postgresql://example:example@localhost:5432/sho_test?host=private-db-postgresql-nyc1-12345.db.ondigitalocean.com",
@@ -173,12 +195,6 @@ describe("staging editor (APL-2682)", () => {
         }),
         argv: ["--confirm-staging"],
         message: "must not set host or dbname",
-      },
-      {
-        name: "uppercase prod name",
-        env: env({ PROD_DB_NAME: dbName.toUpperCase() }),
-        argv: ["--confirm-staging"],
-        message: "database name is production",
       },
     ];
     for (const item of cases) {
@@ -213,6 +229,20 @@ describe("staging editor (APL-2682)", () => {
     expect(code).toBe(1);
     expect(text).not.toContain("non-local database host");
     expectNoSecrets(text, [PASSWORD, "example:example", "ondigitalocean.com"]);
+  });
+
+  it("does not treat a different case of PROD_DB_NAME as the production database", async () => {
+    expect(dbName).not.toBe(dbName.toUpperCase());
+    let connected = false;
+    const connect: DbConnect = () => {
+      connected = true;
+      throw new Error("stop-before-query");
+    };
+    const { code, text } = await capture(() => runStagingEditor(env({ PROD_DB_NAME: dbName.toUpperCase() }), ["--confirm-staging"], connect));
+    expect(connected).toBe(true);
+    expect(code).toBe(1);
+    expect(text).not.toContain("database name is production");
+    expectNoSecrets(text, [PASSWORD, OTHER_PASSWORD]);
   });
 
   it("is idempotent and does not reset an existing password", async () => {
@@ -250,6 +280,11 @@ describe("staging editor (APL-2682)", () => {
       const again = await db.user.findUniqueOrThrow({ where: { email: EDITOR_EMAIL } });
       const leaderAgain = await db.user.findUniqueOrThrow({ where: { email: LEADER_EMAIL } });
       const projectAgain = await db.project.findFirstOrThrow({ where: { workspaceId, name: QA_PROJECT_NAME } });
+      expect(leaderAgain.id).not.toBe(again.id);
+      expect(again.deactivatedAt).toBeNull();
+      expect(leaderAgain.deactivatedAt).toBeNull();
+      expect(again.emailVerifiedAt).not.toBeNull();
+      expect(leaderAgain.emailVerifiedAt).not.toBeNull();
       expect(again.passwordHash).toBe(before.hash);
       expect(leaderAgain.passwordHash).toBe(leaderBefore.passwordHash);
       expect(await verifyPassword(PASSWORD, leaderAgain.passwordHash)).toBe(true);
@@ -269,12 +304,24 @@ describe("staging editor (APL-2682)", () => {
 
   it("keeps Editor rights on ZZ-TEST QA only and no admin role", async () => {
     const hash = "already-set-hash";
+    const leaderHash = "leader-already-set";
     const user = await db.user.create({
       data: {
         workspaceId,
         email: EDITOR_EMAIL,
         name: "ZZ Test Editor",
         passwordHash: hash,
+        orgRole: "ADMIN",
+        emailVerifiedAt: null,
+        deactivatedAt: new Date("2020-01-01T00:00:00.000Z"),
+      },
+    });
+    const dormant = await db.user.create({
+      data: {
+        workspaceId,
+        email: LEADER_EMAIL,
+        name: "Dormant Leader",
+        passwordHash: leaderHash,
         orgRole: "ADMIN",
         emailVerifiedAt: null,
         deactivatedAt: new Date("2020-01-01T00:00:00.000Z"),
@@ -288,9 +335,9 @@ describe("staging editor (APL-2682)", () => {
     const { code, text } = await capture(() => runStagingEditor(env({ STAGING_EDITOR_PASSWORD: OTHER_PASSWORD }), ["--confirm-staging"]));
     expect(code, text).toBe(0);
     expect(text).toContain("editorPassword: unchanged");
-    expect(text).toContain("leaderPassword: set");
+    expect(text).toContain("leaderPassword: unchanged");
     expect(text).toContain("leaderRole: LEADER");
-    expectNoSecrets(text, [PASSWORD, OTHER_PASSWORD, hash]);
+    expectNoSecrets(text, [PASSWORD, OTHER_PASSWORD, hash, leaderHash]);
 
     const after = await db.user.findUniqueOrThrow({ where: { id: user.id } });
     expect(after.orgRole).toBe("MEMBER");
@@ -305,8 +352,16 @@ describe("staging editor (APL-2682)", () => {
     expect(memberships[0].projectId).toBe(qa.id);
     expect(memberships[0]?.role).toBe("EDITOR");
     expect(await db.projectMember.count({ where: { userId: user.id, role: "LEADER" } })).toBe(0);
+    const leader = await db.user.findUniqueOrThrow({ where: { id: dormant.id } });
+    expect(leader.id).not.toBe(after.id);
+    expect(leader.orgRole).toBe("MEMBER");
+    expect(leader.deactivatedAt).toBeNull();
+    expect(leader.emailVerifiedAt).not.toBeNull();
+    expect(leader.passwordHash).toBe(leaderHash);
     const leaders = await db.projectMember.findMany({ where: { projectId: qa.id, role: "LEADER" }, include: { user: true } });
     expect(leaders).toHaveLength(1);
+    expect(leaders[0]?.user.id).toBe(dormant.id);
+    expect(leaders[0]?.user.id).not.toBe(user.id);
     expect(leaders[0]?.user.email).toBe(LEADER_EMAIL);
     expect(leaders[0]?.user.orgRole).toBe("MEMBER");
 
@@ -323,8 +378,13 @@ describe("staging editor (APL-2682)", () => {
     expect(ready.code, ready.text).toBe(0);
     const project = await db.project.findFirstOrThrow({ where: { workspaceId, name: QA_PROJECT_NAME } });
     const leaders = await db.projectMember.findMany({ where: { projectId: project.id, role: "LEADER" }, include: { user: true } });
+    const editorUser = await db.user.findUniqueOrThrow({ where: { email: EDITOR_EMAIL } });
     expect(leaders).toHaveLength(1);
     expect(leaders[0]?.user.email).toBe(LEADER_EMAIL);
+    expect(leaders[0]?.user.id).not.toBe(editorUser.id);
+    expect(leaders[0]?.user.deactivatedAt).toBeNull();
+    expect(leaders[0]?.user.emailVerifiedAt).not.toBeNull();
+    expect(editorUser.deactivatedAt).toBeNull();
 
     const editor = new Client();
     const signin = await editor.post("/api/auth/signin", { email: EDITOR_EMAIL, password: PASSWORD });
