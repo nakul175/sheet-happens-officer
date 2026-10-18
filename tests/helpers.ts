@@ -81,6 +81,12 @@ export const task = async (who: Account, projectId: string, body: Record<string,
   return r.json.task.id as string;
 };
 
+/** PATCH a task on the version it is at right now (SHO-BUG-13: the server refuses an edit without one). */
+export const patchTask = async (who: Account, id: string, body: Record<string, unknown>) => {
+  const seen = (await who.c.get(`/api/tasks/${id}`)).json?.task?.updatedAt ?? new Date(0).toISOString();
+  return who.c.patch(`/api/tasks/${id}`, { ...body, expectedUpdatedAt: seen });
+};
+
 export function istDate(offsetDays: number) {
   const ist = new Date(Date.now() + 5.5 * 3600_000 + offsetDays * 86400_000);
   return ist.toISOString().slice(0, 10);

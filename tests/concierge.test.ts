@@ -1,7 +1,7 @@
 // SHO-US-8.1 to 8.8: reads, proposals and cards, clarification, undo and privacy of the concierge.
 // Calls src/lib directly with a scripted fake model; the live server (same database) sets up people and work.
 import { describe, expect, it } from "vitest";
-import { account, istDate, project, superAdmin, task, type Account } from "./helpers";
+import { account, istDate, project, superAdmin, task, type Account, patchTask } from "./helpers";
 import { MONDAY, actor, db, lastData, lastResultText, say, script, tu, useFakeModel } from "./concierge-helpers";
 import { fakeCallCount, setFakeModel, type ModelRequest } from "../src/lib/model";
 import { answerChoice, quickAction, sendMessage } from "../src/lib/concierge/engine";
@@ -33,7 +33,7 @@ describe("reads (8.2)", () => {
     const soon = await task(lead, p.id, { title: "Soon thing", dueDate: istDate(2) });
     const far = await task(lead, p.id, { title: "Far thing", dueDate: istDate(40) });
     const blocked = await task(lead, p.id, { title: "Stuck thing" });
-    expect((await lead.c.patch(`/api/tasks/${blocked}`, { blocked: true, blockedReason: "waiting" })).status).toBe(200);
+    expect((await patchTask(lead, blocked, { blocked: true, blockedReason: "waiting" })).status).toBe(200);
     const trashed = await task(lead, p.id, { title: "Trashed late", dueDate: istDate(-5) });
     expect((await lead.c.del(`/api/tasks/${trashed}`)).status).toBe(204);
     const done = await task(lead, p.id, { title: "Finished thing" });
@@ -246,7 +246,7 @@ describe("propose and confirm (8.3)", () => {
     script(...moveBudget());
     const c = cardOf((await ask(lead, "Move the budget task to Monday", MONDAY)).messages);
     // Someone else moves it first.
-    expect((await ed.c.patch(`/api/tasks/${t}`, { dueDate: "2031-04-10" })).status).toBe(200);
+    expect((await patchTask(ed, t, { dueDate: "2031-04-10" })).status).toBe(200);
     const err = await confirmCard(actor(lead), c.id).catch((e) => e);
     expect(err.status).toBe(409);
     expect(err.extra.stale).toBe(true);
@@ -574,7 +574,7 @@ describe("undo of a card (8.5)", () => {
   it("a conflict warns first and reverses nothing; 'anyway' then reverses the card (AC2)", async () => {
     const { lead, ed, a, b, card } = await multi();
     await confirmCard(actor(lead), card.id);
-    expect((await ed.c.patch(`/api/tasks/${a}`, { dueDate: "2031-06-01" })).status).toBe(200);
+    expect((await patchTask(ed, a, { dueDate: "2031-06-01" })).status).toBe(200);
     const err = await undoCard(actor(lead), card.id).catch((e) => e);
     expect(err.status).toBe(409);
     expect(err.extra.needsConfirm).toBe("conflict");

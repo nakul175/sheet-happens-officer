@@ -62,7 +62,7 @@ export async function bulkChange(user: Actor, projectId: string, input: Input) {
         await assignTask(user, id, input.assigneeId!);
       } else if (input.action === "date") {
         if ((formatDueDate(t.dueDate) ?? null) === (input.dueDate ?? null)) { skipped.push({ id, title: t.title, reason: "already up to date" }); continue; }
-        await updateTask(user, id, { dueDate: input.dueDate ?? null });
+        await updateTask(user, id, { dueDate: input.dueDate ?? null, expectedUpdatedAt: t.updatedAt.toISOString() });
       } else if (input.action === "move") {
         if (t.sectionId === input.sectionId) { skipped.push({ id, title: t.title, reason: "already up to date" }); continue; }
         await moveTask(user, id, input.sectionId!);

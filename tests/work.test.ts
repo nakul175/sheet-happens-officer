@@ -2,7 +2,7 @@
 // Server must run with SUPER_ADMIN_EMAILS=root.test@aplyd.com and the same EMAIL_OUTBOX_DIR; DATABASE_URL points at the same database.
 import { describe, expect, it } from "vitest";
 import { PrismaClient } from "../src/generated/prisma/client";
-import { Client, account, admin, istDate, project, superAdmin, task, type Account } from "./helpers";
+import { Client, account, admin, istDate, project, superAdmin, task, type Account, patchTask } from "./helpers";
 
 const db = new PrismaClient();
 
@@ -167,19 +167,19 @@ describe("projects and access (3.x)", () => {
     const p = await project(lead, lead, [{ who: viewer, role: "VIEWER" }]);
     const t = await task(lead, p.id);
     expect((await viewer.c.post(`/api/projects/${p.id}/tasks`, { title: "x" })).status).toBe(403);
-    expect((await viewer.c.patch(`/api/tasks/${t}`, { title: "x" })).status).toBe(403);
+    expect((await patchTask(viewer, t, { title: "x" })).status).toBe(403);
     expect((await viewer.c.del(`/api/tasks/${t}`)).status).toBe(403);
     expect((await viewer.c.get(`/api/tasks/${t}`)).status).toBe(200);
     const arch = await lead.c.post(`/api/projects/${p.id}/archive`);
     expect(arch.json.openTasks).toBe(1);
     expect((await lead.c.post(`/api/projects/${p.id}/tasks`, { title: "x" })).status).toBe(409);
-    expect((await lead.c.patch(`/api/tasks/${t}`, { title: "x" })).status).toBe(409);
+    expect((await patchTask(lead, t, { title: "x" })).status).toBe(409);
     expect((await lead.c.get(`/api/tasks/${t}`)).status).toBe(200);
     expect((await lead.c.get("/api/projects")).json.projects.some((x: { id: string }) => x.id === p.id)).toBe(false);
     expect((await lead.c.get("/api/projects?archived=true")).json.projects.some((x: { id: string }) => x.id === p.id)).toBe(true);
     expect((await viewer.c.post(`/api/projects/${p.id}/unarchive`)).status).toBe(403);
     expect((await lead.c.post(`/api/projects/${p.id}/unarchive`)).status).toBe(200);
-    expect((await lead.c.patch(`/api/tasks/${t}`, { title: "now ok" })).status).toBe(200);
+    expect((await patchTask(lead, t, { title: "now ok" })).status).toBe(200);
   });
 });
 
@@ -365,7 +365,7 @@ describe("tasks (4.x, 5.x)", () => {
     const p = await project(lead, lead, [{ who: ed }]);
     const t = await task(lead, p.id);
     const seen = (await ed.c.get(`/api/tasks/${t}`)).json.task.updatedAt;
-    expect((await lead.c.patch(`/api/tasks/${t}`, { dueDate: istDate(3) })).status).toBe(200);
+    expect((await patchTask(lead, t, { dueDate: istDate(3) })).status).toBe(200);
     const r = await ed.c.patch(`/api/tasks/${t}`, { title: "mine", expectedUpdatedAt: seen });
     expect(r.status).toBe(409);
     expect(r.json.stale).toBe(true);
@@ -375,16 +375,56 @@ describe("tasks (4.x, 5.x)", () => {
     expect((await ed.c.patch(`/api/tasks/${t}`, { title: "mine", expectedUpdatedAt: fresh })).status).toBe(200);
   });
 
+  // SHO-BUG-13: an edit must say which version it was made on.
+  it("refuses an edit without a version and changes nothing", async () => {
+    const lead = await account("lead");
+    const p = await project(lead, lead);
+    const t = await task(lead, p.id, { title: "Original", priority: "LOW" });
+    const before = (await lead.c.get(`/api/tasks/${t}`)).json.task;
+    const r = await lead.c.patch(`/api/tasks/${t}`, { title: "Overwritten", priority: "URGENT" });
+    expect(r.status).toBe(400);
+    const after = (await lead.c.get(`/api/tasks/${t}`)).json.task;
+    expect(after.title).toBe("Original");
+    expect(after.priority).toBe("LOW");
+    expect(after.updatedAt).toBe(before.updatedAt);
+    expect(await db.actionLog.count({ where: { targetType: "task", targetId: t, action: "task.updated" } })).toBe(0);
+  });
+
+  it("refuses a stale version with 409 and the current values", async () => {
+    const lead = await account("lead");
+    const ed = await account("editor");
+    const p = await project(lead, lead, [{ who: ed }]);
+    const t = await task(lead, p.id, { title: "Original" });
+    const seen = (await ed.c.get(`/api/tasks/${t}`)).json.task.updatedAt;
+    expect((await patchTask(lead, t, { title: "Theirs" })).status).toBe(200);
+    const r = await ed.c.patch(`/api/tasks/${t}`, { title: "Mine", expectedUpdatedAt: seen });
+    expect(r.status).toBe(409);
+    expect(r.json.error).toBe("This task changed while you were editing it.");
+    expect(r.json.changedBy).toBe("Lead");
+    expect(r.json.current.title).toBe("Theirs");
+    expect((await ed.c.get(`/api/tasks/${t}`)).json.task.title).toBe("Theirs");
+  });
+
+  it("saves an edit made on the current version", async () => {
+    const lead = await account("lead");
+    const p = await project(lead, lead);
+    const t = await task(lead, p.id, { title: "Original" });
+    const seen = (await lead.c.get(`/api/tasks/${t}`)).json.task.updatedAt;
+    const r = await lead.c.patch(`/api/tasks/${t}`, { title: "Saved", expectedUpdatedAt: seen });
+    expect(r.status).toBe(200);
+    expect(r.json.task.title).toBe("Saved");
+  });
+
   it("flags Blocked with a reason, keeps the Section, and tells the Leader once", async () => {
     const lead = await account("lead");
     const ed = await account("editor");
     const p = await project(lead, lead, [{ who: ed }]);
     const t = await task(ed, p.id, { sectionId: p.doing });
-    const r = await ed.c.patch(`/api/tasks/${t}`, { blocked: true, blockedReason: "Waiting on data" });
+    const r = await patchTask(ed, t, { blocked: true, blockedReason: "Waiting on data" });
     expect(r.json.task.blocked).toBe(true);
     expect(r.json.task.blockedReason).toBe("Waiting on data");
     expect(r.json.task.sectionId).toBe(p.doing);
-    const cleared = await ed.c.patch(`/api/tasks/${t}`, { blocked: false });
+    const cleared = await patchTask(ed, t, { blocked: false });
     expect(cleared.json.task.blockedReason).toBeNull();
   });
 
