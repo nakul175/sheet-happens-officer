@@ -4,9 +4,9 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { chromium, type Browser, type BrowserContext, type Page } from "playwright-core";
 import { PrismaClient } from "../src/generated/prisma/client";
 import { projectActivity } from "../src/lib/feed";
-import { account, BASE, patchTask, PW, superAdmin, task, type Account } from "./helpers";
+import { account, admin, BASE, patchTask, PW, superAdmin, task, type Account } from "./helpers";
 
-/** Pam's markers. AC1–AC3 stay @v1. AC4 and AC5 stay @v2. AC6 uses her v2.1 ids. No AC7. */
+/** AC1–AC3 stay on Pam's @v1 markers. AC4–AC6 are tagged with AC ids until Pam's v2 TC ids land. No AC7. */
 
 const TITLE = "Fix invoice";
 const DELETED = `moved "${TITLE}" to Trash`;
@@ -209,31 +209,38 @@ describe("APL-2674 activity delete undo", () => {
     expect((trash.json.items as { id: string }[]).some((item) => item.id === id)).toBe(true);
   }, 60_000);
 
-  it("qa:TC-APL2674-d0b5b573@v2 Leader and super admin see Undo on another user's delete and it restores as Trash does", async () => {
+  it("APL-2674-AC4@v2 Leader and Admin see Undo on anyone's delete and it restores as Trash does", async () => {
     const leader = await account("leader");
     const erin = await account("erin");
     const root = await superAdmin();
+    const orgAdmin = await admin(root, "ada");
     const body = { title: TITLE, description: "Keep the note", priority: "HIGH" as const, dueDate: "2026-11-02" };
+    const leaderName = await displayName(leader);
+    const erinName = await displayName(erin);
+    const otherDelete = 'moved "Pay vendor" to Trash';
 
     async function likeTrash(clicker: Account) {
       const projectId = await alpha(leader, erin);
       const controlId = await alpha(leader, erin);
       const subject = await task(erin, projectId, body);
+      const byLeader = await task(leader, projectId, { title: "Pay vendor" });
       const control = await task(erin, controlId, body);
       const before = await preserved(subject);
       const beforeControl = await preserved(control);
       expect(before).toEqual(beforeControl);
       expect((await erin.c.del(`/api/tasks/${subject}`)).status).toBe(204);
+      expect((await leader.c.del(`/api/tasks/${byLeader}`)).status).toBe(204);
       expect((await erin.c.del(`/api/tasks/${control}`)).status).toBe(204);
       expect((await clicker.c.post(`/api/tasks/${control}/restore`)).status).toBe(200);
       const restored = await preserved(control);
       expect(restored).toEqual({ ...beforeControl, inTrash: false });
 
-      const name = await displayName(erin);
       const ctx = await signedIn(clicker.email);
       try {
         const page = await openActivity(ctx, projectId);
-        await clickUndo(page, name);
+        await deleteRow(page, erinName).getByRole("button", { name: "Undo" }).waitFor({ state: "visible", timeout: 30_000 });
+        await deleteRow(page, leaderName, otherDelete).getByRole("button", { name: "Undo" }).waitFor({ state: "visible", timeout: 30_000 });
+        await clickUndo(page, erinName);
         await expect.poll(async () => (await clicker.c.get(`/api/tasks/${subject}`)).status, { timeout: 20_000 }).toBe(200);
       } finally {
         await ctx.close();
@@ -244,10 +251,11 @@ describe("APL-2674 activity delete undo", () => {
     }
 
     await likeTrash(leader);
+    await likeTrash(orgAdmin);
     await likeTrash(root);
-  }, 120_000);
+  }, 180_000);
 
-  it("qa:TC-APL2674-db4b7af8@v2 Another Editor and a Viewer see no Undo on someone else's delete", async () => {
+  it("APL-2674-AC4@v2 Another Editor and a Viewer see no Undo on someone else's delete", async () => {
     const leader = await account("leader");
     const erin = await account("erin");
     const other = await account("other");
@@ -265,6 +273,7 @@ describe("APL-2674 activity delete undo", () => {
       const row = deleteRow(page, erinName);
       await row.waitFor({ state: "visible", timeout: 30_000 });
       expect(await row.getByRole("button", { name: "Undo" }).count()).toBe(0);
+      expect(await page.getByRole("button", { name: "Undo" }).count()).toBe(0);
     } finally {
       await otherCtx.close();
     }
@@ -282,7 +291,7 @@ describe("APL-2674 activity delete undo", () => {
     expect((trash.json.items as { id: string }[]).some((item) => item.id === id)).toBe(true);
   }, 90_000);
 
-  it("qa:TC-APL2674-a4fde780@v2 Activity Undo sends one POST to /api/actions/<id>/undo with anyway false", async () => {
+  it("APL-2674-AC5@v2 Activity Undo sends one POST /api/actions/{actionId}/undo with {\"anyway\":false}", async () => {
     const leader = await account("leader");
     const editor = await account("editor");
     const projectId = await alpha(leader, editor);
@@ -311,17 +320,21 @@ describe("APL-2674 activity delete undo", () => {
     expect(posts).toEqual([{ path: `/api/actions/${actionId}/undo`, body: '{"anyway":false}' }]);
   }, 90_000);
 
-  it("qa:TC-APL2674-d3c54eaf@v3 A delete more than 30×24h old shows Too old to undo", async () => {
+  it("APL-2674-AC6@v2 An activity row older than 30 days shows Too old to undo and no Undo", async () => {
     const leader = await account("leader");
     const editor = await account("editor");
+    const other = await account("other");
     const root = await superAdmin();
+    const orgAdmin = await admin(root, "ada");
     const projectId = await alpha(leader, editor);
+    await addMember(leader, projectId, other, "EDITOR");
     const id = await task(editor, projectId, { title: TITLE });
+    expect((await editor.c.post(`/api/tasks/${id}/collaborators`, { userId: other.id })).status).toBe(201);
     expect((await editor.c.del(`/api/tasks/${id}`)).status).toBe(204);
-    const logId = await ageLog(id, editor.id, "task.deleted", 31 * DAY);
+    await ageLog(id, editor.id, "task.deleted", 31 * DAY);
     const name = await displayName(editor);
 
-    for (const who of [leader, root]) {
+    for (const who of [leader, orgAdmin, root, editor]) {
       const ctx = await signedIn(who.email);
       try {
         const page = await openActivity(ctx, projectId);
@@ -331,21 +344,19 @@ describe("APL-2674 activity delete undo", () => {
       }
     }
 
-    const now = Date.now();
-    const ist = 5.5 * 60 * 60 * 1000;
-    const midnight = new Date(now + ist);
-    midnight.setUTCHours(0, 0, 0, 0);
-    await setLogTime(logId, new Date(midnight.getTime() - ist - 31 * DAY));
-    const ctx = await signedIn(leader.email);
+    const otherCtx = await signedIn(other.email);
     try {
-      const page = await openActivity(ctx, projectId);
-      await expectTooOld(page, name, DELETED);
+      const page = await openActivity(otherCtx, projectId);
+      const row = deleteRow(page, name);
+      await row.waitFor({ state: "visible", timeout: 30_000 });
+      expect(await row.getByRole("button", { name: "Undo" }).count()).toBe(0);
+      expect(await row.innerText()).not.toContain("Too old to undo");
     } finally {
-      await ctx.close();
+      await otherCtx.close();
     }
-  }, 90_000);
+  }, 120_000);
 
-  it("qa:TC-APL2674-6b35ff98@v3 Exactly 30×24h still shows Undo; one millisecond later is Too old to undo", async () => {
+  it("APL-2674-AC6@v2 Exactly 30×24h still shows Undo; one millisecond later is Too old to undo", async () => {
     const leader = await account("leader");
     const editor = await account("editor");
     const projectId = await alpha(leader, editor);
@@ -386,7 +397,7 @@ describe("APL-2674 activity delete undo", () => {
     }
   }, 90_000);
 
-  it("qa:TC-APL2674-8633ebdd@v1 An old task.updated row also shows Too old to undo", async () => {
+  it("APL-2674-AC6@v2 An old task.updated row also shows Too old to undo and no Undo", async () => {
     const leader = await account("leader");
     const editor = await account("editor");
     const projectId = await alpha(leader, editor);
