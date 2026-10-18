@@ -3,6 +3,7 @@ import Link from "next/link";
 import { use, useState } from "react";
 import { api, dueLabel, todayIST, useGet } from "@/components/api";
 import { Confirm, Field, Modal } from "@/components/ui";
+import { DealBoard, type BoardDeal, type BoardStage } from "@/components/DealBoard";
 import { Page, useMe } from "../../Shell";
 
 type Contact = { id: string; name: string; role: string | null; email: string | null; phone: string | null; canEdit: boolean; knownBy: { id: string; name: string; active: boolean }[]; lastSpoke: string | null };
@@ -16,6 +17,28 @@ type Org = {
 };
 type H = { id: string; at: string; who: string; action: string }[];
 const KIND: Record<string, string> = { MEETING: "Meeting", CALL: "Call", INTRODUCTION: "Introduction", OTHER: "Other" };
+
+/** The same board as the Deals screen, one per pipeline, limited to this organisation's deals (11.5 AC2, 10.5). */
+function OrgDeals({ orgId, enabled }: { orgId: string; enabled: boolean }) {
+  const pipes = useGet<{ pipelines: { id: string; key: string; name: string; stages: BoardStage[] }[] }>(enabled ? "/api/deals/pipelines" : null);
+  const { data, reload } = useGet<{ deals: BoardDeal[] }>(enabled ? `/api/deals?organisationId=${orgId}` : null);
+  const deals = data?.deals ?? [];
+  if (!data || !pipes.data) return null;
+  return (
+    <>
+      {pipes.data.pipelines.map((p) => {
+        const mine = deals.filter((d) => d.pipeline?.id === p.id);
+        if (!mine.length) return null;
+        return (
+          <section key={p.id} aria-label={`${p.name} deals`} style={{ marginBottom: 12 }}>
+            <div className="sub2" style={{ marginBottom: 4 }}>{p.name}</div>
+            <DealBoard deals={mine} stages={p.stages} bid={p.key === "DEAL_BID"} onChange={reload} />
+          </section>
+        );
+      })}
+    </>
+  );
+}
 
 function TreeView({ node, current }: { node: Tree; current: string }) {
   return (
@@ -114,12 +137,9 @@ export default function OrgView({ params }: { params: Promise<{ id: string }> })
       {o?.archived && <div className="err">This organisation is archived.</div>}
       {o && <p className="meta" style={{ justifyContent: "flex-start" }}>{o.kind && <span className="chip">{o.kind}</span>}{o.country && <span>{o.country}</span>}{o.createdBy && <span>Added by {o.createdBy}</span>}</p>}
 
-      <div className="grp">Open deals</div>
+      <div className="grp">Deals</div>
       {o && o.deals.length === 0 && <div className="card empty">No deals you can see yet.</div>}
-      {o && o.deals.length > 0 && (
-        <div style={{ overflowX: "auto" }}><table className="tbl"><thead><tr><th>Deal</th><th>Role</th><th>Stage</th><th>Leader</th></tr></thead>
-          <tbody>{o.deals.map((d) => <tr key={d.projectId}><td><Link href={`/projects/${d.projectId}`}>{d.name}</Link></td><td>{d.role}</td><td>{d.stage?.name ?? "—"} <span style={{ color: "var(--muted)" }}>{d.pipeline}</span></td><td>{d.leader?.name ?? "—"}</td></tr>)}</tbody></table></div>
-      )}
+      {o && o.deals.length > 0 && <OrgDeals orgId={o.id} enabled />}
 
       <div className="grp">Contacts</div>
       {o && !o.archived && <button className="btn sm" style={{ marginBottom: 8 }} onClick={() => setDlg({})}>+ Contact</button>}

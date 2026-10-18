@@ -8,7 +8,7 @@ import { Blocked, StageDialog, money, type Stage, type StageInitial } from "@/co
 import { Menu, Modal } from "@/components/ui";
 
 export type BoardDeal = {
-  id: string; name: string; archived: boolean; pipeline: { id: string; key: string; name: string } | null; stage: { id: string; name: string; category: string } | null;
+  id: string; name: string; archived: boolean; role?: string | null; pipeline: { id: string; key: string; name: string } | null; stage: { id: string; name: string; category: string } | null;
   organisation: { id: string; name: string } | null; leader: { id: string; name: string } | null; value: number | null; currency: string | null;
   submissionDeadline: string | null; nextStep: { title: string; dueDate: string | null } | null; needsNextStep: boolean; stalled: boolean;
 };
@@ -45,14 +45,16 @@ function Card({ d, stages, onMove, bid }: { d: BoardDeal; stages: BoardStage[]; 
     <div className="dcard" draggable onDragStart={(e) => e.dataTransfer.setData("text/deal", d.id)}>
       <div style={{ display: "flex", justifyContent: "space-between", gap: 6 }}>
         <Link href={`/projects/${d.id}`}><b>{d.name}</b></Link>
-        <Menu label={`Move ${d.name}`}>{(close) => (
+        {stages.length > 0 && <Menu label={`Move ${d.name}`}>{(close) => (
           <>
             <div className="mhead">Move to…</div>
             {stages.filter((s) => s.id !== d.stage?.id).map((s) => <button key={s.id} role="menuitem" onClick={() => { close(); onMove(d, s); }}>{s.name}</button>)}
           </>
-        )}</Menu>
+        )}</Menu>}
       </div>
       {d.organisation && <div className="sub2">{d.organisation.name}</div>}
+      {d.pipeline && stages.length === 0 && <div className="sub2"><span className="chip grey">{d.pipeline.name}</span> {d.stage?.name}</div>}
+      {d.role && <div className="sub2"><span className="chip">{d.role.replace(/_/g, " ").toLowerCase()}</span></div>}
       <div className="sub2">{money(d.value, d.currency)}{d.leader ? ` · ${d.leader.name}` : ""}</div>
       {bid && d.submissionDeadline && <div className={`sub2${isOverdue(d.submissionDeadline) ? " over" : ""}`}>{isOverdue(d.submissionDeadline) ? "Deadline passed " : "Submit by "}{dueLabel(d.submissionDeadline)}</div>}
       <div className="sub2">
@@ -116,5 +118,29 @@ export function DealBoard({ deals, stages, bid, canMove = true, onChange }: { de
       )}
       {dialog && <StageDialog projectId={dialog.deal.id} stage={dialog.stage} deal={{ details: null }} initial={dialog.initial} onClose={() => setDialog(null)} onDone={() => { setDialog(null); onChange(); }} />}
     </>
+  );
+}
+
+const CATEGORIES: [string, string][] = [["NOT_STARTED", "Not started"], ["ACTIVE", "Active"], ["PAUSED", "On hold"], ["DONE", "Won / done"], ["LOST", "Lost"]];
+
+/** SHO-US-10.5 AC2: the same cards grouped by stage category across every pipeline. Read-only: stages differ between pipelines, so moving happens in the pipeline view. */
+export function CategoryBoard({ deals }: { deals: BoardDeal[] }) {
+  return (
+    <div className="dboard">
+      {CATEGORIES.map(([key, title]) => {
+        const mine = deals.filter((d) => !d.archived && d.stage?.category === key);
+        const t = totals(mine);
+        return (
+          <section key={key} className="dcol" aria-label={title}>
+            <header>
+              <b>{title}</b> <span className="chip grey">{mine.length}</span>
+              <div className="sub2">{t.sums.length ? t.sums.join(" · ") : "No values"}{t.unknown > 0 ? ` · ${t.unknown} without value` : ""}</div>
+            </header>
+            {mine.map((d) => <Card key={d.id} d={d} stages={[]} onMove={() => {}} bid={d.pipeline?.key === "DEAL_BID"} />)}
+            {mine.length === 0 && <div className="sub2" style={{ padding: 8 }}>No deals</div>}
+          </section>
+        );
+      })}
+    </div>
   );
 }

@@ -27,6 +27,8 @@ export const UNDO_LABELS: Record<string, string> = {
   "deal.stage_changed": "Stage changed",
   "deal.details_updated": "Deal details edited",
   "deal.converted": "Task converted to a deal",
+  "deal.party_added": "Organisation added to deal",
+  "deal.party_removed": "Organisation removed from deal",
   "organisation.created": "Organisation added",
   "organisation.updated": "Organisation edited",
   "organisation.archived": "Organisation archived",

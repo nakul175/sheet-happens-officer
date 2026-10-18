@@ -73,7 +73,7 @@ function Inner() {
   const { canAdd, openAdd } = useExtras();
   const { data, error, loading, reload } = useGet<Groups>("/api/my-tasks");
   const [mode, setMode] = useState<"date" | "project">("date");
-  const [done, setDone] = useState<{ projectId: string; name: string }[]>([]);
+  const [done, setDone] = useState<{ projectId: string; name: string; slot: string }[]>([]);
   const [dismissed, setDismissed] = useState<string[]>([]);
   const [guideGone, setGuideGone] = useState(guide.gone); // SHO-US-14.4
   // Reads the saved choice from browser storage after mount (reading it during render would not match the server HTML).
@@ -113,9 +113,19 @@ function Inner() {
     return [...m.values()].sort((a, b) => key(a).localeCompare(key(b)));
   })();
   const prompts = done.filter((d) => needs.some((n) => n.id === d.projectId) && !dismissed.includes(d.projectId));
+  // The prompt sits where the finished task was: in its date group, or under its project heading.
+  const promptsAt = (slot: string) => prompts.filter((p) => p.slot === slot);
+  const promptCard = (p: { projectId: string; name: string }) => (
+    <div key={p.projectId} className="card" style={{ marginBottom: 10, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+      <b>What is next for {p.name}?</b>
+      <AddNext projectId={p.projectId} meId={me.id} label="+ Next task" onDone={reload} />
+      <button className="btn ghost sm" onClick={() => setDismissed((d) => [...d, p.projectId])}>Not now</button>
+    </div>
+  );
+  const slotOf = (t: Item) => (mode === "project" && me.crm ? t.project.id : groups.find((g) => data?.[g].some((x) => x.id === t.id)) ?? "later");
   const row = (t: Item) => (
     <div key={t.id} className="item click" {...rowKeys(() => router.push(`/?task=${t.id}`, { scroll: false }))}>
-      <Tick id={t.id} title={t.title} done={false} allowed={t.canClose} onDone={() => { if (t.project.type === "DEAL") setDone((d) => [...d, { projectId: t.project.id, name: t.project.name }]); reload(); }} />
+      <Tick id={t.id} title={t.title} done={false} allowed={t.canClose} onDone={() => { if (t.project.type === "DEAL") setDone((d) => [...d, { projectId: t.project.id, name: t.project.name, slot: slotOf(t) }]); reload(); }} />
       <div className="t">
         <b className="ttl"><a href={`/tasks/${t.id}`} style={{ color: "inherit", textDecoration: "none" }} onClick={(e) => { e.preventDefault(); }}>{t.title}</a></b>
         <small>{t.parent ? `Subtask of ${t.parent.title} · ` : ""}{t.project.name}</small>
@@ -142,13 +152,6 @@ function Inner() {
       {loading && !data && <Skeleton />}
       {error && !data && <LoadFailed onRetry={reload} />}
       {error && data && <div className="err" role="alert">{error} <button className="link" onClick={reload}>Retry</button></div>}
-      {prompts.map((p) => (
-        <div key={p.projectId} className="card" style={{ marginBottom: 10, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-          <b>What is next for {p.name}?</b>
-          <AddNext projectId={p.projectId} meId={me.id} label="+ Next task" onDone={reload} />
-          <button className="btn ghost sm" onClick={() => setDismissed((d) => [...d, p.projectId])}>Not now</button>
-        </div>
-      ))}
       {data && total === 0 && needs.length === 0 && others.length === 0 && (
         <div className="card empty"><b>Nothing on your plate.</b><br />Tasks assigned to you, or that you collaborate on, show up here.<div className="empty-act"><Link className="btn" href="/projects">Open a project</Link>{canAdd && <button className="btn ghost" onClick={openAdd}>New task</button>}</div></div>
       )}
@@ -158,9 +161,10 @@ function Inner() {
           <div className="list">{wait.map((t) => waitRow(t, true))}</div>
         </section>
       )}
-      {data && (!me.crm || mode === "date") && groups.map((key) => data[key].length > 0 && (
+      {data && (!me.crm || mode === "date") && groups.map((key) => (data[key].length > 0 || promptsAt(key).length > 0) && (
         <section key={key} aria-label={labels[key]}>
           <div className={`grp${key === "overdue" ? " red" : ""}`}>{labels[key]} · {data[key].length}</div>
+          {promptsAt(key).map(promptCard)}
           <div className="list">{data[key].map(row)}</div>
         </section>
       ))}
@@ -170,6 +174,7 @@ function Inner() {
             <Link href={`/projects/${g.project.id}`} style={{ color: "inherit" }}>{g.project.name}</Link>
             {g.project.type === "DEAL" && <> <span className="chip">Deal</span>{g.project.stage && <> <span className="chip grey">{g.project.stage}</span></>}</>}
           </div>
+          {promptsAt(g.project.id).map(promptCard)}
           {g.items.length > 0 && <div className="list">{g.items.map(row)}</div>}
           {needs.some((n) => n.id === g.project.id) && (
             <div className="card" style={{ marginTop: 6, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>

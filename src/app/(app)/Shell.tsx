@@ -12,6 +12,12 @@ import { Extras, NewTaskButton, SearchButton } from "@/components/extras/Extras"
 export type Me = { id: string; name: string; email: string; orgRole: "MEMBER" | "ADMIN" | "SUPER_ADMIN"; crm?: boolean; review?: boolean; compact?: boolean; startGuide?: boolean; tempPassword?: boolean };
 const MeCtx = createContext<Me | null>(null);
 export const useMe = () => useContext(MeCtx)!;
+/** A deal page lives at /projects/[id]; it tells the sidebar to highlight Deals instead of Projects. */
+const NavHintCtx = createContext<(h: string | null) => void>(() => {});
+export function useNavHint(hint: string | null) {
+  const set = useContext(NavHintCtx);
+  useEffect(() => { set(hint); return () => set(null); }, [hint, set]);
+}
 export const roleLabel = (r: Me["orgRole"]) => (r === "SUPER_ADMIN" ? "Super Admin" : r === "ADMIN" ? "Admin" : "Member");
 
 /** SHO-US-22.4: bottom tab bar under 600 px. The server still decides who may open Usage and Audit; this only decides what is listed. */
@@ -95,8 +101,12 @@ export function Shell({ user, children }: { user: Me; children: React.ReactNode 
     if (!r.ok) setCompact(!v); // not saved: go back to what is saved
   };
   const [menu, setMenu] = useState<string | null>(null);
+  const [hint, setHint] = useState<string | null>(null);
   const open = menu === path;
-  const here = (p: string) => (p === "/" ? path === "/" : path === p || path.startsWith(p + "/"));
+  const here = (p: string) => {
+    if (hint && path.startsWith("/projects/")) return p === hint;
+    return p === "/" ? path === "/" : path === p || path.startsWith(p + "/");
+  };
   const items: [string, string][] = [["/", "My tasks"], ["/projects", "Projects"], ...(user.crm ? [["/deals", "Deals"], ["/accounts", "Accounts"], ...(user.review ? [["/review", "Pipeline review"]] : [])] as [string, string][] : []), ["/team", "Team"], ["/search", "Search"]];
   if (user.orgRole === "SUPER_ADMIN") items.push(["/usage", "Usage"], ["/audit", "Audit log"]);
   const more = items.filter(([h]) => !["/", "/projects", "/search"].includes(h));
@@ -120,6 +130,7 @@ export function Shell({ user, children }: { user: Me; children: React.ReactNode 
   }, [open]);
   return (
     <MeCtx.Provider value={user}>
+      <NavHintCtx.Provider value={setHint}>
       <ConciergeProvider>
       <Extras>
       <div className="shell" data-density={compact ? "compact" : undefined}>
@@ -156,6 +167,7 @@ export function Shell({ user, children }: { user: Me; children: React.ReactNode 
       </div>
       </Extras>
       </ConciergeProvider>
+      </NavHintCtx.Provider>
     </MeCtx.Provider>
   );
 }

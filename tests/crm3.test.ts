@@ -148,13 +148,21 @@ describe("convert a task to a deal (12.2)", () => {
     expect((await lead.c.get(`/api/projects/${dealId}`)).json.project.archived).toBe(true);
   });
 
-  it("will not convert a task that already lives in a deal", async () => {
+  it("converts a task that lives in a deal, flags the source deal's missing next step, and undoes", async () => {
     const lead = await account("dlead3");
     const org = await newOrg(lead);
     const pr = await pipes(lead);
     const d = await lead.c.post("/api/deals", { name: `D ${Date.now()}`, organisationId: org, pipelineId: pr.proactive.id, leaderId: lead.id, whyPursue: "x", nextStep: { title: "n", dueDate: istDate(2) } });
-    const t = await task(lead, d.json.deal.id, { title: "Inside", dueDate: istDate(2) });
-    expect((await lead.c.post(`/api/tasks/${t}/convert`, await gate(lead))).status).toBe(400);
+    const src = d.json.deal.id;
+    type Row = { id: string; needsNextStep: boolean; nextStep: { id: string } | null };
+    const before = ((await lead.c.get("/api/deals")).json.deals as Row[]).find((x) => x.id === src)!;
+    expect(before.nextStep).toBeTruthy();
+    const r = await lead.c.post(`/api/tasks/${before.nextStep!.id}/convert`, await gate(lead));
+    expect(r.status).toBe(201);
+    expect(r.json.deal.id).not.toBe(src);
+    const after = ((await lead.c.get("/api/deals")).json.deals as Row[]).find((x) => x.id === src)!;
+    expect(after.nextStep).toBeNull();
+    expect(after.needsNextStep).toBe(true);
   });
 });
 

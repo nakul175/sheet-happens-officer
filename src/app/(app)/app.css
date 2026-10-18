@@ -51,7 +51,7 @@ h1.pt { font-size: 24px; margin: 0; color: var(--ink); font-weight: 600; }
 .chip.grey { background: #eceef1; color: var(--muted); }
 .seg { display: inline-flex; border: 1px solid var(--field); border-radius: 8px; overflow: hidden; background: var(--card); }
 .seg button, .seg a { border: 0; background: none; padding: 7px 14px; font: inherit; font-size: 14px; cursor: pointer; color: var(--ink-2); text-decoration: none; }
-.seg [aria-current="true"], .seg [aria-pressed="true"] { background: var(--navy); color: #fff; }
+.seg [aria-current="true"], .seg [aria-pressed="true"], .seg [aria-selected="true"] { background: var(--navy); color: #fff; }
 .grp { margin: 18px 0 8px; font-size: 12px; font-weight: 600; letter-spacing: .06em; color: var(--muted); text-transform: uppercase; }
 .grp.red { color: var(--danger); }
 .list { background: var(--card); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }

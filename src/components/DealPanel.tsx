@@ -3,6 +3,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { api, dueLabel, isOverdue, useGet } from "@/components/api";
 import { Field, Modal } from "@/components/ui";
+import { useNavHint } from "@/app/(app)/Shell";
 
 export type Stage = { id: string; name: string; category: string; needsReason: boolean; requiredFields: string[] };
 export type DealBlock = {
@@ -166,6 +167,7 @@ function DealNotes({ projectId, orgId }: { projectId: string; orgId: string | nu
 }
 
 export function DealPanel({ projectId, deal, canWrite, onChange }: { projectId: string; deal: DealBlock; canWrite: boolean; onChange: () => void }) {
+  useNavHint("/deals");
   const [pick, setPick] = useState<Stage | null>(null);
   const [edit, setEdit] = useState(false);
   const d = deal.details;

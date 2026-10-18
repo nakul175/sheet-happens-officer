@@ -4,7 +4,8 @@ import { Skeleton } from "@/components/ui";
 import { useState } from "react";
 import { dueLabel, isOverdue, useGet } from "@/components/api";
 import { money } from "@/components/DealPanel";
-import { DealBoard, type BoardDeal, type BoardStage } from "@/components/DealBoard";
+import { CategoryBoard, DealBoard, type BoardDeal, type BoardStage } from "@/components/DealBoard";
+import { StagesDialog } from "@/components/StagesDialog";
 import { Page, useMe } from "../Shell";
 
 type D = BoardDeal;
@@ -12,13 +13,13 @@ type D = BoardDeal;
 export default function DealsView() {
   const [mine, setMine] = useState(false);
   const [old, setOld] = useState(false);
-  const [view, setView] = useState<"board" | "list">("board");
+  const [view, setView] = useState<"board" | "category" | "list">("board");
   const [pipe, setPipe] = useState("");
   const me = useMe();
-  void me;
+  const [stagesOpen, setStagesOpen] = useState(false);
   const pipes = useGet<{ pipelines: { id: string; key: string; name: string; stages: BoardStage[] }[] }>("/api/deals/pipelines");
   const cur = pipes.data?.pipelines.find((p) => p.id === pipe) ?? pipes.data?.pipelines[0];
-  const { data, loading, error, reload } = useGet<{ deals: D[] }>(cur ? `/api/deals?pipelineId=${cur.id}${mine ? "&mine=true" : ""}${old ? "&archived=true" : ""}` : null);
+  const { data, loading, error, reload } = useGet<{ deals: D[] }>(cur ? `/api/deals?${view === "category" ? "" : `pipelineId=${cur.id}`}${mine ? "&mine=true" : ""}${old ? "&archived=true" : ""}` : null);
   const deals = data?.deals ?? [];
   return (
     <Page title="Deals" sub="Deals you lead or belong to"
@@ -28,6 +29,7 @@ export default function DealsView() {
           <button aria-pressed={mine} onClick={() => setMine(true)}>Only my deals</button>
         </div>
         <button className="btn ghost" aria-pressed={old} onClick={() => setOld(!old)}>{old ? "Show live" : "Show archived"}</button>
+        {me.orgRole === "SUPER_ADMIN" && cur && <button className="btn ghost" onClick={() => setStagesOpen(true)}>Edit stages</button>}
         <Link className="btn" href="/deals/new">+ New deal</Link>
       </>}>
       <div className="tabs" style={{ marginBottom: 12 }}>
@@ -37,6 +39,7 @@ export default function DealsView() {
         <span className="sp" />
         <div className="seg" role="group" aria-label="Layout">
           <button aria-pressed={view === "board"} onClick={() => setView("board")}>Board</button>
+          <button aria-pressed={view === "category"} onClick={() => setView("category")}>By category</button>
           <button aria-pressed={view === "list"} onClick={() => setView("list")}>List</button>
         </div>
       </div>
@@ -44,6 +47,7 @@ export default function DealsView() {
       {error && <div className="err" role="alert">{error}</div>}
       {data && deals.length === 0 && <div className="card empty"><b>No deals yet.</b><br />Create one to track an opportunity.<div className="empty-act"><Link className="btn" href="/deals/new">New deal</Link></div></div>}
       {data && cur && view === "board" && !old && <DealBoard deals={deals} stages={cur.stages} bid={cur.key === "DEAL_BID"} onChange={reload} />}
+      {data && view === "category" && !old && <CategoryBoard deals={deals} />}
       {deals.length > 0 && (view === "list" || old) && (
         <div style={{ overflowX: "auto" }}>
           <table className="tbl">
@@ -63,6 +67,7 @@ export default function DealsView() {
           </table>
         </div>
       )}
+      {stagesOpen && cur && <StagesDialog pipeline={cur} onClose={() => setStagesOpen(false)} onDone={() => { pipes.reload(); reload(); }} />}
     </Page>
   );
 }
