@@ -3,7 +3,10 @@
 // Projects, deals and tasks are ZZ-TEST and archived afterwards.
 // Pam left no qa:TC cases on this issue.
 // A new idea is not 30 days old, so the review cannot render Convert and Drop for one this spec creates.
+import { execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { test, expect, zz, RUN } from "../support";
+import { runVitest } from "../helpers/named-suite";
 import { newProject, newTask, ymd, type Who } from "../g2";
 import { createDeal, createOrg, dealBody, projectOf } from "../helpers/claude-a";
 import { pipelines } from "../helpers/deal-board";
@@ -162,6 +165,23 @@ test("AC5: the review counts deals in each stage and how many have no value", as
   await expect(row).toContainText(`${stage.withoutValue} without value`);
 });
 
-test.fixme("AC6: existing My tasks tests pass unchanged", async () => {
-  // This acceptance criterion names another suite. It does not describe a screen or a response this spec can check.
+function myTasksAssertions(source: string) {
+  const start = source.indexOf('describe("My tasks (5.1)"');
+  expect(start, "My tasks describe").toBeGreaterThanOrEqual(0);
+  const rest = source.slice(start);
+  const cuts = [rest.indexOf("\ndescribe(", 10), rest.indexOf("\nexport ", 10)].filter((at) => at > 0);
+  const block = cuts.length ? rest.slice(0, Math.min(...cuts)) : rest;
+  return block.split("\n").filter((line) => /\bexpect\(/.test(line)).map((line) => line.trim()).join("\n");
+}
+
+test("AC6: existing My tasks tests pass unchanged", async () => {
+  test.setTimeout(15 * 60_000);
+  const log = execFileSync("git", ["log", "-p", "d0f2522^..HEAD", "--", "tests/work.test.ts"], { encoding: "utf8" });
+  const before = execFileSync("git", ["show", "d0f2522^:tests/work.test.ts"], { encoding: "utf8" });
+  expect(myTasksAssertions(readFileSync("tests/work.test.ts", "utf8")), log.slice(0, 4_000) || "no edits to tests/work.test.ts since d0f2522^").toBe(myTasksAssertions(before));
+  const work = await runVitest(["tests/work.test.ts", "tests/crm-visible.test.ts"]);
+  expect(work.numPassedTests).toBe(work.numTotalTests);
+  // The default vitest config excludes tests/viewport, so this file runs with the viewport config.
+  const a11y = await runVitest(["tests/viewport/a11y.test.ts"], "vitest.viewport.config.mts");
+  expect(a11y.numPassedTests).toBe(a11y.numTotalTests);
 });
