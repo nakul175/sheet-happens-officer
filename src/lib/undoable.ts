@@ -36,6 +36,8 @@ export const UNDO_LABELS: Record<string, string> = {
   "contact.removed": "Contact removed",
   "note.created": "Note added",
   "note.removed": "Note deleted",
+  "comment.added": "Comment added",
+  "comment.removed": "Comment deleted",
   "task.idea_changed": "Idea flag changed",
   "task.link_added": "Link added",
   "task.link_removed": "Link removed",

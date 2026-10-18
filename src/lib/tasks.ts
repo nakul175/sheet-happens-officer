@@ -9,6 +9,8 @@ import {
 import { addDays, formatDueDate, parseDueDate, startOfTodayIST } from "@/lib/dates";
 import { auditTx, logAction, notify } from "@/lib/notify";
 import { reqCtx } from "@/lib/reqctx";
+import { attachCommentCounts, commentCount } from "@/lib/comments";
+import { commentsEnabled } from "@/lib/flags";
 
 export const taskInclude = {
   assignee: { select: { id: true, name: true } },
@@ -154,13 +156,15 @@ export async function getTask(user: Actor, id: string) {
     db.task.findMany({ where: { parentId: id, deletedAt: null }, include: taskInclude, orderBy: [...ORDER] }),
   ]);
   const viewer = { id: user.id, role: a.role };
-  return {
+  const task = {
     ...present(t, viewer),
     section: { id: section.id, name: section.name, isDone: section.isDone },
     project: { id: a.project.id, name: a.project.name, archived: !!a.project.archivedAt },
     subtaskList: subtasks.map((s) => present(s, viewer)),
     links: await linksOfTask(id),
   };
+  if (!commentsEnabled()) return task;
+  return { ...task, commentsEnabled: true as const, commentCount: await commentCount(id) };
 }
 
 /** Project list and board (SHO-US-5.2, 5.3). One page of each Section, or one Section paged on its own. */
@@ -191,7 +195,7 @@ export async function listTasks(
     const end = offset + rows.length;
     out.push({
       id: s.id, name: s.name, isDone: s.isDone, total,
-      tasks: rows.map((t) => present(t, viewer)),
+      tasks: await attachCommentCounts(rows.map((t) => present(t, viewer))),
       nextCursor: end < total && !(s.isDone && !o.all) ? Buffer.from(String(end)).toString("base64url") : null,
     });
   }
@@ -579,6 +583,11 @@ export async function myTasks(user: Actor) {
     else groups.later.push(item);
   }
   for (const t of sent) if (awaiting(t)) groups.waitingOnOthers.push({ ...shape(t), waitingDays: days(t.id, t.updatedAt) });
+  groups.waitingOnMe = await attachCommentCounts(groups.waitingOnMe as { id: string }[]);
+  groups.overdue = await attachCommentCounts(groups.overdue as { id: string }[]);
+  groups.next7 = await attachCommentCounts(groups.next7 as { id: string }[]);
+  groups.later = await attachCommentCounts(groups.later as { id: string }[]);
+  groups.waitingOnOthers = await attachCommentCounts(groups.waitingOnOthers as { id: string }[]);
   return groups;
 }
 

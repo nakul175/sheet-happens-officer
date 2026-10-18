@@ -46,6 +46,8 @@ export function noticeText(n: N) {
   const p = d.project ? `"${d.project}"` : "a project";
   const text: Record<string, string> = {
     TASK_ASSIGNED: `${who} assigned you ${t}.`,
+    COMMENT_ADDED: `${who} commented on ${t}.`,
+    COMMENT_MENTION: `${who} mentioned you on ${t}.`,
     TASKS_REASSIGNED: d.count ? `${who} assigned you ${d.count} tasks${d.project ? ` in ${p}` : ""}.` : `${who} moved tasks over to you.`,
     TASKS_REASSIGNED_SUMMARY: `${d.count ?? "Some"} tasks in ${p} were handed to a new owner by ${who}.`,
     APPROVER_REASSIGNED: `${who} changed who approves tasks in ${p}.`,

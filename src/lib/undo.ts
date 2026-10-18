@@ -20,6 +20,7 @@ const bad = (msg: string, extra?: Record<string, unknown>) => new ApiError(409, 
 const NOTIFYING = new Set([
   "task.created", "task.assigned", "task.sent_for_approval", "task.sent_back", "task.approver_changed", "task.collaborator_added",
   "task.collaborator_removed", "task.deleted", "project.archived", "member.added", "member.removed", "member.role_changed", "project.leader_changed",
+  "comment.added",
 ]);
 
 const FIELD_LABEL: Record<string, string> = {
@@ -155,6 +156,22 @@ async function plan(row: any, user: Actor, projectId: string): Promise<Plan> {
           await tx.task.update({ where: { id }, data: { sectionId: b.sectionId } });
         },
       };
+    }
+    case "comment.added": {
+      const commentId = String(f.commentId ?? "");
+      const c = await db.comment.findUnique({ where: { id: commentId } });
+      if (!c) throw bad("This comment no longer exists.");
+      if (c.removedAt) throw bad("This comment is already deleted.");
+      const task = await liveTask(id, projectId);
+      return { conflicts: [], subject: task.title, apply: async (tx) => { await tx.comment.update({ where: { id: commentId }, data: { removedAt: new Date() } }); } };
+    }
+    case "comment.removed": {
+      const commentId = String(f.commentId ?? "");
+      const c = await db.comment.findUnique({ where: { id: commentId } });
+      if (!c) throw bad("This comment no longer exists.");
+      if (!c.removedAt) throw bad("This comment is already back.");
+      const task = await liveTask(id, projectId);
+      return { conflicts: [], subject: task.title, apply: async (tx) => { await tx.comment.update({ where: { id: commentId }, data: { removedAt: null } }); } };
     }
     case "task.deleted": {
       const t = await taskOf(id, projectId);

@@ -135,6 +135,16 @@ textarea.in.blocked-reason { display: block; margin-top: 6px; min-height: 0; lin
 .pills { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
 .sub-item { display: flex; gap: 10px; align-items: center; padding: 6px 0; border-bottom: 1px solid var(--line); }
 .box { border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; margin-top: 14px; background: #fafbfc; }
+.comments { margin-top: 18px; }
+.comments h3 { font-size: 15px; margin: 0 0 8px; }
+.comment { padding: 10px 0; border-top: 1px solid var(--line); }
+.comment-meta { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+.comment-text { margin: 4px 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.comment-form { margin-top: 10px; }
+.comment-form label { display: block; font-size: 14px; margin-bottom: 4px; }
+#mention-list { list-style: none; margin: 4px 0; padding: 4px; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
+#mention-list button { width: 100%; text-align: left; background: transparent; border: 0; padding: 8px; min-height: 44px; cursor: pointer; }
+#mention-list button.on, #mention-list button:hover { background: #f3f6f4; }
 .box.warn { background: #fff8e8; border-color: #ecd9a6; }
 .box.dng { background: var(--danger-bg); border-color: var(--danger-line); }
 .skel { color: var(--muted); padding: 24px 0; }

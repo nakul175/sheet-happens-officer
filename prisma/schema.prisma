@@ -97,6 +97,7 @@ model User {
   chatMessages        ChatMessage[]
   modelUsage          ModelUsage[]
   savedViews          SavedView[]
+  authoredComments    Comment[]          @relation("CommentAuthor")
 
   @@index([workspaceId])
 }
@@ -240,6 +241,7 @@ model Task {
   createdAt          DateTime           @default(now())
   updatedAt          DateTime           @updatedAt
   collaborators      TaskCollaborator[]
+  comments           Comment[]
 
   @@index([workspaceId])
   @@index([projectId, sectionId, position])
@@ -248,6 +250,23 @@ model Task {
   @@index([assigneeId])
   @@index([approverId])
   @@index([deletedAt])
+}
+
+// A conversation on a task (SHO-US-19.1). Soft-deleted; purged with the task.
+// The action log stores the comment id, never this text.
+model Comment {
+  id        String    @id @default(cuid())
+  taskId    String
+  task      Task      @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  authorId  String
+  author    User      @relation("CommentAuthor", fields: [authorId], references: [id])
+  text      String
+  mentions  String[]  @default([])
+  editedAt  DateTime?
+  removedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([taskId, removedAt, createdAt])
 }
 
 model TaskCollaborator {
