@@ -1,6 +1,6 @@
 "use client";
 import { useState } from "react";
-import { Skeleton } from "@/components/ui";
+import { LoadFailed, Skeleton } from "@/components/ui";
 import { ago, api, useGet } from "@/components/api";
 import { Page, useMe } from "../Shell";
 
@@ -51,6 +51,7 @@ export default function AuditView() {
         <label className="field" style={{ margin: 0 }}><span className="lbl">To</span><input className="in" type="date" value={to} onChange={(e) => setTo(e.target.value)} /></label>
       </div>
       {a.loading && <Skeleton />}
+      {!a.data && a.failed && <LoadFailed onRetry={a.reload} />}
       {a.data && !rows.length && <div className="card empty">No events match.</div>}
       {!!rows.length && (
         <div className="scroll">

@@ -32,12 +32,24 @@ Settings (environment variables):
 
 ## Test
 
-Integration tests run against a live server that shares the outbox folder:
+Integration tests run against a live server that shares the outbox folder. The vitest
+process needs `DATABASE_URL` and `JOB_SECRET` as well: several tests open the database
+and call the job endpoint directly. Each value in the commands is a placeholder.
+
+| Name | Purpose |
+|---|---|
+| `DATABASE_URL` | Postgres connection string the test process uses, the same database as the server |
+| `JOB_SECRET` | Bearer token the test process sends when it calls the job endpoint, the same value as the server |
 
 ```bash
 EMAIL_OUTBOX_DIR=/tmp/sho-outbox SUPER_ADMIN_EMAILS=root.test@aplyd.com APP_URL=http://localhost:3100 \
-  JOB_SECRET=0123456789abcdef0123 npx next dev -p 3100 &
-EMAIL_OUTBOX_DIR=/tmp/sho-outbox TASKBOARD_URL=http://localhost:3100 npm test
+  DATABASE_URL="postgresql://USER:PASSWORD@localhost:5432/taskboard?schema=public" \
+  JOB_SECRET=replace-with-a-token-of-at-least-16-chars \
+  npx next dev -p 3100 &
+EMAIL_OUTBOX_DIR=/tmp/sho-outbox TASKBOARD_URL=http://localhost:3100 \
+  DATABASE_URL="postgresql://USER:PASSWORD@localhost:5432/taskboard?schema=public" \
+  JOB_SECRET=replace-with-a-token-of-at-least-16-chars \
+  npm test
 ```
 
 ## Deploy (story 9.3)
