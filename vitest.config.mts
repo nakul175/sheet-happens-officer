@@ -10,6 +10,6 @@ export default defineConfig({
   test: {
     testTimeout: 30000,
     fileParallelism: false,
-    exclude: [...configDefaults.exclude, "tests/viewport/**", "tests/crm-visible-modes-server.test.ts"],
+    exclude: [...configDefaults.exclude, "tests/viewport/**", "tests/crm-visible-modes-server.test.ts", "tests/e2e/**"],
   },
 });
