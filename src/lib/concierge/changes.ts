@@ -134,7 +134,8 @@ const P = (L: Loaded, id: string) => L.projects.get(id) ?? gone("Project");
 
 function describe(op: Op, L: Loaded): Described {
   const task = (id: string) => T(L, id);
-  const where = (t: TaskFull) => `${t.title} (${t.project.name})`;
+  // A blank project name (a hidden deal, or an archived deal) is left off the label.
+  const where = (t: TaskFull) => (t.project.name ? `${t.title} (${t.project.name})` : t.title);
   switch (op.k) {
     case "task.create": {
       const p = P(L, op.projectId);
@@ -304,27 +305,35 @@ async function blockedReason(user: Actor, op: Op, L: Loaded): Promise<string | n
 // ------------------------------------------------------------------ cards
 export type BuiltCard = { card: Omit<Card, "id" | "status">; fingerprint: string; ops: Op[] };
 
-/** A project the person may read: membership (Admins see all) and the CRM lever. Archived projects stay visible; writes are refused later. */
+/** A project the person may read: membership (Admins see all) and the CRM lever. Archived projects stay on the card; writes are refused later. */
 function projectVisibleTo(user: Actor, p: { typeId: string; members: { userId: string }[] }) {
   if (p.typeId === WORKSTREAM_DEAL && !crmVisible(user)) return false;
   if (!isAdmin(user) && !p.members.some((m) => m.userId === user.id)) return false;
   return true;
 }
 
-/** Drop projects (and their tasks) the person cannot see, so a card never quotes a hidden deal's name. */
+/** Drop projects (and their tasks) the person cannot see, so a card never quotes a hidden deal's name.
+ *  An archived deal stays (the write is still refused as read-only) but its name is cleared the same way. */
 function hideInvisible(user: Actor, L: Loaded) {
   const hidden = new Set<string>();
+  const unnamed = new Set<string>();
   for (const [id, p] of L.projects) {
     if (!projectVisibleTo(user, p)) {
       hidden.add(id);
       p.name = "";
       L.projects.delete(id);
+    } else if (p.typeId === WORKSTREAM_DEAL && p.archivedAt) {
+      unnamed.add(id);
+      p.name = "";
     }
   }
   for (const [id, t] of L.tasks) {
-    if (!hidden.has(t.projectId)) continue;
-    t.project.name = "";
-    L.tasks.delete(id);
+    if (hidden.has(t.projectId)) {
+      t.project.name = "";
+      L.tasks.delete(id);
+      continue;
+    }
+    if (unnamed.has(t.projectId)) t.project.name = "";
   }
 }
 
