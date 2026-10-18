@@ -1,6 +1,8 @@
 // @vitest-environment jsdom
-// APL-2665 v1: Audit, Members, Trash and New project use useGet's .failed flag.
-// One test per acceptance criterion. Each case is tagged with its AC id.
+// APL-2665 v1. One test per Pam TC. The old failure decision was isNetworkFailure(status)
+// (status === 0 || status >= 500), which treats an in-flight status of 0 as a failure.
+// These views decide from useGet's .failed instead.
+import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { act, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
@@ -11,10 +13,11 @@ import Trash from "@/app/(app)/projects/[id]/trash/Trash";
 import NewProject from "@/app/(app)/projects/new/NewProject";
 
 const FAILURE = "Could not reach the server";
-const params = Promise.resolve({ id: "p1" });
+const PROJECT_ID = "zz-test-project-2665";
+const params = Promise.resolve({ id: PROJECT_ID });
 
 const harness = vi.hoisted(() => ({
-  me: { id: "me", name: "Ada Admin", email: "ada@aplyd.com", orgRole: "SUPER_ADMIN" as const },
+  me: { id: "me", name: "QA Admin", email: "nakul17+qa-admin@gmail.com", orgRole: "SUPER_ADMIN" as const },
 }));
 
 vi.mock("next/link", async () => {
@@ -26,8 +29,8 @@ vi.mock("next/link", async () => {
 });
 
 vi.mock("next/navigation", () => ({
-  useParams: () => ({ id: "p1" }),
-  usePathname: () => "/projects/p1",
+  useParams: () => ({ id: PROJECT_ID }),
+  usePathname: () => `/projects/${PROJECT_ID}`,
   useRouter: () => ({ push: () => undefined, replace: () => undefined }),
 }));
 
@@ -37,10 +40,10 @@ vi.mock("@/app/(app)/Shell", async (importOriginal) => {
 });
 
 const VIEWS = [
-  { name: "Audit", ready: "SIGN_IN", render: () => <AuditView /> },
-  { name: "Members", ready: "ZZ-TEST Member", render: () => <Members params={params} /> },
-  { name: "Trash", ready: "ZZ-TEST deleted task", render: () => <Trash params={params} /> },
-  { name: "New project", ready: "ZZ-TEST Colleague", render: () => <NewProject /> },
+  { name: "Audit", ready: "ZZ-TEST-audit-row", empty: "No events match.", render: () => <AuditView /> },
+  { name: "Members", ready: "ZZ-TEST-member", empty: "ZZ-TEST-project-2665", render: () => <Members params={params} /> },
+  { name: "Trash", ready: "ZZ-TEST-trashed-task", empty: "Trash is empty.", render: () => <Trash params={params} /> },
+  { name: "New project", ready: "ZZ-TEST-colleague", empty: "No one else is available to add yet.", render: () => <NewProject /> },
 ] as const;
 
 const FILES = [
@@ -50,57 +53,70 @@ const FILES = [
   "src/app/(app)/projects/new/NewProject.tsx",
 ];
 
+const LOADED_MARKERS = ["ZZ-TEST-audit-row", "ZZ-TEST-member", "ZZ-TEST-trashed-task", "ZZ-TEST-colleague"];
+const EMPTY_AS_LOADED = ["No events match.", "Trash is empty.", "No one else is available to add yet."];
+
 let root: Root | undefined;
 
 function json(status: number, body: unknown) {
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 }
 
-function okBody(url: string) {
+function okBody(url: string, empty: boolean) {
   if (url.startsWith("/api/audit")) {
-    return {
-      events: ["SIGN_IN"],
-      items: [{ id: "e1", at: "2026-10-01T04:30:00.000Z", who: "Ada Admin", email: "ada@aplyd.com", event: "SIGN_IN", ip: "127.0.0.1", channel: "Screen", target: "ZZ-TEST-audit" }],
-      nextCursor: null,
-    };
+    return empty
+      ? { events: [], items: [], nextCursor: null }
+      : {
+          events: ["SIGN_IN"],
+          items: [{ id: "e1", at: "2026-10-01T04:30:00.000Z", who: "QA Admin", email: "nakul17+qa-admin@gmail.com", event: "SIGN_IN", ip: "127.0.0.1", channel: "Screen", target: "ZZ-TEST-audit-row" }],
+          nextCursor: null,
+        };
   }
   if (url.startsWith("/api/jobs")) return { jobs: [] };
   if (url === "/api/team") {
     return {
-      people: [
-        { id: "me", name: "Ada Admin", email: "ada@aplyd.com", status: "ACTIVE" },
-        { id: "u2", name: "ZZ-TEST Colleague", email: "c@aplyd.com", status: "ACTIVE" },
-      ],
+      people: empty
+        ? []
+        : [
+            { id: "me", name: "QA Admin", email: "nakul17+qa-admin@gmail.com", status: "ACTIVE" },
+            { id: "u2", name: "ZZ-TEST-colleague", email: "nakul17+qa-member@gmail.com", status: "ACTIVE" },
+          ],
     };
   }
-  if (url === "/api/projects/p1/trash") {
-    return { items: [{ id: "t1", title: "ZZ-TEST deleted task", isSubtask: false, deletedAt: "2026-10-01T04:30:00.000Z", deletedBy: { name: "Ada Admin" }, daysLeft: 12 }] };
+  if (url === `/api/projects/${PROJECT_ID}/trash`) {
+    return empty
+      ? { items: [] }
+      : { items: [{ id: "t1", title: "ZZ-TEST-trashed-task", isSubtask: false, deletedAt: "2026-10-01T04:30:00.000Z", deletedBy: { name: "QA Admin" }, daysLeft: 12 }] };
   }
-  if (url === "/api/projects/p1") {
+  if (url === `/api/projects/${PROJECT_ID}`) {
     return {
       project: {
-        id: "p1", name: "ZZ-TEST Project", archived: false, role: "LEADER",
-        members: [{ userId: "u2", name: "ZZ-TEST Member", role: "EDITOR", active: true, email: "m@aplyd.com" }],
+        id: PROJECT_ID, name: "ZZ-TEST-project-2665", archived: false, role: "LEADER",
+        members: empty ? [] : [{ userId: "u2", name: "ZZ-TEST-member", role: "EDITOR", active: true, email: "nakul17+qa-member@gmail.com" }],
       },
     };
   }
   throw new Error(`unexpected ${url}`);
 }
 
-type Mode = "pending" | "network" | "5xx" | "ok";
+type Held = { url: string; resolve: (r: Response) => void };
 
-function installFetch(mode: Mode) {
-  vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
-    const url = String(input);
-    if (mode === "pending") return new Promise<Response>(() => {});
-    if (mode === "network") throw new TypeError("Failed to fetch");
-    if (mode === "5xx") return json(503, { error: "down" });
-    return json(200, okBody(url));
-  }));
+function installFetch(respond: (url: string) => Promise<Response>) {
+  vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => respond(String(input))));
 }
 
-async function settle(ms = 0) {
-  await act(async () => { await new Promise((r) => setTimeout(r, ms)); });
+function installHeld() {
+  const pending: Held[] = [];
+  installFetch((url) => new Promise<Response>((resolve) => pending.push({ url, resolve })));
+  return pending;
+}
+
+function release(pending: Held[], status: number, empty = false) {
+  for (const call of pending.splice(0)) call.resolve(json(status, status >= 200 && status < 300 ? okBody(call.url, empty) : { error: "down" }));
+}
+
+async function flush() {
+  for (let i = 0; i < 8; i++) await act(async () => { await Promise.resolve(); });
 }
 
 async function show(node: ReactNode) {
@@ -112,60 +128,116 @@ async function show(node: ReactNode) {
   return document.body;
 }
 
-afterEach(() => {
+function unmount() {
   act(() => root?.unmount());
   root = undefined;
+}
+
+afterEach(() => {
+  unmount();
   document.body.replaceChildren();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
 
 describe("In-scope views use useGet's .failed flag", () => {
-  // APL-2665 AC1 @v1 @kind-happy. One case for the scenario outline (Audit, Members, Trash, New project).
-  it("A slow load is not shown as a failure", async () => {
+  // qa:TC-APL2665-b7c814f3@v1 · AC1. Pending requests show loading in Audit, Members, Trash and New project.
+  it("qa:TC-APL2665-b7c814f3@v1 slow load is not shown as a failure", async () => {
     for (const view of VIEWS) {
-      installFetch("pending");
+      installFetch(() => new Promise<Response>(() => {}));
       const page = await show(view.render());
-      await settle(450);
+      await flush();
       expect(page.querySelector(".skel-wrap"), `${view.name} loading state`).toBeTruthy();
       expect(page.textContent, view.name).not.toContain(FAILURE);
       expect(page.textContent, view.name).not.toContain(view.ready);
-      act(() => root?.unmount());
-      root = undefined;
+      unmount();
     }
   });
 
-  // APL-2665 AC2 @v1 @kind-error. Network error and HTTP 503, for each in-scope view.
-  it("A real failure shows the error state", async () => {
-    for (const mode of ["network", "5xx"] as const) {
+  // qa:TC-APL2665-051481c9@v1 · AC1. A slow load that later succeeds never flashes the error.
+  it("qa:TC-APL2665-051481c9@v1 slow load then success shows no error", async () => {
+    for (const view of VIEWS) {
+      let sawError = false;
+      const observer = new MutationObserver(() => {
+        if (document.body.textContent?.includes(FAILURE)) sawError = true;
+      });
+      observer.observe(document.body, { subtree: true, childList: true, characterData: true });
+      const pending = installHeld();
+      const page = await show(view.render());
+      expect(pending.length, `${view.name} issued a request`).toBeGreaterThan(0);
+      expect(page.querySelector(".skel-wrap"), `${view.name} loading state`).toBeTruthy();
+      expect(page.textContent, view.name).not.toContain(FAILURE);
+      expect(sawError, view.name).toBe(false);
+      await act(async () => { release(pending, 200); });
+      await flush();
+      expect(page.textContent, view.name).toContain(view.ready);
+      expect(page.textContent, view.name).not.toContain(FAILURE);
+      expect(sawError, `${view.name} flashed the error`).toBe(false);
+      observer.disconnect();
+      unmount();
+    }
+  });
+
+  // qa:TC-APL2665-b06cea3a@v1 · AC2. A network error shows the existing error message.
+  it("qa:TC-APL2665-b06cea3a@v1 network error shows the error state", async () => {
+    for (const view of VIEWS) {
+      installFetch(() => Promise.reject(new TypeError("Failed to fetch")));
+      const page = await show(view.render());
+      await flush();
+      expect(page.textContent, view.name).toContain("Could not reach the server.");
+      expect(page.querySelector(".skel-wrap"), `${view.name} loading gone`).toBeNull();
+      for (const marker of LOADED_MARKERS) expect(page.textContent, view.name).not.toContain(marker);
+      for (const phrase of EMPTY_AS_LOADED) expect(page.textContent, view.name).not.toContain(phrase);
+      unmount();
+    }
+  });
+
+  // qa:TC-APL2665-2d7b3f7f@v1 · AC2. HTTP 500 and 503 show the existing error message.
+  it("qa:TC-APL2665-2d7b3f7f@v1 5xx shows the error state", async () => {
+    for (const status of [500, 503]) {
       for (const view of VIEWS) {
-        installFetch(mode);
+        installFetch((url) => Promise.resolve(json(status, okBody(url, false))));
         const page = await show(view.render());
-        for (let i = 0; i < 20; i++) await settle();
-        expect(page.textContent, `${view.name} ${mode}`).toContain("Could not reach the server.");
-        expect([...page.querySelectorAll("button")].some((b) => b.textContent === "Retry"), `${view.name} ${mode}`).toBe(true);
-        act(() => root?.unmount());
-        root = undefined;
+        await flush();
+        expect(page.textContent, `${view.name} ${status}`).toContain("Could not reach the server.");
+        expect(page.querySelector(".skel-wrap"), `${view.name} ${status} loading gone`).toBeNull();
+        unmount();
       }
     }
   });
 
-  // APL-2665 AC3 @v1 @kind-regression. No isNetworkFailure(status) in the four files, and a successful load still renders.
-  it("No old status check remains in scope", async () => {
+  // qa:TC-APL2665-ae74af03@v1 · AC3. No old status check in the four files, and api.ts is untouched.
+  it("qa:TC-APL2665-ae74af03@v1 no old status check left in the 4 files", () => {
     for (const file of FILES) {
       const src = readFileSync(file, "utf8");
-      expect(src, file).not.toMatch(/isNetworkFailure\s*\(/);
       expect(src, file).toMatch(/\.failed/);
+      expect(src, `${file} still decides failure with isNetworkFailure(status)`).not.toMatch(/isNetworkFailure\s*\(/);
       expect(src, file).not.toMatch(/status\s*===\s*0|status\s*>=\s*500/);
     }
-    for (const view of VIEWS) {
-      installFetch("ok");
-      const page = await show(view.render());
-      for (let i = 0; i < 20 && !page.textContent?.includes(view.ready); i++) await settle();
-      expect(page.textContent, view.name).toContain(view.ready);
-      expect(page.textContent, view.name).not.toContain(FAILURE);
-      act(() => root?.unmount());
-      root = undefined;
+    let changed: string[] | null = null;
+    try {
+      execFileSync("git", ["rev-parse", "--verify", "--quiet", "origin/main"], { stdio: "ignore" });
+      changed = execFileSync("git", ["diff", "--name-only", "origin/main...HEAD"], { encoding: "utf8" }).split("\n").filter(Boolean);
+    } catch {
+      changed = null;
+    }
+    if (changed) {
+      expect(changed, "src/components/api.ts stays with APL-2663").not.toContain("src/components/api.ts");
+    }
+  });
+
+  // qa:TC-APL2665-ef4b5ec8@v1 · AC3. Loaded data and the normal empty state still render.
+  it("qa:TC-APL2665-ef4b5ec8@v1 loaded data renders as before", async () => {
+    for (const empty of [false, true]) {
+      for (const view of VIEWS) {
+        installFetch((url) => Promise.resolve(json(200, okBody(url, empty))));
+        const page = await show(view.render());
+        await flush();
+        expect(page.textContent, `${view.name} ${empty ? "empty" : "loaded"}`).toContain(empty ? view.empty : view.ready);
+        expect(page.textContent, view.name).not.toContain(FAILURE);
+        expect(page.querySelector(".skel-wrap"), view.name).toBeNull();
+        unmount();
+      }
     }
   });
 });
