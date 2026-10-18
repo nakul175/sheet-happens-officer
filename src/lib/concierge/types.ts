@@ -45,7 +45,8 @@ export type Stored = {
   card?: Card;
   result?: Message["result"];
   /** Server-only. */
-  proposal?: { ops: unknown[]; fingerprint: string };
+  /** `versions` is each task's updatedAt when the card was built (APL-2667). Server-only, with the rest of proposal. */
+  proposal?: { ops: unknown[]; fingerprint: string; versions?: Record<string, string> };
   pending?: { request: string; question?: string; kind?: "task" | "project" | "person"; optionIds?: string[]; narrowFor?: string };
   internal?: {
     logIds?: string[]; confirmedAt?: string; resultMessageId?: string; cardMessageId?: string;
