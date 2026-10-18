@@ -1,18 +1,37 @@
 // SHO-US-8.1 Concierge dock, bottom bar and hide preference (APL-2510).
 // One test per acceptance criterion. The dock checks use a wide window; the phone check uses 390px.
-// AC5 needs a monthly cap, a weekly cap or a provider outage. Staging cannot switch those on, so the test
-// runs only when the build is already in one of those states and skips otherwise.
-// No model call: a quick action is enough to put one exchange in the thread (AC3).
+// No model call. A quick action is enough to put one exchange in the thread (AC3).
+// AC5: staging cannot switch the monthly cap, the weekly cap or a provider outage. When the build is
+// not already paused, the page is shown the paused payload the server sends, and the app is checked live.
+import { readFileSync } from "node:fs";
+import type { Page } from "@playwright/test";
 import { test, expect } from "../support";
 import { newProject } from "../g2";
 import { cleanChat, quickAction } from "../helpers/jim-http";
-import { conciergeLive, conciergeOff } from "../helpers/jim-gate";
-import { requireConcierge, secondScreen, showConcierge } from "../helpers/jim-concierge";
+import { secondScreen, showConcierge } from "../helpers/jim-concierge";
 
 test.use({ viewport: { width: 1440, height: 900 } });
 
+const PAUSED = new Set(["MONTH_CAP", "WEEK_CAP", "PROVIDER_DOWN"]);
+
+/** The paused payload /api/concierge/state sends for a cap. Quick actions and the rest of the app stay up. */
+async function showPaused(page: Page) {
+  const message = "The concierge is paused for the rest of this month. It resumes on 1 November 2026. Screens and quick actions keep working.";
+  await page.route("**/api/concierge/state", (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify({
+      available: false,
+      disabled: { code: "MONTH_CAP", message, resumesAt: "2026-10-31T18:30:00.000Z" },
+      hidden: false,
+      voiceNoticeAcked: true,
+      quickActions: [],
+      messages: [],
+    }),
+  }));
+}
+
 test("AC1: a dock on My tasks, Projects, a project list and Team, and a bottom bar on the project board", async ({ admin, later }) => {
-  await requireConcierge(admin);
   await showConcierge(admin, later);
   const project = await newProject(admin, later, { label: "us81-dock" });
   const p = admin.page;
@@ -27,7 +46,6 @@ test("AC1: a dock on My tasks, Projects, a project list and Team, and a bottom b
 });
 
 test("AC2: hiding the concierge stays hidden after a reload and a sign-in on another session", async ({ admin, browser, later }) => {
-  await requireConcierge(admin);
   await showConcierge(admin, later);
   const p = admin.page;
   await p.goto("/");
@@ -45,7 +63,6 @@ test("AC2: hiding the concierge stays hidden after a reload and a sign-in on ano
 });
 
 test("AC3: moving from a project list to its board keeps the same conversation", async ({ admin, later }) => {
-  await requireConcierge(admin);
   await showConcierge(admin, later);
   await cleanChat(admin, later);
   const project = await newProject(admin, later, { label: "us81-thread" });
@@ -62,7 +79,6 @@ test("AC3: moving from a project list to its board keeps the same conversation",
 });
 
 test("AC4: at 390 pixels a floating button opens the concierge full screen", async ({ admin, later }) => {
-  await requireConcierge(admin);
   await showConcierge(admin, later);
   const p = admin.page;
   await p.setViewportSize({ width: 390, height: 844 });
@@ -78,20 +94,22 @@ test("AC4: at 390 pixels a floating button opens the concierge full screen", asy
 });
 
 test("AC5: a cap or a provider outage leaves the concierge visible but disabled, with a plain reason, and the app still works", async ({ admin, later }) => {
-  const c = await conciergeLive(admin);
-  test.skip(!c.live, conciergeOff(c));
-  const code = (await admin.api.get("/api/concierge/state")).json.disabled?.code as string | undefined;
-  test.skip(
-    code !== "MONTH_CAP" && code !== "WEEK_CAP" && code !== "PROVIDER_DOWN",
-    "Staging cannot switch the monthly cost cap, the weekly cap or the provider's availability. This build is not already in one of those paused states, so the disabled reason cannot be raised from a browser session.",
-  );
   await showConcierge(admin, later);
+  const state = await admin.api.get("/api/concierge/state");
+  expect(state.status, JSON.stringify(state.json)).toBe(200);
+  const code = state.json.disabled?.code as string | undefined;
+  const live = !!code && PAUSED.has(code);
   const p = admin.page;
+  if (!live) await showPaused(p);
   await p.goto("/");
   const note = p.locator("aside.cc-slot .cc-disabled");
   await expect(note).toBeVisible();
   await expect(note).not.toBeEmpty();
-  if (code === "MONTH_CAP" || code === "WEEK_CAP") await expect(note).toContainText(/reset|resume|return/i);
+  await expect(note).toContainText(/reset|resume|return/i);
   await expect(p.getByRole("heading", { name: "My tasks" })).toBeVisible();
   expect((await admin.api.get("/api/projects")).status).toBe(200);
+  const limits = readFileSync("src/lib/concierge/limits.ts", "utf8");
+  for (const name of ["MONTH_CAP", "WEEK_CAP", "PROVIDER_DOWN"]) expect(limits).toContain(name);
+  expect(limits).toContain("Screens and quick actions keep working");
+  expect(limits).toContain("The rest of the app works normally");
 });

@@ -1,10 +1,49 @@
 // SHO-US-22.8 Concierge on phones (APL-2556). Epic SHO-E22.
-// Runs against staging. Data: one ZZ-TEST project, archived afterwards. The concierge tests need the concierge switched ON on the
-// server (a model key and MODEL_DATA_APPROVED); when it is off they skip, and AC4 (the off notice) runs instead.
-// Skipped always: Confirm/Cancel (AC2 part) and the undo toast (AC5) need the concierge to propose a change through the model, which a story test must not trigger.
+// Runs against staging. Data: one ZZ-TEST project, archived afterwards.
+// Confirm, Cancel and the off notice are painted from the concierge state payload, so no model call is made.
+// The undo toast is the same UndoHost the app raises after a change; it is shown with the sheet open and closed.
 import { test, expect, zz, login, BASE_URL } from "../support";
-import type { Page } from "@playwright/test";
-import type { Browser } from "@playwright/test";
+import type { Page, Browser } from "@playwright/test";
+
+type Box = { x: number; y: number; width: number; height: number };
+
+function overlaps(a: Box | null, b: Box | null) {
+  if (!a || !b) return false;
+  return a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y;
+}
+
+const enabledState = {
+  available: true, hidden: false, voiceNoticeAcked: true, messages: [] as unknown[],
+  quickActions: [
+    { id: "due-week", label: "Due this week" },
+    { id: "overdue", label: "Overdue" },
+    { id: "waiting-on-me", label: "Waiting on me" },
+    { id: "blocked", label: "Blocked" },
+    { id: "recently-completed", label: "Recently completed" },
+  ],
+};
+
+const offState = {
+  available: false, hidden: false, voiceNoticeAcked: true, messages: [] as unknown[], quickActions: [],
+  disabled: { code: "NOT_ENABLED", message: "The concierge is not switched on yet." },
+};
+
+const cardState = {
+  ...enabledState,
+  messages: [{
+    id: "zz-card", role: "ASSISTANT", createdAt: new Date().toISOString(), kind: "card", text: "ZZ-TEST review this.",
+    card: {
+      id: "zz-card", status: "PENDING", title: "ZZ-TEST change", canConfirm: true,
+      changes: [{ label: "Due", before: "today", after: "Monday" }],
+    },
+  }],
+};
+
+async function fulfillState(page: Page, body: unknown) {
+  await page.route("**/api/concierge/state", (route) => route.fulfill({
+    status: 200, contentType: "application/json", body: JSON.stringify(body),
+  }));
+}
 
 async function phone(browser: Browser, width: number, height = 800, touch = true, who: "admin" | "member" = "admin") {
   const email = who === "admin" ? login("ADMIN").email : login("MEMBER").email;
@@ -33,74 +72,110 @@ async function openConcierge(page: Page) {
   await page.getByRole("menuitem", { name: "Concierge" }).click();
   const sheet = page.getByRole("dialog", { name: "Concierge" });
   await expect(sheet).toBeVisible({ timeout: 30000 });
-  await page.waitForTimeout(1500);
-  const on = (await page.getByLabel("Message the concierge").count()) > 0;
-  return { sheet, on };
+  return sheet;
 }
 
 test("AC1: the concierge fills the visible screen with the composer inside it (keyboard part needs a device)", async ({ browser }) => {
   const ctx = await phone(browser, 390, 780);
   const page = await ctx.newPage();
-  const { sheet, on } = await openConcierge(page);
-  test.skip(!on, "The concierge is not switched on on this server.");
-  const b = (await sheet.boundingBox())!;
-  expect(b.height).toBeGreaterThanOrEqual(780 * 0.95);
-  expect(b.width).toBeGreaterThanOrEqual(390 * 0.98);
-  const c = (await page.getByLabel("Message the concierge").boundingBox())!;
-  expect(c.y + c.height).toBeLessThanOrEqual(780);
-  await ctx.close();
+  try {
+    await fulfillState(page, enabledState);
+    const sheet = await openConcierge(page);
+    const b = (await sheet.boundingBox())!;
+    expect(b.height).toBeGreaterThanOrEqual(780 * 0.95);
+    expect(b.width).toBeGreaterThanOrEqual(390 * 0.98);
+    const c = (await page.getByLabel("Message the concierge").boundingBox())!;
+    expect(c.y + c.height).toBeLessThanOrEqual(780);
+  } finally { await ctx.close(); }
 });
 
 test("AC2: the quick chips are at least 44 px high", async ({ browser }) => {
   const ctx = await phone(browser, 390, 780);
   const page = await ctx.newPage();
-  const { on } = await openConcierge(page);
-  test.skip(!on, "The concierge is not switched on on this server.");
-  const chips = page.getByRole("group", { name: "Quick actions" }).getByRole("button");
-  expect(await chips.count()).toBeGreaterThan(0);
-  for (let i = 0; i < (await chips.count()); i++) expect((await chips.nth(i).boundingBox())!.height, `chip ${i}`).toBeGreaterThanOrEqual(44);
-  await ctx.close();
+  try {
+    await fulfillState(page, enabledState);
+    await openConcierge(page);
+    const chips = page.getByRole("group", { name: "Quick actions" }).getByRole("button");
+    expect(await chips.count()).toBeGreaterThan(0);
+    for (let i = 0; i < (await chips.count()); i++) expect((await chips.nth(i).boundingBox())!.height, `chip ${i}`).toBeGreaterThanOrEqual(44);
+  } finally { await ctx.close(); }
 });
 
-test.skip("AC2: the Confirm and Cancel buttons are at least 44 px high", () => {
-  // Confirm and Cancel only appear on a card the model proposes. A story test must not call the model (cost cap, SHO-US-9.2); covered by the CI phone checks on a fixture card.
-});
-
-// Probable product defect found 18 Oct 2026 (against dbfbab2): opened from More > Concierge on a phone, Close hides the sheet but
-// focus lands on <body> (the menu item it came from is gone), so "focus returns to the entry" does not hold. Remove test.fail() when fixed.
-test("AC3: Close closes the concierge and focus returns to the entry", async ({ browser }) => {
-  test.fail(true, "SHO-US-22.8 AC3: after Close, focus is on <body>, not on the More tab or the concierge entry");
+test("AC2: the Confirm and Cancel buttons are at least 44 px high", async ({ browser }) => {
   const ctx = await phone(browser, 390, 780);
   const page = await ctx.newPage();
-  const { sheet } = await openConcierge(page); // works with the concierge on or off: the sheet and its Close exist either way
-  await sheet.getByRole("button", { name: "Close" }).click();
-  await expect(sheet).toHaveCount(0);
-  const where = await page.evaluate(() => { const a = document.activeElement as HTMLElement | null; return a ? `${a.tagName}.${a.className}|${a.textContent?.trim().slice(0, 12)}` : ""; });
-  expect(where, "focus is on the More tab or the concierge button, not lost on <body>").toMatch(/More|Concierge|fab/i);
-  await ctx.close();
+  try {
+    await fulfillState(page, cardState);
+    const sheet = await openConcierge(page);
+    for (const name of ["Confirm", "Cancel"]) {
+      const box = await sheet.getByRole("button", { name }).boundingBox();
+      expect(box, name).toBeTruthy();
+      expect(box!.height, name).toBeGreaterThanOrEqual(44);
+    }
+  } finally { await ctx.close(); }
+});
+
+test("AC3: Close closes the concierge and focus returns to the entry", async ({ browser }) => {
+  const ctx = await phone(browser, 390, 780);
+  const page = await ctx.newPage();
+  try {
+    const sheet = await openConcierge(page);
+    await sheet.getByRole("button", { name: "Close" }).click();
+    await expect(sheet).toHaveCount(0);
+    const where = await page.evaluate(() => {
+      const a = document.activeElement as HTMLElement | null;
+      return a ? `${a.tagName}.${a.className}|${a.textContent?.trim().slice(0, 40)}` : "";
+    });
+    expect(where, "focus is on the More tab or the concierge button, not lost on <body>").toMatch(/More|Concierge|fab/i);
+  } finally { await ctx.close(); }
 });
 
 test("AC3: Back closes the concierge", async ({ browser }) => {
   const ctx = await phone(browser, 390, 780);
   const page = await ctx.newPage();
-  const { sheet } = await openConcierge(page);
-  await page.goBack().catch(() => {});
-  await expect(sheet).toHaveCount(0);
-  await ctx.close();
+  try {
+    const sheet = await openConcierge(page);
+    await page.goBack().catch(() => {});
+    await expect(sheet).toHaveCount(0);
+  } finally { await ctx.close(); }
 });
 
 test("AC4: when the concierge is switched off the notice shows and the rest of the app works", async ({ browser }) => {
   const ctx = await phone(browser, 390, 780);
   const page = await ctx.newPage();
-  const { sheet, on } = await openConcierge(page);
-  test.skip(on, "The concierge is switched on on this server, so there is no off notice to see.");
-  await expect(sheet.locator(".cc-disabled")).toBeVisible();
-  await sheet.getByRole("button", { name: "Close" }).click();
-  await page.goto(`/projects/${projectId}`, { waitUntil: "load" });
-  await expect(page.getByRole("button", { name: "+ Add task" }).first()).toBeVisible({ timeout: 30000 });
-  await ctx.close();
+  try {
+    await fulfillState(page, offState);
+    const sheet = await openConcierge(page);
+    await expect(sheet.locator(".cc-disabled")).toBeVisible();
+    await expect(sheet.locator(".cc-disabled")).toContainText(/not switched on yet|not enabled/i);
+    await sheet.getByRole("button", { name: "Close" }).click();
+    await page.goto(`/projects/${projectId}`, { waitUntil: "load" });
+    await expect(page.getByRole("button", { name: "+ Add task" }).first()).toBeVisible({ timeout: 30000 });
+  } finally { await ctx.close(); }
 });
 
-test.skip("AC5: the undo toast does not overlap the entry or a bottom bar", () => {
-  // An undo toast only appears after a confirmed concierge change, which needs the model. The same toast's position is covered for ordinary changes in SHO-US-14.5's tests.
+test("AC5: the undo toast does not overlap the entry or a bottom bar", async ({ browser }) => {
+  const ctx = await phone(browser, 390, 780);
+  const page = await ctx.newPage();
+  try {
+    const sheet = await openConcierge(page);
+    await page.evaluate(() => {
+      window.dispatchEvent(new CustomEvent("sho:undo", { detail: { id: "zz-toast", label: "ZZ-TEST change", notified: false } }));
+    });
+    const toast = page.locator(".undo-toast");
+    await expect(toast).toBeVisible();
+    const openBox = await toast.boundingBox();
+    expect(overlaps(openBox, await page.locator("button.fab").boundingBox())).toBe(false);
+    expect(overlaps(openBox, await page.locator("nav.tabbar").boundingBox())).toBe(false);
+    expect(openBox!.y, "with the sheet open the toast sits at the top, clear of the tab bar").toBeLessThan(160);
+    await sheet.getByRole("button", { name: "Close" }).click();
+    await expect(sheet).toHaveCount(0);
+    await page.evaluate(() => {
+      window.dispatchEvent(new CustomEvent("sho:undo", { detail: { id: "zz-toast-2", label: "ZZ-TEST change", notified: false } }));
+    });
+    await expect(toast).toBeVisible();
+    const closed = await toast.boundingBox();
+    expect(overlaps(closed, await page.locator("button.fab").boundingBox())).toBe(false);
+    expect(overlaps(closed, await page.locator("nav.tabbar").boundingBox())).toBe(false);
+  } finally { await ctx.close(); }
 });
