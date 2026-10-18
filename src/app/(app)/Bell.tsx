@@ -5,8 +5,8 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ago, api } from "@/components/api";
-import { bellEmptyText, responseApplies, visibleNotes, type BellFilter } from "./bell-list";
 import "./bell.css";
+import { bellEmptyText, responseApplies, visibleNotes, type BellFilter } from "./bell-list";
 
 type Note = { id: string; text: string; href: string; read: boolean; createdAt: string };
 type Page = { unread: number; items: Note[]; next: string | null };
@@ -52,7 +52,8 @@ export function Bell() {
   }, [open]);
 
   const unread = page?.unread ?? 0;
-  const items = visibleNotes(filter, [...(page?.items ?? []), ...more]);
+  const items = [...(page?.items ?? []), ...more];
+  const shown = visibleNotes(filter, items);
   async function older() {
     if (!next) return;
     const mine = loadSeq.current;
@@ -88,8 +89,8 @@ export function Bell() {
             <button aria-pressed={filter === "unread"} onClick={() => { filterRef.current = "unread"; setFilter("unread"); }}>Unread{unread > 0 ? ` · ${unread}` : ""}</button>
           </div>
           {failed && <div className="empty">Could not load notifications. <button className="link" onClick={() => load(filter, true)}>Try again</button></div>}
-          {!failed && page && !items.length && <div className="empty">{bellEmptyText(filter)}</div>}
-          {items.map((n) => (
+          {!failed && page && !shown.length && <div className="empty">{bellEmptyText(filter)}</div>}
+          {shown.map((n) => (
             <div key={n.id} className={`row bell-row${!n.read ? " unread" : ""}`}>
               <Link href={n.href} className="bell-main"
                 onClick={async (e) => {
