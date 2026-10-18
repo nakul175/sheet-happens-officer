@@ -1,9 +1,9 @@
 // SHO-US-14.12 Density and visual hierarchy (APL-2571).
-import { test, expect, zz } from "../support";
+import { test, expect, zz, type Who, type Later } from "../support";
 
 test.use({ viewport: { width: 1440, height: 900 } });
 
-async function listProject(admin: any, later: any, n: number) {
+async function listProject(admin: Who, later: Later, n: number) {
   const r = await admin.api.post("/api/projects", { name: zz("density"), leaderId: admin.user.id });
   expect(r.status).toBe(201);
   const id = r.json.project.id as string;

@@ -1,9 +1,9 @@
 // SHO-US-4.4 Flag a task as Blocked (Linear APL-2494).
 // The Super Admin acts as the project Leader; the plain Member (SHO_MEMBER_*) is the Editor/Viewer who flags. Member tests skip without it.
-import { test, expect, zz } from "../support";
+import { test, expect, zz, type Api } from "../support";
 import { getTask, newProject, newTask } from "../g2";
 
-const count = async (who: { api: any }, text: string) =>
+const count = async (who: { api: Api }, text: string) =>
   ((await who.api.get("/api/notifications")).json.items as { text: string }[]).filter((n) => n.text.includes(text));
 
 test("AC1: a blocked task stays in its Section and shows a Blocked badge on the list (API and screen)", async ({ admin, later }) => {

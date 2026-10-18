@@ -1,8 +1,8 @@
 // SHO-US-14.1 Approval state stays truthful (Linear APL-2560).
 // Needs a second person (the Member account) because a task awaits approval only when it sits with a different person than its assignee.
-import { test, expect, zz } from "../support";
+import { test, expect, zz, type Json } from "../support";
 
-type Who = { api: import("../support").Api; user: Record<string, any> };
+type Who = { api: import("../support").Api; user: Json };
 
 /** A ZZ-TEST project led by the admin, the member as Editor, and a task for the member with the admin as approver. */
 async function setup(admin: Who, member: Who, later: (f: () => Promise<unknown>) => void, label: string) {

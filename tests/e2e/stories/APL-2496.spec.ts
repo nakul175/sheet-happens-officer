@@ -1,11 +1,11 @@
 // APL-2496 · SHO-US-5.1 My tasks as the home page
 // Acceptance criteria: AC1 two projects grouped by date, AC2 collaborator tag and tick, AC3 access, AC4 empty state.
 // Data: every project and task is named "ZZ-TEST ..."; projects are archived afterwards.
-import { test, expect, zz, hasMember } from "../support";
+import { test, expect, zz, hasMember, type Who } from "../support";
 
 const ist = (d: number) => new Date(Date.now() + 5.5 * 3600e3 + d * 864e5).toISOString().slice(0, 10);
 
-async function proj(admin: any, label: string, later: (f: () => Promise<unknown>) => void) {
+async function proj(admin: Who, label: string, later: (f: () => Promise<unknown>) => void) {
   const r = await admin.api.post("/api/projects", { name: zz(label), leaderId: admin.user.id });
   expect(r.status, JSON.stringify(r.json)).toBe(201);
   const id = r.json.project.id as string;
@@ -25,7 +25,7 @@ test("AC1: tasks assigned to me in two projects appear in the right date group w
   expect(ids(mine.overdue)).toContain(over);
   expect(ids(mine.next7)).toContain(soon);
   expect(ids(mine.later)).toEqual(expect.arrayContaining([far, nodate]));
-  expect(mine.overdue.find((t: any) => t.id === over).project.name).toBe(zz("mt-a"));
+  expect(mine.overdue.find((t: { id: string }) => t.id === over).project.name).toBe(zz("mt-a"));
   // undated tasks sit last in Later
   const later_ = ids(mine.later);
   expect(later_.indexOf(nodate)).toBeGreaterThan(later_.indexOf(far));
@@ -43,7 +43,7 @@ test("AC2: a collaborator task shows a Collaborator tag, and a Viewer gets no ti
   later(() => admin.api.del(`/api/projects/${p}/members/${member.user.id}?handoverTo=${admin.user.id}`));
   const t = (await admin.api.post(`/api/projects/${p}/tasks`, { title: zz("collab"), collaboratorIds: [member.user.id], dueDate: ist(1) })).json.task.id;
   let mine = (await member.api.get("/api/my-tasks")).json;
-  const row = mine.next7.find((x: any) => x.id === t);
+  const row = mine.next7.find((x: { id: string }) => x.id === t);
   expect(row, "collaborator sees the task").toBeTruthy();
   expect(row.relation).toBe("COLLABORATOR");
   expect(row.canClose).toBe(true); // Editor
@@ -53,7 +53,7 @@ test("AC2: a collaborator task shows a Collaborator tag, and a Viewer gets no ti
   // Change the person to Viewer: no tick.
   expect((await admin.api.patch(`/api/projects/${p}/members/${member.user.id}`, { role: "VIEWER" })).status).toBe(200);
   mine = (await member.api.get("/api/my-tasks")).json;
-  expect(mine.next7.find((x: any) => x.id === t).canClose).toBe(false);
+  expect(mine.next7.find((x: { id: string }) => x.id === t).canClose).toBe(false);
 });
 
 test("AC3: a task in a project I was removed from, or an archived project, no longer appears", async ({ admin, member, later }) => {
