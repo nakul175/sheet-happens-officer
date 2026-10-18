@@ -156,7 +156,7 @@ describe("flag on (AC1–AC8)", () => {
   });
 
   it("qa:TC-APL2590-5335c004@v3: a double mention gives one notice, and the picker leaves out the author", async () => {
-    const { lead, worker, viewer, outsider, p, t1 } = await cast();
+    const { lead, viewer, outsider, p, t1 } = await cast();
     const sa = await superAdmin();
     const adm = await admin(sa, "admin");
     const writer = await account("writer");
