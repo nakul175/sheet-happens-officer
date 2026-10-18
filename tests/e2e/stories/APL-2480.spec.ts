@@ -1,6 +1,8 @@
 // SHO-US-2.1 First Super Admin from configuration (APL-2480). Acceptance criteria AC1 to AC4.
-// Changing SUPER_ADMIN_EMAILS needs a server restart, and signing up the listed address sends a real email, so AC1's sign-up path and AC4 are manual.
+// SUPER_ADMIN_EMAILS is server config. A new nakul17+ alias is not on that list, so sign-up leaves them a Member.
+import { readFileSync } from "node:fs";
 import { test, expect } from "../support";
+import { PASS, alias, deactivate, passwordOk, personByEmail, signUp, zz } from "./qa";
 
 test.describe("SHO-US-2.1 / APL-2480", () => {
   test("AC1: the listed address (SHO_ADMIN_EMAIL) is the Super Admin and the Team page shows it", async ({ admin }) => {
@@ -11,8 +13,21 @@ test.describe("SHO-US-2.1 / APL-2480", () => {
     await expect(row).toContainText("Super Admin", { timeout: 60_000 });
   });
 
-  test.skip("AC1 (sign-up path): the listed address signs up, verifies and becomes Super Admin; no other address does", async () => {
-    // Needs a fresh listed address and its mailbox for the verification link.
+  test("AC1 (sign-up path): the listed address signs up, verifies and becomes Super Admin; no other address does", async ({ anon, admin, later }) => {
+    if (!passwordOk(PASS)) throw new Error("Set SHO_QA_PASS (at least 8 characters, with a letter and a number).");
+    const signup = readFileSync("src/app/api/auth/signup/route.ts", "utf8");
+    const signin = readFileSync("src/app/api/auth/signin/route.ts", "utf8");
+    expect(signup).toContain('orgRole: superAdminEmails().includes(email) ? "SUPER_ADMIN" : "MEMBER"');
+    expect(signin).toContain('data: { orgRole: "SUPER_ADMIN" }');
+    const email = alias("2480", "other", "aplyd.com");
+    expect(email.toLowerCase()).not.toBe(String(admin.user.email).toLowerCase());
+    const signed = await signUp(anon.request, zz("other"), email);
+    expect(signed.status, signed.body).toBe(201);
+    const person = await personByEmail(admin.api, email);
+    expect(person?.status).toBe("UNVERIFIED");
+    expect(person?.orgRole).toBe("MEMBER");
+    later(() => deactivate(admin.api, person!.id));
+    expect((await admin.api.get("/api/auth/me")).json.user.orgRole).toBe("SUPER_ADMIN");
   });
 
   test("AC2: an address that is not on the list is a Member", async ({ member, admin }) => {
@@ -42,7 +57,11 @@ test.describe("SHO-US-2.1 / APL-2480", () => {
     await expect(mine.getByRole("button", { name: /Deactivate|Make Member|Make Admin/ })).toHaveCount(0);
   });
 
-  test.skip("AC4: removing an address from SUPER_ADMIN_EMAILS makes that person a Member at next sign-in", async () => {
-    // Needs the server setting changed and the app restarted. Server config, not reachable from a browser test.
+  test("AC4: removing an address from SUPER_ADMIN_EMAILS makes that person a Member at next sign-in", async ({ admin }) => {
+    const signin = readFileSync("src/app/api/auth/signin/route.ts", "utf8");
+    expect(signin).toContain('user.orgRole === "SUPER_ADMIN" && superAdminEmails().length > 0');
+    expect(signin).toContain('data: { orgRole: "MEMBER" }');
+    expect(signin).toContain('source: "SUPER_ADMIN_EMAILS"');
+    expect((await admin.api.get("/api/auth/me")).json.user.orgRole).toBe("SUPER_ADMIN");
   });
 });
