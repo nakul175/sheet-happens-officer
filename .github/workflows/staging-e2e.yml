@@ -12,8 +12,11 @@
 # How a run is split:
 #   plan        checks "target" first, then picks the spec files once and splits them into the parallel set and SERIAL_SPECS.
 #               Every shard and the serial job get BASE_URL=https://<target>.
-#   e2e         20 shards of the parallel set (--shard=N/20, workers=1 each). Shard N signs in as ZZ_TEST_NN (SHARD_*), names its
-#               data ZZ-TEST-NN (ZZ_PREFIX), and gets a partner account of the other role (PEER_*). At most max_parallel run at once.
+#   shards      lists the parallel files with `npx playwright test --list` (the same file filters as the test step)
+#               and sets the shard count to max(1, min(20, matching tests)). Zero matches still schedules one shard
+#               so the all-skipped guard fails the run. When any test matches, every scheduled shard has a test.
+#   e2e         that many shards of the parallel set (--shard=N/total, workers=1 each). Shard N signs in as ZZ_TEST_NN (SHARD_*),
+#               names its data ZZ-TEST-NN (ZZ_PREFIX), and gets a partner account of the other role (PEER_*). At most max_parallel run at once.
 #               After the tests, the job reads the Playwright JSON report and fails if nothing ran or every test was skipped.
 #   e2e-serial  the SERIAL_SPECS files, alone, after every shard has finished, as the shared SHO_ADMIN / SHO_MEMBER accounts.
 #               The same JSON-report check runs after these tests.
@@ -149,39 +152,51 @@ jobs:
           echo "parallel=${parallel[*]}" >> "$GITHUB_OUTPUT"
           echo "serial=${serial[*]}" >> "$GITHUB_OUTPUT"
 
-  e2e:
-    name: Shard ${{ matrix.nn }} of 20 (${{ matrix.role }})
+  shards:
+    name: Clamp the shard count
     needs: plan
     if: needs.plan.outputs.parallel != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      total: ${{ steps.clamp.outputs.total }}
+      matching: ${{ steps.clamp.outputs.matching }}
+      matrix: ${{ steps.clamp.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: List matching tests and clamp the shard count
+        id: clamp
+        env:
+          FILES: ${{ needs.plan.outputs.parallel }}
+          REQUESTED_SHARDS: "20"
+        run: |
+          read -ra files <<< "$FILES"
+          # Same file filters as the test step. --pass-with-no-tests only lets a zero-match list exit 0
+          # so this job can schedule one shard; the test step does not pass that flag, and the all-skipped guard fails it.
+          set +e
+          npx playwright test --list --pass-with-no-tests "${files[@]}" > "$RUNNER_TEMP/pw-list.txt" 2>&1
+          status=$?
+          set -e
+          cat "$RUNNER_TEMP/pw-list.txt"
+          node scripts/ci/clamp-shards.mjs --requested "$REQUESTED_SHARDS" --status "$status" --list "$RUNNER_TEMP/pw-list.txt" --github-output "$GITHUB_OUTPUT"
+
+  e2e:
+    name: Shard ${{ matrix.nn }} of ${{ needs.shards.outputs.total }} (${{ matrix.role }})
+    needs: [plan, shards]
+    if: needs.plan.outputs.parallel != '' && needs.shards.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 120
     strategy:
       fail-fast: false
       max-parallel: ${{ inputs.max_parallel }}
       matrix:
-        # nn picks the shard's own ZZ_TEST_NN account; peer is the partner of the other role (shard N with N+5, members with 01-05),
-        # chosen so no two of any 5 consecutive shards share an account.
-        include:
-          - { shard:  1, nn: '01', role: ADMIN,  peer: '06' }
-          - { shard:  2, nn: '02', role: ADMIN,  peer: '07' }
-          - { shard:  3, nn: '03', role: ADMIN,  peer: '08' }
-          - { shard:  4, nn: '04', role: ADMIN,  peer: '09' }
-          - { shard:  5, nn: '05', role: ADMIN,  peer: '10' }
-          - { shard:  6, nn: '06', role: MEMBER, peer: '01' }
-          - { shard:  7, nn: '07', role: MEMBER, peer: '02' }
-          - { shard:  8, nn: '08', role: MEMBER, peer: '03' }
-          - { shard:  9, nn: '09', role: MEMBER, peer: '04' }
-          - { shard: 10, nn: '10', role: MEMBER, peer: '05' }
-          - { shard: 11, nn: '11', role: MEMBER, peer: '01' }
-          - { shard: 12, nn: '12', role: MEMBER, peer: '02' }
-          - { shard: 13, nn: '13', role: MEMBER, peer: '03' }
-          - { shard: 14, nn: '14', role: MEMBER, peer: '04' }
-          - { shard: 15, nn: '15', role: MEMBER, peer: '05' }
-          - { shard: 16, nn: '16', role: MEMBER, peer: '01' }
-          - { shard: 17, nn: '17', role: MEMBER, peer: '02' }
-          - { shard: 18, nn: '18', role: MEMBER, peer: '03' }
-          - { shard: 19, nn: '19', role: MEMBER, peer: '04' }
-          - { shard: 20, nn: '20', role: MEMBER, peer: '05' }
+        # First N of the 20 ZZ_TEST accounts, N = max(1, min(20, matching tests)). See scripts/ci/clamp-shards.mjs.
+        include: ${{ fromJSON(needs.shards.outputs.matrix || '[]') }}
     env:
       BASE_URL: ${{ needs.plan.outputs.base_url }}
       ZZ_PREFIX: ZZ-TEST-${{ matrix.nn }}
@@ -235,7 +250,7 @@ jobs:
           echo "Shard $SHARD waits ${wait}s so shards do not all sign in at once."
           sleep "$wait"
 
-      - name: Run shard ${{ matrix.shard }}/20 (workers=1)
+      - name: Run shard ${{ matrix.shard }}/${{ needs.shards.outputs.total }} (workers=1)
         env:
           STAGING_USER: ${{ secrets.STAGING_USER }}
           STAGING_PASS: ${{ secrets.STAGING_PASS }}
@@ -253,7 +268,7 @@ jobs:
           TRACE: ${{ inputs.trace }}
         run: |
           read -ra files <<< "$FILES"
-          npx playwright test --shard=${{ matrix.shard }}/20 --workers=1 --reporter=list,blob,json --trace="$TRACE" "${files[@]}"
+          npx playwright test --shard=${{ matrix.shard }}/${{ needs.shards.outputs.total }} --workers=1 --reporter=list,blob,json --trace="$TRACE" "${files[@]}"
 
       - name: Fail when no test ran
         if: always()
