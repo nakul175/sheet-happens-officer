@@ -41,7 +41,8 @@
 .bulk-dates { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
 .bulk-msg { display: flex; gap: 12px; align-items: baseline; justify-content: space-between; flex-wrap: wrap; }
 @media (max-width: 1023px), (pointer: coarse) {
-  .sel { width: 44px; height: 44px; margin: -11px -10px -11px -12px; }
+  /* APL-2673: 7 px right margin leaves 8 px between the 44 px checkbox and the tick's 44 px hit area. */
+  .sel { width: 44px; height: 44px; margin: -11px 7px -11px -12px; }
   .sel input { width: 22px; height: 22px; }
   .grp .selall { min-height: 44px; }
 }
