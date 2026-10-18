@@ -58,16 +58,28 @@ jobs:
         run: |
           if [ "${{ steps.playwright-browsers.outputs.cache-hit }}" = "true" ]; then
             echo "Playwright browsers restored from cache"
+            npx playwright-core install-deps chromium
           else
             echo "No Playwright browser cache for this lockfile; downloading Chromium"
+            npx playwright-core install --with-deps chromium
           fi
-          npx playwright-core install --with-deps chromium
       - run: npx prisma migrate deploy
       - run: npm run build
       - name: Start the app
         run: |
           (npx next start -p 3100 > server.log 2>&1 &)
-          for i in $(seq 1 30); do curl -fsS http://localhost:3100/api/health && break; sleep 2; done
+          url="${APP_HEALTH_URL:-http://localhost:3100/api/health}"
+          attempts="${APP_HEALTH_ATTEMPTS:-30}"
+          pause="${APP_HEALTH_PAUSE:-2}"
+          for i in $(seq 1 "$attempts"); do
+            if curl -fsS "$url"; then
+              exit 0
+            fi
+            sleep "$pause"
+          done
+          echo "The app did not come up: ${url} did not answer within the timeout"
+          tail -n 50 server.log || true
+          exit 1
       - name: Viewport tests
         run: npm run test:viewport
       - name: Screenshots of failing pages

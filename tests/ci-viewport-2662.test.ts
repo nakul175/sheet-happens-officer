@@ -1,7 +1,8 @@
 // APL-2662: CI runs the viewport tests in Playwright Chromium.
 // One test per approved Gherkin scenario (Michael, v1).
 import { spawnSync } from "node:child_process";
-import { readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 
@@ -138,8 +139,19 @@ function runText(step: YMap): string {
   return typeof step.run === "string" ? step.run : "";
 }
 
+const UNTOUCHED_WORKFLOWS = [
+  ".github/workflows/phone-checks.yml",
+  ".github/workflows/deploy.yml",
+  ".github/workflows/staging-e2e.yml",
+];
+
+function git(args: string[]): { status: number | null; stdout: string; stderr: string } {
+  const result = spawnSync("git", args, { cwd: process.cwd(), encoding: "utf8" });
+  return { status: result.status, stdout: result.stdout ?? "", stderr: result.stderr ?? "" };
+}
+
 describe("CI runs the viewport tests in Playwright Chromium (APL-2662)", () => {
-  it("Viewport tests run on every PR", () => {
+  it("Viewport tests run on every PR (qa:TC-APL2662-e1e4aac1@v1)", () => {
     const { doc, job, steps } = loadWorkflow();
     expect(path.basename(WORKFLOW_PATH)).toBe("viewport.yml");
     expect(WORKFLOW_PATH.includes(`${path.sep}.github${path.sep}workflows${path.sep}`)).toBe(true);
@@ -166,7 +178,26 @@ describe("CI runs the viewport tests in Playwright Chromium (APL-2662)", () => {
     expect(steps.some((step) => runText(step).trim() === "npm ci")).toBe(true);
   });
 
-  it("A failing viewport test fails the job", { timeout: 90_000 }, () => {
+  it("Viewport checks are a new workflow file (qa:TC-APL2662-6324c7e3@v1)", () => {
+    const viewport = readFileSync(WORKFLOW_PATH, "utf8");
+    expect(viewport).toContain("npm run test:viewport");
+    expect(viewport).toContain("jobs:");
+    for (const file of UNTOUCHED_WORKFLOWS) {
+      const text = readFileSync(path.join(process.cwd(), file), "utf8");
+      expect(text, file).not.toContain("APL-2662");
+      expect(text, file).not.toContain("playwright-browsers");
+      expect(text, file).not.toContain("Playwright browsers restored from cache");
+      expect(text, file).not.toContain("The app did not come up");
+    }
+    const base = git(["rev-parse", "--verify", "origin/main"]);
+    const onMain = git(["cat-file", "-e", "origin/main:.github/workflows/viewport.yml"]);
+    if (base.status === 0 && onMain.status !== 0) {
+      const diff = git(["diff", "--exit-code", "origin/main", "--", ...UNTOUCHED_WORKFLOWS]);
+      expect(diff.status, `${diff.stdout}\n${diff.stderr}`).toBe(0);
+    }
+  });
+
+  it("A failing viewport test fails the job (qa:TC-APL2662-d83a7e4c@v1)", { timeout: 90_000 }, () => {
     const { job, steps } = loadWorkflow();
     const viewport = steps.find((step) => runText(step).trim() === "npm run test:viewport");
     expect(viewport, 'viewport job runs "npm run test:viewport"').toBeDefined();
@@ -203,8 +234,8 @@ describe("CI runs the viewport tests in Playwright Chromium (APL-2662)", () => {
     }
   });
 
-  it("Browser download is cached", () => {
-    const { raw, doc, job, steps } = loadWorkflow();
+  it("Browser download is cached (qa:TC-APL2662-9a100093@v1)", () => {
+    const { job, steps } = loadWorkflow();
     const cache = steps.find((step) => typeof step.uses === "string" && step.uses.startsWith("actions/cache@"));
     expect(cache, "Playwright browsers are stored with actions/cache").toBeDefined();
     expect(cache?.id).toBe("playwright-browsers");
@@ -223,9 +254,18 @@ describe("CI runs the viewport tests in Playwright Chromium (APL-2662)", () => {
     const install = steps.find((step) => runText(step).includes("playwright-core install") && runText(step).includes("chromium"));
     expect(install).toBeDefined();
     expect(steps.indexOf(cache!)).toBeLessThan(steps.indexOf(install!));
-    expect(runText(install!)).toContain("steps.playwright-browsers.outputs.cache-hit");
-    expect(runText(install!)).toContain("Playwright browsers restored from cache");
+    const installScript = runText(install!);
+    expect(installScript).toContain("steps.playwright-browsers.outputs.cache-hit");
+    expect(installScript).toContain("Playwright browsers restored from cache");
+    const [cacheHit, cacheMiss] = installScript.split("else");
+    expect(cacheHit).toContain("npx playwright-core install-deps chromium");
+    expect(cacheHit).not.toContain("install --with-deps");
+    expect(cacheMiss).toContain("npx playwright-core install --with-deps chromium");
+    expect(cacheMiss).not.toContain("install-deps");
+  });
 
+  it("No production or staging secret is used (qa:TC-APL2662-d3047d35@v1)", () => {
+    const { raw, doc, job } = loadWorkflow();
     const expressions = raw.match(/\$\{\{[^}]+\}\}/g) ?? [];
     const allowed = new Set([
       "${{ github.ref }}",
@@ -242,5 +282,41 @@ describe("CI runs the viewport tests in Playwright Chromium (APL-2662)", () => {
     for (const value of stringsIn(doc)) expect(value, value).not.toMatch(forbidden);
     expect(job.environment).toBeUndefined();
     expect(doc.environment).toBeUndefined();
+  });
+
+  it("The health check fails the job when the app never comes up", () => {
+    const { steps } = loadWorkflow();
+    const start = steps.find((step) => step.name === "Start the app");
+    expect(start, "the viewport job waits for the app").toBeDefined();
+    expect(start?.["continue-on-error"]).toBeUndefined();
+    const script = runText(start!);
+    expect(script).toContain("/api/health");
+    expect(script).toContain('echo "The app did not come up: ${url} did not answer within the timeout"');
+    expect(script.trimEnd().endsWith("exit 1")).toBe(true);
+    expect(script).not.toMatch(/curl[^\n]*\|\|\s*true/);
+
+    const bin = mkdtempSync(path.join(tmpdir(), "viewport-health-"));
+    try {
+      writeFileSync(path.join(bin, "npx"), "#!/bin/sh\nexit 0\n");
+      chmodSync(path.join(bin, "npx"), 0o755);
+      const result = spawnSync("bash", ["-eo", "pipefail", "-c", script], {
+        cwd: bin,
+        encoding: "utf8",
+        timeout: 15_000,
+        env: {
+          ...process.env,
+          PATH: `${bin}${path.delimiter}${process.env.PATH ?? ""}`,
+          APP_HEALTH_URL: "http://127.0.0.1:9/api/health",
+          APP_HEALTH_ATTEMPTS: "2",
+          APP_HEALTH_PAUSE: "0",
+        },
+      });
+      const output = `${result.stdout ?? ""}\n${result.stderr ?? ""}`;
+      expect(result.status, output).not.toBe(0);
+      expect(output).toContain("The app did not come up:");
+      expect(output).toContain("did not answer within the timeout");
+    } finally {
+      rmSync(bin, { recursive: true, force: true });
+    }
   });
 });
