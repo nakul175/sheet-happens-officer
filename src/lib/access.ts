@@ -48,8 +48,10 @@ export type Access = Awaited<ReturnType<typeof projectAccess>>;
 export function requireWrite(a: Access) {
   if (a.role === "VIEWER") throw new ApiError(403, "Viewers cannot make changes.");
 }
+/** The Leader or an Admin (Admins act as Leader): who may restore from Trash, and so who may undo a delete (SHO-US-3.3 AC1). */
+export const canManage = (a: Pick<Access, "role">) => a.role === "LEADER";
 export function requireManage(a: Access) {
-  if (a.role !== "LEADER") throw new ApiError(403, "Only the project Leader or an Admin can do this.");
+  if (!canManage(a)) throw new ApiError(403, "Only the project Leader or an Admin can do this.");
 }
 
 export const isActive = (u: { deactivatedAt: Date | null; emailVerifiedAt: Date | null }) =>

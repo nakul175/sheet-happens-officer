@@ -1,7 +1,7 @@
 // SHO-US-8.1 to 8.8: reads, proposals and cards, clarification, undo and privacy of the concierge.
 // Calls src/lib directly with a scripted fake model; the live server (same database) sets up people and work.
 import { describe, expect, it } from "vitest";
-import { account, istDate, project, superAdmin, task, type Account } from "./helpers";
+import { account, istDate, project, superAdmin, task, type Account, patchTask } from "./helpers";
 import { MONDAY, actor, db, lastData, lastResultText, say, script, tu, useFakeModel } from "./concierge-helpers";
 import { fakeCallCount, setFakeModel, type ModelRequest } from "../src/lib/model";
 import { answerChoice, quickAction, sendMessage } from "../src/lib/concierge/engine";
@@ -33,7 +33,7 @@ describe("reads (8.2)", () => {
     const soon = await task(lead, p.id, { title: "Soon thing", dueDate: istDate(2) });
     const far = await task(lead, p.id, { title: "Far thing", dueDate: istDate(40) });
     const blocked = await task(lead, p.id, { title: "Stuck thing" });
-    expect((await lead.c.patch(`/api/tasks/${blocked}`, { blocked: true, blockedReason: "waiting" })).status).toBe(200);
+    expect((await patchTask(lead, blocked, { blocked: true, blockedReason: "waiting" })).status).toBe(200);
     const trashed = await task(lead, p.id, { title: "Trashed late", dueDate: istDate(-5) });
     expect((await lead.c.del(`/api/tasks/${trashed}`)).status).toBe(204);
     const done = await task(lead, p.id, { title: "Finished thing" });
@@ -246,7 +246,7 @@ describe("propose and confirm (8.3)", () => {
     script(...moveBudget());
     const c = cardOf((await ask(lead, "Move the budget task to Monday", MONDAY)).messages);
     // Someone else moves it first.
-    expect((await ed.c.patch(`/api/tasks/${t}`, { dueDate: "2031-04-10" })).status).toBe(200);
+    expect((await patchTask(ed, t, { dueDate: "2031-04-10" })).status).toBe(200);
     const err = await confirmCard(actor(lead), c.id).catch((e) => e);
     expect(err.status).toBe(409);
     expect(err.extra.stale).toBe(true);
@@ -294,8 +294,9 @@ describe("propose and confirm (8.3)", () => {
     expect((await db.task.findUniqueOrThrow({ where: { id: t } })).deletedAt).not.toBeNull();
     expect(done.messages[0].result!.noticeSent).toBe(true);
     expect(await db.notification.count({ where: { recipientId: lead.id, type: "TASK_DELETED", taskId: t } })).toBe(1);
-    await undoCard(actor(ed), c.id);
-    expect((await db.task.findUniqueOrThrow({ where: { id: t } })).deletedAt).toBeNull();
+    // Undo of a delete is a restore, so an Editor is refused like on the Trash page (SHO-BUG-8).
+    await expect(undoCard(actor(ed), c.id)).rejects.toThrow("Only the project Leader or an Admin can do this.");
+    expect((await db.task.findUniqueOrThrow({ where: { id: t } })).deletedAt).not.toBeNull();
   });
 
   it("member removal: lists every task, needs a taker for each, says it cannot be undone, and has no Undo (AC8, 8.5 AC5)", async () => {
@@ -368,10 +369,15 @@ describe("propose and confirm (8.3)", () => {
     expect(viaChat.map((r) => (r.afterState as { count?: number; handedOver?: number }).count ?? (r.afterState as { handedOver?: number }).handedOver).sort()).toEqual([1, 2, 3]);
     expect(viaChat[2].afterState).toMatchObject({ removed: true, handedOver: 3 });
     // The same removal from the screen (the third editor, all tasks to one taker) writes the same kind of rows.
+    // Read those rows by the member they name. A createdAt cutoff taken with new Date() after the setup tasks
+    // races them: task.created stores a null beforeState, and that timestamp is often the same millisecond as
+    // the clock read, so createdAt >= cutoff includes it and Object.keys throws (SHO-BUG-7 flake).
     for (let i = 0; i < 3; i++) await task(e3, p.id, { title: `E3 ${i}` });
-    const screenSince = new Date();
     expect((await lead.c.del(`/api/projects/${p.id}/members/${e3.id}?handoverTo=${e2.id}`)).status).toBe(204);
-    const viaScreen = await db.actionLog.findMany({ where: { projectId: p.id, channel: "SCREEN", createdAt: { gte: screenSince } }, orderBy: [{ createdAt: "asc" }, { id: "asc" }] });
+    const viaScreen = await db.actionLog.findMany({
+      where: { projectId: p.id, channel: "SCREEN", targetId: e3.id, action: { in: ["tasks.reassigned", "member.removed"] } },
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+    });
     expect(shape(viaChat)).toEqual([shape(viaScreen)[0], shape(viaScreen)[0], shape(viaScreen)[1]]);
     expect(viaScreen[1].afterState).toMatchObject({ removed: true, handedOver: 3 });
   });
@@ -573,7 +579,7 @@ describe("undo of a card (8.5)", () => {
   it("a conflict warns first and reverses nothing; 'anyway' then reverses the card (AC2)", async () => {
     const { lead, ed, a, b, card } = await multi();
     await confirmCard(actor(lead), card.id);
-    expect((await ed.c.patch(`/api/tasks/${a}`, { dueDate: "2031-06-01" })).status).toBe(200);
+    expect((await patchTask(ed, a, { dueDate: "2031-06-01" })).status).toBe(200);
     const err = await undoCard(actor(lead), card.id).catch((e) => e);
     expect(err.status).toBe(409);
     expect(err.extra.needsConfirm).toBe("conflict");

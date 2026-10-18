@@ -1,6 +1,6 @@
 // SHO-US-14.9: filter and sort a project list on the server.
 import { describe, expect, it } from "vitest";
-import { account, istDate, project, task } from "./helpers";
+import { account, istDate, project, task, patchTask } from "./helpers";
 
 const ids = (j: { sections: { tasks: { id: string }[] }[] }) => j.sections.flatMap((s) => s.tasks.map((t) => t.id));
 
@@ -17,7 +17,7 @@ describe("project list filters (14.9)", () => {
     const done = await task(lead, p.id, { dueDate: istDate(-20) });
     expect((await lead.c.post(`/api/tasks/${done}/complete`, {})).status).toBe(200);
     const blocked = await task(lead, p.id, { dueDate: istDate(2) });
-    expect((await lead.c.patch(`/api/tasks/${blocked}`, { blocked: true, blockedReason: "waiting" })).status).toBe(200);
+    expect((await patchTask(lead, blocked, { blocked: true, blockedReason: "waiting" })).status).toBe(200);
     const wait = await task(lead, p.id, { assigneeId: meera.id, approverId: lead.id });
     expect((await meera.c.post(`/api/tasks/${wait}/send-for-approval`)).status).toBe(200);
 
