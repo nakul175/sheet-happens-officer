@@ -16,7 +16,10 @@ async function listProject(admin: any, later: any, n: number) {
 }
 
 test("AC1: Compact shows at least 16 rows at 1440 by 900 and the setting persists per person", async ({ admin, later }) => {
-  later(() => admin.api.put("/api/profile/density", { compact: false })); // leave the shared account as it was
+  const prior = await admin.api.get("/api/profile/density");
+  expect(prior.status).toBe(200);
+  const { compact } = prior.json as { compact: boolean };
+  later(() => admin.api.put("/api/profile/density", { compact })); // put the shared Admin back
   await admin.api.put("/api/profile/density", { compact: false });
   const id = await listProject(admin, later, 20);
   const p = admin.page;
@@ -134,7 +137,10 @@ function rowContrast(root: HTMLElement | SVGElement): string[] {
 }
 
 test("AC4: contrast of every text and icon is at least 4.5:1 (3:1 for large text and icons)", async ({ admin, later }) => {
-  later(() => admin.api.put("/api/profile/density", { compact: false }));
+  const prior = await admin.api.get("/api/profile/density");
+  expect(prior.status).toBe(200);
+  const { compact } = prior.json as { compact: boolean };
+  later(() => admin.api.put("/api/profile/density", { compact }));
   await admin.api.put("/api/profile/density", { compact: false });
   const id = await listProject(admin, later, 3);
   const title = `${zz("row")} 00`;
