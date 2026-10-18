@@ -38,10 +38,12 @@ type Got<T> = { forPath: string | null; req: number; data: T | null; error: stri
 
 /** GET a path; `reload()` fetches again. Data stays on screen while the same path reloads.
  * A different path reports loading, no error and no data in that same render, so the previous page cannot stick.
+ * Pass `{ keepPrevious: true }` to keep the last payload on screen while the new path loads (search). Project pages leave it off.
  * Only the latest request for the current path may paint. A late answer for an older path is ignored.
  * `code` is the error body's code (for example PASSWORD_CHANGE_REQUIRED) and is cleared with the error when the path changes.
  * `failed` is true only once an answer came back as a network failure: status starts at 0, so an in-flight request must never read as one. */
-export function useGet<T = Record<string, any>>(path: string | null) { // eslint-disable-line @typescript-eslint/no-explicit-any
+export function useGet<T = Record<string, any>>(path: string | null, opts?: { keepPrevious?: boolean }) { // eslint-disable-line @typescript-eslint/no-explicit-any
+  const keepPrevious = opts?.keepPrevious === true;
   const [state, setState] = useState<Got<T>>({ forPath: path, req: 0, data: null, error: null, status: 0, code: null, loading: true });
   const [tick, setTick] = useState(0);
   const [seenPath, setSeenPath] = useState(path);
@@ -75,7 +77,12 @@ export function useGet<T = Record<string, any>>(path: string | null) { // eslint
   }, [path, tick, gen]);
   const reload = useCallback(() => { setState((p) => (p.data ? p : { ...p, loading: true, error: null })); setTick((n) => n + 1); }, []);
   const fresh = state.forPath === path && state.req === gen;
-  const shown = fresh ? state : { data: null as T | null, error: null as string | null, status: 0, code: null as string | null, loading: path !== null };
+  // Stale-while-loading is opt-in. The default still hides the previous page the moment the path changes.
+  const shown = fresh
+    ? state
+    : keepPrevious && path !== null && state.data != null
+      ? { data: state.data, error: null as string | null, status: 0, code: null as string | null, loading: true }
+      : { data: null as T | null, error: null as string | null, status: 0, code: null as string | null, loading: path !== null };
   return { data: shown.data, error: shown.error, status: shown.status, code: shown.code, loading: shown.loading, failed: path !== null && !shown.loading && isNetworkFailure(shown.status), reload };
 }
 

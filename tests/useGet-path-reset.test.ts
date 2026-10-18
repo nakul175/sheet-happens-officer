@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 // APL-2663 v1.1: useGet resets loading when the path changes.
 // One test per Gherkin scenario. Pam's cases: six re-pinned to @v2, plus AC4 and AC5 at @v1.
+import { mkdirSync, writeFileSync } from "node:fs";
 import { createElement, useEffect, useState } from "react";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
@@ -57,6 +58,7 @@ function Probe({ path, log }: { path: string; log: Snap[] }) {
     { "aria-label": `Project ${project}` },
     g.loading && !g.data ? createElement(Skeleton) : null,
     !g.data && g.failed ? createElement(LoadFailed, { onRetry: g.reload }) : null,
+    !g.loading && g.error && !g.failed ? createElement("div", { className: "err", role: "alert" }, g.error) : null,
     createElement("ul", null, items.map((item) => createElement("li", { key: item }, item))),
   );
 }
@@ -86,6 +88,31 @@ async function settle(run: () => void) {
 
 const bodyText = () => document.body.textContent ?? "";
 const section = () => document.querySelector("section");
+
+/** Accessible bits of the content area, saved for qa:TC-APL2663-2437ecb8. */
+function accessSnapshot(root: Element): string {
+  const lines: string[] = [];
+  const walk = (el: Element, depth: number) => {
+    const role = el.getAttribute("role");
+    const label = el.getAttribute("aria-label");
+    const live = el.getAttribute("aria-live");
+    const busy = el.getAttribute("aria-busy");
+    const sr = el.classList.contains("sr-only");
+    if (role || label || live || busy || sr) {
+      const name = sr ? el.textContent?.trim() : label;
+      const bits = [
+        role ? `role=${role}` : "",
+        live ? `aria-live=${live}` : "",
+        busy ? `aria-busy=${busy}` : "",
+        name ? `name=${JSON.stringify(name)}` : "",
+      ].filter(Boolean);
+      lines.push(`${"  ".repeat(depth)}${el.tagName.toLowerCase()} ${bits.join(" ")}`.trimEnd());
+    }
+    [...el.children].forEach((child) => walk(child, depth + 1));
+  };
+  walk(root, 0);
+  return `${lines.join("\n")}\n`;
+}
 const hasAItem = (data: Data | null | undefined) => JSON.stringify(data ?? {}).includes("ZZ-TEST-A-item");
 
 beforeEach(() => {
@@ -138,15 +165,22 @@ describe("useGet resets its loading state when the path changes", () => {
   // qa:TC-APL2663-1af30363@v2 — error on the old path is cleared (network and HTTP 500)
   // qa:TC-APL2663-dfa02140@v2 — B failing shows B's own error only after B answers
   it("The error state belongs to the current path only", async () => {
-    async function failA(how: "network" | "500") {
+    async function failA(how: "network" | "500" | "refused") {
       const { log } = await mount(PATH_A);
       await settle(() => {
         const a = take(PATH_A);
         if (how === "network") a.reject(new TypeError("Failed to fetch"));
-        else a.resolve(json({ error: "down" }, 500));
+        else if (how === "500") a.resolve(json({ error: "down" }, 500));
+        else a.resolve(json({ error: "Project A is closed for edits" }, 400));
       });
-      expect(log.at(-1)?.failed, `${how} on A`).toBe(true);
-      expect(document.querySelector("[role='alert']")?.textContent).toContain("Could not reach the server.");
+      if (how === "refused") {
+        expect(log.at(-1)?.failed, "a 400 is not a network failure").toBe(false);
+        expect(log.at(-1)?.error).toBe("Project A is closed for edits");
+        expect(document.querySelector("[role='alert']")?.textContent).toBe("Project A is closed for edits");
+      } else {
+        expect(log.at(-1)?.failed, `${how} on A`).toBe(true);
+        expect(document.querySelector("[role='alert']")?.textContent).toContain("Could not reach the server.");
+      }
 
       const mark = log.length;
       await act(async () => { go(PATH_B); });
@@ -165,14 +199,28 @@ describe("useGet resets its loading state when the path changes", () => {
     root = null;
     host?.remove();
 
-    const bad = await failA("500");
+    // qa:TC-APL2663-1af30363@v2 — HTTP 500 on A, then B's 200, in one pass.
+    const server = await failA("500");
+    await settle(() => { take(PATH_B).resolve(json({ items: ITEMS_B })); });
+    expect(server.log.at(-1)).toMatchObject({ loading: false, failed: false, error: null, data: { items: ITEMS_B } });
+    expect(bodyText()).toContain("ZZ-TEST-B-item1");
     expect(document.querySelector("[role='alert']")).toBeNull();
-    await settle(() => { take(PATH_B).reject(new TypeError("Failed to fetch")); });
-    expect(bad.log.at(-1)?.failed).toBe(true);
+    expect(bodyText()).not.toContain("Could not reach the server.");
+    await act(async () => { root!.unmount(); });
+    root = null;
+    host?.remove();
+
+    // qa:TC-APL2663-dfa02140@v2 — A's error and B's error are different strings.
+    const bad = await failA("refused");
+    expect(document.querySelector("[role='alert']")).toBeNull();
+    await settle(() => { take(PATH_B).resolve(json({ error: "Project B is closed for edits" }, 403)); });
+    expect(bad.log.at(-1)?.failed).toBe(false);
     expect(bad.log.at(-1)?.loading).toBe(false);
     expect(bad.log.at(-1)?.data).toBeNull();
-    expect(bad.log.at(-1)?.error).toContain("Could not reach the server.");
-    expect(document.querySelector("[role='alert']")?.textContent).toContain("Could not reach the server.");
+    expect(bad.log.at(-1)?.error).toBe("Project B is closed for edits");
+    expect(bad.log.at(-1)?.error).not.toBe("Project A is closed for edits");
+    expect(document.querySelector("[role='alert']")?.textContent).toBe("Project B is closed for edits");
+    expect(bodyText()).not.toContain("Project A is closed for edits");
     expect(bodyText()).not.toContain("ZZ-TEST-A-item");
     // The alert is B's: it was absent for the whole time B was pending.
     const pendingSnaps = bad.log.slice(bad.log.findIndex((s) => s.loading && s.error === null && s.data === null));
@@ -226,25 +274,36 @@ describe("useGet resets its loading state when the path changes", () => {
     host?.remove();
     document.body.innerHTML = "";
 
-    const round = await mount(PATH_A);
-    await act(async () => { go(PATH_B); });
-    await act(async () => { go(PATH_A); });
-    expect(round.log.at(-1)).toMatchObject({ loading: true, failed: false, data: null, error: null });
-    expect(bodyText()).not.toContain("ZZ-TEST-B-item");
-    const oldA = take(PATH_A);
-    const oldB = take(PATH_B);
-    const latestA = take(PATH_A);
-    await settle(() => { oldA.resolve(json({ items: ["ZZ-TEST-A-item1"] })); });
-    await settle(() => { oldB.resolve(json({ items: ITEMS_B })); });
-    expect(round.log.at(-1)).toMatchObject({ loading: true, data: null });
-    expect(bodyText()).not.toContain("ZZ-TEST-A-item1");
-    expect(bodyText()).not.toContain("ZZ-TEST-B-item1");
-    await settle(() => { latestA.resolve(json({ items: ["ZZ-TEST-A-item2"] })); });
-    expect(round.log.at(-1)).toMatchObject({ loading: false, failed: false, data: { items: ["ZZ-TEST-A-item2"] } });
-    expect(bodyText()).toContain("ZZ-TEST-A-item2");
-    expect(bodyText()).not.toContain("ZZ-TEST-B-item1");
-    expect(bodyText()).not.toContain("ZZ-TEST-A-item1");
-    expect(section()?.getAttribute("aria-label")).toBe("Project A");
+    // A1 pending, then B, then A2. The fresh A2 result is shown before the late answers.
+    async function backToA(rejectStaleA: boolean) {
+      const round = await mount(PATH_A);
+      await act(async () => { go(PATH_B); });
+      await act(async () => { go(PATH_A); });
+      expect(round.log.at(-1)).toMatchObject({ loading: true, failed: false, data: null, error: null });
+      expect(bodyText()).not.toContain("ZZ-TEST-B-item");
+      const a1 = take(PATH_A);
+      const lateB = take(PATH_B);
+      const a2 = take(PATH_A);
+      await settle(() => { a2.resolve(json({ items: ["ZZ-TEST-A-fresh"] })); });
+      expect(round.log.at(-1)).toMatchObject({ loading: false, failed: false, error: null, data: { items: ["ZZ-TEST-A-fresh"] } });
+      expect(bodyText()).toContain("ZZ-TEST-A-fresh");
+      expect(document.querySelector("[role='alert']")).toBeNull();
+      await settle(() => { lateB.resolve(json({ items: ITEMS_B })); });
+      if (rejectStaleA) await settle(() => { a1.reject(new TypeError("Failed to fetch")); });
+      else await settle(() => { a1.resolve(json({ items: ["ZZ-TEST-A-old"] })); });
+      expect(round.log.at(-1)).toMatchObject({ loading: false, failed: false, error: null, data: { items: ["ZZ-TEST-A-fresh"] } });
+      expect(bodyText()).toContain("ZZ-TEST-A-fresh");
+      expect(bodyText()).not.toContain("ZZ-TEST-B-item");
+      expect(bodyText()).not.toContain("ZZ-TEST-A-old");
+      expect(document.querySelector("[role='alert']")).toBeNull();
+      expect(section()?.getAttribute("aria-label")).toBe("Project A");
+      await act(async () => { root!.unmount(); });
+      root = null;
+      host?.remove();
+      document.body.innerHTML = "";
+    }
+    await backToA(false);
+    await backToA(true);
   });
 
   // qa:TC-APL2663-2437ecb8@v1 — skeleton is aria-busy and a polite live region announces Loading; focus stays
@@ -273,6 +332,15 @@ describe("useGet resets its loading state when the path changes", () => {
       announced: skeleton?.querySelector(".sr-only")?.textContent,
     }).toEqual({ role: "status", live: "polite", busy: "true", announced: "Loading" });
     expect(skeleton?.textContent).toContain("Loading");
+    const snapshot = accessSnapshot(content!);
+    mkdirSync("test-results/a11y", { recursive: true });
+    writeFileSync("test-results/a11y/TC-APL2663-2437ecb8.txt", snapshot);
+    expect(snapshot).toBe([
+      'section name="Project B"',
+      '  div role=status aria-live=polite aria-busy=true',
+      '    span name="Loading"',
+      "",
+    ].join("\n"));
     const focusWhileLoading = document.activeElement;
     expect(focusWhileLoading).toBe(keep);
 
