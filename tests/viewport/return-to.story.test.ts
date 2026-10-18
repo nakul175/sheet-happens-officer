@@ -1,0 +1,170 @@
+// APL-2652 story: a deep link opened while signed out comes back after sign-in.
+// Runs with the phone checks (npm run test:viewport) against a local server and a test database.
+import { readdirSync, readFileSync } from "node:fs";
+import path from "node:path";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { chromium, type Browser, type Page } from "playwright-core";
+import { account, BASE, OUTBOX, project, PW, superAdmin, task } from "../helpers";
+
+let browser: Browser;
+let memberEmail = "";
+let outsiderEmail = "";
+let forcedEmail = "";
+let forcedPassword = "";
+let visibleId = "";
+let visibleTitle = "";
+let hiddenId = "";
+let hiddenTitle = "";
+let hiddenDetail = "";
+
+const origin = () => new URL(BASE).origin;
+
+function signInMailPassword(email: string) {
+  const files = readdirSync(OUTBOX).sort();
+  const mails = files.map((f) => JSON.parse(readFileSync(path.join(OUTBOX, f), "utf8"))).filter((m) => m.to === email && /Your Sheet Happens Officer account/.test(m.subject));
+  return ((mails.at(-1)?.text ?? "") as string).match(/Password: (\S+)/)?.[1] ?? "";
+}
+
+async function signedOutPage() {
+  const ctx = await browser.newContext({ viewport: { width: 1024, height: 800 }, baseURL: BASE });
+  const page = await ctx.newPage();
+  return { ctx, page };
+}
+
+async function signIn(page: Page, email: string, password: string) {
+  await page.getByLabel("Work email").fill(email);
+  await page.getByLabel("Password").fill(password);
+  await page.getByRole("button", { name: "Sign in" }).click();
+}
+
+/** The asked-for task, on /tasks/id or on the project page the task screen opens. */
+async function landedOnTask(page: Page, id: string, title: string) {
+  // The title is in the project list and in the open task, so more than one match is expected.
+  await page.getByText(title).first().waitFor({ state: "visible", timeout: 20000 });
+  const url = new URL(page.url());
+  expect(url.origin).toBe(origin());
+  expect(url.pathname === `/tasks/${id}` || url.searchParams.get("task") === id, page.url()).toBe(true);
+  expect(url.hostname).not.toBe("evil.example");
+}
+
+beforeAll(async () => {
+  if (!/^(localhost|127\.0\.0\.1)$/.test(new URL(BASE).hostname)) throw new Error(`Refusing to run the return-to story against ${BASE}: use a local server with a test database.`);
+  browser = await chromium.launch({ executablePath: process.env.PW_CHROMIUM || undefined });
+  const root = await superAdmin();
+  const member = await account("returnmember");
+  const outsider = await account("returnoutsider");
+  memberEmail = member.email;
+  outsiderEmail = outsider.email;
+  const p = await project(root, root, [{ who: member }]);
+  const stamp = Date.now();
+  visibleTitle = `APL2652 visible ${stamp}`;
+  hiddenTitle = `APL2652 hidden ${stamp}`;
+  hiddenDetail = `APL2652 secret detail ${stamp}`;
+  visibleId = await task(root, p.id, { title: visibleTitle, description: "Visible to a member of the project." });
+  hiddenId = await task(root, p.id, { title: hiddenTitle, description: hiddenDetail });
+  forcedEmail = `returnforced${stamp}@aplyd.com`;
+  const added = await root.c.post("/api/team", { firstName: "Rita", lastName: `Return${stamp}`, email: forcedEmail, role: "MEMBER" });
+  expect(added.status, JSON.stringify(added.json)).toBe(201);
+  forcedPassword = signInMailPassword(forcedEmail);
+  expect(forcedPassword).toMatch(/^[A-Za-z0-9]{12}$/);
+  expect((await root.c.post(`/api/projects/${p.id}/members`, { userId: added.json.person.id, role: "EDITOR" })).status).toBe(201);
+}, 90000);
+
+afterAll(async () => { await browser?.close(); });
+
+describe("APL-2652 sign-in returns to the deep link", () => {
+  it("AC1 a signed-out deep link comes back after a successful sign-in", async () => {
+    const { ctx, page } = await signedOutPage();
+    try {
+      await page.goto(`/tasks/${visibleId}`);
+      await page.getByRole("heading", { name: "Sign in" }).waitFor();
+      const url = new URL(page.url());
+      expect(url.origin).toBe(origin());
+      expect(url.pathname).toBe("/signin");
+      expect(url.searchParams.get("next")).toBe(`/tasks/${visibleId}`);
+      await signIn(page, memberEmail, PW);
+      await landedOnTask(page, visibleId, visibleTitle);
+    } finally { await ctx.close(); }
+  });
+
+  it("AC2 off-site and malformed next values stay on the home page", async () => {
+    for (const next of ["https://evil.example", "//evil.example", "/\\evil.example", "javascript:alert(1)"]) {
+      const { ctx, page } = await signedOutPage();
+      const left: string[] = [];
+      page.on("request", (req) => {
+        try {
+          const u = new URL(req.url());
+          if (u.hostname === "evil.example" || u.protocol === "javascript:") left.push(req.url());
+        } catch { /* a request that is not a URL cannot be an off-site navigation */ }
+      });
+      try {
+        await page.goto(`/signin?next=${encodeURIComponent(next)}`);
+        await signIn(page, memberEmail, PW);
+        await page.getByRole("heading", { name: "My tasks" }).waitFor({ timeout: 20000 });
+        const url = new URL(page.url());
+        expect(url.origin, next).toBe(origin());
+        expect(url.pathname, next).toBe("/");
+        expect(url.hostname, next).not.toBe("evil.example");
+        expect(left, next).toEqual([]);
+        expect(page.url(), next).not.toContain("javascript:");
+      } finally { await ctx.close(); }
+    }
+  });
+
+  it("AC3 a task the person cannot see shows the not-found page and no detail", async () => {
+    const { ctx, page } = await signedOutPage();
+    try {
+      const leaked = page.waitForResponse((r) => r.url().includes(`/api/tasks/${hiddenId}`) && r.request().method() === "GET");
+      await page.goto(`/signin?next=${encodeURIComponent(`/tasks/${hiddenId}`)}`);
+      await signIn(page, outsiderEmail, PW);
+      await page.getByRole("heading", { name: "This task isn't available" }).waitFor({ timeout: 20000 });
+      const res = await leaked;
+      expect(res.status()).toBe(404);
+      const body = await res.text();
+      expect(body).not.toContain(hiddenTitle);
+      expect(body).not.toContain(hiddenDetail);
+      expect(await page.getByText(hiddenTitle).count()).toBe(0);
+      expect(await page.getByText(hiddenDetail).count()).toBe(0);
+      const url = new URL(page.url());
+      expect(url.origin).toBe(origin());
+      expect(url.pathname).toBe(`/tasks/${hiddenId}`);
+    } finally { await ctx.close(); }
+  });
+
+  it("AC4 a wrong password keeps the return target for the next try", async () => {
+    const { ctx, page } = await signedOutPage();
+    try {
+      await page.goto(`/signin?next=${encodeURIComponent(`/tasks/${visibleId}`)}`);
+      await page.getByLabel("Work email").fill(memberEmail);
+      await page.getByLabel("Password").fill("wrong-pass-1");
+      await page.getByRole("button", { name: "Sign in" }).click();
+      const alert = page.getByRole("alert").filter({ hasText: "Email or password is incorrect." });
+      await alert.waitFor({ timeout: 15000 });
+      expect(new URL(page.url()).searchParams.get("next")).toBe(`/tasks/${visibleId}`);
+      await page.getByLabel("Password").fill(PW);
+      await page.getByRole("button", { name: "Sign in" }).click();
+      await landedOnTask(page, visibleId, visibleTitle);
+    } finally { await ctx.close(); }
+  });
+
+  it("AC5 a temporary password must be changed before the deep link opens", async () => {
+    const { ctx, page } = await signedOutPage();
+    try {
+      await page.goto(`/signin?next=${encodeURIComponent(`/tasks/${visibleId}`)}`);
+      await signIn(page, forcedEmail, forcedPassword);
+      await page.getByRole("heading", { name: "Set your own password" }).waitFor({ timeout: 20000 });
+      expect(new URL(page.url()).pathname).toBe(`/tasks/${visibleId}`);
+      expect(await page.getByText(visibleTitle).count()).toBe(0);
+      expect(await page.getByRole("navigation", { name: "Main" }).count()).toBe(0);
+      expect(await page.getByRole("heading", { name: "Sign in" }).isVisible()).toBe(false);
+      // The sign-in form can stay mounted, hidden, after the client navigation, so scope to this form.
+      const wall = page.locator("form").filter({ has: page.getByRole("button", { name: "Save and continue" }) });
+      await wall.locator('input[name="current"]').fill(forcedPassword);
+      await wall.locator('input[name="password"]').fill("my-own-pass-7");
+      await wall.locator('input[name="confirm"]').fill("my-own-pass-7");
+      await wall.getByRole("button", { name: "Save and continue" }).click();
+      await landedOnTask(page, visibleId, visibleTitle);
+      expect(await page.getByRole("heading", { name: "Set your own password" }).count()).toBe(0);
+    } finally { await ctx.close(); }
+  });
+});
