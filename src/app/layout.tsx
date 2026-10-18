@@ -1,11 +1,15 @@
 import type { Metadata, Viewport } from "next";
-import { Public_Sans } from "next/font/google";
+import localFont from "next/font/local";
 import "./globals.css";
 
-const publicSans = Public_Sans({
+// Public Sans (OFL, see ./fonts/OFL.txt), variable latin subset from @fontsource-variable/public-sans 5.3.0.
+// Loaded locally so builds need no network access to Google Fonts (APL-2639).
+const publicSans = localFont({
+  src: "./fonts/PublicSans-Variable-latin.woff2",
   variable: "--font-public-sans",
-  subsets: ["latin"],
-  weight: ["400", "500", "600"],
+  weight: "400 600",
+  style: "normal",
+  display: "swap",
 });
 
 export const metadata: Metadata = {
