@@ -1,140 +1,48 @@
-# Test every push to main, then release it to the droplet (SHO-US-9.3).
-# Secrets (repository settings): SSH_PRIVATE_KEY, DATABASE_URL, RESEND_API_KEY.
-# Optional secret DIRECT_DATABASE_URL: direct Postgres connection for migrations when DATABASE_URL goes through PgBouncer
-# (unset means migrations use DATABASE_URL).
-# Optional variables: DROPLET_HOST (defaults to the app address), DROPLET_HOST_KEY (ssh-keyscan line).
-# Concierge (all optional; unset means the concierge stays off): secret ANTHROPIC_API_KEY; variables MODEL_DATA_APPROVED
-# (must be exactly "true" to allow requests to the provider), MODEL_NAME, MONTHLY_CEILING_USD, WEEKLY_MESSAGE_CAP.
-name: Test and deploy
+# A push to main deploys to staging only (/opt/sho-staging). It does not write
+# /etc/sho/app.env, restart sho, or copy a release into /opt/sho.
+# From 16:00 until 18:30 IST that automatic deploy is held. Deploy the release
+# candidate with an rc-* tag, or run this workflow by hand, including during that window.
+# Production is .github/workflows/release.yml. A rel-test-* tag never reaches it.
+#
+# Staging secrets (repository): STAGING_DATABASE_URL, STAGING_DIRECT_DATABASE_URL
+# (required when the staging URL is a PgBouncer pool), RESEND_API_KEY, SSH_PRIVATE_KEY.
+# Optional: ANTHROPIC_API_KEY and the MODEL_* variables.
+# Variables: PROD_DB_HOST and PROD_DB_NAME. A staging pool URL must set
+# connection_limit=2 and pool_timeout, and its host plus database must differ from those.
+# actions: write is granted so the called gates job can upload the tarball.
+# statuses: write is granted so the digest-record job can post staging/digest.
+# The deploy job itself requests actions: read and cannot write statuses.
+name: Test and deploy to staging
 
 on:
   push:
     branches: [main]
+    tags: ["rc-*"]
   workflow_dispatch:
+    inputs:
+      sha:
+        description: Full commit SHA of the ref you selected. Leave empty to deploy that ref as-is.
+        required: false
+        type: string
 
 permissions:
   contents: read
+  actions: write
+  statuses: write
 
 concurrency:
-  group: release-main
+  group: deploy-staging
   cancel-in-progress: false
 
-env:
-  APP_HOST: app.sheethappensofficer.com
-
 jobs:
-  test:
-    name: Lint, build and test
-    runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_USER: sho
-          POSTGRES_PASSWORD: sho
-          POSTGRES_DB: sho_test
-        ports: ["5432:5432"]
-        options: >-
-          --health-cmd "pg_isready -U sho"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 12
-    env:
-      DATABASE_URL: postgresql://sho:sho@localhost:5432/sho_test?schema=public
-      DIRECT_DATABASE_URL: postgresql://sho:sho@localhost:5432/sho_test?schema=public
-      EMAIL_OUTBOX_DIR: ${{ github.workspace }}/.outbox-ci
-      SUPER_ADMIN_EMAILS: root.test@aplyd.com
-      APP_URL: http://localhost:3100
-      TASKBOARD_URL: http://localhost:3100
-      JOB_SECRET: ci-only-not-a-real-secret-0123
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-      - run: npm ci
-      - run: npm run lint
-      - run: npx prisma migrate deploy
-      - run: npm run build
-      - name: Start the app
-        run: |
-          (npx next start -p 3100 > server.log 2>&1 &)
-          for i in $(seq 1 30); do curl -fsS http://localhost:3100/api/health && break; sleep 2; done
-      - run: npm test
-      - name: Server log (on failure)
-        if: failure()
-        run: tail -n 200 server.log || true
-
-  deploy:
-    name: Release to the droplet
-    needs: test
-    if: github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    env:
-      HOST: ${{ vars.DROPLET_HOST || 'app.sheethappensofficer.com' }}
-      HOST_KEY: ${{ vars.DROPLET_HOST_KEY }}
-    steps:
-      - uses: actions/checkout@v4
-      - name: SSH key
-        env:
-          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
-        run: |
-          mkdir -p ~/.ssh && chmod 700 ~/.ssh
-          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
-          chmod 600 ~/.ssh/id_ed25519
-          if [ -n "$HOST_KEY" ]; then
-            printf '%s\n' "$HOST_KEY" > ~/.ssh/known_hosts
-          else
-            echo "::warning::DROPLET_HOST_KEY is not set; trusting the host key seen now"
-            ssh-keyscan -H "$HOST" > ~/.ssh/known_hosts 2>/dev/null
-          fi
-      - name: Upload the release
-        run: >-
-          rsync -az --delete
-          --exclude .git --exclude node_modules --exclude .next --exclude '.env*' --exclude '.outbox*'
-          ./ "deploy@$HOST:/opt/sho/releases/$GITHUB_SHA/"
-      - name: Write settings and secrets on the server
-        env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
-          DIRECT_DATABASE_URL: ${{ secrets.DIRECT_DATABASE_URL }}
-          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          MODEL_DATA_APPROVED: ${{ vars.MODEL_DATA_APPROVED }}
-          MODEL_NAME: ${{ vars.MODEL_NAME }}
-          MONTHLY_CEILING_USD: ${{ vars.MONTHLY_CEILING_USD }}
-          WEEKLY_MESSAGE_CAP: ${{ vars.WEEKLY_MESSAGE_CAP }}
-        run: |
-          [ -n "$DATABASE_URL" ] || { echo "DATABASE_URL secret is missing"; exit 1; }
-          [ -n "$RESEND_API_KEY" ] || { echo "RESEND_API_KEY secret is missing"; exit 1; }
-          case "$DIRECT_DATABASE_URL" in *"'"*|*$'\n'*) echo "::error::DIRECT_DATABASE_URL contains a quote or line break"; exit 1;; esac
-          # A quote or line break in a concierge setting would break app.env; refuse before anything is written.
-          for v in ANTHROPIC_API_KEY MODEL_DATA_APPROVED MODEL_NAME MONTHLY_CEILING_USD WEEKLY_MESSAGE_CAP; do
-            case "${!v}" in *"'"*|*$'\n'*) echo "::error::$v contains a quote or line break"; exit 1;; esac
-          done
-          {
-            printf "DATABASE_URL='%s'\n" "$DATABASE_URL"
-            # Written only when set; release.sh falls back to DATABASE_URL otherwise.
-            if [ -n "$DIRECT_DATABASE_URL" ]; then printf "DIRECT_DATABASE_URL='%s'\n" "$DIRECT_DATABASE_URL"; fi
-            printf "RESEND_API_KEY='%s'\n" "$RESEND_API_KEY"
-            printf "APP_URL='https://%s'\n" "$APP_HOST"
-            printf "SUPER_ADMIN_EMAILS='nakul.jain@aplyd.com'\n"
-            printf "EMAIL_FROM='Sheet Happens Officer <no-reply@sheethappensofficer.com>'\n"
-            printf "TZ='Asia/Kolkata'\n"
-            # Concierge settings: written only when set (an unset one is left out and the concierge stays off).
-            for v in ANTHROPIC_API_KEY MODEL_DATA_APPROVED MODEL_NAME MONTHLY_CEILING_USD WEEKLY_MESSAGE_CAP; do
-              val="${!v}"
-              if [ -n "$val" ]; then printf "%s='%s'\n" "$v" "$val"; fi
-            done
-          } | ssh "deploy@$HOST" 'umask 077 && cat > /etc/sho/app.env'
-      - name: Release
-        run: ssh "deploy@$HOST" "bash /opt/sho/releases/$GITHUB_SHA/deploy/release.sh $GITHUB_SHA"
-      - name: Email the owner if the release failed
-        if: failure()
-        env:
-          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
-          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        run: |
-          curl -sS -o /dev/null -w "owner email: HTTP %{http_code}\n" https://api.resend.com/emails \
-            -H "Authorization: Bearer $RESEND_API_KEY" -H "Content-Type: application/json" \
-            -d "{\"from\":\"Sheet Happens Officer <no-reply@sheethappensofficer.com>\",\"to\":[\"nakul.jain@aplyd.com\"],\"subject\":\"SHO release failed (previous release restored if the app was switched)\",\"text\":\"The release of ${GITHUB_SHA::7} failed. If the health check failed, the previous release was restored automatically. Details: $RUN_URL\"}" || true
+  ship:
+    uses: ./.github/workflows/ship.yml
+    with:
+      tier: staging
+      confirm_sha: ${{ github.event_name == 'workflow_dispatch' && inputs.sha || '' }}
+    secrets:
+      STAGING_DATABASE_URL: ${{ secrets.STAGING_DATABASE_URL }}
+      STAGING_DIRECT_DATABASE_URL: ${{ secrets.STAGING_DIRECT_DATABASE_URL }}
+      RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+      SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}

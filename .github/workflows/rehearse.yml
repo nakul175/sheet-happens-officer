@@ -1,0 +1,33 @@
+# A rel-test-* tag waits for the production environment reviewer and then stops.
+# It does not SSH, does not write an env file, and does not deploy.
+name: Rehearse a production release
+
+on:
+  push:
+    tags: ["rel-test-*"]
+
+permissions:
+  contents: read
+
+jobs:
+  rehearse:
+    name: Check the approval rules
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: production
+      url: https://app.sheethappensofficer.com
+    steps:
+      - uses: actions/checkout@v4
+      - name: Confirm this tag cannot deploy
+        run: |
+          set -euo pipefail
+          case "$GITHUB_REF" in
+            refs/tags/rel-test-*) ;;
+            *) echo "::error::This workflow only accepts a rel-test tag"; exit 1 ;;
+          esac
+          echo "Rehearsal ${GITHUB_REF} stops here. Production is unchanged."
+      - name: Check the production environment
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash deploy/check-production-environment.sh

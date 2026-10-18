@@ -1,0 +1,46 @@
+# Switch production to a release directory that is already on the droplet.
+# Does not migrate and does not rewrite /etc/sho/app.env.
+# NJ creates the GitHub environment "rollback" with Oscar as the required
+# reviewer and prevent self-review on, then sets the variable ROLLBACK_REVIEWER
+# to Oscar's GitHub login. Rollback is pre-authorised for that reviewer.
+name: Roll back production
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_dir:
+        description: Existing directory /opt/sho/releases/<sha>. Empty uses /opt/sho/previous.
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  rollback:
+    name: Switch the live release
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment:
+      name: rollback
+      url: https://app.sheethappensofficer.com
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check the rollback environment
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ROLLBACK_REVIEWER: ${{ vars.ROLLBACK_REVIEWER }}
+        run: bash deploy/check-rollback-environment.sh
+      - name: SSH key
+        env:
+          HOST: ${{ vars.DROPLET_HOST || 'app.sheethappensofficer.com' }}
+          HOST_KEY: ${{ vars.DROPLET_HOST_KEY }}
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          SHO_TIER: production
+        run: bash deploy/ci-ssh.sh
+      - name: Switch to the recorded release
+        env:
+          HOST: ${{ vars.DROPLET_HOST || 'app.sheethappensofficer.com' }}
+          RELEASE_DIR: ${{ inputs.release_dir }}
+        run: bash deploy/push-rollback.sh "$RELEASE_DIR"
