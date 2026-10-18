@@ -1,0 +1,354 @@
+# Story-level Playwright specs (tests/e2e/stories) against staging or a pr1-pr4 preview (input "target", checked against TARGET_ALLOWLIST;
+# production is refused). Started by hand only (Actions > Staging e2e > Run workflow).
+# The specs live on the branch the run is started from ("Use workflow from", e.g. qa/story-e2e): every job checks out that same commit.
+# Input "specs": space-separated issue ids (APL-2481) or globs (APL-26*, tests/e2e/stories/APL-25*.spec.ts); empty runs every spec.
+# Secrets (repository settings): STAGING_USER, STAGING_PASS, SHO_ADMIN_EMAIL, SHO_ADMIN_PASS, SHO_MEMBER_EMAIL, SHO_MEMBER_PASS,
+# and ZZ_TEST_01_EMAIL / ZZ_TEST_01_PASS ... ZZ_TEST_20_EMAIL / ZZ_TEST_20_PASS (01-05 Super Admins, 06-20 plain Members).
+# The previews use the same STAGING_USER / STAGING_PASS basic-auth gate as staging.
+# They reach the jobs as environment variables only and are never echoed. Runs queue in one group so two never run at once.
+#
+# How a run is split:
+#   plan        checks "target" first, then picks the spec files once and splits them into the parallel set and SERIAL_SPECS.
+#               Every shard and the serial job get BASE_URL=https://<target>.
+#   e2e         20 shards of the parallel set (--shard=N/20, workers=1 each). Shard N signs in as ZZ_TEST_NN (SHARD_*), names its
+#               data ZZ-TEST-NN (ZZ_PREFIX), and gets a partner account of the other role (PEER_*). At most max_parallel run at once.
+#   e2e-serial  the SERIAL_SPECS files, alone, after every shard has finished, as the shared SHO_ADMIN / SHO_MEMBER accounts.
+#   report      merges every job's blob report into one HTML report.
+#
+# max_parallel: the staging database is shared with production and allows 25 connections. Do not raise it above 5 until NJ approves
+# a connection pool (PgBouncer) or a bigger database.
+#
+# Traces are OFF unless the "trace" input asks for them. A trace cannot be redacted: it holds the sign-in request body (the password),
+# the basic-auth header (STAGING_USER:STAGING_PASS in base64, which GitHub's log masking does not catch) and any password typed into a
+# field (APL-2476). With traces on, the uploaded reports carry those secrets to anyone who can download the run's artifacts.
+name: Staging e2e
+
+on:
+  workflow_dispatch:
+    inputs:
+      specs:
+        description: "Issue ids or globs, space-separated (e.g. APL-2481 APL-26*). Empty = all specs."
+        required: false
+        default: ""
+        type: string
+      trace:
+        description: "Playwright traces. They contain passwords (see the comment at the top of this file)."
+        required: false
+        default: "off"
+        type: choice
+        options: ["off", "retain-on-failure"]
+      target:
+        description: "Host to test: staging.sheethappensofficer.com or pr1-pr4.staging.sheethappensofficer.com. Production is refused."
+        required: false
+        default: staging.sheethappensofficer.com
+        type: string
+      max_parallel:
+        description: "Shards running at once (1-20). The staging DB has 25 connections: keep 5 until NJ approves a pool."
+        required: false
+        default: 5
+        type: number
+
+permissions:
+  contents: read
+
+concurrency:
+  group: staging-e2e
+  cancel-in-progress: false
+
+env:
+  # The only hosts a run may target: staging, or Oscar's preview slots pr1-pr4. Matched against the whole host.
+  TARGET_ALLOWLIST: '^(staging\.sheethappensofficer\.com|pr[1-4]\.staging\.sheethappensofficer\.com)$'
+  # Only for `prisma generate` during npm ci; nothing connects to it.
+  DATABASE_URL: postgresql://unused:unused@127.0.0.1:1/unused
+  PLAYWRIGHT_HTML_OPEN: never
+  # Specs that read or change org-wide state another shard would disturb (counts, Trash, Activity, people, notifications, a shared
+  # account's password or sessions), so they run in the e2e-serial job, alone. APL-2610 covers APL-2671 too. Ids are file names.
+  SERIAL_SPECS: >-
+    APL-2479 APL-2483 APL-2521 APL-2542-totals APL-2572 APL-2609 APL-2610 APL-2640 APL-2649
+
+jobs:
+  plan:
+    name: Pick the spec files
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      base_url: ${{ steps.target.outputs.base_url }}
+      parallel: ${{ steps.pick.outputs.parallel }}
+      serial: ${{ steps.pick.outputs.serial }}
+    steps:
+      - name: Check the target host
+        id: target
+        env:
+          TARGET: ${{ inputs.target }}
+        run: |
+          if [[ "${TARGET,,}" =~ ^(www\.|app\.)?sheethappensofficer\.com\.?$ ]]; then
+            echo "::error::Refusing to run against production ($TARGET)."; exit 1
+          fi
+          if ! [[ "$TARGET" =~ $TARGET_ALLOWLIST ]]; then
+            echo "::error::Target '$TARGET' is not allowed. Use staging.sheethappensofficer.com or pr1-pr4.staging.sheethappensofficer.com."; exit 1
+          fi
+          echo "Target: https://$TARGET"
+          echo "base_url=https://$TARGET" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v4
+
+      - name: Check max_parallel
+        env:
+          MAX_PARALLEL: ${{ inputs.max_parallel }}
+        run: |
+          if ! [[ "$MAX_PARALLEL" =~ ^[0-9]+$ ]] || [ "$MAX_PARALLEL" -lt 1 ] || [ "$MAX_PARALLEL" -gt 20 ]; then
+            echo "::error::max_parallel must be a whole number from 1 to 20 (got: $MAX_PARALLEL)."; exit 1
+          fi
+          if [ "$MAX_PARALLEL" -gt 5 ]; then
+            echo "::warning::max_parallel=$MAX_PARALLEL. The staging DB has 25 connections; above 5 needs NJ's approval of a DB pool."
+          fi
+
+      - name: Split them into parallel and serial
+        id: pick
+        env:
+          SPECS: ${{ inputs.specs }}
+        run: |
+          shopt -s nullglob
+          files=()
+          read -ra toks <<< "$SPECS"   # split on spaces without expanding globs against the repo root
+          for tok in "${toks[@]}"; do
+            if ! [[ "$tok" =~ ^[A-Za-z0-9_.*?/-]+$ ]] || [[ "$tok" == *..* ]]; then
+              echo "::error::Not an issue id or glob: $tok"; exit 1
+            fi
+            if [[ "$tok" =~ ^[A-Za-z]+-[0-9]+$ ]]; then
+              pattern="tests/e2e/stories/${tok^^}.spec.ts tests/e2e/stories/${tok^^}-*.spec.ts"   # an issue's split files too
+            elif [[ "$tok" == */* ]]; then
+              pattern="$tok"
+            else
+              pattern="tests/e2e/stories/$tok"
+              [[ "$pattern" == *.ts ]] || pattern="$pattern.spec.ts"
+            fi
+            matched=()
+            for f in $pattern; do
+              [[ -f "$f" && "$f" == tests/e2e/stories/*.spec.ts ]] && matched+=("$f")
+            done
+            if [ ${#matched[@]} -eq 0 ]; then echo "::error::No spec file matches: $tok"; exit 1; fi
+            files+=("${matched[@]}")
+          done
+          if [ ${#files[@]} -eq 0 ]; then
+            files=(tests/e2e/stories/*.spec.ts)
+            [ ${#files[@]} -gt 0 ] || { echo "::error::No spec files in tests/e2e/stories on this branch. Start the run from the branch with the specs (e.g. qa/story-e2e)."; exit 1; }
+          fi
+          parallel=(); serial=()
+          for f in $(printf '%s\n' "${files[@]}" | sort -u); do
+            id=$(basename "$f" .spec.ts)
+            if [[ " $SERIAL_SPECS " == *" $id "* ]]; then serial+=("$f"); else parallel+=("$f"); fi
+          done
+          echo "Parallel shards (${#parallel[@]} files):"; printf '  %s\n' "${parallel[@]}"
+          echo "Serial job (${#serial[@]} files):"; printf '  %s\n' "${serial[@]}"
+          echo "parallel=${parallel[*]}" >> "$GITHUB_OUTPUT"
+          echo "serial=${serial[*]}" >> "$GITHUB_OUTPUT"
+
+  e2e:
+    name: Shard ${{ matrix.nn }} of 20 (${{ matrix.role }})
+    needs: plan
+    if: needs.plan.outputs.parallel != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      max-parallel: ${{ inputs.max_parallel }}
+      matrix:
+        # nn picks the shard's own ZZ_TEST_NN account; peer is the partner of the other role (shard N with N+5, members with 01-05),
+        # chosen so no two of any 5 consecutive shards share an account.
+        include:
+          - { shard:  1, nn: '01', role: ADMIN,  peer: '06' }
+          - { shard:  2, nn: '02', role: ADMIN,  peer: '07' }
+          - { shard:  3, nn: '03', role: ADMIN,  peer: '08' }
+          - { shard:  4, nn: '04', role: ADMIN,  peer: '09' }
+          - { shard:  5, nn: '05', role: ADMIN,  peer: '10' }
+          - { shard:  6, nn: '06', role: MEMBER, peer: '01' }
+          - { shard:  7, nn: '07', role: MEMBER, peer: '02' }
+          - { shard:  8, nn: '08', role: MEMBER, peer: '03' }
+          - { shard:  9, nn: '09', role: MEMBER, peer: '04' }
+          - { shard: 10, nn: '10', role: MEMBER, peer: '05' }
+          - { shard: 11, nn: '11', role: MEMBER, peer: '01' }
+          - { shard: 12, nn: '12', role: MEMBER, peer: '02' }
+          - { shard: 13, nn: '13', role: MEMBER, peer: '03' }
+          - { shard: 14, nn: '14', role: MEMBER, peer: '04' }
+          - { shard: 15, nn: '15', role: MEMBER, peer: '05' }
+          - { shard: 16, nn: '16', role: MEMBER, peer: '01' }
+          - { shard: 17, nn: '17', role: MEMBER, peer: '02' }
+          - { shard: 18, nn: '18', role: MEMBER, peer: '03' }
+          - { shard: 19, nn: '19', role: MEMBER, peer: '04' }
+          - { shard: 20, nn: '20', role: MEMBER, peer: '05' }
+    env:
+      BASE_URL: ${{ needs.plan.outputs.base_url }}
+      ZZ_PREFIX: ZZ-TEST-${{ matrix.nn }}
+      SHARD_ROLE: ${{ matrix.role }}
+      PEER_ROLE: ${{ matrix.role == 'ADMIN' && 'MEMBER' || 'ADMIN' }}
+    steps:
+      - name: Check the secrets are set (names only, never values)
+        env:
+          STAGING_USER: ${{ secrets.STAGING_USER }}
+          STAGING_PASS: ${{ secrets.STAGING_PASS }}
+          SHO_ADMIN_EMAIL: ${{ secrets.SHO_ADMIN_EMAIL }}
+          SHO_ADMIN_PASS: ${{ secrets.SHO_ADMIN_PASS }}
+          SHO_MEMBER_EMAIL: ${{ secrets.SHO_MEMBER_EMAIL }}
+          SHO_MEMBER_PASS: ${{ secrets.SHO_MEMBER_PASS }}
+          SHARD_EMAIL: ${{ secrets[format('ZZ_TEST_{0}_EMAIL', matrix.nn)] }}
+          SHARD_PASS: ${{ secrets[format('ZZ_TEST_{0}_PASS', matrix.nn)] }}
+          PEER_EMAIL: ${{ secrets[format('ZZ_TEST_{0}_EMAIL', matrix.peer)] }}
+          PEER_PASS: ${{ secrets[format('ZZ_TEST_{0}_PASS', matrix.peer)] }}
+          NN: ${{ matrix.nn }}
+          PEER: ${{ matrix.peer }}
+        run: |
+          missing=""
+          for n in STAGING_USER STAGING_PASS SHO_ADMIN_EMAIL SHO_ADMIN_PASS SHO_MEMBER_EMAIL SHO_MEMBER_PASS; do
+            [ -n "${!n}" ] || missing="$missing $n"
+          done
+          [ -n "$SHARD_EMAIL" ] || missing="$missing ZZ_TEST_${NN}_EMAIL"
+          [ -n "$SHARD_PASS" ] || missing="$missing ZZ_TEST_${NN}_PASS"
+          [ -n "$PEER_EMAIL" ] || missing="$missing ZZ_TEST_${PEER}_EMAIL"
+          [ -n "$PEER_PASS" ] || missing="$missing ZZ_TEST_${PEER}_PASS"
+          if [ -n "$missing" ]; then
+            echo "::error::Shard $NN: missing repository secrets:$missing. Add them in Settings > Secrets and variables > Actions."
+            exit 1
+          fi
+          echo "Shard $NN: all secrets are set (own account ZZ_TEST_$NN, partner ZZ_TEST_$PEER)."
+
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+
+      - name: Wait for this shard's sign-in slot
+        env:
+          SHARD: ${{ matrix.shard }}
+          MAX_PARALLEL: ${{ inputs.max_parallel }}
+        run: |
+          wait=$(( (SHARD - 1) % MAX_PARALLEL * 15 ))
+          echo "Shard $SHARD waits ${wait}s so shards do not all sign in at once."
+          sleep "$wait"
+
+      - name: Run shard ${{ matrix.shard }}/20 (workers=1)
+        env:
+          STAGING_USER: ${{ secrets.STAGING_USER }}
+          STAGING_PASS: ${{ secrets.STAGING_PASS }}
+          SHO_ADMIN_EMAIL: ${{ secrets.SHO_ADMIN_EMAIL }}
+          SHO_ADMIN_PASS: ${{ secrets.SHO_ADMIN_PASS }}
+          SHO_MEMBER_EMAIL: ${{ secrets.SHO_MEMBER_EMAIL }}
+          SHO_MEMBER_PASS: ${{ secrets.SHO_MEMBER_PASS }}
+          SHARD_EMAIL: ${{ secrets[format('ZZ_TEST_{0}_EMAIL', matrix.nn)] }}
+          SHARD_PASS: ${{ secrets[format('ZZ_TEST_{0}_PASS', matrix.nn)] }}
+          PEER_EMAIL: ${{ secrets[format('ZZ_TEST_{0}_EMAIL', matrix.peer)] }}
+          PEER_PASS: ${{ secrets[format('ZZ_TEST_{0}_PASS', matrix.peer)] }}
+          FILES: ${{ needs.plan.outputs.parallel }}
+          TRACE: ${{ inputs.trace }}
+        run: |
+          read -ra files <<< "$FILES"
+          npx playwright test --shard=${{ matrix.shard }}/20 --workers=1 --reporter=list,blob --trace="$TRACE" "${files[@]}"
+
+      - name: Upload the blob report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: blob-report-${{ matrix.nn }}
+          path: blob-report/
+          if-no-files-found: ignore
+          retention-days: 14
+
+  e2e-serial:
+    name: Serial specs (alone, after the shards)
+    needs: [plan, e2e]
+    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.serial != '' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      BASE_URL: ${{ needs.plan.outputs.base_url }}
+      ZZ_PREFIX: ZZ-TEST-SERIAL
+      PLAYWRIGHT_BLOB_OUTPUT_NAME: report-serial.zip
+    steps:
+      - name: Check the secrets are set (names only, never values)
+        env:
+          STAGING_USER: ${{ secrets.STAGING_USER }}
+          STAGING_PASS: ${{ secrets.STAGING_PASS }}
+          SHO_ADMIN_EMAIL: ${{ secrets.SHO_ADMIN_EMAIL }}
+          SHO_ADMIN_PASS: ${{ secrets.SHO_ADMIN_PASS }}
+          SHO_MEMBER_EMAIL: ${{ secrets.SHO_MEMBER_EMAIL }}
+          SHO_MEMBER_PASS: ${{ secrets.SHO_MEMBER_PASS }}
+        run: |
+          missing=""
+          for n in STAGING_USER STAGING_PASS SHO_ADMIN_EMAIL SHO_ADMIN_PASS SHO_MEMBER_EMAIL SHO_MEMBER_PASS; do
+            [ -n "${!n}" ] || missing="$missing $n"
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::Missing repository secrets:$missing. Add them in Settings > Secrets and variables > Actions."
+            exit 1
+          fi
+          echo "All six secrets are set."
+
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+
+      - name: Run the serial specs (workers=1)
+        env:
+          STAGING_USER: ${{ secrets.STAGING_USER }}
+          STAGING_PASS: ${{ secrets.STAGING_PASS }}
+          SHO_ADMIN_EMAIL: ${{ secrets.SHO_ADMIN_EMAIL }}
+          SHO_ADMIN_PASS: ${{ secrets.SHO_ADMIN_PASS }}
+          SHO_MEMBER_EMAIL: ${{ secrets.SHO_MEMBER_EMAIL }}
+          SHO_MEMBER_PASS: ${{ secrets.SHO_MEMBER_PASS }}
+          FILES: ${{ needs.plan.outputs.serial }}
+          TRACE: ${{ inputs.trace }}
+        run: |
+          read -ra files <<< "$FILES"
+          npx playwright test --workers=1 --reporter=list,blob --trace="$TRACE" "${files[@]}"
+
+      - name: Upload the blob report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: blob-report-serial
+          path: blob-report/
+          if-no-files-found: ignore
+          retention-days: 14
+
+  report:
+    name: Merge the reports
+    needs: [plan, e2e, e2e-serial]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+
+      - uses: actions/download-artifact@v4
+        continue-on-error: true   # none at all is reported by the next step
+        with:
+          pattern: blob-report-*
+          path: all-blob-reports
+          merge-multiple: true
+
+      - name: Merge into one HTML report
+        run: |
+          if ! ls all-blob-reports/*.zip >/dev/null 2>&1; then
+            echo "::warning::No shard produced a blob report, so there is nothing to merge."; exit 0
+          fi
+          npx playwright merge-reports --reporter html ./all-blob-reports
+
+      - name: Upload the HTML report
+        uses: actions/upload-artifact@v4
+        with:
+          name: staging-e2e-report
+          path: playwright-report/
+          if-no-files-found: ignore
+          retention-days: 14

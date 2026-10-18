@@ -2,7 +2,7 @@
 // SHO-US-6.4: Undo from the stored before-state, with a conflict warning and "Undo anyway".
 import { db } from "@/lib/db";
 import { ApiError, notFound } from "@/lib/http";
-import { WORKERS, activeMember, projectAccess, requireWrite, type Actor, type Tx } from "@/lib/access";
+import { WORKERS, activeMember, projectAccess, requireManage, requireWrite, type Actor, type Tx } from "@/lib/access";
 import { formatDueDate } from "@/lib/dates";
 import { auditTx, logAction, notify } from "@/lib/notify";
 import { deleteTask, restoreTask } from "@/lib/tasks";
@@ -346,6 +346,8 @@ async function prepare(user: Actor, logId: string) {
   const archiveKind = row.action === "project.archived" || row.action === "project.unarchived";
   if (a.project.archivedAt && !archiveKind) throw new ApiError(409, "This project is archived and read-only.");
   if (row.actorId !== user.id && a.role !== "LEADER") throw new ApiError(403, "You can only undo your own actions.");
+  // Undoing a delete is a restore from Trash, so it takes the same Leader or Admin check (SHO-US-6.2 AC4, SHO-BUG-8).
+  if (row.action === "task.deleted") requireManage(a);
   if (row.undoneAt) throw bad("This action was already undone.");
   if (!isUndoable(row.action)) throw bad("This kind of action cannot be undone.");
   if (Date.now() - row.createdAt.getTime() > UNDO_DAYS * 86400_000) throw bad("Too old to undo", { tooOld: true });
@@ -383,7 +385,7 @@ export async function undoAction(user: Actor, logId: string, anyway = false) {
   if (p.conflicts.length && !anyway) throw await conflictError(row, p, user.id);
 
   // Deleting and restoring have their own transactions.
-  if (row.action === "task.deleted") await restoreTask(user, row.targetId, true, { byUndo: true });
+  if (row.action === "task.deleted") await restoreTask(user, row.targetId, true, { skipLog: true }); // Undo logs its own row
   if (row.action === "task.restored" || row.action === "task.created") await deleteTask(user, row.targetId, { byUndo: true });
 
   await db.$transaction(async (tx) => {
