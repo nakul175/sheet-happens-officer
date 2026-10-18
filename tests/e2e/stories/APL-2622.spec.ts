@@ -1,9 +1,9 @@
 // SHO-US-23.3 New person gets sign-in details by email (APL-2622). Acceptance criteria AC1 to AC5.
 // The emailed password is read from the test mail sink. People are ZZ-TEST names at an .invalid address and are deactivated afterwards.
-import { test, expect, RUN, BASE_URL, login } from "../support";
+import { test, expect, RUN, BASE_URL, login, type Json } from "../support";
 import { mailedPassword, nextPass, waitForSinkMail, signInAs, PASS, passwordOk } from "./qa";
 
-const mk = async (admin: { api: { post: (p: string, b?: unknown) => Promise<{ status: number; json: any }>; get: (p: string) => Promise<{ status: number; json: any }> } }, later: (f: () => Promise<unknown>) => void, label: string) => {
+const mk = async (admin: { api: { post: (p: string, b?: unknown) => Promise<{ status: number; json: Json }>; get: (p: string) => Promise<{ status: number; json: Json }> } }, later: (f: () => Promise<unknown>) => void, label: string) => {
   const r = await admin.api.post("/api/team", { firstName: "ZZ-TEST", lastName: `${label} ${RUN}`, email: `zz-test-${RUN}-${label}@example.invalid`, role: "MEMBER" });
   expect(r.status, JSON.stringify(r.json)).toBe(201);
   const id = r.json.person.id as string;
