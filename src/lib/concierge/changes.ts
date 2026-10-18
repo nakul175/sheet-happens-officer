@@ -94,8 +94,7 @@ async function load(ops: Op[]): Promise<Loaded> {
 }
 
 // ------------------------------------------------------------------ fingerprint (stale-card check, AC7)
-export async function fingerprint(ops: Op[]): Promise<string> {
-  const L = await load(ops);
+function hashOf(L: Loaded): string {
   const snap = {
     tasks: [...L.tasks.values()].map((t) => [
       t.id, t.updatedAt.toISOString(), t.deletedAt?.toISOString() ?? null, t.title, t.dueDate?.toISOString() ?? null, t.priority, t.assigneeId, t.approverId,
@@ -106,6 +105,19 @@ export async function fingerprint(ops: Op[]): Promise<string> {
     held: [...L.held.entries()].map(([k, v]) => [k, v.map((t) => t.id)]).sort((a, b) => String(a[0]).localeCompare(String(b[0]))),
   };
   return createHash("sha256").update(JSON.stringify(snap)).digest("hex");
+}
+
+/** One load: the fingerprint and each task's updatedAt at that moment, so the two cannot disagree. */
+async function stamp(ops: Op[]) {
+  const L = await load(ops);
+  return {
+    fingerprint: hashOf(L),
+    versions: Object.fromEntries([...L.tasks.values()].map((t) => [t.id, t.updatedAt.toISOString()])),
+  };
+}
+
+export async function fingerprint(ops: Op[]): Promise<string> {
+  return (await stamp(ops)).fingerprint;
 }
 
 // ------------------------------------------------------------------ text
@@ -301,7 +313,13 @@ async function blockedReason(user: Actor, op: Op, L: Loaded): Promise<string | n
 }
 
 // ------------------------------------------------------------------ cards
-export type BuiltCard = { card: Omit<Card, "id" | "status">; fingerprint: string; ops: Op[] };
+export type BuiltCard = {
+  card: Omit<Card, "id" | "status">;
+  fingerprint: string;
+  ops: Op[];
+  /** updatedAt (ISO) of each task when the card was built. Execute checks this, not a later read. */
+  versions: Record<string, string>;
+};
 
 /** Builds the card for these operations from the records as they are now. Throws ApiError(404) when a record is gone. */
 export async function buildCard(user: Actor, ops: Op[]): Promise<BuiltCard> {
@@ -334,9 +352,11 @@ export async function buildCard(user: Actor, ops: Op[]): Promise<BuiltCard> {
   if (ops.some((o) => o.k === "project.create")) irreversible = true; // creating a project has no Undo
 
   const title = ops.length === 1 ? described[0].phrase : `Make ${ops.length} changes`;
+  const sealed = await stamp(ops);
   return {
     ops,
-    fingerprint: await fingerprint(ops),
+    fingerprint: sealed.fingerprint,
+    versions: sealed.versions,
     card: {
       title,
       changes: described.map((d) => d.row),
@@ -364,12 +384,24 @@ export async function recheck(user: Actor, ops: Op[]) {
   return null;
 }
 
-/** The version an edit is made on. The card's own versions were already checked by the fingerprint at Confirm. */
-const versionOf = async (taskId: string) =>
-  (await db.task.findUnique({ where: { id: taskId }, select: { updatedAt: true } }))?.updatedAt.toISOString() ?? "";
-
-/** Applies the operations through the existing functions. Runs inside the caller's request context. */
-export async function execute(user: Actor, ops: Op[], handover: { taskId: string; assigneeId: string }[] = [], onDone?: () => void) {
+/**
+ * Applies the operations through the existing functions. Runs inside the caller's request context.
+ * `versions` is each task's updatedAt when the card was built (APL-2667). A save after the Confirm
+ * fingerprint no longer matches, so it is refused. After each write the map follows the updatedAt
+ * that write stored, so later ops on the same task in this card still apply. Omitting `versions`
+ * re-reads the current row; that path is only for a direct call with no stored card.
+ */
+export async function execute(user: Actor, ops: Op[], handover: { taskId: string; assigneeId: string }[] = [], onDone?: () => void, versions?: Record<string, string>) {
+  const carried = versions ? new Map(Object.entries(versions)) : null;
+  const versionFor = async (taskId: string) => {
+    if (!carried) return (await db.task.findUnique({ where: { id: taskId }, select: { updatedAt: true } }))?.updatedAt.toISOString() ?? "";
+    const v = carried.get(taskId);
+    if (v === undefined) throw new ApiError(409, "This task changed while you were editing it.", { stale: true });
+    return v;
+  };
+  const remember = (taskId: string, updatedAt?: Date) => {
+    if (carried && updatedAt) carried.set(taskId, updatedAt.toISOString());
+  };
   const done: Op[] = [];
   // Every task a leaving person holds must have a taker BEFORE the first write, so this cannot fail half way.
   for (const op of ops) {
@@ -383,22 +415,22 @@ export async function execute(user: Actor, ops: Op[], handover: { taskId: string
         await createTask(user, op.projectId, { title: op.title, description: op.description, dueDate: op.due ?? undefined, priority: op.priority, assigneeId: op.assigneeId });
         break;
       case "task.edit":
-        await updateTask(user, op.taskId, {
-          expectedUpdatedAt: await versionOf(op.taskId),
+        remember(op.taskId, await updateTask(user, op.taskId, {
+          expectedUpdatedAt: await versionFor(op.taskId),
           ...(op.title !== undefined ? { title: op.title } : {}), ...(op.description !== undefined ? { description: op.description } : {}),
           ...(op.due !== undefined ? { dueDate: op.due } : {}), ...(op.priority !== undefined ? { priority: op.priority } : {}),
-        });
+        }));
         break;
-      case "task.section": await moveTask(user, op.taskId, op.sectionId); break;
-      case "task.assign": await assignTask(user, op.taskId, op.assigneeId); break;
-      case "task.complete": await completeTask(user, op.taskId, true); break;
-      case "task.reopen": await reopenTask(user, op.taskId); break;
-      case "task.delete": await deleteTask(user, op.taskId); break;
-      case "task.send_for_approval": await sendForApproval(user, op.taskId); break;
-      case "task.send_back": await sendBack(user, op.taskId); break;
+      case "task.section": remember(op.taskId, await moveTask(user, op.taskId, op.sectionId, await versionFor(op.taskId))); break;
+      case "task.assign": remember(op.taskId, await assignTask(user, op.taskId, op.assigneeId, await versionFor(op.taskId))); break;
+      case "task.complete": remember(op.taskId, await completeTask(user, op.taskId, await versionFor(op.taskId), true)); break;
+      case "task.reopen": remember(op.taskId, await reopenTask(user, op.taskId)); break;
+      case "task.delete": remember(op.taskId, await deleteTask(user, op.taskId)); break;
+      case "task.send_for_approval": remember(op.taskId, await sendForApproval(user, op.taskId)); break;
+      case "task.send_back": remember(op.taskId, await sendBack(user, op.taskId)); break;
       case "task.collab": await (op.add ? addCollaborator(user, op.taskId, op.userId) : removeCollaborator(user, op.taskId, op.userId)); break;
-      case "task.approver": await setApprover(user, op.taskId, op.approverId); break;
-      case "task.blocked": await updateTask(user, op.taskId, { expectedUpdatedAt: await versionOf(op.taskId), blocked: op.blocked, ...(op.blocked ? { blockedReason: op.reason ?? null } : {}) }); break;
+      case "task.approver": remember(op.taskId, await setApprover(user, op.taskId, op.approverId, await versionFor(op.taskId))); break;
+      case "task.blocked": remember(op.taskId, await updateTask(user, op.taskId, { expectedUpdatedAt: await versionFor(op.taskId), blocked: op.blocked, ...(op.blocked ? { blockedReason: op.reason ?? null } : {}) })); break;
       case "project.create": await createProject(user, { name: op.name, description: op.description, leaderId: op.leaderId }); break;
       case "member.add": await addMember(user, op.projectId, op.userId, op.role); break;
       case "member.role":

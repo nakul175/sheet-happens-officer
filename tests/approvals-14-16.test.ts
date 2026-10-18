@@ -1,6 +1,6 @@
 // SHO-US-14.16: Waiting on me / Waiting on others in My tasks.
 import { describe, expect, it } from "vitest";
-import { account, project, task } from "./helpers";
+import { account, project, task, withVersion } from "./helpers";
 
 describe("approvals view (14.16)", () => {
   it("lists tasks held for my approval with their age, and the sender sees them under Waiting on others", async () => {
@@ -27,7 +27,7 @@ describe("approvals view (14.16)", () => {
     expect([...theirs.overdue, ...theirs.next7, ...theirs.later, ...theirs.waitingOnMe].some((x: { id: string }) => x.id === t)).toBe(false);
 
     // Close from the row is one request, and Undo is offered
-    const r = await boss.c.post(`/api/tasks/${t}/complete`, {});
+    const r = await boss.c.post(`/api/tasks/${t}/complete`, await withVersion(boss, t));
     expect(r.status).toBe(200);
     expect(r.headers.get("x-undo-id")).toBeTruthy();
     expect((await boss.c.get("/api/my-tasks")).json.waitingOnMe).toEqual([]);

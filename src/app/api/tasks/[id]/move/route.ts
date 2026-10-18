@@ -5,7 +5,7 @@ import { moveTask } from "@/lib/tasks";
 
 export const POST = handle(async (req: Request, ctx: { params: Promise<{ id: string }> }) => {
   const me = await currentUser();
-  const { sectionId, completeAll } = await parseBody(req, taskMove);
-  await moveTask(me, (await ctx.params).id, sectionId, completeAll);
+  const { sectionId, completeAll, expectedUpdatedAt } = await parseBody(req, taskMove);
+  await moveTask(me, (await ctx.params).id, sectionId, expectedUpdatedAt, completeAll);
   return Response.json({ status: "ok" });
 });
