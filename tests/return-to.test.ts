@@ -1,8 +1,9 @@
 // APL-2652. Same-origin return path after sign-in, and the signed-out redirect that carries it.
 // The cases at the top do not need a server. The "signed-out redirect" cases hit TASKBOARD_URL.
 import { describe, expect, it } from "vitest";
+import { api } from "@/components/api";
 import { account, BASE } from "./helpers";
-import { safeReturnPath, sessionSignInTarget, signInHref } from "@/lib/return-to";
+import { isSignInScreen, safeReturnPath, sessionSignInTarget, signInHref } from "@/lib/return-to";
 
 const BASE_ORIGIN = "http://return.invalid";
 
@@ -111,19 +112,85 @@ describe("APL-2652 safe return path", () => {
     expectSafe(safeReturnPath("/tasks/T1"));
   });
 
-  it("APL-2664 a 401 keeps expired=1, adds a safe return path, and does not leave /signin", () => {
+  it("a 401 sends the browser to /signin with expired=1 and the safe return path", () => {
     expect(sessionSignInTarget("/tasks/T1")).toBe("/signin?expired=1&next=%2Ftasks%2FT1");
     expect(sessionSignInTarget("/projects/abc", "?task=T1")).toBe("/signin?expired=1&next=%2Fprojects%2Fabc%3Ftask%3DT1");
+    const both = sessionSignInTarget("/tasks/T1", "");
+    const url = new URL(both!, BASE_ORIGIN);
+    expect(url.pathname).toBe("/signin");
+    expect(url.searchParams.get("expired")).toBe("1");
+    expect(url.searchParams.get("next")).toBe("/tasks/T1");
+    expect(safeReturnPath(url.searchParams.get("next"))).toBe("/tasks/T1");
+    // No page to return to: expired=1 only, then sign-in goes home.
     expect(sessionSignInTarget("/")).toBe("/signin?expired=1");
-    // Already on the sign-in screen: do not navigate, so next in the query is left as it is.
+  });
+
+  it("a 401 does not redirect when the browser is already on /signin or /signin/", () => {
+    expect(isSignInScreen("/signin")).toBe(true);
+    expect(isSignInScreen("/signin/")).toBe(true);
+    expect(isSignInScreen("/tasks/T1")).toBe(false);
     expect(sessionSignInTarget("/signin")).toBeNull();
-    expect(sessionSignInTarget("/signin", "?next=%2Ftasks%2FT1&expired=1")).toBeNull();
+    expect(sessionSignInTarget("/signin", "?expired=1&next=%2Ftasks%2FT1")).toBeNull();
+    expect(sessionSignInTarget("/signin/")).toBeNull();
+    expect(sessionSignInTarget("/signin/", "?expired=1&next=%2Ftasks%2FT1")).toBeNull();
+  });
+
+  it("expired=1 and a return path both appear, and an unsafe path keeps only expired=1", () => {
+    const href = signInHref("/tasks/T1", { expired: true });
+    const url = new URL(href, BASE_ORIGIN);
+    expect(url.origin).toBe(BASE_ORIGIN);
+    expect(url.searchParams.get("expired")).toBe("1");
+    expect(url.searchParams.get("next")).toBe("/tasks/T1");
+    expect(safeReturnPath(url.searchParams.get("next"))).toBe("/tasks/T1");
     for (const bad of ["https://evil.example", "//evil.example", "/\\evil.example", "javascript:alert(1)", "/%2f%2fevil.example", "/%5Cevil.example"]) {
-      const href = sessionSignInTarget(bad);
-      expect(href, bad).toBe("/signin?expired=1");
-      expect(href, bad).not.toContain("evil.example");
-      expect(href, bad).not.toContain("javascript");
-      expect(new URL(href!, BASE_ORIGIN).origin).toBe(BASE_ORIGIN);
+      const landed = sessionSignInTarget(bad);
+      expect(landed, bad).toBe("/signin?expired=1");
+      expect(landed, bad).not.toContain("evil.example");
+      expect(landed, bad).not.toContain("javascript");
+      expect(new URL(landed!, BASE_ORIGIN).searchParams.get("next")).toBeNull();
+    }
+  });
+
+  it("a 401 from api() navigates with expired=1 and the return path, and stays on /signin and /signin/", async () => {
+    const realFetch = globalThis.fetch;
+    const realWindow = (globalThis as { window?: unknown }).window;
+    const assigned: string[] = [];
+    const place = (pathname: string, search = "") => {
+      assigned.length = 0;
+      (globalThis as { window?: unknown }).window = {
+        location: {
+          pathname,
+          search,
+          set href(value: string) { assigned.push(value); },
+          get href() { return assigned.at(-1) ?? ""; },
+        },
+        dispatchEvent() {},
+      };
+    };
+    globalThis.fetch = (async () =>
+      new Response(JSON.stringify({ error: "Not signed in" }), {
+        status: 401,
+        headers: { "content-type": "application/json" },
+      })) as typeof fetch;
+    try {
+      place("/tasks/T1");
+      expect((await api("GET", "/api/tasks/T1")).status).toBe(401);
+      expect(assigned).toEqual(["/signin?expired=1&next=%2Ftasks%2FT1"]);
+
+      place("/projects/abc", "?task=T1");
+      await api("GET", "/api/tasks/T1");
+      expect(assigned).toEqual(["/signin?expired=1&next=%2Fprojects%2Fabc%3Ftask%3DT1"]);
+
+      place("/signin", "?expired=1&next=%2Ftasks%2FT1");
+      await api("GET", "/api/tasks/T1");
+      expect(assigned).toEqual([]);
+
+      place("/signin/", "?expired=1&next=%2Ftasks%2FT1");
+      await api("GET", "/api/tasks/T1");
+      expect(assigned).toEqual([]);
+    } finally {
+      globalThis.fetch = realFetch;
+      (globalThis as { window?: unknown }).window = realWindow;
     }
   });
 });
@@ -182,6 +249,30 @@ describe("APL-2652 signed-out redirect", () => {
       expect(doc.target, next).toBeNull();
       expect(doc.html, next).not.toMatch(/url=https?:\/\/evil|NEXT_REDIRECT;replace;https?:|url=\/\/evil|url=javascript:/i);
     }
+  });
+
+  it("expired=1 shows the session alert, and a safe return path is kept with it", async () => {
+    const sentence = "Your session has expired, please sign in again";
+    const alert = `<div role="alert"[^>]*>${sentence}</div>`;
+    const both = await documentTarget(`/signin?expired=1&next=${encodeURIComponent("/tasks/T1")}`);
+    expect(both.status).toBe(200);
+    expect(both.target).toBeNull();
+    expect(both.html).toMatch(new RegExp(alert));
+    expect(both.html).toContain('\\"sessionExpired\\":true');
+    expect(both.html).toContain('\\"next\\":\\"/tasks/T1\\"');
+
+    const expiredOnly = await documentTarget("/signin?expired=1");
+    expect(expiredOnly.html).toMatch(new RegExp(alert));
+    expect(expiredOnly.html).toContain('\\"next\\":\\"$undefined\\"');
+
+    const plain = await documentTarget("/signin");
+    expect(plain.html).not.toContain(sentence);
+    expect(plain.html).toContain('\\"sessionExpired\\":false');
+
+    const evil = await documentTarget(`/signin?expired=1&next=${encodeURIComponent("https://evil.example")}`);
+    expect(evil.html).toMatch(new RegExp(alert));
+    expect(evil.html).toContain('\\"next\\":\\"$undefined\\"');
+    expect(evil.html).not.toContain('\\"next\\":\\"https://evil.example\\"');
   });
 
   it("a signed-in person is not sent to sign-in", async () => {

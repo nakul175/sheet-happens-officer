@@ -184,7 +184,9 @@ describe("APL-2652 sign-in returns to the deep link", () => {
         await route.continue();
       });
       await page.goto(`/tasks/${visibleId}`);
-      await page.getByText("Your session has expired, please sign in again").waitFor({ timeout: 20000 });
+      const expired = page.getByRole("alert").filter({ hasText: "Your session has expired, please sign in again" });
+      await expired.waitFor({ timeout: 20000 });
+      expect(await expired.innerText()).toBe("Your session has expired, please sign in again");
       const url = new URL(page.url());
       expect(url.origin).toBe(origin());
       expect(url.pathname).toBe("/signin");
@@ -193,6 +195,33 @@ describe("APL-2652 sign-in returns to the deep link", () => {
       // The sign-in screen must not redirect again: the query is still here when they submit.
       expect(new URL(page.url()).pathname).toBe("/signin");
       await signIn(page, memberEmail, PW);
+      await landedOnTask(page, visibleId, visibleTitle);
+    } finally { await ctx.close(); }
+  });
+
+  it("expired=1 and a return path show the alert until another error, then sign-in returns", async () => {
+    const { ctx, page } = await signedOutPage();
+    try {
+      await page.goto(`/signin?expired=1&next=${encodeURIComponent(`/tasks/${visibleId}`)}`);
+      const expired = page.getByRole("alert").filter({ hasText: "Your session has expired, please sign in again" });
+      await expired.waitFor({ timeout: 20000 });
+      expect(await expired.innerText()).toBe("Your session has expired, please sign in again");
+      const opened = new URL(page.url());
+      expect(opened.pathname).toBe("/signin");
+      expect(opened.searchParams.get("expired")).toBe("1");
+      expect(opened.searchParams.get("next")).toBe(`/tasks/${visibleId}`);
+
+      await page.getByLabel("Work email").fill(memberEmail);
+      await page.getByLabel("Password").fill("wrong-pass-1");
+      await page.getByRole("button", { name: "Sign in" }).click();
+      await page.getByRole("alert").filter({ hasText: "Email or password is incorrect." }).waitFor({ timeout: 15000 });
+      expect(await page.getByText("Your session has expired, please sign in again").count()).toBe(0);
+      const kept = new URL(page.url());
+      expect(kept.searchParams.get("expired")).toBe("1");
+      expect(kept.searchParams.get("next")).toBe(`/tasks/${visibleId}`);
+
+      await page.getByLabel("Password").fill(PW);
+      await page.getByRole("button", { name: "Sign in" }).click();
       await landedOnTask(page, visibleId, visibleTitle);
     } finally { await ctx.close(); }
   });
