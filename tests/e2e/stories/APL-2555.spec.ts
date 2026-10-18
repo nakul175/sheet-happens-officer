@@ -56,11 +56,7 @@ test("AC1: scrolling the sheet does not move the page behind, and Close (44 x 44
   await ctx.close();
 });
 
-// Product defect found 18 Oct 2026 (against dbfbab2): for an editor the 300-character blocked reason sits in a 2-row text box
-// (scrollHeight 206 px in a 56 px box), so most of it is hidden until you scroll inside the box. The title is fine.
-// The story's "After" says reasons are wrapped and AC2 says fully readable. Remove test.fail() once the box grows to fit.
 test("AC2: a 150-character title and a 300-character blocked reason are fully readable by wrapping", async ({ browser }) => {
-  test.fail(true, "SHO-US-22.7 AC2: blocked-reason box is 2 rows high, text needs scrolling inside it");
   expect(LONGTITLE.length).toBe(150);
   expect(LONGREASON.length).toBe(300);
   const ctx = await phone(browser, 320, 700);
