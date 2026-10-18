@@ -1,4 +1,4 @@
-# SHO-US-10.2 AC4: counts touch targets under 44x44 px at phone widths. Needs a running dev server, tools/seed data and Playwright. Usage: python3 scripts/audit-touch.py (run from the folder that has seed.json)
+# SHO-US-22.2 AC4: counts touch targets under 44x44 px at phone widths. Needs a running dev server, tools/seed data and Playwright. Usage: python3 scripts/audit-touch.py (run from the folder that has seed.json)
 import json,sys
 from playwright.sync_api import sync_playwright
 seed=json.load(open("seed.json")); B="http://localhost:3000"

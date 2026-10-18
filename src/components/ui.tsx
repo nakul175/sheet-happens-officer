@@ -7,7 +7,7 @@ export function Modal({ onClose, small, label, children }: { onClose: () => void
   useEffect(() => {
     const prev = document.activeElement as HTMLElement | null;
     (ref.current?.querySelector<HTMLElement>("[data-autofocus]") ?? ref.current)?.focus(); // SHO-US-14.5: a dialog can name the field that gets focus
-    // SHO-US-10.7: the page behind a dialog must not scroll.
+    // SHO-US-22.7: the page behind a dialog must not scroll.
     const before = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     const keys = (e: KeyboardEvent) => {

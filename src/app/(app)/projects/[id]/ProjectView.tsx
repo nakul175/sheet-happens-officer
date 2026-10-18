@@ -30,7 +30,7 @@ type Proj = {
   members: { userId: string; name: string; role: string; active: boolean }[];
 };
 const MAX_SECTIONS = 8;
-// SHO-US-10.6 AC6: dragging is for devices with a mouse. On a touch screen it would fight scrolling, so Move to… is used.
+// SHO-US-22.6 AC6: dragging is for devices with a mouse. On a touch screen it would fight scrolling, so Move to… is used.
 const MOUSE = "(hover: hover) and (pointer: fine)";
 const useMouse = () => useSyncExternalStore(
   (cb) => { const m = window.matchMedia(MOUSE); m.addEventListener("change", cb); return () => m.removeEventListener("change", cb); },
