@@ -1,5 +1,6 @@
 import { Suspense } from "react";
 import { returnToEnabled, safeReturnPath } from "@/lib/return-to";
+import { ReturnToBridge } from "@/components/ReturnToBridge";
 import { SignInForm } from "./SignInForm";
 import { Hero } from "./Hero";
 import s from "./signin.module.css";
@@ -12,7 +13,12 @@ async function Form({ params }: { params: PageProps<"/signin">["searchParams"] }
   if (!returnToEnabled()) return <SignInForm justReset={sp.reset === "1"} />;
   // Only a safe path is handed to the form. A bad `next` is dropped, so sign-in goes home.
   const next = safeReturnPath(typeof sp.next === "string" ? sp.next : undefined) ?? undefined;
-  return <SignInForm justReset={sp.reset === "1"} sessionExpired={sp.expired === "1"} next={next} />;
+  return (
+    <>
+      <ReturnToBridge />
+      <SignInForm justReset={sp.reset === "1"} sessionExpired={sp.expired === "1"} next={next} />
+    </>
+  );
 }
 
 export default function Page({ searchParams }: PageProps<"/signin">) {
