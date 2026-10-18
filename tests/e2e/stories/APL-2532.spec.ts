@@ -165,8 +165,9 @@ test("AC3: a parent cannot be the organisation or one of its descendants, and th
   await expect(crumb.getByRole("link", { name: "Accounts" })).toBeVisible();
   await expect(crumb.getByRole("link", { name: group.name })).toBeVisible();
   await expect(crumb.getByRole("link", { name: ministry.name })).toBeVisible();
-  await expect(admin.page.locator("[aria-current=page]")).toHaveText(board.name);
+  // The side nav also marks Accounts with aria-current=page. The board name is the tree chip.
   const tree = admin.page.locator(".card", { has: admin.page.locator("[aria-current=page]") });
+  await expect(tree.locator("[aria-current=page]")).toHaveText(board.name);
   await expect(tree.getByRole("link", { name: group.name })).toBeVisible();
   await expect(tree.getByRole("link", { name: ministry.name })).toBeVisible();
 });
@@ -402,6 +403,7 @@ test("AC6: create, edit, parent change, archive and unarchive are logged with no
   await expect(admin.page.getByText("contact.created")).toBeVisible();
   await expect(admin.page.getByText("note.created")).toBeVisible();
   await expect(admin.page.getByText("organisation.parent_changed")).toBeVisible();
-  await expect(admin.page.getByText("organisation.archived")).toBeVisible();
+  // History is newest first. The org is archived twice, so the action text is on two rows; the newest is the one just listed.
+  await expect(admin.page.locator(".row", { hasText: "organisation.archived" }).first()).toBeVisible();
   await expect(admin.page.getByText("organisation.unarchived")).toBeVisible();
 });
