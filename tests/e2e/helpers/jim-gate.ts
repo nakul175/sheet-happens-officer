@@ -5,6 +5,7 @@
 // Each answer is worked out once per run and recorded on every test that asks, as a "deployed" annotation.
 // conciergeLive and crmModeLive answer the same way for two server settings a spec may depend on: whether the concierge is
 // switched on, and which CRM_VISIBLE mode staging was started with (the browser can read it but not change it).
+import type { Page } from "@playwright/test";
 import { test, expect, BASE_URL, zz } from "../support";
 import { getTask, newProject, newTask, type Who } from "../g2";
 import { cleanChat, deleteTask, newDeal, quickAction, raw } from "./jim-http";
@@ -27,6 +28,10 @@ const HEADS: Record<number, string> = {
   24: "72ee2713b4b52e8a636af5696006302b5548fcc8",
   // PR #32 (APL-2659). A later push falls through to the probe, same as the others.
   32: "947cbc9714b23915997ff34f409611206018c7f3",
+  // PR #34 (APL-2519). A later push falls through to the probe.
+  34: "983914450254dbca35ee6c3749444e7d9a2a3234",
+  // PR #35 (APL-2641), stacked on #34. A later push falls through to the probe.
+  35: "3b132d09a05cf525e9bd7c4f52e582dd30f8e0c7",
 };
 
 let releaseOnce: Promise<string | null> | null = null;
@@ -37,6 +42,19 @@ export function stagingRelease(who: Who) {
 }
 
 const REFUSED = "Only the project Leader or an Admin can do this.";
+
+/** HTML, visible text and scripts from /usage, so a client-only heading can be recognised before the figures paint. */
+async function servedUsage(page: Page) {
+  const parts: Promise<string>[] = [];
+  page.on("response", (r) => {
+    const kind = r.request().resourceType();
+    const type = r.headers()["content-type"] ?? "";
+    if (kind === "script" || kind === "document" || type.includes("javascript") || type.includes("html")) parts.push(r.text().catch(() => ""));
+  });
+  await page.goto("/usage", { waitUntil: "load" });
+  await page.waitForTimeout(1000); // a late client chunk has arrived by now
+  return [await page.content(), await page.locator("body").innerText(), ...(await Promise.all(parts))].join("\n");
+}
 
 const PROBES: Record<number, (admin: Who, member: Who | null, later: Later) => Promise<Omit<Gate, "pr">>> = {
   // PR #18 (APL-2643): over 99 unread, the bell's name says the "99+" it paints. On main it says the raw total.
@@ -215,6 +233,27 @@ const PROBES: Record<number, (admin: Who, member: Who | null, later: Later) => P
       const blob = [await page.content(), ...(await Promise.all(parts))].join("\n");
       const hit = blob.includes("ic-gap") && blob.includes("ic-hit");
       return { deployed: hit, how: `probe: served CSS/JS ${hit ? "includes" : "lacks"} ic-gap and ic-hit` };
+    } finally { await page.close(); }
+  },
+  // PR #34 (APL-2519): the Usage screen shows "Spend against the monthly ceiling". On main the Super Admin still
+  // sees calls, tokens and cost, and that heading is not in the page or the script it loads. Client text, so the probe
+  // reads what staging serves (no usage row is written).
+  34: async (admin) => {
+    const page = await admin.page.context().newPage();
+    try {
+      const blob = await servedUsage(page);
+      const hit = blob.includes("Spend against the monthly ceiling");
+      return { deployed: hit, how: `probe: Usage ${hit ? "includes" : "lacks"} spend against the monthly ceiling` };
+    } finally { await page.close(); }
+  },
+  // PR #35 (APL-2641): the same screen also shows "Messages this month" and "Quick actions this month".
+  // PR #34 has the ceiling block and not these two headings, so a build with only #34 stays "not live" here.
+  35: async (admin) => {
+    const page = await admin.page.context().newPage();
+    try {
+      const blob = await servedUsage(page);
+      const hit = blob.includes("Messages this month") && blob.includes("Quick actions this month");
+      return { deployed: hit, how: `probe: Usage ${hit ? "shows" : "does not show"} messages this month and quick-action counts` };
     } finally { await page.close(); }
   },
   // PR #32 (APL-2659): a quick action scoped to an archived project the person belongs to is "Project not found"
