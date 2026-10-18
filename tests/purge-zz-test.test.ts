@@ -133,6 +133,28 @@ describe("purge zz-test people (APL-2625)", () => {
       { name: "blank PROD_DB_HOST", env: env({ PROD_DB_HOST: "  " }), argv: argv(true), message: "PROD_DB_HOST and PROD_DB_NAME must be set" },
       { name: "empty PROD_DB_NAME", env: env({ PROD_DB_NAME: "" }), argv: argv(true), message: "PROD_DB_HOST and PROD_DB_NAME must be set" },
       { name: "missing PROD_DB_HOST", env: env({ PROD_DB_HOST: undefined }), argv: argv(false), message: "PROD_DB_HOST and PROD_DB_NAME must be set" },
+      { name: "missing confirm", env: env(), argv: ["--workspace", workspaceId, "--apply"], message: "--confirm must match the current database" },
+      { name: "empty confirm", env: env(), argv: ["--workspace", workspaceId, "--apply", "--confirm="], message: "--confirm must match the current database" },
+      {
+        name: "uppercase prod name",
+        env: env({
+          DATABASE_URL: "postgresql://example:example@db.example.com:5432/SHO_PROD",
+          DIRECT_DATABASE_URL: "postgresql://example:example@db.example.com:5432/SHO_PROD",
+          PROD_DB_NAME: "sho_prod",
+        }),
+        argv: ["--workspace", workspaceId, "--apply", "--confirm=SHO_PROD"],
+        message: "database name is production",
+      },
+      {
+        name: "mixed-case prod name",
+        env: env({
+          DATABASE_URL: "postgresql://example:example@db.example.com:5432/Sho_Prod",
+          DIRECT_DATABASE_URL: "postgresql://example:example@db.example.com:5432/Sho_Prod",
+          PROD_DB_NAME: "sho_prod",
+        }),
+        argv: ["--workspace", workspaceId, "--apply", "--confirm=Sho_Prod"],
+        message: "database name is production",
+      },
     ];
     for (const item of cases) {
       let connected = false;

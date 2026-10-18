@@ -198,6 +198,49 @@ describe("APL-2625 purge on a disposable schema", () => {
     expect(await db.user.findUnique({ where: { id: keeper.id } })).not.toBeNull();
   });
 
+  it("refuses --apply when --confirm is missing or empty, before connecting", async () => {
+    const zz = await person("confirm", { deactivated: true, ageHours: 48 });
+    const cases = [
+      { name: "missing confirm", argv: ["--workspace", workspaceId, "--apply"] },
+      { name: "empty confirm", argv: ["--workspace", workspaceId, "--apply", "--confirm="] },
+    ];
+    for (const item of cases) {
+      let connected = false;
+      const connect: DbConnect = () => {
+        connected = true;
+        throw new Error("connected");
+      };
+      const { code, text } = await capture(() => runPurge(env(), item.argv, connect));
+      expect(code, item.name).toBe(1);
+      expect(connected, item.name).toBe(false);
+      expect(text, item.name).toContain("--confirm must match the current database");
+      expect(text, item.name).not.toContain("postgresql://");
+    }
+    expect(await db.user.findUnique({ where: { id: zz.id } })).not.toBeNull();
+  });
+
+  it("refuses a different case of PROD_DB_NAME before connecting", async () => {
+    const cases = [
+      { name: "uppercase prod name", database: "SHO_PROD" },
+      { name: "mixed-case prod name", database: "Sho_Prod" },
+    ];
+    for (const item of cases) {
+      let connected = false;
+      const connect: DbConnect = () => {
+        connected = true;
+        throw new Error("connected");
+      };
+      const url = `postgresql://example:example@db.example.com:5432/${item.database}`;
+      const { code, text } = await capture(() =>
+        runPurge(env({ DATABASE_URL: url, DIRECT_DATABASE_URL: url, PROD_DB_NAME: "sho_prod" }), applyArgv(item.database), connect),
+      );
+      expect(code, item.name).toBe(1);
+      expect(connected, item.name).toBe(false);
+      expect(text, item.name).toContain("database name is production");
+      expect(text, item.name).not.toContain("postgresql://");
+    }
+  });
+
   it("fails closed when PROD_DB_HOST or PROD_DB_NAME is blank (D3)", async () => {
     const cases = [
       { name: "empty host", env: env({ PROD_DB_HOST: "" }) },
