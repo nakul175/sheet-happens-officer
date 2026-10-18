@@ -381,11 +381,28 @@ describe("tasks (4.x, 5.x)", () => {
     const p = await project(lead, lead, [{ who: ed }]);
     const t = await task(ed, p.id, { sectionId: p.doing });
     const r = await ed.c.patch(`/api/tasks/${t}`, { blocked: true, blockedReason: "Waiting on data" });
+    expect(r.status).toBe(200);
     expect(r.json.task.blocked).toBe(true);
     expect(r.json.task.blockedReason).toBe("Waiting on data");
     expect(r.json.task.sectionId).toBe(p.doing);
     const cleared = await ed.c.patch(`/api/tasks/${t}`, { blocked: false });
+    expect(cleared.status).toBe(200);
+    expect(cleared.json.task.blocked).toBe(false);
     expect(cleared.json.task.blockedReason).toBeNull();
+  });
+
+  it("APL-2494 AC2: {blocked:false} and {blocked:true} succeed with no expectedUpdatedAt", async () => {
+    const lead = await account("lead");
+    const ed = await account("editor");
+    const p = await project(lead, lead, [{ who: ed }]);
+    const t = await task(ed, p.id);
+    const on = await ed.c.patch(`/api/tasks/${t}`, { blocked: true });
+    expect(on.status).toBe(200);
+    expect(on.json.task.blocked).toBe(true);
+    const off = await ed.c.patch(`/api/tasks/${t}`, { blocked: false });
+    expect(off.status).toBe(200);
+    expect(off.json.task.blocked).toBe(false);
+    expect(off.json.task.blockedReason).toBeNull();
   });
 
   it("completes with the open-subtask choice, and reopens to the previous Section", async () => {

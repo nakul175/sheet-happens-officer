@@ -1,7 +1,7 @@
 import { currentUser } from "@/lib/auth";
-import { handle, parseBody } from "@/lib/http";
+import { ApiError, handle } from "@/lib/http";
 import { taskUpdate } from "@/lib/schemas";
-import { assertCanUpdateTask, deleteTask, getTask, updateTask } from "@/lib/tasks";
+import { assertCanUpdateTask, deleteTask, getTask, stampBlockedFlagVersion, updateTask } from "@/lib/tasks";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -12,8 +12,14 @@ export const GET = handle(async (_req: Request, ctx: Ctx) =>
 export const PATCH = handle(async (req: Request, ctx: Ctx) => {
   const me = await currentUser();
   const id = (await ctx.params).id;
-  await assertCanUpdateTask(me, id);
-  await updateTask(me, id, await parseBody(req, taskUpdate));
+  const { t } = await assertCanUpdateTask(me, id);
+  let raw: unknown;
+  try {
+    raw = await req.json();
+  } catch {
+    throw new ApiError(400, "Body must be valid JSON");
+  }
+  await updateTask(me, id, taskUpdate.parse(stampBlockedFlagVersion(raw, t.updatedAt)));
   return Response.json({ task: await getTask(me, id) });
 });
 
