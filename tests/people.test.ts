@@ -143,7 +143,7 @@ describe("15.3 sign-in details", () => {
     expect((await sa.c.post(`/api/team/nope/resend`)).status).toBe(404);
   });
 
-  it("the temporary password stays valid until the person changes it", async () => {
+  it("the emailed password signs in until the person sets their own (SHO-US-23.5 then forces the change)", async () => {
     const sa = await superAdmin();
     const p = person();
     await sa.c.post("/api/team", p);

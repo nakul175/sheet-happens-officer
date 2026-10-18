@@ -104,8 +104,14 @@ export async function endSession() {
   return s?.userId ?? null;
 }
 
-/** Signed-in, verified, active user, or ApiError(401). */
-export async function currentUser() {
+export const PASSWORD_CHANGE_REQUIRED = "PASSWORD_CHANGE_REQUIRED";
+
+/**
+ * Signed-in, verified, active user, or ApiError(401).
+ * SHO-US-23.5: a person still on a Super-Admin-issued password gets ApiError(403) until they set their own.
+ * Only the change-password, "me" and app-layout callers pass `allowTempPassword`.
+ */
+export async function currentUser(opts: { allowTempPassword?: boolean } = {}) {
   const store = await cookies();
   const token = store.get(SESSION_COOKIE)?.value;
   if (!token) throw new ApiError(401, "Not signed in");
@@ -117,6 +123,9 @@ export async function currentUser() {
   // Last-active time for the Profile screen; written at most every 5 minutes.
   if (Date.now() - session.lastSeenAt.getTime() > 5 * 60_000) {
     await db.session.update({ where: { id: session.id }, data: { lastSeenAt: new Date() } });
+  }
+  if (u.tempPasswordAt && !opts.allowTempPassword) {
+    throw new ApiError(403, "Set your own password first.", { code: PASSWORD_CHANGE_REQUIRED });
   }
   return u;
 }
