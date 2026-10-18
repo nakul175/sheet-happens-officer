@@ -28,6 +28,7 @@ function env(over: Record<string, string | undefined> = {}): NodeJS.ProcessEnv {
     PROD_DB_HOST: "",
     PROD_DB_NAME: "",
     ...over,
+    NODE_ENV: "test",
   };
 }
 
