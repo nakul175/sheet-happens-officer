@@ -1,20 +1,23 @@
 // APL-2682. Idempotently ensures the throwaway staging Editor exists.
 //
 // The person zz-test-editor@example.invalid is an ordinary active, verified member and
-// Editor of the "ZZ-TEST QA" project only. zz-test-leader@example.invalid is the Leader
-// of that project. The project and its default sections are created when they are missing.
-// An existing password is never replaced.
+// Editor of the "ZZ-TEST QA" project only. zz-test-leader@example.invalid is a different
+// person: an active, verified member and the Leader of that project. A deactivated or
+// unverified Leader is repaired. The project and its default sections are created when
+// they are missing. An existing password is never replaced.
 //
 // The password is read from STAGING_EDITOR_PASSWORD_FILE (the staging secret file)
 // or, if that is unset, from STAGING_EDITOR_PASSWORD. It is never printed.
 //
 // Refuses before opening a connection unless the database host is local, or the database
-// name is exactly sho_staging. A DigitalOcean managed host (*.db.ondigitalocean.com) and
-// any other non-local host are refused for every other database name. This does not
-// depend on PROD_DB_HOST or PROD_DB_NAME. Those still refuse as well, and database names
-// are compared to PROD_DB_NAME without regard to case. The host app.sheethappensofficer.com
-// is always refused. A URL that sets host or dbname in the query is refused, so those
-// parameters cannot replace the host or database in the authority.
+// name is exactly sho_staging. The comparison is case-sensitive: SHO_STAGING, Sho_Staging,
+// and every other spelling are refused on a non-local host. A DigitalOcean managed host
+// (*.db.ondigitalocean.com) and any other non-local host are refused unless the name is
+// that exact string. This does not depend on PROD_DB_HOST or PROD_DB_NAME. Those still
+// refuse as well, and the database name matches PROD_DB_NAME exactly, including case.
+// The host app.sheethappensofficer.com is always refused. A URL that sets host or dbname
+// in the query is refused, so those parameters cannot replace the host or database in
+// the authority.
 // Requires an explicit staging confirmation: --confirm-staging or SHO_STAGING_CONFIRM=1.
 // STAGING_WORKSPACE_ID is required. An unset id refuses before connecting; there is no
 // fallback to the oldest workspace.
@@ -77,7 +80,7 @@ function parseDatabaseUrl(raw: string): DatabaseTarget | { refusal: string } {
     return { refusal: "Refusing to run: the database URL must not set host or dbname in the query." };
   }
   const host = normalizeHost(url.hostname);
-  const name = decodeURIComponent((url.pathname.replace(/^\//, "").split("/")[0] ?? "").trim());
+  const name = decodeURIComponent(url.pathname.replace(/^\//, "").split("/")[0] ?? "");
   if (!host || !name) return { refusal: "Refusing to run: the database URL is not valid." };
   return { host, name };
 }
@@ -89,7 +92,7 @@ function targetRefusal(target: DatabaseTarget, prodHost: string, prodName: strin
   if (!isLocalHost(target.host) && target.name !== STAGING_DB_NAME) {
     return "Refusing to run: a non-local database host is allowed only when the database name is sho_staging.";
   }
-  if (prodName && target.name.toLowerCase() === prodName.toLowerCase()) {
+  if (prodName && target.name === prodName) {
     return "Refusing to run: the database name is production.";
   }
   return null;
@@ -294,6 +297,9 @@ export async function ensureStagingEditor(
       role: "LEADER",
       passwordHash,
     });
+    if (leader.id === editor.id) {
+      throw new ScriptRefusal("Refusing to run: the ZZ-TEST Leader must be a different user from the Editor.");
+    }
     return {
       userId: editor.id,
       leaderId: leader.id,

@@ -71,6 +71,16 @@ describe("APL-2682 staging editor", () => {
         message: "non-local database host",
       },
       {
+        name: "mixed-case staging name",
+        url: "postgresql://example:example@private-db-postgresql-nyc1-12345.db.ondigitalocean.com:25060/Sho_Staging",
+        message: "non-local database host",
+      },
+      {
+        name: "near-miss staging name",
+        url: "postgresql://example:example@db.example.com:5432/sho-staging",
+        message: "non-local database host",
+      },
+      {
         name: "host query bypass",
         url: "postgresql://example:example@localhost:5432/sho_staging?host=private-db-postgresql-nyc1-12345.db.ondigitalocean.com",
         message: "must not set host or dbname",
@@ -85,11 +95,6 @@ describe("APL-2682 staging editor", () => {
         url: "postgresql://example:example@private-db-postgresql-nyc1-12345.db.ondigitalocean.com:25060/defaultdb",
         message: "non-local database host",
       },
-      {
-        name: "uppercase prod name",
-        url: "postgresql://example:example@localhost:5432/sho_test",
-        message: "database name is production",
-      },
     ];
     for (const item of cases) {
       let connected = false;
@@ -98,7 +103,6 @@ describe("APL-2682 staging editor", () => {
         throw new Error("connected");
       };
       const over: Record<string, string> = { DATABASE_URL: item.url, DIRECT_DATABASE_URL: item.url };
-      if (item.name === "uppercase prod name") over.PROD_DB_NAME = "SHO_TEST";
       const { code, text } = await capture(() => runStagingEditor(env(over), ["--confirm-staging"], connect));
       expect(code, item.name).toBe(1);
       expect(connected, item.name).toBe(false);
@@ -107,6 +111,24 @@ describe("APL-2682 staging editor", () => {
       expect(text, item.name).not.toContain("ondigitalocean.com");
       expect(text, item.name).not.toContain(PASSWORD);
     }
+  });
+
+  it("does not treat a different case of the production database name as a match", async () => {
+    const name = decodeURIComponent(new URL(databaseUrl).pathname.replace(/^\//, "").split("/")[0] ?? "");
+    expect(name).not.toBe(name.toUpperCase());
+    let connected = false;
+    const connect: DbConnect = () => {
+      connected = true;
+      throw new Error("stop-before-query");
+    };
+    const { code, text } = await capture(() =>
+      runStagingEditor(env({ PROD_DB_NAME: name.toUpperCase() }), ["--confirm-staging"], connect),
+    );
+    expect(connected).toBe(true);
+    expect(code).toBe(1);
+    expect(text).not.toContain("database name is production");
+    expect(text).not.toContain(PASSWORD);
+    expect(text).not.toContain("postgresql://");
   });
 
   describe("disposable schema", () => {
@@ -159,8 +181,13 @@ describe("APL-2682 staging editor", () => {
 
       const editor = await db.user.findUniqueOrThrow({ where: { email: EDITOR_EMAIL } });
       const leader = await db.user.findUniqueOrThrow({ where: { email: LEADER_EMAIL } });
+      expect(leader.id).not.toBe(editor.id);
       expect(editor.orgRole).toBe("MEMBER");
       expect(leader.orgRole).toBe("MEMBER");
+      expect(editor.deactivatedAt).toBeNull();
+      expect(leader.deactivatedAt).toBeNull();
+      expect(editor.emailVerifiedAt).not.toBeNull();
+      expect(leader.emailVerifiedAt).not.toBeNull();
       expect(await verifyPassword(PASSWORD, editor.passwordHash)).toBe(true);
       expect(await verifyPassword(PASSWORD, leader.passwordHash)).toBe(true);
       const members = await db.projectMember.findMany({ where: { projectId: project.id } });
