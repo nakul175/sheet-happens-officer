@@ -21,6 +21,44 @@ export default defineConfig({
     env: { SHO_E2E_START_BASE_URL: startBaseUrl },
     exclude: [
       ...configDefaults.exclude,
+      "tests/e2e/stories/APL-2489.spec.ts", // SHO-2909: migrated Playwright story
+      "tests/e2e/stories/APL-2490.spec.ts", // SHO-2909: migrated Playwright story
+      "tests/e2e/stories/APL-2493.spec.ts", // SHO-2909: migrated Playwright story
+      "tests/e2e/stories/APL-2494.spec.ts", // SHO-2909: migrated Playwright story
+      "tests/e2e/stories/APL-2496.spec.ts", // SHO-2909: migrated Playwright story
+      "tests/e2e/stories/APL-2497.spec.ts", // SHO-2909: migrated Playwright story
+      "tests/e2e/stories/APL-2498.spec.ts", // SHO-2909: migrated Playwright story
+      "tests/e2e/stories/APL-2499.spec.ts", // SHO-2909: migrated Playwright story
+      "tests/e2e/stories/APL-2500.spec.ts", // SHO-2909: migrated Playwright story
+      "tests/e2e/stories/APL-2501.spec.ts", // SHO-2909: migrated Playwright story
+      "tests/e2e/stories/APL-2502.spec.ts", // SHO-2909: migrated Playwright story
+      "tests/e2e/stories/APL-2503.spec.ts", // SHO-2909: migrated Playwright story
+      "tests/e2e/stories/APL-2504.spec.ts", // SHO-2909: migrated Playwright story
+      "tests/e2e/stories/APL-2506.spec.ts", // SHO-2909: migrated Playwright story
+      "tests/e2e/stories/APL-2507.spec.ts", // SHO-2909: migrated Playwright story
+      "tests/e2e/stories/APL-2508.spec.ts", // SHO-2909: migrated Playwright story
+      "tests/e2e/stories/APL-2521.spec.ts", // SHO-2909: migrated Playwright story
+      "tests/e2e/stories/APL-2528.spec.ts", // SHO-2909: migrated Playwright story
+      "tests/e2e/stories/APL-2535.spec.ts", // SHO-2909: migrated Playwright story
+      "tests/e2e/stories/APL-2560.spec.ts", // SHO-2909: migrated Playwright story
+      "tests/e2e/stories/APL-2561.spec.ts", // SHO-2909: migrated Playwright story
+      "tests/e2e/stories/APL-2562.spec.ts", // SHO-2909: migrated Playwright story
+      "tests/e2e/stories/APL-2563.spec.ts", // SHO-2909: migrated Playwright story
+      "tests/e2e/stories/APL-2564.spec.ts", // SHO-2909: migrated Playwright story
+      "tests/e2e/stories/APL-2565.spec.ts", // SHO-2909: migrated Playwright story
+      "tests/e2e/stories/APL-2566.spec.ts", // SHO-2909: migrated Playwright story
+      "tests/e2e/stories/APL-2567.spec.ts", // SHO-2909: migrated Playwright story
+      "tests/e2e/stories/APL-2568.spec.ts", // SHO-2909: migrated Playwright story
+      "tests/e2e/stories/APL-2569.spec.ts", // SHO-2909: migrated Playwright story
+      "tests/e2e/stories/APL-2570.spec.ts", // SHO-2909: migrated Playwright story
+      "tests/e2e/stories/APL-2571.spec.ts", // SHO-2909: migrated Playwright story
+      "tests/e2e/stories/APL-2572.spec.ts", // SHO-2909: migrated Playwright story
+      "tests/e2e/stories/APL-2573.spec.ts", // SHO-2909: migrated Playwright story
+      "tests/e2e/stories/APL-2575.spec.ts", // SHO-2909: migrated Playwright story
+      "tests/e2e/stories/APL-2611.spec.ts", // SHO-2909: migrated Playwright story
+      "tests/e2e/stories/APL-2612.spec.ts", // SHO-2909: migrated Playwright story
+      "tests/e2e/stories/APL-2622.spec.ts", // SHO-2909: migrated Playwright story
+      "tests/e2e/stories/APL-2623.spec.ts", // SHO-2909: migrated Playwright story
       "tests/viewport/**",
       "tests/e2e/stories/APL-2669.spec.ts",
       "tests/e2e/stories/APL-2670.spec.ts",
