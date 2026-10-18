@@ -274,15 +274,14 @@ textarea.in { min-height: 90px; resize: vertical; }
 main:focus { outline: none; }
 .stat { font-size: 1.17em; font-weight: 700; margin: 1em 0; }
 
-/* SHO-US-9.2 AC6: spend to date against the monthly ceiling. The bar stops at 100; the percentage text does not. */
+/* SHO-US-9.2 AC6: spend to date against the monthly ceiling. The bar stops at 100; the percentage text does not.
+   Columns wrap once a label would no longer fit, including the 390 px phone width. */
 .usage-h { margin: 0 0 12px; font-size: 15px; font-weight: 600; color: var(--navy); }
-.usage-figs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 0; }
-.usage-figs div { min-width: 0; }
+.usage-figs { display: grid; grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr)); gap: 12px; margin: 0; }
 .usage-figs dt { font-size: 13px; color: var(--muted); }
 .usage-figs dd { margin: 2px 0 0; font-size: 1.17em; font-weight: 700; overflow-wrap: anywhere; }
 .usage-meter { height: 10px; margin-top: 14px; border-radius: 99px; background: #eceef3; overflow: hidden; }
 .usage-meter > span { display: block; height: 100%; background: var(--navy); }
-@media (max-width: 380px) { .usage-figs { grid-template-columns: 1fr; } }
 
 .pwbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; padding: 10px 28px; background: #fff4d6; border-bottom: 1px solid #f0d58a; color: #5c4300; font-size: 14px; }
 .pwbar span { flex: 0 1 auto; }
