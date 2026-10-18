@@ -48,14 +48,34 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npm run lint
+      - name: Lint
+        run: npm run lint
+      - name: Typecheck
+        run: npx next typegen && npx tsc --noEmit
       - run: npx prisma migrate deploy
-      - run: npm run build
+      - name: Build
+        run: npm run build
       - name: Start the app
         run: |
           (npx next start -p 3100 > server.log 2>&1 &)
-          for i in $(seq 1 30); do curl -fsS http://localhost:3100/api/health && break; sleep 2; done
-      - run: npm test
+          url="${APP_HEALTH_URL:-http://localhost:3100/api/health}"
+          attempts="${APP_HEALTH_ATTEMPTS:-30}"
+          pause="${APP_HEALTH_PAUSE:-2}"
+          ready=0
+          for i in $(seq 1 "$attempts"); do
+            if curl -fsS "$url"; then
+              ready=1
+              break
+            fi
+            sleep "$pause"
+          done
+          if [ "$ready" -ne 1 ]; then
+            echo 'The app did not come up' >&2
+            tail -n 50 server.log >&2 || true
+            exit 1
+          fi
+      - name: Unit tests
+        run: npm test
       - name: Server log (on failure)
         if: failure()
         run: tail -n 200 server.log || true
