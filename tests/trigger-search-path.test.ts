@@ -1,13 +1,13 @@
 // APL-2700. Safety:
+// - The guard in trigger-test-guard.ts runs before any connection.
 // - The only schema this file creates or drops is sho_test_trg_<random>.
 // - It never drops, migrates, or writes public or a sho_pr* schema.
-// - It runs only when the database host is local, the CI service name, or
-//   TRIGGER_TEST_ALLOW=1 is set in CI. Otherwise the database tests skip.
+// - TRIGGER_TEST_ALLOW cannot override a refusal.
 // - The "pooled" case simulates a lost search_path. It does not open PgBouncer.
 //
 // Self-check:
 // - [x] Throwaway schema only, dropped only that schema
-// - [x] Host guard skips anything else
+// - [x] Guard allows only localhost, 127.0.0.1, or a sho_test_ database, and refuses defaultdb, sho_staging, public, and sho_pr*
 // - [x] Pooled test is a search_path simulation
 // - [x] Public pin is proven with schema-qualified ALTER FUNCTION on the throwaway
 // - [x] Prod migration path documented as schema=public (direct connection)
@@ -18,6 +18,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { triggerTestAllowed, type TriggerTestTarget } from "./trigger-test-guard";
 
 const MIGRATION = "20261018203100_pin_trigger_search_path";
 const MIGRATIONS = path.join(process.cwd(), "prisma/migrations");
@@ -28,7 +29,6 @@ const SLOT = `sho_test_trg_${randomUUID().replace(/-/g, "").slice(0, 16)}`;
 
 type Sql = pg.Pool | pg.PoolClient | pg.Client;
 type Def = { prosrc: string; proconfig: string[] | null };
-type Env = Record<string, string | undefined>;
 type ProtectedState = { schemas: string[]; publicRelations: number; functions: string };
 
 const run = randomUUID().slice(0, 8);
@@ -55,29 +55,20 @@ export function isThrowawaySchema(name: string): boolean {
   return /^sho_test_trg_[a-z0-9]+$/.test(name);
 }
 
-/**
- * Refuse remote databases. localhost, loopback, and the CI Postgres service
- * name are allowed. TRIGGER_TEST_ALLOW=1 is allowed only when CI is set.
- */
-export function triggerTestAllowed(hostname: string, env: Env): boolean {
-  const host = hostname.toLowerCase().replace(/^\[|\]$/g, "");
-  if (host === "localhost" || host === "127.0.0.1" || host === "::1" || host === "") return true;
-  if (host === "postgres") return true;
-  const ci = env.CI === "true" || env.GITHUB_ACTIONS === "true";
-  return ci && env.TRIGGER_TEST_ALLOW === "1";
-}
-
-function databaseAllowed(): boolean {
+/** Host, database, and the schema this file will create. Nothing connects before this. */
+function targetFromEnv(): TriggerTestTarget | undefined {
   const raw = process.env.DATABASE_URL;
-  if (!raw) return false;
+  if (!raw) return undefined;
   try {
-    return triggerTestAllowed(new URL(raw).hostname, process.env);
+    const url = new URL(raw);
+    return { host: url.hostname, database: decodeURIComponent(url.pathname.replace(/^\//, "")), schema: SLOT };
   } catch {
-    return false;
+    return undefined;
   }
 }
 
-const dbAllowed = databaseAllowed();
+const target = targetFromEnv();
+const dbAllowed = target !== undefined && triggerTestAllowed(target, process.env.TRIGGER_TEST_ALLOW);
 
 function quoteSchema(name: string): string {
   if (!isThrowawaySchema(name)) throw new Error("refusing schema");
@@ -100,10 +91,12 @@ function sqlFor(folder: string): string {
 }
 
 function connectionString(): string {
+  if (!target || !triggerTestAllowed(target, process.env.TRIGGER_TEST_ALLOW)) {
+    throw new Error("trigger tests refused");
+  }
   const raw = process.env.DATABASE_URL;
   if (!raw) throw new Error("DATABASE_URL is missing");
   const url = new URL(raw);
-  if (!triggerTestAllowed(url.hostname, process.env)) throw new Error("trigger tests refused for this database host");
   url.searchParams.delete("schema");
   return url.toString();
 }
@@ -175,21 +168,6 @@ function insertTask(db: Sql, row: { id: string; projectId: string; sectionId: st
 }
 
 describe("@APL-2700 trigger search_path guards", () => {
-  it("@APL-2700 qa:TC-APL2700-6f0a11c0@v1: guard refuses a non-local database", () => {
-    expect(triggerTestAllowed("localhost", {})).toBe(true);
-    expect(triggerTestAllowed("127.0.0.1", {})).toBe(true);
-    expect(triggerTestAllowed("::1", {})).toBe(true);
-    expect(triggerTestAllowed("postgres", {})).toBe(true);
-    expect(triggerTestAllowed("db.internal", {})).toBe(false);
-    expect(triggerTestAllowed("db.internal", { TRIGGER_TEST_ALLOW: "1" })).toBe(false);
-    expect(triggerTestAllowed("db.internal", { CI: "true", TRIGGER_TEST_ALLOW: "1" })).toBe(true);
-    expect(triggerTestAllowed("db.internal", { GITHUB_ACTIONS: "true", TRIGGER_TEST_ALLOW: "1" })).toBe(true);
-    expect(isThrowawaySchema("public")).toBe(false);
-    expect(isThrowawaySchema("sho_pr1")).toBe(false);
-    expect(isThrowawaySchema("sho_pr99")).toBe(false);
-    expect(isThrowawaySchema(SLOT)).toBe(true);
-  });
-
   it("@APL-2700 qa:TC-APL2700-6f0a11c9@v1: self-check list", () => {
     const src = readFileSync(fileURLToPath(new URL("./trigger-search-path.test.ts", import.meta.url)), "utf8");
     const command = ["migrate", "deploy"].join(" ");
@@ -213,7 +191,9 @@ describe("@APL-2700 trigger search_path guards", () => {
 
 describe.skipIf(!dbAllowed)("@APL-2700 trigger search_path in a throwaway schema", () => {
   beforeAll(async () => {
-    if (!dbAllowed) throw new Error("trigger tests refused for this database host");
+    if (!target || !triggerTestAllowed(target, process.env.TRIGGER_TEST_ALLOW)) {
+      throw new Error("trigger tests refused");
+    }
     if (!isThrowawaySchema(SLOT)) throw new Error("refusing schema");
     const connectionStringValue = connectionString();
     pool = new pg.Pool({ connectionString: connectionStringValue, max: CONCURRENT_CREATES });
