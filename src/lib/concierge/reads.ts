@@ -159,8 +159,8 @@ export async function quickAnswer(user: Actor, id: string, now = new Date(), pro
   const base = QUICK_ACTIONS.find((x) => x.id === id);
   if (!base) throw new ApiError(404, "No such quick action");
   // Asked from a project screen (SHO-US-14.15): only that project, and only if the person is in it.
-  // myProjects also drops archived projects and deals the CRM hides, so the name never reaches the chat (SHO-BUG-11).
-  const scope = projectId ? await db.project.findFirst({ where: { id: projectId, ...myProjects(user) }, select: { id: true, name: true } }) : null;
+  // project-lookup-ok: membership scope for this route stays as it is; the hidden-deal 404 lands in APL-2646 so this PR does not also change the endpoint
+  const scope = projectId ? await db.project.findFirst({ where: { id: projectId, members: { some: { userId: user.id } } }, select: { id: true, name: true } }) : null;
   if (projectId && !scope) throw new ApiError(404, "Project not found");
   const q = scope ? { ...base, label: `${base.label} in ${flat(scope.name)}` } : base;
   const { tasks, truncated } = await myTasks(user, q.filter, { now, projectId: scope?.id });

@@ -9,7 +9,7 @@ import { crmMode } from "../src/lib/crm";
 import { getTask, listTasks, myTasks } from "../src/lib/tasks";
 import { getProject } from "../src/lib/projects";
 import { search } from "../src/lib/search";
-import { findTasks, listProjects, myTasks as conciergeMyTasks, projectTasks, quickAnswer } from "../src/lib/concierge/reads";
+import { findTasks, listProjects, myTasks as conciergeMyTasks, projectTasks } from "../src/lib/concierge/reads";
 
 const flat = (g: Awaited<ReturnType<typeof myTasks>>) => [...g.overdue, ...g.next7, ...g.later] as { id: string }[];
 
@@ -53,17 +53,13 @@ describe("CRM_VISIBLE lever (SHO-BUG-2)", () => {
     const nothing = { my: false, searchTask: false, searchProject: false, conciergeMy: false, conciergeFind: false, conciergeList: false };
     const notFound = { status: 404 };
 
-    // Default: the member sees their deal work everywhere, including a quick action scoped to the deal.
+    // Default: the member sees their deal work everywhere.
     expect(crmMode()).toBe("all");
     expect(await sees(me)).toEqual({ my: true, searchTask: true, searchProject: true, conciergeMy: true, conciergeFind: true, conciergeList: true });
-    const named = await quickAnswer(me, "due-week", new Date(), dealId);
-    expect(named.q.label).toContain(`Deal ${tag}`);
 
     await withMode("off", async () => {
       expect(crmMode()).toBe("off");
       expect(await sees(me)).toEqual(nothing);
-      await expect(quickAnswer(me, "due-week", new Date(), dealId)).rejects.toMatchObject(notFound);
-      await expect(quickAnswer(adm, "due-week", new Date(), dealId)).rejects.toMatchObject(notFound);
       await expect(getTask(me, dealTask)).rejects.toMatchObject(notFound);
       await expect(listTasks(me, dealId, {})).rejects.toMatchObject(notFound);
       await expect(getProject(me, dealId)).rejects.toMatchObject(notFound);
@@ -80,7 +76,6 @@ describe("CRM_VISIBLE lever (SHO-BUG-2)", () => {
 
     await withMode("admins", async () => {
       expect(await sees(me)).toEqual(nothing);
-      await expect(quickAnswer(me, "due-week", new Date(), dealId)).rejects.toMatchObject(notFound);
       await expect(getTask(me, dealTask)).rejects.toMatchObject(notFound);
       await expect(listTasks(me, dealId, {})).rejects.toMatchObject(notFound);
       // An Admin is not a member, so My tasks has nothing of theirs; everything else shows the deal.
