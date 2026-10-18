@@ -113,6 +113,27 @@ describe("APL-2691 Move to Won dialog", () => {
     await dialog.getByRole("button", { name: "Cancel" }).click();
   }, 60000);
 
+  it("@APL-2691 phone: at 390x844 Move deal receives the click, and the tab bar does not take it", async () => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    try {
+      const { dialog, alert } = await openStage(wonId, "Won");
+      const bar = page.locator(".tabbar-wrap");
+      await bar.waitFor({ state: "visible", timeout: WITHIN });
+      const move = dialog.getByRole("button", { name: "Move deal" });
+      await move.evaluate((el) => el.scrollIntoView({ block: "end", inline: "nearest" }));
+      const button = await move.boundingBox();
+      const tab = await bar.boundingBox();
+      expect(button && tab && button.y < tab.y + tab.height && button.y + button.height > tab.y).toBe(true);
+      await move.click();
+      await alert.waitFor({ state: "visible", timeout: WITHIN });
+      expect(await alert.innerText()).toContain("21");
+      expect(await dealState(wonId)).toEqual({ stage: "Lead", archived: false });
+      await dialog.getByRole("button", { name: "Cancel" }).click();
+    } finally {
+      await page.setViewportSize({ width: 1280, height: 900 });
+    }
+  }, 60000);
+
   it("@APL-2691 qa:TC-APL2691-b797e18b@v1 TC4: the dialog points at the alert with aria-describedby and focus moves to it", async () => {
     await page.goto(`/projects/${wonId}`);
     await page.getByRole("group", { name: "Stage" }).getByRole("button", { name: "Won", exact: true }).click();
