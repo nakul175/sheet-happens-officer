@@ -11,8 +11,8 @@ export type BulkResult = { message: string; skipped: { id: string; title: string
 type Kind = "assign" | "date" | "move" | "complete";
 const addDays = (iso: string, n: number) => new Date(Date.parse(`${iso}T00:00:00Z`) + n * 86400_000).toISOString().slice(0, 10);
 
-export function BulkBar({ projectId, ids, people, sections, onClear, onDone }: {
-  projectId: string; ids: string[]; people: Person[]; sections: Sec[]; onClear: () => void; onDone: (r: BulkResult) => void;
+export function BulkBar({ projectId, ids, versions, people, sections, onClear, onDone }: {
+  projectId: string; ids: string[]; versions: Record<string, string>; people: Person[]; sections: Sec[]; onClear: () => void; onDone: (r: BulkResult) => void;
 }) {
   const [kind, setKind] = useState<Kind | null>(null);
   const [who, setWho] = useState("");
@@ -26,7 +26,7 @@ export function BulkBar({ projectId, ids, people, sections, onClear, onDone }: {
 
   async function send(body: Record<string, unknown>) {
     setBusy(true);
-    const r = await api<BulkResult & { undoIds: string[]; label: string | null; notified: boolean }>("POST", `/api/projects/${projectId}/tasks/bulk`, { taskIds: ids, ...body });
+    const r = await api<BulkResult & { undoIds: string[]; label: string | null; notified: boolean }>("POST", `/api/projects/${projectId}/tasks/bulk`, { taskIds: ids, versions, ...body });
     setBusy(false);
     if (!r.ok) { setErr(r.error ?? "Could not change the tasks."); return; }
     if (r.data.undoIds.length && r.data.label) {
