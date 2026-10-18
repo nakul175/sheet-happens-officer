@@ -4,16 +4,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { chromium, type Browser, type BrowserContext, type Page } from "playwright-core";
 import { account, BASE, patchTask, PW, superAdmin, task, type Account } from "./helpers";
 
-/**
- * One test per approved AC v1. Pam has not published qa:TC-APL2674 markers on APL-2674
- * (R-S3 still pending; the issue's only comments are Michael's). Re-pin each title to her
- * exact `qa:TC-APL2674-xxxxxxxx@vN` string when that comment lands.
- */
-const QA = {
-  ac1: "APL-2674-AC1@v1",
-  ac2: "APL-2674-AC2@v1",
-  ac3: "APL-2674-AC3@v1",
-};
+/** Pam's AC v1 markers. AC1 is two cases: the editor, then the leader and super admin. */
 
 const TITLE = "Fix invoice";
 const DELETED = `moved "${TITLE}" to Trash`;
@@ -72,46 +63,58 @@ function deleteRow(page: Page, who: string) {
 }
 
 describe("APL-2674 activity delete undo", () => {
-  it(`${QA.ac1} Undo on a task.deleted row follows the Trash restore rule`, async () => {
+  it("qa:TC-APL2674-4c99513c@v1 Editor sees no Undo on their own task.deleted row", async () => {
+    const leader = await account("leader");
+    const editor = await account("editor");
+    const projectId = await alpha(leader, editor);
+    const editorName = await displayName(editor);
+    const editorTask = await task(editor, projectId, { title: TITLE });
+    expect((await editor.c.del(`/api/tasks/${editorTask}`)).status).toBe(204);
+
+    const ctx = await signedIn(editor.email);
+    try {
+      const page = await openActivity(ctx, projectId);
+      const row = deleteRow(page, editorName);
+      await row.waitFor({ state: "visible", timeout: 30_000 });
+      // Not rendered at all, including a disabled button.
+      expect(await row.getByRole("button", { name: "Undo" }).count()).toBe(0);
+    } finally {
+      await ctx.close();
+    }
+    expect((await editor.c.get(`/api/tasks/${editorTask}`)).status).toBe(404);
+    const trash = await leader.c.get(`/api/projects/${projectId}/trash`);
+    expect(trash.status).toBe(200);
+    expect((trash.json.items as { id: string }[]).some((item) => item.id === editorTask)).toBe(true);
+  }, 90_000);
+
+  it("qa:TC-APL2674-c7c6fa04@v1 Leader and super admin see Undo on their own task.deleted row", async () => {
     const leader = await account("leader");
     const editor = await account("editor");
     const root = await superAdmin();
     const projectId = await alpha(leader, editor);
-    const [leaderName, editorName, rootName] = await Promise.all([displayName(leader), displayName(editor), displayName(root)]);
-
-    const editorTask = await task(editor, projectId, { title: TITLE });
+    const [leaderName, rootName] = await Promise.all([displayName(leader), displayName(root)]);
     const leaderTask = await task(leader, projectId, { title: TITLE });
-    const rootTask = await task(root, projectId, { title: TITLE });
-    expect((await editor.c.del(`/api/tasks/${editorTask}`)).status).toBe(204);
     expect((await leader.c.del(`/api/tasks/${leaderTask}`)).status).toBe(204);
-    expect((await root.c.del(`/api/tasks/${rootTask}`)).status).toBe(204);
 
     const contexts: BrowserContext[] = [];
     try {
-      const editorCtx = await signedIn(editor.email);
-      contexts.push(editorCtx);
-      const editorPage = await openActivity(editorCtx, projectId);
-      const editorRow = deleteRow(editorPage, editorName);
-      await editorRow.waitFor({ state: "visible", timeout: 30_000 });
-      expect(await editorRow.getByRole("button", { name: "Undo" }).count()).toBe(0);
-
       const leaderCtx = await signedIn(leader.email);
       contexts.push(leaderCtx);
       const leaderPage = await openActivity(leaderCtx, projectId);
-      const leaderRow = deleteRow(leaderPage, leaderName);
-      await leaderRow.getByRole("button", { name: "Undo" }).waitFor({ state: "visible", timeout: 30_000 });
+      await deleteRow(leaderPage, leaderName).getByRole("button", { name: "Undo" }).waitFor({ state: "visible", timeout: 30_000 });
 
+      const rootTask = await task(root, projectId, { title: TITLE });
+      expect((await root.c.del(`/api/tasks/${rootTask}`)).status).toBe(204);
       const rootCtx = await signedIn(root.email);
       contexts.push(rootCtx);
       const rootPage = await openActivity(rootCtx, projectId);
-      const rootRow = deleteRow(rootPage, rootName);
-      await rootRow.getByRole("button", { name: "Undo" }).waitFor({ state: "visible", timeout: 30_000 });
+      await deleteRow(rootPage, rootName).getByRole("button", { name: "Undo" }).waitFor({ state: "visible", timeout: 30_000 });
     } finally {
       await Promise.all(contexts.map((ctx) => ctx.close()));
     }
   }, 90_000);
 
-  it(`${QA.ac2} Other Undo rows are unchanged`, async () => {
+  it("qa:TC-APL2674-5a651835@v1 Editor's Undo on their own edit still shows and works", async () => {
     const leader = await account("leader");
     const editor = await account("editor");
     const projectId = await alpha(leader, editor);
@@ -131,7 +134,7 @@ describe("APL-2674 activity delete undo", () => {
     }
   }, 90_000);
 
-  it(`${QA.ac3} The server stays the source of truth`, async () => {
+  it("qa:TC-APL2674-cbcdf3cc@v1 Direct undo API call on editor's own delete is still 403, nothing restored", async () => {
     const leader = await account("leader");
     const editor = await account("editor");
     const projectId = await alpha(leader, editor);
