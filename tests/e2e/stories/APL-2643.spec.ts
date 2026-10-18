@@ -7,7 +7,8 @@ import { test, expect } from "../support";
 import { bell, withUnread } from "../helpers/jim-bell";
 import { PASS, passwordOk } from "./qa";
 
-const tag = (id: string) => ({ annotation: [{ type: "ac", description: id }] });
+// qa:TC uses the AC id already on the test. Pam has not published a separate hash for these cases.
+const tag = (id: string) => ({ annotation: [{ type: "ac", description: id }, { type: "qa:TC", description: id }] });
 
 test.beforeAll(() => {
   test.skip(!PASS, "Set SHO_QA_PASS (the password for nakul17+ aliases).");
