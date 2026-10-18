@@ -1,5 +1,7 @@
 # Test every push to main, then release it to the droplet (SHO-US-9.3).
 # Secrets (repository settings): SSH_PRIVATE_KEY, DATABASE_URL, RESEND_API_KEY.
+# Optional secret DIRECT_DATABASE_URL: direct Postgres connection for migrations when DATABASE_URL goes through PgBouncer
+# (unset means migrations use DATABASE_URL).
 # Optional variables: DROPLET_HOST (defaults to the app address), DROPLET_HOST_KEY (ssh-keyscan line).
 # Concierge (all optional; unset means the concierge stays off): secret ANTHROPIC_API_KEY; variables MODEL_DATA_APPROVED
 # (must be exactly "true" to allow requests to the provider), MODEL_NAME, MONTHLY_CEILING_USD, WEEKLY_MESSAGE_CAP.
@@ -39,6 +41,7 @@ jobs:
           --health-retries 12
     env:
       DATABASE_URL: postgresql://sho:sho@localhost:5432/sho_test?schema=public
+      DIRECT_DATABASE_URL: postgresql://sho:sho@localhost:5432/sho_test?schema=public
       EMAIL_OUTBOX_DIR: ${{ github.workspace }}/.outbox-ci
       SUPER_ADMIN_EMAILS: root.test@aplyd.com
       APP_URL: http://localhost:3100
@@ -94,6 +97,7 @@ jobs:
       - name: Write settings and secrets on the server
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DIRECT_DATABASE_URL: ${{ secrets.DIRECT_DATABASE_URL }}
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           MODEL_DATA_APPROVED: ${{ vars.MODEL_DATA_APPROVED }}
@@ -103,12 +107,15 @@ jobs:
         run: |
           [ -n "$DATABASE_URL" ] || { echo "DATABASE_URL secret is missing"; exit 1; }
           [ -n "$RESEND_API_KEY" ] || { echo "RESEND_API_KEY secret is missing"; exit 1; }
+          case "$DIRECT_DATABASE_URL" in *"'"*|*$'\n'*) echo "::error::DIRECT_DATABASE_URL contains a quote or line break"; exit 1;; esac
           # A quote or line break in a concierge setting would break app.env; refuse before anything is written.
           for v in ANTHROPIC_API_KEY MODEL_DATA_APPROVED MODEL_NAME MONTHLY_CEILING_USD WEEKLY_MESSAGE_CAP; do
             case "${!v}" in *"'"*|*$'\n'*) echo "::error::$v contains a quote or line break"; exit 1;; esac
           done
           {
             printf "DATABASE_URL='%s'\n" "$DATABASE_URL"
+            # Written only when set; release.sh falls back to DATABASE_URL otherwise.
+            if [ -n "$DIRECT_DATABASE_URL" ]; then printf "DIRECT_DATABASE_URL='%s'\n" "$DIRECT_DATABASE_URL"; fi
             printf "RESEND_API_KEY='%s'\n" "$RESEND_API_KEY"
             printf "APP_URL='https://%s'\n" "$APP_HOST"
             printf "SUPER_ADMIN_EMAILS='nakul.jain@aplyd.com'\n"
