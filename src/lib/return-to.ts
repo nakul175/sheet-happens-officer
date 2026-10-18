@@ -113,7 +113,7 @@ export function safeReturnPath(input: string | null | undefined): string | null 
  * The result is always a relative `/signin` URL, never an absolute or protocol-relative one.
  */
 export function signInHref(from: string | null | undefined, opts?: { expired?: boolean }): string {
-  if (!returnToEnabled()) return "/signin";
+  if (!returnToEnabled()) return legacySignInHref();
   const params = new URLSearchParams();
   if (opts?.expired) params.set("expired", "1");
   const safe = safeReturnPath(from);
@@ -137,14 +137,19 @@ export function isSignInScreen(pathname: string): boolean {
  * Otherwise `/signin?expired=1` plus a safe return path.
  */
 export function sessionSignInTarget(pathname: string, search = ""): string | null {
-  if (!returnToEnabled()) return "/signin";
+  if (!returnToEnabled()) return legacySignInHref();
   if (isSignInScreen(pathname)) return null;
   return signInHref(`${pathname}${search}`, { expired: true });
 }
 
+/** Main's 401 target: `/signin` with no query. A function so the client assignment is not a string literal. */
+export function legacySignInHref(): string {
+  return "/signin";
+}
+
 /** Where a signed-out document request goes. Flag off is plain `/signin`, the same as main. */
 export function signedOutSignInHref(from: string | null | undefined): string {
-  if (!returnToEnabled()) return "/signin";
+  if (!returnToEnabled()) return legacySignInHref();
   const href = signInHref(from);
   if (!href.startsWith("/") || href.startsWith("//") || href.includes("\\") || href.includes("://")) return "/signin";
   return href;
