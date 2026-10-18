@@ -3,8 +3,8 @@ import { configDefaults, defineConfig } from "vitest/config";
 
 // Tests hit a live dev server (first request to a route compiles it), so allow time.
 // The concierge tests also call src/lib directly (the "@/..." imports), with a fake model.
-// CRM_VISIBLE mode servers need a production build and three processes, so they stay out of `npm test`.
-// Run them with `npm run test:crm-modes`.
+// CRM_VISIBLE mode servers need a production build and one process per mode, so they stay out of `npm test`.
+// Run them with `npm run test:crm-modes` or `npm run test:reminder-modes`. CI runs the reminder one after the build.
 export default defineConfig({
   resolve: { alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) } },
   // scripts/** holds node:test files (assert-playwright-ran.test.mjs). Vitest's default
@@ -12,6 +12,12 @@ export default defineConfig({
   test: {
     testTimeout: 30000,
     fileParallelism: false,
-    exclude: [...configDefaults.exclude, "tests/viewport/**", "tests/crm-visible-modes-server.test.ts", "scripts/**"],
+    exclude: [
+      ...configDefaults.exclude,
+      "tests/viewport/**",
+      "tests/crm-visible-modes-server.test.ts",
+      "tests/jobs-reminders-crm-server.test.ts",
+      "scripts/**",
+    ],
   },
 });

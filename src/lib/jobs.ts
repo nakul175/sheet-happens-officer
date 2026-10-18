@@ -49,7 +49,10 @@ export function reminderFor(due: Date, today: Date): { type: "TASK_DUE_TOMORROW"
 export function reminderTaskWhere(today: Date): Prisma.TaskWhereInput {
   const dueDate = { gte: new Date(today.getTime() - 28 * DAY_MS), lte: new Date(today.getTime() + DAY_MS) };
   const open = { completedAt: null, deletedAt: null, blocked: false, dueDate };
-  const projectFor = (role: OrgRole): Prisma.ProjectWhereInput => ({ archivedAt: null, ...crmProjectWhere({ orgRole: role }) });
+  // AND keeps `archivedAt` if a later crmProjectWhere returns its own archivedAt or OR.
+  const projectFor = (role: OrgRole): Prisma.ProjectWhereInput => ({
+    AND: [{ archivedAt: null }, crmProjectWhere({ orgRole: role })],
+  });
   const mode = crmMode();
   if (mode !== "admins") {
     // off hides deals from every role, including the Super Admin. all (and unset) hides them from nobody.
@@ -59,7 +62,8 @@ export function reminderTaskWhere(today: Date): Prisma.TaskWhereInput {
     ...open,
     OR: [
       { project: projectFor("MEMBER") },
-      { project: projectFor("ADMIN"), assignee: { orgRole: { not: "MEMBER" } } },
+      // Named roles only. A future role must not receive deal reminders merely by not being a Member.
+      { project: projectFor("ADMIN"), assignee: { orgRole: { in: ["ADMIN", "SUPER_ADMIN"] } } },
     ],
   };
 }

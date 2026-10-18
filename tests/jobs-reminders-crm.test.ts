@@ -1,7 +1,9 @@
-// APL-2729. Due-date reminders apply crmProjectWhere for the assignee.
+// APL-2729. Library check: sendReminders applies crmProjectWhere for the assignee.
+// AC4 (one real server process per CRM_VISIBLE mode, including 40 concurrent POSTs) lives in
+// tests/jobs-reminders-crm-server.test.ts and runs in CI via `npm run test:reminder-modes`.
 // The shared test server stays on the default CRM_VISIBLE (unset), so a deal can be seeded.
-// sendReminders reads the lever in this process. Rows are checked in the test database and on
-// GET /api/notifications. Names are ZZ-TEST. A non-local database is refused.
+// Rows are checked in the test database and on GET /api/notifications. Names are ZZ-TEST.
+// A non-local database is refused.
 //
 // qa:TC-APL2729-c2ee0001@v1 unset
 // qa:TC-APL2729-c2a11001@v1 all
@@ -218,23 +220,5 @@ describe("reminder jobs apply crmProjectWhere (APL-2729)", () => {
     expect(adminRows.length).toBeGreaterThanOrEqual(1);
     expect(adminRows[0]).toMatchObject({ type: "TASK_DUE_TOMORROW", projectId: dealId, data: { title: adminTitle } });
     await expectOpsReminder(false);
-  }, 90_000);
-
-  it.skipIf((process.env.JOB_SECRET ?? "").length < 16)("qa:TC-APL2729-10ad0040@v1 40 concurrent POST /api/jobs/reminders requests finish", async () => {
-    const secret = process.env.JOB_SECRET ?? "";
-    const base = process.env.TASKBOARD_URL ?? "http://localhost:3000";
-    const responses = await Promise.all(Array.from({ length: LOAD }, () => fetch(`${base}/api/jobs/reminders`, {
-      method: "POST",
-      headers: { authorization: `Bearer ${secret}` },
-    })));
-    expect(responses).toHaveLength(LOAD);
-    for (const res of responses) {
-      const text = await res.text();
-      expect(text.includes(secret)).toBe(false);
-      expect(res.status, text.slice(0, 200)).toBe(200);
-      const body = JSON.parse(text) as { status?: string; result?: { sent?: number } };
-      expect(body.status).toBe("OK");
-      expect(typeof body.result?.sent).toBe("number");
-    }
   }, 90_000);
 });
