@@ -82,19 +82,50 @@ describe("undo (6.4)", () => {
     expect((await activity(lead, p.id)).find((x) => x.id === id)!.undo).toBe("too_old");
   });
 
-  it("undoes a deletion like a restore, for the person who deleted it, and tells them notices were sent", async () => {
+  it("refuses an Editor's Undo of their own delete with the Trash restore rule, and restores nothing (SHO-BUG-8 AC1, AC3)", async () => {
     const lead = await account("lead");
     const ed = await account("editor");
     const p = await project(lead, lead, [{ who: ed }]);
     const t = await task(lead, p.id, { title: "Oops", assigneeId: ed.id });
     const del = await ed.c.del(`/api/tasks/${t}`);
+    const id = del.headers.get("x-undo-id")!;
     expect(del.headers.get("x-undo-label")).toBe("Task deleted");
-    expect(del.headers.get("x-undo-notified")).toBe("1");
+    const restore = await ed.c.post(`/api/tasks/${t}/restore`); // the unauthorised restore from Trash
+    expect(restore.status).toBe(403);
+    const u = await ed.c.post(`/api/actions/${id}/undo`);
+    expect(u.status).toBe(403);
+    expect(u.json.error).toBe(restore.json.error);
+    expect(u.json.error).toBe("Only the project Leader or an Admin can do this.");
+    const bulk = await ed.c.post("/api/actions/bulk-undo", { ids: [id] }); // the server refuses on every Undo route, not just the button
+    expect(bulk.status).toBe(403);
+    expect(bulk.json.error).toBe(restore.json.error);
     expect((await ed.c.get(`/api/tasks/${t}`)).status).toBe(404);
-    const u = await ed.c.post(`/api/actions/${del.headers.get("x-undo-id")}/undo`);
-    expect(u.status, JSON.stringify(u.json)).toBe(200);
-    expect(u.json.noticesSent).toBe(true);
-    expect((await ed.c.get(`/api/tasks/${t}`)).status).toBe(200);
+    expect((await db.task.findUniqueOrThrow({ where: { id: t } })).deletedAt).not.toBeNull();
+    const row = await db.actionLog.findUniqueOrThrow({ where: { id } });
+    expect(row.undoneAt).toBeNull();
+    expect(await db.actionLog.count({ where: { action: "undo", targetId: t } })).toBe(0);
+  });
+
+  it("lets a Leader or an Admin undo a delete like a restore, logs it, and says notices were sent (SHO-BUG-8 AC2)", async () => {
+    const sa = await superAdmin();
+    const lead = await account("lead");
+    const ed = await account("editor");
+    const p = await project(lead, lead, [{ who: ed }]);
+    for (const who of [lead, sa]) {
+      const t = await task(lead, p.id, { title: "Oops", assigneeId: ed.id });
+      const del = await ed.c.del(`/api/tasks/${t}`);
+      expect(del.headers.get("x-undo-notified")).toBe("1");
+      expect((await ed.c.get(`/api/tasks/${t}`)).status).toBe(404);
+      const id = del.headers.get("x-undo-id")!;
+      const u = await who.c.post(`/api/actions/${id}/undo`);
+      expect(u.status, JSON.stringify(u.json)).toBe(200);
+      expect(u.json.noticesSent).toBe(true);
+      expect((await ed.c.get(`/api/tasks/${t}`)).status).toBe(200);
+      expect((await db.actionLog.findUniqueOrThrow({ where: { id } })).undoneById).toBe(who.id);
+      const log = await db.actionLog.findFirst({ where: { action: "undo", targetId: t, actorId: who.id } });
+      expect(log?.beforeState).toMatchObject({ undoes: id, action: "task.deleted" });
+      expect((await activity(lead, p.id))[0].what).toMatch(/undid "task deleted"/);
+    }
   });
 
   it("undoes complete (with subtasks), move, assign and collaborators", async () => {

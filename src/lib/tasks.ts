@@ -441,7 +441,7 @@ export async function deleteTask(user: Actor, id: string, o: { byUndo?: boolean 
 
 export async function restoreTask(user: Actor, id: string, confirmParent = false, o: { byUndo?: boolean } = {}) {
   const { t, a } = await loadTask(user, id, { write: true, deleted: true });
-  if (!o.byUndo) requireManage(a); // SHO-US-3.3 AC1: only the Leader or an Admin restores from Trash
+  requireManage(a); // SHO-US-3.3 AC1: only the Leader or an Admin restores from Trash
   if (!t.deletedAt) throw new ApiError(409, "This task is not in Trash.");
   const parent = t.parentId ? await db.task.findUnique({ where: { id: t.parentId } }) : null;
   const parentDeleted = !!parent?.deletedAt;
