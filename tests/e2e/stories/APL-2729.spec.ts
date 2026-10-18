@@ -1,7 +1,7 @@
 // APL-2729. Due-date reminders must not name a deal the reader may not see.
 // workers=1. ZZ-TEST deals and nakul17+ aliases. The reminders job runs only on a local server.
 // A remote host is refused so a shared staging database never gets a reminder sweep.
-// gateFile() skips this file in beforeAll when SHO_QA_PASS is unset.
+// gateFile() skips this file in beforeAll when SHO_QA_PASS is unset. Playwright then exits 0.
 // Pam qa:TC: c2ee0001 (unset, same as all here), c2a11001 (all), c1a1d001 (admins member),
 // c2ad0001 (admins admin), c1ff0001 (off), c30b5001 (ops check).
 // The stored-row check for every mode, including off, is tests/jobs-reminders-crm.test.ts on the product branch.
