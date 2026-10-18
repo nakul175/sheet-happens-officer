@@ -75,7 +75,7 @@ test("AC3: deactivating a person blocks sign-in and keeps the record; reactivati
   expect(back.user.id).toBe(member.user.id);
 });
 
-test("AC4: open tasks move to a chosen receiver, and a receiver outside the project is refused", async ({ admin, browser, anon, later }) => {
+test("AC4: open tasks move to a chosen receiver, and a receiver outside the project falls back to the Leader", async ({ admin, browser, anon, later }) => {
   const leaver = await verifiedUser(browser, anon.request, "2466", "ac4-leave");
   const taker = await verifiedUser(browser, anon.request, "2466", "ac4-take");
   const outsider = await verifiedUser(browser, anon.request, "2466", "ac4-out");
@@ -102,11 +102,15 @@ test("AC4: open tasks move to a chosen receiver, and a receiver outside the proj
   later(() => deactivate(admin.api, other.user.id as string));
   expect((await admin.api.post(`/api/projects/${second.id}/members`, { userId: other.user.id, role: "EDITOR" })).status).toBe(201);
   const stayed = await taskFor(admin.api, second.id, other.user.id as string, zz("stays"));
-  const refused = await admin.api.post(`/api/team/${other.user.id}/deactivate`, { reassign: outsider.user.id });
-  // AC4: a receiver who is not on that task's project is refused, and the person stays active.
-  expect(refused.status, "someone not on the project is refused").toBeGreaterThanOrEqual(400);
-  expect((await personByEmail(admin.api, other.email))?.status).toBe("ACTIVE");
-  expect((await admin.api.get(`/api/tasks/${stayed}`)).json.task.assignee.id).toBe(other.user.id);
+  const fell = await admin.api.post(`/api/team/${other.user.id}/deactivate`, { reassign: outsider.user.id });
+  expect(fell.status, JSON.stringify(fell.json)).toBe(200);
+  expect(fell.json.fellBack).toContain(second.name);
+  expect((await personByEmail(admin.api, other.email))?.status).toBe("DEACTIVATED");
+  const assigneeId = (await admin.api.get(`/api/tasks/${stayed}`)).json.task.assignee.id as string;
+  expect(assigneeId, "the open task goes to the project Leader").toBe(admin.user.id);
+  expect(assigneeId).not.toBe(outsider.user.id);
+  const members = (await admin.api.get(`/api/projects/${second.id}`)).json.project.members as { userId: string; role: string }[];
+  expect(["LEADER", "EDITOR"]).toContain(members.find((member) => member.userId === assigneeId)?.role);
 });
 
 test("AC5: the only Super Admin cannot be demoted or deactivated", async ({ admin }) => {
