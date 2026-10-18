@@ -1,6 +1,6 @@
 // Shared setup for the APL-2505 and APL-2536–APL-2540 story specs.
 // Credentials stay in the environment: callers use the admin / member fixtures, which sign in with login().
-import { expect, zz, type Api } from "../support";
+import { expect, zz, type Api, type Json } from "../support";
 import { getTask, ymd, type Who } from "../g2";
 import { raw } from "./jim-http";
 import type { Page } from "@playwright/test";
@@ -55,7 +55,7 @@ export async function createDeal(who: Who, later: Later, body: Record<string, un
 export async function projectOf(who: Who, id: string) {
   const r = await who.api.get(`/api/projects/${id}`);
   expect(r.status, JSON.stringify(r.json)).toBe(200);
-  return r.json.project as Record<string, any>;
+  return r.json.project as Json;
 }
 
 /** PATCH a task on the version it is at now, and keep the Undo headers the Activity button would use. */
@@ -87,5 +87,5 @@ export async function audit(who: Who, event: string, personId: string) {
 export async function orgPage(api: Api, id: string) {
   const r = await api.get(`/api/orgs/${id}`);
   expect(r.status, JSON.stringify(r.json)).toBe(200);
-  return r.json.organisation as Record<string, any>;
+  return r.json.organisation as Json;
 }

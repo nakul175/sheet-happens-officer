@@ -2,9 +2,9 @@
 // Acceptance criteria: AC1 assigned, AC2 own action, AC3 removed (grouped when 5 or more), AC4 role change, AC5 deactivation hand-over.
 // Needs the optional plain Member account (SHO_MEMBER_EMAIL / SHO_MEMBER_PASS): every notice goes to a second person.
 // Data: every project and task is named "ZZ-TEST ..."; projects are archived afterwards.
-import { test, expect, zz } from "../support";
+import { test, expect, zz, type Who } from "../support";
 
-async function withMember(admin: any, member: any, label: string, later: (f: () => Promise<unknown>) => void) {
+async function withMember(admin: Who, member: Who, label: string, later: (f: () => Promise<unknown>) => void) {
   const r = await admin.api.post("/api/projects", { name: zz(label), leaderId: admin.user.id });
   expect(r.status, JSON.stringify(r.json)).toBe(201);
   const p = r.json.project.id as string;
@@ -13,12 +13,12 @@ async function withMember(admin: any, member: any, label: string, later: (f: () 
   later(() => admin.api.del(`/api/projects/${p}/members/${member.user.id}?handoverTo=${admin.user.id}`));
   return { id: p, name: zz(label) };
 }
-const mk = async (who: any, p: string, title: string, extra: Record<string, unknown> = {}) => {
+const mk = async (who: Who, p: string, title: string, extra: Record<string, unknown> = {}) => {
   const r = await who.api.post(`/api/projects/${p}/tasks`, { title, ...extra });
   expect(r.status, JSON.stringify(r.json)).toBe(201);
   return r.json.task.id as string;
 };
-const texts = async (who: any) => ((await who.api.get("/api/notifications?limit=200")).json.items as { text: string }[]).map((n) => n.text);
+const texts = async (who: Who) => ((await who.api.get("/api/notifications?limit=200")).json.items as { text: string }[]).map((n) => n.text);
 
 test("AC1: being assigned a task gives one notice naming the task and who assigned it", async ({ admin, member, later }) => {
   const p = await withMember(admin, member, "assign-notice", later);

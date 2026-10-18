@@ -1,12 +1,12 @@
 // SHO-BUG-5 A deal's first next step is created without a task.created row or a TASK_ASSIGNED notice  (Linear APL-2612)
 // No numbered ACs in the issue; follows its "Expected" and "Test" paragraphs.
-import { test, expect, zz } from "../support";
+import { test, expect, zz, type Json, type Who } from "../support";
 
-async function newDeal(admin: any, leaderId: string, later: (f: () => Promise<unknown>) => void, label: string) {
+async function newDeal(admin: Who, leaderId: string, later: (f: () => Promise<unknown>) => void, label: string) {
   const org = await admin.api.post("/api/orgs", { name: zz(`org ${label}`) });
   expect(org.status).toBe(201);
   later(() => admin.api.post(`/api/orgs/${org.json.organisation.id}/archive`, { archive: true }));
-  const pro = ((await admin.api.get("/api/deals/pipelines")).json.pipelines as any[]).find((p) => p.key === "DEAL_PROACTIVE");
+  const pro = ((await admin.api.get("/api/deals/pipelines")).json.pipelines as Json[]).find((p) => p.key === "DEAL_PROACTIVE")!;
   const step = zz(`first step ${label}`);
   const d = await admin.api.post("/api/deals", {
     name: zz(`deal ${label}`), organisationId: org.json.organisation.id, pipelineId: pro.id, leaderId,

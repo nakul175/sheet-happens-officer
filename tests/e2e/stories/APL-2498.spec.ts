@@ -2,11 +2,11 @@
 // Acceptance criteria: AC1 drag saves the Section, AC2 Viewer cannot drag, AC3 four columns fit at 1280 px,
 // AC4 order by due date, AC5 Done column collapsed to 10, AC6 completion rules and archived project.
 // Data: every project and task is named "ZZ-TEST ..."; projects are archived afterwards.
-import { test, expect, zz } from "../support";
+import { test, expect, zz, type Who, type Page } from "../support";
 
 const ist = (d: number) => new Date(Date.now() + 5.5 * 3600e3 + d * 864e5).toISOString().slice(0, 10);
 
-async function proj(admin: any, label: string, later: (f: () => Promise<unknown>) => void) {
+async function proj(admin: Who, label: string, later: (f: () => Promise<unknown>) => void) {
   const r = await admin.api.post("/api/projects", { name: zz(label), leaderId: admin.user.id });
   expect(r.status, JSON.stringify(r.json)).toBe(201);
   const id = r.json.project.id as string;
@@ -14,12 +14,12 @@ async function proj(admin: any, label: string, later: (f: () => Promise<unknown>
   const s = (await admin.api.get(`/api/projects/${id}`)).json.project.sections as { id: string; name: string; isDone: boolean }[];
   return { id, todo: s[0].id, doing: s[1].id, done: s.find((x) => x.isDone)!.id };
 }
-const mk = async (admin: any, p: string, title: string, extra: Record<string, unknown> = {}) => {
+const mk = async (admin: Who, p: string, title: string, extra: Record<string, unknown> = {}) => {
   const r = await admin.api.post(`/api/projects/${p}/tasks`, { title, ...extra });
   expect(r.status, JSON.stringify(r.json)).toBe(201);
   return r.json.task.id as string;
 };
-const board = async (page: any, id: string) => {
+const board = async (page: Page, id: string) => {
   await page.goto(`/projects/${id}`);
   // An open concierge (left expanded by earlier chats) can sit over the tabs and lower cards: fold it first.
   const fold = page.locator('aside[aria-label="Concierge"]').getByRole("button", { name: "Collapse" });
