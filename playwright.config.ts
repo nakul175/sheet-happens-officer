@@ -8,7 +8,9 @@ assertProdHostGuard(process.argv, process.env);
 const baseURL = process.env.BASE_URL || process.env.TASKBOARD_URL || "http://127.0.0.1:3100";
 
 export default defineConfig({
-  testDir: "./tests",
+  // Story files under tests/e2e are Vitest specs. Loading one here throws while
+  // Playwright lists tests, and the production smoke then rolls the deploy back.
+  testDir: "./tests/smoke",
   testMatch: "**/*.spec.ts",
   timeout: 60_000,
   reporter: "list",
