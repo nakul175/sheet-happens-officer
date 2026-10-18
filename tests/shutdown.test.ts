@@ -174,8 +174,8 @@ describe("SIGTERM drain", () => {
     }
   });
 
-  it("waits out the keep-alive grace, then closes an idle socket", async () => {
-    const proc = startChild({ DELAY_MS: "0", DRAIN_MS: "8000", KEEPALIVE_MS: "400" });
+  it("closes an idle keep-alive socket without waiting out the keep-alive timeout", async () => {
+    const proc = startChild({ DELAY_MS: "0", DRAIN_MS: "8000", KEEPALIVE_MS: "5000" });
     try {
       const ready = await proc.waitFor(/ready (\d+)/);
       const port = Number(ready[1]);
@@ -193,11 +193,11 @@ describe("SIGTERM drain", () => {
         const result = await proc.exited;
         expect(result.code).toBe(0);
         const elapsed = Date.now() - started;
-        // Grace is the keep-alive timeout (400ms). Idle sockets are closed after that,
-        // so the process does not sit for a second full timeout.
-        expect(elapsed).toBeGreaterThanOrEqual(350);
-        expect(elapsed).toBeLessThan(2000);
+        // The socket already finished a response. It is idle, so the drain closes it
+        // and exits instead of sitting for keepAliveTimeout (5s).
+        expect(elapsed).toBeLessThan(1500);
         expect(result.stdout).toContain(CLEAN_LOG);
+        expect(result.stdout).not.toContain(TIMEOUT_LOG);
       } finally {
         agent.destroy();
       }

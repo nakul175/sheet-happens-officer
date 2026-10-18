@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "start": "next start",
+    "start": "node --import tsx server.js",
     "lint": "eslint",
     "test": "vitest run",
     "test:viewport": "vitest run -c vitest.viewport.config.mts",

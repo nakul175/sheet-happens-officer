@@ -30,6 +30,7 @@ Settings (environment variables):
 | `RESEND_API_KEY`, `EMAIL_FROM` | Email sending; without a key, mail goes to the outbox folder (never in production) |
 | `JOB_SECRET` | Bearer token for `POST /api/jobs/<name>` (at least 16 characters) |
 | `SHUTDOWN_DRAIN_MS` | How long SIGTERM waits for in-flight requests before exiting (integer milliseconds, 10000–25000; default 15000). Sits under systemd's 90s stop grace |
+| `SHO_BIND_HOST`, `PORT` | Address `server.js` listens on (default `127.0.0.1:3000`, same as the old `next start -H 127.0.0.1 -p 3000`) |
 
 ## Test
 
@@ -47,9 +48,14 @@ One DigitalOcean droplet (Ubuntu 24.04, BLR1) runs the app behind Caddy; Digital
 Postgres holds the data. Every push to `main` runs `.github/workflows/deploy.yml`: lint, build
 and tests against a throwaway Postgres, then an rsync of the source to
 `/opt/sho/releases/<sha>` and `deploy/release.sh`, which installs, migrates, builds, switches
-the `current` symlink, restarts the service and checks `/api/health`. That restart
-sends SIGTERM; the app stops accepting connections, finishes in-flight requests,
-disconnects Prisma, and exits. A failed health check puts the previous release back
+the `current` symlink, restarts the service and checks `/api/health`. The service
+runs `node server.js` (see `deploy/cloud-init.yaml`). That restart sends SIGTERM;
+the app stops accepting connections, finishes in-flight requests, disconnects
+Prisma, and exits. A droplet built before this change still has
+`ExecStart=... next start` until someone with root replaces that line with
+`/usr/bin/node --import tsx server.js` and runs `systemctl daemon-reload` —
+cloud-init does not re-apply, and the deploy user cannot edit the unit. A failed
+health check puts the previous release back
 and fails the run (GitHub emails the person who pushed).
 
 One-time setup, in order:

@@ -1,16 +1,24 @@
-// SIGTERM is what systemd sends on `systemctl restart sho` (see deploy/cloud-init.yaml).
-// `next start` already closes its HTTP server on that signal, then exits 143 with no
-// deadline and without disconnecting Prisma. systemd's TimeoutStopSec is unset, so the
-// platform SIGKILL arrives at the 90s default. This handler owns SIGTERM instead.
+// SIGTERM is what systemd sends on `systemctl restart sho`.
 //
-// Node's http.Server.close() calls closeIdleConnections() immediately. That destroys
-// accepted sockets whose request has not been parsed yet, so a burst of in-flight
-// requests dies with no response while the server still looks idle. Stop accepting
-// without that sweep, count requests from start to finish, wait until none are active
-// plus one keep-alive timeout (so those sockets can be parsed and handled), and only
-// then close idle connections. Everything stays inside SHUTDOWN_DRAIN_MS.
+// `next start` (node_modules/next/dist/server/lib/start-server.js) registers its own
+// SIGTERM handler in the HTTP server's `listening` callback, before request handlers
+// and before instrumentation.register(). That handler calls server.close() — Node 22's
+// http.Server.close() runs closeIdleConnections(), which destroys accepted sockets that
+// do not yet have an in-progress response — then process.exit(143). NEXT_MANUAL_SIG_HANDLE
+// skips that registration, but it is read in the listening callback. Setting it from
+// instrumentation is too late, and in production NextServer.prepare() does not run
+// register() at all; the hook runs later, inside the first RouteModule.prepare, after
+// the `request` event. A counter attached there never sees sockets that are accepted
+// but not yet parsed, so the process can log a clean drain while those sockets are reset.
+//
+// Production therefore listens from server.js, which sets NEXT_MANUAL_SIG_HANDLE and
+// passes the http.Server it created. On SIGTERM this module unlistens first (without
+// the idle sweep), then waits for every accepted socket that has not finished a
+// response, then closes only sockets that are idle after a response. The whole wait
+// stays inside SHUTDOWN_DRAIN_MS.
 
 import http from "node:http";
+import type net from "node:net";
 
 export const CLEAN_LOG = "graceful shutdown: drained in-flight requests";
 export const TIMEOUT_LOG = "graceful shutdown: drain timed out";
@@ -19,25 +27,33 @@ export const TIMEOUT_LOG = "graceful shutdown: drain timed out";
 export const DEFAULT_DRAIN_MS = 15_000;
 const MIN_DRAIN_MS = 10_000;
 const MAX_DRAIN_MS = 25_000;
-/** Used when the server has no positive keepAliveTimeout (Node's own default is 5s). */
-const DEFAULT_GRACE_MS = 5_000;
 
-type ShutdownState = { installed: boolean; shuttingDown: boolean; active: number; dropped: number };
+type SocketPhase = "pending" | "handling" | "idle";
+type Tracked = { phase: SocketPhase };
+
+type ShutdownState = {
+  installed: boolean;
+  shuttingDown: boolean;
+  dropped: number;
+  sockets: Map<net.Socket, Tracked>;
+};
 
 const state: ShutdownState = ((globalThis as { __shoShutdown?: ShutdownState }).__shoShutdown ??= {
   installed: false,
   shuttingDown: false,
-  active: 0,
   dropped: 0,
+  sockets: new Map(),
 });
 
 export type ShutdownOptions = {
-  /** Override SHUTDOWN_DRAIN_MS. Tests pass a short budget here. */
+  /** Override SHUTDOWN_DRAIN_MS. Tests and server.js (when the slow-request seam is on) pass this. */
   drainMs?: number;
-  /** Defaults to every listening HTTP server in this process. */
+  /** The listening server. server.js passes the one it created. Otherwise every listening HTTP server. */
   servers?: http.Server[];
   /** Runs after the drain attempt and before the process exits. */
   disconnect?: () => Promise<void>;
+  /** Runs synchronously after the listening socket is closed. Tests wait on this before probing. */
+  onStoppedAccepting?: () => void;
   log?: (line: string) => void;
   exit?: (code: number) => void;
 };
@@ -51,10 +67,19 @@ export function shutdownDrainMs(env?: { SHUTDOWN_DRAIN_MS?: string }): number {
   return n;
 }
 
+function isHttpServer(handle: unknown): handle is http.Server {
+  if (handle instanceof http.Server) return true;
+  if (handle == null || typeof handle !== "object") return false;
+  const server = handle as http.Server;
+  // instrumentation's bundled `http` can be a different module instance than the one
+  // start-server.js used, so instanceof misses the real listener.
+  return typeof server.closeIdleConnections === "function" && typeof server.close === "function" && typeof server.on === "function";
+}
+
 function listeningHttpServers(): http.Server[] {
   const getHandles = (process as NodeJS.Process & { _getActiveHandles?: () => unknown[] })._getActiveHandles;
   if (typeof getHandles !== "function") return [];
-  return getHandles.call(process).filter((handle): handle is http.Server => handle instanceof http.Server && handle.listening);
+  return getHandles.call(process).filter((handle): handle is http.Server => isHttpServer(handle) && handle.listening);
 }
 
 async function disconnectPrisma(): Promise<void> {
@@ -66,28 +91,42 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-/** How long to leave accepted-but-unparsed sockets alone: the server's keep-alive timeout. */
-function graceMs(servers: http.Server[]): number {
-  let grace = 0;
-  for (const server of servers) {
-    if (typeof server.keepAliveTimeout === "number" && server.keepAliveTimeout > grace) grace = server.keepAliveTimeout;
-  }
-  return grace > 0 ? grace : DEFAULT_GRACE_MS;
+function track(socket: net.Socket): Tracked {
+  const existing = state.sockets.get(socket);
+  if (existing) return existing;
+  const tracked: Tracked = { phase: "pending" };
+  state.sockets.set(socket, tracked);
+  socket.on("close", () => {
+    // Idle means a response finished and the socket was only kept open for keep-alive.
+    // Closing those at the end of the drain is not a dropped request.
+    if (state.shuttingDown && tracked.phase !== "idle") state.dropped++;
+    state.sockets.delete(socket);
+  });
+  return tracked;
 }
 
 function watchServer(server: http.Server) {
-  // Runs before the app handler, so a synchronous res.end() is still observed.
-  server.prependListener("request", (_req, res) => {
-    state.active++;
-    let finished = false;
+  server.on("connection", (socket) => {
+    track(socket);
+  });
+  // If a request is observed without a connection event (already-accepted socket),
+  // count it from here. prepend so a synchronous res.end() is still observed.
+  server.prependListener("request", (req, res) => {
+    const tracked = track(req.socket);
+    tracked.phase = "handling";
     res.once("finish", () => {
-      finished = true;
-    });
-    res.once("close", () => {
-      state.active = Math.max(0, state.active - 1);
-      if (!finished) state.dropped++;
+      tracked.phase = "idle";
     });
   });
+}
+
+/** Accepted, mid-response, or holding bytes of a request that has not finished. */
+function inFlight(): number {
+  let n = 0;
+  for (const [socket, tracked] of state.sockets) {
+    if (tracked.phase !== "idle" || socket.readableLength > 0) n++;
+  }
+  return n;
 }
 
 /**
@@ -116,20 +155,13 @@ function closeIdle(server: http.Server) {
   }
 }
 
-/** True when active requests have stayed at 0 for the grace period and none were dropped. */
-async function waitForRequests(grace: number, deadline: number): Promise<boolean> {
-  let quietAt: number | null = null;
+/** True once nothing accepted is still waiting on a response, and none was dropped. */
+async function waitForSockets(deadline: number): Promise<boolean> {
   while (Date.now() < deadline) {
-    if (state.active === 0) {
-      quietAt ??= Date.now();
-      if (Date.now() - quietAt >= grace) return state.dropped === 0;
-    } else {
-      quietAt = null;
-    }
+    if (inFlight() === 0) return state.dropped === 0;
     const remaining = deadline - Date.now();
     if (remaining <= 0) break;
-    const untilQuiet = quietAt == null ? 15 : Math.max(1, grace - (Date.now() - quietAt));
-    await sleep(Math.min(15, remaining, untilQuiet));
+    await sleep(Math.min(15, remaining));
   }
   return false;
 }
@@ -151,12 +183,14 @@ async function onSigterm(servers: http.Server[], options: ShutdownOptions) {
   state.dropped = 0;
   const drainMs = options.drainMs != null && Number.isFinite(options.drainMs) && options.drainMs > 0 ? options.drainMs : shutdownDrainMs();
   const deadline = Date.now() + drainMs;
+  // Unlisten before counting so a connection that arrives after SIGTERM is not served.
   for (const server of servers) stopAccepting(server);
-  const quiet = await waitForRequests(graceMs(servers), deadline);
+  options.onStoppedAccepting?.();
+  const quiet = await waitForSockets(deadline);
   for (const server of servers) closeIdle(server);
   // closeIdleConnections destroys sockets on a later turn; count those drops too.
   await sleep(0);
-  const clean = quiet && state.dropped === 0 && state.active === 0;
+  const clean = quiet && state.dropped === 0 && inFlight() === 0;
   try {
     await (options.disconnect ?? disconnectPrisma)();
   } catch (err) {
@@ -167,15 +201,14 @@ async function onSigterm(servers: http.Server[], options: ShutdownOptions) {
 }
 
 /**
- * Own SIGTERM for this process. Call once the HTTP server is already listening
- * (Next.js runs `instrumentation.register` from the server's listening callback).
- * No-ops when no listening server can be found, so a missed lookup does not
- * exit out from under open requests.
+ * Own SIGTERM for this process. server.js calls this with the http.Server it
+ * listens on, before accept. The instrumentation hook is only a fallback for a
+ * process that still goes through `next start`.
  */
 export function installGracefulShutdown(options: ShutdownOptions = {}) {
   if (state.installed) return;
   const servers = options.servers ?? listeningHttpServers();
-  if (!options.servers && servers.length === 0) {
+  if (servers.length === 0) {
     console.error("graceful shutdown: no listening HTTP server found; SIGTERM handling unchanged");
     return;
   }

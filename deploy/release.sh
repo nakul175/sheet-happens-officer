@@ -64,6 +64,9 @@ fi
 
 PREV="$(readlink -f "$CUR" 2>/dev/null || true)"
 switch "$REL"
+if ! grep -q 'server\.js' /etc/systemd/system/sho.service 2>/dev/null; then
+  log "WARNING: sho.service ExecStart is still next start. SIGTERM drain runs only from server.js. Replace ExecStart with '/usr/bin/node --import tsx server.js' and daemon-reload (cloud-init does not re-apply; the deploy user cannot edit the unit)."
+fi
 log "restarting the app"
 sudo systemctl restart sho
 if healthy; then

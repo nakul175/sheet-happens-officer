@@ -1,5 +1,5 @@
-// Fixture process for tests/shutdown.test.ts. Listens, then installs the same
-// SIGTERM hook production installs from src/instrumentation.ts.
+// Fixture process for tests/shutdown.test.ts. Listens with its own http.Server
+// and installs the same SIGTERM hook server.js installs on Next's listener.
 import http from "node:http";
 import { installGracefulShutdown } from "../src/lib/shutdown";
 
@@ -14,8 +14,6 @@ const server = http.createServer(async (req, res) => {
   }
   res.end("done");
 });
-// The drain waits this long after the last request so accepted-but-unparsed sockets
-// can still be handled. Tests pass a short value; production uses Node's 5s default.
 server.keepAliveTimeout = Number.isFinite(keepAliveMs) && keepAliveMs > 0 ? keepAliveMs : 5000;
 
 server.listen(0, "127.0.0.1", () => {
