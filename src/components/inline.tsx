@@ -89,9 +89,10 @@ export function InlineCells({ t, people, editable, onEdit }: { t: Cell; people: 
   const today = todayIST();
   const pick = (c: Change, what: string) => { close(); onEdit(t, c, what); };
   const stop = (e: React.SyntheticEvent) => e.stopPropagation();
+  // APL-2673: ic-gap and ic-hit pick up the phone hit-area gaps in app.css.
   const cell = (k: "who" | "due" | "pri", text: React.ReactNode, cls: string | undefined, aria: string) => editable ? (
-    <span className="ic-wrap" onClick={stop}>
-      <button ref={refs[k]} type="button" className={`ic-cell${cls ? ` ${cls}` : ""}`} aria-haspopup="dialog" aria-expanded={open === k} aria-label={aria}
+    <span className="ic-wrap ic-gap" onClick={stop}>
+      <button ref={refs[k]} type="button" className={`ic-cell ic-hit${cls ? ` ${cls}` : ""}`} aria-haspopup="dialog" aria-expanded={open === k} aria-label={aria}
         onClick={(e) => { e.stopPropagation(); setOpen(open === k ? null : k); }}>{text}</button>
       {open === k && k === "who" && (
         <Pop label="Choose assignee" onClose={close}>
