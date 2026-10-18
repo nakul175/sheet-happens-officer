@@ -28,7 +28,8 @@ export async function api<T = Record<string, any>>(method: string, path: string,
 export const isNetworkFailure = (status: number) => status === 0 || status >= 500;
 export const COULD_NOT_REACH = "Could not reach the server.";
 
-/** GET a path; `reload()` fetches again. `data` stays on screen while reloading. */
+/** GET a path; `reload()` fetches again. `data` stays on screen while reloading.
+ * `failed` is true only once an answer came back as a network failure: status starts at 0, so an in-flight request must never read as one. */
 export function useGet<T = Record<string, any>>(path: string | null) { // eslint-disable-line @typescript-eslint/no-explicit-any
   const [state, setState] = useState<{ data: T | null; error: string | null; status: number; loading: boolean }>({ data: null, error: null, status: 0, loading: true });
   const [tick, setTick] = useState(0);
@@ -43,7 +44,7 @@ export function useGet<T = Record<string, any>>(path: string | null) { // eslint
     });
   }, [path, tick]);
   const reload = useCallback(() => { setState((p) => (p.data ? p : { ...p, loading: true, error: null })); setTick((n) => n + 1); }, []);
-  return { ...state, reload };
+  return { ...state, failed: !state.loading && isNetworkFailure(state.status), reload };
 }
 
 export const initials = (name: string) =>

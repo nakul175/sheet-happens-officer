@@ -1,12 +1,9 @@
 // SHO-BUG Hide Undo toast for Editors after delete (Linear APL-2649, PR #14; follow-up to APL-2640). Acceptance criteria AC1 and AC2.
 // The Super Admin acts as Leader and Admin; the plain Member (SHO_MEMBER_*) is the Editor. Projects are ZZ-TEST and archived afterwards.
-// The Editor check runs whenever PR #14 is live on staging (tests/e2e/helpers/jim-gate.ts) and skips otherwise.
+// An Editor's delete does not carry an Undo id, so the toast is not raised.
 import { test, expect } from "../support";
 import { newProject, newTask, type Who } from "../g2";
 import { deleteTask, undoToast } from "../helpers/jim-http";
-import { notLive, prLive } from "../helpers/jim-gate";
-
-const WHY = "an Editor's delete still raises the Undo toast without it.";
 
 /** Open the task on its project page and move it to Trash through the task's own dialog. */
 async function trashFromScreen(who: Who, projectId: string, taskId: string) {
@@ -18,8 +15,6 @@ async function trashFromScreen(who: Who, projectId: string, taskId: string) {
 
 test.describe("APL-2649", () => {
   test("AC1: an Editor who deletes a task does not see the Undo toast", async ({ admin, member, later }) => {
-    const gate = await prLive(14, admin, member, later);
-    test.skip(!gate.deployed, notLive(gate, WHY));
     const p = await newProject(admin, later, { label: "2649 editor", members: [{ who: member, role: "EDITOR" }] });
     const t = await newTask(admin, p.id);
     await trashFromScreen(member, p.id, t);

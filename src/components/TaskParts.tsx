@@ -5,16 +5,19 @@ import "./avatars.css";
 import { api } from "@/components/api";
 import { Confirm } from "@/components/ui";
 
-/** Tick circle. Calls complete (or reopen) and asks before completing open subtasks. */
-export function Tick({ id, title, done, allowed, onDone }: { id: string; title: string; done: boolean; allowed: boolean; onDone: () => void }) {
+/** Tick circle. Calls complete (or reopen) on the version the row shows, and asks before completing open subtasks. */
+export function Tick({ id, title, done, allowed, version, onDone, onStale }: {
+  id: string; title: string; done: boolean; allowed: boolean; version: string; onDone: () => void; onStale?: () => void;
+}) {
   const [ask, setAsk] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   async function go(all = false) {
     setBusy(true);
-    const r = await api("POST", `/api/tasks/${id}/${done ? "reopen" : "complete"}`, done ? {} : { completeAll: all });
+    const r = await api("POST", `/api/tasks/${id}/${done ? "reopen" : "complete"}`, done ? {} : { completeAll: all, expectedUpdatedAt: version });
     setBusy(false);
     if (r.ok) { setAsk(null); setErr(null); onDone(); }
+    else if (r.status === 409 && r.data.stale) { setAsk(null); setErr(r.error ?? "This task changed while you were editing it."); onStale?.(); }
     else if (r.status === 409 && r.data.needsConfirm === "open_subtasks") setAsk(r.data.openSubtasks as number);
     else setErr(r.error ?? "Could not update the task.");
   }

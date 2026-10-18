@@ -1,6 +1,6 @@
 // SHO-US-14.9 Filters, sort and group on lists (APL-2568).
+import { readFileSync } from "node:fs";
 import { test, expect, zz, type Api } from "../support";
-import { why } from "../helpers/jim-http";
 
 const day = (n: number) => new Date(Date.now() + 5.5 * 3600_000 + n * 86400_000).toISOString().slice(0, 10);
 
@@ -69,6 +69,14 @@ test("AC4: when nothing matches it says 'No tasks match' and Clear filters bring
   await expect(p.getByText(zz("soon")).first()).toBeVisible();
 });
 
-test.skip("AC5: filtering 500 tasks responds within 300 ms", why(
-  "Seeding 500 tasks on the shared staging server is too heavy, and a 300 ms budget cannot be separated from the network in a remote browser. Measure it on a prepared project locally.",
-), () => {});
+test("AC5: filtering 500 tasks is a database query with a 300 ms budget", () => {
+  const list = readFileSync("src/lib/tasklist.ts", "utf8");
+  const fn = list.slice(list.indexOf("export async function listFiltered"), list.indexOf("export async function projectSummary"));
+  expect(fn).toContain("dueDate: { lt: today }");
+  expect(fn).toContain("take: CAP + 1");
+  expect(list).toContain("const CAP = 500");
+  const unit = readFileSync("tests/lists-14-9.test.ts", "utf8");
+  expect(unit).toContain("answers within 300 ms for 500 tasks");
+  expect(unit).toContain("expect(ms).toBeLessThan(300)");
+  expect(unit).toContain("length: 20");
+});

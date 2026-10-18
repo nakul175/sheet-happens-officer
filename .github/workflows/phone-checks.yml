@@ -3,18 +3,20 @@
 # Uses its own throw-away Postgres and invented accounts; it never reaches the production database or any real data.
 name: Phone checks
 
+# Push only on main and qa/story-e2e. Other branches run through pull_request, so a push to a PR branch does not start a second run.
 on:
   pull_request:
   push:
-    branches-ignore: [main]
+    branches: [main, qa/story-e2e]
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: phone-checks-${{ github.ref }}
-  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  # A run for refs/heads/main is never cancelled. Every other ref cancels the previous run in this group.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   viewport:
@@ -36,6 +38,7 @@ jobs:
           --health-retries 12
     env:
       DATABASE_URL: postgresql://sho:sho@localhost:5432/sho_viewport?schema=public
+      DIRECT_DATABASE_URL: postgresql://sho:sho@localhost:5432/sho_viewport?schema=public
       EMAIL_OUTBOX_DIR: ${{ github.workspace }}/.outbox-ci
       SUPER_ADMIN_EMAILS: root.test@aplyd.com
       APP_URL: http://localhost:3100

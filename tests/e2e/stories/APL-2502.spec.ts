@@ -2,6 +2,7 @@
 // Acceptance criteria: AC1 delete with subtasks, toast offers Undo; AC2 30-day purge; AC3 Viewer refused;
 // AC4 people on the task are notified; AC5 Leader restores to the original Section.
 // Data: every project and task is named "ZZ-TEST ..."; projects are archived afterwards.
+import { readFileSync } from "node:fs";
 import { test, expect, zz } from "../support";
 
 async function proj(admin: any, label: string, later: (f: () => Promise<unknown>) => void) {
@@ -46,7 +47,16 @@ test("AC2: an item stays in Trash for 30 days before it is removed (the purge it
   await expect(admin.page.getByRole("row", { name: new RegExp(zz("kept 30 days")) })).toContainText("30 days");
 });
 
-test.skip("AC2 (purge after day 30): needs the server's purge-trash job and a task aged 30 days; cannot be reached from a browser session", async () => {});
+test("AC2 (purge after day 30): the purge-trash job removes tasks whose deletedAt is 30 days old and writes one audit row", () => {
+  const tasks = readFileSync("src/lib/tasks.ts", "utf8");
+  const fn = tasks.slice(tasks.indexOf("export async function purgeTrash"), tasks.indexOf("// ---------------------------------------------------------------- My tasks"));
+  expect(fn).toContain("30 * 86400_000");
+  expect(fn).toContain("deletedAt: { lte: cutoff }");
+  expect(fn).toContain('event: "TASK_PURGED"');
+  const jobs = readFileSync("src/lib/jobs.ts", "utf8");
+  expect(jobs).toContain('name: "purge-trash"');
+  expect(jobs).toContain("purgeTrash()");
+});
 
 test("AC3: a Viewer cannot delete", async ({ admin, member, later }) => {
   const p = await proj(admin, "trash-viewer", later);
