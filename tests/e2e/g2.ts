@@ -1,8 +1,7 @@
 // Helpers shared by the E3 (projects) and E4 (tasks) story specs. Credentials come from the environment through ../support.
-import { expect, zz, type Api } from "./support";
-import type { Page } from "@playwright/test";
+import { expect, zz, type Json, type Who } from "./support";
 
-export type Who = { page: Page; api: Api; user: Record<string, any> };
+export type { Who };
 
 /** A date in India time, `off` days from today, as YYYY-MM-DD. */
 export const ymd = (off: number) => new Date(Date.now() + 5.5 * 3600_000 + off * 86400_000).toISOString().slice(0, 10);
@@ -40,7 +39,7 @@ export async function newTask(who: Who, projectId: string, body: Record<string, 
   return r.json.task.id as string;
 }
 
-export const getTask = async (who: Who, id: string) => (await who.api.get(`/api/tasks/${id}`)).json.task as Record<string, any>;
+export const getTask = async (who: Who, id: string) => (await who.api.get(`/api/tasks/${id}`)).json.task as Json;
 
 let ghosts = 0;
 /**
