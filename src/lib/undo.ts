@@ -2,7 +2,7 @@
 // SHO-US-6.4: Undo from the stored before-state, with a conflict warning and "Undo anyway".
 import { db } from "@/lib/db";
 import { ApiError, notFound } from "@/lib/http";
-import { WORKERS, activeMember, projectAccess, requireWrite, type Actor, type Tx } from "@/lib/access";
+import { WORKERS, activeMember, projectAccess, requireManage, requireWrite, type Actor, type Tx } from "@/lib/access";
 import { formatDueDate } from "@/lib/dates";
 import { auditTx, logAction, notify } from "@/lib/notify";
 import { deleteTask, restoreTask } from "@/lib/tasks";
@@ -40,6 +40,26 @@ const liveTask = async (id: string, projectId: string) => {
 
 function fieldConflicts(keys: string[], before: any, after: any, now: Record<string, unknown>): Conflict[] {
   return keys.filter((k) => !same(now[k], after[k])).map((k) => ({ field: k, before: before[k], after: after[k], now: now[k] }));
+}
+
+/**
+ * A done-section row stores a full count beside each id list. A list shorter than its count was
+ * capped, and applying it would restore only the listed tasks. Refuse instead (APL-2680).
+ * `reopenedSubtaskIds` is written by the reopen-with-parent change; older rows simply omit it.
+ */
+function refuseShortDoneLists(before: Record<string, unknown>, after: Record<string, unknown>) {
+  const gap = (label: string, ids: unknown, total: unknown) => {
+    if (typeof total !== "number" || !Number.isFinite(total)) return null;
+    const listed = Array.isArray(ids) ? ids.length : 0;
+    return total > listed ? `${listed} of ${total} ${label}` : null;
+  };
+  const gaps = [
+    gap("reopened tasks", before.reopenedTaskIds, after.reopened),
+    gap("completed tasks", after.completedTaskIds, after.completed),
+    gap("completed subtasks", after.completedSubtaskIds, after.completedSubtasks),
+    gap("reopened subtasks", before.reopenedSubtaskIds, after.reopenedSubtasks),
+  ].filter((x): x is string => !!x);
+  if (gaps.length) throw bad(`Undo was not applied. This record lists only ${gaps.join(", ")}, so nothing was changed.`);
 }
 
 async function plan(row: any, user: Actor, projectId: string): Promise<Plan> {
@@ -291,6 +311,7 @@ async function plan(row: any, user: Actor, projectId: string): Promise<Plan> {
     case "section.done_changed": {
       const cur = await db.section.findFirst({ where: { projectId, isDone: true } });
       if (!b.doneSectionId || !(await db.section.findFirst({ where: { id: b.doneSectionId, projectId } }))) throw bad("The earlier done section no longer exists.");
+      refuseShortDoneLists(b, f);
       return {
         conflicts: cur && cur.id !== f.doneSectionId ? [{ field: "sectionId", before: b.doneSectionId, after: f.doneSectionId, now: cur.id }] : [], subject: "the done section", fields: "Done section",
         apply: async (tx) => {
@@ -340,6 +361,8 @@ async function prepare(user: Actor, logId: string) {
   const archiveKind = row.action === "project.archived" || row.action === "project.unarchived";
   if (a.project.archivedAt && !archiveKind) throw new ApiError(409, "This project is archived and read-only.");
   if (row.actorId !== user.id && a.role !== "LEADER") throw new ApiError(403, "You can only undo your own actions.");
+  // Undoing a delete is a restore from Trash, so it takes the same Leader or Admin check (SHO-US-6.2 AC4, SHO-BUG-8).
+  if (row.action === "task.deleted") requireManage(a);
   if (row.undoneAt) throw bad("This action was already undone.");
   if (!isUndoable(row.action)) throw bad("This kind of action cannot be undone.");
   if (Date.now() - row.createdAt.getTime() > UNDO_DAYS * 86400_000) throw bad("Too old to undo", { tooOld: true });
@@ -377,7 +400,7 @@ export async function undoAction(user: Actor, logId: string, anyway = false) {
   if (p.conflicts.length && !anyway) throw await conflictError(row, p, user.id);
 
   // Deleting and restoring have their own transactions.
-  if (row.action === "task.deleted") await restoreTask(user, row.targetId, true, { byUndo: true });
+  if (row.action === "task.deleted") await restoreTask(user, row.targetId, true, { skipLog: true }); // Undo logs its own row
   if (row.action === "task.restored" || row.action === "task.created") await deleteTask(user, row.targetId, { byUndo: true });
 
   await db.$transaction(async (tx) => {
