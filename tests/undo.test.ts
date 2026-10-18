@@ -110,7 +110,7 @@ describe("undo (6.4)", () => {
     const ed = await account("editor");
     const p = await project(lead, lead, [{ who: ed }]);
     const t = await task(lead, p.id, { title: "Oops", assigneeId: ed.id });
-    const edit = await ed.c.patch(`/api/tasks/${t}`, { title: "Oops again" });
+    const edit = await patchTask(ed, t, { title: "Oops again" });
     expect(edit.headers.get("x-undo-id")).toBeTruthy();
     expect(edit.headers.get("x-undo-label")).toBe("Task edited");
     const mv = await ed.c.post(`/api/tasks/${t}/move`, { sectionId: p.doing });
