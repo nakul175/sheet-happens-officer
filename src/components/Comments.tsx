@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ago, api, useGet } from "@/components/api";
 
 type Person = { id: string; name: string };
@@ -20,7 +20,7 @@ function queryAt(value: string, pos: number) {
  * Comments on a task. Rendered only when the task payload says comments are switched on,
  * so a flag-off server leaves the overlay as it was.
  */
-export function Comments({ taskId }: { taskId: string }) {
+export function Comments({ taskId, onChanged }: { taskId: string; onChanged?: () => void }) {
   const list = useGet<Payload>(`/api/tasks/${taskId}/comments`);
   const [text, setText] = useState("");
   const [caret, setCaret] = useState(0);
@@ -35,6 +35,13 @@ export function Comments({ taskId }: { taskId: string }) {
   const query = closed ? null : queryAt(text, caret);
   const matches = query === null ? [] : members.filter((m) => m.name.toLowerCase().includes(query.toLowerCase())).slice(0, 8);
   const shown = matches.length ? Math.min(active, matches.length - 1) : 0;
+  const reload = list.reload;
+
+  useEffect(() => {
+    const on = () => { reload(); onChanged?.(); };
+    window.addEventListener("sho:undone", on);
+    return () => window.removeEventListener("sho:undone", on);
+  }, [reload, onChanged]);
 
   function insert(name: string) {
     const upto = text.slice(0, caret);
@@ -54,7 +61,8 @@ export function Comments({ taskId }: { taskId: string }) {
     if (!res.ok) { setErr(res.error ?? "Could not save the comment."); return; }
     setErr(null);
     after?.();
-    list.reload();
+    reload();
+    onChanged?.();
   }
 
   const data = list.data;

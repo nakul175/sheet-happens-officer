@@ -268,7 +268,7 @@ export function TaskModal({ id, me, onClose, onChanged, asPage }: { id: string; 
               <button className="btn ghost sm" style={{ color: "var(--danger)", borderColor: "var(--danger-line)" }} onClick={() => setTrash(true)}>Move to Trash</button>
             </div>
           )}
-          {task.commentsEnabled && <Comments taskId={id} />}
+          {task.commentsEnabled && <Comments taskId={id} onChanged={onChanged} />}
         </>,
       )}
       {convert && <ConvertDialog task={task} meId={me} onClose={() => setConvert(false)} />}

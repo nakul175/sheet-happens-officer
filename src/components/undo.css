@@ -1,6 +1,6 @@
-.undo-toast { position: fixed; left: 50%; bottom: calc(22px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); z-index: 60; display: flex; gap: 14px; align-items: center;
+.undo-toast { position: fixed; left: 50%; bottom: calc(22px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); z-index: 90; display: flex; gap: 14px; align-items: center;
   background: #14213d; color: #fff; padding: 11px 16px; border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,.28); font-size: 14px; max-width: calc(100vw - 28px); }
-.undo-toast button { background: none; border: 0; color: #f2c14e; font-weight: 600; cursor: pointer; font-size: 14px; padding: 0; }
+.undo-toast button { background: none; border: 0; color: #f2c14e; font-weight: 600; cursor: pointer; font-size: 14px; padding: 0 8px; min-height: 44px; min-width: 44px; }
 .undo-toast small { display: block; opacity: .75; font-size: 12px; margin-top: 2px; }
 .undo-cmp { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 14px; }
 .undo-cmp th, .undo-cmp td { text-align: left; padding: 6px 8px; border-bottom: 1px solid rgba(0,0,0,.1); vertical-align: top; }
