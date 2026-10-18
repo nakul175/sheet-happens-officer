@@ -8,9 +8,10 @@ import { PASS, passwordOk } from "./qa";
 // qa:TC uses the AC id already on the test. Pam has not published a separate hash for these cases.
 const tag = (id: string) => ({ annotation: [{ type: "ac", description: id }, { type: "qa:TC", description: id }] });
 
-// The status role's accessible name is empty: "Loading" is only text inside it. The grey rows are aria-hidden and have no role.
+// The status role's accessible name is empty: "Loading" is only text inside it. There is no aria-label.
+// The grey bars are aria-hidden and have no role, name, or text, so the skeleton is the status plus that text.
 const skeleton = (page: import("@playwright/test").Page) => page.getByRole("status").filter({ hasText: "Loading" });
-const skeletonRows = (page: import("@playwright/test").Page) => skeleton(page).locator("[aria-hidden='true']");
+const skeletonRows = (page: import("@playwright/test").Page) => skeleton(page).getByText("Loading", { exact: true });
 
 test.beforeAll(() => {
   test.skip(!PASS, "Set SHO_QA_PASS (the password for nakul17+ aliases).");
