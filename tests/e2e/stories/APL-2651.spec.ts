@@ -159,11 +159,18 @@ test.beforeAll(async ({ browser, playwright }) => {
 });
 
 test.afterAll(async () => {
-  if (projectId) await send(sa.request, "POST", `/api/projects/${projectId}/archive`).catch(() => undefined);
-  if (orgId) await send(sa.request, "POST", `/api/orgs/${orgId}/archive`).catch(() => undefined);
-  await send(lead.request, "DELETE", "/api/concierge/messages").catch(() => undefined);
-  await Promise.all([sa, lead, editor, viewer, outsider, orgAdmin].filter(Boolean).map((w) => w.ctx.close()));
-  await anon?.dispose();
+  // beforeAll skips, or throws before an account is signed in. Reading .request on that
+  // account throws TypeError and hides the real failure. AC3 is the last test, so the
+  // hook error is reported on it.
+  if (projectId && sa?.request) await send(sa.request, "POST", `/api/projects/${projectId}/archive`).catch(() => undefined);
+  if (orgId && sa?.request) await send(sa.request, "POST", `/api/orgs/${orgId}/archive`).catch(() => undefined);
+  if (lead?.request) await send(lead.request, "DELETE", "/api/concierge/messages").catch(() => undefined);
+  await Promise.all(
+    [sa, lead, editor, viewer, outsider, orgAdmin]
+      .filter((w): w is Who => !!w?.ctx)
+      .map((w) => w.ctx.close().catch(() => undefined)),
+  );
+  await anon?.dispose().catch(() => undefined);
 });
 
 test("AC1: no session, malformed or schema-invalid body, returns 401 with no validation details", async () => {
