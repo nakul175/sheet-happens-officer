@@ -301,8 +301,10 @@ test("AC5: any signed-in Member sees all contacts, changes are logged with no pr
   later(() => admin.api.del(`/api/contacts/${id}`));
   expect((await contactsOf(admin, org.id)).some((c) => c.id === id)).toBe(true);
   await admin.page.goto(`/accounts/${org.id}`);
-  // The note form also lists the contact in a label. The contacts list is the bold name.
-  await expect(admin.page.locator("b", { hasText: name })).toBeVisible();
+  // The note form repeats the name in a label, and a page-wide bold match can hit a second
+  // element. The contacts list is the bold name on the row that says Known by.
+  const contactRow = admin.page.locator(".item", { hasText: "Known by:" }).filter({ hasText: name });
+  await expect(contactRow.locator("b", { hasText: name })).toBeVisible();
 
   const denied = await member.api.get(`/api/orgs/${org.id}/history`);
   expect(denied.status).toBe(404);
