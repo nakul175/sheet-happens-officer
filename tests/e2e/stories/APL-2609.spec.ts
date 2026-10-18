@@ -132,9 +132,10 @@ test("AC2: with CRM_VISIBLE=off, search returns no deal and no deal task", async
   await w.editor.page.goto("/search", { waitUntil: "domcontentloaded" });
   const box = w.editor.page.getByRole("searchbox", { name: "Search" });
   await expect(box).toBeEditable();
+  const title = w.deal.taskTitle;
   await expect(async () => {
-    await box.fill(w.deal.taskTitle);
-    await expect(box).toHaveValue(w.deal.taskTitle);
+    await box.fill(title);
+    await expect(box).toHaveValue(title);
   }).toPass();
   if (hide) await expect(w.editor.page.getByText(/Nothing matches/)).toBeVisible();
   else await expect(w.editor.page.getByText(w.deal.taskTitle).first()).toBeVisible();

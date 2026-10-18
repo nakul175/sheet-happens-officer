@@ -273,7 +273,7 @@ function runScenario(): Promise<JobReport> {
   const dir = mkdtempSync(path.join(tmpdir(), "sho-2608-"));
   const file = path.join(dir, "scenario.ts");
   writeFileSync(file, scenarioSource());
-  const env: NodeJS.ProcessEnv = { PATH: process.env.PATH, HOME: process.env.HOME, DATABASE_URL: process.env.DATABASE_URL, ZZ_RUN: Date.now().toString(36) };
+  const env: NodeJS.ProcessEnv = { PATH: process.env.PATH, HOME: process.env.HOME, DATABASE_URL: process.env.DATABASE_URL, NODE_ENV: process.env.NODE_ENV ?? "test", ZZ_RUN: Date.now().toString(36) };
   return new Promise((resolve, reject) => {
     execFile(path.join(process.cwd(), "node_modules/.bin/tsx"), [file], { cwd: process.cwd(), env, timeout: 90_000, maxBuffer: 8 * 1024 * 1024 }, (err, stdout, stderr) => {
       if (err) {
