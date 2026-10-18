@@ -85,6 +85,47 @@ describe("undo (6.4)", () => {
     expect((await activity(lead, p.id)).find((x) => x.id === id)!.undo).toBe("too_old");
   });
 
+  it("gives a Leader or an Admin the Undo toast for a delete, and it works like a restore (APL-2649 AC2)", async () => {
+    const sa = await superAdmin();
+    const lead = await account("lead");
+    const ed = await account("editor");
+    const p = await project(lead, lead, [{ who: ed }]);
+    for (const who of [lead, sa]) {
+      const t = await task(lead, p.id, { title: "Oops", assigneeId: ed.id });
+      const del = await who.c.del(`/api/tasks/${t}`);
+      expect(del.status).toBe(204);
+      expect(del.headers.get("x-undo-id")).toBeTruthy();
+      expect(del.headers.get("x-undo-label")).toBe("Task deleted");
+      expect(del.headers.get("x-undo-notified")).toBe("1");
+      expect((await ed.c.get(`/api/tasks/${t}`)).status).toBe(404);
+      const u = await who.c.post(`/api/actions/${del.headers.get("x-undo-id")}/undo`);
+      expect(u.status, JSON.stringify(u.json)).toBe(200);
+      expect(u.json.noticesSent).toBe(true);
+      expect((await ed.c.get(`/api/tasks/${t}`)).status).toBe(200);
+    }
+  });
+
+  it("gives an Editor no Undo toast for a delete, but keeps it for their edits and moves (APL-2649 AC1)", async () => {
+    const lead = await account("lead");
+    const ed = await account("editor");
+    const p = await project(lead, lead, [{ who: ed }]);
+    const t = await task(lead, p.id, { title: "Oops", assigneeId: ed.id });
+    const edit = await ed.c.patch(`/api/tasks/${t}`, { title: "Oops again" });
+    expect(edit.headers.get("x-undo-id")).toBeTruthy();
+    expect(edit.headers.get("x-undo-label")).toBe("Task edited");
+    const mv = await ed.c.post(`/api/tasks/${t}/move`, { sectionId: p.doing });
+    expect(mv.headers.get("x-undo-id")).toBeTruthy();
+    expect(mv.headers.get("x-undo-label")).toBe("Task moved");
+    const del = await ed.c.del(`/api/tasks/${t}`);
+    expect(del.status).toBe(204);
+    expect(del.headers.get("x-undo-id")).toBeNull(); // no id, so the page raises no toast
+    expect(del.headers.get("x-undo-label")).toBeNull();
+    expect(del.headers.get("x-undo-notified")).toBeNull();
+    expect((await ed.c.get(`/api/tasks/${t}`)).status).toBe(404);
+    // The delete is still logged, so the Leader can find it in Activity and Trash as before.
+    expect(await db.actionLog.count({ where: { action: "task.deleted", targetId: t, actorId: ed.id } })).toBe(1);
+  });
+
   it("refuses an Editor's Undo of their own delete with the Trash restore rule, and restores nothing (SHO-BUG-8 AC1, AC3)", async () => {
     const lead = await account("lead");
     const ed = await account("editor");
