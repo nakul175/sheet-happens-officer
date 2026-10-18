@@ -4,10 +4,12 @@
 // when the working directory or the script path is /opt/sho or anything under it,
 // after symlinks are resolved. It is dry-run unless --apply is passed.
 // --apply also requires --confirm=<database name> equal to current_database().
+// A missing or empty --confirm refuses before a connection is opened.
 //
 // It runs only when SHO_ALLOW_TEST_PURGE=1 and --workspace is exactly STAGING_WORKSPACE_ID.
 // PROD_DB_HOST and PROD_DB_NAME must both be set. It refuses production before opening a
-// connection (those values, or app.sheethappensofficer.com). It deletes only deactivated
+// connection (those values, or app.sheethappensofficer.com). PROD_DB_NAME is compared
+// without regard to case, so SHO_PROD matches sho_prod. It deletes only deactivated
 // people whose email matches zz-test-*@example.invalid, who are older than 24 hours, and
 // who have no audit-log rows. It refuses instead of changing a row that is not one of
 // those people: a SET NULL foreign key, or a task delete that would cascade such a row.
@@ -123,7 +125,9 @@ export function productionRefusal(env: NodeJS.ProcessEnv): string | null {
     if (isProdAppHost(target.host) || (prodHost && target.host === prodHost)) {
       return "Refusing to run: the database host is production.";
     }
-    if (prodName && target.name === prodName) return "Refusing to run: the database name is production.";
+    if (prodName && target.name.toLowerCase() === prodName.toLowerCase()) {
+      return "Refusing to run: the database name is production.";
+    }
   }
   const appUrl = env.APP_URL ?? "";
   if (appUrl) {
@@ -503,6 +507,10 @@ export async function runPurge(
       throw new ScriptRefusal("Refusing to run: --workspace does not match the configured staging workspace.");
     }
     const apply = argv.includes("--apply");
+    const confirm = flagValue(argv, "--confirm")?.trim() ?? "";
+    if (apply && !confirm) {
+      throw new ScriptRefusal("Refusing to run: --confirm must match the current database.");
+    }
     db = await connect(env.DATABASE_URL ?? "");
     const workspace = await db.workspace.findUnique({ where: { id: workspaceId }, select: { id: true } });
     if (!workspace) throw new ScriptRefusal("Refusing to run: the staging workspace was not found.");
@@ -510,9 +518,8 @@ export async function runPurge(
       await refuseIfUnsafe(db, workspaceId, false);
       return 0;
     }
-    const confirm = flagValue(argv, "--confirm")?.trim() ?? "";
     const current = await currentDatabase(db);
-    if (!confirm || confirm !== current) {
+    if (confirm !== current) {
       throw new ScriptRefusal("Refusing to run: --confirm must match the current database.");
     }
     await db.$transaction(async (tx) => {
