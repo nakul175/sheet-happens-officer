@@ -56,9 +56,21 @@ test("AC1: listed events each leave a row with time, actor, event, target and ch
   // exactly one row for one deletion of this task
   const deleted = (await audit(admin, `event=TASK_DELETED&person=${admin.user.id}`)).filter((r) => (r.target ?? "").includes(zz("audited")));
   expect(deleted).toHaveLength(1);
-  // the screen shows the columns
+  // the screen shows the columns. Below 1024px the table stacks and hides its header, so each cell carries its own label.
   await admin.page.goto("/audit");
-  await expect(admin.page.getByRole("columnheader")).toContainText(["When (IST)", "Who", "Event", "IP", "How", "Target"]);
+  const wide = (admin.page.viewportSize()?.width ?? 1280) >= 1024;
+  if (wide) {
+    await expect(admin.page.getByRole("columnheader")).toContainText(["When (IST)", "Who", "Event", "IP", "How", "Target"]);
+  } else {
+    const row = admin.page.getByRole("row").filter({ hasText: "TASK_DELETED" }).filter({ hasText: zz("audited") });
+    await expect(row).toHaveCount(1);
+    await expect(row.getByRole("cell", { name: /^When/ })).toBeVisible();
+    await expect(row.getByRole("cell", { name: /^Who/ })).toContainText(admin.user.name);
+    await expect(row.getByRole("cell", { name: /^Event/ })).toContainText("TASK_DELETED");
+    await expect(row.getByRole("cell", { name: /^How/ })).toContainText("on screen");
+    await expect(row.getByRole("cell", { name: /^Target/ })).toContainText(zz("audited"));
+    await expect(admin.page.getByRole("cell", { name: /^IP/ })).not.toHaveCount(0);
+  }
 });
 
 test("AC2: nobody but the Super Admin can open or query the audit log, Admins included", async ({ admin, member }) => {
@@ -92,11 +104,7 @@ test("AC4: the log is read-only through the app", async ({ admin }) => {
   }
 });
 test("AC4 (12-month removal): audit rows older than 12 months are removed by purge-old", async ({ admin, later }) => {
-  expect(sourceOf("src/lib/feed.ts", "const LOG_MONTHS")).toContain("const LOG_MONTHS = 12");
-  const fn = sourceOf("src/lib/feed.ts", "export async function purgeOld");
-  expect(fn).toContain("cut.setMonth(cut.getMonth() - LOG_MONTHS)");
-  expect(fn).toContain("auditLog.deleteMany");
-  expect(fn).toContain("createdAt: { lt: cut }");
+  test.info().annotations.push({ type: "qa:TC", description: "qa:TC missing" });
   await proj(admin, "audit-year", later);
   const rows = (await audit(admin, `event=PROJECT_CREATED&person=${admin.user.id}`)).filter((r) => (r.target ?? "").includes(zz("audit-year")));
   expect(rows, "the new project is in the audit log").toHaveLength(1);
@@ -111,6 +119,17 @@ test("AC4 (12-month removal): audit rows older than 12 months are removed by pur
   }
 });
 
+// qa:TC missing
+test("APL-2521 AC4: audit rows are kept for 12 months in the source @static", async () => {
+  test.info().annotations.push({ type: "qa:TC", description: "qa:TC missing" });
+  expect(sourceOf("src/lib/feed.ts", "const LOG_MONTHS")).toContain("const LOG_MONTHS = 12");
+  const fn = sourceOf("src/lib/feed.ts", "export async function purgeOld");
+  expect(fn).toContain("cut.setMonth(cut.getMonth() - LOG_MONTHS)");
+  expect(fn).toContain("auditLog.deleteMany");
+  expect(fn).toContain("createdAt: { lt: cut }");
+});
+
+// qa:TC missing
 test("AC5 and AC6: five failed sign-ins and the lockout are logged, with the IP on those rows only", async ({ admin, anon, later }) => {
   const email = `zz-test-lock-${RUN}@example.invalid`;
   const add = await admin.api.post("/api/team", { firstName: "ZZ-TEST", lastName: `lockout ${RUN}`, email, role: "MEMBER" });
@@ -155,10 +174,7 @@ test("AC7: task delete and restore, an approver being set, and 'Undo anyway' eac
 });
 
 test("AC7 (30-day purge): one TASK_PURGED row is written for a purge run", async ({ admin, later }) => {
-  const body = sourceOf("src/lib/tasks.ts", "export async function purgeTrash", "export async function myTasks");
-  expect(body).toContain("if (r.count) await db.auditLog.create");
-  expect(body).toContain('event: "TASK_PURGED"');
-  expect(body).toContain("30 * 86400_000");
+  test.info().annotations.push({ type: "qa:TC", description: "qa:TC missing" });
   const p = await proj(admin, "audit-purge", later);
   const aged = await mk(admin, p, zz("purged task"));
   const fresh = await mk(admin, p, zz("kept task"));
@@ -179,4 +195,13 @@ test("AC7 (30-day purge): one TASK_PURGED row is written for a purge run", async
     expect(trash.some((i) => i.id === aged)).toBe(false);
     expect(trash.some((i) => i.id === fresh)).toBe(true);
   }
+});
+
+// qa:TC missing
+test("APL-2521 AC7: a purge run writes one TASK_PURGED row in the source @static", async () => {
+  test.info().annotations.push({ type: "qa:TC", description: "qa:TC missing" });
+  const body = sourceOf("src/lib/tasks.ts", "export async function purgeTrash", "export async function myTasks");
+  expect(body).toContain("if (r.count) await db.auditLog.create");
+  expect(body).toContain('event: "TASK_PURGED"');
+  expect(body).toContain("30 * 86400_000");
 });
