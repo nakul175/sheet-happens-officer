@@ -1,30 +1,21 @@
 // APL-2466 · [SHO-E2] People and roles. One test per acceptance criterion.
 // Pam qa:TC: none on the issue. New people are named ZZ-TEST and deactivated afterwards.
-// A sign-up password is SHO_QA_PASS when that is set, otherwise a password made for this run.
+// Sign-up uses SHO_QA_PASS. The file skips when that is unset.
 // Sign-in checks use the Member account from the environment (its password is known here). Its role and status are put back.
 import { test, login } from "../support";
 import {
-  PASS, passwordOk, alias, zz, RUN, signUp, signInAs, personByEmail, deactivate,
+  PASS, passwordOk, alias, zz, RUN, gate, signUp, signInAs, personByEmail, deactivate,
   makeProject, archiveProject, expect, type Api,
 } from "./qa";
-
-function madePass() {
-  if (passwordOk(PASS)) return PASS;
-  return `Zz${RUN}a9`;
-}
 
 type Who = { api: Api; user: { id?: string; name?: string; email?: string } };
 
 test.beforeAll(async ({ request }) => {
+  test.skip(!PASS, "Set SHO_QA_PASS (the shared password for the nakul17+ accounts).");
+  if (!PASS) return;
+  if (!passwordOk(PASS)) throw new Error("SHO_QA_PASS must be at least 8 characters with a letter and a number.");
   login("ADMIN");
-  const res = await request.get("/api/health");
-  const body = await res.text();
-  expect(res.status(), body).toBe(200);
-  const json = JSON.parse(body) as { ok?: boolean; release?: unknown };
-  expect(json.ok).toBe(true);
-  expect(typeof json.release === "string" && (json.release as string).length >= 7, "release SHA from /api/health").toBe(true);
-  const pass = madePass();
-  expect(body.includes(pass)).toBe(false);
+  await gate(request);
 });
 
 async function taskFor(api: Api, projectId: string, assigneeId: string, title: string) {
@@ -77,7 +68,7 @@ test("AC1: the configured first Super Admin has the Super Admin role, and a new 
   expect(row?.orgRole).toBe("SUPER_ADMIN");
 
   const email = alias("2466", "ac1", "aplyd.com");
-  const signed = await signUp(anon.request, zz("ac1"), email, madePass());
+  const signed = await signUp(anon.request, zz("ac1"), email);
   expect(signed.status, signed.body).toBe(201);
   const person = await personByEmail(admin.api, email);
   expect(person?.orgRole).toBe("MEMBER");

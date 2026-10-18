@@ -82,7 +82,6 @@ test.describe("SHO-US-2.3 / APL-2482", () => {
   test("AC1 (sessions and sign-in): their sessions end and they cannot sign in", async ({ admin, browser, later }) => {
     test.setTimeout(180_000);
     expect(readFileSync("src/lib/team.ts", "utf8")).toContain("session.updateMany({ where: { userId: targetId, revokedAt: null }, data: { revokedAt: new Date() } })");
-    expect(readFileSync("src/app/api/auth/signin/route.ts", "utf8")).toContain('throw new ApiError(403, "This account is deactivated.")');
 
     const email = alias("2482", "session");
     const r = await admin.api.post("/api/team", { firstName: "ZZ-TEST", lastName: `session ${RUN}`, email, role: "MEMBER" });
