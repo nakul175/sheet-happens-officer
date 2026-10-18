@@ -232,6 +232,8 @@ model Task {
   deletedById        String?
   deletedBy          User?              @relation("TaskDeleter", fields: [deletedById], references: [id])
   completedAt        DateTime?
+  // A subtask closed because its parent closed (APL-2610 AC4): only these reopen with the parent.
+  completedWithParent Boolean @default(false)
   // Where a completed task returns to when reopened (SHO-US-4.5). Plain id, no foreign key.
   previousSectionId  String?
   // CRM (SHO-US-13.2): a task flagged as an early idea.

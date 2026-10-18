@@ -2,6 +2,7 @@ import { db } from "@/lib/db";
 import { ApiError, notFound } from "@/lib/http";
 import { projectAccess, requireManage, type Actor, type Tx } from "@/lib/access";
 import { logAction } from "@/lib/notify";
+import { reopenSubtasks } from "@/lib/tasks";
 
 const MAX_SECTIONS = 8;
 
@@ -19,7 +20,7 @@ async function completeSubtasks(tx: Tx, o: { projectId: string; actorId: string;
   if (!o.parentIds.length) return [] as string[];
   const subs = await tx.task.findMany({ where: { parentId: { in: o.parentIds }, completedAt: null, deletedAt: null }, select: { id: true, parentId: true } });
   if (!subs.length) return [] as string[];
-  await tx.task.updateMany({ where: { id: { in: subs.map((s) => s.id) } }, data: { completedAt: o.now } });
+  await tx.task.updateMany({ where: { id: { in: subs.map((s) => s.id) } }, data: { completedAt: o.now, completedWithParent: true } });
   for (const s of subs) {
     await logAction(tx, { actorId: o.actorId, projectId: o.projectId, targetType: "task", targetId: s.id, action: "task.completed", before: { completedAt: null }, after: { completedAt: o.now.toISOString(), withParent: s.parentId, ...o.via }, primary: false });
   }
@@ -73,10 +74,14 @@ export async function updateSection(
       if (open.length) throw new ApiError(409, "Tasks waiting on an approver are in that section; close or move them first.");
       const old = await tx.section.findFirst({ where: { projectId, isDone: true } });
       let reopened: string[] = [];
+      let reopenedSubtasks: string[] = [];
       if (old) {
-        reopened = (await tx.task.findMany({ where: { sectionId: old.id, parentId: null, completedAt: { not: null } }, select: { id: true } })).map((x) => x.id);
+        // Tasks in Trash are left as they are (APL-2678).
+        reopened = (await tx.task.findMany({ where: { sectionId: old.id, parentId: null, completedAt: { not: null }, deletedAt: null }, select: { id: true } })).map((x) => x.id);
         await tx.section.update({ where: { id: old.id }, data: { isDone: false } });
-        await tx.task.updateMany({ where: { sectionId: old.id, parentId: null }, data: { completedAt: null } });
+        await tx.task.updateMany({ where: { id: { in: reopened } }, data: { completedAt: null } });
+        // Subtasks that closed with their parent reopen with it; ones ticked done on their own stay done (APL-2610 AC4).
+        reopenedSubtasks = await reopenSubtasks(tx, reopened);
       }
       const now = new Date();
       const completed = (await tx.task.findMany({ where: { sectionId: s.id, parentId: null, completedAt: null, deletedAt: null }, select: { id: true } })).map((x) => x.id);
@@ -90,8 +95,8 @@ export async function updateSection(
       await logAction(tx, {
         actorId: user.id, projectId, targetType: "section", targetId: s.id, action: "section.done_changed",
         // Every id is kept. Cutting the lists at 200 made Undo skip the rest and still succeed (APL-2680).
-        before: { doneSectionId: old?.id ?? null, reopenedTaskIds: reopened },
-        after: { doneSectionId: s.id, completedTaskIds: completed, completedSubtaskIds: subtasks, reopened: reopened.length, completed: completed.length, completedSubtasks: subtasks.length },
+        before: { doneSectionId: old?.id ?? null, reopenedTaskIds: reopened, reopenedSubtaskIds: reopenedSubtasks },
+        after: { doneSectionId: s.id, completedTaskIds: completed, completedSubtaskIds: subtasks, reopened: reopened.length, reopenedSubtasks: reopenedSubtasks.length, completed: completed.length, completedSubtasks: subtasks.length },
       });
     }
   });

@@ -367,12 +367,12 @@ export async function completeTask(user: Actor, id: string, completeAll = false)
   await db.$transaction(async (tx) => {
     const now = new Date();
     if (t.parentId) {
-      await tx.task.update({ where: { id }, data: { completedAt: now } });
+      await tx.task.update({ where: { id }, data: { completedAt: now, completedWithParent: false } });
     } else {
       const done = await tx.section.findFirstOrThrow({ where: { projectId: t.projectId, isDone: true } });
       await tx.task.update({ where: { id }, data: { completedAt: now, sectionId: done.id, previousSectionId: t.sectionId === done.id ? t.previousSectionId : t.sectionId } });
       if (openSubs.length) {
-        await tx.task.updateMany({ where: { id: { in: openSubs.map((s) => s.id) } }, data: { completedAt: now } });
+        await tx.task.updateMany({ where: { id: { in: openSubs.map((s) => s.id) } }, data: { completedAt: now, completedWithParent: true } });
         for (const sub of openSubs) {
           await logAction(tx, { actorId: user.id, projectId: t.projectId, targetType: "task", targetId: sub.id, action: "task.completed", before: { completedAt: null }, after: { completedAt: now.toISOString(), withParent: id }, primary: false });
         }
@@ -383,14 +383,23 @@ export async function completeTask(user: Actor, id: string, completeAll = false)
   });
 }
 
+/** Reopens the done subtasks of these parents that closed with them (completedWithParent), and returns their ids. */
+export async function reopenSubtasks(tx: Tx, parentIds: string[]) {
+  if (!parentIds.length) return [] as string[];
+  const ids = (await tx.task.findMany({ where: { parentId: { in: parentIds }, completedWithParent: true, completedAt: { not: null }, deletedAt: null }, select: { id: true } })).map((x) => x.id);
+  if (ids.length) await tx.task.updateMany({ where: { id: { in: ids } }, data: { completedAt: null, completedWithParent: false } });
+  return ids;
+}
+
 export async function reopenTask(user: Actor, id: string, sectionId?: string) {
   const { t } = await loadTask(user, id, { write: true });
   if (!t.completedAt) throw new ApiError(409, "This task is not complete.");
   await db.$transaction(async (tx) => {
+    let subtaskIds: string[] = [];
     if (t.parentId) {
       const parent = await tx.task.findUniqueOrThrow({ where: { id: t.parentId } });
       if (parent.completedAt) throw new ApiError(409, "Reopen the parent task first.");
-      await tx.task.update({ where: { id }, data: { completedAt: null } });
+      await tx.task.update({ where: { id }, data: { completedAt: null, completedWithParent: false } });
     } else {
       let dest: string | null = null;
       if (sectionId) {
@@ -403,8 +412,10 @@ export async function reopenTask(user: Actor, id: string, sectionId?: string) {
         dest = (prev ?? (await tx.section.findFirst({ where: { projectId: t.projectId, isDone: false }, orderBy: { position: "asc" } })) ?? (await tx.section.findFirstOrThrow({ where: { projectId: t.projectId }, orderBy: { position: "asc" } }))).id;
       }
       await tx.task.update({ where: { id }, data: { completedAt: null, sectionId: dest, previousSectionId: null } });
+      // Subtasks that closed with the parent reopen with it; ones ticked done on their own stay done (APL-2610 AC4).
+      subtaskIds = await reopenSubtasks(tx, [id]);
     }
-    await logAction(tx, { actorId: user.id, projectId: t.projectId, targetType: "task", targetId: id, action: "task.reopened", before: { completedAt: t.completedAt, sectionId: t.sectionId }, after: { completedAt: null } });
+    await logAction(tx, { actorId: user.id, projectId: t.projectId, targetType: "task", targetId: id, action: "task.reopened", before: { completedAt: t.completedAt, sectionId: t.sectionId }, after: { completedAt: null, ...(subtaskIds.length ? { subtaskIds } : {}) } });
   });
 }
 
@@ -459,6 +470,8 @@ export async function restoreTask(user: Actor, id: string, confirmParent = false
       const assigneeOk = await activeMember(tx, t.projectId, x.assigneeId, WORKERS);
       const approverOk = x.approverId ? await activeMember(tx, t.projectId, x.approverId, WORKERS) : null;
       const subs = await tx.task.findMany({ where: { parentId: x.id, deletedAt: x.deletedAt }, select: { id: true, assigneeId: true } });
+      // Restore only lifts Trash. A done task whose section lost the done flag stays
+      // complete in that section: no reopen, no move to the current done section (APL-2610 AC6).
       await tx.task.updateMany({
         where: { OR: [{ id: x.id }, { parentId: x.id, deletedAt: x.deletedAt }] },
         data: { deletedAt: null, deletedById: null },
