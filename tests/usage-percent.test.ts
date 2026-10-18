@@ -1,6 +1,10 @@
 // APL-2519 AC6: the percentage used is one display string, rounded half up.
+// The cases are the ones tests/e2e/stories/APL-2519.spec.ts expects on the screen.
 import { describe, expect, it } from "vitest";
-import { percentUsedLabel } from "@/lib/usage-percent";
+import { percentUsedLabel, percentUsedNumber } from "@/lib/usage-percent";
+
+/** The one-decimal figure /api/usage used to store. The screen must not print this. */
+const oldDecimal = (spend: number, ceiling: number) => (ceiling > 0 ? Math.round((spend / ceiling) * 1000) / 10 : 0);
 
 describe("percentUsedLabel (APL-2519 AC6)", () => {
   it("shows 0% for no spend", () => {
@@ -27,6 +31,30 @@ describe("percentUsedLabel (APL-2519 AC6)", () => {
     expect(percentUsedLabel(100, 100)).toBe("100%");
     expect(percentUsedLabel(120, 100)).toBe("120%");
     expect(percentUsedLabel(112.5, 100)).toBe("113%");
+  });
+
+  it("matches the APL-2519 e2e rows, including where the old one-decimal figure differs", () => {
+    const rows: [number, number, string][] = [
+      [0, 80, "0%"],
+      [1, 200, "<1%"],
+      [1, 1000, "<1%"],
+      [1, 101, "<1%"],
+      [1, 100, "1%"],
+      [10, 80, "13%"],
+      [124, 1000, "12%"],
+      [120, 100, "120%"],
+      [112.4, 100, "112%"],
+      [239, 200, "120%"],
+    ];
+    for (const [spend, cap, label] of rows) {
+      expect(percentUsedLabel(spend, cap), `${spend} of ${cap}`).toBe(label);
+      const stored = label === "0%" || label === "<1%" ? 0 : Number(label.slice(0, -1));
+      expect(percentUsedNumber(spend, cap), `${spend} of ${cap}`).toBe(stored);
+    }
+    expect(oldDecimal(10, 80)).toBe(12.5);
+    expect(oldDecimal(1, 101)).toBe(1);
+    expect(percentUsedLabel(10, 80)).toBe("13%");
+    expect(percentUsedLabel(1, 101)).toBe("<1%");
   });
 
   it("rounds a floating-point half up, where Math.round on the IEEE quotient goes down", () => {

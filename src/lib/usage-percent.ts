@@ -1,6 +1,8 @@
 // APL-2519 AC6. One place for the percentage used.
-// GET /api/usage puts this display string in ceiling.percent. The screen prints it unchanged.
-// It is not a bare integer: "<1%" is not a number, and the percent sign is part of the string.
+// The screen prints percentUsedLabel(spend, ceiling). It does not echo ceiling.percent, so a payload
+// that still carries the old one-decimal figure (10 of 80 stored as 12.5, or 1 of 101 stored as 1)
+// still shows 13% and <1%.
+// GET /api/usage stores the matching whole number in ceiling.percent (0 when the label is "0%" or "<1%").
 
 /** Shortest round-trip decimal, expanded out of scientific notation. 0.09 stays "0.09". */
 function plainDecimal(n: number): string {
@@ -53,4 +55,11 @@ export function percentUsedLabel(spendUsd: number, ceilingUsd: number): string {
   const twice = spend.num * ceiling.scale * twoHundred + ceiling.num * spend.scale;
   const den = ceiling.num * spend.scale * two;
   return `${twice / den}%`;
+}
+
+/** Whole number for ceiling.percent. 0 when the label is "0%" or "<1%"; otherwise the integer in the label. */
+export function percentUsedNumber(spendUsd: number, ceilingUsd: number): number {
+  const label = percentUsedLabel(spendUsd, ceilingUsd);
+  if (label === "0%" || label === "<1%") return 0;
+  return Number(label.slice(0, -1));
 }
