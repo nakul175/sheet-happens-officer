@@ -169,7 +169,7 @@ textarea.in { min-height: 90px; resize: vertical; }
 .mhead { font-size: 12px; color: var(--muted); padding: 6px 10px; }
 @media (max-width: 700px) { .dboard { flex-direction: column; overflow: visible; } .dcol { flex: none; width: 100%; } .dcard { cursor: default; } }
 
-/* SHO-US-10.7: on a phone the task opens as a full-screen sheet with Close always in view. */
+/* SHO-US-22.7: on a phone the task opens as a full-screen sheet with Close always in view. */
 @media (max-width: 599px) {
   .scrim { padding: 0; }
   .modal { border-radius: 0; min-height: 100vh; min-height: 100dvh; max-width: none; padding-top: 0; padding-bottom: calc(22px + env(safe-area-inset-bottom, 0px)); padding-left: calc(18px + env(safe-area-inset-left, 0px)); padding-right: calc(18px + env(safe-area-inset-right, 0px)); }
@@ -178,7 +178,7 @@ textarea.in { min-height: 90px; resize: vertical; }
   .modal .bar .link { min-height: 44px; min-width: 44px; padding: 0 8px; }
 }
 
-/* SHO-US-10.2: 44 px tap areas on touch screens; the tick keeps its look. */
+/* SHO-US-22.2: 44 px tap areas on touch screens; the tick keeps its look. */
 .tick { position: relative; }
 @media (max-width: 1023px), (pointer: coarse) {
   .tick::after { content: ""; position: absolute; inset: -11px; }
@@ -201,7 +201,7 @@ textarea.in { min-height: 90px; resize: vertical; }
   .bell, .burger { min-width: 44px; min-height: 44px; display: inline-flex; align-items: center; justify-content: center; }
 }
 
-/* SHO-US-10.4: bottom tab bar (phones only) */
+/* SHO-US-22.4: bottom tab bar (phones only) */
 .tabbar-wrap { display: none; }
 @media (max-width: 1023px) {
   .side:not(.open) { visibility: hidden; transition: transform .2s, visibility 0s .2s; }
@@ -228,7 +228,7 @@ textarea.in { min-height: 90px; resize: vertical; }
 @media (max-width: 1023px), (pointer: coarse) { .box label { min-height: 44px; } }
 @media (max-width: 1023px), (pointer: coarse) { .modal a:not(.btn) { display: inline-flex; align-items: center; min-height: 44px; } }
 
-/* SHO-US-10.5: labelled card rows, wrapped names, wide tables scroll in their own box */
+/* SHO-US-22.5: labelled card rows, wrapped names, wide tables scroll in their own box */
 .vlab { display: none; }
 @media (max-width: 1023px) {
   .tbl.stack td { display: flex; gap: 10px; align-items: baseline; overflow-wrap: anywhere; min-width: 0; }

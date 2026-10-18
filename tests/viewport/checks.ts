@@ -1,4 +1,4 @@
-// SHO-US-10.11: the in-page checks. Each function runs inside the browser, so it must not use anything from outside itself.
+// SHO-US-22.11: the in-page checks. Each function runs inside the browser, so it must not use anything from outside itself.
 export type Finding = { check: "overflow" | "target" | "field" | "meta"; element: string; detail: string };
 
 /** Runs every check on the page as it is now and returns what is wrong. `phone` is true under 600 px. */

@@ -34,7 +34,7 @@ export function Tick({ id, title, done, allowed, onDone }: { id: string; title: 
 }
 
 type Person = { id: string; name: string };
-/** SHO-US-10.9: assignee and collaborator avatars. Tapping the group (or pressing Enter) shows their names; hover is not needed. */
+/** SHO-US-22.9: assignee and collaborator avatars. Tapping the group (or pressing Enter) shows their names; hover is not needed. */
 export function AvatarGroup({ assignee, collaborators, className }: { assignee: Person; collaborators: Person[]; className?: string }) {
   const [open, setOpen] = useState(false);
   const box = useRef<HTMLSpanElement>(null);

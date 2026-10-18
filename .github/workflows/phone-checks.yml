@@ -1,4 +1,4 @@
-# SHO-US-10.11: every change runs the phone-size checks on all screens and widths (tests/viewport).
+# SHO-US-22.11: every change runs the phone-size checks on all screens and widths (tests/viewport).
 # It fails naming the screen, width and element, and keeps a screenshot of each failing page (download "viewport-screenshots" from the run).
 # Uses its own throw-away Postgres and invented accounts; it never reaches the production database or any real data.
 name: Phone checks

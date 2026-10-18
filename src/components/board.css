@@ -1,4 +1,4 @@
-/* SHO-US-10.6: board on phones. One column fills the width (the next peeks by 12 px), a strip jumps between columns,
+/* SHO-US-22.6: board on phones. One column fills the width (the next peeks by 12 px), a strip jumps between columns,
    and Move to… opens a sheet. Desktop keeps drag and drop. */
 .bswitch { display: none; }
 .bmove { margin-top: 8px; }

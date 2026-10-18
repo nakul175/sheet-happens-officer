@@ -1,4 +1,4 @@
-// SHO-US-10.11: the screens and widths the phone checks cover. Add a screen here when you add a page.
+// SHO-US-22.11: the screens and widths the phone checks cover. Add a screen here when you add a page.
 export const WIDTHS = [320, 360, 390, 414, 599, 768] as const;
 export const PHONE_MAX = 600; // under this width the 44 px and 16 px rules apply
 
