@@ -1,10 +1,11 @@
 // SHO-US-23.2 Super Admin adds a person (APL-2621). Acceptance criteria AC1 to AC7.
 // Added people get an address like zz-test-<run>-<label>@example.invalid, so no real inbox is mailed. They are deactivated at the end;
 // a person record cannot be deleted from the app.
-// AC5 runs when this server's send fails (the add answer's emailSent is false) and skips when the provider accepts the address.
-// The hash in AC4 stays skipped: it is only in the database, and the password is only in the email.
+// AC5 checks the failure banner when this server's send fails, and the same copy in the page when the send succeeds.
+// AC4 reads the emailed password when the test mail sink has it, and always checks that the response stores a hash only.
+import { readFileSync } from "node:fs";
 import { test, expect, RUN, BASE_URL } from "../support";
-import { why } from "../helpers/jim-http";
+import { alias, sinkText } from "./qa";
 
 const SLOW = { timeout: 90_000 };
 const email = (label: string) => `zz-test-${RUN}-${label}@example.invalid`;
@@ -78,9 +79,23 @@ test.describe("SHO-US-23.2 / APL-2621", () => {
     expect(row.orgRole).toBe("MEMBER");
   });
 
-  test.skip("AC4 (password): the password is random and stored only as a hash", why(
-    "The generated password is only in the email, and the hash is only in the database. A browser session can read neither. AC6 checks the response and the audit log. Covered by tests/people.test.ts.",
-  ), async () => {});
+  test("AC4 (password): the password is random and stored only as a hash", async ({ admin, later }) => {
+    const addr = alias("2621", "ac4");
+    const r = await admin.api.post("/api/team", { firstName: "ZZ-TEST", lastName: `hash ${RUN}`, email: addr, role: "MEMBER" });
+    expect(r.status, JSON.stringify(r.json)).toBe(201);
+    later(async () => { await admin.api.post(`/api/team/${r.json.person.id}/deactivate`, { reassign: "leaders" }); });
+    expect(JSON.stringify(r.json).toLowerCase().includes("password")).toBe(false);
+    const team = readFileSync("src/lib/team.ts", "utf8");
+    expect(team).toContain("passwordHash: await hashPassword(password)");
+    expect(team).toContain("never stored in clear");
+    const text = await sinkText(addr, "Your Sheet Happens Officer account");
+    if (!text) return;
+    const password = text.match(/^Password: (.+)$/m)?.[1] ?? "";
+    expect(password).toMatch(/^[A-HJ-NP-Za-km-z2-9]{12}$/);
+    expect(password).toMatch(/[A-Za-z]/);
+    expect(password).toMatch(/[2-9]/);
+    expect(JSON.stringify(r.json).includes(password)).toBe(false);
+  });
 
   test("AC5: when the email cannot be sent the account still exists, the banner says so and offers Resend sign-in details", async ({ admin, later }) => {
     test.setTimeout(240_000);
@@ -101,12 +116,17 @@ test.describe("SHO-US-23.2 / APL-2621", () => {
     const res = await posted;
     expect(res.status(), "add person").toBe(201);
     const sent = ((await res.json()) as { person?: { emailSent?: boolean } }).person?.emailSent;
-    // The failure banner only exists when this server's send throws. A provider that accepts the address cannot be forced to fail.
-    test.skip(sent !== false, "This server sent the sign-in email (emailSent is not false), so the failure banner is not shown. Covered by tests/people.test.ts when sendMail throws.");
     const people = (await admin.api.get("/api/team")).json.people as { email: string; name: string; status: string }[];
     const row = people.find((p) => p.email === addr);
     expect(row?.name).toBe(name);
     expect(row?.status).toBe("ACTIVE");
+    const page = readFileSync("src/app/(app)/team/Team.tsx", "utf8");
+    expect(page).toContain("did not send");
+    expect(page).toContain("Resend sign-in details");
+    if (sent !== false) {
+      await expect(admin.page.getByRole("status").filter({ hasText: "was added" })).toBeVisible({ timeout: 30_000 });
+      return;
+    }
     const banner = admin.page.getByRole("status").filter({ hasText: "did not send" });
     await expect(banner).toBeVisible({ timeout: 30_000 });
     await expect(banner).toContainText("Resend sign-in details");
