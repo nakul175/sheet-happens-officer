@@ -1,9 +1,9 @@
 "use client";
 import Link from "next/link";
 import { use, useEffect, useState } from "react";
-import { ago, api, isNetworkFailure, useGet } from "@/components/api";
+import { ago, api, useGet } from "@/components/api";
 import { requestUndo } from "@/components/UndoHost";
-import { LoadFailed } from "@/components/ui";
+import { LoadFailed, Skeleton } from "@/components/ui";
 import { Page } from "../../../Shell";
 
 type Row = { id: string; ts: number; when: string; who: string; via: string; what: string; undo: "available" | "undone" | "too_old" | "none" };
@@ -20,7 +20,7 @@ export default function Activity({ params }: { params: Promise<{ id: string }> }
     window.addEventListener("sho:undone", done);
     return () => window.removeEventListener("sho:undone", done);
   }, [reload]);
-  if (!a.data && isNetworkFailure(a.status)) return <Page title="Activity"><LoadFailed onRetry={a.reload} /></Page>;
+  if (!a.data && a.failed) return <Page title="Activity"><LoadFailed onRetry={a.reload} /></Page>;
   if (a.status === 403 || a.status === 404) {
     return <Page title="Activity"><div className="card empty">{a.status === 403 ? "Only people who work on this project can see Activity." : "This project isn't available."}<br /><Link href={`/projects/${id}`}>Back to the project</Link></div></Page>;
   }
@@ -28,6 +28,7 @@ export default function Activity({ params }: { params: Promise<{ id: string }> }
   const rows = [...(a.data?.items ?? []), ...more];
   return (
     <Page title="Activity" sub={<Link href={`/projects/${id}`}>← Project</Link>}>
+      {a.loading && !a.data && <Skeleton />}
       {a.data && !rows.length && <div className="card empty">Nothing has happened yet.</div>}
       {!!rows.length && (
         <div className="list actlist">

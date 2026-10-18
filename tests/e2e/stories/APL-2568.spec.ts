@@ -1,10 +1,10 @@
 // SHO-US-14.9 Filters, sort and group on lists (APL-2568).
 import { readFileSync } from "node:fs";
-import { test, expect, zz, type Api } from "../support";
+import { test, expect, zz, type Api, type Json } from "../support";
 
 const day = (n: number) => new Date(Date.now() + 5.5 * 3600_000 + n * 86400_000).toISOString().slice(0, 10);
 
-async function seed(admin: { api: Api; user: Record<string, any> }, later: (f: () => Promise<unknown>) => void) {
+async function seed(admin: { api: Api; user: Json }, later: (f: () => Promise<unknown>) => void) {
   const r = await admin.api.post("/api/projects", { name: zz("filters"), leaderId: admin.user.id });
   expect(r.status).toBe(201);
   const id = r.json.project.id as string;

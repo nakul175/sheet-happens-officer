@@ -1,11 +1,11 @@
 // SHO-US-10.2 Pipelines and stages as configuration  (Linear APL-2528)
 // Source: acceptance criteria in the Linear issue. Runs against staging; credentials come from the environment (see playwright.config.ts).
-import { test, expect } from "../support";
+import { test, expect, type Json } from "../support";
 
 type Stage = { id: string; name: string; position: number; category: string; needsReason: boolean; requiredFields: string[] };
 type Pipe = { id: string; key: string; name: string; stages: Stage[] };
 
-async function pipelines(admin: { api: { get: (p: string) => Promise<{ status: number; json: any }> } }) {
+async function pipelines(admin: { api: { get: (p: string) => Promise<{ status: number; json: Json }> } }) {
   const r = await admin.api.get("/api/deals/pipelines");
   expect(r.status).toBe(200);
   return r.json.pipelines as Pipe[];
