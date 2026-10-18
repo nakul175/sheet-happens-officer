@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { RETURN_PATH_HEADER } from "@/lib/return-to";
+import { RETURN_PATH_HEADER, returnToEnabled } from "@/lib/return-to";
 
 /**
  * APL-2652. Records the path that was asked for so the app layout can send a
@@ -14,7 +14,10 @@ export function proxy(request: NextRequest) {
   } catch {
     requestHeaders.delete(RETURN_PATH_HEADER);
   }
-  return NextResponse.next({ request: { headers: requestHeaders } });
+  const res = NextResponse.next({ request: { headers: requestHeaders } });
+  // The client bundle cannot read SIGNIN_RETURN_TO. This cookie is the runtime copy, not a credential.
+  res.cookies.set("sho_return_to", returnToEnabled() ? "1" : "0", { path: "/", sameSite: "lax" });
+  return res;
 }
 
 export const config = {

@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import styles from "@/components/auth.module.css";
 import { post, rememberEmail } from "@/components/client";
-import { safeReturnPath } from "@/lib/return-to";
+import { returnToActive, safeReturnPath } from "@/lib/return-to";
 import s from "./signin.module.css";
 
 export function SignInForm({ justReset, sessionExpired = false, next }: { justReset: boolean; sessionExpired?: boolean; next?: string }) {
@@ -26,7 +26,7 @@ export function SignInForm({ justReset, sessionExpired = false, next }: { justRe
     if (r.ok) {
       // A failed attempt never reaches here, so `next` stays in the address bar (APL-2652 AC4).
       // Checked again: the prop is only a path, and router.push is never given an absolute URL.
-      router.push(safeReturnPath(next) ?? "/");
+      router.push(returnToActive() ? (safeReturnPath(next) ?? "/") : "/");
       router.refresh();
       return;
     }

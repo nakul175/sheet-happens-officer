@@ -60,7 +60,14 @@ export function present(t: TaskRow, viewer?: { id: string; role: Role }) {
 async function loadTask(user: Actor, id: string, o: { write?: boolean; deleted?: boolean; holderCanDo?: boolean } = {}) {
   const t = await loadRow(id);
   if (!t || (t.deletedAt && !o.deleted)) throw notFound("Task");
-  const a = await projectAccess(user, t.projectId, { write: o.write });
+  let a;
+  try {
+    a = await projectAccess(user, t.projectId, { write: o.write });
+  } catch (err) {
+    // No access and a missing task must be the same 404. "Project not found" would reveal that the task exists.
+    if (err instanceof ApiError && err.status === 404) throw notFound("Task");
+    throw err;
+  }
   if (o.write) requireWrite(a);
   // The approver holding a task can only Close it or Send it back (SHO-US-4.6); the Leader and Admins keep full authority.
   if (o.write && !o.holderCanDo && awaiting(t) && user.id === t.approverId && a.role !== "LEADER") {

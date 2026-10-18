@@ -3,7 +3,7 @@ import { Skeleton } from "@/components/ui";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { currentUser, publicUser } from "@/lib/auth";
-import { RETURN_PATH_HEADER, signInHref } from "@/lib/return-to";
+import { RETURN_PATH_HEADER, signedOutSignInHref } from "@/lib/return-to";
 import { Shell, type Me } from "./Shell";
 import { SetOwnPassword } from "./SetOwnPassword";
 import { crmVisible } from "@/lib/crm";
@@ -18,9 +18,8 @@ async function Gate({ children }: { children: React.ReactNode }) {
   try {
     user = await currentUser({ allowTempPassword: true });
   } catch {
-    // APL-2652. Come back to the path they asked for. signInHref refuses anything that is not a same-origin path.
-    const href = signInHref((await headers()).get(RETURN_PATH_HEADER));
-    redirect(href.startsWith("/") && !href.startsWith("//") ? href : "/signin");
+    // APL-2652. Come back to the path they asked for. Flag off is plain /signin, the same as main.
+    redirect(signedOutSignInHref((await headers()).get(RETURN_PATH_HEADER)));
   }
   // SHO-US-23.5: on a Super-Admin-issued password, this screen stands in for every page (the page itself is never rendered).
   // Saving refreshes the same URL, so the person lands on the page they asked for.

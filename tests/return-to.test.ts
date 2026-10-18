@@ -2,8 +2,8 @@
 // The cases at the top do not need a server. The "signed-out redirect" cases hit TASKBOARD_URL.
 import { describe, expect, it } from "vitest";
 import { api } from "@/components/api";
-import { account, BASE } from "./helpers";
-import { isSignInScreen, safeReturnPath, sessionSignInTarget, signInHref } from "@/lib/return-to";
+import { account, BASE, project, task } from "./helpers";
+import { isSignInScreen, returnToActive, returnToEnabled, safeReturnPath, sessionSignInTarget, signedOutSignInHref, signInHref } from "@/lib/return-to";
 
 const BASE_ORIGIN = "http://return.invalid";
 
@@ -76,6 +76,41 @@ describe("APL-2652 safe return path", () => {
     ]) {
       expect(safeReturnPath(next), next).toBeNull();
       expect(signInHref(next), next).toBe("/signin");
+    }
+  });
+
+  it("AC2 follows next only for a same-origin page path; anything else falls back to the home page", () => {
+    expect(safeReturnPath("/tasks/T1")).toBe("/tasks/T1");
+    expect(safeReturnPath("/projects/abc?tab=comments")).toBe("/projects/abc?tab=comments");
+    const rejected = [
+      "https://evil.example",
+      "http://evil.example/tasks/T1",
+      "HTTPS://evil.example",
+      "//evil.example",
+      "///evil.example",
+      "/\\evil.example",
+      "\\\\evil.example",
+      "javascript:alert(1)",
+      "JaVaScRiPt:alert(1)",
+      "javascript%3Aalert(1)",
+      "https%3A%2F%2Fevil.example",
+      "%2F%2Fevil.example",
+      "/%2f%2fevil.example",
+      "/%252f%252fevil.example",
+      "/%5Cevil.example",
+      "/%09/evil.example",
+      "/api/tasks",
+      "/api",
+      "/api/tasks?x=1",
+      "/%2Fapi%2Ftasks",
+      "/%61pi/tasks",
+      "/signin",
+      "/signin?next=/tasks/T1",
+    ];
+    for (const next of rejected) {
+      expect(safeReturnPath(next), next).toBeNull();
+      expect(signInHref(next), next).toBe("/signin");
+      expect(signedOutSignInHref(next), next).toBe("/signin");
     }
   });
 
@@ -249,6 +284,112 @@ function assertSameOriginSignIn(target: string, next: string | null) {
   }
 }
 
+describe("SIGNIN_RETURN_TO", () => {
+  const previous = process.env.SIGNIN_RETURN_TO;
+  function restoreEnv() {
+    if (previous === undefined) delete process.env.SIGNIN_RETURN_TO;
+    else process.env.SIGNIN_RETURN_TO = previous;
+  }
+
+  it("defaults on, and keeps expired=1 with the safe return path", () => {
+    delete process.env.SIGNIN_RETURN_TO;
+    expect(returnToEnabled()).toBe(true);
+    expect(signInHref("/tasks/T1", { expired: true })).toBe("/signin?expired=1&next=%2Ftasks%2FT1");
+    expect(signedOutSignInHref("/tasks/T1")).toBe("/signin?next=%2Ftasks%2FT1");
+    for (const on of ["on", "1", "true", "yes"]) {
+      process.env.SIGNIN_RETURN_TO = on;
+      expect(returnToEnabled(), on).toBe(true);
+    }
+    restoreEnv();
+  });
+
+  it("when off, next and expired are ignored and a 401 goes to /signin like main", async () => {
+    const realFetch = globalThis.fetch;
+    const realWindow = (globalThis as { window?: unknown }).window;
+    const assigned: string[] = [];
+    const place = (pathname: string) => {
+      assigned.length = 0;
+      (globalThis as { window?: unknown }).window = {
+        location: {
+          pathname,
+          search: "",
+          set href(value: string) { assigned.push(value); },
+          get href() { return assigned.at(-1) ?? ""; },
+        },
+        dispatchEvent() {},
+      };
+    };
+    globalThis.fetch = (async () =>
+      new Response(JSON.stringify({ error: "Not signed in" }), {
+        status: 401,
+        headers: { "content-type": "application/json" },
+      })) as typeof fetch;
+    process.env.SIGNIN_RETURN_TO = "off";
+    try {
+      expect(returnToEnabled()).toBe(false);
+      expect(signInHref("/tasks/T1", { expired: true })).toBe("/signin");
+      expect(signInHref("https://evil.example")).toBe("/signin");
+      expect(signedOutSignInHref("/tasks/T1?tab=comments")).toBe("/signin");
+      expect(sessionSignInTarget("/tasks/T1")).toBe("/signin");
+      expect(sessionSignInTarget("/signin", "?next=%2Ftasks%2FT1")).toBe("/signin");
+      for (const off of ["off", "0", "false", "no"]) {
+        process.env.SIGNIN_RETURN_TO = off;
+        expect(returnToEnabled(), off).toBe(false);
+      }
+      process.env.SIGNIN_RETURN_TO = "off";
+      place("/tasks/T1");
+      expect((await api("GET", "/api/tasks/T1")).status).toBe(401);
+      expect(assigned).toEqual(["/signin"]);
+      place("/signin");
+      await api("GET", "/api/tasks/T1");
+      expect(assigned).toEqual(["/signin"]);
+    } finally {
+      globalThis.fetch = realFetch;
+      (globalThis as { window?: unknown }).window = realWindow;
+      restoreEnv();
+    }
+  });
+
+  it("the browser cookie turns the same 401 off and on", async () => {
+    const realFetch = globalThis.fetch;
+    const realWindow = (globalThis as { window?: unknown }).window;
+    const realDocument = (globalThis as { document?: { cookie: string } }).document;
+    const assigned: string[] = [];
+    (globalThis as { window?: unknown }).window = {
+      location: {
+        pathname: "/tasks/T1",
+        search: "",
+        set href(value: string) { assigned.push(value); },
+        get href() { return assigned.at(-1) ?? ""; },
+      },
+      dispatchEvent() {},
+    };
+    globalThis.fetch = (async () =>
+      new Response(JSON.stringify({ error: "Not signed in" }), {
+        status: 401,
+        headers: { "content-type": "application/json" },
+      })) as typeof fetch;
+    delete process.env.SIGNIN_RETURN_TO;
+    try {
+      (globalThis as { document?: { cookie: string } }).document = { cookie: "sho_return_to=0" };
+      expect(returnToActive()).toBe(false);
+      await api("GET", "/api/tasks/T1");
+      expect(assigned).toEqual(["/signin"]);
+
+      assigned.length = 0;
+      (globalThis as { document?: { cookie: string } }).document = { cookie: "sho_return_to=1" };
+      expect(returnToActive()).toBe(true);
+      await api("GET", "/api/tasks/T1");
+      expect(assigned).toEqual([signInHref("/tasks/T1", { expired: true })]);
+    } finally {
+      globalThis.fetch = realFetch;
+      (globalThis as { window?: unknown }).window = realWindow;
+      (globalThis as { document?: { cookie: string } }).document = realDocument;
+      restoreEnv();
+    }
+  });
+});
+
 describe("APL-2652 signed-out redirect", () => {
   it("AC1 sends a signed-out deep link to sign-in with that path, and does not reuse another path", async () => {
     for (const [path, next] of [
@@ -306,6 +447,31 @@ describe("APL-2652 signed-out redirect", () => {
     expect(evil.html).toMatch(new RegExp(alert));
     expect(evil.html).toContain('\\"next\\":\\"$undefined\\"');
     expect(evil.html).not.toContain('\\"next\\":\\"https://evil.example\\"');
+  });
+
+  it("a no-access task and a missing task return the same 404 body and headers", async () => {
+    const owner = await account("nfowner");
+    const outsider = await account("nfout");
+    const p = await project(owner, owner);
+    const hidden = await task(owner, p.id, { title: "APL2652 hidden task", description: "APL2652 secret body" });
+    const missing = "cmmissingtask000000000000";
+    const read = async (id: string) => {
+      const res = await fetch(`${BASE}/api/tasks/${id}`, { headers: { cookie: outsider.c.cookie }, redirect: "manual" });
+      const body = Buffer.from(await res.arrayBuffer());
+      const headers = [...res.headers.entries()]
+        .map(([name, value]) => [name.toLowerCase(), value] as const)
+        .filter(([name]) => name !== "date")
+        .sort((a, b) => a[0].localeCompare(b[0]));
+      return { status: res.status, body, headers };
+    };
+    const denied = await read(hidden);
+    const gone = await read(missing);
+    expect(denied.status).toBe(404);
+    expect(gone.status).toBe(404);
+    expect(Buffer.compare(denied.body, gone.body)).toBe(0);
+    expect(denied.body.toString("utf8")).toBe(JSON.stringify({ error: "Task not found" }));
+    expect(denied.body.toString("utf8")).not.toContain("APL2652");
+    expect(denied.headers).toEqual(gone.headers);
   });
 
   it("a signed-in person is not sent to sign-in", async () => {

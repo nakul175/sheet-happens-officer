@@ -1,6 +1,6 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { isSignInScreen, signInHref } from "@/lib/return-to";
+import { isSignInScreen, returnToActive, signInHref } from "@/lib/return-to";
 
 export type Res<T = Record<string, any>> = { ok: boolean; status: number; error?: string; data: T }; // eslint-disable-line @typescript-eslint/no-explicit-any
 
@@ -18,10 +18,13 @@ export async function api<T = Record<string, any>>(method: string, path: string,
     }
     const data = (res.headers.get("content-type")?.includes("json") ? await res.json() : {}) as any; // eslint-disable-line @typescript-eslint/no-explicit-any
     const error = res.ok ? undefined : data?.issues?.[0]?.message ?? data?.error ?? "Something went wrong. Try again.";
-    // APL-2652. A 401 uses signInHref so the URL carries expired=1 and the current safe path.
-    // Already being on /signin or /signin/ does not navigate.
-    if (res.status === 401 && typeof window !== "undefined" && !isSignInScreen(window.location.pathname)) {
-      window.location.href = signInHref(window.location.pathname + window.location.search, { expired: true });
+    // APL-2652. Flag off matches main: every 401 goes to /signin, including from the sign-in page.
+    // Flag on uses signInHref so the URL carries expired=1 and the current safe path, and /signin does not redirect.
+    if (res.status === 401 && typeof window !== "undefined") {
+      if (!returnToActive()) window.location.href = "/signin";
+      else if (!isSignInScreen(window.location.pathname)) {
+        window.location.href = signInHref(window.location.pathname + window.location.search, { expired: true });
+      }
     }
     return { ok: res.ok, status: res.status, error, data };
   } catch {
