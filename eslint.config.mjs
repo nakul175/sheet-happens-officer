@@ -13,6 +13,9 @@ const eslintConfig = defineConfig([
     "build/**",
     "next-env.d.ts",
     "deploy/**", // ops scripts run on the server with plain node
+    // Story specs are Playwright. This branch's harness is not a unit-test project, and eslint
+    // already errors on it (explicit any). They run from the staging workflow.
+    "tests/e2e/**",
   ]),
 ]);
 
