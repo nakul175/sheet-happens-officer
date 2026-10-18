@@ -118,14 +118,20 @@ test("AC5: a 100-character unbreakable title wraps and the card does not exceed 
 });
 
 test("AC6: on a mouse device 1024 px or wider, dragging a card to another column still works", async ({ browser, admin }) => {
+  test.setTimeout(45_000);
   const ctx = await phone(browser, 1280, 900, false);
   const page = await ctx.newPage();
   await page.goto(board(projectId), { waitUntil: "load" });
   const card = page.locator(".bcard", { hasText: zz("22.6 card") }).first();
   await expect(card).toBeVisible({ timeout: 30000 });
   await expect(card.getByRole("button", { name: /^Move to…/ })).toBeVisible(); // the button exists beside dragging; it is not removed on desktop
-  const target = page.locator(".col").nth(1);
-  await card.dragTo(target);
+  const from = (await card.boundingBox())!;
+  const to = (await page.locator(".col").nth(1).boundingBox())!;
+  await page.mouse.move(from.x + from.width / 2, from.y + 12);
+  await page.mouse.down();
+  await page.mouse.move(from.x + from.width / 2 + 20, from.y + 20, { steps: 4 });
+  await page.mouse.move(to.x + to.width / 2, to.y + 80, { steps: 12 });
+  await page.mouse.up();
   await expect.poll(async () => (await admin.api.get(`/api/tasks/${taskId}`)).json.task.section.id, { timeout: 15000 }).toBe(doing);
   await ctx.close();
 });

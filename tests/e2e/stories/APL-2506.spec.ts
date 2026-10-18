@@ -33,7 +33,7 @@ test("AC1: a new notification raises the count and appears first in the panel", 
   const now = await inbox(member);
   expect(now.unread).toBe(before + 1);
   expect(now.items[0].text).toContain(zz("count me")); // newest first
-  expect(now.items.length).toBeLessThanOrEqual(50);
+  expect((await member.api.get("/api/notifications")).json.items.length).toBeLessThanOrEqual(50); // default page, SHO-US-14.13
   await member.page.goto("/");
   await expect(member.page.getByRole("button", { name: `Notifications, ${before + 1} unread` })).toBeVisible();
   await member.page.getByRole("button", { name: /^Notifications/ }).click();
@@ -50,6 +50,7 @@ test("AC2: opening an item marks it read and the count drops; Mark all as read c
   await member.page.getByRole("button", { name: /^Notifications/ }).click();
   await member.page.getByRole("dialog", { name: "Notifications" }).locator(".bell-main", { hasText: zz("read two") }).click();
   await expect.poll(async () => (await inbox(member)).unread).toBe(start - 1);
+  await member.page.goto("/"); // the click opened the task; start again from a clean page
   await member.page.getByRole("button", { name: /^Notifications/ }).click();
   await member.page.getByRole("button", { name: "Mark all as read" }).click();
   await expect.poll(async () => (await inbox(member)).unread).toBe(0);
