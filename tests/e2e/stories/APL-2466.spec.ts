@@ -1,5 +1,5 @@
 // APL-2466 · [SHO-E2] People and roles. One test per acceptance criterion.
-// Pam qa:TC: none on the issue. New people are named ZZ-TEST and deactivated afterwards.
+// New people are named ZZ-TEST and deactivated afterwards.
 // Sign-up uses SHO_QA_PASS. The file skips when that is unset.
 // Sign-in checks use the Member account from the environment (its password is known here). Its role and status are put back.
 import { test, login } from "../support";
@@ -60,7 +60,7 @@ async function deactivatePerson(admin: Who, personId: string, parked: string[]) 
   return off;
 }
 
-test("AC1: the configured first Super Admin has the Super Admin role, and a new sign-up does not", async ({ admin, anon, later }) => {
+test("AC1: the configured first Super Admin has the Super Admin role, and a new sign-up does not (qa:TC missing)", async ({ admin, anon, later }) => {
   // A fresh database is not created here. The configured account (from SUPER_ADMIN_EMAILS) is that first Super Admin.
   const me = await admin.api.get("/api/auth/me");
   expect(me.json.user.orgRole).toBe("SUPER_ADMIN");
@@ -75,7 +75,7 @@ test("AC1: the configured first Super Admin has the Super Admin role, and a new 
   later(() => deactivate(admin.api, person!.id));
 });
 
-test("AC2: the Super Admin can promote a Member to Admin and demote them, and the person is notified", async ({ admin, browser, later }) => {
+test("AC2: the Super Admin can promote a Member to Admin and demote them, and the person is notified (qa:TC missing)", async ({ admin, browser, later }) => {
   test.setTimeout(120_000);
   const creds = login("MEMBER");
   const member = await signInAs(browser, creds.email, creds.password);
@@ -104,7 +104,7 @@ test("AC2: the Super Admin can promote a Member to Admin and demote them, and th
   expect(await countOf(demoted)).toBe(demotedBefore + 1);
 });
 
-test("AC3: deactivating a person blocks sign-in and keeps the record; reactivating restores access", async ({ admin, browser, anon, later }) => {
+test("AC3: deactivating a person blocks sign-in and keeps the record; reactivating restores access (qa:TC missing)", async ({ admin, browser, anon, later }) => {
   test.setTimeout(180_000);
   const creds = login("MEMBER");
   const member = await signInAs(browser, creds.email, creds.password);
@@ -137,7 +137,7 @@ test("AC3: deactivating a person blocks sign-in and keeps the record; reactivati
   expect(back.user.id).toBe(id);
 });
 
-test("AC4: open tasks move to a chosen receiver, and a receiver outside the project falls back to the Leader", async ({ admin, later }) => {
+test("AC4: open tasks move to a chosen receiver, and a receiver outside the project falls back to the Leader (qa:TC missing)", async ({ admin, later }) => {
   test.setTimeout(180_000);
   const leaver = await added(admin, later, "ac4-leave");
   const taker = await added(admin, later, "ac4-take");
@@ -176,7 +176,7 @@ async function retire(api: Api, email: string) {
   if (person && person.status !== "DEACTIVATED") await deactivate(api, person.id);
 }
 
-test("AC5: the only Super Admin cannot be demoted or deactivated", async ({ admin, later }) => {
+test("AC5: the only Super Admin cannot be demoted or deactivated (qa:TC missing)", async ({ admin, later }) => {
   test.setTimeout(240_000);
   const id = admin.user.id as string;
   const demote = await admin.api.patch(`/api/team/${id}`, { orgRole: "MEMBER" });
@@ -203,7 +203,7 @@ test("AC5: the only Super Admin cannot be demoted or deactivated", async ({ admi
   await expect(mine.getByRole("button", { name: /Deactivate|Make Member|Make Admin|Reactivate/ })).toHaveCount(0);
 });
 
-test("AC6: the Team page shows people by role, and deactivated people are shown as deactivated", async ({ admin, later }) => {
+test("AC6: the Team page shows people by role, and deactivated people are shown as deactivated (qa:TC missing)", async ({ admin, later }) => {
   test.setTimeout(240_000);
   const memberName = zz("ac6-member");
   const adminName = zz("ac6-admin");
