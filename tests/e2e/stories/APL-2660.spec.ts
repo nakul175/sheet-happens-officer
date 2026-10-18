@@ -4,9 +4,74 @@
 // Thrown-away people and projects use ZZ-TEST names and nakul17+ aliases, then afterAll archives
 // the projects and deactivates the people. Self-signup only accepts @aplyd.com, so the alias is
 // nakul17+…@aplyd.com.
-import { afterAll, describe, expect, it } from "vitest";
+import { readdirSync, readFileSync } from "node:fs";
+import path from "node:path";
+import { expect, test } from "@playwright/test";
 import { canDropOnSection, closeControlOffered, completeTickAllowed, moveMenuSections } from "@/lib/approver-ui";
-import { account, superAdmin, task, withVersion, type Account } from "../../helpers";
+
+// Same signup, task and version helpers as tests/helpers.ts. Inlined so Playwright does not load that file's Vitest import.
+const BASE = process.env.TASKBOARD_URL ?? "http://localhost:3000";
+const OUTBOX = process.env.EMAIL_OUTBOX_DIR ?? ".outbox";
+const PW = "correct-horse-9";
+const SUPER_EMAIL = "root.test@aplyd.com";
+const helperRun = Date.now();
+let helperN = 0;
+
+class Client {
+  cookie = "";
+  async call(method: string, p: string, body?: unknown) {
+    const res = await fetch(BASE + p, {
+      method,
+      headers: { "content-type": "application/json", ...(this.cookie ? { cookie: this.cookie } : {}) },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    const set = res.headers.get("set-cookie");
+    if (set) this.cookie = set.split(";")[0];
+    const text = await res.text();
+    const json = text && res.headers.get("content-type")?.includes("json") ? JSON.parse(text) : null;
+    return { status: res.status, json, setCookie: set, headers: res.headers };
+  }
+  get = (p: string) => this.call("GET", p);
+  post = (p: string, b?: unknown) => this.call("POST", p, b ?? {});
+  patch = (p: string, b?: unknown) => this.call("PATCH", p, b);
+  put = (p: string, b?: unknown) => this.call("PUT", p, b);
+  del = (p: string) => this.call("DELETE", p);
+}
+
+function verifyToken(email: string) {
+  let files: string[] = [];
+  try { files = readdirSync(OUTBOX).sort(); } catch { return null; }
+  const mails = files.map((f) => JSON.parse(readFileSync(path.join(OUTBOX, f), "utf8"))).filter((m) => m.to === email && /Verify/.test(m.subject));
+  return mails.at(-1)?.text.match(/token=([\w-]+)/)?.[1] ?? null;
+}
+
+type Account = { c: Client; id: string; email: string; name: string };
+
+async function account(label: string, fixedEmail?: string): Promise<Account> {
+  const email = fixedEmail ?? `${label}${helperRun}${helperN++}@aplyd.com`;
+  const name = label[0].toUpperCase() + label.slice(1);
+  const c = new Client();
+  const r = await c.post("/api/auth/signup", { name, email, password: PW });
+  if (r.status === 201) {
+    const t = verifyToken(email);
+    await expect((await c.post("/api/auth/verify", { token: t })).status).toBe(200);
+  }
+  const s = await c.post("/api/auth/signin", { email, password: PW });
+  await expect(s.status).toBe(200);
+  return { c, id: s.json.user.id, email, name };
+}
+
+const superAdmin = () => account("root", SUPER_EMAIL);
+
+const task = async (who: Account, projectId: string, body: Record<string, unknown> = {}) => {
+  const r = await who.c.post(`/api/projects/${projectId}/tasks`, { title: "Task " + helperN++, ...body });
+  await expect(r.status, JSON.stringify(r.json)).toBe(201);
+  return r.json.task.id as string;
+};
+
+const versionNow = async (who: Account, id: string) => (await who.c.get(`/api/tasks/${id}`)).json?.task?.updatedAt ?? new Date(0).toISOString();
+
+const withVersion = async (who: Account, id: string, body: Record<string, unknown> = {}) => ({ ...body, expectedUpdatedAt: await versionNow(who, id) });
 
 const PRODUCTION = new Set(["sheethappensofficer.com", "www.sheethappensofficer.com", "app.sheethappensofficer.com"]);
 for (const raw of [process.env.TASKBOARD_URL, process.env.BASE_URL, process.env.STAGING_URL]) {
@@ -94,8 +159,8 @@ const card = (sections: BoardSection[], id: string) => {
   return found!;
 };
 
-describe("APL-2522 approver edge cases (APL-2660)", () => {
-  afterAll(async () => {
+test.describe("APL-2522 approver edge cases (APL-2660)", () => {
+  test.afterAll(async () => {
     const sa = await superAdmin();
     const problems: string[] = [];
     for (const id of projectIds) {
@@ -120,7 +185,7 @@ describe("APL-2522 approver edge cases (APL-2660)", () => {
     expect(problems, problems.join("\n")).toEqual([]);
   });
 
-  it("AC1 (set by a plain creator): an Editor who created a task and is not a Leader or Admin names a valid approver, and a Viewer, non-member, deactivated person or the current assignee is refused", async () => {
+  test("AC1 (set by a plain creator): an Editor who created a task and is not a Leader or Admin names a valid approver, and a Viewer, non-member, deactivated person or the current assignee is refused", { tag: "@write" }, async () => {
     const sa = await superAdmin();
     const lead = await zzAccount("lead");
     const creator = await zzAccount("creator");
@@ -147,7 +212,7 @@ describe("APL-2522 approver edge cases (APL-2660)", () => {
     expect((await taskOf(creator, t)).approver?.id).toBe(lead.id);
   });
 
-  it("AC2 (close by the approver): the approver holds the task and selects Close, and the task completes", async () => {
+  test("AC2 (close by the approver): the approver holds the task and selects Close, and the task completes", { tag: "@write" }, async () => {
     const lead = await zzAccount("lead");
     const worker = await zzAccount("worker");
     const boss = await zzAccount("boss");
@@ -165,7 +230,7 @@ describe("APL-2522 approver edge cases (APL-2660)", () => {
     expect(done.section.isDone).toBe(true);
   });
 
-  it("AC3 (close by another Editor refused): an Editor who is neither the approver, the Leader nor an Admin is refused in the UI and on the server, and the task stays open", async () => {
+  test("AC3 (close by another Editor refused): an Editor who is neither the approver, the Leader nor an Admin is refused in the UI and on the server, and the task stays open", { tag: "@write" }, async () => {
     const lead = await zzAccount("lead");
     const worker = await zzAccount("worker");
     const boss = await zzAccount("boss");
@@ -187,7 +252,7 @@ describe("APL-2522 approver edge cases (APL-2660)", () => {
     expect(stayed.awaitingApproval).toBe(false);
   });
 
-  it("AC4 (board drag to Done): a person who may not close it is refused, the task stays open, and Move to omits Done; the approver, the Leader or an Admin dragging it to Done completes it", async () => {
+  test("AC4 (board drag to Done): a person who may not close it is refused, the task stays open, and Move to omits Done; the approver, the Leader or an Admin dragging it to Done completes it", { tag: "@write" }, async () => {
     const sa = await superAdmin();
     const lead = await zzAccount("lead");
     const worker = await zzAccount("worker");
@@ -217,7 +282,7 @@ describe("APL-2522 approver edge cases (APL-2660)", () => {
     }
   });
 
-  it("AC5 (send back: who is notified): the previous assignee receives the notice, nobody else is notified, and the task stays open with them as assignee", async () => {
+  test("AC5 (send back: who is notified): the previous assignee receives the notice, nobody else is notified, and the task stays open with them as assignee", { tag: "@write" }, async () => {
     const lead = await zzAccount("lead");
     const worker = await zzAccount("worker");
     const boss = await zzAccount("boss");
@@ -243,7 +308,7 @@ describe("APL-2522 approver edge cases (APL-2660)", () => {
     expect(back.awaitingApproval).toBe(false);
   });
 
-  it("AC6 (send back with the Leader as approver): the previous assignee has left, been deactivated or made a Viewer, and Send back leaves the task not awaiting approval and reassignable", async () => {
+  test("AC6 (send back with the Leader as approver): the previous assignee has left, been deactivated or made a Viewer, and Send back leaves the task not awaiting approval and reassignable", { tag: "@write" }, async () => {
     const sa = await superAdmin();
     for (const kind of ["left", "deactivated", "viewer"] as const) {
       const lead = await zzAccount("lead");
@@ -267,7 +332,7 @@ describe("APL-2522 approver edge cases (APL-2660)", () => {
     }
   });
 
-  it("AC7 (approver deactivated): the Leader becomes the approver and the holder of tasks awaiting approval, and gets one notice per project with the count", async () => {
+  test("AC7 (approver deactivated): the Leader becomes the approver and the holder of tasks awaiting approval, and gets one notice per project with the count", { tag: "@write" }, async () => {
     const sa = await superAdmin();
     const lead = await zzAccount("lead");
     const worker = await zzAccount("worker");
@@ -300,7 +365,7 @@ describe("APL-2522 approver edge cases (APL-2660)", () => {
     expect(forProject(p2.id)[0].text).toMatch(/you now approve 1 task/);
   });
 
-  it("AC8 (Leader is the assignee): when the approver is deactivated or removed, the approver is cleared and the Leader gets the approver cleared message", async () => {
+  test("AC8 (Leader is the assignee): when the approver is deactivated or removed, the approver is cleared and the Leader gets the approver cleared message", { tag: "@write" }, async () => {
     const sa = await superAdmin();
     for (const kind of ["deactivated", "removed"] as const) {
       const lead = await zzAccount("lead");
