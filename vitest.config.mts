@@ -10,6 +10,7 @@ export default defineConfig({
   test: {
     testTimeout: 30000,
     fileParallelism: false,
-    exclude: [...configDefaults.exclude, "tests/viewport/**", "tests/crm-visible-modes-server.test.ts"],
+    // Story specs are Playwright (tests/e2e/stories) and run from the staging workflow, not vitest.
+    exclude: [...configDefaults.exclude, "tests/viewport/**", "tests/e2e/**", "tests/crm-visible-modes-server.test.ts"],
   },
 });
