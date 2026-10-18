@@ -54,3 +54,5 @@ jobs:
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
       SMOKE_EMAIL: ${{ secrets.SMOKE_EMAIL }}
       SMOKE_PASSWORD: ${{ secrets.SMOKE_PASSWORD }}
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      DIRECT_DATABASE_URL: ${{ secrets.DIRECT_DATABASE_URL }}

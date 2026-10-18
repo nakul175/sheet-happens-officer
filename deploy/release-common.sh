@@ -68,18 +68,32 @@ json_get() {
   node -e 'const j=JSON.parse(process.argv[1]); const v=j[process.argv[2]]; process.stdout.write(v===undefined||v===null?"":String(v))' "$1" "$2"
 }
 
+# Drop leading and trailing whitespace. A padded host must still match, and a
+# whitespace-only value must fail closed the same way an unset value does.
+trim_ws() {
+  local v=$1
+  v="${v#"${v%%[![:space:]]*}"}"
+  v="${v%"${v##*[![:space:]]}"}"
+  printf '%s' "$v"
+}
+
+# Lowercase and trim the production identity. Returns 1 when either side is empty.
+read_prod_identity() {
+  PROD_HOST_TRIM=$(trim_ws "$(printf '%s' "${PROD_DB_HOST:-}" | tr '[:upper:]' '[:lower:]')")
+  PROD_NAME_TRIM=$(trim_ws "$(printf '%s' "${PROD_DB_NAME:-}" | tr '[:upper:]' '[:lower:]')")
+  [ -n "$PROD_HOST_TRIM" ] && [ -n "$PROD_NAME_TRIM" ]
+}
+
 # True when this parsed URL is the production database. Unset identity variables fail closed.
 is_prod_db() {
-  local facts="$1" host db prod_host prod_name
-  if [ -z "${PROD_DB_HOST:-}" ] || [ -z "${PROD_DB_NAME:-}" ]; then
+  local facts="$1" host db
+  if ! read_prod_identity; then
     echo "PROD_DB_HOST and PROD_DB_NAME must be set"
     return 2
   fi
   host=$(json_get "$facts" host)
   db=$(json_get "$facts" database)
-  prod_host=$(printf '%s' "$PROD_DB_HOST" | tr '[:upper:]' '[:lower:]')
-  prod_name=$(printf '%s' "$PROD_DB_NAME" | tr '[:upper:]' '[:lower:]')
-  [ "$host" = "$prod_host" ] && [ "$db" = "$prod_name" ]
+  [ "$host" = "$PROD_HOST_TRIM" ] && [ "$db" = "$PROD_NAME_TRIM" ]
 }
 
 # Staging and production each have one directory and one env file. Callers cannot substitute the other.
@@ -107,7 +121,7 @@ assert_push_target() {
 # Values are never printed.
 assert_database_urls() {
   local tier="$1" app direct pool prod_rc
-  if [ -z "${PROD_DB_HOST:-}" ] || [ -z "${PROD_DB_NAME:-}" ]; then
+  if ! read_prod_identity; then
     echo "PROD_DB_HOST and PROD_DB_NAME must be set"
     return 1
   fi

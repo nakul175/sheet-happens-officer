@@ -24,6 +24,10 @@ on:
         required: false
       STAGING_DIRECT_DATABASE_URL:
         required: false
+      DATABASE_URL:
+        required: false
+      DIRECT_DATABASE_URL:
+        required: false
       RESEND_API_KEY:
         required: false
       ANTHROPIC_API_KEY:

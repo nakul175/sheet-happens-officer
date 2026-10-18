@@ -142,6 +142,23 @@ grep -q '^DIRECT_DATABASE_URL=' "$ENV_OUT"
 if grep -q 'staging.sheethappensofficer.com' "$ENV_OUT"; then fail "production env used the staging host"; fi
 pass "production env keeps the pool URL and the direct URL"
 
+run_env production ok \
+  PROD_DB_HOST='  127.0.0.1  ' \
+  PROD_DB_NAME='  Prod  ' \
+  DATABASE_URL='postgresql://u:test-only@127.0.0.1:25061/prod?sslmode=require&pgbouncer=true' \
+  DIRECT_DATABASE_URL='postgresql://u:test-only@127.0.0.1:25060/prod?sslmode=require' \
+  RESEND_API_KEY='re_test'
+pass "production identity matches after trimming PROD_DB_HOST and PROD_DB_NAME"
+
+run_env production fail \
+  PROD_DB_HOST='   ' \
+  PROD_DB_NAME=prod \
+  DATABASE_URL='postgresql://u:test-only@127.0.0.1:25061/prod?sslmode=require&pgbouncer=true' \
+  DIRECT_DATABASE_URL='postgresql://u:test-only@127.0.0.1:25060/prod?sslmode=require' \
+  RESEND_API_KEY='re_test'
+grep -q 'PROD_DB_HOST and PROD_DB_NAME must be set' "$ENV_ERR"
+pass "whitespace-only PROD_DB_HOST fails closed"
+
 run_env staging fail \
   DATABASE_URL="postgresql://u:test-only@127.0.0.1:5432/db?sslmode=require'" \
   RESEND_API_KEY='re_test'
@@ -503,6 +520,28 @@ pass "same-SHA redeploy keeps the previous symlink and its tree"
 
 new_tree
 write_env production
+run_rel production >"$WORK/out"
+old=eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+old_dir="$WORK/root/opt/sho/releases/$old"
+mkdir -p "$old_dir"
+echo marker > "$old_dir/marker"
+ln -sfn "$old_dir" "$WORK/root/opt/sho/previous"
+printf '%s\n' "$old" > "$WORK/root/opt/sho/previous-sha"
+set +e
+run_rel production HEALTH_FAIL=1 >"$WORK/out" 2>&1
+rc=$?
+set -e
+[ "$rc" != 0 ] || fail "same-SHA health failure was treated as success"
+if grep -q 'no previous release to roll back to' "$WORK/out"; then
+  fail "same-SHA health failure lost the rollback target"
+fi
+[ "$(readlink -f "$WORK/root/opt/sho/current")" = "$old_dir" ] || fail "same-SHA health failure left current on the new tree"
+[ "$(readlink -f "$WORK/root/opt/sho/previous")" = "$old_dir" ] || fail "same-SHA health failure moved the previous symlink"
+[ -f "$old_dir/marker" ] || fail "same-SHA health failure removed the previous tree"
+pass "same-SHA health failure rolls back to the previous tree"
+
+new_tree
+write_env production
 old=dddddddddddddddddddddddddddddddddddddddd
 old_dir="$WORK/root/opt/sho/releases/$old"
 mkdir -p "$old_dir"
@@ -521,6 +560,30 @@ grep -q 'because it is the rollback target' "$WORK/out"
 [ -f "$old_dir/marker" ] || fail "prune deleted the tree previous points at"
 [ ! -d "$WORK/root/opt/sho/releases/junk1" ] || fail "prune did not delete an unreferenced old tree"
 pass "prune keeps the tree the previous symlink points at"
+
+new_tree
+write_env production
+physical="$WORK/physical-root"
+mv "$WORK/root" "$physical"
+ln -s "$physical" "$WORK/root"
+old=9999999999999999999999999999999999999999
+old_dir="$WORK/root/opt/sho/releases/$old"
+mkdir -p "$old_dir"
+echo marker > "$old_dir/marker"
+touch -d '2019-01-01' "$old_dir"
+ln -s "$old_dir" "$WORK/root/opt/sho/current"
+for i in 1 2 3 4; do
+  junk="$WORK/root/opt/sho/releases/junk$i"
+  mkdir -p "$junk"
+  echo x > "$junk/x"
+  touch -d "2020-0${i}-15" "$junk"
+done
+run_rel production >"$WORK/out"
+grep -q 'because it is the rollback target' "$WORK/out"
+[ "$(readlink -f "$WORK/root/opt/sho/previous")" = "$(readlink -f "$old_dir")" ]
+[ -f "$old_dir/marker" ] || fail "prune deleted the rollback tree behind a symlinked prefix"
+[ ! -d "$WORK/root/opt/sho/releases/junk1" ] || fail "prune kept an unreferenced tree behind a symlinked prefix"
+pass "prune resolves a symlinked prefix and keeps the rollback target"
 
 new_tree
 write_env production
@@ -638,13 +701,13 @@ pass "rollback rejects a previous tree that is not an app"
 
 run_guard() {
   local assignments=()
-  while [ $# -gt 0 ] && [[ "$1" == *=* ]]; do
+  while [ $# -gt 0 ] && [[ "$1" =~ ^[A-Za-z_][A-Za-z0-9_]*= ]]; do
     assignments+=("$1")
     shift
   done
   env -u PROD_DB_HOST -u PROD_DB_NAME -u DATABASE_URL -u DIRECT_DATABASE_URL -u ZZ_PREFIX -u APP_URL -u BASE_URL \
     PROD_DB_HOST=prod.example PROD_DB_NAME=prod \
-    "${assignments[@]}" node deploy/prod-host-guard.mjs "$@"
+    "${assignments[@]}" node deploy/prod-host-guard.cjs "$@"
 }
 if run_guard TASKBOARD_URL=https://app.sheethappensofficer.com --grep @write >"$WORK/out" 2>&1; then
   fail "@write was allowed against production"
@@ -663,6 +726,27 @@ fi
 if run_guard TASKBOARD_URL=https://app.sheethappensofficer.com --grep @readonly --grep-invert @writeXXX >"$WORK/out" 2>&1; then
   fail "a grep-invert substring was treated as the read-only smoke"
 fi
+run_guard TASKBOARD_URL=https://app.sheethappensofficer.com -g @readonly -G @write
+run_guard TASKBOARD_URL=https://app.sheethappensofficer.com -g=@readonly -G=@write
+run_guard TASKBOARD_URL=https://app.sheethappensofficer.com --grep=@readonly --grep-invert=@write
+if run_guard TASKBOARD_URL=https://app.sheethappensofficer.com -g '@readonly|' -G @write >"$WORK/out" 2>&1; then
+  fail "a short grep regex was treated as the read-only smoke"
+fi
+if run_guard TASKBOARD_URL=https://app.sheethappensofficer.com '-g=@readonly|' -G=@write >"$WORK/out" 2>&1; then
+  fail "a short grep equals-regex was treated as the read-only smoke"
+fi
+if run_guard TASKBOARD_URL=https://app.sheethappensofficer.com -g @readonly -G @writeXXX >"$WORK/out" 2>&1; then
+  fail "a short grep-invert substring was treated as the read-only smoke"
+fi
+if run_guard TASKBOARD_URL=https://app.sheethappensofficer.com -g=@readonly -G=@writeXXX >"$WORK/out" 2>&1; then
+  fail "a short grep-invert equals substring was treated as the read-only smoke"
+fi
+if run_guard TASKBOARD_URL=https://app.sheethappensofficer.com -grep @readonly -G @write >"$WORK/out" 2>&1; then
+  fail "-grep was treated as the -g alias"
+fi
+if run_guard TASKBOARD_URL=https://app.sheethappensofficer.com --grep @readonly -g @readonly -G @write >"$WORK/out" 2>&1; then
+  fail "two grep flags were accepted as one exact token"
+fi
 run_guard TASKBOARD_URL=http://localhost:3100 --grep @write
 if run_guard TASKBOARD_URL=https://app.sheethappensofficer.com ZZ_PREFIX=ZZ-TEST-01 --seed --grep @readonly --grep-invert @write >"$WORK/out" 2>&1; then
   fail "ZZ-TEST seeding was allowed against production"
@@ -670,16 +754,37 @@ fi
 grep -q 'ZZ-TEST' "$WORK/out"
 if PROD_DB_HOST=db.example PROD_DB_NAME=prod \
   DATABASE_URL='postgresql://u:supersecret@db.example:25061/prod?sslmode=require&pgbouncer=true' \
-  node deploy/prod-host-guard.mjs --grep @write >"$WORK/out" 2>&1; then
+  node deploy/prod-host-guard.cjs --grep @write >"$WORK/out" 2>&1; then
   fail "@write was allowed against the production database"
 fi
 if grep -q 'supersecret' "$WORK/out"; then fail "host guard printed a password"; fi
 if env -u PROD_DB_HOST -u PROD_DB_NAME TASKBOARD_URL=http://localhost:3100 \
-  node deploy/prod-host-guard.mjs --grep @readonly --grep-invert @write >"$WORK/out" 2>&1; then
+  node deploy/prod-host-guard.cjs --grep @readonly --grep-invert @write >"$WORK/out" 2>&1; then
   fail "host guard ran without the production database identity"
 fi
 grep -q 'PROD_DB_HOST and PROD_DB_NAME must be set' "$WORK/out"
 pass "read-only smoke is exact, ZZ-TEST seeding is refused, and an unset identity fails closed"
+
+playwright_list() {
+  env -u DATABASE_URL -u DIRECT_DATABASE_URL -u ZZ_PREFIX -u APP_URL -u BASE_URL -u PROD_DB_HOST -u PROD_DB_NAME \
+    PROD_DB_HOST=prod.example PROD_DB_NAME=prod \
+    TASKBOARD_URL=https://app.sheethappensofficer.com \
+    npx playwright test --list "$@"
+}
+if ! playwright_list -g @readonly -G @write >"$WORK/out" 2>&1; then
+  cat "$WORK/out" >&2
+  fail "playwright test --list could not load the host guard"
+fi
+if grep -q 'exports is not defined' "$WORK/out"; then
+  fail "playwright transformed the host guard into a broken module"
+fi
+if playwright_list -g '@readonly|' -G @write >"$WORK/out" 2>&1; then
+  fail "playwright test --list accepted a short-flag regex"
+fi
+if grep -q 'exports is not defined' "$WORK/out"; then
+  fail "playwright transformed the host guard into a broken module"
+fi
+pass "playwright test --list loads the host guard and checks short grep flags"
 
 # --- qa gate, window, ruleset, ssh ------------------------------------------
 
@@ -831,6 +936,22 @@ if grep -q 'vars.ALLOW_CONTRACT_MIGRATION' .github/workflows/ship.yml .github/wo
   fail "ALLOW_CONTRACT_MIGRATION is still a repository variable"
 fi
 grep -q 'allow_contract_migration' .github/workflows/release.yml
+grep -q 'DATABASE_URL: ${{ secrets.DATABASE_URL }}' .github/workflows/release.yml
+grep -q 'DIRECT_DATABASE_URL: ${{ secrets.DIRECT_DATABASE_URL }}' .github/workflows/release.yml
+python3 - <<'PY'
+import re, pathlib, sys
+ship = pathlib.Path(".github/workflows/ship.yml").read_text()
+match = re.search(r"workflow_call:.*?secrets:\n(.*?)permissions:", ship, re.S)
+if not match:
+    sys.exit("could not find ship.yml workflow_call secrets")
+block = match.group(1)
+for name in ("DATABASE_URL", "DIRECT_DATABASE_URL"):
+    if not re.search(rf"^      {name}:\n        required: false\n", block, re.M):
+        sys.exit(f"ship.yml workflow_call secrets missing {name}")
+deploy = pathlib.Path(".github/workflows/deploy.yml").read_text()
+if re.search(r"secrets\.DATABASE_URL|secrets\.DIRECT_DATABASE_URL", deploy):
+    sys.exit("deploy.yml passes production database secrets")
+PY
 pass "workflows keep rehearsals, secrets, statuses and the contract override apart"
 
 rm -rf /tmp/sho-rel.*

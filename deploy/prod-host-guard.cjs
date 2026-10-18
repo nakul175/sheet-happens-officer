@@ -1,8 +1,8 @@
 // Stop tests and seed data from running against production unless the run is the
 // read-only smoke. NJ's tag is exactly @readonly, with @write excluded exactly.
-// ZZ-TEST seeding is refused against production in every case.
-import { pathToFileURL } from "node:url";
-
+// This file is CommonJS on purpose. Playwright compiles an imported .mjs into
+// CommonJS syntax and then evaluates it as ESM, which throws "exports is not defined"
+// and rolls the production deploy back when the smoke starts.
 const PROD_APP_HOSTS = new Set([
   "app.sheethappensofficer.com",
   "sheethappensofficer.com",
@@ -30,7 +30,7 @@ function identity(raw) {
   }
 }
 
-export function productionTarget(env = process.env) {
+function productionTarget(env = process.env) {
   const prodHost = (env.PROD_DB_HOST || "").trim().toLowerCase();
   const prodName = (env.PROD_DB_NAME || "").trim().toLowerCase();
   if (!prodHost || !prodName) {
@@ -46,39 +46,49 @@ export function productionTarget(env = process.env) {
   });
 }
 
-function flagValues(argv, name) {
+// Exact flag names only. `-g` must not also match `-grep`, and `=` is a value form.
+function flagValues(argv, names) {
+  const wanted = Array.isArray(names) ? names : [names];
   const values = [];
-  const prefix = `${name}=`;
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
-    if (arg === name) values.push(argv[i + 1] ?? "");
-    else if (arg.startsWith(prefix)) values.push(arg.slice(prefix.length));
+    for (const name of wanted) {
+      if (arg === name) {
+        values.push(argv[i + 1] ?? "");
+        break;
+      }
+      const prefix = `${name}=`;
+      if (arg.startsWith(prefix)) {
+        values.push(arg.slice(prefix.length));
+        break;
+      }
+    }
   }
   return values;
 }
 
-export function readonlySmoke(argv) {
-  const grep = flagValues(argv, "--grep");
-  const invert = flagValues(argv, "--grep-invert");
+function readonlySmoke(argv) {
+  const grep = flagValues(argv, ["--grep", "-g"]);
+  const invert = flagValues(argv, ["--grep-invert", "-G"]);
   return grep.length === 1 && grep[0] === "@readonly" && invert.length === 1 && invert[0] === "@write";
 }
 
-export function zzTestRequested(env = process.env, argv = []) {
+function zzTestRequested(env = process.env, argv = []) {
   const blob = [env.ZZ_PREFIX, env.SEED_LABEL, env.SEED_NAME, ...argv].filter(Boolean).join("\n");
   return /ZZ-TEST/.test(blob);
 }
 
-export function assertProdHostGuard(argv = process.argv, env = process.env) {
+function assertProdHostGuard(argv = process.argv, env = process.env) {
   if (!productionTarget(env)) return;
   if (zzTestRequested(env, argv)) {
     throw new Error("refusing ZZ-TEST seeding against production");
   }
   if (!readonlySmoke(argv)) {
-    throw new Error("refusing to run against production without --grep @readonly and --grep-invert @write");
+    throw new Error("refusing to run against production without an exact @readonly grep and an exact @write grep-invert");
   }
 }
 
-export function assertProdSeed(env = process.env, label = "") {
+function assertProdSeed(env = process.env, label = "") {
   if (!productionTarget(env)) return;
   if (/ZZ-TEST/.test(label) || zzTestRequested(env, [])) {
     throw new Error("refusing ZZ-TEST seeding against production");
@@ -86,12 +96,15 @@ export function assertProdSeed(env = process.env, label = "") {
   throw new Error("refusing to seed against production");
 }
 
-function isMain() {
-  const entry = process.argv[1];
-  return Boolean(entry) && import.meta.url === pathToFileURL(entry).href;
-}
+module.exports = {
+  productionTarget,
+  readonlySmoke,
+  zzTestRequested,
+  assertProdHostGuard,
+  assertProdSeed,
+};
 
-if (isMain()) {
+if (require.main === module) {
   try {
     if (process.argv.includes("--seed")) assertProdSeed(process.env, process.argv.join(" "));
     else assertProdHostGuard(process.argv, process.env);

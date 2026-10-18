@@ -1,6 +1,6 @@
 // Synthetic fixtures in the throwaway database. One workspace per run, so prompts cannot see each other.
 import { randomBytes } from "node:crypto";
-import { assertProdSeed } from "../../deploy/prod-host-guard.mjs";
+import { assertProdSeed } from "../../deploy/prod-host-guard.cjs";
 import { db } from "../../src/lib/db";
 import { EVAL_NOW, fixtureDue } from "./clock";
 import type { FixtureSpec, Prompt, World } from "./types";

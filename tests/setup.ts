@@ -1,4 +1,4 @@
-import { assertProdHostGuard } from "../deploy/prod-host-guard.mjs";
+import { assertProdHostGuard } from "../deploy/prod-host-guard.cjs";
 
 // The guard fails closed until the production database is named. These placeholders
 // are not a real host. Values already set by a run are left alone, so a production

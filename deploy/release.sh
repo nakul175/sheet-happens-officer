@@ -131,7 +131,9 @@ note_backfill() {
 rollback() {
   log "rolling back the code only (migrations are forward-only and were not reverted)"
   sudo journalctl -u "$SERVICE" -n 80 --no-pager || true
-  if [ -n "${PREV:-}" ] && [ -d "$PREV" ] && [ "$PREV" != "$REL" ]; then
+  local rel_real
+  rel_real=$(readlink -f "$REL" 2>/dev/null || true)
+  if [ -n "${PREV:-}" ] && [ -d "$PREV" ] && [ "$PREV" != "$rel_real" ]; then
     note_backfill "$PREV"
     switch "$PREV"
     sudo systemctl restart "$SERVICE" || true
@@ -190,6 +192,19 @@ fail_extract() {
 [ -f "$tmp/src/generated/prisma/client.ts" ] || fail_extract "tarball has no Prisma client"
 find "$tmp/src/generated/prisma" -name 'libquery_engine*.node' -print -quit | grep -q . \
   || fail_extract "tarball has no Prisma engine"
+# A same-SHA redeploy replaces the tree current already points at. Record the
+# rollback directory before that replace. Afterwards current and this release
+# are the same path, so a failed health check would otherwise have nothing to restore.
+rel_real=$(readlink -f "$REL" 2>/dev/null || true)
+live=$(readlink -f "$CUR" 2>/dev/null || true)
+if [ -n "$live" ] && [ -d "$live" ] && [ "$live" != "$rel_real" ]; then
+  PREV=$live
+else
+  PREV=$(readlink -f "$ROOT/previous" 2>/dev/null || true)
+  if [ -z "${PREV:-}" ] || [ ! -d "$PREV" ] || [ "$PREV" = "$rel_real" ]; then
+    PREV=
+  fi
+fi
 rm -rf "$REL"
 mv "$tmp" "$REL"
 tmp=
@@ -328,15 +343,21 @@ else
   log "not installing production cron"
 fi
 
-PREV="$(readlink -f "$CUR" 2>/dev/null || true)"
-if [ -n "${PREV:-}" ] && [ -d "$PREV" ] && [ "$PREV" != "$REL" ]; then
+rel_real=$(readlink -f "$REL" 2>/dev/null || true)
+if [ -n "${PREV:-}" ] && [ -d "$PREV" ] && [ "$PREV" != "$rel_real" ]; then
   note_backfill "$PREV"
-  ln -sfn "$PREV" "$ROOT/previous"
-  basename "$PREV" > "$ROOT/previous-sha"
-  log "rollback target $(basename "$PREV")"
+  existing=$(readlink -f "$ROOT/previous" 2>/dev/null || true)
+  if [ "$existing" = "$PREV" ]; then
+    basename "$PREV" > "$ROOT/previous-sha"
+    log "rollback target $(basename "$PREV") kept"
+  else
+    ln -sfn "$PREV" "$ROOT/previous"
+    basename "$PREV" > "$ROOT/previous-sha"
+    log "rollback target $(basename "$PREV")"
+  fi
 elif [ -L "$ROOT/previous" ] || [ -d "$ROOT/previous" ]; then
   note_backfill "$(readlink -f "$ROOT/previous" 2>/dev/null || true)"
-  log "rollback target $(basename "$(readlink -f "$ROOT/previous")") kept"
+  log "rollback target $(basename "$(readlink -f "$ROOT/previous" 2>/dev/null || true)") kept"
 else
   log "rollback target none"
 fi
@@ -350,16 +371,31 @@ fi
 if healthy && version_ok; then
   log "healthy: $SHA is live"
   keep_prev="$(readlink -f "$ROOT/previous" 2>/dev/null || true)"
-  find "$ROOT/releases" -mindepth 1 -maxdepth 1 -type d -printf '%T@ %p\n' | sort -rn | tail -n +$((KEEP + 1)) | cut -d' ' -f2- \
-    | while IFS= read -r path; do
-        [ -n "$path" ] || continue
-        [ "$path" = "$REL" ] && continue
-        if [ -n "$keep_prev" ] && [ "$path" = "$keep_prev" ]; then
-          log "keeping $(basename "$path") because it is the rollback target"
-          continue
-        fi
-        rm -rf "$path"
-      done
+  rel_real="$(readlink -f "$REL" 2>/dev/null || true)"
+  releases_real="$(readlink -f "$ROOT/releases" 2>/dev/null || true)"
+  if [ -z "$releases_real" ] || [ ! -d "$releases_real" ]; then
+    log "refusing to prune; the releases directory could not be resolved"
+  else
+    # find prints the path it was given. A symlinked prefix therefore does not
+    # match readlink -f of the rollback target. Resolve each entry, and never
+    # delete a path that resolves outside the real releases directory.
+    find "$ROOT/releases" -mindepth 1 -maxdepth 1 -type d -printf '%T@ %p\n' | sort -rn | tail -n +$((KEEP + 1)) | cut -d' ' -f2- \
+      | while IFS= read -r path; do
+          [ -n "$path" ] || continue
+          resolved="$(readlink -f "$path" 2>/dev/null || true)"
+          [ -n "$resolved" ] && [ -d "$resolved" ] || continue
+          case "$resolved" in
+            "$releases_real"/*) ;;
+            *) log "refusing to prune $(basename "$path") outside the releases directory"; continue ;;
+          esac
+          [ "$resolved" = "$rel_real" ] && continue
+          if [ -n "$keep_prev" ] && [ "$resolved" = "$keep_prev" ]; then
+            log "keeping $(basename "$resolved") because it is the rollback target"
+            continue
+          fi
+          rm -rf "$resolved"
+        done
+  fi
   case "$TARBALL" in
     "$ROOT"/incoming/*) rm -f "$TARBALL" "${TARBALL}.sha256" ;;
   esac
