@@ -17,7 +17,9 @@
 #               A shard with no tests passes. A shard whose tests were all skipped fails. Each shard uploads its JSON counts.
 #   e2e-serial  the SERIAL_SPECS files, alone, after every shard has finished, as the shared SHO_ADMIN / SHO_MEMBER accounts.
 #               The same per-job rule applies, and it uploads its JSON counts too.
-#   counts      once, after every shard (if: always()), sums those counts and fails when run is 0 or skipped equals total.
+#   counts      once, after every shard (if: always(), needs plan). Expected count files come from plan:
+#               20 when the parallel matrix runs, plus 1 when serial specs were picked. Fewer files, a failed
+#               download, or a missing-report marker fails the job. It also fails when run is 0 or skipped equals total.
 #   report      merges every job's blob report into one HTML report.
 #
 # max_parallel: the staging database is shared with production and allows 25 connections. Do not raise it above 5 until NJ approves
@@ -81,6 +83,7 @@ jobs:
       base_url: ${{ steps.target.outputs.base_url }}
       parallel: ${{ steps.pick.outputs.parallel }}
       serial: ${{ steps.pick.outputs.serial }}
+      expected_counts: ${{ steps.pick.outputs.expected_counts }}
     steps:
       - name: Check the target host
         id: target
@@ -149,6 +152,9 @@ jobs:
           echo "Serial job (${#serial[@]} files):"; printf '  %s\n' "${serial[@]}"
           echo "parallel=${parallel[*]}" >> "$GITHUB_OUTPUT"
           echo "serial=${serial[*]}" >> "$GITHUB_OUTPUT"
+          expected=$(node scripts/ci/assert-playwright-ran.mjs --mode expected --parallel "${#parallel[@]}" --serial "${#serial[@]}")
+          echo "Count files expected: $expected"
+          echo "expected_counts=$expected" >> "$GITHUB_OUTPUT"
 
   e2e:
     name: Shard ${{ matrix.nn }} of 20 (${{ matrix.role }})
@@ -260,9 +266,8 @@ jobs:
         if: always()
         run: |
           if [ ! -f scripts/ci/assert-playwright-ran.mjs ]; then
-            echo "expected=0 unexpected=0 flaky=0 skipped=0 total=0 run=0"
-            printf '%s\n' '{"expected":0,"unexpected":0,"flaky":0,"skipped":0,"total":0,"run":0}' > playwright-counts.json
-            echo "Empty shard: count check script is not on disk."
+            printf '%s\n' '{"missing":true}' > playwright-counts.json
+            echo "Missing Playwright JSON report (missing=true): count check script is not on disk."
             exit 0
           fi
           node scripts/ci/assert-playwright-ran.mjs --mode shard --report playwright-report.json --counts-out playwright-counts.json
@@ -273,7 +278,7 @@ jobs:
         with:
           name: playwright-counts-${{ matrix.nn }}
           path: playwright-counts.json
-          if-no-files-found: ignore
+          if-no-files-found: error
           retention-days: 14
 
       - name: Upload the blob report
@@ -344,9 +349,8 @@ jobs:
         if: always()
         run: |
           if [ ! -f scripts/ci/assert-playwright-ran.mjs ]; then
-            echo "expected=0 unexpected=0 flaky=0 skipped=0 total=0 run=0"
-            printf '%s\n' '{"expected":0,"unexpected":0,"flaky":0,"skipped":0,"total":0,"run":0}' > playwright-counts.json
-            echo "Empty shard: count check script is not on disk."
+            printf '%s\n' '{"missing":true}' > playwright-counts.json
+            echo "Missing Playwright JSON report (missing=true): count check script is not on disk."
             exit 0
           fi
           node scripts/ci/assert-playwright-ran.mjs --mode shard --report playwright-report.json --counts-out playwright-counts.json
@@ -357,7 +361,7 @@ jobs:
         with:
           name: playwright-counts-serial
           path: playwright-counts.json
-          if-no-files-found: ignore
+          if-no-files-found: error
           retention-days: 14
 
       - name: Upload the blob report
@@ -371,19 +375,20 @@ jobs:
 
   counts:
     name: Fail when nothing ran
-    needs: [e2e, e2e-serial]
+    needs: [plan, e2e, e2e-serial]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
-        continue-on-error: true
         with:
           pattern: playwright-counts-*
           path: shard-counts
       - name: Merge the shard counts
-        run: node scripts/ci/assert-playwright-ran.mjs --mode aggregate --dir shard-counts
+        env:
+          EXPECTED_COUNTS: ${{ needs.plan.outputs.expected_counts }}
+        run: node scripts/ci/assert-playwright-ran.mjs --mode aggregate --dir shard-counts --expected "$EXPECTED_COUNTS"
 
   report:
     name: Merge the reports

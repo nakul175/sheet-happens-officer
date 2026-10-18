@@ -24,12 +24,27 @@ function walk(suites, tallies) {
   }
 }
 
+export const SHARD_TOTAL = 20;
+
 export function zeroCounts() {
   return { expected: 0, unexpected: 0, flaky: 0, skipped: 0, total: 0, run: 0 };
 }
 
+/** Marker written when the Playwright JSON report was not produced. It is not a count of 0 tests. */
+export function missingMarker() {
+  return { missing: true };
+}
+
+/** 20 when the parallel matrix runs, plus 1 when the serial job runs. */
+export function expectedCountFiles(parallelFiles, serialFiles) {
+  const shards = Number(parallelFiles) > 0 ? SHARD_TOTAL : 0;
+  const serial = Number(serialFiles) > 0 ? 1 : 0;
+  return shards + serial;
+}
+
 /** Counts from a Playwright JSON report or a counts file. `run` is every outcome that was not skipped. */
 export function countsFromReport(report) {
+  if (report && report.missing === true) return { ...zeroCounts(), missing: true };
   if (report && !report.stats && !report.suites && (report.expected !== undefined || report.run !== undefined || report.skipped !== undefined)) {
     const expected = num(report.expected);
     const unexpected = num(report.unexpected);
@@ -80,6 +95,23 @@ export function aggregateFailureReason(counts) {
     return `Nothing ran across shards (run=${counts.run}, skipped=${counts.skipped}, total=${counts.total}).`;
   }
   return null;
+}
+
+/**
+ * Problems with the set of count files, before the run=0 check.
+ * A short download fails even when the files that arrived contain passing tests.
+ * A missing-report marker fails even when the other files ran tests.
+ */
+export function aggregateFileProblems(received, expected, parts) {
+  const problems = [];
+  if (received < expected) {
+    problems.push(`Received ${received} count files, expected ${expected}.`);
+  }
+  const missing = parts.filter((part) => part.missing).length;
+  if (missing > 0) {
+    problems.push(`${missing} count file(s) marked the Playwright report missing.`);
+  }
+  return problems;
 }
 
 export function sumCounts(parts) {
@@ -148,30 +180,55 @@ function main() {
     try {
       counts = countsFromReport(JSON.parse(readFileSync(reportPath, "utf8")));
     } catch {
-      counts = zeroCounts();
-      console.log(`Shard report missing or unreadable (${reportPath}). Treating this shard as empty.`);
+      counts = missingMarker();
+      console.log(`Shard report missing or unreadable (${reportPath}).`);
     }
     writeFileSync(countsPath, JSON.stringify(counts) + "\n");
+    if (counts.missing) {
+      console.log("Missing Playwright JSON report (missing=true).");
+      return;
+    }
     console.log(`Shard counts: ${formatCounts(counts)}`);
     if (counts.total === 0) console.log("Empty shard: no tests in this shard.");
     finish(counts, shardFailureReason(counts));
     return;
   }
+  if (mode === "expected") {
+    console.log(expectedCountFiles(arg("--parallel"), arg("--serial")));
+    return;
+  }
   if (mode === "aggregate") {
     const dir = arg("--dir");
+    const expectedText = arg("--expected");
+    if (!/^\d+$/.test(expectedText)) {
+      throw new Error(`Expected count is not a whole number (${expectedText}).`);
+    }
+    const expected = Number(expectedText);
     const files = countFilesIn(dir);
     const parts = [];
+    let unreadable = 0;
     for (const file of files) {
       try {
         parts.push(countsFromReport(JSON.parse(readFileSync(file, "utf8"))));
       } catch {
-        console.log(`Skipping unreadable counts file: ${file}`);
+        unreadable += 1;
+        console.log(`Unreadable counts file: ${file}`);
       }
     }
-    const counts = sumCounts(parts);
-    console.log(`Aggregate files: ${parts.length}`);
+    console.log(`Aggregate files: ${files.length} expected: ${expected}`);
+    const problems = aggregateFileProblems(files.length, expected, parts);
+    if (unreadable > 0) problems.push(`${unreadable} count file(s) were unreadable.`);
+    const counted = parts.filter((part) => !part.missing);
+    const counts = sumCounts(counted);
     console.log(`Aggregate counts: ${formatCounts(counts)}`);
-    finish(counts, aggregateFailureReason(counts));
+    if (problems.length === 0) {
+      const reason = aggregateFailureReason(counts);
+      if (reason) problems.push(reason);
+    }
+    if (problems.length > 0) {
+      for (const problem of problems) console.error(`::error::${problem}`);
+      process.exit(1);
+    }
     return;
   }
   throw new Error(`Unknown mode ${mode}.`);

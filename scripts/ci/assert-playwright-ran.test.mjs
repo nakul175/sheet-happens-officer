@@ -7,7 +7,9 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 import {
   aggregateFailureReason,
+  aggregateFileProblems,
   countsFromReport,
+  expectedCountFiles,
   formatCounts,
   shardFailureReason,
   sumCounts,
@@ -125,13 +127,14 @@ test("shard cli: all skipped exits 1", () => {
   assert.equal(JSON.parse(readFileSync(counts, "utf8")).skipped, 7);
 });
 
-test("shard cli: a missing report is an empty shard and exits 0", () => {
+test("shard cli: a missing report writes a missing marker and does not count as 0 tests", () => {
   const dir = mkdtempSync(join(tmpdir(), "pw-shard-"));
   const counts = join(dir, "playwright-counts.json");
   const result = runScript(["--mode", "shard", "--report", join(dir, "missing.json"), "--counts-out", counts]);
   assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /Empty shard/);
-  assert.equal(JSON.parse(readFileSync(counts, "utf8")).total, 0);
+  assert.match(result.stdout, /missing=true/);
+  assert.equal(result.stdout.includes("Empty shard"), false);
+  assert.deepEqual(JSON.parse(readFileSync(counts, "utf8")), { missing: true });
 });
 
 test("aggregate cli: run=0 across shard files fails", () => {
@@ -140,9 +143,9 @@ test("aggregate cli: run=0 across shard files fails", () => {
   mkdirSync(join(dir, "playwright-counts-02"));
   writeFileSync(join(dir, "playwright-counts-01", "playwright-counts.json"), JSON.stringify(countsFromReport(stats({}))));
   writeFileSync(join(dir, "playwright-counts-02", "playwright-counts.json"), JSON.stringify(countsFromReport(stats({ skipped: 3 }))));
-  const result = runScript(["--mode", "aggregate", "--dir", dir]);
+  const result = runScript(["--mode", "aggregate", "--dir", dir, "--expected", "2"]);
   assert.equal(result.status, 1);
-  assert.match(result.stdout, /Aggregate files: 2/);
+  assert.match(result.stdout, /Aggregate files: 2 expected: 2/);
   assert.match(result.stdout, /run=0/);
   assert.match(result.stderr, /::error::Nothing ran across shards/);
 });
@@ -151,9 +154,46 @@ test("aggregate cli: a normal run exits 0", () => {
   const dir = mkdtempSync(join(tmpdir(), "pw-agg-"));
   writeFileSync(join(dir, "a.json"), JSON.stringify(countsFromReport(stats({ expected: 2, skipped: 1 }))));
   writeFileSync(join(dir, "b.json"), JSON.stringify(countsFromReport(stats({}))));
-  const result = runScript(["--mode", "aggregate", "--dir", dir]);
+  const result = runScript(["--mode", "aggregate", "--dir", dir, "--expected", "2"]);
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /expected=2 unexpected=0 flaky=0 skipped=1 total=3 run=2/);
+});
+
+test("a short count fails even when the files that arrived ran tests", () => {
+  const ran = countsFromReport(stats({ expected: 4 }));
+  const problems = aggregateFileProblems(19, expectedCountFiles(3, 1), [ran]);
+  assert.equal(expectedCountFiles(3, 1), 21);
+  assert.equal(expectedCountFiles(0, 2), 1);
+  assert.deepEqual(problems, ["Received 19 count files, expected 21."]);
+  const dir = mkdtempSync(join(tmpdir(), "pw-agg-"));
+  writeFileSync(join(dir, "only.json"), JSON.stringify(ran));
+  const result = runScript(["--mode", "aggregate", "--dir", dir, "--expected", "20"]);
+  assert.equal(result.status, 1);
+  assert.match(result.stdout, /Aggregate files: 1 expected: 20/);
+  assert.match(result.stdout, /run=4/);
+  assert.match(result.stderr, /::error::Received 1 count files, expected 20/);
+  assert.equal(result.stderr.includes("Nothing ran"), false);
+});
+
+test("a missing report marker fails the aggregate even when other shards ran", () => {
+  const dir = mkdtempSync(join(tmpdir(), "pw-agg-"));
+  const shard = mkdtempSync(join(tmpdir(), "pw-shard-"));
+  const report = join(shard, "missing.json");
+  const marker = join(dir, "playwright-counts-05.json");
+  const wrote = runScript(["--mode", "shard", "--report", report, "--counts-out", marker]);
+  assert.equal(wrote.status, 0, wrote.stderr);
+  assert.equal(JSON.parse(readFileSync(marker, "utf8")).missing, true);
+  writeFileSync(join(dir, "playwright-counts-01.json"), JSON.stringify(countsFromReport(stats({ expected: 6 }))));
+  const problems = aggregateFileProblems(2, 2, [
+    countsFromReport(stats({ expected: 6 })),
+    countsFromReport({ missing: true }),
+  ]);
+  assert.match(problems.join("\n"), /marked the Playwright report missing/);
+  const result = runScript(["--mode", "aggregate", "--dir", dir, "--expected", "2"]);
+  assert.equal(result.status, 1);
+  assert.match(result.stdout, /run=6/);
+  assert.match(result.stderr, /::error::1 count file\(s\) marked the Playwright report missing/);
+  assert.equal(result.stderr.includes("Received"), false);
 });
 
 test("formatCounts lists every field", () => {
