@@ -366,15 +366,16 @@ describe("tasks (4.x, 5.x)", () => {
     const ed = await account("editor");
     const p = await project(lead, lead, [{ who: ed }]);
     const t = await task(lead, p.id);
-    const seen = (await ed.c.get(`/api/tasks/${t}`)).json.task.updatedAt;
+    const seen = (await ed.c.get(`/api/tasks/${t}`)).json.task.version;
     expect((await patchTask(lead, t, { dueDate: istDate(3) })).status).toBe(200);
-    const r = await ed.c.patch(`/api/tasks/${t}`, { title: "mine", expectedUpdatedAt: seen });
+    const r = await ed.c.patch(`/api/tasks/${t}`, { title: "mine", version: seen });
     expect(r.status).toBe(409);
+    expect(r.json.code).toBe("version_conflict");
     expect(r.json.stale).toBe(true);
     expect(r.json.changedBy).toBe("Lead");
     expect(r.json.current.dueDate).toBe(istDate(3));
-    const fresh = (await ed.c.get(`/api/tasks/${t}`)).json.task.updatedAt;
-    expect((await ed.c.patch(`/api/tasks/${t}`, { title: "mine", expectedUpdatedAt: fresh })).status).toBe(200);
+    const fresh = (await ed.c.get(`/api/tasks/${t}`)).json.task.version;
+    expect((await ed.c.patch(`/api/tasks/${t}`, { title: "mine", version: fresh })).status).toBe(200);
   });
 
   // SHO-BUG-13: an edit must say which version it was made on.
@@ -397,9 +398,9 @@ describe("tasks (4.x, 5.x)", () => {
     const ed = await account("editor");
     const p = await project(lead, lead, [{ who: ed }]);
     const t = await task(lead, p.id, { title: "Original" });
-    const seen = (await ed.c.get(`/api/tasks/${t}`)).json.task.updatedAt;
+    const seen = (await ed.c.get(`/api/tasks/${t}`)).json.task.version;
     expect((await patchTask(lead, t, { title: "Theirs" })).status).toBe(200);
-    const r = await ed.c.patch(`/api/tasks/${t}`, { title: "Mine", expectedUpdatedAt: seen });
+    const r = await ed.c.patch(`/api/tasks/${t}`, { title: "Mine", version: seen });
     expect(r.status).toBe(409);
     expect(r.json.error).toBe("This task changed while you were editing it.");
     expect(r.json.changedBy).toBe("Lead");
@@ -411,8 +412,8 @@ describe("tasks (4.x, 5.x)", () => {
     const lead = await account("lead");
     const p = await project(lead, lead);
     const t = await task(lead, p.id, { title: "Original" });
-    const seen = (await lead.c.get(`/api/tasks/${t}`)).json.task.updatedAt;
-    const r = await lead.c.patch(`/api/tasks/${t}`, { title: "Saved", expectedUpdatedAt: seen });
+    const seen = (await lead.c.get(`/api/tasks/${t}`)).json.task.version;
+    const r = await lead.c.patch(`/api/tasks/${t}`, { title: "Saved", version: seen });
     expect(r.status).toBe(200);
     expect(r.json.task.title).toBe("Saved");
   });

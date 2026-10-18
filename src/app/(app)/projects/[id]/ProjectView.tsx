@@ -19,7 +19,7 @@ import { SaveViewDialog, type SavedView } from "./SavedViews";
 import { BulkBar, type BulkResult } from "./BulkBar";
 
 type T = {
-  id: string; title: string; updatedAt: string; sectionId: string; priority: string; dueDate: string | null; blocked: boolean; completedAt: string | null; isIdea?: boolean;
+  id: string; title: string; updatedAt: string; version: number; sectionId: string; priority: string; dueDate: string | null; blocked: boolean; completedAt: string | null; isIdea?: boolean;
   assignee: { id: string; name: string }; collaborators: { id: string; name: string }[]; awaitingApproval: boolean; canClose: boolean; subtasks: { total: number; open: number };
 };
 type S = { id: string; name: string; isDone: boolean; total: number; tasks: T[]; nextCursor: string | null };

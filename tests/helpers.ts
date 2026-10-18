@@ -81,10 +81,10 @@ export const task = async (who: Account, projectId: string, body: Record<string,
   return r.json.task.id as string;
 };
 
-/** PATCH a task on the version it is at right now (SHO-BUG-13: the server refuses an edit without one). */
+/** PATCH a task on the integer version it is at right now (APL-2669: the server refuses an edit without one). */
 export const patchTask = async (who: Account, id: string, body: Record<string, unknown>) => {
-  const seen = (await who.c.get(`/api/tasks/${id}`)).json?.task?.updatedAt ?? new Date(0).toISOString();
-  return who.c.patch(`/api/tasks/${id}`, { ...body, expectedUpdatedAt: seen });
+  const seen = (await who.c.get(`/api/tasks/${id}`)).json?.task?.version;
+  return who.c.patch(`/api/tasks/${id}`, { ...body, version: seen });
 };
 
 /** The version a task is at right now, as the page would show it (SHO-BUG-13, APL-2668: a change without one is refused). */

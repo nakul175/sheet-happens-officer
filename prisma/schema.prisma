@@ -239,6 +239,8 @@ model Task {
   links              TaskLink[]
   createdAt          DateTime           @default(now())
   updatedAt          DateTime           @updatedAt
+  // APL-2669: the edit token. A positive integer, one higher after each saved edit.
+  version            Int                @default(1)
   collaborators      TaskCollaborator[]
 
   @@index([workspaceId])
