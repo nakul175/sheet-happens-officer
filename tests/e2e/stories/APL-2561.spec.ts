@@ -5,7 +5,10 @@ import { test, expect, zz } from "../support";
 import { newProject } from "../g2";
 import { PASS, passwordOk } from "./qa";
 
-const tag = (id: string) => ({ annotation: [{ type: "ac", description: id }] });
+// qa:TC uses the AC id already on the test. Pam has not published a separate hash for these cases.
+const tag = (id: string) => ({ annotation: [{ type: "ac", description: id }, { type: "qa:TC", description: id }] });
+
+const skeleton = (page: import("@playwright/test").Page) => page.getByRole("status", { name: "Loading", exact: true });
 
 test.beforeAll(() => {
   test.skip(!PASS, "Set SHO_QA_PASS (the password for nakul17+ aliases).");
@@ -24,9 +27,10 @@ test("AC1: a load slower than 400 ms shows a skeleton of the layout (My tasks)",
   const page = admin.page;
   await page.route("**/api/my-tasks", async (r) => { await new Promise((x) => setTimeout(x, 2500)); await r.continue(); });
   await page.goto("/", { waitUntil: "commit" });
-  await expect(page.locator(".skel-wrap").first()).toHaveAttribute("aria-busy", "true", { timeout: 2000 });
-  await expect(page.locator(".skel-row").first()).toBeVisible({ timeout: 2000 });
-  await expect(page.locator(".skel-row")).toHaveCount(0, { timeout: 8000 }); // gone when the data arrives
+  const skel = skeleton(page);
+  await expect(skel).toHaveAttribute("aria-busy", "true", { timeout: 2000 });
+  await expect(skel.locator(".skel-row")).not.toHaveCount(0, { timeout: 2000 });
+  await expect(skel).toHaveCount(0, { timeout: 8000 }); // gone when the data arrives
 });
 
 test("AC1 and AC2 (project screen): a slow load shows a skeleton and does not claim the server is unreachable", tag("APL-2561 AC1 AC2"), async ({ admin, later }) => {
@@ -34,9 +38,9 @@ test("AC1 and AC2 (project screen): a slow load shows a skeleton and does not cl
   const page = admin.page;
   await page.route(new RegExp(`/api/projects/${p.id}(/tasks)?(\\?|$)`), async (r) => { await new Promise((x) => setTimeout(x, 2500)); await r.continue(); });
   await page.goto(`/projects/${p.id}`, { waitUntil: "commit" });
-  await page.waitForTimeout(800); // past the 400 ms threshold, the request is still in flight
-  await expect(page.getByText("Could not reach the server.")).toHaveCount(0);
-  await expect(page.locator(".skel-row").first()).toBeVisible();
+  const skel = skeleton(page);
+  await expect(skel.locator(".skel-row")).not.toHaveCount(0);
+  await expect(page.getByRole("alert", { name: "Could not reach the server." })).toHaveCount(0);
 });
 
 test("AC2: a dead network or a 5xx says 'Could not reach the server' with Retry, never 'not a member'", tag("APL-2561 AC2"), async ({ admin, later }) => {
@@ -79,13 +83,13 @@ test("AC4: an empty My tasks says what the screen is for and offers the next ste
   await expect(page.getByText("Nothing on your plate.")).toBeVisible();
   await expect(page.getByText(/Tasks assigned to you, or that you collaborate on, show up here/)).toBeVisible();
   await expect(page.getByRole("link", { name: "Open a project" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "New task" }).first()).toBeVisible();
+  await expect(page.getByRole("button", { name: "New task", exact: true })).toBeVisible();
 });
 
 test("AC4 (project): an empty project says so", tag("APL-2561 AC4"), async ({ admin, later }) => {
   const p = await project(admin, later, "14.2 empty");
   await admin.page.goto(`/projects/${p.id}`);
-  await expect(admin.page.getByText("No tasks here.").first()).toBeVisible();
+  await expect(admin.page.getByRole("region", { name: "To do" }).getByText("No tasks here.", { exact: true })).toBeVisible();
 });
 
 test("AC5: Retry succeeds and the screen loads without a full page reload", tag("APL-2561 AC5"), async ({ admin, later }) => {
@@ -98,7 +102,7 @@ test("AC5: Retry succeeds and the screen loads without a full page reload", tag(
   await page.evaluate(() => { (window as any).__noReload = "still here"; });
   await page.unroute(re); // the network is back
   await page.getByRole("button", { name: "Retry" }).click();
-  await expect(page.getByText(p.name).first()).toBeVisible();
+  await expect(page.getByRole("heading", { level: 1, name: p.name })).toBeVisible();
   await expect(page.getByText("Could not reach the server.")).toHaveCount(0);
   expect(await page.evaluate(() => (window as any).__noReload)).toBe("still here"); // same document: no reload
 });

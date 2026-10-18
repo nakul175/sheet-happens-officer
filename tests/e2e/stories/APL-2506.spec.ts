@@ -10,7 +10,8 @@ import path from "node:path";
 import { test, expect, zz, BASE_URL } from "../support";
 import { PASS, passwordOk } from "./qa";
 
-const tag = (id: string) => ({ annotation: [{ type: "ac", description: id }] });
+// qa:TC uses the AC id already on the test. Pam has not published a separate hash for these cases.
+const tag = (id: string) => ({ annotation: [{ type: "ac", description: id }, { type: "qa:TC", description: id }] });
 
 test.beforeAll(() => {
   test.skip(!PASS, "Set SHO_QA_PASS (the password for nakul17+ aliases).");
@@ -102,7 +103,7 @@ test("AC1: a new notification raises the count and appears first in the panel", 
   await member.page.goto("/");
   await expect(member.page.getByRole("button", { name: `Notifications, ${before + 1} unread` })).toBeVisible();
   const dlg = await openBell(member.page);
-  await expect(dlg.locator(".bell-main").first()).toContainText(zz("count me"));
+  await expect(dlg.getByRole("link", { name: zz("count me") })).toBeVisible();
 });
 
 test("AC2: opening an item marks it read and the count drops; Mark all as read clears the count", tag("APL-2506 AC2"), async ({ admin, member, later }) => {

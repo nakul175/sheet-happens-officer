@@ -5,7 +5,8 @@ import type { APIRequestContext, Browser } from "@playwright/test";
 import { test, expect, zz, type Api } from "../support";
 import { PASS, alias, deactivate, passwordOk, signInAs, signUp, sinkToken } from "./qa";
 
-const tag = (id: string) => ({ annotation: [{ type: "ac", description: id }] });
+// qa:TC uses the AC id already on the test. Pam has not published a separate hash for these cases.
+const tag = (id: string) => ({ annotation: [{ type: "ac", description: id }, { type: "qa:TC", description: id }] });
 
 test.beforeAll(() => {
   test.skip(!PASS, "Set SHO_QA_PASS (the password for nakul17+ aliases).");
@@ -47,7 +48,7 @@ test("AC1: tasks awaiting my approval sit in a group at the top of My tasks with
   const group = p.getByRole("region", { name: "Waiting on me" });
   await expect(group).toBeVisible();
   await expect(group.getByText(title)).toBeVisible();
-  await expect(group.getByText("Waiting since today").first()).toBeVisible();
+  await expect(group.locator(".item").filter({ hasText: title }).getByText("Waiting since today", { exact: true })).toBeVisible();
   // at the top of the task groups (the first-run Start guide card, when shown, sits above all groups)
   const labels = await p.locator("main.content").last().locator("section[aria-label]").evaluateAll((els) => els.map((e) => e.getAttribute("aria-label")).filter((l) => l !== "Start guide"));
   expect(labels[0]).toBe("Waiting on me");
@@ -61,7 +62,7 @@ test("AC2: Close in the row closes the task in one step and offers Undo", tag("A
   await p.getByRole("button", { name: `Close "${title}"` }).click();
   await expect(p.getByRole("button", { name: `Close "${title}"` })).toHaveCount(0);
   expect((await admin.api.get(`/api/tasks/${t}`)).json.task.completedAt).toBeTruthy();
-  await expect(p.getByRole("button", { name: /^Undo/ }).first()).toBeVisible();
+  await expect(p.getByRole("status").filter({ has: p.getByRole("button", { name: "Undo", exact: true }) }).getByRole("button", { name: "Undo", exact: true })).toBeVisible();
 });
 
 test("AC3: with nothing waiting, the group is absent", tag("APL-2575 AC3"), async ({ admin, member, browser, request, later }) => {

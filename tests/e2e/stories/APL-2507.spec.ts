@@ -8,7 +8,8 @@ import type { APIRequestContext, Browser } from "@playwright/test";
 import { test, expect, zz, type Api } from "../support";
 import { PASS, alias, archiveProject, deactivate, passwordOk, signInAs, signUp, sinkToken } from "./qa";
 
-const tag = (id: string) => ({ annotation: [{ type: "ac", description: id }] });
+// qa:TC uses the AC id already on the test. Pam has not published a separate hash for these cases.
+const tag = (id: string) => ({ annotation: [{ type: "ac", description: id }, { type: "qa:TC", description: id }] });
 
 test.beforeAll(() => {
   test.skip(!PASS, "Set SHO_QA_PASS (the password for nakul17+ aliases).");
