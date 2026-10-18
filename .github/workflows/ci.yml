@@ -80,6 +80,8 @@ jobs:
           fi
       - name: Unit tests
         run: npm test
+      - name: CRM visibility modes
+        run: npm run test:crm-modes
       - name: Server log (on failure)
         if: failure()
         run: tail -n 200 server.log || true

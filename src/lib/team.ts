@@ -69,8 +69,19 @@ export async function deactivate(actor: Actor, targetId: string, reassign: strin
   const memberships = await db.projectMember.findMany({ where: { userId: targetId }, include: { project: true } });
   const leads = memberships.filter((m) => m.role === "LEADER");
   if (leads.length) {
-    throw new ApiError(409, "Name a new Leader first for: " + leads.map((m) => m.project.name).join(", "), {
-      leads: leads.map((m) => ({ id: m.projectId, name: m.project.name })),
+    // A caller who can see the CRM gets every leadership, in the same order as before (APL-2735 AC2).
+    // crmProjectWhere drops deals the caller cannot see, so those names, ids and counts stay out of the 409.
+    let visible = leads;
+    if (!crmVisible(actor)) {
+      const visibleIds = new Set((await db.projectMember.findMany({
+        where: { userId: targetId, role: "LEADER", project: crmProjectWhere(actor) },
+        select: { projectId: true },
+      })).map((row) => row.projectId));
+      visible = leads.filter((m) => visibleIds.has(m.projectId));
+    }
+    if (!visible.length) throw new ApiError(409, "Name a new Leader first.");
+    throw new ApiError(409, "Name a new Leader first for: " + visible.map((m) => m.project.name).join(", "), {
+      leads: visible.map((m) => ({ id: m.projectId, name: m.project.name })),
     });
   }
   if (reassign !== "leaders") {
