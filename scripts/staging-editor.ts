@@ -13,8 +13,9 @@
 // The comparison is case-sensitive and applies to every host, including localhost,
 // 127.0.0.1 and ::1. SHO_STAGING, Sho_Staging, sho, and every other spelling are refused.
 // A tunnel that presents another database as localhost/<prodname> is refused. This does
-// not depend on PROD_DB_HOST or PROD_DB_NAME. Those still refuse as well, and the database
-// name matches PROD_DB_NAME exactly, including case. The host app.sheethappensofficer.com
+// not depend on PROD_DB_HOST or PROD_DB_NAME. Those still refuse as well. PROD_DB_NAME is
+// compared without regard to case, so SHO_PROD matches sho_prod. The sho_staging allowlist
+// stays an exact, case-sensitive match. The host app.sheethappensofficer.com
 // is always refused. A URL that sets host or dbname in the query is refused, so those
 // parameters cannot replace the host or database in the authority.
 //
@@ -96,12 +97,13 @@ function targetRefusal(target: DatabaseTarget, prodHost: string, prodName: strin
   if (isProdAppHost(target.host) || (prodHost && target.host === prodHost)) {
     return "Refusing to run: the database host is production.";
   }
+  // Deny list only. The sho_staging allowlist below stays case-sensitive.
+  if (prodName && target.name.toLowerCase() === prodName.toLowerCase()) {
+    return "Refusing to run: the database name is production.";
+  }
   const testDb = allowTestDb && target.name === TEST_DB_NAME && isLoopback(target.host);
   if (target.name !== STAGING_DB_NAME && !testDb) {
     return "Refusing to run: the database name must be exactly sho_staging.";
-  }
-  if (prodName && target.name === prodName) {
-    return "Refusing to run: the database name is production.";
   }
   return null;
 }

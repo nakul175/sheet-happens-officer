@@ -59,6 +59,7 @@ async function capture(run: () => Promise<number>) {
   }
 }
 
+// qa:TC-APL2682-97ed5b9f@v1
 function expectNoSecrets(text: string, secrets: string[]) {
   expect(text).not.toContain("postgresql://");
   expect(text).not.toContain("postgres://");
@@ -109,6 +110,7 @@ describe("staging editor (APL-2682)", () => {
     const usersBefore = await db.user.count();
     const fakeUrl = `postgresql://example:example@${PROD_APP}:5432/prod`;
     const cases: { name: string; env: NodeJS.ProcessEnv; argv: string[]; message: string }[] = [
+      // qa:TC-APL2682-64592871@v1
       { name: "production app host", env: env({ DATABASE_URL: fakeUrl, DIRECT_DATABASE_URL: fakeUrl }), argv: ["--confirm-staging"], message: "database host is production" },
       { name: "production app url", env: env({ APP_URL: `https://${PROD_APP}` }), argv: ["--confirm-staging"], message: "app host is production" },
       { name: "PROD_DB_HOST", env: env({ PROD_DB_HOST: dbHost }), argv: ["--confirm-staging"], message: "database host is production" },
@@ -119,6 +121,7 @@ describe("staging editor (APL-2682)", () => {
         argv: ["--confirm-staging"],
         message: "database host is production",
       },
+      // qa:TC-APL2682-2f7dcac3@v1
       { name: "missing confirmation", env: env({ SHO_STAGING_CONFIRM: undefined }), argv: [], message: "without staging confirmation" },
       { name: "missing workspace", env: env({ STAGING_WORKSPACE_ID: undefined }), argv: ["--confirm-staging"], message: "STAGING_WORKSPACE_ID is not set" },
       { name: "blank workspace", env: env({ STAGING_WORKSPACE_ID: "  " }), argv: ["--confirm-staging"], message: "STAGING_WORKSPACE_ID is not set" },
@@ -215,6 +218,30 @@ describe("staging editor (APL-2682)", () => {
         argv: ["--confirm-staging"],
         message: "exactly sho_staging",
       },
+      // qa:TC-APL2682-3ff6e3e4@v1
+      {
+        name: "uppercase prod name",
+        env: env({
+          DATABASE_URL: "postgresql://example:example@db.example.com:5432/SHO_PROD",
+          DIRECT_DATABASE_URL: "postgresql://example:example@db.example.com:5432/SHO_PROD",
+          PROD_DB_HOST: "",
+          PROD_DB_NAME: "sho_prod",
+        }),
+        argv: ["--confirm-staging"],
+        message: "database name is production",
+      },
+      {
+        name: "mixed-case prod name",
+        env: env({
+          DATABASE_URL: "postgresql://example:example@db.example.com:5432/Sho_Prod",
+          DIRECT_DATABASE_URL: "postgresql://example:example@db.example.com:5432/Sho_Prod",
+          PROD_DB_HOST: "",
+          PROD_DB_NAME: "sho_prod",
+        }),
+        argv: ["--confirm-staging"],
+        message: "database name is production",
+      },
+      // qa:TC-APL2682-c0ead628@v1
       {
         name: "wrong database name",
         env: env({
@@ -226,6 +253,7 @@ describe("staging editor (APL-2682)", () => {
         argv: ["--confirm-staging"],
         message: "exactly sho_staging",
       },
+      // qa:TC-APL2682-b8d734f4@v1
       {
         name: "uppercase staging name",
         env: env({
@@ -248,6 +276,7 @@ describe("staging editor (APL-2682)", () => {
         argv: ["--confirm-staging"],
         message: "exactly sho_staging",
       },
+      // qa:TC-APL2682-c0ead628@v1
       {
         name: "near-miss staging name",
         env: env({
@@ -259,6 +288,7 @@ describe("staging editor (APL-2682)", () => {
         argv: ["--confirm-staging"],
         message: "exactly sho_staging",
       },
+      // qa:TC-APL2682-44aceb49@v1
       {
         name: "host query bypass",
         env: env({
@@ -300,6 +330,7 @@ describe("staging editor (APL-2682)", () => {
     expect(await db.user.findUnique({ where: { email: LEADER_EMAIL } })).toBeNull();
   });
 
+  // qa:TC-APL2682-da0df1dc@v1
   it("allows a DigitalOcean host only when the database name is sho_staging", async () => {
     let connected = false;
     const connect: DbConnect = () => {
@@ -316,20 +347,22 @@ describe("staging editor (APL-2682)", () => {
     expectNoSecrets(text, [PASSWORD, "example:example", "ondigitalocean.com"]);
   });
 
-  it("does not treat a different case of PROD_DB_NAME as the production database", async () => {
+  // qa:TC-APL2682-3ff6e3e4@v1
+  it("refuses a different case of PROD_DB_NAME before connecting", async () => {
     expect(dbName).not.toBe(dbName.toUpperCase());
     let connected = false;
     const connect: DbConnect = () => {
       connected = true;
-      throw new Error("stop-before-query");
+      throw new Error("connected");
     };
     const { code, text } = await capture(() => runStagingEditor(env({ PROD_DB_NAME: dbName.toUpperCase() }), ["--confirm-staging"], connect));
-    expect(connected).toBe(true);
+    expect(connected).toBe(false);
     expect(code).toBe(1);
-    expect(text).not.toContain("database name is production");
+    expect(text).toContain("database name is production");
     expectNoSecrets(text, [PASSWORD, OTHER_PASSWORD]);
   });
 
+  // qa:TC-APL2682-0843a4a6@v1
   it("is idempotent and does not reset an existing password", async () => {
     const dir = mkdtempSync(path.join(tmpdir(), "sho-staging-editor-"));
     const file = path.join(dir, "password");
@@ -387,6 +420,8 @@ describe("staging editor (APL-2682)", () => {
     }
   });
 
+  // qa:TC-APL2682-0843a4a6@v1
+  // qa:TC-APL2682-8bc1699b@v1
   it("keeps Editor rights on ZZ-TEST QA only and no admin role", async () => {
     const hash = "already-set-hash";
     const leaderHash = "leader-already-set";
@@ -458,6 +493,9 @@ describe("staging editor (APL-2682)", () => {
     ]);
   });
 
+  // qa:TC-APL2682-8bc1699b@v1
+  // qa:TC-APL2682-b2c724e4@v1
+  // qa:TC-APL2682-39098679@v1
   it("lets the Editor edit a task and returns 403 for Trash restore", async () => {
     const ready = await capture(() => runStagingEditor(env(), ["--confirm-staging"]));
     expect(ready.code, ready.text).toBe(0);
