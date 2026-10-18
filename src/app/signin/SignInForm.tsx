@@ -5,9 +5,10 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import styles from "@/components/auth.module.css";
 import { post, rememberEmail } from "@/components/client";
+import { safeReturnPath } from "@/lib/return-to";
 import s from "./signin.module.css";
 
-export function SignInForm({ justReset }: { justReset: boolean }) {
+export function SignInForm({ justReset, next }: { justReset: boolean; next?: string }) {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
   const [needsVerify, setNeedsVerify] = useState<string | null>(null);
@@ -23,7 +24,9 @@ export function SignInForm({ justReset }: { justReset: boolean }) {
     const r = await post("/api/auth/signin", { email, password: f.get("password") });
     setBusy(false);
     if (r.ok) {
-      router.push("/");
+      // A failed attempt never reaches here, so `next` stays in the address bar (APL-2652 AC4).
+      // Checked again: the prop is only a path, and router.push is never given an absolute URL.
+      router.push(safeReturnPath(next) ?? "/");
       router.refresh();
       return;
     }
