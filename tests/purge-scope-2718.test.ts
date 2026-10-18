@@ -134,19 +134,37 @@ function git(args: string[]) {
   return spawnSync("git", args, { cwd: root, encoding: "utf8" });
 }
 
-/** Paths this branch changes against main, plus anything not yet committed. Null when already on main. */
+/** Commit where this branch left main. Later commits on main are not changes this PR made. */
+function mergeBaseWithMain(): string | null {
+  const onPullRequest = process.env.GITHUB_EVENT_NAME === "pull_request";
+  if (git(["rev-parse", "--verify", "origin/main"]).status !== 0) {
+    const fetched = git(["fetch", "origin", "+refs/heads/main:refs/remotes/origin/main", "--depth=100"]);
+    if (fetched.status !== 0) {
+      if (onPullRequest) throw new Error(fetched.stderr || "could not fetch main");
+      return null;
+    }
+  }
+  for (let attempt = 0; attempt < 8; attempt++) {
+    const base = git(["merge-base", "HEAD", "origin/main"]);
+    if (base.status === 0 && base.stdout.trim()) return base.stdout.trim();
+    const deepened = git(["fetch", "--deepen=100"]);
+    if (deepened.status !== 0) {
+      if (onPullRequest) throw new Error(deepened.stderr || base.stderr || "no merge base with main");
+      return null;
+    }
+  }
+  if (onPullRequest) throw new Error("no merge base with main");
+  return null;
+}
+
+/** Paths this branch changes since it left main, plus anything not yet committed. Null when already on main. */
 function changedPaths(): string[] | null {
   const branch = (git(["branch", "--show-current"]).stdout ?? "").trim();
   const onMain = branch === "main" || process.env.GITHUB_REF === "refs/heads/main";
   if (onMain && process.env.GITHUB_EVENT_NAME !== "pull_request") return null;
-  if (git(["rev-parse", "--verify", "origin/main"]).status !== 0) {
-    const fetched = git(["fetch", "origin", "main", "--depth=1"]);
-    if (fetched.status !== 0) {
-      if (process.env.GITHUB_EVENT_NAME === "pull_request") throw new Error(fetched.stderr || "could not fetch main");
-      return null;
-    }
-  }
-  const diff = git(["diff", "--name-only", "origin/main", "HEAD"]);
+  const base = mergeBaseWithMain();
+  if (!base) return null;
+  const diff = git(["diff", "--name-only", base, "HEAD"]);
   if (diff.status !== 0) throw new Error(diff.stderr || "git diff failed");
   const committed = (diff.stdout ?? "").split("\n").map((line) => line.trim()).filter(Boolean);
   const dirty = (git(["status", "--porcelain"]).stdout ?? "").split("\n").flatMap((line) => {
