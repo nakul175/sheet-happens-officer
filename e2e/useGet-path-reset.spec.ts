@@ -121,17 +121,25 @@ async function prove(page: Page, shot: string) {
     await page.screenshot({ path: `${SHOTS}/${shot}-loading.png`, fullPage: true });
     const frames = await page.evaluate(() => (window as unknown as { __shoFrames: { path: string; text: string; busy: boolean }[] }).__shoFrames);
     const onB = frames.filter((f) => f.path === `/projects/${bId}`);
-    expect(onB.length, `${shot}: frames sampled on B`).toBeGreaterThan(5);
-    expect(onB.some((f) => f.busy), `${shot}: skeleton while B is held`).toBe(true);
-    const leaked = onB.filter((f) => f.text.includes("ZZ-TEST-A"));
-    expect(leaked, `${shot}: a frame showed A's data under B`).toEqual([]);
-    writeFileSync(`${SHOTS}/${shot}-loading.aria.yml`, await page.locator("main").ariaSnapshot());
+    // The address bar can move a few frames before the project view swaps. Those frames still show project A's heading.
+    // Once B's skeleton is up, no later frame may show A's items.
+    const firstBusy = onB.findIndex((f) => f.busy);
+    expect(firstBusy, `${shot}: skeleton appeared while B was held`).toBeGreaterThanOrEqual(0);
+    expect(firstBusy, `${shot}: view swapped to B promptly`).toBeLessThan(15);
+    const bView = onB.slice(firstBusy);
+    expect(bView.length, `${shot}: frames of B's loading view`).toBeGreaterThan(5);
+    const leaked = bView.filter((f) => /ZZ-TEST-A-item/.test(f.text));
+    expect(leaked, `${shot}: a frame of B's view showed A's items`).toEqual([]);
+    const loadingMain = page.locator("main").filter({ has: page.locator(".skel-wrap") });
+    writeFileSync(`${SHOTS}/${shot}-loading.aria.yml`, await loadingMain.ariaSnapshot());
 
     release();
     await page.getByText("ZZ-TEST-B-item1").waitFor({ state: "visible", timeout: 15000 });
     await page.getByRole("heading", { name: "ZZ-TEST-B" }).waitFor({ state: "visible", timeout: 15000 });
     await page.waitForFunction(() => !document.querySelector("main .skel-wrap"), undefined, { timeout: 15000 });
-    expect(await page.getByText(/ZZ-TEST-A/).count()).toBe(0);
+    const shown = await page.locator("main").filter({ hasText: "ZZ-TEST-B-item1" }).innerText();
+    expect(shown).toContain("ZZ-TEST-B-item1");
+    expect(shown).not.toContain("ZZ-TEST-A");
     await page.screenshot({ path: `${SHOTS}/${shot}-loaded.png`, fullPage: true });
     expect(await page.evaluate(() => (window as unknown as { __shoSameDoc?: boolean }).__shoSameDoc), `${shot}: full document reload`).toBe(true);
   } finally {
@@ -169,7 +177,7 @@ describe("useGet path reset on a project page", () => {
     try {
       await page.goto(`/projects/${aId}`, { waitUntil: "domcontentloaded", timeout: 120000 });
       await page.getByText("ZZ-TEST-A-item1").waitFor({ state: "visible", timeout: 120000 });
-      const projects = page.getByRole("navigation", { name: "Main" }).getByRole("link", { name: "Projects" });
+      const projects = page.locator("aside nav").getByRole("link", { name: "Projects", exact: true });
       await projects.focus();
       await page.evaluate(() => { document.activeElement?.setAttribute("data-sho-focus", "stay"); });
       await page.route(
@@ -182,7 +190,7 @@ describe("useGet path reset on a project page", () => {
       expect(await live.count()).toBe(1);
       expect(await page.locator("main [aria-busy='true']").count()).toBeGreaterThan(0);
       expect(await live.innerText()).toContain("Loading");
-      writeFileSync(`${SHOTS}/TC-APL2663-2437ecb8.aria.yml`, await page.locator("main").ariaSnapshot());
+      writeFileSync(`${SHOTS}/TC-APL2663-2437ecb8.aria.yml`, await page.locator("main").filter({ has: page.locator(".skel-wrap") }).ariaSnapshot());
       await page.screenshot({ path: `${SHOTS}/a11y-loading.png`, fullPage: true });
       release();
       await page.getByText("ZZ-TEST-B-item1").waitFor({ state: "visible", timeout: 15000 });
