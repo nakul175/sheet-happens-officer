@@ -191,12 +191,14 @@ describe("CRM_VISIBLE and concierge quick actions (SHO-BUG-11)", () => {
     const otherId = plain.json.project.id as string;
 
     script(() => { throw new Error("no model call expected"); });
+    const refBefore = await chatCursor(member.id);
     const reference = await quick(member, "due-week", otherId);
+    const referenceRows = await storedDelta(member.id, refBefore);
     expect(reference.status).toBe(404);
     expect(reference.json.error).toBe("Project not found");
     expect(reference.body).not.toContain(name);
 
-    for (const mode of ["all", "admins"] as const) {
+    for (const mode of ["all", "admins", "off"] as const) {
       await withMode(mode, async () => {
         const before = await chatCursor(member.id);
         const r = await quick(member, "due-week", projectId);
@@ -205,7 +207,8 @@ describe("CRM_VISIBLE and concierge quick actions (SHO-BUG-11)", () => {
         expect(r.body).toBe(reference.body);
         expect(r.body).not.toContain(name);
         expect(r.body).not.toContain(tag);
-        expect(await storedDelta(member.id, before)).toEqual([]);
+        // Same stored rows as the non-member call, ignoring id and createdAt.
+        expect(await storedDelta(member.id, before)).toEqual(referenceRows);
         const thread = await storedChat(member.id);
         expect(thread).not.toContain(name);
         expect(thread).not.toContain(tag);
@@ -293,7 +296,9 @@ describe("CRM_VISIBLE and concierge quick actions (SHO-BUG-11)", () => {
     const { member, dealName, dealId, otherId } = await hiddenDeal("acc");
     script(() => { throw new Error("no model call expected"); });
     await withMode("admins", async () => {
+      const refBefore = await chatCursor(member.id);
       const reference = await quick(member, "due-week", otherId);
+      const referenceRows = await storedDelta(member.id, refBefore);
       expect(reference.status).toBe(404);
       expect(reference.json.error).toBe("Project not found");
       const before = await chatCursor(member.id);
@@ -301,7 +306,9 @@ describe("CRM_VISIBLE and concierge quick actions (SHO-BUG-11)", () => {
       expect(r.status).toBe(reference.status);
       expect(r.headers).toBe(reference.headers);
       expect(r.body).toBe(reference.body);
-      const stored = JSON.stringify(await storedDelta(member.id, before));
+      const storedRows = await storedDelta(member.id, before);
+      expect(storedRows).toEqual(referenceRows);
+      const stored = JSON.stringify(storedRows);
       expect(stored).not.toContain(`Due this week in ${dealName}`);
       expect(stored).not.toContain(dealName);
     });
