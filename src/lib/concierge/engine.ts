@@ -113,6 +113,27 @@ async function runModel(user: Actor, turn: Turn, userText: string, history: Mode
   return finalText;
 }
 
+const WHO_TO_ASSIGN = "Who should I assign this to?";
+
+/**
+ * "Assign <task>." / "assign it" names no person. A "to <name>" outside quotes does
+ * ("Assign the invoice to Priya"). APL-2513 AC2 / APL-2693.
+ */
+function assignNamesNobody(request: string): boolean {
+  const t = request.trim();
+  if (!/^assign\b/i.test(t)) return false;
+  const outsideQuotes = t.replace(/"[^"]*"|'[^']*'/g, " ");
+  return !/\bto\s+\S/i.test(outsideQuotes);
+}
+
+/** The clarifying question for an assign that named nobody. Keeps the model's own who-question when it asked one. */
+function whoToAssign(request: string, modelText: string): string | null {
+  if (!assignNamesNobody(request)) return null;
+  const text = modelText.trim();
+  if (/\bwho(?:m)?\b/i.test(text) && /\bassign/i.test(text) && text.includes("?")) return text;
+  return WHO_TO_ASSIGN;
+}
+
 function buildReply(turn: Turn, modelText: string, request: string): Stored {
   if (turn.card) {
     const c = turn.card;
@@ -140,6 +161,12 @@ function buildReply(turn: Turn, modelText: string, request: string): Stored {
   if (r.calls > 0 && r.records === 0) {
     // Nothing was fetched: never let the model's own words stand in for data (SHO-US-8.2 AC2, AC4).
     return { kind: "answer", text: r.notFound > 0 ? "I can't find that." : "I found nothing." };
+  }
+  // A lookup makes the reply an "answer". Assigning with no person is a question, even after the task was found (APL-2693).
+  const who = whoToAssign(request, modelText);
+  if (who) {
+    const text = who.slice(0, 4000);
+    return { kind: "text", text, ...(r.calls > 0 ? { links: linksFor(turn, text) } : {}) };
   }
   const text = modelText || "I could not work that out. Try asking in a different way.";
   return { kind: r.calls > 0 ? "answer" : "text", text: text.slice(0, 4000), ...(r.calls > 0 ? { links: linksFor(turn, text) } : {}) };

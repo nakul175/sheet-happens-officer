@@ -510,8 +510,56 @@ describe("clarifying questions (8.4)", () => {
       (r) => { expect(lastResultText(r)).toMatch(/person_id is missing/); return [say("Who should I assign it to?")]; },
     );
     const r = await ask(lead, "assign it");
-    expect(r.messages[1]).toMatchObject({ kind: "answer", text: "Who should I assign it to?" });
+    expect(r.messages[1]).toMatchObject({ kind: "text", text: "Who should I assign it to?" });
     expect(r.messages.some((m) => m.kind === "card")).toBe(false);
+  });
+
+  // APL-2693: staging (6e3ccb5) returned kind "answer" after find_tasks, so AC2's text-or-choices check failed.
+  it("Assign with no person is a who question, not an answer, and assigns nobody (APL-2513 AC2)", async () => {
+    const lead = await account("lead");
+    const p = await project(lead, lead);
+    const id = await task(lead, p.id, { title: "Budget" });
+    const before = (await db.task.findUniqueOrThrow({ where: { id } })).assigneeId;
+    script(
+      () => [tu("find_tasks", { text: "budget" })],
+      (r) => [say(`The task "${lastData(r).tasks[0].title}" is currently assigned to you. Who should I assign it to?`)],
+    );
+    const r = await ask(lead, 'Assign "Budget".');
+    const reply = r.messages[1];
+    expect(reply.kind === "text" || reply.kind === "choices").toBe(true);
+    expect(reply.text).toMatch(/who should I assign it to/i);
+    expect(r.messages.some((m) => m.kind === "card")).toBe(false);
+    expect((await db.task.findUniqueOrThrow({ where: { id } })).assigneeId).toBe(before);
+    expect(reply.links).toEqual([{ label: "Budget", href: `/tasks/${id}` }]);
+  });
+
+  it("a silent assign with no person still asks who, and a named person still gets a card", async () => {
+    const { lead, ed, p } = await team();
+    const id = await task(lead, p.id, { title: "Budget" });
+    const before = (await db.task.findUniqueOrThrow({ where: { id } })).assigneeId;
+    script(
+      () => [tu("find_tasks", { text: "budget" })],
+      () => [say("ok")],
+    );
+    const quiet = await ask(lead, 'Assign "Budget to review".');
+    expect(quiet.messages[1]).toMatchObject({ kind: "text", text: "Who should I assign this to?" });
+    expect(quiet.messages.some((m) => m.kind === "card")).toBe(false);
+    expect((await db.task.findUniqueOrThrow({ where: { id } })).assigneeId).toBe(before);
+
+    script(
+      () => [tu("find_tasks", { text: "budget" }), tu("find_people", { text: "Editor" })],
+      (r) => {
+        const blocks = r.messages.at(-1)!.content as { content: string }[];
+        const taskId = JSON.parse(blocks[0].content).untrusted_data.tasks[0].id as string;
+        const personId = JSON.parse(blocks[1].content).untrusted_data.people[0].id as string;
+        return [tu("propose_changes", { changes: [{ action: "assign_task", task_id: taskId, person_id: personId }] })];
+      },
+    );
+    const named = await ask(lead, "Assign Budget to Editor.");
+    expect(named.messages[1].kind).toBe("card");
+    expect(named.messages[1].card!.changes[0].after).toMatch(/Editor/);
+    expect((await db.task.findUniqueOrThrow({ where: { id } })).assigneeId).toBe(before);
+    expect(ed.id).toBeTruthy();
   });
 
   it("an id the model never fetched is refused", async () => {
