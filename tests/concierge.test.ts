@@ -514,8 +514,28 @@ describe("clarifying questions (8.4)", () => {
     expect(r.messages.some((m) => m.kind === "card")).toBe(false);
   });
 
-  // APL-2693 v1. Staging labeled the who-question as kind "answer" after find_tasks.
+  // APL-2693 v1. A guessed person_id "me" must not be stored as a card.
   const asksToWhom = (text: string) => /\bwho(?:m)?\b/i.test(text) && /\bassign/i.test(text) && text.includes("?");
+  const proposeMe = (text = "budget") => {
+    script(
+      () => [tu("find_tasks", { text })],
+      (r) => [tu("propose_changes", { changes: [{ action: "assign_task", task_id: lastData(r).tasks[0].id, person_id: "me" }] })],
+    );
+  };
+  async function lastStored(userId: string) {
+    const row = await db.chatMessage.findFirstOrThrow({ where: { userId, role: "ASSISTANT" }, orderBy: [{ createdAt: "desc" }, { id: "desc" }] });
+    return { raw: row.content, stored: JSON.parse(row.content) as { kind: string; text: string; links?: unknown; card?: unknown; proposal?: { ops?: unknown } } };
+  }
+  async function expectNoProposal(userId: string) {
+    const { raw, stored } = await lastStored(userId);
+    expect(stored.kind).not.toBe("card");
+    expect(stored.card).toBeUndefined();
+    expect(stored.proposal).toBeUndefined();
+    expect(raw).not.toContain('"proposal"');
+    expect(raw).not.toContain('"ops"');
+    expect(raw).not.toContain('"links":[]');
+    return stored;
+  }
 
   it('APL-2693 AC1: Assign "<title>". ends the turn as a question asking to whom', async () => {
     const lead = await account("lead");
@@ -531,31 +551,25 @@ describe("clarifying questions (8.4)", () => {
     expect(reply?.kind === "text" || reply?.kind === "choices").toBe(true);
     expect(reply?.text.trim()).not.toBe("");
     expect(asksToWhom(reply!.text)).toBe(true);
-
-    // The model said nothing useful: the turn still asks to whom.
-    script(
-      () => [tu("find_tasks", { text: "budget" })],
-      () => [say("ok")],
-    );
-    const quiet = await ask(lead, `Assign "${title}".`);
-    const quietReply = [...quiet.messages].reverse().find((m) => m.role === "ASSISTANT");
-    expect(quietReply?.kind === "text" || quietReply?.kind === "choices").toBe(true);
-    expect(asksToWhom(quietReply!.text)).toBe(true);
+    await expectNoProposal(lead.id);
   });
 
-  it("APL-2693 AC2: no confirm card, and the assignee is unchanged", async () => {
+  it("APL-2693 AC2: propose_changes with person_id me stores no card, proposal, or ops", async () => {
     const lead = await account("lead");
     const p = await project(lead, lead);
     const title = "Budget";
     const id = await task(lead, p.id, { title });
     const before = (await db.task.findUniqueOrThrow({ where: { id } })).assigneeId;
-    script(
-      () => [tu("find_tasks", { text: "budget" })],
-      () => [say("ok")],
-    );
+    proposeMe();
     const asked = await ask(lead, `Assign "${title}".`);
+    const reply = [...asked.messages].reverse().find((m) => m.role === "ASSISTANT");
+    expect(reply?.kind === "text" || reply?.kind === "choices").toBe(true);
+    expect(asksToWhom(reply!.text)).toBe(true);
     expect(asked.messages.some((m) => m.kind === "card" || m.card)).toBe(false);
+    expect(reply?.links).toBeUndefined();
     expect((await db.task.findUniqueOrThrow({ where: { id } })).assigneeId).toBe(before);
+    const stored = await expectNoProposal(lead.id);
+    expect(stored.links).toBeUndefined();
   });
 
   it('APL-2693 AC3: Assign "<title>" to <member>. still returns a confirm card', async () => {
@@ -577,6 +591,78 @@ describe("clarifying questions (8.4)", () => {
     expect(card?.card).toMatchObject({ status: "PENDING", canConfirm: true });
     expect(card?.card!.changes[0].after).toBe(`Assigned to ${ed.name}`);
     expect((await db.task.findUniqueOrThrow({ where: { id } })).assigneeId).toBe(before);
+  });
+
+  it('APL-2693: trailing whitespace, no period, and a title containing " to " still ask whom', async () => {
+    const lead = await account("lead");
+    const p = await project(lead, lead);
+    const plain = await task(lead, p.id, { title: "Budget" });
+    const before = async (id: string) => (await db.task.findUniqueOrThrow({ where: { id } })).assigneeId;
+    const plainBefore = await before(plain);
+    for (const text of [`Assign "Budget".   `, `Assign "Budget"`]) {
+      proposeMe();
+      const asked = await ask(lead, text);
+      const reply = [...asked.messages].reverse().find((m) => m.role === "ASSISTANT");
+      expect(reply?.kind === "text" || reply?.kind === "choices").toBe(true);
+      expect(asksToWhom(reply!.text)).toBe(true);
+      expect(asked.messages.some((m) => m.card)).toBe(false);
+      expect(reply?.links).toBeUndefined();
+      const stored = await expectNoProposal(lead.id);
+      expect(stored.links).toBeUndefined();
+    }
+    const quoted = await task(lead, p.id, { title: "Budget to review" });
+    const quotedBefore = await before(quoted);
+    proposeMe("budget to review");
+    const titled = await ask(lead, 'Assign "Budget to review".');
+    const reply = [...titled.messages].reverse().find((m) => m.role === "ASSISTANT");
+    expect(asksToWhom(reply!.text)).toBe(true);
+    expect(titled.messages.some((m) => m.card)).toBe(false);
+    await expectNoProposal(lead.id);
+    expect(await before(plain)).toBe(plainBefore);
+    expect(await before(quoted)).toBe(quotedBefore);
+  });
+
+  it("APL-2693: an unknown member (to Zzyzx) asks whom, even if the model proposes me", async () => {
+    const lead = await account("lead");
+    const p = await project(lead, lead);
+    const title = "Budget";
+    const id = await task(lead, p.id, { title });
+    const before = (await db.task.findUniqueOrThrow({ where: { id } })).assigneeId;
+    proposeMe();
+    const asked = await ask(lead, `Assign "${title}" to Zzyzx`);
+    const reply = [...asked.messages].reverse().find((m) => m.role === "ASSISTANT");
+    expect(reply?.kind === "text" || reply?.kind === "choices").toBe(true);
+    expect(asksToWhom(reply!.text)).toBe(true);
+    expect(asked.messages.some((m) => m.card)).toBe(false);
+    expect((await db.task.findUniqueOrThrow({ where: { id } })).assigneeId).toBe(before);
+    await expectNoProposal(lead.id);
+  });
+
+  it("APL-2693: a task the user cannot see has no card and does not leak", async () => {
+    const { lead, out, p } = await team();
+    const secret = "Secret acquisition plan";
+    const id = await task(lead, p.id, { title: secret, assigneeId: lead.id });
+    const seen: ModelRequest[] = [];
+    script(
+      (r) => { seen.push(r); return [tu("find_tasks", { text: "secret" })]; },
+      (r) => { seen.push(r); return [tu("propose_changes", { changes: [{ action: "assign_task", task_id: id, person_id: "me" }] })]; },
+      (r) => { seen.push(r); return [say(`Who should I assign ${secret} to?`)]; },
+    );
+    const asked = await ask(out, `Assign "${secret}".`);
+    const reply = [...asked.messages].reverse().find((m) => m.role === "ASSISTANT");
+    expect(asked.messages.some((m) => m.card)).toBe(false);
+    expect(reply?.text).not.toContain(secret);
+    expect(reply?.links ?? []).toEqual([]);
+    const { raw, stored } = await lastStored(out.id);
+    expect(stored.card).toBeUndefined();
+    expect(stored.proposal).toBeUndefined();
+    expect(raw).not.toContain('"proposal"');
+    expect(raw).not.toContain('"ops"');
+    expect(raw).not.toContain(secret);
+    expect(raw).not.toContain(id);
+    const tools = seen.flatMap((r) => r.messages.filter((m) => Array.isArray(m.content)));
+    expect(JSON.stringify(tools)).not.toContain(secret);
+    expect((await db.task.findUniqueOrThrow({ where: { id } })).assigneeId).toBe(lead.id);
   });
 
   it("an id the model never fetched is refused", async () => {

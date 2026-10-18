@@ -115,34 +115,42 @@ async function runModel(user: Actor, turn: Turn, userText: string, history: Mode
 
 const WHO_TO_ASSIGN = "Who should I assign this to?";
 
-/**
- * "Assign <task>." / "assign it" names no person. A "to <name>" outside quotes does
- * ("Assign the invoice to Priya"). APL-2513 AC2 / APL-2693.
- */
-function assignNamesNobody(request: string): boolean {
-  const t = request.trim();
-  if (!/^assign\b/i.test(t)) return false;
-  const outsideQuotes = t.replace(/"[^"]*"|'[^']*'/g, " ");
-  return !/\bto\s+\S/i.test(outsideQuotes);
+/** The person named after "to", ignoring text inside quotes ("Budget to review" is a title, not a person). */
+function namedAssignee(request: string): string | null {
+  const outside = request.trim().replace(/"[^"]*"|'[^']*'/g, " ").replace(/\s+/g, " ").trim();
+  const m = /\bto\s+(.+)$/i.exec(outside);
+  if (!m) return null;
+  const name = m[1].replace(/[.?!]+$/g, "").trim();
+  return name || null;
 }
 
-/** The clarifying question for an assign that named nobody. Keeps the model's own who-question when it asked one. */
-function whoToAssign(request: string, modelText: string): string | null {
-  if (!assignNamesNobody(request)) return null;
+function personKnown(turn: Turn, name: string): boolean {
+  if (/^me$/i.test(name)) return true;
+  const n = name.toLowerCase();
+  for (const p of turn.seen.people.values()) {
+    if (p.name.toLowerCase() === n || p.email.toLowerCase() === n) return true;
+  }
+  return false;
+}
+
+/** Assign with nobody named, or a person this turn did not find. A guessed assignee must not become a card. */
+function needsWhom(turn: Turn, request: string): boolean {
+  if (!/^assign\b/i.test(request.trim())) return false;
+  const name = namedAssignee(request);
+  return !name || !personKnown(turn, name);
+}
+
+function whoQuestion(modelText: string): string {
   const text = modelText.trim();
   if (/\bwho(?:m)?\b/i.test(text) && /\bassign/i.test(text) && text.includes("?")) return text;
   return WHO_TO_ASSIGN;
 }
 
+function nothingFound(turn: Turn): Stored {
+  return { kind: "answer", text: turn.reads.notFound > 0 ? "I can't find that." : "I found nothing." };
+}
+
 function buildReply(turn: Turn, modelText: string, request: string): Stored {
-  if (turn.card) {
-    const c = turn.card;
-    return {
-      kind: "card", text: `${c.card.title}. Review it and tap Confirm to apply it.`,
-      card: { id: "", status: "PENDING", ...c.card },
-      proposal: { ops: c.ops, fingerprint: c.fingerprint },
-    };
-  }
   if (turn.tooMany) {
     return { kind: "text", text: `That would be ${turn.tooMany} changes, and a card can hold at most 10. Please narrow the request, for example one project or one week at a time.` };
   }
@@ -157,16 +165,25 @@ function buildReply(turn: Turn, modelText: string, request: string): Stored {
       };
     }
   }
+  // Before any card: a missing or unknown assignee drops the assign proposal (APL-2693). Nothing is stored.
+  if (needsWhom(turn, request)) {
+    if (turn.reads.calls > 0 && turn.reads.records === 0) return nothingFound(turn);
+    const text = whoQuestion(modelText).slice(0, 4000);
+    const links = linksFor(turn, text);
+    return { kind: "text", text, ...(links.length ? { links } : {}) };
+  }
+  if (turn.card) {
+    const c = turn.card;
+    return {
+      kind: "card", text: `${c.card.title}. Review it and tap Confirm to apply it.`,
+      card: { id: "", status: "PENDING", ...c.card },
+      proposal: { ops: c.ops, fingerprint: c.fingerprint },
+    };
+  }
   const r = turn.reads;
   if (r.calls > 0 && r.records === 0) {
     // Nothing was fetched: never let the model's own words stand in for data (SHO-US-8.2 AC2, AC4).
-    return { kind: "answer", text: r.notFound > 0 ? "I can't find that." : "I found nothing." };
-  }
-  // A lookup makes the reply an "answer". Assigning with no person is a question, even after the task was found (APL-2693).
-  const who = whoToAssign(request, modelText);
-  if (who) {
-    const text = who.slice(0, 4000);
-    return { kind: "text", text, ...(r.calls > 0 ? { links: linksFor(turn, text) } : {}) };
+    return nothingFound(turn);
   }
   const text = modelText || "I could not work that out. Try asking in a different way.";
   return { kind: r.calls > 0 ? "answer" : "text", text: text.slice(0, 4000), ...(r.calls > 0 ? { links: linksFor(turn, text) } : {}) };
