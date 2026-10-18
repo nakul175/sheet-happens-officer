@@ -12,14 +12,6 @@ export default defineConfig({
   test: {
     testTimeout: 30000,
     fileParallelism: false,
-    // APL-2691.spec.ts is Playwright and runs from the staging workflow.
-    // APL-2522.spec.ts in the same folder is Vitest and stays in npm test.
-    exclude: [
-      ...configDefaults.exclude,
-      "tests/viewport/**",
-      "tests/crm-visible-modes-server.test.ts",
-      "scripts/**",
-      "tests/e2e/stories/APL-2691.spec.ts",
-    ],
+    exclude: [...configDefaults.exclude, "tests/viewport/**", "tests/crm-visible-modes-server.test.ts", "scripts/**"],
   },
 });
