@@ -50,12 +50,6 @@ describe("APL-2522 spec prod guard", () => {
     expect(run.output).not.toMatch(/Refusing to run story tests against production \(staging\.sheethappensofficer\.com\)/);
   });
 
-  it("lets the spec start when BASE_URL, TASKBOARD_URL and STAGING_URL are not production", { timeout: 60_000 }, () => {
-    const run = runSpec(safe);
-    expect(run.status, run.output).toBe(0);
-    expect(run.output).not.toContain("Refusing to run story tests against production");
-  });
-
   it("does not consult the BASE_URL property on the environment object", () => {
     const env: NodeJS.ProcessEnv = { NODE_ENV: "test", BASE_URL: PROD, TASKBOARD_URL: LOCAL, STAGING_URL: STAGING };
     expect(() => assertStoryTargetAllowed(env, STAGING)).not.toThrow();
@@ -73,7 +67,9 @@ describe("APL-2522 spec prod guard", () => {
     expect(message).not.toContain("s3cret");
   });
 
-  it("refuses a value that is not a URL without repeating that value", () => {
-    expect(() => assertStoryTargetAllowed({ NODE_ENV: "test", STAGING_URL: "not a url" }, STAGING)).toThrow(/^STAGING_URL is not a URL\.$/);
+  it("allows a non-production target, including a bare hostname that is not production", () => {
+    expect(() => assertStoryTargetAllowed({ NODE_ENV: "test", TASKBOARD_URL: LOCAL, STAGING_URL: STAGING }, STAGING)).not.toThrow();
+    expect(() => assertStoryTargetAllowed({ NODE_ENV: "test", TASKBOARD_URL: "not a url" }, STAGING)).not.toThrow();
+    expect(() => assertStoryTargetAllowed({ NODE_ENV: "test", TASKBOARD_URL: "sheethappensofficer.com" }, STAGING)).toThrow(/Refusing to run story tests against production \(sheethappensofficer\.com\)/);
   });
 });

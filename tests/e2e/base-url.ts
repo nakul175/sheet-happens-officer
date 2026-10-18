@@ -1,7 +1,7 @@
-// Story specs import this on startup and stop if the target is production.
-// Vitest replaces the BASE_URL it was given with "/" before a spec file loads.
+// The APL-2522 spec calls this before its tests run.
+// Vitest replaces the BASE_URL it was given with "/" before the spec file loads.
 // The value from process start is still in the process image (on Linux, /proc/self/environ).
-// TASKBOARD_URL and STAGING_URL are read from the live environment. The guard does not read the rewritten slot.
+// TASKBOARD_URL and STAGING_URL are read from the live environment. The rewritten slot is not.
 import { readFileSync } from "node:fs";
 
 const PRODUCTION_HOSTS = new Set([
@@ -9,8 +9,6 @@ const PRODUCTION_HOSTS = new Set([
   "www.sheethappensofficer.com",
   "app.sheethappensofficer.com",
 ]);
-
-const DEFAULT_BASE = "https://staging.sheethappensofficer.com";
 
 /** BASE_URL as it was when this process started, before Vitest rewrote it to "/". */
 export function baseUrlAtProcessStart(): string | undefined {
@@ -34,20 +32,19 @@ export function baseUrlAtProcessStart(): string | undefined {
   return current;
 }
 
-function hostOf(label: string, raw: string | undefined): string | null {
-  if (raw == null || raw === "" || raw === "/") return null;
-  let url: URL;
+function hostOf(raw: string | undefined): string | null {
+  if (raw == null || raw === "") return null;
   try {
-    url = new URL(raw);
+    const host = new URL(raw).hostname.toLowerCase().replace(/\.$/, "");
+    return host || null;
   } catch {
-    throw new Error(`${label} is not a URL.`);
+    const bare = raw.toLowerCase().replace(/\.$/, "");
+    return bare === "/" ? null : bare;
   }
-  const host = url.hostname.toLowerCase().replace(/\.$/, "");
-  return host || null;
 }
 
-function refuseProduction(label: string, raw: string | undefined): void {
-  const host = hostOf(label, raw);
+function refuseProduction(raw: string | undefined): void {
+  const host = hostOf(raw);
   if (host && PRODUCTION_HOSTS.has(host)) {
     throw new Error(`Refusing to run story tests against production (${host}).`);
   }
@@ -58,16 +55,7 @@ function refuseProduction(label: string, raw: string | undefined): void {
  * `baseUrl` defaults to that starting value. The env object's BASE_URL property is not consulted.
  */
 export function assertStoryTargetAllowed(env: NodeJS.ProcessEnv = process.env, baseUrl: string | undefined = baseUrlAtProcessStart()): void {
-  refuseProduction("TASKBOARD_URL", env.TASKBOARD_URL);
-  refuseProduction("STAGING_URL", env.STAGING_URL);
-  refuseProduction("BASE_URL", baseUrl);
+  refuseProduction(env.TASKBOARD_URL);
+  refuseProduction(env.STAGING_URL);
+  refuseProduction(baseUrl);
 }
-
-assertStoryTargetAllowed();
-
-function usable(raw: string | undefined): string | undefined {
-  if (raw == null || raw === "" || raw === "/") return undefined;
-  return raw.replace(/\/+$/, "");
-}
-
-export const BASE_URL = usable(baseUrlAtProcessStart()) || usable(process.env.STAGING_URL) || DEFAULT_BASE;
