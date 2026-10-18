@@ -37,8 +37,12 @@ test("AC3: an Editor or a Viewer cannot change the Leader; an Admin can", async 
     expect((await member.api.post(`/api/projects/${p.id}/leader`, { newLeaderId: member.user.id })).status).toBe(403);
     expect((await leaders(admin, p.id))[0].userId).toBe(admin.user.id);
   }
+  // The Member leads this one and the Super Admin is not in it: the Super Admin (an Admin) can still change its Leader.
   const q = await newProject(admin, later, { label: "3.5 admin can", creator: member, leader: member });
-  expect((await admin.api.post(`/api/projects/${q.id}/leader`, { newLeaderId: member.user.id, previousRole: "EDITOR" })).status).toBe(400); // already Leader: refused, not forbidden
+  const next = await ghost(admin, later, "nextlead");
+  expect((await member.api.post(`/api/projects/${q.id}/members`, { userId: next.id })).status).toBe(201);
+  expect((await admin.api.post(`/api/projects/${q.id}/leader`, { newLeaderId: next.id })).status).toBe(200);
+  expect((await leaders(admin, q.id))[0].userId).toBe(next.id);
 });
 
 test("AC4: handing over to the current Leader is refused and leaves exactly one Leader", async ({ admin, member, later }) => {

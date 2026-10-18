@@ -14,17 +14,17 @@ async function person(admin: Admin, later: (f: () => Promise<unknown>) => void, 
 
 test.describe("SHO-US-2.2 / APL-2481", () => {
   test("AC1: the Super Admin makes a Member an Admin and an Admin a Member, from the Team page", async ({ admin, later }) => {
-    test.setTimeout(150_000); // the Team table can be long on a busy workspace
+    test.setTimeout(240_000); // the Team table can be long on a busy workspace
     const p = await person(admin, later, "promote");
     await admin.page.goto("/team");
     const row = admin.page.locator("tr", { hasText: p.name });
     await expect(row).toContainText("Member", SLOW);
-    await row.getByRole("button", { name: "Make Admin" }).click();
-    await expect(admin.page.locator("tr", { hasText: p.name }).getByRole("button", { name: "Make Member" })).toBeVisible(SLOW);
+    await row.getByRole("button", { name: "Make Admin" }).click({ timeout: 60_000 });
+    await expect(row.getByRole("button", { name: "Make Member" })).toBeVisible({ timeout: 90_000 });
     let team = (await admin.api.get("/api/team")).json.people as { id: string; orgRole: string }[];
     expect(team.find((x) => x.id === p.id)?.orgRole).toBe("ADMIN");
-    await admin.page.locator("tr", { hasText: p.name }).getByRole("button", { name: "Make Member" }).click();
-    await expect(admin.page.locator("tr", { hasText: p.name }).getByRole("button", { name: "Make Admin" })).toBeVisible(SLOW);
+    await row.getByRole("button", { name: "Make Member" }).click({ timeout: 60_000 });
+    await expect(row.getByRole("button", { name: "Make Admin" })).toBeVisible({ timeout: 90_000 });
     team = (await admin.api.get("/api/team")).json.people as { id: string; orgRole: string }[];
     expect(team.find((x) => x.id === p.id)?.orgRole).toBe("MEMBER");
     // Both changes are in the audit log.

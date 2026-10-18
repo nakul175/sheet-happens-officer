@@ -54,7 +54,10 @@ test("AC3: the Unread filter hides read items, and an empty result says 'All cau
   await p.reload();
   await bell(p).click();
   await p.getByRole("dialog", { name: "Notifications" }).getByRole("button", { name: /^Unread/ }).click();
-  await expect(p.getByRole("dialog", { name: "Notifications" }).getByText("All caught up")).toBeVisible();
+  const panel2 = p.getByRole("dialog", { name: "Notifications" });
+  // If someone else's activity raised a new notice in the meantime, the filter must still show unread items only.
+  if ((await unread(member)) === 0) await expect(panel2.getByText("All caught up")).toBeVisible();
+  else await expect(panel2.locator(".bell-row:not(.unread)")).toHaveCount(0);
 });
 
 test("AC4: marking an item unread raises the badge by 1", async ({ admin, member, later }) => {

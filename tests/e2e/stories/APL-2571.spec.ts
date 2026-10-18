@@ -28,7 +28,7 @@ test("AC1: Compact shows at least 16 rows at 1440 by 900 and the setting persist
   await expect(p.getByRole("button", { name: /Compact/ })).toHaveAttribute("aria-pressed", "true");
   await expect.poll(visibleRows).toBeGreaterThanOrEqual(16);
   expect(await visibleRows()).toBeGreaterThan(comfortable);
-  expect((await admin.api.get("/api/profile/density")).json).toEqual({ compact: true }); // saved on the person
+  await expect.poll(async () => (await admin.api.get("/api/profile/density")).json).toEqual({ compact: true }); // saved on the person
   await p.reload();
   await expect(p.getByRole("button", { name: /Compact/ })).toHaveAttribute("aria-pressed", "true");
 });
