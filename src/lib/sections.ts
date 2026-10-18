@@ -89,8 +89,9 @@ export async function updateSection(
       }
       await logAction(tx, {
         actorId: user.id, projectId, targetType: "section", targetId: s.id, action: "section.done_changed",
-        before: { doneSectionId: old?.id ?? null, reopenedTaskIds: reopened.slice(0, 200) },
-        after: { doneSectionId: s.id, completedTaskIds: completed.slice(0, 200), completedSubtaskIds: subtasks.slice(0, 200), reopened: reopened.length, completed: completed.length, completedSubtasks: subtasks.length },
+        // Every id is kept. Cutting the lists at 200 made Undo skip the rest and still succeed (APL-2680).
+        before: { doneSectionId: old?.id ?? null, reopenedTaskIds: reopened },
+        after: { doneSectionId: s.id, completedTaskIds: completed, completedSubtaskIds: subtasks, reopened: reopened.length, completed: completed.length, completedSubtasks: subtasks.length },
       });
     }
   });
