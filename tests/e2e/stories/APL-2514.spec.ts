@@ -1,11 +1,9 @@
 // SHO-US-8.5 Undo from the chat (APL-2514).
 // One test per acceptance criterion. Confirm and Undo on a concierge card call the same undo as the screen
-// (undoAction). These tests drive that undo on staging with ZZ-TEST tasks, and they paint the concierge
-// thread from the payload the server returns, so no model call is made.
-// AC6 cannot age a stored message. The staging page is shown a result the server marks undoExpired, and
-// undoCard refuses a card older than UNDO_DAYS.
+// (undoAction). These tests drive that undo on staging with ZZ-TEST tasks. A painted card or toast is not
+// a result, and this file does not post /api/concierge/messages.
+// AC6 cannot age a stored message. The 30-day refusal is read from the source (@static), not from a painted button.
 import { readFileSync } from "node:fs";
-import type { Page } from "@playwright/test";
 import { test, expect, zz } from "../support";
 import { newProject, newTask } from "../g2";
 import { cleanChat } from "../helpers/jim-http";
@@ -15,26 +13,10 @@ import { editTask, notices } from "../helpers/claude-a";
 test.describe.configure({ timeout: 90_000 });
 test.use({ viewport: { width: 1440, height: 900 } });
 
+// One skip for the whole file. The password is SHO_QA_PASS and is never generated here.
+test.skip(!process.env.SHO_QA_PASS, "Set SHO_QA_PASS (the shared password for the nakul17+ accounts).");
+
 const read = (path: string) => readFileSync(path, "utf8");
-
-type Msg = Record<string, unknown>;
-
-async function paint(page: Page, messages: Msg[]) {
-  await page.route("**/api/concierge/state", (route) => route.fulfill({
-    status: 200,
-    contentType: "application/json",
-    body: JSON.stringify({
-      available: true, hidden: false, voiceNoticeAcked: true,
-      quickActions: [{ id: "due-week", label: "Due this week" }],
-      messages,
-    }),
-  }));
-}
-
-const result = (extra: Record<string, unknown>, text = "Done."): Msg => ({
-  id: "zz-result", role: "ASSISTANT", createdAt: new Date().toISOString(), kind: "result", text,
-  result: { cardId: "zz-result", summary: ["Due date"], undoable: true, ...extra },
-});
 
 test("AC1: Undo puts a concierge move back to the earlier date and the thread says so", async ({ admin, later }) => {
   await showConcierge(admin, later);
@@ -51,13 +33,13 @@ test("AC1: Undo puts a concierge move back to the earlier date and the thread sa
   const back = await admin.api.post(`/api/actions/${edited.headers["x-undo-id"]}/undo`, {});
   expect(back.status, JSON.stringify(back.json)).toBe(200);
   expect((await taskOf(admin, id)).dueDate).toBe(due);
+});
 
+// @static: the undone wording is in the source. A painted thread is not the staging thread.
+test("AC1: Undo puts a concierge move back to the earlier date and the thread says so", { tag: "@static" }, () => {
   const cards = read("src/lib/concierge/cards.ts");
   expect(cards).toContain("await undoAction(user, r.id, anyway)");
   expect(cards).toContain("Undone. Everything on that card was put back:");
-  await paint(admin.page, [result({ undoneAt: new Date().toISOString(), summary: ["Due date"] }, "Undone.")]);
-  await admin.page.goto(`/projects/${project.id}`);
-  await expect(admin.page.locator("aside.cc-slot")).toContainText(/undone/i);
 });
 
 test("AC2: Undo warns when the task changed since, and overwrites nothing", async ({ admin, member, later }) => {
@@ -75,27 +57,11 @@ test("AC2: Undo warns when the task changed since, and overwrites nothing", asyn
   expect(refused.status, JSON.stringify(refused.json)).toBe(409);
   expect(refused.json.needsConfirm).toBe("conflict");
   expect((await taskOf(admin, id)).dueDate).toBe(patched);
+});
 
-  const cards = read("src/lib/concierge/cards.ts");
-  expect(cards).toContain("if (!anyway) for (const r of todo) await checkUndo(user, r.id)");
-  await admin.page.route("**/api/concierge/cards/zz-result/undo", (route) => route.fulfill({
-    status: 409,
-    contentType: "application/json",
-    body: JSON.stringify({
-      needsConfirm: "conflict",
-      changedBy: [member.user.name],
-      conflicts: [{ field: "Due", before: due, after: dueIn(8), now: patched }],
-    }),
-  }));
-  await paint(admin.page, [result({})]);
-  const p = admin.page;
-  await p.goto(`/projects/${project.id}`);
-  await p.locator("aside.cc-slot").getByRole("button", { name: "Undo" }).click();
-  const dialog = p.getByRole("dialog", { name: "This changed since" });
-  await expect(dialog).toBeVisible();
-  await expect(dialog).toContainText(/changed|overwrite/i);
-  await dialog.getByRole("button", { name: "Cancel" }).click();
-  expect((await taskOf(admin, id)).dueDate).toBe(patched);
+// @static: the conflict check is in the source. A painted Undo dialog is not that warning.
+test("AC2: Undo warns when the task changed since, and overwrites nothing", { tag: "@static" }, () => {
+  expect(read("src/lib/concierge/cards.ts")).toContain("if (!anyway) for (const r of todo) await checkUndo(user, r.id)");
 });
 
 test("AC3: when the action notified someone, the thread says the notice cannot be unsent", async ({ admin, member, later }) => {
@@ -113,12 +79,12 @@ test("AC3: when the action notified someone, the thread says the notice cannot b
   expect(back.status, JSON.stringify(back.json)).toBe(200);
   expect((await taskOf(admin, id)).assignee.id).toBe(admin.user.id);
   expect((await notices(member)).some((n) => n.id === sent!.id), "the notice is still there after Undo").toBe(true);
+});
 
+// @static: the unsent wording is in the source. A painted result line is not the thread.
+test("AC3: when the action notified someone, the thread says the notice cannot be unsent", { tag: "@static" }, () => {
   expect(read("src/lib/concierge/cards.ts")).toContain("Notices already sent to other people cannot be unsent.");
   expect(read("src/components/concierge/MessageView.tsx")).toContain("A notice cannot be unsent");
-  await paint(admin.page, [result({ noticeSent: true })]);
-  await admin.page.goto(`/projects/${project.id}`);
-  await expect(admin.page.locator("aside.cc-slot .cc-result")).toContainText(/cannot be unsent/i);
 });
 
 test("AC4: Undo reverses every change on a card, and the thread lists them", async ({ admin, later }) => {
@@ -139,18 +105,13 @@ test("AC4: Undo reverses every change on a card, and the thread lists them", asy
   const task = await taskOf(admin, id);
   expect(task.dueDate).toBe(due);
   expect(task.priority).toBe("MEDIUM");
+});
 
+// @static: the reversed lines are in the source. A painted summary is not the thread.
+test("AC4: Undo reverses every change on a card, and the thread lists them", { tag: "@static" }, () => {
   const cards = read("src/lib/concierge/cards.ts");
   expect(cards).toContain("const lines = rs.result.summary.map((x) => `- Reversed: ${x}`)");
   expect(cards).toContain("for (const r of todo)");
-  await paint(admin.page, [result({
-    undoneAt: new Date().toISOString(),
-    summary: ["Due date", "Priority"],
-  }, "Undone. Everything on that card was put back:\n- Reversed: Due date\n- Reversed: Priority")]);
-  await admin.page.goto(`/projects/${project.id}`);
-  const note = await admin.page.locator("aside.cc-slot").innerText();
-  expect(note.toLowerCase()).toContain("undone");
-  expect((note.match(/reversed/gi) ?? []).length).toBeGreaterThanOrEqual(2);
 });
 
 test("AC5: a member-removal card says it cannot be undone, and the done message has no Undo", async ({ admin, member, later }) => {
@@ -163,7 +124,10 @@ test("AC5: a member-removal card says it cannot be undone, and the done message 
   const members = (await admin.api.get(`/api/projects/${project.id}`)).json.project.members as { userId: string }[];
   expect(members.some((m) => m.userId === member.user.id)).toBe(false);
   expect((await taskOf(admin, id)).assignee.id).toBe(admin.user.id);
+});
 
+// @static: the irreversible card copy is in the source. A painted card is not a concierge result, and this file does not post /api/concierge/messages.
+test("AC5: a member-removal card says it cannot be undone, and the done message has no Undo", { tag: "@static" }, () => {
   const changes = read("src/lib/concierge/changes.ts");
   expect(changes).toContain("irreversible = tasks.length > 0");
   expect(changes).toContain("await removeMember(user, op.projectId, op.userId, undefined, picks)");
@@ -173,33 +137,10 @@ test("AC5: a member-removal card says it cannot be undone, and the done message 
   const view = read("src/components/concierge/MessageView.tsx");
   expect(view).toContain("This can&apos;t be undone");
   expect(view).toContain('view === "none"');
-
-  const card: Msg = {
-    id: "zz-card", role: "ASSISTANT", createdAt: new Date().toISOString(), kind: "card", text: "Remove a member.",
-    card: {
-      id: "zz-card", status: "PENDING", title: "Remove a member", canConfirm: true, irreversible: true,
-      changes: [], handover: [{ taskId: id, taskTitle: title }],
-      handoverOptions: [{ id: admin.user.id, name: admin.user.name }],
-    },
-  };
-  await paint(admin.page, [
-    card,
-    result({ undoable: false, summary: ["Removed the member"] }, "Done. This can't be undone."),
-  ]);
-  const p = admin.page;
-  await p.goto(`/projects/${project.id}`);
-  const dock = p.locator("aside.cc-slot");
-  await expect(dock.locator(".cc-warn")).toContainText("This can't be undone");
-  await expect(dock.getByRole("button", { name: "Confirm" })).toBeDisabled();
-  await dock.locator(".cc-ho select").selectOption(admin.user.id);
-  await dock.locator(".cc-warn input").check();
-  await expect(dock.getByRole("button", { name: "Confirm" })).toBeEnabled();
-  await expect(dock.locator(".cc-result")).toContainText(/can't be undone/i);
-  await expect(dock.locator(".cc-result").getByRole("button", { name: "Undo" })).toHaveCount(0);
 });
 
-test("AC6: a done message older than 30 days has Undo greyed out, saying it is too old", async ({ admin, later }) => {
-  await showConcierge(admin, later);
+// @static: the 30-day copy is in the source. A painted "Too old to undo" button is not a live message.
+test("AC6: a done message older than 30 days has Undo greyed out, saying it is too old", { tag: "@static" }, () => {
   const thread = read("src/lib/concierge/thread.ts");
   const cards = read("src/lib/concierge/cards.ts");
   const days = read("src/lib/undoable.ts");
@@ -208,9 +149,4 @@ test("AC6: a done message older than 30 days has Undo greyed out, saying it is t
   expect(thread).toContain("UNDO_DAYS");
   expect(cards).toContain('throw new ApiError(409, "Too old to undo"');
   expect(read("src/components/concierge/MessageView.tsx")).toContain("Too old to undo");
-  await paint(admin.page, [result({ undoExpired: true })]);
-  await admin.page.goto("/");
-  const button = admin.page.locator("aside.cc-slot").getByRole("button", { name: "Too old to undo" });
-  await expect(button).toBeVisible();
-  await expect(button).toBeDisabled();
 });

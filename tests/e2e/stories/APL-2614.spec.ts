@@ -5,6 +5,9 @@
 import { readFileSync } from "node:fs";
 import { test, expect, zz, RUN } from "../support";
 
+// One skip for the whole file. The password is SHO_QA_PASS and is never generated here.
+test.skip(!process.env.SHO_QA_PASS, "Set SHO_QA_PASS (the shared password for the nakul17+ accounts).");
+
 test("Reference (screen path): removing a member who holds 3 tasks sends the leaver no per-task notices and logs the removal once", async ({ admin, member, later }) => {
   const pr = await admin.api.post("/api/projects", { name: zz("handover"), leaderId: admin.user.id });
   expect(pr.status).toBe(201);
@@ -24,7 +27,8 @@ test("Reference (screen path): removing a member who holds 3 tasks sends the lea
   expect(act.filter((a) => /^assigned "ZZ-TEST[^"]* held/.test(a.what)), "no per-task reassignment rows on the screen path").toHaveLength(0);
 });
 
-test("Concierge path: a confirmed remove-member card writes the same notices and log row as the screen", async ({ admin, member, later }) => {
+// @static: the concierge path is the source calling removeMember. This does not confirm a card or post /api/concierge/messages.
+test("Concierge path: a confirmed remove-member card writes the same notices and log row as the screen", { tag: "@static" }, async ({ admin, member, later }) => {
   const changes = readFileSync("src/lib/concierge/changes.ts", "utf8");
   const projects = readFileSync("src/lib/projects.ts", "utf8");
   expect(changes).toContain("await removeMember(user, op.projectId, op.userId, undefined, picks)");

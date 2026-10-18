@@ -1,12 +1,16 @@
 // SHO-US-9.3 Production deployment and backups (APL-2520).
 // What a browser can see is checked on staging: HTTPS, /api/health and /api/health/jobs.
 // The droplet, the backup cluster and the owner's mailbox are not opened from here, and production is not requested.
-// Those criteria are checked from the release script, the workflows and the README that staging's main build ships.
+// AC2, AC4, AC5 and AC7 read the repo (@static). AC3 (restore drill) and AC8 (firewall and SSH) are @static and @manual.
+// None of those is a live acceptance result. The staging run excludes both tags.
 import { readFileSync } from "node:fs";
 import { test, expect, BASE_URL } from "../support";
 
 const base = BASE_URL;
 const read = (path: string) => readFileSync(path, "utf8");
+
+// One skip for the whole file. The password is SHO_QA_PASS and is never generated here.
+test.skip(!process.env.SHO_QA_PASS, "Set SHO_QA_PASS (the shared password for the nakul17+ accounts).");
 
 test("AC1: the app is served over HTTPS and its health check passes", async ({ admin }) => {
   expect(base.startsWith("https://"), base).toBe(true);
@@ -48,7 +52,8 @@ test("AC6: the Super Admin can reach the notification bell (job notices land the
   expect(feed).toContain("JOB_MISSED");
 });
 
-test("AC2: a failed health check after a deploy restores the previous release and emails the owner", () => {
+// @static: the release script is not a failed deploy on staging.
+test("AC2: a failed health check after a deploy restores the previous release and emails the owner", { tag: "@static" }, () => {
   const release = read("deploy/release.sh");
   const deploy = read(".github/workflows/deploy.yml");
   expect(release).toContain("health check failed; rolling back");
@@ -61,7 +66,8 @@ test("AC2: a failed health check after a deploy restores the previous release an
   expect(read("README.md")).toContain("puts the previous release back");
 });
 
-test("AC3: a backup restore into a test database was rehearsed and recorded", () => {
+// @static @manual: a restore drill is a step a person records. The workflow file is not that drill.
+test("AC3: a backup restore into a test database was rehearsed and recorded", { tag: ["@static", "@manual"] }, () => {
   const workflow = read(".github/workflows/restore-check.yml");
   const script = read("deploy/restore-check.cjs");
   expect(workflow).toContain("name: Restore check");
@@ -71,7 +77,8 @@ test("AC3: a backup restore into a test database was rehearsed and recorded", ()
   expect(read("README.md")).toContain("Managed Postgres");
 });
 
-test("AC4: no secret is committed or logged", () => {
+// @static: source and gitignore do not show the server logs.
+test("AC4: no secret is committed or logged", { tag: "@static" }, () => {
   const health = read("src/app/api/health/route.ts");
   const model = read("src/lib/model.ts");
   const deploy = read(".github/workflows/deploy.yml");
@@ -83,7 +90,8 @@ test("AC4: no secret is committed or logged", () => {
   expect(read(".gitignore")).toMatch(/\.env/);
 });
 
-test("AC5: a sign-up verification email reaches the inbox, not junk", () => {
+// @static: the mail template does not show which folder the message landed in.
+test("AC5: a sign-up verification email reaches the inbox, not junk", { tag: "@static" }, () => {
   const mail = read("src/lib/email.ts");
   const signup = read("src/app/api/auth/signup/route.ts");
   expect(mail).toContain('subject: "Verify your email for Sheet Happens Officer"');
@@ -93,7 +101,8 @@ test("AC5: a sign-up verification email reaches the inbox, not junk", () => {
   expect(read("README.md")).toContain("confirm the verification email lands in the inbox, not junk");
 });
 
-test("AC7: the external uptime check emails the owner when /api/health fails for 5 minutes", () => {
+// @static: the workflow text is not a five-minute outage on the live check.
+test("AC7: the external uptime check emails the owner when /api/health fails for 5 minutes", { tag: "@static" }, () => {
   const readme = read("README.md");
   const ops = read(".github/workflows/ops-checks.yml");
   expect(readme).toContain("Point an external uptime check at `https://app.sheethappensofficer.com/api/health`");
@@ -102,7 +111,8 @@ test("AC7: the external uptime check emails the owner when /api/health fails for
   expect(read("src/app/api/health/route.ts")).toContain("external uptime check");
 });
 
-test("AC8: only web and SSH are open, password SSH is off, the database accepts the droplet only", () => {
+// @static @manual: firewall and SSH are checked on the droplet by a person. Cloud-init text is not that check.
+test("AC8: only web and SSH are open, password SSH is off, the database accepts the droplet only", { tag: ["@static", "@manual"] }, () => {
   const cloud = read("deploy/cloud-init.yaml");
   const ops = read(".github/workflows/ops-checks.yml");
   const readme = read("README.md");

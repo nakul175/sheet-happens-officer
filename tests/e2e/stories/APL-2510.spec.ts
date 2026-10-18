@@ -12,6 +12,9 @@ import { secondScreen, showConcierge } from "../helpers/jim-concierge";
 
 test.use({ viewport: { width: 1440, height: 900 } });
 
+// One skip for the whole file. The password is SHO_QA_PASS and is never generated here.
+test.skip(!process.env.SHO_QA_PASS, "Set SHO_QA_PASS (the shared password for the nakul17+ accounts).");
+
 const PAUSED = new Set(["MONTH_CAP", "WEEK_CAP", "PROVIDER_DOWN"]);
 
 /** The paused payload /api/concierge/state sends for a cap. Quick actions and the rest of the app stay up. */

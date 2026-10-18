@@ -12,6 +12,9 @@ import { fakeCallCount, generate, ModelError, modelConfig, setFakeModel, type Mo
 test.describe.configure({ timeout: 90_000 });
 test.use({ viewport: { width: 1440, height: 900 } });
 
+// One skip for the whole file. The password is SHO_QA_PASS and is never generated here.
+test.skip(!process.env.SHO_QA_PASS, "Set SHO_QA_PASS (the shared password for the nakul17+ accounts).");
+
 const read = (path: string) => readFileSync(path, "utf8");
 const req = (): ModelRequest => ({
   system: { stable: "stable", dynamic: "dynamic" },

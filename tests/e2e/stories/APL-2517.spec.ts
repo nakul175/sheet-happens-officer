@@ -1,7 +1,6 @@
 // SHO-US-8.8 Private chat history kept 90 days (APL-2517).
 // One test per acceptance criterion. A quick action puts a line in the thread; no model call is made.
-// AC2 cannot age a message or run the retention job (that job needs JOB_SECRET). The job and the 90-day
-// cutoff are the code staging runs, and this file checks them against the live health page.
+// AC2 cannot age a message or run the retention job. It reads the retention source (@static) and is not a live pass.
 import { readFileSync } from "node:fs";
 import { test, expect, zz } from "../support";
 import { newProject, newTask } from "../g2";
@@ -11,6 +10,9 @@ import { editTask } from "../helpers/claude-a";
 
 test.describe.configure({ timeout: 90_000 });
 test.use({ viewport: { width: 1440, height: 900 } });
+
+// One skip for the whole file. The password is SHO_QA_PASS and is never generated here.
+test.skip(!process.env.SHO_QA_PASS, "Set SHO_QA_PASS (the shared password for the nakul17+ accounts).");
 
 const PROMISE = "Your chats are not visible anywhere in the app to anyone else, and are deleted from the app after 90 days.";
 const read = (path: string) => readFileSync(path, "utf8");
@@ -44,7 +46,8 @@ test("AC1: no screen or endpoint returns another person's chat", async ({ admin,
   expect(read("src/lib/concierge/thread.ts")).toContain("there is no function that reads another person's chat");
 });
 
-test("AC2: a message older than 90 days is deleted by the retention job", async ({ admin }) => {
+// @static: reading the retention source does not show that staging deleted a message.
+test("AC2: a message older than 90 days is deleted by the retention job", { tag: "@static" }, async ({ admin }) => {
   const health = await admin.api.get("/api/health");
   expect(health.status).toBe(200);
   expect(health.json.ok).toBe(true);

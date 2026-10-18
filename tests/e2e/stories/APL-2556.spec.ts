@@ -3,6 +3,9 @@
 // Confirm, Cancel and the off notice are painted from the concierge state payload, so no model call is made.
 // The undo toast is the same UndoHost the app raises after a change; it is shown with the sheet open and closed.
 import { test, expect, zz, login, BASE_URL } from "../support";
+
+// One skip for the whole file. The password is SHO_QA_PASS and is never generated here.
+test.skip(!process.env.SHO_QA_PASS, "Set SHO_QA_PASS (the shared password for the nakul17+ accounts).");
 import type { Page, Browser } from "@playwright/test";
 
 type Box = { x: number; y: number; width: number; height: number };
@@ -101,7 +104,8 @@ test("AC2: the quick chips are at least 44 px high", async ({ browser }) => {
   } finally { await ctx.close(); }
 });
 
-test("AC2: the Confirm and Cancel buttons are at least 44 px high", async ({ browser }) => {
+// @manual: the card is painted into the page. It is not a concierge result, and this file does not post /api/concierge/messages.
+test("AC2: the Confirm and Cancel buttons are at least 44 px high", { tag: "@manual" }, async ({ browser }) => {
   const ctx = await phone(browser, 390, 780);
   const page = await ctx.newPage();
   try {
@@ -154,7 +158,8 @@ test("AC4: when the concierge is switched off the notice shows and the rest of t
   } finally { await ctx.close(); }
 });
 
-test("AC5: the undo toast does not overlap the entry or a bottom bar", async ({ browser }) => {
+// @manual: the toast is dispatched in the page. It is not a concierge result.
+test("AC5: the undo toast does not overlap the entry or a bottom bar", { tag: "@manual" }, async ({ browser }) => {
   const ctx = await phone(browser, 390, 780);
   const page = await ctx.newPage();
   try {

@@ -5,6 +5,9 @@
 // and a response that contains the deal's name fails the test.
 // Deals and organisations are ZZ-TEST and archived afterwards. Chats started empty are cleared.
 import { test, expect } from "../support";
+
+// One skip for the whole file. The password is SHO_QA_PASS and is never generated here.
+test.skip(!process.env.SHO_QA_PASS, "Set SHO_QA_PASS (the shared password for the nakul17+ accounts).");
 import { chatMessages, cleanChat, newDeal, QUICK, quickAction } from "../helpers/jim-http";
 import { conciergeLive, crmModeLive, type CrmLive } from "../helpers/jim-gate";
 import type { Who } from "../g2";
