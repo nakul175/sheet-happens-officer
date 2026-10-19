@@ -8,12 +8,21 @@
 import net from "node:net";
 import path from "node:path";
 import { spawn, execFileSync, type ChildProcess } from "node:child_process";
+import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { db } from "../src/lib/db";
 import { CLEAN_LOG, TIMEOUT_LOG } from "../src/lib/shutdown";
+import { PW } from "./helpers";
 
 const root = path.join(fileURLToPath(new URL(".", import.meta.url)), "..");
 const databaseUrl = process.env.DATABASE_URL ?? "postgresql://sho:sho@127.0.0.1:5432/sho_test?schema=public";
+// These tests sign up a ZZ-TEST account and delete it afterwards. Only ever against a local throwaway Postgres.
+const dbHost = new URL(databaseUrl).hostname;
+if (!["localhost", "127.0.0.1", "::1", "[::1]"].includes(dbHost)) {
+  throw new Error("tests/shutdown-next.test.ts only runs against a local Postgres (DATABASE_URL host must be localhost)");
+}
 
 function startBurners(): ChildProcess[] {
   // The droplet is 2 vCPU. Pin the load to two cores so accept() falls behind the
@@ -42,20 +51,32 @@ function freePort(): Promise<number> {
   });
 }
 
-function startNext(port: number, env: Record<string, string>) {
-  const child = spawn("taskset", ["-c", "0,1", process.execPath, "node_modules/next/dist/bin/next", "start", "-p", String(port), "-H", "127.0.0.1"], {
+type Entry = "next start" | "server.js";
+
+function startNext(port: number, env: Record<string, string>, entry: Entry = "next start") {
+  // server.js is the production entry (deploy/cloud-init.yaml). Droplets built before
+  // it, and the pr8 staging preview, still run `next start`.
+  const args =
+    entry === "server.js"
+      ? [process.execPath, "--import", "tsx", "server.js"]
+      : [process.execPath, "node_modules/next/dist/bin/next", "start", "-p", String(port), "-H", "127.0.0.1"];
+  const child = spawn("taskset", ["-c", "0,1", ...args], {
     cwd: root,
     env: {
       ...process.env,
       NODE_ENV: "production",
       DATABASE_URL: databaseUrl,
       SHUTDOWN_TEST_SLOW_MS: "1",
+      PORT: String(port),
+      SHO_BIND_HOST: "127.0.0.1",
       ...env,
     },
     stdio: ["ignore", "pipe", "pipe"],
   });
   let stdout = "";
   let stderr = "";
+  /** Date.now() when each `graceful shutdown:` line reached this process. */
+  const outcomeAt = new Map<string, number>();
   const waiters: { re: RegExp; resolve: (match: RegExpMatchArray) => void }[] = [];
   const notify = () => {
     for (const waiter of [...waiters]) {
@@ -67,6 +88,9 @@ function startNext(port: number, env: Record<string, string>) {
   };
   child.stdout?.on("data", (chunk: Buffer) => {
     stdout += chunk.toString();
+    for (const line of [CLEAN_LOG, TIMEOUT_LOG]) {
+      if (!outcomeAt.has(line) && stdout.includes(line)) outcomeAt.set(line, Date.now());
+    }
     notify();
   });
   child.stderr?.on("data", (chunk: Buffer) => {
@@ -78,6 +102,7 @@ function startNext(port: number, env: Record<string, string>) {
   return {
     child,
     exited,
+    outcomeAt,
     hits: () => stdout.split("sho-hit\n").length - 1,
     waitFor(re: RegExp, ms = 30000) {
       const existing = stdout.match(re);
@@ -117,22 +142,24 @@ function openSocket(port: number): Promise<net.Socket> {
   });
 }
 
-function readResponse(socket: net.Socket): Promise<{ status: number; body: string; reset: boolean }> {
+type Settled = { status: number; body: string; reset: boolean; doneAt: number };
+
+function readResponse(socket: net.Socket): Promise<Settled> {
   return new Promise((resolve) => {
     let buf = "";
-    const timer = setTimeout(() => resolve({ status: 0, body: buf, reset: true }), 20000);
+    const timer = setTimeout(() => resolve({ status: 0, body: buf, reset: true, doneAt: Date.now() }), 20000);
     socket.on("data", (chunk: Buffer) => {
       buf += chunk.toString();
     });
     socket.on("error", () => {
       clearTimeout(timer);
-      resolve({ status: 0, body: buf, reset: true });
+      resolve({ status: 0, body: buf, reset: true, doneAt: Date.now() });
     });
     socket.on("close", () => {
       clearTimeout(timer);
       const head = buf.split("\r\n\r\n")[0] ?? "";
       const status = Number(head.split(" ")[1]);
-      resolve({ status: Number.isFinite(status) ? status : 0, body: buf, reset: !buf.includes("HTTP/") });
+      resolve({ status: Number.isFinite(status) ? status : 0, body: buf, reset: !buf.includes("HTTP/"), doneAt: Date.now() });
     });
   });
 }
@@ -162,7 +189,7 @@ function probeAt(port: number, t0: number, at: number): Promise<"refused" | "ope
   return new Promise((resolve) => setTimeout(() => resolve(probe(port)), wait));
 }
 
-describe("next start SIGTERM", () => {
+describe("qa:TC missing next start SIGTERM", () => {
   beforeAll(() => {
     execFileSync(process.execPath, [path.join(root, "node_modules/next/dist/bin/next"), "build"], {
       cwd: root,
@@ -213,19 +240,19 @@ describe("next start SIGTERM", () => {
     expect(result.stdout).not.toContain(TIMEOUT_LOG);
   }
 
-  it("drains 6 requests and refuses connections at 16ms and 143ms", async () => {
+  it("qa:TC missing drains 6 requests and refuses connections at 16ms and 143ms", async () => {
     await expectBurst(6);
   }, 120_000);
 
-  it("drains 40 requests written 40ms before SIGTERM on two pinned cores", async () => {
+  it("qa:TC missing drains 40 requests written 40ms before SIGTERM on two pinned cores", async () => {
     await expectBurst(40);
   }, 120_000);
 
-  it("drains 100 requests written 40ms before SIGTERM on two pinned cores", async () => {
+  it("qa:TC missing drains 100 requests written 40ms before SIGTERM on two pinned cores", async () => {
     await expectBurst(100);
   }, 120_000);
 
-  it("logs the timeout line and exits 1 when a request outlives the drain", async () => {
+  it("qa:TC missing logs the timeout line and exits 1 when a request outlives the drain", async () => {
     const burners = startBurners();
     const port = await freePort();
     const proc = startNext(port, { SHUTDOWN_DRAIN_MS: "10000" });
@@ -244,4 +271,104 @@ describe("next start SIGTERM", () => {
       stopBurners(burners);
     }
   }, 60_000);
+});
+
+// APL-2689. Oscar's staging run: N concurrent signed-in GET / requests, SIGTERM mid-flight.
+// At dc678d0 this dropped 12 of 40 here (ECONNRESET, no response), still accepted new
+// connections, logged the drained line and exited 0. Every request must now return 200,
+// new connections must be refused, and the drained line must arrive after the last response.
+describe("qa:TC missing signed-in GET / under SIGTERM (APL-2689)", () => {
+  const outbox = mkdtempSync(path.join(tmpdir(), "sho-apl2689-"));
+  const email = `zz-test-apl2689-${Date.now().toString(36)}-${process.pid}@aplyd.com`;
+  let cookie = "";
+
+  afterAll(async () => {
+    const users = await db.user.findMany({ where: { email }, select: { id: true } });
+    const ids = users.map((user) => user.id);
+    if (ids.length) {
+      await db.actionLog.deleteMany({ where: { actorId: { in: ids } } });
+      await db.auditLog.deleteMany({ where: { actorId: { in: ids } } });
+      await db.user.deleteMany({ where: { id: { in: ids } } });
+    }
+    await db.loginAttempt.deleteMany({ where: { email } });
+    await db.$disconnect();
+    rmSync(outbox, { recursive: true, force: true });
+  });
+
+  async function post(base: string, p: string, body: unknown) {
+    return fetch(base + p, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+  }
+
+  /** Signs up once. The session lives in Postgres, so the cookie works on every later server. */
+  async function signedInCookie(base: string) {
+    if (cookie) return cookie;
+    const created = await post(base, "/api/auth/signup", { name: "ZZ-TEST Shutdown", email, password: PW });
+    expect(created.status, await created.text()).toBe(201);
+    const mail = readdirSync(outbox)
+      .filter((f) => f.endsWith(".json"))
+      .map((f) => JSON.parse(readFileSync(path.join(outbox, f), "utf8")) as { to?: string; subject?: string; text?: string })
+      .find((m) => m.to === email && /Verify/.test(m.subject ?? ""));
+    const token = mail?.text?.match(/token=([\w-]+)/)?.[1];
+    expect(token, "verification mail").toBeTruthy();
+    expect((await post(base, "/api/auth/verify", { token })).status).toBe(200);
+    const signed = await post(base, "/api/auth/signin", { email, password: PW });
+    expect(signed.status).toBe(200);
+    cookie = signed.headers.getSetCookie().map((line) => line.split(";")[0]).find((line) => line.startsWith("sho_session=")) ?? "";
+    expect(cookie).not.toBe("");
+    return cookie;
+  }
+
+  async function signedInBurst(entry: Entry, concurrency: number) {
+    const burners = startBurners();
+    const port = await freePort();
+    const base = `http://127.0.0.1:${port}`;
+    const proc = startNext(port, { SHUTDOWN_DRAIN_MS: "15000", EMAIL_OUTBOX_DIR: outbox, APP_URL: base }, entry);
+    try {
+      await proc.waitFor(entry === "server.js" ? /sho ready/ : /Ready/, 120_000);
+      const session = await signedInCookie(base);
+      // Warm-up, as on staging. Under `next start` this is also the request that installs the hook.
+      const warmup = await fetch(`${base}/`, { headers: { cookie: session }, redirect: "manual" });
+      expect(warmup.status).toBe(200);
+      await warmup.text();
+      const sockets = await Promise.all(Array.from({ length: concurrency }, () => openSocket(port)));
+      const pending = Promise.all(sockets.map((socket) => readResponse(socket)));
+      for (const socket of sockets) {
+        socket.write(`GET / HTTP/1.1\r\nHost: 127.0.0.1:${port}\r\nCookie: ${session}\r\nConnection: close\r\n\r\n`);
+      }
+      await new Promise((resolve) => setTimeout(resolve, 40));
+      const t0 = Date.now();
+      proc.child.kill("SIGTERM");
+      const [late16, late143] = await Promise.all([probeAt(port, t0, 16), probeAt(port, t0, 143)]);
+      const settled = await pending;
+      const result = await proc.exited;
+      return { settled, late16, late143, result, drainedAt: proc.outcomeAt.get(CLEAN_LOG) };
+    } finally {
+      stop(proc.child);
+      stopBurners(burners);
+    }
+  }
+
+  async function expectSignedInBurst(entry: Entry, concurrency: number) {
+    const { settled, late16, late143, result, drainedAt } = await signedInBurst(entry, concurrency);
+    const summary = settled.map((response) => (response.reset ? "reset" : String(response.status)));
+    expect(summary, "every in-flight GET / returns 200").toEqual(Array(concurrency).fill("200"));
+    for (const response of settled) expect(response.body).toContain("</html>");
+    expect([late16, late143], "new connections after SIGTERM").toEqual(["refused", "refused"]);
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain(CLEAN_LOG);
+    expect(result.stdout).not.toContain(TIMEOUT_LOG);
+    expect(drainedAt, "drained line seen").toBeDefined();
+    const lastDone = Math.max(...settled.map((response) => response.doneAt));
+    expect(drainedAt!, "drained line only after the last response completed").toBeGreaterThanOrEqual(lastDone);
+  }
+
+  for (const entry of ["next start", "server.js"] as const) {
+    it(`qa:TC missing ${entry}: 6 signed-in GET / mid-flight all return 200, exit 0`, async () => {
+      await expectSignedInBurst(entry, 6);
+    }, 180_000);
+
+    it(`qa:TC missing ${entry}: 40 signed-in GET / mid-flight all return 200, exit 0`, async () => {
+      await expectSignedInBurst(entry, 40);
+    }, 180_000);
+  }
 });

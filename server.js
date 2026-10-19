@@ -13,6 +13,8 @@
 // (the 10–25s clamp still applies when the seam is off).
 
 process.env.NEXT_MANUAL_SIG_HANDLE = "true";
+// Tells src/instrumentation.ts that this file owns the drain (it runs during prepare(), before listen).
+process.env.SHO_SERVER_ENTRY = "1";
 
 const http = require("node:http");
 const next = require("next");

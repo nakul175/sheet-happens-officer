@@ -5,6 +5,9 @@
 
 export async function register() {
   if (process.env.NEXT_RUNTIME !== "nodejs") return;
+  // server.js installs the drain on its own http.Server after prepare(). Without this,
+  // register() runs first, finds no listener, and logs a misleading error at boot.
+  if (process.env.SHO_SERVER_ENTRY === "1") return;
   const { installGracefulShutdown } = await import("@/lib/shutdown");
   installGracefulShutdown();
 }

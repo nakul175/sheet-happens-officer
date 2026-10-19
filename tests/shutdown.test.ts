@@ -129,8 +129,8 @@ function probeAt(port: number, t0: number, at: number): Promise<"refused" | "ope
   return new Promise((resolve) => setTimeout(() => resolve(probe(port)), wait));
 }
 
-describe("shutdownDrainMs", () => {
-  it("uses 15s when the env var is missing or outside 10–25s", () => {
+describe("qa:TC missing shutdownDrainMs", () => {
+  it("qa:TC missing uses 15s when the env var is missing or outside 10–25s", () => {
     expect(shutdownDrainMs({})).toBe(DEFAULT_DRAIN_MS);
     expect(shutdownDrainMs({ SHUTDOWN_DRAIN_MS: "" })).toBe(DEFAULT_DRAIN_MS);
     expect(shutdownDrainMs({ SHUTDOWN_DRAIN_MS: "nope" })).toBe(DEFAULT_DRAIN_MS);
@@ -139,15 +139,15 @@ describe("shutdownDrainMs", () => {
     expect(shutdownDrainMs({ SHUTDOWN_DRAIN_MS: "15000.5" })).toBe(DEFAULT_DRAIN_MS);
   });
 
-  it("accepts an integer from 10s through 25s", () => {
+  it("qa:TC missing accepts an integer from 10s through 25s", () => {
     expect(shutdownDrainMs({ SHUTDOWN_DRAIN_MS: "10000" })).toBe(10_000);
     expect(shutdownDrainMs({ SHUTDOWN_DRAIN_MS: "20000" })).toBe(20_000);
     expect(shutdownDrainMs({ SHUTDOWN_DRAIN_MS: "25000" })).toBe(25_000);
   });
 });
 
-describe("SIGTERM drain", () => {
-  it("finishes an in-flight request, refuses a new one, disconnects, and exits 0", async () => {
+describe("qa:TC missing SIGTERM drain", () => {
+  it("qa:TC missing finishes an in-flight request, refuses a new one, disconnects, and exits 0", async () => {
     const proc = startChild({ DELAY_MS: "1500", DRAIN_MS: "5000", KEEPALIVE_MS: "300" });
     try {
       const ready = await proc.waitFor(/ready (\d+)/);
@@ -179,7 +179,7 @@ describe("SIGTERM drain", () => {
     }
   });
 
-  it("exits non-zero and logs the timeout line when the drain deadline passes", async () => {
+  it("qa:TC missing exits non-zero and logs the timeout line when the drain deadline passes", async () => {
     const proc = startChild({ DELAY_MS: "5000", DRAIN_MS: "400" });
     try {
       const ready = await proc.waitFor(/ready (\d+)/);
@@ -198,7 +198,7 @@ describe("SIGTERM drain", () => {
     }
   });
 
-  it("closes an idle keep-alive socket without waiting out the keep-alive timeout", async () => {
+  it("qa:TC missing closes an idle keep-alive socket without waiting out the keep-alive timeout", async () => {
     const proc = startChild({ DELAY_MS: "0", DRAIN_MS: "8000", KEEPALIVE_MS: "5000" });
     try {
       const ready = await proc.waitFor(/ready (\d+)/);
@@ -230,7 +230,7 @@ describe("SIGTERM drain", () => {
     }
   });
 
-  it("returns 200 for 100 requests written before SIGTERM, including ones not yet dispatched", async () => {
+  it("qa:TC missing returns 200 for 100 requests written before SIGTERM, including ones not yet dispatched", async () => {
     const proc = startChild({ DELAY_MS: "400", DRAIN_MS: "8000" });
     try {
       const ready = await proc.waitFor(/ready (\d+)/);
@@ -257,7 +257,7 @@ describe("SIGTERM drain", () => {
     }
   });
 
-  it("returns 200 for 40 connections accepted before SIGTERM whose requests arrive during the grace", async () => {
+  it("qa:TC missing returns 200 for 40 connections accepted before SIGTERM whose requests arrive during the grace", async () => {
     const proc = startChild({ DELAY_MS: "200", DRAIN_MS: "10000", KEEPALIVE_MS: "1000" });
     try {
       const ready = await proc.waitFor(/ready (\d+)/);
@@ -286,7 +286,7 @@ describe("SIGTERM drain", () => {
     }
   });
 
-  it("refuses connections at 16ms and 143ms after SIGTERM", async () => {
+  it("qa:TC missing refuses connections at 16ms and 143ms after SIGTERM", async () => {
     const proc = startChild({ DELAY_MS: "800", DRAIN_MS: "8000" });
     try {
       const ready = await proc.waitFor(/ready (\d+)/);
@@ -314,7 +314,7 @@ describe("SIGTERM drain", () => {
     }
   });
 
-  it("finishes 40 sockets that were only in the kernel queue while the loop was blocked", async () => {
+  it("qa:TC missing finishes 40 sockets that were only in the kernel queue while the loop was blocked", async () => {
     const proc = startChild({ DELAY_MS: "200", DRAIN_MS: "8000", SPIN_MS: "400", SHUTDOWN_TEST_SLOW_MS: "1" });
     try {
       const ready = await proc.waitFor(/ready (\d+)/);
@@ -343,7 +343,7 @@ describe("SIGTERM drain", () => {
     }
   });
 
-  it("exits non-zero when an in-flight request is dropped", async () => {
+  it("qa:TC missing exits non-zero when an in-flight request is dropped", async () => {
     const proc = startChild({ DELAY_MS: "2000", DRAIN_MS: "8000", KEEPALIVE_MS: "300" });
     try {
       const ready = await proc.waitFor(/ready (\d+)/);
