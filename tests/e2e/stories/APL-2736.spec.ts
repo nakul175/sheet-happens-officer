@@ -1,11 +1,14 @@
-// APL-2736 (SHO-US-10.2 AC3). In a signed-in browser, the Super Admin removes a deal stage: without a choice the
-// answer asks which other stage its items go to and the board keeps the column; with a choice the deal moves
-// and the column goes. The removed stage is a ZZ-TEST row this file inserts; seeded stages are only asked about.
-// Local only, workers=1 (vitest.e2e.config.mts). Run: npm run test:e2e
+// APL-2736 story spec (SHO-US-10.2 AC3, parent APL-2528). No qa:TC id was given, so each title says qa:TC missing.
+// In a signed-in browser, the Super Admin removes a deal stage: without a choice the answer asks which other stage
+// its items go to and the board keeps the column; with a choice the deal moves and the column goes.
+// The removed stage is a ZZ-TEST row this file inserts; seeded stages are only asked about.
+// Local servers only: anything but localhost or 127.0.0.1 is refused before a test runs.
+// The suite runs one file at a time, and the cases in this file run one after another.
+import { existsSync } from "node:fs";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { chromium, type Browser, type BrowserContext, type Page } from "playwright-core";
-import { BASE, PW, SUPER_EMAIL, istDate, superAdmin, type Account } from "../tests/helpers";
-import { db } from "../src/lib/db";
+import { BASE, PW, SUPER_EMAIL, istDate, superAdmin, type Account } from "../../helpers";
+import { db } from "../../../src/lib/db";
 
 const RUN = Date.now().toString(36);
 const STAGE_ID = `st_zz_2736e2e_${RUN}`;
@@ -29,10 +32,20 @@ async function board() {
   await column("Proposal").waitFor({ state: "visible", timeout: 120000 });
 }
 
-beforeAll(async () => {
-  if (!/^(localhost|127\.0\.0\.1)$/.test(new URL(BASE).hostname)) {
-    throw new Error(`Refusing to run against ${BASE}: this spec is local only.`);
+function chromePath() {
+  const fromEnv = process.env.PW_CHROMIUM;
+  if (fromEnv && existsSync(fromEnv)) return fromEnv;
+  for (const p of ["/usr/bin/google-chrome", "/usr/bin/google-chrome-stable", "/usr/bin/chromium", "/usr/bin/chromium-browser"]) {
+    if (existsSync(p)) return p;
   }
+  throw new Error("No Chrome/Chromium binary. Set PW_CHROMIUM.");
+}
+
+if (!/^(localhost|127\.0\.0\.1)$/.test(new URL(BASE).hostname)) {
+  throw new Error(`Refusing to run against ${BASE}: this spec is local only.`);
+}
+
+beforeAll(async () => {
   sa = await superAdmin();
   pro = ((await sa.c.get("/api/deals/pipelines")).json.pipelines as Pipe[]).find((p) => p.key === "DEAL_PROACTIVE")!;
   await db.stage.create({ data: { id: STAGE_ID, pipelineId: pro.id, name: STAGE_NAME, position: 100, category: "ACTIVE", requiredFields: [] } });
@@ -46,7 +59,7 @@ beforeAll(async () => {
   await db.project.update({ where: { id: dealId }, data: { stageId: STAGE_ID } });
 
   browser = await chromium.launch({
-    executablePath: process.env.PW_CHROMIUM || "/usr/local/bin/google-chrome",
+    executablePath: chromePath(),
     args: ["--no-sandbox"],
   });
   ctx = await browser.newContext({ viewport: { width: 1280, height: 800 }, baseURL: BASE });
