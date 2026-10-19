@@ -118,7 +118,10 @@ test("AC2: a project created on the Projects screen has type Project and is list
 // qa:TC missing
 test("@static AC3: the migration only adds columns with defaults, and a rollback restores code but not the database qa:TC missing", () => {
   const dir = "prisma/migrations/20261017124803_crm_workstreams_deals";
-  expect(readdirSync(dir).sort()).toEqual(["migration.sql"]);
+  const names = readdirSync(dir).sort();
+  // The forward file is the only script. There is no down.sql, so reverting the code
+  // restores the tree and leaves the applied columns in the database.
+  expect(names, "a code rollback ships no down migration").toEqual(["migration.sql"]);
   const sql = readFileSync(`${dir}/migration.sql`, "utf8");
   expect(sql).toMatch(/"typeId" TEXT NOT NULL DEFAULT 'wst_project'/);
   expect(sql).toMatch(/"isIdea" BOOLEAN NOT NULL DEFAULT false/);
@@ -128,6 +131,10 @@ test("@static AC3: the migration only adds columns with defaults, and a rollback
   expect(sql).toMatch(/ADD COLUMN\s+"stageChangedAt" TIMESTAMP\(3\)/);
   expect(sql).not.toMatch(/\bDROP TABLE\b/);
   expect(sql).not.toMatch(/\bTRUNCATE\b/);
+  expect(sql).not.toMatch(/--\s*rollback/i);
+  for (const column of ["typeId", "isIdea", "pipelineId", "stageId", "stageReason", "stageChangedAt"]) {
+    expect(sql, `${column} is not dropped, so a code rollback does not undo it`).not.toMatch(new RegExp(`DROP COLUMN\\s+"${column}"`));
+  }
 });
 
 // qa:TC missing
