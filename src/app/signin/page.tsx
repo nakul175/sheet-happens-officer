@@ -1,4 +1,6 @@
 import { Suspense } from "react";
+import { returnToEnabled, safeReturnPath } from "@/lib/return-to";
+import { ReturnToBridge } from "@/components/ReturnToBridge";
 import { SignInForm } from "./SignInForm";
 import { Hero } from "./Hero";
 import s from "./signin.module.css";
@@ -6,7 +8,18 @@ import s from "./signin.module.css";
 export const metadata = { title: "Sign in · Sheet Happens Officer" };
 
 async function Form({ params }: { params: PageProps<"/signin">["searchParams"] }) {
-  return <SignInForm justReset={(await params).reset === "1"} />;
+  const sp = await params;
+  // Flag off ignores next and expired, so sign-in lands on the home page as it does on main.
+  if (!returnToEnabled()) return <SignInForm justReset={sp.reset === "1"} />;
+  // Only a safe path is handed to the form. A bad `next` is dropped, so sign-in goes home.
+  // The router decoded the query once already. That decode counts toward the five-layer cap.
+  const next = safeReturnPath(typeof sp.next === "string" ? sp.next : undefined, 1) ?? undefined;
+  return (
+    <>
+      <ReturnToBridge />
+      <SignInForm justReset={sp.reset === "1"} sessionExpired={sp.expired === "1"} next={next} />
+    </>
+  );
 }
 
 export default function Page({ searchParams }: PageProps<"/signin">) {

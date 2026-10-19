@@ -5,9 +5,10 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import styles from "@/components/auth.module.css";
 import { post, rememberEmail } from "@/components/client";
+import { returnToEnabled, safeReturnPath } from "@/lib/return-to";
 import s from "./signin.module.css";
 
-export function SignInForm({ justReset }: { justReset: boolean }) {
+export function SignInForm({ justReset, sessionExpired = false, next }: { justReset: boolean; sessionExpired?: boolean; next?: string }) {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
   const [needsVerify, setNeedsVerify] = useState<string | null>(null);
@@ -23,7 +24,9 @@ export function SignInForm({ justReset }: { justReset: boolean }) {
     const r = await post("/api/auth/signin", { email, password: f.get("password") });
     setBusy(false);
     if (r.ok) {
-      router.push("/");
+      // A failed attempt never reaches here, so `next` stays in the address bar (APL-2652 AC4).
+      // Checked again: the prop is only a path, and router.push is never given an absolute URL.
+      router.push(returnToEnabled() ? (safeReturnPath(next) ?? "/") : "/");
       router.refresh();
       return;
     }
@@ -47,6 +50,7 @@ export function SignInForm({ justReset }: { justReset: boolean }) {
       <section className={styles.card}>
       <h2 className={s.h2}>Sign in</h2>
       <form onSubmit={submit} className={styles.card} style={{ border: 0, padding: 0 }} noValidate>
+        {sessionExpired && !error && <div role="alert" className={styles.alert}>Your session has expired, please sign in again</div>}
         {justReset && !error && <div role="status" className={styles.notice}>Password changed. Sign in with your new password.</div>}
         {error && (
           <div role="alert" className={styles.alert}>
