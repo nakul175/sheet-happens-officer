@@ -28,11 +28,15 @@ export function SignInForm({ justReset }: { justReset: boolean }) {
       return;
     }
     setError(r.error ?? null);
-    if (r.status === 403 && r.error === "Verify your email first.") setNeedsVerify(email);
+    if (r.status === 403 && r.data?.code === "EMAIL_NOT_VERIFIED") setNeedsVerify(email);
   }
 
   async function resend(email: string) {
-    await post("/api/auth/resend-verification", { email });
+    const r = await post("/api/auth/resend-verification", { email });
+    if (!r.ok) {
+      setError(r.error ?? null); // APL-2742: a refused send is shown here, with the Resend button still offered
+      return;
+    }
     rememberEmail(email);
     router.push("/check-email");
   }

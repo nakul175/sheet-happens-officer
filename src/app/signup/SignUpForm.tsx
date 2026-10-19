@@ -24,7 +24,8 @@ export function SignUpForm() {
     setBusy(false);
     if (r.ok) {
       rememberEmail(email);
-      router.push("/check-email");
+      // APL-2742: the account exists but the email did not go; the next screen says so and offers Resend.
+      router.push(r.data?.emailSent === false ? "/check-email?failed=1" : "/check-email");
       return;
     }
     setExists(r.status === 409);

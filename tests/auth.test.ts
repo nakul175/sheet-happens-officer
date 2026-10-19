@@ -138,7 +138,8 @@ describe("sign-in and sessions (1.3, 1.5)", () => {
     expect((await c.call("POST", "/api/auth/signin", { email, password: "wrong-pass-1" })).json.error).toBe("Email or password is incorrect.");
     const r = await c.call("POST", "/api/auth/signin", { email, password: PW });
     expect(r.status).toBe(403);
-    expect(r.json.error).toBe("Verify your email first.");
+    expect(r.json.error).toBe("Verify your email before you sign in. Open the link we emailed you, or resend it.");
+    expect(r.json.code).toBe("EMAIL_NOT_VERIFIED");
   });
 
   it("locks after 5 failures, for real and unknown emails alike, without checking the password", async () => {

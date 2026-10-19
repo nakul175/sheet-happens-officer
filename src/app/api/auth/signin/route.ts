@@ -4,6 +4,8 @@ import { ApiError, handle, parseBody } from "@/lib/http";
 import { signInInput } from "@/lib/schemas";
 
 const WRONG = "Email or password is incorrect.";
+// APL-2742. The client shows a Resend button on this code, not on the wording.
+const UNVERIFIED = "Verify your email before you sign in. Open the link we emailed you, or resend it.";
 
 // SHO-US-1.3. Same answer for a wrong password and for no account; lockout applies to both.
 export const POST = handle(async (req: Request) => {
@@ -30,7 +32,7 @@ export const POST = handle(async (req: Request) => {
     await audit("SIGN_IN_REFUSED", { actorId: user.id, ip });
     throw new ApiError(403, "This account is deactivated.");
   }
-  if (!user.emailVerifiedAt) throw new ApiError(403, "Verify your email first.");
+  if (!user.emailVerifiedAt) throw new ApiError(403, UNVERIFIED, { code: "EMAIL_NOT_VERIFIED" });
 
   // SHO-US-2.1 AC4: the Super Admin list is read at every sign-in. Listed means Super Admin; unlisted means Member.
   const listed = superAdminEmails().includes(user.email.toLowerCase());
