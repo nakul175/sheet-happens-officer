@@ -182,7 +182,7 @@ describe("qa:TC missing APL-2875 a caller who cannot see a task gets the missing
       const hidden = await getTask(member, t3.json.task.id).catch((e) => e);
       expect({ status: hidden.status, message: hidden.message }).toEqual({ status: missing.status, message: missing.message });
       expect(hidden).toMatchObject({ status: 404, message: "Task not found" });
-      // loadTask asks taskAccess, and every route under /api/tasks/:id (assign through checkAssign) goes through loadTask.
+      // R1-R14 go through loadTask (R4 assign via checkAssign); links and convert (R15-R17) call taskAccess directly; both end in recordAccess.
       // tests/task-outsider-2875-crm.test.ts sends R1-R17 for this example over HTTP to a CRM_VISIBLE=admins server.
       await expect(taskAccess(member, dealId, { write: true })).rejects.toMatchObject({ status: 404, message: "Task not found" });
     } finally {
