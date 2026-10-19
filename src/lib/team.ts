@@ -156,6 +156,7 @@ async function sendDetails(to: string, firstName: string, by: string, password: 
 
 /** SHO-US-15.3. New password, old one dead, every session signed out. The Super Admin never sees it. */
 export async function resendSignIn(actor: Actor & { name?: string }, targetId: string) {
+  // The replacement password is temporary too: sign-in returns mustChangePassword and app APIs answer 403 PASSWORD_CHANGE_REQUIRED.
   if (actor.orgRole !== "SUPER_ADMIN") throw new ApiError(403, "Only the Super Admin can resend sign-in details.");
   const target = await db.user.findUnique({ where: { id: targetId } });
   if (!target) throw notFound("Person");

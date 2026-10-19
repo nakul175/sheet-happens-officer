@@ -47,5 +47,5 @@ export const POST = handle(async (req: Request) => {
   await db.loginAttempt.deleteMany({ where: { email } });
   await startSession(user.id, req.headers.get("user-agent"));
   await audit("SIGN_IN", { actorId: user.id, ip });
-  return Response.json({ user: publicUser(user) });
+  return Response.json({ user: { ...publicUser(user), mustChangePassword: !!user.tempPasswordAt } });
 });
