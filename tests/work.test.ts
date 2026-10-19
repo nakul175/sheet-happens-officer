@@ -427,18 +427,21 @@ describe("tasks (4.x, 5.x)", () => {
     expect(cleared.json.task.blockedReason).toBeNull();
   });
 
-  it("APL-2494 AC2: {blocked:false} and {blocked:true} succeed with no expectedUpdatedAt (qa:TC-APL2494-fd46a8ec@v1)", async () => {
+  it("qa:TC missing APL-2670 AC1 v1.4: setting or clearing Blocked with no expectedUpdatedAt is 400 version_required (supersedes APL-2494 AC2)", async () => {
     const lead = await account("lead");
     const ed = await account("editor");
     const p = await project(lead, lead, [{ who: ed }]);
     const t = await task(ed, p.id);
-    const on = await ed.c.patch(`/api/tasks/${t}`, { blocked: true });
-    expect(on.status).toBe(200);
-    expect(on.json.task.blocked).toBe(true);
-    const off = await ed.c.patch(`/api/tasks/${t}`, { blocked: false });
-    expect(off.status).toBe(200);
-    expect(off.json.task.blocked).toBe(false);
-    expect(off.json.task.blockedReason).toBeNull();
+    const before = (await ed.c.get(`/api/tasks/${t}`)).json.task as { blocked: boolean; updatedAt: string };
+    for (const blocked of [true, false]) {
+      const r = await ed.c.patch(`/api/tasks/${t}`, { blocked });
+      expect(r.status).toBe(400);
+      expect(r.json).toEqual({ error: { code: "version_required", message: "expectedUpdatedAt is required" } });
+    }
+    const after = (await ed.c.get(`/api/tasks/${t}`)).json.task as { blocked: boolean; updatedAt: string };
+    expect({ blocked: after.blocked, updatedAt: after.updatedAt }).toEqual({ blocked: before.blocked, updatedAt: before.updatedAt });
+    // With the version it saves, as every edit does.
+    expect((await patchTask(ed, t, { blocked: true })).json.task.blocked).toBe(true);
   });
 
   it("completes with the open-subtask choice, and reopens to the previous Section", async () => {

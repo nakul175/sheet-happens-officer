@@ -123,19 +123,17 @@ test.describe("APL-2669 a malformed expectedUpdatedAt is a bad request", () => {
     }
   });
 
-  test("AC4 a user who cannot see the task gets 404 Project not found before the timestamp is checked (qa:TC-APL2669-d26a2659@v4)", async () => {
+  test("AC4 a user who cannot see the task gets the same 404 Task not found as a missing id, before the timestamp is checked (qa:TC-APL2669-d26a2659@v4)", async () => {
     const before = await taskNow();
     const hidden = await outsider.patch(`/api/tasks/${taskId}`, { data: { expectedUpdatedAt: "abc" } });
     const current = await outsider.patch(`/api/tasks/${taskId}`, { data: { expectedUpdatedAt: before.updatedAt } });
     const missing = await outsider.patch("/api/tasks/does-not-exist", { data: { expectedUpdatedAt: "abc" } });
-    expect(hidden.status()).toBe(404);
-    expect(current.status()).toBe(404);
-    expect(missing.status()).toBe(404);
-    const hiddenBody = await hidden.json();
-    expect(hiddenBody).toEqual({ error: "Project not found" });
-    expect(await current.json()).toEqual({ error: "Project not found" });
-    expect(await missing.json()).toEqual({ error: { code: "not_found", message: "Task not found" } });
-    expect(JSON.stringify(hiddenBody)).not.toMatch(/Original|New|invalid_version|version_conflict/);
+    expect([hidden.status(), current.status(), missing.status()]).toEqual([404, 404, 404]);
+    const missingText = await missing.text();
+    expect(JSON.parse(missingText)).toEqual({ error: "Task not found" });
+    // F8: byte-identical to the missing-id body, so no task id leaks.
+    expect(await hidden.text()).toBe(missingText);
+    expect(await current.text()).toBe(missingText);
     expect(await taskNow()).toEqual(before);
   });
 

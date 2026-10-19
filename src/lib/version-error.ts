@@ -1,14 +1,13 @@
 // APL-2669 / APL-2670: every task-version answer uses one body, { error: { code, message } }.
 // The token is expectedUpdatedAt. Absent and null are version_required. Anything that is
 // not a full ISO 8601 date-time with a zone is invalid_version. A different instant is
-// version_conflict. A missing task is not_found. A hidden project stays 404 { error: "Project not found" }.
+// version_conflict. A missing or hidden task is not a version error: it is 404 { error: "Task not found" } (F8).
 
 export const VERSION_REQUIRED = "version_required";
 export const INVALID_VERSION = "invalid_version";
 export const VERSION_CONFLICT = "version_conflict";
-export const NOT_FOUND = "not_found";
 
-export type VersionCode = typeof VERSION_REQUIRED | typeof INVALID_VERSION | typeof VERSION_CONFLICT | typeof NOT_FOUND;
+export type VersionCode = typeof VERSION_REQUIRED | typeof INVALID_VERSION | typeof VERSION_CONFLICT;
 
 export const VERSION_REQUIRED_MESSAGE = "expectedUpdatedAt is required";
 export const INVALID_VERSION_MESSAGE = "expectedUpdatedAt must be a full ISO 8601 date-time with a time and a zone.";
@@ -25,9 +24,8 @@ export function conflictActor(error: unknown) {
   const message = errorMessage(error, versionConflictMessage(null));
   return message.endsWith(CONFLICT_SUFFIX) ? message.slice(0, -CONFLICT_SUFFIX.length) : "Someone";
 }
-export const NOT_FOUND_MESSAGE = "Task not found";
 
-const CODES: readonly string[] = [VERSION_REQUIRED, INVALID_VERSION, VERSION_CONFLICT, NOT_FOUND];
+const CODES: readonly string[] = [VERSION_REQUIRED, INVALID_VERSION, VERSION_CONFLICT];
 
 export function isVersionCode(code: unknown): code is VersionCode {
   return typeof code === "string" && CODES.includes(code);

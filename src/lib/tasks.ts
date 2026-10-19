@@ -12,9 +12,7 @@ import { auditTx, logAction, notify } from "@/lib/notify";
 import { reqCtx } from "@/lib/reqctx";
 import { classifyExpectedUpdatedAt } from "@/lib/task-version";
 import { trashPurgeBefore } from "@/lib/undoable";
-import {
-  NOT_FOUND, NOT_FOUND_MESSAGE, VERSION_CONFLICT, versionConflictMessage,
-} from "@/lib/version-error";
+import { VERSION_CONFLICT, versionConflictMessage } from "@/lib/version-error";
 
 export const taskInclude = {
   assignee: { select: { id: true, name: true } },
@@ -76,22 +74,8 @@ async function loadTask(user: Actor, id: string, o: { write?: boolean; deleted?:
 }
 
 /** Same write check updateTask runs, so a caller can refuse before reading the body.
- *  A hidden project is 404 "Project not found" before the body (APL-2651). A missing task is the not_found code. */
+ *  An outsider gets the same 404 { error: "Task not found" } as a missing task, before the body (F8). */
 export const assertCanUpdateTask = (user: Actor, id: string) => loadForEdit(user, id);
-
-/**
- * APL-2494: setting or clearing Blocked is a valid body with no expectedUpdatedAt.
- * When that field is absent, stamp the task version just loaded so a required-version
- * check does not turn `{blocked:false}` or `{blocked:true}` into a 400.
- */
-export function stampBlockedFlagVersion(raw: unknown, updatedAt: Date): unknown {
-  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return raw;
-  const body = raw as Record<string, unknown>;
-  if (typeof body.blocked !== "boolean") return raw;
-  if (!Object.keys(body).every((k) => k === "blocked" || k === "blockedReason" || k === "expectedUpdatedAt")) return raw;
-  if (typeof body.expectedUpdatedAt === "string" && body.expectedUpdatedAt.length > 0) return raw;
-  return { ...body, expectedUpdatedAt: updatedAt.toISOString() };
-}
 
 export const ORDER = [{ dueDate: { sort: "asc", nulls: "last" } }, { createdAt: "asc" }, { id: "asc" }] as const;
 
@@ -233,15 +217,13 @@ async function versionConflict(user: Actor, id: string, t: TaskRow, role: Role):
 }
 
 /** See the task before the timestamp is read.
- *  A hidden project keeps 404 { error: "Project not found" } (APL-2651 AC v1.1).
- *  A missing task is still the not_found code. */
+ *  Every 404 is the missing-task answer, 404 { error: "Task not found" }, so an outsider
+ *  cannot tell a hidden task from a missing one (F8, Dwight). */
 async function loadForEdit(user: Actor, id: string, o: { holderCanDo?: boolean } = {}) {
   try {
     return await loadTask(user, id, { write: true, ...o });
   } catch (e) {
-    if (e instanceof ApiError && e.status === 404 && e.message !== "Project not found") {
-      throw new ApiError(404, NOT_FOUND_MESSAGE, undefined, NOT_FOUND);
-    }
+    if (e instanceof ApiError && e.status === 404) throw notFound("Task");
     throw e;
   }
 }

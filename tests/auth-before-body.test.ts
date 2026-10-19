@@ -106,8 +106,15 @@ describe("auth before body (APL-2651)", () => {
       expectAccess(await hit(editor, "PATCH", sectionPath, body), 403, "Only the project Leader or an Admin can do this.");
     }
     for (const body of [{ title: "" }, "{"] as const) {
-      // APL-2651 AC v1.1: an outsider's PATCH is 404 and exactly { error: "Project not found" }, before the body is read.
-      expectAccess(await hit(outsider, "PATCH", taskPath, body), 404, "Project not found");
+      // F8 (Dwight) and APL-2651 AC2 v1.2: an outsider's PATCH gets the same 404 { error: "Task not found" }
+      // as a missing id, before the body is read, so the two bodies are byte-identical.
+      const hidden = await hit(outsider, "PATCH", taskPath, body);
+      expectAccess(hidden, 404, "Task not found");
+      const rawText = async (path: string) => (await fetch(BASE + path, {
+        method: "PATCH", headers: { "content-type": "application/json", cookie: outsider.c.cookie },
+        body: typeof body === "string" ? body : JSON.stringify(body),
+      })).text();
+      expect(await rawText(taskPath)).toBe(await rawText("/api/tasks/does-not-exist"));
       expectAccess(await hit(viewer, "PATCH", taskPath, body), 403, "Viewers cannot make changes.");
     }
     for (const body of [{ name: "" }, "{"] as const) {
