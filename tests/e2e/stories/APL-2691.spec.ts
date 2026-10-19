@@ -2,8 +2,10 @@
 // One test per acceptance criterion. ZZ-TEST deals and organisations are archived afterwards.
 // The Super Admin acts as Leader. workers is 1 in playwright.config.ts. Traces stay off.
 // Pam's ids sit in the title, next to the acceptance-criteria tag, the same way the other story specs do.
-// A missing SHO_QA_PASS skips the file. The password is never written here.
-import { test, expect, zz } from "../support";
+// A missing SHO_QA_PASS skips the file, like every story spec in staging-e2e.yml. The `admin` fixture does not sign in
+// with SHO_QA_PASS: it uses login("ADMIN") (SHARD_* in a CI shard, otherwise SHO_ADMIN_EMAIL / SHO_ADMIN_PASS). beforeAll
+// checks that account too, so a missing one fails once with its variable names. No password is written here.
+import { test, expect, zz, login } from "../support";
 import { getTask, newTask, ymd, type Who } from "../g2";
 
 type Later = (fn: () => Promise<unknown>) => void;
@@ -54,10 +56,12 @@ async function openTasks(admin: Who, dealId: string, step: { id: string; title: 
 }
 
 test.beforeAll(() => {
-  test.skip(!process.env.SHO_QA_PASS, "Set SHO_QA_PASS (the password for nakul17+ aliases).");
+  test.skip(!process.env.SHO_QA_PASS, "Set SHO_QA_PASS (the shared QA password; story specs skip without it).");
+  // Throws "Set SHO_ADMIN_EMAIL ..." (or _PASS) when the account the admin fixture signs in with is missing.
+  login("ADMIN");
 });
 
-test.describe("APL-2691", { tag: "@APL-2691" }, () => {
+test.describe("qa:TC missing APL-2691", { tag: "@APL-2691" }, () => {
   test.describe.configure({ timeout: 180_000 });
 
   test(
