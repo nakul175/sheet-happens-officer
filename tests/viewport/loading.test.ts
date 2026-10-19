@@ -120,15 +120,17 @@ describe("a real failure still shows LoadFailed", () => {
         expect(await page.getByRole("button", { name: "Retry" }).count()).toBe(1);
       } finally { await page.close(); }
     });
-    it(`${s.name}: a 5xx shows LoadFailed, and Retry loads the screen once the server answers`, async () => {
+    it(`${s.name}: a 5xx shows ${s.name === "Person" ? "\"Something went wrong, try again\"" : "LoadFailed"}, and Retry loads the screen once the server answers`, async () => {
       let fail = true;
       const page = await open(s.path(), s.api(), (route) => (fail ? route.fulfill({ status: 503, contentType: "application/json", body: "{}" }) : route.continue()));
+      // APL-2664: the person page says "Something went wrong, try again" for 503. Other screens keep LoadFailed.
+      const fault = s.name === "Person" ? page.getByText("Something went wrong, try again") : loadFailed(page);
       try {
-        await loadFailed(page).waitFor({ state: "visible", timeout: 15000 });
+        await fault.waitFor({ state: "visible", timeout: 15000 });
         fail = false;
         await page.getByRole("button", { name: "Retry" }).click();
         await s.ready(page).waitFor({ state: "visible", timeout: 15000 });
-        expect(await loadFailed(page).count()).toBe(0);
+        expect(await fault.count()).toBe(0);
       } finally { await page.close(); }
     });
   }

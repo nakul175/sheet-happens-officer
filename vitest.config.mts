@@ -7,10 +7,12 @@ import { configDefaults, defineConfig } from "vitest/config";
 // Run them with `npm run test:crm-modes`.
 export default defineConfig({
   resolve: { alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) } },
+  // scripts/** holds node:test files (assert-playwright-ran.test.mjs). Vitest's default
+  // include matches *.test.mjs and fails them with "No test suite found", which blocks deploy.yml.
   test: {
     testTimeout: 30000,
     fileParallelism: false,
-    // Story specs are Playwright (tests/e2e/stories) and run from the staging workflow, not vitest.
-    exclude: [...configDefaults.exclude, "tests/viewport/**", "tests/e2e/**", "tests/crm-visible-modes-server.test.ts"],
+    // tests/e2e/stories/APL-2693.spec.ts is a Playwright spec for the staging workflow, not vitest.
+    exclude: [...configDefaults.exclude, "tests/viewport/**", "tests/crm-visible-modes-server.test.ts", "tests/apl-2713-crm-modes.test.ts", "e2e/**", "scripts/**", "tests/e2e/stories/APL-2693.spec.ts"],
   },
 });

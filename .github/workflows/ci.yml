@@ -47,6 +47,10 @@ jobs:
         with:
           node-version: 22
           cache: npm
+      # Node 22 treats `node --test scripts/ci/` as a file and exits MODULE_NOT_FOUND.
+      # This glob is that directory on Node 22: every *.test.mjs under scripts/ci/.
+      - name: Node tests for scripts/ci
+        run: node --test "scripts/ci/**/*.test.mjs"
       - run: npm ci
       - name: Lint
         run: npm run lint
@@ -55,6 +59,9 @@ jobs:
       - run: npx prisma migrate deploy
       - name: Build
         run: npm run build
+      # APL-2713. These servers are excluded from `npm test`. A failure here fails the job.
+      - name: CRM mode tests
+        run: npm run test:crm-modes
       - name: Start the app
         run: |
           (npx next start -p 3100 > server.log 2>&1 &)
