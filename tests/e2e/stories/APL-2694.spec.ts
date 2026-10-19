@@ -51,7 +51,8 @@ async function openPanel(page: Page, vp: (typeof VIEWPORTS)[number]) {
   await page.setViewportSize({ width: vp.width, height: vp.height });
   await page.goto(new URL("/", BASE).href);
   if (vp.width >= 1280) {
-    const dock = page.locator("aside.cc-slot");
+    // The dock is <aside aria-label="Concierge">: the complementary landmark of that name.
+    const dock = page.getByRole("complementary", { name: "Concierge", exact: true });
     await dock.waitFor({ state: "visible" });
     return dock;
   }
