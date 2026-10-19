@@ -74,7 +74,7 @@ describe("concierge client matches the contract routes", () => {
     expect(keptDraft(original)).toBe(original);
   });
   it("qa:TC missing AC1: an improve result that only repeats the typed text offers no rewrite", async () => {
-    // An empty model reply comes back from the server as the original text (engine.ts improvePrompt).
+    // The server now answers an empty or echoed reply with a 502; this guards against an older server sending the text back.
     const original = "Move the budget task to Monday";
     mockFetch(200, { improved: original });
     const r = await conciergeApi.improve(original);

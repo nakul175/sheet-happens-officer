@@ -53,7 +53,8 @@ export function resumeText(d: Disabled): string | null {
 
 /**
  * A non-empty improve result replaces the draft and remembers the original. A failure leaves the draft alone.
- * So does a result that is only the typed text again: an empty model reply comes back as the original, and that is no rewrite.
+ * So does a result that is only the typed text again. The server answers that case with a 502 (APL-2694), so this
+ * guard only matters if an older server sends the typed text back.
  */
 export function offeredRewrite(original: string, improved: string | null | undefined): { original: string; draft: string } | null {
   if (!improved?.trim() || improved.trim() === original.trim()) return null;

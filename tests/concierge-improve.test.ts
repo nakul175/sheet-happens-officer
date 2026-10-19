@@ -124,6 +124,18 @@ describe("qa:TC missing improve my prompt (APL-2694)", () => {
     expect(chatCreate).not.toHaveBeenCalled();
   });
 
+  it("qa:TC missing AC4: a reply that only repeats the typed text is a visible error and not counted against the week", async () => {
+    enableModel();
+    mockModel(`  ${ORIGINAL}\n`);
+    await expect(improvePrompt({ id: "user-1", orgRole: "MEMBER" }, ORIGINAL)).rejects.toMatchObject({
+      status: 502,
+      message: "No clearer version came back. Your text is unchanged; try again.",
+    });
+    expect(usageCreate).toHaveBeenCalledTimes(1);
+    expect(usageCreate.mock.calls[0][0].data).toMatchObject({ counted: false, model: "claude-haiku-5-5", userId: "user-1" });
+    expect(chatCreate).not.toHaveBeenCalled();
+  });
+
   it("qa:TC missing a chat-shaped call still sends the per-day system line and its tools", async () => {
     enableModel();
     const sent = mockModel("ok");
