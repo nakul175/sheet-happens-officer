@@ -497,7 +497,7 @@ export async function deleteTask(user: Actor, id: string, o: { byUndo?: boolean 
     await notify(tx, [leader, t.assigneeId, t.approverId, ...t.collaborators.map((c) => c.user.id)], "TASK_DELETED", {
       actorId: user.id, taskId: id, projectId: t.projectId, data: { title: t.title },
     });
-    await logAction(tx, { actorId: user.id, projectId: t.projectId, targetType: "task", targetId: id, action: "task.deleted", before: { title: t.title, sectionId: t.sectionId, deletedAt: null }, after: { deletedAt: now.toISOString() } });
+    await logAction(tx, { actorId: user.id, projectId: t.projectId, targetType: "task", targetId: id, action: "task.deleted", before: { title: t.title, sectionId: t.sectionId, deletedAt: null }, after: { deletedAt: now.toISOString() }, at: now });
     // Undoing a delete is a restore from Trash, so only those who may restore get the Undo toast (APL-2649).
     const ctx = reqCtx.getStore();
     if (ctx && !canManage(a)) { ctx.undoId = undefined; ctx.undoLabel = undefined; }
