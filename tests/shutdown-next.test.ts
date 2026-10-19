@@ -12,9 +12,8 @@ import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { db } from "../src/lib/db";
 import { CLEAN_LOG, TIMEOUT_LOG } from "../src/lib/shutdown";
-import { PW } from "./helpers";
+import { PW, SUPER_EMAIL } from "./helpers";
 
 const root = path.join(fileURLToPath(new URL(".", import.meta.url)), "..");
 const databaseUrl = process.env.DATABASE_URL ?? "postgresql://sho:sho@127.0.0.1:5432/sho_test?schema=public";
@@ -284,19 +283,58 @@ describe("qa:TC missing signed-in GET / under SIGTERM (APL-2689)", () => {
   const outbox = mkdtempSync(path.join(tmpdir(), "sho-apl2689-"));
   const email = `nakul17+zz-test-apl2689-${Date.now().toString(36)}-${process.pid}@aplyd.com`;
   let cookie = "";
+  let userId = "";
 
+  // ZZ-TEST cleanup goes through the app's API, as the Super Admin, with no direct DB writes
+  // (APL-2750). The burst servers are gone by now, so this starts one more on a free port.
   afterAll(async () => {
-    const users = await db.user.findMany({ where: { email }, select: { id: true } });
-    const ids = users.map((user) => user.id);
-    if (ids.length) {
-      await db.actionLog.deleteMany({ where: { actorId: { in: ids } } });
-      await db.auditLog.deleteMany({ where: { actorId: { in: ids } } });
-      await db.user.deleteMany({ where: { id: { in: ids } } });
+    try {
+      if (userId) await deactivateThroughApi(userId);
+    } finally {
+      rmSync(outbox, { recursive: true, force: true });
     }
-    await db.loginAttempt.deleteMany({ where: { email } });
-    await db.$disconnect();
-    rmSync(outbox, { recursive: true, force: true });
-  });
+  }, 180_000);
+
+  function outboxToken(to: string, subject: RegExp) {
+    const mail = readdirSync(outbox)
+      .filter((f) => f.endsWith(".json"))
+      .map((f) => JSON.parse(readFileSync(path.join(outbox, f), "utf8")) as { to?: string; subject?: string; text?: string })
+      .filter((m) => m.to === to && subject.test(m.subject ?? ""))
+      .at(-1);
+    return mail?.text?.match(/token=([\w-]+)/)?.[1];
+  }
+
+  function sessionCookie(res: Response) {
+    return res.headers.getSetCookie().map((line) => line.split(";")[0]).find((line) => line.startsWith("sho_session=")) ?? "";
+  }
+
+  async function deactivateThroughApi(id: string) {
+    const port = await freePort();
+    const base = `http://127.0.0.1:${port}`;
+    const superEmails = process.env.SUPER_ADMIN_EMAILS || SUPER_EMAIL;
+    const proc = startNext(port, { EMAIL_OUTBOX_DIR: outbox, APP_URL: base, SUPER_ADMIN_EMAILS: superEmails });
+    try {
+      await proc.waitFor(/Ready/, 120_000);
+      // Same Super Admin account and password as tests/helpers superAdmin(). A fresh database needs signup and verify first.
+      const created = await post(base, "/api/auth/signup", { name: "Root", email: SUPER_EMAIL, password: PW });
+      if (created.status === 201) {
+        const token = outboxToken(SUPER_EMAIL, /Verify/);
+        expect(token, "Super Admin verification mail").toBeTruthy();
+        expect((await post(base, "/api/auth/verify", { token })).status).toBe(200);
+      }
+      const signed = await post(base, "/api/auth/signin", { email: SUPER_EMAIL, password: PW });
+      expect(signed.status, "Super Admin sign-in").toBe(200);
+      const off = await fetch(`${base}/api/team/${id}/deactivate`, {
+        method: "POST",
+        headers: { "content-type": "application/json", cookie: sessionCookie(signed) },
+        body: JSON.stringify({ reassign: "leaders" }),
+      });
+      expect(off.status, await off.text()).toBe(200);
+      expect((await post(base, "/api/auth/signin", { email, password: PW })).status, "deactivated ZZ-TEST account cannot sign in").not.toBe(200);
+    } finally {
+      stop(proc.child);
+    }
+  }
 
   async function post(base: string, p: string, body: unknown) {
     return fetch(base + p, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
@@ -307,16 +345,13 @@ describe("qa:TC missing signed-in GET / under SIGTERM (APL-2689)", () => {
     if (cookie) return cookie;
     const created = await post(base, "/api/auth/signup", { name: "ZZ-TEST Shutdown", email, password: PW });
     expect(created.status, await created.text()).toBe(201);
-    const mail = readdirSync(outbox)
-      .filter((f) => f.endsWith(".json"))
-      .map((f) => JSON.parse(readFileSync(path.join(outbox, f), "utf8")) as { to?: string; subject?: string; text?: string })
-      .find((m) => m.to === email && /Verify/.test(m.subject ?? ""));
-    const token = mail?.text?.match(/token=([\w-]+)/)?.[1];
+    const token = outboxToken(email, /Verify/);
     expect(token, "verification mail").toBeTruthy();
     expect((await post(base, "/api/auth/verify", { token })).status).toBe(200);
     const signed = await post(base, "/api/auth/signin", { email, password: PW });
     expect(signed.status).toBe(200);
-    cookie = signed.headers.getSetCookie().map((line) => line.split(";")[0]).find((line) => line.startsWith("sho_session=")) ?? "";
+    cookie = sessionCookie(signed);
+    userId = ((await signed.json()) as { user: { id: string } }).user.id;
     expect(cookie).not.toBe("");
     return cookie;
   }
