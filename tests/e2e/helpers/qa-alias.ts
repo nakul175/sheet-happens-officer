@@ -77,32 +77,46 @@ export function track(later: (fn: () => Promise<unknown>) => void, ctx: BrowserC
 
 type Later = (fn: () => Promise<unknown>) => void;
 
-/** A pool Member a spec promoted goes back to Member, so the next spec (or run) gets the role it expects. */
-async function demote(admin: Who, person: Who) {
-  const seen = await admin.api.get(`/api/team/${person.user.id}`);
-  if (seen.status === 200 && seen.json.person?.orgRole !== "MEMBER") {
-    const back = await admin.api.patch(`/api/team/${person.user.id}`, { orgRole: "MEMBER" });
-    expect(back.status, `put ${String(person.user.email)} back to Member`).toBe(200);
+/**
+ * Put a pool Member back the way the next spec expects it: active and a Member. A spec may deactivate one (APL-2471 AC6)
+ * or promote one; the pool is reused, so both are undone here.
+ */
+async function restore(admin: Who, id: string, email: string) {
+  const seen = await admin.api.get(`/api/team/${id}`);
+  if (seen.status !== 200) return;
+  if (seen.json.person?.status === "DEACTIVATED") {
+    const back = await admin.api.post(`/api/team/${id}/reactivate`);
+    expect(back.status, `reactivate ${email}`).toBe(200);
   }
-  person.user.orgRole = "MEMBER";
+  if (seen.json.person?.orgRole !== "MEMBER") {
+    const role = await admin.api.patch(`/api/team/${id}`, { orgRole: "MEMBER" });
+    expect(role.status, `put ${email} back to Member`).toBe(200);
+  }
 }
 
 /**
  * The Super Admin (nakul17+zz-sa) plus one pool Member per label, from this job's slot. The labels say what each
- * person is for; the accounts are fixed. Each one is a Member when handed out and is put back to Member after the
- * test, never deactivated, because the pool is reused.
+ * person is for; the accounts are fixed. Each one is active and a Member when handed out, and is put back that way
+ * after the test (never left deactivated), because the pool is reused.
  */
 export async function cast(browser: Browser, later: Later, labels: string[]) {
   if (labels.length > PER_SLOT) throw new Error(`cast asks for ${labels.length} people; a pool slot has ${PER_SLOT}.`);
   const admin = await signInAlias(browser, QA_ADMIN_EMAIL);
   track(later, admin.ctx);
   expect(admin.who.user.orgRole, `${QA_ADMIN_EMAIL} must be listed in SUPER_ADMIN_EMAILS`).toBe("SUPER_ADMIN");
+  const emails = labels.map((_, i) => qaPerson(i + 1).email);
+  // An interrupted run can leave a pool Member deactivated or promoted. Fix that before signing them in.
+  const team = await admin.who.api.get("/api/team");
+  expect(team.status, "the Super Admin can read the Team list").toBe(200);
+  for (const row of (team.json.people ?? []) as { id: string; email: string; status: string; orgRole: string }[]) {
+    if (emails.includes(row.email) && (row.status === "DEACTIVATED" || row.orgRole !== "MEMBER")) await restore(admin.who, row.id, row.email);
+  }
   const people: Who[] = [];
-  for (let i = 0; i < labels.length; i++) {
-    const signed = await signInAlias(browser, qaPerson(i + 1).email);
+  for (const email of emails) {
+    const signed = await signInAlias(browser, email);
     track(later, signed.ctx);
-    if (signed.who.user.orgRole !== "MEMBER") await demote(admin.who, signed.who);
-    later(() => demote(admin.who, signed.who));
+    const id = String(signed.who.user.id);
+    later(() => restore(admin.who, id, email));
     people.push(signed.who);
   }
   return { admin: admin.who, people };

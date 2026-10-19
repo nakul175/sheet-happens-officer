@@ -155,6 +155,38 @@ describe("qa:TC missing APL-2748 provisioning: sets the pool up once and reports
   });
 });
 
+describe("qa:TC missing APL-2748 provisioning report: says the right next step", () => {
+  it("qa:TC missing provisioning: only aliases waiting on a link are told to follow one", async () => {
+    const [a, b] = poolFor("07");
+    const s = fakeServer([admin, { email: a.email, verified: false }, { email: b.email, password: "someone-else-set-this" }]);
+    const out = report(await run(s, ["07"]));
+    const line = (email: string) => out.split("\n").find((l) => l.includes(email))!;
+    expect(line(a.email)).toContain("VERIFY_SENT");
+    expect(line(a.email)).toContain("follow its Verify link");
+    expect(line(b.email)).toContain("WRONG_PASSWORD");
+    expect(line(b.email)).not.toContain("Verify link");
+    expect(line(b.email)).toContain("Forgot password");
+    expect(out).toContain("3 of 4 need action: 2 waiting on a Verify link in nakul17@aplyd.com, 1 needing the step shown on its line.");
+  });
+
+  it("qa:TC missing provisioning: a run with no link outstanding never mentions Verify links", async () => {
+    const [a] = poolFor("08");
+    const s = fakeServer([admin, { email: a.email, password: "someone-else-set-this" }, ...readySlot("08").slice(1)]);
+    const out = report(await run(s, ["08"]));
+    expect(out).not.toContain("Verify link");
+    expect(out).toContain("1 of 4 need action: 1 needing the step shown on its line.");
+  });
+});
+
+describe("qa:TC missing APL-2748 AC1: pool Members are handed back active", () => {
+  it("qa:TC missing AC1: cast reactivates a deactivated pool Member and restores it after the test", () => {
+    const src = readFileSync("tests/e2e/helpers/qa-alias.ts", "utf8");
+    expect(src).toContain("/reactivate");
+    expect(src).toMatch(/later\(\(\) => restore\(/);
+    expect(src).not.toContain("/deactivate");
+  });
+});
+
 describe("qa:TC missing APL-2748 AC2/AC3: no secret printed, never production", () => {
   it("qa:TC missing AC2: the report never carries SHO_QA_PASS, even when the server echoes it", async () => {
     const [a] = poolFor("06");

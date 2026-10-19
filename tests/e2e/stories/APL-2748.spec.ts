@@ -9,6 +9,7 @@ import { QA_ADMIN_EMAIL, QA_PASS, QA_SLOT, cast, noSecret, qaPerson, signInAlias
 test.describe.configure({ mode: "serial" });
 
 let promotedId = "";
+let deactivatedId = "";
 
 test.describe("qa:TC missing APL-2748: the verified alias pool", () => {
   test.beforeAll(() => {
@@ -47,6 +48,25 @@ test.describe("qa:TC missing APL-2748: the verified alias pool", () => {
     const seen = await admin.who.api.get(`/api/team/${promotedId}`);
     expect(seen.status).toBe(200);
     expect(seen.json.person.orgRole).toBe("MEMBER");
+  });
+
+  test("qa:TC missing AC1: a pool Member a spec deactivates is reactivated by the clean-up", async ({ browser, later }) => {
+    const { admin, people: [, leaver] } = await cast(browser, later, ["stays", "leaver"]);
+    const gone = await admin.api.post(`/api/team/${leaver.user.id}/deactivate`, { reassign: "leaders" });
+    expect(gone.status, JSON.stringify(gone.json)).toBe(200);
+    deactivatedId = String(leaver.user.id);
+  });
+
+  test("qa:TC missing AC1: the deactivated Member is active again and can sign in", async ({ browser, later }) => {
+    expect(deactivatedId, "the previous test ran").not.toBe("");
+    const admin = await signInAlias(browser, QA_ADMIN_EMAIL);
+    track(later, admin.ctx);
+    const seen = await admin.who.api.get(`/api/team/${deactivatedId}`);
+    expect(seen.status).toBe(200);
+    expect(seen.json.person.status).toBe("ACTIVE");
+    const back = await signInAlias(browser, qaPerson(2).email);
+    track(later, back.ctx);
+    expect(String(back.who.user.id)).toBe(deactivatedId);
   });
 
   test("qa:TC missing AC2: the session the pool password opens never echoes it", async ({ browser, later }) => {
