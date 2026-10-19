@@ -30,16 +30,17 @@ function verifyToken(outbox: string, email: string) {
   return mails.filter((m) => m.to === email && /Verify/.test(m.subject ?? "")).at(-1)?.text?.match(/token=([\w-]+)/)?.[1] ?? null;
 }
 
-/** Signs up, verifies and signs in a new nakul17+ alias on a local server whose mail goes to `outbox`. */
-export async function signUpAlias(base: string, outbox: string, email: string, name: string) {
-  if (!QA_PASS) throw new Error("Set SHO_QA_PASS (the password for nakul17+ aliases).");
-  const created = await call(base, "", "POST", "/api/auth/signup", { name, email, password: QA_PASS });
+/** Signs up, verifies and signs in a new nakul17+ alias on a local server whose mail goes to `outbox`.
+ *  `password` defaults to SHO_QA_PASS; local-alias.test.ts passes a ZZ-TEST value so it runs without SHO_QA_PASS. */
+export async function signUpAlias(base: string, outbox: string, email: string, name: string, password = QA_PASS) {
+  if (!password) throw new Error("Set SHO_QA_PASS (the password for nakul17+ aliases).");
+  const created = await call(base, "", "POST", "/api/auth/signup", { name, email, password });
   if (created.status !== 201) throw new Error(`signup ${email}: ${created.status} ${created.text}`);
   const token = verifyToken(outbox, email);
   if (!token) throw new Error(`no verification mail for ${email}`);
   const verified = await call(base, "", "POST", "/api/auth/verify", { token });
   if (verified.status !== 200) throw new Error(`verify ${email}: ${verified.status}`);
-  const signed = await call(base, "", "POST", "/api/auth/signin", { email, password: QA_PASS });
+  const signed = await call(base, "", "POST", "/api/auth/signin", { email, password });
   if (signed.status !== 200) throw new Error(`signin ${email}: ${signed.status}`);
   const user = signed.json?.user as { id: string; orgRole: string };
   return { id: user.id, orgRole: user.orgRole, name, email, cookie: signed.cookie };
