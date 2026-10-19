@@ -1,6 +1,7 @@
 // SHO-US-14.13 Notification triage (APL-2572). Needs the optional Member account (it receives the notices).
 // The file skips only when SHO_QA_PASS is unset. AC3 runs at desktop and phone width (APL-2672 is on main).
 import { test, expect, zz, type Later, type Page, type Who } from "../support";
+import type { Locator } from "@playwright/test";
 import { clickClear } from "../helpers/phone-hit";
 import { PASS, passwordOk } from "./qa";
 
@@ -31,6 +32,9 @@ async function give(admin: Who, member: Who, later: Later, n: number) {
 const quoted = (title: string) => `"${title}"`;
 const marked = (admin: Who, read: boolean, title: string) =>
   `${read ? "Mark as unread" : "Mark as read"}: ${admin.user.name} assigned you ${quoted(title)}.`;
+/** Each notice has one Mark as read / Mark as unread button, so these name the rows: all, or the read ones. */
+const rows = (panel: Locator) => panel.getByRole("button", { name: /^Mark as (read|unread): / });
+const readRows = (panel: Locator) => panel.getByRole("button", { name: /^Mark as unread: / });
 const unread = async (member: Who) => (await member.api.get("/api/notifications")).json.unread as number;
 const bell = (p: Page) => p.getByRole("button", { name: /^Notifications/ });
 
@@ -87,7 +91,7 @@ test("qa:TC missing AC3: the Unread filter hides read items, and an empty result
       const items = (await member.api.get("/api/notifications?filter=unread")).json.items as { read: boolean }[];
       return items.every((n) => !n.read);
     }).toBe(true);
-    await expect(panel.locator(".bell-row:not(.unread)")).toHaveCount(0);
+    await expect(readRows(panel)).toHaveCount(0);
     expect((await member.api.post("/api/notifications/read-all")).status).toBeLessThan(300);
     await p.reload();
     await expect(bell(p)).toBeVisible();
@@ -98,7 +102,7 @@ test("qa:TC missing AC3: the Unread filter hides read items, and an empty result
     await clickClear(unreadAgain);
     // If someone else's activity raised a new notice in the meantime, the filter must still show unread items only.
     if ((await unread(member)) === 0) await expect(panel2.getByText("All caught up")).toBeVisible();
-    else await expect(panel2.locator(".bell-row:not(.unread)")).toHaveCount(0);
+    else await expect(readRows(panel2)).toHaveCount(0);
     await p.keyboard.press("Escape");
   }
 });
@@ -122,7 +126,7 @@ test("qa:TC missing AC5: with more than 50 items, older ones load on request", t
   await p.goto("/");
   await bell(p).click();
   const panel = p.getByRole("dialog", { name: "Notifications" });
-  await expect(panel.locator(".bell-row")).toHaveCount(50);
+  await expect(rows(panel)).toHaveCount(50);
   await clickClear(panel.getByRole("button", { name: /Load older/ }));
-  await expect.poll(() => panel.locator(".bell-row").count()).toBeGreaterThan(50);
+  await expect.poll(() => rows(panel).count()).toBeGreaterThan(50);
 });

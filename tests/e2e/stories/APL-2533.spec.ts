@@ -310,10 +310,8 @@ test("qa:TC missing AC5: any signed-in Member sees all contacts, changes are log
   later(() => admin.api.del(`/api/contacts/${id}`));
   expect((await contactsOf(admin, org.id)).some((c) => c.id === id)).toBe(true);
   await admin.page.goto(`/accounts/${org.id}`);
-  // The note form repeats the name in a label, and a page-wide bold match can hit a second
-  // element. The contacts list is the bold name on the row that says Known by.
-  const contactRow = admin.page.locator(".item", { hasText: "Known by:" }).filter({ hasText: name });
-  await expect(contactRow.locator("b", { hasText: name })).toBeVisible();
+  // The note form repeats the name as a checkbox label. The contacts list shows it as text with no checkbox.
+  await expect(admin.page.getByText(name, { exact: true }).filter({ hasNot: admin.page.getByRole("checkbox") })).toBeVisible();
 
   const denied = await member.api.get(`/api/orgs/${org.id}/history`);
   expect(denied.status).toBe(404);
@@ -374,10 +372,8 @@ test("qa:TC missing AC5: any signed-in Member sees all contacts, changes are log
   // The History line is who · action · the clock time. Two rows can share a second, so the time
   // alone is not the name. The action in that line keeps created, updated and removed apart.
   const logged = (await admin.api.get(`/api/orgs/${org.id}/history`)).json.items as { id: string; at: string; who: string; action: string }[];
-  const historyList = admin.page.locator("div.grp:text-is('History') + div.list");
-  await expect(historyList.locator(".row")).toHaveCount(logged.length);
   // An edit and its undo can log the same who · action · second twice. Those rows are identical on
-  // screen, so the check is that the list shows that line exactly as many times as the log has it.
+  // screen, so the check is that the page shows each logged line exactly as many times as the log has it.
   const lineOf = (i: { who: string; action: string; at: string }) =>
     admin.page.evaluate(
       ({ who, action, at }) => `${who} · ${action} · ${new Date(at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}`,
@@ -390,8 +386,10 @@ test("qa:TC missing AC5: any signed-in Member sees all contacts, changes are log
     expect(index, id).toBeGreaterThanOrEqual(0);
     expect(logged[index].action).toBe(action);
     const line = lines[index];
-    await expect(historyList.getByText(line, { exact: true })).toHaveCount(lines.filter((l) => l === line).length);
+    await expect(admin.page.getByText(line, { exact: true })).toHaveCount(lines.filter((l) => l === line).length);
   };
+  // Every logged line is on the page as many times as it is logged, so History shows the whole log.
+  for (const line of new Set(lines)) await expect(admin.page.getByText(line, { exact: true })).toHaveCount(lines.filter((l) => l === line).length);
   await expectRow(made.headers["x-undo-id"], "contact.created");
   await expectRow(edited.headers["x-undo-id"], "contact.updated");
   await expectRow(removed.headers["x-undo-id"], "contact.removed");

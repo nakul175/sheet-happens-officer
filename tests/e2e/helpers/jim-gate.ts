@@ -94,14 +94,13 @@ const PROBES: Record<number, (admin: Who, member: Who | null, later: Later) => P
       if ((await Promise.all(js)).some((s) => /failed:!\w+\.loading/.test(s))) return { deployed: true, how: "probe: served JS has useGet's `failed` flag" };
       await page.route((u) => u.pathname === `/api/team/${admin.user.id}`, async (r) => { await new Promise((x) => setTimeout(x, 2000)); await r.continue(); });
       await page.goto(`/team/${admin.user.id}`, { waitUntil: "commit" });
-      // The person request is still held. Wait until the old "Loading…" text or the skeleton rows are on screen.
-      await expect.poll(async () => {
-        const loading = await page.locator("div.skel", { hasText: "Loading…" }).count();
-        const rows = await page.locator(".skel-wrap .skel-row").count();
-        return loading + rows;
-      }).toBeGreaterThan(0);
-      const old = await page.locator("div.skel", { hasText: "Loading…" }).count();
-      return { deployed: old === 0 && (await page.locator(".skel-wrap .skel-row").count()) > 0, how: `probe: slow Person page shows ${old ? "\"Loading…\"" : "the Skeleton"}` };
+      // The person request is still held. Wait until the old "Loading…" text or the Skeleton is on screen.
+      // The Skeleton (src/components/ui.tsx) is a busy status region whose only text is the screen-reader "Loading".
+      const oldText = page.getByText("Loading…", { exact: true });
+      const skeleton = page.getByRole("status").filter({ has: page.getByText("Loading", { exact: true }) });
+      await expect.poll(async () => (await oldText.count()) + (await skeleton.count())).toBeGreaterThan(0);
+      const old = await oldText.count();
+      return { deployed: old === 0 && (await skeleton.count()) > 0, how: `probe: slow Person page shows ${old ? "\"Loading…\"" : "the Skeleton"}` };
     } finally { await page.close(); }
   },
   // PR #6 (APL-2610, APL-2671): a manual reopen of a parent reopens the subtask that closed with it. On main it stays done.
