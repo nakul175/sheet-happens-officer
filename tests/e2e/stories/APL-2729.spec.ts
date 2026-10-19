@@ -2,10 +2,11 @@
 // workers=1. ZZ-TEST deals and nakul17+ aliases. The reminders job runs only on a local server.
 // A remote host is refused so a shared staging database never gets a reminder sweep.
 // gateFile() skips this file in beforeAll when SHO_QA_PASS is unset. Playwright then exits 0.
-// Pam qa:TC: c2ee0001 (unset, same as all here), c2a11001 (all), c1a1d001 (admins member),
-// c2ad0001 (admins admin), c1ff0001 (off), c30b5001 (ops check).
-// The stored-row check for every mode, including off, is one server process per mode in
-// tests/jobs-reminders-crm-server.test.ts on the product branch. That file also posts the job 40 times.
+// No APL-2729 TC ids are in the register, so every title carries the literal token "qa:TC missing".
+// Each test runs against the one server it is pointed at; a test for another CRM_VISIBLE mode skips with an APL-2729 reason.
+// Under off the deal API is closed, so no deal can be seeded. The off test checks every reminder the job just made
+// opens for its reader (a deal task is "not found" for everyone under off) and that the ops reminder stays.
+// The stored-row check for every mode, including off, is one server process per mode on the product branch (#92).
 import { test, expect, zz } from "../support";
 import { newProject, newTask, ymd, type Who } from "../g2";
 import { createDeal, createOrg, dealBody, notices } from "../helpers/claude-a";
@@ -16,6 +17,7 @@ gateFile();
 
 type Mode = "all" | "admins" | "off";
 type Item = { text: string; href: string | null };
+type Fresh = Item & { createdAt: string };
 type Later = (fn: () => Promise<unknown>) => void;
 type World = {
   mode: Mode;
@@ -29,6 +31,7 @@ type World = {
   adminTaskId: string;
   opsTitle: string;
   opsTaskId: string;
+  jobAt: number;
 };
 
 const cleanup: (() => Promise<unknown>)[] = [];
@@ -44,6 +47,17 @@ async function bell(who: Who): Promise<Item[]> {
   const rows = await notices(who);
   return rows.map((item) => ({ text: item.text, href: item.href ?? null }));
 }
+
+/** Due reminders made by this run's job (the server is local, so its clock is this one). */
+async function freshDue(who: Who, since: number): Promise<Fresh[]> {
+  const r = await who.api.get("/api/notifications?limit=200");
+  expect(r.status, JSON.stringify(r.json)).toBe(200);
+  const items = (r.json.items ?? []) as Fresh[];
+  return items.filter((item) => / is (due|overdue)/.test(item.text) && Date.parse(item.createdAt) >= since);
+}
+
+/** The mode-skip reason. Every reason names the story. */
+const notThisMode = (want: Mode) => `APL-2729: this test needs CRM_VISIBLE=${want}; this server is ${world?.mode ?? "unknown"}.`;
 
 /** Reminder copy only. Assignment notices from seeding are a different path. */
 function dueItems(items: Item[]) {
@@ -86,9 +100,15 @@ test.beforeAll(async ({ browser }) => {
   const promoted = await admin.api.patch(`/api/team/${orgAdmin.user.id}`, { orgRole: "ADMIN" });
   expect(promoted.status, JSON.stringify(promoted.json)).toBe(200);
   const mode = await readMode(member, admin);
-  // off closes the deal API, so there is nothing to seed. The product test covers that mode.
+  // The non-deal task is seeded in every mode (AC3).
+  const ops = await newProject(admin, later, { label: "ops", members: [{ who: member }, { who: orgAdmin }] });
+  const opsTitle = zz("Ops check");
+  const opsTaskId = await newTask(orgAdmin, ops.id, { title: opsTitle, assigneeId: member.user.id, dueDate: ymd(1) });
+  // off closes the deal API, so no deal can be seeded; the off test checks what the job made instead.
   if (mode === "off") {
-    world = { mode, member, orgAdmin, dealId: "", dealName: "", memberTitle: "", memberTaskId: "", adminTitle: "", adminTaskId: "", opsTitle: "", opsTaskId: "" };
+    const jobAt = Date.now() - 2_000;
+    await runLocalJob("reminders");
+    world = { mode, member, orgAdmin, dealId: "", dealName: "", memberTitle: "", memberTaskId: "", adminTitle: "", adminTaskId: "", opsTitle, opsTaskId, jobAt };
     return;
   }
   const pipes = await pipelines(admin.api);
@@ -103,11 +123,9 @@ test.beforeAll(async ({ browser }) => {
   expect(added.status, JSON.stringify(added.json)).toBe(201);
   const memberTaskId = await newTask(orgAdmin, deal.id, { title: memberTitle, assigneeId: member.user.id, dueDate: ymd(1) });
   const adminTaskId = await newTask(orgAdmin, deal.id, { title: adminTitle, assigneeId: orgAdmin.user.id, dueDate: ymd(1) });
-  const ops = await newProject(admin, later, { label: "ops", members: [{ who: member }, { who: orgAdmin }] });
-  const opsTitle = zz("Ops check");
-  const opsTaskId = await newTask(orgAdmin, ops.id, { title: opsTitle, assigneeId: member.user.id, dueDate: ymd(1) });
+  const jobAt = Date.now() - 2_000;
   await runLocalJob("reminders");
-  world = { mode, member, orgAdmin, dealId: deal.id, dealName, memberTitle, memberTaskId, adminTitle, adminTaskId, opsTitle, opsTaskId };
+  world = { mode, member, orgAdmin, dealId: deal.id, dealName, memberTitle, memberTaskId, adminTitle, adminTaskId, opsTitle, opsTaskId, jobAt };
 });
 
 test.afterAll(async () => {
@@ -116,8 +134,8 @@ test.afterAll(async () => {
   }
 });
 
-test("qa:TC missing qa:TC missing qa:TC missing all and unset keep the deal reminder and the ops check", async () => {
-  test.skip(!world || world.mode !== "all", `This server is CRM_VISIBLE=${world?.mode ?? "off"}. Unset reads as all.`);
+test("qa:TC missing AC2 AC3: all and unset keep the deal reminder and the ops check", async () => {
+  test.skip(!world || world.mode !== "all", `${notThisMode("all")} Unset reads as all.`);
   const w = useWorld();
   const memberItems = await bell(w.member);
   const adminItems = await bell(w.orgAdmin);
@@ -127,8 +145,8 @@ test("qa:TC missing qa:TC missing qa:TC missing all and unset keep the deal remi
   assertOps(memberItems, w);
 });
 
-test("qa:TC missing qa:TC missing qa:TC missing admins: a member gets no deal reminder and an admin still does", async () => {
-  test.skip(!world || world.mode !== "admins", `This server is CRM_VISIBLE=${world?.mode ?? "off"}.`);
+test("qa:TC missing AC1 AC2 AC3: admins: a member gets no deal reminder and an admin still does", async () => {
+  test.skip(!world || world.mode !== "admins", notThisMode("admins"));
   const w = useWorld();
   const memberItems = await bell(w.member);
   const adminItems = await bell(w.orgAdmin);
@@ -138,9 +156,18 @@ test("qa:TC missing qa:TC missing qa:TC missing admins: a member gets no deal re
   assertOps(memberItems, w);
 });
 
-test("qa:TC missing qa:TC missing off: nobody gets a deal reminder", async () => {
-  // The deal routes answer 404 for every role when the CRM is off, so this spec cannot seed
-  // "ZZ-TEST Acme renewal" there. The product test writes that mode against the test database.
-  test.skip(world?.mode !== "off", `This server is CRM_VISIBLE=${world?.mode ?? "unknown"}. Off is covered by tests/jobs-reminders-crm.test.ts.`);
-  test.skip(true, "CRM_VISIBLE=off closes the deal API, so the job cannot be seeded from this spec.");
+test("qa:TC missing AC1 AC3: off: every new due reminder opens for its reader, and the ops check stays", async () => {
+  test.skip(!world || world.mode !== "off", notThisMode("off"));
+  const w = useWorld();
+  // A deal task is "not found" for every role under off, so a reminder that names or links a deal cannot open.
+  for (const who of [w.member, w.orgAdmin]) {
+    const fresh = await freshDue(who, w.jobAt);
+    noSecret(JSON.stringify(fresh));
+    for (const item of fresh) {
+      expect(item.href, item.text).toMatch(/^\/tasks\/[\w-]+$/);
+      const opened = await who.api.get(`/api${item.href}`);
+      expect(opened.status, `${item.text} -> ${item.href}`).toBe(200);
+    }
+  }
+  assertOps(await bell(w.member), w);
 });
