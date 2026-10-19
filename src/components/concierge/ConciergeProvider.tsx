@@ -1,7 +1,7 @@
 "use client";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { conciergeApi } from "./api";
-import { freshMessages, mergeMessages, patchCard } from "./logic";
+import { freshMessages, improveError, mergeMessages, patchCard } from "./logic";
 import type { Disabled, Message, QuickActionId, State } from "./types";
 import "./concierge.css";
 
@@ -149,7 +149,7 @@ export function ConciergeProvider({ children }: { children: React.ReactNode }) {
   const improve = useCallback(async (text: string) => {
     return run(async () => {
       const r = await conciergeApi.improve(text);
-      if (!r.ok) { setError(r.error ?? "Could not improve that. Try again."); return null; }
+      if (!r.ok) { setError(improveError(r.error)); return null; }
       return r.data.improved;
     });
   }, [run]);

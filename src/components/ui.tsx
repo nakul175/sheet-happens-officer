@@ -2,7 +2,7 @@
 import { useEffect, useId, useRef, useState } from "react";
 
 /** Centred dialog over a dimmed page. Escape and the dim area close it; focus moves in and returns. */
-export function Modal({ onClose, small, label, children }: { onClose: () => void; small?: boolean; label: string; children: React.ReactNode }) {
+export function Modal({ onClose, small, label, describedBy, children }: { onClose: () => void; small?: boolean; label: string; describedBy?: string; children: React.ReactNode }) {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const prev = document.activeElement as HTMLElement | null;
@@ -26,7 +26,7 @@ export function Modal({ onClose, small, label, children }: { onClose: () => void
   }, [onClose]);
   return (
     <div className="scrim" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className={`modal${small ? " sm" : ""}`} role="dialog" aria-modal="true" aria-label={label} tabIndex={-1} ref={ref} style={{ outline: "none" }}>
+      <div className={`modal${small ? " sm" : ""}`} role="dialog" aria-modal="true" aria-label={label} aria-describedby={describedBy} tabIndex={-1} ref={ref} style={{ outline: "none" }}>
         {children}
       </div>
     </div>

@@ -40,7 +40,7 @@ describe("activity log", () => {
 });
 
 describe("audit log", () => {
-  it("is Super Admin only, filterable, with IP on sign-in events only", async () => {
+  it("qa:TC missing is Super Admin only, filterable, with IP on sign-in and email-verification events only", async () => {
     const sa = await superAdmin();
     const ad = await admin(sa);
     expect((await ad.c.get("/api/audit")).status).toBe(404);
@@ -56,7 +56,9 @@ describe("audit log", () => {
     const fails = (await sa.c.get("/api/audit?event=SIGN_IN_FAILED")).json.items;
     expect(fails.every((i: { event: string }) => i.event === "SIGN_IN_FAILED")).toBe(true);
     expect(fails.some((i: { ip: string }) => i.ip === "203.0.113.9")).toBe(true);
-    expect(all.items.filter((i: { event: string; ip: string | null }) => !/^SIGN_IN/.test(i.event) && i.ip).length).toBe(0);
+    // APL-2742: email-verification events carry the IP too (link-scanner traceability); every other event still has none.
+    const withIp = (e: string) => /^SIGN_IN/.test(e) || e === "EMAIL_VERIFIED" || e === "VERIFY_EMAIL_REQUESTED";
+    expect(all.items.filter((i: { event: string; ip: string | null }) => !withIp(i.event) && i.ip).length).toBe(0);
     const day = new Date().toISOString().slice(0, 10);
     expect((await sa.c.get(`/api/audit?from=${day}&to=${day}`)).status).toBe(200);
     expect((await sa.c.get(`/api/audit?person=${ad.id}`)).json.items.every((i: { email: string }) => i.email === ad.email)).toBe(true);
