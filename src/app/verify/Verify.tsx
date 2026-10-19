@@ -7,18 +7,27 @@ import { AuthShell } from "@/components/AuthShell";
 import styles from "@/components/auth.module.css";
 import { post } from "@/components/client";
 
+// APL-2742: opening the link only shows a button. Mail link scanners open links without a person, so the token is
+// posted on the click alone, never on load.
 export function Verify() {
   const router = useRouter();
   const token = useSearchParams().get("token") ?? "";
   const [done, setDone] = useState(false);
+  const [busy, setBusy] = useState(false);
   const started = useRef(false);
 
   useEffect(() => {
+    if (!token) router.replace("/expired");
+  }, [token, router]);
+
+  async function verify() {
     if (started.current) return; // a link works once; never submit it twice
     started.current = true;
-    if (!token) return router.replace("/expired");
-    post("/api/auth/verify", { token }).then((r) => (r.ok ? setDone(true) : router.replace("/expired")));
-  }, [token, router]);
+    setBusy(true);
+    const r = await post("/api/auth/verify", { token });
+    if (r.ok) setDone(true);
+    else router.replace("/expired");
+  }
 
   return (
     <AuthShell>
@@ -30,8 +39,11 @@ export function Verify() {
         </>
       ) : (
         <>
-          <h1>Verifying…</h1>
-          <p className={styles.lead}>One moment.</p>
+          <h1>Verify your email</h1>
+          <p className={styles.lead}>Confirm this is your address to finish creating your account.</p>
+          <button type="button" onClick={verify} disabled={busy || !token} className={styles.primary}>
+            {busy ? "Verifying…" : "Verify my email"}
+          </button>
         </>
       )}
     </AuthShell>

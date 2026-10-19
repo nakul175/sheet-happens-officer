@@ -1,13 +1,16 @@
 // APL-2742 (prod hotfix): sign up, ignore the email, sign out, sign in -> refused, with a resend link.
 // A failed verification send is shown on the check-email screen with a resend option.
+// Opening a verify link only shows "Verify my email"; the token is used on the click alone (mail link scanners open links).
+// No screen sends a resend without a click. The verify and resend audit rows keep the client IP and user agent.
 // Runs in `npm test` against the local test server (TASKBOARD_URL) and its outbox (EMAIL_OUTBOX_DIR), as in ci.yml.
 // Anything but localhost is refused before a browser starts. nakul17+zztest accounts, ZZ-TEST names.
 // Chromium: PW_CHROMIUM, else the system Chrome that GitHub's ubuntu-latest runner ships (as tests/inline-touch-2673.test.ts).
 import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { chromium, type Browser, type Page } from "playwright-core";
+import { chromium, type Browser, type BrowserContext, type Page } from "playwright-core";
 import { BASE, OUTBOX, PW } from "../../helpers";
+import { db } from "../../../src/lib/db";
 
 const SHOTS = "test-results/apl-2742";
 const run = Date.now();
@@ -19,6 +22,24 @@ if (!/^(localhost|127\.0\.0\.1)$/.test(new URL(BASE).hostname)) {
 }
 
 let browser: Browser;
+
+// What Caddy adds in production (X-Forwarded-For) and a recognisable browser user agent, so audit rows can be checked.
+const CLIENT_IP = "203.0.113.42";
+const CLIENT_UA = "ZZ-TEST-APL2742 Chromium";
+const tracedContext = () => browser.newContext({ userAgent: CLIENT_UA, extraHTTPHeaders: { "x-forwarded-for": CLIENT_IP } });
+
+/** Counts the page's requests to an API path from now on. */
+function countRequests(page: Page, apiPath: string) {
+  const seen = { n: 0 };
+  page.on("request", (r) => { if (new URL(r.url()).pathname === apiPath) seen.n += 1; });
+  return seen;
+}
+
+/** Lets effects run and the network settle, so a request fired on load would have been seen. */
+async function settle(page: Page) {
+  await page.waitForLoadState("networkidle");
+  await page.waitForTimeout(1500);
+}
 
 function chromePath() {
   const fromEnv = process.env.PW_CHROMIUM;
@@ -89,7 +110,7 @@ describe("qa:TC missing APL-2742: unverified sign-in and verification email", ()
   }, 60_000);
 
   it("qa:TC missing AC2: the refusal offers a resend that sends a new verification link", async () => {
-    const ctx = await browser.newContext();
+    const ctx = await tracedContext();
     const page = await ctx.newPage();
     const email = fresh();
     await signUp(page, email);
@@ -98,9 +119,14 @@ describe("qa:TC missing APL-2742: unverified sign-in and verification email", ()
     await page.getByRole("button", { name: /resend/i }).click();
     await page.waitForURL(/\/check-email/);
     await expect.poll(() => verifyLinks(email).length).toBe(2);
+    const user = await db.user.findUniqueOrThrow({ where: { email } });
+    const resend = await db.auditLog.findFirstOrThrow({ where: { actorId: user.id, event: "VERIFY_EMAIL_REQUESTED" } });
+    expect(resend.ip).toBe(CLIENT_IP);
+    expect(resend.data).toEqual({ result: "SENT", userAgent: CLIENT_UA });
 
-    // The newest link verifies the account, and then the same password signs in.
+    // The newest link, once its button is clicked, verifies the account; then the same password signs in.
     await page.goto(verifyLinks(email).at(-1)!);
+    await page.getByRole("button", { name: "Verify my email" }).click();
     await expect.poll(() => page.locator("main").textContent()).toMatch(/verified/i);
     await signIn(page, email);
     await page.waitForURL((u) => !u.pathname.startsWith("/signin"));
@@ -122,14 +148,66 @@ describe("qa:TC missing APL-2742: unverified sign-in and verification email", ()
       contentType: "application/json",
       body: JSON.stringify({ error: "We could not send the email just now. Wait a few minutes, then try again." }),
     }));
+    const resends = countRequests(page, "/api/auth/resend-verification");
     await signUp(page, fresh());
     const alert = page.locator("main [role=alert]");
     await expect.poll(() => alert.textContent()).toMatch(/could not send the verification email/i);
     await page.screenshot({ path: `${SHOTS}/send-failed.png` });
+    await settle(page);
+    expect(resends.n, "the failed-send screen sends nothing until Resend is clicked").toBe(0);
 
     await page.getByRole("button", { name: /resend/i }).click();
     await expect.poll(() => alert.textContent()).toMatch(/could not send the email just now/i);
     await expect.poll(() => page.locator("main [role=status]").count()).toBe(0);
+    await ctx.close();
+  }, 60_000);
+
+  it("qa:TC missing AC4: opening the verify link alone verifies nothing; the Verify my email click does, and is audited", async () => {
+    const ctx: BrowserContext = await tracedContext();
+    const page = await ctx.newPage();
+    const email = fresh();
+    await signUp(page, email);
+    const verifies = countRequests(page, "/api/auth/verify");
+
+    // What a mail link scanner does: open the link and let the page run, with no click.
+    await page.goto(verifyLinks(email).at(-1)!);
+    await expect.poll(() => page.getByRole("button", { name: "Verify my email" }).count()).toBe(1);
+    await settle(page);
+    expect(verifies.n, "loading /verify posts nothing").toBe(0);
+    const user = await db.user.findUniqueOrThrow({ where: { email } });
+    expect((await db.user.findUniqueOrThrow({ where: { id: user.id } })).emailVerifiedAt).toBeNull();
+    const token = await db.authToken.findFirstOrThrow({ where: { userId: user.id, type: "VERIFY" }, orderBy: { createdAt: "desc" } });
+    expect(token.usedAt).toBeNull();
+    await page.screenshot({ path: `${SHOTS}/verify-button.png` });
+
+    // A person clicks.
+    await page.getByRole("button", { name: "Verify my email" }).click();
+    await expect.poll(() => page.locator("main").textContent()).toMatch(/email verified/i);
+    expect(verifies.n).toBe(1);
+    expect((await db.user.findUniqueOrThrow({ where: { id: user.id } })).emailVerifiedAt).not.toBeNull();
+    expect((await db.authToken.findUniqueOrThrow({ where: { id: token.id } })).usedAt).not.toBeNull();
+    const row = await db.auditLog.findFirstOrThrow({ where: { actorId: user.id, event: "EMAIL_VERIFIED" } });
+    expect(row.ip).toBe(CLIENT_IP);
+    expect(row.data).toEqual({ userAgent: CLIENT_UA });
+    await ctx.close();
+  }, 60_000);
+
+  it("qa:TC missing AC5: the sign-up success flow and /check-email never send a resend without a click", async () => {
+    const ctx = await tracedContext();
+    const page = await ctx.newPage();
+    const resends = countRequests(page, "/api/auth/resend-verification");
+    const email = fresh();
+    await signUp(page, email);
+    await settle(page);
+    await page.reload();
+    await settle(page);
+    await page.goto(`${BASE}/check-email?failed=1`);
+    await settle(page);
+    expect(resends.n, "no resend on sign-up, on /check-email or on its failed-send variant").toBe(0);
+    expect(verifyLinks(email)).toHaveLength(1);
+
+    await page.getByRole("button", { name: /resend/i }).click();
+    await expect.poll(() => resends.n).toBe(1);
     await ctx.close();
   }, 60_000);
 });
