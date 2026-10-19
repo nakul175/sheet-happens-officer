@@ -3,16 +3,70 @@
 // AC5 90-day retention, AC6 no email.
 // Note: AC1 says the latest 30; SHO-US-14.13 changed the panel to 50 at a time with Load older. The test follows 14.13.
 // Data: every project and task is named "ZZ-TEST ..."; projects are archived afterwards.
-import { test, expect, zz, type Who, type Page } from "../support";
+// The file skips only when SHO_QA_PASS is unset. AC5 ages one row this test created and runs purge-old on localhost only.
+import { execFileSync } from "node:child_process";
+import { readdirSync, readFileSync } from "node:fs";
+import path from "node:path";
+import { test, expect, zz, BASE_URL, type Api, type Later, type Page, type Who } from "../support";
+import { PASS, passwordOk } from "./qa";
 
-async function proj(admin: Who, label: string, later: (f: () => Promise<unknown>) => void) {
+// Pam has not published a TC hash. The marker is the literal "qa:TC missing".
+const tag = (id: string) => ({ annotation: [{ type: "ac", description: id }, { type: "qa:TC", description: "qa:TC missing" }] });
+
+test.beforeAll(() => {
+  test.skip(!PASS, "Set SHO_QA_PASS (the password for nakul17+ aliases).");
+  if (!passwordOk(PASS)) throw new Error("SHO_QA_PASS must be at least 8 characters with a letter and a number.");
+});
+
+async function version(who: { api: Api }, id: string) {
+  const seen = await who.api.get(`/api/tasks/${id}`);
+  expect(seen.status, JSON.stringify(seen.json)).toBe(200);
+  return seen.json.task.updatedAt as string;
+}
+
+function mailFiles(email: string) {
+  const dir = process.env.EMAIL_OUTBOX_DIR ?? path.join(process.cwd(), ".outbox");
+  let files: string[] = [];
+  try { files = readdirSync(dir); } catch { return new Set<string>(); }
+  const want = email.toLowerCase();
+  const hit = new Set<string>();
+  for (const file of files) {
+    if (!file.endsWith(".json")) continue;
+    try {
+      const mail = JSON.parse(readFileSync(path.join(dir, file), "utf8")) as { to?: string };
+      if (mail.to?.toLowerCase() === want) hit.add(file);
+    } catch { /* a half-written file */ }
+  }
+  return hit;
+}
+
+/** Localhost only. Updates the one notification id this test created. Never a remote, staging, preview, or production database. */
+function ageNotification(id: string, recipientId: string) {
+  const raw = process.env.DATABASE_URL ?? "";
+  let parsed: URL;
+  try { parsed = new URL(raw); } catch { throw new Error("DATABASE_URL is missing or not a URL. AC5 will not age a notification."); }
+  const host = parsed.hostname;
+  if (host !== "localhost" && host !== "127.0.0.1" && host !== "::1") throw new Error(`Refusing to age a notification: DATABASE_URL host is ${host}.`);
+  const name = parsed.pathname.replace(/^\//, "");
+  if (/prod|staging|preview/i.test(name)) throw new Error("Refusing to age a notification against a production, staging, or preview database.");
+  const appHost = new URL(BASE_URL).hostname;
+  if (appHost !== "localhost" && appHost !== "127.0.0.1" && appHost !== "::1") throw new Error("Refusing to run purge-old against a remote host.");
+  if (!/^[a-z0-9]+$/i.test(id) || !/^[a-z0-9]+$/i.test(recipientId)) throw new Error("Refusing to age a notification: the id is not a single token.");
+  parsed.searchParams.delete("schema");
+  const aged = new Date(Date.now() - 91 * 86400_000).toISOString();
+  const sql = `UPDATE "Notification" SET "createdAt" = timestamptz '${aged}' WHERE id = '${id}' AND "recipientId" = '${recipientId}'`;
+  const out = execFileSync("psql", [parsed.toString(), "-v", "ON_ERROR_STOP=1", "-c", sql], { encoding: "utf8" });
+  expect(out).toContain("UPDATE 1");
+}
+
+async function proj(admin: Who, label: string, later: Later) {
   const r = await admin.api.post("/api/projects", { name: zz(label), leaderId: admin.user.id });
   expect(r.status, JSON.stringify(r.json)).toBe(201);
   const id = r.json.project.id as string;
   later(() => admin.api.post(`/api/projects/${id}/archive`));
   return id;
 }
-const withMember = async (admin: Who, member: Who, label: string, later: (f: () => Promise<unknown>) => void) => {
+const withMember = async (admin: Who, member: Who, label: string, later: Later) => {
   const p = await proj(admin, label, later);
   expect((await admin.api.post(`/api/projects/${p}/members`, { userId: member.user.id, role: "EDITOR" })).status).toBe(201);
   later(() => admin.api.del(`/api/projects/${p}/members/${member.user.id}?handoverTo=${admin.user.id}`));
@@ -38,7 +92,7 @@ async function openBell(page: Page) {
 type N = { id: string; text: string; href: string; read: boolean; createdAt: string };
 const inbox = async (who: Who) => (await who.api.get("/api/notifications?limit=200")).json as { unread: number; items: N[] };
 
-test("AC1: a new notification raises the count and appears first in the panel", async ({ admin, member, later }) => {
+test("AC1: a new notification raises the count and appears first in the panel", tag("APL-2506 AC1"), async ({ admin, member, later }) => {
   const p = await withMember(admin, member, "bell-new", later);
   const before = (await inbox(member)).unread;
   await mk(admin, p, zz("count me"), { assigneeId: member.user.id });
@@ -49,17 +103,17 @@ test("AC1: a new notification raises the count and appears first in the panel", 
   await member.page.goto("/");
   await expect(member.page.getByRole("button", { name: `Notifications, ${before + 1} unread` })).toBeVisible();
   const dlg = await openBell(member.page);
-  await expect(dlg.locator(".bell-main").first()).toContainText(zz("count me"));
+  await expect(dlg.getByRole("link", { name: zz("count me") })).toBeVisible();
 });
 
-test("AC2: opening an item marks it read and the count drops; Mark all as read clears the count", async ({ admin, member, later }) => {
+test("AC2: opening an item marks it read and the count drops; Mark all as read clears the count", tag("APL-2506 AC2"), async ({ admin, member, later }) => {
   const p = await withMember(admin, member, "bell-read", later);
   await mk(admin, p, zz("read one"), { assigneeId: member.user.id });
   await mk(admin, p, zz("read two"), { assigneeId: member.user.id });
   const start = (await inbox(member)).unread;
   expect(start).toBeGreaterThanOrEqual(2);
   const d1 = await openBell(member.page);
-  await d1.locator(".bell-main", { hasText: zz("read two") }).click();
+  await d1.getByRole("link", { name: zz("read two") }).click();
   await expect.poll(async () => (await inbox(member)).unread).toBe(start - 1);
   const d2 = await openBell(member.page); // the click opened the task; start again from a clean page
   // dispatch the click on the button itself: a closing-panel scrim can sit over it for a moment
@@ -68,7 +122,7 @@ test("AC2: opening an item marks it read and the count drops; Mark all as read c
   await expect(member.page.getByRole("button", { name: "Notifications", exact: true })).toBeVisible(); // no count left
 });
 
-test("AC3: another person's notifications are never returned or changed", async ({ admin, member, later }) => {
+test("AC3: another person's notifications are never returned or changed", tag("APL-2506 AC3"), async ({ admin, member, later }) => {
   const p = await withMember(admin, member, "bell-private", later);
   await mk(member, p, zz("for the leader"), { assigneeId: admin.user.id });
   const mine = await inbox(admin);
@@ -81,11 +135,11 @@ test("AC3: another person's notifications are never returned or changed", async 
   expect(after.read).toBe(false);
 });
 
-test("AC4: each event in the list gives exactly one notification to the affected person and none to the person who caused it", async ({ admin, member, later }) => {
+test("AC4: each event in the list gives exactly one notification to the affected person and none to the person who caused it", tag("APL-2506 AC4"), async ({ admin, member, later }) => {
   const p = await withMember(admin, member, "bell-types", later);
   const t = await mk(admin, p, zz("typed"), { assigneeId: member.user.id });                       // assigned
   await mk(admin, p, zz("collab"), { collaboratorIds: [member.user.id] });               // added as collaborator
-  expect((await member.api.patch(`/api/tasks/${t}`, { blocked: true, blockedReason: "Waiting" })).status).toBe(200); // blocked: to the Leader
+  expect((await member.api.patch(`/api/tasks/${t}`, { blocked: true, blockedReason: "Waiting", expectedUpdatedAt: await version(member, t) })).status).toBe(200); // blocked: to the Leader
   expect((await admin.api.patch(`/api/projects/${p}/members/${member.user.id}`, { role: "VIEWER", handoverTo: admin.user.id })).status).toBe(200); // project role changed
   const mine = (await inbox(member)).items.map((n) => n.text);
   const count = (re: RegExp) => mine.filter((x) => re.test(x)).length;
@@ -97,5 +151,31 @@ test("AC4: each event in the list gives exactly one notification to the affected
   expect(mine.some((x) => x.includes("as blocked") && x.includes(zz("typed")))).toBe(false); // the actor is not told
 });
 
-test.skip("AC5: notifications older than 90 days are removed — needs a notice aged 90 days and the purge-old job; not reachable from a browser session", async () => {});
-test.skip("AC6: no email is sent for a notification — the test cannot read a mailbox from a browser session; checked in tests/feed.test.ts and by reading the sender code instead", async () => {});
+test("AC5: notifications older than 90 days are removed", tag("APL-2506 AC5"), async ({ admin, member, later }) => {
+  const secret = process.env.JOB_SECRET ?? "";
+  if (secret.length < 16) throw new Error("Set JOB_SECRET (16 characters or more) to run purge-old on the local server.");
+  const p = await withMember(admin, member, "bell-old", later);
+  await mk(admin, p, zz("aged notice"), { assigneeId: member.user.id });
+  const aged = (await inbox(member)).items.find((n) => n.text.includes(zz("aged notice")));
+  expect(aged, "the notice to age").toBeTruthy();
+  ageNotification(aged!.id, member.user.id as string);
+  await mk(admin, p, zz("fresh notice"), { assigneeId: member.user.id });
+  const fresh = (await inbox(member)).items.find((n) => n.text.includes(zz("fresh notice")));
+  expect(fresh, "a new notice stays").toBeTruthy();
+  const res = await fetch(new URL("/api/jobs/purge-old", BASE_URL), { method: "POST", headers: { authorization: `Bearer ${secret}` } });
+  const body = await res.text();
+  expect(body.includes(secret)).toBe(false);
+  expect(res.status, body).toBe(200);
+  const left = (await inbox(member)).items;
+  expect(left.some((n) => n.id === aged!.id)).toBe(false);
+  expect(left.some((n) => n.id === fresh!.id)).toBe(true);
+});
+
+test("AC6: no email is sent for a notification", tag("APL-2506 AC6"), async ({ admin, member, later }) => {
+  const before = mailFiles(member.user.email as string);
+  const p = await withMember(admin, member, "bell-mail", later);
+  await mk(admin, p, zz("no mail"), { assigneeId: member.user.id });
+  const note = (await inbox(member)).items.find((n) => n.text.includes(zz("no mail")));
+  expect(note, "the notice was created in the bell").toBeTruthy();
+  expect([...mailFiles(member.user.email as string)].filter((file) => !before.has(file))).toEqual([]);
+});

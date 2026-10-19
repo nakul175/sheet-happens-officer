@@ -3,12 +3,13 @@
 // Undo of deactivation and bulk reassignment is excluded, per the epic.
 import { test, login } from "../support";
 import { patchCurrent } from "../helpers/jim-http";
+import { activityRow } from "../helpers/screen-row";
 import {
   PASS, passwordOk, gate, verifiedUser, deactivate, makeProject, archiveProject, expect, zz,
 } from "./qa";
 
 test.beforeAll(async ({ request }) => {
-  if (!PASS) throw new Error("Set SHO_QA_PASS (the shared password for the nakul17+ accounts).");
+  test.skip(!PASS, "Set SHO_QA_PASS (the shared password for the nakul17+ accounts).");
   if (!passwordOk(PASS)) throw new Error("SHO_QA_PASS must be at least 8 characters with a letter and a number.");
   login("ADMIN");
   await gate(request);
@@ -16,7 +17,9 @@ test.beforeAll(async ({ request }) => {
 
 type Act = { id: string; who: string; what: string; when: string; ts: number; undo: string };
 
+// qa:TC missing
 test("AC1: deleting a task moves it to the project Trash, to be purged after 30 days", async ({ admin, browser, anon, later }) => {
+  test.info().annotations.push({ type: "qa:TC", description: "qa:TC missing" });
   const editor = await verifiedUser(browser, anon.request, "2470", "ac1");
   later(() => editor.ctx.close());
   later(() => deactivate(admin.api, editor.user.id as string));
@@ -43,7 +46,9 @@ test("AC1: deleting a task moves it to the project Trash, to be purged after 30 
   await expect(admin.page.getByText("Removes tasks that have been in Trash for 30 days")).toBeVisible();
 });
 
+// qa:TC missing
 test("AC2: restoring a task from Trash puts it back in the project with its data", async ({ admin, later }) => {
+  test.info().annotations.push({ type: "qa:TC", description: "qa:TC missing" });
   const project = await makeProject(admin.api, "restore", admin.user.id as string);
   later(() => archiveProject(admin.api, project.id, admin.user.id as string));
   const title = zz("back");
@@ -52,7 +57,7 @@ test("AC2: restoring a task from Trash puts it back in the project with its data
   const id = created.json.task.id as string;
   expect((await admin.api.del(`/api/tasks/${id}`)).status).toBe(204);
   await admin.page.goto(`/projects/${project.id}/trash`);
-  const row = admin.page.locator("tr", { hasText: title });
+  const row = admin.page.getByRole("row", { name: new RegExp(title) });
   await row.getByRole("button", { name: "Restore" }).click();
   await expect.poll(async () => (await admin.api.get(`/api/tasks/${id}`)).status).toBe(200);
   const task = (await admin.api.get(`/api/tasks/${id}`)).json.task;
@@ -61,7 +66,9 @@ test("AC2: restoring a task from Trash puts it back in the project with its data
   expect(task.projectId).toBe(project.id);
 });
 
+// qa:TC missing
 test("AC3: a write records who, what, when and the before-state", async ({ admin, later }) => {
+  test.info().annotations.push({ type: "qa:TC", description: "qa:TC missing" });
   const project = await makeProject(admin.api, "log", admin.user.id as string);
   later(() => archiveProject(admin.api, project.id, admin.user.id as string));
   const before = zz("before");
@@ -77,7 +84,9 @@ test("AC3: a write records who, what, when and the before-state", async ({ admin
   expect(typeof row!.ts).toBe("number");
 });
 
+// qa:TC missing
 test("AC4: Undo restores a task, a project and a membership change", async ({ admin, browser, anon, later }) => {
+  test.info().annotations.push({ type: "qa:TC", description: "qa:TC missing" });
   const editor = await verifiedUser(browser, anon.request, "2470", "ac4");
   later(() => editor.ctx.close());
   later(() => deactivate(admin.api, editor.user.id as string));
@@ -96,7 +105,8 @@ test("AC4: Undo restores a task, a project and a membership change", async ({ ad
 
   const undo = async (what: string, undone: string) => {
     await admin.page.goto(`/projects/${project.id}/activity`);
-    const row = admin.page.locator(".item.act", { hasText: what }).first();
+    const row = activityRow(admin.page, what === "Viewer" ? /to Viewer/ : `to "${what}"`);
+    await expect(row, what).toHaveCount(1);
     await row.getByRole("button", { name: "Undo" }).click();
     // The toast names this undo. A previous "Undone:" line can still be on screen after the last one.
     await expect(admin.page.getByText(`Undone: ${undone}.`)).toBeVisible();
@@ -112,7 +122,9 @@ test("AC4: Undo restores a task, a project and a membership change", async ({ ad
   }).toBe("EDITOR");
 });
 
+// qa:TC missing
 test("AC5: Undo warns when the data changed after the action, before it proceeds", async ({ admin, later }) => {
+  test.info().annotations.push({ type: "qa:TC", description: "qa:TC missing" });
   const project = await makeProject(admin.api, "conflict", admin.user.id as string);
   later(() => archiveProject(admin.api, project.id, admin.user.id as string));
   const original = zz("one");
@@ -132,7 +144,8 @@ test("AC5: Undo warns when the data changed after the action, before it proceeds
   expect((await admin.api.get(`/api/tasks/${id}`)).json.task.title).toBe(third);
 
   await admin.page.goto(`/projects/${project.id}/activity`);
-  const row = admin.page.locator(".item.act", { hasText: original }).first();
+  const row = activityRow(admin.page, original, second);
+  await expect(row).toHaveCount(1);
   await row.getByRole("button", { name: "Undo" }).click();
   const dialog = admin.page.getByRole("dialog", { name: "Undo conflict" });
   await expect(dialog.getByRole("heading", { name: "This changed after your action" })).toBeVisible();
@@ -141,7 +154,9 @@ test("AC5: Undo warns when the data changed after the action, before it proceeds
   expect((await admin.api.get(`/api/tasks/${id}`)).json.task.title).toBe(third);
 });
 
+// qa:TC missing
 test("AC6: the Super Admin's organisation audit log shows org-level actions and what was acted on", async ({ admin, browser, anon, later }) => {
+  test.info().annotations.push({ type: "qa:TC", description: "qa:TC missing" });
   const member = await verifiedUser(browser, anon.request, "2470", "ac6");
   later(() => member.ctx.close());
   later(() => deactivate(admin.api, member.user.id as string));
@@ -158,7 +173,7 @@ test("AC6: the Super Admin's organisation audit log shows org-level actions and 
   await admin.page.goto("/audit");
   await expect(admin.page.getByRole("heading", { name: "Audit log" })).toBeVisible();
   const event = admin.page.getByLabel("Event");
-  await expect(event.locator("option", { hasText: "ADMIN_PROMOTED" })).toBeAttached();
   await event.selectOption("ADMIN_PROMOTED");
+  await expect(event).toHaveValue("ADMIN_PROMOTED");
   await expect(admin.page.getByText(`Person "${member.name}"`)).toBeVisible();
 });

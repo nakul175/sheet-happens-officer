@@ -17,7 +17,7 @@ export type Gate = { pr: number; deployed: boolean; how: string };
 const HEADS: Record<number, string> = {
   6: "07454a62a82d2aa91e4e6f68cdb2e44abdeddb5d",
   9: "87721120b9",
-  10: "c47be5f552",
+  10: "69c36318a8d7444f874b0c935a368834690e34f3",
   12: "72d2a3d88b",
   14: "40d0793d4b6418053241e1cbdc7fec448fa5825c",
   18: "cd09cf0832",
@@ -70,8 +70,9 @@ const PROBES: Record<number, (admin: Who, member: Who | null, later: Later) => P
     const del = await deleteTask(member, await newTask(admin, p.id));
     return { deployed: del.status === 204 && !del.undoId, how: `probe: Editor's delete answered ${del.status} ${del.undoId ? "with" : "without"} x-undo-id` };
   },
-  // PR #10 (APL-2646): a Member's quick action scoped to a deal CRM_VISIBLE hides answers "I can't find that." without the deal's name.
-  // On main the label names the deal. Under CRM_VISIBLE=all nothing is hidden, so the two builds answer alike and the probe cannot tell.
+  // PR #10 (APL-2646): a Member's quick action scoped to a deal CRM_VISIBLE hides is the non-member 404
+  // "Project not found", and the body does not name the deal. On main the label names the deal.
+  // Under CRM_VISIBLE=all nothing is hidden, so the two builds answer alike and the probe cannot tell.
   10: async (admin, member, later) => {
     if (!member) return { deployed: false, how: "probe needs the Member account (SHO_MEMBER_*)" };
     const mode = await crmModeLive(admin, member);
@@ -79,7 +80,7 @@ const PROBES: Record<number, (admin: Who, member: Who | null, later: Later) => P
     await cleanChat(member, later);
     const deal = await newDeal(admin, later, "gate pr10", [member]);
     const r = await quickAction(member, "due-week", deal.id);
-    const hid = r.status === 200 && r.json.messages?.at(-1)?.text === "I can't find that." && !r.body.includes(deal.name);
+    const hid = r.status === 404 && r.json.error === "Project not found" && !r.body.includes(deal.name);
     return { deployed: hid, how: `probe: a Member's quick action on a hidden deal answered ${r.status} ${hid ? "without" : "with"} the deal's name` };
   },
   // PR #12 (APL-2647): useGet returns `failed: !loading && ...`. A client-only fix, so the probe reads the JS staging serves
