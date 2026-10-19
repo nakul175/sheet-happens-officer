@@ -40,7 +40,7 @@ describe("activity log", () => {
 });
 
 describe("audit log", () => {
-  it("is Super Admin only, filterable, with IP on sign-in events only", async () => {
+  it("qa:TC missing is Super Admin only, filterable, with IP on sign-in and email-verification events only", async () => {
     const sa = await superAdmin();
     const ad = await admin(sa);
     expect((await ad.c.get("/api/audit")).status).toBe(404);
