@@ -1,6 +1,6 @@
 // CRM slice 3: idea flag (13.2), convert to deal (12.2), Home data (13.1, 12.5 AC3).
 import { describe, expect, it } from "vitest";
-import { account, istDate, project, superAdmin, task, type Account } from "./helpers";
+import { account, istDate, project, superAdmin, task, type Account, withVersion } from "./helpers";
 
 let seq = 0;
 async function pipes(a: Account) {
@@ -118,7 +118,7 @@ describe("convert a task to a deal (12.2)", () => {
     await lead.c.del(`/api/tasks/${trashed}`);
     expect((await conv(lead, trashed)).status).toBe(404);
     const done = await mk();
-    await lead.c.post(`/api/tasks/${done}/complete`);
+    await lead.c.post(`/api/tasks/${done}/complete`, await withVersion(lead, done));
     expect((await conv(lead, done)).status).toBe(409);
     const held = await mk({ approverId: ap.id });
     expect((await lead.c.post(`/api/tasks/${held}/send-for-approval`)).status).toBe(200);
@@ -169,7 +169,7 @@ describe("Home data (13.1, 12.5 AC3)", () => {
     const item = [...mine.overdue, ...mine.next7, ...mine.later].find((x: { project: { id: string } }) => x.project.id === id);
     expect(item.project).toMatchObject({ type: "DEAL", stage: "Lead" });
     expect(mine.needsNextStep.some((x: { id: string }) => x.id === id)).toBe(false);
-    await lead.c.post(`/api/tasks/${item.id}/complete`);
+    await lead.c.post(`/api/tasks/${item.id}/complete`, await withVersion(lead, item.id));
     const after = (await lead.c.get("/api/my-tasks")).json;
     expect(after.needsNextStep.find((x: { id: string }) => x.id === id)).toMatchObject({ name: expect.any(String), stage: "Lead" });
   });

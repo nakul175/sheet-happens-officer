@@ -23,7 +23,7 @@ async function freshCard(user: Actor, ops: Op[]): Promise<Message> {
     const b = await buildCard(user, ops);
     return present(await addMessage(user.id, "ASSISTANT", {
       kind: "card", text: `Things changed since I showed you that. ${b.card.title}. Review it and tap Confirm to apply it.`,
-      card: { id: "", status: "PENDING", ...b.card }, proposal: { ops: b.ops, fingerprint: b.fingerprint },
+      card: { id: "", status: "PENDING", ...b.card }, proposal: { ops: b.ops, fingerprint: b.fingerprint, versions: b.versions },
     }));
   } catch (e) {
     if (e instanceof ApiError) return present(await addMessage(user.id, "ASSISTANT", { kind: "notice", text: "Things changed since I showed you that card, and part of it is no longer possible. Nothing was changed. Ask me again if you still want it." }));
@@ -67,7 +67,7 @@ export async function confirmCard(user: Actor, cardId: string, handover?: { task
   let applied = 0;
   let failure: unknown = null;
   await reqCtx.run(ctx, async () => {
-    try { await execute(user, ops, handover, () => { applied++; }); } catch (e) { failure = e; }
+    try { await execute(user, ops, handover, () => { applied++; }, s.proposal.versions ?? {}); } catch (e) { failure = e; }
   });
   const logIds = ctx.logIds ?? [];
   if (failure && !logIds.length) {

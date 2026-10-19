@@ -1,0 +1,88 @@
+# Lint, build and npm test on pull requests.
+# Push to main is still tested by deploy.yml, which also releases. This file does not deploy and uses no production secret.
+# pull_request only: a push trigger would run this twice on a branch that also has an open pull request.
+name: Lint, build and test
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Lint, build and test
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: sho
+          POSTGRES_PASSWORD: sho
+          POSTGRES_DB: sho_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U sho"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      DATABASE_URL: postgresql://sho:sho@localhost:5432/sho_test?schema=public
+      DIRECT_DATABASE_URL: postgresql://sho:sho@localhost:5432/sho_test?schema=public
+      EMAIL_OUTBOX_DIR: ${{ github.workspace }}/.outbox-ci
+      SUPER_ADMIN_EMAILS: root.test@aplyd.com
+      APP_URL: http://localhost:3100
+      TASKBOARD_URL: http://localhost:3100
+      JOB_SECRET: ci-only-not-a-real-secret-0123
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # pull_request workflows otherwise check out a merge commit. Pin the head so the run is that SHA.
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      # Node 22 treats `node --test scripts/ci/` as a file and exits MODULE_NOT_FOUND.
+      # This glob is that directory on Node 22: every *.test.mjs under scripts/ci/.
+      - name: Node tests for scripts/ci
+        run: node --test "scripts/ci/**/*.test.mjs"
+      - run: npm ci
+      - name: Lint
+        run: npm run lint
+      - name: Typecheck
+        run: npx next typegen && npx tsc --noEmit
+      - run: npx prisma migrate deploy
+      - name: Build
+        run: npm run build
+      # APL-2713. These servers are excluded from `npm test`. A failure here fails the job.
+      - name: CRM mode tests
+        run: npm run test:crm-modes
+      - name: Start the app
+        run: |
+          (npx next start -p 3100 > server.log 2>&1 &)
+          url="${APP_HEALTH_URL:-http://localhost:3100/api/health}"
+          attempts="${APP_HEALTH_ATTEMPTS:-30}"
+          pause="${APP_HEALTH_PAUSE:-2}"
+          ready=0
+          for i in $(seq 1 "$attempts"); do
+            if curl -fsS "$url"; then
+              ready=1
+              break
+            fi
+            sleep "$pause"
+          done
+          if [ "$ready" -ne 1 ]; then
+            echo 'The app did not come up' >&2
+            tail -n 50 server.log >&2 || true
+            exit 1
+          fi
+      - name: Unit tests
+        run: npm test
+      - name: Server log (on failure)
+        if: failure()
+        run: tail -n 200 server.log || true

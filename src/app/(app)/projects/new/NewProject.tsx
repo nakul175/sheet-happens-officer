@@ -3,7 +3,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { api, useGet } from "@/components/api";
-import { Field } from "@/components/ui";
+import { Field, LoadFailed, Skeleton } from "@/components/ui";
 import { Page, useMe } from "../../Shell";
 
 type Person = { id: string; name: string; email?: string; status?: "ACTIVE" | "UNVERIFIED" | "DEACTIVATED" };
@@ -33,6 +33,20 @@ export default function NewProject() {
     else setErr(r.error ?? "Could not create the project.");
   }
   const toggle = (id: string, on: boolean) => setPick((m) => { const n = { ...m }; if (on) n[id] = "EDITOR"; else delete n[id]; return n; });
+  if (!team.data && team.failed) {
+    return (
+      <Page title="New project" sub={<Link href="/projects">← Projects</Link>}>
+        <LoadFailed onRetry={team.reload} />
+      </Page>
+    );
+  }
+  if (team.loading && !team.data) {
+    return (
+      <Page title="New project" sub={<Link href="/projects">← Projects</Link>}>
+        <Skeleton />
+      </Page>
+    );
+  }
   return (
     <Page title="New project" sub={<Link href="/projects">← Projects</Link>}>
       <form className="card" style={{ maxWidth: 560 }} onSubmit={submit}>
