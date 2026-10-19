@@ -1,11 +1,11 @@
 // SHO-US-1.5 Stay signed in, sign out, and retire the email-only session (APL-2478). Acceptance criteria AC1 to AC3.
 import { test, expect, login } from "../support";
-import { PASS, passwordOk, alias, zz, signUp, personByEmail, deactivate, waitForSinkMail, signInAs } from "./qa";
+import { PASS, alias, zz, signUp, personByEmail, deactivate, waitForSinkMail, signInAs, QA_READY, QA_SKIPPED } from "./qa";
 
 test.describe("SHO-US-1.5 / APL-2478 qa:TC missing", () => {
+  test.skip(!QA_READY, QA_SKIPPED); // the one SHO_QA_PASS gate for this file (D14): reported as skipped, never as passed
+
   test.beforeAll(() => {
-    test.skip(!PASS, "Set SHO_QA_PASS (the shared password for the nakul17+ accounts).");
-    test.skip(!passwordOk(PASS), "SHO_QA_PASS must be at least 8 characters with a letter and a number.");
     login("ADMIN"); // no Super Admin login is a failure, not a skip: only SHO_QA_PASS gates the run
   });
 
@@ -29,9 +29,7 @@ test.describe("SHO-US-1.5 / APL-2478 qa:TC missing", () => {
   });
 
   // qa:TC missing
-  test("AC1 (after 30 days): the session ends 30 days after sign-in, and a deactivated person's session is not extended qa:TC missing", { annotation: { type: "qa:TC", description: "qa:TC missing" } }, async ({ anon, admin, browser, later }) => {
-    test.skip(!PASS, "Set SHO_QA_PASS (the shared password for the nakul17+ accounts).");
-    test.skip(!passwordOk(PASS), "SHO_QA_PASS must be at least 8 characters with a letter and a number.");
+  test("AC1 (after 30 days): the 30-day cookie end is fixed at sign-in and never extended, and deactivation ends the session at once qa:TC missing", { annotation: { type: "qa:TC", description: "qa:TC missing" } }, async ({ anon, admin, browser, later }) => {
     const email = alias("2478", "ac1", "aplyd.com");
     expect((await signUp(anon.request, zz("ac1"), email)).status).toBe(201);
     const token = (await waitForSinkMail(email, "Verify")).token;
@@ -50,7 +48,7 @@ test.describe("SHO-US-1.5 / APL-2478 qa:TC missing", () => {
     await who.page.reload();
     expect((await cookie())?.expires, "activity must not extend the 30 days").toBe(before.expires);
 
-
+    // The session actually ending at 30 days is checked server-side in tests/apl-2703-auth-server.test.ts (D15).
     const again = await signInAs(browser, email, PASS);
     later(() => again.ctx.close());
     const live = (await again.ctx.cookies()).find((c) => c.name === "sho_session")!;

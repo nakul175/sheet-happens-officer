@@ -8,7 +8,7 @@
 import { writeFileSync } from "node:fs";
 import { test, expect, type APIRequestContext, type Browser, type BrowserContext } from "@playwright/test";
 import { BASE_URL, login, zz } from "../support";
-import { alias, passwordOk, signUp, waitForSinkMail } from "./qa";
+import { alias, signUp, waitForSinkMail, QA_READY, QA_SKIPPED } from "./qa";
 
 const PASS = process.env.SHO_QA_PASS;
 
@@ -115,11 +115,10 @@ let contactId: string;
 let orgId: string;
 const shapes: Record<string, unknown> = {};
 
+test.skip(!QA_READY, QA_SKIPPED); // the one SHO_QA_PASS gate for this file (D14): reported as skipped, never as passed
+
 test.beforeAll(async ({ browser, playwright }) => {
   test.setTimeout(240_000);
-  // Missing SHO_QA_PASS skips this file instead of failing collection.
-  test.skip(!PASS, "Set SHO_QA_PASS (the shared password for the nakul17+ accounts).");
-  test.skip(!passwordOk(PASS ?? ""), "SHO_QA_PASS must be at least 8 characters with a letter and a number.");
   const admin = login("ADMIN"); // no Super Admin login is a failure, not a skip: only SHO_QA_PASS gates the run
   anon = await playwright.request.newContext({ baseURL: BASE_URL });
   const page = await browser.newPage();

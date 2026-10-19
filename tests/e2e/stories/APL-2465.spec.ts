@@ -3,14 +3,14 @@
 // athenainfonomics.com self-signup belongs to SHO-E23 and is not re-tested here.
 import type { Page } from "@playwright/test";
 import { test, login } from "../support";
-import { PASS, passwordOk, alias, zz, gate, signUp, signInAs, mailToken, nextPass, personByEmail, deactivate, expect, BASE_URL, waitForSinkMail } from "./qa";
+import { PASS, alias, zz, gate, signUp, signInAs, mailToken, nextPass, personByEmail, deactivate, expect, BASE_URL, waitForSinkMail, QA_READY, QA_SKIPPED } from "./qa";
 
 const DOMAIN = "Use your @aplyd.com or @athenainfonomics.com email address.";
 const alertOf = (p: Page) => p.locator('[role="alert"]:not(#__next-route-announcer__)');
 
+test.skip(!QA_READY, QA_SKIPPED); // the one SHO_QA_PASS gate for this file (D14): reported as skipped, never as passed
+
 test.beforeAll(async ({ request }) => {
-  test.skip(!PASS, "Set SHO_QA_PASS (the shared password for the nakul17+ accounts).");
-  test.skip(!passwordOk(PASS), "SHO_QA_PASS must be at least 8 characters with a letter and a number.");
   login("ADMIN"); // no Super Admin login is a failure, not a skip: only SHO_QA_PASS gates the run
   await gate(request);
 });

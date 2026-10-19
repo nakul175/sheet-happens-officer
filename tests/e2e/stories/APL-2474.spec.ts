@@ -3,18 +3,13 @@
 // Names use ZZ-TEST. The account is deactivated afterwards.
 import type { Page } from "@playwright/test";
 import { test, expect, RUN, login } from "../support";
-import { PASS, passwordOk, alias, zz, signUp, personByEmail, deactivate, waitForSinkMail } from "./qa";
+import { PASS, alias, zz, signUp, personByEmail, deactivate, waitForSinkMail, QA_READY, QA_SKIPPED } from "./qa";
 
 const alertOf = (p: Page) => p.locator('[role="alert"]:not(#__next-route-announcer__)');
 const DOMAIN_MESSAGE = "Use your @aplyd.com or @athenainfonomics.com email address."; // 1.1 AC2 wording, widened by SHO-US-23.1
 const PASSWORD_MESSAGE = "Use at least 8 characters, with at least one letter and one number.";
 const okPw = `Zz${RUN}9x`; // throw-away value for an account that is never created
 const fresh = (tag: string) => `zz-test-${RUN}-${tag}@aplyd.com`;
-
-function needPass() {
-  test.skip(!PASS, "Set SHO_QA_PASS (the shared password for the nakul17+ accounts).");
-  test.skip(!passwordOk(PASS), "SHO_QA_PASS must be at least 8 characters with a letter and a number.");
-}
 
 async function fillSignUp(page: Page, name: string, email: string, password: string) {
   await page.goto("/signup");
@@ -25,15 +20,14 @@ async function fillSignUp(page: Page, name: string, email: string, password: str
 }
 
 test.describe("SHO-US-1.1 / APL-2474 qa:TC missing", () => {
+  test.skip(!QA_READY, QA_SKIPPED); // the one SHO_QA_PASS gate for this file (D14): reported as skipped, never as passed
+
   test.beforeAll(() => {
-    test.skip(!PASS, "Set SHO_QA_PASS (the shared password for the nakul17+ accounts).");
-    test.skip(!passwordOk(PASS), "SHO_QA_PASS must be at least 8 characters with a letter and a number.");
     login("ADMIN"); // no Super Admin login is a failure, not a skip: only SHO_QA_PASS gates the run
   });
 
   // qa:TC missing
   test("AC1: a valid new @aplyd.com or @athenainfonomics.com sign-up creates an unverified account and shows Check your email qa:TC missing", { annotation: { type: "qa:TC", description: "qa:TC missing" } }, async ({ anon, admin, later }) => {
-    needPass();
     login("ADMIN"); // no Super Admin login is a failure, not a skip: only SHO_QA_PASS gates the run
     for (const domain of ["aplyd.com", "athenainfonomics.com"] as const) {
       const email = alias("2474", `ac1-${domain.split(".")[0]}`, domain);
@@ -68,7 +62,6 @@ test.describe("SHO-US-1.1 / APL-2474 qa:TC missing", () => {
 
   // qa:TC missing
   test("AC3: an email that already has an account is refused with a Sign in link, and no second account appears qa:TC missing", { annotation: { type: "qa:TC", description: "qa:TC missing" } }, async ({ anon, admin, later }) => {
-    needPass();
     const email = alias("2474", "ac3", "aplyd.com");
     const signed = await signUp(anon.request, zz("ac3"), email);
     expect(signed.status, signed.body).toBe(201);

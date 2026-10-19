@@ -1,25 +1,19 @@
 // SHO-US-1.2 Verify email with a link (APL-2475). Acceptance criteria AC1 to AC4.
 // Verification links are read from the test mail sink. Accounts use nakul17+ aliases and are deactivated afterwards.
 import { test, expect, RUN, login } from "../support";
-import { PASS, passwordOk, alias, zz, signUp, personByEmail, deactivate, waitForSinkMail, matchingMails } from "./qa";
+import { PASS, alias, zz, signUp, personByEmail, deactivate, waitForSinkMail, matchingMails, QA_READY, QA_SKIPPED } from "./qa";
 
 const ghost = `zz-test-${RUN}-nobody@aplyd.com`; // never has an account
 
-function needPass() {
-  test.skip(!PASS, "Set SHO_QA_PASS (the shared password for the nakul17+ accounts).");
-  test.skip(!passwordOk(PASS), "SHO_QA_PASS must be at least 8 characters with a letter and a number.");
-}
-
 test.describe("SHO-US-1.2 / APL-2475 qa:TC missing", () => {
+  test.skip(!QA_READY, QA_SKIPPED); // the one SHO_QA_PASS gate for this file (D14): reported as skipped, never as passed
+
   test.beforeAll(() => {
-    test.skip(!PASS, "Set SHO_QA_PASS (the shared password for the nakul17+ accounts).");
-    test.skip(!passwordOk(PASS), "SHO_QA_PASS must be at least 8 characters with a letter and a number.");
     login("ADMIN"); // no Super Admin login is a failure, not a skip: only SHO_QA_PASS gates the run
   });
 
   // qa:TC missing
   test("AC1: an unused link under 24 hours old verifies the account once, and a second use fails qa:TC missing", { annotation: { type: "qa:TC", description: "qa:TC missing" } }, async ({ anon, admin, later }) => {
-    needPass();
     const email = alias("2475", "ac1", "aplyd.com");
     const signed = await signUp(anon.request, zz("ac1"), email);
     expect(signed.status, signed.body).toBe(201);
@@ -41,7 +35,8 @@ test.describe("SHO-US-1.2 / APL-2475 qa:TC missing", () => {
   });
 
   // qa:TC missing
-  test("AC2: an unknown, expired or used link shows the Link expired screen with a way to get a new one, and verifies nobody qa:TC missing", { annotation: { type: "qa:TC", description: "qa:TC missing" } }, async ({ anon }) => {
+  test("AC2: an unknown or missing link shows the Link expired screen with a way to get a new one, and verifies nobody qa:TC missing", { annotation: { type: "qa:TC", description: "qa:TC missing" } }, async ({ anon }) => {
+    // The expired (over 24 h) case is checked server-side in tests/apl-2703-auth-server.test.ts (D17).
     const bogus = "x".repeat(40);
     const api = await anon.request.post("/api/auth/verify", { data: { token: bogus } });
     expect(api.status()).toBe(400);
@@ -61,7 +56,6 @@ test.describe("SHO-US-1.2 / APL-2475 qa:TC missing", () => {
 
   // qa:TC missing
   test("AC3: asking for a new link emails a new one and kills every earlier link qa:TC missing", { annotation: { type: "qa:TC", description: "qa:TC missing" } }, async ({ anon, admin, later }) => {
-    needPass();
     const email = alias("2475", "ac3", "aplyd.com");
     expect((await signUp(anon.request, zz("ac3"), email)).status).toBe(201);
     const first = await waitForSinkMail(email, "Verify");
@@ -82,7 +76,6 @@ test.describe("SHO-US-1.2 / APL-2475 qa:TC missing", () => {
 
   // qa:TC missing
   test("AC4: the resend answer is the same for an unknown address and for a verified one, so it reveals nothing qa:TC missing", { annotation: { type: "qa:TC", description: "qa:TC missing" } }, async ({ anon, admin, later }) => {
-    needPass();
     const email = alias("2475", "ac4-known", "aplyd.com");
     expect((await signUp(anon.request, zz("ac4"), email)).status).toBe(201);
     const token = (await waitForSinkMail(email, "Verify")).token;
@@ -107,7 +100,6 @@ test.describe("SHO-US-1.2 / APL-2475 qa:TC missing", () => {
 
   // qa:TC missing
   test("AC4 (limit): the 4th request in an hour sends no email for a real unverified account qa:TC missing", { annotation: { type: "qa:TC", description: "qa:TC missing" } }, async ({ anon, admin, later }) => {
-    needPass();
     const email = alias("2475", "ac4-limit", "aplyd.com");
     expect((await signUp(anon.request, zz("limit"), email)).status).toBe(201);
     await waitForSinkMail(email, "Verify");

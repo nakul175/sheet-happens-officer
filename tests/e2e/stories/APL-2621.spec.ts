@@ -6,7 +6,7 @@
 import { existsSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { test, expect, RUN, BASE_URL, login } from "../support";
-import { mailedPassword, waitForSinkMail, PASS, passwordOk } from "./qa";
+import { mailedPassword, waitForSinkMail, QA_READY, QA_SKIPPED } from "./qa";
 
 const SLOW = { timeout: 90_000 };
 const email = (label: string) => `zz-test-${RUN}-${label}@example.invalid`;
@@ -27,9 +27,9 @@ async function blockLocalOutbox(): Promise<() => void> {
 }
 
 test.describe("SHO-US-23.2 / APL-2621 qa:TC missing", () => {
+  test.skip(!QA_READY, QA_SKIPPED); // the one SHO_QA_PASS gate for this file (D14): reported as skipped, never as passed
+
   test.beforeAll(() => {
-    test.skip(!PASS, "Set SHO_QA_PASS (the shared password for the nakul17+ accounts).");
-    test.skip(!passwordOk(PASS), "SHO_QA_PASS must be at least 8 characters with a letter and a number.");
     login("ADMIN"); // no Super Admin login is a failure, not a skip: only SHO_QA_PASS gates the run
     login("MEMBER"); // the same for the Member login, so the member fixture never skips silently (D11)
   });
@@ -107,7 +107,7 @@ test.describe("SHO-US-23.2 / APL-2621 qa:TC missing", () => {
   });
 
   // qa:TC missing
-  test("AC4 (password): the password is random and stored only as a hash qa:TC missing", { annotation: { type: "qa:TC", description: "qa:TC missing" } }, async ({ admin, later }) => {
+  test("AC4 (password): the password is random, works once emailed, and is never echoed back qa:TC missing", { annotation: { type: "qa:TC", description: "qa:TC missing" } }, async ({ admin, later }) => {
     const make = async (label: string) => {
       const addr = email(label);
       const r = await admin.api.post("/api/team", { firstName: "ZZ-TEST", lastName: `${label} ${RUN}`, email: addr, role: "MEMBER" });
@@ -135,6 +135,7 @@ test.describe("SHO-US-23.2 / APL-2621 qa:TC missing", () => {
       expect(r.status(), "the emailed password works, so a verifier was stored").toBe(200);
       expect((await r.text()).includes(passA)).toBe(false);
     } finally { await signed.dispose(); }
+    // "Stored only as a hash" is checked server-side in tests/apl-2703-auth-server.test.ts (D16).
   });
 
   // qa:TC missing

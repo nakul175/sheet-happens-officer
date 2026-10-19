@@ -2,18 +2,13 @@
 // Reset links are read from the test mail sink. Accounts use nakul17+ aliases and are deactivated afterwards.
 import type { Page } from "@playwright/test";
 import { test, expect, RUN, login } from "../support";
-import { PASS, passwordOk, alias, zz, nextPass, signUp, personByEmail, deactivate, waitForSinkMail, matchingMails, signInAs } from "./qa";
+import { PASS, alias, zz, nextPass, signUp, personByEmail, deactivate, waitForSinkMail, matchingMails, signInAs, QA_READY, QA_SKIPPED } from "./qa";
 
 const alertOf = (p: Page) => p.locator('[role="alert"]:not(#__next-route-announcer__)');
 const DOMAIN_MESSAGE = "Use your @aplyd.com or @athenainfonomics.com email address.";
 const PASSWORD_MESSAGE = "Use at least 8 characters, with at least one letter and one number.";
 const ghost = (tag: string) => `zz-test-${RUN}-${tag}@aplyd.com`; // no account, so no email is ever sent
 const token = "t".repeat(40); // long enough to pass the format check, never a real token
-
-function needPass() {
-  test.skip(!PASS, "Set SHO_QA_PASS (the shared password for the nakul17+ accounts).");
-  test.skip(!passwordOk(PASS), "SHO_QA_PASS must be at least 8 characters with a letter and a number.");
-}
 
 async function verified(anon: { request: import("@playwright/test").APIRequestContext }, admin: { api: import("../support").Api }, later: (fn: () => Promise<unknown>) => void, tag: string) {
   const email = alias("2477", tag, "aplyd.com");
@@ -26,9 +21,9 @@ async function verified(anon: { request: import("@playwright/test").APIRequestCo
 }
 
 test.describe("SHO-US-1.4 / APL-2477 qa:TC missing", () => {
+  test.skip(!QA_READY, QA_SKIPPED); // the one SHO_QA_PASS gate for this file (D14): reported as skipped, never as passed
+
   test.beforeAll(() => {
-    test.skip(!PASS, "Set SHO_QA_PASS (the shared password for the nakul17+ accounts).");
-    test.skip(!passwordOk(PASS), "SHO_QA_PASS must be at least 8 characters with a letter and a number.");
     login("ADMIN"); // no Super Admin login is a failure, not a skip: only SHO_QA_PASS gates the run
   });
 
@@ -48,7 +43,6 @@ test.describe("SHO-US-1.4 / APL-2477 qa:TC missing", () => {
 
   // qa:TC missing
   test("AC1 (link sent only if an account exists): a reset email arrives for a real account and none for an unknown one qa:TC missing", { annotation: { type: "qa:TC", description: "qa:TC missing" } }, async ({ anon, admin, later }) => {
-    needPass();
     const email = await verified(anon, admin, later, "ac1");
     const unknown = ghost("ac1-none");
     const none = await anon.request.post("/api/auth/forgot-password", { data: { email: unknown } });
@@ -64,7 +58,6 @@ test.describe("SHO-US-1.4 / APL-2477 qa:TC missing", () => {
 
   // qa:TC missing
   test("AC2: a valid link plus a good password changes the password, ends other sessions, and the link works once qa:TC missing", { annotation: { type: "qa:TC", description: "qa:TC missing" } }, async ({ anon, admin, browser, later }) => {
-    needPass();
     const email = await verified(anon, admin, later, "ac2");
     const here = await signInAs(browser, email, PASS);
     const other = await signInAs(browser, email, PASS);
@@ -139,7 +132,6 @@ test.describe("SHO-US-1.4 / APL-2477 qa:TC missing", () => {
 
   // qa:TC missing
   test("AC5 (limit): the 4th request in an hour sends no email for a real account qa:TC missing", { annotation: { type: "qa:TC", description: "qa:TC missing" } }, async ({ anon, admin, later }) => {
-    needPass();
     const email = await verified(anon, admin, later, "ac5");
     let previous = "";
     for (let i = 0; i < 3; i++) {
@@ -157,7 +149,6 @@ test.describe("SHO-US-1.4 / APL-2477 qa:TC missing", () => {
 
   // qa:TC missing
   test("AC6: after a reset, a locked-out person can sign in at once with the new password qa:TC missing", { annotation: { type: "qa:TC", description: "qa:TC missing" } }, async ({ anon, admin, later }) => {
-    needPass();
     const email = await verified(anon, admin, later, "ac6");
     for (let i = 0; i < 5; i++) {
       expect((await anon.request.post("/api/auth/signin", { data: { email, password: `wrong-pass-${i}9` } })).status()).toBe(401);

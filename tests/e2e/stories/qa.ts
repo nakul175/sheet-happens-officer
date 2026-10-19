@@ -16,6 +16,17 @@ export function passwordOk(pass: string) {
   return pass.length >= 8 && pass.length <= 128 && /[A-Za-z]/.test(pass) && /[0-9]/.test(pass);
 }
 
+/**
+ * The one SHO_QA_PASS gate. Each story file calls `test.skip(!QA_READY, QA_SKIPPED)` once, at describe level.
+ * Without a valid SHO_QA_PASS every test in the file is reported as skipped with this reason, never as passed,
+ * and the run prints the warning below, so a green-looking run without the secret is visible as "did not run".
+ */
+export const QA_READY = passwordOk(PASS);
+export const QA_SKIPPED = PASS
+  ? "SKIPPED, NOT PASSED: SHO_QA_PASS must be 8-128 characters with a letter and a number, so this story spec did not run."
+  : "SKIPPED, NOT PASSED: SHO_QA_PASS is not set, so this story spec did not run. Set it to the shared nakul17+ password.";
+if (!QA_READY) console.warn(`[story specs] ${QA_SKIPPED}`);
+
 /** A second password derived at runtime, so the file never contains a password literal. */
 export function nextPass(current: string) {
   let n = current.slice(1) + current.slice(0, 1);

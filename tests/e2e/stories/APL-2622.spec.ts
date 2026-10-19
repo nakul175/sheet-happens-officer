@@ -1,7 +1,7 @@
 // SHO-US-23.3 New person gets sign-in details by email (APL-2622). Acceptance criteria AC1 to AC5.
 // The emailed password is read from the test mail sink. People are ZZ-TEST names at an .invalid address and are deactivated afterwards.
 import { test, expect, RUN, BASE_URL, login, type Json } from "../support";
-import { mailedPassword, nextPass, waitForSinkMail, signInAs, PASS, passwordOk } from "./qa";
+import { mailedPassword, nextPass, waitForSinkMail, signInAs, QA_READY, QA_SKIPPED } from "./qa";
 
 const mk = async (admin: { api: { post: (p: string, b?: unknown) => Promise<{ status: number; json: Json }>; get: (p: string) => Promise<{ status: number; json: Json }> } }, later: (f: () => Promise<unknown>) => void, label: string) => {
   const r = await admin.api.post("/api/team", { firstName: "ZZ-TEST", lastName: `${label} ${RUN}`, email: `zz-test-${RUN}-${label}@example.invalid`, role: "MEMBER" });
@@ -12,9 +12,9 @@ const mk = async (admin: { api: { post: (p: string, b?: unknown) => Promise<{ st
 };
 
 test.describe("SHO-US-23.3 / APL-2622 qa:TC missing", () => {
+  test.skip(!QA_READY, QA_SKIPPED); // the one SHO_QA_PASS gate for this file (D14): reported as skipped, never as passed
+
   test.beforeAll(() => {
-    test.skip(!PASS, "Set SHO_QA_PASS (the shared password for the nakul17+ accounts).");
-    test.skip(!passwordOk(PASS), "SHO_QA_PASS must be at least 8 characters with a letter and a number.");
     login("ADMIN"); // no Super Admin login is a failure, not a skip: only SHO_QA_PASS gates the run
     login("MEMBER"); // the same for the Member login, so the member fixture never skips silently (D11)
   });
