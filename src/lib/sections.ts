@@ -77,6 +77,7 @@ export async function updateSection(
       // Cascaded subtasks reopen with the parent. A subtask ticked on its own, and any parent in Trash, stay as they are (APL-2721).
       let reopenedSubtaskIds: string[] = [];
       if (old) {
+        // A done task in Trash is not reopened and gets no task.reopened row (APL-2721, APL-2755).
         const parents = await tx.task.findMany({
           where: { sectionId: old.id, parentId: null, completedAt: { not: null }, deletedAt: null },
           select: { id: true, completedAt: true },
