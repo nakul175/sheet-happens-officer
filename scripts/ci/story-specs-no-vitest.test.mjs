@@ -44,7 +44,7 @@ export function vitestChain(file, seen = new Set()) {
   return null;
 }
 
-test("specifiers finds static, dynamic, side-effect and require imports", () => {
+test("specifiers finds static, dynamic, side-effect and require imports qa:TC missing", () => {
   const src = [
     'import { a } from "vitest";',
     'import type { B } from "../../helpers";',
@@ -55,7 +55,7 @@ test("specifiers finds static, dynamic, side-effect and require imports", () => 
   assert.deepEqual(specifiers(src), ["vitest", "../../helpers", "./side", "./lazy", "vitest/config"]);
 });
 
-test("no story spec under tests/e2e/stories reaches vitest", () => {
+test("no story spec under tests/e2e/stories reaches vitest qa:TC missing", () => {
   const files = readdirSync(STORIES).filter((f) => /\.(spec|test)\.[cm]?[jt]sx?$/.test(f));
   assert.ok(files.length > 0, "tests/e2e/stories has no spec files");
   const bad = [];
