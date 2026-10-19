@@ -34,20 +34,20 @@ export async function createView(user: Actor, projectId: string, input: z.infer<
 }
 
 /** Someone else's view is reported as missing, never as forbidden. */
-async function own(user: Actor, id: string) {
+export async function ownView(user: Actor, id: string) {
   const v = await db.savedView.findFirst({ where: { id, userId: user.id } });
   if (!v) throw notFound("View");
   return v;
 }
 
 export async function renameView(user: Actor, id: string, name: string) {
-  const v = await own(user, id);
+  const v = await ownView(user, id);
   const clash = await db.savedView.findFirst({ where: { userId: user.id, projectId: v.projectId, name: { equals: name, mode: "insensitive" }, id: { not: id } } });
   if (clash) throw new ApiError(409, "You already have a view with that name.");
   return present(await db.savedView.update({ where: { id }, data: { name } }));
 }
 
 export async function deleteView(user: Actor, id: string) {
-  await own(user, id);
+  await ownView(user, id);
   await db.savedView.delete({ where: { id } });
 }
