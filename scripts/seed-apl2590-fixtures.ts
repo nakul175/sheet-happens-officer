@@ -2,26 +2,42 @@
 // Idempotent (upserts on fixed ids / unique emails). Touches only ZZ-TEST rows. Never prints a secret.
 //
 // Run:  SEED_TARGET=test|staging SHO_QA_PASS=<shared nakul17+ password> DATABASE_URL=... npx tsx scripts/seed-apl2590-fixtures.ts
-// Refuses: any target not explicitly test/staging, NODE_ENV=production, prod hosts, prod-like DB names, and DBs whose name is not allow-listed.
+// Refuses: any target not explicitly test/staging, NODE_ENV=production, prod hosts, prod-like DB names, URL overrides
+// (?host=, ?hostaddr=, ?dbname=) and sockets, and any host + DB name pair that is not on the allowlist (APL-2590 D2).
 import { randomBytes, scryptSync } from "node:crypto";
+import { parse } from "pg-connection-string";
 import { PrismaClient } from "../src/generated/prisma/client";
 
 const PROD_HOSTS = ["139.59.45.166", "sho.139-59-45-166.sslip.io", "168.144.144.69", "app.sheethappensofficer.com"];
 const ALLOWED_DB: Record<string, string[]> = { test: ["sho_test"], staging: ["sho_staging"] };
+const LOCAL_HOSTS = ["localhost", "127.0.0.1", "::1"];
+/**
+ * The staging database hosts the seed may write to, matched exactly. Empty on purpose: the staging database shares
+ * its cluster with production (staging-e2e.yml), so a staging seed needs the exact host added here in a reviewed change.
+ */
+export const STAGING_DB_HOSTS: readonly string[] = [];
+const QUERY_OVERRIDES = new Set(["host", "hostaddr", "dbname"]);
 
-export function guard(env: Record<string, string | undefined> = process.env): string {
+export function guard(env: Record<string, string | undefined> = process.env, stagingHosts: readonly string[] = STAGING_DB_HOSTS): string {
   if (env.NODE_ENV === "production") throw new Error("NODE_ENV=production. Refusing.");
   const target = env.SEED_TARGET ?? "";
   if (!(target in ALLOWED_DB)) throw new Error("Set SEED_TARGET=test or staging. Refusing.");
   const raw = env.DATABASE_URL ?? "";
   let u: URL;
   try { u = new URL(raw); } catch { throw new Error("DATABASE_URL missing or invalid. Refusing."); }
-  const host = u.hostname.toLowerCase();
-  const dbName = u.pathname.replace(/^\//, "").toLowerCase();
+  // A query override or a socket moves the connection after the host and DB name below are read.
+  if ([...u.searchParams.keys()].some((k) => QUERY_OVERRIDES.has(k.toLowerCase()))) throw new Error("DATABASE_URL overrides the host or DB name in its query. Refusing.");
+  let parsed: ReturnType<typeof parse>;
+  try { parsed = parse(raw); } catch { throw new Error("DATABASE_URL missing or invalid. Refusing."); }
+  const host = (parsed.host ?? "").toLowerCase().replace(/^\[|\]$/g, "").replace(/\.$/, "");
+  const dbName = (parsed.database ?? "").toLowerCase();
+  if (!host || host.includes("/") || host.includes("\\")) throw new Error("DATABASE_URL must name a TCP host, not a socket. Refusing.");
   if (PROD_HOSTS.includes(host) || /prod/.test(host) || /prod|defaultdb/.test(dbName) || /prod/.test(u.username))
     throw new Error("Production-like target. Refusing.");
   if (!ALLOWED_DB[target].includes(dbName)) throw new Error(`DB "${dbName}" is not an allowed ${target} DB. Refusing.`);
-  if (target === "test" && !["localhost", "127.0.0.1", "::1"].includes(host)) throw new Error("Test target must be local. Refusing.");
+  if (target === "test" && !LOCAL_HOSTS.includes(host)) throw new Error("Test target must be local. Refusing.");
+  if (target === "staging" && !stagingHosts.map((h) => h.toLowerCase()).includes(host))
+    throw new Error(`Host "${host}" is not an allowed staging DB host. Refusing.`);
   return target;
 }
 
