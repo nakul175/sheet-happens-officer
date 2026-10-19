@@ -29,13 +29,15 @@ const named = (p: Pipe, name: string) => p.stages.find((s) => s.name === name)!;
 /** A ZZ-TEST stage at the end of the Proactive pipeline, removed in afterAll if a test left it. */
 async function zzStage(category: "ACTIVE" | "DONE" = "ACTIVE") {
   const id = `st_zz_2736_${RUN}_${seq++}`;
+  // The one direct write: the product has no API that creates a stage (stages are migration-only), so the ZZ-TEST
+  // stage is inserted here. It is removed through DELETE /api/deals/pipelines/:id in afterAll.
   await db.stage.create({ data: { id, pipelineId: pro.id, name: `ZZ-TEST stage ${id}`, position: 100 + seq, category, requiredFields: [] } });
   zzStages.push(id);
   return id;
 }
 
-/** A deal led by the Super Admin, placed in `stageId`. */
-async function dealIn(stageId: string) {
+/** A deal led by the Super Admin, moved to `stageId` (with `reason`, if given) through the stage-move API. */
+async function dealIn(stageId: string, reason?: string) {
   const org = (await sa.c.post("/api/orgs", { name: `ZZ-TEST Org 2736 ${RUN}-${seq++}` })).json.organisation.id as string;
   zzOrgs.push(org);
   const r = await sa.c.post("/api/deals", {
@@ -45,7 +47,10 @@ async function dealIn(stageId: string) {
   expect(r.status, JSON.stringify(r.json)).toBe(201);
   const id = r.json.deal.id as string;
   zzDeals.push(id);
-  await db.project.update({ where: { id }, data: { stageId } });
+  if (stageId !== named(pro, "Lead").id || reason) {
+    const m = await sa.c.post(`/api/projects/${id}/stage`, { stageId, ...(reason ? { reason } : {}) });
+    expect(m.status, JSON.stringify(m.json)).toBe(200);
+  }
   return id;
 }
 const stageOf = async (dealId: string) => (await db.project.findUniqueOrThrow({ where: { id: dealId } })).stageId;
@@ -103,8 +108,8 @@ describe("qa:TC missing APL-2736 removing a stage asks where its items go", () =
 
   it("qa:TC missing AC1: once another stage is chosen, the items move there and the stage is removed", async () => {
     const zz = await zzStage();
-    const deal = await dealIn(zz);
-    await db.project.update({ where: { id: deal }, data: { stageReason: "ZZ-TEST reason for the removed stage" } });
+    const deal = await dealIn(zz, "ZZ-TEST reason for the removed stage");
+    expect((await db.project.findUniqueOrThrow({ where: { id: deal } })).stageReason).toBe("ZZ-TEST reason for the removed stage");
     const proposal = named(pro, "Proposal");
     const r = await sa.c.del(`/api/deals/pipelines/${zz}?moveTo=${proposal.id}`);
     expect(r.status, JSON.stringify(r.json)).toBe(200);
