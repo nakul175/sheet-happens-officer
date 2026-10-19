@@ -1,5 +1,5 @@
-// Reads the font names out of a WOFF2 file, so a spec can check which typeface a page really loads
-// instead of the CSS family alias (next/font/local names the face after the variable, e.g. "publicSans").
+// Reads the family names out of a WOFF2 file's name table, so a spec can check which typeface a page really
+// loads instead of the CSS family alias (next/font/local names the face after the variable, e.g. "publicSans").
 import { brotliDecompressSync } from "node:zlib";
 
 function base128(buf: Buffer, at: number): [number, number] {
@@ -12,29 +12,54 @@ function base128(buf: Buffer, at: number): [number, number] {
   throw new Error("Bad UIntBase128 in the WOFF2 table directory.");
 }
 
-/** The decompressed font tables of a WOFF2 file. */
-function tables(buf: Buffer): Buffer {
+/** The name table's bytes. The decompressed stream holds the tables back to back, in directory order. */
+function nameTable(buf: Buffer): Buffer {
   if (buf.toString("latin1", 0, 4) !== "wOF2") throw new Error("Not a WOFF2 file.");
   if (buf.toString("latin1", 4, 8) === "ttcf") throw new Error("WOFF2 font collections are not read here.");
   const numTables = buf.readUInt16BE(12);
   const compressed = buf.readUInt32BE(20);
   let at = 48;
+  let offset = 0;
+  let found: [number, number] | null = null;
   for (let i = 0; i < numTables; i++) {
     const flags = buf[at++];
     const tag = flags & 0x3f;
+    const name = tag === 63 ? buf.toString("latin1", at, at + 4) : null;
     if (tag === 63) at += 4;
     const version = (flags >> 6) & 3;
-    [, at] = base128(buf, at);
+    let length: number;
+    [length, at] = base128(buf, at);
     // glyf (10) and loca (11) are untransformed at version 3; every other table at version 0.
     const transformed = tag === 10 || tag === 11 ? version !== 3 : version !== 0;
-    if (transformed) [, at] = base128(buf, at);
+    if (transformed) [length, at] = base128(buf, at);
+    // Known tag 5 is "name" (WOFF2 spec, Known Table Tags).
+    if (tag === 5 || name === "name") found = [offset, length];
+    offset += length;
   }
-  return brotliDecompressSync(buf.subarray(at, at + compressed));
+  if (!found) throw new Error("The WOFF2 file has no name table.");
+  const data = brotliDecompressSync(buf.subarray(at, at + compressed));
+  return data.subarray(found[0], found[0] + found[1]);
 }
 
-/** True when the font's name table carries `name` (UTF-16BE, as Windows and Unicode name records store it, or Mac Roman). */
+/** Family names (name IDs 1 and 16) from the font's name table. */
+export function woff2Families(buf: Buffer): string[] {
+  const table = nameTable(buf);
+  const count = table.readUInt16BE(2);
+  const strings = table.readUInt16BE(4);
+  const out = new Set<string>();
+  for (let i = 0; i < count; i++) {
+    const rec = 6 + i * 12;
+    const platform = table.readUInt16BE(rec);
+    const nameId = table.readUInt16BE(rec + 6);
+    if (nameId !== 1 && nameId !== 16) continue;
+    const bytes = table.subarray(strings + table.readUInt16BE(rec + 10), strings + table.readUInt16BE(rec + 10) + table.readUInt16BE(rec + 8));
+    // Unicode (0) and Windows (3) records are UTF-16BE; Mac (1) records are single-byte.
+    out.add(platform === 1 ? bytes.toString("latin1") : Buffer.from(bytes).swap16().toString("utf16le"));
+  }
+  return [...out];
+}
+
+/** True when the font's family name (name ID 1 or 16) is exactly `name`. */
 export function woff2HasName(buf: Buffer, name: string): boolean {
-  const data = tables(buf);
-  const utf16be = Buffer.from(name, "utf16le").swap16();
-  return data.includes(utf16be) || data.includes(Buffer.from(name, "latin1"));
+  return woff2Families(buf).includes(name);
 }

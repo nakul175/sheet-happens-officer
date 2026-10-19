@@ -11,22 +11,35 @@ import type { Locator } from "@playwright/test";
  *   same z-index. It covers the bottom of a full-screen dialog, so Save and a low checkbox never receive the click.
  *
  * Scroll the control to the centre, then click a point that elementFromPoint says is the control and
- * that sits above the tab bar.
+ * that sits above the tab bar. The tab bar is found by its landmark (the phone `nav` named "Main",
+ * Shell.tsx; the sidebar's nav has no name) and the scroller by its overflow, not by CSS class.
  */
 async function pointOn(locator: Locator): Promise<{ x: number; y: number }> {
   const point = await locator.evaluate((el) => {
     const barLimit = () => {
-      const bar = document.querySelector(".tabbar-wrap");
-      if (!bar || getComputedStyle(bar).display === "none") return window.innerHeight;
+      const nav = document.querySelector('nav[aria-label="Main"]');
+      if (!nav || !nav.getClientRects().length) return window.innerHeight;
+      // The fixed box that holds the tab bar can be taller than the nav itself.
+      let bar: Element = nav;
+      for (let up = nav.parentElement; up && up !== document.body; up = up.parentElement) {
+        if (getComputedStyle(up).position === "fixed") { bar = up; break; }
+      }
       const box = bar.getBoundingClientRect();
       return box.height > 1 ? box.top - 2 : window.innerHeight;
+    };
+    const scroller = () => {
+      for (let up = el.parentElement; up && up !== document.body; up = up.parentElement) {
+        const y = getComputedStyle(up).overflowY;
+        if ((y === "auto" || y === "scroll") && up.scrollHeight > up.clientHeight) return up;
+      }
+      return null;
     };
     const lift = () => {
       const limit = barLimit();
       const rect = el.getBoundingClientRect();
       if (rect.bottom <= limit) return;
-      const scroller = el.closest(".scrim, .panel");
-      if (scroller instanceof HTMLElement) scroller.scrollTop += rect.bottom - limit + 8;
+      const box = scroller();
+      if (box) box.scrollTop += rect.bottom - limit + 8;
     };
     el.scrollIntoView({ block: "center", inline: "center", behavior: "auto" });
     lift();

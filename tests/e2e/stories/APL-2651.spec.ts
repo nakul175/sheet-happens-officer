@@ -167,7 +167,8 @@ test.afterAll(async () => {
   // Reading .request or .ctx on that account throws TypeError and hides the real failure.
   // AC3 is the last test, so the hook error is reported on it.
   if (projectId && sa?.request) await send(sa.request, "POST", `/api/projects/${projectId}/archive`).catch(() => undefined);
-  if (orgId && sa?.request) await send(sa.request, "POST", `/api/orgs/${orgId}/archive`).catch(() => undefined);
+  // The archive route needs { archive: true } (src/lib/schemas.ts orgArchive); without it the org stays live.
+  if (orgId && sa?.request) await send(sa.request, "POST", `/api/orgs/${orgId}/archive`, { archive: true }).catch(() => undefined);
   if (lead?.request) await send(lead.request, "DELETE", "/api/concierge/messages").catch(() => undefined);
   await Promise.all(
     [sa, lead, editor, viewer, outsider, orgAdmin]
