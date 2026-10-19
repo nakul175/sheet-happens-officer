@@ -8,6 +8,7 @@ import { WORKSTREAM_DEAL, requireCrm } from "@/lib/crm";
 import { formatDueDate, parseDueDate } from "@/lib/dates";
 import { logAction } from "@/lib/notify";
 import { assertNoCycle, orgOf } from "@/lib/orgs";
+import { taskAccess } from "@/lib/tasks";
 import { UNDO_LABELS, isTooOldToUndo, isUndoable } from "@/lib/undoable";
 
 const clean = (v: string | null | undefined) => (v?.trim() ? v.trim() : null);
@@ -35,6 +36,12 @@ async function contactOf(user: Actor, id: string, o: { removed?: boolean } = {})
 const canEditContact = (user: Actor, c: { createdById: string }) => isAdmin(user) || c.createdById === user.id;
 function requireContactEdit(user: Actor, c: { createdById: string }) {
   if (!canEditContact(user, c)) throw new ApiError(403, "Only the person who added this contact, or an Admin, can change it.");
+}
+
+/** Same visibility and edit checks updateContact runs, so a caller can refuse before reading the body. */
+export async function assertCanUpdateContact(user: Actor, id: string) {
+  requireCrm(user);
+  requireContactEdit(user, await contactOf(user, id));
 }
 
 async function knownByList(ids: string[] | undefined, user: Actor, workspaceId: string) {
@@ -202,7 +209,7 @@ export async function addTaskLink(user: Actor, taskId: string, input: { organisa
   requireCrm(user);
   const t = await db.task.findUnique({ where: { id: taskId } });
   if (!t || t.deletedAt) throw notFound("Task");
-  const a = await projectAccess(user, t.projectId, { write: true });
+  const a = await taskAccess(user, t.projectId, { write: true });
   requireWrite(a);
   if (!!input.organisationId === !!input.contactId) throw new ApiError(400, "Link either an organisation or a contact.");
   let label = "";
@@ -221,7 +228,7 @@ export async function removeTaskLink(user: Actor, taskId: string, linkId: string
   requireCrm(user);
   const t = await db.task.findUnique({ where: { id: taskId } });
   if (!t || t.deletedAt) throw notFound("Task");
-  const a = await projectAccess(user, t.projectId, { write: true });
+  const a = await taskAccess(user, t.projectId, { write: true });
   requireWrite(a);
   const l = await db.taskLink.findFirst({ where: { id: linkId, taskId } });
   if (!l) throw notFound("Link");

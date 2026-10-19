@@ -4,7 +4,7 @@
 # Input "specs": space-separated issue ids (APL-2481) or globs (APL-26*, tests/e2e/stories/APL-25*.spec.ts); empty runs every spec.
 # Secrets (repository settings): STAGING_USER, STAGING_PASS, SHO_QA_PASS, SHO_ADMIN_EMAIL, SHO_ADMIN_PASS, SHO_MEMBER_EMAIL,
 # SHO_MEMBER_PASS, and ZZ_TEST_01_EMAIL / ZZ_TEST_01_PASS ... ZZ_TEST_20_EMAIL / ZZ_TEST_20_PASS (01-05 Super Admins, 06-20 plain Members).
-# SHO_QA_PASS is the shared password for the nakul17+ story accounts. Story specs skip without it, and Playwright then exits 0.
+# SHO_QA_PASS is the shared password for the nakul17+ story accounts. Without it the harness gate (qa-alias gateFile) fails the spec.
 # The previews use the same STAGING_USER / STAGING_PASS basic-auth gate as staging.
 # They reach the jobs as environment variables only and are never echoed. Runs queue in one group so two never run at once.
 # This workflow is workflow_dispatch only. It does not run on pull_request or pull_request_target, so a fork cannot read these secrets.
@@ -21,6 +21,7 @@
 #               20 when the parallel matrix runs, plus 1 when serial specs were picked. Fewer files, a failed
 #               download, or a missing-report marker fails the job. It also fails when run is 0 or skipped equals total.
 #   report      merges every job's blob report into one HTML report.
+
 #
 # max_parallel: the staging database is shared with production and allows 25 connections. Do not raise it above 5 until NJ approves
 # a connection pool (PgBouncer) or a bigger database.
@@ -118,6 +119,11 @@ jobs:
           SPECS: ${{ inputs.specs }}
         run: |
           shopt -s nullglob
+          # APL-2883: Vitest story specs (npm test runs them) are never picked. The list is tests/e2e/vitest-specs.cjs, the same
+          # VITEST_SPECS playwright.config.ts ignores; a spec Playwright ignores would only end the run in "No tests found".
+          vitest_specs=$(node -e 'process.stdout.write(require("./tests/e2e/vitest-specs.cjs").vitestSpecFiles().join(" "))')
+          is_vitest() { [[ " $vitest_specs " == *" $(basename "$1") "* ]]; }
+          echo "Vitest story specs, never picked: ${vitest_specs:-none}"
           files=()
           read -ra toks <<< "$SPECS"   # split on spaces without expanding globs against the repo root
           for tok in "${toks[@]}"; do
@@ -132,16 +138,21 @@ jobs:
               pattern="tests/e2e/stories/$tok"
               [[ "$pattern" == *.ts ]] || pattern="$pattern.spec.ts"
             fi
-            matched=()
+            matched=(); vitest_hit=()
             for f in $pattern; do
-              [[ -f "$f" && "$f" == tests/e2e/stories/*.spec.ts ]] && matched+=("$f")
+              [[ -f "$f" && "$f" == tests/e2e/stories/*.spec.ts ]] || continue
+              if is_vitest "$f"; then vitest_hit+=("$f"); else matched+=("$f"); fi
             done
+            if [ ${#matched[@]} -eq 0 ] && [ ${#vitest_hit[@]} -gt 0 ]; then
+              echo "::error::$tok selects only Vitest story specs (${vitest_hit[*]}). npm test runs them; Playwright ignores them (VITEST_SPECS)."; exit 1
+            fi
             if [ ${#matched[@]} -eq 0 ]; then echo "::error::No spec file matches: $tok"; exit 1; fi
+            [ ${#vitest_hit[@]} -eq 0 ] || echo "$tok: left out Vitest story specs ${vitest_hit[*]}"
             files+=("${matched[@]}")
           done
           if [ ${#files[@]} -eq 0 ]; then
-            files=(tests/e2e/stories/*.spec.ts)
-            [ ${#files[@]} -gt 0 ] || { echo "::error::No spec files in tests/e2e/stories on this branch. Start the run from the branch with the specs (e.g. qa/story-e2e)."; exit 1; }
+            for f in tests/e2e/stories/*.spec.ts; do is_vitest "$f" || files+=("$f"); done
+            [ ${#files[@]} -gt 0 ] || { echo "::error::No Playwright spec files in tests/e2e/stories on this branch (Vitest specs are not picked). Start the run from the branch with the specs (e.g. qa/story-e2e)."; exit 1; }
           fi
           parallel=(); serial=()
           for f in $(printf '%s\n' "${files[@]}" | sort -u); do
@@ -164,7 +175,7 @@ jobs:
     timeout-minutes: 120
     strategy:
       fail-fast: false
-      max-parallel: ${{ inputs.max_parallel }}
+      max-parallel: ${{ fromJSON(inputs.max_parallel || '5') }}
       matrix:
         # nn picks the shard's own ZZ_TEST_NN account; peer is the partner of the other role (shard N with N+5, members with 01-05),
         # chosen so no two of any 5 consecutive shards share an account.
@@ -260,7 +271,8 @@ jobs:
           TRACE: ${{ inputs.trace }}
         run: |
           read -ra files <<< "$FILES"
-          npx playwright test --shard=${{ matrix.shard }}/20 --workers=1 --reporter=list,blob,json --trace="$TRACE" "${files[@]}"
+          # @static is a file-contains check. @manual cannot force a job failure on staging. Neither is a live pass.
+          npx playwright test --shard=${{ matrix.shard }}/20 --workers=1 --grep-invert "@static|@manual" --reporter=list,blob,json --trace="$TRACE" "${files[@]}"
 
       - name: Fail this shard when every test was skipped
         if: always()
@@ -343,7 +355,8 @@ jobs:
           TRACE: ${{ inputs.trace }}
         run: |
           read -ra files <<< "$FILES"
-          npx playwright test --workers=1 --reporter=list,blob,json --trace="$TRACE" "${files[@]}"
+          # @static is a file-contains check. @manual cannot force a job failure on staging. Neither is a live pass.
+          npx playwright test --workers=1 --grep-invert "@static|@manual" --reporter=list,blob,json --trace="$TRACE" "${files[@]}"
 
       - name: Fail the serial job when every test was skipped
         if: always()

@@ -276,19 +276,26 @@ describe.skipIf(!QA_PASS)("qa:TC missing APL-2742: unverified sign-in and verifi
 
   it("qa:TC missing AC6: when sending fails, Resend link from the sign-in refusal shows the exact neutral text, never 'We sent'", async () => {
     // QA D1: the sign-in refusal's resend used to land on /check-email saying "We sent a verification link".
+    // APL-2766: the behaviour is asserted first, so a red run fails on the landing and the notice, not on the refusal
+    // wording. The refusal is found by its "Resend link" button (present before and after the fix); its exact text,
+    // which AC1 owns, is read before the click and asserted last.
     const ctx = await tracedContext();
     const page = await ctx.newPage();
     const email = fresh();
     await signUp(page, FAILING, email);
     expect((await page.request.post(`${FAILING}/api/auth/signout`)).status()).toBe(204);
     await signIn(page, FAILING, email);
-    await expect.poll(() => main(page).getByRole("alert").getByText(UNVERIFIED_TEXT, { exact: true }).count()).toBe(1);
-    await main(page).getByRole("button", { name: "Resend link" }).click();
-    await page.waitForURL(/\/check-email\?resent=1$/);
+    const resend = main(page).getByRole("alert").getByRole("button", { name: "Resend link" });
+    await expect.poll(() => resend.count(), { message: "the sign-in refusal offers Resend link" }).toBe(1);
+    const refusalTextCount = await main(page).getByRole("alert").getByText(UNVERIFIED_TEXT, { exact: true }).count();
+    await resend.click();
+    await page.waitForURL((u) => u.pathname === "/check-email");
+    expect(new URL(page.url()).search, "the resend lands on /check-email?resent=1").toBe("?resent=1");
     await expect.poll(() => main(page).getByRole("status").textContent()).toBe(RESEND_TEXT);
     expect(await main(page).getByText(WE_SENT).count(), "the failed resend is never reported as sent").toBe(0);
     await expect.poll(() => resendResults(email)).toEqual(["FAILED"]);
     await page.screenshot({ path: `${SHOTS}/resent-failed.png` });
+    expect(refusalTextCount, "the sign-in refusal had the exact text").toBe(1);
     await ctx.close();
   }, 60_000);
 
