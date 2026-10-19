@@ -83,9 +83,16 @@ export async function updateSection(
         });
         reopened = parents.map((x) => x.id);
         reopenedSubtaskIds = await cascadedSubtaskIds(tx, projectId, parents);
+        const subs = reopenedSubtaskIds.length
+          ? await tx.task.findMany({ where: { id: { in: reopenedSubtaskIds } }, select: { id: true, completedAt: true } })
+          : [];
         await tx.section.update({ where: { id: old.id }, data: { isDone: false } });
         const opening = [...reopened, ...reopenedSubtaskIds];
         if (opening.length) await tx.task.updateMany({ where: { id: { in: opening } }, data: { completedAt: null } });
+        // One row per task that reopened, as the complete path below writes per task that closed (APL-2679).
+        for (const t of [...parents, ...subs]) {
+          await logAction(tx, { actorId: user.id, projectId, targetType: "task", targetId: t.id, action: "task.reopened", before: { completedAt: t.completedAt!.toISOString() }, after: { completedAt: null, viaDoneSection: true }, primary: false });
+        }
       }
       const now = new Date();
       const completed = (await tx.task.findMany({ where: { sectionId: s.id, parentId: null, completedAt: null, deletedAt: null }, select: { id: true } })).map((x) => x.id);
