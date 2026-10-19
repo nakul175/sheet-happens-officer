@@ -3,9 +3,12 @@
 // Vitest suites that drive a local server belong in tests/e2e/local.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { dirname, join, relative, resolve } from "node:path";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { basename, dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+// The same list playwright.config.ts passes as testIgnore (APL-2879).
+import { VITEST_SPECS, vitestSpecFiles } from "../../tests/e2e/vitest-specs.cjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const STORIES = join(ROOT, "tests/e2e/stories");
@@ -55,26 +58,41 @@ test("specifiers finds static, dynamic, side-effect and require imports qa:TC mi
   assert.deepEqual(specifiers(src), ["vitest", "../../helpers", "./side", "./lazy", "vitest/config"]);
 });
 
-/** File names playwright.config.ts lists in testIgnore as "**\/<name>": Playwright never loads them (APL-2883 tracks them). */
-export function ignoredByPlaywright(configSource) {
-  const list = /testIgnore:\s*\[([^\]]*)\]/.exec(configSource)?.[1] ?? "";
-  return new Set([...list.matchAll(/["']\*\*\/([^"'/*]+)["']/g)].map((m) => m[1]));
+/** File names in the testIgnore list playwright.config.ts resolves (entries are "**\/stories/<name>"): Playwright never loads them. */
+export function ignoredByPlaywright(patterns = VITEST_SPECS) {
+  return new Set(patterns.map((p) => basename(p)));
 }
 
-test("ignoredByPlaywright reads the **/<file> entries of testIgnore qa:TC missing", () => {
-  const src = 'export default defineConfig({\n  testIgnore: [\n    "**/APL-1.spec.ts",\n    \'**/APL-2.spec.ts\',\n  ],\n  timeout: 1,\n});';
-  assert.deepEqual([...ignoredByPlaywright(src)], ["APL-1.spec.ts", "APL-2.spec.ts"]);
-  assert.deepEqual([...ignoredByPlaywright("export default defineConfig({ timeout: 1 });")], []);
+/** Spec files in `dir` that Playwright loads (not ignored) and that reach vitest, each as its import chain. */
+function loadedSpecsReachingVitest(dir, ignored) {
+  const files = readdirSync(dir).filter((f) => /\.(spec|test)\.[cm]?[jt]sx?$/.test(f) && !ignored.has(f));
+  assert.ok(files.length > 0, `${relative(ROOT, dir) || dir} has no spec files`);
+  const bad = [];
+  for (const f of files) {
+    const chain = vitestChain(join(dir, f));
+    if (chain) bad.push(chain.map((p) => relative(ROOT, p)).join(" -> ") + " -> vitest");
+  }
+  return bad;
+}
+
+test("the guard still catches a loaded story spec that reaches vitest through a helper qa:TC missing", () => {
+  const dir = mkdtempSync(join(tmpdir(), "story-specs-"));
+  try {
+    writeFileSync(join(dir, "APL-1.spec.ts"), 'import { it } from "vitest";\n');
+    writeFileSync(join(dir, "helper.ts"), 'import { expect } from "vitest";\nexport const x = expect;\n');
+    writeFileSync(join(dir, "APL-2.spec.ts"), 'import { x } from "./helper";\n');
+    writeFileSync(join(dir, "APL-3.spec.ts"), 'import { test } from "@playwright/test";\n');
+    const ignored = ignoredByPlaywright(vitestSpecFiles(dir).map((f) => `**/stories/${f}`));
+    assert.deepEqual([...ignored], ["APL-1.spec.ts"]);
+    const bad = loadedSpecsReachingVitest(dir, ignored);
+    assert.equal(bad.length, 1, bad.join("\n"));
+    assert.match(bad[0], /APL-2\.spec\.ts -> .*helper\.ts -> vitest$/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("no story spec Playwright loads from tests/e2e/stories reaches vitest qa:TC missing", () => {
-  const ignored = ignoredByPlaywright(readFileSync(join(ROOT, "playwright.config.ts"), "utf8"));
-  const files = readdirSync(STORIES).filter((f) => /\.(spec|test)\.[cm]?[jt]sx?$/.test(f) && !ignored.has(f));
-  assert.ok(files.length > 0, "tests/e2e/stories has no spec files");
-  const bad = [];
-  for (const f of files) {
-    const chain = vitestChain(join(STORIES, f));
-    if (chain) bad.push(chain.map((p) => relative(ROOT, p)).join(" -> ") + " -> vitest");
-  }
+  const bad = loadedSpecsReachingVitest(STORIES, ignoredByPlaywright());
   assert.deepEqual(bad, [], `Playwright would collect 0 tests. Move Vitest suites to tests/e2e/local:\n${bad.join("\n")}`);
 });
