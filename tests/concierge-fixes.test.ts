@@ -39,7 +39,7 @@ const due = async (id: string) => (await db.task.findUniqueOrThrow({ where: { id
 describe("claims (finding 1)", () => {
   useFakeModel();
 
-  it("two Confirm requests at once: one writes, the other is refused", async () => {
+  it("two Confirm requests at once: one writes, the other is refused qa:TC missing", async () => {
     const { lead, ids } = await setup(1);
     const c = await dueCard(lead);
     const r = await Promise.allSettled([confirmCard(actor(lead), c.id), confirmCard(actor(lead), c.id), confirmCard(actor(lead), c.id)]);
@@ -49,7 +49,7 @@ describe("claims (finding 1)", () => {
     expect(await db.chatMessage.count({ where: { userId: lead.id, content: { contains: '"kind":"result"' } } })).toBe(1);
   });
 
-  it("two Undo requests at once reverse each change once", async () => {
+  it("two Undo requests at once reverse each change once qa:TC missing", async () => {
     const { lead, ids } = await setup(2);
     const c = await dueCard(lead);
     await confirmCard(actor(lead), c.id);
@@ -60,7 +60,7 @@ describe("claims (finding 1)", () => {
     expect(await db.actionLog.count({ where: { actorId: lead.id, action: "undo" } })).toBe(2); // one per change, not four
   });
 
-  it("two taps on one choice answer it once", async () => {
+  it("two taps on one choice answer it once qa:TC missing", async () => {
     const lead = await account("lead");
     const p1 = await project(lead, lead);
     const a = await task(lead, p1.id, { title: "Dup", dueDate: "2031-03-20" });
@@ -73,7 +73,7 @@ describe("claims (finding 1)", () => {
     expect(await db.chatMessage.count({ where: { userId: lead.id, role: "USER", content: { contains: "fromChoice" } } })).toBe(1);
   });
 
-  it("the 80 percent notice is sent once even when many calls cross the line together", async () => {
+  it("the 80 percent notice is sent once even when many calls cross the line together qa:TC missing", async () => {
     const { lead } = await setup(0);
     const sa = await db.user.findFirstOrThrow({ where: { orgRole: "SUPER_ADMIN" } });
     await db.notification.deleteMany({ where: { type: "CONCIERGE_BUDGET_80" } });

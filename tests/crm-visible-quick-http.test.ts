@@ -43,7 +43,7 @@ describe.skipIf(!built)("POST /api/concierge/quick/:id with a hidden deal, over 
   // npx runs next as its own child: stop the whole process group, or the port stays taken.
   afterAll(() => { for (const s of servers) try { process.kill(-s.pid!); } catch { /* already gone */ } });
 
-  it("never names the hidden deal to an Editor or a Viewer (admins, off) or to an Admin (off); an Admin under admins still sees it", async () => {
+  it("never names the hidden deal to an Editor or a Viewer (admins, off) or to an Admin (off); an Admin under admins still sees it qa:TC missing", async () => {
     const sa = await superAdmin();
     const ad = await admin(sa, "qhadmin");
     const lead = await account("qhlead");

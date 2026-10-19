@@ -48,7 +48,7 @@ describe("orientation", () => {
 describe("concierge quick action scoped to a project", () => {
   trackModelUsage();
 
-  it("answers for one project and refuses a project the person is not in", async () => {
+  it("answers for one project and refuses a project the person is not in qa:TC missing", async () => {
     const a = await account("qa1");
     const b = await account("qa2");
     const p1 = await project(a, a);

@@ -145,7 +145,7 @@ describe("caps and ledger (9.2)", () => {
     expect(nextMonthStartIST(last).toISOString()).toBe(first.toISOString());
   });
 
-  it("weekly cap: 'counted' rows only; quick actions never count; resets Monday 00:00 India time (AC2, AC5)", async () => {
+  it("weekly cap: 'counted' rows only; quick actions never count; resets Monday 00:00 India time (AC2, AC5) qa:TC missing", async () => {
     const u = await account("weekly");
     process.env.WEEKLY_MESSAGE_CAP = "3";
     script(() => [say("fine")]);
@@ -194,7 +194,7 @@ describe("caps and ledger (9.2)", () => {
     expect(await db.chatMessage.count({ where: { userId: u.id } })).toBe(2); // improve wrote nothing to the thread
   });
 
-  it("monthly ceiling: calls stop at the ceiling, the message says when it resumes on the 1st, screens and quick actions work (AC1)", async () => {
+  it("monthly ceiling: calls stop at the ceiling, the message says when it resumes on the 1st, screens and quick actions work (AC1) qa:TC missing", async () => {
     const u = await account("monthly");
     const lastSecond = istInstant(2031, 3, 31, 23, 59, 59);
     const before = await monthSpendUsd(lastSecond);
@@ -216,7 +216,7 @@ describe("caps and ledger (9.2)", () => {
     expect(await disabledFor(u.id, istInstant(2031, 4, 1, 0, 0, 0))).toBeNull();
   });
 
-  it("80 percent: one bell notice to the Super Admin per month with the figures (AC4)", async () => {
+  it("80 percent: one bell notice to the Super Admin per month with the figures (AC4) qa:TC missing", async () => {
     const sa = await superAdmin();
     const u = await account("ZZ-TEST eighty", `nakul17+zz-test-eighty-${Date.now()}@aplyd.com`);
     await db.notification.deleteMany({ where: { type: "CONCIERGE_BUDGET_80" } });
