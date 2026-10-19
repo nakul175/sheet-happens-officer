@@ -74,9 +74,14 @@ export async function updateSection(
       const old = await tx.section.findFirst({ where: { projectId, isDone: true } });
       let reopened: string[] = [];
       if (old) {
-        reopened = (await tx.task.findMany({ where: { sectionId: old.id, parentId: null, completedAt: { not: null } }, select: { id: true } })).map((x) => x.id);
+        const was = await tx.task.findMany({ where: { sectionId: old.id, parentId: null, completedAt: { not: null } }, select: { id: true, completedAt: true } });
+        reopened = was.map((x) => x.id);
         await tx.section.update({ where: { id: old.id }, data: { isDone: false } });
         await tx.task.updateMany({ where: { sectionId: old.id, parentId: null }, data: { completedAt: null } });
+        // One row per task that reopened, as the complete path below writes per task that closed (APL-2679).
+        for (const t of was) {
+          await logAction(tx, { actorId: user.id, projectId, targetType: "task", targetId: t.id, action: "task.reopened", before: { completedAt: t.completedAt!.toISOString() }, after: { completedAt: null, viaDoneSection: true }, primary: false });
+        }
       }
       const now = new Date();
       const completed = (await tx.task.findMany({ where: { sectionId: s.id, parentId: null, completedAt: null, deletedAt: null }, select: { id: true } })).map((x) => x.id);

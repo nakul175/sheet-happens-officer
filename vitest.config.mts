@@ -5,6 +5,7 @@ import { configDefaults, defineConfig } from "vitest/config";
 // The concierge tests also call src/lib directly (the "@/..." imports), with a fake model.
 // CRM_VISIBLE mode servers need a production build and one process per mode, so they stay out of `npm test`.
 // Run them with `npm run test:crm-modes` or `npm run test:stalled-modes`. CI runs the stalled-deal one after the build.
+// APL-2733.spec.ts is a Playwright story. Vitest's default include matches *.spec.ts, so it is excluded here.
 export default defineConfig({
   resolve: { alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) } },
   // scripts/** holds node:test files (assert-playwright-ran.test.mjs). Vitest's default
@@ -20,6 +21,7 @@ export default defineConfig({
       "tests/jobs-stalled-crm-server.test.ts",
       "e2e/**",
       "scripts/**",
+      "tests/e2e/stories/APL-2733.spec.ts",
     ],
   },
 });
