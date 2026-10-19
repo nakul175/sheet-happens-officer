@@ -1,6 +1,6 @@
 import { db } from "@/lib/db";
 import { ApiError, notFound } from "@/lib/http";
-import { activeMember, isActive, isAdmin, leaderId, type Actor } from "@/lib/access";
+import { activeMember, crmProjectWhere, crmVisible, isActive, isAdmin, leaderId, type Actor } from "@/lib/access";
 import { auditTx, notify } from "@/lib/notify";
 import { generatePassword, hashPassword, superAdminEmails } from "@/lib/auth";
 import { sendMail, signInDetailsMail } from "@/lib/email";
@@ -173,14 +173,21 @@ export async function resendSignIn(actor: Actor & { name?: string }, targetId: s
   return { emailSent };
 }
 
-/** SHO-US-15.4. Members see a name and shared projects. Admins see the rest. */
+/** SHO-US-15.4. Members see a name and shared projects. Admins see the rest.
+ *  A deal, its name and its tasks are CRM data: left out when this person cannot see the CRM (APL-2740).
+ *  When they can, the query is the same as before.
+ */
 export async function getPerson(actor: Actor, targetId: string) {
   const target = await db.user.findUnique({ where: { id: targetId } });
   const admin = isAdmin(actor);
   if (!target || (!admin && !isActive(target))) throw notFound("Person");
+  const seesCrm = crmVisible(actor);
   const mine = admin ? null : new Set((await db.projectMember.findMany({ where: { userId: actor.id }, select: { projectId: true } })).map((m) => m.projectId));
   const rows = await db.projectMember.findMany({
-    where: { userId: targetId, project: { archivedAt: null } },
+    where: {
+      userId: targetId,
+      project: seesCrm ? { archivedAt: null } : { AND: [{ archivedAt: null }, crmProjectWhere(actor)] },
+    },
     include: { project: { select: { id: true, name: true } } },
     orderBy: { project: { name: "asc" } },
   });
@@ -188,7 +195,14 @@ export async function getPerson(actor: Actor, targetId: string) {
   if (!admin) return { id: target.id, name: target.name, projects: shown.map((m) => ({ id: m.project.id, name: m.project.name })) };
   const open = await db.task.groupBy({
     by: ["projectId"],
-    where: { assigneeId: targetId, completedAt: null, deletedAt: null, parentId: null },
+    where: {
+      assigneeId: targetId,
+      completedAt: null,
+      deletedAt: null,
+      parentId: null,
+      // A hidden deal's tasks must not add to the open-task count.
+      ...(seesCrm ? {} : { project: crmProjectWhere(actor) }),
+    },
     _count: { _all: true },
   });
   const byProject = new Map(open.map((o) => [o.projectId, o._count._all]));
