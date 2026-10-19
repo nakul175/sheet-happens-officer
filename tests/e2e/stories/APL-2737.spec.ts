@@ -80,8 +80,8 @@ const metrics = (el: Locator) => el.evaluate((e) => {
   };
 });
 
-describe("@APL-2737 qa:TC missing a 300-character blocked reason is fully readable on a phone sheet", () => {
-  it("@APL-2737 @AC1 qa:TC missing at 320 px the title does not scroll sideways and the 300-character reason is not clipped vertically", async () => {
+describe("qa:TC missing APL-2737 a 300-character blocked reason is fully readable on a phone sheet", () => {
+  it("qa:TC missing AC1: at 320 px the title does not scroll sideways and the 300-character reason is not clipped vertically", async () => {
     expect(TITLE).toHaveLength(150);
     expect(REASON).toHaveLength(300);
     const { page, dialog, reason } = await openSheet(320, SUPER_EMAIL);
@@ -103,7 +103,7 @@ describe("@APL-2737 qa:TC missing a 300-character blocked reason is fully readab
     } finally { await page.context().close(); }
   });
 
-  it("@APL-2737 @AC1 qa:TC missing the reason stays fully readable at the other phone widths and for a Viewer (read-only box)", async () => {
+  it("qa:TC missing AC1: the reason stays fully readable at the other phone widths and for a Viewer (read-only box)", async () => {
     for (const [width, email] of [[360, SUPER_EMAIL], [390, SUPER_EMAIL], [320, viewer!.email]] as const) {
       const { page, reason } = await openSheet(width, email);
       try {
@@ -115,7 +115,7 @@ describe("@APL-2737 qa:TC missing a 300-character blocked reason is fully readab
     }
   });
 
-  it("@APL-2737 @AC1 qa:TC missing typing the reason up to 300 characters grows the box with it, with no scrolling inside", async () => {
+  it("qa:TC missing AC1: typing the reason up to 300 characters grows the box with it, with no scrolling inside", async () => {
     const { page, reason } = await openSheet(320, SUPER_EMAIL);
     try {
       await reason.fill("");
@@ -132,7 +132,41 @@ describe("@APL-2737 qa:TC missing a 300-character blocked reason is fully readab
     } finally { await page.context().close(); }
   });
 
-  it("@APL-2737 @AC1 qa:TC missing after rotating from landscape to portrait the box is fitted again and the whole reason is still on screen", async () => {
+  it("qa:TC missing AC1: typing a multi-line reason grows the box on every line, pasting grows it again, and overflow-y is never hidden", async () => {
+    const { page, reason } = await openSheet(320, SUPER_EMAIL);
+    try {
+      await reason.fill("");
+      await reason.focus();
+      const lines = ["Waiting on legal sign-off", "Vendor sends the DPA Thursday", "Finance holds the invoice", "Regional lead is away"];
+      let previous = (await metrics(reason)).ch;
+      for (const [i, line] of lines.entries()) {
+        if (i > 0) await page.keyboard.press("Enter");
+        await page.keyboard.type(line);
+        const m = await metrics(reason);
+        expect(m.overflowY, `after typing line ${i + 1}`).not.toBe("hidden");
+        expect(m.sh, `line ${i + 1} clipped vertically`).toBeLessThanOrEqual(m.ch + 2);
+        if (i > 0) expect(m.ch, `the box grew for line ${i + 1}`).toBeGreaterThan(previous);
+        previous = m.ch;
+      }
+
+      // Paste three more lines with the keyboard shortcut, the way a person would.
+      const pasted = "\nPaste one\nPaste two\nPaste three";
+      await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+      await page.evaluate((text) => navigator.clipboard.writeText(text), pasted);
+      await reason.press("End");
+      await page.keyboard.press("ControlOrMeta+KeyV");
+      await expect.poll(async () => (await metrics(reason)).value).toBe(`${lines.join("\n")}${pasted}`);
+      const afterPaste = await metrics(reason);
+      expect(afterPaste.overflowY, "after paste").not.toBe("hidden");
+      expect(afterPaste.ch, "the box grew for the pasted lines").toBeGreaterThan(previous);
+      expect(afterPaste.sh, "pasted text clipped vertically").toBeLessThanOrEqual(afterPaste.ch + 2);
+
+      // Leave without saving: the reason on the task stays as it was.
+      await reason.fill(REASON);
+    } finally { await page.context().close(); }
+  });
+
+  it("qa:TC missing AC1: after rotating from landscape to portrait the box is fitted again and the whole reason is still on screen", async () => {
     // Opened in landscape (568 x 320), then rotated to portrait (320 x 568). The narrower box wraps to more lines.
     const { page, reason } = await openSheet(568, SUPER_EMAIL, 320);
     try {
@@ -150,7 +184,7 @@ describe("@APL-2737 qa:TC missing a 300-character blocked reason is fully readab
     } finally { await page.context().close(); }
   });
 
-  it("@APL-2737 @AC1 qa:TC missing the field stops at 300 characters, the limit the server accepts", async () => {
+  it("qa:TC missing AC1: the field stops at 300 characters, the limit the server accepts", async () => {
     const { page, reason } = await openSheet(320, SUPER_EMAIL);
     try {
       expect(await reason.getAttribute("maxlength")).toBe("300");
