@@ -5,22 +5,22 @@
 // the live 14.14 behaviour (Editor: own tasks only; Viewer: refused) and say so.
 // Data: every project and task is named "ZZ-TEST ..."; projects are archived afterwards.
 import { readFileSync } from "node:fs";
-import { test, expect, zz } from "../support";
+import { test, expect, zz, type Who } from "../support";
 import { patchCurrent } from "../helpers/jim-http";
 
-async function proj(admin: any, label: string, later: (f: () => Promise<unknown>) => void, leaderId?: string) {
+async function proj(admin: Who, label: string, later: (f: () => Promise<unknown>) => void, leaderId?: string) {
   const r = await admin.api.post("/api/projects", { name: zz(label), leaderId: leaderId ?? admin.user.id });
   expect(r.status, JSON.stringify(r.json)).toBe(201);
   const id = r.json.project.id as string;
   later(() => admin.api.post(`/api/projects/${id}/archive`));
   return id;
 }
-const mk = async (who: any, p: string, title: string, extra: Record<string, unknown> = {}) => {
+const mk = async (who: Who, p: string, title: string, extra: Record<string, unknown> = {}) => {
   const r = await who.api.post(`/api/projects/${p}/tasks`, { title, ...extra });
   expect(r.status, JSON.stringify(r.json)).toBe(201);
   return r.json.task.id as string;
 };
-const rows = async (who: any, p: string) => (await who.api.get(`/api/projects/${p}/activity`)).json.items as { what: string; who: string; via: string; undo: string }[];
+const rows = async (who: Who, p: string) => (await who.api.get(`/api/projects/${p}/activity`)).json.items as { what: string; who: string; via: string; undo: string }[];
 
 test("AC1: each write leaves one row with who, what, and the before and after values", async ({ admin, later }) => {
   const p = await proj(admin, "log-rows", later);

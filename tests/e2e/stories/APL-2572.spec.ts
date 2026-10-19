@@ -1,9 +1,9 @@
 // SHO-US-14.13 Notification triage (APL-2572). Needs the optional Member account (it receives the notices).
 // AC3 runs whenever PR #23 is live (tests/e2e/helpers/jim-gate.ts) and skips otherwise: until then the Unread tab can list read rows.
-import { test, expect, zz } from "../support";
+import { test, expect, zz, type Who, type Later, type Page } from "../support";
 import { notLive, prLive } from "../helpers/jim-gate";
 
-async function give(admin: any, member: any, later: any, n: number) {
+async function give(admin: Who, member: Who, later: Later, n: number) {
   const r = await admin.api.post("/api/projects", { name: zz("bell"), leaderId: admin.user.id });
   expect(r.status).toBe(201);
   const id = r.json.project.id as string;
@@ -12,8 +12,8 @@ async function give(admin: any, member: any, later: any, n: number) {
   for (let i = 0; i < n; i++) expect((await admin.api.post(`/api/projects/${id}/tasks`, { title: `${zz("note")} ${i}`, assigneeId: member.user.id })).status).toBe(201);
   return id;
 }
-const unread = async (member: any) => (await member.api.get("/api/notifications")).json.unread as number;
-const bell = (p: any) => p.getByRole("button", { name: /^Notifications/ });
+const unread = async (member: Who) => (await member.api.get("/api/notifications")).json.unread as number;
+const bell = (p: Page) => p.getByRole("button", { name: /^Notifications/ });
 
 test("AC1: opening the bell leaves 5 unread items unread and the badge stays", async ({ admin, member, later }) => {
   await give(admin, member, later, 5);
