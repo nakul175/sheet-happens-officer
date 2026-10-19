@@ -18,7 +18,7 @@ test.describe("SHO-US-1.2 / APL-2475 qa:TC missing", () => {
   });
 
   // qa:TC missing
-  test("AC1: an unused link under 24 hours old verifies the account once, and a second use fails qa:TC missing", { annotation: { type: "qa:TC", description: "missing" } }, async ({ anon, admin, later }) => {
+  test("AC1: an unused link under 24 hours old verifies the account once, and a second use fails qa:TC missing", { annotation: { type: "qa:TC", description: "qa:TC missing" } }, async ({ anon, admin, later }) => {
     needPass();
     const email = alias("2475", "ac1", "aplyd.com");
     const signed = await signUp(anon.request, zz("ac1"), email);
@@ -41,7 +41,7 @@ test.describe("SHO-US-1.2 / APL-2475 qa:TC missing", () => {
   });
 
   // qa:TC missing
-  test("AC2: an unknown, expired or used link shows the Link expired screen with a way to get a new one, and verifies nobody qa:TC missing", { annotation: { type: "qa:TC", description: "missing" } }, async ({ anon }) => {
+  test("AC2: an unknown, expired or used link shows the Link expired screen with a way to get a new one, and verifies nobody qa:TC missing", { annotation: { type: "qa:TC", description: "qa:TC missing" } }, async ({ anon }) => {
     const bogus = "x".repeat(40);
     const api = await anon.request.post("/api/auth/verify", { data: { token: bogus } });
     expect(api.status()).toBe(400);
@@ -60,7 +60,7 @@ test.describe("SHO-US-1.2 / APL-2475 qa:TC missing", () => {
   });
 
   // qa:TC missing
-  test("AC3: asking for a new link emails a new one and kills every earlier link qa:TC missing", { annotation: { type: "qa:TC", description: "missing" } }, async ({ anon, admin, later }) => {
+  test("AC3: asking for a new link emails a new one and kills every earlier link qa:TC missing", { annotation: { type: "qa:TC", description: "qa:TC missing" } }, async ({ anon, admin, later }) => {
     needPass();
     const email = alias("2475", "ac3", "aplyd.com");
     expect((await signUp(anon.request, zz("ac3"), email)).status).toBe(201);
@@ -81,7 +81,7 @@ test.describe("SHO-US-1.2 / APL-2475 qa:TC missing", () => {
   });
 
   // qa:TC missing
-  test("AC4: the resend answer is the same for an unknown address and for a verified one, so it reveals nothing qa:TC missing", { annotation: { type: "qa:TC", description: "missing" } }, async ({ anon, admin, later }) => {
+  test("AC4: the resend answer is the same for an unknown address and for a verified one, so it reveals nothing qa:TC missing", { annotation: { type: "qa:TC", description: "qa:TC missing" } }, async ({ anon, admin, later }) => {
     needPass();
     const email = alias("2475", "ac4-known", "aplyd.com");
     expect((await signUp(anon.request, zz("ac4"), email)).status).toBe(201);
@@ -106,7 +106,7 @@ test.describe("SHO-US-1.2 / APL-2475 qa:TC missing", () => {
   });
 
   // qa:TC missing
-  test("AC4 (limit): the 4th request in an hour sends no email for a real unverified account qa:TC missing", { annotation: { type: "qa:TC", description: "missing" } }, async ({ anon, admin, later }) => {
+  test("AC4 (limit): the 4th request in an hour sends no email for a real unverified account qa:TC missing", { annotation: { type: "qa:TC", description: "qa:TC missing" } }, async ({ anon, admin, later }) => {
     needPass();
     const email = alias("2475", "ac4-limit", "aplyd.com");
     expect((await signUp(anon.request, zz("limit"), email)).status).toBe(201);

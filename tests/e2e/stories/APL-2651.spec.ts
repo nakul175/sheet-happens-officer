@@ -172,15 +172,31 @@ test.beforeAll(async ({ browser, playwright }) => {
   contactId = (contact.json?.contact as { id: string }).id;
 });
 
+// ZZ-TEST clean-up through the API. Nothing is swallowed: any refused step fails the run (D9).
+// The Super Admin takes over as Leader first, because a person who still leads a project cannot be deactivated.
 test.afterAll(async () => {
+  const problems: string[] = [];
+  const must = async (what: string, r: Promise<Res>, ok: (status: number) => boolean) => {
+    try {
+      const res = await r;
+      if (!ok(res.status)) problems.push(`${what}: ${res.status} ${res.text}`);
+    } catch (e) {
+      problems.push(`${what}: ${(e as Error).message}`);
+    }
+  };
   if (sa) {
-    if (projectId) await send(sa.request, "POST", `/api/projects/${projectId}/archive`).catch(() => undefined);
-    if (orgId) await send(sa.request, "POST", `/api/orgs/${orgId}/archive`).catch(() => undefined);
-    for (const id of createdIds) await send(sa.request, "POST", `/api/team/${id}/deactivate`, { reassign: "leaders" }).catch(() => undefined);
+    if (projectId) {
+      await must("add Super Admin", send(sa.request, "POST", `/api/projects/${projectId}/members`, { userId: sa.user.id, role: "EDITOR" }), (s) => s === 201 || s === 409);
+      await must("change leader", send(sa.request, "POST", `/api/projects/${projectId}/leader`, { newLeaderId: sa.user.id, previousRole: "EDITOR" }), (s) => s === 200);
+      await must("archive project", send(sa.request, "POST", `/api/projects/${projectId}/archive`), (s) => s === 200);
+    }
+    if (orgId) await must("archive org", send(sa.request, "POST", `/api/orgs/${orgId}/archive`, { archive: true }), (s) => s === 200);
+    if (lead) await must("clear lead chat", send(lead.request, "DELETE", "/api/concierge/messages"), (s) => s < 300);
+    for (const id of createdIds) await must(`deactivate ${id}`, send(sa.request, "POST", `/api/team/${id}/deactivate`, { reassign: "leaders" }), (s) => s === 200);
   }
-  if (lead) await send(lead.request, "DELETE", "/api/concierge/messages").catch(() => undefined);
   await Promise.all([sa, lead, editor, viewer, outsider, orgAdmin].filter(Boolean).map((w) => w.ctx.close()));
   await anon?.dispose();
+  expect(problems, "ZZ-TEST clean-up through the API").toEqual([]);
 });
 
 // qa:TC TC-APL2651-507ede86@v1 TC-APL2651-0874d1b5@v1

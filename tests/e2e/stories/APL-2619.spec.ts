@@ -91,7 +91,8 @@ test("AC5: clicking a person's name on the Team page opens their full profile qa
   later(() => deactivate(admin.api, id));
 
   await admin.page.goto("/team");
-  await admin.page.locator("tr", { hasText: email }).getByRole("link", { name }).click();
+  // Found by its accessible name, not by scanning every Team row for the email, so the list size does not matter (D10).
+  await admin.page.locator("#main").getByRole("link", { name, exact: true }).click();
   await expect(admin.page).toHaveURL(new RegExp(`/team/${id}$`));
   await expect(admin.page.getByRole("heading", { name })).toBeVisible();
   await expect(admin.page.getByText(`${email} · Member`)).toBeVisible();

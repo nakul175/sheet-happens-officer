@@ -32,7 +32,7 @@ test.describe("SHO-US-1.1 / APL-2474 qa:TC missing", () => {
   });
 
   // qa:TC missing
-  test("AC1: a valid new @aplyd.com or @athenainfonomics.com sign-up creates an unverified account and shows Check your email qa:TC missing", { annotation: { type: "qa:TC", description: "missing" } }, async ({ anon, admin, later }) => {
+  test("AC1: a valid new @aplyd.com or @athenainfonomics.com sign-up creates an unverified account and shows Check your email qa:TC missing", { annotation: { type: "qa:TC", description: "qa:TC missing" } }, async ({ anon, admin, later }) => {
     needPass();
     login("ADMIN"); // no Super Admin login is a failure, not a skip: only SHO_QA_PASS gates the run
     for (const domain of ["aplyd.com", "athenainfonomics.com"] as const) {
@@ -52,7 +52,7 @@ test.describe("SHO-US-1.1 / APL-2474 qa:TC missing", () => {
   });
 
   // qa:TC missing
-  test("AC2: a look-alike or foreign domain is refused on the page and on the server, and nothing is created qa:TC missing", { annotation: { type: "qa:TC", description: "missing" } }, async ({ anon, admin }) => {
+  test("AC2: a look-alike or foreign domain is refused on the page and on the server, and nothing is created qa:TC missing", { annotation: { type: "qa:TC", description: "qa:TC missing" } }, async ({ anon, admin }) => {
     await fillSignUp(anon, "ZZ-TEST Domain", `zz-test-${RUN}-dom@aplyd.co`, okPw);
     await expect(alertOf(anon)).toContainText(DOMAIN_MESSAGE);
     await expect(anon).toHaveURL(/\/signup/);
@@ -67,7 +67,7 @@ test.describe("SHO-US-1.1 / APL-2474 qa:TC missing", () => {
   });
 
   // qa:TC missing
-  test("AC3: an email that already has an account is refused with a Sign in link, and no second account appears qa:TC missing", { annotation: { type: "qa:TC", description: "missing" } }, async ({ anon, admin, later }) => {
+  test("AC3: an email that already has an account is refused with a Sign in link, and no second account appears qa:TC missing", { annotation: { type: "qa:TC", description: "qa:TC missing" } }, async ({ anon, admin, later }) => {
     needPass();
     const email = alias("2474", "ac3", "aplyd.com");
     const signed = await signUp(anon.request, zz("ac3"), email);
@@ -85,7 +85,7 @@ test.describe("SHO-US-1.1 / APL-2474 qa:TC missing", () => {
   });
 
   // qa:TC missing
-  test("AC4: weak passwords show the rule and create nothing qa:TC missing", { annotation: { type: "qa:TC", description: "missing" } }, async ({ anon }) => {
+  test("AC4: weak passwords show the rule and create nothing qa:TC missing", { annotation: { type: "qa:TC", description: "qa:TC missing" } }, async ({ anon }) => {
     const weak = ["short1", "onlyletters", "12345678", "a".repeat(129) + "1"];
     await fillSignUp(anon, "ZZ-TEST Weak", fresh("weak"), weak[0]);
     await expect(alertOf(anon)).toContainText(PASSWORD_MESSAGE);
