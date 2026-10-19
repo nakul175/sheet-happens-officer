@@ -26,7 +26,7 @@ async function parentWithOpenSubs(who: Account, sectionId: string, proj: { id: s
   return { parent, a, b };
 }
 
-describe("APL-2721 unit: done-flag reopen", () => {
+describe("qa:TC missing APL-2721 unit: done-flag reopen", () => {
   it("qa:TC missing cascaded subtasks reopen with their parent", async () => {
     const lead = await account("lead");
     const proj = await project(lead, lead);
@@ -124,7 +124,7 @@ describe("APL-2721 unit: done-flag reopen", () => {
   });
 });
 
-describe("APL-2721 route: done-flag reopen", () => {
+describe("qa:TC missing APL-2721 route: done-flag reopen", () => {
   it("qa:TC missing cascaded subtasks reopen with their parent", async () => {
     const lead = await account("lead");
     const proj = await project(lead, lead);

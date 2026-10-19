@@ -73,7 +73,7 @@ async function openTask(page: Page, title: string) {
   return page.getByRole("dialog", { name: "Task" });
 }
 
-describe("APL-2721 done flag on the project page", () => {
+describe("qa:TC missing APL-2721 done flag on the project page", () => {
   it("qa:TC missing cascaded subtasks reopen with their parent", async () => {
     const proj = await zzProject();
     const parent = await task(lead, proj.id, { title: "ZZ-TEST Parent P", sectionId: proj.doing });
