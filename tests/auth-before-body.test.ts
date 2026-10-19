@@ -106,7 +106,8 @@ describe("auth before body (APL-2651)", () => {
       expectAccess(await hit(editor, "PATCH", sectionPath, body), 403, "Only the project Leader or an Admin can do this.");
     }
     for (const body of [{ title: "" }, "{"] as const) {
-      expectAccess(await hit(outsider, "PATCH", taskPath, body), 404, "Project not found");
+      // APL-2875 supersedes this row: an outsider gets the missing-id answer for a task.
+      expectAccess(await hit(outsider, "PATCH", taskPath, body), 404, "Task not found");
       expectAccess(await hit(viewer, "PATCH", taskPath, body), 403, "Viewers cannot make changes.");
     }
     for (const body of [{ name: "" }, "{"] as const) {
