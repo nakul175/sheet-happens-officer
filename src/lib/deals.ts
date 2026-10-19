@@ -118,8 +118,18 @@ export async function createDeal(
 
 // ---- stages (SHO-US-10.3) ----
 
+/** Tasks still open on a deal, including subtasks. Won and Lost refuse while any of these remain. */
+export function blockingTaskWhere(projectId: string) {
+  return { projectId, deletedAt: null, completedAt: null };
+}
+
 async function openTasks(projectId: string) {
-  return db.task.findMany({ where: { projectId, deletedAt: null, completedAt: null }, select: { id: true, title: true, parentId: true }, orderBy: { createdAt: "asc" } });
+  return db.task.findMany({ where: blockingTaskWhere(projectId), select: { id: true, title: true, parentId: true }, orderBy: { createdAt: "asc" } });
+}
+
+/** AC6: how many tasks are still open, and the first 20, in the order they were created. */
+export function openTaskBlock(open: { id: string; title: string }[]) {
+  return { openTasks: open.length, tasks: open.slice(0, 20).map((t) => ({ id: t.id, title: t.title })) };
 }
 
 const FIELD_NAMES: Record<string, string> = {
@@ -146,9 +156,7 @@ export async function moveStage(user: Actor, projectId: string, input: { stageId
   if (stage.category === "DONE" || stage.category === "LOST") {
     const open = await openTasks(projectId);
     if (open.length) {
-      throw new ApiError(409, `${open.length} task${open.length === 1 ? " is" : "s are"} still open. Complete or delete ${open.length === 1 ? "it" : "them"} before marking this deal ${stage.name}.`, {
-        openTasks: open.length, tasks: open.slice(0, 20).map((t) => ({ id: t.id, title: t.title })),
-      });
+      throw new ApiError(409, `${open.length} task${open.length === 1 ? " is" : "s are"} still open. Complete or delete ${open.length === 1 ? "it" : "them"} before marking this deal ${stage.name}.`, openTaskBlock(open));
     }
   }
   const details = await db.dealDetails.findUnique({ where: { projectId } });
