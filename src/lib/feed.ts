@@ -201,15 +201,18 @@ export async function projectActivity(user: Actor, projectId: string, cursor?: s
     where: { projectId, OR: [{ assigneeId: user.id }, { approverId: user.id }, { collaborators: { some: { userId: user.id } } }] },
     select: { id: true },
   })).map((t) => t.id);
+  // APL-2590 D1: with the switch off, leave out comment rows and the Undo rows that reversed one (before.action).
+  // The Undo rows are matched positively and excluded by id: inside a NOT, a row with no before.action makes the
+  // JSON test NULL and Postgres drops it, which hid older Undo rows too (QA #128 D3).
+  const hiddenUndoIds = commentsEnabled() ? [] : (await db.actionLog.findMany({
+    where: { projectId, action: "undo", beforeState: { path: ["action"], string_starts_with: COMMENT_ACTION_PREFIX } },
+    select: { id: true },
+  })).map((r) => r.id);
   const rows = await db.actionLog.findMany({
     where: {
       projectId,
       ...(mine ? { targetType: "task", targetId: { in: mine } } : {}),
-      // APL-2590 D1: with the switch off, leave out comment rows and the Undo rows that reversed one (before.action).
-      ...(commentsEnabled() ? {} : { NOT: { OR: [
-        { action: { startsWith: COMMENT_ACTION_PREFIX } },
-        { action: "undo", beforeState: { path: ["action"], string_starts_with: COMMENT_ACTION_PREFIX } },
-      ] } }),
+      ...(commentsEnabled() ? {} : { NOT: { action: { startsWith: COMMENT_ACTION_PREFIX } }, id: { notIn: hiddenUndoIds } }),
     },
     orderBy: [{ createdAt: "desc" }, { id: "desc" }],
     take: limit + 1,
