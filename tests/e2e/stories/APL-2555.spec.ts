@@ -1,6 +1,7 @@
 // SHO-US-22.7 Task panel as a full-screen sheet (APL-2555). Epic SHO-E22.
 // Runs against staging. Data: a ZZ-TEST project with ZZ-TEST tasks, archived afterwards. AC7 needs SHO_MEMBER_EMAIL / SHO_MEMBER_PASS.
-// Skipped (need a real iPhone / keyboard, as the story says): AC3 on-device, AC5.
+// Skipped (needs a real iPhone, as the story says): AC3 on-device.
+// AC5 (APL-2738) runs in desktop Chromium with a stand-in visualViewport that behaves like iOS Safari's keyboard.
 import { test, expect, zz, login, BASE_URL } from "../support";
 import { why } from "../helpers/jim-http";
 import type { Browser } from "@playwright/test";
@@ -121,9 +122,72 @@ test("AC4: the Back gesture closes the sheet", async ({ browser }) => {
   await ctx.close();
 });
 
-test.skip("AC5: with the keyboard open and the description focused, the field and footer are visible", why(
-  "Needs a real on-screen keyboard. Desktop Chromium does not open one, so the field and footer cannot be checked above it.",
-), () => {});
+// APL-2738. Desktop Chromium has no on-screen keyboard, so the page gets a visualViewport that behaves like iOS Safari's:
+// the layout viewport keeps its height and only visualViewport shrinks. window.__keyboard(h) opens the "keyboard".
+function fakeKeyboard() {
+  const vv = new EventTarget() as EventTarget & Record<string, number>;
+  let h: number | null = null;
+  const props: Record<string, () => number> = {
+    height: () => h ?? window.innerHeight, width: () => window.innerWidth, offsetTop: () => 0, offsetLeft: () => 0,
+    pageTop: () => window.scrollY, pageLeft: () => window.scrollX, scale: () => 1,
+  };
+  for (const [k, get] of Object.entries(props)) Object.defineProperty(vv, k, { get });
+  Object.defineProperty(window, "visualViewport", { configurable: true, get: () => vv });
+  (window as unknown as { __keyboard: (height: number | null) => void }).__keyboard = (height) => {
+    h = height;
+    vv.dispatchEvent(new Event("resize"));
+  };
+}
+
+test("qa:TC missing AC5: with the keyboard open and the description focused, the field and footer are visible", async ({ browser }) => {
+  const KEYBOARD_TOP = 420; // visible height left above the keyboard on a 390 x 800 phone
+  const ctx = await phone(browser, 390, 800);
+  await ctx.addInitScript(fakeKeyboard);
+  const page = await ctx.newPage();
+  await page.goto(`/projects/${projectId}?task=${taskId}`, { waitUntil: "load" });
+  await expect(page.getByRole("dialog", { name: "Task" })).toBeVisible({ timeout: 30000 });
+  const desc = page.locator("#desc");
+  await expect(desc).toBeEditable();
+  // Type only once the sheet has finished loading: wait until the fields above the description stop moving.
+  await page.waitForLoadState("networkidle");
+  await page.waitForFunction(() => {
+    const w = window as unknown as { __last?: number; __same?: number };
+    const y = document.querySelector<HTMLElement>("#desc")!.offsetTop;
+    w.__same = w.__last === y ? (w.__same ?? 0) + 1 : 0;
+    w.__last = y;
+    return w.__same >= 5;
+  }, undefined, { timeout: 15000, polling: 100 });
+  await desc.focus();
+  await page.evaluate((h) => (window as unknown as { __keyboard: (h: number) => void }).__keyboard(h), KEYBOARD_TOP);
+  await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+  const m = await page.evaluate(() => {
+    const box = (el: Element | null) => { if (!el) return null; const b = el.getBoundingClientRect(); return { top: b.top, bottom: b.bottom }; };
+    const dialog = document.querySelector('[role="dialog"][aria-label="Task"]')!;
+    const close = [...dialog.querySelectorAll(".bar button")].find((b) => b.textContent?.trim() === "Close") ?? null;
+    const foot = dialog.querySelector(".sheet-foot");
+    return {
+      focused: document.activeElement?.id ?? "", sheet: box(dialog.closest(".scrim")), bar: box(dialog.querySelector(".bar")),
+      desc: box(document.querySelector("#desc")), close: box(close), foot: box(foot),
+      footButtons: foot ? [...foot.querySelectorAll("button")].map((b) => b.textContent?.trim() ?? "") : [],
+    };
+  });
+  expect(m.focused, "the description keeps focus").toBe("desc");
+  // The sheet follows visualViewport: it ends where the keyboard starts.
+  expect(m.sheet!.bottom, "sheet bottom edge").toBeLessThanOrEqual(KEYBOARD_TOP + 1);
+  // The footer (Save / Close actions) is there and pinned at the bottom of the visible area.
+  expect(m.foot, "the sheet has a footer").not.toBeNull();
+  expect(m.footButtons.length, "the footer holds the task actions").toBeGreaterThan(0);
+  expect(m.foot!.top, "footer top").toBeGreaterThanOrEqual(-1);
+  expect(m.foot!.bottom, "footer bottom").toBeLessThanOrEqual(KEYBOARD_TOP + 1);
+  expect(m.foot!.bottom, "footer pinned to the keyboard edge").toBeGreaterThanOrEqual(KEYBOARD_TOP - 1);
+  // Close stays in view at the top.
+  expect(m.close!.top, "Close top").toBeGreaterThanOrEqual(-1);
+  expect(m.close!.bottom, "Close bottom").toBeLessThanOrEqual(KEYBOARD_TOP + 1);
+  // The focused description sits between the sticky bar and the footer, so nothing covers it.
+  expect(m.desc!.top, "description top").toBeGreaterThanOrEqual(m.bar!.bottom - 1);
+  expect(m.desc!.bottom, "description bottom").toBeLessThanOrEqual(m.foot!.top + 1);
+  await ctx.close();
+});
 
 test("AC6: at 600 px and wider the centred dialog is used, with the same scroll lock", async ({ browser }) => {
   const ctx = await phone(browser, 800, 800, false);
