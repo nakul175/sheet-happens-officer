@@ -1,5 +1,5 @@
-// APL-2655 test data, shared by tests/apl-2655.test.ts and tests/e2e/stories/APL-2655.spec.ts.
-// Thrown-away people and projects use ZZ-TEST names and nakul17+ aliases, as in APL-2522.spec.ts.
+// APL-2655 test data, shared by tests/apl-2655.test.ts and tests/e2e/local/APL-2655.test.ts.
+// Thrown-away people and projects use ZZ-TEST names and nakul17+ aliases, as in APL-2522.test.ts.
 // cleanupZz() archives the projects and deactivates the people; call it from afterAll.
 import { expect } from "vitest";
 import { PrismaClient } from "../src/generated/prisma/client";
