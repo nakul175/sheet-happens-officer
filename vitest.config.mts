@@ -16,6 +16,7 @@ export default defineConfig({
       ...configDefaults.exclude,
       "tests/viewport/**",
       "tests/crm-visible-modes-server.test.ts",
+      "tests/apl-2713-crm-modes.test.ts",
       "tests/jobs-stalled-crm-server.test.ts",
       "e2e/**",
       "scripts/**",
