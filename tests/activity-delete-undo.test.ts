@@ -1,5 +1,7 @@
 // APL-2674: the Activity page shows Undo on a delete only to people who may restore.
 // The server check is unchanged (APL-2640). These cases open the page, or call the undo API, on a seeded project.
+// The guard import must stay first: it refuses the run before any import below builds a PrismaClient (Pam D8, D10).
+import "./activity-delete-undo-guard";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { chromium, type Browser, type BrowserContext, type Page } from "playwright-core";
 import { PrismaClient } from "../src/generated/prisma/client";
@@ -15,24 +17,6 @@ const RENAMED_TO = "Invoice sent";
 const DAY = 24 * 60 * 60 * 1000;
 const WINDOW = 30 * DAY;
 
-// AC6 backdates actionLog.createdAt through Prisma (there is no API to age an action row), so refuse any database that is
-// not a sho_test* database on this machine before a client is even created (Pam D8). CI uses localhost/sho_test.
-function assertLocalDatabase() {
-  let host = "";
-  let name = "";
-  try {
-    const url = new URL(process.env.DATABASE_URL ?? "");
-    host = url.hostname.toLowerCase();
-    name = url.pathname.replace(/^\//, "");
-  } catch { host = ""; name = ""; }
-  if (host !== "localhost" && host !== "127.0.0.1") {
-    throw new Error("Refusing tests/activity-delete-undo.test.ts: DATABASE_URL must be a database on this machine (it backdates rows).");
-  }
-  if (!name.startsWith("sho_test")) {
-    throw new Error("Refusing tests/activity-delete-undo.test.ts: the database name must start with sho_test (it backdates rows).");
-  }
-}
-assertLocalDatabase();
 const db = new PrismaClient();
 let browser: Browser;
 
@@ -501,7 +485,7 @@ describe("APL-2674 activity delete undo", () => {
     expect((await editor.c.get(`/api/tasks/${oldId}`)).json.task.title).toBe(oldTo);
   }, 90_000);
 
-  it("qa:TC-APL2674-49035634@v1 PROVISIONAL (BA ruling; NJ confirms at 8:30 AM IST): \"Too old to undo\" shows only to people who could have undone the action", async () => {
+  it("qa:TC-APL2674-49035634@v1 PROVISIONAL (BA ruling; NJ ruling pending): \"Too old to undo\" shows only to people who could have undone the action", async () => {
     const leader = await account("leader");
     const editor = await account("editor");
     const erin = await account("erin");
@@ -549,7 +533,7 @@ describe("APL-2674 activity delete undo", () => {
     }
   }, 150_000);
 
-  it("qa:TC-APL2674-070b48b9@v3 PROVISIONAL (AC7; NJ confirms at 8:30 AM IST): the Undo toast disappears after 10 s and the task stays in Trash with \"30 days left\"", async () => {
+  it("qa:TC-APL2674-070b48b9@v3 PROVISIONAL (AC7; NJ ruling pending): a deleted task stays in Trash with 30 days, and the Leader restores it from Trash and from the Activity row (the toast is not asserted)", async () => {
     const leader = await account("leader");
     const editor = await account("editor");
     const projectId = await alpha(leader, editor);
