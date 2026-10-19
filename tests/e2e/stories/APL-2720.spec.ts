@@ -83,7 +83,7 @@ for (const viewport of VIEWPORTS) {
   const size = `${viewport.width}x${viewport.height}`;
 
   // qa:TC missing
-  test(`@APL-2720 AC1@v1.0 Time left reads 30 days left at ${size}`, async ({ admin, later }) => {
+  test(`qa:TC missing @APL-2720 AC1@v1.0 Time left reads 30 days left at ${size}`, async ({ admin, later }) => {
     test.info().annotations.push({ type: "qa:TC", description: "qa:TC missing" });
     const project = await newProject(admin, later, { label: `2720 fresh ${size}` });
     const title = zz("fresh");
@@ -97,7 +97,7 @@ for (const viewport of VIEWPORTS) {
   });
 
   // qa:TC missing
-  test(`@APL-2720 AC1@v1.0 Time left reads 30, 29, 2, 1 and 0 days left at ${size}`, async ({ admin, later }) => {
+  test(`qa:TC missing @APL-2720 AC1@v1.0 Time left reads 30, 29, 2, 1 and 0 days left at ${size}`, async ({ admin, later }) => {
     test.info().annotations.push({ type: "qa:TC", description: "qa:TC missing" });
     test.skip(!localDatabase(), NEEDS_LOCAL);
     const project = await newProject(admin, later, { label: `2720 ages ${size}` });
@@ -125,7 +125,7 @@ for (const viewport of VIEWPORTS) {
   });
 
   // qa:TC missing
-  test(`@APL-2720 AC2@v1.0 keeps the Time left header, deletedAt order, and Restore at ${size}`, async ({ admin, later }) => {
+  test(`qa:TC missing @APL-2720 AC2@v1.0 keeps the Time left header, deletedAt order, and Restore at ${size}`, async ({ admin, later }) => {
     test.info().annotations.push({ type: "qa:TC", description: "qa:TC missing" });
     const project = await newProject(admin, later, { label: `2720 order ${size}` });
     await openTrash(admin.page, project.id, viewport);
@@ -165,7 +165,7 @@ for (const viewport of VIEWPORTS) {
   });
 
   // qa:TC missing
-  test(`@APL-2720 AC2@v1.0 hides Restore from an Editor and a Viewer at ${size}`, async ({ admin, member, later }) => {
+  test(`qa:TC missing @APL-2720 AC2@v1.0 hides Restore from an Editor and a Viewer at ${size}`, async ({ admin, member, later }) => {
     test.info().annotations.push({ type: "qa:TC", description: "qa:TC missing" });
     const project = await newProject(admin, later, {
       label: `2720 access ${size}`,
