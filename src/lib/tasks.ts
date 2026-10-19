@@ -69,6 +69,9 @@ async function loadTask(user: Actor, id: string, o: { write?: boolean; deleted?:
   return { t, a };
 }
 
+/** Same write check updateTask runs, so a route can refuse before reading the body (APL-2651). */
+export const assertCanUpdateTask = (user: Actor, id: string) => loadTask(user, id, { write: true });
+
 export const ORDER = [{ dueDate: { sort: "asc", nulls: "last" } }, { createdAt: "asc" }, { id: "asc" }] as const;
 
 async function requireWorker(tx: Tx, projectId: string, userId: string, what: string) {

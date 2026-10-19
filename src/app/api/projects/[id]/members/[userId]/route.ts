@@ -1,3 +1,4 @@
+import { projectAccess, requireManage } from "@/lib/access";
 import { currentUser } from "@/lib/auth";
 import { handle, parseBody } from "@/lib/http";
 import { changeMemberRole, removeMember } from "@/lib/projects";
@@ -8,6 +9,8 @@ type Ctx = { params: Promise<{ id: string; userId: string }> };
 export const PATCH = handle(async (req: Request, ctx: Ctx) => {
   const me = await currentUser();
   const { id, userId } = await ctx.params;
+  // APL-2651: project access before the body. changeMemberRole repeats the same check.
+  requireManage(await projectAccess(me, id, { write: true }));
   const { role, handoverTo } = await parseBody(req, memberRole);
   await changeMemberRole(me, id, userId, role, handoverTo);
   return Response.json({ status: "ok" });

@@ -2,11 +2,13 @@
 // One test per acceptance criterion. ZZ-TEST organisations, contacts, deals and the throwaway person
 // are archived or deactivated afterwards. The plain Member is the second person.
 // There is no tests/e2e/jim-gate.ts. CRM_VISIBLE is read from the live /api/orgs answer, never a hard skip.
-// Credentials come from the environment. workers is 1 in playwright.config.ts. Traces stay off.
+// The file skips only when SHO_QA_PASS is unset. Credentials come from the environment. workers is 1 in playwright.config.ts. Traces stay off.
 import { test, expect, zz, RUN } from "../support";
 import { ghost, newProject, newTask, ymd, type Who } from "../g2";
 import { raw } from "../helpers/jim-http";
+import { clickClear, setChecked } from "../helpers/phone-hit";
 import type { Page } from "@playwright/test";
+import { PASS, passwordOk } from "./qa";
 
 type Later = (fn: () => Promise<unknown>) => void;
 type Known = { id: string; name: string; active: boolean };
@@ -14,6 +16,11 @@ type Contact = {
   id: string; name: string; role: string | null; email: string | null; phone: string | null;
   canEdit: boolean; knownBy: Known[]; lastSpoke: string | null;
 };
+
+test.beforeAll(() => {
+  test.skip(!PASS, "Set SHO_QA_PASS (the password for nakul17+ aliases).");
+  if (!passwordOk(PASS)) throw new Error("SHO_QA_PASS must be at least 8 characters with a letter and a number.");
+});
 
 test.beforeEach(async ({ admin }) => {
   const r = await admin.api.get("/api/orgs");
@@ -53,18 +60,18 @@ async function proactive(who: Who) {
   return pipe!;
 }
 
-test("AC1: a name saves a contact, role email and phone are optional, any Member adds, only the creator and an Admin edit or remove, and an archived organisation refuses a new contact", async ({ admin, member, later }) => {
+test("qa:TC missing AC1: a name saves a contact, role email and phone are optional, any Member adds, only the creator and an Admin edit or remove, and an archived organisation refuses a new contact", async ({ admin, member, later }) => {
   test.setTimeout(180_000);
   await memberCrm(member);
   const org = await makeOrg(admin, later, "contacts org");
 
   await member.page.goto(`/accounts/${org.id}`);
-  await member.page.getByRole("button", { name: "+ Contact" }).click();
+  await clickClear(member.page.getByRole("button", { name: "+ Contact" }));
   const dlg = member.page.getByRole("dialog", { name: "New contact" });
   await expect(dlg.getByRole("button", { name: "Save" })).toBeDisabled();
   const bareName = zz("bare contact");
   await dlg.getByLabel("Name").fill(bareName);
-  await dlg.getByRole("button", { name: "Save" }).click();
+  await clickClear(dlg.getByRole("button", { name: "Save" }));
   await expect(dlg).toHaveCount(0);
   const bareRow = member.page.locator(".item", { hasText: bareName });
   await expect(bareRow).toBeVisible();
@@ -107,16 +114,16 @@ test("AC1: a name saves a contact, role email and phone are optional, any Member
   expect((await admin.api.patch(`/api/contacts/${fullId}`, { role: "Advisor" })).status, "an Admin who did not create it may edit").toBe(200);
   expect((await contactsOf(member, org.id)).find((c) => c.id === fullId)?.role).toBe("Advisor");
   await member.page.reload();
-  await fullRow.getByRole("button", { name: "Edit" }).click();
+  await clickClear(fullRow.getByRole("button", { name: "Edit" }));
   const edit = member.page.getByRole("dialog", { name: "Edit contact" });
   await edit.getByLabel("Role").fill("Trustee");
-  await edit.getByRole("button", { name: "Save" }).click();
+  await clickClear(edit.getByRole("button", { name: "Save" }));
   await expect(edit).toHaveCount(0);
   expect((await contactsOf(admin, org.id)).find((c) => c.id === fullId)?.role).toBe("Trustee");
 
-  await fullRow.getByRole("button", { name: "Remove" }).click();
+  await clickClear(fullRow.getByRole("button", { name: "Remove" }));
   const confirm = member.page.getByRole("dialog", { name: "Remove contact?" });
-  await confirm.getByRole("button", { name: "Remove" }).click();
+  await clickClear(confirm.getByRole("button", { name: "Remove" }));
   await expect(member.page.locator(".item", { hasText: fullName })).toHaveCount(0);
   expect((await contactsOf(admin, org.id)).some((c) => c.id === fullId)).toBe(false);
 
@@ -130,7 +137,7 @@ test("AC1: a name saves a contact, role email and phone are optional, any Member
   await expect(member.page.locator(".item", { hasText: bareName })).toBeVisible();
 });
 
-test("AC2: a contact is not a user and cannot be an assignee, collaborator, approver or project member", async ({ admin, later }) => {
+test("qa:TC missing AC2: a contact is not a user and cannot be an assignee, collaborator, approver or project member", async ({ admin, later }) => {
   test.setTimeout(120_000);
   const org = await makeOrg(admin, later, "not a user");
   const name = zz("not a user contact");
@@ -147,7 +154,7 @@ test("AC2: a contact is not a user and cannot be an assignee, collaborator, appr
   expect((await admin.api.get(`/api/team/${contactId}`)).status).toBe(404);
 
   await admin.page.goto("/team");
-  await expect(admin.page.getByRole("link", { name: admin.user.name }).first()).toBeVisible();
+  await expect(admin.page.getByRole("main").getByRole("link", { name: admin.user.name, exact: true })).toBeVisible();
   await expect(admin.page.getByText(name)).toHaveCount(0);
   await expect(admin.page.getByText(email)).toHaveCount(0);
 
@@ -156,13 +163,15 @@ test("AC2: a contact is not a user and cannot be an assignee, collaborator, appr
   expect((await admin.api.post(`/api/projects/${project.id}/members`, { userId: worker.id, role: "EDITOR" })).status).toBe(201);
   const taskId = await newTask(admin, project.id, { title: zz("held by the worker"), assigneeId: worker.id });
 
-  const asAssignee = await admin.api.post(`/api/tasks/${taskId}/assign`, { assigneeId: contactId });
+  // Task writes carry the task's current updatedAt (src/lib/schemas.ts), so the refusal is about the contact, not the version.
+  const version = async () => (await admin.api.get(`/api/tasks/${taskId}`)).json.task.updatedAt as string;
+  const asAssignee = await admin.api.post(`/api/tasks/${taskId}/assign`, { assigneeId: contactId, expectedUpdatedAt: await version() });
   expect(asAssignee.status).toBe(400);
   expect(asAssignee.json.error).toContain("assignee");
   const asCollaborator = await admin.api.post(`/api/tasks/${taskId}/collaborators`, { userId: contactId });
   expect(asCollaborator.status).toBe(400);
   expect(asCollaborator.json.error).toContain("member");
-  const asApprover = await admin.api.put(`/api/tasks/${taskId}/approver`, { approverId: contactId });
+  const asApprover = await admin.api.put(`/api/tasks/${taskId}/approver`, { approverId: contactId, expectedUpdatedAt: await version() });
   expect(asApprover.status).toBe(400);
   expect(asApprover.json.error).toContain("approver");
   const asMember = await admin.api.post(`/api/projects/${project.id}/members`, { userId: contactId, role: "EDITOR" });
@@ -185,24 +194,24 @@ test("AC2: a contact is not a user and cannot be an assignee, collaborator, appr
   await expect(dialog.getByText(name)).toHaveCount(0);
 });
 
-test("AC3: Known by lists one or more active members, defaults to the creator, keeps a deactivated member greyed with their name, and refuses adding a deactivated person", async ({ admin, later }) => {
+test("qa:TC missing AC3: Known by lists one or more active members, defaults to the creator, keeps a deactivated member greyed with their name, and refuses adding a deactivated person", async ({ admin, later }) => {
   test.setTimeout(180_000);
   const org = await makeOrg(admin, later, "known by");
   const person = await ghost(admin, later, "known");
   const personName = `ZZ-TEST known ${RUN}`;
 
   await admin.page.goto(`/accounts/${org.id}`);
-  await admin.page.getByRole("button", { name: "+ Contact" }).click();
+  await clickClear(admin.page.getByRole("button", { name: "+ Contact" }));
   const dlg = admin.page.getByRole("dialog", { name: "New contact" });
   await expect(dlg.getByRole("checkbox", { name: admin.user.name, exact: true })).toBeChecked();
   const name = zz("default known");
   // A Known-by surname can contain "name", so the label match is not only the Name field.
   await dlg.getByRole("textbox", { name: "Name", exact: true }).fill(name);
-  await dlg.getByRole("checkbox", { name: admin.user.name, exact: true }).uncheck();
+  await setChecked(dlg.getByRole("checkbox", { name: admin.user.name, exact: true }), false);
   await expect(dlg.getByRole("button", { name: "Save" })).toBeDisabled();
-  await dlg.getByRole("checkbox", { name: admin.user.name, exact: true }).check();
-  await dlg.getByRole("checkbox", { name: personName, exact: true }).check();
-  await dlg.getByRole("button", { name: "Save" }).click();
+  await setChecked(dlg.getByRole("checkbox", { name: admin.user.name, exact: true }), true);
+  await setChecked(dlg.getByRole("checkbox", { name: personName, exact: true }), true);
+  await clickClear(dlg.getByRole("button", { name: "Save" }));
   await expect(dlg).toHaveCount(0);
 
   const saved = (await contactsOf(admin, org.id)).find((c) => c.name === name)!;
@@ -239,7 +248,7 @@ test("AC3: Known by lists one or more active members, defaults to the creator, k
   expect((await contactsOf(admin, org.id)).find((c) => c.id === saved.id)?.knownBy.map((k) => k.id).sort()).toEqual([admin.user.id, person.id].sort());
 });
 
-test("AC4: Last spoke is the date of the newest note on that contact the viewer may see, and a hidden deal note is never counted", async ({ admin, member, later }) => {
+test("qa:TC missing AC4: Last spoke is the date of the newest note on that contact the viewer may see, and a hidden deal note is never counted", async ({ admin, member, later }) => {
   test.setTimeout(180_000);
   await memberCrm(member);
   const org = await makeOrg(admin, later, "spoke org");
@@ -289,7 +298,7 @@ test("AC4: Last spoke is the date of the newest note on that contact the viewer 
   await expect(member.page.getByText(hiddenText)).toBeVisible();
 });
 
-test("AC5: any signed-in Member sees all contacts, changes are logged with no project and shown in organisation History to Admins only, and undo uses the contact labels", async ({ admin, member, later }) => {
+test("qa:TC missing AC5: any signed-in Member sees all contacts, changes are logged with no project and shown in organisation History to Admins only, and undo uses the contact labels", async ({ admin, member, later }) => {
   test.setTimeout(180_000);
   await memberCrm(member);
   const org = await makeOrg(admin, later, "contact log");
@@ -301,8 +310,8 @@ test("AC5: any signed-in Member sees all contacts, changes are logged with no pr
   later(() => admin.api.del(`/api/contacts/${id}`));
   expect((await contactsOf(admin, org.id)).some((c) => c.id === id)).toBe(true);
   await admin.page.goto(`/accounts/${org.id}`);
-  // The note form also lists the contact in a label. The contacts list is the bold name.
-  await expect(admin.page.locator("b", { hasText: name })).toBeVisible();
+  // The note form repeats the name as a checkbox label. The contacts list shows it as text with no checkbox.
+  await expect(admin.page.getByText(name, { exact: true }).filter({ hasNot: admin.page.getByRole("checkbox") })).toBeVisible();
 
   const denied = await member.api.get(`/api/orgs/${org.id}/history`);
   expect(denied.status).toBe(404);
@@ -360,7 +369,28 @@ test("AC5: any signed-in Member sees all contacts, changes are logged with no pr
 
   await admin.page.goto(`/accounts/${org.id}`);
   await admin.page.getByRole("button", { name: "History" }).click();
-  await expect(admin.page.getByText("contact.created")).toBeVisible();
-  await expect(admin.page.getByText("contact.updated")).toBeVisible();
-  await expect(admin.page.getByText("contact.removed")).toBeVisible();
+  // The History line is who · action · the clock time. Two rows can share a second, so the time
+  // alone is not the name. The action in that line keeps created, updated and removed apart.
+  const logged = (await admin.api.get(`/api/orgs/${org.id}/history`)).json.items as { id: string; at: string; who: string; action: string }[];
+  // An edit and its undo can log the same who · action · second twice. Those rows are identical on
+  // screen, so the check is that the page shows each logged line exactly as many times as the log has it.
+  const lineOf = (i: { who: string; action: string; at: string }) =>
+    admin.page.evaluate(
+      ({ who, action, at }) => `${who} · ${action} · ${new Date(at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}`,
+      i,
+    );
+  const lines = await Promise.all(logged.map(lineOf));
+  const expectRow = async (id: string | undefined, action: string) => {
+    expect(id, "x-undo-id").toBeTruthy();
+    const index = logged.findIndex((i) => i.id === id);
+    expect(index, id).toBeGreaterThanOrEqual(0);
+    expect(logged[index].action).toBe(action);
+    const line = lines[index];
+    await expect(admin.page.getByText(line, { exact: true })).toHaveCount(lines.filter((l) => l === line).length);
+  };
+  // Every logged line is on the page as many times as it is logged, so History shows the whole log.
+  for (const line of new Set(lines)) await expect(admin.page.getByText(line, { exact: true })).toHaveCount(lines.filter((l) => l === line).length);
+  await expectRow(made.headers["x-undo-id"], "contact.created");
+  await expectRow(edited.headers["x-undo-id"], "contact.updated");
+  await expectRow(removed.headers["x-undo-id"], "contact.removed");
 });

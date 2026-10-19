@@ -3,13 +3,12 @@
 // contacts/[id], projects/[id]/sections/[sectionId], projects/[id]/members/[userId].
 //
 // Accounts are nakul17+zz-*@gmail.com aliases created for this run. Every record uses the ZZ-TEST prefix
-// and is archived afterwards. Password comes from SHO_QA_PASS and is never written here.
+// and is archived afterwards. Password comes from SHO_QA_PASS and is never written here. The file skips when it is unset.
 // Point BASE_URL at the app under test. Production hosts are refused by tests/e2e/base-url.ts.
 import { writeFileSync } from "node:fs";
 import { test, expect, type APIRequestContext, type Browser, type BrowserContext } from "@playwright/test";
 import { BASE_URL, zz } from "../support";
-
-const PASS = process.env.SHO_QA_PASS;
+import { PASS, passwordOk } from "./qa";
 
 const EMAIL = {
   sa: "nakul17+zz-sa-2651@gmail.com",
@@ -57,6 +56,9 @@ function expectSignedOut(r: Res) {
 
 function expectAccess(r: Res, status: number, error: string) {
   expect(r.status).toBe(status);
+  // AC v1.1 and PR #29 (tests/auth-before-body.test.ts) require a string, e.g. { error: "Project not found" }.
+  // PR #50's loadForEdit rewrites a task 404 into { error: { code: "not_found", message: "Task not found" } }
+  // via withVersionErrors. That stack disagrees with the AC, so this assertion stays the string.
   expect(r.json).toEqual({ error });
   expect(r.status).not.toBe(400);
   noValidation(r);
@@ -104,9 +106,14 @@ let contactId: string;
 let orgId: string;
 const shapes: Record<string, unknown> = {};
 
+// No fixtures here, so an unset SHO_QA_PASS skips before a browser or request context is opened.
+test.beforeAll(() => {
+  test.skip(!PASS, "Set SHO_QA_PASS (the password for nakul17+ aliases).");
+  if (!passwordOk(PASS)) throw new Error("SHO_QA_PASS must be at least 8 characters with a letter and a number.");
+});
+
 test.beforeAll(async ({ browser, playwright }) => {
   test.setTimeout(180_000);
-  if (!PASS) throw new Error("Set SHO_QA_PASS (the shared password for the nakul17+zz accounts).");
   anon = await playwright.request.newContext({ baseURL: BASE_URL });
   const page = await browser.newPage();
   const health = await page.goto("/api/health");
@@ -156,9 +163,12 @@ test.beforeAll(async ({ browser, playwright }) => {
 });
 
 test.afterAll(async () => {
-  // beforeAll throws before an account is signed in. Reading .request on that account throws and hides the real failure.
+  // beforeAll skips or throws before an account is signed in, and sign-in can stop before every account exists.
+  // Reading .request or .ctx on that account throws TypeError and hides the real failure.
+  // AC3 is the last test, so the hook error is reported on it.
   if (projectId && sa?.request) await send(sa.request, "POST", `/api/projects/${projectId}/archive`).catch(() => undefined);
-  if (orgId && sa?.request) await send(sa.request, "POST", `/api/orgs/${orgId}/archive`).catch(() => undefined);
+  // The archive route needs { archive: true } (src/lib/schemas.ts orgArchive); without it the org stays live.
+  if (orgId && sa?.request) await send(sa.request, "POST", `/api/orgs/${orgId}/archive`, { archive: true }).catch(() => undefined);
   if (lead?.request) await send(lead.request, "DELETE", "/api/concierge/messages").catch(() => undefined);
   await Promise.all(
     [sa, lead, editor, viewer, outsider, orgAdmin]
@@ -168,7 +178,7 @@ test.afterAll(async () => {
   await anon?.dispose().catch(() => undefined);
 });
 
-test("AC1: no session, malformed or schema-invalid body, returns 401 with no validation details", async () => {
+test("qa:TC-APL2651-507ede86@v1 qa:TC-APL2651-0874d1b5@v1 AC1: no session, malformed or schema-invalid body, returns 401 with no validation details", async () => {
   const cases: [string, string, Body][] = [
     ["POST", "/api/actions/bulk-undo", MALFORMED],
     ["POST", "/api/actions/bulk-undo", { ids: [] }],
@@ -196,7 +206,7 @@ test("AC1: no session, malformed or schema-invalid body, returns 401 with no val
   await test.info().attach("ac1-routes", { body: JSON.stringify(rows, null, 2), contentType: "application/json" });
 });
 
-test("AC2: signed-in without access gets 403 or the existing not-found answer, not 400", async () => {
+test("qa:TC-APL2651-6edd45b6@v1 AC2: signed-in without access gets 403 or the existing not-found answer, not 400", async () => {
   const memberPath = `/api/projects/${projectId}/members/${editor.user.id}`;
   const sectionPath = `/api/projects/${projectId}/sections/${doing}`;
   const taskPath = `/api/tasks/${taskId}`;
@@ -236,16 +246,21 @@ test("AC2: signed-in without access gets 403 or the existing not-found answer, n
   await test.info().attach("ac2-routes", { body: JSON.stringify(rows, null, 2), contentType: "application/json" });
 });
 
-test("AC2 bulk-undo: another person's action is 403; a signed-in invalid body stays 400", async () => {
+test("qa:TC-APL2651-93d4350b@v1 AC2 bulk-undo: another person's action is 403; a signed-in invalid body stays 400", async () => {
   // The ids are inside the body, so a signed-in caller with a bad body is 400 on this route (no target to authorise yet).
   expectBadJson(await send(editor.request, "POST", "/api/actions/bulk-undo", MALFORMED));
   expectValidation(await send(editor.request, "POST", "/api/actions/bulk-undo", { ids: [] }));
   expectValidation(await send(outsider.request, "POST", "/api/actions/bulk-undo", { ids: [] }));
 
+  // A bulk move needs each task's current updatedAt (src/lib/bulk.ts), the same version check as a single move.
+  const current = await send(lead.request, "GET", `/api/tasks/${taskId}`);
+  expect(current.status, current.text).toBe(200);
+  const updatedAt = (current.json?.task as { updatedAt: string }).updatedAt;
   const bulk = await send(lead.request, "POST", `/api/projects/${projectId}/tasks/bulk`, {
     taskIds: [taskId],
     action: "move",
     sectionId: doing,
+    versions: { [taskId]: updatedAt },
   });
   expect(bulk.status, bulk.text).toBe(200);
   const ids = bulk.json?.undoIds as string[];
@@ -259,7 +274,7 @@ test("AC2 bulk-undo: another person's action is 403; a signed-in invalid body st
   expect(undone.json).toMatchObject({ count: 1 });
 });
 
-test("AC3: an authorised caller with a bad body still gets today's 400 shape, and a valid body still works", async () => {
+test("qa:TC-APL2651-cb9e6bf3@v1 qa:TC-APL2651-fb71e2b6@v1 AC3: an authorised caller with a bad body still gets today's 400 shape, and a valid body still works", async () => {
   const memberPath = `/api/projects/${projectId}/members/${editor.user.id}`;
   const sectionPath = `/api/projects/${projectId}/sections/${doing}`;
   const taskPath = `/api/tasks/${taskId}`;
@@ -267,7 +282,9 @@ test("AC3: an authorised caller with a bad body still gets today's 400 shape, an
   const viewPath = `/api/views/${viewId}`;
   const contactPath = `/api/contacts/${contactId}`;
 
-  const badTitle = await send(lead.request, "PATCH", taskPath, { title: "" });
+  // A task PATCH carries the task's current updatedAt (src/lib/schemas.ts), so title is the only bad field.
+  const taskVersion = async () => ((await send(lead.request, "GET", taskPath)).json?.task as { updatedAt: string }).updatedAt;
+  const badTitle = await send(lead.request, "PATCH", taskPath, { title: "", expectedUpdatedAt: await taskVersion() });
   expectValidation(badTitle);
   expect(badTitle.json?.issues).toEqual([{ path: ["title"], message: "Give the task a title." }]);
   const badTaskJson = await send(lead.request, "PATCH", taskPath, MALFORMED);
@@ -314,7 +331,7 @@ test("AC3: an authorised caller with a bad body still gets today's 400 shape, an
   if (process.env.SHAPE_OUT) writeFileSync(process.env.SHAPE_OUT, JSON.stringify(shapes, null, 2));
   await test.info().attach("ac3-shapes", { body: JSON.stringify(shapes, null, 2), contentType: "application/json" });
 
-  const renamed = await send(lead.request, "PATCH", taskPath, { title: zz("still here") });
+  const renamed = await send(lead.request, "PATCH", taskPath, { title: zz("still here"), expectedUpdatedAt: await taskVersion() });
   expect(renamed.status, renamed.text).toBe(200);
   expect(renamed.json?.task).toMatchObject({ title: expect.stringContaining("ZZ-TEST") });
 

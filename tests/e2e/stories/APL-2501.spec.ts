@@ -5,8 +5,17 @@
 //  - AC4 lists only My tasks, Projects and Team; CRM stories later added Deals and Accounts, so the test checks the role-specific items only.
 //  - AC5 says opening the bell marks the list read and shows the latest 30; SHO-US-14.13 changed it: nothing is marked read until
 //    the person clicks a notice, and the panel shows up to 50. The test checks the 14.13 behaviour.
+// The file skips only when SHO_QA_PASS is unset.
 // Data: every project and task is named "ZZ-TEST ...".
 import { test, expect, zz, type Who } from "../support";
+import { clickClear } from "../helpers/phone-hit";
+import { woff2HasName } from "../helpers/woff2-names";
+import { PASS, passwordOk } from "./qa";
+
+test.beforeAll(() => {
+  test.skip(!PASS, "Set SHO_QA_PASS (the password for nakul17+ aliases).");
+  if (!passwordOk(PASS)) throw new Error("SHO_QA_PASS must be at least 8 characters with a letter and a number.");
+});
 
 async function proj(admin: Who, label: string, later: (f: () => Promise<unknown>) => void) {
   const r = await admin.api.post("/api/projects", { name: zz(label), leaderId: admin.user.id });
@@ -16,12 +25,12 @@ async function proj(admin: Who, label: string, later: (f: () => Promise<unknown>
   return id;
 }
 
-test("AC1: at 1280 px the shell shows the sidebar, the content and a 340 px concierge slot on list screens", async ({ admin, later }) => {
+test("qa:TC missing AC1: at 1280 px the shell shows the sidebar, the content and a 340 px concierge slot on list screens", async ({ admin, later }) => {
   const p = await proj(admin, "shell-wide", later);
   await admin.page.setViewportSize({ width: 1280, height: 800 });
   await admin.page.goto(`/projects/${p}`);
-  await expect(admin.page.locator("aside nav.nav, .shell nav.nav").first()).toBeVisible();
-  await expect(admin.page.locator("main.content, main#main").first()).toBeVisible();
+  await expect(admin.page.getByRole("complementary", { name: "Main" }).getByRole("navigation")).toBeVisible();
+  await expect(admin.page.getByRole("main")).toBeVisible();
   const dock = admin.page.locator('aside[aria-label="Concierge"]');
   await expect(dock).toBeVisible();
   const w = (await dock.boundingBox())!.width;
@@ -29,33 +38,55 @@ test("AC1: at 1280 px the shell shows the sidebar, the content and a 340 px conc
   expect(Math.round(w)).toBeLessThanOrEqual(344);
 });
 
-test("AC2: at 390 px the sidebar collapses and no page scrolls sideways", async ({ admin, later }) => {
+test("qa:TC missing AC2: at 390 px the sidebar collapses and no page scrolls sideways", async ({ admin, later }) => {
   const p = await proj(admin, "shell-phone", later);
   await admin.page.setViewportSize({ width: 390, height: 800 });
   for (const path of ["/", "/projects", `/projects/${p}`, "/team"]) {
     await admin.page.goto(path);
-    await expect(admin.page.locator("main").first()).toBeVisible();
-    await expect(admin.page.locator("aside.side, aside[aria-label='Main']").first()).toBeHidden();
+    await expect(admin.page.getByRole("main")).toBeVisible();
+    await expect(admin.page.getByRole("complementary", { name: "Main" })).toBeHidden();
     const fits = await admin.page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1);
     expect(fits, `${path} scrolls sideways at 390 px`).toBe(true);
   }
 });
 
-test("AC3: the icon-only mark shows at 24 px and the text uses Public Sans", async ({ admin }) => {
+test("qa:TC missing AC3: the icon-only mark shows at 24 px and the text uses Public Sans", async ({ admin }) => {
   await admin.page.setViewportSize({ width: 1280, height: 800 });
   await admin.page.goto("/");
-  const img = admin.page.locator(".brand img").first();
+  const img = admin.page.getByRole("link", { name: "Sheet Happens Officer", exact: true }).locator("img");
   await expect(img).toHaveAttribute("src", "/logo-icon.svg");
   const box = (await img.boundingBox())!;
   expect(Math.round(box.width)).toBeGreaterThanOrEqual(24);
   expect(Math.round(box.width)).toBeLessThanOrEqual(36);
   const svg = await admin.page.request.get("/logo-icon.svg");
   expect(svg.status()).toBe(200);
-  const font = await admin.page.evaluate(() => getComputedStyle(document.body).fontFamily);
-  expect(font).toMatch(/Public Sans/i);
+  // next/font/local names the CSS family after the variable ("publicSans"), not the typeface, so the alias
+  // proves nothing. The body's first family must be a loaded @font-face whose files are Public Sans by
+  // the name table inside each font file.
+  const face = await admin.page.evaluate(async () => {
+    await document.fonts.ready;
+    const family = getComputedStyle(document.body).fontFamily.split(",")[0].trim().replace(/^["']|["']$/g, "");
+    const urls: string[] = [];
+    for (const sheet of Array.from(document.styleSheets)) {
+      for (const rule of Array.from(sheet.cssRules)) {
+        if (!(rule instanceof CSSFontFaceRule)) continue;
+        if (rule.style.getPropertyValue("font-family").trim().replace(/^["']|["']$/g, "") !== family) continue;
+        for (const m of rule.style.getPropertyValue("src").matchAll(/url\(["']?([^"')]+)["']?\)/g)) urls.push(new URL(m[1], sheet.href ?? location.href).pathname);
+      }
+    }
+    const loaded = Array.from(document.fonts).some((f) => f.family.replace(/^["']|["']$/g, "") === family && f.status === "loaded");
+    return { family, urls, loaded };
+  });
+  expect(face.loaded, `a loaded font face for ${face.family}`).toBe(true);
+  expect(face.urls.length, `@font-face files for ${face.family}`).toBeGreaterThan(0);
+  for (const url of face.urls) {
+    const file = await admin.page.request.get(url);
+    expect(file.status(), url).toBe(200);
+    expect(woff2HasName(await file.body(), "Public Sans"), `${url} is Public Sans`).toBe(true);
+  }
 });
 
-test("AC4: Usage and Audit log are for the Super Admin only; a Member who types the address gets the refusal", async ({ admin, member }) => {
+test("qa:TC missing AC4: Usage and Audit log are for the Super Admin only; a Member who types the address gets the refusal", async ({ admin, member }) => {
   await admin.page.setViewportSize({ width: 1280, height: 800 });
   await member.page.setViewportSize({ width: 1280, height: 800 });
   await admin.page.goto("/");
@@ -69,12 +100,12 @@ test("AC4: Usage and Audit log are for the Super Admin only; a Member who types 
   await expect(memberNav.getByRole("link", { name: "Audit log" })).toHaveCount(0);
   for (const path of ["/usage", "/audit"]) {
     await member.page.goto(path);
-    await expect(member.page.getByText("This page isn't available").first()).toBeVisible();
+    await expect(member.page.getByRole("heading", { name: "This page isn't available", exact: true })).toBeVisible();
   }
   expect((await member.api.get("/api/audit")).status).toBe(404);
 });
 
-test("AC5: the bell shows the unread count, lists notices newest first with links, and shows no count when there are none", async ({ admin, member, later }) => {
+test("qa:TC missing AC5: the bell shows the unread count, lists notices newest first with links, and shows no count when there are none", async ({ admin, member, later }) => {
   const p = await proj(admin, "shell-bell", later);
   expect((await admin.api.post(`/api/projects/${p}/members`, { userId: member.user.id, role: "EDITOR" })).status).toBe(201);
   later(() => admin.api.del(`/api/projects/${p}/members/${member.user.id}?handoverTo=${admin.user.id}`));
@@ -90,12 +121,17 @@ test("AC5: the bell shows the unread count, lists notices newest first with link
   expect(count).toBeGreaterThanOrEqual(2);
   await bell.click();
   const panel = member.page.getByRole("dialog", { name: "Notifications" });
-  const rows = panel.locator(".bell-main");
-  await expect(rows.first()).toContainText(zz("second notice")); // newest first
-  await expect(rows.nth(1)).toContainText(zz("first notice"));
-  await expect(rows.first()).toHaveAttribute("href", new RegExp(`/tasks/${t2}`));
+  const secondTitle = zz("second notice");
+  const firstTitle = zz("first notice");
+  const second = panel.getByRole("link", { name: `"${secondTitle}"` });
+  const first = panel.getByRole("link", { name: `"${firstTitle}"` });
+  await expect(second).toContainText(secondTitle);
+  await expect(first).toContainText(firstTitle);
+  // Newest first: the second notice sits above the first.
+  expect((await second.boundingBox())!.y).toBeLessThan((await first.boundingBox())!.y);
+  await expect(second).toHaveAttribute("href", new RegExp(`/tasks/${t2}`));
   // SHO-US-14.13: opening the panel marks nothing read; clicking a notice does
   expect((await member.api.get("/api/notifications")).json.unread).toBe(count);
-  await rows.first().click();
+  await clickClear(second);
   await expect.poll(async () => (await member.api.get("/api/notifications")).json.unread).toBe(count - 1);
 });

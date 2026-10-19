@@ -94,9 +94,13 @@ const PROBES: Record<number, (admin: Who, member: Who | null, later: Later) => P
       if ((await Promise.all(js)).some((s) => /failed:!\w+\.loading/.test(s))) return { deployed: true, how: "probe: served JS has useGet's `failed` flag" };
       await page.route((u) => u.pathname === `/api/team/${admin.user.id}`, async (r) => { await new Promise((x) => setTimeout(x, 2000)); await r.continue(); });
       await page.goto(`/team/${admin.user.id}`, { waitUntil: "commit" });
-      await page.waitForTimeout(900);
-      const old = await page.locator("div.skel", { hasText: "Loading…" }).count();
-      return { deployed: old === 0 && (await page.locator(".skel-wrap .skel-row").count()) > 0, how: `probe: slow Person page shows ${old ? "\"Loading…\"" : "the Skeleton"}` };
+      // The person request is still held. Wait until the old "Loading…" text or the Skeleton is on screen.
+      // The Skeleton (src/components/ui.tsx) is a busy status region whose only text is the screen-reader "Loading".
+      const oldText = page.getByText("Loading…", { exact: true });
+      const skeleton = page.getByRole("status").filter({ has: page.getByText("Loading", { exact: true }) });
+      await expect.poll(async () => (await oldText.count()) + (await skeleton.count())).toBeGreaterThan(0);
+      const old = await oldText.count();
+      return { deployed: old === 0 && (await skeleton.count()) > 0, how: `probe: slow Person page shows ${old ? "\"Loading…\"" : "the Skeleton"}` };
     } finally { await page.close(); }
   },
   // PR #6 (APL-2610, APL-2671): a manual reopen of a parent reopens the subtask that closed with it. On main it stays done.
@@ -151,6 +155,7 @@ const PROBES: Record<number, (admin: Who, member: Who | null, later: Later) => P
     try {
       let armStale = false;
       let staleArmed = false;
+      let lateArrived = false;
       const staleHeld = new Promise<void>((resolve) => { hold.release = () => resolve(); });
       const now = new Date().toISOString();
       const unread = { id: "gate-u", text: "ZZ gate unread", href: "/projects", read: false, createdAt: now };
@@ -170,19 +175,29 @@ const PROBES: Record<number, (admin: Who, member: Who | null, later: Later) => P
           staleArmed = true;
           await staleHeld;
           await route.fulfill(json({ unread: 0, items: [{ ...unread, read: true }, read], next: null }));
+          lateArrived = true;
           return;
         }
         await route.fulfill(json({ unread: 1, items: [unread, read], next: null }));
       });
       await page.goto("/", { waitUntil: "domcontentloaded" });
-      await bell(page).click();
+      // A click on the bell before hydration is lost, and the panel stays shut, so the seeded
+      // row never appears. The badge names "1 unread" only after the seeded list has been applied.
+      await expect(bell(page)).toHaveAttribute("aria-label", "Notifications, 1 unread");
+      await bell(page).click({ timeout: 10_000 });
       const panel = page.getByRole("dialog", { name: "Notifications" });
-      await panel.getByRole("button", { name: "Mark as read: ZZ gate unread" }).click();
+      const markRead = panel.getByRole("button", { name: "Mark as read: ZZ gate unread" });
+      await expect(markRead).toBeVisible();
+      await markRead.click({ timeout: 10_000 });
       await expect.poll(() => staleArmed).toBe(true); // the All reload is in flight; Unread has not been selected yet
-      await panel.getByRole("button", { name: /^Unread/ }).click();
+      await panel.getByRole("button", { name: /^Unread/ }).click({ timeout: 10_000 });
       await expect(panel.getByText("All caught up")).toBeVisible();
       hold.release();
-      await page.waitForTimeout(600); // the late All page has arrived; a panel that still accepts it has painted by now
+      await expect.poll(() => lateArrived).toBe(true);
+      // The response is in the page. Two frames let that list replace the Unread tab, when the build still accepts it.
+      await page.evaluate(() => new Promise<void>((resolve) => {
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+      }));
       const readRows = await panel.locator(".bell-row:not(.unread)").count();
       return { deployed: readRows === 0, how: `probe: a late All page left ${readRows} read row(s) on the Unread tab` };
     } finally { hold.release(); await page.close(); }
