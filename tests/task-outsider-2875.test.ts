@@ -1,9 +1,10 @@
-// APL-2875: a caller who cannot see a task gets exactly the answer for a missing id, on every /api/tasks/:id route.
+// APL-2875 (ACs v1.3): a caller who cannot see a task gets exactly the answer for a missing id, on every task route
+// (R1-R14 through loadTask, R4 assign, R15-R16 links, R17 convert) and on Undo (R18, "Action not found").
 // Test data: ZZ-TEST names and nakul17+ aliases. Projects are archived and people deactivated through the API afterwards.
 import { afterAll, describe, expect, it } from "vitest";
 import { account, BASE, Client, istDate, superAdmin, type Account } from "./helpers";
 import { db } from "../src/lib/db";
-import { getTask, taskAccess } from "../src/lib/tasks";
+import { getTask, recordAccess, taskAccess } from "../src/lib/tasks";
 
 type Res = { status: number; body: string };
 
@@ -12,6 +13,7 @@ const MISSING = `zz-test-missing-${RUN}`;
 const MALFORMED = "{";
 const people: Account[] = [];
 const projects: { id: string; lead: Account }[] = [];
+let seeds = 0;
 
 const person = async (label: string) => {
   const a = await account(label, `nakul17+zz-2875-${label}-${RUN}@aplyd.com`);
@@ -29,26 +31,29 @@ async function send(cookie: string, method: string, path: string, body?: string)
   return { status: res.status, body: await res.text() };
 }
 
-type Route = { method: string; path: (id: string) => string; valid: (s: Seed) => object | undefined; invalid?: object };
+type Route = { r: string; method: string; path: (id: string, s: Seed) => string; valid: (s: Seed) => object | undefined; invalid?: object };
 type Seed = Awaited<ReturnType<typeof setup>>;
 
 const VERSION = "2020-01-01T00:00:00.000Z";
-// Every route under /api/tasks/:id. links and convert are in records.ts and deals.ts, outside this fix.
+// R1-R17 of the APL-2875 v1.3 ACs: every route under /api/tasks/:id.
 const ROUTES: Route[] = [
-  { method: "GET", path: (id) => `/api/tasks/${id}`, valid: () => undefined },
-  { method: "PATCH", path: (id) => `/api/tasks/${id}`, valid: () => ({ title: "ZZ-TEST changed", expectedUpdatedAt: VERSION }), invalid: { title: 7 } },
-  { method: "DELETE", path: (id) => `/api/tasks/${id}`, valid: () => undefined },
-  { method: "PUT", path: (id) => `/api/tasks/${id}/approver`, valid: (s) => ({ approverId: s.editor.id, expectedUpdatedAt: VERSION }), invalid: { approverId: "" } },
-  { method: "POST", path: (id) => `/api/tasks/${id}/assign`, valid: (s) => ({ assigneeId: s.editor.id, expectedUpdatedAt: VERSION }), invalid: { assigneeId: "" } },
-  { method: "POST", path: (id) => `/api/tasks/${id}/collaborators`, valid: (s) => ({ userId: s.editor.id }), invalid: { userId: "" } },
-  { method: "DELETE", path: (id) => `/api/tasks/${id}/collaborators/zz-test-user`, valid: () => undefined },
-  { method: "POST", path: (id) => `/api/tasks/${id}/complete`, valid: () => ({ expectedUpdatedAt: VERSION }), invalid: { completeAll: "yes" } },
-  { method: "POST", path: (id) => `/api/tasks/${id}/idea`, valid: () => ({ isIdea: true }), invalid: { isIdea: "yes" } },
-  { method: "POST", path: (id) => `/api/tasks/${id}/move`, valid: (s) => ({ sectionId: s.doing, expectedUpdatedAt: VERSION }), invalid: { sectionId: "" } },
-  { method: "POST", path: (id) => `/api/tasks/${id}/reopen`, valid: () => ({}), invalid: { sectionId: "" } },
-  { method: "POST", path: (id) => `/api/tasks/${id}/restore`, valid: () => ({}), invalid: { confirmParent: "yes" } },
-  { method: "POST", path: (id) => `/api/tasks/${id}/send-back`, valid: () => ({}) },
-  { method: "POST", path: (id) => `/api/tasks/${id}/send-for-approval`, valid: () => ({}) },
+  { r: "R1", method: "GET", path: (id) => `/api/tasks/${id}`, valid: () => undefined },
+  { r: "R2", method: "PATCH", path: (id) => `/api/tasks/${id}`, valid: () => ({ title: "ZZ-TEST changed", expectedUpdatedAt: VERSION }), invalid: { title: 7 } },
+  { r: "R3", method: "DELETE", path: (id) => `/api/tasks/${id}`, valid: () => undefined },
+  { r: "R4", method: "POST", path: (id) => `/api/tasks/${id}/assign`, valid: (s) => ({ assigneeId: s.editor.id, expectedUpdatedAt: VERSION }), invalid: { assigneeId: "" } },
+  { r: "R5", method: "POST", path: (id) => `/api/tasks/${id}/collaborators`, valid: (s) => ({ userId: s.editor.id }), invalid: { userId: "" } },
+  { r: "R6", method: "DELETE", path: (id, s) => `/api/tasks/${id}/collaborators/${s.editor.id}`, valid: () => undefined },
+  { r: "R7", method: "PUT", path: (id) => `/api/tasks/${id}/approver`, valid: (s) => ({ approverId: s.editor.id, expectedUpdatedAt: VERSION }), invalid: { approverId: "" } },
+  { r: "R8", method: "POST", path: (id) => `/api/tasks/${id}/send-for-approval`, valid: () => ({}) },
+  { r: "R9", method: "POST", path: (id) => `/api/tasks/${id}/send-back`, valid: () => ({}) },
+  { r: "R10", method: "POST", path: (id) => `/api/tasks/${id}/complete`, valid: () => ({ expectedUpdatedAt: VERSION }), invalid: { completeAll: "yes" } },
+  { r: "R11", method: "POST", path: (id) => `/api/tasks/${id}/reopen`, valid: () => ({}), invalid: { sectionId: "" } },
+  { r: "R12", method: "POST", path: (id) => `/api/tasks/${id}/move`, valid: (s) => ({ sectionId: s.doing, expectedUpdatedAt: VERSION }), invalid: { sectionId: "" } },
+  { r: "R13", method: "POST", path: (id) => `/api/tasks/${id}/restore`, valid: () => ({}), invalid: { confirmParent: "yes" } },
+  { r: "R14", method: "POST", path: (id) => `/api/tasks/${id}/idea`, valid: () => ({ isIdea: true }), invalid: { isIdea: "yes" } },
+  { r: "R15", method: "POST", path: (id) => `/api/tasks/${id}/links`, valid: (s) => ({ organisationId: s.orgId }), invalid: { organisationId: 7 } },
+  { r: "R16", method: "DELETE", path: (id, s) => `/api/tasks/${id}/links/${s.linkId}`, valid: () => undefined },
+  { r: "R17", method: "POST", path: (id) => `/api/tasks/${id}/convert`, valid: () => ({}), invalid: { force: "yes" } },
 ];
 
 /** The bodies each route is tried with: valid, schema-invalid and malformed "{". */
@@ -80,10 +85,18 @@ async function setup() {
   };
   const t1 = await newTask(`ZZ-TEST live ${RUN}`);
   const t2 = await newTask(`ZZ-TEST deleted ${RUN}`);
+  const org = await lead.c.post("/api/orgs", { name: `ZZ-TEST APL-2875 org ${RUN} ${++seeds}` });
+  expect(org.status, JSON.stringify(org.json)).toBe(201);
+  const orgId = org.json.organisation.id as string;
+  const link = await lead.c.post(`/api/tasks/${t1}/links`, { organisationId: orgId });
+  expect(link.status, JSON.stringify(link.json)).toBe(201);
   expect((await lead.c.del(`/api/tasks/${t2}`)).status).toBe(204);
   const left = await lead.c.del(`/api/projects/${pid}/members/${removed.id}`);
   expect(left.status, JSON.stringify(left.json)).toBeLessThan(300);
-  return { lead, editor, viewer, outsider, removed, pid, t1, t2, doing: sections[1].id };
+  // An undoable action-log row in P1 for R18.
+  const logRow = await db.actionLog.findFirst({ where: { projectId: pid, targetId: t2, action: "task.deleted" } });
+  expect(logRow?.id).toBeTruthy();
+  return { lead, editor, viewer, outsider, removed, pid, t1, t2, doing: sections[1].id, orgId, linkId: link.json.link.id as string, logId: logRow!.id };
 }
 
 /** Stored state of the tasks, so a refused call can be shown to change nothing. */
@@ -92,6 +105,7 @@ async function snapshot(ids: string[]) {
   return {
     rows: rows.map((t) => ({ id: t.id, updatedAt: t.updatedAt.toISOString(), assigneeId: t.assigneeId, deletedAt: t.deletedAt?.toISOString() ?? null, isIdea: t.isIdea })),
     actions: await db.actionLog.count({ where: { targetId: { in: ids } } }),
+    links: await db.taskLink.count({ where: { taskId: { in: ids } } }),
     audits: await db.auditLog.count({ where: { targetId: { in: ids } } }),
   };
 }
@@ -109,9 +123,9 @@ describe("qa:TC missing APL-2875 a caller who cannot see a task gets the missing
     for (const who of [s.outsider, s.removed]) {
       for (const r of ROUTES) {
         for (const body of bodies(r, s)) {
-          const missing = await send(who.c.cookie, r.method, r.path(MISSING), body);
-          const live = await send(who.c.cookie, r.method, r.path(s.t1), body);
-          expect(live, `${who.name} ${r.method} ${r.path("T1")} ${body ?? ""}`).toEqual(missing);
+          const missing = await send(who.c.cookie, r.method, r.path(MISSING, s), body);
+          const live = await send(who.c.cookie, r.method, r.path(s.t1, s), body);
+          expect(live, `${r.r} ${who.name} ${r.method} ${r.path("T1", s)} ${body ?? ""}`).toEqual(missing);
           expect(live.body).not.toMatch(/Project not found|ZZ-TEST|nakul17/);
         }
       }
@@ -124,9 +138,9 @@ describe("qa:TC missing APL-2875 a caller who cannot see a task gets the missing
     const before = await snapshot([s.t2]);
     for (const r of ROUTES) {
       for (const body of bodies(r, s)) {
-        const missing = await send(s.outsider.c.cookie, r.method, r.path(MISSING), body);
-        const deleted = await send(s.outsider.c.cookie, r.method, r.path(s.t2), body);
-        expect(deleted, `${r.method} ${r.path("T2")} ${body ?? ""}`).toEqual(missing);
+        const missing = await send(s.outsider.c.cookie, r.method, r.path(MISSING, s), body);
+        const deleted = await send(s.outsider.c.cookie, r.method, r.path(s.t2, s), body);
+        expect(deleted, `${r.r} ${r.method} ${r.path("T2", s)} ${body ?? ""}`).toEqual(missing);
       }
     }
     expect(await snapshot([s.t2])).toEqual(before);
@@ -175,9 +189,28 @@ describe("qa:TC missing APL-2875 a caller who cannot see a task gets the missing
     }
   });
 
-  it("qa:TC missing AC2: members keep today's answers", async () => {
+  it("qa:TC missing AC1: R18 Undo gives an outsider and a removed member the missing-action answer, and nothing is undone", async () => {
+    const s = await setup();
+    const before = await snapshot([s.t1, s.t2]);
+    const missingId = `zz-test-missing-action-${RUN}`;
+    for (const who of [s.outsider, s.removed]) {
+      for (const body of [undefined, JSON.stringify({ anyway: true }), JSON.stringify({ anyway: "yes" }), MALFORMED]) {
+        const missing = await send(who.c.cookie, "POST", `/api/actions/${missingId}/undo`, body);
+        const live = await send(who.c.cookie, "POST", `/api/actions/${s.logId}/undo`, body);
+        expect(live, `R18 ${who.name} ${body ?? ""}`).toEqual(missing);
+        expect(live.body).not.toMatch(/Project not found|ZZ-TEST|nakul17/);
+      }
+      expect(await send(who.c.cookie, "POST", `/api/actions/${s.logId}/undo`)).toEqual({ status: 404, body: JSON.stringify({ error: "Action not found" }) });
+    }
+    expect(await snapshot([s.t1, s.t2])).toEqual(before);
+    await expect(recordAccess({ id: s.outsider.id, orgRole: "MEMBER" }, s.pid, "Action")).rejects.toMatchObject({ status: 404, message: "Action not found" });
+  });
+
+  it("qa:TC missing AC3: members keep today's answers", async () => {
     const s = await setup();
     const assign = (who: Account, body: string) => send(who.c.cookie, "POST", `/api/tasks/${s.t1}/assign`, body);
+    // A member still gets Task not found for a task in Trash, the same as a missing id.
+    expect((await s.editor.c.get(`/api/tasks/${s.t2}`)).json).toEqual({ error: "Task not found" });
     expect(await assign(s.viewer, JSON.stringify({ assigneeId: s.editor.id, expectedUpdatedAt: VERSION })))
       .toEqual({ status: 403, body: JSON.stringify({ error: "Viewers cannot make changes." }) });
     expect((await s.editor.c.get(`/api/tasks/${s.t1}`)).status).toBe(200);
@@ -189,20 +222,34 @@ describe("qa:TC missing APL-2875 a caller who cannot see a task gets the missing
     const ok = await assign(s.editor, JSON.stringify({ assigneeId: s.editor.id, expectedUpdatedAt: version }));
     expect(ok, ok.body).toEqual({ status: 200, body: JSON.stringify({ status: "ok" }) });
     expect((await s.editor.c.get(`/api/tasks/${s.t1}`)).json.task.assignee.id).toBe(s.editor.id);
-    // A member still gets Task not found for a task in Trash, the same as a missing id.
-    expect((await s.editor.c.get(`/api/tasks/${s.t2}`)).json).toEqual({ error: "Task not found" });
+    // APL-2714: access is still checked before the body on assign, so a Viewer's bad body is 403, not 400.
+    expect(await assign(s.viewer, JSON.stringify({ assigneeId: "" }))).toEqual({ status: 403, body: JSON.stringify({ error: "Viewers cannot make changes." }) });
+    expect(await assign(s.viewer, MALFORMED)).toEqual({ status: 403, body: JSON.stringify({ error: "Viewers cannot make changes." }) });
+    // R16: a missing link id is still Link not found for a member.
+    expect(await send(s.editor.c.cookie, "DELETE", `/api/tasks/${s.t1}/links/zz-test-missing-link`)).toEqual({ status: 404, body: JSON.stringify({ error: "Link not found" }) });
+    // R15 and R17: a Viewer still gets the write refusal.
+    expect(await send(s.viewer.c.cookie, "POST", `/api/tasks/${s.t1}/links`, JSON.stringify({ organisationId: s.orgId })))
+      .toEqual({ status: 403, body: JSON.stringify({ error: "Viewers cannot make changes." }) });
+    expect((await send(s.viewer.c.cookie, "POST", `/api/tasks/${s.t1}/convert`, "{}")).status).toBe(403);
+    // R18: an Editor who did not make the change still gets today's refusal, and the Leader can undo the delete.
+    expect(await send(s.editor.c.cookie, "POST", `/api/actions/${s.logId}/undo`)).toEqual({ status: 403, body: JSON.stringify({ error: "You can only undo your own actions." }) });
+    expect((await send(s.lead.c.cookie, "POST", `/api/actions/${s.logId}/undo`)).status).toBe(200);
+
   });
 
-  it("qa:TC missing AC3: no session gets 401 Not signed in for a live task, a deleted task and a missing id on every task route", async () => {
+  it("qa:TC missing AC2: no session gets 401 Not signed in for a live task, a deleted task and a missing id on every task route and on Undo", async () => {
     const s = await setup();
     const anon = new Client();
     for (const r of ROUTES) {
       for (const body of bodies(r, s)) {
         for (const id of [s.t1, s.t2, MISSING]) {
-          const res = await send(anon.cookie, r.method, r.path(id), body);
-          expect(res, `${r.method} ${r.path(id)} ${body ?? ""}`).toEqual({ status: 401, body: JSON.stringify({ error: "Not signed in" }) });
+          const res = await send(anon.cookie, r.method, r.path(id, s), body);
+          expect(res, `${r.r} ${r.method} ${r.path(id, s)} ${body ?? ""}`).toEqual({ status: 401, body: JSON.stringify({ error: "Not signed in" }) });
         }
       }
+    }
+    for (const id of [s.logId, `zz-test-missing-action-${RUN}`]) {
+      expect(await send(anon.cookie, "POST", `/api/actions/${id}/undo`)).toEqual({ status: 401, body: JSON.stringify({ error: "Not signed in" }) });
     }
   });
 });

@@ -2,10 +2,10 @@
 // SHO-US-6.4: Undo from the stored before-state, with a conflict warning and "Undo anyway".
 import { db } from "@/lib/db";
 import { ApiError, notFound } from "@/lib/http";
-import { WORKERS, activeMember, projectAccess, requireManage, requireWrite, type Actor, type Tx } from "@/lib/access";
+import { WORKERS, activeMember, requireManage, requireWrite, type Actor, type Tx } from "@/lib/access";
 import { formatDueDate } from "@/lib/dates";
 import { auditTx, logAction, notify } from "@/lib/notify";
-import { deleteTask, restoreTask } from "@/lib/tasks";
+import { deleteTask, recordAccess, restoreTask } from "@/lib/tasks";
 import { UNDO_LABELS, isTooOldToUndo, isUndoable } from "@/lib/undoable";
 import { undoRecord } from "@/lib/records";
 
@@ -356,7 +356,7 @@ async function prepare(user: Actor, logId: string) {
   if (!row) throw notFound("Action");
   const projectId = row.projectId;
   if (!projectId) throw bad("This kind of action cannot be undone.");
-  const a = await projectAccess(user, projectId);
+  const a = await recordAccess(user, projectId, "Action");
   requireWrite(a);
   const archiveKind = row.action === "project.archived" || row.action === "project.unarchived";
   if (a.project.archivedAt && !archiveKind) throw new ApiError(409, "This project is archived and read-only.");
