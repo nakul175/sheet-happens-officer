@@ -4,8 +4,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 type UsageWrite = { data: { counted: boolean; model: string; userId: string } };
 
-const usageCreate = vi.fn(async (_row: UsageWrite) => ({ id: "usage-1" }));
-const chatCreate = vi.fn(async (_row: unknown) => ({ id: "should-not-be-written" }));
+const usageCreate = vi.fn<(row: UsageWrite) => Promise<{ id: string }>>(async () => ({ id: "usage-1" }));
+const chatCreate = vi.fn<(row: unknown) => Promise<{ id: string }>>(async () => ({ id: "should-not-be-written" }));
 
 vi.mock("@/lib/db", () => ({
   db: {
@@ -108,6 +108,19 @@ describe("qa:TC missing improve my prompt (APL-2694)", () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response("", { status: 500 })));
     await expect(improvePrompt({ id: "user-1", orgRole: "MEMBER" }, ORIGINAL)).rejects.toMatchObject({ status: 503 });
     expect(usageCreate).not.toHaveBeenCalled();
+    expect(chatCreate).not.toHaveBeenCalled();
+  });
+
+  it("qa:TC missing AC4: an empty model reply is a visible error, not counted against the week, and writes no chat row", async () => {
+    enableModel();
+    mockModel("   ");
+    await expect(improvePrompt({ id: "user-1", orgRole: "MEMBER" }, ORIGINAL)).rejects.toMatchObject({
+      status: 502,
+      message: "No clearer version came back. Your text is unchanged; try again.",
+    });
+    // The spend is still on the ledger for cost tracking, but not counted toward the person's weekly cap.
+    expect(usageCreate).toHaveBeenCalledTimes(1);
+    expect(usageCreate.mock.calls[0][0].data).toMatchObject({ counted: false, model: "claude-haiku-5-5", userId: "user-1" });
     expect(chatCreate).not.toHaveBeenCalled();
   });
 

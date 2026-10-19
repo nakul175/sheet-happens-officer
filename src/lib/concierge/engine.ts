@@ -276,9 +276,12 @@ export async function improvePrompt(user: Actor, text: string, now = new Date())
   try {
     const r = await generate({ system: IMPROVE_SYSTEM, tools: [], messages: [{ role: "user", content: clean }], maxTokens: 600 });
     clearProviderDown();
-    await recordUsage(user.id, r, true);
     const improved = r.content.filter((b): b is Extract<ContentBlock, { type: "text" }> => b.type === "text").map((b) => b.text).join("\n").trim().slice(0, MAX_TEXT);
-    return { improved: improved || clean };
+    // APL-2694: an empty reply is no rewrite. Its spend is still recorded, but it does not count against the
+    // person's week, and they are told instead of being handed their own text back as "a clearer version".
+    await recordUsage(user.id, r, !!improved);
+    if (!improved) throw new ApiError(502, "No clearer version came back. Your text is unchanged; try again.");
+    return { improved };
   } catch (e) {
     if (e instanceof ModelError) {
       if (e.code === "PROVIDER_DOWN") markProviderDown();
