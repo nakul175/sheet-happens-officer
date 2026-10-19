@@ -106,7 +106,7 @@ describe("auth before body (APL-2651)", () => {
       expectAccess(await hit(editor, "PATCH", sectionPath, body), 403, "Only the project Leader or an Admin can do this.");
     }
     for (const body of [{ title: "" }, "{"] as const) {
-      // F8 (Dwight) and APL-2651 AC2 v1.2: an outsider's PATCH gets the same 404 { error: "Task not found" }
+      // F8 (Dwight), APL-2651 AC2 v1.2 and APL-2875: an outsider's PATCH gets the same 404 { error: "Task not found" }
       // as a missing id, before the body is read, so the two bodies are byte-identical.
       const hidden = await hit(outsider, "PATCH", taskPath, body);
       expectAccess(hidden, 404, "Task not found");

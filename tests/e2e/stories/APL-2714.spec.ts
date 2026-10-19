@@ -155,7 +155,8 @@ describe("qa:TC missing APL-2714 story: auth and access before the body", () => 
     const rows: [Who, "PATCH" | "POST", string, object, number, string][] = [
       [w.outsider, "PATCH", `/api/projects/${w.projectId}`, { name: "" }, 404, "Project not found"],
       [w.editor, "PATCH", `/api/projects/${w.projectId}`, { name: "" }, 403, "Only the project Leader or an Admin can do this."],
-      [w.outsider, "POST", `/api/tasks/${w.taskId}/assign`, { assigneeId: "" }, 404, "Project not found"],
+      // APL-2875 supersedes this row of APL-2714 AC2 v1.1: an outsider gets the missing-id answer.
+      [w.outsider, "POST", `/api/tasks/${w.taskId}/assign`, { assigneeId: "" }, 404, "Task not found"],
       [w.viewer, "POST", `/api/tasks/${w.taskId}/assign`, { assigneeId: "" }, 403, "Viewers cannot make changes."],
       [w.member, "POST", `/api/team/${w.other.id}/deactivate`, { reassign: "" }, 403, "You cannot deactivate this person."],
       [w.orgAdmin, "POST", `/api/team/${w.admin2.id}/deactivate`, { reassign: "" }, 403, "You cannot deactivate this person."],
