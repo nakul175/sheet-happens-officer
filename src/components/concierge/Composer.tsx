@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import { useConcierge } from "./ConciergeProvider";
+import { keptDraft, offeredRewrite } from "./logic";
 import { useDictation } from "./useDictation";
 
 export function Composer({ off, compact }: { off: boolean; compact?: boolean }) {
@@ -21,8 +22,10 @@ export function Composer({ off, compact }: { off: boolean; compact?: boolean }) 
   }
   async function improve() {
     const original = c.draft;
-    const better = await c.improve(original);
-    if (better) { setRewrite({ original }); c.setDraft(better); }
+    const offer = offeredRewrite(original, await c.improve(original));
+    if (!offer) return;
+    setRewrite({ original: offer.original });
+    c.setDraft(offer.draft);
   }
   function mic() {
     if (dict.listening) return;
@@ -51,7 +54,7 @@ export function Composer({ off, compact }: { off: boolean; compact?: boolean }) 
         <div className="cc-rewrite" role="group" aria-label="Suggested rewrite">
           <span>Here is a clearer version. Nothing has been sent.</span>
           <button className="btn sm" onClick={() => { setRewrite(null); ta.current?.focus(); }}>Use it</button>
-          <button className="btn ghost sm" onClick={() => { c.setDraft(rewrite.original); setRewrite(null); ta.current?.focus(); }}>Keep mine</button>
+          <button className="btn ghost sm" onClick={() => { c.setDraft(keptDraft(rewrite.original)); setRewrite(null); ta.current?.focus(); }}>Keep mine</button>
         </div>
       )}
       <div className="cc-inrow">

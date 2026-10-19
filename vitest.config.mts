@@ -3,8 +3,9 @@ import { configDefaults, defineConfig } from "vitest/config";
 
 // Tests hit a live dev server (first request to a route compiles it), so allow time.
 // The concierge tests also call src/lib directly (the "@/..." imports), with a fake model.
-// CRM_VISIBLE mode servers need a production build and three processes, so they stay out of `npm test`.
-// Run them with `npm run test:crm-modes`. Playwright stories and viewport specs have their own runners.
+// CRM_VISIBLE mode servers need a production build and one process per mode, so they stay out of `npm test`.
+// Run them with `npm run test:crm-modes` or `npm run test:stalled-modes`. CI runs the stalled-deal one after the build.
+// APL-2669.spec.ts and APL-2733.spec.ts are Playwright stories. Vitest's default include matches *.spec.ts, so they are excluded here.
 export default defineConfig({
   resolve: { alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) } },
   // scripts/** holds node:test files (assert-playwright-ran.test.mjs). Vitest's default
@@ -13,6 +14,16 @@ export default defineConfig({
   test: {
     testTimeout: 30000,
     fileParallelism: false,
-    exclude: [...configDefaults.exclude, "tests/viewport/**", "tests/e2e/stories/APL-2669.spec.ts", "tests/crm-visible-modes-server.test.ts", "e2e/**", "scripts/**"],
+    exclude: [
+      ...configDefaults.exclude,
+      "tests/viewport/**",
+      "tests/e2e/stories/APL-2669.spec.ts",
+      "tests/e2e/stories/APL-2733.spec.ts",
+      "tests/crm-visible-modes-server.test.ts",
+      "tests/apl-2713-crm-modes.test.ts",
+      "tests/jobs-stalled-crm-server.test.ts",
+      "e2e/**",
+      "scripts/**",
+    ],
   },
 });

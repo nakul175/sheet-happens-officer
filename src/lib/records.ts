@@ -8,7 +8,7 @@ import { WORKSTREAM_DEAL, requireCrm } from "@/lib/crm";
 import { formatDueDate, parseDueDate } from "@/lib/dates";
 import { logAction } from "@/lib/notify";
 import { assertNoCycle, orgOf } from "@/lib/orgs";
-import { UNDO_DAYS, UNDO_LABELS, isUndoable } from "@/lib/undoable";
+import { UNDO_LABELS, isTooOldToUndo, isUndoable } from "@/lib/undoable";
 
 const clean = (v: string | null | undefined) => (v?.trim() ? v.trim() : null);
 const NOTE_KINDS = ["MEETING", "CALL", "INTRODUCTION", "OTHER"] as const;
@@ -344,7 +344,7 @@ export async function undoRecord(user: Actor, row: { id: string; action: string;
   if (row.actorId !== user.id && !isAdmin(user)) throw new ApiError(403, "You can only undo your own actions.");
   if (row.undoneAt) throw new ApiError(409, "This action was already undone.");
   if (!isUndoable(row.action)) throw new ApiError(409, "This kind of action cannot be undone.");
-  if (Date.now() - row.createdAt.getTime() > UNDO_DAYS * 86400_000) throw new ApiError(409, "Too old to undo", { tooOld: true });
+  if (isTooOldToUndo(row.createdAt)) throw new ApiError(409, "Too old to undo", { tooOld: true });
   const p = await planRecord(row, user);
   if (p.conflicts.length && !anyway) {
     throw new ApiError(409, "This changed after your action.", { needsConfirm: "conflict", label: UNDO_LABELS[row.action], changedBy: [], conflicts: p.conflicts.map((c) => ({ field: c.field, before: String(c.before ?? "none"), after: String(c.after ?? "none"), now: String(c.now ?? "none") })) });

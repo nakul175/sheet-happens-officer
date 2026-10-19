@@ -59,6 +59,9 @@ jobs:
       - run: npx prisma migrate deploy
       - name: Build
         run: npm run build
+      # APL-2713. These servers are excluded from `npm test`. A failure here fails the job.
+      - name: CRM mode tests
+        run: npm run test:crm-modes
       - name: Start the app
         run: |
           (npx next start -p 3100 > server.log 2>&1 &)
@@ -80,6 +83,10 @@ jobs:
           fi
       - name: Unit tests
         run: npm test
+      # APL-2741. One production server per CRM_VISIBLE mode, after the build.
+      # The file sets its own test-only job token. A short JOB_SECRET must fail this step, not skip it.
+      - name: Stalled-deal modes (one server per CRM_VISIBLE)
+        run: npm run test:stalled-modes
       - name: Server log (on failure)
         if: failure()
         run: tail -n 200 server.log || true

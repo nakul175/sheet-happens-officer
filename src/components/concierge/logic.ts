@@ -51,6 +51,26 @@ export function resumeText(d: Disabled): string | null {
   return t.toLocaleDateString("en-IN", { day: "numeric", month: "long", year: "numeric", timeZone: "Asia/Kolkata" });
 }
 
+/**
+ * A non-empty improve result replaces the draft and remembers the original. A failure leaves the draft alone.
+ * So does a result that is only the typed text again. The server answers that case with a 502 (APL-2694), so this
+ * guard only matters if an older server sends the typed text back.
+ */
+export function offeredRewrite(original: string, improved: string | null | undefined): { original: string; draft: string } | null {
+  if (!improved?.trim() || improved.trim() === original.trim()) return null;
+  return { original, draft: improved };
+}
+
+/** Keep mine puts the typed text back, exactly, and drops the offer. */
+export function keptDraft(original: string): string {
+  return original;
+}
+
+/** Visible text for a failed improve call. The draft is left as it was. */
+export function improveError(error: string | undefined): string {
+  return error ?? "Could not improve that. Try again.";
+}
+
 /** Stale response from confirm: contract says 409 plus a fresh card message. Accept either shape. */
 export function freshMessages(data: { messages?: Message[]; message?: Message } | undefined): Message[] {
   if (!data) return [];
