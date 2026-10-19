@@ -483,19 +483,19 @@ describe("reminder jobs are one server process per CRM_VISIBLE mode (APL-2729)",
     await db.$disconnect();
   });
 
-  it("qa:TC-APL2729-c2ee0001@v1 qa:TC-APL2729-c30b5001@v1 qa:TC-APL2729-10ad0040@v1 unset server matches main, including 40 concurrent job posts", async () => {
+  it("qa:TC missing qa:TC missing qa:TC missing unset server matches main, including 40 concurrent job posts", async () => {
     await runMode("unset");
   });
 
-  it("qa:TC-APL2729-c2a11001@v1 qa:TC-APL2729-c30b5001@v1 qa:TC-APL2729-10ad0040@v1 CRM_VISIBLE=all server matches main, including 40 concurrent job posts", async () => {
+  it("qa:TC missing qa:TC missing qa:TC missing CRM_VISIBLE=all server matches main, including 40 concurrent job posts", async () => {
     await runMode("all");
   });
 
-  it("qa:TC-APL2729-c1a1d001@v1 qa:TC-APL2729-c2ad0001@v1 qa:TC-APL2729-c30b5001@v1 qa:TC-APL2729-10ad0040@v1 admins server: a member gets no deal reminder and an admin still does", async () => {
+  it("qa:TC missing qa:TC missing qa:TC missing qa:TC missing admins server: a member gets no deal reminder and an admin still does", async () => {
     await runMode("admins");
   });
 
-  it("qa:TC-APL2729-c1ff0001@v1 qa:TC-APL2729-c30b5001@v1 qa:TC-APL2729-10ad0040@v1 off server: nobody gets a deal reminder, and the ops check is unchanged", async () => {
+  it("qa:TC missing qa:TC missing qa:TC missing off server: nobody gets a deal reminder, and the ops check is unchanged", async () => {
     await runMode("off");
   });
 });

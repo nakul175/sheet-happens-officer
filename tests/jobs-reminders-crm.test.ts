@@ -165,35 +165,35 @@ describe("reminder jobs apply crmProjectWhere (APL-2729)", () => {
     await db.notification.deleteMany({ where: { recipientId: { in: [member.id, dealAdmin.id] }, type: { in: [...DUE] } } });
   });
 
-  it("qa:TC-APL2729-c2ee0001@v1 qa:TC-APL2729-c30b5001@v1 unset matches main, including the ops check", async () => {
+  it("qa:TC missing qa:TC missing unset matches main, including the ops check", async () => {
     await runMode("unset");
     await expectDealReminder(member, memberTaskId, memberTitle);
     await expectDealReminder(dealAdmin, adminTaskId, adminTitle);
     await expectOpsReminder(true);
   });
 
-  it("qa:TC-APL2729-c2a11001@v1 qa:TC-APL2729-c30b5001@v1 CRM_VISIBLE=all matches main, including the ops check", async () => {
+  it("qa:TC missing qa:TC missing CRM_VISIBLE=all matches main, including the ops check", async () => {
     await runMode("all");
     await expectDealReminder(member, memberTaskId, memberTitle);
     await expectDealReminder(dealAdmin, adminTaskId, adminTitle);
     await expectOpsReminder(true);
   });
 
-  it("qa:TC-APL2729-c1a1d001@v1 qa:TC-APL2729-c2ad0001@v1 qa:TC-APL2729-c30b5001@v1 admins: a member gets no deal reminder and an admin still does", async () => {
+  it("qa:TC missing qa:TC missing qa:TC missing admins: a member gets no deal reminder and an admin still does", async () => {
     await runMode("admins");
     await expectNoDealReminder(member);
     await expectDealReminder(dealAdmin, adminTaskId, adminTitle);
     await expectOpsReminder(true);
   });
 
-  it("qa:TC-APL2729-c1ff0001@v1 qa:TC-APL2729-c30b5001@v1 off: nobody gets a deal reminder, and the ops check is unchanged", async () => {
+  it("qa:TC missing qa:TC missing off: nobody gets a deal reminder, and the ops check is unchanged", async () => {
     await runMode("off");
     await expectNoDealReminder(member);
     await expectNoDealReminder(dealAdmin);
     await expectOpsReminder(true);
   });
 
-  it("qa:TC-APL2729-10ad0040@v1 40 concurrent reminder requests do not name a hidden deal", async () => {
+  it("qa:TC missing 40 concurrent reminder requests do not name a hidden deal", async () => {
     await clearReminders();
     await withMode("admins", async () => {
       const today = startOfTodayIST();
