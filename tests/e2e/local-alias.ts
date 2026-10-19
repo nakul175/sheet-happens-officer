@@ -35,7 +35,7 @@ function verifyToken(outbox: string, email: string) {
 export async function signUpAlias(base: string, outbox: string, email: string, name: string, password = QA_PASS) {
   if (!password) throw new Error("Set SHO_QA_PASS (the password for nakul17+ aliases).");
   const created = await call(base, "", "POST", "/api/auth/signup", { name, email, password });
-  if (created.status !== 201) throw new Error(`signup ${email}: ${created.status} ${created.text}`);
+  if (created.status !== 201) throw new Error(`signup ${email}: ${created.status}`);
   const token = verifyToken(outbox, email);
   if (!token) throw new Error(`no verification mail for ${email}`);
   const verified = await call(base, "", "POST", "/api/auth/verify", { token });
