@@ -76,7 +76,7 @@ h1.pt { font-size: 24px; margin: 0; color: var(--ink); font-weight: 600; }
 input.in, select.in, textarea.in { font: inherit; font-size: 14px; padding: 8px 10px; border: 1px solid var(--field); border-radius: 8px; background: #fff; color: var(--ink); width: 100%; }
 input.in:focus, select.in:focus, textarea.in:focus, .btn:focus-visible, .tick:focus-visible { outline: 2px solid var(--gold); outline-offset: 1px; }
 textarea.in { min-height: 90px; resize: vertical; }
-/* APL-2644: grows with the reason up to about five lines (the cap is applied in fitBlockedReason), then scrolls inside. */
+/* APL-2644, APL-2737: grows with the reason (fitBlockedReason), refitted when its width changes, so all of it is on screen. */
 textarea.in.blocked-reason { display: block; margin-top: 6px; min-height: 0; line-height: 1.4; resize: none; overflow-wrap: anywhere; overscroll-behavior: contain; }
 .err { background: var(--danger-bg); border: 1px solid var(--danger-line); color: var(--danger); border-radius: 8px; padding: 9px 12px; font-size: 14px; margin: 10px 0; }
 .ok { background: var(--ok-bg); border: 1px solid var(--ok-line); color: var(--ok); border-radius: 8px; padding: 9px 12px; font-size: 14px; margin: 10px 0; }
