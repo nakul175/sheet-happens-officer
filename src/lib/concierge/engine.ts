@@ -10,7 +10,7 @@ import {
 } from "@/lib/concierge/limits";
 import { todayLine } from "@/lib/concierge/dates";
 import { flat, personById, projectById, quickAnswer, taskById, QUICK_ACTIONS, type TaskRec } from "@/lib/concierge/reads";
-import { TOOLS, newTurn, runTool, wrap, type Kind, type Turn } from "@/lib/concierge/tools";
+import { TOOLS, newTurn, normalise, runTool, wrap, type Kind, type Turn } from "@/lib/concierge/tools";
 import { addMessage, casStored, dropPendingChoices, ownMessage, parse, present } from "@/lib/concierge/thread";
 import type { Message, Stored } from "@/lib/concierge/types";
 
@@ -115,29 +115,40 @@ async function runModel(user: Actor, turn: Turn, userText: string, history: Mode
 
 const WHO_TO_ASSIGN = "Who should I assign this to?";
 
-/** The person named after "to", ignoring text inside quotes ("Budget to review" is a title, not a person). */
+/** The request without quoted text ("Budget to review" is a title, not a person). */
+const outsideQuotes = (request: string) => request.trim().replace(/"[^"]*"|'[^']*'/g, " ").replace(/\s+/g, " ").trim();
+
+/** The person named after the last "to" ("Move it to Monday and assign it to Quokka" names Quokka). */
 function namedAssignee(request: string): string | null {
-  const outside = request.trim().replace(/"[^"]*"|'[^']*'/g, " ").replace(/\s+/g, " ").trim();
-  const m = /\bto\s+(.+)$/i.exec(outside);
+  const m = /^.*\bto\s+(.+)$/i.exec(outsideQuotes(request));
   if (!m) return null;
-  const name = m[1].replace(/[.?!]+$/g, "").trim();
+  const name = m[1].replace(/[.?!]+$/g, "").replace(/\s+please$/i, "").trim();
   return name || null;
 }
 
-function personKnown(turn: Turn, name: string): boolean {
-  if (/^me$/i.test(name)) return true;
-  const n = name.toLowerCase();
+/** Ids of the people the name points at: "me", or anyone found this turn whose name or email contains it, as find_people matches. */
+function peopleNamed(turn: Turn, name: string): Set<string> {
+  if (/^me$/i.test(name)) return new Set([turn.user.id]);
+  const n = normalise(name);
+  const ids = new Set<string>();
+  if (n.length < 2) return ids;
   for (const p of turn.seen.people.values()) {
-    if (p.name.toLowerCase() === n || p.email.toLowerCase() === n) return true;
+    if (normalise(p.name).includes(n) || p.email.toLowerCase().includes(n)) ids.add(p.id);
   }
-  return false;
+  return ids;
 }
 
-/** Assign with nobody named, or a person this turn did not find. A guessed assignee must not become a card. */
+/**
+ * An assign request ("Assign …", "Please assign …", "Can you reassign …") with nobody named, or a person this turn did
+ * not find, or a card that assigns someone other than the person named. A guessed assignee must not become a card.
+ */
 function needsWhom(turn: Turn, request: string): boolean {
-  if (!/^assign\b/i.test(request.trim())) return false;
+  if (!/\b(?:re)?assign\b/i.test(outsideQuotes(request))) return false;
+  const assigns = turn.card?.ops.filter((o) => o.k === "task.assign") ?? [];
   const name = namedAssignee(request);
-  return !name || !personKnown(turn, name);
+  if (!name) return true;
+  const named = peopleNamed(turn, name);
+  return !named.size || assigns.some((o) => !named.has(o.assigneeId));
 }
 
 function whoQuestion(modelText: string): string {
