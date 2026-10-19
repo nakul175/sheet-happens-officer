@@ -158,7 +158,7 @@ function fakeKeyboard() {
   };
 }
 
-test("qa:TC missing AC5: with the keyboard open and the description focused, the field and footer are visible", async ({ browser }) => {
+test("qa:TC-APL2738-05@v1 AC5: with the keyboard open and the description focused, the field and footer are visible", async ({ browser }) => {
   const KEYBOARD_TOP = 420; // visible height left above the keyboard on a 390 x 800 phone
   const ctx = await phone(browser, 390, 800);
   await ctx.addInitScript(fakeKeyboard);
