@@ -6,7 +6,7 @@ import net from "node:net";
 import path from "node:path";
 import { spawn, type ChildProcess } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { CLEAN_LOG, DEFAULT_DRAIN_MS, shutdownDrainMs, TIMEOUT_LOG } from "../src/lib/shutdown";
 
 const root = path.join(fileURLToPath(new URL(".", import.meta.url)), "..");
@@ -146,6 +146,31 @@ describe("qa:TC missing shutdownDrainMs", () => {
     expect(shutdownDrainMs({ SHUTDOWN_DRAIN_MS: "10000" })).toBe(10_000);
     expect(shutdownDrainMs({ SHUTDOWN_DRAIN_MS: "20000" })).toBe(20_000);
     expect(shutdownDrainMs({ SHUTDOWN_DRAIN_MS: "25000" })).toBe(25_000);
+  });
+});
+
+// APL-2689 QA D1. `next start` bundles the instrumentation hook apart from the routes, so
+// @/lib/db is evaluated once per bundle. They must share one client, or the drain disconnects
+// a client that never connected. resetModules stands in for the second bundle.
+describe("qa:TC missing Prisma client shared across module instances", () => {
+  it("qa:TC missing two instances of @/lib/db get the same client in production", async () => {
+    const holder = globalThis as unknown as { prisma?: unknown };
+    const saved = holder.prisma;
+    delete holder.prisma;
+    vi.stubEnv("NODE_ENV", "production");
+    try {
+      vi.resetModules();
+      const first = await import("../src/lib/db");
+      vi.resetModules();
+      const second = await import("../src/lib/db");
+      expect(second.db).toBe(first.db);
+      expect(holder.prisma).toBe(first.db);
+    } finally {
+      vi.unstubAllEnvs();
+      vi.resetModules();
+      if (saved === undefined) delete holder.prisma;
+      else holder.prisma = saved;
+    }
   });
 });
 

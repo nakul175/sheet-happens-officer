@@ -254,6 +254,42 @@ describe("qa:TC missing next start SIGTERM", () => {
     await expectBurst(100);
   }, 120_000);
 
+  // APL-2689 QA D2: the +16ms connection hung ~1s in 7 of 10 runs on Pam's box. One run
+  // rarely lands in the window, so repeat. probe() calls a dropped SYN "hung" (it is only
+  // refused on the 1s retransmit), so any run that hits the window fails here.
+  it("qa:TC missing refuses the +16ms and +143ms connections at once in 6 repeated 100-request bursts", async () => {
+    for (let run = 1; run <= 6; run++) {
+      const { settled, late16, late143, result } = await burst(100);
+      const summary = settled.map((response) => (response.reset ? "reset" : String(response.status)));
+      expect(summary, `run ${run}: every in-flight request returns 200`).toEqual(Array(100).fill("200"));
+      expect([late16, late143], `run ${run}: new connections after SIGTERM`).toEqual(["refused", "refused"]);
+      expect(result.code, `run ${run}: exit code`).toBe(0);
+    }
+  }, 600_000);
+
+  // The cause of D2: the accept() that grew the fd table past 128 waited for an RCU grace
+  // period (5-11ms) inside the SIGTERM handler, with listen(0) already in force, so SYNs in
+  // that window were dropped. sho_arm now grows the table up front. FDSize is the size of the
+  // table in slots, which does not shrink.
+  it("qa:TC missing grows the fd table when the SIGTERM handler is armed, so the seize never resizes it", async () => {
+    const port = await freePort();
+    const proc = startNext(port, { SHUTDOWN_DRAIN_MS: "15000" });
+    try {
+      await proc.waitFor(/Ready/, 120_000);
+      const warmup = await fetch(`http://127.0.0.1:${port}/api/shutdown-slow?ms=0`);
+      expect(warmup.status).toBe(200);
+      const pid = proc.child.pid!;
+      const fdSize = Number(readFileSync(`/proc/${pid}/status`, "utf8").match(/^FDSize:\s+(\d+)/m)?.[1]);
+      const soft = readFileSync(`/proc/${pid}/limits`, "utf8").match(/^Max open files\s+(\S+)/m)?.[1] ?? "unlimited";
+      const want = soft === "unlimited" ? 16384 : Math.min(16384, Number(soft));
+      expect(fdSize, `FDSize with a soft limit of ${soft}`).toBeGreaterThanOrEqual(want);
+      proc.child.kill("SIGTERM");
+      expect((await proc.exited).code).toBe(0);
+    } finally {
+      stop(proc.child);
+    }
+  }, 120_000);
+
   it("qa:TC missing logs the timeout line and exits 1 when a request outlives the drain", async () => {
     const burners = startBurners();
     const port = await freePort();

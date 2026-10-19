@@ -14,11 +14,14 @@
 #include <fcntl.h>
 #include <signal.h>
 #include <string.h>
+#include <sys/resource.h>
 #include <sys/socket.h>
 #include <unistd.h>
 
 #define MAX_LISTEN 4
 #define MAX_SEIZED 8192
+/* fd slots grown at arm time. Covers MAX_SEIZED accepts plus what the process already holds. */
+#define RESERVE_FDS 16384
 
 static int listen_fds[MAX_LISTEN];
 static int listen_n = 0;
@@ -75,8 +78,26 @@ static void on_term(int sig) {
   errno = saved_errno;
 }
 
+/* Growing the fd table in a multi-threaded process waits for an RCU grace
+ * period. Node is multi-threaded, so the accept() that crossed fd 128 inside
+ * seize_all stalled 5-11ms. listen(0) was already in force, so a new SYN in that
+ * window was dropped rather than refused, and the client only got ECONNREFUSED
+ * on its 1s retransmit (APL-2689 QA D2). Grow the table once here, outside the
+ * signal. F_DUPFD never replaces an open fd, and the table does not shrink when
+ * the dup is closed. */
+static void reserve_fd_slots(int fd) {
+  struct rlimit rl;
+  if (getrlimit(RLIMIT_NOFILE, &rl) != 0) return;
+  rlim_t top = rl.rlim_cur;
+  if (top == RLIM_INFINITY || top > RESERVE_FDS) top = RESERVE_FDS;
+  if (top < 2) return;
+  int high = fcntl(fd, F_DUPFD_CLOEXEC, (int)(top - 1));
+  if (high >= 0) close(high);
+}
+
 int sho_arm(int fd) {
   if (fd >= 0 && listen_n < MAX_LISTEN) listen_fds[listen_n++] = fd;
+  if (fd >= 0) reserve_fd_slots(fd);
   if (wake_read >= 0) return wake_read;
   int wake[2];
   if (pipe(wake) != 0) return -1;
