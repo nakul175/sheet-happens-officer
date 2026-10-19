@@ -195,7 +195,7 @@ function handed(body: ApiGroups, id: string) {
   return body.waitingOnOthers.find((t) => t.id === id);
 }
 
-describe("CRM_VISIBLE modes hide handed-off deal tasks on a real server per mode", () => {
+describe("qa:TC missing CRM_VISIBLE modes hide handed-off deal tasks on a real server per mode", () => {
   beforeAll(async () => {
     if (!existsSync(path.join(root, ".next", "BUILD_ID"))) {
       throw new Error("CRM_VISIBLE mode cannot start: the production build is missing (.next/BUILD_ID)");
@@ -213,8 +213,8 @@ describe("CRM_VISIBLE modes hide handed-off deal tasks on a real server per mode
     }
   });
 
-  // qa:TC-APL2713-AC4 · covers AC1 and AC2. A hidden deal in any group fails this test.
-  it("qa:TC-APL2713-AC4 hides handed-off deal tasks per CRM mode and shows them when visible", async () => {
+  // qa:TC missing · covers AC1 and AC2. A hidden deal in any group fails this test.
+  it("qa:TC missing hides handed-off deal tasks per CRM mode and shows them when visible", async () => {
     const open = running.get("on");
     const admins = running.get("admins");
     const off = running.get("off");
@@ -313,7 +313,7 @@ describe("CRM_VISIBLE modes hide handed-off deal tasks on a real server per mode
   }, 120_000);
 
   // The handed-off query is on the My tasks read path. 40 concurrent GETs in each hidden case.
-  it("load: 40 concurrent GET /api/my-tasks in each hidden mode", async () => {
+  it("qa:TC missing load: 40 concurrent GET /api/my-tasks in each hidden mode", async () => {
     expect(signed.editor && signed.admin, "AC4 signed in editor and admin").toBeTruthy();
     const hidden: { mode: Mode; who: "editor" | "admin"; cookie: string; plain: boolean }[] = [
       { mode: "off", who: "editor", cookie: signed.editor!, plain: true },

@@ -58,7 +58,7 @@ const seed: {
   userIds: string[];
 } = { dealId: "", plainProjectId: "", kickoffId: "", contractId: "", plainId: "", userIds: [] };
 
-describe("APL-2713 handed-off deal tasks follow CRM visibility", () => {
+describe("qa:TC missing APL-2713 handed-off deal tasks follow CRM visibility", () => {
   beforeAll(async () => {
     const sa = await superAdmin();
     const adminUser = await admin(sa, "apl2713admin");
@@ -120,8 +120,8 @@ describe("APL-2713 handed-off deal tasks follow CRM visibility", () => {
     }
   });
 
-  // qa:TC-APL2713-AC1 · off for editor, off for admin, and admins for a non-admin hide the deal.
-  it("qa:TC-APL2713-AC1 hides handed-off deal tasks when the CRM is hidden", async () => {
+  // qa:TC missing · off for editor, off for admin, and admins for a non-admin hide the deal.
+  it("qa:TC missing hides handed-off deal tasks when the CRM is hidden", async () => {
     const editor = actor(seed.editor!);
     const adm = actor(seed.adminUser!, "ADMIN");
     const cases: { mode: string; who: Actor; label: string }[] = [
@@ -138,8 +138,8 @@ describe("APL-2713 handed-off deal tasks follow CRM visibility", () => {
     }
   });
 
-  // qa:TC-APL2713-AC2 · all for editor, and admins for an admin, match the visible (main) result.
-  it("qa:TC-APL2713-AC2 shows the handed-off deal task when the CRM is visible", async () => {
+  // qa:TC missing · all for editor, and admins for an admin, match the visible (main) result.
+  it("qa:TC missing shows the handed-off deal task when the CRM is visible", async () => {
     const editor = actor(seed.editor!);
     const adm = actor(seed.adminUser!, "ADMIN");
     let kickoffAll: Row | undefined;
@@ -160,8 +160,8 @@ describe("APL-2713 handed-off deal tasks follow CRM visibility", () => {
     });
   });
 
-  // qa:TC-APL2713-AC3 · the project handoff stays, and the other four groups match mode all.
-  it("qa:TC-APL2713-AC3 keeps a handed-off project task and the other groups match main", async () => {
+  // qa:TC missing · the project handoff stays, and the other four groups match mode all.
+  it("qa:TC missing keeps a handed-off project task and the other groups match main", async () => {
     const editor = actor(seed.editor!);
     const baseline = await withModeValue("all", () => myTasks(editor));
     expect(findRow(baseline, seed.plainId)?.title).toBe(PLAIN);
