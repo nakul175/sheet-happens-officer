@@ -2,11 +2,13 @@
 // The person page does not call deactivate. An Admin while CRM_VISIBLE=off cannot see the CRM: the alert is the
 // generic sentence, with no deal name, no deal id and no change-leader link. An Admin while CRM_VISIBLE=on still
 // sees both deal names and a change-leader link for each.
-// Each CRM_VISIBLE mode is its own `next start` process (as tests/e2e/stories/APL-2728.spec.ts), and
+// Each CRM_VISIBLE mode is its own `next start` process (as tests/e2e/local/APL-2728.test.ts), and
 // Chromium is driven with playwright-core. Needs `npm run build` first.
 // Run with `npm run test:crm-modes` (CI runs it after the build). `npm test` does not start these servers.
 // Local or CI Postgres only: a DATABASE_URL on any other host is refused before anything starts.
-// People are run-unique nakul17+ aliases, data is named ZZ-TEST, and afterAll deletes both.
+// People are run-unique nakul17+ aliases, data is named ZZ-TEST. Seeding and clean-up go through the app's API only;
+// this file writes nothing to the database itself. afterAll hands the projects to this run's Super Admin, archives
+// them and the organisation, and deactivates the people; the Super Admin alias cannot be deactivated and stays.
 import "dotenv/config";
 import { spawn } from "node:child_process";
 import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, statSync } from "node:fs";
@@ -24,6 +26,8 @@ const SHOTS = path.join(root, "test-results", "APL-2735");
 const GENERIC = "Name a new Leader first.";
 const runId = `${Date.now().toString(36)}-${process.pid}`;
 const tag = `ZZ-TEST-${runId}`;
+/** This run's Super Admin. Each spawned server lists it in SUPER_ADMIN_EMAILS. */
+const SA_EMAIL = `nakul17+zz-2735-${runId}-sa@aplyd.com`;
 const dealNames = [`ZZ-TEST Northwind ${tag}`, `ZZ-TEST Contoso ${tag}`];
 const VIEWPORTS = [
   { width: 1280, height: 800 },
@@ -31,12 +35,13 @@ const VIEWPORTS = [
 ] as const;
 type Mode = "on" | "off";
 type Server = { mode: Mode; pid: number; outbox: string; base: string };
-type Person = { id: string; name: string; email: string; cookie: string };
+type Person = { id: string; name: string; email: string; orgRole: string; cookie: string };
 
 const servers = new Map<Mode, Server>();
 const seed = { emails: [] as string[], userIds: [] as string[], projectIds: [] as string[], orgIds: [] as string[] };
 const dealIds: string[] = [];
 let browser: Browser | undefined;
+let sa: Person;
 let admin: Person;
 let leader: Person;
 
@@ -90,7 +95,7 @@ async function startServer(mode: Mode): Promise<Server> {
     EMAIL_OUTBOX_DIR: outbox,
     APP_URL: `http://127.0.0.1:${port}`,
     PORT: String(port),
-    SUPER_ADMIN_EMAILS: "root.test@aplyd.com",
+    SUPER_ADMIN_EMAILS: `root.test@aplyd.com,${SA_EMAIL}`,
     JOB_SECRET: process.env.JOB_SECRET || "replace-with-a-token-of-at-least-16-chars",
   };
   const logFd = openSync(path.join(outbox, "server.log"), "a");
@@ -138,25 +143,36 @@ async function signIn(server: Server, label: string): Promise<Person> {
   expect((await call(server.base, "", "POST", "/api/auth/verify", { token })).status).toBe(200);
   const signed = await call(server.base, "", "POST", "/api/auth/signin", { email, password: PW });
   expect(signed.status, signed.text).toBe(200);
-  const id = (signed.json?.user as { id: string }).id;
-  seed.userIds.push(id);
-  return { id, name, email, cookie: signed.cookie };
+  const user = signed.json?.user as { id: string; orgRole: string };
+  seed.userIds.push(user.id);
+  return { id: user.id, name, email, orgRole: user.orgRole, cookie: signed.cookie };
 }
 
-async function cleanup() {
-  const users = await db.user.findMany({ where: { OR: [{ id: { in: seed.userIds } }, { email: { in: seed.emails } }] }, select: { id: true } });
-  const userIds = users.map((u) => u.id);
-  if (userIds.length || seed.projectIds.length) {
-    await db.actionLog.deleteMany({ where: { OR: [{ actorId: { in: userIds } }, { projectId: { in: seed.projectIds } }] } });
+/** Through the API, as this run's Super Admin: take over and archive the projects, archive the organisation, deactivate the people. */
+async function cleanup(on: Server) {
+  const problems: string[] = [];
+  for (const id of seed.projectIds) {
+    const added = await call(on.base, sa.cookie, "POST", `/api/projects/${id}/members`, { userId: sa.id, role: "EDITOR" });
+    if (added.status !== 201 && !(added.status === 409 && /already a member/.test(String(added.json?.error ?? "")))) {
+      problems.push(`add member ${id}: ${added.status}`);
+    }
+    const led = await call(on.base, sa.cookie, "POST", `/api/projects/${id}/leader`, { newLeaderId: sa.id, previousRole: "EDITOR" });
+    if (led.status !== 200 && !(led.status === 400 && /already the Leader/.test(String(led.json?.error ?? "")))) {
+      problems.push(`change leader ${id}: ${led.status}`);
+    }
+    const archived = await call(on.base, sa.cookie, "POST", `/api/projects/${id}/archive`);
+    if (archived.status !== 200) problems.push(`archive project ${id}: ${archived.status}`);
   }
-  if (userIds.length) {
-    await db.modelUsage.deleteMany({ where: { userId: { in: userIds } } });
-    await db.auditLog.deleteMany({ where: { actorId: { in: userIds } } });
+  for (const id of seed.orgIds) {
+    const r = await call(on.base, sa.cookie, "POST", `/api/orgs/${id}/archive`, { archive: true });
+    if (r.status !== 200) problems.push(`archive organisation ${id}: ${r.status}`);
   }
-  if (seed.projectIds.length) await db.project.deleteMany({ where: { id: { in: seed.projectIds } } });
-  if (seed.orgIds.length) await db.organisation.deleteMany({ where: { id: { in: seed.orgIds } } });
-  if (seed.emails.length) await db.loginAttempt.deleteMany({ where: { email: { in: seed.emails } } });
-  if (userIds.length) await db.user.deleteMany({ where: { id: { in: userIds } } });
+  for (const id of seed.userIds) {
+    if (id === sa.id) continue;
+    const r = await call(on.base, sa.cookie, "POST", `/api/team/${id}/deactivate`, { reassign: "leaders" });
+    if (r.status !== 200) problems.push(`deactivate ${id}: ${r.status}`);
+  }
+  expect(problems, problems.join("\n")).toEqual([]);
 }
 
 /** Opens /team as `viewer`, clicks Deactivate on the leader's row, confirms, and waits for the inline alert. */
@@ -193,9 +209,12 @@ beforeAll(async () => {
   browser = await chromium.launch({ executablePath: chromiumPath(), args: ["--no-sandbox"] });
 
   // Seeded once on the open server: an Admin, and a Member who leads two ZZ-TEST deals.
+  sa = await signIn(on, "sa");
+  expect(sa.orgRole, `${SA_EMAIL} is listed in SUPER_ADMIN_EMAILS`).toBe("SUPER_ADMIN");
   admin = await signIn(on, "admin");
   leader = await signIn(on, "leader");
-  await db.user.update({ where: { id: admin.id }, data: { orgRole: "ADMIN" } });
+  const promoted = await call(on.base, sa.cookie, "PATCH", `/api/team/${admin.id}`, { orgRole: "ADMIN" });
+  expect(promoted.status, promoted.text).toBe(200);
   const pipes = await call(on.base, admin.cookie, "GET", "/api/deals/pipelines");
   expect(pipes.status, pipes.text).toBe(200);
   const pipe = (pipes.json?.pipelines as { id: string; key: string }[]).find((p) => p.key === "DEAL_PROACTIVE");
@@ -218,7 +237,8 @@ beforeAll(async () => {
 afterAll(async () => {
   try {
     await browser?.close();
-    await cleanup();
+    const on = servers.get("on");
+    if (on && sa) await cleanup(on);
   } finally {
     for (const server of servers.values()) stop(server.pid);
     await db.$disconnect();
