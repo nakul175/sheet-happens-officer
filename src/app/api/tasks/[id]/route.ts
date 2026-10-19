@@ -1,6 +1,7 @@
 import { currentUser } from "@/lib/auth";
 import { ApiError, handle, withVersionErrors } from "@/lib/http";
 import { taskUpdate } from "@/lib/schemas";
+import { versionFirst } from "@/lib/task-version";
 import { assertCanUpdateTask, deleteTask, getTask, updateTask } from "@/lib/tasks";
 
 type Ctx = { params: Promise<{ id: string }> };
@@ -22,6 +23,8 @@ export const PATCH = handle(withVersionErrors(async (req: Request, ctx: Ctx) => 
     throw new ApiError(400, "Body must be valid JSON");
   }
   // Every edit carries expectedUpdatedAt, Blocked included (APL-2670 AC1 v1.4 drops the APL-2494 exemption).
+  // Session, access, version, then schema (APL-2670 AC1 v1.4).
+  versionFirst(raw);
   await updateTask(me, id, taskUpdate.parse(raw));
   return Response.json({ task: await getTask(me, id) });
 }));

@@ -130,4 +130,29 @@ describe("one error shape for a task version (APL-2670)", () => {
     expect(seen).toEqual(routes.map(([name]) => ({ name, hidden: notFound, missingId: notFound, identical: true })));
     expect(await shown(fx.worker, fx.id)).toEqual({ title: "Original", updatedAt: fx.t0 });
   });
+
+  it("qa:TC missing APL-2670 AC1 v1.4 check order: session, access, version, then schema on all five routes", async () => {
+    const fx = await fixture();
+    // A bad body with no version is version_required, not "Validation failed".
+    const noVersion: Array<[string, Promise<{ status: number; json: unknown }>]> = [
+      ["PATCH title \"\"", fx.worker.c.patch(`/api/tasks/${fx.id}`, { title: "" })],
+      ["move {}", fx.worker.c.post(`/api/tasks/${fx.id}/move`, {})],
+      ["complete completeAll:\"x\"", fx.worker.c.post(`/api/tasks/${fx.id}/complete`, { completeAll: "x" })],
+      ["approver {}", fx.worker.c.put(`/api/tasks/${fx.id}/approver`, {})],
+      ["assign {}", fx.worker.c.post(`/api/tasks/${fx.id}/assign`, {})],
+    ];
+    const seen = [];
+    for (const [name, call] of noVersion) {
+      const r = await call;
+      seen.push({ name, status: r.status, json: r.json });
+    }
+    expect(seen).toEqual(noVersion.map(([name]) => ({ name, status: 400, json: REQUIRED })));
+    // Access comes before the version and the schema: an outsider's bad move is the missing-task 404.
+    const outsiderMove = await fetch(`${BASE}/api/tasks/${fx.id}/move`, {
+      method: "POST", headers: { "content-type": "application/json", cookie: fx.outsider.c.cookie }, body: "{}",
+    });
+    expect(outsiderMove.status).toBe(404);
+    expect(await outsiderMove.text()).toBe(JSON.stringify({ error: "Task not found" }));
+    expect(await shown(fx.worker, fx.id)).toEqual({ title: "Original", updatedAt: fx.t0 });
+  });
 });

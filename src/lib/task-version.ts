@@ -1,3 +1,4 @@
+import type { ZodType } from "zod";
 import { ApiError } from "@/lib/http";
 import {
   INVALID_VERSION, INVALID_VERSION_MESSAGE, VERSION_REQUIRED, VERSION_REQUIRED_MESSAGE,
@@ -36,4 +37,25 @@ function isIsoDateTimeWithZone(value: string): boolean {
   const calendar = new Date(Date.UTC(year, month - 1, day));
   if (calendar.getUTCFullYear() !== year || calendar.getUTCMonth() !== month - 1 || calendar.getUTCDate() !== day) return false;
   return !Number.isNaN(Date.parse(value));
+}
+
+/**
+ * APL-2670 AC1 v1.4: after session and access, the version is checked before the body schema,
+ * so a bad body with no version is version_required, not "Validation failed".
+ */
+export function versionFirst(raw: unknown): void {
+  const value = raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as Record<string, unknown>).expectedUpdatedAt : undefined;
+  classifyExpectedUpdatedAt(value);
+}
+
+/** parseBody for the version routes: valid JSON, then the version, then the schema. */
+export async function parseVersionedBody<T>(req: Request, schema: ZodType<T>): Promise<T> {
+  let raw: unknown;
+  try {
+    raw = await req.json();
+  } catch {
+    throw new ApiError(400, "Body must be valid JSON");
+  }
+  versionFirst(raw);
+  return schema.parse(raw);
 }

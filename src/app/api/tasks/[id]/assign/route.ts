@@ -2,7 +2,8 @@ import { projectAccess, requireWrite } from "@/lib/access";
 import { db } from "@/lib/db";
 import { notFound } from "@/lib/http";
 import { currentUser } from "@/lib/auth";
-import { handle, parseBody, withVersionErrors } from "@/lib/http";
+import { handle, withVersionErrors } from "@/lib/http";
+import { parseVersionedBody } from "@/lib/task-version";
 import { taskAssign } from "@/lib/schemas";
 import { assignTask } from "@/lib/tasks";
 
@@ -12,7 +13,8 @@ export const POST = handle(withVersionErrors(async (req: Request, ctx: { params:
   const t = await db.task.findUnique({ where: { id: (await ctx.params).id }, select: { projectId: true, deletedAt: true } });
   if (!t || t.deletedAt) throw notFound("Task");
   requireWrite(await projectAccess(me, t.projectId, { write: true }));
-  const body = await parseBody(req, taskAssign);
+  // Version before schema (APL-2670 AC1 v1.4).
+  const body = await parseVersionedBody(req, taskAssign);
   await assignTask(me, (await ctx.params).id, body.assigneeId, body.expectedUpdatedAt);
   return Response.json({ status: "ok" });
 }));

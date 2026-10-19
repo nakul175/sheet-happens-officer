@@ -3,7 +3,7 @@
 // TaskModal (task page), inline cells and Move to… (ProjectView), the Tick (TaskParts) and Close (MyTasks approvals).
 // No qa:TC id is published for this story, so every title carries qa:TC missing.
 // Gate: SHO_QA_PASS, the password of the pre-provisioned, verified nakul17+zz-qa-<slot>-1 and -2 aliases
-// (QA_SLOT, default "local"). Without it the file is skipped. Nothing here signs up an account.
+// (QA_SLOT, default "local"). Without it the file fails in beforeAll, by design. Nothing here signs up an account.
 // Each test makes its own ZZ-TEST project through the API, so every row label is unique on its page.
 // afterAll archives those projects through the API. The spec writes no database rows directly.
 import { expect, request, test, type APIRequestContext, type Page } from "@playwright/test";
@@ -27,7 +27,7 @@ async function signIn(email: string): Promise<Person> {
 
 test.describe("qa:TC missing APL-2670 a version conflict shows who saved last on every task screen", () => {
   test.describe.configure({ mode: "serial" });
-  test.skip(!QA_PASS, "APL-2670: set SHO_QA_PASS (the password of the nakul17+zz-qa aliases).");
+  test.beforeAll(() => { if (!QA_PASS) throw new Error("APL-2670: set SHO_QA_PASS (the password of the nakul17+zz-qa aliases)."); });
 
   let lead: Person;
   let other: Person;
