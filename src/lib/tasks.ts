@@ -1,3 +1,4 @@
+import type { Prisma } from "@/generated/prisma/client";
 import { ensureNextStep } from "@/lib/deals";
 import { crmProjectWhere } from "@/lib/crm";
 import { linksOfTask } from "@/lib/records";
@@ -11,6 +12,7 @@ import { auditTx, logAction, notify } from "@/lib/notify";
 import { reqCtx } from "@/lib/reqctx";
 import { attachCommentCounts, commentCount, purgeExpiredComments } from "@/lib/comments";
 import { commentsEnabled } from "@/lib/flags";
+import { trashPurgeBefore } from "@/lib/undoable";
 
 export const taskInclude = {
   assignee: { select: { id: true, name: true } },
@@ -528,12 +530,22 @@ export async function listTrash(user: Actor, projectId: string) {
   }));
 }
 
-/** Scheduled job: removes tasks that have been in Trash for 30 days. Nothing is removed earlier. Also purges soft-deleted comments past 30×24h. */
-export async function purgeTrash(now = new Date()) {
-  const cutoff = new Date(now.getTime() - 30 * 86400_000);
-  const r = await db.task.deleteMany({ where: { deletedAt: { lte: cutoff } } });
-  await purgeExpiredComments(now);
-  if (r.count) await db.auditLog.create({ data: { event: "TASK_PURGED", channel: "SCREEN", data: { count: r.count } } });
+/**
+ * Removes tasks that have been in Trash for strictly more than 30×24h.
+ * A task at exactly 30 days stays, so Undo still works at that instant (APL-2711).
+ * `only` narrows the delete. The scheduled job does not pass it.
+ * The unscoped job also purges soft-deleted comments past 30×24h (APL-2590).
+ */
+export async function purgeTrash(now = new Date(), only?: Prisma.TaskWhereInput) {
+  const expired: Prisma.TaskWhereInput = { deletedAt: { lt: trashPurgeBefore(now) } };
+  const where: Prisma.TaskWhereInput = only ? { AND: [expired, only] } : expired;
+  const r = await db.task.deleteMany({ where });
+  if (!only) await purgeExpiredComments(now); // APL-2590: soft-deleted comments past 30×24h; a scoped call never widens to them
+  if (r.count) {
+    await db.auditLog.create({
+      data: { event: "TASK_PURGED", channel: "SCREEN", data: only ? { count: r.count, limited: "1" } : { count: r.count } },
+    });
+  }
   return r.count;
 }
 
@@ -561,7 +573,7 @@ export async function myTasks(user: Actor) {
   const sent = await db.task.findMany({
     where: {
       completedAt: null, deletedAt: null, previousAssigneeId: user.id, approverId: { not: null }, assigneeId: { not: user.id },
-      project: { archivedAt: null, members: { some: { userId: user.id } } },
+      project: { archivedAt: null, members: { some: { userId: user.id } }, ...crmProjectWhere(user) },
     },
     include: { ...taskInclude, project: { select: { id: true, name: true, typeId: true, stage: { select: { name: true } }, members: { where: { userId: user.id }, select: { role: true } } } }, parent: { select: { id: true, title: true } } },
     orderBy: [...ORDER],

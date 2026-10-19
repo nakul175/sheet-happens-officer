@@ -44,12 +44,16 @@ export const UNDO_LABELS: Record<string, string> = {
 };
 export const isUndoable = (action: string) => action in UNDO_LABELS;
 export const UNDO_DAYS = 30;
+/** 30 × 24 hours. Exactly this age is still undoable; only a greater age is too old (APL-2711). */
+export const UNDO_WINDOW_MS = UNDO_DAYS * 86_400_000;
 
-/**
- * True only when the elapsed time is greater than 30×24h.
- * Exactly 30×24h is still inside the window (Undo works; a soft-deleted comment is kept).
- */
-export function isTooOldToUndo(at: Date | number, now = Date.now()) {
-  const then = at instanceof Date ? at.getTime() : at;
-  return now - then > UNDO_DAYS * 86400_000;
+/** True when `at` is strictly older than 30×24h. Exactly 30 days still counts as undoable (and a soft-deleted comment is kept). */
+export function isTooOldToUndo(at: Date | number, now = Date.now()): boolean {
+  return now - (at instanceof Date ? at.getTime() : at) > UNDO_WINDOW_MS;
+}
+
+/** Trash with `deletedAt` strictly before this instant is past the undo window. */
+export function trashPurgeBefore(now: Date | number = Date.now()): Date {
+  const t = typeof now === "number" ? now : now.getTime();
+  return new Date(t - UNDO_WINDOW_MS);
 }
