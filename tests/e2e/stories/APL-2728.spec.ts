@@ -8,10 +8,8 @@ import { newDeal } from "../helpers/jim-http";
 import { crmModeLive } from "../helpers/jim-gate";
 
 const SENTENCE = "A deal you can't view.";
-const VIEWPORTS = [
-  { width: 1280, height: 800 },
-  { width: 390, height: 844 },
-] as const;
+const DESKTOP = { width: 1280, height: 800 } as const;
+const PHONE = { width: 390, height: 844 } as const;
 
 test.beforeAll(() => {
   const missing = ["SHO_ADMIN_EMAIL", "SHO_ADMIN_PASS", "SHO_MEMBER_EMAIL", "SHO_MEMBER_PASS"].filter((name) => !process.env[name]);
@@ -70,28 +68,54 @@ function removeLocalDeal(id: string) {
   psql(`DELETE FROM "Project" WHERE id = ${quote(id)}`);
 }
 
-async function showsOneSentence(page: Page, personId: string, personName: string, dealName: string, dealId: string) {
-  for (const size of VIEWPORTS) {
-    await page.setViewportSize({ width: size.width, height: size.height });
-    await page.goto(`/team/${personId}`);
-    await expect(page.getByRole("heading", { level: 1, name: personName })).toBeVisible();
-    await expect(page.getByText(SENTENCE, { exact: true })).toHaveCount(1);
-    await expect(page.getByRole("link", { name: SENTENCE })).toHaveCount(0);
-    await expect(page.getByText(dealName, { exact: true })).toHaveCount(0);
-    await expect(page.getByRole("link", { name: dealName })).toHaveCount(0);
-    await expect(page.getByText(dealId, { exact: true })).toHaveCount(0);
+/** Every visible string: page text, each link's text, href and aria-label, and every other aria-label. */
+async function surface(page: Page) {
+  return page.evaluate(() => {
+    const text = document.body?.innerText ?? "";
+    const links = [...document.querySelectorAll("a")].map((a) => ({
+      text: (a.textContent ?? "").replace(/\s+/g, " ").trim(),
+      href: a.getAttribute("href") ?? "",
+      label: a.getAttribute("aria-label") ?? "",
+    }));
+    const labels = [...document.querySelectorAll("[aria-label]")].map((el) => el.getAttribute("aria-label") ?? "");
+    return { text, links, labels };
+  });
+}
+
+async function hidesDeal(page: Page, personId: string, personName: string, dealName: string, dealId: string, size: { width: number; height: number }) {
+  await page.setViewportSize({ width: size.width, height: size.height });
+  await page.goto(`/team/${personId}`);
+  await expect(page.getByRole("heading", { level: 1, name: personName })).toBeVisible();
+  const seen = await surface(page);
+  expect(seen.text.split(SENTENCE).length - 1).toBe(1);
+  const blobs = [seen.text, ...seen.labels, ...seen.links.flatMap((link) => [link.text, link.href, link.label])];
+  for (const blob of blobs) {
+    expect(blob).not.toContain(dealName);
+    expect(blob).not.toContain(dealId);
+    expect(blob).not.toContain(`/projects/${dealId}`);
+  }
+  for (const link of seen.links) {
+    expect(link.text).not.toBe(SENTENCE);
+    expect(link.label).not.toBe(SENTENCE);
   }
 }
 
 test.describe("APL-2728 person page", () => {
-  test("admins: one fixed sentence and no deal name at 1280x800 and 390x844 qa:TC missing", async ({ admin, member, later }) => {
+  test("qa:TC-APL2728-f5d2b1d1@v1 AC1: admins at 1280x800, person page text, links and aria labels hide the deal", async ({ admin, member, later }) => {
     const mode = await crmModeLive(admin, member);
     test.skip(mode !== "admins", `APL-2728: this server runs CRM_VISIBLE=${mode}, not admins.`);
-    const deal = await newDeal(admin, later, "person page", [member]);
-    await showsOneSentence(member.page, admin.user.id as string, admin.user.name as string, deal.name, deal.id);
+    const deal = await newDeal(admin, later, "person page 1280", [member]);
+    await hidesDeal(member.page, admin.user.id as string, admin.user.name as string, deal.name, deal.id, DESKTOP);
   });
 
-  test("off: one fixed sentence and no deal name at 1280x800 and 390x844 qa:TC missing", async ({ admin, member, later }) => {
+  test("qa:TC-APL2728-da58e1ec@v1 AC1: admins at 390x844, person page text, links and aria labels hide the deal", async ({ admin, member, later }) => {
+    const mode = await crmModeLive(admin, member);
+    test.skip(mode !== "admins", `APL-2728: this server runs CRM_VISIBLE=${mode}, not admins.`);
+    const deal = await newDeal(admin, later, "person page 390", [member]);
+    await hidesDeal(member.page, admin.user.id as string, admin.user.name as string, deal.name, deal.id, PHONE);
+  });
+
+  test("qa:TC-APL2728-f5d2b1d1@v1 AC1: off at 1280x800, person page text, links and aria labels hide the deal", async ({ admin, member, later }) => {
     const mode = await crmModeLive(admin, member);
     test.skip(mode !== "off", `APL-2728: this server runs CRM_VISIBLE=${mode}, not off.`);
     const name = `ZZ-TEST person page deal ${Date.now().toString(36)}`;
@@ -101,6 +125,19 @@ test.describe("APL-2728 person page", () => {
       return;
     }
     later(() => Promise.resolve(removeLocalDeal(deal.id)));
-    await showsOneSentence(member.page, admin.user.id as string, admin.user.name as string, name, deal.id);
+    await hidesDeal(member.page, admin.user.id as string, admin.user.name as string, name, deal.id, DESKTOP);
+  });
+
+  test("qa:TC-APL2728-da58e1ec@v1 AC1: off at 390x844, person page text, links and aria labels hide the deal", async ({ admin, member, later }) => {
+    const mode = await crmModeLive(admin, member);
+    test.skip(mode !== "off", `APL-2728: this server runs CRM_VISIBLE=${mode}, not off.`);
+    const name = `ZZ-TEST person page deal ${Date.now().toString(36)}`;
+    const deal = seedLocalDeal(admin.user.id as string, member.user.id as string, name);
+    if (!deal) {
+      test.skip(true, "APL-2728: CRM_VISIBLE=off hides deal creation, and no local database could seed the deal.");
+      return;
+    }
+    later(() => Promise.resolve(removeLocalDeal(deal.id)));
+    await hidesDeal(member.page, admin.user.id as string, admin.user.name as string, name, deal.id, PHONE);
   });
 });
