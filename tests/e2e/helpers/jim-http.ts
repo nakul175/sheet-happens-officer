@@ -53,7 +53,7 @@ export async function newDeal(leader: Who, later: (fn: () => Promise<unknown>) =
   return { id, name };
 }
 
-/** A "skip" annotation with a reason, for the Playwright report. Only the SHO_QA_PASS gate may actually skip a test. */
+/** A "skip" annotation with a reason, for the Playwright report. The harness itself never skips a test. */
 export const why = (description: string) => ({ annotation: { type: "skip", description } });
 
 /** The concierge's quick actions (src/lib/concierge/reads.ts QUICK_ACTIONS). */

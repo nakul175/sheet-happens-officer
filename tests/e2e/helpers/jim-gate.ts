@@ -1,5 +1,5 @@
 // Is a PR's behaviour live on the staging build under test? A spec reads `(await prLive(...)).deployed` and the reason.
-// What it does when the PR is not deployed is the spec's choice; the only allowed test.skip is the SHO_QA_PASS gate.
+// What it does when the PR is not deployed is the spec's choice. The harness never calls test.skip.
 // 1. /api/health answers { release: <git SHA> } (deploy/release.sh). If that is the PR's head commit, the PR is live.
 // 2. Otherwise a probe looks for a behaviour only that PR has. A probe that ACTS (creates a ZZ-TEST project) cleans up through `later`.
 // Each answer is worked out once per run and recorded on every test that asks, as a "deployed" annotation.

@@ -36,7 +36,7 @@ export type ConciergeMessage = {
   };
 };
 
-/** Fails unless the concierge is switched on. A weekly cap or a provider pause still counts as on. No skip: only the SHO_QA_PASS gate skips. */
+/** Fails unless the concierge is switched on. A weekly cap or a provider pause still counts as on. No skip. */
 export async function requireConcierge(who: Who) {
   const c = await conciergeLive(who);
   if (!c.live) throw new Error(conciergeOff(c));
