@@ -1,5 +1,5 @@
 import { db } from "@/lib/db";
-import { audit, hashPassword, issueToken, superAdminEmails } from "@/lib/auth";
+import { audit, hashPassword, issueTokenAndSend, superAdminEmails } from "@/lib/auth";
 import { MailError, VERIFY_SEND_FAILED, sendMail, verifyMail } from "@/lib/email";
 import { ApiError, handle, parseBody } from "@/lib/http";
 import { signUpInput } from "@/lib/schemas";
@@ -25,7 +25,7 @@ export const POST = handle(async (req: Request) => {
   });
   await audit("ACCOUNT_CREATED", { actorId: user.id });
   try {
-    await sendMail(verifyMail(email, await issueToken(user.id, "VERIFY")));
+    await issueTokenAndSend(user.id, "VERIFY", (token) => sendMail(verifyMail(email, token)));
   } catch (err) {
     // APL-2742: the account exists either way; say the email did not go so the person can resend it, instead of a 500.
     if (!(err instanceof MailError)) throw err;
