@@ -56,7 +56,7 @@ jobs:
       # makes Playwright collect 0 tests, so a total of 0 fails here instead of in staging-e2e.
       - name: Playwright collects the story specs
         run: |
-          out=$(npx playwright test --list)
+          out=$(npx playwright test --list 2>&1) || true
           total=$(printf '%s\n' "$out" | sed -n 's/^Total: \([0-9][0-9]*\) tests\{0,1\} in .*/\1/p')
           printf '%s\n' "$out" | grep -E '^(Total|Error)' || true
           if [ "${total:-0}" -eq 0 ]; then
@@ -98,6 +98,9 @@ jobs:
           fi
       - name: Unit tests
         run: npm test
+      # APL-2728 AC4. One production server per CRM_VISIBLE mode. Needs the build above. Not part of npm test.
+      - name: CRM visible modes
+        run: npm run test:crm-modes
       # APL-2729 AC4. One production server per CRM_VISIBLE mode, after the build.
       # The file sets its own test-only job token. A short JOB_SECRET must fail this step, not skip it.
       - name: Reminder modes (one server per CRM_VISIBLE)
