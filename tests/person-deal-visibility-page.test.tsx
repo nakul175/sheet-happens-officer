@@ -65,7 +65,7 @@ afterEach(() => {
 });
 
 describe("APL-2728 person page DOM", () => {
-  it("AC1: a hidden deal is generic text and has no deal href", async () => {
+  it("AC1: a hidden deal is generic text and has no deal href qa:TC missing", async () => {
     const page = await open({
       id: "rep-2728",
       name: "ZZ-TEST rep",
@@ -89,7 +89,7 @@ describe("APL-2728 person page DOM", () => {
     expect(plain?.textContent).toBe(PLAIN_NAME);
   });
 
-  it("AC1: five hidden-deal rows still render one sentence and no link", async () => {
+  it("AC1: five hidden-deal rows still render one sentence and no link qa:TC missing", async () => {
     const page = await open({
       id: "rep-2728",
       name: "ZZ-TEST rep",
@@ -103,7 +103,7 @@ describe("APL-2728 person page DOM", () => {
     expect([...page.querySelectorAll("a")].some((a) => a.textContent === HIDDEN_DEAL_LABEL)).toBe(false);
   });
 
-  it("AC2 and AC3: a visible deal keeps its name and /projects/<id> link", async () => {
+  it("AC2 and AC3: a visible deal keeps its name and /projects/<id> link qa:TC missing", async () => {
     const page = await open({
       id: "rep-2728",
       name: "ZZ-TEST rep",

@@ -364,7 +364,7 @@ describe("CRM_VISIBLE modes are tested against a real server per mode", () => {
     await expect(startModeServer("off", { bin: process.execPath, args: ["-e", "setInterval(() => {}, 1e9)"], timeoutMs: 800 })).rejects.toThrow(/cannot start/);
   }, 30_000);
 
-  it("The person page redacts a hidden deal (APL-2728 AC1-AC3)", async () => {
+  it("The person page redacts a hidden deal (APL-2728 AC1-AC3) qa:TC missing", async () => {
     const open = running.get("on");
     expect(open, "the on server is running").toBeTruthy();
     const dealName = "ZZ-TEST Acme renewal";
