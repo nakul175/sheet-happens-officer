@@ -7,7 +7,7 @@ import { PASS, alias, BASE_URL, passwordOk, signInAs, sinkText } from "./qa";
 
 type Ctx = { api: Api; user: Json };
 async function person(admin: Ctx, later: (f: () => Promise<unknown>) => void, label: string, role: "MEMBER" | "ADMIN" = "MEMBER") {
-  const r = await admin.api.post("/api/team", { firstName: "ZZ-TEST", lastName: `${label} ${RUN}`, email: `zz-test-${RUN}-${label}@example.invalid`, role });
+  const r = await admin.api.post("/api/team", { firstName: "ZZ-TEST", lastName: `${label} ${RUN}`, email: alias("2482", label), role });
   expect(r.status, JSON.stringify(r.json)).toBe(201);
   const id = r.json.person.id as string;
   later(async () => { const s = (await admin.api.get(`/api/team/${id}`)).json.person?.status; if (s !== "DEACTIVATED") await admin.api.post(`/api/team/${id}/deactivate`, { reassign: "leaders" }); });
