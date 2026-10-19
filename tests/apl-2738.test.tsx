@@ -56,7 +56,7 @@ function sheet(fitKeyboard: boolean) {
   return { scrim: document.querySelector<HTMLElement>(".scrim")!, desc: document.querySelector<HTMLTextAreaElement>("#desc")! };
 }
 
-describe("qa:TC missing APL-2738 keyboardFrame", () => {
+describe("APL-2738 keyboardFrame", () => {
   test("qa:TC-APL2738-02@v1 AC1: on a phone the frame is the visible area, top and height from visualViewport", () => {
     expect(keyboardFrame({ height: 420, offsetTop: 36 }, true)).toEqual({ top: "36px", bottom: "auto", height: "420px" });
   });
@@ -68,7 +68,7 @@ describe("qa:TC missing APL-2738 keyboardFrame", () => {
   });
 });
 
-describe("qa:TC missing APL-2738 Modal fitKeyboard", () => {
+describe("APL-2738 Modal fitKeyboard", () => {
   test("qa:TC-APL2738-02@v1 AC1: the sheet follows visualViewport when the visible area shortens", () => {
     const { scrim } = sheet(true);
     expect(scrim.style.height).toBe("800px");

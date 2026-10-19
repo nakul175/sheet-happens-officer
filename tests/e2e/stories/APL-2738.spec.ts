@@ -116,7 +116,7 @@ function inside(what: string, r: R, top: number, bottom: number) {
   expect(r.bottom, `${what} bottom`).toBeLessThanOrEqual(bottom + 1);
 }
 
-describe("qa:TC missing APL-2738 task sheet with the keyboard open", () => {
+describe("APL-2738 task sheet with the keyboard open", () => {
   it("qa:TC-APL2738-01@v1 AC1: the focused description and the pinned footer stay inside the visible sheet when the visible area shortens", async () => {
     const page = await openSheet(PHONE);
     try {
