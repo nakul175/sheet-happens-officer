@@ -1,6 +1,8 @@
 // SHO-US-4.6 Optional approver on a task (Linear APL-2522).
 // The Super Admin acts as Leader/Admin; the plain Member (SHO_MEMBER_*) is the Editor who does the work. A ZZ-TEST person who cannot sign in
 // (a reserved .invalid address) stands in as the second Editor / approver. Tests that need the Member skip without SHO_MEMBER_*.
+// Loaded first so a production URL refuses before the Playwright helpers load.
+import "../story-target";
 import { test, expect, zz } from "../support";
 import { ghost, getTask, newProject, newTask, type Who } from "../g2";
 
@@ -13,7 +15,7 @@ async function setup(admin: Who, member: Who, later: (fn: () => Promise<unknown>
   return { p, boss, t };
 }
 
-test("AC1: the Leader names an approver (Leader or Editor, not the assignee); a Viewer, non-member, deactivated person or the assignee is refused; the assignee cannot set it", async ({ admin, member, later }) => {
+test("qa:TC missing AC1: the Leader names an approver (Leader or Editor, not the assignee); a Viewer, non-member, deactivated person or the assignee is refused; the assignee cannot set it", { annotation: { type: "qa:TC", description: "missing" } }, async ({ admin, member, later }) => {
   const { p, boss, t } = await setup(admin, member, later, "4.6 ac1");
   const viewer = await ghost(admin, later, "viewer");
   const outsider = await ghost(admin, later, "outsider");
@@ -31,13 +33,13 @@ test("AC1: the Leader names an approver (Leader or Editor, not the assignee); a 
   expect((await getTask(admin, t)).approver.id).toBe(boss.id);
 });
 
-test("AC1: the task creator may set the approver (a creator who is not the assignee)", async ({ admin, member, later }) => {
+test("qa:TC missing AC1: the task creator may set the approver (a creator who is not the assignee)", { annotation: { type: "qa:TC", description: "missing" } }, async ({ admin, member, later }) => {
   const { p, boss } = await setup(admin, member, later, "4.6 creator");
   const t = await newTask(admin, p.id, { assigneeId: member.user.id }); // created by the Super Admin, held by the Member
   expect((await admin.api.put(`/api/tasks/${t}/approver`, { approverId: boss.id })).status).toBe(200);
 });
 
-test("AC2: with an approver, the assignee can only hand the task to the approver, and cannot complete it", async ({ admin, member, later }) => {
+test("qa:TC missing AC2: with an approver, the assignee can only hand the task to the approver, and cannot complete it", { annotation: { type: "qa:TC", description: "missing" } }, async ({ admin, member, later }) => {
   const { p, boss, t } = await setup(admin, member, later, "4.6 ac2");
   await admin.api.put(`/api/tasks/${t}/approver`, { approverId: boss.id });
   const other = await ghost(admin, later, "other");
@@ -47,7 +49,7 @@ test("AC2: with an approver, the assignee can only hand the task to the approver
   expect((await getTask(admin, t)).assignee.id).toBe(member.user.id);
 });
 
-test("AC3+AC7: sending for approval makes the approver the assignee, notified, in My tasks, and remembers the previous assignee", async ({ admin, member, later }) => {
+test("qa:TC missing AC3+AC7: sending for approval makes the approver the assignee, notified, in My tasks, and remembers the previous assignee", { annotation: { type: "qa:TC", description: "missing" } }, async ({ admin, member, later }) => {
   const p = await newProject(admin, later, { label: "4.6 ac3", members: [{ who: member, role: "EDITOR" }] });
   const title = zz("4.6 handover");
   const t = await newTask(member, p.id, { title });
@@ -62,7 +64,7 @@ test("AC3+AC7: sending for approval makes the approver the assignee, notified, i
   expect(notes.some((n) => n.text.includes(title))).toBe(true);
 });
 
-test("AC4: only the approver, the Leader or an Admin can close it; the assignee cannot, including by moving it to Done", async ({ admin, member, later }) => {
+test("qa:TC missing AC4: only the approver, the Leader or an Admin can close it; the assignee cannot, including by moving it to Done", { annotation: { type: "qa:TC", description: "missing" } }, async ({ admin, member, later }) => {
   const { p, boss, t } = await setup(admin, member, later, "4.6 ac4");
   await admin.api.put(`/api/tasks/${t}/approver`, { approverId: boss.id });
   expect((await member.api.post(`/api/tasks/${t}/complete`)).status).toBe(403);
@@ -72,7 +74,7 @@ test("AC4: only the approver, the Leader or an Admin can close it; the assignee 
   expect((await getTask(admin, t)).completedAt).not.toBeNull();
 });
 
-test("AC5: Send back returns the task, open, to the previous assignee; if they are gone it goes to the Leader", async ({ admin, member, later }) => {
+test("qa:TC missing AC5: Send back returns the task, open, to the previous assignee; if they are gone it goes to the Leader", { annotation: { type: "qa:TC", description: "missing" } }, async ({ admin, member, later }) => {
   const a = await setup(admin, member, later, "4.6 ac5 back");
   await admin.api.put(`/api/tasks/${a.t}/approver`, { approverId: a.boss.id });
   expect((await member.api.post(`/api/tasks/${a.t}/send-for-approval`)).status).toBe(200);
@@ -92,14 +94,14 @@ test("AC5: Send back returns the task, open, to the previous assignee; if they a
   expect(got.assignee.id).toBe(admin.user.id); // the project Leader
 });
 
-test("AC6: with no approver the 4.3 completion rules apply unchanged (another Editor may complete)", async ({ admin, member, later }) => {
+test("qa:TC missing AC6: with no approver the 4.3 completion rules apply unchanged (another Editor may complete)", { annotation: { type: "qa:TC", description: "missing" } }, async ({ admin, member, later }) => {
   const p = await newProject(admin, later, { label: "4.6 ac6", members: [{ who: member, role: "EDITOR" }] });
   const t = await newTask(admin, p.id);
   expect((await getTask(admin, t)).approver).toBeNull();
   expect((await member.api.post(`/api/tasks/${t}/complete`)).status).toBe(200);
 });
 
-test("AC8: when a named approver is removed from the project, the Leader becomes the approver and is told", async ({ admin, member, later }) => {
+test("qa:TC missing AC8: when a named approver is removed from the project, the Leader becomes the approver and is told", { annotation: { type: "qa:TC", description: "missing" } }, async ({ admin, member, later }) => {
   const { p, boss, t } = await setup(admin, member, later, "4.6 ac8");
   await admin.api.put(`/api/tasks/${t}/approver`, { approverId: boss.id });
   expect((await admin.api.del(`/api/projects/${p.id}/members/${boss.id}`)).status).toBe(204); // holds nothing, so no taker is needed
@@ -111,7 +113,7 @@ test("AC8: when a named approver is removed from the project, the Leader becomes
   expect(mine, "one counted notice for this project").toHaveLength(1);
 });
 
-test("AC9: mid-approval only the Leader or an Admin can change the approver; the new approver becomes the holder", async ({ admin, member, later }) => {
+test("qa:TC missing AC9: mid-approval only the Leader or an Admin can change the approver; the new approver becomes the holder", { annotation: { type: "qa:TC", description: "missing" } }, async ({ admin, member, later }) => {
   const { p, boss, t } = await setup(admin, member, later, "4.6 ac9");
   const next = await ghost(admin, later, "newapprover");
   await admin.api.post(`/api/projects/${p.id}/members`, { userId: next.id, role: "EDITOR" });
@@ -124,7 +126,7 @@ test("AC9: mid-approval only the Leader or an Admin can change the approver; the
   expect(got.assignee.id).toBe(next.id);
 });
 
-test("AC3: the assignee sees 'Send for approval' and, after pressing it, 'Waiting for <approver> to approve this task.' (screen)", async ({ admin, member, later }) => {
+test("qa:TC missing AC3: the assignee sees 'Send for approval' and, after pressing it, 'Waiting for <approver> to approve this task.' (screen)", { annotation: { type: "qa:TC", description: "missing" } }, async ({ admin, member, later }) => {
   const { p, boss, t } = await setup(admin, member, later, "4.6 screen");
   await admin.api.put(`/api/tasks/${t}/approver`, { approverId: boss.id });
   await member.page.goto(`/projects/${p.id}?task=${t}`);
