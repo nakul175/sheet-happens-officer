@@ -246,7 +246,11 @@ export async function removeStage(user: Actor, stageId: string, input: { moveTo?
   if (!sameKind || asksMore) throw new ApiError(400, `Items in "${stage.name}" cannot move to "${target.name}". Choose a stage of the same kind.`);
 
   return db.$transaction(async (tx) => {
-    const moved = await tx.project.updateMany({ where: { stageId: stage.id }, data: { stageId: target.id, stageChangedAt: new Date() } });
+    // A reason was given for the removed stage. It carries over only to a stage that also asks for one.
+    const moved = await tx.project.updateMany({
+      where: { stageId: stage.id },
+      data: { stageId: target.id, stageChangedAt: new Date(), ...(target.needsReason ? {} : { stageReason: null }) },
+    });
     await tx.stage.delete({ where: { id: stage.id } });
     await auditTx(tx, "STAGE_REMOVED", {
       actorId: user.id, targetId: stage.id, targetType: "stage",

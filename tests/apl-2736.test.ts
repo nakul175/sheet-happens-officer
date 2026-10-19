@@ -81,12 +81,14 @@ describe("qa:TC missing APL-2736 removing a stage asks where its items go", () =
   it("qa:TC missing AC1: once another stage is chosen, the items move there and the stage is removed", async () => {
     const zz = await zzStage();
     const deal = await dealIn(zz);
+    await db.project.update({ where: { id: deal }, data: { stageReason: "ZZ-TEST reason for the removed stage" } });
     const proposal = named(pro, "Proposal");
     const r = await sa.c.del(`/api/deals/pipelines/${zz}?moveTo=${proposal.id}`);
     expect(r.status, JSON.stringify(r.json)).toBe(200);
     expect(r.json).toMatchObject({ removed: { id: zz }, movedTo: { id: proposal.id, name: "Proposal" }, items: 1 });
     expect(await exists(zz)).toBe(false);
     expect(await stageOf(deal)).toBe(proposal.id);
+    expect((await db.project.findUniqueOrThrow({ where: { id: deal } })).stageReason, "the old stage's reason is cleared").toBeNull();
     expect((await pipes(sa)).flatMap((p) => p.stages).some((s) => s.id === zz)).toBe(false);
     const audit = await db.auditLog.findFirst({ where: { event: "STAGE_REMOVED", targetId: zz } });
     expect(audit?.actorId).toBe(sa.id);
