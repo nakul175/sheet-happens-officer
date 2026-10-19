@@ -59,10 +59,23 @@ export function present(t: TaskRow, viewer?: { id: string; role: Role }) {
   };
 }
 
+/**
+ * The caller's access to a task's project. A caller who cannot see that project (not a member, or a deal hidden by
+ * CRM_VISIBLE) gets the same 404 "Task not found" as a missing id, so no task route reveals that a task exists (APL-2875).
+ */
+export async function taskAccess(user: Actor, projectId: string, opts: { write?: boolean } = {}) {
+  try {
+    return await projectAccess(user, projectId, opts);
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 404) throw notFound("Task");
+    throw e;
+  }
+}
+
 async function loadTask(user: Actor, id: string, o: { write?: boolean; deleted?: boolean; holderCanDo?: boolean } = {}) {
   const t = await loadRow(id);
   if (!t || (t.deletedAt && !o.deleted)) throw notFound("Task");
-  const a = await projectAccess(user, t.projectId, { write: o.write });
+  const a = await taskAccess(user, t.projectId, { write: o.write });
   if (o.write) requireWrite(a);
   // The approver holding a task can only Close it or Send it back (SHO-US-4.6); the Leader and Admins keep full authority.
   if (o.write && !o.holderCanDo && awaiting(t) && user.id === t.approverId && a.role !== "LEADER") {
