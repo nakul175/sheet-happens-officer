@@ -7,12 +7,12 @@ import { configDefaults, defineConfig } from "vitest/config";
 // Run them with `npm run test:crm-modes`.
 // Playwright story specs live under tests/e2e/stories and are run with `npx playwright test`, not vitest.
 // Vitest's default include matches *.spec.ts, and Vite sets process.env.BASE_URL, which those files refuse.
-// APL-2522.spec.ts is the Vitest spec (APL-2712) and stays in the run.
+// tests/e2e/apl-2522.spec.ts is the Vitest spec (APL-2712). It sits outside tests/e2e/stories so Playwright does not load it.
 export default defineConfig({
   resolve: { alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) } },
   // scripts/** holds node:test files (assert-playwright-ran.test.mjs). Vitest's default
   // include matches *.test.mjs and fails them with "No test suite found", which blocks deploy.yml.
-  // tests/e2e/stories is Playwright, except APL-2522.spec.ts.
+  // tests/e2e/stories is Playwright. The Vitest APL-2522 spec lives beside it, at tests/e2e/apl-2522.spec.ts.
   test: {
     testTimeout: 30000,
     fileParallelism: false,
@@ -20,7 +20,6 @@ export default defineConfig({
       ...configDefaults.exclude,
       "tests/viewport/**",
       "tests/e2e/stories/**",
-      "!tests/e2e/stories/APL-2522.spec.ts",
       "e2e/**",
       "tests/crm-visible-modes-server.test.ts",
       "scripts/**",
