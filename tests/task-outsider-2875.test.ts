@@ -1,5 +1,5 @@
 // APL-2875 (ACs v1.3): a caller who cannot see a task gets exactly the answer for a missing id, on every task route
-// (R1-R14 through loadTask, R4 assign, R15-R16 links, R17 convert) and on Undo (R18, "Action not found").
+// (R1-R14 through loadTask, R4 assign, R15-R16 links, R17 convert) and on Undo and bulk-undo (R18).
 // Test data: ZZ-TEST names and nakul17+ aliases. Projects are archived and people deactivated through the API afterwards.
 import { afterAll, describe, expect, it } from "vitest";
 import { account, BASE, Client, istDate, superAdmin, type Account } from "./helpers";
@@ -182,7 +182,8 @@ describe("qa:TC missing APL-2875 a caller who cannot see a task gets the missing
       const hidden = await getTask(member, t3.json.task.id).catch((e) => e);
       expect({ status: hidden.status, message: hidden.message }).toEqual({ status: missing.status, message: missing.message });
       expect(hidden).toMatchObject({ status: 404, message: "Task not found" });
-      // The assign route asks taskAccess directly before it reads the body.
+      // loadTask asks taskAccess, and every route under /api/tasks/:id (assign through checkAssign) goes through loadTask.
+      // tests/task-outsider-2875-crm.test.ts sends R1-R17 for this example over HTTP to a CRM_VISIBLE=admins server.
       await expect(taskAccess(member, dealId, { write: true })).rejects.toMatchObject({ status: 404, message: "Task not found" });
     } finally {
       if (was === undefined) delete process.env.CRM_VISIBLE; else process.env.CRM_VISIBLE = was;
@@ -204,6 +205,50 @@ describe("qa:TC missing APL-2875 a caller who cannot see a task gets the missing
     }
     expect(await snapshot([s.t1, s.t2])).toEqual(before);
     await expect(recordAccess({ id: s.outsider.id, orgRole: "MEMBER" }, s.pid, "Action")).rejects.toMatchObject({ status: 404, message: "Action not found" });
+  });
+
+  it("qa:TC missing AC1: R18 bulk-undo gives an outsider and a removed member the missing-id answer, and nothing is undone", async () => {
+    const s = await setup();
+    const before = await snapshot([s.t1, s.t2]);
+    const missingId = `zz-test-missing-action-${RUN}`;
+    const bulk = (who: Account, body: string) => send(who.c.cookie, "POST", "/api/actions/bulk-undo", body);
+    for (const who of [s.outsider, s.removed]) {
+      for (const anyway of [undefined, true]) {
+        const missing = await bulk(who, JSON.stringify({ ids: [missingId], anyway }));
+        expect(missing).toEqual({ status: 409, body: JSON.stringify({ error: "This was already undone." }) });
+        expect(await bulk(who, JSON.stringify({ ids: [s.logId], anyway })), `${who.name} anyway=${anyway}`).toEqual(missing);
+        expect(await bulk(who, JSON.stringify({ ids: [s.logId, missingId], anyway })), `${who.name} mixed anyway=${anyway}`).toEqual(missing);
+      }
+    }
+    expect(await snapshot([s.t1, s.t2])).toEqual(before);
+    // The Leader's bulk Undo of the same row still works, and the missing id beside it is skipped as before.
+    const lead = await bulk(s.lead, JSON.stringify({ ids: [s.logId, missingId] }));
+    expect(lead.status, lead.body).toBe(200);
+    expect(JSON.parse(lead.body)).toMatchObject({ count: 1 });
+  });
+
+  it("qa:TC missing AC1: a hidden id gets the same body as a missing id, the flat body main gives", async () => {
+    const s = await setup();
+    // The routes that take a version: main answers a missing task id with this flat body, and so does a hidden one.
+    for (const [method, path, body] of [
+      ["PATCH", (id: string) => `/api/tasks/${id}`, { title: "ZZ-TEST", expectedUpdatedAt: VERSION }],
+      ["POST", (id: string) => `/api/tasks/${id}/assign`, { assigneeId: s.editor.id, expectedUpdatedAt: VERSION }],
+      ["PUT", (id: string) => `/api/tasks/${id}/approver`, { approverId: null, expectedUpdatedAt: VERSION }],
+      ["POST", (id: string) => `/api/tasks/${id}/complete`, { expectedUpdatedAt: VERSION }],
+      ["POST", (id: string) => `/api/tasks/${id}/move`, { sectionId: s.doing, expectedUpdatedAt: VERSION }],
+    ] as const) {
+      for (const [who, id] of [[s.lead, MISSING], [s.outsider, s.t1]] as const) {
+        expect(await send(who.c.cookie, method, path(id), JSON.stringify(body)), `${method} ${path("X")}`).toEqual({ status: 404, body: JSON.stringify({ error: "Task not found" }) });
+      }
+    }
+    // Every other fixed route keeps its flat body too.
+    for (const [who, id] of [[s.lead, MISSING], [s.outsider, s.t1]] as const) {
+      expect(await send(who.c.cookie, "GET", `/api/tasks/${id}`)).toEqual({ status: 404, body: JSON.stringify({ error: "Task not found" }) });
+      expect(await send(who.c.cookie, "POST", `/api/tasks/${id}/links`, JSON.stringify({ organisationId: s.orgId }))).toEqual({ status: 404, body: JSON.stringify({ error: "Task not found" }) });
+    }
+    for (const [who, id] of [[s.lead, `zz-test-missing-action-${RUN}`], [s.outsider, s.logId]] as const) {
+      expect(await send(who.c.cookie, "POST", `/api/actions/${id}/undo`)).toEqual({ status: 404, body: JSON.stringify({ error: "Action not found" }) });
+    }
   });
 
   it("qa:TC missing AC3: members keep today's answers", async () => {

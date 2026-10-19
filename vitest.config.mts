@@ -18,6 +18,7 @@ export default defineConfig({
       "tests/viewport/**",
       "tests/crm-visible-modes-server.test.ts",
       "tests/apl-2713-crm-modes.test.ts",
+      "tests/task-outsider-2875-crm.test.ts",
       "tests/jobs-stalled-crm-server.test.ts",
       "e2e/**",
       "scripts/**",
