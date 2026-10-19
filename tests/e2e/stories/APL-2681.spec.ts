@@ -50,13 +50,12 @@ test.describe("APL-2681 staging mail sink", () => {
       viewport: screenSize(),
       httpCredentials: process.env.STAGING_USER ? { username: process.env.STAGING_USER, password: process.env.STAGING_PASS ?? "" } : undefined,
     });
-    const page = await ctx.newPage();
     try {
-      await page.goto("/signin");
-      await page.getByLabel("Work email").fill(email);
-      await page.getByLabel("Password").fill(password!);
-      await page.getByRole("button", { name: "Sign in" }).click();
-      await expect(page).not.toHaveURL(/\/signin$/);
+      const signed = await ctx.request.post("/api/auth/signin", { data: { email, password } });
+      expect(signed.ok(), `sign in (${signed.status()})`).toBe(true);
+      const page = await ctx.newPage();
+      await page.goto("/");
+      await expect(page).not.toHaveURL(/\/signin/);
       await expect(page.locator("#main")).toBeVisible();
     } finally {
       await ctx.close();

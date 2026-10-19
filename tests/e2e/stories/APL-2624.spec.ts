@@ -198,7 +198,9 @@ test.describe("SHO-US-23.5 / APL-2624", () => {
   // qa:TC missing
   test("AC7 (Add person): the dialog says the person must replace the password at first sign-in, not that it stays valid", async ({ admin }) => {
     await admin.page.goto("/team");
-    await admin.page.getByRole("button", { name: /Add person/ }).click();
+    const add = admin.page.getByRole("button", { name: /Add person/ });
+    await expect(add).toBeVisible();
+    await add.click();
     const dlg = admin.page.getByRole("dialog", { name: "Add person" });
     await expect(dlg).toContainText(REPLACE);
     await expect(dlg).not.toContainText(/stays valid/i);
