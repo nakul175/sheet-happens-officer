@@ -63,6 +63,8 @@ export async function logAction(
     channel?: "SCREEN" | "CONCIERGE";
     /** False for the secondary rows of a bulk action, so the Undo toast points at the main one. */
     primary?: boolean;
+    /** The row's createdAt. Delete passes the same instant it writes to deletedAt, so Undo and purge age together (APL-2719). */
+    at?: Date;
   },
 ) {
   const ctx = reqCtx.getStore();
@@ -77,6 +79,7 @@ export async function logAction(
       action: o.action,
       beforeState: o.before as Json | undefined,
       afterState: o.after as Json | undefined,
+      ...(o.at ? { createdAt: o.at } : {}),
     },
   });
   ctx?.logIds?.push(row.id);
