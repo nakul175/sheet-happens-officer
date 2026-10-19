@@ -18,7 +18,7 @@ import { crmMode, crmProjectWhere } from "@/lib/crm";
 type Job = { name: string; about: string; run: () => Promise<unknown> };
 
 export const JOBS: Job[] = [
-  { name: "purge-trash", about: "Removes tasks that have been in Trash for 30 days", run: () => purgeTrash() },
+  { name: "purge-trash", about: "Removes tasks that have been in Trash for more than 30 days", run: () => purgeTrash() },
   { name: "purge-old", about: "Removes notifications after 90 days and action and audit logs after 12 months", run: () => purgeOld() },
   { name: "purge-chat", about: "Deletes concierge chat messages after 90 days", run: () => purgeChat() },
   { name: "concierge-budget", about: "Tells the Super Admin once a month when concierge spend reaches 80 percent of the ceiling", run: async () => ({ warned: await warnIfNearCeiling() }) },
