@@ -163,13 +163,15 @@ test("qa:TC missing AC2: a contact is not a user and cannot be an assignee, coll
   expect((await admin.api.post(`/api/projects/${project.id}/members`, { userId: worker.id, role: "EDITOR" })).status).toBe(201);
   const taskId = await newTask(admin, project.id, { title: zz("held by the worker"), assigneeId: worker.id });
 
-  const asAssignee = await admin.api.post(`/api/tasks/${taskId}/assign`, { assigneeId: contactId });
+  // Task writes carry the task's current updatedAt (src/lib/schemas.ts), so the refusal is about the contact, not the version.
+  const version = async () => (await admin.api.get(`/api/tasks/${taskId}`)).json.task.updatedAt as string;
+  const asAssignee = await admin.api.post(`/api/tasks/${taskId}/assign`, { assigneeId: contactId, expectedUpdatedAt: await version() });
   expect(asAssignee.status).toBe(400);
   expect(asAssignee.json.error).toContain("assignee");
   const asCollaborator = await admin.api.post(`/api/tasks/${taskId}/collaborators`, { userId: contactId });
   expect(asCollaborator.status).toBe(400);
   expect(asCollaborator.json.error).toContain("member");
-  const asApprover = await admin.api.put(`/api/tasks/${taskId}/approver`, { approverId: contactId });
+  const asApprover = await admin.api.put(`/api/tasks/${taskId}/approver`, { approverId: contactId, expectedUpdatedAt: await version() });
   expect(asApprover.status).toBe(400);
   expect(asApprover.json.error).toContain("approver");
   const asMember = await admin.api.post(`/api/projects/${project.id}/members`, { userId: contactId, role: "EDITOR" });
@@ -374,17 +376,23 @@ test("qa:TC missing AC5: any signed-in Member sees all contacts, changes are log
   const logged = (await admin.api.get(`/api/orgs/${org.id}/history`)).json.items as { id: string; at: string; who: string; action: string }[];
   const historyList = admin.page.locator("div.grp:text-is('History') + div.list");
   await expect(historyList.locator(".row")).toHaveCount(logged.length);
-  const rowFor = async (id: string | undefined) => {
-    expect(id, "x-undo-id").toBeTruthy();
-    const item = logged.find((i) => i.id === id);
-    expect(item, id).toBeTruthy();
-    const line = await admin.page.evaluate(
+  // An edit and its undo can log the same who · action · second twice. Those rows are identical on
+  // screen, so the check is that the list shows that line exactly as many times as the log has it.
+  const lineOf = (i: { who: string; action: string; at: string }) =>
+    admin.page.evaluate(
       ({ who, action, at }) => `${who} · ${action} · ${new Date(at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}`,
-      item!,
+      i,
     );
-    return historyList.getByText(line, { exact: true });
+  const lines = await Promise.all(logged.map(lineOf));
+  const expectRow = async (id: string | undefined, action: string) => {
+    expect(id, "x-undo-id").toBeTruthy();
+    const index = logged.findIndex((i) => i.id === id);
+    expect(index, id).toBeGreaterThanOrEqual(0);
+    expect(logged[index].action).toBe(action);
+    const line = lines[index];
+    await expect(historyList.getByText(line, { exact: true })).toHaveCount(lines.filter((l) => l === line).length);
   };
-  await expect(await rowFor(made.headers["x-undo-id"])).toContainText("contact.created");
-  await expect(await rowFor(edited.headers["x-undo-id"])).toContainText("contact.updated");
-  await expect(await rowFor(removed.headers["x-undo-id"])).toContainText("contact.removed");
+  await expectRow(made.headers["x-undo-id"], "contact.created");
+  await expectRow(edited.headers["x-undo-id"], "contact.updated");
+  await expectRow(removed.headers["x-undo-id"], "contact.removed");
 });

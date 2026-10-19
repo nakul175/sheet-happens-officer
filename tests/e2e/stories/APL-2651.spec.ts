@@ -251,10 +251,15 @@ test("qa:TC-APL2651-93d4350b@v1 AC2 bulk-undo: another person's action is 403; a
   expectValidation(await send(editor.request, "POST", "/api/actions/bulk-undo", { ids: [] }));
   expectValidation(await send(outsider.request, "POST", "/api/actions/bulk-undo", { ids: [] }));
 
+  // A bulk move needs each task's current updatedAt (src/lib/bulk.ts), the same version check as a single move.
+  const current = await send(lead.request, "GET", `/api/tasks/${taskId}`);
+  expect(current.status, current.text).toBe(200);
+  const updatedAt = (current.json?.task as { updatedAt: string }).updatedAt;
   const bulk = await send(lead.request, "POST", `/api/projects/${projectId}/tasks/bulk`, {
     taskIds: [taskId],
     action: "move",
     sectionId: doing,
+    versions: { [taskId]: updatedAt },
   });
   expect(bulk.status, bulk.text).toBe(200);
   const ids = bulk.json?.undoIds as string[];
@@ -276,7 +281,9 @@ test("qa:TC-APL2651-cb9e6bf3@v1 qa:TC-APL2651-fb71e2b6@v1 AC3: an authorised cal
   const viewPath = `/api/views/${viewId}`;
   const contactPath = `/api/contacts/${contactId}`;
 
-  const badTitle = await send(lead.request, "PATCH", taskPath, { title: "" });
+  // A task PATCH carries the task's current updatedAt (src/lib/schemas.ts), so title is the only bad field.
+  const taskVersion = async () => ((await send(lead.request, "GET", taskPath)).json?.task as { updatedAt: string }).updatedAt;
+  const badTitle = await send(lead.request, "PATCH", taskPath, { title: "", expectedUpdatedAt: await taskVersion() });
   expectValidation(badTitle);
   expect(badTitle.json?.issues).toEqual([{ path: ["title"], message: "Give the task a title." }]);
   const badTaskJson = await send(lead.request, "PATCH", taskPath, MALFORMED);
@@ -323,7 +330,7 @@ test("qa:TC-APL2651-cb9e6bf3@v1 qa:TC-APL2651-fb71e2b6@v1 AC3: an authorised cal
   if (process.env.SHAPE_OUT) writeFileSync(process.env.SHAPE_OUT, JSON.stringify(shapes, null, 2));
   await test.info().attach("ac3-shapes", { body: JSON.stringify(shapes, null, 2), contentType: "application/json" });
 
-  const renamed = await send(lead.request, "PATCH", taskPath, { title: zz("still here") });
+  const renamed = await send(lead.request, "PATCH", taskPath, { title: zz("still here"), expectedUpdatedAt: await taskVersion() });
   expect(renamed.status, renamed.text).toBe(200);
   expect(renamed.json?.task).toMatchObject({ title: expect.stringContaining("ZZ-TEST") });
 
