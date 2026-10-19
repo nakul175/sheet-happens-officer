@@ -166,8 +166,15 @@ export const QUICK_ACTIONS = [
 export async function quickAnswer(user: Actor, id: string, now = new Date(), projectId?: string) {
   const base = QUICK_ACTIONS.find((x) => x.id === id);
   if (!base) throw new ApiError(404, "No such quick action");
-  // Asked from a project screen (SHO-US-14.15): only that project, and only if the person is in it.
-  const scope = projectId ? await db.project.findFirst({ where: { id: projectId, members: { some: { userId: user.id } } }, select: { id: true, name: true } }) : null;
+  // Asked from a project screen (SHO-US-14.15). The same filter as the visible list:
+  // membership (except Admins), crmProjectWhere, and archivedAt: null. A hidden,
+  // archived, or non-member project is the same 404, so the name never reaches the label.
+  const scope = projectId
+    ? await db.project.findFirst({
+        where: { id: projectId, ...visibleProjects(user) },
+        select: { id: true, name: true },
+      })
+    : null;
   if (projectId && !scope) throw new ApiError(404, "Project not found");
   const q = scope ? { ...base, label: `${base.label} in ${flat(scope.name)}` } : base;
   const { tasks, truncated } = await myTasks(user, q.filter, { now, projectId: scope?.id });

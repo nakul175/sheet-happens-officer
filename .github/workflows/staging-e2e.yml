@@ -12,8 +12,6 @@
 # How a run is split:
 #   plan        checks "target" first, then picks the spec files once and splits them into the parallel set and SERIAL_SPECS.
 #               Every shard and the serial job get BASE_URL=https://<target>.
-#   @static     tests tagged @static read source files. Both Playwright commands pass --grep-invert @static,
-#               so those tests are not part of this staging run.
 #   e2e         20 shards of the parallel set (--shard=N/20, workers=1 each). Shard N signs in as ZZ_TEST_NN (SHARD_*), names its
 #               data ZZ-TEST-NN (ZZ_PREFIX), and gets a partner account of the other role (PEER_*). At most max_parallel run at once.
 #               A shard with no tests passes. A shard whose tests were all skipped fails. Each shard uploads its JSON counts.
@@ -22,7 +20,8 @@
 #   counts      once, after every shard (if: always(), needs plan). Expected count files come from plan:
 #               20 when the parallel matrix runs, plus 1 when serial specs were picked. Fewer files, a failed
 #               download, or a missing-report marker fails the job. It also fails when run is 0 or skipped equals total.
-#   report      merges every job's blob report into one HTML report.
+#   report      merges every job's blob report into one HTML report.167
+
 #
 # max_parallel: the staging database is shared with production and allows 25 connections. Do not raise it above 5 until NJ approves
 # a connection pool (PgBouncer) or a bigger database.
@@ -166,7 +165,7 @@ jobs:
     timeout-minutes: 120
     strategy:
       fail-fast: false
-      max-parallel: ${{ inputs.max_parallel }}
+      max-parallel: ${{ fromJSON(inputs.max_parallel || '5') }}
       matrix:
         # nn picks the shard's own ZZ_TEST_NN account; peer is the partner of the other role (shard N with N+5, members with 01-05),
         # chosen so no two of any 5 consecutive shards share an account.
@@ -262,7 +261,8 @@ jobs:
           TRACE: ${{ inputs.trace }}
         run: |
           read -ra files <<< "$FILES"
-          npx playwright test --grep-invert "@static" --shard=${{ matrix.shard }}/20 --workers=1 --reporter=list,blob,json --trace="$TRACE" "${files[@]}"
+          # @static is a file-contains check. @manual cannot force a job failure on staging. Neither is a live pass.
+          npx playwright test --shard=${{ matrix.shard }}/20 --workers=1 --grep-invert "@static|@manual" --reporter=list,blob,json --trace="$TRACE" "${files[@]}"
 
       - name: Fail this shard when every test was skipped
         if: always()
@@ -345,7 +345,8 @@ jobs:
           TRACE: ${{ inputs.trace }}
         run: |
           read -ra files <<< "$FILES"
-          npx playwright test --grep-invert "@static" --workers=1 --reporter=list,blob,json --trace="$TRACE" "${files[@]}"
+          # @static is a file-contains check. @manual cannot force a job failure on staging. Neither is a live pass.
+          npx playwright test --workers=1 --grep-invert "@static|@manual" --reporter=list,blob,json --trace="$TRACE" "${files[@]}"
 
       - name: Fail the serial job when every test was skipped
         if: always()
