@@ -56,6 +56,9 @@ jobs:
         run: npm run lint
       - name: Typecheck
         run: npx next typegen && npx tsc --noEmit
+      # tsconfig.json leaves tests/e2e out (Playwright story specs), so check them on their own (APL-2748).
+      - name: Typecheck story specs
+        run: npx tsc --noEmit -p tsconfig.e2e.json
       - run: npx prisma migrate deploy
       - name: Build
         run: npm run build

@@ -126,10 +126,37 @@ export async function provision(opts: Options): Promise<Result> {
   return { rows, ready: rows.every((r) => r.state === "READY") };
 }
 
+const AWAITING_LINK: State[] = ["SIGNED_UP", "VERIFY_SENT", "UNVERIFIED"];
+/** What to do next for a state that is not READY. Only an alias waiting on its link is told to follow one. */
+const NEXT: Record<Exclude<State, "READY">, string> = {
+  MISSING: "run without --check to sign it up",
+  SIGNED_UP: "follow its Verify link in nakul17@aplyd.com",
+  VERIFY_SENT: "follow its Verify link in nakul17@aplyd.com",
+  UNVERIFIED: "run without --check to send a new link, or follow the last one",
+  DEACTIVATED: "run without --check to reactivate it",
+  WRONG_ROLE: "see the note",
+  WRONG_PASSWORD: "use Forgot password for this address and set it to SHO_QA_PASS",
+  LOCKED: "wait for the lockout to end",
+  ERROR: "see the note",
+};
+
 export function report(result: Result): string {
-  const lines = result.rows.map((r) => `${r.slot.padEnd(7)} ${r.email.padEnd(34)} ${r.state}${r.note ? `  (${r.note})` : ""}`);
-  const waiting = result.rows.filter((r) => r.state !== "READY").length;
-  lines.push(result.ready ? `All ${result.rows.length} aliases are ready.` : `${waiting} of ${result.rows.length} need action. Follow the Verify links in nakul17@aplyd.com, then run again.`);
+  const lines = result.rows.map((r) => {
+    const next = r.state === "READY" ? "" : ` -> ${NEXT[r.state]}`;
+    return `${r.slot.padEnd(7)} ${r.email.padEnd(34)} ${r.state}${r.note ? `  (${r.note})` : ""}${next}`;
+  });
+  if (result.ready) {
+    lines.push(`All ${result.rows.length} aliases are ready.`);
+  } else {
+    const open = result.rows.filter((r) => r.state !== "READY");
+    const links = open.filter((r) => AWAITING_LINK.includes(r.state)).length;
+    const other = open.length - links;
+    const parts = [
+      links ? `${links} waiting on a Verify link in nakul17@aplyd.com` : "",
+      other ? `${other} needing the step shown on its line` : "",
+    ].filter(Boolean);
+    lines.push(`${open.length} of ${result.rows.length} need action: ${parts.join(", ")}. Then run again.`);
+  }
   return lines.join("\n");
 }
 
