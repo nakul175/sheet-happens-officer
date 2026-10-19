@@ -29,11 +29,26 @@ export function crmVisible(user: Pick<Actor, "orgRole">) {
 export const crmProjectWhere = (user: Pick<Actor, "orgRole">): Prisma.ProjectWhereInput =>
   crmVisible(user) ? {} : { typeId: { not: WORKSTREAM_DEAL } };
 
+/** Projects the person may see right now. Deals are left out while the CRM is hidden from them (SHO-BUG-2). Archived projects are left out. Admins see every remaining project; everyone else only the ones they belong to. */
+export const visibleProjects = (user: Actor): Prisma.ProjectWhereInput => ({
+  archivedAt: null,
+  ...(isAdmin(user) ? {} : { members: { some: { userId: user.id } } }),
+  ...crmProjectWhere(user),
+});
+
+/** Projects the person belongs to, whatever their org role. Archived projects and hidden deals are left out. */
+export const myProjects = (user: Actor): Prisma.ProjectWhereInput => ({
+  archivedAt: null,
+  members: { some: { userId: user.id } },
+  ...crmProjectWhere(user),
+});
+
 /**
  * Loads a project the person may see. Non-members get "not found", never "forbidden"
  * (SHO-US-3.2 AC4). Admins and the Super Admin act as Leader everywhere.
  */
 export async function projectAccess(user: Actor, projectId: string, opts: { write?: boolean } = {}) {
+  // This read is the visibility check. Other project lookups go through visibleProjects, myProjects, or this function.
   const project = await db.project.findUnique({ where: { id: projectId }, include: { members: true } });
   const member = project?.members.find((m) => m.userId === user.id) ?? null;
   if (!project || (!member && !isAdmin(user))) throw notFound("Project");

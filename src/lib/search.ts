@@ -3,19 +3,18 @@
 // archived ones they are not members of, once Include archived is on. Archived projects stay
 // out of the results until then.
 import { db } from "@/lib/db";
-import { isAdmin, type Actor } from "@/lib/access";
-import { WORKSTREAM_DEAL, crmProjectWhere, crmVisible } from "@/lib/crm";
+import { visibleProjects, type Actor } from "@/lib/access";
+import { WORKSTREAM_DEAL, crmVisible } from "@/lib/crm";
 
 export async function search(user: Actor, q: string, includeArchived: boolean, ideasOnly = false) {
   const text = q.trim();
   if (text.length < 2) return { projects: [], tasks: [], organisations: [], contacts: [] };
-  // Membership and archive are separate filters. Include archived must not put the membership
-  // limit back onto an Admin or Super Admin (APL-2684).
-  const visible = {
-    ...(isAdmin(user) ? {} : { members: { some: { userId: user.id } } }),
-    ...(includeArchived ? {} : { archivedAt: null }),
-    ...crmProjectWhere(user), // neither a deal nor its tasks while the CRM is hidden (SHO-BUG-2)
-  };
+  // visibleProjects is membership (Admins see every project), the CRM lever, and live rows.
+  // Include archived drops the archive key entirely, so an Admin is not limited to projects they belong to (APL-2684).
+  const live = visibleProjects(user);
+  const includingArchived = { ...live };
+  delete includingArchived.archivedAt;
+  const visible = includeArchived ? includingArchived : live;
   const crm = crmVisible(user);
   const me = await db.user.findUniqueOrThrow({ where: { id: user.id }, select: { workspaceId: true } });
   const [organisations, contacts] = crm && !ideasOnly ? await Promise.all([
@@ -24,7 +23,7 @@ export async function search(user: Actor, q: string, includeArchived: boolean, i
   ]) : [[], []];
   const [projects, tasks] = await Promise.all([
     db.project.findMany({
-      where: { ...visible, name: { contains: text, mode: "insensitive" } },
+      where: { ...(includeArchived ? includingArchived : visibleProjects(user)), name: { contains: text, mode: "insensitive" } },
       orderBy: { name: "asc" }, take: 20, select: { id: true, name: true, archivedAt: true, typeId: true },
     }),
     db.task.findMany({

@@ -2,12 +2,13 @@
 // a Member sees their own projects, Admins see all, Trash and archived projects are left out.
 // Results are trimmed records; nothing is ever read from memory or from earlier turns.
 import { db } from "@/lib/db";
-import { isAdmin, projectAccess, type Actor } from "@/lib/access";
-import { crmProjectWhere } from "@/lib/crm";
+import { isAdmin, myProjects, projectAccess, visibleProjects, type Actor } from "@/lib/access";
 import { ApiError } from "@/lib/http";
 import { addDays, formatDueDate, startOfTodayIST } from "@/lib/dates";
 import { awaiting } from "@/lib/tasks";
 import { fullDate, shortDate } from "@/lib/concierge/dates";
+
+export { visibleProjects };
 
 export type TaskRec = {
   id: string; title: string; project: string; projectId: string; due: string | null; dueText: string | null;
@@ -40,15 +41,6 @@ export function toTaskRec(t: Row, today = startOfTodayIST()): TaskRec {
     ...(!t.completedAt && t.dueDate && t.dueDate < today ? { overdue: true } : {}),
   };
 }
-
-/** Projects the person may see right now. Deals are left out while the CRM is hidden from them (SHO-BUG-2). */
-export const visibleProjects = (user: Actor) => ({
-  archivedAt: null,
-  ...(isAdmin(user) ? {} : { members: { some: { userId: user.id } } }),
-  ...crmProjectWhere(user),
-});
-/** Projects the person belongs to: their own work, whatever their org role. */
-const myProjects = (user: Actor) => ({ archivedAt: null, members: { some: { userId: user.id } }, ...crmProjectWhere(user) });
 
 const byProjectThenDue = (a: TaskRec, b: TaskRec) =>
   a.project.localeCompare(b.project) || (a.due ?? "9999").localeCompare(b.due ?? "9999") || a.title.localeCompare(b.title);
@@ -166,9 +158,10 @@ export const QUICK_ACTIONS = [
 export async function quickAnswer(user: Actor, id: string, now = new Date(), projectId?: string) {
   const base = QUICK_ACTIONS.find((x) => x.id === id);
   if (!base) throw new ApiError(404, "No such quick action");
-  // Asked from a project screen (SHO-US-14.15). The same filter as the visible list:
-  // membership (except Admins), crmProjectWhere, and archivedAt: null. A hidden,
-  // archived, or non-member project is the same 404, so the name never reaches the label.
+  // Asked from a project screen (SHO-US-14.15). visibleProjects is the same filter as the
+  // visible list: membership (except Admins), archivedAt: null, and the CRM deal check
+  // (crmProjectWhere). A hidden, archived, or other missing project is the same 404,
+  // before any chat row is written.
   const scope = projectId
     ? await db.project.findFirst({
         where: { id: projectId, ...visibleProjects(user) },

@@ -1,7 +1,7 @@
 import { db } from "@/lib/db";
 import { ApiError, notFound } from "@/lib/http";
 import {
-  activeMember, isActive, isAdmin, projectAccess, requireManage, type Access, type Actor, type Role,
+  activeMember, isActive, isAdmin, projectAccess, requireManage, visibleProjects, type Access, type Actor, type Role,
 } from "@/lib/access";
 import { logAction, notify } from "@/lib/notify";
 import { openTaskCount, releasePerson, resolveHandover, type Handover, type Released } from "@/lib/people";
@@ -47,9 +47,10 @@ export async function listProjects(user: Actor, archived: boolean) {
   const projects = await db.project.findMany({
     where: {
       // SHO-US-10.4: deals have their own place; this list is for type Project only.
+      // visibleProjects applies membership and the CRM filter; the archived toggle overrides its archivedAt: null.
+      ...visibleProjects(user),
       typeId: WORKSTREAM_PROJECT,
       archivedAt: archived ? { not: null } : null,
-      ...(isAdmin(user) ? {} : { members: { some: { userId: user.id } } }),
     },
     orderBy: { createdAt: "asc" },
     include: {
