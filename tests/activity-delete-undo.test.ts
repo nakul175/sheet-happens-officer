@@ -64,9 +64,9 @@ async function openActivity(ctx: BrowserContext, projectId: string) {
 }
 
 function deleteRow(page: Page, who: string, what = DELETED) {
-  return page.locator(".item.act", { hasText: what }).filter({
-    has: page.locator("strong", { hasText: new RegExp(`^${who}$`) }),
-  });
+  return page.getByRole("list", { name: "Activity" }).getByRole("listitem")
+    .filter({ hasText: what })
+    .filter({ has: page.getByText(who, { exact: true }) });
 }
 
 async function addMember(leader: Account, projectId: string, who: Account, role: "EDITOR" | "VIEWER") {
@@ -192,7 +192,7 @@ describe("APL-2674 activity delete undo", () => {
     const ctx = await signedIn(editor.email);
     try {
       const page = await openActivity(ctx, projectId);
-      const row = page.locator(".item.act", { hasText: `renamed "${TITLE}" to "${RENAMED_TO}"` });
+      const row = page.getByRole("list", { name: "Activity" }).getByRole("listitem").filter({ hasText: `renamed "${TITLE}" to "${RENAMED_TO}"` });
       const undo = row.getByRole("button", { name: "Undo" });
       await undo.waitFor({ state: "visible", timeout: 30_000 });
       await undo.click();
@@ -300,7 +300,8 @@ describe("APL-2674 activity delete undo", () => {
       // The feed does not list Erin's delete to an editor who is not involved in the task: the row is absent.
       const feed = (await uninvolved.c.get(`/api/projects/${projectId}/activity`)).json.items as { what: string }[];
       expect(feed.some((item) => item.what === DELETED)).toBe(false);
-      await page.locator(".item.act, .card.empty").first().waitFor({ state: "visible", timeout: 30_000 });
+      // The feed has rendered: either the Activity list or its empty message (only one of them is ever on the page).
+      await page.getByRole("list", { name: "Activity" }).or(page.getByText("Nothing has happened yet.")).waitFor({ state: "visible", timeout: 30_000 });
       expect(await deleteRow(page, erinName).count()).toBe(0);
       expect(await page.getByText("Too old to undo").count()).toBe(0);
     } finally {
@@ -530,6 +531,36 @@ describe("APL-2674 activity delete undo", () => {
     }
   }, 150_000);
 
+  it("qa:TC missing D4 An Editor sees no \"Too old to undo\" on their own delete older than 30×24h; the Leader still does", async () => {
+    const leader = await account("leader");
+    const editor = await account("editor");
+    const projectId = await alpha(leader, editor);
+    const old = await deletedTask(editor, projectId, "Fix invoice D4");
+    await setLogTime(old.logId, new Date(Date.now() - 31 * DAY));
+    const name = await displayName(editor);
+
+    // The Editor could never undo their own delete (Trash restore is Leader or Admin), so the hint would be misleading.
+    const editorCtx = await signedIn(editor.email);
+    try {
+      const page = await openActivity(editorCtx, projectId);
+      const row = deleteRow(page, name, old.what);
+      await row.waitFor({ state: "visible", timeout: 30_000 });
+      expect(await row.getByRole("button", { name: "Undo" }).count()).toBe(0);
+      expect(await row.innerText()).not.toContain("Too old to undo");
+    } finally {
+      await editorCtx.close();
+    }
+
+    // The Leader could have restored it, so the hint still shows for them.
+    const leaderCtx = await signedIn(leader.email);
+    try {
+      const page = await openActivity(leaderCtx, projectId);
+      await expectTooOld(page, name, old.what);
+    } finally {
+      await leaderCtx.close();
+    }
+  }, 90_000);
+
   it("qa:TC-APL2674-070b48b9@v3 PROVISIONAL (AC7; NJ confirms at 8:30 AM IST): the Undo toast disappears after 10 s and the task stays in Trash with \"30 days left\"", async () => {
     const leader = await account("leader");
     const editor = await account("editor");
@@ -545,7 +576,7 @@ describe("APL-2674 activity delete undo", () => {
     try {
       const page = await ctx.newPage();
       await page.goto(`/projects/${projectId}/trash`, { waitUntil: "load", timeout: 45_000 });
-      const row = page.locator("tr", { hasText: TITLE });
+      const row = page.getByRole("row").filter({ hasText: TITLE });
       await row.waitFor({ state: "visible", timeout: 30_000 });
       expect(await row.innerText()).toContain("30 days");
       await row.getByRole("button", { name: "Restore" }).click();
