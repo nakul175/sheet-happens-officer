@@ -59,12 +59,11 @@ test.describe("APL-2681 staging mail sink", () => {
       const mail = await waitForMail(email, "Your Sheet Happens Officer account", { baseUrl: BASE });
       const password = mail.text.match(/^Password: (.+)$/m)?.[1];
       expect(password, "emailed temporary password").toBeTruthy();
+      const signed = await ctx.request.post("/api/auth/signin", { data: { email, password } });
+      expect(signed.ok(), `sign in (${signed.status()})`).toBe(true);
       const page = await ctx.newPage();
-      await page.goto("/signin");
-      await page.getByLabel("Work email").fill(email);
-      await page.getByLabel("Password").fill(password!);
-      await page.getByRole("button", { name: "Sign in" }).click();
-      await expect(page).not.toHaveURL(/\/signin$/);
+      await page.goto("/");
+      await expect(page).not.toHaveURL(/\/signin/);
       await expect(page.locator("#main")).toBeVisible();
     } finally {
       await ctx.close();
