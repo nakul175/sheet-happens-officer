@@ -6,9 +6,9 @@
 //  - AC5 says opening the bell marks the list read and shows the latest 30; SHO-US-14.13 changed it: nothing is marked read until
 //    the person clicks a notice, and the panel shows up to 50. The test checks the 14.13 behaviour.
 // Data: every project and task is named "ZZ-TEST ...".
-import { test, expect, zz } from "../support";
+import { test, expect, zz, type Who } from "../support";
 
-async function proj(admin: any, label: string, later: (f: () => Promise<unknown>) => void) {
+async function proj(admin: Who, label: string, later: (f: () => Promise<unknown>) => void) {
   const r = await admin.api.post("/api/projects", { name: zz(label), leaderId: admin.user.id });
   expect(r.status, JSON.stringify(r.json)).toBe(201);
   const id = r.json.project.id as string;

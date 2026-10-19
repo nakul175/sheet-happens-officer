@@ -12,6 +12,8 @@ import { BASE_URL } from "./tests/e2e/base-url";
 
 export default defineConfig({
   testDir: "./tests/e2e/stories",
+  // APL-2522.spec.ts is the Vitest approver spec. Playwright runs APL-2522-ac.spec.ts.
+  testIgnore: "**/APL-2522.spec.ts",
   timeout: 60_000,
   expect: { timeout: 10_000 },
   workers: 1,

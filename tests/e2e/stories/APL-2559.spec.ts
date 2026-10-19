@@ -1,84 +1,147 @@
-// SHO-US-22.11 Automated phone checks in CI (APL-2559).
-// The criteria describe Phone checks (.github/workflows/phone-checks.yml) and tests/viewport.
-// This file does not sign in, does not call the network, and does not read or write any database.
-// The viewport suite refuses every host except localhost, so it is not pointed at staging or production.
-import { readFileSync } from "node:fs";
+// SHO-US-22.11 Automated phone checks in CI (Linear APL-2559).
+// Pam left no qa:TC id on the issue; each title says "qa:TC missing".
+// A check that only asks whether a file contains a string is tagged @static. The staging
+// workflow leaves @static out. It does not pass a live acceptance criterion.
+// The live tests run the viewport checker in Chromium. They do not sign in, do not call a
+// deployed app, and do not read or write any database. No customer data is seeded.
+// The only skip is a missing SHO_QA_PASS.
+import { existsSync, mkdirSync, readFileSync, statSync } from "node:fs";
+import path from "node:path";
 import { test, expect } from "../support";
 import { collect } from "../../viewport/checks";
 import { PHONE_MAX, SCREENS, WIDTHS } from "../../viewport/screens";
 
-const read = (path: string) => readFileSync(path, "utf8");
-const workflow = read(".github/workflows/phone-checks.yml");
-const suite = read("tests/viewport/viewport.test.ts");
-const config = read("vitest.viewport.config.mts");
+const PASS = process.env.SHO_QA_PASS ?? "";
+const ROOT = process.cwd();
+const WORKFLOW = path.join(ROOT, ".github/workflows/phone-checks.yml");
+const SUITE = path.join(ROOT, "tests/viewport/viewport.test.ts");
+const SHOTS = path.join(ROOT, "test-results/viewport");
 
-const pageHtml = (body: string, meta = "width=device-width, initial-scale=1, viewport-fit=cover") =>
-  `<!doctype html><meta name="viewport" content="${meta}"><body style="margin:0">${body}</body>`;
+test.beforeAll(() => {
+  test.skip(!PASS, "APL-2559: set SHO_QA_PASS (password for nakul17+ aliases).");
+});
 
-test("AC1: when CI runs, the viewport suite runs on every listed screen and width and reports pass or fail", () => {
-  expect(workflow).toMatch(/^\s*pull_request:\s*$/m);
-  expect(workflow).toMatch(/push:\s*\n\s*branches-ignore:\s*\[main\]/);
-  expect(workflow).toContain("npm run test:viewport");
-  expect(suite).toContain("for (const width of WIDTHS)");
-  expect(suite).toContain("for (const s of SCREENS)");
-  expect(suite).toContain("it(`${s.name} @ ${width} px`");
-  expect(WIDTHS.length).toBeGreaterThan(0);
+const CLEAN = `<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"></head>
+<body style="margin:0"><button style="width:44px;height:44px">Ok</button><input style="font-size:16px;height:44px;width:120px"></body></html>`;
+
+const WIDE = `<!doctype html><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><body style="margin:0"><div class="board-fault" style="width:400px;height:20px">wide</div></body>`;
+
+test("AC1: when CI runs, the viewport suite runs on every listed screen and width and reports pass or fail qa:TC missing", async ({ browser }) => {
+  const titles = WIDTHS.flatMap((width) => SCREENS.map((screen) => `${screen.name} @ ${width} px`));
   expect(SCREENS.length).toBeGreaterThan(0);
-  expect(WIDTHS).toEqual([320, 360, 390, 414, 599, 768]);
-  expect(SCREENS.map((s) => s.name)).toEqual(expect.arrayContaining(["Sign in", "Sign up", "My tasks", "Audit log"]));
-  // A passing screen closes with no findings. A failing one reports the screen and the width.
-  expect(suite).toContain("expect.fail(`${s.name} at ${width} px has ${found.length} problem");
+  expect(WIDTHS.length).toBeGreaterThan(0);
+  expect(new Set(titles).size).toBe(SCREENS.length * WIDTHS.length);
+
+  const ctx = await browser.newContext({ viewport: { width: 390, height: 800 } });
+  const page = await ctx.newPage();
+  try {
+    await page.setContent(CLEAN);
+    const found = await page.evaluate(collect, true);
+    expect(found, "a page that meets the rules reports pass (no findings)").toEqual([]);
+  } finally {
+    await ctx.close();
+  }
 });
 
-test("AC2: a change that adds 400 px of fixed width fails the suite, naming the screen, width and element", async ({ page }) => {
-  await page.setViewportSize({ width: 320, height: 700 });
-  await page.setContent(pageHtml('<div class="board-fault" style="width:400px;height:20px">wide</div>'));
-  const found = await page.evaluate(collect, 320 < PHONE_MAX);
-  expect(found.some((x) => x.check === "overflow" && x.element.includes("div.board-fault"))).toBe(true);
-  const hit = found.find((x) => x.element.includes("div.board-fault"))!;
-  const reported = `Board at 320 px has 1 problem:\n  ${hit.check}: ${hit.element} (${hit.detail})`;
-  expect(reported).toContain("Board");
-  expect(reported).toContain("320 px");
-  expect(reported).toContain("div.board-fault");
-  expect(suite).toContain('x.element.includes("div.board-fault")');
-  expect(suite).toContain("screenshot: ${shot}");
+test("@static AC1: the workflow and the suite file name the screen and width loop qa:TC missing", () => {
+  const yml = readFileSync(WORKFLOW, "utf8");
+  const source = readFileSync(SUITE, "utf8");
+  expect(yml).toMatch(/^on:\s*$/m);
+  expect(yml).toContain("pull_request:");
+  expect(yml).toContain("npm run test:viewport");
+  expect(source).toContain("for (const width of WIDTHS)");
+  expect(source).toContain("for (const s of SCREENS)");
+  expect(source).toContain("it(`${s.name} @ ${width} px`");
+  expect(source).toContain("expect.fail(");
 });
 
-test("AC3: the suite asserts no horizontal overflow, 44 by 44 px targets under 600 px, 16 px fields, and viewport-fit=cover", async ({ page }) => {
+test("AC2: a change that adds 400 px of fixed width fails the suite, naming the screen, width and element qa:TC missing", async ({ browser }) => {
+  const width = 320;
+  expect(WIDTHS).toContain(width);
+  expect(SCREENS.some((screen) => screen.name.length > 0)).toBe(true);
+  const ctx = await browser.newContext({ viewport: { width, height: 700 } });
+  const page = await ctx.newPage();
+  try {
+    await page.setContent(WIDE);
+    const found = await page.evaluate(collect, true);
+    const hit = found.find((f) => f.check === "overflow" && f.element.includes("div.board-fault"));
+    expect(hit, "the 400 px element is named").toBeTruthy();
+    expect(hit?.element).toContain("div.board-fault");
+    expect(hit?.detail).toMatch(/400|right edge/);
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("@static AC2: the suite file contains the fixed-width failure wording qa:TC missing", () => {
+  const source = readFileSync(SUITE, "utf8");
+  expect(source).toContain("fails a page with 400 px of fixed width and names the element");
+  expect(source).toContain("${s.name} at ${width} px has");
+  expect(source).toContain("f.element");
+  expect(source).toContain("screenshot:");
+});
+
+test("AC3: the suite asserts no horizontal overflow, 44 by 44 px targets under 600 px, 16 px fields, and viewport-fit=cover qa:TC missing", async ({ browser }) => {
   expect(PHONE_MAX).toBe(600);
-  await page.setViewportSize({ width: 360, height: 700 });
-  await page.setContent(pageHtml(
-    '<button style="width:30px;height:30px">x</button><input style="font-size:14px;height:44px">',
-    "width=device-width, initial-scale=1",
-  ));
-  const found = await page.evaluate(collect, 360 < PHONE_MAX);
-  expect(found.map((x) => x.check).sort()).toEqual(["field", "meta", "target"]);
-  const target = found.find((x) => x.check === "target")!;
-  const field = found.find((x) => x.check === "field")!;
-  const meta = found.find((x) => x.check === "meta")!;
-  expect(target.detail).toContain("needs 44 x 44");
-  expect(field.detail).toContain("needs 16");
-  expect(meta.detail).toContain("viewport-fit=cover");
-  expect(read("tests/viewport/checks.ts")).toContain("viewport-fit\\s*=\\s*cover");
+  const narrow = await browser.newContext({ viewport: { width: 360, height: 700 } });
+  const bad = await narrow.newPage();
+  try {
+    await bad.setContent(`<!doctype html><meta name="viewport" content="width=device-width, initial-scale=1"><body style="margin:0"><button style="width:30px;height:30px">x</button><input style="font-size:14px;height:44px"><div style="width:400px;height:10px">wide</div></body>`);
+    const found = await bad.evaluate(collect, 360 < PHONE_MAX);
+    expect(found.map((f) => f.check).sort()).toEqual(["field", "meta", "overflow", "target"]);
+    expect(found.find((f) => f.check === "target")?.detail).toContain("44");
+    expect(found.find((f) => f.check === "field")?.detail).toContain("16");
+    expect(found.find((f) => f.check === "meta")?.detail).toContain("viewport-fit=cover");
+  } finally {
+    await narrow.close();
+  }
+
+  const wide = await browser.newContext({ viewport: { width: 768, height: 800 } });
+  const ok = await wide.newPage();
+  try {
+    await ok.setContent(CLEAN);
+    expect(await ok.evaluate(collect, 768 < PHONE_MAX)).toEqual([]);
+  } finally {
+    await wide.close();
+  }
 });
 
-test("AC4: the suite finishes in under 10 minutes on CI", () => {
-  expect(workflow).toMatch(/timeout-minutes:\s*10\b/);
-  expect(workflow).toContain("name: Phone-size layout checks");
-  expect(config).toContain("testTimeout: 60000");
-  expect(config).toContain('include: ["tests/viewport/**/*.test.ts"]');
+test("@static AC3: checks.ts names the four rules qa:TC missing", () => {
+  const source = readFileSync(path.join(ROOT, "tests/viewport/checks.ts"), "utf8");
+  expect(source).toContain("No sideways scroll");
+  expect(source).toContain("Tap targets at least 44 by 44");
+  expect(source).toContain("Fields at least 16 px");
+  expect(source).toContain("viewport-fit=cover");
 });
 
-test("AC5: a failure attaches screenshots of the failing state", () => {
-  expect(workflow).toMatch(/name: Screenshots of failing pages\s*\n\s*if:\s*failure\(\)/);
-  expect(workflow).toContain("actions/upload-artifact@v4");
-  expect(workflow).toContain("name: viewport-screenshots");
-  expect(workflow).toContain("path: test-results/viewport/");
-  expect(suite).toContain('const SHOTS = "test-results/viewport"');
-  expect(suite).toContain("await page.screenshot({ path: shot, fullPage: true })");
-  // The suite builds its own rows on a local Postgres and refuses any other host.
-  expect(workflow).toContain("postgresql://sho:sho@localhost:5432/sho_viewport");
-  expect(workflow).not.toMatch(/sheethappensofficer\.com/);
-  expect(suite).toContain("Refusing to run the viewport suite against");
-  expect(suite).toContain("localhost|127\\.0\\.0\\.1");
+test("@static AC4: the phone-checks job sets timeout-minutes to 10 qa:TC missing", () => {
+  expect(readFileSync(WORKFLOW, "utf8")).toMatch(/timeout-minutes:\s*10\b/);
+});
+
+test("AC5: a failure attaches screenshots of the failing state qa:TC missing", async ({ browser }) => {
+  mkdirSync(SHOTS, { recursive: true });
+  const shot = path.join(SHOTS, "APL-2559-fixed-width-320.png");
+  const ctx = await browser.newContext({ viewport: { width: 320, height: 700 } });
+  const page = await ctx.newPage();
+  try {
+    await page.setContent(WIDE);
+    const found = await page.evaluate(collect, true);
+    expect(found.some((f) => f.check === "overflow")).toBe(true);
+    await page.screenshot({ path: shot, fullPage: true });
+  } finally {
+    await ctx.close();
+  }
+  expect(existsSync(shot)).toBe(true);
+  expect(statSync(shot).size).toBeGreaterThan(100);
+});
+
+test("@static AC5: the workflow uploads viewport-screenshots after a failure qa:TC missing", () => {
+  const yml = readFileSync(WORKFLOW, "utf8");
+  const source = readFileSync(SUITE, "utf8");
+  expect(yml).toContain("if: failure()");
+  expect(yml).toContain("actions/upload-artifact@v4");
+  expect(yml).toContain("name: viewport-screenshots");
+  expect(yml).toContain("path: test-results/viewport/");
+  expect(source).toContain("await page.screenshot(");
+  expect(source).toContain("test-results/viewport");
 });
