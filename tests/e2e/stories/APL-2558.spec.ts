@@ -1,14 +1,17 @@
 // SHO-US-22.10 Installable web app (APL-2558). Epic SHO-E22.
+// Pam left no qa:TC id. Each title says qa:TC missing. The annotation is qa:TC with description missing. An AC number is not a TC id.
 // Runs against staging. Creates no data. AC2 uses Chrome's installability report. AC3 checks the tags and manifest Safari reads for Add to Home Screen.
 import { devices } from "@playwright/test";
 import { test, expect, BASE_URL } from "../support";
 import { storyGate } from "../helpers/qa-alias";
+import { linkHrefs, metaContent } from "../helpers/locate";
 
-storyGate({ admin: true });
+storyGate({ admin: true, id: "APL-2558" });
 
 type Icon = { src: string; sizes: string; type?: string; purpose?: string };
 
-test("AC1: /manifest.webmanifest returns 200 with name, short_name, start_url, standalone, colours and the 192, 512, maskable 512 icons", async ({ anon }) => {
+// qa:TC missing
+test("AC1: /manifest.webmanifest returns 200 with name, short_name, start_url, standalone, colours and the 192, 512, maskable 512 icons qa:TC missing", async ({ anon }) => {
   const r = await anon.request.get("/manifest.webmanifest");
   expect(r.status()).toBe(200);
   const m = await r.json();
@@ -29,17 +32,22 @@ test("AC1: /manifest.webmanifest returns 200 with name, short_name, start_url, s
   }
 });
 
-test("AC1: the pages link the manifest and an apple-touch icon of 180 x 180 px", async ({ anon }) => {
+// qa:TC missing
+test("AC1: the pages link the manifest and an apple-touch icon of 180 x 180 px qa:TC missing", async ({ anon }) => {
   await anon.goto("/signin");
-  expect(await anon.locator('link[rel="manifest"]').getAttribute("href")).toMatch(/manifest/);
-  const href = await anon.locator('link[rel="apple-touch-icon"]').first().getAttribute("href");
-  expect(href).toBeTruthy();
-  const png = await (await anon.request.get(href!)).body();
-  // A PNG stores its width and height as two 32-bit numbers at bytes 16 to 24.
-  expect([png.readUInt32BE(16), png.readUInt32BE(20)]).toEqual([180, 180]);
+  expect((await linkHrefs(anon, "manifest")).join(" ")).toMatch(/manifest/);
+  const icons = await linkHrefs(anon, "apple-touch-icon");
+  expect(icons.length).toBeGreaterThan(0);
+  const sizes: number[][] = [];
+  for (const href of icons) {
+    const png = await (await anon.request.get(href)).body();
+    if (png.length >= 24 && png[0] === 0x89 && png[1] === 0x50) sizes.push([png.readUInt32BE(16), png.readUInt32BE(20)]);
+  }
+  expect(sizes).toContainEqual([180, 180]);
 });
 
-test("AC2: Chrome on Android offers install", async ({ browser }) => {
+// qa:TC missing
+test("AC2: Chrome on Android offers install qa:TC missing", async ({ browser }) => {
   const ctx = await browser.newContext({
     ...devices["Pixel 5"],
     baseURL: BASE_URL,
@@ -65,39 +73,47 @@ test("AC2: Chrome on Android offers install", async ({ browser }) => {
   await ctx.close();
 });
 
-test("AC3: iOS Safari Add to Home Screen shows the SHO icon and name and opens without browser bars", async ({ anon }) => {
+// qa:TC missing
+test("AC3: iOS Safari Add to Home Screen shows the SHO icon and name and opens without browser bars qa:TC missing", async ({ anon }) => {
   // Playwright cannot complete Safari's Add to Home Screen. These are the tags and manifest Safari reads for the icon, the name, and a window with no browser bars.
   await anon.goto("/signin");
-  const capable = await anon.locator('meta[name="apple-mobile-web-app-capable"], meta[name="mobile-web-app-capable"]').evaluateAll((els) => els.map((el) => el.getAttribute("content")));
+  const capable = [...await metaContent(anon, "apple-mobile-web-app-capable"), ...await metaContent(anon, "mobile-web-app-capable")];
   expect(capable).toContain("yes");
-  expect(await anon.locator('meta[name="apple-mobile-web-app-title"]').getAttribute("content")).toBe("SHO");
-  const href = await anon.locator('link[rel="apple-touch-icon"]').first().getAttribute("href");
-  expect(href).toBeTruthy();
-  const png = await (await anon.request.get(href!)).body();
-  expect([png.readUInt32BE(16), png.readUInt32BE(20)]).toEqual([180, 180]);
+  expect(await metaContent(anon, "apple-mobile-web-app-title")).toContain("SHO");
+  const icons = await linkHrefs(anon, "apple-touch-icon");
+  expect(icons.length).toBeGreaterThan(0);
+  const sizes: number[][] = [];
+  for (const href of icons) {
+    const png = await (await anon.request.get(href)).body();
+    if (png.length >= 24 && png[0] === 0x89 && png[1] === 0x50) sizes.push([png.readUInt32BE(16), png.readUInt32BE(20)]);
+  }
+  expect(sizes).toContainEqual([180, 180]);
   const manifest = await (await anon.request.get("/manifest.webmanifest")).json();
   expect(manifest.display).toBe("standalone");
   expect(manifest.short_name).toBe("SHO");
   expect(manifest.name).toContain("Sheet Happens");
 });
 
-test("AC3 (tags only): the page declares itself a web app for iOS, titled SHO", async ({ anon }) => {
+// qa:TC missing
+test("AC3 (tags only): the page declares itself a web app for iOS, titled SHO qa:TC missing", async ({ anon }) => {
   await anon.goto("/signin");
-  const capable = (await anon.locator('meta[name="apple-mobile-web-app-capable"], meta[name="mobile-web-app-capable"]').evaluateAll((e) => e.map((x) => x.getAttribute("content"))));
+  const capable = [...await metaContent(anon, "apple-mobile-web-app-capable"), ...await metaContent(anon, "mobile-web-app-capable")];
   expect(capable).toContain("yes");
-  expect(await anon.locator('meta[name="apple-mobile-web-app-title"]').getAttribute("content")).toBe("SHO");
+  expect(await metaContent(anon, "apple-mobile-web-app-title")).toContain("SHO");
 });
 
-test("AC4: the offline page says 'You are offline' and shows no account data", async ({ anon }) => {
+// qa:TC missing
+test("AC4: the offline page says 'You are offline' and shows no account data qa:TC missing", async ({ anon }) => {
   const r = await anon.goto("/offline");
   expect(r!.status()).toBe(200);
   await expect(anon.getByRole("heading", { name: "You are offline" })).toBeVisible();
   await expect(anon.getByRole("link", { name: "Try again" })).toBeVisible();
   // It is a public page: no sign-in is needed and nothing personal is on it.
-  expect(await anon.locator("body").innerText()).not.toMatch(/ZZ-TEST|@/);
+  expect(await anon.evaluate(() => document.body.innerText)).not.toMatch(/ZZ-TEST|@/);
 });
 
-test("AC4: with no network and no installed app the browser's own error shows, never cached task data (no service worker)", async ({ admin }) => {
+// qa:TC missing
+test("AC4: with no network and no installed app the browser's own error shows, never cached task data (no service worker) qa:TC missing", async ({ admin }) => {
   await admin.page.goto("/");
   const regs = await admin.page.evaluate(async () => (await navigator.serviceWorker?.getRegistrations?.())?.length ?? 0);
   expect(regs, "service workers registered").toBe(0);
@@ -108,15 +124,17 @@ test("AC4: with no network and no installed app the browser's own error shows, n
   expect(failed, "an offline reload must not be answered from a cache").toBe(true);
 });
 
-test("AC5: the safe-area rules of 22.1 apply (viewport-fit=cover, theme colour, safe-area padding on the tab bar)", async ({ admin }) => {
+// qa:TC missing
+test("AC5: the safe-area rules of 22.1 apply (viewport-fit=cover, theme colour, safe-area padding on the tab bar) qa:TC missing", async ({ admin }) => {
   await admin.page.goto("/");
-  expect(await admin.page.locator('meta[name="viewport"]').getAttribute("content")).toMatch(/viewport-fit\s*=\s*cover/);
-  const hrefs = await admin.page.$$eval('link[rel="stylesheet"]', (l) => l.map((x) => (x as HTMLLinkElement).href));
+  expect((await metaContent(admin.page, "viewport")).join(" ")).toMatch(/viewport-fit\s*=\s*cover/);
+  const hrefs = await linkHrefs(admin.page, "stylesheet");
   const css = (await Promise.all(hrefs.map(async (h) => (await admin.page.request.get(h)).text()))).join("\n");
   expect(css).toMatch(/safe-area-inset-bottom/);
 });
 
-test("Prohibited: authenticated pages and API responses are not cacheable by a shared cache", async ({ admin }) => {
+// qa:TC missing
+test("Prohibited: authenticated pages and API responses are not cacheable by a shared cache qa:TC missing", async ({ admin }) => {
   for (const p of ["/api/auth/me", "/api/my-tasks", "/"]) {
     const r = await admin.page.request.get(p);
     const cc = (r.headers()["cache-control"] ?? "").toLowerCase();

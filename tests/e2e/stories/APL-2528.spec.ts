@@ -1,9 +1,10 @@
 // SHO-US-10.2 Pipelines and stages as configuration  (Linear APL-2528)
+// Pam left no qa:TC id. Each title says qa:TC missing. The annotation is qa:TC with description missing. An AC number is not a TC id.
 // Source: acceptance criteria in the Linear issue. Runs against staging; credentials come from the environment (see playwright.config.ts).
 import { test, expect, type Json } from "../support";
 import { storyGate } from "../helpers/qa-alias";
 
-storyGate({ admin: true });
+storyGate({ admin: true, id: "APL-2528" });
 
 type Stage = { id: string; name: string; position: number; category: string; needsReason: boolean; requiredFields: string[] };
 type Pipe = { id: string; key: string; name: string; stages: Stage[] };
@@ -14,7 +15,8 @@ async function pipelines(admin: { api: { get: (p: string) => Promise<{ status: n
   return r.json.pipelines as Pipe[];
 }
 
-test("AC1: the Proactive and Bid deal pipelines exist with the agreed stages and categories", async ({ admin }) => {
+// qa:TC missing
+test("AC1: the Proactive and Bid deal pipelines exist with the agreed stages and categories qa:TC missing", async ({ admin }) => {
   const pipes = await pipelines(admin);
   const pro = pipes.find((p) => p.key === "DEAL_PROACTIVE")!;
   const bid = pipes.find((p) => p.key === "DEAL_BID")!;
@@ -31,7 +33,8 @@ test("AC1: the Proactive and Bid deal pipelines exist with the agreed stages and
   ]);
 });
 
-test("AC2: each pipeline owns its own stage rows, so changing one leaves the other unchanged", async ({ admin }) => {
+// qa:TC missing
+test("AC2: each pipeline owns its own stage rows, so changing one leaves the other unchanged qa:TC missing", async ({ admin }) => {
   const pipes = await pipelines(admin);
   const pro = pipes.find((p) => p.key === "DEAL_PROACTIVE")!;
   const bid = pipes.find((p) => p.key === "DEAL_BID")!;
@@ -40,12 +43,14 @@ test("AC2: each pipeline owns its own stage rows, so changing one leaves the oth
   expect(shared, "no stage row is shared between pipelines (even Won and Lost)").toEqual([]);
 });
 
-test("AC1 (screen): the Deals screen shows the Proactive stages as board columns", async ({ admin }) => {
+// qa:TC missing
+test("AC1 (screen): the Deals screen shows the Proactive stages as board columns qa:TC missing", async ({ admin }) => {
   await admin.page.goto("/deals");
-  await expect(admin.page.getByText("Negotiation").first()).toBeVisible();
+  await expect(admin.page.getByRole("region", { name: "Negotiation", exact: true })).toBeVisible();
 });
 
-test("AC3: removing a stage asks where its items go", async ({ admin }) => {
+// qa:TC missing
+test("AC3: removing a stage asks where its items go qa:TC missing", async ({ admin }) => {
   const pipes = await pipelines(admin);
   const stage = pipes.find((p) => p.key === "DEAL_PROACTIVE")!.stages.find((s) => s.name === "Negotiation")!;
   const removed = await admin.api.del(`/api/deals/pipelines/${stage.id}`);
@@ -59,7 +64,8 @@ test("AC3: removing a stage asks where its items go", async ({ admin }) => {
   expect(again.flatMap((p) => p.stages).some((s) => s.id === stage.id), "the stage row is still there").toBe(true);
 });
 
-test("AC4: every pipeline keeps a Done stage", async ({ admin }) => {
+// qa:TC missing
+test("AC4: every pipeline keeps a Done stage qa:TC missing", async ({ admin }) => {
   const pipes = await pipelines(admin);
   expect(pipes.length).toBeGreaterThan(0);
   for (const pipe of pipes) expect(pipe.stages.some((s) => s.category === "DONE"), pipe.name).toBe(true);

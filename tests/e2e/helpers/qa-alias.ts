@@ -49,9 +49,11 @@ async function ensureQaAdmin(request: APIRequestContext) {
  * First thing in the file: skip without SHO_QA_PASS, then read the release SHA from /api/health.
  * `admin` also signs up nakul17+zz-sa when the admin fixture is about to sign in as that address.
  */
-export function storyGate(opts?: { admin?: boolean }) {
+export function storyGate(opts?: { admin?: boolean; id?: string }) {
   test.beforeAll(async ({ playwright }) => {
-    test.skip(!QA_PASS, "Set SHO_QA_PASS (the password for nakul17+ aliases).");
+    test.skip(!QA_PASS, opts?.id
+      ? `${opts.id}: set SHO_QA_PASS (password for nakul17+ aliases).`
+      : "Set SHO_QA_PASS (the password for nakul17+ aliases).");
     if (!passwordOk(QA_PASS)) throw new Error("SHO_QA_PASS must be at least 8 characters with a letter and a number.");
     const req = await playwright.request.newContext({ baseURL: BASE_URL });
     try {
@@ -59,11 +61,16 @@ export function storyGate(opts?: { admin?: boolean }) {
       if (opts?.admin) await ensureQaAdmin(req);
     } finally { await req.dispose(); }
   });
+  if (opts?.id) {
+    test.beforeEach(() => {
+      test.info().annotations.push({ type: "qa:TC", description: "missing" });
+    });
+  }
 }
 
 /** First thing in the file: skip without SHO_QA_PASS, then read the release SHA from /api/health. */
-export function gateFile() {
-  storyGate();
+export function gateFile(id?: string) {
+  storyGate(id ? { id } : undefined);
 }
 
 /** Release SHA from /api/health, checked before any account is used. */

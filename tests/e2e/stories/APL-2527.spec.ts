@@ -1,12 +1,14 @@
 // SHO-US-10.1 Workstream type on every project (APL-2527).
+// Pam left no qa:TC id. Each title says qa:TC missing. The annotation is qa:TC with description missing. An AC number is not a TC id.
 // One test per acceptance criterion. ZZ-TEST projects, deals and organisations are archived afterwards.
 // The Super Admin is the Admin. workers is 1 in playwright.config.ts. Traces stay off.
 import { readdirSync, readFileSync } from "node:fs";
 import { expect, test, zz } from "../support";
 import { storyGate } from "../helpers/qa-alias";
+import { breadcrumb } from "../helpers/locate";
 import { newProject, ymd, type Who } from "../g2";
 
-storyGate({ admin: true });
+storyGate({ admin: true, id: "APL-2527" });
 
 type Later = (fn: () => Promise<unknown>) => void;
 type Stage = { id: string; name: string; category: string };
@@ -44,7 +46,8 @@ const load = async (admin: Who, id: string) => (await admin.api.get(`/api/projec
   type: string; deal: unknown; sections: { id: string; name: string; position: number; isDone: boolean }[];
 };
 
-test("AC1: every project on the Projects list is type Project", async ({ admin, later }) => {
+// qa:TC missing
+test("AC1: every project on the Projects list is type Project qa:TC missing", async ({ admin, later }) => {
   test.setTimeout(120_000);
   // The rehearsal (607 projects, no table's row count changed) is a one-time migration. A browser can check the live result of that default.
   const mine = await newProject(admin, later, { label: "2527 default" });
@@ -73,11 +76,12 @@ test("AC1: every project on the Projects list is type Project", async ({ admin, 
   expect((await load(admin, deal.id)).type).toBe("DEAL");
 });
 
-test("AC2: a project created on the Projects screen has type Project and is listed", async ({ admin, later }) => {
+// qa:TC missing
+test("AC2: a project created on the Projects screen has type Project and is listed qa:TC missing", async ({ admin, later }) => {
   test.setTimeout(120_000);
   const name = zz("2527 screen");
   await admin.page.goto("/projects/new");
-  const form = admin.page.locator("form");
+  const form = admin.page.getByRole("main");
   await expect(form.getByLabel("Project name")).toBeVisible();
   // The form asks for a name and a Leader. It does not ask for a type, and there is no Deal choice.
   await expect(form.getByRole("combobox", { name: "Leader" })).toBeVisible();
@@ -90,8 +94,9 @@ test("AC2: a project created on the Projects screen has type Project and is list
   later(() => admin.api.post(`/api/projects/${id}/archive`));
 
   await admin.page.keyboard.press("Escape"); // a new project asks for its first task; that dialog is not the type
-  await expect(admin.page.locator(".crumb").getByRole("link", { name: "Projects" })).toBeVisible();
-  await expect(admin.page.locator(".crumb")).toContainText(name);
+  const crumb = breadcrumb(admin.page, "Projects");
+  await expect(crumb.getByRole("link", { name: "Projects" })).toBeVisible();
+  await expect(crumb).toContainText(name);
   const row = await load(admin, id);
   expect(row.type).toBe("PROJECT");
   expect(row.deal).toBeNull();
@@ -110,7 +115,8 @@ test("AC2: a project created on the Projects screen has type Project and is list
   if (deals.status === 200) expect((deals.json.deals as { id: string }[]).some((d) => d.id === id)).toBe(false);
 });
 
-test("AC3: the migration only adds columns with defaults, and a rollback restores code but not the database", () => {
+// qa:TC missing
+test("@static AC3: the migration only adds columns with defaults, and a rollback restores code but not the database qa:TC missing", () => {
   const dir = "prisma/migrations/20261017124803_crm_workstreams_deals";
   expect(readdirSync(dir).sort()).toEqual(["migration.sql"]);
   const sql = readFileSync(`${dir}/migration.sql`, "utf8");
@@ -124,7 +130,8 @@ test("AC3: the migration only adds columns with defaults, and a rollback restore
   expect(sql).not.toMatch(/\bTRUNCATE\b/);
 });
 
-test("AC4: deal pipelines are separate from the project status pipeline, and moving a deal does not change a project", async ({ admin, later }) => {
+// qa:TC missing
+test("AC4: deal pipelines are separate from the project status pipeline, and moving a deal does not change a project qa:TC missing", async ({ admin, later }) => {
   test.setTimeout(120_000);
   const pipes = await crmPipes(admin);
   const keys = pipes.map((p) => p.key);

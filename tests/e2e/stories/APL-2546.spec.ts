@@ -1,16 +1,17 @@
 // SHO-US-13.3 Monday pipeline review (APL-2546).
+// Pam left no qa:TC id. Each title says qa:TC missing. The annotation is qa:TC with description missing. An AC number is not a TC id.
 // One test per acceptance criterion. ZZ-TEST deals, projects and tasks are archived afterwards.
-// Ideas are listed only when the task's creation date is more than 30 days ago. A session cannot set that,
-// so Drop (AC2) is skipped and the Convert button on the review row cannot be rendered. AC3 opens the same
-// conversion dialog from the task the row would link to, and checks a Viewer is not offered it.
+// Ideas are listed only when the task's creation date is more than 30 days ago. The task is created here,
+// then its creation date is aged locally, and Drop runs on the review row the product renders.
 // The plain Member is the person who must not see someone else's deal.
 import { expect, zz, withTaskVersion } from "../support";
 import { test } from "../helpers/story-people";
 import { storyGate } from "../helpers/qa-alias";
 import { ageTaskCreated } from "../helpers/own-row";
+import { rowFromLink } from "../helpers/locate";
 import { newProject, newTask, ymd, type Who } from "../g2";
 
-storyGate({ admin: true });
+storyGate({ admin: true, id: "APL-2546" });
 
 type Later = (fn: () => Promise<unknown>) => void;
 type Review = { needsNextStep: { id: string }[]; overdueNextStep: { id: string }[]; stalled: { id: string }[]; ideas: { id: string; canEdit?: boolean }[] };
@@ -35,7 +36,8 @@ async function makeDeal(admin: Who, later: Later, o: { label: string; leaderId?:
 const review = async (who: Who) => (await who.api.get("/api/review")).json as Review;
 const ids = (rows: { id: string }[]) => rows.map((r) => r.id);
 
-test("AC1: Admins see every deal on the review, everyone else only the deals on their projects, and archived deals are left out", async ({ admin, member, later }) => {
+// qa:TC missing
+test("AC1: Admins see every deal on the review, everyone else only the deals on their projects, and archived deals are left out qa:TC missing", async ({ admin, member, later }) => {
   test.setTimeout(180_000);
   const mine = await makeDeal(admin, later, { label: "mine", leaderId: member.user.id, due: ymd(-2) });
   let seen = await review(member);
@@ -66,7 +68,8 @@ test("AC1: Admins see every deal on the review, everyone else only the deals on 
   await expect(admin.page.getByText(hidden.name)).toHaveCount(0);
 });
 
-test("AC2: Drop removes the Idea flag and the task stays", async ({ admin, member, later }) => {
+// qa:TC missing
+test("AC2: Drop removes the Idea flag and the task stays qa:TC missing", async ({ admin, member, later }) => {
   test.setTimeout(120_000);
   const p = await newProject(admin, later, { label: "review drop" });
   const title = zz("old idea");
@@ -77,7 +80,8 @@ test("AC2: Drop removes the Idea flag and the task stays", async ({ admin, membe
   expect(ids((await review(admin)).ideas)).toContain(id);
   expect((await review(member)).ideas.find((i) => i.id === id)?.canEdit).toBe(false);
   await admin.page.goto("/review");
-  const row = admin.page.locator("li, tr, .item, div", { hasText: title }).filter({ has: admin.page.getByRole("button", { name: "Drop" }) }).first();
+  const ideas = admin.page.getByRole("region", { name: "Ideas older than 30 days" });
+  const row = rowFromLink(ideas.getByRole("link", { name: title, exact: true }));
   await expect(row.getByRole("button", { name: "Drop" })).toBeVisible();
   await row.getByRole("button", { name: "Drop" }).click();
   await expect.poll(async () => ids((await review(admin)).ideas).includes(id)).toBe(false);
@@ -86,10 +90,12 @@ test("AC2: Drop removes the Idea flag and the task stays", async ({ admin, membe
   expect(task.json.task.isIdea).toBe(false);
   expect(task.json.task.title).toBe(title);
   await member.page.goto("/review");
-  await expect(member.page.locator(".item", { hasText: title }).getByRole("button", { name: "Drop" })).toHaveCount(0);
+  const memberIdeas = member.page.getByRole("region", { name: "Ideas older than 30 days" });
+  await expect(rowFromLink(memberIdeas.getByRole("link", { name: title, exact: true })).getByRole("button", { name: "Drop" })).toHaveCount(0);
 });
 
-test("AC3: Convert to deal opens the conversion dialog, and a Viewer is not offered it", async ({ admin, member, later }) => {
+// qa:TC missing
+test("AC3: Convert to deal opens the conversion dialog, and a Viewer is not offered it qa:TC missing", async ({ admin, member, later }) => {
   test.setTimeout(180_000);
   const p = await newProject(admin, later, { label: "review convert" });
   const title = zz("review idea");
@@ -117,7 +123,8 @@ test("AC3: Convert to deal opens the conversion dialog, and a Viewer is not offe
   expect((await admin.api.get(`/api/tasks/${id}`)).json.task.projectId).toBe(p.id);
 });
 
-test("AC4: a review row opens the deal it describes", async ({ admin, later }) => {
+// qa:TC missing
+test("AC4: a review row opens the deal it describes qa:TC missing", async ({ admin, later }) => {
   test.setTimeout(120_000);
   const d = await makeDeal(admin, later, { label: "open row" });
   const step = ((await admin.api.get("/api/deals")).json.deals as { id: string; nextStep: { id: string } | null }[]).find((x) => x.id === d.id)!.nextStep!.id;
@@ -129,10 +136,11 @@ test("AC4: a review row opens the deal it describes", async ({ admin, later }) =
   await expect(link).toHaveAttribute("href", `/projects/${d.id}`);
   await link.click();
   await expect(admin.page).toHaveURL(new RegExp(`/projects/${d.id}$`));
-  await expect(admin.page.getByText(d.name).first()).toBeVisible();
+  await expect(admin.page.getByRole("heading", { name: d.name })).toBeVisible();
 });
 
-test("AC5: at 390 px the review does not scroll sideways", async ({ admin, later }) => {
+// qa:TC missing
+test("AC5: at 390 px the review does not scroll sideways qa:TC missing", async ({ admin, later }) => {
   test.setTimeout(120_000);
   const d = await makeDeal(admin, later, { label: "narrow" });
   const step = ((await admin.api.get("/api/deals")).json.deals as { id: string; nextStep: { id: string } | null }[]).find((x) => x.id === d.id)!.nextStep!.id;

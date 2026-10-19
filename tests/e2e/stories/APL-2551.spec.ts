@@ -1,12 +1,14 @@
 // SHO-US-22.3 Forms that do not zoom or hide under the keyboard (APL-2551). Epic SHO-E22.
+// Pam left no qa:TC id. Each title says qa:TC missing. The annotation is qa:TC with description missing. An AC number is not a TC id.
 // Runs against staging. Data: one ZZ-TEST project and tasks, archived afterwards.
 // AC2 and AC3 stand in for a device keyboard by checking font size, visualViewport scale, and a shortened viewport.
 import { devices, type Browser } from "@playwright/test";
 import { expect, zz, login, BASE_URL, test } from "../support";
 import { storyGate } from "../helpers/qa-alias";
+import { metaContent, scrollClear } from "../helpers/locate";
 import { collect } from "../../viewport/checks";
 
-storyGate({ admin: true });
+storyGate({ admin: true, id: "APL-2551" });
 
 async function phone(browser: Browser, width: number, height = 800, touch = true, who: "admin" | "member" = "admin", device: (typeof devices)["Pixel 5"] = devices["Pixel 5"]) {
   const email = who === "admin" ? login("ADMIN").email : login("MEMBER").email;
@@ -33,7 +35,8 @@ test.beforeEach(async ({ admin, later }) => {
   later(() => admin.api.post(`/api/projects/${projectId}/archive`));
 });
 
-test("AC1: every input, select and textarea is at least 16 px at 320 and 600 px", async ({ browser }) => {
+// qa:TC missing
+test("AC1: every input, select and textarea is at least 16 px at 320 and 600 px qa:TC missing", async ({ browser }) => {
   test.setTimeout(180_000);
   const bad: string[] = [];
   for (const w of [320, 600]) {
@@ -41,7 +44,7 @@ test("AC1: every input, select and textarea is at least 16 px at 320 and 600 px"
     const page = await ctx.newPage();
     for (const path of ["/", "/projects/new", `/projects/${projectId}`, `/projects/${projectId}?task=${taskId}`, "/search", "/profile", "/team"]) {
       await page.goto(path, { waitUntil: "load" });
-      await expect(page.locator(".skel, .skel-wrap")).toHaveCount(0, { timeout: 15000 });
+      await expect(page.getByRole("status").filter({ hasText: "Loading" })).toHaveCount(0, { timeout: 15000 });
       for (const f of (await page.evaluate(collect, w < 600)).filter((x) => x.check === "field")) bad.push(`${w}px ${path}: ${f.element} ${f.detail}`);
     }
     await ctx.close();
@@ -49,7 +52,8 @@ test("AC1: every input, select and textarea is at least 16 px at 320 and 600 px"
   expect(bad).toEqual([]);
 });
 
-test("AC2: tapping a field on an iPhone does not zoom the page", async ({ browser }) => {
+// qa:TC missing
+test("AC2: tapping a field on an iPhone does not zoom the page qa:TC missing", async ({ browser }) => {
   const ctx = await phone(browser, 390, 844, true, "admin", devices["iPhone 13"]);
   const page = await ctx.newPage();
   await page.goto("/projects/new", { waitUntil: "load" });
@@ -62,7 +66,8 @@ test("AC2: tapping a field on an iPhone does not zoom the page", async ({ browse
   await ctx.close();
 });
 
-test("AC3: the concierge composer and Send are fully visible on a phone (keyboard part needs a device)", async ({ browser }) => {
+// qa:TC missing
+test("AC3: the concierge composer and Send are fully visible on a phone (keyboard part needs a device) qa:TC missing", async ({ browser }) => {
   const ctx = await phone(browser, 390, 844);
   const page = await ctx.newPage();
   await page.goto("/", { waitUntil: "load" });
@@ -81,7 +86,8 @@ test("AC3: the concierge composer and Send are fully visible on a phone (keyboar
   await ctx.close();
 });
 
-test("AC3: composer and Send stay visible with the on-screen keyboard open", async ({ browser }) => {
+// qa:TC missing
+test("AC3: composer and Send stay visible with the on-screen keyboard open qa:TC missing", async ({ browser }) => {
   const ctx = await phone(browser, 390, 844);
   const page = await ctx.newPage();
   await page.goto("/", { waitUntil: "load" });
@@ -98,22 +104,26 @@ test("AC3: composer and Send stay visible with the on-screen keyboard open", asy
   await ctx.close();
 });
 
-test("AC4: in the task panel the description field and the footer actions are reachable (keyboard part needs a device)", async ({ browser }) => {
+// qa:TC missing
+test("AC4: in the task panel the description field and the footer actions are reachable (keyboard part needs a device) qa:TC missing", async ({ browser }) => {
   const ctx = await phone(browser, 390, 844);
   const page = await ctx.newPage();
   await page.goto(`/projects/${projectId}?task=${taskId}`, { waitUntil: "load" });
-  const desc = page.locator("#desc");
-  await desc.scrollIntoViewIfNeeded();
+  const dialog = page.getByRole("dialog", { name: "Task" });
+  const desc = dialog.getByLabel("Description");
+  await scrollClear(desc);
   await expect(desc).toBeVisible();
   await desc.fill("ZZ-TEST description");
-  await page.locator("textarea.tt").focus(); // leaves the field: the panel saves on blur
-  const close = page.getByRole("button", { name: "Close" }).first();
-  await close.scrollIntoViewIfNeeded();
+  await scrollClear(dialog.getByLabel("Title"));
+  await dialog.getByLabel("Title").focus(); // leaves the field: the panel saves on blur
+  const close = dialog.getByRole("button", { name: "Close", exact: true });
+  await scrollClear(close);
   await expect(close).toBeInViewport();
   await ctx.close();
 });
 
-test("AC5: Search on a phone does not open the keyboard by itself", async ({ browser }) => {
+// qa:TC missing
+test("AC5: Search on a phone does not open the keyboard by itself qa:TC missing", async ({ browser }) => {
   const ctx = await phone(browser, 390, 844);
   const page = await ctx.newPage();
   await page.goto("/search", { waitUntil: "load" });
@@ -122,12 +132,14 @@ test("AC5: Search on a phone does not open the keyboard by itself", async ({ bro
   await ctx.close();
 });
 
-test("AC6: a 150-character title wraps and stays editable without sideways scrolling", async ({ browser, admin }) => {
+// qa:TC missing
+test("AC6: a 150-character title wraps and stays editable without sideways scrolling qa:TC missing", async ({ browser, admin }) => {
   expect(LONG.length).toBe(150);
   const ctx = await phone(browser, 320, 700);
   const page = await ctx.newPage();
   await page.goto(`/projects/${projectId}?task=${longId}`, { waitUntil: "load" });
-  const title = page.locator("textarea.tt");
+  const title = page.getByRole("dialog", { name: "Task" }).getByLabel("Title");
+  await scrollClear(title);
   await expect(title).toBeVisible();
   const m = await page.evaluate(() => ({ sw: document.documentElement.scrollWidth, iw: window.innerWidth }));
   expect(m.sw).toBeLessThanOrEqual(m.iw + 1);
@@ -141,7 +153,8 @@ test("AC6: a 150-character title wraps and stays editable without sideways scrol
   await ctx.close();
 });
 
-test("Prohibited: the viewport does not use maximum-scale=1", async ({ admin }) => {
+// qa:TC missing
+test("Prohibited: the viewport does not use maximum-scale=1 qa:TC missing", async ({ admin }) => {
   await admin.page.goto("/");
-  expect((await admin.page.locator('meta[name="viewport"]').getAttribute("content")) ?? "").not.toMatch(/maximum-scale/);
+  expect((await metaContent(admin.page, "viewport")).join(" ")).not.toMatch(/maximum-scale/);
 });

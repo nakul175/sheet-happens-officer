@@ -1,4 +1,5 @@
 // SHO-US-11.3 Notes on organisations and deals (APL-2534).
+// Pam left no qa:TC id. Each title says qa:TC missing. The annotation is qa:TC with description missing. An AC number is not a TC id.
 // One test per acceptance criterion. ZZ-TEST organisations, contacts, notes and deals are archived or removed afterwards.
 // The plain Member is the person who is not on the deal until a test adds them.
 // There is no tests/e2e/jim-gate.ts. CRM_VISIBLE is read from the live /api/orgs answer, never a hard skip.
@@ -6,8 +7,9 @@
 import { expect, zz } from "../support";
 import { test } from "../helpers/story-people";
 import { storyGate } from "../helpers/qa-alias";
+import { noteRow, rowAround, statusText } from "../helpers/locate";
 
-storyGate({ admin: true });
+storyGate({ admin: true, id: "APL-2534" });
 import { newProject, ymd, type Who } from "../g2";
 import { raw } from "../helpers/jim-http";
 import type { Page } from "@playwright/test";
@@ -62,7 +64,8 @@ const spokeLabel = (page: Page, iso: string) => page.evaluate(
   iso,
 );
 
-test("AC1: a saved note appears on the organisation timeline, newest first", async ({ admin, later }) => {
+// qa:TC missing
+test("AC1: a saved note appears on the organisation timeline, newest first qa:TC missing", async ({ admin, later }) => {
   test.setTimeout(120_000);
   const org = await makeOrg(admin, later, "timeline");
   const newer = zz("newer meeting");
@@ -74,9 +77,9 @@ test("AC1: a saved note appears on the organisation timeline, newest first", asy
   await admin.page.getByLabel("Date").fill(ymd(-1));
   await admin.page.getByLabel("Note").fill(newer);
   await admin.page.getByRole("button", { name: "Add note" }).click();
-  await expect(admin.page.locator(".item", { hasText: newer })).toBeVisible();
-  await expect(admin.page.locator(".item", { hasText: newer }).locator(".chip")).toHaveText("Meeting");
-  await expect(admin.page.locator(".undo-toast")).toContainText("Note added");
+  await expect(noteRow(admin.page, newer)).toBeVisible();
+  await expect(noteRow(admin.page, newer).getByText("Meeting", { exact: true })).toBeVisible();
+  await expect(statusText(admin.page, "Note added")).toBeVisible();
 
   const old = await admin.api.post(`/api/orgs/${org.id}/notes`, { kind: "CALL", date: ymd(-8), text: older });
   expect(old.status).toBe(201);
@@ -88,12 +91,13 @@ test("AC1: a saved note appears on the organisation timeline, newest first", asy
   const texts = (await notesOf(admin, org.id)).map((n) => n.text);
   expect(texts).toEqual([newer, older]);
   await admin.page.reload();
-  const y = async (text: string) => (await admin.page.locator(".item", { hasText: text }).boundingBox())!.y;
+  const y = async (text: string) => (await noteRow(admin.page, text).boundingBox())!.y;
   expect(await y(newer)).toBeLessThan(await y(older));
-  await expect(admin.page.locator(".item", { hasText: older }).locator(".chip")).toHaveText("Call");
+  await expect(noteRow(admin.page, older).getByText("Call", { exact: true })).toBeVisible();
 });
 
-test("AC2: a deal note appears on the deal page for deal members and Admins only, a note with no deal is visible with the organisation, and the deal and contacts must belong to this organisation", async ({ admin, member, later }) => {
+// qa:TC missing
+test("AC2: a deal note appears on the deal page for deal members and Admins only, a note with no deal is visible with the organisation, and the deal and contacts must belong to this organisation qa:TC missing", async ({ admin, member, later }) => {
   test.setTimeout(180_000);
   await memberCrm(member);
   const org = await makeOrg(admin, later, "note org");
@@ -141,7 +145,7 @@ test("AC2: a deal note appears on the deal page for deal members and Admins only
   await admin.page.getByRole("checkbox", { name: contactName, exact: true }).check();
   await admin.page.getByLabel("Note").fill(newest);
   await admin.page.getByRole("button", { name: "Add note" }).click();
-  const onOrg = admin.page.locator(".item", { hasText: newest });
+  const onOrg = noteRow(admin.page, newest);
   await expect(onOrg).toBeVisible();
   await expect(onOrg).toContainText(`With ${contactName}`);
   await expect(onOrg.getByRole("link", { name: deal.name })).toBeVisible();
@@ -149,12 +153,12 @@ test("AC2: a deal note appears on the deal page for deal members and Admins only
   const dealNotes = (await admin.api.get(`/api/projects/${deal.id}/notes`)).json.notes as { text: string }[];
   expect(dealNotes.map((n) => n.text)).toEqual([newest, ...olderTexts]);
   await admin.page.goto(`/projects/${deal.id}`);
-  const panel = admin.page.locator(".card", { hasText: "Add a note on the organisation page" });
-  await expect(panel.getByRole("link", { name: "Add a note on the organisation page" })).toHaveAttribute("href", `/accounts/${org.id}`);
-  await expect(panel.getByRole("button", { name: "Add note" })).toHaveCount(0);
-  const noteText = (text: string) => panel.getByText(text, { exact: true });
+  const addNote = admin.page.getByRole("link", { name: "Add a note on the organisation page" });
+  await expect(addNote).toHaveAttribute("href", `/accounts/${org.id}`);
+  await expect(admin.page.getByRole("button", { name: "Add note" })).toHaveCount(0);
+  const noteText = (text: string) => admin.page.getByRole("main").getByText(text, { exact: true });
   await expect(noteText(newest)).toBeVisible();
-  await expect(panel.getByText(`with ${contactName}`)).toBeVisible();
+  await expect(admin.page.getByRole("main").getByText(`with ${contactName}`)).toBeVisible();
   for (const text of olderTexts.slice(0, 4)) await expect(noteText(text)).toBeVisible();
   await expect(noteText(olderTexts[4])).toHaveCount(0);
   await expect(noteText(publicText)).toHaveCount(0);
@@ -167,11 +171,11 @@ test("AC2: a deal note appears on the deal page for deal members and Admins only
   const memberTexts = (await notesOf(member, org.id)).map((n) => n.text);
   expect(memberTexts).toEqual([publicText]);
   await member.page.goto(`/accounts/${org.id}`);
-  await expect(member.page.locator(".item", { hasText: publicText })).toBeVisible();
-  await expect(member.page.locator(".item", { hasText: newest })).toHaveCount(0);
+  await expect(noteRow(member.page, publicText)).toBeVisible();
+  await expect(member.page.getByText(newest, { exact: true })).toHaveCount(0);
   await admin.page.goto(`/accounts/${org.id}`);
-  await expect(admin.page.locator(".item", { hasText: newest })).toBeVisible();
-  await expect(admin.page.locator(".item", { hasText: publicText })).toBeVisible();
+  await expect(noteRow(admin.page, newest)).toBeVisible();
+  await expect(noteRow(admin.page, publicText)).toBeVisible();
 
   expect((await admin.api.post(`/api/projects/${deal.id}/members`, { userId: member.user.id, role: "VIEWER" })).status).toBe(201);
   expect((await notesOf(member, org.id)).map((n) => n.text)).toContain(newest);
@@ -179,11 +183,12 @@ test("AC2: a deal note appears on the deal page for deal members and Admins only
   await member.page.goto(`/projects/${deal.id}`);
   await expect(member.page.getByText(newest, { exact: true })).toBeVisible();
   await member.page.goto(`/accounts/${org.id}`);
-  await expect(member.page.locator(".item", { hasText: newest })).toBeVisible();
-  await expect(member.page.locator(".item", { hasText: publicText })).toBeVisible();
+  await expect(noteRow(member.page, newest)).toBeVisible();
+  await expect(noteRow(member.page, publicText)).toBeVisible();
 });
 
-test("AC3: the author, the deal's Leader or an Admin deletes a note, Note deleted can be undone, and there is no Trash for notes", async ({ admin, member, later }) => {
+// qa:TC missing
+test("AC3: the author, the deal's Leader or an Admin deletes a note, Note deleted can be undone, and there is no Trash for notes qa:TC missing", async ({ admin, member, later }) => {
   test.setTimeout(180_000);
   await memberCrm(member);
   const org = await makeOrg(admin, later, "delete notes");
@@ -200,7 +205,7 @@ test("AC3: the author, the deal's Leader or an Admin deletes a note, Note delete
   expect(refused.json.error).toContain("Only the author, the deal's Leader or an Admin");
   expect((await notesOf(admin, org.id)).some((n) => n.id === adminNoteId)).toBe(true);
   await member.page.goto(`/accounts/${org.id}`);
-  await expect(member.page.locator(".item", { hasText: adminText }).getByRole("button", { name: "Delete" })).toHaveCount(0);
+  await expect(noteRow(member.page, adminText).getByRole("button", { name: "Delete" })).toHaveCount(0);
   await expect(member.page.getByRole("link", { name: "Trash" })).toHaveCount(0);
 
   const ownText = zz("member note");
@@ -209,7 +214,7 @@ test("AC3: the author, the deal's Leader or an Admin deletes a note, Note delete
   expect(own.headers["x-undo-label"]).toBe("Note added");
   const ownId = own.json.note.id as string;
   await member.page.reload();
-  await expect(member.page.locator(".item", { hasText: ownText }).getByRole("button", { name: "Delete" })).toBeVisible();
+  await expect(noteRow(member.page, ownText).getByRole("button", { name: "Delete" })).toBeVisible();
   const removed = await raw(member, "DELETE", `/api/notes/${ownId}`);
   expect(removed.status).toBe(204);
   expect(removed.headers["x-undo-label"]).toBe("Note deleted");
@@ -218,19 +223,19 @@ test("AC3: the author, the deal's Leader or an Admin deletes a note, Note delete
   expect(trash.some((t) => t.title.includes(ownText))).toBe(false);
   await admin.page.goto(`/projects/${deal.id}/trash`);
   await expect(admin.page.getByRole("heading", { name: "Trash" })).toBeVisible();
-  await expect(admin.page.getByText("Trash is empty.").or(admin.page.locator("table"))).toBeVisible();
-  await expect(admin.page.locator("td", { hasText: ownText })).toHaveCount(0);
+  await expect(admin.page.getByText("Trash is empty.").or(admin.page.getByRole("table"))).toBeVisible();
+  await expect(admin.page.getByRole("cell", { name: ownText })).toHaveCount(0);
   const notMine = await admin.api.post(`/api/actions/${removed.headers["x-undo-id"]}/undo`, { anyway: false });
   // The Super Admin may undo someone else's row. A plain Member may not, checked on the Admin's delete below.
   expect(notMine.status).toBe(200);
   expect((await notesOf(member, org.id)).some((n) => n.id === ownId)).toBe(true);
 
   await member.page.goto(`/accounts/${org.id}`);
-  await member.page.locator(".item", { hasText: ownText }).getByRole("button", { name: "Delete" }).click();
-  await expect(member.page.locator(".item", { hasText: ownText })).toHaveCount(0);
-  await expect(member.page.locator(".undo-toast")).toContainText("Note deleted");
-  await member.page.locator(".undo-toast").getByRole("button", { name: "Undo" }).click();
-  await expect(member.page.locator(".item", { hasText: ownText })).toBeVisible();
+  await noteRow(member.page, ownText).getByRole("button", { name: "Delete" }).click();
+  await expect(member.page.getByText(ownText, { exact: true })).toHaveCount(0);
+  await expect(statusText(member.page, "Note deleted")).toBeVisible();
+  await statusText(member.page, "Note deleted").getByRole("button", { name: "Undo" }).click();
+  await expect(noteRow(member.page, ownText)).toBeVisible();
 
   expect((await admin.api.post(`/api/projects/${deal.id}/leader`, { newLeaderId: member.user.id, previousRole: "EDITOR" })).status).toBe(200);
   const leaderText = zz("leader may delete");
@@ -257,7 +262,8 @@ test("AC3: the author, the deal's Leader or an Admin deletes a note, Note delete
   await expect(admin.page.getByRole("link", { name: "Trash" })).toHaveCount(0);
 });
 
-test("AC4: a note on a deal the viewer cannot see is never shown on the organisation page and never counted in Last spoke", async ({ admin, member, later }) => {
+// qa:TC missing
+test("AC4: a note on a deal the viewer cannot see is never shown on the organisation page and never counted in Last spoke qa:TC missing", async ({ admin, member, later }) => {
   test.setTimeout(180_000);
   await memberCrm(member);
   const org = await makeOrg(admin, later, "hidden note");
@@ -281,19 +287,19 @@ test("AC4: a note on a deal the viewer cannot see is never shown on the organisa
   expect((await notesOf(admin, org.id)).map((n) => n.text)).toEqual([hiddenText, publicText]);
 
   await member.page.goto(`/accounts/${org.id}`);
-  await expect(member.page.locator(".item", { hasText: publicText })).toBeVisible();
-  await expect(member.page.locator(".item", { hasText: hiddenText })).toHaveCount(0);
-  const memberRow = member.page.locator(".item", { hasText: "Last spoke:" }).filter({ hasText: contactName });
+  await expect(noteRow(member.page, publicText)).toBeVisible();
+  await expect(member.page.getByText(hiddenText, { exact: true })).toHaveCount(0);
+  const memberRow = rowAround(member.page, contactName);
   await expect(memberRow).toContainText(`Last spoke: ${await spokeLabel(member.page, older)}`);
   await admin.page.goto(`/accounts/${org.id}`);
-  await expect(admin.page.locator(".item", { hasText: hiddenText })).toBeVisible();
-  const adminRow = admin.page.locator(".item", { hasText: "Last spoke:" }).filter({ hasText: contactName });
+  await expect(noteRow(admin.page, hiddenText)).toBeVisible();
+  const adminRow = rowAround(admin.page, contactName);
   await expect(adminRow).toContainText(`Last spoke: ${await spokeLabel(admin.page, newer)}`);
 
   expect((await admin.api.post(`/api/projects/${deal.id}/members`, { userId: member.user.id, role: "VIEWER" })).status).toBe(201);
   expect(await last(member)).toBe(newer);
   expect((await notesOf(member, org.id)).map((n) => n.text)).toContain(hiddenText);
   await member.page.reload();
-  await expect(member.page.locator(".item", { hasText: hiddenText })).toBeVisible();
+  await expect(noteRow(member.page, hiddenText)).toBeVisible();
   await expect(memberRow).toContainText(`Last spoke: ${await spokeLabel(member.page, newer)}`);
 });

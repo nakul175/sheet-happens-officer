@@ -1,15 +1,17 @@
 // SHO-US-12.7 Stalled deals (APL-2543).
+// Pam left no qa:TC id. Each title says qa:TC missing. The annotation is qa:TC with description missing. An AC number is not a TC id.
 // A deal is stalled only when its last activity is more than 30 days ago. Creating or editing a deal
 // through the API stamps that activity as now, and a browser session cannot rewrite those timestamps
 // (tests/crm5.test.ts does it with SQL). The stalled-deals job also needs JOB_SECRET, which a signed-in
 // session does not have, and running it here would notify real Leaders on staging.
-// AC4 and AC6 are the parts a session can see. The rest stay skipped: a 30-day history, or the stalled-deals cron.
+// Quiet days are the deal's own timestamps, aged locally, then the real stalled-deals job writes the notice.
 import { test, expect, zz, withTaskVersion } from "../support";
 import { storyGate } from "../helpers/qa-alias";
 import { ageDeal, ageNotification, runLocalJob } from "../helpers/own-row";
+import { rowFromLink, stageColumn } from "../helpers/locate";
 import { ymd, type Who } from "../g2";
 
-storyGate({ admin: true });
+storyGate({ admin: true, id: "APL-2543" });
 
 type Later = (fn: () => Promise<unknown>) => void;
 
@@ -34,7 +36,8 @@ async function makeDeal(admin: Who, later: Later, label: string) {
 const stalledOf = async (admin: Who, id: string) =>
   ((await admin.api.get("/api/deals")).json.deals as { id: string; stalled: boolean }[]).find((d) => d.id === id)?.stalled;
 
-test("AC1: Stalled shows on the card, the list and the deal page, and any logged change counts as activity", async ({ admin, later }) => {
+// qa:TC missing
+test("AC1: Stalled shows on the card, the list and the deal page, and any logged change counts as activity qa:TC missing", async ({ admin, later }) => {
   test.setTimeout(180_000);
   const d = await makeDeal(admin, later, "stalled card");
   expect(await stalledOf(admin, d.id)).toBe(false);
@@ -42,7 +45,8 @@ test("AC1: Stalled shows on the card, the list and the deal page, and any logged
   expect(await stalledOf(admin, d.id)).toBe(true);
   expect((await admin.api.get(`/api/projects/${d.id}`)).json.project.deal.stalled).toBe(true);
   await admin.page.goto("/deals");
-  await expect(admin.page.locator(".dcard", { hasText: d.name }).getByText("Stalled", { exact: true })).toBeVisible();
+  const card = rowFromLink(stageColumn(admin.page, "Lead").getByRole("link", { name: d.name, exact: true }));
+  await expect(card.getByText("Stalled", { exact: true })).toBeVisible();
   await admin.page.goto("/review");
   await expect(admin.page.getByRole("region", { name: "Stalled for 30 days" }).getByText(d.name)).toBeVisible();
   await admin.page.goto(`/projects/${d.id}`);
@@ -51,7 +55,8 @@ test("AC1: Stalled shows on the card, the list and the deal page, and any logged
   expect(await stalledOf(admin, d.id), "a logged change is activity, so the flag clears").toBe(false);
 });
 
-test("AC2: any later activity clears the Stalled flag", async ({ admin, later }) => {
+// qa:TC missing
+test("AC2: any later activity clears the Stalled flag qa:TC missing", async ({ admin, later }) => {
   test.setTimeout(120_000);
   const d = await makeDeal(admin, later, "stalled clear");
   const pipes = (await admin.api.get("/api/deals/pipelines")).json.pipelines as { key: string; stages: { id: string; name: string }[] }[];
@@ -63,7 +68,8 @@ test("AC2: any later activity clears the Stalled flag", async ({ admin, later })
   expect(((await admin.api.get("/api/review")).json.stalled as { id: string }[]).some((row) => row.id === d.id)).toBe(false);
 });
 
-test("AC3: one in-app notice per stall, and a new one only after new activity and 30 more quiet days", async ({ admin, later }) => {
+// qa:TC missing
+test("AC3: one in-app notice per stall, and a new one only after new activity and 30 more quiet days qa:TC missing", async ({ admin, later }) => {
   test.setTimeout(120_000);
   const d = await makeDeal(admin, later, "stalled notice");
   ageDeal(d.id, 31);
@@ -81,10 +87,10 @@ test("AC3: one in-app notice per stall, and a new one only after new activity an
   expect(await stalledNotes()).toHaveLength(2);
 });
 
-test("AC4: 30 days is a fixed part of the product, not a setting on the deal", async ({ admin, later }) => {
+// qa:TC missing
+test("AC4: 30 days is a fixed part of the product, not a setting on the deal qa:TC missing", async ({ admin, later }) => {
   await admin.page.goto("/review");
   await expect(admin.page.getByRole("region", { name: "Stalled for 30 days" })).toBeVisible();
-  await expect(admin.page.getByText("Stalled for 30 days").first()).toBeVisible();
 
   const jobs = (await admin.api.get("/api/jobs")).json.jobs as { job: string; about: string }[];
   const stalled = jobs.find((j) => j.job === "stalled-deals");
@@ -100,7 +106,8 @@ test("AC4: 30 days is a fixed part of the product, not a setting on the deal", a
   expect("stallDays" in block).toBe(false);
 });
 
-test("AC5: archived, Paused, Done and Lost deals are never flagged", async ({ admin, later }) => {
+// qa:TC missing
+test("AC5: archived, Paused, Done and Lost deals are never flagged qa:TC missing", async ({ admin, later }) => {
   test.setTimeout(180_000);
   const pipes = (await admin.api.get("/api/deals/pipelines")).json.pipelines as { key: string; stages: { id: string; name: string }[] }[];
   const stages = pipes.find((p) => p.key === "DEAL_PROACTIVE")!.stages;
@@ -131,7 +138,8 @@ test("AC5: archived, Paused, Done and Lost deals are never flagged", async ({ ad
   expect(before).toBeGreaterThanOrEqual(0);
 });
 
-test("AC6: stalled-deals is on the job list the daily check reads, with the same fields as the other jobs", async ({ admin }) => {
+// qa:TC missing
+test("AC6: stalled-deals is on the job list the daily check reads, with the same fields as the other jobs qa:TC missing", async ({ admin }) => {
   const jobs = (await admin.api.get("/api/jobs")).json.jobs as { job: string; about: string; lastStartedAt: string | null; lastFinishedAt: string | null; lastStatus: string | null; lastError: string | null }[];
   const stalled = jobs.find((j) => j.job === "stalled-deals");
   expect(stalled, "the job the checker walks").toBeTruthy();
