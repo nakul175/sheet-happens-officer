@@ -1,26 +1,46 @@
-// APL-2737 (APL-2555 AC2): on a phone sheet a 300-character blocked reason is on screen in full.
+// APL-2737 story spec (APL-2555 AC2): on a phone sheet a 300-character blocked reason is on screen in full.
 // The box grows past five lines to fit it, so it does not scroll inside, and the 150-character title does not scroll sideways.
-// Needs a running app (TASKBOARD_URL) on a TEST database. Creates its own ZZ-TEST project and archives it afterwards.
+// workers=1: the cases in this file run one after another, and the suite runs one file at a time.
+// Local only: TASKBOARD_URL must be a server on this machine with a test database; any other host, production included, is refused.
+// Thrown-away people and projects use ZZ-TEST names and nakul17+ aliases, then afterAll archives
+// the project and deactivates the people. Self-signup only accepts @aplyd.com, so the alias is
+// nakul17+…@aplyd.com.
+import { existsSync } from "node:fs";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { chromium, type Browser, type Locator } from "playwright-core";
-import { account, BASE, patchTask, project, PW, SUPER_EMAIL, superAdmin, task, type Account } from "../helpers";
+import { account, BASE, patchTask, PW, SUPER_EMAIL, superAdmin, task, type Account } from "../../helpers";
+
+if (!/^(localhost|127\.0\.0\.1)$/.test(new URL(BASE).hostname)) throw new Error(`Refusing to run against ${BASE}: use a local server with a test database.`);
+
+const RUN = `${Date.now().toString(36)}${process.pid.toString(36)}`;
+
+/** Chromium for playwright-core: PW_CHROMIUM, then a system Chrome (the CI runner has one), then Playwright's own download. */
+function chromePath() {
+  const fromEnv = process.env.PW_CHROMIUM;
+  if (fromEnv && existsSync(fromEnv)) return fromEnv;
+  for (const p of ["/usr/bin/google-chrome", "/usr/bin/google-chrome-stable", "/usr/bin/chromium", "/usr/bin/chromium-browser"]) {
+    if (existsSync(p)) return p;
+  }
+  return undefined;
+}
 
 const TITLE = "ZZ-TEST blocked reason title that wraps across several lines on a phone sheet so nothing scrolls sideways at three hundred twenty px wide okay".padEnd(150, " x");
 const REASON = "Waiting on the signed paperwork from the vendor before finance can review the invoice and release the next milestone payment for the rollout. Legal also asked for a revised data processing addendum, and the regional lead is away until Thursday, so nobody can approve the changes to the delivery plan.";
 
 let browser: Browser;
 let root: Account | undefined;
-let viewer: Account;
+let viewer: Account | undefined;
 let projectId = "";
 let taskId = "";
 
 beforeAll(async () => {
-  if (!/^(localhost|127\.0\.0\.1)$/.test(new URL(BASE).hostname)) throw new Error(`Refusing to run against ${BASE}: use a local server with a test database.`);
-  browser = await chromium.launch({ executablePath: process.env.PW_CHROMIUM || undefined });
+  browser = await chromium.launch({ executablePath: chromePath() });
   root = await superAdmin();
-  viewer = await account("zzbrviewer");
-  const p = await project(root, root, [{ who: viewer, role: "VIEWER" }]);
-  projectId = p.id;
+  viewer = await account(`ZZ-TEST viewer ${RUN}`, `nakul17+zz-2737-${RUN}-viewer@aplyd.com`);
+  const p = await root.c.post("/api/projects", { name: `ZZ-TEST 2737 ${RUN}`, leaderId: root.id });
+  expect(p.status, JSON.stringify(p.json)).toBe(201);
+  projectId = p.json.project.id as string;
+  expect((await root.c.post(`/api/projects/${projectId}/members`, { userId: viewer.id, role: "VIEWER" })).status).toBe(201);
   taskId = await task(root, projectId, { title: TITLE });
   const r = await patchTask(root, taskId, { blocked: true, blockedReason: REASON });
   expect(r.status, JSON.stringify(r.json)).toBe(200);
@@ -29,6 +49,10 @@ beforeAll(async () => {
 afterAll(async () => {
   try {
     if (root && projectId) expect([200, 409]).toContain((await root.c.post(`/api/projects/${projectId}/archive`)).status);
+    if (root && viewer) {
+      const off = await root.c.post(`/api/team/${viewer.id}/deactivate`, { reassign: "leaders" });
+      expect(off.status === 200 || (off.status === 409 && /already deactivated/.test(off.json?.error ?? "")), JSON.stringify(off.json)).toBe(true);
+    }
   } finally {
     await browser?.close();
   }
@@ -79,7 +103,7 @@ describe("qa:TC missing APL-2737 a 300-character blocked reason is fully readabl
   });
 
   it("qa:TC missing AC1: the reason stays fully readable at the other phone widths and for a Viewer (read-only box)", async () => {
-    for (const [width, email] of [[360, SUPER_EMAIL], [390, SUPER_EMAIL], [320, viewer.email]] as const) {
+    for (const [width, email] of [[360, SUPER_EMAIL], [390, SUPER_EMAIL], [320, viewer!.email]] as const) {
       const { page, reason } = await openSheet(width, email);
       try {
         const r = await metrics(reason);
