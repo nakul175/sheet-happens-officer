@@ -26,7 +26,7 @@ export function SignInForm({ justReset, sessionExpired = false, next }: { justRe
     if (r.ok) {
       // A failed attempt never reaches here, so `next` stays in the address bar (APL-2652 AC4).
       // Checked again: the prop is only a path, and router.push is never given an absolute URL.
-      router.push(returnToEnabled() ? (safeReturnPath(next) ?? "/") : "/");
+      router.push(returnToEnabled() ? (safeReturnPath(next, 1) ?? "/") : "/");
       router.refresh();
       return;
     }

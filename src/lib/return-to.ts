@@ -9,7 +9,8 @@
 
 const BASE = "http://return.invalid";
 const MAX_LENGTH = 2048;
-const MAX_DECODES = 5;
+// Michael's ruling on APL-2652: decode once. `R%26D` stays `R&D` in the query, `C%2B%2B` stays `C++`, `100%25` stays `100%`.
+const MAX_DECODES = 1;
 
 /**
  * APL-2652 off switch. Unset means off.
@@ -39,13 +40,14 @@ function isDangerous(value: string): boolean {
   return false;
 }
 
-/** Every decode of `value`, or null when a layer is dangerous, malformed, or still encoded after the cap. `priorDecodes` is a decode that already happened, such as the router reading the query. */
-function decodeAll(value: string, priorDecodes = 0): string[] | null {
-  const budget = MAX_DECODES - priorDecodes;
-  if (budget < 0) return null;
+/**
+ * `value` and its one decode, or null when a layer is dangerous or malformed. The one decode includes `priorDecodes`,
+ * such as the router reading the query, so a value that was already decoded is not decoded again (APL-2652 D1).
+ */
+function decodeOnce(value: string, priorDecodes = 0): string[] | null {
   const layers = [value];
   let current = value;
-  for (let i = 0; i < budget; i++) {
+  for (let i = priorDecodes; i < MAX_DECODES; i++) {
     if (isDangerous(current)) return null;
     let next: string;
     try {
@@ -53,18 +55,11 @@ function decodeAll(value: string, priorDecodes = 0): string[] | null {
     } catch {
       return null;
     }
-    if (next === current) return layers;
+    if (next === current) break;
     current = next;
     layers.push(current);
   }
-  // Decodes up to the cap are allowed when the result is fully decoded. One more encoding is rejected.
-  if (isDangerous(current)) return null;
-  try {
-    if (decodeURIComponent(current) !== current) return null;
-  } catch {
-    return null;
-  }
-  return layers;
+  return isDangerous(current) ? null : layers;
 }
 
 function originStays(value: string): boolean {
@@ -94,19 +89,22 @@ function canonicalPath(value: string): string | null {
  * A same-origin path (`/tasks/T1`, optionally with a query), or null.
  * A fragment is dropped.
  * Null means "send them home": the value is missing, empty, or not a safe path.
- * `priorDecodes` counts a decode that already happened. The sign-in page passes 1 because the router decoded the query.
+ * `priorDecodes` counts a decode that already happened. Pass 1 for the sign-in page's `next` (the router decoded it) and
+ * for a path taken from a URL as it stands (`location`, the proxy header, a path this function already returned).
  */
 export function safeReturnPath(input: string | null | undefined, priorDecodes = 0): string | null {
   if (typeof input !== "string") return null;
   const raw = input.trim();
   if (!raw || raw.length > MAX_LENGTH) return null;
-  const layers = decodeAll(raw, priorDecodes);
+  const layers = decodeOnce(raw, priorDecodes);
   if (!layers) return null;
   for (const layer of layers) {
     if (!originStays(layer)) return null;
   }
   const final = layers[layers.length - 1];
   if (!final.startsWith("/") || final.startsWith("//") || final.startsWith("/\\")) return null;
+  // A path still encoded after the one decode falls back to the home page. The query keeps its encoding: it is data.
+  if ((final.split(/[?#]/)[0] ?? final).includes("%")) return null;
   const path = canonicalPath(final);
   if (!path) return null;
   // A page path only. /api and /signin are not places sign-in should send someone.
@@ -126,7 +124,8 @@ export function signInHref(from: string | null | undefined, opts?: { expired?: b
   if (!returnToEnabled()) return legacySignInHref();
   const params = new URLSearchParams();
   if (opts?.expired) params.set("expired", "1");
-  const safe = safeReturnPath(from);
+  // `from` is a path from a URL as it stands, so it is not decoded again.
+  const safe = safeReturnPath(from, 1);
   if (safe && safe !== "/") params.set("next", safe);
   const q = params.toString();
   const href = q ? `/signin?${q}` : "/signin";

@@ -39,7 +39,7 @@ async function signIn(page: Page, email: string, password: string) {
 
 /** The asked-for task, still on /tasks/<id>, with the query that was opened. */
 async function landedOnTask(page: Page, id: string, title: string, search = "") {
-  const titleBox = page.locator("textarea.tt");
+  const titleBox = page.getByRole("textbox", { name: "Title", exact: true });
   await titleBox.waitFor({ state: "visible", timeout: 20000 });
   expect(await titleBox.inputValue()).toBe(title);
   const url = new URL(page.url());
@@ -176,12 +176,11 @@ describe("APL-2652 sign-in returns to the deep link", () => {
       expect(await page.getByText(visibleTitle).count()).toBe(0);
       expect(await page.getByRole("navigation", { name: "Main" }).count()).toBe(0);
       expect(await page.getByRole("heading", { name: "Sign in" }).isVisible()).toBe(false);
-      // The sign-in form can stay mounted, hidden, after the client navigation, so scope to this form.
-      const wall = page.locator("form").filter({ has: page.getByRole("button", { name: "Save and continue" }) });
-      await wall.locator('input[name="current"]').fill(forcedPassword);
-      await wall.locator('input[name="password"]').fill("my-own-pass-7");
-      await wall.locator('input[name="confirm"]').fill("my-own-pass-7");
-      await wall.getByRole("button", { name: "Save and continue" }).click();
+      // The sign-in form can stay mounted, hidden, after the client navigation. Exact labels keep these on the wall's fields.
+      await page.getByLabel("Emailed password", { exact: true }).fill(forcedPassword);
+      await page.getByLabel("New password", { exact: true }).fill("my-own-pass-7");
+      await page.getByLabel("Confirm new password", { exact: true }).fill("my-own-pass-7");
+      await page.getByRole("button", { name: "Save and continue" }).click();
       await landedOnTask(page, visibleId, visibleTitle);
       expect(await page.getByRole("heading", { name: "Set your own password" }).count()).toBe(0);
     } finally { await ctx.close(); }

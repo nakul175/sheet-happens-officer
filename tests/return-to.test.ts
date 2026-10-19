@@ -129,7 +129,7 @@ describe("APL-2652 safe return path", () => {
     }
   });
 
-  it("rejects encoded whitespace, and accepts at most five decodes of a safe path", () => {
+  it("rejects encoded whitespace, and decodes a return path once", () => {
     for (const next of [
       "/tasks/a%20b",
       "/tasks/a%2520b",
@@ -148,24 +148,54 @@ describe("APL-2652 safe return path", () => {
       for (let i = 0; i < times; i++) out = encodeURIComponent(out);
       return out;
     };
-    expect(safeReturnPath(encode("/tasks/T1?tab=comments", 5))).toBe("/tasks/T1?tab=comments");
+    // Michael's ruling: one decode. Anything still encoded or unsafe after it falls back to the home page.
     expect(safeReturnPath(encode("/tasks/T1", 1))).toBe("/tasks/T1");
-    expect(safeReturnPath(encode("/tasks/T1", 6))).toBeNull();
-    expect(safeReturnPath(encode("//evil.example", 5))).toBeNull();
-    expect(safeReturnPath(encode("https://evil.example", 5))).toBeNull();
-    expect(safeReturnPath(encode("/\\evil.example", 5))).toBeNull();
-    expect(safeReturnPath(encode("/tasks/a b", 3))).toBeNull();
+    expect(safeReturnPath(encode("/tasks/T1?tab=comments", 1))).toBe("/tasks/T1?tab=comments");
+    expect(safeReturnPath(encode("/tasks/T1", 2))).toBeNull();
+    expect(safeReturnPath(encode("/tasks/T1?tab=comments", 5))).toBeNull();
+    expect(safeReturnPath(encode("//evil.example", 1))).toBeNull();
+    expect(safeReturnPath(encode("https://evil.example", 1))).toBeNull();
+    expect(safeReturnPath(encode("/\\evil.example", 1))).toBeNull();
+    expect(safeReturnPath(encode("/tasks/a b", 1))).toBeNull();
   });
 
-  it("qa:TC missing rejects a safe path encoded six times after the router decode", () => {
+  it("qa:TC-APL2652-c26e8af9 decodes once, counting the router's decode", () => {
     const encode = (value: string, times: number) => {
       let out = value;
       for (let i = 0; i < times; i++) out = encodeURIComponent(out);
       return out;
     };
-    // The router decodes the query once, so six layers reach safeReturnPath as five.
-    const seen = decodeURIComponent(encode("/tasks/T1?tab=comments", 6));
-    expect(safeReturnPath(seen, 1)).toBeNull();
+    // The router decodes the query once. That is the one decode, so a path still encoded after it falls back.
+    expect(safeReturnPath(decodeURIComponent(encode("/tasks/T1?tab=comments", 1)), 1)).toBe("/tasks/T1?tab=comments");
+    expect(safeReturnPath(decodeURIComponent(encode("/tasks/T1?tab=comments", 2)), 1)).toBeNull();
+    expect(safeReturnPath(decodeURIComponent(encode("/tasks/T1?tab=comments", 6)), 1)).toBeNull();
+    expect(safeReturnPath(decodeURIComponent(encode("//evil.example", 2)), 1)).toBeNull();
+  });
+
+  it("D1 keeps an encoded query value: R%26D, C%2B%2B and 100%25", () => {
+    const cases: [string, string][] = [
+      ["/tasks/T1?q=R%26D", "R&D"],
+      ["/tasks/T1?q=C%2B%2B", "C++"],
+      ["/tasks/T1?q=100%25", "100%"],
+    ];
+    for (const [path, q] of cases) {
+      // The sign-in page: the router has already decoded `next` once.
+      const fromRouter = safeReturnPath(new URL(`/signin?next=${encodeURIComponent(path)}`, BASE_ORIGIN).searchParams.get("next"), 1);
+      expect(fromRouter, path).toBe(path);
+      expect(new URL(fromRouter!, BASE_ORIGIN).searchParams.get("q"), path).toBe(q);
+      // A raw `next` value that nothing has decoded yet.
+      expect(safeReturnPath(encodeURIComponent(path)), path).toBe(path);
+      // A 401 or a signed-out request builds next from the URL as it stands, and the sign-in page lands on the same URL.
+      const href = signInHref(path);
+      const landed = safeReturnPath(new URL(href, BASE_ORIGIN).searchParams.get("next"), 1);
+      expect(landed, href).toBe(path);
+      expect(new URL(landed!, BASE_ORIGIN).searchParams.get("q"), href).toBe(q);
+      // The sign-in form gets the page's path and pushes it unchanged.
+      expect(safeReturnPath(landed, 1), path).toBe(path);
+    }
+    // Still encoded in the path after the one decode: home page.
+    expect(safeReturnPath("/tasks/T1%2Fx", 1)).toBeNull();
+    expect(safeReturnPath("/tasks/100%25", 1)).toBeNull();
   });
 
   it("rejects a missing, empty or oversized value", () => {
