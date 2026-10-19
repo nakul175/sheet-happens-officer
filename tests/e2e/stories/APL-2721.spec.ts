@@ -1,11 +1,26 @@
-// APL-2721 Playwright spec. One test per acceptance criterion.
-// Local only. workers=1 (vitest.e2e.config.mts). ZZ-TEST projects, then archived.
+// APL-2721 story spec. One test per acceptance criterion.
+// Local only: production hosts are refused, and so is any host but localhost or 127.0.0.1.
+// The guard is given TASKBOARD_URL as the base, so it never reads the process image for BASE_URL.
+// Thrown-away projects use ZZ-TEST names and a nakul17+ alias, then afterAll archives them.
 // No qa:TC id is assigned on the issue, so every title says qa:TC missing.
+import { existsSync } from "node:fs";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { chromium, type Browser, type Page } from "playwright-core";
-import { account, PW, task, withVersion, type Account } from "../tests/helpers";
+import { assertStoryTargetAllowed } from "../base-url";
+import { account, PW, task, withVersion, type Account } from "../../helpers";
 
 const BASE = process.env.TASKBOARD_URL ?? "http://localhost:3000";
+assertStoryTargetAllowed(process.env, BASE);
+
+function chromePath() {
+  const fromEnv = process.env.PW_CHROMIUM;
+  if (fromEnv && existsSync(fromEnv)) return fromEnv;
+  for (const p of ["/usr/bin/google-chrome", "/usr/bin/google-chrome-stable", "/usr/local/bin/google-chrome", "/usr/bin/chromium", "/usr/bin/chromium-browser"]) {
+    if (existsSync(p)) return p;
+  }
+  throw new Error("No Chrome/Chromium binary. Set PW_CHROMIUM.");
+}
+
 const RUN = `${Date.now().toString(36)}${process.pid.toString(36)}`;
 let seq = 0;
 
@@ -20,7 +35,7 @@ beforeAll(async () => {
     throw new Error(`Refusing to run against ${BASE}: this spec is local only.`);
   }
   browser = await chromium.launch({
-    executablePath: process.env.PW_CHROMIUM || "/usr/local/bin/google-chrome",
+    executablePath: chromePath(),
     args: ["--no-sandbox", "--disable-dev-shm-usage"],
   });
   lead = await account("ZZ-TEST lead", `nakul17+zz-2721-${RUN}@aplyd.com`);
@@ -73,7 +88,8 @@ async function openTask(page: Page, title: string) {
   return page.getByRole("dialog", { name: "Task" });
 }
 
-describe("qa:TC missing APL-2721 done flag on the project page", () => {
+// npm test runs this file too, where the default test timeout is 30 s.
+describe("qa:TC missing APL-2721 done flag on the project page", { timeout: 180000 }, () => {
   it("qa:TC missing cascaded subtasks reopen with their parent", async () => {
     const proj = await zzProject();
     const parent = await task(lead, proj.id, { title: "ZZ-TEST Parent P", sectionId: proj.doing });
