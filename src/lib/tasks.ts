@@ -71,6 +71,23 @@ async function loadTask(user: Actor, id: string, o: { write?: boolean; deleted?:
   return { t, a };
 }
 
+/** Same write check updateTask runs, so a caller can refuse before reading the body. */
+export const assertCanUpdateTask = (user: Actor, id: string) => loadTask(user, id, { write: true });
+
+/**
+ * APL-2494: setting or clearing Blocked is a valid body with no expectedUpdatedAt.
+ * When that field is absent, stamp the task version just loaded so a required-version
+ * check does not turn `{blocked:false}` or `{blocked:true}` into a 400.
+ */
+export function stampBlockedFlagVersion(raw: unknown, updatedAt: Date): unknown {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return raw;
+  const body = raw as Record<string, unknown>;
+  if (typeof body.blocked !== "boolean") return raw;
+  if (!Object.keys(body).every((k) => k === "blocked" || k === "blockedReason" || k === "expectedUpdatedAt")) return raw;
+  if (typeof body.expectedUpdatedAt === "string" && body.expectedUpdatedAt.length > 0) return raw;
+  return { ...body, expectedUpdatedAt: updatedAt.toISOString() };
+}
+
 export const ORDER = [{ dueDate: { sort: "asc", nulls: "last" } }, { createdAt: "asc" }, { id: "asc" }] as const;
 
 async function requireWorker(tx: Tx, projectId: string, userId: string, what: string) {
