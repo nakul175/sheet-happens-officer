@@ -1,6 +1,7 @@
 import { defineConfig } from "@playwright/test";
 
-// Story specs in tests/e2e/stories. APL-2522.spec.ts on this branch is a Vitest file, so Playwright ignores it.
+// Story specs in tests/e2e/stories. Files there use @playwright/test only: one vitest import makes the whole run collect 0 tests
+// (APL-2761). Vitest suites that drive a local server live in tests/e2e/local and run under `npm test`.
 // workers=1. BASE_URL or TASKBOARD_URL points at the app. Production hosts are refused.
 // Default is localhost: Next dev does not hydrate the sign-up form when the page is opened as 127.0.0.1.
 const baseURL = (process.env.BASE_URL || process.env.TASKBOARD_URL || "http://localhost:3100").replace(/\/+$/, "");
@@ -24,7 +25,6 @@ if (PRODUCTION.has(host)) throw new Error(`Refusing to run story tests against p
 
 export default defineConfig({
   testDir: "./tests/e2e/stories",
-  testIgnore: ["**/APL-2522.spec.ts"],
   timeout: 60_000,
   expect: { timeout: 15_000 },
   workers: 1,
