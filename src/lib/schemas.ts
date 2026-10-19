@@ -14,11 +14,13 @@ export const emailField = z
   .refine((e) => ALLOWED_DOMAINS.includes(e.slice(e.lastIndexOf("@") + 1)), { message: DOMAIN_MESSAGE });
 
 // Max 128 so a huge password cannot be used to burn CPU in the hash.
+// abort: Zod runs later checks after a failure. Without it, a too-short or too-long
+// password that also misses a letter or number adds PASSWORD_MESSAGE twice.
 export const passwordField = z
   .string()
-  .min(8, PASSWORD_MESSAGE)
-  .max(128, PASSWORD_MESSAGE)
-  .refine((p) => /[A-Za-z]/.test(p) && /[0-9]/.test(p), { message: PASSWORD_MESSAGE });
+  .min(8, { error: PASSWORD_MESSAGE, abort: true })
+  .max(128, { error: PASSWORD_MESSAGE, abort: true })
+  .refine((p) => /[A-Za-z]/.test(p) && /[0-9]/.test(p), { error: PASSWORD_MESSAGE });
 
 // SHO-US-15.2. Any valid email: the Super Admin decides who is let in.
 export const addPersonInput = z.object({

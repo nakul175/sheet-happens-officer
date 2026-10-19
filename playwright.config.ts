@@ -8,15 +8,18 @@ import { BASE_URL } from "./tests/e2e/base-url";
 //   SHO_MEMBER_EMAIL, SHO_MEMBER_PASS   OPTIONAL: a plain Member account. Specs that need a second person skip without it.
 //   BASE_URL                       optional, the app under test (default: staging). Production hosts are refused (tests/e2e/base-url.ts).
 //   PW_CHROMIUM                    optional path to a Chromium binary
+// Merged with main's config (APL-2733): its fullyParallel: false and 15 s expect timeout are kept.
 // Nothing here is ever pointed at production. All test data is named "ZZ-TEST ..." and cleaned up by the spec.
 
 export default defineConfig({
   testDir: "./tests/e2e/stories",
   // APL-2522.spec.ts is the Vitest approver spec. Playwright runs APL-2522-ac.spec.ts.
-  testIgnore: "**/APL-2522.spec.ts",
+  // Vitest story specs (see vitest.config.mts). Loading one here aborts the whole Playwright run.
+  testIgnore: ["**/APL-2522.spec.ts", "**/APL-2655.spec.ts", "**/APL-2679.spec.ts", "**/APL-2714.spec.ts", "**/APL-2739.spec.ts"],
   timeout: 60_000,
-  expect: { timeout: 10_000 },
+  expect: { timeout: 15_000 },
   workers: 1,
+  fullyParallel: false,
   retries: 0,
   reporter: [["list"]],
   use: {
