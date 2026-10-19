@@ -1,10 +1,11 @@
 // APL-2709: the 30-quiet-day parts of APL-2525 AC6, APL-2543 AC1/AC2/AC3/AC5 and APL-2546 AC2.
 // Pam left no qa:TC id. Each title says qa:TC missing. An AC number is not a TC id.
-// No row is written by this file. Deals, tasks and ideas are made through the HTTP API and archived through it afterwards.
+// No row is written by this file. Deals, tasks and ideas are made through the HTTP API, and in afterAll the deals, orgs and
+// projects are archived and the nakul17+ aliases deactivated, again through the API.
 // The product reads "now" at call time (listDeals, dealBlock, pipelineReview, notifyStalledDeals), so each check fakes Date
 // in this process only, to exactly 30 days and 1 ms after the activity time the product itself reports. The server's clock is
 // never moved. A server-side clock hook for the Playwright screens is APL-2757.
-import { afterEach, beforeAll, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, expect, it, vi } from "vitest";
 import { dealBlock, listDeals, notifyStalledDeals } from "../src/lib/deals";
 import { pipelineReview } from "../src/lib/review";
 import type { Actor } from "../src/lib/access";
@@ -14,7 +15,16 @@ const DAY = 86_400_000;
 const STALL = 30 * DAY;
 let seq = 0;
 const zz = (label: string) => `ZZ-TEST 2709 ${label} ${Date.now()}-${seq++}`;
-let cleanups: (() => Promise<unknown>)[] = [];
+const cleanups: (() => Promise<unknown>)[] = [];
+const aliases: string[] = [];
+let admin: Account | undefined;
+
+/** A run-unique nakul17+ alias with a ZZ-TEST name, deactivated in afterAll. */
+async function alias(label: string) {
+  const a = await account(`ZZ-TEST 2709 ${label}`, `nakul17+zz-2709-${label}-${Date.now()}-${seq++}@aplyd.com`);
+  aliases.push(a.id);
+  return a;
+}
 
 beforeAll(() => {
   // notifyStalledDeals looks at every deal it can see, so this file only runs against a local test database.
@@ -23,9 +33,27 @@ beforeAll(() => {
   if (host !== "localhost" && host !== "127.0.0.1") throw new Error("stall-clock-2709 needs DATABASE_URL on localhost (a local test database).");
 });
 
-afterEach(async () => {
-  for (const fn of cleanups.reverse()) { try { await fn(); } catch { /* clean-up is best effort */ } }
-  cleanups = [];
+/** Deactivate one alias. A Leader is refused (409 with `leads`), so each of those projects goes to the admin first. */
+async function retire(sa: Account, userId: string) {
+  const off = () => sa.c.post(`/api/team/${userId}/deactivate`, { reassign: "leaders" });
+  let r = await off();
+  if (r.status === 409 && Array.isArray(r.json?.leads)) {
+    for (const lead of r.json.leads as { id: string }[]) {
+      const archived = !!(await sa.c.get(`/api/projects/${lead.id}`)).json?.project?.archived;
+      if (archived) expect((await sa.c.post(`/api/projects/${lead.id}/unarchive`)).status).toBeLessThan(300);
+      expect([201, 409]).toContain((await sa.c.post(`/api/projects/${lead.id}/members`, { userId: sa.id, role: "EDITOR" })).status);
+      expect((await sa.c.post(`/api/projects/${lead.id}/leader`, { newLeaderId: sa.id, previousRole: "EDITOR" })).status).toBe(200);
+      if (archived) expect((await sa.c.post(`/api/projects/${lead.id}/archive`)).status).toBeLessThan(300);
+    }
+    r = await off();
+  }
+  expect(r.status, `deactivate ${userId}: ${JSON.stringify(r.json)}`).toBe(200);
+}
+
+afterAll(async () => {
+  if (!admin) return;
+  for (const id of aliases) await retire(admin, id);
+  for (const fn of cleanups.reverse()) { try { await fn(); } catch { /* archive is best effort */ } }
 });
 
 async function actor(a: Account): Promise<Actor> {
@@ -73,10 +101,9 @@ const stalledNotes = async (who: Account, dealId: string) =>
     .filter((n) => n.href.includes(dealId) && /no activity for 30 days/.test(n.text));
 
 it("APL-2525 AC6 (30 quiet days, in-process clock): a working deal with no logged activity for 30 days notifies its Leader once qa:TC missing", async () => {
-  const sa = await superAdmin();
-  const leader = await account("stallleader");
+  const sa = (admin ??= await superAdmin());
+  const leader = await alias("stall-leader");
   const d = await makeDeal(sa, leader.id, "e12 quiet");
-  cleanups.push(() => sa.c.post(`/api/projects/${d.id}/leader`, { newLeaderId: sa.id, previousRole: "EDITOR" }));
   const lead = await actor(leader);
   const quietPast = (await lastActivity(lead, d.id)) + STALL + 1;
   await at(quietPast, async () => {
@@ -89,7 +116,7 @@ it("APL-2525 AC6 (30 quiet days, in-process clock): a working deal with no logge
 });
 
 it("APL-2543 AC1 (30 quiet days, in-process clock): the list, the deal block and the review flag the deal Stalled, and a logged change counts as activity qa:TC missing", async () => {
-  const sa = await superAdmin();
+  const sa = (admin ??= await superAdmin());
   const me = await actor(sa);
   const d = await makeDeal(sa, sa.id, "stalled flag");
   const quietPast = (await lastActivity(me, d.id)) + STALL + 1;
@@ -106,7 +133,7 @@ it("APL-2543 AC1 (30 quiet days, in-process clock): the list, the deal block and
 });
 
 it("APL-2543 AC2 (30 quiet days, in-process clock): any later activity, such as a stage move, clears the Stalled flag qa:TC missing", async () => {
-  const sa = await superAdmin();
+  const sa = (admin ??= await superAdmin());
   const me = await actor(sa);
   const d = await makeDeal(sa, sa.id, "stalled clear");
   const conversation = (await pipelines(sa)).find((p) => p.key === "DEAL_PROACTIVE")!.stages.find((s) => s.name === "Conversation")!;
@@ -120,7 +147,7 @@ it("APL-2543 AC2 (30 quiet days, in-process clock): any later activity, such as 
 });
 
 it("APL-2543 AC3 (30 quiet days, in-process clock): one in-app notice per stall, and a new one only after new activity and 30 more quiet days qa:TC missing", async () => {
-  const sa = await superAdmin();
+  const sa = (admin ??= await superAdmin());
   const me = await actor(sa);
   const d = await makeDeal(sa, sa.id, "stalled notice");
   const firstQuiet = (await lastActivity(me, d.id)) + STALL + 1;
@@ -137,7 +164,7 @@ it("APL-2543 AC3 (30 quiet days, in-process clock): one in-app notice per stall,
 });
 
 it("APL-2543 AC5 (30 quiet days, in-process clock): archived, Paused, Done and Lost deals are never flagged qa:TC missing", async () => {
-  const sa = await superAdmin();
+  const sa = (admin ??= await superAdmin());
   const me = await actor(sa);
   const stages = (await pipelines(sa)).find((p) => p.key === "DEAL_PROACTIVE")!.stages;
   const stage = (name: string) => stages.find((s) => s.name === name)!.id;
@@ -171,8 +198,8 @@ it("APL-2543 AC5 (30 quiet days, in-process clock): archived, Paused, Done and L
 });
 
 it("APL-2546 AC2 (30 days later, in-process clock): Drop removes the Idea flag and the task stays qa:TC missing", async () => {
-  const sa = await superAdmin();
-  const viewer = await account("ideaviewer");
+  const sa = (admin ??= await superAdmin());
+  const viewer = await alias("idea-viewer");
   const me = await actor(sa);
   const p = await sa.c.post("/api/projects", { name: zz("review drop"), leaderId: sa.id });
   expect(p.status).toBe(201);

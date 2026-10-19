@@ -153,10 +153,34 @@ export async function cast(browser: Browser, later: Later, labels: string[]) {
   for (const label of labels) {
     const signed = await signInAlias(browser, qaEmail(label), zz(label));
     track(later, signed.ctx);
-    later(() => admin.who.api.post(`/api/team/${signed.who.user.id}/deactivate`, { reassign: "leaders" }));
+    later(() => retire(admin.who, signed.who.user.id as string));
     people.push(signed.who);
   }
   return { admin: admin.who, people };
+}
+
+/**
+ * Deactivate a run's nakul17+ alias through the API. Deactivate refuses while the person still leads a project
+ * (409 with `leads`), so each of those projects is handed to the QA admin first. An archived project is read-only,
+ * so it is unarchived for the hand-over and archived again. Fails if the person is still active afterwards.
+ */
+export async function retire(admin: Who, userId: string) {
+  const off = () => admin.api.post(`/api/team/${userId}/deactivate`, { reassign: "leaders" });
+  let r = await off();
+  if (r.status === 409 && Array.isArray(r.json?.leads)) {
+    for (const lead of r.json.leads as { id: string }[]) {
+      const archived = !!(await admin.api.get(`/api/projects/${lead.id}`)).json?.project?.archived;
+      if (archived) expect((await admin.api.post(`/api/projects/${lead.id}/unarchive`)).status, `unarchive ${lead.id}`).toBeLessThan(300);
+      const joined = await admin.api.post(`/api/projects/${lead.id}/members`, { userId: admin.user.id, role: "EDITOR" });
+      expect([201, 409], `add the QA admin to ${lead.id}: ${JSON.stringify(joined.json)}`).toContain(joined.status);
+      const handed = await admin.api.post(`/api/projects/${lead.id}/leader`, { newLeaderId: admin.user.id, previousRole: "EDITOR" });
+      expect(handed.status, `hand ${lead.id} to the QA admin: ${JSON.stringify(handed.json)}`).toBe(200);
+      if (archived) expect((await admin.api.post(`/api/projects/${lead.id}/archive`)).status, `archive ${lead.id} again`).toBeLessThan(300);
+    }
+    r = await off();
+  }
+  const done = r.status === 200 || (r.status === 409 && /already deactivated/.test(String(r.json?.error)));
+  expect(done, `deactivate ${userId}: ${r.status} ${JSON.stringify(r.json)}`).toBe(true);
 }
 
 /** POST /api/jobs/<name> on the local server. Refuses a remote host so a staging cron is never fired from here. */
