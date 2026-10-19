@@ -6,7 +6,8 @@ import { clearChat } from "@/lib/concierge/thread";
 
 export const POST = handle(async (req: Request) => {
   const me = await currentUser();
-  return Response.json(await sendMessage(me, (await parseBody(req, conciergeText)).text));
+  const { text } = await parseBody(req, conciergeText);
+  return Response.json(await sendMessage(me, text));
 });
 
 // "Clear my chat": the whole thread at once.
