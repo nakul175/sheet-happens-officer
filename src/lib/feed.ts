@@ -7,6 +7,7 @@ import { currentSessionId, deviceLabel, hashPassword, verifyPassword } from "@/l
 import { WORKSTREAM_DEAL, crmMode, crmVisible, projectAccess, type Actor } from "@/lib/access";
 import { idsIn, sentence, whenText } from "@/lib/activity-text";
 import { purgeExpiredComments } from "@/lib/comments";
+import { COMMENT_ACTION_PREFIX, commentsEnabled } from "@/lib/flags";
 import { isTooOldToUndo, isUndoable } from "@/lib/undoable";
 import { passwordField } from "@/lib/schemas";
 
@@ -196,7 +197,11 @@ export async function projectActivity(user: Actor, projectId: string, cursor?: s
     select: { id: true },
   })).map((t) => t.id);
   const rows = await db.actionLog.findMany({
-    where: { projectId, ...(mine ? { targetType: "task", targetId: { in: mine } } : {}) },
+    where: {
+      projectId,
+      ...(mine ? { targetType: "task", targetId: { in: mine } } : {}),
+      ...(commentsEnabled() ? {} : { NOT: { action: { startsWith: COMMENT_ACTION_PREFIX } } }), // APL-2590 D1
+    },
     orderBy: [{ createdAt: "desc" }, { id: "desc" }],
     take: limit + 1,
     ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),

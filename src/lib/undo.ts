@@ -8,6 +8,7 @@ import { auditTx, logAction, notify } from "@/lib/notify";
 import { deleteTask, restoreTask } from "@/lib/tasks";
 import { UNDO_LABELS, isTooOldToUndo, isUndoable } from "@/lib/undoable";
 import { undoRecord } from "@/lib/records";
+import { commentsEnabled, isCommentAction } from "@/lib/flags";
 
 type Conflict = { field: string; before: unknown; after: unknown; now: unknown };
 type Plan = { conflicts: Conflict[]; apply: (tx: Tx) => Promise<void>; subject?: string; fields?: string };
@@ -371,6 +372,8 @@ async function present(conflicts: Conflict[]) {
 async function prepare(user: Actor, logId: string) {
   const row = await db.actionLog.findUnique({ where: { id: logId } });
   if (!row) throw notFound("Action");
+  // APL-2590 D1: with the comments switch off, a comment row is the same 404 as an action that does not exist.
+  if (isCommentAction(row.action) && !commentsEnabled()) throw notFound("Action");
   const projectId = row.projectId;
   if (!projectId) throw bad("This kind of action cannot be undone.");
   const a = await projectAccess(user, projectId);
