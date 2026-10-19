@@ -18,6 +18,8 @@ import { BASE, istDate, task, type Account } from "./helpers";
 import { zzTestData, type ZzProject } from "./zz-test-data";
 
 const LOAD = 40;
+/** Longest the test holds the lock: well under Prisma's default 2 s maxWait / 5 s timeout, which the fix keeps. */
+const MAX_HOLD_MS = 500;
 const tag = `${Date.now().toString(36)}-${process.pid}`;
 const zz = zzTestData("2749");
 
@@ -51,7 +53,7 @@ async function waitForOverlap(watch: pg.Client, timeoutMs: number) {
     );
     const { inserts, advisory } = rows[0];
     if (inserts >= 2 || (inserts >= 1 && advisory >= 1)) return { inserts, advisory };
-    await new Promise((r) => setTimeout(r, 10));
+    await new Promise((r) => setTimeout(r, 5));
   }
   return null;
 }
@@ -121,11 +123,14 @@ describe("qa:TC missing APL-2749: overlapping reminder runs write one reminder p
     await watch.connect();
     let overlap: { inserts: number; advisory: number } | null = null;
     let posts: Promise<unknown>;
+    let heldMs = 0;
     try {
       await gate.query("BEGIN");
       await gate.query('LOCK TABLE "Notification" IN SHARE MODE');
       posts = postReminders(LOAD).then(() => null, (err: unknown) => err);
-      overlap = await waitForOverlap(watch, 1_500);
+      const held = Date.now();
+      overlap = await waitForOverlap(watch, MAX_HOLD_MS);
+      heldMs = Date.now() - held;
     } finally {
       await gate.query("ROLLBACK");
       await gate.end();
@@ -136,7 +141,7 @@ describe("qa:TC missing APL-2749: overlapping reminder runs write one reminder p
     expect(overlap, "two reminder runs were waiting past their read at the same time").not.toBeNull();
     const counts: Record<string, number> = {};
     for (const d of due) counts[d.who === holder ? "holder" : "leader"] = (await dueTomorrow(d.who, d.taskId, d.title)).length;
-    console.log(`APL-2749 overlap ${JSON.stringify(overlap)}; reminder rows per (recipient, task, TASK_DUE_TOMORROW) after ${LOAD} concurrent runs: ${JSON.stringify(counts)}`);
+    console.log(`APL-2749 overlap ${JSON.stringify(overlap)} after ${heldMs} ms held; reminder rows per (recipient, task, TASK_DUE_TOMORROW) after ${LOAD} concurrent runs: ${JSON.stringify(counts)}`);
     expect(counts).toEqual({ holder: 1, leader: 1 });
   }, 90_000);
 });
