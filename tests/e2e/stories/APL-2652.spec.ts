@@ -1,8 +1,8 @@
 // APL-2652. A signed-out deep link comes back after sign-in.
 // Pam's cases are tagged qa:TC-APL2652-<id>@vN. Refs APL-2652.
 // The file skips in beforeAll when SHO_QA_PASS is unset. It does not run in phone CI.
-import type { APIResponse, Page } from "@playwright/test";
-import { expect, login, test, zz, type Who } from "../support";
+import type { APIResponse, Browser, Page } from "@playwright/test";
+import { BASE_URL, RUN, expect, login, test, zz, type Who } from "../support";
 import { newProject, newTask } from "../g2";
 import { gateFile, signInAlias, track } from "../helpers/qa-alias";
 import { alias, nextPass, sinkText } from "./qa";
@@ -29,10 +29,24 @@ async function returnPathOn(page: Page) {
   return /next=(?:%2F|\/)tasks(?:%2F|\/)return-to-probe/i.test(hay);
 }
 
+/** Public signup accepts @aplyd.com. alias() defaults to gmail.com, which signup answers 400. */
+function aplydAlias(tag: string) {
+  return `nakul17+zz-${tag}-${RUN}@aplyd.com`;
+}
+
 async function signIn(page: Page, email: string, password: string) {
   await page.getByLabel("Work email").fill(email);
   await page.getByLabel("Password").fill(password);
   await page.getByRole("button", { name: "Sign in" }).click();
+}
+
+/** A new context, so a sign-in is not the page that already has a task open. */
+async function freshPage(browser: Browser) {
+  const ctx = await browser.newContext({
+    baseURL: BASE_URL,
+    httpCredentials: process.env.STAGING_USER ? { username: process.env.STAGING_USER, password: process.env.STAGING_PASS ?? "" } : undefined,
+  });
+  return { ctx, page: await ctx.newPage() };
 }
 
 async function openTask(admin: Who, later: (fn: () => Promise<unknown>) => void, label: string) {
@@ -111,30 +125,39 @@ test("qa:TC-APL2652-9a0b7cb9@v2 an /api or /signin next is ignored", async ({ an
   }
 });
 
-test("qa:TC-APL2652-c26e8af9@v1 five decodes of a safe path work and encoded whitespace does not", async ({ admin, anon, later }) => {
+test("qa:TC-APL2652-c26e8af9@v1 five decodes of a safe path work and encoded whitespace does not", async ({ admin, anon, browser, later }) => {
   test.skip(!(await returnPathOn(anon)), "SIGNIN_RETURN_TO is off on this server");
   const task = await openTask(admin, later, "layers");
   const creds = login("ADMIN");
   const safe = `/tasks/${task.id}?tab=comments`;
-  await anon.goto(`/signin?next=${encodeTimes(safe, 5)}`);
-  await signIn(anon, creds.email, creds.password);
-  await expect(anon.locator("textarea.tt")).toHaveValue(task.title);
-  expect(new URL(anon.url()).pathname + new URL(anon.url()).search).toBe(safe);
-  await anon.context().request.post("/api/auth/signout");
-  await anon.goto(`/signin?next=${encodeURIComponent(`/tasks/${task.id}%20x`)}`);
-  await signIn(anon, creds.email, creds.password);
-  await expect(anon.getByRole("heading", { name: "My tasks" })).toBeVisible();
-  expect(new URL(anon.url()).pathname).toBe("/");
-  await anon.context().request.post("/api/auth/signout");
-  await anon.goto(`/signin?next=${encodeTimes(safe, 6)}`);
-  await signIn(anon, creds.email, creds.password);
-  await expect(anon.getByRole("heading", { name: "My tasks" })).toBeVisible();
-  expect(new URL(anon.url()).pathname).toBe("/");
+  const fromSignIn = async (next: string) => {
+    const opened = await freshPage(browser);
+    await opened.page.goto(`/signin?next=${next}`);
+    await expect(opened.page.getByRole("heading", { name: "Sign in" })).toBeVisible();
+    await signIn(opened.page, creds.email, creds.password);
+    return opened;
+  };
+  const landed = await fromSignIn(encodeTimes(safe, 5));
+  try {
+    await expect(landed.page.locator("textarea.tt")).toHaveValue(task.title);
+    const url = new URL(landed.page.url());
+    expect(url.pathname + url.search).toBe(safe);
+  } finally { await landed.ctx.close(); }
+  const spaced = await fromSignIn(encodeURIComponent(`/tasks/${task.id}%20x`));
+  try {
+    await expect(spaced.page.getByRole("heading", { name: "My tasks" })).toBeVisible();
+    expect(new URL(spaced.page.url()).pathname).toBe("/");
+  } finally { await spaced.ctx.close(); }
+  const sixth = await fromSignIn(encodeTimes(safe, 6));
+  try {
+    await expect(sixth.page.getByRole("heading", { name: "My tasks" })).toBeVisible();
+    expect(new URL(sixth.page.url()).pathname).toBe("/");
+  } finally { await sixth.ctx.close(); }
 });
 
 test("qa:TC-APL2652-7526bdb0@v3 a hidden task and a missing task are the same 404 page", async ({ admin, browser, later }) => {
   const task = await openTask(admin, later, "hidden");
-  const signed = await signInAlias(browser, alias("2652", "out"), zz("outsider"));
+  const signed = await signInAlias(browser, aplydAlias("out"), zz("outsider"));
   track(later, signed.ctx);
   later(() => admin.api.post(`/api/team/${String(signed.who.user.id)}/deactivate`, { reassign: "leaders" }));
   const missing = task.id.slice(0, -1) + (task.id.endsWith("a") ? "b" : "a");
@@ -157,7 +180,7 @@ test("qa:TC-APL2652-7526bdb0@v3 a hidden task and a missing task are the same 40
 
 test("qa:TC-APL2652-5cb7edb7@v2 the hidden and missing task APIs are the same 404", async ({ admin, browser, later }) => {
   const task = await openTask(admin, later, "api404");
-  const signed = await signInAlias(browser, alias("2652", "api"), zz("api outsider"));
+  const signed = await signInAlias(browser, aplydAlias("api"), zz("api outsider"));
   track(later, signed.ctx);
   later(() => admin.api.post(`/api/team/${String(signed.who.user.id)}/deactivate`, { reassign: "leaders" }));
   const missing = task.id.slice(0, -1) + (task.id.endsWith("a") ? "b" : "a");
@@ -292,6 +315,8 @@ test("qa:TC-APL2652-9c54f732@v1 a fragment is not part of the 401 return path", 
   test.skip(!(await returnPathOn(anon)), "SIGNIN_RETURN_TO is off on this server");
   const task = await openTask(admin, later, "frag");
   await anon.goto(`/tasks/${task.id}?tab=comments#c9`);
+  await expect(anon.getByRole("heading", { name: "Sign in" })).toBeVisible();
+  await expect(anon).toHaveURL(/\/signin\?/);
   const url = new URL(anon.url());
   expect(url.pathname).toBe("/signin");
   expect(url.hash).toBe("");
