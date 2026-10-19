@@ -1,3 +1,4 @@
+import { projectAccess, requireManage } from "@/lib/access";
 import { currentUser } from "@/lib/auth";
 import { handle, parseBody } from "@/lib/http";
 import { sectionUpdate } from "@/lib/schemas";
@@ -8,6 +9,8 @@ type Ctx = { params: Promise<{ id: string; sectionId: string }> };
 export const PATCH = handle(async (req: Request, ctx: Ctx) => {
   const me = await currentUser();
   const { id, sectionId } = await ctx.params;
+  // APL-2651: project access before the body. updateSection repeats the same check.
+  requireManage(await projectAccess(me, id, { write: true }));
   await updateSection(me, id, sectionId, await parseBody(req, sectionUpdate));
   return Response.json({ status: "ok" });
 });
