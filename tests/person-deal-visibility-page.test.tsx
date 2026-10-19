@@ -76,15 +76,31 @@ describe("APL-2728 person page DOM", () => {
     });
     const html = page.innerHTML;
     expect(page.textContent).toContain(HIDDEN_DEAL_LABEL);
+    expect(page.textContent?.split(HIDDEN_DEAL_LABEL).length).toBe(2);
     expect(html).not.toContain(DEAL_NAME);
     expect(html).not.toContain(DEAL_ID);
     expect(html).not.toContain(TASK_TITLE);
     expect(html).not.toContain(`/projects/${DEAL_ID}`);
-    const hiddenCell = [...page.querySelectorAll("td")].find((td) => td.textContent === HIDDEN_DEAL_LABEL);
-    expect(hiddenCell).toBeTruthy();
-    expect(hiddenCell?.querySelector("a")).toBeNull();
+    const sentence = [...page.querySelectorAll("p")].find((p) => p.textContent === HIDDEN_DEAL_LABEL);
+    expect(sentence).toBeTruthy();
+    expect(sentence?.querySelector("a")).toBeNull();
+    expect(page.querySelector("a")?.textContent).not.toBe(HIDDEN_DEAL_LABEL);
     const plain = page.querySelector(`a[href="/projects/${PLAIN_ID}"]`);
     expect(plain?.textContent).toBe(PLAIN_NAME);
+  });
+
+  it("AC1: five hidden-deal rows still render one sentence and no link", async () => {
+    const page = await open({
+      id: "rep-2728",
+      name: "ZZ-TEST rep",
+      projects: [
+        { id: PLAIN_ID, name: PLAIN_NAME },
+        ...Array.from({ length: 5 }, () => ({ name: HIDDEN_DEAL_LABEL, href: null })),
+      ],
+    });
+    expect(page.textContent?.split(HIDDEN_DEAL_LABEL).length).toBe(2);
+    expect(page.querySelector(`a[href="/projects/${DEAL_ID}"]`)).toBeNull();
+    expect([...page.querySelectorAll("a")].some((a) => a.textContent === HIDDEN_DEAL_LABEL)).toBe(false);
   });
 
   it("AC2 and AC3: a visible deal keeps its name and /projects/<id> link", async () => {

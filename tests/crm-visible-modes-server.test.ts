@@ -413,7 +413,8 @@ describe("CRM_VISIBLE modes are tested against a real server per mode", () => {
       expect(text).not.toContain(taskTitle);
       expect(text).not.toContain(stageName);
       const projects = ((json?.person as { projects?: { id?: string; name?: string; href?: null }[] })?.projects) ?? [];
-      expect(projects).toContainEqual({ name: hiddenLabel, href: null });
+      expect(projects.filter((p) => p.href === null)).toEqual([{ name: hiddenLabel, href: null }]);
+      expect(projects.filter((p) => p.name === hiddenLabel)).toHaveLength(1);
       expect(projects.some((p) => p.id === dealId)).toBe(false);
       expect(projects.some((p) => p.id === plainId)).toBe(true);
     };
@@ -438,18 +439,65 @@ describe("CRM_VISIBLE modes are tested against a real server per mode", () => {
         { mode: "off", server: running.get("off")!, user: "admin", path: "admin", hidden: true },
       ];
       const people = { member, admin };
+      const hiddenAtOne = new Map<string, unknown>();
       for (const example of cases) {
         const who = people[example.user];
         const res = await call(example.server.base, who.cookie, "GET", `/api/team/${admin.id}`);
         const label = `CRM_VISIBLE=${example.mode} ${example.path} path`;
         expect(res.status, `${label} ${res.text}`).toBe(200);
-        if (example.hidden) assertHidden(res.text, res.json);
-        else assertVisible(res.text);
+        if (example.hidden) {
+          assertHidden(res.text, res.json);
+          hiddenAtOne.set(`${example.mode}:${example.path}`, res.json?.person);
+        } else assertVisible(res.text);
         if (example.path === "admin" && example.mode === "off") {
           expect((res.json?.person as { openTasks?: number }).openTasks).toBe(1);
         }
         if (example.path === "admin" && example.mode === "admins") {
           expect((res.json?.person as { openTasks?: number }).openTasks).toBe(2);
+        }
+      }
+
+      // 1, 2 and 5 hidden deals must be the same sentence. 0 hidden deals adds nothing.
+      const hiddenCases = cases.filter((example) => example.hidden);
+      const addDeal = async (name: string) => {
+        const made = await call(open!.base, admin.cookie, "POST", "/api/deals", {
+          name, organisationId, pipelineId: pipe!.id, leaderId: admin.id, whyPursue: tag,
+          nextStep: { title: `${name} step`, dueDate: istDate(3) },
+        });
+        expect(made.status, made.text).toBe(201);
+        const id = (made.json?.deal as { id: string }).id;
+        seed.projectIds.push(id);
+        expect((await call(open!.base, admin.cookie, "POST", `/api/projects/${id}/members`, { userId: member.id, role: "EDITOR" })).status).toBe(201);
+      };
+      const expectSameHidden = async (count: number) => {
+        for (const example of hiddenCases) {
+          const res = await call(example.server.base, people[example.user].cookie, "GET", `/api/team/${admin.id}`);
+          expect(res.status, `${count} deals ${example.mode} ${example.path} ${res.text}`).toBe(200);
+          expect(res.json?.person).toEqual(hiddenAtOne.get(`${example.mode}:${example.path}`));
+          assertHidden(res.text, res.json);
+        }
+      };
+      await addDeal(`ZZ-TEST Acme two ${tag}`);
+      await expectSameHidden(2);
+      await addDeal(`ZZ-TEST Acme three ${tag}`);
+      await addDeal(`ZZ-TEST Acme four ${tag}`);
+      await addDeal(`ZZ-TEST Acme five ${tag}`);
+      await expectSameHidden(5);
+
+      const plainOnlyEmail = `nakul17+zz-2728-${runId}-plain@aplyd.com`;
+      seed.emails.push(plainOnlyEmail);
+      const plainOnly = await signIn(open!, `ZZ-TEST plain ${runId}`, plainOnlyEmail);
+      seed.userIds.push(plainOnly.id);
+      expect((await call(open!.base, admin.cookie, "POST", `/api/projects/${plainId}/members`, { userId: plainOnly.id, role: "EDITOR" })).status).toBe(201);
+      for (const mode of ["admins", "off"] as const) {
+        const server = running.get(mode)!;
+        for (const who of [member, admin]) {
+          const res = await call(server.base, who.cookie, "GET", `/api/team/${plainOnly.id}`);
+          expect(res.status, res.text).toBe(200);
+          expect(res.text).not.toContain(hiddenLabel);
+          expect(res.text).not.toContain(dealName);
+          const projects = ((res.json?.person as { projects?: { href?: null }[] }).projects) ?? [];
+          expect(projects.some((p) => p.href === null)).toBe(false);
         }
       }
 

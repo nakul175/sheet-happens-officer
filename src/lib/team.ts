@@ -175,35 +175,35 @@ export async function resendSignIn(actor: Actor & { name?: string }, targetId: s
 }
 
 /**
- * APL-2716 redaction for a deal this viewer may not see.
- * Generic text only: no deal name, no id, no href. The stored name is not read.
+ * APL-2728. One fixed sentence when this viewer cannot see at least one of the person's deals.
+ * No count, no deal name, no id, no href. Zero hidden deals adds nothing.
  */
 export const HIDDEN_DEAL_LABEL = "A deal you can't view.";
 
-const hiddenDealRows = (count: number) => Array.from({ length: count }, () => ({ name: HIDDEN_DEAL_LABEL, href: null as null }));
+const hiddenDealNotice = () => [{ name: HIDDEN_DEAL_LABEL, href: null as null }];
 
-/** SHO-US-15.4. Members see a name and shared projects. Admins see the rest. A hidden deal is generic text (APL-2728). */
+/** SHO-US-15.4. Members see a name and shared projects. Admins see the rest. A hidden deal is one sentence (APL-2728). */
 export async function getPerson(actor: Actor, targetId: string) {
   const target = await db.user.findUnique({ where: { id: targetId } });
   const admin = isAdmin(actor);
   if (!target || (!admin && !isActive(target))) throw notFound("Person");
   const mine = admin ? null : new Set((await db.projectMember.findMany({ where: { userId: actor.id }, select: { projectId: true } })).map((m) => m.projectId));
-  // crmProjectWhere drops deals when the CRM is hidden, so those names are never selected.
+  // One query supplies both the visible list and the hidden flag. A second count would
+  // repeat the deal rows, and the row count itself would tell the viewer how many deals exist.
   const rows = await db.projectMember.findMany({
-    where: { userId: targetId, project: { archivedAt: null, ...crmProjectWhere(actor) } },
-    include: { project: { select: { id: true, name: true } } },
-    orderBy: { project: { name: "asc" } },
-  });
-  const shown = mine ? rows.filter((m) => mine.has(m.projectId)) : rows;
-  const hiddenDeals = crmVisible(actor) ? 0 : await db.projectMember.count({
     where: {
       userId: targetId,
       ...(mine ? { projectId: { in: [...mine] } } : {}),
-      project: { archivedAt: null, typeId: WORKSTREAM_DEAL },
+      project: { archivedAt: null },
     },
+    select: { role: true, projectId: true, project: { select: { id: true, name: true, typeId: true } } },
+    orderBy: { project: { name: "asc" } },
   });
-  const redacted = hiddenDealRows(hiddenDeals);
-  if (!admin) return { id: target.id, name: target.name, projects: [...shown.map((m) => ({ id: m.project.id, name: m.project.name })), ...redacted] };
+  const hideDeals = !crmVisible(actor);
+  const hidden = hideDeals && rows.some((row) => row.project.typeId === WORKSTREAM_DEAL);
+  const shown = rows.filter((row) => !(hideDeals && row.project.typeId === WORKSTREAM_DEAL));
+  const notice = hidden ? hiddenDealNotice() : [];
+  if (!admin) return { id: target.id, name: target.name, projects: [...shown.map((m) => ({ id: m.project.id, name: m.project.name })), ...notice] };
   const open = await db.task.groupBy({
     by: ["projectId"],
     where: {
@@ -225,6 +225,6 @@ export async function getPerson(actor: Actor, targetId: string) {
     status: target.deactivatedAt ? "DEACTIVATED" : !target.emailVerifiedAt ? "UNVERIFIED" : "ACTIVE",
     joinedAt: target.createdAt.toISOString(),
     openTasks: open.reduce((n, o) => n + o._count._all, 0),
-    projects: [...shown.map((m) => ({ id: m.project.id, name: m.project.name, role: m.role, openTasks: byProject.get(m.projectId) ?? 0 })), ...redacted],
+    projects: [...shown.map((m) => ({ id: m.project.id, name: m.project.name, role: m.role, openTasks: byProject.get(m.projectId) ?? 0 })), ...notice],
   };
 }
