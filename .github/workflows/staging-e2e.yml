@@ -122,6 +122,11 @@ jobs:
           SPECS: ${{ inputs.specs }}
         run: |
           shopt -s nullglob
+          # APL-2883: Vitest story specs (npm test runs them) are never picked. The list is tests/e2e/vitest-specs.cjs, the same
+          # VITEST_SPECS playwright.config.ts ignores; a spec Playwright ignores would only end the run in "No tests found".
+          vitest_specs=$(node -e 'process.stdout.write(require("./tests/e2e/vitest-specs.cjs").vitestSpecFiles().join(" "))')
+          is_vitest() { [[ " $vitest_specs " == *" $(basename "$1") "* ]]; }
+          echo "Vitest story specs, never picked: ${vitest_specs:-none}"
           files=()
           read -ra toks <<< "$SPECS"   # split on spaces without expanding globs against the repo root
           for tok in "${toks[@]}"; do
@@ -136,16 +141,21 @@ jobs:
               pattern="tests/e2e/stories/$tok"
               [[ "$pattern" == *.ts ]] || pattern="$pattern.spec.ts"
             fi
-            matched=()
+            matched=(); vitest_hit=()
             for f in $pattern; do
-              [[ -f "$f" && "$f" == tests/e2e/stories/*.spec.ts ]] && matched+=("$f")
+              [[ -f "$f" && "$f" == tests/e2e/stories/*.spec.ts ]] || continue
+              if is_vitest "$f"; then vitest_hit+=("$f"); else matched+=("$f"); fi
             done
+            if [ ${#matched[@]} -eq 0 ] && [ ${#vitest_hit[@]} -gt 0 ]; then
+              echo "::error::$tok selects only Vitest story specs (${vitest_hit[*]}). npm test runs them; Playwright ignores them (VITEST_SPECS)."; exit 1
+            fi
             if [ ${#matched[@]} -eq 0 ]; then echo "::error::No spec file matches: $tok"; exit 1; fi
+            [ ${#vitest_hit[@]} -eq 0 ] || echo "$tok: left out Vitest story specs ${vitest_hit[*]}"
             files+=("${matched[@]}")
           done
           if [ ${#files[@]} -eq 0 ]; then
-            files=(tests/e2e/stories/*.spec.ts)
-            [ ${#files[@]} -gt 0 ] || { echo "::error::No spec files in tests/e2e/stories on this branch. Start the run from the branch with the specs (e.g. qa/story-e2e)."; exit 1; }
+            for f in tests/e2e/stories/*.spec.ts; do is_vitest "$f" || files+=("$f"); done
+            [ ${#files[@]} -gt 0 ] || { echo "::error::No Playwright spec files in tests/e2e/stories on this branch (Vitest specs are not picked). Start the run from the branch with the specs (e.g. qa/story-e2e)."; exit 1; }
           fi
           parallel=(); serial=()
           for f in $(printf '%s\n' "${files[@]}" | sort -u); do

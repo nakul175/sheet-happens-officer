@@ -201,7 +201,9 @@ describe.skipIf(!dbAllowed)("@APL-2700 trigger search_path in a throwaway schema
     }
     if (!isThrowawaySchema(SLOT)) throw new Error("refusing schema");
     const connectionStringValue = connectionString();
-    pool = new pg.Pool({ connectionString: connectionStringValue, max: CONCURRENT_CREATES });
+    // APL-2889: a finished client hands its session back at once. Behind a session-mode PgBouncer (pool 20)
+    // the other creates wait for those sessions; pg's 10 s idle default made each wave take 10 s.
+    pool = new pg.Pool({ connectionString: connectionStringValue, max: CONCURRENT_CREATES, idleTimeoutMillis: 100 });
     migrator = new pg.Client({ connectionString: connectionStringValue });
     await migrator.connect();
     protectedState = await snapshotProtected(migrator);

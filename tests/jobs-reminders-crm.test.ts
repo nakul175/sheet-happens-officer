@@ -16,7 +16,9 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { crmMode } from "../src/lib/crm";
 import { startOfTodayIST } from "../src/lib/dates";
 import { reminderTaskWhere, sendReminders } from "../src/lib/jobs";
-import { db } from "./concierge-helpers";
+// The job's own client (APL-2889): a second PrismaClient here doubled the sessions the 40-way test holds,
+// and behind a session-mode PgBouncer (pool 20) the job waited on sessions the test never released.
+import { db } from "../src/lib/db";
 import { account, admin, istDate, project, superAdmin, task, type Account } from "./helpers";
 
 const DUE = ["TASK_DUE_TOMORROW", "TASK_DUE_TODAY", "TASK_OVERDUE"] as const;
