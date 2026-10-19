@@ -25,24 +25,6 @@ export function crmVisible(user: Pick<Actor, "orgRole">) {
   return m === "all" || (m === "admins" && isAdmin(user));
 }
 
-// The lever's value and since when, as this database last saw it. Kept in a JobRun row: jobStatus() lists only real jobs.
-const LEVER_ROW = "lever:CRM_VISIBLE";
-
-/**
- * When CRM_VISIBLE took its current value (APL-2609). Every chat read and write calls this, so the first chat use after a
- * restart with a new value moves the time on. Text stored before then may name a deal the reader can no longer see.
- */
-export async function crmModeSince(now = new Date()): Promise<Date> {
-  const mode = crmMode();
-  await db.jobRun.createMany({ data: [{ job: LEVER_ROW, lastStatus: mode, lastStartedAt: now }], skipDuplicates: true });
-  await db.jobRun.updateMany({
-    where: { job: LEVER_ROW, OR: [{ lastStatus: null }, { lastStatus: { not: mode } }, { lastStartedAt: null }] },
-    data: { lastStatus: mode, lastStartedAt: now },
-  });
-  const row = await db.jobRun.findUnique({ where: { job: LEVER_ROW }, select: { lastStartedAt: true } });
-  return row?.lastStartedAt ?? now;
-}
-
 /** Project `where` fragment: deals are left out for a person the CRM is hidden from (SHO-BUG-2). Spread it into any project filter. */
 export const crmProjectWhere = (user: Pick<Actor, "orgRole">): Prisma.ProjectWhereInput =>
   crmVisible(user) ? {} : { typeId: { not: WORKSTREAM_DEAL } };

@@ -3,7 +3,7 @@
 import type { Prisma } from "@/generated/prisma/client";
 import { db } from "@/lib/db";
 import { ApiError } from "@/lib/http";
-import { crmModeSince, crmVisible, type Actor } from "@/lib/access";
+import { crmVisible, type Actor } from "@/lib/access";
 import { UNDO_DAYS } from "@/lib/undoable";
 import { disabledFor } from "@/lib/concierge/limits";
 import { QUICK_ACTIONS } from "@/lib/concierge/reads";
@@ -37,18 +37,27 @@ export function present(row: Row): Message {
   return m;
 }
 
-/**
- * The chat rows a person may see, on screen or replayed to the model. While the CRM is hidden from them, nothing from before
- * CRM_VISIBLE took its current value: an answer given while deals were visible may name one (APL-2609). Nothing is deleted.
- */
-export async function chatWhere(user: Actor): Promise<Prisma.ChatMessageWhereInput> {
-  const since = await crmModeSince();
-  return crmVisible(user) ? { userId: user.id } : { userId: user.id, createdAt: { gte: since } };
+/** Whether the CRM is visible to this person now: their role read from the database, never the session's copy (APL-2609). */
+async function crmVisibleNow(user: Actor) {
+  const me = await db.user.findUnique({ where: { id: user.id }, select: { orgRole: true } });
+  return !!me && crmVisible(me);
 }
 
-export async function addMessage(userId: string, role: "USER" | "ASSISTANT", stored: Stored) {
-  await crmModeSince(); // a row written now belongs to the lever's current value
-  return db.chatMessage.create({ data: { userId, role, content: JSON.stringify(stored) } });
+// What JSON.stringify writes for `crmHidden: true`. Inside a quoted string it would be escaped, so message text cannot fake it.
+const HIDDEN_MARK = '"crmHidden":true';
+
+/**
+ * The chat rows a person may see, on screen or replayed to the model (APL-2609). While the CRM is hidden from them, by the
+ * lever or because their role changed, only rows written while it was hidden from them: anything else may name a deal.
+ * Nothing is deleted; with the CRM visible again the whole history is back.
+ */
+export async function chatWhere(user: Actor): Promise<Prisma.ChatMessageWhereInput> {
+  return (await crmVisibleNow(user)) ? { userId: user.id } : { userId: user.id, content: { contains: HIDDEN_MARK } };
+}
+
+export async function addMessage(user: Actor, role: "USER" | "ASSISTANT", stored: Stored) {
+  const content = JSON.stringify((await crmVisibleNow(user)) ? stored : { ...stored, crmHidden: true });
+  return db.chatMessage.create({ data: { userId: user.id, role, content } });
 }
 export async function saveStored(id: string, stored: Stored) {
   await db.chatMessage.update({ where: { id }, data: { content: JSON.stringify(stored) } });
@@ -64,8 +73,8 @@ export async function casStored(id: string, oldContent: string, stored: Stored) 
 }
 
 /** A message of this person's own, or 404. Another person's message id looks exactly like a missing one. */
-export async function ownMessage(userId: string, id: string) {
-  const row = await db.chatMessage.findFirst({ where: { id, userId } });
+export async function ownMessage(user: Actor, id: string) {
+  const row = await db.chatMessage.findFirst({ where: { ...(await chatWhere(user)), id } });
   if (!row) throw new ApiError(404, "Message not found");
   return row;
 }

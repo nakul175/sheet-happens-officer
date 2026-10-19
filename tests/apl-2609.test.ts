@@ -29,18 +29,23 @@ type World = {
 let w: World;
 const made: { people: Account[]; lead?: Account; projectIds: string[]; orgId?: string } = { people: [], projectIds: [] };
 
-/** Through the API only: the Leader archives what they made, then each person clears their chat and signs out. */
+/** Through the API only: the Leader archives what they made, then each person clears their chat and signs out. Any failure fails the run. */
 async function cleanup() {
-  const quiet = async (fn: () => Promise<unknown>) => { try { await fn(); } catch { /* a ZZ-TEST row left behind is easy to find */ } };
+  const failed: string[] = [];
+  const must = async (what: string, r: Promise<{ status: number }>) => {
+    const res = await r.catch(() => ({ status: 0 }));
+    if (res.status < 200 || res.status > 299) failed.push(`${what}: ${res.status}`);
+  };
   const lead = made.lead;
   if (lead) {
-    for (const id of made.projectIds) await quiet(() => lead.c.post(`/api/projects/${id}/archive`));
-    if (made.orgId) await quiet(() => lead.c.post(`/api/orgs/${made.orgId}/archive`, { archive: true }));
+    for (const id of made.projectIds) await must(`archive project ${id}`, lead.c.post(`/api/projects/${id}/archive`));
+    if (made.orgId) await must(`archive organisation ${made.orgId}`, lead.c.post(`/api/orgs/${made.orgId}/archive`, { archive: true }));
   }
   for (const who of made.people) {
-    await quiet(() => who.c.del("/api/concierge/messages"));
-    await quiet(() => who.c.post("/api/auth/signout"));
+    await must(`clear chat of ${who.email}`, who.c.del("/api/concierge/messages"));
+    await must(`sign out ${who.email}`, who.c.post("/api/auth/signout"));
   }
+  if (failed.length) throw new Error(`ZZ-TEST cleanup failed: ${failed.join("; ")}`);
 }
 
 function setMode(mode: string) { process.env.CRM_VISIBLE = mode; }
@@ -213,31 +218,31 @@ describe("qa:TC missing APL-2609 CRM_VISIBLE hides deals from My tasks, search, 
     expect((await surfaces(w.sa)).taskRoute).toBe(200);
   });
 
-  it("qa:TC missing AC4 AC8: chat from before CRM_VISIBLE hid the CRM is neither shown nor replayed to the model", async () => {
+  it("qa:TC missing AC4 AC8: chat written while the CRM was visible is neither shown nor replayed once it is hidden", async () => {
+    // Chat reads the person's role from the database. The Editor is a Member there and in their Actor, so the lever alone
+    // decides here. The Admin demoted to Member is covered on real servers in tests/e2e/stories/APL-2609.spec.ts.
     const says = `Your deal ${w.dealName} has ${w.dealTaskTitle} due, at stage ${STAGE}.`;
     const shown = async (u: Actor) => JSON.stringify((await chatState(u)).messages);
     setMode("all");
-    for (const u of [w.ed, w.adm]) {
-      script(() => [say(says)]);
-      await sendMessage(u, `ZZ-TEST which deals am I on ${w.tag}?`);
-      expect(await shown(u)).toContain(w.dealName);
+    script(() => [say(says)]);
+    await sendMessage(w.ed, `ZZ-TEST which deals am I on ${w.tag}?`);
+    expect(await shown(w.ed)).toContain(w.dealName);
+    for (const mode of ["off", "admins"]) {
+      setMode(mode);
+      const now = await shown(w.ed);
+      for (const word of [w.dealName, w.dealTaskTitle]) expect(now, mode).not.toContain(word);
     }
+    // A turn while the CRM is hidden is shown, and the earlier answer is not replayed to the model.
     setMode("off");
-    for (const u of [w.ed, w.adm]) {
-      const now = await shown(u);
-      for (const word of [w.dealName, w.dealTaskTitle]) expect(now).not.toContain(word);
-    }
-    // The next turn does not replay the earlier answer to the model either.
     let replayed = "";
     script((req) => { replayed = JSON.stringify(req.messages); return [say("Noted.")]; });
     await sendMessage(w.ed, `ZZ-TEST and now ${w.tag}?`);
     expect(replayed).toContain(`ZZ-TEST and now ${w.tag}?`);
     for (const word of [w.dealName, w.dealTaskTitle]) expect(replayed).not.toContain(word);
-    expect(await shown(w.ed)).toContain(`ZZ-TEST and now ${w.tag}?`);
-    // admins keeps the Admin in: their earlier answer shows again. The Editor still sees none of it.
-    setMode("admins");
-    expect(await shown(w.adm)).toContain(w.dealName);
-    expect(await shown(w.ed)).not.toContain(w.dealName);
+    const later = await shown(w.ed);
+    expect(later).toContain(`ZZ-TEST and now ${w.tag}?`);
+    expect(later).toContain("Noted.");
+    expect(later).not.toContain(w.dealName);
     // Nothing was deleted: with the CRM visible again the history is back.
     setMode("all");
     expect(await shown(w.ed)).toContain(w.dealName);

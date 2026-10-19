@@ -10,7 +10,7 @@
 // "qa:TC missing".
 import "dotenv/config";
 import { spawn, type ChildProcess } from "node:child_process";
-import { closeSync, existsSync, mkdtempSync, openSync, readdirSync, readFileSync } from "node:fs";
+import { closeSync, existsSync, mkdtempSync, openSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import net from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -36,23 +36,38 @@ type Running = { mode: Mode; port: number; pid: number; outbox: string; base: st
 type Row = { id: string; title: string; project: { id: string; name: string; type: string; stage: string | null } };
 
 const running = new Map<Mode, Running>();
-const seed: { projectIds: string[]; orgId?: string; dealId?: string; dealTaskId?: string; plainTaskId?: string } = { projectIds: [] };
+const seed: { projectIds: string[]; plainId?: string; orgId?: string; dealId?: string; dealTaskId?: string; plainTaskId?: string } = { projectIds: [] };
 const people: { lead?: Who; editor?: Who; admin?: Who; superAdmin?: Who } = {};
 let browser: Browser | null = null;
 
-/** Through the API only, on the `all` server: archive, clear each chat, deactivate the people, sign the Super Admin out. */
-async function cleanupSeed() {
+/**
+ * Through the API only, on the `all` server. The lead hands both projects to the Super Admin (deactivating a Leader is
+ * refused), the Super Admin archives them and the organisation, everyone's chat is cleared, the people are deactivated and
+ * the Super Admin signs out. Returns every call that did not succeed, so afterAll can fail the run with them.
+ */
+async function cleanupSeed(): Promise<string[]> {
   const s = running.get("all");
-  if (!s) return;
-  const quiet = async (fn: () => Promise<unknown>) => { try { await fn(); } catch { /* a ZZ-TEST row left behind is easy to find */ } };
+  if (!s) return ["the all server is not running"];
+  const failed: string[] = [];
+  const must = async (what: string, who: Who, method: string, p: string, body?: unknown) => {
+    const r = await call(s.base, who.cookie, method, p, body).catch((e: unknown) => ({ status: 0, text: String(e) }));
+    if (r.status < 200 || r.status > 299) failed.push(`${what}: ${r.status} ${r.text.slice(0, 200)}`);
+  };
   const { lead, editor, admin, superAdmin } = people;
-  if (lead) for (const id of seed.projectIds) await quiet(() => call(s.base, lead.cookie, "POST", `/api/projects/${id}/archive`));
-  if (superAdmin && seed.orgId) await quiet(() => call(s.base, superAdmin.cookie, "POST", `/api/orgs/${seed.orgId}/archive`, { archive: true }));
-  for (const who of [lead, editor, admin, superAdmin]) if (who) await quiet(() => call(s.base, who.cookie, "DELETE", "/api/concierge/messages"));
-  if (superAdmin) {
-    for (const who of [lead, editor, admin]) if (who) await quiet(() => call(s.base, superAdmin.cookie, "POST", `/api/team/${who.id}/deactivate`, { reassign: "leaders" }));
-    await quiet(() => call(s.base, superAdmin.cookie, "POST", "/api/auth/signout"));
+  if (lead && superAdmin) {
+    if (seed.plainId) await must("add the Super Admin to the plain project", lead, "POST", `/api/projects/${seed.plainId}/members`, { userId: superAdmin.id, role: "EDITOR" });
+    for (const id of seed.projectIds) {
+      await must(`hand ${id} to the Super Admin`, lead, "POST", `/api/projects/${id}/leader`, { newLeaderId: superAdmin.id, previousRole: "EDITOR" });
+      await must(`archive ${id}`, superAdmin, "POST", `/api/projects/${id}/archive`);
+    }
   }
+  if (superAdmin && seed.orgId) await must("archive the organisation", superAdmin, "POST", `/api/orgs/${seed.orgId}/archive`, { archive: true });
+  for (const who of [lead, editor, admin, superAdmin]) if (who) await must(`clear ${who.label}'s chat`, who, "DELETE", "/api/concierge/messages");
+  if (superAdmin) {
+    for (const who of [lead, editor, admin]) if (who) await must(`deactivate ${who.label}`, superAdmin, "POST", `/api/team/${who.id}/deactivate`, { reassign: "leaders" });
+    await must("sign the Super Admin out", superAdmin, "POST", "/api/auth/signout");
+  }
+  return failed;
 }
 
 function freePort(): Promise<number> {
@@ -208,6 +223,13 @@ async function surfaces(mode: Mode, who: Who) {
   };
 }
 
+/** The person's chat as the concierge panel loads it on one mode's server. */
+async function chat(mode: Mode, who: Who) {
+  const r = await call(server(mode).base, who.cookie, "GET", "/api/concierge/state");
+  expect(r.status, r.text).toBe(200);
+  return JSON.stringify(r.json?.messages ?? []);
+}
+
 const HIDDEN = { myTasks: false, stage: false, searchDeal: false, searchTask: false, taskRoute: 404, listRoute: 404, concierge: false, conciergeScoped: 404 };
 const SHOWN = { myTasks: true, stage: true, searchDeal: true, searchTask: true, taskRoute: 200, listRoute: 200, concierge: true, conciergeScoped: 200 };
 const strip = (x: Awaited<ReturnType<typeof surfaces>>) => { const { plainShown, ...rest } = x; void plainShown; return rest; };
@@ -323,6 +345,7 @@ describe("qa:TC missing APL-2609 CRM_VISIBLE hides deals on a real server per mo
     const plain = await call(open.base, lead.cookie, "POST", "/api/projects", { name: PLAIN_PROJECT, leaderId: lead.id });
     expect(plain.status, plain.text).toBe(201);
     const plainId = (plain.json?.project as { id: string }).id;
+    seed.plainId = plainId;
     seed.projectIds.push(plainId);
     for (const who of [editor, adminUser]) expect((await call(open.base, lead.cookie, "POST", `/api/projects/${plainId}/members`, { userId: who.id, role: "EDITOR" })).status).toBe(201);
     const plainTask = await call(open.base, lead.cookie, "POST", `/api/projects/${plainId}/tasks`, { title: PLAIN_TASK, assigneeId: editor.id, dueDate: istDate(2) });
@@ -332,10 +355,15 @@ describe("qa:TC missing APL-2609 CRM_VISIBLE hides deals on a real server per mo
   }, 240_000);
 
   afterAll(async () => {
-    try { await cleanupSeed(); } finally {
-      for (const s of running.values()) killGroup(s.pid);
+    let failed: string[] = [];
+    try { failed = await cleanupSeed(); } finally {
+      for (const s of running.values()) {
+        killGroup(s.pid);
+        rmSync(s.outbox, { recursive: true, force: true }); // server.log and the verification mails
+      }
       await browser?.close();
     }
+    if (failed.length) throw new Error(`ZZ-TEST cleanup failed: ${failed.join("; ")}`);
   }, 60_000);
 
   it("qa:TC missing AC1: with CRM_VISIBLE=off, My tasks shows a deal member no deal task and no stage", async () => {
@@ -425,11 +453,6 @@ describe("qa:TC missing APL-2609 CRM_VISIBLE hides deals on a real server per mo
   });
 
   it("qa:TC missing AC4 AC8: chat from before CRM_VISIBLE hid the CRM is not shown, and comes back when it is visible", async () => {
-    const chat = async (mode: Mode, who: Who) => {
-      const r = await call(server(mode).base, who.cookie, "GET", "/api/concierge/state");
-      expect(r.status, r.text).toBe(200);
-      return JSON.stringify(r.json?.messages ?? []);
-    };
     // A quick action while the CRM is visible stores an answer that names the deal task.
     for (const who of [people.editor!, people.admin!]) {
       const asked = await call(server("all").base, who.cookie, "POST", "/api/concierge/quick/due-week", {});
@@ -442,5 +465,28 @@ describe("qa:TC missing APL-2609 CRM_VISIBLE hides deals on a real server per mo
     expect(await chat("admins", people.admin!)).toContain(DEAL_TASK);
     // Nothing is deleted: with the CRM visible the history is back.
     expect(await chat("all", people.editor!)).toContain(DEAL_TASK);
+  });
+
+  it("qa:TC missing AC5 AC8: an Admin demoted to Member under admins no longer sees deal names in their earlier chat", async () => {
+    const admin = people.admin!;
+    const setRole = async (orgRole: "MEMBER" | "ADMIN") => {
+      const r = await call(server("admins").base, people.superAdmin!.cookie, "PATCH", `/api/team/${admin.id}`, { orgRole });
+      expect(r.status, r.text).toBe(200);
+    };
+    // As an Admin under admins, a quick action names the deal task, and the chat shows it.
+    const asked = await call(server("admins").base, admin.cookie, "POST", "/api/concierge/quick/due-week", {});
+    expect(asked.status, asked.text).toBe(200);
+    expect(asked.text).toContain(DEAL_TASK);
+    expect(await chat("admins", admin)).toContain(DEAL_TASK);
+    // Demoted to Member: the same session's next chat read checks the role again and hides every deal-naming message.
+    await setRole("MEMBER");
+    try {
+      const now = await chat("admins", admin);
+      for (const word of [DEAL_TASK, DEAL_NAME, STAGE]) expect(now).not.toContain(word);
+    } finally {
+      await setRole("ADMIN");
+    }
+    // Promoted back, the history is there again: nothing was deleted.
+    expect(await chat("admins", admin)).toContain(DEAL_TASK);
   });
 });
