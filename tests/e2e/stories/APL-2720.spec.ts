@@ -117,10 +117,11 @@ for (const viewport of VIEWPORTS) {
     const cells = admin.page.locator("tbody td[data-label='Time left']");
     await expect(cells).toHaveCount(seeded.length);
     await expect(cells).toHaveText(seeded.map((item) => item.text));
-    for (let i = 0; i < seeded.length; i++) {
-      await expect(cells.nth(i)).toBeVisible();
-      await expect(cells.nth(i)).toHaveAttribute("data-label", "Time left");
-      await expect(row(admin.page, seeded[i].title)).toHaveCount(1);
+    for (const item of seeded) {
+      const cell = row(admin.page, item.title).locator("td[data-label='Time left']");
+      await expect(cell).toHaveCount(1);
+      await expect(cell).toBeVisible();
+      await expect(cell).toHaveAttribute("data-label", "Time left");
     }
   });
 
@@ -147,7 +148,9 @@ for (const viewport of VIEWPORTS) {
     const timeCells = admin.page.locator("tbody td[data-label='Time left']");
     await expect(itemCells).toHaveText(shown);
     await expect(timeCells).toHaveText(shown.map(() => words(30)));
-    for (let i = 0; i < shown.length; i++) await expect(timeCells.nth(i)).toBeVisible();
+    for (const title of shown) {
+      await expect(row(admin.page, title).locator("td[data-label='Time left']")).toBeVisible();
+    }
     await expect(admin.page.getByRole("button", { name: "Restore" })).toHaveCount(shown.length);
 
     const newest = row(admin.page, shown[0]);
