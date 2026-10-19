@@ -101,8 +101,8 @@ const timeLeft = (page: Page, title: string, daysLeft: number) => row(page, titl
 for (const size of SIZES) {
   const at = `${size.width}x${size.height}`;
 
-  test(`qa:TC missing @APL-2720 AC1@v1.0 a task deleted just now reads 30 days left at ${at}`, async ({ browser }) => {
-    test.info().annotations.push({ type: "qa:TC", description: "missing" });
+  test(`qa:TC-APL2720-01@v1 @APL-2720 AC1@v1.0 a task deleted just now reads 30 days left at ${at}`, async ({ browser }) => {
+    test.info().annotations.push({ type: "qa:TC", description: "qa:TC-APL2720-01@v1" });
     const admin = await signIn(browser, "ADMIN");
     try {
       const projectId = await newProject(admin, `2720 fresh ${at}`);
@@ -117,8 +117,8 @@ for (const size of SIZES) {
     }
   });
 
-  test(`qa:TC missing @APL-2720 AC2@v1.0 keeps the Time left header, newest-first order, and Restore for a Leader at ${at}`, async ({ browser }) => {
-    test.info().annotations.push({ type: "qa:TC", description: "missing" });
+  test(`qa:TC-APL2720-02@v1 @APL-2720 AC2@v1.0 keeps the Time left header, newest-first order, and Restore for a Leader at ${at}`, async ({ browser }) => {
+    test.info().annotations.push({ type: "qa:TC", description: "qa:TC-APL2720-02@v1" });
     const admin = await signIn(browser, "ADMIN");
     try {
       const projectId = await newProject(admin, `2720 order ${at}`);
@@ -158,8 +158,8 @@ for (const size of SIZES) {
     }
   });
 
-  test(`qa:TC missing @APL-2720 AC2@v1.0 an Editor and a Viewer read Time left but get no Restore at ${at}`, async ({ browser }) => {
-    test.info().annotations.push({ type: "qa:TC", description: "missing" });
+  test(`qa:TC-APL2720-02@v1 @APL-2720 AC2@v1.0 an Editor and a Viewer read Time left but get no Restore at ${at}`, async ({ browser }) => {
+    test.info().annotations.push({ type: "qa:TC", description: "qa:TC-APL2720-02@v1" });
     const admin = await signIn(browser, "ADMIN");
     const member = await signIn(browser, "MEMBER");
     try {
