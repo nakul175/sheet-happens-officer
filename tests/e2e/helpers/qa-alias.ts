@@ -124,8 +124,9 @@ export async function runLocalJob(name: string) {
   const secret = process.env.JOB_SECRET ?? "";
   const host = new URL(BASE_URL).hostname;
   const local = host === "localhost" || host === "127.0.0.1";
-  test.skip(!local, "The scheduled job is not run against a remote host.");
-  test.skip(secret.length < 16, "Set JOB_SECRET (16 characters or more) to run the scheduled job on the local server.");
+  // No skip here: the only allowed skip is the SHO_QA_PASS gate in gateFile(). These fail loudly instead.
+  if (!local) throw new Error("The scheduled job is not run against a remote host.");
+  if (secret.length < 16) throw new Error("Set JOB_SECRET (16 characters or more) to run the scheduled job on the local server.");
   const res = await fetch(new URL(`/api/jobs/${name}`, BASE_URL), { method: "POST", headers: { authorization: `Bearer ${secret}` } });
   const text = await res.text();
   noSecret(text);

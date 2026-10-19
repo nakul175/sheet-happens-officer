@@ -49,15 +49,19 @@ export const dealsOf = async (api: Api, pipeId: string, extra = "") =>
 
 /** The board reads text/deal from the drop. A real drag is simulated with one DataTransfer, which is what the card writes in dragstart. */
 export async function dropDeal(page: Page, dealName: string, column: string) {
-  await page.locator(".dcard", { hasText: dealName }).scrollIntoViewIfNeeded();
-  await page.getByRole("region", { name: column }).scrollIntoViewIfNeeded();
-  await page.evaluate(({ dealName, column }) => {
-    const card = [...document.querySelectorAll(".dcard")].find((el) => (el.textContent ?? "").includes(dealName));
-    const col = [...document.querySelectorAll(".dcol")].find((el) => el.getAttribute("aria-label") === column);
-    if (!card || !col) throw new Error(`missing ${card ? "column" : "card"} for ${dealName} -> ${column}`);
+  // The card is found by its "Move <deal>" menu button and the column by its region name. No class selectors.
+  const move = page.getByRole("button", { name: `Move ${dealName}`, exact: true });
+  const region = page.getByRole("region", { name: column, exact: true });
+  await move.scrollIntoViewIfNeeded();
+  await region.scrollIntoViewIfNeeded();
+  const [trigger, col] = [await move.elementHandle(), await region.elementHandle()];
+  if (!trigger || !col) throw new Error(`missing ${trigger ? "column" : "card"} for ${dealName} -> ${column}`);
+  await page.evaluate(([trigger, col]) => {
+    const card = trigger.closest("[draggable='true']");
+    if (!card) throw new Error("the Move button is not inside a draggable deal card");
     const dataTransfer = new DataTransfer();
     card.dispatchEvent(new DragEvent("dragstart", { bubbles: true, cancelable: true, dataTransfer }));
     col.dispatchEvent(new DragEvent("dragover", { bubbles: true, cancelable: true, dataTransfer }));
     col.dispatchEvent(new DragEvent("drop", { bubbles: true, cancelable: true, dataTransfer }));
-  }, { dealName, column });
+  }, [trigger, col] as const);
 }

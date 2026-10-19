@@ -20,7 +20,7 @@
 #   counts      once, after every shard (if: always(), needs plan). Expected count files come from plan:
 #               20 when the parallel matrix runs, plus 1 when serial specs were picked. Fewer files, a failed
 #               download, or a missing-report marker fails the job. It also fails when run is 0 or skipped equals total.
-#   report      merges every job's blob report into one HTML report.167
+#   report      merges every job's blob report into one HTML report.
 
 #
 # max_parallel: the staging database is shared with production and allows 25 connections. Do not raise it above 5 until NJ approves

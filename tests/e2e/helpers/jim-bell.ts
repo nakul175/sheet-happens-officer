@@ -4,8 +4,8 @@
 // a real account. Nothing on the server is created or changed.
 import type { Page } from "@playwright/test";
 
-/** The bell button in the header. */
-export const bell = (page: Page) => page.locator("button.bell");
+/** The bell button in the header. Its name is "Notifications", or "Notifications, <n> unread" (bell-label.ts bellName). */
+export const bell = (page: Page) => page.getByRole("button", { name: /^Notifications(, .+ unread)?$/ });
 
 /**
  * Answers every GET /api/notifications on `page` with `count()` unread and no items, and opens My tasks once that answer
