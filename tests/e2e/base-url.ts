@@ -97,9 +97,22 @@ export function assertStoryTargetAllowed(env: NodeJS.ProcessEnv = process.env, b
   refuseProduction(baseUrl);
 }
 
-// BASE_URL wins; STAGING_URL is the older name and still works. Production hosts are refused whatever the variable says.
-const PLAYWRIGHT_DEFAULT = "https://staging.sheethappensofficer.com";
-export const BASE_URL = (process.env.BASE_URL || process.env.STAGING_URL || PLAYWRIGHT_DEFAULT).replace(/\/+$/, "");
+/** With no target variable set, the app under test is the local server. Staging is never a default (APL-2879 D1). */
+export const LOCAL_DEFAULT = "http://localhost:3100";
+
+/**
+ * The app under test: BASE_URL, then TASKBOARD_URL (the local and CI name, as on main), then STAGING_URL (the older
+ * staging name). With none set it is LOCAL_DEFAULT. A staging run must say so: staging-e2e.yml sets BASE_URL.
+ * Production hosts are refused below whatever the variable says.
+ */
+/** Any environment-like object; only BASE_URL, TASKBOARD_URL and STAGING_URL are read. */
+export type TargetEnv = Record<string, string | undefined>;
+
+export function resolveBaseUrl(env: TargetEnv = process.env): string {
+  return (env.BASE_URL || env.TASKBOARD_URL || env.STAGING_URL || LOCAL_DEFAULT).replace(/\/+$/, "");
+}
+
+export const BASE_URL = resolveBaseUrl();
 
 if (!process.env.VITEST) {
   const host = hostOf(BASE_URL);

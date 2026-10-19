@@ -4,14 +4,16 @@
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { expect, type APIRequestContext } from "@playwright/test";
+import { resolveBaseUrl, type TargetEnv } from "../base-url";
 
 /** Local taskboard only. Anything else, including staging and preview, returns null. */
-export function localDatabaseUrl(): string | null {
-  const base = process.env.BASE_URL || process.env.STAGING_URL || "";
+export function localDatabaseUrl(env: TargetEnv = process.env): string | null {
+  // Same target as playwright.config.ts: BASE_URL, TASKBOARD_URL, STAGING_URL, else the local server (APL-2879 D1).
+  const base = resolveBaseUrl(env);
   let appHost = "";
   try { appHost = new URL(base).hostname.toLowerCase(); } catch { return null; }
   if (appHost !== "localhost" && appHost !== "127.0.0.1") return null;
-  const raw = process.env.DATABASE_URL ?? "";
+  const raw = env.DATABASE_URL ?? "";
   let db: URL;
   try { db = new URL(raw); } catch { return null; }
   const host = db.hostname.toLowerCase();

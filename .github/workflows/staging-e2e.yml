@@ -4,7 +4,7 @@
 # Input "specs": space-separated issue ids (APL-2481) or globs (APL-26*, tests/e2e/stories/APL-25*.spec.ts); empty runs every spec.
 # Secrets (repository settings): STAGING_USER, STAGING_PASS, SHO_QA_PASS, SHO_ADMIN_EMAIL, SHO_ADMIN_PASS, SHO_MEMBER_EMAIL,
 # SHO_MEMBER_PASS, and ZZ_TEST_01_EMAIL / ZZ_TEST_01_PASS ... ZZ_TEST_20_EMAIL / ZZ_TEST_20_PASS (01-05 Super Admins, 06-20 plain Members).
-# SHO_QA_PASS is the shared password for the nakul17+ story accounts. Story specs skip without it, and Playwright then exits 0.
+# SHO_QA_PASS is the shared password for the nakul17+ story accounts. Without it the harness gate (qa-alias gateFile) fails the spec.
 # The previews use the same STAGING_USER / STAGING_PASS basic-auth gate as staging.
 # They reach the jobs as environment variables only and are never echoed. Runs queue in one group so two never run at once.
 # This workflow is workflow_dispatch only. It does not run on pull_request or pull_request_target, so a fork cannot read these secrets.
