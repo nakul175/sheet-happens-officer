@@ -232,20 +232,30 @@ export async function removeStage(user: Actor, stageId: string, input: { moveTo?
   if (stage.category === "DONE" && !others.some((s) => s.category === "DONE")) {
     throw new ApiError(409, `${stage.pipeline.name} must keep a Done stage, so "${stage.name}" cannot be removed.`);
   }
+  const canTake = (t: (typeof others)[number]) =>
+    (isOpenCategory(stage.category) ? isOpenCategory(t.category) : t.category === stage.category) &&
+    !(t.needsReason && !stage.needsReason) && t.requiredFields.every((f) => stage.requiredFields.includes(f));
+  // Only the stages that can take the items are offered; with none, nothing is asked.
+  const targets = others.filter(canTake);
+  if (!targets.length) {
+    throw new ApiError(409, `No other stage in ${stage.pipeline.name} can take the items in "${stage.name}", so it cannot be removed.`);
+  }
   const items = await db.project.count({ where: { stageId: stage.id } });
   const moveTo = clean(input.moveTo);
   if (!moveTo) {
     throw new ApiError(409, `Where should the ${items} item${items === 1 ? "" : "s"} in "${stage.name}" go? Choose another stage to move ${items === 1 ? "it" : "them"} to before removing this stage.`, {
-      needsMoveTo: true, items, stages: others.map((s) => ({ id: s.id, name: s.name, category: s.category })),
+      needsMoveTo: true, items, stages: targets.map((s) => ({ id: s.id, name: s.name, category: s.category })),
     });
   }
   const target = others.find((s) => s.id === moveTo);
   if (!target) throw new ApiError(400, `Choose another stage from ${stage.pipeline.name}.`);
-  const sameKind = isOpenCategory(stage.category) ? isOpenCategory(target.category) : target.category === stage.category;
-  const asksMore = (target.needsReason && !stage.needsReason) || target.requiredFields.some((f) => !stage.requiredFields.includes(f));
-  if (!sameKind || asksMore) throw new ApiError(400, `Items in "${stage.name}" cannot move to "${target.name}". Choose a stage of the same kind.`);
+  if (!canTake(target)) throw new ApiError(400, `Items in "${stage.name}" cannot move to "${target.name}". Choose a stage of the same kind.`);
 
   return db.$transaction(async (tx) => {
+    // Lock the stage row first. A deal being moved into it meanwhile either commits before this lock, and is moved
+    // below, or waits and then fails, because the stage is gone. The foreign key never sets a deal's stage to null.
+    const locked = await tx.$queryRaw<{ id: string }[]>`SELECT "id" FROM "Stage" WHERE "id" = ${stage.id} FOR UPDATE`;
+    if (!locked.length) throw notFound("Stage");
     // A reason was given for the removed stage. It carries over only to a stage that also asks for one.
     const moved = await tx.project.updateMany({
       where: { stageId: stage.id },
