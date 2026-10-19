@@ -14,9 +14,13 @@ const viewState = { assignee: "", flags: ["overdue"], priority: "", sort: "date"
 
 /** Sends the body exactly as given, so "{" reaches the server as malformed JSON. */
 async function raw(method: string, path: string, body: string, cookie = ""): Promise<Res> {
+  const r = await rawText(method, path, body, cookie);
+  return { status: r.status, json: r.text && r.json ? JSON.parse(r.text) : null };
+}
+/** Status, content type and the exact body bytes, for comparing two answers byte for byte. */
+async function rawText(method: string, path: string, body: string, cookie = "") {
   const res = await fetch(BASE + path, { method, headers: { "content-type": "application/json", ...(cookie ? { cookie } : {}) }, body });
-  const text = await res.text();
-  return { status: res.status, json: text && res.headers.get("content-type")?.includes("json") ? JSON.parse(text) : null };
+  return { status: res.status, type: res.headers.get("content-type") ?? "", text: await res.text(), json: !!res.headers.get("content-type")?.includes("json") };
 }
 const hit = (c: Client, method: string, path: string, body: object | typeof MALFORMED) =>
   (body === MALFORMED ? raw(method, path, MALFORMED, c.cookie) : c.call(method, path, body)) as Promise<Res>;
@@ -145,7 +149,7 @@ describe("qa:TC-APL2651-507ede86@v1 qa:TC-APL2651-0874d1b5@v1 qa:TC-APL2651-6edd
       [editor, "members", 403, "Only the project Leader or an Admin can do this."],
       [outsider, "sections", 404, "Project not found"],
       [editor, "sections", 403, "Only the project Leader or an Admin can do this."],
-      [outsider, "task", 404, "Project not found"],
+      [outsider, "task", 404, "Task not found"],
       [viewer, "task", 403, "Viewers cannot make changes."],
       [editor, "view", 404, "View not found"],
       [editor, "contact", 403, "Only the person who added this contact, or an Admin, can change it."],
@@ -206,6 +210,31 @@ describe("qa:TC-APL2651-507ede86@v1 qa:TC-APL2651-0874d1b5@v1 qa:TC-APL2651-6edd
     for (const [path, invalid] of rows) {
       for (const body of [invalid, MALFORMED] as const) {
         expectAnswer(await hit(sa.c, "PATCH", path, body), 409, "This project is archived and read-only.");
+      }
+    }
+  });
+
+  it("qa:TC-APL2651-6edd45b6@v1 qa:TC-APL2651-93d4350b@v1 AC2: a caller who cannot see a project, task or view gets exactly the answer for an id that does not exist", async () => {
+    // Dwight's ruling (APL-2651 AC2 v1.2; APL-2669/2670 v1.3): same status and same body bytes, so nothing shows the record exists.
+    const p = paths();
+    const missing = "zz-missing-2651";
+    const rows: [string, Account, string, string, keyof typeof INVALID][] = [
+      ["members", outsider, p.members, `/api/projects/${missing}/members/${editor.id}`, "members"],
+      ["sections", outsider, p.sections, `/api/projects/${missing}/sections/${doing}`, "sections"],
+      ["task", outsider, p.task, `/api/tasks/${missing}`, "task"],
+      ["view", editor, p.view, `/api/views/${missing}`, "view"],
+      // The role check comes before any lookup, so a real and a made-up person answer alike.
+      ["team", editor, p.team, `/api/team/${missing}`, "team"],
+      ["team", orgAdmin, p.team, `/api/team/${missing}`, "team"],
+    ];
+    for (const [route, who, real, made, invalid] of rows) {
+      for (const body of [JSON.stringify(INVALID[invalid]), MALFORMED]) {
+        const a = await rawText("PATCH", real, body, who.c.cookie);
+        const b = await rawText("PATCH", made, body, who.c.cookie);
+        expect({ route, status: a.status, type: a.type, text: a.text }).toEqual({ route, status: b.status, type: b.type, text: b.text });
+        expect(a.status, `${route}: ${a.text}`).not.toBe(400);
+        expect(a.text).not.toContain(taskId);
+        expect(a.text).not.toMatch(/ZZ-TEST/);
       }
     }
   });
