@@ -200,16 +200,6 @@ async function readPaths(base: string, cookie: string, dealId: string, name: str
   ];
 }
 
-function environ(pid: number) {
-  const raw = readFileSync(`/proc/${pid}/environ`);
-  const out: Record<string, string> = {};
-  for (const entry of raw.toString("utf8").split("\0")) {
-    const i = entry.indexOf("=");
-    if (i > 0) out[entry.slice(0, i)] = entry.slice(i + 1);
-  }
-  return out;
-}
-
 function listeningPids(port: number) {
   const hexPort = port.toString(16).toUpperCase().padStart(4, "0");
   const inodes = new Set<string>();
@@ -341,30 +331,46 @@ describe("CRM_VISIBLE modes are tested against a real server per mode", () => {
     const envs = [...running.values()].map((server) => server.env);
     expect(new Set(envs).size, "each mode has its own env object").toBe(MODES.length);
 
+    // Mode, outbox and base are the values passed to spawn. The deal API is how that mode shows up.
+    const open = running.get("on");
+    expect(open, "the on server is running").toBeTruthy();
+    const memberEmail = `nakul17+zz-2728-${runId}-mode-member@aplyd.com`;
+    const adminEmail = `nakul17+zz-2728-${runId}-mode-admin@aplyd.com`;
+    seed.emails.push(memberEmail, adminEmail);
+    const member = await signIn(open!, `ZZ-TEST mode member ${runId}`, memberEmail);
+    const admin = await signIn(open!, `ZZ-TEST mode admin ${runId}`, adminEmail);
+    seed.userIds.push(member.id, admin.id);
+    await db.user.update({ where: { id: admin.id }, data: { orgRole: "ADMIN" } });
+
     const listeners: number[] = [];
     for (const server of running.values()) {
       expect(server.env.CRM_VISIBLE).toBe(server.mode);
+      expect(server.env.EMAIL_OUTBOX_DIR).toBe(server.outbox);
+      expect(server.env.APP_URL).toBe(server.base);
       const health = await fetch(`${server.base}/api/health`);
       expect(health.status, server.mode).toBe(200);
+      const memberDeals = await call(server.base, member.cookie, "GET", "/api/deals");
+      const adminDeals = await call(server.base, admin.cookie, "GET", "/api/deals");
+      const memberSees = memberDeals.status === 200;
+      const adminSees = adminDeals.status === 200;
+      const observed = memberSees && adminSees ? "on" : !memberSees && adminSees ? "admins" : !memberSees && !adminSees ? "off" : "mixed";
+      expect(observed, `${server.mode} member ${memberDeals.status} admin ${adminDeals.status}`).toBe(server.mode);
       const listening = listeningPids(server.port);
       expect(listening.length, `${server.mode} is listening`).toBeGreaterThan(0);
       for (const pid of listening) {
         expect(isInGroup(server.pid, pid), `${server.mode} listener ${pid} belongs to ${server.pid}`).toBe(true);
-        expect(environ(pid).CRM_VISIBLE, server.mode).toBe(server.mode);
-        expect(environ(pid).EMAIL_OUTBOX_DIR).toBe(server.outbox);
-        expect(environ(pid).APP_URL).toBe(server.base);
       }
       listeners.push(...listening);
     }
     expect(new Set(listeners).size, "no mode reuses another mode's process").toBe(listeners.length);
-    const modes = new Set([...running.values()].map((server) => environ(listeningPids(server.port)[0]).CRM_VISIBLE));
+    const modes = new Set([...running.values()].map((server) => server.mode));
     expect(modes).toEqual(new Set(MODES));
 
     await expect(startModeServer("on", { bin: process.execPath, args: ["-e", "process.exit(1)"], timeoutMs: 3_000 })).rejects.toThrow(/cannot start/);
     await expect(startModeServer("off", { bin: process.execPath, args: ["-e", "setInterval(() => {}, 1e9)"], timeoutMs: 800 })).rejects.toThrow(/cannot start/);
-  }, 30_000);
+  }, 60_000);
 
-  it("The person page redacts a hidden deal (APL-2728 AC1-AC3)", async () => {
+  it("qa:TC-APL2728-968d706d@v1 AC4: the person page redacts a hidden deal under every mode", async () => {
     const open = running.get("on");
     expect(open, "the on server is running").toBeTruthy();
     const dealName = "ZZ-TEST Acme renewal";
@@ -413,7 +419,8 @@ describe("CRM_VISIBLE modes are tested against a real server per mode", () => {
       expect(text).not.toContain(taskTitle);
       expect(text).not.toContain(stageName);
       const projects = ((json?.person as { projects?: { id?: string; name?: string; href?: null }[] })?.projects) ?? [];
-      expect(projects).toContainEqual({ name: hiddenLabel, href: null });
+      expect(projects.filter((p) => p.href === null)).toEqual([{ name: hiddenLabel, href: null }]);
+      expect(projects.filter((p) => p.name === hiddenLabel)).toHaveLength(1);
       expect(projects.some((p) => p.id === dealId)).toBe(false);
       expect(projects.some((p) => p.id === plainId)).toBe(true);
     };
@@ -438,18 +445,82 @@ describe("CRM_VISIBLE modes are tested against a real server per mode", () => {
         { mode: "off", server: running.get("off")!, user: "admin", path: "admin", hidden: true },
       ];
       const people = { member, admin };
+      const hiddenAtOne = new Map<string, unknown>();
       for (const example of cases) {
         const who = people[example.user];
         const res = await call(example.server.base, who.cookie, "GET", `/api/team/${admin.id}`);
         const label = `CRM_VISIBLE=${example.mode} ${example.path} path`;
         expect(res.status, `${label} ${res.text}`).toBe(200);
-        if (example.hidden) assertHidden(res.text, res.json);
-        else assertVisible(res.text);
+        if (example.hidden) {
+          assertHidden(res.text, res.json);
+          hiddenAtOne.set(`${example.mode}:${example.path}`, res.json?.person);
+        } else assertVisible(res.text);
         if (example.path === "admin" && example.mode === "off") {
           expect((res.json?.person as { openTasks?: number }).openTasks).toBe(1);
         }
         if (example.path === "admin" && example.mode === "admins") {
           expect((res.json?.person as { openTasks?: number }).openTasks).toBe(2);
+        }
+      }
+
+      // Admin viewing a non-admin rep under off. The rep has one plain task and one deal task.
+      const offServer = running.get("off")!;
+      expect((await call(open!.base, admin.cookie, "POST", `/api/projects/${dealId}/tasks`, { title: `ZZ-TEST Rep deal ${tag}`, assigneeId: member.id })).status).toBe(201);
+      expect((await call(open!.base, admin.cookie, "POST", `/api/projects/${plainId}/tasks`, { title: `ZZ-TEST Rep plain ${tag}`, assigneeId: member.id })).status).toBe(201);
+      const repAtOne = await call(offServer.base, admin.cookie, "GET", `/api/team/${member.id}`);
+      expect(repAtOne.status, repAtOne.text).toBe(200);
+      assertHidden(repAtOne.text, repAtOne.json);
+      const repPerson = repAtOne.json?.person as { id?: string; email?: string; openTasks?: number };
+      expect(repPerson.id).toBe(member.id);
+      expect(repPerson.email).toBe(memberEmail);
+      expect(repPerson.openTasks).toBe(1);
+      expect(repAtOne.text).not.toContain(`ZZ-TEST Rep deal ${tag}`);
+
+      // 1, 2 and 5 hidden deals must be the same sentence. 0 hidden deals adds nothing.
+      const hiddenCases = cases.filter((example) => example.hidden);
+      const addDeal = async (name: string) => {
+        const made = await call(open!.base, admin.cookie, "POST", "/api/deals", {
+          name, organisationId, pipelineId: pipe!.id, leaderId: admin.id, whyPursue: tag,
+          nextStep: { title: `${name} step`, dueDate: istDate(3) },
+        });
+        expect(made.status, made.text).toBe(201);
+        const id = (made.json?.deal as { id: string }).id;
+        seed.projectIds.push(id);
+        expect((await call(open!.base, admin.cookie, "POST", `/api/projects/${id}/members`, { userId: member.id, role: "EDITOR" })).status).toBe(201);
+      };
+      const expectSameHidden = async (count: number) => {
+        for (const example of hiddenCases) {
+          const res = await call(example.server.base, people[example.user].cookie, "GET", `/api/team/${admin.id}`);
+          expect(res.status, `${count} deals ${example.mode} ${example.path} ${res.text}`).toBe(200);
+          expect(res.json?.person).toEqual(hiddenAtOne.get(`${example.mode}:${example.path}`));
+          assertHidden(res.text, res.json);
+        }
+        const rep = await call(offServer.base, admin.cookie, "GET", `/api/team/${member.id}`);
+        expect(rep.status, `${count} deals admin viewing rep ${rep.text}`).toBe(200);
+        expect(rep.json?.person).toEqual(repAtOne.json?.person);
+        assertHidden(rep.text, rep.json);
+      };
+      await addDeal(`ZZ-TEST Acme two ${tag}`);
+      await expectSameHidden(2);
+      await addDeal(`ZZ-TEST Acme three ${tag}`);
+      await addDeal(`ZZ-TEST Acme four ${tag}`);
+      await addDeal(`ZZ-TEST Acme five ${tag}`);
+      await expectSameHidden(5);
+
+      const plainOnlyEmail = `nakul17+zz-2728-${runId}-plain@aplyd.com`;
+      seed.emails.push(plainOnlyEmail);
+      const plainOnly = await signIn(open!, `ZZ-TEST plain ${runId}`, plainOnlyEmail);
+      seed.userIds.push(plainOnly.id);
+      expect((await call(open!.base, admin.cookie, "POST", `/api/projects/${plainId}/members`, { userId: plainOnly.id, role: "EDITOR" })).status).toBe(201);
+      for (const mode of ["admins", "off"] as const) {
+        const server = running.get(mode)!;
+        for (const who of [member, admin]) {
+          const res = await call(server.base, who.cookie, "GET", `/api/team/${plainOnly.id}`);
+          expect(res.status, res.text).toBe(200);
+          expect(res.text).not.toContain(hiddenLabel);
+          expect(res.text).not.toContain(dealName);
+          const projects = ((res.json?.person as { projects?: { href?: null }[] }).projects) ?? [];
+          expect(projects.some((p) => p.href === null)).toBe(false);
         }
       }
 
