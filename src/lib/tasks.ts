@@ -59,16 +59,35 @@ export function present(t: TaskRow, viewer?: { id: string; role: Role }) {
   };
 }
 
+/**
+ * The caller's access to the project a record lives in. A caller who cannot see that project (not a member, or a deal
+ * hidden by CRM_VISIBLE) gets the same 404 as a missing id of that record, so no route reveals that it exists (APL-2875).
+ */
+export async function recordAccess(user: Actor, projectId: string, what: string, opts: { write?: boolean } = {}) {
+  try {
+    return await projectAccess(user, projectId, opts);
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 404) throw notFound(what);
+    throw e;
+  }
+}
+export const taskAccess = (user: Actor, projectId: string, opts: { write?: boolean } = {}) => recordAccess(user, projectId, "Task", opts);
+
 async function loadTask(user: Actor, id: string, o: { write?: boolean; deleted?: boolean; holderCanDo?: boolean } = {}) {
   const t = await loadRow(id);
   if (!t || (t.deletedAt && !o.deleted)) throw notFound("Task");
-  const a = await projectAccess(user, t.projectId, { write: o.write });
+  const a = await taskAccess(user, t.projectId, { write: o.write });
   if (o.write) requireWrite(a);
   // The approver holding a task can only Close it or Send it back (SHO-US-4.6); the Leader and Admins keep full authority.
   if (o.write && !o.holderCanDo && awaiting(t) && user.id === t.approverId && a.role !== "LEADER") {
     throw new ApiError(403, "While you hold this task for approval you can only close it or send it back.");
   }
   return { t, a };
+}
+
+/** The assign route's not-found and write answers before it reads the body (APL-2714), through loadTask (APL-2875). */
+export async function checkAssign(user: Actor, id: string) {
+  await loadTask(user, id, { write: true, holderCanDo: true });
 }
 
 /** Same write check updateTask runs, so a caller can refuse before reading the body. */

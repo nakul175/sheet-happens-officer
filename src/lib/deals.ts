@@ -8,6 +8,7 @@ import { WORKSTREAM_DEAL, crmMode, crmProjectWhere, crmVisible, requireCrm } fro
 import { formatDueDate, parseDueDate } from "@/lib/dates";
 import { auditTx, logAction, notify } from "@/lib/notify";
 import { orgOf } from "@/lib/orgs";
+import { taskAccess } from "@/lib/tasks";
 
 export const STALL_DAYS = 30;
 const DEFAULT_SECTIONS = ["To do", "In progress", "Done"];
@@ -396,7 +397,7 @@ export async function convertTaskToDeal(user: Actor, taskId: string, input: Conv
   requireCrm(user);
   const t = await db.task.findUnique({ where: { id: taskId }, include: { collaborators: { select: { userId: true } } } });
   if (!t || t.deletedAt) throw notFound("Task");
-  const a = await projectAccess(user, t.projectId, { write: true });
+  const a = await taskAccess(user, t.projectId, { write: true });
   requireWrite(a);
   if (a.project.typeId === WORKSTREAM_DEAL) throw new ApiError(400, "Only a task in a project can be converted to a deal.");
   if (t.parentId) throw new ApiError(400, "A subtask cannot be converted. Convert its parent task.");
