@@ -76,7 +76,7 @@ async function openSheet(viewport: { width: number; height: number }) {
   await page.waitForLoadState("networkidle");
   await page.waitForFunction(() => {
     const w = window as unknown as { __last?: number; __same?: number };
-    const y = document.querySelector<HTMLElement>("#desc")!.offsetTop;
+    const y = document.getElementById("desc")!.getBoundingClientRect().top;
     w.__same = w.__last === y ? (w.__same ?? 0) + 1 : 0;
     w.__last = y;
     return w.__same >= 5;
@@ -90,25 +90,24 @@ async function keyboard(page: Page, height: number | null, offsetTop = 0) {
 }
 
 type R = { top: number; bottom: number };
+const edges = async (box: Promise<{ y: number; height: number } | null>): Promise<R | null> => {
+  const b = await box;
+  return b ? { top: b.y, bottom: b.y + b.height } : null;
+};
 async function rects(page: Page) {
-  return page.evaluate(() => {
-    const r = (sel: string) => {
-      const el = document.querySelector<HTMLElement>(sel);
-      if (!el) return null;
-      const b = el.getBoundingClientRect();
-      return { top: b.top, bottom: b.bottom };
-    };
-    const dialog = document.querySelector<HTMLElement>('[role="dialog"][aria-label="Task"]')!;
-    const close = [...dialog.querySelectorAll<HTMLElement>(".bar button")].find((b) => b.textContent?.trim() === "Close")!.getBoundingClientRect();
-    const foot = dialog.querySelector<HTMLElement>(".sheet-foot");
-    return {
-      scrim: r(".scrim")!, desc: r("#desc")!, bar: r('[role="dialog"] .bar')!, foot: r(".sheet-foot"),
-      close: { top: close.top, bottom: close.bottom },
-      footButtons: foot ? [...foot.querySelectorAll("button")].map((b) => b.textContent?.trim()) : [],
-      footPosition: foot ? getComputedStyle(foot).position : "",
-      focused: document.activeElement?.id ?? "",
-    };
-  });
+  const dialog = page.getByRole("dialog", { name: "Task" });
+  const desc = dialog.getByLabel("Description", { exact: true });
+  const foot = page.getByTestId("task-sheet-footer");
+  const hasFoot = (await foot.count()) === 1;
+  return {
+    scrim: (await edges(page.getByTestId("modal-scrim").boundingBox()))!,
+    desc: (await edges(desc.boundingBox()))!,
+    close: (await edges(dialog.getByRole("button", { name: "Close", exact: true }).boundingBox()))!,
+    foot: hasFoot ? await edges(foot.boundingBox()) : null,
+    footButtons: hasFoot ? (await foot.getByRole("button").allTextContents()).map((t) => t.trim()) : [],
+    footPosition: hasFoot ? await foot.evaluate((el) => getComputedStyle(el).position) : "",
+    focused: await desc.evaluate((el) => el === document.activeElement),
+  };
 }
 
 function inside(what: string, r: R, top: number, bottom: number) {
@@ -123,7 +122,7 @@ describe("APL-2738 task sheet with the keyboard open", () => {
       await page.locator("#desc").focus();
       await keyboard(page, 420);
       const m = await rects(page);
-      expect(m.focused).toBe("desc");
+      expect(m.focused, "the description keeps focus").toBe(true);
       // The sheet follows visualViewport.
       expect(m.scrim.top).toBeCloseTo(0, 0);
       expect(m.scrim.bottom).toBeCloseTo(420, 0);
@@ -136,7 +135,7 @@ describe("APL-2738 task sheet with the keyboard open", () => {
       // Close stays in view at the top.
       inside("Close", m.close, 0, 420);
       // The focused description sits between the sticky bar and the footer, so nothing covers it.
-      inside("description", m.desc, m.bar.bottom, m.foot!.top);
+      inside("description", m.desc, m.close.bottom, m.foot!.top);
     } finally { await page.context().close(); }
   });
 
@@ -150,7 +149,7 @@ describe("APL-2738 task sheet with the keyboard open", () => {
       expect(m.scrim.bottom).toBeCloseTo(440, 0);
       inside("footer", m.foot!, 60, 440);
       inside("Close", m.close, 60, 440);
-      inside("description", m.desc, m.bar.bottom, m.foot!.top);
+      inside("description", m.desc, m.close.bottom, m.foot!.top);
     } finally { await page.context().close(); }
   });
 
@@ -164,7 +163,7 @@ describe("APL-2738 task sheet with the keyboard open", () => {
       expect(m.scrim.top).toBeCloseTo(0, 0);
       expect(m.scrim.bottom).toBeCloseTo(PHONE.height, 0);
       inside("footer", m.foot!, 0, PHONE.height);
-      inside("description", m.desc, m.bar.bottom, m.foot!.top);
+      inside("description", m.desc, m.close.bottom, m.foot!.top);
     } finally { await page.context().close(); }
   });
 
@@ -172,11 +171,14 @@ describe("APL-2738 task sheet with the keyboard open", () => {
     const page = await openSheet(DESK);
     try {
       await keyboard(page, 420);
-      const m = await page.evaluate(() => {
-        const s = document.querySelector<HTMLElement>(".scrim")!;
-        const foot = document.querySelector<HTMLElement>(".sheet-foot");
-        return { height: s.style.height, top: s.style.top, bottom: s.getBoundingClientRect().bottom, footPosition: foot ? getComputedStyle(foot).position : "" };
-      });
+      const scrim = page.getByTestId("modal-scrim");
+      const foot = page.getByTestId("task-sheet-footer");
+      const m = {
+        height: await scrim.evaluate((el) => el.style.height),
+        top: await scrim.evaluate((el) => el.style.top),
+        bottom: (await edges(scrim.boundingBox()))!.bottom,
+        footPosition: (await foot.count()) ? await foot.evaluate((el) => getComputedStyle(el).position) : "",
+      };
       expect(m.height).toBe("");
       expect(m.top).toBe("");
       expect(m.bottom).toBeCloseTo(DESK.height, 0);

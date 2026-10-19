@@ -246,7 +246,7 @@ export function TaskModal({ id, me, onClose, onChanged, asPage }: { id: string; 
             </div>
           )}
           {meCtx.crm && !task.parentId && <TaskLinks taskId={id} links={task.links ?? []} canEdit={canEdit && !holding} onChanged={() => { t.reload(); onChanged?.(); }} />}
-          <div className="actions sheet-foot" style={{ justifyContent: "flex-start" }}>
+          <div className="actions sheet-foot" data-testid="task-sheet-footer" style={{ justifyContent: "flex-start" }}>
             {canEdit && !done && task.approver && !task.awaitingApproval && !task.parentId && task.assignee.id === me && (
               <button className="btn" disabled={busy} onClick={() => run(api("POST", `/api/tasks/${id}/send-for-approval`, {}))}>Send for approval</button>
             )}

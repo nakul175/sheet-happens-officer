@@ -58,7 +58,7 @@ export function Modal({ onClose, small, label, fitKeyboard, children }: { onClos
     };
   }, [fitKeyboard]);
   return (
-    <div className="scrim" ref={scrim} onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+    <div className="scrim" data-testid="modal-scrim" ref={scrim} onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div className={`modal${small ? " sm" : ""}`} role="dialog" aria-modal="true" aria-label={label} tabIndex={-1} ref={ref} style={{ outline: "none" }}>
         {children}
       </div>

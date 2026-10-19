@@ -53,7 +53,7 @@ function sheet(fitKeyboard: boolean) {
       <div className="actions sheet-foot"><button>Mark complete</button></div>
     </Modal>,
   ));
-  return { scrim: document.querySelector<HTMLElement>(".scrim")!, desc: document.querySelector<HTMLTextAreaElement>("#desc")! };
+  return { scrim: document.querySelector<HTMLElement>('[data-testid="modal-scrim"]')!, desc: document.querySelector<HTMLTextAreaElement>("#desc")! };
 }
 
 describe("APL-2738 keyboardFrame", () => {
