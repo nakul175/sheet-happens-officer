@@ -458,7 +458,7 @@ async function runMode(mode: Mode) {
   }
 }
 
-describe("reminder jobs are one server process per CRM_VISIBLE mode (APL-2729)", () => {
+describe("qa:TC missing reminder jobs are one server process per CRM_VISIBLE mode (APL-2729)", () => {
   beforeAll(async () => {
     assertLocalTestDatabase();
     if (!existsSync(path.join(root, ".next", "BUILD_ID"))) {

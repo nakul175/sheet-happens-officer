@@ -131,7 +131,7 @@ async function runMode(mode: Mode) {
   });
 }
 
-describe("reminder jobs apply crmProjectWhere (APL-2729)", () => {
+describe("qa:TC missing reminder jobs apply crmProjectWhere (APL-2729)", () => {
   beforeAll(async () => {
     assertLocalTestDatabase();
     const sa = await superAdmin();
