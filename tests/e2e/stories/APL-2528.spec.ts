@@ -52,7 +52,8 @@ test("AC3: removing a stage asks where its items go", async ({ admin }) => {
   const body = JSON.stringify(removed.json);
   const asked = removed.status === 409 && /where|another stage|move/i.test(body);
   if (!asked) {
-    test.fail(true, "SHO-US-10.2 AC3 is not built. Nothing removes a stage or asks where its items go. Stages change by migration only.");
+    test.skip(true, "APL-2709 APL-2528: nothing removes a stage or asks where its items go. Stages change by migration only.");
+    return;
   }
   expect(asked, `${removed.status} ${body}`).toBe(true);
   const again = await pipelines(admin);

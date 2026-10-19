@@ -9,8 +9,17 @@ import { test } from "../helpers/story-people";
 import { storyGate } from "../helpers/qa-alias";
 import { ageTaskCreated } from "../helpers/own-row";
 import { newProject, newTask, ymd, type Who } from "../g2";
+import type { Page } from "@playwright/test";
 
 storyGate({ admin: true });
+
+/** The idea row holds the title link and the Drop button beside it. */
+function ideaRow(page: Page, title: string) {
+  return page.getByRole("region", { name: "Ideas older than 30 days" })
+    .getByRole("link", { name: title })
+    .locator("..")
+    .locator("..");
+}
 
 type Later = (fn: () => Promise<unknown>) => void;
 type Review = { needsNextStep: { id: string }[]; overdueNextStep: { id: string }[]; stalled: { id: string }[]; ideas: { id: string; canEdit?: boolean }[] };
@@ -77,16 +86,16 @@ test("AC2: Drop removes the Idea flag and the task stays", async ({ admin, membe
   expect(ids((await review(admin)).ideas)).toContain(id);
   expect((await review(member)).ideas.find((i) => i.id === id)?.canEdit).toBe(false);
   await admin.page.goto("/review");
-  const row = admin.page.locator("li, tr, .item, div", { hasText: title }).filter({ has: admin.page.getByRole("button", { name: "Drop" }) }).first();
-  await expect(row.getByRole("button", { name: "Drop" })).toBeVisible();
-  await row.getByRole("button", { name: "Drop" }).click();
+  const row = ideaRow(admin.page, title);
+  await expect(row.getByRole("button", { name: "Drop", exact: true })).toBeVisible();
+  await row.getByRole("button", { name: "Drop", exact: true }).click();
   await expect.poll(async () => ids((await review(admin)).ideas).includes(id)).toBe(false);
   const task = await admin.api.get(`/api/tasks/${id}`);
   expect(task.status).toBe(200);
   expect(task.json.task.isIdea).toBe(false);
   expect(task.json.task.title).toBe(title);
   await member.page.goto("/review");
-  await expect(member.page.locator(".item", { hasText: title }).getByRole("button", { name: "Drop" })).toHaveCount(0);
+  await expect(ideaRow(member.page, title).getByRole("button", { name: "Drop", exact: true })).toHaveCount(0);
 });
 
 test("AC3: Convert to deal opens the conversion dialog, and a Viewer is not offered it", async ({ admin, member, later }) => {
@@ -129,7 +138,7 @@ test("AC4: a review row opens the deal it describes", async ({ admin, later }) =
   await expect(link).toHaveAttribute("href", `/projects/${d.id}`);
   await link.click();
   await expect(admin.page).toHaveURL(new RegExp(`/projects/${d.id}$`));
-  await expect(admin.page.getByText(d.name).first()).toBeVisible();
+  await expect(admin.page.getByRole("heading", { level: 1, name: d.name })).toBeVisible();
 });
 
 test("AC5: at 390 px the review does not scroll sideways", async ({ admin, later }) => {
