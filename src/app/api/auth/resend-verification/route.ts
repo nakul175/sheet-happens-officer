@@ -1,5 +1,6 @@
 import { db } from "@/lib/db";
 import { MAX_EMAILS_PER_HOUR, audit, clientAgent, clientIp, emailLimitReached, issueTokenAndSend } from "@/lib/auth";
+import { RESEND_NOTICE } from "@/lib/auth-messages";
 import { MailError, sendMail, verifyMail } from "@/lib/email";
 import { handle, parseBody } from "@/lib/http";
 import { resendInput } from "@/lib/schemas";
@@ -35,8 +36,5 @@ export const POST = handle(async (req: Request) => {
       }
     }
   }
-  return Response.json({
-    status: "ok",
-    message: "If this address needs a new link, we are sending one. If nothing arrives in a few minutes, check spam or ask again; you can ask up to 3 times an hour.",
-  });
+  return Response.json({ status: "ok", message: RESEND_NOTICE });
 });

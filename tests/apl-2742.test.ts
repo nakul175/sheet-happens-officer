@@ -28,6 +28,11 @@ const { POST: signUp } = await import("../src/app/api/auth/signup/route");
 const { POST: resendVerification } = await import("../src/app/api/auth/resend-verification/route");
 const { POST: verifyEmail } = await import("../src/app/api/auth/verify/route");
 
+// APL-2742 D1 (QA): the exact texts on the failure paths. Literal on purpose: a wording change must change this test.
+const UNVERIFIED_TEXT = "Verify your email before you sign in. No working verification link? Use Resend link.";
+const RESEND_TEXT = "Request received. If this address has an account waiting for verification, and it has not reached the limit of 3 requests an hour, we will try to email it a new link. If nothing arrives within a few minutes, check spam, then try again later.";
+const UNUSABLE_TEXT = "This link is invalid, has expired, was already used or was replaced by a newer one.";
+
 const run = Date.now();
 let n = 0;
 const fresh = () => `nakul17+zztest-apl2742-${run}-${n++}@aplyd.com`;
@@ -73,7 +78,7 @@ describe("qa:TC missing AC1: unverified accounts cannot sign in", () => {
     expect(r.status).toBe(403);
     expect(r.setCookie, "a refused sign-in sets no session cookie").toBeNull();
     expect(r.json.code).toBe("EMAIL_NOT_VERIFIED");
-    expect(r.json.error).toMatch(/verify your email/i);
+    expect(r.json.error).toBe(UNVERIFIED_TEXT);
     expect((await c.get("/api/auth/me")).status).toBe(401);
     const user = await db.user.findUniqueOrThrow({ where: { email } });
     expect(await db.session.count({ where: { userId: user.id } })).toBe(0);
@@ -234,7 +239,33 @@ describe("qa:TC missing AC3: a failed verification send is reported to the perso
     expect(failed).toEqual(sent);
     expect(unknown).toEqual(sent);
     expect(sent.status).toBe(200);
-    expect(sent.body.message).not.toMatch(/has been sent/i);
+    expect(sent.body).toEqual({ status: "ok", message: RESEND_TEXT });
+  });
+
+  it("qa:TC missing AC3: a resend over the limit and a capped failed resend get the exact neutral text, never a claim that it went", async () => {
+    const email = fresh();
+    expect((await post(signUp, "/api/auth/signup", { name: "ZZ-TEST Neutral", email, password: PW })).status).toBe(201);
+    failSend.on = true;
+    const answers: unknown[] = [];
+    // Three failed sends reach the failed-send cap; the 4th is limited without trying.
+    for (let i = 0; i < 4; i++) answers.push(await (await post(resendVerification, "/api/auth/resend-verification", { email })).json());
+    for (const a of answers) expect(a).toEqual({ status: "ok", message: RESEND_TEXT });
+  });
+
+  it("qa:TC missing AC3: an unknown, used or replaced verify token gets the exact unusable-link text", async () => {
+    const email = fresh();
+    expect((await post(signUp, "/api/auth/signup", { name: "ZZ-TEST Unusable", email, password: PW })).status).toBe(201);
+    const first = lastVerifyToken(email)!;
+    expect((await post(resendVerification, "/api/auth/resend-verification", { email })).status).toBe(200);
+    const second = lastVerifyToken(email)!;
+    const answer = async (token: string) => {
+      const res = await post(verifyEmail, "/api/auth/verify", { token });
+      return { status: res.status, body: await res.json() };
+    };
+    expect(await answer(first), "replaced by the resent link").toEqual({ status: 400, body: { error: UNUSABLE_TEXT } });
+    expect(await answer("x".repeat(43)), "unknown").toEqual({ status: 400, body: { error: UNUSABLE_TEXT } });
+    expect((await answer(second)).status).toBe(200);
+    expect(await answer(second), "already used").toEqual({ status: 400, body: { error: UNUSABLE_TEXT } });
   });
 
   it("qa:TC missing AC3: resend stays rate-limited at 3 an hour", async () => {
