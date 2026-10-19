@@ -4,7 +4,7 @@ import type { Prisma } from "@/generated/prisma/client";
 import { db } from "@/lib/db";
 import { ApiError } from "@/lib/http";
 import { crmVisible, type Actor } from "@/lib/access";
-import { UNDO_DAYS } from "@/lib/undoable";
+import { isTooOldToUndo } from "@/lib/undoable";
 import { disabledFor } from "@/lib/concierge/limits";
 import { QUICK_ACTIONS } from "@/lib/concierge/reads";
 import type { Message, State, Stored } from "@/lib/concierge/types";
@@ -31,7 +31,7 @@ export function present(row: Row): Message {
   if (s.card) m.card = { ...s.card, id: row.id, ...(s.internal?.state === "RUNNING" ? { canConfirm: false } : {}) };
   if (s.result) {
     const confirmed = s.internal?.confirmedAt ? Date.parse(s.internal.confirmedAt) : row.createdAt.getTime();
-    const expired = !s.result.undoneAt && s.result.undoable && Date.now() - confirmed > UNDO_DAYS * 86400_000;
+    const expired = !s.result.undoneAt && s.result.undoable && isTooOldToUndo(confirmed);
     m.result = { ...s.result, ...(expired ? { undoExpired: true } : {}) };
   }
   return m;

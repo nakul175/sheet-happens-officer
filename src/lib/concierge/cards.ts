@@ -5,7 +5,7 @@ import { ApiError } from "@/lib/http";
 import { canManage, projectAccess, type Actor } from "@/lib/access";
 import { reqCtx, type ReqCtx } from "@/lib/reqctx";
 import { checkUndo, undoAction } from "@/lib/undo";
-import { UNDO_DAYS, isUndoable } from "@/lib/undoable";
+import { isTooOldToUndo, isUndoable } from "@/lib/undoable";
 import { buildCard, checkHandover, execute, fingerprint, recheck, summaryOf, type Op } from "@/lib/concierge/changes";
 import { addMessage, casStored, chatWhere, ownMessage, parse, present } from "@/lib/concierge/thread";
 import type { Card, Message, Stored } from "@/lib/concierge/types";
@@ -90,8 +90,10 @@ export async function confirmCard(user: Actor, cardId: string, handover?: { task
     throw failure instanceof ApiError ? failure : new ApiError(500, "Something went wrong. Nothing was changed.");
   }
 
-  const confirmedAt = new Date().toISOString();
-  const rows = logIds.length ? await db.actionLog.findMany({ where: { id: { in: logIds } }, select: { action: true, projectId: true } }) : [];
+  const rows = logIds.length ? await db.actionLog.findMany({ where: { id: { in: logIds } }, select: { action: true, projectId: true, createdAt: true } }) : [];
+  // The card's Undo clock starts at its first logged change, so a deleted task's card stops offering Undo
+  // no later than Trash purges it (APL-2719). Stamping after execute() left it a few ms behind deletedAt.
+  const confirmedAt = new Date(Math.min(Date.now(), ...rows.map((r) => r.createdAt.getTime()))).toISOString();
   const undoable = !s.card.irreversible && await offerUndo(user, rows);
   const done = summary.slice(0, applied);
   const why = failure instanceof ApiError ? failure.message : "an unexpected error";
@@ -142,7 +144,7 @@ export async function undoCard(user: Actor, cardId: string, anyway = false) {
   }
   if (rs.result.undoneAt) throw new ApiError(409, "This was already undone.");
   const confirmedAt = rs.internal.confirmedAt ? Date.parse(rs.internal.confirmedAt) : resultRow.createdAt.getTime();
-  if (Date.now() - confirmedAt > UNDO_DAYS * 86400_000) throw new ApiError(409, "Too old to undo", { tooOld: true });
+  if (isTooOldToUndo(confirmedAt)) throw new ApiError(409, "Too old to undo", { tooOld: true });
   if (rs.internal.undoing && Date.now() - Date.parse(rs.internal.undoingAt ?? "0") < UNDOING_STALE_MS) throw new ApiError(409, "This is already being undone.");
 
   // Claim the Undo for this card.

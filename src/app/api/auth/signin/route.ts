@@ -2,6 +2,7 @@ import { db } from "@/lib/db";
 import { LOCKOUT_FAILURES, LOCKOUT_MINUTES, audit, clientIp, publicUser, startSession, superAdminEmails, verifyPassword } from "@/lib/auth";
 import { ApiError, handle, parseBody } from "@/lib/http";
 import { signInInput } from "@/lib/schemas";
+import { UNVERIFIED_SIGNIN } from "@/lib/auth-messages";
 
 const WRONG = "Email or password is incorrect.";
 
@@ -30,7 +31,7 @@ export const POST = handle(async (req: Request) => {
     await audit("SIGN_IN_REFUSED", { actorId: user.id, ip });
     throw new ApiError(403, "This account is deactivated.");
   }
-  if (!user.emailVerifiedAt) throw new ApiError(403, "Verify your email first.");
+  if (!user.emailVerifiedAt) throw new ApiError(403, UNVERIFIED_SIGNIN, { code: "EMAIL_NOT_VERIFIED" }); // the client keys its Resend button on the code
 
   // SHO-US-2.1 AC4: the Super Admin list is read at every sign-in. Listed means Super Admin; unlisted means Member.
   const listed = superAdminEmails().includes(user.email.toLowerCase());
@@ -47,5 +48,5 @@ export const POST = handle(async (req: Request) => {
   await db.loginAttempt.deleteMany({ where: { email } });
   await startSession(user.id, req.headers.get("user-agent"));
   await audit("SIGN_IN", { actorId: user.id, ip });
-  return Response.json({ user: publicUser(user) });
+  return Response.json({ user: { ...publicUser(user), mustChangePassword: !!user.tempPasswordAt } }); // SHO-US-23.5 AC8
 });

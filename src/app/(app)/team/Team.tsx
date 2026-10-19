@@ -167,7 +167,7 @@ function AddPerson({ onClose, onAdded }: { onClose: () => void; onAdded: (r: { n
             </select>
           )}
         </Field>
-        <p className="hint">The password is made at random and stays valid until the person changes it. You will not see it.</p>
+        <p className="hint">The password is made at random and you will not see it. The person must replace it with their own when they first sign in.</p>
         {err && <div className="err" role="alert">{err}</div>}
         <div className="actions">
           <button type="button" className="btn ghost" onClick={onClose}>Cancel</button>

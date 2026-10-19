@@ -3,9 +3,9 @@ import { configDefaults, defineConfig } from "vitest/config";
 
 // Tests hit a live dev server (first request to a route compiles it), so allow time.
 // The concierge tests also call src/lib directly (the "@/..." imports), with a fake model.
-// CRM_VISIBLE mode servers need a production build and three processes, so they stay out of `npm test`.
-// Run them with `npm run test:crm-modes`.
-// APL-2733.spec.ts and APL-2609.spec.ts are Playwright stories. Vitest's default include matches *.spec.ts, so it is excluded here.
+// CRM_VISIBLE mode servers need a production build and one process per mode, so they stay out of `npm test`.
+// Run them with `npm run test:crm-modes`, `npm run test:reminder-modes` or `npm run test:stalled-modes`. CI runs the reminder and stalled-deal ones after the build.
+// APL-2733.spec.ts and APL-2609.spec.ts are Playwright stories. Vitest's default include matches *.spec.ts, so they are excluded here.
 export default defineConfig({
   resolve: { alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) } },
   // scripts/** holds node:test files (assert-playwright-ran.test.mjs). Vitest's default
@@ -13,6 +13,19 @@ export default defineConfig({
   test: {
     testTimeout: 30000,
     fileParallelism: false,
-    exclude: [...configDefaults.exclude, "tests/viewport/**", "tests/crm-visible-modes-server.test.ts", "tests/apl-2713-crm-modes.test.ts", "tests/e2e/local/APL-2609.spec.ts", "e2e/**", "scripts/**", "tests/e2e/stories/APL-2733.spec.ts", "tests/e2e/stories/APL-2609.spec.ts"],
+    exclude: [
+      ...configDefaults.exclude,
+      "tests/viewport/**",
+      "tests/crm-visible-modes-server.test.ts",
+      "tests/apl-2713-crm-modes.test.ts",
+      "tests/task-outsider-2875-crm.test.ts",
+      "tests/jobs-reminders-crm-server.test.ts",
+      "tests/jobs-stalled-crm-server.test.ts",
+      "tests/e2e/local/APL-2609.spec.ts",
+      "e2e/**",
+      "scripts/**",
+      "tests/e2e/stories/APL-2733.spec.ts",
+      "tests/e2e/stories/APL-2609.spec.ts",
+    ],
   },
 });
