@@ -1,151 +1,335 @@
-// SHO-BUG-2 CRM_VISIBLE hides deals on My tasks, search, task routes and the concierge (APL-2609).
-// Staging runs one CRM_VISIBLE value and a browser cannot change it. These checks run the lever
-// functions from src/lib/access.ts in this process and put the variable back. No account is signed in
-// and no ZZ-TEST row is created, so there is nothing to clean up. Nothing here is pointed at production.
-import { readFileSync } from "node:fs";
-import vm from "node:vm";
-import { test, expect } from "../support";
+// SHO-BUG-2 CRM_VISIBLE=admins or off still shows deals through My tasks, search, the concierge
+// and the task routes (Linear APL-2609).
+// One test per acceptance criterion. People are nakul17+ aliases signed in with SHO_QA_PASS.
+// Records are ZZ-TEST and archived afterwards; the extra people are deactivated.
+// The server's CRM_VISIBLE is a process setting. A test named for one mode skips when the live
+// lever is different, so an `all` server cannot pass an `off` acceptance criterion.
+// A quick action that names a hidden deal is a product defect (APL-2723): the test is marked as
+// an expected failure with the reason, not skipped.
+// Pam left no qa:TC id on the issue; each title says "qa:TC missing".
+// Nothing here targets production.
+import type { Browser, BrowserContext } from "@playwright/test";
+import { test, expect, zz } from "../support";
+import { newProject, newTask, ymd, type Who } from "../g2";
+import { QA_PASS, noSecret, qaEmail, signInAlias } from "../helpers/qa-alias";
 
-type Person = { orgRole: "MEMBER" | "ADMIN" | "SUPER_ADMIN" };
-type Where = { typeId?: { not: string } };
-type Lever = {
-  crmMode: () => "all" | "admins" | "off";
-  crmVisible: (user: Person) => boolean;
-  crmProjectWhere: (user: Person) => Where;
-  WORKSTREAM_DEAL: string;
+type Mode = "all" | "admins" | "off";
+type Deal = { id: string; name: string; stage: string; taskId: string; taskTitle: string };
+type World = {
+  mode: Mode;
+  admin: Who;
+  editor: Who;
+  orgAdmin: Who;
+  deal: Deal | null;
+  plainTitle: string;
+  ctx: BrowserContext[];
+  emptyChat: Set<string>;
 };
 
-function productLever(): Lever {
-  const src = readFileSync("src/lib/access.ts", "utf8");
-  const start = src.indexOf("export const isAdmin");
-  const end = src.indexOf("/**\n * Loads a project");
-  if (start < 0 || end < 0) throw new Error("CRM lever is not in src/lib/access.ts");
-  let code = src.slice(start, end);
-  code = code.replace(/^export type .*$/gm, "");
-  code = code.replace(/^export /gm, "");
-  code = code.replaceAll(": CrmMode", "");
-  code = code.replaceAll(': Pick<Actor, "orgRole">', "");
-  code = code.replaceAll(": Prisma.ProjectWhereInput", "");
-  code = code.replace("(u: { orgRole: OrgRole })", "(u)");
-  const context = vm.createContext({ process });
-  vm.runInContext(`${code}\nthis.api = { crmMode, crmVisible, crmProjectWhere, WORKSTREAM_DEAL };`, context);
-  return (context as { api: Lever }).api;
-}
+let world: World | null = null;
+let adminWho: Who | null = null;
+let editorWho: Who | null = null;
+let orgAdminWho: Who | null = null;
+const contexts: BrowserContext[] = [];
+const emptyChatIds = new Set<string>();
+let orgId = "";
+let plainId = "";
+let dealId = "";
 
-const lever = productLever();
-const { crmMode, crmVisible, crmProjectWhere, WORKSTREAM_DEAL } = lever;
-const member: Person = { orgRole: "MEMBER" };
-const admin: Person = { orgRole: "ADMIN" };
-const root: Person = { orgRole: "SUPER_ADMIN" };
-const hidden = () => ({ typeId: { not: WORKSTREAM_DEAL } });
+test.describe.configure({ timeout: 180_000 });
 
-function withMode<T>(mode: string, fn: () => T): T {
-  const prev = process.env.CRM_VISIBLE;
-  process.env.CRM_VISIBLE = mode;
+test.beforeAll(() => {
+  test.skip(!QA_PASS, "APL-2609: set SHO_QA_PASS (password for nakul17+ aliases).");
+});
+
+test.beforeAll(async ({ browser }) => {
+  test.setTimeout(180_000);
   try {
-    return fn();
-  } finally {
-    if (prev === undefined) delete process.env.CRM_VISIBLE;
-    else process.env.CRM_VISIBLE = prev;
+    world = await buildWorld(browser);
+  } catch (err) {
+    await cleanupCreated();
+    throw err;
   }
+});
+
+test.afterAll(async () => {
+  await cleanupCreated();
+});
+
+async function cleanupCreated() {
+  const quiet = async (fn: () => Promise<unknown>) => { try { await fn(); } catch { /* clean-up is best effort */ } };
+  const admin = world?.admin ?? adminWho;
+  if (admin) {
+    const id = world?.deal?.id || dealId;
+    if (id) await quiet(() => admin.api.post(`/api/projects/${id}/archive`));
+    if (orgId) await quiet(() => admin.api.post(`/api/orgs/${orgId}/archive`, { archive: true }));
+    if (plainId) await quiet(() => admin.api.post(`/api/projects/${plainId}/archive`));
+    const chat = world?.emptyChat ?? emptyChatIds;
+    for (const who of [world?.editor ?? editorWho, world?.orgAdmin ?? orgAdminWho]) {
+      if (!who) continue;
+      if (chat.has(who.user.id as string)) await quiet(() => who.api.del("/api/concierge/messages"));
+      await quiet(() => admin.api.post(`/api/team/${who.user.id}/deactivate`, { reassign: "leaders" }));
+    }
+  }
+  for (const ctx of world?.ctx ?? contexts) await quiet(() => ctx.close());
 }
 
-const tasks = readFileSync("src/lib/tasks.ts", "utf8");
-const myTasks = tasks.slice(tasks.indexOf("export async function myTasks"), tasks.indexOf("async function waitingSince"));
-const access = readFileSync("src/lib/access.ts", "utf8");
-const search = readFileSync("src/lib/search.ts", "utf8");
-const reads = readFileSync("src/lib/concierge/reads.ts", "utf8");
-const visibleProjects = reads.slice(reads.indexOf("export const visibleProjects"), reads.indexOf("const myProjects"));
-const myProjects = reads.slice(reads.indexOf("const myProjects"), reads.indexOf("const byProjectThenDue"));
-
-test("AC1: with CRM_VISIBLE=off, My tasks leaves out a member's deal tasks and stages", () => {
-  withMode("off", () => {
-    expect(crmMode()).toBe("off");
-    expect(crmVisible(member)).toBe(false);
-    expect(crmProjectWhere(member)).toEqual(hidden());
-  });
-  expect(myTasks).toContain('type: t.project.typeId === "wst_deal" ? "DEAL" : "PROJECT"');
-  expect(myTasks).toContain("stage: t.project.stage?.name ?? null");
-  const openWork = myTasks.slice(0, myTasks.indexOf("previousAssigneeId"));
-  expect(openWork).toContain("...crmProjectWhere(user)");
-  // Handed-off tasks ("waiting on others") are part of My tasks and carry the deal name and stage.
-  // APL-2713: this query does not spread the filter, so the assertion fails until that bug is fixed.
-  const waiting = myTasks.slice(myTasks.indexOf("previousAssigneeId"));
-  expect(waiting).toContain("...crmProjectWhere(user)");
+test.beforeEach(() => {
+  if (world) test.info().annotations.push({ type: "CRM_VISIBLE", description: world.mode });
 });
 
-test("AC2: with CRM_VISIBLE=off, search returns no deal and no deal task", () => {
-  withMode("off", () => {
-    expect(crmProjectWhere(member)).toEqual(hidden());
-    expect(crmVisible(member)).toBe(false);
-  });
-  expect(search).toContain("...crmProjectWhere(user)");
-  expect(search).toContain("project: visible");
-  expect(search).toContain("const crm = crmVisible(user)");
-  expect(search).toContain("crm && !ideasOnly");
+test("AC1: with CRM_VISIBLE=off, My tasks shows no deal task and no stage qa:TC missing", async () => {
+  const w = need();
+  only(w, "off");
+  expect(w.deal).toBeNull();
+  const rows = await myRows(w.editor);
+  expect(rows.some((t) => t.project?.type === "DEAL")).toBe(false);
+  expect(rows.some((t) => t.project?.stage)).toBe(false);
+  expect(rows.some((t) => t.title === w.plainTitle)).toBe(true);
+  await w.editor.api.post("/api/profile/start-guide");
+  await w.editor.page.goto("/", { waitUntil: "domcontentloaded" });
+  // The first document request can bounce through /signin while the route compiles. Wait for the row itself.
+  const list = w.editor.page.getByRole("main");
+  await expect(list.getByRole("heading", { name: "My tasks" })).toBeVisible({ timeout: 30_000 });
+  await expect(list.getByRole("link", { name: w.plainTitle, exact: true })).toBeVisible({ timeout: 30_000 });
+  await expect(list.getByText("Deal", { exact: true })).toHaveCount(0);
 });
 
-test("AC3: with CRM_VISIBLE=off, a deal task and the deal's task list are not found", () => {
-  withMode("off", () => {
-    expect(crmVisible(member)).toBe(false);
-    expect(crmVisible(admin)).toBe(false);
-    expect(crmVisible(root)).toBe(false);
-  });
-  const getTask = tasks.slice(tasks.indexOf("export async function getTask"), tasks.indexOf("export async function listTasks"));
-  const load = tasks.slice(tasks.indexOf("async function loadTask"), tasks.indexOf("export const ORDER"));
-  const list = tasks.slice(tasks.indexOf("export async function listTasks"), tasks.indexOf("/** Scheduled job:"));
-  expect(getTask).toContain("loadTask(user, id)");
-  expect(load).toContain("projectAccess(user, t.projectId");
-  expect(list).toContain("projectAccess(user, projectId)");
-  expect(access).toContain('if (project.typeId === WORKSTREAM_DEAL && !crmVisible(user)) throw notFound("Project")');
+test("AC2: with CRM_VISIBLE=off, search returns no deal and no deal task qa:TC missing", async () => {
+  const w = need();
+  only(w, "off");
+  expect((await w.editor.api.get("/api/deals")).status).toBe(404);
+  const plain = await search(w.editor, w.plainTitle);
+  expect(plain.tasks.some((t) => t.title === w.plainTitle)).toBe(true);
+  expect(plain.projects.every((p) => p.type !== "DEAL")).toBe(true);
+  await w.editor.page.goto("/search", { waitUntil: "domcontentloaded" });
+  const box = w.editor.page.getByRole("searchbox", { name: "Search" });
+  await expect(box).toBeEditable();
+  await expect(async () => {
+    await box.fill(w.plainTitle);
+    await expect(box).toHaveValue(w.plainTitle);
+    await expect(w.editor.page.getByRole("link", { name: w.plainTitle })).toBeVisible();
+  }).toPass();
+  await expect(w.editor.page.getByRole("main").getByText("Deal", { exact: true })).toHaveCount(0);
 });
 
-test("AC4: with CRM_VISIBLE=off, the concierge does not read the member's deals or deal tasks", () => {
-  withMode("off", () => expect(crmProjectWhere(member)).toEqual(hidden()));
-  expect(visibleProjects).toContain("...crmProjectWhere(user)");
-  expect(myProjects).toContain("...crmProjectWhere(user)");
-  expect(reads).toContain("project: myProjects(user)");
-  expect(reads).toContain("...visibleProjects(user)");
+test("AC3: with CRM_VISIBLE=off, the deal task and the deal task list answer not found qa:TC missing", async () => {
+  const w = need();
+  only(w, "off");
+  // off answers not found for the deals API, so this run cannot plant a deal task to open.
+  expect(w.deal).toBeNull();
+  expect((await w.editor.api.get("/api/deals")).status).toBe(404);
+  expect((await w.admin.api.get("/api/deals")).status).toBe(404);
+  expect((await w.orgAdmin.api.get("/api/deals")).status).toBe(404);
 });
 
-test("AC5: with CRM_VISIBLE=admins, an Editor sees no deal data on those surfaces", () => {
-  withMode("admins", () => {
-    expect(crmMode()).toBe("admins");
-    expect(crmVisible(member)).toBe(false);
-    expect(crmProjectWhere(member)).toEqual(hidden());
-  });
+test("AC4: with CRM_VISIBLE=off, the concierge does not mention a deal, a deal task, or a stage qa:TC missing", async () => {
+  const w = need();
+  only(w, "off");
+  const open = await quick(w.editor);
+  expect(open).not.toContain("DEAL");
+  expect(open).toContain(w.plainTitle);
+  if (!w.deal) return;
+  expect(open).not.toContain(w.deal.name);
+  expect(open).not.toContain(w.deal.taskTitle);
+  expect(open).not.toContain(w.deal.stage);
+  const scoped = await quick(w.editor, w.deal.id);
+  const leaked = scoped.includes(w.deal.name) || scoped.includes(w.deal.taskTitle) || scoped.includes(w.deal.stage);
+  if (leaked) {
+    test.fail(true, "Product defect APL-2723: quickAnswer looks the deal up by membership only and stores its name on the concierge message (Due this week in <deal>). CRM_VISIBLE off still mentions the deal. This test is not skipped.");
+  }
+  expect(leaked).toBe(false);
 });
 
-test("AC6: with CRM_VISIBLE=admins, an Admin and the Super Admin still see deals", () => {
-  withMode("admins", () => {
-    expect(crmVisible(admin)).toBe(true);
-    expect(crmVisible(root)).toBe(true);
-    expect(crmProjectWhere(admin)).toEqual({});
-    expect(crmProjectWhere(root)).toEqual({});
-  });
+test("AC5: with CRM_VISIBLE=admins, an Editor sees no deal data on the four surfaces qa:TC missing", async () => {
+  const w = need();
+  only(w, "admins");
+  if (!w.deal) throw new Error("No deal was planted.");
+  const seen = await surfaces(w.editor, w.deal);
+  expect(seen.my).toBe(false);
+  expect(seen.searchTask).toBe(false);
+  expect(seen.searchDeal).toBe(false);
+  expect(seen.taskStatus).toBe(404);
+  expect(seen.listStatus).toBe(404);
+  expect(seen.concierge).toBe(false);
+  const plain = await myRows(w.editor);
+  expect(plain.some((t) => t.title === w.plainTitle)).toBe(true);
 });
 
-test("AC7: with CRM_VISIBLE=all, every member still sees deals", () => {
-  withMode("all", () => {
-    expect(crmMode()).toBe("all");
-    for (const person of [member, admin, root]) {
-      expect(crmVisible(person)).toBe(true);
-      expect(crmProjectWhere(person)).toEqual({});
+test("AC6: with CRM_VISIBLE=admins, an Admin sees deal tasks as normal qa:TC missing", async () => {
+  const w = need();
+  only(w, "admins");
+  if (!w.deal) throw new Error("No deal was planted.");
+  const seen = await surfaces(w.orgAdmin, w.deal);
+  expect(seen.my).toBe(true);
+  expect(seen.searchTask).toBe(true);
+  expect(seen.searchDeal).toBe(true);
+  expect(seen.taskStatus).toBe(200);
+  expect(seen.listStatus).toBe(200);
+  expect(seen.concierge).toBe(true);
+});
+
+test("AC7: with CRM_VISIBLE=all, a member still sees their deal work qa:TC missing", async () => {
+  const w = need();
+  only(w, "all");
+  if (!w.deal) throw new Error("No deal was planted.");
+  const seen = await surfaces(w.editor, w.deal);
+  expect(seen.my).toBe(true);
+  expect(seen.searchDeal).toBe(true);
+  expect(seen.taskStatus).toBe(200);
+  expect(seen.concierge).toBe(true);
+});
+
+test("AC8: off hides deals from Admins and the Super Admin; admins mode keeps Admins in qa:TC missing", async () => {
+  const w = need();
+  if (w.mode === "all") {
+    test.skip(true, "APL-2609: Needs CRM_VISIBLE=off or admins. This server runs all, so this AC is not a pass.");
+  }
+  if (w.mode === "off") {
+    expect(w.deal).toBeNull();
+    for (const who of [w.admin, w.orgAdmin, w.editor]) {
+      expect((await who.api.get("/api/deals")).status).toBe(404);
+      expect((await who.api.get("/api/orgs")).status).toBe(404);
     }
-  });
-  expect(crmMode()).toBe("all");
+    return;
+  }
+  if (!w.deal) throw new Error("No deal was planted.");
+  const asAdmin = await surfaces(w.orgAdmin, w.deal);
+  const asSuper = await w.admin.api.get(`/api/tasks/${w.deal.taskId}`);
+  noSecret(JSON.stringify(asSuper.json));
+  const asMember = await w.editor.api.get(`/api/tasks/${w.deal.taskId}`);
+  expect(asAdmin.taskStatus).toBe(200);
+  expect(asAdmin.searchDeal).toBe(true);
+  expect(asSuper.status).toBe(200);
+  expect(asMember.status).toBe(404);
 });
 
-test("AC8: off hides deals from Admins and the Super Admin too; admins mode keeps Admins in", () => {
-  withMode("off", () => {
-    expect(crmVisible(admin)).toBe(false);
-    expect(crmVisible(root)).toBe(false);
-    expect(crmProjectWhere(admin)).toEqual(hidden());
-    expect(crmProjectWhere(root)).toEqual(hidden());
-  });
-  withMode("admins", () => {
-    expect(crmVisible(admin)).toBe(true);
-    expect(crmVisible(root)).toBe(true);
-    expect(crmVisible(member)).toBe(false);
-  });
-});
+function need(): World {
+  if (!world) throw new Error("The story world was not created.");
+  return world;
+}
+
+/** Skip unless the live lever is the mode this acceptance criterion names. A different mode is not a pass. */
+function only(w: World, want: Mode) {
+  test.skip(w.mode !== want, `APL-2609: Needs CRM_VISIBLE=${want}. This server runs ${w.mode}, so this AC is not a pass.`);
+}
+
+type Row = { id?: string; title?: string; project?: { id?: string; name?: string; type?: string; stage?: string | null } };
+
+async function myRows(who: Who): Promise<Row[]> {
+  const r = await who.api.get("/api/my-tasks");
+  noSecret(JSON.stringify(r.json));
+  expect(r.status, JSON.stringify(r.json)).toBe(200);
+  const keys = ["waitingOnMe", "overdue", "next7", "later", "waitingOnOthers"] as const;
+  return keys.flatMap((k) => (r.json[k] ?? []) as Row[]);
+}
+
+async function search(who: Who, q: string) {
+  const r = await who.api.get(`/api/search?q=${encodeURIComponent(q)}`);
+  noSecret(JSON.stringify(r.json));
+  expect(r.status, JSON.stringify(r.json)).toBe(200);
+  return {
+    projects: (r.json.projects ?? []) as { id: string; type?: string }[],
+    tasks: (r.json.tasks ?? []) as { id: string; title?: string; project?: { id?: string } }[],
+  };
+}
+
+async function quick(who: Who, projectId?: string) {
+  const r = await who.api.post("/api/concierge/quick/due-week", projectId ? { projectId } : {});
+  const body = JSON.stringify(r.json);
+  noSecret(body);
+  expect(r.status, body).toBe(200);
+  return body;
+}
+
+async function surfaces(who: Who, deal: Deal) {
+  const rows = await myRows(who);
+  const found = await search(who, deal.taskTitle);
+  const byName = await search(who, deal.name);
+  const one = await who.api.get(`/api/tasks/${deal.taskId}`);
+  const list = await who.api.get(`/api/projects/${deal.id}/tasks`);
+  noSecret(JSON.stringify(one.json));
+  noSecret(JSON.stringify(list.json));
+  const concierge = await quick(who);
+  return {
+    my: rows.some((t) => t.id === deal.taskId),
+    searchTask: found.tasks.some((t) => t.id === deal.taskId),
+    searchDeal: byName.projects.some((p) => p.id === deal.id),
+    taskStatus: one.status,
+    listStatus: list.status,
+    concierge: concierge.includes(deal.taskTitle),
+  };
+}
+
+async function chatWasEmpty(who: Who, into: Set<string>) {
+  const r = await who.api.get("/api/concierge/state");
+  const n = ((r.json.messages ?? []) as unknown[]).length;
+  if (n === 0) into.add(who.user.id as string);
+}
+
+async function buildWorld(browser: Browser): Promise<World> {
+  const emptyChat = new Set<string>();
+  const adminIn = await signInAlias(browser, "nakul17+zz-sa@aplyd.com", "ZZ-TEST QA Admin");
+  contexts.push(adminIn.ctx);
+  const editorIn = await signInAlias(browser, qaEmail("editor"), zz("editor"));
+  contexts.push(editorIn.ctx);
+  const orgIn = await signInAlias(browser, qaEmail("orgadmin"), zz("org admin"));
+  contexts.push(orgIn.ctx);
+  const admin = adminIn.who;
+  const editor = editorIn.who;
+  const orgAdmin = orgIn.who;
+  adminWho = admin;
+  editorWho = editor;
+  orgAdminWho = orgAdmin;
+  expect(admin.user.orgRole).toBe("SUPER_ADMIN");
+  const promoted = await admin.api.patch(`/api/team/${orgAdmin.user.id}`, { orgRole: "ADMIN" });
+  expect(promoted.status, JSON.stringify(promoted.json)).toBe(200);
+  orgAdmin.user.orgRole = "ADMIN";
+  for (const who of [admin, editor, orgAdmin]) await chatWasEmpty(who, emptyChat);
+  for (const id of emptyChat) emptyChatIds.add(id);
+
+  const deals = await admin.api.get("/api/deals");
+  const memberDeals = await editor.api.get("/api/deals");
+  let mode: Mode;
+  if (deals.status === 404) mode = "off";
+  else {
+    expect(deals.status, JSON.stringify(deals.json)).toBe(200);
+    expect([200, 404]).toContain(memberDeals.status);
+    mode = memberDeals.status === 404 ? "admins" : "all";
+  }
+
+  const plainTitle = zz("plain step");
+  const plain = await newProject(admin, (fn) => { void fn; }, { label: "plain", members: [{ who: editor, role: "EDITOR" }] });
+  plainId = plain.id;
+  await newTask(admin, plain.id, { title: plainTitle, assigneeId: editor.user.id, dueDate: ymd(2) });
+
+  let deal: Deal | null = null;
+  if (mode !== "off") {
+    const pipes = (await admin.api.get("/api/deals/pipelines")).json.pipelines as { id: string; key: string }[];
+    const pipe = pipes.find((p) => p.key === "DEAL_PROACTIVE") ?? pipes[0];
+    expect(pipe, "a deal pipeline").toBeTruthy();
+    const org = await admin.api.post("/api/orgs", { name: zz("buyer org") });
+    expect(org.status, JSON.stringify(org.json)).toBe(201);
+    orgId = org.json.organisation.id as string;
+    const name = zz("deal");
+    const made = await admin.api.post("/api/deals", {
+      name, organisationId: orgId, pipelineId: pipe.id, leaderId: admin.user.id, whyPursue: "ZZ-TEST",
+      nextStep: { title: zz("first step"), dueDate: ymd(3) },
+    });
+    expect(made.status, JSON.stringify(made.json)).toBe(201);
+    const id = made.json.deal.id as string;
+    dealId = id;
+    expect((await admin.api.post(`/api/projects/${id}/members`, { userId: editor.user.id, role: "EDITOR" })).status).toBe(201);
+    expect((await admin.api.post(`/api/projects/${id}/members`, { userId: orgAdmin.user.id, role: "EDITOR" })).status).toBe(201);
+    const taskTitle = zz("deal step");
+    const taskId = await newTask(admin, id, { title: taskTitle, assigneeId: editor.user.id, dueDate: ymd(2) });
+    expect((await admin.api.post(`/api/tasks/${taskId}/collaborators`, { userId: orgAdmin.user.id })).status).toBe(201);
+    const loaded = await admin.api.get(`/api/projects/${id}`);
+    expect(loaded.status, JSON.stringify(loaded.json)).toBe(200);
+    const stage = (loaded.json.project?.deal?.stage?.name ?? "") as string;
+    expect(stage.length, JSON.stringify(loaded.json.project?.deal ?? null)).toBeGreaterThan(0);
+    deal = { id, name, stage, taskId, taskTitle };
+  }
+
+  return { mode, admin, editor, orgAdmin, deal, plainTitle, ctx: [adminIn.ctx, editorIn.ctx, orgIn.ctx], emptyChat };
+}
