@@ -69,6 +69,11 @@ async function loadTask(user: Actor, id: string, o: { write?: boolean; deleted?:
   return { t, a };
 }
 
+/** Every check updateTask makes before it reads the edit, so a route can run them before parsing the body (APL-2651). */
+export async function checkTaskEdit(user: Actor, id: string) {
+  await loadTask(user, id, { write: true });
+}
+
 export const ORDER = [{ dueDate: { sort: "asc", nulls: "last" } }, { createdAt: "asc" }, { id: "asc" }] as const;
 
 async function requireWorker(tx: Tx, projectId: string, userId: string, what: string) {
