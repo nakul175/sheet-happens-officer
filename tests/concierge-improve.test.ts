@@ -74,8 +74,8 @@ afterEach(() => {
   delete process.env.MODEL_NAME;
 });
 
-describe("improve my prompt (APL-2694)", () => {
-  it("AC1, AC2, AC3: a mocked reply is the rewrite, counted once on the standard model, and not posted", async () => {
+describe("qa:TC missing improve my prompt (APL-2694)", () => {
+  it("qa:TC missing AC1, AC2, AC3: a mocked reply is the rewrite, counted once on the standard model, and not posted", async () => {
     enableModel();
     const sent = mockModel(REWRITE);
     const out = await improvePrompt({ id: "user-1", orgRole: "MEMBER" }, ORIGINAL);
@@ -103,7 +103,7 @@ describe("improve my prompt (APL-2694)", () => {
     expect(chatCreate).not.toHaveBeenCalled();
   });
 
-  it("AC4: a failed model call does not return a rewrite and writes nothing", async () => {
+  it("qa:TC missing AC4: a failed model call does not return a rewrite and writes nothing", async () => {
     enableModel();
     vi.stubGlobal("fetch", vi.fn(async () => new Response("", { status: 500 })));
     await expect(improvePrompt({ id: "user-1", orgRole: "MEMBER" }, ORIGINAL)).rejects.toMatchObject({ status: 503 });
@@ -111,7 +111,7 @@ describe("improve my prompt (APL-2694)", () => {
     expect(chatCreate).not.toHaveBeenCalled();
   });
 
-  it("a chat-shaped call still sends the per-day system line and its tools", async () => {
+  it("qa:TC missing a chat-shaped call still sends the per-day system line and its tools", async () => {
     enableModel();
     const sent = mockModel("ok");
     const req: ModelRequest = {

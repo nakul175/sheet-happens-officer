@@ -51,9 +51,12 @@ export function resumeText(d: Disabled): string | null {
   return t.toLocaleDateString("en-IN", { day: "numeric", month: "long", year: "numeric", timeZone: "Asia/Kolkata" });
 }
 
-/** A non-empty improve result replaces the draft and remembers the original. A failure leaves the draft alone. */
+/**
+ * A non-empty improve result replaces the draft and remembers the original. A failure leaves the draft alone.
+ * So does a result that is only the typed text again: an empty model reply comes back as the original, and that is no rewrite.
+ */
 export function offeredRewrite(original: string, improved: string | null | undefined): { original: string; draft: string } | null {
-  if (!improved?.trim()) return null;
+  if (!improved?.trim() || improved.trim() === original.trim()) return null;
   return { original, draft: improved };
 }
 

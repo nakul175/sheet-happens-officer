@@ -42,7 +42,7 @@ describe("concierge client matches the contract routes", () => {
       ["POST", "/api/concierge/cards/c1/undo", "{}"],
     ]);
   });
-  it("AC1: parses a successful improve response as the rewritten text", async () => {
+  it("qa:TC missing AC1: parses a successful improve response as the rewritten text", async () => {
     const original = "Move the budget task to Monday";
     const rewrite = "Please move the budget task to Monday.";
     mockFetch(200, { improved: rewrite });
@@ -56,7 +56,7 @@ describe("concierge client matches the contract routes", () => {
     expect(offer?.draft).toBe(rewrite);
     expect(keptDraft(offer!.original)).toBe(original);
   });
-  it("AC4: a 429 or 503 improve response is a visible error and offers no rewrite", async () => {
+  it("qa:TC missing AC4: a 429 or 503 improve response is a visible error and offers no rewrite", async () => {
     const original = "Move the budget task to Monday";
     mockFetch(503, { error: "The concierge cannot reach its language service right now. The rest of the app works normally; try again in a minute." });
     const down = await conciergeApi.improve(original);
@@ -72,6 +72,16 @@ describe("concierge client matches the contract routes", () => {
     expect(improveError(capped.error)).toMatch(/200 concierge messages/);
     expect(offeredRewrite(original, null)).toBeNull();
     expect(keptDraft(original)).toBe(original);
+  });
+  it("qa:TC missing AC1: an improve result that only repeats the typed text offers no rewrite", async () => {
+    // An empty model reply comes back from the server as the original text (engine.ts improvePrompt).
+    const original = "Move the budget task to Monday";
+    mockFetch(200, { improved: original });
+    const r = await conciergeApi.improve(original);
+    expect(r.ok).toBe(true);
+    expect(offeredRewrite(original, r.ok ? r.data.improved : null)).toBeNull();
+    expect(offeredRewrite(`  ${original}\n`, original)).toBeNull();
+    expect(offeredRewrite(original, "Move the Budget task to Monday 20 October.")).toEqual({ original, draft: "Move the Budget task to Monday 20 October." });
   });
   it("surfaces a 409 stale confirm with the fresh card message", async () => {
     mockFetch(409, { error: "stale", messages: [msg({ id: "m2", kind: "card", card: card({ id: "c2" }) })] });
