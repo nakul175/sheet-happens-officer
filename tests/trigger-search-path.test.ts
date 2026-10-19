@@ -7,7 +7,7 @@
 //
 // Self-check:
 // - [x] Throwaway schema only, dropped only that schema
-// - [x] Guard requires localhost or 127.0.0.1 AND a sho_test_* database, and refuses overrides, sockets, defaultdb, sho_staging, public, and sho_pr*
+// - [x] Guard requires localhost or 127.0.0.1 AND a sho_test or sho_test_* database (APL-2764), and refuses overrides, sockets, defaultdb, sho_staging, public, and sho_pr*
 // - [x] Pooled test name contains SIMULATED; it is a search_path simulation
 // - [x] Public pin is proven with schema-qualified ALTER FUNCTION on the throwaway
 // - [x] Release script line 41 runs the Prisma migration command on the direct connection; /etc/sho/app.env has no schema param, so the pin is public
