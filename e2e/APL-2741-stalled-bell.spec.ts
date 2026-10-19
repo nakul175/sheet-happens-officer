@@ -46,10 +46,15 @@ async function openBell(who: Account) {
     expect(name, `${who.email} has a session`).toBe("sho_session");
     await ctx.addCookies([{ name, value: rest.join("="), url: BASE }]);
     const page = await ctx.newPage();
+    // The bell's first /api/notifications load runs in an effect, so it only starts once the page has hydrated.
+    // Clicking the server-rendered button before then does nothing (QA D1: dev server timeouts on the dialog).
+    const hydrated = page.waitForResponse((r) => new URL(r.url()).pathname === "/api/notifications", { timeout: 120000 });
     await page.goto("/", { waitUntil: "domcontentloaded", timeout: 120000 });
+    await hydrated;
     const button = page.locator("button.bell");
     await button.waitFor({ state: "visible", timeout: 120000 });
     await button.click();
+    await page.waitForSelector('button.bell[aria-expanded="true"]', { timeout: 15000 });
     const panel = page.getByRole("dialog", { name: "Notifications" });
     await panel.waitFor({ state: "visible", timeout: 15000 });
     // Either a row or the empty state, so the list has finished loading.
