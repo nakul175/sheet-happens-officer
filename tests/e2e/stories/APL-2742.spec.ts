@@ -2,9 +2,9 @@
 // A failed verification send is shown on the check-email screen with a resend option.
 // Opening a verify link only shows "Verify my email"; the token is used on the click alone (mail link scanners open links).
 // No screen sends a resend without a click. The verify and resend audit rows keep the client IP and user agent.
-// Runs in `npm test` against the local test server (TASKBOARD_URL) and its outbox (EMAIL_OUTBOX_DIR), as in ci.yml.
+// Runs in `npm test` against the local test server (TASKBOARD_URL) and its outbox (EMAIL_OUTBOX_DIR).
 // Anything but localhost is refused before a browser starts. nakul17+zztest accounts, ZZ-TEST names.
-// QA gate: skipped without SHO_QA_PASS, which is also the accounts' password (ci.yml sets a CI-only value).
+// QA gate: skipped without SHO_QA_PASS, which is also the accounts' password. CI does not set it, so CI skips this file.
 // Chromium: PW_CHROMIUM, else the system Chrome that GitHub's ubuntu-latest runner ships (as tests/inline-touch-2673.test.ts).
 import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
