@@ -71,6 +71,20 @@ async function loadTask(user: Actor, id: string, o: { write?: boolean; deleted?:
   return { t, a };
 }
 
+/**
+ * Every check updateTask makes before it reads the edit, so a route can run them before parsing the body (APL-2651).
+ * A task whose project the person cannot see answers exactly like a task id that does not exist, so the reply never
+ * shows that the task is there (APL-2651 AC2 v1.2, Dwight's ruling: APL-2669/2670 v1.3).
+ */
+export async function checkTaskEdit(user: Actor, id: string) {
+  try {
+    await loadTask(user, id, { write: true });
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 404) throw notFound("Task");
+    throw e;
+  }
+}
+
 export const ORDER = [{ dueDate: { sort: "asc", nulls: "last" } }, { createdAt: "asc" }, { id: "asc" }] as const;
 
 async function requireWorker(tx: Tx, projectId: string, userId: string, what: string) {
