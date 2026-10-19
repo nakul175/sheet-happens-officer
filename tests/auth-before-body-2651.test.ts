@@ -1,5 +1,6 @@
 // APL-2651 (product part of APL-2703): bulk-undo checks the session, and six PATCH routes check access, before the body.
-// Titles carry the published APL-2651 TC ids (register, AC v1.1). AC4 (order in code) has no runtime test here.
+// Titles carry the published APL-2651 TC ids (register, AC v1.1): AC1 507ede86/0874d1b5, AC2 6edd45b6/93d4350b,
+// AC3 cb9e6bf3, AC4 fb71e2b6. AC5 (order in code, and these tests) has no TC id of its own.
 // People and records are ZZ-TEST with nakul17+ aliases; afterAll hands leadership back, archives and deactivates
 // through the API, and fails if any of that is refused.
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -114,7 +115,7 @@ afterAll(async () => {
   expect(problems, "ZZ-TEST clean-up through the API").toEqual([]);
 }, 120_000);
 
-describe("qa:TC-APL2651-507ede86@v1 qa:TC-APL2651-0874d1b5@v1 qa:TC-APL2651-6edd45b6@v1 qa:TC-APL2651-93d4350b@v1 qa:TC-APL2651-cb9e6bf3@v1 APL-2651 auth and access before the body (product part)", () => {
+describe("qa:TC-APL2651-507ede86@v1 qa:TC-APL2651-0874d1b5@v1 qa:TC-APL2651-6edd45b6@v1 qa:TC-APL2651-93d4350b@v1 qa:TC-APL2651-cb9e6bf3@v1 qa:TC-APL2651-fb71e2b6@v1 APL-2651 auth and access before the body (product part)", () => {
   it("qa:TC-APL2651-507ede86@v1 qa:TC-APL2651-0874d1b5@v1 AC1: no session gets 401 Not signed in on all 8 routes, for a malformed or a schema-invalid body", async () => {
     const anon = new Client();
     const p = paths();
@@ -172,11 +173,15 @@ describe("qa:TC-APL2651-507ede86@v1 qa:TC-APL2651-0874d1b5@v1 qa:TC-APL2651-6edd
     expectValidation(await hit(sa.c, "PATCH", p.team, INVALID.team));
     expectBadJson(await hit(sa.c, "PATCH", p.team, MALFORMED));
     // A signed-in bulk-undo with a bad body is still 400: the ids it would authorise are inside the body.
-    expectBadJson(await hit(editor.c, "POST", "/api/actions/bulk-undo", MALFORMED));
-    expectValidation(await hit(editor.c, "POST", "/api/actions/bulk-undo", { ids: [] }));
+    for (const who of [editor, lead]) {
+      expectBadJson(await hit(who.c, "POST", "/api/actions/bulk-undo", MALFORMED));
+      expectValidation(await hit(who.c, "POST", "/api/actions/bulk-undo", { ids: [] }));
+    }
+    expectValidation(await hit(lead.c, "POST", "/api/concierge/messages", { text: "" }));
+    expectBadJson(await hit(lead.c, "POST", "/api/concierge/messages", MALFORMED));
   });
 
-  it("qa:TC-APL2651-cb9e6bf3@v1 AC3: valid bodies still work on the changed routes", async () => {
+  it("qa:TC-APL2651-fb71e2b6@v1 AC4: valid bodies still work on the changed routes", async () => {
     const p = paths();
     const seen = (await lead.c.get(`/api/tasks/${taskId}`)).json.task.updatedAt as string;
     const title = `ZZ-TEST 2651 renamed ${RUN}`;
