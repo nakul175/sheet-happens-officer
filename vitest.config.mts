@@ -1,24 +1,40 @@
+import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import { configDefaults, defineConfig } from "vitest/config";
 
+// Every other tests/e2e/stories spec is a Playwright story (qa/story-e2e carries 130+). The Vitest ones are the files that
+// import vitest, read the same way playwright.config.ts reads them (tests/e2e/vitest-specs.cjs).
+const { vitestSpecFiles } = createRequire(import.meta.url)("./tests/e2e/vitest-specs.cjs") as { vitestSpecFiles: () => string[] };
+const playwrightStories = `tests/e2e/stories/!(${vitestSpecFiles().map((f) => f.replace(/\.spec\.ts$/, "")).join("|")}).spec.ts`;
+
 // Tests hit a live dev server (first request to a route compiles it), so allow time.
 // The concierge tests also call src/lib directly (the "@/..." imports), with a fake model.
-// CRM_VISIBLE mode servers need a production build and three processes, so they stay out of `npm test`.
-// Run them with `npm run test:crm-modes`.
-// Playwright story specs are tests/e2e/**/*.spec.ts and are run with `npx playwright test`, not vitest.
-// Vitest's default include matches *.spec.ts, and Vite sets process.env.BASE_URL, which those files refuse.
-// Vitest story specs from main (APL-2522, 2655, 2679, 2714, 2739) run here; every other tests/e2e spec is Playwright
-// and stays out of this run. playwright.config.ts ignores the same five.
-// APL-2733.spec.ts is a Playwright story. Vitest's default include matches *.spec.ts, so it is excluded here.
+// CRM_VISIBLE mode servers need a production build and one process per mode, so they stay out of `npm test`.
+// Run them with `npm run test:crm-modes`, `npm run test:reminder-modes` or `npm run test:stalled-modes`. CI runs all three after the build.
+// APL-2733.spec.ts, APL-2609.spec.ts and APL-2720.spec.ts are Playwright stories. Vitest's default include matches *.spec.ts, so they are excluded here.
 export default defineConfig({
   resolve: { alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) } },
   // scripts/** holds node:test files (assert-playwright-ran.test.mjs). Vitest's default
   // include matches *.test.mjs and fails them with "No test suite found", which blocks deploy.yml.
-  // tests/e2e/** is Playwright. The same default include matches *.spec.ts, and Vite sets
-  // process.env.BASE_URL, which those files refuse.
   test: {
     testTimeout: 30000,
     fileParallelism: false,
-    exclude: [...configDefaults.exclude, "tests/viewport/**", "tests/e2e/**/!(APL-2522|APL-2655|APL-2679|APL-2714|APL-2739).spec.ts", "tests/e2e/stories/APL-2522-*.spec.ts", "e2e/**", "tests/crm-visible-modes-server.test.ts", "tests/apl-2713-crm-modes.test.ts", "scripts/**", "tests/e2e/stories/APL-2733.spec.ts"],
+    exclude: [
+      ...configDefaults.exclude,
+      "tests/viewport/**",
+      "tests/crm-visible-modes-server.test.ts",
+      "tests/apl-2713-crm-modes.test.ts",
+      "tests/task-outsider-2875-crm.test.ts",
+      "tests/jobs-reminders-crm-server.test.ts",
+      "tests/jobs-stalled-crm-server.test.ts",
+      "tests/e2e/local/APL-2728.test.ts",
+      "tests/e2e/local/APL-2609.spec.ts",
+      "e2e/**",
+      "scripts/**",
+      "tests/e2e/stories/APL-2733.spec.ts",
+      "tests/e2e/stories/APL-2609.spec.ts",
+      "tests/e2e/stories/APL-2720.spec.ts",
+      playwrightStories,
+    ],
   },
 });

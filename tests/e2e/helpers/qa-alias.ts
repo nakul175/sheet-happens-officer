@@ -1,7 +1,8 @@
 // Sign-in for story specs that use nakul17+ aliases (APL-2748). The people are a fixed, already verified pool
 // (helpers/alias-pool.ts): nothing here signs up or verifies an account. Oscar provisions the pool once with
 // tests/e2e/tools/provision-aliases.ts. The password is SHO_QA_PASS and is never written here.
-// A missing password skips the file from beforeAll. Every auth body is checked so the password is not echoed.
+// A missing password fails the file from beforeAll (F10: the gate throws, it does not skip; staging-e2e injects the
+// secret and no value is in any committed file). Every auth body is checked so the password is not echoed.
 import type { APIRequestContext, Browser, BrowserContext } from "@playwright/test";
 import { api, BASE_URL, expect, test } from "../support";
 import type { Who } from "../g2";
@@ -27,10 +28,10 @@ export function qaPerson(index: number) {
   return poolPerson(QA_SLOT, index);
 }
 
-/** First thing in the file: skip without SHO_QA_PASS, then read the release SHA from /api/health. */
+/** First thing in the file: fail without SHO_QA_PASS, then read the release SHA from /api/health. */
 export function gateFile() {
   test.beforeAll(async ({ playwright }) => {
-    test.skip(!QA_PASS, "Set SHO_QA_PASS (the password for nakul17+ aliases).");
+    if (!QA_PASS) throw new Error("Set SHO_QA_PASS (the password for nakul17+ aliases).");
     const req = await playwright.request.newContext({ baseURL: BASE_URL, httpCredentials: httpCredentials() });
     try { await assertRelease(req); }
     finally { await req.dispose(); }
@@ -127,8 +128,9 @@ export async function runLocalJob(name: string) {
   const secret = process.env.JOB_SECRET ?? "";
   const host = new URL(BASE_URL).hostname;
   const local = host === "localhost" || host === "127.0.0.1";
-  test.skip(!local, "The scheduled job is not run against a remote host.");
-  test.skip(secret.length < 16, "Set JOB_SECRET (16 characters or more) to run the scheduled job on the local server.");
+  // No skip: the harness never skips (the SHO_QA_PASS gate in gateFile() throws too). These fail loudly instead.
+  if (!local) throw new Error("The scheduled job is not run against a remote host.");
+  if (secret.length < 16) throw new Error("Set JOB_SECRET (16 characters or more) to run the scheduled job on the local server.");
   const res = await fetch(new URL(`/api/jobs/${name}`, BASE_URL), { method: "POST", headers: { authorization: `Bearer ${secret}` } });
   const text = await res.text();
   noSecret(text);

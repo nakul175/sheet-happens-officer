@@ -1,5 +1,5 @@
-// Is a PR's behaviour live on the staging build under test? Used as `test.skip(!(await prLive(...)).deployed, reason)` inside a test,
-// so a spec runs whenever the PR is deployed and skips (with the reason in the report) when it is not.
+// Is a PR's behaviour live on the staging build under test? A spec reads `(await prLive(...)).deployed` and the reason.
+// What it does when the PR is not deployed is the spec's choice. The harness never calls test.skip.
 // 1. /api/health answers { release: <git SHA> } (deploy/release.sh). If that is the PR's head commit, the PR is live.
 // 2. Otherwise a probe looks for a behaviour only that PR has. A probe that ACTS (creates a ZZ-TEST project) cleans up through `later`.
 // Each answer is worked out once per run and recorded on every test that asks, as a "deployed" annotation.
@@ -45,7 +45,7 @@ const PROBES: Record<number, (admin: Who, member: Who | null, later: Later) => P
     const page = await admin.page.context().newPage();
     try {
       await withUnread(page, () => 120);
-      await bell(page).locator(".badge").waitFor(); // the count has rendered
+      await expect(bell(page)).toHaveAccessibleName(/ unread$/); // the count has rendered (bell-label.ts bellName)
       const name = await bell(page).getAttribute("aria-label");
       return { deployed: name === "Notifications, 99+ unread", how: `probe: bell at 120 unread is named "${name}"` };
     } finally { await page.close(); }
@@ -94,9 +94,12 @@ const PROBES: Record<number, (admin: Who, member: Who | null, later: Later) => P
       if ((await Promise.all(js)).some((s) => /failed:!\w+\.loading/.test(s))) return { deployed: true, how: "probe: served JS has useGet's `failed` flag" };
       await page.route((u) => u.pathname === `/api/team/${admin.user.id}`, async (r) => { await new Promise((x) => setTimeout(x, 2000)); await r.continue(); });
       await page.goto(`/team/${admin.user.id}`, { waitUntil: "commit" });
-      await page.waitForTimeout(900);
-      const old = await page.locator("div.skel", { hasText: "Loading…" }).count();
-      return { deployed: old === 0 && (await page.locator(".skel-wrap .skel-row").count()) > 0, how: `probe: slow Person page shows ${old ? "\"Loading…\"" : "the Skeleton"}` };
+      // Main shows the text "Loading…"; the PR shows the Skeleton, a role="status" box whose name is "Loading".
+      const oldText = page.getByText("Loading…", { exact: true });
+      const skeleton = page.getByRole("status").filter({ hasText: /^Loading$/ });
+      await expect.poll(async () => (await oldText.count()) + (await skeleton.count()), { timeout: 10_000 }).toBeGreaterThan(0);
+      const old = await oldText.count();
+      return { deployed: old === 0 && (await skeleton.count()) > 0, how: `probe: slow Person page shows ${old ? "\"Loading…\"" : "the Skeleton"}` };
     } finally { await page.close(); }
   },
   // PR #6 (APL-2610, APL-2671): a manual reopen of a parent reopens the subtask that closed with it. On main it stays done.
@@ -151,6 +154,7 @@ const PROBES: Record<number, (admin: Who, member: Who | null, later: Later) => P
     try {
       let armStale = false;
       let staleArmed = false;
+      let staleSent = false;
       const staleHeld = new Promise<void>((resolve) => { hold.release = () => resolve(); });
       const now = new Date().toISOString();
       const unread = { id: "gate-u", text: "ZZ gate unread", href: "/projects", read: false, createdAt: now };
@@ -170,6 +174,7 @@ const PROBES: Record<number, (admin: Who, member: Who | null, later: Later) => P
           staleArmed = true;
           await staleHeld;
           await route.fulfill(json({ unread: 0, items: [{ ...unread, read: true }, read], next: null }));
+          staleSent = true;
           return;
         }
         await route.fulfill(json({ unread: 1, items: [unread, read], next: null }));
@@ -182,8 +187,11 @@ const PROBES: Record<number, (admin: Who, member: Who | null, later: Later) => P
       await panel.getByRole("button", { name: /^Unread/ }).click();
       await expect(panel.getByText("All caught up")).toBeVisible();
       hold.release();
-      await page.waitForTimeout(600); // the late All page has arrived; a panel that still accepts it has painted by now
-      const readRows = await panel.locator(".bell-row:not(.unread)").count();
+      // The late All page has been delivered; two animation frames let a panel that still accepts it paint.
+      await expect.poll(() => staleSent).toBe(true);
+      await page.evaluate(() => new Promise<void>((done) => requestAnimationFrame(() => requestAnimationFrame(() => done()))));
+      // Every row of that late page is read, so any of its notices on the Unread tab is a read row.
+      const readRows = (await panel.getByText(unread.text, { exact: true }).count()) + (await panel.getByText(read.text, { exact: true }).count());
       return { deployed: readRows === 0, how: `probe: a late All page left ${readRows} read row(s) on the Unread tab` };
     } finally { hold.release(); await page.close(); }
   },
