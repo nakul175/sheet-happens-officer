@@ -9,8 +9,7 @@ const SLOW = { timeout: 90_000 }; // the Team table can be long on a busy worksp
 
 test.describe("SHO-US-2.5 / APL-2484", () => {
   test.beforeAll(() => {
-    test.skip(!PASS, "Set SHO_QA_PASS (the shared password for the nakul17+ accounts).");
-    if (!PASS) return;
+    if (!PASS) throw new Error("Set SHO_QA_PASS (the shared password for the nakul17+ accounts).");
     if (!passwordOk(PASS)) throw new Error("SHO_QA_PASS must be at least 8 characters with a letter and a number.");
   });
 
