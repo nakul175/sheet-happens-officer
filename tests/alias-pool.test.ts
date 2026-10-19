@@ -86,11 +86,13 @@ describe("qa:TC missing APL-2748 AC1: a fixed pool of nakul17+ aliases", () => {
   it("qa:TC missing AC1: the story helper only signs in; it has no sign-up, verify or outbox step", () => {
     const src = readFileSync("tests/e2e/helpers/qa-alias.ts", "utf8");
     for (const banned of ["/api/auth/signup", "/api/auth/verify", "outbox", "OUTBOX", "readdirSync", "qaEmail"]) expect(src, banned).not.toContain(banned);
-    for (const spec of ["APL-2609", "APL-2716"]) {
+    for (const spec of ["APL-2716"]) {
       const text = readFileSync(`tests/e2e/stories/${spec}.spec.ts`, "utf8");
       expect(text, spec).not.toContain("/api/auth/signup");
       expect(text, spec).not.toContain("qaEmail(");
     }
+    // APL-2609 is main's local-sandbox spec (#112): it signs up from the local outbox, so beforeAll fails without one.
+    expect(readFileSync("tests/e2e/stories/APL-2609.spec.ts", "utf8")).toContain("expect(existsSync(OUTBOX)");
   });
 
   it("qa:TC missing AC1: each staging job gets its own slot, so two shards never share a person", () => {
