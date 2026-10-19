@@ -142,12 +142,15 @@ export function noticeForReader(n: N, hidden: boolean): { text: string; href: st
   return redactDealNotice(n.type) ?? { text: HIDDEN_DEAL_TEXT, href: null };
 }
 
+/** With the comments switch off, comment notices are neither listed, counted nor changed (APL-2590 D1b, #128 D2). */
+const hiddenCommentNotices = () => (commentsEnabled() ? {} : { type: { notIn: COMMENT_NOTICE_TYPES } });
+
 /** SHO-US-14.13: newest first, 50 at a time; `before` is the `next` value of the previous page. `filter=unread` hides read items. */
 export async function listNotifications(user: Actor, o: { filter?: string; before?: string; limit?: number } = {}) {
   const limit = Math.min(Math.max(o.limit ?? 50, 1), 200);
   const [at, cursorId] = (o.before ?? "").split("|");
   const when = at && !Number.isNaN(Date.parse(at)) ? new Date(at) : null;
-  const hideComments = commentsEnabled() ? {} : { type: { notIn: COMMENT_NOTICE_TYPES } }; // APL-2590 D1b
+  const hideComments = hiddenCommentNotices(); // APL-2590 D1b
   const rows = await db.notification.findMany({
     where: {
       recipientId: user.id,
@@ -174,14 +177,14 @@ export async function listNotifications(user: Actor, o: { filter?: string; befor
 }
 
 export async function markRead(user: Actor, id: string) {
-  await db.notification.updateMany({ where: { id, recipientId: user.id, readAt: null }, data: { readAt: new Date() } });
+  await db.notification.updateMany({ where: { id, recipientId: user.id, readAt: null, ...hiddenCommentNotices() }, data: { readAt: new Date() } });
 }
 /** SHO-US-14.13 AC4: keep a notice unread until I have acted on it. */
 export async function markUnread(user: Actor, id: string) {
-  await db.notification.updateMany({ where: { id, recipientId: user.id, readAt: { not: null } }, data: { readAt: null } });
+  await db.notification.updateMany({ where: { id, recipientId: user.id, readAt: { not: null }, ...hiddenCommentNotices() }, data: { readAt: null } });
 }
 export async function markAllRead(user: Actor) {
-  await db.notification.updateMany({ where: { recipientId: user.id, readAt: null }, data: { readAt: new Date() } });
+  await db.notification.updateMany({ where: { recipientId: user.id, readAt: null, ...hiddenCommentNotices() }, data: { readAt: new Date() } }); // #128 D2
 }
 
 // ---- project activity (SHO-US-6.3, 14.14) ----
@@ -202,7 +205,11 @@ export async function projectActivity(user: Actor, projectId: string, cursor?: s
     where: {
       projectId,
       ...(mine ? { targetType: "task", targetId: { in: mine } } : {}),
-      ...(commentsEnabled() ? {} : { NOT: { action: { startsWith: COMMENT_ACTION_PREFIX } } }), // APL-2590 D1
+      // APL-2590 D1: with the switch off, leave out comment rows and the Undo rows that reversed one (before.action).
+      ...(commentsEnabled() ? {} : { NOT: { OR: [
+        { action: { startsWith: COMMENT_ACTION_PREFIX } },
+        { action: "undo", beforeState: { path: ["action"], string_starts_with: COMMENT_ACTION_PREFIX } },
+      ] } }),
     },
     orderBy: [{ createdAt: "desc" }, { id: "desc" }],
     take: limit + 1,
