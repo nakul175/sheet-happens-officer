@@ -1,14 +1,14 @@
 // APL-2719 Playwright spec. Undo on Activity and the Trash countdown run from the same delete instant.
 // No qa:TC id is assigned on the issue, so every title carries qa:TC missing.
 // Local or CI server only. Signs in with the throwaway session cookie. ZZ-TEST names and a nakul17+ alias;
-// afterAll removes this spec's tasks and log rows, then archives the project.
+// afterAll cleans up through the API (cleanupZz): the project is archived and the person deactivated.
 // Purge itself is covered by tests/apl-2719.test.ts: purgeTrash() takes no scope here, so this spec never runs it.
 import { existsSync } from "node:fs";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { chromium, type Browser, type Page } from "playwright-core";
 import { PrismaClient } from "../../../src/generated/prisma/client";
 import { UNDO_DAYS } from "../../../src/lib/undoable";
-import { account, BASE, project, task, type Account } from "../../helpers";
+import { account, BASE, cleanupZz, task, zzProject, type Account } from "../../helpers";
 
 const db = new PrismaClient();
 const WINDOW = UNDO_DAYS * 86_400_000;
@@ -18,7 +18,6 @@ let seq = 0;
 let browser: Browser;
 let lead: Account;
 let projectId = "";
-const taskIds: string[] = [];
 
 function chromePath() {
   const fromEnv = process.env.PW_CHROMIUM;
@@ -35,16 +34,12 @@ beforeAll(async () => {
   }
   browser = await chromium.launch({ executablePath: chromePath(), args: ["--no-sandbox", "--disable-dev-shm-usage"] });
   lead = await account(`ZZ-TEST lead ${RUN}`, `nakul17+zz-2719-${RUN}@aplyd.com`);
-  projectId = (await project(lead, lead)).id;
+  projectId = await zzProject(lead, `APL-2719 ${RUN}`);
 }, 180000);
 
 afterAll(async () => {
   await browser?.close();
-  if (taskIds.length) {
-    await db.actionLog.deleteMany({ where: { targetType: "task", targetId: { in: taskIds } } });
-    await db.task.deleteMany({ where: { id: { in: taskIds } } });
-  }
-  if (projectId) await lead?.c.post(`/api/projects/${projectId}/archive`);
+  if (lead) await cleanupZz(projectId ? [projectId] : [], [lead]);
   await db.$disconnect();
 });
 
@@ -59,7 +54,6 @@ async function leadPage() {
 async function deletedTask() {
   const title = `ZZ-TEST 2719 ${RUN}-${seq++}`;
   const id = await task(lead, projectId, { title });
-  taskIds.push(id);
   expect((await lead.c.del(`/api/tasks/${id}`)).status).toBeLessThan(300);
   const log = await db.actionLog.findFirstOrThrow({ where: { action: "task.deleted", targetId: id } });
   return { id, title, logId: log.id };
@@ -74,7 +68,8 @@ async function age(t: { id: string; logId: string }, ms: number) {
   await db.actionLog.update({ where: { id: t.logId }, data: { createdAt: new Date(log.createdAt.getTime() - shift) } });
 }
 
-const activityRow = (page: Page, title: string) => page.locator(".item.act").filter({ hasText: `moved "${title}" to Trash` });
+/** The Activity row for this delete: the sentence's text, then up to the row that also holds its Undo control. */
+const activityRow = (page: Page, title: string) => page.getByText(`moved "${title}" to Trash`).locator("xpath=../..");
 
 async function trashDays(page: Page, title: string) {
   await page.goto(`/projects/${projectId}/trash`);

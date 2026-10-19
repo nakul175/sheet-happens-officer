@@ -1,8 +1,8 @@
 // APL-2719. Delete writes Task.deletedAt and the task.deleted ActionLog.createdAt from one instant,
 // so Undo age and purge age are measured from the same point.
 // No qa:TC id is assigned on the issue, so every title carries qa:TC missing.
-// Rows are ZZ-TEST data in their own workspace and are removed afterwards. The aged rows sit in 1985,
-// so purgeTrash(CLOCK) can only reach rows deleted before 1985: nothing real is in that range.
+// A ZZ-TEST person, project and tasks are made through the API and cleaned up through it (cleanupZz).
+// The aged rows sit in 1985, so purgeTrash(CLOCK) can only reach rows deleted before 1985: nothing real is in that range.
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { PrismaClient } from "../src/generated/prisma/client";
 import type { Actor } from "../src/lib/access";
@@ -10,45 +10,30 @@ import { projectActivity } from "../src/lib/feed";
 import { deleteTask, purgeTrash } from "../src/lib/tasks";
 import { checkUndo } from "../src/lib/undo";
 import { UNDO_DAYS } from "../src/lib/undoable";
+import { account, cleanupZz, task, zzProject, type Account } from "./helpers";
 
 const db = new PrismaClient();
 const WINDOW = UNDO_DAYS * 86_400_000;
 const CLOCK = new Date("1985-06-15T12:00:00.000Z");
-const STAMP = `${Date.now().toString(36)}-${Math.random().toString(16).slice(2, 8)}`;
+const STAMP = `${Date.now().toString(36)}${process.pid.toString(36)}`;
 
-let workspaceId = "";
+let lead: Account;
 let projectId = "";
-let sectionId = "";
 let user: Actor;
 
 beforeAll(async () => {
-  const ws = await db.workspace.create({ data: { name: `ZZ-TEST APL-2719 ${STAMP}` } });
-  workspaceId = ws.id;
-  const u = await db.user.create({
-    data: { workspaceId, email: `nakul17+zz-2719-${STAMP}@aplyd.com`, name: `ZZ-TEST Leader ${STAMP}`, passwordHash: "x", emailVerifiedAt: new Date() },
-  });
-  user = { id: u.id, orgRole: u.orgRole, name: u.name };
-  const p = await db.project.create({ data: { workspaceId, name: `ZZ-TEST APL-2719 ${STAMP}`, description: "APL-2719" } });
-  projectId = p.id;
-  sectionId = (await db.section.create({ data: { projectId, name: "To do", position: 0, isDone: false } })).id;
-  await db.projectMember.create({ data: { projectId, userId: u.id, role: "LEADER" } });
+  lead = await account(`ZZ-TEST Leader ${STAMP}`, `nakul17+zz-2719u-${STAMP}@aplyd.com`);
+  user = { id: lead.id, orgRole: "MEMBER", name: lead.name };
+  projectId = await zzProject(lead, `APL-2719 ${STAMP}`);
 });
 
 afterAll(async () => {
   vi.useRealTimers();
-  if (!workspaceId) return;
-  await db.task.deleteMany({ where: { workspaceId } });
-  await db.actionLog.deleteMany({ where: { OR: [{ projectId }, { actorId: user.id }] } });
-  await db.notification.deleteMany({ where: { OR: [{ recipientId: user.id }, { actorId: user.id }] } });
-  await db.auditLog.deleteMany({ where: { OR: [{ actorId: user.id }, { event: "TASK_PURGED", createdAt: { lt: new Date("1986-01-01") } }] } });
-  await db.project.deleteMany({ where: { id: projectId } });
-  await db.user.deleteMany({ where: { id: user.id } });
-  await db.workspace.deleteMany({ where: { id: workspaceId } });
+  if (lead) await cleanupZz(projectId ? [projectId] : [], [lead]);
   await db.$disconnect();
 });
 
-const newTask = (title: string, parentId?: string) =>
-  db.task.create({ data: { workspaceId, projectId, sectionId, title: `ZZ-TEST ${title} ${STAMP}`, assigneeId: user.id, createdById: user.id, parentId } });
+const newTask = async (title: string, parentId?: string) => ({ id: await task(lead, projectId, { title: `ZZ-TEST ${title} ${STAMP}`, ...(parentId ? { parentId } : {}) }) });
 
 const deleteRow = (taskId: string) => db.actionLog.findFirstOrThrow({ where: { action: "task.deleted", targetId: taskId } });
 
@@ -56,10 +41,10 @@ const deleteRow = (taskId: string) => db.actionLog.findFirstOrThrow({ where: { a
 async function deletedAged(age: number) {
   const t = await newTask(`aged ${age}`);
   await deleteTask(user, t.id);
-  const task = await db.task.findUniqueOrThrow({ where: { id: t.id } });
+  const row = await db.task.findUniqueOrThrow({ where: { id: t.id } });
   const log = await deleteRow(t.id);
-  const shift = task.deletedAt!.getTime() - (CLOCK.getTime() - age);
-  await db.task.update({ where: { id: t.id }, data: { deletedAt: new Date(task.deletedAt!.getTime() - shift) } });
+  const shift = row.deletedAt!.getTime() - (CLOCK.getTime() - age);
+  await db.task.update({ where: { id: t.id }, data: { deletedAt: new Date(row.deletedAt!.getTime() - shift) } });
   await db.actionLog.update({ where: { id: log.id }, data: { createdAt: new Date(log.createdAt.getTime() - shift) } });
   return { taskId: t.id, logId: log.id };
 }
