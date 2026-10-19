@@ -55,7 +55,7 @@ function walk(dir: string): string[] {
   return out;
 }
 
-describe("APL-2715 temporary password", () => {
+describe("qa:TC missing APL-2715 temporary password", () => {
   it("sign-in returns mustChangePassword and app screens stay blocked qa:TC missing", async () => {
     const { p, password } = await issued();
     const { c, s } = await signedIn(p.email, password);
