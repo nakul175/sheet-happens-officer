@@ -20,7 +20,8 @@
 #   counts      once, after every shard (if: always(), needs plan). Expected count files come from plan:
 #               20 when the parallel matrix runs, plus 1 when serial specs were picked. Fewer files, a failed
 #               download, or a missing-report marker fails the job. It also fails when run is 0 or skipped equals total.
-#   report      merges every job's blob report into one HTML report.
+#   report      merges every job's blob report into one HTML report.167
+
 #
 # max_parallel: the staging database is shared with production and allows 25 connections. Do not raise it above 5 until NJ approves
 # a connection pool (PgBouncer) or a bigger database.
@@ -164,7 +165,7 @@ jobs:
     timeout-minutes: 120
     strategy:
       fail-fast: false
-      max-parallel: ${{ inputs.max_parallel }}
+      max-parallel: ${{ fromJSON(inputs.max_parallel || '5') }}
       matrix:
         # nn picks the shard's own ZZ_TEST_NN account; peer is the partner of the other role (shard N with N+5, members with 01-05),
         # chosen so no two of any 5 consecutive shards share an account.
