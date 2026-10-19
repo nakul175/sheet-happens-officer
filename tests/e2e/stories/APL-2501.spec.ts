@@ -9,6 +9,7 @@
 // Data: every project and task is named "ZZ-TEST ...".
 import { test, expect, zz, type Who } from "../support";
 import { clickClear } from "../helpers/phone-hit";
+import { woff2HasName } from "../helpers/woff2-names";
 import { PASS, passwordOk } from "./qa";
 
 test.beforeAll(() => {
@@ -59,14 +60,30 @@ test("qa:TC missing AC3: the icon-only mark shows at 24 px and the text uses Pub
   expect(Math.round(box.width)).toBeLessThanOrEqual(36);
   const svg = await admin.page.request.get("/logo-icon.svg");
   expect(svg.status()).toBe(200);
-  // next/font names the face "Public Sans". A hashed build uses "__Public_Sans_…", so the
-  // computed family or the --font-public-sans token may contain a space or an underscore.
-  const font = await admin.page.evaluate(() => {
-    const applied = getComputedStyle(document.body).fontFamily;
-    const token = getComputedStyle(document.documentElement).getPropertyValue("--font-public-sans");
-    return `${applied} ${token}`;
+  // next/font/local names the CSS family after the variable ("publicSans"), not the typeface, so the alias
+  // proves nothing. The body's first family must be a loaded @font-face whose files are Public Sans by
+  // the name table inside each font file.
+  const face = await admin.page.evaluate(async () => {
+    await document.fonts.ready;
+    const family = getComputedStyle(document.body).fontFamily.split(",")[0].trim().replace(/^["']|["']$/g, "");
+    const urls: string[] = [];
+    for (const sheet of Array.from(document.styleSheets)) {
+      for (const rule of Array.from(sheet.cssRules)) {
+        if (!(rule instanceof CSSFontFaceRule)) continue;
+        if (rule.style.getPropertyValue("font-family").trim().replace(/^["']|["']$/g, "") !== family) continue;
+        for (const m of rule.style.getPropertyValue("src").matchAll(/url\(["']?([^"')]+)["']?\)/g)) urls.push(new URL(m[1], sheet.href ?? location.href).pathname);
+      }
+    }
+    const loaded = Array.from(document.fonts).some((f) => f.family.replace(/^["']|["']$/g, "") === family && f.status === "loaded");
+    return { family, urls, loaded };
   });
-  expect(font).toMatch(/Public[_ ]Sans/i);
+  expect(face.loaded, `a loaded font face for ${face.family}`).toBe(true);
+  expect(face.urls.length, `@font-face files for ${face.family}`).toBeGreaterThan(0);
+  for (const url of face.urls) {
+    const file = await admin.page.request.get(url);
+    expect(file.status(), url).toBe(200);
+    expect(woff2HasName(await file.body(), "Public Sans"), `${url} is Public Sans`).toBe(true);
+  }
 });
 
 test("qa:TC missing AC4: Usage and Audit log are for the Super Admin only; a Member who types the address gets the refusal", async ({ admin, member }) => {
