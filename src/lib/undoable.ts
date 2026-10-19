@@ -42,3 +42,5 @@ export const UNDO_LABELS: Record<string, string> = {
 };
 export const isUndoable = (action: string) => action in UNDO_LABELS;
 export const UNDO_DAYS = 30;
+/** True once more than UNDO_DAYS × 24 h have passed since `at` (epoch ms). Exactly 30 days is still undoable. */
+export const isTooOldToUndo = (at: number, now = Date.now()) => now - at > UNDO_DAYS * 86400_000;
