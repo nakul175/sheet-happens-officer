@@ -1,6 +1,6 @@
 // APL-2670 v1.3: a missing expectedUpdatedAt is one body on every task mutation.
 // Absent and null are 400 version_required. "" and "abc" are 400 invalid_version.
-// A stale instant is 409 version_conflict. A task the caller cannot see is 404 not_found.
+// A stale instant is 409 version_conflict. An outsider PATCH on a hidden task is 404 { error: "Project not found" }.
 // Each body is exactly { error: { code, message } }.
 import { describe, expect, it } from "vitest";
 import { db } from "@/lib/db";
@@ -10,7 +10,6 @@ const T0 = "2026-10-18T10:00:00.000Z";
 const REQUIRED = { error: { code: "version_required", message: "expectedUpdatedAt is required" } };
 const INVALID = { error: { code: "invalid_version", message: "expectedUpdatedAt must be a full ISO 8601 date-time with a time and a zone." } };
 const CONFLICT = { error: { code: "version_conflict", message: "Lead changed this task while you were editing it." } };
-const MISSING = { error: { code: "not_found", message: "Task not found" } };
 
 describe("one error shape for a task version (APL-2670)", () => {
   async function fixture() {
@@ -73,7 +72,7 @@ describe("one error shape for a task version (APL-2670)", () => {
     expect(await shown(fx.worker, fx.id)).toEqual({ title: "Original", updatedAt: T0 });
   });
 
-  it("AC3: missing, malformed, stale and not-visible share one structure, and not-visible is not_found", async () => {
+  it("AC3: missing, malformed and stale share one structure, and a hidden task is Project not found", async () => {
     const fx = await fixture();
     const missing = await fx.worker.c.patch(`/api/tasks/${fx.id}`, { title: "New" });
     const malformed = await fx.worker.c.patch(`/api/tasks/${fx.id}`, { title: "New", expectedUpdatedAt: "abc" });
@@ -86,8 +85,8 @@ describe("one error shape for a task version (APL-2670)", () => {
     expect(missing.json).toEqual(REQUIRED);
     expect(malformed.json).toEqual(INVALID);
     expect(stale.json).toEqual(CONFLICT);
-    expect(hidden.json).toEqual(MISSING);
-    for (const body of [missing.json, malformed.json, stale.json, hidden.json]) {
+    expect(hidden.json).toEqual({ error: "Project not found" });
+    for (const body of [missing.json, malformed.json, stale.json]) {
       expect(Object.keys(body)).toEqual(["error"]);
       expect(Object.keys(body.error).sort()).toEqual(["code", "message"]);
     }

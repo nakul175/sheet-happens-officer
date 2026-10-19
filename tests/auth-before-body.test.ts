@@ -106,10 +106,8 @@ describe("auth before body (APL-2651)", () => {
       expectAccess(await hit(editor, "PATCH", sectionPath, body), 403, "Only the project Leader or an Admin can do this.");
     }
     for (const body of [{ title: "" }, "{"] as const) {
-      // APL-2669: a task the caller cannot see is not_found, checked before the body is read.
-      const hidden = await hit(outsider, "PATCH", taskPath, body);
-      expect(hidden.status).toBe(404);
-      expect(hidden.json).toEqual({ error: { code: "not_found", message: "Task not found" } });
+      // APL-2651 AC v1.1: an outsider's PATCH is 404 and exactly { error: "Project not found" }, before the body is read.
+      expectAccess(await hit(outsider, "PATCH", taskPath, body), 404, "Project not found");
       expectAccess(await hit(viewer, "PATCH", taskPath, body), 403, "Viewers cannot make changes.");
     }
     for (const body of [{ name: "" }, "{"] as const) {

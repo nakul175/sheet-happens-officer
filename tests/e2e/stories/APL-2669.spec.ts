@@ -123,7 +123,7 @@ test.describe("APL-2669 a malformed expectedUpdatedAt is a bad request", () => {
     }
   });
 
-  test("AC4 a user who cannot see the task gets the same 404 before the timestamp is checked", async () => {
+  test("AC4 a user who cannot see the task gets 404 Project not found before the timestamp is checked", async () => {
     const before = await taskNow();
     const hidden = await outsider.patch(`/api/tasks/${taskId}`, { data: { expectedUpdatedAt: "abc" } });
     const current = await outsider.patch(`/api/tasks/${taskId}`, { data: { expectedUpdatedAt: before.updatedAt } });
@@ -132,9 +132,9 @@ test.describe("APL-2669 a malformed expectedUpdatedAt is a bad request", () => {
     expect(current.status()).toBe(404);
     expect(missing.status()).toBe(404);
     const hiddenBody = await hidden.json();
-    expect(await current.json()).toEqual(hiddenBody);
-    expect(await missing.json()).toEqual(hiddenBody);
-    expect(hiddenBody).toEqual({ error: { code: "not_found", message: "Task not found" } });
+    expect(hiddenBody).toEqual({ error: "Project not found" });
+    expect(await current.json()).toEqual({ error: "Project not found" });
+    expect(await missing.json()).toEqual({ error: { code: "not_found", message: "Task not found" } });
     expect(JSON.stringify(hiddenBody)).not.toMatch(/Original|New|invalid_version|version_conflict/);
     expect(await taskNow()).toEqual(before);
   });

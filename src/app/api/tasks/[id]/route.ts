@@ -12,8 +12,8 @@ export const GET = handle(async (_req: Request, ctx: Ctx) =>
 export const PATCH = handle(withVersionErrors(async (req: Request, ctx: Ctx) => {
   const me = await currentUser();
   const id = (await ctx.params).id;
-  // Access, including a hidden or missing task, is decided before the body is read (APL-2651).
-  // loadForEdit turns loadTask's 404 into the not_found code (APL-2669) before any version compare.
+  // Access is decided before the body is read (APL-2651).
+  // A hidden project is 404 { error: "Project not found" }. A missing task is the not_found code.
   const { t } = await assertCanUpdateTask(me, id);
   let raw: unknown;
   try {

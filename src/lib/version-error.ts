@@ -1,7 +1,7 @@
 // APL-2669 / APL-2670: every task-version answer uses one body, { error: { code, message } }.
 // The token is expectedUpdatedAt. Absent and null are version_required. Anything that is
 // not a full ISO 8601 date-time with a zone is invalid_version. A different instant is
-// version_conflict. A task the caller cannot see is not_found, and that is decided first.
+// version_conflict. A missing task is not_found. A hidden project stays 404 { error: "Project not found" }.
 
 export const VERSION_REQUIRED = "version_required";
 export const INVALID_VERSION = "invalid_version";

@@ -1,7 +1,7 @@
 // APL-2669 v1.3: expectedUpdatedAt stays an ISO timestamp.
 // Anything that is not a full ISO 8601 date-time with a time and a zone is 400 invalid_version.
 // A different instant is 409 version_conflict. The same instant saves.
-// Someone who cannot see the task gets 404 before the timestamp is looked at.
+// Someone who cannot see the task gets 404 { error: "Project not found" } before the timestamp is looked at.
 import { describe, expect, it } from "vitest";
 import { db } from "@/lib/db";
 import { classifyExpectedUpdatedAt } from "@/lib/task-version";
@@ -111,7 +111,7 @@ describe("PATCH /api/tasks/:id expectedUpdatedAt (APL-2669)", () => {
     expect(await updatedRows(id)).toBe(rows + 1);
   });
 
-  it("AC4: a user who cannot see the task gets the same 404 before the timestamp is checked", async () => {
+  it("AC4: a user who cannot see the task gets 404 Project not found before the timestamp is checked", async () => {
     const { worker, outsider, id } = await fixture();
     const hidden = await outsider.c.patch(`/api/tasks/${id}`, { title: "New", expectedUpdatedAt: "abc" });
     const current = await outsider.c.patch(`/api/tasks/${id}`, { title: "New", expectedUpdatedAt: T0 });
@@ -119,9 +119,9 @@ describe("PATCH /api/tasks/:id expectedUpdatedAt (APL-2669)", () => {
     expect(hidden.status).toBe(404);
     expect(current.status).toBe(404);
     expect(missing.status).toBe(404);
-    expect(current.json).toEqual(hidden.json);
-    expect(missing.json).toEqual(hidden.json);
-    expect(hidden.json).toEqual({ error: { code: "not_found", message: "Task not found" } });
+    expect(hidden.json).toEqual({ error: "Project not found" });
+    expect(current.json).toEqual({ error: "Project not found" });
+    expect(missing.json).toEqual({ error: { code: "not_found", message: "Task not found" } });
     expect(JSON.stringify(hidden.json)).not.toMatch(/Original|invalid_version|version_conflict|does-not-exist/);
     expect(await shown(worker, id)).toEqual({ title: "Original", updatedAt: T0 });
     expect(await updatedRows(id)).toBe(0);

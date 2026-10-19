@@ -74,7 +74,7 @@ async function loadTask(user: Actor, id: string, o: { write?: boolean; deleted?:
 }
 
 /** Same write check updateTask runs, so a caller can refuse before reading the body.
- *  A 404 from loadTask is the not_found code, before the body and before the timestamp. */
+ *  A hidden project is 404 "Project not found" before the body (APL-2651). A missing task is the not_found code. */
 export const assertCanUpdateTask = (user: Actor, id: string) => loadForEdit(user, id);
 
 /**
@@ -230,12 +230,16 @@ async function versionConflict(user: Actor, id: string, t: TaskRow, role: Role):
   }, VERSION_CONFLICT);
 }
 
-/** See the task, or the same 404 whether it is missing or hidden. Happens before the timestamp is read. */
+/** See the task before the timestamp is read.
+ *  A hidden project keeps 404 { error: "Project not found" } (APL-2651 AC v1.1).
+ *  A missing task is still the not_found code. */
 async function loadForEdit(user: Actor, id: string, o: { holderCanDo?: boolean } = {}) {
   try {
     return await loadTask(user, id, { write: true, ...o });
   } catch (e) {
-    if (e instanceof ApiError && e.status === 404) throw new ApiError(404, NOT_FOUND_MESSAGE, undefined, NOT_FOUND);
+    if (e instanceof ApiError && e.status === 404 && e.message !== "Project not found") {
+      throw new ApiError(404, NOT_FOUND_MESSAGE, undefined, NOT_FOUND);
+    }
     throw e;
   }
 }
