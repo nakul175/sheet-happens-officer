@@ -23,6 +23,11 @@ export function showUndo(row: Pick<Row, "undo" | "what">, role: string | undefin
   return true;
 }
 
+/** AC6 v2.4: on a deleted-task row past the window, only whoever may restore (a Leader or Admin) sees "Too old to undo". */
+export function showTooOld(row: Pick<Row, "undo" | "what">, role: string | undefined) {
+  return row.undo === "too_old" && (!isDeletedTaskRow(row.what) || role === "LEADER");
+}
+
 export default function Activity({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const a = useGet<{ items: Row[]; nextCursor: string | null }>(`/api/projects/${id}/activity`);
@@ -57,7 +62,7 @@ export default function Activity({ params }: { params: Promise<{ id: string }> }
               <div className="meta">
                 {r.via === "concierge" && <span className="chip gold">via concierge</span>}
                 {showUndo(r, pr.data?.project.role) && <button className="btn ghost sm" onClick={() => requestUndo(r.id)}>Undo</button>}
-                {r.undo === "too_old" && <span className="hint" title="Undo works for 30 days">Too old to undo</span>}
+                {showTooOld(r, pr.data?.project.role) && <span className="hint" title="Undo works for 30 days">Too old to undo</span>}
                 {r.undo === "undone" && <span className="hint">Undone</span>}
               </div>
             </div>

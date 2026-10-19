@@ -350,7 +350,7 @@ test.describe("APL-2674 activity delete undo", () => {
     expect(posts).toEqual([{ path: `/api/actions/${actionId}/undo`, body: '{"anyway":false}' }]);
   });
 
-  test("qa:TC-APL2674-070b48b9@v3 AC7 A deleted task stays in Trash with 30 days, and the Leader restores it from Trash and from the Activity row (the toast is not asserted)", async ({ browser }) => {
+  test("qa:TC-APL2674-070b48b9@v4 AC7 Trash and restore half: a deleted task shows 30 days in Trash, and the Leader restores it from Trash and from the Activity row", async ({ browser }) => {
     test.setTimeout(120_000);
     const leader = await zzAccount("leader");
     const projectId = await zzProject(leader);

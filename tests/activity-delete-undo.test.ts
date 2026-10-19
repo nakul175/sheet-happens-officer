@@ -217,7 +217,7 @@ describe("APL-2674 activity delete undo", () => {
     const undo = await editor.c.post(`/api/actions/${row!.id}/undo`);
     expect(undo.status).toBe(403);
     expect(undo.json.error).toBe("Only the project Leader or an Admin can do this.");
-    expect((await editor.c.get(`/api/tasks/${id}`)).status).toBe(404);
+    expect((await leader.c.get(`/api/tasks/${id}`)).status).toBe(404);
     const again = (await editor.c.get(`/api/projects/${projectId}/activity`)).json.items as { id: string; undo: string }[];
     expect(again.find((item) => item.id === row!.id)?.undo).not.toBe("undone");
     const trash = await leader.c.get(`/api/projects/${projectId}/trash`);
@@ -533,7 +533,7 @@ describe("APL-2674 activity delete undo", () => {
     }
   }, 150_000);
 
-  it("qa:TC-APL2674-070b48b9@v3 PROVISIONAL (AC7; NJ ruling pending): a deleted task stays in Trash with 30 days, and the Leader restores it from Trash and from the Activity row (the toast is not asserted)", async () => {
+  it("qa:TC-APL2674-070b48b9@v4 AC7 Trash and restore half: a deleted task shows 30 days in Trash, and the Leader restores it from Trash and from the Activity row", async () => {
     const leader = await account("leader");
     const editor = await account("editor");
     const projectId = await alpha(leader, editor);
@@ -584,4 +584,79 @@ describe("APL-2674 activity delete undo", () => {
     expect((await leader.c.post(`/api/tasks/${keep}/restore`)).status).toBe(200);
     expect((await leader.c.get(`/api/tasks/${keep}`)).status).toBe(200);
   }, 60_000);
+
+  it("qa:TC-APL2674-012b3f52@v1 AC7 toast half: after the Leader moves a task to Trash, the Undo toast and its Undo button disappear after 10 s without being clicked", async () => {
+    const leader = await account("leader");
+    const editor = await account("editor");
+    const projectId = await alpha(leader, editor);
+    // The Leader deletes: an Editor's delete raises no Undo toast by design (APL-2649, tasks.ts canManage).
+    const id = await task(leader, projectId, { title: "ZZ-TEST Toast check" });
+
+    const ctx = await signedIn(leader.email);
+    try {
+      const page = await ctx.newPage();
+      // UndoHost hides the toast with setTimeout(ms = 10000). The page clock is driven by hand, so no real 10 s wait.
+      await page.clock.install();
+      await page.goto(`/projects/${projectId}?task=${id}`, { waitUntil: "load", timeout: 45_000 });
+      const open = page.getByRole("button", { name: "Move to Trash" });
+      await open.waitFor({ state: "visible", timeout: 30_000 });
+      await open.click();
+      await page.getByRole("dialog", { name: "Move to Trash?" }).getByRole("button", { name: "Move to Trash" }).click();
+
+      const toast = page.getByRole("status").filter({ has: page.getByRole("button", { name: "Undo" }) });
+      await expect.poll(() => toast.count(), { timeout: 15_000 }).toBe(1);
+      await page.clock.pauseAt(await page.evaluate(() => Date.now() + 1));
+      await page.clock.runFor(9_000);
+      expect(await toast.count()).toBe(1);
+      await page.clock.runFor(1_000);
+      await expect.poll(() => toast.count(), { timeout: 10_000 }).toBe(0);
+      expect(await page.getByRole("button", { name: "Undo" }).count()).toBe(0);
+      expect((await leader.c.get(`/api/tasks/${id}`)).status).toBe(404);
+    } finally {
+      await ctx.close();
+    }
+  }, 120_000);
+
+  it("qa:TC missing AC6 v2.4 an Editor's own task.deleted row past 30×24h: the Editor sees neither Undo nor \"Too old to undo\", the Leader, an Admin and a Super Admin see \"Too old to undo\" and no Undo, and a Viewer sees no Activity", async () => {
+    const leader = await account("leader");
+    const editor = await account("editor");
+    const viewer = await account("viewer");
+    const root = await superAdmin();
+    const orgAdmin = await admin(root, "ada");
+    const projectId = await alpha(leader, editor);
+    await addMember(leader, projectId, viewer, "VIEWER");
+    const { taskId, what } = await deletedTask(editor, projectId, "ZZ-TEST Fix invoice aged");
+    await ageLog(taskId, editor.id, "task.deleted", 31 * DAY);
+    const name = await displayName(editor);
+
+    const editorCtx = await signedIn(editor.email);
+    try {
+      const page = await openActivity(editorCtx, projectId);
+      const row = deleteRow(page, name, what);
+      await row.waitFor({ state: "visible", timeout: 30_000 });
+      expect(await row.getByRole("button", { name: "Undo" }).count()).toBe(0);
+      expect(await row.innerText()).not.toContain("Too old to undo");
+    } finally {
+      await editorCtx.close();
+    }
+
+    for (const who of [leader, orgAdmin, root]) {
+      const ctx = await signedIn(who.email);
+      try {
+        await expectTooOld(await openActivity(ctx, projectId), name, what);
+      } finally {
+        await ctx.close();
+      }
+    }
+
+    const viewerCtx = await signedIn(viewer.email);
+    try {
+      const page = await openActivity(viewerCtx, projectId);
+      await page.getByText("Only people who work on this project can see Activity.").waitFor({ timeout: 30_000 });
+      expect(await page.getByRole("button", { name: "Undo" }).count()).toBe(0);
+      expect(await page.getByText("Too old to undo").count()).toBe(0);
+    } finally {
+      await viewerCtx.close();
+    }
+  }, 150_000);
 });
