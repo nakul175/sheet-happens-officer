@@ -1,6 +1,9 @@
 // APL-2651: session and access checks run before the body is parsed.
-import { describe, expect, it } from "vitest";
-import { account, admin, BASE, Client, project, superAdmin, task } from "./helpers";
+// Thrown-away people and records use ZZ-TEST names and nakul17+ aliases (self-signup only accepts @aplyd.com).
+// afterAll removes the view and contact, archives the organisation and project, clears the chat, and
+// deactivates the people, all through the API.
+import { afterAll, describe, expect, it } from "vitest";
+import { account, BASE, Client, superAdmin, task, type Account } from "./helpers";
 
 type Res = { status: number; json: { error?: string; issues?: { path: unknown; message: string }[]; [k: string]: unknown } | null };
 
@@ -48,7 +51,60 @@ function expectAccess(r: Res, status: number, error: string) {
 
 const viewState = { assignee: "", flags: ["overdue"], priority: "", sort: "date", group: "section" };
 
-describe("auth before body (APL-2651)", () => {
+const RUN = `${Date.now().toString(36)}${process.pid.toString(36)}`;
+let seq = 0;
+const zz = (label: string) => `ZZ-TEST ${label} ${RUN}-${seq++}`;
+
+/** Everything the test creates, so afterAll can remove it through the API. */
+const made = { people: [] as Account[], projects: [] as string[], orgs: [] as string[], views: [] as { id: string; owner: Account }[], contacts: [] as string[], chats: [] as Account[] };
+
+/** A throwaway person: ZZ-TEST display name, run-unique nakul17+ alias. */
+async function zzAccount(role: string) {
+  const n = seq++;
+  const who = await account(`ZZ-TEST ${role} ${RUN}-${n}`, `nakul17+zz-2651-${RUN}-${role}-${n}@aplyd.com`);
+  made.people.push(who);
+  return who;
+}
+
+async function zzProject(leader: Account, members: { who: Account; role?: "EDITOR" | "VIEWER" }[]) {
+  const r = await leader.c.post("/api/projects", { name: zz("auth before body"), leaderId: leader.id });
+  expect(r.status, JSON.stringify(r.json)).toBe(201);
+  const id = r.json.project.id as string;
+  made.projects.push(id);
+  for (const m of members) {
+    expect((await leader.c.post(`/api/projects/${id}/members`, { userId: m.who.id, role: m.role ?? "EDITOR" })).status).toBe(201);
+  }
+  const sections = (await leader.c.get(`/api/projects/${id}`)).json.project.sections as { id: string }[];
+  return { id, doing: sections[1].id };
+}
+
+afterAll(async () => {
+  const sa = await superAdmin();
+  const problems: string[] = [];
+  const check = (what: string, r: { status: number; json: unknown }, ok: number[]) => {
+    if (!ok.includes(r.status)) problems.push(`${what}: ${r.status} ${JSON.stringify(r.json)}`);
+  };
+  // A saved view belongs to its owner; anyone else is told it does not exist.
+  for (const v of made.views) check(`delete view ${v.id}`, await v.owner.c.del(`/api/views/${v.id}`), [204, 404]);
+  for (const id of made.contacts) check(`remove contact ${id}`, await sa.c.del(`/api/contacts/${id}`), [204, 404]);
+  for (const id of made.orgs) check(`archive org ${id}`, await sa.c.post(`/api/orgs/${id}/archive`, { archive: true }), [200, 409]);
+  for (const id of made.projects) {
+    // Hand the project to the Super Admin, so the throwaway Leader can be deactivated below.
+    const added = await sa.c.post(`/api/projects/${id}/members`, { userId: sa.id, role: "EDITOR" });
+    if (added.status !== 201 && !(added.status === 409 && /already a member/.test(added.json?.error ?? ""))) problems.push(`add member ${id}: ${added.status} ${JSON.stringify(added.json)}`);
+    const led = await sa.c.post(`/api/projects/${id}/leader`, { newLeaderId: sa.id, previousRole: "EDITOR" });
+    if (led.status !== 200 && !(led.status === 400 && /already the Leader/.test(led.json?.error ?? ""))) problems.push(`change leader ${id}: ${led.status} ${JSON.stringify(led.json)}`);
+    check(`archive project ${id}`, await sa.c.post(`/api/projects/${id}/archive`), [200, 409]);
+  }
+  for (const who of made.chats) check(`clear chat ${who.email}`, await who.c.del("/api/concierge/messages"), [200]);
+  for (const who of made.people) {
+    const off = await sa.c.post(`/api/team/${who.id}/deactivate`, { reassign: "leaders" });
+    if (off.status !== 200 && !(off.status === 409 && /already deactivated/.test(off.json?.error ?? ""))) problems.push(`deactivate ${who.email}: ${off.status} ${JSON.stringify(off.json)}`);
+  }
+  expect(problems, problems.join("\n")).toEqual([]);
+});
+
+describe("qa:TC missing auth before body (APL-2651)", () => {
   const routes = [
     ["POST", "/api/actions/bulk-undo", { ids: [] }, "{"],
     ["POST", "/api/concierge/messages", { text: "" }, "{"],
@@ -70,21 +126,26 @@ describe("auth before body (APL-2651)", () => {
 
   it("AC2: no access returns 403 or not-found, not 400; AC3: an allowed user still gets today's 400, and a valid body still works (qa:TC-APL2651-6edd45b6@v1) (qa:TC-APL2651-93d4350b@v1) (qa:TC-APL2651-cb9e6bf3@v1) (qa:TC-APL2651-fb71e2b6@v1)", async () => {
     const sa = await superAdmin();
-    const lead = await account("lead");
-    const editor = await account("ed");
-    const viewer = await account("view");
-    const outsider = await account("out");
-    const orgAdmin = await admin(sa, "orgad");
-    const p = await project(lead, lead, [{ who: editor }, { who: viewer, role: "VIEWER" }]);
-    const taskId = await task(lead, p.id);
-    const view = await lead.c.post(`/api/projects/${p.id}/views`, { name: "Overdue", state: viewState });
+    const lead = await zzAccount("lead");
+    const editor = await zzAccount("editor");
+    const viewer = await zzAccount("viewer");
+    const outsider = await zzAccount("outsider");
+    const orgAdmin = await zzAccount("orgadmin");
+    expect((await sa.c.patch(`/api/team/${orgAdmin.id}`, { orgRole: "ADMIN" })).status).toBe(200);
+    const p = await zzProject(lead, [{ who: editor }, { who: viewer, role: "VIEWER" }]);
+    const taskId = await task(lead, p.id, { title: zz("task") });
+    const view = await lead.c.post(`/api/projects/${p.id}/views`, { name: zz("view").slice(0, 40), state: viewState });
     expect(view.status).toBe(201);
     const viewId = view.json.view.id as string;
-    const org = await lead.c.post("/api/orgs", { name: `Org ${Date.now()}` });
+    made.views.push({ id: viewId, owner: lead });
+    const org = await lead.c.post("/api/orgs", { name: zz("org") });
     expect(org.status).toBe(201);
-    const contact = await lead.c.post(`/api/orgs/${org.json.organisation.id}/contacts`, { name: "Asha" });
+    made.orgs.push(org.json.organisation.id as string);
+    const contact = await lead.c.post(`/api/orgs/${org.json.organisation.id}/contacts`, { name: zz("contact") });
     expect(contact.status).toBe(201);
     const contactId = contact.json.contact.id as string;
+    made.contacts.push(contactId);
+    made.chats.push(lead);
 
     const memberPath = `/api/projects/${p.id}/members/${editor.id}`;
     const sectionPath = `/api/projects/${p.id}/sections/${p.doing}`;
@@ -152,17 +213,19 @@ describe("auth before body (APL-2651)", () => {
     expectBadJson(await hit(lead, "POST", "/api/concierge/messages", "{"));
 
     // A valid body still does what it did before.
-    const renamed = await hit(lead, "PATCH", taskPath, { title: "Still here", expectedUpdatedAt: seen });
+    const stillHere = zz("still here");
+    const renamed = await hit(lead, "PATCH", taskPath, { title: stillHere, expectedUpdatedAt: seen });
     expect(renamed.status).toBe(200);
-    expect(renamed.json!.task).toMatchObject({ title: "Still here" });
+    expect(renamed.json!.task).toMatchObject({ title: stillHere });
 
     const section = await hit(lead, "PATCH", sectionPath, { name: "Doing" });
     expect(section.status).toBe(200);
     expect(section.json).toEqual({ status: "ok" });
 
-    const named = await hit(lead, "PATCH", viewPath, { name: "Kept" });
+    const kept = zz("kept").slice(0, 40);
+    const named = await hit(lead, "PATCH", viewPath, { name: kept });
     expect(named.status).toBe(200);
-    expect(named.json!.view).toMatchObject({ name: "Kept" });
+    expect(named.json!.view).toMatchObject({ name: kept });
 
     const edited = await hit(lead, "PATCH", contactPath, { role: "CEO" });
     expect(edited.status).toBe(200);
@@ -187,7 +250,7 @@ describe("auth before body (APL-2651)", () => {
     expect(role.status).toBe(200);
     expect(role.json).toEqual({ status: "ok" });
 
-    const said = await hit(lead, "POST", "/api/concierge/messages", { text: "hello" });
+    const said = await hit(lead, "POST", "/api/concierge/messages", { text: zz("hello") });
     expect(said.status).toBe(200);
     expect(said.json!.error).toBeUndefined();
     expect(said.json!.disabled).toMatchObject({ code: "NOT_ENABLED" });
