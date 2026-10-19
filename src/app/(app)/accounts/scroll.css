@@ -1,0 +1,22 @@
+/* APL-2692: an accounts table may scroll sideways inside this box. The page must not. */
+.acct-scroll {
+  overflow-x: auto;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.acct-scroll:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: 2px;
+}
+
+@media (max-width: 1023px) {
+  /* .tbl:not(.stack) makes the table its own scroller. Keep that scroll on the wrapper,
+     which is the keyboard target (tabindex and an accessible name live on this box). */
+  .acct-scroll > .tbl {
+    display: table;
+    width: max-content;
+    min-width: 100%;
+    overflow: visible;
+  }
+}
