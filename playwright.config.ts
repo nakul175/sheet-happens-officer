@@ -1,5 +1,15 @@
+import { readdirSync, readFileSync } from "node:fs";
+import path from "node:path";
 import { defineConfig } from "@playwright/test";
 import { BASE_URL } from "./tests/e2e/base-url";
+
+// Story specs that are Vitest files (`npm test` runs them) share tests/e2e/stories with the Playwright ones. Loading one
+// here fails at `import "vitest"` and stops Playwright listing anything, so every spec that imports vitest is ignored.
+// Found by reading the files, so a new Vitest story never breaks `--list` and a new Playwright story is never dropped.
+const STORIES = path.join(__dirname, "tests/e2e/stories");
+const VITEST_SPECS = readdirSync(STORIES)
+  .filter((f) => f.endsWith(".spec.ts") && /from\s+["']vitest["']/.test(readFileSync(path.join(STORIES, f), "utf8")))
+  .map((f) => `**/stories/${f}`);
 
 // Story-level browser tests (tests/e2e/stories/<issue-id>.spec.ts).
 // They run against the LOCAL server (http://localhost:3100) unless a target is set, and read every credential from the environment:
@@ -12,12 +22,10 @@ import { BASE_URL } from "./tests/e2e/base-url";
 // Nothing here is ever pointed at production. All test data is named "ZZ-TEST ..." and cleaned up by the spec.
 
 export default defineConfig({
-  // Discovery stays inside tests/e2e: only *.spec.ts under tests/e2e/stories, minus the Vitest specs below.
+  // Discovery stays inside tests/e2e: only *.spec.ts under tests/e2e/stories, minus the Vitest specs (above).
   testDir: "./tests/e2e/stories",
   testMatch: "**/*.spec.ts",
-  // These story specs are Vitest files (`npm test` runs them). Loading them here fails at
-  // `import "vitest"` and stops Playwright listing anything. APL-2522-ac.spec.ts is the Playwright one.
-  testIgnore: ["**/APL-2522.spec.ts", "**/APL-2655.spec.ts", "**/APL-2679.spec.ts", "**/APL-2714.spec.ts", "**/APL-2739.spec.ts"],
+  testIgnore: VITEST_SPECS,
   timeout: 60_000,
   expect: { timeout: 10_000 },
   workers: 1,
