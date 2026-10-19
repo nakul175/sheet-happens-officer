@@ -1,0 +1,60 @@
+# PR intake check.
+#
+# Runs on pull_request opened, edited, synchronize, and reopened when the base
+# branch is main or qa/story-e2e. An edit of the description re-runs this job
+# without a new push, so fixing the body is enough.
+#
+# The job fails, with one message per missing item, when any of these holds:
+# 1. The body has no Risk line matching
+#    /^\s*\**Risk\**\s*:\s*\**(Low|Medium|High|Critical)\b/im
+#    (for example "Risk: Low").
+# 2. The body's Self-check section does not contain the current head SHA.
+#    The full SHA counts, and so does a prefix of at least 7 characters that
+#    matches the start of the head SHA.
+# 3. The pull request touches UI code (src/app/**, including src/app/api/**, or
+#    src/components/**) and does not include tests/e2e/stories/APL-xxxx.spec.ts
+#    for an APL-xxxx id in the title or a "Refs APL-xxxx" line in the body.
+#    Every it/test title in that spec must contain a qa:TC marker: qa:TC-<id>
+#    or the literal "qa:TC missing".
+#
+# Rule 3 does not apply (rules 1 and 2 still do) when:
+# - every changed file is under tests/ or is a Vitest config (test-only);
+# - every changed non-test file is under src/app/api/**, src/lib/**, scripts/**,
+#   or jobs/, and the pull request adds or changes at least one Vitest test
+#   (API/job-only, covered by Vitest);
+# - the body has an explicit line "No story spec: <reason>" with a reason.
+#
+# Uses the default GITHUB_TOKEN. Permissions below are read-only. The script
+# reads GITHUB_TOKEN from the environment and never prints it.
+name: intake
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+    branches:
+      - main
+      - qa/story-e2e
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: intake-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  intake:
+    name: intake
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Check pull request intake
+        run: node scripts/ci/intake-check.mjs
