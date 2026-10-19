@@ -60,7 +60,7 @@ describe("auth before body (APL-2651)", () => {
     ["PATCH", "/api/projects/missing-project/members/missing-user", { role: "LEADER" }, "{"],
   ] as const;
 
-  it("AC1: no session returns 401 and no validation details for a bad body", async () => {
+  it("AC1: no session returns 401 and no validation details for a bad body (qa:TC-APL2651-507ede86@v1) (qa:TC-APL2651-0874d1b5@v1)", async () => {
     const anon = new Client();
     for (const [method, path, invalid] of routes) {
       expectSignedOut(await call(anon, method, path, invalid));
@@ -68,7 +68,7 @@ describe("auth before body (APL-2651)", () => {
     }
   });
 
-  it("AC2: no access returns 403 or not-found, not 400; AC3: an allowed user still gets today's 400, and a valid body still works", async () => {
+  it("AC2: no access returns 403 or not-found, not 400; AC3: an allowed user still gets today's 400, and a valid body still works (qa:TC-APL2651-6edd45b6@v1) (qa:TC-APL2651-93d4350b@v1) (qa:TC-APL2651-cb9e6bf3@v1) (qa:TC-APL2651-fb71e2b6@v1) (qa:TC-APL2651-ae74761c@v1) (qa:TC-APL2651-7c84a16b@v1)", async () => {
     const sa = await superAdmin();
     const lead = await account("lead");
     const editor = await account("ed");

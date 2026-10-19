@@ -427,7 +427,7 @@ describe("tasks (4.x, 5.x)", () => {
     expect(cleared.json.task.blockedReason).toBeNull();
   });
 
-  it("APL-2494 AC2: {blocked:false} and {blocked:true} succeed with no expectedUpdatedAt", async () => {
+  it("APL-2494 AC2: {blocked:false} and {blocked:true} succeed with no expectedUpdatedAt (qa:TC-APL2494-fd46a8ec@v1)", async () => {
     const lead = await account("lead");
     const ed = await account("editor");
     const p = await project(lead, lead, [{ who: ed }]);
