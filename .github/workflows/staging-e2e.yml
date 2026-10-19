@@ -5,6 +5,7 @@
 # Secrets (repository settings): STAGING_USER, STAGING_PASS, SHO_QA_PASS, SHO_ADMIN_EMAIL, SHO_ADMIN_PASS, SHO_MEMBER_EMAIL,
 # SHO_MEMBER_PASS, and ZZ_TEST_01_EMAIL / ZZ_TEST_01_PASS ... ZZ_TEST_20_EMAIL / ZZ_TEST_20_PASS (01-05 Super Admins, 06-20 plain Members).
 # SHO_QA_PASS is the shared password for the nakul17+ story accounts. Story specs skip without it, and Playwright then exits 0.
+# Optional, names only, never echoed: MAIL_SINK_TOKEN. Mailbox-dependent specs skip when it is absent.
 # The previews use the same STAGING_USER / STAGING_PASS basic-auth gate as staging.
 # They reach the jobs as environment variables only and are never echoed. Runs queue in one group so two never run at once.
 # This workflow is workflow_dispatch only. It does not run on pull_request or pull_request_target, so a fork cannot read these secrets.
@@ -22,7 +23,7 @@
 #               download, or a missing-report marker fails the job. It also fails when run is 0 or skipped equals total.
 #   report      merges every job's blob report into one HTML report.
 #
-# max_parallel: the staging database is shared with production and allows 25 connections. Do not raise it above 5 until NJ approves
+# max_parallel: staging uses its own separate sho_staging database and allows 25 connections. Do not raise it above 5 until NJ approves
 # a connection pool (PgBouncer) or a bigger database.
 #
 # Traces are OFF unless the "trace" input asks for them. A trace cannot be redacted: it holds the sign-in request body (the password),
@@ -194,6 +195,7 @@ jobs:
       ZZ_PREFIX: ZZ-TEST-${{ matrix.nn }}
       SHARD_ROLE: ${{ matrix.role }}
       PEER_ROLE: ${{ matrix.role == 'ADMIN' && 'MEMBER' || 'ADMIN' }}
+      MAIL_SINK_TOKEN: ${{ secrets.MAIL_SINK_TOKEN }}
     steps:
       - name: Check the secrets are set (names only, never values)
         env:
@@ -208,6 +210,7 @@ jobs:
           SHARD_PASS: ${{ secrets[format('ZZ_TEST_{0}_PASS', matrix.nn)] }}
           PEER_EMAIL: ${{ secrets[format('ZZ_TEST_{0}_EMAIL', matrix.peer)] }}
           PEER_PASS: ${{ secrets[format('ZZ_TEST_{0}_PASS', matrix.peer)] }}
+          MAIL_SINK_TOKEN: ${{ secrets.MAIL_SINK_TOKEN }}
           NN: ${{ matrix.nn }}
           PEER: ${{ matrix.peer }}
         run: |
@@ -222,6 +225,9 @@ jobs:
           if [ -n "$missing" ]; then
             echo "::error::Shard $NN: missing repository secrets:$missing. Add them in Settings > Secrets and variables > Actions."
             exit 1
+          fi
+          if [ -z "${MAIL_SINK_TOKEN:-}" ]; then
+            echo "::warning::MAIL_SINK_TOKEN is not set. Mailbox-dependent specs will skip."
           fi
           echo "Shard $NN: all secrets are set (own account ZZ_TEST_$NN, partner ZZ_TEST_$PEER)."
 
@@ -255,6 +261,7 @@ jobs:
           SHARD_PASS: ${{ secrets[format('ZZ_TEST_{0}_PASS', matrix.nn)] }}
           PEER_EMAIL: ${{ secrets[format('ZZ_TEST_{0}_EMAIL', matrix.peer)] }}
           PEER_PASS: ${{ secrets[format('ZZ_TEST_{0}_PASS', matrix.peer)] }}
+          MAIL_SINK_TOKEN: ${{ secrets.MAIL_SINK_TOKEN }}
           PLAYWRIGHT_JSON_OUTPUT_FILE: playwright-report.json
           FILES: ${{ needs.plan.outputs.parallel }}
           TRACE: ${{ inputs.trace }}
@@ -300,6 +307,7 @@ jobs:
       BASE_URL: ${{ needs.plan.outputs.base_url }}
       ZZ_PREFIX: ZZ-TEST-SERIAL
       PLAYWRIGHT_BLOB_OUTPUT_NAME: report-serial.zip
+      MAIL_SINK_TOKEN: ${{ secrets.MAIL_SINK_TOKEN }}
     steps:
       - name: Check the secrets are set (names only, never values)
         env:
@@ -310,6 +318,7 @@ jobs:
           SHO_MEMBER_EMAIL: ${{ secrets.SHO_MEMBER_EMAIL }}
           SHO_MEMBER_PASS: ${{ secrets.SHO_MEMBER_PASS }}
           SHO_QA_PASS: ${{ secrets.SHO_QA_PASS }}
+          MAIL_SINK_TOKEN: ${{ secrets.MAIL_SINK_TOKEN }}
         run: |
           missing=""
           for n in STAGING_USER STAGING_PASS SHO_ADMIN_EMAIL SHO_ADMIN_PASS SHO_MEMBER_EMAIL SHO_MEMBER_PASS SHO_QA_PASS; do
@@ -318,6 +327,9 @@ jobs:
           if [ -n "$missing" ]; then
             echo "::error::Missing repository secrets:$missing. Add them in Settings > Secrets and variables > Actions."
             exit 1
+          fi
+          if [ -z "${MAIL_SINK_TOKEN:-}" ]; then
+            echo "::warning::MAIL_SINK_TOKEN is not set. Mailbox-dependent specs will skip."
           fi
           echo "All required secrets are set."
 
@@ -338,6 +350,7 @@ jobs:
           SHO_MEMBER_EMAIL: ${{ secrets.SHO_MEMBER_EMAIL }}
           SHO_MEMBER_PASS: ${{ secrets.SHO_MEMBER_PASS }}
           SHO_QA_PASS: ${{ secrets.SHO_QA_PASS }}
+          MAIL_SINK_TOKEN: ${{ secrets.MAIL_SINK_TOKEN }}
           PLAYWRIGHT_JSON_OUTPUT_FILE: playwright-report.json
           FILES: ${{ needs.plan.outputs.serial }}
           TRACE: ${{ inputs.trace }}
