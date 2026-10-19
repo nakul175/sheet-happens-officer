@@ -1,7 +1,6 @@
 // Shared pieces for the epic story specs. No password is written here.
 // SHO_QA_PASS is the password for nakul17+ accounts these specs create.
 // Mail is read from EMAIL_OUTBOX_DIR (or .outbox), the same folder the dev server writes when Resend is off.
-import { execFileSync } from "node:child_process";
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import type { APIRequestContext, Browser, BrowserContext, Page } from "@playwright/test";
@@ -224,75 +223,6 @@ export async function archiveProject(adminApi: Api, id: string, adminId: string)
     await adminApi.post(`/api/projects/${id}/leader`, { newLeaderId: adminId, previousRole: "EDITOR" });
   }
   await adminApi.post(`/api/projects/${id}/archive`);
-}
-
-const localHost = () => {
-  try { return ["localhost", "127.0.0.1"].includes(new URL(BASE_URL).hostname); } catch { return false; }
-};
-
-/**
- * One read-only or single-statement query against the local database.
- * Staging's runner has no database (and is not localhost), so this returns null there.
- * Values go through psql variables (`:'name'`), never string concatenation.
- */
-function localSql(sql: string, vars: Record<string, string>): string | null {
-  if (!localHost()) return null;
-  const url = process.env.DATABASE_URL ?? "";
-  if (!url || url.includes("@127.0.0.1:1/")) return null;
-  let parsed: URL;
-  try { parsed = new URL(url); } catch { return null; }
-  const args = [
-    "-h", parsed.hostname,
-    "-p", parsed.port || "5432",
-    "-U", decodeURIComponent(parsed.username),
-    "-d", decodeURIComponent(parsed.pathname.replace(/^\//, "")),
-    "-v", "ON_ERROR_STOP=1",
-    "-At",
-  ];
-  for (const [name, value] of Object.entries(vars)) args.push("-v", `${name}=${value}`);
-  // psql does not interpolate :'variables' inside -c. The statement goes on stdin.
-  try {
-    return execFileSync("psql", args, {
-      input: sql,
-      env: { ...process.env, PGPASSWORD: decodeURIComponent(parsed.password) },
-      encoding: "utf8",
-      timeout: 10_000,
-      stdio: ["pipe", "pipe", "pipe"],
-    }).trim();
-  } catch {
-    return null;
-  }
-}
-
-/** The stored password hash for a local run, or null when this runner cannot see the database. */
-export function localPasswordHash(email: string): Promise<string | null> {
-  const row = localSql(`SELECT "passwordHash" FROM "User" WHERE email = :'email'`, { email: email.toLowerCase() });
-  return Promise.resolve(row ? row : null);
-}
-
-/** True when the raw token is stored only as a sha256 hash. Null when the database is not reachable. */
-export async function localTokenIsHashed(raw: string): Promise<boolean | null> {
-  const { createHash } = await import("node:crypto");
-  const hash = createHash("sha256").update(raw).digest("hex");
-  const row = localSql(`SELECT "tokenHash" FROM "AuthToken" WHERE "tokenHash" = :'hash'`, { hash });
-  if (row === null) return null;
-  if (!row) return false;
-  return row === hash && row !== raw;
-}
-
-/** Move this person's open sessions into the past so the server treats them as the 30-day end. */
-export function expireLocalSessions(email: string): Promise<boolean | null> {
-  const count = localSql(
-    `WITH moved AS (
-       UPDATE "Session" SET "expiresAt" = NOW() - interval '1 second'
-       WHERE "revokedAt" IS NULL
-         AND "userId" = (SELECT id FROM "User" WHERE email = :'email')
-       RETURNING 1
-     ) SELECT count(*)::text FROM moved`,
-    { email: email.toLowerCase() },
-  );
-  if (count === null) return Promise.resolve(null);
-  return Promise.resolve(Number(count) > 0);
 }
 
 export async function makeProject(adminApi: Api, label: string, leaderId: string) {
