@@ -11,7 +11,7 @@ export function ResendLink() {
     const email = recalledEmail();
     if (!email) return router.push("/signin");
     await post("/api/auth/resend-verification", { email });
-    router.push("/check-email");
+    router.push("/check-email?resent=1"); // APL-2742: neutral screen, never "we sent"
   }
   return (
     <button type="button" onClick={go} className={styles.primary}>

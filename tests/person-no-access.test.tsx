@@ -297,7 +297,7 @@ describe("Person page shows a plain state for each failure", () => {
     const page = await openPerson();
     const text = page.textContent ?? "";
     expect(text).toContain("Set your own password");
-    expect(text).toContain("The emailed one still works until you do.");
+    expect(text).not.toContain("still works"); // AC7 of APL-2624: the emailed password is temporary
     expect(page.querySelector("a[href='/profile']")?.textContent).toBe("Change password");
     expect(text).not.toContain(NO_ACCESS);
     expect(page.innerHTML).not.toContain(P2_NAME);

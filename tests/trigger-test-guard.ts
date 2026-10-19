@@ -56,7 +56,7 @@ export function connectionTarget(raw: string, schema: string): TriggerTestTarget
 
 /**
  * Allow only when the host is localhost or 127.0.0.1 AND the database name
- * starts with sho_test_. A remote host is never allowed. Always refuse
+ * is sho_test (the CI database, APL-2764) or starts with sho_test_. A remote host is never allowed. Always refuse
  * defaultdb, sho_staging, schema public, and sho_pr*, even when the second
  * argument is "1" (TRIGGER_TEST_ALLOW). That argument is ignored.
  */
@@ -69,7 +69,8 @@ export function triggerTestAllowed(target: TriggerTestTarget, allowFlag?: string
   if (database === "defaultdb" || database === "sho_staging") return false;
   if (schema === "public" || schema.startsWith("sho_pr")) return false;
 
-  return (host === "localhost" || host === "127.0.0.1") && database.startsWith("sho_test_");
+  const testDatabase = database === "sho_test" || database.startsWith("sho_test_");
+  return (host === "localhost" || host === "127.0.0.1") && testDatabase;
 }
 
 /** Parse first, then apply the allow rule. Overrides and sockets are refused. */
