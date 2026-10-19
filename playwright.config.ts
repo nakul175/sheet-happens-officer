@@ -1,15 +1,7 @@
-import { readdirSync, readFileSync } from "node:fs";
-import path from "node:path";
 import { defineConfig } from "@playwright/test";
 import { BASE_URL } from "./tests/e2e/base-url";
-
-// Story specs that are Vitest files (`npm test` runs them) share tests/e2e/stories with the Playwright ones. Loading one
-// here fails at `import "vitest"` and stops Playwright listing anything, so every spec that imports vitest is ignored.
-// Found by reading the files, so a new Vitest story never breaks `--list` and a new Playwright story is never dropped.
-const STORIES = path.join(__dirname, "tests/e2e/stories");
-const VITEST_SPECS = readdirSync(STORIES)
-  .filter((f) => f.endsWith(".spec.ts") && /from\s+["']vitest["']/.test(readFileSync(path.join(STORIES, f), "utf8")))
-  .map((f) => `**/stories/${f}`);
+// Every story spec that imports vitest. scripts/ci/story-specs-no-vitest.test.mjs checks the rest against this same list.
+import { VITEST_SPECS } from "./tests/e2e/vitest-specs.cjs";
 
 // Story-level browser tests (tests/e2e/stories/<issue-id>.spec.ts).
 // They run against the LOCAL server (http://localhost:3100) unless a target is set, and read every credential from the environment:
