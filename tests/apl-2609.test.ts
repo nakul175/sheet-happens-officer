@@ -4,18 +4,22 @@
 // The server runs with the default `all`, so these call src/lib directly (same database) and flip process.env.CRM_VISIBLE
 // in this process; `crmMode()` reads it at call time. tests/e2e/stories/APL-2609.spec.ts drives a real server per mode.
 // Pam left no qa:TC id on the issue, so every title says "qa:TC missing".
-// Everything this file makes is named ZZ-TEST and cleaned up through the API in afterAll (projects and the organisation
-// archived, chats cleared, sessions signed out). The shared root Super Admin is never used: the Admin and the Super Admin
-// are ZZ-TEST people acting with that org role, which is what src/lib reads from the Actor.
+// Everything this file makes is named ZZ-TEST and cleaned up in afterAll, never by writing to the database: through the API
+// (leadership handed to the ZZ-TEST Super Admin, projects and the organisation archived, chats cleared, sessions signed out),
+// and the per-run people deactivated with src/lib/team's deactivate(), the function the deactivate route calls, because this
+// file has no real Admin session. The shared root Super Admin is never used: the Admin and the Super Admin are ZZ-TEST people
+// acting with that org role on the Actor. The Super Admin is one fixed ZZ-TEST account reused by every run, so it is the
+// only ZZ-TEST account left active.
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { account, istDate, task, type Account } from "./helpers";
-import { actor, lastResultText, say, script, tu, useFakeModel } from "./concierge-helpers";
+import { actor, lastData, lastResultText, say, script, tu, useFakeModel } from "./concierge-helpers";
 import type { Actor } from "../src/lib/access";
 import { crmMode } from "../src/lib/crm";
 import { getTask, listTasks, myTasks } from "../src/lib/tasks";
 import { search } from "../src/lib/search";
 import { findTasks, listProjects, myTasks as conciergeMyTasks, projectTasks, quickAnswer } from "../src/lib/concierge/reads";
-import { sendMessage } from "../src/lib/concierge/engine";
+import { answerChoice, sendMessage } from "../src/lib/concierge/engine";
+import { deactivate } from "../src/lib/team";
 import { state as chatState } from "../src/lib/concierge/thread";
 
 const STAGE = "Proposal";
@@ -27,23 +31,36 @@ type World = {
   ed: Actor; adm: Actor; sa: Actor;
 };
 let w: World;
-const made: { people: Account[]; lead?: Account; projectIds: string[]; orgId?: string } = { people: [], projectIds: [] };
+const made: { people: Account[]; lead?: Account; sa?: Account; plainId?: string; projectIds: string[]; orgId?: string } = { people: [], projectIds: [] };
 
-/** Through the API only: the Leader archives what they made, then each person clears their chat and signs out. Any failure fails the run. */
+/**
+ * The lead hands both projects to the Super Admin (a Leader cannot be deactivated), the Super Admin archives them, the lead
+ * archives the organisation, everyone clears their chat and signs out, and the Super Admin deactivates the per-run people.
+ * Every step must succeed, or the run fails with the list.
+ */
 async function cleanup() {
   const failed: string[] = [];
   const must = async (what: string, r: Promise<{ status: number }>) => {
     const res = await r.catch(() => ({ status: 0 }));
     if (res.status < 200 || res.status > 299) failed.push(`${what}: ${res.status}`);
   };
-  const lead = made.lead;
-  if (lead) {
-    for (const id of made.projectIds) await must(`archive project ${id}`, lead.c.post(`/api/projects/${id}/archive`));
+  const { lead, sa } = made;
+  if (lead && sa) {
+    if (made.plainId) await must("add the Super Admin to the plain project", lead.c.post(`/api/projects/${made.plainId}/members`, { userId: sa.id, role: "EDITOR" }));
+    for (const id of made.projectIds) {
+      await must(`hand project ${id} to the Super Admin`, lead.c.post(`/api/projects/${id}/leader`, { newLeaderId: sa.id, previousRole: "EDITOR" }));
+      await must(`archive project ${id}`, sa.c.post(`/api/projects/${id}/archive`));
+    }
     if (made.orgId) await must(`archive organisation ${made.orgId}`, lead.c.post(`/api/orgs/${made.orgId}/archive`, { archive: true }));
   }
   for (const who of made.people) {
     await must(`clear chat of ${who.email}`, who.c.del("/api/concierge/messages"));
     await must(`sign out ${who.email}`, who.c.post("/api/auth/signout"));
+  }
+  if (sa) {
+    for (const who of made.people.filter((p) => p.id !== sa.id)) {
+      try { await deactivate(actor(sa, "SUPER_ADMIN"), who.id, "leaders"); } catch (e) { failed.push(`deactivate ${who.email}: ${(e as Error).message}`); }
+    }
   }
   if (failed.length) throw new Error(`ZZ-TEST cleanup failed: ${failed.join("; ")}`);
 }
@@ -107,7 +124,8 @@ describe("qa:TC missing APL-2609 CRM_VISIBLE hides deals from My tasks, search, 
   beforeAll(async () => {
     const run = `${Date.now().toString(36)}${process.pid.toString(36)}`;
     const zzPerson = (role: string) => account(`ZZ-TEST cv2609 ${role}`, `zz-test-cv2609-${role}-${run}@aplyd.com`);
-    const saAcc = await zzPerson("superadmin");
+    const saAcc = await account("ZZ-TEST cv2609 superadmin", "zz-test-cv2609-superadmin@aplyd.com");
+    made.sa = saAcc;
     const adAcc = await zzPerson("admin");
     const lead: Account = await zzPerson("lead");
     const edAcc: Account = await zzPerson("editor");
@@ -133,6 +151,7 @@ describe("qa:TC missing APL-2609 CRM_VISIBLE hides deals from My tasks, search, 
     const plain = await lead.c.post("/api/projects", { name: `ZZ-TEST Plain ${tag}`, leaderId: lead.id });
     expect(plain.status, JSON.stringify(plain.json)).toBe(201);
     const p = { id: plain.json.project.id as string };
+    made.plainId = p.id;
     made.projectIds.push(p.id);
     expect((await lead.c.post(`/api/projects/${p.id}/members`, { userId: edAcc.id, role: "EDITOR" })).status).toBe(201);
     const plainTaskTitle = `ZZ-TEST Plain step ${tag}`;
@@ -246,5 +265,23 @@ describe("qa:TC missing APL-2609 CRM_VISIBLE hides deals from My tasks, search, 
     // Nothing was deleted: with the CRM visible again the history is back.
     setMode("all");
     expect(await shown(w.ed)).toContain(w.dealName);
+  });
+
+  it("qa:TC missing AC4 AC8: an open Narrow it down asked while the CRM was visible never reaches the model once it is hidden", async () => {
+    setMode("all");
+    for (let i = 0; i < 7; i++) await task(made.lead!, made.plainId!, { title: `ZZ-TEST review ${w.tag} ${i}`, assigneeId: w.ed.id, dueDate: istDate(10 + i) });
+    script(
+      () => [tu("find_tasks", { text: `review ${w.tag}` })],
+      (r) => [tu("ask_choice", { question: "Which review?", kind: "task", ids: lastData(r).tasks.map((t: { id: string }) => t.id) })],
+    );
+    const q = (await sendMessage(w.ed, `ZZ-TEST move the ${w.dealName} review to Friday`)).messages[1];
+    expect(q.choices?.some((c) => c.id === "narrow")).toBe(true);
+    await answerChoice(w.ed, q.id, "narrow");
+    setMode("off");
+    let prompt = "";
+    script((req) => { prompt = JSON.stringify(req.messages); return [say("Noted.")]; });
+    await sendMessage(w.ed, "ZZ-TEST the one due Friday");
+    expect(prompt).toContain("ZZ-TEST the one due Friday");
+    expect(prompt).not.toContain(w.dealName);
   });
 });

@@ -85,8 +85,8 @@ export async function thread(user: Actor, limit = 300): Promise<Message[]> {
 }
 
 /** A question still waiting for an answer is dropped when the person sends something else (SHO-US-8.4 AC6). */
-export async function dropPendingChoices(userId: string) {
-  const last = await db.chatMessage.findFirst({ where: { userId, role: "ASSISTANT" }, orderBy: [{ createdAt: "desc" }, { id: "desc" }] });
+export async function dropPendingChoices(user: Actor) {
+  const last = await db.chatMessage.findFirst({ where: { ...(await chatWhere(user)), role: "ASSISTANT" }, orderBy: [{ createdAt: "desc" }, { id: "desc" }] });
   if (!last) return;
   const s = parse(last.content);
   if (s.kind === "choices" && !s.choiceAnswered) await saveStored(last.id, { ...s, choiceAnswered: "dropped" });

@@ -173,10 +173,11 @@ export async function sendMessage(user: Actor, text: string, now = new Date()) {
   const disabled = await disabledFor(user.id, now);
   if (disabled) return { messages: [] as Message[], disabled };
   // A pending question is dropped by anything else the person sends (SHO-US-8.4 AC6).
-  const last = await db.chatMessage.findFirst({ where: { userId: user.id }, orderBy: [{ createdAt: "desc" }, { id: "desc" }] });
+  // Through chatWhere: an open "Narrow it down" written while the CRM was visible must not reach the prompt (APL-2609).
+  const last = await db.chatMessage.findFirst({ where: await chatWhere(user), orderBy: [{ createdAt: "desc" }, { id: "desc" }] });
   const lastStored = last ? parse(last.content) : null;
   const narrowFor = last?.role === "ASSISTANT" ? lastStored?.pending?.narrowFor : undefined;
-  await dropPendingChoices(user.id);
+  await dropPendingChoices(user);
   const row = await addMessage(user, "USER", { kind: "text", text: clean });
   const modelText = narrowFor ? `Earlier request: "${narrowFor}"\nThe person has now added: "${clean}"\nTreat these as one request.` : clean;
   return respond(user, row, modelText, narrowFor ? `${narrowFor} (${clean})` : clean, true, now);
@@ -185,7 +186,7 @@ export async function sendMessage(user: Actor, text: string, now = new Date()) {
 /** POST /quick/[id]: a plain query, no model call, no cap. */
 export async function quickAction(user: Actor, id: string, now = new Date(), projectId?: string) {
   const a = await quickAnswer(user, id, now, projectId);
-  await dropPendingChoices(user.id);
+  await dropPendingChoices(user);
   const asked = await addMessage(user, "USER", { kind: "text", text: a.q.label });
   const links = a.tasks.map((t) => ({ label: t.title, href: hrefOf.task(t.id) }));
   const reply = await addMessage(user, "ASSISTANT", { kind: "answer", text: a.text, ...(links.length ? { links } : {}) });

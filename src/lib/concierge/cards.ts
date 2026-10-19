@@ -7,7 +7,7 @@ import { reqCtx, type ReqCtx } from "@/lib/reqctx";
 import { checkUndo, undoAction } from "@/lib/undo";
 import { UNDO_DAYS, isUndoable } from "@/lib/undoable";
 import { buildCard, checkHandover, execute, fingerprint, recheck, summaryOf, type Op } from "@/lib/concierge/changes";
-import { addMessage, casStored, ownMessage, parse, present } from "@/lib/concierge/thread";
+import { addMessage, casStored, chatWhere, ownMessage, parse, present } from "@/lib/concierge/thread";
 import type { Card, Message, Stored } from "@/lib/concierge/types";
 
 async function ownCard(user: Actor, cardId: string) {
@@ -128,7 +128,7 @@ export async function cancelCard(user: Actor, cardId: string) {
 export async function undoCard(user: Actor, cardId: string, anyway = false) {
   const { row } = await ownCard(user, cardId);
   const resultId = (parse(row.content).internal)?.resultMessageId;
-  const resultRow = resultId ? await db.chatMessage.findFirst({ where: { id: resultId, userId: user.id } }) : null;
+  const resultRow = resultId ? await db.chatMessage.findFirst({ where: { ...(await chatWhere(user)), id: resultId } }) : null;
   const rs = resultRow ? parse(resultRow.content) : null;
   if (!resultRow || !rs?.result || !rs.internal) throw new ApiError(404, "Nothing to undo");
   if (!rs.result.undoable) {

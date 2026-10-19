@@ -308,7 +308,8 @@ describe("qa:TC missing APL-2609 CRM_VISIBLE hides deals on a real server per mo
 
     // One world on the shared database, made through the `all` server.
     const open = server("all");
-    const emails = { lead: `lead.${tag}@aplyd.com`, editor: `editor.${tag}@aplyd.com`, admin: `admin.${tag}@aplyd.com` };
+    // QA ruling: zz-test-* or nakul17+ addresses only. All mail goes to this run's local outbox.
+    const emails = { lead: `zz-test-2609-lead-${runId}@aplyd.com`, editor: `zz-test-2609-editor-${runId}@aplyd.com`, admin: `zz-test-2609-admin-${runId}@aplyd.com` };
     people.superAdmin = await signIn(open, "ZZ-TEST super admin", ZZ_SUPER_EMAIL);
     const lead = await signIn(open, "ZZ-TEST lead", emails.lead.toLowerCase());
     const editor = await signIn(open, "ZZ-TEST editor", emails.editor.toLowerCase());
