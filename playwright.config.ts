@@ -12,6 +12,8 @@ import { BASE_URL } from "./tests/e2e/base-url";
 
 export default defineConfig({
   testDir: "./tests/e2e/stories",
+  // APL-2522.spec.ts is the Vitest approver spec. Playwright runs APL-2522-ac.spec.ts.
+  testIgnore: "**/APL-2522.spec.ts",
   timeout: 60_000,
   expect: { timeout: 10_000 },
   workers: 1,
@@ -27,7 +29,8 @@ export default defineConfig({
   outputDir: "test-results/e2e",
   projects: [
     // Phone stories (forms, the task sheet, the installable app) run on the mobile project.
-    { name: "chromium", testIgnore: /APL-2551\.spec\.ts|APL-2555\.spec\.ts|APL-2558\.spec\.ts/ },
+    // A project testIgnore replaces the top-level one, so chromium repeats the APL-2522.spec.ts (Vitest) ignore.
+    { name: "chromium", testIgnore: /APL-2551\.spec\.ts|APL-2555\.spec\.ts|APL-2558\.spec\.ts|(^|\/)APL-2522\.spec\.ts$/ },
     { name: "mobile", testMatch: /APL-2551\.spec\.ts|APL-2555\.spec\.ts|APL-2558\.spec\.ts/, use: { ...devices["Pixel 5"] } },
   ],
 });

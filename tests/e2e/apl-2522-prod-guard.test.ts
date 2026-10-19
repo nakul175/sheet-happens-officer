@@ -17,7 +17,7 @@ function runSpec(overrides: { BASE_URL: string; TASKBOARD_URL: string; STAGING_U
   const result = spawnSync(process.execPath, [
     path.join(process.cwd(), "node_modules/vitest/vitest.mjs"),
     "run",
-    "tests/e2e/apl-2522.spec.ts",
+    "tests/e2e/stories/APL-2522.spec.ts",
     "--config",
     "vitest.config.mts",
   ], {

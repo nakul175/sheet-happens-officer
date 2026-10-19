@@ -7,8 +7,8 @@
 // nakul17+…@aplyd.com.
 import { afterAll, describe, expect, it } from "vitest";
 import { canDropOnSection, closeControlOffered, completeTickAllowed, moveMenuSections } from "@/lib/approver-ui";
-import { assertStoryTargetAllowed } from "./base-url";
-import { account, superAdmin, task, withVersion, type Account } from "../helpers";
+import { assertStoryTargetAllowed } from "../base-url";
+import { account, superAdmin, task, withVersion, type Account } from "../../helpers";
 
 assertStoryTargetAllowed();
 

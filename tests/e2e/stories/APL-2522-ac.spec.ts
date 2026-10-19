@@ -1,4 +1,3 @@
-// Playwright story for SHO-US-4.6. APL-2522.spec.ts is the Vitest spec and is not run here.
 // SHO-US-4.6 Optional approver on a task (Linear APL-2522).
 // The Super Admin acts as Leader/Admin; the plain Member (SHO_MEMBER_*) is the Editor who does the work. A ZZ-TEST person who cannot sign in
 // (a reserved .invalid address) stands in as the second Editor / approver. Tests that need the Member skip without SHO_MEMBER_*.
