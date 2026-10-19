@@ -556,7 +556,7 @@ export async function myTasks(user: Actor) {
   const sent = await db.task.findMany({
     where: {
       completedAt: null, deletedAt: null, previousAssigneeId: user.id, approverId: { not: null }, assigneeId: { not: user.id },
-      project: { archivedAt: null, members: { some: { userId: user.id } } },
+      project: { archivedAt: null, members: { some: { userId: user.id } }, ...crmProjectWhere(user) },
     },
     include: { ...taskInclude, project: { select: { id: true, name: true, typeId: true, stage: { select: { name: true } }, members: { where: { userId: user.id }, select: { role: true } } } }, parent: { select: { id: true, title: true } } },
     orderBy: [...ORDER],
