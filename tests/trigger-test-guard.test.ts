@@ -14,7 +14,7 @@ describe("@APL-2700 trigger test guard", () => {
     expect(triggerTestAllowed({ ...local, host: "127.0.0.1" })).toBe(true);
   });
 
-  it("@APL-2764 allows the CI database sho_test exactly, and nothing else that only resembles it", () => {
+  it("@APL-2764 allows the CI database sho_test exactly, and nothing else that only resembles it qa:TC missing", () => {
     expect(triggerTestAllowed({ ...local, database: "sho_test" })).toBe(true);
     expect(triggerTestAllowed({ ...local, database: "SHO_TEST" })).toBe(true);
     expect(triggerTestAllowed({ ...local, host: "127.0.0.1", database: "sho_test" })).toBe(true);
@@ -27,7 +27,7 @@ describe("@APL-2700 trigger test guard", () => {
     expect(triggerTestAllowed({ ...local, database: "defaultdb" }, "1")).toBe(false);
   });
 
-  it("@APL-2764 refuses sho_test on a remote host, with public or sho_pr* schemas, or via a query override", () => {
+  it("@APL-2764 refuses sho_test on a remote host, with public or sho_pr* schemas, or via a query override qa:TC missing", () => {
     expect(triggerTestAllowed({ ...local, host: "db.example.com", database: "sho_test" }, "1")).toBe(false);
     expect(triggerTestAllowed({ ...local, database: "sho_test", schema: "public" }, "1")).toBe(false);
     expect(triggerTestAllowed({ ...local, database: "sho_test", schema: "sho_pr7" }, "1")).toBe(false);
