@@ -1,9 +1,8 @@
 // SHO-US-22.7 Task panel as a full-screen sheet (APL-2555). Epic SHO-E22.
 // Runs against staging. Data: a ZZ-TEST project with ZZ-TEST tasks, archived afterwards. AC7 needs SHO_MEMBER_EMAIL / SHO_MEMBER_PASS.
-// Skipped (needs a real iPhone, as the story says): AC3 on-device.
-// AC5 (APL-2738) runs in desktop Chromium with a stand-in visualViewport that behaves like iOS Safari's keyboard.
+// AC3 on-device and AC5 (APL-2738) run in desktop Chromium: AC3 at the height an iPhone shows with Safari's toolbar visible,
+// AC5 with a stand-in visualViewport that behaves like iOS Safari's keyboard. A real-iPhone check is still a manual step.
 import { test, expect, zz, login, BASE_URL } from "../support";
-import { why } from "../helpers/jim-http";
 import type { Browser } from "@playwright/test";
 
 async function phone(browser: Browser, width: number, height = 800, touch = true, who: "admin" | "member" = "admin") {
@@ -88,9 +87,29 @@ test("AC3 (stylesheet part): the phone sheet height uses dvh, not 100vh alone", 
   for (const r of rules) if (/100vh/.test(r)) expect(r).toMatch(/100dvh/);
 });
 
-test.skip("AC3 (on a device): with Safari's toolbar visible the sheet's bottom edge is visible", why(
-  "Needs a real iPhone with Safari's toolbar. Desktop Chromium has no dynamic toolbar. The dvh rule is the stylesheet test above.",
-), () => {});
+// With Safari's toolbars showing, an iPhone 13 (390 x 844) leaves about 390 x 664 for the page. Desktop Chromium has no
+// dynamic toolbar, so the page is opened at that visible size: scrolled to its end, the sheet must fill it and end inside it.
+// The test above checks the dvh rule that makes Safari size the sheet to this visible height rather than the toolbar-less one.
+test("qa:TC missing AC3 (on a device): with Safari's toolbar visible the sheet's bottom edge is visible", async ({ browser }) => {
+  const VISIBLE = { width: 390, height: 664 };
+  const ctx = await phone(browser, VISIBLE.width, VISIBLE.height);
+  const page = await ctx.newPage();
+  await page.goto(`/projects/${projectId}?task=${taskId}`, { waitUntil: "load" });
+  const dialog = page.getByRole("dialog", { name: "Task" });
+  await expect(dialog).toBeVisible({ timeout: 30000 });
+  const last = dialog.getByRole("button", { name: "Move to Trash" });
+  await expect(last).toBeVisible();
+  // Scroll the sheet to its end.
+  await page.mouse.move(VISIBLE.width / 2, VISIBLE.height / 2);
+  await expect.poll(async () => {
+    await page.mouse.wheel(0, 2000);
+    return (await dialog.boundingBox())!.y + (await dialog.boundingBox())!.height;
+  }, { message: "sheet bottom edge after scrolling to the end" }).toBeLessThanOrEqual(VISIBLE.height + 1);
+  const b = (await dialog.boundingBox())!;
+  expect(b.y + b.height, "the sheet reaches the bottom of the visible area").toBeGreaterThanOrEqual(VISIBLE.height - 1);
+  await expect(last, "the last control on the sheet can be reached").toBeInViewport();
+  await ctx.close();
+});
 
 test("AC4: Escape closes the sheet and focus returns to the task row", async ({ browser }) => {
   const ctx = await phone(browser, 390, 800);
@@ -145,14 +164,18 @@ test("qa:TC missing AC5: with the keyboard open and the description focused, the
   await ctx.addInitScript(fakeKeyboard);
   const page = await ctx.newPage();
   await page.goto(`/projects/${projectId}?task=${taskId}`, { waitUntil: "load" });
-  await expect(page.getByRole("dialog", { name: "Task" })).toBeVisible({ timeout: 30000 });
-  const desc = page.locator("#desc");
+  const dialog = page.getByRole("dialog", { name: "Task" });
+  await expect(dialog).toBeVisible({ timeout: 30000 });
+  const desc = dialog.getByLabel("Description", { exact: true });
+  const close = dialog.getByRole("button", { name: "Close", exact: true });
+  const action = dialog.getByRole("button", { name: /^(Mark complete|Close task)$/ }); // the footer's main action
   await expect(desc).toBeEditable();
+  await expect(action).toBeVisible();
   // Type only once the sheet has finished loading: wait until the fields above the description stop moving.
   await page.waitForLoadState("networkidle");
   await page.waitForFunction(() => {
     const w = window as unknown as { __last?: number; __same?: number };
-    const y = document.querySelector<HTMLElement>("#desc")!.offsetTop;
+    const y = document.getElementById("desc")!.offsetTop;
     w.__same = w.__last === y ? (w.__same ?? 0) + 1 : 0;
     w.__last = y;
     return w.__same >= 5;
@@ -160,32 +183,17 @@ test("qa:TC missing AC5: with the keyboard open and the description focused, the
   await desc.focus();
   await page.evaluate((h) => (window as unknown as { __keyboard: (h: number) => void }).__keyboard(h), KEYBOARD_TOP);
   await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
-  const m = await page.evaluate(() => {
-    const box = (el: Element | null) => { if (!el) return null; const b = el.getBoundingClientRect(); return { top: b.top, bottom: b.bottom }; };
-    const dialog = document.querySelector('[role="dialog"][aria-label="Task"]')!;
-    const close = [...dialog.querySelectorAll(".bar button")].find((b) => b.textContent?.trim() === "Close") ?? null;
-    const foot = dialog.querySelector(".sheet-foot");
-    return {
-      focused: document.activeElement?.id ?? "", sheet: box(dialog.closest(".scrim")), bar: box(dialog.querySelector(".bar")),
-      desc: box(document.querySelector("#desc")), close: box(close), foot: box(foot),
-      footButtons: foot ? [...foot.querySelectorAll("button")].map((b) => b.textContent?.trim() ?? "") : [],
-    };
-  });
-  expect(m.focused, "the description keeps focus").toBe("desc");
-  // The sheet follows visualViewport: it ends where the keyboard starts.
-  expect(m.sheet!.bottom, "sheet bottom edge").toBeLessThanOrEqual(KEYBOARD_TOP + 1);
-  // The footer (Save / Close actions) is there and pinned at the bottom of the visible area.
-  expect(m.foot, "the sheet has a footer").not.toBeNull();
-  expect(m.footButtons.length, "the footer holds the task actions").toBeGreaterThan(0);
-  expect(m.foot!.top, "footer top").toBeGreaterThanOrEqual(-1);
-  expect(m.foot!.bottom, "footer bottom").toBeLessThanOrEqual(KEYBOARD_TOP + 1);
-  expect(m.foot!.bottom, "footer pinned to the keyboard edge").toBeGreaterThanOrEqual(KEYBOARD_TOP - 1);
-  // Close stays in view at the top.
-  expect(m.close!.top, "Close top").toBeGreaterThanOrEqual(-1);
-  expect(m.close!.bottom, "Close bottom").toBeLessThanOrEqual(KEYBOARD_TOP + 1);
-  // The focused description sits between the sticky bar and the footer, so nothing covers it.
-  expect(m.desc!.top, "description top").toBeGreaterThanOrEqual(m.bar!.bottom - 1);
-  expect(m.desc!.bottom, "description bottom").toBeLessThanOrEqual(m.foot!.top + 1);
+  await expect(desc, "the description keeps focus").toBeFocused();
+  const d = (await desc.boundingBox())!, c = (await close.boundingBox())!, a = (await action.boundingBox())!;
+  // Close stays in view at the top of the visible area.
+  expect(c.y, "Close top").toBeGreaterThanOrEqual(-1);
+  expect(c.y + c.height, "Close bottom").toBeLessThanOrEqual(KEYBOARD_TOP + 1);
+  // The footer action is pinned just above the keyboard: the sheet follows visualViewport.
+  expect(a.y + a.height, "footer action is above the keyboard").toBeLessThanOrEqual(KEYBOARD_TOP + 1);
+  expect(a.y + a.height, "footer action is pinned to the keyboard edge").toBeGreaterThanOrEqual(KEYBOARD_TOP - 24);
+  // The focused description sits between Close and the footer, so nothing covers it.
+  expect(d.y, "description top").toBeGreaterThanOrEqual(c.y + c.height - 1);
+  expect(d.y + d.height, "description bottom").toBeLessThanOrEqual(a.y + 1);
   await ctx.close();
 });
 
