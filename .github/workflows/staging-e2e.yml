@@ -5,6 +5,7 @@
 # Secrets (repository settings): STAGING_USER, STAGING_PASS, SHO_QA_PASS, SHO_ADMIN_EMAIL, SHO_ADMIN_PASS, SHO_MEMBER_EMAIL,
 # SHO_MEMBER_PASS, and ZZ_TEST_01_EMAIL / ZZ_TEST_01_PASS ... ZZ_TEST_20_EMAIL / ZZ_TEST_20_PASS (01-05 Super Admins, 06-20 plain Members).
 # SHO_QA_PASS is the shared password for the nakul17+ story accounts. Story specs skip without it, and Playwright then exits 0.
+# @static and @manual tests are excluded (--grep-invert). A source read, a restore drill, or a firewall/SSH check is not a live acceptance result.
 # The previews use the same STAGING_USER / STAGING_PASS basic-auth gate as staging.
 # They reach the jobs as environment variables only and are never echoed. Runs queue in one group so two never run at once.
 # This workflow is workflow_dispatch only. It does not run on pull_request or pull_request_target, so a fork cannot read these secrets.
@@ -260,7 +261,7 @@ jobs:
           TRACE: ${{ inputs.trace }}
         run: |
           read -ra files <<< "$FILES"
-          npx playwright test --shard=${{ matrix.shard }}/20 --workers=1 --reporter=list,blob,json --trace="$TRACE" "${files[@]}"
+          npx playwright test --shard=${{ matrix.shard }}/20 --workers=1 --grep-invert "@static|@manual" --reporter=list,blob,json --trace="$TRACE" "${files[@]}"
 
       - name: Fail this shard when every test was skipped
         if: always()
@@ -343,7 +344,7 @@ jobs:
           TRACE: ${{ inputs.trace }}
         run: |
           read -ra files <<< "$FILES"
-          npx playwright test --workers=1 --reporter=list,blob,json --trace="$TRACE" "${files[@]}"
+          npx playwright test --workers=1 --grep-invert "@static|@manual" --reporter=list,blob,json --trace="$TRACE" "${files[@]}"
 
       - name: Fail the serial job when every test was skipped
         if: always()
