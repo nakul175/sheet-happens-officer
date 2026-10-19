@@ -98,6 +98,15 @@ describe("APL-2670 story: a missing task version always gives one error shape", 
     await unchanged();
   });
 
+  it("AC1 set or clear Blocked absent", async () => {
+    for (const blocked of [true, false]) {
+      const r = await send("PATCH", `/api/tasks/${taskId}`, { blocked });
+      expect(r.status, String(blocked)).toBe(400);
+      expectVersionError(r.json, "version_required");
+    }
+    await unchanged();
+  });
+
   it("AC1 setApprover absent", async () => {
     const r = await send("PUT", `/api/tasks/${taskId}/approver`, { approverId: lead.id });
     expect(r.status).toBe(400);
@@ -127,15 +136,19 @@ describe("APL-2670 story: a missing task version always gives one error shape", 
     const stale = await send("PATCH", `/api/tasks/${taskId}`, { title: "Mine", expectedUpdatedAt: version });
     const outsider = await account("outsider");
     const hiddenRes = await outsider.c.patch(`/api/tasks/${taskId}`, { title: "New", expectedUpdatedAt: "abc" });
+    const unknown = await send("PATCH", "/api/tasks/missing-task", { title: "New", expectedUpdatedAt: "abc" });
+    const taskNotFound = { error: { code: "not_found", message: "Task not found" } };
 
     expect(missing.status).toBe(400);
     expect(malformed.status).toBe(400);
     expect(stale.status).toBe(409);
     expect(hiddenRes.status).toBe(404);
+    expect(unknown.status).toBe(404);
     expectVersionError(missing.json, "version_required");
     expectVersionError(malformed.json, "invalid_version");
     expectVersionError(stale.json, "version_conflict");
-    expectVersionError(hiddenRes.json, "not_found");
+    expect(hiddenRes.json).toEqual(taskNotFound);
+    expect(JSON.stringify(hiddenRes.json)).toBe(JSON.stringify(unknown.json));
     const shape = (json: unknown) => {
       const body = json as { error: Record<string, unknown> };
       return Object.keys(body).sort().join(",") + "|" + Object.keys(body.error).sort().join(",");

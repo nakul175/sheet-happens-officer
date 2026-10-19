@@ -30,6 +30,19 @@ export const crmProjectWhere = (user: Pick<Actor, "orgRole">): Prisma.ProjectWhe
   crmVisible(user) ? {} : { typeId: { not: WORKSTREAM_DEAL } };
 
 /**
+ * Same lookup as projectAccess, but a hidden project is reported as a missing task.
+ * Task routes use this so a signed-in outsider and a never-used id share one 404 (APL-2670 AC3).
+ */
+export async function taskProjectAccess(user: Actor, projectId: string, opts: { write?: boolean } = {}) {
+  try {
+    return await projectAccess(user, projectId, opts);
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 404) throw notFound("Task");
+    throw err;
+  }
+}
+
+/**
  * Loads a project the person may see. Non-members get "not found", never "forbidden"
  * (SHO-US-3.2 AC4). Admins and the Super Admin act as Leader everywhere.
  */

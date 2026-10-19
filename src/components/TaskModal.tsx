@@ -2,10 +2,11 @@
 import Link from "next/link";
 import { useState } from "react";
 import { PRIORITY, ROLE, api, dueLabel, isVersionConflict, useGet } from "@/components/api";
-import { fitBlockedReason } from "@/components/blocked-reason";
+import { BLOCKED_REASON_MAX_LENGTH, blockedReasonRef, fitBlockedReason } from "@/components/blocked-reason";
 import { Confirm, Modal, Skeleton } from "@/components/ui";
 import { ConvertDialog } from "@/components/ConvertDialog";
 import { TaskLinks } from "@/components/TaskLinks";
+import { closeControlOffered } from "@/lib/approver-ui";
 import { useMe } from "@/app/(app)/Shell";
 
 type P = { id: string; name: string };
@@ -205,9 +206,9 @@ export function TaskModal({ id, me, onClose, onChanged, asPage }: { id: string; 
                 <label className="pills"><input type="checkbox" checked={task.blocked} disabled={busy} onChange={(e) => save({ blocked: e.target.checked, ...(e.target.checked ? {} : { blockedReason: null }) })} /> This task is blocked</label>
               ) : task.blocked ? "Yes" : "No"}
               {task.blocked && ((canEdit && !holding) || task.blockedReason) && (
-                <textarea className="in blocked-reason" rows={1} readOnly={!canEdit || holding} aria-label="Why is it blocked?"
+                <textarea className="in blocked-reason" rows={1} readOnly={!canEdit || holding} aria-label="Why is it blocked?" maxLength={BLOCKED_REASON_MAX_LENGTH}
                   placeholder={canEdit && !holding ? "Why is it blocked?" : undefined} defaultValue={task.blockedReason ?? ""} key={task.updatedAt}
-                  ref={(el) => { if (el && el.dataset.fitted !== "1") { fitBlockedReason(el); el.dataset.fitted = "1"; } }}
+                  ref={blockedReasonRef}
                   onInput={(e) => fitBlockedReason(e.currentTarget)}
                   onBlur={(e) => { if (!canEdit || holding) return; if ((e.target.value || null) !== (task.blockedReason ?? null)) save({ blockedReason: e.target.value || null }); }} />
               )}
@@ -252,7 +253,7 @@ export function TaskModal({ id, me, onClose, onChanged, asPage }: { id: string; 
             {canEdit && task.awaitingApproval && (task.approver?.id === me || canManage) && (
               <button className="btn ghost" disabled={busy} onClick={() => run(api("POST", `/api/tasks/${id}/send-back`, {}))}>Send back</button>
             )}
-            {canEdit && !done && task.canClose && (
+            {closeControlOffered({ canEdit, done, canClose: task.canClose }) && (
               <button className="btn" disabled={busy} onClick={() => complete()}>{task.approver ? "Close task" : "Mark complete"}</button>
             )}
             {canEdit && done && <button className="btn ghost" disabled={busy} onClick={() => run(api("POST", `/api/tasks/${id}/reopen`, {}))}>Reopen</button>}

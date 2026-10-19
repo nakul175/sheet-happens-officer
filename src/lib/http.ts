@@ -1,7 +1,10 @@
 import { connection } from "next/server";
 import { ZodError, type ZodType } from "zod";
 import { reqCtx, type ReqCtx } from "@/lib/reqctx";
-import { NOT_FOUND, isVersionCode, versionErrorBody } from "@/lib/version-error";
+import {
+  INVALID_VERSION, INVALID_VERSION_MESSAGE, NOT_FOUND, VERSION_REQUIRED, VERSION_REQUIRED_MESSAGE,
+  isVersionCode, versionErrorBody, versionProblem,
+} from "@/lib/version-error";
 
 export class ApiError extends Error {
   constructor(
@@ -22,12 +25,17 @@ export async function parseBody<T>(req: Request, schema: ZodType<T>): Promise<T>
 }
 
 /**
- * APL-2670: task edits, assign, move, complete and setApprover.
- * The version itself is checked after the task is loaded, so someone who cannot see it
- * gets 404 before a missing or malformed expectedUpdatedAt is discussed.
+ * APL-2670: call this only after session and access have already been decided.
+ * expectedUpdatedAt is checked before the rest of the schema. Absent and null are
+ * version_required. "" and any other non-ISO value are invalid_version. A real ISO
+ * timestamp continues into schema validation.
  */
 export async function parseTaskBody<T>(req: Request, schema: ZodType<T>): Promise<T> {
-  return parseBody(req, schema);
+  const raw = await readJson(req);
+  const problem = versionProblem(raw);
+  if (problem === VERSION_REQUIRED) throw new ApiError(400, VERSION_REQUIRED_MESSAGE, undefined, VERSION_REQUIRED);
+  if (problem === INVALID_VERSION) throw new ApiError(400, INVALID_VERSION_MESSAGE, undefined, INVALID_VERSION);
+  return schema.parse(raw);
 }
 
 async function readJson(req: Request): Promise<unknown> {

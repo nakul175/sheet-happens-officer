@@ -2,7 +2,7 @@
 // The version is expectedUpdatedAt (the updatedAt the editor saw). "Unchanged at version 3" means that token does not move.
 import { describe, expect, it } from "vitest";
 import { PrismaClient } from "../src/generated/prisma/client";
-import { account, patchTask, project, task, type Account } from "./helpers";
+import { account, BASE, patchTask, project, task, type Account } from "./helpers";
 
 const db = new PrismaClient();
 
@@ -76,6 +76,53 @@ describe("missing task version (APL-2670)", () => {
     expect(await db.actionLog.count({ where: { targetType: "task", targetId: s.t } })).toBe(logs);
   });
 
+  it("AC1: setting or clearing Blocked with no expectedUpdatedAt is version_required and changes nothing", async () => {
+    const s = await setup();
+    const before = await stamp(s.worker, s.t);
+    for (const blocked of [true, false]) {
+      const r = await s.worker.c.patch(`/api/tasks/${s.t}`, { blocked });
+      expect(r.status, String(blocked)).toBe(400);
+      expectVersionError(r.json, "version_required");
+      expect((r.json as { error: { message: string } }).error.message).toBe("expectedUpdatedAt is required");
+    }
+    expect(await stamp(s.worker, s.t)).toEqual(before);
+  });
+
+  it("AC1: session, then access, then version, then the rest of the body", async () => {
+    const s = await setup();
+    const viewer = await account("viewer");
+    await s.lead.c.post(`/api/projects/${s.p.id}/members`, { userId: viewer.id, role: "VIEWER" });
+    const raw = async (cookie: string, body: string) => {
+      const res = await fetch(BASE + `/api/tasks/${s.t}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json", ...(cookie ? { cookie } : {}) },
+        body,
+      });
+      const text = await res.text();
+      return { status: res.status, json: text ? JSON.parse(text) : null };
+    };
+    const signedOut = await raw("", "{");
+    expect(signedOut.status).toBe(401);
+    expect(signedOut.json).toEqual({ error: "Not signed in" });
+
+    const viewerBad = await viewer.c.patch(`/api/tasks/${s.t}`, { title: "", expectedUpdatedAt: "abc" });
+    expect(viewerBad.status).toBe(403);
+    expect(viewerBad.json).toEqual({ error: "Viewers cannot make changes." });
+
+    const missingVersion = await s.worker.c.patch(`/api/tasks/${s.t}`, { title: "" });
+    expect(missingVersion.status).toBe(400);
+    expectVersionError(missingVersion.json, "version_required");
+
+    const malformed = await s.worker.c.patch(`/api/tasks/${s.t}`, { title: "", expectedUpdatedAt: "" });
+    expect(malformed.status).toBe(400);
+    expectVersionError(malformed.json, "invalid_version");
+
+    const schema = await s.worker.c.patch(`/api/tasks/${s.t}`, { title: "", expectedUpdatedAt: s.seen.updatedAt });
+    expect(schema.status).toBe(400);
+    expect(schema.json.error).toBe("Validation failed");
+    expect(schema.json.issues).toEqual([{ path: ["title"], message: "Give the task a title." }]);
+  });
+
   it("AC2: an empty string and a non-ISO value are 400 invalid_version and change nothing", async () => {
     const s = await setup();
     const before = await stamp(s.worker, s.t);
@@ -113,19 +160,57 @@ describe("missing task version (APL-2670)", () => {
 
     const outsider = await account("outsider");
     const hidden = await outsider.c.patch(`/api/tasks/${s.t}`, { title: "New", expectedUpdatedAt: "abc" });
+    const unknown = await s.worker.c.patch("/api/tasks/missing-task", { title: "New", expectedUpdatedAt: "abc" });
+    const taskNotFound = { error: { code: "not_found", message: "Task not found" } };
 
     expect(missing.status).toBe(400);
     expect(malformed.status).toBe(400);
     expect(stale.status).toBe(409);
     expect(hidden.status).toBe(404);
+    expect(unknown.status).toBe(404);
     expectVersionError(missing.json, "version_required");
     expectVersionError(malformed.json, "invalid_version");
     expectVersionError(stale.json, "version_conflict");
-    expectVersionError(hidden.json, "not_found");
+    expect(hidden.json).toEqual(taskNotFound);
+    expect(JSON.stringify(hidden.json)).toBe(JSON.stringify(unknown.json));
     sameShape(missing.json, malformed.json);
     sameShape(malformed.json, stale.json);
     sameShape(stale.json, hidden.json);
     expect((await stamp(s.worker, s.t)).title).toBe("Theirs");
+
+    const versionRoutes: [string, string, Record<string, unknown>][] = [
+      ["POST", `/api/tasks/${s.t}/assign`, { assigneeId: "" }],
+      ["POST", `/api/tasks/${s.t}/move`, { sectionId: "missing" }],
+      ["POST", `/api/tasks/${s.t}/complete`, {}],
+      ["PUT", `/api/tasks/${s.t}/approver`, { approverId: null }],
+    ];
+    for (const [method, path, body] of versionRoutes) {
+      const hiddenRoute = await outsider.c.call(method, path, body);
+      const missingRoute = await s.worker.c.call(method, path.replace(s.t, "missing-task"), body);
+      expect(hiddenRoute.status, path).toBe(404);
+      expect(hiddenRoute.json).toEqual(taskNotFound);
+      expect(JSON.stringify(hiddenRoute.json)).toBe(JSON.stringify(missingRoute.json));
+    }
+
+    const flat = { error: "Task not found" };
+    const otherRoutes: [string, string, Record<string, unknown> | undefined][] = [
+      ["GET", `/api/tasks/${s.t}`, undefined],
+      ["DELETE", `/api/tasks/${s.t}`, undefined],
+      ["POST", `/api/tasks/${s.t}/reopen`, {}],
+      ["POST", `/api/tasks/${s.t}/send-for-approval`, undefined],
+      ["POST", `/api/tasks/${s.t}/send-back`, undefined],
+      ["POST", `/api/tasks/${s.t}/collaborators`, { userId: s.lead.id }],
+      ["POST", `/api/tasks/${s.t}/idea`, { isIdea: true }],
+      ["POST", `/api/tasks/${s.t}/links`, {}],
+      ["POST", `/api/tasks/${s.t}/convert`, {}],
+    ];
+    for (const [method, path, body] of otherRoutes) {
+      const hiddenRoute = await outsider.c.call(method, path, body);
+      const missingRoute = await s.worker.c.call(method, path.replace(s.t, "missing-task"), body);
+      expect(hiddenRoute.status, path).toBe(404);
+      expect(hiddenRoute.json).toEqual(flat);
+      expect(JSON.stringify(hiddenRoute.json)).toBe(JSON.stringify(missingRoute.json));
+    }
   });
 
   it("a bad title with a real version is still a validation error, not a version error", async () => {

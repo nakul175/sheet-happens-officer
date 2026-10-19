@@ -32,7 +32,7 @@ describe("version classification (APL-2670)", () => {
     expect(isIsoTimestamp("")).toBe(false);
   });
 
-  it("accepts an ISO timestamp and does not invent an integer version", () => {
+  it("accepts an ISO timestamp and keeps expectedUpdatedAt, with no integer version field", () => {
     const iso = "2026-10-18T00:00:00.000Z";
     expect(isIsoTimestamp(iso)).toBe(true);
     expect(versionProblem({ expectedUpdatedAt: iso })).toBeNull();

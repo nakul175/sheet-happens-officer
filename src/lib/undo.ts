@@ -6,7 +6,7 @@ import { WORKERS, activeMember, projectAccess, requireManage, requireWrite, type
 import { formatDueDate } from "@/lib/dates";
 import { auditTx, logAction, notify } from "@/lib/notify";
 import { deleteTask, restoreTask } from "@/lib/tasks";
-import { UNDO_DAYS, UNDO_LABELS, isUndoable } from "@/lib/undoable";
+import { UNDO_LABELS, isTooOldToUndo, isUndoable } from "@/lib/undoable";
 import { undoRecord } from "@/lib/records";
 
 type Conflict = { field: string; before: unknown; after: unknown; now: unknown };
@@ -140,9 +140,13 @@ async function plan(row: any, user: Actor, projectId: string): Promise<Plan> {
       return {
         conflicts: [], subject: t.title,
         apply: async (tx) => {
-          if (t.parentId) { await tx.task.update({ where: { id }, data: { completedAt: new Date(b.completedAt ?? Date.now()) } }); return; }
+          const stamp = new Date(b.completedAt ?? Date.now());
+          if (t.parentId) { await tx.task.update({ where: { id }, data: { completedAt: stamp } }); return; }
           const done = await tx.section.findFirstOrThrow({ where: { projectId, isDone: true } });
-          await tx.task.update({ where: { id }, data: { completedAt: new Date(b.completedAt ?? Date.now()), sectionId: done.id, previousSectionId: t.sectionId } });
+          await tx.task.update({ where: { id }, data: { completedAt: stamp, sectionId: done.id, previousSectionId: t.sectionId } });
+          // Subtasks that reopened with the parent close with it again, on the same completedAt (APL-2721).
+          // One ticked done on its own since then keeps its own completedAt.
+          if (Array.isArray(f.subtaskIds) && f.subtaskIds.length) await tx.task.updateMany({ where: { id: { in: f.subtaskIds }, deletedAt: null, completedAt: null }, data: { completedAt: stamp } });
         },
       };
     }
@@ -320,7 +324,12 @@ async function plan(row: any, user: Actor, projectId: string): Promise<Plan> {
           // Parents closed by the change reopen, and so do the subtasks that closed with them (SHO-BUG-3).
           const closed = [...(Array.isArray(f.completedTaskIds) ? f.completedTaskIds : []), ...(Array.isArray(f.completedSubtaskIds) ? f.completedSubtaskIds : [])];
           if (closed.length) await tx.task.updateMany({ where: { id: { in: closed } }, data: { completedAt: null } });
-          if (Array.isArray(b.reopenedTaskIds) && b.reopenedTaskIds.length) await tx.task.updateMany({ where: { id: { in: b.reopenedTaskIds }, completedAt: null }, data: { completedAt: new Date() } });
+          // One stamp, so a later move still treats these subtasks as closed with the parent (APL-2721).
+          // Every task the move reopened closes again, also one moved to Trash since: the move never lists a task
+          // that was already in Trash, so these ids are only tasks it changed (APL-2755).
+          const stamp = new Date();
+          if (Array.isArray(b.reopenedTaskIds) && b.reopenedTaskIds.length) await tx.task.updateMany({ where: { id: { in: b.reopenedTaskIds }, completedAt: null }, data: { completedAt: stamp } });
+          if (Array.isArray(b.reopenedSubtaskIds) && b.reopenedSubtaskIds.length) await tx.task.updateMany({ where: { id: { in: b.reopenedSubtaskIds }, completedAt: null }, data: { completedAt: stamp } });
         },
       };
     }
@@ -361,11 +370,14 @@ async function prepare(user: Actor, logId: string) {
   const archiveKind = row.action === "project.archived" || row.action === "project.unarchived";
   if (a.project.archivedAt && !archiveKind) throw new ApiError(409, "This project is archived and read-only.");
   if (row.actorId !== user.id && a.role !== "LEADER") throw new ApiError(403, "You can only undo your own actions.");
+  // Already undone wins over the Leader/Admin check (APL-2655). An Editor who deleted the task
+  // otherwise gets 403 after a Leader has already undone that delete.
+  if (row.action === "task.deleted" && row.undoneAt) throw bad("This was already undone.");
   // Undoing a delete is a restore from Trash, so it takes the same Leader or Admin check (SHO-US-6.2 AC4, SHO-BUG-8).
   if (row.action === "task.deleted") requireManage(a);
   if (row.undoneAt) throw bad("This action was already undone.");
   if (!isUndoable(row.action)) throw bad("This kind of action cannot be undone.");
-  if (Date.now() - row.createdAt.getTime() > UNDO_DAYS * 86400_000) throw bad("Too old to undo", { tooOld: true });
+  if (isTooOldToUndo(row.createdAt)) throw bad("Too old to undo", { tooOld: true });
 
   const p = await plan(row, user, projectId);
   return { row, projectId, p };

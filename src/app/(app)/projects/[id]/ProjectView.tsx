@@ -10,20 +10,21 @@ import { AvatarGroup, Pri, Tick } from "@/components/TaskParts";
 import { Confirm, Field, LoadFailed, Menu, Modal, Skeleton } from "@/components/ui";
 import { MoveSheet } from "@/components/MoveSheet";
 import "@/components/board.css";
-import { DealPanel, type DealBlock } from "@/components/DealPanel";
+import { DealPanel, openTaskFeed, type DealBlock, type OpenTaskFeed } from "@/components/DealPanel";
 import { Page, useMe } from "../../Shell";
 import { InlineCells, inlineEditable, useInlineEdit } from "@/components/inline";
 import { ListControls } from "./ListControls";
 import { apiQuery, groupTasks, isFiltered, readState, sameState, type ListState } from "./listview";
 import { SaveViewDialog, type SavedView } from "./SavedViews";
 import { BulkBar, type BulkResult } from "./BulkBar";
+import { canDropOnSection, completeTickAllowed, moveMenuSections } from "@/lib/approver-ui";
 
 type T = {
   id: string; title: string; updatedAt: string; sectionId: string; priority: string; dueDate: string | null; blocked: boolean; completedAt: string | null; isIdea?: boolean;
   assignee: { id: string; name: string }; collaborators: { id: string; name: string }[]; awaitingApproval: boolean; canClose: boolean; subtasks: { total: number; open: number };
 };
 type S = { id: string; name: string; isDone: boolean; total: number; tasks: T[]; nextCursor: string | null };
-type Summary = { open: number; overdue: number; blocked: number; awaiting: number };
+type Summary = { open: number; overdue: number; blocked: number; awaiting: number; openTasks?: number };
 type Proj = {
   id: string; name: string; archived: boolean; role: string; type?: "PROJECT" | "DEAL"; deal?: DealBlock | null;
   sections: { id: string; name: string; isDone: boolean }[];
@@ -104,6 +105,10 @@ function Inner({ id }: { id: string }) {
   }
   const p = pr.data?.project;
   const secs = tk.data?.sections;
+  // APL-2691: Won and Lost read this list. The count includes subtasks, the same set the move refuses.
+  const openFeed: OpenTaskFeed = secs
+    ? openTaskFeed(secs, tk.data?.summary?.open, filtered, tk.data?.summary?.openTasks)
+    : { status: tk.failed || tk.error ? "error" : "loading", openCount: 0, tasks: [] };
   const canWrite = !!p && p.role !== "VIEWER" && !p.archived;
   const manage = !!p && p.role === "LEADER" && !p.archived;
   // The address keeps the view, the open task and the filter, sort and group choices.
@@ -154,17 +159,16 @@ function Inner({ id }: { id: string }) {
   }
 
   const tasksOf = (s: S) => [...s.tasks, ...(extra[s.id] ?? [])];
-  // SHO-US-5.3 AC6: a task may only be dropped into Done by someone who may close it.
+  // SHO-US-5.3 AC6 / APL-2660 AC4: a task may only be dropped into Done by someone who may close it.
   const canDrop = (taskId: string, to: S) => {
-    if (!to.isDone) return true;
     const t = secs?.flatMap((x) => tasksOf(x)).find((x) => x.id === taskId);
-    return !!t && (t.canClose || !!t.completedAt);
+    return canDropOnSection(t, to.isDone);
   };
   const pick = (ids: string[], on: boolean) => setSel((cur) => { const n = new Set(cur); for (const i of ids) { if (on) n.add(i); else n.delete(i); } return n; });
   const rowOf = (t: T) => (
     <div key={t.id} className={`item click${canWrite ? " sel-row" : ""}${sel.has(t.id) ? " picked" : ""}`} {...rowKeys(() => openTask(t.id))}>
       {canWrite && <label className="sel" onClick={(e) => e.stopPropagation()}><input type="checkbox" checked={sel.has(t.id)} aria-label={`Select "${t.title}"`} onChange={(e) => pick([t.id], e.target.checked)} /></label>}
-      <Tick id={t.id} title={t.title} done={!!t.completedAt} allowed={canWrite && (t.canClose || !!t.completedAt)} version={t.updatedAt} onDone={refresh} onStale={refresh} />
+      <Tick id={t.id} title={t.title} done={!!t.completedAt} allowed={completeTickAllowed({ canWrite, canClose: t.canClose, completedAt: t.completedAt })} version={t.updatedAt} onDone={refresh} onStale={refresh} />
       <div className="t"><b className="ttl">{t.title}</b>{t.subtasks.total > 0 && <small>{t.subtasks.total - t.subtasks.open} of {t.subtasks.total} subtasks</small>}</div>
       <div className="meta">
         {t.awaitingApproval && <span className="chip gold">Awaiting approval</span>}
@@ -194,7 +198,7 @@ function Inner({ id }: { id: string }) {
           <button className="btn ghost sm" onClick={() => { nudgeSeen(p.id, true); setNudgeOff(true); }}>Dismiss</button>
         </div>
       )}
-      {p?.deal && <DealPanel projectId={id} deal={p.deal} canWrite={canWrite} onChange={refresh} />}
+      {p?.deal && <DealPanel projectId={id} deal={p.deal} canWrite={canWrite} onChange={refresh} feed={openFeed} />}
       <div className="tabs">
         <div className="seg" role="tablist" aria-label="View">
           <button role="tab" aria-selected={view === "list"} onClick={() => setView("list")}>List</button>
@@ -316,7 +320,7 @@ function Inner({ id }: { id: string }) {
       )}
       {moving && secs && (
         <MoveSheet title={`Move to… ${moving.title.length > 60 ? moving.title.slice(0, 57) + "…" : moving.title}`}
-          options={secs.filter((x) => !x.isDone || moving.canClose || x.id === moving.sectionId).map((x) => ({ id: x.id, name: x.name, current: x.id === moving.sectionId }))}
+          options={moveMenuSections(secs, moving).map((x) => ({ id: x.id, name: x.name, current: x.id === moving.sectionId }))}
           onClose={() => setMoving(null)}
           onPick={(sid) => { const t = moving; setMoving(null); void moveTo(t.id, sid); }} />
       )}

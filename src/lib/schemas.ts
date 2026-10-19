@@ -14,11 +14,13 @@ export const emailField = z
   .refine((e) => ALLOWED_DOMAINS.includes(e.slice(e.lastIndexOf("@") + 1)), { message: DOMAIN_MESSAGE });
 
 // Max 128 so a huge password cannot be used to burn CPU in the hash.
+// abort: Zod runs later checks after a failure. Without it, a too-short or too-long
+// password that also misses a letter or number adds PASSWORD_MESSAGE twice.
 export const passwordField = z
   .string()
-  .min(8, PASSWORD_MESSAGE)
-  .max(128, PASSWORD_MESSAGE)
-  .refine((p) => /[A-Za-z]/.test(p) && /[0-9]/.test(p), { message: PASSWORD_MESSAGE });
+  .min(8, { error: PASSWORD_MESSAGE, abort: true })
+  .max(128, { error: PASSWORD_MESSAGE, abort: true })
+  .refine((p) => /[A-Za-z]/.test(p) && /[0-9]/.test(p), { error: PASSWORD_MESSAGE });
 
 // SHO-US-15.2. Any valid email: the Super Admin decides who is let in.
 export const addPersonInput = z.object({
@@ -91,9 +93,9 @@ export const taskCreate = z.object({
   collaboratorIds: z.array(z.string().min(1)).max(50).optional(),
 });
 // The updatedAt the person saw when they opened the task; a different value means someone else saved first.
-// Required (SHO-BUG-13, APL-2668). APL-2670 checks it after the task is loaded: absent and null are
-// version_required, and "" or any non-ISO value is invalid_version. The schema lets those through
-// so the answer is not Zod's issues list, and someone who cannot see the task still gets 404.
+// Required (SHO-BUG-13, APL-2668). The route checks it after access and before this schema (APL-2670):
+// absent and null are version_required, and "" or any non-ISO value is invalid_version. The field stays
+// loose so those answers are not Zod's issues list. No integer version column.
 const taskVersion = z.unknown().optional();
 export const taskUpdate = z.object({
   title: title.optional(),

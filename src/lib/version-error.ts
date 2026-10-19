@@ -1,8 +1,9 @@
-// APL-2670: a missing expectedUpdatedAt is one error, whatever route received it.
-// The token stays the ISO timestamp the person saw (no integer version field).
+// APL-2670: a missing expectedUpdatedAt is one error, whatever mutation route received it.
+// The token stays the ISO timestamp the person saw (no integer version field; that is APL-2668).
+// Checks run session, then access, then this value, then the rest of the body.
 // Absent and null are "version_required". "" and any other non-ISO value are
 // "invalid_version". A real ISO timestamp that is not the task's current updatedAt
-// is "version_conflict". A task the caller cannot see is "not_found".
+// is "version_conflict". A task the caller cannot see is "not_found", same as an unknown id.
 
 export const VERSION_REQUIRED = "version_required";
 export const INVALID_VERSION = "invalid_version";

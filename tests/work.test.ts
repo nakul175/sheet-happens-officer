@@ -428,6 +428,23 @@ describe("tasks (4.x, 5.x)", () => {
     expect(cleared.json.task.blockedReason).toBeNull();
   });
 
+  it("APL-2670 AC1: setting or clearing Blocked without expectedUpdatedAt is 400 version_required", async () => {
+    const lead = await account("lead");
+    const ed = await account("editor");
+    const p = await project(lead, lead, [{ who: ed }]);
+    const t = await task(ed, p.id);
+    const before = (await ed.c.get(`/api/tasks/${t}`)).json.task.updatedAt;
+    const on = await ed.c.patch(`/api/tasks/${t}`, { blocked: true });
+    expect(on.status).toBe(400);
+    expect(on.json).toEqual({ error: { code: "version_required", message: "expectedUpdatedAt is required" } });
+    const off = await ed.c.patch(`/api/tasks/${t}`, { blocked: false });
+    expect(off.status).toBe(400);
+    expect(off.json).toEqual({ error: { code: "version_required", message: "expectedUpdatedAt is required" } });
+    const after = (await ed.c.get(`/api/tasks/${t}`)).json.task;
+    expect(after.blocked).toBe(false);
+    expect(after.updatedAt).toBe(before);
+  });
+
   it("completes with the open-subtask choice, and reopens to the previous Section", async () => {
     const lead = await account("lead");
     const p = await project(lead, lead);
