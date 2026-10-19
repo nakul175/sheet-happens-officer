@@ -72,18 +72,19 @@ export async function updateSection(
       const open = await tx.task.findMany({ where: { sectionId: s.id, completedAt: null, deletedAt: null, approverId: { not: null }, parentId: null } });
       if (open.length) throw new ApiError(409, "Tasks waiting on an approver are in that section; close or move them first.");
       const old = await tx.section.findFirst({ where: { projectId, isDone: true } });
+      // When each live task about to reopen closed, for its task.reopened row below (APL-2679). A task in Trash gets no row.
+      const wasDone = old ? await tx.task.findMany({ where: { sectionId: old.id, parentId: null, completedAt: { not: null }, deletedAt: null }, select: { id: true, completedAt: true } }) : [];
       let reopened: string[] = [];
       if (old) {
-        const was = await tx.task.findMany({ where: { sectionId: old.id, parentId: null, completedAt: { not: null } }, select: { id: true, completedAt: true } });
-        reopened = was.map((x) => x.id);
+        reopened = (await tx.task.findMany({ where: { sectionId: old.id, parentId: null, completedAt: { not: null } }, select: { id: true } })).map((x) => x.id);
         await tx.section.update({ where: { id: old.id }, data: { isDone: false } });
         await tx.task.updateMany({ where: { sectionId: old.id, parentId: null }, data: { completedAt: null } });
-        // One row per task that reopened, as the complete path below writes per task that closed (APL-2679).
-        for (const t of was) {
-          await logAction(tx, { actorId: user.id, projectId, targetType: "task", targetId: t.id, action: "task.reopened", before: { completedAt: t.completedAt!.toISOString() }, after: { completedAt: null, viaDoneSection: true }, primary: false });
-        }
       }
       const now = new Date();
+      // One row per task that reopened, as the complete path below writes per task that closed (APL-2679).
+      for (const t of wasDone) {
+        await logAction(tx, { actorId: user.id, projectId, targetType: "task", targetId: t.id, action: "task.reopened", before: { completedAt: t.completedAt!.toISOString() }, after: { completedAt: null, viaDoneSection: true }, primary: false });
+      }
       const completed = (await tx.task.findMany({ where: { sectionId: s.id, parentId: null, completedAt: null, deletedAt: null }, select: { id: true } })).map((x) => x.id);
       await tx.section.update({ where: { id: s.id }, data: { isDone: true } });
       await tx.task.updateMany({ where: { id: { in: completed } }, data: { completedAt: now } });
