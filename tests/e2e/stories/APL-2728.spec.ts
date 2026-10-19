@@ -10,7 +10,7 @@
 // People are run-unique nakul17+ aliases, data is named ZZ-TEST. afterAll archives the projects and the
 // organisation and deactivates the people; the run's Super Admin alias cannot be deactivated and stays.
 import { spawn } from "node:child_process";
-import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, statSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, rmSync, statSync } from "node:fs";
 import net from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -231,6 +231,8 @@ describe.skipIf(!QA_PASS)("qa:TC missing APL-2728 person page in the browser", (
       if (on && sa) await cleanup(on);
     } finally {
       for (const server of servers.values()) stop(server.pid);
+      // Pam's outbox condition: each server's temp outbox (verification mails and server.log) goes with it.
+      for (const server of servers.values()) rmSync(server.outbox, { recursive: true, force: true });
     }
   });
 
