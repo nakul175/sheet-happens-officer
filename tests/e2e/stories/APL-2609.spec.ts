@@ -1,7 +1,7 @@
 // SHO-BUG-2 CRM_VISIBLE=admins or off still shows deals through My tasks, search, the concierge
 // and the task routes (Linear APL-2609).
 // One test per acceptance criterion. People are nakul17+ aliases signed in with SHO_QA_PASS.
-// Records are ZZ-TEST and archived afterwards; the extra people are deactivated.
+// Records are ZZ-TEST and archived afterwards. The people are this job's pool aliases (APL-2748): the org admin is put back to Member.
 // The server's CRM_VISIBLE is a process setting. A test named for one mode skips when the live
 // lever is different, so an `all` server cannot pass an `off` acceptance criterion.
 // A quick action that names a hidden deal is a product defect (APL-2723): the test is marked as
@@ -11,7 +11,7 @@
 import type { Browser, BrowserContext } from "@playwright/test";
 import { test, expect, zz } from "../support";
 import { newProject, newTask, ymd, type Who } from "../g2";
-import { QA_PASS, noSecret, qaEmail, signInAlias } from "../helpers/qa-alias";
+import { QA_ADMIN_EMAIL, QA_PASS, noSecret, qaPerson, signInAlias } from "../helpers/qa-alias";
 
 type Mode = "all" | "admins" | "off";
 type Deal = { id: string; name: string; stage: string; taskId: string; taskTitle: string };
@@ -68,7 +68,7 @@ async function cleanupCreated() {
     for (const who of [world?.editor ?? editorWho, world?.orgAdmin ?? orgAdminWho]) {
       if (!who) continue;
       if (chat.has(who.user.id as string)) await quiet(() => who.api.del("/api/concierge/messages"));
-      await quiet(() => admin.api.post(`/api/team/${who.user.id}/deactivate`, { reassign: "leaders" }));
+      if (who.user.orgRole !== "MEMBER") await quiet(() => admin.api.patch(`/api/team/${who.user.id}`, { orgRole: "MEMBER" }));
     }
   }
   for (const ctx of world?.ctx ?? contexts) await quiet(() => ctx.close());
@@ -269,11 +269,11 @@ async function chatWasEmpty(who: Who, into: Set<string>) {
 
 async function buildWorld(browser: Browser): Promise<World> {
   const emptyChat = new Set<string>();
-  const adminIn = await signInAlias(browser, "nakul17+zz-sa@aplyd.com", "ZZ-TEST QA Admin");
+  const adminIn = await signInAlias(browser, QA_ADMIN_EMAIL);
   contexts.push(adminIn.ctx);
-  const editorIn = await signInAlias(browser, qaEmail("editor"), zz("editor"));
+  const editorIn = await signInAlias(browser, qaPerson(1).email);
   contexts.push(editorIn.ctx);
-  const orgIn = await signInAlias(browser, qaEmail("orgadmin"), zz("org admin"));
+  const orgIn = await signInAlias(browser, qaPerson(2).email);
   contexts.push(orgIn.ctx);
   const admin = adminIn.who;
   const editor = editorIn.who;
@@ -282,6 +282,11 @@ async function buildWorld(browser: Browser): Promise<World> {
   editorWho = editor;
   orgAdminWho = orgAdmin;
   expect(admin.user.orgRole).toBe("SUPER_ADMIN");
+  // A pool alias is reused, so one left as Admin by an interrupted run is put back first.
+  if (editor.user.orgRole !== "MEMBER") {
+    expect((await admin.api.patch(`/api/team/${editor.user.id}`, { orgRole: "MEMBER" })).status).toBe(200);
+    editor.user.orgRole = "MEMBER";
+  }
   const promoted = await admin.api.patch(`/api/team/${orgAdmin.user.id}`, { orgRole: "ADMIN" });
   expect(promoted.status, JSON.stringify(promoted.json)).toBe(200);
   orgAdmin.user.orgRole = "ADMIN";
