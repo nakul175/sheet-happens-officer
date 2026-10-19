@@ -1,6 +1,6 @@
 // APL-2466 · [SHO-E2] People and roles. One test per acceptance criterion.
 // New people are named ZZ-TEST and deactivated afterwards.
-// Sign-up uses SHO_QA_PASS. The file skips when that is unset.
+// Sign-up uses SHO_QA_PASS. The file fails when that is unset.
 // Sign-in checks use the Member account from the environment (its password is known here). Its role and status are put back.
 import { test, login } from "../support";
 import {
@@ -11,8 +11,7 @@ import {
 type Who = { api: Api; user: { id?: string; name?: string; email?: string } };
 
 test.beforeAll(async ({ request }) => {
-  test.skip(!PASS, "Set SHO_QA_PASS (the shared password for the nakul17+ accounts).");
-  if (!PASS) return;
+  if (!PASS) throw new Error("Set SHO_QA_PASS (the shared password for the nakul17+ accounts).");
   if (!passwordOk(PASS)) throw new Error("SHO_QA_PASS must be at least 8 characters with a letter and a number.");
   login("ADMIN");
   await gate(request);
