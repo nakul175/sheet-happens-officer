@@ -246,7 +246,7 @@ afterAll(async () => {
 describe("qa:TC missing APL-2728 person page in the browser", () => {
   for (const mode of HIDDEN_MODES) {
     for (const size of VIEWPORTS) {
-      it(`qa:TC missing AC1: CRM_VISIBLE=${mode} at ${size.width}x${size.height}, the member sees one sentence and nothing of the deal on the rep's page`, async () => {
+      it(`${size.width === 1280 ? "qa:TC-APL2728-f5d2b1d1@v1" : "qa:TC-APL2728-da58e1ec@v1"} AC1: CRM_VISIBLE=${mode} at ${size.width}x${size.height}, the member sees one sentence and nothing of the deal on the rep's page`, async () => {
         const { page, close } = await openPerson(servers.get(mode)!, member, rep.id, rep.name, size);
         try {
           await page.getByText(SENTENCE, { exact: true }).waitFor();
