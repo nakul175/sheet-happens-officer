@@ -142,6 +142,60 @@ describe("flag off (AC9)", () => {
   });
 });
 
+describe("flag off, QA #128 (D1, D2)", () => {
+  beforeEach(off);
+  afterEach(off);
+
+  // Pam #128 @3a96042 D1: with the flag off, Activity still showed 'undid "comment deleted"' rows. Undo logs "undo" with the original in before.action.
+  it("qa:TC missing D1 (#128): flag off, Activity hides the Undo rows of comment actions", async () => {
+    const { lead, worker, p, t1 } = await cast();
+    on();
+    const kept = await addComment(actor(worker), t1, { text: "ZZ-TEST undo rows" });
+    await removeComment(actor(worker), t1, kept.id);
+    const removed = await db.actionLog.findFirstOrThrow({ where: { targetId: t1, action: "comment.removed" } });
+    await undoAction(actor(worker), removed.id);
+    const added = await addComment(actor(worker), t1, { text: "ZZ-TEST undo add" });
+    const addLog = await db.actionLog.findFirstOrThrow({ where: { targetId: t1, action: "comment.added", afterState: { path: ["commentId"], equals: added.id } } });
+    await undoAction(actor(worker), addLog.id);
+    off();
+    const undos = await db.actionLog.findMany({ where: { targetId: t1, action: "undo" } });
+    expect(undos).toHaveLength(2);
+    // Pam's steps, over HTTP against the flag-off server, as the writer's Leader and the writer.
+    for (const who of [lead, worker]) {
+      const activity = await who.c.get(`/api/projects/${p.id}/activity`);
+      expect(activity.status).toBe(200);
+      const shown = (activity.json.items as { id: string }[]).map((i) => i.id);
+      for (const u of undos) expect(shown).not.toContain(u.id);
+      expect(JSON.stringify(activity.json)).not.toMatch(/comment/i);
+      expect(shown.length, "rows that are not about comments still show").toBeGreaterThan(0);
+    }
+    on();
+    try {
+      const back = await projectActivity(actor(lead), p.id);
+      for (const u of undos) expect(back.items.some((i) => i.id === u.id)).toBe(true);
+    } finally { off(); }
+  });
+
+  // Pam #128 @3a96042 D2: with the flag off, POST /api/notifications/read-all marked the hidden comment notices read.
+  it("qa:TC missing D2 (#128): flag off, Mark all read leaves hidden comment notices unchanged", async () => {
+    const { lead, worker, p, t1 } = await cast();
+    on();
+    await addComment(actor(lead), t1, { text: "@worker ZZ-TEST read-all" });
+    off();
+    await task(lead, p.id, { title: "ZZ-TEST read-all assigned", assigneeId: worker.id });
+    const commentTypes = ["COMMENT_ADDED", "COMMENT_MENTION"];
+    const unreadComments = () => db.notification.count({ where: { recipientId: worker.id, readAt: null, type: { in: commentTypes } } });
+    const unreadOthers = () => db.notification.count({ where: { recipientId: worker.id, readAt: null, type: { notIn: commentTypes } } });
+    const before = await unreadComments();
+    expect(before).toBeGreaterThan(0);
+    expect(await unreadOthers()).toBeGreaterThan(0);
+    expect((await worker.c.post("/api/notifications/read-all")).status).toBe(204);
+    expect(await unreadComments()).toBe(before);
+    expect(await unreadOthers()).toBe(0);
+    expect((await worker.c.get("/api/notifications")).json.unread).toBe(0);
+  });
+});
+
 describe("flag off notices (D1b)", () => {
   beforeEach(off);
   afterEach(off);

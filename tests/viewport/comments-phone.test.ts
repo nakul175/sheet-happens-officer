@@ -5,7 +5,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { mkdirSync } from "node:fs";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { chromium, type Browser, type BrowserContext, type Page } from "playwright-core";
-import { account, BASE, project, task } from "../helpers";
+import { account, BASE, project, superAdmin, task, type Account } from "../helpers";
 
 const SHOTS = "test-results/viewport";
 let browser: Browser;
@@ -14,6 +14,11 @@ let app = BASE;
 let projectId = "";
 let taskId = "";
 let email = "";
+// QA #128 D4: ZZ-TEST names and nakul17+ aliases. The Super Admin leads the project so that, in afterAll,
+// it can deactivate both people and archive the project through the API.
+const RUN = Date.now().toString(36);
+let root: Account | null = null;
+const made: Account[] = [];
 
 async function up(url: string) {
   for (let i = 0; i < 40; i++) {
@@ -30,10 +35,12 @@ beforeAll(async () => {
   if (!/^(localhost|127\.0\.0\.1)$/.test(new URL(BASE).hostname)) throw new Error(`Refusing to run the phone comment test against ${BASE}.`);
   mkdirSync(SHOTS, { recursive: true });
   browser = await chromium.launch({ executablePath: process.env.PW_CHROMIUM || undefined });
-  const writer = await account("phonewriter");
+  const writer = await account("phonewriter", `nakul17+zztest-apl2590-phone-writer-${RUN}@aplyd.com`, "ZZ-TEST phone writer");
   email = writer.email;
-  const colleague = await account("phonecolleague");
-  const p = await project(writer, writer, [{ who: colleague, role: "EDITOR" }]);
+  const colleague = await account("phonecolleague", `nakul17+zztest-apl2590-phone-colleague-${RUN}@aplyd.com`, "ZZ-TEST phone colleague");
+  made.push(writer, colleague);
+  root = await superAdmin();
+  const p = await project(root, root, [{ who: writer, role: "EDITOR" }, { who: colleague, role: "EDITOR" }], `ZZ-TEST phone ${RUN}`);
   projectId = p.id;
   taskId = await task(writer, p.id, { title: "ZZ-TEST phone comment" });
   const probe = await writer.c.get(`/api/tasks/${taskId}`);
@@ -50,8 +57,19 @@ beforeAll(async () => {
 }, 90_000);
 
 afterAll(async () => {
-  await browser?.close();
-  if (child && !child.killed) child.kill();
+  try {
+    // Clean-up through the API: deactivate this run's people, then archive its project.
+    if (root) {
+      for (const who of made) {
+        const off = await root.c.post(`/api/team/${who.id}/deactivate`, { reassign: "leaders" });
+        expect(off.status, `deactivate ${who.name}`).toBe(200);
+      }
+      if (projectId) expect((await root.c.post(`/api/projects/${projectId}/archive`)).status, "archive the project").toBe(200);
+    }
+  } finally {
+    await browser?.close();
+    if (child && !child.killed) child.kill();
+  }
 });
 
 async function phone(): Promise<{ ctx: BrowserContext; page: Page }> {
