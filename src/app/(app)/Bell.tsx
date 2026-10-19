@@ -9,7 +9,7 @@ import { bellBadge, bellName } from "./bell-label";
 import "./bell.css";
 import { bellEmptyText, responseApplies, visibleNotes, type BellFilter } from "./bell-list";
 
-type Note = { id: string; text: string; href: string; read: boolean; createdAt: string };
+type Note = { id: string; text: string; href: string | null; read: boolean; createdAt: string };
 type Page = { unread: number; items: Note[]; next: string | null };
 const PAGE = 50;
 
@@ -92,23 +92,35 @@ export function Bell() {
           </div>
           {failed && <div className="empty">Could not load notifications. <button className="link" onClick={() => load(filter, true)}>Try again</button></div>}
           {!failed && page && !shown.length && <div className="empty">{bellEmptyText(filter)}</div>}
-          {shown.map((n) => (
-            <div key={n.id} className={`row bell-row${!n.read ? " unread" : ""}`}>
-              <Link href={n.href} className="bell-main"
-                onClick={async (e) => {
-                  e.preventDefault();
-                  setOpen(false);
-                  if (!n.read) await api("POST", `/api/notifications/${n.id}/read`, {});
-                  load(filterRef.current);
-                  router.push(n.href);
-                }}>
+          {shown.map((n) => {
+            const href = n.href;
+            const body = (
+              <>
                 {!n.read && <span className="bell-dot" aria-label="Unread" role="img" />}
                 {n.text}
                 <small>{ago(n.createdAt)}</small>
-              </Link>
+              </>
+            );
+            return (
+            <div key={n.id} className={`row bell-row${!n.read ? " unread" : ""}`}>
+              {href ? (
+                <Link href={href} className="bell-main"
+                  onClick={async (e) => {
+                    e.preventDefault();
+                    setOpen(false);
+                    if (!n.read) await api("POST", `/api/notifications/${n.id}/read`, {});
+                    load(filterRef.current);
+                    router.push(href);
+                  }}>
+                  {body}
+                </Link>
+              ) : (
+                <div className="bell-main">{body}</div>
+              )}
               <button className="bell-tog" onClick={() => setRead(n, !n.read)} aria-label={n.read ? `Mark as unread: ${n.text}` : `Mark as read: ${n.text}`}>{n.read ? "Mark unread" : "Mark read"}</button>
             </div>
-          ))}
+            );
+          })}
           {next && <button className="link bell-more" disabled={loadingMore} onClick={older}>{loadingMore ? "Loading…" : "Load older"}</button>}
         </div>
       )}
