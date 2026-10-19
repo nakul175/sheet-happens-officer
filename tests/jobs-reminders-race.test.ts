@@ -2,11 +2,17 @@
 // must not write the same due-date reminder twice. Everything goes through the shared test server:
 // people, project and tasks are made through the API, the job is POSTed with JOB_SECRET, and the
 // reminders are read back on GET /api/notifications. Names are ZZ-TEST, addresses nakul17+ aliases.
+// 40 concurrent POSTs alone did not overlap on a local `next start` (each run takes a few ms), so the AC1
+// test adds one hook, inside the test only: a separate connection holds a SHARE lock on "Notification"
+// (no rows written) while the runs start. Reads go through; each run's insert waits on the lock. The lock
+// is released as soon as a second connection sees in pg_stat_activity two runs waiting past their read: two inserts waiting (the bug),
+// or one insert plus one run waiting on the reminders advisory lock (the fix).
 // The CRM_VISIBLE filter (AC3) is covered unchanged by tests/jobs-reminders-crm.test.ts and
 // tests/jobs-reminders-crm-server.test.ts (`npm run test:reminder-modes`).
 //
 // qa:TC missing single run
 // qa:TC missing 40 concurrent reminder requests
+import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { BASE, istDate, task, type Account } from "./helpers";
 import { zzTestData, type ZzProject } from "./zz-test-data";
@@ -20,6 +26,35 @@ type BellItem = { text: string; href: string | null };
 let leader: Account;
 let holder: Account;
 let proj: ZzProject;
+
+/** The local test database, without Prisma's ?schema= parameter. Anything else is refused. */
+function localDatabaseUrl() {
+  const raw = process.env.DATABASE_URL;
+  if (!raw) throw new Error("DATABASE_URL is required and must point at the local test database");
+  const url = new URL(raw);
+  if (url.hostname !== "localhost" && url.hostname !== "127.0.0.1" && url.hostname !== "[::1]") {
+    throw new Error("Refusing to run: the reminder race test uses the local test database only");
+  }
+  url.search = "";
+  return url.toString();
+}
+
+/** Waits until two runs are past their read: two inserts on the lock, or one insert and one advisory-lock wait. */
+async function waitForOverlap(watch: pg.Client, timeoutMs: number) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const { rows } = await watch.query<{ inserts: number; advisory: number }>(
+      `SELECT count(*) FILTER (WHERE query ILIKE 'INSERT INTO %"Notification"%')::int AS inserts,
+              count(*) FILTER (WHERE wait_event = 'advisory')::int AS advisory
+       FROM pg_stat_activity
+       WHERE datname = current_database() AND pid <> pg_backend_pid() AND state = 'active' AND wait_event_type = 'Lock'`,
+    );
+    const { inserts, advisory } = rows[0];
+    if (inserts >= 2 || (inserts >= 1 && advisory >= 1)) return { inserts, advisory };
+    await new Promise((r) => setTimeout(r, 10));
+  }
+  return null;
+}
 
 async function postReminders(count: number) {
   const secret = process.env.JOB_SECRET ?? "";
@@ -79,10 +114,29 @@ describe("qa:TC missing APL-2749: overlapping reminder runs write one reminder p
 
   it("qa:TC missing AC1: 40 concurrent POST /api/jobs/reminders leave exactly one reminder per holder and task", async () => {
     const due = await dueTasks("concurrent run");
-    await postReminders(LOAD);
+    // The gate holds the lock; the watcher reads pg_stat_activity outside the gate's transaction snapshot.
+    const gate = new pg.Client({ connectionString: localDatabaseUrl() });
+    const watch = new pg.Client({ connectionString: localDatabaseUrl() });
+    await gate.connect();
+    await watch.connect();
+    let overlap: { inserts: number; advisory: number } | null = null;
+    let posts: Promise<unknown>;
+    try {
+      await gate.query("BEGIN");
+      await gate.query('LOCK TABLE "Notification" IN SHARE MODE');
+      posts = postReminders(LOAD).then(() => null, (err: unknown) => err);
+      overlap = await waitForOverlap(watch, 1_500);
+    } finally {
+      await gate.query("ROLLBACK");
+      await gate.end();
+      await watch.end();
+    }
+    const failed = await posts;
+    if (failed) throw failed;
+    expect(overlap, "two reminder runs were waiting past their read at the same time").not.toBeNull();
     const counts: Record<string, number> = {};
     for (const d of due) counts[d.who === holder ? "holder" : "leader"] = (await dueTomorrow(d.who, d.taskId, d.title)).length;
-    console.log(`APL-2749 reminder rows per (recipient, task, TASK_DUE_TOMORROW) after ${LOAD} concurrent runs: ${JSON.stringify(counts)}`);
+    console.log(`APL-2749 overlap ${JSON.stringify(overlap)}; reminder rows per (recipient, task, TASK_DUE_TOMORROW) after ${LOAD} concurrent runs: ${JSON.stringify(counts)}`);
     expect(counts).toEqual({ holder: 1, leader: 1 });
   }, 90_000);
 });
