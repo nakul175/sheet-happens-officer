@@ -5,14 +5,16 @@ import { useState, useSyncExternalStore } from "react";
 import { AuthShell } from "@/components/AuthShell";
 import styles from "@/components/auth.module.css";
 import { post, recalledEmail } from "@/components/client";
+import { RESEND_NOTICE, VERIFY_SEND_FAILED } from "@/lib/auth-messages";
 
-/** APL-2742: sendFailed is set when sign-up created the account but the verification email did not go (same text as VERIFY_SEND_FAILED in lib/email). */
-export function CheckEmail({ sendFailed = false }: { sendFailed?: boolean }) {
+/**
+ * APL-2742. sendFailed: sign-up created the account but its email did not go. resent: the person came here from a resend
+ * (sign-in refusal or /expired), whose outcome is never told, so the "We sent" line is replaced by the neutral notice.
+ */
+export function CheckEmail({ sendFailed = false, resent = false }: { sendFailed?: boolean; resent?: boolean }) {
   const email = useSyncExternalStore(() => () => {}, recalledEmail, () => "");
-  const [sent, setSent] = useState(false);
-  const [error, setError] = useState<string | null>(
-    sendFailed ? "We created your account but could not send the verification email. Use \"resend the link\" below in a few minutes; if it still does not arrive, contact your Super Admin." : null,
-  );
+  const [sent, setSent] = useState(resent);
+  const [error, setError] = useState<string | null>(sendFailed ? VERIFY_SEND_FAILED : null);
 
   async function resend() {
     if (!email) return;
@@ -24,13 +26,13 @@ export function CheckEmail({ sendFailed = false }: { sendFailed?: boolean }) {
   return (
     <AuthShell>
       <h1>Check your email</h1>
-      {!sendFailed && (
+      {!sendFailed && !resent && (
         <p className={styles.lead}>
           We sent a verification link{email ? <> to <strong>{email}</strong></> : null}. Click it to activate your account. The link works for 24 hours.
         </p>
       )}
       {error && <div className={styles.alert} role="alert"><span>{error}</span></div>}
-      {sent && <div className={styles.notice} role="status">If this address needs a new link, we are sending one. If nothing arrives in a few minutes, check spam or ask again; you can ask up to 3 times an hour.</div>}
+      {sent && <div className={styles.notice} role="status">{RESEND_NOTICE}</div>}
       <div className={styles.foot} style={{ textAlign: "left" }}>
         Did not get it? Check spam, or{" "}
         {email ? <button type="button" onClick={resend} className={styles.linkbtn}>resend the link</button> : <Link href="/signup">sign up again</Link>}.

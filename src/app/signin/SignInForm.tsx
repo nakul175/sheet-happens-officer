@@ -38,7 +38,7 @@ export function SignInForm({ justReset }: { justReset: boolean }) {
       return;
     }
     rememberEmail(email);
-    router.push("/check-email");
+    router.push("/check-email?resent=1"); // APL-2742: the next screen must not say the email went
   }
 
   return (

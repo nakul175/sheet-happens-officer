@@ -1,6 +1,7 @@
 import { db } from "@/lib/db";
 import { audit, clientAgent, clientIp, consumeToken } from "@/lib/auth";
 import { ApiError, handle, parseBody } from "@/lib/http";
+import { VERIFY_LINK_UNUSABLE } from "@/lib/auth-messages";
 import { tokenInput } from "@/lib/schemas";
 
 // SHO-US-1.2. Single use, 24 hours. Verifying does not sign the person in.
@@ -8,7 +9,7 @@ import { tokenInput } from "@/lib/schemas";
 export const POST = handle(async (req: Request) => {
   const { token } = await parseBody(req, tokenInput);
   const userId = await consumeToken(token, "VERIFY");
-  if (!userId) throw new ApiError(400, "This link has expired or was already used.");
+  if (!userId) throw new ApiError(400, VERIFY_LINK_UNUSABLE);
   await db.user.update({ where: { id: userId }, data: { emailVerifiedAt: new Date() } });
   const ua = clientAgent(req);
   await audit("EMAIL_VERIFIED", { actorId: userId, ip: clientIp(req), data: ua ? { userAgent: ua } : undefined });
