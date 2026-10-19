@@ -143,9 +143,13 @@ async function plan(row: any, user: Actor, projectId: string): Promise<Plan> {
       return {
         conflicts: [], subject: t.title,
         apply: async (tx) => {
-          if (t.parentId) { await tx.task.update({ where: { id }, data: { completedAt: new Date(b.completedAt ?? Date.now()) } }); return; }
+          const stamp = new Date(b.completedAt ?? Date.now());
+          if (t.parentId) { await tx.task.update({ where: { id }, data: { completedAt: stamp } }); return; }
           const done = await tx.section.findFirstOrThrow({ where: { projectId, isDone: true } });
-          await tx.task.update({ where: { id }, data: { completedAt: new Date(b.completedAt ?? Date.now()), sectionId: done.id, previousSectionId: t.sectionId } });
+          await tx.task.update({ where: { id }, data: { completedAt: stamp, sectionId: done.id, previousSectionId: t.sectionId } });
+          // Subtasks that reopened with the parent close with it again, on the same completedAt (APL-2721).
+          // One ticked done on its own since then keeps its own completedAt.
+          if (Array.isArray(f.subtaskIds) && f.subtaskIds.length) await tx.task.updateMany({ where: { id: { in: f.subtaskIds }, deletedAt: null, completedAt: null }, data: { completedAt: stamp } });
         },
       };
     }
@@ -346,7 +350,12 @@ async function plan(row: any, user: Actor, projectId: string): Promise<Plan> {
           // Parents closed by the change reopen, and so do the subtasks that closed with them (SHO-BUG-3).
           const closed = [...(Array.isArray(f.completedTaskIds) ? f.completedTaskIds : []), ...(Array.isArray(f.completedSubtaskIds) ? f.completedSubtaskIds : [])];
           if (closed.length) await tx.task.updateMany({ where: { id: { in: closed } }, data: { completedAt: null } });
-          if (Array.isArray(b.reopenedTaskIds) && b.reopenedTaskIds.length) await tx.task.updateMany({ where: { id: { in: b.reopenedTaskIds }, completedAt: null }, data: { completedAt: new Date() } });
+          // One stamp, so a later move still treats these subtasks as closed with the parent (APL-2721).
+          // Every task the move reopened closes again, also one moved to Trash since: the move never lists a task
+          // that was already in Trash, so these ids are only tasks it changed (APL-2755).
+          const stamp = new Date();
+          if (Array.isArray(b.reopenedTaskIds) && b.reopenedTaskIds.length) await tx.task.updateMany({ where: { id: { in: b.reopenedTaskIds }, completedAt: null }, data: { completedAt: stamp } });
+          if (Array.isArray(b.reopenedSubtaskIds) && b.reopenedSubtaskIds.length) await tx.task.updateMany({ where: { id: { in: b.reopenedSubtaskIds }, completedAt: null }, data: { completedAt: stamp } });
         },
       };
     }

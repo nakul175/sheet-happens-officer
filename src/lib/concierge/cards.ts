@@ -90,8 +90,10 @@ export async function confirmCard(user: Actor, cardId: string, handover?: { task
     throw failure instanceof ApiError ? failure : new ApiError(500, "Something went wrong. Nothing was changed.");
   }
 
-  const confirmedAt = new Date().toISOString();
-  const rows = logIds.length ? await db.actionLog.findMany({ where: { id: { in: logIds } }, select: { action: true, projectId: true } }) : [];
+  const rows = logIds.length ? await db.actionLog.findMany({ where: { id: { in: logIds } }, select: { action: true, projectId: true, createdAt: true } }) : [];
+  // The card's Undo clock starts at its first logged change, so a deleted task's card stops offering Undo
+  // no later than Trash purges it (APL-2719). Stamping after execute() left it a few ms behind deletedAt.
+  const confirmedAt = new Date(Math.min(Date.now(), ...rows.map((r) => r.createdAt.getTime()))).toISOString();
   const undoable = !s.card.irreversible && await offerUndo(user, rows);
   const done = summary.slice(0, applied);
   const why = failure instanceof ApiError ? failure.message : "an unexpected error";

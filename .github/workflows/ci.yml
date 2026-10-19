@@ -83,6 +83,14 @@ jobs:
           fi
       - name: Unit tests
         run: npm test
+      # APL-2729 AC4. One production server per CRM_VISIBLE mode, after the build.
+      # The file sets its own test-only job token. A short JOB_SECRET must fail this step, not skip it.
+      - name: Reminder modes (one server per CRM_VISIBLE)
+        run: npm run test:reminder-modes
+      # APL-2741. One production server per CRM_VISIBLE mode, after the build.
+      # The file sets its own test-only job token. A short JOB_SECRET must fail this step, not skip it.
+      - name: Stalled-deal modes (one server per CRM_VISIBLE)
+        run: npm run test:stalled-modes
       - name: Server log (on failure)
         if: failure()
         run: tail -n 200 server.log || true

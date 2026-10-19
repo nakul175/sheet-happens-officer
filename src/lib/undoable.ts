@@ -47,9 +47,13 @@ export const UNDO_DAYS = 30;
 /** 30 × 24 hours. Exactly this age is still undoable; only a greater age is too old (APL-2711). */
 export const UNDO_WINDOW_MS = UNDO_DAYS * 86_400_000;
 
-/** True when `at` is strictly older than 30×24h. Exactly 30 days still counts as undoable (and a soft-deleted comment is kept). */
+/**
+ * True when `at` is strictly older than 30×24h. Exactly 30 days still counts as undoable.
+ * `at` is a Date or epoch ms: the concierge paths keep epoch ms (APL-2717), the rest pass Dates (APL-2711).
+ * The comment purge uses it too: a soft-deleted comment at exactly 30×24h is kept (APL-2590).
+ */
 export function isTooOldToUndo(at: Date | number, now = Date.now()): boolean {
-  return now - (at instanceof Date ? at.getTime() : at) > UNDO_WINDOW_MS;
+  return now - (typeof at === "number" ? at : at.getTime()) > UNDO_WINDOW_MS;
 }
 
 /** Trash with `deletedAt` strictly before this instant is past the undo window. */

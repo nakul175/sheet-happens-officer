@@ -318,6 +318,8 @@ export async function updateName(user: Actor, name: string) {
 export async function changePassword(user: Actor, current: string, password: string) {
   const u = await db.user.findUniqueOrThrow({ where: { id: user.id } });
   if (!(await verifyPassword(current, u.passwordHash))) throw new ApiError(400, "Your current password is not correct.");
+  // SHO-US-23.5 AC3: keeping the emailed password is not setting your own.
+  if (u.tempPasswordAt && password === current) throw new ApiError(400, "Choose a new password. It cannot be the one we emailed you.");
   const keep = await currentSessionId();
   await db.$transaction([
     db.user.update({ where: { id: user.id }, data: { passwordHash: await hashPassword(password), tempPasswordAt: null } }),
