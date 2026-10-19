@@ -85,5 +85,5 @@ export const resetMail = (to: string, token: string): Mail => ({
 export const signInDetailsMail = (to: string, firstName: string, addedBy: string, password: string): Mail => ({
   to,
   subject: "Your Sheet Happens Officer account",
-  text: `Hi ${firstName},\n\n${addedBy} added you to Sheet Happens Officer. Sign in here:\n\n${appUrl()}/signin\n\nUsername: ${to}\nPassword: ${password}\n\nThis password stays valid until you change it. We suggest you set your own after you sign in: open Profile, then Change password.\n\nIf you did not expect this email, ignore it and tell ${addedBy}. Do not forward this email, because it contains your password.`,
+  text: `Hi ${firstName},\n\n${addedBy} added you to Sheet Happens Officer. Sign in here:\n\n${appUrl()}/signin\n\nUsername: ${to}\nPassword: ${password}\n\nThis password is temporary. When you sign in, you will be asked to set your own password before you can do anything else. After that, this one stops working.\n\nIf you did not expect this email, ignore it and tell ${addedBy}. Do not forward this email, because it contains your password.`,
 });
