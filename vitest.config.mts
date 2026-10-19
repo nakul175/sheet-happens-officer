@@ -18,6 +18,6 @@ export default defineConfig({
   test: {
     testTimeout: 30000,
     fileParallelism: false,
-    exclude: [...configDefaults.exclude, "tests/viewport/**", "tests/e2e/**/!(APL-2522).spec.ts", "tests/e2e/stories/APL-2522-*.spec.ts", "e2e/**", "tests/crm-visible-modes-server.test.ts", "scripts/**"],
+    exclude: [...configDefaults.exclude, "tests/viewport/**", "tests/e2e/**/!(APL-2522).spec.ts", "tests/e2e/stories/APL-2522-*.spec.ts", "e2e/**", "tests/crm-visible-modes-server.test.ts", "tests/apl-2713-crm-modes.test.ts", "scripts/**"],
   },
 });
