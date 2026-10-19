@@ -52,7 +52,7 @@ export async function setOrgRole(actor: Actor, targetId: string, role: "MEMBER" 
   return { ...target, orgRole: role };
 }
 
-function mayAct(actor: Actor, target: { orgRole: string; email: string }) {
+export function mayAct(actor: Actor, target: { orgRole: string; email: string }) {
   if (isSuper(target)) return false; // protected in the app
   if (target.orgRole === "ADMIN") return actor.orgRole === "SUPER_ADMIN";
   return isAdmin(actor);
