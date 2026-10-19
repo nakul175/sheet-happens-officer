@@ -13,6 +13,8 @@ const run = Date.now();
 let n = 0;
 let browser: Browser;
 let sa: Account;
+// ZZ-TEST people with nakul17+zz-… aliases; afterAll deactivates them.
+const created: string[] = [];
 
 function chromePath() {
   const fromEnv = process.env.PW_CHROMIUM;
@@ -51,14 +53,16 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await browser?.close();
+  for (const id of created) await sa?.c.post(`/api/team/${id}/deactivate`, { reassign: "leaders" });
 });
 
 describe("qa:TC missing 23.5 AC8 the sign-in form gets mustChangePassword (browser)", () => {
   it("qa:TC missing AC8: an emailed password signs in with mustChangePassword true and opens Set your own password", async () => {
     const tag = `${run}${n++}`;
-    const email = `forcedui${tag}@aplyd.com`;
-    const r = await sa.c.post("/api/team", { firstName: "Fern", lastName: `Forcedui${tag}`, email, role: "MEMBER" });
+    const email = `nakul17+zz-2624-ui-${tag}@aplyd.com`;
+    const r = await sa.c.post("/api/team", { firstName: "ZZ-TEST", lastName: `Forcedui${tag}`, email, role: "MEMBER" });
     expect(r.status).toBe(201);
+    created.push(r.json.person.id as string);
     const page = await browser.newPage();
     const s = await signInThroughForm(page, email, emailedPassword(email));
     expect(s.status).toBe(200);
@@ -72,7 +76,8 @@ describe("qa:TC missing 23.5 AC8 the sign-in form gets mustChangePassword (brows
     const s = await signInThroughForm(page, sa.email, PW);
     expect(s.status).toBe(200);
     expect(s.json.user.mustChangePassword).toBe(false);
-    await page.locator('[aria-label="Main"]').first().waitFor({ state: "attached" });
+    // The side drawer is the one aside labelled Main (the phone tab bar is a nav), so the locator is exact.
+    await page.locator('aside[aria-label="Main"]').waitFor({ state: "attached" });
     expect(await page.getByRole("heading", { name: WALL }).count()).toBe(0);
     await page.context().close();
   });

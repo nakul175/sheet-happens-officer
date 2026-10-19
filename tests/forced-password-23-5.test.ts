@@ -2,7 +2,7 @@
 // APL-2624 has no TC ids, so every describe and test title carries the literal token qa:TC missing.
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it } from "vitest";
 import { account, BASE, Client, OUTBOX, PW, superAdmin, type Account } from "./helpers";
 
 const run = Date.now();
@@ -17,16 +17,34 @@ function signInMail(email: string) {
   return { text, password: text.match(/Password: (\S+)/)?.[1] ?? "", resetToken: (mails.at(-1)?.text as string)?.match(/token=([\w-]+)/)?.[1] ?? "" };
 }
 
+// Thrown-away people use ZZ-TEST names and nakul17+zz-… aliases (self-signup only accepts @aplyd.com).
+// afterAll deactivates every one of them.
+const created: string[] = [];
+
+afterAll(async () => {
+  const sa = await superAdmin();
+  for (const id of created) await sa.c.post(`/api/team/${id}/deactivate`, { reassign: "leaders" });
+});
+
 /** A person added by the Super Admin and signed in with the emailed password. */
 async function added(sa: Account) {
   const tag = `${run}${n++}`;
-  const email = `forced${tag}@aplyd.com`;
-  const r = await sa.c.post("/api/team", { firstName: "Fern", lastName: `Forced${tag}`, email, role: "MEMBER" });
+  const email = `nakul17+zz-2624-${tag}@aplyd.com`;
+  const r = await sa.c.post("/api/team", { firstName: "ZZ-TEST", lastName: `Forced${tag}`, email, role: "MEMBER" });
   expect(r.status).toBe(201);
+  created.push(r.json.person.id as string);
   const pw = signInMail(email).password;
   const c = new Client();
   expect((await c.post("/api/auth/signin", { email, password: pw })).status).toBe(200);
   return { c, id: r.json.person.id as string, email, pw };
+}
+
+/** A person who signed up with their own password. */
+async function ownPassword() {
+  const tag = `${run}${n++}`;
+  const a = await account(`ZZ-TEST own ${tag}`, `nakul17+zz-2624-own-${tag}@aplyd.com`);
+  created.push(a.id);
+  return a;
 }
 
 /** The server-rendered HTML of an app screen. */
@@ -147,7 +165,7 @@ describe("qa:TC missing 23.5 AC5 Resend puts the person back in the forced state
 
 describe("qa:TC missing 23.5 AC6 own or reset passwords are never forced", () => {
   it("qa:TC missing a person who signed up with their own password is not forced", async () => {
-    const a = await account("ownpw");
+    const a = await ownPassword();
     expect((await a.c.get("/api/auth/me")).json.user.mustChangePassword).toBe(false);
     expect((await a.c.get("/api/projects")).status).toBe(200);
     expect((await screen(a.c, "/")).html).not.toContain("Set your own password");
@@ -202,7 +220,7 @@ describe("qa:TC missing 23.5 AC8 sign-in returns mustChangePassword", () => {
   });
 
   it("qa:TC missing AC8: false for a person who signed up with their own password", async () => {
-    const own = await account("ownpw");
+    const own = await ownPassword();
     const s = await new Client().post("/api/auth/signin", { email: own.email, password: PW });
     expect(s.status).toBe(200);
     expect(s.json.user.mustChangePassword).toBe(false);
