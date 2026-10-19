@@ -1,5 +1,7 @@
-// The APL-2522 spec calls this before its tests run.
-// Vitest replaces the BASE_URL it was given with "/" before the spec file loads.
+// Playwright specs import BASE_URL from this module (via support.ts and playwright.config.ts).
+// Vitest specs import assertStoryTargetAllowed. Vitest rewrites the live BASE_URL to "/"
+// before a spec file loads, so the guard reads the value from process start and this module
+// does not throw while Vitest is loading it.
 // The value from process start is still in the process image (on Linux, /proc/self/environ).
 // If that image cannot be read, the original value is hidden and the guard fails closed.
 // TASKBOARD_URL and STAGING_URL are read from the live environment. The rewritten slot is not.
@@ -93,4 +95,14 @@ export function assertStoryTargetAllowed(env: NodeJS.ProcessEnv = process.env, b
   refuseProduction(env.TASKBOARD_URL);
   refuseProduction(env.STAGING_URL);
   refuseProduction(baseUrl);
+}
+
+// BASE_URL wins; STAGING_URL is the older name and still works. Production hosts are refused whatever the variable says.
+const PLAYWRIGHT_DEFAULT = "https://staging.sheethappensofficer.com";
+export const BASE_URL = (process.env.BASE_URL || process.env.STAGING_URL || PLAYWRIGHT_DEFAULT).replace(/\/+$/, "");
+
+if (!process.env.VITEST) {
+  const host = hostOf(BASE_URL);
+  if (!host) throw new Error(`BASE_URL is not a URL: ${BASE_URL}`);
+  if (PRODUCTION_HOSTS.has(host)) throw new Error(`Refusing to run story tests against production (${host}).`);
 }
