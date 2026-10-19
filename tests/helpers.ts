@@ -101,3 +101,40 @@ export function istDate(offsetDays: number) {
   const ist = new Date(Date.now() + 5.5 * 3600_000 + offsetDays * 86400_000);
   return ist.toISOString().slice(0, 10);
 }
+
+/** A ZZ-TEST project led by `leader`, named so cleanup and QA can tell it is test data. */
+export async function zzProject(leader: Account, label: string) {
+  const r = await leader.c.post("/api/projects", { name: `ZZ-TEST ${label}`, leaderId: leader.id });
+  expect(r.status, JSON.stringify(r.json)).toBe(201);
+  return r.json.project.id as string;
+}
+
+/**
+ * Cleans up ZZ-TEST data through the API, as the APL-2522 spec does: the Super Admin takes over as Leader,
+ * restores anything left in Trash and archives each project, then deactivates each person.
+ * The API has no hard delete for people or projects.
+ */
+export async function cleanupZz(projectIds: string[], people: Account[]) {
+  const sa = await superAdmin();
+  const problems: string[] = [];
+  for (const id of projectIds) {
+    const added = await sa.c.post(`/api/projects/${id}/members`, { userId: sa.id, role: "EDITOR" });
+    if (added.status !== 201 && !(added.status === 409 && /already a member/.test(added.json?.error ?? ""))) problems.push(`add member ${id}: ${added.status}`);
+    const led = await sa.c.post(`/api/projects/${id}/leader`, { newLeaderId: sa.id, previousRole: "EDITOR" });
+    if (led.status !== 200 && !(led.status === 400 && /already the Leader/.test(led.json?.error ?? ""))) problems.push(`change leader ${id}: ${led.status}`);
+    // Bring Trash back first, so a back-dated test task is never left for another test's purge run to count.
+    const trash = await sa.c.get(`/api/projects/${id}/trash`);
+    for (const item of (trash.json?.items ?? []) as { id: string }[]) {
+      const back = await sa.c.post(`/api/tasks/${item.id}/restore`, { confirmParent: true });
+      if (back.status >= 300) problems.push(`restore ${item.id}: ${back.status}`);
+    }
+    const archived = await sa.c.post(`/api/projects/${id}/archive`);
+    if (archived.status !== 200) problems.push(`archive ${id}: ${archived.status}`);
+  }
+  for (const who of people) {
+    if (who.id === sa.id) continue;
+    const off = await sa.c.post(`/api/team/${who.id}/deactivate`, { reassign: "leaders" });
+    if (off.status !== 200 && !(off.status === 409 && /already deactivated/.test(off.json?.error ?? ""))) problems.push(`deactivate ${who.email}: ${off.status}`);
+  }
+  expect(problems, problems.join("\n")).toEqual([]);
+}

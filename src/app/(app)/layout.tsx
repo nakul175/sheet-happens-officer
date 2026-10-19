@@ -3,6 +3,7 @@ import { Skeleton } from "@/components/ui";
 import { redirect } from "next/navigation";
 import { currentUser, publicUser } from "@/lib/auth";
 import { Shell, type Me } from "./Shell";
+import { SetOwnPassword } from "./SetOwnPassword";
 import { crmVisible } from "@/lib/crm";
 import { leadsAnyDeal } from "@/lib/review";
 import { UndoHost } from "@/components/UndoHost";
@@ -13,11 +14,14 @@ import "./density.css";
 async function Gate({ children }: { children: React.ReactNode }) {
   let user;
   try {
-    user = await currentUser();
+    user = await currentUser({ allowTempPassword: true });
   } catch {
     redirect("/signin");
   }
-  return <><Shell user={{ ...(publicUser(user) as Me), compact: user.compactRows, tempPassword: !!user.tempPasswordAt, crm: crmVisible(user), review: await leadsAnyDeal(user), startGuide: !user.startGuideDismissedAt }}>{children}</Shell><UndoHost /></>;
+  // SHO-US-23.5: on a Super-Admin-issued password, this screen stands in for every page (the page itself is never rendered).
+  // Saving refreshes the same URL, so the person lands on the page they asked for.
+  if (user.tempPasswordAt) return <SetOwnPassword email={user.email} />;
+  return <><Shell user={{ ...(publicUser(user) as Me), compact: user.compactRows, crm: crmVisible(user), review: await leadsAnyDeal(user), startGuide: !user.startGuideDismissedAt }}>{children}</Shell><UndoHost /></>;
 }
 
 export default function AppLayout({ children }: LayoutProps<"/">) {
