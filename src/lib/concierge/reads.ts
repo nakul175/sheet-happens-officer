@@ -159,8 +159,9 @@ export async function quickAnswer(user: Actor, id: string, now = new Date(), pro
   const base = QUICK_ACTIONS.find((x) => x.id === id);
   if (!base) throw new ApiError(404, "No such quick action");
   // Asked from a project screen (SHO-US-14.15). visibleProjects is the same filter as the
-  // visible list: membership (except Admins), archivedAt: null, and the CRM deal check.
-  // A hidden, archived, or other missing project is the same 404, before any chat row is written.
+  // visible list: membership (except Admins), archivedAt: null, and the CRM deal check
+  // (crmProjectWhere). A hidden, archived, or other missing project is the same 404,
+  // before any chat row is written.
   const scope = projectId
     ? await db.project.findFirst({
         where: { id: projectId, ...visibleProjects(user) },

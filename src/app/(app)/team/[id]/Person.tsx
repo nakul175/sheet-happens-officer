@@ -3,7 +3,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useState } from "react";
 import { api, useGet } from "@/components/api";
-import { LoadFailed } from "@/components/ui";
+import { LoadFailed, Skeleton } from "@/components/ui";
 import { Page, roleLabel, useMe } from "../../Shell";
 
 type Proj = { id: string; name: string; role?: string; openTasks?: number };
@@ -19,7 +19,19 @@ export default function PersonPage() {
   const me = useMe();
   const g = useGet<{ person: Person }>(`/api/team/${id}`);
   const [note, setNote] = useState<null | { ok: boolean; text: string }>(null);
-  const p = g.data?.person;
+  // APL-2664 v1.2. Each failed read has its own plain message. A 403 is no access, except the
+  // forced-password 403 (APL-2624). The shared client is unchanged, so this matches the error text
+  // that client already returns for PASSWORD_CHANGE_REQUIRED. Mocked until PR #8 merges.
+  const settled = !g.loading;
+  const passwordChange = settled && g.status === 403 && g.error === "Set your own password first.";
+  const denied = settled && g.status === 403 && !passwordChange;
+  // AC5: a 401 shows no message and no Retry here. The global redirect stays in api(), and the
+  // visible session-expired sentence is APL-2652.
+  const expired = settled && g.status === 401;
+  const missing = settled && g.status === 404;
+  const serverFault = settled && (g.status === 500 || g.status === 502 || g.status === 503);
+  const unreachable = settled && g.status === 0 && !!g.error;
+  const p = denied || passwordChange || expired || missing ? undefined : g.data?.person;
   const admin = me.orgRole !== "MEMBER";
   const self = p?.id === me.id;
 
@@ -35,12 +47,31 @@ export default function PersonPage() {
     if (r.ok) { setNote({ ok: true, text: `${p.name} is now ${to === "ADMIN" ? "an Admin" : "a Member"}.` }); g.reload(); } else setNote({ ok: false, text: r.error ?? "Could not change the role." });
   }
 
+  if (passwordChange) {
+    return (
+      <Page title="Set your own password" docTitle="Set your own password">
+        <div className="pwbar" role="status">
+          <span>Set your own password. The emailed one still works until you do.</span>
+          <Link href="/profile">Change password</Link>
+        </div>
+      </Page>
+    );
+  }
+
   return (
-    <Page title={p?.name ?? "Person"} sub={p?.email ? `${p.email} · ${roleLabel(p.orgRole!)}` : undefined} docTitle={p?.name ?? "Person"}>
+    <Page title={p?.name ?? "Person"} sub={admin && p?.email ? `${p.email} · ${roleLabel(p.orgRole!)}` : undefined} docTitle={p?.name ?? "Person"}>
+      {/* APL-2664 AC3: a member sees the name and shared projects only, so email and role stay off this line. */}
       <p><Link href="/team">← Back to Team</Link></p>
-      {g.loading && <div className="skel">Loading…</div>}
-      {g.error && g.status === 404 && <div className="err" role="alert">This person was not found.</div>}
-      {g.error && g.status !== 404 && <LoadFailed onRetry={g.reload} />}
+      {g.loading && <Skeleton />}
+      {missing && <div className="err" role="alert">Not found</div>}
+      {denied && <div className="card empty" role="alert">{"You don't have access to this person"}</div>}
+      {serverFault && (
+        <div className="card empty" role="alert">
+          <p>Something went wrong, try again</p>
+          <button className="btn" onClick={g.reload}>Retry</button>
+        </div>
+      )}
+      {(unreachable || (g.error && !missing && !expired && !denied && !serverFault)) && <LoadFailed onRetry={g.reload} />}
       {note && <div className={note.ok ? "ok" : "err"} role="status">{note.text}</div>}
       {p && (
         <>

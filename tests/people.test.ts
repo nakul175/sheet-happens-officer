@@ -159,6 +159,39 @@ describe("15.3 sign-in details", () => {
 });
 
 describe("15.4 person profile", () => {
+  // qa:TC-APL2664-b7b130bf@v2 — the live API response. The page case does not stringify its own fixture.
+  // The server must already be up. From a built tree:
+  //   EMAIL_OUTBOX_DIR=/tmp/sho-outbox SUPER_ADMIN_EMAILS=root.test@aplyd.com APP_URL=http://localhost:3100 \
+  //     JOB_SECRET=ci-only-not-a-real-secret-0123 npx next start -p 3100
+  //   EMAIL_OUTBOX_DIR=/tmp/sho-outbox TASKBOARD_URL=http://localhost:3100 npx vitest run tests/people.test.ts
+  // npm test with no TASKBOARD_URL calls http://localhost:3000 and refuses the connection.
+  it("Allowed users see what their role allows: worker qa:TC-APL2664-b7b130bf@v2", async () => {
+    const sa = await superAdmin();
+    const lead = await account("lead");
+    const worker = await account("worker");
+    const p2 = await account("p2");
+    const shared = await project(sa, lead, [{ who: worker }, { who: p2 }]);
+    const priv = await project(sa, lead, [{ who: p2 }]);
+    const sharedName = (await lead.c.get(`/api/projects/${shared.id}`)).json.project.name as string;
+    const privateName = (await lead.c.get(`/api/projects/${priv.id}`)).json.project.name as string;
+    const r = await worker.c.get(`/api/team/${p2.id}`);
+    expect(r.status).toBe(200);
+    const body = JSON.stringify(r.json);
+    const pr = r.json.person;
+    expect(pr.name).toBe(p2.name);
+    expect(pr.projects).toEqual([{ id: shared.id, name: sharedName }]);
+    expect(pr.email).toBeUndefined();
+    expect(pr.orgRole).toBeUndefined();
+    expect(pr.status).toBeUndefined();
+    expect(pr.joinedAt).toBeUndefined();
+    expect(pr.openTasks).toBeUndefined();
+    expect(pr.projects[0]).not.toHaveProperty("role");
+    expect(body).not.toContain("Member");
+    expect(body).not.toContain(p2.email);
+    expect(body).not.toContain(priv.id);
+    expect(body).not.toContain(privateName);
+  });
+
   it("a Member sees a name and shared projects only", async () => {
     const sa = await superAdmin();
     const lead = await account("lead");
