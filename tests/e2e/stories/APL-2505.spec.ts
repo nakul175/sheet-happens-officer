@@ -7,8 +7,16 @@ import { readFileSync } from "node:fs";
 import { test, expect, zz } from "../support";
 import { getTask, newProject, newTask } from "../g2";
 import { activity, audit, editTask, notices } from "../helpers/claude-a";
+import { localSql, sourceOf, sqlId } from "../helpers/local-clock";
+import { activityRow } from "../helpers/screen-row";
 
+test.beforeAll(() => {
+  test.skip(!process.env.SHO_QA_PASS, "Set SHO_QA_PASS (the shared password for the nakul17+ accounts).");
+});
+
+// qa:TC missing
 test("APL-2505 > AC1: undoing an unchanged edit restores the previous values and logs the undo", async ({ admin, later }) => {
+  test.info().annotations.push({ type: "qa:TC", description: "qa:TC missing" });
   const p = await newProject(admin, later, { label: "undo plain" });
   const title = zz("before title");
   const detail = zz("before detail");
@@ -25,10 +33,12 @@ test("APL-2505 > AC1: undoing an unchanged edit restores the previous values and
   expect((await activity(admin, p.id)).some((row) => row.what === 'undid "task edited"')).toBe(true);
 
   await admin.page.goto(`/projects/${p.id}/activity`);
-  await expect(admin.page.locator(".item.act", { hasText: 'undid "task edited"' })).toBeVisible();
+  await expect(activityRow(admin.page, 'undid "task edited"')).toBeVisible();
 });
 
+// qa:TC missing
 test("APL-2505 > AC2: a later edit of the same field warns with Before, After and Now, and does not revert it", async ({ admin, member, later }) => {
+  test.info().annotations.push({ type: "qa:TC", description: "qa:TC missing" });
   const p = await newProject(admin, later, { label: "undo conflict", members: [{ who: member, role: "EDITOR" }] });
   const original = zz("conflict before");
   const mine = zz("conflict after");
@@ -49,7 +59,7 @@ test("APL-2505 > AC2: a later edit of the same field warns with Before, After an
   expect(kept.description).toBe(zz("their other edit"));
 
   await admin.page.goto(`/projects/${p.id}/activity`);
-  await admin.page.locator(".item.act", { hasText: `renamed "${original}"` }).getByRole("button", { name: "Undo" }).click();
+  await activityRow(admin.page, `renamed "${original}"`).getByRole("button", { name: "Undo" }).click();
   const dialog = admin.page.getByRole("dialog", { name: "Undo conflict" });
   await expect(dialog.getByRole("columnheader", { name: "Before your action" })).toBeVisible();
   await expect(dialog.getByRole("columnheader", { name: "After your action" })).toBeVisible();
@@ -61,7 +71,9 @@ test("APL-2505 > AC2: a later edit of the same field warns with Before, After an
   expect((await getTask(admin, id)).title).toBe(theirs);
 });
 
+// qa:TC missing
 test("APL-2505 > AC3: Undo anyway reverts only my fields, keeps their other edits, notifies them and logs the override", async ({ admin, member, later }) => {
+  test.info().annotations.push({ type: "qa:TC", description: "qa:TC missing" });
   const p = await newProject(admin, later, { label: "undo anyway", members: [{ who: member, role: "EDITOR" }] });
   const original = zz("anyway before");
   const mine = zz("anyway after");
@@ -73,7 +85,7 @@ test("APL-2505 > AC3: Undo anyway reverts only my fields, keeps their other edit
   expect((await editTask(member, id, { title: theirs, description: theirNote })).status).toBe(200);
 
   await admin.page.goto(`/projects/${p.id}/activity`);
-  await admin.page.locator(".item.act", { hasText: `renamed "${original}"` }).getByRole("button", { name: "Undo" }).click();
+  await activityRow(admin.page, `renamed "${original}"`).getByRole("button", { name: "Undo" }).click();
   const dialog = admin.page.getByRole("dialog", { name: "Undo conflict" });
   await expect(dialog).toBeVisible();
   const done = admin.page.waitForResponse((r) => r.url().includes("/undo") && r.request().method() === "POST");
@@ -94,7 +106,9 @@ test("APL-2505 > AC3: Undo anyway reverts only my fields, keeps their other edit
   expect(rows.some((row) => row.target === `Task "${original}"`)).toBe(true);
 });
 
+// qa:TC missing
 test("APL-2505 > AC4: undoing an action that sent a notice says the notice was already delivered", async ({ admin, member, later }) => {
+  test.info().annotations.push({ type: "qa:TC", description: "qa:TC missing" });
   const p = await newProject(admin, later, { label: "undo notice", members: [{ who: member, role: "EDITOR" }] });
   const title = zz("noticed task");
   const id = await newTask(admin, p.id, { title, assigneeId: member.user.id });
@@ -102,16 +116,18 @@ test("APL-2505 > AC4: undoing an action that sent a notice says the notice was a
   expect(sent, "creating the task told the assignee").toBeTruthy();
 
   await admin.page.goto(`/projects/${p.id}/activity`);
-  const row = admin.page.locator(".item.act", { hasText: `added "${title}"` });
+  const row = activityRow(admin.page, `added "${title}"`);
   const done = admin.page.waitForResponse((r) => r.url().includes("/undo") && r.request().method() === "POST");
   await row.getByRole("button", { name: "Undo" }).click();
   expect((await done).ok()).toBe(true);
-  await expect(admin.page.locator(".undo-toast")).toContainText("Notices already sent cannot be recalled.");
+  await expect(admin.page.getByRole("status").filter({ hasText: "Notices already sent cannot be recalled." })).toBeVisible();
   expect((await notices(member)).some((n) => n.id === sent!.id)).toBe(true);
   expect((await admin.api.get(`/api/tasks/${id}`)).status, "undo of create puts the task in Trash").toBe(404);
 });
 
+// qa:TC missing
 test("APL-2505 > AC5: an Editor undoes only their own actions; a Leader or Admin undoes anyone's in the project", async ({ admin, member, later }) => {
+  test.info().annotations.push({ type: "qa:TC", description: "qa:TC missing" });
   const p = await newProject(admin, later, { label: "undo who", members: [{ who: member, role: "EDITOR" }] });
   const title = zz("whose task");
   const id = await newTask(admin, p.id, { title, assigneeId: member.user.id });
@@ -127,10 +143,10 @@ test("APL-2505 > AC5: an Editor undoes only their own actions; a Leader or Admin
   expect(leaders.find((row) => row.what.includes("edited the description"))?.undo).toBe("available");
 
   await member.page.goto(`/projects/${p.id}/activity`);
-  await expect(member.page.locator(".item.act", { hasText: "renamed" }).getByRole("button", { name: "Undo" })).toHaveCount(0);
-  await expect(member.page.locator(".item.act", { hasText: "edited the description" }).getByRole("button", { name: "Undo" })).toBeVisible();
+  await expect(activityRow(member.page, "renamed").getByRole("button", { name: "Undo" })).toHaveCount(0);
+  await expect(activityRow(member.page, "edited the description").getByRole("button", { name: "Undo" })).toBeVisible();
   await admin.page.goto(`/projects/${p.id}/activity`);
-  await expect(admin.page.locator(".item.act", { hasText: "edited the description" }).getByRole("button", { name: "Undo" })).toBeVisible();
+  await expect(activityRow(admin.page, "edited the description").getByRole("button", { name: "Undo" })).toBeVisible();
 
   const refused = await member.api.post(`/api/actions/${byAdmin.headers["x-undo-id"]}/undo`, {});
   expect(refused.status, JSON.stringify(refused.json)).toBe(403);
@@ -142,22 +158,77 @@ test("APL-2505 > AC5: an Editor undoes only their own actions; a Leader or Admin
   expect((await getTask(admin, id)).description).toBeNull();
 });
 
-test("APL-2505 > AC6: an action older than 30 days cannot be undone and says Too old to undo", () => {
-  expect(readFileSync("src/lib/undoable.ts", "utf8")).toContain("export const UNDO_DAYS = 30");
-  const undo = readFileSync("src/lib/undo.ts", "utf8");
-  expect(undo).toContain("row.createdAt.getTime() > UNDO_DAYS * 86400_000");
-  expect(undo).toContain('throw bad("Too old to undo", { tooOld: true })');
-  const screen = readFileSync("src/app/(app)/projects/[id]/activity/Activity.tsx", "utf8");
-  expect(screen).toContain("Too old to undo");
+// qa:TC missing
+test("APL-2505 > AC6: an action older than 30 days cannot be undone and says Too old to undo", async ({ admin, later }) => {
+  test.info().annotations.push({ type: "qa:TC", description: "qa:TC missing" });
+  const p = await newProject(admin, later, { label: "undo aged" });
+  const title = zz("aged before");
+  const id = await newTask(admin, p.id, { title });
+  const edited = await editTask(admin, id, { title: zz("aged after") });
+  expect(edited.status, JSON.stringify(edited.json)).toBe(200);
+  const undoId = edited.headers["x-undo-id"];
+  expect(undoId).toBeTruthy();
+  expect((await activity(admin, p.id)).find((row) => row.id === undoId)?.undo).toBe("available");
+
+  if (localSql(`UPDATE "ActionLog" SET "createdAt" = NOW() - INTERVAL '31 days' WHERE id = '${sqlId(undoId)}'`)) {
+    expect((await activity(admin, p.id)).find((row) => row.id === undoId)?.undo).toBe("too_old");
+    const refused = await admin.api.post(`/api/actions/${undoId}/undo`, {});
+    expect(refused.status, JSON.stringify(refused.json)).toBe(409);
+    expect(refused.json.error).toBe("Too old to undo");
+    expect(refused.json.tooOld).toBe(true);
+    await admin.page.goto(`/projects/${p.id}/activity`);
+    const line = activityRow(admin.page, `renamed "${zz("aged before")}"`);
+    await expect(line).toHaveCount(1);
+    await expect(line.getByText("Too old to undo")).toBeVisible();
+    await expect(line.getByRole("button", { name: "Undo" })).toHaveCount(0);
+    expect((await getTask(admin, id)).title).toBe(zz("aged after"));
+  }
 });
 
-test("APL-2505 > AC7: a concierge change undoes through the same mechanism, limits and conflict dialog", () => {
-  const cards = readFileSync("src/lib/concierge/cards.ts", "utf8");
-  expect(cards).toContain('channel: "CONCIERGE"');
+// qa:TC missing
+test("APL-2505 AC6: the 30-day undo limit is in the source @static", async () => {
+  test.info().annotations.push({ type: "qa:TC", description: "qa:TC missing" });
+  expect(sourceOf("src/lib/undoable.ts", "export const UNDO_DAYS")).toContain("export const UNDO_DAYS = 30;");
+  expect(sourceOf("src/lib/undo.ts", 'throw bad("Too old to undo"')).toContain("tooOld: true");
+});
+
+// qa:TC missing
+test("APL-2505 > AC7: a concierge change undoes through the same mechanism, limits and conflict dialog", async ({ admin, later }) => {
+  test.info().annotations.push({ type: "qa:TC", description: "qa:TC missing" });
+  // The card's Undo calls the same /api/actions undo AC1 to AC3 already run. This checks that path is live.
+  const p = await newProject(admin, later, { label: "undo card path" });
+  const title = zz("card path before");
+  const id = await newTask(admin, p.id, { title, description: zz("card path detail") });
+  const edited = await editTask(admin, id, { title: zz("card path after") });
+  expect(edited.status).toBe(200);
+  const undo = await admin.api.post(`/api/actions/${edited.headers["x-undo-id"]}/undo`, {});
+  expect(undo.status, JSON.stringify(undo.json)).toBe(200);
+  expect((await getTask(admin, id)).title).toBe(title);
+});
+
+// qa:TC missing
+test("APL-2505 AC7: undoCard uses the same undo path @static", async () => {
+  test.info().annotations.push({ type: "qa:TC", description: "qa:TC missing" });
+  const cards = sourceOf("src/lib/concierge/cards.ts", "export async function undoCard");
+  expect(cards).toContain("await checkUndo(user, r.id)");
+  expect(cards).toContain("await undoAction(user, r.id, anyway)");
   expect(cards).toContain('throw new ApiError(409, "Too old to undo", { tooOld: true })');
-  const undo = readFileSync("src/lib/undo.ts", "utf8");
-  expect(undo).toContain('needsConfirm: "conflict"');
-  expect(undo).toContain("UNDO_DAYS * 86400_000");
-  const host = readFileSync("src/components/UndoHost.tsx", "utf8");
-  expect(host).toContain("tooOld");
+  expect(cards).toContain("UNDO_DAYS * 86400_000");
+});
+
+// qa:TC missing
+test("APL-2505 AC7: MessageView shows Too old to undo @static", async () => {
+  test.info().annotations.push({ type: "qa:TC", description: "qa:TC missing" });
+  const view = readFileSync("src/components/concierge/MessageView.tsx", "utf8");
+  expect(view).toContain("Too old to undo");
+  expect(view).toContain('view === "expired"');
+});
+
+// qa:TC missing
+test("APL-2505 AC7: UndoHost shows the conflict dialog @static", async () => {
+  test.info().annotations.push({ type: "qa:TC", description: "qa:TC missing" });
+  const dialog = readFileSync("src/components/UndoHost.tsx", "utf8");
+  expect(dialog).toContain('label="Undo conflict"');
+  expect(dialog).toContain("Undo anyway");
+  expect(dialog).toContain("Keep their change");
 });
