@@ -4,8 +4,8 @@
 // The plain Member is the second person. A new person's password is only emailed, so a deactivated
 // creator cannot be signed in here; AC4 checks the same rule with the roles this server actually has.
 // CRM_VISIBLE is read from the live /api/orgs answer, never a hard skip.
-// AC6's undo of Organisation archived / Organisation unarchived follows PR #19 (tests/e2e/helpers/jim-gate.ts):
-// when that fix is live both undos reverse the archive; until then both answer 409 and the organisation stays as it was.
+// AC6: undo of Organisation archived clears the archive, and undo of Organisation unarchived archives it again.
+// Both are asserted directly, with no probe of the same behaviour first, so a broken undo fails this test.
 // Credentials come from the environment. workers is 1 in playwright.config.ts. Traces stay off.
 import { expect, login, zz } from "../support";
 import { test } from "../helpers/story-people";
@@ -15,7 +15,6 @@ import { breadcrumb, statusText } from "../helpers/locate";
 storyGate({ admin: true, id: "APL-2532" });
 import { ymd, type Who } from "../g2";
 import { raw } from "../helpers/jim-http";
-import { notLive, prLive } from "../helpers/jim-gate";
 
 type Later = (fn: () => Promise<unknown>) => void;
 type Org = {
@@ -278,7 +277,6 @@ test("AC5: any signed-in Member sees all organisations, and deal data still foll
 test("AC6: create, edit, parent change, archive and unarchive are logged with no project and before and after; undo uses the organisation labels; History is for Admins only and includes contact and note changes qa:TC missing", async ({ admin, member, later }) => {
   test.setTimeout(180_000);
   await memberCrm(member);
-  const gate = await prLive(19, admin, null, later);
   const parent = await makeOrg(admin, later, "log parent");
   const name = zz("logged org");
   const made = await raw(member, "POST", "/api/orgs", { name });
@@ -362,16 +360,8 @@ test("AC6: create, edit, parent change, archive and unarchive are logged with no
   expect(archItems[0]?.event).toBe("ORGANISATION_ARCHIVED");
   expect(Date.now() - Date.parse(archItems[0].at)).toBeLessThan(120_000);
   const undoArchived = await admin.api.post(`/api/actions/${archived.headers["x-undo-id"]}/undo`, { anyway: false });
-  if (gate.deployed) {
-    expect(undoArchived.status).toBe(200);
-    expect((await load(admin, id)).archived, "undo of Organisation archived clears the archive").toBe(false);
-  } else {
-    expect(undoArchived.status, notLive(gate, "undo of Organisation archived still answers 409.")).toBe(409);
-    expect(undoArchived.json.error).toBe("This organisation is already archived.");
-    expect((await load(admin, id)).archived).toBe(true);
-    // The next steps archive and then unarchive. Put it back first so that archive is a real change.
-    expect((await admin.api.post(`/api/orgs/${id}/archive`, { archive: false })).status).toBe(200);
-  }
+  expect(undoArchived.status, JSON.stringify(undoArchived.json)).toBe(200);
+  expect((await load(admin, id)).archived, "undo of Organisation archived clears the archive").toBe(false);
 
   const archivedAgain = await raw(admin, "POST", `/api/orgs/${id}/archive`, { archive: true });
   expect(archivedAgain.status).toBe(200);
@@ -389,14 +379,8 @@ test("AC6: create, edit, parent change, archive and unarchive are logged with no
   expect(unItems[0]?.event).toBe("ORGANISATION_UNARCHIVED");
   expect(Date.now() - Date.parse(unItems[0].at)).toBeLessThan(120_000);
   const undoOpened = await admin.api.post(`/api/actions/${opened.headers["x-undo-id"]}/undo`, { anyway: false });
-  if (gate.deployed) {
-    expect(undoOpened.status).toBe(200);
-    expect((await load(admin, id)).archived, "undo of Organisation unarchived archives it again").toBe(true);
-  } else {
-    expect(undoOpened.status, notLive(gate, "undo of Organisation unarchived still answers 409.")).toBe(409);
-    expect(undoOpened.json.error).toBe("This organisation is not archived any more.");
-    expect((await load(admin, id)).archived).toBe(false);
-  }
+  expect(undoOpened.status, JSON.stringify(undoOpened.json)).toBe(200);
+  expect((await load(admin, id)).archived, "undo of Organisation unarchived archives it again").toBe(true);
 
   const fresh = await raw(admin, "POST", "/api/orgs", { name: zz("undo create") });
   expect(fresh.headers["x-undo-label"]).toBe("Organisation added");

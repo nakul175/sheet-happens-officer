@@ -94,7 +94,7 @@ test("AC3 (stylesheet part): the phone sheet height uses dvh, not 100vh alone qa
 });
 
 // qa:TC missing
-test("AC3 (on a device): with Safari's toolbar visible the sheet's bottom edge is visible qa:TC missing", async ({ browser }) => {
+test("AC3 (Chromium proxy, needs a device): with an iPhone-sized viewport shortened for Safari's toolbar, the sheet's bottom edge is visible qa:TC missing", async ({ browser }) => {
   const ctx = await phone(browser, 390, 664, true, "admin", devices["iPhone 13"]);
   const page = await ctx.newPage();
   await page.goto(`/projects/${projectId}?task=${taskId}`, { waitUntil: "load" });

@@ -53,7 +53,7 @@ test("AC1: every input, select and textarea is at least 16 px at 320 and 600 px 
 });
 
 // qa:TC missing
-test("AC2: tapping a field on an iPhone does not zoom the page qa:TC missing", async ({ browser }) => {
+test("AC2 (Chromium proxy, needs a device): tapping a field in iPhone emulation does not zoom the page qa:TC missing", async ({ browser }) => {
   const ctx = await phone(browser, 390, 844, true, "admin", devices["iPhone 13"]);
   const page = await ctx.newPage();
   await page.goto("/projects/new", { waitUntil: "load" });

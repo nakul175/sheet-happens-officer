@@ -83,7 +83,7 @@ test("AC2: Chrome on Android offers install qa:TC missing", async () => {
 });
 
 // qa:TC missing
-test("AC3: iOS Safari Add to Home Screen shows the SHO icon and name and opens without browser bars qa:TC missing", async ({ anon }) => {
+test("AC3 (Chromium proxy, needs a device): the tags and manifest iOS Safari reads for Add to Home Screen give the SHO icon, the name and no browser bars qa:TC missing", async ({ anon }) => {
   // Playwright cannot complete Safari's Add to Home Screen. These are the tags and manifest Safari reads for the icon, the name, and a window with no browser bars.
   await anon.goto("/signin");
   const capable = [...await metaContent(anon, "apple-mobile-web-app-capable"), ...await metaContent(anon, "mobile-web-app-capable")];
