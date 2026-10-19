@@ -96,3 +96,85 @@ test("no story spec Playwright loads from tests/e2e/stories reaches vitest qa:TC
   const bad = loadedSpecsReachingVitest(STORIES, ignoredByPlaywright());
   assert.deepEqual(bad, [], `Playwright would collect 0 tests. Move Vitest suites to tests/e2e/local:\n${bad.join("\n")}`);
 });
+
+// APL-2892 D3: a Playwright spec that only mentions `from "vitest"` in a comment, a string or a regex is not a Vitest spec.
+const MENTIONS_ONLY = [
+  "// Mentions vitest only in prose and data: this is a Playwright spec.",
+  '/* import { it } from "vitest"; */',
+  'import { test, expect } from "@playwright/test";',
+  "const note = 'moved away from \"vitest\"';",
+  "const tpl = `was: import { it } from 'vitest'`;",
+  "const re = /from\\s+[\"']vitest[\"']/;",
+  'test("ZZ-TEST mention", () => { expect(re.test(note)).toBe(true); expect(tpl).toContain("vitest"); });',
+].join("\n");
+
+test("a spec with from \"vitest\" only in a comment, string or regex is not a Vitest spec qa:TC missing", () => {
+  assert.deepEqual(specifiers(MENTIONS_ONLY), ["@playwright/test"]);
+  const dir = mkdtempSync(join(tmpdir(), "story-specs-"));
+  try {
+    writeFileSync(join(dir, "APL-1.spec.ts"), 'import { it } from "vitest";\n');
+    writeFileSync(join(dir, "APL-4.spec.ts"), MENTIONS_ONLY);
+    const ignored = ignoredByPlaywright(vitestSpecFiles(dir).map((f) => `**/stories/${f}`));
+    assert.deepEqual([...ignored], ["APL-1.spec.ts"]);
+    assert.deepEqual(loadedSpecsReachingVitest(dir, ignored), []);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// APL-2892 AC3: every real `import ... from "vitest"` form is still a Vitest spec.
+test("a spec with a real import ... from \"vitest\" is still a Vitest spec qa:TC missing", () => {
+  const dir = mkdtempSync(join(tmpdir(), "story-specs-"));
+  try {
+    writeFileSync(join(dir, "APL-1.spec.ts"), 'import { it } from "vitest";\n');
+    writeFileSync(join(dir, "APL-2.spec.ts"), "// header\nimport {\n  afterAll,\n  it,\n} from 'vitest';\n");
+    writeFileSync(join(dir, "APL-3.spec.ts"), 'import { test } from "@playwright/test";\nimport type { Mock } from "vitest";\n');
+    writeFileSync(join(dir, "APL-5.spec.ts"), 'import { test } from "@playwright/test";\n');
+    assert.deepEqual(vitestSpecFiles(dir).sort(), ["APL-1.spec.ts", "APL-2.spec.ts", "APL-3.spec.ts"]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+const CONFIG = join(ROOT, "playwright.config.ts");
+
+/** APL-2892 D2: playwright.config.ts imports VITEST_SPECS from tests/e2e/vitest-specs.cjs and passes it to testIgnore. */
+export function assertConfigAppliesVitestSpecs(file = CONFIG) {
+  const src = readFileSync(file, "utf8");
+  const imported = /\bimport\s*\{[^}]*\bVITEST_SPECS\b[^}]*\}\s*from\s*["'][^"']*\/vitest-specs(?:\.cjs)?["']/.test(src);
+  const applied = /\btestIgnore\s*:\s*(?:\[[^\]]*\.\.\.\s*)?VITEST_SPECS\b/.test(src);
+  assert.ok(
+    imported && applied,
+    `${relative(ROOT, file)} must import VITEST_SPECS from tests/e2e/vitest-specs.cjs and pass it to testIgnore, ` +
+      "or Playwright loads the Vitest story specs and collects 0 tests.",
+  );
+}
+
+test("playwright.config.ts applies VITEST_SPECS to testIgnore qa:TC missing", () => {
+  assertConfigAppliesVitestSpecs();
+});
+
+test("the config check fails naming playwright.config.ts when testIgnore drops VITEST_SPECS qa:TC missing", () => {
+  const real = readFileSync(CONFIG, "utf8");
+  assert.match(real, /testIgnore: VITEST_SPECS,/);
+  const dir = mkdtempSync(join(tmpdir(), "pw-config-"));
+  const copy = join(dir, "playwright.config.ts");
+  const check = (src) => {
+    writeFileSync(copy, src);
+    return () => assertConfigAppliesVitestSpecs(copy);
+  };
+  try {
+    assert.doesNotThrow(check(real.replace("testIgnore: VITEST_SPECS,", 'testIgnore: [...VITEST_SPECS, "**/x.spec.ts"],')));
+    for (const bad of [
+      real.replace("testIgnore: VITEST_SPECS,", "testIgnore: [],"),
+      real.replace("testIgnore: VITEST_SPECS,", ""),
+      real.replace("testIgnore: VITEST_SPECS,", "// testIgnore: VITEST_SPECS,"),
+      real.replace(/^import \{ VITEST_SPECS \}.*$/m, 'const VITEST_SPECS = []; // was: import { VITEST_SPECS } from "./tests/e2e/vitest-specs.cjs";'),
+    ]) {
+      assert.notEqual(bad, real);
+      assert.throws(check(bad), /playwright\.config\.ts must import VITEST_SPECS/);
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
