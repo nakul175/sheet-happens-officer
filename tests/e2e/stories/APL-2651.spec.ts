@@ -184,16 +184,16 @@ test.afterAll(async () => {
   await anon?.dispose();
 });
 
-// qa:TC missing
-test("AC1 bulk-undo: a signed-out caller is still parsed before the session check", { annotation: { type: "qa:TC", description: "missing" } }, async () => {
+// qa:TC TC-APL2651-507ede86@v1 TC-APL2651-0874d1b5@v1
+test("AC1 bulk-undo: a signed-out caller is still parsed before the session check", { annotation: [{ type: "qa:TC", description: "TC-APL2651-507ede86@v1" }, { type: "qa:TC", description: "TC-APL2651-0874d1b5@v1" }] }, async () => {
   // Known gap, APL-2651. The other seven routes already answer 401 before parsing (covered below).
   test.fail(true, "Product gap APL-2651: POST /api/actions/bulk-undo reads the body before the session check, so a signed-out caller gets 400 instead of 401 Not signed in.");
   expectSignedOut(await send(anon, "POST", "/api/actions/bulk-undo", MALFORMED));
   expectSignedOut(await send(anon, "POST", "/api/actions/bulk-undo", { ids: [] }));
 });
 
-// qa:TC missing
-test("AC1: no session, malformed or schema-invalid body, returns 401 with no validation details", { annotation: { type: "qa:TC", description: "missing" } }, async () => {
+// qa:TC TC-APL2651-507ede86@v1 TC-APL2651-0874d1b5@v1
+test("AC1: no session, malformed or schema-invalid body, returns 401 with no validation details", { annotation: [{ type: "qa:TC", description: "TC-APL2651-507ede86@v1" }, { type: "qa:TC", description: "TC-APL2651-0874d1b5@v1" }] }, async () => {
   const cases: [string, string, Body][] = [
     ["POST", "/api/concierge/messages", MALFORMED],
     ["POST", "/api/concierge/messages", { text: "" }],
@@ -219,8 +219,8 @@ test("AC1: no session, malformed or schema-invalid body, returns 401 with no val
   await test.info().attach("ac1-routes", { body: JSON.stringify(rows, null, 2), contentType: "application/json" });
 });
 
-// qa:TC missing
-test("AC2: signed-in without access gets 403 or the existing not-found answer, not 400", { annotation: { type: "qa:TC", description: "missing" } }, async () => {
+// qa:TC TC-APL2651-6edd45b6@v1 TC-APL2651-93d4350b@v1
+test("AC2: signed-in without access gets 403 or the existing not-found answer, not 400", { annotation: [{ type: "qa:TC", description: "TC-APL2651-6edd45b6@v1" }, { type: "qa:TC", description: "TC-APL2651-93d4350b@v1" }] }, async () => {
   test.fail(true, "Product gap APL-2651: these routes parse the body before the access check, so a signed-in caller without access gets 400 validation instead of 403 or 404.");
   const memberPath = `/api/projects/${projectId}/members/${editor.user.id}`;
   const sectionPath = `/api/projects/${projectId}/sections/${doing}`;
@@ -261,8 +261,8 @@ test("AC2: signed-in without access gets 403 or the existing not-found answer, n
   await test.info().attach("ac2-routes", { body: JSON.stringify(rows, null, 2), contentType: "application/json" });
 });
 
-// qa:TC missing
-test("AC2 bulk-undo: another person's action is 403; a signed-in invalid body stays 400", { annotation: { type: "qa:TC", description: "missing" } }, async () => {
+// qa:TC TC-APL2651-6edd45b6@v1 TC-APL2651-93d4350b@v1
+test("AC2 bulk-undo: another person's action is 403; a signed-in invalid body stays 400", { annotation: [{ type: "qa:TC", description: "TC-APL2651-6edd45b6@v1" }, { type: "qa:TC", description: "TC-APL2651-93d4350b@v1" }] }, async () => {
   // The ids are inside the body, so a signed-in caller with a bad body is 400 on this route (no target to authorise yet).
   expectBadJson(await send(editor.request, "POST", "/api/actions/bulk-undo", MALFORMED));
   expectValidation(await send(editor.request, "POST", "/api/actions/bulk-undo", { ids: [] }));
@@ -287,8 +287,8 @@ test("AC2 bulk-undo: another person's action is 403; a signed-in invalid body st
   expect(undone.json).toMatchObject({ count: 1 });
 });
 
-// qa:TC missing
-test("AC3: an authorised caller with a bad body still gets today's 400 shape, and a valid body still works", { annotation: { type: "qa:TC", description: "missing" } }, async () => {
+// qa:TC TC-APL2651-cb9e6bf3@v1
+test("AC3: an authorised caller with a bad body still gets today's 400 shape, and a valid body still works", { annotation: { type: "qa:TC", description: "TC-APL2651-cb9e6bf3@v1" } }, async () => {
   const memberPath = `/api/projects/${projectId}/members/${editor.user.id}`;
   const sectionPath = `/api/projects/${projectId}/sections/${doing}`;
   const taskPath = `/api/tasks/${taskId}`;

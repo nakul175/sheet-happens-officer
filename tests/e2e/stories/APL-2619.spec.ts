@@ -16,7 +16,8 @@ test.beforeAll(async ({ request }) => {
   await gate(request);
 });
 
-test("AC1: self-signup allows @aplyd.com and @athenainfonomics.com, and refuses any other domain", async ({ anon, admin, later }) => {
+// qa:TC missing
+test("AC1: self-signup allows @aplyd.com and @athenainfonomics.com, and refuses any other domain qa:TC missing", { annotation: { type: "qa:TC", description: "qa:TC missing" } }, async ({ anon, admin, later }) => {
   for (const [tag, domain] of [["aplyd", "aplyd.com"], ["athena", "athenainfonomics.com"]] as const) {
     const email = alias("2619", tag, domain);
     const signed = await signUp(anon.request, zz(tag), email);
@@ -33,7 +34,8 @@ test("AC1: self-signup allows @aplyd.com and @athenainfonomics.com, and refuses 
   expect(await personByEmail(admin.api, alias("2619", "nope"))).toBeNull();
 });
 
-test("AC2: the Super Admin adds a person on any domain, active, with no verification link", async ({ admin, later }) => {
+// qa:TC missing
+test("AC2: the Super Admin adds a person on any domain, active, with no verification link qa:TC missing", { annotation: { type: "qa:TC", description: "qa:TC missing" } }, async ({ admin, later }) => {
   const email = alias("2619", "ac2");
   const body = { firstName: "ZZ-TEST", lastName: `ac2 ${RUN}`, email, role: "MEMBER" as const };
   const created = await admin.api.post("/api/team", body);
@@ -48,7 +50,8 @@ test("AC2: the Super Admin adds a person on any domain, active, with no verifica
   expect(mailToken(email, "Verify"), "an added person does not get a verification link").toBeNull();
 });
 
-test("AC3: a person added by the Super Admin receives an email with their sign-in details", async ({ admin, later }) => {
+// qa:TC missing
+test("AC3: a person added by the Super Admin receives an email with their sign-in details qa:TC missing", { annotation: { type: "qa:TC", description: "qa:TC missing" } }, async ({ admin, later }) => {
   const email = alias("2619", "ac3");
   const created = await admin.api.post("/api/team", { firstName: "ZZ-TEST", lastName: `ac3 ${RUN}`, email, role: "MEMBER" });
   const text = JSON.stringify(created.json);
@@ -63,7 +66,8 @@ test("AC3: a person added by the Super Admin receives an email with their sign-i
   expect(text.includes(pass)).toBe(false);
 });
 
-test("AC4: signing in with the emailed password shows a banner to set their own", async ({ admin, browser, later }) => {
+// qa:TC missing
+test("AC4: signing in with the emailed password shows a banner to set their own qa:TC missing", { annotation: { type: "qa:TC", description: "qa:TC missing" } }, async ({ admin, browser, later }) => {
   const email = alias("2619", "ac4");
   const created = await admin.api.post("/api/team", { firstName: "ZZ-TEST", lastName: `ac4 ${RUN}`, email, role: "MEMBER" });
   expect(created.status, JSON.stringify(created.json)).toBe(201);
@@ -77,7 +81,8 @@ test("AC4: signing in with the emailed password shows a banner to set their own"
   await expect(who.page.getByRole("link", { name: "Change password" })).toHaveAttribute("href", "/profile");
 });
 
-test("AC5: clicking a person's name on the Team page opens their full profile", async ({ admin, later }) => {
+// qa:TC missing
+test("AC5: clicking a person's name on the Team page opens their full profile qa:TC missing", { annotation: { type: "qa:TC", description: "qa:TC missing" } }, async ({ admin, later }) => {
   const email = alias("2619", "ac5");
   const created = await admin.api.post("/api/team", { firstName: "ZZ-TEST", lastName: `ac5 ${RUN}`, email, role: "MEMBER" });
   expect(created.status).toBe(201);
@@ -96,7 +101,8 @@ test("AC5: clicking a person's name on the Team page opens their full profile", 
   expect(Array.isArray(profile.json.person.projects)).toBe(true);
 });
 
-test("AC6: an added person's name is stored as one First Last field", async ({ admin, later }) => {
+// qa:TC missing
+test("AC6: an added person's name is stored as one First Last field qa:TC missing", { annotation: { type: "qa:TC", description: "qa:TC missing" } }, async ({ admin, later }) => {
   const email = alias("2619", "ac6");
   const created = await admin.api.post("/api/team", { firstName: "ZZ-TEST", lastName: `ac6 ${RUN}`, email, role: "MEMBER" });
   expect(created.status, JSON.stringify(created.json)).toBe(201);
