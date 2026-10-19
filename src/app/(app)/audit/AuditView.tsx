@@ -15,6 +15,10 @@ export default function AuditView() {
   const team = useGet<{ people: { id: string; name: string }[] }>("/api/team");
   const a = useGet<Res>(me.orgRole === "SUPER_ADMIN" ? `/api/audit${qs ? `?${qs}` : ""}` : null);
   const jobs = useGet<{ jobs: JobRow[] }>(me.orgRole === "SUPER_ADMIN" ? "/api/jobs" : null);
+  // The event list and the rows share one fetch. Remember the last list so the dropdown does not collapse to "All events" while the next filter loads.
+  const [knownEvents, setKnownEvents] = useState<string[]>([]);
+  if (a.data?.events && a.data.events !== knownEvents) setKnownEvents(a.data.events);
+  const events = a.data?.events ?? knownEvents;
   const [more, setMore] = useState<{ key: string; rows: Row[]; next: string | null } | null>(null);
   if (me.orgRole !== "SUPER_ADMIN") return <Page title="This page isn't available"><div className="card empty">Only the Super Admin can see the audit log.</div></Page>;
   const extra = more?.key === qs ? more : null;
@@ -42,7 +46,7 @@ export default function AuditView() {
         <label className="field" style={{ margin: 0 }}><span className="lbl">Person</span>
           <select className="in" value={person} onChange={(e) => setPerson(e.target.value)}><option value="">Everyone</option>{team.data?.people.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label>
         <label className="field" style={{ margin: 0 }}><span className="lbl">Event</span>
-          <select className="in" value={event} onChange={(e) => setEvent(e.target.value)}><option value="">All events</option>{a.data?.events.map((x) => <option key={x}>{x}</option>)}</select></label>
+          <select className="in" aria-label="Event" value={event} onChange={(e) => setEvent(e.target.value)}><option value="">All events</option>{events.map((x) => <option key={x}>{x}</option>)}</select></label>
         <label className="field" style={{ margin: 0 }}><span className="lbl">From</span><input className="in" type="date" value={from} onChange={(e) => setFrom(e.target.value)} /></label>
         <label className="field" style={{ margin: 0 }}><span className="lbl">To</span><input className="in" type="date" value={to} onChange={(e) => setTo(e.target.value)} /></label>
       </div>
