@@ -4,9 +4,10 @@
 // The server runs with the default `all`, so these call src/lib directly (same database) and flip process.env.CRM_VISIBLE
 // in this process; `crmMode()` reads it at call time. tests/e2e/stories/APL-2609.spec.ts drives a real server per mode.
 // Pam left no qa:TC id on the issue, so every title says "qa:TC missing".
-import { afterEach, beforeAll, describe, expect, it } from "vitest";
-import { account, admin, istDate, project, superAdmin, task, type Account } from "./helpers";
-import { actor, lastResultText, say, script, tu, useFakeModel } from "./concierge-helpers";
+// Everything this file makes is named ZZ-TEST and deleted in afterAll; the shared Super Admin keeps only their account.
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import { account, admin, istDate, superAdmin, task, type Account } from "./helpers";
+import { actor, db, lastResultText, say, script, tu, useFakeModel } from "./concierge-helpers";
 import type { Actor } from "../src/lib/access";
 import { crmMode } from "../src/lib/crm";
 import { getTask, listTasks, myTasks } from "../src/lib/tasks";
@@ -23,6 +24,25 @@ type World = {
   ed: Actor; adm: Actor; sa: Actor;
 };
 let w: World;
+const started = new Date();
+const made: { userIds: string[]; emails: string[]; projectIds: string[]; orgId?: string; saId?: string } = { userIds: [], emails: [], projectIds: [] };
+
+async function cleanup() {
+  const { userIds, projectIds } = made;
+  if (userIds.length || projectIds.length) {
+    await db.actionLog.deleteMany({ where: { OR: [...(userIds.length ? [{ actorId: { in: userIds } }] : []), ...(projectIds.length ? [{ projectId: { in: projectIds } }] : [])] } });
+  }
+  if (projectIds.length) await db.notification.deleteMany({ where: { projectId: { in: projectIds } } });
+  if (made.saId) await db.chatMessage.deleteMany({ where: { userId: made.saId, createdAt: { gte: started } } });
+  if (userIds.length) {
+    await db.modelUsage.deleteMany({ where: { userId: { in: userIds } } });
+    await db.auditLog.deleteMany({ where: { actorId: { in: userIds } } });
+  }
+  if (projectIds.length) await db.project.deleteMany({ where: { id: { in: projectIds } } });
+  if (made.orgId) await db.organisation.deleteMany({ where: { id: made.orgId } });
+  if (made.emails.length) await db.loginAttempt.deleteMany({ where: { email: { in: made.emails } } });
+  if (userIds.length) await db.user.deleteMany({ where: { id: { in: userIds } } });
+}
 
 function setMode(mode: string) { process.env.CRM_VISIBLE = mode; }
 const prevMode = process.env.CRM_VISIBLE;
@@ -82,32 +102,46 @@ describe("qa:TC missing APL-2609 CRM_VISIBLE hides deals from My tasks, search, 
 
   beforeAll(async () => {
     const saAcc = await superAdmin();
+    made.saId = saAcc.id;
     const adAcc = await admin(saAcc, "cv2609admin");
     const lead: Account = await account("cv2609lead");
     const edAcc: Account = await account("cv2609ed");
+    for (const who of [adAcc, lead, edAcc]) {
+      made.userIds.push(who.id);
+      made.emails.push(who.email);
+      await db.user.update({ where: { id: who.id }, data: { name: `ZZ-TEST ${who.name}` } });
+    }
     const tag = `cv2609x${Date.now()}`;
     const pipes = (await lead.c.get("/api/deals/pipelines")).json.pipelines as { id: string; key: string; stages: { id: string; name: string }[] }[];
     const pipe = pipes.find((p) => p.key === "DEAL_PROACTIVE")!;
-    const orgId = (await lead.c.post("/api/orgs", { name: `Org ${tag}` })).json.organisation.id;
-    const dealName = `Deal ${tag}`;
-    const made = await lead.c.post("/api/deals", { name: dealName, organisationId: orgId, pipelineId: pipe.id, leaderId: lead.id, whyPursue: "fit", nextStep: { title: `First ${tag}`, dueDate: istDate(3) } });
-    expect(made.status, JSON.stringify(made.json)).toBe(201);
-    const dealId = made.json.deal.id as string;
+    const orgId = (await lead.c.post("/api/orgs", { name: `ZZ-TEST Org ${tag}` })).json.organisation.id as string;
+    made.orgId = orgId;
+    const dealName = `ZZ-TEST Deal ${tag}`;
+    const deal = await lead.c.post("/api/deals", { name: dealName, organisationId: orgId, pipelineId: pipe.id, leaderId: lead.id, whyPursue: "fit", nextStep: { title: `ZZ-TEST First ${tag}`, dueDate: istDate(3) } });
+    expect(deal.status, JSON.stringify(deal.json)).toBe(201);
+    const dealId = deal.json.deal.id as string;
+    made.projectIds.push(dealId);
     const proposal = pipe.stages.find((s) => s.name === STAGE)!;
     expect((await lead.c.post(`/api/projects/${dealId}/stage`, { stageId: proposal.id })).status).toBe(200);
-    // The Editor and the Admin are both members of the deal; each holds a deal task due this week.
-    for (const who of [edAcc, adAcc]) expect((await lead.c.post(`/api/projects/${dealId}/members`, { userId: who.id, role: "EDITOR" })).status).toBe(201);
-    const dealTaskTitle = `Deal step ${tag}`;
+    // The Editor, the Admin and the Super Admin are all members of the deal; each holds the deal task due this week.
+    for (const who of [edAcc, adAcc, saAcc]) expect((await lead.c.post(`/api/projects/${dealId}/members`, { userId: who.id, role: "EDITOR" })).status).toBe(201);
+    const dealTaskTitle = `ZZ-TEST Deal step ${tag}`;
     const dealTask = await task(lead, dealId, { title: dealTaskTitle, assigneeId: edAcc.id, dueDate: istDate(2) });
-    expect((await lead.c.post(`/api/tasks/${dealTask}/collaborators`, { userId: adAcc.id })).status).toBe(201);
-    const p = await project(lead, lead, [{ who: edAcc }]);
-    const plainTaskTitle = `Plain step ${tag}`;
+    for (const who of [adAcc, saAcc]) expect((await lead.c.post(`/api/tasks/${dealTask}/collaborators`, { userId: who.id })).status).toBe(201);
+    const plain = await lead.c.post("/api/projects", { name: `ZZ-TEST Plain ${tag}`, leaderId: lead.id });
+    expect(plain.status, JSON.stringify(plain.json)).toBe(201);
+    const p = { id: plain.json.project.id as string };
+    made.projectIds.push(p.id);
+    expect((await lead.c.post(`/api/projects/${p.id}/members`, { userId: edAcc.id, role: "EDITOR" })).status).toBe(201);
+    const plainTaskTitle = `ZZ-TEST Plain step ${tag}`;
     const plainTask = await task(lead, p.id, { title: plainTaskTitle, assigneeId: edAcc.id, dueDate: istDate(2) });
     w = {
       tag, dealId, dealName, dealTask, dealTaskTitle, plainTask, plainTaskTitle,
       ed: actor(edAcc), adm: actor(adAcc, "ADMIN"), sa: { id: saAcc.id, orgRole: "SUPER_ADMIN" },
     };
   });
+
+  afterAll(cleanup);
 
   it("qa:TC missing AC1: with CRM_VISIBLE=off, My tasks shows a deal member no deal task and no stage", async () => {
     setMode("off");
@@ -157,9 +191,9 @@ describe("qa:TC missing APL-2609 CRM_VISIBLE hides deals from My tasks, search, 
   it("qa:TC missing AC6: with CRM_VISIBLE=admins, an Admin and the Super Admin see deal tasks as normal", async () => {
     setMode("admins");
     expect(await surfaces(w.adm)).toEqual(SHOWN);
-    // The Super Admin is not a member, so My tasks and the person's own lists hold nothing of theirs; the rest shows the deal
-    // (list_projects shows Admins every project, so the concierge turn still names it).
-    expect(await surfaces(w.sa)).toEqual({ ...SHOWN, myTasks: false, stage: false, conciergeMy: false, quick: false });
+    // The Super Admin holds the deal task too: it is in their own My tasks, concierge lists and quick actions, with its stage.
+    expect(await surfaces(w.sa)).toEqual(SHOWN);
+    expect((await rows(w.sa)).find((t) => t.id === w.dealTask)?.project).toMatchObject({ id: w.dealId, type: "DEAL", stage: STAGE });
     expect((await quickAnswer(w.adm, "due-week", new Date(), w.dealId)).q.label).toContain(w.dealName);
   });
 

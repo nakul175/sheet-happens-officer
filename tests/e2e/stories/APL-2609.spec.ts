@@ -310,14 +310,14 @@ describe("qa:TC missing APL-2609 CRM_VISIBLE hides deals on a real server per mo
     seed.dealId = (made.json?.deal as { id: string }).id;
     seed.projectIds.push(seed.dealId);
     expect((await call(open.base, lead.cookie, "POST", `/api/projects/${seed.dealId}/stage`, { stageId: proposal!.id })).status).toBe(200);
-    for (const who of [editor, adminUser]) {
+    for (const who of [editor, adminUser, people.superAdmin]) {
       const added = await call(open.base, lead.cookie, "POST", `/api/projects/${seed.dealId}/members`, { userId: who.id, role: "EDITOR" });
       expect(added.status, added.text).toBe(201);
     }
     const dealTask = await call(open.base, lead.cookie, "POST", `/api/projects/${seed.dealId}/tasks`, { title: DEAL_TASK, assigneeId: editor.id, dueDate: istDate(2) });
     expect(dealTask.status, dealTask.text).toBe(201);
     seed.dealTaskId = (dealTask.json?.task as { id: string }).id;
-    expect((await call(open.base, lead.cookie, "POST", `/api/tasks/${seed.dealTaskId}/collaborators`, { userId: adminUser.id })).status).toBe(201);
+    for (const who of [adminUser, people.superAdmin]) expect((await call(open.base, lead.cookie, "POST", `/api/tasks/${seed.dealTaskId}/collaborators`, { userId: who.id })).status).toBe(201);
 
     const plain = await call(open.base, lead.cookie, "POST", "/api/projects", { name: `ZZ-TEST workshop ${runId}`, leaderId: lead.id });
     expect(plain.status, plain.text).toBe(201);
@@ -395,9 +395,11 @@ describe("qa:TC missing APL-2609 CRM_VISIBLE hides deals on a real server per mo
     expect(screen.dealChips).toBeGreaterThan(0);
     expect((await searchScreen("admins", people.admin!, DEAL_NAME)).links.some((l) => l.includes(DEAL_NAME))).toBe(true);
     expect((await taskScreen("admins", people.admin!)).url).toContain(`/projects/${seed.dealId}`);
-    // The Super Admin is not a member: no My tasks row or quick-action line of theirs, but every other surface shows the deal.
-    const sa = await surfaces("admins", people.superAdmin!);
-    expect(strip(sa)).toEqual({ ...SHOWN, myTasks: false, stage: false, concierge: false });
+    // The Super Admin holds the deal task too: it shows on every surface, their own My tasks screen included.
+    expect(strip(await surfaces("admins", people.superAdmin!))).toEqual(SHOWN);
+    const saScreen = await myTasksScreen("admins", people.superAdmin!, DEAL_TASK);
+    expect(saScreen.text).toContain(DEAL_NAME);
+    expect(saScreen.text).toContain(STAGE);
   });
 
   it("qa:TC missing AC7: with CRM_VISIBLE=all, every member's behaviour is unchanged", async () => {
