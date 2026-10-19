@@ -41,30 +41,42 @@ const seed: {
   userIds: string[]; emails: string[]; projectId?: string; plainProjectId?: string; projectIds: string[]; orgId?: string; orgIds: string[];
 } = { userIds: [], emails: [], projectIds: [], orgIds: [] };
 
-/** Removes this run's users, deal and organisation so the shared test database stays clear. */
+/**
+ * Through the API, as the Super Admin: takes over as Leader where this run's people lead, archives this run's
+ * projects and organisations, then deactivates this run's people (APL-2728: no direct database writes here).
+ */
 async function cleanupSeed() {
-  const users = seed.emails.length || seed.userIds.length
-    ? await db.user.findMany({
-      where: { OR: [{ id: { in: seed.userIds } }, { email: { in: seed.emails } }] },
-      select: { id: true },
-    })
-    : [];
-  const userIds = users.map((user) => user.id);
+  const server = running.get("on");
+  if (!server) return;
+  const sa = await superAdminOn(server);
+  const problems: string[] = [];
   const projectIds = [...new Set([seed.projectId, seed.plainProjectId, ...seed.projectIds].filter((id): id is string => !!id))];
   const orgIds = [...new Set([...(seed.orgId ? [seed.orgId] : []), ...seed.orgIds])];
-  if (userIds.length) {
-    await db.modelUsage.deleteMany({ where: { userId: { in: userIds } } });
-    await db.actionLog.deleteMany({
-      where: { OR: [{ actorId: { in: userIds } }, ...(projectIds.length ? [{ projectId: { in: projectIds } }] : [])] },
-    });
-    await db.auditLog.deleteMany({ where: { actorId: { in: userIds } } });
-  } else if (projectIds.length) {
-    await db.actionLog.deleteMany({ where: { projectId: { in: projectIds } } });
+  for (const id of projectIds) {
+    const got = await call(server.base, sa.cookie, "GET", `/api/projects/${id}`);
+    const members = ((got.json?.project as { members?: { userId: string; role: string }[] } | undefined)?.members) ?? [];
+    const leader = members.find((m) => m.role === "LEADER");
+    if (leader && leader.userId !== sa.id) {
+      if (!members.some((m) => m.userId === sa.id)) {
+        const added = await call(server.base, sa.cookie, "POST", `/api/projects/${id}/members`, { userId: sa.id, role: "EDITOR" });
+        if (added.status !== 201) problems.push(`join ${id}: ${added.status}`);
+      }
+      const led = await call(server.base, sa.cookie, "POST", `/api/projects/${id}/leader`, { newLeaderId: sa.id, previousRole: "EDITOR" });
+      if (led.status !== 200) problems.push(`take over ${id}: ${led.status}`);
+    }
+    const archived = await call(server.base, sa.cookie, "POST", `/api/projects/${id}/archive`);
+    if (archived.status !== 200) problems.push(`archive project ${id}: ${archived.status}`);
   }
-  if (projectIds.length) await db.project.deleteMany({ where: { id: { in: projectIds } } });
-  if (orgIds.length) await db.organisation.deleteMany({ where: { id: { in: orgIds } } });
-  if (seed.emails.length) await db.loginAttempt.deleteMany({ where: { email: { in: seed.emails } } });
-  if (userIds.length) await db.user.deleteMany({ where: { id: { in: userIds } } });
+  for (const id of orgIds) {
+    const archived = await call(server.base, sa.cookie, "POST", `/api/orgs/${id}/archive`, { archive: true });
+    if (archived.status !== 200 && archived.status !== 409) problems.push(`archive organisation ${id}: ${archived.status}`);
+  }
+  for (const id of new Set(seed.userIds)) {
+    if (id === sa.id) continue;
+    const off = await call(server.base, sa.cookie, "POST", `/api/team/${id}/deactivate`, { reassign: "leaders" });
+    if (off.status !== 200 && !(off.status === 409 && /already deactivated/.test(off.text))) problems.push(`deactivate ${id}: ${off.status}`);
+  }
+  expect(problems).toEqual([]);
 }
 
 function freePort(): Promise<number> {
@@ -184,6 +196,22 @@ async function signIn(server: Running, name: string, email: string) {
   expect(user?.id).toBeTruthy();
   expect(signed.cookie).toContain("sho_session=");
   return { id: user!.id, cookie: signed.cookie, name };
+}
+
+/** Listed in each mode server's SUPER_ADMIN_EMAILS (startModeServer). */
+const SUPER_EMAIL = "root.test@aplyd.com";
+let superSession: { id: string; cookie: string } | null = null;
+
+async function superAdminOn(server: Running) {
+  superSession ??= await signIn(server, "Root", SUPER_EMAIL);
+  return superSession;
+}
+
+/** APL-2728: the role change goes through PATCH /api/team/:id as the Super Admin, not a database write. */
+async function promoteToAdmin(server: Running, userId: string) {
+  const sa = await superAdminOn(server);
+  const promoted = await call(server.base, sa.cookie, "PATCH", `/api/team/${userId}`, { orgRole: "ADMIN" });
+  expect(promoted.status, promoted.text).toBe(200);
 }
 
 type Read = { name: string; status: number; text: string; hiddenStatus: number; mustName: boolean };
@@ -549,7 +577,7 @@ describe("CRM_VISIBLE modes are tested against a real server per mode", () => {
     const member = await signIn(open!, `ZZ-TEST mode member ${runId}`, memberEmail);
     const admin = await signIn(open!, `ZZ-TEST mode admin ${runId}`, adminEmail);
     seed.userIds.push(member.id, admin.id);
-    await db.user.update({ where: { id: admin.id }, data: { orgRole: "ADMIN" } });
+    await promoteToAdmin(open!, admin.id);
 
     const listeners: number[] = [];
     for (const server of running.values()) {
@@ -591,7 +619,7 @@ describe("CRM_VISIBLE modes are tested against a real server per mode", () => {
     const member = await signIn(open!, `ZZ-TEST member ${runId}`, memberEmail);
     const admin = await signIn(open!, `ZZ-TEST admin ${runId}`, adminEmail);
     seed.userIds.push(member.id, admin.id);
-    await db.user.update({ where: { id: admin.id }, data: { orgRole: "ADMIN" } });
+    await promoteToAdmin(open!, admin.id);
 
     const pipes = await call(open!.base, admin.cookie, "GET", "/api/deals/pipelines");
     expect(pipes.status, pipes.text).toBe(200);
