@@ -4,8 +4,10 @@
 //    message only (no key, no body, no link), and sign-up / resend tell the person instead of failing with a 500.
 //    The provider is faked here: sendMail is called in this process, and the routes are called through their own
 //    POST handlers with sendMail made to fail.
+import { readdirSync, readFileSync } from "node:fs";
+import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { Client, PW } from "./helpers";
+import { BASE, Client, OUTBOX, PW } from "./helpers";
 import { db } from "../src/lib/db";
 
 vi.mock("next/server", async (orig) => ({ ...(await orig<typeof import("next/server")>()), connection: async () => {} }));
@@ -33,6 +35,22 @@ const MAIL = { to: "nakul17+zztest-apl2742@aplyd.com", subject: "Verify your ema
 
 const post = (route: (req: Request) => Promise<Response>, path: string, body: unknown) =>
   route(new Request(`http://localhost${path}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }));
+
+/** The newest verification token mailed to this address (outbox), or null. */
+function lastVerifyToken(email: string): string | null {
+  let files: string[] = [];
+  try { files = readdirSync(OUTBOX).sort(); } catch { return null; }
+  const mails = files.map((f) => JSON.parse(readFileSync(path.join(OUTBOX, f), "utf8"))).filter((m) => m.to === email && /Verify/.test(m.subject));
+  return mails.at(-1)?.text.match(/token=([\w-]+)/)?.[1] ?? null;
+}
+
+/** A request as it reaches the app behind Caddy: X-Forwarded-For names the client, plus a browser user agent. */
+const viaProxy = (method: string, p: string, ip: string, ua: string, body?: unknown) =>
+  fetch(BASE + p, {
+    method,
+    headers: { "content-type": "application/json", "x-forwarded-for": `${ip}, 10.0.0.1`, "user-agent": ua },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
 
 afterEach(() => {
   failSend.on = false;
@@ -161,5 +179,59 @@ describe("qa:TC missing AC3: a failed verification send is reported to the perso
     }
     // One token at sign-up plus two resends reach the limit of 3; the 3rd and 4th resends send nothing.
     expect(await db.authToken.count({ where: { userId: user.id, type: "VERIFY" } })).toBe(3);
+  });
+});
+
+describe("qa:TC missing AC4: verification needs a click, and verification events are traceable", () => {
+  it("qa:TC missing AC4: a link scanner's GET of /verify?token=... leaves the account unverified and the token unused", async () => {
+    const email = fresh();
+    expect((await new Client().post("/api/auth/signup", { name: "ZZ-TEST Scanner", email, password: PW })).status).toBe(201);
+    const token = lastVerifyToken(email)!;
+    const page = await fetch(`${BASE}/verify?token=${token}`, { headers: { "user-agent": "ZZ-TEST link scanner" } });
+    expect(page.status).toBe(200);
+    await page.text();
+    const user = await db.user.findUniqueOrThrow({ where: { email } });
+    expect(user.emailVerifiedAt).toBeNull();
+    const row = await db.authToken.findFirstOrThrow({ where: { userId: user.id, type: "VERIFY" }, orderBy: { createdAt: "desc" } });
+    expect(row.usedAt).toBeNull();
+  });
+
+  it("qa:TC missing AC4: EMAIL_VERIFIED stores the client IP and user agent, and nothing else", async () => {
+    const email = fresh();
+    expect((await new Client().post("/api/auth/signup", { name: "ZZ-TEST Trace", email, password: PW })).status).toBe(201);
+    const ua = "ZZ-TEST-UA verify " + "x".repeat(400);
+    const res = await viaProxy("POST", "/api/auth/verify", "203.0.113.7", ua, { token: lastVerifyToken(email) });
+    expect(res.status).toBe(200);
+    const user = await db.user.findUniqueOrThrow({ where: { email } });
+    expect(user.emailVerifiedAt).not.toBeNull();
+    const row = await db.auditLog.findFirstOrThrow({ where: { actorId: user.id, event: "EMAIL_VERIFIED" } });
+    expect(row.ip).toBe("203.0.113.7");
+    expect(row.data).toEqual({ userAgent: ua.slice(0, 300) });
+  });
+
+  it("qa:TC missing AC4: a resend request stores the client IP, user agent and result, and never the address", async () => {
+    const email = fresh();
+    expect((await new Client().post("/api/auth/signup", { name: "ZZ-TEST Trace", email, password: PW })).status).toBe(201);
+    const ua = "ZZ-TEST-UA resend";
+    expect((await viaProxy("POST", "/api/auth/resend-verification", "198.51.100.9", ua, { email })).status).toBe(200);
+    const user = await db.user.findUniqueOrThrow({ where: { email } });
+    const rows = await db.auditLog.findMany({ where: { actorId: user.id, event: "VERIFY_EMAIL_REQUESTED" } });
+    expect(rows).toHaveLength(1);
+    expect(rows[0].ip).toBe("198.51.100.9");
+    expect(rows[0].data).toEqual({ result: "SENT", userAgent: ua });
+    expect(JSON.stringify(rows[0])).not.toContain(email);
+  });
+
+  it("qa:TC missing AC4: a resend over the limit is audited as LIMITED; an unknown address leaves no row", async () => {
+    const email = fresh();
+    expect((await new Client().post("/api/auth/signup", { name: "ZZ-TEST Limit", email, password: PW })).status).toBe(201);
+    for (let i = 0; i < 3; i++) await viaProxy("POST", "/api/auth/resend-verification", "198.51.100.10", "ZZ-TEST-UA", { email });
+    const user = await db.user.findUniqueOrThrow({ where: { email } });
+    const results = (await db.auditLog.findMany({ where: { actorId: user.id, event: "VERIFY_EMAIL_REQUESTED" }, orderBy: { createdAt: "asc" } }))
+      .map((r) => (r.data as { result: string }).result);
+    expect(results).toEqual(["SENT", "SENT", "LIMITED"]);
+    const before = await db.auditLog.count({ where: { event: "VERIFY_EMAIL_REQUESTED" } });
+    expect((await viaProxy("POST", "/api/auth/resend-verification", "198.51.100.11", "ZZ-TEST-UA", { email: fresh() })).status).toBe(200);
+    expect(await db.auditLog.count({ where: { event: "VERIFY_EMAIL_REQUESTED" } })).toBe(before);
   });
 });

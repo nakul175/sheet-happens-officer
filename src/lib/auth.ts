@@ -54,10 +54,18 @@ export async function verifyPassword(password: string, stored: string | null): P
 
 export function clientIp(req: Request): string | null {
   const fwd = req.headers.get("x-forwarded-for");
-  return fwd ? fwd.split(",")[0].trim() || null : null;
+  return fwd ? fwd.split(",")[0].trim().slice(0, 64) || null : null;
 }
 
-/** Audit rows for sign-in events carry the IP; no other event does. Never put secrets in data. */
+/** APL-2742. The request's user agent, cut to the same 300 characters a session stores. */
+export function clientAgent(req: Request): string | null {
+  return req.headers.get("user-agent")?.slice(0, 300) || null;
+}
+
+/**
+ * Audit rows for sign-in and email-verification events carry the IP (APL-2742 adds the user agent in data
+ * for verification); no other event does. Never put secrets in data.
+ */
 export async function audit(
   event: string,
   o: { actorId?: string | null; ip?: string | null; data?: Record<string, string> } = {},
