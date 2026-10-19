@@ -1,9 +1,10 @@
 // APL-2733. A bad password shows the password message once.
 // Sign-up, reset-password and change-password. Desktop and 390x844.
 // ZZ-TEST names, nakul17+ aliases. workers=1 (playwright.config.ts).
-// A valid password is not sent to the server. The change-password page is signed in
-// through signup, the verification mail, and sign-in. No test writes the database itself.
-import { readdirSync, readFileSync, mkdirSync, writeFileSync } from "node:fs";
+// A valid password is not sent to the server, and a bad one is refused before the account is touched.
+// The change-password page signs in as an existing account (SHARD_EMAIL / SHARD_PASS, as staging-e2e.yml
+// passes each shard). The spec creates no account, reads no files, and writes no database.
+import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { test, expect, type APIRequestContext, type APIResponse, type Page, type Response } from "@playwright/test";
 
@@ -12,7 +13,6 @@ const VALID_PASSWORD = "goodpass7";
 const FAKE_RESET_TOKEN = "zz-test-reset-token-0123456789";
 // Repo-relative. Override with APL_2733_EVIDENCE when a run wants a different folder.
 const EVIDENCE = process.env.APL_2733_EVIDENCE ?? path.join("test-results", "apl-2733");
-const OUTBOX = process.env.EMAIL_OUTBOX_DIR ?? ".outbox";
 
 const SIZES = [
   { label: "desktop", width: 1280, height: 800 },
@@ -36,14 +36,13 @@ function gateFile() {
     const pass = process.env.SHO_QA_PASS ?? "";
     test.skip(!pass, "APL-2733: Set SHO_QA_PASS (the password for nakul17+ aliases).");
     if (!pass) return;
-    if (!process.env.BASE_URL && !process.env.TASKBOARD_URL) {
-      test.skip(true, "APL-2733 needs BASE_URL or TASKBOARD_URL");
-      return;
-    }
-    if (pass.length < 8 || !/[A-Za-z]/.test(pass) || !/[0-9]/.test(pass)) {
-      throw new Error("APL-2733: SHO_QA_PASS must be at least 8 characters with a letter and a number.");
-    }
-    changeSession = await seedChangeUser(request, pass);
+    const origin = process.env.BASE_URL || process.env.TASKBOARD_URL;
+    test.skip(!origin, "APL-2733 needs BASE_URL or TASKBOARD_URL");
+    if (!origin) return;
+    const email = process.env.SHARD_EMAIL ?? "";
+    const password = process.env.SHARD_PASS ?? "";
+    if (!email || !password) throw new Error("APL-2733: set SHARD_EMAIL and SHARD_PASS (an existing verified account) for change-password.");
+    changeSession = await signIn(request, email, password);
   });
 }
 
@@ -71,31 +70,6 @@ function appOrigin() {
   return (process.env.BASE_URL || process.env.TASKBOARD_URL || "http://localhost:3100").replace(/\/+$/, "");
 }
 
-function assertLocalApp() {
-  const host = new URL(appOrigin()).hostname;
-  if (host !== "localhost" && host !== "127.0.0.1") {
-    throw new Error(`APL-2733 refuses to create an account on ${host}`);
-  }
-}
-
-/** Verification token from the server's outbox. The signup response is sent after the file is written. */
-function verifyToken(email: string): string | null {
-  let files: string[] = [];
-  try {
-    files = readdirSync(OUTBOX);
-  } catch {
-    return null;
-  }
-  const mails = files.map((file) => {
-    try {
-      return JSON.parse(readFileSync(path.join(OUTBOX, file), "utf8")) as { to?: string; subject?: string; text?: string };
-    } catch {
-      return null;
-    }
-  }).filter((mail): mail is { to?: string; subject?: string; text?: string } => !!mail && mail.to === email && /Verify/.test(mail.subject ?? ""));
-  return mails.at(-1)?.text?.match(/token=([\w-]+)/)?.[1] ?? null;
-}
-
 function sessionValue(res: APIResponse): string {
   for (const header of res.headersArray()) {
     if (header.name.toLowerCase() !== "set-cookie") continue;
@@ -105,18 +79,10 @@ function sessionValue(res: APIResponse): string {
   throw new Error("APL-2733 sign-in did not return a session cookie");
 }
 
-/** One verified ZZ-TEST person, created the same way tests/helpers.ts account() does. */
-async function seedChangeUser(request: APIRequestContext, password: string): Promise<string> {
-  assertLocalApp();
-  const email = `nakul17+zz2733-change-${Date.now().toString(36)}@aplyd.com`;
-  const up = await request.post("/api/auth/signup", { data: { name: "ZZ-TEST Change password", email, password } });
-  expect(up.status(), await up.text()).toBe(201);
-  const token = verifyToken(email);
-  expect(token, `verification mail for ${email} in ${OUTBOX}`).toBeTruthy();
-  const verified = await request.post("/api/auth/verify", { data: { token } });
-  expect(verified.ok(), await verified.text()).toBeTruthy();
+/** Session for an existing account. Bad new passwords fail validation before the current one is checked. */
+async function signIn(request: APIRequestContext, email: string, password: string): Promise<string> {
   const sign = await request.post("/api/auth/signin", { data: { email, password } });
-  expect(sign.status(), await sign.text()).toBe(200);
+  expect(sign.status(), "APL-2733 sign-in as SHARD_EMAIL").toBe(200);
   return sessionValue(sign);
 }
 
