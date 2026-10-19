@@ -7,8 +7,8 @@ import { admin, istDate, superAdmin, task, withVersion, type Account } from "./h
 const row = (id: string, done = false) => ({ id, title: id, completedAt: done ? "2026-01-01" : null, assignee: null });
 const section = (tasks: ReturnType<typeof row>[], total = tasks.length, nextCursor: string | null = null, isDone = false) => ({ isDone, total, nextCursor, tasks });
 
-describe("closing alert payload", () => {
-  it("@APL-2691 TC6: names a closing stage, keeps the first 20, and says how many remain", () => {
+describe("qa:TC missing closing alert payload", () => {
+  it("qa:TC missing @APL-2691 TC6: names a closing stage, keeps the first 20, and says how many remain", () => {
     expect(stageClosesDeal("DONE")).toBe(true);
     expect(stageClosesDeal("LOST")).toBe(true);
     expect(stageClosesDeal("ACTIVE")).toBe(false);
@@ -33,7 +33,7 @@ describe("closing alert payload", () => {
     expect(moreOpenTasks(20, 20)).toBeNull();
   });
 
-  it("@APL-2691 TC8: plans the dialog from the list the page already has", () => {
+  it("qa:TC missing @APL-2691 TC8: plans the dialog from the list the page already has", () => {
     const tasks = Array.from({ length: 21 }, (_, i) => ({ id: `t${i}`, title: `Task ${i}` }));
     expect(planClosing({ pending: true, status: "ready", openCount: 21, tasks })).toEqual({ kind: "ignore" });
     expect(planClosing({ pending: false, status: "loading", openCount: 0, tasks: [] })).toEqual({ kind: "wait" });
@@ -63,7 +63,7 @@ async function pipelines(a: Account) {
   return r.json.pipelines as { id: string; key: string; stages: { id: string; name: string }[] }[];
 }
 
-describe("open tasks that block Won (APL-2691)", () => {
+describe("qa:TC missing open tasks that block Won (APL-2691)", () => {
   it("@APL-2691 qa:TC-APL2691-6ec60bba@v1 TC3 AC3: Won returns 409 with openTasks 21 and does not move, close, or archive the deal", async () => {
     const sa = await superAdmin();
     const lead = await admin(sa, "won2691");
@@ -106,7 +106,7 @@ describe("open tasks that block Won (APL-2691)", () => {
     expect(after.archived).toBe(false);
   });
 
-  it("@APL-2691 TC9: the refusal count includes a subtask, and the task list reports that same count", async () => {
+  it("qa:TC missing @APL-2691 TC9: the refusal count includes a subtask, and the task list reports that same count", async () => {
     const sa = await superAdmin();
     const lead = await admin(sa, "sub2691");
     const pipes = await pipelines(lead);

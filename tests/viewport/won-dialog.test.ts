@@ -79,7 +79,7 @@ async function dealState(projectId: string) {
   return { stage: project.deal.stage.name as string, archived: project.archived as boolean };
 }
 
-describe("APL-2691 Move to Won dialog", () => {
+describe("qa:TC missing APL-2691 Move to Won dialog", () => {
   it("@APL-2691 qa:TC-APL2691-8d4e9e0b@v1 TC1 AC1: Move to Won shows an alert with 21, the first 20 tasks, and how many remain", async () => {
     const { dialog, alert } = await openStage(wonId, "Won");
     const text = await alert.innerText();
@@ -113,7 +113,7 @@ describe("APL-2691 Move to Won dialog", () => {
     await dialog.getByRole("button", { name: "Cancel" }).click();
   }, 60000);
 
-  it("@APL-2691 phone: at 390x844 Move deal receives the click, and the tab bar does not take it", async () => {
+  it("qa:TC missing @APL-2691 phone: at 390x844 Move deal receives the click, and the tab bar does not take it", async () => {
     await page.setViewportSize({ width: 390, height: 844 });
     try {
       const { dialog, alert } = await openStage(wonId, "Won");
@@ -152,7 +152,7 @@ describe("APL-2691 Move to Won dialog", () => {
     await page.getByRole("dialog", { name: "Move to Won" }).getByRole("button", { name: "Cancel" }).click();
   }, 60000);
 
-  it("@APL-2691 TC5: a second click while the list loads opens one dialog, and a failed load is said in it", async () => {
+  it("qa:TC missing @APL-2691 TC5: a second click while the list loads opens one dialog, and a failed load is said in it", async () => {
     let release: () => void = () => {};
     const gate = new Promise<void>((resolve) => { release = resolve; });
     const pattern = `**/api/projects/${wonId}/tasks**`;
@@ -179,7 +179,7 @@ describe("APL-2691 Move to Won dialog", () => {
     }
   }, 60000);
 
-  it("@APL-2691 TC9: the dialog count includes a subtask and matches the refusal", async () => {
+  it("qa:TC missing @APL-2691 TC9: the dialog count includes a subtask and matches the refusal", async () => {
     const listed = await lead.c.get(`/api/projects/${subId}/tasks`);
     expect(listed.json.summary.open).toBe(1);
     expect(listed.json.summary.openTasks).toBe(2);
@@ -197,7 +197,7 @@ describe("APL-2691 Move to Won dialog", () => {
     await dialog.getByRole("button", { name: "Cancel" }).click();
   }, 60000);
 
-  it("@APL-2691 TC7: moves to Won once every task is closed, and does not archive the deal or restamp the tasks", async () => {
+  it("qa:TC missing @APL-2691 TC7: moves to Won once every task is closed, and does not archive the deal or restamp the tasks", async () => {
     const stamps: string[] = [];
     for (const id of wonTaskIds) {
       expect((await lead.c.post(`/api/tasks/${id}/complete`, await withVersion(lead, id))).status).toBe(200);
