@@ -2,7 +2,7 @@
 // The only skip is the file-level beforeAll below. It names APL-2681 when SHO_QA_PASS or the mail sink is missing.
 import { readFileSync } from "node:fs";
 import { expect, test, type APIRequestContext } from "@playwright/test";
-import { waitForMail } from "../mail";
+import { waitForMail } from "../../mail-sink-client";
 
 const PASS = process.env.SHO_QA_PASS ?? "";
 const BASE = (process.env.BASE_URL || "http://127.0.0.1:3100").replace(/\/+$/, "");
@@ -90,7 +90,7 @@ test.describe("APL-2681 staging mail sink", () => {
   test("AC3 @static: the sink token is not written in the repo @static", () => {
     const token = process.env.MAIL_SINK_TOKEN ?? "";
     expect(token.length).toBeGreaterThan(0);
-    for (const file of [".env.example", "tests/e2e/mail.ts", "tests/e2e/stories/APL-2681.spec.ts", "src/lib/mail-sink.ts", "src/lib/email.ts"]) {
+    for (const file of [".env.example", "tests/mail-sink-client.ts", "tests/e2e/stories/APL-2681.spec.ts", "src/lib/mail-sink.ts", "src/lib/email.ts"]) {
       expect(readFileSync(file, "utf8").includes(token), file).toBe(false);
     }
   });

@@ -26,7 +26,7 @@ vi.mock("next/server", () => ({
 import { GET } from "../src/app/api/qa/mail/route";
 import { resetMail, sendMail, signInDetailsMail, verifyMail } from "../src/lib/email";
 import { isZzTestAddress } from "../src/lib/mail-sink";
-import { MAIL_WAIT_MS, mailSinkHeaders, mailboxSpecsSkip, waitForMail } from "./e2e/mail";
+import { MAIL_WAIT_MS, mailSinkHeaders, mailboxSpecsSkip, waitForMail } from "./mail-sink-client";
 
 const TOKEN = "zz-test-sink-token";
 const PASSWORD = "ZzTemp9only";
