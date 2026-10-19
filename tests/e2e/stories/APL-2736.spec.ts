@@ -23,6 +23,7 @@ let page: Page;
 let sa: Account;
 let pro: Pipe;
 let dealId = "";
+let orgId = "";
 
 const column = (name: string) => page.getByRole("region", { name, exact: true });
 const proposalId = () => pro.stages.find((s) => s.name === "Proposal")!.id;
@@ -50,6 +51,7 @@ beforeAll(async () => {
   pro = ((await sa.c.get("/api/deals/pipelines")).json.pipelines as Pipe[]).find((p) => p.key === "DEAL_PROACTIVE")!;
   await db.stage.create({ data: { id: STAGE_ID, pipelineId: pro.id, name: STAGE_NAME, position: 100, category: "ACTIVE", requiredFields: [] } });
   const org = (await sa.c.post("/api/orgs", { name: `ZZ-TEST Org 2736 ${RUN}` })).json.organisation.id as string;
+  orgId = org;
   const r = await sa.c.post("/api/deals", {
     name: DEAL_NAME, organisationId: org, pipelineId: pro.id, leaderId: sa.id, whyPursue: "fit",
     nextStep: { title: "First call", dueDate: istDate(2) },
@@ -68,13 +70,26 @@ beforeAll(async () => {
   page = await ctx.newPage();
 }, 180000);
 
+// Cleanup goes through the API: the ZZ-TEST stage (if a test left it) is removed by the endpoint under test,
+// then the ZZ-TEST deal and organisation are archived.
 afterAll(async () => {
   await browser?.close();
-  if (await db.stage.findUnique({ where: { id: STAGE_ID } })) {
-    await db.project.updateMany({ where: { stageId: STAGE_ID }, data: { stageId: proposalId() } });
-    await db.stage.delete({ where: { id: STAGE_ID } });
+  if (!sa) return;
+  const problems: string[] = [];
+  const pipes = (await sa.c.get("/api/deals/pipelines")).json.pipelines as Pipe[];
+  if (pipes.flatMap((p) => p.stages).some((s) => s.id === STAGE_ID)) {
+    const r = await sa.c.del(`/api/deals/pipelines/${STAGE_ID}?moveTo=${proposalId()}`);
+    if (r.status !== 200) problems.push(`remove stage: ${r.status} ${JSON.stringify(r.json)}`);
   }
-  if (dealId) await sa?.c.post(`/api/projects/${dealId}/archive`);
+  if (dealId) {
+    const r = await sa.c.post(`/api/projects/${dealId}/archive`);
+    if (r.status !== 200) problems.push(`archive deal: ${r.status} ${JSON.stringify(r.json)}`);
+  }
+  if (orgId) {
+    const r = await sa.c.post(`/api/orgs/${orgId}/archive`, { archive: true });
+    if (r.status !== 200) problems.push(`archive org: ${r.status} ${JSON.stringify(r.json)}`);
+  }
+  expect(problems, problems.join("\n")).toEqual([]);
 });
 
 describe("qa:TC missing APL-2736 removing a stage asks where its items go", () => {

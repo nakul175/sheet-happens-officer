@@ -11,6 +11,9 @@ type Pipe = { id: string; key: string; stages: Stage[] };
 
 const RUN = Date.now().toString(36);
 const zzStages: string[] = [];
+const zzOrgs: string[] = [];
+const zzDeals: string[] = [];
+const zzPeople: string[] = [];
 let sa: Account;
 let pro: Pipe;
 let bid: Pipe;
@@ -34,12 +37,14 @@ async function zzStage(category: "ACTIVE" | "DONE" = "ACTIVE") {
 /** A deal led by the Super Admin, placed in `stageId`. */
 async function dealIn(stageId: string) {
   const org = (await sa.c.post("/api/orgs", { name: `ZZ-TEST Org 2736 ${RUN}-${seq++}` })).json.organisation.id as string;
+  zzOrgs.push(org);
   const r = await sa.c.post("/api/deals", {
     name: `ZZ-TEST Deal 2736 ${RUN}-${seq++}`, organisationId: org, pipelineId: pro.id, leaderId: sa.id, whyPursue: "fit",
     nextStep: { title: "First call", dueDate: istDate(2) },
   });
   expect(r.status, JSON.stringify(r.json)).toBe(201);
   const id = r.json.deal.id as string;
+  zzDeals.push(id);
   await db.project.update({ where: { id }, data: { stageId } });
   return id;
 }
@@ -53,12 +58,29 @@ beforeAll(async () => {
   bid = all.find((p) => p.key === "DEAL_BID")!;
 });
 
+// Cleanup goes through the API: leftover ZZ-TEST stages are removed by the endpoint under test, then the
+// ZZ-TEST deals and organisations are archived and the ZZ-TEST person is deactivated.
 afterAll(async () => {
-  const left = await db.stage.findMany({ where: { id: { in: zzStages } }, select: { id: true } });
+  const problems: string[] = [];
+  const left = (await pipes(sa)).flatMap((p) => p.stages).filter((s) => zzStages.includes(s.id));
   for (const s of left) {
-    await db.project.updateMany({ where: { stageId: s.id }, data: { stageId: named(pro, "Lead").id } });
-    await db.stage.delete({ where: { id: s.id } });
+    const to = named(pro, s.category === "DONE" ? "Won" : "Lead").id;
+    const r = await sa.c.del(`/api/deals/pipelines/${s.id}?moveTo=${to}`);
+    if (r.status !== 200) problems.push(`remove stage ${s.id}: ${r.status} ${JSON.stringify(r.json)}`);
   }
+  for (const id of zzDeals) {
+    const r = await sa.c.post(`/api/projects/${id}/archive`);
+    if (r.status !== 200) problems.push(`archive deal ${id}: ${r.status} ${JSON.stringify(r.json)}`);
+  }
+  for (const id of zzOrgs) {
+    const r = await sa.c.post(`/api/orgs/${id}/archive`, { archive: true });
+    if (r.status !== 200) problems.push(`archive org ${id}: ${r.status} ${JSON.stringify(r.json)}`);
+  }
+  for (const id of zzPeople) {
+    const r = await sa.c.post(`/api/team/${id}/deactivate`, { reassign: "leaders" });
+    if (r.status !== 200) problems.push(`deactivate ${id}: ${r.status} ${JSON.stringify(r.json)}`);
+  }
+  expect(problems, problems.join("\n")).toEqual([]);
 });
 
 describe("qa:TC missing APL-2736 removing a stage asks where its items go", () => {
@@ -178,6 +200,7 @@ describe("qa:TC missing APL-2736 removing a stage asks where its items go", () =
   it("qa:TC missing AC1: only the Super Admin removes a stage", async () => {
     const zz = await zzStage();
     const member = await account("zz2736member");
+    zzPeople.push(member.id);
     const r = await member.c.del(`/api/deals/pipelines/${zz}?moveTo=${named(pro, "Proposal").id}`);
     expect(r.status).toBe(404);
     expect(await exists(zz)).toBe(true);
