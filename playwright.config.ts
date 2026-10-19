@@ -1,48 +1,32 @@
 import { defineConfig } from "@playwright/test";
+import { BASE_URL } from "./tests/e2e/base-url";
+// Every story spec that imports vitest. scripts/ci/story-specs-no-vitest.test.mjs checks the rest against this same list.
+import { VITEST_SPECS } from "./tests/e2e/vitest-specs.cjs";
 
-// Story specs in tests/e2e/stories. Files there use @playwright/test only: one vitest import makes the whole run collect 0 tests
-// (APL-2761). Vitest suites that drive a local server live in tests/e2e/local and run under `npm test`.
-// workers=1. BASE_URL or TASKBOARD_URL points at the app. Production hosts are refused.
-// Default is localhost: Next dev does not hydrate the sign-up form when the page is opened as 127.0.0.1.
-const baseURL = (process.env.BASE_URL || process.env.TASKBOARD_URL || "http://localhost:3100").replace(/\/+$/, "");
-
-const host = (() => {
-  try {
-    return new URL(baseURL).hostname.toLowerCase().replace(/\.$/, "");
-  } catch {
-    return "";
-  }
-})();
-
-const PRODUCTION = new Set([
-  "sheethappensofficer.com",
-  "www.sheethappensofficer.com",
-  "app.sheethappensofficer.com",
-  "168.144.144.69",
-]);
-
-if (PRODUCTION.has(host)) throw new Error(`Refusing to run story tests against production (${host}).`);
+// Story-level browser tests (tests/e2e/stories/<issue-id>.spec.ts).
+// They run against the LOCAL server (http://localhost:3100) unless a target is set, and read every credential from the environment:
+//   STAGING_USER, STAGING_PASS     the basic-auth gate in front of staging
+//   SHO_ADMIN_EMAIL, SHO_ADMIN_PASS   a Super Admin account on staging
+//   SHO_MEMBER_EMAIL, SHO_MEMBER_PASS   a plain Member account. A spec that needs a second person fails without it (support.ts).
+//   BASE_URL / TASKBOARD_URL / STAGING_URL   the app under test, in that order (default: http://localhost:3100).
+//                                  staging-e2e.yml sets BASE_URL for staging. Production hosts are refused (tests/e2e/base-url.ts).
+//   PW_CHROMIUM                    optional path to a Chromium binary
+// Nothing here is ever pointed at production. All test data is named "ZZ-TEST ..." and cleaned up by the spec.
 
 export default defineConfig({
+  // Discovery stays inside tests/e2e: only *.spec.ts under tests/e2e/stories, minus the Vitest specs (above).
   testDir: "./tests/e2e/stories",
-  // Vitest suites still in tests/e2e/stories, until APL-2883 moves them to tests/e2e/local. Without these entries Playwright
-  // fails to load them and collects 0 tests. scripts/ci/story-specs-no-vitest.test.mjs reads this list: add none.
-  testIgnore: [
-    "**/APL-2624.spec.ts",
-    "**/APL-2694.spec.ts",
-    "**/APL-2721.spec.ts",
-    "**/APL-2737.spec.ts",
-    "**/APL-2742.spec.ts",
-  ],
+  testMatch: "**/*.spec.ts",
+  testIgnore: VITEST_SPECS,
   timeout: 60_000,
-  expect: { timeout: 15_000 },
+  expect: { timeout: 10_000 },
   workers: 1,
-  fullyParallel: false,
   retries: 0,
   reporter: [["list"]],
   use: {
-    baseURL,
-    launchOptions: process.env.PW_CHROMIUM ? { executablePath: process.env.PW_CHROMIUM } : undefined,
+    baseURL: BASE_URL,
+    httpCredentials: process.env.STAGING_USER ? { username: process.env.STAGING_USER, password: process.env.STAGING_PASS ?? "" } : undefined,
+    launchOptions: { executablePath: process.env.PW_CHROMIUM || undefined },
     screenshot: "only-on-failure",
     trace: "off",
   },

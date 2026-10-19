@@ -62,7 +62,7 @@ async function trashDays(page: Page, title: string) {
   await page.goto(`/projects/${projectId}/trash`);
   const row = page.getByRole("row").filter({ hasText: title });
   await row.waitFor();
-  return (await row.getByRole("cell").filter({ hasText: /^\d+ days?$/ }).innerText()).trim();
+  return (await row.getByRole("cell").filter({ hasText: /^\d+ days? left$/ }).innerText()).trim();
 }
 
 describe("qa:TC missing APL-2719 Undo and purge share one timestamp", () => {
@@ -82,7 +82,7 @@ describe("qa:TC missing APL-2719 Undo and purge share one timestamp", () => {
     try {
       await page.goto(`/projects/${projectId}/activity`);
       await activityRow(page, t.title).getByRole("button", { name: "Undo" }).waitFor();
-      expect(await trashDays(page, t.title)).toBe("30 days");
+      expect(await trashDays(page, t.title)).toBe("30 days left");
     } finally {
       await ctx.close();
     }
