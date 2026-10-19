@@ -11,7 +11,7 @@ export function CheckEmail({ sendFailed = false }: { sendFailed?: boolean }) {
   const email = useSyncExternalStore(() => () => {}, recalledEmail, () => "");
   const [sent, setSent] = useState(false);
   const [error, setError] = useState<string | null>(
-    sendFailed ? "We created your account but could not send the verification email. Use Resend below in a few minutes; if it still does not arrive, contact your Super Admin." : null,
+    sendFailed ? "We created your account but could not send the verification email. Use \"resend the link\" below in a few minutes; if it still does not arrive, contact your Super Admin." : null,
   );
 
   async function resend() {
@@ -30,7 +30,7 @@ export function CheckEmail({ sendFailed = false }: { sendFailed?: boolean }) {
         </p>
       )}
       {error && <div className={styles.alert} role="alert"><span>{error}</span></div>}
-      {sent && <div className={styles.notice} role="status">If this address needs a new link, it has been sent. You can ask up to 3 times an hour; if you have asked that often already, try again later.</div>}
+      {sent && <div className={styles.notice} role="status">If this address needs a new link, we are sending one. If nothing arrives in a few minutes, check spam or ask again; you can ask up to 3 times an hour.</div>}
       <div className={styles.foot} style={{ textAlign: "left" }}>
         Did not get it? Check spam, or{" "}
         {email ? <button type="button" onClick={resend} className={styles.linkbtn}>resend the link</button> : <Link href="/signup">sign up again</Link>}.

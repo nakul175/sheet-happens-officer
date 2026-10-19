@@ -153,6 +153,7 @@ describe("qa:TC missing AC3: a failed verification send is reported to the perso
     const user = await db.user.findUniqueOrThrow({ where: { email } });
     expect(user.emailVerifiedAt).toBeNull();
     expect(await db.session.count({ where: { userId: user.id } })).toBe(0);
+    expect(await db.authToken.count({ where: { userId: user.id } }), "the unsent token is gone, so it does not count toward the limit").toBe(0);
   });
 
   it("qa:TC missing AC3: sign-up answers emailSent true when the send works", async () => {
@@ -161,13 +162,53 @@ describe("qa:TC missing AC3: a failed verification send is reported to the perso
     expect((await res.json()).emailSent).toBe(true);
   });
 
-  it("qa:TC missing AC3: resend answers 503 with a clear message when the send fails", async () => {
+  it("qa:TC missing AC3: a failed resend keeps the delivered link working, does not use up the limit and is audited FAILED", async () => {
     const email = fresh();
     expect((await post(signUp, "/api/auth/signup", { name: "ZZ-TEST Mailfail", email, password: PW })).status).toBe(201);
+    const user = await db.user.findUniqueOrThrow({ where: { email } });
+    const delivered = await db.authToken.findFirstOrThrow({ where: { userId: user.id, type: "VERIFY" } });
     failSend.on = true;
-    const res = await post(resendVerification, "/api/auth/resend-verification", { email });
-    expect(res.status).toBe(503);
-    expect((await res.json()).error).toMatch(/could not send/i);
+    for (let i = 0; i < 2; i++) expect((await post(resendVerification, "/api/auth/resend-verification", { email })).status).toBe(200);
+    expect((await db.authToken.findUniqueOrThrow({ where: { id: delivered.id } })).usedAt, "the delivered link still works").toBeNull();
+    expect(await db.authToken.count({ where: { userId: user.id, type: "VERIFY" } }), "failed sends leave no token").toBe(1);
+    // The provider recovers: the next request is not limited, sends, and only then voids the old link.
+    failSend.on = false;
+    expect((await post(resendVerification, "/api/auth/resend-verification", { email })).status).toBe(200);
+    expect(await db.authToken.count({ where: { userId: user.id, type: "VERIFY" } })).toBe(2);
+    expect((await db.authToken.findUniqueOrThrow({ where: { id: delivered.id } })).usedAt).not.toBeNull();
+    const results = (await db.auditLog.findMany({ where: { actorId: user.id, event: "VERIFY_EMAIL_REQUESTED" }, orderBy: { createdAt: "asc" } }))
+      .map((r) => (r.data as { result: string }).result);
+    expect(results).toEqual(["FAILED", "FAILED", "SENT"]);
+  });
+
+  it("qa:TC missing AC3: failed resends are capped at 3 an hour, so a client cannot hammer the provider", async () => {
+    const email = fresh();
+    expect((await post(signUp, "/api/auth/signup", { name: "ZZ-TEST Mailfail", email, password: PW })).status).toBe(201);
+    const user = await db.user.findUniqueOrThrow({ where: { email } });
+    failSend.on = true;
+    for (let i = 0; i < 5; i++) expect((await post(resendVerification, "/api/auth/resend-verification", { email })).status).toBe(200);
+    const results = (await db.auditLog.findMany({ where: { actorId: user.id, event: "VERIFY_EMAIL_REQUESTED" }, orderBy: { createdAt: "asc" } }))
+      .map((r) => (r.data as { result: string }).result);
+    expect(results).toEqual(["FAILED", "FAILED", "FAILED", "LIMITED"]);
+  });
+
+  it("qa:TC missing AC3: resend gives one neutral answer for a failed send, a sent one and an unknown address", async () => {
+    const failing = fresh();
+    const working = fresh();
+    expect((await post(signUp, "/api/auth/signup", { name: "ZZ-TEST Neutral", email: failing, password: PW })).status).toBe(201);
+    expect((await post(signUp, "/api/auth/signup", { name: "ZZ-TEST Neutral", email: working, password: PW })).status).toBe(201);
+    const answer = async (email: string) => {
+      const res = await post(resendVerification, "/api/auth/resend-verification", { email });
+      return { status: res.status, body: await res.json() };
+    };
+    const sent = await answer(working);
+    failSend.on = true;
+    const failed = await answer(failing);
+    const unknown = await answer(fresh());
+    expect(failed).toEqual(sent);
+    expect(unknown).toEqual(sent);
+    expect(sent.status).toBe(200);
+    expect(sent.body.message).not.toMatch(/has been sent/i);
   });
 
   it("qa:TC missing AC3: resend stays rate-limited at 3 an hour", async () => {
@@ -222,10 +263,11 @@ describe("qa:TC missing AC4: verification needs a click, and verification events
     expect(JSON.stringify(rows[0])).not.toContain(email);
   });
 
-  it("qa:TC missing AC4: a resend over the limit is audited as LIMITED; an unknown address leaves no row", async () => {
+  it("qa:TC missing AC4: a resend over the limit is audited as LIMITED once an hour; an unknown address leaves no row", async () => {
     const email = fresh();
     expect((await new Client().post("/api/auth/signup", { name: "ZZ-TEST Limit", email, password: PW })).status).toBe(201);
-    for (let i = 0; i < 3; i++) await viaProxy("POST", "/api/auth/resend-verification", "198.51.100.10", "ZZ-TEST-UA", { email });
+    // Sign-up's link plus two resends reach the limit; the 3rd to 6th requests send nothing, and only one LIMITED row is written.
+    for (let i = 0; i < 6; i++) await viaProxy("POST", "/api/auth/resend-verification", "198.51.100.10", "ZZ-TEST-UA", { email });
     const user = await db.user.findUniqueOrThrow({ where: { email } });
     const results = (await db.auditLog.findMany({ where: { actorId: user.id, event: "VERIFY_EMAIL_REQUESTED" }, orderBy: { createdAt: "asc" } }))
       .map((r) => (r.data as { result: string }).result);

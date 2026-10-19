@@ -66,8 +66,7 @@ export async function sendMail(mail: Mail): Promise<void> {
 }
 
 /** APL-2742. What the person sees when the verification email could not be sent. */
-export const VERIFY_SEND_FAILED = "We created your account but could not send the verification email. Use Resend below in a few minutes; if it still does not arrive, contact your Super Admin.";
-export const RESEND_FAILED = "We could not send the email just now. Wait a few minutes, then try again.";
+export const VERIFY_SEND_FAILED = "We created your account but could not send the verification email. Use \"resend the link\" below in a few minutes; if it still does not arrive, contact your Super Admin.";
 
 export const appUrl = () => (process.env.APP_URL ?? "http://localhost:3000").replace(/\/$/, "");
 

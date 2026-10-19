@@ -149,6 +149,27 @@ export async function issueToken(userId: string, type: "VERIFY" | "RESET") {
   return token;
 }
 
+/**
+ * APL-2742. Creates a token of a type and hands it to `send`. Only when the send succeeds are the earlier unused tokens
+ * of that type voided, so a failed send leaves the link already delivered working. A failed send's token is deleted,
+ * so it never counts toward the hourly limit. Returns the raw token.
+ */
+export async function issueTokenAndSend(userId: string, type: "VERIFY" | "RESET", send: (token: string) => Promise<void>) {
+  const token = newToken();
+  const hours = type === "VERIFY" ? VERIFY_HOURS : RESET_HOURS;
+  const row = await db.authToken.create({
+    data: { userId, type, tokenHash: sha256(token), expiresAt: new Date(Date.now() + hours * HOUR) },
+  });
+  try {
+    await send(token);
+  } catch (err) {
+    await db.authToken.delete({ where: { id: row.id } });
+    throw err;
+  }
+  await db.authToken.updateMany({ where: { userId, type, usedAt: null, id: { not: row.id } }, data: { usedAt: new Date() } });
+  return token;
+}
+
 /** True when 3 emails of this type were already issued to the user in the last hour. */
 export async function emailLimitReached(userId: string, type: "VERIFY" | "RESET") {
   const n = await db.authToken.count({ where: { userId, type, createdAt: { gt: new Date(Date.now() - HOUR) } } });

@@ -4,12 +4,13 @@
 // No screen sends a resend without a click. The verify and resend audit rows keep the client IP and user agent.
 // Runs in `npm test` against the local test server (TASKBOARD_URL) and its outbox (EMAIL_OUTBOX_DIR), as in ci.yml.
 // Anything but localhost is refused before a browser starts. nakul17+zztest accounts, ZZ-TEST names.
+// QA gate: skipped without SHO_QA_PASS, which is also the accounts' password (ci.yml sets a CI-only value).
 // Chromium: PW_CHROMIUM, else the system Chrome that GitHub's ubuntu-latest runner ships (as tests/inline-touch-2673.test.ts).
 import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { chromium, type Browser, type BrowserContext, type Page } from "playwright-core";
-import { BASE, OUTBOX, PW } from "../../helpers";
+import { BASE, OUTBOX } from "../../helpers";
 import { db } from "../../../src/lib/db";
 
 const SHOTS = "test-results/apl-2742";
@@ -20,6 +21,8 @@ const fresh = () => `nakul17+zztest-apl2742-e2e-${run}-${n++}@aplyd.com`;
 if (!/^(localhost|127\.0\.0\.1)$/.test(new URL(BASE).hostname)) {
   throw new Error(`Refusing to run against ${BASE}: this spec is local only.`);
 }
+
+const QA_PASS = process.env.SHO_QA_PASS ?? "";
 
 let browser: Browser;
 
@@ -35,10 +38,15 @@ function countRequests(page: Page, apiPath: string) {
   return seen;
 }
 
-/** Lets effects run and the network settle, so a request fired on load would have been seen. */
-async function settle(page: Page) {
+/**
+ * Waits until the page is hydrated (its client control is enabled) and the network has been idle, so a request fired
+ * on load would already have been seen.
+ */
+async function settle(page: Page, control: ReturnType<Page["getByRole"]>) {
+  await control.waitFor({ state: "visible" });
+  await page.waitForFunction(() => document.readyState === "complete");
+  await expect.poll(() => control.isEnabled()).toBe(true);
   await page.waitForLoadState("networkidle");
-  await page.waitForTimeout(1500);
 }
 
 function chromePath() {
@@ -64,7 +72,7 @@ async function signUp(page: Page, email: string) {
   await page.goto(`${BASE}/signup`);
   await page.fill("#name", "ZZ-TEST Unverified");
   await page.fill("#email", email);
-  await page.fill("#password", PW);
+  await page.fill("#password", QA_PASS);
   await page.click("button[type=submit]");
   await page.waitForURL(/\/check-email/);
 }
@@ -72,20 +80,20 @@ async function signUp(page: Page, email: string) {
 async function signIn(page: Page, email: string) {
   await page.goto(`${BASE}/signin`);
   await page.fill("#email", email);
-  await page.fill("#password", PW);
+  await page.fill("#password", QA_PASS);
   await page.click("button[type=submit]");
 }
 
-beforeAll(async () => {
-  mkdirSync(SHOTS, { recursive: true });
-  browser = await chromium.launch({ executablePath: chromePath(), args: ["--no-sandbox", "--disable-dev-shm-usage"] });
-}, 60_000);
+describe.skipIf(!QA_PASS)("qa:TC missing APL-2742: unverified sign-in and verification email", () => {
+  beforeAll(async () => {
+    mkdirSync(SHOTS, { recursive: true });
+    browser = await chromium.launch({ executablePath: chromePath(), args: ["--no-sandbox", "--disable-dev-shm-usage"] });
+  }, 60_000);
 
-afterAll(async () => {
-  await browser?.close();
-});
+  afterAll(async () => {
+    await browser?.close();
+  });
 
-describe("qa:TC missing APL-2742: unverified sign-in and verification email", () => {
   it("qa:TC missing AC1: unverified user cannot sign in", async () => {
     const ctx = await browser.newContext();
     const page = await ctx.newPage();
@@ -143,22 +151,22 @@ describe("qa:TC missing APL-2742: unverified sign-in and verification email", ()
       contentType: "application/json",
       body: JSON.stringify({ status: "check_email", emailSent: false, message: "We created your account but could not send the verification email." }),
     }));
-    await page.route("**/api/auth/resend-verification", (r) => r.fulfill({
-      status: 503,
-      contentType: "application/json",
-      body: JSON.stringify({ error: "We could not send the email just now. Wait a few minutes, then try again." }),
-    }));
     const resends = countRequests(page, "/api/auth/resend-verification");
     await signUp(page, fresh());
     const alert = page.locator("main [role=alert]");
     await expect.poll(() => alert.textContent()).toMatch(/could not send the verification email/i);
     await page.screenshot({ path: `${SHOTS}/send-failed.png` });
-    await settle(page);
+    const resend = page.getByRole("button", { name: /resend the link/i });
+    await settle(page, resend);
     expect(resends.n, "the failed-send screen sends nothing until Resend is clicked").toBe(0);
+    expect(await alert.textContent(), "the message names the control as it is labelled").toContain('"resend the link"');
 
-    await page.getByRole("button", { name: /resend/i }).click();
-    await expect.poll(() => alert.textContent()).toMatch(/could not send the email just now/i);
-    await expect.poll(() => page.locator("main [role=status]").count()).toBe(0);
+    // The server's resend answer is neutral (it never reveals a failed send); the screen never says the email went.
+    await resend.click();
+    await expect.poll(() => resends.n).toBe(1);
+    const notice = page.locator("main [role=status]");
+    await expect.poll(() => notice.textContent()).toMatch(/we are sending one/i);
+    expect(await notice.textContent()).not.toMatch(/has been sent/i);
     await ctx.close();
   }, 60_000);
 
@@ -171,8 +179,7 @@ describe("qa:TC missing APL-2742: unverified sign-in and verification email", ()
 
     // What a mail link scanner does: open the link and let the page run, with no click.
     await page.goto(verifyLinks(email).at(-1)!);
-    await expect.poll(() => page.getByRole("button", { name: "Verify my email" }).count()).toBe(1);
-    await settle(page);
+    await settle(page, page.getByRole("button", { name: "Verify my email" }));
     expect(verifies.n, "loading /verify posts nothing").toBe(0);
     const user = await db.user.findUniqueOrThrow({ where: { email } });
     expect((await db.user.findUniqueOrThrow({ where: { id: user.id } })).emailVerifiedAt).toBeNull();
@@ -197,12 +204,13 @@ describe("qa:TC missing APL-2742: unverified sign-in and verification email", ()
     const page = await ctx.newPage();
     const resends = countRequests(page, "/api/auth/resend-verification");
     const email = fresh();
+    const resend = page.getByRole("button", { name: /resend the link/i });
     await signUp(page, email);
-    await settle(page);
+    await settle(page, resend);
     await page.reload();
-    await settle(page);
+    await settle(page, resend);
     await page.goto(`${BASE}/check-email?failed=1`);
-    await settle(page);
+    await settle(page, resend);
     expect(resends.n, "no resend on sign-up, on /check-email or on its failed-send variant").toBe(0);
     expect(verifyLinks(email)).toHaveLength(1);
 
