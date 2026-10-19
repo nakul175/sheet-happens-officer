@@ -1,7 +1,16 @@
 // SHO-US-14.13 Notification triage (APL-2572). Needs the optional Member account (it receives the notices).
-// AC3 runs at desktop and phone width. It is the Unread filter from this story, not a gate on another PR.
-import { test, expect, zz, type Who, type Later, type Page } from "../support";
+// The file skips only when SHO_QA_PASS is unset. AC3 runs at desktop and phone width (APL-2672 is on main).
+import { test, expect, zz, type Later, type Page, type Who } from "../support";
 import { clickClear } from "../helpers/phone-hit";
+import { PASS, passwordOk } from "./qa";
+
+// Pam has not published a TC hash. The marker is the literal "qa:TC missing".
+const tag = (id: string) => ({ annotation: [{ type: "ac", description: id }, { type: "qa:TC", description: "qa:TC missing" }] });
+
+test.beforeAll(() => {
+  test.skip(!PASS, "Set SHO_QA_PASS (the password for nakul17+ aliases).");
+  if (!passwordOk(PASS)) throw new Error("SHO_QA_PASS must be at least 8 characters with a letter and a number.");
+});
 
 async function give(admin: Who, member: Who, later: Later, n: number) {
   const r = await admin.api.post("/api/projects", { name: zz("bell"), leaderId: admin.user.id });
@@ -25,7 +34,7 @@ const marked = (admin: Who, read: boolean, title: string) =>
 const unread = async (member: Who) => (await member.api.get("/api/notifications")).json.unread as number;
 const bell = (p: Page) => p.getByRole("button", { name: /^Notifications/ });
 
-test("qa:TC missing AC1: opening the bell leaves 5 unread items unread and the badge stays", async ({ admin, member, later }) => {
+test("qa:TC missing AC1: opening the bell leaves 5 unread items unread and the badge stays", tag("APL-2572 AC1"), async ({ admin, member, later }) => {
   const titles = await give(admin, member, later, 5);
   const before = await unread(member);
   expect(before).toBeGreaterThanOrEqual(5);
@@ -47,7 +56,7 @@ test("qa:TC missing AC1: opening the bell leaves 5 unread items unread and the b
   await expect(bell(p)).toHaveAttribute("aria-label", new RegExp(`${before} unread`));
 });
 
-test("qa:TC missing AC2: clicking an item opens its task and marks it read", async ({ admin, member, later }) => {
+test("qa:TC missing AC2: clicking an item opens its task and marks it read", tag("APL-2572 AC2"), async ({ admin, member, later }) => {
   const titles = await give(admin, member, later, 1);
   const before = await unread(member);
   const p = member.page;
@@ -58,7 +67,7 @@ test("qa:TC missing AC2: clicking an item opens its task and marks it read", asy
   await expect.poll(() => unread(member)).toBe(before - 1);
 });
 
-test("qa:TC missing AC3: the Unread filter hides read items, and an empty result says 'All caught up'", async ({ admin, member, later }) => {
+test("qa:TC missing AC3: the Unread filter hides read items, and an empty result says 'All caught up'", tag("APL-2572 AC3"), async ({ admin, member, later }) => {
   test.setTimeout(180_000);
   const p = member.page;
   for (const viewport of [{ width: 1280, height: 800 }, { width: 390, height: 844 }]) {
@@ -94,7 +103,7 @@ test("qa:TC missing AC3: the Unread filter hides read items, and an empty result
   }
 });
 
-test("qa:TC missing AC4: marking an item unread raises the badge by 1", async ({ admin, member, later }) => {
+test("qa:TC missing AC4: marking an item unread raises the badge by 1", tag("APL-2572 AC4"), async ({ admin, member, later }) => {
   const titles = await give(admin, member, later, 1);
   expect((await member.api.post("/api/notifications/read-all")).status).toBeLessThan(300);
   const p = member.page;
@@ -106,7 +115,7 @@ test("qa:TC missing AC4: marking an item unread raises the badge by 1", async ({
   expect(await unread(member)).toBe(1);
 });
 
-test("qa:TC missing AC5: with more than 50 items, older ones load on request", async ({ admin, member, later }) => {
+test("qa:TC missing AC5: with more than 50 items, older ones load on request", tag("APL-2572 AC5"), async ({ admin, member, later }) => {
   test.setTimeout(240_000);
   await give(admin, member, later, 52);
   const p = member.page;

@@ -5,9 +5,16 @@
 //  - AC4 lists only My tasks, Projects and Team; CRM stories later added Deals and Accounts, so the test checks the role-specific items only.
 //  - AC5 says opening the bell marks the list read and shows the latest 30; SHO-US-14.13 changed it: nothing is marked read until
 //    the person clicks a notice, and the panel shows up to 50. The test checks the 14.13 behaviour.
+// The file skips only when SHO_QA_PASS is unset.
 // Data: every project and task is named "ZZ-TEST ...".
 import { test, expect, zz, type Who } from "../support";
 import { clickClear } from "../helpers/phone-hit";
+import { PASS, passwordOk } from "./qa";
+
+test.beforeAll(() => {
+  test.skip(!PASS, "Set SHO_QA_PASS (the password for nakul17+ aliases).");
+  if (!passwordOk(PASS)) throw new Error("SHO_QA_PASS must be at least 8 characters with a letter and a number.");
+});
 
 async function proj(admin: Who, label: string, later: (f: () => Promise<unknown>) => void) {
   const r = await admin.api.post("/api/projects", { name: zz(label), leaderId: admin.user.id });

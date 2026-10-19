@@ -3,13 +3,12 @@
 // contacts/[id], projects/[id]/sections/[sectionId], projects/[id]/members/[userId].
 //
 // Accounts are nakul17+zz-*@gmail.com aliases created for this run. Every record uses the ZZ-TEST prefix
-// and is archived afterwards. Password comes from SHO_QA_PASS and is never written here.
+// and is archived afterwards. Password comes from SHO_QA_PASS and is never written here. The file skips when it is unset.
 // Point BASE_URL at the app under test. Production hosts are refused by tests/e2e/base-url.ts.
 import { writeFileSync } from "node:fs";
 import { test, expect, type APIRequestContext, type Browser, type BrowserContext } from "@playwright/test";
 import { BASE_URL, zz } from "../support";
-
-const PASS = process.env.SHO_QA_PASS;
+import { PASS, passwordOk } from "./qa";
 
 const EMAIL = {
   sa: "nakul17+zz-sa-2651@gmail.com",
@@ -107,9 +106,14 @@ let contactId: string;
 let orgId: string;
 const shapes: Record<string, unknown> = {};
 
+// No fixtures here, so an unset SHO_QA_PASS skips before a browser or request context is opened.
+test.beforeAll(() => {
+  test.skip(!PASS, "Set SHO_QA_PASS (the password for nakul17+ aliases).");
+  if (!passwordOk(PASS)) throw new Error("SHO_QA_PASS must be at least 8 characters with a letter and a number.");
+});
+
 test.beforeAll(async ({ browser, playwright }) => {
   test.setTimeout(180_000);
-  if (!PASS) throw new Error("Set SHO_QA_PASS (the shared password for the nakul17+zz accounts).");
   anon = await playwright.request.newContext({ baseURL: BASE_URL });
   const page = await browser.newPage();
   const health = await page.goto("/api/health");
@@ -159,7 +163,7 @@ test.beforeAll(async ({ browser, playwright }) => {
 });
 
 test.afterAll(async () => {
-  // beforeAll throws before an account is signed in, and sign-in can stop before every account exists.
+  // beforeAll skips or throws before an account is signed in, and sign-in can stop before every account exists.
   // Reading .request or .ctx on that account throws TypeError and hides the real failure.
   // AC3 is the last test, so the hook error is reported on it.
   if (projectId && sa?.request) await send(sa.request, "POST", `/api/projects/${projectId}/archive`).catch(() => undefined);
