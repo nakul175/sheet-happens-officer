@@ -1,7 +1,10 @@
 // SHO-US-22.10 Installable web app (APL-2558). Epic SHO-E22.
 // Pam left no qa:TC id. Each title says qa:TC missing. The annotation is qa:TC with description missing. An AC number is not a TC id.
 // Runs against staging. Creates no data. AC2 uses Chrome's installability report. AC3 checks the tags and manifest Safari reads for Add to Home Screen.
-import { devices } from "@playwright/test";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { chromium, devices } from "@playwright/test";
 import { test, expect, BASE_URL } from "../support";
 import { storyGate } from "../helpers/qa-alias";
 import { linkHrefs, metaContent } from "../helpers/locate";
@@ -47,30 +50,39 @@ test("AC1: the pages link the manifest and an apple-touch icon of 180 x 180 px q
 });
 
 // qa:TC missing
-test("AC2: Chrome on Android offers install qa:TC missing", async ({ browser }) => {
-  const ctx = await browser.newContext({
-    ...devices["Pixel 5"],
+test("AC2: Chrome on Android offers install qa:TC missing", async () => {
+  // browser.newContext() is always off the record, and Chrome never offers install there ("in-incognito").
+  // A persistent profile is a normal window, so the report is about the app.
+  const { defaultBrowserType: _type, ...pixel } = devices["Pixel 5"];
+  const profile = mkdtempSync(path.join(tmpdir(), "apl-2558-"));
+  const ctx = await chromium.launchPersistentContext(profile, {
+    ...pixel,
+    executablePath: process.env.PW_CHROMIUM || undefined,
     baseURL: BASE_URL,
     httpCredentials: process.env.STAGING_USER ? { username: process.env.STAGING_USER, password: process.env.STAGING_PASS ?? "" } : undefined,
   });
-  const page = await ctx.newPage();
-  await page.goto("/signin", { waitUntil: "load" });
-  const manifest = await (await page.request.get("/manifest.webmanifest")).json();
-  expect(manifest.display).toBe("standalone");
-  expect(manifest.name).toBeTruthy();
-  expect(manifest.short_name).toBeTruthy();
-  expect(manifest.start_url).toBe("/");
-  expect((manifest.icons as { sizes: string }[]).some((i) => i.sizes === "192x192")).toBe(true);
-  expect((manifest.icons as { sizes: string }[]).some((i) => i.sizes === "512x512")).toBe(true);
-  const session = await ctx.newCDPSession(page);
-  const found = await session.send("Page.getInstallabilityErrors");
-  const errors = (found as { installabilityErrors?: { errorId: string }[] }).installabilityErrors ?? [];
-  const blocking = errors.filter((e) => e.errorId !== "warn-not-offline-capable");
-  if (blocking.length) {
-    test.skip(true, `APL-2709 APL-2558: Chrome on Android does not offer install: ${errors.map((e) => e.errorId).join(", ") || "unknown"}.`);
+  try {
+    const page = ctx.pages()[0] ?? await ctx.newPage();
+    await page.goto("/signin", { waitUntil: "load" });
+    const manifest = await (await page.request.get("/manifest.webmanifest")).json();
+    expect(manifest.display).toBe("standalone");
+    expect(manifest.name).toBeTruthy();
+    expect(manifest.short_name).toBeTruthy();
+    expect(manifest.start_url).toBe("/");
+    expect((manifest.icons as { sizes: string }[]).some((i) => i.sizes === "192x192")).toBe(true);
+    expect((manifest.icons as { sizes: string }[]).some((i) => i.sizes === "512x512")).toBe(true);
+    const session = await ctx.newCDPSession(page);
+    const found = await session.send("Page.getInstallabilityErrors");
+    const errors = (found as { installabilityErrors?: { errorId: string }[] }).installabilityErrors ?? [];
+    const blocking = errors.filter((e) => e.errorId !== "warn-not-offline-capable");
+    if (blocking.length) {
+      test.skip(true, `APL-2709 APL-2558: Chrome on Android does not offer install: ${errors.map((e) => e.errorId).join(", ") || "unknown"}.`);
+    }
+    expect(blocking, JSON.stringify(errors)).toEqual([]);
+  } finally {
+    await ctx.close();
+    rmSync(profile, { recursive: true, force: true });
   }
-  expect(blocking, JSON.stringify(errors)).toEqual([]);
-  await ctx.close();
 });
 
 // qa:TC missing
