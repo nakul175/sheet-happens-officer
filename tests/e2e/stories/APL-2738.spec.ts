@@ -4,12 +4,12 @@
 // iOS Safari's: the layout viewport keeps its height and only visualViewport shrinks (and may move down).
 // workers=1: the cases in this file run one after another, and the suite runs one file at a time.
 // Local server with a test database only (TASKBOARD_URL on localhost); any other host is refused, production included.
-// It signs in as the local test Super Admin, makes a ZZ-TEST project and task, and afterAll archives the project.
+// It signs in as the local test Super Admin, makes a ZZ-TEST project, task and subtasks, and afterAll archives the project.
 // Browser: PW_CHROMIUM if set, else Playwright's own Chromium if installed, else the system Chrome.
 import { existsSync } from "node:fs";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { chromium, type Browser, type Page } from "playwright-core";
-import { BASE, PW, project, superAdmin, task, type Account } from "../../helpers";
+import { BASE, PW, superAdmin, task, type Account } from "../../helpers";
 
 if (!/^(localhost|127\.0\.0\.1)$/.test(new URL(BASE).hostname)) throw new Error(`Refusing to run against ${BASE}: use a local server with a test database.`);
 
@@ -30,11 +30,12 @@ function launch() {
 beforeAll(async () => {
   browser = await launch();
   root = await superAdmin();
-  const p = await project(root, root);
-  projectId = p.id;
-  taskId = await task(root, p.id, { title: "ZZ-TEST APL-2738 keyboard sheet", description: "Line of description.\n".repeat(60) });
+  const made = await root.c.post("/api/projects", { name: `ZZ-TEST APL-2738 keyboard sheet ${Date.now()}`, leaderId: root.id });
+  expect(made.status, JSON.stringify(made.json)).toBe(201);
+  projectId = made.json.project.id as string;
+  taskId = await task(root, projectId, { title: "ZZ-TEST APL-2738 keyboard sheet", description: "Line of description.\n".repeat(60) });
   for (const t of ["one", "two", "three", "four", "five"]) {
-    expect((await root.c.post(`/api/projects/${p.id}/tasks`, { title: `ZZ-TEST APL-2738 subtask ${t}`, parentId: taskId })).status).toBe(201);
+    expect((await root.c.post(`/api/projects/${projectId}/tasks`, { title: `ZZ-TEST APL-2738 subtask ${t}`, parentId: taskId })).status).toBe(201);
   }
 }, 60000);
 
