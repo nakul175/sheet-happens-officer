@@ -9,6 +9,7 @@ import { deleteTask, restoreTask } from "@/lib/tasks";
 import { UNDO_LABELS, isTooOldToUndo, isUndoable } from "@/lib/undoable";
 import { undoRecord } from "@/lib/records";
 import { commentsEnabled, isCommentAction } from "@/lib/flags";
+import { assertCommentRoom } from "@/lib/comments";
 
 type Conflict = { field: string; before: unknown; after: unknown; now: unknown };
 type Plan = { conflicts: Conflict[]; apply: (tx: Tx) => Promise<void>; subject?: string; fields?: string };
@@ -172,7 +173,14 @@ async function plan(row: any, user: Actor, projectId: string): Promise<Plan> {
       if (!c) throw bad("This comment no longer exists.");
       if (!c.removedAt) throw bad("This comment is already back.");
       const task = await liveTask(id, projectId);
-      return { conflicts: [], subject: task.title, apply: async (tx) => { await tx.comment.update({ where: { id: commentId }, data: { removedAt: null } }); } };
+      await assertCommentRoom(db, c.taskId); // APL-2840: at 200 live comments the restore is refused with the cap message
+      return {
+        conflicts: [], subject: task.title,
+        apply: async (tx) => {
+          await assertCommentRoom(tx, c.taskId, true);
+          await tx.comment.update({ where: { id: commentId }, data: { removedAt: null } });
+        },
+      };
     }
     case "task.deleted": {
       const t = await taskOf(id, projectId);

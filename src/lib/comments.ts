@@ -14,6 +14,17 @@ export const MENTIONS_PER_COMMENT = 20;
 const EXCERPT = 300;
 
 const fail = (code: string, message: string) => new ApiError(400, message, { code });
+const CAP_MESSAGE = "A task can have at most 200 comments.";
+
+/**
+ * Refuses when the task already has 200 live comments. Inside a transaction it first locks the task row,
+ * so concurrent adds and Undo restores count one at a time (APL-2590 D3, APL-2840).
+ */
+export async function assertCommentRoom(client: Tx | typeof db, taskId: string, lock = false) {
+  if (lock) await client.$queryRaw`SELECT 1 FROM "Task" WHERE "id" = ${taskId} FOR UPDATE`;
+  const live = await client.comment.count({ where: { taskId, removedAt: null } });
+  if (live >= COMMENTS_PER_TASK) throw fail("too_many_comments", CAP_MESSAGE);
+}
 
 type Member = { id: string; name: string; role: string };
 
@@ -148,13 +159,9 @@ export async function addComment(user: Actor, taskId: string, input: { text?: st
   if (!body) throw fail("comment_required", "Write a comment.");
   const { resolved, attempted } = resolveMentions(body, members, input.mentions ?? []);
   if (attempted > MENTIONS_PER_COMMENT) throw fail("too_many_mentions", "A comment can mention at most 20 people.");
-  const live = await db.comment.count({ where: { taskId, removedAt: null } });
-  if (live >= COMMENTS_PER_TASK) throw fail("too_many_comments", "A task can have at most 200 comments.");
+  await assertCommentRoom(db, taskId);
   return db.$transaction(async (tx) => {
-    // APL-2590 D3: lock the task row so concurrent adds to one task count one at a time; the cap holds at 200.
-    await tx.$queryRaw`SELECT 1 FROM "Task" WHERE "id" = ${taskId} FOR UPDATE`;
-    const again = await tx.comment.count({ where: { taskId, removedAt: null } });
-    if (again >= COMMENTS_PER_TASK) throw fail("too_many_comments", "A task can have at most 200 comments.");
+    await assertCommentRoom(tx, taskId, true); // APL-2590 D3: the locked count is the one that holds the cap
     const c = await tx.comment.create({
       data: { taskId, authorId: user.id, text: body, mentions: resolved },
     });
