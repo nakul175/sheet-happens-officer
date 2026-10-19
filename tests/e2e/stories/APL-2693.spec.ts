@@ -1,6 +1,6 @@
 // APL-2693: Assign without a person asks to whom (parent APL-2513 AC2).
 // One test per acceptance criterion. Each turn is one short prompt to POST /api/concierge/messages.
-// The harness (support, g2, jim-concierge) is the same one the other files in this directory use.
+// The harness (support, g2, jim-http, jim-concierge, jim-gate) is the same one the other files in this directory use.
 // Moved here from #55 (APL-2693 QA D6): its imports only resolve on qa/story-e2e.
 // Only skip: a missing SHO_QA_PASS, as for every story spec in staging-e2e.yml. A missing admin or
 // Member account, or a concierge that cannot take a model question, fails with the reason instead of
