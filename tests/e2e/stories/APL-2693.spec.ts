@@ -40,7 +40,7 @@ test.describe("qa:TC missing APL-2693", { tag: "@APL-2693" }, () => {
       await needModel(admin);
       await cleanChat(admin, later);
       const project = await newProject(admin, later, { label: "apl2693-who" });
-      const title = zz("unassigned-ask");
+      const title = zz("ac1-unassigned-ask");
       await newTask(admin, project.id, { title, assigneeId: admin.user.id });
       const asked = await ask(admin, `Assign "${title}".`);
       expect(asked.status, JSON.stringify(asked.json)).toBe(200);
@@ -58,7 +58,7 @@ test.describe("qa:TC missing APL-2693", { tag: "@APL-2693" }, () => {
       await needModel(admin);
       await cleanChat(admin, later);
       const project = await newProject(admin, later, { label: "apl2693-nocard" });
-      const title = zz("unassigned-ask");
+      const title = zz("ac2-nocard-ask");
       const id = await newTask(admin, project.id, { title, assigneeId: admin.user.id });
       const asked = await ask(admin, `Assign "${title}".`);
       expect(asked.status, JSON.stringify(asked.json)).toBe(200);
@@ -75,7 +75,7 @@ test.describe("qa:TC missing APL-2693", { tag: "@APL-2693" }, () => {
       await needModel(admin);
       await cleanChat(admin, later);
       const project = await newProject(admin, later, { label: "apl2693-named", members: [{ who: member, role: "EDITOR" }] });
-      const title = zz("named-ask");
+      const title = zz("ac3-named-ask");
       const id = await newTask(admin, project.id, { title, assigneeId: admin.user.id });
       const memberName = String(member.user.name);
       const asked = await ask(admin, `Assign "${title}" to ${memberName}.`);
