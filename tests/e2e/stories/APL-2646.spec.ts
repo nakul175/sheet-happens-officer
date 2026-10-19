@@ -62,7 +62,7 @@ async function ready(admin: Who, member: Who, later: Later, opts: { admins?: boo
 test.describe("SHO-BUG-11 / APL-2646", () => {
   // qa:TC-APL2646-4346ccb6@v2 · ACa. Due this week on an archived project is the non-member refusal.
   // qa:TC-APL2646-e08272d4@v2 · ACa. The name is absent from the stored thread, which is the next model request's history.
-  test("ACa: an archived project a member belongs to is the same 404 as a project they cannot see, and the name is not stored", async ({ admin, member, later }) => {
+  test("ACa: an archived project a member belongs to is the same 404 as a project they cannot see, and the name is not stored (qa:TC-APL2646-4346ccb6@v2, qa:TC-APL2646-e08272d4@v2)", async ({ admin, member, later }) => {
     await cleanChat(member, later);
     await ready(admin, member, later);
     const vault = await newProject(admin, later, { label: "bug11 archived", members: [{ who: member, role: "EDITOR" }] });
@@ -90,7 +90,7 @@ test.describe("SHO-BUG-11 / APL-2646", () => {
 
   // qa:TC-APL2646-1311c0f3@v2 · ACb. Hidden deal and a project the caller is not in: same status, headers, and body.
   // qa:TC-APL2646-2010a576@v2 · ACb. The stored thread does not name the deal, and an Admin (who can see it) still gets the name.
-  test("ACb: a hidden deal and a project the person is not in return the same status, headers, and body", async ({ admin, member, later }) => {
+  test("ACb: a hidden deal and a project the person is not in return the same status, headers, and body (qa:TC-APL2646-1311c0f3@v2, qa:TC-APL2646-2010a576@v2)", async ({ admin, member, later }) => {
     await cleanChat(member, later);
     await cleanChat(admin, later);
     await ready(admin, member, later, { admins: true });
@@ -124,7 +124,7 @@ test.describe("SHO-BUG-11 / APL-2646", () => {
   });
 
   // qa:TC-APL2646-1e6ed728@v2 · ACc. Due this week for a deal member is the non-member refusal, with no stored "Due this week in <deal>".
-  test("ACc: a deal member's due-week is the reference refusal, and the thread has no 'Due this week in <deal>'", async ({ admin, member, later }) => {
+  test("ACc: a deal member's due-week is the reference refusal, and the thread has no 'Due this week in <deal>' (qa:TC-APL2646-1e6ed728@v2)", async ({ admin, member, later }) => {
     await cleanChat(member, later);
     await ready(admin, member, later, { admins: true });
     const deal = await newDeal(admin, later, "bug11 due", [member]);
@@ -147,7 +147,7 @@ test.describe("SHO-BUG-11 / APL-2646", () => {
   });
 
   // qa:TC-APL2646-df616fe9@v2 · ACc. UI: Due this week no longer shows a hidden deal's name, at 1280 and at 390.
-  test("ACc UI: Due this week hides a hidden deal's name at 1280 and at 390", async ({ admin, member, later }) => {
+  test("ACc UI: Due this week hides a hidden deal's name at 1280 and at 390 (qa:TC-APL2646-df616fe9@v2)", async ({ admin, member, later }) => {
     test.setTimeout(120_000);
     await cleanChat(member, later);
     await ready(admin, member, later, { admins: true });
