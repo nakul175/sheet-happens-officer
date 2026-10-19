@@ -837,6 +837,36 @@ describe("clarifying questions (8.4)", () => {
       expect(card?.card!.changes[0].after).toBe(`Assigned to ${lead.name}`);
       expect((await db.task.findUniqueOrThrow({ where: { id } })).assigneeId).toBe(before);
     });
+
+    // QA on f30f72f (D5): "assign" later in the message with a card that assigns someone still needs a named person.
+    it("qa:TC missing APL-2693 D5: a non-leading assign with nobody named gives no card and asks whom", async () => {
+      const lead = await account("lead");
+      const p = await project(lead, lead);
+      const id = await task(lead, p.id, { title: "Budget" });
+      const before = (await db.task.findUniqueOrThrow({ where: { id } })).assigneeId;
+      for (const text of [`Now assign "Budget".`, `Hi, assign "Budget".`, `I need you to assign "Budget".`, `Set "Budget" to high priority and assign it.`]) {
+        proposeMe();
+        const asked = await ask(lead, text);
+        const reply = [...asked.messages].reverse().find((m) => m.role === "ASSISTANT");
+        expect(asked.messages.some((m) => m.card), text).toBe(false);
+        expect(asksToWhom(reply!.text), text).toBe(true);
+        await expectNoProposal(lead.id);
+      }
+      expect((await db.task.findUniqueOrThrow({ where: { id } })).assigneeId).toBe(before);
+    });
+
+    it("qa:TC missing APL-2693 D5: a non-leading assign that names the person still returns the confirm card", async () => {
+      const lead = await account("lead");
+      const p = await project(lead, lead);
+      await task(lead, p.id, { title: "Budget" });
+      for (const text of [`I need you to assign "Budget" to me.`, `Hi, assign "Budget" to myself please`]) {
+        proposeMe();
+        const named = await ask(lead, text);
+        const card = named.messages.find((m) => m.kind === "card");
+        expect(card?.card, text).toMatchObject({ status: "PENDING", canConfirm: true });
+        expect(card?.card!.changes[0].after).toBe(`Assigned to ${lead.name}`);
+      }
+    });
   });
 
   it("an id the model never fetched is refused", async () => {

@@ -145,12 +145,13 @@ function peopleNamed(turn: Turn, name: string): Set<string> {
 
 /**
  * An assign request with nobody named, or a person this turn did not find, or a card that assigns someone other than
- * the person named. A guessed assignee must not become a card.
+ * the person named. A guessed assignee must not become a card. "Assign" later in the message ("Now assign …", "Set it to
+ * high priority and assign it") counts too when the card assigns someone; with no such card the model's reply stands.
  */
 function needsWhom(turn: Turn, request: string): boolean {
   const text = outsideQuotes(request);
-  if (!ASSIGN_REQUEST.test(text)) return false;
   const assigns = turn.card?.ops.filter((o) => o.k === "task.assign") ?? [];
+  if (!ASSIGN_REQUEST.test(text) && !(assigns.length && /\b(?:re)?assign\b/i.test(text))) return false;
   const name = namedAssignee(text);
   if (!name) return true;
   const named = peopleNamed(turn, name);
