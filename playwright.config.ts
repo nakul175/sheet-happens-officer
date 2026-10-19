@@ -25,6 +25,15 @@ if (PRODUCTION.has(host)) throw new Error(`Refusing to run story tests against p
 
 export default defineConfig({
   testDir: "./tests/e2e/stories",
+  // Vitest suites still in tests/e2e/stories, until APL-2883 moves them to tests/e2e/local. Without these entries Playwright
+  // fails to load them and collects 0 tests. scripts/ci/story-specs-no-vitest.test.mjs reads this list: add none.
+  testIgnore: [
+    "**/APL-2624.spec.ts",
+    "**/APL-2694.spec.ts",
+    "**/APL-2721.spec.ts",
+    "**/APL-2737.spec.ts",
+    "**/APL-2742.spec.ts",
+  ],
   timeout: 60_000,
   expect: { timeout: 15_000 },
   workers: 1,

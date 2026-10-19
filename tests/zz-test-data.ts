@@ -1,6 +1,6 @@
 // ZZ-TEST people and projects for one test file, and their cleanup through the API (APL-2721).
 // Names start with ZZ-TEST and addresses are nakul17+ aliases. cleanUp() is the same sequence as
-// tests/e2e/stories/APL-2522.spec.ts: the Super Admin joins each project, takes the Leader role,
+// tests/e2e/local/APL-2522.test.ts: the Super Admin joins each project, takes the Leader role,
 // archives it, then deactivates each person. Archived projects still count as leaderships, so the
 // handover has to come first.
 import { expect } from "vitest";

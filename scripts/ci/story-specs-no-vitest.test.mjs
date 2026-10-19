@@ -55,8 +55,21 @@ test("specifiers finds static, dynamic, side-effect and require imports qa:TC mi
   assert.deepEqual(specifiers(src), ["vitest", "../../helpers", "./side", "./lazy", "vitest/config"]);
 });
 
-test("no story spec under tests/e2e/stories reaches vitest qa:TC missing", () => {
-  const files = readdirSync(STORIES).filter((f) => /\.(spec|test)\.[cm]?[jt]sx?$/.test(f));
+/** File names playwright.config.ts lists in testIgnore as "**\/<name>": Playwright never loads them (APL-2883 tracks them). */
+export function ignoredByPlaywright(configSource) {
+  const list = /testIgnore:\s*\[([^\]]*)\]/.exec(configSource)?.[1] ?? "";
+  return new Set([...list.matchAll(/["']\*\*\/([^"'/*]+)["']/g)].map((m) => m[1]));
+}
+
+test("ignoredByPlaywright reads the **/<file> entries of testIgnore qa:TC missing", () => {
+  const src = 'export default defineConfig({\n  testIgnore: [\n    "**/APL-1.spec.ts",\n    \'**/APL-2.spec.ts\',\n  ],\n  timeout: 1,\n});';
+  assert.deepEqual([...ignoredByPlaywright(src)], ["APL-1.spec.ts", "APL-2.spec.ts"]);
+  assert.deepEqual([...ignoredByPlaywright("export default defineConfig({ timeout: 1 });")], []);
+});
+
+test("no story spec Playwright loads from tests/e2e/stories reaches vitest qa:TC missing", () => {
+  const ignored = ignoredByPlaywright(readFileSync(join(ROOT, "playwright.config.ts"), "utf8"));
+  const files = readdirSync(STORIES).filter((f) => /\.(spec|test)\.[cm]?[jt]sx?$/.test(f) && !ignored.has(f));
   assert.ok(files.length > 0, "tests/e2e/stories has no spec files");
   const bad = [];
   for (const f of files) {
