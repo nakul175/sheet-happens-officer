@@ -40,6 +40,8 @@ async function own(user: Actor, id: string) {
   return v;
 }
 
+export const assertOwnView = (user: Actor, id: string) => own(user, id);
+
 export async function renameView(user: Actor, id: string, name: string) {
   const v = await own(user, id);
   const clash = await db.savedView.findFirst({ where: { userId: user.id, projectId: v.projectId, name: { equals: name, mode: "insensitive" }, id: { not: id } } });
