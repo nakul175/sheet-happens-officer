@@ -6,7 +6,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { account, admin, istDate, superAdmin, task, type Account } from "./helpers";
-import { db } from "./concierge-helpers";
+import { db, trackModelUsage } from "./concierge-helpers";
 import { QUICK_ACTIONS } from "../src/lib/concierge/reads";
 
 const built = existsSync(".next/BUILD_ID");
@@ -38,6 +38,7 @@ async function quick(mode: Mode, who: Account, id: string, projectId: string) {
 const storedSince = async (userId: string, since: Date) => JSON.stringify(await db.chatMessage.findMany({ where: { userId, createdAt: { gte: since } } }));
 
 describe.skipIf(!built)("POST /api/concierge/quick/:id with a hidden deal, over HTTP (SHO-BUG-11)", () => {
+  trackModelUsage();
   beforeAll(async () => { await Promise.all([startServer("admins"), startServer("off")]); }, 60_000);
   // npx runs next as its own child: stop the whole process group, or the port stays taken.
   afterAll(() => { for (const s of servers) try { process.kill(-s.pid!); } catch { /* already gone */ } });
