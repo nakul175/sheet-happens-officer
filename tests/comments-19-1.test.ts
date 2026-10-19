@@ -164,22 +164,26 @@ describe("flag off, QA #128 (D1, D2)", () => {
     // Pam #128 @8da5384 D4: an Admin is covered too (ZZ-TEST name, nakul17+ alias; deactivated through the API below).
     const sa = await superAdmin();
     const adm = await account("admin", `nakul17+zztest-apl2590-d1-admin-${Date.now().toString(36)}@aplyd.com`, "ZZ-TEST admin");
-    expect((await sa.c.patch(`/api/team/${adm.id}`, { orgRole: "ADMIN" })).status).toBe(200);
-    // Pam's steps, over HTTP against the flag-off server, as the writer's Leader, the writer and an Admin.
-    for (const who of [lead, worker, adm]) {
-      const activity = await who.c.get(`/api/projects/${p.id}/activity`);
-      expect(activity.status).toBe(200);
-      const shown = (activity.json.items as { id: string }[]).map((i) => i.id);
-      for (const u of undos) expect(shown).not.toContain(u.id);
-      expect(JSON.stringify(activity.json)).not.toMatch(/comment/i);
-      expect(shown.length, "rows that are not about comments still show").toBeGreaterThan(0);
-    }
-    on();
+    // Pam #128 @49dca62 D1: everything after the promotion runs in try, so the finally always deactivates the test Admin.
     try {
+      expect((await sa.c.patch(`/api/team/${adm.id}`, { orgRole: "ADMIN" })).status).toBe(200);
+      // Pam's steps, over HTTP against the flag-off server, as the writer's Leader, the writer and an Admin.
+      for (const who of [lead, worker, adm]) {
+        const activity = await who.c.get(`/api/projects/${p.id}/activity`);
+        expect(activity.status).toBe(200);
+        const shown = (activity.json.items as { id: string }[]).map((i) => i.id);
+        for (const u of undos) expect(shown).not.toContain(u.id);
+        expect(JSON.stringify(activity.json)).not.toMatch(/comment/i);
+        expect(shown.length, "rows that are not about comments still show").toBeGreaterThan(0);
+      }
+      on();
       const back = await projectActivity(actor(lead), p.id);
       for (const u of undos) expect(back.items.some((i) => i.id === u.id)).toBe(true);
-    } finally { off(); }
-    expect((await sa.c.post(`/api/team/${adm.id}/deactivate`, { reassign: "leaders" })).status).toBe(200);
+    } finally {
+      off();
+      const deactivated = (await sa.c.post(`/api/team/${adm.id}/deactivate`, { reassign: "leaders" })).status;
+      expect(deactivated, "deactivate the test Admin").toBe(200);
+    }
   });
 
   // Pam #128 @8da5384 D3: the flag-off filter also hid Undo rows with no before.action (rows logged before it was recorded).

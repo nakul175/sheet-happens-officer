@@ -439,19 +439,21 @@ test.describe("APL-2590 comments with @mentions", () => {
 
   test("qa:TC-APL2590-66f316fe@v2 AC13 Comment text never leaves the project", async () => {
     const taskId = await taskFor("writer", projectId(), `ZZ-TEST secret ${RUN}`);
-    const posted = await postComment("writer", taskId, { text: "Client name: Acme" });
+    // Pam #128 @49dca62 D2: a client name unique to this run. A bare "Acme" also matched main's seeded "ZZ-TEST Acme renewal" orgs.
+    const client = `ZZ-TEST Acme-${Date.now()}`;
+    const posted = await postComment("writer", taskId, { text: `Client name: ${client}` });
     const id = (posted.json as { comment: { id: string } }).comment.id;
-    const search = await read(await person("outsider").ctx.get("/api/search?q=Acme"));
+    const search = await read(await person("outsider").ctx.get(`/api/search?q=${encodeURIComponent(client)}`));
     expect(search.status).toBe(200);
-    expect(JSON.stringify(search.json)).not.toContain("Acme");
+    expect(JSON.stringify(search.json)).not.toContain(client);
     expect(JSON.stringify(search.json)).not.toContain(id);
     const bell = await read(await person("outsider").ctx.get("/api/notifications?limit=200"));
-    expect(JSON.stringify(bell.json)).not.toContain("Acme");
+    expect(JSON.stringify(bell.json)).not.toContain(client);
     expect(JSON.stringify(bell.json)).not.toContain(id);
     const activity = await person("outsider").ctx.get(`/api/projects/${projectId()}/activity`);
     expect(activity.status()).toBe(404);
     const asked = await read(await person("outsider").ctx.post("/api/concierge/messages", { data: { text: "summarise the comments on the secret task" } }));
-    expect(JSON.stringify(asked.json)).not.toContain("Acme");
+    expect(JSON.stringify(asked.json)).not.toContain(client);
     expect(JSON.stringify(asked.json)).not.toContain(id);
   });
 
