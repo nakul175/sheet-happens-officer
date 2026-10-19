@@ -524,10 +524,10 @@ export async function listTrash(user: Actor, projectId: string) {
   }));
 }
 
-/** Scheduled job: removes tasks that have been in Trash for 30 days. Nothing is removed earlier. */
+/** Scheduled job: removes tasks that have been in Trash for more than 30 days. A task at exactly 30 days stays, as Undo still works then (APL-2711 AC v1.1). */
 export async function purgeTrash(now = new Date()) {
   const cutoff = new Date(now.getTime() - 30 * 86400_000);
-  const r = await db.task.deleteMany({ where: { deletedAt: { lte: cutoff } } });
+  const r = await db.task.deleteMany({ where: { deletedAt: { lt: cutoff } } });
   if (r.count) await db.auditLog.create({ data: { event: "TASK_PURGED", channel: "SCREEN", data: { count: r.count } } });
   return r.count;
 }

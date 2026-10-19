@@ -89,10 +89,11 @@ describe("qa:TC missing APL-2719 delete, Undo and purge share one timestamp", ()
     expect(log.createdAt.getTime()).toBeLessThanOrEqual(Date.now() + 1000);
   });
 
-  it("qa:TC missing AC2: at 30d - 1 ms and 30d + 1..4 ms the task is never purged while Undo is still offered", async () => {
-    // 30d + 1..4 ms is the window this bug left open: the log row landed 3-4 ms after deletedAt.
-    // Exactly 30d is APL-2711's boundary (PR #66) and is not asserted here.
-    const ages = [WINDOW - 1, WINDOW + 1, WINDOW + 2, WINDOW + 3, WINDOW + 4];
+  it("qa:TC missing AC2: on day 29, day 30 (exactly 30x24h) and day 31, and 1-4 ms either side of 30 days, the task is never purged while Undo is still offered", async () => {
+    // 30d + 1..4 ms is the window the late log row left open. Exactly 30x24h keeps Undo and is not purged
+    // (APL-2711 AC v1.1: Undo at 30 days or less, purge only when older than 30 days).
+    const DAY = 86_400_000;
+    const ages = [29 * DAY, WINDOW - 1, WINDOW, WINDOW + 1, WINDOW + 2, WINDOW + 3, WINDOW + 4, 31 * DAY];
     const rows = [];
     for (const age of ages) rows.push({ age, ...(await deletedAged(age)) });
 

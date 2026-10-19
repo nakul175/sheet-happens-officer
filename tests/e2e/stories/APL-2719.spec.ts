@@ -138,4 +138,36 @@ describe("qa:TC missing APL-2719 Undo and purge share one timestamp", () => {
     expect(undo.status).toBeGreaterThanOrEqual(400);
     expect(undo.json.error).toBe("Too old to undo");
   }, 120000);
+
+  // Exactly 30x24h needs a frozen clock, so tests/apl-2719.test.ts covers day 30; this spec covers days 29 and 31.
+  it("qa:TC missing AC2: on day 29 Undo is offered on Activity and the task shows 1 day left in Trash", async () => {
+    const t = await deletedTask();
+    await age(t, 29 * 86_400_000);
+    const { ctx, page } = await leadPage();
+    try {
+      await page.goto(`/projects/${projectId}/activity`);
+      await activityRow(page, t.title).getByRole("button", { name: "Undo" }).waitFor();
+      expect(await trashDays(page, t.title)).toBe("1 day");
+    } finally {
+      await ctx.close();
+    }
+  }, 120000);
+
+  it("qa:TC missing AC2: on day 31 Activity shows Too old to undo, the API refuses it, and Trash shows 0 days", async () => {
+    const t = await deletedTask();
+    await age(t, 31 * 86_400_000);
+    const { ctx, page } = await leadPage();
+    try {
+      await page.goto(`/projects/${projectId}/activity`);
+      const r = activityRow(page, t.title);
+      await r.getByText("Too old to undo").waitFor();
+      expect(await r.getByRole("button", { name: "Undo" }).count()).toBe(0);
+      expect(await trashDays(page, t.title)).toBe("0 days");
+    } finally {
+      await ctx.close();
+    }
+    const undo = await lead.c.post(`/api/actions/${t.logId}/undo`);
+    expect(undo.status).toBeGreaterThanOrEqual(400);
+    expect(undo.json.error).toBe("Too old to undo");
+  }, 120000);
 });
