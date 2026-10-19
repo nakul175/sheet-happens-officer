@@ -7,7 +7,7 @@ import { currentSessionId, deviceLabel, hashPassword, verifyPassword } from "@/l
 import { WORKSTREAM_DEAL, crmMode, crmVisible, projectAccess, type Actor } from "@/lib/access";
 import { idsIn, sentence, whenText } from "@/lib/activity-text";
 import { purgeExpiredComments } from "@/lib/comments";
-import { COMMENT_ACTION_PREFIX, commentsEnabled } from "@/lib/flags";
+import { COMMENT_ACTION_PREFIX, COMMENT_NOTICE_TYPES, commentsEnabled } from "@/lib/flags";
 import { isTooOldToUndo, isUndoable } from "@/lib/undoable";
 import { passwordField } from "@/lib/schemas";
 
@@ -147,9 +147,11 @@ export async function listNotifications(user: Actor, o: { filter?: string; befor
   const limit = Math.min(Math.max(o.limit ?? 50, 1), 200);
   const [at, cursorId] = (o.before ?? "").split("|");
   const when = at && !Number.isNaN(Date.parse(at)) ? new Date(at) : null;
+  const hideComments = commentsEnabled() ? {} : { type: { notIn: COMMENT_NOTICE_TYPES } }; // APL-2590 D1b
   const rows = await db.notification.findMany({
     where: {
       recipientId: user.id,
+      ...hideComments,
       ...(o.filter === "unread" ? { readAt: null } : {}),
       ...(when ? { OR: [{ createdAt: { lt: when } }, { createdAt: when, id: { lt: cursorId ?? "" } }] } : {}),
     },
@@ -157,7 +159,7 @@ export async function listNotifications(user: Actor, o: { filter?: string; befor
     take: limit + 1,
     include: { actor: { select: { name: true } } },
   });
-  const unread = await db.notification.count({ where: { recipientId: user.id, readAt: null } });
+  const unread = await db.notification.count({ where: { recipientId: user.id, readAt: null, ...hideComments } });
   const page = rows.slice(0, limit);
   const hiddenDeals = await hiddenDealIds(user, page.map((n) => n.projectId));
   const last = page.at(-1);
