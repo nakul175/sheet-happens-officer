@@ -7,18 +7,16 @@ import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, w
 import { tmpdir } from "node:os";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-// The same list playwright.config.ts passes as testIgnore (APL-2879).
-import { VITEST_SPECS, vitestSpecFiles } from "../../tests/e2e/vitest-specs.cjs";
+// The same list playwright.config.ts passes as testIgnore (APL-2879), and the same comment- and string-aware reader (APL-2892).
+import { VITEST_SPECS, codeAndStrings, moduleSpecifiers, vitestSpecFiles } from "../../tests/e2e/vitest-specs.cjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const STORIES = join(ROOT, "tests/e2e/stories");
 const EXTS = ["", ".ts", ".tsx", ".mts", ".js", ".mjs", "/index.ts"];
 
-const SPECIFIERS = /(?:\bfrom\s*|\bimport\s*\(\s*|\bimport\s+|\brequire\s*\(\s*)["']([^"']+)["']/g;
-
 /** Every module specifier in a file, type-only imports included (they are erased, but they never need vitest either). */
 export function specifiers(source) {
-  return [...source.matchAll(SPECIFIERS)].map((m) => m[1]);
+  return moduleSpecifiers(source);
 }
 
 function resolveLocal(from, spec) {
@@ -140,9 +138,11 @@ const CONFIG = join(ROOT, "playwright.config.ts");
 
 /** APL-2892 D2: playwright.config.ts imports VITEST_SPECS from tests/e2e/vitest-specs.cjs and passes it to testIgnore. */
 export function assertConfigAppliesVitestSpecs(file = CONFIG) {
-  const src = readFileSync(file, "utf8");
-  const imported = /\bimport\s*\{[^}]*\bVITEST_SPECS\b[^}]*\}\s*from\s*["'][^"']*\/vitest-specs(?:\.cjs)?["']/.test(src);
-  const applied = /\btestIgnore\s*:\s*(?:\[[^\]]*\.\.\.\s*)?VITEST_SPECS\b/.test(src);
+  const { code, strings } = codeAndStrings(readFileSync(file, "utf8"));
+  const imported = [...code.matchAll(/\bimport\s*\{[^}]*\bVITEST_SPECS\b[^}]*\}\s*from\s*"#(\d+)"/g)].some((m) =>
+    /\/vitest-specs(?:\.cjs)?$/.test(strings[Number(m[1])]),
+  );
+  const applied = /\btestIgnore\s*:\s*(?:\[[^\]]*\.\.\.\s*)?VITEST_SPECS\b/.test(code);
   assert.ok(
     imported && applied,
     `${relative(ROOT, file)} must import VITEST_SPECS from tests/e2e/vitest-specs.cjs and pass it to testIgnore, ` +
