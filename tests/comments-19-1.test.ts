@@ -16,7 +16,7 @@ import { sendMessage } from "../src/lib/concierge/engine";
 import { listNotifications, projectActivity, purgeOld } from "../src/lib/feed";
 import { search } from "../src/lib/search";
 import { listTasks, purgeTrash } from "../src/lib/tasks";
-import { undoAction } from "../src/lib/undo";
+import { checkUndo, undoAction } from "../src/lib/undo";
 import { isTooOldToUndo } from "../src/lib/undoable";
 
 const DAY = 86400_000;
@@ -138,6 +138,41 @@ describe("flag off (AC9)", () => {
     try {
       const back = await projectActivity(actor(lead), p.id);
       for (const log of logs) expect(back.items.find((i) => i.id === log.id)?.undo).toBe("available");
+    } finally { off(); }
+  });
+});
+
+describe("flag off notices (D1b)", () => {
+  beforeEach(off);
+  afterEach(off);
+
+  // APL-2590 QA D1b (Toby, #128): with the flag off, the bell still listed COMMENT_ADDED and COMMENT_MENTION notices and counted them as unread.
+  it("qa:TC missing D1b: flag off, the bell lists no comment notices and its unread count leaves them out", async () => {
+    const { lead, worker, t1 } = await cast();
+    on();
+    await addComment(actor(worker), t1, { text: "@lead ZZ-TEST bell" });
+    await addComment(actor(lead), t1, { text: "@worker ZZ-TEST bell back" });
+    off();
+    const commentTypes = ["COMMENT_ADDED", "COMMENT_MENTION"];
+    for (const who of [lead, worker]) {
+      const stored = await db.notification.findMany({ where: { recipientId: who.id, taskId: t1, type: { in: commentTypes } } });
+      expect(stored.length).toBeGreaterThan(0);
+      const otherUnread = await db.notification.count({ where: { recipientId: who.id, readAt: null, type: { notIn: commentTypes } } });
+      // Toby's steps, over HTTP against the server, which runs with the flag off.
+      for (const path of ["/api/notifications", "/api/notifications?filter=unread"]) {
+        const bell = await who.c.get(path);
+        expect(bell.status).toBe(200);
+        const ids = (bell.json.items as { id: string }[]).map((i) => i.id);
+        for (const n of stored) expect(ids).not.toContain(n.id);
+        expect(JSON.stringify(bell.json.items)).not.toMatch(/commented on|mentioned you on/);
+        expect(bell.json.unread).toBe(otherUnread);
+      }
+    }
+    on();
+    try {
+      const back = await listNotifications(actor(lead), {});
+      expect(back.items.some((i) => i.text.includes("mentioned you on"))).toBe(true);
+      expect(back.unread).toBeGreaterThan(await db.notification.count({ where: { recipientId: lead.id, readAt: null, type: { notIn: commentTypes } } }));
     } finally { off(); }
   });
 });
@@ -625,15 +660,37 @@ describe("flag on (AC1–AC8)", () => {
   it("qa:TC missing D3: concurrent adds never take a task past 200 comments", async () => {
     const { worker, p } = await cast();
     const near = await task(worker, p.id, { title: "ZZ-TEST 190 race" });
-    await db.comment.createMany({ data: Array.from({ length: 190 }, (_, i) => ({ taskId: near, authorId: worker.id, text: `ZZ-TEST ${i}` })) });
+    for (let i = 0; i < 190; i++) await addComment(actor(worker), near, { text: `ZZ-TEST ${i}` });
     const results = await Promise.all(Array.from({ length: 30 }, (_, i) =>
       addComment(actor(worker), near, { text: `ZZ-TEST race ${i}` }).then(() => "ok", (e: { extra?: { code?: string } }) => e.extra?.code ?? "other"),
     ));
     expect(await db.comment.count({ where: { taskId: near, removedAt: null } })).toBe(200);
     expect(results.filter((r) => r === "ok")).toHaveLength(10);
     expect(results.filter((r) => r === "too_many_comments")).toHaveLength(20);
-    expect(await db.actionLog.count({ where: { targetId: near, action: "comment.added" } })).toBe(10);
+    expect(await db.actionLog.count({ where: { targetId: near, action: "comment.added" } })).toBe(200);
   }, 60_000);
+
+  // APL-2840 (Michael/Dwight ruling): at 200 live comments, Undo of a comment delete is refused with the cap message.
+  it("qa:TC missing APL-2840: Undo of a comment delete is refused with the cap message when the task has 200 comments", async () => {
+    const { worker, p } = await cast();
+    const t = await task(worker, p.id, { title: "ZZ-TEST cap undo" });
+    const first = await addComment(actor(worker), t, { text: "ZZ-TEST first" });
+    await removeComment(actor(worker), t, first.id);
+    const removed = await db.actionLog.findFirstOrThrow({ where: { targetId: t, action: "comment.removed" } });
+    const filler: string[] = [];
+    for (let i = 0; i < 200; i++) filler.push((await addComment(actor(worker), t, { text: `ZZ-TEST ${i}` })).id);
+    const refused = { status: 400, message: "A task can have at most 200 comments.", extra: { code: "too_many_comments" } };
+    await expect(checkUndo(actor(worker), removed.id)).rejects.toMatchObject(refused);
+    await expect(undoAction(actor(worker), removed.id)).rejects.toMatchObject(refused);
+    expect((await db.comment.findUniqueOrThrow({ where: { id: first.id } })).removedAt).not.toBeNull();
+    expect(await db.comment.count({ where: { taskId: t, removedAt: null } })).toBe(200);
+    expect((await db.actionLog.findUniqueOrThrow({ where: { id: removed.id } })).undoneAt).toBeNull();
+    // With room again (199 live), the same Undo restores the comment.
+    await removeComment(actor(worker), t, filler[0]);
+    await undoAction(actor(worker), removed.id);
+    expect((await db.comment.findUniqueOrThrow({ where: { id: first.id } })).removedAt).toBeNull();
+    expect(await db.comment.count({ where: { taskId: t, removedAt: null } })).toBe(200);
+  }, 120_000);
 
   it("qa:TC-APL2590-093cbb6e@v2: purge keeps a comment at exactly 30x24h and removes it 1ms later", async () => {
     const { worker, t1 } = await cast();

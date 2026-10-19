@@ -73,7 +73,7 @@ describe("phone comments", () => {
     const text = `ZZ-TEST phone ${Date.now().toString(36)}`;
     try {
       await page.goto(`/projects/${projectId}?task=${taskId}`, { waitUntil: "load" });
-      const box = page.locator("#new-comment");
+      const box = page.getByLabel("Add a comment");
       await box.waitFor({ state: "visible" });
       await box.click();
       await box.fill(text);
@@ -95,28 +95,30 @@ describe("phone comments", () => {
     const { ctx, page } = await phone();
     try {
       await page.goto(`/projects/${projectId}?task=${taskId}`, { waitUntil: "load" });
-      const box = page.locator("#new-comment");
+      const box = page.getByLabel("Add a comment");
       await box.waitFor({ state: "visible" });
       await box.click();
       await box.fill("@");
-      const list = page.locator("#mention-list");
+      const list = page.getByRole("listbox", { name: "Mention a project member" });
       await list.waitFor({ state: "visible" });
-      expect(await page.locator("#mention-list button").count()).toBe(0);
-      expect(await page.locator("#mention-list [role=option]").count()).toBeGreaterThan(0);
+      expect(await list.getByRole("button").count()).toBe(0);
+      expect(await list.getByRole("option").count()).toBeGreaterThan(0);
       await page.keyboard.press("ArrowDown");
       await page.keyboard.press("Enter");
       expect(await box.inputValue()).toMatch(/@/);
       await page.addScriptTag({ path: "node_modules/axe-core/axe.min.js" });
-      const nested = await page.evaluate(async () => {
+      // D7: color-contrast is on, and its violations are asserted with nested-interactive.
+      // axe takes a DOM node; the region is the one the Comments heading labels.
+      const found = await page.evaluate(async () => {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const r = await (window as any).axe.run(document.querySelector(".comments"), {
+        const r = await (window as any).axe.run(document.querySelector("[aria-labelledby=comments-heading]"), {
           runOnly: { type: "tag", values: ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "best-practice"] },
-          rules: { "color-contrast": { enabled: false } },
         });
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        return r.violations.filter((v: any) => v.id === "nested-interactive").map((v: any) => v.nodes.length);
+        const ids = (id: string) => r.violations.filter((v: any) => v.id === id).map((v: any) => v.nodes.length);
+        return { nested: ids("nested-interactive"), contrast: ids("color-contrast") };
       });
-      expect(nested).toEqual([]);
+      expect(found).toEqual({ nested: [], contrast: [] });
     } catch (e) {
       await page.screenshot({ path: `${SHOTS}/phone-mention-picker.png`, fullPage: true }).catch(() => {});
       throw e;
