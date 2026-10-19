@@ -325,9 +325,11 @@ async function plan(row: any, user: Actor, projectId: string): Promise<Plan> {
           const closed = [...(Array.isArray(f.completedTaskIds) ? f.completedTaskIds : []), ...(Array.isArray(f.completedSubtaskIds) ? f.completedSubtaskIds : [])];
           if (closed.length) await tx.task.updateMany({ where: { id: { in: closed } }, data: { completedAt: null } });
           // One stamp, so a later move still treats these subtasks as closed with the parent (APL-2721).
+          // Every task the move reopened closes again, also one moved to Trash since: the move never lists a task
+          // that was already in Trash, so these ids are only tasks it changed (APL-2755).
           const stamp = new Date();
-          if (Array.isArray(b.reopenedTaskIds) && b.reopenedTaskIds.length) await tx.task.updateMany({ where: { id: { in: b.reopenedTaskIds }, completedAt: null, deletedAt: null }, data: { completedAt: stamp } });
-          if (Array.isArray(b.reopenedSubtaskIds) && b.reopenedSubtaskIds.length) await tx.task.updateMany({ where: { id: { in: b.reopenedSubtaskIds }, completedAt: null, deletedAt: null }, data: { completedAt: stamp } });
+          if (Array.isArray(b.reopenedTaskIds) && b.reopenedTaskIds.length) await tx.task.updateMany({ where: { id: { in: b.reopenedTaskIds }, completedAt: null }, data: { completedAt: stamp } });
+          if (Array.isArray(b.reopenedSubtaskIds) && b.reopenedSubtaskIds.length) await tx.task.updateMany({ where: { id: { in: b.reopenedSubtaskIds }, completedAt: null }, data: { completedAt: stamp } });
         },
       };
     }
