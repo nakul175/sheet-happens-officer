@@ -117,7 +117,7 @@ function inside(what: string, r: R, top: number, bottom: number) {
 }
 
 describe("qa:TC missing APL-2738 task sheet with the keyboard open", () => {
-  it("qa:TC missing AC1: the focused description and the pinned footer stay inside the visible sheet when the visible area shortens", async () => {
+  it("qa:TC-APL2738-01@v1 AC1: the focused description and the pinned footer stay inside the visible sheet when the visible area shortens", async () => {
     const page = await openSheet(PHONE);
     try {
       await page.locator("#desc").focus();
@@ -140,7 +140,7 @@ describe("qa:TC missing APL-2738 task sheet with the keyboard open", () => {
     } finally { await page.context().close(); }
   });
 
-  it("qa:TC missing AC1: the sheet follows visualViewport when it moves down the page (iOS offsetTop)", async () => {
+  it("qa:TC-APL2738-02@v1 AC1: the sheet follows visualViewport when it moves down the page (iOS offsetTop)", async () => {
     const page = await openSheet(PHONE);
     try {
       await page.locator("#desc").focus();
@@ -154,7 +154,7 @@ describe("qa:TC missing APL-2738 task sheet with the keyboard open", () => {
     } finally { await page.context().close(); }
   });
 
-  it("qa:TC missing AC1: when the keyboard closes the sheet fills the screen again with the footer at the bottom", async () => {
+  it("qa:TC-APL2738-03@v1 AC1: when the keyboard closes the sheet fills the screen again with the footer at the bottom", async () => {
     const page = await openSheet(PHONE);
     try {
       await page.locator("#desc").focus();
@@ -168,7 +168,7 @@ describe("qa:TC missing APL-2738 task sheet with the keyboard open", () => {
     } finally { await page.context().close(); }
   });
 
-  it("qa:TC missing AC1: at 600 px and wider the centred dialog is unchanged and does not follow visualViewport", async () => {
+  it("qa:TC-APL2738-04@v1 AC1: at 600 px and wider the centred dialog is unchanged and does not follow visualViewport", async () => {
     const page = await openSheet(DESK);
     try {
       await keyboard(page, 420);

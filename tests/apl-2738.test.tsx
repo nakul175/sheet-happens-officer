@@ -57,11 +57,11 @@ function sheet(fitKeyboard: boolean) {
 }
 
 describe("qa:TC missing APL-2738 keyboardFrame", () => {
-  test("qa:TC missing AC1: on a phone the frame is the visible area, top and height from visualViewport", () => {
+  test("qa:TC-APL2738-02@v1 AC1: on a phone the frame is the visible area, top and height from visualViewport", () => {
     expect(keyboardFrame({ height: 420, offsetTop: 36 }, true)).toEqual({ top: "36px", bottom: "auto", height: "420px" });
   });
 
-  test("qa:TC missing AC1: at 600 px and wider, or with no visualViewport, the stylesheet stays in charge", () => {
+  test("qa:TC-APL2738-04@v1 AC1: at 600 px and wider, or with no visualViewport, the stylesheet stays in charge", () => {
     expect(keyboardFrame({ height: 420, offsetTop: 0 }, false)).toBeNull();
     expect(keyboardFrame(null, true)).toBeNull();
     expect(keyboardFrame(undefined, true)).toBeNull();
@@ -69,7 +69,7 @@ describe("qa:TC missing APL-2738 keyboardFrame", () => {
 });
 
 describe("qa:TC missing APL-2738 Modal fitKeyboard", () => {
-  test("qa:TC missing AC1: the sheet follows visualViewport when the visible area shortens", () => {
+  test("qa:TC-APL2738-02@v1 AC1: the sheet follows visualViewport when the visible area shortens", () => {
     const { scrim } = sheet(true);
     expect(scrim.style.height).toBe("800px");
     act(() => vv.shrink(450, 12));
@@ -78,7 +78,7 @@ describe("qa:TC missing APL-2738 Modal fitKeyboard", () => {
     expect(scrim.style.height).toBe("450px");
   });
 
-  test("qa:TC missing AC1: the focused description is scrolled back into the sheet on resize", () => {
+  test("qa:TC-APL2738-01@v1 AC1: the focused description is scrolled back into the sheet on resize", () => {
     const { desc } = sheet(true);
     const into = vi.fn();
     desc.scrollIntoView = into;
@@ -87,7 +87,7 @@ describe("qa:TC missing APL-2738 Modal fitKeyboard", () => {
     expect(into).toHaveBeenCalledWith({ block: "nearest" });
   });
 
-  test("qa:TC missing AC1: a visualViewport scroll moves the sheet without forcing the field into view", () => {
+  test("qa:TC-APL2738-02@v1 AC1: a visualViewport scroll moves the sheet without forcing the field into view", () => {
     const { scrim, desc } = sheet(true);
     const into = vi.fn();
     desc.scrollIntoView = into;
@@ -98,7 +98,7 @@ describe("qa:TC missing APL-2738 Modal fitKeyboard", () => {
     expect(into).not.toHaveBeenCalled();
   });
 
-  test("qa:TC missing AC1: dialogs without fitKeyboard, and wide screens, keep the stylesheet layout", () => {
+  test("qa:TC-APL2738-04@v1 AC1: dialogs without fitKeyboard, and wide screens, keep the stylesheet layout", () => {
     const plain = sheet(false);
     act(() => vv.shrink(450));
     expect(plain.scrim.style.height).toBe("");
@@ -111,7 +111,7 @@ describe("qa:TC missing APL-2738 Modal fitKeyboard", () => {
     expect(wide.scrim.style.top).toBe("");
   });
 
-  test("qa:TC missing AC1: closing the sheet clears the inline frame and stops listening", () => {
+  test("qa:TC-APL2738-03@v1 AC1: closing the sheet clears the inline frame and stops listening", () => {
     const { scrim } = sheet(true);
     act(() => vv.shrink(450));
     act(() => root!.unmount());
