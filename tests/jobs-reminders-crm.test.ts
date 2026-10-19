@@ -5,13 +5,13 @@
 // Rows are checked in the test database and on GET /api/notifications. Names are ZZ-TEST.
 // A non-local database is refused.
 //
-// qa:TC-APL2729-c2ee0001@v1 unset
-// qa:TC-APL2729-c2a11001@v1 all
-// qa:TC-APL2729-c1a1d001@v1 admins / member
-// qa:TC-APL2729-c2ad0001@v1 admins / admin
-// qa:TC-APL2729-c1ff0001@v1 off
-// qa:TC-APL2729-c30b5001@v1 non-deal ops check
-// qa:TC-APL2729-10ad0040@v1 40 concurrent reminder requests
+// qa:TC missing unset
+// qa:TC missing all
+// qa:TC missing admins / member
+// qa:TC missing admins / admin
+// qa:TC missing off
+// qa:TC missing non-deal ops check
+// qa:TC missing 40 concurrent reminder requests
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { crmMode } from "../src/lib/crm";
 import { startOfTodayIST } from "../src/lib/dates";
@@ -165,28 +165,28 @@ describe("reminder jobs apply crmProjectWhere (APL-2729)", () => {
     await db.notification.deleteMany({ where: { recipientId: { in: [member.id, dealAdmin.id] }, type: { in: [...DUE] } } });
   });
 
-  it("qa:TC missing qa:TC missing unset matches main, including the ops check", async () => {
+  it("qa:TC missing unset matches main, including the ops check", async () => {
     await runMode("unset");
     await expectDealReminder(member, memberTaskId, memberTitle);
     await expectDealReminder(dealAdmin, adminTaskId, adminTitle);
     await expectOpsReminder(true);
   });
 
-  it("qa:TC missing qa:TC missing CRM_VISIBLE=all matches main, including the ops check", async () => {
+  it("qa:TC missing CRM_VISIBLE=all matches main, including the ops check", async () => {
     await runMode("all");
     await expectDealReminder(member, memberTaskId, memberTitle);
     await expectDealReminder(dealAdmin, adminTaskId, adminTitle);
     await expectOpsReminder(true);
   });
 
-  it("qa:TC missing qa:TC missing qa:TC missing admins: a member gets no deal reminder and an admin still does", async () => {
+  it("qa:TC missing admins: a member gets no deal reminder and an admin still does", async () => {
     await runMode("admins");
     await expectNoDealReminder(member);
     await expectDealReminder(dealAdmin, adminTaskId, adminTitle);
     await expectOpsReminder(true);
   });
 
-  it("qa:TC missing qa:TC missing off: nobody gets a deal reminder, and the ops check is unchanged", async () => {
+  it("qa:TC missing off: nobody gets a deal reminder, and the ops check is unchanged", async () => {
     await runMode("off");
     await expectNoDealReminder(member);
     await expectNoDealReminder(dealAdmin);

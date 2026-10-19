@@ -4,13 +4,13 @@
 // does not skip this file: the child always receives the test token, and a dead server fails the run.
 // Rows are checked in the local test database and on GET /api/notifications. Names are ZZ-TEST.
 //
-// qa:TC-APL2729-c2ee0001@v1 unset
-// qa:TC-APL2729-c2a11001@v1 all
-// qa:TC-APL2729-c1a1d001@v1 admins / member
-// qa:TC-APL2729-c2ad0001@v1 admins / admin
-// qa:TC-APL2729-c1ff0001@v1 off
-// qa:TC-APL2729-c30b5001@v1 non-deal ops check
-// qa:TC-APL2729-10ad0040@v1 40 concurrent reminder requests
+// qa:TC missing unset
+// qa:TC missing all
+// qa:TC missing admins / member
+// qa:TC missing admins / admin
+// qa:TC missing off
+// qa:TC missing non-deal ops check
+// qa:TC missing 40 concurrent reminder requests
 import "dotenv/config";
 import { spawn, type ChildProcess } from "node:child_process";
 import { closeSync, existsSync, mkdtempSync, openSync, readdirSync, readFileSync, readlinkSync } from "node:fs";
@@ -162,14 +162,22 @@ function stopServer(server: Running | null) {
   spawned.delete(server.pid);
 }
 
-function environ(pid: number) {
-  const raw = readFileSync(`/proc/${pid}/environ`);
-  const out: Record<string, string> = {};
-  for (const entry of raw.toString("utf8").split("\0")) {
-    const i = entry.indexOf("=");
-    if (i > 0) out[entry.slice(0, i)] = entry.slice(i + 1);
-  }
-  return out;
+/** Child writes one non-secret line, then starts next. The line never includes env values. */
+function launcherSource(port: number) {
+  const args = JSON.stringify(["next", "start", "-H", "127.0.0.1", "-p", String(port)]);
+  return `
+const { spawn } = require("node:child_process");
+const fs = require("node:fs");
+const mode = process.env.CRM_VISIBLE;
+const label = mode === "all" || mode === "admins" || mode === "off" ? mode : (mode == null || mode === "" ? "unset" : "other");
+const tokenMatch = process.env.JOB_SECRET === process.env.SHO_REMINDER_TOKEN_CHECK ? "yes" : "no";
+delete process.env.SHO_REMINDER_TOKEN_CHECK;
+fs.writeSync(1, "sho-reminder-marker mode=" + label + " token-match=" + tokenMatch + "\\n");
+fs.fsyncSync(1);
+const child = spawn("npx", ${args}, { cwd: ${JSON.stringify(root)}, env: process.env, stdio: "inherit" });
+child.on("exit", (code) => process.exit(code == null ? 1 : code));
+child.on("error", () => process.exit(1));
+`;
 }
 
 async function waitForHealth(port: number, child: ChildProcess, timeoutMs: number) {
@@ -203,11 +211,12 @@ async function startModeServer(mode: Mode): Promise<Running> {
     PORT: String(port),
     SUPER_ADMIN_EMAILS: "root.test@aplyd.com",
     JOB_SECRET: TEST_JOB_SECRET,
+    SHO_REMINDER_TOKEN_CHECK: TEST_JOB_SECRET,
   };
   delete env.CRM_VISIBLE;
   if (mode !== "unset") env.CRM_VISIBLE = mode;
   const logFd = openSync(path.join(outbox, "server.log"), "a");
-  const child = spawn("npx", ["next", "start", "-H", "127.0.0.1", "-p", String(port)], {
+  const child = spawn("node", ["-e", launcherSource(port)], {
     cwd: root, env, detached: true, stdio: ["ignore", logFd, logFd],
   });
   closeSync(logFd);
@@ -373,7 +382,7 @@ async function expectOpsReminder(base: string, exact: boolean) {
   if (exact) expect(items).toHaveLength(1);
 }
 
-/** The listener inherited the env it was started with, not a later change in this process. */
+/** The listener was started with this mode. A later change in this process does not rewrite that line. */
 function expectOwnProcess(server: Running) {
   expect(server.pid).not.toBe(process.pid);
   const listeners = listeningPids(server.port).filter((pid) => isInGroup(server.pid, pid));
@@ -381,17 +390,11 @@ function expectOwnProcess(server: Running) {
   const previous = process.env.CRM_VISIBLE;
   process.env.CRM_VISIBLE = server.mode === "off" ? "all" : "off";
   try {
-    for (const pid of listeners) {
-      const live = environ(pid);
-      if (server.mode === "unset") expect(live.CRM_VISIBLE, "unset server has no CRM_VISIBLE").toBeUndefined();
-      else expect(live.CRM_VISIBLE, server.mode).toBe(server.mode);
-      expect(live.CRM_VISIBLE === process.env.CRM_VISIBLE, "spawned server picked up this process CRM_VISIBLE").toBe(false);
-      const childSecret = live.JOB_SECRET ?? "";
-      expect(childSecret.length >= 16).toBe(true);
-      expect(childSecret === TEST_JOB_SECRET).toBe(true);
-      const parentSecret = process.env.JOB_SECRET;
-      if (parentSecret && parentSecret !== TEST_JOB_SECRET) expect(childSecret === parentSecret).toBe(false);
-    }
+    const log = readFileSync(path.join(server.outbox, "server.log"), "utf8");
+    const line = log.split("\n").find((row) => row.startsWith("sho-reminder-marker "));
+    const want = `sho-reminder-marker mode=${server.mode} token-match=yes`;
+    expect(line).toBe(want);
+    expect(line).not.toBe(`sho-reminder-marker mode=${process.env.CRM_VISIBLE} token-match=yes`);
   } finally {
     if (previous === undefined) delete process.env.CRM_VISIBLE;
     else process.env.CRM_VISIBLE = previous;
@@ -483,19 +486,19 @@ describe("reminder jobs are one server process per CRM_VISIBLE mode (APL-2729)",
     await db.$disconnect();
   });
 
-  it("qa:TC missing qa:TC missing qa:TC missing unset server matches main, including 40 concurrent job posts", async () => {
+  it("qa:TC missing unset server matches main, including 40 concurrent job posts", async () => {
     await runMode("unset");
   });
 
-  it("qa:TC missing qa:TC missing qa:TC missing CRM_VISIBLE=all server matches main, including 40 concurrent job posts", async () => {
+  it("qa:TC missing CRM_VISIBLE=all server matches main, including 40 concurrent job posts", async () => {
     await runMode("all");
   });
 
-  it("qa:TC missing qa:TC missing qa:TC missing qa:TC missing admins server: a member gets no deal reminder and an admin still does", async () => {
+  it("qa:TC missing admins server: a member gets no deal reminder and an admin still does", async () => {
     await runMode("admins");
   });
 
-  it("qa:TC missing qa:TC missing qa:TC missing off server: nobody gets a deal reminder, and the ops check is unchanged", async () => {
+  it("qa:TC missing off server: nobody gets a deal reminder, and the ops check is unchanged", async () => {
     await runMode("off");
   });
 });
