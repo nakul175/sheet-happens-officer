@@ -2,11 +2,11 @@
 // The Super Admin acts as Leader; the plain Member (SHO_MEMBER_*) is the Editor/Viewer/assignee. Member tests skip without it.
 // AC6's non-member check follows PR #21 (tests/e2e/helpers/jim-gate.ts). The plain Admin role shares isAdmin with the Super Admin;
 // the second staging account is a Member, so the check signs in as the Super Admin.
-import { test, expect, zz } from "../support";
+import { test, expect, zz, type Api } from "../support";
 import { newProject, newTask } from "../g2";
 import { notLive, prLive } from "../helpers/jim-gate";
 
-const listed = async (who: { api: any }, id: string, archived = false) =>
+const listed = async (who: { api: Api }, id: string, archived = false) =>
   ((await who.api.get(`/api/projects${archived ? "?archived=true" : ""}`)).json.projects as { id: string }[]).some((p) => p.id === id);
 
 test("AC1: archiving removes the project from active lists and refuses new or changed tasks", async ({ admin, later }) => {

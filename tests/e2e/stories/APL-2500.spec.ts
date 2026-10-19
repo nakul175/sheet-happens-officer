@@ -2,23 +2,23 @@
 // Acceptance criteria: AC1 fields and Close returns to the same scroll position, AC2 role (Viewer read-only),
 // AC3 concierge stays usable, AC4 task link and "This task isn't available", AC5 stale save warning.
 // Data: every project and task is named "ZZ-TEST ..."; projects are archived afterwards.
-import { test, expect, zz } from "../support";
+import { test, expect, zz, type Who, type Page } from "../support";
 
 const ist = (d: number) => new Date(Date.now() + 5.5 * 3600e3 + d * 864e5).toISOString().slice(0, 10);
 
-async function proj(admin: any, label: string, later: (f: () => Promise<unknown>) => void) {
+async function proj(admin: Who, label: string, later: (f: () => Promise<unknown>) => void) {
   const r = await admin.api.post("/api/projects", { name: zz(label), leaderId: admin.user.id });
   expect(r.status, JSON.stringify(r.json)).toBe(201);
   const id = r.json.project.id as string;
   later(() => admin.api.post(`/api/projects/${id}/archive`));
   return id;
 }
-const mk = async (admin: any, p: string, title: string, extra: Record<string, unknown> = {}) => {
+const mk = async (admin: Who, p: string, title: string, extra: Record<string, unknown> = {}) => {
   const r = await admin.api.post(`/api/projects/${p}/tasks`, { title, ...extra });
   expect(r.status, JSON.stringify(r.json)).toBe(201);
   return r.json.task.id as string;
 };
-const dialog = (page: any) => page.getByRole("dialog", { name: "Task" });
+const dialog = (page: Page) => page.getByRole("dialog", { name: "Task" });
 
 test("AC1: opening a task shows all its fields, and Close returns to the same scroll position", async ({ admin, later }) => {
   test.setTimeout(120_000);
@@ -31,7 +31,7 @@ test("AC1: opening a task shows all its fields, and Close returns to the same sc
   // scroll down the list, open a row near the bottom, close, and compare
   const target = admin.page.locator(".item.click", { hasText: zz("filler 25") });
   await target.scrollIntoViewIfNeeded();
-  const pos = () => admin.page.evaluate(() => Math.round(window.scrollY + (document.querySelector(".content") as HTMLElement | null)?.scrollTop!));
+  const pos = () => admin.page.evaluate(() => Math.round(window.scrollY + ((document.querySelector(".content") as HTMLElement | null)?.scrollTop as number)));
   const before = await pos();
   expect(before).toBeGreaterThan(300);
   await target.click();
