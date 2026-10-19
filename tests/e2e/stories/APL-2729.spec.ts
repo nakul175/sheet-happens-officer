@@ -4,7 +4,8 @@
 // gateFile() skips this file in beforeAll when SHO_QA_PASS is unset. Playwright then exits 0.
 // Pam qa:TC: c2ee0001 (unset, same as all here), c2a11001 (all), c1a1d001 (admins member),
 // c2ad0001 (admins admin), c1ff0001 (off), c30b5001 (ops check).
-// The stored-row check for every mode, including off, is tests/jobs-reminders-crm.test.ts on the product branch.
+// The stored-row check for every mode, including off, is one server process per mode in
+// tests/jobs-reminders-crm-server.test.ts on the product branch. That file also posts the job 40 times.
 import { test, expect, zz } from "../support";
 import { newProject, newTask, ymd, type Who } from "../g2";
 import { createDeal, createOrg, dealBody, notices } from "../helpers/claude-a";
