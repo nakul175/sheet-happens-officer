@@ -2,12 +2,12 @@
 // Acceptance criteria: AC1 recipients get title, deleter and Trash link; AC2 own delete gives no notice; AC3 one notice per person.
 // Needs the optional plain Member account (SHO_MEMBER_EMAIL / SHO_MEMBER_PASS) for AC1 and AC3.
 // Data: every project and task is named "ZZ-TEST ..."; projects are archived afterwards.
-import { test, expect, zz } from "../support";
+import { test, expect, zz, type Who } from "../support";
 
 type N = { text: string; href: string };
-const inbox = async (who: any) => (await who.api.get("/api/notifications?limit=200")).json.items as N[];
+const inbox = async (who: Who) => (await who.api.get("/api/notifications?limit=200")).json.items as N[];
 
-async function proj(admin: any, member: any | null, label: string, later: (f: () => Promise<unknown>) => void) {
+async function proj(admin: Who, member: Who | null, label: string, later: (f: () => Promise<unknown>) => void) {
   const r = await admin.api.post("/api/projects", { name: zz(label), leaderId: admin.user.id });
   expect(r.status, JSON.stringify(r.json)).toBe(201);
   const p = r.json.project.id as string;
@@ -18,7 +18,7 @@ async function proj(admin: any, member: any | null, label: string, later: (f: ()
   }
   return p;
 }
-const mk = async (who: any, p: string, title: string, extra: Record<string, unknown> = {}) => {
+const mk = async (who: Who, p: string, title: string, extra: Record<string, unknown> = {}) => {
   const r = await who.api.post(`/api/projects/${p}/tasks`, { title, ...extra });
   expect(r.status, JSON.stringify(r.json)).toBe(201);
   return r.json.task.id as string;

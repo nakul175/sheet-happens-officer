@@ -1,8 +1,8 @@
 // SHO-US-23.4 Click a name, open the full profile (APL-2623). Acceptance criteria AC1 to AC6.
-import { test, expect, RUN, zz } from "../support";
+import { test, expect, RUN, zz, type Who } from "../support";
 
 const SLOW = { timeout: 90_000 };
-const mk = async (admin: any, later: (f: () => Promise<unknown>) => void, label: string) => {
+const mk = async (admin: Who, later: (f: () => Promise<unknown>) => void, label: string) => {
   const email = `zz-test-${RUN}-${label}@example.invalid`;
   const r = await admin.api.post("/api/team", { firstName: "ZZ-TEST", lastName: `${label} ${RUN}`, email, role: "MEMBER" });
   expect(r.status, JSON.stringify(r.json)).toBe(201);

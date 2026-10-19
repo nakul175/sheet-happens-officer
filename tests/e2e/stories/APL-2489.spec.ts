@@ -1,9 +1,9 @@
 // SHO-US-3.5 Hand over project leadership (Linear APL-2489).
 // The Super Admin hands over to / takes over from the plain Member (SHO_MEMBER_*); those tests skip without it.
-import { test, expect } from "../support";
+import { test, expect, type Api } from "../support";
 import { ghost, getTask, newProject, newTask } from "../g2";
 
-const leaders = async (who: { api: any }, id: string) =>
+const leaders = async (who: { api: Api }, id: string) =>
   ((await who.api.get(`/api/projects/${id}`)).json.project.members as { userId: string; role: string }[]).filter((m) => m.role === "LEADER");
 
 test("AC1+AC4: the member becomes Leader, the previous Leader becomes Editor by default, in one step with one Leader", async ({ admin, member, later }) => {

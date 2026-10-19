@@ -1,8 +1,8 @@
 // SHO-US-14.6 Keyboard shortcuts and help sheet (Linear APL-2565).
-import { test, expect, zz } from "../support";
+import { test, expect, zz, type Json } from "../support";
 import { newProject } from "../g2";
 
-type Who = { api: import("../support").Api; user: Record<string, any>; page: import("@playwright/test").Page };
+type Who = { api: import("../support").Api; user: Json; page: import("@playwright/test").Page };
 
 async function listProject(admin: Who, later: (f: () => Promise<unknown>) => void, label: string, n = 3) {
   const r = await admin.api.post("/api/projects", { name: zz(label), leaderId: admin.user.id });
@@ -100,13 +100,13 @@ test("AC4: browser and screen-reader keys (anything with Ctrl, Alt or Meta) are 
   await page.goto("/");
   await expect(page.getByRole("button", { name: "+ New task" })).toBeVisible();
   await page.evaluate(() => {
-    (window as any).__prevented = [];
+    (window as unknown as { __prevented: string[] }).__prevented = [];
     // A window listener runs after the product's document listener, so it sees whether the product called preventDefault.
-    window.addEventListener("keydown", (e) => { if (e.defaultPrevented) (window as any).__prevented.push(`${e.ctrlKey ? "Ctrl+" : ""}${e.altKey ? "Alt+" : ""}${e.metaKey ? "Meta+" : ""}${e.key}`); });
+    window.addEventListener("keydown", (e) => { if (e.defaultPrevented) (window as unknown as { __prevented: string[] }).__prevented.push(`${e.ctrlKey ? "Ctrl+" : ""}${e.altKey ? "Alt+" : ""}${e.metaKey ? "Meta+" : ""}${e.key}`); });
   });
   for (const combo of ["Control+c", "Control+j", "Control+/", "Alt+c", "Alt+/", "Meta+c", "Meta+j", "Control+Shift+/", "Alt+g", "Control+g"]) {
     await page.keyboard.press(combo);
   }
-  expect(await page.evaluate(() => (window as any).__prevented)).toEqual([]);
+  expect(await page.evaluate(() => (window as unknown as { __prevented: string[] }).__prevented)).toEqual([]);
   await expect(page.locator("[aria-modal='true']")).toHaveCount(0);
 });
