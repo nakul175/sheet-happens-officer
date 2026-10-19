@@ -3,7 +3,8 @@
 // Each CRM_VISIBLE mode is its own `next start` process (as tests/crm-visible-modes-server.test.ts), and
 // Chromium is driven with playwright-core at 1280x800 and 390x844. Needs `npm run build` first.
 // Run with `npm run test:crm-modes` (CI runs it after the build). `npm test` does not start these servers.
-// Skipped without SHO_QA_PASS, the password for the nakul17+ aliases (CI sets a CI-only value).
+// Skipped without SHO_QA_PASS, the password for the nakul17+ aliases. CI does not set it, so CI skips this file;
+// QA runs set it. No workflow file may hold a SHO_QA_PASS value.
 // Seeding and clean-up go through the app's API only; this file writes nothing to the database itself.
 // Local or CI Postgres only: a DATABASE_URL on any other host is refused before anything starts.
 // People are run-unique nakul17+ aliases, data is named ZZ-TEST. afterAll archives the projects and the
