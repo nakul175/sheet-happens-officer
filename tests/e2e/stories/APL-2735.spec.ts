@@ -1,57 +1,67 @@
-/**
- * @vitest-environment jsdom
- */
-// APL-2735. The team page deactivate dialog shows the 409 text inline (role="alert"), not as a toast.
-// The person page does not call deactivate. A caller who can see the CRM sees the deal names.
-// A caller who cannot (an Admin while CRM_VISIBLE=off) sees the generic sentence and no deal name.
-// workers=1. Production hosts are refused. ZZ-TEST names, nakul17+ aliases. afterAll archives and deactivates.
-import { spawn, type ChildProcess } from "node:child_process";
-import { closeSync, existsSync, openSync, readFileSync } from "node:fs";
+// APL-2735 in a real browser. The team page deactivate dialog shows the 409 text inline (role="alert"), not as a toast.
+// The person page does not call deactivate. An Admin while CRM_VISIBLE=off cannot see the CRM: the alert is the
+// generic sentence, with no deal name, no deal id and no change-leader link. An Admin while CRM_VISIBLE=on still
+// sees both deal names and a change-leader link for each.
+// Each CRM_VISIBLE mode is its own `next start` process (as tests/e2e/stories/APL-2728.spec.ts), and
+// Chromium is driven with playwright-core. Needs `npm run build` first.
+// Run with `npm run test:crm-modes` (CI runs it after the build). `npm test` does not start these servers.
+// Local or CI Postgres only: a DATABASE_URL on any other host is refused before anything starts.
+// People are run-unique nakul17+ aliases, data is named ZZ-TEST, and afterAll deletes both.
+import "dotenv/config";
+import { spawn } from "node:child_process";
+import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, statSync } from "node:fs";
 import net from "node:net";
+import { tmpdir } from "node:os";
 import path from "node:path";
-import { createElement } from "react";
-import { act } from "react";
-import { createRoot, type Root } from "react-dom/client";
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import Team from "@/app/(app)/team/Team";
-import { assertStoryTargetAllowed } from "../base-url";
-import { account, istDate, superAdmin, type Account } from "../../helpers";
+import { fileURLToPath } from "node:url";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { chromium, type Browser } from "playwright-core";
+import { db } from "../../../src/lib/db";
+import { istDate, PW } from "../../helpers";
 
-assertStoryTargetAllowed();
-
-const harness = vi.hoisted(() => ({
-  me: { id: "admin", name: "ZZ-TEST admin", email: "nakul17+zz-2735-admin@aplyd.com", orgRole: "ADMIN" as const },
-}));
-
-vi.mock("next/link", async () => {
-  const React = await import("react");
-  return {
-    default: ({ href, children, className }: { href: string; children?: React.ReactNode; className?: string }) =>
-      React.createElement("a", { href, className }, children),
-  };
-});
-
-vi.mock("next/navigation", () => ({
-  useParams: () => ({}),
-  usePathname: () => "/team",
-  useRouter: () => ({ push: () => undefined, replace: () => undefined }),
-}));
-
-vi.mock("@/app/(app)/Shell", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/app/(app)/Shell")>();
-  return { ...actual, useMe: () => harness.me };
-});
-
-const RUN = `${Date.now().toString(36)}${process.pid.toString(36)}`;
+const root = fileURLToPath(new URL("../../..", import.meta.url));
+const SHOTS = path.join(root, "test-results", "APL-2735");
 const GENERIC = "Name a new Leader first.";
-let seq = 0;
-const people: Account[] = [];
-const projectIds: string[] = [];
-const rootDir = process.cwd();
+const runId = `${Date.now().toString(36)}-${process.pid}`;
+const tag = `ZZ-TEST-${runId}`;
+const dealNames = [`ZZ-TEST Northwind ${tag}`, `ZZ-TEST Contoso ${tag}`];
+const VIEWPORTS = [
+  { width: 1280, height: 800 },
+  { width: 390, height: 844 },
+] as const;
+type Mode = "on" | "off";
+type Server = { mode: Mode; pid: number; outbox: string; base: string };
+type Person = { id: string; name: string; email: string; cookie: string };
 
-let root: Root | undefined;
-let offPid: number | undefined;
-let offBase = "";
+const servers = new Map<Mode, Server>();
+const seed = { emails: [] as string[], userIds: [] as string[], projectIds: [] as string[], orgIds: [] as string[] };
+const dealIds: string[] = [];
+let browser: Browser | undefined;
+let admin: Person;
+let leader: Person;
+
+/** Refuses any database that is not on this machine (the CI service container is localhost). */
+function assertLocalDatabase() {
+  let host = "";
+  try { host = new URL(process.env.DATABASE_URL ?? "").hostname.toLowerCase(); } catch { /* checked below */ }
+  if (!["localhost", "127.0.0.1", "::1", "[::1]"].includes(host)) {
+    throw new Error("APL-2735 story: refusing to run, DATABASE_URL is not a local database.");
+  }
+}
+
+function chromiumPath() {
+  const candidates = [
+    process.env.PW_CHROMIUM,
+    "/opt/pw-browsers/chromium",
+    "/usr/bin/google-chrome",
+    "/usr/bin/google-chrome-stable",
+    "/usr/bin/chromium",
+    "/usr/local/bin/google-chrome",
+  ].filter((p): p is string => !!p);
+  const found = candidates.find((p) => existsSync(p) && statSync(p).isFile());
+  if (!found) throw new Error(`APL-2735 story: no Chromium found. Set PW_CHROMIUM. Looked in ${candidates.join(", ")}`);
+  return found;
+}
 
 function freePort(): Promise<number> {
   return new Promise((resolve, reject) => {
@@ -65,207 +75,189 @@ function freePort(): Promise<number> {
   });
 }
 
-function killGroup(pid: number | undefined) {
-  if (!pid || pid === process.pid) return;
+/** Stops the process group this file spawned, by its exact PID. */
+function stop(pid: number) {
   try { process.kill(-pid, "SIGKILL"); } catch { /* already gone */ }
-  try { process.kill(pid, "SIGKILL"); } catch { /* already gone */ }
 }
 
-async function waitForHealth(port: number, child: ChildProcess) {
-  const deadline = Date.now() + 60_000;
-  while (Date.now() < deadline) {
-    if (child.exitCode !== null) throw new Error(`CRM_VISIBLE=off server exited ${child.exitCode}`);
-    try {
-      const res = await fetch(`http://127.0.0.1:${port}/api/health`);
-      if (res.ok) return;
-    } catch { /* still booting */ }
-    await new Promise((r) => setTimeout(r, 250));
-  }
-  throw new Error(`CRM_VISIBLE=off server did not answer on port ${port}`);
-}
-
-/** A second production server so the dialog can be opened while the CRM is off. */
-async function startOffServer() {
-  if (!existsSync(path.join(rootDir, ".next", "BUILD_ID"))) {
-    throw new Error("CRM_VISIBLE=off UI server cannot start: the production build is missing (.next/BUILD_ID)");
-  }
+async function startServer(mode: Mode): Promise<Server> {
   const port = await freePort();
-  const log = path.join("/tmp", `sho-2735-off-${port}.log`);
-  const logFd = openSync(log, "a");
+  const outbox = mkdtempSync(path.join(tmpdir(), `sho-2735-${mode}-`));
+  const env: NodeJS.ProcessEnv = {
+    ...process.env,
+    NODE_ENV: "production",
+    CRM_VISIBLE: mode,
+    EMAIL_OUTBOX_DIR: outbox,
+    APP_URL: `http://127.0.0.1:${port}`,
+    PORT: String(port),
+    SUPER_ADMIN_EMAILS: "root.test@aplyd.com",
+    JOB_SECRET: process.env.JOB_SECRET || "replace-with-a-token-of-at-least-16-chars",
+  };
+  const logFd = openSync(path.join(outbox, "server.log"), "a");
   const child = spawn("npx", ["next", "start", "-H", "127.0.0.1", "-p", String(port)], {
-    cwd: rootDir,
-    env: { ...process.env, CRM_VISIBLE: "off", PORT: String(port), APP_URL: `http://127.0.0.1:${port}` },
-    detached: true,
-    stdio: ["ignore", logFd, logFd],
+    cwd: root, env, detached: true, stdio: ["ignore", logFd, logFd],
   });
   closeSync(logFd);
   child.unref();
-  try {
-    await waitForHealth(port, child);
-  } catch (err) {
-    killGroup(child.pid);
-    const tail = existsSync(log) ? readFileSync(log, "utf8").slice(-500) : "";
-    throw new Error(`${err instanceof Error ? err.message : "CRM_VISIBLE=off server cannot start"}${tail ? `\n${tail}` : ""}`);
+  if (!child.pid) throw new Error(`APL-2735 story: CRM_VISIBLE=${mode} did not start`);
+  const deadline = Date.now() + 60_000;
+  while (Date.now() < deadline) {
+    if (child.exitCode !== null) break;
+    try {
+      if ((await fetch(`http://127.0.0.1:${port}/api/health`)).ok) return { mode, pid: child.pid, outbox, base: `http://127.0.0.1:${port}` };
+    } catch { /* still booting */ }
+    await new Promise((r) => setTimeout(r, 250));
   }
-  if (!child.pid) throw new Error("CRM_VISIBLE=off server cannot start");
-  offPid = child.pid;
-  offBase = `http://127.0.0.1:${port}`;
+  stop(child.pid);
+  throw new Error(`APL-2735 story: CRM_VISIBLE=${mode} never answered /api/health`);
 }
 
-async function zzAccount(role: string) {
-  const n = seq++;
-  const slug = role.toLowerCase().replace(/[^a-z0-9]+/g, "") || "user";
-  const email = `nakul17+zz-2735-ui-${RUN}-${slug}-${n}@aplyd.com`;
-  const who = await account(`ZZ-TEST ${role} ${RUN}-${n}`, email);
-  people.push(who);
-  return who;
-}
-
-function closePage() {
-  act(() => root?.unmount());
-  root = undefined;
-  document.body.replaceChildren();
-  vi.unstubAllGlobals();
-}
-
-/** Renders the team page against one server, signed in as `who`. */
-async function openTeam(base: string, who: Account) {
-  harness.me = { id: who.id, name: who.name, email: who.email, orgRole: "ADMIN" };
-  const real = globalThis.fetch.bind(globalThis);
-  vi.stubGlobal("fetch", (input: RequestInfo | URL, init?: RequestInit) => {
-    const raw = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
-    const url = raw.startsWith("/") ? base + raw : raw;
-    const headers = new Headers(typeof input === "string" || input instanceof URL ? init?.headers : input.headers);
-    if (init?.headers) new Headers(init.headers).forEach((value, key) => headers.set(key, value));
-    if (raw.startsWith("/") && who.c.cookie) headers.set("cookie", who.c.cookie);
-    return real(url, { ...init, headers });
+async function call(base: string, cookie: string, method: string, p: string, body?: unknown) {
+  const res = await fetch(base + p, {
+    method,
+    headers: { "content-type": "application/json", ...(cookie ? { cookie } : {}) },
+    body: body === undefined ? undefined : JSON.stringify(body),
   });
-  document.body.replaceChildren();
-  const host = document.createElement("div");
-  document.body.appendChild(host);
-  root = createRoot(host);
-  await act(async () => { root!.render(createElement(Team)); });
-  for (let i = 0; i < 40; i++) {
-    await act(async () => { await new Promise((r) => setTimeout(r, 25)); });
-    if ([...document.querySelectorAll("button")].some((b) => b.textContent === "Deactivate")) return document.body;
-  }
-  throw new Error(`Team page did not offer Deactivate. ${document.body.textContent?.slice(0, 400)}`);
+  const sets = typeof res.headers.getSetCookie === "function" ? res.headers.getSetCookie() : [];
+  const session = sets.map((line) => line.split(";")[0]).find((line) => line.startsWith("sho_session="));
+  const text = await res.text();
+  const json = text && res.headers.get("content-type")?.includes("json") ? (JSON.parse(text) as Record<string, unknown>) : null;
+  return { status: res.status, text, json, cookie: session ?? cookie };
 }
 
-async function deactivateDialog(leaderName: string) {
-  const row = [...document.querySelectorAll("tr")].find((tr) => tr.textContent?.includes(leaderName));
-  expect(row, leaderName).toBeTruthy();
-  const open = [...row!.querySelectorAll("button")].find((b) => b.textContent === "Deactivate");
-  expect(open, "row Deactivate").toBeTruthy();
-  await act(async () => { open!.click(); });
-  const dialog = document.querySelector("[role=dialog]");
-  expect(dialog, "deactivate dialog").toBeTruthy();
-  const yes = [...dialog!.querySelectorAll("button")].find((b) => b.textContent === "Deactivate");
-  expect(yes, "confirm Deactivate").toBeTruthy();
-  await act(async () => { yes!.click(); });
-  let alert: Element | null = null;
-  for (let i = 0; i < 40; i++) {
-    await act(async () => { await new Promise((r) => setTimeout(r, 25)); });
-    alert = dialog!.querySelector("[role=alert]");
-    if (alert?.textContent) break;
-  }
-  expect(alert, "inline 409 alert").toBeTruthy();
-  return { dialog: dialog!, alert: alert! };
+async function signIn(server: Server, label: string): Promise<Person> {
+  const email = `nakul17+zz-2735-${runId}-${label}@aplyd.com`;
+  const name = `ZZ-TEST ${label} ${runId}`;
+  seed.emails.push(email);
+  const created = await call(server.base, "", "POST", "/api/auth/signup", { name, email, password: PW });
+  expect(created.status, created.text).toBe(201);
+  const mails = readdirSync(server.outbox).filter((f) => f.endsWith(".json")).sort()
+    .map((f) => JSON.parse(readFileSync(path.join(server.outbox, f), "utf8")) as { to?: string; subject?: string; text?: string });
+  const token = mails.filter((m) => m.to === email && /Verify/.test(m.subject ?? "")).at(-1)?.text?.match(/token=([\w-]+)/)?.[1];
+  expect(token, `verification mail for ${label}`).toBeTruthy();
+  expect((await call(server.base, "", "POST", "/api/auth/verify", { token })).status).toBe(200);
+  const signed = await call(server.base, "", "POST", "/api/auth/signin", { email, password: PW });
+  expect(signed.status, signed.text).toBe(200);
+  const id = (signed.json?.user as { id: string }).id;
+  seed.userIds.push(id);
+  return { id, name, email, cookie: signed.cookie };
 }
 
-describe("qa:TC missing APL-2735 deactivate dialog shows the 409 text", () => {
-  let adminUser: Account;
-  let leader: Account;
-  const dealNames = [`ZZ-TEST Northwind ${RUN}`, `ZZ-TEST Contoso ${RUN}`];
-  const dealIds: string[] = [];
+async function cleanup() {
+  const users = await db.user.findMany({ where: { OR: [{ id: { in: seed.userIds } }, { email: { in: seed.emails } }] }, select: { id: true } });
+  const userIds = users.map((u) => u.id);
+  if (userIds.length || seed.projectIds.length) {
+    await db.actionLog.deleteMany({ where: { OR: [{ actorId: { in: userIds } }, { projectId: { in: seed.projectIds } }] } });
+  }
+  if (userIds.length) {
+    await db.modelUsage.deleteMany({ where: { userId: { in: userIds } } });
+    await db.auditLog.deleteMany({ where: { actorId: { in: userIds } } });
+  }
+  if (seed.projectIds.length) await db.project.deleteMany({ where: { id: { in: seed.projectIds } } });
+  if (seed.orgIds.length) await db.organisation.deleteMany({ where: { id: { in: seed.orgIds } } });
+  if (seed.emails.length) await db.loginAttempt.deleteMany({ where: { email: { in: seed.emails } } });
+  if (userIds.length) await db.user.deleteMany({ where: { id: { in: userIds } } });
+}
 
-  beforeAll(async () => {
-    await startOffServer();
-    const sa = await superAdmin();
-    adminUser = await zzAccount("admin");
-    leader = await zzAccount("deal leader");
-    expect((await sa.c.patch(`/api/team/${adminUser.id}`, { orgRole: "ADMIN" })).status).toBe(200);
-    const pipes = await sa.c.get("/api/deals/pipelines");
-    expect(pipes.status, JSON.stringify(pipes.json)).toBe(200);
-    const pipe = (pipes.json.pipelines as { id: string; key: string }[]).find((p) => p.key === "DEAL_PROACTIVE");
-    expect(pipe?.id).toBeTruthy();
-    const org = await sa.c.post("/api/orgs", { name: `ZZ-TEST Buyer UI ${RUN}` });
-    expect(org.status, JSON.stringify(org.json)).toBe(201);
-    for (const name of dealNames) {
-      const made = await sa.c.post("/api/deals", {
-        name,
-        organisationId: org.json.organisation.id,
-        pipelineId: pipe!.id,
-        leaderId: leader.id,
-        whyPursue: "ZZ-TEST fit",
-        nextStep: { title: `ZZ-TEST step ${RUN}`, dueDate: istDate(3) },
-      });
-      expect(made.status, JSON.stringify(made.json)).toBe(201);
-      dealIds.push(made.json.deal.id as string);
-      projectIds.push(made.json.deal.id as string);
-    }
-  }, 90_000);
+/** Opens /team as `viewer`, clicks Deactivate on the leader's row, confirms, and waits for the inline alert. */
+async function attemptDeactivate(server: Server, viewer: Person, size: { width: number; height: number }) {
+  const context = await browser!.newContext({ viewport: size });
+  const eq = viewer.cookie.indexOf("=");
+  await context.addCookies([{ name: viewer.cookie.slice(0, eq), value: viewer.cookie.slice(eq + 1), url: server.base }]);
+  const page = await context.newPage();
+  await page.goto(`${server.base}/team`);
+  const row = page.locator("tr").filter({ hasText: leader.email });
+  await row.getByRole("button", { name: "Deactivate", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: `Deactivate ${leader.name}?` });
+  await dialog.waitFor();
+  await dialog.getByRole("button", { name: "Deactivate", exact: true }).click();
+  const alert = dialog.getByRole("alert");
+  await alert.waitFor();
+  const seen = {
+    alert: (await alert.innerText()).trim(),
+    text: await dialog.innerText(),
+    html: await dialog.evaluate((el) => el.outerHTML),
+    hrefs: await dialog.locator("a").evaluateAll((as) => as.map((a) => a.getAttribute("href") ?? "")),
+  };
+  return { page, seen, close: () => context.close() };
+}
 
-  afterAll(async () => {
-    closePage();
-    killGroup(offPid);
-    const sa = await superAdmin();
-    const problems: string[] = [];
-    for (const id of projectIds) {
-      const added = await sa.c.post(`/api/projects/${id}/members`, { userId: sa.id, role: "EDITOR" });
-      if (added.status !== 201 && !(added.status === 409 && /already a member/.test(added.json?.error ?? ""))) {
-        problems.push(`add member ${id}: ${added.status}`);
-      }
-      const led = await sa.c.post(`/api/projects/${id}/leader`, { newLeaderId: sa.id, previousRole: "EDITOR" });
-      if (led.status !== 200 && !(led.status === 400 && /already the Leader/.test(led.json?.error ?? ""))) {
-        problems.push(`change leader ${id}: ${led.status}`);
-      }
-      const archived = await sa.c.post(`/api/projects/${id}/archive`);
-      if (archived.status !== 200) problems.push(`archive ${id}: ${archived.status} ${JSON.stringify(archived.json)}`);
-    }
-    for (const who of people) {
-      if (who.id === sa.id) continue;
-      const off = await sa.c.post(`/api/team/${who.id}/deactivate`, { reassign: "leaders" });
-      if (off.status !== 200 && !(off.status === 409 && /already deactivated/.test(off.json?.error ?? ""))) {
-        problems.push(`deactivate ${who.email}: ${off.status} ${JSON.stringify(off.json)}`);
-      }
-    }
-    expect(problems, problems.join("\n")).toEqual([]);
-  }, 60_000);
+beforeAll(async () => {
+  assertLocalDatabase();
+  if (!existsSync(path.join(root, ".next", "BUILD_ID"))) {
+    throw new Error("APL-2735 story cannot start: the production build is missing (.next/BUILD_ID)");
+  }
+  mkdirSync(SHOTS, { recursive: true });
+  const [on, off] = await Promise.all([startServer("on"), startServer("off")]);
+  servers.set("on", on).set("off", off);
+  browser = await chromium.launch({ executablePath: chromiumPath(), args: ["--no-sandbox"] });
 
-  it("a non-CRM caller sees the generic sentence and no deal name (qa:TC missing)", async () => {
-    expect(offBase).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);
+  // Seeded once on the open server: an Admin, and a Member who leads two ZZ-TEST deals.
+  admin = await signIn(on, "admin");
+  leader = await signIn(on, "leader");
+  await db.user.update({ where: { id: admin.id }, data: { orgRole: "ADMIN" } });
+  const pipes = await call(on.base, admin.cookie, "GET", "/api/deals/pipelines");
+  expect(pipes.status, pipes.text).toBe(200);
+  const pipe = (pipes.json?.pipelines as { id: string; key: string }[]).find((p) => p.key === "DEAL_PROACTIVE");
+  expect(pipe?.id).toBeTruthy();
+  const org = await call(on.base, admin.cookie, "POST", "/api/orgs", { name: `ZZ-TEST Buyer ${tag}` });
+  expect(org.status, org.text).toBe(201);
+  seed.orgIds.push((org.json?.organisation as { id: string }).id);
+  for (const name of dealNames) {
+    const made = await call(on.base, admin.cookie, "POST", "/api/deals", {
+      name, organisationId: seed.orgIds[0], pipelineId: pipe!.id, leaderId: leader.id, whyPursue: tag,
+      nextStep: { title: `ZZ-TEST step ${tag}`, dueDate: istDate(3) },
+    });
+    expect(made.status, made.text).toBe(201);
+    const id = (made.json?.deal as { id: string }).id;
+    dealIds.push(id);
+    seed.projectIds.push(id);
+  }
+}, 180_000);
+
+afterAll(async () => {
+  try {
+    await browser?.close();
+    await cleanup();
+  } finally {
+    for (const server of servers.values()) stop(server.pid);
+    await db.$disconnect();
+  }
+});
+
+describe("qa:TC missing APL-2735 deactivate dialog in the browser", () => {
+  for (const size of VIEWPORTS) {
+    it(`qa:TC missing AC1: CRM_VISIBLE=off at ${size.width}x${size.height}, the admin sees the generic sentence and nothing of the deals`, async () => {
+      const { page, seen, close } = await attemptDeactivate(servers.get("off")!, admin, size);
+      try {
+        await page.screenshot({ path: path.join(SHOTS, `off-${size.width}x${size.height}.png`), fullPage: true });
+        expect(seen.alert).toBe(GENERIC);
+        expect(seen.text).not.toMatch(/\b2\b/);
+        expect(seen.hrefs.filter((href) => href.includes("/projects/")), "no change-leader link").toEqual([]);
+        for (const blob of [seen.text, seen.html]) {
+          for (const name of dealNames) expect(blob).not.toContain(name);
+          for (const id of dealIds) expect(blob).not.toContain(id);
+        }
+        expect((await db.user.findUnique({ where: { id: leader.id }, select: { deactivatedAt: true } }))?.deactivatedAt).toBeNull();
+      } finally {
+        await close();
+      }
+    });
+  }
+
+  // Shows the checks above can see the deals when they are visible, so their passing is not vacuous.
+  it("qa:TC missing AC2: CRM_VISIBLE=on at 1280x800, the admin sees both deal names and a change-leader link for each", async () => {
+    const { page, seen, close } = await attemptDeactivate(servers.get("on")!, admin, VIEWPORTS[0]);
     try {
-      await openTeam(offBase, adminUser);
-      const { dialog, alert } = await deactivateDialog(leader.name);
-      expect(alert.textContent).toBe(GENERIC);
-      const shown = dialog.textContent ?? "";
-      const html = dialog.innerHTML;
-      for (const name of dealNames) expect(shown).not.toContain(name);
-      for (const id of dealIds) {
-        expect(html).not.toContain(id);
-        expect(html).not.toContain(`/projects/${id}`);
+      await page.screenshot({ path: path.join(SHOTS, "on-1280x800.png"), fullPage: true });
+      expect(seen.alert.startsWith("Name a new Leader first for: ")).toBe(true);
+      for (const name of dealNames) {
+        expect(seen.alert).toContain(name);
+        expect(seen.text).toContain(`${name}: Change leader`);
       }
-      expect(shown).not.toMatch(/\b2\b/);
-      expect(dialog.querySelectorAll("a[href*='/projects/']")).toHaveLength(0);
+      for (const id of dealIds) expect(seen.hrefs).toContain(`/projects/${id}/members`);
     } finally {
-      closePage();
+      await close();
     }
-  }, 60_000);
-
-  it("a CRM caller sees the named deals (qa:TC missing)", async () => {
-    const base = process.env.TASKBOARD_URL ?? "http://localhost:3100";
-    try {
-      await openTeam(base, adminUser);
-      const { dialog, alert } = await deactivateDialog(leader.name);
-      const text = alert.textContent ?? "";
-      expect(text.startsWith("Name a new Leader first for: ")).toBe(true);
-      for (const name of dealNames) expect(text).toContain(name);
-      const html = dialog.innerHTML;
-      for (const id of dealIds) expect(html).toContain(`/projects/${id}/members`);
-      for (const name of dealNames) expect(dialog.textContent).toContain(`${name}: Change leader`);
-    } finally {
-      closePage();
-    }
-  }, 60_000);
+  });
 });
