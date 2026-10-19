@@ -59,6 +59,9 @@ jobs:
       - run: npx prisma migrate deploy
       - name: Build
         run: npm run build
+      # APL-2609: tests/e2e/stories/APL-2609.spec.ts drives these mode servers in Playwright Chromium.
+      - name: Install Playwright Chromium
+        run: npx playwright-core install --with-deps chromium
       # APL-2713. These servers are excluded from `npm test`. A failure here fails the job.
       - name: CRM mode tests
         run: npm run test:crm-modes
