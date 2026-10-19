@@ -117,10 +117,17 @@ describe("qa:TC missing APL-2749: overlapping reminder runs write one reminder p
   it("qa:TC missing AC1: 40 concurrent POST /api/jobs/reminders leave exactly one reminder per holder and task", async () => {
     const due = await dueTasks("concurrent run");
     // The gate holds the lock; the watcher reads pg_stat_activity outside the gate's transaction snapshot.
-    const gate = new pg.Client({ connectionString: localDatabaseUrl() });
-    const watch = new pg.Client({ connectionString: localDatabaseUrl() });
+    // Both are bounded: no statement runs past 5 s and no lock wait past 2 s, even if the release below never ran.
+    const gate = new pg.Client({ connectionString: localDatabaseUrl(), statement_timeout: 5_000, lock_timeout: 2_000 });
+    const watch = new pg.Client({ connectionString: localDatabaseUrl(), statement_timeout: 5_000, lock_timeout: 2_000 });
     await gate.connect();
     await watch.connect();
+    for (const client of [gate, watch]) {
+      const { rows } = await client.query<{ statement_timeout: string; lock_timeout: string }>(
+        "SELECT current_setting('statement_timeout') AS statement_timeout, current_setting('lock_timeout') AS lock_timeout",
+      );
+      expect(rows[0]).toEqual({ statement_timeout: "5s", lock_timeout: "2s" });
+    }
     let overlap: { inserts: number; advisory: number } | null = null;
     let posts: Promise<unknown>;
     let heldMs = 0;
