@@ -26,6 +26,7 @@ vi.mock("@/lib/email", async (orig) => {
 const { sendMail, MailError } = await import("../src/lib/email");
 const { POST: signUp } = await import("../src/app/api/auth/signup/route");
 const { POST: resendVerification } = await import("../src/app/api/auth/resend-verification/route");
+const { POST: verifyEmail } = await import("../src/app/api/auth/verify/route");
 
 const run = Date.now();
 let n = 0;
@@ -179,6 +180,31 @@ describe("qa:TC missing AC3: a failed verification send is reported to the perso
     const results = (await db.auditLog.findMany({ where: { actorId: user.id, event: "VERIFY_EMAIL_REQUESTED" }, orderBy: { createdAt: "asc" } }))
       .map((r) => (r.data as { result: string }).result);
     expect(results).toEqual(["FAILED", "FAILED", "SENT"]);
+  });
+
+  it("qa:TC missing AC3: failed, failed, then a successful resend: the original link still verifies after the two failures", async () => {
+    const email = fresh();
+    expect((await post(signUp, "/api/auth/signup", { name: "ZZ-TEST Mailfail", email, password: PW })).status).toBe(201);
+    failSend.on = true;
+    for (let i = 0; i < 2; i++) {
+      const res = await post(resendVerification, "/api/auth/resend-verification", { email });
+      expect(res.status, "a failed send answers like any other request").toBe(200);
+      expect((await res.json()).message).not.toMatch(/has been sent/i);
+    }
+    failSend.on = false;
+    // The two failures neither voided the delivered link nor used up the limit: the next request still sends.
+    expect((await post(resendVerification, "/api/auth/resend-verification", { email })).status).toBe(200);
+    const user = await db.user.findUniqueOrThrow({ where: { email } });
+    expect(await db.authToken.count({ where: { userId: user.id, type: "VERIFY" } }), "sign-up's link plus the one successful resend").toBe(2);
+    // A second address: the original link is used right after two failed resends, and it verifies.
+    const other = fresh();
+    expect((await post(signUp, "/api/auth/signup", { name: "ZZ-TEST Mailfail", email: other, password: PW })).status).toBe(201);
+    const first = lastVerifyToken(other)!;
+    failSend.on = true;
+    for (let i = 0; i < 2; i++) expect((await post(resendVerification, "/api/auth/resend-verification", { email: other })).status).toBe(200);
+    failSend.on = false;
+    expect((await post(verifyEmail, "/api/auth/verify", { token: first })).status).toBe(200);
+    expect((await db.user.findUniqueOrThrow({ where: { email: other } })).emailVerifiedAt).not.toBeNull();
   });
 
   it("qa:TC missing AC3: failed resends are capped at 3 an hour, so a client cannot hammer the provider", async () => {
