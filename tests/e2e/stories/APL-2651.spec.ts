@@ -173,7 +173,7 @@ test.afterAll(async () => {
   await anon?.dispose().catch(() => undefined);
 });
 
-test("qa:TC missing AC1: no session, malformed or schema-invalid body, returns 401 with no validation details", async () => {
+test("qa:TC-APL2651-507ede86@v1 qa:TC-APL2651-0874d1b5@v1 AC1: no session, malformed or schema-invalid body, returns 401 with no validation details", async () => {
   const cases: [string, string, Body][] = [
     ["POST", "/api/actions/bulk-undo", MALFORMED],
     ["POST", "/api/actions/bulk-undo", { ids: [] }],
@@ -201,7 +201,7 @@ test("qa:TC missing AC1: no session, malformed or schema-invalid body, returns 4
   await test.info().attach("ac1-routes", { body: JSON.stringify(rows, null, 2), contentType: "application/json" });
 });
 
-test("qa:TC missing AC2: signed-in without access gets 403 or the existing not-found answer, not 400", async () => {
+test("qa:TC-APL2651-6edd45b6@v1 AC2: signed-in without access gets 403 or the existing not-found answer, not 400", async () => {
   const memberPath = `/api/projects/${projectId}/members/${editor.user.id}`;
   const sectionPath = `/api/projects/${projectId}/sections/${doing}`;
   const taskPath = `/api/tasks/${taskId}`;
@@ -241,7 +241,7 @@ test("qa:TC missing AC2: signed-in without access gets 403 or the existing not-f
   await test.info().attach("ac2-routes", { body: JSON.stringify(rows, null, 2), contentType: "application/json" });
 });
 
-test("qa:TC missing AC2 bulk-undo: another person's action is 403; a signed-in invalid body stays 400", async () => {
+test("qa:TC-APL2651-93d4350b@v1 AC2 bulk-undo: another person's action is 403; a signed-in invalid body stays 400", async () => {
   // The ids are inside the body, so a signed-in caller with a bad body is 400 on this route (no target to authorise yet).
   expectBadJson(await send(editor.request, "POST", "/api/actions/bulk-undo", MALFORMED));
   expectValidation(await send(editor.request, "POST", "/api/actions/bulk-undo", { ids: [] }));
@@ -264,7 +264,7 @@ test("qa:TC missing AC2 bulk-undo: another person's action is 403; a signed-in i
   expect(undone.json).toMatchObject({ count: 1 });
 });
 
-test("qa:TC missing AC3: an authorised caller with a bad body still gets today's 400 shape, and a valid body still works", async () => {
+test("qa:TC-APL2651-cb9e6bf3@v1 qa:TC-APL2651-fb71e2b6@v1 AC3: an authorised caller with a bad body still gets today's 400 shape, and a valid body still works", async () => {
   const memberPath = `/api/projects/${projectId}/members/${editor.user.id}`;
   const sectionPath = `/api/projects/${projectId}/sections/${doing}`;
   const taskPath = `/api/tasks/${taskId}`;
