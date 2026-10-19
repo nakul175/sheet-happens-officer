@@ -2,7 +2,7 @@
 // permission on the server; a card whose records changed writes nothing and is replaced by a fresh one.
 import { db } from "@/lib/db";
 import { ApiError } from "@/lib/http";
-import type { Actor } from "@/lib/access";
+import { canManage, projectAccess, type Actor } from "@/lib/access";
 import { reqCtx, type ReqCtx } from "@/lib/reqctx";
 import { checkUndo, undoAction } from "@/lib/undo";
 import { UNDO_DAYS, isUndoable } from "@/lib/undoable";
@@ -32,6 +32,20 @@ async function freshCard(user: Actor, ops: Op[]): Promise<Message> {
 }
 
 const UNDOING_STALE_MS = 2 * 60_000;
+
+/**
+ * A confirmed card offers Undo only when this person can reverse every logged action.
+ * Undoing a delete is a restore from Trash, so it takes the same Leader or Admin check as checkUndo (APL-2675).
+ * A card that both deletes and edits hides Undo for the whole card when that check fails.
+ */
+async function offerUndo(user: Actor, rows: { action: string; projectId: string | null }[]) {
+  const live = rows.filter((r) => isUndoable(r.action));
+  if (!live.length) return false;
+  for (const projectId of new Set(live.flatMap((r) => (r.action === "task.deleted" && r.projectId ? [r.projectId] : [])))) {
+    if (!canManage(await projectAccess(user, projectId))) return false;
+  }
+  return true;
+}
 
 export async function confirmCard(user: Actor, cardId: string, handover?: { taskId: string; assigneeId: string }[], acknowledge?: boolean) {
   const { row, s } = await ownCard(user, cardId);
@@ -77,8 +91,8 @@ export async function confirmCard(user: Actor, cardId: string, handover?: { task
   }
 
   const confirmedAt = new Date().toISOString();
-  const rows = logIds.length ? await db.actionLog.findMany({ where: { id: { in: logIds } }, select: { id: true, action: true } }) : [];
-  const undoable = !s.card.irreversible && rows.some((r) => isUndoable(r.action));
+  const rows = logIds.length ? await db.actionLog.findMany({ where: { id: { in: logIds } }, select: { action: true, projectId: true } }) : [];
+  const undoable = !s.card.irreversible && await offerUndo(user, rows);
   const done = summary.slice(0, applied);
   const why = failure instanceof ApiError ? failure.message : "an unexpected error";
   const text = failure
@@ -117,7 +131,15 @@ export async function undoCard(user: Actor, cardId: string, anyway = false) {
   const resultRow = resultId ? await db.chatMessage.findFirst({ where: { id: resultId, userId: user.id } }) : null;
   const rs = resultRow ? parse(resultRow.content) : null;
   if (!resultRow || !rs?.result || !rs.internal) throw new ApiError(404, "Nothing to undo");
-  if (!rs.result.undoable) throw new ApiError(409, "This can't be undone.");
+  if (!rs.result.undoable) {
+    // The button is hidden, but a direct Undo of a delete still runs the Trash restore check (APL-2675 AC3).
+    const deletes = await db.actionLog.findMany({
+      where: { id: { in: rs.internal.logIds ?? [] }, action: "task.deleted", undoneAt: null },
+      select: { id: true },
+    });
+    for (const r of deletes) await checkUndo(user, r.id);
+    throw new ApiError(409, "This can't be undone.");
+  }
   if (rs.result.undoneAt) throw new ApiError(409, "This was already undone.");
   const confirmedAt = rs.internal.confirmedAt ? Date.parse(rs.internal.confirmedAt) : resultRow.createdAt.getTime();
   if (Date.now() - confirmedAt > UNDO_DAYS * 86400_000) throw new ApiError(409, "Too old to undo", { tooOld: true });
