@@ -131,7 +131,7 @@ describe("sign-in and sessions (1.3, 1.5)", () => {
     expect(a.json.error).toBe("Email or password is incorrect.");
   });
 
-  it("asks an unverified person to verify only when the password is right", async () => {
+  it("qa:TC missing asks an unverified person to verify only when the password is right", async () => {
     const email = fresh();
     const c = new Client();
     await c.call("POST", "/api/auth/signup", { name: "U", email, password: PW });
