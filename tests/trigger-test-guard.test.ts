@@ -12,7 +12,30 @@ describe("@APL-2700 trigger test guard", () => {
   it("@APL-2700 qa:TC-APL2700-6f0a11d1@v1: allows localhost and 127.0.0.1 when the database is sho_test_*", () => {
     expect(triggerTestAllowed(local)).toBe(true);
     expect(triggerTestAllowed({ ...local, host: "127.0.0.1" })).toBe(true);
-    expect(triggerTestAllowed({ ...local, database: "sho_test" })).toBe(false);
+  });
+
+  it("@APL-2764 allows the CI database sho_test exactly, and nothing else that only resembles it qa:TC missing", () => {
+    expect(triggerTestAllowed({ ...local, database: "sho_test" })).toBe(true);
+    expect(triggerTestAllowed({ ...local, database: "SHO_TEST" })).toBe(true);
+    expect(triggerTestAllowed({ ...local, host: "127.0.0.1", database: "sho_test" })).toBe(true);
+    expect(triggerTestAllowed({ ...local, database: "sho_testing" })).toBe(false);
+    expect(triggerTestAllowed({ ...local, database: "sho_test2" })).toBe(false);
+    expect(triggerTestAllowed({ ...local, database: "xsho_test" })).toBe(false);
+    expect(triggerTestAllowed({ ...local, database: "sho_tes" })).toBe(false);
+    expect(triggerTestAllowed({ ...local, database: "sho_app" })).toBe(false);
+    expect(triggerTestAllowed({ ...local, database: "sho_staging" }, "1")).toBe(false);
+    expect(triggerTestAllowed({ ...local, database: "defaultdb" }, "1")).toBe(false);
+  });
+
+  it("@APL-2764 refuses sho_test on a remote host, with public or sho_pr* schemas, or via a query override qa:TC missing", () => {
+    expect(triggerTestAllowed({ ...local, host: "db.example.com", database: "sho_test" }, "1")).toBe(false);
+    expect(triggerTestAllowed({ ...local, database: "sho_test", schema: "public" }, "1")).toBe(false);
+    expect(triggerTestAllowed({ ...local, database: "sho_test", schema: "sho_pr7" }, "1")).toBe(false);
+    const schema = "sho_test_trg_abc";
+    expect(triggerUrlAllowed("postgresql://sho:sho@localhost:5432/sho_test?schema=public", schema)).toBe(true);
+    expect(triggerUrlAllowed("postgresql://sho:sho@localhost:5432/sho_test?host=staging.db.internal", schema, "1")).toBe(false);
+    expect(triggerUrlAllowed("postgresql://sho:sho@localhost:5432/sho_test?dbname=defaultdb", schema, "1")).toBe(false);
+    expect(triggerUrlAllowed("postgresql://sho:sho@db.example.com:5432/sho_test", schema, "1")).toBe(false);
   });
 
   it("@APL-2700 qa:TC-APL2700-6f0a11d2@v1: refuses a remote host even when the database is sho_test_*", () => {
