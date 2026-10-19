@@ -82,9 +82,8 @@ async function trashItem(who: Who, projectId: string, title: string) {
 for (const viewport of VIEWPORTS) {
   const size = `${viewport.width}x${viewport.height}`;
 
-  // qa:TC missing
-  test(`@APL-2720 AC1@v1.0 Time left reads 30 days left at ${size}`, async ({ admin, later }) => {
-    test.info().annotations.push({ type: "qa:TC", description: "qa:TC missing" });
+  test(`qa:TC missing AC1@v1.0: Time left reads 30 days left at ${size}`, async ({ admin, later }) => {
+    test.info().annotations.push({ type: "qa:TC", description: "missing" });
     const project = await newProject(admin, later, { label: `2720 fresh ${size}` });
     const title = zz("fresh");
     await trashItem(admin, project.id, title);
@@ -96,9 +95,8 @@ for (const viewport of VIEWPORTS) {
     await expect(cell).toHaveAttribute("data-label", "Time left");
   });
 
-  // qa:TC missing
-  test(`@APL-2720 AC1@v1.0 Time left reads 30, 29, 2, 1 and 0 days left at ${size}`, async ({ admin, later }) => {
-    test.info().annotations.push({ type: "qa:TC", description: "qa:TC missing" });
+  test(`qa:TC missing AC1@v1.0: Time left reads 30, 29, 2, 1 and 0 days left at ${size}`, async ({ admin, later }) => {
+    test.info().annotations.push({ type: "qa:TC", description: "missing" });
     test.skip(!localDatabase(), NEEDS_LOCAL);
     const project = await newProject(admin, later, { label: `2720 ages ${size}` });
     const seeded: { label: string; age: number; daysLeft: number; id: string; title: string; text: string }[] = [];
@@ -124,9 +122,8 @@ for (const viewport of VIEWPORTS) {
     }
   });
 
-  // qa:TC missing
-  test(`@APL-2720 AC2@v1.0 keeps the Time left header, deletedAt order, and Restore at ${size}`, async ({ admin, later }) => {
-    test.info().annotations.push({ type: "qa:TC", description: "qa:TC missing" });
+  test(`qa:TC missing AC2@v1.0: keeps the Time left header, deletedAt order, and Restore at ${size}`, async ({ admin, later }) => {
+    test.info().annotations.push({ type: "qa:TC", description: "missing" });
     const project = await newProject(admin, later, { label: `2720 order ${size}` });
     await openTrash(admin.page, project.id, viewport);
     await expect(admin.page.getByText("Trash is empty.")).toBeVisible();
@@ -164,9 +161,8 @@ for (const viewport of VIEWPORTS) {
     await expect(row(admin.page, shown[1]).locator("td[data-label='Time left']")).toHaveText(words(30));
   });
 
-  // qa:TC missing
-  test(`@APL-2720 AC2@v1.0 hides Restore from an Editor and a Viewer at ${size}`, async ({ admin, member, later }) => {
-    test.info().annotations.push({ type: "qa:TC", description: "qa:TC missing" });
+  test(`qa:TC missing AC2@v1.0: hides Restore from an Editor and a Viewer at ${size}`, async ({ admin, member, later }) => {
+    test.info().annotations.push({ type: "qa:TC", description: "missing" });
     const project = await newProject(admin, later, {
       label: `2720 access ${size}`,
       members: [{ who: member, role: "EDITOR" }],
