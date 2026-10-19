@@ -297,11 +297,11 @@ describe("APL-2674 activity delete undo", () => {
     const plainCtx = await signedIn(uninvolved.email);
     try {
       const page = await openActivity(plainCtx, projectId);
-      const row = deleteRow(page, erinName);
-      if ((await row.count()) > 0) {
-        expect(await row.getByRole("button", { name: "Undo" }).count()).toBe(0);
-        expect(await row.innerText()).not.toContain("Too old to undo");
-      }
+      // The feed does not list Erin's delete to an editor who is not involved in the task: the row is absent.
+      const feed = (await uninvolved.c.get(`/api/projects/${projectId}/activity`)).json.items as { what: string }[];
+      expect(feed.some((item) => item.what === DELETED)).toBe(false);
+      await page.locator(".item.act, .card.empty").first().waitFor({ state: "visible", timeout: 30_000 });
+      expect(await deleteRow(page, erinName).count()).toBe(0);
       expect(await page.getByText("Too old to undo").count()).toBe(0);
     } finally {
       await plainCtx.close();

@@ -1,13 +1,16 @@
 // APL-2674 story spec. One case per acceptance criterion. workers=1: this file runs its cases in order.
-// Skipped unless SHO_QA_PASS is set, so a normal `npm test` does not need a browser for this file.
+// Local only, outside `npm test`: run it with `npm run test:e2e` (vitest.e2e.config.mts). It lives in e2e/, not
+// tests/e2e/stories/, because it imports the shared tests/helpers and opens a PrismaClient (story specs that do
+// that belong on qa/story-e2e).
+// Skipped unless SHO_QA_PASS is set: beforeAll launches nothing without it, and beforeEach skips every case.
 // Production hosts are refused. Point TASKBOARD_URL at a local server, never at production.
 // Thrown-away people and projects use ZZ-TEST names and nakul17+ aliases. afterAll archives only
 // the projects this file created and deactivates only the people this file created.
 // Self-signup only accepts @aplyd.com, so the alias is nakul17+…@aplyd.com.
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { chromium, type Browser, type BrowserContext, type Page } from "playwright-core";
-import { PrismaClient } from "../../../src/generated/prisma/client";
-import { account, BASE, patchTask, PW, superAdmin, task, type Account } from "../../helpers";
+import { PrismaClient } from "../src/generated/prisma/client";
+import { account, BASE, patchTask, PW, superAdmin, task, type Account } from "../tests/helpers";
 
 const PRODUCTION = new Set(["sheethappensofficer.com", "www.sheethappensofficer.com", "app.sheethappensofficer.com"]);
 for (const raw of [process.env.TASKBOARD_URL, process.env.BASE_URL, process.env.STAGING_URL]) {
@@ -17,6 +20,7 @@ for (const raw of [process.env.TASKBOARD_URL, process.env.BASE_URL, process.env.
   if (PRODUCTION.has(host)) throw new Error(`Refusing to run story tests against production (${host}).`);
 }
 
+const QA_PASS = Boolean(process.env.SHO_QA_PASS);
 const RUN = `${Date.now().toString(36)}${process.pid.toString(36)}`;
 let seq = 0;
 const people: Account[] = [];
@@ -86,8 +90,9 @@ function actRow(page: Page, who: string, what: string) {
   });
 }
 
-describe.skipIf(!process.env.SHO_QA_PASS)("APL-2674 activity delete undo", () => {
+describe("APL-2674 activity delete undo", () => {
   beforeAll(async () => {
+    if (!QA_PASS) return;
     browser = await chromium.launch({
       executablePath: process.env.PW_CHROMIUM || "/usr/bin/google-chrome",
       args: ["--no-sandbox", "--disable-dev-shm-usage"],
@@ -95,7 +100,12 @@ describe.skipIf(!process.env.SHO_QA_PASS)("APL-2674 activity delete undo", () =>
     db = new PrismaClient();
   }, 60_000);
 
+  beforeEach(({ skip }) => {
+    if (!QA_PASS) skip("Set SHO_QA_PASS to run the APL-2674 story spec.");
+  });
+
   afterAll(async () => {
+    if (!QA_PASS) return;
     const problems: string[] = [];
     try {
       const sa = await superAdmin();
@@ -239,11 +249,11 @@ describe.skipIf(!process.env.SHO_QA_PASS)("APL-2674 activity delete undo", () =>
     const plainCtx = await signedIn(uninvolved.email);
     try {
       const page = await openActivity(plainCtx, projectId);
-      const row = actRow(page, erinName, what);
-      if ((await row.count()) > 0) {
-        expect(await row.getByRole("button", { name: "Undo" }).count()).toBe(0);
-        expect(await row.innerText()).not.toContain("Too old to undo");
-      }
+      // The feed does not list Erin's delete to an editor who is not involved in the task: the row is absent.
+      const feed = (await uninvolved.c.get(`/api/projects/${projectId}/activity`)).json.items as { what: string }[];
+      expect(feed.some((item) => item.what === what)).toBe(false);
+      await page.locator(".item.act, .card.empty").first().waitFor({ state: "visible", timeout: 30_000 });
+      expect(await actRow(page, erinName, what).count()).toBe(0);
       expect(await page.getByText("Too old to undo").count()).toBe(0);
     } finally {
       await plainCtx.close();
