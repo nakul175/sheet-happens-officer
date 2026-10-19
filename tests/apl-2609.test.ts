@@ -33,7 +33,14 @@ async function cleanup() {
     await db.actionLog.deleteMany({ where: { OR: [...(userIds.length ? [{ actorId: { in: userIds } }] : []), ...(projectIds.length ? [{ projectId: { in: projectIds } }] : [])] } });
   }
   if (projectIds.length) await db.notification.deleteMany({ where: { projectId: { in: projectIds } } });
-  if (made.saId) await db.chatMessage.deleteMany({ where: { userId: made.saId, createdAt: { gte: started } } });
+  // The Super Admin is shared, so only this run's rows go: chat, model usage, notices and sessions.
+  if (made.saId) {
+    const since = { userId: made.saId, createdAt: { gte: started } };
+    await db.chatMessage.deleteMany({ where: since });
+    await db.modelUsage.deleteMany({ where: since });
+    await db.notification.deleteMany({ where: { recipientId: made.saId, createdAt: { gte: started } } });
+    await db.session.deleteMany({ where: since });
+  }
   if (userIds.length) {
     await db.modelUsage.deleteMany({ where: { userId: { in: userIds } } });
     await db.auditLog.deleteMany({ where: { actorId: { in: userIds } } });

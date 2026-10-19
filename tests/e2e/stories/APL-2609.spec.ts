@@ -35,6 +35,8 @@ const seed: { userIds: string[]; emails: string[]; projectIds: string[]; orgId?:
   userIds: [], emails: [], projectIds: [],
 };
 const people: { editor?: Who; admin?: Who; superAdmin?: Who } = {};
+/** The shared Super Admin's start-guide flag before this run; restored afterwards. */
+let saStartGuide: Date | null | undefined;
 let browser: Browser | null = null;
 const started = new Date();
 
@@ -45,7 +47,16 @@ async function cleanupSeed() {
       where: { OR: [...(userIds.length ? [{ actorId: { in: userIds } }] : []), ...(seed.projectIds.length ? [{ projectId: { in: seed.projectIds } }] : [])] },
     });
   }
-  if (people.superAdmin) await db.chatMessage.deleteMany({ where: { userId: people.superAdmin.id, createdAt: { gte: started } } });
+  if (seed.projectIds.length) await db.notification.deleteMany({ where: { projectId: { in: seed.projectIds } } });
+  // The Super Admin is shared, so only this run's rows go: chat, quick-action usage, notices, sessions and the start guide.
+  if (people.superAdmin) {
+    const since = { userId: people.superAdmin.id, createdAt: { gte: started } };
+    await db.chatMessage.deleteMany({ where: since });
+    await db.modelUsage.deleteMany({ where: since });
+    await db.notification.deleteMany({ where: { recipientId: people.superAdmin.id, createdAt: { gte: started } } });
+    await db.session.deleteMany({ where: since });
+    if (saStartGuide !== undefined) await db.user.update({ where: { id: people.superAdmin.id }, data: { startGuideDismissedAt: saStartGuide } });
+  }
   if (userIds.length) {
     await db.modelUsage.deleteMany({ where: { userId: { in: userIds } } });
     await db.auditLog.deleteMany({ where: { actorId: { in: userIds } } });
@@ -293,13 +304,14 @@ describe("qa:TC missing APL-2609 CRM_VISIBLE hides deals on a real server per mo
     people.editor = editor;
     people.admin = adminUser;
     people.superAdmin = await signIn(open, "Root", SUPER_EMAIL);
+    saStartGuide = (await db.user.findUniqueOrThrow({ where: { id: people.superAdmin.id }, select: { startGuideDismissedAt: true } })).startGuideDismissedAt;
 
     const pipes = await call(open.base, lead.cookie, "GET", "/api/deals/pipelines");
     expect(pipes.status, pipes.text).toBe(200);
     const pipe = (pipes.json?.pipelines as { id: string; key: string; stages: { id: string; name: string }[] }[]).find((p) => p.key === "DEAL_PROACTIVE");
     const proposal = pipe?.stages.find((s) => s.name === STAGE);
     expect(proposal?.id).toBeTruthy();
-    const org = await call(open.base, lead.cookie, "POST", "/api/orgs", { name: `Buyer ${tag}` });
+    const org = await call(open.base, lead.cookie, "POST", "/api/orgs", { name: `ZZ-TEST buyer ${runId}` });
     expect(org.status, org.text).toBe(201);
     seed.orgId = (org.json?.organisation as { id: string }).id;
     const made = await call(open.base, lead.cookie, "POST", "/api/deals", {
