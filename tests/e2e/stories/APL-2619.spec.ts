@@ -91,9 +91,11 @@ test("AC5: clicking a person's name on the Team page opens their full profile qa
   later(() => deactivate(admin.api, id));
 
   await admin.page.goto("/team");
-  // Found by its accessible name, not by scanning every Team row for the email, so the list size does not matter (D10).
-  await admin.page.locator("#main").getByRole("link", { name, exact: true }).click();
-  await expect(admin.page).toHaveURL(new RegExp(`/team/${id}$`));
+  // The link to this person's own page, found by role and its /team/<id> target instead of by scanning every Team row
+  // for the email, so neither the list size (D10) nor another spec's "ZZ-TEST ac5" person in the same run matters.
+  await admin.page.locator("#main").getByRole("link", { name, exact: true }).and(admin.page.locator(`a[href="/team/${id}"]`)).click();
+  // With about 1,850 people this navigation took 10-17 s locally at 390 px (QA D10), so it gets its own longer wait.
+  await expect(admin.page).toHaveURL(new RegExp(`/team/${id}$`), { timeout: 45_000 });
   await expect(admin.page.getByRole("heading", { name })).toBeVisible();
   await expect(admin.page.getByText(`${email} · Member`)).toBeVisible();
   const profile = await admin.api.get(`/api/team/${id}`);
