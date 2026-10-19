@@ -1,5 +1,6 @@
 // APL-2659: a hand-written db.project read outside the visibility helpers fails lint.
 // The same read passes when it goes through visibleProjects, or carries // project-lookup-ok: <reason>.
+import path from "node:path";
 import { Linter } from "eslint";
 import tsParser from "@typescript-eslint/parser";
 import { describe, expect, it } from "vitest";
@@ -88,6 +89,6 @@ describe("project lookup guard (APL-2659)", () => {
       }
     `;
     expect(lint(code, "src/lib/access.ts")).toEqual([]);
-    expect(lint(code, "/workspace/src/lib/access.ts")).toEqual([]);
+    expect(lint(code, path.join(process.cwd(), "src/lib/access.ts"))).toEqual([]);
   });
 });
