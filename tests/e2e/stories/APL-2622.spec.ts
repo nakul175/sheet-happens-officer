@@ -2,11 +2,11 @@
 // The emailed password is only ever in the person's inbox, so what the email says and what the person sees at first sign-in are manual.
 // Resend sign-in details is exercised on throw-away "ZZ-TEST" people at an .invalid address.
 import { readFileSync } from "node:fs";
-import { test, expect, RUN } from "../support";
+import { test, expect, RUN, type Json } from "../support";
 import { alias, BASE_URL, sinkText } from "./qa";
 import { signInDetailsMail } from "../../../src/lib/email";
 
-const mk = async (admin: { api: { post: (p: string, b?: unknown) => Promise<{ status: number; json: any }>; get: (p: string) => Promise<{ status: number; json: any }> } }, later: (f: () => Promise<unknown>) => void, label: string) => {
+const mk = async (admin: { api: { post: (p: string, b?: unknown) => Promise<{ status: number; json: Json }>; get: (p: string) => Promise<{ status: number; json: Json }> } }, later: (f: () => Promise<unknown>) => void, label: string) => {
   const r = await admin.api.post("/api/team", { firstName: "ZZ-TEST", lastName: `${label} ${RUN}`, email: `zz-test-${RUN}-${label}@example.invalid`, role: "MEMBER" });
   expect(r.status, JSON.stringify(r.json)).toBe(201);
   const id = r.json.person.id as string;
