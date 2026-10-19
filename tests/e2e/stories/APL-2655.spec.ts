@@ -1,5 +1,5 @@
 // APL-2655 Playwright spec. Pam has not assigned TC ids. Titles keep the literal marker until then.
-// Signs in with the throwaway session cookie and clicks Undo on Activity. Local or CI server only.
+// Signs in with the throwaway session cookie and clicks Undo on Activity. Local or CI server and database only.
 import { existsSync } from "node:fs";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { chromium, type Browser, type Page } from "playwright-core";
@@ -47,9 +47,15 @@ async function snapshot(taskId: string, logId: string) {
 
 let browser: Browser;
 
+const LOCAL = /^(localhost|127\.0\.0\.1)$/;
+
 beforeAll(async () => {
-  if (!/^(localhost|127\.0\.0\.1)$/.test(new URL(BASE).hostname)) {
-    throw new Error(`Refusing to run against ${BASE}: this spec is local only.`);
+  if (!LOCAL.test(new URL(BASE).hostname)) {
+    throw new Error("Refusing to run: TASKBOARD_URL is not a local server.");
+  }
+  // The spec reads rows with Prisma, so the database must be local too. The URL itself is never printed.
+  if (!LOCAL.test(new URL(process.env.DATABASE_URL ?? "postgresql://unset").hostname)) {
+    throw new Error("Refusing to run: DATABASE_URL is not a local database.");
   }
   browser = await chromium.launch({ executablePath: chromePath(), args: ["--no-sandbox", "--disable-dev-shm-usage"] });
 });
@@ -99,8 +105,9 @@ describe("qa:TC missing APL-2655 editor Undo of a delete", () => {
       expect(await snapshot(t, row.id)).toEqual(before);
 
       await page.goto(`/projects/${p.id}/trash`);
-      await page.getByRole("heading", { name: "Trash" }).waitFor();
-      expect(await page.getByRole("cell", { name: "T1" }).count()).toBe(0);
+      // The heading renders before the list loads, so wait for the loaded state, not the heading.
+      await page.getByText("Trash is empty.").waitFor();
+      expect(await page.getByRole("cell", { name: "T1", exact: true }).count()).toBe(0);
       expect((await ed.c.get(`/api/tasks/${t}`)).status).toBe(200);
     } finally {
       await ctx.close();
@@ -126,8 +133,8 @@ describe("qa:TC missing APL-2655 editor Undo of a delete", () => {
       expect(await snapshot(t, row.id)).toEqual(before);
 
       await page.goto(`/projects/${p.id}/trash`);
-      await page.getByRole("heading", { name: "Trash" }).waitFor();
-      expect(await page.getByRole("cell", { name: "T1" }).count()).toBe(1);
+      await page.getByRole("cell", { name: "T1", exact: true }).waitFor();
+      expect(await page.getByRole("cell", { name: "T1", exact: true }).count()).toBe(1);
       expect((await ed.c.get(`/api/tasks/${t}`)).status).toBe(404);
     } finally {
       await ctx.close();
