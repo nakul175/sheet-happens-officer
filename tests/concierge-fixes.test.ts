@@ -77,7 +77,7 @@ describe("claims (finding 1)", () => {
     const { lead } = await setup(0);
     const sa = await db.user.findFirstOrThrow({ where: { orgRole: "SUPER_ADMIN" } });
     await db.notification.deleteMany({ where: { type: "CONCIERGE_BUDGET_80" } });
-    const row = await db.modelUsage.create({ data: { userId: lead.id, model: "m", inputTokens: 1, outputTokens: 1, costUsd: "9", counted: false } });
+    const row = await db.modelUsage.create({ data: { userId: lead.id, model: "ZZ-TEST", inputTokens: 1, outputTokens: 1, costUsd: "9", counted: false } });
     const spend = await monthSpendUsd(new Date());
     process.env.MONTHLY_CEILING_USD = String(spend / 0.9);
     const r = await Promise.all([1, 2, 3, 4, 5, 6].map(() => warnIfNearCeiling()));

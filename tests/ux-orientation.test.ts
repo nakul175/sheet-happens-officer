@@ -1,5 +1,6 @@
 // SHO-US-14.4 first-run orientation: Leaders list, request to be added, Team roles, dismiss.
 import { describe, expect, it } from "vitest";
+import { trackModelUsage } from "./concierge-helpers";
 import { Client, PW, account, project } from "./helpers";
 
 describe("orientation", () => {
@@ -45,6 +46,8 @@ describe("orientation", () => {
 
 // SHO-US-14.15 AC2: a quick action asked from a project screen is about that project only.
 describe("concierge quick action scoped to a project", () => {
+  trackModelUsage();
+
   it("answers for one project and refuses a project the person is not in", async () => {
     const a = await account("qa1");
     const b = await account("qa2");
