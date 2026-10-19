@@ -39,11 +39,13 @@ function isDangerous(value: string): boolean {
   return false;
 }
 
-/** Every decode of `value`, or null when a layer is dangerous, malformed, or still encoded after the cap. */
-function decodeAll(value: string): string[] | null {
+/** Every decode of `value`, or null when a layer is dangerous, malformed, or still encoded after the cap. `priorDecodes` is a decode that already happened, such as the router reading the query. */
+function decodeAll(value: string, priorDecodes = 0): string[] | null {
+  const budget = MAX_DECODES - priorDecodes;
+  if (budget < 0) return null;
   const layers = [value];
   let current = value;
-  for (let i = 0; i < MAX_DECODES; i++) {
+  for (let i = 0; i < budget; i++) {
     if (isDangerous(current)) return null;
     let next: string;
     try {
@@ -55,7 +57,7 @@ function decodeAll(value: string): string[] | null {
     current = next;
     layers.push(current);
   }
-  // Five decodes are allowed when the result is fully decoded. A sixth encoding is rejected.
+  // Decodes up to the cap are allowed when the result is fully decoded. One more encoding is rejected.
   if (isDangerous(current)) return null;
   try {
     if (decodeURIComponent(current) !== current) return null;
@@ -92,12 +94,13 @@ function canonicalPath(value: string): string | null {
  * A same-origin path (`/tasks/T1`, optionally with a query), or null.
  * A fragment is dropped.
  * Null means "send them home": the value is missing, empty, or not a safe path.
+ * `priorDecodes` counts a decode that already happened. The sign-in page passes 1 because the router decoded the query.
  */
-export function safeReturnPath(input: string | null | undefined): string | null {
+export function safeReturnPath(input: string | null | undefined, priorDecodes = 0): string | null {
   if (typeof input !== "string") return null;
   const raw = input.trim();
   if (!raw || raw.length > MAX_LENGTH) return null;
-  const layers = decodeAll(raw);
+  const layers = decodeAll(raw, priorDecodes);
   if (!layers) return null;
   for (const layer of layers) {
     if (!originStays(layer)) return null;

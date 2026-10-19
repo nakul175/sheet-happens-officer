@@ -12,7 +12,8 @@ async function Form({ params }: { params: PageProps<"/signin">["searchParams"] }
   // Flag off ignores next and expired, so sign-in lands on the home page as it does on main.
   if (!returnToEnabled()) return <SignInForm justReset={sp.reset === "1"} />;
   // Only a safe path is handed to the form. A bad `next` is dropped, so sign-in goes home.
-  const next = safeReturnPath(typeof sp.next === "string" ? sp.next : undefined) ?? undefined;
+  // The router decoded the query once already. That decode counts toward the five-layer cap.
+  const next = safeReturnPath(typeof sp.next === "string" ? sp.next : undefined, 1) ?? undefined;
   return (
     <>
       <ReturnToBridge />

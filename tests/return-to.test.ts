@@ -157,6 +157,17 @@ describe("APL-2652 safe return path", () => {
     expect(safeReturnPath(encode("/tasks/a b", 3))).toBeNull();
   });
 
+  it("qa:TC missing rejects a safe path encoded six times after the router decode", () => {
+    const encode = (value: string, times: number) => {
+      let out = value;
+      for (let i = 0; i < times; i++) out = encodeURIComponent(out);
+      return out;
+    };
+    // The router decodes the query once, so six layers reach safeReturnPath as five.
+    const seen = decodeURIComponent(encode("/tasks/T1?tab=comments", 6));
+    expect(safeReturnPath(seen, 1)).toBeNull();
+  });
+
   it("rejects a missing, empty or oversized value", () => {
     expect(safeReturnPath(null)).toBeNull();
     expect(safeReturnPath(undefined)).toBeNull();
