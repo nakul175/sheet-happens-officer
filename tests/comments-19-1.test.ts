@@ -13,7 +13,8 @@ import { commentsEnabled } from "../src/lib/flags";
 import { confirmCard } from "../src/lib/concierge/cards";
 import { newTurn, runTool, TOOLS, conciergeTools } from "../src/lib/concierge/tools";
 import { sendMessage } from "../src/lib/concierge/engine";
-import { listNotifications, projectActivity, purgeOld } from "../src/lib/feed";
+import { listNotifications, markRead, markUnread, projectActivity, purgeOld } from "../src/lib/feed";
+import { logAction } from "../src/lib/notify";
 import { search } from "../src/lib/search";
 import { listTasks, purgeTrash } from "../src/lib/tasks";
 import { checkUndo, undoAction } from "../src/lib/undo";
@@ -160,8 +161,12 @@ describe("flag off, QA #128 (D1, D2)", () => {
     off();
     const undos = await db.actionLog.findMany({ where: { targetId: t1, action: "undo" } });
     expect(undos).toHaveLength(2);
-    // Pam's steps, over HTTP against the flag-off server, as the writer's Leader and the writer.
-    for (const who of [lead, worker]) {
+    // Pam #128 @8da5384 D4: an Admin is covered too (ZZ-TEST name, nakul17+ alias; deactivated through the API below).
+    const sa = await superAdmin();
+    const adm = await account("admin", `nakul17+zztest-apl2590-d1-admin-${Date.now().toString(36)}@aplyd.com`, "ZZ-TEST admin");
+    expect((await sa.c.patch(`/api/team/${adm.id}`, { orgRole: "ADMIN" })).status).toBe(200);
+    // Pam's steps, over HTTP against the flag-off server, as the writer's Leader, the writer and an Admin.
+    for (const who of [lead, worker, adm]) {
       const activity = await who.c.get(`/api/projects/${p.id}/activity`);
       expect(activity.status).toBe(200);
       const shown = (activity.json.items as { id: string }[]).map((i) => i.id);
@@ -174,6 +179,23 @@ describe("flag off, QA #128 (D1, D2)", () => {
       const back = await projectActivity(actor(lead), p.id);
       for (const u of undos) expect(back.items.some((i) => i.id === u.id)).toBe(true);
     } finally { off(); }
+    expect((await sa.c.post(`/api/team/${adm.id}/deactivate`, { reassign: "leaders" })).status).toBe(200);
+  });
+
+  // Pam #128 @8da5384 D3: the flag-off filter also hid Undo rows with no before.action (rows logged before it was recorded).
+  // The app no longer writes that shape, so the row is logged here through the app's own logAction, in the older shape.
+  it("qa:TC missing D3 (#128): flag off, an Undo row without before.action still shows in Activity", async () => {
+    const { lead, p, t1 } = await cast();
+    await db.$transaction((tx) => logAction(tx, {
+      actorId: lead.id, projectId: p.id, targetType: "task", targetId: t1, action: "undo",
+      before: { undoes: "zz-test-older-row" }, after: { undoes: "zz-test-older-row", label: "Task moved" },
+    }));
+    const row = await db.actionLog.findFirstOrThrow({ where: { targetId: t1, action: "undo" }, orderBy: { createdAt: "desc" } });
+    expect((row.beforeState as { action?: string }).action).toBeUndefined();
+    const activity = await lead.c.get(`/api/projects/${p.id}/activity`);
+    expect(activity.status).toBe(200);
+    expect((activity.json.items as { id: string }[]).map((i) => i.id)).toContain(row.id);
+    expect((await projectActivity(actor(lead), p.id)).items.map((i) => i.id)).toContain(row.id);
   });
 
   // Pam #128 @3a96042 D2: with the flag off, POST /api/notifications/read-all marked the hidden comment notices read.
@@ -193,6 +215,20 @@ describe("flag off, QA #128 (D1, D2)", () => {
     expect(await unreadComments()).toBe(before);
     expect(await unreadOthers()).toBe(0);
     expect((await worker.c.get("/api/notifications")).json.unread).toBe(0);
+
+    // Pam #128 @8da5384 D2: markRead and markUnread must not change a hidden comment notice either.
+    const hidden = await db.notification.findFirstOrThrow({ where: { recipientId: worker.id, readAt: null, type: { in: commentTypes } } });
+    const readAt = async () => (await db.notification.findUniqueOrThrow({ where: { id: hidden.id } })).readAt;
+    expect((await worker.c.post(`/api/notifications/${hidden.id}/read`)).status).toBeLessThan(300);
+    await markRead(actor(worker), hidden.id);
+    expect(await readAt(), "markRead left the hidden notice unread").toBeNull();
+    on();
+    try { await markRead(actor(worker), hidden.id); } finally { off(); } // read it while the flag is on
+    const wasRead = await readAt();
+    expect(wasRead).not.toBeNull();
+    expect((await worker.c.post(`/api/notifications/${hidden.id}/unread`)).status).toBeLessThan(300);
+    await markUnread(actor(worker), hidden.id);
+    expect((await readAt())?.toISOString(), "markUnread left the hidden notice read").toBe(wasRead?.toISOString());
   });
 });
 
