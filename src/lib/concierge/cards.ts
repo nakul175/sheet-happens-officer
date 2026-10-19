@@ -7,11 +7,11 @@ import { reqCtx, type ReqCtx } from "@/lib/reqctx";
 import { checkUndo, undoAction } from "@/lib/undo";
 import { isTooOldToUndo, isUndoable } from "@/lib/undoable";
 import { buildCard, checkHandover, execute, fingerprint, recheck, summaryOf, type Op } from "@/lib/concierge/changes";
-import { addMessage, casStored, ownMessage, parse, present } from "@/lib/concierge/thread";
+import { addMessage, casStored, chatWhere, ownMessage, parse, present } from "@/lib/concierge/thread";
 import type { Card, Message, Stored } from "@/lib/concierge/types";
 
 async function ownCard(user: Actor, cardId: string) {
-  const row = await ownMessage(user.id, cardId);
+  const row = await ownMessage(user, cardId);
   const s = parse(row.content);
   if (row.role !== "ASSISTANT" || s.kind !== "card" || !s.card || !s.proposal) throw new ApiError(404, "Card not found");
   return { row, s: s as Stored & { card: Card; proposal: NonNullable<Stored["proposal"]> } };
@@ -21,12 +21,12 @@ async function ownCard(user: Actor, cardId: string) {
 async function freshCard(user: Actor, ops: Op[]): Promise<Message> {
   try {
     const b = await buildCard(user, ops);
-    return present(await addMessage(user.id, "ASSISTANT", {
+    return present(await addMessage(user, "ASSISTANT", {
       kind: "card", text: `Things changed since I showed you that. ${b.card.title}. Review it and tap Confirm to apply it.`,
       card: { id: "", status: "PENDING", ...b.card }, proposal: { ops: b.ops, fingerprint: b.fingerprint, versions: b.versions },
     }));
   } catch (e) {
-    if (e instanceof ApiError) return present(await addMessage(user.id, "ASSISTANT", { kind: "notice", text: "Things changed since I showed you that card, and part of it is no longer possible. Nothing was changed. Ask me again if you still want it." }));
+    if (e instanceof ApiError) return present(await addMessage(user, "ASSISTANT", { kind: "notice", text: "Things changed since I showed you that card, and part of it is no longer possible. Nothing was changed. Ask me again if you still want it." }));
     throw e;
   }
 }
@@ -100,7 +100,7 @@ export async function confirmCard(user: Actor, cardId: string, handover?: { task
   const text = failure
     ? `Only part of this was done: ${why}${done.length ? `\nDone:\n${done.map((x) => `- ${x}`).join("\n")}` : ""}\nThe rest was not done. Ask me again for what is left.`
     : `Done.\n${summary.map((x) => `- ${x}`).join("\n")}`;
-  const resultRow = await addMessage(user.id, "ASSISTANT", {
+  const resultRow = await addMessage(user, "ASSISTANT", {
     kind: "result", text,
     result: { cardId: row.id, summary: failure ? done : summary, undoable, noticeSent: !!ctx.notified, notNotified: !ctx.notified },
     internal: { logIds, confirmedAt, cardMessageId: row.id },
@@ -130,7 +130,7 @@ export async function cancelCard(user: Actor, cardId: string) {
 export async function undoCard(user: Actor, cardId: string, anyway = false) {
   const { row } = await ownCard(user, cardId);
   const resultId = (parse(row.content).internal)?.resultMessageId;
-  const resultRow = resultId ? await db.chatMessage.findFirst({ where: { id: resultId, userId: user.id } }) : null;
+  const resultRow = resultId ? await db.chatMessage.findFirst({ where: { ...(await chatWhere(user)), id: resultId } }) : null;
   const rs = resultRow ? parse(resultRow.content) : null;
   if (!resultRow || !rs?.result || !rs.internal) throw new ApiError(404, "Nothing to undo");
   if (!rs.result.undoable) {
@@ -173,14 +173,14 @@ export async function undoCard(user: Actor, cardId: string, anyway = false) {
     // What was reversed stays recorded; the claim is released so a retry finishes the rest.
     await save({});
     if (progress.length > (rs.internal.undoneIds ?? []).length) {
-      await addMessage(user.id, "ASSISTANT", { kind: "notice", text: `Undo stopped part way: ${progress.length - (rs.internal.undoneIds ?? []).length} change${progress.length - (rs.internal.undoneIds ?? []).length === 1 ? " was" : "s were"} put back and the rest is still as it was. Tap Undo again to finish.` });
+      await addMessage(user, "ASSISTANT", { kind: "notice", text: `Undo stopped part way: ${progress.length - (rs.internal.undoneIds ?? []).length} change${progress.length - (rs.internal.undoneIds ?? []).length === 1 ? " was" : "s were"} put back and the rest is still as it was. Tap Undo again to finish.` });
     }
     throw e;
   }
   const undoneAt = new Date().toISOString();
   await save({}, { ...rs.result, undoneAt });
   const lines = rs.result.summary.map((x) => `- Reversed: ${x}`);
-  const note = await addMessage(user.id, "ASSISTANT", {
+  const note = await addMessage(user, "ASSISTANT", {
     kind: "notice",
     text: `Undone. Everything on that card was put back:\n${lines.join("\n")}${noticed || rs.result.noticeSent ? "\nNotices already sent to other people cannot be unsent." : ""}`,
   });

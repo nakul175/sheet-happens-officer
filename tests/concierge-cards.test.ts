@@ -73,7 +73,7 @@ async function person(email: string, name: string, orgRole: Actor["orgRole"], wo
 /** A pending card, as the concierge would store it, ready to confirm. */
 async function pendingCard(user: Actor, ops: Op[]) {
   const built = await buildCard(user, ops);
-  const row = await addMessage(user.id, "ASSISTANT", {
+  const row = await addMessage(user, "ASSISTANT", {
     kind: "card",
     text: built.card.title,
     card: { id: "", status: "PENDING", ...built.card },
