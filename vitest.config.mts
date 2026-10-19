@@ -17,6 +17,7 @@ export default defineConfig({
       "tests/viewport/**",
       "tests/crm-visible-modes-server.test.ts",
       "tests/jobs-reminders-crm-server.test.ts",
+      "e2e/**",
       "scripts/**",
     ],
   },
