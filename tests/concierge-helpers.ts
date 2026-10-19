@@ -3,7 +3,7 @@
 import { afterEach, beforeEach } from "vitest";
 import { PrismaClient } from "../src/generated/prisma/client";
 import { setFakeModel, type ContentBlock, type ModelRequest } from "../src/lib/model";
-import { clearProviderDown } from "../src/lib/concierge/limits";
+import { clearProviderDown, monthSpendUsd } from "../src/lib/concierge/limits";
 import type { Actor } from "../src/lib/access";
 import type { Account } from "./helpers";
 
@@ -45,15 +45,41 @@ export const lastResultText = (req: ModelRequest) => {
   return "";
 };
 
+/**
+ * Deletes exactly the model-usage rows created while the test ran.
+ * Ids present at the start (including unrelated month spend) are left in place.
+ */
+export function trackModelUsage() {
+  let seen = new Set<string>();
+  beforeEach(async () => {
+    seen = new Set((await db.modelUsage.findMany({ select: { id: true } })).map((r) => r.id));
+  });
+  afterEach(async () => {
+    const created = (await db.modelUsage.findMany({ select: { id: true } })).map((r) => r.id).filter((id) => !seen.has(id));
+    if (created.length) await db.modelUsage.deleteMany({ where: { id: { in: created } } });
+  });
+}
+
+/**
+ * In-process ceiling above spend already stored for this month and for the March 2031
+ * dates the suites pass as `now`. Tests that assert a ceiling overwrite this.
+ * The live server keeps its own env, so Usage still reports the default $100.
+ */
+async function liftCeilingAboveBaseline() {
+  const spend = Math.max(await monthSpendUsd(new Date()), await monthSpendUsd(MONDAY));
+  process.env.MONTHLY_CEILING_USD = String(Math.max(spend * 2, spend + 10_000));
+}
+
 /** Fake provider on, owner approval on, no waiting between retries. */
 export function useFakeModel() {
-  beforeEach(() => {
+  trackModelUsage();
+  beforeEach(async () => {
     process.env.MODEL_PROVIDER = "fake";
     process.env.MODEL_DATA_APPROVED = "true";
     process.env.MODEL_RETRY_DELAY_MS = "0";
-    delete process.env.MONTHLY_CEILING_USD;
     delete process.env.WEEKLY_MESSAGE_CAP;
     delete process.env.MODEL_NAME;
+    await liftCeilingAboveBaseline();
     clearProviderDown();
     setFakeModel(null);
   });
