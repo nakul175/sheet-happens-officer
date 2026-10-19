@@ -16,12 +16,20 @@ const DAY = 24 * 60 * 60 * 1000;
 const WINDOW = 30 * DAY;
 
 // AC6 backdates actionLog.createdAt through Prisma (there is no API to age an action row), so refuse any database that is
-// not on this machine before a client is even created (Pam D8). CI and local runs use localhost.
+// not a sho_test* database on this machine before a client is even created (Pam D8). CI uses localhost/sho_test.
 function assertLocalDatabase() {
   let host = "";
-  try { host = new URL(process.env.DATABASE_URL ?? "").hostname.toLowerCase(); } catch { host = ""; }
+  let name = "";
+  try {
+    const url = new URL(process.env.DATABASE_URL ?? "");
+    host = url.hostname.toLowerCase();
+    name = url.pathname.replace(/^\//, "");
+  } catch { host = ""; name = ""; }
   if (host !== "localhost" && host !== "127.0.0.1") {
     throw new Error("Refusing tests/activity-delete-undo.test.ts: DATABASE_URL must be a database on this machine (it backdates rows).");
+  }
+  if (!name.startsWith("sho_test")) {
+    throw new Error("Refusing tests/activity-delete-undo.test.ts: the database name must start with sho_test (it backdates rows).");
   }
 }
 assertLocalDatabase();

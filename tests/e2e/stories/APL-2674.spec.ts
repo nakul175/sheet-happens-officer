@@ -126,7 +126,7 @@ function actRow(page: Page, who: string, what: string) {
     .filter({ has: page.getByText(who, { exact: true }) });
 }
 
-test.describe("qa:TC missing APL-2674 activity delete undo", () => {
+test.describe("APL-2674 activity delete undo", () => {
   test.describe.configure({ mode: "serial" });
 
   test.beforeAll(async () => {
@@ -166,7 +166,7 @@ test.describe("qa:TC missing APL-2674 activity delete undo", () => {
     expect(problems, problems.join("\n")).toEqual([]);
   });
 
-  test("qa:TC missing AC1 Undo on a task.deleted row follows the Trash restore rule: no Undo for the Editor, Undo for the Leader and a Super Admin on their own deletes", async ({ browser }) => {
+  test("qa:TC-APL2674-4c99513c@v1 qa:TC-APL2674-c7c6fa04@v1 AC1 Undo on a task.deleted row follows the Trash restore rule: no Undo for the Editor, Undo for the Leader and a Super Admin on their own deletes", async ({ browser }) => {
     test.setTimeout(180_000);
     const leader = await zzAccount("leader");
     const editor = await zzAccount("editor");
@@ -205,7 +205,7 @@ test.describe("qa:TC missing APL-2674 activity delete undo", () => {
     }
   });
 
-  test("qa:TC missing AC2 Other Undo rows are unchanged: the Editor's own edit shows Undo and restores the title", async ({ browser }) => {
+  test("qa:TC-APL2674-5a651835@v1 AC2 Other Undo rows are unchanged: the Editor's own edit shows Undo and restores the title", async ({ browser }) => {
     test.setTimeout(90_000);
     const leader = await zzAccount("leader");
     const editor = await zzAccount("editor");
@@ -226,7 +226,7 @@ test.describe("qa:TC missing APL-2674 activity delete undo", () => {
     }
   });
 
-  test("qa:TC missing AC3 The server stays the source of truth: a direct undo of the Editor's own delete is 403 and nothing is restored", async ({ browser }) => {
+  test("qa:TC-APL2674-cbcdf3cc@v1 AC3 The server stays the source of truth: a direct undo of the Editor's own delete is 403 and nothing is restored", async ({ browser }) => {
     test.setTimeout(90_000);
     const leader = await zzAccount("leader");
     const editor = await zzAccount("editor");
@@ -250,7 +250,7 @@ test.describe("qa:TC missing APL-2674 activity delete undo", () => {
     expect((trash.json.items as { id: string }[]).some((item) => item.id === created.id)).toBe(true);
   });
 
-  test("qa:TC missing AC4 Leader and Admin see Undo on someone else's delete and it restores; another Editor, an uninvolved Editor and a Viewer do not", async ({ browser }) => {
+  test("qa:TC-APL2674-d0b5b573@v2 qa:TC-APL2674-db4b7af8@v3 AC4 Leader and Admin see Undo on someone else's delete and it restores; another Editor, an uninvolved Editor and a Viewer do not", async ({ browser }) => {
     test.setTimeout(180_000);
     const leader = await zzAccount("leader");
     const erin = await zzAccount("erin");
@@ -320,7 +320,7 @@ test.describe("qa:TC missing APL-2674 activity delete undo", () => {
     expect((trash.json.items as { id: string }[]).some((item) => item.id === created.id)).toBe(false);
   });
 
-  test("qa:TC missing AC5 Undo from the Activity row sends one POST /api/actions/{actionId}/undo with {\"anyway\":false}", async ({ browser }) => {
+  test("qa:TC-APL2674-a4fde780@v2 AC5 Undo from the Activity row sends one POST /api/actions/{actionId}/undo with {\"anyway\":false}", async ({ browser }) => {
     test.setTimeout(90_000);
     const leader = await zzAccount("leader");
     const editor = await zzAccount("editor");
@@ -350,7 +350,7 @@ test.describe("qa:TC missing APL-2674 activity delete undo", () => {
     expect(posts).toEqual([{ path: `/api/actions/${actionId}/undo`, body: '{"anyway":false}' }]);
   });
 
-  test("qa:TC missing AC7 A deleted task stays in Trash with 30 days, and the Leader restores it from Trash and from the Activity row (the toast is not asserted)", async ({ browser }) => {
+  test("qa:TC-APL2674-070b48b9@v3 AC7 A deleted task stays in Trash with 30 days, and the Leader restores it from Trash and from the Activity row (the toast is not asserted)", async ({ browser }) => {
     test.setTimeout(120_000);
     const leader = await zzAccount("leader");
     const projectId = await zzProject(leader);
