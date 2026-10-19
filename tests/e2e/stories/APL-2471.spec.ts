@@ -47,8 +47,10 @@ test("AC1: the bell shows the unread count and the panel lists the notices; open
   await member.page.goto("/");
   await expect(member.page.getByRole("button", { name: `Notifications, ${now.unread} unread` })).toBeVisible();
   const dlg = await openBell(member.page);
-  await expect(dlg.locator(".bell-main", { hasText: title })).toBeVisible();
-  await dlg.locator(".bell-main", { hasText: title }).click();
+  // Each notice is a link whose name holds the task title (unique to this run).
+  const notice = dlg.getByRole("link", { name: title });
+  await expect(notice).toBeVisible();
+  await notice.click();
   await expect.poll(async () => (await inbox(member)).items.find((n) => n.id === hit[0].id)?.read).toBe(true);
   expect((await inbox(member)).unread).toBe(now.unread - 1);
 });
