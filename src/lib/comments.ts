@@ -151,6 +151,8 @@ export async function addComment(user: Actor, taskId: string, input: { text?: st
   const live = await db.comment.count({ where: { taskId, removedAt: null } });
   if (live >= COMMENTS_PER_TASK) throw fail("too_many_comments", "A task can have at most 200 comments.");
   return db.$transaction(async (tx) => {
+    // APL-2590 D3: lock the task row so concurrent adds to one task count one at a time; the cap holds at 200.
+    await tx.$queryRaw`SELECT 1 FROM "Task" WHERE "id" = ${taskId} FOR UPDATE`;
     const again = await tx.comment.count({ where: { taskId, removedAt: null } });
     if (again >= COMMENTS_PER_TASK) throw fail("too_many_comments", "A task can have at most 200 comments.");
     const c = await tx.comment.create({
