@@ -54,10 +54,18 @@ export async function verifyPassword(password: string, stored: string | null): P
 
 export function clientIp(req: Request): string | null {
   const fwd = req.headers.get("x-forwarded-for");
-  return fwd ? fwd.split(",")[0].trim() || null : null;
+  return fwd ? fwd.split(",")[0].trim().slice(0, 64) || null : null;
 }
 
-/** Audit rows for sign-in events carry the IP; no other event does. Never put secrets in data. */
+/** APL-2742. The request's user agent, cut to the same 300 characters a session stores. */
+export function clientAgent(req: Request): string | null {
+  return req.headers.get("user-agent")?.slice(0, 300) || null;
+}
+
+/**
+ * Audit rows for sign-in and email-verification events carry the IP (APL-2742 adds the user agent in data
+ * for verification); no other event does. Never put secrets in data.
+ */
 export async function audit(
   event: string,
   o: { actorId?: string | null; ip?: string | null; data?: Record<string, string> } = {},
@@ -138,6 +146,27 @@ export async function issueToken(userId: string, type: "VERIFY" | "RESET") {
       data: { userId, type, tokenHash: sha256(token), expiresAt: new Date(Date.now() + hours * HOUR) },
     }),
   ]);
+  return token;
+}
+
+/**
+ * APL-2742. Creates a token of a type and hands it to `send`. Only when the send succeeds are the earlier unused tokens
+ * of that type voided, so a failed send leaves the link already delivered working. A failed send's token is deleted,
+ * so it never counts toward the hourly limit. Returns the raw token.
+ */
+export async function issueTokenAndSend(userId: string, type: "VERIFY" | "RESET", send: (token: string) => Promise<void>) {
+  const token = newToken();
+  const hours = type === "VERIFY" ? VERIFY_HOURS : RESET_HOURS;
+  const row = await db.authToken.create({
+    data: { userId, type, tokenHash: sha256(token), expiresAt: new Date(Date.now() + hours * HOUR) },
+  });
+  try {
+    await send(token);
+  } catch (err) {
+    await db.authToken.delete({ where: { id: row.id } });
+    throw err;
+  }
+  await db.authToken.updateMany({ where: { userId, type, usedAt: null, id: { not: row.id } }, data: { usedAt: new Date() } });
   return token;
 }
 
