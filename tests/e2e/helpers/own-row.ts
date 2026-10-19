@@ -1,19 +1,11 @@
 // Move timestamps on rows a story spec created. Local test databases only.
 // A remote, staging, preview, or production database makes the test fail. It is never updated.
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
 import { BASE_URL, expect } from "../support";
 
-/** Playwright does not load .env. A local file may hold DATABASE_URL; a remote value is still refused below. */
+/** DATABASE_URL from the process environment only. The .env file is never read. A remote value is still refused below. */
 function databaseUrl(): string {
-  if (process.env.DATABASE_URL) return process.env.DATABASE_URL;
-  try {
-    const line = readFileSync(".env", "utf8").split("\n").find((l) => l.startsWith("DATABASE_URL="));
-    if (!line) return "";
-    return line.slice("DATABASE_URL=".length).trim().replace(/^["']|["']$/g, "");
-  } catch {
-    return "";
-  }
+  return process.env.DATABASE_URL ?? "";
 }
 
 const TOKEN = /^[A-Za-z0-9_-]+$/;
@@ -40,8 +32,14 @@ export function localTestDatabase(): string {
   return parsed.toString();
 }
 
+/** A failed execFileSync message repeats the command line, which holds the connection string. Only psql's stderr is kept. */
 function psql(sql: string) {
-  return execFileSync("psql", [localTestDatabase(), "-v", "ON_ERROR_STOP=1", "-c", sql], { encoding: "utf8" });
+  try {
+    return execFileSync("psql", [localTestDatabase(), "-v", "ON_ERROR_STOP=1", "-c", sql], { encoding: "utf8", stdio: "pipe" });
+  } catch (err) {
+    const stderr = String((err as { stderr?: unknown }).stderr ?? "").trim();
+    throw new Error(`psql failed: ${stderr || "no stderr"}`);
+  }
 }
 
 function id(value: string) {
