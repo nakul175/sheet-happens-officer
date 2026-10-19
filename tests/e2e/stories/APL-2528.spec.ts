@@ -56,11 +56,8 @@ test("AC3: removing a stage asks where its items go qa:TC missing", async ({ adm
   const removed = await admin.api.del(`/api/deals/pipelines/${stage.id}`);
   const body = JSON.stringify(removed.json);
   const asked = removed.status === 409 && /where|another stage|move/i.test(body);
-  if (!asked) {
-    test.skip(true, "APL-2709 APL-2528: nothing removes a stage or asks where its items go. Stages change by migration only.");
-    return;
-  }
-  expect(asked, `${removed.status} ${body}`).toBe(true);
+  // APL-2709 defect (Linear APL-2709): nothing removes a stage or asks where its items go. Stages change by migration only.
+  expect(asked, `APL-2709 APL-2528 defect: removing a stage must answer 409 and ask where its items go. Got ${removed.status} ${body}`).toBe(true);
   const again = await pipelines(admin);
   expect(again.flatMap((p) => p.stages).some((s) => s.id === stage.id), "the stage row is still there").toBe(true);
 });

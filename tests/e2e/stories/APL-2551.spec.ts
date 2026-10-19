@@ -94,11 +94,17 @@ test("AC3: composer and Send stay visible with the on-screen keyboard open qa:TC
   await page.getByRole("button", { name: "More" }).click();
   await page.getByRole("menuitem", { name: "Concierge" }).click();
   const sheet = page.getByRole("dialog", { name: "Concierge" });
+  await expect(sheet).toBeVisible();
   const box = sheet.getByLabel("Message the concierge");
-  await expect(box).toBeVisible();
+  await expect(box).toBeEnabled();
   await box.focus();
+  await expect(box).toBeFocused();
   // The mobile project has no operating-system keyboard. Shortening the viewport is how that keyboard shrinks visualViewport.
   await page.setViewportSize({ width: 390, height: 420 });
+  await page.waitForFunction(() => window.visualViewport?.height === 420);
+  // The keyboard opening must not close the sheet.
+  await expect(sheet, "the Concierge sheet is still open after the visible area shrinks").toBeVisible();
+  await expect(box).toBeFocused();
   await expect(box).toBeInViewport();
   await expect(sheet.getByRole("button", { name: "Send" })).toBeInViewport();
   await ctx.close();

@@ -74,10 +74,8 @@ test("AC2: a 150-character title and a 300-character blocked reason are fully re
   for (const [name, el] of [["title", title], ["blocked reason", reason]] as const) {
     const m = await el.evaluate((e) => ({ sw: e.scrollWidth, cw: e.clientWidth, sh: e.scrollHeight, ch: e.clientHeight }));
     expect(m.sw, `${name} scrolls sideways`).toBeLessThanOrEqual(m.cw + 1);
-    if (name === "blocked reason" && m.sh > m.ch + 2) {
-      test.skip(true, "APL-2709 APL-2555: a 300-character blocked reason still scrolls inside the box. The box grows to five lines, then stops, so the rest is not on screen at once.");
-    }
-    expect(m.sh, `${name} is clipped vertically`).toBeLessThanOrEqual(m.ch + 2);
+    // APL-2709 defect (Linear APL-2709): the blocked-reason box grows to five lines, then scrolls inside itself.
+    expect(m.sh, `APL-2709 APL-2555 defect: the ${name} is clipped vertically (scrollHeight ${m.sh}, clientHeight ${m.ch})`).toBeLessThanOrEqual(m.ch + 2);
   }
   const pg = await page.evaluate(() => ({ sw: document.documentElement.scrollWidth, iw: window.innerWidth }));
   expect(pg.sw).toBeLessThanOrEqual(pg.iw + 1);
@@ -160,9 +158,8 @@ test("AC5: with the keyboard open and the description focused, the field and foo
     const h = window.visualViewport?.height ?? window.innerHeight;
     return r.height > 0 && r.top >= 0 && r.bottom <= h + 1;
   });
-  if (!kept) {
-    test.skip(true, "APL-2709 APL-2555: shortening the visible area (the keyboard) leaves the focused description outside the sheet. The sheet does not follow visualViewport, and the footer is not pinned in that area.");
-  }
+  // APL-2709 defect (Linear APL-2709): the sheet does not follow visualViewport, and the footer is not pinned in that area.
+  expect(kept, "APL-2709 APL-2555 defect: with the visible area shortened to 380 px (the keyboard), the focused description is outside it").toBe(true);
   await expect(desc).toBeInViewport();
   await expect(dialog.getByRole("button", { name: "Close" })).toBeInViewport();
   await expect(dialog.getByRole("button", { name: "Mark complete" })).toBeInViewport();

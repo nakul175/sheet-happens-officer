@@ -157,10 +157,8 @@ test("AC3: a stage that lists empty required fields refuses the move until they 
   test.setTimeout(120_000);
   const pipes = await crmPipes(admin, CRM_OFF);
   const stage = pipes.flatMap((p) => p.stages).find((s) => s.requiredFields.length > 0);
-  if (!stage) {
-    test.skip(true, "APL-2709 APL-2529: no seeded stage lists requiredFields, so a move is never asked for them.");
-    return;
-  }
+  // APL-2709 defect (Linear APL-2709): no seeded stage lists requiredFields, so a move is never asked for them.
+  if (!stage) throw new Error("APL-2709 APL-2529 defect: no stage lists requiredFields, so no move is ever refused for missing fields.");
   const pipe = pipes.find((p) => p.stages.some((s) => s.id === stage.id))!;
   const org = await admin.api.post("/api/orgs", { name: zz("org 2529 fields") });
   expect(org.status, JSON.stringify(org.json)).toBe(201);

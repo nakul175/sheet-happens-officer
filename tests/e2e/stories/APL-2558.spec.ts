@@ -75,10 +75,7 @@ test("AC2: Chrome on Android offers install qa:TC missing", async () => {
     const found = await session.send("Page.getInstallabilityErrors");
     const errors = (found as { installabilityErrors?: { errorId: string }[] }).installabilityErrors ?? [];
     const blocking = errors.filter((e) => e.errorId !== "warn-not-offline-capable");
-    if (blocking.length) {
-      test.skip(true, `APL-2709 APL-2558: Chrome on Android does not offer install: ${errors.map((e) => e.errorId).join(", ") || "unknown"}.`);
-    }
-    expect(blocking, JSON.stringify(errors)).toEqual([]);
+    expect(blocking, `Chrome on Android does not offer install: ${JSON.stringify(errors)}`).toEqual([]);
   } finally {
     await ctx.close();
     rmSync(profile, { recursive: true, force: true });
