@@ -63,7 +63,7 @@ test.describe("APL-2691", { tag: "@APL-2691" }, () => {
   test(
     "@APL-2691 qa:TC-APL2691-8d4e9e0b@v1 AC1: the Move to Won dialog shows an alert containing 21 within 10s, lists the first 20 open tasks, and nothing is closed or archived",
     { tag: ["@APL-2691", "@AC1"] },
-    async ({ admin, later }) => {
+    async ({ admin, later }: { admin: Who; later: Later }) => {
       const step = zz("won step");
       const deal = await makeDeal(admin, later, "2691 won", step);
       const next = (await projectOf(admin, deal.id)).deal.nextStep!;
@@ -76,7 +76,7 @@ test.describe("APL-2691", { tag: "@APL-2691" }, () => {
       await expect(alert).toContainText("21 open tasks", { timeout: WITHIN });
       await dialog.getByRole("button", { name: "Move deal" }).click();
       await expect(alert).toContainText("21 open tasks", { timeout: WITHIN });
-      const shown = (await dialog.getByRole("link").allTextContents()).map((t) => t.trim());
+      const shown = (await dialog.getByRole("link").allTextContents()).map((t: string) => t.trim());
       expect(shown).toHaveLength(20);
       expect(made.titles.filter((t) => !shown.includes(t))).toHaveLength(1);
 
@@ -91,7 +91,7 @@ test.describe("APL-2691", { tag: "@APL-2691" }, () => {
   test(
     '@APL-2691 qa:TC-APL2691-c3d4c477@v1 AC2: Move to Lost says "1 open task" and lists that task',
     { tag: ["@APL-2691", "@AC2"] },
-    async ({ admin, later }) => {
+    async ({ admin, later }: { admin: Who; later: Later }) => {
       const step = zz("lost step");
       const deal = await makeDeal(admin, later, "2691 lost", step);
       const next = (await projectOf(admin, deal.id)).deal.nextStep!;
@@ -117,7 +117,7 @@ test.describe("APL-2691", { tag: "@APL-2691" }, () => {
   test(
     "@APL-2691 qa:TC-APL2691-6ec60bba@v1 AC3: POST /api/projects/{id}/stage with Won still returns 409 with openTasks 21",
     { tag: ["@APL-2691", "@AC3"] },
-    async ({ admin, later }) => {
+    async ({ admin, later }: { admin: Who; later: Later }) => {
       const step = zz("api step");
       const deal = await makeDeal(admin, later, "2691 api", step);
       const next = (await projectOf(admin, deal.id)).deal.nextStep!;
