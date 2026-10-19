@@ -28,13 +28,13 @@ test.describe("SHO-US-1.1 / APL-2474 qa:TC missing", () => {
   test.beforeAll(() => {
     test.skip(!PASS, "Set SHO_QA_PASS (the shared password for the nakul17+ accounts).");
     test.skip(!passwordOk(PASS), "SHO_QA_PASS must be at least 8 characters with a letter and a number.");
-    try { login("ADMIN"); } catch { test.skip(true, "Set SHO_ADMIN_EMAIL and SHO_ADMIN_PASS (a Super Admin)."); }
+    login("ADMIN"); // no Super Admin login is a failure, not a skip: only SHO_QA_PASS gates the run
   });
 
   // qa:TC missing
   test("AC1: a valid new @aplyd.com or @athenainfonomics.com sign-up creates an unverified account and shows Check your email qa:TC missing", { annotation: { type: "qa:TC", description: "missing" } }, async ({ anon, admin, later }) => {
     needPass();
-    try { login("ADMIN"); } catch { test.skip(true, "Set SHO_ADMIN_EMAIL and SHO_ADMIN_PASS (a Super Admin)."); }
+    login("ADMIN"); // no Super Admin login is a failure, not a skip: only SHO_QA_PASS gates the run
     for (const domain of ["aplyd.com", "athenainfonomics.com"] as const) {
       const email = alias("2474", `ac1-${domain.split(".")[0]}`, domain);
       const name = zz(`ac1 ${domain.split(".")[0]}`);

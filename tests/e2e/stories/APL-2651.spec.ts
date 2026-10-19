@@ -120,8 +120,7 @@ test.beforeAll(async ({ browser, playwright }) => {
   // Missing SHO_QA_PASS skips this file instead of failing collection.
   test.skip(!PASS, "Set SHO_QA_PASS (the shared password for the nakul17+ accounts).");
   test.skip(!passwordOk(PASS ?? ""), "SHO_QA_PASS must be at least 8 characters with a letter and a number.");
-  let admin: { email: string; password: string };
-  try { admin = login("ADMIN"); } catch { test.skip(true, "Set SHO_ADMIN_EMAIL and SHO_ADMIN_PASS (a Super Admin)."); return; }
+  const admin = login("ADMIN"); // no Super Admin login is a failure, not a skip: only SHO_QA_PASS gates the run
   anon = await playwright.request.newContext({ baseURL: BASE_URL });
   const page = await browser.newPage();
   const health = await page.goto("/api/health");
