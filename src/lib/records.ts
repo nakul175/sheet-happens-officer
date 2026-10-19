@@ -81,11 +81,6 @@ export async function createContact(user: Actor, orgId: string, input: { name: s
   });
 }
 
-/** Every check updateContact makes before it reads the edit, so the route can run them before parsing the body (APL-2651). */
-export async function checkContactEdit(user: Actor, id: string) {
-  requireCrm(user);
-  requireContactEdit(user, await contactOf(user, id));
-}
 export async function updateContact(user: Actor, id: string, input: { name?: string; role?: string | null; email?: string | null; phone?: string | null; knownBy?: string[] }) {
   requireCrm(user);
   const c = await contactOf(user, id);

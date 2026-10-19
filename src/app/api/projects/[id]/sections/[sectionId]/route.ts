@@ -1,4 +1,3 @@
-import { projectAccess, requireManage } from "@/lib/access";
 import { currentUser } from "@/lib/auth";
 import { handle, parseBody } from "@/lib/http";
 import { sectionUpdate } from "@/lib/schemas";
@@ -9,8 +8,6 @@ type Ctx = { params: Promise<{ id: string; sectionId: string }> };
 export const PATCH = handle(async (req: Request, ctx: Ctx) => {
   const me = await currentUser();
   const { id, sectionId } = await ctx.params;
-  // Access before the body, so a caller who may not edit sections gets 403/404, not 400 (APL-2651).
-  requireManage(await projectAccess(me, id, { write: true }));
   await updateSection(me, id, sectionId, await parseBody(req, sectionUpdate));
   return Response.json({ status: "ok" });
 });

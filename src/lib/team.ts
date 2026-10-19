@@ -35,13 +35,9 @@ export async function listTeam(user: Actor) {
 /** SHO-US-2.1 AC3: a listed address is protected whatever its stored role says. */
 const isSuper = (u: { orgRole: string; email: string }) => u.orgRole === "SUPER_ADMIN" || superAdminEmails().includes(u.email.toLowerCase());
 
-export function requireRoleChanger(actor: Actor) {
-  if (actor.orgRole !== "SUPER_ADMIN") throw new ApiError(403, "Only the Super Admin can change roles.");
-}
-
 /** SHO-US-2.2. Only the Super Admin; Super Admin itself can never be granted or removed here. */
 export async function setOrgRole(actor: Actor, targetId: string, role: "MEMBER" | "ADMIN") {
-  requireRoleChanger(actor);
+  if (actor.orgRole !== "SUPER_ADMIN") throw new ApiError(403, "Only the Super Admin can change roles.");
   const target = await db.user.findUnique({ where: { id: targetId } });
   if (!target) throw notFound("Person");
   if (isSuper(target)) throw new ApiError(403, "The Super Admin role is set in server configuration only.");

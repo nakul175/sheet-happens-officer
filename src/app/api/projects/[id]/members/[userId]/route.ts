@@ -1,4 +1,3 @@
-import { projectAccess, requireManage } from "@/lib/access";
 import { currentUser } from "@/lib/auth";
 import { handle, parseBody } from "@/lib/http";
 import { changeMemberRole, removeMember } from "@/lib/projects";
@@ -9,8 +8,6 @@ type Ctx = { params: Promise<{ id: string; userId: string }> };
 export const PATCH = handle(async (req: Request, ctx: Ctx) => {
   const me = await currentUser();
   const { id, userId } = await ctx.params;
-  // Access before the body, so a caller who may not change roles gets 403/404, not 400 (APL-2651).
-  requireManage(await projectAccess(me, id, { write: true }));
   const { role, handoverTo } = await parseBody(req, memberRole);
   await changeMemberRole(me, id, userId, role, handoverTo);
   return Response.json({ status: "ok" });
