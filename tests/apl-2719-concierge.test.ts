@@ -2,7 +2,8 @@
 // card finished running, so the card never offers Undo for a task that purge can already remove.
 // No qa:TC id is assigned on the issue, so every title carries qa:TC missing.
 // ZZ-TEST person, project and task with a nakul17+ alias, made and cleaned up through the API (cleanupZz).
-// The rows are aged into 1985, so purgeTrash(CLOCK) can only reach rows deleted before 1985.
+// Nothing is written to back-date a row. Each check injects 'now' at deletedAt + age: Vitest's fake Date for the
+// card's Undo reads, and purgeTrash(now, { id }) scoped to the one task, so no other Trash is touched.
 import { afterAll, describe, expect, it, vi } from "vitest";
 import { account, cleanupZz, task, zzProject, type Account } from "./helpers";
 import { actor, db, lastData, script, tu, useFakeModel } from "./concierge-helpers";
@@ -15,7 +16,6 @@ import { UNDO_DAYS } from "../src/lib/undoable";
 
 const WINDOW = UNDO_DAYS * 86_400_000;
 const DAY = 86_400_000;
-const CLOCK = new Date("1985-06-15T12:00:00.000Z");
 const RUN = `${Date.now().toString(36)}${process.pid.toString(36)}`;
 let seq = 0;
 const leads: Account[] = [];
@@ -63,42 +63,23 @@ describe("qa:TC missing APL-2719 concierge card Undo and purge share one timesta
   });
 
   it("qa:TC missing AC2: on day 29, day 30 (exactly 30x24h) and day 31 the card never offers Undo for a task purge can remove", async () => {
-    const rows: { age: number; lead: Account; taskId: string; cardId: string }[] = [];
     for (const age of [29 * DAY, WINDOW, WINDOW + 1, 31 * DAY]) {
       const c = await cardDeletedTask();
-      // Move deletedAt, the log row and the card's confirmedAt back together so the delete is `age` old at CLOCK.
       const t = await db.task.findUniqueOrThrow({ where: { id: c.taskId } });
-      const shift = t.deletedAt!.getTime() - (CLOCK.getTime() - age);
-      const back = (d: Date | string) => new Date(new Date(d).getTime() - shift);
-      await db.task.update({ where: { id: c.taskId }, data: { deletedAt: back(t.deletedAt!) } });
-      for (const l of await db.actionLog.findMany({ where: { targetId: c.taskId } })) {
-        await db.actionLog.update({ where: { id: l.id }, data: { createdAt: back(l.createdAt) } });
-      }
-      for (const id of [c.cardId, c.resultId]) {
-        const s = await storedOf(id);
-        await db.chatMessage.update({ where: { id }, data: { content: JSON.stringify({ ...s, internal: { ...s.internal, confirmedAt: back(s.internal!.confirmedAt!).toISOString() } }) } });
-      }
-      rows.push({ age, ...c });
-    }
-
-    vi.useFakeTimers({ now: CLOCK, toFake: ["Date"] });
-    try {
-      const offered = new Map<string, boolean>();
-      for (const r of rows) {
-        const shown = (await thread(r.lead.id)).find((m) => m.kind === "result" && m.result?.cardId === r.cardId)!;
+      const now = new Date(t.deletedAt!.getTime() + age);
+      vi.useFakeTimers({ now, toFake: ["Date"] });
+      try {
+        const shown = (await thread(c.lead.id)).find((m) => m.kind === "result" && m.result?.cardId === c.cardId)!;
         const showsUndo = shown.result!.undoable && !shown.result!.undoExpired && !shown.result!.undoneAt;
         if (!showsUndo) {
-          await expect(undoCard(actor(r.lead), r.cardId)).rejects.toMatchObject({ status: 409, message: "Too old to undo" });
+          await expect(undoCard(actor(c.lead), c.cardId)).rejects.toMatchObject({ status: 409, message: "Too old to undo" });
         }
-        offered.set(r.taskId, showsUndo);
+        await purgeTrash(now, { id: c.taskId });
+        const purged = !(await db.task.findUnique({ where: { id: c.taskId } }));
+        expect({ age, purged, undoOffered: showsUndo }).toEqual({ age, purged: age > WINDOW, undoOffered: age <= WINDOW });
+      } finally {
+        vi.useRealTimers();
       }
-      await purgeTrash(CLOCK);
-      for (const r of rows) {
-        const purged = !(await db.task.findUnique({ where: { id: r.taskId } }));
-        expect({ age: r.age, purged, undoOffered: offered.get(r.taskId) }).toEqual({ age: r.age, purged: r.age > WINDOW, undoOffered: r.age <= WINDOW });
-      }
-    } finally {
-      vi.useRealTimers();
     }
   });
 });

@@ -2,19 +2,19 @@
 // so Undo age and purge age are measured from the same point.
 // No qa:TC id is assigned on the issue, so every title carries qa:TC missing.
 // A ZZ-TEST person, project and tasks are made through the API and cleaned up through it (cleanupZz).
-// The aged rows sit in 1985, so purgeTrash(CLOCK) can only reach rows deleted before 1985: nothing real is in that range.
+// Nothing is written to back-date a row. Each check runs with 'now' injected at deletedAt + age: Vitest's fake Date
+// for the Undo reads, and purgeTrash(now, { id }) scoped to the one task, so no other Trash is touched.
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { PrismaClient } from "../src/generated/prisma/client";
 import type { Actor } from "../src/lib/access";
 import { projectActivity } from "../src/lib/feed";
-import { deleteTask, purgeTrash } from "../src/lib/tasks";
+import { deleteTask, listTrash, purgeTrash } from "../src/lib/tasks";
 import { checkUndo } from "../src/lib/undo";
 import { UNDO_DAYS } from "../src/lib/undoable";
 import { account, cleanupZz, task, zzProject, type Account } from "./helpers";
 
 const db = new PrismaClient();
 const WINDOW = UNDO_DAYS * 86_400_000;
-const CLOCK = new Date("1985-06-15T12:00:00.000Z");
 const STAMP = `${Date.now().toString(36)}${process.pid.toString(36)}`;
 
 let lead: Account;
@@ -37,16 +37,13 @@ const newTask = async (title: string, parentId?: string) => ({ id: await task(le
 
 const deleteRow = (taskId: string) => db.actionLog.findFirstOrThrow({ where: { action: "task.deleted", targetId: taskId } });
 
-/** Deletes a fresh task through deleteTask, then moves both stamps back by the same amount so the task is `age` ms old at CLOCK. */
-async function deletedAged(age: number) {
+/** Deletes a fresh task through deleteTask and returns the instant to inject: deletedAt + age. */
+async function deletedAt(age: number) {
   const t = await newTask(`aged ${age}`);
   await deleteTask(user, t.id);
   const row = await db.task.findUniqueOrThrow({ where: { id: t.id } });
   const log = await deleteRow(t.id);
-  const shift = row.deletedAt!.getTime() - (CLOCK.getTime() - age);
-  await db.task.update({ where: { id: t.id }, data: { deletedAt: new Date(row.deletedAt!.getTime() - shift) } });
-  await db.actionLog.update({ where: { id: log.id }, data: { createdAt: new Date(log.createdAt.getTime() - shift) } });
-  return { taskId: t.id, logId: log.id };
+  return { taskId: t.id, logId: log.id, now: new Date(row.deletedAt!.getTime() + age) };
 }
 
 describe("qa:TC missing APL-2719 delete, Undo and purge share one timestamp", () => {
@@ -79,31 +76,26 @@ describe("qa:TC missing APL-2719 delete, Undo and purge share one timestamp", ()
     // (APL-2711 AC v1.1: Undo at 30 days or less, purge only when older than 30 days).
     const DAY = 86_400_000;
     const ages = [29 * DAY, WINDOW - 1, WINDOW, WINDOW + 1, WINDOW + 2, WINDOW + 3, WINDOW + 4, 31 * DAY];
-    const rows = [];
-    for (const age of ages) rows.push({ age, ...(await deletedAged(age)) });
-
-    vi.useFakeTimers({ now: CLOCK, toFake: ["Date"] });
-    try {
-      const activity = await projectActivity(user, projectId, undefined, 200);
-      const offered = new Map<string, boolean>();
-      for (const r of rows) {
-        const item = activity.items.find((i) => i.id === r.logId);
-        expect(item, `activity row for age ${r.age}`).toBeDefined();
+    for (const age of ages) {
+      const r = await deletedAt(age);
+      vi.useFakeTimers({ now: r.now, toFake: ["Date"] });
+      try {
+        const item = (await projectActivity(user, projectId, undefined, 200)).items.find((i) => i.id === r.logId);
+        expect(item, `activity row for age ${age}`).toBeDefined();
         const apiAllows = await checkUndo(user, r.logId).then(() => true, (e: { message?: string }) => {
           expect(e.message).toBe("Too old to undo");
           return false;
         });
-        expect(item!.undo === "available", `feed and API agree at age ${r.age}`).toBe(apiAllows);
-        offered.set(r.taskId, apiAllows);
-      }
-      await purgeTrash(CLOCK);
-      for (const r of rows) {
+        expect(item!.undo === "available", `feed and API agree at age ${age}`).toBe(apiAllows);
+        const left = (await listTrash(user, projectId)).find((x) => x.id === r.taskId)?.daysLeft;
+        if (age === 29 * DAY) expect(left).toBe(1);
+        if (age === 31 * DAY) expect(left).toBe(0);
+        await purgeTrash(r.now, { id: r.taskId });
         const purged = !(await db.task.findUnique({ where: { id: r.taskId } }));
-        expect({ age: r.age, purged, undoOffered: offered.get(r.taskId) }).toEqual({ age: r.age, purged: r.age > WINDOW, undoOffered: r.age <= WINDOW });
-        expect(purged && offered.get(r.taskId), `purged while Undo offered at age ${r.age}`).toBe(false);
+        expect({ age, purged, undoOffered: apiAllows }).toEqual({ age, purged: age > WINDOW, undoOffered: age <= WINDOW });
+      } finally {
+        vi.useRealTimers();
       }
-    } finally {
-      vi.useRealTimers();
     }
   });
 });
