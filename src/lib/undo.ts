@@ -145,7 +145,8 @@ async function plan(row: any, user: Actor, projectId: string): Promise<Plan> {
           const done = await tx.section.findFirstOrThrow({ where: { projectId, isDone: true } });
           await tx.task.update({ where: { id }, data: { completedAt: stamp, sectionId: done.id, previousSectionId: t.sectionId } });
           // Subtasks that reopened with the parent close with it again, on the same completedAt (APL-2721).
-          if (Array.isArray(f.subtaskIds) && f.subtaskIds.length) await tx.task.updateMany({ where: { id: { in: f.subtaskIds }, deletedAt: null }, data: { completedAt: stamp } });
+          // One ticked done on its own since then keeps its own completedAt.
+          if (Array.isArray(f.subtaskIds) && f.subtaskIds.length) await tx.task.updateMany({ where: { id: { in: f.subtaskIds }, deletedAt: null, completedAt: null }, data: { completedAt: stamp } });
         },
       };
     }

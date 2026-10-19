@@ -1,13 +1,15 @@
 // APL-2721 story spec. One test per acceptance criterion.
 // Local only: production hosts are refused, and so is any host but localhost or 127.0.0.1.
 // The guard is given TASKBOARD_URL as the base, so it never reads the process image for BASE_URL.
-// Thrown-away projects use ZZ-TEST names and a nakul17+ alias, then afterAll archives them.
+// Thrown-away people and projects use ZZ-TEST names and a nakul17+ alias. afterAll hands each project
+// to the Super Admin, archives it and deactivates the person, all through the API (tests/zz-test-data.ts).
 // No qa:TC id is assigned on the issue, so every title says qa:TC missing.
 import { existsSync } from "node:fs";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { chromium, type Browser, type Page } from "playwright-core";
 import { assertStoryTargetAllowed } from "../base-url";
-import { account, PW, task, withVersion, type Account } from "../../helpers";
+import { PW, task, withVersion, type Account } from "../../helpers";
+import { zzTestData, type ZzProject } from "../../zz-test-data";
 
 const BASE = process.env.TASKBOARD_URL ?? "http://localhost:3000";
 assertStoryTargetAllowed(process.env, BASE);
@@ -21,14 +23,10 @@ function chromePath() {
   throw new Error("No Chrome/Chromium binary. Set PW_CHROMIUM.");
 }
 
-const RUN = `${Date.now().toString(36)}${process.pid.toString(36)}`;
-let seq = 0;
+const zz = zzTestData("2721e2e");
 
 let browser: Browser;
 let lead: Account;
-const projectIds: string[] = [];
-
-type Proj = { id: string; name: string; todo: string; doing: string; done: string };
 
 beforeAll(async () => {
   if (!/^(localhost|127\.0\.0\.1)$/.test(new URL(BASE).hostname)) {
@@ -38,27 +36,30 @@ beforeAll(async () => {
     executablePath: chromePath(),
     args: ["--no-sandbox", "--disable-dev-shm-usage"],
   });
-  lead = await account("ZZ-TEST lead", `nakul17+zz-2721-${RUN}@aplyd.com`);
+  lead = await zz.person("lead");
 }, 180000);
 
 afterAll(async () => {
   await browser?.close();
-  for (const id of projectIds) await lead?.c.post(`/api/projects/${id}/archive`);
-});
+  const problems = await zz.cleanUp();
+  expect(problems, problems.join("\n")).toEqual([]);
+}, 120000);
 
-async function zzProject(): Promise<Proj> {
-  const name = `ZZ-TEST ${RUN}-${seq++}`;
-  const r = await lead.c.post("/api/projects", { name, leaderId: lead.id });
-  expect(r.status, JSON.stringify(r.json)).toBe(201);
-  const id = r.json.project.id as string;
-  projectIds.push(id);
-  const p = await lead.c.get(`/api/projects/${id}`);
-  const sections = p.json.project.sections as { id: string; name: string; isDone: boolean }[];
-  return { id, name, todo: sections[0].id, doing: sections[1].id, done: sections.find((s) => s.isDone)!.id };
-}
+const zzProject = (): Promise<ZzProject> => zz.project(lead);
 
+/**
+ * Signs in through the form. A click before React has hydrated the form does a native submit
+ * instead of the API call, so wait until React has attached its props to the form first.
+ */
 async function signIn(page: Page) {
   await page.goto("/signin", { waitUntil: "domcontentloaded", timeout: 120000 });
+  const button = page.getByRole("button", { name: "Sign in" });
+  await button.waitFor({ state: "visible", timeout: 120000 });
+  await page.waitForFunction(
+    (el) => Object.keys((el as HTMLButtonElement).form ?? {}).some((k) => k.startsWith("__reactProps")),
+    await button.elementHandle(),
+    { timeout: 120000 },
+  );
   await page.getByLabel("Work email").fill(lead.email);
   await page.getByLabel("Password").fill(PW);
   await page.getByRole("button", { name: "Sign in" }).click();
@@ -174,7 +175,9 @@ describe("qa:TC missing APL-2721 done flag on the project page", { timeout: 1800
       await region(page, "To do").getByText("(done)").waitFor({ state: "visible", timeout: 20000 });
       await region(page, "In progress").getByRole("button", { name: `Reopen "${title}"` }).waitFor({ state: "visible", timeout: 20000 });
       const dialog = await openTask(page, title);
-      await dialog.getByText("In progress").first().waitFor({ state: "visible" });
+      const section = dialog.getByRole("combobox", { name: "Section" });
+      await section.waitFor({ state: "visible" });
+      expect(await section.inputValue()).toBe(proj.doing);
       await dialog.getByRole("button", { name: "Reopen" }).waitFor({ state: "visible" });
     } finally {
       await page.close();
