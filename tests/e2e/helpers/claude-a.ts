@@ -49,6 +49,11 @@ export async function createDeal(who: Who, later: Later, body: Record<string, un
   expect(r.status, JSON.stringify(r.json)).toBe(201);
   const id = r.json.deal.id as string;
   later(() => who.api.post(`/api/projects/${id}/archive`));
+  // A reused pool alias (APL-2748) must not stay Leader of the archived deal: deactivate refuses any Leader, archived
+  // or not. Registered after the archive, so it runs before it (an archived project is read-only).
+  if (body.leaderId && body.leaderId !== who.user.id) {
+    later(() => who.api.post(`/api/projects/${id}/leader`, { newLeaderId: who.user.id, previousRole: "EDITOR" }));
+  }
   return { id, name: r.json.deal.name as string };
 }
 
