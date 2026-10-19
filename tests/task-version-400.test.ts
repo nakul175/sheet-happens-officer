@@ -25,14 +25,14 @@ const MALFORMED = [
 ] as const;
 
 describe("classifyExpectedUpdatedAt (APL-2669)", () => {
-  it("accepts a full ISO date-time and compares it as an instant", () => {
+  it("accepts a full ISO date-time and compares it as an instant (qa:TC missing)", () => {
     const instant = Date.parse(T0);
     expect(classifyExpectedUpdatedAt(T0)).toBe(instant);
     expect(classifyExpectedUpdatedAt("2026-10-18T10:00:00Z")).toBe(instant);
     expect(classifyExpectedUpdatedAt("2026-10-18T15:30:00.000+05:30")).toBe(instant);
   });
 
-  it("refuses an invalid timestamp and an empty one with 400 invalid_version", () => {
+  it("refuses an invalid timestamp and an empty one with 400 invalid_version (qa:TC missing)", () => {
     for (const v of MALFORMED) {
       expect(() => classifyExpectedUpdatedAt(v)).toThrowError(
         expect.objectContaining({ status: 400, code: "invalid_version" }),
@@ -40,7 +40,7 @@ describe("classifyExpectedUpdatedAt (APL-2669)", () => {
     }
   });
 
-  it("refuses a missing or null timestamp with 400 version_required", () => {
+  it("refuses a missing or null timestamp with 400 version_required (qa:TC missing)", () => {
     for (const v of [undefined, null]) {
       try {
         classifyExpectedUpdatedAt(v);
@@ -74,7 +74,7 @@ describe("PATCH /api/tasks/:id expectedUpdatedAt (APL-2669)", () => {
   const updatedRows = (id: string) =>
     db.actionLog.count({ where: { targetType: "task", targetId: id, action: "task.updated" } });
 
-  it("AC1: an invalid or empty expectedUpdatedAt is 400 invalid_version and writes nothing", async () => {
+  it("AC1: an invalid or empty expectedUpdatedAt is 400 invalid_version and writes nothing (qa:TC-APL2669-0a0899e4@v4) (qa:TC-APL2669-6d7d7c6a@v4) (qa:TC-APL2669-0a13b349@v2)", async () => {
     const { worker, id } = await fixture();
     const rows = await updatedRows(id);
     for (const expectedUpdatedAt of MALFORMED) {
@@ -88,7 +88,7 @@ describe("PATCH /api/tasks/:id expectedUpdatedAt (APL-2669)", () => {
     expect(await updatedRows(id)).toBe(rows);
   });
 
-  it("AC2: a valid timestamp that is not the current instant is 409 version_conflict", async () => {
+  it("AC2: a valid timestamp that is not the current instant is 409 version_conflict (qa:TC-APL2669-6219e8a1@v4)", async () => {
     const { worker, id } = await fixture();
     for (const expectedUpdatedAt of ["2026-10-18T09:59:59.000Z", "2026-10-18T10:00:01.000Z"]) {
       const r = await worker.c.patch(`/api/tasks/${id}`, { title: "New", expectedUpdatedAt });
@@ -100,7 +100,7 @@ describe("PATCH /api/tasks/:id expectedUpdatedAt (APL-2669)", () => {
     }
   });
 
-  it("AC3: the current timestamp saves and updatedAt moves forward", async () => {
+  it("AC3: the current timestamp saves and updatedAt moves forward (qa:TC-APL2669-6d6dc297@v4)", async () => {
     const { worker, id } = await fixture();
     const rows = await updatedRows(id);
     const r = await worker.c.patch(`/api/tasks/${id}`, { title: "New", expectedUpdatedAt: T0 });
@@ -111,7 +111,7 @@ describe("PATCH /api/tasks/:id expectedUpdatedAt (APL-2669)", () => {
     expect(await updatedRows(id)).toBe(rows + 1);
   });
 
-  it("AC4: a user who cannot see the task gets 404 Project not found before the timestamp is checked", async () => {
+  it("AC4: a user who cannot see the task gets 404 Project not found before the timestamp is checked (qa:TC-APL2669-d26a2659@v4)", async () => {
     const { worker, outsider, id } = await fixture();
     const hidden = await outsider.c.patch(`/api/tasks/${id}`, { title: "New", expectedUpdatedAt: "abc" });
     const current = await outsider.c.patch(`/api/tasks/${id}`, { title: "New", expectedUpdatedAt: T0 });
@@ -127,7 +127,7 @@ describe("PATCH /api/tasks/:id expectedUpdatedAt (APL-2669)", () => {
     expect(await updatedRows(id)).toBe(0);
   });
 
-  it("AC5: the same instant succeeds with Z, an offset, or no fractional seconds", async () => {
+  it("AC5: the same instant succeeds with Z, an offset, or no fractional seconds (qa:TC-APL2669-efd03389@v1)", async () => {
     const { worker, id } = await fixture();
     for (const expectedUpdatedAt of [T0, "2026-10-18T15:30:00.000+05:30", "2026-10-18T10:00:00Z"]) {
       await db.task.update({ where: { id }, data: { title: "Original", updatedAt: new Date(T0) } });

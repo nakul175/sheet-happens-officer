@@ -41,7 +41,7 @@ describe("one error shape for a task version (APL-2670)", () => {
     return worker.c.put(`/api/tasks/${id}/approver`, { approverId: worker.id, ...body });
   }
 
-  it("AC1: absent or null expectedUpdatedAt is 400 version_required on every mutation", async () => {
+  it("AC1: absent or null expectedUpdatedAt is 400 version_required on every mutation (qa:TC-APL2670-273d7fb3@v4) (qa:TC-APL2670-247d44cc@v4)", async () => {
     const fx = await fixture();
     const cases: Array<["edit" | "assign" | "move" | "complete" | "approver", Record<string, unknown>]> = [
       ["edit", { title: "New" }],
@@ -62,7 +62,7 @@ describe("one error shape for a task version (APL-2670)", () => {
     expect(await shown(fx.worker, fx.id)).toEqual({ title: "Original", updatedAt: T0 });
   });
 
-  it("AC2: an empty or non-ISO value is invalid_version, not version_required", async () => {
+  it("AC2: an empty or non-ISO value is invalid_version, not version_required (qa:TC-APL2670-7de488a3@v3)", async () => {
     const fx = await fixture();
     for (const expectedUpdatedAt of ["", "abc"]) {
       const r = await fx.worker.c.patch(`/api/tasks/${fx.id}`, { title: "New", expectedUpdatedAt });
@@ -72,7 +72,7 @@ describe("one error shape for a task version (APL-2670)", () => {
     expect(await shown(fx.worker, fx.id)).toEqual({ title: "Original", updatedAt: T0 });
   });
 
-  it("AC3: missing, malformed and stale share one structure, and a hidden task is Project not found", async () => {
+  it("AC3: missing, malformed and stale share one structure, and a hidden task is Project not found (qa:TC-APL2670-2da9e2aa@v4)", async () => {
     const fx = await fixture();
     const missing = await fx.worker.c.patch(`/api/tasks/${fx.id}`, { title: "New" });
     const malformed = await fx.worker.c.patch(`/api/tasks/${fx.id}`, { title: "New", expectedUpdatedAt: "abc" });

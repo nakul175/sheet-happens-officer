@@ -96,7 +96,7 @@ test.describe("APL-2669 a malformed expectedUpdatedAt is a bad request", () => {
     return ((await r.json()).items as unknown[]).length;
   }
 
-  test("AC1 an invalid or empty expectedUpdatedAt is 400 invalid_version", async () => {
+  test("AC1 an invalid or empty expectedUpdatedAt is 400 invalid_version (qa:TC-APL2669-0a0899e4@v4) (qa:TC-APL2669-6d7d7c6a@v4) (qa:TC-APL2669-0a13b349@v2)", async () => {
     const before = await taskNow();
     const rows = await updatedCount();
     for (const expectedUpdatedAt of MALFORMED) {
@@ -111,7 +111,7 @@ test.describe("APL-2669 a malformed expectedUpdatedAt is a bad request", () => {
     expect(await updatedCount()).toBe(rows);
   });
 
-  test("AC2 a valid timestamp that is not current is 409 version_conflict", async () => {
+  test("AC2 a valid timestamp that is not current is 409 version_conflict (qa:TC-APL2669-6219e8a1@v4)", async () => {
     const before = await taskNow();
     const t0 = Date.parse(before.updatedAt);
     for (const expectedUpdatedAt of [new Date(t0 - 1000).toISOString(), new Date(t0 + 1000).toISOString()]) {
@@ -123,7 +123,7 @@ test.describe("APL-2669 a malformed expectedUpdatedAt is a bad request", () => {
     }
   });
 
-  test("AC4 a user who cannot see the task gets 404 Project not found before the timestamp is checked", async () => {
+  test("AC4 a user who cannot see the task gets 404 Project not found before the timestamp is checked (qa:TC-APL2669-d26a2659@v4)", async () => {
     const before = await taskNow();
     const hidden = await outsider.patch(`/api/tasks/${taskId}`, { data: { expectedUpdatedAt: "abc" } });
     const current = await outsider.patch(`/api/tasks/${taskId}`, { data: { expectedUpdatedAt: before.updatedAt } });
@@ -139,7 +139,7 @@ test.describe("APL-2669 a malformed expectedUpdatedAt is a bad request", () => {
     expect(await taskNow()).toEqual(before);
   });
 
-  test("AC5 the same instant succeeds as Z or as an offset", async () => {
+  test("AC5 the same instant succeeds as Z or as an offset (qa:TC-APL2669-efd03389@v1)", async () => {
     const before = await taskNow();
     // Dropping the fraction is the same instant only when it is .000, which the unit fixture covers.
     const forms = [before.updatedAt, plus0530(before.updatedAt), before.updatedAt.replace(/Z$/, "+00:00")];
@@ -151,7 +151,7 @@ test.describe("APL-2669 a malformed expectedUpdatedAt is a bad request", () => {
     expect(await taskNow()).toEqual(before);
   });
 
-  test("AC3 the current timestamp saves and updatedAt moves forward", async () => {
+  test("AC3 the current timestamp saves and updatedAt moves forward (qa:TC-APL2669-6d6dc297@v4)", async () => {
     const before = await taskNow();
     const rows = await updatedCount();
     const r = await worker.patch(`/api/tasks/${taskId}`, { data: { title: "New", expectedUpdatedAt: before.updatedAt } });
