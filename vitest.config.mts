@@ -28,6 +28,7 @@ export default defineConfig({
       "tests/e2e/stories/APL-2733.spec.ts",
       "tests/e2e/stories/APL-2609.spec.ts",
       "tests/e2e/stories/APL-2720.spec.ts",
+      "tests/e2e/stories/APL-2742.spec.ts",
     ],
   },
 });
