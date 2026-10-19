@@ -31,6 +31,16 @@ const server = http.createServer(async (req, res) => {
 server.keepAliveTimeout = Number.isFinite(keepAliveMs) && keepAliveMs > 0 ? keepAliveMs : 5000;
 
 server.listen(0, "127.0.0.1", () => {
+  if (process.env.EARLY_SIGTERM === "1") {
+    // APL-2688 QA D1. Stands in for `next start`: Next's own SIGTERM listener is
+    // registered, a SIGTERM arrives, and the instrumentation hook installs the
+    // drain before the event loop has dispatched that signal.
+    process.on("SIGTERM", () => process.stdout.write("next handler\n"));
+    process.kill(process.pid, "SIGTERM");
+    // Synchronous, so libuv's C handler queues the signal while JS cannot dispatch it.
+    const end = Date.now() + 50;
+    while (Date.now() < end) Math.sqrt(end);
+  }
   installGracefulShutdown({
     drainMs,
     disconnect: async () => {

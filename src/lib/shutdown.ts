@@ -487,10 +487,19 @@ export function installGracefulShutdown(options: ShutdownOptions = {}) {
   }
   state.installed = true;
   for (const server of servers) watchServer(server);
-  process.removeAllListeners("SIGTERM");
-  process.on("SIGTERM", () => {
+  // Add ours before removing Next's. When the last SIGTERM listener goes, Node
+  // closes the signal handle, and a SIGTERM that libuv has already queued but JS
+  // has not dispatched yet is dropped. Under `next start` with no warm-up this
+  // hook runs ~150ms after Ready; a SIGTERM in that window was lost and the
+  // process hung until a second one. Keeping a listener throughout hands that
+  // queued signal to onSigterm instead.
+  const ours = () => {
     void onSigterm(servers, options);
-  });
+  };
+  process.on("SIGTERM", ours);
+  for (const listener of process.listeners("SIGTERM")) {
+    if (listener !== ours) process.removeListener("SIGTERM", listener as (...args: unknown[]) => void);
+  }
   // Installed last so it replaces Node's handler. The C handler accept()s and
   // shutdown(SHUT_RD)s before it returns, including while JS is busy. A helper
   // thread does not: on 2 vCPU it was still waiting for a core at +16ms.

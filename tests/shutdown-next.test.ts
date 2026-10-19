@@ -164,27 +164,30 @@ function readResponse(socket: net.Socket): Promise<Settled> {
   });
 }
 
-function probe(port: number): Promise<"refused" | "open"> {
+type Probe = "refused" | "open" | "hung" | string;
+
+/** "refused" only for ECONNREFUSED. A connect that neither completes nor fails in 300ms is "hung", not refused. */
+function probe(port: number): Promise<Probe> {
   return new Promise((resolve) => {
     const socket = net.connect({ port, host: "127.0.0.1" });
     const timer = setTimeout(() => {
       socket.destroy();
-      resolve("refused");
+      resolve("hung");
     }, 300);
     socket.once("connect", () => {
       clearTimeout(timer);
       socket.destroy();
       resolve("open");
     });
-    socket.once("error", () => {
+    socket.once("error", (err: NodeJS.ErrnoException) => {
       clearTimeout(timer);
-      resolve("refused");
+      resolve(err.code === "ECONNREFUSED" ? "refused" : (err.code ?? "error"));
     });
   });
 }
 
 /** Times match the droplet tester: a new TCP connection at +16ms and +143ms. */
-function probeAt(port: number, t0: number, at: number): Promise<"refused" | "open"> {
+function probeAt(port: number, t0: number, at: number): Promise<Probe> {
   const wait = Math.max(0, t0 + at - Date.now());
   return new Promise((resolve) => setTimeout(() => resolve(probe(port)), wait));
 }
@@ -279,7 +282,7 @@ describe("qa:TC missing next start SIGTERM", () => {
 // new connections must be refused, and the drained line must arrive after the last response.
 describe("qa:TC missing signed-in GET / under SIGTERM (APL-2689)", () => {
   const outbox = mkdtempSync(path.join(tmpdir(), "sho-apl2689-"));
-  const email = `zz-test-apl2689-${Date.now().toString(36)}-${process.pid}@aplyd.com`;
+  const email = `nakul17+zz-test-apl2689-${Date.now().toString(36)}-${process.pid}@aplyd.com`;
   let cookie = "";
 
   afterAll(async () => {

@@ -5,7 +5,10 @@
  * returns EINVAL), and accept() before that still takes a handshake that
  * arrives mid-loop — on 2 vCPU the loop ran past +16ms and accepted the probe.
  * listen(0) refuses new handshakes immediately and leaves the completed queue
- * to be accept()ed. shutdown(SHUT_RD) then makes the refusal stick. */
+ * to be accept()ed. shutdown(SHUT_RD) then makes the refusal stick.
+ *
+ * Rebuild (Ubuntu 24.04, gcc 13, same as the droplet) and commit the .so:
+ *   gcc -O2 -fPIC -shared -o src/lib/sho-accept.so src/lib/sho-accept.c */
 #define _GNU_SOURCE
 #include <errno.h>
 #include <fcntl.h>
@@ -65,8 +68,11 @@ static void seize_all(void) {
 
 static void on_term(int sig) {
   (void)sig;
-  if (did_seize) return;
-  seize_all();
+  /* The handler interrupts whatever the thread was doing. accept4/listen/
+   * shutdown/write set errno, and the interrupted code may read it next. */
+  int saved_errno = errno;
+  if (!did_seize) seize_all();
+  errno = saved_errno;
 }
 
 int sho_arm(int fd) {

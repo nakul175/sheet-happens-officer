@@ -105,26 +105,29 @@ function writeRequest(socket: net.Socket, port: number) {
   socket.write(`GET /slow HTTP/1.1\r\nHost: 127.0.0.1:${port}\r\nConnection: close\r\n\r\n`);
 }
 
-function probe(port: number): Promise<"refused" | "open"> {
+type Probe = "refused" | "open" | "hung" | string;
+
+/** "refused" only for ECONNREFUSED. A connect that neither completes nor fails in 300ms is "hung", not refused. */
+function probe(port: number): Promise<Probe> {
   return new Promise((resolve) => {
     const socket = net.connect({ port, host: "127.0.0.1" });
     const timer = setTimeout(() => {
       socket.destroy();
-      resolve("refused");
+      resolve("hung");
     }, 300);
     socket.once("connect", () => {
       clearTimeout(timer);
       socket.destroy();
       resolve("open");
     });
-    socket.once("error", () => {
+    socket.once("error", (err: NodeJS.ErrnoException) => {
       clearTimeout(timer);
-      resolve("refused");
+      resolve(err.code === "ECONNREFUSED" ? "refused" : (err.code ?? "error"));
     });
   });
 }
 
-function probeAt(port: number, t0: number, at: number): Promise<"refused" | "open"> {
+function probeAt(port: number, t0: number, at: number): Promise<Probe> {
   const wait = Math.max(0, t0 + at - Date.now());
   return new Promise((resolve) => setTimeout(() => resolve(probe(port)), wait));
 }
@@ -174,6 +177,20 @@ describe("qa:TC missing SIGTERM drain", () => {
       const outcome = result.stdout.split("\n").filter((line) => line.startsWith("graceful shutdown:"));
       expect(outcome).toEqual([CLEAN_LOG]);
       expect(result.stdout.indexOf("prisma disconnected")).toBeLessThan(result.stdout.indexOf(CLEAN_LOG));
+    } finally {
+      stop(proc.child);
+    }
+  });
+
+  it("qa:TC missing drains a SIGTERM that was queued before the hook installed, without a second signal", async () => {
+    const proc = startChild({ EARLY_SIGTERM: "1", DRAIN_MS: "5000" });
+    try {
+      const hung = setTimeout(() => stop(proc.child), 8000);
+      const result = await proc.exited;
+      clearTimeout(hung);
+      expect(result.code, `stdout:\n${result.stdout}`).toBe(0);
+      expect(result.stdout.split("\n").filter((line) => line.startsWith("graceful shutdown:"))).toEqual([CLEAN_LOG]);
+      expect(result.stdout).not.toContain("next handler");
     } finally {
       stop(proc.child);
     }
