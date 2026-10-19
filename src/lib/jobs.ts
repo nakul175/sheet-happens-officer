@@ -79,7 +79,6 @@ export async function sendReminders(now = new Date()) {
     select: { id: true, title: true, projectId: true, assigneeId: true, dueDate: true, assignee: { select: { deactivatedAt: true } } },
   });
   // One transaction under an advisory lock: two overlapping runs cannot both find "not sent yet" (APL-2749).
-  // Waiting runs queue on the lock, so they get longer than the default 2 s / 5 s to start and finish.
   return db.$transaction(async (tx) => {
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(${REMINDERS_LOCK_KEY})`;
     const already = await tx.notification.findMany({
@@ -96,7 +95,7 @@ export async function sendReminders(now = new Date()) {
     }
     if (rows.length) await tx.notification.createMany({ data: rows });
     return { sent: rows.length };
-  }, { maxWait: 30_000, timeout: 60_000 });
+  });
 }
 
 export function requireJobSecret(req: Request) {
