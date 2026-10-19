@@ -8,7 +8,6 @@ import { getTask, newProject, newTask, ymd, type Who } from "../g2";
 import { pipelines, type Stage } from "../helpers/deal-board";
 import { createDeal, createOrg, dealBody, projectOf } from "../helpers/claude-a";
 import { cast, gateFile } from "../helpers/qa-alias";
-import { ageDeal, runLocalJob } from "../helpers/own-row";
 
 gateFile("APL-2525");
 
@@ -160,29 +159,19 @@ test("AC5: Won and Lost are refused while a task is open, and a finished move le
 });
 
 // qa:TC missing
-test("AC6: a working deal with no next step or no logged activity for 30 days notifies its Leader once qa:TC missing", async ({ browser, later }) => {
+test("AC6 (no next step): a working deal whose dated step is done tells its Leader it needs a next step qa:TC missing", async ({ browser, later }) => {
+  // The 30-quiet-days half of AC6 runs on an in-process clock in tests/stall-clock-2709.test.ts. The server has no clock hook yet (APL-2757).
   test.setTimeout(180_000);
   const { admin, people: [leader] } = await cast(browser, later, ["stall leader"]);
   const { pro } = await pipes(admin);
   const org = await createOrg(admin, later, "e12 stall org");
-  const quiet = await createDeal(admin, later, dealBody({ name: zz("e12 quiet"), organisationId: org.id, pipelineId: pro.id, leaderId: leader.user.id }));
   const empty = await createDeal(admin, later, dealBody({ name: zz("e12 no step"), organisationId: org.id, pipelineId: pro.id, leaderId: leader.user.id }));
-  later(() => admin.api.post(`/api/projects/${quiet.id}/leader`, { newLeaderId: admin.user.id, previousRole: "EDITOR" }));
   later(() => admin.api.post(`/api/projects/${empty.id}/leader`, { newLeaderId: admin.user.id, previousRole: "EDITOR" }));
   const notes = async () => ((await leader.api.get("/api/notifications?limit=200")).json.items ?? []) as { text: string; href: string }[];
   const stepId = (await projectOf(admin, empty.id)).deal.nextStep.id as string;
   expect((await admin.api.post(`/api/tasks/${stepId}/complete`, await withTaskVersion(admin.api, stepId))).status).toBe(200);
   const needs = (await notes()).filter((n) => n.text.includes(empty.name) && n.text.includes("needs a next step"));
   expect(needs).toHaveLength(1);
-
-  ageDeal(quiet.id, 31);
-  const row = ((await leader.api.get("/api/deals")).json.deals as { id: string; stalled: boolean }[]).find((d) => d.id === quiet.id);
-  expect(row?.stalled).toBe(true);
-  await runLocalJob("stalled-deals");
-  const stalled = (await notes()).filter((n) => n.href.includes(quiet.id) && /no activity for 30 days/.test(n.text));
-  expect(stalled).toHaveLength(1);
-  await runLocalJob("stalled-deals");
-  expect((await notes()).filter((n) => n.href.includes(quiet.id) && /no activity for 30 days/.test(n.text))).toHaveLength(1);
 });
 
 // qa:TC missing

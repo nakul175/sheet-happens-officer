@@ -1,13 +1,11 @@
 // SHO-US-12.7 Stalled deals (APL-2543).
 // Pam left no qa:TC id. Each title says qa:TC missing. The annotation is qa:TC with description missing. An AC number is not a TC id.
-// A deal is stalled only when its last activity is more than 30 days ago. Creating or editing a deal
-// through the API stamps that activity as now, and a browser session cannot rewrite those timestamps
-// (tests/crm5.test.ts does it with SQL). The stalled-deals job also needs JOB_SECRET, which a signed-in
-// session does not have, and running it here would notify real Leaders on staging.
-// Quiet days are the deal's own timestamps, aged locally, then the real stalled-deals job writes the notice.
-import { test, expect, zz, withTaskVersion } from "../support";
+// A deal is stalled only when its last activity is more than 30 days ago. Every activity time is stamped by the
+// server, no API can backdate it, and this suite writes nothing to the database. So the 30-quiet-days halves of
+// AC1, AC2, AC3 and AC5 run in tests/stall-clock-2709.test.ts: ZZ-TEST deals made through the API, with Date faked
+// in that process only. A server-side clock hook for these screens is APL-2757.
+import { test, expect, zz } from "../support";
 import { storyGate } from "../helpers/qa-alias";
-import { ageDeal, ageNotification, runLocalJob } from "../helpers/own-row";
 import { rowFromLink, stageColumn } from "../helpers/locate";
 import { ymd, type Who } from "../g2";
 
@@ -37,55 +35,26 @@ const stalledOf = async (admin: Who, id: string) =>
   ((await admin.api.get("/api/deals")).json.deals as { id: string; stalled: boolean }[]).find((d) => d.id === id)?.stalled;
 
 // qa:TC missing
-test("AC1: Stalled shows on the card, the list and the deal page, and any logged change counts as activity qa:TC missing", async ({ admin, later }) => {
+test("AC1 (screen): a deal with activity today carries no Stalled mark on the card, the review or the deal page qa:TC missing", async ({ admin, later }) => {
   test.setTimeout(180_000);
   const d = await makeDeal(admin, later, "stalled card");
   expect(await stalledOf(admin, d.id)).toBe(false);
-  ageDeal(d.id, 31);
-  expect(await stalledOf(admin, d.id)).toBe(true);
-  expect((await admin.api.get(`/api/projects/${d.id}`)).json.project.deal.stalled).toBe(true);
+  expect((await admin.api.get(`/api/projects/${d.id}`)).json.project.deal.stalled).toBe(false);
   await admin.page.goto("/deals");
   const card = rowFromLink(stageColumn(admin.page, "Lead").getByRole("link", { name: d.name, exact: true }));
-  await expect(card.getByText("Stalled", { exact: true })).toBeVisible();
+  await expect(card).toBeVisible();
+  await expect(card.getByText("Stalled", { exact: true })).toHaveCount(0);
   await admin.page.goto("/review");
-  await expect(admin.page.getByRole("region", { name: "Stalled for 30 days" }).getByText(d.name)).toBeVisible();
+  const stalledRegion = admin.page.getByRole("region", { name: "Stalled for 30 days" });
+  await expect(stalledRegion).toBeVisible();
+  await expect(stalledRegion.getByText(d.name)).toHaveCount(0);
   await admin.page.goto(`/projects/${d.id}`);
-  await expect(admin.page.getByText("Stalled · no activity for 30 days")).toBeVisible();
-  expect((await admin.api.post(`/api/projects/${d.id}/tasks`, { title: zz("logged change") })).status).toBe(201);
-  expect(await stalledOf(admin, d.id), "a logged change is activity, so the flag clears").toBe(false);
+  await expect(admin.page.getByRole("heading", { name: d.name })).toBeVisible();
+  await expect(admin.page.getByText("Stalled · no activity for 30 days")).toHaveCount(0);
 });
 
-// qa:TC missing
-test("AC2: any later activity clears the Stalled flag qa:TC missing", async ({ admin, later }) => {
-  test.setTimeout(120_000);
-  const d = await makeDeal(admin, later, "stalled clear");
-  const pipes = (await admin.api.get("/api/deals/pipelines")).json.pipelines as { key: string; stages: { id: string; name: string }[] }[];
-  const conversation = pipes.find((p) => p.key === "DEAL_PROACTIVE")!.stages.find((s) => s.name === "Conversation")!;
-  ageDeal(d.id, 31);
-  expect(await stalledOf(admin, d.id)).toBe(true);
-  expect((await admin.api.post(`/api/projects/${d.id}/stage`, { stageId: conversation.id })).status).toBe(200);
-  expect(await stalledOf(admin, d.id)).toBe(false);
-  expect(((await admin.api.get("/api/review")).json.stalled as { id: string }[]).some((row) => row.id === d.id)).toBe(false);
-});
-
-// qa:TC missing
-test("AC3: one in-app notice per stall, and a new one only after new activity and 30 more quiet days qa:TC missing", async ({ admin, later }) => {
-  test.setTimeout(120_000);
-  const d = await makeDeal(admin, later, "stalled notice");
-  ageDeal(d.id, 31);
-  const notes = async () => ((await admin.api.get("/api/notifications?limit=200")).json.items ?? []) as { id: string; text: string; href: string }[];
-  const stalledNotes = async () => (await notes()).filter((n) => n.href.includes(d.id) && /no activity for 30 days/.test(n.text));
-  await runLocalJob("stalled-deals");
-  const first = await stalledNotes();
-  expect(first).toHaveLength(1);
-  await runLocalJob("stalled-deals");
-  expect(await stalledNotes()).toHaveLength(1);
-  expect((await admin.api.post(`/api/projects/${d.id}/tasks`, { title: zz("new activity") })).status).toBe(201);
-  ageDeal(d.id, 31);
-  ageNotification(first[0].id, admin.user.id as string, 80);
-  await runLocalJob("stalled-deals");
-  expect(await stalledNotes()).toHaveLength(2);
-});
+// AC2 (later activity clears the flag) and AC3 (one notice per stall) need a deal 30 days quiet.
+// They run in tests/stall-clock-2709.test.ts on an in-process clock.
 
 // qa:TC missing
 test("AC4: 30 days is a fixed part of the product, not a setting on the deal qa:TC missing", async ({ admin, later }) => {
@@ -106,37 +75,8 @@ test("AC4: 30 days is a fixed part of the product, not a setting on the deal qa:
   expect("stallDays" in block).toBe(false);
 });
 
-// qa:TC missing
-test("AC5: archived, Paused, Done and Lost deals are never flagged qa:TC missing", async ({ admin, later }) => {
-  test.setTimeout(180_000);
-  const pipes = (await admin.api.get("/api/deals/pipelines")).json.pipelines as { key: string; stages: { id: string; name: string }[] }[];
-  const stages = pipes.find((p) => p.key === "DEAL_PROACTIVE")!.stages;
-  const stage = (name: string) => stages.find((s) => s.name === name)!;
-  const hold = await makeDeal(admin, later, "never hold");
-  const won = await makeDeal(admin, later, "never won");
-  const lost = await makeDeal(admin, later, "never lost");
-  const archived = await makeDeal(admin, later, "never archived");
-  expect((await admin.api.post(`/api/projects/${hold.id}/stage`, { stageId: stage("On hold").id, reason: "ZZ-TEST pause" })).status).toBe(200);
-  for (const deal of [won, lost]) {
-    const step = (await admin.api.get(`/api/projects/${deal.id}`)).json.project.deal.nextStep.id as string;
-    expect((await admin.api.post(`/api/tasks/${step}/complete`, await withTaskVersion(admin.api, step))).status).toBe(200);
-  }
-  expect((await admin.api.post(`/api/projects/${won.id}/stage`, { stageId: stage("Won").id })).status).toBe(200);
-  expect((await admin.api.post(`/api/projects/${lost.id}/stage`, { stageId: stage("Lost").id, reason: "ZZ-TEST lost" })).status).toBe(200);
-  expect((await admin.api.post(`/api/projects/${archived.id}/archive`)).status).toBeLessThan(300);
-  for (const deal of [hold, won, lost, archived]) ageDeal(deal.id, 45);
-  const before = ((await admin.api.get("/api/notifications?limit=200")).json.items as { href: string; text: string }[])
-    .filter((n) => /no activity for 30 days/.test(n.text)).length;
-  await runLocalJob("stalled-deals");
-  const live = (await admin.api.get("/api/deals")).json.deals as { id: string; stalled: boolean }[];
-  for (const deal of [hold, won, lost]) expect(live.find((row) => row.id === deal.id)?.stalled).toBe(false);
-  const old = (await admin.api.get(`/api/deals?archived=true`)).json.deals as { id: string; stalled: boolean }[];
-  expect(old.find((row) => row.id === archived.id)?.stalled).toBe(false);
-  const after = ((await admin.api.get("/api/notifications?limit=200")).json.items as { href: string; text: string }[])
-    .filter((n) => /no activity for 30 days/.test(n.text) && [hold, won, lost, archived].some((d) => n.href.includes(d.id)));
-  expect(after).toEqual([]);
-  expect(before).toBeGreaterThanOrEqual(0);
-});
+// AC5 (archived, Paused, Done and Lost are never flagged) needs 30 quiet days to mean anything.
+// It runs in tests/stall-clock-2709.test.ts with a working control deal that is flagged at the same moment.
 
 // qa:TC missing
 test("AC6: stalled-deals is on the job list the daily check reads, with the same fields as the other jobs qa:TC missing", async ({ admin }) => {

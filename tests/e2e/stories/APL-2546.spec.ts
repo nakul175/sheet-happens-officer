@@ -1,14 +1,12 @@
 // SHO-US-13.3 Monday pipeline review (APL-2546).
 // Pam left no qa:TC id. Each title says qa:TC missing. The annotation is qa:TC with description missing. An AC number is not a TC id.
 // One test per acceptance criterion. ZZ-TEST deals, projects and tasks are archived afterwards.
-// Ideas are listed only when the task's creation date is more than 30 days ago. The task is created here,
-// then its creation date is aged locally, and Drop runs on the review row the product renders.
+// Ideas are listed only when the task's creation date is more than 30 days ago, so AC2 lives in
+// tests/stall-clock-2709.test.ts on an in-process clock. No test here writes to the database.
 // The plain Member is the person who must not see someone else's deal.
 import { expect, zz, withTaskVersion } from "../support";
 import { test } from "../helpers/story-people";
 import { storyGate } from "../helpers/qa-alias";
-import { ageTaskCreated } from "../helpers/own-row";
-import { rowFromLink } from "../helpers/locate";
 import { newProject, newTask, ymd, type Who } from "../g2";
 
 storyGate({ admin: true, id: "APL-2546" });
@@ -68,31 +66,8 @@ test("AC1: Admins see every deal on the review, everyone else only the deals on 
   await expect(admin.page.getByText(hidden.name)).toHaveCount(0);
 });
 
-// qa:TC missing
-test("AC2: Drop removes the Idea flag and the task stays qa:TC missing", async ({ admin, member, later }) => {
-  test.setTimeout(120_000);
-  const p = await newProject(admin, later, { label: "review drop" });
-  const title = zz("old idea");
-  const id = await newTask(admin, p.id, { title, dueDate: ymd(6), assigneeId: admin.user.id });
-  expect((await admin.api.post(`/api/tasks/${id}/idea`, { isIdea: true })).status).toBe(200);
-  expect((await admin.api.post(`/api/projects/${p.id}/members`, { userId: member.user.id, role: "VIEWER" })).status).toBe(201);
-  ageTaskCreated(id, 40);
-  expect(ids((await review(admin)).ideas)).toContain(id);
-  expect((await review(member)).ideas.find((i) => i.id === id)?.canEdit).toBe(false);
-  await admin.page.goto("/review");
-  const ideas = admin.page.getByRole("region", { name: "Ideas older than 30 days" });
-  const row = rowFromLink(ideas.getByRole("link", { name: title, exact: true }));
-  await expect(row.getByRole("button", { name: "Drop" })).toBeVisible();
-  await row.getByRole("button", { name: "Drop" }).click();
-  await expect.poll(async () => ids((await review(admin)).ideas).includes(id)).toBe(false);
-  const task = await admin.api.get(`/api/tasks/${id}`);
-  expect(task.status).toBe(200);
-  expect(task.json.task.isIdea).toBe(false);
-  expect(task.json.task.title).toBe(title);
-  await member.page.goto("/review");
-  const memberIdeas = member.page.getByRole("region", { name: "Ideas older than 30 days" });
-  await expect(rowFromLink(memberIdeas.getByRole("link", { name: title, exact: true })).getByRole("button", { name: "Drop" })).toHaveCount(0);
-});
+// AC2 (Drop removes the Idea flag and the task stays) needs an idea more than 30 days old, which no API can make.
+// It runs on an in-process clock in tests/stall-clock-2709.test.ts. The server has no clock hook yet (APL-2757).
 
 // qa:TC missing
 test("AC3: Convert to deal opens the conversion dialog, and a Viewer is not offered it qa:TC missing", async ({ admin, member, later }) => {
