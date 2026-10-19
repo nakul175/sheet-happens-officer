@@ -458,7 +458,7 @@ async function runMode(mode: Mode) {
   }
 }
 
-describe("qa:TC missing reminder jobs are one server process per CRM_VISIBLE mode (APL-2729)", () => {
+describe("qa:TC missing APL-2729 AC4: reminder jobs run on one server process per CRM_VISIBLE mode", () => {
   beforeAll(async () => {
     assertLocalTestDatabase();
     if (!existsSync(path.join(root, ".next", "BUILD_ID"))) {
@@ -486,19 +486,19 @@ describe("qa:TC missing reminder jobs are one server process per CRM_VISIBLE mod
     await db.$disconnect();
   });
 
-  it("qa:TC missing unset server matches main, including 40 concurrent job posts", async () => {
+  it("qa:TC missing AC2 AC3 AC4: unset server matches main for member, admin and the ops check, including 40 concurrent job posts", async () => {
     await runMode("unset");
   });
 
-  it("qa:TC missing CRM_VISIBLE=all server matches main, including 40 concurrent job posts", async () => {
+  it("qa:TC missing AC2 AC3 AC4: CRM_VISIBLE=all server matches main for member, admin and the ops check, including 40 concurrent job posts", async () => {
     await runMode("all");
   });
 
-  it("qa:TC missing admins server: a member gets no deal reminder and an admin still does", async () => {
+  it("qa:TC missing AC1 AC2 AC3 AC4: admins server gives a member no deal reminder, an admin the reminder as on main, and the ops check unchanged", async () => {
     await runMode("admins");
   });
 
-  it("qa:TC missing off server: nobody gets a deal reminder, and the ops check is unchanged", async () => {
+  it("qa:TC missing AC1 AC3 AC4: off server gives nobody a deal reminder and leaves the ops check unchanged", async () => {
     await runMode("off");
   });
 });
