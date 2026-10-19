@@ -1,8 +1,8 @@
 // SHO-US-22.7 Task panel as a full-screen sheet (APL-2555). Epic SHO-E22.
 // Runs against staging. Data: a ZZ-TEST project with ZZ-TEST tasks, archived afterwards. AC7 needs SHO_MEMBER_EMAIL / SHO_MEMBER_PASS.
-// Skipped (need a real iPhone / keyboard, as the story says): AC3 on-device, AC5.
+// AC3 on-device and AC5 (APL-2738) run in desktop Chromium: AC3 at the height an iPhone shows with Safari's toolbar visible,
+// AC5 with a stand-in visualViewport that behaves like iOS Safari's keyboard. A real-iPhone check is still a manual step.
 import { test, expect, zz, login, BASE_URL } from "../support";
-import { why } from "../helpers/jim-http";
 import type { Browser } from "@playwright/test";
 
 async function phone(browser: Browser, width: number, height = 800, touch = true, who: "admin" | "member" = "admin") {
@@ -33,17 +33,24 @@ test.beforeEach(async ({ admin, later }) => {
   later(() => admin.api.post(`/api/projects/${projectId}/archive`));
 });
 
-test("AC1: scrolling the sheet does not move the page behind, and Close (44 x 44 px) stays visible", async ({ browser }) => {
+test("qa:TC missing AC1: scrolling the sheet does not move the page behind, and Close (44 x 44 px) stays visible", async ({ browser }) => {
   const ctx = await phone(browser, 390, 700);
   const page = await ctx.newPage();
   await page.goto(`/projects/${projectId}?task=${taskId}`, { waitUntil: "load" });
   const dialog = page.getByRole("dialog", { name: "Task" });
   await expect(dialog).toBeVisible({ timeout: 30000 });
-  expect(await page.evaluate(() => getComputedStyle(document.body).overflow)).toBe("hidden");
+  // The scroll lock is set in an effect after the sheet first paints, so wait for it instead of reading it once.
+  await expect.poll(() => page.evaluate(() => getComputedStyle(document.body).overflow), { message: "page behind is locked" }).toBe("hidden");
   const before = await page.evaluate(() => window.scrollY);
   await page.mouse.move(195, 400);
   await page.mouse.wheel(0, 900);
-  await page.waitForTimeout(400);
+  // Wait until scrolling has been quiet for 200 ms (any scroller, so the sheet's own scroll counts too).
+  await page.evaluate(() => new Promise<void>((done) => {
+    let t = 0;
+    const quiet = () => { clearTimeout(t); t = window.setTimeout(() => { removeEventListener("scroll", quiet, true); done(); }, 200); };
+    addEventListener("scroll", quiet, true);
+    quiet();
+  }));
   expect(await page.evaluate(() => window.scrollY)).toBe(before);
   const close = dialog.getByRole("button", { name: "Close" });
   await expect(close).toBeInViewport();
@@ -56,14 +63,14 @@ test("AC1: scrolling the sheet does not move the page behind, and Close (44 x 44
 // Product defect found 18 Oct 2026 (against dbfbab2): for an editor the 300-character blocked reason sits in a 2-row text box
 // (scrollHeight 206 px in a 56 px box), so most of it is hidden until you scroll inside the box. The title is fine.
 // The story's "After" says reasons are wrapped and AC2 says fully readable. Remove test.fail() once the box grows to fit.
-test("AC2: a 150-character title and a 300-character blocked reason are fully readable by wrapping", async ({ browser }) => {
+test("qa:TC missing AC2: a 150-character title and a 300-character blocked reason are fully readable by wrapping", async ({ browser }) => {
   test.fail(true, "SHO-US-22.7 AC2: blocked-reason box is 2 rows high, text needs scrolling inside it");
   expect(LONGTITLE.length).toBe(150);
   expect(LONGREASON.length).toBe(300);
   const ctx = await phone(browser, 320, 700);
   const page = await ctx.newPage();
   await page.goto(`/projects/${projectId}?task=${longId}`, { waitUntil: "load" });
-  const title = page.locator("textarea.tt");
+  const title = page.getByRole("dialog", { name: "Task" }).getByRole("textbox", { name: "Title", exact: true });
   await expect(title).toBeVisible({ timeout: 30000 });
   const reason = page.getByLabel("Why is it blocked?");
   await expect(reason).toBeVisible();
@@ -77,7 +84,7 @@ test("AC2: a 150-character title and a 300-character blocked reason are fully re
   await ctx.close();
 });
 
-test("AC3 (stylesheet part): the phone sheet height uses dvh, not 100vh alone", async ({ admin }) => {
+test("qa:TC missing AC3 (stylesheet part): the phone sheet height uses dvh, not 100vh alone", async ({ admin }) => {
   await admin.page.goto(`/projects/${projectId}?task=${taskId}`);
   const hrefs = await admin.page.$$eval('link[rel="stylesheet"]', (l) => l.map((x) => (x as HTMLLinkElement).href));
   const css = (await Promise.all(hrefs.map(async (h) => (await admin.page.request.get(h)).text()))).join("\n");
@@ -87,15 +94,35 @@ test("AC3 (stylesheet part): the phone sheet height uses dvh, not 100vh alone", 
   for (const r of rules) if (/100vh/.test(r)) expect(r).toMatch(/100dvh/);
 });
 
-test.skip("AC3 (on a device): with Safari's toolbar visible the sheet's bottom edge is visible", why(
-  "Needs a real iPhone with Safari's toolbar. Desktop Chromium has no dynamic toolbar. The dvh rule is the stylesheet test above.",
-), () => {});
+// With Safari's toolbars showing, an iPhone 13 (390 x 844) leaves about 390 x 664 for the page. Desktop Chromium has no
+// dynamic toolbar, so the page is opened at that visible size: scrolled to its end, the sheet must fill it and end inside it.
+// The test above checks the dvh rule that makes Safari size the sheet to this visible height rather than the toolbar-less one.
+test("qa:TC missing AC3 (on a device): with Safari's toolbar visible the sheet's bottom edge is visible", async ({ browser }) => {
+  const VISIBLE = { width: 390, height: 664 };
+  const ctx = await phone(browser, VISIBLE.width, VISIBLE.height);
+  const page = await ctx.newPage();
+  await page.goto(`/projects/${projectId}?task=${taskId}`, { waitUntil: "load" });
+  const dialog = page.getByRole("dialog", { name: "Task" });
+  await expect(dialog).toBeVisible({ timeout: 30000 });
+  const last = dialog.getByRole("button", { name: "Move to Trash" });
+  await expect(last).toBeVisible();
+  // Scroll the sheet to its end.
+  await page.mouse.move(VISIBLE.width / 2, VISIBLE.height / 2);
+  await expect.poll(async () => {
+    await page.mouse.wheel(0, 2000);
+    return (await dialog.boundingBox())!.y + (await dialog.boundingBox())!.height;
+  }, { message: "sheet bottom edge after scrolling to the end" }).toBeLessThanOrEqual(VISIBLE.height + 1);
+  const b = (await dialog.boundingBox())!;
+  expect(b.y + b.height, "the sheet reaches the bottom of the visible area").toBeGreaterThanOrEqual(VISIBLE.height - 1);
+  await expect(last, "the last control on the sheet can be reached").toBeInViewport();
+  await ctx.close();
+});
 
-test("AC4: Escape closes the sheet and focus returns to the task row", async ({ browser }) => {
+test("qa:TC missing AC4: Escape closes the sheet and focus returns to the task row", async ({ browser }) => {
   const ctx = await phone(browser, 390, 800);
   const page = await ctx.newPage();
   await page.goto(`/projects/${projectId}`, { waitUntil: "load" });
-  const row = page.locator(".item.click", { hasText: zz("22.7 task") }).first();
+  const row = page.getByRole("link", { name: zz("22.7 task") }); // task rows are role="link"
   await expect(row).toBeVisible({ timeout: 30000 });
   await row.focus();
   await page.keyboard.press("Enter");
@@ -103,16 +130,15 @@ test("AC4: Escape closes the sheet and focus returns to the task row", async ({ 
   await expect(dialog).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(dialog).toHaveCount(0);
-  const back = await page.evaluate(() => { const a = document.activeElement as HTMLElement | null; return !!a && !!a.closest(".item") && a.closest(".item")!.textContent!.includes("22.7 task"); });
-  expect(back, "focus is back on the task row").toBe(true);
+  await expect(row, "focus is back on the task row").toBeFocused();
   await ctx.close();
 });
 
-test("AC4: the Back gesture closes the sheet", async ({ browser }) => {
+test("qa:TC missing AC4: the Back gesture closes the sheet", async ({ browser }) => {
   const ctx = await phone(browser, 390, 800);
   const page = await ctx.newPage();
   await page.goto(`/projects/${projectId}`, { waitUntil: "load" });
-  await page.locator(".item.click", { hasText: zz("22.7 task") }).first().locator(".t b").first().click();
+  await page.getByRole("link", { name: zz("22.7 task") }).getByText(zz("22.7 task"), { exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "Task" });
   await expect(dialog).toBeVisible();
   await page.goBack();
@@ -121,11 +147,79 @@ test("AC4: the Back gesture closes the sheet", async ({ browser }) => {
   await ctx.close();
 });
 
-test.skip("AC5: with the keyboard open and the description focused, the field and footer are visible", why(
-  "Needs a real on-screen keyboard. Desktop Chromium does not open one, so the field and footer cannot be checked above it.",
-), () => {});
+// APL-2738. Desktop Chromium has no on-screen keyboard, so the page gets a visualViewport that behaves like iOS Safari's:
+// the layout viewport keeps its height and only visualViewport shrinks, and may move down the page (offsetTop) as iOS does.
+// window.__keyboard(h, top) opens the "keyboard".
+function fakeKeyboard() {
+  const vv = new EventTarget() as EventTarget & Record<string, number>;
+  let h: number | null = null, top = 0;
+  const props: Record<string, () => number> = {
+    height: () => h ?? window.innerHeight, width: () => window.innerWidth, offsetTop: () => top, offsetLeft: () => 0,
+    pageTop: () => window.scrollY + top, pageLeft: () => window.scrollX, scale: () => 1,
+  };
+  for (const [k, get] of Object.entries(props)) Object.defineProperty(vv, k, { get });
+  Object.defineProperty(window, "visualViewport", { configurable: true, get: () => vv });
+  (window as unknown as { __keyboard: (height: number | null, offsetTop?: number) => void }).__keyboard = (height, offsetTop = 0) => {
+    h = height;
+    top = offsetTop;
+    vv.dispatchEvent(new Event("resize"));
+    vv.dispatchEvent(new Event("scroll"));
+  };
+}
 
-test("AC6: at 600 px and wider the centred dialog is used, with the same scroll lock", async ({ browser }) => {
+test("qa:TC-APL2738-05@v1 AC5: with the keyboard open and the description focused, the field and footer are visible", async ({ browser }) => {
+  const KEYBOARD_TOP = 420; // visible height left above the keyboard on a 390 x 800 phone
+  const ctx = await phone(browser, 390, 800);
+  await ctx.addInitScript(fakeKeyboard);
+  const page = await ctx.newPage();
+  await page.goto(`/projects/${projectId}?task=${taskId}`, { waitUntil: "load" });
+  const dialog = page.getByRole("dialog", { name: "Task" });
+  await expect(dialog).toBeVisible({ timeout: 30000 });
+  const desc = dialog.getByLabel("Description", { exact: true });
+  const close = dialog.getByRole("button", { name: "Close", exact: true });
+  const action = dialog.getByRole("button", { name: /^(Mark complete|Close task)$/ }); // the footer's main action
+  await expect(desc).toBeEditable();
+  await expect(action).toBeVisible();
+  // Type only once the sheet has finished loading: wait until the fields above the description stop moving.
+  await page.waitForLoadState("networkidle");
+  await page.waitForFunction(() => {
+    const w = window as unknown as { __last?: number; __same?: number };
+    const y = document.getElementById("desc")!.getBoundingClientRect().top;
+    w.__same = w.__last === y ? (w.__same ?? 0) + 1 : 0;
+    w.__last = y;
+    return w.__same >= 5;
+  }, undefined, { timeout: 15000, polling: 100 });
+  await desc.focus();
+  const keyboard = async (h: number, offsetTop: number) => {
+    await page.evaluate(([kh, kt]) => (window as unknown as { __keyboard: (h: number, t: number) => void }).__keyboard(kh, kt), [h, offsetTop] as const);
+    await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+  };
+  await keyboard(KEYBOARD_TOP, 0);
+  await expect(desc, "the description keeps focus").toBeFocused();
+  const d = (await desc.boundingBox())!, c = (await close.boundingBox())!, a = (await action.boundingBox())!;
+  // Close stays in view at the top of the visible area.
+  expect(c.y, "Close top").toBeGreaterThanOrEqual(-1);
+  expect(c.y + c.height, "Close bottom").toBeLessThanOrEqual(KEYBOARD_TOP + 1);
+  // The footer action is pinned just above the keyboard: the sheet follows visualViewport.
+  expect(a.y + a.height, "footer action is above the keyboard").toBeLessThanOrEqual(KEYBOARD_TOP + 1);
+  expect(a.y + a.height, "footer action is pinned to the keyboard edge").toBeGreaterThanOrEqual(KEYBOARD_TOP - 24);
+  // The focused description sits between Close and the footer, so nothing covers it.
+  expect(d.y, "description top").toBeGreaterThanOrEqual(c.y + c.height - 1);
+  expect(d.y + d.height, "description bottom").toBeLessThanOrEqual(a.y + 1);
+  // iOS can also move the visible area down the page (visualViewport.offsetTop): the sheet must move with it.
+  const MOVED = 60, MOVED_HEIGHT = 380;
+  await keyboard(MOVED_HEIGHT, MOVED);
+  await expect(desc, "the description keeps focus after the move").toBeFocused();
+  const d2 = (await desc.boundingBox())!, c2 = (await close.boundingBox())!, a2 = (await action.boundingBox())!;
+  expect(c2.y, "Close moves down with the visible area").toBeGreaterThanOrEqual(MOVED - 1);
+  expect(a2.y + a2.height, "footer action stays above the keyboard").toBeLessThanOrEqual(MOVED + MOVED_HEIGHT + 1);
+  expect(a2.y + a2.height, "footer action stays pinned to the keyboard edge").toBeGreaterThanOrEqual(MOVED + MOVED_HEIGHT - 24);
+  expect(d2.y, "description top after the move").toBeGreaterThanOrEqual(c2.y + c2.height - 1);
+  expect(d2.y + d2.height, "description bottom after the move").toBeLessThanOrEqual(a2.y + 1);
+  await ctx.close();
+});
+
+test("qa:TC missing AC6: at 600 px and wider the centred dialog is used, with the same scroll lock", async ({ browser }) => {
   const ctx = await phone(browser, 800, 800, false);
   const page = await ctx.newPage();
   await page.goto(`/projects/${projectId}?task=${taskId}`, { waitUntil: "load" });
@@ -138,14 +232,15 @@ test("AC6: at 600 px and wider the centred dialog is used, with the same scroll 
   await ctx.close();
 });
 
-test("AC7: a task I cannot edit stays read-only (Viewer)", async ({ browser, admin, member }) => {
+test("qa:TC missing AC7: a task I cannot edit stays read-only (Viewer)", async ({ browser, admin, member }) => {
   expect((await admin.api.post(`/api/projects/${projectId}/members`, { userId: member.user.id, role: "VIEWER" })).status).toBe(201);
   const ctx = await phone(browser, 390, 800, true, "member");
   const page = await ctx.newPage();
   await page.goto(`/projects/${projectId}?task=${taskId}`, { waitUntil: "load" });
   await expect(page.getByRole("dialog", { name: "Task" })).toBeVisible({ timeout: 30000 });
-  await expect(page.locator("textarea.tt")).not.toBeEditable();
-  await expect(page.locator("#desc")).not.toBeEditable();
+  const sheet = page.getByRole("dialog", { name: "Task" });
+  await expect(sheet.getByRole("textbox", { name: "Title", exact: true })).not.toBeEditable();
+  await expect(sheet.getByLabel("Description", { exact: true })).not.toBeEditable();
   expect((await member.api.patch(`/api/tasks/${taskId}`, { title: "ZZ-TEST should be refused" })).status).toBeGreaterThanOrEqual(400);
   await ctx.close();
 });
