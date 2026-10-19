@@ -68,6 +68,9 @@ export function reminderTaskWhere(today: Date): Prisma.TaskWhereInput {
   };
 }
 
+/** pg_advisory_xact_lock key for sendReminders. Distinct from the concierge budget key (4120801). */
+const REMINDERS_LOCK_KEY = 2749001;
+
 /** Holder = the assignee; while a task awaits approval the approver is the assignee (SHO-US-4.6). */
 export async function sendReminders(now = new Date()) {
   const today = startOfTodayIST(now);
@@ -75,20 +78,25 @@ export async function sendReminders(now = new Date()) {
     where: reminderTaskWhere(today),
     select: { id: true, title: true, projectId: true, assigneeId: true, dueDate: true, assignee: { select: { deactivatedAt: true } } },
   });
-  const already = await db.notification.findMany({
-    where: { type: { in: ["TASK_DUE_TOMORROW", "TASK_DUE_TODAY", "TASK_OVERDUE"] }, createdAt: { gte: today } },
-    select: { taskId: true, type: true },
-  });
-  const done = new Set(already.map((n) => `${n.taskId}|${n.type}`));
-  const rows: { recipientId: string; type: string; taskId: string; projectId: string; data: { title: string; daysOverdue?: number } }[] = [];
-  for (const t of tasks) {
-    if (t.assignee.deactivatedAt || !t.dueDate) continue;
-    const r = reminderFor(t.dueDate, today);
-    if (!r || done.has(`${t.id}|${r.type}`)) continue;
-    rows.push({ recipientId: t.assigneeId, type: r.type, taskId: t.id, projectId: t.projectId, data: { title: t.title, ...(r.daysOverdue ? { daysOverdue: r.daysOverdue } : {}) } });
-  }
-  if (rows.length) await db.notification.createMany({ data: rows });
-  return { sent: rows.length };
+  // One transaction under an advisory lock: two overlapping runs cannot both find "not sent yet" (APL-2749).
+  // Waiting runs queue on the lock, so they get longer than the default 2 s / 5 s to start and finish.
+  return db.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(${REMINDERS_LOCK_KEY})`;
+    const already = await tx.notification.findMany({
+      where: { type: { in: ["TASK_DUE_TOMORROW", "TASK_DUE_TODAY", "TASK_OVERDUE"] }, createdAt: { gte: today } },
+      select: { taskId: true, type: true },
+    });
+    const done = new Set(already.map((n) => `${n.taskId}|${n.type}`));
+    const rows: { recipientId: string; type: string; taskId: string; projectId: string; data: { title: string; daysOverdue?: number } }[] = [];
+    for (const t of tasks) {
+      if (t.assignee.deactivatedAt || !t.dueDate) continue;
+      const r = reminderFor(t.dueDate, today);
+      if (!r || done.has(`${t.id}|${r.type}`)) continue;
+      rows.push({ recipientId: t.assigneeId, type: r.type, taskId: t.id, projectId: t.projectId, data: { title: t.title, ...(r.daysOverdue ? { daysOverdue: r.daysOverdue } : {}) } });
+    }
+    if (rows.length) await tx.notification.createMany({ data: rows });
+    return { sent: rows.length };
+  }, { maxWait: 30_000, timeout: 60_000 });
 }
 
 export function requireJobSecret(req: Request) {
