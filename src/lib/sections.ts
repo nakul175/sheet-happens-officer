@@ -2,6 +2,7 @@ import { db } from "@/lib/db";
 import { ApiError, notFound } from "@/lib/http";
 import { projectAccess, requireManage, type Actor, type Tx } from "@/lib/access";
 import { logAction } from "@/lib/notify";
+import { cascadedSubtaskIds } from "@/lib/tasks";
 
 const MAX_SECTIONS = 8;
 
@@ -73,10 +74,18 @@ export async function updateSection(
       if (open.length) throw new ApiError(409, "Tasks waiting on an approver are in that section; close or move them first.");
       const old = await tx.section.findFirst({ where: { projectId, isDone: true } });
       let reopened: string[] = [];
+      // Cascaded subtasks reopen with the parent. A subtask ticked on its own, and any parent in Trash, stay as they are (APL-2721).
+      let reopenedSubtaskIds: string[] = [];
       if (old) {
-        reopened = (await tx.task.findMany({ where: { sectionId: old.id, parentId: null, completedAt: { not: null } }, select: { id: true } })).map((x) => x.id);
+        const parents = await tx.task.findMany({
+          where: { sectionId: old.id, parentId: null, completedAt: { not: null }, deletedAt: null },
+          select: { id: true, completedAt: true },
+        });
+        reopened = parents.map((x) => x.id);
+        reopenedSubtaskIds = await cascadedSubtaskIds(tx, projectId, parents);
         await tx.section.update({ where: { id: old.id }, data: { isDone: false } });
-        await tx.task.updateMany({ where: { sectionId: old.id, parentId: null }, data: { completedAt: null } });
+        const opening = [...reopened, ...reopenedSubtaskIds];
+        if (opening.length) await tx.task.updateMany({ where: { id: { in: opening } }, data: { completedAt: null } });
       }
       const now = new Date();
       const completed = (await tx.task.findMany({ where: { sectionId: s.id, parentId: null, completedAt: null, deletedAt: null }, select: { id: true } })).map((x) => x.id);
@@ -90,8 +99,8 @@ export async function updateSection(
       await logAction(tx, {
         actorId: user.id, projectId, targetType: "section", targetId: s.id, action: "section.done_changed",
         // Every id is kept. Cutting the lists at 200 made Undo skip the rest and still succeed (APL-2680).
-        before: { doneSectionId: old?.id ?? null, reopenedTaskIds: reopened },
-        after: { doneSectionId: s.id, completedTaskIds: completed, completedSubtaskIds: subtasks, reopened: reopened.length, completed: completed.length, completedSubtasks: subtasks.length },
+        before: { doneSectionId: old?.id ?? null, reopenedTaskIds: reopened, reopenedSubtaskIds },
+        after: { doneSectionId: s.id, completedTaskIds: completed, completedSubtaskIds: subtasks, reopened: reopened.length, completed: completed.length, completedSubtasks: subtasks.length, reopenedSubtasks: reopenedSubtaskIds.length },
       });
     }
   });
