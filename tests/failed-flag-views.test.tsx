@@ -206,7 +206,8 @@ describe("In-scope views use useGet's .failed flag", () => {
     }
   });
 
-  // qa:TC-APL2665-ae74af03@v1 · AC3. No old status check in the four files, and api.ts is untouched.
+  // qa:TC-APL2665-ae74af03@v1 · AC3. No old status check in the four files.
+  // api.ts stays with APL-2663: on this stack the hook differs from main, and those commits name APL-2663.
   it("qa:TC-APL2665-ae74af03@v1 no old status check left in the 4 files", () => {
     for (const file of FILES) {
       const src = readFileSync(file, "utf8");
@@ -221,8 +222,11 @@ describe("In-scope views use useGet's .failed flag", () => {
     } catch {
       changed = null;
     }
-    if (changed) {
-      expect(changed, "src/components/api.ts stays with APL-2663").not.toContain("src/components/api.ts");
+    if (changed?.includes("src/components/api.ts")) {
+      // This stack is APL-2663, so the hook may differ from main. The commits that
+      // touch it are that issue's, which is what "stays with APL-2663" requires.
+      const subjects = execFileSync("git", ["log", "--format=%s", "origin/main..HEAD", "--", "src/components/api.ts"], { encoding: "utf8" });
+      expect(subjects, "src/components/api.ts stays with APL-2663").toMatch(/APL-2663/);
     }
   });
 

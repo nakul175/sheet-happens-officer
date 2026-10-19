@@ -27,7 +27,8 @@ export default defineConfig({
   outputDir: "test-results/e2e",
   projects: [
     // Phone stories (forms, the task sheet, the installable app) run on the mobile project.
-    { name: "chromium", testIgnore: /APL-2551\.spec\.ts|APL-2555\.spec\.ts|APL-2558\.spec\.ts/ },
+    // APL-2522.spec.ts is the Vitest spec. The Playwright story is APL-2522-browser.spec.ts.
+    { name: "chromium", testIgnore: /APL-2551\.spec\.ts|APL-2555\.spec\.ts|APL-2558\.spec\.ts|APL-2522\.spec\.ts/ },
     { name: "mobile", testMatch: /APL-2551\.spec\.ts|APL-2555\.spec\.ts|APL-2558\.spec\.ts/, use: { ...devices["Pixel 5"] } },
   ],
 });
