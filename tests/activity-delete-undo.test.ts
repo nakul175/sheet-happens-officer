@@ -531,36 +531,6 @@ describe("APL-2674 activity delete undo", () => {
     }
   }, 150_000);
 
-  it("qa:TC missing D4 An Editor sees no \"Too old to undo\" on their own delete older than 30×24h; the Leader still does", async () => {
-    const leader = await account("leader");
-    const editor = await account("editor");
-    const projectId = await alpha(leader, editor);
-    const old = await deletedTask(editor, projectId, "Fix invoice D4");
-    await setLogTime(old.logId, new Date(Date.now() - 31 * DAY));
-    const name = await displayName(editor);
-
-    // The Editor could never undo their own delete (Trash restore is Leader or Admin), so the hint would be misleading.
-    const editorCtx = await signedIn(editor.email);
-    try {
-      const page = await openActivity(editorCtx, projectId);
-      const row = deleteRow(page, name, old.what);
-      await row.waitFor({ state: "visible", timeout: 30_000 });
-      expect(await row.getByRole("button", { name: "Undo" }).count()).toBe(0);
-      expect(await row.innerText()).not.toContain("Too old to undo");
-    } finally {
-      await editorCtx.close();
-    }
-
-    // The Leader could have restored it, so the hint still shows for them.
-    const leaderCtx = await signedIn(leader.email);
-    try {
-      const page = await openActivity(leaderCtx, projectId);
-      await expectTooOld(page, name, old.what);
-    } finally {
-      await leaderCtx.close();
-    }
-  }, 90_000);
-
   it("qa:TC-APL2674-070b48b9@v3 PROVISIONAL (AC7; NJ confirms at 8:30 AM IST): the Undo toast disappears after 10 s and the task stays in Trash with \"30 days left\"", async () => {
     const leader = await account("leader");
     const editor = await account("editor");

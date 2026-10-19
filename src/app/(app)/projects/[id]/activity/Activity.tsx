@@ -23,16 +23,6 @@ export function showUndo(row: Pick<Row, "undo" | "what">, role: string | undefin
   return true;
 }
 
-/**
- * "Too old to undo" is only for someone who could have undone the row while it was in the window (Pam D4 on #54).
- * On a delete that is a Leader or an Admin, the same rule as showUndo, so an Editor never sees it on their own delete.
- */
-export function showTooOld(row: Pick<Row, "undo" | "what">, role: string | undefined) {
-  if (row.undo !== "too_old") return false;
-  if (isDeletedTaskRow(row.what) && role !== "LEADER") return false;
-  return true;
-}
-
 export default function Activity({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const a = useGet<{ items: Row[]; nextCursor: string | null }>(`/api/projects/${id}/activity`);
@@ -67,7 +57,7 @@ export default function Activity({ params }: { params: Promise<{ id: string }> }
               <div className="meta">
                 {r.via === "concierge" && <span className="chip gold">via concierge</span>}
                 {showUndo(r, pr.data?.project.role) && <button className="btn ghost sm" onClick={() => requestUndo(r.id)}>Undo</button>}
-                {showTooOld(r, pr.data?.project.role) && <span className="hint" title="Undo works for 30 days">Too old to undo</span>}
+                {r.undo === "too_old" && <span className="hint" title="Undo works for 30 days">Too old to undo</span>}
                 {r.undo === "undone" && <span className="hint">Undone</span>}
               </div>
             </div>

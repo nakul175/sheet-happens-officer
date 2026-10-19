@@ -1,14 +1,13 @@
 // APL-2674 story spec. One case per acceptance criterion. workers=1: this file runs its cases in order.
 // It lives in tests/e2e/stories/ so staging-e2e.yml collects it (Dwight's ruling on Pam's D2, 19 Oct 2026).
 // Skipped unless SHO_QA_PASS is set: beforeAll launches nothing without it, and beforeEach skips every case.
-// Production hosts are refused. AC6 backdates one action row through Prisma (there is no API for that), so the
-// suite also refuses any DATABASE_URL that is not on this machine.
+// Production hosts are refused. No direct database writes: AC6 is not here, because there is no API to age an
+// action row; AC6 is covered by d3c54eaf@v3, 6b35ff98@v3 and 8633ebdd@v1 in tests/activity-delete-undo.test.ts.
 // Thrown-away people and projects use ZZ-TEST names and nakul17+ aliases. afterAll archives only
 // the projects this file created and deactivates only the people this file created, through the API.
 // Self-signup only accepts @aplyd.com, so the alias is nakul17+…@aplyd.com.
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { chromium, type Browser, type BrowserContext, type Page } from "playwright-core";
-import { PrismaClient } from "../../../src/generated/prisma/client";
 import { account, BASE, patchTask, PW, superAdmin, task, type Account } from "../../helpers";
 
 const PRODUCTION = new Set(["sheethappensofficer.com", "www.sheethappensofficer.com", "app.sheethappensofficer.com"]);
@@ -25,7 +24,6 @@ let seq = 0;
 const people: Account[] = [];
 const projectIds: string[] = [];
 let browser: Browser;
-let db: PrismaClient;
 
 async function zzAccount(role: string) {
   const n = seq++;
@@ -91,14 +89,10 @@ function actRow(page: Page, who: string, what: string) {
 describe("qa:TC missing APL-2674 activity delete undo", () => {
   beforeAll(async () => {
     if (!QA_PASS) return;
-    let dbHost = "";
-    try { dbHost = new URL(process.env.DATABASE_URL ?? "").hostname; } catch { dbHost = ""; }
-    if (!/^(localhost|127\.0\.0\.1)$/.test(dbHost)) throw new Error("Refusing the APL-2674 story spec: DATABASE_URL must be a database on this machine.");
     browser = await chromium.launch({
       executablePath: process.env.PW_CHROMIUM || "/usr/bin/google-chrome",
       args: ["--no-sandbox", "--disable-dev-shm-usage"],
     });
-    db = new PrismaClient();
   }, 60_000);
 
   beforeEach(({ skip }) => {
@@ -131,7 +125,6 @@ describe("qa:TC missing APL-2674 activity delete undo", () => {
       }
     } finally {
       await browser?.close();
-      await db?.$disconnect();
     }
     expect(problems, problems.join("\n")).toEqual([]);
   });
@@ -320,32 +313,6 @@ describe("qa:TC missing APL-2674 activity delete undo", () => {
       await ctx.close();
     }
     expect(posts).toEqual([{ path: `/api/actions/${actionId}/undo`, body: '{"anyway":false}' }]);
-  }, 90_000);
-
-  it("qa:TC missing AC6 A delete more than 30×24h old shows \"Too old to undo\" and no Undo to the Leader", async () => {
-    const leader = await zzAccount("leader");
-    const editor = await zzAccount("editor");
-    const projectId = await zzProject(leader, [{ who: editor }]);
-    const created = await zzTask(editor, projectId, "Old delete");
-    expect((await editor.c.del(`/api/tasks/${created.id}`)).status).toBe(204);
-    const log = await db.actionLog.findFirstOrThrow({
-      where: { action: "task.deleted", targetId: created.id, actorId: editor.id },
-      orderBy: { createdAt: "desc" },
-    });
-    await db.actionLog.update({ where: { id: log.id }, data: { createdAt: new Date(Date.now() - 31 * 24 * 60 * 60 * 1000) } });
-    const name = await displayName(editor);
-    const what = `moved "${created.title}" to Trash`;
-
-    const ctx = await signedIn(leader.email);
-    try {
-      const page = await openActivity(ctx, projectId);
-      const row = actRow(page, name, what);
-      await row.waitFor({ state: "visible", timeout: 30_000 });
-      expect(await row.getByRole("button", { name: "Undo" }).count()).toBe(0);
-      expect(await row.innerText()).toContain("Too old to undo");
-    } finally {
-      await ctx.close();
-    }
   }, 90_000);
 
   it("qa:TC missing AC7 A deleted task stays in Trash with 30 days, and the Leader restores it from Trash and from the Activity row (the toast is not asserted)", async () => {
