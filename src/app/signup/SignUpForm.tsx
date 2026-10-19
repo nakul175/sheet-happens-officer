@@ -7,6 +7,8 @@ import { AuthShell } from "@/components/AuthShell";
 import styles from "@/components/auth.module.css";
 import { post, rememberEmail } from "@/components/client";
 
+const PASSWORD_MESSAGE = "Use at least 8 characters, with at least one letter and one number.";
+
 export function SignUpForm() {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
@@ -52,7 +54,7 @@ export function SignUpForm() {
         <div className={styles.field}>
           <label htmlFor="password" className={styles.label}>Password</label>
           <input id="password" name="password" type="password" autoComplete="new-password" placeholder="At least 8 characters" required className={styles.input} />
-          <div className={styles.hint}>Use at least 8 characters, with at least one letter and one number.</div>
+          {error !== PASSWORD_MESSAGE && <div className={styles.hint}>{PASSWORD_MESSAGE}</div>}
         </div>
         <button type="submit" disabled={busy} className={styles.primary}>{busy ? "Creating…" : "Create account"}</button>
       </form>
