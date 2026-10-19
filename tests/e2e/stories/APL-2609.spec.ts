@@ -9,7 +9,10 @@
 // list in SUPER_ADMIN_EMAILS. Records are ZZ-TEST and cleaned up through the API afterwards: projects and the organisation
 // archived, chats cleared, the run's people deactivated. A failed clean-up step fails the file.
 // No TC id is registered for APL-2609, so every title says "qa:TC missing". Nothing here targets production.
-import { readdirSync, readFileSync } from "node:fs";
+// LOCAL SANDBOX ONLY. Each run makes new nakul17+ aliases and verifies them from the server's local outbox
+// (EMAIL_OUTBOX_DIR), so it cannot run against staging, where mail is not a local file. beforeAll fails with that
+// message when the outbox is not readable.
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { test, expect, type Browser, type Page } from "@playwright/test";
 import { assertStoryTargetAllowed } from "../base-url";
@@ -225,6 +228,7 @@ test.describe("qa:TC missing APL-2609 CRM_VISIBLE hides deals on this server's m
     // Both URLs are passed in, so the guard never falls back to reading the process environment.
     assertStoryTargetAllowed(process.env, BASE);
     assertStoryTargetAllowed(process.env, SEED);
+    expect(existsSync(OUTBOX), `APL-2609 story spec is local-sandbox-only: it verifies new aliases from the server's local outbox (EMAIL_OUTBOX_DIR=${OUTBOX})`).toBe(true);
     const health = await call(BASE, "", "GET", "/api/health");
     expect(health.status, health.text).toBe(200);
 
