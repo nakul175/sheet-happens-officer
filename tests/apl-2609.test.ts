@@ -4,16 +4,19 @@
 // The server runs with the default `all`, so these call src/lib directly (same database) and flip process.env.CRM_VISIBLE
 // in this process; `crmMode()` reads it at call time. tests/e2e/stories/APL-2609.spec.ts drives a real server per mode.
 // Pam left no qa:TC id on the issue, so every title says "qa:TC missing".
-// Everything this file makes is named ZZ-TEST and deleted in afterAll; the shared Super Admin keeps only their account.
+// Everything this file makes is named ZZ-TEST and cleaned up through the API in afterAll (projects and the organisation
+// archived, chats cleared, sessions signed out). The shared root Super Admin is never used: the Admin and the Super Admin
+// are ZZ-TEST people acting with that org role, which is what src/lib reads from the Actor.
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
-import { account, admin, istDate, superAdmin, task, type Account } from "./helpers";
-import { actor, db, lastResultText, say, script, tu, useFakeModel } from "./concierge-helpers";
+import { account, istDate, task, type Account } from "./helpers";
+import { actor, lastResultText, say, script, tu, useFakeModel } from "./concierge-helpers";
 import type { Actor } from "../src/lib/access";
 import { crmMode } from "../src/lib/crm";
 import { getTask, listTasks, myTasks } from "../src/lib/tasks";
 import { search } from "../src/lib/search";
 import { findTasks, listProjects, myTasks as conciergeMyTasks, projectTasks, quickAnswer } from "../src/lib/concierge/reads";
 import { sendMessage } from "../src/lib/concierge/engine";
+import { state as chatState } from "../src/lib/concierge/thread";
 
 const STAGE = "Proposal";
 const GROUPS = ["waitingOnMe", "overdue", "next7", "later", "waitingOnOthers"] as const;
@@ -24,31 +27,20 @@ type World = {
   ed: Actor; adm: Actor; sa: Actor;
 };
 let w: World;
-const started = new Date();
-const made: { userIds: string[]; emails: string[]; projectIds: string[]; orgId?: string; saId?: string } = { userIds: [], emails: [], projectIds: [] };
+const made: { people: Account[]; lead?: Account; projectIds: string[]; orgId?: string } = { people: [], projectIds: [] };
 
+/** Through the API only: the Leader archives what they made, then each person clears their chat and signs out. */
 async function cleanup() {
-  const { userIds, projectIds } = made;
-  if (userIds.length || projectIds.length) {
-    await db.actionLog.deleteMany({ where: { OR: [...(userIds.length ? [{ actorId: { in: userIds } }] : []), ...(projectIds.length ? [{ projectId: { in: projectIds } }] : [])] } });
+  const quiet = async (fn: () => Promise<unknown>) => { try { await fn(); } catch { /* a ZZ-TEST row left behind is easy to find */ } };
+  const lead = made.lead;
+  if (lead) {
+    for (const id of made.projectIds) await quiet(() => lead.c.post(`/api/projects/${id}/archive`));
+    if (made.orgId) await quiet(() => lead.c.post(`/api/orgs/${made.orgId}/archive`, { archive: true }));
   }
-  if (projectIds.length) await db.notification.deleteMany({ where: { projectId: { in: projectIds } } });
-  // The Super Admin is shared, so only this run's rows go: chat, model usage, notices and sessions.
-  if (made.saId) {
-    const since = { userId: made.saId, createdAt: { gte: started } };
-    await db.chatMessage.deleteMany({ where: since });
-    await db.modelUsage.deleteMany({ where: since });
-    await db.notification.deleteMany({ where: { recipientId: made.saId, createdAt: { gte: started } } });
-    await db.session.deleteMany({ where: since });
+  for (const who of made.people) {
+    await quiet(() => who.c.del("/api/concierge/messages"));
+    await quiet(() => who.c.post("/api/auth/signout"));
   }
-  if (userIds.length) {
-    await db.modelUsage.deleteMany({ where: { userId: { in: userIds } } });
-    await db.auditLog.deleteMany({ where: { actorId: { in: userIds } } });
-  }
-  if (projectIds.length) await db.project.deleteMany({ where: { id: { in: projectIds } } });
-  if (made.orgId) await db.organisation.deleteMany({ where: { id: made.orgId } });
-  if (made.emails.length) await db.loginAttempt.deleteMany({ where: { email: { in: made.emails } } });
-  if (userIds.length) await db.user.deleteMany({ where: { id: { in: userIds } } });
 }
 
 function setMode(mode: string) { process.env.CRM_VISIBLE = mode; }
@@ -108,16 +100,14 @@ describe("qa:TC missing APL-2609 CRM_VISIBLE hides deals from My tasks, search, 
   useFakeModel();
 
   beforeAll(async () => {
-    const saAcc = await superAdmin();
-    made.saId = saAcc.id;
-    const adAcc = await admin(saAcc, "cv2609admin");
-    const lead: Account = await account("cv2609lead");
-    const edAcc: Account = await account("cv2609ed");
-    for (const who of [adAcc, lead, edAcc]) {
-      made.userIds.push(who.id);
-      made.emails.push(who.email);
-      await db.user.update({ where: { id: who.id }, data: { name: `ZZ-TEST ${who.name}` } });
-    }
+    const run = `${Date.now().toString(36)}${process.pid.toString(36)}`;
+    const zzPerson = (role: string) => account(`ZZ-TEST cv2609 ${role}`, `zz-test-cv2609-${role}-${run}@aplyd.com`);
+    const saAcc = await zzPerson("superadmin");
+    const adAcc = await zzPerson("admin");
+    const lead: Account = await zzPerson("lead");
+    const edAcc: Account = await zzPerson("editor");
+    made.lead = lead;
+    made.people.push(saAcc, adAcc, lead, edAcc);
     const tag = `cv2609x${Date.now()}`;
     const pipes = (await lead.c.get("/api/deals/pipelines")).json.pipelines as { id: string; key: string; stages: { id: string; name: string }[] }[];
     const pipe = pipes.find((p) => p.key === "DEAL_PROACTIVE")!;
@@ -144,7 +134,7 @@ describe("qa:TC missing APL-2609 CRM_VISIBLE hides deals from My tasks, search, 
     const plainTask = await task(lead, p.id, { title: plainTaskTitle, assigneeId: edAcc.id, dueDate: istDate(2) });
     w = {
       tag, dealId, dealName, dealTask, dealTaskTitle, plainTask, plainTaskTitle,
-      ed: actor(edAcc), adm: actor(adAcc, "ADMIN"), sa: { id: saAcc.id, orgRole: "SUPER_ADMIN" },
+      ed: actor(edAcc), adm: actor(adAcc, "ADMIN"), sa: actor(saAcc, "SUPER_ADMIN"),
     };
   });
 
@@ -221,5 +211,35 @@ describe("qa:TC missing APL-2609 CRM_VISIBLE hides deals from My tasks, search, 
     setMode("admins");
     expect((await surfaces(w.adm)).taskRoute).toBe(200);
     expect((await surfaces(w.sa)).taskRoute).toBe(200);
+  });
+
+  it("qa:TC missing AC4 AC8: chat from before CRM_VISIBLE hid the CRM is neither shown nor replayed to the model", async () => {
+    const says = `Your deal ${w.dealName} has ${w.dealTaskTitle} due, at stage ${STAGE}.`;
+    const shown = async (u: Actor) => JSON.stringify((await chatState(u)).messages);
+    setMode("all");
+    for (const u of [w.ed, w.adm]) {
+      script(() => [say(says)]);
+      await sendMessage(u, `ZZ-TEST which deals am I on ${w.tag}?`);
+      expect(await shown(u)).toContain(w.dealName);
+    }
+    setMode("off");
+    for (const u of [w.ed, w.adm]) {
+      const now = await shown(u);
+      for (const word of [w.dealName, w.dealTaskTitle]) expect(now).not.toContain(word);
+    }
+    // The next turn does not replay the earlier answer to the model either.
+    let replayed = "";
+    script((req) => { replayed = JSON.stringify(req.messages); return [say("Noted.")]; });
+    await sendMessage(w.ed, `ZZ-TEST and now ${w.tag}?`);
+    expect(replayed).toContain(`ZZ-TEST and now ${w.tag}?`);
+    for (const word of [w.dealName, w.dealTaskTitle]) expect(replayed).not.toContain(word);
+    expect(await shown(w.ed)).toContain(`ZZ-TEST and now ${w.tag}?`);
+    // admins keeps the Admin in: their earlier answer shows again. The Editor still sees none of it.
+    setMode("admins");
+    expect(await shown(w.adm)).toContain(w.dealName);
+    expect(await shown(w.ed)).not.toContain(w.dealName);
+    // Nothing was deleted: with the CRM visible again the history is back.
+    setMode("all");
+    expect(await shown(w.ed)).toContain(w.dealName);
   });
 });

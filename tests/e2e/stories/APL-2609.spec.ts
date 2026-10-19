@@ -4,7 +4,10 @@
 // Run with `npm run test:crm-modes` after `npm run build`. `npm test` does not start these servers.
 // Locally set PW_CHROMIUM to a chrome binary; CI installs Playwright Chromium first.
 // Every mode server is started, so no acceptance criterion depends on the lever of a shared server, and none is skipped.
-// Records use ZZ-TEST names and are deleted afterwards. Pam left no qa:TC id on the issue, so every title says "qa:TC missing".
+// Records use ZZ-TEST names and are cleaned up through the API afterwards (projects and the organisation archived, chats
+// cleared, people deactivated, the Super Admin signed out). The mode servers list a ZZ-TEST Super Admin in SUPER_ADMIN_EMAILS,
+// so the shared root Super Admin is never signed in or touched. No TC id is registered for APL-2609, so every title says
+// "qa:TC missing".
 import "dotenv/config";
 import { spawn, type ChildProcess } from "node:child_process";
 import { closeSync, existsSync, mkdtempSync, openSync, readdirSync, readFileSync } from "node:fs";
@@ -14,8 +17,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium, type Browser, type Page } from "playwright-core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { db } from "../../../src/lib/db";
-import { istDate, PW, SUPER_EMAIL } from "../../helpers";
+import { istDate, PW } from "../../helpers";
 
 const root = fileURLToPath(new URL("../../..", import.meta.url));
 const runId = `${Date.now().toString(36)}${process.pid.toString(36)}`;
@@ -23,7 +25,10 @@ const tag = `ZZ-TEST-2609-${runId}`;
 const DEAL_NAME = `ZZ-TEST Globex renewal ${runId}`;
 const DEAL_TASK = `ZZ-TEST Globex pricing ${runId}`;
 const PLAIN_TASK = `ZZ-TEST plain workshop ${runId}`;
+const PLAIN_PROJECT = `ZZ-TEST workshop ${runId}`;
 const STAGE = "Proposal";
+/** The Super Admin these mode servers know. ZZ-TEST, reused across runs, never the shared root account. */
+const ZZ_SUPER_EMAIL = "zz-test-2609-superadmin@aplyd.com";
 const MODES = ["all", "admins", "off"] as const;
 type Mode = (typeof MODES)[number];
 type Who = { id: string; cookie: string; label: string };
@@ -31,41 +36,25 @@ type Running = { mode: Mode; port: number; pid: number; outbox: string; base: st
 type Row = { id: string; title: string; project: { id: string; name: string; type: string; stage: string | null } };
 
 const running = new Map<Mode, Running>();
-const seed: { userIds: string[]; emails: string[]; projectIds: string[]; orgId?: string; dealId?: string; dealTaskId?: string; plainTaskId?: string } = {
-  userIds: [], emails: [], projectIds: [],
-};
-const people: { editor?: Who; admin?: Who; superAdmin?: Who } = {};
-/** The shared Super Admin's start-guide flag before this run; restored afterwards. */
-let saStartGuide: Date | null | undefined;
+const seed: { projectIds: string[]; orgId?: string; dealId?: string; dealTaskId?: string; plainTaskId?: string } = { projectIds: [] };
+const people: { lead?: Who; editor?: Who; admin?: Who; superAdmin?: Who } = {};
 let browser: Browser | null = null;
-const started = new Date();
 
+/** Through the API only, on the `all` server: archive, clear each chat, deactivate the people, sign the Super Admin out. */
 async function cleanupSeed() {
-  const userIds = seed.userIds;
-  if (userIds.length || seed.projectIds.length) {
-    await db.actionLog.deleteMany({
-      where: { OR: [...(userIds.length ? [{ actorId: { in: userIds } }] : []), ...(seed.projectIds.length ? [{ projectId: { in: seed.projectIds } }] : [])] },
-    });
+  const s = running.get("all");
+  if (!s) return;
+  const quiet = async (fn: () => Promise<unknown>) => { try { await fn(); } catch { /* a ZZ-TEST row left behind is easy to find */ } };
+  const { lead, editor, admin, superAdmin } = people;
+  if (lead) for (const id of seed.projectIds) await quiet(() => call(s.base, lead.cookie, "POST", `/api/projects/${id}/archive`));
+  if (superAdmin && seed.orgId) await quiet(() => call(s.base, superAdmin.cookie, "POST", `/api/orgs/${seed.orgId}/archive`, { archive: true }));
+  for (const who of [lead, editor, admin, superAdmin]) if (who) await quiet(() => call(s.base, who.cookie, "DELETE", "/api/concierge/messages"));
+  if (superAdmin) {
+    for (const who of [lead, editor, admin]) if (who) await quiet(() => call(s.base, superAdmin.cookie, "POST", `/api/team/${who.id}/deactivate`, { reassign: "leaders" }));
+    await quiet(() => call(s.base, superAdmin.cookie, "POST", "/api/auth/signout"));
   }
-  if (seed.projectIds.length) await db.notification.deleteMany({ where: { projectId: { in: seed.projectIds } } });
-  // The Super Admin is shared, so only this run's rows go: chat, quick-action usage, notices, sessions and the start guide.
-  if (people.superAdmin) {
-    const since = { userId: people.superAdmin.id, createdAt: { gte: started } };
-    await db.chatMessage.deleteMany({ where: since });
-    await db.modelUsage.deleteMany({ where: since });
-    await db.notification.deleteMany({ where: { recipientId: people.superAdmin.id, createdAt: { gte: started } } });
-    await db.session.deleteMany({ where: since });
-    if (saStartGuide !== undefined) await db.user.update({ where: { id: people.superAdmin.id }, data: { startGuideDismissedAt: saStartGuide } });
-  }
-  if (userIds.length) {
-    await db.modelUsage.deleteMany({ where: { userId: { in: userIds } } });
-    await db.auditLog.deleteMany({ where: { actorId: { in: userIds } } });
-  }
-  if (seed.projectIds.length) await db.project.deleteMany({ where: { id: { in: seed.projectIds } } });
-  if (seed.orgId) await db.organisation.deleteMany({ where: { id: seed.orgId } });
-  if (seed.emails.length) await db.loginAttempt.deleteMany({ where: { email: { in: seed.emails } } });
-  if (userIds.length) await db.user.deleteMany({ where: { id: { in: userIds } } });
 }
+
 function freePort(): Promise<number> {
   return new Promise((resolve, reject) => {
     const server = net.createServer();
@@ -117,7 +106,7 @@ async function startModeServer(mode: Mode): Promise<Running> {
     EMAIL_OUTBOX_DIR: outbox,
     APP_URL: `http://127.0.0.1:${port}`,
     PORT: String(port),
-    SUPER_ADMIN_EMAILS: SUPER_EMAIL,
+    SUPER_ADMIN_EMAILS: ZZ_SUPER_EMAIL,
     JOB_SECRET: process.env.JOB_SECRET || "replace-with-a-token-of-at-least-16-chars",
   };
   const logFd = openSync(path.join(outbox, "server.log"), "a");
@@ -227,17 +216,19 @@ const strip = (x: Awaited<ReturnType<typeof surfaces>>) => { const { plainShown,
  * My tasks in the browser. The By date / By project control exists only while the CRM is visible to the viewer; when it does,
  * this switches to By project, where a deal shows its Deal chip and stage. Waits for a task, then reads the page.
  */
-async function myTasksScreen(mode: Mode, who: Who, waitFor: string) {
+async function myTasksScreen(mode: Mode, who: Who, waitFor: string, project: string) {
   const page = await pageAs(mode, who);
   try {
     await page.goto(`${server(mode).base}/`, { waitUntil: "domcontentloaded" });
-    await page.getByRole("link", { name: waitFor, exact: true }).first().waitFor({ timeout: 30_000 });
+    // The task's row in its own list section. The concierge panel can link the same task, so the page as a whole is not enough.
+    const row = (section: string) => page.getByRole("region", { name: section, exact: true }).getByRole("link", { name: waitFor, exact: true });
+    await row("Next 7 days").waitFor({ timeout: 30_000 });
     const grouping = (await page.getByRole("group", { name: "Group tasks" }).count()) > 0;
     if (grouping) {
       const byProject = page.getByRole("button", { name: "By project" });
       await byProject.click();
       await expect.poll(() => byProject.getAttribute("aria-pressed"), { timeout: 10_000 }).toBe("true");
-      await page.getByRole("link", { name: waitFor, exact: true }).first().waitFor({ timeout: 30_000 });
+      await row(project).waitFor({ timeout: 30_000 });
     }
     const main = page.getByRole("main");
     return { grouping, text: (await main.textContent()) ?? "", dealChips: await main.getByText("Deal", { exact: true }).count() };
@@ -259,8 +250,10 @@ async function searchScreen(mode: Mode, who: Who, q: string) {
     const answered = page.waitForResponse((r) => r.url().includes("/api/search?q=") && r.status() === 200, { timeout: 30_000 });
     await box.fill(q);
     await answered;
-    await page.waitForTimeout(300);
+    // The answer is on screen once it lists a result for these words or says nothing matches them.
     const main = page.getByRole("main");
+    await expect.poll(async () => (await main.getByRole("link").allTextContents()).some((l) => l.includes(q))
+      || (await main.getByText(`Nothing matches \u201c${q}\u201d`, { exact: false }).count()) > 0, { timeout: 30_000 }).toBe(true);
     const links = await main.getByRole("link").allTextContents();
     return { links, text: (await main.textContent()) ?? "" };
   } finally {
@@ -276,7 +269,7 @@ async function taskScreen(mode: Mode, who: Who) {
     await page.goto(`${server(mode).base}/tasks/${seed.dealTaskId}`, { waitUntil: "domcontentloaded" });
     const status = (await answered).status();
     if (status === 200) await page.waitForURL(/\/projects\//, { timeout: 30_000 });
-    else await page.waitForTimeout(500);
+    else await page.getByRole("heading", { name: "This task isn't available" }).waitFor({ timeout: 30_000 });
     return { status, url: page.url(), text: (await page.locator("body").textContent()) ?? "" };
   } finally {
     await page.context().close();
@@ -288,23 +281,19 @@ describe("qa:TC missing APL-2609 CRM_VISIBLE hides deals on a real server per mo
     if (!existsSync(path.join(root, ".next", "BUILD_ID"))) {
       throw new Error("CRM_VISIBLE mode cannot start: the production build is missing (.next/BUILD_ID)");
     }
-    await db.$connect();
     browser = await chromium.launch({ executablePath: process.env.PW_CHROMIUM || undefined });
     await Promise.all(MODES.map(async (mode) => { running.set(mode, await startModeServer(mode)); }));
 
     // One world on the shared database, made through the `all` server.
     const open = server("all");
     const emails = { lead: `lead.${tag}@aplyd.com`, editor: `editor.${tag}@aplyd.com`, admin: `admin.${tag}@aplyd.com` };
-    for (const e of Object.values(emails)) seed.emails.push(e.toLowerCase());
+    people.superAdmin = await signIn(open, "ZZ-TEST super admin", ZZ_SUPER_EMAIL);
     const lead = await signIn(open, "ZZ-TEST lead", emails.lead.toLowerCase());
     const editor = await signIn(open, "ZZ-TEST editor", emails.editor.toLowerCase());
     const adminUser = await signIn(open, "ZZ-TEST admin", emails.admin.toLowerCase());
-    seed.userIds.push(lead.id, editor.id, adminUser.id);
-    await db.user.update({ where: { id: adminUser.id }, data: { orgRole: "ADMIN" } });
-    people.editor = editor;
-    people.admin = adminUser;
-    people.superAdmin = await signIn(open, "Root", SUPER_EMAIL);
-    saStartGuide = (await db.user.findUniqueOrThrow({ where: { id: people.superAdmin.id }, select: { startGuideDismissedAt: true } })).startGuideDismissedAt;
+    Object.assign(people, { lead, editor, admin: adminUser });
+    const promoted = await call(open.base, people.superAdmin.cookie, "PATCH", `/api/team/${adminUser.id}`, { orgRole: "ADMIN" });
+    expect(promoted.status, promoted.text).toBe(200);
 
     const pipes = await call(open.base, lead.cookie, "GET", "/api/deals/pipelines");
     expect(pipes.status, pipes.text).toBe(200);
@@ -331,7 +320,7 @@ describe("qa:TC missing APL-2609 CRM_VISIBLE hides deals on a real server per mo
     seed.dealTaskId = (dealTask.json?.task as { id: string }).id;
     for (const who of [adminUser, people.superAdmin]) expect((await call(open.base, lead.cookie, "POST", `/api/tasks/${seed.dealTaskId}/collaborators`, { userId: who.id })).status).toBe(201);
 
-    const plain = await call(open.base, lead.cookie, "POST", "/api/projects", { name: `ZZ-TEST workshop ${runId}`, leaderId: lead.id });
+    const plain = await call(open.base, lead.cookie, "POST", "/api/projects", { name: PLAIN_PROJECT, leaderId: lead.id });
     expect(plain.status, plain.text).toBe(201);
     const plainId = (plain.json?.project as { id: string }).id;
     seed.projectIds.push(plainId);
@@ -352,7 +341,7 @@ describe("qa:TC missing APL-2609 CRM_VISIBLE hides deals on a real server per mo
   it("qa:TC missing AC1: with CRM_VISIBLE=off, My tasks shows a deal member no deal task and no stage", async () => {
     const seen = await surfaces("off", people.editor!);
     expect({ myTasks: seen.myTasks, stage: seen.stage, plainShown: seen.plainShown }).toEqual({ myTasks: false, stage: false, plainShown: true });
-    const screen = await myTasksScreen("off", people.editor!, PLAIN_TASK);
+    const screen = await myTasksScreen("off", people.editor!, PLAIN_TASK, PLAIN_PROJECT);
     for (const word of [DEAL_NAME, DEAL_TASK, STAGE]) expect(screen.text).not.toContain(word);
     expect(screen.dealChips).toBe(0);
     expect(screen.grouping).toBe(false);
@@ -392,7 +381,7 @@ describe("qa:TC missing APL-2609 CRM_VISIBLE hides deals on a real server per mo
     const seen = await surfaces("admins", people.editor!);
     expect(strip(seen)).toEqual(HIDDEN);
     expect(seen.plainShown).toBe(true);
-    const screen = await myTasksScreen("admins", people.editor!, PLAIN_TASK);
+    const screen = await myTasksScreen("admins", people.editor!, PLAIN_TASK, PLAIN_PROJECT);
     for (const word of [DEAL_NAME, DEAL_TASK, STAGE]) expect(screen.text).not.toContain(word);
     expect(screen.grouping).toBe(false);
     expect((await taskScreen("admins", people.editor!)).status).toBe(404);
@@ -400,7 +389,7 @@ describe("qa:TC missing APL-2609 CRM_VISIBLE hides deals on a real server per mo
 
   it("qa:TC missing AC6: with CRM_VISIBLE=admins, an Admin and the Super Admin see deal tasks as normal", async () => {
     expect(strip(await surfaces("admins", people.admin!))).toEqual(SHOWN);
-    const screen = await myTasksScreen("admins", people.admin!, DEAL_TASK);
+    const screen = await myTasksScreen("admins", people.admin!, DEAL_TASK, DEAL_NAME);
     expect(screen.grouping).toBe(true);
     expect(screen.text).toContain(DEAL_NAME);
     expect(screen.text).toContain(STAGE);
@@ -409,7 +398,7 @@ describe("qa:TC missing APL-2609 CRM_VISIBLE hides deals on a real server per mo
     expect((await taskScreen("admins", people.admin!)).url).toContain(`/projects/${seed.dealId}`);
     // The Super Admin holds the deal task too: it shows on every surface, their own My tasks screen included.
     expect(strip(await surfaces("admins", people.superAdmin!))).toEqual(SHOWN);
-    const saScreen = await myTasksScreen("admins", people.superAdmin!, DEAL_TASK);
+    const saScreen = await myTasksScreen("admins", people.superAdmin!, DEAL_TASK, DEAL_NAME);
     expect(saScreen.text).toContain(DEAL_NAME);
     expect(saScreen.text).toContain(STAGE);
   });
@@ -417,7 +406,7 @@ describe("qa:TC missing APL-2609 CRM_VISIBLE hides deals on a real server per mo
   it("qa:TC missing AC7: with CRM_VISIBLE=all, every member's behaviour is unchanged", async () => {
     expect(strip(await surfaces("all", people.editor!))).toEqual(SHOWN);
     expect(strip(await surfaces("all", people.admin!))).toEqual(SHOWN);
-    const screen = await myTasksScreen("all", people.editor!, DEAL_TASK);
+    const screen = await myTasksScreen("all", people.editor!, DEAL_TASK, DEAL_NAME);
     expect(screen.grouping).toBe(true);
     expect(screen.text).toContain(DEAL_NAME);
     expect(screen.text).toContain(STAGE);
@@ -427,11 +416,31 @@ describe("qa:TC missing APL-2609 CRM_VISIBLE hides deals on a real server per mo
   it("qa:TC missing AC8: CRM_VISIBLE=off hides deals from Admins and the Super Admin too; admins mode keeps them in", async () => {
     expect(strip(await surfaces("off", people.admin!))).toEqual(HIDDEN);
     expect(strip(await surfaces("off", people.superAdmin!))).toEqual(HIDDEN);
-    const screen = await myTasksScreen("off", people.admin!, PLAIN_TASK);
+    const screen = await myTasksScreen("off", people.admin!, PLAIN_TASK, PLAIN_PROJECT);
     for (const word of [DEAL_NAME, DEAL_TASK, STAGE]) expect(screen.text).not.toContain(word);
     expect(screen.grouping).toBe(false);
     expect((await taskScreen("off", people.superAdmin!)).status).toBe(404);
     expect((await surfaces("admins", people.admin!)).taskRoute).toBe(200);
     expect((await surfaces("admins", people.superAdmin!)).taskRoute).toBe(200);
+  });
+
+  it("qa:TC missing AC4 AC8: chat from before CRM_VISIBLE hid the CRM is not shown, and comes back when it is visible", async () => {
+    const chat = async (mode: Mode, who: Who) => {
+      const r = await call(server(mode).base, who.cookie, "GET", "/api/concierge/state");
+      expect(r.status, r.text).toBe(200);
+      return JSON.stringify(r.json?.messages ?? []);
+    };
+    // A quick action while the CRM is visible stores an answer that names the deal task.
+    for (const who of [people.editor!, people.admin!]) {
+      const asked = await call(server("all").base, who.cookie, "POST", "/api/concierge/quick/due-week", {});
+      expect(asked.status, asked.text).toBe(200);
+      expect(await chat("all", who)).toContain(DEAL_TASK);
+    }
+    // off hides it from everyone, admins from the Editor only.
+    for (const who of [people.editor!, people.admin!]) for (const word of [DEAL_TASK, DEAL_NAME]) expect(await chat("off", who)).not.toContain(word);
+    expect(await chat("admins", people.editor!)).not.toContain(DEAL_TASK);
+    expect(await chat("admins", people.admin!)).toContain(DEAL_TASK);
+    // Nothing is deleted: with the CRM visible the history is back.
+    expect(await chat("all", people.editor!)).toContain(DEAL_TASK);
   });
 });

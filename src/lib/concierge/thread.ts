@@ -1,8 +1,9 @@
 // SHO-US-8.1 / 8.8: the person's one private thread. Every query here is keyed by the signed-in
 // user's id; there is no function that reads another person's chat.
+import type { Prisma } from "@/generated/prisma/client";
 import { db } from "@/lib/db";
 import { ApiError } from "@/lib/http";
-import type { Actor } from "@/lib/access";
+import { crmModeSince, crmVisible, type Actor } from "@/lib/access";
 import { UNDO_DAYS } from "@/lib/undoable";
 import { disabledFor } from "@/lib/concierge/limits";
 import { QUICK_ACTIONS } from "@/lib/concierge/reads";
@@ -36,7 +37,17 @@ export function present(row: Row): Message {
   return m;
 }
 
+/**
+ * The chat rows a person may see, on screen or replayed to the model. While the CRM is hidden from them, nothing from before
+ * CRM_VISIBLE took its current value: an answer given while deals were visible may name one (APL-2609). Nothing is deleted.
+ */
+export async function chatWhere(user: Actor): Promise<Prisma.ChatMessageWhereInput> {
+  const since = await crmModeSince();
+  return crmVisible(user) ? { userId: user.id } : { userId: user.id, createdAt: { gte: since } };
+}
+
 export async function addMessage(userId: string, role: "USER" | "ASSISTANT", stored: Stored) {
+  await crmModeSince(); // a row written now belongs to the lever's current value
   return db.chatMessage.create({ data: { userId, role, content: JSON.stringify(stored) } });
 }
 export async function saveStored(id: string, stored: Stored) {
@@ -59,8 +70,8 @@ export async function ownMessage(userId: string, id: string) {
   return row;
 }
 
-export async function thread(userId: string, limit = 300): Promise<Message[]> {
-  const rows = await db.chatMessage.findMany({ where: { userId }, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: limit });
+export async function thread(user: Actor, limit = 300): Promise<Message[]> {
+  const rows = await db.chatMessage.findMany({ where: await chatWhere(user), orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: limit });
   return rows.reverse().map(present);
 }
 
@@ -76,7 +87,7 @@ export async function state(user: Actor, now = new Date()): Promise<State> {
   const [me, disabled, messages] = await Promise.all([
     db.user.findUniqueOrThrow({ where: { id: user.id }, select: { conciergeHidden: true, voiceNoticeAckedAt: true } }),
     disabledFor(user.id, now),
-    thread(user.id),
+    thread(user),
   ]);
   return {
     available: !disabled,

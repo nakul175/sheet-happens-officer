@@ -11,7 +11,7 @@ import {
 import { todayLine } from "@/lib/concierge/dates";
 import { flat, personById, projectById, quickAnswer, taskById, QUICK_ACTIONS, type TaskRec } from "@/lib/concierge/reads";
 import { TOOLS, newTurn, runTool, wrap, type Kind, type Turn } from "@/lib/concierge/tools";
-import { addMessage, casStored, dropPendingChoices, ownMessage, parse, present } from "@/lib/concierge/thread";
+import { addMessage, casStored, chatWhere, dropPendingChoices, ownMessage, parse, present } from "@/lib/concierge/thread";
 import type { Message, Stored } from "@/lib/concierge/types";
 
 export const MAX_MODEL_CALLS = 4;
@@ -37,8 +37,8 @@ type Loop = { reply: Stored; disabled?: Disabled };
  * Earlier turns for the model. The person's own words go as they are; everything the assistant said earlier can quote
  * task text, so it is replayed inside the same untrusted-data wrapper as tool results. A pick of an option is not replayed.
  */
-async function recentHistory(userId: string, excludeId: string): Promise<ModelMessage[]> {
-  const rows = await db.chatMessage.findMany({ where: { userId, id: { not: excludeId } }, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: 8 });
+async function recentHistory(user: Actor, excludeId: string): Promise<ModelMessage[]> {
+  const rows = await db.chatMessage.findMany({ where: { ...(await chatWhere(user)), id: { not: excludeId } }, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: 8 });
   const msgs: ModelMessage[] = [];
   for (const r of rows.reverse()) {
     const s = parse(r.content);
@@ -146,7 +146,7 @@ function buildReply(turn: Turn, modelText: string, request: string): Stored {
 }
 
 async function respond(user: Actor, userRow: { id: string }, userText: string, request: string, counted: boolean, now: Date, seed?: (t: Turn) => void): Promise<{ messages: Message[]; disabled?: Disabled }> {
-  const history = await recentHistory(user.id, userRow.id);
+  const history = await recentHistory(user, userRow.id);
   const turn = newTurn(user, now);
   seed?.(turn);
   const userMsg = present((await db.chatMessage.findUniqueOrThrow({ where: { id: userRow.id } })));
