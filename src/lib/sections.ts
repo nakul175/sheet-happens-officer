@@ -2,6 +2,7 @@ import { db } from "@/lib/db";
 import { ApiError, notFound } from "@/lib/http";
 import { projectAccess, requireManage, type Actor, type Tx } from "@/lib/access";
 import { logAction } from "@/lib/notify";
+import { cascadedSubtaskIds } from "@/lib/tasks";
 
 const MAX_SECTIONS = 8;
 
@@ -73,14 +74,23 @@ export async function updateSection(
       if (open.length) throw new ApiError(409, "Tasks waiting on an approver are in that section; close or move them first.");
       const old = await tx.section.findFirst({ where: { projectId, isDone: true } });
       let reopened: string[] = [];
+      // Cascaded subtasks reopen with the parent. A subtask ticked on its own, and any parent in Trash, stay as they are (APL-2721).
+      let reopenedSubtaskIds: string[] = [];
       if (old) {
-        // A done task in Trash gets no task.reopened row (APL-2679 follow-up).
-        const was = await tx.task.findMany({ where: { sectionId: old.id, parentId: null, completedAt: { not: null }, deletedAt: null }, select: { id: true, completedAt: true } });
-        reopened = was.map((x) => x.id);
+        const parents = await tx.task.findMany({
+          where: { sectionId: old.id, parentId: null, completedAt: { not: null }, deletedAt: null },
+          select: { id: true, completedAt: true },
+        });
+        reopened = parents.map((x) => x.id);
+        reopenedSubtaskIds = await cascadedSubtaskIds(tx, projectId, parents);
+        const subs = reopenedSubtaskIds.length
+          ? await tx.task.findMany({ where: { id: { in: reopenedSubtaskIds } }, select: { id: true, completedAt: true } })
+          : [];
         await tx.section.update({ where: { id: old.id }, data: { isDone: false } });
-        await tx.task.updateMany({ where: { sectionId: old.id, parentId: null }, data: { completedAt: null } });
+        const opening = [...reopened, ...reopenedSubtaskIds];
+        if (opening.length) await tx.task.updateMany({ where: { id: { in: opening } }, data: { completedAt: null } });
         // One row per task that reopened, as the complete path below writes per task that closed (APL-2679).
-        for (const t of was) {
+        for (const t of [...parents, ...subs]) {
           await logAction(tx, { actorId: user.id, projectId, targetType: "task", targetId: t.id, action: "task.reopened", before: { completedAt: t.completedAt!.toISOString() }, after: { completedAt: null, viaDoneSection: true }, primary: false });
         }
       }
@@ -96,8 +106,8 @@ export async function updateSection(
       await logAction(tx, {
         actorId: user.id, projectId, targetType: "section", targetId: s.id, action: "section.done_changed",
         // Every id is kept. Cutting the lists at 200 made Undo skip the rest and still succeed (APL-2680).
-        before: { doneSectionId: old?.id ?? null, reopenedTaskIds: reopened },
-        after: { doneSectionId: s.id, completedTaskIds: completed, completedSubtaskIds: subtasks, reopened: reopened.length, completed: completed.length, completedSubtasks: subtasks.length },
+        before: { doneSectionId: old?.id ?? null, reopenedTaskIds: reopened, reopenedSubtaskIds },
+        after: { doneSectionId: s.id, completedTaskIds: completed, completedSubtaskIds: subtasks, reopened: reopened.length, completed: completed.length, completedSubtasks: subtasks.length, reopenedSubtasks: reopenedSubtaskIds.length },
       });
     }
   });
