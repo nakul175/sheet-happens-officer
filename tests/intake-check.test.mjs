@@ -243,7 +243,8 @@ describe("workflow", () => {
     expect(permissions).toContain("contents: read");
     expect(permissions).toContain("pull-requests: read");
     expect(permissions).not.toMatch(/write/);
-    expect(workflow).not.toContain("secrets.");
+    expect(workflow.match(/secrets\.[A-Za-z0-9_]+/g)).toEqual(["secrets.GITHUB_TOKEN"]);
+    expect(workflow).toContain("GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}");
     expect(workflow).toContain("run: node scripts/ci/intake-check.mjs");
     expect(workflow).toContain("github.event.pull_request.head.sha");
     expect(workflow).not.toMatch(/echo\s+.*GITHUB_TOKEN/);

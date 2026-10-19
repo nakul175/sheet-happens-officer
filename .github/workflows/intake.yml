@@ -24,8 +24,8 @@
 #   (API/job-only, covered by Vitest);
 # - the body has an explicit line "No story spec: <reason>" with a reason.
 #
-# Uses the default GITHUB_TOKEN. Permissions below are read-only. The script
-# reads GITHUB_TOKEN from the environment and never prints it.
+# Uses the default GITHUB_TOKEN. Permissions below are read-only. The check
+# step passes that token into the environment; the script never prints it.
 name: intake
 
 on:
@@ -57,4 +57,6 @@ jobs:
         with:
           node-version: 22
       - name: Check pull request intake
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: node scripts/ci/intake-check.mjs
