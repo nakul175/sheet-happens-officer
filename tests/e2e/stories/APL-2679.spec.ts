@@ -1,8 +1,11 @@
 // APL-2679 story spec: a done-flag move writes one task.reopened row per task it reopens.
 // Runs against a local server and a local database only. Any other host is refused before a request is sent.
+// People, projects and tasks are ZZ-TEST with nakul17+ aliases (tests/zz-test-data.ts). afterAll hands each project
+// to the Super Admin, archives it and deactivates each person, all through the API.
 import { afterAll, describe, expect, it } from "vitest";
 import { PrismaClient } from "../../../src/generated/prisma/client";
-import { account, project, superAdmin, task, withVersion, type Account } from "../../helpers";
+import { task, withVersion, type Account } from "../../helpers";
+import { zzTestData } from "../../zz-test-data";
 
 const LOCAL = new Set(["localhost", "127.0.0.1", "::1", "[::1]"]);
 function refuseRemote(label: string, raw: string | undefined) {
@@ -14,16 +17,23 @@ refuseRemote("TASKBOARD_URL", process.env.TASKBOARD_URL);
 refuseRemote("DATABASE_URL", process.env.DATABASE_URL);
 
 const db = new PrismaClient();
-afterAll(() => db.$disconnect());
+const zz = zzTestData("2679");
 
-const RUN = Date.now().toString(36);
-const title = (label: string) => `ZZ-TEST ${label} ${RUN}`;
+afterAll(async () => {
+  const problems = await zz.cleanUp();
+  await db.$disconnect();
+  expect(problems, problems.join("\n")).toEqual([]);
+}, 120000);
+
+let n = 0;
+const title = (label: string) => `ZZ-TEST ${label} ${n++}`;
 
 /** A lead who manages Sections and an editor who closes tasks, so the mover and the closer differ. */
 async function setup() {
-  const lead = await account("lead");
-  const editor = await account("editor");
-  const p = await project(lead, lead, [{ who: editor }]);
+  const lead = await zz.person("lead");
+  const editor = await zz.person("editor");
+  const p = await zz.project(lead);
+  expect((await lead.c.post(`/api/projects/${p.id}/members`, { userId: editor.id, role: "EDITOR" })).status).toBe(201);
   return { lead, editor, p };
 }
 
@@ -34,6 +44,8 @@ async function closeAs(who: Account, id: string) {
 
 const rows = (projectId: string, action: string, since: Date) =>
   db.actionLog.findMany({ where: { projectId, action, targetType: "task", createdAt: { gte: since } }, orderBy: { targetId: "asc" } });
+const completedAt = async (id: string) => (await db.task.findUniqueOrThrow({ where: { id }, select: { completedAt: true } })).completedAt?.toISOString() ?? null;
+const reopenedIds = async (logId: string) => (((await db.actionLog.findUniqueOrThrow({ where: { id: logId } })).beforeState as { reopenedTaskIds: string[] }).reopenedTaskIds);
 
 describe("APL-2679 done-flag move logs reopened tasks qa:TC missing", () => {
   it("writes one task.reopened row per reopened task, with the mover as actor qa:TC missing", async () => {
@@ -58,7 +70,7 @@ describe("APL-2679 done-flag move logs reopened tasks qa:TC missing", () => {
     const move = await db.actionLog.findUniqueOrThrow({ where: { id: r.headers.get("x-undo-id")! } });
     expect(move.action).toBe("section.done_changed");
     expect(move.actorId).toBe(lead.id);
-    expect([...(move.beforeState as { reopenedTaskIds: string[] }).reopenedTaskIds].sort()).toEqual([...reopening].sort());
+    expect([...(await reopenedIds(move.id))].sort()).toEqual([...reopening].sort());
   });
 
   it("writes no task.reopened row when the old done section has no closed task qa:TC missing", async () => {
@@ -90,67 +102,46 @@ describe("APL-2679 done-flag move logs reopened tasks qa:TC missing", () => {
   });
 });
 
-describe("APL-2679 follow-up: no task.reopened for a done task in Trash qa:TC missing", () => {
-  // Thrown-away people and the project use ZZ-TEST names and nakul17+ aliases. afterAll archives the
-  // project and deactivates the people through the API, as APL-2522.spec.ts does.
-  const zzPeople: Account[] = [];
-  const zzProjects: string[] = [];
-  let n = 0;
-  const zzTitle = (label: string) => `ZZ-TEST ${label} ${RUN}-${n++}`;
-
-  async function zzAccount(role: string) {
-    const who = await account(`ZZ-TEST ${role} ${RUN}-${n++}`, `nakul17+zz-2679-${RUN}-${role}-${n++}@aplyd.com`);
-    zzPeople.push(who);
-    return who;
-  }
-
-  afterAll(async () => {
-    const sa = await superAdmin();
-    const problems: string[] = [];
-    for (const id of zzProjects) {
-      const added = await sa.c.post(`/api/projects/${id}/members`, { userId: sa.id, role: "EDITOR" });
-      if (added.status !== 201 && !(added.status === 409 && /already a member/.test(added.json?.error ?? ""))) {
-        problems.push(`add member ${id}: ${added.status} ${JSON.stringify(added.json)}`);
-      }
-      const led = await sa.c.post(`/api/projects/${id}/leader`, { newLeaderId: sa.id, previousRole: "EDITOR" });
-      if (led.status !== 200 && !(led.status === 400 && /already the Leader/.test(led.json?.error ?? ""))) {
-        problems.push(`change leader ${id}: ${led.status} ${JSON.stringify(led.json)}`);
-      }
-      const archived = await sa.c.post(`/api/projects/${id}/archive`);
-      if (archived.status !== 200) problems.push(`archive ${id}: ${archived.status} ${JSON.stringify(archived.json)}`);
-    }
-    for (const who of zzPeople) {
-      const off = await sa.c.post(`/api/team/${who.id}/deactivate`, { reassign: "leaders" });
-      if (off.status !== 200 && !(off.status === 409 && /already deactivated/.test(off.json?.error ?? ""))) {
-        problems.push(`deactivate ${who.email}: ${off.status} ${JSON.stringify(off.json)}`);
-      }
-    }
-    expect(problems, problems.join("\n")).toEqual([]);
-  });
-
-  it("writes no task.reopened row for a done task in Trash, and one for each live done task qa:TC missing", async () => {
-    const lead = await zzAccount("lead");
-    const editor = await zzAccount("editor");
-    const created = await lead.c.post("/api/projects", { name: zzTitle("project"), leaderId: lead.id });
-    expect(created.status, JSON.stringify(created.json)).toBe(201);
-    const id = created.json.project.id as string;
-    zzProjects.push(id);
-    expect((await lead.c.post(`/api/projects/${id}/members`, { userId: editor.id, role: "EDITOR" })).status).toBe(201);
-    const sections = (await lead.c.get(`/api/projects/${id}`)).json.project.sections as { id: string; isDone: boolean }[];
-    const todo = sections[0].id;
-    const doing = sections[1].id;
-
-    const live = await task(lead, id, { title: zzTitle("live done"), sectionId: todo });
-    const trashed = await task(lead, id, { title: zzTitle("trashed done"), sectionId: todo });
+describe("APL-2755 a done task in Trash and the done-flag move qa:TC missing", () => {
+  it("leaves a done task in Trash closed, unlisted and without a task.reopened row, and Undo leaves it as it was qa:TC missing", async () => {
+    const { lead, editor, p } = await setup();
+    const live = await task(lead, p.id, { title: title("live done"), sectionId: p.todo });
+    const trashed = await task(lead, p.id, { title: title("trashed done"), sectionId: p.todo });
     await closeAs(editor, live);
     await closeAs(editor, trashed);
     expect((await lead.c.del(`/api/tasks/${trashed}`)).status).toBeLessThan(300);
+    const trashedAt = await completedAt(trashed);
+    expect(trashedAt).not.toBeNull();
 
     const since = new Date();
-    const r = await lead.c.patch(`/api/projects/${id}/sections/${doing}`, { isDone: true });
+    const r = await lead.c.patch(`/api/projects/${p.id}/sections/${p.doing}`, { isDone: true });
     expect(r.status, JSON.stringify(r.json)).toBe(200);
-    const reopened = await rows(id, "task.reopened", since);
+    const reopened = await rows(p.id, "task.reopened", since);
     expect(reopened.map((x) => x.targetId)).toEqual([live]);
     expect(reopened[0].actorId).toBe(lead.id);
+    expect(await reopenedIds(r.headers.get("x-undo-id")!)).toEqual([live]);
+    expect(await completedAt(trashed)).toBe(trashedAt);
+    expect(await completedAt(live)).toBeNull();
+
+    const u = await lead.c.post(`/api/actions/${r.headers.get("x-undo-id")}/undo`);
+    expect(u.status, JSON.stringify(u.json)).toBe(200);
+    expect(await completedAt(trashed)).toBe(trashedAt);
+    expect(await completedAt(live)).not.toBeNull();
+  });
+
+  it("Undo of a done-flag move closes again a task it reopened that was moved to Trash after the move qa:TC missing", async () => {
+    const { lead, editor, p } = await setup();
+    const id = await task(lead, p.id, { title: title("trashed later"), sectionId: p.todo });
+    await closeAs(editor, id);
+
+    const r = await lead.c.patch(`/api/projects/${p.id}/sections/${p.doing}`, { isDone: true });
+    expect(r.status, JSON.stringify(r.json)).toBe(200);
+    expect(await reopenedIds(r.headers.get("x-undo-id")!)).toEqual([id]);
+    expect(await completedAt(id)).toBeNull();
+    expect((await lead.c.del(`/api/tasks/${id}`)).status).toBeLessThan(300);
+
+    const u = await lead.c.post(`/api/actions/${r.headers.get("x-undo-id")}/undo`, { anyway: true });
+    expect(u.status, JSON.stringify(u.json)).toBe(200);
+    expect(await completedAt(id)).not.toBeNull();
   });
 });
