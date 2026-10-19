@@ -98,4 +98,36 @@ describe("one error shape for a task version (APL-2670)", () => {
     }
     expect(await shown(fx.worker, fx.id)).toEqual({ title: "Original", updatedAt: fx.t0 });
   });
+
+  it("qa:TC missing APL-2670 AC3 F8: on assign, move, complete and approver an outsider with a valid body gets the same 404 bytes as a missing id", async () => {
+    const fx = await fixture();
+    const valid = {
+      assign: { assigneeId: fx.worker.id, expectedUpdatedAt: fx.t0 },
+      move: { sectionId: fx.sectionId, expectedUpdatedAt: fx.t0 },
+      complete: { expectedUpdatedAt: fx.t0 },
+      approver: { approverId: fx.worker.id, expectedUpdatedAt: fx.t0 },
+    } as const;
+    const routes = [
+      ["assign", "POST", "assign"],
+      ["move", "POST", "move"],
+      ["complete", "POST", "complete"],
+      ["approver", "PUT", "approver"],
+    ] as const;
+    const raw = async (method: string, id: string, path: string, body: unknown) => {
+      const r = await fetch(`${BASE}/api/tasks/${id}/${path}`, {
+        method, headers: { "content-type": "application/json", cookie: fx.outsider.c.cookie }, body: JSON.stringify(body),
+      });
+      return { status: r.status, text: await r.text() };
+    };
+    const seen = [];
+    for (const [name, method, path] of routes) {
+      const hidden = await raw(method, fx.id, path, valid[name]);
+      const missingId = await raw(method, "does-not-exist", path, valid[name]);
+      seen.push({ name, hidden, missingId, identical: hidden.text === missingId.text });
+    }
+    const notFound = { status: 404, text: JSON.stringify({ error: "Task not found" }) };
+    // F8: every route answers an outsider with exactly the bytes it gives for a missing id.
+    expect(seen).toEqual(routes.map(([name]) => ({ name, hidden: notFound, missingId: notFound, identical: true })));
+    expect(await shown(fx.worker, fx.id)).toEqual({ title: "Original", updatedAt: fx.t0 });
+  });
 });
