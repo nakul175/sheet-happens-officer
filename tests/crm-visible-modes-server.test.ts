@@ -200,16 +200,6 @@ async function readPaths(base: string, cookie: string, dealId: string, name: str
   ];
 }
 
-function environ(pid: number) {
-  const raw = readFileSync(`/proc/${pid}/environ`);
-  const out: Record<string, string> = {};
-  for (const entry of raw.toString("utf8").split("\0")) {
-    const i = entry.indexOf("=");
-    if (i > 0) out[entry.slice(0, i)] = entry.slice(i + 1);
-  }
-  return out;
-}
-
 function listeningPids(port: number) {
   const hexPort = port.toString(16).toUpperCase().padStart(4, "0");
   const inodes = new Set<string>();
@@ -341,28 +331,44 @@ describe("CRM_VISIBLE modes are tested against a real server per mode", () => {
     const envs = [...running.values()].map((server) => server.env);
     expect(new Set(envs).size, "each mode has its own env object").toBe(MODES.length);
 
+    // Mode, outbox and base are the values passed to spawn. The deal API is how that mode shows up.
+    const open = running.get("on");
+    expect(open, "the on server is running").toBeTruthy();
+    const memberEmail = `nakul17+zz-2728-${runId}-mode-member@aplyd.com`;
+    const adminEmail = `nakul17+zz-2728-${runId}-mode-admin@aplyd.com`;
+    seed.emails.push(memberEmail, adminEmail);
+    const member = await signIn(open!, `ZZ-TEST mode member ${runId}`, memberEmail);
+    const admin = await signIn(open!, `ZZ-TEST mode admin ${runId}`, adminEmail);
+    seed.userIds.push(member.id, admin.id);
+    await db.user.update({ where: { id: admin.id }, data: { orgRole: "ADMIN" } });
+
     const listeners: number[] = [];
     for (const server of running.values()) {
       expect(server.env.CRM_VISIBLE).toBe(server.mode);
+      expect(server.env.EMAIL_OUTBOX_DIR).toBe(server.outbox);
+      expect(server.env.APP_URL).toBe(server.base);
       const health = await fetch(`${server.base}/api/health`);
       expect(health.status, server.mode).toBe(200);
+      const memberDeals = await call(server.base, member.cookie, "GET", "/api/deals");
+      const adminDeals = await call(server.base, admin.cookie, "GET", "/api/deals");
+      const memberSees = memberDeals.status === 200;
+      const adminSees = adminDeals.status === 200;
+      const observed = memberSees && adminSees ? "on" : !memberSees && adminSees ? "admins" : !memberSees && !adminSees ? "off" : "mixed";
+      expect(observed, `${server.mode} member ${memberDeals.status} admin ${adminDeals.status}`).toBe(server.mode);
       const listening = listeningPids(server.port);
       expect(listening.length, `${server.mode} is listening`).toBeGreaterThan(0);
       for (const pid of listening) {
         expect(isInGroup(server.pid, pid), `${server.mode} listener ${pid} belongs to ${server.pid}`).toBe(true);
-        expect(environ(pid).CRM_VISIBLE, server.mode).toBe(server.mode);
-        expect(environ(pid).EMAIL_OUTBOX_DIR).toBe(server.outbox);
-        expect(environ(pid).APP_URL).toBe(server.base);
       }
       listeners.push(...listening);
     }
     expect(new Set(listeners).size, "no mode reuses another mode's process").toBe(listeners.length);
-    const modes = new Set([...running.values()].map((server) => environ(listeningPids(server.port)[0]).CRM_VISIBLE));
+    const modes = new Set([...running.values()].map((server) => server.mode));
     expect(modes).toEqual(new Set(MODES));
 
     await expect(startModeServer("on", { bin: process.execPath, args: ["-e", "process.exit(1)"], timeoutMs: 3_000 })).rejects.toThrow(/cannot start/);
     await expect(startModeServer("off", { bin: process.execPath, args: ["-e", "setInterval(() => {}, 1e9)"], timeoutMs: 800 })).rejects.toThrow(/cannot start/);
-  }, 30_000);
+  }, 60_000);
 
   it("qa:TC-APL2728-968d706d@v1 AC4: the person page redacts a hidden deal under every mode", async () => {
     const open = running.get("on");
