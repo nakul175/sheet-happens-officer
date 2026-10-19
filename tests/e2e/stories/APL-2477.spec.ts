@@ -25,7 +25,7 @@ async function verified(anon: { request: import("@playwright/test").APIRequestCo
   return email;
 }
 
-test.describe("SHO-US-1.4 / APL-2477", () => {
+test.describe("SHO-US-1.4 / APL-2477 qa:TC missing", () => {
   test.beforeAll(() => {
     test.skip(!PASS, "Set SHO_QA_PASS (the shared password for the nakul17+ accounts).");
     test.skip(!passwordOk(PASS), "SHO_QA_PASS must be at least 8 characters with a letter and a number.");
@@ -33,7 +33,7 @@ test.describe("SHO-US-1.4 / APL-2477", () => {
   });
 
   // qa:TC missing
-  test("AC1: asking for a reset gives the same neutral answer whether or not an account exists", { annotation: { type: "qa:TC", description: "missing" } }, async ({ anon }) => {
+  test("AC1: asking for a reset gives the same neutral answer whether or not an account exists qa:TC missing", { annotation: { type: "qa:TC", description: "missing" } }, async ({ anon }) => {
     const a = await anon.request.post("/api/auth/forgot-password", { data: { email: ghost("a") } });
     const b = await anon.request.post("/api/auth/forgot-password", { data: { email: ghost("b") } });
     expect(a.status()).toBe(200);
@@ -47,7 +47,7 @@ test.describe("SHO-US-1.4 / APL-2477", () => {
   });
 
   // qa:TC missing
-  test("AC1 (link sent only if an account exists): a reset email arrives for a real account and none for an unknown one", { annotation: { type: "qa:TC", description: "missing" } }, async ({ anon, admin, later }) => {
+  test("AC1 (link sent only if an account exists): a reset email arrives for a real account and none for an unknown one qa:TC missing", { annotation: { type: "qa:TC", description: "missing" } }, async ({ anon, admin, later }) => {
     needPass();
     const email = await verified(anon, admin, later, "ac1");
     const unknown = ghost("ac1-none");
@@ -63,7 +63,7 @@ test.describe("SHO-US-1.4 / APL-2477", () => {
   });
 
   // qa:TC missing
-  test("AC2: a valid link plus a good password changes the password, ends other sessions, and the link works once", { annotation: { type: "qa:TC", description: "missing" } }, async ({ anon, admin, browser, later }) => {
+  test("AC2: a valid link plus a good password changes the password, ends other sessions, and the link works once qa:TC missing", { annotation: { type: "qa:TC", description: "missing" } }, async ({ anon, admin, browser, later }) => {
     needPass();
     const email = await verified(anon, admin, later, "ac2");
     const here = await signInAs(browser, email, PASS);
@@ -95,7 +95,7 @@ test.describe("SHO-US-1.4 / APL-2477", () => {
   });
 
   // qa:TC missing
-  test("AC3: a foreign domain, a rule-breaking password and mismatched fields each show their own message", { annotation: { type: "qa:TC", description: "missing" } }, async ({ anon }) => {
+  test("AC3: a foreign domain, a rule-breaking password and mismatched fields each show their own message qa:TC missing", { annotation: { type: "qa:TC", description: "missing" } }, async ({ anon }) => {
     await anon.goto("/forgot");
     await anon.getByLabel("Work email").fill("someone@gmail.com");
     await anon.getByRole("button", { name: "Send reset link" }).click();
@@ -114,7 +114,7 @@ test.describe("SHO-US-1.4 / APL-2477", () => {
   });
 
   // qa:TC missing
-  test("AC4: an unknown, expired or used link lands on Link expired with a way to request a new reset link", { annotation: { type: "qa:TC", description: "missing" } }, async ({ anon }) => {
+  test("AC4: an unknown, expired or used link lands on Link expired with a way to request a new reset link qa:TC missing", { annotation: { type: "qa:TC", description: "missing" } }, async ({ anon }) => {
     await anon.goto(`/reset?token=${token}`);
     await anon.getByLabel("New password", { exact: true }).fill(`Zz${RUN}9x`);
     await anon.getByLabel("Confirm new password").fill(`Zz${RUN}9x`);
@@ -126,7 +126,7 @@ test.describe("SHO-US-1.4 / APL-2477", () => {
   });
 
   // qa:TC missing
-  test("AC5: repeated requests for an address always get one message that never says whether an account exists", { annotation: { type: "qa:TC", description: "missing" } }, async ({ anon }) => {
+  test("AC5: repeated requests for an address always get one message that never says whether an account exists qa:TC missing", { annotation: { type: "qa:TC", description: "missing" } }, async ({ anon }) => {
     const email = ghost("limit");
     const first = await (await anon.request.post("/api/auth/forgot-password", { data: { email } })).json();
     for (let i = 0; i < 4; i++) {
@@ -138,7 +138,7 @@ test.describe("SHO-US-1.4 / APL-2477", () => {
   });
 
   // qa:TC missing
-  test("AC5 (limit): the 4th request in an hour sends no email for a real account", { annotation: { type: "qa:TC", description: "missing" } }, async ({ anon, admin, later }) => {
+  test("AC5 (limit): the 4th request in an hour sends no email for a real account qa:TC missing", { annotation: { type: "qa:TC", description: "missing" } }, async ({ anon, admin, later }) => {
     needPass();
     const email = await verified(anon, admin, later, "ac5");
     let previous = "";
@@ -156,7 +156,7 @@ test.describe("SHO-US-1.4 / APL-2477", () => {
   });
 
   // qa:TC missing
-  test("AC6: after a reset, a locked-out person can sign in at once with the new password", { annotation: { type: "qa:TC", description: "missing" } }, async ({ anon, admin, later }) => {
+  test("AC6: after a reset, a locked-out person can sign in at once with the new password qa:TC missing", { annotation: { type: "qa:TC", description: "missing" } }, async ({ anon, admin, later }) => {
     needPass();
     const email = await verified(anon, admin, later, "ac6");
     for (let i = 0; i < 5; i++) {

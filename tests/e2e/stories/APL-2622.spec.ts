@@ -11,7 +11,7 @@ const mk = async (admin: { api: { post: (p: string, b?: unknown) => Promise<{ st
   return { id, name: `ZZ-TEST ${label} ${RUN}`, email: `zz-test-${RUN}-${label}@example.invalid` };
 };
 
-test.describe("SHO-US-23.3 / APL-2622", () => {
+test.describe("SHO-US-23.3 / APL-2622 qa:TC missing", () => {
   test.beforeAll(() => {
     test.skip(!PASS, "Set SHO_QA_PASS (the shared password for the nakul17+ accounts).");
     test.skip(!passwordOk(PASS), "SHO_QA_PASS must be at least 8 characters with a letter and a number.");
@@ -19,7 +19,7 @@ test.describe("SHO-US-23.3 / APL-2622", () => {
   });
 
   // qa:TC missing
-  test("AC1: the email shows the sign-in link, the username and the password", { annotation: { type: "qa:TC", description: "missing" } }, async ({ admin, later }) => {
+  test("AC1: the email shows the sign-in link, the username and the password qa:TC missing", { annotation: { type: "qa:TC", description: "missing" } }, async ({ admin, later }) => {
     const p = await mk(admin, later, "mail");
     const mail = await waitForSinkMail(p.email, "Your Sheet Happens Officer account");
     expect(mail.text).toContain("/signin");
@@ -30,7 +30,7 @@ test.describe("SHO-US-23.3 / APL-2622", () => {
   });
 
   // qa:TC missing
-  test("AC2: the password stays valid until the person changes it", { annotation: { type: "qa:TC", description: "missing" } }, async ({ admin, browser, later }) => {
+  test("AC2: the password stays valid until the person changes it qa:TC missing", { annotation: { type: "qa:TC", description: "missing" } }, async ({ admin, browser, later }) => {
     const p = await mk(admin, later, "keep");
     const pass = mailedPassword(p.email) ?? (await waitForSinkMail(p.email, "Your Sheet Happens Officer account")).text?.match(/^Password: (.+)$/m)?.[1];
     expect(pass, "emailed password").toBeTruthy();
@@ -53,7 +53,7 @@ test.describe("SHO-US-23.3 / APL-2622", () => {
   });
 
   // qa:TC missing
-  test("AC3: the first sign-in shows a closable 'Set your own password' banner linking to Profile", { annotation: { type: "qa:TC", description: "missing" } }, async ({ admin, browser, later }) => {
+  test("AC3: the first sign-in shows a closable 'Set your own password' banner linking to Profile qa:TC missing", { annotation: { type: "qa:TC", description: "missing" } }, async ({ admin, browser, later }) => {
     const p = await mk(admin, later, "banner");
     const pass = (await waitForSinkMail(p.email, "Your Sheet Happens Officer account")).text?.match(/^Password: (.+)$/m)?.[1];
     expect(pass).toBeTruthy();
@@ -71,7 +71,7 @@ test.describe("SHO-US-23.3 / APL-2622", () => {
   });
 
   // qa:TC missing
-  test("AC4: Resend sign-in details answers with an emailed/not-emailed flag only, never a password, and is for the Super Admin only", { annotation: { type: "qa:TC", description: "missing" } }, async ({ admin, member, later }) => {
+  test("AC4: Resend sign-in details answers with an emailed/not-emailed flag only, never a password, and is for the Super Admin only qa:TC missing", { annotation: { type: "qa:TC", description: "missing" } }, async ({ admin, member, later }) => {
     const p = await mk(admin, later, "resend");
     const r = await admin.api.post(`/api/team/${p.id}/resend`);
     expect(r.status, JSON.stringify(r.json)).toBe(200);
@@ -95,7 +95,7 @@ test.describe("SHO-US-23.3 / APL-2622", () => {
   });
 
   // qa:TC missing
-  test("AC4 (screen): the button on the person's page says what happened and shows no password", { annotation: { type: "qa:TC", description: "missing" } }, async ({ admin, later }) => {
+  test("AC4 (screen): the button on the person's page says what happened and shows no password qa:TC missing", { annotation: { type: "qa:TC", description: "missing" } }, async ({ admin, later }) => {
     const p = await mk(admin, later, "resendui");
     await admin.page.goto(`/team/${p.id}`);
     await admin.page.getByRole("button", { name: "Resend sign-in details" }).click({ timeout: 60_000 });
@@ -106,7 +106,7 @@ test.describe("SHO-US-23.3 / APL-2622", () => {
   });
 
   // qa:TC missing
-  test("AC5: wrong-password lockout and Forgot password are unchanged for a person who was added", { annotation: { type: "qa:TC", description: "missing" } }, async ({ anon, admin, later }) => {
+  test("AC5: wrong-password lockout and Forgot password are unchanged for a person who was added qa:TC missing", { annotation: { type: "qa:TC", description: "missing" } }, async ({ anon, admin, later }) => {
     // Locking out an added person would lock a real account, so this uses the ZZ-TEST person: 5 wrong tries lock it, and the screen still offers Forgot password.
     const p = await mk(admin, later, "lockout");
     for (let i = 0; i < 5; i++) expect((await anon.request.post("/api/auth/signin", { data: { email: p.email, password: `wrong-pass-${i}9` } })).status()).toBe(401);
