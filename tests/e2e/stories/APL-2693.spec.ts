@@ -10,7 +10,7 @@ test.describe.configure({ timeout: 150_000 });
 
 const asksToWhom = (text: string) => /\bwho(?:m)?\b/i.test(text) && /\bassign/i.test(text) && text.includes("?");
 
-test.describe("APL-2693", { tag: "@APL-2693" }, () => {
+test.describe("qa:TC missing APL-2693", { tag: "@APL-2693" }, () => {
   test(
     '@APL-2693 qa:TC-APL2693-67ec712c@v1 AC1: Assign "<title>". ends as a question asking to whom',
     { tag: ["@APL-2693", "@AC1"] },
