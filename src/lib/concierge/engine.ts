@@ -118,17 +118,22 @@ const WHO_TO_ASSIGN = "Who should I assign this to?";
 /** The request without quoted text ("Budget to review" is a title, not a person). */
 const outsideQuotes = (request: string) => request.trim().replace(/"[^"]*"|'[^']*'/g, " ").replace(/\s+/g, " ").trim();
 
-/** The person named after the last "to" ("Move it to Monday and assign it to Quokka" names Quokka). */
-function namedAssignee(request: string): string | null {
-  const m = /^.*\bto\s+(.+)$/i.exec(outsideQuotes(request));
-  if (!m) return null;
-  const name = m[1].replace(/[.?!]+$/g, "").replace(/\s+please$/i, "").trim();
+/**
+ * An assign request opens with "assign" or "reassign", after an optional "please" or "can/could/would/will you".
+ * A question about assigning ("How do I assign a task?", "Can I reassign it?") is not one.
+ */
+const ASSIGN_REQUEST = /^(?:please\s+)?(?:(?:can|could|would|will)\s+you\s+(?:please\s+)?)?(?:re)?assign\b/i;
+
+/** The person named right after "assign … to", up to the next clause ("to me and set it to high priority" names me). */
+function namedAssignee(text: string): string | null {
+  const m = /\b(?:re)?assign\b.*?\bto\s+(.+?)(?=\s+(?:and|then|please)\b|[.?!,;]|$)/i.exec(text);
+  const name = m?.[1].trim();
   return name || null;
 }
 
-/** Ids of the people the name points at: "me", or anyone found this turn whose name or email contains it, as find_people matches. */
+/** Ids of the people the name points at: "me" or "myself", or anyone found this turn whose name or email contains it, as find_people matches. */
 function peopleNamed(turn: Turn, name: string): Set<string> {
-  if (/^me$/i.test(name)) return new Set([turn.user.id]);
+  if (/^(?:me|myself)$/i.test(name)) return new Set([turn.user.id]);
   const n = normalise(name);
   const ids = new Set<string>();
   if (n.length < 2) return ids;
@@ -139,13 +144,14 @@ function peopleNamed(turn: Turn, name: string): Set<string> {
 }
 
 /**
- * An assign request ("Assign …", "Please assign …", "Can you reassign …") with nobody named, or a person this turn did
- * not find, or a card that assigns someone other than the person named. A guessed assignee must not become a card.
+ * An assign request with nobody named, or a person this turn did not find, or a card that assigns someone other than
+ * the person named. A guessed assignee must not become a card.
  */
 function needsWhom(turn: Turn, request: string): boolean {
-  if (!/\b(?:re)?assign\b/i.test(outsideQuotes(request))) return false;
+  const text = outsideQuotes(request);
+  if (!ASSIGN_REQUEST.test(text)) return false;
   const assigns = turn.card?.ops.filter((o) => o.k === "task.assign") ?? [];
-  const name = namedAssignee(request);
+  const name = namedAssignee(text);
   if (!name) return true;
   const named = peopleNamed(turn, name);
   return !named.size || assigns.some((o) => !named.has(o.assigneeId));

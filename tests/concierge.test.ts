@@ -797,6 +797,46 @@ describe("clarifying questions (8.4)", () => {
         expect(card?.card!.changes[0].after).toBe(`Assigned to ${quokka.name}`);
       }
     });
+
+    // QA on e81b0de: a how-to question is not an assign request (D1), the name is the one right after
+    // "assign … to" (D2), and "myself" is the signed-in person (D3).
+    it("qa:TC missing APL-2693 D1: a how-to question that mentions assign gets the model's answer, not the who-question", async () => {
+      const lead = await account("lead");
+      const answer = "Open the task and pick a person in the Assignee field.";
+      for (const text of ["How do I assign a task to someone?", "Who can assign tasks in a project?", "Can I reassign a task after it is done?"]) {
+        script(() => [say(answer)]);
+        const asked = await ask(lead, text);
+        const reply = [...asked.messages].reverse().find((m) => m.role === "ASSISTANT");
+        expect(reply?.text, text).toBe(answer);
+        expect(asked.messages.some((m) => m.card), text).toBe(false);
+      }
+    });
+
+    it("qa:TC missing APL-2693 D2: the name is read right after assign … to, so a later \"to\" does not replace it", async () => {
+      const lead = await account("lead");
+      const p = await project(lead, lead);
+      await task(lead, p.id, { title: "Budget" });
+      for (const text of [`Assign "Budget" to me and set it to high priority.`, `Please assign "Budget" to me, then move it to Monday`]) {
+        proposeMe();
+        const named = await ask(lead, text);
+        const card = named.messages.find((m) => m.kind === "card");
+        expect(card?.card, text).toMatchObject({ status: "PENDING", canConfirm: true });
+        expect(card?.card!.changes[0].after).toBe(`Assigned to ${lead.name}`);
+      }
+    });
+
+    it("qa:TC missing APL-2693 D3: \"to myself\" names the signed-in person and returns the confirm card", async () => {
+      const lead = await account("lead");
+      const p = await project(lead, lead);
+      const id = await task(lead, p.id, { title: "Budget" });
+      const before = (await db.task.findUniqueOrThrow({ where: { id } })).assigneeId;
+      proposeMe();
+      const named = await ask(lead, `Assign "Budget" to myself.`);
+      const card = named.messages.find((m) => m.kind === "card");
+      expect(card?.card).toMatchObject({ status: "PENDING", canConfirm: true });
+      expect(card?.card!.changes[0].after).toBe(`Assigned to ${lead.name}`);
+      expect((await db.task.findUniqueOrThrow({ where: { id } })).assigneeId).toBe(before);
+    });
   });
 
   it("an id the model never fetched is refused", async () => {
