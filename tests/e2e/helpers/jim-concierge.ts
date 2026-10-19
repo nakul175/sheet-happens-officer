@@ -1,7 +1,7 @@
 // Shared by the SHO-E8 / SHO-E9 story specs (APL-2510 to APL-2518).
 // Each test clears the concierge thread it started empty (cleanChat) and does not continue another test's conversation,
 // so these files are not in the staging workflow's SERIAL_SPECS. A thread that already held messages is left alone.
-import { test, expect, login, BASE_URL, type Json } from "../support";
+import { expect, login, BASE_URL, type Json } from "../support";
 import { getTask, ymd, type Who } from "../g2";
 import { conciergeLive, conciergeOff } from "./jim-gate";
 import type { Browser, Page } from "@playwright/test";
@@ -36,20 +36,19 @@ export type ConciergeMessage = {
   };
 };
 
-/** Skip unless the concierge is switched on. A weekly cap or a provider pause still counts as on. */
+/** Fails unless the concierge is switched on. A weekly cap or a provider pause still counts as on. No skip. */
 export async function requireConcierge(who: Who) {
   const c = await conciergeLive(who);
-  if (!c.live) test.info().annotations.push({ type: "skip", description: conciergeOff(c) });
-  test.skip(!c.live, conciergeOff(c));
+  if (!c.live) throw new Error(conciergeOff(c));
   return c;
 }
 
-/** Skip unless a model question can run. A cap or an outage pauses the composer and refuses the call. */
+/** Fails unless a model question can run. A cap or an outage pauses the composer and refuses the call. No skip. */
 export async function requireModel(who: Who) {
   await requireConcierge(who);
   const s = await who.api.get("/api/concierge/state");
   const code = s.json.disabled?.code as string | undefined;
-  test.skip(!!code, `The concierge cannot take a model question on this build (${code}: ${s.json.disabled?.message ?? "paused"}).`);
+  if (code) throw new Error(`The concierge cannot take a model question on this build (${code}: ${s.json.disabled?.message ?? "paused"}).`);
 }
 
 /** Puts the concierge back on screen for the test, and restores the account's hide preference afterwards. */
@@ -158,7 +157,7 @@ export async function setDictation(page: Page, mode: "hold" | "speak" | "silence
 /** Clicks the microphone, and accepts the first-use notice when this account has not seen it yet. */
 export async function startDictation(who: Who) {
   const acked = !!(await who.api.get("/api/concierge/state")).json.voiceNoticeAcked;
-  await who.page.locator("button.cc-mic").click();
+  await who.page.getByRole("button", { name: "Dictate", exact: true }).click();
   if (!acked) {
     const notice = who.page.getByRole("alertdialog", { name: "About dictation" });
     await expect(notice).toBeVisible();

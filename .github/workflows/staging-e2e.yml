@@ -4,7 +4,10 @@
 # Input "specs": space-separated issue ids (APL-2481) or globs (APL-26*, tests/e2e/stories/APL-25*.spec.ts); empty runs every spec.
 # Secrets (repository settings): STAGING_USER, STAGING_PASS, SHO_QA_PASS, SHO_ADMIN_EMAIL, SHO_ADMIN_PASS, SHO_MEMBER_EMAIL,
 # SHO_MEMBER_PASS, and ZZ_TEST_01_EMAIL / ZZ_TEST_01_PASS ... ZZ_TEST_20_EMAIL / ZZ_TEST_20_PASS (01-05 Super Admins, 06-20 plain Members).
-# SHO_QA_PASS is the shared password for the nakul17+ story accounts. Story specs skip without it, and Playwright then exits 0.
+# SHO_QA_PASS is the shared password for the nakul17+ story accounts. Without it the harness gate (qa-alias gateFile) fails the spec.
+# Those accounts are a fixed pool of already verified aliases (APL-2748, tests/e2e/helpers/alias-pool.ts): the Super Admin
+# nakul17+zz-sa plus 3 Members per job, nakul17+zz-qa-<QA_SLOT>-1..3. QA_SLOT is the shard's nn, or "serial", so two jobs
+# never share a person. No spec signs up or verifies an account; tests/e2e/tools/provision-aliases.ts sets the pool up once.
 # The previews use the same STAGING_USER / STAGING_PASS basic-auth gate as staging.
 # They reach the jobs as environment variables only and are never echoed. Runs queue in one group so two never run at once.
 # This workflow is workflow_dispatch only. It does not run on pull_request or pull_request_target, so a fork cannot read these secrets.
@@ -20,7 +23,7 @@
 #   counts      once, after every shard (if: always(), needs plan). Expected count files come from plan:
 #               20 when the parallel matrix runs, plus 1 when serial specs were picked. Fewer files, a failed
 #               download, or a missing-report marker fails the job. It also fails when run is 0 or skipped equals total.
-#   report      merges every job's blob report into one HTML report.167
+#   report      merges every job's blob report into one HTML report.
 
 #
 # max_parallel: the staging database is shared with production and allows 25 connections. Do not raise it above 5 until NJ approves
@@ -252,6 +255,7 @@ jobs:
           SHO_MEMBER_EMAIL: ${{ secrets.SHO_MEMBER_EMAIL }}
           SHO_MEMBER_PASS: ${{ secrets.SHO_MEMBER_PASS }}
           SHO_QA_PASS: ${{ secrets.SHO_QA_PASS }}
+          QA_SLOT: ${{ matrix.nn }}
           SHARD_EMAIL: ${{ secrets[format('ZZ_TEST_{0}_EMAIL', matrix.nn)] }}
           SHARD_PASS: ${{ secrets[format('ZZ_TEST_{0}_PASS', matrix.nn)] }}
           PEER_EMAIL: ${{ secrets[format('ZZ_TEST_{0}_EMAIL', matrix.peer)] }}
@@ -340,6 +344,7 @@ jobs:
           SHO_MEMBER_EMAIL: ${{ secrets.SHO_MEMBER_EMAIL }}
           SHO_MEMBER_PASS: ${{ secrets.SHO_MEMBER_PASS }}
           SHO_QA_PASS: ${{ secrets.SHO_QA_PASS }}
+          QA_SLOT: serial
           PLAYWRIGHT_JSON_OUTPUT_FILE: playwright-report.json
           FILES: ${{ needs.plan.outputs.serial }}
           TRACE: ${{ inputs.trace }}

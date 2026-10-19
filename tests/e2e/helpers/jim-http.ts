@@ -25,8 +25,8 @@ export async function patchCurrent(who: Who, taskId: string, body: Record<string
   return who.api.patch(`/api/tasks/${taskId}`, { ...body, expectedUpdatedAt: seen });
 }
 
-/** The Undo toast raised by UndoHost after a change. */
-export const undoToast = (who: Who) => who.page.locator(".undo-toast");
+/** The Undo toast raised by UndoHost after a change (role="status" with an Undo button, or a status note). */
+export const undoToast = (who: Who) => who.page.getByRole("status").filter({ has: who.page.getByRole("button", { name: "Undo", exact: true }) });
 
 /**
  * A ZZ-TEST deal (a project with deal data) led by `leader`, with `members` as Editors. The deal and its organisation are archived afterwards.
@@ -53,7 +53,7 @@ export async function newDeal(leader: Who, later: (fn: () => Promise<unknown>) =
   return { id, name };
 }
 
-/** Details for `test.skip(title, why(reason), body)`: the reason is shown in the Playwright report next to the skipped test. */
+/** A "skip" annotation with a reason, for the Playwright report. The harness itself never skips a test. */
 export const why = (description: string) => ({ annotation: { type: "skip", description } });
 
 /** The concierge's quick actions (src/lib/concierge/reads.ts QUICK_ACTIONS). */
