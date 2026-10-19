@@ -58,8 +58,8 @@ afterAll(async () => {
   }
 });
 
-async function openSheet(width: number, email: string) {
-  const ctx = await browser.newContext({ viewport: { width, height: 700 }, deviceScaleFactor: 1, hasTouch: true, isMobile: true, baseURL: BASE });
+async function openSheet(width: number, email: string, height = 700) {
+  const ctx = await browser.newContext({ viewport: { width, height }, deviceScaleFactor: 1, hasTouch: true, isMobile: true, baseURL: BASE });
   const signed = await ctx.request.post("/api/auth/signin", { data: { email, password: PW } });
   expect(signed.ok(), "sign in").toBe(true);
   const page = await ctx.newPage();
@@ -80,8 +80,8 @@ const metrics = (el: Locator) => el.evaluate((e) => {
   };
 });
 
-describe("qa:TC missing APL-2737 a 300-character blocked reason is fully readable on a phone sheet", () => {
-  it("qa:TC missing AC1: at 320 px the title does not scroll sideways and the 300-character reason is not clipped vertically", async () => {
+describe("@APL-2737 qa:TC missing a 300-character blocked reason is fully readable on a phone sheet", () => {
+  it("@APL-2737 @AC1 qa:TC missing at 320 px the title does not scroll sideways and the 300-character reason is not clipped vertically", async () => {
     expect(TITLE).toHaveLength(150);
     expect(REASON).toHaveLength(300);
     const { page, dialog, reason } = await openSheet(320, SUPER_EMAIL);
@@ -94,7 +94,8 @@ describe("qa:TC missing APL-2737 a 300-character blocked reason is fully readabl
       expect(r.value).toBe(REASON);
       expect(r.sw, "blocked reason scrolls sideways").toBeLessThanOrEqual(r.cw + 1);
       expect(r.sh, "blocked reason is clipped vertically").toBeLessThanOrEqual(r.ch + 2);
-      expect(r.overflowY).toBe("hidden");
+      // auto, not hidden: if the width ever changes before the next fit, the rest stays reachable (Pam D2).
+      expect(r.overflowY).toBe("auto");
       // It got here by growing past the old five-line cap, not by the reason being short.
       expect(r.ch).toBeGreaterThan(r.lineHeight * 5);
       const pg = await page.evaluate(() => ({ sw: document.documentElement.scrollWidth, iw: window.innerWidth }));
@@ -102,7 +103,7 @@ describe("qa:TC missing APL-2737 a 300-character blocked reason is fully readabl
     } finally { await page.context().close(); }
   });
 
-  it("qa:TC missing AC1: the reason stays fully readable at the other phone widths and for a Viewer (read-only box)", async () => {
+  it("@APL-2737 @AC1 qa:TC missing the reason stays fully readable at the other phone widths and for a Viewer (read-only box)", async () => {
     for (const [width, email] of [[360, SUPER_EMAIL], [390, SUPER_EMAIL], [320, viewer!.email]] as const) {
       const { page, reason } = await openSheet(width, email);
       try {
@@ -114,7 +115,7 @@ describe("qa:TC missing APL-2737 a 300-character blocked reason is fully readabl
     }
   });
 
-  it("qa:TC missing AC1: typing the reason up to 300 characters grows the box with it, with no scrolling inside", async () => {
+  it("@APL-2737 @AC1 qa:TC missing typing the reason up to 300 characters grows the box with it, with no scrolling inside", async () => {
     const { page, reason } = await openSheet(320, SUPER_EMAIL);
     try {
       await reason.fill("");
@@ -128,6 +129,36 @@ describe("qa:TC missing APL-2737 a 300-character blocked reason is fully readabl
       expect(full.sh, "clipped vertically after typing").toBeLessThanOrEqual(full.ch + 2);
       // Leave without saving: the reason on the task stays as it was.
       await reason.fill(REASON);
+    } finally { await page.context().close(); }
+  });
+
+  it("@APL-2737 @AC1 qa:TC missing after rotating from landscape to portrait the box is fitted again and the whole reason is still on screen", async () => {
+    // Opened in landscape (568 x 320), then rotated to portrait (320 x 568). The narrower box wraps to more lines.
+    const { page, reason } = await openSheet(568, SUPER_EMAIL, 320);
+    try {
+      const wide = await metrics(reason);
+      expect(wide.value).toBe(REASON);
+      expect(wide.sh, "landscape clipped vertically").toBeLessThanOrEqual(wide.ch + 2);
+      await page.setViewportSize({ width: 320, height: 568 });
+      await expect.poll(async () => {
+        const m = await metrics(reason);
+        return m.sh - m.ch;
+      }, { timeout: 5000, message: "portrait: the box was not fitted again after rotation" }).toBeLessThanOrEqual(2);
+      const tall = await metrics(reason);
+      expect(tall.ch, "portrait box is taller than landscape").toBeGreaterThan(wide.ch);
+      expect(tall.sw, "portrait scrolls sideways").toBeLessThanOrEqual(tall.cw + 1);
+    } finally { await page.context().close(); }
+  });
+
+  it("@APL-2737 @AC1 qa:TC missing the field stops at 300 characters, the limit the server accepts", async () => {
+    const { page, reason } = await openSheet(320, SUPER_EMAIL);
+    try {
+      expect(await reason.getAttribute("maxlength")).toBe("300");
+      await reason.fill(REASON);
+      await reason.press("End");
+      await reason.pressSequentially("abcd"); // typed keys past the limit are ignored
+      expect((await metrics(reason)).value).toBe(REASON);
+      // Leave without saving: the reason on the task stays as it was.
     } finally { await page.context().close(); }
   });
 });
