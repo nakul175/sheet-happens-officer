@@ -457,6 +457,19 @@ describe("CRM_VISIBLE modes are tested against a real server per mode", () => {
         }
       }
 
+      // Admin viewing a non-admin rep under off. The rep has one plain task and one deal task.
+      const offServer = running.get("off")!;
+      expect((await call(open!.base, admin.cookie, "POST", `/api/projects/${dealId}/tasks`, { title: `ZZ-TEST Rep deal ${tag}`, assigneeId: member.id })).status).toBe(201);
+      expect((await call(open!.base, admin.cookie, "POST", `/api/projects/${plainId}/tasks`, { title: `ZZ-TEST Rep plain ${tag}`, assigneeId: member.id })).status).toBe(201);
+      const repAtOne = await call(offServer.base, admin.cookie, "GET", `/api/team/${member.id}`);
+      expect(repAtOne.status, repAtOne.text).toBe(200);
+      assertHidden(repAtOne.text, repAtOne.json);
+      const repPerson = repAtOne.json?.person as { id?: string; email?: string; openTasks?: number };
+      expect(repPerson.id).toBe(member.id);
+      expect(repPerson.email).toBe(memberEmail);
+      expect(repPerson.openTasks).toBe(1);
+      expect(repAtOne.text).not.toContain(`ZZ-TEST Rep deal ${tag}`);
+
       // 1, 2 and 5 hidden deals must be the same sentence. 0 hidden deals adds nothing.
       const hiddenCases = cases.filter((example) => example.hidden);
       const addDeal = async (name: string) => {
@@ -476,6 +489,10 @@ describe("CRM_VISIBLE modes are tested against a real server per mode", () => {
           expect(res.json?.person).toEqual(hiddenAtOne.get(`${example.mode}:${example.path}`));
           assertHidden(res.text, res.json);
         }
+        const rep = await call(offServer.base, admin.cookie, "GET", `/api/team/${member.id}`);
+        expect(rep.status, `${count} deals admin viewing rep ${rep.text}`).toBe(200);
+        expect(rep.json?.person).toEqual(repAtOne.json?.person);
+        assertHidden(rep.text, rep.json);
       };
       await addDeal(`ZZ-TEST Acme two ${tag}`);
       await expectSameHidden(2);

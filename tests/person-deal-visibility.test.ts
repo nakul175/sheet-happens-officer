@@ -151,6 +151,8 @@ describe("APL-2728 person page hides a deal CRM_VISIBLE conceals", () => {
     projectIds.push(id);
     dealIds.push(id);
     dealNames.push(name);
+    // The member shares every added deal. A deal they are not on would never be a row, so it cannot prove the count stays hidden.
+    expect((await sa.c.post(`/api/projects/${id}/members`, { userId: member.id, role: "EDITOR" })).status).toBe(201);
   }
 
   // Member path: the membership query. Mutation check: on main today this is the deal id and name.
@@ -217,29 +219,52 @@ describe("APL-2728 person page hides a deal CRM_VISIBLE conceals", () => {
     expect(adminView.openTasks).toBe(2);
   });
 
+  // The AC names an admin opening a non-admin's page. The rep has one plain task and one deal task.
+  it("admin path, off: an admin viewing a non-admin rep hides that rep's deal", async () => {
+    await task(adminUser, plainId, { title: `ZZ-TEST Rep plain ${RUN}`, assigneeId: member.id });
+    await task(adminUser, dealId, { title: `ZZ-TEST Rep deal ${RUN}`, assigneeId: member.id });
+    const person = await withMode("off", () => getPerson(actor(adminUser, "ADMIN"), member.id));
+    expect(person.id).toBe(member.id);
+    expect(person.email).toBe(member.email);
+    expect(person.orgRole).toBe("MEMBER");
+    assertHidden(person);
+    expect(person.openTasks).toBe(1);
+    expect(body(person)).not.toContain(`ZZ-TEST Rep deal ${RUN}`);
+    const plain = person.projects.find((p) => "id" in p && p.id === plainId);
+    expect(plain).toMatchObject({ id: plainId, name: plainName, role: "EDITOR", openTasks: 1 });
+    expect(person.projects.filter((p) => "href" in p && p.href === null)).toEqual([{ name: HIDDEN_DEAL_LABEL, href: null }]);
+  });
+
   // Mutation check: one row per hidden deal makes 1, 2 and 5 differ. The deal name fails assertHidden.
   it("1, 2 and 5 hidden deals are one sentence under admins and off, and 0 is none", async () => {
     const memberView = (mode: "admins" | "off") => withMode(mode, () => getPerson(actor(member, "MEMBER"), adminUser.id));
     const adminOff = () => withMode("off", () => getPerson(actor(adminUser, "ADMIN"), adminUser.id));
+    const repOff = () => withMode("off", () => getPerson(actor(adminUser, "ADMIN"), member.id));
     const one = {
       admins: await memberView("admins"),
       off: await memberView("off"),
       adminOff: await adminOff(),
+      repOff: await repOff(),
     };
     assertHidden(one.admins);
     assertHidden(one.off);
     assertHidden(one.adminOff);
+    assertHidden(one.repOff);
     const sentences = (projects: unknown) => JSON.stringify(projects).split(HIDDEN_DEAL_LABEL).length - 1;
     expect(sentences(one.admins.projects)).toBe(1);
     expect(sentences(one.off.projects)).toBe(1);
     expect(sentences(one.adminOff.projects)).toBe(1);
+    expect(sentences(one.repOff.projects)).toBe(1);
     expect(one.off.projects).toEqual(one.admins.projects);
     expect(one.adminOff.openTasks).toBe(1);
+    expect(one.repOff.id).toBe(member.id);
+    expect(one.repOff.openTasks).toBe(1);
 
     await addHiddenDeal(`ZZ-TEST Acme renewal 2 ${RUN}`);
     expect(await memberView("admins")).toEqual(one.admins);
     expect(await memberView("off")).toEqual(one.off);
     expect(await adminOff()).toEqual(one.adminOff);
+    expect(await repOff()).toEqual(one.repOff);
 
     await addHiddenDeal(`ZZ-TEST Acme renewal 3 ${RUN}`);
     await addHiddenDeal(`ZZ-TEST Acme renewal 4 ${RUN}`);
@@ -249,6 +274,9 @@ describe("APL-2728 person page hides a deal CRM_VISIBLE conceals", () => {
     const fiveOff = await adminOff();
     expect(fiveOff).toEqual(one.adminOff);
     expect(fiveOff.projects.filter((p) => "href" in p && p.href === null)).toHaveLength(1);
+    const fiveRep = await repOff();
+    expect(fiveRep).toEqual(one.repOff);
+    expect(fiveRep.projects.filter((p) => "href" in p && p.href === null)).toHaveLength(1);
 
     for (const mode of ["admins", "off"] as const) {
       const memberZero = await withMode(mode, () => getPerson(actor(member, "MEMBER"), outsider.id));

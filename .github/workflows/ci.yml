@@ -80,6 +80,9 @@ jobs:
           fi
       - name: Unit tests
         run: npm test
+      # APL-2728 AC4. One production server per CRM_VISIBLE mode. Needs the build above. Not part of npm test.
+      - name: CRM visible modes
+        run: npm run test:crm-modes
       - name: Server log (on failure)
         if: failure()
         run: tail -n 200 server.log || true
