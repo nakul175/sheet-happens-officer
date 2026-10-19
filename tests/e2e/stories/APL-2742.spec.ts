@@ -10,6 +10,8 @@
 //   mail-failing has no RESEND_API_KEY and no outbox, so every send fails as it does in production today.
 // The outbox is read for the newest "Verify your email" mail to the exact address only; no token or mail body is logged.
 // ZZ-TEST names, nakul17+zztest aliases; every account made here is deactivated through the API in afterAll.
+// APL-2765: the clean-up Super Admin is a new alias per run, so a reused database whose root has another run's
+// password cannot answer 401. A Super Admin cannot be deactivated through the API, so each run leaves its root active.
 // Chromium: PW_CHROMIUM, else the system Chrome that GitHub's ubuntu-latest runner ships (as tests/inline-touch-2673.test.ts).
 import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
@@ -28,16 +30,12 @@ for (const base of [OK, FAILING]) {
 }
 
 const SHOTS = "test-results/apl-2742";
-const ROOT_EMAIL = "nakul17+zztest-apl2742-root@aplyd.com"; // Super Admin on the spec's servers, used for clean-up only
 const VERIFY_SUBJECT = "Verify your email for Sheet Happens Officer";
 const run = Date.now();
+const ROOT_EMAIL = `nakul17+zztest-apl2742-root-${run}@aplyd.com`; // Super Admin on the spec's servers, used for clean-up only
+const E2E_PREFIX = "nakul17+zztest-apl2742-e2e-";
 let n = 0;
-const created: string[] = [];
-const fresh = () => {
-  const email = `nakul17+zztest-apl2742-e2e-${run}-${n++}@aplyd.com`;
-  created.push(email);
-  return email;
-};
+const fresh = () => `${E2E_PREFIX}${run}-${n++}@aplyd.com`;
 
 // APL-2742 D1 (QA): the exact texts on the failure paths.
 const UNVERIFIED_TEXT = "Verify your email before you sign in. No working verification link? Use Resend link.";
@@ -182,16 +180,17 @@ describe.skipIf(!QA_PASS)("qa:TC missing APL-2742: unverified sign-in and verifi
   afterAll(async () => {
     const problems: string[] = [];
     try {
-      // Clean-up through the API: the Super Admin alias deactivates every account this run made.
-      if ((await call(OK, "POST", "/api/auth/signup", { name: "ZZ-TEST Root", email: ROOT_EMAIL, password: QA_PASS })).status === 201) {
+      // Clean-up through the API: this run's Super Admin alias deactivates every active account this spec has made,
+      // including any an earlier run left behind, so the next run starts clean.
+      const signedUp = await call(OK, "POST", "/api/auth/signup", { name: "ZZ-TEST Root", email: ROOT_EMAIL, password: QA_PASS });
+      if (signedUp.status === 201) {
         const verified = await call(OK, "POST", "/api/auth/verify", { token: newestVerifyLink(ROOT_EMAIL).split("token=")[1] });
         if (verified.status !== 200) problems.push(`verify the clean-up account: ${verified.status}`);
-      }
+      } else problems.push(`sign up the clean-up account: ${signedUp.status}`);
       const root = await call(OK, "POST", "/api/auth/signin", { email: ROOT_EMAIL, password: QA_PASS });
       if (root.status !== 200) problems.push(`sign in the clean-up account: ${root.status}`);
-      for (const email of root.status === 200 ? created : []) {
-        const who = await db.user.findUnique({ where: { email } });
-        if (!who) continue;
+      const left = root.status === 200 ? await db.user.findMany({ where: { email: { startsWith: E2E_PREFIX }, deactivatedAt: null }, select: { id: true } }) : [];
+      for (const who of left) {
         const off = await call(OK, "POST", `/api/team/${who.id}/deactivate`, { reassign: "leaders" }, root.cookie);
         if (off.status !== 200 && !(off.status === 409 && /already deactivated/.test(off.json?.error ?? ""))) problems.push(`deactivate an account: ${off.status}`);
       }
