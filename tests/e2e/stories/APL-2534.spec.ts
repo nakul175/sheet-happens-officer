@@ -141,7 +141,7 @@ test("AC2: a deal note appears on the deal page for deal members and Admins only
   await admin.page.goto(`/accounts/${org.id}`);
   await admin.page.getByLabel("Kind").selectOption("MEETING");
   await admin.page.getByLabel("Date").fill(ymd(0));
-  await admin.page.getByLabel("Deal").selectOption({ label: deal.name });
+  await admin.page.getByLabel("Deal", { exact: true }).selectOption({ label: deal.name });
   await admin.page.getByRole("checkbox", { name: contactName, exact: true }).check();
   await admin.page.getByLabel("Note").fill(newest);
   await admin.page.getByRole("button", { name: "Add note" }).click();
