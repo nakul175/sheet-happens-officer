@@ -4,7 +4,7 @@ import type { Prisma } from "@/generated/prisma/client";
 import { db } from "@/lib/db";
 import { ApiError, notFound } from "@/lib/http";
 import { isActive, isAdmin, projectAccess, requireWrite, type Actor } from "@/lib/access";
-import { WORKSTREAM_DEAL, crmMode, crmVisible, requireCrm } from "@/lib/crm";
+import { WORKSTREAM_DEAL, crmMode, crmProjectWhere, crmVisible, requireCrm } from "@/lib/crm";
 import { formatDueDate, parseDueDate } from "@/lib/dates";
 import { auditTx, logAction, notify } from "@/lib/notify";
 import { orgOf } from "@/lib/orgs";
@@ -119,8 +119,18 @@ export async function createDeal(
 
 // ---- stages (SHO-US-10.3) ----
 
+/** Tasks still open on a deal, including subtasks. Won and Lost refuse while any of these remain. */
+export function blockingTaskWhere(projectId: string) {
+  return { projectId, deletedAt: null, completedAt: null };
+}
+
 async function openTasks(projectId: string) {
-  return db.task.findMany({ where: { projectId, deletedAt: null, completedAt: null }, select: { id: true, title: true, parentId: true }, orderBy: { createdAt: "asc" } });
+  return db.task.findMany({ where: blockingTaskWhere(projectId), select: { id: true, title: true, parentId: true }, orderBy: { createdAt: "asc" } });
+}
+
+/** AC6: how many tasks are still open, and the first 20, in the order they were created. */
+export function openTaskBlock(open: { id: string; title: string }[]) {
+  return { openTasks: open.length, tasks: open.slice(0, 20).map((t) => ({ id: t.id, title: t.title })) };
 }
 
 const FIELD_NAMES: Record<string, string> = {
@@ -147,9 +157,7 @@ export async function moveStage(user: Actor, projectId: string, input: { stageId
   if (stage.category === "DONE" || stage.category === "LOST") {
     const open = await openTasks(projectId);
     if (open.length) {
-      throw new ApiError(409, `${open.length} task${open.length === 1 ? " is" : "s are"} still open. Complete or delete ${open.length === 1 ? "it" : "them"} before marking this deal ${stage.name}.`, {
-        openTasks: open.length, tasks: open.slice(0, 20).map((t) => ({ id: t.id, title: t.title })),
-      });
+      throw new ApiError(409, `${open.length} task${open.length === 1 ? " is" : "s are"} still open. Complete or delete ${open.length === 1 ? "it" : "them"} before marking this deal ${stage.name}.`, openTaskBlock(open));
     }
   }
   const details = await db.dealDetails.findUnique({ where: { projectId } });
@@ -492,12 +500,51 @@ export async function dealsNeedingNextStep(user: Actor) {
   return deals.filter((d) => !has.has(d.id)).map((d) => ({ id: d.id, name: d.name, stage: d.stage?.name ?? null }));
 }
 
+/**
+ * Deals the stalled-deal job may name in a notice (APL-2741).
+ * `crmProjectWhere` is applied for the Leader. Under `all` and unset it is empty, so the rows match
+ * the previous filter. Under `off` every deal is left out. Under `admins` a deal is left out unless
+ * its Leader is an Admin or the Super Admin. The role list is those two names only.
+ */
+export function stalledDealWhere(): Prisma.ProjectWhereInput {
+  const working: Prisma.ProjectWhereInput = {
+    typeId: WORKSTREAM_DEAL,
+    stage: { category: { in: [...WORKING_CATEGORIES] } },
+  };
+  // AND keeps `archivedAt` if a later crmProjectWhere returns its own archivedAt or OR.
+  const visibleTo = (role: "MEMBER" | "ADMIN" | "SUPER_ADMIN"): Prisma.ProjectWhereInput => ({
+    AND: [{ archivedAt: null }, crmProjectWhere({ orgRole: role })],
+  });
+  const mode = crmMode();
+  if (mode !== "admins") {
+    // off hides deals from every role, including the Super Admin. all (and unset) hides them from nobody.
+    return { AND: [working, visibleTo(mode === "off" ? "SUPER_ADMIN" : "MEMBER")] };
+  }
+  return {
+    AND: [
+      working,
+      visibleTo("ADMIN"),
+      // Named roles only. A future role must not receive a stalled-deal notice merely by not being a Member.
+      { members: { some: { role: "LEADER", user: { orgRole: { in: ["ADMIN", "SUPER_ADMIN"] } } } } },
+    ],
+  };
+}
+
 /** SHO-US-12.7 AC3: one in-app notice to the Leader per stall. A new notice needs new activity first, then a new 30 days of silence. */
 export async function notifyStalledDeals(now = new Date()) {
   if (crmMode() === "off") return { stalled: 0, notified: 0, skipped: true };
+  const mode = crmMode();
   const deals = await db.project.findMany({
-    where: { typeId: WORKSTREAM_DEAL, archivedAt: null, stage: { category: { in: [...WORKING_CATEGORIES] } } },
-    include: { stage: true, members: { where: { role: "LEADER" }, select: { userId: true } } },
+    where: stalledDealWhere(),
+    include: {
+      stage: true,
+      members: {
+        where: mode === "admins"
+          ? { role: "LEADER", user: { orgRole: { in: ["ADMIN", "SUPER_ADMIN"] } } }
+          : { role: "LEADER" },
+        select: { userId: true, user: { select: { orgRole: true } } },
+      },
+    },
   });
   const signals = await dealSignals(deals);
   let stalled = 0, notified = 0;
@@ -505,11 +552,12 @@ export async function notifyStalledDeals(now = new Date()) {
     const last = signals.get(d.id)!.lastActivity;
     if (!isStalled(d.stage?.category, last, now.getTime())) continue;
     stalled++;
-    const leader = d.members[0]?.userId;
-    if (!leader) continue;
-    const already = await db.notification.findFirst({ where: { recipientId: leader, projectId: d.id, type: "DEAL_STALLED", createdAt: { gt: last } }, select: { id: true } });
+    const leader = d.members[0];
+    // crmVisible is the same lever as crmProjectWhere. A leader the CRM is hidden from is not told.
+    if (!leader || !crmVisible(leader.user)) continue;
+    const already = await db.notification.findFirst({ where: { recipientId: leader.userId, projectId: d.id, type: "DEAL_STALLED", createdAt: { gt: last } }, select: { id: true } });
     if (already) continue;
-    await db.$transaction((tx) => notify(tx, [leader], "DEAL_STALLED", { projectId: d.id, data: { project: d.name }, includeActor: true }));
+    await db.$transaction((tx) => notify(tx, [leader.userId], "DEAL_STALLED", { projectId: d.id, data: { project: d.name }, includeActor: true }));
     notified++;
   }
   return { stalled, notified };

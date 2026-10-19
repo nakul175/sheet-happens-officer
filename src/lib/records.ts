@@ -38,6 +38,12 @@ function requireContactEdit(user: Actor, c: { createdById: string }) {
   if (!canEditContact(user, c)) throw new ApiError(403, "Only the person who added this contact, or an Admin, can change it.");
 }
 
+/** Same visibility and edit checks updateContact runs, so a caller can refuse before reading the body. */
+export async function assertCanUpdateContact(user: Actor, id: string) {
+  requireCrm(user);
+  requireContactEdit(user, await contactOf(user, id));
+}
+
 async function knownByList(ids: string[] | undefined, user: Actor, workspaceId: string) {
   const want = [...new Set(ids?.length ? ids : [user.id])];
   const people = await db.user.findMany({ where: { id: { in: want }, workspaceId }, select: { id: true, deactivatedAt: true } });
