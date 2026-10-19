@@ -596,16 +596,19 @@ describe("APL-2674 activity delete undo", () => {
     try {
       const page = await ctx.newPage();
       // UndoHost hides the toast with setTimeout(ms = 10000). The page clock is driven by hand, so no real 10 s wait.
-      await page.clock.install();
+      // It starts at a fixed instant and is paused an hour later before the delete, so pauseAt is always in the
+      // clock's future (Pam D11: pausing at "now + 1 ms" raced the running clock).
+      const start = new Date("2026-01-05T09:00:00Z");
+      await page.clock.install({ time: start });
       await page.goto(`/projects/${projectId}?task=${id}`, { waitUntil: "load", timeout: 45_000 });
       const open = page.getByRole("button", { name: "Move to Trash" });
       await open.waitFor({ state: "visible", timeout: 30_000 });
+      await page.clock.pauseAt(new Date(start.getTime() + 60 * 60 * 1000));
       await open.click();
       await page.getByRole("dialog", { name: "Move to Trash?" }).getByRole("button", { name: "Move to Trash" }).click();
 
       const toast = page.getByRole("status").filter({ has: page.getByRole("button", { name: "Undo" }) });
       await expect.poll(() => toast.count(), { timeout: 15_000 }).toBe(1);
-      await page.clock.pauseAt(await page.evaluate(() => Date.now() + 1));
       await page.clock.runFor(9_000);
       expect(await toast.count()).toBe(1);
       await page.clock.runFor(1_000);
