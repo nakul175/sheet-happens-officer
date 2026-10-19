@@ -116,7 +116,7 @@ test.afterAll(async () => {
   }
 });
 
-test("qa:TC-APL2729-c2a11001@v1 qa:TC-APL2729-c2ee0001@v1 qa:TC-APL2729-c30b5001@v1 all and unset keep the deal reminder and the ops check", async () => {
+test("qa:TC missing qa:TC missing qa:TC missing all and unset keep the deal reminder and the ops check", async () => {
   test.skip(!world || world.mode !== "all", `This server is CRM_VISIBLE=${world?.mode ?? "off"}. Unset reads as all.`);
   const w = useWorld();
   const memberItems = await bell(w.member);
@@ -127,7 +127,7 @@ test("qa:TC-APL2729-c2a11001@v1 qa:TC-APL2729-c2ee0001@v1 qa:TC-APL2729-c30b5001
   assertOps(memberItems, w);
 });
 
-test("qa:TC-APL2729-c1a1d001@v1 qa:TC-APL2729-c2ad0001@v1 qa:TC-APL2729-c30b5001@v1 admins: a member gets no deal reminder and an admin still does", async () => {
+test("qa:TC missing qa:TC missing qa:TC missing admins: a member gets no deal reminder and an admin still does", async () => {
   test.skip(!world || world.mode !== "admins", `This server is CRM_VISIBLE=${world?.mode ?? "off"}.`);
   const w = useWorld();
   const memberItems = await bell(w.member);
@@ -138,7 +138,7 @@ test("qa:TC-APL2729-c1a1d001@v1 qa:TC-APL2729-c2ad0001@v1 qa:TC-APL2729-c30b5001
   assertOps(memberItems, w);
 });
 
-test("qa:TC-APL2729-c1ff0001@v1 qa:TC-APL2729-c30b5001@v1 off: nobody gets a deal reminder", async () => {
+test("qa:TC missing qa:TC missing off: nobody gets a deal reminder", async () => {
   // The deal routes answer 404 for every role when the CRM is off, so this spec cannot seed
   // "ZZ-TEST Acme renewal" there. The product test writes that mode against the test database.
   test.skip(world?.mode !== "off", `This server is CRM_VISIBLE=${world?.mode ?? "unknown"}. Off is covered by tests/jobs-reminders-crm.test.ts.`);
