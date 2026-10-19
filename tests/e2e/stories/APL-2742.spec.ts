@@ -1,18 +1,33 @@
 // APL-2742 (prod hotfix): sign up, ignore the email, sign out, sign in -> refused, with a resend link.
 // A failed verification send is shown on the check-email screen with a resend option.
-// Local only, workers=1 (vitest.e2e.config.mts). nakul17+zztest accounts. Run: npm run test:e2e
-import { mkdirSync, readdirSync, readFileSync } from "node:fs";
+// Runs in `npm test` against the local test server (TASKBOARD_URL) and its outbox (EMAIL_OUTBOX_DIR), as in ci.yml.
+// Anything but localhost is refused before a browser starts. nakul17+zztest accounts, ZZ-TEST names.
+// Chromium: PW_CHROMIUM, else the system Chrome that GitHub's ubuntu-latest runner ships (as tests/inline-touch-2673.test.ts).
+import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { chromium, type Browser, type Page } from "playwright-core";
-import { BASE, OUTBOX, PW } from "../tests/helpers";
+import { BASE, OUTBOX, PW } from "../../helpers";
 
 const SHOTS = "test-results/apl-2742";
 const run = Date.now();
 let n = 0;
 const fresh = () => `nakul17+zztest-apl2742-e2e-${run}-${n++}@aplyd.com`;
 
+if (!/^(localhost|127\.0\.0\.1)$/.test(new URL(BASE).hostname)) {
+  throw new Error(`Refusing to run against ${BASE}: this spec is local only.`);
+}
+
 let browser: Browser;
+
+function chromePath() {
+  const fromEnv = process.env.PW_CHROMIUM;
+  if (fromEnv && existsSync(fromEnv)) return fromEnv;
+  for (const p of ["/usr/bin/google-chrome", "/usr/bin/google-chrome-stable", "/usr/bin/chromium", "/usr/bin/chromium-browser"]) {
+    if (existsSync(p)) return p;
+  }
+  throw new Error("No Chrome/Chromium binary. Set PW_CHROMIUM.");
+}
 
 /** Verification links in the outbox for this address, oldest first. */
 function verifyLinks(email: string): string[] {
@@ -41,15 +56,9 @@ async function signIn(page: Page, email: string) {
 }
 
 beforeAll(async () => {
-  if (!/^(localhost|127\.0\.0\.1)$/.test(new URL(BASE).hostname)) {
-    throw new Error(`Refusing to run against ${BASE}: this spec is local only.`);
-  }
   mkdirSync(SHOTS, { recursive: true });
-  browser = await chromium.launch({
-    executablePath: process.env.PW_CHROMIUM || "/usr/local/bin/google-chrome",
-    args: ["--no-sandbox"],
-  });
-});
+  browser = await chromium.launch({ executablePath: chromePath(), args: ["--no-sandbox", "--disable-dev-shm-usage"] });
+}, 60_000);
 
 afterAll(async () => {
   await browser?.close();
@@ -77,7 +86,7 @@ describe("qa:TC missing APL-2742: unverified sign-in and verification email", ()
     await page.goto(`${BASE}/`);
     await page.waitForURL(/\/signin/);
     await ctx.close();
-  });
+  }, 60_000);
 
   it("qa:TC missing AC2: the refusal offers a resend that sends a new verification link", async () => {
     const ctx = await browser.newContext();
@@ -97,7 +106,7 @@ describe("qa:TC missing APL-2742: unverified sign-in and verification email", ()
     await page.waitForURL((u) => !u.pathname.startsWith("/signin"));
     expect((await page.request.get(`${BASE}/api/auth/me`)).status()).toBe(200);
     await ctx.close();
-  });
+  }, 60_000);
 
   it("qa:TC missing AC3: a failed verification send is shown with a resend option, not swallowed", async () => {
     const ctx = await browser.newContext();
@@ -122,5 +131,5 @@ describe("qa:TC missing APL-2742: unverified sign-in and verification email", ()
     await expect.poll(() => alert.textContent()).toMatch(/could not send the email just now/i);
     await expect.poll(() => page.locator("main [role=status]").count()).toBe(0);
     await ctx.close();
-  });
+  }, 60_000);
 });
