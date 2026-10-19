@@ -59,10 +59,7 @@ export default function PersonPage() {
   if (passwordChange) {
     return (
       <Page title="Set your own password" docTitle="Set your own password">
-        <div className="pwbar" role="status">
-          <span>Set your own password. The emailed one still works until you do.</span>
-          <Link href="/profile">Change password</Link>
-        </div>
+        <p><Link href="/profile">Change password</Link></p>
       </Page>
     );
   }

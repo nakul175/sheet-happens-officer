@@ -1,9 +1,10 @@
 // SHO-US-8.1 / 8.8: the person's one private thread. Every query here is keyed by the signed-in
 // user's id; there is no function that reads another person's chat.
+import type { Prisma } from "@/generated/prisma/client";
 import { db } from "@/lib/db";
 import { ApiError } from "@/lib/http";
-import type { Actor } from "@/lib/access";
-import { UNDO_DAYS } from "@/lib/undoable";
+import { crmVisible, type Actor } from "@/lib/access";
+import { isTooOldToUndo } from "@/lib/undoable";
 import { disabledFor } from "@/lib/concierge/limits";
 import { QUICK_ACTIONS } from "@/lib/concierge/reads";
 import type { Message, State, Stored } from "@/lib/concierge/types";
@@ -30,14 +31,33 @@ export function present(row: Row): Message {
   if (s.card) m.card = { ...s.card, id: row.id, ...(s.internal?.state === "RUNNING" ? { canConfirm: false } : {}) };
   if (s.result) {
     const confirmed = s.internal?.confirmedAt ? Date.parse(s.internal.confirmedAt) : row.createdAt.getTime();
-    const expired = !s.result.undoneAt && s.result.undoable && Date.now() - confirmed > UNDO_DAYS * 86400_000;
+    const expired = !s.result.undoneAt && s.result.undoable && isTooOldToUndo(confirmed);
     m.result = { ...s.result, ...(expired ? { undoExpired: true } : {}) };
   }
   return m;
 }
 
-export async function addMessage(userId: string, role: "USER" | "ASSISTANT", stored: Stored) {
-  return db.chatMessage.create({ data: { userId, role, content: JSON.stringify(stored) } });
+/** Whether the CRM is visible to this person now: their role read from the database, never the session's copy (APL-2609). */
+async function crmVisibleNow(user: Actor) {
+  const me = await db.user.findUnique({ where: { id: user.id }, select: { orgRole: true } });
+  return !!me && crmVisible(me);
+}
+
+// What JSON.stringify writes for `crmHidden: true`. Inside a quoted string it would be escaped, so message text cannot fake it.
+const HIDDEN_MARK = '"crmHidden":true';
+
+/**
+ * The chat rows a person may see, on screen or replayed to the model (APL-2609). While the CRM is hidden from them, by the
+ * lever or because their role changed, only rows written while it was hidden from them: anything else may name a deal.
+ * Nothing is deleted; with the CRM visible again the whole history is back.
+ */
+export async function chatWhere(user: Actor): Promise<Prisma.ChatMessageWhereInput> {
+  return (await crmVisibleNow(user)) ? { userId: user.id } : { userId: user.id, content: { contains: HIDDEN_MARK } };
+}
+
+export async function addMessage(user: Actor, role: "USER" | "ASSISTANT", stored: Stored) {
+  const content = JSON.stringify((await crmVisibleNow(user)) ? stored : { ...stored, crmHidden: true });
+  return db.chatMessage.create({ data: { userId: user.id, role, content } });
 }
 export async function saveStored(id: string, stored: Stored) {
   await db.chatMessage.update({ where: { id }, data: { content: JSON.stringify(stored) } });
@@ -53,20 +73,20 @@ export async function casStored(id: string, oldContent: string, stored: Stored) 
 }
 
 /** A message of this person's own, or 404. Another person's message id looks exactly like a missing one. */
-export async function ownMessage(userId: string, id: string) {
-  const row = await db.chatMessage.findFirst({ where: { id, userId } });
+export async function ownMessage(user: Actor, id: string) {
+  const row = await db.chatMessage.findFirst({ where: { ...(await chatWhere(user)), id } });
   if (!row) throw new ApiError(404, "Message not found");
   return row;
 }
 
-export async function thread(userId: string, limit = 300): Promise<Message[]> {
-  const rows = await db.chatMessage.findMany({ where: { userId }, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: limit });
+export async function thread(user: Actor, limit = 300): Promise<Message[]> {
+  const rows = await db.chatMessage.findMany({ where: await chatWhere(user), orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: limit });
   return rows.reverse().map(present);
 }
 
 /** A question still waiting for an answer is dropped when the person sends something else (SHO-US-8.4 AC6). */
-export async function dropPendingChoices(userId: string) {
-  const last = await db.chatMessage.findFirst({ where: { userId, role: "ASSISTANT" }, orderBy: [{ createdAt: "desc" }, { id: "desc" }] });
+export async function dropPendingChoices(user: Actor) {
+  const last = await db.chatMessage.findFirst({ where: { ...(await chatWhere(user)), role: "ASSISTANT" }, orderBy: [{ createdAt: "desc" }, { id: "desc" }] });
   if (!last) return;
   const s = parse(last.content);
   if (s.kind === "choices" && !s.choiceAnswered) await saveStored(last.id, { ...s, choiceAnswered: "dropped" });
@@ -76,7 +96,7 @@ export async function state(user: Actor, now = new Date()): Promise<State> {
   const [me, disabled, messages] = await Promise.all([
     db.user.findUniqueOrThrow({ where: { id: user.id }, select: { conciergeHidden: true, voiceNoticeAckedAt: true } }),
     disabledFor(user.id, now),
-    thread(user.id),
+    thread(user),
   ]);
   return {
     available: !disabled,
