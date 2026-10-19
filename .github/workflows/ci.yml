@@ -62,6 +62,11 @@ jobs:
       # APL-2713. These servers are excluded from `npm test`. A failure here fails the job.
       - name: CRM mode tests
         run: npm run test:crm-modes
+      # APL-2688 / APL-2689. Spawns next start and server.js, fires 6/40/100 concurrent
+      # requests (including signed-in GET /), SIGTERMs mid-flight. Excluded from `npm test`
+      # because it rebuilds .next, so it runs here before the app is started.
+      - name: SIGTERM drain tests
+        run: npx vitest run -c vitest.shutdown.config.mts
       - name: Start the app
         run: |
           (npx next start -p 3100 > server.log 2>&1 &)

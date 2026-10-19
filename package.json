@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "start": "next start",
+    "start": "node --import tsx server.js",
     "lint": "eslint",
     "typecheck": "node scripts/typecheck.mjs",
     "test": "vitest run",
@@ -20,6 +20,7 @@
   },
   "dependencies": {
     "@prisma/client": "^6.19.3",
+    "koffi": "^3.3.3",
     "next": "16.4.2",
     "prisma": "^6.19.3",
     "react": "19.3.0",

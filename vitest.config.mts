@@ -10,6 +10,7 @@ export default defineConfig({
   resolve: { alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) } },
   // scripts/** holds node:test files (assert-playwright-ran.test.mjs). Vitest's default
   // include matches *.test.mjs and fails them with "No test suite found", which blocks deploy.yml.
+  // shutdown-next.test.ts runs `next build` and would rewrite .next under a live server.
   test: {
     testTimeout: 30000,
     fileParallelism: false,
@@ -23,6 +24,7 @@ export default defineConfig({
       "e2e/**",
       "scripts/**",
       "tests/e2e/stories/APL-2733.spec.ts",
+      "tests/shutdown-next.test.ts",
     ],
   },
 });
