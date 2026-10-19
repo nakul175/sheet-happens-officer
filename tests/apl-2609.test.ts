@@ -2,7 +2,7 @@
 // With CRM_VISIBLE=off no deal, deal task or stage reaches My tasks, search, the task routes or the concierge, for anyone;
 // with `admins` the same for everyone but Admins and the Super Admin; with `all` nothing changes.
 // The server runs with the default `all`, so these call src/lib directly (same database) and flip process.env.CRM_VISIBLE
-// in this process; `crmMode()` reads it at call time. tests/e2e/stories/APL-2609.spec.ts drives a real server per mode.
+// in this process; `crmMode()` reads it at call time. tests/e2e/local/APL-2609.spec.ts drives a real server per mode.
 // Pam left no qa:TC id on the issue, so every title says "qa:TC missing".
 // Everything this file makes is named ZZ-TEST and cleaned up in afterAll, never by writing to the database: through the API
 // (leadership handed to the ZZ-TEST Super Admin, projects and the organisation archived, chats cleared, sessions signed out),
@@ -239,7 +239,7 @@ describe("qa:TC missing APL-2609 CRM_VISIBLE hides deals from My tasks, search, 
 
   it("qa:TC missing AC4 AC8: chat written while the CRM was visible is neither shown nor replayed once it is hidden", async () => {
     // Chat reads the person's role from the database. The Editor is a Member there and in their Actor, so the lever alone
-    // decides here. The Admin demoted to Member is covered on real servers in tests/e2e/stories/APL-2609.spec.ts.
+    // decides here. The Admin demoted to Member is covered on real servers in tests/e2e/local/APL-2609.spec.ts.
     const says = `Your deal ${w.dealName} has ${w.dealTaskTitle} due, at stage ${STAGE}.`;
     const shown = async (u: Actor) => JSON.stringify((await chatState(u)).messages);
     setMode("all");
