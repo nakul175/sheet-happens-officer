@@ -4,8 +4,8 @@
 // Sign-in checks use the Member account from the environment (its password is known here). Its role and status are put back.
 import { test, login } from "../support";
 import {
-  PASS, passwordOk, alias, zz, RUN, gate, signUp, signInAs, personByEmail, deactivate,
-  addPersonOnTeam, deactivateOnTeam, expectTeamColumns, teamRow, makeProject, archiveProject, expect, type Api,
+  PASS, passwordOk, alias, zz, gate, signUp, signInAs, personByEmail, deactivate,
+  addPersonOnTeam, deactivateOnTeam, expectChip, expectTeamColumns, teamRow, makeProject, archiveProject, expect, type Api,
 } from "./qa";
 
 type Who = { api: Api; user: { id?: string; name?: string; email?: string } };
@@ -30,7 +30,7 @@ async function added(admin: Who, later: (fn: () => Promise<unknown>) => void, la
   const r = await admin.api.post("/api/team", {
     firstName: full.slice(0, space),
     lastName: full.slice(space + 1),
-    email: `zz-test-${RUN}-${label}@example.invalid`,
+    email: alias("2466", label),
     role,
   });
   expect(r.status, JSON.stringify(r.json)).toBe(201);
@@ -168,7 +168,7 @@ test("AC4: open tasks move to a chosen receiver, and a receiver outside the proj
   expect(["LEADER", "EDITOR"]).toContain(members.find((member) => member.userId === assigneeId)?.role);
 });
 
-const zzEmail = (label: string) => `zz-test-${RUN}-${label}@example.invalid`;
+const zzEmail = (label: string) => alias("2466", label);
 
 async function retire(api: Api, email: string) {
   const person = await personByEmail(api, email);
@@ -198,7 +198,7 @@ test("AC5: the only Super Admin cannot be demoted or deactivated (qa:TC missing)
 
   const mine = teamRow(admin.page, String(admin.user.email));
   await expect(mine).toHaveCount(1);
-  await expect(mine.locator(".chip", { hasText: "Super Admin" })).toBeVisible();
+  await expectChip(mine, "Super Admin");
   await expect(mine.getByRole("button", { name: /Deactivate|Make Member|Make Admin|Reactivate/ })).toHaveCount(0);
 });
 
@@ -228,10 +228,10 @@ test("AC6: the Team page shows people by role, and deactivated people are shown 
   await expect(adminRow).toHaveCount(1);
   await expectTeamColumns(admin.page, memberRow, ["Role"]);
   await expectTeamColumns(admin.page, adminRow, ["Role"]);
-  await expect(memberRow.locator(".chip", { hasText: "Member" })).toBeVisible();
-  await expect(memberRow.locator(".chip.grey", { hasText: "Deactivated" })).toBeVisible();
-  await expect(adminRow.locator(".chip", { hasText: "Admin" })).toBeVisible();
+  await expectChip(memberRow, "Member");
+  await expectChip(memberRow, "Deactivated", "grey");
+  await expectChip(adminRow, "Admin");
   const mine = teamRow(admin.page, String(admin.user.email));
   await expect(mine).toHaveCount(1);
-  await expect(mine.locator(".chip", { hasText: "Super Admin" })).toBeVisible();
+  await expectChip(mine, "Super Admin");
 });

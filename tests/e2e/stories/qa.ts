@@ -221,9 +221,33 @@ export async function archiveProject(adminApi: Api, id: string, adminId: string)
 
 const UI = { timeout: 90_000 };
 
+/** The page's main landmark. */
+export function mainOf(page: Page) {
+  return page.getByRole("main");
+}
+
 /** One Team table row whose text contains `text`. Callers assert a count of 1, so a shared `.first()` is not used. */
 export function teamRow(page: Page, text: string) {
-  return page.locator("#main tbody tr").filter({ hasText: text });
+  return mainOf(page).getByRole("row").filter({ hasText: text });
+}
+
+/** Chip colours from app.css (.chip.grey, .chip.green, .chip.gold), read as computed styles instead of class names. */
+export const CHIP = {
+  grey: "rgb(236, 238, 241)",
+  green: "rgb(232, 244, 236)",
+  gold: "rgb(251, 239, 210)",
+} as const;
+
+/** The chip in `scope` whose whole text is `text`. */
+export function chip(scope: Locator, text: string) {
+  return scope.getByText(text, { exact: true });
+}
+
+/** The chip is visible and has that colour. */
+export async function expectChip(scope: Locator, text: string, colour?: keyof typeof CHIP) {
+  const c = chip(scope, text);
+  await expect(c).toBeVisible();
+  if (colour) await expect(c).toHaveCSS("background-color", CHIP[colour]);
 }
 
 /**
@@ -231,31 +255,33 @@ export function teamRow(page: Page, text: string) {
  * At 1024px and wider the header row is visible. Below that it is hidden and each cell shows its data-label.
  */
 export async function expectTeamColumns(page: Page, row: Locator, labels: readonly string[]) {
-  const head = page.locator("#main table thead");
+  const head = mainOf(page).getByRole("row").filter({ has: page.getByRole("columnheader") });
   if (await head.isVisible()) {
     for (const label of labels) {
       await expect(head.getByRole("columnheader", { name: label, exact: true })).toHaveCount(1);
     }
     return;
   }
-  for (const label of labels) {
-    const cell = row.locator(`td[data-label="${label}"]`);
-    await expect(cell).toHaveCount(1);
-    await expect(cell).toBeVisible();
+  const shown: string[] = [];
+  for (const cell of await row.getByRole("cell").all()) {
+    if (!(await cell.isVisible())) continue;
     const content = await cell.evaluate((el) => getComputedStyle(el, "::before").content);
-    expect(content.replace(/^["']|["']$/g, "")).toBe(label);
+    shown.push(content.replace(/^["']|["']$/g, ""));
+  }
+  for (const label of labels) {
+    expect(shown.filter((l) => l === label), `visible ${label} label on the row`).toHaveLength(1);
   }
 }
 
-/** One Member-list item whose link is exactly `name`. */
+/** The Member-list link whose name is exactly `name`. */
 export function memberItem(page: Page, name: string) {
-  return page.locator("#main .list .item").filter({ has: page.getByRole("link", { name, exact: true }) });
+  return mainOf(page).getByRole("link", { name, exact: true });
 }
 
 /** The Super Admin adds a person from the Team page. Cleanup stays with the caller. */
 export async function addPersonOnTeam(page: Page, first: string, last: string, email: string, role: "MEMBER" | "ADMIN" = "MEMBER") {
   await page.goto("/team");
-  await page.locator("#main").getByRole("button", { name: "+ Add person" }).click(UI);
+  await mainOf(page).getByRole("button", { name: "+ Add person" }).click(UI);
   const dialog = page.getByRole("dialog", { name: "Add person" });
   await dialog.getByLabel("First name").fill(first);
   await dialog.getByLabel("Last name").fill(last);
@@ -279,7 +305,8 @@ export async function deactivateOnTeam(page: Page, name: string) {
   await expect(done).toBeVisible({ timeout: 120_000 });
   await done.getByRole("button", { name: "Close" }).click();
   await expect(done).toBeHidden();
-  await expect(teamRow(page, name).locator(".chip.grey", { hasText: "Deactivated" })).toBeVisible(UI);
+  await expect(chip(teamRow(page, name), "Deactivated")).toBeVisible(UI);
+  await expect(chip(teamRow(page, name), "Deactivated")).toHaveCSS("background-color", CHIP.grey);
 }
 
 export async function makeProject(adminApi: Api, label: string, leaderId: string) {

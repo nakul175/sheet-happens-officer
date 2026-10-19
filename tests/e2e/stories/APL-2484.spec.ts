@@ -1,8 +1,8 @@
 // SHO-US-2.5 Team page by role (APL-2484). Acceptance criteria AC1 to AC4.
-import { test, expect, RUN, type Json } from "../support";
+import { test, expect, type Json } from "../support";
 import {
   PASS, alias, deactivate, passwordOk, personByEmail, signUp, zz,
-  addPersonOnTeam, deactivateOnTeam, expectTeamColumns, memberItem, teamRow, type Api,
+  addPersonOnTeam, deactivateOnTeam, expectChip, expectTeamColumns, mainOf, memberItem, teamRow, type Api,
 } from "./qa";
 
 const SLOW = { timeout: 90_000 }; // the Team table can be long on a busy workspace
@@ -13,7 +13,7 @@ test.describe("SHO-US-2.5 / APL-2484", () => {
     if (!passwordOk(PASS)) throw new Error("SHO_QA_PASS must be at least 8 characters with a letter and a number.");
   });
 
-  const zzEmail = (label: string) => `zz-test-${RUN}-${label}@example.invalid`;
+  const zzEmail = (label: string) => alias("2484", label);
 
   async function retire(api: Api, email: string) {
     const person = await personByEmail(api, email);
@@ -29,17 +29,15 @@ test.describe("SHO-US-2.5 / APL-2484", () => {
     await addPersonOnTeam(admin.page, name.slice(0, space), name.slice(space + 1), email);
 
     await member.page.goto("/team");
-    const main = member.page.locator("#main");
+    const main = mainOf(member.page);
     await expect(main.getByRole("heading", { name: "Team", exact: true })).toBeVisible(SLOW);
     const item = memberItem(member.page, name);
     await expect(item).toHaveCount(1, SLOW);
-    await expect(item.getByRole("link", { name, exact: true })).toBeVisible();
-    await expect(item.getByText(/@/)).toHaveCount(0);
-    await expect(item.getByText(/Active|Unverified|Deactivated/)).toHaveCount(0);
-    await expect(item.getByRole("button")).toHaveCount(0);
+    await expect(item).toBeVisible();
+    await expect(main.getByText(/^(Active|Unverified|Deactivated)$/)).toHaveCount(0);
     await expect(main.getByRole("columnheader", { name: /Email|Status/ })).toHaveCount(0);
     await expect(main.getByRole("button", { name: /Deactivate|Reactivate|Make Admin|Make Member|Resend sign-in details|Add person/ })).toHaveCount(0);
-    await expect(main.locator(".list").getByText(/@/)).toHaveCount(0);
+    await expect(main.getByText(/@/)).toHaveCount(0);
     const people = (await member.api.get("/api/team")).json.people as Json[];
     const created = people.find((p) => p.name === name);
     expect(created, "the person just added").toBeTruthy();
@@ -55,13 +53,13 @@ test.describe("SHO-US-2.5 / APL-2484", () => {
     later(() => retire(admin.api, email));
     await addPersonOnTeam(admin.page, name.slice(0, space), name.slice(space + 1), email);
 
-    await expect(admin.page.locator("#main").getByRole("button", { name: "+ Add person" })).toBeVisible();
+    await expect(mainOf(admin.page).getByRole("button", { name: "+ Add person" })).toBeVisible();
     const row = teamRow(admin.page, email);
     await expect(row).toHaveCount(1, SLOW);
     await expectTeamColumns(admin.page, row, ["Name", "Email", "Role", "Status", "Actions"]);
     await expect(row).toContainText(email);
-    await expect(row.locator(".chip", { hasText: "Member" })).toBeVisible();
-    await expect(row.locator(".chip.green", { hasText: "Active" })).toBeVisible();
+    await expectChip(row, "Member");
+    await expectChip(row, "Active", "green");
     await expect(row.getByRole("button", { name: "Make Admin" })).toBeVisible();
     await expect(row.getByRole("button", { name: "Deactivate" })).toBeVisible();
     const person = await personByEmail(admin.api, email);
@@ -83,14 +81,14 @@ test.describe("SHO-US-2.5 / APL-2484", () => {
 
     const row = teamRow(admin.page, email);
     await expect(row).toHaveCount(1);
-    await expect(row.locator(".chip.grey", { hasText: "Deactivated" })).toBeVisible();
+    await expectChip(row, "Deactivated", "grey");
 
     const seen = (await member.api.get("/api/team")).json.people as Json[];
     expect(seen.some((p) => p.id === created!.id), "a Member must not see a deactivated person").toBe(false);
     await member.page.goto("/team");
     await expect(memberItem(member.page, String(member.user.name))).toHaveCount(1, SLOW);
     await expect(memberItem(member.page, name)).toHaveCount(0);
-    await expect(member.page.locator("#main").getByText(name, { exact: true })).toHaveCount(0);
+    await expect(mainOf(member.page).getByText(name, { exact: true })).toHaveCount(0);
   });
 
   test("AC3 (unverified): unverified people show an Unverified status to Admins and are hidden from Members (qa:TC missing)", async ({ anon, admin, member, later }) => {
@@ -105,13 +103,13 @@ test.describe("SHO-US-2.5 / APL-2484", () => {
     await admin.page.goto("/team");
     const row = teamRow(admin.page, email);
     await expect(row).toHaveCount(1, SLOW);
-    await expect(row.locator(".chip.gold", { hasText: "Unverified" })).toBeVisible();
+    await expectChip(row, "Unverified", "gold");
     const seen = (await member.api.get("/api/team")).json.people as { id?: string; name?: string }[];
     expect(seen.some((p) => p.id === person!.id || p.name === name)).toBe(false);
     await member.page.goto("/team");
     await expect(memberItem(member.page, String(member.user.name))).toHaveCount(1, SLOW);
     await expect(memberItem(member.page, name)).toHaveCount(0);
-    await expect(member.page.locator("#main").getByText(name, { exact: true })).toHaveCount(0);
+    await expect(mainOf(member.page).getByText(name, { exact: true })).toHaveCount(0);
   });
 
   test("AC4: the Super Admin's own row has no management action (qa:TC missing)", async ({ admin, later }) => {
@@ -128,7 +126,7 @@ test.describe("SHO-US-2.5 / APL-2484", () => {
 
     const mine = teamRow(admin.page, String(admin.user.email));
     await expect(mine).toHaveCount(1);
-    await expect(mine.locator(".chip", { hasText: "Super Admin" })).toBeVisible();
+    await expectChip(mine, "Super Admin");
     await expect(mine.getByRole("button", { name: /Deactivate|Reactivate|Make Admin|Make Member|Resend sign-in details/ })).toHaveCount(0);
   });
 });
