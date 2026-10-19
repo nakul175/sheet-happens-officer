@@ -91,8 +91,8 @@ const WORDS = [
   { n: 0, text: "0 days left" },
 ] as const;
 
-describe("@APL-2720 Trash says how many days are left", () => {
-  it.each(WORDS)("@APL-2720 AC1@v1.0 Time left for daysLeft $n reads exactly $text", async ({ n, text }) => {
+describe("qa:TC missing @APL-2720 Trash says how many days are left", () => {
+  it.each(WORDS)("qa:TC missing @APL-2720 AC1@v1.0 Time left for daysLeft $n reads exactly $text", async ({ n, text }) => {
     installFetch("LEADER", false, [item(n)]);
     const page = await show(<Trash params={params} />);
     const cell = timeCells(page);
@@ -101,7 +101,7 @@ describe("@APL-2720 Trash says how many days are left", () => {
     expect(page.textContent).toContain("ZZ-TEST Fix invoice");
   });
 
-  it("@APL-2720 AC2@v1.0 keeps the Time left header, the API order, and Restore for a Leader", async () => {
+  it("qa:TC missing @APL-2720 AC2@v1.0 keeps the Time left header, the API order, and Restore for a Leader", async () => {
     const rows = [
       item(2, "ZZ-TEST two", "a"),
       item(30, "ZZ-TEST thirty", "b"),
@@ -133,14 +133,14 @@ describe("@APL-2720 Trash says how many days are left", () => {
     { role: "EDITOR", archived: false },
     { role: "VIEWER", archived: false },
     { role: "LEADER", archived: true },
-  ])("@APL-2720 AC2@v1.0 hides Restore for $role when archived is $archived", async ({ role, archived }) => {
+  ])("qa:TC missing @APL-2720 AC2@v1.0 hides Restore for $role when archived is $archived", async ({ role, archived }) => {
     installFetch(role, archived, [item(30)]);
     const page = await show(<Trash params={params} />);
     expect(timeCells(page)[0].textContent).toBe("30 days left");
     expect(page.querySelector("button")).toBeNull();
   });
 
-  it("@APL-2720 AC2@v1.0 still shows the empty state and the 30-day notice", async () => {
+  it("qa:TC missing @APL-2720 AC2@v1.0 still shows the empty state and the 30-day notice", async () => {
     installFetch("LEADER", false, []);
     const page = await show(<Trash params={params} />);
     expect(page.textContent).toContain("Trash is empty.");
@@ -149,7 +149,7 @@ describe("@APL-2720 Trash says how many days are left", () => {
   });
 
   // @static: a source read, not a live pass of AC2. Behaviour is the tests above.
-  it("@APL-2720 AC2@v1.0 @static listTrash daysLeft formula is unchanged in src/lib/tasks.ts", () => {
+  it("qa:TC missing @APL-2720 AC2@v1.0 @static listTrash daysLeft formula is unchanged in src/lib/tasks.ts", () => {
     const tasks = readFileSync("src/lib/tasks.ts", "utf8");
     expect(tasks).toContain("daysLeft: Math.max(0, 30 - Math.floor((now - t.deletedAt!.getTime()) / 86400_000)),");
   });
