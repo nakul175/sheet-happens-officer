@@ -27,7 +27,7 @@ async function team() {
 describe("reads (8.2)", () => {
   useFakeModel();
 
-  it("quick actions: five plain queries, no model call, under a second, Trash excluded (AC1, AC3)", async () => {
+  it("quick actions: five plain queries, no model call, under a second, Trash excluded (AC1, AC3) qa:TC missing", async () => {
     delete process.env.MODEL_DATA_APPROVED; // proves they need no model at all
     const { lead, ed, p } = await team();
     const overdue = await task(lead, p.id, { title: "Late report", dueDate: istDate(-3) });
@@ -782,7 +782,7 @@ describe("privacy, clearing and retention (8.1, 8.8)", () => {
     expect((await u.c.patch("/api/concierge/preferences", { voiceNoticeAcked: false })).status).toBe(400);
   });
 
-  it("the quick-action route answers over HTTP without any model (8.2 AC3)", async () => {
+  it("the quick-action route answers over HTTP without any model (8.2 AC3) qa:TC missing", async () => {
     const u = await account("quicky");
     const p = await project(u, u);
     await task(u, p.id, { title: "Very late", dueDate: istDate(-4) });
