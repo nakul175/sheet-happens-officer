@@ -3,7 +3,8 @@
 // A remote host is refused so a shared staging database never gets a reminder sweep.
 // gateFile() skips this file in beforeAll when SHO_QA_PASS is unset. Playwright then exits 0.
 // No APL-2729 TC ids are in the register, so every title carries the literal token "qa:TC missing".
-// Each test runs against the one server it is pointed at; a test for another CRM_VISIBLE mode skips with an APL-2729 reason.
+// Each test runs against the one server it is pointed at and checks what that CRM_VISIBLE mode requires. Nothing skips
+// except the SHO_QA_PASS gate (gateFile) and the shared harness's guard that never runs the job against a remote host.
 // Under off the deal API is closed, so no deal can be seeded. The off test checks every reminder the job just made
 // opens for its reader (a deal task is "not found" for everyone under off) and that the ops reminder stays.
 // The stored-row check for every mode, including off, is one server process per mode on the product branch (#92).
@@ -56,8 +57,23 @@ async function freshDue(who: Who, since: number): Promise<Fresh[]> {
   return items.filter((item) => / is (due|overdue)/.test(item.text) && Date.parse(item.createdAt) >= since);
 }
 
-/** The mode-skip reason. Every reason names the story. */
-const notThisMode = (want: Mode) => `APL-2729: this test needs CRM_VISIBLE=${want}; this server is ${world?.mode ?? "unknown"}.`;
+/** Every due reminder this run's job made for the reader opens for them. Under off a deal task is "not found" for everyone. */
+async function assertFreshRemindersOpen(who: Who, w: World) {
+  const fresh = await freshDue(who, w.jobAt);
+  noSecret(JSON.stringify(fresh));
+  for (const item of fresh) {
+    expect(item.href, item.text).toMatch(/^\/tasks\/[\w-]+$/);
+    const opened = await who.api.get(`/api${item.href}`);
+    expect(opened.status, `${item.text} -> ${item.href}`).toBe(200);
+  }
+}
+
+/** The CRM_VISIBLE mode this run checks, recorded on the test so a report says which mode passed. */
+function useModeWorld() {
+  const w = useWorld();
+  test.info().annotations.push({ type: "CRM_VISIBLE", description: w.mode });
+  return w;
+}
 
 /** Reminder copy only. Assignment notices from seeding are a different path. */
 function dueItems(items: Item[]) {
@@ -134,40 +150,26 @@ test.afterAll(async () => {
   }
 });
 
-test("qa:TC missing AC2 AC3: all and unset keep the deal reminder and the ops check", async () => {
-  test.skip(!world || world.mode !== "all", `${notThisMode("all")} Unset reads as all.`);
-  const w = useWorld();
-  const memberItems = await bell(w.member);
-  const adminItems = await bell(w.orgAdmin);
-  noSecret(JSON.stringify({ memberItems, adminItems }));
-  assertDealReminder(memberItems, w.memberTitle, w.memberTaskId);
-  assertDealReminder(adminItems, w.adminTitle, w.adminTaskId);
-  assertOps(memberItems, w);
+test("qa:TC missing AC1 AC2: a member gets the deal reminder only while the CRM is visible to them", async () => {
+  const w = useModeWorld();
+  const items = await bell(w.member);
+  noSecret(JSON.stringify(items));
+  if (w.mode === "all") assertDealReminder(items, w.memberTitle, w.memberTaskId); // AC2: unchanged from main (unset reads as all)
+  else if (w.mode === "admins") assertNoDealReminder(items, w); // AC1
+  else await assertFreshRemindersOpen(w.member, w); // AC1 under off: no deal can be seeded, so nothing new may point at one
 });
 
-test("qa:TC missing AC1 AC2 AC3: admins: a member gets no deal reminder and an admin still does", async () => {
-  test.skip(!world || world.mode !== "admins", notThisMode("admins"));
-  const w = useWorld();
-  const memberItems = await bell(w.member);
-  const adminItems = await bell(w.orgAdmin);
-  noSecret(JSON.stringify({ memberItems, adminItems }));
-  assertNoDealReminder(memberItems, w);
-  assertDealReminder(adminItems, w.adminTitle, w.adminTaskId);
-  assertOps(memberItems, w);
+test("qa:TC missing AC1 AC2: an Admin keeps the deal reminder under all and admins, and off hides it", async () => {
+  const w = useModeWorld();
+  const items = await bell(w.orgAdmin);
+  noSecret(JSON.stringify(items));
+  if (w.mode === "off") await assertFreshRemindersOpen(w.orgAdmin, w); // AC1: off hides deals from Admins too
+  else assertDealReminder(items, w.adminTitle, w.adminTaskId); // AC2
 });
 
-test("qa:TC missing AC1 AC3: off: every new due reminder opens for its reader, and the ops check stays", async () => {
-  test.skip(!world || world.mode !== "off", notThisMode("off"));
-  const w = useWorld();
-  // A deal task is "not found" for every role under off, so a reminder that names or links a deal cannot open.
-  for (const who of [w.member, w.orgAdmin]) {
-    const fresh = await freshDue(who, w.jobAt);
-    noSecret(JSON.stringify(fresh));
-    for (const item of fresh) {
-      expect(item.href, item.text).toMatch(/^\/tasks\/[\w-]+$/);
-      const opened = await who.api.get(`/api${item.href}`);
-      expect(opened.status, `${item.text} -> ${item.href}`).toBe(200);
-    }
-  }
-  assertOps(await bell(w.member), w);
+test("qa:TC missing AC3: the non-deal reminder is unchanged in every mode", async () => {
+  const w = useModeWorld();
+  const items = await bell(w.member);
+  noSecret(JSON.stringify(items));
+  assertOps(items, w);
 });
