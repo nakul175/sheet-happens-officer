@@ -535,35 +535,38 @@ describe("flag on (AC1–AC8)", () => {
   it("qa:TC-APL2590-66f316fe@v2: comment text never leaves the project", async () => {
     const { lead, worker, outsider, p, t1 } = await cast();
     await project(outsider, outsider);
-    const secret = "ZZ-TEST Client name: Acme";
+    // Pam #128 @fefd5d1 D3: a client name unique to this run, as in the AC13 story spec. A fixed Acme name also matched
+    // the ZZ-TEST Acme renewal orgs that other suites create, so a re-run on a reused database failed.
+    const client = `ZZ-TEST Acme-${Date.now().toString(36)}`;
+    const secret = `ZZ-TEST Client name: ${client}`;
     const row = await addComment(actor(worker), t1, { text: secret });
-    for (const q of ["Acme", "Acm"]) {
+    for (const q of [client, client.slice(0, -2)]) { // the whole name, and a prefix of it
       const found = JSON.stringify(await search(actor(outsider), q, true));
-      expect(found).not.toContain("Acme");
+      expect(found).not.toContain(client);
       expect(found).not.toContain(t1);
       expect(found).not.toContain(row.id);
     }
     const bell = JSON.stringify(await listNotifications(actor(outsider)));
-    expect(bell).not.toContain("Acme");
+    expect(bell).not.toContain(client);
     expect(bell).not.toContain(row.id);
     await expect(commentExcerpts(actor(outsider), t1)).rejects.toMatchObject({ status: 404 });
     const asked = await runTool(newTurn(actor(outsider), new Date()), "task_comments", { task_id: t1 });
     expect(asked.isError).toBe(true);
-    expect(asked.content).not.toContain("Acme");
+    expect(asked.content).not.toContain(client);
     expect(asked.content).not.toContain(t1);
     expect(asked.content).not.toContain(row.id);
     await expect(projectActivity(actor(outsider), p.id)).rejects.toMatchObject({ status: 404 });
     const activity = await projectActivity(actor(lead), p.id);
     expect(activity.items.some((i) => i.what.includes("commented on"))).toBe(true);
-    expect(JSON.stringify(activity)).not.toContain("Acme");
+    expect(JSON.stringify(activity)).not.toContain(client);
     expect(JSON.stringify(activity)).not.toContain(row.id);
-    expect(JSON.stringify(await listNotifications(actor(lead)))).not.toContain("Acme");
+    expect(JSON.stringify(await listNotifications(actor(lead)))).not.toContain(client);
     const names = new Map<string, string>([[`t:${t1}`, "T1"]]);
     expect(sentence({ action: "comment.added", beforeState: { commentId: "c" }, afterState: { commentId: "c" }, targetId: t1 }, names)).toBe('commented on "T1"');
     expect(sentence({ action: "comment.removed", beforeState: { commentId: "c" }, afterState: { commentId: "c" }, targetId: t1 }, names)).toBe('deleted a comment on "T1"');
     const audits = await db.auditLog.findMany({ where: { createdAt: { gte: new Date(Date.now() - 60_000) } } });
-    expect(audits.some((a) => JSON.stringify(a).includes("Acme") || JSON.stringify(a).includes(secret))).toBe(false);
-    const memberHit = await search(actor(worker), "Acme", false);
+    expect(audits.some((a) => JSON.stringify(a).includes(client) || JSON.stringify(a).includes(secret))).toBe(false);
+    const memberHit = await search(actor(worker), client, false);
     expect(memberHit.tasks.some((t) => t.id === t1)).toBe(true);
     expect(JSON.stringify(memberHit)).not.toContain(secret);
   });
