@@ -64,7 +64,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe("APL-2728 person page DOM", () => {
+describe("qa:TC missing APL-2728 person page DOM", () => {
   it("qa:TC missing AC1: a hidden deal is generic text and has no deal href", async () => {
     const page = await open({
       id: "rep-2728",

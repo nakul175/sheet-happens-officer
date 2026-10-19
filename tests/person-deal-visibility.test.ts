@@ -37,7 +37,7 @@ async function zzAccount(role: string) {
 
 const actor = (who: Account, orgRole: "MEMBER" | "ADMIN" | "SUPER_ADMIN") => ({ id: who.id, orgRole });
 
-describe("APL-2728 person page hides a deal CRM_VISIBLE conceals", () => {
+describe("qa:TC missing APL-2728 person page hides a deal CRM_VISIBLE conceals", () => {
   let member: Account;
   let adminUser: Account;
   let outsider: Account;
