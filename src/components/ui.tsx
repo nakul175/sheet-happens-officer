@@ -1,9 +1,20 @@
 "use client";
 import { useEffect, useId, useRef, useState } from "react";
 
+/**
+ * APL-2738: the phone keyboard shortens the visible area without resizing the page (iOS Safari),
+ * so a full-screen sheet is placed over visualViewport instead of the whole layout viewport.
+ * Returns null when there is nothing to follow, which leaves the stylesheet in charge.
+ */
+export function keyboardFrame(vv: { height: number; offsetTop: number } | null | undefined, phone: boolean) {
+  if (!vv || !phone) return null;
+  return { top: `${vv.offsetTop}px`, bottom: "auto", height: `${vv.height}px` };
+}
+
 /** Centred dialog over a dimmed page. Escape and the dim area close it; focus moves in and returns. */
-export function Modal({ onClose, small, label, children }: { onClose: () => void; small?: boolean; label: string; children: React.ReactNode }) {
+export function Modal({ onClose, small, label, fitKeyboard, children }: { onClose: () => void; small?: boolean; label: string; fitKeyboard?: boolean; children: React.ReactNode }) {
   const ref = useRef<HTMLDivElement>(null);
+  const scrim = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const prev = document.activeElement as HTMLElement | null;
     (ref.current?.querySelector<HTMLElement>("[data-autofocus]") ?? ref.current)?.focus(); // SHO-US-14.5: a dialog can name the field that gets focus
@@ -24,8 +35,30 @@ export function Modal({ onClose, small, label, children }: { onClose: () => void
     document.addEventListener("keydown", keys);
     return () => { document.removeEventListener("keydown", keys); document.body.style.overflow = before; prev?.focus?.(); };
   }, [onClose]);
+  useEffect(() => {
+    const vv = window.visualViewport, el = scrim.current;
+    if (!fitKeyboard || !vv || !el) return;
+    const fit = (keep: boolean) => {
+      const f = keyboardFrame(vv, window.matchMedia("(max-width: 599px)").matches);
+      el.style.top = f?.top ?? ""; el.style.bottom = f?.bottom ?? ""; el.style.height = f?.height ?? "";
+      // Keep the focused field clear of the sticky bar and footer.
+      el.style.scrollPaddingTop = f ? `${ref.current?.querySelector<HTMLElement>(".bar")?.offsetHeight ?? 0}px` : "";
+      el.style.scrollPaddingBottom = f ? `${ref.current?.querySelector<HTMLElement>(".sheet-foot")?.offsetHeight ?? 0}px` : "";
+      const at = document.activeElement;
+      if (keep && f && at instanceof HTMLElement && at !== ref.current && ref.current?.contains(at)) at.scrollIntoView({ block: "nearest" });
+    };
+    const resize = () => fit(true), move = () => fit(false);
+    fit(false);
+    vv.addEventListener("resize", resize);
+    vv.addEventListener("scroll", move);
+    return () => {
+      vv.removeEventListener("resize", resize);
+      vv.removeEventListener("scroll", move);
+      el.style.top = el.style.bottom = el.style.height = el.style.scrollPaddingTop = el.style.scrollPaddingBottom = "";
+    };
+  }, [fitKeyboard]);
   return (
-    <div className="scrim" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+    <div className="scrim" ref={scrim} onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div className={`modal${small ? " sm" : ""}`} role="dialog" aria-modal="true" aria-label={label} tabIndex={-1} ref={ref} style={{ outline: "none" }}>
         {children}
       </div>
