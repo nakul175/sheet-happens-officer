@@ -3,12 +3,7 @@
 // tests/jobs-stalled-crm-server.test.ts and runs in CI via `npm run test:stalled-modes`.
 // Rows are checked in the test database and on GET /api/notifications. The job sends no email;
 // the outbox is checked so a deal name cannot leave that way either. Names are ZZ-TEST.
-//
-// qa:TC-APL2741-c1a1d001@v1 admins / non-admin owner and follower
-// qa:TC-APL2741-c2ad0001@v1 admins / admin and super admin
-// qa:TC-APL2741-c2ee0001@v1 unset
-// qa:TC-APL2741-c2a11001@v1 all
-// qa:TC-APL2741-c1ff0001@v1 off
+// qa:TC missing: QA has not assigned TC ids for this story yet.
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { crmMode } from "../src/lib/crm";
 import { notifyStalledDeals, stalledDealWhere } from "../src/lib/deals";
@@ -57,7 +52,7 @@ async function expectAllowed(exact: boolean) {
   await expectNoDealNotice(world, world.follower);
 }
 
-describe("stalled-deal notices respect CRM_VISIBLE (APL-2741)", () => {
+describe("qa:TC missing APL-2741 stalled-deal notices respect CRM_VISIBLE", () => {
   beforeAll(async () => {
     assertLocalTestDatabase();
     world = await seedStalledWorld();
@@ -67,7 +62,7 @@ describe("stalled-deal notices respect CRM_VISIBLE (APL-2741)", () => {
     await cleanupStalledWorld(world);
   });
 
-  it("qa:TC-APL2741-c2ee0001@v1 unset matches today: the owner, admin and super admin are told, the follower is not", async () => {
+  it("qa:TC missing AC2: unset matches today: the owner, admin and super admin are told, the follower is not", async () => {
     await clearStalledNotes(world);
     await withMode("unset", async () => {
       expect(crmMode()).toBe("all");
@@ -84,7 +79,7 @@ describe("stalled-deal notices respect CRM_VISIBLE (APL-2741)", () => {
     expectNoDealMail(dealNeedles(world));
   });
 
-  it("qa:TC-APL2741-c2a11001@v1 CRM_VISIBLE=all matches today", async () => {
+  it("qa:TC missing AC2: CRM_VISIBLE=all matches today", async () => {
     await clearStalledNotes(world);
     await withMode("all", async () => {
       expect(crmMode()).toBe("all");
@@ -96,7 +91,7 @@ describe("stalled-deal notices respect CRM_VISIBLE (APL-2741)", () => {
     expectNoDealMail(dealNeedles(world));
   });
 
-  it("qa:TC-APL2741-c1a1d001@v1 qa:TC-APL2741-c2ad0001@v1 admins: a non-admin owner or follower gets no deal notice, and admins still do", async () => {
+  it("qa:TC missing AC1 AC2: admins: a non-admin owner or follower gets no deal notice, and admins still do", async () => {
     await clearStalledNotes(world);
     await withMode("admins", async () => {
       expect(crmMode()).toBe("admins");
@@ -113,7 +108,7 @@ describe("stalled-deal notices respect CRM_VISIBLE (APL-2741)", () => {
     expectNoDealMail(dealNeedles(world));
   });
 
-  it("qa:TC-APL2741-c1ff0001@v1 off: nobody is told, and the filter matches no ZZ-TEST deal", async () => {
+  it("qa:TC missing AC1: off: nobody is told, and the filter matches no ZZ-TEST deal", async () => {
     await clearStalledNotes(world);
     await withMode("off", async () => {
       expect(crmMode()).toBe("off");

@@ -4,12 +4,8 @@
 // does not skip this file: the child always receives the test token, and a dead server fails the run.
 // Rows are checked in the local test database and on GET /api/notifications. The job sends no email.
 // Names are ZZ-TEST. Addresses are nakul17+ aliases.
-//
-// qa:TC-APL2741-c2ee0001@v1 unset
-// qa:TC-APL2741-c2a11001@v1 all
-// qa:TC-APL2741-c1a1d001@v1 admins / non-admin
-// qa:TC-APL2741-c2ad0001@v1 admins / admin
-// qa:TC-APL2741-c1ff0001@v1 off
+// The child's env is never read from /proc. Its mode and job token are proven by how it answers.
+// qa:TC missing: QA has not assigned TC ids for this story yet.
 import "dotenv/config";
 import { spawn, type ChildProcess } from "node:child_process";
 import { closeSync, existsSync, mkdtempSync, openSync, readdirSync, readFileSync, readlinkSync } from "node:fs";
@@ -153,16 +149,6 @@ function stopServer(server: Running | null) {
     try { process.kill(pid, "SIGKILL"); } catch { /* already gone */ }
   }
   spawned.delete(server.pid);
-}
-
-function environ(pid: number) {
-  const raw = readFileSync(`/proc/${pid}/environ`);
-  const out: Record<string, string> = {};
-  for (const entry of raw.toString("utf8").split("\0")) {
-    const i = entry.indexOf("=");
-    if (i > 0) out[entry.slice(0, i)] = entry.slice(i + 1);
-  }
-  return out;
 }
 
 async function waitForHealth(port: number, child: ChildProcess, timeoutMs: number) {
@@ -373,25 +359,30 @@ function expectNoDealMail(outbox: string) {
   }
 }
 
-function expectOwnProcess(server: Running) {
+async function expectOwnProcess(server: Running) {
   expect(server.pid).not.toBe(process.pid);
   const listeners = listeningPids(server.port).filter((pid) => isInGroup(server.pid, pid));
   expect(listeners.length, `${server.mode} is listening`).toBeGreaterThan(0);
+  // The child holds the test-only token, not the parent's: anything else is refused.
+  const refused = async (headers: Record<string, string>) => {
+    const res = await fetch(`${server.base}/api/jobs/stalled-deals`, { method: "POST", headers });
+    const text = await res.text();
+    expect(text.includes(TEST_JOB_SECRET)).toBe(false);
+    return res.status;
+  };
+  expect(await refused({}), "no token").toBe(401);
+  expect(await refused({ authorization: `Bearer ${"x".repeat(TEST_JOB_SECRET.length)}` }), "wrong token").toBe(401);
+  const parentSecret = process.env.JOB_SECRET;
+  if (parentSecret && parentSecret !== TEST_JOB_SECRET) {
+    expect(await refused({ authorization: `Bearer ${parentSecret}` }), "parent token").toBe(401);
+  }
+}
+
+/** Sets this process's CRM_VISIBLE to a mode that contradicts the server's while fn runs. */
+async function withContraryParentMode(server: Running, fn: () => Promise<void>) {
   const previous = process.env.CRM_VISIBLE;
   process.env.CRM_VISIBLE = server.mode === "off" ? "all" : "off";
-  try {
-    for (const pid of listeners) {
-      const live = environ(pid);
-      if (server.mode === "unset") expect(live.CRM_VISIBLE, "unset server has no CRM_VISIBLE").toBeUndefined();
-      else expect(live.CRM_VISIBLE, server.mode).toBe(server.mode);
-      expect(live.CRM_VISIBLE === process.env.CRM_VISIBLE, "spawned server picked up this process CRM_VISIBLE").toBe(false);
-      const childSecret = live.JOB_SECRET ?? "";
-      expect(childSecret.length >= 16).toBe(true);
-      expect(childSecret === TEST_JOB_SECRET).toBe(true);
-      const parentSecret = process.env.JOB_SECRET;
-      if (parentSecret && parentSecret !== TEST_JOB_SECRET) expect(childSecret === parentSecret).toBe(false);
-    }
-  } finally {
+  try { await fn(); } finally {
     if (previous === undefined) delete process.env.CRM_VISIBLE;
     else process.env.CRM_VISIBLE = previous;
   }
@@ -432,10 +423,13 @@ async function expectMode(base: string, mode: Mode, exact: boolean) {
 async function runMode(mode: Mode) {
   const server = await startModeServer(mode);
   try {
-    expectOwnProcess(server);
+    await expectOwnProcess(server);
     await clearNotes();
-    await postJob(server.base, 1);
-    await expectMode(server.base, mode, true);
+    // The rows must follow the server's own mode even while this process says the opposite.
+    await withContraryParentMode(server, async () => {
+      await postJob(server.base, 1);
+      await expectMode(server.base, mode, true);
+    });
     expectNoDealMail(server.outbox);
     await clearNotes();
     await postJob(server.base, LOAD);
@@ -446,7 +440,7 @@ async function runMode(mode: Mode) {
   }
 }
 
-describe("stalled-deal jobs are one server process per CRM_VISIBLE mode (APL-2741)", () => {
+describe("qa:TC missing APL-2741 stalled-deal jobs are one server process per CRM_VISIBLE mode", () => {
   beforeAll(async () => {
     assertLocalTestDatabase();
     if (!existsSync(path.join(root, ".next", "BUILD_ID"))) {
@@ -474,19 +468,19 @@ describe("stalled-deal jobs are one server process per CRM_VISIBLE mode (APL-274
     await db.$disconnect();
   });
 
-  it("qa:TC-APL2741-c2ee0001@v1 unset server matches today, including 40 concurrent job posts", async () => {
+  it("qa:TC missing AC2: unset server matches today, including 40 concurrent job posts", async () => {
     await runMode("unset");
   });
 
-  it("qa:TC-APL2741-c2a11001@v1 CRM_VISIBLE=all server matches today, including 40 concurrent job posts", async () => {
+  it("qa:TC missing AC2: CRM_VISIBLE=all server matches today, including 40 concurrent job posts", async () => {
     await runMode("all");
   });
 
-  it("qa:TC-APL2741-c1a1d001@v1 qa:TC-APL2741-c2ad0001@v1 admins server: a non-admin gets no deal notice and an admin still does", async () => {
+  it("qa:TC missing AC1 AC2: admins server: a non-admin gets no deal notice and an admin still does", async () => {
     await runMode("admins");
   });
 
-  it("qa:TC-APL2741-c1ff0001@v1 off server: nobody gets a stalled-deal notice", async () => {
+  it("qa:TC missing AC1: off server: nobody gets a stalled-deal notice", async () => {
     await runMode("off");
   });
 });
