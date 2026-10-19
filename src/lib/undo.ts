@@ -361,6 +361,9 @@ async function prepare(user: Actor, logId: string) {
   const archiveKind = row.action === "project.archived" || row.action === "project.unarchived";
   if (a.project.archivedAt && !archiveKind) throw new ApiError(409, "This project is archived and read-only.");
   if (row.actorId !== user.id && a.role !== "LEADER") throw new ApiError(403, "You can only undo your own actions.");
+  // Already undone wins over the Leader/Admin check (APL-2655). An Editor who deleted the task
+  // otherwise gets 403 after a Leader has already undone that delete.
+  if (row.action === "task.deleted" && row.undoneAt) throw bad("This was already undone.");
   // Undoing a delete is a restore from Trash, so it takes the same Leader or Admin check (SHO-US-6.2 AC4, SHO-BUG-8).
   if (row.action === "task.deleted") requireManage(a);
   if (row.undoneAt) throw bad("This action was already undone.");
