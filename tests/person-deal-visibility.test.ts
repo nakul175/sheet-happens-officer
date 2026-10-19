@@ -65,6 +65,11 @@ describe("qa:TC missing APL-2728 person page hides a deal CRM_VISIBLE conceals",
       const archived = await sa.c.post(`/api/projects/${id}/archive`);
       if (archived.status !== 200) problems.push(`archive ${id}: ${archived.status} ${JSON.stringify(archived.json)}`);
     }
+    // Pam's D2: the ZZ-TEST organisation this file creates is archived through the API.
+    if (organisationId) {
+      const archived = await sa.c.post(`/api/orgs/${organisationId}/archive`, { archive: true });
+      if (archived.status !== 200) problems.push(`archive organisation ${organisationId}: ${archived.status} ${JSON.stringify(archived.json)}`);
+    }
     for (const who of people) {
       if (who.id === sa.id) continue;
       const off = await sa.c.post(`/api/team/${who.id}/deactivate`, { reassign: "leaders" });

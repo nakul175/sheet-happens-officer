@@ -9,15 +9,13 @@
 // Local or CI Postgres only: a DATABASE_URL on any other host is refused before anything starts.
 // People are run-unique nakul17+ aliases, data is named ZZ-TEST. afterAll archives the projects and the
 // organisation and deactivates the people; the run's Super Admin alias cannot be deactivated and stays.
-import { spawn } from "node:child_process";
-import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, rmSync, statSync } from "node:fs";
-import net from "node:net";
-import { tmpdir } from "node:os";
+import { existsSync, mkdirSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { chromium, type Browser, type Page } from "playwright-core";
 import { call, QA_PASS, signUpAlias } from "../local-alias";
+import { LocalServers } from "../local-servers";
 import { istDate } from "../../helpers";
 
 const root = fileURLToPath(new URL("../../..", import.meta.url));
@@ -41,6 +39,8 @@ type Server = { mode: Mode; pid: number; outbox: string; base: string };
 type Person = Awaited<ReturnType<typeof signUpAlias>>;
 
 const servers = new Map<Mode, Server>();
+/** Owns every mode server and temp outbox this file starts, failed starts included (Pam's outbox condition 2). */
+const pool = new LocalServers();
 const seed = { people: [] as Person[], projectIds: [] as string[], orgIds: [] as string[] };
 let browser: Browser | undefined;
 let sa: Person;
@@ -74,53 +74,22 @@ function chromiumPath() {
   return found;
 }
 
-function freePort(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const server = net.createServer();
-    server.listen(0, "127.0.0.1", () => {
-      const addr = server.address();
-      const port = typeof addr === "object" && addr ? addr.port : 0;
-      server.close((err) => (err ? reject(err) : resolve(port)));
-    });
-    server.on("error", reject);
-  });
-}
-
-/** Stops the process group this file spawned, by its exact PID. */
-function stop(pid: number) {
-  try { process.kill(-pid, "SIGKILL"); } catch { /* already gone */ }
-}
-
 async function startServer(mode: Mode): Promise<Server> {
-  const port = await freePort();
-  const outbox = mkdtempSync(path.join(tmpdir(), `sho-2728-${mode}-`));
-  const env: NodeJS.ProcessEnv = {
-    ...process.env,
-    NODE_ENV: "production",
-    CRM_VISIBLE: mode,
-    EMAIL_OUTBOX_DIR: outbox,
-    APP_URL: `http://127.0.0.1:${port}`,
-    PORT: String(port),
-    SUPER_ADMIN_EMAILS: `root.test@aplyd.com,${SA_EMAIL}`,
-    JOB_SECRET: process.env.JOB_SECRET || "replace-with-a-token-of-at-least-16-chars",
-  };
-  const logFd = openSync(path.join(outbox, "server.log"), "a");
-  const child = spawn("npx", ["next", "start", "-H", "127.0.0.1", "-p", String(port)], {
-    cwd: root, env, detached: true, stdio: ["ignore", logFd, logFd],
+  const started = await pool.start({
+    label: `2728-${mode}`,
+    cwd: root,
+    env: ({ port, outbox, base }) => ({
+      ...process.env,
+      NODE_ENV: "production",
+      CRM_VISIBLE: mode,
+      EMAIL_OUTBOX_DIR: outbox,
+      APP_URL: base,
+      PORT: String(port),
+      SUPER_ADMIN_EMAILS: `root.test@aplyd.com,${SA_EMAIL}`,
+      JOB_SECRET: process.env.JOB_SECRET || "replace-with-a-token-of-at-least-16-chars",
+    }),
   });
-  closeSync(logFd);
-  child.unref();
-  if (!child.pid) throw new Error(`APL-2728 story: CRM_VISIBLE=${mode} did not start`);
-  const deadline = Date.now() + 60_000;
-  while (Date.now() < deadline) {
-    if (child.exitCode !== null) break;
-    try {
-      if ((await fetch(`http://127.0.0.1:${port}/api/health`)).ok) return { mode, pid: child.pid, outbox, base: `http://127.0.0.1:${port}` };
-    } catch { /* still booting */ }
-    await new Promise((r) => setTimeout(r, 250));
-  }
-  stop(child.pid);
-  throw new Error(`APL-2728 story: CRM_VISIBLE=${mode} never answered /api/health`);
+  return { mode, pid: started.pid, outbox: started.outbox, base: started.base };
 }
 
 async function person(server: Server, label: string) {
@@ -181,7 +150,8 @@ describe.skipIf(!QA_PASS)("qa:TC missing APL-2728 person page in the browser", (
       throw new Error("APL-2728 story cannot start: the production build is missing (.next/BUILD_ID)");
     }
     mkdirSync(SHOTS, { recursive: true });
-    const [on, admins, off] = await Promise.all([startServer("on"), startServer("admins"), startServer("off")]);
+    // Every start settles before this throws, so afterAll's pool.release() sees all three servers and outboxes.
+    const [on, admins, off] = await pool.startAll([() => startServer("on"), () => startServer("admins"), () => startServer("off")]);
     servers.set("on", on).set("admins", admins).set("off", off);
     browser = await chromium.launch({ executablePath: chromiumPath(), args: ["--no-sandbox"] });
 
@@ -230,9 +200,9 @@ describe.skipIf(!QA_PASS)("qa:TC missing APL-2728 person page in the browser", (
       const on = servers.get("on");
       if (on && sa) await cleanup(on);
     } finally {
-      for (const server of servers.values()) stop(server.pid);
-      // Pam's outbox condition: each server's temp outbox (verification mails and server.log) goes with it.
-      for (const server of servers.values()) rmSync(server.outbox, { recursive: true, force: true });
+      // Pam's outbox condition 2: every spawned server is stopped and every temp outbox (verification mails
+      // and server.log) removed, also when a server failed to start and beforeAll threw.
+      pool.release();
     }
   });
 
