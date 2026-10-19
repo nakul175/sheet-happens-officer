@@ -22,6 +22,13 @@ const about = (items: Note[], title: string) => items.filter((n) => n.text.inclu
 /** Notices that arrived after `before` was read. A reused account already holds older ones with the same text. */
 const since = (items: Note[], before: Note[]) => { const old = new Set(before.map((n) => n.id)); return items.filter((n) => !old.has(n.id)); };
 
+/** POST /assign with the task's current version, which main requires on every task mutation (APL-2668). */
+async function assign(who: Who, taskId: string, assigneeId: string) {
+  const seen = await who.api.get(`/api/tasks/${taskId}`);
+  expect(seen.status, JSON.stringify(seen.json)).toBe(200);
+  return who.api.post(`/api/tasks/${taskId}/assign`, { assigneeId, expectedUpdatedAt: seen.json.task.updatedAt });
+}
+
 async function openBell(page: Page) {
   await page.goto("/");
   await page.waitForLoadState("networkidle");
@@ -60,9 +67,9 @@ test("AC2: the new assignee is told about an assignment and a reassignment, and 
   const p = await newProject(admin, later, { label: "e7 assign", members: [{ who: member, role: "EDITOR" }, { who: other, role: "EDITOR" }] });
   const title = zz("handed");
   const t = await newTask(admin, p.id, { title, assigneeId: admin.user.id });
-  expect((await admin.api.post(`/api/tasks/${t}/assign`, { assigneeId: member.user.id })).status).toBe(200);
+  expect((await assign(admin, t, String(member.user.id))).status).toBe(200);
   expect(about(await (await inbox(member)).items, title).map((n) => n.text)).toEqual([`${admin.user.name} assigned you "${title}".`]);
-  expect((await admin.api.post(`/api/tasks/${t}/assign`, { assigneeId: other.user.id })).status).toBe(200);
+  expect((await assign(admin, t, String(other.user.id))).status).toBe(200);
   expect(about((await inbox(other)).items, title).some((n) => n.text.includes(`${admin.user.name} assigned you`))).toBe(true);
   expect(about((await inbox(member)).items, title).some((n) => n.text.includes("took"))).toBe(true);
   const own = zz("own assign");

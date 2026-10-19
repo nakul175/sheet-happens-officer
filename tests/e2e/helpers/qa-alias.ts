@@ -97,7 +97,8 @@ async function restore(admin: Who, id: string, email: string) {
 /**
  * The Super Admin (nakul17+zz-sa) plus one pool Member per label, from this job's slot. The labels say what each
  * person is for; the accounts are fixed. Each one is active and a Member when handed out, and is put back that way
- * after the test (never left deactivated), because the pool is reused.
+ * after the test (never left deactivated), because the pool is reused. A spec that makes one of them a project's Leader
+ * hands leadership back before archiving it (createDeal does this), because deactivate refuses any Leader.
  */
 export async function cast(browser: Browser, later: Later, labels: string[]) {
   if (labels.length > PER_SLOT) throw new Error(`cast asks for ${labels.length} people; a pool slot has ${PER_SLOT}.`);
