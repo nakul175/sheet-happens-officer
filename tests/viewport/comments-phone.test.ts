@@ -68,7 +68,7 @@ async function phone(): Promise<{ ctx: BrowserContext; page: Page }> {
 }
 
 describe("phone comments", () => {
-  it("posts a comment from a 390x800 viewport", async () => {
+  it("qa:TC missing N1: posts a comment from a 390x800 viewport", async () => {
     const { ctx, page } = await phone();
     const text = `ZZ-TEST phone ${Date.now().toString(36)}`;
     try {
@@ -91,7 +91,7 @@ describe("phone comments", () => {
     }
   });
 
-  it("the @ picker has no nested button on a phone", async () => {
+  it("qa:TC missing N2: the @ picker has no nested button on a phone", async () => {
     const { ctx, page } = await phone();
     try {
       await page.goto(`/projects/${projectId}?task=${taskId}`, { waitUntil: "load" });

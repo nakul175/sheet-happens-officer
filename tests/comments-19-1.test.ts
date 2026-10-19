@@ -301,7 +301,7 @@ describe("flag on (AC1–AC8)", () => {
     }
   });
 
-  it("AC3 the author edits (marked edited); the Leader deletes any comment", async () => {
+  it("qa:TC missing AC4/AC5: the author edits (marked edited); the Leader deletes any comment", async () => {
     const { lead, worker, viewer, t1 } = await cast();
     const sa = await superAdmin();
     const adm = await admin(sa, "boss");
@@ -597,11 +597,18 @@ describe("flag on (AC1–AC8)", () => {
     expect(p95, `p95 ${p95}ms over 50 reads`).toBeLessThanOrEqual(1000);
   }, 60_000);
 
-  it("qa:TC-APL2590-b4442f7b@v1: BLOCKED (SHO-US-17.1) Comment search. Record it as BLOCKED.", () => {
-    expect("BLOCKED until SHO-US-17.1").toContain("SHO-US-17.1");
+  // D6: the full case is BLOCKED until SHO-US-17.1. This checks the comment search that is built today.
+  it("qa:TC-APL2590-b4442f7b@v1: BLOCKED (SHO-US-17.1) Comment search. Record it as BLOCKED.", async () => {
+    const { worker, outsider, t1 } = await cast();
+    const phrase = `zzsearch${Date.now().toString(36)}`;
+    await addComment(actor(worker), t1, { text: `ZZ-TEST note ${phrase}` });
+    const found = await search(actor(worker), phrase, false);
+    expect(found.tasks.map((t) => t.id)).toContain(t1);
+    expect(JSON.stringify(found)).not.toContain("ZZ-TEST note");
+    expect((await search(actor(outsider), phrase, false)).tasks.map((t) => t.id)).not.toContain(t1);
   });
 
-  it("load: 40 concurrent comment writes", async () => {
+  it("qa:TC missing load: 40 concurrent comment writes", async () => {
     const { worker, t1 } = await cast();
     const started = Date.now();
     const results = await Promise.all(Array.from({ length: 40 }, (_, i) =>
@@ -651,7 +658,7 @@ describe("flag on (AC1–AC8)", () => {
     expect(await db.comment.findUnique({ where: { id: gone.id } })).toBeNull();
   });
 
-  it("load: 40 concurrent comment purges", async () => {
+  it("qa:TC missing load: 40 concurrent comment purges", async () => {
     const { worker, t1 } = await cast();
     const removedAt = new Date("2020-06-01T00:00:00.000Z");
     const edge = new Date(removedAt.getTime() + 30 * DAY);

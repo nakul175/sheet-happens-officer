@@ -64,8 +64,7 @@ describe("mention picker", () => {
     const panel = document.querySelector(".comments")!;
     const result = await axe.run(panel, {
       runOnly: { type: "tag", values: ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa", "best-practice"] },
-      rules: { "color-contrast": { enabled: false } },
-    });
+    }); // D7: color-contrast is on. jsdom has no stylesheet, so the real contrast check is AC19 in the Chromium story spec.
     const nested = result.violations.filter((v) => v.id === "nested-interactive");
     expect(nested, JSON.stringify(nested)).toEqual([]);
     expect(result.violations.map((v) => v.id), JSON.stringify(result.violations)).toEqual([]);
