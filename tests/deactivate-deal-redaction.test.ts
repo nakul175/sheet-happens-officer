@@ -55,7 +55,7 @@ function assertNoDeal(text: string, dealNames: string[], dealIds: string[]) {
   for (const id of dealIds) expect(text).not.toContain(id);
 }
 
-describe("APL-2735 deactivate 409 hides deals the caller cannot see", () => {
+describe("qa:TC missing APL-2735 deactivate 409 hides deals the caller cannot see", () => {
   let adminUser: Account;
   let member: Account;
   let dealLeader: Account;
@@ -95,7 +95,7 @@ describe("APL-2735 deactivate 409 hides deals the caller cannot see", () => {
     expect(problems, problems.join("\n")).toEqual([]);
   });
 
-  it("seeds two deals, a plain project, and a mixed leadership", async () => {
+  it("qa:TC missing AC3: seeds two deals, a plain project, and a mixed leadership", async () => {
     const sa = await superAdmin();
     adminUser = await zzAccount("admin");
     member = await zzAccount("member");
@@ -160,7 +160,7 @@ describe("APL-2735 deactivate 409 hides deals the caller cannot see", () => {
     return "detail";
   }
 
-  it("covers on, all, admins and off for an admin and a member", async () => {
+  it("qa:TC missing AC1 AC2: covers on, all, admins and off for an admin and a member", async () => {
     expect(dealIds).toHaveLength(2);
     const callers: { who: Account; role: Role }[] = [
       { who: adminUser, role: "ADMIN" },
@@ -198,7 +198,7 @@ describe("APL-2735 deactivate 409 hides deals the caller cannot see", () => {
     expect((await db.user.findUnique({ where: { id: dealLeader.id }, select: { deactivatedAt: true } }))?.deactivatedAt).toBeNull();
   });
 
-  it("still names a plain project when the CRM is off", async () => {
+  it("qa:TC missing AC1: still names a plain project when the CRM is off", async () => {
     const res = await withMode("off", () => attempt(adminUser, "ADMIN", projectLeader.id));
     expect(res.status).toBe(409);
     expect(res.body).toEqual({
@@ -207,7 +207,7 @@ describe("APL-2735 deactivate 409 hides deals the caller cannot see", () => {
     });
   });
 
-  it("names the visible project and omits the hidden deal", async () => {
+  it("qa:TC missing AC1 AC2: names the visible project and omits the hidden deal", async () => {
     const hidden = await withMode("off", () => attempt(adminUser, "ADMIN", mixedLeader.id));
     expect(hidden.status).toBe(409);
     expect(hidden.body).toEqual({

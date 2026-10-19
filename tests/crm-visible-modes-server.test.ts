@@ -539,7 +539,7 @@ describe("CRM_VISIBLE modes are tested against a real server per mode", () => {
     }
   }, 120_000);
 
-  it("Deactivate 409 hides deal names from a caller who cannot see the CRM (APL-2735 AC1-AC3)", async () => {
+  it("qa:TC missing AC1 AC2 AC3: Deactivate 409 hides deal names from a caller who cannot see the CRM (APL-2735 AC1-AC3)", async () => {
     const open = running.get("on");
     expect(open, "the on server is running").toBeTruthy();
     const dealNames = [`ZZ-TEST Northwind ${tag}`, `ZZ-TEST Contoso ${tag}`];

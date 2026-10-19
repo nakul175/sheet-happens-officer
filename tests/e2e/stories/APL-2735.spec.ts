@@ -173,7 +173,7 @@ async function deactivateDialog(leaderName: string) {
   return { dialog: dialog!, alert: alert! };
 }
 
-describe("APL-2735 deactivate dialog shows the 409 text", () => {
+describe("qa:TC missing APL-2735 deactivate dialog shows the 409 text", () => {
   let adminUser: Account;
   let leader: Account;
   const dealNames = [`ZZ-TEST Northwind ${RUN}`, `ZZ-TEST Contoso ${RUN}`];
