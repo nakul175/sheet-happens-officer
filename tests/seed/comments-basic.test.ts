@@ -18,7 +18,7 @@ function env(over: Record<string, string | undefined> = {}) {
 describe("comments-basic seed", () => {
   it("qa:TC-APL2590-7662ffd7@v2: the comments-basic seed refuses anything but an allowlisted test or staging database", () => {
     expect(guard(env())).toBe("test");
-    expect(guard(env({ SEED_TARGET: "staging", DATABASE_URL: stagingUrl }))).toBe("staging");
+    expect(guard(env({ SEED_TARGET: "staging", DATABASE_URL: stagingUrl }), ["staging.internal"])).toBe("staging"); // host and DB name both listed (D2)
 
     const refuse = (over: Record<string, string | undefined>, pattern: RegExp) => {
       let message = "";
@@ -46,6 +46,32 @@ describe("comments-basic seed", () => {
     const src = readFileSync(SCRIPT, "utf8");
     expect(src).not.toMatch(/console\.(log|info|debug|error)\([^)]*SHO_QA_PASS/);
     expect(src).not.toMatch(/console\.(log|info|debug)\([^)]*\bpassword\b/);
+  });
+
+  // APL-2590 QA D2 (Pam, #49 @3337a90): the staging guard checked only the DB name, so any host with /sho_staging passed.
+  it("qa:TC missing D2: the seed needs both an allowlisted host and DB name, and refuses URL overrides", () => {
+    const refused = (url: string, target = "staging") => {
+      let message = "";
+      try { guard(env({ SEED_TARGET: target, DATABASE_URL: url })); } catch (e) { message = (e as Error).message; }
+      expect(message, url.replace(/\/\/[^@]*@/, "//***@")).toMatch(/Refusing/);
+      expect(message).not.toMatch(/taskboard:taskboard/);
+    };
+    // Pam's step: an arbitrary host with the staging DB name.
+    refused("postgresql://taskboard:taskboard@attacker.example.com:5432/sho_staging");
+    refused("postgresql://taskboard:taskboard@staging.internal:5432/sho_staging");
+    refused("postgresql://taskboard:taskboard@localhost:5432/sho_staging");
+    // Query overrides that move the connection after the host and name are read.
+    refused("postgresql://taskboard:taskboard@localhost:5432/sho_test?host=db.example.com", "test");
+    refused("postgresql://taskboard:taskboard@localhost:5432/sho_test?hostaddr=10.0.0.9", "test");
+    refused("postgresql://taskboard:taskboard@localhost:5432/sho_test?dbname=defaultdb", "test");
+    refused("postgresql://taskboard:taskboard@%2Fvar%2Frun%2Fpostgresql/sho_test", "test");
+    // Staging passes only when this exact host and this exact DB name are both on the list.
+    const listed = { SEED_TARGET: "staging", DATABASE_URL: "postgresql://taskboard:taskboard@staging-db.zz-test.local:5432/sho_staging" };
+    expect(guard(env(listed), ["staging-db.zz-test.local"])).toBe("staging");
+    expect(() => guard(env({ ...listed, DATABASE_URL: listed.DATABASE_URL.replace("/sho_staging", "/sho_test") }), ["staging-db.zz-test.local"])).toThrow(/Refusing/);
+    expect(() => guard(env({ ...listed, DATABASE_URL: listed.DATABASE_URL.replace("staging-db.zz-test.local", "other.zz-test.local") }), ["staging-db.zz-test.local"])).toThrow(/Refusing/);
+    expect(() => guard(env(listed))).toThrow(/Refusing/); // no staging host is on the built-in list
+    expect(guard(env())).toBe("test");
   });
 
   it("qa:TC-APL2590-7662ffd7@v2: comments-basic creates the ZZ-TEST Ops fixture and can be run again", async () => {

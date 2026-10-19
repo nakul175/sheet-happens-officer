@@ -100,6 +100,46 @@ describe("flag off (AC9)", () => {
     expect(read.content).not.toContain(secret);
     expect(await db.comment.count({ where: { taskId: t1, text: secret } })).toBe(1);
   });
+
+  // APL-2590 QA D1 (Pam, #49 @3337a90): with the flag off, Activity listed a comment row with Undo available, and Undo answered 200.
+  it("qa:TC missing D1: flag off, Activity hides comment rows and their Undo answers 404 with nothing changed", async () => {
+    const { lead, worker, p, t1 } = await cast();
+    on();
+    const kept = await addComment(actor(worker), t1, { text: "ZZ-TEST flag-off keep" });
+    const gone = await addComment(actor(worker), t1, { text: "ZZ-TEST flag-off delete" });
+    await removeComment(actor(worker), t1, gone.id);
+    off();
+    const logs = await db.actionLog.findMany({ where: { targetId: t1, action: { in: ["comment.added", "comment.removed"] } } });
+    expect(logs).toHaveLength(3);
+
+    // Pam's steps, over HTTP against the server, which runs with the flag off.
+    const activity = await lead.c.get(`/api/projects/${p.id}/activity`);
+    expect(activity.status).toBe(200);
+    const shown = (activity.json.items as { id: string }[]).map((i) => i.id);
+    for (const log of logs) expect(shown).not.toContain(log.id);
+    expect(JSON.stringify(activity.json)).not.toMatch(/comment/i);
+    const madeUp = await lead.c.post("/api/actions/zz-test-no-such-action/undo", {});
+    for (const log of logs) {
+      for (const who of [worker, lead]) {
+        const r = await who.c.post(`/api/actions/${log.id}/undo`, {});
+        expect(r.status).toBe(404);
+        expect(r.json).toEqual(madeUp.json); // the same 404 as an action that does not exist
+      }
+    }
+    expect((await db.comment.findUniqueOrThrow({ where: { id: kept.id } })).removedAt).toBeNull();
+    expect((await db.comment.findUniqueOrThrow({ where: { id: gone.id } })).removedAt).not.toBeNull();
+    expect(await db.actionLog.count({ where: { id: { in: logs.map((l) => l.id) }, undoneAt: { not: null } } })).toBe(0);
+    expect(await db.actionLog.count({ where: { targetId: t1, action: "undo" } })).toBe(0);
+
+    // The same in this process, and back on, the rows and their Undo return.
+    expect((await projectActivity(actor(lead), p.id)).items.some((i) => logs.some((l) => l.id === i.id))).toBe(false);
+    await expect(undoAction(actor(worker), logs[0].id)).rejects.toMatchObject({ status: 404 });
+    on();
+    try {
+      const back = await projectActivity(actor(lead), p.id);
+      for (const log of logs) expect(back.items.find((i) => i.id === log.id)?.undo).toBe("available");
+    } finally { off(); }
+  });
 });
 
 describe("flag off concierge (AC9)", () => {
@@ -572,6 +612,20 @@ describe("flag on (AC1–AC8)", () => {
     expect(await db.comment.count({ where: { taskId: t1, removedAt: null } })).toBe(40);
     const reads = await Promise.all(Array.from({ length: 40 }, () => listComments(actor(worker), t1)));
     expect(reads.every((r) => r.comments.length === 40)).toBe(true);
+  }, 60_000);
+
+  // APL-2590 QA D3 (Pam, #49 @3337a90): the 200-comment cap was count-then-insert with no lock; concurrent adds reached 203.
+  it("qa:TC missing D3: concurrent adds never take a task past 200 comments", async () => {
+    const { worker, p } = await cast();
+    const near = await task(worker, p.id, { title: "ZZ-TEST 190 race" });
+    await db.comment.createMany({ data: Array.from({ length: 190 }, (_, i) => ({ taskId: near, authorId: worker.id, text: `ZZ-TEST ${i}` })) });
+    const results = await Promise.all(Array.from({ length: 30 }, (_, i) =>
+      addComment(actor(worker), near, { text: `ZZ-TEST race ${i}` }).then(() => "ok", (e: { extra?: { code?: string } }) => e.extra?.code ?? "other"),
+    ));
+    expect(await db.comment.count({ where: { taskId: near, removedAt: null } })).toBe(200);
+    expect(results.filter((r) => r === "ok")).toHaveLength(10);
+    expect(results.filter((r) => r === "too_many_comments")).toHaveLength(20);
+    expect(await db.actionLog.count({ where: { targetId: near, action: "comment.added" } })).toBe(10);
   }, 60_000);
 
   it("qa:TC-APL2590-093cbb6e@v2: purge keeps a comment at exactly 30x24h and removes it 1ms later", async () => {
