@@ -16,13 +16,14 @@
 #
 # Target: the repository variable STAGING_BASE_URL (not a secret), else https://staging.sheethappensofficer.com. Only staging
 # or a pr1-pr4 preview is accepted; production is refused.
-# Secrets (repository settings, set by Oscar):
-#   STAGING_BASIC_USER, STAGING_BASIC_PASS   the basic-auth gate in front of staging
-#   SHO_QA_PASS, SHO_ADMIN_EMAIL, SHO_ADMIN_PASS, SHO_MEMBER_EMAIL, SHO_MEMBER_PASS   as in staging-e2e.yml
+# Secrets (repository settings that staging-e2e.yml already uses; this workflow adds none):
+#   STAGING_USER, STAGING_PASS   the basic-auth gate in front of staging
+#   SHO_QA_PASS, SHO_ADMIN_EMAIL, SHO_ADMIN_PASS, SHO_MEMBER_EMAIL, SHO_MEMBER_PASS
+#   SHO_MEMBER_EMAIL / SHO_MEMBER_PASS also feed SHARD_EMAIL / SHARD_PASS, which APL-2733 signs in with.
 # They reach steps through env: only and are never echoed.
 #
 # Traces are OFF unless the "trace" input asks for them. A trace cannot be redacted: it holds the sign-in request body (the
-# password) and the basic-auth header (STAGING_BASIC_USER:STAGING_BASIC_PASS in base64, which GitHub's log masking does not
+# password) and the basic-auth header (STAGING_USER:STAGING_PASS in base64, which GitHub's log masking does not
 # catch) (APL-2476). With traces on, the uploaded test-results artifact carries those secrets to anyone who can download it.
 name: Staging regression
 
@@ -52,7 +53,9 @@ env:
   DATABASE_URL: postgresql://unused:unused@127.0.0.1:1/unused
   DIRECT_DATABASE_URL: postgresql://unused:unused@127.0.0.1:1/unused
   PLAYWRIGHT_HTML_OPEN: never
-  EXCLUDED_TAG: "@local-only"
+  # @local-only: specs that sign up and verify new aliases from a local outbox (APL-2925). @static is a file-contains check and
+  # @manual cannot force a job failure on staging; neither is a live pass (as in staging-e2e.yml).
+  EXCLUDED_TAGS: "@local-only|@static|@manual"
 
 jobs:
   staging-regression:
@@ -80,8 +83,8 @@ jobs:
 
       - name: Check the secrets are set (names only, never values)
         env:
-          STAGING_BASIC_USER: ${{ secrets.STAGING_BASIC_USER }}
-          STAGING_BASIC_PASS: ${{ secrets.STAGING_BASIC_PASS }}
+          STAGING_USER: ${{ secrets.STAGING_USER }}
+          STAGING_PASS: ${{ secrets.STAGING_PASS }}
           SHO_ADMIN_EMAIL: ${{ secrets.SHO_ADMIN_EMAIL }}
           SHO_ADMIN_PASS: ${{ secrets.SHO_ADMIN_PASS }}
           SHO_MEMBER_EMAIL: ${{ secrets.SHO_MEMBER_EMAIL }}
@@ -89,7 +92,7 @@ jobs:
           SHO_QA_PASS: ${{ secrets.SHO_QA_PASS }}
         run: |
           missing=""
-          for n in STAGING_BASIC_USER STAGING_BASIC_PASS SHO_ADMIN_EMAIL SHO_ADMIN_PASS SHO_MEMBER_EMAIL SHO_MEMBER_PASS SHO_QA_PASS; do
+          for n in STAGING_USER STAGING_PASS SHO_ADMIN_EMAIL SHO_ADMIN_PASS SHO_MEMBER_EMAIL SHO_MEMBER_PASS SHO_QA_PASS; do
             [ -n "${!n}" ] || missing="$missing $n"
           done
           if [ -n "$missing" ]; then
@@ -108,9 +111,8 @@ jobs:
 
       - name: Check the alias pool is verified (read-only)
         env:
-          # The scripts and playwright.config.ts read the basic-auth pair as STAGING_USER / STAGING_PASS.
-          STAGING_USER: ${{ secrets.STAGING_BASIC_USER }}
-          STAGING_PASS: ${{ secrets.STAGING_BASIC_PASS }}
+          STAGING_USER: ${{ secrets.STAGING_USER }}
+          STAGING_PASS: ${{ secrets.STAGING_PASS }}
           SHO_QA_PASS: ${{ secrets.SHO_QA_PASS }}
         # --check signs up, verifies and changes nothing; it only signs in and reports. It prints addresses and states,
         # never a password, and exits non-zero when any alias is not ready.
@@ -120,18 +122,23 @@ jobs:
             exit 1
           fi
 
-      - name: Run the full suite except ${{ env.EXCLUDED_TAG }} (workers=1)
+      - name: Run the full suite except ${{ env.EXCLUDED_TAGS }} (workers=1)
         env:
-          STAGING_USER: ${{ secrets.STAGING_BASIC_USER }}
-          STAGING_PASS: ${{ secrets.STAGING_BASIC_PASS }}
+          STAGING_USER: ${{ secrets.STAGING_USER }}
+          STAGING_PASS: ${{ secrets.STAGING_PASS }}
           SHO_ADMIN_EMAIL: ${{ secrets.SHO_ADMIN_EMAIL }}
           SHO_ADMIN_PASS: ${{ secrets.SHO_ADMIN_PASS }}
           SHO_MEMBER_EMAIL: ${{ secrets.SHO_MEMBER_EMAIL }}
           SHO_MEMBER_PASS: ${{ secrets.SHO_MEMBER_PASS }}
           SHO_QA_PASS: ${{ secrets.SHO_QA_PASS }}
+          # APL-2733 signs in as SHARD_EMAIL / SHARD_PASS for its change-password page and only submits passwords the server
+          # refuses. It gets the shared Member account. SHARD_ROLE is left unset on purpose, so the admin/member fixtures in
+          # support.ts keep using SHO_ADMIN_* / SHO_MEMBER_* (as staging-e2e.yml's serial job does).
+          SHARD_EMAIL: ${{ secrets.SHO_MEMBER_EMAIL }}
+          SHARD_PASS: ${{ secrets.SHO_MEMBER_PASS }}
           PLAYWRIGHT_JSON_OUTPUT_FILE: playwright-report.json
           TRACE: ${{ inputs.trace }}
-        run: npx playwright test --workers=1 --grep-invert "$EXCLUDED_TAG" --reporter=list,html,json --trace="$TRACE"
+        run: npx playwright test --workers=1 --grep-invert "$EXCLUDED_TAGS" --reporter=list,html,json --trace="$TRACE"
 
       - name: Count the results
         if: always()
@@ -141,7 +148,8 @@ jobs:
             echo "::error::Missing Playwright JSON report: the suite did not run."
             exit 1
           fi
-          node scripts/ci/assert-playwright-ran.mjs --mode shard --report playwright-report.json --counts-out playwright-counts.json
+          # --require-tests: this job is the whole run, so a run with no tests fails (an empty shard is normal only in staging-e2e).
+          node scripts/ci/assert-playwright-ran.mjs --mode shard --report playwright-report.json --counts-out playwright-counts.json --require-tests
 
       - name: Write the summary
         if: always()
@@ -159,8 +167,9 @@ jobs:
               echo "**Counts:** none (the job stopped before the suite ran: aliases not verified, ask Oscar)."
             fi
             echo
-            echo "**Excluded ($EXCLUDED_TAG):** APL-2609, APL-2669, APL-2674. They sign up new nakul17+ aliases and verify them"
+            echo "**Excluded (@local-only):** APL-2609, APL-2669, APL-2674. They sign up new nakul17+ aliases and verify them"
             echo "from a local mail outbox, so on staging they would create real accounts and send real mail. They run locally only."
+            echo "Also excluded: @static (a file-contains check) and @manual (cannot force a failure on staging), as in staging-e2e.yml."
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload the counts
