@@ -64,8 +64,8 @@ afterAll(async () => {
   }
 });
 
-describe("qa:TC missing @APL-2720 AC1@v1.0 listTrash daysLeft at Pam's seven ages", () => {
-  it.each(AGES)("qa:TC missing @APL-2720 AC1@v1.0 a task deleted $label ago has daysLeft $daysLeft", async ({ label, age, daysLeft }) => {
+describe("qa:TC-APL2720-01@v1 @APL-2720 AC1@v1.0 listTrash daysLeft at Pam's seven ages", () => {
+  it.each(AGES)("qa:TC-APL2720-01@v1 @APL-2720 AC1@v1.0 a task deleted $label ago has daysLeft $daysLeft", async ({ label, age, daysLeft }) => {
     const row = deleted.get(`ZZ-TEST 2720 ${label} ${RUN}`);
     expect(row, label).toBeTruthy();
     vi.useFakeTimers({ toFake: ["Date"] });
@@ -74,7 +74,7 @@ describe("qa:TC missing @APL-2720 AC1@v1.0 listTrash daysLeft at Pam's seven age
     expect(items.find((item) => item.id === row!.id)?.daysLeft, label).toBe(daysLeft);
   });
 
-  it("qa:TC missing @APL-2720 AC2@v1.0 the trash is still ordered by deletedAt, newest first", async () => {
+  it("qa:TC-APL2720-02@v1 @APL-2720 AC2@v1.0 the trash is still ordered by deletedAt, newest first", async () => {
     const items = await listTrash({ id: leader.id, orgRole: "MEMBER" }, projectId);
     const times = items.map((item) => new Date(item.deletedAt!).getTime());
     expect(times).toEqual([...times].sort((a, b) => b - a));

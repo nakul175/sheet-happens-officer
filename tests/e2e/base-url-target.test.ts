@@ -26,8 +26,9 @@ function configBaseUrl(env: Record<string, string>) {
 }
 
 describe("qa:TC missing APL-2879 the story target is never staging by default", () => {
-  it("qa:TC missing playwright.config.ts: only TASKBOARD_URL=http://localhost:3100 set gives a localhost baseURL", () => {
-    expect(configBaseUrl({ TASKBOARD_URL: "http://localhost:3100" })).toBe("http://localhost:3100");
+  it("qa:TC missing playwright.config.ts: only TASKBOARD_URL=http://127.0.0.1:3100 set gives that baseURL", () => {
+    // Not LOCAL_DEFAULT, so a config that ignored TASKBOARD_URL would fail here (APL-2884).
+    expect(configBaseUrl({ TASKBOARD_URL: "http://127.0.0.1:3100" })).toBe("http://127.0.0.1:3100");
   }, 30_000);
 
   it("qa:TC missing playwright.config.ts: no target variable set gives http://localhost:3100", () => {
@@ -38,15 +39,17 @@ describe("qa:TC missing APL-2879 the story target is never staging by default", 
   it("qa:TC missing resolveBaseUrl: BASE_URL, then TASKBOARD_URL, then STAGING_URL, else localhost", () => {
     expect(resolveBaseUrl({})).toBe("http://localhost:3100");
     expect(resolveBaseUrl({ TASKBOARD_URL: "http://127.0.0.1:3100/" })).toBe("http://127.0.0.1:3100");
-    expect(resolveBaseUrl({ TASKBOARD_URL: "http://localhost:3100", STAGING_URL: STAGING })).toBe("http://localhost:3100");
-    expect(resolveBaseUrl({ BASE_URL: STAGING, TASKBOARD_URL: "http://localhost:3100" })).toBe(STAGING);
+    expect(resolveBaseUrl({ TASKBOARD_URL: "http://127.0.0.1:3100", STAGING_URL: STAGING })).toBe("http://127.0.0.1:3100");
+    expect(resolveBaseUrl({ BASE_URL: STAGING, TASKBOARD_URL: "http://127.0.0.1:3100" })).toBe(STAGING);
     expect(resolveBaseUrl({ STAGING_URL: STAGING })).toBe(STAGING);
   });
 
   it("qa:TC missing local-clock.ts: reads TASKBOARD_URL and defaults to localhost the same way", () => {
-    expect(localDatabaseUrl({ TASKBOARD_URL: "http://localhost:3100", DATABASE_URL: LOCAL_DB })).toBe(LOCAL_DB);
+    expect(localDatabaseUrl({ TASKBOARD_URL: "http://127.0.0.1:3100", DATABASE_URL: LOCAL_DB })).toBe(LOCAL_DB);
+    // A non-local TASKBOARD_URL must win over the localhost default, or this guard would age rows on staging (APL-2884).
+    expect(localDatabaseUrl({ TASKBOARD_URL: STAGING, DATABASE_URL: LOCAL_DB })).toBeNull();
     expect(localDatabaseUrl({ DATABASE_URL: LOCAL_DB })).toBe(LOCAL_DB);
-    expect(localDatabaseUrl({ BASE_URL: STAGING, TASKBOARD_URL: "http://localhost:3100", DATABASE_URL: LOCAL_DB })).toBeNull();
+    expect(localDatabaseUrl({ BASE_URL: STAGING, TASKBOARD_URL: "http://127.0.0.1:3100", DATABASE_URL: LOCAL_DB })).toBeNull();
     expect(localDatabaseUrl({ STAGING_URL: STAGING, DATABASE_URL: LOCAL_DB })).toBeNull();
   });
 });

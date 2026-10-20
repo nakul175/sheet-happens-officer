@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { PRIORITY, initials } from "@/components/api";
 import "./avatars.css";
 import { api } from "@/components/api";
+import { errorMessage, isVersionConflict } from "@/lib/version-error";
 import { Confirm } from "@/components/ui";
 
 /** Tick circle. Calls complete (or reopen) on the version the row shows, and asks before completing open subtasks. */
@@ -17,9 +18,9 @@ export function Tick({ id, title, done, allowed, version, onDone, onStale }: {
     const r = await api("POST", `/api/tasks/${id}/${done ? "reopen" : "complete"}`, done ? {} : { completeAll: all, expectedUpdatedAt: version });
     setBusy(false);
     if (r.ok) { setAsk(null); setErr(null); onDone(); }
-    else if (r.status === 409 && r.data.stale) { setAsk(null); setErr(r.error ?? "This task changed while you were editing it."); onStale?.(); }
+    else if (isVersionConflict(r.status, r.data)) { setAsk(null); setErr(errorMessage(r.error, "This task changed while you were editing it.")); onStale?.(); }
     else if (r.status === 409 && r.data.needsConfirm === "open_subtasks") setAsk(r.data.openSubtasks as number);
-    else setErr(r.error ?? "Could not update the task.");
+    else setErr(errorMessage(r.error, "Could not update the task."));
   }
   return (
     <>
