@@ -70,12 +70,14 @@ describe("qa:TC missing APL-2590 seed step (staging-e2e.yml)", () => {
   it("qa:TC missing D1: a missing, public, other slot's, repeated or look-alike schema is refused", () => {
     const bad = [
       "", "?sslmode=require", "?schema=public", "?schema=", "?schema=sho_pr5", "?schema=SHO_PR8", "?schema=sho_pr8x",
-      "?schema=sho_pr8&schema=public", "?schema=public&schema=sho_pr8", "?schema=sho_staging",
+      "?schema=sho_pr8&schema=public", "?schema=public&schema=sho_pr8", "?schema=sho_staging", "?SCHEMA=sho_pr8", "?Schema=sho_pr8",
     ];
+    // Prisma reads the schema key case-sensitively; any other spelling falls back to public (Toby, #146@12fd2d6).
+    const upper = new Set(["?SCHEMA=sho_pr8", "?Schema=sho_pr8"]);
     for (const q of bad) {
       const r = step(pr(8), url(q));
       expect(r.status, q || "(no query)").toBe(1);
-      expect(r.out).toContain("must set ?schema=sho_pr8 (exactly once) for pr8");
+      expect(r.out, q).toContain(upper.has(q) ? "must spell the schema key in lower case" : "must set ?schema=sho_pr8 (exactly once) for pr8");
       expect(r.seeded).toBe(false);
     }
   });

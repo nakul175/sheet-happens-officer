@@ -220,7 +220,7 @@ jobs:
             case "$key" in
               host|hostaddr|dbname|options|*%*)
                 echo "::error::SHO_PR_SLOT_DATABASE_URL overrides the host, DB name or search path in its query. Refusing to seed."; exit 1;;
-              schema) schemas+=("${kv#*=}");;
+              schema) [ "${kv%%=*}" = schema ] || { echo "::error::SHO_PR_SLOT_DATABASE_URL must spell the schema key in lower case. Refusing to seed."; exit 1; }; schemas+=("${kv#*=}");;
             esac
           done
           # One secret serves every slot, so the schema must be this slot's own: sho_pr<N>, never public or missing (APL-2590 D1).
