@@ -68,7 +68,7 @@ concurrency:
 
 env:
   # The only hosts a run may target: staging, or Oscar's preview slots pr1-pr4. Matched against the whole host.
-  TARGET_ALLOWLIST: '^(staging\.sheethappensofficer\.com|pr[1-4]\.staging\.sheethappensofficer\.com)$'
+  TARGET_ALLOWLIST: '^(staging\.sheethappensofficer\.com|pr[1-8]\.staging\.sheethappensofficer\.com)$'
   # Only for `prisma generate` during npm ci; nothing connects to it.
   DATABASE_URL: postgresql://unused:unused@127.0.0.1:1/unused
   DIRECT_DATABASE_URL: postgresql://unused:unused@127.0.0.1:1/unused
@@ -98,7 +98,7 @@ jobs:
             echo "::error::Refusing to run against production ($TARGET)."; exit 1
           fi
           if ! [[ "$TARGET" =~ $TARGET_ALLOWLIST ]]; then
-            echo "::error::Target '$TARGET' is not allowed. Use staging.sheethappensofficer.com or pr1-pr4.staging.sheethappensofficer.com."; exit 1
+            echo "::error::Target '$TARGET' is not allowed. Use staging.sheethappensofficer.com or pr1-pr8.staging.sheethappensofficer.com."; exit 1
           fi
           echo "Target: https://$TARGET"
           echo "base_url=https://$TARGET" >> "$GITHUB_OUTPUT"
