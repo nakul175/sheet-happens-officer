@@ -90,7 +90,7 @@ describe("APL-2522 spec prod guard", () => {
     }
   });
 
-  it("refuses the new production host sheethappensofficer.aplyd.org, as well as the old ones (APL-2929)", () => {
+  it("qa:TC missing APL-2929 AC2: refuses the new production host sheethappensofficer.aplyd.org, as well as the old ones", () => {
     const env = { NODE_ENV: "test" } as NodeJS.ProcessEnv;
     for (const value of [PROD_NEW, `${PROD_NEW}/tasks`, "sheethappensofficer.aplyd.org:443", "https://SHEETHAPPENSOFFICER.aplyd.org."]) {
       expect(() => assertStoryTargetAllowed({ ...env, TASKBOARD_URL: value }, LOCAL), value).toThrow(
