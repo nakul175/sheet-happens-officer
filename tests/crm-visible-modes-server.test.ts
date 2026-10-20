@@ -815,4 +815,96 @@ describe("CRM_VISIBLE modes are tested against a real server per mode", () => {
       if (allServer) killGroup(allServer.pid);
     }
   }, 120_000);
+
+  it("qa:TC missing AC1 AC2 AC3: Deactivate 409 hides deal names from a caller who cannot see the CRM (APL-2735 AC1-AC3)", async () => {
+    const open = running.get("on");
+    expect(open, "the on server is running").toBeTruthy();
+    const dealNames = [`ZZ-TEST Northwind ${tag}`, `ZZ-TEST Contoso ${tag}`];
+    const leaderEmail = `nakul17+zz-2735-${runId}-leader@aplyd.com`;
+    const adminEmail = `nakul17+zz-2735-${runId}-admin@aplyd.com`;
+    const memberEmail = `nakul17+zz-2735-${runId}-member@aplyd.com`;
+    seed.emails.push(leaderEmail, adminEmail, memberEmail);
+    const leader = await signIn(open!, `ZZ-TEST leader ${runId}`, leaderEmail);
+    const admin = await signIn(open!, `ZZ-TEST admin ${runId}`, adminEmail);
+    const member = await signIn(open!, `ZZ-TEST member ${runId}`, memberEmail);
+    seed.userIds.push(leader.id, admin.id, member.id);
+    await db.user.update({ where: { id: admin.id }, data: { orgRole: "ADMIN" } });
+
+    const pipes = await call(open!.base, admin.cookie, "GET", "/api/deals/pipelines");
+    expect(pipes.status, pipes.text).toBe(200);
+    const pipe = (pipes.json?.pipelines as { id: string; key: string }[]).find((p) => p.key === "DEAL_PROACTIVE");
+    expect(pipe?.id).toBeTruthy();
+    const org = await call(open!.base, admin.cookie, "POST", "/api/orgs", { name: `ZZ-TEST Buyer ${tag} deactivate` });
+    expect(org.status, org.text).toBe(201);
+    const organisationId = (org.json?.organisation as { id: string }).id;
+    seed.orgIds.push(organisationId);
+
+    const dealIds: string[] = [];
+    for (const name of dealNames) {
+      const made = await call(open!.base, admin.cookie, "POST", "/api/deals", {
+        name, organisationId, pipelineId: pipe!.id, leaderId: leader.id, whyPursue: tag,
+        nextStep: { title: `ZZ-TEST step ${tag}`, dueDate: istDate(4) },
+      });
+      expect(made.status, made.text).toBe(201);
+      const id = (made.json?.deal as { id: string }).id;
+      dealIds.push(id);
+      seed.projectIds.push(id);
+    }
+    expect(dealIds).toHaveLength(2);
+
+    // Same sentence main returns, plus the leads the caller is allowed to see.
+    const assertDetail = (text: string, json: Record<string, unknown> | null) => {
+      const leads = json?.leads as { id: string; name: string }[];
+      expect(json?.error).toBe("Name a new Leader first for: " + leads.map((row) => row.name).join(", "));
+      expect(leads).toHaveLength(2);
+      expect(leads).toEqual(expect.arrayContaining(dealIds.map((id, i) => ({ id, name: dealNames[i] }))));
+      for (const name of dealNames) expect(text).toContain(name);
+      for (const id of dealIds) expect(text).toContain(id);
+    };
+    // No deal name, id, or count. Two deals would show up as "2" or a second leads row.
+    const assertGeneric = (text: string, json: Record<string, unknown> | null) => {
+      expect(json).toEqual({ error: "Name a new Leader first." });
+      expect(text).not.toMatch(/\b2\b/);
+      for (const name of dealNames) expect(text).not.toContain(name);
+      for (const id of dealIds) expect(text).not.toContain(id);
+    };
+
+    let allServer: Running | undefined;
+    try {
+      allServer = await startModeServer("all" as Mode);
+      // Admin is the CRM caller except under off, where nobody can see the CRM.
+      // A member cannot deactivate anyone, so the body is the 403 and never the leader list.
+      const cases: { mode: string; server: Running; user: "admin" | "member"; kind: "detail" | "generic" | "forbidden" }[] = [
+        { mode: "on", server: open!, user: "admin", kind: "detail" },
+        { mode: "on", server: open!, user: "member", kind: "forbidden" },
+        { mode: "all", server: allServer, user: "admin", kind: "detail" },
+        { mode: "all", server: allServer, user: "member", kind: "forbidden" },
+        { mode: "admins", server: running.get("admins")!, user: "admin", kind: "detail" },
+        { mode: "admins", server: running.get("admins")!, user: "member", kind: "forbidden" },
+        { mode: "off", server: running.get("off")!, user: "admin", kind: "generic" },
+        { mode: "off", server: running.get("off")!, user: "member", kind: "forbidden" },
+      ];
+      const people = { admin, member };
+      for (const example of cases) {
+        const who = people[example.user];
+        const res = await call(example.server.base, who.cookie, "POST", `/api/team/${leader.id}/deactivate`, { reassign: "leaders" });
+        const label = `CRM_VISIBLE=${example.mode} ${example.user} ${res.text}`;
+        if (example.kind === "detail") {
+          expect(res.status, label).toBe(409);
+          assertDetail(res.text, res.json);
+        } else if (example.kind === "generic") {
+          expect(res.status, label).toBe(409);
+          assertGeneric(res.text, res.json);
+        } else {
+          expect(res.status, label).toBe(403);
+          expect(res.json).toEqual({ error: "You cannot deactivate this person." });
+          for (const name of dealNames) expect(res.text, label).not.toContain(name);
+          for (const id of dealIds) expect(res.text, label).not.toContain(id);
+        }
+      }
+      expect((await db.user.findUnique({ where: { id: leader.id }, select: { deactivatedAt: true } }))?.deactivatedAt).toBeNull();
+    } finally {
+      if (allServer) killGroup(allServer.pid);
+    }
+  }, 120_000);
 });
