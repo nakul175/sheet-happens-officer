@@ -115,11 +115,17 @@ test("APL-2538 > AC3: Not listed? New organisation creates the organisation inli
   await expect(dialog.getByLabel("Organisation (buyer)")).toHaveValue(orgId);
   await dialog.getByLabel("Deal name").fill(dealName);
   await dialog.getByLabel("Why are we pursuing this?").fill("ZZ-TEST inline");
-  // The task is already on /projects/<source>. Wait until the address is a different project.
-  const landed = admin.page.waitForURL((u) => u.pathname.startsWith("/projects/") && !u.href.includes(p.id));
+  // The task is open at /projects/<source>?task=<task>, which already matches /projects/. Wait for /projects/<newId> with newId not the source.
+  const dealPath = /^\/projects\/([^/]+)$/;
+  const landed = admin.page.waitForURL((u) => { const m = dealPath.exec(u.pathname); return !!m && m[1] !== p.id; });
   await dialog.getByRole("button", { name: "Convert to deal" }).click();
   await landed;
-  const dealId = new URL(admin.page.url()).pathname.split("/").pop()!;
+  const dealId = dealPath.exec(new URL(admin.page.url()).pathname)![1];
+  expect(dealId).not.toBe(p.id);
+  // The deal page's title carries the Deals breadcrumb.
+  await expect(admin.page.getByRole("heading", { level: 1, name: `Deals / ${dealName}`, exact: true })).toBeVisible();
+  await expect(admin.page.getByRole("group", { name: "Stage" })).toBeVisible();
+  await expect(admin.page.getByText(/^Buyer:/).getByRole("link", { name: orgName, exact: true })).toHaveAttribute("href", `/accounts/${orgId}`);
   expect((await projectOf(admin, dealId)).deal.organisation.id).toBe(orgId);
 });
 
