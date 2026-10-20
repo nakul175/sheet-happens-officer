@@ -11,6 +11,18 @@ import { isSignInScreen, RETURN_PATH_HEADER, returnToEnabled, safeReturnPath, se
 const BASE_ORIGIN = "http://return.invalid";
 /** A decoded tab, CR, LF or other control character. A header or a log line must never carry one from `next`. */
 const RAW_CONTROL = /[\u0000-\u001F\u007F]/;
+/**
+ * Places in a server log where a v16 probe value appears with a raw control character, LF included. The probe values
+ * are a%09b, a%0Ab and a%0D%0Ab, so anything between "v16-probe?q=a" and the closing "b" must be ASCII text.
+ */
+function serverLogLeaks(text: string): string[] {
+  const leaks: string[] = [];
+  for (const m of text.matchAll(/v16-probe\?q=a([\s\S]{0,12}?)b/g)) {
+    if (/[\u0000-\u001F\u007F]/.test(m[1])) leaks.push(JSON.stringify(m[0]));
+  }
+  return leaks;
+}
+
 /** The same, minus the line ending a log write ends with. */
 const RAW_CONTROL_IN_LINE = /[\u0000-\u0009\u000B-\u001F\u007F]|\n(?!$)/;
 
@@ -676,13 +688,21 @@ describe("APL-2652 signed-out redirect", () => {
     }
     expect(forwarded).toEqual(["/tasks/v16-probe?q=a%09b", "/tasks/v16-probe?q=a%0Ab", "/tasks/v16-probe?q=a%0D%0Ab"]);
     for (const line of lines) expect(line).not.toMatch(RAW_CONTROL_IN_LINE);
-    // The server's own log, where CI writes it (server.log) or where SERVER_LOG points.
+    // The server's own log, where CI writes it (server.log) or where SERVER_LOG points. It must exist: a missing log
+    // would make this check pass without looking at anything (Pam's D11).
     const log = process.env.SERVER_LOG ?? "server.log";
-    if (existsSync(log)) {
-      for (const line of readFileSync(log, "utf8").split("\n")) {
-        if (line.includes("v16-probe")) expect(line).not.toMatch(RAW_CONTROL_IN_LINE);
-      }
-    }
+    expect(existsSync(log), `server log at ${log} (set SERVER_LOG to the running server's log)`).toBe(true);
+    // Scan the whole text, not line by line: splitting on LF would hide a raw LF inside a logged value (Pam's D11).
+    const text = readFileSync(log, "utf8");
+    expect(serverLogLeaks(text)).toEqual([]);
+  });
+
+  it("D11 the server-log scan catches a raw LF, tab or CR LF in a logged probe value", () => {
+    // Planted lines like Pam's: each raw form is found, and the encoded forms the app logs pass.
+    expect(serverLogLeaks("GET /tasks/v16-probe?q=a\nb 302\n")).toHaveLength(1);
+    expect(serverLogLeaks("GET /tasks/v16-probe?q=a\tb 302\n")).toHaveLength(1);
+    expect(serverLogLeaks("GET /tasks/v16-probe?q=a\r\nb 302\n")).toHaveLength(1);
+    expect(serverLogLeaks("GET /tasks/v16-probe?q=a%09b 302\nGET /tasks/v16-probe?q=a%0Ab 302\nGET /tasks/v16-probe?q=a%0D%0Ab 302\n")).toEqual([]);
   });
 
   it("D10 a space in a query value keeps its %20 through the signed-out redirect", async () => {
