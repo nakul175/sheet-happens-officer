@@ -1,7 +1,8 @@
 // Shared checks for the Usage screen (APL-2519, APL-2641). The screen prints figures from /api/usage.
-// The percentage shown is the nearest whole number, and a half goes up. Zero spend is 0%.
-// A nonzero share under 1% is "<1%", decided before that rounding. Over 100% is the real rounded figure, not capped.
-// Stubs still send the one-decimal figure /api/usage stores. PR #34 prints that figure unchanged.
+// APL-2519 AC6 v1.2 (Linear, Michael 19 Oct 2026 20:43 IST): the percentage shown is the nearest whole number, and a half
+// goes up. Zero spend is 0%. A nonzero share under 1% is "<1%", decided before that rounding. A ceiling of 0 or unset shows
+// "No ceiling set" and no percentage. Spend over the ceiling shows the rounded percentage plus a visible "Over ceiling" flag.
+// Stubs still send the one-decimal figure /api/usage once stored; the screen must not echo it.
 // Quick actions are not added into the message total.
 import type { Locator, Page } from "@playwright/test";
 import { expect, type Api } from "../support";
@@ -35,7 +36,8 @@ export const QUICK_ROWS: QuickRow[] = [
 export type UsageBody = {
   monthStart: string;
   weekStart: string;
-  ceiling: { usd: number; spendUsd: number; percent: number };
+  /** `usd` 0, null or absent is "no ceiling set" (AC6 v1.2). */
+  ceiling: { usd?: number | null; spendUsd: number; percent: number };
   month: { calls: number; inputTokens: number; outputTokens: number; costUsd: number; messages: number };
   quickActions: QuickRow[];
   people: { id: string; name: string; monthCalls: number; weekCalls: number; monthCostUsd: number }[];
@@ -46,21 +48,65 @@ export type UsageBody = {
  * Percentage /api/usage stores today: one decimal, half up. 10 of 80 is 12.5.
  * Stubs send this so a screen that only echoes ceiling.percent still shows the decimal.
  */
-export function apiPercent(spendUsd: number, ceilingUsd: number) {
-  if (!(ceilingUsd > 0)) return 0;
+export function apiPercent(spendUsd: number, ceilingUsd: number | null | undefined) {
+  if (typeof ceilingUsd !== "number" || !(ceilingUsd > 0)) return 0;
   return Math.round((spendUsd / ceilingUsd) * 1000) / 10;
 }
 
+export const NO_CEILING = "No ceiling set";
+export const OVER_CEILING = "Over ceiling";
+
+/** A ceiling the percentage is worked out against: a number above 0. 0, null or absent is "No ceiling set". */
+export const hasCeiling = (ceilingUsd: number | null | undefined): ceilingUsd is number =>
+  typeof ceilingUsd === "number" && Number.isFinite(ceilingUsd) && ceilingUsd > 0;
+
 /**
- * The percentage AC6 shows. Nearest whole number, and a half goes up (12.5 is 13).
- * Zero spend is "0%". A nonzero share under 1% is "<1%" before rounding, so 0.5 stays "<1%".
- * Over 100% is that same rounded figure, not capped (119.5 is "120%").
+ * The percentage AC6 v1.2 shows, or null when no ceiling is set (no percentage at all).
+ * Nearest whole number, and a half goes up (12.5 is 13). Zero spend is "0%". A nonzero share under 1% is "<1%"
+ * before rounding, so 0.5 stays "<1%". Over 100% is that same rounded figure (100.40 of 100 is "100%", 113 is "113%").
+ * Worked in whole micro-dollars so an exact half is not lost to floating point (0.09 of 0.4 is 22.5, so "23%").
  */
-export function percentLabel(spendUsd: number, ceilingUsd: number): string {
+export function percentLabel(spendUsd: number, ceilingUsd: number | null | undefined): string | null {
+  if (!hasCeiling(ceilingUsd)) return null;
   if (!(spendUsd > 0)) return "0%";
-  const ratio = (spendUsd / ceilingUsd) * 100;
-  if (ratio < 1) return "<1%";
-  return `${Math.round(ratio)}%`;
+  const s = Math.round(spendUsd * 1e6);
+  const c = Math.round(ceilingUsd * 1e6);
+  if (s * 100 < c) return "<1%";
+  return `${Math.floor((s * 200 + c) / (2 * c))}%`;
+}
+
+const escape = (t: string) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/**
+ * AC6 v1.2 on the Super Admin's Usage screen, by role and exact text: the spend figures are the terms and definitions of
+ * the one description list in `main`, in order. With a ceiling: Spend to date, Monthly ceiling, Percentage used, a meter,
+ * and "Over ceiling" exactly when spend is above the ceiling. With none: "No ceiling set", and no percentage, meter or flag.
+ */
+export async function expectSpend(main: Locator, spendUsd: number, ceilingUsd: number | null | undefined, label: string | null) {
+  const meter = main.getByRole("meter", { name: "Spend against the monthly ceiling" });
+  const flag = main.getByText(OVER_CEILING, { exact: true });
+  await expect(main.getByRole("heading", { name: "Spend against the monthly ceiling", exact: true })).toBeVisible();
+  if (label === null) {
+    await expect(main.getByRole("term")).toHaveText(["Spend to date", "Monthly ceiling"]);
+    await expect(main.getByRole("definition")).toHaveText([usd(spendUsd), NO_CEILING]);
+    await expect(meter).toHaveCount(0);
+    await expect(flag).toHaveCount(0);
+    const text = await main.innerText();
+    expect(text, "no percentage when no ceiling is set").not.toContain("%");
+    expect(text).not.toMatch(/NaN|Infinity/);
+    return;
+  }
+  const over = spendUsd > (ceilingUsd as number);
+  await expect(main.getByRole("term")).toHaveText(["Spend to date", "Monthly ceiling", "Percentage used"]);
+  await expect(main.getByRole("definition")).toHaveText([
+    usd(spendUsd),
+    usd(ceilingUsd as number),
+    new RegExp(`^${escape(label)}${over ? ` ${OVER_CEILING}` : ""}$`),
+  ]);
+  if (over) await expect(flag).toBeVisible();
+  else await expect(flag).toHaveCount(0);
+  await expect(meter).toHaveAttribute("aria-valuetext", new RegExp(`^${escape(`${usd(spendUsd)} of ${usd(ceilingUsd as number)}, ${label} used`)}`));
+  await expect(main).not.toContainText(NO_CEILING);
 }
 
 /**
