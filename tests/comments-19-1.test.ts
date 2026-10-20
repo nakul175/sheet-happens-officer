@@ -776,7 +776,8 @@ describe("flag on (AC1–AC8)", () => {
     const removed = await db.actionLog.findFirstOrThrow({ where: { targetId: t, action: "comment.removed" } });
     const filler: string[] = [];
     for (let i = 0; i < 200; i++) filler.push((await addComment(actor(worker), t, { text: `ZZ-TEST ${i}` })).id);
-    const refused = { status: 400, message: "A task can have at most 200 comments.", extra: { code: "too_many_comments" } };
+    // AC17 (Pam #128 S3): the refused restore is a 409, not the 400 an add at the cap answers (:591).
+    const refused = { status: 409, message: "A task can have at most 200 comments.", extra: { code: "too_many_comments" } };
     await expect(checkUndo(actor(worker), removed.id)).rejects.toMatchObject(refused);
     await expect(undoAction(actor(worker), removed.id)).rejects.toMatchObject(refused);
     expect((await db.comment.findUniqueOrThrow({ where: { id: first.id } })).removedAt).not.toBeNull();

@@ -543,6 +543,18 @@ test.describe("APL-2590 comments with @mentions", () => {
     expect((capped.json as { code?: string }).code).toBe("too_many_comments");
     expect((await comments("writer", full)).list?.comments).toHaveLength(200);
     expect((await notices("worker", full)).length).toBe(beforeFull);
+    // Undo at the cap (APL-2840, Pam #128 S3): delete one, refill to 200, then Undo the delete. 409, not 400.
+    const first = ((await comments("writer", full)).list?.comments ?? [])[0];
+    const gone = await person("writer").ctx.delete(`/api/tasks/${full}/comments/${first.id}`);
+    expect([200, 204]).toContain(gone.status());
+    const undoId = gone.headers()["x-undo-id"];
+    expect(undoId).toBeTruthy();
+    expect((await postComment("writer", full, { text: "ZZ-TEST refill" })).status).toBe(201);
+    const refused = await read(await person("writer").ctx.post(`/api/actions/${undoId}/undo`, { data: {} }));
+    expect(refused.status).toBe(409);
+    expect(refused.json?.code).toBe("too_many_comments");
+    expect(refused.json?.error).toBe("A task can have at most 200 comments.");
+    expect((await comments("writer", full)).list?.comments).toHaveLength(200);
   });
 
   test("qa:TC-APL2590-6ef7b1ac@v1 AC18 The panel shows 200 comments within 1 s p95", async ({ browser }) => {

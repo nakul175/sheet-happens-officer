@@ -17,6 +17,11 @@ type Plan = { conflicts: Conflict[]; apply: (tx: Tx) => Promise<void>; subject?:
 const norm = (v: unknown): unknown => (v instanceof Date ? v.toISOString() : v === undefined ? null : v);
 const same = (a: unknown, b: unknown) => JSON.stringify(norm(a)) === JSON.stringify(norm(b));
 const bad = (msg: string, extra?: Record<string, unknown>) => new ApiError(409, msg, extra);
+/** The 200-comment cap on an Undo restore is a conflict with the task's current state: 409, same message and code (AC17). */
+const roomForRestore = (client: Tx | typeof db, taskId: string, lock = false) =>
+  assertCommentRoom(client, taskId, lock).catch((e: unknown) => {
+    throw e instanceof ApiError && e.extra?.code === "too_many_comments" ? bad(e.message, e.extra) : e;
+  });
 
 /** Actions that sent a bell notice, so Undo can say the notice was already delivered (AC4). */
 const NOTIFYING = new Set([
@@ -178,11 +183,11 @@ async function plan(row: any, user: Actor, projectId: string): Promise<Plan> {
       if (!c) throw bad("This comment no longer exists.");
       if (!c.removedAt) throw bad("This comment is already back.");
       const task = await liveTask(id, projectId);
-      await assertCommentRoom(db, c.taskId); // APL-2840: at 200 live comments the restore is refused with the cap message
+      await roomForRestore(db, c.taskId); // APL-2840: at 200 live comments the restore is refused with the cap message (409)
       return {
         conflicts: [], subject: task.title,
         apply: async (tx) => {
-          await assertCommentRoom(tx, c.taskId, true);
+          await roomForRestore(tx, c.taskId, true);
           await tx.comment.update({ where: { id: commentId }, data: { removedAt: null } });
         },
       };
