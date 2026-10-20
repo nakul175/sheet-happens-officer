@@ -2,6 +2,7 @@
 // gives the same list. Grouping by person or week is only a layout and happens in the browser.
 import { db } from "@/lib/db";
 import { projectAccess, type Actor } from "@/lib/access";
+import { blockingTaskWhere } from "@/lib/deals";
 import { startOfTodayIST } from "@/lib/dates";
 import { ORDER, awaiting, present, taskInclude } from "@/lib/tasks";
 
@@ -58,18 +59,21 @@ export async function listFiltered(user: Actor, projectId: string, f: ListFilter
   return { sections: out, filtered: true, truncated: rows.length > CAP, matched: kept.length };
 }
 
-/** Counts for the heading ("3 overdue"): open top-level tasks of the project. */
+/** Counts for the heading ("3 overdue"): open top-level tasks of the project.
+ * `openTasks` counts every open task, including subtasks, which is the set a Won or Lost move refuses. */
 export async function projectSummary(user: Actor, projectId: string) {
   await projectAccess(user, projectId);
   const today = startOfTodayIST();
-  const open = await db.task.findMany({
-    where: { projectId, parentId: null, deletedAt: null, completedAt: null },
-    select: { dueDate: true, blocked: true, approverId: true, assigneeId: true },
+  const rows = await db.task.findMany({
+    where: blockingTaskWhere(projectId),
+    select: { parentId: true, dueDate: true, blocked: true, approverId: true, assigneeId: true },
   });
+  const open = rows.filter((t) => !t.parentId);
   return {
     open: open.length,
     overdue: open.filter((t) => t.dueDate && t.dueDate < today).length,
     blocked: open.filter((t) => t.blocked).length,
     awaiting: open.filter((t) => t.approverId && t.approverId === t.assigneeId).length,
+    openTasks: rows.length,
   };
 }

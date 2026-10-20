@@ -6,7 +6,16 @@ import { api, useGet } from "@/components/api";
 import { LoadFailed, Skeleton } from "@/components/ui";
 import { Page, roleLabel, useMe } from "../../Shell";
 
-type Proj = { id: string; name: string; role?: string; openTasks?: number };
+type Proj = { id?: string; name: string; href?: string | null; role?: string; openTasks?: number };
+
+/** One fixed sentence. No count, no deal name, no link. */
+export const HIDDEN_DEAL_SENTENCE = "A deal you can't view.";
+
+/** A hidden deal is that sentence with no link. A visible project keeps /projects/<id>. */
+export function personProjectHref(project: { id?: string; href?: string | null }): string | null {
+  if (project.href === null || !project.id) return null;
+  return `/projects/${project.id}`;
+}
 type Person = {
   id: string; name: string; projects: Proj[];
   email?: string; orgRole?: "MEMBER" | "ADMIN" | "SUPER_ADMIN"; status?: "ACTIVE" | "UNVERIFIED" | "DEACTIVATED"; joinedAt?: string; openTasks?: number;
@@ -50,10 +59,7 @@ export default function PersonPage() {
   if (passwordChange) {
     return (
       <Page title="Set your own password" docTitle="Set your own password">
-        <div className="pwbar" role="status">
-          <span>Set your own password. The emailed one still works until you do.</span>
-          <Link href="/profile">Change password</Link>
-        </div>
+        <p><Link href="/profile">Change password</Link></p>
       </Page>
     );
   }
@@ -93,19 +99,24 @@ export default function PersonPage() {
             </div>
           )}
           <h2 style={{ fontSize: 17 }}>{admin ? "Projects" : "Projects you share"}</h2>
-          {p.projects.length === 0 && <p className="hint">{admin ? "Not on any project yet." : "You are not on a project together."}</p>}
-          {p.projects.length > 0 && (
+          {p.projects.some((x) => x.href === null) && <p>{HIDDEN_DEAL_SENTENCE}</p>}
+          {p.projects.filter((x) => personProjectHref(x)).length === 0 && !p.projects.some((x) => x.href === null) && <p className="hint">{admin ? "Not on any project yet." : "You are not on a project together."}</p>}
+          {p.projects.some((x) => personProjectHref(x)) && (
             <div className="scroll">
               <table className="tbl stack">
                 <thead><tr><th>Project</th>{admin && <th>Their role</th>}{admin && <th>Open tasks</th>}</tr></thead>
                 <tbody>
-                  {p.projects.map((x) => (
-                    <tr key={x.id}>
-                      <td><Link href={`/projects/${x.id}`}>{x.name}</Link></td>
-                      {admin && <td>{ROLE[x.role ?? ""] ?? x.role}</td>}
-                      {admin && <td>{x.openTasks}</td>}
-                    </tr>
-                  ))}
+                  {p.projects.map((x) => {
+                    const href = personProjectHref(x);
+                    if (!href || !x.id) return null;
+                    return (
+                      <tr key={x.id}>
+                        <td><Link href={href}>{x.name}</Link></td>
+                        {admin && <td>{ROLE[x.role ?? ""] ?? x.role}</td>}
+                        {admin && <td>{x.openTasks}</td>}
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>

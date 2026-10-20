@@ -6,7 +6,7 @@ import { ApiError } from "@/lib/http";
 import { currentSessionId, deviceLabel, hashPassword, verifyPassword } from "@/lib/auth";
 import { WORKSTREAM_DEAL, crmMode, crmVisible, projectAccess, type Actor } from "@/lib/access";
 import { idsIn, sentence, whenText } from "@/lib/activity-text";
-import { UNDO_DAYS, isUndoable } from "@/lib/undoable";
+import { isTooOldToUndo, isUndoable } from "@/lib/undoable";
 import { passwordField } from "@/lib/schemas";
 
 const NOTE_DAYS = 90;
@@ -220,7 +220,7 @@ export async function projectActivity(user: Actor, projectId: string, cursor?: s
       via: r.channel === "CONCIERGE" ? "concierge" : "screen",
       // Undo stays on the row (AC5); an Editor can only undo their own actions, as the server enforces.
       undo: r.undoneAt ? "undone" : !isUndoable(r.action) || (!leader && r.actorId !== user.id) ? "none"
-        : Date.now() - r.createdAt.getTime() > UNDO_DAYS * 86400_000 ? "too_old" : "available",
+        : isTooOldToUndo(r.createdAt) ? "too_old" : "available",
     })),
     nextCursor: more ? page[page.length - 1].id : null,
   };
@@ -301,6 +301,8 @@ export async function updateName(user: Actor, name: string) {
 export async function changePassword(user: Actor, current: string, password: string) {
   const u = await db.user.findUniqueOrThrow({ where: { id: user.id } });
   if (!(await verifyPassword(current, u.passwordHash))) throw new ApiError(400, "Your current password is not correct.");
+  // SHO-US-23.5 AC3: keeping the emailed password is not setting your own.
+  if (u.tempPasswordAt && password === current) throw new ApiError(400, "Choose a new password. It cannot be the one we emailed you.");
   const keep = await currentSessionId();
   await db.$transaction([
     db.user.update({ where: { id: user.id }, data: { passwordHash: await hashPassword(password), tempPasswordAt: null } }),

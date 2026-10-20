@@ -52,13 +52,31 @@ jobs:
       - name: Node tests for scripts/ci
         run: node --test "scripts/ci/**/*.test.mjs"
       - run: npm ci
+      # APL-2761. Listing loads every story spec without a browser or a server. One file that cannot load (a vitest import)
+      # makes Playwright collect 0 tests, so a total of 0 fails here instead of in staging-e2e.
+      - name: Playwright collects the story specs
+        run: |
+          out=$(npx playwright test --list 2>&1) || true
+          total=$(printf '%s\n' "$out" | sed -n 's/^Total: \([0-9][0-9]*\) tests\{0,1\} in .*/\1/p')
+          printf '%s\n' "$out" | grep -E '^(Total|Error)' || true
+          if [ "${total:-0}" -eq 0 ]; then
+            printf '%s\n' "$out" | tail -n 40
+            echo "::error::Playwright collected 0 tests from tests/e2e/stories."; exit 1
+          fi
+          echo "Playwright story tests collected: $total"
       - name: Lint
         run: npm run lint
       - name: Typecheck
         run: npx next typegen && npx tsc --noEmit
+      # tsconfig.json leaves tests/e2e out (Playwright story specs), so check them on their own (APL-2748).
+      - name: Typecheck story specs
+        run: npx tsc --noEmit -p tsconfig.e2e.json
       - run: npx prisma migrate deploy
       - name: Build
         run: npm run build
+      # APL-2609: tests/e2e/local/APL-2609.spec.ts drives these mode servers in Playwright Chromium.
+      - name: Install Playwright Chromium
+        run: npx playwright-core install --with-deps chromium
       # APL-2713. These servers are excluded from `npm test`. A failure here fails the job.
       - name: CRM mode tests
         run: npm run test:crm-modes
@@ -83,6 +101,17 @@ jobs:
           fi
       - name: Unit tests
         run: npm test
+      # APL-2728 AC4. One production server per CRM_VISIBLE mode. Needs the build above. Not part of npm test.
+      - name: CRM visible modes
+        run: npm run test:crm-modes
+      # APL-2729 AC4. One production server per CRM_VISIBLE mode, after the build.
+      # The file sets its own test-only job token. A short JOB_SECRET must fail this step, not skip it.
+      - name: Reminder modes (one server per CRM_VISIBLE)
+        run: npm run test:reminder-modes
+      # APL-2741. One production server per CRM_VISIBLE mode, after the build.
+      # The file sets its own test-only job token. A short JOB_SECRET must fail this step, not skip it.
+      - name: Stalled-deal modes (one server per CRM_VISIBLE)
+        run: npm run test:stalled-modes
       - name: Server log (on failure)
         if: failure()
         run: tail -n 200 server.log || true
