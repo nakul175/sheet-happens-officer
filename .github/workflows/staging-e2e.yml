@@ -1,4 +1,4 @@
-# Story-level Playwright specs (tests/e2e/stories) against staging or a pr1-pr4 preview (input "target", checked against TARGET_ALLOWLIST;
+# Story-level Playwright specs (tests/e2e/stories) against staging or a pr1-pr8 preview (input "target", checked against TARGET_ALLOWLIST;
 # production is refused). Started by hand only (Actions > Staging e2e > Run workflow).
 # The specs live on the branch the run is started from ("Use workflow from", e.g. qa/story-e2e): every job checks out that same commit.
 # Input "specs": space-separated issue ids (APL-2481) or globs (APL-26*, tests/e2e/stories/APL-25*.spec.ts); empty runs every spec.
@@ -49,7 +49,7 @@ on:
         type: choice
         options: ["off", "retain-on-failure"]
       target:
-        description: "Host to test: staging.sheethappensofficer.com or pr1-pr4.staging.sheethappensofficer.com. Production is refused."
+        description: "Host to test: staging.sheethappensofficer.com or pr1-pr8.staging.sheethappensofficer.com. Production is refused."
         required: false
         default: staging.sheethappensofficer.com
         type: string
@@ -67,8 +67,8 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  # The only hosts a run may target: staging, or Oscar's preview slots pr1-pr4. Matched against the whole host.
-  TARGET_ALLOWLIST: '^(staging\.sheethappensofficer\.com|pr[1-4]\.staging\.sheethappensofficer\.com)$'
+  # The only hosts a run may target: staging, or Oscar's preview slots pr1-pr8. Matched against the whole host.
+  TARGET_ALLOWLIST: '^(staging\.sheethappensofficer\.com|pr[1-8]\.staging\.sheethappensofficer\.com)$'
   # Only for `prisma generate` during npm ci; nothing connects to it.
   DATABASE_URL: postgresql://unused:unused@127.0.0.1:1/unused
   DIRECT_DATABASE_URL: postgresql://unused:unused@127.0.0.1:1/unused
@@ -98,7 +98,7 @@ jobs:
             echo "::error::Refusing to run against production ($TARGET)."; exit 1
           fi
           if ! [[ "$TARGET" =~ $TARGET_ALLOWLIST ]]; then
-            echo "::error::Target '$TARGET' is not allowed. Use staging.sheethappensofficer.com or pr1-pr4.staging.sheethappensofficer.com."; exit 1
+            echo "::error::Target '$TARGET' is not allowed. Use staging.sheethappensofficer.com or pr1-pr8.staging.sheethappensofficer.com."; exit 1
           fi
           echo "Target: https://$TARGET"
           echo "base_url=https://$TARGET" >> "$GITHUB_OUTPUT"
@@ -276,7 +276,8 @@ jobs:
         run: |
           read -ra files <<< "$FILES"
           # @static is a file-contains check. @manual cannot force a job failure on staging. Neither is a live pass.
-          npx playwright test --shard=${{ matrix.shard }}/20 --workers=1 --grep-invert "@static|@manual" --reporter=list,blob,json --trace="$TRACE" "${files[@]}"
+          # @local-only specs sign up and verify new aliases from a local outbox: on staging that is real accounts and mail (APL-2925).
+          npx playwright test --shard=${{ matrix.shard }}/20 --workers=1 --grep-invert "@static|@manual|@local-only" --reporter=list,blob,json --trace="$TRACE" "${files[@]}"
 
       - name: Fail this shard when every test was skipped
         if: always()
@@ -361,7 +362,8 @@ jobs:
         run: |
           read -ra files <<< "$FILES"
           # @static is a file-contains check. @manual cannot force a job failure on staging. Neither is a live pass.
-          npx playwright test --workers=1 --grep-invert "@static|@manual" --reporter=list,blob,json --trace="$TRACE" "${files[@]}"
+          # @local-only specs sign up and verify new aliases from a local outbox: on staging that is real accounts and mail (APL-2925).
+          npx playwright test --workers=1 --grep-invert "@static|@manual|@local-only" --reporter=list,blob,json --trace="$TRACE" "${files[@]}"
 
       - name: Fail the serial job when every test was skipped
         if: always()
