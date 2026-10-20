@@ -7,6 +7,7 @@ import { ModelError, costUsd, fakeCallCount, generate, modelConfig, modelEnabled
 import { disabledFor, monthSpendUsd, warnIfNearCeiling, weekMessages } from "../src/lib/concierge/limits";
 import { improvePrompt, quickAction, sendMessage } from "../src/lib/concierge/engine";
 import { monthStartIST, nextMonthStartIST, weekStartIST } from "../src/lib/concierge/dates";
+import { percentUsedNumber } from "../src/lib/usage-percent";
 import { state } from "../src/lib/concierge/thread";
 
 const req = { system: { stable: "s", dynamic: "d" }, tools: [], messages: [{ role: "user" as const, content: "hi" }], maxTokens: 10 };
@@ -145,7 +146,7 @@ describe("caps and ledger (9.2)", () => {
     expect(nextMonthStartIST(last).toISOString()).toBe(first.toISOString());
   });
 
-  it("weekly cap: 'counted' rows only; quick actions never count; resets Monday 00:00 India time (AC2, AC5)", async () => {
+  it("weekly cap: 'counted' rows only; quick actions never count; resets Monday 00:00 India time (AC2, AC5) qa:TC missing", async () => {
     const u = await account("weekly");
     process.env.WEEKLY_MESSAGE_CAP = "3";
     script(() => [say("fine")]);
@@ -155,10 +156,10 @@ describe("caps and ledger (9.2)", () => {
     const sun = istInstant(2031, 3, 16, 23, 59, 59);
     await db.modelUsage.createMany({
       data: [
-        { userId: u.id, model: "m", inputTokens: 1, outputTokens: 1, costUsd: "0", counted: true, createdAt: sun },
-        { userId: u.id, model: "m", inputTokens: 1, outputTokens: 1, costUsd: "0", counted: false, createdAt: sun },
-        { userId: u.id, model: "m", inputTokens: 1, outputTokens: 1, costUsd: "0", counted: true, createdAt: sun },
-        { userId: u.id, model: "m", inputTokens: 1, outputTokens: 1, costUsd: "0", counted: true, createdAt: sun },
+        { userId: u.id, model: "ZZ-TEST", inputTokens: 1, outputTokens: 1, costUsd: "0", counted: true, createdAt: sun },
+        { userId: u.id, model: "ZZ-TEST", inputTokens: 1, outputTokens: 1, costUsd: "0", counted: false, createdAt: sun },
+        { userId: u.id, model: "ZZ-TEST", inputTokens: 1, outputTokens: 1, costUsd: "0", counted: true, createdAt: sun },
+        { userId: u.id, model: "ZZ-TEST", inputTokens: 1, outputTokens: 1, costUsd: "0", counted: true, createdAt: sun },
       ],
     });
     // Sunday 23:59:59 India time: the cap of 3 is reached, and the reset is the coming Monday 00:00.
@@ -194,15 +195,15 @@ describe("caps and ledger (9.2)", () => {
     expect(await db.chatMessage.count({ where: { userId: u.id } })).toBe(2); // improve wrote nothing to the thread
   });
 
-  it("monthly ceiling: calls stop at the ceiling, the message says when it resumes on the 1st, screens and quick actions work (AC1)", async () => {
+  it("monthly ceiling: calls stop at the ceiling, the message says when it resumes on the 1st, screens and quick actions work (AC1) qa:TC missing", async () => {
     const u = await account("monthly");
-    await db.modelUsage.deleteMany({ where: { createdAt: { gte: istInstant(2031, 1, 1) } } }); // left over from an earlier run
-    process.env.MONTHLY_CEILING_USD = "10";
-    script(() => [say("never")]);
-    const spender = await account("spender");
     const lastSecond = istInstant(2031, 3, 31, 23, 59, 59);
-    await db.modelUsage.create({ data: { userId: spender.id, model: "m", inputTokens: 1, outputTokens: 1, costUsd: "10", counted: true, createdAt: istInstant(2031, 3, 5) } });
-    expect(await monthSpendUsd(lastSecond)).toBeCloseTo(10, 5);
+    const before = await monthSpendUsd(lastSecond);
+    process.env.MONTHLY_CEILING_USD = String(before + 10);
+    script(() => [say("never")]);
+    const spender = await account("ZZ-TEST spender", `nakul17+zz-test-spender-${Date.now()}@aplyd.com`);
+    await db.modelUsage.create({ data: { userId: spender.id, model: "ZZ-TEST", inputTokens: 1, outputTokens: 1, costUsd: "10", counted: true, createdAt: istInstant(2031, 3, 5) } });
+    expect(await monthSpendUsd(lastSecond)).toBeCloseTo(before + 10, 5);
     const d = await disabledFor(u.id, lastSecond);
     expect(d?.code).toBe("MONTH_CAP");
     expect(d?.message).toMatch(/The concierge is paused for the rest of this month/);
@@ -216,14 +217,19 @@ describe("caps and ledger (9.2)", () => {
     expect(await disabledFor(u.id, istInstant(2031, 4, 1, 0, 0, 0))).toBeNull();
   });
 
-  it("80 percent: one bell notice to the Super Admin per month with the figures (AC4)", async () => {
+  it("80 percent: one bell notice to the Super Admin per month with the figures (AC4) qa:TC missing", async () => {
     const sa = await superAdmin();
-    const u = await account("eighty");
+    const u = await account("ZZ-TEST eighty", `nakul17+zz-test-eighty-${Date.now()}@aplyd.com`);
     await db.notification.deleteMany({ where: { type: "CONCIERGE_BUDGET_80" } });
     const spend0 = await monthSpendUsd();
-    // The next message costs 10 USD; set the ceiling so that it lands at 85 percent.
-    setFakeModel(() => ({ content: [say("ok")], stopReason: "end_turn", usage: { input: 100_000_000, output: 0, cacheWrite: 0, cacheRead: 0 } }));
-    const after = spend0 + 10;
+    // One call must cross 80 percent from whatever this month already holds. On an empty month that cost is $10.
+    const price = modelConfig().price;
+    const minAdded = Math.max(10, spend0 / 16 + 1);
+    const input = Math.ceil((minAdded * 1_000_000) / price.inPerMTok);
+    const added = Number(costUsd({ input, output: 0, cacheWrite: 0, cacheRead: 0 }, price).toFixed(6));
+    process.env.MODEL_NAME = "ZZ-TEST";
+    setFakeModel(() => ({ content: [say("ok")], stopReason: "end_turn", usage: { input, output: 0, cacheWrite: 0, cacheRead: 0 } }));
+    const after = spend0 + added;
     process.env.MONTHLY_CEILING_USD = String(after / 0.85);
     expect(await warnIfNearCeiling()).toBe(false); // not yet
     await sendMessage(actor(u), "hi"); // recordUsage notices the threshold right after the call
@@ -249,6 +255,8 @@ describe("caps and ledger (9.2)", () => {
     expect(r.status).toBe(200);
     expect(r.json.ceiling.usd).toBe(100);
     expect(r.json.ceiling.spendUsd).toBeGreaterThan(0);
+    expect(typeof r.json.ceiling.percent).toBe("number");
+    expect(r.json.ceiling.percent).toBe(percentUsedNumber(r.json.ceiling.spendUsd, r.json.ceiling.usd));
     expect(r.json.quickActions.find((q: { id: string }) => q.id === "overdue").count).toBeGreaterThanOrEqual(1);
     const me = r.json.people.find((p: { id: string }) => p.id === u.id);
     expect(me).toMatchObject({ weekMessages: 1, monthMessages: 1 });
