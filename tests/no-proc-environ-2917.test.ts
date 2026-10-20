@@ -1,5 +1,6 @@
 // APL-2917. No test file reads the process image of environment variables, so no run can load every secret at once.
-// This file names the banned path in its own examples, so the scan leaves out this one file. No TC id is assigned on the issue.
+// This file names the banned path in its own examples, so the scan leaves out this one file. AC1 runs in base-url-env-2917.test.ts.
+// No TC id is assigned on the issue.
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -25,11 +26,14 @@ function filesUnder(dir: string): string[] {
 // Catches a path built with `+`, ${...} or path.join, however the pieces are split ("/environ", 'environ',
 // `${dir}environ`, "environ/..."). "environment" is not a match.
 const ENVIRON_SEGMENT = /["'`/}]environ(?=["'`/$])/;
+// The environ file exists only under /proc, so a lone environ piece counts only in a file that also names a proc
+// path piece ("/proc", 'proc', `/proc/`). A "/environ" route or an 'environ' test title elsewhere is not flagged.
+const PROC_SEGMENT = /["'`/]proc(?=["'`/$])/;
 
 /** The test-file paths under tests/ whose source reads the process image of environment variables. */
 export function environReaders(files: { file: string; text: string }[]) {
   return files
-    .filter(({ text }) => text.includes(ENVIRON) || PROC_ENVIRON.test(text) || ENVIRON_PART.test(text) || ENVIRON_SEGMENT.test(text))
+    .filter(({ text }) => text.includes(ENVIRON) || PROC_ENVIRON.test(text) || (PROC_SEGMENT.test(text) && (ENVIRON_PART.test(text) || ENVIRON_SEGMENT.test(text))))
     .map(({ file }) => file);
 }
 
@@ -56,24 +60,22 @@ describe("qa:TC missing APL-2917: no test file reads the whole process environme
       "readFileSync(`/proc/self/environ${suffix}`)",
       // A template that joins a directory variable to the file name (Pam, D1 on a935b24).
       'const dir = "/proc/self/"; readFileSync(`${dir}environ`)',
-      "readFileSync(`${procDir}environ${suffix}`)",
-      "readFileSync(`${root}/${pid}/environ`)",
+      'const procDir = "/proc/1/"; readFileSync(`${procDir}environ${suffix}`)',
+      'const root = "/proc"; readFileSync(`${root}/${pid}/environ`)',
+      "readFileSync(path.join(`/proc`, `self`, `environ`))",
     ]) {
       expect(environReaders([{ file: "x.ts", text }]), text).toEqual(["x.ts"]);
     }
-    for (const text of [`readFileSync("/proc/self/stat")`, `const msg = "the environment is not read";`, "`${environment}/x`", `env.BASE_URL + "/environments"`]) {
+    for (const text of [
+      `readFileSync("/proc/self/stat")`,
+      `const msg = "the environment is not read";`,
+      "`${environment}/x`",
+      `env.BASE_URL + "/environments"`,
+      // No proc path piece in the file (Pam, D3 on a935b24): a route and a test title.
+      `app.get("/environ", handler)`,
+      `it('environ', () => {})`,
+    ]) {
       expect(environReaders([{ file: "y.ts", text }]), text).toEqual([]);
     }
-  });
-
-  it("qa:TC missing AC1: base-url.ts reads only its named variables from process.env", () => {
-    const src = readFileSync("tests/e2e/base-url.ts", "utf8");
-    expect(src).not.toMatch(/node:fs|readFileSync/);
-    // No enumeration or copy of the whole environment.
-    expect(src).not.toMatch(/(Object\.(keys|values|entries)|JSON\.stringify)\(\s*process\.env|\.\.\.\s*process\.env|for\s*\([^)]*\bin\s+process\.env/);
-    const named = [...src.matchAll(/process\.env\.([A-Z_][A-Z0-9_]*)/g)].map((m) => m[1]);
-    expect(new Set(named)).toEqual(new Set(["VITEST", "SHO_E2E_START_BASE_URL", "BASE_URL"]));
-    // Bracket access would read a name chosen at run time.
-    expect(src).not.toMatch(/process\.env\s*\[/);
   });
 });
