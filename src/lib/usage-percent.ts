@@ -2,7 +2,24 @@
 // The screen prints percentUsedLabel(spend, ceiling). It does not echo ceiling.percent, so a payload
 // that still carries the old one-decimal figure (10 of 80 stored as 12.5, or 1 of 101 stored as 1)
 // still shows 13% and <1%.
-// GET /api/usage stores the matching whole number in ceiling.percent (0 when the label is "0%" or "<1%").
+// GET /api/usage stores the matching whole number in ceiling.percent (0 when the label is "0%" or "<1%",
+// and 0 when no ceiling is set).
+// AC6 v1.1: a ceiling of 0 or unset shows "No ceiling set" and no percentage; spend over the ceiling
+// shows the rounded percentage plus an "Over ceiling" flag.
+
+/** What the screen shows in place of the ceiling and the percentage when the ceiling is 0 or unset. */
+export const NO_CEILING = "No ceiling set";
+export const OVER_CEILING = "Over ceiling";
+
+/** A ceiling the percentage can be worked out against: a finite number above 0. */
+export function hasCeiling(ceilingUsd: number | null | undefined): ceilingUsd is number {
+  return typeof ceilingUsd === "number" && Number.isFinite(ceilingUsd) && ceilingUsd > 0;
+}
+
+/** Spend is above a set ceiling. At exactly the ceiling it is not over. */
+export function overCeiling(spendUsd: number, ceilingUsd: number | null | undefined): boolean {
+  return hasCeiling(ceilingUsd) && Number.isFinite(spendUsd) && spendUsd > ceilingUsd;
+}
 
 /** Shortest round-trip decimal, expanded out of scientific notation. 0.09 stays "0.09". */
 function plainDecimal(n: number): string {
@@ -31,7 +48,8 @@ function rational(n: number): { num: bigint; scale: bigint } {
 /**
  * Percentage used, as the Usage screen prints it.
  *
- * - A spend of 0 is "0%". A non-positive ceiling is "0%" too.
+ * - No ceiling (0, unset or not a number) is null: the screen shows NO_CEILING and no percentage.
+ * - A spend of 0 is "0%".
  * - Any nonzero spend whose true share is under 1% is "<1%". That includes a half such as 0.5%,
  *   which is not rounded up to 1%.
  * - Otherwise the nearest whole number, halves up, with no cap past 100 (120% stays "120%").
@@ -40,8 +58,9 @@ function rational(n: number): { num: bigint; scale: bigint } {
  * first turns some exact halves into n.49999999999999, and Math.round then goes the wrong way
  * (0.09 of 0.4 is 22.5, which is 23%, not 22%).
  */
-export function percentUsedLabel(spendUsd: number, ceilingUsd: number): string {
-  if (!(spendUsd > 0) || !(ceilingUsd > 0) || !Number.isFinite(spendUsd) || !Number.isFinite(ceilingUsd)) return "0%";
+export function percentUsedLabel(spendUsd: number, ceilingUsd: number | null | undefined): string | null {
+  if (!hasCeiling(ceilingUsd)) return null;
+  if (!(spendUsd > 0) || !Number.isFinite(spendUsd)) return "0%";
   const spend = rational(spendUsd);
   const ceiling = rational(ceilingUsd);
   const zero = BigInt(0);
@@ -57,9 +76,9 @@ export function percentUsedLabel(spendUsd: number, ceilingUsd: number): string {
   return `${twice / den}%`;
 }
 
-/** Whole number for ceiling.percent. 0 when the label is "0%" or "<1%"; otherwise the integer in the label. */
-export function percentUsedNumber(spendUsd: number, ceilingUsd: number): number {
+/** Whole number for ceiling.percent. 0 when there is no ceiling or the label is "0%" or "<1%"; otherwise the integer in the label. */
+export function percentUsedNumber(spendUsd: number, ceilingUsd: number | null | undefined): number {
   const label = percentUsedLabel(spendUsd, ceilingUsd);
-  if (label === "0%" || label === "<1%") return 0;
+  if (label === null || label === "0%" || label === "<1%") return 0;
   return Number(label.slice(0, -1));
 }
