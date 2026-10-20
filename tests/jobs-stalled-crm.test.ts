@@ -40,6 +40,19 @@ async function dealIds() {
   return new Set(rows.map((row) => row.id));
 }
 
+/** DEAL_STALLED rows on this test's ZZ-TEST deals. Other tests' stalled deals cannot move this count. */
+async function worldStalledRows() {
+  const projectId = { in: [world.owned.id, world.adminDeal.id, world.rootDeal.id] };
+  return db.notification.count({ where: { type: "DEAL_STALLED", projectId } });
+}
+
+/** APL-2754. One job run, with notified counted on this test's ZZ-TEST deals only. */
+async function notifyWorldDeals() {
+  const before = await worldStalledRows();
+  await notifyStalledDeals();
+  return { notified: (await worldStalledRows()) - before };
+}
+
 /** Allowed leaders keep today's notice. A follower, and any other deal, stays out of their bell. */
 async function expectAllowed(exact: boolean) {
   await expectStalledNotice(world.orgAdmin, world.adminDeal, exact);
@@ -71,8 +84,8 @@ describe("qa:TC missing APL-2741 stalled-deal notices respect CRM_VISIBLE", () =
       expect(ids.has(world.adminDeal.id)).toBe(true);
       const first = await notifyStalledDeals();
       expect(first.notified).toBeGreaterThanOrEqual(3);
-      const second = await notifyStalledDeals();
-      expect(second.notified).toBeGreaterThanOrEqual(0);
+      const second = await notifyWorldDeals();
+      expect(second.notified).toBe(0);
     });
     await expectStalledNotice(world.owner, world.owned, true);
     await expectAllowed(true);
@@ -84,7 +97,8 @@ describe("qa:TC missing APL-2741 stalled-deal notices respect CRM_VISIBLE", () =
     await withMode("all", async () => {
       expect(crmMode()).toBe("all");
       expect((await notifyStalledDeals()).notified).toBeGreaterThanOrEqual(3);
-      expect((await notifyStalledDeals()).notified).toBe(0);
+      const second = await notifyWorldDeals();
+      expect(second.notified).toBe(0);
     });
     await expectStalledNotice(world.owner, world.owned, true);
     await expectAllowed(true);
@@ -100,7 +114,8 @@ describe("qa:TC missing APL-2741 stalled-deal notices respect CRM_VISIBLE", () =
       expect(ids.has(world.adminDeal.id)).toBe(true);
       expect(ids.has(world.rootDeal.id)).toBe(true);
       expect((await notifyStalledDeals()).notified).toBeGreaterThanOrEqual(2);
-      expect((await notifyStalledDeals()).notified).toBe(0);
+      const second = await notifyWorldDeals();
+      expect(second.notified).toBe(0);
     });
     await expectNoDealNotice(world, world.owner);
     await expectNoDealNotice(world, world.follower);
