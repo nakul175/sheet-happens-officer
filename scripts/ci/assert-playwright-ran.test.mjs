@@ -114,6 +114,46 @@ test("shard cli: empty report exits 0 and writes zero counts", () => {
   });
 });
 
+test("APL-2925: with requireTests an empty run fails; a run with tests still passes", () => {
+  const empty = countsFromReport(stats({}));
+  assert.match(shardFailureReason(empty, { requireTests: true }), /No tests ran \(total=0\)/);
+  assert.equal(shardFailureReason(empty), null);
+  assert.equal(shardFailureReason(countsFromReport(stats({ expected: 3 })), { requireTests: true }), null);
+  assert.match(shardFailureReason(countsFromReport(stats({ skipped: 2 })), { requireTests: true }), /Every test in this shard was skipped/);
+});
+
+test("shard cli --require-tests: an empty report exits 1 and still writes zero counts", () => {
+  const dir = mkdtempSync(join(tmpdir(), "pw-shard-"));
+  const report = join(dir, "playwright-report.json");
+  const counts = join(dir, "playwright-counts.json");
+  writeFileSync(report, JSON.stringify(stats({})));
+  const result = runScript(["--mode", "shard", "--report", report, "--counts-out", counts, "--require-tests"]);
+  assert.equal(result.status, 1);
+  assert.match(result.stdout, /total=0 run=0/);
+  assert.equal(result.stdout.includes("Empty shard"), false);
+  assert.match(result.stderr, /::error::No tests ran \(total=0\)/);
+  assert.equal(JSON.parse(readFileSync(counts, "utf8")).total, 0);
+});
+
+test("shard cli --require-tests: a missing report exits 1", () => {
+  const dir = mkdtempSync(join(tmpdir(), "pw-shard-"));
+  const counts = join(dir, "playwright-counts.json");
+  const result = runScript(["--mode", "shard", "--report", join(dir, "missing.json"), "--counts-out", counts, "--require-tests"]);
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /::error::Missing Playwright JSON report/);
+  assert.deepEqual(JSON.parse(readFileSync(counts, "utf8")), { missing: true });
+});
+
+test("shard cli --require-tests: a run with passing tests exits 0", () => {
+  const dir = mkdtempSync(join(tmpdir(), "pw-shard-"));
+  const report = join(dir, "playwright-report.json");
+  const counts = join(dir, "playwright-counts.json");
+  writeFileSync(report, JSON.stringify(stats({ expected: 4, skipped: 1 })));
+  const result = runScript(["--mode", "shard", "--report", report, "--counts-out", counts, "--require-tests"]);
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /total=5 run=4/);
+});
+
 test("shard cli: all skipped exits 1", () => {
   const dir = mkdtempSync(join(tmpdir(), "pw-shard-"));
   const report = join(dir, "playwright-report.json");

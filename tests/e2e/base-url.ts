@@ -11,6 +11,7 @@ const PRODUCTION_HOSTS = new Set([
   "sheethappensofficer.com",
   "www.sheethappensofficer.com",
   "app.sheethappensofficer.com",
+  "sheethappensofficer.aplyd.org",
   "168.144.144.69",
 ]);
 

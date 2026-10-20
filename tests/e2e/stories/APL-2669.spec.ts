@@ -88,7 +88,7 @@ function plus0530(iso: string) {
   return `${shifted.getUTCFullYear()}-${pad(shifted.getUTCMonth() + 1)}-${pad(shifted.getUTCDate())}T${pad(shifted.getUTCHours())}:${pad(shifted.getUTCMinutes())}:${pad(shifted.getUTCSeconds())}.${pad(shifted.getUTCMilliseconds(), 3)}+05:30`;
 }
 
-test.describe("APL-2669 a malformed expectedUpdatedAt is a bad request", () => {
+test.describe("APL-2669 a malformed expectedUpdatedAt is a bad request", { tag: "@local-only" }, () => {
   test.describe.configure({ mode: "serial" });
   test.beforeAll(() => { if (!QA_PASS) throw new Error("APL-2669: set SHO_QA_PASS (the password of the nakul17+zz aliases)."); });
 
