@@ -48,10 +48,11 @@ function expectBadJson(r: Res) {
   expect(r.json).toEqual({ error: "Body must be valid JSON" });
 }
 
-// Schema-invalid body per route.
+// Schema-invalid body per route. Assign is a version route: since APL-2670 AC1 v1.4 the version is checked before
+// the schema, so its invalid body carries a well-formed expectedUpdatedAt to still reach "Validation failed".
 const INVALID = {
   project: { name: "" },
-  assign: { assigneeId: "" },
+  assign: { assigneeId: "", expectedUpdatedAt: "2026-01-01T00:00:00.000Z" },
   deactivate: { reassign: "" },
 } as const;
 

@@ -259,7 +259,8 @@ describe("qa:TC missing APL-2875 a caller who cannot see a task gets the missing
     expect(await assign(s.viewer, JSON.stringify({ assigneeId: s.editor.id, expectedUpdatedAt: VERSION })))
       .toEqual({ status: 403, body: JSON.stringify({ error: "Viewers cannot make changes." }) });
     expect((await s.editor.c.get(`/api/tasks/${s.t1}`)).status).toBe(200);
-    const bad = await assign(s.editor, JSON.stringify({ assigneeId: "" }));
+    // APL-2670 AC1 v1.4: version before schema, so a well-formed version lets the schema answer.
+    const bad = await assign(s.editor, JSON.stringify({ assigneeId: "", expectedUpdatedAt: VERSION }));
     expect(bad.status).toBe(400);
     expect(JSON.parse(bad.body).error).toBe("Validation failed");
     expect(await assign(s.editor, MALFORMED)).toEqual({ status: 400, body: JSON.stringify({ error: "Body must be valid JSON" }) });
