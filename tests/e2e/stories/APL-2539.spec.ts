@@ -2,7 +2,7 @@
 // One test per acceptance criterion. Sign-in is login("ADMIN") / login("MEMBER") via the fixtures.
 // Deals and organisations are ZZ-TEST and archived afterwards.
 // On hold, Won and Lost are stages in the stepper. The page is /projects/:id.
-import { test, expect, zz } from "../support";
+import { test, expect, zz, withTaskVersion } from "../support";
 import { newTask, ymd } from "../g2";
 import { pipelines } from "../helpers/deal-board";
 import { activity, createDeal, createOrg, dealBody, dealPanel, noSideways, projectOf } from "../helpers/claude-a";
@@ -44,7 +44,7 @@ test("APL-2539 > AC2: the next step is a line in the panel, a red chip when ther
   await expect(line).toContainText(step);
   await expect(line).toContainText("·");
   const stepId = (await projectOf(admin, deal.id)).deal.nextStep.id as string;
-  expect((await admin.api.post(`/api/tasks/${stepId}/complete`, {})).status).toBe(200);
+  expect((await admin.api.post(`/api/tasks/${stepId}/complete`, await withTaskVersion(admin.api, stepId))).status).toBe(200);
   await admin.page.reload();
   await expect(panel.locator(".chip.red", { hasText: "No next step. Add a dated task." })).toBeVisible();
   await panel.getByRole("button", { name: "On hold", exact: true }).click();

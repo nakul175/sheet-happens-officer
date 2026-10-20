@@ -1,7 +1,7 @@
 // SHO-US-12.2 Convert a task to a deal (Linear APL-2538).
 // One test per acceptance criterion. Sign-in is login("ADMIN") / login("MEMBER") via the fixtures.
 // Ghost assignees cannot sign in. Projects, deals and organisations are ZZ-TEST and archived afterwards.
-import { test, expect, zz } from "../support";
+import { test, expect, zz, withTaskVersion } from "../support";
 import { getTask, ghost, newProject, newTask, ymd, type Who } from "../g2";
 import { pipelines } from "../helpers/deal-board";
 import { raw } from "../helpers/jim-http";
@@ -179,7 +179,7 @@ test("APL-2538 > AC5: Convert to deal is hidden and refused for a Viewer, a subt
   expect(JSON.stringify(subRes.json)).toContain("subtask");
 
   const done = await newTask(admin, p.id, { title: zz("done task"), dueDate: ymd(3) });
-  expect((await admin.api.post(`/api/tasks/${done}/complete`, {})).status).toBe(200);
+  expect((await admin.api.post(`/api/tasks/${done}/complete`, await withTaskVersion(admin.api, done))).status).toBe(200);
   await admin.page.goto(`/projects/${p.id}?task=${done}`);
   await expect(admin.page.getByRole("button", { name: "Convert to deal" })).toHaveCount(0);
   expect((await admin.api.post(`/api/tasks/${done}/convert`, body)).status).toBe(409);
@@ -187,7 +187,7 @@ test("APL-2538 > AC5: Convert to deal is hidden and refused for a Viewer, a subt
   expect((await admin.api.patch(`/api/projects/${p.id}/members/${member.user.id}`, { role: "EDITOR" })).status).toBe(200);
   const heldTitle = zz("awaiting task");
   const held = await newTask(admin, p.id, { title: heldTitle, dueDate: ymd(3), assigneeId: member.user.id });
-  expect((await admin.api.put(`/api/tasks/${held}/approver`, { approverId: admin.user.id })).status).toBe(200);
+  expect((await admin.api.put(`/api/tasks/${held}/approver`, await withTaskVersion(admin.api, held, { approverId: admin.user.id }))).status).toBe(200);
   expect((await member.api.post(`/api/tasks/${held}/send-for-approval`, {})).status).toBe(200);
   await admin.page.goto(`/projects/${p.id}?task=${held}`);
   await expect(admin.page.getByRole("button", { name: "Convert to deal" })).toHaveCount(0);
