@@ -19,7 +19,9 @@ export default function SearchView() {
   const [archived, setArchived] = useState(false);
   const [ideas, setIdeas] = useState(false);
   useEffect(() => { const t = setTimeout(() => setDebounced(q.trim()), 250); return () => clearTimeout(t); }, [q]);
-  const r = useGet<Res>(debounced.length >= 2 ? `/api/search?q=${encodeURIComponent(debounced)}${archived ? "&archived=true" : ""}${ideas ? "&idea=true" : ""}` : null);
+  const path = debounced.length >= 2 ? `/api/search?q=${encodeURIComponent(debounced)}${archived ? "&archived=true" : ""}${ideas ? "&idea=true" : ""}` : null;
+  // A new query must not blank the list: there is no separate loading state on this screen.
+  const r = useGet<Res>(path, { keepPrevious: true });
   const none = r.data && !r.data.projects.length && !r.data.tasks.length && !r.data.organisations?.length && !r.data.contacts?.length;
   return (
     <Page title="Search" sub="Projects and tasks you can see">

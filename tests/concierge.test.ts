@@ -1,7 +1,8 @@
 // SHO-US-8.1 to 8.8: reads, proposals and cards, clarification, undo and privacy of the concierge.
 // Calls src/lib directly with a scripted fake model; the live server (same database) sets up people and work.
-import { describe, expect, it } from "vitest";
-import { account, istDate, project, superAdmin, task, type Account } from "./helpers";
+import { describe, expect, it, vi } from "vitest";
+import * as changes from "@/lib/concierge/changes";
+import { account, istDate, project, superAdmin, task, type Account, patchTask, withVersion } from "./helpers";
 import { MONDAY, actor, db, lastData, lastResultText, say, script, tu, useFakeModel } from "./concierge-helpers";
 import { fakeCallCount, setFakeModel, type ModelRequest } from "../src/lib/model";
 import { answerChoice, quickAction, sendMessage } from "../src/lib/concierge/engine";
@@ -26,21 +27,21 @@ async function team() {
 describe("reads (8.2)", () => {
   useFakeModel();
 
-  it("quick actions: five plain queries, no model call, under a second, Trash excluded (AC1, AC3)", async () => {
+  it("quick actions: five plain queries, no model call, under a second, Trash excluded (AC1, AC3) qa:TC missing", async () => {
     delete process.env.MODEL_DATA_APPROVED; // proves they need no model at all
     const { lead, ed, p } = await team();
     const overdue = await task(lead, p.id, { title: "Late report", dueDate: istDate(-3) });
     const soon = await task(lead, p.id, { title: "Soon thing", dueDate: istDate(2) });
     const far = await task(lead, p.id, { title: "Far thing", dueDate: istDate(40) });
     const blocked = await task(lead, p.id, { title: "Stuck thing" });
-    expect((await lead.c.patch(`/api/tasks/${blocked}`, { blocked: true, blockedReason: "waiting" })).status).toBe(200);
+    expect((await patchTask(lead, blocked, { blocked: true, blockedReason: "waiting" })).status).toBe(200);
     const trashed = await task(lead, p.id, { title: "Trashed late", dueDate: istDate(-5) });
     expect((await lead.c.del(`/api/tasks/${trashed}`)).status).toBe(204);
     const done = await task(lead, p.id, { title: "Finished thing" });
-    expect((await lead.c.post(`/api/tasks/${done}/complete`)).status).toBe(200);
+    expect((await lead.c.post(`/api/tasks/${done}/complete`, await withVersion(lead, done))).status).toBe(200);
     // Waiting on me: the editor's task with lead as approver, sent for approval.
     const review = await task(ed, p.id, { title: "Needs sign-off" });
-    expect((await lead.c.put(`/api/tasks/${review}/approver`, { approverId: lead.id })).status).toBe(200);
+    expect((await lead.c.put(`/api/tasks/${review}/approver`, await withVersion(lead, review, { approverId: lead.id }))).status).toBe(200);
     expect((await ed.c.post(`/api/tasks/${review}/send-for-approval`)).status).toBe(200);
     script(() => { throw new Error("no model call expected"); });
 
@@ -246,7 +247,7 @@ describe("propose and confirm (8.3)", () => {
     script(...moveBudget());
     const c = cardOf((await ask(lead, "Move the budget task to Monday", MONDAY)).messages);
     // Someone else moves it first.
-    expect((await ed.c.patch(`/api/tasks/${t}`, { dueDate: "2031-04-10" })).status).toBe(200);
+    expect((await patchTask(ed, t, { dueDate: "2031-04-10" })).status).toBe(200);
     const err = await confirmCard(actor(lead), c.id).catch((e) => e);
     expect(err.status).toBe(409);
     expect(err.extra.stale).toBe(true);
@@ -260,6 +261,64 @@ describe("propose and confirm (8.3)", () => {
     // The fresh card is good.
     await confirmCard(actor(lead), fresh.id);
     expect((await dueOf(t))?.toISOString()).toContain("2031-03-23");
+  });
+
+  it("carries the card-time updatedAt into execute, so a save after Confirm is refused and not overwritten (APL-2667)", async () => {
+    const { lead, ed, p } = await team();
+    const t = await task(lead, p.id, { title: "Budget", dueDate: "2031-03-20" });
+    script(...moveBudget());
+    const c = cardOf((await ask(lead, "Move the budget task to Monday", MONDAY)).messages);
+    const stored = JSON.parse((await db.chatMessage.findUniqueOrThrow({ where: { id: c.id } })).content) as { proposal: { versions: Record<string, string> } };
+    const atCard = (await db.task.findUniqueOrThrow({ where: { id: t } })).updatedAt.toISOString();
+    const dueAtCard = (await db.task.findUniqueOrThrow({ where: { id: t } })).dueDate?.toISOString();
+    expect(stored.proposal.versions[t]).toBe(atCard);
+
+    // The Confirm fingerprint still matches. The save lands after that check and before the write.
+    const real = changes.fingerprint;
+    const spy = vi.spyOn(changes, "fingerprint").mockImplementationOnce(async (ops) => {
+      const fp = await real(ops);
+      expect((await patchTask(ed, t, { title: "Saved after confirm" })).status).toBe(200);
+      return fp;
+    });
+    try {
+      const err = await confirmCard(actor(lead), c.id).catch((e) => e);
+      expect(spy).toHaveBeenCalledOnce();
+      expect(err).toMatchObject({ status: 409, message: `${ed.name} changed this task while you were editing it.` });
+      expect(err.extra.stale).toBe(true);
+      expect(err.extra.changedBy).toBe(ed.name);
+    } finally {
+      spy.mockRestore();
+    }
+    const row = await db.task.findUniqueOrThrow({ where: { id: t } });
+    expect(row.title).toBe("Saved after confirm");
+    expect(row.dueDate?.toISOString()).toBe(dueAtCard);
+    expect(await conciergeLogs(lead.id)).toHaveLength(0);
+    expect(JSON.parse((await db.chatMessage.findUniqueOrThrow({ where: { id: c.id } })).content).card.status).toBe("PENDING");
+  });
+
+  it("several ops on one task in one card still apply (APL-2667)", async () => {
+    const { lead, ed, p } = await team();
+    const t = await task(ed, p.id, { title: "Chain task", dueDate: "2031-03-20" });
+    script(
+      () => [tu("find_tasks", { text: "chain task" })],
+      (r) => {
+        const id = lastData(r).tasks[0].id as string;
+        return [tu("propose_changes", { changes: [
+          { action: "edit_task", task_id: id, priority: "HIGH" },
+          { action: "move_task_to_section", task_id: id, section: "In progress" },
+          { action: "assign_task", task_id: id, person_id: "me" },
+          { action: "edit_task", task_id: id, title: "Chain revised" },
+        ] })];
+      },
+    );
+    const c = cardOf((await ask(lead, "Update the chain task")).messages);
+    expect(c.card!.changes).toHaveLength(4);
+    await confirmCard(actor(lead), c.id);
+    const row = await db.task.findUniqueOrThrow({ where: { id: t } });
+    expect(row.priority).toBe("HIGH");
+    expect(row.sectionId).toBe(p.doing);
+    expect(row.assigneeId).toBe(lead.id);
+    expect(row.title).toBe("Chain revised");
   });
 
   it("more than 10 changes: no card, the person is asked to narrow; exactly 10 is fine (AC6)", async () => {
@@ -369,10 +428,15 @@ describe("propose and confirm (8.3)", () => {
     expect(viaChat.map((r) => (r.afterState as { count?: number; handedOver?: number }).count ?? (r.afterState as { handedOver?: number }).handedOver).sort()).toEqual([1, 2, 3]);
     expect(viaChat[2].afterState).toMatchObject({ removed: true, handedOver: 3 });
     // The same removal from the screen (the third editor, all tasks to one taker) writes the same kind of rows.
+    // Read those rows by the member they name. A createdAt cutoff taken with new Date() after the setup tasks
+    // races them: task.created stores a null beforeState, and that timestamp is often the same millisecond as
+    // the clock read, so createdAt >= cutoff includes it and Object.keys throws (SHO-BUG-7 flake).
     for (let i = 0; i < 3; i++) await task(e3, p.id, { title: `E3 ${i}` });
-    const screenSince = new Date();
     expect((await lead.c.del(`/api/projects/${p.id}/members/${e3.id}?handoverTo=${e2.id}`)).status).toBe(204);
-    const viaScreen = await db.actionLog.findMany({ where: { projectId: p.id, channel: "SCREEN", createdAt: { gte: screenSince } }, orderBy: [{ createdAt: "asc" }, { id: "asc" }] });
+    const viaScreen = await db.actionLog.findMany({
+      where: { projectId: p.id, channel: "SCREEN", targetId: e3.id, action: { in: ["tasks.reassigned", "member.removed"] } },
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+    });
     expect(shape(viaChat)).toEqual([shape(viaScreen)[0], shape(viaScreen)[0], shape(viaScreen)[1]]);
     expect(viaScreen[1].afterState).toMatchObject({ removed: true, handedOver: 3 });
   });
@@ -574,7 +638,7 @@ describe("undo of a card (8.5)", () => {
   it("a conflict warns first and reverses nothing; 'anyway' then reverses the card (AC2)", async () => {
     const { lead, ed, a, b, card } = await multi();
     await confirmCard(actor(lead), card.id);
-    expect((await ed.c.patch(`/api/tasks/${a}`, { dueDate: "2031-06-01" })).status).toBe(200);
+    expect((await patchTask(ed, a, { dueDate: "2031-06-01" })).status).toBe(200);
     const err = await undoCard(actor(lead), card.id).catch((e) => e);
     expect(err.status).toBe(409);
     expect(err.extra.needsConfirm).toBe("conflict");
@@ -587,12 +651,12 @@ describe("undo of a card (8.5)", () => {
   it("Undo stops working after 30 days (AC6)", async () => {
     const { lead, card } = await multi();
     await confirmCard(actor(lead), card.id);
-    const row = (await thread(lead.id)).find((m) => m.kind === "result")!;
+    const row = (await thread(actor(lead))).find((m) => m.kind === "result")!;
     const old = new Date(Date.now() - 31 * 86400_000).toISOString();
     const raw = JSON.parse((await db.chatMessage.findUniqueOrThrow({ where: { id: row.id } })).content);
     raw.internal.confirmedAt = old;
     await db.chatMessage.update({ where: { id: row.id }, data: { content: JSON.stringify(raw) } });
-    expect((await thread(lead.id)).find((m) => m.id === row.id)!.result!.undoExpired).toBe(true);
+    expect((await thread(actor(lead))).find((m) => m.id === row.id)!.result!.undoExpired).toBe(true);
     await expect(undoCard(actor(lead), card.id)).rejects.toMatchObject({ status: 409, message: "Too old to undo" });
   });
 
@@ -718,7 +782,7 @@ describe("privacy, clearing and retention (8.1, 8.8)", () => {
     expect((await u.c.patch("/api/concierge/preferences", { voiceNoticeAcked: false })).status).toBe(400);
   });
 
-  it("the quick-action route answers over HTTP without any model (8.2 AC3)", async () => {
+  it("the quick-action route answers over HTTP without any model (8.2 AC3) qa:TC missing", async () => {
     const u = await account("quicky");
     const p = await project(u, u);
     await task(u, p.id, { title: "Very late", dueDate: istDate(-4) });

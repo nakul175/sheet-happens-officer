@@ -1,7 +1,7 @@
 // Integration tests for reminders (7.4), search (3.2/3.6 AC6), Usage (9.2 AC3) and sign-out everywhere (1.6 AC3).
 // Server must run with SUPER_ADMIN_EMAILS=root.test@aplyd.com, JOB_SECRET set and the same EMAIL_OUTBOX_DIR.
 import { describe, expect, it } from "vitest";
-import { Client, PW, account, istDate, project, superAdmin, task } from "./helpers";
+import { Client, PW, account, istDate, project, superAdmin, task, patchTask, withVersion } from "./helpers";
 
 const SECRET = process.env.JOB_SECRET ?? "";
 const runJob = (name: string) => fetch(`${process.env.TASKBOARD_URL ?? "http://localhost:3000"}/api/jobs/${name}`, { method: "POST", headers: { authorization: `Bearer ${SECRET}` } });
@@ -22,8 +22,8 @@ describe("reminders (7.4)", () => {
     await mk("R-nodate", undefined);
     const done = await mk("R-done", istDate(1));
     const blocked = await mk("R-blocked", istDate(1));
-    expect((await w.c.post(`/api/tasks/${done}/complete`)).status).toBe(200);
-    expect((await lead.c.patch(`/api/tasks/${blocked}`, { blocked: true })).status).toBe(200);
+    expect((await w.c.post(`/api/tasks/${done}/complete`, await withVersion(w, done))).status).toBe(200);
+    expect((await patchTask(lead, blocked, { blocked: true })).status).toBe(200);
     expect((await runJob("reminders")).status).toBe(200);
     expect((await runJob("reminders")).status).toBe(200); // same day: no second reminder
     const t = await texts(w);
@@ -42,7 +42,7 @@ describe("reminders (7.4)", () => {
     const boss = await account("approver");
     const p = await project(lead, lead, [{ who: w }, { who: boss }]);
     const t = await task(lead, p.id, { title: "R-approval", assigneeId: w.id, dueDate: istDate(1) });
-    expect((await lead.c.put(`/api/tasks/${t}/approver`, { approverId: boss.id })).status).toBe(200);
+    expect((await lead.c.put(`/api/tasks/${t}/approver`, await withVersion(lead, t, { approverId: boss.id }))).status).toBe(200);
     expect((await w.c.post(`/api/tasks/${t}/send-for-approval`)).status).toBe(200);
     await runJob("reminders");
     expect((await texts(boss)).filter((x) => x.includes("R-approval") && x.includes("is due tomorrow"))).toHaveLength(1);
@@ -61,6 +61,9 @@ describe("cron health", () => {
     expect(typeof r.json.ok).toBe("boolean");
   });
 });
+
+// Not on the shared helpers import: PR #13 adds patchTask there and PR #20 adds withVersion.
+import { admin } from "./helpers";
 
 describe("search (3.2 AC6, 3.6 AC6)", () => {
   it("finds only what the person may see, leaves archived out unless asked, and shows Admins everything", async () => {
@@ -83,6 +86,27 @@ describe("search (3.2 AC6, 3.6 AC6)", () => {
     expect(withArch).toEqual([`${tag} archived task`, `${tag} visible`]);
     expect((await q(out, "&archived=true")).json.tasks).toHaveLength(0);
     expect((await q(sa)).json.tasks.map((t: { title: string }) => t.title).sort()).toEqual([`${tag} hidden`, `${tag} visible`]);
+    const ad = await admin(sa, "searchadmin");
+    const titles = async (who: { c: Client }, extra = "") => (await q(who, extra)).json.tasks.map((t: { title: string }) => t.title).sort();
+    // APL-2684: with Include archived on, an Admin and the Super Admin see the archived project they are not members of.
+    expect(await titles(sa, "&archived=true")).toEqual([`${tag} archived task`, `${tag} hidden`, `${tag} visible`]);
+    expect(await titles(ad, "&archived=true")).toEqual([`${tag} archived task`, `${tag} hidden`, `${tag} visible`]);
+    expect(await titles(ad)).toEqual([`${tag} hidden`, `${tag} visible`]);
+    const nameOf = async (id: string) => (await lead.c.get(`/api/projects/${id}`)).json.project.name as string;
+    const idsFor = async (who: { c: Client }, name: string, extra = "") =>
+      ((await who.c.get(`/api/search?q=${encodeURIComponent(name)}${extra}`)).json.projects as { id: string }[]).map((p) => p.id);
+    const oldName = await nameOf(old.id);
+    const secretName = await nameOf(secret.id);
+    expect(await idsFor(sa, oldName, "&archived=true")).toContain(old.id);
+    expect(await idsFor(ad, oldName, "&archived=true")).toContain(old.id);
+    expect(await idsFor(me, oldName, "&archived=true")).toContain(old.id);
+    expect(await idsFor(out, oldName, "&archived=true")).not.toContain(old.id);
+    expect(await idsFor(sa, oldName)).not.toContain(old.id);
+    expect(await idsFor(ad, oldName)).not.toContain(old.id);
+    // Members still see only their own projects, flag on or off.
+    expect(await idsFor(me, secretName, "&archived=true")).not.toContain(secret.id);
+    expect(await idsFor(out, secretName, "&archived=true")).not.toContain(secret.id);
+    expect(await idsFor(ad, secretName, "&archived=true")).toContain(secret.id);
     expect((await me.c.get("/api/search?q=z")).json.tasks).toHaveLength(0); // too short
     expect((await new Client().get(`/api/search?q=${tag}`)).status).toBe(401);
     expect(a).toBeTruthy();
