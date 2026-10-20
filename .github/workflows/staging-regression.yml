@@ -2,9 +2,13 @@
 # Started by hand only (Actions > Staging regression > Run workflow). Never on push, pull_request or pull_request_target,
 # so a fork cannot read these secrets.
 #
-# Steps: provision the verified alias pool (tests/e2e/tools/provision-aliases.ts --slots all, verifying each new alias on the
-# server so no emailed link has to be clicked), then every Playwright spec in tests/e2e/stories except those tagged
-# @local-only, then upload the counts and the evidence (if: always()). New specs are included by default.
+# Steps: check the verified alias pool (tests/e2e/tools/provision-aliases.ts --check --slots all, read-only), then every
+# Playwright spec in tests/e2e/stories except those tagged @local-only, then upload the counts and the evidence
+# (if: always()). New specs are included by default.
+#
+# Aliases: Oscar verifies the ZZ-TEST pool once with a server-side script (Dwight's ruling, 13:01). This job never signs up,
+# verifies, reactivates or changes an alias. If any alias is not ready, it stops before the suite with
+# "aliases not verified, ask Oscar".
 #
 # Excluded: @local-only (Dwight's ruling, APL-2925). APL-2609, APL-2669 and APL-2674 sign up brand-new nakul17+ aliases and
 # verify them from the server's local mail outbox. On staging that would make real accounts and send real mail, then fail.
@@ -14,8 +18,6 @@
 # or a pr1-pr4 preview is accepted; production is refused.
 # Secrets (repository settings, set by Oscar):
 #   STAGING_BASIC_USER, STAGING_BASIC_PASS   the basic-auth gate in front of staging
-#   STAGING_JOB_SECRET                      staging's JOB_SECRET, for POST /api/qa/verify-alias (src/lib/qa-verify.ts).
-#                                           Staging must also run with QA_VERIFY_ALIASES=1; anywhere else that route is 404.
 #   SHO_QA_PASS, SHO_ADMIN_EMAIL, SHO_ADMIN_PASS, SHO_MEMBER_EMAIL, SHO_MEMBER_PASS   as in staging-e2e.yml
 # They reach steps through env: only and are never echoed.
 #
@@ -80,7 +82,6 @@ jobs:
         env:
           STAGING_BASIC_USER: ${{ secrets.STAGING_BASIC_USER }}
           STAGING_BASIC_PASS: ${{ secrets.STAGING_BASIC_PASS }}
-          QA_JOB_SECRET: ${{ secrets.STAGING_JOB_SECRET }}
           SHO_ADMIN_EMAIL: ${{ secrets.SHO_ADMIN_EMAIL }}
           SHO_ADMIN_PASS: ${{ secrets.SHO_ADMIN_PASS }}
           SHO_MEMBER_EMAIL: ${{ secrets.SHO_MEMBER_EMAIL }}
@@ -91,7 +92,6 @@ jobs:
           for n in STAGING_BASIC_USER STAGING_BASIC_PASS SHO_ADMIN_EMAIL SHO_ADMIN_PASS SHO_MEMBER_EMAIL SHO_MEMBER_PASS SHO_QA_PASS; do
             [ -n "${!n}" ] || missing="$missing $n"
           done
-          [ -n "$QA_JOB_SECRET" ] || missing="$missing STAGING_JOB_SECRET"
           if [ -n "$missing" ]; then
             echo "::error::Missing repository secrets:$missing. Add them in Settings > Secrets and variables > Actions."
             exit 1
@@ -106,15 +106,19 @@ jobs:
       - run: npm ci
       - run: npx playwright install --with-deps chromium
 
-      - name: Provision the alias pool (all slots, verified on the server)
+      - name: Check the alias pool is verified (read-only)
         env:
           # The scripts and playwright.config.ts read the basic-auth pair as STAGING_USER / STAGING_PASS.
           STAGING_USER: ${{ secrets.STAGING_BASIC_USER }}
           STAGING_PASS: ${{ secrets.STAGING_BASIC_PASS }}
           SHO_QA_PASS: ${{ secrets.SHO_QA_PASS }}
-          QA_JOB_SECRET: ${{ secrets.STAGING_JOB_SECRET }}
-        # The script prints addresses and states only, and refuses to print any line that contains a secret.
-        run: npx tsx tests/e2e/tools/provision-aliases.ts --slots all
+        # --check signs up, verifies and changes nothing; it only signs in and reports. It prints addresses and states,
+        # never a password, and exits non-zero when any alias is not ready.
+        run: |
+          if ! npx tsx tests/e2e/tools/provision-aliases.ts --check --slots all; then
+            echo "::error::aliases not verified, ask Oscar (see the lines above for which ones)."
+            exit 1
+          fi
 
       - name: Run the full suite except ${{ env.EXCLUDED_TAG }} (workers=1)
         env:
@@ -152,7 +156,7 @@ jobs:
                 else console.log(`**Counts:** total ${c.total}, run ${c.run}, passed ${c.expected}, failed ${c.unexpected}, flaky ${c.flaky}, skipped ${c.skipped}`);
               '
             else
-              echo "**Counts:** none (the job stopped before the suite ran; see the provisioning step)."
+              echo "**Counts:** none (the job stopped before the suite ran: aliases not verified, ask Oscar)."
             fi
             echo
             echo "**Excluded ($EXCLUDED_TAG):** APL-2609, APL-2669, APL-2674. They sign up new nakul17+ aliases and verify them"
