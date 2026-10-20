@@ -2,7 +2,7 @@
 // One test per acceptance criterion. Sign-in is login("ADMIN") / login("MEMBER") via the fixtures.
 // Organisations, deals, contacts, notes and tasks are ZZ-TEST and archived or deleted afterwards.
 // The seeded pipelines have no Not started stage; AC4 records that and still checks Active and Paused.
-import { test, expect, zz } from "../support";
+import { test, expect, zz, withTaskVersion } from "../support";
 import { newProject, newTask, ymd } from "../g2";
 import { pipelines } from "../helpers/deal-board";
 import { createDeal, createOrg, dealBody, noSideways, orgPage, projectOf } from "../helpers/claude-a";
@@ -35,18 +35,19 @@ test("APL-2536 > AC1: the organisation page shows open deals, contacts, notes, t
 
   await admin.page.goto(`/accounts/${leaf.id}`);
   await expect(admin.page.getByRole("heading", { name: leaf.name })).toBeVisible();
-  await expect(admin.page.locator("aside").getByRole("link", { name: "Accounts" })).toHaveAttribute("aria-current", "page");
+  await expect(admin.page.getByRole("complementary", { name: "Main" }).getByRole("link", { name: "Accounts" })).toHaveAttribute("aria-current", "page");
   await expect(admin.page.getByRole("link", { name: deal.name })).toBeVisible();
-  await expect(admin.page.getByText(zz("tree contact")).first()).toBeVisible();
-  await expect(admin.page.getByText("Known by").first()).toBeVisible();
-  await expect(admin.page.getByText("Last spoke").first()).toBeVisible();
-  await expect(admin.page.getByText(noteText).first()).toBeVisible();
+  // The note form also lists the contact, as a checkbox label. The contact card's name is the exact text with no checkbox in it.
+  await expect(admin.page.getByText(zz("tree contact"), { exact: true }).filter({ hasNot: admin.page.getByRole("checkbox") })).toBeVisible();
+  await expect(admin.page.getByText("Known by:")).toBeVisible();
+  await expect(admin.page.getByText("Last spoke:")).toBeVisible();
+  await expect(admin.page.getByText(noteText, { exact: true })).toBeVisible();
   await expect(admin.page.getByRole("link", { name: taskTitle })).toBeVisible();
-  await expect(admin.page.locator("[aria-current=page]").filter({ hasText: leaf.name })).toBeVisible();
-  // The parent is also the breadcrumb. The tree card is the one that highlights this organisation.
-  const tree = admin.page.locator(".card", { has: admin.page.locator("b[aria-current=page]", { hasText: leaf.name }) });
-  await expect(tree.getByRole("link", { name: parent.name })).toBeVisible();
+  // The parent is also a breadcrumb link. The tree is the nested list: its parent item holds the parent link and the highlighted leaf.
   await expect(admin.page.getByText("Organisation tree")).toBeVisible();
+  const tree = admin.page.getByRole("listitem").filter({ has: admin.page.getByRole("link", { name: parent.name, exact: true }) }).filter({ hasText: leaf.name });
+  await expect(tree.getByRole("link", { name: parent.name, exact: true })).toHaveAttribute("href", `/accounts/${parent.id}`);
+  await expect(tree.getByText(leaf.name, { exact: true })).toHaveAttribute("aria-current", "page");
 });
 
 test("APL-2536 > AC2: deals, notes and linked tasks follow membership, and deals are a plain table", async ({ admin, member, later }) => {
@@ -125,7 +126,7 @@ test("APL-2536 > AC4: Accounts is searchable by name, filterable by kind, and co
   expect((await admin.api.post(`/api/projects/${paused.id}/stage`, { stageId: hold.id, reason: "ZZ-TEST pause" })).status).toBe(200);
   const closed = await createDeal(admin, later, dealBody({ name: zz("counted won"), organisationId: wonOrg.id, pipelineId: pipes.pro.id, leaderId: admin.user.id, step: zz("won step") }));
   const stepId = (await projectOf(admin, closed.id)).deal.nextStep.id as string;
-  expect((await admin.api.post(`/api/tasks/${stepId}/complete`, {})).status).toBe(200);
+  expect((await admin.api.post(`/api/tasks/${stepId}/complete`, await withTaskVersion(admin.api, stepId))).status).toBe(200);
   expect((await admin.api.post(`/api/projects/${closed.id}/stage`, { stageId: won.id })).status).toBe(200);
   expect((await admin.api.post(`/api/projects/${lead.id}/parties`, { organisationId: funder.id, role: "FUNDER" })).status).toBe(201);
 
