@@ -44,12 +44,17 @@ describe("APL-2522 spec prod guard", () => {
     expect(run.output).toMatch(/Refusing to run story tests against production \(www\.sheethappensofficer\.com\)/);
   });
 
-  // Linux keeps the starting BASE_URL in the process image after Vitest sets the live value to "/".
-  it.skipIf(process.platform !== "linux")("refuses a production BASE_URL read before Vitest rewrites it to /", { timeout: 60_000 }, () => {
+  // vitest.config.mts copies the starting BASE_URL to SHO_E2E_START_BASE_URL before Vitest sets the live value to "/".
+  it("refuses a production BASE_URL read before Vitest rewrites it to /", { timeout: 60_000 }, () => {
     const run = runSpec({ ...safe, BASE_URL: PROD });
     expect(run.status, run.output).not.toBe(0);
     expect(run.output).toMatch(/Refusing to run story tests against production \(sheethappensofficer\.com\)/);
     expect(run.output).not.toMatch(/Refusing to run story tests against production \(staging\.sheethappensofficer\.com\)/);
+  });
+
+  it("qa:TC missing APL-2917 AC2: a non-production starting BASE_URL is read and allowed when the spec starts", { timeout: 60_000 }, () => {
+    const run = runSpec(safe);
+    expect(run.output).not.toMatch(/Refusing to run/);
   });
 
   it("does not consult the BASE_URL property on the environment object", () => {
@@ -114,20 +119,23 @@ describe("APL-2522 spec prod guard", () => {
 
   it("fails closed when the starting BASE_URL cannot be read, and the error quotes no value", () => {
     const hidden = "https://user:s3cret@sheethappensofficer.com";
-    const unread = { environ: null, underVitest: true, liveBaseUrl: hidden } as const;
-    for (const platform of ["darwin", "linux"] as const) {
-      let message = "";
-      try {
-        startingBaseUrl({ ...unread, platform });
-      } catch (error) {
-        message = error instanceof Error ? error.message : "";
-      }
-      expect(message, platform).toBe("Refusing to run: the starting BASE_URL could not be read.");
-      expect(message).not.toContain("s3cret");
-      expect(message).not.toContain("sheethappensofficer");
+    let message = "";
+    try {
+      startingBaseUrl({ underVitest: true, captured: undefined, liveBaseUrl: hidden });
+    } catch (error) {
+      message = error instanceof Error ? error.message : "";
     }
-    const image = Buffer.from("OTHER=1\0BASE_URL=https://staging.sheethappensofficer.com\0", "latin1");
-    expect(startingBaseUrl({ platform: "linux", environ: image, underVitest: true, liveBaseUrl: "/" })).toBe("https://staging.sheethappensofficer.com");
-    expect(startingBaseUrl({ platform: "linux", environ: Buffer.from("OTHER=1\0", "latin1"), underVitest: true, liveBaseUrl: hidden })).toBeUndefined();
+    expect(message).toBe("Refusing to run: the starting BASE_URL could not be read.");
+    expect(message).not.toContain("s3cret");
+    expect(message).not.toContain("sheethappensofficer");
+    expect(startingBaseUrl({ underVitest: true, captured: STAGING, liveBaseUrl: "/" })).toBe(STAGING);
+    expect(startingBaseUrl({ underVitest: true, captured: "", liveBaseUrl: hidden })).toBeUndefined();
+  });
+
+  it("qa:TC missing APL-2917 AC2: outside Vitest the live BASE_URL is the starting value, and a copied value is ignored", () => {
+    expect(startingBaseUrl({ underVitest: false, captured: PROD, liveBaseUrl: STAGING })).toBe(STAGING);
+    for (const live of [undefined, "", "/"]) {
+      expect(startingBaseUrl({ underVitest: false, captured: PROD, liveBaseUrl: live }), String(live)).toBeUndefined();
+    }
   });
 });
