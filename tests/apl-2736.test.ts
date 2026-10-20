@@ -42,7 +42,8 @@ async function dealIn(stageId: string, reason?: string) {
   zzOrgs.push(org);
   const r = await sa.c.post("/api/deals", {
     name: `ZZ-TEST Deal 2736 ${RUN}-${seq++}`, organisationId: org, pipelineId: pro.id, leaderId: sa.id, whyPursue: "fit",
-    nextStep: { title: "First call", dueDate: istDate(2) },
+    // Value and currency up front: Negotiation asks for them on a stage move (APL-2739).
+    value: 1000, currency: "USD", nextStep: { title: "First call", dueDate: istDate(2) },
   });
   expect(r.status, JSON.stringify(r.json)).toBe(201);
   const id = r.json.deal.id as string;
