@@ -31,6 +31,7 @@ export default defineConfig({
       "scripts/**",
       "tests/e2e/stories/APL-2609.spec.ts",
       "tests/e2e/stories/APL-2720.spec.ts",
+      "tests/e2e/stories/APL-2694.spec.ts",
       "tests/e2e/stories/APL-2471.spec.ts",
       "tests/e2e/stories/APL-2748.spec.ts",
       "tests/e2e/stories/APL-2674.spec.ts",

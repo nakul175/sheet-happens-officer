@@ -1,8 +1,9 @@
 // APL-2694 story spec: Improve my prompt in the real concierge dock, in a browser, at desktop and phone width.
 // Pam left no qa:TC id on the issue; each title says "qa:TC missing".
-// Gate: SHO_QA_PASS (the password of the pre-provisioned, verified nakul17+ alias). Without it the file is skipped,
-// so `npm test` in CI skips it. Nothing here signs up an account (APL-2748): the alias must already exist.
-// Production hosts are refused. Point TASKBOARD_URL at a local server or at staging, never at production.
+// Playwright (playwright.config.ts); npm test skips it (vitest.config.mts). APL-2896 moved it from vitest.
+// Gate: SHO_QA_PASS (the password of the pre-provisioned, verified nakul17+ alias). Without it every test is skipped,
+// so CI lists them and runs none. Nothing here signs up an account (APL-2748): the alias must already exist.
+// Production hosts are refused. Point BASE_URL (or TASKBOARD_URL) at a local server or at staging, never at production.
 //
 // AC4 runs first: the improve response is intercepted in the browser (503, then 429), so the dock's error path is
 // checked without a real outage and without spending a model call.
@@ -10,12 +11,11 @@
 // available and the call must return 200 with a new text. The APL-2694 bug was exactly "available, but improve
 // returns 503", so that fails here. Text sent to the model is a ZZ-TEST sentence only.
 import { mkdirSync } from "node:fs";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { chromium, type Browser, type BrowserContext, type Locator, type Page } from "playwright-core";
-import { assertStoryTargetAllowed } from "../base-url";
-import { BASE } from "../../helpers";
+import { test, expect, type BrowserContext, type Locator, type Page } from "@playwright/test";
+import { assertStoryTargetAllowed, BASE_URL } from "../base-url";
 
-// The target is TASKBOARD_URL (BASE). Pass it in, so the guard checks it without reading the process image.
+// The target is BASE_URL, then TASKBOARD_URL (base-url.ts). Pass it in, so the guard checks it without reading the process image.
+const BASE = BASE_URL;
 assertStoryTargetAllowed(process.env, BASE);
 
 const QA_PASS = process.env.SHO_QA_PASS ?? "";
@@ -35,7 +35,6 @@ const FAILURES = [
 
 type Improve = { status: number; improved: string | null; error: string | null };
 
-let browser: Browser;
 let ctx: BrowserContext;
 
 const basic = process.env.STAGING_USER ? { username: process.env.STAGING_USER, password: process.env.STAGING_PASS ?? "" } : undefined;
@@ -79,10 +78,14 @@ async function mustBeAvailable() {
   return s;
 }
 
-describe.skipIf(!QA_PASS)("qa:TC missing APL-2694: Improve my prompt in the concierge dock", () => {
-  beforeAll(async () => {
+test.describe("qa:TC missing APL-2694: Improve my prompt in the concierge dock", () => {
+  test.skip(!QA_PASS, "APL-2694: set SHO_QA_PASS (the password for nakul17+ aliases).");
+  // AC4 runs first, then AC1/AC3, all on the one signed-in context.
+  test.describe.configure({ mode: "serial" });
+
+  test.beforeAll(async ({ browser }) => {
+    test.setTimeout(60_000);
     mkdirSync(SHOTS, { recursive: true });
-    browser = await chromium.launch({ executablePath: process.env.PW_CHROMIUM || undefined, args: ["--no-sandbox"] });
     ctx = await browser.newContext({ httpCredentials: basic });
     const signed = await ctx.request.post(new URL("/api/auth/signin", BASE).href, { data: { email: EMAIL, password: QA_PASS } });
     const text = await signed.text();
@@ -90,15 +93,15 @@ describe.skipIf(!QA_PASS)("qa:TC missing APL-2694: Improve my prompt in the conc
     expect(signed.status(), `${EMAIL} must be a provisioned, verified alias (APL-2748)`).toBe(200);
     const shown = await ctx.request.patch(new URL("/api/concierge/preferences", BASE).href, { data: { hidden: false } });
     expect(shown.status()).toBe(200);
-  }, 60_000);
+  });
 
-  afterAll(async () => {
+  test.afterAll(async () => {
     await ctx?.close();
-    await browser?.close();
   });
 
   for (const vp of VIEWPORTS) {
-    it(`qa:TC missing AC4: at ${vp.name} width a 503 or 429 from improve is a visible alert, the typed text stays and no rewrite is offered`, async () => {
+    test(`qa:TC missing AC4: at ${vp.name} width a 503 or 429 from improve is a visible alert, the typed text stays and no rewrite is offered`, async () => {
+      test.setTimeout(90_000);
       const before = (await mustBeAvailable()).messages.length;
       const page = await ctx.newPage();
       try {
@@ -122,11 +125,12 @@ describe.skipIf(!QA_PASS)("qa:TC missing APL-2694: Improve my prompt in the conc
       } finally {
         await page.close();
       }
-    }, 90_000);
+    });
   }
 
   for (const vp of VIEWPORTS) {
-    it(`qa:TC missing AC1, AC3: at ${vp.name} width the real model's rewrite is offered; Keep mine and Use it work; nothing is posted`, async () => {
+    test(`qa:TC missing AC1, AC3: at ${vp.name} width the real model's rewrite is offered; Keep mine and Use it work; nothing is posted`, async () => {
+      test.setTimeout(90_000);
       const before = (await mustBeAvailable()).messages.length;
       const page = await ctx.newPage();
       try {
@@ -162,6 +166,6 @@ describe.skipIf(!QA_PASS)("qa:TC missing APL-2694: Improve my prompt in the conc
       } finally {
         await page.close();
       }
-    }, 90_000);
+    });
   }
 });
