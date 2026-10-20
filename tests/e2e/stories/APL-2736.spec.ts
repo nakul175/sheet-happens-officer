@@ -49,8 +49,8 @@ if (!/^(localhost|127\.0\.0\.1)$/.test(new URL(BASE).hostname)) {
 beforeAll(async () => {
   sa = await superAdmin();
   pro = ((await sa.c.get("/api/deals/pipelines")).json.pipelines as Pipe[]).find((p) => p.key === "DEAL_PROACTIVE")!;
-  // The one direct write: the product has no API that creates a stage (stages are migration-only), so the ZZ-TEST
-  // stage is inserted here. It is removed through DELETE /api/deals/pipelines/:id in afterAll.
+  // Allowed direct DB write (ZZ-TEST setup only): the product has no API that creates a stage (stages are
+  // migration-only), so the ZZ-TEST stage is inserted here. It is removed through DELETE /api/deals/pipelines/:id in afterAll.
   await db.stage.create({ data: { id: STAGE_ID, pipelineId: pro.id, name: STAGE_NAME, position: 100, category: "ACTIVE", requiredFields: [] } });
   const org = (await sa.c.post("/api/orgs", { name: `ZZ-TEST Org 2736 ${RUN}` })).json.organisation.id as string;
   orgId = org;

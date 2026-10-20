@@ -29,8 +29,8 @@ const named = (p: Pipe, name: string) => p.stages.find((s) => s.name === name)!;
 /** A ZZ-TEST stage at the end of the Proactive pipeline, removed in afterAll if a test left it. */
 async function zzStage(category: "ACTIVE" | "DONE" = "ACTIVE") {
   const id = `st_zz_2736_${RUN}_${seq++}`;
-  // The one direct write: the product has no API that creates a stage (stages are migration-only), so the ZZ-TEST
-  // stage is inserted here. It is removed through DELETE /api/deals/pipelines/:id in afterAll.
+  // Allowed direct DB write (ZZ-TEST setup only): the product has no API that creates a stage (stages are
+  // migration-only), so the ZZ-TEST stage is inserted here. It is removed through DELETE /api/deals/pipelines/:id in afterAll.
   await db.stage.create({ data: { id, pipelineId: pro.id, name: `ZZ-TEST stage ${id}`, position: 100 + seq, category, requiredFields: [] } });
   zzStages.push(id);
   return id;
@@ -178,7 +178,8 @@ describe("qa:TC missing APL-2736 removing a stage asks where its items go", () =
     await mover.connect();
     await watcher.connect();
     try {
-      // The mover puts the deal in the stage and holds its transaction open while the removal runs.
+      // Allowed direct DB write (D1 race transaction only): the mover puts the deal in the stage and holds its
+      // transaction open while the removal runs. An HTTP request cannot hold a transaction open across calls.
       await mover.query("BEGIN");
       await mover.query(`UPDATE "Project" SET "stageId" = $1 WHERE "id" = $2`, [zz, deal]);
       const removing = sa.c.del(`/api/deals/pipelines/${zz}?moveTo=${proposal.id}`);
