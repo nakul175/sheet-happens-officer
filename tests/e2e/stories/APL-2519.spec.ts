@@ -1,11 +1,10 @@
 // [SHO-US-9.2] Cost controls and caps (Linear APL-2519, PR #34). AC6 is the remaining work.
 // Given the Super Admin opens Usage, when the month's spend is recorded, the screen shows spend to date,
 // the monthly ceiling and the percentage used.
-// The percentage is the nearest whole number, and a half goes up. 10 of 80 (12.5) shows 13%.
-// Zero spend shows 0%. Any nonzero share under 1% shows <1%, before rounding. Over 100% shows the
-// real rounded figure, uncapped (120 stays 120%, and 119.5 becomes 120%).
-// PR #34 still prints the one-decimal ceiling.percent, so 10 of 80 shows 12.5% there. These expects
-// fail until that screen is updated. The stub keeps sending that one-decimal figure.
+// AC6 v1.2 (Linear, Michael 19 Oct 2026 20:43 IST; supersedes the AC6 clarification and the v1.1 note): the percentage is
+// the nearest whole number, halves up (10 of 80 shows 13%). Zero spend shows 0%. Any nonzero share under 1% shows "<1%".
+// A ceiling of 0 or unset shows "No ceiling set" and no percentage. Spend over the ceiling shows the rounded percentage
+// (100.40 of 100 shows 100%) plus a visible "Over ceiling" flag. The stub keeps sending the old one-decimal figure.
 // A Member and an Admin are refused. The page does not request /api/usage for them, and no figures are shown.
 // Widths 320, 390 and 1280 keep the spend labels fully on screen, with no sideways scroll.
 // Those checks run when PR #34 is live (tests/e2e/helpers/jim-gate.ts: release SHA, then the heading in the served page)
@@ -13,77 +12,93 @@
 // The plain Member (SHO_MEMBER_*) is promoted to Admin for that one check and put back afterwards.
 import { test, expect, login } from "../support";
 import { notLive, prLive } from "../helpers/jim-gate";
-import { CHAT, apiPercent, expectRefused, figure, fits, percentLabel, sampleUsage, stubUsage, usd, usageCard } from "../helpers/usage-screen";
+import { CHAT, apiPercent, expectRefused, expectSpend, figure, fits, percentLabel, sampleUsage, stubUsage, usd, usageCard } from "../helpers/usage-screen";
 
 const WHY = "the Usage screen still shows calls, tokens and cost, and does not show spend against the monthly ceiling.";
 const WIDTHS = [320, 390, 1280] as const;
 
 test.describe("SHO-US-9.2 / APL-2519", () => {
   test.describe.configure({ timeout: 120_000 });
-  test("AC6: the Super Admin sees spend to date, the monthly ceiling and the percentage used from /api/usage", async ({ admin, later }) => {
-    const gate = await prLive(34, admin, null, later);
-    test.skip(!gate.deployed, notLive(gate, WHY));
+  // AC6 v1.2 (Linear APL-2519, Michael 19 Oct 2026 20:43 IST) fails, never skips, when the screen is missing.
+  // The PR #34 gate only records which build was under test.
+  test("qa:TC missing AC6 v1.2: the Super Admin sees spend to date, the monthly ceiling and the percentage used from /api/usage", async ({ admin, later }) => {
+    await prLive(34, admin, null, later);
     const live = await admin.api.get("/api/usage");
     const body = JSON.stringify(live.json);
     const pass = login("ADMIN").password;
-    expect(live.status, body).toBe(200);
+    expect(live.status, "GET /api/usage").toBe(200);
     expect(body.includes(pass)).toBe(false);
     expect(body.includes(CHAT)).toBe(false);
-    const ceiling = live.json.ceiling as { usd: number; spendUsd: number; percent: number };
+    const ceiling = live.json.ceiling as { usd?: number | null; spendUsd: number };
     expect(typeof ceiling.spendUsd).toBe("number");
-    expect(typeof ceiling.usd).toBe("number");
-    expect(typeof ceiling.percent).toBe("number");
-    const label = percentLabel(ceiling.spendUsd, ceiling.usd);
 
     await admin.page.goto("/usage", { waitUntil: "domcontentloaded" });
-    const card = usageCard(admin.page, "Spend against the monthly ceiling");
-    await expect(card.getByRole("heading", { name: "Spend against the monthly ceiling" })).toBeVisible();
-    await expect(figure(card, "Spend to date")).toHaveText(usd(ceiling.spendUsd));
-    await expect(figure(card, "Monthly ceiling")).toHaveText(usd(ceiling.usd));
-    await expect(figure(card, "Percentage used")).toHaveText(label);
-    const meter = admin.page.getByRole("meter", { name: "Spend against the monthly ceiling" });
-    await expect(meter).toHaveAttribute("aria-valuetext", `${usd(ceiling.spendUsd)} of ${usd(ceiling.usd)}, ${label} used`);
-    const main = await admin.page.locator("main").innerText();
-    expect(main.includes(pass)).toBe(false);
-    expect(main.includes(CHAT)).toBe(false);
+    const main = admin.page.getByRole("main");
+    await expectSpend(main, ceiling.spendUsd, ceiling.usd, percentLabel(ceiling.spendUsd, ceiling.usd));
+    const text = await main.innerText();
+    expect(text.includes(pass)).toBe(false);
+    expect(text.includes(CHAT)).toBe(false);
   });
 
-  test("AC6: the percentage is the nearest whole number, halves up, including under 1% and over 100%", async ({ admin, later }) => {
-    const gate = await prLive(34, admin, null, later);
-    test.skip(!gate.deployed, notLive(gate, WHY));
-    // Each label is the BA rule, not the one-decimal figure the stub still sends.
-    // 0 is 0%. Just under 1% (including 0.5, which would otherwise round to 1) is <1%. Exactly 1% is 1%.
-    // 12.5 halves up to 13, and 12.4 goes to 12. Over 100% stays the real figure: 120, 112.4 to 112, 119.5 to 120.
-    const cases: { spend: number; cap: number; label: string }[] = [
-      { spend: 0, cap: 80, label: "0%" },
-      { spend: 1, cap: 200, label: "<1%" },
-      { spend: 1, cap: 1000, label: "<1%" },
-      { spend: 1, cap: 101, label: "<1%" },
-      { spend: 1, cap: 100, label: "1%" },
+  // Pam's AC6 cases (Linear APL-2519, 18 Oct 2026). Each label is written out, not worked out. The stub still sends the old
+  // one-decimal ceiling.percent, so a screen that echoes it fails.
+  const CASES: { title: string; rows: { spend: number; cap: number | null | undefined; label: string | null }[] }[] = [
+    { title: "qa:TC-US92-753859f9@v2 AC6 v1.2: half rounds up, 10 of 80 shows 13%", rows: [
       { spend: 10, cap: 80, label: "13%" },
-      { spend: 124, cap: 1000, label: "12%" },
-      { spend: 120, cap: 100, label: "120%" },
-      { spend: 112.4, cap: 100, label: "112%" },
-      { spend: 239, cap: 200, label: "120%" },
-    ];
-    for (const [i, row] of cases.entries()) {
-      expect(percentLabel(row.spend, row.cap), `${row.spend} of ${row.cap}`).toBe(row.label);
-      if (i > 0) await admin.page.unrouteAll({ behavior: "ignoreErrors" });
-      await stubUsage(admin.page, sampleUsage({
-        ceiling: { usd: row.cap, spendUsd: row.spend, percent: apiPercent(row.spend, row.cap) },
-        people: [],
-      }));
-      if (i === 0) await admin.page.goto("/usage", { waitUntil: "domcontentloaded" });
-      else await admin.page.reload({ waitUntil: "domcontentloaded" });
-      const card = usageCard(admin.page, "Spend against the monthly ceiling");
-      await expect(figure(card, "Spend to date")).toHaveText(usd(row.spend));
-      await expect(figure(card, "Monthly ceiling")).toHaveText(usd(row.cap));
-      await expect(figure(card, "Percentage used"), `${usd(row.spend)} of ${usd(row.cap)}`).toHaveText(row.label);
-      await expect(admin.page.getByRole("meter", { name: "Spend against the monthly ceiling" }))
-        .toHaveAttribute("aria-valuetext", `${usd(row.spend)} of ${usd(row.cap)}, ${row.label} used`);
-      expect(await admin.page.locator("main").innerText()).not.toContain(CHAT);
-    }
-  });
+      { spend: 12.5, cap: 100, label: "13%" },
+      { spend: 12.49, cap: 100, label: "12%" },
+    ] },
+    { title: "qa:TC-US92-b0d3b0cc@v2 AC6 v1.2: zero spend shows 0%", rows: [
+      { spend: 0, cap: 100, label: "0%" },
+    ] },
+    { title: "qa:TC-US92-b81e727e@v2 AC6 v1.2: a nonzero share below 1%, including 0.5% to under 1%, shows <1%", rows: [
+      { spend: 0.01, cap: 100, label: "<1%" },
+      { spend: 0.49, cap: 100, label: "<1%" },
+      { spend: 0.5, cap: 100, label: "<1%" },
+      { spend: 0.99, cap: 100, label: "<1%" },
+      { spend: 1, cap: 100, label: "1%" },
+    ] },
+    { title: "qa:TC-US92-00534b06@v2 AC6 v1.2: 50%, 99% and 100%, with no Over ceiling flag at exactly the ceiling", rows: [
+      { spend: 50.03, cap: 100, label: "50%" },
+      { spend: 99.49, cap: 100, label: "99%" },
+      { spend: 99.5, cap: 100, label: "100%" },
+      { spend: 100, cap: 100, label: "100%" },
+    ] },
+    { title: "qa:TC-US92-cd463d7f@v2 AC6 v1.2: well over the ceiling shows the rounded percentage plus Over ceiling", rows: [
+      { spend: 113, cap: 100, label: "113%" },
+      { spend: 100.5, cap: 100, label: "101%" },
+      { spend: 250, cap: 100, label: "250%" },
+    ] },
+    { title: "qa:TC-US92-5acadabc@v1 AC6 v1.2: just over the ceiling shows 100% plus Over ceiling", rows: [
+      { spend: 100.4, cap: 100, label: "100%" },
+      { spend: 100.01, cap: 100, label: "100%" },
+    ] },
+    { title: "qa:TC-US92-30f41089@v1 AC6 v1.2: a ceiling of 0 or unset shows No ceiling set and no percentage", rows: [
+      { spend: 10, cap: 0, label: null },
+      { spend: 10, cap: null, label: null },
+      { spend: 10, cap: undefined, label: null },
+      { spend: 0, cap: 0, label: null },
+    ] },
+  ];
+
+  for (const c of CASES) {
+    test(c.title, async ({ admin, later }) => {
+      await prLive(34, admin, null, later);
+      const main = admin.page.getByRole("main");
+      for (const [i, row] of c.rows.entries()) {
+        const what = `${usd(row.spend)} of ${row.cap === undefined ? "no ceiling field" : String(row.cap)}`;
+        expect(percentLabel(row.spend, row.cap), `oracle for ${what}`).toBe(row.label);
+        // An unset ceiling leaves `usd` out of the payload; null and 0 send it.
+        const ceiling = { spendUsd: row.spend, percent: apiPercent(row.spend, row.cap), ...(row.cap === undefined ? {} : { usd: row.cap }) };
+        if (i > 0) await admin.page.unrouteAll({ behavior: "ignoreErrors" });
+        await stubUsage(admin.page, sampleUsage({ ceiling, people: [] }));
+        if (i === 0) await admin.page.goto("/usage", { waitUntil: "domcontentloaded" });
+        else await admin.page.reload({ waitUntil: "domcontentloaded" });
+        await test.step(what, () => expectSpend(main, row.spend, row.cap, row.label));
+        await expect(main).not.toContainText(CHAT);
+      }
+    });
+  }
 
   test("at 320, 390 and 1280 px the spend block does not scroll sideways and the labels stay fully visible", async ({ admin, later }) => {
     test.setTimeout(120_000);
