@@ -19,6 +19,8 @@ export async function proxy(request: NextRequest) {
   // put back `%20`, which is how the query was sent (AC2 v1.5 keeps the query's encoding).
   const sent = new URL(request.url);
   const value = sent.pathname + sent.search.replace(/\+/g, "%20");
+  // Off by default. CI's test server turns it on so the AC2 v1.6 check has the forwarded return path in server.log.
+  if (process.env.RETURN_PATH_LOG === "1") console.info(`[return-path] ${value}`);
   try {
     requestHeaders.set(RETURN_PATH_HEADER, value);
   } catch {

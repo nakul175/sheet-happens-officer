@@ -694,6 +694,11 @@ describe("APL-2652 signed-out redirect", () => {
     expect(existsSync(log), `server log at ${log} (set SERVER_LOG to the running server's log)`).toBe(true);
     // Scan the whole text, not line by line: splitting on LF would hide a raw LF inside a logged value (Pam's D11).
     const text = readFileSync(log, "utf8");
+    // Pam's D12: the scan must have something to look at. `next start` logs no requests, so the server runs with
+    // RETURN_PATH_LOG=1 and the proxy logs the return path it forwards. Each probe must be there, still encoded.
+    for (const encoded of ["a%09b", "a%0Ab", "a%0D%0Ab"]) {
+      expect(text, `server log has the v16-probe line for q=${encoded} (start the server with RETURN_PATH_LOG=1)`).toContain(`[return-path] /tasks/v16-probe?q=${encoded}`);
+    }
     expect(serverLogLeaks(text)).toEqual([]);
   });
 
