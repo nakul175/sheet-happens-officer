@@ -3,6 +3,7 @@ import path from "node:path";
 
 export type Mail = { to: string; subject: string; text: string };
 
+// APL-2929: the sender stays on the old domain until Resend verifies sheethappensofficer.aplyd.org.
 const FROM = process.env.EMAIL_FROM ?? "Sheet Happens Officer <no-reply@sheethappensofficer.com>";
 
 /** The provider refused or could not be reached. Carries only the HTTP status and Resend's error name. */
