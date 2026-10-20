@@ -4,6 +4,7 @@ import Link from "next/link";
 import { Suspense, useEffect, useState } from "react";
 import "./approvals.css";
 import { api, dueLabel, dueState, rowKeys, isOverdue, todayIST, useGet } from "@/components/api";
+import { errorMessage, isVersionConflict } from "@/lib/version-error";
 import { TaskModal } from "@/components/TaskModal";
 import { Pri, Tick } from "@/components/TaskParts";
 import { Confirm, LoadFailed, Skeleton } from "@/components/ui";
@@ -12,7 +13,7 @@ import { StartGuide, guide } from "@/components/extras/StartGuide";
 import { Page, useMe } from "./Shell";
 
 type Item = {
-  id: string; title: string; dueDate: string | null; blocked: boolean; priority: string; canClose: boolean; relation: "ASSIGNEE" | "COLLABORATOR";
+  id: string; title: string; dueDate: string | null; blocked: boolean; priority: string; canClose: boolean; relation: "ASSIGNEE" | "COLLABORATOR"; updatedAt: string;
   project: { id: string; name: string; type?: "PROJECT" | "DEAL"; stage?: string | null }; parent: { id: string; title: string } | null; awaitingApproval: boolean; isIdea?: boolean;
 };
 type NeedsStep = { id: string; name: string; stage: string | null };
@@ -28,11 +29,12 @@ function ApprovalButtons({ t, onDone }: { t: Waiting; onDone: () => void }) {
   const [err, setErr] = useState<string | null>(null);
   async function go(path: "complete" | "send-back", all = false) {
     setBusy(true);
-    const r = await api("POST", `/api/tasks/${t.id}/${path}`, path === "complete" ? { completeAll: all } : {});
+    const r = await api("POST", `/api/tasks/${t.id}/${path}`, path === "complete" ? { completeAll: all, expectedUpdatedAt: t.updatedAt } : {});
     setBusy(false);
     if (r.ok) { setAsk(null); setErr(null); onDone(); }
+    else if (isVersionConflict(r.status, r.data)) { setAsk(null); setErr(errorMessage(r.error, "This task changed while you were editing it.")); onDone(); }
     else if (r.status === 409 && r.data.needsConfirm === "open_subtasks") setAsk(r.data.openSubtasks as number);
-    else setErr(r.error ?? "Could not do that.");
+    else setErr(errorMessage(r.error, "Could not do that."));
   }
   return (
     <span className="aw-act" onClick={(e) => e.stopPropagation()}>
@@ -115,7 +117,7 @@ function Inner() {
   const prompts = done.filter((d) => needs.some((n) => n.id === d.projectId) && !dismissed.includes(d.projectId));
   const row = (t: Item) => (
     <div key={t.id} className="item click" {...rowKeys(() => router.push(`/?task=${t.id}`, { scroll: false }))}>
-      <Tick id={t.id} title={t.title} done={false} allowed={t.canClose} onDone={() => { if (t.project.type === "DEAL") setDone((d) => [...d, { projectId: t.project.id, name: t.project.name }]); reload(); }} />
+      <Tick id={t.id} title={t.title} done={false} allowed={t.canClose} version={t.updatedAt} onStale={reload} onDone={() => { if (t.project.type === "DEAL") setDone((d) => [...d, { projectId: t.project.id, name: t.project.name }]); reload(); }} />
       <div className="t">
         <b className="ttl"><a href={`/tasks/${t.id}`} style={{ color: "inherit", textDecoration: "none" }} onClick={(e) => { e.preventDefault(); }}>{t.title}</a></b>
         <small>{t.parent ? `Subtask of ${t.parent.title} · ` : ""}{t.project.name}</small>

@@ -14,11 +14,13 @@ export const emailField = z
   .refine((e) => ALLOWED_DOMAINS.includes(e.slice(e.lastIndexOf("@") + 1)), { message: DOMAIN_MESSAGE });
 
 // Max 128 so a huge password cannot be used to burn CPU in the hash.
+// abort: Zod runs later checks after a failure. Without it, a too-short or too-long
+// password that also misses a letter or number adds PASSWORD_MESSAGE twice.
 export const passwordField = z
   .string()
-  .min(8, PASSWORD_MESSAGE)
-  .max(128, PASSWORD_MESSAGE)
-  .refine((p) => /[A-Za-z]/.test(p) && /[0-9]/.test(p), { message: PASSWORD_MESSAGE });
+  .min(8, { error: PASSWORD_MESSAGE, abort: true })
+  .max(128, { error: PASSWORD_MESSAGE, abort: true })
+  .refine((p) => /[A-Za-z]/.test(p) && /[0-9]/.test(p), { error: PASSWORD_MESSAGE });
 
 // SHO-US-15.2. Any valid email: the Super Admin decides who is let in.
 export const addPersonInput = z.object({
@@ -90,6 +92,10 @@ export const taskCreate = z.object({
   approverId: z.string().min(1).optional(),
   collaboratorIds: z.array(z.string().min(1)).max(50).optional(),
 });
+// The updatedAt the person saw when they opened the task; a different value means someone else saved first.
+// APL-2669 / APL-2670: kept as unknown so a missing, empty or malformed token is classified
+// only after the caller can see the task. A string schema would answer 400 before that 404.
+const taskVersion = z.unknown().optional();
 export const taskUpdate = z.object({
   title: title.optional(),
   description: z.string().trim().max(20000).nullish(),
@@ -97,15 +103,14 @@ export const taskUpdate = z.object({
   priority: taskPriority.optional(),
   blocked: z.boolean().optional(),
   blockedReason: z.string().trim().max(300).nullish(),
-  // The updatedAt the person saw when they opened the task; a different value means someone else saved first.
-  expectedUpdatedAt: z.string().optional(),
+  expectedUpdatedAt: taskVersion,
 });
-export const taskAssign = z.object({ assigneeId: z.string().min(1), expectedUpdatedAt: z.string().optional() });
+export const taskAssign = z.object({ assigneeId: z.string().min(1), expectedUpdatedAt: taskVersion });
 export const taskCollaborator = z.object({ userId: z.string().min(1) });
-export const taskApprover = z.object({ approverId: z.string().min(1).nullable() });
-export const taskComplete = z.object({ completeAll: z.boolean().optional() });
+export const taskApprover = z.object({ approverId: z.string().min(1).nullable(), expectedUpdatedAt: taskVersion });
+export const taskComplete = z.object({ completeAll: z.boolean().optional(), expectedUpdatedAt: taskVersion });
 export const taskReopen = z.object({ sectionId: z.string().min(1).optional() });
-export const taskMove = z.object({ sectionId: z.string().min(1), completeAll: z.boolean().optional() });
+export const taskMove = z.object({ sectionId: z.string().min(1), completeAll: z.boolean().optional(), expectedUpdatedAt: taskVersion });
 export const taskRestore = z.object({ confirmParent: z.boolean().optional() });
 
 // ---- CRM: organisations and deals (SHO-E10 to SHO-E13) ----

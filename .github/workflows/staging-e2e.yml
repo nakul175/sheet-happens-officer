@@ -1,19 +1,30 @@
-# Story-level Playwright specs (tests/e2e/stories) against staging or a pr1-pr4 preview (input "target", checked against TARGET_ALLOWLIST;
+# Story-level Playwright specs (tests/e2e/stories) against staging or a pr1-pr8 preview (input "target", checked against TARGET_ALLOWLIST;
 # production is refused). Started by hand only (Actions > Staging e2e > Run workflow).
 # The specs live on the branch the run is started from ("Use workflow from", e.g. qa/story-e2e): every job checks out that same commit.
 # Input "specs": space-separated issue ids (APL-2481) or globs (APL-26*, tests/e2e/stories/APL-25*.spec.ts); empty runs every spec.
-# Secrets (repository settings): STAGING_USER, STAGING_PASS, SHO_ADMIN_EMAIL, SHO_ADMIN_PASS, SHO_MEMBER_EMAIL, SHO_MEMBER_PASS,
-# and ZZ_TEST_01_EMAIL / ZZ_TEST_01_PASS ... ZZ_TEST_20_EMAIL / ZZ_TEST_20_PASS (01-05 Super Admins, 06-20 plain Members).
+# Secrets (repository settings): STAGING_USER, STAGING_PASS, SHO_QA_PASS, SHO_ADMIN_EMAIL, SHO_ADMIN_PASS, SHO_MEMBER_EMAIL,
+# SHO_MEMBER_PASS, and ZZ_TEST_01_EMAIL / ZZ_TEST_01_PASS ... ZZ_TEST_20_EMAIL / ZZ_TEST_20_PASS (01-05 Super Admins, 06-20 plain Members).
+# SHO_QA_PASS is the shared password for the nakul17+ story accounts. Without it the harness gate (qa-alias gateFile) fails the spec.
+# Those accounts are a fixed pool of already verified aliases (APL-2748, tests/e2e/helpers/alias-pool.ts): the Super Admin
+# nakul17+zz-sa plus 3 Members per job, nakul17+zz-qa-<QA_SLOT>-1..3. QA_SLOT is the shard's nn, or "serial", so two jobs
+# never share a person. No spec signs up or verifies an account; tests/e2e/tools/provision-aliases.ts sets the pool up once.
 # The previews use the same STAGING_USER / STAGING_PASS basic-auth gate as staging.
 # They reach the jobs as environment variables only and are never echoed. Runs queue in one group so two never run at once.
+# This workflow is workflow_dispatch only. It does not run on pull_request or pull_request_target, so a fork cannot read these secrets.
 #
 # How a run is split:
 #   plan        checks "target" first, then picks the spec files once and splits them into the parallel set and SERIAL_SPECS.
 #               Every shard and the serial job get BASE_URL=https://<target>.
 #   e2e         20 shards of the parallel set (--shard=N/20, workers=1 each). Shard N signs in as ZZ_TEST_NN (SHARD_*), names its
 #               data ZZ-TEST-NN (ZZ_PREFIX), and gets a partner account of the other role (PEER_*). At most max_parallel run at once.
+#               A shard with no tests passes. A shard whose tests were all skipped fails. Each shard uploads its JSON counts.
 #   e2e-serial  the SERIAL_SPECS files, alone, after every shard has finished, as the shared SHO_ADMIN / SHO_MEMBER accounts.
+#               The same per-job rule applies, and it uploads its JSON counts too.
+#   counts      once, after every shard (if: always(), needs plan). Expected count files come from plan:
+#               20 when the parallel matrix runs, plus 1 when serial specs were picked. Fewer files, a failed
+#               download, or a missing-report marker fails the job. It also fails when run is 0 or skipped equals total.
 #   report      merges every job's blob report into one HTML report.
+
 #
 # max_parallel: the staging database is shared with production and allows 25 connections. Do not raise it above 5 until NJ approves
 # a connection pool (PgBouncer) or a bigger database.
@@ -38,7 +49,7 @@ on:
         type: choice
         options: ["off", "retain-on-failure"]
       target:
-        description: "Host to test: staging.sheethappensofficer.com or pr1-pr4.staging.sheethappensofficer.com. Production is refused."
+        description: "Host to test: staging.sheethappensofficer.com or pr1-pr8.staging.sheethappensofficer.com. Production is refused."
         required: false
         default: staging.sheethappensofficer.com
         type: string
@@ -56,8 +67,8 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  # The only hosts a run may target: staging, or Oscar's preview slots pr1-pr4. Matched against the whole host.
-  TARGET_ALLOWLIST: '^(staging\.sheethappensofficer\.com|pr[1-4]\.staging\.sheethappensofficer\.com)$'
+  # The only hosts a run may target: staging, or Oscar's preview slots pr1-pr8. Matched against the whole host.
+  TARGET_ALLOWLIST: '^(staging\.sheethappensofficer\.com|pr[1-8]\.staging\.sheethappensofficer\.com)$'
   # Only for `prisma generate` during npm ci; nothing connects to it.
   DATABASE_URL: postgresql://unused:unused@127.0.0.1:1/unused
   DIRECT_DATABASE_URL: postgresql://unused:unused@127.0.0.1:1/unused
@@ -76,6 +87,7 @@ jobs:
       base_url: ${{ steps.target.outputs.base_url }}
       parallel: ${{ steps.pick.outputs.parallel }}
       serial: ${{ steps.pick.outputs.serial }}
+      expected_counts: ${{ steps.pick.outputs.expected_counts }}
     steps:
       - name: Check the target host
         id: target
@@ -86,7 +98,7 @@ jobs:
             echo "::error::Refusing to run against production ($TARGET)."; exit 1
           fi
           if ! [[ "$TARGET" =~ $TARGET_ALLOWLIST ]]; then
-            echo "::error::Target '$TARGET' is not allowed. Use staging.sheethappensofficer.com or pr1-pr4.staging.sheethappensofficer.com."; exit 1
+            echo "::error::Target '$TARGET' is not allowed. Use staging.sheethappensofficer.com or pr1-pr8.staging.sheethappensofficer.com."; exit 1
           fi
           echo "Target: https://$TARGET"
           echo "base_url=https://$TARGET" >> "$GITHUB_OUTPUT"
@@ -110,6 +122,11 @@ jobs:
           SPECS: ${{ inputs.specs }}
         run: |
           shopt -s nullglob
+          # APL-2883: Vitest story specs (npm test runs them) are never picked. The list is tests/e2e/vitest-specs.cjs, the same
+          # VITEST_SPECS playwright.config.ts ignores; a spec Playwright ignores would only end the run in "No tests found".
+          vitest_specs=$(node -e 'process.stdout.write(require("./tests/e2e/vitest-specs.cjs").vitestSpecFiles().join(" "))')
+          is_vitest() { [[ " $vitest_specs " == *" $(basename "$1") "* ]]; }
+          echo "Vitest story specs, never picked: ${vitest_specs:-none}"
           files=()
           read -ra toks <<< "$SPECS"   # split on spaces without expanding globs against the repo root
           for tok in "${toks[@]}"; do
@@ -124,16 +141,21 @@ jobs:
               pattern="tests/e2e/stories/$tok"
               [[ "$pattern" == *.ts ]] || pattern="$pattern.spec.ts"
             fi
-            matched=()
+            matched=(); vitest_hit=()
             for f in $pattern; do
-              [[ -f "$f" && "$f" == tests/e2e/stories/*.spec.ts ]] && matched+=("$f")
+              [[ -f "$f" && "$f" == tests/e2e/stories/*.spec.ts ]] || continue
+              if is_vitest "$f"; then vitest_hit+=("$f"); else matched+=("$f"); fi
             done
+            if [ ${#matched[@]} -eq 0 ] && [ ${#vitest_hit[@]} -gt 0 ]; then
+              echo "::error::$tok selects only Vitest story specs (${vitest_hit[*]}). npm test runs them; Playwright ignores them (VITEST_SPECS)."; exit 1
+            fi
             if [ ${#matched[@]} -eq 0 ]; then echo "::error::No spec file matches: $tok"; exit 1; fi
+            [ ${#vitest_hit[@]} -eq 0 ] || echo "$tok: left out Vitest story specs ${vitest_hit[*]}"
             files+=("${matched[@]}")
           done
           if [ ${#files[@]} -eq 0 ]; then
-            files=(tests/e2e/stories/*.spec.ts)
-            [ ${#files[@]} -gt 0 ] || { echo "::error::No spec files in tests/e2e/stories on this branch. Start the run from the branch with the specs (e.g. qa/story-e2e)."; exit 1; }
+            for f in tests/e2e/stories/*.spec.ts; do is_vitest "$f" || files+=("$f"); done
+            [ ${#files[@]} -gt 0 ] || { echo "::error::No Playwright spec files in tests/e2e/stories on this branch (Vitest specs are not picked). Start the run from the branch with the specs (e.g. qa/story-e2e)."; exit 1; }
           fi
           parallel=(); serial=()
           for f in $(printf '%s\n' "${files[@]}" | sort -u); do
@@ -144,6 +166,9 @@ jobs:
           echo "Serial job (${#serial[@]} files):"; printf '  %s\n' "${serial[@]}"
           echo "parallel=${parallel[*]}" >> "$GITHUB_OUTPUT"
           echo "serial=${serial[*]}" >> "$GITHUB_OUTPUT"
+          expected=$(node scripts/ci/assert-playwright-ran.mjs --mode expected --parallel "${#parallel[@]}" --serial "${#serial[@]}")
+          echo "Count files expected: $expected"
+          echo "expected_counts=$expected" >> "$GITHUB_OUTPUT"
 
   e2e:
     name: Shard ${{ matrix.nn }} of 20 (${{ matrix.role }})
@@ -153,7 +178,7 @@ jobs:
     timeout-minutes: 120
     strategy:
       fail-fast: false
-      max-parallel: ${{ inputs.max_parallel }}
+      max-parallel: ${{ fromJSON(inputs.max_parallel || '5') }}
       matrix:
         # nn picks the shard's own ZZ_TEST_NN account; peer is the partner of the other role (shard N with N+5, members with 01-05),
         # chosen so no two of any 5 consecutive shards share an account.
@@ -192,6 +217,7 @@ jobs:
           SHO_ADMIN_PASS: ${{ secrets.SHO_ADMIN_PASS }}
           SHO_MEMBER_EMAIL: ${{ secrets.SHO_MEMBER_EMAIL }}
           SHO_MEMBER_PASS: ${{ secrets.SHO_MEMBER_PASS }}
+          SHO_QA_PASS: ${{ secrets.SHO_QA_PASS }}
           SHARD_EMAIL: ${{ secrets[format('ZZ_TEST_{0}_EMAIL', matrix.nn)] }}
           SHARD_PASS: ${{ secrets[format('ZZ_TEST_{0}_PASS', matrix.nn)] }}
           PEER_EMAIL: ${{ secrets[format('ZZ_TEST_{0}_EMAIL', matrix.peer)] }}
@@ -200,7 +226,7 @@ jobs:
           PEER: ${{ matrix.peer }}
         run: |
           missing=""
-          for n in STAGING_USER STAGING_PASS SHO_ADMIN_EMAIL SHO_ADMIN_PASS SHO_MEMBER_EMAIL SHO_MEMBER_PASS; do
+          for n in STAGING_USER STAGING_PASS SHO_ADMIN_EMAIL SHO_ADMIN_PASS SHO_MEMBER_EMAIL SHO_MEMBER_PASS SHO_QA_PASS; do
             [ -n "${!n}" ] || missing="$missing $n"
           done
           [ -n "$SHARD_EMAIL" ] || missing="$missing ZZ_TEST_${NN}_EMAIL"
@@ -238,15 +264,38 @@ jobs:
           SHO_ADMIN_PASS: ${{ secrets.SHO_ADMIN_PASS }}
           SHO_MEMBER_EMAIL: ${{ secrets.SHO_MEMBER_EMAIL }}
           SHO_MEMBER_PASS: ${{ secrets.SHO_MEMBER_PASS }}
+          SHO_QA_PASS: ${{ secrets.SHO_QA_PASS }}
+          QA_SLOT: ${{ matrix.nn }}
           SHARD_EMAIL: ${{ secrets[format('ZZ_TEST_{0}_EMAIL', matrix.nn)] }}
           SHARD_PASS: ${{ secrets[format('ZZ_TEST_{0}_PASS', matrix.nn)] }}
           PEER_EMAIL: ${{ secrets[format('ZZ_TEST_{0}_EMAIL', matrix.peer)] }}
           PEER_PASS: ${{ secrets[format('ZZ_TEST_{0}_PASS', matrix.peer)] }}
+          PLAYWRIGHT_JSON_OUTPUT_FILE: playwright-report.json
           FILES: ${{ needs.plan.outputs.parallel }}
           TRACE: ${{ inputs.trace }}
         run: |
           read -ra files <<< "$FILES"
-          npx playwright test --shard=${{ matrix.shard }}/20 --workers=1 --reporter=list,blob --trace="$TRACE" "${files[@]}"
+          # @static is a file-contains check. @manual cannot force a job failure on staging. Neither is a live pass.
+          npx playwright test --shard=${{ matrix.shard }}/20 --workers=1 --grep-invert "@static|@manual" --reporter=list,blob,json --trace="$TRACE" "${files[@]}"
+
+      - name: Fail this shard when every test was skipped
+        if: always()
+        run: |
+          if [ ! -f scripts/ci/assert-playwright-ran.mjs ]; then
+            printf '%s\n' '{"missing":true}' > playwright-counts.json
+            echo "Missing Playwright JSON report (missing=true): count check script is not on disk."
+            exit 0
+          fi
+          node scripts/ci/assert-playwright-ran.mjs --mode shard --report playwright-report.json --counts-out playwright-counts.json
+
+      - name: Upload shard counts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-counts-${{ matrix.nn }}
+          path: playwright-counts.json
+          if-no-files-found: error
+          retention-days: 14
 
       - name: Upload the blob report
         if: always()
@@ -276,16 +325,17 @@ jobs:
           SHO_ADMIN_PASS: ${{ secrets.SHO_ADMIN_PASS }}
           SHO_MEMBER_EMAIL: ${{ secrets.SHO_MEMBER_EMAIL }}
           SHO_MEMBER_PASS: ${{ secrets.SHO_MEMBER_PASS }}
+          SHO_QA_PASS: ${{ secrets.SHO_QA_PASS }}
         run: |
           missing=""
-          for n in STAGING_USER STAGING_PASS SHO_ADMIN_EMAIL SHO_ADMIN_PASS SHO_MEMBER_EMAIL SHO_MEMBER_PASS; do
+          for n in STAGING_USER STAGING_PASS SHO_ADMIN_EMAIL SHO_ADMIN_PASS SHO_MEMBER_EMAIL SHO_MEMBER_PASS SHO_QA_PASS; do
             [ -n "${!n}" ] || missing="$missing $n"
           done
           if [ -n "$missing" ]; then
             echo "::error::Missing repository secrets:$missing. Add them in Settings > Secrets and variables > Actions."
             exit 1
           fi
-          echo "All six secrets are set."
+          echo "All required secrets are set."
 
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -303,11 +353,34 @@ jobs:
           SHO_ADMIN_PASS: ${{ secrets.SHO_ADMIN_PASS }}
           SHO_MEMBER_EMAIL: ${{ secrets.SHO_MEMBER_EMAIL }}
           SHO_MEMBER_PASS: ${{ secrets.SHO_MEMBER_PASS }}
+          SHO_QA_PASS: ${{ secrets.SHO_QA_PASS }}
+          QA_SLOT: serial
+          PLAYWRIGHT_JSON_OUTPUT_FILE: playwright-report.json
           FILES: ${{ needs.plan.outputs.serial }}
           TRACE: ${{ inputs.trace }}
         run: |
           read -ra files <<< "$FILES"
-          npx playwright test --workers=1 --reporter=list,blob --trace="$TRACE" "${files[@]}"
+          # @static is a file-contains check. @manual cannot force a job failure on staging. Neither is a live pass.
+          npx playwright test --workers=1 --grep-invert "@static|@manual" --reporter=list,blob,json --trace="$TRACE" "${files[@]}"
+
+      - name: Fail the serial job when every test was skipped
+        if: always()
+        run: |
+          if [ ! -f scripts/ci/assert-playwright-ran.mjs ]; then
+            printf '%s\n' '{"missing":true}' > playwright-counts.json
+            echo "Missing Playwright JSON report (missing=true): count check script is not on disk."
+            exit 0
+          fi
+          node scripts/ci/assert-playwright-ran.mjs --mode shard --report playwright-report.json --counts-out playwright-counts.json
+
+      - name: Upload serial counts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-counts-serial
+          path: playwright-counts.json
+          if-no-files-found: error
+          retention-days: 14
 
       - name: Upload the blob report
         if: always()
@@ -317,6 +390,23 @@ jobs:
           path: blob-report/
           if-no-files-found: ignore
           retention-days: 14
+
+  counts:
+    name: Fail when nothing ran
+    needs: [plan, e2e, e2e-serial]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: playwright-counts-*
+          path: shard-counts
+      - name: Merge the shard counts
+        env:
+          EXPECTED_COUNTS: ${{ needs.plan.outputs.expected_counts }}
+        run: node scripts/ci/assert-playwright-ran.mjs --mode aggregate --dir shard-counts --expected "$EXPECTED_COUNTS"
 
   report:
     name: Merge the reports

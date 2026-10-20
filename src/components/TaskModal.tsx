@@ -2,13 +2,16 @@
 import Link from "next/link";
 import { useState } from "react";
 import { PRIORITY, ROLE, api, dueLabel, useGet } from "@/components/api";
+import { BLOCKED_REASON_MAX_LENGTH, blockedReasonRef, fitBlockedReason } from "@/components/blocked-reason";
+import { errorMessage, isVersionConflict, versionConflictMessage } from "@/lib/version-error";
 import { Confirm, Modal, Skeleton } from "@/components/ui";
 import { ConvertDialog } from "@/components/ConvertDialog";
 import { TaskLinks } from "@/components/TaskLinks";
+import { closeControlOffered } from "@/lib/approver-ui";
 import { useMe } from "@/app/(app)/Shell";
 
 type P = { id: string; name: string };
-type Sub = { id: string; title: string; completedAt: string | null; canClose: boolean };
+type Sub = { id: string; title: string; completedAt: string | null; canClose: boolean; updatedAt: string };
 type Task = {
   id: string; projectId: string; parentId: string | null; createdById: string; title: string; description: string | null; priority: string;
   dueDate: string | null; blocked: boolean; blockedReason: string | null; completedAt: string | null; isIdea?: boolean;
@@ -57,6 +60,7 @@ export function TaskModal({ id, me, onClose, onChanged, asPage }: { id: string; 
   const workers = project?.members.filter((m) => m.active && (m.role === "LEADER" || m.role === "EDITOR")) ?? [];
   const everyone = project?.members.filter((m) => m.active) ?? [];
   const done = !!task.completedAt;
+  const version = task.updatedAt; // APL-2668: every change is made on the version the modal shows
 
   async function run(r: Promise<{ ok: boolean; status: number; error?: string; data: Record<string, any> }>, after?: () => void) { // eslint-disable-line @typescript-eslint/no-explicit-any
     setBusy(true);
@@ -66,17 +70,17 @@ export function TaskModal({ id, me, onClose, onChanged, asPage }: { id: string; 
       setErr(null); setStale(null); setLost(null); after?.(); t.reload(); onChanged?.();
       return res;
     }
-    if (res.status === 409 && res.data.stale) {
-      setStale(`${res.data.changedBy ?? "Someone"} changed this task while you were editing. Your change was not saved; the fields now show the current values.`);
+    if (isVersionConflict(res.status, res.data)) {
+      setStale(`${errorMessage(res.error, versionConflictMessage(null))} Your change was not saved; the fields now show the current values.`);
       t.reload();
     } else if (res.status === 409 && res.data.needsConfirm === "open_subtasks") {
       return res;
-    } else setErr(res.error ?? "Something went wrong.");
+    } else setErr(errorMessage(res.error, "Something went wrong."));
     return res;
   }
   const save = async (patch: Record<string, unknown>) => {
     const res = await run(api("PATCH", `/api/tasks/${id}`, { ...patch, expectedUpdatedAt: task.updatedAt }));
-    if (res && !res.ok && res.status === 409 && res.data.stale) setLost(patch);
+    if (res && !res.ok && isVersionConflict(res.status, res.data)) setLost(patch);
     return res;
   };
   const LABEL: Record<string, string> = { title: "Title", description: "Description", dueDate: "Due date", priority: "Priority", blocked: "Blocked", blockedReason: "Blocked reason" };
@@ -84,11 +88,11 @@ export function TaskModal({ id, me, onClose, onChanged, asPage }: { id: string; 
     Object.entries(patch).filter(([k]) => LABEL[k]).map(([k, v]) => `${LABEL[k]}: ${v === null || v === "" ? "(cleared)" : typeof v === "boolean" ? (v ? "Yes" : "No") : k === "priority" ? PRIORITY[String(v)] ?? String(v) : `"${String(v)}"`}`).join(", ");
 
   async function complete(all = false) {
-    const res = await run(api("POST", `/api/tasks/${id}/complete`, { completeAll: all }), () => setConfirm(null));
+    const res = await run(api("POST", `/api/tasks/${id}/complete`, { completeAll: all, expectedUpdatedAt: version }), () => setConfirm(null));
     if (res && !res.ok && res.status === 409 && res.data.needsConfirm === "open_subtasks") setConfirm({ kind: "complete", n: res.data.openSubtasks });
   }
   async function move(sectionId: string, all = false) {
-    const res = await run(api("POST", `/api/tasks/${id}/move`, { sectionId, completeAll: all }), () => setConfirm(null));
+    const res = await run(api("POST", `/api/tasks/${id}/move`, { sectionId, completeAll: all, expectedUpdatedAt: version }), () => setConfirm(null));
     if (res && !res.ok && res.status === 409 && res.data.needsConfirm === "open_subtasks") setConfirm({ kind: "move", n: res.data.openSubtasks, sectionId });
   }
 
@@ -135,7 +139,7 @@ export function TaskModal({ id, me, onClose, onChanged, asPage }: { id: string; 
             <div>
               {canEdit && !holding ? (
                 <select className="in" aria-label="Assignee" value={task.assignee.id} disabled={busy}
-                  onChange={(e) => run(api("POST", `/api/tasks/${id}/assign`, { assigneeId: e.target.value }))}>
+                  onChange={(e) => run(api("POST", `/api/tasks/${id}/assign`, { assigneeId: e.target.value, expectedUpdatedAt: version }))}>
                   {!workers.some((w) => w.userId === task.assignee.id) && <option value={task.assignee.id}>{task.assignee.name}</option>}
                   {workers.map((w) => <option key={w.userId} value={w.userId}>{w.name}</option>)}
                 </select>
@@ -161,7 +165,7 @@ export function TaskModal({ id, me, onClose, onChanged, asPage }: { id: string; 
             <div>
               {(canManage || task.createdById === me) && canEdit && !task.awaitingApproval && !task.parentId && task.assignee.id !== me ? (
                 <select className="in" aria-label="Approver" value={task.approver?.id ?? ""} disabled={busy}
-                  onChange={(e) => run(api("PUT", `/api/tasks/${id}/approver`, { approverId: e.target.value || null }))}>
+                  onChange={(e) => run(api("PUT", `/api/tasks/${id}/approver`, { approverId: e.target.value || null, expectedUpdatedAt: version }))}>
                   <option value="">None</option>
                   {workers.filter((w) => w.userId !== task.assignee.id).map((w) => <option key={w.userId} value={w.userId}>{w.name}</option>)}
                 </select>
@@ -202,11 +206,12 @@ export function TaskModal({ id, me, onClose, onChanged, asPage }: { id: string; 
               {canEdit && !holding ? (
                 <label className="pills"><input type="checkbox" checked={task.blocked} disabled={busy} onChange={(e) => save({ blocked: e.target.checked, ...(e.target.checked ? {} : { blockedReason: null }) })} /> This task is blocked</label>
               ) : task.blocked ? "Yes" : "No"}
-              {task.blocked && (
-                canEdit && !holding ? (
-                  <textarea className="in" rows={2} style={{ marginTop: 6, minHeight: 0 }} aria-label="Why is it blocked?" placeholder="Why is it blocked?" defaultValue={task.blockedReason ?? ""} key={task.updatedAt}
-                    onBlur={(e) => { if ((e.target.value || null) !== (task.blockedReason ?? null)) save({ blockedReason: e.target.value || null }); }} />
-                ) : task.blockedReason ? <div className="hint">{task.blockedReason}</div> : null
+              {task.blocked && ((canEdit && !holding) || task.blockedReason) && (
+                <textarea className="in blocked-reason" rows={1} readOnly={!canEdit || holding} aria-label="Why is it blocked?" maxLength={BLOCKED_REASON_MAX_LENGTH}
+                  placeholder={canEdit && !holding ? "Why is it blocked?" : undefined} defaultValue={task.blockedReason ?? ""} key={task.updatedAt}
+                  ref={blockedReasonRef}
+                  onInput={(e) => fitBlockedReason(e.currentTarget)}
+                  onBlur={(e) => { if (!canEdit || holding) return; if ((e.target.value || null) !== (task.blockedReason ?? null)) save({ blockedReason: e.target.value || null }); }} />
               )}
             </div>
           </div>
@@ -221,7 +226,7 @@ export function TaskModal({ id, me, onClose, onChanged, asPage }: { id: string; 
               {task.subtaskList.map((s) => (
                 <label className="sub-item" key={s.id}>
                   <input type="checkbox" aria-label={`Mark "${s.title}" ${s.completedAt ? "not done" : "done"}`} checked={!!s.completedAt} disabled={!canEdit || busy || (!s.canClose && !s.completedAt)}
-                    onChange={() => run(api("POST", `/api/tasks/${s.id}/${s.completedAt ? "reopen" : "complete"}`, {}))} />
+                    onChange={() => run(api("POST", `/api/tasks/${s.id}/${s.completedAt ? "reopen" : "complete"}`, s.completedAt ? {} : { expectedUpdatedAt: s.updatedAt }))} />
                   <span style={s.completedAt ? { textDecoration: "line-through", color: "var(--muted)" } : undefined}>{s.title}</span>
                 </label>
               ))}
@@ -249,7 +254,7 @@ export function TaskModal({ id, me, onClose, onChanged, asPage }: { id: string; 
             {canEdit && task.awaitingApproval && (task.approver?.id === me || canManage) && (
               <button className="btn ghost" disabled={busy} onClick={() => run(api("POST", `/api/tasks/${id}/send-back`, {}))}>Send back</button>
             )}
-            {canEdit && !done && task.canClose && (
+            {closeControlOffered({ canEdit, done, canClose: task.canClose }) && (
               <button className="btn" disabled={busy} onClick={() => complete()}>{task.approver ? "Close task" : "Mark complete"}</button>
             )}
             {canEdit && done && <button className="btn ghost" disabled={busy} onClick={() => run(api("POST", `/api/tasks/${id}/reopen`, {}))}>Reopen</button>}
