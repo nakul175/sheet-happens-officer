@@ -4,46 +4,34 @@
 // Thrown-away people and projects use ZZ-TEST names and a nakul17+ alias. afterAll hands each project
 // to the Super Admin, archives it and deactivates the person, all through the API (tests/zz-test-data.ts).
 // No qa:TC id is assigned on the issue, so every title says qa:TC missing.
-import { existsSync } from "node:fs";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { chromium, type Browser, type Page } from "playwright-core";
+// Playwright (APL-2911): ci.yml runs it against the CI server after npm test. People, projects, tasks and cleanup go
+// through ../local-api, the same calls as tests/helpers.ts and tests/zz-test-data.ts without a vitest import.
+import { expect, test, type Browser, type Page } from "@playwright/test";
 import { assertStoryTargetAllowed } from "../base-url";
-import { PW, task, withVersion, type Account } from "../../helpers";
-import { zzTestData, type ZzProject } from "../../zz-test-data";
+import { BASE, PW, task, withVersion, zzTestData, type Account, type ZzProject } from "../local-api";
 
-const BASE = process.env.TASKBOARD_URL ?? "http://localhost:3000";
 assertStoryTargetAllowed(process.env, BASE);
-
-function chromePath() {
-  const fromEnv = process.env.PW_CHROMIUM;
-  if (fromEnv && existsSync(fromEnv)) return fromEnv;
-  for (const p of ["/usr/bin/google-chrome", "/usr/bin/google-chrome-stable", "/usr/local/bin/google-chrome", "/usr/bin/chromium", "/usr/bin/chromium-browser"]) {
-    if (existsSync(p)) return p;
-  }
-  throw new Error("No Chrome/Chromium binary. Set PW_CHROMIUM.");
-}
 
 const zz = zzTestData("2721e2e");
 
 let browser: Browser;
 let lead: Account;
 
-beforeAll(async () => {
+// The browser is Playwright's own (playwright.config.ts: PW_CHROMIUM or the installed Chromium).
+test.beforeAll(async ({ browser: b }) => {
+  test.setTimeout(180000);
   if (!/^(localhost|127\.0\.0\.1)$/.test(new URL(BASE).hostname)) {
     throw new Error(`Refusing to run against ${BASE}: this spec is local only.`);
   }
-  browser = await chromium.launch({
-    executablePath: chromePath(),
-    args: ["--no-sandbox", "--disable-dev-shm-usage"],
-  });
+  browser = b;
   lead = await zz.person("lead");
-}, 180000);
+});
 
-afterAll(async () => {
-  await browser?.close();
+test.afterAll(async () => {
+  test.setTimeout(120000);
   const problems = await zz.cleanUp();
   expect(problems, problems.join("\n")).toEqual([]);
-}, 120000);
+});
 
 const zzProject = (): Promise<ZzProject> => zz.project(lead);
 
@@ -89,9 +77,9 @@ async function openTask(page: Page, title: string) {
   return page.getByRole("dialog", { name: "Task" });
 }
 
-// npm test runs this file too, where the default test timeout is 30 s.
-describe("qa:TC missing APL-2721 done flag on the project page", { timeout: 180000 }, () => {
-  it("qa:TC missing cascaded subtasks reopen with their parent", async () => {
+test.describe("qa:TC missing APL-2721 done flag on the project page", () => {
+  test.describe.configure({ timeout: 180000 });
+  test("qa:TC missing cascaded subtasks reopen with their parent", async () => {
     const proj = await zzProject();
     const parent = await task(lead, proj.id, { title: "ZZ-TEST Parent P", sectionId: proj.doing });
     await task(lead, proj.id, { title: "ZZ-TEST Sub A", parentId: parent });
@@ -117,7 +105,7 @@ describe("qa:TC missing APL-2721 done flag on the project page", { timeout: 1800
     }
   });
 
-  it("qa:TC missing a subtask ticked done on its own stays done", async () => {
+  test("qa:TC missing a subtask ticked done on its own stays done", async () => {
     const flag = await zzProject();
     const parent = await task(lead, flag.id, { title: "ZZ-TEST Parent flag", sectionId: flag.doing });
     await task(lead, flag.id, { title: "ZZ-TEST Sub A flag", parentId: parent });
@@ -152,7 +140,7 @@ describe("qa:TC missing APL-2721 done flag on the project page", { timeout: 1800
     }
   });
 
-  it("qa:TC missing a trashed parent stays complete in its original section", async () => {
+  test("qa:TC missing a trashed parent stays complete in its original section", async () => {
     const proj = await zzProject();
     const title = "ZZ-TEST Parent T";
     const trashed = await task(lead, proj.id, { title, sectionId: proj.doing });
