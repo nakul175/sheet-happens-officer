@@ -5,12 +5,13 @@
 // Local only: it reads the emailed passwords from EMAIL_OUTBOX_DIR, so TASKBOARD_URL must be localhost.
 // That check refuses production too, without reading the process image as ../base-url does.
 // Thrown-away people use ZZ-TEST names and nakul17+zz-…@aplyd.com aliases; afterAll deactivates them.
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+// Playwright (APL-2911): ci.yml runs it against the CI server after npm test. The API calls go through ../local-api,
+// which has no vitest import, so Playwright can load this file.
+import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { chromium, type Browser, type Locator, type Page } from "playwright-core";
+import { expect, test, type Browser, type Locator, type Page } from "@playwright/test";
 import { signInDetailsMail } from "@/lib/email";
-import { account, BASE, Client, OUTBOX, PW, superAdmin, type Account } from "../../helpers";
+import { account, BASE, Client, OUTBOX, PW, superAdmin, type Account } from "../local-api";
 
 const WALL = "Set your own password";
 const REPLACE = "The person must replace it with their own when they first sign in.";
@@ -75,12 +76,12 @@ async function signIn(page: Page, email: string, password: string, ok = true) {
   return { status: res.status(), json: await res.json() };
 }
 
-// The runner is vitest with playwright-core, so there are no web-first matchers. These wait the same way.
+// Each waits as it did under vitest: a count of 0 includes hidden elements, and text is matched across every match.
 const visible = (l: Locator) => l.waitFor({ state: "visible" });
 const gone = (l: Locator, msg?: string) => expect.poll(() => l.count(), { message: msg, timeout: 10000 }).toBe(0);
 const hasText = (l: Locator, text: string) => expect.poll(async () => (await l.allTextContents()).join(" "), { timeout: 10000 }).toContain(text);
 // Both the side drawer (aside) and the phone tab bar (nav) are labelled Main. Counting all of them avoids picking one by position.
-const nav = (page: Page) => page.locator('[aria-label="Main"]');
+const nav = (page: Page) => page.getByLabel("Main", { exact: true });
 
 async function expectWall(page: Page, url: string) {
   await page.goto(url);
@@ -90,7 +91,7 @@ async function expectWall(page: Page, url: string) {
 
 async function expectApp(page: Page, url: string) {
   await page.goto(url);
-  await page.locator('aside[aria-label="Main"]').waitFor({ state: "attached" });
+  await page.getByRole("complementary", { name: "Main", exact: true, includeHidden: true }).waitFor({ state: "attached" });
   await gone(page.getByRole("heading", { name: WALL }), url);
 }
 
@@ -101,30 +102,22 @@ async function setOwn(page: Page, emailed: string, next: string) {
   await page.getByRole("button", { name: "Save and continue" }).click();
 }
 
-function chromePath() {
-  const fromEnv = process.env.PW_CHROMIUM;
-  if (fromEnv && existsSync(fromEnv)) return fromEnv;
-  for (const p of ["/usr/bin/google-chrome", "/usr/bin/google-chrome-stable", "/usr/bin/chromium", "/usr/bin/chromium-browser"]) {
-    if (existsSync(p)) return p;
-  }
-  throw new Error("No Chrome/Chromium binary. Set PW_CHROMIUM.");
-}
-
-describe("qa:TC missing APL-2624 a Super-Admin-issued password must be changed at first sign-in", () => {
-  beforeAll(async () => {
+test.describe("qa:TC missing APL-2624 a Super-Admin-issued password must be changed at first sign-in", { tag: "@local-only" }, () => {
+  // The browser is Playwright's own (playwright.config.ts: PW_CHROMIUM or the installed Chromium).
+  test.beforeAll(async ({ browser: b }) => {
+    test.setTimeout(180000);
     if (!/^(localhost|127\.0\.0\.1)$/.test(new URL(BASE).hostname)) {
       throw new Error(`Refusing to run against ${BASE}: this spec is local only.`);
     }
-    browser = await chromium.launch({ executablePath: chromePath(), args: ["--no-sandbox"] });
+    browser = b;
     admin = await superAdmin();
-  }, 180000);
+  });
 
-  afterAll(async () => {
-    await browser?.close();
+  test.afterAll(async () => {
     for (const id of created) await admin?.c.post(`/api/team/${id}/deactivate`, { reassign: "leaders" });
   });
 
-  it("qa:TC missing AC1: after signing in on an emailed password every screen but Set your own password and Sign out is blocked", async () => {
+  test("qa:TC missing AC1: after signing in on an emailed password every screen but Set your own password and Sign out is blocked", async () => {
     const { email, password } = await issued();
     const page = await openPage();
     await signIn(page, email, password);
@@ -134,7 +127,7 @@ describe("qa:TC missing APL-2624 a Super-Admin-issued password must be changed a
     await page.context().close();
   });
 
-  it("qa:TC missing AC2: a valid new password opens the asked-for page and the emailed password stops working", async () => {
+  test("qa:TC missing AC2: a valid new password opens the asked-for page and the emailed password stops working", async () => {
     const { email, password } = await issued();
     const page = await openPage();
     await signIn(page, email, password);
@@ -155,7 +148,7 @@ describe("qa:TC missing APL-2624 a Super-Admin-issued password must be changed a
     await next.context().close();
   });
 
-  it("qa:TC missing AC3: a new password equal to the emailed one is refused with a clear message", async () => {
+  test("qa:TC missing AC3: a new password equal to the emailed one is refused with a clear message", async () => {
     const { email, password } = await issued();
     const page = await openPage();
     await signIn(page, email, password);
@@ -166,7 +159,7 @@ describe("qa:TC missing APL-2624 a Super-Admin-issued password must be changed a
     await page.context().close();
   });
 
-  it("qa:TC missing AC4: in the forced state the server refuses app APIs, but not change-password, sign-out or me", async () => {
+  test("qa:TC missing AC4: in the forced state the server refuses app APIs, but not change-password, sign-out or me", async () => {
     const { email, password } = await issued();
     const page = await openPage();
     await signIn(page, email, password);
@@ -200,7 +193,7 @@ describe("qa:TC missing APL-2624 a Super-Admin-issued password must be changed a
     await page.context().close();
   });
 
-  it("qa:TC missing AC5: Resend sign-in details forces the change again, and the old emailed password stops working", async () => {
+  test("qa:TC missing AC5: Resend sign-in details forces the change again, and the old emailed password stops working", async () => {
     const { email, password, id } = await issued();
     const page = await openPage();
     await signIn(page, email, password);
@@ -222,7 +215,7 @@ describe("qa:TC missing APL-2624 a Super-Admin-issued password must be changed a
     await old.context().close();
   });
 
-  it("qa:TC missing AC6: a person who signed up with their own password is never forced", async () => {
+  test("qa:TC missing AC6: a person who signed up with their own password is never forced", async () => {
     const own = await ownPassword();
     const page = await openPage();
     await signIn(page, own.email, PW);
@@ -230,7 +223,7 @@ describe("qa:TC missing APL-2624 a Super-Admin-issued password must be changed a
     await page.context().close();
   });
 
-  it("qa:TC missing AC6: a person who reset their password with Forgot password is never forced", async () => {
+  test("qa:TC missing AC6: a person who reset their password with Forgot password is never forced", async () => {
     const { email, password } = await issued();
     expect((await new Client().post("/api/auth/forgot-password", { email })).status).toBe(200);
     const token = resetToken(email);
@@ -251,7 +244,7 @@ describe("qa:TC missing APL-2624 a Super-Admin-issued password must be changed a
     await old.context().close();
   });
 
-  it("qa:TC missing AC7: the Add person dialog and the sign-in email say the password is temporary, with no closable banner", async () => {
+  test("qa:TC missing AC7: the Add person dialog and the sign-in email say the password is temporary, with no closable banner", async () => {
     const mail = signInDetailsMail("nakul17+zz-2624-e2e-copy@aplyd.com", "ZZ-TEST", "A Super Admin", "TempPass1234");
     expect(mail.text).toContain("This password is temporary.");
     expect(mail.text).not.toMatch(/stays valid/i);
@@ -275,7 +268,7 @@ describe("qa:TC missing APL-2624 a Super-Admin-issued password must be changed a
     await forced.context().close();
   });
 
-  it("qa:TC missing AC8: the sign-in answer says mustChangePassword, true on an emailed password and false on their own", async () => {
+  test("qa:TC missing AC8: the sign-in answer says mustChangePassword, true on an emailed password and false on their own", async () => {
     const { email, password } = await issued();
     const page = await openPage();
     const first = await signIn(page, email, password);
