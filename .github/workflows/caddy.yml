@@ -1,0 +1,23 @@
+# Dry-run the Caddyfile. Does not deploy and does not use a production secret.
+name: Caddy config
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: caddy validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Validate and format-check
+        run: bash scripts/caddy/validate.sh
