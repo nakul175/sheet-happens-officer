@@ -8,8 +8,9 @@ export const QA_PASS = process.env.SHO_QA_PASS ?? "";
 
 export type Answer = { status: number; text: string; json: Record<string, unknown> | null; cookie: string };
 
-/** One JSON call. Keeps the sho_session cookie the server sets, or the one passed in. */
-export async function call(base: string, cookie: string, method: string, p: string, body?: unknown): Promise<Answer> {
+/** One JSON call. Keeps the sho_session cookie the server sets, or the one passed in.
+ *  Fails if the reply contains `secret`: SHO_QA_PASS by default, or the password signUpAlias was given (APL-2901). */
+export async function call(base: string, cookie: string, method: string, p: string, body?: unknown, secret = QA_PASS): Promise<Answer> {
   const res = await fetch(base + p, {
     method,
     headers: { "content-type": "application/json", ...(cookie ? { cookie } : {}) },
@@ -18,7 +19,7 @@ export async function call(base: string, cookie: string, method: string, p: stri
   const sets = typeof res.headers.getSetCookie === "function" ? res.headers.getSetCookie() : [];
   const session = sets.map((line) => line.split(";")[0]).find((line) => line.startsWith("sho_session="));
   const text = await res.text();
-  if (QA_PASS && text.includes(QA_PASS)) throw new Error(`${method} ${p} echoed the password`);
+  if (secret && text.includes(secret)) throw new Error(`${method} ${p} echoed the password`);
   const json = text && res.headers.get("content-type")?.includes("json") ? (JSON.parse(text) as Record<string, unknown>) : null;
   return { status: res.status, text, json, cookie: session ?? cookie };
 }
@@ -31,16 +32,17 @@ function verifyToken(outbox: string, email: string) {
 }
 
 /** Signs up, verifies and signs in a new nakul17+ alias on a local server whose mail goes to `outbox`.
- *  `password` defaults to SHO_QA_PASS; local-alias.test.ts passes a ZZ-TEST value so it runs without SHO_QA_PASS. */
+ *  `password` defaults to SHO_QA_PASS; local-alias.test.ts passes a ZZ-TEST value so it runs without SHO_QA_PASS.
+ *  Every call checks its reply for that same password, whichever path supplied it (APL-2901). */
 export async function signUpAlias(base: string, outbox: string, email: string, name: string, password = QA_PASS) {
   if (!password) throw new Error("Set SHO_QA_PASS (the password for nakul17+ aliases).");
-  const created = await call(base, "", "POST", "/api/auth/signup", { name, email, password });
+  const created = await call(base, "", "POST", "/api/auth/signup", { name, email, password }, password);
   if (created.status !== 201) throw new Error(`signup ${email}: ${created.status}`);
   const token = verifyToken(outbox, email);
   if (!token) throw new Error(`no verification mail for ${email}`);
-  const verified = await call(base, "", "POST", "/api/auth/verify", { token });
+  const verified = await call(base, "", "POST", "/api/auth/verify", { token }, password);
   if (verified.status !== 200) throw new Error(`verify ${email}: ${verified.status}`);
-  const signed = await call(base, "", "POST", "/api/auth/signin", { email, password });
+  const signed = await call(base, "", "POST", "/api/auth/signin", { email, password }, password);
   if (signed.status !== 200) throw new Error(`signin ${email}: ${signed.status}`);
   const user = signed.json?.user as { id: string; orgRole: string };
   return { id: user.id, orgRole: user.orgRole, name, email, cookie: signed.cookie };

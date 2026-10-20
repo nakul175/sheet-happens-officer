@@ -13,6 +13,8 @@ export const QA_ADMIN_NAME = "ZZ-TEST QA Admin";
 export const PER_SLOT = 3;
 export const SHARD_SLOTS = Array.from({ length: 20 }, (_, i) => String(i + 1).padStart(2, "0"));
 export const SLOTS = [...SHARD_SLOTS, "serial", "local"] as const;
+/** Every pool Member across every slot: 22 slots of 3. The create-mode run must account for all of them. */
+export const POOL_SIZE = SLOTS.length * PER_SLOT;
 
 export type PoolPerson = { email: string; name: string; slot: string; index: number };
 
@@ -49,7 +51,7 @@ export function parseSlots(raw: string | undefined): string[] {
   return [...new Set(out)];
 }
 
-const PRODUCTION_HOSTS = new Set(["sheethappensofficer.com", "www.sheethappensofficer.com", "app.sheethappensofficer.com", "168.144.144.69"]);
+const PRODUCTION_HOSTS = new Set(["sheethappensofficer.com", "www.sheethappensofficer.com", "app.sheethappensofficer.com", "sheethappensofficer.aplyd.org", "168.144.144.69"]);
 const ALLOWED_HOST = /^(staging\.sheethappensofficer\.com|pr[1-4]\.staging\.sheethappensofficer\.com|localhost|127\.0\.0\.1)$/;
 
 /** The provisioning script's target. Staging, a pr1-pr4 preview or this machine; production and everything else are refused. */
@@ -63,6 +65,15 @@ export function provisionTarget(raw: string | undefined): URL {
   const local = host === "localhost" || host === "127.0.0.1";
   if (!local && url.protocol !== "https:") throw new Error("Use https for a remote host.");
   return new URL(url.origin);
+}
+
+export const STAGING_HOST = "staging.sheethappensofficer.com";
+
+/** The create-mode target: staging itself only. A pr1-pr4 preview, localhost and production are all refused. */
+export function stagingOnlyTarget(raw: string | undefined): URL {
+  const url = provisionTarget(raw);
+  if (url.hostname !== STAGING_HOST) throw new Error(`Refusing host ${url.hostname}: create mode runs against ${STAGING_HOST} only.`);
+  return url;
 }
 
 /** True when `text` carries none of the secrets. Use before printing any server text. */
