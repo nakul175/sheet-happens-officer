@@ -3,7 +3,8 @@
 // No screen sends a resend without a click. The verify and resend audit rows keep the client IP and user agent.
 // On the failure paths (send refused, limit, unusable link) every screen tells the truth: nothing says an email went.
 //
-// QA gate: skipped without SHO_QA_PASS, which is also the accounts' password. CI does not set it, so CI lists these tests and skips them.
+// QA gate: skipped without SHO_QA_PASS, which is also the accounts' password. ci.yml does not set it, so it lists these tests and skips them.
+// @local-only: the spec starts its own servers from a local build and database, so staging-e2e leaves it out (APL-2925, #145).
 // APL-2895: a Playwright spec (@playwright/test), so `npx playwright test` collects it; vitest.config.mts excludes it from `npm test`.
 // Servers: the spec starts its own two `next start` processes from the existing build (`npm run build` first), on
 // 127.0.0.1 only, against the local database (anything else in DATABASE_URL is refused):
@@ -183,7 +184,7 @@ const resendResults = async (email: string) =>
   (await rows<{ data: { result: string } }>('SELECT data FROM "AuditLog" WHERE "actorId" = $1 AND event = $2 ORDER BY "createdAt" ASC', [await userId(email), "VERIFY_EMAIL_REQUESTED"]))
     .map((r) => r.data.result);
 
-test.describe("qa:TC missing APL-2742: unverified sign-in and verification email", () => {
+test.describe("qa:TC missing APL-2742: unverified sign-in and verification email", { tag: "@local-only" }, () => {
   test.skip(!QA_PASS, "QA gate: set SHO_QA_PASS to run (CI does not).");
   test.describe.configure({ timeout: 60_000 });
 
