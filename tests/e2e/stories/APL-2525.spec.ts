@@ -1,22 +1,21 @@
 // SHO-E12 Deals (Linear APL-2525).
+// Pam left no qa:TC id. Each title says qa:TC missing. The annotation is qa:TC with description missing. An AC number is not a TC id.
 // One test per acceptance criterion. People are nakul17+ aliases signed in with SHO_QA_PASS.
 // Deals, organisations and tasks are ZZ-TEST and archived afterwards.
 // Pam left no qa:TC cases on this issue.
-import { test, expect, zz } from "../support";
+import { test, expect, zz, withTaskVersion } from "../support";
 import { getTask, newProject, newTask, ymd, type Who } from "../g2";
 import { pipelines, type Stage } from "../helpers/deal-board";
 import { createDeal, createOrg, dealBody, projectOf } from "../helpers/claude-a";
 import { cast, gateFile } from "../helpers/qa-alias";
-import { why } from "../helpers/jim-http";
 
-gateFile();
+gateFile("APL-2525");
 
 const CRM_OFF = "CRM routes answer not found on this server (CRM_VISIBLE is off).";
 
 async function pipes(who: Who) {
   const r = await who.api.get("/api/deals/pipelines");
-  test.skip(r.status === 404, CRM_OFF);
-  expect(r.status, JSON.stringify(r.json)).toBe(200);
+  expect(r.status, CRM_OFF + " " + JSON.stringify(r.json)).toBe(200);
   return pipelines(who.api);
 }
 
@@ -26,7 +25,8 @@ const stageNamed = (stages: Stage[], name: string) => {
   return stage!;
 };
 
-test("AC1: creating a deal with a name, Leader, buyer and a dated first next step saves a Deal", async ({ browser, later }) => {
+// qa:TC missing
+test("AC1: creating a deal with a name, Leader, buyer and a dated first next step saves a Deal qa:TC missing", async ({ browser, later }) => {
   test.setTimeout(120_000);
   const { admin, people: [leader] } = await cast(browser, later, ["deal leader"]);
   const { pro } = await pipes(admin);
@@ -49,7 +49,8 @@ test("AC1: creating a deal with a name, Leader, buyer and a dated first next ste
   expect(next.project.id).toBe(deal.id);
 });
 
-test("AC2: an open project task converts through the same gate, and a task already in a deal does not", async ({ browser, later }) => {
+// qa:TC missing
+test("AC2: an open project task converts through the same gate, and a task already in a deal does not qa:TC missing", async ({ browser, later }) => {
   test.setTimeout(180_000);
   const { admin } = await cast(browser, later, []);
   const { pro } = await pipes(admin);
@@ -77,7 +78,8 @@ test("AC2: an open project task converts through the same gate, and a task alrea
   expect(again.json.error).toBe("Only a task in a project can be converted to a deal.");
 });
 
-test("AC3: the deal page shows members, sections, tasks, Trash and Activity, plus stage, organisations, reason and next step", async ({ browser, later }) => {
+// qa:TC missing
+test("AC3: the deal page shows members, sections, tasks, Trash and Activity, plus stage, organisations, reason and next step qa:TC missing", async ({ browser, later }) => {
   test.setTimeout(180_000);
   const { admin } = await cast(browser, later, []);
   const { pro } = await pipes(admin);
@@ -100,16 +102,16 @@ test("AC3: the deal page shows members, sections, tasks, Trash and Activity, plu
   await expect(admin.page.getByRole("region", { name: "In progress" })).toBeVisible();
   await expect(admin.page.getByRole("region", { name: "Done" })).toBeVisible();
   await expect(admin.page.getByRole("region", { name: "To do" }).getByText(step)).toBeVisible();
-  const panel = admin.page.locator(".card").filter({ has: admin.page.getByRole("group", { name: "Stage" }) });
-  await expect(panel.getByRole("link", { name: org.name }).first()).toBeVisible();
-  await expect(panel.getByText("Buyer:")).toBeVisible();
+  await expect(admin.page.getByRole("main").getByRole("link", { name: org.name, exact: true })).not.toHaveCount(0);
+  await expect(admin.page.getByText("Buyer:")).toBeVisible();
   await expect(admin.page.getByText(`Reason: ${reason}`)).toBeVisible();
   await expect(admin.page.getByText(`Next step: ${step}`)).toBeVisible();
   await admin.page.getByRole("link", { name: "Members" }).click();
   await expect(admin.page.getByRole("heading", { name: "Members" })).toBeVisible();
 });
 
-test("AC4: the next step is the earliest-due open dated task", async ({ browser, later }) => {
+// qa:TC missing
+test("AC4: the next step is the earliest-due open dated task qa:TC missing", async ({ browser, later }) => {
   const { admin } = await cast(browser, later, []);
   const { pro } = await pipes(admin);
   const org = await createOrg(admin, later, "e12 next org");
@@ -123,13 +125,14 @@ test("AC4: the next step is the earliest-due open dated task", async ({ browser,
   const first = await projectOf(admin, deal.id);
   expect(first.deal.nextStep.title).toBe(sooner);
   expect(first.deal.nextStep.id).toBe(soonerId);
-  expect((await admin.api.post(`/api/tasks/${soonerId}/complete`, {})).status).toBe(200);
+  expect((await admin.api.post(`/api/tasks/${soonerId}/complete`, await withTaskVersion(admin.api, soonerId))).status).toBe(200);
   const second = await projectOf(admin, deal.id);
   expect(second.deal.nextStep.title).toBe(laterTitle);
   expect(second.deal.nextStep.dueDate).toBe(ymd(12));
 });
 
-test("AC5: Won and Lost are refused while a task is open, and a finished move leaves the deal and its tasks as they were", async ({ browser, later }) => {
+// qa:TC missing
+test("AC5: Won and Lost are refused while a task is open, and a finished move leaves the deal and its tasks as they were qa:TC missing", async ({ browser, later }) => {
   test.setTimeout(120_000);
   const { admin } = await cast(browser, later, []);
   const { pro } = await pipes(admin);
@@ -145,7 +148,7 @@ test("AC5: Won and Lost are refused while a task is open, and a finished move le
   expect(lostOpen.status).toBe(409);
   expect((await getTask(admin, stepId)).completedAt).toBeNull();
   expect((await projectOf(admin, deal.id)).archived).toBe(false);
-  expect((await admin.api.post(`/api/tasks/${stepId}/complete`, {})).status).toBe(200);
+  expect((await admin.api.post(`/api/tasks/${stepId}/complete`, await withTaskVersion(admin.api, stepId))).status).toBe(200);
   const closedAt = (await getTask(admin, stepId)).completedAt as string;
   const moved = await admin.api.post(`/api/projects/${deal.id}/stage`, { stageId: won.id });
   expect(moved.status, JSON.stringify(moved.json)).toBe(200);
@@ -155,11 +158,24 @@ test("AC5: Won and Lost are refused while a task is open, and a finished move le
   expect((await getTask(admin, stepId)).completedAt).toBe(closedAt);
 });
 
-test.skip("AC6: a working deal with no next step or no logged activity for 30 days notifies its Leader once", why(
-  "A deal is stalled only after 30 quiet days. A session cannot age createdAt, stageChangedAt or the action log, and running stalled-deals here would notify real Leaders. Covered by tests/crm5.test.ts.",
-), () => {});
+// qa:TC missing
+test("AC6 (no next step): a working deal whose dated step is done tells its Leader it needs a next step qa:TC missing", async ({ browser, later }) => {
+  // The 30-quiet-days half of AC6 runs on an in-process clock in tests/stall-clock-2709.test.ts. The server has no clock hook yet (APL-2757).
+  test.setTimeout(180_000);
+  const { admin, people: [leader] } = await cast(browser, later, ["stall leader"]);
+  const { pro } = await pipes(admin);
+  const org = await createOrg(admin, later, "e12 stall org");
+  const empty = await createDeal(admin, later, dealBody({ name: zz("e12 no step"), organisationId: org.id, pipelineId: pro.id, leaderId: leader.user.id }));
+  later(() => admin.api.post(`/api/projects/${empty.id}/leader`, { newLeaderId: admin.user.id, previousRole: "EDITOR" }));
+  const notes = async () => ((await leader.api.get("/api/notifications?limit=200")).json.items ?? []) as { text: string; href: string }[];
+  const stepId = (await projectOf(admin, empty.id)).deal.nextStep.id as string;
+  expect((await admin.api.post(`/api/tasks/${stepId}/complete`, await withTaskVersion(admin.api, stepId))).status).toBe(200);
+  const needs = (await notes()).filter((n) => n.text.includes(empty.name) && n.text.includes("needs a next step"));
+  expect(needs).toHaveLength(1);
+});
 
-test("AC7: on the pipeline board each deal sits in the column of its current stage", async ({ browser, later }) => {
+// qa:TC missing
+test("AC7: on the pipeline board each deal sits in the column of its current stage qa:TC missing", async ({ browser, later }) => {
   test.setTimeout(180_000);
   const { admin } = await cast(browser, later, []);
   const { pro } = await pipes(admin);
@@ -168,10 +184,10 @@ test("AC7: on the pipeline board each deal sits in the column of its current sta
   const lead = pro.stages[0];
   const next = pro.stages[1];
   await admin.page.goto("/deals");
-  const column = (name: string) => admin.page.locator("section.dcol").filter({ hasText: name }).first();
-  await expect(column(lead.name).locator(".dcard", { hasText: deal.name })).toBeVisible();
+  const column = (name: string) => admin.page.getByRole("region", { name, exact: true });
+  await expect(column(lead.name).getByRole("link", { name: deal.name, exact: true })).toBeVisible();
   expect((await admin.api.post(`/api/projects/${deal.id}/stage`, { stageId: next.id })).status).toBe(200);
   await admin.page.reload();
-  await expect(column(next.name).locator(".dcard", { hasText: deal.name })).toBeVisible();
-  await expect(column(lead.name).locator(".dcard", { hasText: deal.name })).toHaveCount(0);
+  await expect(column(next.name).getByRole("link", { name: deal.name, exact: true })).toBeVisible();
+  await expect(column(lead.name).getByRole("link", { name: deal.name, exact: true })).toHaveCount(0);
 });

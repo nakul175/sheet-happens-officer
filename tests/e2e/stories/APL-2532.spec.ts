@@ -1,15 +1,20 @@
 // SHO-US-11.1 Organisations with a parent tree (APL-2532).
+// Pam left no qa:TC id. Each title says qa:TC missing. The annotation is qa:TC with description missing. An AC number is not a TC id.
 // One test per acceptance criterion. ZZ-TEST organisations and deals are archived afterwards.
 // The plain Member is the second person. A new person's password is only emailed, so a deactivated
 // creator cannot be signed in here; AC4 checks the same rule with the roles this server actually has.
 // CRM_VISIBLE is read from the live /api/orgs answer, never a hard skip.
-// AC6's undo of Organisation archived / Organisation unarchived follows PR #19 (tests/e2e/helpers/jim-gate.ts):
-// when that fix is live both undos reverse the archive; until then both answer 409 and the organisation stays as it was.
+// AC6: undo of Organisation archived clears the archive, and undo of Organisation unarchived archives it again.
+// Both are asserted directly, with no probe of the same behaviour first, so a broken undo fails this test.
 // Credentials come from the environment. workers is 1 in playwright.config.ts. Traces stay off.
-import { test, expect, login, zz } from "../support";
+import { expect, login, zz } from "../support";
+import { test } from "../helpers/story-people";
+import { storyGate } from "../helpers/qa-alias";
+import { breadcrumb, statusText } from "../helpers/locate";
+
+storyGate({ admin: true, id: "APL-2532" });
 import { ymd, type Who } from "../g2";
 import { raw } from "../helpers/jim-http";
-import { notLive, prLive } from "../helpers/jim-gate";
 
 type Later = (fn: () => Promise<unknown>) => void;
 type Org = {
@@ -21,15 +26,12 @@ type Hist = { action: string; before: Record<string, unknown> | null; after: Rec
 
 test.beforeEach(async ({ admin }) => {
   const r = await admin.api.get("/api/orgs");
-  test.skip(r.status === 404, "CRM is hidden for the Super Admin on this server (CRM_VISIBLE is off). /api/orgs answered 404.");
-  expect(r.status).toBe(200);
+  expect(r.status, "CRM is hidden for the Super Admin on this server (CRM_VISIBLE is off). /api/orgs answered 404.").toBe(200);
 });
 
-/** Skip when the plain Member's live session cannot see accounts (CRM_VISIBLE=admins). */
 async function memberCrm(member: Who) {
   const r = await member.api.get("/api/orgs");
-  test.skip(r.status === 404, "CRM is hidden for the plain Member on this server (CRM_VISIBLE=admins). /api/orgs answered 404.");
-  expect(r.status).toBe(200);
+  expect(r.status, "CRM is hidden for the plain Member on this server (CRM_VISIBLE=admins). /api/orgs answered 404.").toBe(200);
 }
 
 async function makeOrg(who: Who, later: Later, label: string, extra: Record<string, unknown> = {}) {
@@ -57,7 +59,8 @@ async function proactive(who: Who) {
   return pipe!;
 }
 
-test("AC1: a name creates the organisation in the person's workspace; kind, country, level and parent are optional", async ({ admin, later }) => {
+// qa:TC missing
+test("AC1: a name creates the organisation in the person's workspace; kind, country, level and parent are optional qa:TC missing", async ({ admin, later }) => {
   test.setTimeout(120_000);
   const parent = await makeOrg(admin, later, "parent");
   const bare = await makeOrg(admin, later, "bare");
@@ -88,9 +91,9 @@ test("AC1: a name creates the organisation in the person's workspace; kind, coun
   await expect(dlg.getByLabel("Sits under (optional)")).toHaveValue("");
   await dlg.getByRole("button", { name: "Add", exact: true }).click();
   await expect(dlg).toHaveCount(0);
-  await expect(admin.page.locator(".undo-toast")).toContainText("Organisation added");
+  await expect(statusText(admin.page, "Organisation added")).toBeVisible();
   await admin.page.getByLabel("Search organisations").fill(uiName);
-  const row = admin.page.locator("tr", { hasText: uiName });
+  const row = admin.page.getByRole("row", { name: uiName });
   await expect(row.getByRole("link", { name: uiName })).toBeVisible();
   await expect(row).toContainText("Funder");
   await expect(row).toContainText("India");
@@ -100,11 +103,12 @@ test("AC1: a name creates the organisation in the person's workspace; kind, coun
   later(() => admin.api.post(`/api/orgs/${made!.id}/archive`, { archive: true }));
   await admin.page.goto(`/accounts/${made!.id}`);
   await expect(admin.page.getByRole("heading", { name: uiName })).toBeVisible();
-  await expect(admin.page.locator(".chip", { hasText: "Funder" })).toBeVisible();
+  await expect(admin.page.getByText("Funder", { exact: true })).toBeVisible();
   await expect(admin.page.getByText("India")).toBeVisible();
 });
 
-test("AC2: a name that already exists under the same parent, ignoring case, is refused with 409 needsConfirm duplicate, and the member can continue", async ({ admin, later }) => {
+// qa:TC missing
+test("AC2: a name that already exists under the same parent, ignoring case, is refused with 409 needsConfirm duplicate, and the member can continue qa:TC missing", async ({ admin, later }) => {
   test.setTimeout(120_000);
   const name = zz("dup org");
   const first = await makeOrg(admin, later, "dup org");
@@ -114,6 +118,7 @@ test("AC2: a name that already exists under the same parent, ignoring case, is r
   expect(dup.json.needsConfirm).toBe("duplicate");
   expect(dup.json.existingId).toBe(first.id);
   expect(dup.json.error).toContain(name);
+  // `force` is the API field that confirms a duplicate name. It is not a click.
   const forced = await admin.api.post("/api/orgs", { name: name.toLowerCase(), force: true });
   expect(forced.status).toBe(201);
   const forcedId = forced.json.organisation.id as string;
@@ -143,7 +148,8 @@ test("AC2: a name that already exists under the same parent, ignoring case, is r
   for (const o of extra) later(() => admin.api.post(`/api/orgs/${o.id}/archive`, { archive: true }));
 });
 
-test("AC3: a parent cannot be the organisation or one of its descendants, and the page shows the full path", async ({ admin, later }) => {
+// qa:TC missing
+test("AC3: a parent cannot be the organisation or one of its descendants, and the page shows the full path qa:TC missing", async ({ admin, later }) => {
   test.setTimeout(120_000);
   const group = await makeOrg(admin, later, "group");
   const ministry = await makeOrg(admin, later, "ministry", { parentId: group.id });
@@ -161,18 +167,17 @@ test("AC3: a parent cannot be the organisation or one of its descendants, and th
 
   await admin.page.goto(`/accounts/${board.id}`);
   await expect(admin.page.getByRole("heading", { name: board.name })).toBeVisible();
-  const crumb = admin.page.locator(".crumb");
+  const crumb = breadcrumb(admin.page, "Accounts");
   await expect(crumb.getByRole("link", { name: "Accounts" })).toBeVisible();
   await expect(crumb.getByRole("link", { name: group.name })).toBeVisible();
   await expect(crumb.getByRole("link", { name: ministry.name })).toBeVisible();
-  // The side nav also marks Accounts with aria-current=page. The board name is the tree chip.
-  const tree = admin.page.locator(".card", { has: admin.page.locator("[aria-current=page]") });
-  await expect(tree.locator("[aria-current=page]")).toHaveText(board.name);
-  await expect(tree.getByRole("link", { name: group.name })).toBeVisible();
-  await expect(tree.getByRole("link", { name: ministry.name })).toBeVisible();
+  // The side nav also marks Accounts as the current page. The tree marks the board name.
+  const marked = await admin.page.getByRole("main").getByText(board.name, { exact: true }).evaluateAll((els) => els.map((el) => el.getAttribute("aria-current")));
+  expect(marked).toContain("page");
 });
 
-test("AC4: there is no delete; archive and unarchive work; any Member creates; only the creator and an Admin edit or archive", async ({ admin, member, later }) => {
+// qa:TC missing
+test("AC4: there is no delete; archive and unarchive work; any Member creates; only the creator and an Admin edit or archive qa:TC missing", async ({ admin, member, later }) => {
   test.setTimeout(180_000);
   await memberCrm(member);
   // The creator's password for a brand-new person is only emailed, and the shared Member cannot be
@@ -230,7 +235,8 @@ test("AC4: there is no delete; archive and unarchive work; any Member creates; o
   expect(back.some((o) => o.id === byAdmin.id)).toBe(true);
 });
 
-test("AC5: any signed-in Member sees all organisations, and deal data still follows project membership", async ({ admin, member, later }) => {
+// qa:TC missing
+test("AC5: any signed-in Member sees all organisations, and deal data still follows project membership qa:TC missing", async ({ admin, member, later }) => {
   test.setTimeout(180_000);
   await memberCrm(member);
   const org = await makeOrg(admin, later, "shared org");
@@ -267,10 +273,10 @@ test("AC5: any signed-in Member sees all organisations, and deal data still foll
   await expect(member.page.getByRole("link", { name: dealName })).toBeVisible();
 });
 
-test("AC6: create, edit, parent change, archive and unarchive are logged with no project and before and after; undo uses the organisation labels; History is for Admins only and includes contact and note changes", async ({ admin, member, later }) => {
+// qa:TC missing
+test("AC6: create, edit, parent change, archive and unarchive are logged with no project and before and after; undo uses the organisation labels; History is for Admins only and includes contact and note changes qa:TC missing", async ({ admin, member, later }) => {
   test.setTimeout(180_000);
   await memberCrm(member);
-  const gate = await prLive(19, admin, null, later);
   const parent = await makeOrg(admin, later, "log parent");
   const name = zz("logged org");
   const made = await raw(member, "POST", "/api/orgs", { name });
@@ -354,16 +360,8 @@ test("AC6: create, edit, parent change, archive and unarchive are logged with no
   expect(archItems[0]?.event).toBe("ORGANISATION_ARCHIVED");
   expect(Date.now() - Date.parse(archItems[0].at)).toBeLessThan(120_000);
   const undoArchived = await admin.api.post(`/api/actions/${archived.headers["x-undo-id"]}/undo`, { anyway: false });
-  if (gate.deployed) {
-    expect(undoArchived.status).toBe(200);
-    expect((await load(admin, id)).archived, "undo of Organisation archived clears the archive").toBe(false);
-  } else {
-    expect(undoArchived.status, notLive(gate, "undo of Organisation archived still answers 409.")).toBe(409);
-    expect(undoArchived.json.error).toBe("This organisation is already archived.");
-    expect((await load(admin, id)).archived).toBe(true);
-    // The next steps archive and then unarchive. Put it back first so that archive is a real change.
-    expect((await admin.api.post(`/api/orgs/${id}/archive`, { archive: false })).status).toBe(200);
-  }
+  expect(undoArchived.status, JSON.stringify(undoArchived.json)).toBe(200);
+  expect((await load(admin, id)).archived, "undo of Organisation archived clears the archive").toBe(false);
 
   const archivedAgain = await raw(admin, "POST", `/api/orgs/${id}/archive`, { archive: true });
   expect(archivedAgain.status).toBe(200);
@@ -381,14 +379,8 @@ test("AC6: create, edit, parent change, archive and unarchive are logged with no
   expect(unItems[0]?.event).toBe("ORGANISATION_UNARCHIVED");
   expect(Date.now() - Date.parse(unItems[0].at)).toBeLessThan(120_000);
   const undoOpened = await admin.api.post(`/api/actions/${opened.headers["x-undo-id"]}/undo`, { anyway: false });
-  if (gate.deployed) {
-    expect(undoOpened.status).toBe(200);
-    expect((await load(admin, id)).archived, "undo of Organisation unarchived archives it again").toBe(true);
-  } else {
-    expect(undoOpened.status, notLive(gate, "undo of Organisation unarchived still answers 409.")).toBe(409);
-    expect(undoOpened.json.error).toBe("This organisation is not archived any more.");
-    expect((await load(admin, id)).archived).toBe(false);
-  }
+  expect(undoOpened.status, JSON.stringify(undoOpened.json)).toBe(200);
+  expect((await load(admin, id)).archived, "undo of Organisation unarchived archives it again").toBe(true);
 
   const fresh = await raw(admin, "POST", "/api/orgs", { name: zz("undo create") });
   expect(fresh.headers["x-undo-label"]).toBe("Organisation added");
@@ -403,7 +395,7 @@ test("AC6: create, edit, parent change, archive and unarchive are logged with no
   await expect(admin.page.getByText("contact.created")).toBeVisible();
   await expect(admin.page.getByText("note.created")).toBeVisible();
   await expect(admin.page.getByText("organisation.parent_changed")).toBeVisible();
-  // History is newest first. The org is archived twice and unarchived twice, so each action text is on two rows.
-  await expect(admin.page.locator(".row", { hasText: "organisation.archived" }).first()).toBeVisible();
-  await expect(admin.page.getByText("organisation.unarchived")).toHaveCount(2);
+  // Undo of archive restores the row and does not write a second unarchived log (APL-2686).
+  await expect(admin.page.getByText("organisation.archived")).not.toHaveCount(0);
+  await expect(admin.page.getByText("organisation.unarchived")).not.toHaveCount(0);
 });

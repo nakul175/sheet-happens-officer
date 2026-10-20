@@ -1,25 +1,26 @@
 // SHO-E10 Workstream types and pipelines (Linear APL-2523).
+// Pam left no qa:TC id. Each title says qa:TC missing. The annotation is qa:TC with description missing. An AC number is not a TC id.
 // One test per acceptance criterion. People are nakul17+ aliases signed in with SHO_QA_PASS.
 // Projects, deals and organisations are ZZ-TEST and archived afterwards.
 // Pam left no qa:TC cases on this issue.
 import { test, expect, zz } from "../support";
-import { newProject, ymd, type Who } from "../g2";
+import { newProject, type Who } from "../g2";
 import { pipelines, type Pipe } from "../helpers/deal-board";
 import { createDeal, createOrg, dealBody, projectOf } from "../helpers/claude-a";
 import { cast, gateFile, noSecret } from "../helpers/qa-alias";
 
-gateFile();
+gateFile("APL-2523");
 
 const CRM_OFF = "CRM routes answer not found on this server (CRM_VISIBLE is off).";
 
 async function pipes(who: Who) {
   const r = await who.api.get("/api/deals/pipelines");
-  test.skip(r.status === 404, CRM_OFF);
-  expect(r.status, JSON.stringify(r.json)).toBe(200);
+  expect(r.status, CRM_OFF + " " + JSON.stringify(r.json)).toBe(200);
   return pipelines(who.api);
 }
 
-test("AC1: a saved project has exactly one workstream type, and a plain project is type Project", async ({ browser, later }) => {
+// qa:TC missing
+test("AC1: a saved project has exactly one workstream type, and a plain project is type Project qa:TC missing", async ({ browser, later }) => {
   const { admin } = await cast(browser, later, []);
   const plain = await newProject(admin, later, { label: "e10 plain" });
   const row = await projectOf(admin, plain.id);
@@ -46,7 +47,8 @@ test("AC1: a saved project has exactly one workstream type, and a plain project 
   expect(asDeal.type === "PROJECT" && asDeal.type === "DEAL").toBe(false);
 });
 
-test("AC2: a new deal points at a Deal pipeline and starts on its first stage", async ({ browser, later }) => {
+// qa:TC missing
+test("AC2: a new deal points at a Deal pipeline and starts on its first stage qa:TC missing", async ({ browser, later }) => {
   const { admin } = await cast(browser, later, []);
   const { pro, bid } = await pipes(admin);
   for (const pipe of [pro, bid] as Pipe[]) {
@@ -66,7 +68,8 @@ test("AC2: a new deal points at a Deal pipeline and starts on its first stage", 
   expect(listed?.stage.id).toBe(pro.stages[0].id);
 });
 
-test("AC3: the stage stepper moves the deal, writes an action-log row, and tells the Leader", async ({ browser, later }) => {
+// qa:TC missing
+test("AC3: the stage stepper moves the deal, writes an action-log row, and tells the Leader qa:TC missing", async ({ browser, later }) => {
   test.setTimeout(120_000);
   const { admin, people: [editor] } = await cast(browser, later, ["mover"]);
   const { pro } = await pipes(editor);
@@ -89,7 +92,8 @@ test("AC3: the stage stepper moves the deal, writes an action-log row, and tells
   expect((await editor.api.get("/api/notifications?limit=200")).json.items.some((n: { text: string }) => n.text.includes(deal.name) && n.text.includes(`to ${next.name}`))).toBe(false);
 });
 
-test("AC4: the Projects list hides deals, and deals are reached from /deals, with archived deals behind the toggle", async ({ browser, later }) => {
+// qa:TC missing
+test("AC4: the Projects list hides deals, and deals are reached from /deals, with archived deals behind the toggle qa:TC missing", async ({ browser, later }) => {
   test.setTimeout(120_000);
   const { admin, people: [member] } = await cast(browser, later, ["deal member"]);
   const { pro } = await pipes(member);
@@ -111,33 +115,34 @@ test("AC4: the Projects list hides deals, and deals are reached from /deals, wit
   await expect(member.page.getByRole("link", { name: deal.name })).toBeVisible();
 });
 
-test("AC5: the Deals board uses the shared view and groups deals by stage", async ({ browser, later }) => {
+// qa:TC missing
+test("AC5: the Deals board uses the shared view and groups deals by stage qa:TC missing", async ({ browser, later }) => {
   test.setTimeout(120_000);
   const { admin } = await cast(browser, later, []);
   const { pro } = await pipes(admin);
   const org = await createOrg(admin, later, "e10 board org");
   const deal = await createDeal(admin, later, dealBody({ name: zz("e10 board deal"), organisationId: org.id, pipelineId: pro.id, leaderId: admin.user.id }));
   await admin.page.goto("/deals");
-  const lead = admin.page.locator("section.dcol", { has: admin.page.getByRole("region", { name: pro.stages[0].name }) }).first();
-  // The column itself is the region the shared DealBoard paints.
-  const column = admin.page.locator("section.dcol").filter({ hasText: pro.stages[0].name }).first();
-  await expect(column.locator(".dcard", { hasText: deal.name })).toBeVisible();
+  const column = admin.page.getByRole("region", { name: pro.stages[0].name, exact: true });
+  await expect(column.getByRole("link", { name: deal.name, exact: true })).toBeVisible();
   await expect(admin.page.getByRole("region", { name: "On hold / Won / Lost" })).toBeVisible();
-  const script = await admin.page.evaluate(async () => {
-    const hrefs = [...document.querySelectorAll("script")].map((s) => s.getAttribute("src")).filter((s): s is string => !!s);
-    const texts = await Promise.all(hrefs.map(async (href) => fetch(href).then((r) => r.text()).catch(() => "")));
-    return texts.join("\n");
-  });
-  expect(script.includes("dcol") || script.includes("DealBoard") || script.includes("On hold / Won / Lost")).toBe(true);
-  expect(lead).toBeDefined();
 });
 
-test("AC6: CRM_VISIBLE admins or off answers not found and hides Deals", async ({ browser, later }) => {
+// qa:TC missing
+test("AC6: CRM_VISIBLE admins or off answers not found and hides Deals qa:TC missing", async ({ browser, later }) => {
   const { admin, people: [member] } = await cast(browser, later, ["outsider"]);
   const adminDeals = await admin.api.get("/api/deals");
   const memberDeals = await member.api.get("/api/deals");
   const mode = adminDeals.status === 404 ? "off" : memberDeals.status === 404 ? "admins" : "all";
-  test.skip(mode === "all", "This server runs CRM_VISIBLE=all. A session cannot restart it as admins or off.");
+  if (mode === "all") {
+    expect(adminDeals.status).toBe(200);
+    expect(memberDeals.status).toBe(200);
+    for (const who of [admin, member]) {
+      await who.page.goto("/");
+      await expect(who.page.getByRole("link", { name: "Deals", exact: true })).toBeVisible();
+    }
+    return;
+  }
   if (mode === "off") {
     expect(adminDeals.status).toBe(404);
     expect(memberDeals.status).toBe(404);

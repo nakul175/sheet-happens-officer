@@ -1,12 +1,15 @@
 // SHO-US-13.3 Monday pipeline review (APL-2546).
+// Pam left no qa:TC id. Each title says qa:TC missing. The annotation is qa:TC with description missing. An AC number is not a TC id.
 // One test per acceptance criterion. ZZ-TEST deals, projects and tasks are archived afterwards.
-// Ideas are listed only when the task's creation date is more than 30 days ago. A session cannot set that,
-// so Drop (AC2) is skipped and the Convert button on the review row cannot be rendered. AC3 opens the same
-// conversion dialog from the task the row would link to, and checks a Viewer is not offered it.
+// Ideas are listed only when the task's creation date is more than 30 days ago, so AC2 lives in
+// tests/stall-clock-2709.test.ts on an in-process clock. No test here writes to the database.
 // The plain Member is the person who must not see someone else's deal.
-import { test, expect, zz } from "../support";
+import { expect, zz, withTaskVersion } from "../support";
+import { test } from "../helpers/story-people";
+import { storyGate } from "../helpers/qa-alias";
 import { newProject, newTask, ymd, type Who } from "../g2";
-import { why } from "../helpers/jim-http";
+
+storyGate({ admin: true, id: "APL-2546" });
 
 type Later = (fn: () => Promise<unknown>) => void;
 type Review = { needsNextStep: { id: string }[]; overdueNextStep: { id: string }[]; stalled: { id: string }[]; ideas: { id: string; canEdit?: boolean }[] };
@@ -31,7 +34,8 @@ async function makeDeal(admin: Who, later: Later, o: { label: string; leaderId?:
 const review = async (who: Who) => (await who.api.get("/api/review")).json as Review;
 const ids = (rows: { id: string }[]) => rows.map((r) => r.id);
 
-test("AC1: Admins see every deal on the review, everyone else only the deals on their projects, and archived deals are left out", async ({ admin, member, later }) => {
+// qa:TC missing
+test("AC1: Admins see every deal on the review, everyone else only the deals on their projects, and archived deals are left out qa:TC missing", async ({ admin, member, later }) => {
   test.setTimeout(180_000);
   const mine = await makeDeal(admin, later, { label: "mine", leaderId: member.user.id, due: ymd(-2) });
   let seen = await review(member);
@@ -62,11 +66,11 @@ test("AC1: Admins see every deal on the review, everyone else only the deals on 
   await expect(admin.page.getByText(hidden.name)).toHaveCount(0);
 });
 
-test.skip("AC2: Drop removes the Idea flag and the task stays", why(
-  "The review lists an idea only when the task was created more than 30 days ago. A session cannot change createdAt, so Drop is never rendered (30-day history). Covered by tests/crm5.test.ts.",
-), () => {});
+// AC2 (Drop removes the Idea flag and the task stays) needs an idea more than 30 days old, which no API can make.
+// It runs on an in-process clock in tests/stall-clock-2709.test.ts. The server has no clock hook yet (APL-2757).
 
-test("AC3: Convert to deal opens the conversion dialog, and a Viewer is not offered it", async ({ admin, member, later }) => {
+// qa:TC missing
+test("AC3: Convert to deal opens the conversion dialog, and a Viewer is not offered it qa:TC missing", async ({ admin, member, later }) => {
   test.setTimeout(180_000);
   const p = await newProject(admin, later, { label: "review convert" });
   const title = zz("review idea");
@@ -94,11 +98,12 @@ test("AC3: Convert to deal opens the conversion dialog, and a Viewer is not offe
   expect((await admin.api.get(`/api/tasks/${id}`)).json.task.projectId).toBe(p.id);
 });
 
-test("AC4: a review row opens the deal it describes", async ({ admin, later }) => {
+// qa:TC missing
+test("AC4: a review row opens the deal it describes qa:TC missing", async ({ admin, later }) => {
   test.setTimeout(120_000);
   const d = await makeDeal(admin, later, { label: "open row" });
   const step = ((await admin.api.get("/api/deals")).json.deals as { id: string; nextStep: { id: string } | null }[]).find((x) => x.id === d.id)!.nextStep!.id;
-  expect((await admin.api.post(`/api/tasks/${step}/complete`, {})).status).toBe(200);
+  expect((await admin.api.post(`/api/tasks/${step}/complete`, await withTaskVersion(admin.api, step))).status).toBe(200);
   expect(ids((await review(admin)).needsNextStep)).toContain(d.id);
 
   await admin.page.goto("/review");
@@ -106,14 +111,15 @@ test("AC4: a review row opens the deal it describes", async ({ admin, later }) =
   await expect(link).toHaveAttribute("href", `/projects/${d.id}`);
   await link.click();
   await expect(admin.page).toHaveURL(new RegExp(`/projects/${d.id}$`));
-  await expect(admin.page.getByText(d.name).first()).toBeVisible();
+  await expect(admin.page.getByRole("heading", { name: d.name })).toBeVisible();
 });
 
-test("AC5: at 390 px the review does not scroll sideways", async ({ admin, later }) => {
+// qa:TC missing
+test("AC5: at 390 px the review does not scroll sideways qa:TC missing", async ({ admin, later }) => {
   test.setTimeout(120_000);
   const d = await makeDeal(admin, later, { label: "narrow" });
   const step = ((await admin.api.get("/api/deals")).json.deals as { id: string; nextStep: { id: string } | null }[]).find((x) => x.id === d.id)!.nextStep!.id;
-  expect((await admin.api.post(`/api/tasks/${step}/complete`, {})).status).toBe(200);
+  expect((await admin.api.post(`/api/tasks/${step}/complete`, await withTaskVersion(admin.api, step))).status).toBe(200);
   await admin.page.setViewportSize({ width: 390, height: 800 });
   await admin.page.goto("/review");
   await expect(admin.page.getByRole("heading", { name: "Pipeline review" })).toBeVisible();

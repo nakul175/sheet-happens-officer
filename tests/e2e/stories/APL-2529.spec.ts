@@ -1,10 +1,15 @@
 // SHO-US-10.3 See and move a workstream's stage (APL-2529).
+// Pam left no qa:TC id. Each title says qa:TC missing. The annotation is qa:TC with description missing. An AC number is not a TC id.
 // One test per acceptance criterion. ZZ-TEST deals, organisations and people are archived or deactivated afterwards.
 // The Super Admin acts as Leader except where AC1 needs someone else to move the stage. The plain Member is that Editor,
 // and in AC4 the Viewer. workers is 1 in playwright.config.ts. Traces stay off.
-import { test, expect, zz } from "../support";
+import { expect, zz, withTaskVersion } from "../support";
+import { test } from "../helpers/story-people";
+import { storyGate } from "../helpers/qa-alias";
 import { getTask, ghost, newProject, newTask, ymd, type Who } from "../g2";
 import { undoToast } from "../helpers/jim-http";
+
+storyGate({ admin: true, id: "APL-2529" });
 
 type Later = (fn: () => Promise<unknown>) => void;
 type Stage = { id: string; name: string; category: string; needsReason: boolean; requiredFields: string[] };
@@ -20,8 +25,7 @@ const FIELD_LABEL: Record<string, string> = {
 
 async function crmPipes(who: Who, hidden: string) {
   const r = await who.api.get("/api/deals/pipelines");
-  test.skip(r.status === 404, hidden);
-  expect(r.status, JSON.stringify(r.json)).toBe(200);
+  expect(r.status, hidden + " " + JSON.stringify(r.json)).toBe(200);
   return r.json.pipelines as Pipe[];
 }
 
@@ -62,7 +66,8 @@ function fieldValues(keys: string[]) {
   return fields;
 }
 
-test("AC1: the stage changes, the log keeps the before-state, Undo restores it, and the Leader is told", async ({ admin, member, later }) => {
+// qa:TC missing
+test("AC1: the stage changes, the log keeps the before-state, Undo restores it, and the Leader is told qa:TC missing", async ({ admin, member, later }) => {
   test.setTimeout(180_000);
   await crmPipes(member, CRM_MEMBER);
   // The assignee is a ZZ-TEST person with no mailbox, so this session cannot open their bell. The Leader holds no task,
@@ -71,7 +76,7 @@ test("AC1: the stage changes, the log keeps the before-state, Undo restores it, 
   const d = await makeDeal(admin, later, { label: "2529 undo", leaderId: member.user.id, step: zz("leader step") });
   expect((await admin.api.post(`/api/projects/${d.id}/members`, { userId: assignee.id, role: "EDITOR" })).status).toBe(201);
   const stepId = (await projectOf(admin, d.id)).deal.nextStep!.id;
-  expect((await admin.api.post(`/api/tasks/${stepId}/assign`, { assigneeId: assignee.id })).status).toBe(200);
+  expect((await admin.api.post(`/api/tasks/${stepId}/assign`, await withTaskVersion(admin.api, stepId, { assigneeId: assignee.id }))).status).toBe(200);
   expect((await getTask(admin, stepId)).assignee.id).toBe(assignee.id);
 
   await member.page.goto("/");
@@ -102,13 +107,14 @@ test("AC1: the stage changes, the log keeps the before-state, Undo restores it, 
   expect(told[0].href).toBe(`/projects/${d.id}`);
   await member.page.getByRole("button", { name: /Notifications/ }).click();
   // The same deal is also the "made you Leader" bell item. The stage notice is the one that says moved.
-  await expect(member.page.getByRole("dialog", { name: "Notifications" }).locator("a", { hasText: d.name }).filter({ hasText: /moved/ })).toContainText("to Conversation");
+  await expect(member.page.getByRole("dialog", { name: "Notifications" }).getByRole("link").filter({ hasText: d.name }).filter({ hasText: "moved" })).toContainText("to Conversation");
 
   const moverNotes = (await admin.api.get("/api/notifications?limit=200")).json.items as { text: string }[];
   expect(moverNotes.some((n) => n.text.includes(d.name) && n.text.includes("to Conversation")), "the mover is not told").toBe(false);
 });
 
-test("AC2: On hold and Lost require a reason, and the reason is kept and shown", async ({ admin, later }) => {
+// qa:TC missing
+test("AC2: On hold and Lost require a reason, and the reason is kept and shown qa:TC missing", async ({ admin, later }) => {
   test.setTimeout(120_000);
   const d = await makeDeal(admin, later, { label: "2529 reason", step: zz("still open") });
   const lost = d.pro.stages.find((s) => s.name === "Lost")!;
@@ -146,12 +152,13 @@ test("AC2: On hold and Lost require a reason, and the reason is kept and shown",
   await expect(admin.page.getByText(`moved the deal from Lead to On hold (${reason})`)).toBeVisible();
 });
 
-test("AC3: a stage that lists empty required fields refuses the move until they are sent", async ({ admin, later }) => {
+// qa:TC missing
+test("AC3: a stage that lists empty required fields refuses the move until they are sent qa:TC missing", async ({ admin, later }) => {
   test.setTimeout(120_000);
   const pipes = await crmPipes(admin, CRM_OFF);
   const stage = pipes.flatMap((p) => p.stages).find((s) => s.requiredFields.length > 0);
-  test.skip(!stage, "No stage on this server lists required fields, and stages cannot be edited, so the needsFields refusal cannot be opened.");
-  if (!stage) return;
+  // APL-2709 defect (Linear APL-2709): no seeded stage lists requiredFields, so a move is never asked for them.
+  if (!stage) throw new Error("APL-2709 APL-2529 defect: no stage lists requiredFields, so no move is ever refused for missing fields.");
   const pipe = pipes.find((p) => p.stages.some((s) => s.id === stage.id))!;
   const org = await admin.api.post("/api/orgs", { name: zz("org 2529 fields") });
   expect(org.status, JSON.stringify(org.json)).toBe(201);
@@ -169,12 +176,11 @@ test("AC3: a stage that lists empty required fields refuses the move until they 
 
   if (stage.category === "DONE" || stage.category === "LOST") {
     const step = (await projectOf(admin, id)).deal.nextStep!.id;
-    expect((await admin.api.post(`/api/tasks/${step}/complete`, {})).status).toBe(200);
+    expect((await admin.api.post(`/api/tasks/${step}/complete`, await withTaskVersion(admin.api, step))).status).toBe(200);
   }
   const details = (await projectOf(admin, id)).deal.details ?? {};
   const missing = stage.requiredFields.filter((k) => empty(details[k]));
-  test.skip(missing.length === 0, "The only required fields are already filled on a new deal, so a move is not asked for them.");
-  if (!missing.length) return;
+  expect(missing.length, "a new deal still has an empty required field, so the move can be refused").toBeGreaterThan(0);
   const reason = stage.needsReason ? { reason: "ZZ-TEST fields" } : {};
   const refused = await admin.api.post(`/api/projects/${id}/stage`, { stageId: stage.id, ...reason });
   expect(refused.status).toBe(409);
@@ -193,7 +199,8 @@ test("AC3: a stage that lists empty required fields refuses the move until they 
   expect((await projectOf(admin, id)).deal.stage.name).toBe(stage.name);
 });
 
-test("AC4: a Viewer and an archived deal cannot change stage", async ({ admin, member, later }) => {
+// qa:TC missing
+test("AC4: a Viewer and an archived deal cannot change stage qa:TC missing", async ({ admin, member, later }) => {
   test.setTimeout(120_000);
   await crmPipes(member, CRM_MEMBER);
   const d = await makeDeal(admin, later, { label: "2529 locked" });
@@ -223,7 +230,8 @@ test("AC4: a Viewer and an archived deal cannot change stage", async ({ admin, m
   expect((await projectOf(admin, d.id)).deal.stage.name).toBe("Lead");
 });
 
-test("AC5: a plain project shows no stepper and the server answers that only deals have stages", async ({ admin, later }) => {
+// qa:TC missing
+test("AC5: a plain project shows no stepper and the server answers that only deals have stages qa:TC missing", async ({ admin, later }) => {
   const pipes = await crmPipes(admin, CRM_OFF);
   const plain = await newProject(admin, later, { label: "2529 plain" });
   await admin.page.goto(`/projects/${plain.id}`);
@@ -240,7 +248,8 @@ test("AC5: a plain project shows no stepper and the server answers that only dea
   expect(row.deal).toBeNull();
 });
 
-test("AC6: Won and Lost are refused while a task is open, the dialog lists the first 20, and nothing is closed or archived", async ({ admin, later }) => {
+// qa:TC missing
+test("AC6: Won and Lost are refused while a task is open, the dialog lists the first 20, and nothing is closed or archived qa:TC missing", async ({ admin, later }) => {
   test.setTimeout(180_000);
   const wonDeal = await makeDeal(admin, later, { label: "2529 won", step: zz("won step") });
   const extraTitles = Array.from({ length: 20 }, (_, i) => zz(`open ${i}`));
@@ -264,6 +273,7 @@ test("AC6: Won and Lost are refused while a task is open, the dialog lists the f
   await admin.page.goto(`/projects/${wonDeal.id}`);
   await admin.page.getByRole("group", { name: "Stage" }).getByRole("button", { name: "Won", exact: true }).click();
   let dialog = admin.page.getByRole("dialog", { name: "Move to Won" });
+  await dialog.getByRole("button", { name: "Move deal" }).click();
   await expect(dialog.getByRole("alert")).toContainText("21");
   const shown = (await dialog.getByRole("link").allTextContents()).map((t) => t.trim());
   expect(shown).toHaveLength(20);
@@ -271,7 +281,7 @@ test("AC6: Won and Lost are refused while a task is open, the dialog lists the f
   await dialog.getByRole("button", { name: "Cancel" }).click();
   expect((await projectOf(admin, wonDeal.id)).deal.stage.name).toBe("Lead");
 
-  for (const task of made) expect((await admin.api.post(`/api/tasks/${task.id}/complete`, {})).status, task.title).toBe(200);
+  for (const task of made) expect((await admin.api.post(`/api/tasks/${task.id}/complete`, await withTaskVersion(admin.api, task.id))).status, task.title).toBe(200);
   const stamps = [];
   for (const task of made) stamps.push((await getTask(admin, task.id)).completedAt as string);
   expect(stamps.every(Boolean)).toBe(true);
@@ -301,7 +311,7 @@ test("AC6: Won and Lost are refused while a task is open, the dialog lists the f
   await dialog.getByRole("button", { name: "Cancel" }).click();
 
   const lostStep = (await projectOf(admin, lostDeal.id)).deal.nextStep!.id;
-  expect((await admin.api.post(`/api/tasks/${lostStep}/complete`, {})).status).toBe(200);
+  expect((await admin.api.post(`/api/tasks/${lostStep}/complete`, await withTaskVersion(admin.api, lostStep))).status).toBe(200);
   const lostStamp = (await getTask(admin, lostStep)).completedAt;
   await admin.page.getByRole("group", { name: "Stage" }).getByRole("button", { name: "Lost", exact: true }).click();
   dialog = admin.page.getByRole("dialog", { name: "Move to Lost" });
@@ -314,12 +324,13 @@ test("AC6: Won and Lost are refused while a task is open, the dialog lists the f
   expect((await getTask(admin, lostStep)).completedAt).toBe(lostStamp);
 });
 
-test("AC7: a stage change does not set completedAt and does not touch a Section", async ({ admin, later }) => {
+// qa:TC missing
+test("AC7: a stage change does not set completedAt and does not touch a Section qa:TC missing", async ({ admin, later }) => {
   test.setTimeout(120_000);
   const d = await makeDeal(admin, later, { label: "2529 sections", step: zz("stays open") });
   const step = (await projectOf(admin, d.id)).deal.nextStep!;
   const doneId = await newTask(admin, d.id, { title: zz("already done") });
-  expect((await admin.api.post(`/api/tasks/${doneId}/complete`, {})).status).toBe(200);
+  expect((await admin.api.post(`/api/tasks/${doneId}/complete`, await withTaskVersion(admin.api, doneId))).status).toBe(200);
   const openBefore = await getTask(admin, step.id);
   const doneBefore = await getTask(admin, doneId);
   const sections = (await projectOf(admin, d.id)).sections;

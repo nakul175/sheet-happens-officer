@@ -1,7 +1,7 @@
 // SHO-US-12.2 Convert a task to a deal (Linear APL-2538).
 // One test per acceptance criterion. Sign-in is login("ADMIN") / login("MEMBER") via the fixtures.
 // Ghost assignees cannot sign in. Projects, deals and organisations are ZZ-TEST and archived afterwards.
-import { test, expect, zz } from "../support";
+import { test, expect, zz, withTaskVersion } from "../support";
 import { getTask, ghost, newProject, newTask, ymd, type Who } from "../g2";
 import { pipelines } from "../helpers/deal-board";
 import { raw } from "../helpers/jim-http";
@@ -115,11 +115,17 @@ test("APL-2538 > AC3: Not listed? New organisation creates the organisation inli
   await expect(dialog.getByLabel("Organisation (buyer)")).toHaveValue(orgId);
   await dialog.getByLabel("Deal name").fill(dealName);
   await dialog.getByLabel("Why are we pursuing this?").fill("ZZ-TEST inline");
-  // The task is already on /projects/<source>. Wait until the address is a different project.
-  const landed = admin.page.waitForURL((u) => u.pathname.startsWith("/projects/") && !u.href.includes(p.id));
+  // The task is open at /projects/<source>?task=<task>, which already matches /projects/. Wait for /projects/<newId> with newId not the source.
+  const dealPath = /^\/projects\/([^/]+)$/;
+  const landed = admin.page.waitForURL((u) => { const m = dealPath.exec(u.pathname); return !!m && m[1] !== p.id; });
   await dialog.getByRole("button", { name: "Convert to deal" }).click();
   await landed;
-  const dealId = new URL(admin.page.url()).pathname.split("/").pop()!;
+  const dealId = dealPath.exec(new URL(admin.page.url()).pathname)![1];
+  expect(dealId).not.toBe(p.id);
+  // The deal page's title carries the Deals breadcrumb.
+  await expect(admin.page.getByRole("heading", { level: 1, name: `Deals / ${dealName}`, exact: true })).toBeVisible();
+  await expect(admin.page.getByRole("group", { name: "Stage" })).toBeVisible();
+  await expect(admin.page.getByText(/^Buyer:/).getByRole("link", { name: orgName, exact: true })).toHaveAttribute("href", `/accounts/${orgId}`);
   expect((await projectOf(admin, dealId)).deal.organisation.id).toBe(orgId);
 });
 
@@ -173,7 +179,7 @@ test("APL-2538 > AC5: Convert to deal is hidden and refused for a Viewer, a subt
   expect(JSON.stringify(subRes.json)).toContain("subtask");
 
   const done = await newTask(admin, p.id, { title: zz("done task"), dueDate: ymd(3) });
-  expect((await admin.api.post(`/api/tasks/${done}/complete`, {})).status).toBe(200);
+  expect((await admin.api.post(`/api/tasks/${done}/complete`, await withTaskVersion(admin.api, done))).status).toBe(200);
   await admin.page.goto(`/projects/${p.id}?task=${done}`);
   await expect(admin.page.getByRole("button", { name: "Convert to deal" })).toHaveCount(0);
   expect((await admin.api.post(`/api/tasks/${done}/convert`, body)).status).toBe(409);
@@ -181,7 +187,7 @@ test("APL-2538 > AC5: Convert to deal is hidden and refused for a Viewer, a subt
   expect((await admin.api.patch(`/api/projects/${p.id}/members/${member.user.id}`, { role: "EDITOR" })).status).toBe(200);
   const heldTitle = zz("awaiting task");
   const held = await newTask(admin, p.id, { title: heldTitle, dueDate: ymd(3), assigneeId: member.user.id });
-  expect((await admin.api.put(`/api/tasks/${held}/approver`, { approverId: admin.user.id })).status).toBe(200);
+  expect((await admin.api.put(`/api/tasks/${held}/approver`, await withTaskVersion(admin.api, held, { approverId: admin.user.id }))).status).toBe(200);
   expect((await member.api.post(`/api/tasks/${held}/send-for-approval`, {})).status).toBe(200);
   await admin.page.goto(`/projects/${p.id}?task=${held}`);
   await expect(admin.page.getByRole("button", { name: "Convert to deal" })).toHaveCount(0);

@@ -23,14 +23,54 @@ export function qaEmail(label: string) {
   return `nakul17+${slug}-${RUN}@aplyd.com`;
 }
 
-/** First thing in the file: skip without SHO_QA_PASS, then read the release SHA from /api/health. */
-export function gateFile() {
+function passwordOk(pass: string) {
+  return pass.length >= 8 && pass.length <= 128 && /[A-Za-z]/.test(pass) && /[0-9]/.test(pass);
+}
+
+/** Signs the stable Super Admin up when this database does not have them yet. */
+async function ensureQaAdmin(request: APIRequestContext) {
+  const sign = await request.post("/api/auth/signin", { data: { email: QA_ADMIN_EMAIL, password: QA_PASS } });
+  const signed = await sign.text();
+  noSecret(signed);
+  if (sign.status() === 200) return;
+  const up = await request.post("/api/auth/signup", { data: { name: "ZZ-TEST QA Admin", email: QA_ADMIN_EMAIL, password: QA_PASS } });
+  const upText = await up.text();
+  noSecret(upText);
+  expect(up.status(), upText).toBe(201);
+  const token = await verifyToken(QA_ADMIN_EMAIL);
+  expect(token, `verification mail for ${QA_ADMIN_EMAIL}`).toBeTruthy();
+  const verified = await request.post("/api/auth/verify", { data: { token } });
+  const verifiedText = await verified.text();
+  noSecret(verifiedText);
+  expect(verified.ok(), verifiedText).toBe(true);
+}
+
+/**
+ * First thing in the file: skip without SHO_QA_PASS, then read the release SHA from /api/health.
+ * `admin` also signs up nakul17+zz-sa when the admin fixture is about to sign in as that address.
+ */
+export function storyGate(opts?: { admin?: boolean; id?: string }) {
   test.beforeAll(async ({ playwright }) => {
-    test.skip(!QA_PASS, "Set SHO_QA_PASS (the password for nakul17+ aliases).");
+    test.skip(!QA_PASS, opts?.id
+      ? `${opts.id}: set SHO_QA_PASS (password for nakul17+ aliases).`
+      : "Set SHO_QA_PASS (the password for nakul17+ aliases).");
+    if (!passwordOk(QA_PASS)) throw new Error("SHO_QA_PASS must be at least 8 characters with a letter and a number.");
     const req = await playwright.request.newContext({ baseURL: BASE_URL });
-    try { await assertRelease(req); }
-    finally { await req.dispose(); }
+    try {
+      await assertRelease(req);
+      if (opts?.admin) await ensureQaAdmin(req);
+    } finally { await req.dispose(); }
   });
+  if (opts?.id) {
+    test.beforeEach(() => {
+      test.info().annotations.push({ type: "qa:TC", description: "missing" });
+    });
+  }
+}
+
+/** First thing in the file: skip without SHO_QA_PASS, then read the release SHA from /api/health. */
+export function gateFile(id?: string) {
+  storyGate(id ? { id } : undefined);
 }
 
 /** Release SHA from /api/health, checked before any account is used. */
@@ -113,10 +153,34 @@ export async function cast(browser: Browser, later: Later, labels: string[]) {
   for (const label of labels) {
     const signed = await signInAlias(browser, qaEmail(label), zz(label));
     track(later, signed.ctx);
-    later(() => admin.who.api.post(`/api/team/${signed.who.user.id}/deactivate`, { reassign: "leaders" }));
+    later(() => retire(admin.who, signed.who.user.id as string));
     people.push(signed.who);
   }
   return { admin: admin.who, people };
+}
+
+/**
+ * Deactivate a run's nakul17+ alias through the API. Deactivate refuses while the person still leads a project
+ * (409 with `leads`), so each of those projects is handed to the QA admin first. An archived project is read-only,
+ * so it is unarchived for the hand-over and archived again. Fails if the person is still active afterwards.
+ */
+export async function retire(admin: Who, userId: string) {
+  const off = () => admin.api.post(`/api/team/${userId}/deactivate`, { reassign: "leaders" });
+  let r = await off();
+  if (r.status === 409 && Array.isArray(r.json?.leads)) {
+    for (const lead of r.json.leads as { id: string }[]) {
+      const archived = !!(await admin.api.get(`/api/projects/${lead.id}`)).json?.project?.archived;
+      if (archived) expect((await admin.api.post(`/api/projects/${lead.id}/unarchive`)).status, `unarchive ${lead.id}`).toBeLessThan(300);
+      const joined = await admin.api.post(`/api/projects/${lead.id}/members`, { userId: admin.user.id, role: "EDITOR" });
+      expect([201, 409], `add the QA admin to ${lead.id}: ${JSON.stringify(joined.json)}`).toContain(joined.status);
+      const handed = await admin.api.post(`/api/projects/${lead.id}/leader`, { newLeaderId: admin.user.id, previousRole: "EDITOR" });
+      expect(handed.status, `hand ${lead.id} to the QA admin: ${JSON.stringify(handed.json)}`).toBe(200);
+      if (archived) expect((await admin.api.post(`/api/projects/${lead.id}/archive`)).status, `archive ${lead.id} again`).toBeLessThan(300);
+    }
+    r = await off();
+  }
+  const done = r.status === 200 || (r.status === 409 && /already deactivated/.test(String(r.json?.error)));
+  expect(done, `deactivate ${userId}: ${r.status} ${JSON.stringify(r.json)}`).toBe(true);
 }
 
 /** POST /api/jobs/<name> on the local server. Refuses a remote host so a staging cron is never fired from here. */

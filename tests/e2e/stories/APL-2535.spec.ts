@@ -1,5 +1,10 @@
 // SHO-US-11.4 Link tasks to an organisation or contact  (Linear APL-2535)
-import { test, expect, zz, hasMember, type Json, type Who } from "../support";
+// Pam left no qa:TC id. Each title says qa:TC missing. The annotation is qa:TC with description missing. An AC number is not a TC id.
+import { expect, zz, type Json, type Who } from "../support";
+import { test } from "../helpers/story-people";
+import { storyGate } from "../helpers/qa-alias";
+
+storyGate({ admin: true, id: "APL-2535" });
 
 let n = 0;
 async function setup(admin: Who, later: (f: () => Promise<unknown>) => void) {
@@ -18,7 +23,8 @@ async function setup(admin: Who, later: (f: () => Promise<unknown>) => void) {
   return { org, contact, projectId, taskId };
 }
 
-test("AC1: an Editor links an organisation or a contact and it shows on the task", async ({ admin, later }) => {
+// qa:TC missing
+test("AC1: an Editor links an organisation or a contact and it shows on the task qa:TC missing", async ({ admin, later }) => {
   const s = await setup(admin, later);
   expect((await admin.api.post(`/api/tasks/${s.taskId}/links`, { organisationId: s.org })).status).toBe(201);
   expect((await admin.api.post(`/api/tasks/${s.taskId}/links`, { contactId: s.contact })).status).toBe(201);
@@ -26,17 +32,20 @@ test("AC1: an Editor links an organisation or a contact and it shows on the task
   expect(shown).toHaveLength(2);
   // On screen: the task overlay has a Links section.
   await admin.page.goto(`/projects/${s.projectId}?task=${s.taskId}`);
-  await expect(admin.page.getByText(zz("org")).first()).toBeVisible();
+  const dialog = admin.page.getByRole("dialog", { name: "Task" });
+  await expect(dialog.getByRole("link", { name: new RegExp(zz("org")) })).toBeVisible();
 });
 
-test("AC2: 'Tasks linked here' on the organisation lists the linked task, including via its contacts", async ({ admin, later }) => {
+// qa:TC missing
+test("AC2: 'Tasks linked here' on the organisation lists the linked task, including via its contacts qa:TC missing", async ({ admin, later }) => {
   const s = await setup(admin, later);
   expect((await admin.api.post(`/api/tasks/${s.taskId}/links`, { contactId: s.contact })).status).toBe(201);
   await admin.page.goto(`/accounts/${s.org}`);
-  await expect(admin.page.getByText(zz("linked task")).first()).toBeVisible();
+  await expect(admin.page.getByRole("link", { name: new RegExp(zz("linked task")) })).toBeVisible();
 });
 
-test("AC3: removing a link leaves the task unchanged", async ({ admin, later }) => {
+// qa:TC missing
+test("AC3: removing a link leaves the task unchanged qa:TC missing", async ({ admin, later }) => {
   const s = await setup(admin, later);
   const l = await admin.api.post(`/api/tasks/${s.taskId}/links`, { organisationId: s.org });
   const linkId = l.json.link.id as string;
@@ -46,7 +55,8 @@ test("AC3: removing a link leaves the task unchanged", async ({ admin, later }) 
   expect(t.links).toHaveLength(0);
 });
 
-test("AC4: a task in Trash or in an archived project is not listed on the organisation", async ({ admin, later }) => {
+// qa:TC missing
+test("AC4: a task in Trash or in an archived project is not listed on the organisation qa:TC missing", async ({ admin, later }) => {
   const s = await setup(admin, later);
   await admin.api.post(`/api/tasks/${s.taskId}/links`, { organisationId: s.org });
   const listed = async () => JSON.stringify((await admin.api.get(`/api/orgs/${s.org}`)).json);
@@ -61,8 +71,8 @@ test("AC4: a task in Trash or in an archived project is not listed on the organi
   expect(await listed()).not.toContain(zz("second linked task"));
 });
 
-test("AC5: the server refuses a Viewer's link change", async ({ admin, member, later }) => {
-  test.skip(!hasMember(), "needs SHO_MEMBER_EMAIL/PASS");
+// qa:TC missing
+test("AC5: the server refuses a Viewer's link change qa:TC missing", async ({ admin, member, later }) => {
   const s = await setup(admin, later);
   const add = await admin.api.post(`/api/projects/${s.projectId}/members`, { userId: member.user.id, role: "VIEWER" });
   expect(add.status).toBe(201);
@@ -70,6 +80,16 @@ test("AC5: the server refuses a Viewer's link change", async ({ admin, member, l
   expect(r.status).toBe(403);
 });
 
-test.skip("AC5 (screen): the Links section renders read-only for a Viewer", () => {
-  // Reason: the Linear issue says this is NOT verified; the exact read-only markup is not specified, so it needs a person's look.
+// qa:TC missing
+test("AC5 (screen): the Links section renders read-only for a Viewer qa:TC missing", async ({ admin, member, later }) => {
+  const s = await setup(admin, later);
+  expect((await admin.api.post(`/api/projects/${s.projectId}/members`, { userId: member.user.id, role: "VIEWER" })).status).toBe(201);
+  const orgName = (await admin.api.get(`/api/orgs/${s.org}`)).json.organisation.name as string;
+  expect((await admin.api.post(`/api/tasks/${s.taskId}/links`, { organisationId: s.org })).status).toBe(201);
+  await member.page.goto(`/projects/${s.projectId}?task=${s.taskId}`);
+  const links = member.page.getByRole("dialog", { name: "Task" }).getByText("Links", { exact: true }).locator("xpath=parent::div");
+  await expect(links).toBeVisible();
+  await expect(links.getByRole("link", { name: orgName })).toBeVisible();
+  await expect(links.getByRole("button", { name: "+ Link" })).toHaveCount(0);
+  await expect(links.getByRole("button", { name: "Remove link" })).toHaveCount(0);
 });

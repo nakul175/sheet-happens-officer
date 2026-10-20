@@ -2,7 +2,7 @@
 // One test per acceptance criterion. Sign-in is login("ADMIN") / login("MEMBER") via the fixtures.
 // Deals and organisations are ZZ-TEST and archived afterwards.
 // On hold, Won and Lost are stages in the stepper. The page is /projects/:id.
-import { test, expect, zz } from "../support";
+import { test, expect, zz, withTaskVersion } from "../support";
 import { newTask, ymd } from "../g2";
 import { pipelines } from "../helpers/deal-board";
 import { activity, createDeal, createOrg, dealBody, dealPanel, noSideways, projectOf } from "../helpers/claude-a";
@@ -12,21 +12,25 @@ test("APL-2539 > AC1: the panel shows the pipeline, the organisation and the sta
   const org = await createOrg(admin, later, "page buyer");
   const deal = await createDeal(admin, later, dealBody({ name: zz("page deal"), organisationId: org.id, pipelineId: pipes.pro.id, leaderId: admin.user.id }));
   await admin.page.goto(`/projects/${deal.id}`);
-  const panel = dealPanel(admin.page);
+  const main = admin.page.getByRole("main");
+  const stages = main.getByRole("group", { name: "Stage" });
+  // The deal panel has no landmark of its own. It is the element that holds the Stage group.
+  const panel = stages.locator("..");
   await expect(panel.getByText(pipes.pro.name, { exact: true })).toBeVisible();
-  // The same organisation is also the Buyer chip. The organisation line is the meta row next to the pipeline.
-  await expect(panel.locator(".meta").getByRole("link", { name: org.name })).toHaveAttribute("href", `/accounts/${org.id}`);
-  await expect(panel.getByRole("button", { name: "Lead", exact: true })).toHaveAttribute("aria-current", "step");
-  await expect(panel.getByRole("button", { name: "On hold", exact: true })).toBeEnabled();
-  await expect(panel.getByRole("button", { name: "Won", exact: true })).toBeEnabled();
-  await expect(panel.getByRole("button", { name: "Lost", exact: true })).toBeEnabled();
-  await expect(admin.page.locator("main").getByRole("button", { name: "Put on hold", exact: true })).toHaveCount(0);
-  await expect(admin.page.locator("main").getByRole("button", { name: "Close", exact: true })).toHaveCount(0);
+  // The organisation is linked twice in the panel (beside the pipeline and as the Buyer). The Buyer link is the one in the "Buyer:" field.
+  await expect(panel.getByText(/^Buyer:/).getByRole("link", { name: org.name, exact: true })).toHaveAttribute("href", `/accounts/${org.id}`);
+  await expect(stages.getByRole("button", { name: "Lead", exact: true })).toHaveAttribute("aria-current", "step");
+  await expect(stages.getByRole("button", { name: "On hold", exact: true })).toBeEnabled();
+  await expect(stages.getByRole("button", { name: "Won", exact: true })).toBeEnabled();
+  await expect(stages.getByRole("button", { name: "Lost", exact: true })).toBeEnabled();
+  await expect(main.getByRole("button", { name: "Put on hold", exact: true })).toHaveCount(0);
+  await expect(main.getByRole("button", { name: "Close", exact: true })).toHaveCount(0);
   await expect(panel).not.toContainText(admin.user.name);
   await admin.page.getByRole("link", { name: "Members", exact: true }).click();
   await expect(admin.page.getByRole("heading", { name: "Members" })).toBeVisible();
-  await expect(admin.page.locator("main").getByText(admin.user.name).first()).toBeVisible();
-  await expect(admin.page.locator("main").getByText("Leader").first()).toBeVisible();
+  // The Leader is the only member, so their name and the Leader role each appear once on the list.
+  await expect(main.getByText(admin.user.name, { exact: true })).toBeVisible();
+  await expect(main.getByText("Leader", { exact: true })).toBeVisible();
 });
 
 test("APL-2539 > AC2: the next step is a line in the panel, a red chip when there is none, and a muted note when the stage needs none", async ({ admin, later }) => {
@@ -40,7 +44,7 @@ test("APL-2539 > AC2: the next step is a line in the panel, a red chip when ther
   await expect(line).toContainText(step);
   await expect(line).toContainText("·");
   const stepId = (await projectOf(admin, deal.id)).deal.nextStep.id as string;
-  expect((await admin.api.post(`/api/tasks/${stepId}/complete`, {})).status).toBe(200);
+  expect((await admin.api.post(`/api/tasks/${stepId}/complete`, await withTaskVersion(admin.api, stepId))).status).toBe(200);
   await admin.page.reload();
   await expect(panel.locator(".chip.red", { hasText: "No next step. Add a dated task." })).toBeVisible();
   await panel.getByRole("button", { name: "On hold", exact: true }).click();

@@ -33,6 +33,13 @@ export type Who = { page: Page; api: Api; user: Json };
 /** Clean-up registrar passed as the `later` fixture. */
 export type Later = (fn: () => Promise<unknown>) => void;
 
+/** A task change must name the version the screen is showing (APL-2648 / APL-2668). */
+export async function withTaskVersion(api: Api, id: string, body: Record<string, unknown> = {}) {
+  const seen = (await api.get(`/api/tasks/${id}`)).json?.task?.updatedAt as string | undefined;
+  if (!seen) throw new Error(`Task ${id} has no updatedAt, so the change cannot name its version.`);
+  return { ...body, expectedUpdatedAt: seen };
+}
+
 export function api(req: APIRequestContext): Api {
   const call = async (method: string, p: string, data?: unknown) => {
     const r = await req.fetch(p, { method, data: data === undefined ? undefined : data, headers: { "content-type": "application/json" } });

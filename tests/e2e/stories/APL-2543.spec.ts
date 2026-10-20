@@ -1,12 +1,15 @@
 // SHO-US-12.7 Stalled deals (APL-2543).
-// A deal is stalled only when its last activity is more than 30 days ago. Creating or editing a deal
-// through the API stamps that activity as now, and a browser session cannot rewrite those timestamps
-// (tests/crm5.test.ts does it with SQL). The stalled-deals job also needs JOB_SECRET, which a signed-in
-// session does not have, and running it here would notify real Leaders on staging.
-// AC4 and AC6 are the parts a session can see. The rest stay skipped: a 30-day history, or the stalled-deals cron.
+// Pam left no qa:TC id. Each title says qa:TC missing. The annotation is qa:TC with description missing. An AC number is not a TC id.
+// A deal is stalled only when its last activity is more than 30 days ago. Every activity time is stamped by the
+// server, no API can backdate it, and this suite writes nothing to the database. So the 30-quiet-days halves of
+// AC1, AC2, AC3 and AC5 run in tests/stall-clock-2709.test.ts: ZZ-TEST deals made through the API, with Date faked
+// in that process only. A server-side clock hook for these screens is APL-2757.
 import { test, expect, zz } from "../support";
+import { storyGate } from "../helpers/qa-alias";
+import { rowFromLink, stageColumn } from "../helpers/locate";
 import { ymd, type Who } from "../g2";
-import { why } from "../helpers/jim-http";
+
+storyGate({ admin: true, id: "APL-2543" });
 
 type Later = (fn: () => Promise<unknown>) => void;
 
@@ -28,22 +31,35 @@ async function makeDeal(admin: Who, later: Later, label: string) {
   return { id, name };
 }
 
-test.skip("AC1: Stalled shows on the card, the list and the deal page, and any logged change counts as activity", why(
-  "Needs a deal whose last activity is more than 30 days old. A session cannot move createdAt, stageChangedAt, task updatedAt or the action log backwards (30-day history). Covered by tests/crm5.test.ts.",
-), () => {});
+const stalledOf = async (admin: Who, id: string) =>
+  ((await admin.api.get("/api/deals")).json.deals as { id: string; stalled: boolean }[]).find((d) => d.id === id)?.stalled;
 
-test.skip("AC2: any later activity clears the Stalled flag", why(
-  "Clearing the flag needs a deal that is already stalled. A session cannot age one (30-day history). Covered by tests/crm5.test.ts.",
-), () => {});
+// qa:TC missing
+test("AC1 (screen): a deal with activity today carries no Stalled mark on the card, the review or the deal page qa:TC missing", async ({ admin, later }) => {
+  test.setTimeout(180_000);
+  const d = await makeDeal(admin, later, "stalled card");
+  expect(await stalledOf(admin, d.id)).toBe(false);
+  expect((await admin.api.get(`/api/projects/${d.id}`)).json.project.deal.stalled).toBe(false);
+  await admin.page.goto("/deals");
+  const card = rowFromLink(stageColumn(admin.page, "Lead").getByRole("link", { name: d.name, exact: true }));
+  await expect(card).toBeVisible();
+  await expect(card.getByText("Stalled", { exact: true })).toHaveCount(0);
+  await admin.page.goto("/review");
+  const stalledRegion = admin.page.getByRole("region", { name: "Stalled for 30 days" });
+  await expect(stalledRegion).toBeVisible();
+  await expect(stalledRegion.getByText(d.name)).toHaveCount(0);
+  await admin.page.goto(`/projects/${d.id}`);
+  await expect(admin.page.getByRole("heading", { name: d.name })).toBeVisible();
+  await expect(admin.page.getByText("Stalled · no activity for 30 days")).toHaveCount(0);
+});
 
-test.skip("AC3: one in-app notice per stall, and a new one only after new activity and 30 more quiet days", why(
-  "The notice is sent by the stalled-deals cron. That route needs JOB_SECRET and a deal quiet for 30 days, and running it on staging would notify real Leaders. Covered by tests/crm5.test.ts.",
-), () => {});
+// AC2 (later activity clears the flag) and AC3 (one notice per stall) need a deal 30 days quiet.
+// They run in tests/stall-clock-2709.test.ts on an in-process clock.
 
-test("AC4: 30 days is a fixed part of the product, not a setting on the deal", async ({ admin, later }) => {
+// qa:TC missing
+test("AC4: 30 days is a fixed part of the product, not a setting on the deal qa:TC missing", async ({ admin, later }) => {
   await admin.page.goto("/review");
   await expect(admin.page.getByRole("region", { name: "Stalled for 30 days" })).toBeVisible();
-  await expect(admin.page.getByText("Stalled for 30 days").first()).toBeVisible();
 
   const jobs = (await admin.api.get("/api/jobs")).json.jobs as { job: string; about: string }[];
   const stalled = jobs.find((j) => j.job === "stalled-deals");
@@ -59,11 +75,11 @@ test("AC4: 30 days is a fixed part of the product, not a setting on the deal", a
   expect("stallDays" in block).toBe(false);
 });
 
-test.skip("AC5: archived, Paused, Done and Lost deals are never flagged", why(
-  "Proving those stages are never stalled needs 30 quiet days. A new deal in those stages is also not stalled, so a session cannot show the stage rule (30-day history). Covered by tests/crm5.test.ts.",
-), () => {});
+// AC5 (archived, Paused, Done and Lost are never flagged) needs 30 quiet days to mean anything.
+// It runs in tests/stall-clock-2709.test.ts with a working control deal that is flagged at the same moment.
 
-test("AC6: stalled-deals is on the job list the daily check reads, with the same fields as the other jobs", async ({ admin }) => {
+// qa:TC missing
+test("AC6: stalled-deals is on the job list the daily check reads, with the same fields as the other jobs qa:TC missing", async ({ admin }) => {
   const jobs = (await admin.api.get("/api/jobs")).json.jobs as { job: string; about: string; lastStartedAt: string | null; lastFinishedAt: string | null; lastStatus: string | null; lastError: string | null }[];
   const stalled = jobs.find((j) => j.job === "stalled-deals");
   expect(stalled, "the job the checker walks").toBeTruthy();

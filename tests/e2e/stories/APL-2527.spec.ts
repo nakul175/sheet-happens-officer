@@ -1,8 +1,14 @@
 // SHO-US-10.1 Workstream type on every project (APL-2527).
+// Pam left no qa:TC id. Each title says qa:TC missing. The annotation is qa:TC with description missing. An AC number is not a TC id.
 // One test per acceptance criterion. ZZ-TEST projects, deals and organisations are archived afterwards.
 // The Super Admin is the Admin. workers is 1 in playwright.config.ts. Traces stay off.
-import { test, expect, zz } from "../support";
+import { readdirSync, readFileSync } from "node:fs";
+import { expect, test, zz } from "../support";
+import { storyGate } from "../helpers/qa-alias";
+import { breadcrumb } from "../helpers/locate";
 import { newProject, ymd, type Who } from "../g2";
+
+storyGate({ admin: true, id: "APL-2527" });
 
 type Later = (fn: () => Promise<unknown>) => void;
 type Stage = { id: string; name: string; category: string };
@@ -13,8 +19,7 @@ const CRM_OFF = "CRM routes answer not found on this server (CRM_VISIBLE is off)
 
 async function crmPipes(who: Who) {
   const r = await who.api.get("/api/deals/pipelines");
-  test.skip(r.status === 404, CRM_OFF);
-  expect(r.status, JSON.stringify(r.json)).toBe(200);
+  expect(r.status, CRM_OFF + " " + JSON.stringify(r.json)).toBe(200);
   return r.json.pipelines as Pipe[];
 }
 
@@ -41,7 +46,8 @@ const load = async (admin: Who, id: string) => (await admin.api.get(`/api/projec
   type: string; deal: unknown; sections: { id: string; name: string; position: number; isDone: boolean }[];
 };
 
-test("AC1: every project on the Projects list is type Project", async ({ admin, later }) => {
+// qa:TC missing
+test("AC1: every project on the Projects list is type Project qa:TC missing", async ({ admin, later }) => {
   test.setTimeout(120_000);
   // The rehearsal (607 projects, no table's row count changed) is a one-time migration. A browser can check the live result of that default.
   const mine = await newProject(admin, later, { label: "2527 default" });
@@ -70,11 +76,12 @@ test("AC1: every project on the Projects list is type Project", async ({ admin, 
   expect((await load(admin, deal.id)).type).toBe("DEAL");
 });
 
-test("AC2: a project created on the Projects screen has type Project and is listed", async ({ admin, later }) => {
+// qa:TC missing
+test("AC2: a project created on the Projects screen has type Project and is listed qa:TC missing", async ({ admin, later }) => {
   test.setTimeout(120_000);
   const name = zz("2527 screen");
   await admin.page.goto("/projects/new");
-  const form = admin.page.locator("form");
+  const form = admin.page.getByRole("main");
   await expect(form.getByLabel("Project name")).toBeVisible();
   // The form asks for a name and a Leader. It does not ask for a type, and there is no Deal choice.
   await expect(form.getByRole("combobox", { name: "Leader" })).toBeVisible();
@@ -87,8 +94,9 @@ test("AC2: a project created on the Projects screen has type Project and is list
   later(() => admin.api.post(`/api/projects/${id}/archive`));
 
   await admin.page.keyboard.press("Escape"); // a new project asks for its first task; that dialog is not the type
-  await expect(admin.page.locator(".crumb").getByRole("link", { name: "Projects" })).toBeVisible();
-  await expect(admin.page.locator(".crumb")).toContainText(name);
+  const crumb = breadcrumb(admin.page, "Projects");
+  await expect(crumb.getByRole("link", { name: "Projects" })).toBeVisible();
+  await expect(crumb).toContainText(name);
   const row = await load(admin, id);
   expect(row.type).toBe("PROJECT");
   expect(row.deal).toBeNull();
@@ -107,12 +115,30 @@ test("AC2: a project created on the Projects screen has type Project and is list
   if (deals.status === 200) expect((deals.json.deals as { id: string }[]).some((d) => d.id === id)).toBe(false);
 });
 
-test.skip("AC3: the migration only adds columns with defaults, and a rollback restores code but not the database", () => {
-  // Reason: this is the one-time rehearsal on a copy of dev data, then the production deploy. A browser session cannot
-  // read that migration, its row counts, or a rollback. Rollback restores code, not the database, so there is nothing to click.
+// qa:TC missing
+test("@static AC3: the migration only adds columns with defaults, and a rollback restores code but not the database qa:TC missing", () => {
+  const dir = "prisma/migrations/20261017124803_crm_workstreams_deals";
+  const names = readdirSync(dir).sort();
+  // The forward file is the only script. There is no down.sql, so reverting the code
+  // restores the tree and leaves the applied columns in the database.
+  expect(names, "a code rollback ships no down migration").toEqual(["migration.sql"]);
+  const sql = readFileSync(`${dir}/migration.sql`, "utf8");
+  expect(sql).toMatch(/"typeId" TEXT NOT NULL DEFAULT 'wst_project'/);
+  expect(sql).toMatch(/"isIdea" BOOLEAN NOT NULL DEFAULT false/);
+  expect(sql).toMatch(/ADD COLUMN\s+"pipelineId" TEXT/);
+  expect(sql).toMatch(/ADD COLUMN\s+"stageId" TEXT/);
+  expect(sql).toMatch(/ADD COLUMN\s+"stageReason" TEXT/);
+  expect(sql).toMatch(/ADD COLUMN\s+"stageChangedAt" TIMESTAMP\(3\)/);
+  expect(sql).not.toMatch(/\bDROP TABLE\b/);
+  expect(sql).not.toMatch(/\bTRUNCATE\b/);
+  expect(sql).not.toMatch(/--\s*rollback/i);
+  for (const column of ["typeId", "isIdea", "pipelineId", "stageId", "stageReason", "stageChangedAt"]) {
+    expect(sql, `${column} is not dropped, so a code rollback does not undo it`).not.toMatch(new RegExp(`DROP COLUMN\\s+"${column}"`));
+  }
 });
 
-test("AC4: deal pipelines are separate from the project status pipeline, and moving a deal does not change a project", async ({ admin, later }) => {
+// qa:TC missing
+test("AC4: deal pipelines are separate from the project status pipeline, and moving a deal does not change a project qa:TC missing", async ({ admin, later }) => {
   test.setTimeout(120_000);
   const pipes = await crmPipes(admin);
   const keys = pipes.map((p) => p.key);

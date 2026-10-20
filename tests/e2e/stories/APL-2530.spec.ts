@@ -1,9 +1,15 @@
 // SHO-US-10.4 Projects list hides Deals; Deals has its own place (APL-2530).
+// Pam left no qa:TC id. Each title says qa:TC missing. The annotation is qa:TC with description missing. An AC number is not a TC id.
 // One test per acceptance criterion. ZZ-TEST projects, deals and organisations are archived afterwards.
 // The Super Admin is the Admin. The plain Member creates the project in AC4 and moves the stage in AC3.
 // workers is 1 in playwright.config.ts. Traces stay off.
-import { test, expect, zz, RUN } from "../support";
+import { expect, zz, RUN } from "../support";
+import { test } from "../helpers/story-people";
+import { storyGate } from "../helpers/qa-alias";
+import { breadcrumb, dealLink, stageColumn } from "../helpers/locate";
 import { newProject, ymd, type Who } from "../g2";
+
+storyGate({ admin: true, id: "APL-2530" });
 
 type Later = (fn: () => Promise<unknown>) => void;
 type Pipe = { id: string; key: string; stages: { id: string; name: string }[] };
@@ -13,8 +19,7 @@ const CRM_MEMBER = "CRM is hidden from this Member (CRM_VISIBLE is admins or off
 
 async function crmOn(who: Who, hidden: string) {
   const r = await who.api.get("/api/deals/pipelines");
-  test.skip(r.status === 404, hidden);
-  expect(r.status, JSON.stringify(r.json)).toBe(200);
+  expect(r.status, hidden + " " + JSON.stringify(r.json)).toBe(200);
   return r.json.pipelines as Pipe[];
 }
 
@@ -36,7 +41,8 @@ async function makeDeal(who: Who, later: Later, o: { label: string; leaderId?: s
   return { id, name, pro };
 }
 
-test("AC1: the Projects list is type Project only, and Deals opens the pipeline board", async ({ admin, later }) => {
+// qa:TC missing
+test("AC1: the Projects list is type Project only, and Deals opens the pipeline board qa:TC missing", async ({ admin, later }) => {
   test.setTimeout(120_000);
   await crmOn(admin, CRM_OFF);
   const project = await newProject(admin, later, { label: "2530 project" });
@@ -53,15 +59,17 @@ test("AC1: the Projects list is type Project only, and Deals opens the pipeline 
   await admin.page.goto("/projects");
   await expect(admin.page.getByRole("heading", { level: 2, name: project.name })).toBeVisible();
   await expect(admin.page.getByRole("heading", { level: 2, name: deal.name })).toHaveCount(0);
-  await admin.page.locator("nav").getByRole("link", { name: "Deals" }).click();
+  await admin.page.getByRole("link", { name: "Deals", exact: true }).click();
   await expect(admin.page).toHaveURL(/\/deals\/?$/);
-  await expect(admin.page.getByRole("region", { name: "Lead" })).toBeVisible();
-  await expect(admin.page.locator(".dcol header b").first()).toHaveText("Lead");
-  await expect(admin.page.locator(".dcard", { hasText: deal.name })).toBeVisible();
-  await expect(admin.page.locator(".dcard", { hasText: project.name })).toHaveCount(0);
+  await expect(stageColumn(admin.page, "Lead")).toBeVisible();
+  const columnNames = await admin.page.getByRole("main").getByRole("region").evaluateAll((els) => els.map((el) => el.getAttribute("aria-label")));
+  expect(columnNames[0]).toBe("Lead");
+  await expect(dealLink(admin.page, deal.name)).toBeVisible();
+  await expect(dealLink(admin.page, project.name)).toHaveCount(0);
 });
 
-test("AC2: search finds a project and a deal, and the Search screen shows no type mark on the deal", async ({ admin, later }) => {
+// qa:TC missing
+test("AC2: search finds a project and a deal, and the Search screen shows no type mark on the deal qa:TC missing", async ({ admin, later }) => {
   test.setTimeout(120_000);
   await crmOn(admin, CRM_OFF);
   const token = `ZZ-TEST ${RUN} pair`;
@@ -82,17 +90,18 @@ test("AC2: search finds a project and a deal, and the Search screen shows no typ
   await admin.page.goto("/search");
   await expect(admin.page.getByRole("checkbox", { name: "Ideas only" })).toBeVisible();
   await admin.page.getByLabel("Search").fill(token);
-  const projectRow = admin.page.locator("a.item", { hasText: projectName });
-  const dealRow = admin.page.locator("a.item", { hasText: dealName });
+  const projectRow = admin.page.getByRole("main").getByRole("link", { name: projectName, exact: true });
+  const dealRow = admin.page.getByRole("main").getByRole("link", { name: dealName, exact: true });
   await expect(projectRow).toBeVisible();
   await expect(dealRow).toBeVisible();
-  await expect(admin.page.locator(".grp", { hasText: /^Projects$/ })).toBeVisible();
-  await expect(admin.page.locator(".grp", { hasText: /^Deals$/ })).toHaveCount(0);
-  await expect(dealRow.locator(".chip")).toHaveCount(0);
+  await expect(admin.page.getByRole("main").getByText("Projects", { exact: true })).toBeVisible();
+  await expect(admin.page.getByRole("main").getByText("Deals", { exact: true })).toHaveCount(0);
+  await expect(dealRow.getByText("Archived", { exact: true })).toHaveCount(0);
   await expect(dealRow).toHaveText(dealName);
 });
 
-test("AC3: a deal link and a notification open the deal page, and the breadcrumb says Deals", async ({ admin, member, later }) => {
+// qa:TC missing
+test("AC3: a deal link and a notification open the deal page, and the breadcrumb says Deals qa:TC missing", async ({ admin, member, later }) => {
   test.setTimeout(180_000);
   await crmOn(admin, CRM_OFF);
   await crmOn(member, CRM_MEMBER);
@@ -106,21 +115,23 @@ test("AC3: a deal link and a notification open the deal page, and the breadcrumb
   expect(note!.href).toBe(`/projects/${deal.id}`);
 
   await admin.page.goto("/deals");
-  await admin.page.locator(".dcard", { hasText: deal.name }).getByRole("link", { name: deal.name }).click();
+  await dealLink(admin.page, deal.name).click();
   await expect(admin.page).toHaveURL(new RegExp(`/projects/${deal.id}`));
-  await expect(admin.page.locator(".crumb").getByRole("link", { name: "Deals" })).toBeVisible();
+  const crumb = breadcrumb(admin.page, "Deals");
+  await expect(crumb).toBeVisible();
   await expect(admin.page.getByRole("group", { name: "Stage" })).toBeVisible();
-  await expect(admin.page.locator(".crumb").getByRole("link", { name: "Projects" })).toHaveCount(0);
+  await expect(crumb.getByRole("link", { name: "Projects" })).toHaveCount(0);
 
   await admin.page.goto("/projects");
   await admin.page.getByRole("button", { name: /Notifications/ }).click();
-  await admin.page.getByRole("dialog", { name: "Notifications" }).locator("a", { hasText: deal.name }).filter({ hasText: "to Conversation" }).click();
+  await admin.page.getByRole("dialog", { name: "Notifications" }).getByRole("link").filter({ hasText: deal.name }).filter({ hasText: "to Conversation" }).click();
   await expect(admin.page).toHaveURL(new RegExp(`/projects/${deal.id}`));
-  await expect(admin.page.locator(".crumb").getByRole("link", { name: "Deals" })).toBeVisible();
+  await expect(breadcrumb(admin.page, "Deals")).toBeVisible();
   await expect(admin.page.getByRole("group", { name: "Stage" }).getByRole("button", { name: "Conversation", exact: true })).toHaveAttribute("aria-current", "step");
 });
 
-test("AC4: All projects shows type Project, and a deal is reached through Deals", async ({ admin, member, later }) => {
+// qa:TC missing
+test("AC4: All projects shows type Project, and a deal is reached through Deals qa:TC missing", async ({ admin, member, later }) => {
   test.setTimeout(120_000);
   await crmOn(admin, CRM_OFF);
   await crmOn(member, CRM_MEMBER);
@@ -144,28 +155,29 @@ test("AC4: All projects shows type Project, and a deal is reached through Deals"
   await expect(admin.page.getByRole("heading", { level: 2, name })).toBeVisible();
   await expect(admin.page.getByRole("heading", { level: 2, name: deal.name })).toHaveCount(0);
 
-  await admin.page.locator("nav").getByRole("link", { name: "Deals" }).click();
-  await expect(admin.page.locator(".dcard", { hasText: deal.name })).toBeVisible();
-  await expect(admin.page.locator(".dcard", { hasText: name })).toHaveCount(0);
+  await admin.page.getByRole("link", { name: "Deals", exact: true }).click();
+  await expect(dealLink(admin.page, deal.name)).toBeVisible();
+  await expect(dealLink(admin.page, name)).toHaveCount(0);
 });
 
-test("AC5: Show archived is a read-only table of archived deals, not an Archived group on the board", async ({ admin, later }) => {
+// qa:TC missing
+test("AC5: Show archived is a read-only table of archived deals, not an Archived group on the board qa:TC missing", async ({ admin, later }) => {
   test.setTimeout(120_000);
   await crmOn(admin, CRM_OFF);
   const deal = await makeDeal(admin, later, { label: "2530 archived" });
   await admin.page.goto("/deals");
-  await expect(admin.page.locator(".dcard", { hasText: deal.name })).toBeVisible();
-  await expect(admin.page.locator(".dboard")).toBeVisible();
+  await expect(dealLink(admin.page, deal.name)).toBeVisible();
+  await expect(stageColumn(admin.page, "Lead")).toBeVisible();
   expect((await admin.api.post(`/api/projects/${deal.id}/archive`)).status).toBeLessThan(300);
   await admin.page.reload();
-  await expect(admin.page.locator(".dcard", { hasText: deal.name })).toHaveCount(0);
+  await expect(dealLink(admin.page, deal.name)).toHaveCount(0);
   await expect(admin.page.getByText("Archived (read-only)")).toHaveCount(0);
 
   await admin.page.getByRole("button", { name: "Show archived" }).click();
   await expect(admin.page.getByRole("button", { name: "Show live" })).toHaveAttribute("aria-pressed", "true");
-  await expect(admin.page.locator(".dboard")).toHaveCount(0);
+  await expect(stageColumn(admin.page, "Lead")).toHaveCount(0);
   await expect(admin.page.getByText("Archived (read-only)")).toHaveCount(0);
-  const row = admin.page.locator("tr", { hasText: deal.name });
+  const row = admin.page.getByRole("row", { name: deal.name });
   await expect(row).toBeVisible();
   await expect(row.getByRole("link", { name: deal.name })).toBeVisible();
   await expect(admin.page.getByRole("button", { name: `Move ${deal.name}` })).toHaveCount(0);
@@ -173,7 +185,7 @@ test("AC5: Show archived is a read-only table of archived deals, not an Archived
   await row.getByRole("link", { name: deal.name }).click();
   await expect(admin.page.getByText("This project is archived and read-only.")).toBeVisible();
   const buttons = admin.page.getByRole("group", { name: "Stage" }).getByRole("button");
-  await expect(buttons.first()).toBeVisible();
+  await expect(buttons).not.toHaveCount(0);
   for (const button of await buttons.all()) await expect(button).toBeDisabled();
   const live = (await admin.api.get(`/api/deals?pipelineId=${deal.pro.id}`)).json.deals as { id: string }[];
   const old = (await admin.api.get(`/api/deals?pipelineId=${deal.pro.id}&archived=true`)).json.deals as { id: string }[];
