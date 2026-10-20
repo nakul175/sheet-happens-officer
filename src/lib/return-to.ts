@@ -94,7 +94,9 @@ function canonicalPath(value: string): string | null {
  */
 export function safeReturnPath(input: string | null | undefined, priorDecodes = 0): string | null {
   if (typeof input !== "string") return null;
-  const raw = input.trim();
+  // AC2: leading or trailing whitespace (`%20/tasks/T1`, `?a=%0D%0A`) is not trimmed away. It is not a safe path.
+  if (input !== input.trim()) return null;
+  const raw = input;
   if (!raw || raw.length > MAX_LENGTH) return null;
   const layers = decodeOnce(raw, priorDecodes);
   if (!layers) return null;

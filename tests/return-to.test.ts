@@ -29,7 +29,7 @@ describe("APL-2652 safe return path", () => {
 
   it("keeps a same-origin deep link and drops the fragment", () => {
     expect(safeReturnPath("/tasks/T1")).toBe("/tasks/T1");
-    expect(safeReturnPath("  /tasks/T1  ")).toBe("/tasks/T1");
+    expect(safeReturnPath("  /tasks/T1  ")).toBeNull();
     expect(safeReturnPath("/tasks/T1?x=1")).toBe("/tasks/T1?x=1");
     expect(safeReturnPath("/projects/abc?task=T1")).toBe("/projects/abc?task=T1");
     // AC1 v1.2: path and query stay; the #fragment is not part of next.
@@ -159,7 +159,7 @@ describe("APL-2652 safe return path", () => {
     expect(safeReturnPath(encode("/tasks/a b", 1))).toBeNull();
   });
 
-  it("qa:TC-APL2652-c26e8af9 decodes once, counting the router's decode", () => {
+  it("qa:TC-APL2652-c26e8af9@v2 AC2 v1.4: decodes once, counting the router's decode; 5x-encoded lands on /", () => {
     const encode = (value: string, times: number) => {
       let out = value;
       for (let i = 0; i < times; i++) out = encodeURIComponent(out);
@@ -168,8 +168,31 @@ describe("APL-2652 safe return path", () => {
     // The router decodes the query once. That is the one decode, so a path still encoded after it falls back.
     expect(safeReturnPath(decodeURIComponent(encode("/tasks/T1?tab=comments", 1)), 1)).toBe("/tasks/T1?tab=comments");
     expect(safeReturnPath(decodeURIComponent(encode("/tasks/T1?tab=comments", 2)), 1)).toBeNull();
+    expect(safeReturnPath(decodeURIComponent(encode("/tasks/T1?tab=comments", 5)), 1)).toBeNull();
+    expect(signInHref(decodeURIComponent(encode("/tasks/T1?tab=comments", 5)))).toBe("/signin");
     expect(safeReturnPath(decodeURIComponent(encode("/tasks/T1?tab=comments", 6)), 1)).toBeNull();
     expect(safeReturnPath(decodeURIComponent(encode("//evil.example", 2)), 1)).toBeNull();
+  });
+
+  it("AC2 v1.4 rejects whitespace or a control character at either end instead of trimming it", () => {
+    // Pam's D1 (6280676456): the router decodes `next`, so these reach safeReturnPath with the character in place.
+    for (const next of [
+      "%20%2Ftasks%2FT1", // leading space
+      "%2Ftasks%2FT1%20", // trailing space
+      "%09%2Ftasks%2FT1", // leading tab
+      "%2Ftasks%2FT1%09", // trailing tab
+      "%01%2Ftasks%2FT1", // leading control character
+      "%2Ftasks%2FT1%0A", // trailing line feed
+      "%2Ftasks%2FT1%3Fa%3D%0D%0A", // trailing CR LF in the query
+    ]) {
+      const seen = new URL(`/signin?next=${next}`, BASE_ORIGIN).searchParams.get("next");
+      expect(safeReturnPath(seen, 1), next).toBeNull();
+      expect(safeReturnPath(next), next).toBeNull();
+      expect(signInHref(seen), next).toBe("/signin");
+    }
+    expect(safeReturnPath(" /tasks/T1")).toBeNull();
+    expect(safeReturnPath("/tasks/T1\t")).toBeNull();
+    expect(safeReturnPath("/tasks/T1\u0001")).toBeNull();
   });
 
   it("D1 keeps an encoded query value: R%26D, C%2B%2B and 100%25", () => {
