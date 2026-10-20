@@ -31,7 +31,7 @@ export const RETURN_PATH_HEADER = "x-sho-return-path";
 const WHITESPACE = /[\s\u00A0\u1680\u2000-\u200A\u2028\u2029\u202F\u205F\u3000\uFEFF]/;
 
 function isDangerous(value: string): boolean {
-  if (WHITESPACE.test(value)) return true;
+  // Control characters (tab, CR, LF included) anywhere. Other whitespace is a path rule (AC2 v1.5/v1.6), checked below.
   if (/[\\\u0000-\u001F\u007F]/.test(value)) return true;
   // Protocol-relative `//` and a backslash, including after a prefix. Browsers treat `\` as `/`.
   if (value.includes("//") || value.includes("\\")) return true;
@@ -107,8 +107,10 @@ export function safeReturnPath(input: string | null | undefined, priorDecodes = 
   }
   const final = layers[layers.length - 1];
   if (!final.startsWith("/") || final.startsWith("//") || final.startsWith("/\\")) return null;
-  // A path still encoded after the one decode falls back to the home page. The query keeps its encoding: it is data.
-  if ((final.split(/[?#]/)[0] ?? final).includes("%")) return null;
+  // A path still encoded after the one decode, or carrying whitespace, falls back to the home page.
+  // The query keeps its encoding and its spaces: it is data (AC2 v1.5/v1.6).
+  const finalPath = final.split(/[?#]/)[0] ?? final;
+  if (finalPath.includes("%") || WHITESPACE.test(finalPath)) return null;
   const path = canonicalPath(final);
   if (!path) return null;
   // A page path only. /api and /signin are not places sign-in should send someone.

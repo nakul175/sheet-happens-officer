@@ -251,6 +251,39 @@ describe("APL-2652 safe return path", () => {
     }
   });
 
+  it("D8 a literal space in a query value keeps the return path; whitespace in the path is still rejected", () => {
+    // Pam's D8 (6283719658): the router turns q%3Da%20b into a literal space in the query.
+    const landed = safeReturnPath(new URL("/signin?next=%2Ftasks%2FT1%3Fq%3Da%20b", BASE_ORIGIN).searchParams.get("next"), 1);
+    expect(landed).toBe("/tasks/T1?q=a%20b");
+    expect(new URL(landed!, BASE_ORIGIN).searchParams.get("q")).toBe("a b");
+    expect(safeReturnPath("/tasks/T1?q=a\u00A0b", 1)).toBe("/tasks/T1?q=a%C2%A0b");
+    for (const path of ["/tasks/a b", "/tasks/a\u00A0b", "/tasks/a\u3000b", "/tasks/T1 ?q=x"]) {
+      expect(safeReturnPath(path, 1), path).toBeNull();
+      expect(signInHref(path), path).toBe("/signin");
+    }
+    // A literal control character is still rejected anywhere, query included.
+    for (const value of ["/tasks/T1?q=a\tb", "/tasks/T1?q=a\nb", "/tasks/T1?q=a\rb", "/tasks/T1?q=a\u0001b"]) {
+      expect(safeReturnPath(value, 1), JSON.stringify(value)).toBeNull();
+    }
+  });
+
+  it("D9 AC2 v1.6: encoded %09 and %0A in a query value are kept encoded and never emitted raw", () => {
+    for (const [sent, q] of [["%2Ftasks%2FT1%3Fq%3Da%2509b", "a\tb"], ["%2Ftasks%2FT1%3Fq%3Da%250Ab", "a\nb"], ["%2Ftasks%2FT1%3Fq%3Da%250D%250Ab", "a\r\nb"]]) {
+      const landed = safeReturnPath(new URL(`/signin?next=${sent}`, BASE_ORIGIN).searchParams.get("next"), 1);
+      expect(landed, sent).toBeTruthy();
+      expect(landed!, sent).not.toMatch(/[\u0000-\u001F\u007F]/);
+      expect(landed!.startsWith("/tasks/T1?q=a%"), landed!).toBe(true);
+      expect(new URL(landed!, BASE_ORIGIN).searchParams.get("q"), sent).toBe(q);
+      // The 401 and signed-out paths carry it the same way, still encoded.
+      const href = signInHref(landed);
+      expect(href).not.toMatch(/[\u0000-\u001F\u007F]/);
+      expect(safeReturnPath(new URL(href, BASE_ORIGIN).searchParams.get("next"), 1)).toBe(landed);
+    }
+    // The same encodings in the path are rejected.
+    expect(safeReturnPath("/tasks/T1%09", 1)).toBeNull();
+    expect(safeReturnPath("/tasks/T1%0A", 1)).toBeNull();
+  });
+
   it("D1 keeps an encoded query value: R%26D, C%2B%2B and 100%25", () => {
     const cases: [string, string][] = [
       ["/tasks/T1?q=R%26D", "R&D"],
@@ -590,6 +623,23 @@ describe("APL-2652 signed-out redirect", () => {
         expect(url.searchParams.get("next"), path).toBeNull();
         assertSameOriginSignIn(doc.target!, null);
       }
+    }
+  });
+
+  it("D9 AC2 v1.6: a signed-out redirect keeps %09 and %0A in a query value encoded in the Location", async () => {
+    const enabled = await serverReturnToEnabled();
+    for (const [path, q] of [["/tasks/v16-probe?q=a%09b", "a\tb"], ["/tasks/v16-probe?q=a%0Ab", "a\nb"], ["/tasks/v16-probe?q=a%0D%0Ab", "a\r\nb"]] as const) {
+      const doc = await documentTarget(path);
+      expect(doc.target, path).toBeTruthy();
+      // Never raw: no decoded control character in the Location or the redirect the page carries.
+      expect(doc.target!, path).not.toMatch(/[\u0000-\u001F\u007F]/);
+      const next = new URL(doc.target!, BASE).searchParams.get("next");
+      if (!enabled) {
+        expect(next, path).toBeNull();
+        continue;
+      }
+      expect(next, path).toBe(path);
+      expect(new URL(next!, BASE).searchParams.get("q"), path).toBe(q);
     }
   });
 
