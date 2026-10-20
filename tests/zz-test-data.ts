@@ -2,7 +2,7 @@
 // Names start with ZZ-TEST and addresses are nakul17+ aliases. cleanUp() is the same sequence as
 // tests/e2e/local/APL-2522.test.ts: the Super Admin joins each project, takes the Leader role,
 // archives it, then deactivates each person. Archived projects still count as leaderships, so the
-// handover has to come first.
+// handover has to come first. Last, it signs the Super Admin session it opened out through the API (APL-2893).
 import { expect } from "vitest";
 import { account, superAdmin, type Account } from "./helpers";
 
@@ -35,7 +35,7 @@ export function zzTestData(tag: string) {
     return { id, name, todo: sections[0].id, doing: sections[1].id, done: sections.find((s) => s.isDone)!.id };
   }
 
-  /** Archives every project and deactivates every person made here. Returns what went wrong, if anything. */
+  /** Archives every project, deactivates every person made here, then signs the Super Admin out. Returns what went wrong, if anything. */
   async function cleanUp() {
     const sa = await superAdmin();
     const problems: string[] = [];
@@ -57,6 +57,8 @@ export function zzTestData(tag: string) {
         problems.push(`deactivate ${who.email}: ${off.status} ${JSON.stringify(off.json)}`);
       }
     }
+    const out = await sa.c.post("/api/auth/signout");
+    if (out.status !== 204) problems.push(`sign out ${sa.email}: ${out.status} ${JSON.stringify(out.json)}`);
     return problems;
   }
 

@@ -43,13 +43,13 @@ export const getTask = async (who: Who, id: string) => (await who.api.get(`/api/
 
 let ghosts = 0;
 /**
- * A ZZ-TEST person nobody signs in as. The address is a nakul17+ alias from qa-alias qaEmail(), the only builder
- * story specs use. Deactivated afterwards. Use it as "a person who is not in the project".
+ * A ZZ-TEST person nobody signs in as. The address is a nakul17+ alias made by an admin (no sign-up); qa-alias has no
+ * address builder since the fixed pool (APL-2748). Deactivated afterwards. Use it as "a person who is not in the project".
  */
 export async function ghost(admin: Who, later: (fn: () => Promise<unknown>) => void, label = "ghost") {
   const { RUN } = await import("./support");
-  const { qaEmail } = await import("./helpers/qa-alias");
-  const email = qaEmail(`ghost${label}${ghosts++}`);
+  const slug = `ghost${label}${ghosts++}`.toLowerCase().replace(/[^a-z0-9]+/g, "").slice(0, 20);
+  const email = `nakul17+${slug}-${RUN}@aplyd.com`;
   const r = await admin.api.post("/api/team", { firstName: "ZZ-TEST", lastName: `${label} ${RUN}`, email, role: "MEMBER" });
   expect(r.status, JSON.stringify(r.json)).toBe(201);
   const id = r.json.person.id as string;

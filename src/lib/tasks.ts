@@ -11,7 +11,9 @@ import {
 import { addDays, formatDueDate, parseDueDate, startOfTodayIST } from "@/lib/dates";
 import { auditTx, logAction, notify } from "@/lib/notify";
 import { reqCtx } from "@/lib/reqctx";
+import { classifyExpectedUpdatedAt } from "@/lib/task-version";
 import { trashPurgeBefore } from "@/lib/undoable";
+import { VERSION_CONFLICT, versionConflictMessage } from "@/lib/version-error";
 
 export const taskInclude = {
   assignee: { select: { id: true, name: true } },
@@ -91,22 +93,9 @@ export async function checkAssign(user: Actor, id: string) {
   await loadTask(user, id, { write: true, holderCanDo: true });
 }
 
-/** Same write check updateTask runs, so a caller can refuse before reading the body. */
-export const assertCanUpdateTask = (user: Actor, id: string) => loadTask(user, id, { write: true });
-
-/**
- * APL-2494: setting or clearing Blocked is a valid body with no expectedUpdatedAt.
- * When that field is absent, stamp the task version just loaded so a required-version
- * check does not turn `{blocked:false}` or `{blocked:true}` into a 400.
- */
-export function stampBlockedFlagVersion(raw: unknown, updatedAt: Date): unknown {
-  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return raw;
-  const body = raw as Record<string, unknown>;
-  if (typeof body.blocked !== "boolean") return raw;
-  if (!Object.keys(body).every((k) => k === "blocked" || k === "blockedReason" || k === "expectedUpdatedAt")) return raw;
-  if (typeof body.expectedUpdatedAt === "string" && body.expectedUpdatedAt.length > 0) return raw;
-  return { ...body, expectedUpdatedAt: updatedAt.toISOString() };
-}
+/** Same write check updateTask runs, so a caller can refuse before reading the body.
+ *  An outsider gets the same 404 { error: "Task not found" } as a missing task, before the body (F8). */
+export const assertCanUpdateTask = (user: Actor, id: string, o: { holderCanDo?: boolean } = {}) => loadForEdit(user, id, o);
 
 /** The task page may show this id. Missing and no-access both throw "Task not found". */
 export async function visibleTask(user: Actor, id: string) {
@@ -242,17 +231,34 @@ export async function listTasks(
   return { sections: out };
 }
 
-/** SHO-BUG-13, APL-2668: every task change says which version it was made on; refused before any read or write without one. */
-function requireVersion(expected: string | undefined): asserts expected is string {
-  if (!expected) throw new ApiError(400, "expectedUpdatedAt is required");
+/** APL-2669: a well-formed timestamp that is not the task's current instant.
+ *  extra stays on the thrown error for bulk and the concierge. HTTP routes drop it (APL-2670). */
+async function versionConflict(user: Actor, id: string, t: TaskRow, role: Role): Promise<never> {
+  const last = await db.actionLog.findFirst({ where: { targetType: "task", targetId: id }, orderBy: { createdAt: "desc" }, include: { actor: { select: { name: true } } } });
+  const who = last?.actor.name ?? null;
+  throw new ApiError(409, versionConflictMessage(who), {
+    stale: true, changedBy: who, current: present(t, { id: user.id, role }),
+  }, VERSION_CONFLICT);
 }
 
-/** SHO-US-14.8 AC4: the same stale-edit answer for every inline edit. */
-async function staleCheck(user: Actor, id: string, t: TaskRow, role: Role, expected?: string) {
-  if (expected && new Date(expected).getTime() !== t.updatedAt.getTime()) {
-    const last = await db.actionLog.findFirst({ where: { targetType: "task", targetId: id }, orderBy: { createdAt: "desc" }, include: { actor: { select: { name: true } } } });
-    throw new ApiError(409, "This task changed while you were editing it.", { stale: true, changedBy: last?.actor.name ?? null, current: present(t, { id: user.id, role }) });
+/** See the task before the timestamp is read.
+ *  Every 404 is the missing-task answer, 404 { error: "Task not found" }, so an outsider
+ *  cannot tell a hidden task from a missing one (F8, Dwight). */
+async function loadForEdit(user: Actor, id: string, o: { holderCanDo?: boolean } = {}) {
+  try {
+    return await loadTask(user, id, { write: true, ...o });
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 404) throw notFound("Task");
+    throw e;
   }
+}
+
+/** Visibility first, then the timestamp. Instants are compared with getTime, not as strings. */
+async function guardVersion(user: Actor, id: string, expected: unknown, o: { holderCanDo?: boolean } = {}) {
+  const loaded = await loadForEdit(user, id, o);
+  const expectedMs = classifyExpectedUpdatedAt(expected);
+  if (expectedMs !== loaded.t.updatedAt.getTime()) await versionConflict(user, id, loaded.t, loaded.a.role);
+  return loaded;
 }
 
 // ---------------------------------------------------------------- edit (4.2, 4.4)
@@ -261,13 +267,13 @@ export async function updateTask(
   id: string,
   input: {
     title?: string; description?: string | null; dueDate?: string | null; priority?: "LOW" | "MEDIUM" | "HIGH" | "URGENT";
-    blocked?: boolean; blockedReason?: string | null; expectedUpdatedAt: string;
+    blocked?: boolean; blockedReason?: string | null;
+    /** APL-2669: the updatedAt the editor saw. Classified only after loadForEdit. */
+    expectedUpdatedAt?: unknown;
   },
 ) {
-  // SHO-BUG-13: every edit says which version it was made on, so a concurrent save is never silently overwritten.
-  if (!input.expectedUpdatedAt) throw new ApiError(400, "expectedUpdatedAt is required");
-  const { t, a } = await loadTask(user, id, { write: true });
-  await staleCheck(user, id, t, a.role, input.expectedUpdatedAt);
+  // Visibility first: a stranger gets 404 before a bad timestamp can become 400 (APL-2669 AC4).
+  const { t } = await guardVersion(user, id, input.expectedUpdatedAt);
   const data: Record<string, unknown> = {};
   const before: Record<string, unknown> = {};
   const set = (k: string, v: unknown, old: unknown) => {
@@ -302,10 +308,8 @@ export async function updateTask(
 }
 
 // ---------------------------------------------------------------- assign, collaborators, approver (4.3, 4.6)
-export async function assignTask(user: Actor, id: string, assigneeId: string, expectedUpdatedAt: string) {
-  requireVersion(expectedUpdatedAt);
-  const { t, a } = await loadTask(user, id, { write: true });
-  await staleCheck(user, id, t, a.role, expectedUpdatedAt);
+export async function assignTask(user: Actor, id: string, assigneeId: string, expectedUpdatedAt: unknown) {
+  const { t, a } = await guardVersion(user, id, expectedUpdatedAt);
   // The assignee may only hand a task with an approver on to that approver; the Leader and Admins keep full authority (SHO-BUG-6).
   if (t.approverId && user.id === t.assigneeId && assigneeId !== t.approverId && a.role !== "LEADER") {
     throw new ApiError(403, "With an approver, this task can only be handed to the approver.");
@@ -343,10 +347,8 @@ export async function removeCollaborator(user: Actor, id: string, userId: string
   });
 }
 
-export async function setApprover(user: Actor, id: string, approverId: string | null, expectedUpdatedAt: string) {
-  requireVersion(expectedUpdatedAt);
-  const { t, a } = await loadTask(user, id, { write: true });
-  await staleCheck(user, id, t, a.role, expectedUpdatedAt);
+export async function setApprover(user: Actor, id: string, approverId: string | null, expectedUpdatedAt: unknown) {
+  const { t, a } = await guardVersion(user, id, expectedUpdatedAt);
   if (t.parentId) throw new ApiError(400, "Subtasks do not have an approver.");
   if (user.id === t.assigneeId) throw new ApiError(403, "The assignee cannot change their own task's approver.");
   const isAwaiting = awaiting(t);
@@ -407,10 +409,8 @@ export async function sendBack(user: Actor, id: string) {
 }
 
 // ---------------------------------------------------------------- complete, reopen, move (4.5)
-export async function completeTask(user: Actor, id: string, expectedUpdatedAt: string, completeAll = false) {
-  requireVersion(expectedUpdatedAt);
-  const { t, a } = await loadTask(user, id, { write: true, holderCanDo: true });
-  await staleCheck(user, id, t, a.role, expectedUpdatedAt);
+export async function completeTask(user: Actor, id: string, expectedUpdatedAt: unknown, completeAll = false) {
+  const { t, a } = await guardVersion(user, id, expectedUpdatedAt, { holderCanDo: true });
   if (!canClose(user.id, a.role, t)) {
     throw new ApiError(403, t.approverId ? "Only the approver, the Leader or an Admin can close this task." : "You cannot complete this task.");
   }
@@ -509,10 +509,8 @@ export async function reopenTask(user: Actor, id: string, sectionId?: string) {
 }
 
 /** Dragging a card. Into the done Section completes, out of it reopens, otherwise only the Section changes. */
-export async function moveTask(user: Actor, id: string, sectionId: string, expectedUpdatedAt: string, completeAll = false) {
-  requireVersion(expectedUpdatedAt);
-  const { t, a } = await loadTask(user, id, { write: true, holderCanDo: true });
-  await staleCheck(user, id, t, a.role, expectedUpdatedAt);
+export async function moveTask(user: Actor, id: string, sectionId: string, expectedUpdatedAt: unknown, completeAll = false) {
+  const { t } = await guardVersion(user, id, expectedUpdatedAt, { holderCanDo: true });
   if (t.parentId) throw new ApiError(409, "Subtasks move with their parent task.");
   const dest = await db.section.findFirst({ where: { id: sectionId, projectId: t.projectId } });
   if (!dest) throw notFound("Section");

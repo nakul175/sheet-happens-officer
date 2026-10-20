@@ -56,7 +56,7 @@ jobs:
       # makes Playwright collect 0 tests, so a total of 0 fails here instead of in staging-e2e.
       - name: Playwright collects the story specs
         run: |
-          out=$(npx playwright test --list)
+          out=$(npx playwright test --list 2>&1) || true
           total=$(printf '%s\n' "$out" | sed -n 's/^Total: \([0-9][0-9]*\) tests\{0,1\} in .*/\1/p')
           printf '%s\n' "$out" | grep -E '^(Total|Error)' || true
           if [ "${total:-0}" -eq 0 ]; then
@@ -68,6 +68,9 @@ jobs:
         run: npm run lint
       - name: Typecheck
         run: npx next typegen && npx tsc --noEmit
+      # tsconfig.json leaves tests/e2e out (Playwright story specs), so check them on their own (APL-2748).
+      - name: Typecheck story specs
+        run: npx tsc --noEmit -p tsconfig.e2e.json
       - run: npx prisma migrate deploy
       - name: Build
         run: npm run build

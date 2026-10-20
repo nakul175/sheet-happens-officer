@@ -1,16 +1,21 @@
-// Sign-in for story specs that use nakul17+ aliases. The password is SHO_QA_PASS and is never written here.
+// Sign-in for story specs that use nakul17+ aliases (APL-2748). The people are a fixed, already verified pool
+// (helpers/alias-pool.ts): nothing here signs up or verifies an account. Oscar provisions the pool once with
+// tests/e2e/tools/provision-aliases.ts. The password is SHO_QA_PASS and is never written here.
 // A missing password fails the file from beforeAll (F10: the gate throws, it does not skip; staging-e2e injects the
 // secret and no value is in any committed file). Every auth body is checked so the password is not echoed.
-import { readdirSync, readFileSync } from "node:fs";
-import path from "node:path";
 import type { APIRequestContext, Browser, BrowserContext } from "@playwright/test";
-import { api, BASE_URL, expect, RUN, test, zz } from "../support";
+import { api, BASE_URL, expect, test } from "../support";
 import type { Who } from "../g2";
+import { PER_SLOT, QA_ADMIN_EMAIL, poolPerson, slotFromEnv } from "./alias-pool";
 
+export { QA_ADMIN_EMAIL };
 export const QA_PASS = process.env.SHO_QA_PASS ?? "";
-/** Stable Super Admin address. The local server lists it in SUPER_ADMIN_EMAILS. */
-export const QA_ADMIN_EMAIL = "nakul17+zz-sa@aplyd.com";
-const OUTBOX = process.env.EMAIL_OUTBOX_DIR ?? ".outbox";
+/** This job's slot of the pool: QA_SLOT (01-20 or serial in CI), else local. */
+export const QA_SLOT = slotFromEnv(process.env);
+const PROVISION = "Run tests/e2e/tools/provision-aliases.ts (see its header) so the alias exists, is verified and uses SHO_QA_PASS.";
+
+const httpCredentials = () =>
+  process.env.STAGING_USER ? { username: process.env.STAGING_USER, password: process.env.STAGING_PASS ?? "" } : undefined;
 
 export function noSecret(body: string) {
   if (QA_PASS) expect(body.includes(QA_PASS)).toBe(false);
@@ -18,17 +23,16 @@ export function noSecret(body: string) {
   if (job) expect(body.includes(job)).toBe(false);
 }
 
-/** nakul17+ alias on the signup domain. The label keeps the address readable in the Team list. */
-export function qaEmail(label: string) {
-  const slug = label.toLowerCase().replace(/[^a-z0-9]+/g, "").slice(0, 20);
-  return `nakul17+${slug}-${RUN}@aplyd.com`;
+/** Pool Member `index` (1-based) of this job's slot. */
+export function qaPerson(index: number) {
+  return poolPerson(QA_SLOT, index);
 }
 
 /** First thing in the file: fail without SHO_QA_PASS, then read the release SHA from /api/health. */
 export function gateFile() {
   test.beforeAll(async ({ playwright }) => {
     if (!QA_PASS) throw new Error("Set SHO_QA_PASS (the password for nakul17+ aliases).");
-    const req = await playwright.request.newContext({ baseURL: BASE_URL });
+    const req = await playwright.request.newContext({ baseURL: BASE_URL, httpCredentials: httpCredentials() });
     try { await assertRelease(req); }
     finally { await req.dispose(); }
   });
@@ -46,50 +50,21 @@ export async function assertRelease(request: APIRequestContext) {
   return json.release as string;
 }
 
-async function verifyToken(email: string) {
-  const deadline = Date.now() + 8_000;
-  while (Date.now() < deadline) {
-    let files: string[] = [];
-    try { files = readdirSync(OUTBOX); } catch { files = []; }
-    const mails = files.map((f) => {
-      try { return JSON.parse(readFileSync(path.join(OUTBOX, f), "utf8")) as { to?: string; subject?: string; text?: string }; }
-      catch { return null; }
-    }).filter((m): m is { to?: string; subject?: string; text?: string } => !!m && m.to === email && /Verify/.test(m.subject ?? ""));
-    const token = mails.at(-1)?.text?.match(/token=([\w-]+)/)?.[1];
-    if (token) return token;
-    await new Promise((r) => setTimeout(r, 200));
-  }
-  return null;
-}
-
 /**
- * A signed-in nakul17+ person. Creates the account on first use (signup + the outbox verification link)
- * and signs in with SHO_QA_PASS after that. Register `ctx.close` with `later` before any other clean-up
- * so the context stays open while records are archived.
+ * A signed-in pool alias. Sign-in only: an alias that is missing, unverified or deactivated fails with the
+ * provisioning step to run, and is never created here. Register `ctx.close` with `later` before any other
+ * clean-up so the context stays open while records are archived.
  */
-export async function signInAlias(browser: Browser, email: string, name: string): Promise<{ who: Who; ctx: BrowserContext }> {
+export async function signInAlias(browser: Browser, email: string): Promise<{ who: Who; ctx: BrowserContext }> {
   if (!QA_PASS) throw new Error("Set SHO_QA_PASS (the password for nakul17+ aliases).");
-  const ctx = await browser.newContext({ baseURL: BASE_URL });
-  const sign = () => ctx.request.post("/api/auth/signin", { data: { email, password: QA_PASS } });
-  let res = await sign();
-  let text = await res.text();
+  const ctx = await browser.newContext({ baseURL: BASE_URL, httpCredentials: httpCredentials() });
+  const res = await ctx.request.post("/api/auth/signin", { data: { email, password: QA_PASS } });
+  const text = await res.text();
   noSecret(text);
   if (res.status() !== 200) {
-    const up = await ctx.request.post("/api/auth/signup", { data: { name, email, password: QA_PASS } });
-    const upText = await up.text();
-    noSecret(upText);
-    expect(up.status(), upText).toBe(201);
-    const token = await verifyToken(email);
-    expect(token, `verification mail for ${email} in ${OUTBOX}`).toBeTruthy();
-    const verified = await ctx.request.post("/api/auth/verify", { data: { token } });
-    const verifiedText = await verified.text();
-    noSecret(verifiedText);
-    expect(verified.ok(), verifiedText).toBe(true);
-    res = await sign();
-    text = await res.text();
-    noSecret(text);
+    await ctx.close();
+    throw new Error(`Sign-in for pool alias ${email} returned ${res.status()}. ${PROVISION}`);
   }
-  expect(res.status(), text).toBe(200);
   const user = (JSON.parse(text) as { user: Record<string, unknown> }).user;
   const page = await ctx.newPage();
   return { who: { page, api: api(ctx.request), user }, ctx };
@@ -103,18 +78,46 @@ export function track(later: (fn: () => Promise<unknown>) => void, ctx: BrowserC
 type Later = (fn: () => Promise<unknown>) => void;
 
 /**
- * The Super Admin (nakul17+zz-sa) plus one signed-in nakul17+ person per label.
- * Each extra person is deactivated after the test. Register a leader hand-back before that if one of them leads a project.
+ * Put a pool Member back the way the next spec expects it: active and a Member. A spec may deactivate one (APL-2471 AC6)
+ * or promote one; the pool is reused, so both are undone here.
+ */
+async function restore(admin: Who, id: string, email: string) {
+  const seen = await admin.api.get(`/api/team/${id}`);
+  if (seen.status !== 200) return;
+  if (seen.json.person?.status === "DEACTIVATED") {
+    const back = await admin.api.post(`/api/team/${id}/reactivate`);
+    expect(back.status, `reactivate ${email}`).toBe(200);
+  }
+  if (seen.json.person?.orgRole !== "MEMBER") {
+    const role = await admin.api.patch(`/api/team/${id}`, { orgRole: "MEMBER" });
+    expect(role.status, `put ${email} back to Member`).toBe(200);
+  }
+}
+
+/**
+ * The Super Admin (nakul17+zz-sa) plus one pool Member per label, from this job's slot. The labels say what each
+ * person is for; the accounts are fixed. Each one is active and a Member when handed out, and is put back that way
+ * after the test (never left deactivated), because the pool is reused. A spec that makes one of them a project's Leader
+ * hands leadership back before archiving it (createDeal does this), because deactivate refuses any Leader.
  */
 export async function cast(browser: Browser, later: Later, labels: string[]) {
-  const admin = await signInAlias(browser, QA_ADMIN_EMAIL, "ZZ-TEST QA Admin");
+  if (labels.length > PER_SLOT) throw new Error(`cast asks for ${labels.length} people; a pool slot has ${PER_SLOT}.`);
+  const admin = await signInAlias(browser, QA_ADMIN_EMAIL);
   track(later, admin.ctx);
   expect(admin.who.user.orgRole, `${QA_ADMIN_EMAIL} must be listed in SUPER_ADMIN_EMAILS`).toBe("SUPER_ADMIN");
+  const emails = labels.map((_, i) => qaPerson(i + 1).email);
+  // An interrupted run can leave a pool Member deactivated or promoted. Fix that before signing them in.
+  const team = await admin.who.api.get("/api/team");
+  expect(team.status, "the Super Admin can read the Team list").toBe(200);
+  for (const row of (team.json.people ?? []) as { id: string; email: string; status: string; orgRole: string }[]) {
+    if (emails.includes(row.email) && (row.status === "DEACTIVATED" || row.orgRole !== "MEMBER")) await restore(admin.who, row.id, row.email);
+  }
   const people: Who[] = [];
-  for (const label of labels) {
-    const signed = await signInAlias(browser, qaEmail(label), zz(label));
+  for (const email of emails) {
+    const signed = await signInAlias(browser, email);
     track(later, signed.ctx);
-    later(() => admin.who.api.post(`/api/team/${signed.who.user.id}/deactivate`, { reassign: "leaders" }));
+    const id = String(signed.who.user.id);
+    later(() => restore(admin.who, id, email));
     people.push(signed.who);
   }
   return { admin: admin.who, people };
