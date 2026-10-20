@@ -8,6 +8,7 @@ const body = z.object({ ids: z.array(z.string().min(1)).min(1), anyway: z.boolea
 
 // SHO-US-14.11: one Undo for a whole bulk change.
 export const POST = handle(async (req: Request) => {
+  const me = await currentUser();
   const input = await parseBody(req, body);
-  return Response.json(await undoMany(await currentUser(), input.ids, input.anyway));
+  return Response.json(await undoMany(me, input.ids, input.anyway));
 });

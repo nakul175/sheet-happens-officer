@@ -16,6 +16,12 @@ npx prisma migrate dev
 SUPER_ADMIN_EMAILS=you@aplyd.com npm run dev
 ```
 
+After any pull that changes the Prisma schema (`prisma/schema.prisma` or migrations), run:
+
+```bash
+npx prisma generate
+```
+
 Without `RESEND_API_KEY`, emails are written as JSON files to `.outbox/` (or
 `EMAIL_OUTBOX_DIR`), so verification and reset links can be opened from there.
 
@@ -32,12 +38,24 @@ Settings (environment variables):
 
 ## Test
 
-Integration tests run against a live server that shares the outbox folder:
+Integration tests run against a live server that shares the outbox folder. The vitest
+process needs `DATABASE_URL` and `JOB_SECRET` as well: several tests open the database
+and call the job endpoint directly. Each value in the commands is a placeholder.
+
+| Name | Purpose |
+|---|---|
+| `DATABASE_URL` | Postgres connection string the test process uses, the same database as the server |
+| `JOB_SECRET` | Bearer token the test process sends when it calls the job endpoint, the same value as the server |
 
 ```bash
 EMAIL_OUTBOX_DIR=/tmp/sho-outbox SUPER_ADMIN_EMAILS=root.test@aplyd.com APP_URL=http://localhost:3100 \
-  JOB_SECRET=0123456789abcdef0123 npx next dev -p 3100 &
-EMAIL_OUTBOX_DIR=/tmp/sho-outbox TASKBOARD_URL=http://localhost:3100 npm test
+  DATABASE_URL="postgresql://USER:PASSWORD@localhost:5432/taskboard?schema=public" \
+  JOB_SECRET=replace-with-a-token-of-at-least-16-chars \
+  npx next dev -p 3100 &
+EMAIL_OUTBOX_DIR=/tmp/sho-outbox TASKBOARD_URL=http://localhost:3100 \
+  DATABASE_URL="postgresql://USER:PASSWORD@localhost:5432/taskboard?schema=public" \
+  JOB_SECRET=replace-with-a-token-of-at-least-16-chars \
+  npm test
 ```
 
 ## Deploy (story 9.3)
@@ -62,13 +80,13 @@ One-time setup, in order:
 5. In GoDaddy, add an A record `app` → the droplet's IP.
 6. GitHub repository secrets: `SSH_PRIVATE_KEY` (the private half of `sho_deploy`),
    `DATABASE_URL`, `RESEND_API_KEY` (a Resend key with sending access for
-   `sheethappensofficer.com`). Optional secret: `DIRECT_DATABASE_URL`, the direct (non-PgBouncer)
+   `sheethappensofficer.com`, the sender's domain until Resend verifies `sheethappensofficer.aplyd.org`). Optional secret: `DIRECT_DATABASE_URL`, the direct (non-PgBouncer)
    connection string for migrations, needed once `DATABASE_URL` points at PgBouncer; unset, migrations
    use `DATABASE_URL`. Optional variables: `DROPLET_HOST` (IP, if DNS is not live yet)
    and `DROPLET_HOST_KEY` (one `ssh-keyscan -t ed25519 <ip>` line, which pins the host key).
 7. Run the workflow (push to `main` or "Run workflow"), then sign up with the Super Admin
    address and confirm the verification email lands in the inbox, not junk.
-8. Point an external uptime check at `https://app.sheethappensofficer.com/api/health`.
+8. Point an external uptime check at `https://sheethappensofficer.aplyd.org/api/health`.
 
 Scheduled jobs (`/etc/cron.d/sho`, IST): `purge-trash` 03:17, `purge-old` 03:37, `purge-chat` 03:47
 (chat older than 90 days), `concierge-budget` 03:57 (80 percent notice), `stalled-deals` 07:50 (deals with no
