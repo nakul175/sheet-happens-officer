@@ -5,7 +5,7 @@
 // A missing build, or a mode that never answers /api/health, fails this file.
 import "dotenv/config";
 import { spawn, type ChildProcess } from "node:child_process";
-import { closeSync, existsSync, mkdtempSync, openSync, readdirSync, readFileSync, readlinkSync } from "node:fs";
+import { closeSync, existsSync, mkdtempSync, openSync, readdirSync, readFileSync, readlinkSync, rmSync } from "node:fs";
 import net from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -37,6 +37,13 @@ type Running = {
 const running = new Map<Mode, Running>();
 /** CRM_VISIBLE=all and an unset CRM_VISIBLE. Not part of the three-mode process check. */
 const extra = new Map<"all" | "unset", Running>();
+/** Every outbox startModeServer made and has not removed. afterAll removes the rest (APL-2891). */
+const outboxes = new Set<string>();
+
+function removeOutbox(dir: string) {
+  rmSync(dir, { recursive: true, force: true, maxRetries: 3 });
+  outboxes.delete(dir);
+}
 const seed: {
   userIds: string[]; emails: string[]; projectId?: string; plainProjectId?: string; projectIds: string[]; orgId?: string; orgIds: string[];
 } = { userIds: [], emails: [], projectIds: [], orgIds: [] };
@@ -129,6 +136,7 @@ async function startModeServer(mode: Mode, opts: { bin?: string; args?: string[]
   const port = await freePort();
   const label = opts.crm === null ? "unset" : opts.crm ?? mode;
   const outbox = mkdtempSync(path.join(tmpdir(), `sho-crm-${label}-`));
+  outboxes.add(outbox);
   const env: NodeJS.ProcessEnv = {
     ...process.env,
     NODE_ENV: "production",
@@ -152,10 +160,24 @@ async function startModeServer(mode: Mode, opts: { bin?: string; args?: string[]
     killGroup(child.pid);
     const log = existsSync(path.join(outbox, "server.log")) ? scrub(readFileSync(path.join(outbox, "server.log"), "utf8")).slice(-1500) : "";
     const message = err instanceof Error ? err.message : `CRM_VISIBLE=${mode} cannot start`;
+    removeOutbox(outbox);
     throw new Error(`${message}${log ? `\n${log}` : ""}`);
   }
   if (!child.pid) throw new Error(`CRM_VISIBLE=${mode} cannot start`);
   return { mode, port, pid: child.pid, outbox, env, base: `http://127.0.0.1:${port}` };
+}
+
+/** Starts every server. If one rejects, closes the ones that started and removes their outboxes, then throws. */
+async function startServers(starts: (() => Promise<Running>)[]): Promise<Running[]> {
+  const results = await Promise.allSettled(starts.map((start) => start()));
+  const failed = results.find((r): r is PromiseRejectedResult => r.status === "rejected");
+  const started = results.flatMap((r) => (r.status === "fulfilled" ? [r.value] : []));
+  if (!failed) return started;
+  for (const server of started) {
+    killGroup(server.pid);
+    removeOutbox(server.outbox);
+  }
+  throw failed.reason;
 }
 
 type HttpResult = { status: number; text: string; json: Record<string, unknown> | null; cookie: string };
@@ -323,12 +345,12 @@ describe("CRM_VISIBLE modes are tested against a real server per mode", () => {
     if (!existsSync(path.join(root, ".next", "BUILD_ID"))) {
       throw new Error("CRM_VISIBLE mode cannot start: the production build is missing (.next/BUILD_ID)");
     }
-    const [on, admins, off, all, unset] = await Promise.all([
-      startModeServer("on"),
-      startModeServer("admins"),
-      startModeServer("off"),
-      startModeServer("on", { crm: "all" }),
-      startModeServer("on", { crm: null }),
+    const [on, admins, off, all, unset] = await startServers([
+      () => startModeServer("on"),
+      () => startModeServer("admins"),
+      () => startModeServer("off"),
+      () => startModeServer("on", { crm: "all" }),
+      () => startModeServer("on", { crm: null }),
     ]);
     running.set("on", on);
     running.set("admins", admins);
@@ -340,6 +362,7 @@ describe("CRM_VISIBLE modes are tested against a real server per mode", () => {
   afterAll(async () => {
     try { await cleanupSeed(); } finally {
       for (const server of [...running.values(), ...extra.values()]) killGroup(server.pid);
+      for (const dir of outboxes) removeOutbox(dir);
       await db.$disconnect();
     }
   });
@@ -606,6 +629,23 @@ describe("CRM_VISIBLE modes are tested against a real server per mode", () => {
     await expect(startModeServer("on", { bin: process.execPath, args: ["-e", "process.exit(1)"], timeoutMs: 3_000 })).rejects.toThrow(/cannot start/);
     await expect(startModeServer("off", { bin: process.execPath, args: ["-e", "setInterval(() => {}, 1e9)"], timeoutMs: 800 })).rejects.toThrow(/cannot start/);
   }, 60_000);
+
+  it("qa:TC missing APL-2891: when one server rejects at start-up, the started ones are closed and no sho-crm outbox is left", async () => {
+    const crmDirs = () => new Set(readdirSync(tmpdir()).filter((name) => name.startsWith("sho-crm-")));
+    const before = crmDirs();
+    // A stand-in server that answers /api/health on the PORT startModeServer gives it.
+    const healthy = { bin: process.execPath, args: ["-e", "require('http').createServer((q, s) => s.end('ok')).listen(+process.env.PORT, '127.0.0.1')"] };
+    let started: Running | undefined;
+    await expect(startServers([
+      async () => (started = await startModeServer("on", healthy)),
+      () => startModeServer("off", { bin: process.execPath, args: ["-e", "process.exit(1)"], timeoutMs: 3_000 }),
+    ])).rejects.toThrow(/cannot start/);
+    expect(started, "the healthy server started before the other rejected").toBeTruthy();
+    const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+    await expect.poll(() => alive(started!.pid), { timeout: 5_000 }).toBe(false);
+    await expect.poll(() => fetch(`${started!.base}/api/health`).then(() => "open", () => "closed"), { timeout: 5_000 }).toBe("closed");
+    expect([...crmDirs()].filter((name) => !before.has(name))).toEqual([]);
+  }, 30_000);
 
   it("qa:TC-APL2728-968d706d@v1 AC4: the person page redacts a hidden deal under every mode", async () => {
     const open = running.get("on");

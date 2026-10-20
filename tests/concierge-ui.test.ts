@@ -83,6 +83,19 @@ describe("concierge client matches the contract routes", () => {
     expect(offeredRewrite(`  ${original}\n`, original)).toBeNull();
     expect(offeredRewrite(original, "Move the Budget task to Monday 20 October.")).toEqual({ original, draft: "Move the Budget task to Monday 20 October." });
   });
+  it.each([
+    "move the budget task to monday",
+    "Move the budget task to Monday.",
+    "\u201cMove the budget task to Monday\u201d",
+  ])("qa:TC missing APL-2871 AC1 v1.1: offeredRewrite offers nothing for the near-copy %j and the text is unchanged", (reply) => {
+    const original = "Move the budget task to Monday";
+    expect(offeredRewrite(original, reply)).toBeNull();
+    expect(keptDraft(original)).toBe(original);
+  });
+  it("qa:TC missing APL-2871 AC2: offeredRewrite offers a real rewrite as the Suggested rewrite draft", () => {
+    const original = "Move the budget task to Monday";
+    expect(offeredRewrite(original, "Move the budget review task to Monday 9:00")).toEqual({ original, draft: "Move the budget review task to Monday 9:00" });
+  });
   it("surfaces a 409 stale confirm with the fresh card message", async () => {
     mockFetch(409, { error: "stale", messages: [msg({ id: "m2", kind: "card", card: card({ id: "c2" }) })] });
     const r = await conciergeApi.confirm("c1");

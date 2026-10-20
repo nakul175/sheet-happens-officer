@@ -23,6 +23,7 @@ import { canDropOnSection, completeTickAllowed, moveMenuSections } from "@/lib/a
 type T = {
   id: string; title: string; updatedAt: string; sectionId: string; priority: string; dueDate: string | null; blocked: boolean; completedAt: string | null; isIdea?: boolean;
   assignee: { id: string; name: string }; collaborators: { id: string; name: string }[]; awaitingApproval: boolean; canClose: boolean; subtasks: { total: number; open: number };
+  commentCount?: number;
 };
 type S = { id: string; name: string; isDone: boolean; total: number; tasks: T[]; nextCursor: string | null };
 type Summary = { open: number; overdue: number; blocked: number; awaiting: number; openTasks?: number };
@@ -170,7 +171,7 @@ function Inner({ id }: { id: string }) {
     <div key={t.id} className={`item click${canWrite ? " sel-row" : ""}${sel.has(t.id) ? " picked" : ""}`} {...rowKeys(() => openTask(t.id))}>
       {canWrite && <label className="sel" onClick={(e) => e.stopPropagation()}><input type="checkbox" checked={sel.has(t.id)} aria-label={`Select "${t.title}"`} onChange={(e) => pick([t.id], e.target.checked)} /></label>}
       <Tick id={t.id} title={t.title} done={!!t.completedAt} allowed={completeTickAllowed({ canWrite, canClose: t.canClose, completedAt: t.completedAt })} version={t.updatedAt} onDone={refresh} onStale={refresh} />
-      <div className="t"><b className="ttl">{t.title}</b>{t.subtasks.total > 0 && <small>{t.subtasks.total - t.subtasks.open} of {t.subtasks.total} subtasks</small>}</div>
+      <div className="t"><b className="ttl">{t.title}</b>{t.subtasks.total > 0 && <small>{t.subtasks.total - t.subtasks.open} of {t.subtasks.total} subtasks</small>}{!!t.commentCount && <small>{t.commentCount} {t.commentCount === 1 ? "comment" : "comments"}</small>}</div>
       <div className="meta">
         {t.awaitingApproval && <span className="chip gold">Awaiting approval</span>}
         {t.isIdea && <span className="chip gold">Idea</span>}{t.blocked && <span className="chip red">Blocked</span>}
@@ -298,6 +299,7 @@ function Inner({ id }: { id: string }) {
                     <span className={!t.completedAt && isOverdue(t.dueDate) ? "over" : undefined} style={isOverdue(t.dueDate) && !t.completedAt ? { color: "var(--danger)" } : undefined}>{dueState(t.dueDate, !!t.completedAt)}</span>
                     <Pri p={t.priority} />
                     {t.subtasks.total > 0 && <span>{t.subtasks.total - t.subtasks.open} of {t.subtasks.total}</span>}
+                    {!!t.commentCount && <span>{t.commentCount} {t.commentCount === 1 ? "comment" : "comments"}</span>}
                     {t.isIdea && <span className="chip gold">Idea</span>}{t.blocked && <span className="chip red">Blocked</span>}
                     {t.awaitingApproval && <span className="chip gold">Awaiting</span>}
                     <AvatarGroup assignee={t.assignee} collaborators={t.collaborators} />

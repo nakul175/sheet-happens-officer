@@ -119,9 +119,8 @@ export const PASSWORD_CHANGE_REQUIRED = "PASSWORD_CHANGE_REQUIRED";
  * SHO-US-23.5: a person still on a Super-Admin-issued password gets ApiError(403) until they set their own.
  * Only the change-password, "me" and app-layout callers pass `allowTempPassword`.
  */
-export async function currentUser(opts: { allowTempPassword?: boolean } = {}) {
-  const store = await cookies();
-  const token = store.get(SESSION_COOKIE)?.value;
+/** The signed-in user for a session token, or ApiError(401). Does not read the cookie jar. */
+export async function sessionUser(token: string | undefined, opts: { allowTempPassword?: boolean } = {}) {
   if (!token) throw new ApiError(401, "Not signed in");
   const session = await db.session.findUnique({ where: { tokenHash: sha256(token) }, include: { user: true } });
   const u = session?.user;
@@ -136,6 +135,11 @@ export async function currentUser(opts: { allowTempPassword?: boolean } = {}) {
     throw new ApiError(403, "Set your own password first.", { code: PASSWORD_CHANGE_REQUIRED });
   }
   return u;
+}
+
+export async function currentUser(opts: { allowTempPassword?: boolean } = {}) {
+  const store = await cookies();
+  return sessionUser(store.get(SESSION_COOKIE)?.value, opts);
 }
 
 export const publicUser = (u: { id: string; name: string; email: string; orgRole: string }) => ({

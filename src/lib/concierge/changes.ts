@@ -13,6 +13,7 @@ import {
   addCollaborator, assignTask, awaiting, canClose, completeTask, createTask, deleteTask, moveTask, removeCollaborator, reopenTask,
   sendBack, sendForApproval, setApprover, updateTask,
 } from "@/lib/tasks";
+import { addComment, commentExcerpt } from "@/lib/comments";
 import { fullDate } from "@/lib/concierge/dates";
 import type { Card } from "@/lib/concierge/types";
 
@@ -28,6 +29,7 @@ export type Op =
   | { k: "task.collab"; taskId: string; userId: string; add: boolean }
   | { k: "task.approver"; taskId: string; approverId: string | null }
   | { k: "task.blocked"; taskId: string; blocked: boolean; reason?: string | null }
+  | { k: "task.comment"; taskId: string; text: string }
   | { k: "project.create"; name: string; description?: string; leaderId: string }
   | { k: "member.add"; projectId: string; userId: string; role: "EDITOR" | "VIEWER" }
   | { k: "member.role"; projectId: string; userId: string; role: "EDITOR" | "VIEWER" }
@@ -202,6 +204,10 @@ function describe(op: Op, L: Loaded): Described {
         row: { label: where(t), before: t.blocked ? "Blocked" : "Not blocked", after: op.blocked ? `Blocked${op.reason ? `: ${op.reason}` : ""}` : "Not blocked" },
       };
     }
+    case "task.comment": {
+      const t = task(op.taskId);
+      return { phrase: `Comment on ${q(t.title)}`, row: { label: where(t), after: commentExcerpt(op.text) } };
+    }
     case "project.create": return { phrase: `Create project ${q(op.name)}`, row: { label: "New project", after: `${op.name}; Leader ${U(L, op.leaderId).name}${op.description ? `; Description: ${excerpt(op.description)}` : ""}` } };
     case "member.add": {
       const p = P(L, op.projectId); const u = U(L, op.userId);
@@ -220,7 +226,7 @@ function describe(op: Op, L: Loaded): Described {
 
 const PAST: Record<string, string> = {
   Move: "Moved", Create: "Created", Edit: "Edited", Assign: "Assigned", Complete: "Completed", Reopen: "Reopened", Add: "Added", Make: "Made",
-  Remove: "Removed", Send: "Sent", Mark: "Marked", Clear: "Cleared", Change: "Changed",
+  Remove: "Removed", Send: "Sent", Mark: "Marked", Clear: "Cleared", Change: "Changed", Comment: "Commented",
 };
 export const pastTense = (phrase: string) => phrase.replace(/^\w+/, (w) => PAST[w] ?? w);
 
@@ -262,7 +268,7 @@ async function blockedReason(user: Actor, op: Op, L: Loaded): Promise<string | n
     const a = await needWrite(t.projectId);
     if (typeof a === "string") return a;
     const holder = awaiting(t) && user.id === t.approverId && a.role !== "LEADER";
-    if (holder && op.k !== "task.complete" && op.k !== "task.send_back") return "While you hold this task for approval you can only close it or send it back.";
+    if (holder && op.k !== "task.complete" && op.k !== "task.send_back" && op.k !== "task.comment") return "While you hold this task for approval you can only close it or send it back.";
     switch (op.k) {
       case "task.complete":
         if (t.completedAt) return "This task is already complete.";
@@ -431,6 +437,7 @@ export async function execute(user: Actor, ops: Op[], handover: { taskId: string
       case "task.collab": await (op.add ? addCollaborator(user, op.taskId, op.userId) : removeCollaborator(user, op.taskId, op.userId)); break;
       case "task.approver": remember(op.taskId, await setApprover(user, op.taskId, op.approverId, await versionFor(op.taskId))); break;
       case "task.blocked": remember(op.taskId, await updateTask(user, op.taskId, { expectedUpdatedAt: await versionFor(op.taskId), blocked: op.blocked, ...(op.blocked ? { blockedReason: op.reason ?? null } : {}) })); break;
+      case "task.comment": await addComment(user, op.taskId, { text: op.text }); break;
       case "project.create": await createProject(user, { name: op.name, description: op.description, leaderId: op.leaderId }); break;
       case "member.add": await addMember(user, op.projectId, op.userId, op.role); break;
       case "member.role":

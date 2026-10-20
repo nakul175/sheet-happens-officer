@@ -289,9 +289,10 @@ async function searchScreen(mode: Mode, who: Who, q: string) {
 async function taskScreen(mode: Mode, who: Who) {
   const page = await pageAs(mode, who);
   try {
-    const answered = page.waitForResponse((r) => r.url().endsWith(`/api/tasks/${seed.dealTaskId}`), { timeout: 30_000 });
-    await page.goto(`${server(mode).base}/tasks/${seed.dealTaskId}`, { waitUntil: "domcontentloaded" });
-    const status = (await answered).status();
+    const answered = page.waitForResponse((r) => r.url().endsWith(`/api/tasks/${seed.dealTaskId}`), { timeout: 30_000 }).catch(() => null);
+    const doc = await page.goto(`${server(mode).base}/tasks/${seed.dealTaskId}`, { waitUntil: "domcontentloaded" });
+    // APL-2652: a hidden task's document is itself the 404, so the page never asks the API.
+    const status = doc?.status() === 404 ? 404 : ((await answered)?.status() ?? 0);
     if (status === 200) await page.waitForURL(/\/projects\//, { timeout: 30_000 });
     else await page.getByRole("heading", { name: "This task isn't available" }).waitFor({ timeout: 30_000 });
     return { status, url: page.url(), text: (await page.locator("body").textContent()) ?? "" };

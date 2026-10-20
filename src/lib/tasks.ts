@@ -1,4 +1,5 @@
 import type { Prisma } from "@/generated/prisma/client";
+import { assertTaskReadable } from "@/lib/task-access";
 import { ensureNextStep } from "@/lib/deals";
 import { crmProjectWhere } from "@/lib/crm";
 import { linksOfTask } from "@/lib/records";
@@ -10,6 +11,8 @@ import {
 import { addDays, formatDueDate, parseDueDate, startOfTodayIST } from "@/lib/dates";
 import { auditTx, logAction, notify } from "@/lib/notify";
 import { reqCtx } from "@/lib/reqctx";
+import { attachCommentCounts, commentCount, purgeExpiredComments } from "@/lib/comments";
+import { commentsEnabled } from "@/lib/flags";
 import { classifyExpectedUpdatedAt } from "@/lib/task-version";
 import { trashPurgeBefore } from "@/lib/undoable";
 import { VERSION_CONFLICT, versionConflictMessage } from "@/lib/version-error";
@@ -96,6 +99,11 @@ export async function checkAssign(user: Actor, id: string) {
  *  An outsider gets the same 404 { error: "Task not found" } as a missing task, before the body (F8). */
 export const assertCanUpdateTask = (user: Actor, id: string, o: { holderCanDo?: boolean } = {}) => loadForEdit(user, id, o);
 
+/** The task page may show this id. Missing and no-access both throw "Task not found". */
+export async function visibleTask(user: Actor, id: string) {
+  await assertTaskReadable(user, id);
+}
+
 export const ORDER = [{ dueDate: { sort: "asc", nulls: "last" } }, { createdAt: "asc" }, { id: "asc" }] as const;
 
 async function requireWorker(tx: Tx, projectId: string, userId: string, what: string) {
@@ -181,13 +189,15 @@ export async function getTask(user: Actor, id: string) {
     db.task.findMany({ where: { parentId: id, deletedAt: null }, include: taskInclude, orderBy: [...ORDER] }),
   ]);
   const viewer = { id: user.id, role: a.role };
-  return {
+  const task = {
     ...present(t, viewer),
     section: { id: section.id, name: section.name, isDone: section.isDone },
     project: { id: a.project.id, name: a.project.name, archived: !!a.project.archivedAt },
     subtaskList: subtasks.map((s) => present(s, viewer)),
     links: await linksOfTask(id),
   };
+  if (!commentsEnabled()) return task;
+  return { ...task, commentsEnabled: true as const, commentCount: await commentCount(id) };
 }
 
 /** Project list and board (SHO-US-5.2, 5.3). One page of each Section, or one Section paged on its own. */
@@ -218,7 +228,7 @@ export async function listTasks(
     const end = offset + rows.length;
     out.push({
       id: s.id, name: s.name, isDone: s.isDone, total,
-      tasks: rows.map((t) => present(t, viewer)),
+      tasks: await attachCommentCounts(rows.map((t) => present(t, viewer))),
       nextCursor: end < total && !(s.isDone && !o.all) ? Buffer.from(String(end)).toString("base64url") : null,
     });
   }
@@ -605,11 +615,13 @@ export async function listTrash(user: Actor, projectId: string) {
  * Removes tasks that have been in Trash for strictly more than 30×24h.
  * A task at exactly 30 days stays, so Undo still works at that instant (APL-2711).
  * `only` narrows the delete. The scheduled job does not pass it.
+ * The unscoped job also purges soft-deleted comments past 30×24h (APL-2590).
  */
 export async function purgeTrash(now = new Date(), only?: Prisma.TaskWhereInput) {
   const expired: Prisma.TaskWhereInput = { deletedAt: { lt: trashPurgeBefore(now) } };
   const where: Prisma.TaskWhereInput = only ? { AND: [expired, only] } : expired;
   const r = await db.task.deleteMany({ where });
+  if (!only) await purgeExpiredComments(now); // APL-2590: soft-deleted comments past 30×24h; a scoped call never widens to them
   if (r.count) {
     await db.auditLog.create({
       data: { event: "TASK_PURGED", channel: "SCREEN", data: only ? { count: r.count, limited: "1" } : { count: r.count } },
@@ -665,6 +677,11 @@ export async function myTasks(user: Actor) {
     else groups.later.push(item);
   }
   for (const t of sent) if (awaiting(t)) groups.waitingOnOthers.push({ ...shape(t), waitingDays: days(t.id, t.updatedAt) });
+  groups.waitingOnMe = await attachCommentCounts(groups.waitingOnMe as { id: string }[]);
+  groups.overdue = await attachCommentCounts(groups.overdue as { id: string }[]);
+  groups.next7 = await attachCommentCounts(groups.next7 as { id: string }[]);
+  groups.later = await attachCommentCounts(groups.later as { id: string }[]);
+  groups.waitingOnOthers = await attachCommentCounts(groups.waitingOnOthers as { id: string }[]);
   return groups;
 }
 

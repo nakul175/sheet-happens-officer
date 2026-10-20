@@ -8,6 +8,8 @@ import { auditTx, logAction, notify } from "@/lib/notify";
 import { deleteTask, recordAccess, restoreTask } from "@/lib/tasks";
 import { UNDO_LABELS, isTooOldToUndo, isUndoable } from "@/lib/undoable";
 import { undoRecord } from "@/lib/records";
+import { commentsEnabled, isCommentAction } from "@/lib/flags";
+import { assertCommentRoom } from "@/lib/comments";
 
 type Conflict = { field: string; before: unknown; after: unknown; now: unknown };
 type Plan = { conflicts: Conflict[]; apply: (tx: Tx) => Promise<void>; subject?: string; fields?: string };
@@ -15,11 +17,17 @@ type Plan = { conflicts: Conflict[]; apply: (tx: Tx) => Promise<void>; subject?:
 const norm = (v: unknown): unknown => (v instanceof Date ? v.toISOString() : v === undefined ? null : v);
 const same = (a: unknown, b: unknown) => JSON.stringify(norm(a)) === JSON.stringify(norm(b));
 const bad = (msg: string, extra?: Record<string, unknown>) => new ApiError(409, msg, extra);
+/** The 200-comment cap on an Undo restore is a conflict with the task's current state: 409, same message and code (AC17). */
+const roomForRestore = (client: Tx | typeof db, taskId: string, lock = false) =>
+  assertCommentRoom(client, taskId, lock).catch((e: unknown) => {
+    throw e instanceof ApiError && e.extra?.code === "too_many_comments" ? bad(e.message, e.extra) : e;
+  });
 
 /** Actions that sent a bell notice, so Undo can say the notice was already delivered (AC4). */
 const NOTIFYING = new Set([
   "task.created", "task.assigned", "task.sent_for_approval", "task.sent_back", "task.approver_changed", "task.collaborator_added",
   "task.collaborator_removed", "task.deleted", "project.archived", "member.added", "member.removed", "member.role_changed", "project.leader_changed",
+  "comment.added",
 ]);
 
 const FIELD_LABEL: Record<string, string> = {
@@ -158,6 +166,29 @@ async function plan(row: any, user: Actor, projectId: string): Promise<Plan> {
         apply: async (tx) => {
           if (!(await tx.section.findFirst({ where: { id: b.sectionId, projectId } }))) throw bad("The section it came from no longer exists.");
           await tx.task.update({ where: { id }, data: { sectionId: b.sectionId } });
+        },
+      };
+    }
+    case "comment.added": {
+      const commentId = String(f.commentId ?? "");
+      const c = await db.comment.findUnique({ where: { id: commentId } });
+      if (!c) throw bad("This comment no longer exists.");
+      if (c.removedAt) throw bad("This comment is already deleted.");
+      const task = await liveTask(id, projectId);
+      return { conflicts: [], subject: task.title, apply: async (tx) => { await tx.comment.update({ where: { id: commentId }, data: { removedAt: new Date() } }); } };
+    }
+    case "comment.removed": {
+      const commentId = String(f.commentId ?? "");
+      const c = await db.comment.findUnique({ where: { id: commentId } });
+      if (!c) throw bad("This comment no longer exists.");
+      if (!c.removedAt) throw bad("This comment is already back.");
+      const task = await liveTask(id, projectId);
+      await roomForRestore(db, c.taskId); // APL-2840: at 200 live comments the restore is refused with the cap message (409)
+      return {
+        conflicts: [], subject: task.title,
+        apply: async (tx) => {
+          await roomForRestore(tx, c.taskId, true);
+          await tx.comment.update({ where: { id: commentId }, data: { removedAt: null } });
         },
       };
     }
@@ -364,6 +395,8 @@ async function present(conflicts: Conflict[]) {
 async function prepare(user: Actor, logId: string) {
   const row = await db.actionLog.findUnique({ where: { id: logId } });
   if (!row) throw notFound("Action");
+  // APL-2590 D1: with the comments switch off, a comment row is the same 404 as an action that does not exist.
+  if (isCommentAction(row.action) && !commentsEnabled()) throw notFound("Action");
   const projectId = row.projectId;
   if (!projectId) throw bad("This kind of action cannot be undone.");
   const a = await recordAccess(user, projectId, "Action");
@@ -419,9 +452,12 @@ export async function undoAction(user: Actor, logId: string, anyway = false) {
   await db.$transaction(async (tx) => {
     await p.apply(tx);
     await tx.actionLog.update({ where: { id: row.id }, data: { undoneAt: new Date(), undoneById: user.id } });
+    const commentId = (row.afterState as { commentId?: string } | null)?.commentId
+      ?? (row.beforeState as { commentId?: string } | null)?.commentId;
     await logAction(tx, {
       actorId: user.id, projectId, targetType: row.targetType as "task", targetId: row.targetId, action: "undo",
-      before: { undoes: row.id, action: row.action }, after: { undoes: row.id, label: UNDO_LABELS[row.action], anyway: anyway && p.conflicts.length > 0 },
+      before: { undoes: row.id, action: row.action, ...(commentId ? { commentId } : {}) },
+      after: { undoes: row.id, label: UNDO_LABELS[row.action], anyway: anyway && p.conflicts.length > 0, ...(commentId ? { commentId } : {}) },
     });
     if (anyway && p.conflicts.length) {
       const later = await tx.actionLog.findMany({ where: { targetType: row.targetType, targetId: row.targetId, createdAt: { gt: row.createdAt }, id: { not: row.id }, actorId: { not: user.id } }, select: { actorId: true } });

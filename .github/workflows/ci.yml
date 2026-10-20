@@ -82,7 +82,8 @@ jobs:
         run: npm run test:crm-modes
       - name: Start the app
         run: |
-          (npx next start -p 3100 > server.log 2>&1 &)
+          # APL-2652: RETURN_PATH_LOG=1 makes the proxy log the return path it forwards, for tests/return-to.test.ts.
+          (RETURN_PATH_LOG=1 npx next start -p 3100 > server.log 2>&1 &)
           url="${APP_HEALTH_URL:-http://localhost:3100/api/health}"
           attempts="${APP_HEALTH_ATTEMPTS:-30}"
           pause="${APP_HEALTH_PAUSE:-2}"
@@ -101,6 +102,17 @@ jobs:
           fi
       - name: Unit tests
         run: npm test
+      # APL-2911. Story specs that drive this local server in Playwright Chromium (outbox mail, the CI Super Admin), so
+      # staging cannot run them and npm test no longer does. Each file must collect at least one test, then every test runs.
+      - name: Local Playwright story specs
+        run: |
+          specs=(tests/e2e/stories/APL-2624.spec.ts tests/e2e/stories/APL-2721.spec.ts tests/e2e/stories/APL-2737.spec.ts)
+          for f in "${specs[@]}"; do
+            total=$(npx playwright test --list "$f" | sed -n 's/^Total: \([0-9][0-9]*\) tests\{0,1\} in .*/\1/p')
+            echo "$f: ${total:-0} tests"
+            if [ "${total:-0}" -eq 0 ]; then echo "::error::Playwright collected 0 tests from $f."; exit 1; fi
+          done
+          npx playwright test "${specs[@]}"
       # APL-2728 AC4. One production server per CRM_VISIBLE mode. Needs the build above. Not part of npm test.
       - name: CRM visible modes
         run: npm run test:crm-modes
