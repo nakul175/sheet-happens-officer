@@ -40,9 +40,9 @@ function verifyToken(email: string) {
 export type Account = { c: Client; id: string; email: string; name: string };
 
 /** A verified, signed-in person. Reuses the account if it already exists. */
-export async function account(label: string, fixedEmail?: string): Promise<Account> {
+export async function account(label: string, fixedEmail?: string, fixedName?: string): Promise<Account> {
   const email = fixedEmail ?? `${label}${run}${n++}@aplyd.com`;
-  const name = label[0].toUpperCase() + label.slice(1);
+  const name = fixedName ?? label[0].toUpperCase() + label.slice(1);
   const c = new Client();
   const r = await c.post("/api/auth/signup", { name, email, password: PW });
   if (r.status === 201) {
@@ -63,8 +63,8 @@ export async function admin(sa: Account, label = "admin") {
 }
 
 /** A project led by `leader`, with optional extra members. Returns ids. */
-export async function project(creator: Account, leader: Account, members: { who: Account; role?: "EDITOR" | "VIEWER" }[] = []) {
-  const r = await creator.c.post("/api/projects", { name: `P${run}-${n++}`, leaderId: leader.id });
+export async function project(creator: Account, leader: Account, members: { who: Account; role?: "EDITOR" | "VIEWER" }[] = [], name?: string) {
+  const r = await creator.c.post("/api/projects", { name: name ?? `P${run}-${n++}`, leaderId: leader.id });
   expect(r.status).toBe(201);
   const id = r.json.project.id as string;
   for (const m of members) {

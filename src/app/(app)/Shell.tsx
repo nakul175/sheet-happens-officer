@@ -24,11 +24,35 @@ function TabBar({ user, here, more }: { user: Me; here: (p: string) => boolean; 
   const box = useRef<HTMLDivElement>(null);
   useEffect(() => {
     // The keyboard hides the bar (a field has focus), so it never sits on top of what is being typed.
-    const on = (e: FocusEvent) => setTyping(!!(e.target as HTMLElement | null)?.matches?.("input:not([type=checkbox]):not([type=radio]), textarea, select"));
-    const off = () => setTyping(false);
-    document.addEventListener("focusin", on);
-    document.addEventListener("focusout", off);
-    return () => { document.removeEventListener("focusin", on); document.removeEventListener("focusout", off); };
+    // A pointer that starts while a field is focused keeps the bar hidden until pointerup: otherwise
+    // blur paints the bar back between pointerdown and pointerup and the bar swallows the click.
+    const field = (el: EventTarget | null) =>
+      !!(el as HTMLElement | null)?.matches?.("input:not([type=checkbox]):not([type=radio]), textarea, select");
+    let pointers = 0;
+    let hold = false;
+    const paint = () => setTyping(hold || field(document.activeElement));
+    const down = () => {
+      if (pointers === 0) hold = field(document.activeElement);
+      pointers += 1;
+      paint();
+    };
+    const up = () => {
+      pointers = Math.max(0, pointers - 1);
+      if (pointers === 0) hold = false;
+      paint();
+    };
+    document.addEventListener("focusin", paint);
+    document.addEventListener("focusout", paint);
+    document.addEventListener("pointerdown", down, true);
+    document.addEventListener("pointerup", up, true);
+    document.addEventListener("pointercancel", up, true);
+    return () => {
+      document.removeEventListener("focusin", paint);
+      document.removeEventListener("focusout", paint);
+      document.removeEventListener("pointerdown", down, true);
+      document.removeEventListener("pointerup", up, true);
+      document.removeEventListener("pointercancel", up, true);
+    };
   }, []);
   useEffect(() => {
     if (!open) return;

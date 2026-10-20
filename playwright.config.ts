@@ -18,8 +18,8 @@ export default defineConfig({
   testDir: "./tests/e2e/stories",
   testMatch: "**/*.spec.ts",
   testIgnore: VITEST_SPECS,
-  timeout: 60_000,
-  expect: { timeout: 10_000 },
+  timeout: 120_000, // APL-2590's spec seeds several roles per test
+  expect: { timeout: 15_000 },
   workers: 1,
   retries: 0,
   reporter: [["list"]],

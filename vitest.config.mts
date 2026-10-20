@@ -30,6 +30,7 @@ export default defineConfig({
       "tests/e2e/local/APL-2609.spec.ts",
       "e2e/**",
       "scripts/**",
+      "tests/e2e/stories/APL-2590.spec.ts", // a Playwright story (APL-2590)
       "tests/e2e/stories/APL-2609.spec.ts",
       "tests/e2e/stories/APL-2720.spec.ts",
       "tests/e2e/stories/APL-2694.spec.ts",
