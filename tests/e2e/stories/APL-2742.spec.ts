@@ -3,21 +3,24 @@
 // No screen sends a resend without a click. The verify and resend audit rows keep the client IP and user agent.
 // On the failure paths (send refused, limit, unusable link) every screen tells the truth: nothing says an email went.
 //
-// QA gate: skipped without SHO_QA_PASS, which is also the accounts' password. CI does not set it, so CI skips this file.
+// QA gate: skipped without SHO_QA_PASS, which is also the accounts' password. ci.yml does not set it, so it lists these tests and skips them.
+// @local-only: the spec starts its own servers from a local build and database, so staging-e2e leaves it out (APL-2925, #145).
+// APL-2895: a Playwright spec (@playwright/test), so `npx playwright test` collects it; vitest.config.mts excludes it from `npm test`.
 // Servers: the spec starts its own two `next start` processes from the existing build (`npm run build` first), on
 // 127.0.0.1 only, against the local database (anything else in DATABASE_URL is refused):
 //   mail-ok      writes mail to a temp outbox this spec creates and removes in afterAll;
 //   mail-failing has no RESEND_API_KEY and no outbox, so every send fails as it does in production today.
 // The outbox is read for the newest "Verify your email" mail to the exact address only; no token or mail body is logged.
 // ZZ-TEST names, nakul17+zztest aliases; every account made here is deactivated through the API in afterAll.
+// APL-2765: the clean-up Super Admin is a new alias per run, so a reused database whose root has another run's
+// password cannot answer 401. A Super Admin cannot be deactivated through the API, so each run leaves its root active.
 // Chromium: PW_CHROMIUM, else the system Chrome that GitHub's ubuntu-latest runner ships (as tests/inline-touch-2673.test.ts).
 import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { chromium, type Browser, type Page } from "playwright-core";
-import { db } from "../../../src/lib/db";
+import { chromium, expect, test, type Browser, type Locator, type Page } from "@playwright/test";
+import pg from "pg";
 
 const QA_PASS = process.env.SHO_QA_PASS ?? "";
 const PORT = Number(process.env.APL2742_PORT ?? 3142);
@@ -28,16 +31,12 @@ for (const base of [OK, FAILING]) {
 }
 
 const SHOTS = "test-results/apl-2742";
-const ROOT_EMAIL = "nakul17+zztest-apl2742-root@aplyd.com"; // Super Admin on the spec's servers, used for clean-up only
 const VERIFY_SUBJECT = "Verify your email for Sheet Happens Officer";
 const run = Date.now();
+const ROOT_EMAIL = `nakul17+zztest-apl2742-root-${run}@aplyd.com`; // Super Admin on the spec's servers, used for clean-up only
+const E2E_PREFIX = "nakul17+zztest-apl2742-e2e-";
 let n = 0;
-const created: string[] = [];
-const fresh = () => {
-  const email = `nakul17+zztest-apl2742-e2e-${run}-${n++}@aplyd.com`;
-  created.push(email);
-  return email;
-};
+const fresh = () => `${E2E_PREFIX}${run}-${n++}@aplyd.com`;
 
 // APL-2742 D1 (QA): the exact texts on the failure paths.
 const UNVERIFIED_TEXT = "Verify your email before you sign in. No working verification link? Use Resend link.";
@@ -81,13 +80,14 @@ async function startServer(base: string, mail: Record<string, string>) {
   if (!mail.EMAIL_OUTBOX_DIR) delete env.EMAIL_OUTBOX_DIR;
   const child = spawn(process.execPath, ["node_modules/next/dist/bin/next", "start", "-p", new URL(base).port, "-H", "127.0.0.1"], { env, stdio: "ignore" });
   servers.push(child);
-  // A condition wait (hooks cannot use expect.poll): health must answer 200 before the deadline.
-  const deadline = Date.now() + 90_000;
-  while ((await healthStatus(base)) !== 200) {
-    if (child.exitCode !== null) throw new Error(`next start for ${base} exited (${child.exitCode}).`);
-    if (Date.now() > deadline) throw new Error(`next start for ${base} did not become healthy in 90 s.`);
-    await new Promise((resolve) => setTimeout(resolve, 500));
-  }
+  // A condition wait: health must answer 200 within 90 s. A server that exited reads as its exit, not as a status.
+  await expect
+    .poll(async () => (child.exitCode !== null ? `next start exited (${child.exitCode})` : await healthStatus(base)), {
+      message: `next start for ${base} becomes healthy`,
+      timeout: 90_000,
+      intervals: [500],
+    })
+    .toBe(200);
 }
 
 /** A small JSON client for the spec's own servers (clean-up and the Super Admin sign-in). */
@@ -137,7 +137,7 @@ function countRequests(page: Page, apiPath: string) {
 }
 
 /** Waits until the page is hydrated (its control is enabled) and the network is idle, so a request fired on load was seen. */
-async function settle(page: Page, control: ReturnType<Page["getByRole"]>) {
+async function settle(page: Page, control: Locator) {
   await control.waitFor({ state: "visible" });
   await page.waitForFunction(() => document.readyState === "complete");
   await expect.poll(() => control.isEnabled()).toBe(true);
@@ -162,48 +162,75 @@ async function signIn(page: Page, base: string, email: string) {
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
 }
 
-const userId = async (email: string) => (await db.user.findUniqueOrThrow({ where: { email } })).id;
+// Read-only SELECTs on the local database (beforeAll refuses any other). Playwright cannot load src/lib/db (APL-2895):
+// the generated Prisma client is an ES module and its "@/" import does not resolve here, so the spec reads with pg.
+let pool: pg.Pool | undefined;
+async function rows<T>(sql: string, params: unknown[]): Promise<T[]> {
+  if (!pool) throw new Error("The database pool is not open: beforeAll did not run.");
+  return (await pool.query(sql, params)).rows as T[];
+}
+async function one<T>(what: string, sql: string, params: unknown[]): Promise<T> {
+  const [row] = await rows<T>(sql, params);
+  if (!row) throw new Error(`No ${what} row.`);
+  return row;
+}
+type AuditRow = { ip: string | null; data: unknown };
+const userId = async (email: string) => (await one<{ id: string }>("user", 'SELECT id FROM "User" WHERE email = $1', [email])).id;
+const emailVerifiedAt = async (id: string) =>
+  (await one<{ emailVerifiedAt: Date | null }>("user", 'SELECT "emailVerifiedAt" FROM "User" WHERE id = $1', [id])).emailVerifiedAt;
+const firstAudit = (actorId: string, event: string) =>
+  one<AuditRow>(`${event} audit`, 'SELECT ip, data FROM "AuditLog" WHERE "actorId" = $1 AND event = $2 ORDER BY "createdAt" ASC LIMIT 1', [actorId, event]);
 const resendResults = async (email: string) =>
-  (await db.auditLog.findMany({ where: { actorId: await userId(email), event: "VERIFY_EMAIL_REQUESTED" }, orderBy: { createdAt: "asc" } }))
-    .map((r) => (r.data as { result: string }).result);
+  (await rows<{ data: { result: string } }>('SELECT data FROM "AuditLog" WHERE "actorId" = $1 AND event = $2 ORDER BY "createdAt" ASC', [await userId(email), "VERIFY_EMAIL_REQUESTED"]))
+    .map((r) => r.data.result);
 
-describe.skipIf(!QA_PASS)("qa:TC missing APL-2742: unverified sign-in and verification email", () => {
-  beforeAll(async () => {
+test.describe("qa:TC missing APL-2742: unverified sign-in and verification email", { tag: "@local-only" }, () => {
+  test.skip(!QA_PASS, "QA gate: set SHO_QA_PASS to run (CI does not).");
+  test.describe.configure({ timeout: 60_000 });
+
+  test.beforeAll(async () => {
+    test.setTimeout(240_000);
     const dbHost = process.env.DATABASE_URL ? new URL(process.env.DATABASE_URL).hostname : "";
     if (!/^(localhost|127\.0\.0\.1)$/.test(dbHost)) throw new Error("Refusing to run: DATABASE_URL must point at a local database.");
+    pool = new pg.Pool({ connectionString: process.env.DATABASE_URL, max: 1 });
     if (!existsSync(".next/BUILD_ID")) throw new Error("Run `npm run build` first: this spec starts its own `next start`.");
     mkdirSync(SHOTS, { recursive: true });
     outbox = mkdtempSync(path.join(os.tmpdir(), "apl2742-outbox-"));
     await startServer(OK, { EMAIL_OUTBOX_DIR: outbox });
     await startServer(FAILING, {});
     browser = await chromium.launch({ executablePath: chromePath(), args: ["--no-sandbox", "--disable-dev-shm-usage"] });
-  }, 240_000);
+  });
 
-  afterAll(async () => {
+  test.afterAll(async () => {
+    test.setTimeout(120_000);
     const problems: string[] = [];
     try {
-      // Clean-up through the API: the Super Admin alias deactivates every account this run made.
-      if ((await call(OK, "POST", "/api/auth/signup", { name: "ZZ-TEST Root", email: ROOT_EMAIL, password: QA_PASS })).status === 201) {
+      // Clean-up through the API: this run's Super Admin alias deactivates every active account this spec has made,
+      // including any an earlier run left behind, so the next run starts clean.
+      const signedUp = await call(OK, "POST", "/api/auth/signup", { name: "ZZ-TEST Root", email: ROOT_EMAIL, password: QA_PASS });
+      if (signedUp.status === 201) {
         const verified = await call(OK, "POST", "/api/auth/verify", { token: newestVerifyLink(ROOT_EMAIL).split("token=")[1] });
         if (verified.status !== 200) problems.push(`verify the clean-up account: ${verified.status}`);
-      }
+      } else problems.push(`sign up the clean-up account: ${signedUp.status}`);
       const root = await call(OK, "POST", "/api/auth/signin", { email: ROOT_EMAIL, password: QA_PASS });
       if (root.status !== 200) problems.push(`sign in the clean-up account: ${root.status}`);
-      for (const email of root.status === 200 ? created : []) {
-        const who = await db.user.findUnique({ where: { email } });
-        if (!who) continue;
+      const left = root.status === 200 ? await rows<{ id: string }>('SELECT id FROM "User" WHERE starts_with(email, $1) AND "deactivatedAt" IS NULL', [E2E_PREFIX]) : [];
+      for (const who of left) {
         const off = await call(OK, "POST", `/api/team/${who.id}/deactivate`, { reassign: "leaders" }, root.cookie);
         if (off.status !== 200 && !(off.status === 409 && /already deactivated/.test(off.json?.error ?? ""))) problems.push(`deactivate an account: ${off.status}`);
       }
     } finally {
       await browser?.close();
+      await pool?.end();
       for (const s of servers) s.kill("SIGTERM"); // exactly the processes this spec started
+      // Playwright starts a new worker (and this file's beforeAll) after a failed test: the ports must be free by then.
+      await Promise.all(servers.map((s) => (s.exitCode !== null || s.signalCode !== null ? undefined : new Promise((resolve) => s.once("exit", resolve)))));
       if (outbox) rmSync(outbox, { recursive: true, force: true });
     }
     expect(problems, "clean-up").toEqual([]);
-  }, 120_000);
+  });
 
-  it("qa:TC missing AC1: unverified user cannot sign in, and the refusal does not assume an email arrived", async () => {
+  test("qa:TC missing AC1: unverified user cannot sign in, and the refusal does not assume an email arrived", async () => {
     const ctx = await browser.newContext();
     const page = await ctx.newPage();
     const email = fresh();
@@ -225,9 +252,9 @@ describe.skipIf(!QA_PASS)("qa:TC missing APL-2742: unverified sign-in and verifi
     await page.goto(`${OK}/`);
     await page.waitForURL(/\/signin/);
     await ctx.close();
-  }, 60_000);
+  });
 
-  it("qa:TC missing AC2: the refusal's resend sends a new link, is audited, lands on the neutral screen, and the click verifies", async () => {
+  test("qa:TC missing AC2: the refusal's resend sends a new link, is audited, lands on the neutral screen, and the click verifies", async () => {
     const ctx = await tracedContext();
     const page = await ctx.newPage();
     const email = fresh();
@@ -239,7 +266,7 @@ describe.skipIf(!QA_PASS)("qa:TC missing APL-2742: unverified sign-in and verifi
     await expect.poll(() => main(page).getByRole("status").textContent()).toBe(RESEND_TEXT);
     expect(await main(page).getByText(WE_SENT).count(), "never 'We sent' after a resend").toBe(0);
     await expect.poll(() => verifyCount(email)).toBe(2);
-    const resend = await db.auditLog.findFirstOrThrow({ where: { actorId: await userId(email), event: "VERIFY_EMAIL_REQUESTED" } });
+    const resend = await firstAudit(await userId(email), "VERIFY_EMAIL_REQUESTED");
     expect(resend.ip).toBe(CLIENT_IP);
     expect(resend.data).toEqual({ result: "SENT", userAgent: CLIENT_UA });
 
@@ -251,9 +278,9 @@ describe.skipIf(!QA_PASS)("qa:TC missing APL-2742: unverified sign-in and verifi
     await page.waitForURL((u) => !u.pathname.startsWith("/signin"));
     expect((await page.request.get(`${OK}/api/auth/me`)).status()).toBe(200);
     await ctx.close();
-  }, 60_000);
+  });
 
-  it("qa:TC missing AC3: when sending fails, sign-up says so with the exact text, and its resend shows only the neutral notice", async () => {
+  test("qa:TC missing AC3: when sending fails, sign-up says so with the exact text, and its resend shows only the neutral notice", async () => {
     const ctx = await tracedContext();
     const page = await ctx.newPage();
     const resends = countRequests(page, "/api/auth/resend-verification");
@@ -273,9 +300,9 @@ describe.skipIf(!QA_PASS)("qa:TC missing APL-2742: unverified sign-in and verifi
     await expect.poll(() => main(page).getByRole("status").textContent()).toBe(RESEND_TEXT);
     expect(await resendResults(email)).toEqual(["FAILED"]);
     await ctx.close();
-  }, 60_000);
+  });
 
-  it("qa:TC missing AC6: when sending fails, Resend link from the sign-in refusal shows the exact neutral text, never 'We sent'", async () => {
+  test("qa:TC missing AC6: when sending fails, Resend link from the sign-in refusal shows the exact neutral text, never 'We sent'", async () => {
     // QA D1: the sign-in refusal's resend used to land on /check-email saying "We sent a verification link".
     // APL-2766: the behaviour is asserted first, so a red run fails on the landing and the notice, not on the refusal
     // wording. The refusal is found by its "Resend link" button (present before and after the fix); its exact text,
@@ -298,9 +325,9 @@ describe.skipIf(!QA_PASS)("qa:TC missing APL-2742: unverified sign-in and verifi
     await page.screenshot({ path: `${SHOTS}/resent-failed.png` });
     expect(refusalTextCount, "the sign-in refusal had the exact text").toBe(1);
     await ctx.close();
-  }, 60_000);
+  });
 
-  it("qa:TC missing AC7: an unusable verify link leads to the exact can't-be-used text, and its resend to the neutral notice", async () => {
+  test("qa:TC missing AC7: an unusable verify link leads to the exact can't-be-used text, and its resend to the neutral notice", async () => {
     const ctx = await browser.newContext();
     const page = await ctx.newPage();
     const email = fresh();
@@ -315,9 +342,9 @@ describe.skipIf(!QA_PASS)("qa:TC missing APL-2742: unverified sign-in and verifi
     await expect.poll(() => main(page).getByRole("status").textContent()).toBe(RESEND_TEXT);
     expect(await main(page).getByText(WE_SENT).count()).toBe(0);
     await ctx.close();
-  }, 60_000);
+  });
 
-  it("qa:TC missing AC4: opening the verify link alone verifies nothing; the Verify my email click does, and is audited", async () => {
+  test("qa:TC missing AC4: opening the verify link alone verifies nothing; the Verify my email click does, and is audited", async () => {
     const ctx = await tracedContext();
     const page = await ctx.newPage();
     const email = fresh();
@@ -329,8 +356,8 @@ describe.skipIf(!QA_PASS)("qa:TC missing APL-2742: unverified sign-in and verifi
     await settle(page, main(page).getByRole("button", { name: "Verify my email" }));
     expect(verifies.n, "loading /verify posts nothing").toBe(0);
     const id = await userId(email);
-    expect((await db.user.findUniqueOrThrow({ where: { id } })).emailVerifiedAt).toBeNull();
-    const token = await db.authToken.findFirstOrThrow({ where: { userId: id, type: "VERIFY" }, orderBy: { createdAt: "desc" } });
+    expect(await emailVerifiedAt(id)).toBeNull();
+    const token = await one<{ id: string; usedAt: Date | null }>("VERIFY token", 'SELECT id, "usedAt" FROM "AuthToken" WHERE "userId" = $1 AND type = $2 ORDER BY "createdAt" DESC LIMIT 1', [id, "VERIFY"]);
     expect(token.usedAt).toBeNull();
     await page.screenshot({ path: `${SHOTS}/verify-button.png` });
 
@@ -338,15 +365,15 @@ describe.skipIf(!QA_PASS)("qa:TC missing APL-2742: unverified sign-in and verifi
     await main(page).getByRole("button", { name: "Verify my email" }).click();
     await expect.poll(() => main(page).getByRole("heading", { name: "Email verified" }).count()).toBe(1);
     expect(verifies.n).toBe(1);
-    expect((await db.user.findUniqueOrThrow({ where: { id } })).emailVerifiedAt).not.toBeNull();
-    expect((await db.authToken.findUniqueOrThrow({ where: { id: token.id } })).usedAt).not.toBeNull();
-    const row = await db.auditLog.findFirstOrThrow({ where: { actorId: id, event: "EMAIL_VERIFIED" } });
+    expect(await emailVerifiedAt(id)).not.toBeNull();
+    expect((await one<{ usedAt: Date | null }>("VERIFY token", 'SELECT "usedAt" FROM "AuthToken" WHERE id = $1', [token.id])).usedAt).not.toBeNull();
+    const row = await firstAudit(id, "EMAIL_VERIFIED");
     expect(row.ip).toBe(CLIENT_IP);
     expect(row.data).toEqual({ userAgent: CLIENT_UA });
     await ctx.close();
-  }, 60_000);
+  });
 
-  it("qa:TC missing AC5: sign-up, /check-email and its failed and resent variants never send a resend without a click", async () => {
+  test("qa:TC missing AC5: sign-up, /check-email and its failed and resent variants never send a resend without a click", async () => {
     const ctx = await tracedContext();
     const page = await ctx.newPage();
     const resends = countRequests(page, "/api/auth/resend-verification");
@@ -366,5 +393,5 @@ describe.skipIf(!QA_PASS)("qa:TC missing APL-2742: unverified sign-in and verifi
     await resend.click();
     await expect.poll(() => resends.n).toBe(1);
     await ctx.close();
-  }, 60_000);
+  });
 });

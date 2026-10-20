@@ -94,7 +94,7 @@ test("AC3: when an Editor deletes a task, the Leader and everyone on the task ar
   expect(about((await inbox(editor)).items, title).some((n) => n.text.includes("to Trash"))).toBe(false);
 });
 
-test("AC4: a task due tomorrow or overdue produces at most one reminder for its assignee when the daily job runs", async ({ browser, later }) => {
+test("AC4: a task due tomorrow or overdue produces at most one reminder for its assignee when the daily job runs @local-only", async ({ browser, later }) => {
   const { admin, people: [holder] } = await cast(browser, later, ["due"]);
   const p = await newProject(admin, later, { label: "e7 due", members: [{ who: holder, role: "EDITOR" }] });
   const tomorrow = zz("due tomorrow");

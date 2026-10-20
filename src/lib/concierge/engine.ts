@@ -9,6 +9,7 @@ import {
   clearProviderDown, disabledFor, markProviderDown, monthCap, providerDown, recordQuickAction, recordUsage, providerDownUntil, type Disabled,
 } from "@/lib/concierge/limits";
 import { todayLine } from "@/lib/concierge/dates";
+import { isEcho } from "@/lib/concierge/echo";
 import { flat, personById, projectById, quickAnswer, taskById, QUICK_ACTIONS, type TaskRec } from "@/lib/concierge/reads";
 import { TOOLS, newTurn, runTool, wrap, type Kind, type Turn } from "@/lib/concierge/tools";
 import { addMessage, casStored, chatWhere, dropPendingChoices, ownMessage, parse, present } from "@/lib/concierge/thread";
@@ -278,10 +279,12 @@ export async function improvePrompt(user: Actor, text: string, now = new Date())
     const r = await generate({ system: IMPROVE_SYSTEM, tools: [], messages: [{ role: "user", content: clean }], maxTokens: 600 });
     clearProviderDown();
     const improved = r.content.filter((b): b is Extract<ContentBlock, { type: "text" }> => b.type === "text").map((b) => b.text).join("\n").trim().slice(0, MAX_TEXT);
-    // APL-2694: an empty reply, or one that only repeats the typed text, is no rewrite. Its spend is still recorded,
-    // but it does not count against the person's week, and they are told instead of seeing nothing happen.
-    const rewritten = !!improved && improved !== clean;
-    await recordUsage(user.id, r, rewritten);
+    // APL-2694: an empty reply, or one that only repeats the typed text, is no rewrite, and the person is told instead
+    // of seeing nothing happen. APL-2871: "repeats" is judged by isEcho (case, quotes, one trailing full stop), the
+    // same rule as offeredRewrite. AC1 v1.1: an echo used a model call, so it counts once toward the week like any
+    // sent message (APL-2519). An empty reply is still recorded without counting, as before.
+    const rewritten = !!improved && !isEcho(clean, improved);
+    await recordUsage(user.id, r, !!improved);
     if (!rewritten) throw new ApiError(502, "No clearer version came back. Your text is unchanged; try again.");
     return { improved };
   } catch (e) {

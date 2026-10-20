@@ -120,28 +120,33 @@ describe("qa:TC missing APL-2749: overlapping reminder runs write one reminder p
     // Both are bounded: no statement runs past 5 s and no lock wait past 2 s, even if the release below never ran.
     const gate = new pg.Client({ connectionString: localDatabaseUrl(), statement_timeout: 5_000, lock_timeout: 2_000 });
     const watch = new pg.Client({ connectionString: localDatabaseUrl(), statement_timeout: 5_000, lock_timeout: 2_000 });
-    await gate.connect();
-    await watch.connect();
-    for (const client of [gate, watch]) {
-      const { rows } = await client.query<{ statement_timeout: string; lock_timeout: string }>(
-        "SELECT current_setting('statement_timeout') AS statement_timeout, current_setting('lock_timeout') AS lock_timeout",
-      );
-      expect(rows[0]).toEqual({ statement_timeout: "5s", lock_timeout: "2s" });
-    }
     let overlap: { inserts: number; advisory: number } | null = null;
     let posts: Promise<unknown>;
     let heldMs = 0;
+    let began = false;
     try {
+      await gate.connect();
+      await watch.connect();
+      for (const client of [gate, watch]) {
+        const { rows } = await client.query<{ statement_timeout: string; lock_timeout: string }>(
+          "SELECT current_setting('statement_timeout') AS statement_timeout, current_setting('lock_timeout') AS lock_timeout",
+        );
+        expect(rows[0]).toEqual({ statement_timeout: "5s", lock_timeout: "2s" });
+      }
       await gate.query("BEGIN");
+      began = true;
       await gate.query('LOCK TABLE "Notification" IN SHARE MODE');
       posts = postReminders(LOAD).then(() => null, (err: unknown) => err);
       const held = Date.now();
       overlap = await waitForOverlap(watch, MAX_HOLD_MS);
       heldMs = Date.now() - held;
     } finally {
-      await gate.query("ROLLBACK");
-      await gate.end();
-      await watch.end();
+      // APL-2894: end both clients even when a connect, the setting assert or the lock fails.
+      try {
+        if (began) await gate.query("ROLLBACK");
+      } finally {
+        await Promise.allSettled([gate.end(), watch.end()]);
+      }
     }
     const failed = await posts;
     if (failed) throw failed;
