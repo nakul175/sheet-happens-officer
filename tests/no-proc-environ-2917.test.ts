@@ -21,9 +21,10 @@ function filesUnder(dir: string): string[] {
   return out;
 }
 
-// "environ" as a path piece, with a quote or "/" on each side: catches a path built with `+`, ${...} or path.join,
-// however the pieces are split ("/environ", 'environ', `environ`, "environ/..."). "environment" is not a match.
-const ENVIRON_SEGMENT = /["'`/]environ(?=["'`/$])/;
+// "environ" as a path piece: after a quote, "/" or the "}" that closes a ${...}, and before a quote, "/" or "${".
+// Catches a path built with `+`, ${...} or path.join, however the pieces are split ("/environ", 'environ',
+// `${dir}environ`, "environ/..."). "environment" is not a match.
+const ENVIRON_SEGMENT = /["'`/}]environ(?=["'`/$])/;
 
 /** The test-file paths under tests/ whose source reads the process image of environment variables. */
 export function environReaders(files: { file: string; text: string }[]) {
@@ -53,6 +54,10 @@ describe("qa:TC missing APL-2917: no test file reads the whole process environme
       // Template literals with the path split across pieces or inside ${...}.
       "readFileSync(`${\"/proc/self/\" + \"environ\"}`)",
       "readFileSync(`/proc/self/environ${suffix}`)",
+      // A template that joins a directory variable to the file name (Pam, D1 on a935b24).
+      'const dir = "/proc/self/"; readFileSync(`${dir}environ`)',
+      "readFileSync(`${procDir}environ${suffix}`)",
+      "readFileSync(`${root}/${pid}/environ`)",
     ]) {
       expect(environReaders([{ file: "x.ts", text }]), text).toEqual(["x.ts"]);
     }
