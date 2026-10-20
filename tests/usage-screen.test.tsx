@@ -112,7 +112,7 @@ describe("Usage screen (SHO-US-9.2 AC6)", () => {
     people: [{ id: "zz-1", name: "ZZ-TEST usage person", monthCalls: 1, weekCalls: 1, monthCostUsd: ceiling.spendUsd ?? 0 }],
   });
 
-  it("qa:TC-US92-30f41089@v1 AC6 v1.1 (b): a ceiling of 0 or unset shows No ceiling set and no percentage", () => {
+  it('qa:TC-US92-30f41089@v1 AC6 v1.2: if the ceiling is 0 or unset, the screen shows "No ceiling set" and no percentage', () => {
     const cases: { label: string; ceiling: Partial<UsagePayload["ceiling"]> }[] = [
       { label: "$10 of $0", ceiling: { usd: 0, spendUsd: 10, percent: 0 } },
       { label: "$0 of $0", ceiling: { usd: 0, spendUsd: 0, percent: 0 } },
@@ -133,7 +133,7 @@ describe("Usage screen (SHO-US-9.2 AC6)", () => {
     }
   });
 
-  it("qa:TC-US92-5acadabc@v1 qa:TC-US92-cd463d7f@v2 AC6 v1.1 (c): spend over the ceiling shows the rounded percentage and a visible Over ceiling flag", () => {
+  it('qa:TC-US92-5acadabc@v1 qa:TC-US92-cd463d7f@v2 AC6 v1.2: if spend is over the ceiling, the screen shows the rounded percentage plus a visible "Over ceiling" flag', () => {
     const rows: { spend: number; cap: number; label: string; over: boolean }[] = [
       { spend: 100.4, cap: 100, label: "100%", over: true },
       { spend: 100.01, cap: 100, label: "100%", over: true },
