@@ -6,7 +6,9 @@ import { ApiError } from "@/lib/http";
 import { currentSessionId, deviceLabel, hashPassword, verifyPassword } from "@/lib/auth";
 import { WORKSTREAM_DEAL, crmMode, crmVisible, projectAccess, type Actor } from "@/lib/access";
 import { idsIn, sentence, whenText } from "@/lib/activity-text";
-import { UNDO_DAYS, isUndoable } from "@/lib/undoable";
+import { purgeExpiredComments } from "@/lib/comments";
+import { COMMENT_ACTION_PREFIX, COMMENT_NOTICE_TYPES, commentsEnabled } from "@/lib/flags";
+import { isTooOldToUndo, isUndoable } from "@/lib/undoable";
 import { passwordField } from "@/lib/schemas";
 
 const NOTE_DAYS = 90;
@@ -46,6 +48,8 @@ export function noticeText(n: N) {
   const p = d.project ? `"${d.project}"` : "a project";
   const text: Record<string, string> = {
     TASK_ASSIGNED: `${who} assigned you ${t}.`,
+    COMMENT_ADDED: `${who} commented on ${t}.`,
+    COMMENT_MENTION: `${who} mentioned you on ${t}.`,
     TASKS_REASSIGNED: d.count ? `${who} assigned you ${d.count} tasks${d.project ? ` in ${p}` : ""}.` : `${who} moved tasks over to you.`,
     TASKS_REASSIGNED_SUMMARY: `${d.count ?? "Some"} tasks in ${p} were handed to a new owner by ${who}.`,
     APPROVER_REASSIGNED: `${who} changed who approves tasks in ${p}.`,
@@ -138,14 +142,19 @@ export function noticeForReader(n: N, hidden: boolean): { text: string; href: st
   return redactDealNotice(n.type) ?? { text: HIDDEN_DEAL_TEXT, href: null };
 }
 
+/** With the comments switch off, comment notices are neither listed, counted nor changed (APL-2590 D1b, #128 D2). */
+const hiddenCommentNotices = () => (commentsEnabled() ? {} : { type: { notIn: COMMENT_NOTICE_TYPES } });
+
 /** SHO-US-14.13: newest first, 50 at a time; `before` is the `next` value of the previous page. `filter=unread` hides read items. */
 export async function listNotifications(user: Actor, o: { filter?: string; before?: string; limit?: number } = {}) {
   const limit = Math.min(Math.max(o.limit ?? 50, 1), 200);
   const [at, cursorId] = (o.before ?? "").split("|");
   const when = at && !Number.isNaN(Date.parse(at)) ? new Date(at) : null;
+  const hideComments = hiddenCommentNotices(); // APL-2590 D1b
   const rows = await db.notification.findMany({
     where: {
       recipientId: user.id,
+      ...hideComments,
       ...(o.filter === "unread" ? { readAt: null } : {}),
       ...(when ? { OR: [{ createdAt: { lt: when } }, { createdAt: when, id: { lt: cursorId ?? "" } }] } : {}),
     },
@@ -153,7 +162,7 @@ export async function listNotifications(user: Actor, o: { filter?: string; befor
     take: limit + 1,
     include: { actor: { select: { name: true } } },
   });
-  const unread = await db.notification.count({ where: { recipientId: user.id, readAt: null } });
+  const unread = await db.notification.count({ where: { recipientId: user.id, readAt: null, ...hideComments } });
   const page = rows.slice(0, limit);
   const hiddenDeals = await hiddenDealIds(user, page.map((n) => n.projectId));
   const last = page.at(-1);
@@ -168,14 +177,14 @@ export async function listNotifications(user: Actor, o: { filter?: string; befor
 }
 
 export async function markRead(user: Actor, id: string) {
-  await db.notification.updateMany({ where: { id, recipientId: user.id, readAt: null }, data: { readAt: new Date() } });
+  await db.notification.updateMany({ where: { id, recipientId: user.id, readAt: null, ...hiddenCommentNotices() }, data: { readAt: new Date() } });
 }
 /** SHO-US-14.13 AC4: keep a notice unread until I have acted on it. */
 export async function markUnread(user: Actor, id: string) {
-  await db.notification.updateMany({ where: { id, recipientId: user.id, readAt: { not: null } }, data: { readAt: null } });
+  await db.notification.updateMany({ where: { id, recipientId: user.id, readAt: { not: null }, ...hiddenCommentNotices() }, data: { readAt: null } });
 }
 export async function markAllRead(user: Actor) {
-  await db.notification.updateMany({ where: { recipientId: user.id, readAt: null }, data: { readAt: new Date() } });
+  await db.notification.updateMany({ where: { recipientId: user.id, readAt: null, ...hiddenCommentNotices() }, data: { readAt: new Date() } }); // #128 D2
 }
 
 // ---- project activity (SHO-US-6.3, 14.14) ----
@@ -192,8 +201,19 @@ export async function projectActivity(user: Actor, projectId: string, cursor?: s
     where: { projectId, OR: [{ assigneeId: user.id }, { approverId: user.id }, { collaborators: { some: { userId: user.id } } }] },
     select: { id: true },
   })).map((t) => t.id);
+  // APL-2590 D1: with the switch off, leave out comment rows and the Undo rows that reversed one (before.action).
+  // The Undo rows are matched positively and excluded by id: inside a NOT, a row with no before.action makes the
+  // JSON test NULL and Postgres drops it, which hid older Undo rows too (QA #128 D3).
+  const hiddenUndoIds = commentsEnabled() ? [] : (await db.actionLog.findMany({
+    where: { projectId, action: "undo", beforeState: { path: ["action"], string_starts_with: COMMENT_ACTION_PREFIX } },
+    select: { id: true },
+  })).map((r) => r.id);
   const rows = await db.actionLog.findMany({
-    where: { projectId, ...(mine ? { targetType: "task", targetId: { in: mine } } : {}) },
+    where: {
+      projectId,
+      ...(mine ? { targetType: "task", targetId: { in: mine } } : {}),
+      ...(commentsEnabled() ? {} : { NOT: { action: { startsWith: COMMENT_ACTION_PREFIX } }, id: { notIn: hiddenUndoIds } }),
+    },
     orderBy: [{ createdAt: "desc" }, { id: "desc" }],
     take: limit + 1,
     ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
@@ -220,7 +240,7 @@ export async function projectActivity(user: Actor, projectId: string, cursor?: s
       via: r.channel === "CONCIERGE" ? "concierge" : "screen",
       // Undo stays on the row (AC5); an Editor can only undo their own actions, as the server enforces.
       undo: r.undoneAt ? "undone" : !isUndoable(r.action) || (!leader && r.actorId !== user.id) ? "none"
-        : Date.now() - r.createdAt.getTime() > UNDO_DAYS * 86400_000 ? "too_old" : "available",
+        : isTooOldToUndo(r.createdAt) ? "too_old" : "available",
     })),
     nextCursor: more ? page[page.length - 1].id : null,
   };
@@ -301,6 +321,8 @@ export async function updateName(user: Actor, name: string) {
 export async function changePassword(user: Actor, current: string, password: string) {
   const u = await db.user.findUniqueOrThrow({ where: { id: user.id } });
   if (!(await verifyPassword(current, u.passwordHash))) throw new ApiError(400, "Your current password is not correct.");
+  // SHO-US-23.5 AC3: keeping the emailed password is not setting your own.
+  if (u.tempPasswordAt && password === current) throw new ApiError(400, "Choose a new password. It cannot be the one we emailed you.");
   const keep = await currentSessionId();
   await db.$transaction([
     db.user.update({ where: { id: user.id }, data: { passwordHash: await hashPassword(password), tempPasswordAt: null } }),
@@ -334,13 +356,14 @@ export async function signOutOthers(user: Actor) {
 }
 
 // ---- retention ----
-export async function purgeOld() {
-  const now = Date.now();
-  const notes = await db.notification.deleteMany({ where: { createdAt: { lt: new Date(now - NOTE_DAYS * 86400_000) } } });
-  const cut = new Date();
+export async function purgeOld(now = new Date()) {
+  const ms = now.getTime();
+  const notes = await db.notification.deleteMany({ where: { createdAt: { lt: new Date(ms - NOTE_DAYS * 86400_000) } } });
+  const cut = new Date(ms);
   cut.setMonth(cut.getMonth() - LOG_MONTHS);
   const actions = await db.actionLog.deleteMany({ where: { createdAt: { lt: cut } } });
   const audits = await db.auditLog.deleteMany({ where: { createdAt: { lt: cut } } });
-  const sessions = await db.session.deleteMany({ where: { expiresAt: { lt: new Date(now - 7 * 86400_000) } } });
-  return { notifications: notes.count, actionLogs: actions.count, auditLogs: audits.count, sessions: sessions.count };
+  const sessions = await db.session.deleteMany({ where: { expiresAt: { lt: new Date(ms - 7 * 86400_000) } } });
+  const comments = await purgeExpiredComments(now);
+  return { notifications: notes.count, actionLogs: actions.count, auditLogs: audits.count, sessions: sessions.count, comments };
 }

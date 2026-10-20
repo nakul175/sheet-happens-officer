@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { createContext, useContext, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { createContext, useContext, useEffect, useRef, useState } from "react";
 import { ago, api, initials, useGet } from "@/components/api";
 import { ConciergeProvider, useConcierge } from "@/components/concierge/ConciergeProvider";
 import { ConciergeBar, ConciergeDock, ConciergeFab } from "@/components/concierge/Concierge";
@@ -9,7 +9,7 @@ import { Bell } from "./Bell";
 import { ConciergeHost, ConciergeNavItem, openConcierge } from "@/components/concierge/Launcher";
 import { Extras, NewTaskButton, SearchButton } from "@/components/extras/Extras";
 
-export type Me = { id: string; name: string; email: string; orgRole: "MEMBER" | "ADMIN" | "SUPER_ADMIN"; crm?: boolean; review?: boolean; compact?: boolean; startGuide?: boolean; tempPassword?: boolean };
+export type Me = { id: string; name: string; email: string; orgRole: "MEMBER" | "ADMIN" | "SUPER_ADMIN"; crm?: boolean; review?: boolean; compact?: boolean; startGuide?: boolean };
 const MeCtx = createContext<Me | null>(null);
 export const useMe = () => useContext(MeCtx)!;
 export const roleLabel = (r: Me["orgRole"]) => (r === "SUPER_ADMIN" ? "Super Admin" : r === "ADMIN" ? "Admin" : "Member");
@@ -24,11 +24,35 @@ function TabBar({ user, here, more }: { user: Me; here: (p: string) => boolean; 
   const box = useRef<HTMLDivElement>(null);
   useEffect(() => {
     // The keyboard hides the bar (a field has focus), so it never sits on top of what is being typed.
-    const on = (e: FocusEvent) => setTyping(!!(e.target as HTMLElement | null)?.matches?.("input:not([type=checkbox]):not([type=radio]), textarea, select"));
-    const off = () => setTyping(false);
-    document.addEventListener("focusin", on);
-    document.addEventListener("focusout", off);
-    return () => { document.removeEventListener("focusin", on); document.removeEventListener("focusout", off); };
+    // A pointer that starts while a field is focused keeps the bar hidden until pointerup: otherwise
+    // blur paints the bar back between pointerdown and pointerup and the bar swallows the click.
+    const field = (el: EventTarget | null) =>
+      !!(el as HTMLElement | null)?.matches?.("input:not([type=checkbox]):not([type=radio]), textarea, select");
+    let pointers = 0;
+    let hold = false;
+    const paint = () => setTyping(hold || field(document.activeElement));
+    const down = () => {
+      if (pointers === 0) hold = field(document.activeElement);
+      pointers += 1;
+      paint();
+    };
+    const up = () => {
+      pointers = Math.max(0, pointers - 1);
+      if (pointers === 0) hold = false;
+      paint();
+    };
+    document.addEventListener("focusin", paint);
+    document.addEventListener("focusout", paint);
+    document.addEventListener("pointerdown", down, true);
+    document.addEventListener("pointerup", up, true);
+    document.addEventListener("pointercancel", up, true);
+    return () => {
+      document.removeEventListener("focusin", paint);
+      document.removeEventListener("focusout", paint);
+      document.removeEventListener("pointerdown", down, true);
+      document.removeEventListener("pointerup", up, true);
+      document.removeEventListener("pointercancel", up, true);
+    };
   }, []);
   useEffect(() => {
     if (!open) return;
@@ -56,23 +80,6 @@ function TabBar({ user, here, more }: { user: Me; here: (p: string) => boolean; 
         ))}
         <button aria-expanded={open} aria-haspopup="menu" aria-current={moreHere ? "true" : undefined} onClick={() => setOpen((v) => !v)}><span aria-hidden>⋯</span>More</button>
       </nav>
-    </div>
-  );
-}
-
-/** SHO-US-15.3. A nudge, not a wall: the person was given a password and may keep it. */
-let barClosed = false; // fallback when sessionStorage is blocked
-const barListen = (cb: () => void) => { window.addEventListener("sho-pwbar", cb); return () => window.removeEventListener("sho-pwbar", cb); };
-const barIsClosed = () => { try { return barClosed || sessionStorage.getItem("sho_pwbar") === "1"; } catch { return barClosed; } };
-function SetPasswordBar() {
-  // The server snapshot is "closed", so the server and the first browser render match; the real answer follows.
-  const closed = useSyncExternalStore(barListen, barIsClosed, () => true);
-  if (closed) return null;
-  return (
-    <div className="pwbar" role="status">
-      <span>Set your own password. The emailed one still works until you do.</span>
-      <Link href="/profile">Change password</Link>
-      <button className="btn ghost sm" aria-label="Close this message" onClick={() => { barClosed = true; try { sessionStorage.setItem("sho_pwbar", "1"); } catch { /* ignore */ } window.dispatchEvent(new Event("sho-pwbar")); }}>×</button>
     </div>
   );
 }
@@ -148,7 +155,6 @@ export function Shell({ user, children }: { user: Me; children: React.ReactNode 
             <DensityToggle compact={compact} onChange={chooseDensity} />
             <Bell />
           </header>
-          {user.tempPassword && <SetPasswordBar />}
           {children}
         </div>
         <TabBar user={user} here={here} more={more} />

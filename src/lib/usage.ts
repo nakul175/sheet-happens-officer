@@ -4,8 +4,9 @@ import { db } from "@/lib/db";
 import { ApiError } from "@/lib/http";
 import type { Actor } from "@/lib/access";
 import { monthStartIST, nextMonthStartIST, weekStartIST } from "@/lib/concierge/dates";
-import { monthlyCeilingUsd, weeklyMessageCap, WARN_AT } from "@/lib/concierge/limits";
+import { monthlyCeilingConfigured, monthlyCeilingUsd, weeklyMessageCap, WARN_AT } from "@/lib/concierge/limits";
 import { QUICK_ACTIONS } from "@/lib/concierge/reads";
+import { percentUsedNumber } from "@/lib/usage-percent";
 
 export async function usageSummary(user: Actor, now = new Date()) {
   if (user.orgRole !== "SUPER_ADMIN") throw new ApiError(404, "Resource not found");
@@ -31,7 +32,9 @@ export async function usageSummary(user: Actor, now = new Date()) {
     monthStart: monthStart.toISOString(),
     weekStart: weekStart.toISOString(),
     resumesAt: nextMonthStartIST(now).toISOString(),
-    ceiling: { usd: ceiling, spendUsd: spend, percent: Math.round((spend / ceiling) * 1000) / 10, warnAtPercent: WARN_AT * 100, weeklyMessageCap: weeklyMessageCap() },
+    // percent is the whole number (0 when the screen shows "0%" or "<1%", or no ceiling is set). The screen prints percentUsedLabel, not this field.
+    // configured is false when MONTHLY_CEILING_USD is 0 or unset: usd is then the default safety cap, which still applies (APL-2950).
+    ceiling: { usd: ceiling, configured: monthlyCeilingConfigured(), spendUsd: spend, percent: percentUsedNumber(spend, ceiling), warnAtPercent: WARN_AT * 100, weeklyMessageCap: weeklyMessageCap() },
     month: {
       calls: month._count, inputTokens: month._sum.inputTokens ?? 0, outputTokens: month._sum.outputTokens ?? 0, costUsd: spend,
       messages: [...monthBy.values()].reduce((a, b) => a + b, 0),

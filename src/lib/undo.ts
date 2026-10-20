@@ -2,12 +2,14 @@
 // SHO-US-6.4: Undo from the stored before-state, with a conflict warning and "Undo anyway".
 import { db } from "@/lib/db";
 import { ApiError, notFound } from "@/lib/http";
-import { WORKERS, activeMember, projectAccess, requireManage, requireWrite, type Actor, type Tx } from "@/lib/access";
+import { WORKERS, activeMember, requireManage, requireWrite, type Actor, type Tx } from "@/lib/access";
 import { formatDueDate } from "@/lib/dates";
 import { auditTx, logAction, notify } from "@/lib/notify";
-import { deleteTask, restoreTask } from "@/lib/tasks";
-import { UNDO_DAYS, UNDO_LABELS, isUndoable } from "@/lib/undoable";
+import { deleteTask, recordAccess, restoreTask } from "@/lib/tasks";
+import { UNDO_LABELS, isTooOldToUndo, isUndoable } from "@/lib/undoable";
 import { undoRecord } from "@/lib/records";
+import { commentsEnabled, isCommentAction } from "@/lib/flags";
+import { assertCommentRoom } from "@/lib/comments";
 
 type Conflict = { field: string; before: unknown; after: unknown; now: unknown };
 type Plan = { conflicts: Conflict[]; apply: (tx: Tx) => Promise<void>; subject?: string; fields?: string };
@@ -15,11 +17,17 @@ type Plan = { conflicts: Conflict[]; apply: (tx: Tx) => Promise<void>; subject?:
 const norm = (v: unknown): unknown => (v instanceof Date ? v.toISOString() : v === undefined ? null : v);
 const same = (a: unknown, b: unknown) => JSON.stringify(norm(a)) === JSON.stringify(norm(b));
 const bad = (msg: string, extra?: Record<string, unknown>) => new ApiError(409, msg, extra);
+/** The 200-comment cap on an Undo restore is a conflict with the task's current state: 409, same message and code (AC17). */
+const roomForRestore = (client: Tx | typeof db, taskId: string, lock = false) =>
+  assertCommentRoom(client, taskId, lock).catch((e: unknown) => {
+    throw e instanceof ApiError && e.extra?.code === "too_many_comments" ? bad(e.message, e.extra) : e;
+  });
 
 /** Actions that sent a bell notice, so Undo can say the notice was already delivered (AC4). */
 const NOTIFYING = new Set([
   "task.created", "task.assigned", "task.sent_for_approval", "task.sent_back", "task.approver_changed", "task.collaborator_added",
   "task.collaborator_removed", "task.deleted", "project.archived", "member.added", "member.removed", "member.role_changed", "project.leader_changed",
+  "comment.added",
 ]);
 
 const FIELD_LABEL: Record<string, string> = {
@@ -140,9 +148,14 @@ async function plan(row: any, user: Actor, projectId: string): Promise<Plan> {
       return {
         conflicts: [], subject: t.title,
         apply: async (tx) => {
-          if (t.parentId) { await tx.task.update({ where: { id }, data: { completedAt: new Date(b.completedAt ?? Date.now()) } }); return; }
+          const stamp = new Date(b.completedAt ?? Date.now());
+          if (t.parentId) { await tx.task.update({ where: { id }, data: { completedAt: stamp } }); return; }
           const done = await tx.section.findFirstOrThrow({ where: { projectId, isDone: true } });
-          await tx.task.update({ where: { id }, data: { completedAt: new Date(b.completedAt ?? Date.now()), sectionId: done.id, previousSectionId: t.sectionId } });
+          await tx.task.update({ where: { id }, data: { completedAt: stamp, sectionId: done.id, previousSectionId: t.sectionId } });
+          // Subtasks that reopened with the parent close with it again, on the same completedAt (APL-2721).
+          // One ticked done on its own since then keeps its own completedAt. One moved to Trash since closes too:
+          // the reopen never lists a subtask that was already in Trash, so these ids are only ones it changed (APL-2870).
+          if (Array.isArray(f.subtaskIds) && f.subtaskIds.length) await tx.task.updateMany({ where: { id: { in: f.subtaskIds }, completedAt: null }, data: { completedAt: stamp } });
         },
       };
     }
@@ -153,6 +166,29 @@ async function plan(row: any, user: Actor, projectId: string): Promise<Plan> {
         apply: async (tx) => {
           if (!(await tx.section.findFirst({ where: { id: b.sectionId, projectId } }))) throw bad("The section it came from no longer exists.");
           await tx.task.update({ where: { id }, data: { sectionId: b.sectionId } });
+        },
+      };
+    }
+    case "comment.added": {
+      const commentId = String(f.commentId ?? "");
+      const c = await db.comment.findUnique({ where: { id: commentId } });
+      if (!c) throw bad("This comment no longer exists.");
+      if (c.removedAt) throw bad("This comment is already deleted.");
+      const task = await liveTask(id, projectId);
+      return { conflicts: [], subject: task.title, apply: async (tx) => { await tx.comment.update({ where: { id: commentId }, data: { removedAt: new Date() } }); } };
+    }
+    case "comment.removed": {
+      const commentId = String(f.commentId ?? "");
+      const c = await db.comment.findUnique({ where: { id: commentId } });
+      if (!c) throw bad("This comment no longer exists.");
+      if (!c.removedAt) throw bad("This comment is already back.");
+      const task = await liveTask(id, projectId);
+      await roomForRestore(db, c.taskId); // APL-2840: at 200 live comments the restore is refused with the cap message (409)
+      return {
+        conflicts: [], subject: task.title,
+        apply: async (tx) => {
+          await roomForRestore(tx, c.taskId, true);
+          await tx.comment.update({ where: { id: commentId }, data: { removedAt: null } });
         },
       };
     }
@@ -320,7 +356,12 @@ async function plan(row: any, user: Actor, projectId: string): Promise<Plan> {
           // Parents closed by the change reopen, and so do the subtasks that closed with them (SHO-BUG-3).
           const closed = [...(Array.isArray(f.completedTaskIds) ? f.completedTaskIds : []), ...(Array.isArray(f.completedSubtaskIds) ? f.completedSubtaskIds : [])];
           if (closed.length) await tx.task.updateMany({ where: { id: { in: closed } }, data: { completedAt: null } });
-          if (Array.isArray(b.reopenedTaskIds) && b.reopenedTaskIds.length) await tx.task.updateMany({ where: { id: { in: b.reopenedTaskIds }, completedAt: null }, data: { completedAt: new Date() } });
+          // One stamp, so a later move still treats these subtasks as closed with the parent (APL-2721).
+          // Every task the move reopened closes again, also one moved to Trash since: the move never lists a task
+          // that was already in Trash, so these ids are only tasks it changed (APL-2755).
+          const stamp = new Date();
+          if (Array.isArray(b.reopenedTaskIds) && b.reopenedTaskIds.length) await tx.task.updateMany({ where: { id: { in: b.reopenedTaskIds }, completedAt: null }, data: { completedAt: stamp } });
+          if (Array.isArray(b.reopenedSubtaskIds) && b.reopenedSubtaskIds.length) await tx.task.updateMany({ where: { id: { in: b.reopenedSubtaskIds }, completedAt: null }, data: { completedAt: stamp } });
         },
       };
     }
@@ -354,18 +395,23 @@ async function present(conflicts: Conflict[]) {
 async function prepare(user: Actor, logId: string) {
   const row = await db.actionLog.findUnique({ where: { id: logId } });
   if (!row) throw notFound("Action");
+  // APL-2590 D1: with the comments switch off, a comment row is the same 404 as an action that does not exist.
+  if (isCommentAction(row.action) && !commentsEnabled()) throw notFound("Action");
   const projectId = row.projectId;
   if (!projectId) throw bad("This kind of action cannot be undone.");
-  const a = await projectAccess(user, projectId);
+  const a = await recordAccess(user, projectId, "Action");
   requireWrite(a);
   const archiveKind = row.action === "project.archived" || row.action === "project.unarchived";
   if (a.project.archivedAt && !archiveKind) throw new ApiError(409, "This project is archived and read-only.");
   if (row.actorId !== user.id && a.role !== "LEADER") throw new ApiError(403, "You can only undo your own actions.");
+  // Already undone wins over the Leader/Admin check (APL-2655). An Editor who deleted the task
+  // otherwise gets 403 after a Leader has already undone that delete.
+  if (row.action === "task.deleted" && row.undoneAt) throw bad("This was already undone.");
   // Undoing a delete is a restore from Trash, so it takes the same Leader or Admin check (SHO-US-6.2 AC4, SHO-BUG-8).
   if (row.action === "task.deleted") requireManage(a);
   if (row.undoneAt) throw bad("This action was already undone.");
   if (!isUndoable(row.action)) throw bad("This kind of action cannot be undone.");
-  if (Date.now() - row.createdAt.getTime() > UNDO_DAYS * 86400_000) throw bad("Too old to undo", { tooOld: true });
+  if (isTooOldToUndo(row.createdAt)) throw bad("Too old to undo", { tooOld: true });
 
   const p = await plan(row, user, projectId);
   return { row, projectId, p };
@@ -406,9 +452,12 @@ export async function undoAction(user: Actor, logId: string, anyway = false) {
   await db.$transaction(async (tx) => {
     await p.apply(tx);
     await tx.actionLog.update({ where: { id: row.id }, data: { undoneAt: new Date(), undoneById: user.id } });
+    const commentId = (row.afterState as { commentId?: string } | null)?.commentId
+      ?? (row.beforeState as { commentId?: string } | null)?.commentId;
     await logAction(tx, {
       actorId: user.id, projectId, targetType: row.targetType as "task", targetId: row.targetId, action: "undo",
-      before: { undoes: row.id, action: row.action }, after: { undoes: row.id, label: UNDO_LABELS[row.action], anyway: anyway && p.conflicts.length > 0 },
+      before: { undoes: row.id, action: row.action, ...(commentId ? { commentId } : {}) },
+      after: { undoes: row.id, label: UNDO_LABELS[row.action], anyway: anyway && p.conflicts.length > 0, ...(commentId ? { commentId } : {}) },
     });
     if (anyway && p.conflicts.length) {
       const later = await tx.actionLog.findMany({ where: { targetType: row.targetType, targetId: row.targetId, createdAt: { gt: row.createdAt }, id: { not: row.id }, actorId: { not: user.id } }, select: { actorId: true } });

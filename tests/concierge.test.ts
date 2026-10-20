@@ -27,7 +27,7 @@ async function team() {
 describe("reads (8.2)", () => {
   useFakeModel();
 
-  it("quick actions: five plain queries, no model call, under a second, Trash excluded (AC1, AC3)", async () => {
+  it("quick actions: five plain queries, no model call, under a second, Trash excluded (AC1, AC3) qa:TC missing", async () => {
     delete process.env.MODEL_DATA_APPROVED; // proves they need no model at all
     const { lead, ed, p } = await team();
     const overdue = await task(lead, p.id, { title: "Late report", dueDate: istDate(-3) });
@@ -283,7 +283,7 @@ describe("propose and confirm (8.3)", () => {
     try {
       const err = await confirmCard(actor(lead), c.id).catch((e) => e);
       expect(spy).toHaveBeenCalledOnce();
-      expect(err).toMatchObject({ status: 409, message: "This task changed while you were editing it." });
+      expect(err).toMatchObject({ status: 409, message: `${ed.name} changed this task while you were editing it.` });
       expect(err.extra.stale).toBe(true);
       expect(err.extra.changedBy).toBe(ed.name);
     } finally {
@@ -651,12 +651,12 @@ describe("undo of a card (8.5)", () => {
   it("Undo stops working after 30 days (AC6)", async () => {
     const { lead, card } = await multi();
     await confirmCard(actor(lead), card.id);
-    const row = (await thread(lead.id)).find((m) => m.kind === "result")!;
+    const row = (await thread(actor(lead))).find((m) => m.kind === "result")!;
     const old = new Date(Date.now() - 31 * 86400_000).toISOString();
     const raw = JSON.parse((await db.chatMessage.findUniqueOrThrow({ where: { id: row.id } })).content);
     raw.internal.confirmedAt = old;
     await db.chatMessage.update({ where: { id: row.id }, data: { content: JSON.stringify(raw) } });
-    expect((await thread(lead.id)).find((m) => m.id === row.id)!.result!.undoExpired).toBe(true);
+    expect((await thread(actor(lead))).find((m) => m.id === row.id)!.result!.undoExpired).toBe(true);
     await expect(undoCard(actor(lead), card.id)).rejects.toMatchObject({ status: 409, message: "Too old to undo" });
   });
 
@@ -782,7 +782,7 @@ describe("privacy, clearing and retention (8.1, 8.8)", () => {
     expect((await u.c.patch("/api/concierge/preferences", { voiceNoticeAcked: false })).status).toBe(400);
   });
 
-  it("the quick-action route answers over HTTP without any model (8.2 AC3)", async () => {
+  it("the quick-action route answers over HTTP without any model (8.2 AC3) qa:TC missing", async () => {
     const u = await account("quicky");
     const p = await project(u, u);
     await task(u, p.id, { title: "Very late", dueDate: istDate(-4) });

@@ -5,6 +5,7 @@
 import { db } from "@/lib/db";
 import { isAdmin, type Actor } from "@/lib/access";
 import { WORKSTREAM_DEAL, crmProjectWhere, crmVisible } from "@/lib/crm";
+import { commentsEnabled } from "@/lib/flags";
 
 export async function search(user: Actor, q: string, includeArchived: boolean, ideasOnly = false) {
   const text = q.trim();
@@ -22,13 +23,28 @@ export async function search(user: Actor, q: string, includeArchived: boolean, i
     db.organisation.findMany({ where: { workspaceId: me.workspaceId, archivedAt: includeArchived ? undefined : null, name: { contains: text, mode: "insensitive" } }, orderBy: { name: "asc" }, take: 20, select: { id: true, name: true, kind: true } }),
     db.contact.findMany({ where: { workspaceId: me.workspaceId, removedAt: null, name: { contains: text, mode: "insensitive" } }, orderBy: { name: "asc" }, take: 20, select: { id: true, name: true, organisation: { select: { id: true, name: true } } } }),
   ]) : [[], []];
+  // Comment text is searchable only while ff_task_comments is on, and only inside projects the person can see.
+  // The hit is the task. The comment body is not copied into the result.
+  const commentTaskIds = commentsEnabled() ? [...new Set((await db.comment.findMany({
+    where: {
+      removedAt: null,
+      text: { contains: text, mode: "insensitive" },
+      task: { deletedAt: null, ...(ideasOnly ? { isIdea: true } : {}), project: visible },
+    },
+    select: { taskId: true },
+    take: 30,
+  })).map((c) => c.taskId))] : [];
+  const titleMatch = { contains: text, mode: "insensitive" as const };
+  const taskWhere = commentTaskIds.length
+    ? { deletedAt: null, ...(ideasOnly ? { isIdea: true } : {}), project: visible, OR: [{ title: titleMatch }, { id: { in: commentTaskIds } }] }
+    : { deletedAt: null, ...(ideasOnly ? { isIdea: true } : {}), title: titleMatch, project: visible };
   const [projects, tasks] = await Promise.all([
     db.project.findMany({
       where: { ...visible, name: { contains: text, mode: "insensitive" } },
       orderBy: { name: "asc" }, take: 20, select: { id: true, name: true, archivedAt: true, typeId: true },
     }),
     db.task.findMany({
-      where: { deletedAt: null, ...(ideasOnly ? { isIdea: true } : {}), title: { contains: text, mode: "insensitive" }, project: visible },
+      where: taskWhere,
       orderBy: [{ completedAt: { sort: "asc", nulls: "first" } }, { updatedAt: "desc" }], take: 30,
       select: { id: true, title: true, completedAt: true, isIdea: true, assignee: { select: { name: true } }, project: { select: { id: true, name: true, archivedAt: true } } },
     }),

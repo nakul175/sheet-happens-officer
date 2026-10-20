@@ -4,7 +4,7 @@
 // Fails when a hidden deal, its stage, its task or type DEAL shows up on GET /api/my-tasks.
 import "dotenv/config";
 import { spawn, type ChildProcess } from "node:child_process";
-import { closeSync, existsSync, mkdtempSync, openSync, readdirSync, readFileSync } from "node:fs";
+import { closeSync, existsSync, mkdtempSync, openSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import net from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -36,6 +36,8 @@ type ApiGroups = {
 };
 
 const running = new Map<Mode, Running>();
+/** Every outbox startModeServer made. afterAll removes them whether the test passes or fails (APL-2890). */
+const outboxes = new Set<string>();
 const signed: { editor?: string; admin?: string } = {};
 const LOAD = 40;
 const seed: { userIds: string[]; emails: string[]; projectIds: string[]; orgId?: string; dealId?: string; kickoffId?: string; contractId?: string; plainId?: string } = {
@@ -108,6 +110,7 @@ async function waitForHealth(port: number, child: ChildProcess, timeoutMs: numbe
 async function startModeServer(mode: Mode): Promise<Running> {
   const port = await freePort();
   const outbox = mkdtempSync(path.join(tmpdir(), `sho-apl2713-${mode}-`));
+  outboxes.add(outbox);
   const env: NodeJS.ProcessEnv = {
     ...process.env,
     NODE_ENV: "production",
@@ -210,6 +213,7 @@ describe("qa:TC missing CRM_VISIBLE modes hide handed-off deal tasks on a real s
   afterAll(async () => {
     try { await cleanupSeed(); } finally {
       for (const server of running.values()) killGroup(server.pid);
+      for (const dir of outboxes) rmSync(dir, { recursive: true, force: true, maxRetries: 3 });
     }
   });
 

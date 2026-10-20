@@ -2,6 +2,8 @@
 // day puts a notice in every Super Admin's bell. Jobs are triggered by the server's cron
 // through POST /api/jobs/<name> with the JOB_SECRET; nothing here is reachable from a session.
 import { timingSafeEqual } from "node:crypto";
+import type { Prisma } from "@/generated/prisma/client";
+import type { OrgRole } from "@/lib/access";
 import { db } from "@/lib/db";
 import { purgeOld } from "@/lib/feed";
 import { ApiError } from "@/lib/http";
@@ -11,12 +13,13 @@ import { purgeTrash } from "@/lib/tasks";
 import { startOfTodayIST } from "@/lib/dates";
 import { purgeChat } from "@/lib/concierge/thread";
 import { warnIfNearCeiling } from "@/lib/concierge/limits";
+import { crmMode, crmProjectWhere } from "@/lib/crm";
 
 type Job = { name: string; about: string; run: () => Promise<unknown> };
 
 export const JOBS: Job[] = [
-  { name: "purge-trash", about: "Removes tasks that have been in Trash for 30 days", run: () => purgeTrash() },
-  { name: "purge-old", about: "Removes notifications after 90 days and action and audit logs after 12 months", run: () => purgeOld() },
+  { name: "purge-trash", about: "Removes tasks that have been in Trash for more than 30 days, and soft-deleted comments once they are older than 30 days", run: () => purgeTrash() },
+  { name: "purge-old", about: "Removes notifications after 90 days, action and audit logs after 12 months, and soft-deleted comments once they are older than 30 days", run: () => purgeOld() },
   { name: "purge-chat", about: "Deletes concierge chat messages after 90 days", run: () => purgeChat() },
   { name: "concierge-budget", about: "Tells the Super Admin once a month when concierge spend reaches 80 percent of the ceiling", run: async () => ({ warned: await warnIfNearCeiling() }) },
   { name: "reminders", about: "Due-tomorrow, due-today and overdue reminders to the holder of each open task, 8:00 am India time", run: () => sendReminders() },
@@ -37,30 +40,62 @@ export function reminderFor(due: Date, today: Date): { type: "TASK_DUE_TOMORROW"
   return null;
 }
 
+/**
+ * Which open tasks may produce a reminder.
+ * `crmProjectWhere` is applied for the assignee: under `all` and unset it is empty, so this matches
+ * the previous project filter. Under `off` a deal is left out for every assignee. Under `admins` a
+ * deal is left out unless the assignee is an Admin or the Super Admin (APL-2729).
+ */
+export function reminderTaskWhere(today: Date): Prisma.TaskWhereInput {
+  const dueDate = { gte: new Date(today.getTime() - 28 * DAY_MS), lte: new Date(today.getTime() + DAY_MS) };
+  const open = { completedAt: null, deletedAt: null, blocked: false, dueDate };
+  // AND keeps `archivedAt` if a later crmProjectWhere returns its own archivedAt or OR.
+  const projectFor = (role: OrgRole): Prisma.ProjectWhereInput => ({
+    AND: [{ archivedAt: null }, crmProjectWhere({ orgRole: role })],
+  });
+  const mode = crmMode();
+  if (mode !== "admins") {
+    // off hides deals from every role, including the Super Admin. all (and unset) hides them from nobody.
+    return { ...open, project: projectFor(mode === "off" ? "SUPER_ADMIN" : "MEMBER") };
+  }
+  return {
+    ...open,
+    OR: [
+      { project: projectFor("MEMBER") },
+      // Named roles only. A future role must not receive deal reminders merely by not being a Member.
+      { project: projectFor("ADMIN"), assignee: { orgRole: { in: ["ADMIN", "SUPER_ADMIN"] } } },
+    ],
+  };
+}
+
+/** pg_advisory_xact_lock key for sendReminders. Distinct from the concierge budget key (4120801). */
+const REMINDERS_LOCK_KEY = 2749001;
+
 /** Holder = the assignee; while a task awaits approval the approver is the assignee (SHO-US-4.6). */
 export async function sendReminders(now = new Date()) {
   const today = startOfTodayIST(now);
   const tasks = await db.task.findMany({
-    where: {
-      completedAt: null, deletedAt: null, blocked: false, project: { archivedAt: null },
-      dueDate: { gte: new Date(today.getTime() - 28 * DAY_MS), lte: new Date(today.getTime() + DAY_MS) },
-    },
+    where: reminderTaskWhere(today),
     select: { id: true, title: true, projectId: true, assigneeId: true, dueDate: true, assignee: { select: { deactivatedAt: true } } },
   });
-  const already = await db.notification.findMany({
-    where: { type: { in: ["TASK_DUE_TOMORROW", "TASK_DUE_TODAY", "TASK_OVERDUE"] }, createdAt: { gte: today } },
-    select: { taskId: true, type: true },
+  // One transaction under an advisory lock: two overlapping runs cannot both find "not sent yet" (APL-2749).
+  return db.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(${REMINDERS_LOCK_KEY})`;
+    const already = await tx.notification.findMany({
+      where: { type: { in: ["TASK_DUE_TOMORROW", "TASK_DUE_TODAY", "TASK_OVERDUE"] }, createdAt: { gte: today } },
+      select: { taskId: true, type: true },
+    });
+    const done = new Set(already.map((n) => `${n.taskId}|${n.type}`));
+    const rows: { recipientId: string; type: string; taskId: string; projectId: string; data: { title: string; daysOverdue?: number } }[] = [];
+    for (const t of tasks) {
+      if (t.assignee.deactivatedAt || !t.dueDate) continue;
+      const r = reminderFor(t.dueDate, today);
+      if (!r || done.has(`${t.id}|${r.type}`)) continue;
+      rows.push({ recipientId: t.assigneeId, type: r.type, taskId: t.id, projectId: t.projectId, data: { title: t.title, ...(r.daysOverdue ? { daysOverdue: r.daysOverdue } : {}) } });
+    }
+    if (rows.length) await tx.notification.createMany({ data: rows });
+    return { sent: rows.length };
   });
-  const done = new Set(already.map((n) => `${n.taskId}|${n.type}`));
-  const rows: { recipientId: string; type: string; taskId: string; projectId: string; data: { title: string; daysOverdue?: number } }[] = [];
-  for (const t of tasks) {
-    if (t.assignee.deactivatedAt || !t.dueDate) continue;
-    const r = reminderFor(t.dueDate, today);
-    if (!r || done.has(`${t.id}|${r.type}`)) continue;
-    rows.push({ recipientId: t.assigneeId, type: r.type, taskId: t.id, projectId: t.projectId, data: { title: t.title, ...(r.daysOverdue ? { daysOverdue: r.daysOverdue } : {}) } });
-  }
-  if (rows.length) await db.notification.createMany({ data: rows });
-  return { sent: rows.length };
 }
 
 export function requireJobSecret(req: Request) {

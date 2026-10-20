@@ -2,7 +2,9 @@
 // gives the same list. Grouping by person or week is only a layout and happens in the browser.
 import { db } from "@/lib/db";
 import { projectAccess, type Actor } from "@/lib/access";
+import { blockingTaskWhere } from "@/lib/deals";
 import { startOfTodayIST } from "@/lib/dates";
+import { attachCommentCounts } from "@/lib/comments";
 import { ORDER, awaiting, present, taskInclude } from "@/lib/tasks";
 
 export const PRIORITIES = ["LOW", "MEDIUM", "HIGH", "URGENT"] as const;
@@ -50,26 +52,30 @@ export async function listFiltered(user: Actor, projectId: string, f: ListFilter
     take: CAP + 1,
   });
   const kept = (f.flags.includes("awaiting") ? rows.filter(awaiting) : rows).slice(0, CAP);
-  const out = sections.map((s) => {
+  const out = [];
+  for (const s of sections) {
     const mine = kept.filter((t) => t.sectionId === s.id);
     if (s.isDone) mine.sort((x, y) => (y.completedAt?.getTime() ?? 0) - (x.completedAt?.getTime() ?? 0));
-    return { id: s.id, name: s.name, isDone: s.isDone, total: mine.length, tasks: mine.map((t) => present(t, viewer)), nextCursor: null };
-  });
+    out.push({ id: s.id, name: s.name, isDone: s.isDone, total: mine.length, tasks: await attachCommentCounts(mine.map((t) => present(t, viewer))), nextCursor: null });
+  }
   return { sections: out, filtered: true, truncated: rows.length > CAP, matched: kept.length };
 }
 
-/** Counts for the heading ("3 overdue"): open top-level tasks of the project. */
+/** Counts for the heading ("3 overdue"): open top-level tasks of the project.
+ * `openTasks` counts every open task, including subtasks, which is the set a Won or Lost move refuses. */
 export async function projectSummary(user: Actor, projectId: string) {
   await projectAccess(user, projectId);
   const today = startOfTodayIST();
-  const open = await db.task.findMany({
-    where: { projectId, parentId: null, deletedAt: null, completedAt: null },
-    select: { dueDate: true, blocked: true, approverId: true, assigneeId: true },
+  const rows = await db.task.findMany({
+    where: blockingTaskWhere(projectId),
+    select: { parentId: true, dueDate: true, blocked: true, approverId: true, assigneeId: true },
   });
+  const open = rows.filter((t) => !t.parentId);
   return {
     open: open.length,
     overdue: open.filter((t) => t.dueDate && t.dueDate < today).length,
     blocked: open.filter((t) => t.blocked).length,
     awaiting: open.filter((t) => t.approverId && t.approverId === t.assigneeId).length,
+    openTasks: rows.length,
   };
 }

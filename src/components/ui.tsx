@@ -12,7 +12,7 @@ export function keyboardFrame(vv: { height: number; offsetTop: number } | null |
 }
 
 /** Centred dialog over a dimmed page. Escape and the dim area close it; focus moves in and returns. */
-export function Modal({ onClose, small, label, fitKeyboard, children }: { onClose: () => void; small?: boolean; label: string; fitKeyboard?: boolean; children: React.ReactNode }) {
+export function Modal({ onClose, small, label, describedBy, fitKeyboard, children }: { onClose: () => void; small?: boolean; label: string; describedBy?: string; fitKeyboard?: boolean; children: React.ReactNode }) {
   const ref = useRef<HTMLDivElement>(null);
   const scrim = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -59,7 +59,7 @@ export function Modal({ onClose, small, label, fitKeyboard, children }: { onClos
   }, [fitKeyboard]);
   return (
     <div className="scrim" data-testid="modal-scrim" ref={scrim} onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className={`modal${small ? " sm" : ""}`} role="dialog" aria-modal="true" aria-label={label} tabIndex={-1} ref={ref} style={{ outline: "none" }}>
+      <div className={`modal${small ? " sm" : ""}`} role="dialog" aria-modal="true" aria-label={label} aria-describedby={describedBy} tabIndex={-1} ref={ref} style={{ outline: "none" }}>
         {children}
       </div>
     </div>

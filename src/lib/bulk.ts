@@ -149,10 +149,29 @@ async function loadOpenUndoRows(ids: string[]) {
   return rows;
 }
 
+/** APL-2875: a row in a project the caller cannot see is skipped like a missing id, so the answer does not reveal it exists. */
+async function canSee(user: Actor, projectId: string | null) {
+  if (!projectId) return true;
+  try {
+    await projectAccess(user, projectId);
+    return true;
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 404) return false;
+    throw e;
+  }
+}
+
 /** One Undo for a whole bulk change. All of it is checked first; rows already reversed are skipped, so a retry finishes the rest. */
 export async function undoMany(user: Actor, ids: string[], anyway = false) {
   const rows = await loadOpenUndoRows(ids);
-  const todo = rows.filter((r) => isUndoable(r.action));
+  const seen = new Map<string, boolean>();
+  const todo = [];
+  for (const r of rows) {
+    if (!isUndoable(r.action)) continue;
+    const key = r.projectId ?? "";
+    if (!seen.has(key)) seen.set(key, await canSee(user, r.projectId));
+    if (seen.get(key)) todo.push(r);
+  }
   if (!todo.length) throw new ApiError(409, "This was already undone.");
   if (!anyway) for (const r of todo) await checkUndo(user, r.id);
   let noticed = false;

@@ -3,6 +3,7 @@
 // the cells are only read-only here when the server would refuse anyway (see `inlineEditable`).
 import { useEffect, useRef, useState } from "react";
 import { PRIORITY, api, dueState, isOverdue, todayIST } from "@/components/api";
+import { conflictActor, errorMessage, isVersionConflict } from "@/lib/version-error";
 import { Pri } from "@/components/TaskParts";
 import "./inline.css";
 
@@ -31,11 +32,11 @@ export function useInlineEdit(onChanged: () => void) {
       : await api("PATCH", `/api/tasks/${t.id}`, { ...change.patch, expectedUpdatedAt: t.updatedAt });
     setBusy(false);
     if (r.ok) { setErr(null); setStale(null); onChanged(); return; }
-    if (r.status === 409 && r.data.stale) {
-      setStale({ taskId: t.id, title: t.title, who: r.data.changedBy ?? "Someone", change, what });
+    if (isVersionConflict(r.status, r.data)) {
+      setStale({ taskId: t.id, title: t.title, who: conflictActor(r.error), change, what });
       setErr(null);
       onChanged();
-    } else setErr(r.error ?? "Could not save the change.");
+    } else setErr(errorMessage(r.error, "Could not save the change."));
   }
   /** Re-apply the refused edit on top of the task's current version. */
   async function reapply() {
@@ -90,9 +91,11 @@ export function InlineCells({ t, people, editable, onEdit }: { t: Cell; people: 
   const pick = (c: Change, what: string) => { close(); onEdit(t, c, what); };
   const stop = (e: React.SyntheticEvent) => e.stopPropagation();
   // APL-2673: ic-gap and ic-hit pick up the phone hit-area gaps in app.css.
+  // APL-2770: a long assignee name is cut short with an ellipsis (ic-who in inline.css); the full name stays in the title.
+  const tip = (k: "who" | "due" | "pri") => (k === "who" ? t.assignee.name : undefined);
   const cell = (k: "who" | "due" | "pri", text: React.ReactNode, cls: string | undefined, aria: string) => editable ? (
     <span className="ic-wrap ic-gap" onClick={stop}>
-      <button ref={refs[k]} type="button" className={`ic-cell ic-hit${cls ? ` ${cls}` : ""}`} aria-haspopup="dialog" aria-expanded={open === k} aria-label={aria}
+      <button ref={refs[k]} type="button" className={`ic-cell ic-hit${cls ? ` ${cls}` : ""}`} aria-haspopup="dialog" aria-expanded={open === k} aria-label={aria} title={tip(k)}
         onClick={(e) => { e.stopPropagation(); setOpen(open === k ? null : k); }}>{text}</button>
       {open === k && k === "who" && (
         <Pop label="Choose assignee" onClose={close}>
@@ -116,10 +119,10 @@ export function InlineCells({ t, people, editable, onEdit }: { t: Cell; people: 
         </Pop>
       )}
     </span>
-  ) : <span className={cls}>{text}</span>;
+  ) : <span className={cls} title={tip(k)}>{text}</span>;
   return (
     <>
-      {cell("who", t.assignee.name, undefined, `Assignee ${t.assignee.name}. Change`)}
+      {cell("who", t.assignee.name, "ic-who", `Assignee ${t.assignee.name}. Change`)}
       {cell("pri", <Pri p={t.priority} />, undefined, `Priority ${PRIORITY[t.priority]}. Change`)}
       {cell("due", dueState(t.dueDate, !!t.completedAt), !t.completedAt && isOverdue(t.dueDate) ? "over" : undefined, `Due date ${dueState(t.dueDate, !!t.completedAt)}. Change`)}
     </>

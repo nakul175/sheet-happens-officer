@@ -100,9 +100,11 @@ const anthropic: ModelProvider = {
       body: JSON.stringify({
         model: cfg.model,
         max_tokens: req.maxTokens,
+        // An empty text block is rejected outright. Improve my prompt has no per-day line, and that
+        // rejection was reported as the language service being down (APL-2694). A real per-day line is still sent.
         system: [
           { type: "text", text: req.system.stable, cache_control: { type: "ephemeral" } },
-          { type: "text", text: req.system.dynamic },
+          ...(req.system.dynamic.trim() ? [{ type: "text", text: req.system.dynamic }] : []),
         ],
         ...(tools.length ? { tools } : {}),
         messages: req.messages,

@@ -61,10 +61,13 @@ async function openPerson() {
   await act(async () => {
     root!.render(<Person />);
   });
-  for (let i = 0; i < 20; i++) {
+  // Real requests (the 404 case) take longer than a handful of microtasks. Stop once the page
+  // has an answer; keep going when it is still the bare shell.
+  for (let i = 0; i < 40; i++) {
     await act(async () => {
-      await new Promise((r) => setTimeout(r, 0));
+      await new Promise((r) => setTimeout(r, i < 5 ? 0 : 25));
     });
+    if (document.body.querySelector("[role=alert], table.tbl, .hint, .pwbar")) break;
   }
   return document.body;
 }
@@ -297,7 +300,7 @@ describe("Person page shows a plain state for each failure", () => {
     const page = await openPerson();
     const text = page.textContent ?? "";
     expect(text).toContain("Set your own password");
-    expect(text).toContain("The emailed one still works until you do.");
+    expect(text).not.toContain("still works"); // AC7 of APL-2624: the emailed password is temporary
     expect(page.querySelector("a[href='/profile']")?.textContent).toBe("Change password");
     expect(text).not.toContain(NO_ACCESS);
     expect(page.innerHTML).not.toContain(P2_NAME);

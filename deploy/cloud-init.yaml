@@ -36,7 +36,7 @@ write_files:
   # A record for this name points at the droplet.
   - path: /etc/sho/Caddyfile
     content: |
-      app.sheethappensofficer.com {
+      sheethappensofficer.aplyd.org {
         encode gzip
         reverse_proxy 127.0.0.1:3000
       }

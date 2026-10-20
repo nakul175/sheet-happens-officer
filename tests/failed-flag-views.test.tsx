@@ -206,9 +206,9 @@ describe("In-scope views use useGet's .failed flag", () => {
     }
   });
 
-  // qa:TC-APL2665-ae74af03@v1 · AC3. No old status check in the four files.
-  // api.ts stays with APL-2663: on this stack the hook differs from main, and those commits name APL-2663.
-  it("qa:TC-APL2665-ae74af03@v1 no old status check left in the 4 files", () => {
+  // qa:TC-APL2665-ae74af03@v2 · AC3. No old status check in the four files.
+  // The useGet hook in api.ts stays with APL-2663: a branch that changes the hook names APL-2663 in its commits.
+  it("qa:TC-APL2665-ae74af03@v2 no old status check left in the 4 files", () => {
     for (const file of FILES) {
       const src = readFileSync(file, "utf8");
       expect(src, file).toMatch(/\.failed/);
@@ -223,10 +223,19 @@ describe("In-scope views use useGet's .failed flag", () => {
       changed = null;
     }
     if (changed?.includes("src/components/api.ts")) {
-      // This stack is APL-2663, so the hook may differ from main. The commits that
-      // touch it are that issue's, which is what "stays with APL-2663" requires.
-      const subjects = execFileSync("git", ["log", "--format=%s", "origin/main..HEAD", "--", "src/components/api.ts"], { encoding: "utf8" });
-      expect(subjects, "src/components/api.ts stays with APL-2663").toMatch(/APL-2663/);
+      // Only a change to the useGet hook must be APL-2663's. Another issue may change the rest of api.ts
+      // (APL-2652 changes the 401 redirect), so compare the hook with the merge base, not the whole file.
+      const base = execFileSync("git", ["merge-base", "origin/main", "HEAD"], { encoding: "utf8" }).trim();
+      const hookOf = (src: string) => {
+        const at = src.indexOf("export function useGet");
+        expect(at, "src/components/api.ts still exports useGet").toBeGreaterThanOrEqual(0);
+        return src.slice(at);
+      };
+      const before = hookOf(execFileSync("git", ["show", `${base}:src/components/api.ts`], { encoding: "utf8" }));
+      if (hookOf(readFileSync("src/components/api.ts", "utf8")) !== before) {
+        const subjects = execFileSync("git", ["log", "--format=%s", "origin/main..HEAD", "--", "src/components/api.ts"], { encoding: "utf8" });
+        expect(subjects, "the useGet hook in src/components/api.ts stays with APL-2663").toMatch(/APL-2663/);
+      }
     }
   });
 
