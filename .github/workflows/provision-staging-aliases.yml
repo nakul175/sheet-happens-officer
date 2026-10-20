@@ -1,0 +1,109 @@
+# APL-2748. Creates the missing nakul17+zz-qa-* pool aliases (22 slots of 3 = 66) on staging, and nowhere else.
+# Started by hand only (Actions > Provision staging aliases > Run workflow). Never on push, pull_request or
+# pull_request_target, so a fork cannot read these secrets.
+#
+# Runs tests/e2e/tools/provision-aliases.ts --create. It signs up each pool Member that does not exist yet; an address
+# that already exists is skipped and left as it is. It prints three counts (created, skipped, failed) and never an address
+# or a password. The job fails when any sign-up fails or the counts do not add up to 66. A second run creates 0.
+#
+# Target: https://staging.sheethappensofficer.com, fixed here. There is no repository variable or free-text input for
+# it, the "environment" input has one choice (staging), and both this workflow and the script refuse any other host,
+# a pr1-pr4 preview and production included. The script talks to staging's public API only: no database connection.
+#
+# Created accounts are unverified. Staging mails a Verify link for each one to nakul17@aplyd.com; follow them, then run
+# the script without --create (see its header) or Staging regression's read-only check to confirm the pool is ready.
+#
+# Secrets (repository settings that staging-regression.yml already uses; this workflow adds none):
+#   STAGING_USER, STAGING_PASS   the basic-auth gate in front of staging
+#   SHO_QA_PASS                  the password every alias is created with
+# They reach the one step that needs them through env: only. They are never echoed or written to a file.
+name: Provision staging aliases
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Target. Staging is the only choice."
+        required: true
+        default: staging
+        type: choice
+        options: ["staging"]
+
+permissions:
+  contents: read
+
+# The same group as staging-e2e.yml and staging-regression.yml: all of them use the alias pool on staging.
+concurrency:
+  group: staging-e2e
+  cancel-in-progress: false
+
+env:
+  BASE_URL: https://staging.sheethappensofficer.com
+  # Only for `prisma generate` during npm ci; nothing connects to it.
+  DATABASE_URL: postgresql://unused:unused@127.0.0.1:1/unused
+  DIRECT_DATABASE_URL: postgresql://unused:unused@127.0.0.1:1/unused
+
+jobs:
+  provision-staging-aliases:
+    name: provision-staging-aliases
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check the target is staging
+        env:
+          TARGET_ENV: ${{ inputs.environment }}
+        run: |
+          if [ "$TARGET_ENV" != "staging" ]; then
+            echo "::error::Refusing environment '$TARGET_ENV': this workflow runs against staging only."; exit 1
+          fi
+          if ! [[ "$BASE_URL" =~ ^https://([^/:]+)/?$ ]]; then
+            echo "::error::BASE_URL must be https://<host> with no path."; exit 1
+          fi
+          host="${BASH_REMATCH[1],,}"
+          if [[ "$host" =~ ^((www\.|app\.)?sheethappensofficer\.com|sheethappensofficer\.aplyd\.org|168\.144\.144\.69)\.?$ ]]; then
+            echo "::error::Refusing to run against production ($host)."; exit 1
+          fi
+          if [ "$host" != "staging.sheethappensofficer.com" ]; then
+            echo "::error::Refusing host '$host': only staging.sheethappensofficer.com."; exit 1
+          fi
+          echo "Target: https://$host"
+
+      - name: Check the secrets are set (names only, never values)
+        env:
+          STAGING_USER: ${{ secrets.STAGING_USER }}
+          STAGING_PASS: ${{ secrets.STAGING_PASS }}
+          SHO_QA_PASS: ${{ secrets.SHO_QA_PASS }}
+        run: |
+          missing=""
+          for n in STAGING_USER STAGING_PASS SHO_QA_PASS; do
+            [ -n "${!n}" ] || missing="$missing $n"
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::Missing repository secrets:$missing. Add them in Settings > Secrets and variables > Actions."
+            exit 1
+          fi
+          echo "All required secrets are set."
+
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+
+      - name: Create the missing aliases (counts only)
+        env:
+          STAGING_USER: ${{ secrets.STAGING_USER }}
+          STAGING_PASS: ${{ secrets.STAGING_PASS }}
+          SHO_QA_PASS: ${{ secrets.SHO_QA_PASS }}
+        # The script refuses any host but staging.sheethappensofficer.com on its own as well. It prints
+        # "created N, skipped N, failed N, total N of 66" and exits non-zero on any failure or a total other than 66.
+        run: |
+          rc=0
+          out="$(npx tsx tests/e2e/tools/provision-aliases.ts --create)" || rc=$?
+          printf '%s\n' "$out"
+          {
+            echo "## Provision staging aliases ($BASE_URL)"
+            printf '%s\n' "$out" | tail -n 1
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$rc"
