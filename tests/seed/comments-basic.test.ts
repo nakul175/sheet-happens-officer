@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { db } from "../../src/lib/db";
-import { guard, seedCommentsBasic } from "../../scripts/seed-apl2590-fixtures";
+import { guard, seedCommentsBasic, STAGING_DB_HOSTS } from "../../scripts/seed-apl2590-fixtures";
 
 const SCRIPT = path.join(process.cwd(), "scripts/seed-apl2590-fixtures.ts");
 const PASS = "seed-pass-9";
@@ -70,8 +70,20 @@ describe("comments-basic seed", () => {
     expect(guard(env(listed), ["staging-db.zz-test.local"])).toBe("staging");
     expect(() => guard(env({ ...listed, DATABASE_URL: listed.DATABASE_URL.replace("/sho_staging", "/sho_test") }), ["staging-db.zz-test.local"])).toThrow(/Refusing/);
     expect(() => guard(env({ ...listed, DATABASE_URL: listed.DATABASE_URL.replace("staging-db.zz-test.local", "other.zz-test.local") }), ["staging-db.zz-test.local"])).toThrow(/Refusing/);
-    expect(() => guard(env(listed))).toThrow(/Refusing/); // no staging host is on the built-in list
+    expect(() => guard(env(listed))).toThrow(/Refusing/); // staging-db.zz-test.local is not on the built-in list
     expect(guard(env())).toBe("test");
+  });
+
+  // pr8 seed host (Dwight 13:46, 20 Oct): the built-in list holds exactly the pr8/staging host, and only with sho_staging.
+  it("qa:TC missing D-pr8: the built-in staging list accepts only the pr8 host with sho_staging", () => {
+    const PR8 = "private-sho-db-do-user-45345612-0.k.db.ondigitalocean.com";
+    expect(STAGING_DB_HOSTS).toEqual([PR8]);
+    const at = (host: string, db: string) => env({ SEED_TARGET: "staging", DATABASE_URL: `postgresql://${host}/${db}` });
+    expect(guard(at(PR8, "sho_staging"))).toBe("staging");
+    expect(() => guard(at(PR8, "defaultdb"))).toThrow(/Production-like target. Refusing/);
+    expect(() => guard(at(PR8, "sho_test"))).toThrow(/not an allowed staging DB/);
+    for (const other of ["other-sho-db-do-user-45345612-0.k.db.ondigitalocean.com", "staging.internal", "localhost"])
+      expect(() => guard(at(other, "sho_staging")), other).toThrow(/is not an allowed staging DB host/);
   });
 
   it("qa:TC-APL2590-7662ffd7@v2: comments-basic creates the ZZ-TEST Ops fixture and can be run again", async () => {

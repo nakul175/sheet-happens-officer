@@ -12,10 +12,11 @@ const PROD_HOSTS = ["139.59.45.166", "sho.139-59-45-166.sslip.io", "168.144.144.
 const ALLOWED_DB: Record<string, string[]> = { test: ["sho_test"], staging: ["sho_staging"] };
 const LOCAL_HOSTS = ["localhost", "127.0.0.1", "::1"];
 /**
- * The staging database hosts the seed may write to, matched exactly. Empty on purpose: the staging database shares
- * its cluster with production (staging-e2e.yml), so a staging seed needs the exact host added here in a reviewed change.
+ * The staging database hosts the seed may write to, matched exactly. It holds the pr8/staging host only, added with
+ * Dwight's approval on 20 Oct. The staging database shares its cluster with production (staging-e2e.yml), so any other
+ * host needs its own reviewed change. The DB name must still be sho_staging (ALLOWED_DB).
  */
-export const STAGING_DB_HOSTS: readonly string[] = [];
+export const STAGING_DB_HOSTS: readonly string[] = ["private-sho-db-do-user-45345612-0.k.db.ondigitalocean.com"];
 const QUERY_OVERRIDES = new Set(["host", "hostaddr", "dbname"]);
 
 export function guard(env: Record<string, string | undefined> = process.env, stagingHosts: readonly string[] = STAGING_DB_HOSTS): string {
