@@ -102,7 +102,7 @@ async function setOwn(page: Page, emailed: string, next: string) {
   await page.getByRole("button", { name: "Save and continue" }).click();
 }
 
-test.describe("qa:TC missing APL-2624 a Super-Admin-issued password must be changed at first sign-in", () => {
+test.describe("qa:TC missing APL-2624 a Super-Admin-issued password must be changed at first sign-in", { tag: "@local-only" }, () => {
   // The browser is Playwright's own (playwright.config.ts: PW_CHROMIUM or the installed Chromium).
   test.beforeAll(async ({ browser: b }) => {
     test.setTimeout(180000);

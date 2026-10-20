@@ -77,7 +77,7 @@ async function openTask(page: Page, title: string) {
   return page.getByRole("dialog", { name: "Task" });
 }
 
-test.describe("qa:TC missing APL-2721 done flag on the project page", () => {
+test.describe("qa:TC missing APL-2721 done flag on the project page", { tag: "@local-only" }, () => {
   test.describe.configure({ timeout: 180000 });
   test("qa:TC missing cascaded subtasks reopen with their parent", async () => {
     const proj = await zzProject();

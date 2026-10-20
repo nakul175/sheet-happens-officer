@@ -68,7 +68,7 @@ const metrics = (el: Locator) => el.evaluate((e) => {
   };
 });
 
-test.describe("qa:TC missing APL-2737 a 300-character blocked reason is fully readable on a phone sheet", () => {
+test.describe("qa:TC missing APL-2737 a 300-character blocked reason is fully readable on a phone sheet", { tag: "@local-only" }, () => {
   test("qa:TC missing AC1: at 320 px the title does not scroll sideways and the 300-character reason is not clipped vertically", async () => {
     expect(TITLE).toHaveLength(150);
     expect(REASON).toHaveLength(300);
