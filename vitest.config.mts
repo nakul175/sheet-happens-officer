@@ -26,6 +26,7 @@ export default defineConfig({
       "tests/jobs-reminders-crm-server.test.ts",
       "tests/jobs-stalled-crm-server.test.ts",
       "tests/e2e/local/APL-2728.test.ts",
+      "tests/e2e/stories/APL-2735.spec.ts",
       "tests/e2e/local/APL-2609.spec.ts",
       "e2e/**",
       "scripts/**",

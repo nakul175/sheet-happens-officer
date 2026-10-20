@@ -98,7 +98,7 @@ describe("qa:TC missing AC2: sendMail logs a Resend rejection without secrets", 
   it("qa:TC missing AC2: a 403 from Resend throws MailError and logs status, error name and message only", async () => {
     vi.stubEnv("RESEND_API_KEY", FAKE_KEY);
     vi.stubGlobal("fetch", vi.fn(async () => Response.json(
-      { statusCode: 403, name: "validation_error", message: "The sheethappensofficer.com domain is not verified." },
+      { statusCode: 403, name: "validation_error", message: "The sheethappensofficer.aplyd.org domain is not verified." },
       { status: 403 },
     )));
     const log = vi.spyOn(console, "error").mockImplementation(() => {});
@@ -110,7 +110,7 @@ describe("qa:TC missing AC2: sendMail logs a Resend rejection without secrets", 
     const line = log.mock.calls[0].join(" ");
     expect(line).toContain("HTTP 403");
     expect(line).toContain("validation_error");
-    expect(line).toContain("The sheethappensofficer.com domain is not verified.");
+    expect(line).toContain("The sheethappensofficer.aplyd.org domain is not verified.");
     expect(line).not.toContain(FAKE_KEY);
     expect(line).not.toContain("SECRET-TOKEN-123");
     expect(line).not.toContain(MAIL.to);
