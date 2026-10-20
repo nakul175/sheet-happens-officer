@@ -10,7 +10,7 @@ jobs:
   compare:
     runs-on: ubuntu-latest
     env:
-      HOST: ${{ vars.DROPLET_HOST || 'app.sheethappensofficer.com' }}
+      HOST: ${{ vars.DROPLET_HOST || 'sheethappensofficer.aplyd.org' }}
       HOST_KEY: ${{ vars.DROPLET_HOST_KEY }}
     steps:
       - uses: actions/checkout@v4
