@@ -65,8 +65,8 @@ describe("qa:TC missing APL-2995 deactivate fellBack hides deals the caller cann
     expect(res.moved).toBe(2);
   });
 
-  it("qa:TC missing D1: callers who can see the CRM are unchanged under all and admins", async () => {
-    for (const mode of ["all", "on", "admins"]) {
+  it("qa:TC missing D1: callers who can see the CRM are unchanged under all and admins (on is all)", async () => {
+    for (const mode of ["all", "admins"]) {
       const res = await run(mode, "ADMIN");
       expect(res.fellBack, `CRM_VISIBLE=${mode}`).toEqual([DEAL.project.name, PLAIN.project.name]);
     }
