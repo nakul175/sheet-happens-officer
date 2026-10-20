@@ -6,6 +6,10 @@ import { configDefaults, defineConfig } from "vitest/config";
 // CRM_VISIBLE mode servers need a production build and one process per mode, so they stay out of `npm test`.
 // Run them with `npm run test:crm-modes`, `npm run test:reminder-modes` or `npm run test:stalled-modes`. CI runs all three after the build.
 // APL-2669.spec.ts, APL-2670.spec.ts, APL-2733.spec.ts, APL-2609.spec.ts, APL-2720.spec.ts, APL-2674.spec.ts, APL-2471.spec.ts and APL-2748.spec.ts are Playwright stories. Vitest's default include matches *.spec.ts, so they are excluded here.
+// APL-2917. Vitest rewrites BASE_URL to "/" in the test workers. This file runs first, so it hands the starting value to
+// tests/e2e/base-url.ts as SHO_E2E_START_BASE_URL ("" when unset). Only that one variable is copied.
+const startBaseUrl = process.env.BASE_URL ?? "";
+
 export default defineConfig({
   resolve: { alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) } },
   // scripts/** holds node:test files (assert-playwright-ran.test.mjs). Vitest's default
@@ -14,6 +18,7 @@ export default defineConfig({
   test: {
     testTimeout: 30000,
     fileParallelism: false,
+    env: { SHO_E2E_START_BASE_URL: startBaseUrl },
     exclude: [
       ...configDefaults.exclude,
       "tests/viewport/**",

@@ -2,10 +2,10 @@
 // Vitest specs import assertStoryTargetAllowed. Vitest rewrites the live BASE_URL to "/"
 // before a spec file loads, so the guard reads the value from process start and this module
 // does not throw while Vitest is loading it.
-// The value from process start is still in the process image (on Linux, /proc/self/environ).
-// If that image cannot be read, the original value is hidden and the guard fails closed.
+// vitest.config.mts runs before that rewrite and copies the starting value into SHO_E2E_START_BASE_URL
+// (APL-2917). Only named variables are read from process.env; the environment is never read as a whole.
+// If that copy is missing under Vitest, the original value is hidden and the guard fails closed.
 // TASKBOARD_URL and STAGING_URL are read from the live environment. The rewritten slot is not.
-import { readFileSync } from "node:fs";
 
 const PRODUCTION_HOSTS = new Set([
   "sheethappensofficer.com",
@@ -17,31 +17,20 @@ const PRODUCTION_HOSTS = new Set([
 const UNREADABLE = "Refusing to run: the starting BASE_URL could not be read.";
 
 export type StartingBaseUrl = {
-  platform: NodeJS.Platform;
-  /** Process image, or null when it cannot be read. Ignored off Linux. */
-  environ: Buffer | null;
   underVitest: boolean;
+  /** SHO_E2E_START_BASE_URL, or undefined when vitest.config.mts did not set it. Read only under Vitest. */
+  captured: string | undefined;
   liveBaseUrl: string | undefined;
 };
-
-function baseUrlFromEnviron(environ: Buffer): string | undefined {
-  const marker = "BASE_URL=";
-  for (const entry of environ.toString("latin1").split("\0")) {
-    if (!entry.startsWith(marker)) continue;
-    const value = entry.slice(marker.length);
-    return value === "" ? undefined : value;
-  }
-  return undefined;
-}
 
 /**
  * BASE_URL as it was when the process started.
  * Throws, without quoting any value, when that original value cannot be known.
- * An absent BASE_URL in a readable process image is known: it was not set.
+ * An empty captured value is known: BASE_URL was not set.
  */
 export function startingBaseUrl(input: StartingBaseUrl): string | undefined {
-  if (input.platform === "linux" && input.environ) {
-    return baseUrlFromEnviron(input.environ);
+  if (input.underVitest && input.captured !== undefined) {
+    return input.captured === "" ? undefined : input.captured;
   }
   if (!input.underVitest) {
     const current = input.liveBaseUrl;
@@ -53,18 +42,9 @@ export function startingBaseUrl(input: StartingBaseUrl): string | undefined {
 
 /** BASE_URL from process start. Vitest has already rewritten the live value to "/". */
 export function baseUrlAtProcessStart(): string | undefined {
-  let environ: Buffer | null = null;
-  if (process.platform === "linux") {
-    try {
-      environ = readFileSync("/proc/self/environ");
-    } catch {
-      environ = null;
-    }
-  }
   return startingBaseUrl({
-    platform: process.platform,
-    environ,
     underVitest: Boolean(process.env.VITEST),
+    captured: process.env.SHO_E2E_START_BASE_URL,
     liveBaseUrl: process.env.BASE_URL,
   });
 }
