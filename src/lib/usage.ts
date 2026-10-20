@@ -32,7 +32,7 @@ export async function usageSummary(user: Actor, now = new Date()) {
     monthStart: monthStart.toISOString(),
     weekStart: weekStart.toISOString(),
     resumesAt: nextMonthStartIST(now).toISOString(),
-    // percent is the whole number (0 when the screen shows "0%" or "<1%"). The screen prints percentUsedLabel, not this field.
+    // percent is the whole number (0 when the screen shows "0%" or "<1%", or no ceiling is set). The screen prints percentUsedLabel, not this field.
     ceiling: { usd: ceiling, spendUsd: spend, percent: percentUsedNumber(spend, ceiling), warnAtPercent: WARN_AT * 100, weeklyMessageCap: weeklyMessageCap() },
     month: {
       calls: month._count, inputTokens: month._sum.inputTokens ?? 0, outputTokens: month._sum.outputTokens ?? 0, costUsd: spend,

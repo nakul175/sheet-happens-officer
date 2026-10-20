@@ -4,7 +4,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { UsageContents, meterWidth, usagePath, usageTitle, type UsagePayload, type UsageRole } from "@/app/(app)/usage/screen";
-import { percentUsedLabel } from "@/lib/usage-percent";
+import { overCeiling, percentUsedLabel } from "@/lib/usage-percent";
 
 const CHAT = "PRIVATE-CHAT-TEXT";
 
@@ -74,9 +74,12 @@ describe("Usage screen (SHO-US-9.2 AC6)", () => {
         percent: oldDecimal(row.spend, row.cap),
       }));
       const shown = row.label === "<1%" ? "&lt;1%" : row.label;
-      expect(html, `${row.spend} of ${row.cap}`).toContain(`<dt>Percentage used</dt><dd>${shown}</dd>`);
+      // AC6 v1.1: 120%, 112% and 239 of 200 are over the ceiling, so the flag follows the percentage.
+      const over = overCeiling(row.spend, row.cap);
+      const flag = over ? ' <span class="usage-over">Over ceiling</span>' : "";
+      expect(html, `${row.spend} of ${row.cap}`).toContain(`<dt>Percentage used</dt><dd>${shown}${flag}</dd>`);
       expect(html).not.toContain(`${shown}%`);
-      expect(html).toContain(`aria-valuetext="$${row.spend.toFixed(2)} of $${row.cap.toFixed(2)}, ${shown} used"`);
+      expect(html).toContain(`aria-valuetext="$${row.spend.toFixed(2)} of $${row.cap.toFixed(2)}, ${shown} used${over ? ", over ceiling" : ""}"`);
       if (row.width) expect(html).toContain(`style="width:${row.width}"`);
       if (row.label === "<1%") expect(html).not.toContain(">1%<");
       expect(html).not.toContain(CHAT);
@@ -100,6 +103,59 @@ describe("Usage screen (SHO-US-9.2 AC6)", () => {
       expect(html).not.toContain("Asha");
       expect(html).not.toContain(CHAT);
       expect(html).not.toContain("Overdue tasks");
+    }
+  });
+
+  // AC6 v1.1 (Dwight, 19 Oct 01:24 IST). Render data only, named ZZ-TEST; nothing is written anywhere.
+  const zz = (ceiling: Partial<UsagePayload["ceiling"]>): UsagePayload => ({
+    ...payload(ceiling),
+    people: [{ id: "zz-1", name: "ZZ-TEST usage person", monthCalls: 1, weekCalls: 1, monthCostUsd: ceiling.spendUsd ?? 0 }],
+  });
+
+  it("qa:TC-US92-30f41089@v1 AC6 v1.1 (b): a ceiling of 0 or unset shows No ceiling set and no percentage", () => {
+    const cases: { label: string; ceiling: Partial<UsagePayload["ceiling"]> }[] = [
+      { label: "$10 of $0", ceiling: { usd: 0, spendUsd: 10, percent: 0 } },
+      { label: "$0 of $0", ceiling: { usd: 0, spendUsd: 0, percent: 0 } },
+      { label: "$10, ceiling null", ceiling: { usd: null, spendUsd: 10, percent: 0 } },
+      { label: "$10, ceiling missing", ceiling: { usd: undefined, spendUsd: 10, percent: 0 } },
+    ];
+    for (const c of cases) {
+      const html = htmlFor("SUPER_ADMIN", zz(c.ceiling));
+      expect(html, c.label).toContain("<dt>Monthly ceiling</dt><dd>No ceiling set</dd>");
+      expect(html, c.label).toContain(`<dt>Spend to date</dt><dd>$${(c.ceiling.spendUsd ?? 0).toFixed(2)}</dd>`);
+      expect(html, c.label).not.toContain("Percentage used");
+      expect(html, c.label).not.toContain("%<");
+      expect(html, c.label).not.toContain("% used");
+      expect(html, c.label).not.toContain('role="meter"');
+      expect(html, c.label).not.toContain("Over ceiling");
+      expect(html, c.label).not.toMatch(/NaN|Infinity/);
+      expect(html, c.label).not.toContain(CHAT);
+    }
+  });
+
+  it("qa:TC-US92-5acadabc@v1 qa:TC-US92-cd463d7f@v2 AC6 v1.1 (c): spend over the ceiling shows the rounded percentage and a visible Over ceiling flag", () => {
+    const rows: { spend: number; cap: number; label: string; over: boolean }[] = [
+      { spend: 100.4, cap: 100, label: "100%", over: true },
+      { spend: 100.01, cap: 100, label: "100%", over: true },
+      { spend: 100.5, cap: 100, label: "101%", over: true },
+      { spend: 113, cap: 100, label: "113%", over: true },
+      { spend: 250, cap: 100, label: "250%", over: true },
+      { spend: 100, cap: 100, label: "100%", over: false },
+      { spend: 99.5, cap: 100, label: "100%", over: false },
+    ];
+    for (const row of rows) {
+      const html = htmlFor("SUPER_ADMIN", zz({ usd: row.cap, spendUsd: row.spend, percent: 0 }));
+      const name = `$${row.spend.toFixed(2)} of $${row.cap.toFixed(2)}`;
+      if (row.over) {
+        // Visible text in the same cell as the percentage, so a screen reader reads it too.
+        expect(html, name).toContain(`<dt>Percentage used</dt><dd>${row.label} <span class="usage-over">Over ceiling</span></dd>`);
+        expect(html, name).toContain(`aria-valuetext="${name}, ${row.label} used, over ceiling"`);
+        expect(html, name).toContain('style="width:100%"');
+      } else {
+        expect(html, name).toContain(`<dt>Percentage used</dt><dd>${row.label}</dd>`);
+        expect(html, name).not.toContain("Over ceiling");
+        expect(html, name).not.toContain("over ceiling");
+      }
     }
   });
 });

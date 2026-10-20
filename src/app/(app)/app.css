@@ -285,3 +285,5 @@ main:focus { outline: none; }
 .usage-figs dd { margin: 2px 0 0; font-size: 1.17em; font-weight: 700; overflow-wrap: anywhere; }
 .usage-meter { height: 10px; margin-top: 14px; border-radius: 99px; background: #eceef3; overflow: hidden; }
 .usage-meter > span { display: block; height: 100%; background: var(--navy); }
+/* AC6 v1.1: spend over the ceiling. The words carry the meaning; the colour only adds to it. */
+.usage-over { display: inline-block; margin-left: 6px; padding: 1px 8px; border-radius: 99px; border: 1px solid #b42318; background: #fef3f2; color: #b42318; font-size: 13px; font-weight: 600; vertical-align: middle; }

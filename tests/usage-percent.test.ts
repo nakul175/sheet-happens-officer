@@ -1,7 +1,7 @@
 // APL-2519 AC6: the percentage used is one display string, rounded half up.
 // The cases are the ones tests/e2e/stories/APL-2519.spec.ts expects on the screen.
 import { describe, expect, it } from "vitest";
-import { percentUsedLabel, percentUsedNumber } from "@/lib/usage-percent";
+import { hasCeiling, overCeiling, percentUsedLabel, percentUsedNumber } from "@/lib/usage-percent";
 
 /** The one-decimal figure /api/usage used to store. The screen must not print this. */
 const oldDecimal = (spend: number, ceiling: number) => (ceiling > 0 ? Math.round((spend / ceiling) * 1000) / 10 : 0);
@@ -9,7 +9,6 @@ const oldDecimal = (spend: number, ceiling: number) => (ceiling > 0 ? Math.round
 describe("percentUsedLabel (APL-2519 AC6)", () => {
   it("shows 0% for no spend", () => {
     expect(percentUsedLabel(0, 80)).toBe("0%");
-    expect(percentUsedLabel(0, 0)).toBe("0%");
     expect(percentUsedLabel(-1, 80)).toBe("0%");
   });
 
@@ -62,5 +61,34 @@ describe("percentUsedLabel (APL-2519 AC6)", () => {
     expect((0.09 / 0.4) * 100).toBeLessThan(22.5);
     expect(Math.round((0.09 / 0.4) * 100)).toBe(22);
     expect(percentUsedLabel(0.09, 0.4)).toBe("23%");
+  });
+
+  it("qa:TC-US92-30f41089@v1 AC6 v1.1 (b): a ceiling of 0 or unset has no percentage", () => {
+    for (const cap of [0, -5, null, undefined, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(hasCeiling(cap), String(cap)).toBe(false);
+      for (const spend of [0, 10]) {
+        expect(percentUsedLabel(spend, cap), `${spend} of ${cap}`).toBeNull();
+        expect(percentUsedNumber(spend, cap), `${spend} of ${cap}`).toBe(0);
+        expect(overCeiling(spend, cap), `${spend} of ${cap}`).toBe(false);
+      }
+    }
+    expect(hasCeiling(80)).toBe(true);
+  });
+
+  it("qa:TC-US92-5acadabc@v1 qa:TC-US92-cd463d7f@v2 AC6 v1.1 (c): over the ceiling is spend above it, and the percentage stays rounded", () => {
+    const rows: [number, number, string, boolean][] = [
+      [100.4, 100, "100%", true],
+      [100.01, 100, "100%", true],
+      [100.5, 100, "101%", true],
+      [113, 100, "113%", true],
+      [250, 100, "250%", true],
+      [100, 100, "100%", false],
+      [99.5, 100, "100%", false],
+      [99.49, 100, "99%", false],
+    ];
+    for (const [spend, cap, label, over] of rows) {
+      expect(percentUsedLabel(spend, cap), `${spend} of ${cap}`).toBe(label);
+      expect(overCeiling(spend, cap), `${spend} of ${cap}`).toBe(over);
+    }
   });
 });

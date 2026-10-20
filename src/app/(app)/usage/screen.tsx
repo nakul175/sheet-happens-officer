@@ -1,6 +1,6 @@
 "use client";
 import { Skeleton } from "@/components/ui";
-import { percentUsedLabel } from "@/lib/usage-percent";
+import { NO_CEILING, OVER_CEILING, hasCeiling, overCeiling, percentUsedLabel } from "@/lib/usage-percent";
 
 export type UsageRole = "MEMBER" | "ADMIN" | "SUPER_ADMIN";
 
@@ -8,12 +8,13 @@ export type UsageRole = "MEMBER" | "ADMIN" | "SUPER_ADMIN";
  * What GET /api/usage returns. `ceiling.percent` is a whole number (0 when the label is "0%" or "<1%").
  * The screen prints percentUsedLabel(spend, ceiling) and does not echo that number, so an old one-decimal
  * percent still shows 13% for 10 of 80 and "<1%" for 1 of 101.
+ * A ceiling of 0 or unset (`usd` 0, null or missing) shows "No ceiling set" and no percentage (AC6 v1.1).
  * `messages` and `quickActions` stay on the type so a later section can read them; this screen does not show them (APL-2641).
  */
 export type UsagePayload = {
   monthStart: string;
   weekStart: string;
-  ceiling: { usd: number; spendUsd: number; percent: number };
+  ceiling: { usd?: number | null; spendUsd: number; percent: number };
   month: { calls: number; inputTokens: number; outputTokens: number; costUsd: number; messages?: number };
   quickActions?: { id: string; label: string; count: number }[];
   people: { id: string; name: string; monthCalls: number; weekCalls: number; monthCostUsd: number }[];
@@ -73,11 +74,27 @@ export function UsageContents({ role, loading, error, data }: {
   );
 }
 
-/** Spend to date, the monthly ceiling and the percentage used. The label comes from spend and ceiling, not from `ceiling.percent`. */
+/**
+ * Spend to date, the monthly ceiling and the percentage used. The label comes from spend and ceiling, not from `ceiling.percent`.
+ * No ceiling: "No ceiling set", no percentage and no meter. Over the ceiling: the rounded percentage plus a
+ * visible "Over ceiling" flag, in text so it does not rely on colour (AC6 v1.1).
+ */
 export function SpendCeiling({ ceiling }: { ceiling: UsagePayload["ceiling"] }) {
   const amount = formatUsd(ceiling.spendUsd);
+  if (!hasCeiling(ceiling.usd)) {
+    return (
+      <section className="card">
+        <h2 className="usage-h" id="usage-ceiling">Spend against the monthly ceiling</h2>
+        <dl className="usage-figs">
+          <div><dt>Spend to date</dt><dd>{amount}</dd></div>
+          <div><dt>Monthly ceiling</dt><dd>{NO_CEILING}</dd></div>
+        </dl>
+      </section>
+    );
+  }
   const cap = formatUsd(ceiling.usd);
-  const pct = percentUsedLabel(ceiling.spendUsd, ceiling.usd);
+  const pct = percentUsedLabel(ceiling.spendUsd, ceiling.usd) ?? "0%";
+  const over = overCeiling(ceiling.spendUsd, ceiling.usd);
   const width = meterWidth(pct, ceiling.spendUsd, ceiling.usd);
   return (
     <section className="card">
@@ -85,7 +102,7 @@ export function SpendCeiling({ ceiling }: { ceiling: UsagePayload["ceiling"] }) 
       <dl className="usage-figs">
         <div><dt>Spend to date</dt><dd>{amount}</dd></div>
         <div><dt>Monthly ceiling</dt><dd>{cap}</dd></div>
-        <div><dt>Percentage used</dt><dd>{pct}</dd></div>
+        <div><dt>Percentage used</dt><dd>{pct}{over && <> <span className="usage-over">{OVER_CEILING}</span></>}</dd></div>
       </dl>
       <div
         className="usage-meter"
@@ -94,7 +111,7 @@ export function SpendCeiling({ ceiling }: { ceiling: UsagePayload["ceiling"] }) 
         aria-valuemin={0}
         aria-valuemax={100}
         aria-valuenow={width}
-        aria-valuetext={`${amount} of ${cap}, ${pct} used`}
+        aria-valuetext={`${amount} of ${cap}, ${pct} used${over ? `, ${OVER_CEILING.toLowerCase()}` : ""}`}
       >
         <span style={{ width: `${width}%` }} />
       </div>
