@@ -112,7 +112,7 @@ describe("Usage screen (SHO-US-9.2 AC6)", () => {
     }
   });
 
-  it("shows messages this month and each quick-action count, and keeps quick actions out of the message total (APL-2641 AC1, AC2)", () => {
+  it("qa:TC missing shows messages this month and each quick-action count, and keeps quick actions out of the message total (APL-2641 AC1, AC2)", () => {
     const html = htmlFor("SUPER_ADMIN");
     expect(html).toMatch(/Messages this month<\/h2>\s*<p class="usage-count">17<\/p>/);
     expect(html).toContain("Quick actions are not included.");
@@ -126,7 +126,7 @@ describe("Usage screen (SHO-US-9.2 AC6)", () => {
     expect(html).not.toContain(CHAT);
   });
 
-  it("shows zero messages and zero quick-action counts when the month figures are zero (APL-2641 AC3)", () => {
+  it("qa:TC missing shows zero messages and zero quick-action counts when the month figures are zero (APL-2641 AC3)", () => {
     const data = payload();
     data.month = { ...data.month, messages: 0 };
     data.quickActions = data.quickActions!.map((q) => ({ ...q, count: 0 }));
