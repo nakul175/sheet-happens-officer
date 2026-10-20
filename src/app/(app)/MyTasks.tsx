@@ -4,6 +4,7 @@ import Link from "next/link";
 import { Suspense, useEffect, useState } from "react";
 import "./approvals.css";
 import { api, dueLabel, dueState, rowKeys, isOverdue, todayIST, useGet } from "@/components/api";
+import { errorMessage, isVersionConflict } from "@/lib/version-error";
 import { TaskModal } from "@/components/TaskModal";
 import { Pri, Tick } from "@/components/TaskParts";
 import { Confirm, LoadFailed, Skeleton } from "@/components/ui";
@@ -31,9 +32,9 @@ function ApprovalButtons({ t, onDone }: { t: Waiting; onDone: () => void }) {
     const r = await api("POST", `/api/tasks/${t.id}/${path}`, path === "complete" ? { completeAll: all, expectedUpdatedAt: t.updatedAt } : {});
     setBusy(false);
     if (r.ok) { setAsk(null); setErr(null); onDone(); }
-    else if (r.status === 409 && r.data.stale) { setAsk(null); setErr(r.error ?? "This task changed while you were editing it."); onDone(); }
+    else if (isVersionConflict(r.status, r.data)) { setAsk(null); setErr(errorMessage(r.error, "This task changed while you were editing it.")); onDone(); }
     else if (r.status === 409 && r.data.needsConfirm === "open_subtasks") setAsk(r.data.openSubtasks as number);
-    else setErr(r.error ?? "Could not do that.");
+    else setErr(errorMessage(r.error, "Could not do that."));
   }
   return (
     <span className="aw-act" onClick={(e) => e.stopPropagation()}>

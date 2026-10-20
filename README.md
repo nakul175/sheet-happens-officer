@@ -92,13 +92,13 @@ One-time setup, in order:
 5. In GoDaddy, add an A record `app` → the droplet's IP.
 6. GitHub repository secrets: `SSH_PRIVATE_KEY` (the private half of `sho_deploy`),
    `DATABASE_URL`, `RESEND_API_KEY` (a Resend key with sending access for
-   `sheethappensofficer.com`). Optional secret: `DIRECT_DATABASE_URL`, the direct (non-PgBouncer)
+   `sheethappensofficer.com`, the sender's domain until Resend verifies `sheethappensofficer.aplyd.org`). Optional secret: `DIRECT_DATABASE_URL`, the direct (non-PgBouncer)
    connection string for migrations, needed once `DATABASE_URL` points at PgBouncer; unset, migrations
    use `DATABASE_URL`. Optional variables: `DROPLET_HOST` (IP, if DNS is not live yet)
    and `DROPLET_HOST_KEY` (one `ssh-keyscan -t ed25519 <ip>` line, which pins the host key).
 7. Run the workflow (push to `main` or "Run workflow"), then sign up with the Super Admin
    address and confirm the verification email lands in the inbox, not junk.
-8. Point an external uptime check at `https://app.sheethappensofficer.com/api/health`.
+8. Point an external uptime check at `https://sheethappensofficer.aplyd.org/api/health`.
 
 Scheduled jobs (`/etc/cron.d/sho`, IST): `purge-trash` 03:17, `purge-old` 03:37, `purge-chat` 03:47
 (chat older than 90 days), `concierge-budget` 03:57 (80 percent notice), `stalled-deals` 07:50 (deals with no

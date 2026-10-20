@@ -7,7 +7,7 @@
 //
 // Self-check:
 // - [x] Throwaway schema only, dropped only that schema
-// - [x] Guard requires localhost or 127.0.0.1 AND a sho_test_* database, and refuses overrides, sockets, defaultdb, sho_staging, public, and sho_pr*
+// - [x] Guard requires localhost or 127.0.0.1 AND a sho_test or sho_test_* database (APL-2764), and refuses overrides, sockets, defaultdb, sho_staging, public, and sho_pr*
 // - [x] Pooled test name contains SIMULATED; it is a search_path simulation
 // - [x] Public pin is proven with schema-qualified ALTER FUNCTION on the throwaway
 // - [x] Release script line 41 runs the Prisma migration command on the direct connection; /etc/sho/app.env has no schema param, so the pin is public
@@ -201,7 +201,9 @@ describe.skipIf(!dbAllowed)("@APL-2700 trigger search_path in a throwaway schema
     }
     if (!isThrowawaySchema(SLOT)) throw new Error("refusing schema");
     const connectionStringValue = connectionString();
-    pool = new pg.Pool({ connectionString: connectionStringValue, max: CONCURRENT_CREATES });
+    // APL-2889: a finished client hands its session back at once. Behind a session-mode PgBouncer (pool 20)
+    // the other creates wait for those sessions; pg's 10 s idle default made each wave take 10 s.
+    pool = new pg.Pool({ connectionString: connectionStringValue, max: CONCURRENT_CREATES, idleTimeoutMillis: 100 });
     migrator = new pg.Client({ connectionString: connectionStringValue });
     await migrator.connect();
     protectedState = await snapshotProtected(migrator);
