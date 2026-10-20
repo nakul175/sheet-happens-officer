@@ -80,9 +80,12 @@ export function countsFromReport(report) {
 /**
  * Empty shard (no tests) passes. A shard whose tests were all skipped fails.
  * The run-wide run=0 check belongs to the aggregate job, not here.
+ * requireTests (--require-tests, APL-2925): the job is the whole run, not one of many shards, so an empty run fails too.
  */
-export function shardFailureReason(counts) {
-  if (counts.total === 0) return null;
+export function shardFailureReason(counts, { requireTests = false } = {}) {
+  if (counts.total === 0) {
+    return requireTests ? "No tests ran (total=0). This job is the whole run, so an empty run fails." : null;
+  }
   if (counts.run === 0 || counts.skipped === counts.total) {
     return `Every test in this shard was skipped (skipped=${counts.skipped}, total=${counts.total}, run=${counts.run}).`;
   }
@@ -176,6 +179,7 @@ function main() {
   if (mode === "shard") {
     const reportPath = arg("--report");
     const countsPath = arg("--counts-out");
+    const requireTests = process.argv.includes("--require-tests");
     let counts;
     try {
       counts = countsFromReport(JSON.parse(readFileSync(reportPath, "utf8")));
@@ -186,11 +190,12 @@ function main() {
     writeFileSync(countsPath, JSON.stringify(counts) + "\n");
     if (counts.missing) {
       console.log("Missing Playwright JSON report (missing=true).");
+      if (requireTests) finish(counts, "Missing Playwright JSON report: the run produced no results.");
       return;
     }
     console.log(`Shard counts: ${formatCounts(counts)}`);
-    if (counts.total === 0) console.log("Empty shard: no tests in this shard.");
-    finish(counts, shardFailureReason(counts));
+    if (counts.total === 0 && !requireTests) console.log("Empty shard: no tests in this shard.");
+    finish(counts, shardFailureReason(counts, { requireTests }));
     return;
   }
   if (mode === "expected") {

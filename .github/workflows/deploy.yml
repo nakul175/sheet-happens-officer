@@ -20,7 +20,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  APP_HOST: app.sheethappensofficer.com
+  APP_HOST: sheethappensofficer.aplyd.org
 
 jobs:
   test:
@@ -72,7 +72,7 @@ jobs:
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     env:
-      HOST: ${{ vars.DROPLET_HOST || 'app.sheethappensofficer.com' }}
+      HOST: ${{ vars.DROPLET_HOST || 'sheethappensofficer.aplyd.org' }}
       HOST_KEY: ${{ vars.DROPLET_HOST_KEY }}
     steps:
       - uses: actions/checkout@v4
@@ -119,6 +119,7 @@ jobs:
             printf "RESEND_API_KEY='%s'\n" "$RESEND_API_KEY"
             printf "APP_URL='https://%s'\n" "$APP_HOST"
             printf "SUPER_ADMIN_EMAILS='nakul.jain@aplyd.com'\n"
+            # APL-2929: the sender stays on the old domain until Resend verifies sheethappensofficer.aplyd.org.
             printf "EMAIL_FROM='Sheet Happens Officer <no-reply@sheethappensofficer.com>'\n"
             printf "TZ='Asia/Kolkata'\n"
             # Concierge settings: written only when set (an unset one is left out and the concierge stays off).
@@ -134,6 +135,7 @@ jobs:
         env:
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        # APL-2929: the sender stays on the old domain until Resend verifies sheethappensofficer.aplyd.org.
         run: |
           curl -sS -o /dev/null -w "owner email: HTTP %{http_code}\n" https://api.resend.com/emails \
             -H "Authorization: Bearer $RESEND_API_KEY" -H "Content-Type: application/json" \

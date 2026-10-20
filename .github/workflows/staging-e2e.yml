@@ -324,7 +324,8 @@ jobs:
         run: |
           read -ra files <<< "$FILES"
           # @static is a file-contains check. @manual cannot force a job failure on staging. Neither is a live pass.
-          npx playwright test --shard=${{ matrix.shard }}/20 --workers=1 --grep-invert "@static|@manual" --reporter=list,blob,json --trace="$TRACE" "${files[@]}"
+          # @local-only specs sign up and verify new aliases from a local outbox: on staging that is real accounts and mail (APL-2925).
+          npx playwright test --shard=${{ matrix.shard }}/20 --workers=1 --grep-invert "@static|@manual|@local-only" --reporter=list,blob,json --trace="$TRACE" "${files[@]}"
 
       - name: Fail this shard when every test was skipped
         if: always()
@@ -409,7 +410,8 @@ jobs:
         run: |
           read -ra files <<< "$FILES"
           # @static is a file-contains check. @manual cannot force a job failure on staging. Neither is a live pass.
-          npx playwright test --workers=1 --grep-invert "@static|@manual" --reporter=list,blob,json --trace="$TRACE" "${files[@]}"
+          # @local-only specs sign up and verify new aliases from a local outbox: on staging that is real accounts and mail (APL-2925).
+          npx playwright test --workers=1 --grep-invert "@static|@manual|@local-only" --reporter=list,blob,json --trace="$TRACE" "${files[@]}"
 
       - name: Fail the serial job when every test was skipped
         if: always()

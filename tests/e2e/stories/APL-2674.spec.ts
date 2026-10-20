@@ -11,7 +11,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { test, expect, request as pwRequest, type APIRequestContext, type Browser, type BrowserContext, type Page } from "@playwright/test";
 
-const PRODUCTION = new Set(["sheethappensofficer.com", "www.sheethappensofficer.com", "app.sheethappensofficer.com", "168.144.144.69"]);
+const PRODUCTION = new Set(["sheethappensofficer.com", "www.sheethappensofficer.com", "app.sheethappensofficer.com", "sheethappensofficer.aplyd.org", "168.144.144.69"]);
 const RUN = `${Date.now().toString(36)}${process.pid.toString(36)}`;
 let seq = 0;
 
@@ -126,7 +126,7 @@ function actRow(page: Page, who: string, what: string) {
     .filter({ has: page.getByText(who, { exact: true }) });
 }
 
-test.describe("APL-2674 activity delete undo", () => {
+test.describe("APL-2674 activity delete undo", { tag: "@local-only" }, () => {
   test.describe.configure({ mode: "serial" });
 
   test.beforeAll(async () => {

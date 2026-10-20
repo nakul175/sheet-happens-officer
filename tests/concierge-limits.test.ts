@@ -7,6 +7,7 @@ import { ModelError, costUsd, fakeCallCount, generate, modelConfig, modelEnabled
 import { disabledFor, monthSpendUsd, warnIfNearCeiling, weekMessages } from "../src/lib/concierge/limits";
 import { improvePrompt, quickAction, sendMessage } from "../src/lib/concierge/engine";
 import { monthStartIST, nextMonthStartIST, weekStartIST } from "../src/lib/concierge/dates";
+import { percentUsedNumber } from "../src/lib/usage-percent";
 import { state } from "../src/lib/concierge/thread";
 
 const req = { system: { stable: "s", dynamic: "d" }, tools: [], messages: [{ role: "user" as const, content: "hi" }], maxTokens: 10 };
@@ -254,6 +255,8 @@ describe("caps and ledger (9.2)", () => {
     expect(r.status).toBe(200);
     expect(r.json.ceiling.usd).toBe(100);
     expect(r.json.ceiling.spendUsd).toBeGreaterThan(0);
+    expect(typeof r.json.ceiling.percent).toBe("number");
+    expect(r.json.ceiling.percent).toBe(percentUsedNumber(r.json.ceiling.spendUsd, r.json.ceiling.usd));
     expect(r.json.quickActions.find((q: { id: string }) => q.id === "overdue").count).toBeGreaterThanOrEqual(1);
     const me = r.json.people.find((p: { id: string }) => p.id === u.id);
     expect(me).toMatchObject({ weekMessages: 1, monthMessages: 1 });
