@@ -576,7 +576,7 @@ describe("APL-2652 signed-out redirect", () => {
     const owner = await account("nfowner");
     const outsider = await account("nfout");
     const p = await project(owner, owner);
-    const hidden = await task(owner, p.id, { title: "APL2652 hidden task", description: "APL2652 secret body" });
+    const hidden = await task(owner, p.id, { title: "ZZ-TEST APL2652 hidden task", description: "ZZ-TEST APL2652 secret body" });
     const missing = "c".repeat(hidden.length);
     const apartFromId = (text: string) => text.split(hidden).join("ID").split(missing).join("ID");
     const titleOf = (html: string) => html.match(/<title[^>]*>([^<]*)<\/title>/i)?.[1] ?? "";
@@ -618,10 +618,10 @@ describe("APL-2652 signed-out redirect", () => {
     expect(missingPage.html).toContain("This task isn't available");
     expect(hiddenPage.title).toBe("Task · Sheet Happens Officer");
     expect(missingPage.title).toBe(hiddenPage.title);
-    expect(hiddenPage.html).not.toContain("APL2652 hidden task");
-    expect(hiddenPage.html).not.toContain("APL2652 secret body");
-    expect(missingPage.html).not.toContain("APL2652 hidden task");
-    expect(missingPage.html).not.toContain("APL2652 secret body");
+    expect(hiddenPage.html).not.toContain("ZZ-TEST APL2652 hidden task");
+    expect(hiddenPage.html).not.toContain("ZZ-TEST APL2652 secret body");
+    expect(missingPage.html).not.toContain("ZZ-TEST APL2652 hidden task");
+    expect(missingPage.html).not.toContain("ZZ-TEST APL2652 secret body");
     expect(hiddenPage.html).not.toContain("Project not found");
     expect(missingPage.html).not.toContain("Project not found");
     // The flight script order is not stable. The document the person sees, apart from the id, is.

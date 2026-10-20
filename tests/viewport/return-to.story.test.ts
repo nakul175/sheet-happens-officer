@@ -60,12 +60,12 @@ beforeAll(async () => {
   outsiderEmail = outsider.email;
   const p = await project(root, root, [{ who: member }]);
   const stamp = Date.now();
-  visibleTitle = `APL2652 visible ${stamp}`;
-  hiddenTitle = `APL2652 hidden ${stamp}`;
-  hiddenDetail = `APL2652 secret detail ${stamp}`;
+  visibleTitle = `ZZ-TEST APL2652 visible ${stamp}`;
+  hiddenTitle = `ZZ-TEST APL2652 hidden ${stamp}`;
+  hiddenDetail = `ZZ-TEST APL2652 secret detail ${stamp}`;
   visibleId = await task(root, p.id, { title: visibleTitle, description: "Visible to a member of the project." });
   hiddenId = await task(root, p.id, { title: hiddenTitle, description: hiddenDetail });
-  forcedEmail = `returnforced${stamp}@aplyd.com`;
+  forcedEmail = `zz-test-returnforced${stamp}@aplyd.com`;
   const added = await root.c.post("/api/team", { firstName: "Rita", lastName: `Return${stamp}`, email: forcedEmail, role: "MEMBER" });
   expect(added.status, JSON.stringify(added.json)).toBe(201);
   forcedPassword = signInMailPassword(forcedEmail);
