@@ -66,7 +66,7 @@ describe("qa:TC missing APL-2717 concierge too-old-to-undo matches undo.ts", () 
 
       expect(isTooOldToUndo(at.getTime(), now)).toBe(c.tooOld);
       const viaUndo = await tooOldFlag(checkUndo(actor(lead), logId));
-      const viaThread = (await thread(lead.id)).find((m) => m.id === resultId)!.result!.undoExpired === true;
+      const viaThread = (await thread(actor(lead))).find((m) => m.id === resultId)!.result!.undoExpired === true;
       const viaCard = await tooOldFlag(undoCard(actor(lead), cardId));
 
       expect(viaUndo).toBe(c.tooOld);

@@ -2,10 +2,10 @@
 // SHO-US-6.4: Undo from the stored before-state, with a conflict warning and "Undo anyway".
 import { db } from "@/lib/db";
 import { ApiError, notFound } from "@/lib/http";
-import { WORKERS, activeMember, projectAccess, requireManage, requireWrite, type Actor, type Tx } from "@/lib/access";
+import { WORKERS, activeMember, requireManage, requireWrite, type Actor, type Tx } from "@/lib/access";
 import { formatDueDate } from "@/lib/dates";
 import { auditTx, logAction, notify } from "@/lib/notify";
-import { deleteTask, restoreTask } from "@/lib/tasks";
+import { deleteTask, recordAccess, restoreTask } from "@/lib/tasks";
 import { UNDO_LABELS, isTooOldToUndo, isUndoable } from "@/lib/undoable";
 import { undoRecord } from "@/lib/records";
 import { commentsEnabled, isCommentAction } from "@/lib/flags";
@@ -148,8 +148,9 @@ async function plan(row: any, user: Actor, projectId: string): Promise<Plan> {
           const done = await tx.section.findFirstOrThrow({ where: { projectId, isDone: true } });
           await tx.task.update({ where: { id }, data: { completedAt: stamp, sectionId: done.id, previousSectionId: t.sectionId } });
           // Subtasks that reopened with the parent close with it again, on the same completedAt (APL-2721).
-          // One ticked done on its own since then keeps its own completedAt.
-          if (Array.isArray(f.subtaskIds) && f.subtaskIds.length) await tx.task.updateMany({ where: { id: { in: f.subtaskIds }, deletedAt: null, completedAt: null }, data: { completedAt: stamp } });
+          // One ticked done on its own since then keeps its own completedAt. One moved to Trash since closes too:
+          // the reopen never lists a subtask that was already in Trash, so these ids are only ones it changed (APL-2870).
+          if (Array.isArray(f.subtaskIds) && f.subtaskIds.length) await tx.task.updateMany({ where: { id: { in: f.subtaskIds }, completedAt: null }, data: { completedAt: stamp } });
         },
       };
     }
@@ -393,7 +394,7 @@ async function prepare(user: Actor, logId: string) {
   if (isCommentAction(row.action) && !commentsEnabled()) throw notFound("Action");
   const projectId = row.projectId;
   if (!projectId) throw bad("This kind of action cannot be undone.");
-  const a = await projectAccess(user, projectId);
+  const a = await recordAccess(user, projectId, "Action");
   requireWrite(a);
   const archiveKind = row.action === "project.archived" || row.action === "project.unarchived";
   if (a.project.archivedAt && !archiveKind) throw new ApiError(409, "This project is archived and read-only.");

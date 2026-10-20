@@ -48,10 +48,11 @@ function expectBadJson(r: Res) {
   expect(r.json).toEqual({ error: "Body must be valid JSON" });
 }
 
-// Schema-invalid body per route.
+// Schema-invalid body per route. Assign is a version route: since APL-2670 AC1 v1.4 the version is checked before
+// the schema, so its invalid body carries a well-formed expectedUpdatedAt to still reach "Validation failed".
 const INVALID = {
   project: { name: "" },
-  assign: { assigneeId: "" },
+  assign: { assigneeId: "", expectedUpdatedAt: "2026-01-01T00:00:00.000Z" },
   deactivate: { reassign: "" },
 } as const;
 
@@ -102,7 +103,8 @@ describe("qa:TC missing APL-2714 auth before body", () => {
     const rows: [Account, string, string, object, number, string][] = [
       [outsider, "PATCH", `/api/projects/${p.id}`, INVALID.project, 404, "Project not found"],
       [editor, "PATCH", `/api/projects/${p.id}`, INVALID.project, 403, "Only the project Leader or an Admin can do this."],
-      [outsider, "POST", `/api/tasks/${t1}/assign`, INVALID.assign, 404, "Project not found"],
+      // APL-2875 supersedes the assign row of APL-2714 AC2 v1.1: an outsider gets the missing-id answer.
+      [outsider, "POST", `/api/tasks/${t1}/assign`, INVALID.assign, 404, "Task not found"],
       [viewer, "POST", `/api/tasks/${t1}/assign`, INVALID.assign, 403, "Viewers cannot make changes."],
       [editor, "POST", `/api/team/${other.id}/deactivate`, INVALID.deactivate, 403, "You cannot deactivate this person."],
       [orgAdmin, "POST", `/api/team/${admin2.id}/deactivate`, INVALID.deactivate, 403, "You cannot deactivate this person."],

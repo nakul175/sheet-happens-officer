@@ -69,7 +69,7 @@ describe("qa:TC missing APL-2719 concierge card Undo and purge share one timesta
       const now = new Date(t.deletedAt!.getTime() + age);
       vi.useFakeTimers({ now, toFake: ["Date"] });
       try {
-        const shown = (await thread(c.lead.id)).find((m) => m.kind === "result" && m.result?.cardId === c.cardId)!;
+        const shown = (await thread(actor(c.lead))).find((m) => m.kind === "result" && m.result?.cardId === c.cardId)!;
         const showsUndo = shown.result!.undoable && !shown.result!.undoExpired && !shown.result!.undoneAt;
         if (!showsUndo) {
           await expect(undoCard(actor(c.lead), c.cardId)).rejects.toMatchObject({ status: 409, message: "Too old to undo" });

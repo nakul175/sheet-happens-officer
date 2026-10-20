@@ -283,7 +283,7 @@ describe("propose and confirm (8.3)", () => {
     try {
       const err = await confirmCard(actor(lead), c.id).catch((e) => e);
       expect(spy).toHaveBeenCalledOnce();
-      expect(err).toMatchObject({ status: 409, message: "This task changed while you were editing it." });
+      expect(err).toMatchObject({ status: 409, message: `${ed.name} changed this task while you were editing it.` });
       expect(err.extra.stale).toBe(true);
       expect(err.extra.changedBy).toBe(ed.name);
     } finally {
@@ -651,12 +651,12 @@ describe("undo of a card (8.5)", () => {
   it("Undo stops working after 30 days (AC6)", async () => {
     const { lead, card } = await multi();
     await confirmCard(actor(lead), card.id);
-    const row = (await thread(lead.id)).find((m) => m.kind === "result")!;
+    const row = (await thread(actor(lead))).find((m) => m.kind === "result")!;
     const old = new Date(Date.now() - 31 * 86400_000).toISOString();
     const raw = JSON.parse((await db.chatMessage.findUniqueOrThrow({ where: { id: row.id } })).content);
     raw.internal.confirmedAt = old;
     await db.chatMessage.update({ where: { id: row.id }, data: { content: JSON.stringify(raw) } });
-    expect((await thread(lead.id)).find((m) => m.id === row.id)!.result!.undoExpired).toBe(true);
+    expect((await thread(actor(lead))).find((m) => m.id === row.id)!.result!.undoExpired).toBe(true);
     await expect(undoCard(actor(lead), card.id)).rejects.toMatchObject({ status: 409, message: "Too old to undo" });
   });
 

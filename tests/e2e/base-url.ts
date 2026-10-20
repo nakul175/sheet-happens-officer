@@ -1,5 +1,7 @@
-// The APL-2522 spec calls this before its tests run.
-// Vitest replaces the BASE_URL it was given with "/" before the spec file loads.
+// Playwright specs import BASE_URL from this module (via support.ts and playwright.config.ts).
+// Vitest specs import assertStoryTargetAllowed. Vitest rewrites the live BASE_URL to "/"
+// before a spec file loads, so the guard reads the value from process start and this module
+// does not throw while Vitest is loading it.
 // The value from process start is still in the process image (on Linux, /proc/self/environ).
 // If that image cannot be read, the original value is hidden and the guard fails closed.
 // TASKBOARD_URL and STAGING_URL are read from the live environment. The rewritten slot is not.
@@ -93,4 +95,27 @@ export function assertStoryTargetAllowed(env: NodeJS.ProcessEnv = process.env, b
   refuseProduction(env.TASKBOARD_URL);
   refuseProduction(env.STAGING_URL);
   refuseProduction(baseUrl);
+}
+
+/** With no target variable set, the app under test is the local server. Staging is never a default (APL-2879 D1). */
+export const LOCAL_DEFAULT = "http://localhost:3100";
+
+/**
+ * The app under test: BASE_URL, then TASKBOARD_URL (the local and CI name, as on main), then STAGING_URL (the older
+ * staging name). With none set it is LOCAL_DEFAULT. A staging run must say so: staging-e2e.yml sets BASE_URL.
+ * Production hosts are refused below whatever the variable says.
+ */
+/** Any environment-like object; only BASE_URL, TASKBOARD_URL and STAGING_URL are read. */
+export type TargetEnv = Record<string, string | undefined>;
+
+export function resolveBaseUrl(env: TargetEnv = process.env): string {
+  return (env.BASE_URL || env.TASKBOARD_URL || env.STAGING_URL || LOCAL_DEFAULT).replace(/\/+$/, "");
+}
+
+export const BASE_URL = resolveBaseUrl();
+
+if (!process.env.VITEST) {
+  const host = hostOf(BASE_URL);
+  if (!host) throw new Error(`BASE_URL is not a URL: ${BASE_URL}`);
+  if (PRODUCTION_HOSTS.has(host)) throw new Error(`Refusing to run story tests against production (${host}).`);
 }
