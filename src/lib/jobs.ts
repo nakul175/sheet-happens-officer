@@ -98,11 +98,14 @@ export async function sendReminders(now = new Date()) {
   });
 }
 
+/** True when `given` is the server's JOB_SECRET (16 characters or more), compared in constant time. */
+export function jobSecretMatches(given: string, secret = process.env.JOB_SECRET ?? "") {
+  return secret.length >= 16 && given.length === secret.length && timingSafeEqual(Buffer.from(given), Buffer.from(secret));
+}
+
 export function requireJobSecret(req: Request) {
-  const secret = process.env.JOB_SECRET ?? "";
   const given = req.headers.get("authorization")?.replace(/^Bearer /, "") ?? "";
-  const ok = secret.length >= 16 && given.length === secret.length && timingSafeEqual(Buffer.from(given), Buffer.from(secret));
-  if (!ok) throw new ApiError(401, "Not allowed");
+  if (!jobSecretMatches(given)) throw new ApiError(401, "Not allowed");
 }
 
 export async function runJob(name: string) {

@@ -10,6 +10,8 @@
 //      An unverified one gets a fresh link (at most 3 an hour). A deactivated one is reactivated. One left as Admin
 //      is put back to Member.
 //   3. Open each "Verify" email and follow its link, then run the script again. It exits 0 when every alias is ready.
+//      APL-2925: with QA_JOB_SECRET set (staging's JOB_SECRET), step 3 is done for you: each alias waiting on its link is
+//      verified through POST /api/qa/verify-alias, which staging enables with QA_VERIFY_ALIASES=1 (404 everywhere else).
 // --check changes nothing and only reports. Output names addresses and states, never a password or token.
 import { pathToFileURL } from "node:url";
 import { QA_ADMIN_EMAIL, QA_ADMIN_NAME, freeOfSecrets, parseSlots, poolFor, provisionTarget, type PoolPerson } from "../helpers/alias-pool";
@@ -29,7 +31,9 @@ export type State =
 
 export type Row = { email: string; slot: string; state: State; note: string };
 export type Result = { rows: Row[]; ready: boolean };
-export type Options = { password: string; slots: string[]; check: boolean; http: Http; secrets: string[]; pause?: number };
+/** Marks a pool alias verified on the server (APL-2925). Without one, an alias waits for its emailed link. */
+export type Verify = (email: string) => Promise<Reply>;
+export type Options = { password: string; slots: string[]; check: boolean; http: Http; secrets: string[]; pause?: number; verify?: Verify };
 
 type TeamRow = { id: string; email: string; orgRole: string; status: string };
 
@@ -56,8 +60,31 @@ export async function provision(opts: Options): Promise<Result> {
     else push(email, slot, "ERROR", `sign-up: ${said(up, secrets)}`);
   };
 
+  /** Verify on the server when a verifier is given (never with --check). True when it worked. */
+  const autoVerify = async (email: string, slot: string) => {
+    if (check || !opts.verify) return false;
+    const done = await opts.verify(email);
+    if (done.status === 200) return true;
+    push(email, slot, "ERROR", `verify step: ${said(done, secrets)}`);
+    return false;
+  };
+
   // 1. The Super Admin. Nothing else can be checked without it.
-  const adminIn = await signIn(QA_ADMIN_EMAIL);
+  let adminIn = await signIn(QA_ADMIN_EMAIL);
+  if (adminIn.status !== 200 && !check && opts.verify) {
+    const unverified = adminIn.status === 403 && /verify/i.test(said(adminIn, secrets));
+    let created = false;
+    if (adminIn.status === 401) {
+      const up = await http("POST", "/api/auth/signup", { name: QA_ADMIN_NAME, email: QA_ADMIN_EMAIL, password });
+      created = up.status === 201;
+      if (up.status === 409) { push(QA_ADMIN_EMAIL, "admin", "WRONG_PASSWORD", "the account exists but SHO_QA_PASS does not sign in"); return { rows, ready: false }; }
+      if (!created) { push(QA_ADMIN_EMAIL, "admin", "ERROR", `sign-up: ${said(up, secrets)}`); return { rows, ready: false }; }
+    }
+    if (created || unverified) {
+      if (!(await autoVerify(QA_ADMIN_EMAIL, "admin"))) return { rows, ready: false };
+      adminIn = await signIn(QA_ADMIN_EMAIL);
+    }
+  }
   if (adminIn.status !== 200) {
     const msg = said(adminIn, secrets);
     if (adminIn.status === 401) {
@@ -92,6 +119,18 @@ export async function provision(opts: Options): Promise<Result> {
     for (const p of people) {
       await sleep(pause);
       const row = byEmail.get(p.email);
+      if (!row && opts.verify && !check) {
+        const up = await http("POST", "/api/auth/signup", { name: p.name, email: p.email, password });
+        if (up.status === 409) { push(p.email, p.slot, "WRONG_PASSWORD", "the account exists but SHO_QA_PASS does not sign in"); continue; }
+        if (up.status !== 201) { push(p.email, p.slot, "ERROR", `sign-up: ${said(up, secrets)}`); continue; }
+        if (!(await autoVerify(p.email, p.slot))) continue;
+        const probe = await signIn(p.email);
+        await signOut(probe.cookie);
+        const role = (probe.json.user as { orgRole?: string } | undefined)?.orgRole;
+        if (probe.status === 200 && role === "MEMBER") push(p.email, p.slot, "READY", "signed up and verified");
+        else push(p.email, p.slot, "ERROR", probe.status === 200 ? `new account is ${role}` : `sign-in after verify: ${said(probe, secrets)}`);
+        continue;
+      }
       if (!row) {
         if (check) push(p.email, p.slot, "MISSING");
         else await signUp(p.email, p.name, p.slot);
@@ -102,9 +141,15 @@ export async function provision(opts: Options): Promise<Result> {
         const back = await http("POST", `/api/team/${row.id}/reactivate`, {}, admin);
         if (back.status !== 200) { push(p.email, p.slot, "ERROR", `reactivate: ${said(back, secrets)}`); continue; }
       }
-      const probe = await signIn(p.email);
+      let probe = await signIn(p.email);
       await signOut(probe.cookie);
-      const msg = said(probe, secrets);
+      let msg = said(probe, secrets);
+      if (probe.status === 403 && /verify/i.test(msg) && opts.verify && !check) {
+        if (!(await autoVerify(p.email, p.slot))) continue;
+        probe = await signIn(p.email);
+        await signOut(probe.cookie);
+        msg = said(probe, secrets);
+      }
       if (probe.status === 403 && /verify/i.test(msg)) {
         if (!check) await http("POST", "/api/auth/resend-verification", { email: p.email });
         push(p.email, p.slot, check ? "UNVERIFIED" : "VERIFY_SENT");
@@ -161,9 +206,9 @@ export function report(result: Result): string {
 }
 
 /** fetch against `base`, with the staging basic-auth gate when set. Only the session cookie is kept. */
-export function fetchHttp(base: URL, basic: { user: string; pass: string } | null): Http {
+export function fetchHttp(base: URL, basic: { user: string; pass: string } | null, extra: Record<string, string> = {}): Http {
   return async (method, path, body, cookie) => {
-    const headers: Record<string, string> = { "content-type": "application/json" };
+    const headers: Record<string, string> = { "content-type": "application/json", ...extra };
     if (basic) headers.authorization = `Basic ${Buffer.from(`${basic.user}:${basic.pass}`).toString("base64")}`;
     if (cookie) headers.cookie = cookie;
     const res = await fetch(new URL(path, base), { method, headers, body: body === undefined ? undefined : JSON.stringify(body), redirect: "manual" });
@@ -186,9 +231,14 @@ async function main() {
   const user = process.env.STAGING_USER ?? "";
   const pass = process.env.STAGING_PASS ?? "";
   if (remote && (!user || !pass)) throw new Error("Set STAGING_USER and STAGING_PASS for the staging basic-auth gate.");
-  const secrets = [password, pass].filter(Boolean);
-  console.log(`${check ? "Checking" : "Provisioning"} ${slots.length} slot(s) on ${base.host}.`);
-  const result = await provision({ password, slots, check, http: fetchHttp(base, remote ? { user, pass } : null), secrets });
+  const jobSecret = process.env.QA_JOB_SECRET ?? "";
+  const secrets = [password, pass, jobSecret].filter(Boolean);
+  const basic = remote ? { user, pass } : null;
+  // The job secret goes in its own header: Authorization carries the basic-auth gate.
+  const verifyHttp = jobSecret ? fetchHttp(base, basic, { "x-job-secret": jobSecret }) : null;
+  const verify: Verify | undefined = verifyHttp ? (email) => verifyHttp("POST", "/api/qa/verify-alias", { email }) : undefined;
+  console.log(`${check ? "Checking" : "Provisioning"} ${slots.length} slot(s) on ${base.host}${verify && !check ? ", verifying through /api/qa/verify-alias" : ""}.`);
+  const result = await provision({ password, slots, check, http: fetchHttp(base, basic), secrets, verify });
   const out = report(result);
   if (!freeOfSecrets(out, secrets)) throw new Error("Refusing to print output that contains a secret.");
   console.log(out);

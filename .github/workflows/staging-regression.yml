@@ -1,25 +1,27 @@
-# APL-2925. Full story-spec regression against staging (https://staging.sheethappensofficer.com), in one job.
+# APL-2925. Full story-spec regression against staging, in one job.
 # Started by hand only (Actions > Staging regression > Run workflow). Never on push, pull_request or pull_request_target,
 # so a fork cannot read these secrets.
 #
-# Steps: provision the verified alias pool (tests/e2e/tools/provision-aliases.ts --slots all), then every Playwright spec in
-# tests/e2e/stories except those tagged @local-only, then upload the counts and the evidence (if: always()).
-# New specs are included by default: nothing is picked by name.
+# Steps: provision the verified alias pool (tests/e2e/tools/provision-aliases.ts --slots all, verifying each new alias on the
+# server so no emailed link has to be clicked), then every Playwright spec in tests/e2e/stories except those tagged
+# @local-only, then upload the counts and the evidence (if: always()). New specs are included by default.
 #
 # Excluded: @local-only (Dwight's ruling, APL-2925). APL-2609, APL-2669 and APL-2674 sign up brand-new nakul17+ aliases and
 # verify them from the server's local mail outbox. On staging that would make real accounts and send real mail, then fail.
 # They still run against a local server.
 #
-# Secrets (repository settings, the same names staging-e2e.yml uses): STAGING_USER, STAGING_PASS, SHO_QA_PASS,
-# SHO_ADMIN_EMAIL, SHO_ADMIN_PASS, SHO_MEMBER_EMAIL, SHO_MEMBER_PASS. They reach steps through env: only and are never echoed.
-# There is no base-URL secret: the host is fixed below and checked against production the same way staging-e2e.yml does.
+# Target: the repository variable STAGING_BASE_URL (not a secret), else https://staging.sheethappensofficer.com. Only staging
+# or a pr1-pr4 preview is accepted; production is refused.
+# Secrets (repository settings, set by Oscar):
+#   STAGING_BASIC_USER, STAGING_BASIC_PASS   the basic-auth gate in front of staging
+#   STAGING_JOB_SECRET                      staging's JOB_SECRET, for POST /api/qa/verify-alias (src/lib/qa-verify.ts).
+#                                           Staging must also run with QA_VERIFY_ALIASES=1; anywhere else that route is 404.
+#   SHO_QA_PASS, SHO_ADMIN_EMAIL, SHO_ADMIN_PASS, SHO_MEMBER_EMAIL, SHO_MEMBER_PASS   as in staging-e2e.yml
+# They reach steps through env: only and are never echoed.
 #
 # Traces are OFF unless the "trace" input asks for them. A trace cannot be redacted: it holds the sign-in request body (the
-# password) and the basic-auth header (STAGING_USER:STAGING_PASS in base64, which GitHub's log masking does not catch)
-# (APL-2476). With traces on, the uploaded test-results artifact carries those secrets to anyone who can download it.
-#
-# Provisioning exits 2 while any alias waits on its Verify link (nakul17@aplyd.com). That fails the job before the suite runs;
-# follow the links and dispatch again.
+# password) and the basic-auth header (STAGING_BASIC_USER:STAGING_BASIC_PASS in base64, which GitHub's log masking does not
+# catch) (APL-2476). With traces on, the uploaded test-results artifact carries those secrets to anyone who can download it.
 name: Staging regression
 
 on:
@@ -41,7 +43,9 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  BASE_URL: https://staging.sheethappensofficer.com
+  BASE_URL: ${{ vars.STAGING_BASE_URL || 'https://staging.sheethappensofficer.com' }}
+  # The only hosts a run may target: staging, or the preview slots pr1-pr4. Matched against the whole host.
+  TARGET_ALLOWLIST: '^(staging\.sheethappensofficer\.com|pr[1-4]\.staging\.sheethappensofficer\.com)$'
   # Only for `prisma generate` during npm ci; nothing connects to it.
   DATABASE_URL: postgresql://unused:unused@127.0.0.1:1/unused
   DIRECT_DATABASE_URL: postgresql://unused:unused@127.0.0.1:1/unused
@@ -60,19 +64,23 @@ jobs:
     steps:
       - name: Check the target host
         run: |
-          host="${BASE_URL#https://}"; host="${host%%/*}"
+          if ! [[ "$BASE_URL" =~ ^https://([^/:]+)/?$ ]]; then
+            echo "::error::STAGING_BASE_URL must be https://<host> with no path."; exit 1
+          fi
+          host="${BASH_REMATCH[1]}"
           if [[ "${host,,}" =~ ^(www\.|app\.)?sheethappensofficer\.com\.?$ ]]; then
             echo "::error::Refusing to run against production ($host)."; exit 1
           fi
-          if [ "$host" != "staging.sheethappensofficer.com" ]; then
-            echo "::error::Target '$host' is not staging."; exit 1
+          if ! [[ "$host" =~ $TARGET_ALLOWLIST ]]; then
+            echo "::error::Target '$host' is not allowed. Use staging.sheethappensofficer.com or pr1-pr4.staging.sheethappensofficer.com."; exit 1
           fi
           echo "Target: https://$host"
 
       - name: Check the secrets are set (names only, never values)
         env:
-          STAGING_USER: ${{ secrets.STAGING_USER }}
-          STAGING_PASS: ${{ secrets.STAGING_PASS }}
+          STAGING_BASIC_USER: ${{ secrets.STAGING_BASIC_USER }}
+          STAGING_BASIC_PASS: ${{ secrets.STAGING_BASIC_PASS }}
+          QA_JOB_SECRET: ${{ secrets.STAGING_JOB_SECRET }}
           SHO_ADMIN_EMAIL: ${{ secrets.SHO_ADMIN_EMAIL }}
           SHO_ADMIN_PASS: ${{ secrets.SHO_ADMIN_PASS }}
           SHO_MEMBER_EMAIL: ${{ secrets.SHO_MEMBER_EMAIL }}
@@ -80,9 +88,10 @@ jobs:
           SHO_QA_PASS: ${{ secrets.SHO_QA_PASS }}
         run: |
           missing=""
-          for n in STAGING_USER STAGING_PASS SHO_ADMIN_EMAIL SHO_ADMIN_PASS SHO_MEMBER_EMAIL SHO_MEMBER_PASS SHO_QA_PASS; do
+          for n in STAGING_BASIC_USER STAGING_BASIC_PASS SHO_ADMIN_EMAIL SHO_ADMIN_PASS SHO_MEMBER_EMAIL SHO_MEMBER_PASS SHO_QA_PASS; do
             [ -n "${!n}" ] || missing="$missing $n"
           done
+          [ -n "$QA_JOB_SECRET" ] || missing="$missing STAGING_JOB_SECRET"
           if [ -n "$missing" ]; then
             echo "::error::Missing repository secrets:$missing. Add them in Settings > Secrets and variables > Actions."
             exit 1
@@ -97,18 +106,20 @@ jobs:
       - run: npm ci
       - run: npx playwright install --with-deps chromium
 
-      - name: Provision the alias pool (all slots)
+      - name: Provision the alias pool (all slots, verified on the server)
         env:
-          STAGING_USER: ${{ secrets.STAGING_USER }}
-          STAGING_PASS: ${{ secrets.STAGING_PASS }}
+          # The scripts and playwright.config.ts read the basic-auth pair as STAGING_USER / STAGING_PASS.
+          STAGING_USER: ${{ secrets.STAGING_BASIC_USER }}
+          STAGING_PASS: ${{ secrets.STAGING_BASIC_PASS }}
           SHO_QA_PASS: ${{ secrets.SHO_QA_PASS }}
+          QA_JOB_SECRET: ${{ secrets.STAGING_JOB_SECRET }}
         # The script prints addresses and states only, and refuses to print any line that contains a secret.
         run: npx tsx tests/e2e/tools/provision-aliases.ts --slots all
 
       - name: Run the full suite except ${{ env.EXCLUDED_TAG }} (workers=1)
         env:
-          STAGING_USER: ${{ secrets.STAGING_USER }}
-          STAGING_PASS: ${{ secrets.STAGING_PASS }}
+          STAGING_USER: ${{ secrets.STAGING_BASIC_USER }}
+          STAGING_PASS: ${{ secrets.STAGING_BASIC_PASS }}
           SHO_ADMIN_EMAIL: ${{ secrets.SHO_ADMIN_EMAIL }}
           SHO_ADMIN_PASS: ${{ secrets.SHO_ADMIN_PASS }}
           SHO_MEMBER_EMAIL: ${{ secrets.SHO_MEMBER_EMAIL }}
