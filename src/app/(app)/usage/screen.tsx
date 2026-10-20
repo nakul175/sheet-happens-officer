@@ -9,7 +9,7 @@ export type UsageRole = "MEMBER" | "ADMIN" | "SUPER_ADMIN";
  * The screen prints percentUsedLabel(spend, ceiling) and does not echo that number, so an old one-decimal
  * percent still shows 13% for 10 of 80 and "<1%" for 1 of 101.
  * A ceiling of 0 or unset (`usd` 0, null or missing) shows "No ceiling set" and no percentage (AC6 v1.1).
- * `messages` and `quickActions` stay on the type so a later section can read them; this screen does not show them (APL-2641).
+ * Messages and quick actions are separate figures (APL-2641).
  */
 export type UsagePayload = {
   monthStart: string;
@@ -21,7 +21,7 @@ export type UsagePayload = {
 };
 
 export const USAGE_DENIED = "This page isn't available";
-export const USAGE_SUB = "Spend against the monthly ceiling, plus calls and tokens this month. Counts only; no chat text is shown here.";
+export const USAGE_SUB = "Spend against the monthly ceiling, messages and quick actions this month, plus calls and tokens. Counts only; no chat text is shown here.";
 
 export const usageAllowed = (role: UsageRole) => role === "SUPER_ADMIN";
 
@@ -67,7 +67,11 @@ export function UsageContents({ role, loading, error, data }: {
       {error && <div className="err" role="alert">{error}</div>}
       {data && (
         <>
-          <SpendCeiling ceiling={data.ceiling} />
+          <div className="usage-split">
+            <SpendCeiling ceiling={data.ceiling} />
+            <MessagesThisMonth messages={data.month.messages ?? 0} />
+            <QuickActionCounts actions={data.quickActions ?? []} />
+          </div>
           <MonthCounts month={data.month} />
           <PeopleUsage people={data.people} />
         </>
@@ -121,6 +125,32 @@ export function SpendCeiling({ ceiling }: { ceiling: UsagePayload["ceiling"] }) 
       >
         <span style={{ width: `${width}%` }} />
       </div>
+    </section>
+  );
+}
+
+/** Total concierge messages this calendar month, as /api/usage counted them. Quick actions are not in this number. */
+export function MessagesThisMonth({ messages }: { messages: number }) {
+  const n = messages.toLocaleString("en-IN");
+  return (
+    <section className="card" aria-labelledby="usage-messages">
+      <h2 className="usage-h" id="usage-messages">Messages this month</h2>
+      <p className="usage-count">{n}</p>
+      <p className="hint">This calendar month, India time. Quick actions are not included.</p>
+    </section>
+  );
+}
+
+/** Each quick action's own count for the same month. These stay out of the message total. */
+export function QuickActionCounts({ actions }: { actions: NonNullable<UsagePayload["quickActions"]> }) {
+  return (
+    <section className="card" aria-labelledby="usage-quick">
+      <h2 className="usage-h" id="usage-quick">Quick actions this month</h2>
+      {actions.length === 0 ? <p className="hint">No quick actions this month.</p> : (
+        <dl className="usage-figs">
+          {actions.map((q) => <div key={q.id}><dt>{q.label}</dt><dd>{q.count.toLocaleString("en-IN")}</dd></div>)}
+        </dl>
+      )}
     </section>
   );
 }
