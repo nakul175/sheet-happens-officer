@@ -188,35 +188,53 @@ jobs:
           SHO_QA_PASS: ${{ secrets.SHO_QA_PASS }}
         run: |
           # Never prints the URL or the password: no set -x, no env dump; parts of the URL are masked before any check.
-          if ! [[ "$TARGET" =~ ^pr[1-8]\.staging\.sheethappensofficer\.com$ ]]; then
+          if ! [[ "$TARGET" =~ ^pr([1-8])\.staging\.sheethappensofficer\.com$ ]]; then
             echo "::error::Refusing to seed '$TARGET': only pr1-pr8.staging.sheethappensofficer.com (never staging or production)."; exit 1
           fi
+          slot="pr${BASH_REMATCH[1]}"; want_schema="sho_${slot}"
           url="$SEED_DATABASE_URL"
           if [ -z "$url" ]; then
             echo "::error::SHO_PR_SLOT_DATABASE_URL is missing or empty. Refusing to seed."; exit 1
           fi
           echo "::add-mask::$url"
-          rest="${url#*://}"; authority="${rest%%/*}"; userinfo=""; [[ "$authority" == *@* ]] && userinfo="${authority%@*}"
+          rest="${url#*://}"; authority="${rest%%[/?#]*}"; userinfo=""; [[ "$authority" == *@* ]] && userinfo="${authority%@*}"
           [[ "$userinfo" == *:* ]] && echo "::add-mask::${userinfo#*:}"
           hostport="${authority##*@}"; host="${hostport%:*}"; host="${host,,}"; host="${host%.}"
-          path="${rest#"$authority"}"; db="${path#/}"; db="${db%%\?*}"; db="${db,,}"
+          path="${rest#"$authority"}"; path="${path%%#*}"; db="${path%%\?*}"; db="${db#/}"; db="${db,,}"
+          query=""; [[ "$path" == *\?* ]] && query="${path#*\?}"
           if [[ "$url" == *unused:unused@127.0.0.1* || "$host" == 127.0.0.1 || "$host" == localhost || "$host" == "::1" || "$host" == "[::1]" ]]; then
             echo "::error::SHO_PR_SLOT_DATABASE_URL is still the placeholder or a local host. Refusing to seed."; exit 1
           fi
-          case "$host" in 139.59.45.166|sho.139-59-45-166.sslip.io|168.144.144.69|app.sheethappensofficer.com)
+          case "$host" in 139.59.45.166|sho.139-59-45-166.sslip.io|168.144.144.69|app.sheethappensofficer.com|sheethappensofficer.aplyd.org)
             echo "::error::SHO_PR_SLOT_DATABASE_URL points at a production host. Refusing to seed."; exit 1;;
           esac
           if [ -z "$host" ] || [ -z "$db" ] || [ "$db" = defaultdb ]; then
             echo "::error::SHO_PR_SLOT_DATABASE_URL has no host, no DB name, or the defaultdb DB. Refusing to seed."; exit 1
           fi
+          # As #128's guard: a query override moves the connection after the host and DB name above are read (APL-2590 D2).
+          # options can set search_path, which would move the schema checked below.
+          schemas=()
+          IFS='&' read -ra params <<< "$query"
+          for kv in "${params[@]}"; do
+            key="${kv%%=*}"; key="${key,,}"
+            case "$key" in
+              host|hostaddr|dbname|options|*%*)
+                echo "::error::SHO_PR_SLOT_DATABASE_URL overrides the host, DB name or search path in its query. Refusing to seed."; exit 1;;
+              schema) schemas+=("${kv#*=}");;
+            esac
+          done
+          # One secret serves every slot, so the schema must be this slot's own: sho_pr<N>, never public or missing (APL-2590 D1).
+          if [ "${#schemas[@]}" -ne 1 ] || [ "${schemas[0]}" != "$want_schema" ]; then
+            echo "::error::SHO_PR_SLOT_DATABASE_URL must set ?schema=$want_schema (exactly once) for $slot. Refusing to seed."; exit 1
+          fi
           if [ -z "$SHO_QA_PASS" ]; then
             echo "::error::SHO_QA_PASS is missing. Refusing to seed."; exit 1
           fi
           if [ ! -f scripts/seed-apl2590-fixtures.ts ]; then
-            echo "::notice::scripts/seed-apl2590-fixtures.ts is not on this ref (it is on #128's branch). Seed skipped."; exit 0
+            echo "::error::scripts/seed-apl2590-fixtures.ts is not on this ref (it is on #128's branch). Start the run from a ref that has it."; exit 1
           fi
           npm ci
-          DATABASE_URL="$url" SEED_TARGET=staging npx tsx scripts/seed-apl2590-fixtures.ts
+          DATABASE_URL="$url" SEED_TARGET=staging SEED_PR_SLOT="$slot" npx tsx scripts/seed-apl2590-fixtures.ts
 
   e2e:
     name: Shard ${{ matrix.nn }} of 20 (${{ matrix.role }})
