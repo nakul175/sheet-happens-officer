@@ -178,7 +178,8 @@ describe("qa:TC missing APL-2714 story: auth and access before the body", () => 
     const w = await setup();
     for (const [who, method, path, invalid] of [
       [w.lead, "PATCH", `/api/projects/${w.projectId}`, { name: "" }],
-      [w.lead, "POST", `/api/tasks/${w.taskId}/assign`, { assigneeId: "" }],
+      // A version route: since APL-2670 AC1 v1.4 the version is checked before the schema, so send a well-formed one.
+      [w.lead, "POST", `/api/tasks/${w.taskId}/assign`, { assigneeId: "", expectedUpdatedAt: "2026-01-01T00:00:00.000Z" }],
       [w.sa, "POST", `/api/team/${w.other.id}/deactivate`, { reassign: "" }],
     ] as const) {
       const bad = await send(who.api, method, path, invalid);

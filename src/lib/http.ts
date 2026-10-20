@@ -1,12 +1,14 @@
 import { connection } from "next/server";
 import { ZodError, type ZodType } from "zod";
 import { reqCtx, type ReqCtx } from "@/lib/reqctx";
+import { isVersionCode, versionErrorBody } from "@/lib/version-error";
 
 export class ApiError extends Error {
   constructor(
     public status: number,
     message: string,
     public extra?: Record<string, unknown>,
+    public code?: string,
   ) {
     super(message);
   }
@@ -27,6 +29,24 @@ export async function parseBody<T>(req: Request, schema: ZodType<T>): Promise<T>
 
 export function parseQuery<T>(url: URL, schema: ZodType<T>): T {
   return schema.parse(Object.fromEntries(url.searchParams));
+}
+
+/**
+ * APL-2670: version failures on edit, assign, move, complete and setApprover
+ * are exactly { error: { code, message } }. Other errors keep the shared shape,
+ * so a concierge call that throws the same ApiError still carries who changed the task.
+ */
+export function withVersionErrors<A extends unknown[]>(fn: (...args: A) => Promise<Response>) {
+  return async (...args: A): Promise<Response> => {
+    try {
+      return await fn(...args);
+    } catch (err) {
+      if (err instanceof ApiError && isVersionCode(err.code)) {
+        return Response.json(versionErrorBody(err.code, err.message), { status: err.status });
+      }
+      throw err;
+    }
+  };
 }
 
 /** Wrap a handler so thrown ApiError / ZodError / Prisma errors become JSON responses. */
