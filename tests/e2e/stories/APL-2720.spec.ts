@@ -10,7 +10,7 @@
 // ZZ-TEST names; every project this file creates is archived through the API, and the Member is taken off it.
 import { test, expect, type APIRequestContext, type Browser, type BrowserContext, type Page } from "@playwright/test";
 
-const PRODUCTION = new Set(["sheethappensofficer.com", "www.sheethappensofficer.com", "app.sheethappensofficer.com", "168.144.144.69"]);
+const PRODUCTION = new Set(["sheethappensofficer.com", "www.sheethappensofficer.com", "app.sheethappensofficer.com", "sheethappensofficer.aplyd.org", "168.144.144.69"]);
 const RUN = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 const zz = (label: string) => `${process.env.ZZ_PREFIX || "ZZ-TEST"} ${label} ${RUN}`;
 const HEADERS = ["Item", "Deleted by", "Deleted", "Time left", ""];
