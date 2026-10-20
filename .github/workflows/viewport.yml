@@ -40,6 +40,8 @@ jobs:
       APP_URL: http://localhost:3100
       TASKBOARD_URL: http://localhost:3100
       JOB_SECRET: ci-only-not-a-real-secret-0123
+      # The product default is off. The return-to story needs the return path on, as in phone checks.
+      SIGNIN_RETURN_TO: "on"
       PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.cache/ms-playwright
     steps:
       - uses: actions/checkout@v4

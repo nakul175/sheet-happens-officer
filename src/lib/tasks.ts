@@ -1,4 +1,5 @@
 import type { Prisma } from "@/generated/prisma/client";
+import { assertTaskReadable } from "@/lib/task-access";
 import { ensureNextStep } from "@/lib/deals";
 import { crmProjectWhere } from "@/lib/crm";
 import { linksOfTask } from "@/lib/records";
@@ -97,6 +98,11 @@ export async function checkAssign(user: Actor, id: string) {
 /** Same write check updateTask runs, so a caller can refuse before reading the body.
  *  An outsider gets the same 404 { error: "Task not found" } as a missing task, before the body (F8). */
 export const assertCanUpdateTask = (user: Actor, id: string, o: { holderCanDo?: boolean } = {}) => loadForEdit(user, id, o);
+
+/** The task page may show this id. Missing and no-access both throw "Task not found". */
+export async function visibleTask(user: Actor, id: string) {
+  await assertTaskReadable(user, id);
+}
 
 export const ORDER = [{ dueDate: { sort: "asc", nulls: "last" } }, { createdAt: "asc" }, { id: "asc" }] as const;
 
