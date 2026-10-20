@@ -77,8 +77,10 @@ function canonicalPath(value: string): string | null {
     if (url.origin !== BASE || url.hostname !== "return.invalid" || url.username !== "" || url.password !== "") return null;
     // AC1: the fragment is not part of the return path. The browser never sent it.
     const path = `${url.pathname}${url.search}`;
-    // The URL parser re-encodes a space as `%20`. That is still whitespace, so it is not a safe path.
-    if (!path.startsWith("/") || path.includes("//") || path.includes("\\") || WHITESPACE.test(path) || /%(?:20|09|0a|0d)/i.test(path) || /[\u0000-\u001F\u007F]/.test(path)) return null;
+    if (!path.startsWith("/") || path.includes("//") || path.includes("\\") || /[\u0000-\u001F\u007F]/.test(path)) return null;
+    // AC2 v1.5: the encoding and whitespace rules are for the path. The URL parser re-encodes a space as `%20`,
+    // so an encoded space in the path is still whitespace. A query value keeps its encoding (`?q=a%20b` is `a b`).
+    if (WHITESPACE.test(url.pathname) || /%(?:20|09|0a|0d)/i.test(url.pathname)) return null;
     return path;
   } catch {
     return null;

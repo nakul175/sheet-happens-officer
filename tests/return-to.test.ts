@@ -135,7 +135,6 @@ describe("APL-2652 safe return path", () => {
       "/tasks/a%2520b",
       "%20/tasks/T1",
       "/tasks/T1%20",
-      "/tasks/T1?tab=a%20b",
       "/%20/evil.example",
       "/tasks/a b",
       "/tasks/a\u00A0b",
@@ -143,6 +142,10 @@ describe("APL-2652 safe return path", () => {
       expect(safeReturnPath(next), next).toBeNull();
       expect(signInHref(next), next).toBe("/signin");
     }
+    // AC2 v1.5 (Pam's D6): the encoded-whitespace reject is for the path only. A query value a%20b keeps the return path.
+    expect(signInHref("/tasks/T1?tab=a%20b")).toBe("/signin?next=%2Ftasks%2FT1%3Ftab%3Da%2520b");
+    expect(safeReturnPath("/tasks/T1?tab=a%20b", 1)).toBe("/tasks/T1?tab=a%20b");
+    expect(safeReturnPath("/tasks/a%20b", 1)).toBeNull();
     const encode = (value: string, times: number) => {
       let out = value;
       for (let i = 0; i < times; i++) out = encodeURIComponent(out);
@@ -232,6 +235,20 @@ describe("APL-2652 safe return path", () => {
     expect(safeReturnPath(" /tasks/T1")).toBeNull();
     expect(safeReturnPath("/tasks/T1\t")).toBeNull();
     expect(safeReturnPath("/tasks/T1\u0001")).toBeNull();
+  });
+
+  it("D6 AC2 v1.5: encoded whitespace is a path rule; a query value keeps it", () => {
+    // Pam's D6 (6283329986): ?q=a%20b is a query value, decoded once and kept as "a b".
+    const landed = safeReturnPath(new URL("/signin?next=%2Ftasks%2FT1%3Fq%3Da%2520b", BASE_ORIGIN).searchParams.get("next"), 1);
+    expect(landed).toBe("/tasks/T1?q=a%20b");
+    expect(new URL(landed!, BASE_ORIGIN).searchParams.get("q")).toBe("a b");
+    expect(signInHref("/tasks/T1?q=a%20b")).toBe("/signin?next=%2Ftasks%2FT1%3Fq%3Da%2520b");
+    expect(safeReturnPath("/tasks/T1?tab=a%20b", 1)).toBe("/tasks/T1?tab=a%20b");
+    // The same encodings in the path are still rejected.
+    for (const path of ["/tasks/a%20b", "/tasks/T1%09", "/tasks/T1%0A", "/tasks/T1%0d"]) {
+      expect(safeReturnPath(path, 1), path).toBeNull();
+      expect(signInHref(path), path).toBe("/signin");
+    }
   });
 
   it("D1 keeps an encoded query value: R%26D, C%2B%2B and 100%25", () => {
