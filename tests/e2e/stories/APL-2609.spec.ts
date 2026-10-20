@@ -216,7 +216,7 @@ async function cleanup(): Promise<string[]> {
 
 test.describe.configure({ mode: "serial", timeout: 180_000 });
 
-test.describe("qa:TC missing APL-2609 CRM_VISIBLE hides deals on this server's mode, in the browser and over HTTP", () => {
+test.describe("qa:TC missing APL-2609 CRM_VISIBLE hides deals on this server's mode, in the browser and over HTTP", { tag: "@local-only" }, () => {
   test.beforeAll(() => {
     test.skip(!QA_PASS, "APL-2609: set SHO_QA_PASS (the password for nakul17+ aliases).");
   });
