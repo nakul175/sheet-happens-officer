@@ -21,10 +21,14 @@ function filesUnder(dir: string): string[] {
   return out;
 }
 
+// "environ" as a path piece, with a quote or "/" on each side: catches a path built with `+`, ${...} or path.join,
+// however the pieces are split ("/environ", 'environ', `environ`, "environ/..."). "environment" is not a match.
+const ENVIRON_SEGMENT = /["'`/]environ(?=["'`/$])/;
+
 /** The test-file paths under tests/ whose source reads the process image of environment variables. */
 export function environReaders(files: { file: string; text: string }[]) {
   return files
-    .filter(({ text }) => text.includes(ENVIRON) || PROC_ENVIRON.test(text) || ENVIRON_PART.test(text))
+    .filter(({ text }) => text.includes(ENVIRON) || PROC_ENVIRON.test(text) || ENVIRON_PART.test(text) || ENVIRON_SEGMENT.test(text))
     .map(({ file }) => file);
 }
 
@@ -41,10 +45,20 @@ describe("qa:TC missing APL-2917: no test file reads the whole process environme
       "readFileSync(`/proc/${process.pid}/environ`)",
       `readFileSync(path.join("/proc", "self", "environ"))`,
       `fs.readFileSync('/proc/1/environ', "latin1")`,
+      // String concatenation (Pam, D1 on f263aad).
+      `readFileSync("/proc/" + process.pid + "/environ")`,
+      `readFileSync('/proc/self' + '/environ')`,
+      "readFileSync(`/proc/${process.pid}` + `/environ`)",
+      `const dir = "/proc/self/"; readFileSync(dir + "environ")`,
+      // Template literals with the path split across pieces or inside ${...}.
+      "readFileSync(`${\"/proc/self/\" + \"environ\"}`)",
+      "readFileSync(`/proc/self/environ${suffix}`)",
     ]) {
       expect(environReaders([{ file: "x.ts", text }]), text).toEqual(["x.ts"]);
     }
-    expect(environReaders([{ file: "y.ts", text: `readFileSync("/proc/self/stat")` }])).toEqual([]);
+    for (const text of [`readFileSync("/proc/self/stat")`, `const msg = "the environment is not read";`, "`${environment}/x`", `env.BASE_URL + "/environments"`]) {
+      expect(environReaders([{ file: "y.ts", text }]), text).toEqual([]);
+    }
   });
 
   it("qa:TC missing AC1: base-url.ts reads only its named variables from process.env", () => {
