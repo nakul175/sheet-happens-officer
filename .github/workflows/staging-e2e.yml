@@ -192,24 +192,41 @@ jobs:
             echo "::error::Refusing to seed '$TARGET': only pr1-pr8.staging.sheethappensofficer.com (never staging or production)."; exit 1
           fi
           slot="pr${BASH_REMATCH[1]}"; want_schema="sho_${slot}"
+          # AC23(a): never seed with NODE_ENV=production (APL-2590 D4).
+          if [ "${NODE_ENV,,}" = production ]; then
+            echo "::error::NODE_ENV=production. Refusing to seed."; exit 1
+          fi
           url="$SEED_DATABASE_URL"
           if [ -z "$url" ]; then
             echo "::error::SHO_PR_SLOT_DATABASE_URL is missing or empty. Refusing to seed."; exit 1
+          fi
+          # ::add-mask:: masks one line and the checks below read one line, so a line break would get past both (APL-2590 D3).
+          # Mask every line of both secrets first, then refuse any secret with a line break.
+          for secret in "$SEED_DATABASE_URL" "$SHO_QA_PASS"; do
+            while IFS= read -r line || [ -n "$line" ]; do
+              [ -z "$line" ] || echo "::add-mask::$line"
+            done < <(printf '%s' "$secret" | tr '\r' '\n')
+          done
+          if [[ "$SEED_DATABASE_URL$SHO_QA_PASS" == *[$'\n\r']* ]]; then
+            echo "::error::SHO_PR_SLOT_DATABASE_URL or SHO_QA_PASS contains a line break. Refusing to seed."; exit 1
           fi
           echo "::add-mask::$url"
           rest="${url#*://}"; authority="${rest%%[/?#]*}"; userinfo=""; [[ "$authority" == *@* ]] && userinfo="${authority%@*}"
           [[ "$userinfo" == *:* ]] && echo "::add-mask::${userinfo#*:}"
           hostport="${authority##*@}"; host="${hostport%:*}"; host="${host,,}"; host="${host%.}"
-          path="${rest#"$authority"}"; path="${path%%#*}"; db="${path%%\?*}"; db="${db#/}"; db="${db,,}"
+          path="${rest#"$authority"}"; path="${path%%#*}"; db="${path%%\?*}"; db="${db#/}"
           query=""; [[ "$path" == *\?* ]] && query="${path#*\?}"
           if [[ "$url" == *unused:unused@127.0.0.1* || "$host" == 127.0.0.1 || "$host" == localhost || "$host" == "::1" || "$host" == "[::1]" ]]; then
             echo "::error::SHO_PR_SLOT_DATABASE_URL is still the placeholder or a local host. Refusing to seed."; exit 1
           fi
-          case "$host" in 139.59.45.166|sho.139-59-45-166.sslip.io|168.144.144.69|app.sheethappensofficer.com|sheethappensofficer.aplyd.org)
-            echo "::error::SHO_PR_SLOT_DATABASE_URL points at a production host. Refusing to seed."; exit 1;;
-          esac
-          if [ -z "$host" ] || [ -z "$db" ] || [ "$db" = defaultdb ]; then
-            echo "::error::SHO_PR_SLOT_DATABASE_URL has no host, no DB name, or the defaultdb DB. Refusing to seed."; exit 1
+          # AC23(a) allowlist, matched exactly (APL-2590 D1): the one staging DB host (#128's STAGING_DB_HOSTS) and the sho_staging DB.
+          # Anything else is refused: multi-host lists, IP forms, sslip/nip names, production, a port-less look-alike.
+          # The whole host:port is matched, so "host:1,other" and "[::ffff:...]" cannot pass on a stripped port.
+          if ! [[ "${hostport,,}" =~ ^private-sho-db-do-user-45345612-0\.k\.db\.ondigitalocean\.com\.?(:[0-9]{1,5})?$ ]]; then
+            echo "::error::SHO_PR_SLOT_DATABASE_URL host is not the staging DB host. Refusing to seed."; exit 1
+          fi
+          if [ "$db" != sho_staging ]; then
+            echo "::error::SHO_PR_SLOT_DATABASE_URL DB name is not sho_staging. Refusing to seed."; exit 1
           fi
           # As #128's guard: a query override moves the connection after the host and DB name above are read (APL-2590 D2).
           # options can set search_path, which would move the schema checked below.
@@ -233,7 +250,8 @@ jobs:
           if [ ! -f scripts/seed-apl2590-fixtures.ts ]; then
             echo "::error::scripts/seed-apl2590-fixtures.ts is not on this ref (it is on #128's branch). Start the run from a ref that has it."; exit 1
           fi
-          npm ci
+          # npm ci runs install scripts: it gets neither secret (APL-2590 D2).
+          env -u SEED_DATABASE_URL -u SHO_QA_PASS npm ci
           DATABASE_URL="$url" SEED_TARGET=staging SEED_PR_SLOT="$slot" npx tsx scripts/seed-apl2590-fixtures.ts
 
   e2e:
