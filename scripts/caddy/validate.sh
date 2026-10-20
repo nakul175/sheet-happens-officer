@@ -28,7 +28,7 @@ text = open(path, encoding="utf-8").read()
 if "{env.SHO_QA_BASIC_AUTH_HASH}" not in text:
     sys.exit("missing {env.SHO_QA_BASIC_AUTH_HASH}")
 
-prod = re.search(r"(?ms)^app\.sheethappensofficer\.com \{\n(?P<body>.*?)\n\}", text)
+prod = re.search(r"(?ms)^sheethappensofficer\.aplyd\.org \{\n(?P<body>.*?)\n\}", text)
 if not prod:
     sys.exit("prod site block missing")
 lines = [
@@ -40,8 +40,20 @@ expected = ["encode gzip", "reverse_proxy 127.0.0.1:3000"]
 if lines != expected:
     sys.exit(f"prod site block must stay {expected}, found {lines}")
 
-if re.search(r"(?m)^http://app\.sheethappensofficer\.com\b", text):
-    sys.exit("do not add an explicit http site for the prod host")
+old_prod = re.search(r"(?ms)^app\.sheethappensofficer\.com \{\n(?P<body>.*?)\n\}", text)
+if not old_prod:
+    sys.exit("app.sheethappensofficer.com redirect block missing")
+old_lines = [
+    line.strip()
+    for line in old_prod.group("body").splitlines()
+    if line.strip() and not line.strip().startswith("#")
+]
+old_expected = ["redir https://sheethappensofficer.aplyd.org{uri} permanent"]
+if old_lines != old_expected:
+    sys.exit(f"app.sheethappensofficer.com must be {old_expected}, found {old_lines}")
+
+if re.search(r"(?m)^http://(app\.sheethappensofficer\.com|sheethappensofficer\.aplyd\.org)\b", text):
+    sys.exit("do not add an explicit http site for the prod hosts")
 
 if "(staging_security)" not in text:
     sys.exit("missing (staging_security) snippet")
