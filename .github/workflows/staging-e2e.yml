@@ -82,7 +82,7 @@ jobs:
   plan:
     name: Pick the spec files
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 15
     outputs:
       base_url: ${{ steps.target.outputs.base_url }}
       parallel: ${{ steps.pick.outputs.parallel }}
@@ -102,6 +102,9 @@ jobs:
           fi
           echo "Target: https://$TARGET"
           echo "base_url=https://$TARGET" >> "$GITHUB_OUTPUT"
+          # The seed step below runs only for a pr1-pr8 preview slot (APL-2590).
+          if [[ "$TARGET" =~ ^pr[1-8]\.staging\.sheethappensofficer\.com$ ]]; then pr_slot=true; else pr_slot=false; fi
+          echo "pr_slot=$pr_slot" >> "$GITHUB_OUTPUT"
 
       - uses: actions/checkout@v4
 
@@ -169,6 +172,51 @@ jobs:
           expected=$(node scripts/ci/assert-playwright-ran.mjs --mode expected --parallel "${#parallel[@]}" --serial "${#serial[@]}")
           echo "Count files expected: $expected"
           echo "expected_counts=$expected" >> "$GITHUB_OUTPUT"
+
+      # APL-2590: the seed runs once here, before any shard starts. pr1-pr8 only; staging and production are refused.
+      - uses: actions/setup-node@v4
+        if: steps.target.outputs.pr_slot == 'true'
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Seed APL-2590 fixtures (pr slots only)
+        if: steps.target.outputs.pr_slot == 'true'
+        env:
+          TARGET: ${{ inputs.target }}
+          SEED_DATABASE_URL: ${{ secrets.SHO_PR_SLOT_DATABASE_URL }}
+          SHO_QA_PASS: ${{ secrets.SHO_QA_PASS }}
+        run: |
+          # Never prints the URL or the password: no set -x, no env dump; parts of the URL are masked before any check.
+          if ! [[ "$TARGET" =~ ^pr[1-8]\.staging\.sheethappensofficer\.com$ ]]; then
+            echo "::error::Refusing to seed '$TARGET': only pr1-pr8.staging.sheethappensofficer.com (never staging or production)."; exit 1
+          fi
+          url="$SEED_DATABASE_URL"
+          if [ -z "$url" ]; then
+            echo "::error::SHO_PR_SLOT_DATABASE_URL is missing or empty. Refusing to seed."; exit 1
+          fi
+          echo "::add-mask::$url"
+          rest="${url#*://}"; authority="${rest%%/*}"; userinfo=""; [[ "$authority" == *@* ]] && userinfo="${authority%@*}"
+          [[ "$userinfo" == *:* ]] && echo "::add-mask::${userinfo#*:}"
+          hostport="${authority##*@}"; host="${hostport%:*}"; host="${host,,}"; host="${host%.}"
+          path="${rest#"$authority"}"; db="${path#/}"; db="${db%%\?*}"; db="${db,,}"
+          if [[ "$url" == *unused:unused@127.0.0.1* || "$host" == 127.0.0.1 || "$host" == localhost || "$host" == "::1" || "$host" == "[::1]" ]]; then
+            echo "::error::SHO_PR_SLOT_DATABASE_URL is still the placeholder or a local host. Refusing to seed."; exit 1
+          fi
+          case "$host" in 139.59.45.166|sho.139-59-45-166.sslip.io|168.144.144.69|app.sheethappensofficer.com)
+            echo "::error::SHO_PR_SLOT_DATABASE_URL points at a production host. Refusing to seed."; exit 1;;
+          esac
+          if [ -z "$host" ] || [ -z "$db" ] || [ "$db" = defaultdb ]; then
+            echo "::error::SHO_PR_SLOT_DATABASE_URL has no host, no DB name, or the defaultdb DB. Refusing to seed."; exit 1
+          fi
+          if [ -z "$SHO_QA_PASS" ]; then
+            echo "::error::SHO_QA_PASS is missing. Refusing to seed."; exit 1
+          fi
+          if [ ! -f scripts/seed-apl2590-fixtures.ts ]; then
+            echo "::notice::scripts/seed-apl2590-fixtures.ts is not on this ref (it is on #128's branch). Seed skipped."; exit 0
+          fi
+          npm ci
+          DATABASE_URL="$url" SEED_TARGET=staging npx tsx scripts/seed-apl2590-fixtures.ts
 
   e2e:
     name: Shard ${{ matrix.nn }} of 20 (${{ matrix.role }})

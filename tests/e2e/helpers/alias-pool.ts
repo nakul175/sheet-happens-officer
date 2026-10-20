@@ -50,16 +50,16 @@ export function parseSlots(raw: string | undefined): string[] {
 }
 
 const PRODUCTION_HOSTS = new Set(["sheethappensofficer.com", "www.sheethappensofficer.com", "app.sheethappensofficer.com", "168.144.144.69"]);
-const ALLOWED_HOST = /^(staging\.sheethappensofficer\.com|pr[1-4]\.staging\.sheethappensofficer\.com|localhost|127\.0\.0\.1)$/;
+const ALLOWED_HOST = /^(staging\.sheethappensofficer\.com|pr[1-8]\.staging\.sheethappensofficer\.com|localhost|127\.0\.0\.1)$/;
 
-/** The provisioning script's target. Staging, a pr1-pr4 preview or this machine; production and everything else are refused. */
+/** The provisioning script's target. Staging, a pr1-pr8 preview or this machine; production and everything else are refused. */
 export function provisionTarget(raw: string | undefined): URL {
   if (!raw) throw new Error("Set BASE_URL to the staging host (https://staging.sheethappensofficer.com). There is no default.");
   let url: URL;
   try { url = new URL(raw); } catch { throw new Error("BASE_URL is not a URL."); }
   const host = url.hostname.toLowerCase().replace(/\.$/, "");
   if (PRODUCTION_HOSTS.has(host)) throw new Error(`Refusing to provision aliases on production (${host}).`);
-  if (!ALLOWED_HOST.test(host)) throw new Error(`Refusing host ${host}: only staging, pr1-pr4.staging or localhost.`);
+  if (!ALLOWED_HOST.test(host)) throw new Error(`Refusing host ${host}: only staging, pr1-pr8.staging or localhost.`);
   const local = host === "localhost" || host === "127.0.0.1";
   if (!local && url.protocol !== "https:") throw new Error("Use https for a remote host.");
   return new URL(url.origin);
