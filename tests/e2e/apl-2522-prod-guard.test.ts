@@ -8,6 +8,8 @@ import { assertStoryTargetAllowed, startingBaseUrl } from "./base-url";
 const PROD = "https://sheethappensofficer.com";
 const PROD_APP = "https://app.sheethappensofficer.com";
 const PROD_WWW = "https://www.sheethappensofficer.com";
+// APL-2929: production moved to sheethappensofficer.aplyd.org. The guard refuses the old hosts and the new one.
+const PROD_NEW = "https://sheethappensofficer.aplyd.org";
 const STAGING = "https://staging.sheethappensofficer.com";
 const LOCAL = "http://127.0.0.1:9";
 
@@ -17,7 +19,7 @@ function runSpec(overrides: { BASE_URL: string; TASKBOARD_URL: string; STAGING_U
   const result = spawnSync(process.execPath, [
     path.join(process.cwd(), "node_modules/vitest/vitest.mjs"),
     "run",
-    "tests/e2e/stories/APL-2522.spec.ts",
+    "tests/e2e/local/APL-2522.test.ts",
     "--config",
     "vitest.config.mts",
   ], {
@@ -85,6 +87,19 @@ describe("APL-2522 spec prod guard", () => {
       expect(message, value).toBe("Refusing to run story tests against production (168.144.144.69).");
       expect(message).not.toContain(":3000");
       expect(message).not.toContain(":443");
+    }
+  });
+
+  it("qa:TC missing APL-2929 AC2: refuses the new production host sheethappensofficer.aplyd.org, as well as the old ones", () => {
+    const env = { NODE_ENV: "test" } as NodeJS.ProcessEnv;
+    for (const value of [PROD_NEW, `${PROD_NEW}/tasks`, "sheethappensofficer.aplyd.org:443", "https://SHEETHAPPENSOFFICER.aplyd.org."]) {
+      expect(() => assertStoryTargetAllowed({ ...env, TASKBOARD_URL: value }, LOCAL), value).toThrow(
+        "Refusing to run story tests against production (sheethappensofficer.aplyd.org).",
+      );
+    }
+    expect(() => assertStoryTargetAllowed(env, PROD_NEW)).toThrow("Refusing to run story tests against production (sheethappensofficer.aplyd.org).");
+    for (const [old, host] of [[PROD, "sheethappensofficer.com"], [PROD_APP, "app.sheethappensofficer.com"], [PROD_WWW, "www.sheethappensofficer.com"]]) {
+      expect(() => assertStoryTargetAllowed({ ...env, STAGING_URL: old }, LOCAL), old).toThrow(`Refusing to run story tests against production (${host}).`);
     }
   });
 

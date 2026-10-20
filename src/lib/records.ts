@@ -8,7 +8,8 @@ import { WORKSTREAM_DEAL, requireCrm } from "@/lib/crm";
 import { formatDueDate, parseDueDate } from "@/lib/dates";
 import { logAction } from "@/lib/notify";
 import { assertNoCycle, orgOf } from "@/lib/orgs";
-import { UNDO_DAYS, UNDO_LABELS, isUndoable } from "@/lib/undoable";
+import { taskAccess } from "@/lib/tasks";
+import { UNDO_LABELS, isTooOldToUndo, isUndoable } from "@/lib/undoable";
 
 const clean = (v: string | null | undefined) => (v?.trim() ? v.trim() : null);
 const NOTE_KINDS = ["MEETING", "CALL", "INTRODUCTION", "OTHER"] as const;
@@ -35,6 +36,12 @@ async function contactOf(user: Actor, id: string, o: { removed?: boolean } = {})
 const canEditContact = (user: Actor, c: { createdById: string }) => isAdmin(user) || c.createdById === user.id;
 function requireContactEdit(user: Actor, c: { createdById: string }) {
   if (!canEditContact(user, c)) throw new ApiError(403, "Only the person who added this contact, or an Admin, can change it.");
+}
+
+/** Same visibility and edit checks updateContact runs, so a caller can refuse before reading the body. */
+export async function assertCanUpdateContact(user: Actor, id: string) {
+  requireCrm(user);
+  requireContactEdit(user, await contactOf(user, id));
 }
 
 async function knownByList(ids: string[] | undefined, user: Actor, workspaceId: string) {
@@ -202,7 +209,7 @@ export async function addTaskLink(user: Actor, taskId: string, input: { organisa
   requireCrm(user);
   const t = await db.task.findUnique({ where: { id: taskId } });
   if (!t || t.deletedAt) throw notFound("Task");
-  const a = await projectAccess(user, t.projectId, { write: true });
+  const a = await taskAccess(user, t.projectId, { write: true });
   requireWrite(a);
   if (!!input.organisationId === !!input.contactId) throw new ApiError(400, "Link either an organisation or a contact.");
   let label = "";
@@ -221,7 +228,7 @@ export async function removeTaskLink(user: Actor, taskId: string, linkId: string
   requireCrm(user);
   const t = await db.task.findUnique({ where: { id: taskId } });
   if (!t || t.deletedAt) throw notFound("Task");
-  const a = await projectAccess(user, t.projectId, { write: true });
+  const a = await taskAccess(user, t.projectId, { write: true });
   requireWrite(a);
   const l = await db.taskLink.findFirst({ where: { id: linkId, taskId } });
   if (!l) throw notFound("Link");
@@ -338,7 +345,7 @@ export async function undoRecord(user: Actor, row: { id: string; action: string;
   if (row.actorId !== user.id && !isAdmin(user)) throw new ApiError(403, "You can only undo your own actions.");
   if (row.undoneAt) throw new ApiError(409, "This action was already undone.");
   if (!isUndoable(row.action)) throw new ApiError(409, "This kind of action cannot be undone.");
-  if (Date.now() - row.createdAt.getTime() > UNDO_DAYS * 86400_000) throw new ApiError(409, "Too old to undo", { tooOld: true });
+  if (isTooOldToUndo(row.createdAt)) throw new ApiError(409, "Too old to undo", { tooOld: true });
   const p = await planRecord(row, user);
   if (p.conflicts.length && !anyway) {
     throw new ApiError(409, "This changed after your action.", { needsConfirm: "conflict", label: UNDO_LABELS[row.action], changedBy: [], conflicts: p.conflicts.map((c) => ({ field: c.field, before: String(c.before ?? "none"), after: String(c.after ?? "none"), now: String(c.now ?? "none") })) });

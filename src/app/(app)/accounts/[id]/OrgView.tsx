@@ -4,6 +4,7 @@ import { use, useState } from "react";
 import { api, dueLabel, todayIST, useGet } from "@/components/api";
 import { Confirm, Field, Modal } from "@/components/ui";
 import { Page, useMe } from "../../Shell";
+import "../scroll.css";
 
 type Contact = { id: string; name: string; role: string | null; email: string | null; phone: string | null; canEdit: boolean; knownBy: { id: string; name: string; active: boolean }[]; lastSpoke: string | null };
 type Note = { id: string; kind: string; date: string; text: string; author: { id: string; name: string }; deal: { id: string; name: string } | null; contacts: { id: string; name: string }[]; canDelete: boolean };
@@ -117,7 +118,7 @@ export default function OrgView({ params }: { params: Promise<{ id: string }> })
       <div className="grp">Open deals</div>
       {o && o.deals.length === 0 && <div className="card empty">No deals you can see yet.</div>}
       {o && o.deals.length > 0 && (
-        <div style={{ overflowX: "auto" }}><table className="tbl"><thead><tr><th>Deal</th><th>Role</th><th>Stage</th><th>Leader</th></tr></thead>
+        <div className="acct-scroll" tabIndex={0} role="region" aria-label="Open deals"><table className="tbl"><thead><tr><th>Deal</th><th>Role</th><th>Stage</th><th>Leader</th></tr></thead>
           <tbody>{o.deals.map((d) => <tr key={d.projectId}><td><Link href={`/projects/${d.projectId}`}>{d.name}</Link></td><td>{d.role}</td><td>{d.stage?.name ?? "—"} <span style={{ color: "var(--muted)" }}>{d.pipeline}</span></td><td>{d.leader?.name ?? "—"}</td></tr>)}</tbody></table></div>
       )}
 

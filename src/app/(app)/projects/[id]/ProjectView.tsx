@@ -5,12 +5,13 @@ import { use, useCallback, useEffect, useRef, useState, useSyncExternalStore } f
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Suspense } from "react";
 import { PRIORITY, ROLE, api, dueLabel, dueState, rowKeys, initials, isOverdue, todayIST, useGet } from "@/components/api";
+import { errorMessage, isVersionConflict } from "@/lib/version-error";
 import { TaskModal } from "@/components/TaskModal";
 import { AvatarGroup, Pri, Tick } from "@/components/TaskParts";
 import { Confirm, Field, LoadFailed, Menu, Modal, Skeleton } from "@/components/ui";
 import { MoveSheet } from "@/components/MoveSheet";
 import "@/components/board.css";
-import { DealPanel, type DealBlock } from "@/components/DealPanel";
+import { DealPanel, openTaskFeed, type DealBlock, type OpenTaskFeed } from "@/components/DealPanel";
 import { Page, useMe } from "../../Shell";
 import { InlineCells, inlineEditable, useInlineEdit } from "@/components/inline";
 import { ListControls } from "./ListControls";
@@ -24,7 +25,7 @@ type T = {
   assignee: { id: string; name: string }; collaborators: { id: string; name: string }[]; awaitingApproval: boolean; canClose: boolean; subtasks: { total: number; open: number };
 };
 type S = { id: string; name: string; isDone: boolean; total: number; tasks: T[]; nextCursor: string | null };
-type Summary = { open: number; overdue: number; blocked: number; awaiting: number };
+type Summary = { open: number; overdue: number; blocked: number; awaiting: number; openTasks?: number };
 type Proj = {
   id: string; name: string; archived: boolean; role: string; type?: "PROJECT" | "DEAL"; deal?: DealBlock | null;
   sections: { id: string; name: string; isDone: boolean }[];
@@ -105,6 +106,10 @@ function Inner({ id }: { id: string }) {
   }
   const p = pr.data?.project;
   const secs = tk.data?.sections;
+  // APL-2691: Won and Lost read this list. The count includes subtasks, the same set the move refuses.
+  const openFeed: OpenTaskFeed = secs
+    ? openTaskFeed(secs, tk.data?.summary?.open, filtered, tk.data?.summary?.openTasks)
+    : { status: tk.failed || tk.error ? "error" : "loading", openCount: 0, tasks: [] };
   const canWrite = !!p && p.role !== "VIEWER" && !p.archived;
   const manage = !!p && p.role === "LEADER" && !p.archived;
   // The address keeps the view, the open task and the filter, sort and group choices.
@@ -149,9 +154,9 @@ function Inner({ id }: { id: string }) {
   async function moveTo(taskId: string, sectionId: string, all = false) {
     const r = await api("POST", `/api/tasks/${taskId}/move`, { sectionId, completeAll: all, expectedUpdatedAt: versionOf(taskId) });
     if (r.ok) { setAsk(null); setErr(null); refresh(); }
-    else if (r.status === 409 && r.data.stale) { setAsk(null); setErr(r.error ?? "This task changed while you were editing it."); refresh(); }
+    else if (isVersionConflict(r.status, r.data)) { setAsk(null); setErr(errorMessage(r.error, "This task changed while you were editing it.")); refresh(); }
     else if (r.status === 409 && r.data.needsConfirm === "open_subtasks") setAsk({ taskId, sectionId, n: r.data.openSubtasks });
-    else setErr(r.error ?? "Could not move the task.");
+    else setErr(errorMessage(r.error, "Could not move the task."));
   }
 
   const tasksOf = (s: S) => [...s.tasks, ...(extra[s.id] ?? [])];
@@ -194,7 +199,7 @@ function Inner({ id }: { id: string }) {
           <button className="btn ghost sm" onClick={() => { nudgeSeen(p.id, true); setNudgeOff(true); }}>Dismiss</button>
         </div>
       )}
-      {p?.deal && <DealPanel projectId={id} deal={p.deal} canWrite={canWrite} onChange={refresh} />}
+      {p?.deal && <DealPanel projectId={id} deal={p.deal} canWrite={canWrite} onChange={refresh} feed={openFeed} />}
       <div className="tabs">
         <div className="seg" role="tablist" aria-label="View">
           <button role="tab" aria-selected={view === "list"} onClick={() => setView("list")}>List</button>

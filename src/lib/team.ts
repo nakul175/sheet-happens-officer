@@ -1,6 +1,7 @@
 import { db } from "@/lib/db";
 import { ApiError, notFound } from "@/lib/http";
 import { activeMember, isActive, isAdmin, leaderId, type Actor } from "@/lib/access";
+import { WORKSTREAM_DEAL, crmProjectWhere, crmVisible } from "@/lib/crm";
 import { auditTx, notify } from "@/lib/notify";
 import { generatePassword, hashPassword, superAdminEmails } from "@/lib/auth";
 import { sendMail, signInDetailsMail } from "@/lib/email";
@@ -35,9 +36,14 @@ export async function listTeam(user: Actor) {
 /** SHO-US-2.1 AC3: a listed address is protected whatever its stored role says. */
 const isSuper = (u: { orgRole: string; email: string }) => u.orgRole === "SUPER_ADMIN" || superAdminEmails().includes(u.email.toLowerCase());
 
+/** SHO-US-2.2. Only the Super Admin may change organisation roles. */
+export function assertCanSetOrgRole(actor: Actor) {
+  if (actor.orgRole !== "SUPER_ADMIN") throw new ApiError(403, "Only the Super Admin can change roles.");
+}
+
 /** SHO-US-2.2. Only the Super Admin; Super Admin itself can never be granted or removed here. */
 export async function setOrgRole(actor: Actor, targetId: string, role: "MEMBER" | "ADMIN") {
-  if (actor.orgRole !== "SUPER_ADMIN") throw new ApiError(403, "Only the Super Admin can change roles.");
+  assertCanSetOrgRole(actor);
   const target = await db.user.findUnique({ where: { id: targetId } });
   if (!target) throw notFound("Person");
   if (isSuper(target)) throw new ApiError(403, "The Super Admin role is set in server configuration only.");
@@ -51,7 +57,7 @@ export async function setOrgRole(actor: Actor, targetId: string, role: "MEMBER" 
   return { ...target, orgRole: role };
 }
 
-function mayAct(actor: Actor, target: { orgRole: string; email: string }) {
+export function mayAct(actor: Actor, target: { orgRole: string; email: string }) {
   if (isSuper(target)) return false; // protected in the app
   if (target.orgRole === "ADMIN") return actor.orgRole === "SUPER_ADMIN";
   return isAdmin(actor);
@@ -68,8 +74,19 @@ export async function deactivate(actor: Actor, targetId: string, reassign: strin
   const memberships = await db.projectMember.findMany({ where: { userId: targetId }, include: { project: true } });
   const leads = memberships.filter((m) => m.role === "LEADER");
   if (leads.length) {
-    throw new ApiError(409, "Name a new Leader first for: " + leads.map((m) => m.project.name).join(", "), {
-      leads: leads.map((m) => ({ id: m.projectId, name: m.project.name })),
+    // A caller who can see the CRM gets every leadership, in the same order as before (APL-2735 AC2).
+    // crmProjectWhere drops deals the caller cannot see, so those names, ids and counts stay out of the 409.
+    let visible = leads;
+    if (!crmVisible(actor)) {
+      const visibleIds = new Set((await db.projectMember.findMany({
+        where: { userId: targetId, role: "LEADER", project: crmProjectWhere(actor) },
+        select: { projectId: true },
+      })).map((row) => row.projectId));
+      visible = leads.filter((m) => visibleIds.has(m.projectId));
+    }
+    if (!visible.length) throw new ApiError(409, "Name a new Leader first.");
+    throw new ApiError(409, "Name a new Leader first for: " + visible.map((m) => m.project.name).join(", "), {
+      leads: visible.map((m) => ({ id: m.projectId, name: m.project.name })),
     });
   }
   if (reassign !== "leaders") {
@@ -173,22 +190,46 @@ export async function resendSignIn(actor: Actor & { name?: string }, targetId: s
   return { emailSent };
 }
 
-/** SHO-US-15.4. Members see a name and shared projects. Admins see the rest. */
+/**
+ * APL-2728. One fixed sentence when this viewer cannot see at least one of the person's deals.
+ * No count, no deal name, no id, no href. Zero hidden deals adds nothing.
+ */
+export const HIDDEN_DEAL_LABEL = "A deal you can't view.";
+
+const hiddenDealNotice = () => [{ name: HIDDEN_DEAL_LABEL, href: null as null }];
+
+/** SHO-US-15.4. Members see a name and shared projects. Admins see the rest. A hidden deal is one sentence (APL-2728). */
 export async function getPerson(actor: Actor, targetId: string) {
   const target = await db.user.findUnique({ where: { id: targetId } });
   const admin = isAdmin(actor);
   if (!target || (!admin && !isActive(target))) throw notFound("Person");
   const mine = admin ? null : new Set((await db.projectMember.findMany({ where: { userId: actor.id }, select: { projectId: true } })).map((m) => m.projectId));
+  // One query supplies both the visible list and the hidden flag. A second count would
+  // repeat the deal rows, and the row count itself would tell the viewer how many deals exist.
   const rows = await db.projectMember.findMany({
-    where: { userId: targetId, project: { archivedAt: null } },
-    include: { project: { select: { id: true, name: true } } },
+    where: {
+      userId: targetId,
+      ...(mine ? { projectId: { in: [...mine] } } : {}),
+      project: { archivedAt: null },
+    },
+    select: { role: true, projectId: true, project: { select: { id: true, name: true, typeId: true } } },
     orderBy: { project: { name: "asc" } },
   });
-  const shown = mine ? rows.filter((m) => mine.has(m.projectId)) : rows;
-  if (!admin) return { id: target.id, name: target.name, projects: shown.map((m) => ({ id: m.project.id, name: m.project.name })) };
+  const hideDeals = !crmVisible(actor);
+  const hidden = hideDeals && rows.some((row) => row.project.typeId === WORKSTREAM_DEAL);
+  const shown = rows.filter((row) => !(hideDeals && row.project.typeId === WORKSTREAM_DEAL));
+  const notice = hidden ? hiddenDealNotice() : [];
+  if (!admin) return { id: target.id, name: target.name, projects: [...shown.map((m) => ({ id: m.project.id, name: m.project.name })), ...notice] };
   const open = await db.task.groupBy({
     by: ["projectId"],
-    where: { assigneeId: targetId, completedAt: null, deletedAt: null, parentId: null },
+    where: {
+      assigneeId: targetId,
+      completedAt: null,
+      deletedAt: null,
+      parentId: null,
+      // A hidden deal's tasks must not add to the open-task count.
+      ...(crmVisible(actor) ? {} : { project: crmProjectWhere(actor) }),
+    },
     _count: { _all: true },
   });
   const byProject = new Map(open.map((o) => [o.projectId, o._count._all]));
@@ -200,6 +241,6 @@ export async function getPerson(actor: Actor, targetId: string) {
     status: target.deactivatedAt ? "DEACTIVATED" : !target.emailVerifiedAt ? "UNVERIFIED" : "ACTIVE",
     joinedAt: target.createdAt.toISOString(),
     openTasks: open.reduce((n, o) => n + o._count._all, 0),
-    projects: shown.map((m) => ({ id: m.project.id, name: m.project.name, role: m.role, openTasks: byProject.get(m.projectId) ?? 0 })),
+    projects: [...shown.map((m) => ({ id: m.project.id, name: m.project.name, role: m.role, openTasks: byProject.get(m.projectId) ?? 0 })), ...notice],
   };
 }

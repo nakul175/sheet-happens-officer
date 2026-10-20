@@ -3,6 +3,7 @@
 // the cells are only read-only here when the server would refuse anyway (see `inlineEditable`).
 import { useEffect, useRef, useState } from "react";
 import { PRIORITY, api, dueState, isOverdue, todayIST } from "@/components/api";
+import { conflictActor, errorMessage, isVersionConflict } from "@/lib/version-error";
 import { Pri } from "@/components/TaskParts";
 import "./inline.css";
 
@@ -31,11 +32,11 @@ export function useInlineEdit(onChanged: () => void) {
       : await api("PATCH", `/api/tasks/${t.id}`, { ...change.patch, expectedUpdatedAt: t.updatedAt });
     setBusy(false);
     if (r.ok) { setErr(null); setStale(null); onChanged(); return; }
-    if (r.status === 409 && r.data.stale) {
-      setStale({ taskId: t.id, title: t.title, who: r.data.changedBy ?? "Someone", change, what });
+    if (isVersionConflict(r.status, r.data)) {
+      setStale({ taskId: t.id, title: t.title, who: conflictActor(r.error), change, what });
       setErr(null);
       onChanged();
-    } else setErr(r.error ?? "Could not save the change.");
+    } else setErr(errorMessage(r.error, "Could not save the change."));
   }
   /** Re-apply the refused edit on top of the task's current version. */
   async function reapply() {
