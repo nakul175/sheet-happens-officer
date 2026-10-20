@@ -94,6 +94,8 @@ export async function deactivate(actor: Actor, targetId: string, reassign: strin
     if (!named || !isActive(named) || named.id === targetId) throw new ApiError(400, "Choose an active person to take the tasks.");
   }
 
+  // APL-2995: fellBack names only projects the caller can see; a hidden deal still falls back to its Leader, unnamed.
+  const showDeals = crmVisible(actor);
   return db.$transaction(async (tx) => {
     const fellBack: string[] = [];
     let moved = 0;
@@ -103,7 +105,7 @@ export async function deactivate(actor: Actor, targetId: string, reassign: strin
       if (reassign !== "leaders") {
         const ok = await activeMember(tx, m.projectId, reassign, ["LEADER", "EDITOR"]);
         if (ok) newAssignee = reassign;
-        else fellBack.push(m.project.name);
+        else if (showDeals || m.project.typeId !== WORKSTREAM_DEAL) fellBack.push(m.project.name);
       }
       const r = await releasePerson(tx, { projectId: m.projectId, userId: targetId, newAssigneeId: newAssignee, actorId: actor.id });
       moved += r.moved;
