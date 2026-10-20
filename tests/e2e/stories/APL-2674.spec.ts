@@ -126,7 +126,7 @@ function actRow(page: Page, who: string, what: string) {
     .filter({ has: page.getByText(who, { exact: true }) });
 }
 
-test.describe("APL-2674 activity delete undo", () => {
+test.describe("APL-2674 activity delete undo", { tag: "@local-only" }, () => {
   test.describe.configure({ mode: "serial" });
 
   test.beforeAll(async () => {
