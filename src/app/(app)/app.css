@@ -277,12 +277,17 @@ textarea.in.blocked-reason { display: block; margin-top: 6px; min-height: 0; lin
 main:focus { outline: none; }
 .stat { font-size: 1.17em; font-weight: 700; margin: 1em 0; }
 
-/* SHO-US-9.2 AC6: spend to date against the monthly ceiling. The bar stops at 100; the percentage text does not.
-   Columns wrap once a label would no longer fit, including the 390 px phone width. */
-.usage-h { margin: 0 0 12px; font-size: 15px; font-weight: 600; color: var(--navy); }
-.usage-figs { display: grid; grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr)); gap: 12px; margin: 0; }
-.usage-figs dt { font-size: 13px; color: var(--muted); }
+/* SHO-US-9.2 AC6 and SHO-US-9.2b: spend, messages and quick actions.
+   Sections sit side by side when the row is wide enough (1280) and stack at 320 and 390,
+   so a label always has its own line. Figure columns do the same. */
+.usage-split { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 18rem), 1fr)); gap: 14px; align-items: start; }
+.usage-split > * { min-width: 0; }
+.usage-h { margin: 0 0 12px; font-size: 15px; font-weight: 600; color: var(--navy); overflow-wrap: anywhere; }
+.usage-figs { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 9.5rem), 1fr)); gap: 12px; margin: 0; }
+.usage-figs > div { min-width: 0; }
+.usage-figs dt { font-size: 13px; color: var(--muted); overflow-wrap: anywhere; }
 .usage-figs dd { margin: 2px 0 0; font-size: 1.17em; font-weight: 700; overflow-wrap: anywhere; }
+.usage-count { margin: 0 0 8px; font-size: 1.6rem; font-weight: 700; line-height: 1.2; overflow-wrap: anywhere; }
 .usage-meter { height: 10px; margin-top: 14px; border-radius: 99px; background: #eceef3; overflow: hidden; }
 .usage-meter > span { display: block; height: 100%; background: var(--navy); }
 /* AC6 v1.1: spend over the ceiling. The words carry the meaning; the colour only adds to it. */
