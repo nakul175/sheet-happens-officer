@@ -14,7 +14,7 @@ export type UsageRole = "MEMBER" | "ADMIN" | "SUPER_ADMIN";
 export type UsagePayload = {
   monthStart: string;
   weekStart: string;
-  ceiling: { usd?: number | null; spendUsd: number; percent: number };
+  ceiling: { usd?: number | null; configured?: boolean; spendUsd?: number | null; percent: number };
   month: { calls: number; inputTokens: number; outputTokens: number; costUsd: number; messages?: number };
   quickActions?: { id: string; label: string; count: number }[];
   people: { id: string; name: string; monthCalls: number; weekCalls: number; monthCostUsd: number }[];
@@ -34,7 +34,9 @@ export function usagePath(role: UsageRole): "/api/usage" | null {
   return usageAllowed(role) ? "/api/usage" : null;
 }
 
-export const formatUsd = (n: number) => `$${n.toFixed(2)}`;
+/** A missing, null or non-finite amount is $0.00 (APL-2950). */
+export const usdAmount = (n: number | null | undefined) => (typeof n === "number" && Number.isFinite(n) ? n : 0);
+export const formatUsd = (n: number | null | undefined) => `$${usdAmount(n).toFixed(2)}`;
 
 /**
  * Bar width from the display label. The bar stops at 100. The percentage text does not.
@@ -84,22 +86,26 @@ export function UsageContents({ role, loading, error, data }: {
  * visible "Over ceiling" flag, in text so it does not rely on colour (AC6 v1.1).
  */
 export function SpendCeiling({ ceiling }: { ceiling: UsagePayload["ceiling"] }) {
-  const amount = formatUsd(ceiling.spendUsd);
-  if (!hasCeiling(ceiling.usd)) {
+  const spend = usdAmount(ceiling.spendUsd);
+  const amount = formatUsd(spend);
+  // AC6 v1.2: a ceiling of 0 or unset shows "No ceiling set" and no percentage. The $100 safety cap still
+  // applies, so the screen says so instead of passing it off as a set ceiling (APL-2950, Dwight's ruling).
+  if (ceiling.configured === false || !hasCeiling(ceiling.usd)) {
+    const safetyCap = hasCeiling(ceiling.usd) ? `, default ${formatUsd(ceiling.usd)} safety cap applies` : "";
     return (
       <section className="card">
-        <h2 className="usage-h" id="usage-ceiling">Spend against the monthly ceiling</h2>
+        <h2 className="usage-h" id="usage-ceiling">Spend to date: {NO_CEILING}</h2>
         <dl className="usage-figs">
           <div><dt>Spend to date</dt><dd>{amount}</dd></div>
-          <div><dt>Monthly ceiling</dt><dd>{NO_CEILING}</dd></div>
+          <div><dt>Monthly ceiling</dt><dd>{NO_CEILING}{safetyCap}</dd></div>
         </dl>
       </section>
     );
   }
   const cap = formatUsd(ceiling.usd);
-  const pct = percentUsedLabel(ceiling.spendUsd, ceiling.usd) ?? "0%";
-  const over = overCeiling(ceiling.spendUsd, ceiling.usd);
-  const width = meterWidth(pct, ceiling.spendUsd, ceiling.usd);
+  const pct = percentUsedLabel(spend, ceiling.usd) ?? "0%";
+  const over = overCeiling(spend, ceiling.usd);
+  const width = meterWidth(pct, spend, ceiling.usd);
   return (
     <section className="card">
       <h2 className="usage-h" id="usage-ceiling">Spend against the monthly ceiling</h2>

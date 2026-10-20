@@ -12,6 +12,8 @@ const numEnv = (v: string | undefined, d: number) => {
   return Number.isFinite(n) && n > 0 ? n : d;
 };
 export const monthlyCeilingUsd = () => numEnv(process.env.MONTHLY_CEILING_USD, 100);
+/** MONTHLY_CEILING_USD is set above 0. When it is 0 or unset, monthlyCeilingUsd is the $100 safety cap and still applies (APL-2950). */
+export const monthlyCeilingConfigured = () => numEnv(process.env.MONTHLY_CEILING_USD, 0) > 0;
 export const weeklyMessageCap = () => Math.floor(numEnv(process.env.WEEKLY_MESSAGE_CAP, 200));
 export const WARN_AT = 0.8;
 

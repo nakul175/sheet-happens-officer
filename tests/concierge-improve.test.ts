@@ -124,7 +124,7 @@ describe("qa:TC missing improve my prompt (APL-2694)", () => {
     expect(chatCreate).not.toHaveBeenCalled();
   });
 
-  it("qa:TC missing AC4: a reply that only repeats the typed text is a visible error and not counted against the week", async () => {
+  it("qa:TC missing AC4: a reply that only repeats the typed text is a visible error and counts once toward the week (APL-2871 AC1 v1.1)", async () => {
     enableModel();
     mockModel(`  ${ORIGINAL}\n`);
     await expect(improvePrompt({ id: "user-1", orgRole: "MEMBER" }, ORIGINAL)).rejects.toMatchObject({
@@ -132,7 +132,7 @@ describe("qa:TC missing improve my prompt (APL-2694)", () => {
       message: "No clearer version came back. Your text is unchanged; try again.",
     });
     expect(usageCreate).toHaveBeenCalledTimes(1);
-    expect(usageCreate.mock.calls[0][0].data).toMatchObject({ counted: false, model: "claude-haiku-5-5", userId: "user-1" });
+    expect(usageCreate.mock.calls[0][0].data).toMatchObject({ counted: true, model: "claude-haiku-5-5", userId: "user-1" });
     expect(chatCreate).not.toHaveBeenCalled();
   });
 
@@ -153,5 +153,33 @@ describe("qa:TC missing improve my prompt (APL-2694)", () => {
     ]);
     expect(sent[0].system[0].cache_control).toEqual({ type: "ephemeral" });
     expect(sent[0].tools?.[0]).toMatchObject({ name: "my_tasks", cache_control: { type: "ephemeral" } });
+  });
+});
+
+describe("qa:TC missing improve my prompt ignores near-copies (APL-2871)", () => {
+  it.each([
+    "move the budget task to monday",
+    "Move the budget task to Monday.",
+    "\u201cMove the budget task to Monday\u201d",
+  ])("qa:TC missing AC1 v1.1: the reply %j is no rewrite: 502, counted once toward the week, nothing posted", async (reply) => {
+    enableModel();
+    mockModel(reply);
+    await expect(improvePrompt({ id: "user-1", orgRole: "MEMBER" }, ORIGINAL)).rejects.toMatchObject({
+      status: 502,
+      message: "No clearer version came back. Your text is unchanged; try again.",
+    });
+    expect(usageCreate).toHaveBeenCalledTimes(1);
+    expect(usageCreate.mock.calls[0][0].data).toMatchObject({ counted: true, userId: "user-1" });
+    expect(chatCreate).not.toHaveBeenCalled();
+  });
+
+  it("qa:TC missing AC2: a real rewrite is returned and counts once toward the week", async () => {
+    enableModel();
+    mockModel("Move the budget review task to Monday 9:00");
+    const out = await improvePrompt({ id: "user-1", orgRole: "MEMBER" }, ORIGINAL);
+    expect(out.improved).toBe("Move the budget review task to Monday 9:00");
+    expect(usageCreate).toHaveBeenCalledTimes(1);
+    expect(usageCreate.mock.calls[0][0].data).toMatchObject({ counted: true, userId: "user-1" });
+    expect(chatCreate).not.toHaveBeenCalled();
   });
 });

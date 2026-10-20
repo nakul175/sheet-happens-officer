@@ -254,6 +254,8 @@ describe("caps and ledger (9.2)", () => {
     const r = await sa.c.get("/api/usage");
     expect(r.status).toBe(200);
     expect(r.json.ceiling.usd).toBe(100);
+    // The test server leaves MONTHLY_CEILING_USD unset: $100 is the default safety cap, not a set ceiling (APL-2950).
+    expect(r.json.ceiling.configured).toBe(false);
     expect(r.json.ceiling.spendUsd).toBeGreaterThan(0);
     expect(typeof r.json.ceiling.percent).toBe("number");
     expect(r.json.ceiling.percent).toBe(percentUsedNumber(r.json.ceiling.spendUsd, r.json.ceiling.usd));

@@ -1,3 +1,4 @@
+import { isEcho } from "@/lib/concierge/echo";
 import type { Card, Disabled, Message } from "./types";
 
 /** Append messages, replacing any with the same id (so a refreshed card or result replaces the old one in place). */
@@ -53,11 +54,11 @@ export function resumeText(d: Disabled): string | null {
 
 /**
  * A non-empty improve result replaces the draft and remembers the original. A failure leaves the draft alone.
- * So does a result that is only the typed text again. The server answers that case with a 502 (APL-2694), so this
- * guard only matters if an older server sends the typed text back.
+ * So does a result that is only the typed text again, judged by the same isEcho rule as the server (APL-2871).
+ * The server answers that case with a 502 (APL-2694), so this guard only matters if an older server sends it back.
  */
 export function offeredRewrite(original: string, improved: string | null | undefined): { original: string; draft: string } | null {
-  if (!improved?.trim() || improved.trim() === original.trim()) return null;
+  if (!improved?.trim() || isEcho(original, improved)) return null;
   return { original, draft: improved };
 }
 

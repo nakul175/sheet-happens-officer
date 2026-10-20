@@ -63,7 +63,7 @@ describe("percentUsedLabel (APL-2519 AC6)", () => {
     expect(percentUsedLabel(0.09, 0.4)).toBe("23%");
   });
 
-  it("qa:TC-US92-30f41089@v1 AC6 v1.1 (b): a ceiling of 0 or unset has no percentage", () => {
+  it('qa:TC-US92-30f41089@v1 AC6 v1.2: if the ceiling is 0 or unset, there is no percentage', () => {
     for (const cap of [0, -5, null, undefined, Number.NaN, Number.POSITIVE_INFINITY]) {
       expect(hasCeiling(cap), String(cap)).toBe(false);
       for (const spend of [0, 10]) {
@@ -75,7 +75,7 @@ describe("percentUsedLabel (APL-2519 AC6)", () => {
     expect(hasCeiling(80)).toBe(true);
   });
 
-  it("qa:TC-US92-5acadabc@v1 qa:TC-US92-cd463d7f@v2 AC6 v1.1 (c): over the ceiling is spend above it, and the percentage stays rounded", () => {
+  it('qa:TC-US92-5acadabc@v1 qa:TC-US92-cd463d7f@v2 AC6 v1.2: over the ceiling is spend above it, and the percentage stays rounded', () => {
     const rows: [number, number, string, boolean][] = [
       [100.4, 100, "100%", true],
       [100.01, 100, "100%", true],
