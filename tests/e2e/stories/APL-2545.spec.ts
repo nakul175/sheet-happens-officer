@@ -34,12 +34,14 @@ test("AC1: an Editor turns Idea on and the chip shows in the project list, the b
 
   await admin.page.goto("/search");
   await admin.page.getByLabel("Search").fill(t.title);
-  // The project and the task share this title. The project link is the one with no task query; the Idea chip is on the task.
-  const project = admin.page.getByRole("link", { name: t.project, exact: true }).and(admin.page.locator('a[href^="/projects/"]:not([href*="?task="])'));
-  await expect(project).toHaveAttribute("href", /^\/projects\/[^?]*$/);
-  const row = admin.page.locator("a[href*='?task=']", { hasText: t.title });
-  await expect(row).toBeVisible();
-  await expect(row.locator(".chip", { hasText: "Idea" })).toBeVisible();
+  // The project and the task share this name, so both results show it. The project result's whole name is that text.
+  // The task result is the link whose title is exactly that text and whose line names its project and assignee.
+  const project = admin.page.getByRole("link", { name: t.project, exact: true });
+  await expect(project).toHaveAttribute("href", `/projects/${t.projectId}`);
+  await expect(project.getByText("Idea", { exact: true })).toHaveCount(0);
+  const task = admin.page.getByRole("link").filter({ has: admin.page.getByText(t.title, { exact: true }) }).filter({ hasText: `${t.project} · ${admin.user.name}` });
+  await expect(task).toHaveAttribute("href", `/projects/${t.projectId}?task=${t.id}`);
+  await expect(task.getByText("Idea", { exact: true })).toBeVisible();
 });
 
 test("AC2: converting the task to a deal clears the Idea flag", async ({ admin, later }) => {
