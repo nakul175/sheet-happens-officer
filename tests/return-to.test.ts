@@ -172,6 +172,45 @@ describe("APL-2652 safe return path", () => {
     expect(signInHref(decodeURIComponent(encode("/tasks/T1?tab=comments", 5)))).toBe("/signin");
     expect(safeReturnPath(decodeURIComponent(encode("/tasks/T1?tab=comments", 6)), 1)).toBeNull();
     expect(safeReturnPath(decodeURIComponent(encode("//evil.example", 2)), 1)).toBeNull();
+    // The 17 Examples rows of AC2 v1.2, unchanged in v1.4. Each is sent as /signin?next=<row>, both as written and
+    // URL-encoded, and is decoded exactly once by the router before safeReturnPath sees it. Every one lands on /.
+    const rows = [
+      "https://evil.example",
+      "//evil.example",
+      "/\\evil.example",
+      "\\\\evil.example",
+      "%2F%2Fevil.example",
+      "/%5Cevil.example",
+      "/%09/evil.example",
+      " //evil.example",
+      "javascript:alert(1)",
+      "JaVaScRiPt:alert(1)",
+      "data:text/html,ZZ-TEST-INJECT",
+      "https:evil.example",
+      "https://return.invalid.evil.example",
+      "https://return.invalid@evil.example",
+      "",
+      "/api/tasks",
+      "/signin",
+      "/signin?next=/tasks/T1",
+    ];
+    for (const row of rows) {
+      for (const sent of [row, encodeURIComponent(row)]) {
+        const seen = new URL(`/signin?next=${sent}`, BASE_ORIGIN).searchParams.get("next");
+        expect(safeReturnPath(seen, 1), `next=${sent}`).toBeNull();
+      }
+      expect(signInHref(row), row).toBe("/signin");
+    }
+    // Missing next.
+    expect(safeReturnPath(new URL("/signin", BASE_ORIGIN).searchParams.get("next"), 1)).toBeNull();
+    // /api/ and /signin are rejected after the one decode, including when they only appear once decoded.
+    for (const sent of ["%2Fapi%2Ftasks", "%2Fapi%2Ftasks%3Fx%3D1", "%2Fsignin", "%2Fsignin%3Fnext%3D%2Ftasks%2FT1", "%2Fsignin%2F"]) {
+      const seen = new URL(`/signin?next=${sent}`, BASE_ORIGIN).searchParams.get("next");
+      expect(safeReturnPath(seen, 1), sent).toBeNull();
+    }
+    // A path still %-encoded after the one decode is rejected (the query keeps its encoding per the 19:06 ruling).
+    expect(safeReturnPath(new URL("/signin?next=%2Ftasks%252FT1", BASE_ORIGIN).searchParams.get("next"), 1)).toBeNull();
+    expect(safeReturnPath(new URL("/signin?next=%2F%2561pi%2Ftasks", BASE_ORIGIN).searchParams.get("next"), 1)).toBeNull();
   });
 
   it("AC2 v1.4 rejects whitespace or a control character at either end instead of trimming it", () => {
