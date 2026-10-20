@@ -14,7 +14,11 @@ import { RETURN_PATH_HEADER } from "@/lib/return-to";
  */
 export async function proxy(request: NextRequest) {
   const requestHeaders = new Headers(request.headers);
-  const value = request.nextUrl.pathname + request.nextUrl.search;
+  // Pam's D10. Next rebuilds the proxy's URL with URLSearchParams, so a space in the query arrives as `+` in both
+  // `request.url` and `nextUrl`. That serialiser writes a literal plus as `%2B`, so every `+` here is a space:
+  // put back `%20`, which is how the query was sent (AC2 v1.5 keeps the query's encoding).
+  const sent = new URL(request.url);
+  const value = sent.pathname + sent.search.replace(/\+/g, "%20");
   try {
     requestHeaders.set(RETURN_PATH_HEADER, value);
   } catch {

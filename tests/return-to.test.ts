@@ -1,13 +1,18 @@
 // APL-2652. Same-origin return path after sign-in, and the signed-out redirect that carries it.
 // The cases at the top do not need a server. The "signed-out redirect" cases hit TASKBOARD_URL.
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { existsSync, readFileSync } from "node:fs";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 import { api } from "@/components/api";
 import { proxy } from "@/proxy";
 import { account, BASE, project, task } from "./helpers";
-import { isSignInScreen, returnToEnabled, safeReturnPath, sessionSignInTarget, signedOutSignInHref, signInHref } from "@/lib/return-to";
+import { isSignInScreen, RETURN_PATH_HEADER, returnToEnabled, safeReturnPath, sessionSignInTarget, signedOutSignInHref, signInHref } from "@/lib/return-to";
 
 const BASE_ORIGIN = "http://return.invalid";
+/** A decoded tab, CR, LF or other control character. A header or a log line must never carry one from `next`. */
+const RAW_CONTROL = /[\u0000-\u001F\u007F]/;
+/** The same, minus the line ending a log write ends with. */
+const RAW_CONTROL_IN_LINE = /[\u0000-\u0009\u000B-\u001F\u007F]|\n(?!$)/;
 
 function expectSafe(path: string | null) {
   expect(path, "a safe path").toBeTruthy();
@@ -640,6 +645,63 @@ describe("APL-2652 signed-out redirect", () => {
       }
       expect(next, path).toBe(path);
       expect(new URL(next!, BASE).searchParams.get("q"), path).toBe(q);
+    }
+    // Pam's D9: no response header from the running server carries a raw tab, CR or LF.
+    for (const path of ["/tasks/v16-probe?q=a%09b", "/tasks/v16-probe?q=a%0Ab", "/tasks/v16-probe?q=a%0D%0Ab"]) {
+      const res = await fetch(BASE + path, { redirect: "manual" });
+      await res.arrayBuffer();
+      for (const [name, value] of res.headers.entries()) expect(`${name}: ${value}`, path).not.toMatch(RAW_CONTROL);
+    }
+    // No log line carries one either. The proxy runs in this process, so every console and stdout/stderr write is caught.
+    const lines: string[] = [];
+    const keep = (...args: unknown[]) => { lines.push(args.map(String).join(" ")); };
+    const spies = [
+      vi.spyOn(console, "log").mockImplementation(keep),
+      vi.spyOn(console, "info").mockImplementation(keep),
+      vi.spyOn(console, "warn").mockImplementation(keep),
+      vi.spyOn(console, "error").mockImplementation(keep),
+      vi.spyOn(console, "debug").mockImplementation(keep),
+      vi.spyOn(process.stdout, "write").mockImplementation((chunk: string | Uint8Array) => { lines.push(String(chunk)); return true; }),
+      vi.spyOn(process.stderr, "write").mockImplementation((chunk: string | Uint8Array) => { lines.push(String(chunk)); return true; }),
+    ];
+    const forwarded: string[] = [];
+    try {
+      for (const path of ["/tasks/v16-probe?q=a%09b", "/tasks/v16-probe?q=a%0Ab", "/tasks/v16-probe?q=a%0D%0Ab"]) {
+        const res = await proxy(new NextRequest(BASE_ORIGIN + path));
+        for (const [name, value] of res.headers.entries()) expect(`${name}: ${value}`, path).not.toMatch(RAW_CONTROL);
+        forwarded.push(res.headers.get(`x-middleware-request-${RETURN_PATH_HEADER}`) ?? "");
+      }
+    } finally {
+      for (const spy of spies) spy.mockRestore();
+    }
+    expect(forwarded).toEqual(["/tasks/v16-probe?q=a%09b", "/tasks/v16-probe?q=a%0Ab", "/tasks/v16-probe?q=a%0D%0Ab"]);
+    for (const line of lines) expect(line).not.toMatch(RAW_CONTROL_IN_LINE);
+    // The server's own log, where CI writes it (server.log) or where SERVER_LOG points.
+    const log = process.env.SERVER_LOG ?? "server.log";
+    if (existsSync(log)) {
+      for (const line of readFileSync(log, "utf8").split("\n")) {
+        if (line.includes("v16-probe")) expect(line).not.toMatch(RAW_CONTROL_IN_LINE);
+      }
+    }
+  });
+
+  it("D10 a space in a query value keeps its %20 through the signed-out redirect", async () => {
+    // Next hands the proxy a URL rebuilt with URLSearchParams, where a space is "+" and a literal plus is "%2B".
+    const forwarded = async (url: string) => (await proxy(new NextRequest(url))).headers.get(`x-middleware-request-${RETURN_PATH_HEADER}`);
+    expect(await forwarded(`${BASE_ORIGIN}/tasks/T1?q=a+b`)).toBe("/tasks/T1?q=a%20b");
+    expect(await forwarded(`${BASE_ORIGIN}/tasks/T1?q=a%20b`)).toBe("/tasks/T1?q=a%20b");
+    expect(await forwarded(`${BASE_ORIGIN}/tasks/T1?q=C%2B%2B`)).toBe("/tasks/T1?q=C%2B%2B");
+    expect(await forwarded(`${BASE_ORIGIN}/tasks/T1?q=R%26D`)).toBe("/tasks/T1?q=R%26D");
+    // The running server: Pam's probe lands on ?q=a%20b, not ?q=a+b.
+    const enabled = await serverReturnToEnabled();
+    for (const path of ["/tasks/v10-probe?q=a%20b", "/tasks/v10-probe?q=a%2Bb"]) {
+      const doc = await documentTarget(path);
+      const next = new URL(doc.target!, BASE).searchParams.get("next");
+      if (!enabled) {
+        expect(next, path).toBeNull();
+        continue;
+      }
+      expect(next, path).toBe(path);
     }
   });
 
