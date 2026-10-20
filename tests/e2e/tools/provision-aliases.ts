@@ -11,8 +11,14 @@
 //      is put back to Member.
 //   3. Open each "Verify" email and follow its link, then run the script again. It exits 0 when every alias is ready.
 // --check changes nothing and only reports. Output names addresses and states, never a password or token.
+//
+// --create (APL-2748, run by .github/workflows/provision-staging-aliases.yml) only signs up the pool Members that do not
+// exist yet, on staging itself and nothing else. An address that already exists (sign-up says 409) is skipped, never
+// changed. It needs no Super Admin and prints three counts only (created, skipped, failed), no address and no password.
+// It exits non-zero when any sign-up failed or the counts do not add up to every pool Member. A second run creates 0.
+// A created account is unverified until its Verify link is followed; the normal run above then reports what is left.
 import { pathToFileURL } from "node:url";
-import { QA_ADMIN_EMAIL, QA_ADMIN_NAME, freeOfSecrets, parseSlots, poolFor, provisionTarget, type PoolPerson } from "../helpers/alias-pool";
+import { POOL_SIZE, QA_ADMIN_EMAIL, QA_ADMIN_NAME, SLOTS, freeOfSecrets, parseSlots, poolFor, provisionTarget, stagingOnlyTarget, type PoolPerson } from "../helpers/alias-pool";
 
 export type Reply = { status: number; json: Record<string, unknown>; cookie: string | null };
 export type Http = (method: "GET" | "POST" | "PATCH", path: string, body?: unknown, cookie?: string | null) => Promise<Reply>;
@@ -126,6 +132,35 @@ export async function provision(opts: Options): Promise<Result> {
   return { rows, ready: rows.every((r) => r.state === "READY") };
 }
 
+export type CreateCounts = { created: number; skipped: number; failed: number };
+export type CreateOptions = { password: string; http: Http; pause?: number };
+
+/** Create mode: sign up every pool Member in every slot. 201 is created, 409 (already exists) is skipped, anything else failed. */
+export async function createMissing(opts: CreateOptions): Promise<CreateCounts> {
+  const pause = opts.pause ?? 300;
+  const counts: CreateCounts = { created: 0, skipped: 0, failed: 0 };
+  for (const p of SLOTS.flatMap(poolFor)) {
+    await sleep(pause);
+    let status = 0;
+    try { status = (await opts.http("POST", "/api/auth/signup", { name: p.name, email: p.email, password: opts.password })).status; }
+    catch { /* a network error counts as failed */ }
+    if (status === 201) counts.created++;
+    else if (status === 409) counts.skipped++;
+    else counts.failed++;
+  }
+  return counts;
+}
+
+/** Counts only. Never an address, a password or server text. */
+export function createSummary(c: CreateCounts): string {
+  return `created ${c.created}, skipped ${c.skipped}, failed ${c.failed}, total ${c.created + c.skipped + c.failed} of ${POOL_SIZE}`;
+}
+
+/** Create mode passes only when nothing failed and every pool Member was accounted for. */
+export function createPassed(c: CreateCounts): boolean {
+  return c.failed === 0 && c.created + c.skipped + c.failed === POOL_SIZE;
+}
+
 const AWAITING_LINK: State[] = ["SIGNED_UP", "VERIFY_SENT", "UNVERIFIED"];
 /** What to do next for a state that is not READY. Only an alias waiting on its link is told to follow one. */
 const NEXT: Record<Exclude<State, "READY">, string> = {
@@ -174,8 +209,25 @@ export function fetchHttp(base: URL, basic: { user: string; pass: string } | nul
   };
 }
 
+async function create(args: string[]) {
+  if (args.includes("--check") || args.includes("--slots")) throw new Error("--create always covers every slot and cannot be combined with --check or --slots.");
+  const base = stagingOnlyTarget(process.env.BASE_URL);
+  const password = process.env.SHO_QA_PASS ?? "";
+  if (password.length < 8) throw new Error("Set SHO_QA_PASS (8 characters or more) in the environment.");
+  const user = process.env.STAGING_USER ?? "";
+  const pass = process.env.STAGING_PASS ?? "";
+  if (!user || !pass) throw new Error("Set STAGING_USER and STAGING_PASS for the staging basic-auth gate.");
+  console.log(`Creating missing pool aliases on ${base.host}.`);
+  const counts = await createMissing({ password, http: fetchHttp(base, { user, pass }) });
+  const out = createSummary(counts);
+  if (!freeOfSecrets(out, [password, pass])) throw new Error("Refusing to print output that contains a secret.");
+  console.log(out);
+  process.exitCode = createPassed(counts) ? 0 : 2;
+}
+
 async function main() {
   const args = process.argv.slice(2);
+  if (args.includes("--create")) return create(args);
   const check = args.includes("--check");
   const at = args.indexOf("--slots");
   const slots = parseSlots(at >= 0 ? args[at + 1] : undefined);
