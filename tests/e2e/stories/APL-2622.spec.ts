@@ -1,10 +1,7 @@
 // SHO-US-23.3 New person gets sign-in details by email (APL-2622). Acceptance criteria AC1 to AC5.
-// The emailed password is only ever in the person's inbox, so what the email says and what the person sees at first sign-in are manual.
-// Resend sign-in details is exercised on throw-away "ZZ-TEST" people at an .invalid address.
-import { readFileSync } from "node:fs";
-import { test, expect, RUN, type Json } from "../support";
-import { alias, BASE_URL, sinkText } from "./qa";
-import { signInDetailsMail } from "../../../src/lib/email";
+// The emailed password is read from the test mail sink. People are ZZ-TEST names at an .invalid address and are deactivated afterwards.
+import { test, expect, RUN, BASE_URL, login, type Json } from "../support";
+import { mailedPassword, nextPass, waitForSinkMail, signInAs, PASS, passwordOk } from "./qa";
 
 const mk = async (admin: { api: { post: (p: string, b?: unknown) => Promise<{ status: number; json: Json }>; get: (p: string) => Promise<{ status: number; json: Json }> } }, later: (f: () => Promise<unknown>) => void, label: string) => {
   const r = await admin.api.post("/api/team", { firstName: "ZZ-TEST", lastName: `${label} ${RUN}`, email: `zz-test-${RUN}-${label}@example.invalid`, role: "MEMBER" });
@@ -14,75 +11,68 @@ const mk = async (admin: { api: { post: (p: string, b?: unknown) => Promise<{ st
   return { id, name: `ZZ-TEST ${label} ${RUN}`, email: `zz-test-${RUN}-${label}@example.invalid` };
 };
 
-test.describe("SHO-US-23.3 / APL-2622", () => {
-  test("AC1: the email shows the sign-in link, the username and the password", async ({ admin, later }) => {
-    const email = alias("2622", "ac1");
-    const built = signInDetailsMail(email, "ZZ-TEST", "A Super Admin", "secret-pass-1");
-    expect(built.text).toContain("/signin");
-    expect(built.text).toContain(`Username: ${email}`);
-    expect(built.text).toContain("Password: secret-pass-1");
-    const r = await admin.api.post("/api/team", { firstName: "ZZ-TEST", lastName: `mail ${RUN}`, email, role: "MEMBER" });
-    expect(r.status, JSON.stringify(r.json)).toBe(201);
-    later(async () => { await admin.api.post(`/api/team/${r.json.person.id}/deactivate`, { reassign: "leaders" }); });
-    expect(JSON.stringify(r.json).toLowerCase().includes("password")).toBe(false);
-    expect(readFileSync("src/lib/team.ts", "utf8")).toContain("signInDetailsMail");
-    const text = await sinkText(email, "Your Sheet Happens Officer account");
-    if (!text) return;
-    expect(text).toContain("/signin");
-    expect(text).toContain(`Username: ${email}`);
-    expect(text).toMatch(/^Password: .+$/m);
+test.describe("SHO-US-23.3 / APL-2622 qa:TC missing", () => {
+  test.beforeAll(() => {
+    test.skip(!PASS, "Set SHO_QA_PASS (the shared password for the nakul17+ accounts).");
+    test.skip(!passwordOk(PASS), "SHO_QA_PASS must be at least 8 characters with a letter and a number.");
+    login("ADMIN"); // no Super Admin login is a failure, not a skip: only SHO_QA_PASS gates the run
+    login("MEMBER"); // the same for the Member login, so the member fixture never skips silently (D11)
   });
 
-  test("AC2: the password stays valid until the person changes it", async ({ admin, browser, later }) => {
-    const email = alias("2622", "ac2");
-    expect(signInDetailsMail(email, "ZZ-TEST", "A Super Admin", "secret-pass-1").text).toContain("This password stays valid until you change it.");
-    const r = await admin.api.post("/api/team", { firstName: "ZZ-TEST", lastName: `keep ${RUN}`, email, role: "MEMBER" });
-    expect(r.status).toBe(201);
-    later(async () => { await admin.api.post(`/api/team/${r.json.person.id}/deactivate`, { reassign: "leaders" }); });
-    const text = await sinkText(email, "Your Sheet Happens Officer account");
-    if (!text) return;
-    const password = text.match(/^Password: (.+)$/m)?.[1];
-    expect(password).toBeTruthy();
-    const ctx = await browser.newContext({
-      baseURL: BASE_URL,
-      httpCredentials: process.env.STAGING_USER ? { username: process.env.STAGING_USER, password: process.env.STAGING_PASS ?? "" } : undefined,
-    });
-    const signed = await ctx.request.post("/api/auth/signin", { data: { email, password } });
-    expect(signed.ok()).toBe(true);
-    await ctx.close();
+  // qa:TC missing
+  test("AC1: the email shows the sign-in link, the username and the password qa:TC missing", { annotation: { type: "qa:TC", description: "qa:TC missing" } }, async ({ admin, later }) => {
+    const p = await mk(admin, later, "mail");
+    const mail = await waitForSinkMail(p.email, "Your Sheet Happens Officer account");
+    expect(mail.text).toContain("/signin");
+    expect(mail.text).toContain(`Username: ${p.email}`);
+    expect(mail.text).toMatch(/^Password: \S+$/m);
+    const pass = mail.text?.match(/^Password: (.+)$/m)?.[1] ?? "";
+    expect(JSON.stringify((await admin.api.get(`/api/team/${p.id}`)).json).includes(pass)).toBe(false);
   });
 
-  test("AC3: the first sign-in shows a closable 'Set your own password' banner linking to Profile", async ({ admin, browser, later }) => {
-    const email = alias("2622", "ac3");
-    const bar = readFileSync("src/app/(app)/Shell.tsx", "utf8");
-    expect(bar).toContain("Set your own password. The emailed one still works until you do.");
-    expect(bar).toContain('Link href="/profile"');
-    expect(bar).toContain('aria-label="Close this message"');
-    const r = await admin.api.post("/api/team", { firstName: "ZZ-TEST", lastName: `bar ${RUN}`, email, role: "MEMBER" });
-    expect(r.status).toBe(201);
-    later(async () => { await admin.api.post(`/api/team/${r.json.person.id}/deactivate`, { reassign: "leaders" }); });
-    const text = await sinkText(email, "Your Sheet Happens Officer account");
-    if (!text) return;
-    const password = text.match(/^Password: (.+)$/m)?.[1];
-    expect(password).toBeTruthy();
-    const ctx = await browser.newContext({
-      baseURL: BASE_URL,
-      httpCredentials: process.env.STAGING_USER ? { username: process.env.STAGING_USER, password: process.env.STAGING_PASS ?? "" } : undefined,
-    });
-    const page = await ctx.newPage();
-    await page.goto("/signin");
-    await page.getByLabel("Work email").fill(email);
-    await page.getByLabel("Password").fill(password!);
-    await page.getByRole("button", { name: "Sign in" }).click();
-    const banner = page.locator(".pwbar");
-    await expect(banner).toContainText("Set your own password");
-    await expect(banner.getByRole("link", { name: "Change password" })).toHaveAttribute("href", "/profile");
-    await banner.getByRole("button", { name: "Close this message" }).click();
-    await expect(banner).toHaveCount(0);
-    await ctx.close();
+  // qa:TC missing
+  test("AC2: the password stays valid until the person changes it qa:TC missing", { annotation: { type: "qa:TC", description: "qa:TC missing" } }, async ({ admin, browser, later }) => {
+    const p = await mk(admin, later, "keep");
+    const pass = mailedPassword(p.email) ?? (await waitForSinkMail(p.email, "Your Sheet Happens Officer account")).text?.match(/^Password: (.+)$/m)?.[1];
+    expect(pass, "emailed password").toBeTruthy();
+    const first = await signInAs(browser, p.email, pass!);
+    later(() => first.ctx.close());
+    expect((await first.api.get("/api/auth/me")).status).toBe(200);
+    await first.ctx.close();
+    const second = await signInAs(browser, p.email, pass!);
+    later(() => second.ctx.close());
+    const updated = nextPass(pass!);
+    const changed = await second.api.post("/api/profile/password", { current: pass, password: updated, confirm: updated });
+    expect(changed.status, JSON.stringify(changed.json)).toBe(200);
+    const fresh = await browser.newContext({ baseURL: BASE_URL });
+    later(() => fresh.close());
+    expect((await fresh.request.post("/api/auth/signin", { data: { email: p.email, password: pass } })).status()).toBe(401);
+    const ok = await fresh.request.post("/api/auth/signin", { data: { email: p.email, password: updated } });
+    const body = await ok.text();
+    expect(body.includes(updated)).toBe(false);
+    expect(ok.status()).toBe(200);
   });
 
-  test("AC4: Resend sign-in details answers with an emailed/not-emailed flag only, never a password, and is for the Super Admin only", async ({ admin, member, later }) => {
+  // qa:TC missing
+  test("AC3: the first sign-in shows a closable 'Set your own password' banner linking to Profile qa:TC missing", { annotation: { type: "qa:TC", description: "qa:TC missing" } }, async ({ admin, browser, later }) => {
+    const p = await mk(admin, later, "banner");
+    const pass = (await waitForSinkMail(p.email, "Your Sheet Happens Officer account")).text?.match(/^Password: (.+)$/m)?.[1];
+    expect(pass).toBeTruthy();
+    const who = await signInAs(browser, p.email, pass!);
+    later(() => who.ctx.close());
+    await who.page.goto("/");
+    const bar = who.page.getByRole("status").filter({ hasText: "Set your own password" });
+    await expect(bar).toBeVisible();
+    await expect(bar).toContainText("The emailed one still works until you do.");
+    await expect(bar.getByRole("link", { name: "Change password" })).toHaveAttribute("href", "/profile");
+    await bar.getByRole("button", { name: "Close this message" }).click();
+    await expect(bar).toHaveCount(0);
+    await who.page.reload();
+    await expect(who.page.getByRole("status").filter({ hasText: "Set your own password" })).toHaveCount(0);
+  });
+
+  // qa:TC missing
+  test("AC4: Resend sign-in details answers with an emailed/not-emailed flag only, never a password, and is for the Super Admin only qa:TC missing", { annotation: { type: "qa:TC", description: "qa:TC missing" } }, async ({ admin, member, later }) => {
     const p = await mk(admin, later, "resend");
     const r = await admin.api.post(`/api/team/${p.id}/resend`);
     expect(r.status, JSON.stringify(r.json)).toBe(200);
@@ -105,7 +95,8 @@ test.describe("SHO-US-23.3 / APL-2622", () => {
     expect(JSON.stringify(log).toLowerCase().includes("password")).toBe(false);
   });
 
-  test("AC4 (screen): the button on the person's page says what happened and shows no password", async ({ admin, later }) => {
+  // qa:TC missing
+  test("AC4 (screen): the button on the person's page says what happened and shows no password qa:TC missing", { annotation: { type: "qa:TC", description: "qa:TC missing" } }, async ({ admin, later }) => {
     const p = await mk(admin, later, "resendui");
     await admin.page.goto(`/team/${p.id}`);
     await admin.page.getByRole("button", { name: "Resend sign-in details" }).click({ timeout: 60_000 });
@@ -115,7 +106,8 @@ test.describe("SHO-US-23.3 / APL-2622", () => {
     expect(body.includes("Password:")).toBe(false);
   });
 
-  test("AC5: wrong-password lockout and Forgot password are unchanged for a person who was added", async ({ anon, admin, later }) => {
+  // qa:TC missing
+  test("AC5: wrong-password lockout and Forgot password are unchanged for a person who was added qa:TC missing", { annotation: { type: "qa:TC", description: "qa:TC missing" } }, async ({ anon, admin, later }) => {
     // Locking out an added person would lock a real account, so this uses the ZZ-TEST person: 5 wrong tries lock it, and the screen still offers Forgot password.
     const p = await mk(admin, later, "lockout");
     for (let i = 0; i < 5; i++) expect((await anon.request.post("/api/auth/signin", { data: { email: p.email, password: `wrong-pass-${i}9` } })).status()).toBe(401);

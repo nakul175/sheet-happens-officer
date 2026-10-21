@@ -119,14 +119,20 @@ async function sinkMails(email: string): Promise<Mail[]> {
   return found;
 }
 
+/** Every matching message currently in the outbox or the staging mail sink. */
+export async function matchingMails(email: string, subjectIncludes: string): Promise<SinkMail[]> {
+  return (await sinkMails(email))
+    .filter((mail) => (mail.subject ?? "").includes(subjectIncludes))
+    .map((mail) => ({ ...mail, token: mail.text?.match(/token=([\w-]+)/)?.[1] ?? "" }));
+}
+
 /** The next matching message in the sink. `previousToken` skips a link that was already read. Gives up after 60 seconds. */
 export async function waitForSinkMail(email: string, subjectIncludes: string, previousToken?: string | null): Promise<SinkMail> {
   const deadline = Date.now() + 60_000;
   while (Date.now() < deadline) {
-    const hits = (await sinkMails(email))
-      .filter((mail) => (mail.subject ?? "").includes(subjectIncludes))
-      .map((mail) => ({ ...mail, token: mail.text?.match(/token=([\w-]+)/)?.[1] ?? "" }))
-      .filter((mail) => mail.token && mail.token !== previousToken);
+    // Verify and reset mails carry a token. The add-person mail does not, and still counts.
+    // When a previous token is named, wait for a different link and ignore token-less mail.
+    const hits = (await matchingMails(email, subjectIncludes)).filter((mail) => !previousToken || (mail.token && mail.token !== previousToken));
     const hit = hits.at(-1);
     if (hit) return hit;
     await new Promise((resolve) => setTimeout(resolve, 1_000));

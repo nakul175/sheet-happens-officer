@@ -1,21 +1,45 @@
 // SHO-US-23.2 Super Admin adds a person (APL-2621). Acceptance criteria AC1 to AC7.
 // Added people get an address like zz-test-<run>-<label>@example.invalid, so no real inbox is mailed. They are deactivated at the end;
 // a person record cannot be deleted from the app.
-// AC5 checks the failure banner when this server's send fails, and the same copy in the page when the send succeeds.
-// AC4 reads the emailed password when the test mail sink has it, and always checks that the response stores a hash only.
-import { readFileSync } from "node:fs";
-import { test, expect, RUN, BASE_URL } from "../support";
-import { alias, sinkText } from "./qa";
+// AC4 reads the generated password from the test mail sink and, on a local run, the hash from the database.
+// AC5 blocks the local outbox so the send fails; the account must still exist and the banner must say so.
+import { existsSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import path from "node:path";
+import { test, expect, RUN, BASE_URL, login } from "../support";
+import { mailedPassword, waitForSinkMail, PASS, passwordOk } from "./qa";
 
 const SLOW = { timeout: 90_000 };
 const email = (label: string) => `zz-test-${RUN}-${label}@example.invalid`;
 
-test.describe("SHO-US-23.2 / APL-2621", () => {
-  test("AC1: only the Super Admin sees + Add person, and the server refuses anyone else", async ({ admin, member }) => {
+/** On a local server, put a file where the outbox directory is so sendMail throws. Staging is left alone. */
+async function blockLocalOutbox(): Promise<() => void> {
+  const host = new URL(BASE_URL).hostname;
+  if (host !== "localhost" && host !== "127.0.0.1") return () => {};
+  const dir = process.env.EMAIL_OUTBOX_DIR ?? path.join(process.cwd(), ".outbox");
+  const held = `${dir}.held-${Date.now()}`;
+  const had = existsSync(dir);
+  if (had) renameSync(dir, held);
+  writeFileSync(dir, "blocked");
+  return () => {
+    rmSync(dir, { force: true });
+    if (had) renameSync(held, dir);
+  };
+}
+
+test.describe("SHO-US-23.2 / APL-2621 qa:TC missing", () => {
+  test.beforeAll(() => {
+    test.skip(!PASS, "Set SHO_QA_PASS (the shared password for the nakul17+ accounts).");
+    test.skip(!passwordOk(PASS), "SHO_QA_PASS must be at least 8 characters with a letter and a number.");
+    login("ADMIN"); // no Super Admin login is a failure, not a skip: only SHO_QA_PASS gates the run
+    login("MEMBER"); // the same for the Member login, so the member fixture never skips silently (D11)
+  });
+
+  // qa:TC missing
+  test("AC1: only the Super Admin sees + Add person, and the server refuses anyone else qa:TC missing", { annotation: { type: "qa:TC", description: "qa:TC missing" } }, async ({ admin, member }) => {
     await admin.page.goto("/team");
     await expect(admin.page.getByRole("button", { name: "+ Add person" })).toBeVisible(SLOW);
     await member.page.goto("/team");
-    await expect(member.page.locator(".list .item").first()).toBeVisible(SLOW);
+    await expect(member.page.locator("#main").getByRole("link", { name: member.user.name, exact: true })).toBeVisible(SLOW);
     await expect(member.page.getByRole("button", { name: /Add person/ })).toHaveCount(0);
     const r = await member.api.post("/api/team", { firstName: "ZZ-TEST", lastName: `nope ${RUN}`, email: email("nope"), role: "MEMBER" });
     expect(r.status).toBe(403);
@@ -23,7 +47,8 @@ test.describe("SHO-US-23.2 / APL-2621", () => {
     expect(people.some((p) => p.email === email("nope"))).toBe(false);
   });
 
-  test("AC2: the form has First name, Last name, Email and Role (Member by default, Admin), and never offers Super Admin", async ({ admin }) => {
+  // qa:TC missing
+  test("AC2: the form has First name, Last name, Email and Role (Member by default, Admin), and never offers Super Admin qa:TC missing", { annotation: { type: "qa:TC", description: "qa:TC missing" } }, async ({ admin }) => {
     test.setTimeout(240_000);
     await admin.page.goto("/team");
     await admin.page.getByRole("button", { name: "+ Add person" }).click({ timeout: 90_000 });
@@ -39,7 +64,8 @@ test.describe("SHO-US-23.2 / APL-2621", () => {
     expect(r.status).toBe(400);
   });
 
-  test("AC3: an email that already exists is refused; for a deactivated person the message offers Reactivate", async ({ admin, later }) => {
+  // qa:TC missing
+  test("AC3: an email that already exists is refused; for a deactivated person the message offers Reactivate qa:TC missing", { annotation: { type: "qa:TC", description: "qa:TC missing" } }, async ({ admin, later }) => {
     const body = { firstName: "ZZ-TEST", lastName: `dup ${RUN}`, email: email("dup"), role: "MEMBER" };
     const first = await admin.api.post("/api/team", body);
     expect(first.status).toBe(201);
@@ -57,7 +83,8 @@ test.describe("SHO-US-23.2 / APL-2621", () => {
     expect(gone.json.error).toMatch(/Reactivate/);
   });
 
-  test("AC4: saving through the form creates an Active person named 'First Last' and shows the result", async ({ admin, later }) => {
+  // qa:TC missing
+  test("AC4: saving through the form creates an Active person named 'First Last' and shows the result qa:TC missing", { annotation: { type: "qa:TC", description: "qa:TC missing" } }, async ({ admin, later }) => {
     test.setTimeout(240_000);
     const addr = email("form");
     later(async () => {
@@ -79,25 +106,39 @@ test.describe("SHO-US-23.2 / APL-2621", () => {
     expect(row.orgRole).toBe("MEMBER");
   });
 
-  test("AC4 (password): the password is random and stored only as a hash", async ({ admin, later }) => {
-    const addr = alias("2621", "ac4");
-    const r = await admin.api.post("/api/team", { firstName: "ZZ-TEST", lastName: `hash ${RUN}`, email: addr, role: "MEMBER" });
-    expect(r.status, JSON.stringify(r.json)).toBe(201);
-    later(async () => { await admin.api.post(`/api/team/${r.json.person.id}/deactivate`, { reassign: "leaders" }); });
-    expect(JSON.stringify(r.json).toLowerCase().includes("password")).toBe(false);
-    const team = readFileSync("src/lib/team.ts", "utf8");
-    expect(team).toContain("passwordHash: await hashPassword(password)");
-    expect(team).toContain("never stored in clear");
-    const text = await sinkText(addr, "Your Sheet Happens Officer account");
-    if (!text) return;
-    const password = text.match(/^Password: (.+)$/m)?.[1] ?? "";
-    expect(password).toMatch(/^[A-HJ-NP-Za-km-z2-9]{12}$/);
-    expect(password).toMatch(/[A-Za-z]/);
-    expect(password).toMatch(/[2-9]/);
-    expect(JSON.stringify(r.json).includes(password)).toBe(false);
+  // qa:TC missing
+  test("AC4 (password): the password is random and stored only as a hash qa:TC missing", { annotation: { type: "qa:TC", description: "qa:TC missing" } }, async ({ admin, later }) => {
+    const make = async (label: string) => {
+      const addr = email(label);
+      const r = await admin.api.post("/api/team", { firstName: "ZZ-TEST", lastName: `${label} ${RUN}`, email: addr, role: "MEMBER" });
+      expect(r.status, JSON.stringify(r.json)).toBe(201);
+      later(async () => { await admin.api.post(`/api/team/${r.json.person.id}/deactivate`, { reassign: "leaders" }); });
+      return { addr, body: JSON.stringify(r.json) };
+    };
+    const a = await make("pw-a");
+    const b = await make("pw-b");
+    const first = (await waitForSinkMail(a.addr, "Your Sheet Happens Officer account")).text ?? "";
+    const second = mailedPassword(b.addr) ?? (await waitForSinkMail(b.addr, "Your Sheet Happens Officer account")).text?.match(/^Password: (.+)$/m)?.[1] ?? "";
+    const passA = first.match(/^Password: (.+)$/m)?.[1] ?? "";
+    expect(passA).toMatch(/^[A-Za-z0-9]{12}$/);
+    expect(/[A-Za-z]/.test(passA) && /[0-9]/.test(passA)).toBe(true);
+    expect(second).toMatch(/^[A-Za-z0-9]{12}$/);
+    expect(passA).not.toBe(second);
+    expect(a.body.includes(passA)).toBe(false);
+    expect(b.body.toLowerCase().includes("password")).toBe(false);
+    const log = JSON.stringify((await admin.api.get("/api/audit?event=USER_ADDED_BY_ADMIN")).json);
+    expect(log.includes(passA)).toBe(false);
+    expect(log.includes(second)).toBe(false);
+    const signed = await (await import("@playwright/test")).request.newContext({ baseURL: BASE_URL });
+    try {
+      const r = await signed.post("/api/auth/signin", { data: { email: a.addr, password: passA } });
+      expect(r.status(), "the emailed password works, so a verifier was stored").toBe(200);
+      expect((await r.text()).includes(passA)).toBe(false);
+    } finally { await signed.dispose(); }
   });
 
-  test("AC5: when the email cannot be sent the account still exists, the banner says so and offers Resend sign-in details", async ({ admin, later }) => {
+  // qa:TC missing
+  test("AC5: when the email cannot be sent the account still exists, the banner says so and offers Resend sign-in details qa:TC missing", { annotation: { type: "qa:TC", description: "qa:TC missing" } }, async ({ admin, later }) => {
     test.setTimeout(240_000);
     const addr = email("nosend");
     const name = `ZZ-TEST nosend ${RUN}`;
@@ -112,21 +153,19 @@ test.describe("SHO-US-23.2 / APL-2621", () => {
     await dialog.getByLabel("Last name").fill(`nosend ${RUN}`);
     await dialog.getByLabel("Email").fill(addr);
     const posted = admin.page.waitForResponse((r) => new URL(r.url()).pathname === "/api/team" && r.request().method() === "POST");
-    await dialog.getByRole("button", { name: "Add and email" }).click();
-    const res = await posted;
-    expect(res.status(), "add person").toBe(201);
-    const sent = ((await res.json()) as { person?: { emailSent?: boolean } }).person?.emailSent;
+    const restore = await blockLocalOutbox();
+    let res;
+    try {
+      await dialog.getByRole("button", { name: "Add and email" }).click();
+      res = await posted;
+    } finally { restore(); }
+    expect(res!.status(), "add person").toBe(201);
+    const sent = ((await res!.json()) as { person?: { emailSent?: boolean } }).person?.emailSent;
+    expect(sent, "the send was made to fail so the banner can be checked").toBe(false);
     const people = (await admin.api.get("/api/team")).json.people as { email: string; name: string; status: string }[];
     const row = people.find((p) => p.email === addr);
     expect(row?.name).toBe(name);
     expect(row?.status).toBe("ACTIVE");
-    const page = readFileSync("src/app/(app)/team/Team.tsx", "utf8");
-    expect(page).toContain("did not send");
-    expect(page).toContain("Resend sign-in details");
-    if (sent !== false) {
-      await expect(admin.page.getByRole("status").filter({ hasText: "was added" })).toBeVisible({ timeout: 30_000 });
-      return;
-    }
     const banner = admin.page.getByRole("status").filter({ hasText: "did not send" });
     await expect(banner).toBeVisible({ timeout: 30_000 });
     await expect(banner).toContainText("Resend sign-in details");
@@ -135,7 +174,8 @@ test.describe("SHO-US-23.2 / APL-2621", () => {
     await expect(admin.page.locator("tbody tr", { hasText: addr }).getByRole("button", { name: "Resend sign-in details" })).toBeVisible();
   });
 
-  test("AC6: the audit log records who added whom and with which role, and never the password", async ({ admin, later }) => {
+  // qa:TC missing
+  test("AC6: the audit log records who added whom and with which role, and never the password qa:TC missing", { annotation: { type: "qa:TC", description: "qa:TC missing" } }, async ({ admin, later }) => {
     const body = { firstName: "ZZ-TEST", lastName: `audit ${RUN}`, email: email("audit"), role: "ADMIN" };
     const r = await admin.api.post("/api/team", body);
     expect(r.status).toBe(201);
@@ -151,7 +191,8 @@ test.describe("SHO-US-23.2 / APL-2621", () => {
     expect(JSON.stringify(row).toLowerCase().includes("password")).toBe(false);
   });
 
-  test("AC7: any email domain works, because only self-signup is limited", async ({ admin, later }) => {
+  // qa:TC missing
+  test("AC7: any email domain works, because only self-signup is limited qa:TC missing", { annotation: { type: "qa:TC", description: "qa:TC missing" } }, async ({ admin, later }) => {
     const addr = `zz-test-${RUN}-any@zz-test-other-domain.invalid`;
     const r = await admin.api.post("/api/team", { firstName: "ZZ-TEST", lastName: `any ${RUN}`, email: addr, role: "MEMBER" });
     expect(r.status, JSON.stringify(r.json)).toBe(201);

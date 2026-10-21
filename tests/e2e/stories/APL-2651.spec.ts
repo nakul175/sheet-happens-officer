@@ -2,23 +2,15 @@
 // Eight routes: actions/bulk-undo, concierge/messages, tasks/[id], team/[id], views/[id],
 // contacts/[id], projects/[id]/sections/[sectionId], projects/[id]/members/[userId].
 //
-// Accounts are nakul17+zz-*@gmail.com aliases created for this run. Every record uses the ZZ-TEST prefix
-// and is archived afterwards. Password comes from SHO_QA_PASS and is never written here.
-// Point BASE_URL at the app under test. Production hosts are refused by tests/e2e/base-url.ts.
+// Accounts are nakul17+ aliases created for this run (the Super Admin is SHO_ADMIN_*). Every record uses the ZZ-TEST prefix.
+// Projects and organisations are archived, and the people this run created are deactivated. Password comes from SHO_QA_PASS.
+// Point BASE_URL at the app under test (local next dev). Production hosts are refused by tests/e2e/base-url.ts.
 import { writeFileSync } from "node:fs";
 import { test, expect, type APIRequestContext, type Browser, type BrowserContext } from "@playwright/test";
-import { BASE_URL, zz } from "../support";
+import { BASE_URL, login, zz } from "../support";
+import { alias, passwordOk, signUp, waitForSinkMail } from "./qa";
 
 const PASS = process.env.SHO_QA_PASS;
-
-const EMAIL = {
-  sa: "nakul17+zz-sa-2651@gmail.com",
-  lead: "nakul17+zz-lead-2651@gmail.com",
-  editor: "nakul17+zz-ed-2651@gmail.com",
-  viewer: "nakul17+zz-view-2651@gmail.com",
-  outsider: "nakul17+zz-out-2651@gmail.com",
-  orgAdmin: "nakul17+zz-orgadmin-2651@gmail.com",
-} as const;
 
 type Body = string | Record<string, unknown>;
 type Res = { status: number; json: Record<string, unknown> | null; text: string };
@@ -80,13 +72,32 @@ function expectValidation(r: Res) {
   }
 }
 
-async function signIn(browser: Browser, email: string): Promise<Who> {
-  if (!PASS) throw new Error("Set SHO_QA_PASS (the shared password for the nakul17+zz accounts).");
+async function signIn(browser: Browser, email: string, password = PASS ?? ""): Promise<Who> {
+  if (!password) throw new Error("Set SHO_QA_PASS (the shared password for the nakul17+ accounts).");
   const ctx = await browser.newContext({ baseURL: BASE_URL });
-  const r = await ctx.request.post("/api/auth/signin", { data: { email, password: PASS } });
+  const r = await ctx.request.post("/api/auth/signin", { data: { email, password } });
   expect(r.status(), `sign in ${email}`).toBe(200);
   const user = (await r.json()).user as Who["user"];
   return { ctx, request: ctx.request, user };
+}
+
+const createdIds: string[] = [];
+
+async function register(browser: Browser, tag: string): Promise<Who> {
+  const email = alias("2651", tag, "aplyd.com");
+  const signed = await signUp(anon, zz(`2651 ${tag}`), email);
+  expect(signed.status, signed.body).toBe(201);
+  const token = (await waitForSinkMail(email, "Verify")).token;
+  expect((await anon.post("/api/auth/verify", { data: { token } })).ok()).toBe(true);
+  const who = await signIn(browser, email);
+  createdIds.push(who.user.id);
+  return who;
+}
+
+async function taskVersion() {
+  const loaded = await send(lead.request, "GET", `/api/tasks/${taskId}`);
+  const version = (loaded.json?.task as { updatedAt?: string } | undefined)?.updatedAt;
+  return typeof version === "string" ? version : "";
 }
 
 let anon: APIRequestContext;
@@ -105,20 +116,26 @@ let orgId: string;
 const shapes: Record<string, unknown> = {};
 
 test.beforeAll(async ({ browser, playwright }) => {
-  test.setTimeout(180_000);
-  if (!PASS) throw new Error("Set SHO_QA_PASS (the shared password for the nakul17+zz accounts).");
+  test.setTimeout(240_000);
+  // Missing SHO_QA_PASS skips this file instead of failing collection.
+  test.skip(!PASS, "Set SHO_QA_PASS (the shared password for the nakul17+ accounts).");
+  test.skip(!passwordOk(PASS ?? ""), "SHO_QA_PASS must be at least 8 characters with a letter and a number.");
+  const admin = login("ADMIN"); // no Super Admin login is a failure, not a skip: only SHO_QA_PASS gates the run
   anon = await playwright.request.newContext({ baseURL: BASE_URL });
   const page = await browser.newPage();
   const health = await page.goto("/api/health");
   expect(health?.status()).toBe(200);
   await page.close();
 
-  sa = await signIn(browser, EMAIL.sa);
-  lead = await signIn(browser, EMAIL.lead);
-  editor = await signIn(browser, EMAIL.editor);
-  viewer = await signIn(browser, EMAIL.viewer);
-  outsider = await signIn(browser, EMAIL.outsider);
-  orgAdmin = await signIn(browser, EMAIL.orgAdmin);
+  sa = await signIn(browser, admin.email, admin.password);
+  lead = await register(browser, "lead");
+  editor = await register(browser, "editor");
+  viewer = await register(browser, "viewer");
+  outsider = await register(browser, "outsider");
+  orgAdmin = await register(browser, "orgadmin");
+  const promoted = await send(sa.request, "PATCH", `/api/team/${orgAdmin.user.id}`, { orgRole: "ADMIN" });
+  expect(promoted.status, promoted.text).toBe(200);
+  orgAdmin.user.orgRole = "ADMIN";
   expect(sa.user.orgRole).toBe("SUPER_ADMIN");
   expect(lead.user.orgRole).toBe("MEMBER");
   expect(orgAdmin.user.orgRole).toBe("ADMIN");
@@ -155,23 +172,42 @@ test.beforeAll(async ({ browser, playwright }) => {
   contactId = (contact.json?.contact as { id: string }).id;
 });
 
+// ZZ-TEST clean-up through the API. Nothing is swallowed: any refused step fails the run (D9).
+// The Super Admin takes over as Leader first, because a person who still leads a project cannot be deactivated.
 test.afterAll(async () => {
-  // beforeAll throws before an account is signed in. Reading .request on that account throws and hides the real failure.
-  if (projectId && sa?.request) await send(sa.request, "POST", `/api/projects/${projectId}/archive`).catch(() => undefined);
-  if (orgId && sa?.request) await send(sa.request, "POST", `/api/orgs/${orgId}/archive`).catch(() => undefined);
-  if (lead?.request) await send(lead.request, "DELETE", "/api/concierge/messages").catch(() => undefined);
-  await Promise.all(
-    [sa, lead, editor, viewer, outsider, orgAdmin]
-      .filter((w): w is Who => !!w?.ctx)
-      .map((w) => w.ctx.close().catch(() => undefined)),
-  );
-  await anon?.dispose().catch(() => undefined);
+  const problems: string[] = [];
+  const must = async (what: string, r: Promise<Res>, ok: (status: number) => boolean) => {
+    try {
+      const res = await r;
+      if (!ok(res.status)) problems.push(`${what}: ${res.status} ${res.text}`);
+    } catch (e) {
+      problems.push(`${what}: ${(e as Error).message}`);
+    }
+  };
+  if (sa) {
+    if (projectId) {
+      await must("add Super Admin", send(sa.request, "POST", `/api/projects/${projectId}/members`, { userId: sa.user.id, role: "EDITOR" }), (s) => s === 201 || s === 409);
+      await must("change leader", send(sa.request, "POST", `/api/projects/${projectId}/leader`, { newLeaderId: sa.user.id, previousRole: "EDITOR" }), (s) => s === 200);
+      await must("archive project", send(sa.request, "POST", `/api/projects/${projectId}/archive`), (s) => s === 200);
+    }
+    if (orgId) await must("archive org", send(sa.request, "POST", `/api/orgs/${orgId}/archive`, { archive: true }), (s) => s === 200);
+    if (lead) await must("clear lead chat", send(lead.request, "DELETE", "/api/concierge/messages"), (s) => s < 300);
+    for (const id of createdIds) await must(`deactivate ${id}`, send(sa.request, "POST", `/api/team/${id}/deactivate`, { reassign: "leaders" }), (s) => s === 200);
+  }
+  await Promise.all([sa, lead, editor, viewer, outsider, orgAdmin].filter(Boolean).map((w) => w.ctx.close()));
+  await anon?.dispose();
+  expect(problems, "ZZ-TEST clean-up through the API").toEqual([]);
 });
 
-test("AC1: no session, malformed or schema-invalid body, returns 401 with no validation details", async () => {
+// qa:TC TC-APL2651-507ede86@v1 TC-APL2651-0874d1b5@v1
+test("AC1 bulk-undo: a signed-out caller gets 401 before the body is parsed qa:TC-APL2651-507ede86@v1 qa:TC-APL2651-0874d1b5@v1", { annotation: [{ type: "qa:TC", description: "TC-APL2651-507ede86@v1" }, { type: "qa:TC", description: "TC-APL2651-0874d1b5@v1" }] }, async () => {
+  expectSignedOut(await send(anon, "POST", "/api/actions/bulk-undo", MALFORMED));
+  expectSignedOut(await send(anon, "POST", "/api/actions/bulk-undo", { ids: [] }));
+});
+
+// qa:TC TC-APL2651-507ede86@v1 TC-APL2651-0874d1b5@v1
+test("AC1: no session, malformed or schema-invalid body, returns 401 with no validation details qa:TC-APL2651-507ede86@v1 qa:TC-APL2651-0874d1b5@v1", { annotation: [{ type: "qa:TC", description: "TC-APL2651-507ede86@v1" }, { type: "qa:TC", description: "TC-APL2651-0874d1b5@v1" }] }, async () => {
   const cases: [string, string, Body][] = [
-    ["POST", "/api/actions/bulk-undo", MALFORMED],
-    ["POST", "/api/actions/bulk-undo", { ids: [] }],
     ["POST", "/api/concierge/messages", MALFORMED],
     ["POST", "/api/concierge/messages", { text: "" }],
     ["PATCH", `/api/tasks/${taskId}`, MALFORMED],
@@ -196,7 +232,8 @@ test("AC1: no session, malformed or schema-invalid body, returns 401 with no val
   await test.info().attach("ac1-routes", { body: JSON.stringify(rows, null, 2), contentType: "application/json" });
 });
 
-test("AC2: signed-in without access gets 403 or the existing not-found answer, not 400", async () => {
+// qa:TC TC-APL2651-6edd45b6@v1 TC-APL2651-93d4350b@v1
+test("AC2: signed-in without access gets 403 or the existing not-found answer, not 400 qa:TC-APL2651-6edd45b6@v1 qa:TC-APL2651-93d4350b@v1", { annotation: [{ type: "qa:TC", description: "TC-APL2651-6edd45b6@v1" }, { type: "qa:TC", description: "TC-APL2651-93d4350b@v1" }] }, async () => {
   const memberPath = `/api/projects/${projectId}/members/${editor.user.id}`;
   const sectionPath = `/api/projects/${projectId}/sections/${doing}`;
   const taskPath = `/api/tasks/${taskId}`;
@@ -236,16 +273,19 @@ test("AC2: signed-in without access gets 403 or the existing not-found answer, n
   await test.info().attach("ac2-routes", { body: JSON.stringify(rows, null, 2), contentType: "application/json" });
 });
 
-test("AC2 bulk-undo: another person's action is 403; a signed-in invalid body stays 400", async () => {
+// qa:TC TC-APL2651-6edd45b6@v1 TC-APL2651-93d4350b@v1
+test("AC2 bulk-undo: another person's action is 403; a signed-in invalid body stays 400 qa:TC-APL2651-6edd45b6@v1 qa:TC-APL2651-93d4350b@v1", { annotation: [{ type: "qa:TC", description: "TC-APL2651-6edd45b6@v1" }, { type: "qa:TC", description: "TC-APL2651-93d4350b@v1" }] }, async () => {
   // The ids are inside the body, so a signed-in caller with a bad body is 400 on this route (no target to authorise yet).
   expectBadJson(await send(editor.request, "POST", "/api/actions/bulk-undo", MALFORMED));
   expectValidation(await send(editor.request, "POST", "/api/actions/bulk-undo", { ids: [] }));
   expectValidation(await send(outsider.request, "POST", "/api/actions/bulk-undo", { ids: [] }));
 
+  const version = await taskVersion();
   const bulk = await send(lead.request, "POST", `/api/projects/${projectId}/tasks/bulk`, {
     taskIds: [taskId],
     action: "move",
     sectionId: doing,
+    ...(version ? { versions: { [taskId]: version } } : {}),
   });
   expect(bulk.status, bulk.text).toBe(200);
   const ids = bulk.json?.undoIds as string[];
@@ -259,7 +299,8 @@ test("AC2 bulk-undo: another person's action is 403; a signed-in invalid body st
   expect(undone.json).toMatchObject({ count: 1 });
 });
 
-test("AC3: an authorised caller with a bad body still gets today's 400 shape, and a valid body still works", async () => {
+// qa:TC TC-APL2651-cb9e6bf3@v1
+test("AC3: an authorised caller with a bad body still gets today's 400 shape, and a valid body still works qa:TC-APL2651-cb9e6bf3@v1", { annotation: { type: "qa:TC", description: "TC-APL2651-cb9e6bf3@v1" } }, async () => {
   const memberPath = `/api/projects/${projectId}/members/${editor.user.id}`;
   const sectionPath = `/api/projects/${projectId}/sections/${doing}`;
   const taskPath = `/api/tasks/${taskId}`;
@@ -267,7 +308,8 @@ test("AC3: an authorised caller with a bad body still gets today's 400 shape, an
   const viewPath = `/api/views/${viewId}`;
   const contactPath = `/api/contacts/${contactId}`;
 
-  const badTitle = await send(lead.request, "PATCH", taskPath, { title: "" });
+  const seenAt = await taskVersion();
+  const badTitle = await send(lead.request, "PATCH", taskPath, { title: "", expectedUpdatedAt: seenAt });
   expectValidation(badTitle);
   expect(badTitle.json?.issues).toEqual([{ path: ["title"], message: "Give the task a title." }]);
   const badTaskJson = await send(lead.request, "PATCH", taskPath, MALFORMED);
@@ -314,7 +356,8 @@ test("AC3: an authorised caller with a bad body still gets today's 400 shape, an
   if (process.env.SHAPE_OUT) writeFileSync(process.env.SHAPE_OUT, JSON.stringify(shapes, null, 2));
   await test.info().attach("ac3-shapes", { body: JSON.stringify(shapes, null, 2), contentType: "application/json" });
 
-  const renamed = await send(lead.request, "PATCH", taskPath, { title: zz("still here") });
+  const version = await taskVersion();
+  const renamed = await send(lead.request, "PATCH", taskPath, { title: zz("still here"), ...(version ? { expectedUpdatedAt: version } : {}) });
   expect(renamed.status, renamed.text).toBe(200);
   expect(renamed.json?.task).toMatchObject({ title: expect.stringContaining("ZZ-TEST") });
 
