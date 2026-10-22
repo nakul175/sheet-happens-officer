@@ -575,7 +575,12 @@ describe("APL-2652 expiry on a live browser: AC6 v1.2 keeps the target, AC7 v1.2
   it("AC6 v1.2: a person's page — an expired session answers 401 on a real person, and a signed-in one gets the page, not a redirect", async () => {
     // A real row, not a fixture id: `/api/team/p2` answers 401 for an expired cookie whether or not `p2` exists
     // (currentUser() runs before getPerson()), so a made-up id would pass this row for the wrong reason.
-    const person = await db.user.findFirstOrThrow({ where: { deactivatedAt: null }, orderBy: { createdAt: "asc" }, select: { id: true } });
+    // Total order: with a bare createdAt this could one day pick a different row, in principle the Super Admin.
+    const person = await db.user.findFirstOrThrow({
+      where: { deactivatedAt: null },
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+      select: { id: true, email: true },
+    });
     const page = `/team/${person.id}`;
 
     // 1. The trigger AC6 depends on.
@@ -584,22 +589,31 @@ describe("APL-2652 expiry on a live browser: AC6 v1.2 keeps the target, AC7 v1.2
     expect(api.status, "an expired session on a person's page answers 401").toBe(401);
     await api.arrayBuffer();
 
-    // 2. A signed-in Super Admin does NOT get a redirect away from the page. This is the half that a "401 only" row
-    //    cannot see: while the page bounced to /signin, every 401 assertion here passed and the page was broken.
+    // 2. A signed-in Super Admin is NOT bounced off the page.
+    //    Measured on this build: a person's page that the (app) layout refuses answers **200** with no Location and
+    //    puts the bounce in the RSC payload (`"digest":"NEXT_REDIRECT;replace;/signin?next=...</bounced>"`). So
+    //    status and Location cannot see it, and the expired-session wording is a sign-in-screen marker, not a
+    //    page-bounce marker. The bounce itself is the thing to assert on: a good page has no NEXT_REDIRECT digest,
+    //    a bounced one always does.
     const sa = await superAdmin();
+    expect(sa.email, "the person under test must not be the signed-in Super Admin").not.toBe(person.email);
     const pageRes = await fetch(BASE + page, { headers: { cookie: sa.c.cookie }, redirect: "manual" });
-    expect(pageRes.status, `a signed-in person opening ${page} gets the page itself`).toBe(200);
     const html = await pageRes.text();
+    expect(pageRes.status, `a signed-in person opening ${page} gets the page itself`).toBe(200);
     expect(pageRes.headers.get("location") ?? "", `${page} must not redirect a signed-in person`).toBe("");
+    expect(html, `a signed-in person must not be bounced to sign-in from ${page}`).not.toMatch(/NEXT_REDIRECT;replace;\/signin/);
     expect(html, "the page is the person's screen, not the sign-in one").not.toMatch(/Your session has expired/);
 
     // 3. What `src/components/api.ts` does with a 401 on that page, the same way the /tasks/T1 row checks it.
+    const before = process.env.SIGNIN_RETURN_TO;
     process.env.SIGNIN_RETURN_TO = "on";
     const signedInTarget = sessionSignInTarget(page) ?? "";
     expect(signedInTarget).toBe(`/signin?expired=1&next=${encodeURIComponent(page)}`);
     const roundTrip = new URL(signedInTarget, "http://return.invalid").searchParams.get("next") ?? "";
     expect(roundTrip).toBe(page);
     expect(safeReturnPath(roundTrip)).toBe(page);
+    if (before === undefined) delete process.env.SIGNIN_RETURN_TO;
+    else process.env.SIGNIN_RETURN_TO = before;
 
     // 4. The flag-on screen itself: the fixed sentence, no bounce, and the payload carries the page as `next`.
     //    Asserted against the product's flag directly (`signInReturnToEnabled()`), not inferred from a redirect the
