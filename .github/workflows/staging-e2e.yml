@@ -560,32 +560,40 @@ jobs:
           cache: npm
 
       # No `prisma generate`, no database: the probe talks to the app over HTTPS and nothing else.
-      - name: Install tsx only
+      - name: Install dependencies (no scripts, no database)
         run: npm ci --ignore-scripts --no-audit --no-fund
 
-      - name: Refuse a production or non-staging target
+      # The probe opens one connection to the staging database and runs four read-only queries: identity,
+      # schema grants, database grants, max_connections. `SET default_transaction_read_only = on` is the first
+      # statement after connect, and no DDL, DML, seed or migration exists in the script. The credential reaches
+      # the process through a 0600 file it writes from an env-only value, never argv, and nothing in the run
+      # prints it: the script strips it from every message and reports error codes only.
+      - name: Probe the staging database identity and grants (read-only SQL)
         env:
-          PROBE_BASE_URL: ${{ secrets.SHO_STAGING_PROBE_URL }}
+          STAGING_DATABASE_URL: ${{ secrets.SHO_STAGING_PROBE_URL }}
         run: |
-          echo "::add-mask::$PROBE_BASE_URL"   # a host, but also the one place a credential could arrive inside
-          if [[ -z "$PROBE_BASE_URL" ]]; then echo "::error::SHO_STAGING_PROBE_URL is not set."; exit 1; fi
-          if [[ "$PROBE_BASE_URL" == *@* || "$PROBE_BASE_URL" =~ [[:space:]] ]]; then echo "::error::The probe target carries user info or whitespace. Refusing."; exit 1; fi
-          if [[ "$PROBE_BASE_URL" != https://* ]]; then echo "::error::The probe target must be https."; exit 1; fi
-          # As the plan job does: TARGET_ALLOWLIST is matched against the bare host, so strip the scheme and any trailing slash.
-          host="${PROBE_BASE_URL#https://}"; host="${host%%/*}"; host="${host,,}"; host="${host%.}"
-          if [[ "$host" =~ ^(www\.|app\.)?sheethappensofficer\.com$ ]]; then
-            echo "::error::Refusing to probe production."; exit 1
-          fi
-          if [[ "$host" == *aplyd.org* ]]; then echo "::error::Refusing to probe production (the aplyd.org host)."; exit 1; fi
-          if ! [[ "$host" =~ $TARGET_ALLOWLIST ]]; then
-            echo "::error::The probe target is not the staging host or a pr1-pr8 preview."; exit 1
-          fi
+          if [[ -z "$STAGING_DATABASE_URL" ]]; then echo "::error::SHO_STAGING_PROBE_URL is not set."; exit 1; fi
+          echo "::add-mask::$STAGING_DATABASE_URL"
+          umask 077
+          printf '%s' "$STAGING_DATABASE_URL" > "$RUNNER_TEMP/staging-url.secret"
+          unset STAGING_DATABASE_URL
+          SHO_CHECKOUT="$GITHUB_WORKSPACE" PROBE_URL_FILE="$RUNNER_TEMP/staging-url.secret" \
+            node tests/e2e/tools/staging-isolation-probe.cjs
+          rc=$?
+          rm -f "$RUNNER_TEMP/staging-url.secret"
+          case "$rc" in
+            0) echo "::notice::ISOLATED.";;
+            1) echo "::error::NOT-ISOLATED: a stop condition fired (see the stops list above).";;
+            *) echo "::error::UNDETERMINED: the probe could not decide (exit $rc).";;
+          esac
+          exit "$rc"
 
-      - name: Probe identity, grants and write closure (read-only)
+      - name: Report the target shape, never a character of it
         env:
-          PROBE_BASE_URL: ${{ secrets.SHO_STAGING_PROBE_URL }}
-          STAGING_USER: ${{ secrets.STAGING_USER }}
-          STAGING_PASS: ${{ secrets.STAGING_PASS }}
+          STAGING_DATABASE_URL: ${{ secrets.SHO_STAGING_PROBE_URL }}
         run: |
-          echo "::add-mask::$PROBE_BASE_URL"
-          npx tsx tests/e2e/tools/staging-identity-probe.ts
+          v="$STAGING_DATABASE_URL"
+          echo "length=${#v}"
+          echo "scheme=postgres$( [[ "$v" == postgresql://* ]] && echo ql )"
+          echo "sslmode_present=$( [[ "$v" == *sslmode=* ]] && echo yes || echo no)"
+          echo "has_linebreak=$( case "$v" in *$'\n'*|*$'\r'*) echo yes;; *) echo no;; esac )"
