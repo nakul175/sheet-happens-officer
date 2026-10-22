@@ -96,7 +96,12 @@ beforeAll(async () => {
   const token = latestMailText(lockoutEmail, /Verify/).match(/token=([\w-]+)/)?.[1] ?? null;
   expect(token, "the sign-up mail carries a verify token").toBeTruthy();
   expect((await new Client().post("/api/auth/verify", { token })).status).toBe(200);
-  lockoutAccountId = signedUp.json.user.id;
+  // APL-2742: sign-up answers { status: "check_email" } only, never the person, so the id comes from the Team list.
+  const team = await root.c.get("/api/team");
+  expect(team.status, JSON.stringify(team.json)).toBe(200);
+  const lockoutPerson = (team.json.people as { id: string; email: string }[]).find((x) => x.email === lockoutEmail);
+  expect(lockoutPerson, `${lockoutEmail} is listed for the Super Admin so the lockout person can be deactivated after`).toBeTruthy();
+  lockoutAccountId = lockoutPerson!.id;
 }, 90000);
 
 afterAll(async () => {

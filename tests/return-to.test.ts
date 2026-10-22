@@ -593,7 +593,8 @@ describe("APL-2652 expiry on a live browser: AC6 v1.2 keeps the target, AC7 v1.2
       expect(screen.status).toBe(200);
       expect(screen.target, "sign-in does not bounce anywhere on its own").toBeNull();
       expect(screen.html).toMatch(/<div role="alert"[^>]*>Your session has expired, please sign in again<\/div>/);
-      expect(screen.html).toContain('\"next\":\"/team/p2\"');
+      // The same escaping as the /tasks/T1 row above: the payload carries double-escaped quotes, so the match needs two.
+      expect(screen.html).toContain('\\"next\\":\\"/team/p2\\"');
     }
   });
 
