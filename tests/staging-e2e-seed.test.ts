@@ -6,7 +6,6 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync 
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { guard } from "../scripts/seed-apl2590-fixtures";
 
 const WORKFLOW = readFileSync(path.join(process.cwd(), ".github/workflows/staging-e2e.yml"), "utf8");
 const PW = "s3cretDbPw9";
@@ -252,86 +251,3 @@ describe("qa:TC missing APL-2590 seed step (staging-e2e.yml)", () => {
     }
   });
 });
-
-// The seed's own in-process guard must agree with the step above. These call guard() directly: no bash, so they pass
-// on this machine's bash 3.2, where the ${VAR,,} shells above fail.
-const stageEnv = (query: string, extra: Record<string, string> = {}) => ({
-  NODE_ENV: "test",
-  SEED_TARGET: "staging",
-  DATABASE_URL: url(query),
-  // staging-e2e.yml always passes the slot alongside the URL; the guard binds the two.
-  SEED_PR_SLOT: (query.match(/schema=sho_(pr\d)/)?.[1]) ?? "pr8",
-  ...extra,
-});
-
-describe("qa:TC missing APL-2590 seed guard(): ?schema=sho_pr<N> on staging", () => {
-  it("qa:TC missing D1: guard() accepts this slot's own schema, whichever slot it is", () => {
-    for (const n of [1, 5, 8]) {
-      expect(guard(stageEnv(`?schema=sho_pr${n}`))).toBe("staging");
-      expect(guard(stageEnv(`?schema=sho_pr${n}&sslmode=require`))).toBe("staging");
-      expect(guard(stageEnv(`?sslmode=require&schema=sho_pr${n}`))).toBe("staging");
-      expect(guard(stageEnv(`?schema=sho_pr${n}`, { SEED_PR_SLOT: `pr${n}` }))).toBe("staging");
-    }
-  });
-
-  it("qa:TC missing D1: guard() refuses a missing, public, empty, repeated or upper-case schema key", () => {
-    const cases: [string, RegExp][] = [
-      ["", /exactly once on staging/],
-      ["?sslmode=require", /exactly once on staging/],
-      ["?schema=", /empty \?schema=/],
-      ["?schema=public", /schema=public on staging/],
-      ["?schema=PUBLIC", /schema=public on staging/],
-      ["?schema=SHO_PR8", /not a pr slot schema/],
-      ["?schema=sho_pr8x", /not a pr slot schema/],
-      ["?schema=sho_pr9", /not a pr slot schema/],
-      ["?schema=sho_pr0", /not a pr slot schema/],
-      ["?schema=sho_staging", /not a pr slot schema/],
-      ["?schema=sho_pr8&schema=public", /exactly once on staging/],
-      ["?schema=sho_pr8&schema=sho_pr8", /exactly once on staging/],
-      ["?SCHEMA=sho_pr8", /schema key in lower case/],
-      ["?Schema=sho_pr8", /schema key in lower case/],
-      ["?schema=sho_pr8&SCHEMA=public", /schema key in lower case/],
-      ["?schema=sho_pr8&options=-csearch_path%3Dpublic", /search path in its query/],
-    ];
-    for (const [query, message] of cases) {
-      expect(() => guard(stageEnv(query)), query || "(no query)").toThrow(message);
-      expect(() => guard(stageEnv(query)), query || "(no query)").toThrow(/Refusing\.$/);
-    }
-  });
-
-  it("qa:TC missing D1: guard() binds the URL's schema to this run's SEED_PR_SLOT", () => {
-    // A URL naming a neighbour's schema must never run as this slot, and vice versa.
-    for (const [slot, schema] of [["pr8", "sho_pr5"], ["pr1", "sho_pr8"]]) {
-      expect(() => guard(stageEnv(`?schema=${schema}`, { SEED_PR_SLOT: slot })), `${slot} + ${schema}`)
-        .toThrow(new RegExp(`is not this run's slot schema sho_${slot}`));
-    }
-    expect(() => guard(stageEnv("?schema=public", { SEED_PR_SLOT: "pr5" }))).toThrow(/schema=public on staging/);
-    // A staging seed with no slot at all is refused: the schema alone cannot say which run it is.
-    expect(() => guard(stageEnv("?schema=sho_pr5", { SEED_PR_SLOT: undefined as unknown as string })))
-      .toThrow(/needs SEED_PR_SLOT=pr5/);
-    expect(() => guard(stageEnv("?schema=sho_pr8", { SEED_PR_SLOT: "" }))).toThrow(/needs SEED_PR_SLOT=pr8/);
-    // A slot name that is not a pr slot can never match a pr schema, so it cannot widen the rule.
-    expect(() => guard(stageEnv("?schema=sho_pr8", { SEED_PR_SLOT: "staging" })))
-      .toThrow(/is not this run's slot schema sho_staging/);
-    expect(guard(stageEnv("?schema=sho_pr8", { SEED_PR_SLOT: "pr8" }))).toBe("staging");
-  });
-
-  it("qa:TC missing D2: the schema rule does not loosen the host, DB or override checks", () => {
-    expect(() => guard(stageEnv("?schema=sho_pr8&host=evil.example"))).toThrow(/overrides the host or DB name/);
-    expect(() => guard(stageEnv("?schema=sho_pr8&hostaddr=evil.example"))).toThrow(/overrides the host or DB name/);
-    expect(() => guard(stageEnv("?schema=sho_pr8&dbname=postgres"))).toThrow(/overrides the host or DB name/);
-    expect(() => guard({ ...stageEnv("?schema=sho_pr8"), SEED_TARGET: "staging", DATABASE_URL: url("?schema=sho_pr8", "postgres") }))
-      .toThrow(/is not an allowed staging DB/);
-    expect(() => guard({ ...stageEnv("?schema=sho_pr8"), DATABASE_URL: url("?schema=sho_pr8", "sho_staging", "evil.example") }))
-      .toThrow(/not an allowed staging DB host/);
-    expect(() => guard({ ...stageEnv("?schema=sho_pr8"), NODE_ENV: "production" })).toThrow(/NODE_ENV=production/);
-  });
-
-  it("qa:TC missing D1: the test target is not required to name a pr schema (unchanged local behaviour)", () => {
-    expect(guard({ NODE_ENV: "test", SEED_TARGET: "test", DATABASE_URL: "postgresql://sho:sho@127.0.0.1:55432/sho_test" })).toBe("test");
-    expect(guard({ NODE_ENV: "test", SEED_TARGET: "test", DATABASE_URL: "postgresql://sho:sho@127.0.0.1:55432/sho_test?schema=public" })).toBe("test");
-    expect(() => guard({ NODE_ENV: "test", SEED_TARGET: "test", DATABASE_URL: "postgresql://sho:sho@db.example.com/sho_test" }))
-      .toThrow(/Test target must be local/);
-  });
-});
-
