@@ -33,6 +33,7 @@ export default defineConfig({
       "tests/e2e/local/APL-2728.test.ts",
       "tests/e2e/stories/APL-2735.spec.ts",
       "tests/e2e/local/APL-2609.spec.ts",
+      "tests/e2e/stories/**", // every file here is a Playwright story, not Vitest (see the note at the top)
       "e2e/**",
       "scripts/**",
       "tests/e2e/stories/APL-2590.spec.ts", // a Playwright story (APL-2590)
