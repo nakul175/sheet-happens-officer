@@ -22,10 +22,9 @@ jobs:
   viewport:
     name: Phone-size layout checks
     runs-on: ubuntu-latest
-    # 20 minutes, the same budget ci.yml gives its own Chromium job. The browser download is not bounded by anything this
-    # job controls: it took 0.3 min on one runner and 8-10 min on another (ci.yml's viewport job rides the same pool).
-    # With 10 minutes, the checkout, install, migrate and build left nothing for the download, and the run was cancelled
-    # before a single test ran. This raises the ceiling only; no test is skipped, retried or weakened.
+    # 20 minutes, the same budget this same change's ci.yml job gives its own Chromium step. The browser download is not
+    # bounded by anything this job controls: it took 0.3 min on one runner and 8-10 min on another.
+    # This raises the ceiling only; no test is skipped, retried or weakened.
     timeout-minutes: 20
     services:
       postgres:
