@@ -44,19 +44,31 @@ and call the job endpoint directly. Each value in the commands is a placeholder.
 
 | Name | Purpose |
 |---|---|
+| `TASKBOARD_URL` | Base URL of the server the tests call, e.g. `http://localhost:3100` |
 | `DATABASE_URL` | Postgres connection string the test process uses, the same database as the server |
 | `JOB_SECRET` | Bearer token the test process sends when it calls the job endpoint, the same value as the server |
+| `EMAIL_OUTBOX_DIR` | Folder the app writes emails to; the tests read the files back from it |
+| `SUPER_ADMIN_EMAILS` | Comma-separated addresses the test sign-ins expect to be super admins |
 
 ```bash
 EMAIL_OUTBOX_DIR=/tmp/sho-outbox SUPER_ADMIN_EMAILS=root.test@aplyd.com APP_URL=http://localhost:3100 \
   DATABASE_URL="postgresql://USER:PASSWORD@localhost:5432/taskboard?schema=public" \
   JOB_SECRET=replace-with-a-token-of-at-least-16-chars \
   npx next dev -p 3100 &
-EMAIL_OUTBOX_DIR=/tmp/sho-outbox TASKBOARD_URL=http://localhost:3100 \
+EMAIL_OUTBOX_DIR=/tmp/sho-outbox SUPER_ADMIN_EMAILS=root.test@aplyd.com TASKBOARD_URL=http://localhost:3100 \
   DATABASE_URL="postgresql://USER:PASSWORD@localhost:5432/taskboard?schema=public" \
   JOB_SECRET=replace-with-a-token-of-at-least-16-chars \
   npm test
 ```
+
+Three conditions are not on that line, because they belong to the server or the machine:
+
+- `SERVER_LOG` — the path to the running server's log file, for example `server.log`. A few tests
+  read the server's own log, not the test output, so point this at wherever the dev server writes.
+- `PW_CHROMIUM` — the path to a Chrome or Chromium binary, used by the browser tests. In CI run
+  `npx playwright-core install --with-deps chromium` first instead.
+- `RETURN_PATH_LOG=1` — set this on the **server** process, not the test process. `src/proxy.ts`
+  only writes its `[return-path]` lines when the server has it, and a test reads those lines back.
 
 ## Deploy (story 9.3)
 
