@@ -49,7 +49,6 @@ and call the job endpoint directly. Each value in the commands is a placeholder.
 | `JOB_SECRET` | Bearer token the test process sends when it calls the job endpoint, the same value as the server |
 | `EMAIL_OUTBOX_DIR` | Folder the app writes emails to; the tests read the files back from it |
 | `SUPER_ADMIN_EMAILS` | Comma-separated addresses the test sign-ins expect to be super admins |
-| `SERVER_LOG` | Path to the running server's log file (see below); a few tests fail, by design, when it is unset |
 
 ```bash
 EMAIL_OUTBOX_DIR=/tmp/sho-outbox SUPER_ADMIN_EMAILS=root.test@aplyd.com APP_URL=http://localhost:3100 \
@@ -66,6 +65,8 @@ Three conditions are not on that line, because they belong to the server or the 
 
 - `SERVER_LOG` — the path to the running server's log file, for example `server.log`. A few tests
   read the server's own log, not the test output, so point this at wherever the dev server writes.
+  It is deliberately **not** a row in the table above: that table is the `npm test` line's variables,
+  and a test asserts the two agree. `SERVER_LOG` belongs to the process that *runs the server*.
 - `PW_CHROMIUM` — the path to a Chrome or Chromium binary, used by the browser tests. In CI run
   `npx playwright-core install --with-deps chromium` first instead.
 - `RETURN_PATH_LOG=1` — set this on the **server** process, not the test process. `src/proxy.ts`

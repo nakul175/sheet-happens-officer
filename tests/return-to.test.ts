@@ -551,23 +551,25 @@ describe("APL-2652 expiry on a live browser: AC6 v1.2 keeps the target, AC7 v1.2
     const api = await fetch(`${BASE}/api/tasks/T1`, { headers: { cookie }, redirect: "manual" });
     expect(api.status, "an expired session answers 401, the trigger AC6 depends on").toBe(401);
     await api.arrayBuffer();
-    // The server decides which 401 target it uses. With the flag off that is main's plain /signin, exactly as AC8 says.
-    const enabled = await serverReturnToEnabled();
-    delete process.env.SIGNIN_RETURN_TO;
-    if (!enabled) {
-      expect(sessionSignInTarget("/tasks/T1"), "flag off: main's plain /signin").toBe("/signin");
-      expect(signedOutSignInHref("/tasks/T1")).toBe("/signin");
-      return;
-    }
-    // Flag on: what `src/components/api.ts` does with that 401, for the same browser.
+    // The trigger above is the server's; what follows is this process's decision, so the flag is set explicitly here
+    // rather than read from whatever environment this runner happens to carry (a mode server sets it to on).
+    // AC8 is covered separately by the flag-off cases in SIGNIN_RETURN_TO.
+    process.env.SIGNIN_RETURN_TO = "on";
+    // What `src/components/api.ts` does with that 401, for the same browser.
     expect(sessionSignInTarget("/tasks/T1")).toBe("/signin?expired=1&next=%2Ftasks%2FT1");
-    const screen = await documentTarget("/signin?expired=1&next=%2Ftasks%2FT1");
-    expect(screen.status).toBe(200);
-    expect(screen.target, "sign-in does not bounce anywhere on its own").toBeNull();
-    expect(screen.html).toMatch(/<div role="alert"[^>]*>Your session has expired, please sign in again<\/div>/);
+    expect(signedOutSignInHref("/tasks/T1?tab=comments")).toBe("/signin?next=%2Ftasks%2FT1%3Ftab%3Dcomments");
     // AC6 v1.2: the next it carries passes the same AC2 validation sign-in will apply to it.
     expect(safeReturnPath("/tasks/T1")).toBe("/tasks/T1");
-    expect(screen.html).toContain('\\"next\\":\\"/tasks/T1\\"');
+    // And on a server that runs with the flag on, the screen really shows the one fixed sentence and does not bounce.
+    // ci.yml's server runs with the flag off, so that half is asserted only where the server has it on (phone-checks.yml,
+    // viewport.yml and the mode servers all set SIGNIN_RETURN_TO=on).
+    if (await serverReturnToEnabled()) {
+      const screen = await documentTarget("/signin?expired=1&next=%2Ftasks%2FT1");
+      expect(screen.status).toBe(200);
+      expect(screen.target, "sign-in does not bounce anywhere on its own").toBeNull();
+      expect(screen.html).toMatch(/<div role="alert"[^>]*>Your session has expired, please sign in again<\/div>/);
+      expect(screen.html).toContain('\\"next\\":\\"/tasks/T1\\"');
+    }
   });
 
   /** The document with every `<script>` removed: what a person can actually see, as opposed to the framework's payload. */
@@ -591,6 +593,12 @@ describe("APL-2652 expiry on a live browser: AC6 v1.2 keeps the target, AC7 v1.2
       // The URL's own text is never shown. The framework carries the request URL in its own payload, inert, so the
       // check is on the document: no element, attribute or text node renders what the URL said.
       expect(visible(html), path).not.toContain("zz-2652-ac7");
+      // ...and that check is not vacuous: the probe really is in the response (in the framework payload), and stripping
+      // only the scripts is what removes it. A blank page, or a page that echoed nothing at all, would fail here.
+      if (path.includes("zz-2652-ac7")) {
+        expect(html, `${path}: the probe reaches the response`).toContain("zz-2652-ac7");
+        expect(visible(html).length, `${path}: the document still has content`).toBeGreaterThan(1000);
+      }
       // The sentence is the fixed one and appears only where it belongs: expired=1 on a flag-on server.
       const shows = /Your session has expired, please sign in again/.test(visible(html));
       expect(shows, path).toBe(query.includes("expired=1") && enabled);
