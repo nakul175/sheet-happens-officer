@@ -563,6 +563,24 @@ jobs:
       - name: Install tsx only
         run: npm ci --ignore-scripts --no-audit --no-fund
 
+      # Shape only: length, whether it starts with https://, and whether it carries a newline, a tab, a space or
+      # an @. No character of the value is printed, so this reports on a secret without disclosing one.
+      - name: Report the target's shape (no characters)
+        env:
+          PROBE_BASE_URL: ${{ secrets.SHO_STAGING_PROBE_URL }}
+        run: |
+          v="$PROBE_BASE_URL"
+          echo "length=${#v}"
+          echo "starts_https=$([[ "$v" == https://* ]] && echo yes || echo no)"
+          echo "has_newline=$([[ "$v" == *$'\n'* ]] && echo yes || echo no)"
+          echo "has_cr=$([[ "$v" == *$'\r'* ]] && echo yes || echo no)"
+          echo "has_space=$([[ "$v" == *' '* ]] && echo yes || echo no)"
+          echo "has_tab=$([[ "$v" == *$'\t'* ]] && echo yes || echo no)"
+          echo "has_at=$([[ "$v" == *@* ]] && echo yes || echo no)"
+          echo "has_quote=$([[ "$v" == *"* ]] && echo yes || echo no)"
+          echo "ends_slash=$([[ "$v" == */ ]] && echo yes || echo no)"
+          echo "first3=$(printf %s "$v" | head -c 3 | od -An -c | tr -d ' ')"
+
       - name: Refuse a production or non-staging target
         env:
           PROBE_BASE_URL: ${{ secrets.SHO_STAGING_PROBE_URL }}
