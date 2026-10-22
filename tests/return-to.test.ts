@@ -572,6 +572,31 @@ describe("APL-2652 expiry on a live browser: AC6 v1.2 keeps the target, AC7 v1.2
     }
   });
 
+  it("AC6 v1.2: the /team/p2 row — an expired session there answers 401, and the 401 target keeps the validated path", async () => {
+    // The same case as the row above, for a person's page: `/team/<id>` is an app page with no task in it, so the
+    // return path is the page itself. `person-no-access.test.tsx` already loads `/api/team/p2`, so that id is real.
+    const cookie = await expiredCookie();
+    const api = await fetch(`${BASE}/api/team/p2`, { headers: { cookie }, redirect: "manual" });
+    expect(api.status, "an expired session on /team/p2 answers 401, the trigger AC6 depends on").toBe(401);
+    await api.arrayBuffer();
+    // What `src/components/api.ts` does with that 401 for /team/p2, the same way the /tasks/T1 row checks it.
+    process.env.SIGNIN_RETURN_TO = "on";
+    const signedIn = sessionSignInTarget("/team/p2") ?? "";
+    expect(signedIn).toBe("/signin?expired=1&next=%2Fteam%2Fp2");
+    // ...and the next it carries decodes to the page itself and passes the same AC2 validation sign-in will apply.
+    const roundTrip = new URL(signedIn, "http://return.invalid").searchParams.get("next") ?? "";
+    expect(roundTrip).toBe("/team/p2");
+    expect(safeReturnPath(roundTrip)).toBe("/team/p2");
+    // And on a server that runs with the flag on, the screen shows the fixed sentence and does not bounce.
+    if (await serverReturnToEnabled()) {
+      const screen = await documentTarget("/signin?expired=1&next=%2Fteam%2Fp2");
+      expect(screen.status).toBe(200);
+      expect(screen.target, "sign-in does not bounce anywhere on its own").toBeNull();
+      expect(screen.html).toMatch(/<div role="alert"[^>]*>Your session has expired, please sign in again<\/div>/);
+      expect(screen.html).toContain('\"next\":\"/team/p2\"');
+    }
+  });
+
   /** The document with every `<script>` removed: what a person can actually see, as opposed to the framework's payload. */
   function visible(html: string): string {
     return html.replace(/<script\b[^>]*>[\s\S]*?(?:<\/script>|$)/gi, "");

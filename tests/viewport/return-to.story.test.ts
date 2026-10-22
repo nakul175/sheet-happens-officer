@@ -4,7 +4,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { chromium, type Browser, type Page } from "playwright-core";
-import { account, BASE, OUTBOX, project, PW, superAdmin, task } from "../helpers";
+import { account, BASE, Client, OUTBOX, project, PW, superAdmin, task } from "../helpers";
 
 let browser: Browser;
 let memberEmail = "";
@@ -16,13 +16,28 @@ let visibleTitle = "";
 let hiddenId = "";
 let hiddenTitle = "";
 let hiddenDetail = "";
+// AC4's lockout case uses a throwaway person of its own, so the 5-failure lockout can never land on a fixture alias
+// (the story fixture, the outsider, or the person forced to change a temporary password).
+let lockoutEmail = "";
+let lockoutPassword = "";
+let lockoutAccountId = "";
 
 const origin = () => new URL(BASE).origin;
+
+// The product's own words for a locked-out sign-in. `src/app/api/auth/signin/route.ts` builds it from LOCKOUT_MINUTES.
+const LOCKED_OUT = "Too many attempts. Try again in 15 minutes.";
 
 function signInMailPassword(email: string) {
   const files = readdirSync(OUTBOX).sort();
   const mails = files.map((f) => JSON.parse(readFileSync(path.join(OUTBOX, f), "utf8"))).filter((m) => m.to === email && /Your Sheet Happens Officer account/.test(m.subject));
   return ((mails.at(-1)?.text ?? "") as string).match(/Password: (\S+)/)?.[1] ?? "";
+}
+
+/** The text of the newest mail to `email` whose subject matches `subject`, or "" when none arrived. */
+function latestMailText(email: string, subject: RegExp) {
+  const files = readdirSync(OUTBOX).sort();
+  const mails = files.map((f) => JSON.parse(readFileSync(path.join(OUTBOX, f), "utf8"))).filter((m) => m.to === email && subject.test(m.subject));
+  return (mails.at(-1)?.text ?? "") as string;
 }
 
 async function signedOutPage() {
@@ -71,9 +86,35 @@ beforeAll(async () => {
   forcedPassword = signInMailPassword(forcedEmail);
   expect(forcedPassword).toMatch(/^[A-Za-z0-9]{12}$/);
   expect((await root.c.post(`/api/projects/${p.id}/members`, { userId: added.json.person.id, role: "EDITOR" })).status).toBe(201);
+  // AC4 lockout: a person who exists only for that case. Verified (so the app's own sign-in path is the one under test)
+  // and never a fixture alias, because five wrong passwords lock whatever email they are typed for.
+  const stamp2 = `${stamp}l`;
+  lockoutEmail = `zz-test-returnlockout${stamp2}@aplyd.com`;
+  lockoutPassword = "Lockout-pass-6";
+  const signedUp = await new Client().post("/api/auth/signup", { name: "Lata Lockout", email: lockoutEmail, password: lockoutPassword });
+  expect(signedUp.status, JSON.stringify(signedUp.json)).toBe(201);
+  const token = latestMailText(lockoutEmail, /Verify/).match(/token=([\w-]+)/)?.[1] ?? null;
+  expect(token, "the sign-up mail carries a verify token").toBeTruthy();
+  expect((await new Client().post("/api/auth/verify", { token })).status).toBe(200);
+  lockoutAccountId = signedUp.json.user.id;
 }, 90000);
 
-afterAll(async () => { await browser?.close(); });
+afterAll(async () => {
+  // AC4's throwaway person is deactivated through the API, as `cleanupZz` does: the API has no hard delete for people.
+  // Best effort, and reported rather than thrown, so a real assertion failure is not masked by cleanup.
+  try {
+    if (lockoutAccountId) {
+      const sa = await superAdmin();
+      const off = await sa.c.post(`/api/team/${lockoutAccountId}/deactivate`, { reassign: "leaders" });
+      if (off.status !== 200 && !(off.status === 409 && /already deactivated/.test(off.json?.error ?? ""))) {
+        console.warn(`AC4 lockout cleanup: deactivate ${lockoutEmail} answered ${off.status}`);
+      }
+    }
+  } catch (err) {
+    console.warn(`AC4 lockout cleanup failed: ${(err as Error).message}`);
+  }
+  await browser?.close();
+});
 
 describe("APL-2652 sign-in returns to the deep link", () => {
   it("AC1 a signed-out deep link comes back after a successful sign-in", async () => {
@@ -163,6 +204,41 @@ describe("APL-2652 sign-in returns to the deep link", () => {
       await page.getByLabel("Password").fill(PW);
       await page.getByRole("button", { name: "Sign in" }).click();
       await landedOnTask(page, visibleId, visibleTitle);
+    } finally { await ctx.close(); }
+  });
+
+  it("AC4 a lockout keeps the return target, and the right password does not bypass it", async () => {
+    const { ctx, page } = await signedOutPage();
+    try {
+      await page.goto(`/signin?next=${encodeURIComponent(`/tasks/${visibleId}`)}`);
+      // The throwaway person: five wrong passwords, each one refused on its own with the product's fixed sentence.
+      await page.getByLabel("Work email").fill(lockoutEmail);
+      for (let attempt = 1; attempt <= 5; attempt++) {
+        await page.getByLabel("Password").fill(`wrong-pass-${attempt}`);
+        await page.getByRole("button", { name: "Sign in" }).click();
+        const alert = page.getByRole("alert").filter({ hasText: "Email or password is incorrect." });
+        await alert.waitFor({ timeout: 15000 });
+        expect(await alert.innerText(), `attempt ${attempt}`).toBe("Email or password is incorrect.");
+        // A refused attempt is not a navigation: the return target is still in the address bar.
+        expect(new URL(page.url()).searchParams.get("next"), `attempt ${attempt}`).toBe(`/tasks/${visibleId}`);
+      }
+      // The sixth is past LOCKOUT_FAILURES: the server's own lockout message, not the wrong-password one.
+      await page.getByLabel("Password").fill(`wrong-pass-6`);
+      await page.getByRole("button", { name: "Sign in" }).click();
+      const locked = page.getByRole("alert").filter({ hasText: LOCKED_OUT });
+      await locked.waitFor({ timeout: 15000 });
+      expect(await locked.innerText()).toBe(LOCKED_OUT);
+      // The lockout does not clear the return target either.
+      const url = new URL(page.url());
+      expect(url.pathname).toBe("/signin");
+      expect(url.searchParams.get("next")).toBe(`/tasks/${visibleId}`);
+      // ...and the right password does not go round the lockout while it is on.
+      await page.getByLabel("Password").fill(lockoutPassword);
+      await page.getByRole("button", { name: "Sign in" }).click();
+      await page.getByRole("alert").filter({ hasText: LOCKED_OUT }).waitFor({ timeout: 15000 });
+      expect(new URL(page.url()).pathname, "a locked-out sign-in does not land on the task").toBe("/signin");
+      expect(new URL(page.url()).searchParams.get("next")).toBe(`/tasks/${visibleId}`);
+      expect(await page.getByRole("textbox", { name: "Title", exact: true }).count()).toBe(0);
     } finally { await ctx.close(); }
   });
 
