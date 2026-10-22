@@ -58,6 +58,12 @@ on:
         required: false
         default: 5
         type: number
+      probe:
+        description: "on = run the read-only identity probe job only (no shards, no sign-in as a pool account, no POST that writes). Every other job is skipped."
+        required: false
+        default: "off"
+        type: choice
+        options: ["off", "on"]
 
 permissions:
   contents: read
@@ -81,6 +87,7 @@ env:
 jobs:
   plan:
     name: Pick the spec files
+    if: inputs.probe != 'on'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     outputs:
@@ -480,7 +487,7 @@ jobs:
   counts:
     name: Fail when nothing ran
     needs: [plan, e2e, e2e-serial]
-    if: always()
+    if: always() && inputs.probe != 'on'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -497,7 +504,7 @@ jobs:
   report:
     name: Merge the reports
     needs: [plan, e2e, e2e-serial]
-    if: always()
+    if: always() && inputs.probe != 'on'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -529,3 +536,56 @@ jobs:
           path: playwright-report/
           if-no-files-found: ignore
           retention-days: 14
+
+  # Read-only identity probe (input "probe" = "on"). It exists because a TCP probe from a laptop cannot reach
+  # the staging database, and this is the one approved way to ask the question from inside the network instead.
+  # Nothing here writes: every request is a refusal path (a wrong password, an anonymous POST, a body the
+  # product rejects), so a run leaves at most one LoginAttempt and one ActionLog per sign-in on an address that
+  # owns no account. No pool account is signed in, no spec runs, and no report or trace is uploaded: a report can
+  # carry a request body, and this job must be safe to hand to anyone who can read the run.
+  # Credentials come from the repo's ordinary staging secrets (STAGING_USER / STAGING_PASS, the basic-auth
+  # gate) and SHO_STAGING_PROBE_URL, which holds the probe target. Both are env-only and never echoed; the
+  # request's status line, the table names behind the 401 and a hash of the throwaway address are the output.
+  probe:
+    name: Read-only identity probe
+    if: inputs.probe == 'on'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      # No `prisma generate`, no database: the probe talks to the app over HTTPS and nothing else.
+      - name: Install tsx only
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Refuse a production or non-staging target
+        env:
+          PROBE_BASE_URL: ${{ secrets.SHO_STAGING_PROBE_URL }}
+        run: |
+          echo "::add-mask::$PROBE_BASE_URL"   # a host, but also the one place a credential could arrive inside
+          if [[ -z "$PROBE_BASE_URL" ]]; then echo "::error::SHO_STAGING_PROBE_URL is not set."; exit 1; fi
+          if [[ "$PROBE_BASE_URL" == *@* || "$PROBE_BASE_URL" =~ [[:space:]] ]]; then echo "::error::The probe target carries user info or whitespace. Refusing."; exit 1; fi
+          if [[ "$PROBE_BASE_URL" != https://* ]]; then echo "::error::The probe target must be https."; exit 1; fi
+          # As the plan job does: TARGET_ALLOWLIST is matched against the bare host, so strip the scheme and any trailing slash.
+          host="${PROBE_BASE_URL#https://}"; host="${host%%/*}"; host="${host,,}"; host="${host%.}"
+          if [[ "$host" =~ ^(www\.|app\.)?sheethappensofficer\.com$ ]]; then
+            echo "::error::Refusing to probe production."; exit 1
+          fi
+          if [[ "$host" == *aplyd.org* ]]; then echo "::error::Refusing to probe production (the aplyd.org host)."; exit 1; fi
+          if ! [[ "$host" =~ $TARGET_ALLOWLIST ]]; then
+            echo "::error::The probe target is not the staging host or a pr1-pr8 preview."; exit 1
+          fi
+
+      - name: Probe identity, grants and write closure (read-only)
+        env:
+          PROBE_BASE_URL: ${{ secrets.SHO_STAGING_PROBE_URL }}
+          STAGING_USER: ${{ secrets.STAGING_USER }}
+          STAGING_PASS: ${{ secrets.STAGING_PASS }}
+        run: |
+          echo "::add-mask::$PROBE_BASE_URL"
+          npx tsx tests/e2e/tools/staging-identity-probe.ts
