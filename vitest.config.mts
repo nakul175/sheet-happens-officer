@@ -46,6 +46,16 @@ export default defineConfig({
       "tests/e2e/stories/APL-2624.spec.ts",
       "tests/e2e/stories/APL-2721.spec.ts",
       "tests/e2e/stories/APL-2737.spec.ts",
+      // Browser tier: 7 Playwright/Chromium files that compete with these 107 files for the dev server and the
+      // machine, and lost 9 tests to the 30s testTimeout in the full run. They have their own config and
+      // their own npm script (`npm run test:browser`, vitest.browser-tier.config.mts, testTimeout 120s).
+      "tests/apl-2770-long-assignee.test.ts",
+      "tests/e2e/local/APL-2739.test.ts",
+      "tests/e2e/stories/APL-2736.spec.ts",
+      "tests/activity-delete-undo.test.ts",
+      "tests/inline-touch-2673.test.ts",
+      "tests/forced-password-23-5-browser.test.ts",
+      "tests/e2e/local/APL-2719.test.ts",
     ],
   },
 });
