@@ -74,7 +74,6 @@ jobs:
           fi
       - run: npx prisma migrate deploy
       - run: npm run build
-      - run: npx playwright-core install --with-deps chromium
       - name: Start the app
         run: |
           (npx next start -p 3100 > server.log 2>&1 &)
