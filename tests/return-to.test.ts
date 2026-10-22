@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 import { api } from "@/components/api";
 import { proxy } from "@/proxy";
-import { account, BASE, project, SUPER_EMAIL, task } from "./helpers";
+import { account, BASE, project, SUPER_EMAIL, superAdmin, task } from "./helpers";
 import { hashToken, SESSION_COOKIE } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { isSignInScreen, RETURN_PATH_HEADER, returnToEnabled, safeReturnPath, sessionSignInTarget, signedOutSignInHref, signInHref } from "@/lib/return-to";
@@ -572,29 +572,44 @@ describe("APL-2652 expiry on a live browser: AC6 v1.2 keeps the target, AC7 v1.2
     }
   });
 
-  it("AC6 v1.2: the /team/p2 row — an expired session there answers 401, and the 401 target keeps the validated path", async () => {
-    // The same case as the row above, for a person's page: `/team/<id>` is an app page with no task in it, so the
-    // return path is the page itself. `person-no-access.test.tsx` already loads `/api/team/p2`, so that id is real.
+  it("AC6 v1.2: a person's page — an expired session answers 401 on a real person, and a signed-in one gets the page, not a redirect", async () => {
+    // A real row, not a fixture id: `/api/team/p2` answers 401 for an expired cookie whether or not `p2` exists
+    // (currentUser() runs before getPerson()), so a made-up id would pass this row for the wrong reason.
+    const person = await db.user.findFirstOrThrow({ where: { deactivatedAt: null }, orderBy: { createdAt: "asc" }, select: { id: true } });
+    const page = `/team/${person.id}`;
+
+    // 1. The trigger AC6 depends on.
     const cookie = await expiredCookie();
-    const api = await fetch(`${BASE}/api/team/p2`, { headers: { cookie }, redirect: "manual" });
-    expect(api.status, "an expired session on /team/p2 answers 401, the trigger AC6 depends on").toBe(401);
+    const api = await fetch(`${BASE}/api/team/${person.id}`, { headers: { cookie }, redirect: "manual" });
+    expect(api.status, "an expired session on a person's page answers 401").toBe(401);
     await api.arrayBuffer();
-    // What `src/components/api.ts` does with that 401 for /team/p2, the same way the /tasks/T1 row checks it.
+
+    // 2. A signed-in Super Admin does NOT get a redirect away from the page. This is the half that a "401 only" row
+    //    cannot see: while the page bounced to /signin, every 401 assertion here passed and the page was broken.
+    const sa = await superAdmin();
+    const pageRes = await fetch(BASE + page, { headers: { cookie: sa.c.cookie }, redirect: "manual" });
+    expect(pageRes.status, `a signed-in person opening ${page} gets the page itself`).toBe(200);
+    const html = await pageRes.text();
+    expect(pageRes.headers.get("location") ?? "", `${page} must not redirect a signed-in person`).toBe("");
+    expect(html, "the page is the person's screen, not the sign-in one").not.toMatch(/Your session has expired/);
+
+    // 3. What `src/components/api.ts` does with a 401 on that page, the same way the /tasks/T1 row checks it.
     process.env.SIGNIN_RETURN_TO = "on";
-    const signedIn = sessionSignInTarget("/team/p2") ?? "";
-    expect(signedIn).toBe("/signin?expired=1&next=%2Fteam%2Fp2");
-    // ...and the next it carries decodes to the page itself and passes the same AC2 validation sign-in will apply.
-    const roundTrip = new URL(signedIn, "http://return.invalid").searchParams.get("next") ?? "";
-    expect(roundTrip).toBe("/team/p2");
-    expect(safeReturnPath(roundTrip)).toBe("/team/p2");
-    // And on a server that runs with the flag on, the screen shows the fixed sentence and does not bounce.
-    if (await serverReturnToEnabled()) {
-      const screen = await documentTarget("/signin?expired=1&next=%2Fteam%2Fp2");
+    const signedInTarget = sessionSignInTarget(page) ?? "";
+    expect(signedInTarget).toBe(`/signin?expired=1&next=${encodeURIComponent(page)}`);
+    const roundTrip = new URL(signedInTarget, "http://return.invalid").searchParams.get("next") ?? "";
+    expect(roundTrip).toBe(page);
+    expect(safeReturnPath(roundTrip)).toBe(page);
+
+    // 4. The flag-on screen itself: the fixed sentence, no bounce, and the payload carries the page as `next`.
+    //    Asserted against the product's flag directly (`signInReturnToEnabled()`), not inferred from a redirect the
+    //    page may or may not make, so a server with the flag on can never skip this block silently.
+    if (returnToEnabled()) {
+      const screen = await documentTarget(`/signin?expired=1&next=${encodeURIComponent(page)}`);
       expect(screen.status).toBe(200);
       expect(screen.target, "sign-in does not bounce anywhere on its own").toBeNull();
       expect(screen.html).toMatch(/<div role="alert"[^>]*>Your session has expired, please sign in again<\/div>/);
-      // The same escaping as the /tasks/T1 row above: the payload carries double-escaped quotes, so the match needs two.
-      expect(screen.html).toContain('\\"next\\":\\"/team/p2\\"');
+      expect(screen.html).toContain(`\\"next\\":\\"${page}\\"`);
     }
   });
 
