@@ -4,6 +4,8 @@
 // Run:  SEED_TARGET=test|staging SHO_QA_PASS=<shared nakul17+ password> DATABASE_URL=... npx tsx scripts/seed-apl2590-fixtures.ts
 // Refuses: any target not explicitly test/staging, NODE_ENV=production, prod hosts, prod-like DB names, URL overrides
 // (?host=, ?hostaddr=, ?dbname=) and sockets, and any host + DB name pair that is not on the allowlist (APL-2590 D2).
+// On staging it also requires exactly one ?schema=sho_pr<N> for this run's slot: isolation is per-slot schema, so a
+// missing, public or foreign schema would write into another slot's data (APL-2590 D1).
 import { randomBytes, scryptSync } from "node:crypto";
 import { parse } from "pg-connection-string";
 import { PrismaClient } from "../src/generated/prisma/client";
@@ -18,6 +20,31 @@ const LOCAL_HOSTS = ["localhost", "127.0.0.1", "::1"];
  */
 export const STAGING_DB_HOSTS: readonly string[] = ["private-sho-db-do-user-45345612-0.k.db.ondigitalocean.com"];
 const QUERY_OVERRIDES = new Set(["host", "hostaddr", "dbname"]);
+/** The pr slots staging-e2e seeds; each one owns one schema, sho_pr<N> (APL-2590 D1). */
+const SEED_SCHEMA = /^sho_pr[1-8]$/;
+
+/**
+ * The single per-slot schema a staging URL names, e.g. sho_pr3. Only Prisma client/CLI honour ?schema=, so this guards
+ * the same contract staging-e2e.yml checks before it seeds: exactly one lowercase schema key, and it must be this slot's.
+ * One secret can serve every slot, so the URL's schema must also be the slot SEED_PR_SLOT names: the two move together.
+ */
+function slotSchema(u: URL, env: Record<string, string | undefined>): string {
+  const keys = [...u.searchParams.keys()].filter((k) => k.toLowerCase() === "schema");
+  if (keys.some((k) => k !== "schema"))
+    throw new Error("DATABASE_URL must spell the schema key in lower case. Refusing.");
+  const schemas = u.searchParams.getAll("schema");
+  if (schemas.length !== 1) throw new Error("DATABASE_URL must set ?schema=sho_pr<N> exactly once on staging. Refusing.");
+  const schema = schemas[0];
+  if (!schema) throw new Error("DATABASE_URL has an empty ?schema=. Refusing.");
+  if (/^public$/i.test(schema)) throw new Error("DATABASE_URL sets ?schema=public on staging. Refusing.");
+  if (!SEED_SCHEMA.test(schema)) throw new Error(`Schema "${schema}" is not a pr slot schema (sho_pr1-pr8). Refusing.`);
+  // The schema and SEED_PR_SLOT must name the same slot: a URL for pr5 may only run as slot pr5 (APL-2590 D1).
+  const slot = schema.replace(/^sho_/, "");
+  if (!env.SEED_PR_SLOT) throw new Error(`Schema "${schema}" needs SEED_PR_SLOT=${slot}. Refusing.`);
+  if (env.SEED_PR_SLOT !== slot)
+    throw new Error(`Schema "${schema}" is not this run's slot schema sho_${env.SEED_PR_SLOT}. Refusing.`);
+  return schema;
+}
 
 export function guard(env: Record<string, string | undefined> = process.env, stagingHosts: readonly string[] = STAGING_DB_HOSTS): string {
   if (env.NODE_ENV === "production") throw new Error("NODE_ENV=production. Refusing.");
@@ -28,6 +55,8 @@ export function guard(env: Record<string, string | undefined> = process.env, sta
   try { u = new URL(raw); } catch { throw new Error("DATABASE_URL missing or invalid. Refusing."); }
   // A query override or a socket moves the connection after the host and DB name below are read.
   if ([...u.searchParams.keys()].some((k) => QUERY_OVERRIDES.has(k.toLowerCase()))) throw new Error("DATABASE_URL overrides the host or DB name in its query. Refusing.");
+  // options can set search_path, which would move the schema checked below (staging-e2e.yml refuses it for the same reason).
+  if ([...u.searchParams.keys()].some((k) => k.toLowerCase() === "options")) throw new Error("DATABASE_URL overrides the search path in its query. Refusing.");
   let parsed: ReturnType<typeof parse>;
   try { parsed = parse(raw); } catch { throw new Error("DATABASE_URL missing or invalid. Refusing."); }
   const host = (parsed.host ?? "").toLowerCase().replace(/^\[|\]$/g, "").replace(/\.$/, "");
@@ -39,6 +68,9 @@ export function guard(env: Record<string, string | undefined> = process.env, sta
   if (target === "test" && !LOCAL_HOSTS.includes(host)) throw new Error("Test target must be local. Refusing.");
   if (target === "staging" && !stagingHosts.map((h) => h.toLowerCase()).includes(host))
     throw new Error(`Host "${host}" is not an allowed staging DB host. Refusing.`);
+  // Isolation on staging is one schema per pr slot (staging-e2e.yml checks it before seeding); the in-process guard
+  // must apply the same rule, or it accepts a URL the workflow exists to reject (APL-2590 D1).
+  if (target === "staging") slotSchema(u, env);
   return target;
 }
 
