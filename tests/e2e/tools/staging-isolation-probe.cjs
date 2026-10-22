@@ -139,7 +139,11 @@ async function main() {
       err.code === "SELF_SIGNED_CERT_IN_CHAIN" || err.code === "UNABLE_TO_VERIFY_LEAF_SIGNATURE"
         ? " (TLS chain is not in the trust store; supply the provider CA rather than disabling verification)"
         : "";
-    console.error(`CONNECT FAILED (code ${err.code || "unknown"}).${hint} Not proceeding.`);
+    // pg's own connection timeout destroys the socket with `new Error('timeout expired')`, which carries no code,
+    // so a bare "code unknown" cannot tell a blocked port from an untrusted TLS chain. Map that one case to a
+    // stable label of our own; every other failure keeps its code, and none of them quotes the message.
+    const code = err.code || (/timeout expired/.test(err.message || "") ? "PROBE_TIMEOUT" : "unknown");
+    console.error(`CONNECT FAILED (code ${code}).${hint} Not proceeding.`);
     return 2;
   }
 
