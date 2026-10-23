@@ -123,6 +123,47 @@ describe("qa:TC missing APL-2736 removing a stage asks where its items go", () =
     expect(audit?.actorId).toBe(sa.id);
   });
 
+  it("qa:TC missing AC1: every item lands in the stage that was chosen, and two removals can choose different stages", async () => {
+    // The tests around this one move a single item each: the one above picks Proposal, the "every stage the
+    // answer offers" one takes offered[last]. Neither checks that a stage holding more than one item moves
+    // all of them, or that a deal in a stage nobody asked about is left alone. Here two stages are removed
+    // with different destinations (neither the last one offered), one holds two items, and a deal in a
+    // third stage must keep its stage.
+    const zzA = await zzStage();
+    const zzB = await zzStage();
+    const offered = ((await sa.c.del(`/api/deals/pipelines/${zzA}`)).json.stages ?? []) as Stage[];
+    const byName = new Map(offered.map((s) => [s.name, s] as const));
+    const conversation = byName.get("Conversation");
+    const lead = byName.get("Lead");
+    expect(conversation, `offered: ${offered.map((s) => s.name).join(", ")}`).toBeDefined();
+    expect(lead, `offered: ${offered.map((s) => s.name).join(", ")}`).toBeDefined();
+    expect(offered[offered.length - 1].id, "the last offered stage is a third one").not.toBe(conversation!.id);
+    expect(offered[offered.length - 1].id).not.toBe(lead!.id);
+
+    const a1 = await dealIn(zzA);
+    const a2 = await dealIn(zzA);
+    const b1 = await dealIn(zzB);
+    // A deal in a stage nobody asked about. Removing zzA must not touch it.
+    const untouched = await dealIn(named(pro, "Negotiation").id);
+
+    const first = await sa.c.del(`/api/deals/pipelines/${zzA}?moveTo=${conversation!.id}`);
+    expect(first.status, JSON.stringify(first.json)).toBe(200);
+    expect(first.json).toMatchObject({ removed: { id: zzA }, movedTo: { id: conversation!.id, name: "Conversation" }, items: 2 });
+    expect(await stageOf(a1), "the first item of the removed stage").toBe(conversation!.id);
+    expect(await stageOf(a2), "the second item of the removed stage").toBe(conversation!.id);
+    expect(await stageOf(untouched), "a deal in another stage is not dragged along").toBe(named(pro, "Negotiation").id);
+
+    const second = await sa.c.del(`/api/deals/pipelines/${zzB}?moveTo=${lead!.id}`);
+    expect(second.status, JSON.stringify(second.json)).toBe(200);
+    expect(second.json).toMatchObject({ removed: { id: zzB }, movedTo: { id: lead!.id, name: "Lead" }, items: 1 });
+    expect(await stageOf(b1), "the second removal follows its own choice").toBe(lead!.id);
+    // The second removal's choice did not drag the first stage's items along.
+    expect(await stageOf(a1)).toBe(conversation!.id);
+    expect(await stageOf(a2)).toBe(conversation!.id);
+    expect(await exists(zzA)).toBe(false);
+    expect(await exists(zzB)).toBe(false);
+  });
+
   it("qa:TC missing AC1: an empty stage still asks before it is removed", async () => {
     const zz = await zzStage();
     const r = await sa.c.del(`/api/deals/pipelines/${zz}`);
