@@ -45,9 +45,21 @@ test("APL-2540 > AC1: a deal has one Buyer, set at creation, and other roles can
   await expect(panel.getByRole("button", { name: `Remove ${buyer.name}` })).toHaveCount(0);
   await panel.getByRole("button", { name: "+ Add organisation" }).click();
   await expect(panel.getByLabel("Role").locator("option")).toHaveText(["Funder", "Implementing office", "Partner", "Other"]);
-  // The same organisation is Funder and Partner, so "Remove <org>" is on two chips. Each chip is labelled by its role ("Funder: ...").
-  const removeFunder = panel.getByText(/^Funder:/).getByRole("button", { name: `Remove ${funder.name}`, exact: true });
-  const removePartner = panel.getByText(/^Partner:/).getByRole("button", { name: `Remove ${funder.name}`, exact: true });
+  // The same organisation is Funder and Partner, so "Remove <org>" is on two chips. Each chip is the parties line's
+  // span that starts with its role ("Funder: ...") and links to that organisation, so the role plus the exact link
+  // name names one chip even when a second organisation holds a similar name (SHO-2997/SHO-2922).
+  const chipOf = (role: string, organisation: string) =>
+    panel
+      .locator("span.chip")
+      .filter({ hasText: new RegExp(`^${role}:`) })
+      .filter({ has: admin.page.getByRole("link", { name: organisation, exact: true }) });
+  // SHO-2922: the ambiguity is real, not theoretical — an unscoped Remove <org> names the Funder chip AND the Partner
+  // chip, because both hold the same organisation. The AC is that each chip's Remove is still reachable on its own.
+  await expect(panel.getByRole("button", { name: `Remove ${funder.name}`, exact: true })).toHaveCount(2);
+  await expect(chipOf("Funder", funder.name)).toHaveCount(1);
+  await expect(chipOf("Partner", funder.name)).toHaveCount(1);
+  const removeFunder = chipOf("Funder", funder.name).getByRole("button", { name: `Remove ${funder.name}`, exact: true });
+  const removePartner = chipOf("Partner", funder.name).getByRole("button", { name: `Remove ${funder.name}`, exact: true });
   await expect(removeFunder).toBeVisible();
   await expect(removePartner).toBeVisible();
   await removeFunder.click();
@@ -116,6 +128,11 @@ test("APL-2540 > AC4: an archived organisation stays on existing deals and canno
   await admin.page.goto(`/projects/${deal.id}`);
   // The archived buyer is linked twice in the deal panel (beside the pipeline and in the parties line). Scope to the parties line's "Buyer:" chip.
   const buyerParty = admin.page.getByRole("main").locator("span.chip").filter({ hasText: /^Buyer:/ });
+  // SHO-2923: the archived buyer really is linked more than once inside main, so a bare link name is ambiguous; the
+  // parties line's one "Buyer:" chip must still name exactly one link, and it is that buyer's.
+  await expect.poll(() => admin.page.getByRole("main").getByRole("link", { name: buyer.name, exact: true }).count()).toBeGreaterThan(1);
+  await expect(buyerParty).toHaveCount(1);
+  await expect(buyerParty.getByRole("link", { name: buyer.name, exact: true })).toHaveCount(1);
   await expect(buyerParty.getByRole("link", { name: buyer.name, exact: true })).toHaveAttribute("href", `/accounts/${buyer.id}`);
 
   const fresh = dealBody({ name: zz("refused deal"), organisationId: buyer.id, pipelineId: pipes.pro.id, leaderId: admin.user.id });
