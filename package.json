@@ -21,6 +21,7 @@
   },
   "dependencies": {
     "@prisma/client": "^6.19.3",
+    "koffi": "^3.3.3",
     "next": "16.4.2",
     "pg-connection-string": "^2.14.1",
     "prisma": "^6.19.3",
