@@ -5,11 +5,12 @@
 // fixture is a two-row ledger that carries those shapes, so a grammar change that stops catching them fails here.
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import { assertedPairs, census, rowsOf, spans } from "./ledger-census.mjs";
+import { assertedPairs, bucketOf, census, rowsOf, spans } from "./ledger-census.mjs";
+import * as vocab from "./ledger-census.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const FIXTURES = join(ROOT, "scripts/audit/fixtures");
@@ -109,4 +110,43 @@ test("AC4 ancestry is charged only where the file claims reach", () => {
   for (const sha of result.ancestry.notAncestor) assert.equal(isAncestor(sha), false);
   assert.deepEqual(result.ancestry.assertedNotAncestor, [], "every citation in the fixture is an ancestor");
   assert.ok(spans("`a` ← `b`").length === 2);
+// --- AC5: the label axis names a git fact, never a deployment state ------------------------------------------------
+// C15 shipped 15 rows labelled `ISOLATED-STAGED` while its staging class of that name was 0. The label meant "the
+// fixing commit is reachable from the candidate head" — a fact about git, not about any deployment — and a reader who
+// saw `ISOLATED-STAGED=15` concluded fifteen tickets were staged. The name was the defect, so the label axis may not
+// borrow a staging class at all: one token, one meaning.
+test("AC5 the label vocabulary shares no token with the staging axis, and the longer label wins over FIXED", () => {
+  assert.ok(vocab.LABELS.includes("FIXED-ON-CANDIDATE-BRANCH"), "the label for a fix on the candidate branch is named");
+  assert.ok(!vocab.LABELS.includes("ISOLATED-STAGED"), "the label axis must not reuse a staging class");
+  assert.deepEqual(
+    vocab.LABELS.filter((l) => vocab.STAGING_CLASSES.includes(l)),
+    [],
+    "no class is counted on both axes",
+  );
+  // `\bFIXED\b` matches inside `FIXED-ON-CANDIDATE-BRANCH` (the dash is a word boundary), so longest-first must win.
+  assert.equal(
+    bucketOf("**FIXED-ON-CANDIDATE-BRANCH** — fix at head, no fail-without on this line, so not **FIXED**", vocab.LABELS),
+    "FIXED-ON-CANDIDATE-BRANCH",
+  );
+  assert.equal(bucketOf("**FIXED** — pin green, fail-without quoted", vocab.LABELS), "FIXED");
+});
+
+test("AC5 a LABEL cell that opens with a staging class is a defect that names the right label", () => {
+  const md = readFileSync(FIXTURE, "utf8").replace("| LOCAL-ONLY | **FIXED** |", "| LOCAL-ONLY | **ISOLATED-STAGED** |");
+  const tmp = join(FIXTURES, ".ledger-label-lie.tmp.md");
+  writeFileSync(tmp, md);
+  let result;
+  try {
+    result = census({ ledger: tmp, head: HEAD, cwd: ROOT });
+  } finally {
+    rmSync(tmp, { force: true });
+  }
+  assert.ok(
+    result.defects.some(
+      (d) => d.includes("row 9301") && d.includes("ISOLATED-STAGED") && d.includes("FIXED-ON-CANDIDATE-BRANCH"),
+    ),
+    `the row and the label to use instead are both named:\n${result.defects.join("\n")}`,
+  );
+});
+
 });

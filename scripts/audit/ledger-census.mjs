@@ -19,7 +19,7 @@
 import { execFileSync } from "node:child_process";
 import { readFileSync, realpathSync } from "node:fs";
 import { pathToFileURL } from "node:url";
-import { classifyEvidence, classifyStaging, splitRow } from "./receipt-label.mjs";
+import { classifyEvidence, classifyStaging, splitRow, STAGING } from "./receipt-label.mjs";
 
 export const PAIR_SCOPE = /^(?:tests|src|scripts|e2e|prisma|public|deploy|\.github)\//;
 const SHA = /^[0-9a-f]{7,40}$/;
@@ -88,13 +88,44 @@ export function rowsOf(markdown) {
   return rows;
 }
 
-/** The bucket vocabulary, longest token first so `PRE-ISOLATION-STAGED` never reads as `ISOLATED-STAGED`. */
+/**
+ * The bucket vocabulary, longest token first so `FIXED-ON-CANDIDATE-BRANCH` never reads as `FIXED` and
+ * `PRE-ISOLATION-STAGED` never reads as `ISOLATED-STAGED`.
+ */
 export function bucketOf(cell, vocabulary) {
   for (const token of [...vocabulary].sort((a, b) => b.length - a.length)) {
     if (new RegExp(`\\b${token.replace(/-/g, "\\-")}\\b`).test(cell)) return token;
   }
   return null;
 }
+
+/**
+ * The token a cell opens with, after markdown emphasis — the cell's own claim, as opposed to a mention in its prose.
+ * `**PARTIAL** — 2840 is not ISOLATED-STAGED` claims PARTIAL and only mentions the other.
+ */
+export function leadingBucket(cell, vocabulary) {
+  const head = cell.trim().replace(/^[*_`\s]+/, "");
+  for (const token of [...vocabulary].sort((a, b) => b.length - a.length)) {
+    if (new RegExp(`^${token.replace(/-/g, "\\-")}\\b`).test(head)) return token;
+  }
+  return null;
+}
+
+/**
+ * The label axis. Each token answers "what does the evidence support about this row's fix?" and nothing else.
+ *
+ * `FIXED-ON-CANDIDATE-BRANCH` means exactly one thing: **the fixing commit is reachable from the candidate head** —
+ * a fact about this git history. It is not a deployment state, and it was called `ISOLATED-STAGED` until C15 carried
+ * 15 rows of that label beside a staging class of 0: a reader seeing `ISOLATED-STAGED=15` read fifteen staged
+ * tickets, and the product owner's rule that isolation retains 0 was silently undone by a name. The label axis and
+ * the staging axis therefore share no token — `LABELS ∩ STAGING_CLASSES` is empty, and AC5 pins it. `FIXED` keeps
+ * its old meaning: fix present **and** a quoted fail-without on this line.
+ */
+export const LABELS = ["FIXED", "FIXED-ON-CANDIDATE-BRANCH", "PARTIAL", "DECISION NEEDED", "NO-DEFECT-REPRODUCED"];
+
+/** The deployment axis: where the run that produced the evidence was observed. `ISOLATED-STAGED` stays 0. */
+export const STAGING_CLASSES = STAGING;
+
 
 
 /**
@@ -260,9 +291,19 @@ export function census(opts) {
   const labels = {};
   const staging = {};
   for (const row of rows) {
-    const label = bucketOf(row.label, ["FIXED", "ISOLATED-STAGED", "PARTIAL", "DECISION NEEDED", "NO-DEFECT-REPRODUCED"]);
-    const stage = bucketOf(row.staging.split("(")[0], ["PRE-ISOLATION-STAGED", "ISOLATED-STAGED", "LOCAL-ONLY", "NOT-STAGED"]);
-    if (!label) defects.push(`row ${row.id}: no label in the LABEL cell`);
+    const label = bucketOf(row.label, LABELS);
+    const stage = bucketOf(row.staging.split("(")[0], STAGING_CLASSES);
+    // A LABEL cell whose own claim is a staging class is the C15 defect by name: the reader cannot tell a git fact
+    // from a deployment state. Refuse it and say which label the row should carry instead.
+    const asDeployment = leadingBucket(row.label, STAGING_CLASSES);
+    if (!label) {
+      defects.push(
+        asDeployment
+          ? `row ${row.id}: the LABEL cell claims ${asDeployment}, a staging class — the label axis names no ` +
+              `deployment state; a fix reachable from the candidate head is FIXED-ON-CANDIDATE-BRANCH`
+          : `row ${row.id}: no label in the LABEL cell`,
+      );
+    }
     if (!stage) defects.push(`row ${row.id}: no staging class in the staging cell`);
     (labels[label ?? "?"] ??= []).push(row.id);
     (staging[stage ?? "?"] ??= []).push(row.id);
@@ -301,12 +342,7 @@ export function census(opts) {
   // --- 5. the class each row's own cells earn, against the class the cell claims -------------------------------
   const restaged = [];
   for (const row of rows) {
-    const claimed = bucketOf(row.staging.split("(")[0], [
-      "PRE-ISOLATION-STAGED",
-      "ISOLATED-STAGED",
-      "LOCAL-ONLY",
-      "NOT-STAGED",
-    ]);
+    const claimed = bucketOf(row.staging.split("(")[0], STAGING_CLASSES);
     const derived = classifyStaging([row.carrier, row.measured, row.staging, row.label].join(" \n")).cls;
     if (claimed && claimed !== derived) {
       restaged.push({ row: row.id, claimed, derived });
