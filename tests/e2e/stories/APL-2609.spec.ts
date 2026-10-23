@@ -2,7 +2,8 @@
 // tests/e2e/local/APL-2609.spec.ts starts one server per mode and stays the full check (`npm run test:crm-modes`).
 // This file runs against BASE_URL (or TASKBOARD_URL), the way staging-e2e.yml runs every story spec.
 // CRM_VISIBLE names the server's mode (all, admins or off; staging runs all). Every test asserts what that mode must show,
-// so a server whose lever differs from CRM_VISIBLE fails here. Nothing is skipped except by the SHO_QA_PASS gate.
+// so a server whose lever differs from CRM_VISIBLE fails here. Nothing is skipped except by the SHO_QA_PASS and
+// EMAIL_OUTBOX_DIR gates.
 // A deal cannot be created while the CRM is hidden, so for admins or off, APL2609_SEED_URL names an all server on the same
 // database. The deal and its people are made there; every assertion is made on BASE_URL.
 // People are nakul17+ aliases signed in with SHO_QA_PASS. The Super Admin is nakul17+zz-sa@aplyd.com, which the server must
@@ -10,8 +11,9 @@
 // archived, chats cleared, the run's people deactivated. A failed clean-up step fails the file.
 // No TC id is registered for APL-2609, so every title says "qa:TC missing". Nothing here targets production.
 // LOCAL SANDBOX ONLY. Each run makes new nakul17+ aliases and verifies them from the server's local outbox
-// (EMAIL_OUTBOX_DIR), so it cannot run against staging, where mail is not a local file. beforeAll fails with that
-// message when the outbox is not readable.
+// (EMAIL_OUTBOX_DIR), so it cannot run against staging, where mail is not a local file. The folder is never guessed
+// and never made here: beforeAll skips, with that reason, when EMAIL_OUTBOX_DIR is unset or is not a readable
+// directory, so a server writing its mail elsewhere shows up as a skip instead of a green run.
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { test, expect, type Browser, type Page } from "@playwright/test";
@@ -21,7 +23,7 @@ const QA_PASS = process.env.SHO_QA_PASS ?? "";
 const BASE = (process.env.BASE_URL || process.env.TASKBOARD_URL || "http://localhost:3100").replace(/\/+$/, "");
 const MODE = (process.env.CRM_VISIBLE || "all") as "all" | "admins" | "off";
 const SEED = (process.env.APL2609_SEED_URL || (MODE === "all" ? BASE : "")).replace(/\/+$/, "");
-const OUTBOX = process.env.EMAIL_OUTBOX_DIR ?? ".outbox";
+const OUTBOX = process.env.EMAIL_OUTBOX_DIR ?? "";
 const SUPER_EMAIL = "nakul17+zz-sa@aplyd.com";
 const runId = `${Date.now().toString(36)}${process.pid.toString(36)}`;
 const DEAL_NAME = `ZZ-TEST Globex renewal ${runId}`;
@@ -43,6 +45,26 @@ const visibleTo = (role: Role) => MODE === "all" || (MODE === "admins" && role !
 
 function istDate(offsetDays: number) {
   return new Date(Date.now() + 5.5 * 3600_000 + offsetDays * 86400_000).toISOString().slice(0, 10);
+}
+
+/**
+ * Why the server's local mail outbox cannot be read here, or null when it can.
+ * No default and no directory of its own: a server that writes its mail elsewhere must show up as a skip naming
+ * EMAIL_OUTBOX_DIR, not as tests that pass because this file looked somewhere else.
+ */
+function outboxMissing(): string | null {
+  if (!OUTBOX) {
+    return "APL-2609: set EMAIL_OUTBOX_DIR to the local mail outbox the server writes. This spec signs up nakul17+ aliases and verifies them from it, so it cannot run against a server whose mail is not a local file (staging).";
+  }
+  if (!existsSync(OUTBOX)) {
+    return `APL-2609: EMAIL_OUTBOX_DIR=${OUTBOX} does not exist. Set it to the folder the server writes its mail to; this spec will not make one of its own, because that would hide the misconfiguration.`;
+  }
+  try {
+    readdirSync(OUTBOX);
+  } catch {
+    return `APL-2609: EMAIL_OUTBOX_DIR=${OUTBOX} is not a readable directory. Point it at the folder the server writes its mail to.`;
+  }
+  return null;
 }
 
 function noSecret(text: string) {
@@ -219,6 +241,8 @@ test.describe.configure({ mode: "serial", timeout: 180_000 });
 test.describe("qa:TC missing APL-2609 CRM_VISIBLE hides deals on this server's mode, in the browser and over HTTP", { tag: "@local-only" }, () => {
   test.beforeAll(() => {
     test.skip(!QA_PASS, "APL-2609: set SHO_QA_PASS (the password for nakul17+ aliases).");
+    const noOutbox = outboxMissing();
+    test.skip(Boolean(noOutbox), noOutbox ?? "");
   });
 
   test.beforeAll(async () => {
@@ -228,7 +252,6 @@ test.describe("qa:TC missing APL-2609 CRM_VISIBLE hides deals on this server's m
     // Both URLs are passed in, so the guard never falls back to reading the process environment.
     assertStoryTargetAllowed(process.env, BASE);
     assertStoryTargetAllowed(process.env, SEED);
-    expect(existsSync(OUTBOX), `APL-2609 story spec is local-sandbox-only: it verifies new aliases from the server's local outbox (EMAIL_OUTBOX_DIR=${OUTBOX})`).toBe(true);
     const health = await call(BASE, "", "GET", "/api/health");
     expect(health.status, health.text).toBe(200);
 
