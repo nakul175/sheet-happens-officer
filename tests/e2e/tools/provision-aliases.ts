@@ -12,11 +12,15 @@
 //   3. Open each "Verify" email and follow its link, then run the script again. It exits 0 when every alias is ready.
 // --check changes nothing and only reports. Output names addresses and states, never a password or token.
 //
-// --create (APL-2748, run by .github/workflows/provision-staging-aliases.yml) only signs up the pool Members that do not
-// exist yet, on staging itself and nothing else. An address that already exists (sign-up says 409) is skipped, never
-// changed. It needs no Super Admin and prints three counts only (created, skipped, failed), no address and no password.
-// It exits non-zero when any sign-up failed or the counts do not add up to every pool Member. A second run creates 0.
-// A created account is unverified until its Verify link is followed; the normal run above then reports what is left.
+// --create (APL-2748, run by .github/workflows/provision-staging-aliases.yml) brings the pool up on staging itself and
+// nothing else. Each Member is probed with a sign-in first and only an address with no account is signed up, so an alias
+// that already exists is never sent a sign-up (the one request that creates an unverified row). It needs no Super Admin
+// and prints counts only (created, skipped, failed, ready) plus one verdict line, no address and no password.
+//
+// APL-3017: it exits non-zero unless all 66 are ready (signed in with SHO_QA_PASS), nothing was created and nothing
+// failed. A created account is unverified until its Verify link is followed, so the first run on an empty staging is red
+// on purpose and says how many are not ready; the same run after the links are followed is green with created 0. A run
+// that leaves the pool unverified can never look green, which is how 66 unverified aliases were mistaken for success.
 import { pathToFileURL } from "node:url";
 import { POOL_SIZE, QA_ADMIN_EMAIL, QA_ADMIN_NAME, SLOTS, freeOfSecrets, parseSlots, poolFor, provisionTarget, stagingOnlyTarget, type PoolPerson } from "../helpers/alias-pool";
 
@@ -132,15 +136,35 @@ export async function provision(opts: Options): Promise<Result> {
   return { rows, ready: rows.every((r) => r.state === "READY") };
 }
 
-export type CreateCounts = { created: number; skipped: number; failed: number };
+export type CreateCounts = { created: number; skipped: number; failed: number; ready: number };
 export type CreateOptions = { password: string; http: Http; pause?: number };
 
-/** Create mode: sign up every pool Member in every slot. 201 is created, 409 (already exists) is skipped, anything else failed. */
+/** The server's own message, for the one decision create mode makes on it (verified or not). Never printed. */
+function messageOf(reply: Reply) {
+  return typeof reply.json.error === "string" ? reply.json.error : "";
+}
+
+/**
+ * Create mode: every pool Member in every slot, signed up only when it has no account. Each one is probed with a sign-in
+ * first, so an existing alias is left exactly as it is:
+ *   200             -> ready (verified, active, SHO_QA_PASS works); skipped, nothing written.
+ *   403 "verify"    -> the account exists and waits on its link; skipped, nothing written.
+ *   403 (other), 429 -> deactivated or locked; failed, nothing written.
+ *   401             -> no account, or another password; sign up. 201 created, 409 skipped (other password), else failed.
+ *   a dropped request or any other status -> failed.
+ * APL-3017: a sign-up is the one request in this repo that makes an unverified row, so no existing alias ever gets one.
+ */
 export async function createMissing(opts: CreateOptions): Promise<CreateCounts> {
   const pause = opts.pause ?? 300;
-  const counts: CreateCounts = { created: 0, skipped: 0, failed: 0 };
+  const counts: CreateCounts = { created: 0, skipped: 0, failed: 0, ready: 0 };
   for (const p of SLOTS.flatMap(poolFor)) {
     await sleep(pause);
+    let probe: Reply;
+    try { probe = await opts.http("POST", "/api/auth/signin", { email: p.email, password: opts.password }); }
+    catch { counts.failed++; continue; }
+    if (probe.status === 200) { counts.ready++; counts.skipped++; continue; }
+    if (probe.status === 403 && /verify/i.test(messageOf(probe))) { counts.skipped++; continue; }
+    if (probe.status !== 401) { counts.failed++; continue; }
     let status = 0;
     try { status = (await opts.http("POST", "/api/auth/signup", { name: p.name, email: p.email, password: opts.password })).status; }
     catch { /* a network error counts as failed */ }
@@ -153,12 +177,25 @@ export async function createMissing(opts: CreateOptions): Promise<CreateCounts> 
 
 /** Counts only. Never an address, a password or server text. */
 export function createSummary(c: CreateCounts): string {
-  return `created ${c.created}, skipped ${c.skipped}, failed ${c.failed}, total ${c.created + c.skipped + c.failed} of ${POOL_SIZE}`;
+  const total = c.created + c.skipped + c.failed;
+  return `created ${c.created}, skipped ${c.skipped}, failed ${c.failed}, ready ${c.ready}, total ${total} of ${POOL_SIZE}`;
 }
 
-/** Create mode passes only when nothing failed and every pool Member was accounted for. */
+/**
+ * Create mode passes only when every pool Member was accounted for, nothing failed, nothing was created and all 66 sign
+ * in. APL-3017: creating is not provisioning. A created account is unverified until its Verify link is followed, and an
+ * alias left unverified by an earlier run is not ready either — existing is not the same as ready.
+ */
 export function createPassed(c: CreateCounts): boolean {
-  return c.failed === 0 && c.created + c.skipped + c.failed === POOL_SIZE;
+  return c.failed === 0 && c.created === 0 && c.created + c.skipped + c.failed === POOL_SIZE && c.ready === POOL_SIZE;
+}
+
+/** The line after the counts: what the run means, and what to do when it is not a pass. Counts only. */
+export function createVerdict(c: CreateCounts): string {
+  if (createPassed(c)) return `All ${POOL_SIZE} aliases are ready: verified, active and signed in with SHO_QA_PASS.`;
+  const notReady = POOL_SIZE - c.ready;
+  return `${notReady} of ${POOL_SIZE} not ready. A created account is unverified until its Verify link is followed; ` +
+    `run --check --slots all for the per-alias state, then follow the links and run --create again.`;
 }
 
 const AWAITING_LINK: State[] = ["SIGNED_UP", "VERIFY_SENT", "UNVERIFIED"];
@@ -219,7 +256,7 @@ async function create(args: string[]) {
   if (!user || !pass) throw new Error("Set STAGING_USER and STAGING_PASS for the staging basic-auth gate.");
   console.log(`Creating missing pool aliases on ${base.host}.`);
   const counts = await createMissing({ password, http: fetchHttp(base, { user, pass }) });
-  const out = createSummary(counts);
+  const out = `${createSummary(counts)}\n${createVerdict(counts)}`;
   if (!freeOfSecrets(out, [password, pass])) throw new Error("Refusing to print output that contains a secret.");
   console.log(out);
   process.exitCode = createPassed(counts) ? 0 : 2;
