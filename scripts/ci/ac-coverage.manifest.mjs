@@ -248,11 +248,21 @@ export const ENTRIES = Object.freeze([
     reason: "process", note: "the CI conclusion for a SHA is not observable from inside a test run" },
 
   // ---- 3011: per-schema reads -------------------------------------------------------------------------------------
-  { id: "3011 AC1", ticket: "3011", clause: "with ?schema=<name> every SQL read targets <name>", status: "UNTESTED",
-    note: "the named receipt tests/apl-2742.test.ts is about unverified sign-in and Resend logging (:71-:174); nothing "
-      + "in it mentions schema targeting, so the receipt does not support the clause" },
+  { id: "3011 AC1", ticket: "3011", clause: "with ?schema=<name> every SQL read targets <name>", status: "TESTED",
+    test: "tests/sho-3011-schema-strip.test.ts:63", verified: "body",
+    asserts: "SET search_path TO \"${SCHEMA}\"",
+    note: "W232: the case's title says AC2 while the assertion is AC1's - localSql() is handed a URL naming w193, the "
+      + "statement it sends is pinned with SET search_path TO \"w193\" and the helper then asks the server for "
+      + "SELECT current_schema(). Scope, stated plainly: this is the shared psql helper's statement path "
+      + "(tests/e2e/helpers/local-clock.ts), not Prisma's own reads, so 'every SQL read' is enforced for that one "
+      + "path and no other; the schema-mismatch case (:105) is what turns a statement that ran elsewhere into an "
+      + "error rather than a green run" },
   { id: "3011 AC2", ticket: "3011", clause: "without it, unchanged", status: "UNTESTED",
-    note: "no test names the no-parameter path either" },
+    note: "still no test of the PRODUCT's no-parameter path. The two no-schema cases in "
+      + "tests/sho-3011-schema-strip.test.ts (:77, :90) are titled AC2 but are about the test helper: a URL with no "
+      + "?schema= is now REFUSED by name and psql is never started, which is the opposite of 'unchanged' for that "
+      + "helper. A test whose title claims AC2 while asserting a refusal is not a receipt for this clause, so the "
+      + "status does not move" },
   { id: "3011 AC3", ticket: "3011", clause: "the local-only guard still refuses non-local and nothing is logged",
     status: "UNTESTED", note: "no test in the named receipt asserts the guard or the absence of a log line" },
   { id: "3011 AC4", ticket: "3011", clause: "a test covers it, CI green", status: "NOT-TESTABLE-IN-REPO",
@@ -305,10 +315,15 @@ export const ENTRIES = Object.freeze([
 
   // ---- 3024: RETURN_PATH_LOG ---------------------------------------------------------------------------------------
   { id: "3024 BULLET-1", ticket: "3024", clause: "RETURN_PATH_LOG is set, or the dead reference removed",
-    status: "UNTESTED",
-    note: "tests/return-to.test.ts:808-816 requires the log to carry the probe, so it fails unless RETURN_PATH_LOG=1 at "
-      + "run time, but nothing asserts the variable exists where the code expects it; the one measured run failed on a "
-      + "SERVER_LOG precondition, not on the ticket" },
+    status: "TESTED", test: "tests/test-env-contract.test.ts:127", verified: "body",
+    asserts: "RETURN_PATH_LOG=1 on the dev server line",
+    note: "W232, re-derived at HEAD: the old note (\"nothing asserts the variable exists where the code expects it\") "
+      + "is false and was already false at the baseline. Four assertions in this file pin exactly that: the README's "
+      + "dev-server line sets RETURN_PATH_LOG=1 (:127), package.json's dev script sets it (:136), src/proxy.ts gates "
+      + "the [return-path] line on it (:141) and ci.yml starts next start with it (:154). The file's titles name the "
+      + "probe, not SHO-3024 - the ticket id appears only in the comment at :149 - so the attribution is the same "
+      + "kind BULLET-2 discloses, not a title that names the ticket. What it does not prove: that any run of "
+      + "tests/return-to.test.ts succeeded, which is a different hand and stays in that test's own record" },
   { id: "3024 BULLET-2", ticket: "3024", clause: "a test covers it", status: "TESTED",
     test: "tests/return-to.test.ts:817", verified: "body",
     asserts: "[return-path] /tasks/v16-probe?q=${encoded}",

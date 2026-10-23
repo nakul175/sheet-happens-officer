@@ -3,9 +3,9 @@
   "clauses": 78,
   "tickets": 35,
   "status": {
-    "TESTED": 33,
+    "TESTED": 35,
     "NOT-TESTABLE-IN-REPO": 23,
-    "UNTESTED": 22
+    "UNTESTED": 20
   },
   "tested": [
     "2671 AC1",
@@ -32,11 +32,13 @@
     "3000 AC1",
     "3010 AC1",
     "3010 AC2",
+    "3011 AC1",
     "3012 AC3",
     "3013 AC1",
     "3013 AC2",
     "3013 AC3",
     "3019 EXPECTED",
+    "3024 BULLET-1",
     "3024 BULLET-2",
     "3029 AC2",
     "3031 EXPECTED",
@@ -91,7 +93,7 @@
     "3010 AC2": "TESTED",
     "3010 AC3": "UNTESTED",
     "3010 AC4": "NOT-TESTABLE-IN-REPO",
-    "3011 AC1": "UNTESTED",
+    "3011 AC1": "TESTED",
     "3011 AC2": "UNTESTED",
     "3011 AC3": "UNTESTED",
     "3011 AC4": "NOT-TESTABLE-IN-REPO",
@@ -107,7 +109,7 @@
     "3017 AC2": "NOT-TESTABLE-IN-REPO",
     "3017 AC3": "NOT-TESTABLE-IN-REPO",
     "3019 EXPECTED": "TESTED",
-    "3024 BULLET-1": "UNTESTED",
+    "3024 BULLET-1": "TESTED",
     "3024 BULLET-2": "TESTED",
     "3024 BULLET-3": "NOT-TESTABLE-IN-REPO",
     "3025 BULLET-1": "UNTESTED",
