@@ -4,6 +4,7 @@
 import { test, expect, zz } from "../support";
 import { getTask, ghost, newProject, newTask, ymd, type Who } from "../g2";
 import { pipelines } from "../helpers/deal-board";
+import { atDeal } from "../helpers/deal-wait";
 import { raw } from "../helpers/jim-http";
 import { activity, audit, createOrg, projectOf, type Later } from "../helpers/claude-a";
 
@@ -115,12 +116,21 @@ test("APL-2538 > AC3: Not listed? New organisation creates the organisation inli
   await expect(dialog.getByLabel("Organisation (buyer)")).toHaveValue(orgId);
   await dialog.getByLabel("Deal name").fill(dealName);
   await dialog.getByLabel("Why are we pursuing this?").fill("ZZ-TEST inline");
-  // The task is open at /projects/<source>?task=<task>, which already matches /projects/. Wait for /projects/<newId> with newId not the source.
-  const dealPath = /^\/projects\/([^/]+)$/;
-  const landed = admin.page.waitForURL((u) => { const m = dealPath.exec(u.pathname); return !!m && m[1] !== p.id; });
+  // The task is open at /projects/<source>?task=<task>. AC3: wait for the deal this dialog just moved it to, by that
+  // deal's own id — not for any /projects/ path, and not merely for a project that is not the source.
   await dialog.getByRole("button", { name: "Convert to deal" }).click();
-  await landed;
-  const dealId = dealPath.exec(new URL(admin.page.url()).pathname)![1];
+  let dealId = "";
+  await expect
+    .poll(
+      async () => {
+        const deals = (await admin.api.get("/api/deals")).json.deals as { id: string; name: string }[] | undefined;
+        dealId = deals?.find((row) => row.name === dealName)?.id ?? "";
+        return dealId;
+      },
+      { timeout: 30_000 },
+    )
+    .not.toBe("");
+  await admin.page.waitForURL(atDeal(dealId));
   expect(dealId).not.toBe(p.id);
   // The deal page's title carries the Deals breadcrumb.
   await expect(admin.page.getByRole("heading", { level: 1, name: `Deals / ${dealName}`, exact: true })).toBeVisible();
