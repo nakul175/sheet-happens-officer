@@ -1,9 +1,20 @@
 // SHO-2689 local drain probe. Same protocol as the staging burst and tests/shutdown-next.test.ts:
 // connect N sockets, write the request, SIGTERM 40ms later, then probe a NEW connection at
 // +16ms and +143ms. Reuses tests/shutdown-next.test.ts's readResponse/probe semantics; it does
-// not spawn taskset (Linux-only) and it runs server.js in dev mode because this worktree has no
-// production `.next` build and building would rewrite the dev server's directory.
+// not spawn taskset (Linux-only).
+//
+// Two modes, and they answer different questions (W99 / SHO-2689):
+//   default        NODE_ENV=development against the checkout's own server.js. A local look.
+//                  A green here is NOT deployed acceptance: there is no `next build`, so the
+//                  thing measured is a dev server, not the release.
+//   --production   the release: the same entry, but NODE_ENV=production, cwd = SHO_APP_ROOT
+//                  (the gate builds an isolated copy and points this at it), RELEASE passed
+//                  through and echoed back for a comparison. It REFUSES to start without a
+//                  completed build (`.next/BUILD_ID`) and refuses a directory that carries a
+//                  dev server's artifacts (`.next/dev`).
 import net from "node:net";
+import path from "node:path";
+import fs from "node:fs";
 import { spawn } from "node:child_process";
 
 const N = Number(process.argv[2] ?? "40");
@@ -17,6 +28,10 @@ const flags = process.argv.slice(3);
 // different questions and reporting one as the other is how a vacuous green gets made.
 const SLOW = flags.includes("--slow");
 const ASSERT = flags.includes("--assert");
+// SHO-2689: the deployed artifact, not the dev server. See the header.
+const PRODUCTION = flags.includes("--production");
+const APP_ROOT = process.env.SHO_APP_ROOT || process.cwd();
+const ENTRY = process.env.SHO_ENTRY || "server.js";
 const PORT_ARG = Number(flags.find((arg) => /^\d+$/.test(arg)) ?? "0");
 const URL_PATH = SLOW ? "/api/shutdown-slow?ms=2000" : "/api/health";
 const WARM_PATH = SLOW ? "/api/shutdown-slow?ms=0" : "/api/health";
@@ -44,13 +59,41 @@ function freePort() {
 }
 
 const port = PORT_ARG || (await freePort());
-const child = spawn(process.execPath, ["--import", "tsx", "server.js"], {
-  cwd: process.cwd(),
+
+// ---------------------------------------------------------------- the production precondition
+// A green from a dev server is what W99 was asked to make impossible, so `--production` refuses
+// to open a single socket unless the directory it was pointed at really holds a release.
+let buildId = null;
+let devArtifacts = false;
+if (PRODUCTION) {
+  const nextDir = path.join(APP_ROOT, ".next");
+  // The build first: a dev checkout has server.js but no BUILD_ID, and that is the case this
+  // refusal is for.
+  try {
+    buildId = fs.readFileSync(path.join(nextDir, "BUILD_ID"), "utf8").trim() || null;
+  } catch {
+    buildId = null;
+  }
+  if (!buildId) {
+    throw new Error(`--production needs a completed build: ${nextDir}/BUILD_ID is missing (run next build against this directory first)`);
+  }
+  if (!fs.existsSync(path.join(APP_ROOT, ENTRY))) {
+    throw new Error(`--production needs the production entry at ${path.join(APP_ROOT, ENTRY)} (a dev server is not the release)`);
+  }
+  devArtifacts = fs.existsSync(path.join(nextDir, "dev"));
+  if (devArtifacts) {
+    throw new Error(`${nextDir}/dev exists: this directory carries a dev server's artifacts, so what would be measured is not the release`);
+  }
+}
+
+const child = spawn(process.execPath, ["--import", "tsx", ENTRY], {
+  cwd: APP_ROOT,
   env: {
     ...process.env,
-    NODE_ENV: "development",
+    NODE_ENV: PRODUCTION ? "production" : "development",
     PORT: String(port),
     SHO_BIND_HOST: "127.0.0.1",
+    ...(PRODUCTION && process.env.RELEASE ? { RELEASE: process.env.RELEASE } : {}),
     ...(SLOW ? { SHUTDOWN_TEST_SLOW_MS: "1", SHUTDOWN_DRAIN_MS: "15000" } : {}),
   },
   stdio: ["ignore", "pipe", "pipe"],
@@ -144,6 +187,17 @@ const warm = await fetch(`http://127.0.0.1:${port}${WARM_PATH}`, { redirect: "ma
 const warmBody = await warm.text();
 marks.push({ warmup: warm.status });
 if (warm.status !== 200) throw new Error(`warm-up ${WARM_PATH} was ${warm.status}: ${warmBody.slice(0, 300)}`);
+// SHO-2689: the release identity the serving process reports (src/app/api/health/route.ts:10).
+// The gate compares this with the RELEASE it was given; a mismatch means the artifact under the
+// knife is not the artifact the receipt names.
+let release = null;
+if (PRODUCTION) {
+  try {
+    release = JSON.parse(warmBody).release ?? null;
+  } catch {
+    release = null;
+  }
+}
 const hitsBefore = countHits();
 
 const sockets = await Promise.all(Array.from({ length: N }, () => openSocket()));
@@ -188,6 +242,16 @@ const summary = {
   n: N,
   sigtermDelayMs: SIGTERM_DELAY_MS,
   mode: SLOW ? "slow" : "health",
+  // W99 / SHO-2689: what was actually serving, so a receipt states it instead of assuming it.
+  serving: {
+    entry: ENTRY,
+    appRoot: APP_ROOT,
+    nodeEnv: PRODUCTION ? "production" : "development",
+    dev: !PRODUCTION,
+    buildId: buildId ? "present" : "missing",
+    devArtifacts,
+  },
+  release,
   path: URL_PATH,
   stillOpenAtSigterm,
   hits,
