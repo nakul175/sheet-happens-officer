@@ -52,9 +52,10 @@ and call the job endpoint directly. Each value in the commands is a placeholder.
 
 ```bash
 EMAIL_OUTBOX_DIR=/tmp/sho-outbox SUPER_ADMIN_EMAILS=root.test@aplyd.com APP_URL=http://localhost:3100 \
+  RETURN_PATH_LOG=1 \
   DATABASE_URL="postgresql://USER:PASSWORD@localhost:5432/taskboard?schema=public" \
   JOB_SECRET=replace-with-a-token-of-at-least-16-chars \
-  npx next dev -p 3100 &
+  npx next dev -p 3100 > server.log 2>&1 &
 EMAIL_OUTBOX_DIR=/tmp/sho-outbox SUPER_ADMIN_EMAILS=root.test@aplyd.com TASKBOARD_URL=http://localhost:3100 \
   DATABASE_URL="postgresql://USER:PASSWORD@localhost:5432/taskboard?schema=public" \
   JOB_SECRET=replace-with-a-token-of-at-least-16-chars \
@@ -67,12 +68,16 @@ Three conditions are not on that line, because they belong to the server or the 
   read the server's own log, not the test output, so point this at wherever the dev server writes.
   It is deliberately **not** a row in the table above: that table is the `npm test` line's variables,
   and a test asserts the two agree. `SERVER_LOG` belongs to the process that *runs the server*.
+  Unset, the tests read `server.log` in the repository root, which is where the server line above
+  writes.
 - `PW_CHROMIUM` — the path to a Chrome or Chromium binary, used by the browser tests. In CI run
   `npx playwright-core install --with-deps chromium` first instead.
-- `RETURN_PATH_LOG=1` — set this on the **server** process, not the test process. `src/proxy.ts`
-  only writes its `[return-path]` lines when the server has it, and a test reads those lines back.
-  In `ci.yml` the server under test is started with `next start`, and the check still passes there: the
-  proxy's own lines are what the test reads, not the request lines `next dev` adds.
+- `RETURN_PATH_LOG=1` — set this on the **server** process, not the test process. The server line
+  above sets it and writes `server.log`, so the probe has somewhere to write; `npm run dev` sets it
+  too. `src/proxy.ts` only writes its `[return-path]` lines when the server has it, and
+  `tests/return-to.test.ts` reads those lines back. In `ci.yml` the server under test is started with
+  `next start`, and the check still passes there: the proxy's own lines are what the test reads, not
+  the request lines `next dev` adds.
 
 ## Deploy (story 9.3)
 

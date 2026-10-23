@@ -65,6 +65,13 @@ function npmTestEnv(section: string): Record<string, string> {
   return command.env;
 }
 
+/** The dev server the Test section starts, the one `TASKBOARD_URL` points at. */
+function devServer(section: string): { env: Record<string, string>; rest: string } {
+  const server = commands(section).find((item) => /next dev/.test(item.rest));
+  if (!server) throw new Error("Test section has no dev server command");
+  return server;
+}
+
 const readme = readFileSync("README.md", "utf8");
 const section = testSection(readme);
 
@@ -109,5 +116,39 @@ describe("test env contract: README npm test line + vitest config", () => {
     const port = server!.env.APP_URL?.match(/:(\d+)\b/)?.[1];
     expect(port, "APP_URL port in the server command").toBeTruthy();
     expect(env.TASKBOARD_URL).toBe(server!.env.APP_URL);
+  });
+});
+
+// APL-2652 follow-up. tests/return-to.test.ts reads `process.env.SERVER_LOG ?? "server.log"` and requires a
+// `[return-path] …` line for each v16 probe. src/proxy.ts writes those lines only when the SERVER has
+// RETURN_PATH_LOG=1. Documenting the variable (as the prose above the table does) is not enough: the dev-server
+// line the README publishes never set it, so the probe had nothing to read and the check could only pass in CI.
+describe("return-path probe: the documented dev server can write what the test reads", () => {
+  it("the dev server the README starts sets RETURN_PATH_LOG=1", () => {
+    expect(devServer(section).env.RETURN_PATH_LOG, "RETURN_PATH_LOG=1 on the dev server line").toBe("1");
+  });
+
+  it("the dev server writes the log the probe reads (server.log)", () => {
+    // Unset SERVER_LOG means the test reads ./server.log, so the documented server has to write that file.
+    expect(devServer(section).rest, "the dev server line redirects to server.log").toMatch(/>\s*server\.log\b/);
+  });
+
+  it("npm run dev sets it too, so a plain dev server answers the same probe", () => {
+    const pkg = JSON.parse(readFileSync("package.json", "utf8")) as { scripts: Record<string, string> };
+    expect(pkg.scripts.dev, "RETURN_PATH_LOG=1 in the dev script").toMatch(/(^|\s)RETURN_PATH_LOG=1\s+next dev/);
+  });
+
+  it("the proxy still gates the line on RETURN_PATH_LOG=1 and the test still reads server.log", () => {
+    // The other end of the contract. Without these two the assertions above would prove a variable nobody uses.
+    const proxy = readFileSync("src/proxy.ts", "utf8");
+    expect(proxy, "proxy gated on RETURN_PATH_LOG === \"1\"").toContain('process.env.RETURN_PATH_LOG === "1"');
+    expect(proxy, "proxy writes the [return-path] line").toContain("[return-path]");
+    expect(readFileSync("tests/return-to.test.ts", "utf8"), "the test reads SERVER_LOG, else server.log")
+      .toContain('process.env.SERVER_LOG ?? "server.log"');
+  });
+
+  it("CI starts the server under test the same way", () => {
+    expect(readFileSync(".github/workflows/ci.yml", "utf8"), "CI sets RETURN_PATH_LOG=1 for next start")
+      .toMatch(/RETURN_PATH_LOG=1\s+npx next start/);
   });
 });
