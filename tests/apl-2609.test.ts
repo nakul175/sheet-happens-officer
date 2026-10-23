@@ -244,7 +244,9 @@ describe("qa:TC missing APL-2609 CRM_VISIBLE hides deals from My tasks, search, 
     const shown = async (u: Actor) => JSON.stringify((await chatState(u)).messages);
     setMode("all");
     // The sentence is only relayed on a turn that read something (engine.ts buildReply: `records === 0` returns
-    // NOTHING_CHANGED, SHO-2693), so the fake model reads the person's own tasks first and then says it.
+    // NOTHING_CHANGED, SHO-2693), so the fake model reads the person's own tasks first and then says it. That read is
+    // EARNED, unlike the one this packet removed further down: `my_tasks` really does return this deal task at CRM all
+    // (AC1/AC7 above assert it), so the sentence's three facts - deal, task, stage - are in the rows the tool returned.
     script(() => [tu("my_tasks", { filter: "all_open" })], () => [say(says)]);
     await sendMessage(w.ed, `ZZ-TEST which deals am I on ${w.tag}?`);
     expect(await shown(w.ed)).toContain(w.dealName);
@@ -256,15 +258,27 @@ describe("qa:TC missing APL-2609 CRM_VISIBLE hides deals from My tasks, search, 
     // A turn while the CRM is hidden is shown, and the earlier answer is not replayed to the model.
     setMode("off");
     let replayed = "";
-    // Same reason: with the CRM hidden this turn still reads the plain task, so its reply is relayed and stays on record.
-    script(() => [tu("my_tasks", { filter: "all_open" })], (req) => { replayed = JSON.stringify(req.messages); return [say("Noted.")]; });
+    script((req) => { replayed = JSON.stringify(req.messages); return [say("Noted.")]; });
     await sendMessage(w.ed, `ZZ-TEST and now ${w.tag}?`);
     expect(replayed).toContain(`ZZ-TEST and now ${w.tag}?`);
     for (const word of [w.dealName, w.dealTaskTitle]) expect(replayed).not.toContain(word);
     const later = await shown(w.ed);
     expect(later).toContain(`ZZ-TEST and now ${w.tag}?`);
-    expect(later).toContain("Noted.");
     expect(later).not.toContain(w.dealName);
+    // The hidden turn is on record with an ASSISTANT row. What that row SAYS is not one of APL-2609's clauses (AC4/AC8
+    // ask that the turn is shown and that no deal word survives), and this packet does not decide it either: the fake
+    // model said "Noted." with no tool call, and the engine discards every sentence on a turn that read nothing
+    // (src/lib/concierge/engine.ts:244, `records === 0` → NOTHING_CHANGED at :159).
+    const stored = (await chatState(w.ed)).messages.at(-1)!;
+    expect(stored.role).toBe("ASSISTANT");
+    expect(stored.text).toBeTruthy();
+    // PENDING-DECISION - the reply trade-off, W246 (DECISIONS-NEEDED.md §D4; framed in
+    // app/sho-status-plan/execution/W246-REPORT.md, and the file is not in this repo yet). The options are: relay a
+    // sentence that claims nothing about the world, or keep the blackout. Until one is taken this assertion pins the
+    // behaviour that shipped BEFORE edc62ac - which is what the person actually gets today - instead of bending the
+    // fixture with a decorative read to dodge it: a change refusal, to somebody who asked for no change.
+    // When D4 is decided, replace the expected sentence below with the decided one. Do not add a read to make it green.
+    expect(stored.text).toBe("Nothing has changed. I cannot change anything without a card you confirm, so tell me which task should change and how, and I will show you the card.");
     // Nothing was deleted: with the CRM visible again the history is back.
     setMode("all");
     expect(await shown(w.ed)).toContain(w.dealName);
