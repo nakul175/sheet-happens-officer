@@ -10,10 +10,12 @@
 # verifies, reactivates or changes an alias. If any alias is not ready, it stops before the suite with
 # "aliases not verified, ask Oscar".
 #
-# Excluded: @local-only (Dwight's ruling, APL-2925). APL-2471 AC4, APL-2609, APL-2624, APL-2669, APL-2674, APL-2721 and
-# APL-2737 sign up brand-new nakul17+ aliases and verify them from the server's local mail outbox; APL-2742 starts its own
-# servers from a local build and database. On staging that would make real accounts and send real mail, then fail.
-# They still run against a local server.
+# Excluded: @local-only (Dwight's ruling, APL-2925). The printed list is derived from the tags by
+# scripts/ci/local-only-specs.mjs, so it cannot drift from the specs again (SHO-3000). At the time of writing the
+# tagged specs are APL-2471 AC4, APL-2609, APL-2624, APL-2669, APL-2674, APL-2721, APL-2737 and APL-2742:
+# APL-2471 AC4, APL-2609, APL-2624, APL-2669, APL-2674, APL-2721 and APL-2737 sign up brand-new nakul17+ aliases and
+# verify them from the server's local mail outbox, and APL-2742 starts its own servers from a local build and database.
+# On staging that would make real accounts and send real mail, then fail. They still run against a local server.
 #
 # Target: the repository variable STAGING_BASE_URL (not a secret), else https://staging.sheethappensofficer.com. Only staging
 # or a pr1-pr4 preview is accepted; production is refused.
@@ -169,10 +171,13 @@ jobs:
               echo "**Counts:** none (the job stopped before the suite ran: aliases not verified, ask Oscar)."
             fi
             echo
-            echo "**Excluded (@local-only):** APL-2471 AC4, APL-2609, APL-2624, APL-2669, APL-2674, APL-2721, APL-2737, APL-2742. They need a"
-            echo "local server: all but APL-2742 sign up new nakul17+ aliases and verify them from a local mail outbox (APL-2471 AC4 runs the"
-            echo "daily reminder job and reads the notices it writes locally), and APL-2742 starts its own servers from a local build and"
-            echo "database. On staging that would create real accounts, send real mail and run jobs against staging data. They run locally only."
+            # SHO-3000: the list is read from the tags (scripts/ci/local-only-specs.mjs), not written by hand. A hand-written
+            # list named 4 of the 8 tagged specs and nothing could tell. Its test checks the line against the tags.
+            node scripts/ci/local-only-specs.mjs --summary
+            echo "They need a local server: all but APL-2742 sign up new nakul17+ aliases and verify them from a local mail outbox"
+            echo "(APL-2471 AC4 runs the daily reminder job and reads the notices it writes locally), and APL-2742 starts its own"
+            echo "servers from a local build and database. On staging that would create real accounts, send real mail and run jobs"
+            echo "against staging data. They run locally only."
             echo "Also excluded: @static (a file-contains check) and @manual (cannot force a failure on staging), as in staging-e2e.yml."
           } >> "$GITHUB_STEP_SUMMARY"
 

@@ -14,8 +14,9 @@ test("APL-2539 > AC1: the panel shows the pipeline, the organisation and the sta
   await admin.page.goto(`/projects/${deal.id}`);
   const main = admin.page.getByRole("main");
   const stages = main.getByRole("group", { name: "Stage" });
-  // The deal panel has no landmark of its own. It is the element that holds the Stage group.
-  const panel = stages.locator("..");
+  // SHO-2996: the panel is a landmark, not the Stage group's parent -- the shared helper APL-2540 AC1/AC3 and this spec's
+  // AC2 use, so a wrapper around the group cannot make AC1 disagree with them.
+  const panel = dealPanel(admin.page);
   await expect(panel.getByText(pipes.pro.name, { exact: true })).toBeVisible();
   // The organisation is linked twice in the panel (beside the pipeline and as the Buyer). The Buyer link is the one in the "Buyer:" field.
   await expect(panel.getByText(/^Buyer:/).getByRole("link", { name: org.name, exact: true })).toHaveAttribute("href", `/accounts/${org.id}`);

@@ -9,8 +9,9 @@ export type Later = (fn: () => Promise<unknown>) => void;
 export type Act = { id: string; who: string; what: string; undo: "available" | "undone" | "too_old" | "none" };
 export type Notice = { id: string; text: string; href: string };
 
-/** The deal panel: the box that holds the Stage group (DealPanel.tsx renders the group as its first child). */
-export const dealPanel = (page: Page) => page.getByRole("group", { name: "Stage" }).locator("..");
+/** The deal panel: the box inside <main> that holds the Stage group (DealPanel.tsx renders the group as its first child).
+ *  The same locator APL-2540 AC1 uses, so the two tests cannot disagree about what the panel is, and neither walks to a parent. */
+export const dealPanel = (page: Page) => page.getByRole("main").filter({ has: page.getByRole("group", { name: "Stage" }) });
 
 /** The page, and any box that can scroll sideways (the Accounts table, for example), stays inside the viewport. */
 export async function noSideways(page: Page) {

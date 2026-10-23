@@ -1,6 +1,11 @@
 // The staging-regression summary prints which tests it excludes. The tags are the source of truth: every test tagged
-// @local-only is left out of that run, so every one of them has to be named in the printed list. This is a file read,
-// like the other @static checks: no server, model or database.
+// @local-only is left out of that run, so every one of them has to be named in the printed list. This is a file read
+// plus one local command, like the other @static checks: no server, model or database.
+//
+// SHO-3000: the list is no longer written by hand in the workflow's echo lines -- a hand-written line named 4 of the 8
+// tagged specs -- so the check runs the command the summary step runs (scripts/ci/local-only-specs.mjs --summary) and
+// compares what it prints with the tags read here. The two tag scans are separate, so one of them missing a tag shows.
+import { execFileSync } from "node:child_process";
 import { readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -25,17 +30,11 @@ function tagged(): string[] {
   return out.sort();
 }
 
-/** The printed list as one sentence, joined from the `echo` lines the summary block writes. */
+/** The printed list as the summary step produces it: it runs the command, and this reads the command's output. */
 function printed(): string {
-  const lines = readFileSync(WORKFLOW, "utf8").split("\n");
-  const start = lines.findIndex((l) => l.includes("**Excluded (@local-only):**"));
-  expect(start, "the summary prints an @local-only exclusion list").toBeGreaterThan(-1);
-  const said: string[] = [];
-  for (let i = start; i < lines.length; i++) {
-    if (lines[i].includes("Also excluded")) break;
-    said.push(lines[i].replace(/^\s*echo\s+"/, "").replace(/"\s*$/, ""));
-  }
-  return said.join(" ");
+  const step = readFileSync(WORKFLOW, "utf8").split("- name: Write the summary")[1]?.split("- name: Upload the counts")[0] ?? "";
+  expect(step, "the summary step derives the @local-only list").toMatch(/node scripts\/ci\/local-only-specs\.mjs --summary/);
+  return execFileSync(process.execPath, ["scripts/ci/local-only-specs.mjs", "--summary"], { cwd: process.cwd(), encoding: "utf8" });
 }
 
 describe("qa:TC missing the staging-regression @local-only exclusion list", () => {
