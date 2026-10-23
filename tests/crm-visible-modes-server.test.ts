@@ -5,7 +5,7 @@
 // A missing build, or a mode that never answers /api/health, fails this file.
 import "dotenv/config";
 import { spawn, type ChildProcess } from "node:child_process";
-import { closeSync, existsSync, mkdtempSync, openSync, readdirSync, readFileSync, readlinkSync, rmSync } from "node:fs";
+import { closeSync, existsSync, mkdtempSync, openSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import net from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -15,7 +15,7 @@ import { db } from "../src/lib/db";
 import { HIDDEN_DEAL_TEXT } from "../src/lib/feed";
 import { QUICK_ACTIONS } from "../src/lib/concierge/reads";
 import { istDate, PW } from "./helpers";
-import { assertProcfs } from "./procfs-precondition";
+import { portAnswers } from "./spawned-listener";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 // Run-scoped so a shared test database cannot mix this seed with another spec's "Acme renewal".
@@ -286,50 +286,6 @@ async function readPaths(base: string, cookie: string, dealId: string, name: str
     { name: "the concierge quick actions", status: quickStatus, text: quicks.map((q) => q.text).join("\n"), hiddenStatus: 200, mustName: true },
     { name: "the deal API", status: dealStatus, text: `${list.text}\n${one.text}`, hiddenStatus: 404, mustName: true },
   ];
-}
-
-function listeningPids(port: number) {
-  const hexPort = port.toString(16).toUpperCase().padStart(4, "0");
-  const inodes = new Set<string>();
-  for (const file of ["/proc/net/tcp", "/proc/net/tcp6"]) {
-    let text = "";
-    try { text = readFileSync(file, "utf8"); } catch { continue; }
-    for (const line of text.split("\n").slice(1)) {
-      const parts = line.trim().split(/\s+/);
-      if (parts.length < 10 || parts[3] !== "0A") continue;
-      if ((parts[1].split(":").pop() ?? "").toUpperCase() === hexPort) inodes.add(parts[9]);
-    }
-  }
-  if (!inodes.size) return [];
-  const found: number[] = [];
-  for (const dir of readdirSync("/proc")) {
-    if (!/^\d+$/.test(dir)) continue;
-    let fds: string[];
-    try { fds = readdirSync(`/proc/${dir}/fd`); } catch { continue; }
-    for (const fd of fds) {
-      try {
-        const target = readlinkSync(`/proc/${dir}/fd/${fd}`);
-        const inode = /^socket:\[(\d+)\]$/.exec(target)?.[1];
-        if (inode && inodes.has(inode)) { found.push(Number(dir)); break; }
-      } catch { /* fd vanished */ }
-    }
-  }
-  return found;
-}
-
-function isInGroup(ancestor: number, pid: number) {
-  let cur = pid;
-  const seen = new Set<number>();
-  while (cur > 1 && !seen.has(cur)) {
-    if (cur === ancestor) return true;
-    seen.add(cur);
-    let stat = "";
-    try { stat = readFileSync(`/proc/${cur}/stat`, "utf8"); } catch { return false; }
-    const ppid = Number(stat.slice(stat.lastIndexOf(")") + 2).split(" ")[1]);
-    if (!ppid) return false;
-    cur = ppid;
-  }
-  return false;
 }
 
 describe("bell mustName=false check (APL-2698 AC2)", () => {
@@ -616,18 +572,14 @@ describe("CRM_VISIBLE modes are tested against a real server per mode", () => {
       const adminSees = adminDeals.status === 200;
       const observed = memberSees && adminSees ? "on" : !memberSees && adminSees ? "admins" : !memberSees && !adminSees ? "off" : "mixed";
       expect(observed, `${server.mode} member ${memberDeals.status} admin ${adminDeals.status}`).toBe(server.mode);
-      // Only this assertion needs procfs: listeningPids reads /proc/net/tcp and /proc/<pid>/fd, and
-      // returns [] when they are missing. Placed here, not in beforeAll, so the file's procfs-free
-      // assertions keep running on a host without /proc (a beforeAll throw would skip all of them).
-      assertProcfs();
-      const listening = listeningPids(server.port);
-      expect(listening.length, `${server.mode} is listening`).toBeGreaterThan(0);
-      for (const pid of listening) {
-        expect(isInGroup(server.pid, pid), `${server.mode} listener ${pid} belongs to ${server.pid}`).toBe(true);
-      }
-      listeners.push(...listening);
+      // SHO-2771: this used to read /proc/net/tcp and /proc/<pid>/fd to name the pid holding the port,
+      // which is why the tier could only run on Linux. The port answers or it does not (a TCP connect),
+      // and the pid is the one startModeServer spawned in its own process group.
+      expect(await portAnswers(server.port), `${server.mode} is listening`).toBe(true);
+      listeners.push(server.pid);
     }
     expect(new Set(listeners).size, "no mode reuses another mode's process").toBe(listeners.length);
+    expect(new Set([...running.values()].map((server) => server.port)).size, "each mode has its own port").toBe(running.size);
     const modes = new Set([...running.values()].map((server) => server.mode));
     expect(modes).toEqual(new Set(MODES));
 

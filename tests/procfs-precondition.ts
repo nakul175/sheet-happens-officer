@@ -5,6 +5,12 @@
 // as a red tier, and the reason two local runs (w196, w272) could not say what was actually missing.
 // Like the build precondition these files already throw ("CRM_VISIBLE mode cannot start: the production
 // build is missing"), this says what the host lacks, before any server is spawned. On Linux it is a no-op.
+//
+// SHO-2771: the three mode tiers no longer import this, because they no longer read procfs - they ask the
+// port they spawned the server for and stop its process group (tests/spawned-listener.ts), which is why
+// they run on darwin. This module stays as the named refusal for a tier that genuinely does need the
+// process table; the only such file left is tests/shutdown-next.test.ts, which reads /proc/<pid>/status and
+// /proc/<pid>/limits about the process it started and is named out of `npm test` into the Linux tier.
 import { readdirSync } from "node:fs";
 
 /** Named, so a log or a report can quote the requirement instead of an errno. */
