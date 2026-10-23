@@ -109,7 +109,11 @@ function listeningHttpServers(): http.Server[] {
 }
 
 async function disconnectPrisma(): Promise<void> {
-  const { db } = await import("@/lib/db");
+  // Relative, not the "@/lib/db" alias. systemd runs `node server.js`, which loads this
+  // file through Node's type stripping; Node has no tsconfig `paths`, so the alias threw
+  // "Cannot find package '@/lib'" on every drain and db.$disconnect() never ran
+  // (SHO-2689 F7). The ".ts" suffix is what Node resolves; bundlers resolve it too.
+  const { db } = await import("./db.ts");
   await db.$disconnect();
 }
 
