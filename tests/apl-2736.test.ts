@@ -146,6 +146,18 @@ describe("qa:TC missing APL-2736 removing a stage asks where its items go", () =
     // A deal in a stage nobody asked about. Removing zzA must not touch it.
     const untouched = await dealIn(named(pro, "Negotiation").id);
 
+    // The question names how many items there are - two, not one - and offers both stages this test goes on to
+    // choose. Nothing moves and nothing is removed while the answer waits.
+    const asked = await sa.c.del(`/api/deals/pipelines/${zzA}`);
+    expect(asked.status, JSON.stringify(asked.json)).toBe(409);
+    expect(asked.json).toMatchObject({ needsMoveTo: true, items: 2 });
+    const offeredIds = (asked.json.stages as Stage[]).map((s) => s.id);
+    expect(offeredIds).toEqual(expect.arrayContaining([conversation!.id, lead!.id]));
+    expect(offeredIds).not.toContain(zzA);
+    expect(await exists(zzA)).toBe(true);
+    expect(await stageOf(a1)).toBe(zzA);
+    expect(await stageOf(a2)).toBe(zzA);
+
     const first = await sa.c.del(`/api/deals/pipelines/${zzA}?moveTo=${conversation!.id}`);
     expect(first.status, JSON.stringify(first.json)).toBe(200);
     expect(first.json).toMatchObject({ removed: { id: zzA }, movedTo: { id: conversation!.id, name: "Conversation" }, items: 2 });
