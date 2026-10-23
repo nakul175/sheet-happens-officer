@@ -3,11 +3,11 @@
 // Two tiers drive a real Chromium against a running app and are deliberately kept out of `npm test`
 // (vitest.config.mts excludes them so their timing is not decided by 107 other files):
 //   * the phone-size / viewport tier  - tests/viewport/**  (npm run test:viewport, vitest.viewport.config.mts)
-//   * the browser tier                - 7 named files      (npm run test:browser,  vitest.browser-tier.config.mts)
+//   * the browser tier                - *.browser.test.ts + the specs it names (npm run test:browser, vitest.browser-tier.config.mts)
 //
 // The viewport tier is wired into CI (phone-checks.yml on every pull request, viewport.yml for main).
 // The browser tier was wired into NO workflow at all: `npm run test:browser` appeared only in package.json
-// and in comments, so its 7 files could break without any check ever turning red. This file is the guard
+// and in comments, so its files could break without any check ever turning red. This file is the guard
 // that makes that state fail, and it is generic over package.json so the next tier added cannot repeat it.
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -60,6 +60,16 @@ function walk(dir: string, root: string, out: string[]): void {
     else out.push(full);
   }
 }
+
+/** Every source file in the tree, relative to `root`, skipping the same directories `expand` skips. */
+function filesInTree(root: string = ROOT): string[] {
+  const found: string[] = [];
+  walk(root, root, found);
+  return found.map((file) => path.relative(root, file));
+}
+
+/** Files the tree itself marks as browser tests by name, wherever they live. */
+const BROWSER_TEST_NAME = /\.browser\.test\.tsx?$/;
 
 /** A file that starts a browser itself, rather than through a helper. */
 function drivesChromium(file: string, root: string = ROOT): boolean {
@@ -153,7 +163,7 @@ describe("SHO-2559 automated phone checks in CI", () => {
     for (const key of TIER_ENV) expect(job, `job ${jobName} sets ${key}`).toMatch(new RegExp(`^\\s+${key}:`, "m"));
     for (const [needle, why] of PRECONDITIONS) expect(job, `job ${jobName} ${why}`).toContain(needle);
     expect(job, "the app starts on the port TASKBOARD_URL names").toContain("-p 3100");
-    // Six of the seven files fall back to a system /usr/bin/google-chrome and fail before any test when it is absent,
+    // The tier's files fall back to a system /usr/bin/google-chrome and fail before any test when it is absent,
     // which is every ubuntu-latest runner: the job must hand them the Chromium it installed (PW_CHROMIUM).
     expect(job, `job ${jobName} exports PW_CHROMIUM`).toContain("PW_CHROMIUM=$chrome");
     expect(job, `job ${jobName} exports it to the later steps`).toContain('>> "$GITHUB_ENV"');
@@ -162,8 +172,30 @@ describe("SHO-2559 automated phone checks in CI", () => {
   it("no browser-tier file is collected twice or dropped from npm test (qa:TC-SHO2559-11c9a5d7@v1)", () => {
     const browser = readTiers().find((tier) => tier.script === "test:browser");
     expect(browser, "the browser tier exists").toBeDefined();
-    // The config's 7 entries must each exist; a rename would otherwise shrink the tier silently.
-    expect(browser!.files).toHaveLength(7);
+    // THE PROPERTY, NOT A COUNT. A fixed "7" went stale the moment a browser spec was legitimately added
+    // (tests/e2e/local/SHO-2738-3025-3030.browser.test.ts), and a rename shrank or grew the tier silently
+    // in the other direction. Both directions are asserted against the tree instead:
+    //   (a) every file the tree names `*.browser.test.ts` is registered in the tier, wherever it lives, so an
+    //       addition cannot be forgotten and a rename cannot leave a dangling entry behind;
+    //   (b) every entry the tier registers really is a browser test, so the tier cannot quietly absorb a
+    //       non-browser file (which would hide it from `npm test` and from the timing story above).
+    const named = filesInTree().filter((file) => BROWSER_TEST_NAME.test(file));
+    expect(named.length, "the tree names at least one *.browser.test.ts").toBeGreaterThan(0);
+    for (const file of named) expect(browser!.files, `${file} is registered in npm run test:browser`).toContain(file);
+    for (const file of browser!.files) {
+      const browserTest = BROWSER_TEST_NAME.test(file) || drivesChromium(file);
+      expect(browserTest, `${file} drives a browser of its own, so it belongs in the browser tier`).toBe(true);
+    }
+    // Still a count, but a derived one: the tier's own list must be free of duplicates, so its de-duplicated
+    // size is its size. That is what "collected twice" means and it cannot go stale.
+    expect(new Set(browser!.files).size, "no browser-tier file is listed twice").toBe(browser!.files.length);
+    // The other direction of the same rename: a name the config still lists must resolve to a file that is
+    // there. Moving a spec without updating vitest.browser-tier.config.mts would otherwise shrink the tier
+    // silently - `expand` drops an exact path that no longer exists, so the count alone cannot see it.
+    for (const pattern of includeGlobs(path.join(ROOT, browser!.config))) {
+      if (pattern.includes("*")) continue; // A glob is proven by the two properties above, over what it expands to.
+      expect(existsSync(path.join(ROOT, pattern)), `${pattern} is listed in ${browser!.config} and exists`).toBe(true);
+    }
     const main = readFileSync(path.join(ROOT, "vitest.config.mts"), "utf8");
     const excluded = new Set([...main.matchAll(/^\s+"([^"]+)",\s*$/gm)].map((m) => m[1]));
     for (const file of browser!.files) expect(excluded.has(file), `${file} is excluded from npm test`).toBe(true);

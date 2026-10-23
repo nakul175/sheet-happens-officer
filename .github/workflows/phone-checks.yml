@@ -3,7 +3,7 @@
 # Uses its own throw-away Postgres and invented accounts; it never reaches the production database or any real data.
 #
 # SHO-2559: the browser tier (tests/browser-tier, `npm run test:browser`, vitest.browser-tier.config.mts) drives a real
-# Chromium the same way and ran in NO workflow, so its 7 files could break with nothing turning red. The `browser` job
+# Chromium the same way and ran in NO workflow, so its files could break with nothing turning red. The `browser` job
 # below is that tier's wiring: same throw-away database, same invented accounts, no credential. tests/ci-phone-checks-2559.test.ts
 # fails if any Chromium tier in package.json is left unwired again.
 name: Phone checks
@@ -132,7 +132,7 @@ jobs:
       # start Chromium, and a cache keyed on the lockfile cannot decide which binary the tier gets.
       - name: Install Playwright Chromium
         run: npx playwright-core install --with-deps chromium
-      # The tier does not use Playwright's default binary: six of its seven files fall back to a system
+      # The tier does not use Playwright's default binary: its files fall back to a system
       # /usr/bin/google-chrome and fail before any test when that is absent (tests/activity-delete-undo.test.ts:25,
       # tests/apl-2770-long-assignee.test.ts:39, tests/forced-password-23-5-browser.test.ts:25, tests/inline-touch-2673.test.ts:19),
       # which is exactly the ubuntu-latest case. PW_CHROMIUM is the variable all of them read first, so it points at the
