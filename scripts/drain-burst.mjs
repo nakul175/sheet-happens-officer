@@ -9,6 +9,9 @@ import { spawn } from "node:child_process";
 const N = Number(process.argv[2] ?? "40");
 const PORT_ARG = Number(process.argv[3] ?? "0");
 const URL_PATH = "/api/health";
+// W85: 40ms is the staging protocol. Left configurable so a rate run can shorten the window and
+// prove whether a drop needs a socket still in the kernel accept queue at SIGTERM.
+const SIGTERM_DELAY_MS = Number(process.env.BURST_SIGTERM_DELAY_MS ?? "40");
 
 function freePort() {
   return new Promise((resolve, reject) => {
@@ -127,7 +130,7 @@ const pending = Promise.all(sockets.map((s) => readResponse(s)));
 for (const socket of sockets) {
   socket.write(`GET ${URL_PATH} HTTP/1.1\r\nHost: 127.0.0.1:${port}\r\nConnection: close\r\n\r\n`);
 }
-await new Promise((r) => setTimeout(r, 40));
+await new Promise((r) => setTimeout(r, SIGTERM_DELAY_MS));
 const t0 = Date.now();
 child.kill("SIGTERM");
 const [late16, late143] = await Promise.all([probeAt(t0, 16), probeAt(t0, 143)]);
@@ -144,7 +147,11 @@ const statuses = settled.reduce((acc, r) => {
 }, {});
 const summary = {
   n: N,
+  sigtermDelayMs: SIGTERM_DELAY_MS,
   inFlight: { requested: N, non200: settled.filter((r) => r.status !== 200 || r.reset).length, statuses },
+  // W49's classification needs the connection, not just the count: index is the write order, so a
+  // non-200 here names the socket that was accepted before SIGTERM and did not get its 200.
+  connections: settled.map((r, index) => ({ index, status: r.status, reset: r.reset, bytes: r.bytes })),
   acceptedBeforeSigterm: { all200: settled.every((r) => r.status === 200 && !r.reset) },
   afterSigterm: { late16, late143 },
   exit: result,
