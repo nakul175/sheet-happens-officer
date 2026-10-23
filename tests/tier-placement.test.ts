@@ -99,9 +99,18 @@ describe("W152/W163 tier placement: the SIGTERM drain files", () => {
     const ci = readFileSync(path.join(ROOT, ".github/workflows/ci.yml"), "utf8");
     expect(ci, "a ci.yml step runs the Linux tier's config").toContain("-c vitest.shutdown.config.mts");
     expect(ci, "the job that runs it is ubuntu-latest").toMatch(/runs-on: ubuntu-latest/);
-    // "run: npm test" is the unit step; the bare phrase also appears in ci.yml's header comment.
-    expect(ci.indexOf("vitest.shutdown.config.mts"), "the tier runs before the unit step")
-      .toBeLessThan(ci.indexOf("run: npm test"));
+    // W174: anchor the order on the STEPS, not on the first mention of either string. `indexOf` of a
+    // bare phrase is satisfied by a comment — ci.yml's header comment already carries "run: npm test",
+    // and a comment naming vitest.shutdown.config.mts above it made the previous version of this
+    // assertion pass with the drain step moved after the unit step.
+    const drainStep = ci.indexOf("- name: SIGTERM drain tests");
+    const unitStep = ci.indexOf("- name: Unit tests");
+    expect(drainStep, "ci.yml still has a SIGTERM drain step").toBeGreaterThan(-1);
+    expect(unitStep, "ci.yml still has a Unit tests step").toBeGreaterThan(-1);
+    expect(drainStep, "the tier runs before the unit step").toBeLessThan(unitStep);
+    // And that step is the thing that runs the config: the name may not live only in a comment.
+    expect(ci.slice(drainStep, unitStep), "the drain step runs the tier's config")
+      .toContain("-c vitest.shutdown.config.mts");
   });
 
   it("the exclusion is justified by the file that is excluded", () => {
