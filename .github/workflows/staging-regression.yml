@@ -10,8 +10,9 @@
 # verifies, reactivates or changes an alias. If any alias is not ready, it stops before the suite with
 # "aliases not verified, ask Oscar".
 #
-# Excluded: @local-only (Dwight's ruling, APL-2925). APL-2609, APL-2669 and APL-2674 sign up brand-new nakul17+ aliases and
-# verify them from the server's local mail outbox. On staging that would make real accounts and send real mail, then fail.
+# Excluded: @local-only (Dwight's ruling, APL-2925). APL-2471 AC4, APL-2609, APL-2624, APL-2669, APL-2674, APL-2721 and
+# APL-2737 sign up brand-new nakul17+ aliases and verify them from the server's local mail outbox; APL-2742 starts its own
+# servers from a local build and database. On staging that would make real accounts and send real mail, then fail.
 # They still run against a local server.
 #
 # Target: the repository variable STAGING_BASE_URL (not a secret), else https://staging.sheethappensofficer.com. Only staging
@@ -53,8 +54,9 @@ env:
   DATABASE_URL: postgresql://unused:unused@127.0.0.1:1/unused
   DIRECT_DATABASE_URL: postgresql://unused:unused@127.0.0.1:1/unused
   PLAYWRIGHT_HTML_OPEN: never
-  # @local-only: specs that sign up and verify new aliases from a local outbox (APL-2925). @static is a file-contains check and
-  # @manual cannot force a job failure on staging; neither is a live pass (as in staging-e2e.yml).
+  # @local-only: specs that sign up and verify new aliases from a local outbox, or start their own servers (APL-2742), so
+  # staging leaves them out (APL-2925). @static is a file-contains check and @manual cannot force a job failure on staging;
+  # neither is a live pass (as in staging-e2e.yml).
   EXCLUDED_TAGS: "@local-only|@static|@manual"
 
 jobs:
@@ -167,9 +169,10 @@ jobs:
               echo "**Counts:** none (the job stopped before the suite ran: aliases not verified, ask Oscar)."
             fi
             echo
-            echo "**Excluded (@local-only):** APL-2471 AC4, APL-2609, APL-2669, APL-2674. They sign up new nakul17+ aliases and verify them"
-            echo "from a local mail outbox (APL-2471 AC4 runs the daily reminder job and reads the notices it writes locally), so on staging"
-            echo "they would create real accounts, send real mail and run a job against staging data. They run locally only."
+            echo "**Excluded (@local-only):** APL-2471 AC4, APL-2609, APL-2624, APL-2669, APL-2674, APL-2721, APL-2737, APL-2742. They need a"
+            echo "local server: all but APL-2742 sign up new nakul17+ aliases and verify them from a local mail outbox (APL-2471 AC4 runs the"
+            echo "daily reminder job and reads the notices it writes locally), and APL-2742 starts its own servers from a local build and"
+            echo "database. On staging that would create real accounts, send real mail and run jobs against staging data. They run locally only."
             echo "Also excluded: @static (a file-contains check) and @manual (cannot force a failure on staging), as in staging-e2e.yml."
           } >> "$GITHUB_STEP_SUMMARY"
 
