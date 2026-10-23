@@ -566,11 +566,34 @@ describe("clarifying questions (8.4)", () => {
     script(
       () => [tu("find_tasks", { text: "budget" })],
       (r) => [tu("propose_changes", { changes: [{ action: "assign_task", task_id: lastData(r).tasks[0].id }] })],
-      (r) => { expect(lastResultText(r)).toMatch(/person_id is missing/); return [say("Who should I assign it to?")]; },
+      () => [say("Who should I assign it to?")],
     );
     const r = await ask(lead, "assign it");
-    expect(r.messages[1]).toMatchObject({ kind: "answer", text: "Who should I assign it to?" });
+    // SHO-2693 (APL-2513 AC1): "assign it" with nobody named now comes back as the server's own question, kind
+    // "choices" with one "Never mind" option, not as the model's sentence. The old assertion here pinned kind "answer"
+    // and the model's exact words, which is the reply APL-2513 recorded as failing.
+    expect(r.messages[1]).toMatchObject({
+      kind: "choices",
+      text: "Who should I assign it to? Tell me the person's name and I will show you the card to confirm.",
+      choices: [{ id: "none", label: "Never mind" }],
+    });
+    expect(r.messages[1].text).toMatch(/^Who should I assign it to\?/);
     expect(r.messages.some((m) => m.kind === "card")).toBe(false);
+  });
+
+  it("a missing person is refused, and the model is told so", async () => {
+    const lead = await account("lead");
+    const p = await project(lead, lead);
+    await task(lead, p.id, { title: "Budget" });
+    script(
+      () => [tu("find_tasks", { text: "budget" })],
+      (r) => [tu("propose_changes", { changes: [{ action: "assign_task", task_id: lastData(r).tasks[0].id }] })],
+      (r) => { expect(lastResultText(r)).toMatch(/person_id is missing/); return [say("Who?")]; },
+    );
+    const r = await ask(lead, "assign the budget task");
+    expect(r.messages.some((m) => m.kind === "card")).toBe(false);
+    const stored = JSON.parse((await db.chatMessage.findUniqueOrThrow({ where: { id: r.messages[1].id } })).content);
+    expect(stored.proposal).toBeUndefined();
   });
 
   it("an id the model never fetched is refused", async () => {

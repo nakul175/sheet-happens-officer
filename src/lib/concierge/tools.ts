@@ -27,6 +27,11 @@ export type Turn = {
   card?: BuiltCard;
   tooMany?: number;
   choice?: { question: string; kind: Kind; ids: string[] };
+  /**
+   * Set when a proposal was refused only because it named no person: the reply asks who, in the server's own words,
+   * instead of falling back to whatever sentence the model wrote (SHO-2693 / APL-2513 AC1).
+   */
+  needsWho?: boolean;
   forced?: { kind: Kind; ids: string[] };
 };
 
@@ -160,8 +165,11 @@ const change = z.object({
 type Change = z.infer<typeof change>;
 const input = z.object({ changes: z.array(change).min(1).max(25) });
 
-class Reject extends Error {}
-const reject = (m: string): never => { throw new Reject(m); };
+/** A proposal refusal. `askWho`: the request named no person, which the server must ask about itself (SHO-2693). */
+class Reject extends Error {
+  constructor(message: string, readonly askWho?: "person") { super(message); }
+}
+const reject = (m: string, askWho?: "person"): never => { throw new Reject(m, askWho); };
 
 async function toOps(t: Turn, changes: Change[]): Promise<{ ops: Op[]; refs: { kind: Kind; id: string }[] }> {
   const ops: Op[] = [];
@@ -173,9 +181,18 @@ async function toOps(t: Turn, changes: Change[]): Promise<{ ops: Op[]; refs: { k
     refs.push({ kind: "task", id: c.task_id! });
     return rec!;
   };
-  const person = (c: Change, required = true) => {
+  /**
+   * SHO-2693: callers pass `{ required: true }` rather than `true`. A bare `person(c)` passed the Change object itself,
+   * which is truthy, so a proposal that named nobody was never refused — it produced a card that would have assigned
+   * "nobody". Only create_project has ever asked for the optional form (`person(c, false)`), which works because `false`
+   * is `false` however it is passed.
+   */
+  const person = (c: Change, o?: true | false | { required: boolean }): string | undefined => {
+    const required = o === undefined ? true : typeof o === "object" ? o.required : o;
     const id = c.person_id === "me" ? t.user.id : c.person_id;
-    if (!id) return required ? reject("person_id is missing. Ask the person who.") : undefined;
+    // A refused proposal used to be thrown away, leaving whatever sentence the model wrote — often none. The server
+    // records that it must ask who, and buildReply asks it (APL-2513 AC1).
+    if (!id) return required ? reject("person_id is missing. Ask the person who.", "person") : undefined;
     if (id !== t.user.id && !t.seen.people.has(id)) reject(`person_id ${id} was not returned by find_people in this turn.`);
     refs.push({ kind: "person", id });
     return id;
@@ -232,15 +249,15 @@ async function toOps(t: Turn, changes: Change[]): Promise<{ ops: Op[]; refs: { k
         ops.push({ k: "task.section", taskId: rec.id, sectionId: secs[0].id });
         break;
       }
-      case "assign_task": { const rec = task(c); ops.push({ k: "task.assign", taskId: rec.id, assigneeId: person(c)! }); break; }
+      case "assign_task": { const rec = task(c); ops.push({ k: "task.assign", taskId: rec.id, assigneeId: person(c, { required: true })! }); break; }
       case "complete_task": ops.push({ k: "task.complete", taskId: task(c).id }); break;
       case "reopen_task": ops.push({ k: "task.reopen", taskId: task(c).id }); break;
       case "delete_task": ops.push({ k: "task.delete", taskId: task(c).id }); break;
       case "send_for_approval": ops.push({ k: "task.send_for_approval", taskId: task(c).id }); break;
       case "send_back": ops.push({ k: "task.send_back", taskId: task(c).id }); break;
-      case "add_collaborator": { const rec = task(c); ops.push({ k: "task.collab", taskId: rec.id, userId: person(c)!, add: true }); break; }
-      case "remove_collaborator": { const rec = task(c); ops.push({ k: "task.collab", taskId: rec.id, userId: person(c)!, add: false }); break; }
-      case "set_approver": { const rec = task(c); ops.push({ k: "task.approver", taskId: rec.id, approverId: person(c)! }); break; }
+      case "add_collaborator": { const rec = task(c); ops.push({ k: "task.collab", taskId: rec.id, userId: person(c, { required: true })!, add: true }); break; }
+      case "remove_collaborator": { const rec = task(c); ops.push({ k: "task.collab", taskId: rec.id, userId: person(c, { required: true })!, add: false }); break; }
+      case "set_approver": { const rec = task(c); ops.push({ k: "task.approver", taskId: rec.id, approverId: person(c, { required: true })! }); break; }
       case "clear_approver": ops.push({ k: "task.approver", taskId: task(c).id, approverId: null }); break;
       case "set_blocked": {
         const rec = task(c);
@@ -255,9 +272,9 @@ async function toOps(t: Turn, changes: Change[]): Promise<{ ops: Op[]; refs: { k
         ops.push({ k: "project.create", name: c.name!.trim(), description: c.description, leaderId: person(c, false) ?? t.user.id });
         break;
       }
-      case "add_member": ops.push({ k: "member.add", projectId: project(c), userId: person(c)!, role: role(c.role ?? "EDITOR") }); break;
-      case "change_member_role": ops.push({ k: "member.role", projectId: project(c), userId: person(c)!, role: role(c.role) }); break;
-      case "remove_member": ops.push({ k: "member.remove", projectId: project(c), userId: person(c)! }); break;
+      case "add_member": ops.push({ k: "member.add", projectId: project(c), userId: person(c, { required: true })!, role: role(c.role ?? "EDITOR") }); break;
+      case "change_member_role": ops.push({ k: "member.role", projectId: project(c), userId: person(c, { required: true })!, role: role(c.role) }); break;
+      case "remove_member": ops.push({ k: "member.remove", projectId: project(c), userId: person(c, { required: true })! }); break;
       case "comment_on_task": {
         if (!commentsEnabled()) reject(`"${c.action}" is not something the concierge can do. Archiving a project, changing a Leader, deactivating or reassigning a user, Admin roles, Sections, password and profile are done on their screens; tell the person where.`);
         const rec = task(c);
@@ -353,12 +370,18 @@ export async function runTool(t: Turn, name: string, raw: Record<string, unknown
         }
         t.card = await buildCard(t.user, all);
         t.ops = all;
+        t.needsWho = false; // a card was built after all, so nothing is waiting on a person
         return { content: "A confirmation card is ready for the person. Nothing has changed yet. Do not say the change was made.", stop: true };
       }
     }
     return fail(`Unknown tool ${name}.`);
   } catch (e) {
-    if (e instanceof Reject) return fail(e.message);
+    if (e instanceof Reject) {
+      // SHO-2693: only a missing person leaves a question for the server to ask. Any other refusal means nothing is
+      // pending, so a stale flag never makes the reply ask who after a card or a different problem.
+      t.needsWho = e.askWho === "person";
+      return fail(e.message);
+    }
     if (e instanceof z.ZodError) return fail("Invalid arguments.");
     if (e instanceof ApiError) {
       if (isRead && e.status === 404) { t.reads.notFound++; return fail("Not found."); }
