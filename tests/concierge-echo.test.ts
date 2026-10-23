@@ -6,12 +6,14 @@ import { echoKey, isEcho } from "../src/lib/concierge/echo";
 import { offeredRewrite } from "../src/components/concierge/logic";
 
 const TYPED = "Move the budget task to Monday";
-const NEAR_COPIES = ["move the budget task to monday", "Move the budget task to Monday.", "“Move the budget task to Monday”", "  'Move the budget task to Monday.'  "];
+const NEAR_COPIES = ["move the budget task to monday", "Move the budget task to Monday.", "“Move the budget task to Monday”", "  'Move the budget task to Monday.'  ", "“Move the budget task to Monday”.", "'Move the budget task to Monday'."];
 const REWRITES = ["Move the budget review task to Monday 9:00", "Move the budget task to Tuesday", "Move the budget task to Monday..."];
 
 describe("qa:TC missing APL-2871 AC3 one echo rule", () => {
   it("qa:TC missing AC3: echoKey trims, lower-cases, reads curly quotes as straight, drops one wrapping quote pair and one trailing full stop", () => {
     expect(echoKey("  “Move the Budget task to Monday.” ")).toBe("move the budget task to monday");
+    expect(echoKey("“Move the Budget task to Monday”.")).toBe("move the budget task to monday");
+    expect(echoKey("'Move the Budget task to Monday'.")).toBe("move the budget task to monday");
     expect(echoKey("It’s Monday.")).toBe(echoKey("it's monday"));
     expect(echoKey("Done..")).toBe("done.");
   });

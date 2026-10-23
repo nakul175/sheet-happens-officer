@@ -6,8 +6,17 @@ const QUOTES: Record<string, string> = { "‘": "'", "’": "'", "‚": "'", "�
 /** Trim, lower-case, read curly quotes as straight ones, drop one wrapping pair of quotes and one trailing full stop. */
 export function echoKey(text: string): string {
   let s = text.trim().toLowerCase().replace(/[‘’‚‛“”„‟]/g, (q) => QUOTES[q]);
-  if (s.length >= 2 && (s[0] === "\"" || s[0] === "'") && s[s.length - 1] === s[0]) s = s.slice(1, -1).trim();
-  if (s.endsWith(".")) s = s.slice(0, -1).trimEnd();
+  // The full stop can sit after the closing quote (“Move it”.) or inside it (“Move it.”), so drop the one the
+  // reply ends with before looking for the pair, and one more only if unwrapping exposes it. One in total.
+  let stopped = false;
+  if (s.endsWith(".")) {
+    s = s.slice(0, -1).trimEnd();
+    stopped = true;
+  }
+  if (s.length >= 2 && (s[0] === "\"" || s[0] === "'") && s[s.length - 1] === s[0]) {
+    s = s.slice(1, -1).trim();
+    if (!stopped && s.endsWith(".")) s = s.slice(0, -1).trimEnd();
+  }
   return s;
 }
 
