@@ -9,9 +9,6 @@ import { Page, roleLabel, useMe } from "../../Shell";
 
 type Proj = { id?: string; name: string; href?: string | null; role?: string; openTasks?: number };
 
-/** One fixed sentence. No count, no deal name, no link. */
-export const HIDDEN_DEAL_SENTENCE = "A deal you can't view.";
-
 /** A hidden deal is that sentence with no link. A visible project keeps /projects/<id>. */
 export function personProjectHref(project: { id?: string; href?: string | null }): string | null {
   if (project.href === null || !project.id) return null;
@@ -43,6 +40,10 @@ export default function PersonPage() {
   const p = denied || passwordChange || expired || missing ? undefined : g.data?.person;
   const admin = me.orgRole !== "MEMBER";
   const self = p?.id === me.id;
+  // SHO-2872. The hidden-deal sentence is the model's (team.ts HIDDEN_DEAL_LABEL, emitted as the
+  // `name` of an href-null row by getPerson). This page prints that value; it keeps no copy of its
+  // own, so a reword on the model side reaches the screen instead of leaving a stale sentence here.
+  const hiddenDeal = p?.projects.find((x) => x.href === null);
 
   async function resend() {
     if (!p) return;
@@ -99,8 +100,8 @@ export default function PersonPage() {
             </div>
           )}
           <h2 style={{ fontSize: 17 }}>{admin ? "Projects" : "Projects you share"}</h2>
-          {p.projects.some((x) => x.href === null) && <p>{HIDDEN_DEAL_SENTENCE}</p>}
-          {p.projects.filter((x) => personProjectHref(x)).length === 0 && !p.projects.some((x) => x.href === null) && <p className="hint">{admin ? "Not on any project yet." : "You are not on a project together."}</p>}
+          {hiddenDeal && <p>{hiddenDeal.name}</p>}
+          {p.projects.filter((x) => personProjectHref(x)).length === 0 && !hiddenDeal && <p className="hint">{admin ? "Not on any project yet." : "You are not on a project together."}</p>}
           {p.projects.some((x) => personProjectHref(x)) && (
             <div className="scroll">
               <table className="tbl stack">
