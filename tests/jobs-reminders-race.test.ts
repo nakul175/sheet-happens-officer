@@ -32,7 +32,7 @@ let proj: ZzProject;
 
 /** The schema DATABASE_URL names: where Prisma, and so the route under test, writes. */
 function testSchema(): string | undefined {
-  return new URL(process.env.DATABASE_URL ?? "postgresql://localhost").searchParams.get("schema");
+  return new URL(process.env.DATABASE_URL ?? "postgresql://localhost").searchParams.get("schema") ?? undefined;
 }
 
 /** The local test database, without Prisma's ?schema= parameter (pg would post it as an unknown startup setting). */
