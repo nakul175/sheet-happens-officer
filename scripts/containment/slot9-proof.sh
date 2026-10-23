@@ -18,7 +18,20 @@
 # A denial alone proves nothing: a missing file is also "denied". So each probe reports EXISTS and DENIED
 # separately, and PASS requires both. That is the difference between a proof and a coincidence.
 #
-# Exit: 0 gap closed and slot healthy · 1 gap NOT closed (stop, do not deploy) · 2 refused precondition
+# TWO GATES, ONE DIRECTION. The rule this serves is "no candidate execution on slot 9 until PROOF=PASS",
+# but that rule used to be circular: P2 needs a MainPID, and R6 exits 4 until phase 2 has started the unit,
+# so the only achievable order was start-the-candidate -> then prove it should not have started.
+#   * `--pre-start` (alias `--containment`) authorises the FIRST start. It answers only the questions that
+#     exist with no process running: the positive control, P1's uid/denial probes, P3's sandbox properties,
+#     and P4's static EnvironmentFile enumeration. It SKIPS P2, P5, the listener, health and release.
+#     It prints CONTAINMENT=PASS|FAIL and exits 0|1.
+#   * The full run (no flag) keeps its P1..P5 contract, still prints PROOF=PASS|FAIL, and now also prints
+#     CONTAINMENT=... BEFORE gap_closed=/PROOF= so one run can never be mistaken for the other gate.
+# ORDERING: the pre-start gate authorises the first start; the full run is a POST-START revocation check and
+# can only retract that authorisation, never grant one.
+#
+# Exit: 0 gate passed · 1 gate FAILED (pre-start: do not start the unit · full: do not deploy) · 2 refused
+# precondition (not root, not Linux, account absent, unit file absent, positive control broken, bad argument)
 set -euo pipefail
 
 readonly UNIT_NAME='sho-pr9'
@@ -31,13 +44,30 @@ readonly SLOT_ROOT='/home/shoslot/pr9'                      # :325-327 — the o
 readonly MARKER_SCAN="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/prod-marker-scan.sh"
 readonly UNIT_ENV_LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/unit-env-sources.sh"
 readonly HEALTH_URL="http://127.0.0.1:${EXPECT_PORT}/api/health"
+# Declared here because the pre-start gate refuses (exit 2) when R4 has not rendered it yet, which happens
+# before P4 runs.
+readonly UNIT_FILE="/etc/systemd/system/${UNIT_NAME}.service"
 
 say()  { printf '%s\n' "$*"; }
 fail() { printf 'REFUSING: %s\n' "$*" >&2; exit 2; }
 
+# MODE=prestart is the gate that may run against a stopped unit; MODE=full is the historical proof block.
+MODE='full'
+case "${1:-}" in
+  '')                        ;;
+  --pre-start|--containment) MODE='prestart' ;;
+  *)                         fail "unknown argument '$1'; usage: ${0##*/} [--pre-start|--containment]" ;;
+esac
+
 [ "$(id -u)" -eq 0 ] || fail "must be run as root (it uses sudo -u ${SLOT_ACCOUNT} to test another uid's rights)"
 [ "$(uname -s)" = 'Linux' ] || fail "not Linux; this is the staging host's proof block"
 id -u "$SLOT_ACCOUNT" >/dev/null 2>&1 || fail "account ${SLOT_ACCOUNT} does not exist - run slot9-optionR.sh first"
+# A real precondition, not a verdict: with no unit file there is nothing to be contained, and answering
+# "CONTAINMENT=PASS" would be a statement about a unit that does not exist. Only the pre-start gate refuses
+# here - the full run keeps its contract (its P4 enumeration fails the verdict instead).
+if [ "$MODE" = 'prestart' ] && [ ! -e "$UNIT_FILE" ]; then
+  fail "${UNIT_FILE} is absent - R4 has not rendered the unit yet, so there is nothing to contain"
+fi
 
 # 0 = yes (it could), 1 = no (denied). Never prints the path's contents, only the answer.
 as_slot() { if sudo -n -u "$SLOT_ACCOUNT" "$@" >/dev/null 2>&1; then echo 0; else echo 1; fi; }
@@ -50,6 +80,47 @@ fi
 say "probe_positive_control=1"
 # 1 = exists (checked as root, so permissions cannot confuse the two answers)
 exists() { if [ -e "$1" ]; then echo 1; else echo 0; fi; }
+
+# THE CONTAINMENT TERMS — every one of them answers with no process running, which is exactly why the
+# pre-start gate and the full run share this one function instead of each keeping a copy that could drift
+# apart (the failure mode this repo has already paid for once: two prefix globs answering one question).
+# Sets `gap`: 0 = containment holds, 1 = it does not (the accumulator name the full verdict already used).
+#
+# INVERTED, and it was the whole verdict. `as_slot` echoes 0 when the probe SUCCEEDS (the slot could do it
+# - the contract its own comment states, and the one the positive control depends on), and 1 when the probe
+# fails. These terms used to compare with 1, i.e. they set the gap exactly when containment HELD:
+#   * a correct host (all three denied) printed gap_closed=0 PROOF=FAIL, every time, so the proof could
+#     never confirm anything;
+#   * a host where shoslot CAN read /etc/sho/app.env printed gap_closed=1 PROOF=PASS - the proof's own
+#     headline claim, asserted green while the credential was readable (measured in the sandbox).
+# 0 is the gap here; 1 is the denial that closes it.
+assess_containment() {
+  gap=0
+  if [ "$prod_env_readable" -eq 0 ]; then gap=1; fi
+  if [ "$deploy_home_traversable" -eq 0 ]; then gap=1; fi
+  if [ "$bak_readable" -eq 0 ]; then gap=1; fi
+  # The header's rule, in the verdict: a denial over a path that does not exist proves nothing, so EXISTS is
+  # part of the answer. It used to be a WARNING only - the run printed gap_closed=1 with the prod env absent.
+  if [ "$prod_env_exists" -eq 0 ]; then
+    say "WARNING prod_env_exists=0 - a denial here proves nothing; check the path before trusting this run"
+    gap=1
+  fi
+  # Same rule for the stale copies: if the count says copies exist but the named probe does not, the denial
+  # was measured against a missing file, not against a copy.
+  if [ "$bak_count" -gt 0 ] && [ "$bak_exists" -eq 0 ]; then
+    say "WARNING prod_env_bak_count=${bak_count} but the named probe is absent - re-point bak_probe at a real copy"
+    gap=1
+  fi
+  if [ "$unit_env_prod" -ne 0 ]; then gap=1; fi
+  if [ "$unit_env_outside" -ne 0 ]; then gap=1; fi
+  if [ "$unit_env_unreadable" -ne 0 ]; then gap=1; fi
+  # Guard PARITY, not a guard count. `env_guard != 4` alone let a fifth source appended to the unit pass
+  # with four guards, because nothing tied a guard to the source it was supposed to guard.
+  if [ "$unit_env_unguarded" -ne 0 ]; then gap=1; fi
+  if [ "$unit_env_guard" -ne 4 ]; then gap=1; fi
+  # Exactly four: the unit is rendered by R4, so any other number means the file on disk is not what R4 wrote.
+  if [ "$unit_env_count" -ne 4 ]; then gap=1; fi
+}
 
 say ""
 say "== P1  THE gap-closing proof: uid separation denies the credential =="
@@ -82,6 +153,8 @@ fi
 say "shoslot_can_write_authorized_keys=$(as_slot test -w "$DEPLOY_HOME/.ssh/authorized_keys")"
 
 
+# P2 needs a MainPID, so it is the one section the pre-start gate cannot and must not answer.
+if [ "$MODE" != 'prestart' ]; then
 say ""
 say "== P2  runtime identity, and the SHAPE of its environment (counts and key names only) =="
 pid=$(systemctl show -p MainPID --value "$UNIT_NAME" 2>/dev/null || true)
@@ -95,6 +168,7 @@ say "environ_key_count=${env_key_count}   (a count of keys; no key and no value 
 runt_markers=$(tr '\0' '\n' < "/proc/${pid}/environ" | grep -cE "$MARKERS" || true)
 say "environ_prod_marker_count=${runt_markers}"
 say "slot_sees_its_own_environ=$(as_slot test -r "/proc/${pid}/environ")   (expect 0)"
+fi
 
 say ""
 say "== P3  the sandbox is applied by the SYSTEM manager, not a wrapper (contrast :250-253) =="
@@ -107,7 +181,7 @@ say "== P4  the unit cannot silently regain the production env; the slot answers
 # literal shape and missed the fourth source entirely: `current/release.env` is created by phase 2 AFTER
 # the apply script exits, and a marker pasted there would be loaded at the next start. Enumerate every
 # source the unit actually names, require each to live inside the slot tree, and scan each existing one.
-unit_file="/etc/systemd/system/${UNIT_NAME}.service"
+unit_file="$UNIT_FILE"
 # One enumeration, shared with R4 (lib/unit-env-sources.sh). The previous version answered this with a
 # `case` prefix glob, which `.../env/../../etc/sho/app.env` satisfies (a case pattern is a STRING glob),
 # counted guards instead of matching them to sources, and never asked where a source resolves to — so a
@@ -131,6 +205,27 @@ for v in unit_env_count unit_env_existing unit_env_outside unit_env_unreadable u
   case "${!v}" in ''|*[!0-9]*) printf '%s\n' "WARNING ${v} unset - the enumeration did not answer" >&2; printf -v "$v" '%s' 99 ;; esac
 done
 say "unit_envfile_count=${unit_env_count} existing=${unit_env_existing} outside_slot=${unit_env_outside} unreadable=${unit_env_unreadable} unguarded=${unit_env_unguarded} prod_markers=${unit_env_prod} env_guard=${unit_env_guard}   (expect 4 / - / 0 / 0 / 0 / 0 / 4)"
+
+# --- PRE-START GATE -------------------------------------------------------------------------------------
+# Everything this gate needs has been measured above, and none of it needed a process. Nothing below this
+# point is answerable with the unit stopped (P2's MainPID, P5's environ, the listener, health, release), so
+# this is the exit that authorises the FIRST start. Before it existed, the only order that worked was
+# start-the-candidate and then prove it should not have started - the circularity this mode removes.
+if [ "$MODE" = 'prestart' ]; then
+  say ""
+  say "== VERDICT (pre-start containment gate; P2/P5/listener/health not applicable to a stopped unit) =="
+  assess_containment
+  if [ "$gap" -eq 0 ]; then
+    say "CONTAINMENT=PASS  the slot cannot reach the production env while the unit is stopped; it may be started."
+    exit 0
+  fi
+  say "CONTAINMENT=FAIL  containment does NOT hold with the unit stopped."
+  say "STOP: do not start it." >&2
+  exit 1
+fi
+
+# From here on a started unit is assumed. These terms can only retract the pre-start verdict.
+if [ "$MODE" != 'prestart' ]; then
 listen_count=$(ss -ltn 2>/dev/null | grep -c ":${EXPECT_PORT} " || true)
 say "listen_on_${EXPECT_PORT}_count=${listen_count}   (expect >=1)"
 health_code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "$HEALTH_URL" || echo 000)
@@ -139,6 +234,8 @@ say "health_http_code=${health_code}   (expect 200; 503 means the app cannot rea
 # release SHA is read from the app itself rather than guessed from a path. No env value is involved.
 release=$(curl -s --max-time 5 "$HEALTH_URL" 2>/dev/null | sed -n 's/.*"release":"\([^"]*\)".*/\1/p' || true)
 say "release_sha=${release:-unknown}"
+fi
+
 
 say ""
 say "== P5  DB identity unchanged and still slot-only (booleans; the DSN is never printed) =="
@@ -154,31 +251,13 @@ say ""
 say "== VERDICT =="
 # `if` blocks rather than `cond && gap=1`: under `set -e` a false `[ ]` in a bare `&&` list is a failing
 # command and would abort the script mid-verdict.
-gap=0
-# INVERTED, and it was the whole verdict. `as_slot` echoes 0 when the probe SUCCEEDS (the slot could do
-# it — the contract its own comment states, and the one the positive control depends on), and 1 when the
-# probe fails. These three terms tested for 1, i.e. they set gap=1 exactly when containment HELD:
-#   * a correct host (all three denied) printed gap_closed=0 PROOF=FAIL, every time, so the proof could
-#     never confirm anything;
-#   * a host where shoslot CAN read /etc/sho/app.env printed gap_closed=1 PROOF=PASS — the proof's own
-#     headline claim, asserted green while the credential was readable (measured in the sandbox).
-# 0 is the gap here; 1 is the denial that closes it.
-if [ "$prod_env_readable" -eq 0 ]; then gap=1; fi
-if [ "$deploy_home_traversable" -eq 0 ]; then gap=1; fi
-if [ "$bak_readable" -eq 0 ]; then gap=1; fi
-# The header's rule, now in the verdict: a denial over a path that does not exist proves nothing, so
-# EXISTS is part of the answer. It used to be a WARNING only — the run printed gap_closed=1 with the
-# prod env absent (measured in isolation).
-if [ "$prod_env_exists" -eq 0 ]; then
-  say "WARNING prod_env_exists=0 - a denial here proves nothing; check the path before trusting this run"
-  gap=1
-fi
-# Same rule for the stale copies: if the count says copies exist but the named probe does not, the
-# denial was measured against a missing file, not against a copy.
-if [ "$bak_count" -gt 0 ] && [ "$bak_exists" -eq 0 ]; then
-  say "WARNING prod_env_bak_count=${bak_count} but the named probe is absent - re-point bak_probe at a real copy"
-  gap=1
-fi
+# The containment terms are the SAME function the pre-start gate runs, so the two gates cannot drift: a
+# CONTAINMENT=FAIL here retracts what --pre-start authorised, and neither gate can lend the other a PASS.
+assess_containment
+# Printed BEFORE gap_closed=/PROOF= on purpose: this is the pre-start gate's answer, and one run must never
+# be mistakable for the other gate.
+say "CONTAINMENT=$([ "$gap" -eq 0 ] && echo PASS || echo FAIL)   (terms that need no running process)"
+# Everything below needs a started unit, so it can only retract the verdict above.
 # A vanished /proc/<pid>/environ makes the marker count 0 for the wrong reason: an empty read is
 # indistinguishable from a clean environ. `grep -c` still prints 0 when its input never opened
 # (measured: dead pid -> key_count=0 marker_count=0 gap_closed=1), so readability is its own answer.
@@ -187,15 +266,6 @@ if [ "$environ_readable" -eq 0 ] || [ "$env_key_count" -eq 0 ]; then
   gap=1
 fi
 if [ "${runt_markers:-1}" -ne 0 ]; then gap=1; fi
-if [ "$unit_env_prod" -ne 0 ]; then gap=1; fi
-if [ "$unit_env_outside" -ne 0 ]; then gap=1; fi
-if [ "$unit_env_unreadable" -ne 0 ]; then gap=1; fi
-# Guard PARITY, not a guard count. `env_guard != 4` alone let a fifth source appended to the unit pass with
-# four guards, because nothing tied a guard to the source it was supposed to guard.
-if [ "$unit_env_unguarded" -ne 0 ]; then gap=1; fi
-if [ "$unit_env_guard" -ne 4 ]; then gap=1; fi
-# Exactly four: the unit is rendered by R4, so any other number means the file on disk is not what R4 wrote.
-if [ "$unit_env_count" -ne 4 ]; then gap=1; fi
 if [ "$health_code" != '200' ]; then gap=1; fi
 
 say "gap_closed=$([ "$gap" -eq 0 ] && echo 1 || echo 0)"
