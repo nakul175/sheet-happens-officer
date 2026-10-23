@@ -876,6 +876,65 @@ describe("flag on (AC1–AC8)", () => {
     expect(await live()).toBeLessThanOrEqual(200);
   }, 120_000);
 
+  // SHO-2840 boundary proof (AC17): the cap is 200 live comments, so the delete-Undo boundary is proved on
+  // both sides of it. 199 live has exactly one slot and the restore is allowed; 200 has none and the restore
+  // is refused; an out-of-band 201 is not pushed to 202. Every case counts live rows after the attempt, so a
+  // refusal that still wrote (or an allow that wrote twice) cannot pass.
+  it("qa:TC SHO-2840: at 199 live comments Undo of a delete restores exactly one, landing on 200", async () => {
+    const { worker, p } = await cast();
+    const t = await task(worker, p.id, { title: "ZZ-TEST 2840 boundary 199" });
+    const target = await addComment(actor(worker), t, { text: "ZZ-TEST 2840 boundary target" });
+    await db.comment.createMany({ data: Array.from({ length: 199 }, (_, i) => ({ taskId: t, authorId: worker.id, text: `ZZ-TEST 2840 199 fill ${i}` })) });
+    await removeComment(actor(worker), t, target.id);
+    const live = () => db.comment.count({ where: { taskId: t, removedAt: null } });
+    expect(await live()).toBe(199); // 199 live, one soft-deleted row: the one free slot is the boundary under test
+    const log = await db.actionLog.findFirstOrThrow({ where: { targetId: t, action: "comment.removed" } });
+    await expect(checkUndo(actor(worker), log.id)).resolves.toBeUndefined();
+    expect((await undoAction(actor(worker), log.id)).label).toBe("Comment deleted");
+    expect(await live()).toBe(200);
+    expect(await db.comment.count({ where: { taskId: t } })).toBe(200); // restored in place, no duplicate row
+    expect((await db.comment.findUniqueOrThrow({ where: { id: target.id } })).removedAt).toBeNull();
+    expect((await db.actionLog.findUniqueOrThrow({ where: { id: log.id } })).undoneAt).not.toBeNull();
+  }, 120_000);
+
+  it("qa:TC SHO-2840: at 200 live comments Undo of a delete is refused and the count stays 200", async () => {
+    const { worker, p } = await cast();
+    const t = await task(worker, p.id, { title: "ZZ-TEST 2840 boundary 200" });
+    const target = await addComment(actor(worker), t, { text: "ZZ-TEST 2840 boundary target" });
+    await removeComment(actor(worker), t, target.id);
+    await db.comment.createMany({ data: Array.from({ length: 200 }, (_, i) => ({ taskId: t, authorId: worker.id, text: `ZZ-TEST 2840 200 fill ${i}` })) });
+    const live = () => db.comment.count({ where: { taskId: t, removedAt: null } });
+    expect(await live()).toBe(200); // full: the restore would be the 201st
+    const log = await db.actionLog.findFirstOrThrow({ where: { targetId: t, action: "comment.removed" } });
+    const refused = { status: 409, message: "A task can have at most 200 comments.", extra: { code: "too_many_comments" } };
+    await expect(checkUndo(actor(worker), log.id)).rejects.toMatchObject(refused);
+    await expect(undoAction(actor(worker), log.id)).rejects.toMatchObject(refused);
+    await expect(undoAction(actor(worker), log.id, true)).rejects.toMatchObject(refused); // "Undo anyway" cannot bypass the cap
+    expect(await live()).toBe(200);
+    expect((await db.comment.findUniqueOrThrow({ where: { id: target.id } })).removedAt).not.toBeNull();
+    expect((await db.actionLog.findUniqueOrThrow({ where: { id: log.id } })).undoneAt).toBeNull();
+  }, 120_000);
+
+  it("qa:TC SHO-2840: at 201 live comments Undo of a delete is refused and never reaches 202", async () => {
+    const { worker, p } = await cast();
+    const t = await task(worker, p.id, { title: "ZZ-TEST 2840 boundary 201" });
+    const target = await addComment(actor(worker), t, { text: "ZZ-TEST 2840 boundary target" });
+    await removeComment(actor(worker), t, target.id);
+    // The API refuses the 201st live comment, so 201 is an out-of-band state (rows written before the cap,
+    // or by a migration). The constant is untouched by the refusal: the guard must be >= the cap, not ==.
+    await db.comment.createMany({ data: Array.from({ length: 201 }, (_, i) => ({ taskId: t, authorId: worker.id, text: `ZZ-TEST 2840 201 fill ${i}` })) });
+    const live = () => db.comment.count({ where: { taskId: t, removedAt: null } });
+    expect(await live()).toBe(201);
+    await expect(addComment(actor(worker), t, { text: "ZZ-TEST 2840 past cap" })).rejects.toMatchObject({ status: 400, extra: { code: "too_many_comments" } });
+    const log = await db.actionLog.findFirstOrThrow({ where: { targetId: t, action: "comment.removed" } });
+    const refused = { status: 409, message: "A task can have at most 200 comments.", extra: { code: "too_many_comments" } };
+    await expect(checkUndo(actor(worker), log.id)).rejects.toMatchObject(refused);
+    await expect(undoAction(actor(worker), log.id)).rejects.toMatchObject(refused);
+    expect(await live()).toBe(201); // never 202
+    expect((await db.comment.findUniqueOrThrow({ where: { id: target.id } })).removedAt).not.toBeNull();
+    expect((await db.actionLog.findUniqueOrThrow({ where: { id: log.id } })).undoneAt).toBeNull();
+  }, 120_000);
+
   it("qa:TC-APL2590-093cbb6e@v2: purge keeps a comment at exactly 30x24h and removes it 1ms later", async () => {
     const { worker, t1 } = await cast();
     const kept = await addComment(actor(worker), t1, { text: "ZZ-TEST keep" });
