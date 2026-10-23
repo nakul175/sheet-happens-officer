@@ -8,6 +8,17 @@ import { Page, roleLabel, useMe } from "../Shell";
 type P = { id: string; name: string; email?: string; orgRole?: "MEMBER" | "ADMIN" | "SUPER_ADMIN"; leads?: { id: string; name: string }[]; status?: "ACTIVE" | "UNVERIFIED" | "DEACTIVATED" };
 const STATUS: Record<string, [string, string]> = { ACTIVE: ["Active", "green"], UNVERIFIED: ["Unverified", "gold"], DEACTIVATED: ["Deactivated", "grey"] };
 
+/**
+ * SHO-US-2.4 AC2: the fallback is about the role, not membership. A person who is on the project as a
+ * Viewer is still not a Leader or Editor there, so that project's Leader takes the tasks. SHO-3030.
+ */
+export const FALLBACK_HINT = "If the person you name is not a Leader or Editor on a project, that project's Leader takes those tasks.";
+
+/** The deactivation summary's explanation, naming each project that fell back to its Leader (SHO-3030). */
+export function fellBackHint(names: string[]): string {
+  return `The Leader took the tasks in ${names.join(", ")}, because the person you named is not a Leader or Editor on ${names.length === 1 ? "that project" : "those projects"}.`;
+}
+
 /** SHO-US-14.4 AC3: the projects a person leads (only those the viewer can see). */
 function Leads({ p }: { p: P }) {
   if (!p.leads?.length) return null;
@@ -101,7 +112,7 @@ export default function Team() {
       {done && (
         <Confirm title={`${done.name} is deactivated`} yes="Close" onNo={() => setDone(null)} onYes={() => setDone(null)}
           body={`${done.moved} open task${done.moved === 1 ? " was" : "s were"} handed over.`}>
-          {done.fellBack.length > 0 && <p className="hint">The Leader took the tasks in {done.fellBack.join(", ")}, because the person you named is not on {done.fellBack.length === 1 ? "that project" : "those projects"}.</p>}
+          {done.fellBack.length > 0 && <p className="hint">{fellBackHint(done.fellBack)}</p>}
         </Confirm>
       )}
     </Page>
@@ -125,7 +136,7 @@ function Deactivate({ p, others, onClose, onDone }: { p: P; others: P[]; onClose
           </select>
         )}
       </Field>
-      <p className="hint">If the person you name is not on a project, that project&apos;s Leader takes those tasks.</p>
+      <p className="hint">{FALLBACK_HINT}</p>
       {leads.length > 0 && (
         <div className="box warn">
           <b>{p.name} leads {leads.length === 1 ? "a project" : "projects"}.</b> Hand over the leadership first, then deactivate:
