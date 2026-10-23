@@ -21,8 +21,8 @@ test.describe("SHO-BUG-8 / APL-2640", () => {
     const restore = await member.api.post(`/api/tasks/${t}/restore`); // the unauthorised restore from Trash
     expect(restore.status).toBe(403);
     // The action-log id from the Leader's Activity: PR #14 stops sending the Editor an Undo id, but the row can still be undone by id.
-    const items = (await admin.api.get(`/api/projects/${p.id}/activity`)).json.items as { id: string; what: string }[];
-    const row = items.find((i) => /to Trash/.test(i.what));
+    const items = (await admin.api.get(`/api/projects/${p.id}/activity`)).json.items as { id: string; what: string; kind: string }[];
+    const row = items.find((i) => i.kind === "task.deleted"); // SHO-2701: the kind, not the sentence
     expect(row, "the delete's Activity row").toBeTruthy();
     const u = await member.api.post(`/api/actions/${row!.id}/undo`, {});
     expect(u.status).toBe(403);
@@ -59,8 +59,8 @@ test.describe("SHO-BUG-8 / APL-2640", () => {
     const t = await newTask(admin, p.id);
     // The action-log id comes from the Leader's Activity, so the check does not rely on the Editor being given an Undo id.
     expect((await deleteTask(member, t)).status).toBe(204);
-    const items = (await admin.api.get(`/api/projects/${p.id}/activity`)).json.items as { id: string; what: string }[];
-    const row = items.find((i) => /to Trash/.test(i.what));
+    const items = (await admin.api.get(`/api/projects/${p.id}/activity`)).json.items as { id: string; what: string; kind: string }[];
+    const row = items.find((i) => i.kind === "task.deleted"); // SHO-2701: the kind, not the sentence
     expect(row, "the delete's Activity row").toBeTruthy();
     const one = await raw(member, "POST", `/api/actions/${row!.id}/undo`, {});
     expect(one.status).toBe(403);
@@ -77,8 +77,8 @@ test.describe("SHO-BUG-8 / APL-2640", () => {
     const p = await newProject(admin, later, { label: "bug8 both", members: [{ who: member, role: "EDITOR" }] });
     const t = await newTask(admin, p.id);
     expect((await deleteTask(member, t)).status).toBe(204);
-    const items = (await admin.api.get(`/api/projects/${p.id}/activity`)).json.items as { id: string; what: string }[];
-    const id = items.find((i) => /to Trash/.test(i.what))!.id;
+    const items = (await admin.api.get(`/api/projects/${p.id}/activity`)).json.items as { id: string; what: string; kind: string }[];
+    const id = items.find((i) => i.kind === "task.deleted")!.id; // SHO-2701: the kind, not the sentence
     expect((await member.api.post(`/api/actions/${id}/undo`)).status).toBe(403);
     expect((await admin.api.get(`/api/tasks/${t}`)).status).toBe(404);
     const ok = await admin.api.post(`/api/actions/${id}/undo`);

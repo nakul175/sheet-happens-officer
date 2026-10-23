@@ -7,6 +7,17 @@ type Row = { action: string; beforeState: unknown; afterState: unknown; targetId
 type Names = Map<string, string>;
 type Rec = Record<string, unknown>;
 
+/** SHO-2701: the event kinds a consumer may branch on. They are the actions rows are logged with. */
+export const TASK_DELETED = "task.deleted";
+
+/**
+ * The stable kind of an activity event: the action the row was logged with (`task.deleted`, `task.updated`, ...).
+ * Deliberately reads nothing but that column, so rewording `sentence` below cannot change what a consumer branches on.
+ */
+export function activityKind(a: { action: string }): string {
+  return a.action;
+}
+
 /** "10 Oct", or "10 Oct 2025" when it is not this year. Takes a YYYY-MM-DD date or an instant (shown in India time). */
 export function shortDay(v: unknown, now = new Date()): string | null {
   if (typeof v !== "string" && !(v instanceof Date)) return null;

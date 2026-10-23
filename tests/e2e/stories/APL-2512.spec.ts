@@ -9,7 +9,7 @@ import { ask, cardOf, dueIn, postJson, replyOf, requireModel, showConcierge, tas
 test.describe.configure({ timeout: 150_000 });
 
 const activity = async (who: { api: { get: (p: string) => Promise<{ json: { items?: unknown[] } }> } }, projectId: string) =>
-  ((await who.api.get(`/api/projects/${projectId}/activity`)).json.items ?? []) as { what: string; via?: string }[];
+  ((await who.api.get(`/api/projects/${projectId}/activity`)).json.items ?? []) as { what: string; kind?: string; via?: string }[];
 
 test("AC1: moving a task to Monday shows the old and new date, and nothing changes until Confirm", async ({ admin, later }) => {
   await requireModel(admin);
@@ -172,5 +172,8 @@ test("AC9: confirming a deletion sends the task to Trash, with Undo", async ({ a
   const trash = (await admin.api.get(`/api/projects/${project.id}/trash`)).json.items as { id: string }[];
   expect(trash.some((t) => t.id === id)).toBe(true);
   const rows = await activity(admin, project.id);
-  expect(rows.some((r) => r.via === "concierge" && /trash/i.test(r.what))).toBe(true);
+  // SHO-2701: the concierge delete is the row of kind task.deleted; the sentence is still checked as text.
+  const deleted = rows.find((r) => r.via === "concierge" && r.kind === "task.deleted");
+  expect(deleted, "the concierge delete's row").toBeTruthy();
+  expect(deleted!.what, "the sentence still says Trash").toMatch(/trash/i);
 });

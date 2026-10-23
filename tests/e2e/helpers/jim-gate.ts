@@ -57,8 +57,9 @@ const PROBES: Record<number, (admin: Who, member: Who | null, later: Later) => P
     const t = await newTask(admin, p.id);
     expect((await deleteTask(member, t)).status).toBe(204);
     // The action-log id from the Leader's Activity, so the probe works whether or not PR #14 hides the Editor's Undo id.
-    const items = (await admin.api.get(`/api/projects/${p.id}/activity`)).json.items as { id: string; what: string }[];
-    const row = items.find((i) => /to Trash/.test(i.what));
+    const items = (await admin.api.get(`/api/projects/${p.id}/activity`)).json.items as { id: string; what: string; kind: string }[];
+    // SHO-2701: the delete is picked by its event kind; `what` is prose and is not the branch.
+    const row = items.find((i) => i.kind === "task.deleted");
     if (!row) return { deployed: false, how: "probe found no delete row in Activity" };
     const u = await member.api.post(`/api/actions/${row.id}/undo`, {});
     return { deployed: u.status === 403 && u.json.error === REFUSED, how: `probe: Editor's Undo of own delete answered ${u.status}` };

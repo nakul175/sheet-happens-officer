@@ -8,9 +8,12 @@ test("AC1: an Editor changes the due date; it shows on the task and is logged wi
   const t = await newTask(member, p.id);
   expect((await member.api.patch(`/api/tasks/${t}`, { dueDate: ymd(5) })).status).toBe(200);
   expect((await getTask(admin, t)).dueDate).toBe(ymd(5));
-  const items = (await admin.api.get(`/api/projects/${p.id}/activity`)).json.items as { what: string; undo: string }[];
-  const row = items.find((i) => /changed due date from no date to/.test(i.what));
-  expect(row, "an activity row 'changed due date from no date to ...'").toBeTruthy();
+  const items = (await admin.api.get(`/api/projects/${p.id}/activity`)).json.items as { what: string; kind: string; undo: string }[];
+  // SHO-2701: the edit is the row of kind task.updated. Which field it changed is not part of the kind, so the
+  // sentence is still read for that - but the row is no longer selected by its wording.
+  const row = items.find((i) => i.kind === "task.updated");
+  expect(row, "an activity row of kind task.updated").toBeTruthy();
+  expect(row!.what, "an activity row 'changed due date from no date to ...'").toMatch(/changed due date from no date to/);
   expect(row!.undo).toBe("available"); // the before-state is kept, so it can be undone
   expect((await member.api.patch(`/api/tasks/${t}`, { priority: "HIGH", description: "ZZ-TEST detail" })).status).toBe(200);
 });
