@@ -77,9 +77,6 @@ jobs:
       # APL-2609: tests/e2e/local/APL-2609.spec.ts drives these mode servers in Playwright Chromium.
       - name: Install Playwright Chromium
         run: npx playwright-core install --with-deps chromium
-      # APL-2713. These servers are excluded from `npm test`. A failure here fails the job.
-      - name: CRM mode tests
-        run: npm run test:crm-modes
       # APL-2688 / APL-2689. Spawns next start and server.js, fires 6/40/100 concurrent
       # requests (including signed-in GET /), SIGTERMs mid-flight. Excluded from `npm test`
       # because it rebuilds .next, so it runs here before the app is started.
@@ -119,6 +116,7 @@ jobs:
           done
           npx playwright test "${specs[@]}"
       # APL-2728 AC4. One production server per CRM_VISIBLE mode. Needs the build above. Not part of npm test.
+      # SHO-2873: the only invocation of this tier. An identical step (APL-2713) ran it a second time higher up.
       - name: CRM visible modes
         run: npm run test:crm-modes
       # APL-2729 AC4. One production server per CRM_VISIBLE mode, after the build.
