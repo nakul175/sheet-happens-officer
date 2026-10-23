@@ -420,6 +420,40 @@ describe("qa:TC missing SHO-3011: the APL-2742 pool reads the schema DATABASE_UR
     }
   });
 
+  it.skipIf(!local)("qa:TC missing SHO-3011 AC4: a schema whose name has capitals is reached by exactly that name", async () => {
+    // Prisma creates whatever ?schema= spells, capitals included, so the pool must land on that exact schema. The
+    // start-up option is quoted for this reason: unquoted, Postgres folds the name to lower case, search_path then names
+    // a schema that does not exist and current_schema() is NULL - a wrong answer, not an error, which is the defect.
+    const MIXED = `ZZ_Sho3011_Mixed_${randomUUID().replace(/-/g, "").slice(0, 8)}`;
+    const MIXED_TABLE = `zz_mixed_${randomUUID().replace(/-/g, "").slice(0, 8)}`;
+    await admin!.query(`CREATE SCHEMA "${MIXED}"`);
+    try {
+      const unquoted = new pg.Pool({ connectionString: urlWithSchema(MIXED), max: 1, options: `-c search_path=${MIXED}` });
+      try {
+        expect((await unquoted.query<{ s: string | null }>("SELECT current_schema() AS s")).rows[0].s,
+          "unquoted, the name is folded to lower case and the schema is missed, without an error").not.toBe(MIXED);
+      } finally {
+        await unquoted.end();
+      }
+
+      const ours = localPgPool(urlWithSchema(MIXED));
+      try {
+        expect((await ours.query<{ s: string }>("SELECT current_schema() AS s")).rows[0].s, "the URL's schema, capitals and all").toBe(MIXED);
+        await ours.query(`CREATE TABLE ${MIXED_TABLE} (value text)`);
+        const where = (await admin!.query<{ nspname: string }>(
+          "SELECT n.nspname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE c.relname = $1",
+          [MIXED_TABLE],
+        )).rows.map((r) => r.nspname);
+        expect(where, "the unqualified table landed in the capitalised schema, not a folded twin").toEqual([MIXED]);
+      } finally {
+        await ours.end();
+      }
+    } finally {
+      // Only the throwaway schema this block made, named the way this block named it.
+      if (/^ZZ_Sho3011_Mixed_[a-z0-9]+$/.test(MIXED)) await admin!.query(`DROP SCHEMA IF EXISTS "${MIXED}" CASCADE`);
+    }
+  });
+
   it("qa:TC missing SHO-3011 AC3: a non-local database, an ambiguous URL and a hostile schema name are refused, without echoing the URL", () => {
     const secret = "s3cretDbPw9";
     for (const bad of [
