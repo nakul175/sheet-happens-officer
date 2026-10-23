@@ -3,7 +3,8 @@
 // base-url-no-environ-dump.test.ts (which imports `environReaders` from here), so AC1/AC3 have one verdict, not two.
 // AC1 at run time runs in base-url-env-2917.test.ts.
 // No TC id is assigned on the issue.
-import { lstatSync, readdirSync, readFileSync } from "node:fs";
+import { lstatSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { violations } from "./base-url-no-environ-dump.test";
@@ -375,6 +376,47 @@ describe("qa:TC missing APL-2917: no test file reads the whole process environme
       // The pre-fix guard flagged every one of these; that is the defect these cases pin.
       expect(legacyEnvironReaders([{ file: "y.ts", text }]), text).toEqual(["y.ts"]);
       expect(environReaders([{ file: "y.ts", text }]), text).toEqual([]);
+    }
+  });
+
+  // SHO-3031, at the level the ticket describes: a real file on disk, one per direction. The string cases above judge
+  // the resolver; this one writes the ticket's own file beside a file that really builds the path, reads both back and
+  // asks for one verdict over the pair, so the false positive and the true positive are pinned together.
+  it("qa:TC missing AC3: one real file on disk per direction (SHO-3031)", () => {
+    // The ticket's file: a harmless proc path piece, and apart from it an "/environ" route and an 'environ' title.
+    const BENIGN = [
+      `import { readFileSync } from "node:fs";`,
+      `export const routes = { "/environ": () => "ok" };`,
+      `it('environ', () => {`,
+      `  const cpu = readFileSync("/proc/cpuinfo", "utf8");`,
+      `  expect(cpu.length).toBeGreaterThan(0);`,
+      `});`,
+    ].join("\n");
+    // The file this guard exists for, assembled so the banned path is never written whole.
+    const READER = [
+      `import { readFileSync } from "node:fs";`,
+      `export const image = () => readFileSync("/proc/" + "self" + "/environ", "utf8");`,
+    ].join("\n");
+    const dir = mkdtempSync(path.join(os.tmpdir(), "sho-3031-"));
+    try {
+      const files = [
+        { name: "benign.ts", text: BENIGN },
+        { name: "reader.ts", text: READER },
+      ].map(({ name, text }) => {
+        writeFileSync(path.join(dir, name), text);
+        return { file: path.join(dir, name), text: readFileSync(path.join(dir, name), "utf8") };
+      });
+      // The ticket's file is not flagged: it never builds a /proc/<pid|self>/environ path.
+      expect(environReaders([files[0]])).toEqual([]);
+      // The reader is flagged, from the same file on disk.
+      expect(environReaders([files[1]]).map((file) => path.basename(file))).toEqual(["reader.ts"]);
+      // The one authoritative guard agrees, in both of its passes (the resolver and the AST pass).
+      expect(violations(files).map((v) => path.basename(v.file))).toEqual(["reader.ts", "reader.ts"]);
+      // A "fix" that deleted the resolution pass would leave only the whole-file spelling, which neither file contains:
+      // that guard would pass the benign case above and miss the reader. The clause cannot be deleted.
+      expect([BENIGN, READER].map((text) => text.includes(ENVIRON))).toEqual([false, false]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
     }
   });
 
