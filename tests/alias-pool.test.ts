@@ -239,16 +239,27 @@ describe("qa:TC missing APL-3017: a verified alias is never reset to unverified"
     expect(signUps(s.calls)).toHaveLength(66); // the first run only; the second sent none
   });
 
-  it("qa:TC missing APL-3017: no app code writes emailVerifiedAt back to NULL, so the 66 were created, not reset", () => {
+  it("qa:TC missing APL-3017: no app code, script, seed or migration writes emailVerifiedAt back to NULL", () => {
     const walk = (dir: string): string[] => readdirSync(dir, { withFileTypes: true }).flatMap((d) =>
       d.isDirectory() ? walk(`${dir}/${d.name}`) : /\.tsx?$/.test(d.name) ? [`${dir}/${d.name}`] : []);
-    for (const file of [...walk("src"), ...walk("tests/e2e/helpers")]) {
+    // Every writer in the repo, not just the app: the seed is the step the ticket blamed, so it is inside the guard.
+    for (const file of [...walk("src"), ...walk("tests/e2e/helpers"), ...walk("tests/e2e/tools"), ...walk("scripts")]) {
       expect(readFileSync(file, "utf8"), file).not.toMatch(/emailVerifiedAt\s*:\s*null/);
     }
     // Sign-up is the only place a pool alias is created, and it leaves the column unset: NULL is what "unverified" is.
     expect(readFileSync("src/app/api/auth/signup/route.ts", "utf8")).not.toContain("emailVerifiedAt");
     // The one writer sets a date. There is no route, job or script that can clear it again.
     expect(readFileSync("src/app/api/auth/verify/route.ts", "utf8")).toContain("emailVerifiedAt: new Date()");
+    // The seed (APL-2590) verifies its own nakul17+apl2590-* rows and never names the pool: it cannot reset an alias.
+    const seed = readFileSync("scripts/seed-apl2590-fixtures.ts", "utf8");
+    expect(seed).toContain("emailVerifiedAt: now");
+    expect(seed).toContain("nakul17+apl2590-");
+    expect(seed).not.toContain("zz-qa");
+    // No migration updates the column after init; only the init's column definition mentions it.
+    const migrations = readdirSync("prisma/migrations", { withFileTypes: true })
+      .filter((d) => d.isDirectory()).map((d) => `prisma/migrations/${d.name}/migration.sql`);
+    expect(migrations.length).toBeGreaterThan(0);
+    for (const file of migrations) expect(readFileSync(file, "utf8"), file).not.toMatch(/SET\s+"?emailVerifiedAt"?\s*=/i);
   });
 });
 

@@ -15,16 +15,25 @@ function signupServer(existing: string[] = [], fail: string[] = [], drop: string
   // An address that exists is a working alias (verified, on PASS) until `verifyLink()` or a test says otherwise.
   const accts = new Map(existing.map((email) => [email, { verified: true, deactivated: false, password: PASS }]));
   const calls: { method: string; path: string; body?: unknown }[] = [];
-  const http: Http = async (method, path, body) => {
+  // Every successful sign-in creates one Session row that lives 30 days (src/lib/auth.ts startSession). Sign-out revokes it.
+  const sessions = new Set<string>();
+  let issued = 0;
+  const http: Http = async (method, path, body, cookie) => {
     calls.push({ method, path, body });
     const { email, password } = (body ?? {}) as { email: string; password: string };
     if (drop.includes(email)) throw new Error("socket hang up");
+    if (path === "/api/auth/signout") {
+      if (cookie) sessions.delete(cookie);
+      return { status: 204, json: {}, cookie: null };
+    }
     if (path === "/api/auth/signin") {
       const a = accts.get(email);
       if (!a || a.password !== password) return { status: 401, json: { error: "Email or password is incorrect." }, cookie: null };
       if (a.deactivated) return { status: 403, json: { error: "This account is deactivated." }, cookie: null };
       if (!a.verified) return { status: 403, json: { error: "Verify your email first." }, cookie: null };
-      return { status: 200, json: { user: { email } }, cookie: "sho_session=x" };
+      const session = `sho_session=s${++issued}`;
+      sessions.add(session);
+      return { status: 200, json: { user: { email, orgRole: "MEMBER" } }, cookie: session }; // publicUser carries orgRole
     }
     if (path !== "/api/auth/signup") return { status: 404, json: {}, cookie: null };
     if (fail.includes(email)) return { status: 500, json: { error: "Something went wrong." }, cookie: null };
@@ -36,6 +45,8 @@ function signupServer(existing: string[] = [], fail: string[] = [], drop: string
     http,
     calls,
     accts,
+    /** Sessions that a sign-in created and no sign-out has revoked: what the app would still accept. */
+    openSessions: () => [...sessions],
     /** The operator following the Verify link(s) in the inbox. */
     verifyLink: () => { for (const a of accts.values()) a.verified = true; },
     signups: () => calls.filter((c) => c.path === "/api/auth/signup"),
@@ -86,6 +97,19 @@ describe("qa:TC missing APL-2748 create mode: idempotent, counts only", () => {
     expect(createVerdict(ready)).toContain("All 66 aliases are ready");
     expect(s.signups()).toEqual([]); // read with a sign-in only
     for (const e of ALL) expect(s.accts.get(e)!.verified, e).toBe(true);
+  });
+
+  it("qa:TC missing APL-3017: a create run signs its probe out, so re-running it leaves nothing live behind", async () => {
+    // Read-only is not the same as side-effect free: sign-in is what creates a Session, and a Session is a credential
+    // the app honours for 30 days (src/lib/auth.ts startSession). A run that reports created 0 must not leave 66 of them.
+    const s = signupServer(ALL);
+    const first = await create(s);
+    expect(first).toEqual({ created: 0, skipped: 66, failed: 0, ready: 66 });
+    expect(s.signIns()).toHaveLength(66); // the probe is still a sign-in, not a sign-up
+    expect(s.openSessions()).toEqual([]);
+    const second = await create(s);
+    expect(second).toEqual(first);
+    expect(s.openSessions()).toEqual([]); // running it again adds nothing at all
   });
 
   it("qa:TC missing create: existing aliases are read, never signed up, and only the missing ones are created", async () => {

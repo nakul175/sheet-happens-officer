@@ -147,12 +147,14 @@ function messageOf(reply: Reply) {
 /**
  * Create mode: every pool Member in every slot, signed up only when it has no account. Each one is probed with a sign-in
  * first, so an existing alias is left exactly as it is:
- *   200             -> ready (verified, active, SHO_QA_PASS works); skipped, nothing written.
+ *   200             -> ready (verified, active, SHO_QA_PASS works); skipped, and the probe is signed straight back out.
  *   403 "verify"    -> the account exists and waits on its link; skipped, nothing written.
  *   403 (other), 429 -> deactivated or locked; failed, nothing written.
  *   401             -> no account, or another password; sign up. 201 created, 409 skipped (other password), else failed.
  *   a dropped request or any other status -> failed.
  * APL-3017: a sign-up is the one request in this repo that makes an unverified row, so no existing alias ever gets one.
+ * A 200 probe is a real sign-in, and sign-in is what creates a Session row the app honours for 30 days; it is signed out
+ * again so that re-running this mode, which reports created 0, really does add nothing.
  */
 export async function createMissing(opts: CreateOptions): Promise<CreateCounts> {
   const pause = opts.pause ?? 300;
@@ -162,7 +164,14 @@ export async function createMissing(opts: CreateOptions): Promise<CreateCounts> 
     let probe: Reply;
     try { probe = await opts.http("POST", "/api/auth/signin", { email: p.email, password: opts.password }); }
     catch { counts.failed++; continue; }
-    if (probe.status === 200) { counts.ready++; counts.skipped++; continue; }
+    if (probe.status === 200) {
+      // Same as provision()'s probe: a session created to read the account is closed again. Best effort: a probe that
+      // signed in has told us what we needed, and a failed sign-out must not turn a ready alias into a failed run.
+      if (probe.cookie) try { await opts.http("POST", "/api/auth/signout", {}, probe.cookie); } catch { /* best effort */ }
+      counts.ready++;
+      counts.skipped++;
+      continue;
+    }
     if (probe.status === 403 && /verify/i.test(messageOf(probe))) { counts.skipped++; continue; }
     if (probe.status !== 401) { counts.failed++; continue; }
     let status = 0;
