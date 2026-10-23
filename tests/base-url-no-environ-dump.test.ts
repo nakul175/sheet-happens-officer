@@ -18,10 +18,11 @@
 // The one asymmetry, on purpose: a plain alias (`const e = process.env`) is reported only when the whole thing is used
 // (a dump, a listing, a spread), while an import, a destructuring of `env` out of `process` and `require(...).env` are
 // reported where they bind: those three exist only to move the whole object out of reach of a `process.env` scan.
-// The file names the banned forms in its own patterns and examples, so the scan leaves this file and the delegating
-// tests/no-proc-environ-2917.test.ts out. It is a superset of that file's scan: `violations` calls its
-// `environReaders` for the process-image cases this AST pass might miss, so one guard answers AC1/AC3.
-// No TC id is assigned on the issue. Follow-ups SHO-3031 and SHO-3032 are not exercised here (see BUG-2917.md).
+// The file names the banned forms in its own patterns and examples, so the scan leaves this file, the delegating
+// tests/no-proc-environ-2917.test.ts and its harness tests/sec-2917-gaps.test.ts out. It is a superset of that file's
+// scan: `violations` calls its `environReaders` for the process-image cases this AST pass might miss, so one guard
+// answers AC1/AC3.
+// No TC id is assigned on the issue. Follow-ups SHO-3031 and SHO-3032 are exercised in tests/no-proc-environ-2917.test.ts.
 import { lstatSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import ts from "typescript";
@@ -32,6 +33,9 @@ import { environReaders } from "./no-proc-environ-2917.test";
 
 export const SELF = path.join("tests", "base-url-no-environ-dump.test.ts");
 export const OLD_GUARD = path.join("tests", "no-proc-environ-2917.test.ts");
+// The third guard test: it assembles the banned path on purpose to build adversarial files for this guard, so it is
+// excluded for the same reason as the two above. SHO-3032's precision fix is what makes the scan resolve it at all.
+export const GAP_GUARD = path.join("tests", "sec-2917-gaps.test.ts");
 const TESTS_DIR = "tests";
 /** Call sites whose `env` option is a child process' environment rather than an object field that happens to be named env. */
 const CALLS = new Set(["spawn", "spawnSync", "execFile", "execFileSync", "exec", "execSync", "fork"]);
@@ -463,14 +467,14 @@ export function wholeEnvReads(files: { file: string; text: string }[]): Violatio
 }
 
 /**
- * The files under tests/ as { file, text }, leaving out this one file and the delegating APL-2917 guard: both name the
- * banned forms in their own self-test data on purpose. `dir` lets the shell harnesses in this file run the same scan
- * against a throwaway copy of the tree, so the proof is a real file on disk, not only a string.
+ * The files under tests/ as { file, text }, leaving out this file, the delegating APL-2917 guard and its harness: all
+ * three name the banned forms in their own self-test data on purpose. `dir` lets the shell harnesses in this file run
+ * the same scan against a throwaway copy of the tree, so the proof is a real file on disk, not only a string.
  */
 export function scannedFiles(dir: string = TESTS_DIR): { file: string; text: string }[] {
   return filesUnder(dir)
     .map((full) => ({ file: path.join(dir, path.relative(dir, full)), text: readFileSync(full, "utf8") }))
-    .filter(({ file }) => file !== SELF && file !== OLD_GUARD);
+    .filter(({ file }) => file !== SELF && file !== OLD_GUARD && file !== GAP_GUARD);
 }
 
 /**
@@ -479,9 +483,9 @@ export function scannedFiles(dir: string = TESTS_DIR): { file: string; text: str
  * iteration, /proc read, and one-file alias/element-access resolution of `process.env`).
  */
 export function violations(files: { file: string; text: string }[]): Violation[] {
-  // The two guard files name the banned forms on purpose; the exclusion lives here so no caller can forget it. Compared by
-  // base name, because a scan of a throwaway copy of tests/ reports absolute paths.
-  const scanners = new Set([path.basename(SELF), path.basename(OLD_GUARD)]);
+  // The three guard files name the banned forms on purpose; the exclusion lives here so no caller can forget it. Compared
+  // by base name, because a scan of a throwaway copy of tests/ reports absolute paths.
+  const scanners = new Set([path.basename(SELF), path.basename(OLD_GUARD), path.basename(GAP_GUARD)]);
   const scanned = files.filter(({ file }) => !scanners.has(path.basename(file)));
   const image: Violation[] = environReaders(scanned).map((file) => ({ file, line: 0, form: "process image file read", text: "" }));
   return [...image, ...wholeEnvReads(scanned)];
