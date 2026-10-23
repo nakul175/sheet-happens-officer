@@ -40,13 +40,23 @@ export type HiddenProjectFixture = HiddenDealFixture & {
   plain: FixtureProject;
 };
 
+/**
+ * A person on the fixture's projects: a bare Account joins as Editor, or name the role when the test
+ * needs the other one — a VIEWER is how the suite proves a read-only member is hidden too.
+ */
+export type HiddenMember = Account | { who: Account; role: "EDITOR" | "VIEWER" };
+
+function asMember(m: HiddenMember): { who: Account; role: "EDITOR" | "VIEWER" } {
+  return "who" in m ? m : { who: m, role: "EDITOR" };
+}
+
 export type HiddenDealOptions = {
   /** The person who leads the deal. */
   leader: Account;
   /** Included in the ZZ-TEST names, so one run's rows are told from another's. */
   label: string;
-  /** People added as Editors to the deal. A test's viewer or leaver goes here. */
-  members?: Account[];
+  /** People added to the deal. A test's viewer or leaver goes here; a bare Account is an Editor. */
+  members?: HiddenMember[];
   /** Reuse an organisation another fixture made, so one cleanup archives it once. */
   organisationId?: string;
   /** Reuse a pipeline another fixture looked up. */
@@ -58,6 +68,11 @@ export type HiddenDealOptions = {
 export type HiddenProjectOptions = HiddenDealOptions & {
   /** Leads the plain project only. Defaults to `leader`, which makes both projects that person's. */
   plainLeader?: Account;
+  /**
+   * People added to the plain control. Defaults to `members`, which is right when the control is the
+   * same people's second project; pass `[]` when the control must be one they are not in.
+   */
+  plainMembers?: HiddenMember[];
 };
 
 /** The organisation and pipeline a deal needs, reused from the options when a sibling fixture made them. */
@@ -98,8 +113,8 @@ export async function hiddenDeal(sa: Account, o: HiddenDealOptions): Promise<Hid
   const deal: FixtureProject = { id: made.json.deal.id as string, name };
   const stage = made.json.deal.stage?.name ?? made.json.deal.stageName;
   const stageName = typeof stage === "string" ? stage : "";
-  for (const who of o.members ?? []) {
-    const added = await sa.c.post(`/api/projects/${deal.id}/members`, { userId: who.id, role: "EDITOR" });
+  for (const { who, role } of (o.members ?? []).map(asMember)) {
+    const added = await sa.c.post(`/api/projects/${deal.id}/members`, { userId: who.id, role });
     expect(added.status, `add ${who.email} to ${deal.name}: ${added.status} ${JSON.stringify(added.json)}`).toBe(201);
   }
   return { deal, organisationId, pipelineId, stageName, projectIds: [deal.id] };
@@ -117,8 +132,8 @@ export async function hiddenProjectFixture(sa: Account, o: HiddenProjectOptions)
   const made = await sa.c.post("/api/projects", { name, leaderId: plainLeader.id });
   expect(made.status, JSON.stringify(made.json)).toBe(201);
   const plain: FixtureProject = { id: made.json.project.id as string, name };
-  for (const who of o.members ?? []) {
-    const added = await sa.c.post(`/api/projects/${plain.id}/members`, { userId: who.id, role: "EDITOR" });
+  for (const { who, role } of (o.plainMembers ?? o.members ?? []).map(asMember)) {
+    const added = await sa.c.post(`/api/projects/${plain.id}/members`, { userId: who.id, role });
     expect(added.status, `add ${who.email} to ${plain.name}: ${added.status} ${JSON.stringify(added.json)}`).toBe(201);
   }
   return { ...hidden, plain, projectIds: [hidden.deal.id, plain.id] };
