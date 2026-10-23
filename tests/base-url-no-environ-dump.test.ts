@@ -12,8 +12,11 @@
 //      (`const also = e`) is followed too.
 //   4. REVIEW-2917 F1/F2, the routes that hand the environment to someone else instead of naming it here: a child
 //      process that prints it (`execSync("printenv")`, `spawnSync("env")`, `execSync("env | sort")`, `sh -c env`,
-//      `bash -c "env | sort"`), the module-level bindings (`import { env as e } from "node:process"`,
-//      `const { env: e } = process`, `require("node:process").env`). A command line that only READS NAMED variables stays
+//      `bash -c "env | sort"`, and the same behind a wrapper program: `nohup printenv`, `sudo -u root env`,
+//      `timeout 10 env`), the module-level bindings (`import { env as e } from "node:process"`,
+//      `const { env: e } = process`, `require("node:process").env`) and the aliases that hand out the process object
+//      itself (`import * as p from "node:process"`, `const p = require("node:process")`, `await import("node:process")`),
+//      whose `p.env` is judged exactly like `process.env`. A command line that only READS NAMED variables stays
 //      allowed, as does the explicit `env:` allowlist a spawn passes (`{ env: { ...process.env, PORT } }`, `env: process.env`).
 //   5. SHO-2917 F3, the shapes the disposition deferred: a whole environment that reaches the sink as an ARGUMENT. The
 //      callee is resolved — a declaration or a const arrow in the same file, or a named/default/namespace import of
@@ -30,6 +33,16 @@
 // file that declares it, so a sink behind a barrel is judged like a sink behind a plain import. Still not followed:
 // `export * as ns from "./impl"` (a namespace handed on), a re-export through a module outside the scanned batch, and
 // `require()`/dynamic `import()` of a local module.
+// LIMITS (W239) — what this scanner does NOT decide, stated so no reader takes a green run as absence of the behaviour:
+//   1. An unresolvable callee. `import { send } from "some-lib"; send(process.env)` hands the environment to code the
+//      batch cannot read, so the scanner cannot say whether it dumps. Only a run-time check at that boundary can.
+//   2. A child handed CODE instead of a command. `spawn("node", ["-e", "console.log(JSON.stringify(process.env))"])`
+//      is a literal argv the scanner could judge, but the rule would have to price every literal argv of every
+//      child-process call in tests/; it is left out rather than shipped unpriced. The child inherits the environment of
+//      the parent by design, so no text in this file can prove the child does not print it.
+//   3. An assembly built at run time: `["print","env"].join("")`, a base64/char-code string, or a `Reflect`/`Proxy` read
+//      of `globalThis["pro" + "cess"].env`. The scanner reads source, and these are values, not text.
+// A text scanner proves that the files it reads contain no banned FORM; it cannot prove absence of a behaviour.
 // The guard is not exhaustive; tests/sec-2917-f3-sinking-w93.test.ts pins what the F3 pass sees,
 // tests/sec-2917-reexport-w105.test.ts pins the re-export pass, and SEC-2917-F3-DISPOSITION.md keeps the rest open.
 // The one asymmetry, on purpose: a plain alias (`const e = process.env`) is reported only when the whole thing is used
@@ -71,10 +84,14 @@ function callName(node: ts.CallExpression): string | null {
   return null;
 }
 
-/** A literal string's text; null for anything computed (`script`, `` `${body}` ``, `body.join("\n")`). */
-function literalText(node: ts.Node | undefined): string | null {
+/**
+ * A literal string's text; null for anything computed (`` `${body}` ``, `body.join("\n")`). A name bound to a literal in
+ * the same file resolves to that literal (W239, W169 row 29): `const CMD = "printenv"; execSync(CMD)` runs printenv.
+ */
+function literalText(node: ts.Node | undefined, bindings?: Bindings): string | null {
   if (!node) return null;
   if (ts.isStringLiteralLike(node)) return node.text;
+  if (bindings && ts.isIdentifier(node)) return bindings.strings.get(node.text) ?? null;
   return null;
 }
 
@@ -97,9 +114,43 @@ function programName(word: string): string {
   return (bare.split(/[\\/]/).pop() ?? bare).toLowerCase();
 }
 
-/** True when these segments print the environment, directly or inside a `sh -c` script. */
+/**
+ * Programs a shell runs IN FRONT OF another program (W239, W169 row 25-28). `nohup printenv`, `sudo -u root env` and
+ * `timeout 10 env` print exactly what `printenv`/`env` print, so the dump is the program at the end of the chain.
+ */
+const WRAPPERS = new Set(["nohup", "sudo", "doas", "command", "exec", "xargs", "nice", "ionice", "stdbuf", "setsid", "time",
+  "unbuffer", "timeout", "env", "busybox"]);
+/** The wrapper flags whose value is a separate word: `sudo -u root env`, `nice -n 5 env`. */
+const WRAPPER_OPERANDS = new Set(["-u", "-g", "-C", "-p", "-U", "-n", "-s", "-t", "-o", "-e", "--user", "--group"]);
+
+/**
+ * The words a shell actually runs: leading wrapper programs, their flags, the operand of a flag, the bare numeric
+ * operand `timeout 10 env` takes, and `NAME=VALUE` assignments are stripped. A program-position rule, not a text ban:
+ * `grep env notes.txt` and `sudo tee env` keep their own program and stay quiet.
+ */
+function stripWrappers(words: string[]): string[] {
+  let rest = words;
+  for (let step = 0; step < 8 && rest.length > 1; step++) {
+    if (!WRAPPERS.has(programName(rest[0]))) break;
+    let index = 1;
+    while (index < rest.length - 1) {
+      const word = rest[index];
+      if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(word)) { index++; continue; }
+      if (!word.startsWith("-")) break;
+      index++;
+      if (WRAPPER_OPERANDS.has(word) && index < rest.length - 1) index++;
+    }
+    if (index < rest.length - 1 && /^\d+(\.\d+)?[smhd]?$/.test(rest[index])) index++;
+    if (index >= rest.length) break;
+    rest = rest.slice(index);
+  }
+  return rest;
+}
+
+/** True when these segments print the environment, directly, behind a wrapper, or inside a `sh -c` script. */
 function runsEnvDump(segments: string[][]): boolean {
-  return segments.some((words) => {
+  return segments.some((rawWords) => {
+    const words = stripWrappers(rawWords);
     const program = programName(words[0]);
     if (ENV_DUMP_PROGRAMS.has(program)) return true;
     if (!SHELLS.has(program)) return false;
@@ -113,20 +164,20 @@ function runsEnvDump(segments: string[][]): boolean {
  * The command lines a child-process call runs: `execSync("printenv")` takes a whole shell command line, `spawn("sh",
  * ["-c", "env"])` a program and its argv. Null when the command is computed rather than written here.
  */
-function commandLines(call: ts.CallExpression): string[][] | null {
+function commandLines(call: ts.CallExpression, bindings?: Bindings): string[][] | null {
   const name = callName(call);
   if (!name || !CALLS.has(name)) return null;
-  const program = literalText(call.arguments[0]);
+  const program = literalText(call.arguments[0], bindings);
   if (program === null) return null;
   const argv: string[] = [];
   const second = call.arguments[1];
   if (second && ts.isArrayLiteralExpression(second)) {
     for (const element of second.elements) {
-      const value = literalText(element);
+      const value = literalText(element, bindings);
       if (value !== null) argv.push(value);
     }
   } else {
-    const value = literalText(second);
+    const value = literalText(second, bindings);
     if (value !== null) argv.push(value);
   }
   // exec/execSync run a shell: the first argument is the whole command line, pipes and all.
@@ -134,6 +185,25 @@ function commandLines(call: ts.CallExpression): string[][] | null {
   // spawn("env | sort", { shell: true }): a command line where a program name is expected.
   if (/[;&|\n]/.test(program)) return shellSegments(program);
   return [[program, ...argv]];
+}
+
+/** `import * as p from "node:process"` / `from "process"`: the namespace itself is the process object. */
+function processNamespaceOf(node: ts.Node): string | null {
+  if (!ts.isImportDeclaration(node) || !ts.isStringLiteralLike(node.moduleSpecifier) || !PROCESS_MODULES.includes(node.moduleSpecifier.text)) return null;
+  const bindings = node.importClause?.namedBindings;
+  return bindings && ts.isNamespaceImport(bindings) ? bindings.name.text : null;
+}
+
+/**
+ * `require("node:process")` / `await import("node:process")` as a VALUE: `const p = require("node:process"); p.env` hands
+ * out the same environment `process.env` does (W239, W169 rows 18-19).
+ */
+function isProcessModuleValue(node: ts.Node): boolean {
+  if (ts.isParenthesizedExpression(node) || ts.isAwaitExpression(node) || ts.isNonNullExpression(node)) return isProcessModuleValue(node.expression);
+  if (isProcessRequire(node)) return true;
+  // `import("node:process")` is a call whose callee is the `import` keyword, not an identifier.
+  return ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword && node.arguments.length === 1
+    && ts.isStringLiteralLike(node.arguments[0]) && PROCESS_MODULES.includes(node.arguments[0].text);
 }
 
 /** `require("node:process")` / `require("process")`: the process module itself. */
@@ -217,7 +287,7 @@ function usesProcName(node: ts.Node, bindings?: Bindings): string | null {
  * at worst (a name reused for an unrelated value flags a read the file may not make), never under-reports — which is the
  * direction a security guard must err in.
  */
-export type Bindings = { env: Set<string>; proc: Set<string>; process: Set<string> };
+export type Bindings = { env: Set<string>; proc: Set<string>; process: Set<string>; strings: Map<string, string> };
 /** A path piece under /proc: "/proc", "/proc/self/", or a template head that names /proc. */
 const PROC_PIECE = /^\/proc\/?(self\/?|\d+\/?)?$/;
 
@@ -284,12 +354,12 @@ function namesProcPiece(node: ts.Node): boolean {
 
 /** Every name in the file bound to the environment, the process image path, or the process object. */
 function collectBindings(source: ts.Node, seed: readonly string[] = []): Bindings {
-  const bindings: Bindings = { env: new Set(seed), proc: new Set(), process: new Set() };
+  const bindings: Bindings = { env: new Set(seed), proc: new Set(), process: new Set(), strings: new Map() };
   // One hop is enough for the alias shapes above; a later pass picks up `const also = e` once `e` is known. Repeat until
   // nothing new is bound, because a chain written in reverse order (`const d = c; ... const a = process.env`) needs one
   // pass per link, and an F3 callee body re-binds its own parameter as many times as it likes.
   for (let pass = 0; pass < 20; pass++) {
-    const before = bindings.env.size + bindings.proc.size + bindings.process.size;
+    const before = bindings.env.size + bindings.proc.size + bindings.process.size + bindings.strings.size;
     const visit = (node: ts.Node): void => {
       if (ts.isVariableDeclaration(node) && node.initializer && !ts.isObjectBindingPattern(node.name) && !ts.isArrayBindingPattern(node.name)) {
         if (ts.isIdentifier(node.name)) {
@@ -297,10 +367,18 @@ function collectBindings(source: ts.Node, seed: readonly string[] = []): Binding
           if (isWholeEnv(init, bindings) || isEnvOfProcess(init, bindings)) bindings.env.add(node.name.text);
           if (ts.isIdentifier(init) && bindings.env.has(init.text)) bindings.env.add(node.name.text);
           if (isProcessObject(init, bindings)) bindings.process.add(node.name.text);
+          // `const p = require("node:process")` / `const p = await import("node:process")`: p is the process object.
+          if (isProcessModuleValue(init)) bindings.process.add(node.name.text);
+          // `const CMD = "printenv"` and a chain of such names: the text a child-process call really runs (W239).
+          const text = literalText(init, bindings);
+          if (text !== null) bindings.strings.set(node.name.text, text);
           // A string that is a piece of the proc path (`"/proc/self/"`, `"/proc"`) or spans it: a proc name.
           if (namesProcessImage(init, bindings) || namesProcPiece(init) || (ts.isIdentifier(init) && bindings.proc.has(init.text))) bindings.proc.add(node.name.text);
         }
       }
+      // `import * as p from "node:process"`: the namespace hands out the same environment as `process` (W239).
+      const namespace = processNamespaceOf(node);
+      if (namespace) bindings.process.add(namespace);
       // `import { env as e } from "node:process"`: `e` is the whole environment for the rest of the file.
       if (importsEnv(node) && node.importClause && node.importClause.namedBindings && ts.isNamedImports(node.importClause.namedBindings)) {
         for (const element of node.importClause.namedBindings.elements) if (bindsEnvName(element)) bindings.env.add(element.name.text);
@@ -323,7 +401,7 @@ function collectBindings(source: ts.Node, seed: readonly string[] = []): Binding
       ts.forEachChild(node, visit);
     };
     visit(source);
-    if (before === bindings.env.size + bindings.proc.size + bindings.process.size) break;
+    if (before === bindings.env.size + bindings.proc.size + bindings.process.size + bindings.strings.size) break;
   }
   return bindings;
 }
@@ -344,6 +422,10 @@ function isWholeEnv(node: ts.Node, bindings?: Bindings): boolean {
   // A name bound to the whole environment in this file: `const e = process.env; console.log(e)`.
   if (bindings && ts.isIdentifier(node)) return bindings.env.has(node.text);
   if (bindings && isEnvOfProcess(node, bindings)) return true;
+  // `${process.env}` stringifies the whole environment: the span's expression IS the object. A named key inside a
+  // template (`${process.env.PATH}`) is not, because that span's expression is the key (W169 row 11, kept here so the
+  // table's control stays caught).
+  if (ts.isTemplateExpression(node)) return node.templateSpans.some((span) => isWholeEnv(span.expression, bindings));
   // String(process.env), util.inspect(process.env), JSON.stringify(process.env): the argument is the environment.
   if (ts.isCallExpression(node) && node.arguments.length === 1 && /^(String|JSON\.stringify|util\.inspect|util\.format)$/.test(node.expression.getText())) return isWholeEnv(node.arguments[0], bindings);
   if (ts.isPropertyAccessExpression(node)) return node.name.text === "env" && ts.isIdentifier(node.expression) && node.expression.text === "process";
@@ -737,7 +819,7 @@ export function wholeEnvReads(files: { file: string; text: string }[]): Violatio
       // 5. A child process that prints the environment instead of naming a key: execSync("printenv"), spawnSync("env"),
       //    execSync("env | sort"), spawn("sh", ["-c", "env"]), spawn("bash", ["-c", "env | sort"]).
       if (ts.isCallExpression(node)) {
-        const lines = commandLines(node);
+        const lines = commandLines(node, bindings);
         if (lines && runsEnvDump(lines)) report(node, "environment printed by a child process");
       }
       // 6. The whole environment lifted out of the process module or object: no `process.env` left to scan.
@@ -985,7 +1067,10 @@ describe("REVIEW-2917 F1/F2: a child process that prints the environment and a m
       `execFile("npx", ["next", "start", "-p", "3191"]);`,
       // A shell that runs something else, including a script the file does not spell out.
       `spawn("bash", ["-c", "npm test -- --config vitest.config.mts"]);`,
-      "const script = \"printenv\"; spawnSync(\"bash\", [\"-eo\", \"pipefail\", \"-c\", script]);",
+      // A shell that runs a script genuinely assembled at RUN TIME: the words are built from pieces, so no text in this
+      // file says "printenv". W239 moved the boundary here: a script the file spells out, even through a name
+      // (`const script = "printenv"; spawnSync("bash", ["-c", script])`), is now read as the text it is and reported.
+      `const script = ["print", "env"].join(""); spawnSync("bash", ["-eo", "pipefail", "-c", script]);`,
       `spawn(process.execPath, ["--import", "tsx", "-e", read]);`,
       // The explicit env: allowlist, the whole point of keeping the guard usable.
       `spawn(bin, args, { env: { ...process.env, PORT: "3192" } });`,
@@ -998,6 +1083,52 @@ describe("REVIEW-2917 F1/F2: a child process that prints the environment and a m
       `const e = { env: process.env.TASKBOARD_URL }; console.log(e.env);`,
     ]) {
       expect(wholeEnvReads([{ file: "zz-f1.test.ts", text }]), text).toEqual([]);
+    }
+  });
+});
+
+// W239: the eight `it.fails` pins of tests/sec-2917-gaps-w41.test.ts, promoted to plain `it` (that file's own header
+// prescribed exactly this promotion), plus the two shapes the promotion made reachable. Each is one evasion from W169's
+// table; the LIMITS block in the header states the three that stay out because a text scanner cannot settle them.
+const W239_CLOSED = [
+  [`execSync("nohup printenv")`, `execSync("nohup printenv");`, "environment printed by a child process"],
+  [`execSync("sudo env")`, `execSync("sudo env");`, "environment printed by a child process"],
+  [`execSync("xargs env")`, `execSync("xargs env");`, "environment printed by a child process"],
+  [`const CMD = "printenv"; execSync(CMD)`, `const CMD = "printenv";\nexecSync(CMD);`, "environment printed by a child process"],
+  [`import * as p from "node:process"; { ...p.env }`, `import * as p from "node:process";\nconst copy = { ...p.env };`, "spread of process.env"],
+  [`import * as p from "node:process"; console.log(p.env)`, `import * as p from "node:process";\nconsole.log(p.env);`, "whole environment dumped"],
+  [`const p = require("node:process"); console.log(p.env)`, `const p = require("node:process");\nconsole.log(p.env);`, "whole environment dumped"],
+  [`const p = await import("node:process"); console.log(p.env)`, `const p = await import("node:process");\nconsole.log(p.env);`, "whole environment dumped"],
+  // The wrapper's operand and its flags: `sudo -u root env`, `timeout 10 env`, `nice -n 5 env`.
+  [`execSync("sudo -u root env")`, `execSync("sudo -u root env");`, "environment printed by a child process"],
+  [`execSync("timeout 10 env")`, `execSync("timeout 10 env");`, "environment printed by a child process"],
+  [`execSync("nice -n 5 env")`, `execSync("nice -n 5 env");`, "environment printed by a child process"],
+  // A script the file spells out and hands to a shell by name is the text it is.
+  [`const script = "printenv" handed to bash -c`, `const script = "printenv";\nspawnSync("bash", ["-eo", "pipefail", "-c", script]);`, "environment printed by a child process"],
+  // W169 row 11: a template whose span is the whole object stringifies it.
+  ["template dump", "console.log(`${process.env}`);", "whole environment dumped"],
+] as const;
+
+describe("W239: the W169 evasion table is closed where a text scanner can close it", () => {
+  for (const [form, text, expected] of W239_CLOSED) {
+    it(`qa:TC missing AC1: ${form} turns the guard RED`, () => {
+      expect(wholeEnvReads([{ file: "zz-w239.test.ts", text }]).map(({ form: hit }) => hit), `${form}: ${text}`).toContain(expected);
+    });
+  }
+
+  // Not a text ban: the new program rules only fire on the program a shell runs, and only when that program is a dump.
+  it("qa:TC missing AC1: a wrapper in front of another program, a named key, and a run-time script stay quiet", () => {
+    for (const text of [
+      `execSync("grep env notes.txt");`,
+      `execSync("sudo tee env");`,
+      `execSync("timeout 10 npm test");`,
+      `const CMD = "git"; execSync(CMD);`,
+      `const script = ["print", "env"].join(""); spawnSync("bash", ["-c", script]);`,
+      `import * as p from "node:process"; console.log(p.version);`,
+      "console.log(`${process.env.BASE_URL}/health`);",
+      `const p = require("node:process"); console.log(p.platform, p.env.BASE_URL);`,
+    ]) {
+      expect(wholeEnvReads([{ file: "zz-w239.test.ts", text }]), text).toEqual([]);
     }
   });
 });
