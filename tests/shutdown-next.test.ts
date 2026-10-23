@@ -444,5 +444,12 @@ describe("qa:TC missing signed-in GET / under SIGTERM (APL-2689)", () => {
     it(`qa:TC missing ${entry}: 40 signed-in GET / mid-flight all return 200, exit 0`, async () => {
       await expectSignedInBurst(entry, 40);
     }, 180_000);
+
+    // SHO-2689: the staging drain receipt measured N=100 as well as N=40, and only the
+    // 40 case existed here. Same protocol, same assertions; 100 is the burst that used
+    // to drop sockets the accept-queue seizure now keeps.
+    it(`qa:TC missing ${entry}: 100 signed-in GET / mid-flight all return 200, exit 0`, async () => {
+      await expectSignedInBurst(entry, 100);
+    }, 240_000);
   }
 });
