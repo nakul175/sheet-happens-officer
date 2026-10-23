@@ -35,11 +35,15 @@ test("AC1: an Editor turns Idea on and the chip shows in the project list, the b
   await admin.page.goto("/search");
   await admin.page.getByLabel("Search").fill(t.title);
   // The project and the task share this name, so both results show it. The project result's whole name is that text.
-  // The task result is the link whose title is exactly that text and whose line names its project and assignee.
   const project = admin.page.getByRole("link", { name: t.project, exact: true });
   await expect(project).toHaveAttribute("href", `/projects/${t.projectId}`);
   await expect(project.getByText("Idea", { exact: true })).toHaveCount(0);
-  const task = admin.page.getByRole("link").filter({ has: admin.page.getByText(t.title, { exact: true }) }).filter({ hasText: `${t.project} · ${admin.user.name}` });
+  // Scope by result type before the title: only a task result carries the "<project> · <assignee>" line, so the project
+  // result is never a candidate even though its whole name is the title (SHO-2924: the old .item filter matched both).
+  const task = admin.page
+    .getByRole("link")
+    .filter({ hasText: `${t.project} · ${admin.user.name}` })
+    .filter({ has: admin.page.getByText(t.title, { exact: true }) });
   await expect(task).toHaveAttribute("href", `/projects/${t.projectId}?task=${t.id}`);
   await expect(task.getByText("Idea", { exact: true })).toBeVisible();
 });
