@@ -169,6 +169,7 @@ jobs:
             echo
             echo "**Excluded (@local-only):** APL-2609, APL-2669, APL-2674. They sign up new nakul17+ aliases and verify them"
             echo "from a local mail outbox, so on staging they would create real accounts and send real mail. They run locally only."
+            echo "And APL-2471 AC4: it starts the daily reminders job on the local server, and runLocalJob refuses a remote host."
             echo "Also excluded: @static (a file-contains check) and @manual (cannot force a failure on staging), as in staging-e2e.yml."
           } >> "$GITHUB_STEP_SUMMARY"
 
