@@ -8,7 +8,7 @@
 //
 // This file is pure file parsing: no live server, no database, no child process. It is fast and
 // hermetic on purpose, so it can run anywhere `npm test` runs.
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 /** Variables the `npm test` command line must set for the vitest process (README contract). */
@@ -154,6 +154,42 @@ describe("return-path probe: the documented dev server can write what the test r
   it("CI starts the server under test the same way", () => {
     expect(readFileSync(".github/workflows/ci.yml", "utf8"), "CI sets RETURN_PATH_LOG=1 for next start")
       .toMatch(/RETURN_PATH_LOG=1\s+npx next start/);
+  });
+});
+
+// W248. The APL-2652 D9 AC2 case (tests/return-to.test.ts:803-817) waits until it runs to find out that the server was
+// started without a log, so the runner learns about it after the whole database tier. The precondition is cheap to state:
+// SERVER_LOG is a claim the runner makes about a file the *server* writes. When it is set, the file has to be there. When
+// it is unset the documented default is ./server.log in the repo root, which an offline run may legitimately not have —
+// the server creates it at redirect time, long before any test reads it — so the guard stays quiet then (reported as
+// skipped, not as a silent pass) and CI, which starts `next start > server.log` without SERVER_LOG, is unaffected.
+const SERVER_LOG = process.env.SERVER_LOG;
+
+describe("SERVER_LOG, when the runner sets it, names the log the server writes", () => {
+  it.skipIf(!SERVER_LOG)("the file SERVER_LOG names exists before tests/return-to.test.ts reads it", () => {
+    expect(
+      existsSync(SERVER_LOG!),
+      `SERVER_LOG=${SERVER_LOG} does not exist. tests/return-to.test.ts reads the running server's own log from `
+        + `process.env.SERVER_LOG ?? "server.log" and fails at :803 without it. Start the server so its output goes to `
+        + `that file, with RETURN_PATH_LOG=1 on the SERVER process: `
+        + `RETURN_PATH_LOG=1 npx next dev -p 3100 > ${SERVER_LOG} 2>&1 & `
+        + `(README ## Test, "What the tests read from the server, not from the test process").`,
+    ).toBe(true);
+  });
+
+  it("the README publishes that server line, so the runner can copy it", () => {
+    // The requirement only counts if it is written where a runner starts a server. This is the W248 section of README
+    // ## Test; without it the state is "known to two reports", which is how the same failure was diagnosed twice.
+    // testSection() cuts the section at the next "\n## ", so the new subsection runs to the end of the string it returns.
+    const written = (section.match(/### What the tests read from the server[\s\S]*/) ?? [""])[0];
+    expect(written, "README ## Test has the section naming what the tests read from the server").not.toBe("");
+    const prose = written.replace(/\\\n/g, " "); // a shell line continuation is one command
+    expect(prose, "the server line sets RETURN_PATH_LOG=1 on the server process").toContain("RETURN_PATH_LOG=1");
+    expect(prose, "the server line sends its output to the file the test reads").toContain("npx next dev -p 3100 > server.log 2>&1");
+    expect(prose, "the section names SERVER_LOG as the test-side pointer to that file").toContain("SERVER_LOG");
+    // The quote is wrapped in the prose, so compare with the wrapping taken out.
+    expect(written.replace(/\s+/g, " "), "the section quotes the failure a log-less server produces")
+      .toContain("the server under test appended no [return-path] line");
   });
 });
 
