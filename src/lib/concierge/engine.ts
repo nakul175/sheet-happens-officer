@@ -10,6 +10,7 @@ import {
 } from "@/lib/concierge/limits";
 import { todayLine } from "@/lib/concierge/dates";
 import { isEcho } from "@/lib/concierge/echo";
+import { claimsWrite } from "@/lib/concierge/claims";
 import { flat, personById, projectById, quickAnswer, taskById, QUICK_ACTIONS, type TaskRec } from "@/lib/concierge/reads";
 import { conciergeTools, newTurn, runTool, wrap, type Kind, type Turn } from "@/lib/concierge/tools";
 import { commentsEnabled } from "@/lib/flags";
@@ -219,12 +220,28 @@ function buildReply(turn: Turn, modelText: string, request: string): Stored {
   //   records === 0  → nothing was read and nothing was written. There is no fact behind any sentence the model could
   //                    have produced here, so no sentence of it is relayed, whatever it says. The person gets the
   //                    server's own words: nothing changed, and what is missing.
-  //   records  > 0   → the model's answer is grounded in rows the tools returned, so it is relayed as the answer.
+  //   records  > 0   → the model has data, but data is not an outcome. Rows say what the world IS; they say nothing
+  //                    about a write this turn did not perform.
   //
   // No wording of the model's can move itself from the first case to the second, because the deciding value is a count
   // of tool results. That is the whole difference from every previous attempt (w107 widened a request keyword, w126
   // proved 6 of 7 phrasings still fabricated, w148/w164 matched the model's sentence): there is no pattern to defeat.
-  if (r.records === 0) return { kind: "text", text: NOTHING_CHANGED };
+  //
+  // SHO-2693 w215: w183 read the second case as "the answer is grounded, relay it", which made every turn with a real
+  // read a free relay for ANY sentence. Reproduced in tests/sho-2693-w199.test.ts on a turn that wrote nothing: after
+  // a read of the person's own tasks, "Here are your tasks. I've assigned the late one to Sam and it is done now." was
+  // relayed verbatim; after a read of something unrelated, so was "Done - I deleted it for you.". Both are sentences
+  // w183's predecessor replaced, so w183 reopened them. The outcome check is back, in front of BOTH branches, as ONE
+  // predicate: rows prove the facts, they do not prove the write.
+  //
+  // The two halves do different jobs and neither substitutes for the other. `records === 0` is structural - it holds
+  // whatever the model wrote, because the deciding value is a count of tool results, not a pattern in the prose.
+  // claimsWrite is a blacklist and is wrong in both directions (it misses a fresh verb; it blocks a true statement
+  // such as "it is already assigned to Sam"). It is here only for the branch the count cannot reach, and it is what
+  // refuses the two w199 sentences again. Containment, not closure: §5 of W215-REPORT.md names the version that does
+  // close it - render the answer from the rows the tools returned instead of the model's prose - and why that is a
+  // product decision this packet does not take.
+  if (r.records === 0 || claimsWrite(modelText)) return { kind: "text", text: NOTHING_CHANGED };
   const body = modelText || UNKNOWN;
   return { kind: "answer", text: body.slice(0, 4000), links: linksFor(turn, body) };
 }
