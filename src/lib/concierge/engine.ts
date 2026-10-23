@@ -119,8 +119,15 @@ async function runModel(user: Actor, turn: Turn, userText: string, history: Mode
   return finalText;
 }
 
-/** What the person said, for the server's own question (SHO-2693). Trimmed and case-folded; never echoed back. */
-const asksForAssign = (request: string) => /\bassign/.test(request.toLowerCase());
+/**
+ * What the person said, for the server's own question (SHO-2693). Trimmed and case-folded; never echoed back.
+ *
+ * The word "assign", not every word that starts with it: `/\bassign/` also matched "assigned", so a read-only
+ * question — "Which tasks are assigned to me?" — threw away the answer the model had just produced and asked who to
+ * assign instead. `assign`, `assign it`, `Assign "X" to Y` and `please assign X` still match; `assigned`,
+ * `assignment`, `reassign` and `unassign` do not (they are what the person is asking *about*, not a request to assign).
+ */
+const asksForAssign = (request: string) => /\bassign\b/.test(request.toLowerCase());
 
 /**
  * The server's question when a request asks to assign and named no person. The model's own words cannot be relied on

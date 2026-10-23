@@ -31,4 +31,28 @@ describe("qa:TC missing SHO-2693 the required flag cannot be satisfied by the Ch
     // Callers used to pass an options bag. It is not a flag: only the boolean `false` turns the requirement off.
     expect(requiredPerson({ required: false })).toBe(true);
   });
+
+  // SHO-2693 independent re-verification (w52): the four shapes a caller could try in the flag position. Before the fix
+  // the flag was `typeof o === "object" ? o.required : o`, so a nested `{ required: false }` answered false — optional —
+  // and a personless assign_task became a card. Every one of these must keep the requirement on; only `false` may not.
+  it("qa:TC missing a truthy non-boolean keeps the requirement on", () => {
+    expect(requiredPerson(1)).toBe(true);
+    expect(requiredPerson("true")).toBe(true);
+    expect(requiredPerson([])).toBe(true); // truthy in JS, and the old code read it as an object with no key
+  });
+
+  it("qa:TC missing the string \"false\" keeps the requirement on", () => {
+    // A model or a query string can carry "false". It is not the boolean, so it must not switch the check off.
+    expect(requiredPerson("false")).toBe(true);
+  });
+
+  it("qa:TC missing a nested object keeps the requirement on at any depth", () => {
+    expect(requiredPerson({ required: false })).toBe(true);
+    expect(requiredPerson({ required: { value: false } })).toBe(true);
+    expect(requiredPerson({ options: { required: false } })).toBe(true);
+  });
+
+  it("qa:TC missing an absent flag keeps the requirement on", () => {
+    expect(requiredPerson()).toBe(true);
+  });
 });

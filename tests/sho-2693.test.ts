@@ -151,4 +151,22 @@ describe("qa:TC missing SHO-2693 assign without a person asks who and changes no
     // Still nothing applied: only the person's Confirm can do that.
     expect(await assigneeOf(taskId)).not.toBe(member.id);
   });
+
+  // The who-question is triggered by the request's wording (engine.ts asksForAssign). It must match the word "assign"
+  // and not the prefix of "assigned": a read-only question used to be answered with "Who should I assign it to?" and the
+  // model's real answer was thrown away (SHO-2693 re-verification, w52).
+  it("qa:TC missing AC3: a question about assignments keeps its answer instead of asking who to assign", async () => {
+    const { lead, title } = await unassigned();
+    script(() => [tu("find_tasks", { text: title })], () => [say(`You have one task: ${title}`)]);
+    const read = await sendMessage(actor(lead), "Which tasks are assigned to me?");
+    const reply = lastAssistant(read.messages);
+    expect(reply.kind).toBe("answer");
+    expect(reply.text).not.toMatch(/Who should I assign it to/);
+    expect(reply.text).toContain(title);
+    // The same turn, when it does ask to assign, is still the server's question.
+    script(() => [say("ok")]);
+    const asked = await sendMessage(actor(lead), "please assign it to somebody");
+    expect(lastAssistant(asked.messages).kind).toBe("choices");
+    expect(isQuestion(lastAssistant(asked.messages))).toBe(true);
+  });
 });
