@@ -6,7 +6,7 @@ import { getTask, ghost, newProject, newTask, ymd, type Who } from "../g2";
 import { pipelines } from "../helpers/deal-board";
 import { atDeal } from "../helpers/deal-wait";
 import { raw } from "../helpers/jim-http";
-import { activity, audit, createOrg, projectOf, type Later } from "../helpers/claude-a";
+import { activity, audit, createOrg, projectOf } from "../helpers/claude-a";
 
 async function gate(admin: Who, orgId: string, pipelineId: string, extra: Record<string, unknown> = {}) {
   return { organisationId: orgId, pipelineId, whyPursue: "ZZ-TEST why", leaderId: admin.user.id, ...extra };

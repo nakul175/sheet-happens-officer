@@ -14,7 +14,6 @@
 //                  dev server's artifacts (`.next/dev`).
 import net from "node:net";
 import path from "node:path";
-import fs from "node:fs";
 import { spawn } from "node:child_process";
 // W184: "is this directory a release" is asked of the ONE implementation in the acceptance
 // module, not re-implemented here (W160 measured the two copies diverging on a directory named

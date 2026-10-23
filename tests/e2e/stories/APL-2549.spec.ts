@@ -1,6 +1,6 @@
 // SHO-US-22.1 Phone-ready foundations (APL-2549). Epic SHO-E22.
 // Runs against staging. Data: one ZZ-TEST project, archived afterwards.
-import { test, expect, zz, type Json, login, BASE_URL } from "../support";
+import { test, expect, zz, login, BASE_URL } from "../support";
 import type { Browser } from "@playwright/test";
 
 const WIDTHS = [320, 344, 360, 375, 390, 412, 440, 600, 768];

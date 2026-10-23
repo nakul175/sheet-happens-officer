@@ -1,6 +1,6 @@
 // SHO-US-3.4 Add and remove project members (Linear APL-2488).
 // The Super Admin acts as the Leader; the plain Member (SHO_MEMBER_*) is the person added, removed or demoted.
-import { test, expect, zz } from "../support";
+import { test, expect } from "../support";
 import { ghost, getTask, newProject, newTask } from "../g2";
 
 test("AC1: the Leader adds an active person (Editor pre-selected); they see the project and are notified", async ({ admin, member, later }) => {

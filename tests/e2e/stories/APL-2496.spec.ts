@@ -1,7 +1,7 @@
 // APL-2496 · SHO-US-5.1 My tasks as the home page
 // Acceptance criteria: AC1 two projects grouped by date, AC2 collaborator tag and tick, AC3 access, AC4 empty state.
 // Data: every project and task is named "ZZ-TEST ..."; projects are archived afterwards.
-import { test, expect, zz, hasMember, type Who } from "../support";
+import { test, expect, zz, type Who } from "../support";
 
 const ist = (d: number) => new Date(Date.now() + 5.5 * 3600e3 + d * 864e5).toISOString().slice(0, 10);
 

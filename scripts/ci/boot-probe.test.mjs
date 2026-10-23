@@ -84,7 +84,7 @@ test("a route the server does not have is 404 and the probe exits non-zero: the 
   assert.equal(result.stderr, "", "a status the probe saw is an answer, not an error message");
 });
 
-test("nothing listening is 000 and non-zero, not a silent success", async (t) => {
+test("nothing listening is 000 and non-zero, not a silent success", async () => {
   // Take a real ephemeral port and close it, so the probe talks to a port that was open a moment ago and is not now.
   const server = await startServer();
   await stopServer(server.child);

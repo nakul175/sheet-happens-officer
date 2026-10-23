@@ -15,7 +15,7 @@ export const useMe = () => useContext(MeCtx)!;
 export const roleLabel = (r: Me["orgRole"]) => (r === "SUPER_ADMIN" ? "Super Admin" : r === "ADMIN" ? "Admin" : "Member");
 
 /** SHO-US-22.4: bottom tab bar under 600 px. The server still decides who may open Usage and Audit; this only decides what is listed. */
-function TabBar({ user, here, more }: { user: Me; here: (p: string) => boolean; more: [string, string][] }) {
+function TabBar({ here, more }: { here: (p: string) => boolean; more: [string, string][] }) {
   const path = usePathname();
   const [openAt, setOpenAt] = useState<string | null>(null); // the menu belongs to the page it was opened on
   const open = openAt === path;
@@ -157,7 +157,7 @@ export function Shell({ user, children }: { user: Me; children: React.ReactNode 
           </header>
           {children}
         </div>
-        <TabBar user={user} here={here} more={more} />
+        <TabBar here={here} more={more} />
         <ConciergeHost />
       </div>
       </Extras>

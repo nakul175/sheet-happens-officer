@@ -55,8 +55,6 @@ export function idsIn(a: { beforeState: unknown; afterState: unknown; targetId: 
   return [...out];
 }
 
-const FIELD: Record<string, string> = { title: "title", description: "description", dueDate: "due date", priority: "priority", blocked: "blocked", blockedReason: "blocked reason" };
-
 function person(names: Names, id: unknown) {
   return typeof id === "string" && id ? names.get(id) ?? "someone no longer on the project" : "no one";
 }

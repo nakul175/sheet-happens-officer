@@ -193,7 +193,7 @@ test("a null release still passes but is reported: the field is proven, the rele
   assert.match(result.stdout, /note: release is empty - this server identifies no release/);
 });
 
-test("nothing listening is exit 10, and says why nothing answered", async (t) => {
+test("nothing listening is exit 10, and says why nothing answered", async () => {
   // Take a real ephemeral port and close it, so the probe talks to a port that was open a moment ago and is not now.
   const server = await startServer(HEALTHY);
   await stopServer(server.child);

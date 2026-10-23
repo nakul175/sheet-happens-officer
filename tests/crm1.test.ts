@@ -1,7 +1,7 @@
 // Integration tests for CRM slice 1: types, pipelines, organisations, deals, stages (SHO-US-10.1 to 10.4, 11.1, 12.1, 12.3).
 // Server must run with SUPER_ADMIN_EMAILS=root.test@aplyd.com and the same EMAIL_OUTBOX_DIR.
 import { describe, expect, it } from "vitest";
-import { account, admin, istDate, project, superAdmin, task, type Account, withVersion } from "./helpers";
+import { account, admin, istDate, project, superAdmin, type Account, withVersion } from "./helpers";
 
 let seq = 0;
 async function pipelines(a: Account) {

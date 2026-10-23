@@ -14,7 +14,6 @@ import { cast, gateFile } from "../helpers/qa-alias";
 
 gateFile();
 
-type Later = (fn: () => Promise<unknown>) => void;
 type Groups = { overdue: { id: string; title: string }[]; next7: { id: string; title: string }[]; later: { id: string; title: string }[] };
 type Review = {
   needsNextStep: { id: string; name: string }[];

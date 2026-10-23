@@ -413,8 +413,7 @@ export async function ensureNextStep(tx: Prisma.TransactionClient, projectId: st
   await notify(tx, [leader.userId], "DEAL_NEEDS_NEXT_STEP", { actorId, projectId, data: { project: p.name }, includeActor: true });
 }
 
-const PARTY_ROLES = ["BUYER", "FUNDER", "IMPLEMENTING_OFFICE", "PARTNER", "OTHER"] as const;
-export type PartyRoleName = (typeof PARTY_ROLES)[number];
+export type PartyRoleName = "BUYER" | "FUNDER" | "IMPLEMENTING_OFFICE" | "PARTNER" | "OTHER";
 
 /** SHO-US-12.4: parties are organisations. One Buyer (set at creation); other roles repeat. Archived organisations cannot be added. */
 export async function addParty(user: Actor, projectId: string, organisationId: string, role: PartyRoleName) {

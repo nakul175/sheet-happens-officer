@@ -3,7 +3,7 @@
 // Questions that need the model skip when the concierge is off. Records are ZZ-TEST and archived afterwards.
 // Pam left no qa:TC cases on this issue.
 import { test, expect, zz } from "../support";
-import { newProject, newTask, type Who } from "../g2";
+import { newProject, newTask } from "../g2";
 import { cleanChat, quickAction } from "../helpers/jim-http";
 import { ask, cardOf, dueIn, replyOf, requireModel, showConcierge } from "../helpers/jim-concierge";
 import { QA_PASS, cast, gateFile, noSecret } from "../helpers/qa-alias";

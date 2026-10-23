@@ -2,12 +2,10 @@
 // New accounts are nakul17+ aliases and are deactivated afterwards. When the test mail sink has the
 // link, the test opens it. Otherwise it checks verifyMail, which is what the sign-up route sends.
 import { readFileSync } from "node:fs";
-import type { Page } from "@playwright/test";
 import { test, expect, RUN } from "../support";
 import { PASS, alias, deactivate, passwordOk, personByEmail, signUp, sinkToken, zz } from "./qa";
 import { verifyMail } from "../../../src/lib/email";
 
-const alertOf = (p: Page) => p.locator('[role="alert"]:not(#__next-route-announcer__)');
 const ghost = `zz-test-${RUN}-nobody@aplyd.com`; // never has an account
 
 test.describe("SHO-US-1.2 / APL-2475", () => {

@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-require-imports -- test-only preload, no imports needed. */
 // SHO-2689 F7 independent measurement (W40). NOT part of the app: loaded with
 // `node --require scripts/w40-exit-hold.cjs` so a probe can observe what the drain
 // did to the PostgreSQL connections at the LAST moment the process is alive.
