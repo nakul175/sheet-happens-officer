@@ -21,7 +21,18 @@ const FLAG = "FF_TASK_COMMENTS";
 const tag = `${Date.now().toString(36)}-${process.pid}`;
 const CAP_MESSAGE = "A task can have at most 200 comments.";
 
-/** The local test database, without Prisma's ?schema= parameter. Anything else is refused. */
+/**
+ * The local test database, for the raw pg connections this test needs to hold a row lock by hand.
+ * Anything but a local host is refused. Prisma's `?schema=` is Prisma-only: the pg driver would send it to the
+ * server as an unknown startup setting, so it is carried over as `search_path` instead. Without that the raw
+ * connections land in `public` while Prisma (and the code under test) work in the named schema, the lock guards no
+ * rows, and the test proves nothing about the locked count.
+ */
+const testSchema = () => {
+  const url = new URL(process.env.DATABASE_URL ?? "");
+  return url.searchParams.get("schema") ?? "public";
+};
+
 function localDatabaseUrl() {
   const raw = process.env.DATABASE_URL;
   if (!raw) throw new Error("DATABASE_URL is required and must point at the local test database");
@@ -29,8 +40,10 @@ function localDatabaseUrl() {
   if (url.hostname !== "localhost" && url.hostname !== "127.0.0.1" && url.hostname !== "[::1]") {
     throw new Error("Refusing to run: the locked Undo test uses the local test database only");
   }
+  const schema = url.searchParams.get("schema");
   url.search = "";
-  return url.toString();
+  if (schema) url.searchParams.set("options", `-c search_path=${schema}`);
+  return url.toString().replaceAll("+", "%20");
 }
 
 /**
@@ -86,6 +99,10 @@ describe("SHO-3019: Undo's locked comment restore", () => {
     await holder.connect();
     await watcher.connect();
     try {
+      // The raw connections must see the tables the code under test writes, or the lock below is a no-op.
+      const where = (await watcher.query<{ schema: string }>("SELECT current_schema() AS schema")).rows[0].schema;
+      expect(where, "the raw pg connections are not in the schema DATABASE_URL names").toBe(testSchema());
+
       // Hold the task row exactly the way the undo transaction asks for it. Reads still go through, so Undo
       // reaches its transaction and its read check (198 live) and then waits on this lock.
       await holder.query("BEGIN");
@@ -94,16 +111,22 @@ describe("SHO-3019: Undo's locked comment restore", () => {
 
       // Rejections are collected as values, so a refusal while the lock is held is not an unhandled rejection.
       let settled = false;
+      // A one-slot box: reading a `let` that a callback assigns keeps TS's narrowed `null` type at the assertion.
+      const refusal: { status?: number; message?: string }[] = [];
       const outcome = undoAction(actor(worker), removed.id)
         .then(
           () => null,
-          (e: { status?: number; message?: string; extra?: { code?: string } }) => e,
+          (e: { status?: number; message?: string; extra?: { code?: string } }) => {
+            refusal.push(e);
+            return e;
+          },
         )
         .finally(() => {
           settled = true;
         });
       const waitedOnLock = await waitForBlockedBy(watcher, holderPid, () => settled);
-      expect(waitedOnLock, "Undo finished without running the locked count inside its transaction").toBe(true);
+      const why = refusal[0] ? `${refusal[0].status} ${refusal[0].message}` : "it resolved";
+      expect(waitedOnLock, `Undo finished without running the locked count inside its transaction (${why})`).toBe(true);
 
       // Two more live comments land while Undo waits on the lock: 200 by the time its locked count runs.
       await holder.query(
