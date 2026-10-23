@@ -55,6 +55,7 @@ readonly EXPECT_HOST='aplyd-productivity-suite'   # :44
 readonly SLOT_PORT='3109'                          # :340
 readonly DEPLOY_UID='1000'                         # :43
 readonly MARKER_SCAN="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/prod-marker-scan.sh"
+readonly UNIT_ENV_LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/unit-env-sources.sh"
 
 MODE='apply'
 REFRESH_ENV=0
@@ -314,29 +315,30 @@ render_unit > "$unit_tmp"
 # clean. The ExecStartPre guard covers the fourth one after this script has exited.
 env_paths=$(sed -n 's/^EnvironmentFile=-\{0,1\}//p' "$unit_tmp")
 env_count=$(printf '%s\n' "$env_paths" | grep -c . || true)
-env_outside=0
-existing_paths=''
-while IFS= read -r p; do
-  [ -n "$p" ] || continue
-  case "$p" in
-    "$ENV_DIR"/*|"$CURRENT_DIR"/*) ;;
-    *) env_outside=$((env_outside + 1)) ;;
-  esac
-  if [ -e "$p" ]; then existing_paths="${existing_paths} ${p}"; fi
-done <<< "$env_paths"
-if [ "$env_outside" -ne 0 ]; then
-  rm -f "$unit_tmp"
-  fail "unit loads ${env_outside} env source(s) outside the slot tree"
-fi
-if [ -n "$existing_paths" ]; then
-  if ! scan_existing=$(bash "$MARKER_SCAN" $existing_paths); then
+# The same enumeration the proof uses (lib/unit-env-sources.sh): normalize every path and require it under
+# the slot tree at a component boundary, require one guard per source, scan each existing source. R4 used
+# to do this with a `case` prefix glob, which `.../env/../../etc/sho/app.env` satisfies.
+# shellcheck source=lib/unit-env-sources.sh
+. "$UNIT_ENV_LIB"
+src_out=$(unit_env_sources "$unit_tmp" "${ENV_DIR}" "${CURRENT_DIR}") || src_out=''
+src_field() { printf '%s\n' "$src_out" | sed -n "s/^UNIT_${1}=//p"; }
+env_outside=$(src_field ENV_OUTSIDE)
+env_unguarded=$(src_field ENV_UNGUARDED)
+env_unreadable=$(src_field ENV_UNREADABLE)
+env_scan_files=$(src_field ENV_EXISTING)
+env_markers=$(src_field ENV_PROD)
+case "${env_outside:-x}:${env_unguarded:-x}:${env_unreadable:-x}:${env_markers:-x}" in
+  0:0:0:0) : ;;
+  *)
     rm -f "$unit_tmp"
-    printf '%s\n' "$scan_existing"
-    printf 'REFUSING: production marker in an EnvironmentFile source; the unit was not installed.\n' >&2
-    exit 3
-  fi
-  note "env sources scanned=$(printf '%s\n' "$scan_existing" | sed -n 's/^ENV_FILE_COUNT=//p') marker_count=$(printf '%s\n' "$scan_existing" | sed -n 's/^PROD_MARKER_COUNT=//p')"
-fi
+    printf 'REFUSING: unit env sources outside=%s unguarded=%s unreadable=%s markers=%s; the unit was not installed.\n' \
+      "${env_outside:-unknown}" "${env_unguarded:-unknown}" "${env_unreadable:-unknown}" "${env_markers:-unknown}" >&2
+    # A marker is the D1 case and keeps its own exit code; anything else is a refusal.
+    if [ "${env_markers:-1}" -ne 0 ]; then exit 3; fi
+    fail "unit env sources are not all inside the slot tree, or not all guarded"
+    ;;
+esac
+note "env sources scanned=${env_scan_files} marker_count=${env_markers} outside=${env_outside} unguarded=${env_unguarded} unreadable=${env_unreadable}"
 guard_lines=$(grep -c '^ExecStartPre=.*grep -qEi' "$unit_tmp" || true)
 [ "$guard_lines" -eq 4 ] \
   || { rm -f "$unit_tmp"; fail "unit must guard all 4 env sources on start (saw ${guard_lines})"; }

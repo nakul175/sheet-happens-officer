@@ -27,7 +27,9 @@ readonly PROD_ENV='/etc/sho/app.env'
 readonly DEPLOY_HOME='/home/deploy'
 readonly EXPECT_PORT='3109'
 readonly MARKERS='defaultdb|doadmin|25061|sho-prod-pool'   # :334
+readonly SLOT_ROOT='/home/shoslot/pr9'                      # :325-327 — the only tree a source may live in
 readonly MARKER_SCAN="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/prod-marker-scan.sh"
+readonly UNIT_ENV_LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/unit-env-sources.sh"
 readonly HEALTH_URL="http://127.0.0.1:${EXPECT_PORT}/api/health"
 
 say()  { printf '%s\n' "$*"; }
@@ -106,27 +108,29 @@ say "== P4  the unit cannot silently regain the production env; the slot answers
 # the apply script exits, and a marker pasted there would be loaded at the next start. Enumerate every
 # source the unit actually names, require each to live inside the slot tree, and scan each existing one.
 unit_file="/etc/systemd/system/${UNIT_NAME}.service"
-unit_env_count=$(sed -n 's/^EnvironmentFile=-\{0,1\}//p' "$unit_file" | grep -c . || true)
-unit_env_existing=0
-unit_env_outside=0
-unit_env_unreadable=0
-unit_env_prod=0
-while IFS= read -r p; do
-  [ -n "$p" ] || continue
-  case "$p" in
-    /home/shoslot/pr9/env/*|/home/shoslot/pr9/current/*) ;;
-    *) unit_env_outside=$((unit_env_outside + 1)) ;;
-  esac
-  if [ ! -e "$p" ]; then continue; fi
-  unit_env_existing=$((unit_env_existing + 1))
-  if [ ! -r "$p" ]; then unit_env_unreadable=$((unit_env_unreadable + 1)); continue; fi
-  m=$(bash "$MARKER_SCAN" "$p" | sed -n 's/^PROD_MARKER_COUNT=//p' || true)
-  unit_env_prod=$((unit_env_prod + ${m:-1}))
-done < <(sed -n 's/^EnvironmentFile=-\{0,1\}//p' "$unit_file")
-# The durable control is the unit's own ExecStartPre guard, because it runs on every start, including
-# after phase 2 creates release.env. One guard per env source; a missing one is a fail, not a warning.
-unit_env_guard=$(grep -c '^ExecStartPre=.*grep -qEi' "$unit_file" || true)
-say "unit_envfile_count=${unit_env_count} existing=${unit_env_existing} outside_slot=${unit_env_outside} unreadable=${unit_env_unreadable} prod_markers=${unit_env_prod} env_guard=${unit_env_guard}   (expect 4 / 0 / 0 / 0 / 4)"
+# One enumeration, shared with R4 (lib/unit-env-sources.sh). The previous version answered this with a
+# `case` prefix glob, which `.../env/../../etc/sho/app.env` satisfies (a case pattern is a STRING glob),
+# counted guards instead of matching them to sources, and never asked where a source resolves to — so a
+# fifth, unguarded, out-of-tree source passed as `count=5 outside=0 guard=4`.
+# shellcheck source=lib/unit-env-sources.sh
+. "$UNIT_ENV_LIB"
+src_out=$(unit_env_sources "$unit_file" "${SLOT_ROOT}/env" "${SLOT_ROOT}/current" || true)
+# `|| true`: the lib exits 2 when it cannot read the unit, and under `set -e` that would abort with no
+# verdict at all. An unreadable unit must FAIL the verdict, not end the run silently.
+src_field() { printf '%s\n' "$src_out" | sed -n "s/^UNIT_${1}=//p"; }
+unit_env_count=$(src_field ENVFILE_COUNT)
+unit_env_existing=$(src_field ENV_EXISTING)
+unit_env_outside=$(src_field ENV_OUTSIDE)
+unit_env_unreadable=$(src_field ENV_UNREADABLE)
+unit_env_unguarded=$(src_field ENV_UNGUARDED)
+unit_env_prod=$(src_field ENV_PROD)
+unit_env_guard=$(src_field ENV_GUARD)
+# A lib that produced nothing must not read as a clean unit: every field is then empty and `-ne 0` would
+# error out of the comparison (leaving gap unset would be worse).
+for v in unit_env_count unit_env_existing unit_env_outside unit_env_unreadable unit_env_unguarded unit_env_prod unit_env_guard; do
+  case "${!v}" in ''|*[!0-9]*) printf '%s\n' "WARNING ${v} unset - the enumeration did not answer" >&2; printf -v "$v" '%s' 99 ;; esac
+done
+say "unit_envfile_count=${unit_env_count} existing=${unit_env_existing} outside_slot=${unit_env_outside} unreadable=${unit_env_unreadable} unguarded=${unit_env_unguarded} prod_markers=${unit_env_prod} env_guard=${unit_env_guard}   (expect 4 / - / 0 / 0 / 0 / 0 / 4)"
 listen_count=$(ss -ltn 2>/dev/null | grep -c ":${EXPECT_PORT} " || true)
 say "listen_on_${EXPECT_PORT}_count=${listen_count}   (expect >=1)"
 health_code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "$HEALTH_URL" || echo 000)
@@ -151,9 +155,17 @@ say "== VERDICT =="
 # `if` blocks rather than `cond && gap=1`: under `set -e` a false `[ ]` in a bare `&&` list is a failing
 # command and would abort the script mid-verdict.
 gap=0
-if [ "$prod_env_readable" -eq 1 ]; then gap=1; fi
-if [ "$deploy_home_traversable" -eq 1 ]; then gap=1; fi
-if [ "$bak_readable" -eq 1 ]; then gap=1; fi
+# INVERTED, and it was the whole verdict. `as_slot` echoes 0 when the probe SUCCEEDS (the slot could do
+# it — the contract its own comment states, and the one the positive control depends on), and 1 when the
+# probe fails. These three terms tested for 1, i.e. they set gap=1 exactly when containment HELD:
+#   * a correct host (all three denied) printed gap_closed=0 PROOF=FAIL, every time, so the proof could
+#     never confirm anything;
+#   * a host where shoslot CAN read /etc/sho/app.env printed gap_closed=1 PROOF=PASS — the proof's own
+#     headline claim, asserted green while the credential was readable (measured in the sandbox).
+# 0 is the gap here; 1 is the denial that closes it.
+if [ "$prod_env_readable" -eq 0 ]; then gap=1; fi
+if [ "$deploy_home_traversable" -eq 0 ]; then gap=1; fi
+if [ "$bak_readable" -eq 0 ]; then gap=1; fi
 # The header's rule, now in the verdict: a denial over a path that does not exist proves nothing, so
 # EXISTS is part of the answer. It used to be a WARNING only — the run printed gap_closed=1 with the
 # prod env absent (measured in isolation).
@@ -178,8 +190,12 @@ if [ "${runt_markers:-1}" -ne 0 ]; then gap=1; fi
 if [ "$unit_env_prod" -ne 0 ]; then gap=1; fi
 if [ "$unit_env_outside" -ne 0 ]; then gap=1; fi
 if [ "$unit_env_unreadable" -ne 0 ]; then gap=1; fi
+# Guard PARITY, not a guard count. `env_guard != 4` alone let a fifth source appended to the unit pass with
+# four guards, because nothing tied a guard to the source it was supposed to guard.
+if [ "$unit_env_unguarded" -ne 0 ]; then gap=1; fi
 if [ "$unit_env_guard" -ne 4 ]; then gap=1; fi
-if [ "$unit_env_count" -lt 3 ]; then gap=1; fi
+# Exactly four: the unit is rendered by R4, so any other number means the file on disk is not what R4 wrote.
+if [ "$unit_env_count" -ne 4 ]; then gap=1; fi
 if [ "$health_code" != '200' ]; then gap=1; fi
 
 say "gap_closed=$([ "$gap" -eq 0 ] && echo 1 || echo 0)"
