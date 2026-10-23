@@ -27,8 +27,12 @@ const fake = vi.hoisted(() => {
     memberships: [] as unknown[],
     /** Every releasePerson call, in order: a hidden deal's tasks must still be released. */
     released: [] as string[],
+    /** Who each project's tasks were handed to, so a redacted count cannot hide a skipped release. */
+    assignees: [] as { projectId: string; newAssigneeId: string }[],
     /** Tasks released per project, so a leaked count is visible as a wrong total. */
     movedByProject: {} as Record<string, number>,
+    /** Projects where the named person is already an active LEADER/EDITOR, so nothing falls back there. */
+    namedOn: new Set<string>(),
   };
 });
 
@@ -36,11 +40,13 @@ vi.mock("@/lib/db", () => ({ db: fake.db }));
 vi.mock("@/lib/access", async (orig) => ({
   ...(await orig<typeof import("../src/lib/access")>()),
   leaderId: async () => "zz-leader-2995",
-  activeMember: async () => null, // the named person is on none of these projects, so every one falls back
+  // The named person is on none of these projects unless a test says so, so every one falls back.
+  activeMember: async (_tx: unknown, projectId: string) => (fake.namedOn.has(projectId) ? { userId: NAMED.id } : null),
 }));
 vi.mock("@/lib/people", () => ({
-  releasePerson: async (_tx: unknown, o: { projectId: string }) => {
+  releasePerson: async (_tx: unknown, o: { projectId: string; newAssigneeId: string }) => {
     fake.released.push(o.projectId);
+    fake.assignees.push({ projectId: o.projectId, newAssigneeId: o.newAssigneeId });
     return { moved: fake.movedByProject[o.projectId] ?? 0 };
   },
 }));
@@ -54,7 +60,7 @@ fake.memberships = [DEAL, PLAIN];
 fake.movedByProject = { [DEAL.projectId]: 3, [PLAIN.projectId]: 2 };
 
 afterEach(() => vi.unstubAllEnvs());
-beforeEach(() => { fake.released.length = 0; });
+beforeEach(() => { fake.released.length = 0; fake.assignees.length = 0; fake.namedOn.clear(); });
 
 async function run(mode: string, orgRole: "ADMIN" | "SUPER_ADMIN") {
   vi.stubEnv("CRM_VISIBLE", mode);
@@ -83,6 +89,18 @@ describe("qa:TC missing APL-2995 SHO-3029 deactivate hides deals the caller cann
     expect(res.moved).toBe(fake.movedByProject[PLAIN.projectId]);
     expect(res.moved).not.toBe(fake.movedByProject[DEAL.projectId] + fake.movedByProject[PLAIN.projectId]);
     expect(JSON.stringify(res)).not.toContain('"moved":5');
+  });
+
+  // SHO-3029, the other branch: the named person IS on the hidden deal, so nothing falls back for it and
+  // `fellBack` never mentions the deal at all. If the count still included its tasks, `moved` alone would
+  // say a deal with 3 tasks exists; the deal's tasks must still go to the person the caller named.
+  it("qa:TC missing SHO-3029: the count leaves a hidden deal out even when the named person is on it", async () => {
+    fake.namedOn.add(DEAL.projectId);
+    const res = await run("off", "ADMIN");
+    expect(res.fellBack).toEqual([PLAIN.project.name]);
+    expect(res.moved).toBe(fake.movedByProject[PLAIN.projectId]);
+    expect(fake.assignees.find((a) => a.projectId === DEAL.projectId)?.newAssigneeId).toBe(NAMED.id);
+    expect(JSON.stringify(res)).not.toContain(DEAL.project.name);
   });
 
   it("qa:TC missing D1 SHO-3029: hidden deals still move their tasks to their own Leader", async () => {
