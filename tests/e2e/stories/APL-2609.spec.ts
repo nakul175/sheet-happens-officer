@@ -12,8 +12,9 @@
 // No TC id is registered for APL-2609, so every title says "qa:TC missing". Nothing here targets production.
 // LOCAL SANDBOX ONLY. Each run makes new nakul17+ aliases and verifies them from the server's local outbox
 // (EMAIL_OUTBOX_DIR), so it cannot run against staging, where mail is not a local file. The folder is never guessed
-// and never made here: beforeAll skips, with that reason, when EMAIL_OUTBOX_DIR is unset or is not a readable
-// directory, so a server writing its mail elsewhere shows up as a skip instead of a green run.
+// and never made here: beforeAll skips, with that reason, when EMAIL_OUTBOX_DIR is unset or names something that
+// exists but is not a readable directory, so a server writing its mail elsewhere shows up as a skip instead of a green
+// run. A configured folder that does not exist yet is not a skip: src/lib/email.ts makes it on the first email.
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { test, expect, type Browser, type Page } from "@playwright/test";
@@ -48,21 +49,23 @@ function istDate(offsetDays: number) {
 }
 
 /**
- * Why the server's local mail outbox cannot be read here, or null when it can.
+ * Why the server's local mail outbox is not configured here, or null when it is.
  * No default and no directory of its own: a server that writes its mail elsewhere must show up as a skip naming
  * EMAIL_OUTBOX_DIR, not as tests that pass because this file looked somewhere else.
+ * A configured folder that does not exist yet is configured, not missing: src/lib/email.ts makes it on the first
+ * email, and on a fresh sandbox nothing has written one, so skipping there would leave this file unable to ever run
+ * a first time. Only a configured path that exists but cannot be read is a skip.
  */
 function outboxMissing(): string | null {
   if (!OUTBOX) {
     return "APL-2609: set EMAIL_OUTBOX_DIR to the local mail outbox the server writes. This spec signs up nakul17+ aliases and verifies them from it, so it cannot run against a server whose mail is not a local file (staging).";
   }
-  if (!existsSync(OUTBOX)) {
-    return `APL-2609: EMAIL_OUTBOX_DIR=${OUTBOX} does not exist. Set it to the folder the server writes its mail to; this spec will not make one of its own, because that would hide the misconfiguration.`;
-  }
-  try {
-    readdirSync(OUTBOX);
-  } catch {
-    return `APL-2609: EMAIL_OUTBOX_DIR=${OUTBOX} is not a readable directory. Point it at the folder the server writes its mail to.`;
+  if (existsSync(OUTBOX)) {
+    try {
+      readdirSync(OUTBOX);
+    } catch {
+      return `APL-2609: EMAIL_OUTBOX_DIR=${OUTBOX} is not a readable directory. Point it at the folder the server writes its mail to.`;
+    }
   }
   return null;
 }
