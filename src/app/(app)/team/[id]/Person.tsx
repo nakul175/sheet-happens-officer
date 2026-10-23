@@ -3,6 +3,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useState } from "react";
 import { api, useGet } from "@/components/api";
+import { PASSWORD_CHANGE_REQUIRED } from "@/lib/auth-messages";
 import { LoadFailed, Skeleton } from "@/components/ui";
 import { Page, roleLabel, useMe } from "../../Shell";
 
@@ -29,10 +30,9 @@ export default function PersonPage() {
   const g = useGet<{ person: Person }>(`/api/team/${id}`);
   const [note, setNote] = useState<null | { ok: boolean; text: string }>(null);
   // APL-2664 v1.2. Each failed read has its own plain message. A 403 is no access, except the
-  // forced-password 403 (APL-2624). The shared client is unchanged, so this matches the error text
-  // that client already returns for PASSWORD_CHANGE_REQUIRED. Mocked until PR #8 merges.
+  // forced-password 403 (APL-2624), which this branches on by its code (SHO-2695) so the sentence can be reworded.
   const settled = !g.loading;
-  const passwordChange = settled && g.status === 403 && g.error === "Set your own password first.";
+  const passwordChange = settled && g.status === 403 && g.code === PASSWORD_CHANGE_REQUIRED;
   const denied = settled && g.status === 403 && !passwordChange;
   // AC5: a 401 shows no message and no Retry here. The global redirect stays in api(), and the
   // visible session-expired sentence is APL-2652.
