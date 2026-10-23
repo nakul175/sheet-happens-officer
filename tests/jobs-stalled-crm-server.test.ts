@@ -16,6 +16,7 @@ import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { db } from "../src/lib/db";
 import { istDate, PW } from "./helpers";
+import { ageDeals, clearNotesFor, setOrgRole } from "./stalled-crm-fixture";
 import { assertProcfs } from "./procfs-precondition";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
@@ -280,8 +281,8 @@ async function seed(server: Running) {
   follower = await signIn(server, `ZZ-TEST follower ${tag}`, mail("follower"));
   orgAdmin = await signIn(server, `ZZ-TEST admin ${tag}`, mail("admin"));
   superLead = await signIn(server, `ZZ-TEST super ${tag}`, mail("super"));
-  await db.user.update({ where: { id: orgAdmin.id }, data: { orgRole: "ADMIN" } });
-  await db.user.update({ where: { id: superLead.id }, data: { orgRole: "SUPER_ADMIN" } });
+  await setOrgRole(orgAdmin.id, "ADMIN");
+  await setOrgRole(superLead.id, "SUPER_ADMIN");
   await makeDeal(server, owner, owned);
   await makeDeal(server, orgAdmin, adminDeal);
   await makeDeal(server, superLead, rootDeal);
@@ -290,19 +291,15 @@ async function seed(server: Running) {
   await addEditor(server, superLead, rootDeal.id, follower.id);
   await addEditor(server, orgAdmin, adminDeal.id, owner.id);
   await addEditor(server, superLead, rootDeal.id, owner.id);
-  const t = new Date(Date.now() - 31 * 86400_000);
-  for (const id of [owned.id, adminDeal.id, rootDeal.id]) {
-    await db.$executeRaw`UPDATE "Project" SET "createdAt" = ${t}, "stageChangedAt" = ${t} WHERE id = ${id}`;
-    await db.$executeRaw`UPDATE "Task" SET "updatedAt" = ${t} WHERE "projectId" = ${id}`;
-    await db.$executeRaw`UPDATE "ActionLog" SET "createdAt" = ${t} WHERE "projectId" = ${id}`;
-  }
+  // Same three deals, same 31-day age, same column order as seedStalledWorld's fixture.
+  await ageDeals({ owned, adminDeal, rootDeal });
 }
 
 const people = () => [owner, follower, orgAdmin, superLead];
 const deals = () => [owned, adminDeal, rootDeal];
 
 async function clearNotes() {
-  await db.notification.deleteMany({ where: { recipientId: { in: people().map((p) => p.id) } } });
+  await clearNotesFor(people().map((p) => p.id));
 }
 
 async function storedRows(recipientId: string) {
@@ -466,7 +463,7 @@ describe("qa:TC missing APL-2741 stalled-deal jobs are one server process per CR
       spawned.delete(pid);
     }
     if (owner?.id) {
-      await db.notification.deleteMany({ where: { recipientId: { in: people().map((p) => p.id) } } });
+      await clearNotesFor(people().map((p) => p.id));
     }
     await db.$disconnect();
   });

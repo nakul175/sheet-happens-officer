@@ -22,6 +22,11 @@ export type StalledWorld = {
   rootDeal: DealFix;
 };
 
+/** The three deals a stalled world ages. A caller that builds its people another way - the server tier
+ *  signs up through its own spawned process - passes only the deals, so both fixtures share one writer
+ *  instead of keeping a second copy of the UPDATE statements (SHO-2902). */
+export type StalledDeals = Pick<StalledWorld, "owned" | "adminDeal" | "rootDeal">;
+
 const PEOPLE = (world: StalledWorld) => [world.owner, world.follower, world.orgAdmin, world.superLead];
 
 export function assertLocalTestDatabase() {
@@ -60,14 +65,25 @@ async function makeDeal(who: Account, name: string, title: string) {
   return made.json.deal.id as string;
 }
 
+/** The orgRole promotion every stalled fixture needs (a Leader who is also an Org Admin, and a Super
+ *  Admin). One writer, so a fixture cannot drift from the others' column choice (SHO-2902). */
+export async function setOrgRole(userId: string, role: "ADMIN" | "SUPER_ADMIN") {
+  await db.user.update({ where: { id: userId }, data: { orgRole: role } });
+}
+
+/** Deletes the DEAL_STALLED rows of these recipients. The teardown shape every stalled fixture needs. */
+export async function clearNotesFor(recipientIds: string[]) {
+  await db.notification.deleteMany({ where: { recipientId: { in: recipientIds } } });
+}
+
 /** Owner leads one stalled deal. Follower is an editor on every deal. Admin and Super Admin each lead one. */
 export async function seedStalledWorld(tag = stalledTag()): Promise<StalledWorld> {
   const owner = await account(`ZZ-TEST owner ${tag}`, `nakul17+zz-2741-${tag}-owner@aplyd.com`);
   const follower = await account(`ZZ-TEST follower ${tag}`, `nakul17+zz-2741-${tag}-follower@aplyd.com`);
   const orgAdmin = await account(`ZZ-TEST admin ${tag}`, `nakul17+zz-2741-${tag}-admin@aplyd.com`);
   const superLead = await account(`ZZ-TEST super ${tag}`, `nakul17+zz-2741-${tag}-super@aplyd.com`);
-  await db.user.update({ where: { id: orgAdmin.id }, data: { orgRole: "ADMIN" } });
-  await db.user.update({ where: { id: superLead.id }, data: { orgRole: "SUPER_ADMIN" } });
+  await setOrgRole(orgAdmin.id, "ADMIN");
+  await setOrgRole(superLead.id, "SUPER_ADMIN");
 
   const owned: DealFix = { id: "", name: `ZZ-TEST Acme renewal ${tag}`, title: `ZZ-TEST Acme kickoff ${tag}` };
   const adminDeal: DealFix = { id: "", name: `ZZ-TEST Admin renewal ${tag}`, title: `ZZ-TEST Admin kickoff ${tag}` };
@@ -93,7 +109,9 @@ export async function seedStalledWorld(tag = stalledTag()): Promise<StalledWorld
   return world;
 }
 
-export async function ageDeals(world: StalledWorld) {
+/** Back-dates the three stalled deals by 31 days: Project.createdAt/stageChangedAt, Task.updatedAt,
+ *  ActionLog.createdAt, one deal at a time in world order. The only place a fixture ages a deal. */
+export async function ageDeals(world: StalledDeals) {
   const t = new Date(Date.now() - 31 * 86400_000);
   for (const id of [world.owned.id, world.adminDeal.id, world.rootDeal.id]) {
     await db.$executeRaw`UPDATE "Project" SET "createdAt" = ${t}, "stageChangedAt" = ${t} WHERE id = ${id}`;
@@ -103,7 +121,7 @@ export async function ageDeals(world: StalledWorld) {
 }
 
 export async function clearStalledNotes(world: StalledWorld) {
-  await db.notification.deleteMany({ where: { recipientId: { in: PEOPLE(world).map((p) => p.id) } } });
+  await clearNotesFor(PEOPLE(world).map((p) => p.id));
 }
 
 export async function storedRows(recipientId: string) {
@@ -180,5 +198,5 @@ export function expectNoDealMail(needles: string[]) {
 
 export async function cleanupStalledWorld(world: StalledWorld | undefined) {
   if (!world) return;
-  await db.notification.deleteMany({ where: { recipientId: { in: PEOPLE(world).map((p) => p.id) } } });
+  await clearNotesFor(PEOPLE(world).map((p) => p.id));
 }
