@@ -71,6 +71,29 @@ describe("SHO-2918: APL-2536 AC1 locates the tree-parent link uniquely", () => {
     await pw(tree.getByRole("link", { name: "Parent", exact: true })).toHaveAttribute("href", "/accounts/PARENT");
     await page.close();
   });
+
+  // The fragment above is hand-written. This pins it to what TreeView really renders (W67): the child's <ul> sits
+  // INSIDE the parent's <li>, and the current organisation is a <b aria-current="page">, not a link. Flatten that
+  // (siblings instead of nesting) and AC1's scoped locator stops matching the parent at all, so the browser spec
+  // would fail only when someone remembers to run it.
+  it("TreeView keeps the children inside the parent's list item and highlights the current one", () => {
+    const src = readFileSync(path.join(process.cwd(), "src/app/(app)/accounts/[id]/OrgView.tsx"), "utf8");
+    const start = src.indexOf("function TreeView");
+    expect(start, "OrgView.tsx no longer has a TreeView").toBeGreaterThan(-1);
+    const end = src.indexOf("\nfunction ", start + 1);
+    const treeView = src.slice(start, end < 0 ? undefined : end);
+    const li = treeView.indexOf("<li>");
+    const closeLi = treeView.indexOf("</li>");
+    expect(li, "TreeView no longer renders a list item").toBeGreaterThan(-1);
+    expect(closeLi, "TreeView no longer closes its list item").toBeGreaterThan(li);
+    const children = treeView.indexOf("node.children.map");
+    expect(children, "TreeView no longer recurses into node.children").toBeGreaterThan(-1);
+    expect(children, "the child list is no longer inside the parent's <li>, so AC1's scoped locator loses the parent").toBeLessThan(closeLi);
+    expect(treeView).toContain('aria-current="page"');
+    expect(treeView, "the current organisation became a link, so the tree has one more parent-shaped link").toMatch(
+      /node\.id === current \? <b aria-current="page"[^>]*>\{node\.name\}<\/b> : <Link href=\{`\/accounts\/\$\{node\.id\}`\}>\{node\.name\}<\/Link>/,
+    );
+  });
 });
 
 describe("SHO-2919: APL-2536 AC4 finds the seeded organisation", () => {
