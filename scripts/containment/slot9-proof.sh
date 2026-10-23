@@ -47,6 +47,9 @@ set -euo pipefail
 readonly UNIT_NAME='sho-pr9'
 readonly SLOT_ACCOUNT='shoslot'
 readonly PROD_ENV='/etc/sho/app.env'
+# The directory the production env lives in. A separate variable because the copy policy below enumerates the
+# WHOLE directory, not one path, and a reader should see that in one place rather than in a hard-coded glob.
+readonly PROD_ENV_DIR='/etc/sho'
 readonly DEPLOY_HOME='/home/deploy'
 readonly EXPECT_PORT='3109'
 readonly MARKERS='defaultdb|doadmin|25061|sho-prod-pool'   # :334
@@ -183,19 +186,26 @@ assess_containment() {
   gap=0
   if [ "$prod_env_readable" -eq 0 ]; then gap=1; fi
   if [ "$deploy_home_traversable" -eq 0 ]; then gap=1; fi
-  if [ "$bak_readable" -eq 0 ]; then gap=1; fi
+  # Every env-shaped copy the policy names, not one path: 1 = the slot was denied ALL of them. Named, so the
+  # FAIL says which control failed (and a copy under a name the old `app.env.bak*` glob never matched now
+  # fails here instead of passing unseen).
+  if [ "$stale_denied" -ne 1 ]; then term_fail shoslot_can_read_stale_copy; fi
   # The header's rule, in the verdict: a denial over a path that does not exist proves nothing, so EXISTS is
   # part of the answer. It used to be a WARNING only - the run printed gap_closed=1 with the prod env absent.
   if [ "$prod_env_exists" -eq 0 ]; then
     say "prod_env_exists=0   (required 1: a denial measured against a missing path proves nothing)"
     term_fail prod_env_exists
   fi
-  # Same rule for the stale copies: if the count says copies exist but the named probe does not, the denial
-  # was measured against a missing file, not against a copy.
-  if [ "$bak_count" -gt 0 ] && [ "$bak_exists" -eq 0 ]; then
-    say "prod_env_bak_probe_exists=0   (required 1 while prod_env_bak_count=${bak_count} - re-point bak_probe at a real copy)"
-    term_fail prod_env_bak_probe_exists
+  # Same rule for the stale copies, and it is why EXISTS is a term of its own rather than a precondition of
+  # the readability answer: `test -r` on a path that is not there also says "denied", so the number of copies
+  # CONFIRMED PRESENT must equal the number the policy counted, or a denial was measured against a missing
+  # path. A copy that exists but cannot be read still means a copy exists - that is the term.
+  if [ "${stale_exists}" -ne "${stale_count}" ]; then
+    say "prod_env_stale_exists=${stale_exists}   (required ${stale_count}: every copy the policy counted must be confirmed present before its denial counts)"
+    term_fail prod_env_stale_exists
   fi
+  # An /etc/sho that could not be enumerated makes the count 0 for the wrong reason. Fail closed, by name.
+  if [ "${stale_scan}" -ne 1 ]; then term_fail prod_env_stale_scan; fi
   if [ "$unit_env_prod" -ne 0 ]; then term_fail prod_markers; fi
   if [ "$unit_env_outside" -ne 0 ]; then term_fail outside_slot; fi
   if [ "$unit_env_unreadable" -ne 0 ]; then term_fail unreadable; fi
@@ -251,12 +261,71 @@ deploy_home_exists=$(exists "$DEPLOY_HOME")
 deploy_home_traversable=$(as_slot test -x "$DEPLOY_HOME")
 say "shoslot_can_traverse_deploy_home=${deploy_home_traversable}   (required 1 = denied; deploy_home_exists=${deploy_home_exists})"
 
-# The stale copies §4 mentions (18 of them, :305). Counted, and one named copy probed by path only.
-bak_count=$(find /etc/sho -maxdepth 1 -name 'app.env.bak*' -type f 2>/dev/null | wc -l | tr -d ' ')
-bak_probe='/etc/sho/app.env.bak-20261019-115253'
-bak_exists=$(exists "$bak_probe")
-bak_readable=$(as_slot test -r "$bak_probe")
-say "prod_env_bak_count=${bak_count} shoslot_can_read_prod_env_bak=${bak_readable}   (required 1 = denied; probe_exists=${bak_exists})"
+# --- STALE COPIES OF THE PRODUCTION ENV (W102 F1, HIGH) ------------------------------------------------
+# POLICY, in words: an ENV-SHAPED COPY is any regular file or symlink ANYWHERE under ${PROD_ENV_DIR} whose
+# basename is a name this app uses to hold environment variables - `app.env` plus any suffix (`app.env.old`,
+# `app.env.save`, `app.env.bak-20261019-115253`, `app.env~`, `app.env-2026`), `release.env` plus any suffix,
+# or any other `*.env` file with or without one (`db.env`, `db.env.old`, `local.env.save`, `*.env~`).
+# Anywhere, not just beside app.env: the unit loads NOTHING from that directory (P4 asserts all four
+# EnvironmentFile sources resolve under the slot tree), so an env-named file one level down is a copy for the
+# same reason one beside app.env is, and a top-level-only scan would be the old blind spot with a new depth.
+# Not "everything in /etc/sho": a directory of READMEs and certs is not a directory of env copies, and a term
+# that fires on `*.pem` would be measuring something else. Two exclusions, both deliberate:
+#   * the live ${PROD_ENV} - it is the credential the headline claim is about, and it already has its own
+#     EXISTS + DENIED pair (prod_env_exists / shoslot_can_read_prod_env). Counting it here as well would make
+#     prod_env_stale_count nonzero on a host with no copies at all, so the count would stop meaning "copies"
+#     and one term would silently answer the other term's question.
+#   * documentation/template names (`*.example`, `*.sample`, `*.template`, `*.tmpl`, `*.dist`). They carry
+#     placeholders, not a credential; failing a host for a world-readable `.env.example` would be a gate
+#     nobody can pass, and a check that flags the legitimate file is not a fix.
+# `release.env` under ${PROD_ENV_DIR} counts - it is NOT the file the unit loads. The unit's release.env is
+# ${SLOT_ROOT}/current/release.env, and P4 already asserts that it resolves inside the slot tree
+# (outside_slot). A release.env in the production env directory is a production artifact by definition, so it
+# is a copy; counting it costs a correct host nothing, because PASS only requires that the slot cannot READ it.
+# WHY THIS IS ENUMERATION AND NOT A GLOB: the old code counted `-name 'app.env.bak*'` and probed ONE hard-coded
+# path. Both are naming conventions, so `app.env.old`, `release.env.2026` and `app.env.save` were invisible to
+# the count AND the probe, and a slot that could read one still printed CONTAINMENT=PASS. The suffix is now
+# irrelevant: every file the policy names is counted and every counted file is probed, by path, one by one.
+# FAIL CLOSED ON THE ENUMERATION ITSELF: if `find` cannot walk the directory (absent, unreadable, or it gives
+# up part-way through), the count would be 0 for the wrong reason - an unmeasured "no copies". pipefail makes
+# that a FAIL by name (prod_env_stale_scan) rather than a silent pass.
+stale_scan=1
+stale_list=''
+if [ -d "$PROD_ENV_DIR" ] && [ -r "$PROD_ENV_DIR" ] && [ -x "$PROD_ENV_DIR" ]; then
+  # shellcheck disable=SC2016  # the single-quoted -name patterns are find's, not the shell's
+  stale_list=$(find "$PROD_ENV_DIR" \( -type f -o -type l \) \
+    \( -name 'app.env*' -o -name 'release.env*' -o -name '*.env' \
+       -o -name '*.env.*' -o -name '*.env-*' -o -name '*.env~' \) \
+    ! -name '*.example' ! -name '*.sample' ! -name '*.template' ! -name '*.tmpl' ! -name '*.dist' \
+    ! -path "$PROD_ENV" 2>/dev/null | LC_ALL=C sort) || stale_scan=0
+else
+  stale_scan=0
+fi
+stale_count=0
+stale_exists=0
+stale_readable=0
+stale_names=''
+while IFS= read -r stale_path; do
+  [ -n "$stale_path" ] || continue
+  stale_count=$((stale_count + 1))
+  # Basenames only, and sanitized: the transcript lists WHICH copies were measured, and a filename with a
+  # space, paren or `=` in it must not be able to make the line stop parsing as a term line. Never a value.
+  case "${stale_path##*/}" in
+    *[!A-Za-z0-9._+~-]*) stale_names="${stale_names:+${stale_names},}?" ;;
+    *)                   stale_names="${stale_names:+${stale_names},}${stale_path##*/}" ;;
+  esac
+  # EXISTS is its own answer, checked as root so a permission bit cannot turn "absent" into "denied".
+  if [ -e "$stale_path" ]; then
+    stale_exists=$((stale_exists + 1))
+    # And the read attempt is `test -r` as the slot: a boolean, never a value, one probe per copy.
+    if [ "$(as_slot test -r "$stale_path")" -eq 0 ]; then
+      stale_readable=$((stale_readable + 1))
+    fi
+  fi
+done <<< "${stale_list}"
+stale_denied=1
+if [ "$stale_readable" -ne 0 ]; then stale_denied=0; fi
+say "prod_env_stale_count=${stale_count} prod_env_stale_exists=${stale_exists} prod_env_stale_scan=${stale_scan} shoslot_can_read_stale_copy=${stale_denied}   (required exists=${stale_count} scan=1 and 1 = denied for EVERY copy; readable_by_slot=${stale_readable}/${stale_count}; names=${stale_names:-none})"
 
 # The path Option N could not close: another uid's /proc entry (:247-249). Cross-uid ptrace is denied.
 # THE variable is `deploy_environ_probeable`: it, not the printed line, decides whether the verdict has a

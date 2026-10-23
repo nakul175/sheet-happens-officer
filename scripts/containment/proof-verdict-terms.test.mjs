@@ -308,9 +308,10 @@ const HEADERS = [
 // rule, not an obstacle to it.
 const TERMS = new Set([
   "probe_positive_control", "shoslot_can_read_prod_env", "shoslot_can_traverse_deploy_home",
-  "prod_env_bak_count", "shoslot_can_read_prod_env_bak", "deploy_environ_probe",
+  "prod_env_stale_count", "prod_env_stale_exists", "prod_env_stale_scan", "shoslot_can_read_stale_copy",
+  "deploy_environ_probe",
   "shoslot_can_read_deploy_environ", "shoslot_can_write_authorized_keys",
-  "prod_env_exists", "prod_env_bak_probe_exists",
+  "prod_env_exists",
   "environ_readable", "environ_key_count", "environ_prod_marker_count",
   "listen_on_3109_count", "health_http_code", "release_sha",
   "sandbox_User", "sandbox_NoNewPrivileges", "sandbox_ProtectSystem", "sandbox_ProtectHome",
