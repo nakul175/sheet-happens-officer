@@ -1,0 +1,34 @@
+// SHO-2693: the required-person flag is a flag, and a proposal's Change object is not one.
+// person() (src/lib/concierge/tools.ts) read the flag as `typeof o === "object" ? o.required : o`. A Change has no
+// `required` key, so a Change in that position evaluated to undefined and switched the check off — the object
+// "satisfied" (stood in for) the flag and turned the requirement off. The flag is boolean-only now: only an explicit
+// `false` asks for an optional person, anything else keeps the requirement on, so a proposal that names nobody is
+// refused instead of becoming a card that assigns nobody. See W29-REPORT.md.
+import { describe, expect, it } from "vitest";
+import { requiredPerson } from "../src/lib/concierge/tools";
+
+/** A proposal's Change with no person: the exact object that must never disarm the check. */
+const personlessAssign = { action: "assign_task", task_id: "task-1" };
+
+describe("qa:TC missing SHO-2693 the required flag cannot be satisfied by the Change object", () => {
+  it("qa:TC missing a Change in the flag position keeps the requirement on", () => {
+    // The defect: this was undefined (falsy), so `if (!id)` answered "optional" for assign_task.
+    expect(requiredPerson(personlessAssign)).toBe(true);
+  });
+
+  it("qa:TC missing only an explicit false asks for an optional person", () => {
+    expect(requiredPerson(false)).toBe(false);
+  });
+
+  it("qa:TC missing a default and an explicit true are both required", () => {
+    expect(requiredPerson()).toBe(true);
+    expect(requiredPerson(undefined)).toBe(true);
+    expect(requiredPerson(true)).toBe(true);
+  });
+
+  it("qa:TC missing no object disarms it, with or without a required key", () => {
+    expect(requiredPerson({})).toBe(true);
+    // Callers used to pass an options bag. It is not a flag: only the boolean `false` turns the requirement off.
+    expect(requiredPerson({ required: false })).toBe(true);
+  });
+});
