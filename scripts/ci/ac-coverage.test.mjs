@@ -89,6 +89,31 @@ test("AC coverage manifest: no entry falls back from TESTED, and the counts are 
   assert.equal(baseline.clauses, counts.clauses, "the clause count moved: record the change in the baseline deliberately");
   assert.equal(baseline.status.TESTED, counts.status.TESTED,
     `TESTED moved from ${baseline.status.TESTED} to ${counts.status.TESTED}`);
+
+  // Every status, not only the TESTED ids. `tested` above catches a fall from TESTED; it cannot see a clause moved from
+  // UNTESTED ("no test asserts it today" - a debt) to NOT-TESTABLE-IN-REPO ("no test can ever reach it" - a permanent
+  // exclusion). That reclassification is the one a ledger is laundered through, and until now it left every assertion
+  // green (W173 §4.3). A status map per id is the alarm.
+  if (!baseline.statuses || typeof baseline.statuses !== "object") {
+    assert.fail("no statuses map in the baseline: record every entry's status, not just the TESTED ids, so an "
+      + "UNTESTED -> NOT-TESTABLE reclassification is a deliberate commit and not a quiet edit");
+  }
+  const moved = [];
+  for (const entry of ENTRIES) {
+    const was = baseline.statuses[entry.id];
+    if (was === undefined) moved.push(`${entry.id}: ${entry.status}, absent from the baseline`);
+    else if (was !== entry.status) moved.push(`${entry.id}: ${was} -> ${entry.status}`);
+  }
+  const live = new Set(ENTRIES.map((entry) => entry.id));
+  for (const id of Object.keys(baseline.statuses)) if (!live.has(id)) moved.push(`${id}: in the baseline, the entry is gone`);
+  assert.deepEqual(moved, [],
+    "an entry's status moved since the baseline (a reclassification, not a fall from TESTED):\n  "
+    + `${moved.join("\n  ")}\nIf the move is right, change the baseline in the same commit and say why.`);
+
+  // The totals are the map's own arithmetic, so a reader who trusts them is trusting a check.
+  assert.deepEqual(baseline.status, counts.status, "the baseline's status totals disagree with the manifest");
+  assert.equal(baseline.tickets, counts.ticketsCovered, "the baseline's ticket count disagrees with the manifest");
+
   assert.match(line, /TESTED \d+/, "the counts must be printed on every run");
   assert.match(LIMIT, /GOOD test/, "the limit paragraph must still say what a TESTED entry cannot prove");
 });

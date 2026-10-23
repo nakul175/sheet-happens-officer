@@ -80,8 +80,11 @@ export const ENTRIES = Object.freeze([
     status: "TESTED", test: "tests/shutdown-next.test.ts:260", verified: "title",
     asserts: "refuses the +16ms and +143ms connections at once",
     note: "pins the refusal at 16ms and 143ms; the 1.2 s bound is the harness's own timing, not asserted as a deadline" },
-  { id: "2689 AC3", ticket: "2689", clause: "drain log only after completion", status: "UNTESTED",
-    note: "no test names log ordering; :293 asserts the timeout line, which is the failure path, not completion" },
+  { id: "2689 AC3", ticket: "2689", clause: "drain log only after completion", status: "TESTED",
+    test: "tests/shutdown-next.test.ts:436", verified: "body",
+    asserts: "drained line only after the last response completed",
+    note: "the assertion lives in the shared helper every signed-in-burst test calls, so it holds for both entry "
+      + "points and both concurrency rows; :293 is the timeout path and is not what discharges this" },
   { id: "2689 AC4", ticket: "2689", clause: "the process exits 0", status: "TESTED",
     test: "tests/shutdown-next.test.ts:444", verified: "title", asserts: "exit 0" },
   { id: "2689 AC5", ticket: "2689", clause: "re-run on the staging preview with the run output attached",
@@ -175,9 +178,11 @@ export const ENTRIES = Object.freeze([
     status: "UNTESTED", carrier: "APL-2540",
     note: "APL-2540.spec.ts:131 comment names SHO-2923; no title does, and no test asserts the locator shape" },
   { id: "2924 AC1", ticket: "2924", clause: "the task result is found by role and exact title, not the .item class",
-    status: "TESTED", test: "tests/e2e/stories/APL-2545.spec.ts:56", verified: "title", carrier: "APL-2545",
-    asserts: "AC1 (SHO-2924): the Search locators select one result each",
-    note: "a Playwright story: it asserts the clause at the right level but was never executed in this slot" },
+    status: "TESTED", test: "tests/e2e/stories/APL-2545.spec.ts:56", verified: "body", carrier: "APL-2545",
+    asserts: ".filter({ has: admin.page.getByText(t.title, { exact: true }) })",
+    note: "a Playwright story: the body proves .item is ambiguous (toHaveCount(2) at :68), then resolves the task by "
+      + "role, the type line and the exact title. NO EXECUTION EVIDENCE: this spec was never run in this slot and no "
+      + "run of it is recorded, so TESTED here is a reading of the file, not a green result" },
 
   // ---- 2951: usage month figure ------------------------------------------------------------------------------------
   { id: "2951 AC1", ticket: "2951", clause: "the test removes every ledger row it creates", status: "TESTED",
@@ -191,15 +196,24 @@ export const ENTRIES = Object.freeze([
     reason: "process", note: "the CI conclusion for a SHA is not observable from inside a test run" },
 
   // ---- 2996, 2997, 2998: the locator repairs, and the staging run ---------------------------------------------------
-  { id: "2996 AC1", ticket: "2996", clause: "line 18 uses a role/test-id/label locator", status: "UNTESTED",
-    note: "APL-2539.spec.ts:17 comment names SHO-2996 and :19 uses dealPanel(); no test asserts the shape of a spec" },
+  { id: "2996 AC1", ticket: "2996", clause: "line 18 uses a role/test-id/label locator", status: "TESTED",
+    test: "scripts/ci/story-locators.test.mjs:47", verified: "body",
+    asserts: "APL-2539 must name the panel through dealPanel(admin.page)",
+    note: "two assertions, one clause: this one pins the spec's call site to dealPanel(admin.page) with an anchored "
+      + "pattern, so a positional form on that line is red, and the parent-step scan at :31 is red for "
+      + "`.locator(\"..\")` anywhere in the specs; the helper's own getByRole(\"region\", { name: \"Deal\" }) is "
+      + "asserted in the sibling test at :70. The line number is not asserted - the file moved once already" },
   { id: "2996 AC2", ticket: "2996", clause: "the spec still passes in the staging regression run",
     status: "NOT-TESTABLE-IN-REPO", reason: "deploy",
     note: "a staging-run outcome; no SHO_ADMIN_* exists in this slot, and the run is not a repo fact" },
   { id: "2996 AC3", ticket: "2996", clause: "only test files change", status: "UNTESTED",
     note: "nothing asserts the change set of the commit" },
-  { id: "2997 AC1", ticket: "2997", clause: "line 44 uses such a locator", status: "UNTESTED",
-    note: "APL-2540.spec.ts:43-44 comment names SHO-2996/2997 and the line is dealPanel(admin.page); no test asserts it" },
+  { id: "2997 AC1", ticket: "2997", clause: "line 44 uses such a locator", status: "TESTED",
+    test: "scripts/ci/story-locators.test.mjs:83", verified: "body",
+    asserts: "assert.equal(uses.length, 2",
+    note: "APL-2540.spec.ts has exactly two `const <x> = dealPanel(` call sites - :44 for AC1 and :113 for AC3 - so "
+      + "dropping either to a `.locator(\"..\")` parent walk or a positional form takes the count to 1 and this is red "
+      + "(the scan at :31 also forbids the parent-step form anywhere). The count is pinned, not the line number" },
   { id: "2997 AC2", ticket: "2997", clause: "the spec still passes in the staging regression run",
     status: "NOT-TESTABLE-IN-REPO", reason: "deploy", note: "as 2996 AC2" },
   { id: "2997 AC3", ticket: "2997", clause: "only test files change", status: "UNTESTED",
@@ -295,9 +309,12 @@ export const ENTRIES = Object.freeze([
     note: "tests/return-to.test.ts:808-816 requires the log to carry the probe, so it fails unless RETURN_PATH_LOG=1 at "
       + "run time, but nothing asserts the variable exists where the code expects it; the one measured run failed on a "
       + "SERVER_LOG precondition, not on the ticket" },
-  { id: "3024 BULLET-2", ticket: "3024", clause: "a test covers it", status: "UNTESTED",
-    note: "the probe assertion sits inside a test titled 'D9 AC2 v1.6 ...' (:752); no title names SHO-3024, only the "
-      + "comment at :810, so a reader following the ticket id cannot reach it" },
+  { id: "3024 BULLET-2", ticket: "3024", clause: "a test covers it", status: "TESTED",
+    test: "tests/return-to.test.ts:817", verified: "body",
+    asserts: "[return-path] /tasks/v16-probe?q=${encoded}",
+    note: "the covering test is titled 'D9 AC2 v1.6 ...', not SHO-3024 - only the comment at :810 names the ticket - "
+      + "and it requires the [return-path] line each probe wrote while that test ran, so a server started without "
+      + "RETURN_PATH_LOG fails it" },
   { id: "3024 BULLET-3", ticket: "3024", clause: "Pam PASS on the fix PR", status: "NOT-TESTABLE-IN-REPO",
     reason: "human", note: "a named person's review decision on a forge, not a repo fact" },
 
@@ -339,8 +356,12 @@ export const ENTRIES = Object.freeze([
   { id: "3032 EXPECTED", ticket: "3032", clause: "the guard flags a mid-word split such as '/pr' + 'oc/self/environ'",
     status: "TESTED", test: "tests/no-proc-environ-2917.test.ts:381", verified: "body",
     asserts: "expect(environReaders([{ file: \"x.ts\", text }]), text).toEqual([\"x.ts\"])" },
-  { id: "3033 EXPECTED", ticket: "3033", clause: "the comment credits the row lock, not the FK", status: "TESTED",
-    test: "tests/deals-stage-fk-3033.test.ts:41", verified: "body", asserts: "expect(comment).toMatch(/updateMany/)" },
+  { id: "3033 EXPECTED", ticket: "3033", clause: "the comment credits the row lock, not the FK", status: "UNTESTED",
+    note: "tests/deals-stage-fk-3033.test.ts:41 greps the comment for /updateMany/ and /ON DELETE SET NULL/ and for the "
+      + "absence of the old 'never sets a deal's stage to null' sentence - token presence, not attribution. A comment "
+      + "reading 'the key does it; the updateMany is irrelevant' would satisfy all three, and nothing asserts that the "
+      + "comment credits the row lock at all. The real comment (src/lib/deals.ts:264-268) does credit the lock and the "
+      + "updateMany, so the clause is true of the code; no test asserts it as attribution" },
 ]);
 
 /** Counts, computed from the entries so the report and the test can never disagree with the data. */
