@@ -35,12 +35,50 @@ test("AC1: an Editor turns Idea on and the chip shows in the project list, the b
   await admin.page.goto("/search");
   await admin.page.getByLabel("Search").fill(t.title);
   // The project and the task share this name, so both results show it. The project result's whole name is that text.
-  // The task result is the link whose title is exactly that text and whose line names its project and assignee.
   const project = admin.page.getByRole("link", { name: t.project, exact: true });
   await expect(project).toHaveAttribute("href", `/projects/${t.projectId}`);
   await expect(project.getByText("Idea", { exact: true })).toHaveCount(0);
-  const task = admin.page.getByRole("link").filter({ has: admin.page.getByText(t.title, { exact: true }) }).filter({ hasText: `${t.project} · ${admin.user.name}` });
+  // Scope by result type before the title: only a task result carries the "<project> · <assignee>" line, so the project
+  // result is never a candidate even though its whole name is the title (SHO-2924: the old .item filter matched both).
+  const task = admin.page
+    .getByRole("link")
+    .filter({ hasText: `${t.project} · ${admin.user.name}` })
+    .filter({ has: admin.page.getByText(t.title, { exact: true }) });
   await expect(task).toHaveAttribute("href", `/projects/${t.projectId}?task=${t.id}`);
+  await expect(task.getByText("Idea", { exact: true })).toBeVisible();
+});
+
+// SHO-2924: the AC1 locators must each select exactly one Search result. This replays the two rows the Search screen
+// renders for a project and a task that carry the same name (src/app/(app)/SearchView.tsx:54-78: a project result is
+// <a class="item"><div class="t"><b>name</b></div>, a task result adds <small>project · assignee</small> and the Idea
+// chip), so the ambiguity behind the ticket is exercised without a server: the ticket's .item filter matches both rows,
+// which is the strict-mode violation the AC rules out.
+test("AC1 (SHO-2924): the Search locators select one result each when the project and the task share a name", async ({ anon }) => {
+  const name = zz("idea chip shared name");
+  const assignee = "W24 Admin";
+  // The rows SearchView.tsx renders for that name, in the order the API returns them: Projects, then Tasks.
+  await anon.setContent(`<main><div class="grp">Projects</div><div class="list">
+    <a class="item" href="/projects/p1"><div class="t"><b>${name}</b></div></a>
+  </div><div class="grp">Tasks</div><div class="list">
+    <a class="item" href="/projects/p1?task=t1"><div class="t"><b>${name}</b><small>${name} · ${assignee}</small></div><span class="chip gold">Idea</span></a>
+  </div></main>`);
+
+  // The precondition of the bug: filtering by the shared name alone is two rows, not one (the old `.item` locator).
+  await expect(anon.locator(".item", { hasText: name }), "the name alone matches the project and the task").toHaveCount(2);
+
+  // The project result: the link whose whole name is that text. One row, no Idea chip.
+  const project = anon.getByRole("link", { name, exact: true });
+  await expect(project, "the project result is not ambiguous").toHaveCount(1);
+  await expect(project).toHaveAttribute("href", "/projects/p1");
+  await expect(project.getByText("Idea", { exact: true })).toHaveCount(0);
+
+  // The task result, the same chain AC1 uses: role first, then the type line, then the exact title. One row, Idea chip.
+  const task = anon
+    .getByRole("link")
+    .filter({ hasText: `${name} · ${assignee}` })
+    .filter({ has: anon.getByText(name, { exact: true }) });
+  await expect(task, "the task result is not ambiguous").toHaveCount(1);
+  await expect(task).toHaveAttribute("href", "/projects/p1?task=t1");
   await expect(task.getByText("Idea", { exact: true })).toBeVisible();
 });
 
