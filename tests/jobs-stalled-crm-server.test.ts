@@ -16,6 +16,7 @@ import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { db } from "../src/lib/db";
 import { istDate, PW } from "./helpers";
+import { assertProcfs } from "./procfs-precondition";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const LOAD = 40;
@@ -446,6 +447,8 @@ describe("qa:TC missing APL-2741 stalled-deal jobs are one server process per CR
     if (!existsSync(path.join(root, ".next", "BUILD_ID"))) {
       throw new Error("CRM_VISIBLE mode cannot start: the production build is missing (.next/BUILD_ID)");
     }
+    // descendantPids / listeningPids / isInGroup and stopServer read Linux procfs only.
+    assertProcfs();
     const server = await startModeServer("unset");
     try {
       await seed(server);

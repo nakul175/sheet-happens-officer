@@ -15,6 +15,7 @@ import { db } from "../src/lib/db";
 import { HIDDEN_DEAL_TEXT } from "../src/lib/feed";
 import { QUICK_ACTIONS } from "../src/lib/concierge/reads";
 import { istDate, PW } from "./helpers";
+import { assertProcfs } from "./procfs-precondition";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 // Run-scoped so a shared test database cannot mix this seed with another spec's "Acme renewal".
@@ -615,6 +616,10 @@ describe("CRM_VISIBLE modes are tested against a real server per mode", () => {
       const adminSees = adminDeals.status === 200;
       const observed = memberSees && adminSees ? "on" : !memberSees && adminSees ? "admins" : !memberSees && !adminSees ? "off" : "mixed";
       expect(observed, `${server.mode} member ${memberDeals.status} admin ${adminDeals.status}`).toBe(server.mode);
+      // Only this assertion needs procfs: listeningPids reads /proc/net/tcp and /proc/<pid>/fd, and
+      // returns [] when they are missing. Placed here, not in beforeAll, so the file's procfs-free
+      // assertions keep running on a host without /proc (a beforeAll throw would skip all of them).
+      assertProcfs();
       const listening = listeningPids(server.port);
       expect(listening.length, `${server.mode} is listening`).toBeGreaterThan(0);
       for (const pid of listening) {
