@@ -306,7 +306,8 @@ export function wholeEnvReads(files: { file: string; text: string }[]): Violatio
       // individual keys (`const { HOME } = e`) stays a named read, as it is for `const { HOME } = process.env`.
       if (ts.isObjectBindingPattern(node) && bindings && bindings.env.size > 0) {
         const parent = node.parent;
-        const fromEnv = ts.isVariableDeclaration(parent) && Boolean(parent.initializer) && isWholeEnv(parent.initializer, bindings);
+        const initializer = ts.isVariableDeclaration(parent) ? parent.initializer : undefined;
+        const fromEnv = initializer !== undefined && isWholeEnv(initializer, bindings);
         if (fromEnv && node.elements.some((element) => ts.isBindingElement(element) && Boolean(element.dotDotDotToken))) report(node, "whole environment destructured");
       }
       if (ts.isForInStatement(node) && isWholeEnv(node.expression, bindings)) report(node, "whole environment iterated");
