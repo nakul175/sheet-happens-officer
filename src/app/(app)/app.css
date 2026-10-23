@@ -298,6 +298,8 @@ main:focus { outline: none; }
 .usage-figs dt { font-size: 13px; color: var(--muted); overflow-wrap: anywhere; }
 .usage-figs dd { margin: 2px 0 0; font-size: 1.17em; font-weight: 700; overflow-wrap: anywhere; }
 .usage-count { margin: 0 0 8px; font-size: 1.6rem; font-weight: 700; line-height: 1.2; overflow-wrap: anywhere; }
+/* SHO-2951: the payload left the message count out, so the card says so rather than printing a false 0. */
+.usage-unknown { font-size: 1.05rem; color: var(--muted); }
 .usage-meter { height: 10px; margin-top: 14px; border-radius: 99px; background: #eceef3; overflow: hidden; }
 .usage-meter > span { display: block; height: 100%; background: var(--navy); }
 /* AC6 v1.1: spend over the ceiling. The words carry the meaning; the colour only adds to it. */

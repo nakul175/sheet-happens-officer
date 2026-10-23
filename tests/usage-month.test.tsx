@@ -3,7 +3,8 @@
 // Seeding goes through the app only, never the database: quick actions over HTTP (POST /api/concierge/quick/:id)
 // and messages through sendMessage with the fake model. The test server runs without a model, so it refuses an
 // HTTP message send. The person is a ZZ-TEST nakul17+ alias. afterAll clears the chat and deactivates the person
-// through the API. Their ledger rows stay: there is no route that deletes usage history.
+// through the API, then deletes the ledger rows this test wrote: no route deletes usage history, and leaving them
+// behind inflates later month figures (SHO-2951). The alias belongs to no one else, so every row for them is ours.
 // Other suites write to this month's ledger too, so this month's figures are checked as before-and-after deltas.
 import { afterAll, describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -35,6 +36,11 @@ describe("qa:TC missing APL-2641 Usage figures reset on the 1st, India time (AC2
     if (person) {
       const cleared = await person.c.del("/api/concierge/messages");
       if (cleared.status !== 200) problems.push(`clear chat: ${cleared.status}`);
+      // SHO-2951: no API route deletes usage history, so the ledger rows this test wrote are removed directly.
+      // Every row for this alias comes from the two messages and three quick actions above.
+      await db.modelUsage.deleteMany({ where: { userId: person.id } });
+      const left = await db.modelUsage.count({ where: { userId: person.id } });
+      if (left) problems.push(`usage rows left for ${person.email}: ${left}`);
       const sa = await superAdmin();
       const off = await sa.c.post(`/api/team/${person.id}/deactivate`, { reassign: "leaders" });
       if (off.status !== 200) problems.push(`deactivate ${person.email}: ${off.status} ${JSON.stringify(off.json)}`);

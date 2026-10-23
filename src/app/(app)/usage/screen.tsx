@@ -69,7 +69,7 @@ export function UsageContents({ role, loading, error, data }: {
         <>
           <div className="usage-split">
             <SpendCeiling ceiling={data.ceiling} />
-            <MessagesThisMonth messages={data.month.messages ?? 0} />
+            <MessagesThisMonth messages={data.month.messages} />
             <QuickActionCounts actions={data.quickActions ?? []} />
           </div>
           <MonthCounts month={data.month} />
@@ -140,12 +140,16 @@ export function SpendCeiling({ ceiling }: { ceiling: UsagePayload["ceiling"] }) 
 }
 
 /** Total concierge messages this calendar month, as /api/usage counted them. Quick actions are not in this number. */
-export function MessagesThisMonth({ messages }: { messages: number }) {
-  const n = messages.toLocaleString("en-IN");
+export function MessagesThisMonth({ messages }: { messages: number | undefined }) {
+  // SHO-2951: an old or partial payload can leave the figure out. Printing 0 would claim nobody sent a message,
+  // so the screen says the figure was not counted instead. A real 0 still prints 0.
+  const count = typeof messages === "number" && Number.isFinite(messages) ? messages : null;
   return (
     <section className="card" aria-labelledby="usage-messages">
       <h2 className="usage-h" id="usage-messages">Messages this month</h2>
-      <p className="usage-count">{n}</p>
+      {count === null
+        ? <p className="usage-count usage-unknown">Not counted</p>
+        : <p className="usage-count">{count.toLocaleString("en-IN")}</p>}
       <p className="hint">This calendar month, India time. Quick actions are not included.</p>
     </section>
   );
