@@ -110,6 +110,18 @@ describe("qa:TC missing APL-2995 SHO-3029 deactivate hides deals the caller cann
     expect(res.moved).toBe(fake.movedByProject[PLAIN.projectId]);
   });
 
+  // 2f92bfc left the `reassign: "leaders"` branch uncovered: both its cases name a person, so
+  // `fellBack` is populated and the deal name is kept out there. With "leaders" nothing is named, so
+  // `fellBack` is empty by construction and `moved` is the only field that could still leak the deal.
+  it("qa:TC missing SHO-3029: the count leaves a hidden deal out when the tasks go to each Leader", async () => {
+    vi.stubEnv("CRM_VISIBLE", "off");
+    const res = await deactivate({ id: "zz-actor-2995", orgRole: "ADMIN" }, TARGET.id, "leaders");
+    expect(res.fellBack).toEqual([]);
+    expect(res.moved).toBe(fake.movedByProject[PLAIN.projectId]);
+    expect([...fake.released].sort()).toEqual([DEAL.projectId, PLAIN.projectId].sort());
+    expect(fake.assignees.every((a) => a.newAssigneeId === "zz-leader-2995")).toBe(true);
+  });
+
   it("qa:TC missing D1 SHO-3029: callers who can see the CRM are unchanged under all and admins (on is all)", async () => {
     for (const mode of ["all", "admins"]) {
       fake.released.length = 0;
