@@ -121,7 +121,7 @@ async function prove(page: Page, shot: string) {
     await page.evaluate(watchAndGo, `/projects/${bId}`);
     await page.waitForTimeout(2000);
     await page.screenshot({ path: `${SHOTS}/${shot}-loading.png`, fullPage: true });
-    const frames = await page.evaluate(() => (window as unknown as { __shoFrames: { path: string; text: string; busy: boolean }[] }).__shoFrames);
+    const frames = await page.evaluate(() => (window as unknown as { __shoFrames: { path: string; text: string; busy: boolean; t: number }[] }).__shoFrames);
     const onB = frames.filter((f) => f.path === `/projects/${bId}`);
     // The address bar can move a few frames before the project view swaps. Those frames still show project A's heading.
     // Once B's skeleton is up, no later frame may show A's items.
