@@ -241,9 +241,15 @@ export const ENTRIES = Object.freeze([
   { id: "3010 AC2", ticket: "3010", clause: "near-copies are echoes, real rewrites are not", status: "TESTED",
     test: "tests/concierge-echo.test.ts:61", verified: "title",
     asserts: "is an echo for the server rule and offers nothing on the client" },
-  { id: "3010 AC3", ticket: "3010", clause: "502 with exactly one counted: true row, no rewrite", status: "UNTESTED",
-    note: "no it() in tests/concierge-echo.test.ts names the 502 answer or a counted row; both it()s are client-side "
-      + "isEcho/offeredRewrite, so the server half of the clause is unpinned" },
+  // W241 closed this one. W133 read only tests/concierge-echo.test.ts and was right that no it() there names the 502
+  // answer; the route-level receipt had landed in tests/concierge-improve.test.ts (35cbdd7), so the clause was absent
+  // from the manifest, not from the tree. The entry is now TESTED, and the receipt is a falsifier by mutation, not by
+  // belief: route swallowing the ApiError -> 4 failed | 12 passed (the AC3 rows only); recordUsage counted:false and
+  // ApiError 502->400 -> the same rows red. Nothing in `asserts` names the client half: offeredRewrite is
+  // tests/concierge-echo.test.ts and is claimed by 3010 AC2.
+  { id: "3010 AC3", ticket: "3010", clause: "502 with exactly one counted: true row, no rewrite", status: "TESTED",
+    test: "tests/concierge-improve.test.ts:222", verified: "body",
+    asserts: "qa:TC missing AC3: %s is answered 502 with AC3's sentence and exactly one counted:true row, no rewrite" },
   { id: "3010 AC4", ticket: "3010", clause: "a test covers it, CI green", status: "NOT-TESTABLE-IN-REPO",
     reason: "process", note: "the CI conclusion for a SHA is not observable from inside a test run" },
 

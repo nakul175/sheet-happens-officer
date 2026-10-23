@@ -3,9 +3,9 @@
   "clauses": 78,
   "tickets": 35,
   "status": {
-    "TESTED": 35,
+    "TESTED": 36,
     "NOT-TESTABLE-IN-REPO": 23,
-    "UNTESTED": 20
+    "UNTESTED": 19
   },
   "tested": [
     "2671 AC1",
@@ -33,6 +33,7 @@
     "3010 AC1",
     "3010 AC2",
     "3011 AC1",
+    "3010 AC3",
     "3012 AC3",
     "3013 AC1",
     "3013 AC2",
@@ -91,7 +92,7 @@
     "3000 AC3": "NOT-TESTABLE-IN-REPO",
     "3010 AC1": "TESTED",
     "3010 AC2": "TESTED",
-    "3010 AC3": "UNTESTED",
+    "3010 AC3": "TESTED",
     "3010 AC4": "NOT-TESTABLE-IN-REPO",
     "3011 AC1": "TESTED",
     "3011 AC2": "UNTESTED",
