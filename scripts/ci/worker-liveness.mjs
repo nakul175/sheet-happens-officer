@@ -14,7 +14,8 @@
 //
 // Usage:
 //   node scripts/ci/worker-liveness.mjs --tsv <packets.tsv> --state <state dir> \
-//     [--logs <dir>] [--reports <execution dir>] [--launches <wave log>] [--json]
+//     [--logs <dir>] [--reports <execution dir>] [--launches <wave log>] \
+//     [--database-url <url>] [--database <name>] [--reap-idle <minutes>] [--json] [--help]
 //
 // --tsv       the packet table the launcher reads: id<TAB>branch<TAB>port<TAB>schema<TAB>keys
 // --state     directory holding <id>.pid and <id>.started
@@ -23,18 +24,38 @@
 //             FINISHED: "I cannot see a report" is not the same as "there is a report".
 // --launches  wave log written by launch-wave3.sh; each `LAUNCH <id> pid=<pid>` line lets the checker spot a packet
 //             that was launched more than once (a relaunch truncates the earlier run's log and overwrites its pid).
+// --database-url  connection URL for the POOL section; defaults to $DATABASE_URL, which is never printed. Absent, the
+//             pool census is skipped and the packet verdicts are unchanged.
+// --database  count only this database's connections. A database with a CONNECTION LIMIT is then measured against
+//             that limit instead of max_connections — the safe way to look at a worker's own scope on a shared server.
+// --reap-idle OPT-IN, OFF BY DEFAULT: terminate connections that have been `idle` for longer than <minutes>, and
+//             print every pid it touched. Nothing else is ever terminated, and the checker never terminates
+//             anything without this flag: killing backends during a run is worse than the pressure.
 //
 // Verdicts, one per dispatched packet:
 //   RUNNING             the pid is alive AND its command line names this worker's own worktree or data-dir
 //   FINISHED            <ID>-REPORT.md exists and is not empty
 //   DEAD-WITHOUT-REPORT everything else — including a pid that is alive but belongs to somebody else
-// Exit: 0 when every dispatched packet is RUNNING or FINISHED, 1 when any DEAD-WITHOUT-REPORT exists, 2 bad usage.
+// Exit: 0 when every dispatched packet is RUNNING or FINISHED, 1 when any DEAD-WITHOUT-REPORT exists, 2 bad usage,
+//       3 when the POOL is SATURATED (used >= ceiling). 3 wins over 1: a saturated pool explains later failures,
+//       and it must not be possible to pass this checker by having no dead workers and a full server.
 //
 // What this cannot see: a process that is alive and looping, and a run that was abandoned while its pid stayed alive.
-// Liveness is a process question; progress is not answerable from a pid, a log tail or a report on disk.
+// Liveness is a process question; progress is not answerable from a pid, a log tail or a report on disk. And the POOL
+// section reports pressure — it does not name the vitest file, the dev server or the killed run that is holding the
+// connections: pg_stat_activity carries a datname, a user and an application_name, not a test name.
 import { execFileSync } from "node:child_process";
 import { closeSync, existsSync, openSync, readFileSync, readSync, statSync } from "node:fs";
 import path from "node:path";
+
+import {
+  EXIT_SATURATED,
+  censusLines,
+  connectionStringOf,
+  readCensus,
+  reapIdle,
+  reapLines,
+} from "./db-pool-census.mjs";
 
 const EXIT_DEAD = 1;
 const EXIT_USAGE = 2;
@@ -71,9 +92,17 @@ function abortMarker(text) {
 function usage(message) {
   process.stderr.write(`worker-liveness: ${message}\n`);
   process.stderr.write("usage: node scripts/ci/worker-liveness.mjs --tsv <packets.tsv> --state <state dir> " +
-    "[--logs <dir>] [--reports <dir>] [--launches <wave log>] [--json]\n");
+    "[--logs <dir>] [--reports <dir>] [--launches <wave log>] [--database-url <url>] [--database <name>] " +
+    "[--reap-idle <minutes>] [--json] [--help]\n" +
+    "  --database-url  connection URL for the POOL section (default $DATABASE_URL; never printed)\n" +
+    "  --database      count only this database's connections; its CONNECTION LIMIT becomes the ceiling\n" +
+    "  --reap-idle     OPT-IN and OFF BY DEFAULT: terminate connections idle longer than <minutes>, print each\n" +
+    "  exit: 0 all packets RUNNING/FINISHED and pool below 80%, 1 a packet is DEAD-WITHOUT-REPORT,\n" +
+    "        2 usage, 3 the pool is SATURATED (used >= ceiling)\n");
   process.exit(EXIT_USAGE);
 }
+
+const VALUE_FLAGS = ["--tsv", "--state", "--logs", "--reports", "--launches", "--database-url", "--database", "--reap-idle"];
 
 function parseArgs(argv) {
   const args = { json: false };
@@ -81,7 +110,10 @@ function parseArgs(argv) {
     const flag = argv[i];
     if (flag === "--json") {
       args.json = true;
-    } else if (["--tsv", "--state", "--logs", "--reports", "--launches"].includes(flag)) {
+    } else if (flag === "--help" || flag === "-h") {
+      // --help must name the one flag that terminates something, or an operator finds it by reading the source.
+      usage("--help");
+    } else if (VALUE_FLAGS.includes(flag)) {
       const value = argv[i + 1];
       if (!value) usage(`${flag} needs a value`);
       args[flag.slice(2)] = value;
@@ -92,9 +124,45 @@ function parseArgs(argv) {
   }
   if (!args.tsv) usage("--tsv is required");
   if (!args.state) usage("--state is required");
+  if (args["reap-idle"] !== undefined) {
+    const minutes = Number(args["reap-idle"]);
+    if (!Number.isFinite(minutes) || minutes < 0) usage("--reap-idle needs a number of minutes >= 0");
+  }
   args.logs ??= path.resolve(args.state, "..");
   return args;
 }
+
+/**
+ * The POOL section: pressure, never action. Without a URL it says so and changes nothing, so every existing caller
+ * (and every existing test) keeps the packet verdicts it had. With `--reap-idle` it reaps FIRST and then measures,
+ * so the census printed is the one the operator's reap produced.
+ */
+async function poolReport(args) {
+  const raw = args["database-url"] ?? process.env.DATABASE_URL;
+  if (!raw) {
+    return {
+      lines: ["POOL: skipped — DATABASE_URL is not set (pass --database-url to measure the connection pool)"],
+      saturated: false,
+    };
+  }
+  const database = args.database ?? null;
+  const lines = [];
+  try {
+    const connectionString = connectionStringOf(raw);
+    if (args["reap-idle"] !== undefined) {
+      const report = await reapIdle({ connectionString, minutes: Number(args["reap-idle"]), database });
+      lines.push(...reapLines(report));
+    }
+    const census = await readCensus({ connectionString, database });
+    lines.push(...censusLines(census));
+    return { lines, saturated: census.verdict === "SATURATED" };
+  } catch (error) {
+    // An unreachable database is not evidence of a saturated one: report it and leave the exit code to the packets.
+    lines.push(`POOL: unknown — could not read pg_stat_activity: ${error.message}`);
+    return { lines, saturated: false };
+  }
+}
+
 
 /** The dispatched packets, in table order, first occurrence wins. Comments and blank lines are not packets. */
 function readPackets(tsvPath) {
@@ -243,7 +311,7 @@ function classify(packet, paths) {
   return { id, verdict, pid: pidText || null, started, evidence };
 }
 
-function main() {
+async function main() {
   const args = parseArgs(process.argv.slice(2));
   const paths = {
     state: args.state,
@@ -259,9 +327,13 @@ function main() {
     "DEAD-WITHOUT-REPORT": results.filter((row) => row.verdict === "DEAD-WITHOUT-REPORT").length,
   };
   const dead = results.filter((row) => row.verdict === "DEAD-WITHOUT-REPORT").map((row) => row.id);
+  // Measured after the packets so the reap/census reflects the run the operator is asking about, not the launch.
+  const pool = await poolReport(args);
 
   if (args.json) {
-    process.stdout.write(`${JSON.stringify({ results, counts, dead }, null, 2)}\n`);
+    process.stdout.write(
+      `${JSON.stringify({ results, counts, dead, pool: { saturated: pool.saturated, lines: pool.lines } }, null, 2)}\n`,
+    );
   } else {
     const width = Math.max(7, ...results.map((row) => row.verdict.length));
     process.stdout.write(`${"PACKET".padEnd(8)} ${"VERDICT".padEnd(width)} ${"PID".padEnd(8)} EVIDENCE\n`);
@@ -274,10 +346,20 @@ function main() {
       `\nSUMMARY: ${counts.RUNNING} RUNNING, ${counts.FINISHED} FINISHED, ` +
         `${counts["DEAD-WITHOUT-REPORT"]} DEAD-WITHOUT-REPORT of ${results.length} dispatched\n`,
     );
-    process.stdout.write(dead.length ? `RESULT: FAIL (dead without report: ${dead.join(" ")})\n` : "RESULT: OK\n");
+    for (const line of pool.lines) process.stdout.write(`${line}\n`);
+    const reasons = [];
+    if (dead.length) reasons.push(`dead without report: ${dead.join(" ")}`);
+    // A saturated pool is a FAIL even when every packet is healthy: it is the harness about to stall, not a worker.
+    if (pool.saturated) reasons.push("pool SATURATED");
+    process.stdout.write(reasons.length ? `RESULT: FAIL (${reasons.join("; ")})\n` : "RESULT: OK\n");
   }
 
+  if (pool.saturated) process.exit(EXIT_SATURATED);
   process.exit(dead.length ? EXIT_DEAD : 0);
 }
 
-main();
+main().catch((error) => {
+  process.stderr.write(`worker-liveness: ${error.stack ?? error.message}\n`);
+  process.exit(1);
+});
+

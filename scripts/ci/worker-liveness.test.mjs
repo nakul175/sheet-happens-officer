@@ -24,9 +24,31 @@ function gonePid() {
   return spawnSync(process.execPath, ["-e", "process.exit(0)"]).pid;
 }
 
-function runChecker(args) {
-  return spawnSync(process.execPath, [CHECKER, ...args], { encoding: "utf8" });
+function runChecker(args, env = {}) {
+  // DATABASE_URL is cleared so these packet verdicts cannot depend on how full the local server happens to be.
+  return spawnSync(process.execPath, [CHECKER, ...args], {
+    encoding: "utf8",
+    env: { ...process.env, DATABASE_URL: "", ...env },
+  });
 }
+
+test("without a DATABASE_URL the POOL section says so and changes no packet verdict", () => {
+  // The pool census is additive: a caller that was passing before must still pass, and the exit code must
+  // stay a packet verdict. What it must NOT do is stay silent — "I did not look" is printed.
+  const pool = makePool(["w908"]);
+  writeFileSync(join(pool.state, "w908.pid"), `${gonePid()}\n`);
+  writeFileSync(join(pool.reports, "W908-REPORT.md"), "# w908\n\nSTATUS: DONE - abc1234\n");
+  const skipped = runChecker(state3(pool));
+  assert.match(skipped.stdout, /^POOL: skipped — DATABASE_URL is not set/m);
+  assert.match(skipped.stdout, /RESULT: OK/);
+  assert.equal(skipped.status, 0);
+
+  const help = runChecker(["--help"]);
+  assert.match(help.stderr, /--reap-idle\s+OPT-IN and OFF BY DEFAULT/, "the one destructive flag is in --help");
+  assert.match(help.stderr, /3 the pool is SATURATED/);
+  assert.equal(help.status, 2, "--help is a usage message, and usage is exit 2");
+  rmSync(pool.dir, { recursive: true, force: true });
+});
 
 function makePool(packets) {
   const dir = mkdtempSync(join(tmpdir(), "sho-worker-liveness-"));
