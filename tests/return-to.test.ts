@@ -2,7 +2,7 @@
 // The cases at the top do not need a server. The "signed-out redirect" cases hit TASKBOARD_URL.
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { randomBytes } from "node:crypto";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 import { api } from "@/components/api";
 import { proxy } from "@/proxy";
@@ -525,15 +525,26 @@ describe("APL-2652 expiry on a live browser: AC6 v1.2 keeps the target, AC7 v1.2
   });
 
   /**
+   * The person the expired session belongs to. This file owns the fixture instead of reading whichever account an
+   * earlier test file happened to create: `npm test` runs files one at a time in path order, so `people.test.ts` and
+   * the viewport specs left root.test@aplyd.com behind before this file ran, and running this file on its own threw
+   * `findUniqueOrThrow` before the 401 the case is about. `account` reuses the row when it is already there (signup
+   * answers 409, then sign-in), so the full-suite order is unchanged.
+   */
+  let superUserId = "";
+  beforeAll(async () => {
+    superUserId = (await account("root", SUPER_EMAIL)).id;
+  });
+
+  /**
    * A session row whose expiry is already past, and whose `lastSeenAt` is recent so `sessionUser` does not write to it.
    * `sessionUser` looks the token up by its hash and refuses it on `expiresAt`, so the app treats the browser as signed out.
    */
   async function expiredCookie(): Promise<string> {
-    const user = await db.user.findUniqueOrThrow({ where: { email: SUPER_EMAIL } });
     const token = randomBytes(32).toString("base64url");
     const now = new Date();
     await db.session.create({
-      data: { userId: user.id, tokenHash: hashToken(token), expiresAt: new Date(now.getTime() - 60_000), lastSeenAt: now, userAgent: "qa:APL-2652 expired session" },
+      data: { userId: superUserId, tokenHash: hashToken(token), expiresAt: new Date(now.getTime() - 60_000), lastSeenAt: now, userAgent: "qa:APL-2652 expired session" },
     });
     return `${SESSION_COOKIE}=${token}`;
   }
