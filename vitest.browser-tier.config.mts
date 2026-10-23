@@ -1,7 +1,7 @@
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitest/config";
 
-// Browser tier (npm run test:browser). These 7 files drive a real Chromium through Playwright, and each
+// Browser tier (npm run test:browser). These 8 files drive a real Chromium through Playwright, and each
 // one first-paints routes on the shared dev server, so a single test can legitimately take minutes.
 // In the full `npm test` run they shared the machine with 107 other files and 9 of their tests hit the
 // 30s testTimeout; run alone they finish in well under a minute. Keep them out of the main config
@@ -18,6 +18,7 @@ export default defineConfig({
       "tests/inline-touch-2673.test.ts",
       "tests/forced-password-23-5-browser.test.ts",
       "tests/e2e/local/APL-2719.test.ts",
+      "tests/e2e/local/SHO-2738-3025-3030.browser.test.ts",
     ],
     testTimeout: 120_000,
     hookTimeout: 120_000,
