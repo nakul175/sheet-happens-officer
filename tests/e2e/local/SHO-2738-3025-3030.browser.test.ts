@@ -75,11 +75,14 @@ async function signedIn(email: string, viewport: { width: number; height: number
 /**
  * Open the task sheet from its row, the way a person does: the row has focus, Enter opens it.
  *
- * The dialog appears before the task does: TaskModal renders <Skeleton /> while `/api/tasks/:id` is in flight
- * (src/components/TaskModal.tsx:47), so "the dialog is visible" is not "the sheet has a body". On a loaded machine the
- * gap is wide enough that the first read of the sheet's geometry finds no `#desc` and no action bar, and the run dies
- * with an opaque `page.evaluate: Error: missing element` (measured at 390x844: body absent when the dialog paints,
- * present ~700 ms later). Wait for the sheet's own body here, so every caller gets a sheet it can read.
+ * "The dialog is visible" is not "the sheet can be read", and it is not even "the sheet has a body".
+ * Two separate fetches paint after the dialog: `<Skeleton />` while `/api/tasks/:id` is in flight
+ * (src/components/TaskModal.tsx:47) and, once that lands, a footer whose primary button is still absent
+ * while the *project* fetch is in flight — `role` falls back to "VIEWER" and `canEdit` to false
+ * (src/components/TaskModal.tsx:57-59), so "Mark complete" (src/components/TaskModal.tsx:259-260) is not
+ * rendered yet. Measured on this tree: the dialog paints at t=477 ms, `#desc` at t=510 ms, the footer at
+ * t=538 ms. Reading the geometry in that window threw `page.evaluate: Error: missing element` in 1 of 3 runs.
+ * Wait on both conditions here, so every caller gets a sheet it can read.
  */
 async function openSheet(page: Page) {
   const row = page.locator(".item.click", { hasText: `ZZ-TEST 2738 task ${RUN}` }).first();
@@ -89,6 +92,8 @@ async function openSheet(page: Page) {
   const sheet = page.getByRole("dialog", { name: "Task" });
   await sheet.waitFor({ state: "visible", timeout: 30000 });
   await sheet.locator("#desc").waitFor({ state: "visible", timeout: 30000 });
+  // The action bar exists as an empty `.actions` while the project fetch is in flight; wait for the primary
+  // action itself, not for its container.
   await sheet.locator(".actions").filter({ hasText: /Mark complete|Close task/ }).first().waitFor({ state: "visible", timeout: 30000 });
   return { row, sheet };
 }
