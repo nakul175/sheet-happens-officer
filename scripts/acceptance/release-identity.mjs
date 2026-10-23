@@ -158,6 +158,20 @@ function matchMain(args) {
   return matches ? 0 : 1;
 }
 
+/** `--build-id <dir>`: the completed build's id, or an empty exit status. The gate prints
+ * `BUILD=ok build-id=…` and used to read `.next/BUILD_ID` itself, which made a THIRD copy of
+ * the directory rule (W184); now it asks this. */
+function buildIdMain(args) {
+  const [root, extra] = args;
+  if (!root || extra !== undefined) {
+    process.stderr.write("RELEASE-IDENTITY=usage --build-id takes exactly <dir>\n");
+    return 2;
+  }
+  const id = buildIdOf(root);
+  process.stdout.write(`RELEASE-IDENTITY=build-id=${id || "none"} root=${root}\n`);
+  return id ? 0 : 1;
+}
+
 async function main(argv) {
   const args = argv.slice(2);
   let root = "";
@@ -165,6 +179,7 @@ async function main(argv) {
   let url = "";
 
   if (args[0] === "--match") return matchMain(args.slice(1));
+  if (args[0] === "--build-id") return buildIdMain(args.slice(1));
 
   for (let i = 0; i < args.length; i += 1) {
     const a = args[i];

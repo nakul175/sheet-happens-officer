@@ -16,6 +16,10 @@ import net from "node:net";
 import path from "node:path";
 import fs from "node:fs";
 import { spawn } from "node:child_process";
+// W184: "is this directory a release" is asked of the ONE implementation in the acceptance
+// module, not re-implemented here (W160 measured the two copies diverging on a directory named
+// server.js). See scripts/acceptance/single-implementation.test.mjs.
+import { ENTRY as RELEASE_ENTRY, buildIdOf, identityProblem } from "./acceptance/release-identity.mjs";
 
 const N = Number(process.argv[2] ?? "40");
 const flags = process.argv.slice(3);
@@ -63,27 +67,34 @@ const port = PORT_ARG || (await freePort());
 // ---------------------------------------------------------------- the production precondition
 // A green from a dev server is what W99 was asked to make impossible, so `--production` refuses
 // to open a single socket unless the directory it was pointed at really holds a release.
+//
+// The RULES are not here (W184). "Is this directory a release" is identityProblem() in
+// scripts/acceptance/release-identity.mjs — the same answer the gate and its off-Linux evidence
+// use — because a second copy is exactly how W160's divergence happened (a DIRECTORY named
+// server.js counted as a release to one copy and not to the other). This harness asks the
+// module and only translates its reason code into the message a developer needs; the decision
+// to refuse is the module's.
 let buildId = null;
 let devArtifacts = false;
 if (PRODUCTION) {
   const nextDir = path.join(APP_ROOT, ".next");
-  // The build first: a dev checkout has server.js but no BUILD_ID, and that is the case this
-  // refusal is for.
-  try {
-    buildId = fs.readFileSync(path.join(nextDir, "BUILD_ID"), "utf8").trim() || null;
-  } catch {
-    buildId = null;
+  const problem = identityProblem(APP_ROOT);
+  if (problem) {
+    const reasons = [];
+    // Both facts can be true at once (an empty directory has neither); say the build first,
+    // because "run next build first" is the actionable one.
+    if (!buildIdOf(APP_ROOT)) {
+      reasons.push(`${nextDir}/BUILD_ID is missing (run next build against this directory first)`);
+    }
+    if (problem === "missing-production-entry") {
+      reasons.push(`the production entry ${RELEASE_ENTRY} is missing (a dev server is not the release)`);
+    }
+    if (problem === "dev-artifacts-present") {
+      reasons.push(`${nextDir}/dev exists, so what would be measured is not the release`);
+    }
+    throw new Error(`--production refuses ${APP_ROOT}: ${reasons.join("; ") || problem}`);
   }
-  if (!buildId) {
-    throw new Error(`--production needs a completed build: ${nextDir}/BUILD_ID is missing (run next build against this directory first)`);
-  }
-  if (!fs.existsSync(path.join(APP_ROOT, ENTRY))) {
-    throw new Error(`--production needs the production entry at ${path.join(APP_ROOT, ENTRY)} (a dev server is not the release)`);
-  }
-  devArtifacts = fs.existsSync(path.join(nextDir, "dev"));
-  if (devArtifacts) {
-    throw new Error(`${nextDir}/dev exists: this directory carries a dev server's artifacts, so what would be measured is not the release`);
-  }
+  buildId = buildIdOf(APP_ROOT) || null;
 }
 
 const child = spawn(process.execPath, ["--import", "tsx", ENTRY], {

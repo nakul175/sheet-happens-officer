@@ -84,6 +84,113 @@ IDENTITY="$ROOT/scripts/acceptance/release-identity.mjs"
 # by a test on any kernel without `set -u` tripping over it.
 TMP=""
 
+# ---------------------------------------------------------------- the platform marker
+#
+# WHY NOT `uname -s` (W184)
+# The kernel decision used to be `uname -s` resolved through PATH, so one directory ahead of
+# /usr/bin holding a two-line `uname` that echoes Linux moved a darwin host straight past the
+# refusal into the mode dispatch and, from there, into a build and a burst. `uname` is an
+# ordinary program on $PATH: the environment picks it, so it cannot be the authority.
+#
+# WHAT THE AUTHORITY IS
+# The kernel's own procfs — a Linux interface that no PATH entry can provide, and a file no
+# environment variable can rewrite. TWO differently-shaped markers, read with BASH BUILTINS
+# ONLY (`read` plus a redirection, so not even `cat` sits on the path between the answer and
+# the decision):
+#
+#   /proc/sys/kernel/ostype   one word: "Linux"
+#   /proc/version             "Linux version <release> <gcc ...> ..."
+#
+# BOTH must say Linux. A host with no /proc, or with either marker wrong or unreadable, is
+# REFUSED: the gate fails closed, because the drain it would measure needs the Linux-only C
+# handler and libc seize (src/lib/shutdown.ts:205,246). A forged `uname` cannot produce either
+# file, and a forged file cannot be created at /proc (it is a kernel mount): the only way to
+# answer Linux is to BE Linux.
+#
+# WHY TWO: one marker is a single point of forgery. `ostype` is a bare word that a bind mount
+# could fake; `version` must ALSO start with "Linux", so faking the pair needs a writable
+# /proc, which is a different kernel decision altogether.
+#
+# WHAT PROVES THE LINUX BRANCH IS REACHABLE: linux-drain-gate.w184.test.mjs points
+# platform_is_linux() at fixture files that say Linux and asserts it answers 0, and at fixtures
+# that say Darwin / nothing and asserts it answers 1 — so the check is two-sided, not "always
+# refuse". That is a SIMULATION of the Linux branch on a darwin host, and a simulation is not
+# acceptance; only a real Linux kernel can be.
+GATE_PROCFS_OSTYPE=/proc/sys/kernel/ostype
+GATE_PROCFS_VERSION=/proc/version
+
+# platform_is_linux [ostype-file] [version-file]
+# The two arguments exist ONLY for the fixture test above. The run path — main(), production_run()
+# and dev_run() — calls it with no arguments, so the kernel a run is judged by is never the
+# caller's choice.
+platform_is_linux() {
+  local ostype_file="${1:-$GATE_PROCFS_OSTYPE}"
+  local version_file="${2:-$GATE_PROCFS_VERSION}"
+  local ostype=""
+  local version=""
+  { read -r ostype _ <"$ostype_file"; } 2>/dev/null || return 1
+  { read -r version _ <"$version_file"; } 2>/dev/null || return 1
+  [ "$ostype" = "Linux" ] || return 1
+  [ "$version" = "Linux" ] || return 1
+  return 0
+}
+
+# What main() branches on and reports: "Linux" when both kernel markers agree, "" otherwise.
+# Never a PATH answer.
+platform_kernel() {
+  if platform_is_linux; then
+    printf 'Linux'
+  fi
+  return 0
+}
+
+# The refusal, as ONE exit status (3). Called by main() first and by each inner runner, so a
+# sourced `production_run` / `dev_run` cannot skip the check that main() performs.
+platform_gate() {
+  local uname_s=""
+  local arch=""
+  uname_s="$(uname -s 2>/dev/null || true)"
+  arch="$(uname -m 2>/dev/null || true)"
+  if platform_is_linux; then
+    return 0
+  fi
+  printf 'GATE=REFUSED reason=not-linux\n'
+  printf 'marker=%s uname=%s arch=%s\n' "$GATE_PROCFS_OSTYPE" "${uname_s:-unknown}" "${arch:-unknown}"
+  printf 'no burst was run: the drain needs the Linux-only C handler and libc seize (src/lib/shutdown.ts:205,246).\n'
+  printf 'on this kernel every leg can only print "%s" and exit 1, so a pass here would be invented.\n' "$TIMEOUT_LINE"
+  return 3
+}
+
+# ---------------------------------------------------------------- the internal platform token
+#
+# `main` is not the only way into the run path: the test suite sources this file and calls
+# production_run / dev_run directly (W172 measured that a sourced call on darwin reached the
+# build and the dev spawn before anything refused). Both mechanisms below are in both runners:
+#
+#   1. platform_gate() — the same kernel check main() makes, with the real procfs and no
+#      arguments, so the refusal is the runner's own answer and not main()'s courtesy;
+#   2. this token — minted only by main(), only AFTER platform_gate() returned 0, and required
+#      by both runners. The value is assigned unconditionally at load, so an exported
+#      GATE_PLATFORM_TOKEN in the environment is overwritten before anything reads it: the
+#      environment cannot mint it. Its job is to make "platform checked first" an invariant of
+#      the code's own control flow, so a later edit that reorders main() fails closed
+#      (GATE=REFUSED reason=no-platform-token, exit 3) instead of opening the gate.
+GATE_PLATFORM_TOKEN_VALUE='platform-checked-by-main'
+GATE_PLATFORM_TOKEN=''
+
+grant_platform_token() {
+  GATE_PLATFORM_TOKEN="$GATE_PLATFORM_TOKEN_VALUE"
+}
+
+require_platform_token() {
+  if [ "$GATE_PLATFORM_TOKEN" = "$GATE_PLATFORM_TOKEN_VALUE" ]; then
+    return 0
+  fi
+  printf 'GATE=REFUSED reason=no-platform-token\n'
+  printf 'these runners may only be entered by main() after the kernel check; a direct or sourced call is refused.\n'
+  return 3
+}
+
 usage() {
   printf 'usage: %s [--production|--dev] <release-sha> | --explain\n' "${0##*/}"
 }
@@ -328,7 +435,15 @@ build_release() {
     tail -n 25 "$log" | sed 's/^/  /'
     return 1
   fi
-  printf 'BUILD=ok build-id=%s\n' "$(tr -d '[:space:]' <"$app/.next/BUILD_ID" 2>/dev/null || printf 'missing')"
+  # The build id is the MODULE's answer (`--build-id`), not a third read of .next/BUILD_ID here.
+  # That read was the third copy of the directory rule; W184 removed it so "did the build
+  # produce a release" exists once, in release-identity.mjs, and the drift test keeps it so.
+  local build_id=""
+  if ! build_id="$(node "$IDENTITY" --build-id "$app" 2>/dev/null)"; then
+    printf 'GATE=FAIL missing-build-id (%s/.next/BUILD_ID is absent: run next build in this directory first)\n' "$app"
+    return 1
+  fi
+  printf 'BUILD=ok build-id=%s\n' "${build_id#RELEASE-IDENTITY=build-id=}"
   return 0
 }
 
@@ -471,6 +586,12 @@ production_run() {
   local app=""
   local held
 
+  # Entered directly? main() is not the only caller — the suite sources this file. The kernel is
+  # re-read here with the REAL procfs (no arguments), so darwin refuses with exit 3 before the
+  # build, and the token main() mints only after that same check must be present too.
+  platform_gate || return $?
+  require_platform_token || return $?
+
   if [ -n "${GATE_BUILD_ROOT:-}" ]; then
     app="$GATE_BUILD_ROOT"
     printf 'BUILD=reused root=%s\n' "$app"
@@ -486,7 +607,9 @@ production_run() {
 
   run_bursts production "$sha" "$app"
   held=$?
-  gate_verdict "$(uname -s 2>/dev/null || echo unknown)" production \
+  # The verdict is fed the SAME marker main() and the runner's own gate use, never `uname -s`:
+  # a PATH answer must not be able to reach the one statement that can print PASS.
+  gate_verdict "$(platform_kernel)" production \
     "$([ "$held" -eq 0 ] && printf 'true' || printf 'false')" >/dev/null
   case "$?" in
     0)
@@ -508,6 +631,11 @@ production_run() {
 dev_run() {
   local sha="$1"
   local held
+
+  # Same two refusals as production_run: a dev "look" is still a burst, and a burst on a kernel
+  # without the drain cannot say anything about SHO-2689.
+  platform_gate || return $?
+  require_platform_token || return $?
 
   printf 'DEV=local-look (NODE_ENV=development, no next build: this is a dev server)\n'
   run_bursts dev "$sha" "$ROOT"
@@ -546,16 +674,19 @@ main() {
 
   # THE GATE. First branch of the run path: before the mode is honoured, before the
   # argument checks, before any build and before any socket.
-  local kernel arch
-  kernel="$(uname -s 2>/dev/null || echo unknown)"
-  arch="$(uname -m 2>/dev/null || echo unknown)"
+  #
+  # The kernel is the KERNEL'S OWN ANSWER (`platform_kernel` reads /proc/sys/kernel/ostype and
+  # /proc/version with bash builtins), never `uname -s`: W184 measured that a `uname` shim on
+  # PATH moved this host past the refusal into the mode dispatch.
+  local kernel
+  kernel="$(platform_kernel)"
   if [ "$kernel" != "Linux" ]; then
-    printf 'GATE=REFUSED reason=not-linux\n'
-    printf 'kernel=%s arch=%s\n' "$kernel" "$arch"
-    printf 'no burst was run: the drain needs the Linux-only C handler and libc seize (src/lib/shutdown.ts:205,246).\n'
-    printf 'on %s every leg can only print "%s" and exit 1, so a pass here would be invented.\n' "$kernel" "$TIMEOUT_LINE"
+    platform_gate
     return 3
   fi
+  # The kernel check passed. Only now may the inner runners be entered, and only through the
+  # token main() mints here — after the check, never before it.
+  grant_platform_token
 
   case "$mode" in
     production|dev) : ;;

@@ -35,6 +35,11 @@ import path from "node:path";
 import fs from "node:fs";
 import process from "node:process";
 import { spawn } from "node:child_process";
+// W184: the release-comparison rule has ONE implementation, in the acceptance module; this
+// runner used to carry a second copy of it (a `Math.min(...) >= 7` prefix test) that no test
+// compared with the gate's. The drift test scripts/acceptance/single-implementation.test.mjs
+// fails if a second copy reappears anywhere under scripts/.
+import { releaseMatches } from "./acceptance/release-identity.mjs";
 
 const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
 const CLEAN_LOG = "graceful shutdown: drained in-flight requests";
@@ -542,10 +547,10 @@ function shaGate(health) {
   }
   shaChecked = true;
   shaObserved = String(release).trim();
-  const expected = expectedSha.trim().toLowerCase();
-  const observed = shaObserved.toLowerCase();
-  const match =
-    expected === observed || (Math.min(expected.length, observed.length) >= 7 && (observed.startsWith(expected) || expected.startsWith(observed)));
+  // The rule is the module's (W184): releaseMatches() in scripts/acceptance/release-identity.mjs.
+  // The comparison that used to sit here was a second implementation of it with no test
+  // comparing the two.
+  const match = releaseMatches(expectedSha.trim(), shaObserved);
   leg("sha.release-echoed", match ? "PASS" : "FAIL", `deployed release ${shaObserved} vs SHA under test ${expectedSha}`);
   if (!match) throw new ShaMismatch(`SHA MISMATCH: /api/health reports release=${shaObserved}, this acceptance is for ${expectedSha}. Refusing to run: nothing was measured.`);
 }
