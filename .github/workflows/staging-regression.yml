@@ -11,11 +11,13 @@
 # "aliases not verified, ask Oscar".
 #
 # Excluded: @local-only (Dwight's ruling, APL-2925). The printed list is derived from the tags by
-# scripts/ci/local-only-specs.mjs, so it cannot drift from the specs again (SHO-3000). At the time of writing the
-# tagged specs are APL-2471 AC4, APL-2609, APL-2624, APL-2669, APL-2674, APL-2721, APL-2737 and APL-2742:
-# APL-2471 AC4, APL-2609, APL-2624, APL-2669, APL-2674, APL-2721 and APL-2737 sign up brand-new nakul17+ aliases and
-# verify them from the server's local mail outbox, and APL-2742 starts its own servers from a local build and database.
-# On staging that would make real accounts and send real mail, then fail. They still run against a local server.
+# scripts/ci/local-only-specs.mjs, so it cannot drift from the specs again (SHO-3000); `node
+# scripts/ci/local-only-specs.mjs --summary` prints it and the summary step runs that command. Do not write a copy of
+# the list here (SHO-2996): a hand-kept copy names whatever it named the day it was written.
+# The tagged specs sign up brand-new nakul17+ aliases and verify them from the server's local mail outbox, one of them
+# (APL-2471 AC4) runs the daily reminder job and reads the notices it writes locally, and APL-2742 starts its own
+# servers from a local build and database. On staging that would make real accounts, send real mail and run jobs
+# against staging data, then fail. They still run against a local server.
 #
 # Target: the repository variable STAGING_BASE_URL (not a secret), else https://staging.sheethappensofficer.com. Only staging
 # or a pr1-pr4 preview is accepted; production is refused.

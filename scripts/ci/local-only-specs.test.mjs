@@ -54,6 +54,14 @@ test("the summary derives its list instead of hard-coding it", () => {
   assert.doesNotMatch(SUMMARY_STEP, /APL-\d+ AC?\d*,\s*APL-/, "the summary step still hard-codes a spec list");
 });
 
+test("the workflow keeps no hand-written copy of the tagged list (SHO-2996)", () => {
+  // The printed line is derived, but the header still wrote the eight specs out by hand ("the tagged specs are
+  // APL-2471 AC4, APL-2609, ..."), which is a second copy of exactly the list this module derives. It matched on the
+  // day and nothing would have noticed it going stale: a ninth tagged spec changes the printed line and not the
+  // comment. Derivation means one copy, so the sentence is gone rather than kept in step by eye.
+  assert.doesNotMatch(WORKFLOW, /tagged specs are APL-\d+/);
+});
+
 test("the exclusion behaviour is unchanged (SHO-3000 AC2)", () => {
   assert.match(WORKFLOW, /EXCLUDED_TAGS: "@local-only\|@static\|@manual"/);
   assert.match(WORKFLOW, /npx playwright test --workers=1 --grep-invert "\$EXCLUDED_TAGS"/);
