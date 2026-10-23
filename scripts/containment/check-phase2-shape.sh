@@ -9,7 +9,7 @@
 # when R3/R4 scanned the slot. A wrong phase 2 can therefore put the production env back into the slot
 # without touching the unit at all.
 #
-# PHASE2-CONTRACT.md states what phase 2 must produce. This script is the falsifier for that statement:
+# scripts/containment/PHASE2-CONTRACT.md states what phase 2 must produce. This script is the falsifier for that statement:
 # given a slot root it answers, in booleans/counts only,
 #
 #     is the on-disk shape the one the contract describes?
@@ -48,7 +48,7 @@
 #   * It does not re-derive the unit's EnvironmentFile list — that is `lib/unit-env-sources.sh`'s job, and
 #     slot9-proof.sh P4 runs it. Combine the two for the full answer:
 #       unit_env_sources /etc/systemd/system/sho-pr9.service "$SLOT/env" "$SLOT/current"
-#   * It cannot prove WHO wrote a file or WHEN. See PHASE2-CONTRACT.md §7.
+#   * It cannot prove WHO wrote a file or WHEN. See scripts/containment/PHASE2-CONTRACT.md §7.
 set -euo pipefail
 
 readonly HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

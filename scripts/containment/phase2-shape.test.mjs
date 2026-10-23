@@ -1,6 +1,6 @@
 // CONTAINMENT / slot 9 — PHASE 2 SHAPE CHECKER, attacked.
 //
-// PHASE2-CONTRACT.md says what phase 2 must leave on disk. These tests are what keeps that statement
+// scripts/containment/PHASE2-CONTRACT.md says what phase 2 must leave on disk. These tests are what keeps that statement
 // falsifiable: each one builds a throwaway slot tree in the OS temp dir and asks the real checker about it.
 // Nothing here touches the staging host, systemd, root, /home/shoslot or any real env file; no credential is
 // written into a fixture and no fixture value may appear in the checker's output (one test asserts that).
