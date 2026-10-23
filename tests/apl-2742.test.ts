@@ -420,6 +420,22 @@ describe("qa:TC missing SHO-3011: the APL-2742 pool reads the schema DATABASE_UR
     }
   });
 
+  it.skipIf(!local)("qa:TC missing SHO-3011 AC1: every connection the pool opens, not only the first, lands on the schema", async () => {
+    // AC1 says every SQL read targets the schema, and a pool holds more than one connection. An implementation that
+    // set search_path once - on the first connection, or in a single SET after connect - would pass the one-connection
+    // check above and still read the default schema here.
+    const two = localPgPool(urlWithSchema(SCHEMA), 2);
+    try {
+      const sql = "SELECT pg_backend_pid() AS pid, current_schema() AS s";
+      const [a, b] = await Promise.all([two.query<{ pid: number; s: string }>(sql), two.query<{ pid: number; s: string }>(sql)]);
+      expect(a.rows[0].s, "the first connection").toBe(SCHEMA);
+      expect(b.rows[0].s, "the second connection").toBe(SCHEMA);
+      expect(a.rows[0].pid, "two distinct connections were checked, not one reused twice").not.toBe(b.rows[0].pid);
+    } finally {
+      await two.end();
+    }
+  });
+
   it.skipIf(!local)("qa:TC missing SHO-3011 AC4: a schema whose name has capitals is reached by exactly that name", async () => {
     // Prisma creates whatever ?schema= spells, capitals included, so the pool must land on that exact schema. The
     // start-up option is quoted for this reason: unquoted, Postgres folds the name to lower case, search_path then names
@@ -477,7 +493,9 @@ describe("qa:TC missing SHO-3011: the APL-2742 pool reads the schema DATABASE_UR
     const spec = readFileSync(path.join(process.cwd(), "tests/e2e/stories/APL-2742.spec.ts"), "utf8");
     expect(spec).toContain('from "../helpers/local-db-pool"');
     expect(spec).toContain("localPgPool(process.env.DATABASE_URL)");
-    expect(spec).not.toContain("new pg.Pool(");
+    // AC1 covers every SQL read, so no second client may be built from DATABASE_URL either: a pg.Client drops ?schema=
+    // exactly as the pre-SHO-3011 pool did, and a ban on `new pg.Pool(` alone would let it through.
+    for (const construction of ["new pg.Pool(", "new pg.Client("]) expect(spec, construction).not.toContain(construction);
   });
 });
 
