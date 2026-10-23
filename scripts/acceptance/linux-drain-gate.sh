@@ -51,6 +51,31 @@
 #   3  REFUSED          not a Linux kernel -> "GATE=REFUSED reason=not-linux", no burst run
 #   4  NOT-ACCEPTANCE   a dev-mode run; never PASS
 #
+# LIMITS — WHAT THIS GATE DOES NOT PROTECT AGAINST (SHO-2689, W204)
+#
+# The threat model is OPERATOR ERROR on a host the deployer already controls, not malice. The five
+# in-scope mistakes are exactly the five conditions above, and each has a test in
+# scripts/acceptance/: the wrong platform, a dev build, an unbuilt tree, a mismatched release (the
+# checkout's HEAD, and the release /api/health echoes), and a burst off the pinned protocol.
+#
+# Everything below is OUT OF SCOPE on purpose. These are recorded limits, NOT defects to redesign
+# against: each assumes the operator has already rewritten the code that would have to catch it,
+# and no self-check survives that.
+#   - an operator who EDITS this script, release-identity.mjs or drain-burst.mjs. A rewritten gate
+#     is a different gate; a receipt is evidence for the committed file.
+#   - shimmed coreutils, or a forged / lying kernel marker (a bind-mounted /proc, a kernel that
+#     answers Linux when it is not). W184 moved the marker to bash builtins on procfs so a PATH
+#     `uname` cannot answer it; beyond that the gate trusts the kernel's own answer.
+#   - a sourced internal function with a forged token. W172 measured that a sourced
+#     production_run reached the build on darwin; W184 gave both runners their own kernel check
+#     and a token only main() mints. Reassigning either in a shell you control is your own code.
+#   - the deployment itself: that this is the right host, that the database is the intended one,
+#     or that the release was deployed at all. The gate measures a built release on Linux. The
+#     operator-facing copy of this list is scripts/acceptance/linux-drain-gate-runbook.md.
+#
+# The one thing that is NOT a limit: a real Linux amd64 kernel on a host you may run the build on.
+# Nothing in this file, and no test in scripts/acceptance/, substitutes for that run.
+#
 # OWNERSHIP: SHO-2689 / scripts/acceptance/**. The burst harness it drives is
 # scripts/drain-burst.mjs (N=100, SIGTERM at 40 ms, probes at +16/+143 ms).
 
@@ -111,7 +136,7 @@ TMP=""
 # could fake; `version` must ALSO start with "Linux", so faking the pair needs a writable
 # /proc, which is a different kernel decision altogether.
 #
-# WHAT PROVES THE LINUX BRANCH IS REACHABLE: linux-drain-gate.w184.test.mjs points
+# WHAT PROVES THE LINUX BRANCH IS REACHABLE: w184-platform.test.mjs points
 # platform_is_linux() at fixture files that say Linux and asserts it answers 0, and at fixtures
 # that say Darwin / nothing and asserts it answers 1 — so the check is two-sided, not "always
 # refuse". That is a SIMULATION of the Linux branch on a darwin host, and a simulation is not
