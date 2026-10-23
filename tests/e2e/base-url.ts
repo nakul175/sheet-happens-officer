@@ -17,6 +17,20 @@ const PRODUCTION_HOSTS = new Set([
 
 const UNREADABLE = "Refusing to run: the starting BASE_URL could not be read.";
 
+/**
+ * A value with any `user:pass@` userinfo removed, for use in messages (REVIEW-2917 F4). A target URL is not a
+ * credential, but a malformed one can carry userinfo, and this message lands in CI logs. Only the userinfo is removed:
+ * the host and path still identify the target. Handles `scheme://user:pass@`, `//user:pass@` and a bare `user:pass@host`.
+ */
+const USERINFO = /^([A-Za-z][A-Za-z0-9+.-]*:\/\/|\/\/)?[^/?#@\s]*@/;
+
+export function redactUserinfo(raw: string): string {
+  const userinfo = raw.match(USERINFO);
+  if (!userinfo) return raw;
+  const scheme = userinfo[1] ?? "";
+  return `${scheme}<redacted>@${raw.slice(userinfo[0].length)}`;
+}
+
 export type StartingBaseUrl = {
   underVitest: boolean;
   /** SHO_E2E_START_BASE_URL, or undefined when vitest.config.mts did not set it. Read only under Vitest. */
@@ -97,6 +111,6 @@ export const BASE_URL = resolveBaseUrl();
 
 if (!process.env.VITEST) {
   const host = hostOf(BASE_URL);
-  if (!host) throw new Error(`BASE_URL is not a URL: ${BASE_URL}`);
+  if (!host) throw new Error(`BASE_URL is not a URL: ${redactUserinfo(BASE_URL)}`);
   if (PRODUCTION_HOSTS.has(host)) throw new Error(`Refusing to run story tests against production (${host}).`);
 }

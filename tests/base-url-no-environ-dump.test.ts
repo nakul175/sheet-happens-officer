@@ -22,7 +22,7 @@
 // tests/no-proc-environ-2917.test.ts out. It is a superset of that file's scan: `violations` calls its
 // `environReaders` for the process-image cases this AST pass might miss, so one guard answers AC1/AC3.
 // No TC id is assigned on the issue. Follow-ups SHO-3031 and SHO-3032 are not exercised here (see BUG-2917.md).
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { lstatSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import ts from "typescript";
 import { cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -148,7 +148,11 @@ function filesUnder(dir: string): string[] {
   for (const name of readdirSync(dir)) {
     if (name === "node_modules") continue;
     const full = path.join(dir, name);
-    if (statSync(full).isDirectory()) out.push(...filesUnder(full));
+    // lstat, never stat (REVIEW-2917 F5): statSync follows a link, so a directory symlink under tests/ was traversed and
+    // its target scanned. A symlink is skipped outright: the guard scans the real files of this tree only.
+    const info = lstatSync(full);
+    if (info.isSymbolicLink()) continue;
+    if (info.isDirectory()) out.push(...filesUnder(full));
     else if (/\.(c|m)?[jt]sx?$/.test(name)) out.push(full);
   }
   return out;
