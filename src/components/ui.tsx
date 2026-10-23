@@ -24,9 +24,44 @@ export function Modal({ onClose, small, label, describedBy, children }: { onClos
     document.addEventListener("keydown", keys);
     return () => { document.removeEventListener("keydown", keys); document.body.style.overflow = before; prev?.focus?.(); };
   }, [onClose]);
+  // SHO-2738: on a phone the keyboard shortens the visible area, not the page, so the sheet is sized from visualViewport
+  // (--vvh/--vvt, the same pair the Concierge sheet uses) and the footer is pinned to the bottom of that area.
+  // On a desktop visualViewport is the window, so the dialog there is unchanged.
+  const scrim = useRef<HTMLDivElement>(null);
+  const dialog = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const vv = window.visualViewport;
+    const root = document.documentElement;
+    document.body.classList.add("vv-sheet");
+    const fit = () => {
+      if (vv) {
+        root.style.setProperty("--vvh", `${vv.height}px`);
+        root.style.setProperty("--vvt", `${vv.offsetTop}px`);
+      }
+      // Pinning the footer only helps if the sheet scrolls a focused field out from under it, so nudge the field back up.
+      const field = document.activeElement;
+      const sheet = dialog.current;
+      if (!sheet || !(field instanceof HTMLElement) || !sheet.contains(field) || field.closest(".actions")) return;
+      // The pin line: the sheet's padding ends this far above its bottom edge (see body.vv-sheet .modal in app.css).
+      const pin = sheet.getBoundingClientRect().bottom - parseFloat(getComputedStyle(sheet).paddingBottom || "0");
+      if (field.getBoundingClientRect().bottom > pin) field.scrollIntoView({ block: "nearest" });
+    };
+    fit();
+    vv?.addEventListener("resize", fit);
+    vv?.addEventListener("scroll", fit);
+    document.addEventListener("focusin", fit);
+    return () => {
+      document.body.classList.remove("vv-sheet");
+      document.removeEventListener("focusin", fit);
+      vv?.removeEventListener("resize", fit);
+      vv?.removeEventListener("scroll", fit);
+      root.style.removeProperty("--vvh");
+      root.style.removeProperty("--vvt");
+    };
+  }, []);
   return (
-    <div className="scrim" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className={`modal${small ? " sm" : ""}`} role="dialog" aria-modal="true" aria-label={label} aria-describedby={describedBy} tabIndex={-1} ref={ref} style={{ outline: "none" }}>
+    <div className="scrim" ref={scrim} onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className={`modal${small ? " sm" : ""}`} role="dialog" aria-modal="true" aria-label={label} aria-describedby={describedBy} tabIndex={-1} ref={(el) => { ref.current = el; dialog.current = el; }} style={{ outline: "none" }}>
         {children}
       </div>
     </div>

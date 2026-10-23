@@ -191,6 +191,19 @@ textarea.in.blocked-reason { display: block; margin-top: 6px; min-height: 0; lin
   .modal .bar .link { min-height: 44px; min-width: 44px; padding: 0 8px; }
 }
 
+/* SHO-2738 (APL-2555 AC5): with the keyboard open, the sheet follows visualViewport (--vvt/--vvh, set on <html> by the dialog)
+   so the focused description and the footer stay inside the visible area. Outside this block a desktop dialog never shows
+   a pinned footer, so desktop behaviour is unchanged. */
+@media (max-width: 599px), (pointer: coarse) {
+  body.vv-sheet .scrim { top: var(--vvt, 0px); bottom: auto; height: var(--vvh, 100dvh); overscroll-behavior: contain; }
+  body.vv-sheet .modal { min-height: 0; max-height: 100%; overflow-y: auto; overscroll-behavior: contain;
+    padding-bottom: calc(22px + var(--vvh, 100dvh) - 100% + env(safe-area-inset-bottom, 0px)); }
+  /* the pin line: the sheet's own padding ends this far above its bottom edge, so the sticky footer sits exactly there */
+  body.vv-sheet .modal .actions { position: sticky; bottom: calc(var(--vvh, 100dvh) - 100%); z-index: 2; background: var(--card);
+    margin: 0 -18px; padding: 10px 18px; border-top: 1px solid var(--line); }
+  body.vv-sheet .modal.sm { max-height: calc(var(--vvh, 100dvh) - 24vh); overflow-y: auto; }
+}
+
 /* SHO-US-22.2: 44 px tap areas on touch screens; the tick keeps its look. */
 .tick { position: relative; }
 @media (max-width: 1023px), (pointer: coarse) {
