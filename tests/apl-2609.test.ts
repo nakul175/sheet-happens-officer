@@ -243,7 +243,9 @@ describe("qa:TC missing APL-2609 CRM_VISIBLE hides deals from My tasks, search, 
     const says = `Your deal ${w.dealName} has ${w.dealTaskTitle} due, at stage ${STAGE}.`;
     const shown = async (u: Actor) => JSON.stringify((await chatState(u)).messages);
     setMode("all");
-    script(() => [say(says)]);
+    // The sentence is only relayed on a turn that read something (engine.ts buildReply: `records === 0` returns
+    // NOTHING_CHANGED, SHO-2693), so the fake model reads the person's own tasks first and then says it.
+    script(() => [tu("my_tasks", { filter: "all_open" })], () => [say(says)]);
     await sendMessage(w.ed, `ZZ-TEST which deals am I on ${w.tag}?`);
     expect(await shown(w.ed)).toContain(w.dealName);
     for (const mode of ["off", "admins"]) {
@@ -254,7 +256,8 @@ describe("qa:TC missing APL-2609 CRM_VISIBLE hides deals from My tasks, search, 
     // A turn while the CRM is hidden is shown, and the earlier answer is not replayed to the model.
     setMode("off");
     let replayed = "";
-    script((req) => { replayed = JSON.stringify(req.messages); return [say("Noted.")]; });
+    // Same reason: with the CRM hidden this turn still reads the plain task, so its reply is relayed and stays on record.
+    script(() => [tu("my_tasks", { filter: "all_open" })], (req) => { replayed = JSON.stringify(req.messages); return [say("Noted.")]; });
     await sendMessage(w.ed, `ZZ-TEST and now ${w.tag}?`);
     expect(replayed).toContain(`ZZ-TEST and now ${w.tag}?`);
     for (const word of [w.dealName, w.dealTaskTitle]) expect(replayed).not.toContain(word);
