@@ -38,6 +38,26 @@ test("no story spec or deal helper walks to a parent element", () => {
   assert.deepEqual(offenders, [], "use a role, test-id or label locator instead of a parent step");
 });
 
+// SHO-2996. The row names "line 18 of APL-2539", but the line number is not the contract and cannot be: the file moved
+// (+25/-8) and the panel is resolved on line 19 now. The contract is that AC1 names the deal panel through the one shared
+// role/test-id/label locator -- not by walking up from the Stage group and not by position. So this asserts the call site
+// rather than a line number, and it goes red for both forbidden forms: `stages.locator("..")` and a positional selector
+// such as `.first()`. The parent-step check above catches the first one in any spec; this one pins the call site the
+// ticket names, so a rewrite to a position cannot slip past a green suite.
+test("APL-2539 resolves the deal panel through the shared role locator, not a parent step or a position (SHO-2996)", () => {
+  const spec = readFileSync(join(STORIES, "APL-2539.spec.ts"), "utf8").split("\n");
+  const panels = spec.filter((line) => /^\s*const panel = /.test(line));
+  assert.ok(panels.length > 0, "APL-2539 must resolve the deal panel");
+  for (const line of panels) {
+    assert.match(
+      line,
+      /^\s*const panel = dealPanel\(\w+\.page\);$/,
+      'APL-2539 must name the panel through dealPanel(admin.page), the "Deal" region DealPanel.tsx renders; ' +
+        'not a parent walk such as locator(".."), not a positional selector such as .first()',
+    );
+  }
+});
+
 // APL-2540 AC1 and AC3 must resolve the SAME deal-panel region, so a locator change in one spec cannot silently point at a
 // different panel. That region is the one DealPanel.tsx puts the Stage group in.
 //
