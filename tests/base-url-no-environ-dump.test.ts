@@ -10,6 +10,14 @@
 //      `globalThis.process.env`, `globalThis["process"].env`, `const p = process; p.env`, and the same names again in a
 //      listing (`Object.keys(e)`), a dump (`console.log(e)`) or a spread (`{ ...e }`). A name bound to such an alias
 //      (`const also = e`) is followed too.
+//   4. REVIEW-2917 F1/F2, the routes that hand the environment to someone else instead of naming it here: a child
+//      process that prints it (`execSync("printenv")`, `spawnSync("env")`, `execSync("env | sort")`, `sh -c env`,
+//      `bash -c "env | sort"`), the module-level bindings (`import { env as e } from "node:process"`,
+//      `const { env: e } = process`, `require("node:process").env`). A command line that only READS NAMED variables stays
+//      allowed, as does the explicit `env:` allowlist a spawn passes (`{ env: { ...process.env, PORT } }`, `env: process.env`).
+// The one asymmetry, on purpose: a plain alias (`const e = process.env`) is reported only when the whole thing is used
+// (a dump, a listing, a spread), while an import, a destructuring of `env` out of `process` and `require(...).env` are
+// reported where they bind: those three exist only to move the whole object out of reach of a `process.env` scan.
 // The file names the banned forms in its own patterns and examples, so the scan leaves this file and the delegating
 // tests/no-proc-environ-2917.test.ts out. It is a superset of that file's scan: `violations` calls its
 // `environReaders` for the process-image cases this AST pass might miss, so one guard answers AC1/AC3.
@@ -27,6 +35,113 @@ export const OLD_GUARD = path.join("tests", "no-proc-environ-2917.test.ts");
 const TESTS_DIR = "tests";
 /** Call sites whose `env` option is a child process' environment rather than an object field that happens to be named env. */
 const CALLS = new Set(["spawn", "spawnSync", "execFile", "execFileSync", "exec", "execSync", "fork"]);
+/** Programs whose output is the whole environment, and the shells that can be asked to run one. */
+const ENV_DUMP_PROGRAMS = new Set(["env", "printenv"]);
+const SHELLS = new Set(["sh", "bash", "dash", "zsh", "ksh", "ash", "busybox"]);
+/** The child-process calls whose first argument is a shell command line, not a program name. */
+const SHELL_COMMAND_CALLS = new Set(["exec", "execSync"]);
+/** Modules that export the process object itself: `import { env } from "node:process"`, `require("process").env`. */
+const PROCESS_MODULES = ["node:process", "process"];
+
+/** The callee name of a call: `execSync(...)` and `cp.execSync(...)` are both `execSync`. */
+function callName(node: ts.CallExpression): string | null {
+  if (ts.isIdentifier(node.expression)) return node.expression.text;
+  if (ts.isPropertyAccessExpression(node.expression)) return node.expression.name.text;
+  return null;
+}
+
+/** A literal string's text; null for anything computed (`script`, `` `${body}` ``, `body.join("\n")`). */
+function literalText(node: ts.Node | undefined): string | null {
+  if (!node) return null;
+  if (ts.isStringLiteralLike(node)) return node.text;
+  return null;
+}
+
+/** The words a shell runs, one array per `;`, `&&`, `||` and `|` segment, leading `VAR=VAL` assignments dropped. */
+function shellSegments(script: string): string[][] {
+  return script
+    .split(/[;&|\n]+/)
+    .map((segment) => segment.trim().split(/\s+/).filter(Boolean))
+    .map((words) => {
+      let start = 0;
+      while (start < words.length - 1 && /^[A-Za-z_][A-Za-z0-9_]*=/.test(words[start])) start++;
+      return words.slice(start);
+    })
+    .filter((words) => words.length > 0);
+}
+
+/** A program token without its quotes, directory or suffix: `/usr/bin/env` -> `env`. */
+function programName(word: string): string {
+  const bare = word.replace(/^[`"']+|[`"']+$/g, "");
+  return (bare.split(/[\\/]/).pop() ?? bare).toLowerCase();
+}
+
+/** True when these segments print the environment, directly or inside a `sh -c` script. */
+function runsEnvDump(segments: string[][]): boolean {
+  return segments.some((words) => {
+    const program = programName(words[0]);
+    if (ENV_DUMP_PROGRAMS.has(program)) return true;
+    if (!SHELLS.has(program)) return false;
+    const flag = words.findIndex((word, position) => position > 0 && /^-[A-Za-z]*c[A-Za-z]*$/.test(word));
+    if (flag === -1 || flag + 1 >= words.length) return false;
+    return runsEnvDump(shellSegments(words.slice(flag + 1).join(" ")));
+  });
+}
+
+/**
+ * The command lines a child-process call runs: `execSync("printenv")` takes a whole shell command line, `spawn("sh",
+ * ["-c", "env"])` a program and its argv. Null when the command is computed rather than written here.
+ */
+function commandLines(call: ts.CallExpression): string[][] | null {
+  const name = callName(call);
+  if (!name || !CALLS.has(name)) return null;
+  const program = literalText(call.arguments[0]);
+  if (program === null) return null;
+  const argv: string[] = [];
+  const second = call.arguments[1];
+  if (second && ts.isArrayLiteralExpression(second)) {
+    for (const element of second.elements) {
+      const value = literalText(element);
+      if (value !== null) argv.push(value);
+    }
+  } else {
+    const value = literalText(second);
+    if (value !== null) argv.push(value);
+  }
+  // exec/execSync run a shell: the first argument is the whole command line, pipes and all.
+  if (SHELL_COMMAND_CALLS.has(name)) return shellSegments([program, ...argv].join(" "));
+  // spawn("env | sort", { shell: true }): a command line where a program name is expected.
+  if (/[;&|\n]/.test(program)) return shellSegments(program);
+  return [[program, ...argv]];
+}
+
+/** `require("node:process")` / `require("process")`: the process module itself. */
+function isProcessRequire(node: ts.Node): boolean {
+  return ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === "require"
+    && node.arguments.length === 1 && ts.isStringLiteralLike(node.arguments[0])
+    && PROCESS_MODULES.includes(node.arguments[0].text);
+}
+
+/** `require("node:process").env` / `require("process")["env"]`, with or without a chain. */
+function isRequiredEnv(node: ts.Node): boolean {
+  if (ts.isParenthesizedExpression(node) || ts.isNonNullExpression(node) || ts.isAsExpression(node)) return isRequiredEnv(node.expression);
+  const key = ts.isPropertyAccessExpression(node) ? node.name.text
+    : ts.isElementAccessExpression(node) && node.argumentExpression && ts.isStringLiteralLike(node.argumentExpression)
+      ? node.argumentExpression.text : null;
+  return key === "env" && (ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node)) && isProcessRequire(node.expression);
+}
+
+/** The `env` name a binding element takes: `{ env: e }`, `{ env }` and `import { env as e }` all bind the whole environment. */
+function bindsEnvName(element: ts.BindingElement | ts.ImportSpecifier): boolean {
+  return ((element.propertyName ?? element.name) as ts.Node).getText() === "env";
+}
+
+/** `import { env } from "node:process"` / `import { env as e } from "process"`. */
+function importsEnv(node: ts.Node): node is ts.ImportDeclaration {
+  return ts.isImportDeclaration(node) && ts.isStringLiteralLike(node.moduleSpecifier) && PROCESS_MODULES.includes(node.moduleSpecifier.text)
+    && Boolean(node.importClause && node.importClause.namedBindings && ts.isNamedImports(node.importClause.namedBindings)
+      && node.importClause.namedBindings.elements.some(bindsEnvName));
+}
 
 function filesUnder(dir: string): string[] {
   const out: string[] = [];
@@ -158,13 +273,20 @@ function collectBindings(source: ts.SourceFile): Bindings {
           if (namesProcessImage(init, bindings) || namesProcPiece(init) || (ts.isIdentifier(init) && bindings.proc.has(init.text))) bindings.proc.add(node.name.text);
         }
       }
-      // `const { ...all } = process.env` and `const { ...rest } = e`: a rest element of the whole environment is a copy.
-      if (ts.isObjectBindingPattern(node) || ts.isArrayBindingPattern(node)) {
+      // `import { env as e } from "node:process"`: `e` is the whole environment for the rest of the file.
+      if (importsEnv(node) && node.importClause && node.importClause.namedBindings && ts.isNamedImports(node.importClause.namedBindings)) {
+        for (const element of node.importClause.namedBindings.elements) if (bindsEnvName(element)) bindings.env.add(element.name.text);
+      }
+      // `const { env: e } = process` and `const { env } = require("node:process")`: the same, through a binding pattern.
+      if (ts.isObjectBindingPattern(node)) {
         const parent = node.parent;
-        const fromEnv = Boolean(parent && ts.isVariableDeclaration(parent) && parent.initializer
-          && (isWholeEnv(parent.initializer, bindings) || isEnvOfProcess(parent.initializer, bindings)));
-        if (fromEnv) {
-          for (const name of boundNames(node)) bindings.env.add(name);
+        const initializer = ts.isVariableDeclaration(parent) ? parent.initializer : undefined;
+        const fromProcess = initializer !== undefined && (isProcessObject(initializer, bindings) || isProcessRequire(initializer));
+        if (initializer !== undefined) {
+          const fromEnv = isWholeEnv(initializer, bindings) || isEnvOfProcess(initializer, bindings);
+          if (fromEnv || fromProcess) {
+            for (const name of boundNames(node)) bindings.env.add(name);
+          }
         }
       }
       // Assignment without a declaration: `let e; e = process.env;`
@@ -180,6 +302,8 @@ function collectBindings(source: ts.SourceFile): Bindings {
 
 function isWholeEnv(node: ts.Node, bindings?: Bindings): boolean {
   if (ts.isParenthesizedExpression(node) || ts.isAsExpression(node) || ts.isNonNullExpression(node)) return isWholeEnv(node.expression, bindings);
+  // `require("node:process").env` is the environment wherever `process.env` is, including in a dump or a listing.
+  if (isRequiredEnv(node)) return true;
   // A name bound to the whole environment in this file: `const e = process.env; console.log(e)`.
   if (bindings && ts.isIdentifier(node)) return bindings.env.has(node.text);
   if (bindings && isEnvOfProcess(node, bindings)) return true;
@@ -302,6 +426,15 @@ export function wholeEnvReads(files: { file: string; text: string }[]): Violatio
       }
       // 4. A whole environment listed in place: Object.keys(process.env)
       if (ts.isCallExpression(node) && isWholeEnv(node, bindings)) report(node, "whole environment listed");
+      // 5. A child process that prints the environment instead of naming a key: execSync("printenv"), spawnSync("env"),
+      //    execSync("env | sort"), spawn("sh", ["-c", "env"]), spawn("bash", ["-c", "env | sort"]).
+      if (ts.isCallExpression(node)) {
+        const lines = commandLines(node);
+        if (lines && runsEnvDump(lines)) report(node, "environment printed by a child process");
+      }
+      // 6. The whole environment lifted out of the process module or object: no `process.env` left to scan.
+      if (importsEnv(node)) report(node, "whole environment imported");
+      if (isRequiredEnv(node)) report(node, "whole environment accessed through require");
       // 4b. A REST element of a bound environment is a whole copy: `const e = process.env; const { ...rest } = e`. Naming
       // individual keys (`const { HOME } = e`) stays a named read, as it is for `const { HOME } = process.env`.
       if (ts.isObjectBindingPattern(node) && bindings && bindings.env.size > 0) {
@@ -309,6 +442,9 @@ export function wholeEnvReads(files: { file: string; text: string }[]): Violatio
         const initializer = ts.isVariableDeclaration(parent) ? parent.initializer : undefined;
         const fromEnv = initializer !== undefined && isWholeEnv(initializer, bindings);
         if (fromEnv && node.elements.some((element) => ts.isBindingElement(element) && Boolean(element.dotDotDotToken))) report(node, "whole environment destructured");
+        // `const { env: e } = process`: the same copy, written as a destructuring of the process object.
+        const fromProcess = initializer !== undefined && (isProcessObject(initializer, bindings) || isProcessRequire(initializer));
+        if (fromProcess && node.elements.some((element) => ts.isBindingElement(element) && bindsEnvName(element))) report(node, "whole environment destructured");
       }
       if (ts.isForInStatement(node) && isWholeEnv(node.expression, bindings)) report(node, "whole environment iterated");
       // 5. The process image file read through node:fs, however the path is built.
@@ -483,6 +619,65 @@ describe("REVIEW-2917 R2: one hop of indirection does not hide a whole-environme
   });
 });
 
+// REVIEW-2917 F1/F2: the routes that move the whole environment out of reach of a `process.env` scan — a child process
+// that prints it, and the module-level bindings. Every one of these was GREEN against the guard before it learned them
+// (verified by running this exact list against a664d55+f770d92), so each case below is a failing-then-passing test.
+const F1_F2_ROUTES = [
+  ["execSync printenv", `execSync("printenv");`],
+  ["spawnSync env", `spawnSync("env");`],
+  ["execSync env pipe", `execSync("env | sort");`],
+  ["sh -c env", `spawn("sh", ["-c", "env"]);`],
+  ["bash -c env pipe", `spawnSync("bash", ["-c", "env | sort"]);`],
+  ["absolute printenv path", `execFileSync("/usr/bin/printenv", ["HOME"]);`],
+  ["import env as e", `import { env as e } from "node:process"; void e;`],
+  ["destructure env from process", `const { env: e } = process; void e;`],
+  ["require node:process env", `void require("node:process").env;`],
+] as const;
+
+describe("REVIEW-2917 F1/F2: a child process that prints the environment and a module-level env binding are reported", () => {
+  for (const [form, text] of F1_F2_ROUTES) {
+    it(`qa:TC missing AC1: ${form} turns the guard RED`, () => {
+      expect(wholeEnvReads([{ file: "zz-f1.test.ts", text }]).map(({ form: hit }) => hit), `${form}: ${text}`).not.toEqual([]);
+    });
+  }
+
+  it("qa:TC missing AC1: a whole-environment command reached through a sh -c script is reported at its form", () => {
+    expect(wholeEnvReads([{ file: "zz-f1.test.ts", text: `spawn("sh", ["-c", "env | sort"]);` }])).toContainEqual(
+      expect.objectContaining({ form: "environment printed by a child process" }),
+    );
+    expect(wholeEnvReads([{ file: "zz-f1.test.ts", text: `import { env as e } from "node:process"; void e;` }])).toContainEqual(
+      expect.objectContaining({ form: "whole environment imported" }),
+    );
+    expect(wholeEnvReads([{ file: "zz-f1.test.ts", text: `void require("node:process").env;` }])).toContainEqual(
+      expect.objectContaining({ form: "whole environment accessed through require" }),
+    );
+  });
+
+  it("qa:TC missing AC1: ordinary commands, computed scripts and the explicit env: allowlist stay quiet", () => {
+    for (const text of [
+      // A child process that runs a normal command is not a dump.
+      `execSync("git rev-parse HEAD");`,
+      `spawnSync("npm", ["run", "typecheck"], { encoding: "utf8" });`,
+      `execFile("npx", ["next", "start", "-p", "3191"]);`,
+      // A shell that runs something else, including a script the file does not spell out.
+      `spawn("bash", ["-c", "npm test -- --config vitest.config.mts"]);`,
+      "const script = \"printenv\"; spawnSync(\"bash\", [\"-eo\", \"pipefail\", \"-c\", script]);",
+      `spawn(process.execPath, ["--import", "tsx", "-e", read]);`,
+      // The explicit env: allowlist, the whole point of keeping the guard usable.
+      `spawn(bin, args, { env: { ...process.env, PORT: "3192" } });`,
+      `spawnSync("npm", ["run", "typecheck"], { env: process.env });`,
+      `const env: NodeJS.ProcessEnv = { ...process.env }; spawn(bin, args, { env, detached: true });`,
+      // An `env` that is not the process environment: another module, another object, another key.
+      `import { env } from "./config"; void env;`,
+      `const { env: serverEnv } = config; void serverEnv;`,
+      `const { env } = options; void env;`,
+      `const e = { env: process.env.TASKBOARD_URL }; console.log(e.env);`,
+    ]) {
+      expect(wholeEnvReads([{ file: "zz-f1.test.ts", text }]), text).toEqual([]);
+    }
+  });
+});
+
 // REVIEW-2917 §4: the reviewer's method is a REAL file under a throwaway copy's tests/, then the same scan. These harnesses
 // do exactly that: copy this tree's tests/ (excluding the two guard files) into a temp dir, drop one file per case, scan.
 function withThrowawayTree<T>(body: (dir: string, drop: (file: string, text: string) => void) => T): T {
@@ -526,6 +721,14 @@ describe("REVIEW-2917: the scan runs against real files in a throwaway copy of t
     ["zz-e5.ts", "const e = process.env; JSON.stringify(e);"],
     ["zz-e6.ts", "const { ...all } = process.env; console.log(all);"],
     ["zz-e7.ts", "Object.getOwnPropertyNames(process.env);"],
+    // REVIEW-2917 F1/F2, as real files too.
+    ["zz-c1.ts", 'execSync("printenv");'],
+    ["zz-c2.ts", 'spawnSync("env");'],
+    ["zz-c3.ts", 'execSync("env | sort");'],
+    ["zz-c4.ts", 'spawn("sh", ["-c", "env"]);'],
+    ["zz-c5.ts", 'import { env as e } from "node:process"; void e;'],
+    ["zz-c6.ts", "const { env: e } = process; void e;"],
+    ["zz-c7.ts", 'void require("node:process").env;'],
   ];
 
   for (const [file, text] of ADVERSARIAL) {
