@@ -109,4 +109,15 @@ describe("w90 SHO-2693 disposition of 282e31d", () => {
     // ...and the sentence is assign-specific even though the missing person is a collaborator: recorded, not endorsed.
     expect(reply.text).toMatch(/Who should I assign it to/);
   });
+
+  it("w90/RESIDUAL: 'reassign' with no tool call still falls through to the model's words", async () => {
+    // Unchanged by 282e31d: the gate's new half is `turn.needsWho`, which only runTool sets, and the keyword half is
+    // the same /\bassign\b/ the commit does not touch. So the tool-less branch of B3 survives - recorded, not fixed.
+    const { lead } = await unassigned();
+    script(() => [say("I need a name first.")]);
+    const { messages } = await sendMessage(actor(lead), "Reassign all of them to me.");
+    const reply = lastAssistant(messages);
+    expect(reply.kind).toBe("text");
+    expect(reply.text).toBe("I need a name first.");
+  });
 });
