@@ -5,7 +5,7 @@
 // The live tests run the viewport checker in Chromium. They do not sign in, do not call a
 // deployed app, and do not read or write any database. No customer data is seeded.
 // The only skip is a missing SHO_QA_PASS.
-import { existsSync, mkdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import path from "node:path";
 import { test, expect } from "../support";
 import { collect } from "../../viewport/checks";
@@ -15,7 +15,11 @@ const PASS = process.env.SHO_QA_PASS ?? "";
 const ROOT = process.cwd();
 const WORKFLOW = path.join(ROOT, ".github/workflows/phone-checks.yml");
 const SUITE = path.join(ROOT, "tests/viewport/viewport.test.ts");
-const SHOTS = path.join(ROOT, "test-results/viewport");
+// W240: this spec owns its evidence folder. It used to point at test-results/viewport, which
+// tests/viewport/viewport.test.ts and tests/viewport/comments-phone.test.ts also write — one run's
+// screenshots landing in a folder two other files resolve. Every other story spec owns
+// test-results/<SPEC-ID>.
+const SHOTS = path.join(ROOT, "test-results/APL-2559");
 
 test.beforeAll(() => {
   test.skip(!PASS, "APL-2559: set SHO_QA_PASS (password for nakul17+ aliases).");
@@ -121,6 +125,10 @@ test("@static AC4: the phone-checks job sets timeout-minutes to 10 qa:TC missing
 test("AC5: a failure attaches screenshots of the failing state qa:TC missing", async ({ browser }) => {
   mkdirSync(SHOTS, { recursive: true });
   const shot = path.join(SHOTS, "APL-2559-fixed-width-320.png");
+  // W240 anti-cheat: remove this run's target first. The assertions below are existsSync + a size
+  // floor, and a PNG left by a previous run satisfied both even when this run's screenshot never
+  // wrote one. Deleting first makes the pass depend on the bytes this run produced.
+  rmSync(shot, { force: true });
   const ctx = await browser.newContext({ viewport: { width: 320, height: 700 } });
   const page = await ctx.newPage();
   try {
