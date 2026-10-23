@@ -16,6 +16,9 @@ import { fileURLToPath } from "node:url";
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const STORIES = join(ROOT, "tests/e2e/stories");
 const HELPERS = ["tests/e2e/helpers/claude-a.ts"];
+const HELPER = join(ROOT, "tests/e2e/helpers/claude-a.ts");
+const APL_2540 = join(ROOT, "tests/e2e/stories/APL-2540.spec.ts");
+const DEAL_PANEL = join(ROOT, "src/components/DealPanel.tsx");
 
 /** `.locator("..")` and `.locator('..')`, the whole-string parent step only: `"../x"` module paths are untouched. */
 const PARENT_STEP = /\.locator\(\s*["'`]\.\.["'`]\s*\)/;
@@ -35,7 +38,35 @@ test("no story spec or deal helper walks to a parent element", () => {
   assert.deepEqual(offenders, [], "use a role, test-id or label locator instead of a parent step");
 });
 
+// APL-2540 AC1 and AC3 must resolve the SAME deal-panel region, so a locator change in one spec cannot silently point at a
+// different panel. That region is the one DealPanel.tsx puts the Stage group in.
+//
+// SHO-2920+2921 (aa9b699) gave the panel a landmark of its own: DealPanel.tsx renders <section aria-label="Deal">, and a
+// named <section> is exposed as role=region, so the helper now names that panel instead of <main> (which also holds the
+// task list below it). The old expectation below still spelled the pre-aa9b699 locator,
+// getByRole("main").filter({ has: getByRole("group", { name: "Stage" }) }), and went red against a helper that is
+// correct. The three assertions keep the original intent: one shared locator, both ACs take the panel from it, and the
+// region it names is the one that holds the Stage group.
 test("the deal panel APL-2540 AC1 and AC3 share is the one that holds the Stage group", () => {
-  const helper = readFileSync(join(ROOT, "tests/e2e/helpers/claude-a.ts"), "utf8");
-  assert.match(helper, /export const dealPanel = \(page: Page\) => page\.getByRole\("main"\)\.filter\(\{ has: page\.getByRole\("group", \{ name: "Stage" \}\) \}\)/);
+  const helper = readFileSync(HELPER, "utf8");
+  assert.match(
+    helper,
+    /export const dealPanel = \(page: Page\) => page\.getByRole\("region", \{ name: "Deal", exact: true \}\)/,
+    "claude-a.ts must carry the one shared deal-panel locator, the \"Deal\" landmark DealPanel.tsx renders",
+  );
+
+  // Both ACs reach the panel through that helper and neither builds a locator of its own.
+  const panel = helper.split("\n").find((line) => line.startsWith("export const dealPanel = "));
+  assert.ok(panel, "claude-a.ts must export dealPanel");
+  const spec = readFileSync(APL_2540, "utf8").split("\n");
+  const uses = spec.filter((line) => /^\s*const \w+ = dealPanel\(/.test(line));
+  assert.equal(uses.length, 2, `APL-2540 AC1 and AC3 must both do \`const panel = dealPanel(page)\`, found ${uses.length}`);
+
+  // The region that locator resolves holds the Stage group: DealPanel.tsx nests role="group" aria-label="Stage" in the
+  // single <section aria-label="Deal">, and APL-2539 AC7 asserts that group is visible inside dealPanel().
+  const component = readFileSync(DEAL_PANEL, "utf8");
+  const section = component.match(/<section[^>]*aria-label="Deal"[^>]*>([\s\S]*?)<\/section>/);
+  assert.ok(section, 'DealPanel.tsx must render the panel as <section aria-label="Deal">, the region named "Deal"');
+  assert.match(section[1], /role="group"[^>]*aria-label="Stage"/, "the \"Deal\" region must hold the Stage group");
+  assert.match(panel, /name: "Deal", exact: true/, "the helper must name that region exactly, not a broader ancestor");
 });
