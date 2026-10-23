@@ -119,6 +119,19 @@ async function runModel(user: Actor, turn: Turn, userText: string, history: Mode
   return finalText;
 }
 
+/** What the person said, for the server's own question (SHO-2693). Trimmed and case-folded; never echoed back. */
+const asksForAssign = (request: string) => /\bassign/.test(request.toLowerCase());
+
+/**
+ * The server's question when a request asks to assign and named no person. The model's own words cannot be relied on
+ * here: a model that understood the rule answers without calling any tool, which used to leave a top-level kind "text"
+ * (APL-2513 recorded the same turn as "answer" when a find tool had run first, and got neither). The reply asks in the
+ * server's words, and its one option ("Never mind") means it is a real question rather than a dead end, so the next
+ * message is free to name the person. No card and no proposal is written: nothing changes until somebody is named.
+ */
+const WHO_QUESTION = "Who should I assign it to? Tell me the person's name and I will show you the card to confirm.";
+const whoQuestion = () => ({ kind: "choices" as const, text: WHO_QUESTION, choices: [{ id: "none", label: "Never mind" }] });
+
 function buildReply(turn: Turn, modelText: string, request: string): Stored {
   if (turn.card) {
     const c = turn.card;
@@ -147,6 +160,9 @@ function buildReply(turn: Turn, modelText: string, request: string): Stored {
     // Nothing was fetched: never let the model's own words stand in for data (SHO-US-8.2 AC2, AC4).
     return { kind: "answer", text: r.notFound > 0 ? "I can't find that." : "I found nothing." };
   }
+  // SHO-2693 (APL-2513 AC1): a request that asks to assign, and did not end in a card, must ask who. Nothing is written
+  // either way, so nothing changes until a person is named (AC2).
+  if (!turn.card && asksForAssign(request)) return whoQuestion();
   const text = modelText || "I could not work that out. Try asking in a different way.";
   return { kind: r.calls > 0 ? "answer" : "text", text: text.slice(0, 4000), ...(r.calls > 0 ? { links: linksFor(turn, text) } : {}) };
 }
