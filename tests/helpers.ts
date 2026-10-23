@@ -1,9 +1,14 @@
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { expect } from "vitest";
+import { outboxDir } from "./e2e/outbox";
 
 export const BASE = process.env.TASKBOARD_URL ?? "http://localhost:3000";
-export const OUTBOX = process.env.EMAIL_OUTBOX_DIR ?? ".outbox";
+// SHO-2897: no default. `.outbox` against this process's cwd is the same folder every other spec in the run reads,
+// so a spec that sent nothing could be satisfied by another spec's mail. Read through outboxDir() (./e2e/outbox.ts),
+// which fails loudly naming EMAIL_OUTBOX_DIR. An unset variable therefore leaves this empty, and a reader that uses it
+// directly fails instead of reading somebody else's folder.
+export const OUTBOX = process.env.EMAIL_OUTBOX_DIR ?? "";
 export const PW = "correct-horse-9";
 export const SUPER_EMAIL = "root.test@aplyd.com"; // the server must run with SUPER_ADMIN_EMAILS=root.test@aplyd.com
 const run = Date.now();
@@ -34,9 +39,10 @@ export class Client {
 const MAIL_WAIT_MS = 10_000;
 
 function verifyTokenOnce(email: string) {
+  const dir = outboxDir("tests/helpers.ts");
   let files: string[] = [];
-  try { files = readdirSync(OUTBOX).sort(); } catch { return null; }
-  const mails = files.map((f) => JSON.parse(readFileSync(path.join(OUTBOX, f), "utf8"))).filter((m) => m.to === email && /Verify/.test(m.subject));
+  try { files = readdirSync(dir).sort(); } catch { return null; }
+  const mails = files.map((f) => JSON.parse(readFileSync(path.join(dir, f), "utf8"))).filter((m) => m.to === email && /Verify/.test(m.subject));
   return mails.at(-1)?.text.match(/token=([\w-]+)/)?.[1] ?? null;
 }
 

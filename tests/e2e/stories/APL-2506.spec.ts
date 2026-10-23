@@ -8,6 +8,7 @@ import { execFileSync } from "node:child_process";
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { test, expect, zz, BASE_URL, type Api, type Later, type Page, type Who } from "../support";
+import { outboxDir } from "../outbox";
 import { PASS, passwordOk } from "./qa";
 
 // Pam has not published a TC hash. The marker is the literal "qa:TC missing".
@@ -25,7 +26,8 @@ async function version(who: { api: Api }, id: string) {
 }
 
 function mailFiles(email: string) {
-  const dir = process.env.EMAIL_OUTBOX_DIR ?? path.join(process.cwd(), ".outbox");
+  // SHO-2897: outboxDir() names EMAIL_OUTBOX_DIR when it is unset, instead of falling back to a ".outbox" every spec shares.
+  const dir = outboxDir("tests/e2e/stories/APL-2506.spec.ts");
   let files: string[] = [];
   try { files = readdirSync(dir); } catch { return new Set<string>(); }
   const want = email.toLowerCase();

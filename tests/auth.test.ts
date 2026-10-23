@@ -4,9 +4,11 @@
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
+import { outboxDir } from "./e2e/outbox";
 
 const BASE = process.env.TASKBOARD_URL ?? "http://localhost:3000";
-const OUTBOX = process.env.EMAIL_OUTBOX_DIR ?? ".outbox";
+// SHO-2897: no shared ".outbox" default; outboxDir() names EMAIL_OUTBOX_DIR when it is unset.
+const OUTBOX = () => outboxDir("tests/auth.test.ts");
 const run = Date.now();
 const PW = "correct-horse-9";
 
@@ -29,12 +31,12 @@ class Client {
 function mailsTo(email: string) {
   let files: string[] = [];
   try {
-    files = readdirSync(OUTBOX).sort();
+    files = readdirSync(OUTBOX()).sort();
   } catch {
     return [];
   }
   return files
-    .map((f) => JSON.parse(readFileSync(path.join(OUTBOX, f), "utf8")))
+    .map((f) => JSON.parse(readFileSync(path.join(OUTBOX(), f), "utf8")))
     .filter((m) => m.to === email)
     .map((m) => ({ subject: m.subject as string, token: (m.text as string).match(/token=([\w-]+)/)?.[1] ?? "" }));
 }

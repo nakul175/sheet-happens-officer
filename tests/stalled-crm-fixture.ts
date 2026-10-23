@@ -4,6 +4,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { expect } from "vitest";
 import { db } from "../src/lib/db";
+import { outboxDir } from "./e2e/outbox";
 import { account, istDate, type Account } from "./helpers";
 
 export type Mode = "unset" | "all" | "admins" | "off";
@@ -165,7 +166,8 @@ export async function expectStalledNotice(who: Account, deal: DealFix, exact: bo
 }
 
 export function expectNoDealMail(needles: string[]) {
-  const dir = process.env.EMAIL_OUTBOX_DIR ?? ".outbox";
+  // SHO-2897: no shared ".outbox" default; outboxDir() names EMAIL_OUTBOX_DIR when it is unset.
+  const dir = outboxDir("tests/stalled-crm-fixture.ts");
   let files: string[] = [];
   try { files = readdirSync(dir).filter((f) => f.endsWith(".json")); } catch { files = []; }
   for (const file of files) {

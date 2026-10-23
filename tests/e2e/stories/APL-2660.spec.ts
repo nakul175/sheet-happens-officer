@@ -8,10 +8,13 @@ import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { expect, test } from "@playwright/test";
 import { canDropOnSection, closeControlOffered, completeTickAllowed, moveMenuSections } from "@/lib/approver-ui";
+import { outboxDir } from "../outbox";
 
 // Same signup, task and version helpers as tests/helpers.ts. Inlined so Playwright does not load that file's Vitest import.
 const BASE = process.env.TASKBOARD_URL ?? "http://localhost:3000";
-const OUTBOX = process.env.EMAIL_OUTBOX_DIR ?? ".outbox";
+// SHO-2897: no shared ".outbox" default — a folder two specs both resolve lets one spec's mail satisfy the other's
+// assertion. outboxDir() names EMAIL_OUTBOX_DIR when it is unset.
+const OUTBOX = () => outboxDir("tests/e2e/stories/APL-2660.spec.ts");
 const PW = "correct-horse-9";
 const SUPER_EMAIL = "root.test@aplyd.com";
 const helperRun = Date.now();
@@ -40,8 +43,8 @@ class Client {
 
 function verifyToken(email: string) {
   let files: string[] = [];
-  try { files = readdirSync(OUTBOX).sort(); } catch { return null; }
-  const mails = files.map((f) => JSON.parse(readFileSync(path.join(OUTBOX, f), "utf8"))).filter((m) => m.to === email && /Verify/.test(m.subject));
+  try { files = readdirSync(OUTBOX()).sort(); } catch { return null; }
+  const mails = files.map((f) => JSON.parse(readFileSync(path.join(OUTBOX(), f), "utf8"))).filter((m) => m.to === email && /Verify/.test(m.subject));
   return mails.at(-1)?.text.match(/token=([\w-]+)/)?.[1] ?? null;
 }
 

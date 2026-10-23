@@ -1,16 +1,21 @@
 // Shared pieces for the epic story specs. No password is written here.
 // SHO_QA_PASS is the password for nakul17+ accounts these specs create.
-// Mail is read from EMAIL_OUTBOX_DIR (or .outbox), the same folder the dev server writes when Resend is off.
+// Mail is read from EMAIL_OUTBOX_DIR, the same folder the dev server writes when Resend is off.
+// SHO-2897: no default. A shared ".outbox" is a folder two specs in one run both resolve, so one spec's mail can satisfy
+// the other's assertion. outboxDir() names the variable when it is unset instead.
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import type { APIRequestContext, Browser, BrowserContext, Page } from "@playwright/test";
 import { api, expect, zz, RUN, BASE_URL, type Api, type Json } from "../support";
+import { outboxDir } from "../outbox";
 
 export { zz, RUN, BASE_URL, expect };
 export type { Api, Json };
 
 export const PASS = process.env.SHO_QA_PASS ?? "";
-const OUTBOX = process.env.EMAIL_OUTBOX_DIR ?? path.join(process.cwd(), ".outbox");
+
+/** The outbox this run was told to read, resolved at read time so an unset variable fails loudly (SHO-2897). */
+const outbox = () => outboxDir("tests/e2e/stories/qa.ts");
 
 export function passwordOk(pass: string) {
   return pass.length >= 8 && pass.length <= 128 && /[A-Za-z]/.test(pass) && /[0-9]/.test(pass);
@@ -33,13 +38,13 @@ type Mail = { to?: string; subject?: string; text?: string };
 
 function mailsTo(email: string): Mail[] {
   let files: string[] = [];
-  try { files = readdirSync(OUTBOX); } catch { return []; }
+  try { files = readdirSync(outbox()); } catch { return []; }
   const want = email.toLowerCase();
   const out: Mail[] = [];
   for (const file of files) {
     if (!file.endsWith(".json")) continue;
     try {
-      const mail = JSON.parse(readFileSync(path.join(OUTBOX, file), "utf8")) as Mail;
+      const mail = JSON.parse(readFileSync(path.join(outbox(), file), "utf8")) as Mail;
       if (mail.to?.toLowerCase() === want) out.push(mail);
     } catch { /* a half-written file */ }
   }
