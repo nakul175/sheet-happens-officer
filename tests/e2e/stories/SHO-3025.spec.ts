@@ -5,7 +5,7 @@
 // effect has run, and a dialog stacked over the sheet must take the Escape instead of sharing it.
 // Data: one ZZ-TEST project with one ZZ-TEST task, archived afterwards.
 import { test, expect, zz, login, BASE_URL } from "../support";
-import type { Browser } from "@playwright/test";
+import type { Browser, Locator } from "@playwright/test";
 
 async function phone(browser: Browser) {
   const ctx = await browser.newContext({
@@ -16,6 +16,20 @@ async function phone(browser: Browser) {
   const r = await ctx.request.post("/api/auth/signin", { data: { email: login("ADMIN").email, password: login("ADMIN").password } });
   expect(r.ok(), "sign in as the admin").toBe(true);
   return ctx;
+}
+
+/**
+ * SHO-3025: a visible dialog is not yet a dialog that answers Escape. The sheet at `?task=` is in the SERVER's
+ * HTML (measured: `aria-label="Task"` present, `body.vv-sheet` absent), so `toBeVisible()` is satisfied before the
+ * app has run. The Escape listener is added in the same layout effect that moves focus into the dialog
+ * (src/components/ui.tsx:47 and :72), so "the focus has landed in the dialog" is the condition that says the
+ * sheet can answer a key. Waiting on it is waiting on the product, not on a duration: with the JS chunks held
+ * 3 s, an Escape sent at `toBeVisible()` was dropped and the sheet stayed open; the same Escape sent after this
+ * wait closed it.
+ */
+async function answerable(dialog: Locator) {
+  await dialog.waitFor({ state: "visible" });
+  await expect.poll(() => dialog.evaluate((el) => el.contains(document.activeElement)), { message: "the dialog has taken the focus, so it is bound to the keyboard" }).toBe(true);
 }
 
 const TITLE = (label: string) => zz(`3025 ${label}`);
@@ -38,6 +52,7 @@ test("qa:TC missing SHO-3025 AC4: Escape closes the sheet and focus returns to t
   await page.keyboard.press("Enter");
   const sheet = page.getByRole("dialog", { name: "Task" });
   await expect(sheet).toBeVisible();
+  await answerable(sheet);
   await page.keyboard.press("Escape");
   await expect(sheet).toHaveCount(0);
   await expect(row, "focus is back on the task row").toBeFocused();
@@ -57,6 +72,7 @@ test("qa:TC missing SHO-3025 AC4: a dialog stacked over the sheet takes the Esca
   await sheet.getByRole("button", { name: "Move to Trash", exact: true }).click();
   const confirm = page.getByRole("dialog", { name: "Move to Trash?" });
   await expect(confirm).toBeVisible();
+  await answerable(confirm);
 
   await page.keyboard.press("Escape");
   await expect(confirm, "the dialog on top closes").toHaveCount(0);
