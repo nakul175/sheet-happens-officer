@@ -124,10 +124,13 @@ async function runModel(user: Actor, turn: Turn, userText: string, history: Mode
  *
  * The word "assign", not every word that starts with it: `/\bassign/` also matched "assigned", so a read-only
  * question — "Which tasks are assigned to me?" — threw away the answer the model had just produced and asked who to
- * assign instead. `assign`, `assign it`, `Assign "X" to Y` and `please assign X` still match; `assigned`,
- * `assignment`, `reassign` and `unassign` do not (they are what the person is asking *about*, not a request to assign).
+ * assign instead. `assign`, `assign it`, `Assign "X" to Y` and `please assign X` still match, and so does the same
+ * request spelled `reassign` (SHO-2693 w107: "Reassign it." with no person is the same request as "Assign it." with no
+ * person; trusting the model's prose there let it answer "Done - I reassigned it for you." for a write that never
+ * happened). `assigned`, `assignment`, `assigns` and `unassign` do not: the first three are what the person is asking
+ * *about*, and `unassign` asks a different question that no AC here covers.
  */
-const asksForAssign = (request: string) => /\bassign\b/.test(request.toLowerCase());
+const asksForAssign = (request: string) => /\b(?:re)?assign\b/.test(request.toLowerCase());
 
 /**
  * The server's question when a request asks to assign and named no person. The model's own words cannot be relied on
@@ -178,9 +181,8 @@ function buildReply(turn: Turn, modelText: string, request: string): Stored {
   // either way, so nothing changes until a person is named (AC2).
   //
   // Two gates, because one is not enough: `asksForAssign` covers a model that never called a tool (so no refusal ever
-  // happened), and `turn.needsWho` covers a model that did call one and was refused for naming no person — the case the
-  // wording misses ("reassign everything to me" contains no word boundary before "assign"). Reading needsWho is what
-  // makes that refusal signal load-bearing instead of write-only state.
+  // happened), and `turn.needsWho` covers a model that did call one and was refused for naming no person. Reading
+  // needsWho is what makes that refusal signal load-bearing instead of write-only state.
   if (turn.needsWho || asksForAssign(request)) return whoQuestion(request);
   const text = modelText || "I could not work that out. Try asking in a different way.";
   return { kind: r.calls > 0 ? "answer" : "text", text: text.slice(0, 4000), ...(r.calls > 0 ? { links: linksFor(turn, text) } : {}) };

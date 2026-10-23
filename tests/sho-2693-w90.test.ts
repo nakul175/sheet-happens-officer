@@ -110,14 +110,16 @@ describe("w90 SHO-2693 disposition of 282e31d", () => {
     expect(reply.text).toMatch(/Who should I assign it to/);
   });
 
-  it("w90/RESIDUAL: 'reassign' with no tool call still falls through to the model's words", async () => {
-    // Unchanged by 282e31d: the gate's new half is `turn.needsWho`, which only runTool sets, and the keyword half is
-    // the same /\bassign\b/ the commit does not touch. So the tool-less branch of B3 survives - recorded, not fixed.
+  it("w90/RESIDUAL: 'reassign' with no tool call asks who instead of trusting the model's words", async () => {
+    // At 282e31d this case pinned the opposite: kind "text" carrying the model's own sentence, because the gate's new
+    // half is `turn.needsWho`, which only runTool sets, and the keyword half was `/\bassign\b/`, which "reassign" misses.
+    // SHO-2693 w107 widened the keyword to `/\b(?:re)?assign\b/` (engine.ts:130): a tool-less "Reassign it." now gets
+    // the server's question, as the AC asks. Nothing was written before or after - AC2 was never at risk.
     const { lead } = await unassigned();
     script(() => [say("I need a name first.")]);
     const { messages } = await sendMessage(actor(lead), "Reassign all of them to me.");
     const reply = lastAssistant(messages);
-    expect(reply.kind).toBe("text");
-    expect(reply.text).toBe("I need a name first.");
+    expect(reply.kind).toBe("choices");
+    expect(reply.text).toMatch(/Who should I assign it to/);
   });
 });
