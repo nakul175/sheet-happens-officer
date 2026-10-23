@@ -73,6 +73,13 @@ case "$GATE_RUNS" in ''|*[!0-9]*) GATE_RUNS=5 ;; esac
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 BURST="$ROOT/scripts/drain-burst.mjs"
+# The ONE implementation of "is this directory the release" and "are these the same release".
+# This gate used to keep its own bash copies (production_precondition, release_matches) beside
+# this module, and W160 measured the copies drifting: a DIRECTORY named server.js was a release
+# to the module and a refusal to the gate. The gate now asks the module — it already runs node
+# for read_burst, for `next build` and for the harness — so a gate and its off-Linux evidence
+# cannot hold two different answers.
+IDENTITY="$ROOT/scripts/acceptance/release-identity.mjs"
 # Set by main() for the run; declared here so the functions can be sourced and exercised
 # by a test on any kernel without `set -u` tripping over it.
 TMP=""
@@ -198,51 +205,64 @@ harness_delay_ok() {
 
 # Is the release /api/health echoed the release under test? Equal, or a short SHA on one
 # side that is a prefix of the other (both at least 7 characters, the shortest unambiguous
-# abbreviation git itself allows).
+# abbreviation git itself allows). The RULE is not here: it is releaseMatches() in
+# scripts/acceptance/release-identity.mjs, and this asks it. `--match` exits 0 for a match and
+# 1 otherwise; anything else (node missing, bad arguments) is treated as no match, so the
+# gate fails closed.
 release_matches() {
-  local expected observed
-  expected="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"
-  observed="$(printf '%s' "$2" | tr '[:upper:]' '[:lower:]')"
-  [ -n "$expected" ] || return 1
-  [ -n "$observed" ] || return 1
-  [ "$expected" = "$observed" ] && return 0
-  [ "${#expected}" -ge 7 ] || return 1
-  [ "${#observed}" -ge 7 ] || return 1
-  case "$observed" in "$expected"*) return 0 ;; esac
-  case "$expected" in "$observed"*) return 0 ;; esac
-  return 1
+  node "$IDENTITY" --match "$1" "$2" >/dev/null 2>&1
+}
+
+# The c0-release condition of one run, as a predicate, so a test can drive it directly with
+# a document whose tree IS the release and whose /api/health names a DIFFERENT one.
+c0_release_ok() {
+  local sha="$1"
+  local reported="$2"
+  release_matches "$sha" "${reported#release=}"
 }
 
 # ---------------------------------------------------------------- the production precondition
 #
 # What "the deployed artifact" means, checked on the directory that will actually serve:
-#   - the production entry (server.js) is there;
+#   - the production entry (server.js) is there — as a regular file;
 #   - `next build` completed (`.next/BUILD_ID` is non-empty);
 #   - no dev-server artifacts (`.next/dev`) mixed in, which is what a `next dev` leaves and
 #     would make "production" a label rather than a fact.
-# Prints the GATE=FAIL line itself so the reason travels with the receipt.
+# The three rules are NOT written here. They are identityProblem() in
+# scripts/acceptance/release-identity.mjs — the module the off-Linux evidence runs — because two
+# copies of "is this the release" is how a gate and its evidence drift apart (W160 measured it:
+# a directory named server.js passed the module and failed the gate). This function asks the
+# module and translates its reason code back into the gate's own GATE=FAIL line, so the receipt
+# text is unchanged. It refuses if the module cannot answer at all: no answer is not a release.
 production_precondition() {
   local app="${1:-$ROOT}"
-  local entry="$app/$ENTRY"
-  local build_id=""
+  local answer="" status=0 reason="" build_id=""
 
-  if [ ! -f "$entry" ]; then
-    printf 'GATE=FAIL missing-production-entry (%s has no %s; a dev server is not the release)\n' "$app" "$ENTRY"
-    return 1
+  answer="$(node "$IDENTITY" "$app" 2>/dev/null)"
+  status=$?
+  if [ "$status" -eq 0 ]; then
+    build_id="${answer#*build-id=}"
+    build_id="${build_id%% *}"
+    printf 'PRECONDITION=production build-id=%s entry=%s\n' "$build_id" "$ENTRY"
+    return 0
   fi
-  if [ -f "$app/.next/BUILD_ID" ]; then
-    build_id="$(tr -d '[:space:]' <"$app/.next/BUILD_ID")"
-  fi
-  if [ -z "$build_id" ]; then
-    printf 'GATE=FAIL missing-build-id (%s/.next/BUILD_ID is absent: run next build in this directory first)\n' "$app"
-    return 1
-  fi
-  if [ -e "$app/.next/dev" ]; then
-    printf 'GATE=FAIL dev-artifacts-present (%s/.next/dev exists: the serving process would be a dev server, not the release)\n' "$app"
-    return 1
-  fi
-  printf 'PRECONDITION=production build-id=%s entry=%s\n' "$build_id" "$ENTRY"
-  return 0
+
+  reason="$(printf '%s\n' "$answer" | sed -n 's/^RELEASE-IDENTITY=not-release reason=\([a-z-]*\).*$/\1/p')"
+  case "$reason" in
+    missing-production-entry)
+      printf 'GATE=FAIL missing-production-entry (%s has no %s; a dev server is not the release)\n' "$app" "$ENTRY"
+      ;;
+    missing-build-id)
+      printf 'GATE=FAIL missing-build-id (%s/.next/BUILD_ID is absent: run next build in this directory first)\n' "$app"
+      ;;
+    dev-artifacts-present)
+      printf 'GATE=FAIL dev-artifacts-present (%s/.next/dev exists: the serving process would be a dev server, not the release)\n' "$app"
+      ;;
+    *)
+      printf 'GATE=FAIL release-identity-unavailable (%s could not answer for %s; that is not a release)\n' "$IDENTITY" "$app"
+      ;;
+  esac
+  return 1
 }
 
 
@@ -429,7 +449,7 @@ EOF
         printf 'GATE=FAIL c0-serving run=%s %s\n' "$run" "$serving"
         ok=false
       fi
-      if ! release_matches "$sha" "${release#release=}"; then
+      if ! c0_release_ok "$sha" "$release"; then
         printf 'GATE=FAIL c0-release run=%s %s expected=%s\n' "$run" "$release" "$sha"
         ok=false
       fi
@@ -563,14 +583,16 @@ main() {
     printf 'GATE=FAIL missing-database-url (set it in the environment; this gate never prints it)\n'
     return 1
   fi
-  # The SHA is the build the receipt is attached to. When git can answer, it must agree.
+  # The SHA is the build the receipt is attached to. When git can answer, it must agree — by the
+  # same rule as c0-release (one implementation, in the module), so a 4-character abbreviation
+  # cannot satisfy this check and then fail the health echo later.
   local head
   head="$(git -C "$ROOT" rev-parse HEAD 2>/dev/null || true)"
   if [ -n "$head" ]; then
-    case "$head" in
-      "$sha"*) : ;;
-      *) printf 'GATE=FAIL release-head-mismatch (requested %s, HEAD is %s)\n' "$sha" "$head"; return 1 ;;
-    esac
+    if ! release_matches "$sha" "$head"; then
+      printf 'GATE=FAIL release-head-mismatch (requested %s, HEAD is %s)\n' "$sha" "$head"
+      return 1
+    fi
   fi
 
   printf 'GATE=MODE mode=%s\n' "$mode"

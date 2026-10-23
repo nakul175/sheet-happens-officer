@@ -89,6 +89,22 @@ test("a directory without the production entry is not the release, whatever else
   }
 });
 
+// The gate tested the entry with `[ -f ]`, this probe with existsSync: a DIRECTORY called
+// server.js passed here and was refused there. Two implementations of one question, already
+// disagreeing. The gate now asks this module, so the probe must be at least as strict as the
+// gate ever was — and this case is what proves the strictness survived the unification.
+test("a directory named server.js is not the production entry", () => {
+  const t = tempTree();
+  try {
+    mkdirSync(path.join(t.root, ".next"), { recursive: true });
+    writeFileSync(path.join(t.root, ".next", "BUILD_ID"), "abc12345");
+    mkdirSync(path.join(t.root, "server.js"), { recursive: true });
+    assert.equal(identityProblem(t.root), "missing-production-entry");
+  } finally {
+    t.done();
+  }
+});
+
 // ---------------------------------------------------------------- 2. the release comparison
 
 test("release_matches rule: equal, or a >=7-character prefix either way; never empty", () => {

@@ -20,6 +20,8 @@ import { spawnSync } from "node:child_process";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
+import { ENTRY, releaseMatches } from "./release-identity.mjs";
+
 const script = fileURLToPath(new URL("./linux-drain-gate.sh", import.meta.url));
 const source = readFileSync(script, "utf8");
 
@@ -302,6 +304,126 @@ test("release_matches refuses a different release, an absent one, or a too-short
   assert.equal(matches("abcdef1234567890", "none"), 1, "no release echoed");
   assert.equal(matches("abcdef1234567890", ""), 1, "empty echo");
   assert.equal(matches("abcdef1", "abc"), 1, "an abbreviation under 7 characters is not unambiguous");
+});
+
+// The gate's release_matches is now a call into the module, so the anti-drift pin is that the
+// two answer identically on the pairs that decide c0-release — including the ones where a copy
+// would most plausibly drift (case, direction of the prefix, the 7-character floor, empty).
+test("the gate's comparison is the module's comparison, pair for pair", () => {
+  const pairs = [
+    ["abcdef1234567890", "abcdef1234567890"],
+    ["abcdef1", "abcdef1234567890"],
+    ["abcdef1234567890", "abcdef1"],
+    ["ABCDEF1234567890", "abcdef1234567890"],
+    ["abcdef1234567890", "abcdef1234567891"],
+    ["abcdef1", "abc"],
+    ["abcdef1234567890", "none"],
+    ["abcdef1234567890", ""],
+    ["", "abcdef1234567890"],
+    ["", ""],
+    ["d08e66abe2eb", null],
+  ];
+  for (const [expected, observed] of pairs) {
+    const shell = matches(expected ?? "", observed ?? "");
+    const module = releaseMatches(expected, observed) ? 0 : 1;
+    assert.equal(shell, module, `gate and module disagree on ${JSON.stringify([expected, observed])}`);
+  }
+});
+
+// The one place a release comparison could still hide: the gate's ENTRY constant. The module
+// is the single source, so the shell's copy must be the same string.
+test("the gate's ENTRY is the module's ENTRY", () => {
+  const shellEntry = /^ENTRY='([^']+)'$/m.exec(source)?.[1];
+  assert.ok(shellEntry, "the gate declares ENTRY");
+  assert.equal(shellEntry, ENTRY, "the gate and the module must name the same production entry");
+});
+
+// ---------------------------------------------------------------- 5b. a DIFFERENT release
+//
+// The packet's missing case: the tree under test IS a built release, the burst is clean, and
+// /api/health echoes some OTHER release. Nothing but c0-release can catch it, so this drives
+// run_bursts with a stub harness that returns such a document — otherwise the branch is only
+// reachable inside a real Linux run, which is exactly how a gate's one identity condition goes
+// untested. The control run uses the same document with the release under test in it.
+const RELEASE_UNDER_TEST = "abcdef1234567890";
+
+function stubBurst(dir) {
+  const file = path.join(dir, "stub-burst.mjs");
+  writeFileSync(
+    file,
+    `process.stdout.write(JSON.stringify({
+  n: 100,
+  sigtermDelayMs: 40,
+  inFlight: { requested: 100, non200: 0, statuses: { 200: 100 } },
+  afterSigterm: { late16: "refused", late143: "refused" },
+  exit: { code: 0, signal: null },
+  drainedLine: "logged",
+  shutdownLines: ["graceful shutdown: drained in-flight requests"],
+  serving: { entry: "server.js", nodeEnv: "production", buildId: "present", devArtifacts: false },
+  release: process.env.STUB_RELEASE ?? null,
+}) + "\\n");
+`,
+  );
+  return file;
+}
+
+// One production burst against a stub harness, through the gate's own loop.
+function burstWith(release, app, workDir) {
+  const out = spawnSync(
+    "bash",
+    [
+      "-c",
+      'source "$1"; BURST="$2"; TMP="$3"; GATE_RUNS=1; run_bursts production "$4" "$5"; printf "RC=%s\\n" "$?"',
+      "--",
+      script,
+      stubBurst(workDir),
+      workDir,
+      RELEASE_UNDER_TEST,
+      app,
+    ],
+    { encoding: "utf8", env: { ...process.env, STUB_RELEASE: release } },
+  );
+  return { stdout: out.stdout, stderr: out.stderr, status: out.status };
+}
+
+function builtReleaseDir(dir) {
+  mkdirSync(path.join(dir, ".next"), { recursive: true });
+  writeFileSync(path.join(dir, "server.js"), "// entry\n");
+  writeFileSync(path.join(dir, ".next", "BUILD_ID"), "sRxBtLUUZRc5LUDXn1GTm\n");
+  return dir;
+}
+
+test("a built release that reports a DIFFERENT release fails c0-release and cannot PASS", () => {
+  const work = mkdtempSync(path.join(tmpdir(), "sho-gate-c0-release-"));
+  try {
+    const app = builtReleaseDir(path.join(work, "app"));
+    const got = burstWith("deadbeefdeadbeef", app, work);
+    assert.match(
+      got.stdout,
+      new RegExp(`^GATE=FAIL c0-release run=1 release=deadbeefdeadbeef expected=${RELEASE_UNDER_TEST}$`, "m"),
+      got.stdout,
+    );
+    assert.match(got.stdout, /^RC=1$/m, "run_bursts reports evidence that did not hold");
+    assert.ok(!got.stdout.includes("GATE=PASS"), "a differing release must never pass");
+
+    // …and that evidence is what gate_verdict() turns into the verdict: FAIL, never PASS.
+    assert.deepEqual(verdict("Linux", "production", "false"), { verdict: "FAIL", status: 1 });
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
+});
+
+test("the same built release reporting ITSELF passes c0-release, so the case above is not vacuous", () => {
+  const work = mkdtempSync(path.join(tmpdir(), "sho-gate-c0-release-ok-"));
+  try {
+    const app = builtReleaseDir(path.join(work, "app"));
+    const got = burstWith(RELEASE_UNDER_TEST, app, work);
+    assert.ok(!got.stdout.includes("GATE=FAIL c0-release"), got.stdout);
+    assert.match(got.stdout, /^RC=0$/m, "every condition of the run held");
+    assert.ok(!got.stdout.includes("GATE=PASS"), "run_bursts never prints the verdict, production_run does");
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
 });
 
 test("read_burst maps a clean production burst to every satisfied condition", () => {
