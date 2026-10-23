@@ -190,7 +190,51 @@ test("the marker scanner is not fooled by the case of a marker", () => {
   assert.match(res.stdout, /^ENV_CONTAMINATED$/m);
 });
 
-// Rollback promises "return the slot to its current (stopped) state". It gated the stop on
+// The marker scanner must be able to scan an explicit FILE, not only a directory. The unit loads four
+// EnvironmentFile sources; the fourth, current/release.env, is created by phase 2 AFTER R4, so it cannot
+// be covered by a scan of the env dir. Scanning 3 of 4 sources is the gap this pins shut.
+test("the marker scanner scans an explicit env file, including through a symlink", () => {
+  const dir = mkdtempSync(join(tmpdir(), "sho-marker-file-"));
+  writeFileSync(join(dir, "release.env"), "DATABASE_URL=postgres://doadmin@db:25061/defaultdb\n");
+  const direct = spawnSync("bash", [SCAN, join(dir, "release.env")], { encoding: "utf8" });
+  assert.notEqual(direct.status, 0, "an explicit contaminated file must not scan clean");
+  assert.match(direct.stdout, /^PROD_MARKER_COUNT=1$/m);
+  assert.match(direct.stdout, /^ENV_CONTAMINATED$/m);
+
+  const link = join(dir, "release-link.env");
+  symlinkSync(join(dir, "release.env"), link);
+  const viaLink = spawnSync("bash", [SCAN, link], { encoding: "utf8" });
+  assert.notEqual(viaLink.status, 0, "a symlinked explicit file must not scan clean");
+});
+
+// The fourth EnvironmentFile source. The unit must name all four, keep every path inside the slot tree,
+// and carry one fail-closed guard per source so release.env is re-checked on every start.
+test("the unit guards all four EnvironmentFile sources, including current/release.env", () => {
+  const plan = run(OPTION_R, ["--check"]);
+  assert.equal(plan.status, 0, plan.stderr);
+  const envLines = plan.stdout.split("\n").filter((l) => l.startsWith("EnvironmentFile="));
+  assert.equal(envLines.length, 4, "db, app, local and current/release.env");
+  assert.ok(envLines.some((l) => l.includes("/current/release.env")), "release.env must be named");
+  for (const line of envLines) {
+    const path = line.replace(/^EnvironmentFile=-?/, "");
+    assert.match(path, /^\/home\/shoslot\/pr9\/(env|current)\//, `env source outside the slot tree: ${path}`);
+  }
+  const guards = plan.stdout.split("\n").filter((l) => l.startsWith("ExecStartPre="));
+  assert.equal(guards.length, 4, "one guard per source");
+  for (const guard of guards) {
+    assert.match(guard, /test -r /, "unreadable source must fail closed");
+    assert.match(guard, /grep -qEi -- "defaultdb\|doadmin\|25061\|sho-prod-pool"/, "the marker set");
+  }
+});
+
+// W59-F4's contract: exit 2 after a mutation must not read as "nothing changed". The refusal line now
+// carries whether the host was already modified, so the operator knows whether --rollback is required.
+test("a refusal reports whether the host was already mutated", () => {
+  const src = read(OPTION_R);
+  assert.match(src, /REFUSING \(partial=%s\)/, "the refusal line must carry the partial flag");
+  assert.match(src, /MUTATED=1/, "the first mutation must raise it");
+  assert.match(src, /MUTATED:-0/, "fail() must read it");
+});
 // `[ -e "$UNIT_PATH" ]`, so a host whose unit FILE is already gone but whose unit is still ACTIVE
 // made no stop call at all and printed ROLLBACK_OK, exit 0 — a live slot reported as rolled back.
 // Run against a sandbox copy: every path redirected into a temp dir, systemctl stubbed to answer
@@ -198,16 +242,18 @@ test("the marker scanner is not fooled by the case of a marker", () => {
 test("rollback refuses to report success while the unit is still active", () => {
   // Two runs, so the assertion cannot be satisfied by "the script simply failed": the stopped host
   // must still roll back cleanly, and the live one must refuse. Same sandbox, different systemd.
-  function rollbackWith(state) {
+  function rollbackWith(state, { link = false } = {}) {
     const dir = mkdtempSync(join(tmpdir(), "sho-rollback-"));
-    for (const sub of ["lib", "unit", "sudoers", "bin", join("home", "shoslot", "pr9")]) {
+    for (const sub of ["lib", "unit", "sudoers", "bin", "wants", join("home", "shoslot", "pr9")]) {
       mkdirSync(join(dir, sub), { recursive: true });
     }
+    if (link) symlinkSync(join(dir, "unit", "sho-pr9.service"), join(dir, "wants", "sho-pr9.service"));
     const scan = join(dir, "lib", "prod-marker-scan.sh");
     copyFileSync(SCAN, scan);
     chmodSync(scan, 0o755); // the script prechecks `[ -x "$MARKER_SCAN" ]`; without +x it never reaches R7
     const patched = read(OPTION_R)
       .replaceAll("/etc/systemd/system/sho-pr9.service", join(dir, "unit", "sho-pr9.service"))
+      .replaceAll("/etc/systemd/system/multi-user.target.wants", join(dir, "wants"))
       .replaceAll("/etc/sudoers.d/50-sho-pr9", join(dir, "sudoers", "50-sho-pr9"))
       .replaceAll("/home/shoslot", join(dir, "home", "shoslot"))
       .replace(/^\[ "\$\(id -u\)" -eq 0 \].*$/m, '[ -n "$FAKE_ROOT" ] || fail "needs root"')
@@ -237,6 +283,14 @@ test("rollback refuses to report success while the unit is still active", () => 
   const stopped = rollbackWith("inactive");
   assert.match(stopped.stdout, /ROLLBACK_OK/, stopped.stderr);
   assert.equal(stopped.status, 0, stopped.stderr);
+
+  // W59-F5: `systemctl enable` leaves a wants symlink. A rollback that removes the unit file but not the
+  // link leaves systemd starting a unit that no longer exists. The link must be gone afterwards.
+  const withLink = rollbackWith("inactive", { link: true });
+  assert.match(withLink.stdout, /ROLLBACK_OK/, withLink.stderr);
+  assert.equal(withLink.status, 0, withLink.stderr);
+  // The sandbox path is derived from the temp dir the run used; assert on the script's own booleans.
+  assert.match(withLink.stdout, /unit_disabled=1/, "the enable-symlink must be gone after rollback");
 });
 
 // The proof's own header: "a denial alone proves nothing: a missing file is also denied ... PASS

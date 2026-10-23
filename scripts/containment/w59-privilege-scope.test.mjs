@@ -45,34 +45,35 @@ function sudoersRule() {
   return rule;
 }
 
-// F1 — the grant, as the artefact renders it. A trailing `*` in a sudoers command-argument pattern is a
-// shell-style wildcard over the WHOLE remaining argument string (sudoers(5)); it does not stop at the next
-// flag. So `-u sho-pr9 *` and `status sho-pr9 *` pin the first two words and then accept anything.
-test("W59-F1: R5's sudoers rule pins a unit name but leaves two entries open-ended with a bare wildcard", () => {
+// F1 — the grant, as the artefact renders it. The previous form ended two entries in a bare `*`, which in
+// sudoers is a shell-style wildcard over the WHOLE remaining argument string (sudoers(5)) — so
+// `journalctl -u sho-pr9 *` was "read any journal on the host as root". The fix pins literal arguments.
+test("W59-F1: R5's sudoers rule pins literal arguments and contains no wildcard", () => {
   const rule = sudoersRule();
-  assert.match(rule, /systemctl status sho-pr9 \*/, "status <unit> * is open-ended");
-  assert.match(rule, /journalctl -u sho-pr9 \*$/, "journalctl -u <unit> * is open-ended");
+  assert.doesNotMatch(rule, /\*/, "no wildcard may remain in a sudoers grant");
+  assert.match(rule, /systemctl is-active sho-pr9/, "a fixed liveness query, not `status <unit> *`");
+  assert.match(rule, /journalctl -u sho-pr9 --no-pager -n 500/, "fixed log window");
+  assert.match(rule, /journalctl -u sho-pr9 --no-pager --since -24h/, "fixed time window");
   // The exact bytes matter: this string is what a human is asked to install into /etc/sudoers.d.
   assert.equal(
     rule,
     "deploy ALL=(root) NOPASSWD: /usr/bin/systemctl restart sho-pr9, " +
       "/usr/bin/systemctl start sho-pr9, /usr/bin/systemctl status sho-pr9, " +
-      "/usr/bin/systemctl status sho-pr9 *, /usr/bin/journalctl -u sho-pr9 *",
+      "/usr/bin/systemctl is-active sho-pr9, " +
+      "/usr/bin/journalctl -u sho-pr9 --no-pager -n 500, " +
+      "/usr/bin/journalctl -u sho-pr9 --no-pager --since -24h",
   );
 });
 
-// F2 — quantify it. Two of the five comma-separated entries end in `*`; the wildcard is copied from the
-// pre-existing per-unit pattern, so this artefact would make it the tenth instance of the same defect.
-test("W59-F2: two of five granted command forms are wildcard-open (measured, not asserted in prose)", () => {
+// F2 — quantify it. Six fixed command forms, none open-ended. A future edit that reintroduces a wildcard
+// (the form nine pre-existing per-unit entries still use) fails here.
+test("W59-F2: every granted command form is closed (measured, not asserted in prose)", () => {
   const rule = sudoersRule();
   const entries = rule.slice(rule.indexOf("NOPASSWD:") + "NOPASSWD:".length).split(",").map((s) => s.trim());
-  assert.equal(entries.length, 5);
+  assert.equal(entries.length, 6);
   const openEnded = entries.filter((e) => e.endsWith("*"));
-  assert.deepEqual(openEnded, [
-    "/usr/bin/systemctl status sho-pr9 *",
-    "/usr/bin/journalctl -u sho-pr9 *",
-  ]);
-  assert.equal(openEnded.length, 2);
+  assert.deepEqual(openEnded, []);
+  assert.equal(openEnded.length, 0);
 });
 
 
@@ -109,21 +110,15 @@ test("W59-F4: `fail` (exit 2) is reachable after the first mutation, so exit 2 d
 });
 
 // F5 — rollback completeness. `systemctl enable` writes a wants symlink; only `systemctl disable` removes it.
-// R7 removes UNIT_PATH directly and tolerates a failing `disable` (:172 `|| say "note: unit was not running"`),
-// then reports ROLLBACK_OK from three booleans (:193-199) that do not include the symlink. A disable that
-// failed therefore leaves the host enabled-for-a-unit-that-does-not-exist and still prints success.
-test("W59-F5 (todo): R7 can report ROLLBACK_OK with the enable-symlink still in place", {
-  todo:
-    "R7 checks UNIT_PATH, the account and the sudoers fragment; it never checks " +
-    "multi-user.target.wants/sho-pr9.service, and :172 treats a failed `disable` as 'was not running'. " +
-    "The fix edits the artefact under review, which this packet's BOUNDARY forbids, so it is tracked here " +
-    "rather than applied.",
-}, () => {
-  // Deliberately a boolean, not assert.match: the failure message must not dump the whole script.
-  assert.ok(
-    body().includes("multi-user.target.wants"),
-    "R7 must verify the enable-symlink, not just the unit file",
-  );
+// R7 removes UNIT_PATH directly, so a failed `disable` used to leave the host enabled-for-a-unit-that-does-
+// not-exist and still print success from booleans that did not include the symlink. The fix removes the link
+// explicitly and makes `unit_disabled` part of the verdict.
+test("W59-F5: rollback verifies the enable-symlink, not just the unit file", () => {
+  const src = body();
+  assert.match(src, /multi-user\.target\.wants/, "R7 must name the enable-symlink");
+  assert.match(src, /rm -f "\$ENABLE_LINK"/, "R7 must remove it explicitly");
+  assert.match(src, /unit_disabled=1/, "the rollback verdict must compute it");
+  assert.match(src, /unit_disabled" -eq 1 \]/, "and require it to be 1");
 });
 
 // F6 — the script's D4 claim: "the resolved absolute path is written into the sudoers rule, so a different
@@ -131,9 +126,9 @@ test("W59-F5 (todo): R7 can report ROLLBACK_OK with the enable-symlink still in 
 // non-empty at :159. Not true for journalctl: JOURNALCTL_BIN is resolved at :160 and never checked, and
 // render_sudoers (:118) falls back to `/usr/bin/journalctl` — a rule pinned to a path that may not exist,
 // which sudo silently declines to match. That is exactly the failure mode D4 says it prevents.
-test("W59-F6: the journalctl path is resolved but never asserted, so the rule can be silently inert", () => {
+test("W59-F6: the journalctl path is resolved and asserted, so the rule cannot be silently inert", () => {
   const src = body();
   assert.match(src, /JOURNALCTL_BIN=\$\(command -v journalctl \|\| true\)/, "resolved");
-  assert.doesNotMatch(src, /\[ -n "\$JOURNALCTL_BIN" \]/, "never asserted (contrast :159 for systemctl)");
-  assert.match(src, /JOURNALCTL_BIN:-\/usr\/bin\/journalctl/, "falls back to an unverified absolute path");
+  assert.match(src, /\[ -n "\$JOURNALCTL_BIN" \]/, "asserted non-empty (as systemctl already was)");
+  assert.match(src, /JOURNALCTL_BIN:-\/usr\/bin\/journalctl/, "the fallback remains unreachable after the assert");
 });

@@ -36,7 +36,8 @@
 #   bash slot9-optionR.sh --refresh-env   # also overwrite the copied slot env from the deploy originals
 #   bash slot9-optionR.sh --rollback      # R7: return the slot to its current (stopped) state
 #
-# EXIT CODES: 0 done · 2 refused (precondition) · 3 env contaminated · 4 phase-2 code missing
+# EXIT CODES: 0 done · 2 refused (the line says partial=0 or partial=1) · 3 env contaminated · 4 phase-2 code missing
+# A refusal with partial=1 means R1/R2/R3 already changed the host: run --rollback before anything else.
 # NEVER prints a value from an env file. Output is uids, counts, booleans and systemd property names.
 set -euo pipefail
 
@@ -49,6 +50,7 @@ readonly CURRENT_DIR='/home/shoslot/pr9/current'
 readonly ENV_DIR='/home/shoslot/pr9/env'
 readonly SRC_ENV_DIR='/home/deploy/preview/pr9/env'
 readonly SUDOERS_PATH='/etc/sudoers.d/50-sho-pr9'
+readonly ENABLE_LINK="/etc/systemd/system/multi-user.target.wants/${UNIT_NAME}.service"
 readonly EXPECT_HOST='aplyd-productivity-suite'   # :44
 readonly SLOT_PORT='3109'                          # :340
 readonly DEPLOY_UID='1000'                         # :43
@@ -56,10 +58,19 @@ readonly MARKER_SCAN="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/prod-mar
 
 MODE='apply'
 REFRESH_ENV=0
+MUTATED=0
 
 say()  { printf '%s\n' "$*"; }
 note() { printf '  %s\n' "$*"; }
-fail() { printf 'REFUSING: %s\n' "$*" >&2; exit 2; }
+# `partial` is not decoration: R2's `install -d` runs before R3's marker gate, so a refusal after that
+# point has ALREADY changed the host (W59-F4: five `fail` sites sit after the first mutation). Saying
+# exit 2 means "nothing changed" was false; the caller now sees whether it must run --rollback.
+fail() {
+  local partial=0
+  [ "${MUTATED:-0}" -eq 1 ] && partial=1
+  printf 'REFUSING (partial=%s): %s\n' "$partial" "$*" >&2
+  exit 2
+}
 
 for arg in "$@"; do
   case "$arg" in
@@ -89,6 +100,13 @@ EnvironmentFile=${ENV_DIR}/db.env
 EnvironmentFile=${ENV_DIR}/app.env
 EnvironmentFile=-${ENV_DIR}/local.env
 EnvironmentFile=-${CURRENT_DIR}/release.env
+# FAIL CLOSED ON EVERY START. Phase 2 creates current/release.env AFTER this script has exited, so a
+# one-time scan of ${ENV_DIR} cannot cover the fourth EnvironmentFile source. One line per source, so
+# there is no shell variable for systemd to expand: absent = OK, unreadable = fail, marker = fail.
+ExecStartPre=/bin/sh -c 'test ! -e ${ENV_DIR}/db.env || { test -r ${ENV_DIR}/db.env && ! grep -qEi -- "defaultdb|doadmin|25061|sho-prod-pool" ${ENV_DIR}/db.env; }'
+ExecStartPre=/bin/sh -c 'test ! -e ${ENV_DIR}/app.env || { test -r ${ENV_DIR}/app.env && ! grep -qEi -- "defaultdb|doadmin|25061|sho-prod-pool" ${ENV_DIR}/app.env; }'
+ExecStartPre=/bin/sh -c 'test ! -e ${ENV_DIR}/local.env || { test -r ${ENV_DIR}/local.env && ! grep -qEi -- "defaultdb|doadmin|25061|sho-prod-pool" ${ENV_DIR}/local.env; }'
+ExecStartPre=/bin/sh -c 'test ! -e ${CURRENT_DIR}/release.env || { test -r ${CURRENT_DIR}/release.env && ! grep -qEi -- "defaultdb|doadmin|25061|sho-prod-pool" ${CURRENT_DIR}/release.env; }'
 ExecStart=/usr/bin/node server.js
 Restart=on-failure
 RestartSec=5
@@ -114,8 +132,13 @@ UNIT
 
 # §5 R5. `daemon-reload` is deliberately absent: deploy must not be able to reload the unit that contains it.
 render_sudoers() {
+  # W59-F1/F2: the previous form ended two of five grants in a bare `*`. In sudoers a trailing `*`
+  # matches spaces, so `journalctl -u sho-pr9 *` was "read any journal on the host as root" (and
+  # `--cursor-file=` is a root-path write). sudoers can pin literal argument strings, so it does:
+  # no wildcard, no `enable`, no `daemon-reload`, no shell. A different log window is another fixed
+  # string added by a root change, never a wildcard.
   printf '%s\n' \
-    "deploy ALL=(root) NOPASSWD: ${SYSTEMCTL_BIN:-/usr/bin/systemctl} restart ${UNIT_NAME}, ${SYSTEMCTL_BIN:-/usr/bin/systemctl} start ${UNIT_NAME}, ${SYSTEMCTL_BIN:-/usr/bin/systemctl} status ${UNIT_NAME}, ${SYSTEMCTL_BIN:-/usr/bin/systemctl} status ${UNIT_NAME} *, ${JOURNALCTL_BIN:-/usr/bin/journalctl} -u ${UNIT_NAME} *"
+    "deploy ALL=(root) NOPASSWD: ${SYSTEMCTL_BIN:-/usr/bin/systemctl} restart ${UNIT_NAME}, ${SYSTEMCTL_BIN:-/usr/bin/systemctl} start ${UNIT_NAME}, ${SYSTEMCTL_BIN:-/usr/bin/systemctl} status ${UNIT_NAME}, ${SYSTEMCTL_BIN:-/usr/bin/systemctl} is-active ${UNIT_NAME}, ${JOURNALCTL_BIN:-/usr/bin/journalctl} -u ${UNIT_NAME} --no-pager -n 500, ${JOURNALCTL_BIN:-/usr/bin/journalctl} -u ${UNIT_NAME} --no-pager --since -24h"
 }
 
 # ---------------------------------------------------------------------------
@@ -158,6 +181,12 @@ hostname -s | grep -qx "$EXPECT_HOST" \
 SYSTEMCTL_BIN=$(command -v systemctl || true)
 [ -n "$SYSTEMCTL_BIN" ] || fail "systemctl not found"
 JOURNALCTL_BIN=$(command -v journalctl || true)
+# W59-F6: resolving a path and never asserting it produces a rule that silently does nothing. The
+# systemctl path was asserted; the journalctl path was not. Both are now preconditions. Rollback does
+# not render the sudoers rule, so it does not require journalctl to exist.
+if [ "$MODE" != 'rollback' ]; then
+  [ -n "$JOURNALCTL_BIN" ] || fail "journalctl not found (the sudoers rule would be inert)"
+fi
 VISUDO_BIN=$(command -v visudo || true)
 
 # ---------------------------------------------------------------------------
@@ -187,6 +216,10 @@ if [ "$MODE" = 'rollback' ]; then
 
   rm -f "$UNIT_PATH" "$SUDOERS_PATH"
   say "  removed unit file and sudoers file (absent is fine)"
+  # W59-F5: the enable symlink is a fourth object. `disable` normally removes it, but a failed disable
+  # used to be indistinguishable from "was not running", and the unit could still be scheduled to start
+  # at boot while rollback printed OK. Remove it explicitly and make its absence part of the verdict.
+  if [ -e "$ENABLE_LINK" ] || [ -L "$ENABLE_LINK" ]; then rm -f "$ENABLE_LINK"; fi
   systemctl daemon-reload
   say "  daemon-reload done"
 
@@ -206,9 +239,11 @@ if [ "$MODE" = 'rollback' ]; then
   # "the file is gone" and "the slot is stopped" are different questions; the booleans used to answer
   # only the first, so a live slot with no unit file read as a successful rollback.
   if [ "$("$SYSTEMCTL_BIN" is-active "$UNIT_NAME" 2>/dev/null || true)" = 'active' ]; then unit_stopped=0; else unit_stopped=1; fi
-  say "ROLLBACK unit_gone=${unit_gone} account_gone=${account_gone} sudoers_gone=${sudoers_gone} unit_stopped=${unit_stopped}"
-  [ "$account_gone" -eq 1 ] && [ "$unit_gone" -eq 1 ] && [ "$sudoers_gone" -eq 1 ] && [ "$unit_stopped" -eq 1 ] \
-    || fail "rollback incomplete; inspect the four booleans above"
+  # A present symlink means systemd will start it again at the next boot.
+  if [ -e "$ENABLE_LINK" ] || [ -L "$ENABLE_LINK" ]; then unit_disabled=0; else unit_disabled=1; fi
+  say "ROLLBACK unit_gone=${unit_gone} account_gone=${account_gone} sudoers_gone=${sudoers_gone} unit_stopped=${unit_stopped} unit_disabled=${unit_disabled}"
+  [ "$account_gone" -eq 1 ] && [ "$unit_gone" -eq 1 ] && [ "$sudoers_gone" -eq 1 ] && [ "$unit_stopped" -eq 1 ] && [ "$unit_disabled" -eq 1 ] \
+    || fail "rollback incomplete; inspect the five booleans above"
   say "ROLLBACK_OK"
   exit 0
 fi
@@ -227,6 +262,7 @@ for name in db app local; do
 done
 
 say "R1 account ${ACCOUNT}"
+MUTATED=1
 if id -u "$ACCOUNT" >/dev/null 2>&1; then
   acct_uid=$(id -u "$ACCOUNT")
   acct_home=$(getent passwd "$ACCOUNT" | cut -d: -f6)
@@ -264,8 +300,8 @@ printf '%s\n' "$scan_out"
 env_files=$(printf '%s\n' "$scan_out" | sed -n 's/^ENV_FILE_COUNT=//p')
 if [ "$scan_rc" -ne 0 ]; then
   # D1: this is the line §5 got wrong — it printed ABORT and continued into R4/R6.
-  printf 'REFUSING: production marker in the slot env; nothing was installed or started.\n' >&2
-  printf 'REFUSING: inspect %s by hand, then re-run. Do not start the unit.\n' "$ENV_DIR" >&2
+  printf 'REFUSING: production marker in the slot env; no unit was installed and nothing was started.\n' >&2
+  printf 'REFUSING: %s copied file(s) may already be in %s; inspect them by hand, then re-run. Do not start the unit.\n' "${env_files:-unknown}" "$ENV_DIR" >&2
   exit 3
 fi
 [ "${env_files:-0}" -ge 3 ] || { printf 'REFUSING: only %s env file(s) in %s\n' "${env_files:-0}" "$ENV_DIR" >&2; exit 3; }
@@ -273,6 +309,38 @@ fi
 say "R4 unit"
 unit_tmp=$(mktemp)
 render_unit > "$unit_tmp"
+# The unit loads four env sources: three inside ENV_DIR and current/release.env, which phase 2 creates
+# later. Every rendered path must stay inside the slot tree, and every source that exists NOW must scan
+# clean. The ExecStartPre guard covers the fourth one after this script has exited.
+env_paths=$(sed -n 's/^EnvironmentFile=-\{0,1\}//p' "$unit_tmp")
+env_count=$(printf '%s\n' "$env_paths" | grep -c . || true)
+env_outside=0
+existing_paths=''
+while IFS= read -r p; do
+  [ -n "$p" ] || continue
+  case "$p" in
+    "$ENV_DIR"/*|"$CURRENT_DIR"/*) ;;
+    *) env_outside=$((env_outside + 1)) ;;
+  esac
+  if [ -e "$p" ]; then existing_paths="${existing_paths} ${p}"; fi
+done <<< "$env_paths"
+if [ "$env_outside" -ne 0 ]; then
+  rm -f "$unit_tmp"
+  fail "unit loads ${env_outside} env source(s) outside the slot tree"
+fi
+if [ -n "$existing_paths" ]; then
+  if ! scan_existing=$(bash "$MARKER_SCAN" $existing_paths); then
+    rm -f "$unit_tmp"
+    printf '%s\n' "$scan_existing"
+    printf 'REFUSING: production marker in an EnvironmentFile source; the unit was not installed.\n' >&2
+    exit 3
+  fi
+  note "env sources scanned=$(printf '%s\n' "$scan_existing" | sed -n 's/^ENV_FILE_COUNT=//p') marker_count=$(printf '%s\n' "$scan_existing" | sed -n 's/^PROD_MARKER_COUNT=//p')"
+fi
+guard_lines=$(grep -c '^ExecStartPre=.*grep -qEi' "$unit_tmp" || true)
+[ "$guard_lines" -eq 4 ] \
+  || { rm -f "$unit_tmp"; fail "unit must guard all 4 env sources on start (saw ${guard_lines})"; }
+note "unit env_sources=${env_count} outside=${env_outside} env_guard=${guard_lines}"
 if [ -e "$UNIT_PATH" ]; then
   if cmp -s "$unit_tmp" "$UNIT_PATH"; then
     note "unit already identical (no backup needed)"
@@ -309,6 +377,12 @@ tmp_sudo=''
 note "installed 0440; global sudoers check OK"
 
 say "R6 start"
+# W59 §5: a listener already on 3109 makes `enable --now` a bind-failure restart loop, bounded only by
+# systemd's start limit — and the unit stays enabled, retrying at every boot. Check before enabling.
+if [ "$("$SYSTEMCTL_BIN" is-active "$UNIT_NAME" 2>/dev/null || true)" != 'active' ] \
+   && ss -ltn 2>/dev/null | grep -q ":${SLOT_PORT} "; then
+  fail "port ${SLOT_PORT} is already in use; refusing to enable a unit that would restart-loop"
+fi
 # §5:389 — phase 2 creates `current` as deploy. Missing here is a precondition failure, not a reason to
 # loosen ProtectHome. R1..R5 stay applied so phase 2 can ship into releases/.
 if [ ! -d "$CURRENT_DIR" ] || [ ! -f "${CURRENT_DIR}/server.js" ]; then
