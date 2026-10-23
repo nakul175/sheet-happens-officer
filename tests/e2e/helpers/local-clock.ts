@@ -24,12 +24,58 @@ export function localDatabaseUrl(env: TargetEnv = process.env): string | null {
   return raw;
 }
 
-/** Runs one statement against the local database. Returns false when this run is not local. */
-export function localSql(sql: string): boolean {
-  const url = localDatabaseUrl();
-  if (!url) return false;
-  // Prisma's URL carries ?schema=public, which psql rejects.
-  execFileSync("psql", [url.replace(/\?.*$/, ""), "-v", "ON_ERROR_STOP=1", "-c", sql], { stdio: "pipe" });
+/** Extra instructions for localSql(). `schema` overrides ?schema= in DATABASE_URL: the only way to ask for `public`. */
+export type LocalSqlOptions = { schema?: string };
+
+/**
+ * The psql connection for one statement: the local URL without Prisma's parameters, and the schema to pin.
+ * SHO-3011: Prisma's ?schema= is not a libpq setting, so it cannot stay in the URL - and dropping it left an
+ * unqualified statement on the server default (public) while the app under test writes the schema DATABASE_URL names,
+ * where it "succeeds" against zero rows and the spec's assertion reads like a product bug. The schema therefore travels
+ * in the statement, and a URL that does not name one is refused by name rather than guessed: a caller that genuinely
+ * means the server default says so - localSql(sql, { schema: "public" }).
+ */
+function psqlTarget(opts: LocalSqlOptions = {}): { url: string; schema: string } | null {
+  const raw = localDatabaseUrl();
+  if (!raw) return null;
+  const db = new URL(raw);
+  const schema = opts.schema ?? db.searchParams.get("schema");
+  if (!schema) {
+    throw new Error(
+      "SHO-3011: DATABASE_URL names no ?schema=, so psql would run this statement in the server's default schema " +
+        "(public) while the app writes another. Add ?schema=<name> to DATABASE_URL, or pass { schema: \"public\" } " +
+        "to say public out loud.",
+    );
+  }
+  if (!/^[A-Za-z_][A-Za-z0-9_$-]{0,62}$/.test(schema)) {
+    throw new Error(`Refusing to put an unexpected schema into SQL: ${JSON.stringify(schema)}.`);
+  }
+  // Prisma-only parameters: libpq rejects them, and none of them is a setting psql needs.
+  for (const k of ["schema", "connection_limit", "pool_timeout", "pgbouncer", "statement_cache_size"]) db.searchParams.delete(k);
+  return { url: db.toString(), schema };
+}
+
+/** Runs one statement against the local database, in the schema DATABASE_URL names. Returns false when this run is not local. */
+export function localSql(sql: string, opts: LocalSqlOptions = {}): boolean {
+  const target = psqlTarget(opts);
+  if (!target) return false;
+  // One session, in this order: pin the schema psql cannot carry, run the caller's statement, then ask the server which
+  // schema it ran in. A helper that lost the pin - or a psql that ignored it - fails here, instead of quietly reporting
+  // a write that landed in another schema.
+  const out = execFileSync("psql", [
+    target.url, "-X", "-A", "-t", "-v", "ON_ERROR_STOP=1",
+    "-c", `SET search_path TO "${target.schema}"`,
+    "-c", sql,
+    "-c", "SELECT current_schema()",
+  ], { encoding: "utf8" });
+  const lines = out.split("\n").map((line) => line.trim()).filter((line) => line && line !== "SET");
+  const ran = lines.at(-1) ?? "";
+  if (ran !== target.schema) {
+    throw new Error(
+      `SHO-3011: the statement ran in schema ${JSON.stringify(ran)}, not ${JSON.stringify(target.schema)}: ` +
+        "refusing to report a write that landed elsewhere.",
+    );
+  }
   return true;
 }
 

@@ -30,9 +30,27 @@ let leader: Account;
 let holder: Account;
 let proj: ZzProject;
 
-/** The schema DATABASE_URL names: where Prisma, and so the route under test, writes. */
-function testSchema(): string | undefined {
-  return new URL(process.env.DATABASE_URL ?? "postgresql://localhost").searchParams.get("schema") ?? undefined;
+/**
+ * SHO-3011: the schema DATABASE_URL names - where Prisma, and so the route under test, writes - or a refusal that
+ * names the reason. It used to return `undefined` for a URL without ?schema=, the factory below spread `{}`, and both
+ * raw connections fell back to the server default (public): a wrong answer, never an error. The correctness of this
+ * test must come from the test, not from the shape of the URL the runner happened to export, so a URL that does not
+ * say which schema it means is refused here, at the point of use - never silently sent to public.
+ */
+function testSchema(): string {
+  const raw = process.env.DATABASE_URL;
+  if (!raw) throw new Error("SHO-3011: DATABASE_URL is required and must name the local test schema (?schema=).");
+  const schema = new URL(raw).searchParams.get("schema");
+  if (!schema) {
+    throw new Error(
+      "SHO-3011: DATABASE_URL carries no ?schema=, so this test cannot know which schema the app writes. " +
+        "Add ?schema=<name> to DATABASE_URL; it will not fall back to public.",
+    );
+  }
+  if (!/^[A-Za-z_][A-Za-z0-9_$-]{0,62}$/.test(schema)) {
+    throw new Error(`SHO-3011: refusing to pin a search_path to ${JSON.stringify(schema)}: not a plain schema name.`);
+  }
+  return schema;
 }
 
 /** The local test database, without Prisma's ?schema= parameter (pg would post it as an unknown startup setting). */
@@ -51,17 +69,15 @@ function localDatabaseUrl() {
  * SHO-3011: both raw connections of the race, on the schema the app writes. Stripping ?schema= used to leave pg on the
  * server default (public), so `LOCK TABLE "Notification"` below locked a table the app never touches, the runs never
  * waited on it, and the race proved nothing - while every assertion that did not look at the schema still passed.
- * The schema is carried the only way pg can carry it, a start-up option, quoted so a mixed-case name keeps its case;
- * with no ?schema= in the URL nothing is added and the client is exactly the one it was before. The guard at the end
- * of this file asserts what this client really connects as, so a rewrite that loses the schema fails aloud.
+ * The schema is carried the only way pg can carry it, a start-up option, quoted so a mixed-case name keeps its case.
+ * There is no schema-less branch: testSchema() refuses first, so this factory cannot quietly build a public client.
  */
 function raceClient() {
-  const schema = testSchema();
   return new pg.Client({
     connectionString: localDatabaseUrl(),
     statement_timeout: 5_000,
     lock_timeout: 2_000,
-    ...(schema ? { options: `-c search_path="${schema}"` } : {}),
+    options: `-c search_path="${testSchema()}"`,
   });
 }
 
@@ -157,6 +173,22 @@ describe("qa:TC missing APL-2749: overlapping reminder runs write one reminder p
         );
         expect(rows[0]).toEqual({ statement_timeout: "5s", lock_timeout: "2s" });
       }
+      // SHO-3011: the gate is a gate only if it is where the app writes. current_schema() names that schema, and the
+      // two task rows the API created a moment ago exist only there - a gate on public would see neither. Without this,
+      // the LOCK below could guard another schema's "Notification" and the race would "pass" by writing rows nobody
+      // raced for (the failure mode W159 found: two runs never waiting, reported as a product regression).
+      const gateSchema = (await gate.query<{ s: string | null }>("SELECT current_schema() AS s")).rows[0].s;
+      expect(gateSchema, 'LOCK TABLE "Notification" would have guarded another schema\'s table').toBe(testSchema());
+      const lockedAt = (await gate.query<{ schema: string | null }>(
+        `SELECT n.nspname AS schema FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+         WHERE c.oid = to_regclass('"Notification"')`,
+      )).rows[0].schema;
+      expect(lockedAt, 'the unqualified "Notification" the LOCK names does not resolve to the app\'s schema').toBe(testSchema());
+      const appRows = (await gate.query<{ n: number }>(
+        'SELECT count(*)::int AS n FROM "Task" WHERE id = ANY($1::text[])',
+        [due.map((d) => d.taskId)],
+      )).rows[0].n;
+      expect(appRows, "the gate connection cannot see the rows the app just wrote: it is not on the app's schema").toBe(due.length);
       await gate.query("BEGIN");
       began = true;
       await gate.query('LOCK TABLE "Notification" IN SHARE MODE');
@@ -193,8 +225,8 @@ describe("qa:TC missing SHO-3011: the race's pg connections read the schema DATA
   const SENTINEL = `zz_w168_sentinel_${process.pid}`;
 
   it("qa:TC missing SHO-3011 AC1: current_schema() is the URL's schema and a public sentinel is not visible", async () => {
+    // testSchema() refuses a URL that does not name a schema, so this guard cannot be skipped by leaving ?schema= off.
     const want = testSchema();
-    expect(want, "this guard only means something when DATABASE_URL names a schema (?schema=)").toBeTruthy();
 
     const client = raceClient();
     await client.connect();
@@ -239,9 +271,9 @@ describe("qa:TC missing SHO-3011: the race's pg connections read the schema DATA
   }, 30_000);
 
   // The guard above is one test in this file: a run that selects only the race (`-t APL-2749`, `-t AC1`, a focused
-  // rerun while triaging) never reaches it, and with a DATABASE_URL that carries no ?schema= raceClient() spreads
-  // `{}` and returns the very client W159 found - on `public`. The lock then guards public."Notification" while the
-  // app writes the URL's schema, and the only failure the triager sees is AC1's "two runs were never waiting", which
+  // rerun while triaging) never reaches it, and with a DATABASE_URL that carried no ?schema= raceClient() used to spread
+  // `{}` and return the very client W159 found - on `public`. The lock then guarded public."Notification" while the
+  // app wrote the URL's schema, and the only failure the triager saw was AC1's "two runs were never waiting", which
   // reads like a product regression. The refusal belongs in the factory, at the point of use, not in a sibling test.
   it("qa:TC missing SHO-3011 AC2: a DATABASE_URL with no schema is refused by the factory, not silently sent to public", () => {
     const saved = process.env.DATABASE_URL;
@@ -249,7 +281,7 @@ describe("qa:TC missing SHO-3011: the race's pg connections read the schema DATA
       const noSchema = new URL(saved ?? "postgresql://localhost");
       noSchema.searchParams.delete("schema");
       process.env.DATABASE_URL = noSchema.toString();
-      expect(() => raceClient(), "raceClient() happily built a public-schema client").toThrow(/schema/i);
+      expect(() => raceClient(), "raceClient() happily built a public-schema client").toThrow(/SHO-3011: DATABASE_URL carries no \?schema=/);
     } finally {
       process.env.DATABASE_URL = saved;
     }
