@@ -6,7 +6,7 @@
 //   3. re-running them does not break a good state.
 // Evidence for every name/port/path asserted here is OS-IDENTITY-ISOLATION.md, cited in the scripts themselves.
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -143,4 +143,110 @@ test("optionR keeps a rollback that restores the stopped state", () => {
 
 test("optionR does not clobber an existing slot env on a re-run", () => {
   assert.match(read(OPTION_R), /--refresh-env/, "overwriting live slot env needs an explicit flag");
+});
+
+// ---------------------------------------------------------------------------
+// Red-team regressions. Each of these FAILS on the code as it was committed
+// (118955f), and passes after the fixes it names.
+// ---------------------------------------------------------------------------
+
+// The marker gate on the slot env. `exit 3` at :256 was correct in the committed code but NOTHING
+// tested it: deleting that line (leaving the REFUSING text and the message that says nothing was
+// installed) kept all 12 tests green, and the script happily walked into R4/R6. Order matters —
+// the exit has to be between the scan result and the first R4 write.
+test("the R3 marker gate is a process exit before R4, not a warning that continues", () => {
+  const body = read(OPTION_R);
+  const gateStart = body.indexOf('[ "$scan_rc" -ne 0 ]');
+  const r4Start = body.indexOf('say "R4 unit"');
+  assert.ok(gateStart > 0, "the R3 gate disappeared entirely");
+  assert.ok(r4Start > gateStart, "R4 must come after the gate");
+  const gate = body.slice(gateStart, r4Start);
+  assert.match(gate, /^\s*exit 3\s*$/m, "the gate must exit 3 before any R4 write");
+  assert.doesNotMatch(gate, /^\s*:\s*(#.*)?$/m, "the gate must not be a no-op");
+});
+
+// The slot env dir is writable by the account the slot runs as, so `db.env` can be a symlink to a
+// production file. `find -type f` skipped it and `grep -r` does not follow a link found while
+// walking, so the scan said ENV_CLEAN / exit 0 for a dir whose only file was a prod env. Measured
+// with a real symlink before the fix.
+test("the marker scanner follows a symlinked env file instead of reporting the dir clean", () => {
+  // The link target lives OUTSIDE the scanned dir, which is the only shape that evaded the scan:
+  // with the target also inside, `find -type f` counts it and the hole hides.
+  const outside = mkdtempSync(join(tmpdir(), "sho-marker-target-"));
+  writeFileSync(join(outside, "prod-real.env"), "DATABASE_URL=postgres://doadmin@db:25061/defaultdb\n");
+  const dir = mkdtempSync(join(tmpdir(), "sho-marker-link-"));
+  symlinkSync(join(outside, "prod-real.env"), join(dir, "db.env"));
+  const res = spawnSync("bash", [SCAN, dir], { encoding: "utf8" });
+  assert.notEqual(res.status, 0, "a symlink to a prod env must not scan clean");
+  assert.match(res.stdout, /^PROD_MARKER_COUNT=1$/m);
+  assert.match(res.stdout, /^ENV_CONTAMINATED$/m);
+});
+
+// A DSN pasted in upper case scanned clean: `grep -E` is case-sensitive and the marker list is not.
+test("the marker scanner is not fooled by the case of a marker", () => {
+  const dir = scanDir({ "db.env": "DATABASE_URL=postgres://DOADMIN:pw@db.example.com:5432/MAIN\n" });
+  const res = spawnSync("bash", [SCAN, dir], { encoding: "utf8" });
+  assert.notEqual(res.status, 0, "DOADMIN is the same credential as doadmin");
+  assert.match(res.stdout, /^ENV_CONTAMINATED$/m);
+});
+
+// Rollback promises "return the slot to its current (stopped) state". It gated the stop on
+// `[ -e "$UNIT_PATH" ]`, so a host whose unit FILE is already gone but whose unit is still ACTIVE
+// made no stop call at all and printed ROLLBACK_OK, exit 0 — a live slot reported as rolled back.
+// Run against a sandbox copy: every path redirected into a temp dir, systemctl stubbed to answer
+// `active` and to fail the stop. It must refuse, not report success.
+test("rollback refuses to report success while the unit is still active", () => {
+  // Two runs, so the assertion cannot be satisfied by "the script simply failed": the stopped host
+  // must still roll back cleanly, and the live one must refuse. Same sandbox, different systemd.
+  function rollbackWith(state) {
+    const dir = mkdtempSync(join(tmpdir(), "sho-rollback-"));
+    for (const sub of ["lib", "unit", "sudoers", "bin", join("home", "shoslot", "pr9")]) {
+      mkdirSync(join(dir, sub), { recursive: true });
+    }
+    const scan = join(dir, "lib", "prod-marker-scan.sh");
+    copyFileSync(SCAN, scan);
+    chmodSync(scan, 0o755); // the script prechecks `[ -x "$MARKER_SCAN" ]`; without +x it never reaches R7
+    const patched = read(OPTION_R)
+      .replaceAll("/etc/systemd/system/sho-pr9.service", join(dir, "unit", "sho-pr9.service"))
+      .replaceAll("/etc/sudoers.d/50-sho-pr9", join(dir, "sudoers", "50-sho-pr9"))
+      .replaceAll("/home/shoslot", join(dir, "home", "shoslot"))
+      .replace(/^\[ "\$\(id -u\)" -eq 0 \].*$/m, '[ -n "$FAKE_ROOT" ] || fail "needs root"')
+      .replace(/^\[ "\$\(uname -s\)" = 'Linux' \].*$/m, ":")
+      .replace(/^hostname -s \| grep -qx "\$EXPECT_HOST" \\$/m, ":")
+      .replace(/^  \|\| fail "host is not .*$/m, ":");
+    writeFileSync(join(dir, "rollback.sh"), patched);
+    // `active` + a stop that does not take = the host in the worst state: slot live, unit file gone.
+    writeFileSync(
+      join(dir, "bin", "systemctl"),
+      `#!/bin/bash\ncase "$*" in *is-active*) echo ${state}; exit 0;; *disable*) exit 1;; *) exit 0;; esac\n`,
+      { mode: 0o755 },
+    );
+    chmodSync(join(dir, "bin", "systemctl"), 0o755);
+    return spawnSync("bash", [join(dir, "rollback.sh"), "--rollback"], {
+      encoding: "utf8",
+      env: { PATH: `${join(dir, "bin")}:${process.env.PATH}`, HOME: process.env.HOME, FAKE_ROOT: "1" },
+    });
+  }
+
+  const live = rollbackWith("active");
+  assert.doesNotMatch(live.stdout, /ROLLBACK_OK/, "a still-active unit is not a successful rollback");
+  assert.notEqual(live.status, 0, "a still-active unit must make rollback exit non-zero");
+
+  // Positive control: the same sandbox with a stopped unit still has to succeed, or the test above
+  // would pass for a script that can never roll back at all.
+  const stopped = rollbackWith("inactive");
+  assert.match(stopped.stdout, /ROLLBACK_OK/, stopped.stderr);
+  assert.equal(stopped.status, 0, stopped.stderr);
+});
+
+// The proof's own header: "a denial alone proves nothing: a missing file is also denied ... PASS
+// requires both". The verdict only WARNED about prod_env_exists=0 and then still printed
+// gap_closed=1, so an absent /etc/sho/app.env produced PROOF=PASS.
+test("proof does not report PASS when the production env it probed was absent", () => {
+  const body = read(PROOF);
+  const warn = body.indexOf('[ "$prod_env_exists" -eq 0 ]');
+  assert.ok(warn > 0, "the missing-file guard disappeared");
+  const block = body.slice(warn, body.indexOf("fi", warn));
+  assert.match(block, /gap=1/, "prod_env_exists=0 must fail the verdict, not only warn");
+  assert.match(body, /if \[ "\$environ_readable" -eq 0 \]/, "an unreadable environ must be its own answer");
 });

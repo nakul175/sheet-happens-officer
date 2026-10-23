@@ -168,11 +168,21 @@ VISUDO_BIN=$(command -v visudo || true)
 if [ "$MODE" = 'rollback' ]; then
   say "R7 rollback: ${UNIT_NAME} + ${ACCOUNT} only"
 
-  if [ -e "$UNIT_PATH" ]; then
-    systemctl disable --now "$UNIT_NAME" >/dev/null 2>&1 || say "  note: unit was not running"
+  # Key the stop on the UNIT'S STATE, not on the presence of the unit file. Gating on `[ -e "$UNIT_PATH" ]`
+  # meant an interrupted rollback (file already removed, process still live) took the "absent already"
+  # branch, never called disable, and still printed ROLLBACK_OK - measured in a sandbox where is-active
+  # says `active` and the file is gone: zero stop calls, exit 0.
+  if [ "$("$SYSTEMCTL_BIN" is-active "$UNIT_NAME" 2>/dev/null || true)" = 'active' ] || [ -e "$UNIT_PATH" ]; then
+    # A failed stop is NOT "the unit was not running" (that conflation is how a live slot survived).
+    "$SYSTEMCTL_BIN" disable --now "$UNIT_NAME" >/dev/null 2>&1 || true
     say "  stopped+disabled ${UNIT_NAME}"
   else
-    say "  ${UNIT_NAME} unit absent already"
+    say "  ${UNIT_NAME} not active and its file is absent"
+  fi
+  # Never remove the unit file over a live slot: that leaves a running process systemd cannot manage,
+  # which is worse than the stopped state this mode promises.
+  if [ "$("$SYSTEMCTL_BIN" is-active "$UNIT_NAME" 2>/dev/null || true)" = 'active' ]; then
+    fail "${UNIT_NAME} is still active after disable --now; refusing to remove the unit file over a live slot"
   fi
 
   rm -f "$UNIT_PATH" "$SUDOERS_PATH"
@@ -193,9 +203,12 @@ if [ "$MODE" = 'rollback' ]; then
   if id -u "$ACCOUNT" >/dev/null 2>&1; then account_gone=0; else account_gone=1; fi
   if [ -e "$UNIT_PATH" ]; then unit_gone=0; else unit_gone=1; fi
   if [ -e "$SUDOERS_PATH" ]; then sudoers_gone=0; else sudoers_gone=1; fi
-  say "ROLLBACK unit_gone=${unit_gone} account_gone=${account_gone} sudoers_gone=${sudoers_gone}"
-  [ "$account_gone" -eq 1 ] && [ "$unit_gone" -eq 1 ] && [ "$sudoers_gone" -eq 1 ] \
-    || fail "rollback incomplete; inspect the three booleans above"
+  # "the file is gone" and "the slot is stopped" are different questions; the booleans used to answer
+  # only the first, so a live slot with no unit file read as a successful rollback.
+  if [ "$("$SYSTEMCTL_BIN" is-active "$UNIT_NAME" 2>/dev/null || true)" = 'active' ]; then unit_stopped=0; else unit_stopped=1; fi
+  say "ROLLBACK unit_gone=${unit_gone} account_gone=${account_gone} sudoers_gone=${sudoers_gone} unit_stopped=${unit_stopped}"
+  [ "$account_gone" -eq 1 ] && [ "$unit_gone" -eq 1 ] && [ "$sudoers_gone" -eq 1 ] && [ "$unit_stopped" -eq 1 ] \
+    || fail "rollback incomplete; inspect the four booleans above"
   say "ROLLBACK_OK"
   exit 0
 fi

@@ -62,8 +62,10 @@ say "shoslot_can_traverse_deploy_home=${deploy_home_traversable}   (deploy_home_
 
 # The stale copies §4 mentions (18 of them, :305). Counted, and one named copy probed by path only.
 bak_count=$(find /etc/sho -maxdepth 1 -name 'app.env.bak*' -type f 2>/dev/null | wc -l | tr -d ' ')
-bak_readable=$(as_slot test -r /etc/sho/app.env.bak-20261019-115253)
-say "prod_env_bak_count=${bak_count} shoslot_can_read_prod_env_bak=${bak_readable}"
+bak_probe='/etc/sho/app.env.bak-20261019-115253'
+bak_exists=$(exists "$bak_probe")
+bak_readable=$(as_slot test -r "$bak_probe")
+say "prod_env_bak_count=${bak_count} shoslot_can_read_prod_env_bak=${bak_readable}   (probe_exists=${bak_exists})"
 
 # The path Option N could not close: another uid's /proc entry (:247-249). Cross-uid ptrace is denied.
 deploy_pid=$(pgrep -u deploy -n 2>/dev/null || true)
@@ -82,6 +84,8 @@ say "== P2  runtime identity, and the SHAPE of its environment (counts and key n
 pid=$(systemctl show -p MainPID --value "$UNIT_NAME" 2>/dev/null || true)
 [ -n "$pid" ] && [ "$pid" != '0' ] || fail "${UNIT_NAME} has no MainPID - is it running? (R6)"
 say "main_pid_present=1 run_uid=$(ps -o uid= -p "$pid" | tr -d ' ') run_user=$(ps -o user= -p "$pid" | tr -d ' ')"
+environ_readable=$( if [ -r "/proc/${pid}/environ" ]; then echo 1; else echo 0; fi )
+say "environ_readable=${environ_readable}"
 env_key_count=$(tr '\0' '\n' < "/proc/${pid}/environ" | grep -c '=' || true)
 say "environ_key_count=${env_key_count}   (a count of keys; no key and no value is printed)"
 # :424 — the runtime environ must carry zero production markers.
@@ -125,12 +129,29 @@ gap=0
 if [ "$prod_env_readable" -eq 1 ]; then gap=1; fi
 if [ "$deploy_home_traversable" -eq 1 ]; then gap=1; fi
 if [ "$bak_readable" -eq 1 ]; then gap=1; fi
-if [ "$runt_markers" -ne 0 ]; then gap=1; fi
-if [ "$unit_prod_env_lines" -ne 0 ]; then gap=1; fi
-if [ "$health_code" != '200' ]; then gap=1; fi
+# The header's rule, now in the verdict: a denial over a path that does not exist proves nothing, so
+# EXISTS is part of the answer. It used to be a WARNING only — the run printed gap_closed=1 with the
+# prod env absent (measured in isolation).
 if [ "$prod_env_exists" -eq 0 ]; then
   say "WARNING prod_env_exists=0 - a denial here proves nothing; check the path before trusting this run"
+  gap=1
 fi
+# Same rule for the stale copies: if the count says copies exist but the named probe does not, the
+# denial was measured against a missing file, not against a copy.
+if [ "$bak_count" -gt 0 ] && [ "$bak_exists" -eq 0 ]; then
+  say "WARNING prod_env_bak_count=${bak_count} but the named probe is absent - re-point bak_probe at a real copy"
+  gap=1
+fi
+# A vanished /proc/<pid>/environ makes the marker count 0 for the wrong reason: an empty read is
+# indistinguishable from a clean environ. `grep -c` still prints 0 when its input never opened
+# (measured: dead pid -> key_count=0 marker_count=0 gap_closed=1), so readability is its own answer.
+if [ "$environ_readable" -eq 0 ] || [ "$env_key_count" -eq 0 ]; then
+  say "WARNING environ_unreadable - the zero marker count came from an empty read, not a clean environ"
+  gap=1
+fi
+if [ "${runt_markers:-1}" -ne 0 ]; then gap=1; fi
+if [ "$unit_prod_env_lines" -ne 0 ]; then gap=1; fi
+if [ "$health_code" != '200' ]; then gap=1; fi
 
 say "gap_closed=$([ "$gap" -eq 0 ] && echo 1 || echo 0)"
 if [ "$gap" -eq 0 ]; then

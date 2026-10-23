@@ -19,10 +19,17 @@ readonly ENV_DIR=$1
 files=0
 matches=0
 if [ -d "$ENV_DIR" ]; then
-  files=$(find "$ENV_DIR" -maxdepth 1 -type f | wc -l | tr -d ' ')
+  # `-L` and `-type l`: the slot env dir is writable by the account the slot runs as, so `db.env` can be
+  # a symlink to a production file. Plain `find -type f` skips it and `grep -r` does not follow a link
+  # found while walking, so that dir used to report ENV_FILE_COUNT=0 PROD_MARKER_COUNT=0 ENV_CLEAN,
+  # exit 0 (measured). Both the count and the scan therefore resolve the tree with -L.
+  files=$(find -L "$ENV_DIR" -maxdepth 1 \( -type f -o -type l \) 2>/dev/null | wc -l | tr -d ' ')
+  # `-i`: the marker list is matched case-insensitively. A DSN pasted as DOADMIN used to scan clean
+  # (measured); a false positive only stops a run, which is the safe direction.
   # The `|| true` is load-bearing: grep exits 1 when nothing matches, and under `set -o pipefail`
   # that would fail the assignment and abort on the clean case — the exact opposite of the intent.
-  matches=$({ grep -rlE -- "$MARKERS" "$ENV_DIR" 2>/dev/null || true; } | wc -l | tr -d ' ')
+  matches=$( { find -L "$ENV_DIR" -maxdepth 1 \( -type f -o -type l \) \
+    -exec grep -lEi -- "$MARKERS" {} + 2>/dev/null || true; } | wc -l | tr -d ' ')
 fi
 
 printf 'ENV_FILE_COUNT=%s\n' "$files"
