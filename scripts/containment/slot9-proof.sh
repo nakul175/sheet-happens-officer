@@ -40,6 +40,13 @@
 # ORDERING: the pre-start gate authorises the first start; the full run is a POST-START revocation check and
 # can only retract that authorisation, never grant one.
 #
+# NO FLAG AUTHORISES AN UNRUN CONTROL (W150, W102 F3). Every control that could not be measured used to have a
+# way out: the cross-uid /proc probe could be waived with `--accept-unproven`, and the pre-start gate then
+# printed `CONTAINMENT=PASS` over a control that never ran. That flag is GONE, refused (exit 2) if it is still
+# passed, and the unrun control is a FAIL by name (`deploy_environ_unproven`) in both modes - so the sentence
+# "it may be started" is only ever printed after every control answered. A qualifier on a PASS is not a
+# mitigation; it is the same authorisation with a footnote.
+#
 # Exit: 0 gate passed · 1 gate FAILED (pre-start: do not start the unit · full: do not deploy) · 2 refused
 # precondition (not root, not Linux, account absent, unit file absent, positive control broken, bad argument)
 set -euo pipefail
@@ -66,18 +73,20 @@ fail() { printf 'REFUSING: %s\n' "$*" >&2; exit 2; }
 
 # MODE=prestart is the gate that may run against a stopped unit; MODE=full is the historical proof block.
 MODE='full'
-# `--accept-unproven` is the ONLY route to a PASS with the cross-uid /proc probe unrun, and the verdict then
-# says so out loud (`unproven=deploy_environ`) instead of counting a probe that never happened as a denial.
-# The DEFAULT is FAIL, deliberately: a PASS you can earn by not measuring is not a proof, and the production
-# `sho` unit is always a deploy-owned process, so the probe is only impossible in a scenario that is not the
-# one this block certifies.
-ACCEPT_UNPROVEN=0
-unproven=''
+# NO FLAG MAY ACCEPT AN UNRUN CONTROL (W150, W102 F3). There used to be `--accept-unproven`, and with it an
+# unrun cross-uid /proc probe printed a `CONTAINMENT=PASS` line carrying an `unproven` qualifier (naming
+# deploy_environ), and a full run printed `PROOF=PASS` beside it. That is a route to authorisation, and the red
+# team read it as one - correctly: a verdict line in the PASS column is what a start decision is made on, and a
+# qualifier beside it is negotiable. So the variable, the assignment and the qualifier are all gone rather than
+# downgraded: an unrun control FAILS by name (`deploy_environ_unproven`) in BOTH modes, and the old spelling is
+# REFUSED (exit 2) instead of being ignored, so a stale invocation cannot quietly keep working against a verdict
+# that no longer honours it. The string a reader would grep for is absent from this file on purpose.
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --pre-start|--containment) MODE='prestart' ;;
-    --accept-unproven)         ACCEPT_UNPROVEN=1 ;;
-    *)                         fail "unknown argument '$1'; usage: ${0##*/} [--pre-start|--containment] [--accept-unproven]" ;;
+    --accept-unproven)
+      fail "--accept-unproven was REMOVED (W150, W102 F3): an unrun cross-uid probe is a FAIL (deploy_environ_unproven) in both modes and no flag converts it into a PASS. The remedy is a deploy-owned process to probe, not an opt-out" ;;
+    *)                         fail "unknown argument '$1'; usage: ${0##*/} [--pre-start|--containment]" ;;
   esac
   shift
 done
@@ -231,11 +240,11 @@ assess_containment() {
 
   # The cross-uid /proc proof - the one negative proof that needs a second uid at runtime. `skipped` used to be
   # printed when no deploy-owned process existed, which read like a passing term. An unrun probe is not a
-  # denial: unless it is accepted explicitly (--accept-unproven, which then says `unproven=` on the verdict
-  # line), the verdict FAILS. Otherwise a PASS could be earned by not measuring.
+  # denial: it FAILS, by name, and there is no argument that turns it into a PASS (W150 removed the old
+  # opt-out). Otherwise a PASS could be earned by not measuring - which is exactly what F3 recorded.
   if [ "$deploy_environ_probeable" -eq 1 ]; then
     if [ "$deploy_environ_denied" -ne 1 ]; then term_fail shoslot_can_read_deploy_environ; fi
-  elif [ "$ACCEPT_UNPROVEN" -eq 0 ]; then
+  else
     term_fail deploy_environ_unproven
   fi
 
@@ -348,12 +357,9 @@ if [ -n "$deploy_pid" ]; then
   say "shoslot_can_read_deploy_environ=${deploy_environ_denied}   (required 1 = denied)"
 else
   say "deploy_environ_probe=not_probeable   (deploy_pid_present=0: pgrep -u deploy found no process)"
-  if [ "$ACCEPT_UNPROVEN" -eq 1 ]; then
-    unproven='deploy_environ'
-    say "INFO --accept-unproven given: the verdict carries unproven=deploy_environ instead of claiming a denial it did not measure"
-  else
-    say "INFO remedy: rerun while a deploy-owned process is alive (the production sho unit always is one). An unrun probe is not a denial, so this FAILS by default rather than passing unmeasured"
-  fi
+  # The reason it cannot be a term, and the reason it cannot be waived, in one line. Deliberately no `name=value`
+  # shape: there is nothing here to compare with, because nothing was measured.
+  say "INFO the cross-uid probe did NOT run - not a verdict term and not a denial, and no flag can accept it (--accept-unproven was removed, W150), so containment_terms_failed names deploy_environ_unproven and this run FAILS. remedy: rerun while a deploy-owned process is alive (the production sho unit always is one)"
 fi
 
 # SSH persistence was the other durable path (:254). A term: uid separation does not remove it, so a slot that
@@ -442,7 +448,7 @@ if [ "$MODE" = 'prestart' ]; then
   say "== VERDICT (pre-start containment gate; P2/P5/listener/health not applicable to a stopped unit) =="
   assess_containment
   if [ "$gap" -eq 0 ]; then
-    say "CONTAINMENT=PASS${unproven:+ unproven=${unproven}}  the slot cannot reach the production env while the unit is stopped; it may be started."
+    say "CONTAINMENT=PASS  the slot cannot reach the production env while the unit is stopped; it may be started."
     exit 0
   fi
   say "CONTAINMENT=FAIL  containment does NOT hold with the unit stopped."
@@ -487,7 +493,7 @@ say "== VERDICT =="
 assess_containment
 # Printed BEFORE gap_closed=/PROOF= on purpose: this is the pre-start gate's answer, and one run must never
 # be mistakable for the other gate.
-say "CONTAINMENT=$([ "$gap" -eq 0 ] && echo PASS || echo FAIL)${unproven:+ unproven=${unproven}}   (terms that need no running process)"
+say "CONTAINMENT=$([ "$gap" -eq 0 ] && echo PASS || echo FAIL)   (terms that need no running process)"
 # Everything below needs a started unit, so it can only retract the verdict above.
 # A vanished /proc/<pid>/environ makes the marker count 0 for the wrong reason: an empty read is
 # indistinguishable from a clean environ. `grep -c` still prints 0 when its input never opened
@@ -514,7 +520,7 @@ esac
 say "proof_terms_failed=${term_failures:-none}"
 say "gap_closed=$([ "$gap" -eq 0 ] && echo 1 || echo 0)"
 if [ "$gap" -eq 0 ]; then
-  say "PROOF=PASS${unproven:+ unproven=${unproven}}  slot 9 runtime cannot read the production env, and the slot is healthy."
+  say "PROOF=PASS  slot 9 runtime cannot read the production env, and the slot is healthy."
   exit 0
 fi
 say "PROOF=FAIL  the gap is NOT closed, or the slot is unhealthy. STOP: do not deploy, do not migrate." >&2

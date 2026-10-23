@@ -9,6 +9,9 @@
 // Two rules are pinned here:
 //   1. the sandbox properties are TERMS, read from render_unit() so they cannot drift into a second copy;
 //   2. every line the script prints is a term, an `INFO` line that says why it cannot be one, or a header.
+//   3. (W150 / W102 F3) an unrun control can never be authorised: the cross-uid probe fails by name, and the
+//      `--accept-unproven` flag that used to turn that FAIL into a qualified PASS is refused (exit 2) because
+//      the string it printed and the variable that read it are no longer in the script at all.
 //
 // Offline and macOS-safe: the real script runs against a temp-dir sandbox, with `systemctl`/`pgrep` answered
 // by proof-sandbox.mjs. No host, no root, no sudo, no systemd, no ssh, no /etc/sho.
@@ -253,19 +256,36 @@ test("a slot that can write the deployer's authorized_keys fails the gate", () =
 // ---------------------------------------------------------------------------
 // 5. An unrun probe is not a denial: no deploy-owned process -> FAIL, not a skip.
 // ---------------------------------------------------------------------------
-test("no deploy-owned process prints not_probeable and FAILS the verdict by default", () => {
+test("no deploy-owned process prints not_probeable and FAILS the verdict by name", () => {
   const res = build({ running: false, deployPid: false }).run("--pre-start");
   assert.equal(res.status, 1, `an unmeasured probe earned a PASS:\n${res.stdout}\n${res.stderr}`);
   assert.equal(verdict(res.stdout), "FAIL", res.stdout);
   assert.match(res.stdout, /^deploy_environ_probe=not_probeable\b/m);
   assert.match(failedTerms(res.stdout), /deploy_environ_unproven/);
   assert.match(res.stdout, /INFO .*remedy/i, "the failure must say how to make the probe possible");
+  // W150: the gate must not advertise a way out of it, and must not print a qualified PASS either.
+  assert.doesNotMatch(res.stdout, /unproven=/, "a qualifier on a verdict is the bypass in another costume");
+  assert.doesNotMatch(res.stdout, /CONTAINMENT=PASS/);
 });
 
-test("--accept-unproven is the documented opt-in: PASS says unproven=deploy_environ", () => {
-  const res = build({ running: false, deployPid: false }).run("--pre-start", "--accept-unproven");
-  assert.equal(res.status, 0, res.stdout + res.stderr);
-  assert.match(res.stdout, /^CONTAINMENT=PASS unproven=deploy_environ\b/m);
+test("--accept-unproven is REFUSED: no flag may authorise a start with an unrun control", () => {
+  // W150 / W102 F3. This test used to assert the opposite - `status 0` and
+  // `^CONTAINMENT=PASS unproven=deploy_environ` - i.e. it pinned the bypass as acceptable, which is a test
+  // forbidding the fix. The command below is the exact F3 repro: gate, flag, cross-uid probe unrun.
+  for (const args of [["--pre-start", "--accept-unproven"], ["--accept-unproven"]]) {
+    const res = build({ running: false, deployPid: false }).run(...args);
+    assert.equal(res.status, 2, `${args.join(" ")} was honoured:\n${res.stdout}\n${res.stderr}`);
+    assert.match(res.stderr, /^REFUSING: --accept-unproven was REMOVED\b/m, res.stderr);
+    assert.doesNotMatch(res.stdout, /^(CONTAINMENT|PROOF)=/, "a refused argument must print no verdict at all");
+  }
+});
+
+test("the vocabulary that made the bypass possible does not exist in the script", () => {
+  // A run can only be as safe as the words the file can emit: if neither the accepting variable nor the
+  // qualifier's byte string is in slot9-proof.sh, no future edit can print them without deleting this test.
+  assert.doesNotMatch(proofSrc(), /ACCEPT_UNPROVEN/, "the accepting switch is back");
+  assert.doesNotMatch(proofSrc(), /\$\{unproven/, "a verdict line is interpolating an unproven qualifier again");
+  assert.doesNotMatch(proofSrc(), /unproven=/, "the `unproven=` qualification is back in the transcript");
 });
 
 test("a probeable deploy process is measured, and a denial is the passing answer", () => {
@@ -334,8 +354,10 @@ test("every printed line is a term, an INFO line with a reason, a header, or a v
       checked += 1;
       if (HEADERS.includes(line)) continue;
       if (line.startsWith("INFO ")) {
-        // The rule is not "prefix it INFO and move on": the prefix must carry the reason.
-        assert.match(line, /not a verdict term|not probeable|remedy|accept-unproven/i,
+        // The rule is not "prefix it INFO and move on": the prefix must carry the reason. `accept-unproven` is
+        // NOT an accepted reason any more (W150): an INFO line that cites a flag to waive a control is the
+        // bypass talking, and the flag it would cite no longer exists.
+        assert.match(line, /not a verdict term|not probeable|remedy|no flag/i,
           `an INFO line must say why it is not a term:\n  ${line}`);
         continue;
       }
