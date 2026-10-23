@@ -12,6 +12,7 @@
 //
 // qa:TC missing single run
 // qa:TC missing 40 concurrent reminder requests
+// qa:TC missing SHO-3011 a public sentinel stays invisible to the race's own connections
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { BASE, istDate, task, type Account } from "./helpers";
@@ -29,7 +30,12 @@ let leader: Account;
 let holder: Account;
 let proj: ZzProject;
 
-/** The local test database, without Prisma's ?schema= parameter. Anything else is refused. */
+/** The schema DATABASE_URL names: where Prisma, and so the route under test, writes. */
+function testSchema(): string | undefined {
+  return new URL(process.env.DATABASE_URL ?? "postgresql://localhost").searchParams.get("schema");
+}
+
+/** The local test database, without Prisma's ?schema= parameter (pg would post it as an unknown startup setting). */
 function localDatabaseUrl() {
   const raw = process.env.DATABASE_URL;
   if (!raw) throw new Error("DATABASE_URL is required and must point at the local test database");
@@ -39,6 +45,24 @@ function localDatabaseUrl() {
   }
   url.search = "";
   return url.toString();
+}
+
+/**
+ * SHO-3011: both raw connections of the race, on the schema the app writes. Stripping ?schema= used to leave pg on the
+ * server default (public), so `LOCK TABLE "Notification"` below locked a table the app never touches, the runs never
+ * waited on it, and the race proved nothing - while every assertion that did not look at the schema still passed.
+ * The schema is carried the only way pg can carry it, a start-up option, quoted so a mixed-case name keeps its case;
+ * with no ?schema= in the URL nothing is added and the client is exactly the one it was before. The guard at the end
+ * of this file asserts what this client really connects as, so a rewrite that loses the schema fails aloud.
+ */
+function raceClient() {
+  const schema = testSchema();
+  return new pg.Client({
+    connectionString: localDatabaseUrl(),
+    statement_timeout: 5_000,
+    lock_timeout: 2_000,
+    ...(schema ? { options: `-c search_path="${schema}"` } : {}),
+  });
 }
 
 /** Waits until two runs are past their read: two inserts on the lock, or one insert and one advisory-lock wait. */
@@ -118,8 +142,8 @@ describe("qa:TC missing APL-2749: overlapping reminder runs write one reminder p
     const due = await dueTasks("concurrent run");
     // The gate holds the lock; the watcher reads pg_stat_activity outside the gate's transaction snapshot.
     // Both are bounded: no statement runs past 5 s and no lock wait past 2 s, even if the release below never ran.
-    const gate = new pg.Client({ connectionString: localDatabaseUrl(), statement_timeout: 5_000, lock_timeout: 2_000 });
-    const watch = new pg.Client({ connectionString: localDatabaseUrl(), statement_timeout: 5_000, lock_timeout: 2_000 });
+    const gate = raceClient();
+    const watch = raceClient();
     let overlap: { inserts: number; advisory: number } | null = null;
     let posts: Promise<unknown>;
     let heldMs = 0;
@@ -156,4 +180,61 @@ describe("qa:TC missing APL-2749: overlapping reminder runs write one reminder p
     console.log(`APL-2749 overlap ${JSON.stringify(overlap)} after ${heldMs} ms held; reminder rows per (recipient, task, TASK_DUE_TOMORROW) after ${LOAD} concurrent runs: ${JSON.stringify(counts)}`);
     expect(counts).toEqual({ holder: 1, leader: 1 });
   }, 90_000);
+});
+
+// SHO-3011. The race above is only a race if its two connections see the rows the route writes. A client that lost
+// Prisma's ?schema= reads `public` instead - a wrong answer, never an error - so `LOCK TABLE "Notification"` locked a
+// table nobody was writing, the overlap it waits for never came, and the file still passed every test whose assertions
+// happened not to look at the schema. W121 fixed the same class in tests/apl-2742.test.ts, whose own guard bans the
+// strings `new pg.Pool(` / `new pg.Client(`: a grep is the instrument that missed this one, so the check here is
+// behavioural. It builds its connections through raceClient(), the factory the race itself uses, and reads a sentinel
+// row that lives in `public` under a name nothing else uses.
+describe("qa:TC missing SHO-3011: the race's pg connections read the schema DATABASE_URL names, not public", () => {
+  const SENTINEL = `zz_w168_sentinel_${process.pid}`;
+
+  it("qa:TC missing SHO-3011 AC1: current_schema() is the URL's schema and a public sentinel is not visible", async () => {
+    const want = testSchema();
+    expect(want, "this guard only means something when DATABASE_URL names a schema (?schema=)").toBeTruthy();
+
+    const client = raceClient();
+    await client.connect();
+    try {
+      // The sentinel as the leak would have found it: a table that exists only in public, fully qualified in its DDL so
+      // its own creation cannot depend on the search path being checked.
+      await client.query(`DROP TABLE IF EXISTS public."${SENTINEL}"`);
+      await client.query(`CREATE TABLE public."${SENTINEL}" (value text)`);
+      await client.query(`INSERT INTO public."${SENTINEL}" (value) VALUES ('SENTINEL-FROM-public')`);
+
+      const where = (await client.query<{ current: string | null; schemas: string; searchPath: string }>(
+        "SELECT current_schema() AS current, array_to_string(current_schemas(false), ',') AS schemas, current_setting('search_path') AS \"searchPath\"",
+      )).rows[0];
+      expect(where.current, "a race connection did not receive the URL's schema").toBe(want);
+      expect(where.schemas.split(","), "search_path falls back to public, so an unqualified read can leave the schema").not.toContain("public");
+
+      // Behaviour, not text: the unqualified sentinel name has no table to resolve to on this connection.
+      await expect(client.query(`SELECT value FROM "${SENTINEL}"`)).rejects.toMatchObject({ code: "42P01" });
+
+      // And the table the race locks is the one the route inserts into, in that same schema.
+      const locked = (await client.query<{ schema: string }>(
+        `SELECT n.nspname AS schema FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+         WHERE c.oid = to_regclass('"Notification"')`,
+      )).rows[0];
+      expect(locked?.schema, "LOCK TABLE \"Notification\" would have guarded another schema's table").toBe(want);
+
+      // The single-connection construction this replaces, for the record: it is the escape, on the live URL.
+      const bare = new pg.Client({ connectionString: localDatabaseUrl() });
+      await bare.connect();
+      try {
+        const bareSchema = (await bare.query<{ s: string | null }>("SELECT current_schema() AS s")).rows[0].s;
+        expect(bareSchema, "a bare pg client drops ?schema= - this is the leak the factory closes").not.toBe(want);
+        const bareSentinel = (await bare.query<{ value: string }>(`SELECT value FROM "${SENTINEL}"`)).rows;
+        expect(bareSentinel.map((r) => r.value), "the same connection reads the public sentinel").toEqual(["SENTINEL-FROM-public"]);
+      } finally {
+        await bare.end();
+      }
+    } finally {
+      await client.query(`DROP TABLE IF EXISTS public."${SENTINEL}"`).catch(() => {});
+      await client.end();
+    }
+  }, 30_000);
 });

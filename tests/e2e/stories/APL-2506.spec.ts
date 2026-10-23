@@ -54,9 +54,16 @@ function ageNotification(id: string, recipientId: string) {
   const appHost = new URL(BASE_URL).hostname;
   if (appHost !== "localhost" && appHost !== "127.0.0.1" && appHost !== "::1") throw new Error("Refusing to run purge-old against a remote host.");
   if (!/^[a-z0-9]+$/i.test(id) || !/^[a-z0-9]+$/i.test(recipientId)) throw new Error("Refusing to age a notification: the id is not a single token.");
+  // SHO-3011: psql/libpq do not understand Prisma's ?schema=, so it is removed from the URL - and an unqualified
+  // UPDATE then runs against the server default (public), where this notification does not exist. The statement below
+  // is where that shows up: "UPDATE 0" and an assertion failure that reads like a product bug. Pin the schema psql
+  // cannot carry, from the same parameter, so the UPDATE targets the table the app writes.
+  const schema = parsed.searchParams.get("schema");
+  if (schema !== null && !/^[A-Za-z_][A-Za-z0-9_$-]{0,62}$/.test(schema)) throw new Error("Refusing to age a notification: DATABASE_URL names a schema that is not a plain identifier.");
   parsed.searchParams.delete("schema");
   const aged = new Date(Date.now() - 91 * 86400_000).toISOString();
-  const sql = `UPDATE "Notification" SET "createdAt" = timestamptz '${aged}' WHERE id = '${id}' AND "recipientId" = '${recipientId}'`;
+  const pin = schema === null ? "" : `SET search_path TO "${schema}"; `;
+  const sql = `${pin}UPDATE "Notification" SET "createdAt" = timestamptz '${aged}' WHERE id = '${id}' AND "recipientId" = '${recipientId}'`;
   const out = execFileSync("psql", [parsed.toString(), "-v", "ON_ERROR_STOP=1", "-c", sql], { encoding: "utf8" });
   expect(out).toContain("UPDATE 1");
 }
