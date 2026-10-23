@@ -1,9 +1,11 @@
 // SHO-2693: the required-person flag is a flag, and a proposal's Change object is not one.
-// person() (src/lib/concierge/tools.ts) read the flag as `typeof o === "object" ? o.required : o`. A Change has no
-// `required` key, so a Change in that position evaluated to undefined and switched the check off — the object
-// "satisfied" (stood in for) the flag and turned the requirement off. The flag is boolean-only now: only an explicit
-// `false` asks for an optional person, anything else keeps the requirement on, so a proposal that names nobody is
-// refused instead of becoming a card that assigns nobody. See W29-REPORT.md.
+// Honest history (re-review w70): the parent 597f67d refused a person-less proposal already — `person(c, required = true)`
+// with `required ? reject("person_id is missing. …")`, called with one argument. The object-reading form
+// `typeof o === "object" ? o.required : o` came in with f3a4c03's options-bag spelling of the parameter, was never
+// reachable from a call site (each one passed an explicit boolean), and d89ef4b removed it. These cases are therefore a
+// fail-closed guard on the exported helper for future callers, not the proof of a shipped defect: only an explicit
+// `false` asks for an optional person; anything else keeps the requirement on, so a proposal that names nobody is
+// refused instead of becoming a card that assigns nobody. See W70-REPORT.md.
 import { describe, expect, it } from "vitest";
 import { requiredPerson } from "../src/lib/concierge/tools";
 

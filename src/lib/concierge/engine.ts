@@ -135,9 +135,16 @@ const asksForAssign = (request: string) => /\bassign\b/.test(request.toLowerCase
  * (APL-2513 recorded the same turn as "answer" when a find tool had run first, and got neither). The reply asks in the
  * server's words, and its one option ("Never mind") means it is a real question rather than a dead end, so the next
  * message is free to name the person. No card and no proposal is written: nothing changes until somebody is named.
+ *
+ * The `pending` is what makes that option real: `answerChoice` refuses any choices message without one
+ * (`!s.pending` → 404 "Message not found"), so before it was here the only button on the question answered 404.
+ * It has no `kind`: "none" is handled before the kind is read, and the person is free to name somebody instead.
  */
 const WHO_QUESTION = "Who should I assign it to? Tell me the person's name and I will show you the card to confirm.";
-const whoQuestion = () => ({ kind: "choices" as const, text: WHO_QUESTION, choices: [{ id: "none", label: "Never mind" }] });
+const whoQuestion = (request: string) => ({
+  kind: "choices" as const, text: WHO_QUESTION, choices: [{ id: "none", label: "Never mind" }],
+  pending: { request, question: WHO_QUESTION },
+});
 
 function buildReply(turn: Turn, modelText: string, request: string): Stored {
   if (turn.card) {
@@ -169,7 +176,12 @@ function buildReply(turn: Turn, modelText: string, request: string): Stored {
   }
   // SHO-2693 (APL-2513 AC1): a request that asks to assign, and did not end in a card, must ask who. Nothing is written
   // either way, so nothing changes until a person is named (AC2).
-  if (!turn.card && asksForAssign(request)) return whoQuestion();
+  //
+  // Two gates, because one is not enough: `asksForAssign` covers a model that never called a tool (so no refusal ever
+  // happened), and `turn.needsWho` covers a model that did call one and was refused for naming no person — the case the
+  // wording misses ("reassign everything to me" contains no word boundary before "assign"). Reading needsWho is what
+  // makes that refusal signal load-bearing instead of write-only state.
+  if (turn.needsWho || asksForAssign(request)) return whoQuestion(request);
   const text = modelText || "I could not work that out. Try asking in a different way.";
   return { kind: r.calls > 0 ? "answer" : "text", text: text.slice(0, 4000), ...(r.calls > 0 ? { links: linksFor(turn, text) } : {}) };
 }

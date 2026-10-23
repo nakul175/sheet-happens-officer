@@ -11,6 +11,7 @@ import { account, cleanupZz, task, zzProject, type Account } from "./helpers";
 import { actor, db, lastData, say, script, tu, useFakeModel } from "./concierge-helpers";
 import { sendMessage } from "../src/lib/concierge/engine";
 import { confirmCard } from "../src/lib/concierge/cards";
+import { choicesActive } from "../src/components/concierge/logic";
 import { thread } from "../src/lib/concierge/thread";
 import type { Message } from "../src/lib/concierge/types";
 
@@ -168,5 +169,50 @@ describe("qa:TC missing SHO-2693 assign without a person asks who and changes no
     const asked = await sendMessage(actor(lead), "please assign it to somebody");
     expect(lastAssistant(asked.messages).kind).toBe("choices");
     expect(isQuestion(lastAssistant(asked.messages))).toBe(true);
+  });
+
+  // SHO-2693 independent re-review (w70), blocker B2: the who question's one option has to work. The browser renders
+  // a `choices` message with a button per option and enables it while it is the newest, unanswered message
+  // (src/components/concierge/logic.ts choicesActive, src/components/concierge/MessageView.tsx), and tapping it POSTs to
+  // /api/concierge/choices/[messageId]. answerChoice refuses any choices message without `pending`
+  // (src/lib/concierge/engine.ts: `s.kind !== "choices" || !s.pending` -> 404 "Message not found"), so a who question
+  // that carries no `pending` offers one dead button and leaves the person in an error state.
+  it("qa:TC missing AC1: the who question's Never mind option is answerable and drops the request", async () => {
+    const { lead, taskId, title } = await unassigned();
+    script(() => [say("Who?")]);
+    const asked = await sendMessage(actor(lead), `Assign "${title}".`);
+    const reply = lastAssistant(asked.messages);
+    expect(reply.kind).toBe("choices");
+    // Exactly what the thread shows the person: one enabled button, because this is the newest unanswered message.
+    const rows = await thread(actor(lead));
+    expect(choicesActive(rows, rows[rows.length - 1])).toBe(true);
+    // ...and tapping it goes through the real route, not around it.
+    const tapped = await lead.c.post(`/api/concierge/choices/${reply.id}`, { choiceId: "none" });
+    expect(tapped.status, JSON.stringify(tapped.json)).toBe(200);
+    expect(tapped.json.messages.at(-1).text).toBe("Okay, I dropped that request. Nothing was changed.");
+    expect((await storedOf(reply.id)).choiceAnswered).toBe("none");
+    // Nothing was assigned: the dropped request stayed dropped.
+    expect(await assigneeOf(taskId)).toBe(lead.id);
+  });
+
+  // SHO-2693 independent re-review (w70), blocker B3: the refusal's own signal has to decide the reply too, or the
+  // keyword is the only gate and a real assign request is missed. "Reassign everything to me" asks to assign and names
+  // nobody, but /\bassign\b/ does not match inside "reassign"; only turn.needsWho — set by runTool when a proposal is
+  // refused for naming no person — knows a person is owed. Before this, that turn fell through to the model's own
+  // words, which is the same defect AC1 measured on the parent.
+  it("qa:TC missing AC1: a refusal for naming nobody asks who even when the wording says reassign", async () => {
+    const { lead, taskId, title } = await unassigned();
+    script(
+      () => [tu("find_tasks", { text: title })],
+      () => plansWithoutPerson(taskId)(),
+      () => [say("I need a person for that.")],
+    );
+    const { messages } = await sendMessage(actor(lead), "Reassign everything to me.");
+    const reply = lastAssistant(messages);
+    expect(reply.kind).toBe("choices");
+    expect(reply.text).toMatch(/Who should I assign it to/);
+    // The model's own sentence is not what the person is shown, and nothing moved.
+    expect(reply.text).not.toBe("I need a person for that.");
+    expect(await assigneeOf(taskId)).toBe(lead.id);
   });
 });

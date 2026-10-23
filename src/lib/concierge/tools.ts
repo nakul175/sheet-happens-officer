@@ -28,8 +28,9 @@ export type Turn = {
   tooMany?: number;
   choice?: { question: string; kind: Kind; ids: string[] };
   /**
-   * Set when a proposal was refused only because it named no person: the reply asks who, in the server's own words,
-   * instead of falling back to whatever sentence the model wrote (SHO-2693 / APL-2513 AC1).
+   * Set when a proposal was refused only because it named no person. buildReply reads it (engine.ts) and answers with
+   * the server's own question instead of falling back to whatever sentence the model wrote (SHO-2693 / APL-2513 AC1),
+   * which is how a turn worded "reassign everything to me" still asks who.
    */
   needsWho?: boolean;
   forced?: { kind: Kind; ids: string[] };
@@ -176,10 +177,13 @@ const reject = (m: string, askWho?: "person"): never => { throw new Reject(m, as
  * person; every other value — undefined, true, or a stray object such as a proposal's own Change — keeps the
  * requirement on, so a proposal that names nobody is refused rather than sliding through.
  *
- * The defect this replaces: the flag was read as `typeof o === "object" ? o.required : o`. A Change has no `required`
- * key, so a Change in the flag position (the shape `person(c)` used to invite) evaluated to undefined, the check read
- * that as "optional", and an assign_task that named nobody became a card that assigns nobody. The flag fails closed
- * now, and the parameter is a boolean, so the compiler will not accept a Change there either.
+ * Honest history (re-review w70): the parent 597f67d was `person(c, required = true)` with the check
+ * `required ? reject("person_id is missing. …") : undefined`, and every call site passed one argument, so the refusal
+ * already fired and no Change ever reached the flag. The object-reading form this replaces
+ * (`typeof o === "object" ? o.required : o`) was introduced by f3a4c03's own options-bag spelling of this parameter,
+ * not inherited: there a Change would have read as undefined, i.e. "optional". d89ef4b removed that shape. So this is a
+ * fail-closed guard for future callers, not the repair of a shipped defect — the person-less proposal was refused
+ * before the fix as well.
  */
 export const requiredPerson = (flag?: unknown): boolean => flag !== false;
 
@@ -194,10 +198,11 @@ async function toOps(t: Turn, changes: Change[]): Promise<{ ops: Op[]; refs: { k
     return rec!;
   };
   /**
-   * SHO-2693: `required` is a boolean and nothing else. It used to accept an options bag — `{ required: true }` — and
-   * the flag was read off whatever object arrived (`typeof o === "object" ? o.required : o`), so a Change, which has
-   * no `required` key, stood in for the flag and switched the check off. Passing a Change here is now a type error,
-   * and requiredPerson keeps the check on for anything that is not an explicit `false` (see its comment).
+   * SHO-2693: `required` is a boolean and nothing else. It briefly accepted an options bag — `{ required: true }` — and
+   * the flag was read off whatever object arrived (`typeof o === "object" ? o.required : o`), a shape in which a Change,
+   * which has no `required` key, would have read as "optional". No caller ever passed a Change, and that spelling is
+   * gone; passing one here is now a type error, and requiredPerson keeps the check on for anything that is not an
+   * explicit `false` (see its comment).
    */
   const person = (c: Change, required?: boolean): string | undefined => {
     const id = c.person_id === "me" ? t.user.id : c.person_id;
