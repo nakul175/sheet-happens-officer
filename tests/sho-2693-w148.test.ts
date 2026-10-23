@@ -110,23 +110,30 @@ describe("w148 SHO-2693: a turn that wrote nothing must not say it wrote somethi
     expect(await stateOf(lead, projectId)).toEqual(before);
   });
 
-  it("w148/HEDGE-RESIDUAL 'I believe it went through.': relayed, but inside the server's frame so it reads as no change", async () => {
+  it("w148/HEDGE-RESIDUAL 'I believe it went through.': not relayed at all, because nothing was read or written", async () => {
     // w148 recorded this as a residual the detector cannot see, because it names no verb from the change family and no
-    // completion word. w164 closes it without touching the word list: the sentence is still relayed, and the person
-    // reads the server's own statement of the state first, so it cannot be mistaken for a report of a write.
+    // completion word. w164 framed it (contained, not eliminated). w183 removes it from the reply entirely: the turn
+    // read nothing and wrote nothing, so the person gets the server's own sentence and none of the model's.
     const { lead } = await fixture();
     script(() => [say("I believe it went through.")]);
     const { messages } = await sendMessage(actor(lead), "Sort it out."); // no assign wording, so no who question
-    expect(lastAssistant(messages).text).toBe("Nothing has changed - I have not carried anything out here. I believe it went through.");
+    const text = lastAssistant(messages).text;
+    expect(text).not.toContain("went through");
+    expect(text).toBe("Nothing has changed. I cannot change anything without a card you confirm, so tell me which task should change and how, and I will show you the card.");
   });
 
-  it("w148/READ: 'Which tasks are assigned to me?' keeps the model's answer", async () => {
+  it("w148/READ: 'Which tasks are assigned to me?' keeps the model's answer when a read returned rows", async () => {
     const { lead } = await fixture();
-    script(() => [say("Here are the tasks assigned to you.")]);
+    // SHO-2693 w183: the answer survives on the state that makes it an answer - a read tool returned rows. A no-tool
+    // answer is not relayed (tests/sho-2693-w183.test.ts, w183/NO-EVIDENCE).
+    script(
+      () => [tu("my_tasks", { filter: "all_open" })],
+      () => [say("Here are the tasks assigned to you.")],
+    );
     const { messages } = await sendMessage(actor(lead), "Which tasks are assigned to me?");
     const reply = lastAssistant(messages);
-    expect(reply.kind).toBe("text");
-    expect(reply.text).toBe("Nothing has changed - I have not carried anything out here. Here are the tasks assigned to you.");
+    expect(reply.kind).toBe("answer");
+    expect(reply.text).toBe("Here are the tasks assigned to you.");
   });
 
   it("w148/CARD: a card-backed assignment still returns its card", async () => {

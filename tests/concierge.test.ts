@@ -236,14 +236,16 @@ describe("propose and confirm (8.3)", () => {
       },
     );
     const r = await ask(lead, "Deactivate the editor");
-    // SHO-2693 w164: the model is still the source of the screens-only wording, and the turn still writes nothing, so
-    // the reply now carries the server's own "nothing has changed" sentence in front of it. AC3 is unchanged: the
-    // concierge points to the screen, no card is offered, and no write happens.
+    // SHO-2693 w183: the turn read nothing and wrote nothing (the proposal was refused), so the person gets the server's
+    // own sentence and NONE of the model's prose - whatever it says. AC3's substance is unchanged: no card is offered and
+    // no write happens. DISCLOSED COST: the model's pointer to the Team screen is no longer relayed either, because the
+    // server cannot tell that sentence from a claim without reading its words. Restoring the pointer needs a
+    // server-authored screen map for refused actions (a product decision, not a wording match).
     expect(r.messages[1]).toMatchObject({
       kind: "text",
-      text: "Nothing has changed - I have not carried anything out here. Deactivating people is done on the Team screen.",
+      text: "Nothing has changed. I cannot change anything without a card you confirm, so tell me which task should change and how, and I will show you the card.",
     });
-    expect((r.messages[1] as { text: string }).text).toContain("Deactivating people is done on the Team screen.");
+    expect((r.messages[1] as { text: string }).text).not.toMatch(/screen/i);
     expect(r.messages.some((m) => m.kind === "card")).toBe(false);
     expect((await db.user.findUniqueOrThrow({ where: { id: ed.id } })).deactivatedAt).toBeNull();
   });

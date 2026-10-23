@@ -88,15 +88,18 @@ describe("w90 SHO-2693 disposition of 282e31d", () => {
 
   it("w90/B1: a read question containing 'assigned' keeps the model's answer", async () => {
     const { lead } = await unassigned();
-    script(() => [say("Here are the tasks assigned to you.")]);
+    // SHO-2693 w183: the answer is relayed only when a read tool actually returned rows - the fact that makes it an
+    // answer rather than a sentence. A model that answers with NO tool call is no longer relayed at all (below).
+    script(
+      () => [tu("my_tasks", { filter: "all_open" })],
+      () => [say("Here are the tasks assigned to you.")],
+    );
     const { messages } = await sendMessage(actor(lead), "Which tasks are assigned to me?");
     const reply = lastAssistant(messages);
-    expect(reply.kind).toBe("text");
-    // SHO-2693 w164: the answer is unchanged, and engine.ts now puts the server's own "nothing has changed" sentence in
-    // front of it on every turn that wrote nothing, so the relayed prose can never be read as an outcome. The gate is
-    // still byte-exact; only the bytes it pins gained the frame.
-    expect(reply.text).toContain("Here are the tasks assigned to you.");
-    expect(reply.text).toBe("Nothing has changed - I have not carried anything out here. Here are the tasks assigned to you.");
+    expect(reply.kind).toBe("answer");
+    // SHO-2693 w183: byte-exact and unframed - the answer is the answer, and there is no server sentence in front of
+    // it. The guarantee that nothing false is relayed comes from the read having happened (engine.ts), not from a frame.
+    expect(reply.text).toBe("Here are the tasks assigned to you.");
   });
 
   it("w90/WIDENING: a person-less collaborator refusal now asks the assign-worded question", async () => {

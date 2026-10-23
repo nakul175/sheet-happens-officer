@@ -10,7 +10,6 @@ import {
 } from "@/lib/concierge/limits";
 import { todayLine } from "@/lib/concierge/dates";
 import { isEcho } from "@/lib/concierge/echo";
-import { claimsWrite } from "@/lib/concierge/claims";
 import { flat, personById, projectById, quickAnswer, taskById, QUICK_ACTIONS, type TaskRec } from "@/lib/concierge/reads";
 import { conciergeTools, newTurn, runTool, wrap, type Kind, type Turn } from "@/lib/concierge/tools";
 import { commentsEnabled } from "@/lib/flags";
@@ -158,27 +157,6 @@ const WHO_QUESTION = "Who should I assign it to? Tell me the person's name and I
  */
 const NOTHING_CHANGED = "Nothing has changed. I cannot change anything without a card you confirm, so tell me which task should change and how, and I will show you the card.";
 
-/**
- * SHO-2693 w164: the closed half of the invariant, and the reason it is a *frame* and not another keyword.
- *
- * `claimsWrite` below is a blacklist over a verb family. A person reading "I've handled that for you." or "Your task
- * has a new owner." is told the same thing as "I reassigned it", yet neither sentence names a verb in that family, so
- * both were relayed on a turn that wrote nothing (w164/NOUNVERB). Adding them to the list is the trap w107 fell into:
- * each synonym added leaves the next one ("I sorted it", "it went through") outside, because natural language has no
- * closed vocabulary for "I changed the world".
- *
- * So the property lives in the frame instead. On the branch below, nothing was written - no card, no proposal, no
- * result - and the server says exactly that in its own sentence, in the first person, BEFORE the model's prose, so the
- * state of the world is never left to be inferred from what the model chose to say. `claimsWrite` is kept only for the
- * better message it can give (it explains the card), never as the thing that makes the reply true.
- *
- * This is containment, not closure: the model's sentence is still relayed, so a person who reads only the last sentence
- * can still be told a write happened when none did (w164/NOUNVERB). The only closure is to relay no prose at all on
- * this branch, which deletes the answer of a read the model answered without a tool call - see W164-REPORT.md, which
- * states that trade-off rather than hiding it.
- */
-const UNCHANGED = "Nothing has changed - I have not carried anything out here. ";
-
 const UNKNOWN = "I could not work that out. Try asking in a different way.";
 const whoQuestion = (request: string) => ({
   kind: "choices" as const, text: WHO_QUESTION, choices: [{ id: "none", label: "Never mind" }],
@@ -225,14 +203,30 @@ function buildReply(turn: Turn, modelText: string, request: string): Stored {
   // "result" row is written only by cards.ts when a card is confirmed, which is a different turn. So nothing was
   // written, and a sentence that says otherwise is a lie whatever wording asked for it. asksForAssign above is only a
   // nicer question (it knows the missing value is the person); it is not what makes this branch safe. No further
-  // widening of that keyword is needed, and none would help: `reassigning`, `unassign`, `re-assign` are all the same
-  // claim, and claimsWrite matches the verb stem rather than a spelling.
-  if (claimsWrite(modelText)) return { kind: r.calls > 0 ? "answer" : "text", text: NOTHING_CHANGED, ...(r.calls > 0 ? { links: linksFor(turn, modelText) } : {}) };
-  // SHO-2693 w164: everything that got past the blacklist is still relayed - but framed, so the person reads the
-  // server's statement of the state first. This is the line that makes the invariant independent of vocabulary.
+  // widening of that keyword is needed, and none would help.
+  //
+  // SHO-2693 w164: the guarantee is the STATE OF THE TURN, not a vocabulary. w164 showed that `claimsWrite` (the
+  // blacklist this line used to consult, src/lib/concierge/claims.ts, now deleted) relayed "I've handled that for
+  // you.", "That's taken care of." and "Your task has a new owner." on a turn that wrote nothing, and that adding each
+  // synonym leaves the next one outside. The frame w164 shipped in its place kept those sentences on the screen behind
+  // a denial - contained, not eliminated.
+  //
+  // w183 closes it by construction. The branch below is reached only when the turn produced no card, no proposal and
+  // no result, so the server has nothing of its own to report. The one thing that CAN make the model's prose true is
+  // data the tools actually returned (`turn.reads.records`), and that is state the model cannot fake: it is incremented
+  // by tools.ts when a read tool returns rows, never by anything the model writes. So:
+  //
+  //   records === 0  → nothing was read and nothing was written. There is no fact behind any sentence the model could
+  //                    have produced here, so no sentence of it is relayed, whatever it says. The person gets the
+  //                    server's own words: nothing changed, and what is missing.
+  //   records  > 0   → the model's answer is grounded in rows the tools returned, so it is relayed as the answer.
+  //
+  // No wording of the model's can move itself from the first case to the second, because the deciding value is a count
+  // of tool results. That is the whole difference from every previous attempt (w107 widened a request keyword, w126
+  // proved 6 of 7 phrasings still fabricated, w148/w164 matched the model's sentence): there is no pattern to defeat.
+  if (r.records === 0) return { kind: "text", text: NOTHING_CHANGED };
   const body = modelText || UNKNOWN;
-  const text = UNCHANGED + body;
-  return { kind: r.calls > 0 ? "answer" : "text", text: text.slice(0, 4000), ...(r.calls > 0 ? { links: linksFor(turn, body) } : {}) };
+  return { kind: "answer", text: body.slice(0, 4000), links: linksFor(turn, body) };
 }
 
 async function respond(user: Actor, userRow: { id: string }, userText: string, request: string, counted: boolean, now: Date, seed?: (t: Turn) => void): Promise<{ messages: Message[]; disabled?: Disabled }> {

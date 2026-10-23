@@ -94,14 +94,20 @@ describe("w164 SHO-2693: the claim detector's synonym hole, and the closed fix",
     });
   }
 
-  it("w164/PRESERVED-READ: a read question keeps its answer (inside the server's frame)", async () => {
+  it("w164/PRESERVED-READ: a read question keeps its answer (on a read that returned rows)", async () => {
     const { lead } = await fixture();
-    script(() => [say("Here are the tasks assigned to you.")]);
+    // SHO-2693 w183: w164 could only keep this answer by framing it, because the scripted model answered with no tool
+    // call, and a sentence with no data behind it is indistinguishable from a claim. The answer is now kept on the
+    // state that makes it true - a read tool returned rows - and is relayed byte-exact with no frame.
+    script(
+      () => [tu("my_tasks", { filter: "all_open" })],
+      () => [say("Here are the tasks assigned to you.")],
+    );
     const { messages } = await sendMessage(actor(lead), "Which tasks are assigned to me?");
     const reply = lastAssistant(messages);
-    expect(reply.kind).toBe("text");
+    expect(reply.kind).toBe("answer");
     expect(reply.text).toContain("Here are the tasks assigned to you.");
-    expect(reply.text).toBe("Nothing has changed - I have not carried anything out here. Here are the tasks assigned to you.");
+    expect(reply.text).toBe("Here are the tasks assigned to you.");
   });
 
   it("w164/PRESERVED-CARD: a card-backed assignment still returns its card", async () => {
