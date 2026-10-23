@@ -3,6 +3,14 @@ import { ApiError } from "@/lib/http";
 import { RETURN_PATH_HEADER } from "@/lib/return-to";
 
 /**
+ * SHO-2725 (APL-2661 AC1). The apex and www names belong to the app, so this proxy answers them with a 301 to it.
+ * The forwarder that used to hold the names answered HEAD with 405, which is why `curl -I` never showed the
+ * redirect that GET gets. Answering here is method-independent: HEAD gets the same status and Location as GET.
+ */
+const APP_ORIGIN = "https://app.sheethappensofficer.com";
+const APEX_HOSTS = new Set(["sheethappensofficer.com", "www.sheethappensofficer.com"]);
+
+/**
  * APL-2652. Records the path that was asked for so the app layout can send a
  * signed-out person to `/signin?next=…`. This does not decide who is signed in;
  * `currentUser()` in the layout still does that. A client-supplied header is replaced.
@@ -13,6 +21,9 @@ import { RETURN_PATH_HEADER } from "@/lib/return-to";
  * still render the task segment, which calls `notFound()` for the same screen.
  */
 export async function proxy(request: NextRequest) {
+  // SHO-2725: this runs for HEAD too, so an apex or www request never reaches a handler that only answers GET.
+  const apex = apexRedirect(request);
+  if (apex) return apex;
   const requestHeaders = new Headers(request.headers);
   // Pam's D10. Next rebuilds the proxy's URL with URLSearchParams, so a space in the query arrives as `+` in both
   // `request.url` and `nextUrl`. That serialiser writes a literal plus as `%2B`, so every `+` here is a space:
@@ -30,6 +41,28 @@ export async function proxy(request: NextRequest) {
   if (unavailable) return unavailable;
   // No cookie. SIGNIN_RETURN_TO stays on the server; main sends no sho_return_to cookie either.
   return NextResponse.next({ request: { headers: requestHeaders } });
+}
+
+/**
+ * SHO-2725. Apex and www answer 301 to the app on every method, HEAD included, so `curl -I` shows the same status
+ * and Location as GET. The path and query are kept, so an apex deep link lands on the same screen. The app and the
+ * staging names are not in APEX_HOSTS, so their answers are unchanged.
+ */
+function apexRedirect(request: NextRequest): NextResponse | null {
+  if (!APEX_HOSTS.has(hostnameOf(request))) return null;
+  // Setters, not `new URL(request.nextUrl.pathname, APP_ORIGIN)`: a path that begins `//` would otherwise become
+  // another host, turning the redirect into an open redirect.
+  const target = new URL(APP_ORIGIN);
+  target.pathname = request.nextUrl.pathname;
+  target.search = request.nextUrl.search;
+  return new NextResponse(null, { status: 301, headers: { location: target.toString() } });
+}
+
+/** The name the client asked for: the first forwarded name, without a port, the root dot or case. */
+function hostnameOf(request: NextRequest): string {
+  const forwarded = request.headers.get("x-forwarded-host")?.split(",")[0]?.trim();
+  const raw = forwarded || request.headers.get("host") || request.nextUrl.host || request.nextUrl.hostname;
+  return raw.replace(/:\d+$/, "").replace(/\.$/, "").toLowerCase();
 }
 
 /** A flight request. Those render the task segment; only a document needs the status fixed here. */
