@@ -128,7 +128,10 @@ test("APL-2536 > AC4: Accounts is searchable by name, filterable by kind, and co
   expect((await admin.api.post(`/api/projects/${paused.id}/stage`, { stageId: hold.id, reason: "ZZ-TEST pause" })).status).toBe(200);
   const closed = await createDeal(admin, later, dealBody({ name: zz("counted won"), organisationId: wonOrg.id, pipelineId: pipes.pro.id, leaderId: admin.user.id, step: zz("won step") }));
   const stepId = (await projectOf(admin, closed.id)).deal.nextStep.id as string;
-  expect((await admin.api.post(`/api/tasks/${stepId}/complete`, {})).status).toBe(200);
+  // The complete endpoint is versioned: send the step's current updatedAt, as the app does.
+  const stepVersion = (await admin.api.get(`/api/tasks/${stepId}`)).json.task.updatedAt as string;
+  expect(stepVersion, "the step's current updatedAt").toBeTruthy();
+  expect((await admin.api.post(`/api/tasks/${stepId}/complete`, { expectedUpdatedAt: stepVersion })).status).toBe(200);
   expect((await admin.api.post(`/api/projects/${closed.id}/stage`, { stageId: won.id })).status).toBe(200);
   expect((await admin.api.post(`/api/projects/${lead.id}/parties`, { organisationId: funder.id, role: "FUNDER" })).status).toBe(201);
 
