@@ -100,6 +100,27 @@ describe("SHO-2736 AC1, proved locally where the Super Admin can sign up", () =>
     expect(me.json.user.orgRole, "the removal route's guard is satisfied before the route is even called").toBe("SUPER_ADMIN");
   });
 
+  it("every destination the question offers is honoured, so no default stage is doing the moving", async () => {
+    // AC1 is about a CHOSEN destination: one hard-coded stage answering for all of them would still pass a test
+    // that only ever picks one. The question's own offer list is the yardstick, and each entry is tried.
+    const probe = await zzStage();
+    const asked = await sa.c.del(`/api/deals/pipelines/${probe}`);
+    expect(asked.status, JSON.stringify(asked.json)).toBe(409);
+    const offered = asked.json.stages as Stage[];
+    expect(offered.length, "more than one destination is offered").toBeGreaterThan(1);
+    expect((await sa.c.del(`/api/deals/pipelines/${probe}?moveTo=${offered[0].id}`)).status).toBe(200);
+
+    for (const dest of offered) {
+      const zz = await zzStage();
+      const deal = await dealIn(zz);
+      const r = await sa.c.del(`/api/deals/pipelines/${zz}?moveTo=${dest.id}`);
+      expect(r.status, `${dest.name}: ${JSON.stringify(r.json)}`).toBe(200);
+      expect(r.json, `the answer names ${dest.name}`).toMatchObject({ removed: { id: zz }, movedTo: { id: dest.id, name: dest.name }, items: 1 });
+      expect(await stageOf(deal), `the item lands in ${dest.name}, the stage that was chosen`).toBe(dest.id);
+      expect(await exists(zz), "and the stage it came from is gone").toBe(false);
+    }
+  });
+
   it("deals sit in two different stages; removing a third stage that holds items asks first, then moves exactly those items", async () => {
     const lead = named(pro, "Lead");
     const conversation = named(pro, "Conversation");

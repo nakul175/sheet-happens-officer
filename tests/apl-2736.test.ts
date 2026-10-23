@@ -19,6 +19,27 @@ let pro: Pipe;
 let bid: Pipe;
 let seq = 0;
 
+/**
+ * The local test database, for the two raw pg connections the race test needs (SHO-2736). Prisma's `?schema=` is
+ * Prisma-only: the pg driver would send it as an unknown startup setting, so it is carried over as `search_path`
+ * instead. Without that the raw connections land in `public` while Prisma - and the route under test - work in the
+ * named schema, so the mover holds a row lock on a deal nobody is looking at and the race never overlaps.
+ */
+const testSchema = () => new URL(process.env.DATABASE_URL ?? "").searchParams.get("schema") ?? "public";
+
+function rawDatabaseUrl() {
+  const raw = process.env.DATABASE_URL;
+  if (!raw) throw new Error("DATABASE_URL is required and must point at the local test database");
+  const url = new URL(raw);
+  if (url.hostname !== "localhost" && url.hostname !== "127.0.0.1" && url.hostname !== "[::1]") {
+    throw new Error("Refusing to run: the stage-removal race test uses the local test database only");
+  }
+  const schema = url.searchParams.get("schema");
+  url.search = "";
+  if (schema) url.searchParams.set("options", `-c search_path=${schema}`);
+  return url.toString().replaceAll("+", "%20");
+}
+
 async function pipes(who: Account) {
   const r = await who.c.get("/api/deals/pipelines");
   expect(r.status).toBe(200);
@@ -226,11 +247,15 @@ describe("qa:TC missing APL-2736 removing a stage asks where its items go", () =
     const zz = await zzStage();
     const proposal = named(pro, "Proposal");
     const deal = await dealIn(named(pro, "Lead").id);
-    const mover = new pg.Client({ connectionString: process.env.DATABASE_URL });
-    const watcher = new pg.Client({ connectionString: process.env.DATABASE_URL });
+    const mover = new pg.Client({ connectionString: rawDatabaseUrl() });
+    const watcher = new pg.Client({ connectionString: rawDatabaseUrl() });
     await mover.connect();
     await watcher.connect();
     try {
+      // The raw connections must see the tables the route writes, or the lock below guards no rows and this
+      // test passes without ever overlapping the removal (it did: the mover sat in `public`, holding nothing).
+      const where = (await watcher.query<{ schema: string }>("SELECT current_schema() AS schema")).rows[0].schema;
+      expect(where, "the raw pg connections are not in the schema DATABASE_URL names").toBe(testSchema());
       // Allowed direct DB write (D1 race transaction only): the mover puts the deal in the stage and holds its
       // transaction open while the removal runs. An HTTP request cannot hold a transaction open across calls.
       await mover.query("BEGIN");
@@ -248,6 +273,8 @@ describe("qa:TC missing APL-2736 removing a stage asks where its items go", () =
       await mover.query("COMMIT");
       const r = await removing;
       expect(r.status, JSON.stringify(r.json)).toBe(200);
+      // The deal that raced into the stage is one of the items the move carried, not a row the delete stranded.
+      expect(r.json, "the raced-in deal is one of the moved items").toMatchObject({ removed: { id: zz }, movedTo: { id: proposal.id }, items: 1 });
     } finally {
       await mover.query("ROLLBACK").catch(() => {});
       await mover.end();
