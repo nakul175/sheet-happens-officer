@@ -80,6 +80,21 @@ describe("qa:TC missing SHO-2671 AC1: subtasks completed with the parent reopen 
     expect(await isOpen(lead, parent)).toBe(true);
     for (const id of subs) expect(await isOpen(lead, id), id).toBe(true);
   });
+
+  it("qa:TC missing done-section completion then the reopen route reopens every subtask", async () => {
+    const lead = await zz.person("lead");
+    const proj = await zz.project(lead);
+    const { parent, subs } = await parentWith(lead, proj, 2);
+    // The other half of "cascade/complete-with-parent": P's section becomes the done Section, so P
+    // closes and completeSubtasks closes both subtasks with it (src/lib/sections.ts:103).
+    expect((await lead.c.patch(`/api/projects/${proj.id}/sections/${proj.doing}`, { isDone: true })).status).toBe(200);
+    for (const id of [parent, ...subs]) expect(await isDone(lead, id), id).toBe(true);
+
+    expect((await reopen(lead, parent)).status).toBe(200);
+    expect(await isOpen(lead, parent)).toBe(true);
+    for (const id of subs) expect(await isOpen(lead, id), id).toBe(true);
+    expect(await reopenedIds(proj.id, parent)).toEqual(subs.slice().sort());
+  });
 });
 
 describe("qa:TC missing SHO-2671 AC2: a subtask ticked done on its own stays done", () => {
