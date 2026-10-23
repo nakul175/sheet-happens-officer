@@ -24,9 +24,14 @@
 //      whole object like a plain alias does.
 // The boundary is stated rather than hidden: a callee this pass cannot read (a third-party or unresolved module, a
 // method on an object, a function passed as a parameter) is NOT reported, a value RETURNED from a helper is not
-// followed, and neither is one stored on an object property, closed over, or interpolated into a template string. The
-// guard is not exhaustive; tests/sec-2917-f3-sinking-w93.test.ts pins what it now sees and SEC-2917-F3-DISPOSITION.md
-// keeps the rest open.
+// followed, and neither is one stored on an object property, closed over, or interpolated into a template string.
+// W105 closes one more of these: a name a file HANDS ON without declaring it (`export { dump } from "./impl"`,
+// `export { dump as shout } from "./impl"`, `export * from "./impl"`, and a barrel of a barrel) is now followed to the
+// file that declares it, so a sink behind a barrel is judged like a sink behind a plain import. Still not followed:
+// `export * as ns from "./impl"` (a namespace handed on), a re-export through a module outside the scanned batch, and
+// `require()`/dynamic `import()` of a local module.
+// The guard is not exhaustive; tests/sec-2917-f3-sinking-w93.test.ts pins what the F3 pass sees,
+// tests/sec-2917-reexport-w105.test.ts pins the re-export pass, and SEC-2917-F3-DISPOSITION.md keeps the rest open.
 // The one asymmetry, on purpose: a plain alias (`const e = process.env`) is reported only when the whole thing is used
 // (a dump, a listing, a spread), while an import, a destructuring of `env` out of `process` and `require(...).env` are
 // reported where they bind: those three exist only to move the whole object out of reach of a `process.env` scan.
@@ -370,11 +375,21 @@ function isDumpCall(node: ts.CallExpression): boolean {
 /** A function whose body this pass can read: a declaration, or a `const` arrow / function expression. */
 type Callee = { file: string; name: string; params: readonly ts.ParameterDeclaration[]; body: ts.Node };
 
+/**
+ * A name a file hands on without declaring it: `export { dump } from "./impl"`, `export { dump as shout } from "./impl"`,
+ * `export * from "./impl"` (recorded under the key `*`, whose `name` is the star sentinel).
+ */
+type ReExport = { module: string; name: string };
+/** The `export *` key: the name the importing file asked for is resolved inside that module. */
+const STAR = "*";
+
 /** The cross-file view SHO-2917 F3 needs: what each file declares, and what it imports from where. */
 type ModuleIndex = {
   functions: Map<string, Map<string, Callee>>;
   imports: Map<string, Map<string, { module: string; name: string }>>;
   namespaces: Map<string, Map<string, string>>;
+  /** W105: what each file exports by handing it on (`export { x } from "./y"`, `export * from "./y"`). */
+  reexports: Map<string, Map<string, ReExport[]>>;
   files: Set<string>;
 };
 
@@ -433,13 +448,30 @@ function functionsOf(file: string, source: ts.SourceFile): Map<string, Callee> {
 
 /** The whole batch as one module graph, so an import can be followed into the file that defines the callee. */
 function moduleIndex(sources: { file: string; source: ts.SourceFile }[]): ModuleIndex {
-  const index: ModuleIndex = { functions: new Map(), imports: new Map(), namespaces: new Map(), files: new Set() };
+  const index: ModuleIndex = { functions: new Map(), imports: new Map(), namespaces: new Map(), reexports: new Map(), files: new Set() };
   for (const { file, source } of sources) {
     index.files.add(file);
     index.functions.set(file, functionsOf(file, source));
     const imports = new Map<string, { module: string; name: string }>();
     const namespaces = new Map<string, string>();
+    const reexports = new Map<string, ReExport[]>();
+    const addReExport = (exported: string, module: string, name: string): void => {
+      const list = reexports.get(exported) ?? [];
+      list.push({ module, name });
+      reexports.set(exported, list);
+    };
     const visit = (node: ts.Node): void => {
+      // W105: `export { dump } from "./impl"` and `export * from "./impl"` declare nothing, so the barrel's own function
+      // map is empty and an import of the barrel used to resolve to nothing. Record the hand-off so it can be followed.
+      if (ts.isExportDeclaration(node) && node.moduleSpecifier && ts.isStringLiteralLike(node.moduleSpecifier)) {
+        const module = node.moduleSpecifier.text;
+        if (!node.exportClause) addReExport(STAR, module, STAR);
+        else if (ts.isNamedExports(node.exportClause)) {
+          for (const element of node.exportClause.elements) {
+            addReExport(element.name.text, module, (element.propertyName ?? element.name).getText());
+          }
+        }
+      }
       if (ts.isImportDeclaration(node) && ts.isStringLiteralLike(node.moduleSpecifier) && node.importClause) {
         const module = node.moduleSpecifier.text;
         const clause = node.importClause;
@@ -456,18 +488,48 @@ function moduleIndex(sources: { file: string; source: ts.SourceFile }[]): Module
     visit(source);
     index.imports.set(file, imports);
     index.namespaces.set(file, namespaces);
+    index.reexports.set(file, reexports);
   }
   return index;
 }
 
-/** The function a call names, followed through one import when that is how the file got it. */
+/**
+ * The function `name` names in `file`: declared there, or handed on by that file to another module in the batch
+ * (`export { dump } from "./impl"`, `export * from "./impl"`, and a barrel of a barrel). A re-export declares nothing, so
+ * without this the import of a barrel resolved to a module with no such function and the call site was not judged —
+ * the W105 hole. `seen` stops a cycle (`a` re-exports from `b`, `b` re-exports from `a`) from looping.
+ */
+function exportedFrom(index: ModuleIndex, file: string, name: string, seen: Set<string>, depth = 0): Callee | null {
+  const key = `${file}#${name}`;
+  if (seen.has(key) || depth > MAX_HOPS) return null;
+  seen.add(key);
+  const own = index.functions.get(file)?.get(name);
+  if (own) return own;
+  const reexports = index.reexports.get(file);
+  if (!reexports) return null;
+  const follow = (target: ReExport, exported: string): Callee | null => {
+    const module = resolveModule(file, target.module, index.files);
+    // `export * from "./impl"` re-exports whatever the caller asked for, so the name travels unchanged.
+    const wanted = target.name === STAR ? exported : target.name;
+    return module ? exportedFrom(index, module, wanted, seen, depth + 1) : null;
+  };
+  const direct = reexports.get(name)?.find((target) => target.name !== STAR);
+  if (direct) return follow(direct, name);
+  for (const star of reexports.get(STAR) ?? []) {
+    const found = follow(star, name);
+    if (found) return found;
+  }
+  return null;
+}
+
+/** The function a call names, followed through one import — and through any re-export on the way — when that is how the file got it. */
 function calleeOf(index: ModuleIndex, file: string, call: ts.CallExpression): Callee | null {
   const sameFile = (name: string): Callee | null => index.functions.get(file)?.get(name) ?? null;
   const imported = (name: string): Callee | null => {
     const target = index.imports.get(file)?.get(name);
     if (!target) return null;
     const module = resolveModule(file, target.module, index.files);
-    return module ? index.functions.get(module)?.get(target.name) ?? null : null;
+    return module ? exportedFrom(index, module, target.name, new Set()) : null;
   };
   const expression = call.expression;
   if (ts.isIdentifier(expression)) return imported(expression.text) ?? sameFile(expression.text);
@@ -475,7 +537,7 @@ function calleeOf(index: ModuleIndex, file: string, call: ts.CallExpression): Ca
     const module = index.namespaces.get(file)?.get(expression.expression.text);
     if (module) {
       const resolved = resolveModule(file, module, index.files);
-      return resolved ? index.functions.get(resolved)?.get(expression.name.text) ?? null : null;
+      return resolved ? exportedFrom(index, resolved, expression.name.text, new Set()) : null;
     }
   }
   return null;
