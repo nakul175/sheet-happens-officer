@@ -108,6 +108,34 @@ describe("qa:TC missing APL-2950 Usage spend vs ceiling fixes", () => {
     expect(under).toContain("<dt>Monthly ceiling</dt><dd>No ceiling set, default $100.00 safety cap applies</dd>");
   });
 
+  // SHO-3013 AC1/AC3 over the whole range, ported from the 3012+3013 branch (3c2e7dc) at the rebase.
+  // AC1 says "at or above $100", so every level there must speak; AC3 says the same card keeps no
+  // percentage, no meter and no "Over ceiling" flag. The set-ceiling card never borrows this sentence.
+  it("qa:TC missing SHO-3013 AC1+AC3: the signal speaks at every level at or above the cap and the card keeps its shape", () => {
+    for (const spendUsd of [100, 100.004, 150, 1000]) {
+      const html = htmlFor({ usd: 100, configured: false, spendUsd, percent: 0 });
+      expect(html, String(spendUsd)).toContain('role="status"');
+      expect(html, String(spendUsd)).toContain("The default $100.00 safety cap has been reached.");
+      expect(html, String(spendUsd)).toContain(`<dt>Spend to date</dt><dd>${formatUsd(spendUsd)}</dd>`);
+      expect(html, String(spendUsd)).not.toContain("Percentage used");
+      expect(html, String(spendUsd)).not.toContain('role="meter"');
+      expect(html, String(spendUsd)).not.toContain("Over ceiling");
+    }
+    for (const spendUsd of [0, 10, 99.99, 99.999]) {
+      const html = htmlFor({ usd: 100, configured: false, spendUsd, percent: 0 });
+      expect(html, String(spendUsd)).not.toContain('role="status"');
+      expect(html, String(spendUsd)).not.toContain("safety cap has been reached");
+      expect(html, String(spendUsd)).toContain("<dt>Monthly ceiling</dt><dd>No ceiling set, default $100.00 safety cap applies</dd>");
+      expect(html, String(spendUsd)).not.toContain("Percentage used");
+      expect(html, String(spendUsd)).not.toContain('role="meter"');
+    }
+    // A ceiling the owner set keeps its own card: above it the flag is "Over ceiling", never the safety-cap sentence.
+    const set = htmlFor({ usd: 100, configured: true, spendUsd: 150, percent: 150 });
+    expect(set).toContain("Over ceiling");
+    expect(set).not.toContain("safety cap has been reached");
+    expect(set).not.toContain('role="status"');
+  });
+
   it("qa:TC missing SHO-3013: reaching the default $100 safety cap shows an accessible warning that the concierge is paused", () => {
     const html = htmlFor({ usd: 100, configured: false, spendUsd: 100, percent: 0 });
     // Text in the page, exposed to a screen reader as a status.
