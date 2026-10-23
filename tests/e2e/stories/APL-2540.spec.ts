@@ -40,8 +40,8 @@ test("APL-2540 > AC1: a deal has one Buyer, set at creation, and other roles can
   expect(now.filter((p) => p.role === "FUNDER")).toHaveLength(2);
 
   await admin.page.goto(`/projects/${deal.id}`);
-  // The deal panel has no landmark of its own. It is the element that holds the Stage group.
-  const panel = admin.page.getByRole("main").getByRole("group", { name: "Stage" }).locator("..");
+  // The deal panel has no landmark of its own. It is the box inside <main> that holds the Stage group.
+  const panel = admin.page.getByRole("main").filter({ has: admin.page.getByRole("group", { name: "Stage" }) });
   await expect(panel.getByRole("button", { name: `Remove ${buyer.name}` })).toHaveCount(0);
   await panel.getByRole("button", { name: "+ Add organisation" }).click();
   await expect(panel.getByLabel("Role").locator("option")).toHaveText(["Funder", "Implementing office", "Partner", "Other"]);
@@ -114,9 +114,9 @@ test("APL-2540 > AC4: an archived organisation stays on existing deals and canno
   const still = await partiesOf(admin, deal.id);
   expect(still.some((p) => p.role === "BUYER" && p.organisation.id === buyer.id)).toBe(true);
   await admin.page.goto(`/projects/${deal.id}`);
-  // The archived buyer is linked twice in the deal panel (beside the pipeline and in the parties line). Scope to the parties line's "Buyer:" field.
-  const parties = admin.page.getByRole("main").getByText("Organisations:", { exact: true }).locator("..");
-  await expect(parties.getByText(/^Buyer:/).getByRole("link", { name: buyer.name, exact: true })).toHaveAttribute("href", `/accounts/${buyer.id}`);
+  // The archived buyer is linked twice in the deal panel (beside the pipeline and in the parties line). Scope to the parties line's "Buyer:" chip.
+  const buyerParty = admin.page.getByRole("main").locator("span.chip").filter({ hasText: /^Buyer:/ });
+  await expect(buyerParty.getByRole("link", { name: buyer.name, exact: true })).toHaveAttribute("href", `/accounts/${buyer.id}`);
 
   const fresh = dealBody({ name: zz("refused deal"), organisationId: buyer.id, pipelineId: pipes.pro.id, leaderId: admin.user.id });
   const refused = await admin.api.post("/api/deals", fresh);
