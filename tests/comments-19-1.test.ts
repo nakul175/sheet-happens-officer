@@ -790,6 +790,92 @@ describe("flag on (AC1–AC8)", () => {
     expect(await db.comment.count({ where: { taskId: t, removedAt: null } })).toBe(200);
   }, 120_000);
 
+  // SHO-2840 (Pam #128, AC17 boundary): Undo of a comment delete is the one restore path the 200 cap
+  // has to hold on its own. Fill to exactly 200, delete one, Undo: the restore lands ON the cap.
+  it("qa:TC SHO-2840: 200 live, delete one, Undo restores to exactly 200 and never 201", async () => {
+    const { worker, p } = await cast();
+    const t = await task(worker, p.id, { title: "ZZ-TEST 2840 fill then delete" });
+    const target = await addComment(actor(worker), t, { text: "ZZ-TEST 2840 target" });
+    await db.comment.createMany({ data: Array.from({ length: 199 }, (_, i) => ({ taskId: t, authorId: worker.id, text: `ZZ-TEST 2840 fill ${i}` })) });
+    const live = () => db.comment.count({ where: { taskId: t, removedAt: null } });
+    expect(await live()).toBe(200);
+    await expect(addComment(actor(worker), t, { text: "ZZ-TEST 2840 at cap" })).rejects.toMatchObject({ status: 400, extra: { code: "too_many_comments" } });
+    await removeComment(actor(worker), t, target.id);
+    expect(await live()).toBe(199);
+    const log = await db.actionLog.findFirstOrThrow({ where: { targetId: t, action: "comment.removed" } });
+    const undone = await undoAction(actor(worker), log.id);
+    expect(undone.label).toBe("Comment deleted");
+    expect(await live()).toBe(200);
+    expect(await live()).toBeLessThanOrEqual(200);
+    expect(await db.comment.count({ where: { taskId: t } })).toBe(200);
+    expect((await db.comment.findUniqueOrThrow({ where: { id: target.id } })).removedAt).toBeNull();
+    expect((await db.actionLog.findUniqueOrThrow({ where: { id: log.id } })).undoneAt).not.toBeNull();
+  }, 120_000);
+
+  // SHO-2840: with the task refilled to 200 after the delete, the same Undo is refused (409, the cap
+  // message) and "Undo anyway" cannot bypass it; the live count stays at 200.
+  it("qa:TC SHO-2840: a refill back to 200 refuses the Undo of an earlier delete (no 201, no bypass)", async () => {
+    const { worker, p } = await cast();
+    const t = await task(worker, p.id, { title: "ZZ-TEST 2840 delete then refill" });
+    const target = await addComment(actor(worker), t, { text: "ZZ-TEST 2840 target" });
+    await db.comment.createMany({ data: Array.from({ length: 199 }, (_, i) => ({ taskId: t, authorId: worker.id, text: `ZZ-TEST 2840 fill ${i}` })) });
+    const live = () => db.comment.count({ where: { taskId: t, removedAt: null } });
+    await removeComment(actor(worker), t, target.id);
+    expect(await live()).toBe(199);
+    await addComment(actor(worker), t, { text: "ZZ-TEST 2840 refill" });
+    expect(await live()).toBe(200);
+    const log = await db.actionLog.findFirstOrThrow({ where: { targetId: t, action: "comment.removed" } });
+    const refused = { status: 409, message: "A task can have at most 200 comments.", extra: { code: "too_many_comments" } };
+    await expect(checkUndo(actor(worker), log.id)).rejects.toMatchObject(refused);
+    await expect(undoAction(actor(worker), log.id)).rejects.toMatchObject(refused);
+    await expect(undoAction(actor(worker), log.id, true)).rejects.toMatchObject(refused);
+    expect(await live()).toBe(200);
+    expect((await db.comment.findUniqueOrThrow({ where: { id: target.id } })).removedAt).not.toBeNull();
+    expect((await db.actionLog.findUniqueOrThrow({ where: { id: log.id } })).undoneAt).toBeNull();
+  }, 120_000);
+
+  // SHO-2840: the last slot. Two deleted comments, 199 live, both Undos at once: the task row lock lets
+  // exactly one restore in. Anything else (0 or 2) breaks either the cap or the promise.
+  it("qa:TC SHO-2840: two Undos racing for the last slot restore exactly one comment (200, not 201)", async () => {
+    const { worker, p } = await cast();
+    const t = await task(worker, p.id, { title: "ZZ-TEST 2840 last slot" });
+    const a = await addComment(actor(worker), t, { text: "ZZ-TEST 2840 a" });
+    const b = await addComment(actor(worker), t, { text: "ZZ-TEST 2840 b" });
+    await db.comment.createMany({ data: Array.from({ length: 198 }, (_, i) => ({ taskId: t, authorId: worker.id, text: `ZZ-TEST 2840 fill ${i}` })) });
+    await removeComment(actor(worker), t, a.id);
+    await removeComment(actor(worker), t, b.id);
+    await addComment(actor(worker), t, { text: "ZZ-TEST 2840 last slot filler" });
+    const live = () => db.comment.count({ where: { taskId: t, removedAt: null } });
+    expect(await live()).toBe(199);
+    const logs = await db.actionLog.findMany({ where: { targetId: t, action: "comment.removed" } });
+    expect(logs).toHaveLength(2);
+    const results = await Promise.allSettled(logs.map((l) => undoAction(actor(worker), l.id)));
+    const code = (r: PromiseSettledResult<unknown>) => (r.status === "rejected" ? (r.reason as { extra?: { code?: string } }).extra?.code ?? "other" : "restored");
+    expect(results.map(code).sort()).toEqual(["restored", "too_many_comments"]);
+    expect(await live()).toBe(200);
+    expect(await live()).toBeLessThanOrEqual(200);
+  }, 120_000);
+
+  // SHO-2840: the refill path racing the Undo path for the same last slot. Add and Undo take the same
+  // task row lock, so exactly one gets the slot and the task still ends on 200, never 201.
+  it("qa:TC SHO-2840: an add and an Undo racing for the last slot leave exactly 200 live", async () => {
+    const { worker, p } = await cast();
+    const t = await task(worker, p.id, { title: "ZZ-TEST 2840 add vs undo" });
+    const target = await addComment(actor(worker), t, { text: "ZZ-TEST 2840 target" });
+    await db.comment.createMany({ data: Array.from({ length: 199 }, (_, i) => ({ taskId: t, authorId: worker.id, text: `ZZ-TEST 2840 fill ${i}` })) });
+    await removeComment(actor(worker), t, target.id); // 199 live, one slot, one deleted comment
+    const live = () => db.comment.count({ where: { taskId: t, removedAt: null } });
+    expect(await live()).toBe(199);
+    const log = await db.actionLog.findFirstOrThrow({ where: { targetId: t, action: "comment.removed" } });
+    const results = await Promise.allSettled([
+      addComment(actor(worker), t, { text: "ZZ-TEST 2840 racer" }),
+      undoAction(actor(worker), log.id),
+    ]);
+    expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1);
+    expect(await live()).toBe(200);
+    expect(await live()).toBeLessThanOrEqual(200);
+  }, 120_000);
+
   it("qa:TC-APL2590-093cbb6e@v2: purge keeps a comment at exactly 30x24h and removes it 1ms later", async () => {
     const { worker, t1 } = await cast();
     const kept = await addComment(actor(worker), t1, { text: "ZZ-TEST keep" });
