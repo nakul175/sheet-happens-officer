@@ -1,0 +1,42 @@
+{
+  "note": "Which AC-coverage entries were TESTED when the manifest was committed. scripts/ci/ac-coverage.test.mjs fails if one of these falls back to UNTESTED or NOT-TESTABLE, so losing a receipt is a deliberate commit, not a quiet edit.",
+  "clauses": 78,
+  "tickets": 35,
+  "status": {
+    "TESTED": 30,
+    "NOT-TESTABLE-IN-REPO": 23,
+    "UNTESTED": 25
+  },
+  "tested": [
+    "2671 AC1",
+    "2671 AC2",
+    "2671 AC3",
+    "2689 AC1",
+    "2689 AC2",
+    "2689 AC4",
+    "2693 AC1",
+    "2693 AC2",
+    "2693 AC3",
+    "2736 AC1",
+    "2738 AC1",
+    "2840 AC1",
+    "2917 AC1",
+    "2917 AC3",
+    "2918 AC1",
+    "2919 AC1",
+    "2924 AC1",
+    "2951 AC1",
+    "3000 AC1",
+    "3010 AC1",
+    "3010 AC2",
+    "3012 AC3",
+    "3013 AC1",
+    "3013 AC2",
+    "3013 AC3",
+    "3019 EXPECTED",
+    "3029 AC2",
+    "3031 EXPECTED",
+    "3032 EXPECTED",
+    "3033 EXPECTED"
+  ]
+}
