@@ -110,6 +110,9 @@ async function taskDocumentUnavailable(request: NextRequest): Promise<Response |
 }
 
 export const config = {
-  // Pages only. API routes, Next assets and files with an extension (logo, favicon) are left alone.
-  matcher: ["/((?!api|_next/static|_next/image|favicon.ico|.*\\..*).*)"],
+  // SHO-2725. Every path that is not a Next asset or an API route reaches the proxy, including one that contains a
+  // dot. The old matcher also skipped `.*\..*` and `favicon.ico`, so an apex or www request for `/logo-icon.svg` or
+  // `/tasks/a.b` never reached `apexRedirect` and the app answered it with 200 on the wrong host instead of the 301
+  // every other apex path gets. On the app those files still pass through: the proxy only adds a request header.
+  matcher: ["/((?!api|_next/static|_next/image).*)"],
 };
