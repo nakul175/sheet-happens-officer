@@ -144,6 +144,13 @@ describe("qa:TC missing APL-2950 Usage spend vs ceiling fixes", () => {
       "The default $100.00 safety cap has been reached. The concierge is paused until the 1st of next month, India time.",
     );
     expect(html).not.toMatch(/NaN|Infinity/);
+    // "Visible" is the sentence a person reads, in the rendered paragraph — not a prop, a class or an aria label.
+    // role="status" is how a screen reader gets it; the sentence is the text on the card.
+    expect(html).toMatch(
+      /<p class="usage-warn" role="status">The default \$100\.00 safety cap has been reached\. The concierge is paused until the 1st of next month, India time\.<\/p>/,
+    );
+    expect(html).not.toMatch(/aria-hidden="true"/);
+    expect(html).not.toMatch(/display:\s*none/);
 
     // Over the cap the pause is still the truth, so the warning stays.
     expect(htmlFor({ usd: 100, configured: false, spendUsd: 150, percent: 0 })).toContain('role="status"');
