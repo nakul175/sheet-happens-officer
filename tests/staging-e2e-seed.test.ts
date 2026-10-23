@@ -250,4 +250,21 @@ describe("qa:TC missing APL-2590 seed step (staging-e2e.yml)", () => {
       expect(r.status, host).toBe(1);
     }
   });
+
+  // W151: the allowlist refuses production too, so a target check that dies before its production branch still returns 1.
+  // Only the message proves the branch ran: under bash 3.2 a ${TARGET,,} expansion prints "bad substitution" and drops it.
+  it("qa:TC missing: the target check refuses production by name, not only via the allowlist", () => {
+    const target = stepRun("Check the target host");
+    const allow = WORKFLOW.match(/TARGET_ALLOWLIST: '([^']+)'/)?.[1] ?? "";
+    const runTarget = (host: string) =>
+      spawnSync("bash", ["-c", target], { encoding: "utf8", env: { PATH: process.env.PATH, TARGET: host, TARGET_ALLOWLIST: allow, GITHUB_OUTPUT: "/dev/null", NODE_ENV: "test" } });
+    for (const host of ["app.sheethappensofficer.com", "www.sheethappensofficer.com", "sheethappensofficer.com."]) {
+      const r = runTarget(host);
+      expect(r.status, host).toBe(1);
+      expect(`${r.stdout}${r.stderr}`, host).toContain("Refusing to run against production");
+    }
+    const ok = runTarget(pr(5));
+    expect(ok.status).toBe(0);
+    expect(`${ok.stdout}${ok.stderr}`).not.toContain("bad substitution");
+  });
 });

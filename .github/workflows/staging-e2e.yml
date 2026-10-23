@@ -94,7 +94,9 @@ jobs:
         env:
           TARGET: ${{ inputs.target }}
         run: |
-          if [[ "${TARGET,,}" =~ ^(www\.|app\.)?sheethappensofficer\.com\.?$ ]]; then
+          # ${TARGET,,} is bash 4+; lower-case with tr so the check also runs under bash 3.2 (tests/staging-e2e-seed.test.ts).
+          target_lc=$(printf '%s' "$TARGET" | tr '[:upper:]' '[:lower:]')
+          if [[ "$target_lc" =~ ^(www\.|app\.)?sheethappensofficer\.com\.?$ ]]; then
             echo "::error::Refusing to run against production ($TARGET)."; exit 1
           fi
           if ! [[ "$TARGET" =~ $TARGET_ALLOWLIST ]]; then
@@ -192,8 +194,10 @@ jobs:
             echo "::error::Refusing to seed '$TARGET': only pr1-pr8.staging.sheethappensofficer.com (never staging or production)."; exit 1
           fi
           slot="pr${BASH_REMATCH[1]}"; want_schema="sho_${slot}"
+          # ${var,,} is bash 4+; the offline regression runs this step with a dev machine's bash 3.2, so lower-case with tr.
+          lower() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
           # AC23(a): never seed with NODE_ENV=production (APL-2590 D4).
-          if [ "${NODE_ENV,,}" = production ]; then
+          if [ "$(lower "$NODE_ENV")" = production ]; then
             echo "::error::NODE_ENV=production. Refusing to seed."; exit 1
           fi
           url="$SEED_DATABASE_URL"
@@ -213,7 +217,7 @@ jobs:
           echo "::add-mask::$url"
           rest="${url#*://}"; authority="${rest%%[/?#]*}"; userinfo=""; [[ "$authority" == *@* ]] && userinfo="${authority%@*}"
           [[ "$userinfo" == *:* ]] && echo "::add-mask::${userinfo#*:}"
-          hostport="${authority##*@}"; host="${hostport%:*}"; host="${host,,}"; host="${host%.}"
+          hostport="${authority##*@}"; host=$(lower "${hostport%:*}"); host="${host%.}"
           path="${rest#"$authority"}"; path="${path%%#*}"; db="${path%%\?*}"; db="${db#/}"
           query=""; [[ "$path" == *\?* ]] && query="${path#*\?}"
           if [[ "$url" == *unused:unused@127.0.0.1* || "$host" == 127.0.0.1 || "$host" == localhost || "$host" == "::1" || "$host" == "[::1]" ]]; then
@@ -222,7 +226,7 @@ jobs:
           # AC23(a) allowlist, matched exactly (APL-2590 D1): the one staging DB host (#128's STAGING_DB_HOSTS) and the sho_staging DB.
           # Anything else is refused: multi-host lists, IP forms, sslip/nip names, production, a port-less look-alike.
           # The whole host:port is matched, so "host:1,other" and "[::ffff:...]" cannot pass on a stripped port.
-          if ! [[ "${hostport,,}" =~ ^private-sho-db-do-user-45345612-0\.k\.db\.ondigitalocean\.com\.?(:[0-9]{1,5})?$ ]]; then
+          if ! [[ "$(lower "$hostport")" =~ ^private-sho-db-do-user-45345612-0\.k\.db\.ondigitalocean\.com\.?(:[0-9]{1,5})?$ ]]; then
             echo "::error::SHO_PR_SLOT_DATABASE_URL host is not the staging DB host. Refusing to seed."; exit 1
           fi
           if [ "$db" != sho_staging ]; then
@@ -233,7 +237,7 @@ jobs:
           schemas=()
           IFS='&' read -ra params <<< "$query"
           for kv in "${params[@]}"; do
-            key="${kv%%=*}"; key="${key,,}"
+            key=$(lower "${kv%%=*}")
             case "$key" in
               host|hostaddr|dbname|options|*%*)
                 echo "::error::SHO_PR_SLOT_DATABASE_URL overrides the host, DB name or search path in its query. Refusing to seed."; exit 1;;
