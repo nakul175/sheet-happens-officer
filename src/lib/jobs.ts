@@ -106,6 +106,12 @@ export async function sendReminders(now = new Date()) {
  * driver, a `fetch()` or a config dump can put a DSN, a token or a host path in `err.message`, so
  * the shapes that carry one are redacted here by label. The whole message is not dropped: the row
  * still has to say what failed.
+ *
+ * SECURITY (W244): the fourth sink is the file log. deploy/job.sh:12-13 appends this same 500 body
+ * to /var/log/sho/jobs.log, one line per cron run, where it outlives the row and is read by any
+ * operator with the box. A routine database failure carries no credential, only topology - the host
+ * and port of the machine behind the DSN - so the topology is redacted here too rather than at any
+ * one sink: the port stays, the host goes, and the error class and operation are untouched.
  */
 const REDACTIONS: [RegExp, string][] = [
   // scheme://user:password@host — the whole userinfo, because the user name is half of it.
@@ -116,6 +122,12 @@ const REDACTIONS: [RegExp, string][] = [
   [/\b(password|passwd|pwd|secret|token|api[_-]?key|apikey|access[_-]?token|authorization)(\s*["']?\s*[=:]\s*["']?)[^\s"',;&)\]}]+/gi, "$1$2[redacted]"],
   // An absolute host path keeps the file name and loses the directories that name the machine.
   [/(^|[\s"'(=,[])\/(?:[^\s"'()[\],;/]+\/)+([^\s"'()[\],;/]+)/g, "$1[path]/$2"],
+  // A host and port name a machine on the network: the port stays (it says which service), the host
+  // goes. This is the shape a routine database failure has when it carries no credential at all -
+  // Prisma says "Can't reach database server at db.internal:5432", Node says "connect ECONNREFUSED
+  // 10.0.3.7:5432", a DSN says "postgresql://db.internal:5432/sho". A host needs two dots (or to be
+  // an address, or localhost) so that a repo path such as `src/lib/jobs.ts:86` is left readable.
+  [/\b(?:(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.){2,}[a-z]{2,}|(?:\d{1,3}\.){3}\d{1,3}|localhost):(\d{2,5})\b/gi, "[host]:$1"],
 ];
 
 /** `err.message` with the shapes that carry a credential or a host path redacted, capped at 500. */
