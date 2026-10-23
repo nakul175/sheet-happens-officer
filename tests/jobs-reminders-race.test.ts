@@ -237,4 +237,21 @@ describe("qa:TC missing SHO-3011: the race's pg connections read the schema DATA
       await client.end();
     }
   }, 30_000);
+
+  // The guard above is one test in this file: a run that selects only the race (`-t APL-2749`, `-t AC1`, a focused
+  // rerun while triaging) never reaches it, and with a DATABASE_URL that carries no ?schema= raceClient() spreads
+  // `{}` and returns the very client W159 found - on `public`. The lock then guards public."Notification" while the
+  // app writes the URL's schema, and the only failure the triager sees is AC1's "two runs were never waiting", which
+  // reads like a product regression. The refusal belongs in the factory, at the point of use, not in a sibling test.
+  it("qa:TC missing SHO-3011 AC2: a DATABASE_URL with no schema is refused by the factory, not silently sent to public", () => {
+    const saved = process.env.DATABASE_URL;
+    try {
+      const noSchema = new URL(saved ?? "postgresql://localhost");
+      noSchema.searchParams.delete("schema");
+      process.env.DATABASE_URL = noSchema.toString();
+      expect(() => raceClient(), "raceClient() happily built a public-schema client").toThrow(/schema/i);
+    } finally {
+      process.env.DATABASE_URL = saved;
+    }
+  });
 });
