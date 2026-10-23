@@ -232,7 +232,7 @@ describe("flag off, QA #128 (D1, D2)", () => {
 
   // Pam #128 @8da5384 D3: the flag-off filter also hid Undo rows with no before.action (rows logged before it was recorded).
   // The app no longer writes that shape, so the row is logged here through the app's own logAction, in the older shape.
-  it("qa:TC missing D3 (#128): flag off, an Undo row without before.action still shows in Activity", async () => {
+  it("qa:TC missing D3 (#128): flag off, an Undo row without before.action still shows in Activity", async (ctx) => {
     const { lead, p, t1 } = await cast();
     await db.$transaction((tx) => logAction(tx, {
       actorId: lead.id, projectId: p.id, targetType: "task", targetId: t1, action: "undo",
@@ -240,10 +240,13 @@ describe("flag off, QA #128 (D1, D2)", () => {
     }));
     const row = await db.actionLog.findFirstOrThrow({ where: { targetId: t1, action: "undo" }, orderBy: { createdAt: "desc" } });
     expect((row.beforeState as { action?: string }).action).toBeUndefined();
+    // This process's half first: projectActivity reads THIS process's flag, so the flag-off filter is on here and the
+    // row must survive it. Then the server's half, which needs a server whose flag is off.
+    expect((await projectActivity(actor(lead), p.id)).items.map((i) => i.id)).toContain(row.id);
+    await requireFlagOffServer(ctx);
     const activity = await lead.c.get(`/api/projects/${p.id}/activity`);
     expect(activity.status).toBe(200);
     expect((activity.json.items as { id: string }[]).map((i) => i.id)).toContain(row.id);
-    expect((await projectActivity(actor(lead), p.id)).items.map((i) => i.id)).toContain(row.id);
   });
 
   // Pam #128 @3a96042 D2: with the flag off, POST /api/notifications/read-all marked the hidden comment notices read.

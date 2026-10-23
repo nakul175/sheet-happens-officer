@@ -156,3 +156,35 @@ describe("return-path probe: the documented dev server can write what the test r
       .toMatch(/RETURN_PATH_LOG=1\s+npx next start/);
   });
 });
+
+// SHO-US-19.1 (APL-2590), W202. tests/comments-19-1.test.ts has two halves: cases that call the library in this
+// process, and cases named "flag off" that describe what the SERVER does. commentsEnabled() reads the environment of
+// the process it runs in (src/lib/flags.ts:12) and AC9 says no request field may change the server's copy, so a
+// flag-off case means nothing against a server started with FF_TASK_COMMENTS on: it would report PASSED for a claim
+// it never exercised, which is the same lie as a green test that asserts nothing. W190 gave those cases a
+// `requireFlagOffServer(ctx)` guard that skips with the printed reason instead. This keeps the guard from being
+// dropped from a new case: an unguarded one fails here by name.
+describe("comments-19-1: every flag-off case owns the flag it asserts", () => {
+  it("each case in a `flag off` describe calls requireFlagOffServer", () => {
+    const src = readFileSync("tests/comments-19-1.test.ts", "utf8");
+    const unguarded: string[] = [];
+    // One chunk per top-level describe block: the name is the first string in it, the cases are the lines indented
+    // exactly two spaces (nested describes would need a parser, and this file has none inside a flag-off block).
+    for (const block of src.split(/^describe\(/m).slice(1)) {
+      const name = block.match(/^"([^"]+)"/)?.[1] ?? "";
+      if (!/flag off/i.test(name)) continue;
+      for (const part of block.split(/^  it\(/m).slice(1)) {
+        const title = part.match(/^"([^"]+)"/)?.[1] ?? "";
+        if (!part.includes("requireFlagOffServer(")) unguarded.push(title);
+      }
+    }
+    expect(unguarded, "flag-off cases that never ask for a server whose flag is off").toEqual([]);
+  });
+
+  it("the guard skips with the reason on record, not silently", () => {
+    const src = readFileSync("tests/comments-19-1.test.ts", "utf8");
+    // ctx.skip(note) is what prints the reason; ctx.skip() with no note is the silent form this rules out.
+    expect(src, "requireFlagOffServer passes a note to ctx.skip").toMatch(/async function requireFlagOffServer\(ctx: TestContext\) \{\s*if \(await serverCommentsOn\(\)\) ctx\.skip\(SERVER_FLAG_ON_NOTE\);/);
+    expect(src, "the note names the flag it could not control").toContain("was started with FF_TASK_COMMENTS on");
+  });
+});
