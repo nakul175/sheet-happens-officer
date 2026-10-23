@@ -20,6 +20,7 @@ import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { containmentLines, pgrepBody, systemctlBody } from "./proof-sandbox.mjs";
 
 const here = fileURLToPath(new URL(".", import.meta.url));
 const PROOF = join(here, "slot9-proof.sh");
@@ -27,8 +28,10 @@ const LIB = join(here, "lib", "unit-env-sources.sh");
 const SCAN = join(here, "lib", "prod-marker-scan.sh");
 const MARKERS = "defaultdb|doadmin|25061|sho-prod-pool";
 
-// A four-source, four-guard unit — the shape R4 renders.
-function unitText(slot) {
+// A four-source, four-guard unit — the shape R4 renders. The containment block comes from the shared helper
+// so this sandbox and proof-verdict-terms' cannot model a different host: a clean unit here must also be a
+// CONTAINED one, or "the sandbox still PASSES" would be a PASS over a unit with no User= at all.
+function unitText(slot, shoDir = "/etc/sho") {
   const sources = [
     `${slot}/env/db.env`,
     `${slot}/env/app.env`,
@@ -40,6 +43,7 @@ function unitText(slot) {
   sources.forEach((p) => lines.push(
     `ExecStartPre=/bin/sh -c 'test ! -e ${p} || { test -r ${p} && ! grep -qEi -- "${MARKERS}" ${p}; }'`,
   ));
+  lines.push(...containmentLines({ shoDir }));
   return `${lines.join("\n")}\n`;
 }
 
@@ -61,7 +65,7 @@ function build({ prodEnvReadable = false, unitFile = true, running = true, posit
   writeFileSync(join(slot, "env", "extra.env"), "NODE_ENV=production\n");
   writeFileSync(join(dir, "evil", "extra.env"), "NODE_ENV=production\n");
   writeFileSync(join(dir, "outside", "release.env"), "NODE_ENV=production\n");
-  if (unitFile) writeFileSync(join(dir, "unitdir", "sho-pr9.service"), unitText(slot));
+  if (unitFile) writeFileSync(join(dir, "unitdir", "sho-pr9.service"), unitText(slot, join(dir, "sho")));
 
   const stub = (name, body) => {
     writeFileSync(join(dir, "bin", name), `#!/bin/bash\n${body}\n`);
@@ -75,14 +79,14 @@ function build({ prodEnvReadable = false, unitFile = true, running = true, posit
     pid = sleeper.stdout.trim();
     mkdirSync(join(dir, "proc", pid), { recursive: true });
     writeFileSync(join(dir, "proc", pid, "environ"), "NODE_ENV=production\0DATABASE_URL=postgres://sho@127.0.0.1:5432/x\0");
-    stub("systemctl", `for a in "$@"; do [ "$a" = "MainPID" ] && { echo ${pid}; exit 0; }; done\nexit 0`);
-  } else {
-    // Rendered, never started: systemctl exists, MainPID is empty/0.
-    stub("systemctl", "exit 0");
   }
+  // A deploy-owned process: the cross-uid /proc probe cannot be run without one, and an unrun probe is now a
+  // FAIL (deploy_environ_probe=not_probeable), not a skip. The production `sho` unit always plays this role.
+  const deploy = spawnSync("bash", ["-c", "sleep 20 >/dev/null 2>&1 & echo $!"], { encoding: "utf8" }).stdout.trim();
+  stub("systemctl", systemctlBody({ unitFile: join(dir, "unitdir", "sho-pr9.service"), mainPid: pid }));
   stub("ss", running ? `echo "LISTEN 0 511 127.0.0.1:3109 0.0.0.0:*"` : "exit 0");
   stub("curl", `for a in "$@"; do [ "$a" = "-o" ] && { printf 200; exit 0; }; done\nprintf '{"ok":true,"release":"deadbeef"}'`);
-  stub("pgrep", "exit 1");
+  stub("pgrep", pgrepBody(deploy));
 
   // as_slot's real contract: 0 = the probe SUCCEEDED (the slot could do it), 1 = denied.
   const prodEnv = join(dir, "sho", "app.env");
@@ -114,6 +118,7 @@ function build({ prodEnvReadable = false, unitFile = true, running = true, posit
       env: { PATH: `${join(dir, "bin")}:${process.env.PATH}`, HOME: process.env.HOME, FAKE_ROOT: "1" },
     });
     if (pid) { try { process.kill(Number(pid)); } catch { /* already gone is fine */ } }
+    try { process.kill(Number(deploy)); } catch { /* already gone is fine */ }
     return res;
   };
   return { dir, slot, run };

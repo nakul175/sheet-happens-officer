@@ -18,6 +18,16 @@
 # A denial alone proves nothing: a missing file is also "denied". So each probe reports EXISTS and DENIED
 # separately, and PASS requires both. That is the difference between a proof and a coincidence.
 #
+# THE OUTPUT RULE (W98). Every line this script prints is one of three things:
+#   * a VERDICT TERM — `name=value`, where the name is in the verdict's own vocabulary and a bad value sets
+#     `gap` (see term_fail). A term's value is compared, never merely displayed;
+#   * `INFO …` — a line that deliberately cannot be a term, carrying the reason it cannot be one;
+#   * a fixed `== … ==` section header, or the CONTAINMENT=/PROOF= verdict line itself.
+# Nothing else. The rule exists because P3 printed `systemctl show -p User … -p InaccessiblePaths` and nothing
+# consumed it: a unit with User=root and an empty InaccessiblePaths= printed CONTAINMENT=PASS, and a
+# `shoslot_can_write_authorized_keys` printed next to real terms read as if it gated the verdict too.
+# scripts/containment/proof-verdict-terms.test.mjs enforces the rule over the whole transcript.
+#
 # TWO GATES, ONE DIRECTION. The rule this serves is "no candidate execution on slot 9 until PROOF=PASS",
 # but that rule used to be circular: P2 needs a MainPID, and R6 exits 4 until phase 2 has started the unit,
 # so the only achievable order was start-the-candidate -> then prove it should not have started.
@@ -53,11 +63,21 @@ fail() { printf 'REFUSING: %s\n' "$*" >&2; exit 2; }
 
 # MODE=prestart is the gate that may run against a stopped unit; MODE=full is the historical proof block.
 MODE='full'
-case "${1:-}" in
-  '')                        ;;
-  --pre-start|--containment) MODE='prestart' ;;
-  *)                         fail "unknown argument '$1'; usage: ${0##*/} [--pre-start|--containment]" ;;
-esac
+# `--accept-unproven` is the ONLY route to a PASS with the cross-uid /proc probe unrun, and the verdict then
+# says so out loud (`unproven=deploy_environ`) instead of counting a probe that never happened as a denial.
+# The DEFAULT is FAIL, deliberately: a PASS you can earn by not measuring is not a proof, and the production
+# `sho` unit is always a deploy-owned process, so the probe is only impossible in a scenario that is not the
+# one this block certifies.
+ACCEPT_UNPROVEN=0
+unproven=''
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --pre-start|--containment) MODE='prestart' ;;
+    --accept-unproven)         ACCEPT_UNPROVEN=1 ;;
+    *)                         fail "unknown argument '$1'; usage: ${0##*/} [--pre-start|--containment] [--accept-unproven]" ;;
+  esac
+  shift
+done
 
 [ "$(id -u)" -eq 0 ] || fail "must be run as root (it uses sudo -u ${SLOT_ACCOUNT} to test another uid's rights)"
 [ "$(uname -s)" = 'Linux' ] || fail "not Linux; this is the staging host's proof block"
@@ -81,6 +101,71 @@ say "probe_positive_control=1"
 # 1 = exists (checked as root, so permissions cannot confuse the two answers)
 exists() { if [ -e "$1" ]; then echo 1; else echo 0; fi; }
 
+# --- THE VERDICT'S VOCABULARY ---------------------------------------------------------------------------
+# A failing term is NAMED on stdout (`containment_terms_failed=` / `proof_terms_failed=`), so a FAIL always
+# says which control failed instead of leaving the reader to diff two transcripts. The list is the verdict's,
+# not a section's: a term raised in P1, P3 or the post-start block lands in the same place, which is what makes
+# "every line is a term" checkable rather than decorative.
+term_failures=''
+term_fail() {
+  gap=1
+  case " ${term_failures} " in
+    *" $1 "*) ;;
+    *) term_failures="${term_failures:+${term_failures},}$1" ;;
+  esac
+}
+
+# The containment properties, and the value each must hold. These are render_unit()'s values
+# (slot9-optionR.sh) - NOT a second opinion: proof-verdict-terms.test.mjs extracts render_unit() and fails if
+# this table and the rendered unit ever disagree, so the requirement cannot drift away from the unit that is
+# actually installed. A leading `~` means "contains" (systemd renders InaccessiblePaths= as a list).
+# Entries are space-free on purpose: the loop below word-splits the table.
+readonly SANDBOX_REQUIRED='User=shoslot
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=yes
+~InaccessiblePaths=/etc/sho
+RestrictNamespaces=yes'
+readonly SANDBOX_TERM_COUNT=7
+
+# systemd's own rendering of one property, or empty when the unit does not set it. An unset property is NOT a
+# satisfied one: empty never equals a required value and never contains one.
+sb_get() {
+  printf '%s\n' "${sandbox_raw:-}" |
+    awk -v k="$1" 'index($0, k "=") == 1 { print substr($0, length(k) + 2); exit }'
+}
+
+# Every containment property, printed and JUDGED. This is the section that used to be a bare
+# `systemctl show` display: it answered `User=root` and `InaccessiblePaths=` and the verdict never looked.
+assess_sandbox_properties() {
+  local entry prop want mode got ok judged
+  judged=0
+  for entry in $SANDBOX_REQUIRED; do
+    mode='equals'
+    case "$entry" in
+      '~'*) mode='contains'; entry="${entry:1}" ;;
+    esac
+    prop=${entry%%=*}
+    want=${entry#*=}
+    got=$(sb_get "$prop")
+    ok=0
+    if [ "$mode" = 'contains' ]; then
+      say "sandbox_${prop}=${got:-absent}   (required contains ${want})"
+      case " ${got} " in *" ${want} "*) ok=1 ;; esac
+    else
+      say "sandbox_${prop}=${got:-absent}   (required ${want})"
+      if [ "$got" = "$want" ]; then ok=1; fi
+    fi
+    if [ "$ok" -ne 1 ]; then term_fail "sandbox_${prop}"; fi
+    judged=$((judged + 1))
+  done
+  # A term that never runs is not an assertion. If the table or the loop is ever cut short, the count says so.
+  say "sandbox_terms_judged=${judged}   (required ${SANDBOX_TERM_COUNT})"
+  if [ "$judged" -ne "$SANDBOX_TERM_COUNT" ]; then term_fail sandbox_terms_judged; fi
+  sandbox_terms_judged=$judged
+}
+
 # THE CONTAINMENT TERMS — every one of them answers with no process running, which is exactly why the
 # pre-start gate and the full run share this one function instead of each keeping a copy that could drift
 # apart (the failure mode this repo has already paid for once: two prefix globs answering one question).
@@ -102,55 +187,107 @@ assess_containment() {
   # The header's rule, in the verdict: a denial over a path that does not exist proves nothing, so EXISTS is
   # part of the answer. It used to be a WARNING only - the run printed gap_closed=1 with the prod env absent.
   if [ "$prod_env_exists" -eq 0 ]; then
-    say "WARNING prod_env_exists=0 - a denial here proves nothing; check the path before trusting this run"
-    gap=1
+    say "prod_env_exists=0   (required 1: a denial measured against a missing path proves nothing)"
+    term_fail prod_env_exists
   fi
   # Same rule for the stale copies: if the count says copies exist but the named probe does not, the denial
   # was measured against a missing file, not against a copy.
   if [ "$bak_count" -gt 0 ] && [ "$bak_exists" -eq 0 ]; then
-    say "WARNING prod_env_bak_count=${bak_count} but the named probe is absent - re-point bak_probe at a real copy"
-    gap=1
+    say "prod_env_bak_probe_exists=0   (required 1 while prod_env_bak_count=${bak_count} - re-point bak_probe at a real copy)"
+    term_fail prod_env_bak_probe_exists
   fi
-  if [ "$unit_env_prod" -ne 0 ]; then gap=1; fi
-  if [ "$unit_env_outside" -ne 0 ]; then gap=1; fi
-  if [ "$unit_env_unreadable" -ne 0 ]; then gap=1; fi
+  if [ "$unit_env_prod" -ne 0 ]; then term_fail prod_markers; fi
+  if [ "$unit_env_outside" -ne 0 ]; then term_fail outside_slot; fi
+  if [ "$unit_env_unreadable" -ne 0 ]; then term_fail unreadable; fi
   # Guard PARITY, not a guard count. `env_guard != 4` alone let a fifth source appended to the unit pass
   # with four guards, because nothing tied a guard to the source it was supposed to guard.
-  if [ "$unit_env_unguarded" -ne 0 ]; then gap=1; fi
-  if [ "$unit_env_guard" -ne 4 ]; then gap=1; fi
+  if [ "$unit_env_unguarded" -ne 0 ]; then term_fail unguarded; fi
+  if [ "$unit_env_guard" -ne 4 ]; then term_fail env_guard; fi
   # Exactly four: the unit is rendered by R4, so any other number means the file on disk is not what R4 wrote.
-  if [ "$unit_env_count" -ne 4 ]; then gap=1; fi
+  if [ "$unit_env_count" -ne 4 ]; then term_fail unit_envfile_count; fi
+
+  # --- THE CONTROLS THE CONTAINMENT IS MADE OF (W98) -----------------------------------------------------
+  # P3 printed these and nothing consumed them. A `User=root` unit with an empty `InaccessiblePaths=` printed
+  # CONTAINMENT=PASS because the only thing looking at a uid was a probe run AS the slot, which is contained
+  # by definition - it cannot ask "am I root?". The unit's own properties are asserted here instead, from
+  # `systemctl show`, which answers for an inactive unit, so --pre-start keeps working without a process.
+  assess_sandbox_properties
+  if [ "${sandbox_terms_judged:-0}" -ne "$SANDBOX_TERM_COUNT" ]; then term_fail sandbox_terms_judged; fi
+
+  # SSH persistence. uid separation does not stop the slot from appending a key to the deployer's
+  # authorized_keys, so this is a term, not a line printed beside terms. `as_slot` echoes 0 when the write
+  # SUCCEEDS, so 1 (denied) is the required answer - the same inversion the rest of the verdict uses.
+  if [ "$authkeys_write" -ne 1 ]; then term_fail shoslot_can_write_authorized_keys; fi
+
+  # The cross-uid /proc proof - the one negative proof that needs a second uid at runtime. `skipped` used to be
+  # printed when no deploy-owned process existed, which read like a passing term. An unrun probe is not a
+  # denial: unless it is accepted explicitly (--accept-unproven, which then says `unproven=` on the verdict
+  # line), the verdict FAILS. Otherwise a PASS could be earned by not measuring.
+  if [ "$deploy_environ_probeable" -eq 1 ]; then
+    if [ "$deploy_environ_denied" -ne 1 ]; then term_fail shoslot_can_read_deploy_environ; fi
+  elif [ "$ACCEPT_UNPROVEN" -eq 0 ]; then
+    term_fail deploy_environ_unproven
+  fi
+
+  # A term raised before this point (P1, P3) still has to close the gap: term_fail sets `gap`, but `gap=0`
+  # above is the function's own reset, so the accumulated names are folded back in here - one accumulator,
+  # so a term cannot be printed somewhere the verdict does not read.
+  if [ -n "$term_failures" ]; then gap=1; fi
+  say "containment_terms_failed=${term_failures:-none}"
 }
 
 say ""
 say "== P1  THE gap-closing proof: uid separation denies the credential =="
-say "slot_uid=$(id -u "$SLOT_ACCOUNT") deploy_uid=$(id -u deploy 2>/dev/null || echo absent) uids_differ=$( [ "$(id -u "$SLOT_ACCOUNT")" != "$(id -u deploy 2>/dev/null || echo x)" ] && echo 1 || echo 0 )"
+# INFO, not a term: the uids are context for the probes below. The uid separation itself is asserted statically
+# by sandbox_User (the unit's User=) and measured by shoslot_can_read_prod_env - a probe run AS the slot cannot
+# answer "am I root?", which is exactly the hole the sandbox terms close.
+say "INFO slot_uid=$(id -u "$SLOT_ACCOUNT") deploy_uid=$(id -u deploy 2>/dev/null || echo absent) uids_differ=$( [ "$(id -u "$SLOT_ACCOUNT")" != "$(id -u deploy 2>/dev/null || echo x)" ] && echo 1 || echo 0 ) - not a verdict term: two uids differing says nothing about which one the unit runs as (see sandbox_User)"
 
 prod_env_exists=$(exists "$PROD_ENV")
 prod_env_readable=$(as_slot test -r "$PROD_ENV")
-say "shoslot_can_read_prod_env=${prod_env_readable}   (prod_env_exists=${prod_env_exists})"
+say "shoslot_can_read_prod_env=${prod_env_readable}   (required 1 = denied; prod_env_exists=${prod_env_exists})"
 
 deploy_home_exists=$(exists "$DEPLOY_HOME")
 deploy_home_traversable=$(as_slot test -x "$DEPLOY_HOME")
-say "shoslot_can_traverse_deploy_home=${deploy_home_traversable}   (deploy_home_exists=${deploy_home_exists})"
+say "shoslot_can_traverse_deploy_home=${deploy_home_traversable}   (required 1 = denied; deploy_home_exists=${deploy_home_exists})"
 
 # The stale copies §4 mentions (18 of them, :305). Counted, and one named copy probed by path only.
 bak_count=$(find /etc/sho -maxdepth 1 -name 'app.env.bak*' -type f 2>/dev/null | wc -l | tr -d ' ')
 bak_probe='/etc/sho/app.env.bak-20261019-115253'
 bak_exists=$(exists "$bak_probe")
 bak_readable=$(as_slot test -r "$bak_probe")
-say "prod_env_bak_count=${bak_count} shoslot_can_read_prod_env_bak=${bak_readable}   (probe_exists=${bak_exists})"
+say "prod_env_bak_count=${bak_count} shoslot_can_read_prod_env_bak=${bak_readable}   (required 1 = denied; probe_exists=${bak_exists})"
 
 # The path Option N could not close: another uid's /proc entry (:247-249). Cross-uid ptrace is denied.
+# THE variable is `deploy_environ_probeable`: it, not the printed line, decides whether the verdict has a
+# measurement. The old code printed `skipped` here and moved on, so a host with no deploy-owned process earned
+# a PASS by never asking the question.
+deploy_environ_probeable=0
+deploy_environ_denied=1
 deploy_pid=$(pgrep -u deploy -n 2>/dev/null || true)
 if [ -n "$deploy_pid" ]; then
-  say "shoslot_can_read_deploy_environ=$(as_slot test -r "/proc/${deploy_pid}/environ")   (deploy_pid_present=1)"
+  deploy_environ_probeable=1
+  deploy_environ_denied=$(as_slot test -r "/proc/${deploy_pid}/environ")
+  say "deploy_environ_probe=probeable   (deploy_pid_present=1)"
+  say "shoslot_can_read_deploy_environ=${deploy_environ_denied}   (required 1 = denied)"
 else
-  say "shoslot_can_read_deploy_environ=skipped   (deploy_pid_present=0)"
+  say "deploy_environ_probe=not_probeable   (deploy_pid_present=0: pgrep -u deploy found no process)"
+  if [ "$ACCEPT_UNPROVEN" -eq 1 ]; then
+    unproven='deploy_environ'
+    say "INFO --accept-unproven given: the verdict carries unproven=deploy_environ instead of claiming a denial it did not measure"
+  else
+    say "INFO remedy: rerun while a deploy-owned process is alive (the production sho unit always is one). An unrun probe is not a denial, so this FAILS by default rather than passing unmeasured"
+  fi
 fi
 
-# SSH persistence was the other durable path (:254).
-say "shoslot_can_write_authorized_keys=$(as_slot test -w "$DEPLOY_HOME/.ssh/authorized_keys")"
+# SSH persistence was the other durable path (:254). A term: uid separation does not remove it, so a slot that
+# can append a key to the deployer's authorized_keys has a way back in that no other probe would notice.
+authkeys_exists=$(exists "${DEPLOY_HOME}/.ssh/authorized_keys")
+authkeys_write=$(as_slot test -w "${DEPLOY_HOME}/.ssh/authorized_keys")
+say "shoslot_can_write_authorized_keys=${authkeys_write}   (required 1 = denied; authkeys_exists=${authkeys_exists})"
+if [ "$authkeys_exists" -eq 0 ]; then
+  say "INFO authorized_keys is absent on this host - not a verdict term here: the write denial is vacuous (there is no key file to plant), so this line cannot distinguish a real denial from a missing file"
+fi
 
 
 # P2 needs a MainPID, so it is the one section the pre-start gate cannot and must not answer.
@@ -159,21 +296,29 @@ say ""
 say "== P2  runtime identity, and the SHAPE of its environment (counts and key names only) =="
 pid=$(systemctl show -p MainPID --value "$UNIT_NAME" 2>/dev/null || true)
 [ -n "$pid" ] && [ "$pid" != '0' ] || fail "${UNIT_NAME} has no MainPID - is it running? (R6)"
-say "main_pid_present=1 run_uid=$(ps -o uid= -p "$pid" | tr -d ' ') run_user=$(ps -o user= -p "$pid" | tr -d ' ')"
+say "INFO main_pid_present=1 run_uid=$(ps -o uid= -p "$pid" | tr -d ' ') run_user=$(ps -o user= -p "$pid" | tr -d ' ') - not a verdict term: the static User= is already judged (sandbox_User), and every term this run adds below is read without a MainPID so --pre-start can answer the same questions"
 environ_readable=$( if [ -r "/proc/${pid}/environ" ]; then echo 1; else echo 0; fi )
-say "environ_readable=${environ_readable}"
+say "environ_readable=${environ_readable}   (required 1: an unreadable environ makes a zero marker count meaningless)"
 env_key_count=$(tr '\0' '\n' < "/proc/${pid}/environ" | grep -c '=' || true)
-say "environ_key_count=${env_key_count}   (a count of keys; no key and no value is printed)"
+say "environ_key_count=${env_key_count}   (required >=1; a count of keys, and no key or value is printed)"
 # :424 — the runtime environ must carry zero production markers.
 runt_markers=$(tr '\0' '\n' < "/proc/${pid}/environ" | grep -cE "$MARKERS" || true)
-say "environ_prod_marker_count=${runt_markers}"
-say "slot_sees_its_own_environ=$(as_slot test -r "/proc/${pid}/environ")   (expect 0)"
+say "environ_prod_marker_count=${runt_markers}   (required 0)"
+say "INFO slot_sees_its_own_environ=$(as_slot test -r "/proc/${pid}/environ") - not a verdict term: reading its own /proc entry is not a containment path, the cross-uid read is (shoslot_can_read_deploy_environ)"
 fi
 
 say ""
-say "== P3  the sandbox is applied by the SYSTEM manager, not a wrapper (contrast :250-253) =="
-systemctl show "$UNIT_NAME" -p User -p NoNewPrivileges -p ProtectSystem -p ProtectHome -p PrivateTmp \
-  -p InaccessiblePaths -p RestrictNamespaces
+say "== P3  the sandbox is applied by the SYSTEM manager, asserted property by property (contrast :250-253) =="
+# MEASURED here, JUDGED in assess_containment (assess_sandbox_properties): the terms are printed where they are
+# read, and the verdict they feed is the same accumulator both gates use. One call, because a property asked
+# twice can be answered twice. An inactive unit still answers, which is why --pre-start keeps working.
+sandbox_raw=$(systemctl show "$UNIT_NAME" -p User -p NoNewPrivileges -p ProtectSystem -p ProtectHome -p PrivateTmp \
+  -p InaccessiblePaths -p RestrictNamespaces 2>/dev/null || true)
+if [ -z "$sandbox_raw" ]; then
+  # A manager that answers nothing is not a manager that answered "yes": every property below then reads
+  # `absent` and fails, which is the correct verdict for "the unit's sandbox could not be read".
+  say "INFO systemctl show returned nothing - not a verdict term in itself: the per-property terms below then read absent, and absent never matches a required value"
+fi
 
 say ""
 say "== P4  the unit cannot silently regain the production env; the slot answers =="
@@ -202,7 +347,7 @@ unit_env_guard=$(src_field ENV_GUARD)
 # A lib that produced nothing must not read as a clean unit: every field is then empty and `-ne 0` would
 # error out of the comparison (leaving gap unset would be worse).
 for v in unit_env_count unit_env_existing unit_env_outside unit_env_unreadable unit_env_unguarded unit_env_prod unit_env_guard; do
-  case "${!v}" in ''|*[!0-9]*) printf '%s\n' "WARNING ${v} unset - the enumeration did not answer" >&2; printf -v "$v" '%s' 99 ;; esac
+  case "${!v}" in ''|*[!0-9]*) printf '%s\n' "INFO ${v} unset - not a verdict term: the enumeration did not answer, so every P4 counter above reads 99 and fails" >&2; printf -v "$v" '%s' 99 ;; esac
 done
 say "unit_envfile_count=${unit_env_count} existing=${unit_env_existing} outside_slot=${unit_env_outside} unreadable=${unit_env_unreadable} unguarded=${unit_env_unguarded} prod_markers=${unit_env_prod} env_guard=${unit_env_guard}   (expect 4 / - / 0 / 0 / 0 / 0 / 4)"
 
@@ -216,7 +361,7 @@ if [ "$MODE" = 'prestart' ]; then
   say "== VERDICT (pre-start containment gate; P2/P5/listener/health not applicable to a stopped unit) =="
   assess_containment
   if [ "$gap" -eq 0 ]; then
-    say "CONTAINMENT=PASS  the slot cannot reach the production env while the unit is stopped; it may be started."
+    say "CONTAINMENT=PASS${unproven:+ unproven=${unproven}}  the slot cannot reach the production env while the unit is stopped; it may be started."
     exit 0
   fi
   say "CONTAINMENT=FAIL  containment does NOT hold with the unit stopped."
@@ -241,11 +386,16 @@ say ""
 say "== P5  DB identity unchanged and still slot-only (booleans; the DSN is never printed) =="
 # Held in a variable, compared, then discarded. Only the boolean answers are echoed.
 dsn=$(tr '\0' '\n' < "/proc/${pid}/environ" | grep -m1 '^DATABASE_URL=' | cut -d= -f2- || true)
-say "dsn_present=$([ -n "${dsn:-}" ] && echo 1 || echo 0)"
-say "dsn_is_loopback=$([ -n "${dsn:-}" ] && { case "$dsn" in *@127.0.0.1:*|*@localhost:*) echo 1 ;; *) echo 0 ;; esac; } || echo 0)"
-say "dsn_port_5432=$([ -n "${dsn:-}" ] && { case "$dsn" in *:5432/*) echo 1 ;; *) echo 0 ;; esac; } || echo 0)"
-say "dsn_prod_marker_count=$(printf '%s' "${dsn:-}" | grep -cE "$MARKERS" || true)   (expect 0)"
+dsn_present=0; dsn_is_loopback=0; dsn_port_5432=0
+if [ -n "${dsn:-}" ]; then
+  dsn_present=1
+  case "$dsn" in *@127.0.0.1:*|*@localhost:*) dsn_is_loopback=1 ;; esac
+  case "$dsn" in *:5432/*) dsn_port_5432=1 ;; esac
+fi
+dsn_prod_marker_count=$(printf '%s' "${dsn:-}" | grep -cE "$MARKERS" || true)
 unset dsn
+say "INFO dsn_present=${dsn_present} dsn_is_loopback=${dsn_is_loopback} dsn_port_5432=${dsn_port_5432} - not a verdict term: the slot may rewrite its own DSN at will, so the P5 answer is environ_prod_marker_count (the runtime environ scan), and no value of the DSN is ever printed"
+say "INFO dsn_prod_marker_count=${dsn_prod_marker_count} - not a verdict term: it repeats environ_prod_marker_count over the slot's own variable rather than the process environ"
 
 say ""
 say "== VERDICT =="
@@ -256,21 +406,27 @@ say "== VERDICT =="
 assess_containment
 # Printed BEFORE gap_closed=/PROOF= on purpose: this is the pre-start gate's answer, and one run must never
 # be mistakable for the other gate.
-say "CONTAINMENT=$([ "$gap" -eq 0 ] && echo PASS || echo FAIL)   (terms that need no running process)"
+say "CONTAINMENT=$([ "$gap" -eq 0 ] && echo PASS || echo FAIL)${unproven:+ unproven=${unproven}}   (terms that need no running process)"
 # Everything below needs a started unit, so it can only retract the verdict above.
 # A vanished /proc/<pid>/environ makes the marker count 0 for the wrong reason: an empty read is
 # indistinguishable from a clean environ. `grep -c` still prints 0 when its input never opened
 # (measured: dead pid -> key_count=0 marker_count=0 gap_closed=1), so readability is its own answer.
 if [ "$environ_readable" -eq 0 ] || [ "$env_key_count" -eq 0 ]; then
-  say "WARNING environ_unreadable - the zero marker count came from an empty read, not a clean environ"
+  # Named, because "the marker count is zero" and "the marker count is zero because nothing was read" are the
+  # same transcript line otherwise. Both terms were already printed in P2 with their required values.
+  if [ "$environ_readable" -eq 0 ]; then term_fail environ_readable; fi
+  if [ "$env_key_count" -eq 0 ]; then term_fail environ_key_count; fi
   gap=1
 fi
-if [ "${runt_markers:-1}" -ne 0 ]; then gap=1; fi
-if [ "$health_code" != '200' ]; then gap=1; fi
+if [ "${runt_markers:-1}" -ne 0 ]; then term_fail environ_prod_marker_count; fi
+if [ "$health_code" != '200' ]; then term_fail health_http_code; fi
 
+# The complete list, after the post-start terms have joined the pre-start ones. `containment_terms_failed=`
+# above answers the pre-start gate; this one answers this run, and a reader can tell which is which by name.
+say "proof_terms_failed=${term_failures:-none}"
 say "gap_closed=$([ "$gap" -eq 0 ] && echo 1 || echo 0)"
 if [ "$gap" -eq 0 ]; then
-  say "PROOF=PASS  slot 9 runtime cannot read the production env, and the slot is healthy."
+  say "PROOF=PASS${unproven:+ unproven=${unproven}}  slot 9 runtime cannot read the production env, and the slot is healthy."
   exit 0
 fi
 say "PROOF=FAIL  the gap is NOT closed, or the slot is unhealthy. STOP: do not deploy, do not migrate." >&2

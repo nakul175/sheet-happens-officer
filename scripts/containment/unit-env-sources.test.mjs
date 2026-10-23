@@ -13,6 +13,7 @@ import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { containmentLines, pgrepBody, systemctlBody } from "./proof-sandbox.mjs";
 
 const here = fileURLToPath(new URL(".", import.meta.url));
 const PROOF = join(here, "slot9-proof.sh");
@@ -23,7 +24,7 @@ const MARKERS = 'defaultdb|doadmin|25061|sho-prod-pool';
 
 // The five-source shape. `fifth` is the path under attack; `guarded` names the source indices that carry
 // an ExecStartPre guard line, so "appended after rendering, without a guard" is expressible.
-function unitText({ slot, fifth, guarded = [0, 1, 2, 3] }) {
+function unitText({ slot, fifth, guarded = [0, 1, 2, 3], shoDir = "/etc/sho" }) {
   const sources = [
     `${slot}/env/db.env`,
     `${slot}/env/app.env`,
@@ -39,6 +40,9 @@ function unitText({ slot, fifth, guarded = [0, 1, 2, 3] }) {
     if (!guarded.includes(i)) return;
     lines.push(`ExecStartPre=/bin/sh -c 'test ! -e ${p} || { test -r ${p} && ! grep -qEi -- "${MARKERS}" ${p}; }'`);
   });
+  // A clean sandbox must be a CONTAINED unit, not just a four-source one: the proof now asserts the unit's
+  // own sandbox properties, so a unit without User=/InaccessiblePaths= correctly fails it.
+  lines.push(...containmentLines({ shoDir }));
   return `${lines.join("\n")}\n`;
 }
 
@@ -163,7 +167,8 @@ function proofRun({ fifth, guarded, releaseLink, slotCanReadProdEnv = false } = 
   writeFileSync(join(dir, "evil", "extra.env"), "NODE_ENV=production\n");
   writeFileSync(join(dir, "outside", "release.env"), "NODE_ENV=production\n");
   if (releaseLink) symlinkSync(join(dir, "outside", "release.env"), join(slot, "current", "release.env"));
-  writeFileSync(join(dir, "unitdir", "sho-pr9.service"), unitText({ slot, fifth: fifth?.(slot), guarded }));
+  writeFileSync(join(dir, "unitdir", "sho-pr9.service"),
+    unitText({ slot, fifth: fifth?.(slot), guarded, shoDir: join(dir, "sho") }));
 
   // A live process this test owns, so the P2 environ reads are truthfully readable and key-bearing. macOS
   // has no /proc, so the proof's /proc reads are pointed at a sandbox stand-in with real NUL separators.
@@ -175,10 +180,13 @@ function proofRun({ fifth, guarded, releaseLink, slotCanReadProdEnv = false } = 
     writeFileSync(join(dir, "bin", name), `#!/bin/bash\n${body}\n`);
     chmodSync(join(dir, "bin", name), 0o755);
   };
-  stub("systemctl", `for a in "$@"; do [ "$a" = "MainPID" ] && { echo ${pid}; exit 0; }; done\nexit 0`);
+  // A deploy-owned process, so the cross-uid /proc probe is measurable: an unrun probe is a FAIL now, not a
+  // skip, and this harness must model a host where the probe CAN run (that is the host the proof certifies).
+  const deploy = spawnSync("bash", ["-c", "sleep 20 >/dev/null 2>&1 & echo $!"], { encoding: "utf8" }).stdout.trim();
+  stub("systemctl", systemctlBody({ unitFile: join(dir, "unitdir", "sho-pr9.service"), mainPid: pid }));
   stub("ss", `echo "LISTEN 0 511 127.0.0.1:3109 0.0.0.0:*"`);
   stub("curl", `for a in "$@"; do [ "$a" = "-o" ] && { printf 200; exit 0; }; done\nprintf '{"ok":true,"release":"deadbeef"}'`);
-  stub("pgrep", "exit 1");
+  stub("pgrep", pgrepBody(deploy));
 
   // as_slot's contract: it echoes 0 when the probe SUCCEEDS (the slot could do it) and 1 when it is
   // denied — the same contract the script's positive control depends on. `slotCanReadProdEnv` models the
@@ -209,6 +217,7 @@ function proofRun({ fifth, guarded, releaseLink, slotCanReadProdEnv = false } = 
     env: { PATH: `${join(dir, "bin")}:${process.env.PATH}`, HOME: process.env.HOME, FAKE_ROOT: "1" },
   });
   try { process.kill(Number(pid)); } catch { /* the test's own sleeper; already gone is fine */ }
+  try { process.kill(Number(deploy)); } catch { /* the test's own sleeper; already gone is fine */ }
   return { ...res, slot, dir };
 }
 

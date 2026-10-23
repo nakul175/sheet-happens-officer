@@ -301,6 +301,9 @@ test("proof does not report PASS when the production env it probed was absent", 
   const warn = body.indexOf('[ "$prod_env_exists" -eq 0 ]');
   assert.ok(warn > 0, "the missing-file guard disappeared");
   const block = body.slice(warn, body.indexOf("fi", warn));
-  assert.match(block, /gap=1/, "prod_env_exists=0 must fail the verdict, not only warn");
+  // W98 replaced the bare `gap=1` here with a NAMED term: term_fail sets gap AND records the name, so a FAIL
+  // says which control failed. Either spelling satisfies the rule this test states.
+  assert.match(block, /gap=1|term_fail prod_env_exists/, "prod_env_exists=0 must fail the verdict, not only warn");
+  assert.match(body, /containment_terms_failed=/, "a FAIL must name the terms that failed");
   assert.match(body, /if \[ "\$environ_readable" -eq 0 \]/, "an unreadable environ must be its own answer");
 });
