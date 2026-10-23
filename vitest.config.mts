@@ -58,6 +58,12 @@ export default defineConfig({
       "tests/forced-password-23-5-browser.test.ts",
       "tests/e2e/local/APL-2719.test.ts",
       "tests/e2e/local/SHO-2738-3025-3030.browser.test.ts",
+      // tests/shutdown-next.test.ts runs `next build`, which rewrites .next under the dev server CI
+      // already started, and its SIGTERM burst pins two cores with util-linux `taskset` and reads
+      // /proc/<pid>/status - absent on macOS. vitest.shutdown.config.mts:4-5 says `npm test` excludes
+      // it and that config runs it alone; that exclusion was never in this list, so `npm test` ran it
+      // too: `next build` clobbered .next at 01:25 and the file added 11 platform failures.
+      "tests/shutdown-next.test.ts",
     ],
   },
 });
