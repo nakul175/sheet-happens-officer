@@ -98,10 +98,16 @@ describe("qa:TC missing SHO-2917 AC2: the guard refuses production and allows st
     expect(() => assertStoryTargetAllowed(envOf({}), resolveBaseUrl({ BASE_URL: PRODUCTION }))).toThrow(/Refusing to run story tests against production/);
   });
 
-  // DEFECT OPEN (D1 in execution/BUG-2917.md, no ticket yet): the guard does not treat sheethappensofficer.aplyd.com as
-  // production. Recorded as a todo rather than an assertion: a `.not.toThrow()` here would make fixing the production set
-  // FAIL this suite. When the host is added to PRODUCTION_HOSTS, turn this into a `.toThrow` case.
-  it.todo("DEFECT OPEN — decide whether sheethappensofficer.aplyd.com is production; the guard currently allows it");
+  // DECISION NEEDED, NO OWNING TICKET (w281, 24 Oct 2026; the tracker was read only). The question is whether
+  // sheethappensofficer.aplyd.com is a production host. The closest ticket is SHO-2929 ("Replace hardcoded old domain
+  // after move to sheethappensofficer.aplyd.org"), and it does not answer it: it is Done, its AC1/AC2 name only
+  // sheethappensofficer.com and sheethappensofficer.aplyd.org, and its ruling comment keeps the staging hosts
+  // (staging.sheethappensofficer.com and the prN.staging hosts) out of scope. The .aplyd.com name appears nowhere in this
+  // repo outside this todo. So the answer is UNKNOWN; it is recorded as pending decision W281-D1 in DECISIONS-NEEDED.md.
+  // Effect on the guard: if the host IS production, add it to PRODUCTION_HOSTS (tests/e2e/base-url.ts:10) and turn this
+  // todo into a `.toThrow` case; if it is not, delete the todo and record the host as deliberately allowed. It stays a
+  // todo, so closing the production set can never make this suite fail.
+  it.todo("DECISION NEEDED (no owning ticket; closest SHO-2929, Done, names only .com and .aplyd.org): is sheethappensofficer.aplyd.com a production host? If yes, add it to PRODUCTION_HOSTS and assert the refusal — see DECISIONS-NEEDED.md W281-D1");
 });
 
 // REVIEW-2917 R3: pin the import-time refusal in tests/e2e/base-url.ts:98-102. The previous claim said "pin the base-url
@@ -137,5 +143,9 @@ describe("REVIEW-2917 R3: the base-url guard refuses production at import time, 
     expect(run.output).not.toMatch(/Refusing to run/);
   });
 
-  it.todo("DEFECT OPEN — decide whether sheethappensofficer.aplyd.com is production; the import-time guard currently allows it");
+  // The same pending decision on the import-time path (tests/e2e/base-url.ts:112-116). No ticket answers it either:
+  // SHO-2929 is Done and scoped to the old .com domain, and SHO-2917 AC3 is about reading the process image, not about
+  // which hosts the production set holds. See DECISIONS-NEEDED.md W281-D1. Effect on the guard is the same: add the host
+  // to PRODUCTION_HOSTS and this becomes a `.toThrow` case; rule it not production and the todo goes.
+  it.todo("DECISION NEEDED at import time (no owning ticket; closest SHO-2929, Done): is sheethappensofficer.aplyd.com a production host? The guard inside tests/e2e/base-url.ts allows it today — see DECISIONS-NEEDED.md W281-D1");
 });

@@ -147,8 +147,9 @@ export const ENTRIES = Object.freeze([
     asserts: "SHO-2917 AC1: no file under tests/ reads the environment as a whole" },
   { id: "2917 AC2", ticket: "2917", clause: "same base-URL behaviour for local/staging/preview, CI green",
     status: "UNTESTED",
-    note: "the guard half is asserted at tests/base-url-env-2917.test.ts:73 and :85, but two it.todo at :104 and :140 "
-      + "record an OPEN defect (is sheethappensofficer.aplyd.com production?); the clause is open, not merely unnamed" },
+    note: "the guard half is asserted at tests/base-url-env-2917.test.ts:73 and :85, but two it.todo at :110 and :150 "
+      + "record a PENDING DECISION (is sheethappensofficer.aplyd.com production? see DECISIONS-NEEDED.md W281-D1); the "
+      + "clause is open, not merely unnamed" },
   { id: "2917 AC3", ticket: "2917", clause: "a guard fails if any test reads /proc/self/environ", status: "TESTED",
     test: "tests/no-proc-environ-2917.test.ts:302", verified: "title",
     asserts: "no file under tests/ reads the process environment image" },
