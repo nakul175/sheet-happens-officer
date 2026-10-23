@@ -405,3 +405,76 @@ describe("qa:TC missing SIGTERM drain", () => {
     }
   });
 });
+// SHO-2689 F7. `node server.js` loads src/lib/shutdown.ts through type stripping, which has
+// no tsconfig `paths`. The drain's disconnectPrisma() used to do `import("@/lib/db")`, so every
+// drain logged "prisma disconnect failed: Cannot find package '@/lib'" and db.$disconnect()
+// never ran. These cases run the drain with no injected `disconnect`, under plain `node`.
+describe("qa:TC missing drain prisma disconnect under plain node (F7)", () => {
+  function startPlainNodeChild(env: Record<string, string> = {}) {
+    const child = spawn(process.execPath, ["tests/shutdown-disconnect-child.ts"], {
+      cwd: root,
+      env: { ...process.env, ...env },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    const exited = new Promise<{ code: number | null; stdout: string; stderr: string }>((resolve) => {
+      // "close", not "exit": stdout chunks can arrive after exit, which drops the drain line.
+      child.on("close", (code) => resolve({ code, stdout, stderr }));
+    });
+    child.stdout?.on("data", (chunk: Buffer) => (stdout += chunk.toString()));
+    child.stderr?.on("data", (chunk: Buffer) => (stderr += chunk.toString()));
+    return { child, exited, stdout: () => stdout, stderr: () => stderr };
+  }
+
+  it("qa:TC missing does not use a tsconfig alias inside the drain path", async () => {
+    const { readFile } = await import("node:fs/promises");
+    for (const file of ["src/lib/shutdown.ts", "src/lib/db.ts"]) {
+      const source = await readFile(path.join(root, file), "utf8");
+      const specifiers = [...source.matchAll(/(?:from|import\()\s*"([^"]+)"/g)].map((m) => m[1]);
+      expect(specifiers.filter((s) => s?.startsWith("@/")), file).toEqual([]);
+    }
+  });
+
+  it("qa:TC missing disconnects prisma under plain node instead of failing on the alias", async () => {
+    const proc = startPlainNodeChild({ DELAY_MS: "50", KEEPALIVE_MS: "1" });
+    try {
+      const port = await vi.waitFor(
+        () => {
+          const match = /ready (\d+)/.exec(proc.stdout());
+          if (!match) throw new Error(`no ready line: ${proc.stdout()} ${proc.stderr()}`);
+          return Number(match[1]);
+        },
+        { timeout: 15000 },
+      );
+      const body = await new Promise<string>((resolve, reject) => {
+        http
+          .get({ host: "127.0.0.1", port, path: "/slow", agent: false }, (res) => {
+            let data = "";
+            res.on("data", (c) => (data += c));
+            res.on("end", () => resolve(`${res.statusCode} ${data}`));
+          })
+          .on("error", reject);
+      });
+      expect(body).toBe("200 done");
+      proc.child.kill("SIGTERM");
+      const result = await proc.exited;
+      // The alias defect is what F7 named; it must be gone from the drain output.
+      expect(result.stderr).not.toContain("Cannot find package '@/");
+      expect(result.stdout).not.toContain("Cannot find package '@/");
+      // Not asserted green yet: node cannot load the generated Prisma client (F7 residual).
+      const unloadable = /prisma disconnect failed: (.*)/.exec(result.stdout + result.stderr);
+      expect(unloadable?.[1] ?? "").not.toContain("@/lib");
+      // The drain itself is unaffected by a failed disconnect, which is why F7 was MEDIUM.
+      // On Darwin the koffi accept-queue seizer is linux-only, so the drain here reports the
+      // timeout line and exits 1; the Linux run exits 0 (BUG-2689-LINUX.md §9). Assert the
+      // outcome is one of the two honest lines, not a specific exit code.
+      const shutdownLines = result.stdout.split("\n").filter((line) => line.startsWith("graceful shutdown:"));
+      expect(shutdownLines.length).toBeGreaterThan(0);
+      expect(shutdownLines.every((line) => line === CLEAN_LOG || line === TIMEOUT_LOG)).toBe(true);
+    } finally {
+      if (proc.child.exitCode === null) proc.child.kill("SIGKILL");
+    }
+  });
+});
+

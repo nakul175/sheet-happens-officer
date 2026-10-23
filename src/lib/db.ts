@@ -1,4 +1,7 @@
-import { PrismaClient } from "@/generated/prisma/client";
+// Relative, not the "@/generated/prisma/client" alias, for the same reason as
+// src/lib/shutdown.ts (SHO-2689 F7): plain `node server.js` has no tsconfig `paths`,
+// so the alias made src/lib/db.ts itself unloadable and the drain could not disconnect.
+import { PrismaClient } from "../generated/prisma/client.ts";
 
 const globalForPrisma = globalThis as unknown as { prisma?: PrismaClient };
 
