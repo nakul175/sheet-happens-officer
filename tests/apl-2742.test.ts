@@ -4,10 +4,13 @@
 //    message only (no key, no body, no link), and sign-up / resend tell the person instead of failing with a 500.
 //    The provider is faked here: sendMail is called in this process, and the routes are called through their own
 //    POST handlers with sendMail made to fail.
+import { randomUUID } from "node:crypto";
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import pg from "pg";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { BASE, Client, OUTBOX, PW } from "./helpers";
+import { localPgPool, schemaFromDatabaseUrl } from "./e2e/helpers/local-db-pool";
 import { db } from "../src/lib/db";
 
 vi.mock("next/server", async (orig) => ({ ...(await orig<typeof import("next/server")>()), connection: async () => {} }));
@@ -334,3 +337,113 @@ describe("qa:TC missing AC4: verification needs a click, and verification events
     expect(await db.auditLog.count({ where: { event: "VERIFY_EMAIL_REQUESTED" } })).toBe(before);
   });
 });
+
+// SHO-3011 (also cited as SHO-3036). The APL-2742 story spec reads the app's rows with `pg`, and ?schema= is a
+// Prisma parameter pg ignores, so the spec's pool must carry it itself or it reads public while the app writes
+// elsewhere. Proven on a throwaway schema: current_schema() and search_path come from the URL, an unqualified table
+// lands in that schema, and public cannot see it. Only a local database is touched, and only that schema is dropped.
+describe("qa:TC missing SHO-3011: the APL-2742 pool reads the schema DATABASE_URL names", () => {
+  const RAW = process.env.DATABASE_URL ?? "";
+  let local = false;
+  try {
+    local = /^(localhost|127\.0\.0\.1|::1)$/i.test(new URL(RAW).hostname.replace(/^\[|\]$/g, ""));
+  } catch {
+    local = false;
+  }
+  const SCHEMA = `sho_test_apl2742_${randomUUID().replace(/-/g, "").slice(0, 12)}`;
+  const TABLE = `apl2742_probe_${randomUUID().replace(/-/g, "").slice(0, 8)}`;
+  const urlWithSchema = (schema: string) => {
+    const url = new URL(RAW);
+    url.searchParams.set("schema", schema);
+    return url.toString();
+  };
+  let admin: pg.Client | undefined;
+  let pool: pg.Pool | undefined;
+
+  beforeAll(async () => {
+    if (!local) return;
+    admin = new pg.Client({ connectionString: RAW });
+    await admin.connect();
+    await admin.query(`CREATE SCHEMA "${SCHEMA}"`);
+  });
+
+  afterAll(async () => {
+    await pool?.end();
+    // Only the throwaway schema this block made, and never public or anything else.
+    if (local && admin && /^sho_test_apl2742_[a-z0-9]+$/.test(SCHEMA)) await admin.query(`DROP SCHEMA IF EXISTS "${SCHEMA}" CASCADE`);
+    await admin?.end();
+  });
+
+  it.skipIf(!local)("qa:TC missing SHO-3011 AC1: ?schema= sets current_schema() and search_path on the pool's connections", async () => {
+    // The defect itself: pg alone keeps its own parameters and drops Prisma's ?schema=, so it reads the default schema.
+    const bare = new pg.Pool({ connectionString: urlWithSchema(SCHEMA), max: 1 });
+    try {
+      const bareSchema = (await bare.query<{ s: string }>("SELECT current_schema() AS s")).rows[0].s;
+      expect(bareSchema, "a bare pg pool ignores ?schema= and reads the default schema").not.toBe(SCHEMA);
+    } finally {
+      await bare.end();
+    }
+
+    pool = localPgPool(urlWithSchema(SCHEMA));
+    const row = (await pool.query<{ current: string; schemas: string; searchPath: string }>(
+      'SELECT current_schema() AS current, array_to_string(current_schemas(false), \',\') AS schemas, current_setting(\'search_path\') AS "searchPath"',
+    )).rows[0];
+    expect(row.current, "current_schema() is the URL's schema").toBe(SCHEMA);
+    expect(row.schemas, "search_path holds that schema and nothing else, so no public fallback").toBe(SCHEMA);
+    expect(row.searchPath).toContain(SCHEMA);
+
+    // An unqualified write and read land in that schema: the same search_path Prisma would give the app.
+    await pool.query(`CREATE TABLE ${TABLE} (value text)`);
+    await pool.query(`INSERT INTO ${TABLE} (value) VALUES ($1)`, ["zz-sho-3011"]);
+    expect((await pool.query<{ value: string }>(`SELECT value FROM ${TABLE}`)).rows).toEqual([{ value: "zz-sho-3011" }]);
+    const inSchema = (await admin!.query<{ nspname: string }>(
+      "SELECT n.nspname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE c.relname = $1",
+      [TABLE],
+    )).rows;
+    expect(inSchema.map((r) => r.nspname), "the unqualified table was created in that schema").toEqual([SCHEMA]);
+    expect((await admin!.query<{ t: string | null }>("SELECT to_regclass($1) AS t", [`public.${TABLE}`])).rows[0].t,
+      "public does not have the table").toBeNull();
+  });
+
+  it.skipIf(!local)("qa:TC missing SHO-3011 AC2: without ?schema= the pool is unchanged (default schema)", async () => {
+    const plain = new URL(RAW);
+    plain.searchParams.delete("schema");
+    const ours = localPgPool(plain.toString());
+    const before = new pg.Pool({ connectionString: plain.toString(), max: 1 }); // the construction this replaces
+    try {
+      const sql = "SELECT current_schema() AS current, array_to_string(current_schemas(false), ',') AS schemas, current_setting('search_path') AS sp";
+      expect((await ours.query(sql)).rows[0], "indistinguishable from a plain pg pool").toEqual((await before.query(sql)).rows[0]);
+      expect(schemaFromDatabaseUrl(plain.toString())).toBeUndefined();
+    } finally {
+      await ours.end();
+      await before.end();
+    }
+  });
+
+  it("qa:TC missing SHO-3011 AC3: a non-local database, an ambiguous URL and a hostile schema name are refused, without echoing the URL", () => {
+    const secret = "s3cretDbPw9";
+    for (const bad of [
+      `postgresql://sho:${secret}@db.example.com:5432/sho_test?schema=sho_test`,
+      `postgresql://sho:${secret}@10.255.0.9:5432/sho_test?schema=sho_test`,
+    ]) {
+      let message = "";
+      try { localPgPool(bad); } catch (e) { message = (e as Error).message; }
+      expect(message).toMatch(/local database/);
+      expect(message).not.toContain(secret);
+      expect(message).not.toContain("db.example.com");
+    }
+    const local = `postgresql://sho:${secret}@127.0.0.1:55432/sho_test`;
+    expect(() => localPgPool(`${local}?schema=${encodeURIComponent('public; DROP TABLE "User"')}`)).toThrow(/plain identifier/);
+    expect(() => localPgPool(`${local}?schema=one&schema=two`)).toThrow(/more than one schema/);
+    expect(() => localPgPool(`${local}?schema=sho_test&options=-c%20search_path%3Dpublic`)).toThrow(/\?options=/);
+    expect(() => localPgPool(undefined)).toThrow(/not set/);
+  });
+
+  it("qa:TC missing SHO-3011 AC1: the story spec builds its pool with that helper, not a bare pg pool", () => {
+    const spec = readFileSync(path.join(process.cwd(), "tests/e2e/stories/APL-2742.spec.ts"), "utf8");
+    expect(spec).toContain('from "../helpers/local-db-pool"');
+    expect(spec).toContain("localPgPool(process.env.DATABASE_URL)");
+    expect(spec).not.toContain("new pg.Pool(");
+  });
+});
+
