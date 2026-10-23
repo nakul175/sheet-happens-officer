@@ -138,8 +138,13 @@ function build({ authKeys = true, ssListens = true, running = true, staleCopyRea
 }
 
 const verdict = (stdout) => /^CONTAINMENT=(PASS|FAIL)\b/m.exec(stdout)?.[1] ?? "(no CONTAINMENT line)";
-const failedTerms = (stdout) =>
-  (/^(?:containment|proof)_terms_failed=(.*)$/m.exec(stdout)?.[1] ?? "(no terms line)").trim();
+// The verdict is cumulative: `containment_terms_failed=` is the pre-start answer, `proof_terms_failed=` the
+// run's own. A full run prints both, so read EVERY term line and join them - a helper that took only the first
+// would report the pre-start answer and hide a post-start term (measured: it hid listen_on_3109_count).
+const failedTerms = (stdout) => {
+  const all = [...stdout.matchAll(/^(?:containment|proof)_terms_failed=(.*)$/gm)].map((m) => m[1].trim());
+  return all.length ? all.join(",") : "(no terms line)";
+};
 
 
 
@@ -177,6 +182,12 @@ test("a readable stale copy named app.env.old is neither counted nor probed, so 
     res.stdout, res.stderr,
   ].join("\n"));
   assert.match(failedTerms(res.stdout), /stale|bak/, "the FAIL must name the probe that did not cover the copy");
+// OPEN ON THIS TREE, and deliberately not repaired here: closing it means deciding which copies of the
+// production env count (the glob `app.env.bak*`, the one hard-coded probe path, or every file in /etc/sho that
+// parses as an env). That is a policy the containment owner has to set, not a one-line fix, so it is reported
+// as finding F1 in W102-REPORT.md and this test is this packet's ONE deliberate red: it goes green when the
+// policy lands, not before. (Node 24 does not suppress a failing `{ todo }` test's exit code, so marking it
+// todo would have looked green in the count and red in the run - it is left plainly red instead.)
 });
 
 // ---------------------------------------------------------------------------

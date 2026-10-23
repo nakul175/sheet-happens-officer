@@ -282,11 +282,16 @@ fi
 
 # SSH persistence was the other durable path (:254). A term: uid separation does not remove it, so a slot that
 # can append a key to the deployer's authorized_keys has a way back in that no other probe would notice.
+# EXISTS is a term here too (W102): `test -w <missing file>` answers "denied", so on a host with no
+# authorized_keys the passing value meant "there was no key file to plant a key in", not "the slot is denied".
+# That is the same vacuity the header forbids for /etc/sho/app.env, and it made the SSH control unmeasured
+# while CONTAINMENT=PASS was printed. A host that really has no authorized_keys fails this term on purpose:
+# the control cannot be observed there, so the proof says so instead of banking a denial it never measured.
 authkeys_exists=$(exists "${DEPLOY_HOME}/.ssh/authorized_keys")
 authkeys_write=$(as_slot test -w "${DEPLOY_HOME}/.ssh/authorized_keys")
 say "shoslot_can_write_authorized_keys=${authkeys_write}   (required 1 = denied; authkeys_exists=${authkeys_exists})"
 if [ "$authkeys_exists" -eq 0 ]; then
-  say "INFO authorized_keys is absent on this host - not a verdict term here: the write denial is vacuous (there is no key file to plant), so this line cannot distinguish a real denial from a missing file"
+  term_fail authorized_keys_absent
 fi
 
 
@@ -420,6 +425,13 @@ if [ "$environ_readable" -eq 0 ] || [ "$env_key_count" -eq 0 ]; then
 fi
 if [ "${runt_markers:-1}" -ne 0 ]; then term_fail environ_prod_marker_count; fi
 if [ "$health_code" != '200' ]; then term_fail health_http_code; fi
+# W102: the listener line printed its own expectation "(expect >=1)" and no term read it, so a host without
+# iproute2 (`ss` absent) printed listen_on_3109_count=0 and still reached PROOF=PASS. An unmeasured count is
+# not a satisfied one - the same rule the environ and health terms above follow.
+case "${listen_count:-}" in
+  ''|*[!0-9]*) term_fail listen_on_3109_count ;;
+  *) if [ "$listen_count" -lt 1 ]; then term_fail listen_on_3109_count; fi ;;
+esac
 
 # The complete list, after the post-start terms have joined the pre-start ones. `containment_terms_failed=`
 # above answers the pre-start gate; this one answers this run, and a reader can tell which is which by name.
