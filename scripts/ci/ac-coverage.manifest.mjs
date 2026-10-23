@@ -327,9 +327,10 @@ export const ENTRIES = Object.freeze([
     note: "W232, re-derived at HEAD: the old note (\"nothing asserts the variable exists where the code expects it\") "
       + "is false and was already false at the baseline. Four assertions in this file pin exactly that: the README's "
       + "dev-server line sets RETURN_PATH_LOG=1 (:127), package.json's dev script sets it (:136), src/proxy.ts gates "
-      + "the [return-path] line on it (:141) and ci.yml starts next start with it (:154). The file's titles name the "
-      + "probe, not SHO-3024 - the ticket id appears only in the comment at :149 - so the attribution is the same "
-      + "kind BULLET-2 discloses, not a title that names the ticket. What it does not prove: that any run of "
+      + "the [return-path] line on it (:141) and every workflow that runs `npm test` starts next start with it (:157, "
+      + "a scan since SHO-3024 - deploy.yml was the release gate that ran the tier without it). The file's titles name "
+      + "the probe, not SHO-3024 - the ticket id appears only in the comment above that scan - so the attribution is "
+      + "the same kind BULLET-2 discloses, not a title that names the ticket. What it does not prove: that any run of "
       + "tests/return-to.test.ts succeeded, which is a different hand and stays in that test's own record" },
   { id: "3024 BULLET-2", ticket: "3024", clause: "a test covers it", status: "TESTED",
     test: "tests/return-to.test.ts:817", verified: "body",

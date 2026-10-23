@@ -8,7 +8,7 @@
 //
 // This file is pure file parsing: no live server, no database, no child process. It is fast and
 // hermetic on purpose, so it can run anywhere `npm test` runs.
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 /** Variables the `npm test` command line must set for the vitest process (README contract). */
@@ -151,9 +151,21 @@ describe("return-path probe: the documented dev server can write what the test r
       .toContain("logSizeAtStart");
   });
 
-  it("CI starts the server under test the same way", () => {
-    expect(readFileSync(".github/workflows/ci.yml", "utf8"), "CI sets RETURN_PATH_LOG=1 for next start")
-      .toMatch(/RETURN_PATH_LOG=1\s+npx next start/);
+  // SHO-3024. This used to name ci.yml alone, so deploy.yml — the release gate, which runs the same `npm test` tier on
+  // every push to main — kept starting `next start` without the variable and could not pass the return-path probe. The
+  // check is over every workflow that runs the tier now, so a new one (or a rename) cannot miss it either.
+  it("every workflow that runs npm test starts the server under test the same way", () => {
+    const files = readdirSync(".github/workflows")
+      .filter((name) => /\.ya?ml$/.test(name))
+      .map((name) => `.github/workflows/${name}`)
+      .filter((file) => /^\s*-?\s*run:\s*npm test\s*$/m.test(readFileSync(file, "utf8")));
+    expect(files, "the scan finds the workflows that run the tier").toEqual(
+      expect.arrayContaining([".github/workflows/ci.yml", ".github/workflows/deploy.yml"]),
+    );
+    for (const file of files) {
+      expect(readFileSync(file, "utf8"), `${file} sets RETURN_PATH_LOG=1 for the server under test`)
+        .toMatch(/RETURN_PATH_LOG=1\s+npx next start/);
+    }
   });
 });
 

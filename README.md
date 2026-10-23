@@ -87,9 +87,11 @@ Three conditions are not on that line, because they belong to the server or the 
   `SERVER_LOG` at wherever its output goes, or the tests have nothing to read. `src/proxy.ts` only
   writes its `[return-path]` lines when the server has it, and `tests/return-to.test.ts` reads those
   lines back, counting only what the running server appended while that test ran: a `server.log` left
-  behind by an earlier run does not let a server that logs nothing pass. In `ci.yml` the server under
-  test is started with `next start`, and the check still passes there: the proxy's own lines are what
-  the test reads, not the request lines `next dev` adds.
+  behind by an earlier run does not let a server that logs nothing pass. In `ci.yml` and `deploy.yml` the
+  server under test is started with `next start`, and the check still passes there: the proxy's own lines
+  are what the test reads, not the request lines `next dev` adds. Both workflows run `npm test`, so both
+  set the variable on that line; `tests/test-env-contract.test.ts` scans every workflow that runs the
+  tier and fails when one does not.
 
 ### What the tests read from the server, not from the test process
 
