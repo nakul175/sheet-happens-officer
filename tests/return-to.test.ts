@@ -1,6 +1,6 @@
 // APL-2652. Same-origin return path after sign-in, and the signed-out redirect that carries it.
 // The cases at the top do not need a server. The "signed-out redirect" cases hit TASKBOARD_URL.
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
@@ -739,6 +739,10 @@ describe("APL-2652 signed-out redirect", () => {
   });
 
   it("D9 AC2 v1.6: a signed-out redirect keeps %09 and %0A in a query value encoded in the Location", async () => {
+    // Where the running server writes: CI redirects `next start` to server.log, otherwise SERVER_LOG. Only bytes this
+    // test appends count (see the check at the end), so the size is taken before the first probe is sent.
+    const log = process.env.SERVER_LOG ?? "server.log";
+    const logSizeAtStart = existsSync(log) ? statSync(log).size : 0;
     const enabled = await serverReturnToEnabled();
     for (const [path, q] of [["/tasks/v16-probe?q=a%09b", "a\tb"], ["/tasks/v16-probe?q=a%0Ab", "a\nb"], ["/tasks/v16-probe?q=a%0D%0Ab", "a\r\nb"]] as const) {
       const doc = await documentTarget(path);
@@ -785,14 +789,21 @@ describe("APL-2652 signed-out redirect", () => {
     for (const line of lines) expect(line).not.toMatch(RAW_CONTROL_IN_LINE);
     // The server's own log, where CI writes it (server.log) or where SERVER_LOG points. It must exist: a missing log
     // would make this check pass without looking at anything (Pam's D11).
-    const log = process.env.SERVER_LOG ?? "server.log";
     expect(existsSync(log), `server log at ${log} (set SERVER_LOG to the running server's log)`).toBe(true);
     // Scan the whole text, not line by line: splitting on LF would hide a raw LF inside a logged value (Pam's D11).
-    const text = readFileSync(log, "utf8");
+    const bytes = readFileSync(log);
+    const text = bytes.toString("utf8");
     // Pam's D12: the scan must have something to look at. `next start` logs no requests, so the server runs with
     // RETURN_PATH_LOG=1 and the proxy logs the return path it forwards. Each probe must be there, still encoded.
+    // Only bytes appended while this test ran count. A server.log left behind by an earlier run would otherwise let a
+    // server with RETURN_PATH_LOG unset — one that writes nothing at all — pass this check (SHO-3024).
+    const appended = bytes.subarray(Math.min(logSizeAtStart, bytes.length)).toString("utf8");
     for (const encoded of ["a%09b", "a%0Ab", "a%0D%0Ab"]) {
-      expect(text, `server log has the v16-probe line for q=${encoded} (start the server with RETURN_PATH_LOG=1)`).toContain(`[return-path] /tasks/v16-probe?q=${encoded}`);
+      expect(
+        appended,
+        `the server under test appended no [return-path] line for q=${encoded} to ${log} while this test ran. Start it with `
+        + `RETURN_PATH_LOG=1 and send its output to ${log} (SERVER_LOG); a log left by an earlier run does not count.`,
+      ).toContain(`[return-path] /tasks/v16-probe?q=${encoded}`);
     }
     expect(serverLogLeaks(text)).toEqual([]);
   });

@@ -73,11 +73,14 @@ Three conditions are not on that line, because they belong to the server or the 
 - `PW_CHROMIUM` — the path to a Chrome or Chromium binary, used by the browser tests. In CI run
   `npx playwright-core install --with-deps chromium` first instead.
 - `RETURN_PATH_LOG=1` — set this on the **server** process, not the test process. The server line
-  above sets it and writes `server.log`, so the probe has somewhere to write; `npm run dev` sets it
-  too. `src/proxy.ts` only writes its `[return-path]` lines when the server has it, and
-  `tests/return-to.test.ts` reads those lines back. In `ci.yml` the server under test is started with
-  `next start`, and the check still passes there: the proxy's own lines are what the test reads, not
-  the request lines `next dev` adds.
+  above sets it and writes `server.log`, so the probe has somewhere to write. `npm run dev` sets it
+  too, but prints to the terminal: redirect it (`npm run dev > server.log 2>&1`) or point
+  `SERVER_LOG` at wherever its output goes, or the tests have nothing to read. `src/proxy.ts` only
+  writes its `[return-path]` lines when the server has it, and `tests/return-to.test.ts` reads those
+  lines back, counting only what the running server appended while that test ran: a `server.log` left
+  behind by an earlier run does not let a server that logs nothing pass. In `ci.yml` the server under
+  test is started with `next start`, and the check still passes there: the proxy's own lines are what
+  the test reads, not the request lines `next dev` adds.
 
 ## Deploy (story 9.3)
 

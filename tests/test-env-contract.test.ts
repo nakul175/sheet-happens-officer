@@ -145,6 +145,10 @@ describe("return-path probe: the documented dev server can write what the test r
     expect(proxy, "proxy writes the [return-path] line").toContain("[return-path]");
     expect(readFileSync("tests/return-to.test.ts", "utf8"), "the test reads SERVER_LOG, else server.log")
       .toContain('process.env.SERVER_LOG ?? "server.log"');
+    // ...and only counts what the running server appended while it ran, so a log left by an earlier run cannot let a
+    // server with RETURN_PATH_LOG unset pass (SHO-3024).
+    expect(readFileSync("tests/return-to.test.ts", "utf8"), "the probe counts only bytes appended during the test")
+      .toContain("logSizeAtStart");
   });
 
   it("CI starts the server under test the same way", () => {
