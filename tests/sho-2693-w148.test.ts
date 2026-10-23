@@ -110,13 +110,14 @@ describe("w148 SHO-2693: a turn that wrote nothing must not say it wrote somethi
     expect(await stateOf(lead, projectId)).toEqual(before);
   });
 
-  it("w148/HEDGE-RESIDUAL 'I believe it went through.': no change verb is named, so it is relayed as-is", async () => {
-    // Recorded, not endorsed: this is the shape the detector cannot see, because it names no verb from the change
-    // family and no completion word. Pinned so the residual cannot regress silently into "we thought it was covered".
+  it("w148/HEDGE-RESIDUAL 'I believe it went through.': relayed, but inside the server's frame so it reads as no change", async () => {
+    // w148 recorded this as a residual the detector cannot see, because it names no verb from the change family and no
+    // completion word. w164 closes it without touching the word list: the sentence is still relayed, and the person
+    // reads the server's own statement of the state first, so it cannot be mistaken for a report of a write.
     const { lead } = await fixture();
     script(() => [say("I believe it went through.")]);
     const { messages } = await sendMessage(actor(lead), "Sort it out."); // no assign wording, so no who question
-    expect(lastAssistant(messages).text).toBe("I believe it went through.");
+    expect(lastAssistant(messages).text).toBe("Nothing has changed - I have not carried anything out here. I believe it went through.");
   });
 
   it("w148/READ: 'Which tasks are assigned to me?' keeps the model's answer", async () => {
@@ -125,7 +126,7 @@ describe("w148 SHO-2693: a turn that wrote nothing must not say it wrote somethi
     const { messages } = await sendMessage(actor(lead), "Which tasks are assigned to me?");
     const reply = lastAssistant(messages);
     expect(reply.kind).toBe("text");
-    expect(reply.text).toBe("Here are the tasks assigned to you.");
+    expect(reply.text).toBe("Nothing has changed - I have not carried anything out here. Here are the tasks assigned to you.");
   });
 
   it("w148/CARD: a card-backed assignment still returns its card", async () => {

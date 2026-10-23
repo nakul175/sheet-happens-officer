@@ -92,7 +92,11 @@ describe("w90 SHO-2693 disposition of 282e31d", () => {
     const { messages } = await sendMessage(actor(lead), "Which tasks are assigned to me?");
     const reply = lastAssistant(messages);
     expect(reply.kind).toBe("text");
-    expect(reply.text).toBe("Here are the tasks assigned to you.");
+    // SHO-2693 w164: the answer is unchanged, and engine.ts now puts the server's own "nothing has changed" sentence in
+    // front of it on every turn that wrote nothing, so the relayed prose can never be read as an outcome. The gate is
+    // still byte-exact; only the bytes it pins gained the frame.
+    expect(reply.text).toContain("Here are the tasks assigned to you.");
+    expect(reply.text).toBe("Nothing has changed - I have not carried anything out here. Here are the tasks assigned to you.");
   });
 
   it("w90/WIDENING: a person-less collaborator refusal now asks the assign-worded question", async () => {

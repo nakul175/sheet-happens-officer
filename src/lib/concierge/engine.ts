@@ -158,6 +158,28 @@ const WHO_QUESTION = "Who should I assign it to? Tell me the person's name and I
  */
 const NOTHING_CHANGED = "Nothing has changed. I cannot change anything without a card you confirm, so tell me which task should change and how, and I will show you the card.";
 
+/**
+ * SHO-2693 w164: the closed half of the invariant, and the reason it is a *frame* and not another keyword.
+ *
+ * `claimsWrite` below is a blacklist over a verb family. A person reading "I've handled that for you." or "Your task
+ * has a new owner." is told the same thing as "I reassigned it", yet neither sentence names a verb in that family, so
+ * both were relayed on a turn that wrote nothing (w164/NOUNVERB). Adding them to the list is the trap w107 fell into:
+ * each synonym added leaves the next one ("I sorted it", "it went through") outside, because natural language has no
+ * closed vocabulary for "I changed the world".
+ *
+ * So the property lives in the frame instead. On the branch below, nothing was written - no card, no proposal, no
+ * result - and the server says exactly that in its own sentence, in the first person, BEFORE the model's prose, so the
+ * state of the world is never left to be inferred from what the model chose to say. `claimsWrite` is kept only for the
+ * better message it can give (it explains the card), never as the thing that makes the reply true.
+ *
+ * This is containment, not closure: the model's sentence is still relayed, so a person who reads only the last sentence
+ * can still be told a write happened when none did (w164/NOUNVERB). The only closure is to relay no prose at all on
+ * this branch, which deletes the answer of a read the model answered without a tool call - see W164-REPORT.md, which
+ * states that trade-off rather than hiding it.
+ */
+const UNCHANGED = "Nothing has changed - I have not carried anything out here. ";
+
+const UNKNOWN = "I could not work that out. Try asking in a different way.";
 const whoQuestion = (request: string) => ({
   kind: "choices" as const, text: WHO_QUESTION, choices: [{ id: "none", label: "Never mind" }],
   pending: { request, question: WHO_QUESTION },
@@ -206,8 +228,11 @@ function buildReply(turn: Turn, modelText: string, request: string): Stored {
   // widening of that keyword is needed, and none would help: `reassigning`, `unassign`, `re-assign` are all the same
   // claim, and claimsWrite matches the verb stem rather than a spelling.
   if (claimsWrite(modelText)) return { kind: r.calls > 0 ? "answer" : "text", text: NOTHING_CHANGED, ...(r.calls > 0 ? { links: linksFor(turn, modelText) } : {}) };
-  const text = modelText || "I could not work that out. Try asking in a different way.";
-  return { kind: r.calls > 0 ? "answer" : "text", text: text.slice(0, 4000), ...(r.calls > 0 ? { links: linksFor(turn, text) } : {}) };
+  // SHO-2693 w164: everything that got past the blacklist is still relayed - but framed, so the person reads the
+  // server's statement of the state first. This is the line that makes the invariant independent of vocabulary.
+  const body = modelText || UNKNOWN;
+  const text = UNCHANGED + body;
+  return { kind: r.calls > 0 ? "answer" : "text", text: text.slice(0, 4000), ...(r.calls > 0 ? { links: linksFor(turn, body) } : {}) };
 }
 
 async function respond(user: Actor, userRow: { id: string }, userText: string, request: string, counted: boolean, now: Date, seed?: (t: Turn) => void): Promise<{ messages: Message[]; disabled?: Disabled }> {

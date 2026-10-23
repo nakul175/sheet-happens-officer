@@ -236,7 +236,14 @@ describe("propose and confirm (8.3)", () => {
       },
     );
     const r = await ask(lead, "Deactivate the editor");
-    expect(r.messages[1]).toMatchObject({ kind: "text", text: "Deactivating people is done on the Team screen." });
+    // SHO-2693 w164: the model is still the source of the screens-only wording, and the turn still writes nothing, so
+    // the reply now carries the server's own "nothing has changed" sentence in front of it. AC3 is unchanged: the
+    // concierge points to the screen, no card is offered, and no write happens.
+    expect(r.messages[1]).toMatchObject({
+      kind: "text",
+      text: "Nothing has changed - I have not carried anything out here. Deactivating people is done on the Team screen.",
+    });
+    expect((r.messages[1] as { text: string }).text).toContain("Deactivating people is done on the Team screen.");
     expect(r.messages.some((m) => m.kind === "card")).toBe(false);
     expect((await db.user.findUniqueOrThrow({ where: { id: ed.id } })).deactivatedAt).toBeNull();
   });

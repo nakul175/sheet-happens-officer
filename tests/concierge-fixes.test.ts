@@ -282,7 +282,9 @@ describe("choices and the weekly cap (finding 7, 8)", () => {
     expect((await state(actor(lead))).messages.find((m) => m.id === q.id)!.choiceAnswered).toBeUndefined();
     clearProviderDown();
     script(() => [say("Fine.")]);
-    expect((await answerChoice(actor(lead), q.id, a)).messages.at(-1)?.text).toBe("Fine.");
+    // SHO-2693 w164: answering a server question writes nothing either, so the reply now carries the server's own
+    // "nothing has changed" sentence in front of the model's word. The restore is still proven by the word surviving.
+    expect((await answerChoice(actor(lead), q.id, a)).messages.at(-1)?.text).toBe("Nothing has changed - I have not carried anything out here. Fine.");
     expect((await state(actor(lead))).messages.find((m) => m.id === q.id)!.choiceAnswered).toBe(a);
   });
 });
