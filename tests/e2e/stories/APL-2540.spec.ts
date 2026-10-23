@@ -40,8 +40,8 @@ test("APL-2540 > AC1: a deal has one Buyer, set at creation, and other roles can
   expect(now.filter((p) => p.role === "FUNDER")).toHaveLength(2);
 
   await admin.page.goto(`/projects/${deal.id}`);
-  // The deal panel has no landmark of its own. It is the box inside <main> that holds the Stage group.
-  const panel = admin.page.getByRole("main").filter({ has: admin.page.getByRole("group", { name: "Stage" }) });
+  // SHO-2996: the panel is the "Deal" landmark, so this AC and APL-2539 name the same box instead of <main> and its task list.
+  const panel = dealPanel(admin.page);
   await expect(panel.getByRole("button", { name: `Remove ${buyer.name}` })).toHaveCount(0);
   await panel.getByRole("button", { name: "+ Add organisation" }).click();
   await expect(panel.getByLabel("Role").locator("option")).toHaveText(["Funder", "Implementing office", "Partner", "Other"]);
