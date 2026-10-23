@@ -171,6 +171,18 @@ class Reject extends Error {
 }
 const reject = (m: string, askWho?: "person"): never => { throw new Reject(m, askWho); };
 
+/**
+ * SHO-2693: the required-person flag, read as a flag and as nothing else. Only an explicit `false` asks for an optional
+ * person; every other value — undefined, true, or a stray object such as a proposal's own Change — keeps the
+ * requirement on, so a proposal that names nobody is refused rather than sliding through.
+ *
+ * The defect this replaces: the flag was read as `typeof o === "object" ? o.required : o`. A Change has no `required`
+ * key, so a Change in the flag position (the shape `person(c)` used to invite) evaluated to undefined, the check read
+ * that as "optional", and an assign_task that named nobody became a card that assigns nobody. The flag fails closed
+ * now, and the parameter is a boolean, so the compiler will not accept a Change there either.
+ */
+export const requiredPerson = (flag?: unknown): boolean => flag !== false;
+
 async function toOps(t: Turn, changes: Change[]): Promise<{ ops: Op[]; refs: { kind: Kind; id: string }[] }> {
   const ops: Op[] = [];
   const refs: { kind: Kind; id: string }[] = [];
@@ -182,17 +194,16 @@ async function toOps(t: Turn, changes: Change[]): Promise<{ ops: Op[]; refs: { k
     return rec!;
   };
   /**
-   * SHO-2693: callers pass `{ required: true }` rather than `true`. A bare `person(c)` passed the Change object itself,
-   * which is truthy, so a proposal that named nobody was never refused — it produced a card that would have assigned
-   * "nobody". Only create_project has ever asked for the optional form (`person(c, false)`), which works because `false`
-   * is `false` however it is passed.
+   * SHO-2693: `required` is a boolean and nothing else. It used to accept an options bag — `{ required: true }` — and
+   * the flag was read off whatever object arrived (`typeof o === "object" ? o.required : o`), so a Change, which has
+   * no `required` key, stood in for the flag and switched the check off. Passing a Change here is now a type error,
+   * and requiredPerson keeps the check on for anything that is not an explicit `false` (see its comment).
    */
-  const person = (c: Change, o?: true | false | { required: boolean }): string | undefined => {
-    const required = o === undefined ? true : typeof o === "object" ? o.required : o;
+  const person = (c: Change, required?: boolean): string | undefined => {
     const id = c.person_id === "me" ? t.user.id : c.person_id;
     // A refused proposal used to be thrown away, leaving whatever sentence the model wrote — often none. The server
     // records that it must ask who, and buildReply asks it (APL-2513 AC1).
-    if (!id) return required ? reject("person_id is missing. Ask the person who.", "person") : undefined;
+    if (!id) return requiredPerson(required) ? reject("person_id is missing. Ask the person who.", "person") : undefined;
     if (id !== t.user.id && !t.seen.people.has(id)) reject(`person_id ${id} was not returned by find_people in this turn.`);
     refs.push({ kind: "person", id });
     return id;
@@ -249,15 +260,15 @@ async function toOps(t: Turn, changes: Change[]): Promise<{ ops: Op[]; refs: { k
         ops.push({ k: "task.section", taskId: rec.id, sectionId: secs[0].id });
         break;
       }
-      case "assign_task": { const rec = task(c); ops.push({ k: "task.assign", taskId: rec.id, assigneeId: person(c, { required: true })! }); break; }
+      case "assign_task": { const rec = task(c); ops.push({ k: "task.assign", taskId: rec.id, assigneeId: person(c, true)! }); break; }
       case "complete_task": ops.push({ k: "task.complete", taskId: task(c).id }); break;
       case "reopen_task": ops.push({ k: "task.reopen", taskId: task(c).id }); break;
       case "delete_task": ops.push({ k: "task.delete", taskId: task(c).id }); break;
       case "send_for_approval": ops.push({ k: "task.send_for_approval", taskId: task(c).id }); break;
       case "send_back": ops.push({ k: "task.send_back", taskId: task(c).id }); break;
-      case "add_collaborator": { const rec = task(c); ops.push({ k: "task.collab", taskId: rec.id, userId: person(c, { required: true })!, add: true }); break; }
-      case "remove_collaborator": { const rec = task(c); ops.push({ k: "task.collab", taskId: rec.id, userId: person(c, { required: true })!, add: false }); break; }
-      case "set_approver": { const rec = task(c); ops.push({ k: "task.approver", taskId: rec.id, approverId: person(c, { required: true })! }); break; }
+      case "add_collaborator": { const rec = task(c); ops.push({ k: "task.collab", taskId: rec.id, userId: person(c, true)!, add: true }); break; }
+      case "remove_collaborator": { const rec = task(c); ops.push({ k: "task.collab", taskId: rec.id, userId: person(c, true)!, add: false }); break; }
+      case "set_approver": { const rec = task(c); ops.push({ k: "task.approver", taskId: rec.id, approverId: person(c, true)! }); break; }
       case "clear_approver": ops.push({ k: "task.approver", taskId: task(c).id, approverId: null }); break;
       case "set_blocked": {
         const rec = task(c);
@@ -272,9 +283,9 @@ async function toOps(t: Turn, changes: Change[]): Promise<{ ops: Op[]; refs: { k
         ops.push({ k: "project.create", name: c.name!.trim(), description: c.description, leaderId: person(c, false) ?? t.user.id });
         break;
       }
-      case "add_member": ops.push({ k: "member.add", projectId: project(c), userId: person(c, { required: true })!, role: role(c.role ?? "EDITOR") }); break;
-      case "change_member_role": ops.push({ k: "member.role", projectId: project(c), userId: person(c, { required: true })!, role: role(c.role) }); break;
-      case "remove_member": ops.push({ k: "member.remove", projectId: project(c), userId: person(c, { required: true })! }); break;
+      case "add_member": ops.push({ k: "member.add", projectId: project(c), userId: person(c, true)!, role: role(c.role ?? "EDITOR") }); break;
+      case "change_member_role": ops.push({ k: "member.role", projectId: project(c), userId: person(c, true)!, role: role(c.role) }); break;
+      case "remove_member": ops.push({ k: "member.remove", projectId: project(c), userId: person(c, true)! }); break;
       case "comment_on_task": {
         if (!commentsEnabled()) reject(`"${c.action}" is not something the concierge can do. Archiving a project, changing a Leader, deactivating or reassigning a user, Admin roles, Sections, password and profile are done on their screens; tell the person where.`);
         const rec = task(c);
