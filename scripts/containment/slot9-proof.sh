@@ -269,6 +269,12 @@ say "shoslot_can_traverse_deploy_home=${deploy_home_traversable}   (required 1 =
 # Anywhere, not just beside app.env: the unit loads NOTHING from that directory (P4 asserts all four
 # EnvironmentFile sources resolve under the slot tree), so an env-named file one level down is a copy for the
 # same reason one beside app.env is, and a top-level-only scan would be the old blind spot with a new depth.
+# A SYMLINKED DIRECTORY under ${PROD_ENV_DIR} is followed, not skipped (W119). "Anywhere under /etc/sho" is a
+# PATH, not a filesystem subtree: `ln -s /var/backups/sho-envs /etc/sho/previous` makes the slot read a copy by
+# a path that starts with /etc/sho, and plain `find` does not descend into a directory link and does not match
+# the link's own name against the env patterns - so every copy behind it was invisible to the count AND the
+# probe, which is F1's exact failure mode one indirection further out. `-L` closes it by enumerating both; a
+# loop it cannot resolve makes find exit non-zero, which FAILS the scan term rather than passing quietly.
 # Not "everything in /etc/sho": a directory of READMEs and certs is not a directory of env copies, and a term
 # that fires on `*.pem` would be measuring something else. Two exclusions, both deliberate:
 #   * the live ${PROD_ENV} - it is the credential the headline claim is about, and it already has its own
@@ -293,7 +299,8 @@ stale_scan=1
 stale_list=''
 if [ -d "$PROD_ENV_DIR" ] && [ -r "$PROD_ENV_DIR" ] && [ -x "$PROD_ENV_DIR" ]; then
   # shellcheck disable=SC2016  # the single-quoted -name patterns are find's, not the shell's
-  stale_list=$(find "$PROD_ENV_DIR" \( -type f -o -type l \) \
+  # `-L`: follow a symlink, file or DIRECTORY, so a copy behind a link is enumerated too (see the policy above).
+  stale_list=$(find -L "$PROD_ENV_DIR" \( -type f -o -type l \) \
     \( -name 'app.env*' -o -name 'release.env*' -o -name '*.env' \
        -o -name '*.env.*' -o -name '*.env-*' -o -name '*.env~' \) \
     ! -name '*.example' ! -name '*.sample' ! -name '*.template' ! -name '*.tmpl' ! -name '*.dist' \
