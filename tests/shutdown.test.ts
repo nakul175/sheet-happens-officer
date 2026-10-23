@@ -11,6 +11,21 @@ import { CLEAN_LOG, DEFAULT_DRAIN_MS, shutdownDrainMs, TIMEOUT_LOG } from "../sr
 
 const root = path.join(fileURLToPath(new URL(".", import.meta.url)), "..");
 
+// W163. This file is in two tiers at once. Only its seven drain cases are Linux-only: they assert
+// exit 0 and CLEAN_LOG, and src/lib/shutdown.ts can only produce those where its accept-queue
+// seizer loaded — loadNative() and loadLibc() return null on anything but linux (src/lib/shutdown.ts:205
+// and :246), so on darwin the drain honestly reports TIMEOUT_LOG and exits 1. Those seven skip off
+// linux and still run for real in CI on ubuntu-latest (vitest.shutdown.config.mts, ci.yml).
+// The clock/env cases, the module-identity case, the timeout path and the F7 cases below are
+// platform-independent and run here on every OS. W152 kept the darwin run green by excluding the
+// whole file from `npm test`, which deleted that coverage as well; this split keeps both.
+const LINUX_ONLY = process.platform !== "linux";
+// `it.skipIf` takes a condition and no note (vitest 5.0.5, node_modules/vitest/dist/chunks/config.d.QBNYCgFU.d.ts:2778),
+// so the reason rides on the title and `npx vitest run --reporter=verbose` prints it on a darwin run.
+const SKIP_REASON = LINUX_ONLY
+  ? " [skipped on darwin: Linux-only — the drain needs the accept-queue seizer, and loadNative/loadLibc return null off linux (src/lib/shutdown.ts:205,246)]"
+  : "";
+
 function startChild(env: Record<string, string>) {
   // `node --import tsx` is one process, so SIGTERM hits the handler. The tsx
   // CLI is a parent that dies on SIGTERM before the drain finishes.
@@ -175,7 +190,7 @@ describe("qa:TC missing Prisma client shared across module instances", () => {
 });
 
 describe("qa:TC missing SIGTERM drain", () => {
-  it("qa:TC missing finishes an in-flight request, refuses a new one, disconnects, and exits 0", async () => {
+  it.skipIf(LINUX_ONLY)(`qa:TC missing finishes an in-flight request, refuses a new one, disconnects, and exits 0${SKIP_REASON}`, async () => {
     const proc = startChild({ DELAY_MS: "1500", DRAIN_MS: "5000", KEEPALIVE_MS: "300" });
     try {
       const ready = await proc.waitFor(/ready (\d+)/);
@@ -207,7 +222,7 @@ describe("qa:TC missing SIGTERM drain", () => {
     }
   });
 
-  it("qa:TC missing drains a SIGTERM that was queued before the hook installed, without a second signal", async () => {
+  it.skipIf(LINUX_ONLY)(`qa:TC missing drains a SIGTERM that was queued before the hook installed, without a second signal${SKIP_REASON}`, async () => {
     const proc = startChild({ EARLY_SIGTERM: "1", DRAIN_MS: "5000" });
     try {
       const hung = setTimeout(() => stop(proc.child), 8000);
@@ -240,7 +255,7 @@ describe("qa:TC missing SIGTERM drain", () => {
     }
   });
 
-  it("qa:TC missing closes an idle keep-alive socket without waiting out the keep-alive timeout", async () => {
+  it.skipIf(LINUX_ONLY)(`qa:TC missing closes an idle keep-alive socket without waiting out the keep-alive timeout${SKIP_REASON}`, async () => {
     const proc = startChild({ DELAY_MS: "0", DRAIN_MS: "8000", KEEPALIVE_MS: "5000" });
     try {
       const ready = await proc.waitFor(/ready (\d+)/);
@@ -272,7 +287,7 @@ describe("qa:TC missing SIGTERM drain", () => {
     }
   });
 
-  it("qa:TC missing returns 200 for 100 requests written before SIGTERM, including ones not yet dispatched", async () => {
+  it.skipIf(LINUX_ONLY)(`qa:TC missing returns 200 for 100 requests written before SIGTERM, including ones not yet dispatched${SKIP_REASON}`, async () => {
     const proc = startChild({ DELAY_MS: "400", DRAIN_MS: "8000" });
     try {
       const ready = await proc.waitFor(/ready (\d+)/);
@@ -299,7 +314,7 @@ describe("qa:TC missing SIGTERM drain", () => {
     }
   });
 
-  it("qa:TC missing returns 200 for 40 connections accepted before SIGTERM whose requests arrive during the grace", async () => {
+  it.skipIf(LINUX_ONLY)(`qa:TC missing returns 200 for 40 connections accepted before SIGTERM whose requests arrive during the grace${SKIP_REASON}`, async () => {
     const proc = startChild({ DELAY_MS: "200", DRAIN_MS: "10000", KEEPALIVE_MS: "1000" });
     try {
       const ready = await proc.waitFor(/ready (\d+)/);
@@ -328,7 +343,7 @@ describe("qa:TC missing SIGTERM drain", () => {
     }
   });
 
-  it("qa:TC missing refuses connections at 16ms and 143ms after SIGTERM", async () => {
+  it.skipIf(LINUX_ONLY)(`qa:TC missing refuses connections at 16ms and 143ms after SIGTERM${SKIP_REASON}`, async () => {
     const proc = startChild({ DELAY_MS: "800", DRAIN_MS: "8000" });
     try {
       const ready = await proc.waitFor(/ready (\d+)/);
@@ -356,7 +371,7 @@ describe("qa:TC missing SIGTERM drain", () => {
     }
   });
 
-  it("qa:TC missing finishes 40 sockets that were only in the kernel queue while the loop was blocked", async () => {
+  it.skipIf(LINUX_ONLY)(`qa:TC missing finishes 40 sockets that were only in the kernel queue while the loop was blocked${SKIP_REASON}`, async () => {
     const proc = startChild({ DELAY_MS: "200", DRAIN_MS: "8000", SPIN_MS: "400", SHUTDOWN_TEST_SLOW_MS: "1" });
     try {
       const ready = await proc.waitFor(/ready (\d+)/);

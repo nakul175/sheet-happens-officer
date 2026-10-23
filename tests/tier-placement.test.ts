@@ -1,23 +1,31 @@
-// W152 (CI): the SIGTERM drain files are Linux-only, so they live in the Linux tier and nowhere else.
+// W152 (CI), rewritten by W163: the SIGTERM drain work is in two tiers, and this file is the guard
+// that neither half can be lost silently.
 //
-// tests/shutdown-next.test.ts spawns `taskset` and reads /proc/<pid>/status and /proc/<pid>/limits; the
-// seven SIGTERM-drain tests in tests/shutdown.test.ts expect exit 0 and the clean-drain line, which
-// src/lib/shutdown.ts produces only when the Linux accept-queue seizer is loaded (loadNative and
-// loadLibc return null off linux, src/lib/shutdown.ts:205 and :246). Neither can pass on darwin, so
-// before this guard they made `npm test` on darwin red for a reason unrelated to the change under test,
-// while tests/shutdown-next.test.ts's own header claimed `npm test` excluded it.
+//   * tests/shutdown-next.test.ts is Linux-only whole — it spawns `taskset`, reads
+//     /proc/<pid>/status and /proc/<pid>/limits, and runs `next build`, which would rewrite .next
+//     under the app the CI job already started. It is named out of `npm test` and into
+//     vitest.shutdown.config.mts.
+//   * tests/shutdown.test.ts is mixed. Seven of its cases assert exit 0 and CLEAN_LOG, which
+//     src/lib/shutdown.ts produces only where the Linux accept-queue seizer loaded (loadNative and
+//     loadLibc return null off linux, src/lib/shutdown.ts:205 and :246), so they gate themselves with
+//     `it.skipIf(process.platform !== "linux")`. The other seven — the drain-clock env parsing, the
+//     shared Prisma client, the timeout path and the F7 alias cases — run on every OS, so the file
+//     stays in `npm test`. W152 excluded the whole file, which was green on darwin because it had
+//     deleted those seven cases from the default run; W163 put the file back and gated the cases.
 //
-// The trap this file closes is the W96 one: a file that is excluded from the default tier and included
-// by no other tier runs nowhere, and every offline run stays green. So both halves are asserted here —
-// out of `npm test`, in the Linux config, and that config is the one ci.yml runs on ubuntu-latest. This
-// file itself is collected by `npm test` (it is not in the exclude list), so it cannot be dropped
-// without a red run.
+// The trap this file closes is the W96 one: a file excluded from the default tier and included by no
+// other tier runs nowhere, and every offline run stays green. Both halves are asserted here — the
+// mixed file is NOT excluded and IS collected by the Linux tier too, so the seven skipped-on-darwin
+// cases still run for real on ubuntu-latest; the whole-Linux file is out of `npm test` and in that
+// tier. This file itself is collected by `npm test` (it is not in the exclude list), so it cannot be
+// dropped without a red run.
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 const ROOT = process.cwd();
-const LINUX_ONLY = ["tests/shutdown.test.ts", "tests/shutdown-next.test.ts"] as const;
+const DRAIN_SPEC = "tests/shutdown.test.ts"; // mixed: 7 darwin-safe cases + 7 Linux-only ones
+const LINUX_ONLY = [DRAIN_SPEC, "tests/shutdown-next.test.ts"] as const;
 
 /** The entries of one `key: [ ... ]` list, read off the config text (no import side effects).
  *  Only lines that ARE an entry count: a name quoted inside a comment must not satisfy the guard —
@@ -29,15 +37,54 @@ function listEntries(configName: string, key: "include" | "exclude"): string[] {
   return [...match[1].matchAll(/^[ \t]*["']([^"']+)["'][ \t]*,?[ \t]*$/gm)].map((entry) => entry[1]);
 }
 
-describe("W152 tier placement: the Linux-only SIGTERM drain files", () => {
-  it("npm test does not collect them, and names each one instead of globbing tests/shutdown*-", () => {
+/** Every `it(...)` site in a spec, with its header line and the text up to the next `it(`.
+ *  The file is flat, so "up to the next it(" is that case's own body — enough to tell which
+ *  assertions it owns without parsing TypeScript. */
+function testCases(source: string): { header: string; body: string }[] {
+  const starts = [...source.matchAll(/^[ \t]*it(\.\w+(?:\([^)]*\))?)?\(/gm)];
+  return starts.map((match, index) => {
+    const start = match.index ?? 0;
+    const next = index + 1 < starts.length ? (starts[index + 1].index ?? source.length) : source.length;
+    const lineEnd = source.indexOf("\n", start);
+    // The whole header line: the titles are long and the skip reason sits at their end.
+    return { header: source.slice(start, lineEnd === -1 ? source.length : lineEnd), body: source.slice(start, next) };
+  });
+}
+
+describe("W152/W163 tier placement: the SIGTERM drain files", () => {
+  it("npm test still collects tests/shutdown.test.ts, and names only shutdown-next.test.ts out", () => {
     const excluded = listEntries("vitest.config.mts", "exclude");
-    for (const file of LINUX_ONLY) expect(excluded, `${file} is excluded from npm test by name`).toContain(file);
-    // A glob would also hide files written later; the two names above are the whole exclusion.
-    expect(excluded.filter((entry) => entry.includes("shutdown"))).toEqual([...LINUX_ONLY]);
+    // W163: excluding this file bought a green darwin run by deleting seven platform-independent
+    // cases from `npm test`. Re-adding the entry has to be a red run, not a quiet edit.
+    expect(excluded, `${DRAIN_SPEC} is not excluded from npm test`).not.toContain(DRAIN_SPEC);
+    // A glob would also hide files written later; the one name below is the whole exclusion.
+    expect(excluded.filter((entry) => entry.includes("shutdown"))).toEqual(["tests/shutdown-next.test.ts"]);
   });
 
-  it("the Linux tier collects them, so they cannot drop out of every tier", () => {
+  it("every case in the drain spec that asserts the clean-drain exit is gated by it.skipIf", () => {
+    const source = readFileSync(path.join(ROOT, DRAIN_SPEC), "utf8");
+    // The gate is not a comment: `npm test` on darwin fails on any of these seven that runs ungated
+    // (exit 1 / TIMEOUT_LOG instead of 0 / CLEAN_LOG), so an ungated case is a red default tier.
+    expect(source, "the platform gate").toContain('const LINUX_ONLY = process.platform !== "linux"');
+    // A bare "(skipped)" tells a darwin reader nothing, so each skipped title carries the reason.
+    expect(source, "the skip reason is on the title").toContain("const SKIP_REASON = LINUX_ONLY");
+    expect(source).toContain("${SKIP_REASON}`");
+    const drainCases = testCases(source).filter((c) =>
+      /expect\(result\.code\)\.toBe\(0\)|toEqual\(\[CLEAN_LOG\]\)/.test(c.body),
+    );
+    expect(drainCases.length, "cases asserting exit 0 / CLEAN_LOG").toBe(7);
+    for (const testCase of drainCases) {
+      expect(testCase.header, `${testCase.header.trim()} is gated with it.skipIf(LINUX_ONLY)`).toContain(
+        "it.skipIf(LINUX_ONLY)",
+      );
+      expect(testCase.header, `${testCase.header.trim()} carries the skip reason`).toContain("${SKIP_REASON}");
+    }
+    // And nothing else skips: the file must not creep back to "skip it all on darwin".
+    const gated = testCases(source).filter((c) => c.header.includes("it.skipIf"));
+    expect(gated.length, "exactly the seven Linux-only cases skip").toBe(drainCases.length);
+  });
+
+  it("the Linux tier collects both files, so the skipped cases still run on ubuntu", () => {
     const included = listEntries("vitest.shutdown.config.mts", "include");
     for (const file of LINUX_ONLY) {
       expect(included, `${file} is in vitest.shutdown.config.mts`).toContain(file);
@@ -57,16 +104,15 @@ describe("W152 tier placement: the Linux-only SIGTERM drain files", () => {
       .toBeLessThan(ci.indexOf("run: npm test"));
   });
 
-  it("the exclusion is justified by the files themselves", () => {
-    // If either file is ever ported to run on darwin, this fails and the exclusion has to be revisited
-    // rather than quietly staying in place.
+  it("the exclusion is justified by the file that is excluded", () => {
+    // If shutdown-next.test.ts is ever ported to run on darwin it comes out of the exclude list and
+    // off this assertion; if it is only half-ported, this fails instead of the exclusion quietly
+    // staying. The drain spec's darwin divergence lives in its header and in SKIP_REASON.
     const next = readFileSync(path.join(ROOT, "tests/shutdown-next.test.ts"), "utf8");
     expect(next).toContain('spawn("taskset"');
     expect(next).toContain("/proc/${pid}/status");
-    const drain = readFileSync(path.join(ROOT, "tests/shutdown.test.ts"), "utf8");
+    const drain = readFileSync(path.join(ROOT, DRAIN_SPEC), "utf8");
     expect(drain).toContain("CLEAN_LOG");
-    // The file already records the darwin divergence for its F7 test; the seven drain tests assert the
-    // Linux outcome that comment describes.
-    expect(drain).toContain("the koffi accept-queue seizer is linux-only");
+    expect(drain).toContain("loadNative/loadLibc return null off linux");
   });
 });
