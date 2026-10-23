@@ -262,7 +262,10 @@ export async function removeStage(user: Actor, stageId: string, input: { moveTo?
 
   return db.$transaction(async (tx) => {
     // Lock the stage row first. A deal being moved into it meanwhile either commits before this lock, and is moved
-    // below, or waits and then fails, because the stage is gone. The foreign key never sets a deal's stage to null.
+    // below, or waits and then fails, because the stage is gone. The stageId foreign key is ON DELETE SET NULL (see
+    // prisma/migrations/20261017124803_crm_workstreams_deals), so the delete below would silently clear a deal's stage
+    // instead of refusing: the updateMany on the next line, which moves every project off the stage first, is what
+    // keeps a deal from losing it.
     const locked = await tx.$queryRaw<{ id: string }[]>`SELECT "id" FROM "Stage" WHERE "id" = ${stage.id} FOR UPDATE`;
     if (!locked.length) throw notFound("Stage");
     // A reason was given for the removed stage. It carries over only to a stage that also asks for one.
