@@ -15,6 +15,18 @@
 //      `bash -c "env | sort"`), the module-level bindings (`import { env as e } from "node:process"`,
 //      `const { env: e } = process`, `require("node:process").env`). A command line that only READS NAMED variables stays
 //      allowed, as does the explicit `env:` allowlist a spawn passes (`{ env: { ...process.env, PORT } }`, `env: process.env`).
+//   5. SHO-2917 F3, the shapes the disposition deferred: a whole environment that reaches the sink as an ARGUMENT. The
+//      callee is resolved — a declaration or a const arrow in the same file, or a named/default/namespace import of
+//      another file in the batch, followed two hops — and its body is judged with the parameter bound: a dump, a listing,
+//      a spread that is not a child's `env`, an iteration or a further hand-off is reported at the call site. A callee
+//      that reads named keys (`env.BASE_URL`) or hands the copy to a child process as its `env` is the legal
+//      pass-through the five helpers below are and stays quiet. A default on the value (`process.env ?? {}`) binds the
+//      whole object like a plain alias does.
+// The boundary is stated rather than hidden: a callee this pass cannot read (a third-party or unresolved module, a
+// method on an object, a function passed as a parameter) is NOT reported, a value RETURNED from a helper is not
+// followed, and neither is one stored on an object property, closed over, or interpolated into a template string. The
+// guard is not exhaustive; tests/sec-2917-f3-sinking-w93.test.ts pins what it now sees and SEC-2917-F3-DISPOSITION.md
+// keeps the rest open.
 // The one asymmetry, on purpose: a plain alias (`const e = process.env`) is reported only when the whole thing is used
 // (a dump, a listing, a spread), while an import, a destructuring of `env` out of `process` and `require(...).env` are
 // reported where they bind: those three exist only to move the whole object out of reach of a `process.env` scan.
@@ -266,10 +278,13 @@ function namesProcPiece(node: ts.Node): boolean {
 }
 
 /** Every name in the file bound to the environment, the process image path, or the process object. */
-function collectBindings(source: ts.SourceFile): Bindings {
-  const bindings: Bindings = { env: new Set(), proc: new Set(), process: new Set() };
-  // One hop is enough for the alias shapes above; the second pass picks up `const also = e` after `e` is known.
-  for (let pass = 0; pass < 3; pass++) {
+function collectBindings(source: ts.Node, seed: readonly string[] = []): Bindings {
+  const bindings: Bindings = { env: new Set(seed), proc: new Set(), process: new Set() };
+  // One hop is enough for the alias shapes above; a later pass picks up `const also = e` once `e` is known. Repeat until
+  // nothing new is bound, because a chain written in reverse order (`const d = c; ... const a = process.env`) needs one
+  // pass per link, and an F3 callee body re-binds its own parameter as many times as it likes.
+  for (let pass = 0; pass < 20; pass++) {
+    const before = bindings.env.size + bindings.proc.size + bindings.process.size;
     const visit = (node: ts.Node): void => {
       if (ts.isVariableDeclaration(node) && node.initializer && !ts.isObjectBindingPattern(node.name) && !ts.isArrayBindingPattern(node.name)) {
         if (ts.isIdentifier(node.name)) {
@@ -303,6 +318,7 @@ function collectBindings(source: ts.SourceFile): Bindings {
       ts.forEachChild(node, visit);
     };
     visit(source);
+    if (before === bindings.env.size + bindings.proc.size + bindings.process.size) break;
   }
   return bindings;
 }
@@ -310,6 +326,14 @@ function collectBindings(source: ts.SourceFile): Bindings {
 
 function isWholeEnv(node: ts.Node, bindings?: Bindings): boolean {
   if (ts.isParenthesizedExpression(node) || ts.isAsExpression(node) || ts.isNonNullExpression(node)) return isWholeEnv(node.expression, bindings);
+  // A default for an absent environment is still the environment (SHO-2917 F3): `const u = process.env ?? {}` and
+  // `const u = process.env || {}` bind the whole object exactly as `const u = process.env` does.
+  if (ts.isBinaryExpression(node)) {
+    const operator = node.operatorToken.kind;
+    if (operator === ts.SyntaxKind.QuestionQuestionToken || operator === ts.SyntaxKind.BarBarToken) {
+      return isWholeEnv(node.left, bindings) || isWholeEnv(node.right, bindings);
+    }
+  }
   // `require("node:process").env` is the environment wherever `process.env` is, including in a dump or a listing.
   if (isRequiredEnv(node)) return true;
   // A name bound to the whole environment in this file: `const e = process.env; console.log(e)`.
@@ -343,19 +367,233 @@ function isDumpCall(node: ts.CallExpression): boolean {
   return (owner === "JSON" && callee.name.text === "stringify") || (owner === "util" && ["inspect", "format"].includes(callee.name.text));
 }
 
+/** A function whose body this pass can read: a declaration, or a `const` arrow / function expression. */
+type Callee = { file: string; name: string; params: readonly ts.ParameterDeclaration[]; body: ts.Node };
+
+/** The cross-file view SHO-2917 F3 needs: what each file declares, and what it imports from where. */
+type ModuleIndex = {
+  functions: Map<string, Map<string, Callee>>;
+  imports: Map<string, Map<string, { module: string; name: string }>>;
+  namespaces: Map<string, Map<string, string>>;
+  files: Set<string>;
+};
+
+/** How deep a whole-environment argument is followed through helpers. Two hops beyond the call site, per the F3 disposition. */
+const MAX_HOPS = 3;
+/** Extensions a relative import is resolved against, the way the bundler under test would resolve it. */
+const MODULE_EXTENSIONS = [".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs"];
+
+/** The TypeScript dialect a file name asks for. */
+function scriptKind(file: string): ts.ScriptKind {
+  if (file.endsWith(".tsx")) return ts.ScriptKind.TSX;
+  if (/\.(c|m)?jsx?$/.test(file)) return ts.ScriptKind.JS;
+  return ts.ScriptKind.TS;
+}
+
+/** Resolve `./helper` from a file to a file in the scanned set, or null when it is outside it. */
+function resolveModule(fromFile: string, specifier: string, files: Set<string>): string | null {
+  if (!specifier.startsWith(".")) return null;
+  const base = path.join(path.dirname(fromFile), specifier);
+  for (const candidate of [base, ...MODULE_EXTENSIONS.map((ext) => `${base}${ext}`),
+    ...MODULE_EXTENSIONS.map((ext) => path.join(base, `index${ext}`))]) {
+    if (files.has(candidate)) return candidate;
+  }
+  return null;
+}
+
+/** Every function a file declares, by the name its own module knows it by (`default` for the default export). */
+function functionsOf(file: string, source: ts.SourceFile): Map<string, Callee> {
+  const out = new Map<string, Callee>();
+  const add = (name: string, params: readonly ts.ParameterDeclaration[], body: ts.Node | undefined): void => {
+    if (body && !out.has(name)) out.set(name, { file, name, params, body });
+  };
+  const isDefault = (node: ts.Node): boolean => Boolean(ts.canHaveModifiers(node)
+    && ts.getModifiers(node)?.some((modifier) => modifier.kind === ts.SyntaxKind.DefaultKeyword));
+  const visit = (node: ts.Node): void => {
+    if (ts.isFunctionDeclaration(node) && node.body) {
+      if (node.name) add(node.name.text, node.parameters, node.body);
+      if (isDefault(node)) add("default", node.parameters, node.body);
+    }
+    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer) {
+      const initializer = node.initializer;
+      if (ts.isArrowFunction(initializer) || ts.isFunctionExpression(initializer)) {
+        add(node.name.text, initializer.parameters, initializer.body);
+        if (isDefault(node.parent.parent)) add("default", initializer.parameters, initializer.body);
+      }
+    }
+    // `export default dump;` names a binding the file already declares.
+    if (ts.isExportAssignment(node) && !node.isExportEquals && ts.isIdentifier(node.expression) && isDefault(node)) {
+      add("default", out.get(node.expression.text)?.params ?? [], out.get(node.expression.text)?.body);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(source);
+  return out;
+}
+
+/** The whole batch as one module graph, so an import can be followed into the file that defines the callee. */
+function moduleIndex(sources: { file: string; source: ts.SourceFile }[]): ModuleIndex {
+  const index: ModuleIndex = { functions: new Map(), imports: new Map(), namespaces: new Map(), files: new Set() };
+  for (const { file, source } of sources) {
+    index.files.add(file);
+    index.functions.set(file, functionsOf(file, source));
+    const imports = new Map<string, { module: string; name: string }>();
+    const namespaces = new Map<string, string>();
+    const visit = (node: ts.Node): void => {
+      if (ts.isImportDeclaration(node) && ts.isStringLiteralLike(node.moduleSpecifier) && node.importClause) {
+        const module = node.moduleSpecifier.text;
+        const clause = node.importClause;
+        if (clause.name) imports.set(clause.name.text, { module, name: "default" });
+        if (clause.namedBindings && ts.isNamedImports(clause.namedBindings)) {
+          for (const element of clause.namedBindings.elements) {
+            imports.set(element.name.text, { module, name: (element.propertyName ?? element.name).getText() });
+          }
+        }
+        if (clause.namedBindings && ts.isNamespaceImport(clause.namedBindings)) namespaces.set(clause.namedBindings.name.text, module);
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(source);
+    index.imports.set(file, imports);
+    index.namespaces.set(file, namespaces);
+  }
+  return index;
+}
+
+/** The function a call names, followed through one import when that is how the file got it. */
+function calleeOf(index: ModuleIndex, file: string, call: ts.CallExpression): Callee | null {
+  const sameFile = (name: string): Callee | null => index.functions.get(file)?.get(name) ?? null;
+  const imported = (name: string): Callee | null => {
+    const target = index.imports.get(file)?.get(name);
+    if (!target) return null;
+    const module = resolveModule(file, target.module, index.files);
+    return module ? index.functions.get(module)?.get(target.name) ?? null : null;
+  };
+  const expression = call.expression;
+  if (ts.isIdentifier(expression)) return imported(expression.text) ?? sameFile(expression.text);
+  if (ts.isPropertyAccessExpression(expression) && ts.isIdentifier(expression.expression)) {
+    const module = index.namespaces.get(file)?.get(expression.expression.text);
+    if (module) {
+      const resolved = resolveModule(file, module, index.files);
+      return resolved ? index.functions.get(resolved)?.get(expression.name.text) ?? null : null;
+    }
+  }
+  return null;
+}
+
+/** The parameter a call's argument at `position` lands on, following a rest parameter. */
+function parameterAt(callee: Callee, position: number): ts.ParameterDeclaration | undefined {
+  if (callee.params.length === 0) return undefined;
+  if (position < callee.params.length) return callee.params[position];
+  const last = callee.params[callee.params.length - 1];
+  return last.dotDotDotToken ? last : undefined;
+}
+
+/**
+ * True when `node` is a spread inside the `env:` object of a call: the one place a copy of the environment belongs, at
+ * the call site and inside a helper alike. This is the allowance the call-site pass already makes for a child's env.
+ */
+function insideChildEnv(node: ts.Node): boolean {
+  let current: ts.Node | undefined = node.parent;
+  while (current) {
+    if (ts.isPropertyAssignment(current) && current.name.getText() === "env" && ts.isObjectLiteralExpression(current.initializer)) {
+      let up: ts.Node | undefined = current.parent;
+      while (up) {
+        if (ts.isCallExpression(up) || ts.isNewExpression(up)) return true;
+        if (ts.isStatement(up) || ts.isFunctionLike(up)) return false;
+        up = up.parent;
+      }
+      return false;
+    }
+    if (ts.isStatement(current) || ts.isFunctionLike(current)) return false;
+    current = current.parent;
+  }
+  return false;
+}
+
+/**
+ * True when this body reads the environment as a whole: a dump, a listing, a spread that is not a child's `env`, an
+ * iteration, or a hand-off to another helper that does one of those. `bindings` holds the parameters already followed.
+ */
+function bodyReadsWhole(body: ts.Node, bindings: Bindings, index: ModuleIndex, file: string, seen: Set<string>): boolean {
+  let hit = false;
+  const visit = (node: ts.Node): void => {
+    if (hit) return;
+    if ((ts.isSpreadAssignment(node) || ts.isSpreadElement(node)) && isWholeEnv(node.expression, bindings) && !insideChildEnv(node)) {
+      hit = true;
+      return;
+    }
+    if (ts.isForInStatement(node) && isWholeEnv(node.expression, bindings)) {
+      hit = true;
+      return;
+    }
+    if (ts.isCallExpression(node)) {
+      // console.log(e), JSON.stringify(e), process.stdout.write(String(e))
+      if (isDumpCall(node) && node.arguments.some((argument) => isWholeEnv(argument, bindings))) {
+        hit = true;
+        return;
+      }
+      // Object.keys(e), Object.entries(e), Reflect.ownKeys(e), Object.getOwnPropertyNames(e)
+      if (isWholeEnv(node, bindings)) {
+        hit = true;
+        return;
+      }
+      if (ts.isPropertyAccessExpression(node.expression) && node.expression.expression.getText() === "Object"
+        && node.expression.name.text === "assign" && node.arguments.length > 1 && isWholeEnv(node.arguments[1], bindings)) {
+        hit = true;
+        return;
+      }
+      const next = calleeOf(index, file, node);
+      if (next) {
+        for (let position = 0; position < node.arguments.length; position++) {
+          if (!isWholeEnv(node.arguments[position], bindings)) continue;
+          if (calleeReadsWhole(index, next, position, seen)) {
+            hit = true;
+            return;
+          }
+        }
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(body);
+  return hit;
+}
+
+/**
+ * True when `callee` reads the whole environment once its argument at `position` is bound to the parameter. A helper that
+ * reads named keys (`env.BASE_URL`), or hands the copy to a child process as its `env`, is not one of these.
+ */
+function calleeReadsWhole(index: ModuleIndex, callee: Callee, position: number, seen: Set<string>): boolean {
+  const key = `${callee.file}:${callee.name}:${position}`;
+  if (seen.has(key) || seen.size >= MAX_HOPS) return false;
+  const parameter = parameterAt(callee, position);
+  if (!parameter) return false;
+  seen.add(key);
+  // `function dump({ ...rest })`: the rest element is the whole object. A destructuring of named keys is a named read.
+  if (ts.isObjectBindingPattern(parameter.name)) {
+    return parameter.name.elements.some((element) => ts.isBindingElement(element) && Boolean(element.dotDotDotToken));
+  }
+  if (!ts.isIdentifier(parameter.name)) return false;
+  const bindings = collectBindings(callee.body, [parameter.name.text]);
+  return bodyReadsWhole(callee.body, bindings, index, callee.file, seen);
+}
+
 export type Violation = { file: string; line: number; form: string; text: string };
+
 
 /** Every whole-environment read in the given files, parsed as source (so comments and dead strings stay quiet). */
 export function wholeEnvReads(files: { file: string; text: string }[]): Violation[] {
   const found: Violation[] = [];
-  for (const { file, text } of files) {
-    const kind = file.endsWith(".tsx") ? ts.ScriptKind.TSX
-      : /\.(c|m)?js$/.test(file) ? ts.ScriptKind.JS
-      : ts.ScriptKind.TS;
-    const source = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, kind);
+  // Parsed once: the call-site pass below needs the whole batch as one module graph, so a callee defined in another file
+  // of the batch can be followed instead of guessed at (SHO-2917 F3).
+  const sources = files.map(({ file, text }) => ({ file, source: ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, scriptKind(file)) }));
+  const index = moduleIndex(sources);
+  for (const { file, source } of sources) {
     // A spread of the whole environment is a per-key copy only when it is handed to a child process as its `env`. Mark
     // exactly those: a spawn call's own `env:` object, and `env:` objects of any call whose object holds a marked copy.
     const bindings = collectBindings(source);
+
     const spawnEnvSpreads = new Set<ts.Node>();
     const envCopies = new Map<string, ts.Node>();
     const isSpawnCall = (node: ts.Node): node is ts.CallExpression => (ts.isCallExpression(node) || ts.isNewExpression(node)) && (
@@ -454,7 +692,23 @@ export function wholeEnvReads(files: { file: string; text: string }[]): Violatio
         const fromProcess = initializer !== undefined && (isProcessObject(initializer, bindings) || isProcessRequire(initializer));
         if (fromProcess && node.elements.some((element) => ts.isBindingElement(element) && bindsEnvName(element))) report(node, "whole environment destructured");
       }
+      // 7. A whole environment handed to a helper as an argument: the callee's own body decides (SHO-2917 F3). A helper
+      //    that reads named keys, or hands the copy to a child process as its `env`, is a legal pass-through and stays
+      //    quiet; a helper that dumps, lists, spreads or iterates it — in this file or another one — is reported here.
+      if (ts.isCallExpression(node)) {
+        const callee = calleeOf(index, file, node);
+        if (callee) {
+          for (let position = 0; position < node.arguments.length; position++) {
+            if (!isWholeEnv(node.arguments[position], bindings)) continue;
+            if (calleeReadsWhole(index, callee, position, new Set())) {
+              report(node, "whole environment passed to a callee that reads it whole");
+              break;
+            }
+          }
+        }
+      }
       if (ts.isForInStatement(node) && isWholeEnv(node.expression, bindings)) report(node, "whole environment iterated");
+
       // 5. The process image file read through node:fs, however the path is built.
       if (ts.isCallExpression(node) && node.arguments.some((argument) => namesProcessImage(argument, bindings)
         // A proc-bound name only counts when the same expression also names the file: `P + "environ"`, `${dir}/environ`.
