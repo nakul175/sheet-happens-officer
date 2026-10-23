@@ -19,8 +19,14 @@
 //   the same, with a fake release root and a `node` that answers release-id/build/burst:
 //     -> GATE=PASS runs=1 n=100 release=deadbeef11 entry=server.js, EXIT=0   (on darwin)
 //
-// So the authority is not the kernel's answer: it is a shell variable in a shell whose startup
-// file the caller chose. This file is the red receipt. It fails on the tree as of 1366bdf.
+// So the authority was not the kernel's answer: it was a shell variable in a shell whose startup
+// file the caller chose. This file was the red receipt — it failed on the tree as of 1366bdf.
+// W214 closed it with ONE early branch: linux-drain-gate.sh:79-95 refuses at load
+// (GATE=REFUSED reason=environment-hook, exit 3) when BASH_ENV/ENV is set or a DEBUG trap is
+// installed, and main() plus both inner runners re-assert the same function, so the CLI case and
+// the sourced-runner case below now assert THAT reason, on its own line, distinct from not-linux.
+// Residual by decision: `--rcfile`, an inherited SHELLOPTS, or sourcing from an already-hooked
+// shell are outside what a shell script can defend against.
 //
 // Run with: node --test "scripts/acceptance/**/*.test.mjs"
 import assert from "node:assert/strict";
@@ -85,8 +91,8 @@ test("a BASH_ENV DEBUG trap cannot move the CLI past the kernel refusal", { skip
       );
       assert.match(
         out.stdout,
-        /^GATE=REFUSED reason=not-linux\n/,
-        `the first line must still be the refusal for ${mode}\n${out.stdout}`,
+        /^GATE=REFUSED reason=environment-hook\n/,
+        `the first line must be the environment-hook refusal for ${mode} (W214: the hook is refused outright, not tolerated and then caught by the kernel)\n${out.stdout}`,
       );
       assert.ok(!/^GATE=MODE/m.test(out.stdout), `the mode was honoured on this kernel:\n${out.stdout}`);
       assert.ok(!/^BUILD=/m.test(out.stdout), `a build was started on this kernel:\n${out.stdout}`);
@@ -114,8 +120,8 @@ test("a sourced runner reads the real kernel, not the caller's BASH_ENV", { skip
       );
       assert.match(
         out.stdout,
-        /^GATE=REFUSED reason=not-linux\n/,
-        `${fn} answered with something other than the kernel refusal:\n${out.stdout}`,
+        /^GATE=REFUSED reason=environment-hook\n/,
+        `${fn} answered with something other than the hook refusal:\n${out.stdout}`,
       );
       assert.ok(!/^BUILD=/m.test(out.stdout), `${fn} started a build before refusing:\n${out.stdout}`);
       assert.ok(!/^DEV=/m.test(out.stdout), `${fn} started a dev run before refusing:\n${out.stdout}`);
@@ -123,6 +129,36 @@ test("a sourced runner reads the real kernel, not the caller's BASH_ENV", { skip
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test("both inner runners re-assert the guard, so a shell hooked AFTER load is still refused", { skip }, () => {
+  // The load-time refusal covers W198's shapes because the hook is present when the file is read.
+  // This one covers the call the guard's own placement depends on: the file is loaded clean, then
+  // the shell is hooked, and a runner is entered directly. The runner's own check — not the load
+  // call, not the kernel — is what has to answer.
+  const { dir, env } = forgedHook();
+  try {
+    for (const fn of ["production_run", "dev_run"]) {
+      const out = call(`BASH_ENV="$HOOK" ${fn} "$@"`, [SHA], { HOOK: env, GATE_RUNS: "1" });
+      assert.equal(out.status, 3, `${fn} ran in a hooked shell\nstdout:\n${out.stdout}\nstderr:\n${out.stderr}`);
+      assert.match(out.stdout, /^GATE=REFUSED reason=environment-hook\n/, `${fn} printed no hook refusal:\n${out.stdout}`);
+      assert.ok(!/^RUN \d/m.test(out.stdout), `${fn} ran a burst in a hooked shell:\n${out.stdout}`);
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("an inherited DEBUG trap under functrace is refused too (the third clause)", { skip }, () => {
+  // `set -T` is not decoration: it is the only way a DEBUG trap fires inside the gate's functions,
+  // and on bash 3.2 (this host) it is also the only way `trap -p DEBUG` reports one at all. A trap
+  // without functrace cannot reach a marker read and is not what the guard claims to catch.
+  const out = spawnSync("bash", ["-c", 'trap \':\' DEBUG; set -T; source "$1"', "--", script], {
+    encoding: "utf8",
+    env: { ...process.env },
+  });
+  assert.equal(out.status, 3, out.stdout + out.stderr);
+  assert.match(out.stdout, /^GATE=REFUSED reason=environment-hook\n/, out.stdout);
 });
 
 test("no invocation on this host can print GATE=PASS, even with the hook and a forged release", { skip }, () => {

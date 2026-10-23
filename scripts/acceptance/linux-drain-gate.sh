@@ -81,6 +81,66 @@
 
 set -uo pipefail
 
+# ---------------------------------------------------------------- the environment hook guard (W214)
+#
+# THE HOLE (W198)
+# BASH_ENV (and sh's ENV) name a file that bash sources BEFORE this script's first line, and a
+# DEBUG trap set there with `set -T` is inherited into every function below and runs before each
+# command in it. The trap then re-assigns GATE_PROCFS_OSTYPE / GATE_PROCFS_VERSION after the load
+# (they are assigned unconditionally at load, which defeats an environment COPY of those names)
+# and before platform_is_linux() reads them (line 127) — so two forged one-line files answered
+# "Linux" twice and this darwin host printed GATE=PASS for a release that was never built. The
+# authority was never the kernel's answer: it was a variable in a shell whose startup file the
+# caller chose.
+#
+# THE CLOSURE, AND ITS LIMIT
+# One early branch, before any marker is read: refuse (exit 3, GATE=REFUSED reason=environment-hook)
+# when BASH_ENV or ENV is set, or when a DEBUG trap is already installed. Its own reason code so an
+# operator can tell it from not-linux; it removes no existing check and mints no second authority.
+# Residual, by decision and not by omission: a caller who starts the shell with --rcfile, inherits
+# SHELLOPTS (functrace), or sources this file from an already-hooked shell is outside what a shell
+# script can defend against — this is the LAST shell-hook hardening, and further shapes are out of
+# scope.
+# Is a DEBUG trap installed? Answered into GATE_DEBUG_TRAP_FOUND ("set" / "") and never through a
+# command substitution: bash 3.2.57 — this host's bash — prints nothing from `trap -p DEBUG` inside
+# a $( ) created while a sourced file is running, which is exactly the context this guard lives in
+# (measured). The probe writes to a file and is judged with `-s`, a builtin over a file whose size
+# is the answer. On 3.2 a trap is visible here only under functrace (`set -T`) — and functrace is
+# the ONLY way a DEBUG trap can fire inside this script's functions, so the case that can forge a
+# kernel marker is the case this probe sees.
+gate_debug_trap_present() {
+  local probe="${TMPDIR:-/tmp}/.sho-gate-debug-trap.$$"
+  GATE_DEBUG_TRAP_FOUND=''
+  trap -p DEBUG >"$probe" 2>/dev/null || :
+  if [ -s "$probe" ]; then GATE_DEBUG_TRAP_FOUND='set'; fi
+  rm -f "$probe" 2>/dev/null || :
+}
+
+gate_debug_trap_present
+GATE_DEBUG_TRAP_AT_LOAD="$GATE_DEBUG_TRAP_FOUND"
+
+refuse_environment_hook() {
+  local debug_trap=""
+  gate_debug_trap_present
+  debug_trap="$GATE_DEBUG_TRAP_FOUND"
+  # The load-time snapshot covers a trap installed before this file was read; the fresh probe covers
+  # one that turned up afterwards under functrace. One guard, one reason code.
+  [ -n "$debug_trap" ] || debug_trap="${GATE_DEBUG_TRAP_AT_LOAD:-}"
+  if [ -n "${BASH_ENV:-}" ] || [ -n "${ENV:-}" ] || [ -n "$debug_trap" ]; then
+    printf 'GATE=REFUSED reason=environment-hook\n'
+    printf 'BASH_ENV=%s ENV=%s debug-trap=%s\n' \
+      "${BASH_ENV:+set}" "${ENV:+set}" "${debug_trap:+set}"
+    printf 'a startup file or an inherited DEBUG trap can repoint the kernel markers this gate reads.\n'
+    printf 'run the gate from a clean shell (env -u BASH_ENV -u ENV bash %s ...); no burst was run.\n' "${0##*/}"
+    return 3
+  fi
+  return 0
+}
+
+# AT LOAD, before anything below reads a marker — and so also on the sourced path the suite uses,
+# which is where W198's third case entered.
+refuse_environment_hook || exit 3
+
 CLEAN_LINE='graceful shutdown: drained in-flight requests'
 TIMEOUT_LINE='graceful shutdown: drain timed out'
 
@@ -613,7 +673,10 @@ production_run() {
 
   # Entered directly? main() is not the only caller — the suite sources this file. The kernel is
   # re-read here with the REAL procfs (no arguments), so darwin refuses with exit 3 before the
-  # build, and the token main() mints only after that same check must be present too.
+  # build, and the token main() mints only after that same check must be present too. The
+  # environment hook guard is re-asserted first: a hooked shell is refused before the kernel is
+  # read at all, whichever way this runner was entered (SHO-2689 / W214).
+  refuse_environment_hook || return $?
   platform_gate || return $?
   require_platform_token || return $?
 
@@ -658,7 +721,9 @@ dev_run() {
   local held
 
   # Same two refusals as production_run: a dev "look" is still a burst, and a burst on a kernel
-  # without the drain cannot say anything about SHO-2689.
+  # without the drain cannot say anything about SHO-2689. The environment hook guard is re-asserted
+  # first, for the same reason as in production_run (SHO-2689 / W214).
+  refuse_environment_hook || return $?
   platform_gate || return $?
   require_platform_token || return $?
 
@@ -679,6 +744,11 @@ main() {
   local mode="production"
   local sha=""
   local arg
+
+  # First statement of the run path. The load-time call above already refused a hooked shell; this
+  # keeps that true if the load call is ever moved, and makes the refusal a property of main()
+  # rather than of where a guard happens to sit in the file (SHO-2689 / W214).
+  refuse_environment_hook || return $?
 
   for arg in "$@"; do
     case "$arg" in
