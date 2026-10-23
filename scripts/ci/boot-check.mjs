@@ -73,6 +73,11 @@ export function healthProblem(body) {
   return null;
 }
 
+/** A followed redirect that leaves the origin is not this candidate serving anything. */
+function sameOrigin(response, origin) {
+  return !response.redirected || new URL(response.finalUrl).origin === origin.origin;
+}
+
 /** The value that names the release, for the summary line. */
 export function releaseLabel(body) {
   const field = ["release", "version"].find((key) => Object.prototype.hasOwnProperty.call(body, key));
@@ -173,6 +178,13 @@ async function main() {
       `GET ${rootUrl} returned ${root.status}, expected 200. Every route answers 404 when the App Router resolves to a shadowing repo-root app/ (commit 7dd3581 fixed exactly that).`,
     );
   }
+  if (!sameOrigin(root, origin)) {
+    console.error(`  GET /                    200 (but redirected off-origin)`);
+    fail(
+      EXIT.rootBody,
+      `GET ${rootUrl} was redirected off-origin to ${new URL(root.finalUrl).origin}. A candidate that answers for / by sending the client elsewhere has not served its own page, whatever that other origin returns.`,
+    );
+  }
   if (!looksLikeApp(root.text)) {
     console.error(`  GET /                    200 (but not this app)`);
     fail(
@@ -197,6 +209,14 @@ async function main() {
     fail(
       EXIT.healthStatus,
       `GET ${healthUrl} returned ${health.status}, expected 200. The route answers 503 when the app cannot reach its database, so a non-200 here means the app is up but not healthy.`,
+    );
+  }
+
+  if (!sameOrigin(health, origin)) {
+    console.error(`  GET /api/health          200 (but redirected off-origin)`);
+    fail(
+      EXIT.healthStatus,
+      `GET ${healthUrl} was redirected off-origin to ${new URL(health.finalUrl).origin}, so the health answer did not come from this candidate.`,
     );
   }
 

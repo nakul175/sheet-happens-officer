@@ -39,6 +39,7 @@ const SERVER = [
   '  const route = routes[req.url] || { status: 404, body: "<html><body>not found</body></html>" };',
   "  res.statusCode = route.status;",
   '  res.setHeader("content-type", route.type || "text/html; charset=utf-8");',
+  '  if (route.location) res.setHeader("location", route.location);',
   '  if (route.hang) return;',
   '  res.end(route.body || "");',
   "});",
@@ -111,6 +112,31 @@ test("the sign-in page is an accepted answer for /, so a candidate that sends vi
   const result = await probeWith(t, { "/": { status: 200, body: SIGNIN_HTML } });
   assert.equal(result.code, 0, `the sign-in page must be accepted:\n${result.stdout}\n${result.stderr}`);
   assert.match(result.stdout, /title="Sign in · Sheet Happens Officer"/);
+});
+
+test("a same-origin redirect to the sign-in page is accepted, and the pass line says where it landed", async (t) => {
+  // `/` answering 307 -> /signin is this app serving; the probe follows it and reports the hop rather than hiding it.
+  const result = await probeWith(t, {
+    "/": { status: 307, location: "/signin" },
+    "/signin": { status: 200, body: SIGNIN_HTML },
+  });
+  assert.equal(result.code, 0, `a same-origin redirect must be accepted:\n${result.stdout}\n${result.stderr}`);
+  assert.match(result.stdout, /title="Sign in · Sheet Happens Officer" \(redirected to \/signin\)/);
+});
+
+test("a redirect that leaves the origin is exit 21: another server answering is not this one", async (t) => {
+  // The pass case here would be the loudest lie the probe could tell, so the destination serves a genuine lookalike.
+  const destination = await startServer(HEALTHY);
+  t.after(() => stopServer(destination.child));
+  const front = await startServer({
+    "/": { status: 302, location: `${destination.base}/` },
+    "/api/health": HEALTHY["/api/health"],
+  });
+  t.after(() => stopServer(front.child));
+
+  const result = await probe([front.base]);
+  assert.equal(result.code, 21, `expected exit 21, got ${result.code}:\n${result.stdout}\n${result.stderr}`);
+  assert.match(result.stderr, /was redirected off-origin to http:\/\/127\.0\.0\.1:\d+/);
 });
 
 test("a 404 on / is exit 20 and the failure names the status and the incident", async (t) => {
