@@ -10,6 +10,7 @@ import {
 } from "@/lib/concierge/limits";
 import { todayLine } from "@/lib/concierge/dates";
 import { isEcho } from "@/lib/concierge/echo";
+import { claimsWrite } from "@/lib/concierge/claims";
 import { flat, personById, projectById, quickAnswer, taskById, QUICK_ACTIONS, type TaskRec } from "@/lib/concierge/reads";
 import { conciergeTools, newTurn, runTool, wrap, type Kind, type Turn } from "@/lib/concierge/tools";
 import { commentsEnabled } from "@/lib/flags";
@@ -122,13 +123,17 @@ async function runModel(user: Actor, turn: Turn, userText: string, history: Mode
 /**
  * What the person said, for the server's own question (SHO-2693). Trimmed and case-folded; never echoed back.
  *
+ * This gate only decides whether the server asks a *better* question (it knows the missing value is the person, so it
+ * can name it). It is not what keeps a false "done" out of the thread - w148 moved that to the turn's own state in
+ * buildReply, because a gate on the request is defeated by the next inflection: w107 widened `/\bassign\b/` to
+ * `/\b(?:re)?assign\b/` and `reassigning` and `unassign` still walked past it. Widen this only to ask a nicer
+ * question; do not treat a match here as the safety property.
+ *
  * The word "assign", not every word that starts with it: `/\bassign/` also matched "assigned", so a read-only
- * question — "Which tasks are assigned to me?" — threw away the answer the model had just produced and asked who to
- * assign instead. `assign`, `assign it`, `Assign "X" to Y` and `please assign X` still match, and so does the same
- * request spelled `reassign` (SHO-2693 w107: "Reassign it." with no person is the same request as "Assign it." with no
- * person; trusting the model's prose there let it answer "Done - I reassigned it for you." for a write that never
- * happened). `assigned`, `assignment`, `assigns` and `unassign` do not: the first three are what the person is asking
- * *about*, and `unassign` asks a different question that no AC here covers.
+ * question - "Which tasks are assigned to me?" - threw away the answer the model had just produced and asked who to
+ * assign instead. `assign`, `assign it`, `Assign "X" to Y`, `please assign X`, `reassign`, `re-assign` and `REASSIGN`
+ * all match; `assigned`, `assignment`, `assigns`, `assigning` and `unassign` do not, and their replies are safe anyway:
+ * nothing was written, and engine.ts refuses to relay a sentence that says it was.
  */
 const asksForAssign = (request: string) => /\b(?:re)?assign\b/.test(request.toLowerCase());
 
@@ -144,6 +149,15 @@ const asksForAssign = (request: string) => /\b(?:re)?assign\b/.test(request.toLo
  * It has no `kind`: "none" is handled before the kind is read, and the person is free to name somebody instead.
  */
 const WHO_QUESTION = "Who should I assign it to? Tell me the person's name and I will show you the card to confirm.";
+
+/**
+ * SHO-2693 w148: what the person is told instead of the model's sentence when the turn wrote nothing but the sentence
+ * says it did. It is true (nothing changed), it explains the mechanism that makes it true (a card must be confirmed),
+ * and it asks for the one thing that was missing without pretending to know which detail that was - a delete has no
+ * person to name, so a who question would be the wrong question here.
+ */
+const NOTHING_CHANGED = "Nothing has changed. I cannot change anything without a card you confirm, so tell me which task should change and how, and I will show you the card.";
+
 const whoQuestion = (request: string) => ({
   kind: "choices" as const, text: WHO_QUESTION, choices: [{ id: "none", label: "Never mind" }],
   pending: { request, question: WHO_QUESTION },
@@ -184,6 +198,14 @@ function buildReply(turn: Turn, modelText: string, request: string): Stored {
   // happened), and `turn.needsWho` covers a model that did call one and was refused for naming no person. Reading
   // needsWho is what makes that refusal signal load-bearing instead of write-only state.
   if (turn.needsWho || asksForAssign(request)) return whoQuestion(request);
+  // SHO-2693 w148: this line is the invariant, and it is about the TURN, not the request. Reaching here means turn.card
+  // was never set, and tools.ts sets `ops` and `card` together (propose_changes), so no proposal exists either; a
+  // "result" row is written only by cards.ts when a card is confirmed, which is a different turn. So nothing was
+  // written, and a sentence that says otherwise is a lie whatever wording asked for it. asksForAssign above is only a
+  // nicer question (it knows the missing value is the person); it is not what makes this branch safe. No further
+  // widening of that keyword is needed, and none would help: `reassigning`, `unassign`, `re-assign` are all the same
+  // claim, and claimsWrite matches the verb stem rather than a spelling.
+  if (claimsWrite(modelText)) return { kind: r.calls > 0 ? "answer" : "text", text: NOTHING_CHANGED, ...(r.calls > 0 ? { links: linksFor(turn, modelText) } : {}) };
   const text = modelText || "I could not work that out. Try asking in a different way.";
   return { kind: r.calls > 0 ? "answer" : "text", text: text.slice(0, 4000), ...(r.calls > 0 ? { links: linksFor(turn, text) } : {}) };
 }
