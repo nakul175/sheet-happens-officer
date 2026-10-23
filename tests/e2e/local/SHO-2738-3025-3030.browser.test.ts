@@ -72,7 +72,15 @@ async function signedIn(email: string, viewport: { width: number; height: number
   return ctx;
 }
 
-/** Open the task sheet from its row, the way a person does: the row has focus, Enter opens it. */
+/**
+ * Open the task sheet from its row, the way a person does: the row has focus, Enter opens it.
+ *
+ * The dialog appears before the task does: TaskModal renders <Skeleton /> while `/api/tasks/:id` is in flight
+ * (src/components/TaskModal.tsx:47), so "the dialog is visible" is not "the sheet has a body". On a loaded machine the
+ * gap is wide enough that the first read of the sheet's geometry finds no `#desc` and no action bar, and the run dies
+ * with an opaque `page.evaluate: Error: missing element` (measured at 390x844: body absent when the dialog paints,
+ * present ~700 ms later). Wait for the sheet's own body here, so every caller gets a sheet it can read.
+ */
 async function openSheet(page: Page) {
   const row = page.locator(".item.click", { hasText: `ZZ-TEST 2738 task ${RUN}` }).first();
   await row.waitFor({ state: "visible", timeout: 120000 });
@@ -80,6 +88,8 @@ async function openSheet(page: Page) {
   await page.keyboard.press("Enter");
   const sheet = page.getByRole("dialog", { name: "Task" });
   await sheet.waitFor({ state: "visible", timeout: 30000 });
+  await sheet.locator("#desc").waitFor({ state: "visible", timeout: 30000 });
+  await sheet.locator(".actions").filter({ hasText: /Mark complete|Close task/ }).first().waitFor({ state: "visible", timeout: 30000 });
   return { row, sheet };
 }
 
@@ -135,8 +145,9 @@ describe("SHO-2738: the real sheet, a real phone viewport, a real focus, a short
       await page.waitForFunction(() => document.documentElement.style.getPropertyValue("--vvh") === `${window.innerHeight}px`, undefined, { timeout: 15000 });
 
       const after = await page.evaluate(() => {
-        const r = (el: Element | null) => { if (!el) throw new Error("missing element"); const b = el.getBoundingClientRect(); return { top: Math.round(b.top), bottom: Math.round(b.bottom), height: Math.round(b.height) }; };
-        const modal = document.querySelector(".modal")!;
+        const r = (el: Element | null, what: string) => { if (!el) throw new Error(`missing ${what}, so its geometry cannot be read`); const b = el.getBoundingClientRect(); return { top: Math.round(b.top), bottom: Math.round(b.bottom), height: Math.round(b.height) }; };
+        const modal = document.querySelector(".modal");
+        if (!modal) throw new Error("missing .modal: the sheet is not on screen");
         // The sheet's own footer is the action bar that holds the primary action. A later .actions in the
         // same scroll box is the comment composer, which is ordinary content further down the sheet.
         const footerEl = [...modal.querySelectorAll(".actions")].find((a) => /Mark complete/.test(a.textContent ?? ""));
@@ -144,10 +155,10 @@ describe("SHO-2738: the real sheet, a real phone viewport, a real focus, a short
           visibleBottom: Math.round((window.visualViewport?.offsetTop ?? 0) + (window.visualViewport?.height ?? window.innerHeight)),
           layoutBottom: window.innerHeight,
           vvh: document.documentElement.style.getPropertyValue("--vvh"),
-          scrim: r(document.querySelector(".scrim")),
-          modal: { ...r(modal), scrollTop: modal.scrollTop, scrollHeight: modal.scrollHeight },
-          desc: r(document.getElementById("desc")),
-          footer: r(footerEl ?? null),
+          scrim: r(document.querySelector(".scrim"), ".scrim"),
+          modal: { ...r(modal, ".modal"), scrollTop: modal.scrollTop, scrollHeight: modal.scrollHeight },
+          desc: r(document.getElementById("desc"), "#desc"),
+          footer: r(footerEl ?? null, "the .actions footer holding Mark complete"),
           footerPinned: footerEl ? getComputedStyle(footerEl).position : "missing",
           focused: document.activeElement?.id,
         };
