@@ -154,3 +154,47 @@ describe("qa:TC missing SHO-3030 the fallback is about the role, not membership"
   });
 });
 
+
+// SHO-3030's AC is "the dialog text matches the agreed #156 wording". That wording lives in the review
+// thread, not in this repository (the only #156 mentions here are comments), so it cannot be verified
+// from the code and is not invented below. What IS verifiable is the shape of the copy: the trigger's
+// hint and the confirmation's explanation make the same claim about the same person, and neither shows a
+// placeholder, an interpolation artefact or a raw key.
+describe("qa:TC missing SHO-3030 the copy is one claim shown twice, with nothing unrendered", () => {
+  const UNRENDERED = [/\$\{/, /\{\{/, /\}\}/, /[{}]/, /\bundefined\b/, /\bNaN\b/, /\bnull\b/, /\b(team|deactivate|fallback)\.[a-zA-Z_]+/];
+
+  it("qa:TC missing D1: the hint before confirming and the summary after agree, and no placeholder leaks", async () => {
+    await mountTeam();
+    await act(async () => {
+      buttons("Deactivate")[0].click();
+    });
+    const trigger = dialogText();
+
+    await act(async () => {
+      const select = dialog()!.querySelector("select")!;
+      select.value = NAMED.id;
+      select.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    await act(async () => {
+      buttons("Deactivate").find((b) => dialog()!.contains(b))!.click();
+    });
+    const confirmation = dialogText();
+
+    // One claim, twice: the same rule, stated about the same person, before and after.
+    for (const text of [trigger, confirmation]) {
+      expect(text).toMatch(/not a Leader or Editor/);
+      expect(text).toMatch(/the person you name/);
+      expect(text).not.toMatch(/\bnot on (a|that|those) projects?\b/);
+    }
+    // Both halves are complete sentences, not fragments glued to a missing name or a stub.
+    expect(trigger).toContain("the person you name is not a Leader or Editor on a project, that project's Leader takes those tasks.");
+    // "you name" before the act, "you named" after it: the same claim, the tense follows the moment.
+    expect(confirmation).toContain(`${PLAIN}, because the person you named is not a Leader or Editor on that project.`);
+    // Nothing left unrendered: no ${}, no braces, no undefined/NaN, no raw dotted key, no dangling "in ,".
+    for (const text of [trigger, confirmation]) {
+      for (const bad of UNRENDERED) expect(text, `unrendered ${bad} in: ${text}`).not.toMatch(bad);
+      expect(text).not.toContain("in ,");
+      expect(text).not.toContain("  ");
+    }
+  });
+});
