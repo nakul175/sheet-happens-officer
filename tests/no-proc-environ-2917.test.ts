@@ -3,7 +3,7 @@
 // base-url-no-environ-dump.test.ts (which imports `environReaders` from here), so AC1/AC3 have one verdict, not two.
 // AC1 at run time runs in base-url-env-2917.test.ts.
 // No TC id is assigned on the issue.
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { lstatSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { violations } from "./base-url-no-environ-dump.test";
@@ -13,12 +13,17 @@ const ENVIRON = ["", "proc", "self", "environ"].join("/");
 const PROC_ENVIRON = new RegExp(["/proc/", "[^\\s\"'`]*", "/environ\\b"].join(""));
 const ENVIRON_PART = new RegExp(["[\"'`]environ", "[\"'`]"].join(""));
 
-function filesUnder(dir: string): string[] {
+export function filesUnder(dir: string): string[] {
   const out: string[] = [];
   for (const name of readdirSync(dir)) {
     if (name === "node_modules") continue;
     const full = path.join(dir, name);
-    if (statSync(full).isDirectory()) out.push(...filesUnder(full));
+    // lstat, never stat (REVIEW-2917 F5): statSync follows a link, so a directory symlink under tests/ was traversed and
+    // its target scanned. A symlink is now skipped outright — the guard scans the real files of this tree only, so a link
+    // to a large or foreign tree cannot slow it, deepen it or pull in files that are not in scope.
+    const info = lstatSync(full);
+    if (info.isSymbolicLink()) continue;
+    if (info.isDirectory()) out.push(...filesUnder(full));
     else if (/\.(c|m)?[jt]sx?$/.test(name)) out.push(full);
   }
   return out;
