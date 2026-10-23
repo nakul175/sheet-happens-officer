@@ -130,14 +130,25 @@ const REDACTIONS: [RegExp, string][] = [
   [/\b(?:(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.){2,}[a-z]{2,}|(?:\d{1,3}\.){3}\d{1,3}|localhost):(\d{2,5})\b/gi, "[host]:$1"],
 ];
 
-/** `err.message` with the shapes that carry a credential or a host path redacted, capped at 500. */
+/** The size every one of the three sinks can carry: one log line, one bell entry, one API field. */
+const ERROR_TEXT_CAP = 500;
+
+/**
+ * `err.message` with the shapes that carry a credential or a host path redacted, capped at 500.
+ *
+ * QA (W265): the cap keeps the head *and* the tail. Prisma's message for a failed query is a code
+ * frame first and the cause last (`The table … does not exist in the current database.`), so a
+ * head-only cut returned the frame and dropped the reason: a failing `reminders` job answered 500
+ * with a body that ended mid-frame and never said what went wrong, which is the one thing the
+ * operator reading /var/log/sho/jobs.log needs. Redaction runs over the whole message before the
+ * elision, so a secret in the tail is already gone by the time the tail is kept.
+ */
 export function redactError(err: unknown): string {
   let text = String((err as Error)?.message ?? err);
-  for (const [find, replace] of REDACTIONS) {
-    text = text.replace(find, replace);
-    if (text.length > 500) text = text.slice(0, 500);
-  }
-  return text.slice(0, 500);
+  for (const [find, replace] of REDACTIONS) text = text.replace(find, replace);
+  if (text.length <= ERROR_TEXT_CAP) return text;
+  const tail = 180;
+  return `${text.slice(0, ERROR_TEXT_CAP - tail - 3)} … ${text.slice(-tail)}`;
 }
 
 export function requireJobSecret(req: Request) {
