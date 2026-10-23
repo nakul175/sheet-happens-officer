@@ -58,11 +58,20 @@ export default defineConfig({
       "tests/forced-password-23-5-browser.test.ts",
       "tests/e2e/local/APL-2719.test.ts",
       "tests/e2e/local/SHO-2738-3025-3030.browser.test.ts",
-      // tests/shutdown-next.test.ts runs `next build`, which rewrites .next under the dev server CI
-      // already started, and its SIGTERM burst pins two cores with util-linux `taskset` and reads
-      // /proc/<pid>/status - absent on macOS. vitest.shutdown.config.mts:4-5 says `npm test` excludes
-      // it and that config runs it alone; that exclusion was never in this list, so `npm test` ran it
-      // too: `next build` clobbered .next at 01:25 and the file added 11 platform failures.
+      // SIGTERM drain (APL-2688 / APL-2689). Both files are Linux-only, and `npm test` collected
+      // tests/shutdown-next.test.ts anyway until W152 (its own header said the opposite), so
+      // `npm test` on darwin went red for a reason that had nothing to do with the change under test:
+      //   * tests/shutdown-next.test.ts spawns `taskset` and reads /proc/<pid>/status and
+      //     /proc/<pid>/limits, and it runs `next build`, which would rewrite .next under the app
+      //     the CI job already started at :3100;
+      //   * the seven SIGTERM-drain tests in tests/shutdown.test.ts assert exit 0 and CLEAN_LOG,
+      //     which src/lib/shutdown.ts only produces when the Linux accept-queue seizer exists
+      //     (loadNative/loadLibc return null on anything but linux, at src/lib/shutdown.ts:205 and
+      //     :246, so the drain honestly reports the timeout line and exits 1 on darwin).
+      // Their tier is vitest.shutdown.config.mts, which ci.yml runs on ubuntu-latest before the app
+      // starts. Named one by one, not a glob, so a new file here still lands in this run.
+      // tests/tier-placement.test.ts asserts both halves of that placement.
+      "tests/shutdown.test.ts",
       "tests/shutdown-next.test.ts",
     ],
   },
