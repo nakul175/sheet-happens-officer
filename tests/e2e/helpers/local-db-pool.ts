@@ -49,17 +49,37 @@ export function schemaFromDatabaseUrl(databaseUrl: string): string | undefined {
 }
 
 /**
+ * The start-up option that puts a connection on the URL's schema: pg's only lever, and it applies to every connection
+ * the pool opens. Undefined when the URL names no schema, so that connection is exactly the one it was before.
+ */
+function startupOptions(url: string): string | undefined {
+  const schema = schemaFromDatabaseUrl(url);
+  if (schema === undefined) return undefined;
+  // pg's ConnectionParameters lets the parsed connection string override the config passed beside it, so an
+  // ?options= in the URL would silently win over the schema. Refuse rather than read the wrong schema.
+  const keys = [...new URL(url).searchParams.keys()].map((k) => k.toLowerCase());
+  if (keys.includes("options")) throw new Error("DATABASE_URL carries both ?schema= and ?options=. Refusing.");
+  return `-c search_path="${schema}"`;
+}
+
+/**
+ * A single connection with the same schema as the pool, for the spec's own DDL and catalog probes. It exists because
+ * `new pg.Client({ connectionString: DATABASE_URL })` is the very escape the pool fixes: it drops ?schema= and lands on
+ * the server default (public), so an unqualified read added to it later answers with another schema's rows.
+ */
+export function localPgClient(databaseUrl: string | undefined): pg.Client {
+  const url = assertLocalDatabaseUrl(databaseUrl);
+  const options = startupOptions(url);
+  return options === undefined ? new pg.Client({ connectionString: url }) : new pg.Client({ connectionString: url, options });
+}
+
+/**
  * A small pool for the spec's read-only SELECTs that reads the same schema Prisma does. max stays 1 by default, as it
  * was. With ?schema=<name> every connection starts with search_path set to that one schema, exactly as Prisma's own
  * connections do; with no ?schema= nothing is added to the connection.
  */
 export function localPgPool(databaseUrl: string | undefined, max = 1): pg.Pool {
   const url = assertLocalDatabaseUrl(databaseUrl);
-  const schema = schemaFromDatabaseUrl(url);
-  if (schema === undefined) return new pg.Pool({ connectionString: url, max });
-  // pg's ConnectionParameters lets the parsed connection string override the config passed beside it, so an
-  // ?options= in the URL would silently win over the schema. Refuse rather than read the wrong schema.
-  const keys = [...new URL(url).searchParams.keys()].map((k) => k.toLowerCase());
-  if (keys.includes("options")) throw new Error("DATABASE_URL carries both ?schema= and ?options=. Refusing.");
-  return new pg.Pool({ connectionString: url, max, options: `-c search_path="${schema}"` });
+  const options = startupOptions(url);
+  return options === undefined ? new pg.Pool({ connectionString: url, max }) : new pg.Pool({ connectionString: url, max, options });
 }

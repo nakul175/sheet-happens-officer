@@ -10,7 +10,7 @@ import path from "node:path";
 import pg from "pg";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { BASE, Client, OUTBOX, PW } from "./helpers";
-import { localPgPool, schemaFromDatabaseUrl } from "./e2e/helpers/local-db-pool";
+import { localPgClient, localPgPool, schemaFromDatabaseUrl } from "./e2e/helpers/local-db-pool";
 import { db } from "../src/lib/db";
 
 vi.mock("next/server", async (orig) => ({ ...(await orig<typeof import("next/server")>()), connection: async () => {} }));
@@ -362,7 +362,7 @@ describe("qa:TC missing SHO-3011: the APL-2742 pool reads the schema DATABASE_UR
 
   beforeAll(async () => {
     if (!local) return;
-    admin = new pg.Client({ connectionString: RAW });
+    admin = localPgClient(RAW);
     await admin.connect();
     await admin.query(`CREATE SCHEMA "${SCHEMA}"`);
   });
@@ -417,6 +417,71 @@ describe("qa:TC missing SHO-3011: the APL-2742 pool reads the schema DATABASE_UR
     } finally {
       await ours.end();
       await before.end();
+    }
+  });
+
+  it.skipIf(!local)("qa:TC missing SHO-3011 AC1: the spec's own admin connection reads the URL's schema, not public", async () => {
+    // AC1 covers every SQL read in this file, and `admin` in beforeAll is a read connection built from DATABASE_URL.
+    // It is the construction the story spec bans for good reason (the AC1 test at the end of this describe): a bare pg
+    // client drops ?schema= and answers from public. On the shared local cluster that is 16882 rows against this
+    // schema's 17 for "User" - a wrong answer, not an error, and only the assertions that happen to look at it notice.
+    const currentSchema = async (c: pg.Client) => (await c.query<{ s: string | null }>("SELECT current_schema() AS s")).rows[0].s;
+    const want = schemaFromDatabaseUrl(RAW)!;
+    expect(await currentSchema(admin!), "the spec's admin connection did not receive ?schema=").toBe(want);
+
+    // The construction this replaces, on a throwaway schema, for the record: it lands elsewhere.
+    const bare = new pg.Client({ connectionString: urlWithSchema(SCHEMA) });
+    try {
+      await bare.connect();
+      expect(await currentSchema(bare), "a bare pg client drops ?schema= - the escape this test closes").not.toBe(SCHEMA);
+      expect(await currentSchema(bare), "and it lands on the server default, which is public").toBe("public");
+    } finally {
+      await bare.end();
+    }
+  });
+
+  it.skipIf(!local)("qa:TC missing SHO-3011 AC1: nothing this spec builds can see a sibling schema's sentinel row", async () => {
+    // The property behind AC1, stated as an experiment rather than as a reading of the URL: a sentinel row lives in a
+    // sibling schema under the *same table name* as the row the spec should read. A connection that did not receive the
+    // schema has no way to answer the unqualified SELECT with the schema's own row, so it either returns the sentinel
+    // or fails on a missing table - both fail this test.
+    const SIBLING = `sho_test_apl2742_sib_${randomUUID().replace(/-/g, "").slice(0, 12)}`;
+    const PROBE = `apl2742_sentinel_${randomUUID().replace(/-/g, "").slice(0, 8)}`;
+    const SENTINEL = "SENTINEL-MUST-NOT-BE-SEEN";
+    const OWN = schemaFromDatabaseUrl(RAW)!;
+    await admin!.query(`CREATE SCHEMA "${SIBLING}"`);
+    const sibling = localPgPool(urlWithSchema(SIBLING));
+    try {
+      for (const [schema, value] of [[SIBLING, SENTINEL], [OWN, "OWN"]] as const) {
+        await admin!.query(`CREATE TABLE "${schema}".${PROBE} (value text)`);
+        await admin!.query(`INSERT INTO "${schema}".${PROBE} (value) VALUES ($1)`, [value]);
+      }
+      // The sentinel is real and readable when it is named: the negative results below are not a missing table.
+      expect((await sibling.query<{ value: string }>(`SELECT value FROM ${PROBE}`)).rows.map((r) => r.value),
+        "a connection on the sibling schema reads the sentinel").toEqual([SENTINEL]);
+
+      const own = localPgPool(RAW);
+      try {
+        // Both connections this spec reads with, addressed the same way: admin (DDL + probes) and the helper pool.
+        const readers = [
+          { who: "admin", query: (sql: string) => admin!.query<{ value: string; schemas: string }>(sql) },
+          { who: "the helper pool", query: (sql: string) => own.query<{ value: string; schemas: string }>(sql) },
+        ];
+        for (const { who, query } of readers) {
+          expect((await query(`SELECT value FROM ${PROBE}`)).rows.map((r) => r.value),
+            `${who}: the unqualified read answers with the URL's own row`).toEqual(["OWN"]);
+          const schemas = (await query("SELECT array_to_string(current_schemas(false), ',') AS schemas")).rows[0].schemas.split(",");
+          expect(schemas, `${who}: search_path names no sibling schema`).not.toContain(SIBLING);
+          expect(schemas, `${who}: and no public fallback`).not.toContain("public");
+        }
+      } finally {
+        await own.end();
+      }
+    } finally {
+      await sibling.end();
+      for (const schema of [SIBLING, OWN]) await admin!.query(`DROP TABLE IF EXISTS "${schema}".${PROBE}`).catch(() => {});
+      // Only the throwaway schema this test made, named the way this test named it.
+      if (/^sho_test_apl2742_sib_[a-z0-9]+$/.test(SIBLING)) await admin!.query(`DROP SCHEMA IF EXISTS "${SIBLING}" CASCADE`);
     }
   });
 
@@ -496,6 +561,13 @@ describe("qa:TC missing SHO-3011: the APL-2742 pool reads the schema DATABASE_UR
     // AC1 covers every SQL read, so no second client may be built from DATABASE_URL either: a pg.Client drops ?schema=
     // exactly as the pre-SHO-3011 pool did, and a ban on `new pg.Pool(` alone would let it through.
     for (const construction of ["new pg.Pool(", "new pg.Client("]) expect(spec, construction).not.toContain(construction);
+
+    // This file has to hold to the same rule for its own connections. The bare constructions it still contains are
+    // controls that must land OFF the schema (a pool and a client on a throwaway schema), so neither may be built from
+    // DATABASE_URL itself; anything built from RAW has to come from the helper above. Written as a pattern, not as a
+    // literal: a literal would match itself in this source and could never pass.
+    const self = readFileSync(path.join(process.cwd(), "tests/apl-2742.test.ts"), "utf8");
+    expect(self, "a connection built from DATABASE_URL without the helper").not.toMatch(/new pg\.(?:Pool|Client)\(\{ connectionString: RAW/);
   });
 });
 
