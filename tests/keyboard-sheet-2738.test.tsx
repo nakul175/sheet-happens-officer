@@ -5,7 +5,7 @@
 // the real Modal and drives a shrinking visualViewport, so the tier fails when the wiring stops happening.
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import { Modal } from "@/components/ui";
 
 const PHONE = 844;
@@ -15,7 +15,7 @@ type VV = { height: number; offsetTop: number; addEventListener: (t: string, f: 
 const resizeListeners = new Set<() => void>();
 let vv: VV;
 let root: Root | null = null;
-let nudged: ReturnType<typeof vi.fn>;
+let nudged: Mock<(arg?: boolean | ScrollIntoViewOptions) => void>;
 
 /** jsdom has no visualViewport; this is the part of it the dialog uses. */
 function visualViewport(height: number, offsetTop = 0): VV {
@@ -39,7 +39,7 @@ beforeEach(() => {
   resizeListeners.clear();
   vv = visualViewport(PHONE);
   Object.defineProperty(window, "visualViewport", { configurable: true, value: vv });
-  nudged = vi.fn();
+  nudged = vi.fn<(arg?: boolean | ScrollIntoViewOptions) => void>();
   HTMLElement.prototype.scrollIntoView = nudged;
   document.body.innerHTML = '<div id="root"></div>';
   document.body.className = "";
