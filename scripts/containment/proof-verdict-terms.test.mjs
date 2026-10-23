@@ -157,15 +157,20 @@ function build({
     .replace(/^as_slot\(\).*$/m, () => asSlot);
   writeFileSync(join(dir, "proof.sh"), patched);
 
-  const run = (...args) => {
+  // `extraEnv` exists so a test can try to smuggle the old waiver in as an environment variable. It defaults
+  // to empty, so every existing call site keeps the exact environment it always had.
+  const exec = (extraEnv, args) => {
     const res = spawnSync("bash", [join(dir, "proof.sh"), ...args], {
       encoding: "utf8",
-      env: { PATH: `${join(dir, "bin")}:${process.env.PATH}`, HOME: process.env.HOME, FAKE_ROOT: "1" },
+      env: {
+        PATH: `${join(dir, "bin")}:${process.env.PATH}`, HOME: process.env.HOME, FAKE_ROOT: "1", ...extraEnv,
+      },
     });
     for (const p of pids) { try { process.kill(Number(p)); } catch { /* already gone is fine */ } }
     return res;
   };
-  return { dir, run };
+  const run = (...args) => exec({}, args);
+  return { dir, run, runEnv: (extraEnv, ...args) => exec(extraEnv, args) };
 }
 
 const verdict = (stdout) => /^CONTAINMENT=(PASS|FAIL)\b/m.exec(stdout)?.[1] ?? "(no CONTAINMENT line)";
@@ -286,6 +291,56 @@ test("the vocabulary that made the bypass possible does not exist in the script"
   assert.doesNotMatch(proofSrc(), /ACCEPT_UNPROVEN/, "the accepting switch is back");
   assert.doesNotMatch(proofSrc(), /\$\{unproven/, "a verdict line is interpolating an unproven qualifier again");
   assert.doesNotMatch(proofSrc(), /unproven=/, "the `unproven=` qualification is back in the transcript");
+});
+
+test("no renamed flag, no env var, and no config can waive the unrun control (W155 bypass hunt)", () => {
+  // W155. The old spelling being refused is necessary but not sufficient: the question this packet asks is
+  // whether ANY invocation authorises a start with the cross-uid probe unrun. So the plausible respellings are
+  // tried as arguments (the parser's `*)` arm must refuse each) and as environment variables (no code path may
+  // read one). Every case has an unrun control, so every case must end in FAIL/refusal - never PASS.
+  const FLAGS = [
+    "--accept-unproven", "--accept-unproven=1", "--accept_unproven", "--allow-unproven", "--allow-unproven=yes",
+    "--unproven", "--accept", "--force", "--skip-probe", "--skip_cross_uid_probe", "--no-probe", "-f",
+  ];
+  // One sandbox for all of them: nothing before the argument loop can print, so a refused argument must leave
+  // stdout empty. That is the strongest form of "no verdict".
+  const refused = build({ running: false, deployPid: false });
+  for (const flag of FLAGS) {
+    for (const args of [["--pre-start", flag], [flag]]) {
+      const res = refused.run(...args);
+      assert.equal(res.status, 2,
+        `${args.join(" ")} was not refused - an argument may not reach a verdict:\n${res.stdout}\n${res.stderr}`);
+      assert.match(res.stderr, /^REFUSING: /m, res.stderr);
+      assert.equal(res.stdout, "", `a refused argument printed something:\n${res.stdout}`);
+    }
+  }
+
+  // The env-var route: the variable is gone, so setting it changes nothing. Each run must still FAIL by name.
+  const ENV_VARS = [
+    { ACCEPT_UNPROVEN: "1" }, { UNPROVEN: "deploy_environ" }, { SKIP_DEPLOY_ENVIRON_PROBE: "1" },
+    { SHO_ACCEPT_UNPROVEN: "1" }, { CONTAINMENT_ACCEPT_UNPROVEN: "yes" },
+  ];
+  const emulated = build({ running: false, deployPid: false });
+  for (const extraEnv of ENV_VARS) {
+    const res = emulated.runEnv(extraEnv, "--pre-start");
+    const name = Object.keys(extraEnv).join("=");
+    assert.equal(res.status, 1, `${name} waived the unrun control:\n${res.stdout}\n${res.stderr}`);
+    assert.doesNotMatch(res.stdout, /^CONTAINMENT=PASS\b/m, `${name} produced a PASS:\n${res.stdout}`);
+    assert.match(failedTerms(res.stdout), /deploy_environ_unproven/, `${name}: ${res.stdout}`);
+  }
+});
+
+test("the FULL run fails on an unrun control too: no PROOF=PASS, and no qualifier on it", () => {
+  // W150 changed the full-mode verdict line as well (`PROOF=PASS${unproven:+ ...}` -> `PROOF=PASS`). Nothing
+  // asserted that half of the delta, so a regression there would have been silent: the pre-start gate would
+  // still fail while the post-start run said PASS beside an unmeasured control.
+  const res = build({ deployPid: false }).run();
+  assert.equal(res.status, 1, `a full run authorised a slot over an unrun control:\n${res.stdout}\n${res.stderr}`);
+  assert.doesNotMatch(res.stdout, /^PROOF=PASS\b/m, res.stdout);
+  assert.match(res.stdout, /^containment_terms_failed=.*deploy_environ_unproven/m, res.stdout);
+  assert.match(res.stdout, /^proof_terms_failed=.*deploy_environ_unproven/m, res.stdout);
+  assert.match(res.stderr, /^PROOF=FAIL\b/m, res.stderr);
+  assert.doesNotMatch(res.stdout, /unproven=/, "a qualifier on the full verdict is the bypass in another costume");
 });
 
 test("a probeable deploy process is measured, and a denial is the passing answer", () => {
