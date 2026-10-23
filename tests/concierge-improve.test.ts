@@ -161,6 +161,9 @@ describe("qa:TC missing improve my prompt ignores near-copies (APL-2871)", () =>
     "move the budget task to monday",
     "Move the budget task to Monday.",
     "\u201cMove the budget task to Monday\u201d",
+    // SHO-3010 AC1/AC3: the typed text in wrapping quotes with one full stop after the closing quote, straight and curly.
+    "\"Move the budget task to Monday\".",
+    "\u2018Move the budget task to Monday\u2019.",
   ])("qa:TC missing AC1 v1.1: the reply %j is no rewrite: 502, counted once toward the week, nothing posted", async (reply) => {
     enableModel();
     mockModel(reply);
