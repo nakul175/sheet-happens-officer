@@ -68,17 +68,19 @@ function watchAndGo(href: string) {
   const w = window as unknown as {
     __shoSameDoc?: boolean;
     __shoStop?: boolean;
-    __shoFrames?: { path: string; text: string; busy: boolean }[];
+    __shoFrames?: { t: number; path: string; text: string; busy: boolean }[];
     __shoPoll?: ReturnType<typeof setInterval>;
     next?: { router?: { push?: (path: string) => void } };
   };
   w.__shoSameDoc = true;
   w.__shoStop = false;
   w.__shoFrames = [];
+  const start = performance.now();
   const record = () => {
     if (w.__shoStop) return;
     const main = document.querySelector("main");
     w.__shoFrames!.push({
+      t: Math.round(performance.now() - start),
       path: location.pathname,
       text: main?.innerText ?? "",
       busy: !!main?.querySelector(".skel-wrap, [aria-busy='true']"),
@@ -125,7 +127,10 @@ async function prove(page: Page, shot: string) {
     // Once B's skeleton is up, no later frame may show A's items.
     const firstBusy = onB.findIndex((f) => f.busy);
     expect(firstBusy, `${shot}: skeleton appeared while B was held`).toBeGreaterThanOrEqual(0);
-    expect(firstBusy, `${shot}: view swapped to B promptly`).toBeLessThan(15);
+    // B's route is held, so the loading view must not wait for data. Bound the TIME, not the number of
+    // samples: `record()` runs on every animation frame and every 50 ms, so a faster renderer packs more
+    // samples into the same latency and a sample-index bound fails a machine for rendering quickly.
+    expect(onB[firstBusy].t, `${shot}: view swapped to B promptly`).toBeLessThan(2000);
     const bView = onB.slice(firstBusy);
     expect(bView.length, `${shot}: frames of B's loading view`).toBeGreaterThan(5);
     const leaked = bView.filter((f) => /ZZ-TEST-A-item/.test(f.text));
