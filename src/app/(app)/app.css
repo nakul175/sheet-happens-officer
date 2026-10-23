@@ -302,3 +302,5 @@ main:focus { outline: none; }
 .usage-meter > span { display: block; height: 100%; background: var(--navy); }
 /* AC6 v1.1: spend over the ceiling. The words carry the meaning; the colour only adds to it. */
 .usage-over { display: inline-block; margin-left: 6px; padding: 1px 8px; border-radius: 99px; border: 1px solid #b42318; background: #fef3f2; color: #b42318; font-size: 13px; font-weight: 600; vertical-align: middle; }
+/* SHO-3013: the default safety cap has been reached and the concierge is paused. Text, not colour alone. */
+.usage-warn { margin: 14px 0 0; padding: 8px 10px; border: 1px solid #b42318; border-radius: 8px; background: #fef3f2; color: #b42318; font-size: 14px; font-weight: 600; }

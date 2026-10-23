@@ -92,6 +92,11 @@ export function SpendCeiling({ ceiling }: { ceiling: UsagePayload["ceiling"] }) 
   // applies, so the screen says so instead of passing it off as a set ceiling (APL-2950, Dwight's ruling).
   if (ceiling.configured === false || !hasCeiling(ceiling.usd)) {
     const safetyCap = hasCeiling(ceiling.usd) ? `, default ${formatUsd(ceiling.usd)} safety cap applies` : "";
+    // SHO-3013: with no set ceiling the default $100 safety cap is the brake. The concierge stops at 100 percent
+    // (monthCap stops at >=), so say so in text when spend reaches the cap instead of leaving the screen silent.
+    // role="status" gives the sentence to a screen reader; the wording does not rely on colour.
+    const capUsd = hasCeiling(ceiling.usd) ? ceiling.usd : null;
+    const capReached = ceiling.configured === false && capUsd !== null && spend >= capUsd;
     return (
       <section className="card">
         <h2 className="usage-h" id="usage-ceiling">Spend to date: {NO_CEILING}</h2>
@@ -99,6 +104,11 @@ export function SpendCeiling({ ceiling }: { ceiling: UsagePayload["ceiling"] }) 
           <div><dt>Spend to date</dt><dd>{amount}</dd></div>
           <div><dt>Monthly ceiling</dt><dd>{NO_CEILING}{safetyCap}</dd></div>
         </dl>
+        {capReached && (
+          <p className="usage-warn" role="status">
+            The default {formatUsd(capUsd)} safety cap has been reached. The concierge is paused until the 1st of next month, India time.
+          </p>
+        )}
       </section>
     );
   }
