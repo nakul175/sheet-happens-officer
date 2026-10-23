@@ -89,4 +89,29 @@ describe("qa:TC missing APL-2950 Usage spend vs ceiling fixes", () => {
     expect(monthlyCeilingConfigured()).toBe(true);
     expect(monthlyCeilingUsd()).toBe(250);
   });
+
+  it("qa:TC missing SHO-3013: reaching the default $100 safety cap shows an accessible warning that the concierge is paused", () => {
+    const html = htmlFor({ usd: 100, configured: false, spendUsd: 100, percent: 0 });
+    // Text in the page, exposed to a screen reader as a status.
+    expect(html).toContain('role="status"');
+    expect(html).toContain(
+      "The default $100.00 safety cap has been reached. The concierge is paused until the 1st of next month, India time.",
+    );
+    expect(html).not.toMatch(/NaN|Infinity/);
+
+    // Over the cap the pause is still the truth, so the warning stays.
+    expect(htmlFor({ usd: 100, configured: false, spendUsd: 150, percent: 0 })).toContain('role="status"');
+
+    // Below the cap, a ceiling the owner set, or a payload with no cap amount: no warning.
+    const quiet = [
+      { usd: 100, configured: false, spendUsd: 99.99, percent: 0 },
+      { usd: 100, configured: true, spendUsd: 100, percent: 100 },
+      { usd: null, configured: false, spendUsd: 150, percent: 0 },
+    ];
+    for (const ceiling of quiet) {
+      const q = htmlFor(ceiling);
+      expect(q).not.toContain('role="status"');
+      expect(q).not.toContain("safety cap has been reached");
+    }
+  });
 });
