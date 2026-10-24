@@ -238,6 +238,7 @@ const bodyDone = settled.filter((r) => r.body.includes("done")).length;
 const non200 = settled.filter((r) => r.status !== 200 || r.reset).length;
 const summary = {
   n: N,
+  listenerUrl: `http://127.0.0.1:${port}`,
   sigtermDelayMs: SIGTERM_DELAY_MS,
   mode: SLOW ? "slow" : "health",
   // W99 / SHO-2689: what was actually serving, so a receipt states it instead of assuming it.
