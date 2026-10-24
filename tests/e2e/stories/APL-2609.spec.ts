@@ -171,13 +171,29 @@ async function myTasksScreen(browser: Browser, who: Who, waitFor: string, projec
 /** Search in the browser. An empty search echoes the words back ("Nothing matches ..."), so a leak is judged on the links. */
 async function searchScreen(browser: Browser, who: Who, q: string) {
   const page = await pageAs(browser, who);
+  const responses: {kind: string; status: number}[] = [];
+  const errors: string[] = [];
+  page.on("response", r => {
+    const pathname = new URL(r.url()).pathname;
+    const kind = pathname === "/api/search" ? "search" : pathname.startsWith("/_next/") ? "asset" : null;
+    if (kind && responses.length < 100) responses.push({kind, status: r.status()});
+  });
+  page.on("pageerror", e => { if (errors.length < 10) errors.push(/^[A-Za-z]+Error$/.test(e.name) ? e.name : "Error"); });
   try {
     await page.goto(`${BASE}/search`, { waitUntil: "domcontentloaded" });
     const box = page.getByRole("searchbox", { name: "Search" });
     await expect(box).toBeVisible({ timeout: 30_000 });
     const answered = page.waitForResponse((r) => r.url().includes("/api/search?q=") && r.status() === 200, { timeout: 30_000 });
     await box.fill(q);
-    await answered;
+    try { await answered; }
+    catch (error) {
+      console.info("SHO_2897_SEARCH_DIAGNOSTIC", JSON.stringify({
+        responses, errors, inputMatchesSyntheticQuery: await box.inputValue() === q,
+        initialHintVisible: await page.getByText("Type at least two letters.", {exact: true}).isVisible(),
+        alertCount: await page.getByRole("alert").count(),
+      }));
+      throw error;
+    }
     const main = page.getByRole("main");
     await expect.poll(async () => (await main.getByRole("link").allTextContents()).some((l) => l.includes(q))
       || (await main.getByText(`Nothing matches “${q}”`, { exact: false }).count()) > 0, { timeout: 30_000 }).toBe(true);
