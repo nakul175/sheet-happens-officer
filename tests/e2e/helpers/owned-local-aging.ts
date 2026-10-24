@@ -3,13 +3,15 @@ import { execFileSync } from "node:child_process";
 import { localPgClient, schemaFromDatabaseUrl } from "./local-db-pool";
 import { RUN, BASE_URL, type Json } from "../support";
 
-export function agingDatabase(env: NodeJS.ProcessEnv = process.env) {
+export function agingDatabase(env: NodeJS.ProcessEnv = process.env, appUrl = BASE_URL) {
   if (env.SHO_OWNED_LOCAL_AGING !== "true") throw Error("SHO_OWNED_LOCAL_AGING=true is required for owned aging fixtures");
   const hosts = ["127.0.0.1", "localhost", "::1"];
-  if (!hosts.includes(new URL(BASE_URL).hostname.replace(/^\[|\]$/g, ""))) throw Error("Owned aging requires a loopback application");
+  if (!hosts.includes(new URL(appUrl).hostname.replace(/^\[|\]$/g, ""))) throw Error("Owned aging requires a loopback application");
   const raw = env.DATABASE_URL;
   if (!raw) throw Error("Owned aging requires DATABASE_URL");
-  const u = new URL(raw), schema = schemaFromDatabaseUrl(raw);
+  const u = new URL(raw);
+  if ([...u.searchParams.keys()].some(k => ["host", "hostaddr", "dbname", "database", "port", "user", "options"].includes(k.toLowerCase()))) throw Error("Owned aging refuses database routing overrides");
+  const schema = schemaFromDatabaseUrl(raw);
   if (!hosts.includes(u.hostname.replace(/^\[|\]$/g, "")) || u.pathname !== "/sho_test" || !schema || !/^sho_(owned_aging|full_story)_[a-zA-Z0-9_]+$/.test(schema)) throw Error("Owned aging requires an isolated sho_test schema on loopback");
   return raw;
 }
@@ -26,11 +28,11 @@ export async function ownedAging(user: Json) {
     close: () => client.end(), messages,
     async age(ids: string[], at: Date) {
       if (!ids.length || (await messages(ids)).length !== ids.length) throw Error("All aged messages must belong to this fresh actor");
-      const r = await client.query('UPDATE "ChatMessage" SET "createdAt"=$3 WHERE "userId"=$1 AND id=ANY($2::text[]) RETURNING id', [user.id, ids, at]);
+      const r = await client.query('UPDATE "ChatMessage" SET "createdAt"=$3 WHERE "userId"=$1 AND id=ANY($2::text[]) RETURNING id', [user.id, ids, at.toISOString()]);
       if (r.rowCount !== ids.length) throw Error("Owned aging row count changed");
     },
     async assertOnlyOwnedExpiry(ids: string[], at: Date) {
-      const r = await client.query('SELECT count(*)::int AS n FROM "ChatMessage" WHERE "createdAt"<$1 AND NOT ("userId"=$2 AND id=ANY($3::text[]))', [new Date(at.getTime()-89*86400000), user.id, ids]);
+      const r = await client.query('SELECT count(*)::int AS n FROM "ChatMessage" WHERE "createdAt"<$1 AND NOT ("userId"=$2 AND id=ANY($3::text[]))', [new Date(at.getTime()-89*86400000).toISOString(), user.id, ids]);
       if (r.rows[0].n !== 0) throw Error("Retention job would reach non-owned aged messages; refusing");
     },
     async expireUndo(cardId: string, resultId: string, at: Date) {
@@ -41,12 +43,12 @@ export async function ownedAging(user: Json) {
       if (stored.kind !== "result" || stored.result?.cardId !== cardId || stored.internal?.cardMessageId !== cardId || !stored.internal.logIds?.length) throw Error("Real confirmed result and action logs required");
       await client.query("BEGIN");
       try {
-        const logs = await client.query('UPDATE "ActionLog" SET "createdAt"=$3 WHERE "actorId"=$1 AND id=ANY($2::text[]) AND channel=\'CONCIERGE\' RETURNING id', [user.id, stored.internal.logIds, at]);
+        const logs = await client.query('UPDATE "ActionLog" SET "createdAt"=$3 WHERE "actorId"=$1 AND id=ANY($2::text[]) AND channel=\'CONCIERGE\' RETURNING id', [user.id, stored.internal.logIds, at.toISOString()]);
         if (logs.rowCount !== stored.internal.logIds.length) throw Error("Action logs are not all owned by this actor");
         for (const row of rows) {
           const s = JSON.parse(row.content);
           s.internal = { ...s.internal, confirmedAt: at.toISOString() };
-          await client.query('UPDATE "ChatMessage" SET "createdAt"=$3,content=$4 WHERE "userId"=$1 AND id=$2', [user.id,row.id,at,JSON.stringify(s)]);
+          await client.query('UPDATE "ChatMessage" SET "createdAt"=$3,content=$4 WHERE "userId"=$1 AND id=$2', [user.id,row.id,at.toISOString(),JSON.stringify(s)]);
         }
         await client.query("COMMIT");
       } catch (e) { await client.query("ROLLBACK"); throw e; }
