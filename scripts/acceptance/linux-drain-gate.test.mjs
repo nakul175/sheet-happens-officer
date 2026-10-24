@@ -325,8 +325,8 @@ test("the gate's comparison is the module's comparison, pair for pair", () => {
   ];
   for (const [expected, observed] of pairs) {
     const shell = matches(expected ?? "", observed ?? "");
-    const module = releaseMatches(expected, observed) ? 0 : 1;
-    assert.equal(shell, module, `gate and module disagree on ${JSON.stringify([expected, observed])}`);
+    const moduleResult = releaseMatches(expected, observed) ? 0 : 1;
+    assert.equal(shell, moduleResult, `gate and module disagree on ${JSON.stringify([expected, observed])}`);
   }
 });
 

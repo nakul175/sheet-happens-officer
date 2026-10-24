@@ -70,12 +70,12 @@ function copiesIn(file, source) {
 }
 
 test("each rule is implemented exactly once, in release-identity.mjs", () => {
-  const module = readFileSync(MODULE, "utf8");
+  const moduleSource = readFileSync(MODULE, "utf8");
   // The owner really holds the signature: a rule that matches nothing would make the scan below
   // vacuous, so every owned signature must be present in the module.
   for (const { rule, pattern, owner } of RULES) {
     if (owner !== MODULE) continue;
-    assert.ok(pattern.test(module), `release-identity.mjs must implement "${rule}" (${pattern})`);
+    assert.ok(pattern.test(moduleSource), `release-identity.mjs must implement "${rule}" (${pattern})`);
   }
   const found = sources().flatMap((file) => copiesIn(file, readFileSync(file, "utf8")));
   assert.deepEqual(
