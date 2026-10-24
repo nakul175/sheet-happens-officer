@@ -8,11 +8,11 @@ import { QA_PASS, cast, gateFile, noSecret, runLocalJob } from "../helpers/qa-al
 
 gateFile();
 
-type Note = { text: string };
-const notices = async (who: Who) => {
+type Note = { text: string; href: string };
+const notices = async (who: Who, taskId?: string) => {
   const r = await who.api.get("/api/notifications?limit=200");
   noSecret(JSON.stringify(r.json));
-  return (r.json.items as Note[]).map((n) => n.text);
+  return (r.json.items as Note[]).filter((n) => !taskId || n.href === `/tasks/${taskId}`).map((n) => n.text);
 };
 const about = (texts: string[], title: string) => texts.filter((t) => t.includes(`"${title}"`) && / is (due|overdue)/.test(t));
 
@@ -20,13 +20,18 @@ test("AC1: an open task due tomorrow sends its holder one Due tomorrow notice wh
   const { admin, people: [holder] } = await cast(browser, later, ["tomorrow"]);
   const project = await newProject(admin, later, { label: "us74 tomorrow", members: [{ who: holder, role: "EDITOR" }] });
   const title = zz("due tomorrow");
-  await newTask(admin, project.id, { title, assigneeId: holder.user.id, dueDate: ymd(1) });
+  const taskId = await newTask(admin, project.id, { title, assigneeId: holder.user.id, dueDate: ymd(1) });
+  // Another project can legitimately have a same-title task and its own reminder.
+  // Count by the task link, so two notices for our actual task would still fail.
+  const other = await newProject(admin, later, { label: "us74 same-title control", members: [{ who: holder, role: "EDITOR" }] });
+  const otherId = await newTask(admin, other.id, { title, assigneeId: holder.user.id, dueDate: ymd(1) });
   const jobs = (await admin.api.get("/api/jobs")).json.jobs as { job: string; about: string }[];
   expect(jobs.find((j) => j.job === "reminders")?.about).toMatch(/8:00/);
   await runLocalJob("reminders");
-  const hits = about(await notices(holder), title);
+  const hits = about(await notices(holder, taskId), title);
   expect(hits).toEqual([`"${title}" is due tomorrow.`]);
-  expect(about(await notices(admin), title)).toHaveLength(0);
+  expect(about(await notices(holder, otherId), title)).toEqual([`"${title}" is due tomorrow.`]);
+  expect(about(await notices(admin, taskId), title)).toHaveLength(0);
 });
 
 test("AC2: running the job twice on the same day does not send a second reminder", async ({ browser, later }) => {
