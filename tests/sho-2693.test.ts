@@ -38,7 +38,7 @@ async function unassigned() {
   const title = `ZZ-TEST ${RUN}-${n} unassigned-ask`;
   // The app never stores a task with no assignee: an omitted one falls to the project leader (src/lib/tasks.ts:150).
   // "Unassigned" here means "not assigned to the person the request will name".
-  const taskId = await task(lead, projectId, { title, assigneeId: lead.id });
+  const taskId = await task(lead, projectId, { title, assigneeId: lead.id, dueDate: "2031-03-20" });
   return { lead, member, taskId, title };
 }
 

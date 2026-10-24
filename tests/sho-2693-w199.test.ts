@@ -35,7 +35,7 @@ async function fixture() {
   const projectId = await zzProject(lead, `SHO-2693 w199 ${RUN}-${n}`);
   projectIds.push(projectId);
   const title = `ZZ-TEST ${RUN}-${n} w199-task`;
-  const taskId = await task(lead, projectId, { title, assigneeId: lead.id });
+  const taskId = await task(lead, projectId, { title, assigneeId: lead.id, dueDate: "2031-03-20" });
   return { lead, projectId, taskId, title };
 }
 
