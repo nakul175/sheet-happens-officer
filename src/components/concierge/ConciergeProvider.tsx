@@ -66,6 +66,20 @@ export function ConciergeProvider({ children }: { children: React.ReactNode }) {
     return () => { live = false; };
   }, [tick]);
 
+  useEffect(() => {
+    if (!loaded || document.activeElement !== document.body) return;
+    // Hydrating the enabled quick-action controls can leave Chromium's native
+    // sequential-navigation starting point at that inserted fragment. A person
+    // who has not focused a control should still start at the document's skip
+    // link. Never reset a field/link the person already focused.
+    const body = document.body;
+    const before = body.getAttribute("tabindex");
+    body.tabIndex = -1;
+    body.focus({ preventScroll: true });
+    if (before === null) body.removeAttribute("tabindex");
+    else body.setAttribute("tabindex", before);
+  }, [loaded]);
+
   const run = useCallback(async <T,>(fn: () => Promise<T>): Promise<T> => {
     setBusy(true); setError(null);
     try { return await fn(); } finally { setBusy(false); }
