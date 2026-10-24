@@ -43,7 +43,7 @@ test("AC1: deleting a task moves it to the project Trash, to be purged after 30 
 
   await admin.page.goto("/audit");
   await expect(admin.page.getByText("purge-trash")).toBeVisible();
-  await expect(admin.page.getByText("Removes tasks that have been in Trash for 30 days")).toBeVisible();
+  await expect(admin.page.getByText(/Removes tasks that have been in Trash for (?:more than )?30 days/)).toBeVisible();
 });
 
 // qa:TC missing

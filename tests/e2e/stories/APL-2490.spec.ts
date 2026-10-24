@@ -3,7 +3,7 @@
 // AC6's non-member check follows PR #21 (tests/e2e/helpers/jim-gate.ts). The plain Admin role shares isAdmin with the Super Admin;
 // the second staging account is a Member, so the check signs in as the Super Admin.
 import { test, expect, zz, type Api } from "../support";
-import { newProject, newTask } from "../g2";
+import { getTask, newProject, newTask } from "../g2";
 import { notLive, prLive } from "../helpers/jim-gate";
 
 const listed = async (who: { api: Api }, id: string, archived = false) =>
@@ -16,8 +16,8 @@ test("AC1: archiving removes the project from active lists and refuses new or ch
   expect(await listed(admin, p.id)).toBe(false);
   expect(await listed(admin, p.id, true)).toBe(true);
   expect((await admin.api.post(`/api/projects/${p.id}/tasks`, { title: zz("x") })).status).toBe(409);
-  expect((await admin.api.patch(`/api/tasks/${t}`, { title: zz("x") })).status).toBe(409);
-  expect((await admin.api.post(`/api/tasks/${t}/complete`)).status).toBe(409);
+  expect((await admin.api.patch(`/api/tasks/${t}`, { title: zz("x"), expectedUpdatedAt: (await getTask(admin, t)).updatedAt })).status).toBe(409);
+  expect((await admin.api.post(`/api/tasks/${t}/complete`, { expectedUpdatedAt: (await getTask(admin, t)).updatedAt })).status).toBe(409);
 });
 
 test("AC2: unarchiving returns the project unchanged and its open tasks to My tasks", async ({ admin, member, later }) => {
@@ -28,7 +28,7 @@ test("AC2: unarchiving returns the project unchanged and its open tasks to My ta
   expect((await admin.api.post(`/api/projects/${p.id}/unarchive`)).status).toBe(200);
   expect(await listed(admin, p.id)).toBe(true);
   expect(JSON.stringify((await member.api.get("/api/my-tasks")).json)).toContain(t);
-  expect((await admin.api.patch(`/api/tasks/${t}`, { title: zz("3.6 editable again") })).status).toBe(200);
+  expect((await admin.api.patch(`/api/tasks/${t}`, { title: zz("3.6 editable again"), expectedUpdatedAt: (await getTask(admin, t)).updatedAt })).status).toBe(200);
 });
 
 test("AC3: an Editor or a Viewer cannot archive or unarchive", async ({ admin, member, later }) => {
@@ -46,8 +46,8 @@ test("AC4: members can still open and read an archived project; nobody can chang
   await admin.api.post(`/api/projects/${p.id}/archive`);
   expect((await member.api.get(`/api/projects/${p.id}`)).status).toBe(200);
   expect((await member.api.get(`/api/tasks/${t}`)).status).toBe(200);
-  expect((await member.api.patch(`/api/tasks/${t}`, { title: zz("x") })).status).toBe(409);
-  expect((await admin.api.patch(`/api/tasks/${t}`, { title: zz("x") })).status).toBe(409);
+  expect((await member.api.patch(`/api/tasks/${t}`, { title: zz("x"), expectedUpdatedAt: (await getTask(member, t)).updatedAt })).status).toBe(409);
+  expect((await admin.api.patch(`/api/tasks/${t}`, { title: zz("x"), expectedUpdatedAt: (await getTask(admin, t)).updatedAt })).status).toBe(409);
   await member.page.goto(`/projects/${p.id}`);
   await expect(member.page.getByText("This project is archived and read-only.").first()).toBeVisible();
 });

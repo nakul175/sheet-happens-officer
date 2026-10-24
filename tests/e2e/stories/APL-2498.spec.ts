@@ -3,6 +3,7 @@
 // AC4 order by due date, AC5 Done column collapsed to 10, AC6 completion rules and archived project.
 // Data: every project and task is named "ZZ-TEST ..."; projects are archived afterwards.
 import { test, expect, zz, type Who, type Page } from "../support";
+import { getTask } from "../g2";
 
 const ist = (d: number) => new Date(Date.now() + 5.5 * 3600e3 + d * 864e5).toISOString().slice(0, 10);
 
@@ -49,7 +50,7 @@ test("AC2: a Viewer cannot drag cards", async ({ admin, member, later }) => {
   const card = member.page.locator(".bcard", { hasText: zz("viewer card") });
   await expect(card).toBeVisible();
   await expect(card).not.toHaveAttribute("draggable", "true");
-  expect((await member.api.post(`/api/tasks/${t}/move`, { sectionId: p.doing })).status).toBe(403);
+  expect((await member.api.post(`/api/tasks/${t}/move`, { sectionId: p.doing, expectedUpdatedAt: (await getTask(member, t)).updatedAt })).status).toBe(403);
 });
 
 test("AC3: four columns show at 1280 px without the page scrolling sideways", async ({ admin, later }) => {
@@ -79,7 +80,7 @@ test("AC5: a Done column with more than 10 shows the 10 most recent and Show all
   const p = await proj(admin, "board-done", later);
   for (let i = 1; i <= 12; i++) {
     const id = await mk(admin, p.id, zz(`b${i}`));
-    expect((await admin.api.post(`/api/tasks/${id}/complete`)).status).toBe(200);
+    expect((await admin.api.post(`/api/tasks/${id}/complete`, { expectedUpdatedAt: (await getTask(admin, id)).updatedAt })).status).toBe(200);
   }
   await board(admin.page, p.id);
   const col = admin.page.locator(`.col[aria-label="Done"]`);
@@ -94,12 +95,12 @@ test("AC6: someone who may not close a task cannot move it to Done, and an archi
   later(() => admin.api.del(`/api/projects/${p.id}/members/${member.user.id}?handoverTo=${admin.user.id}`));
   // The approver is the admin, so the assignee (member) may not close it.
   const t = await mk(admin, p.id, zz("needs approval"), { assigneeId: member.user.id, approverId: admin.user.id });
-  const refused = await member.api.post(`/api/tasks/${t}/move`, { sectionId: p.done });
+  const refused = await member.api.post(`/api/tasks/${t}/move`, { sectionId: p.done, expectedUpdatedAt: (await getTask(member, t)).updatedAt });
   expect([403, 409]).toContain(refused.status);
   expect((await admin.api.get(`/api/tasks/${t}`)).json.task.completedAt).toBeNull();
   // Ordinary move still works for the same person.
-  expect((await member.api.post(`/api/tasks/${t}/move`, { sectionId: p.doing })).status).toBe(200);
+  expect((await member.api.post(`/api/tasks/${t}/move`, { sectionId: p.doing, expectedUpdatedAt: (await getTask(member, t)).updatedAt })).status).toBe(200);
   // Archived: no card can be moved.
   expect((await admin.api.post(`/api/projects/${p.id}/archive`)).status).toBe(200);
-  expect((await admin.api.post(`/api/tasks/${t}/move`, { sectionId: p.todo })).status).toBe(409);
+  expect((await admin.api.post(`/api/tasks/${t}/move`, { sectionId: p.todo, expectedUpdatedAt: (await getTask(admin, t)).updatedAt })).status).toBe(409);
 });

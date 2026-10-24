@@ -3,6 +3,7 @@
 // AC4 done Section completes tasks, AC5 limit of 8, AC6 done Section protected (proposed, not confirmed by the owner).
 // Data: every project and task is named "ZZ-TEST ..."; projects are archived afterwards.
 import { test, expect, zz, type Who, type Page } from "../support";
+import { getTask } from "../g2";
 
 async function proj(admin: Who, label: string, later: (f: () => Promise<unknown>) => void) {
   const r = await admin.api.post("/api/projects", { name: zz(label), leaderId: admin.user.id });
@@ -69,9 +70,9 @@ test("AC4: tasks moved into the done Section count as complete", async ({ admin,
   const p = await proj(admin, "sec-done", later);
   const t = await mk(admin, p.id, zz("to finish"));
   expect((await admin.api.get(`/api/tasks/${t}`)).json.task.completedAt).toBeNull();
-  expect((await admin.api.post(`/api/tasks/${t}/move`, { sectionId: p.done })).status).toBe(200);
+  expect((await admin.api.post(`/api/tasks/${t}/move`, { sectionId: p.done, expectedUpdatedAt: (await getTask(admin, t)).updatedAt })).status).toBe(200);
   expect((await admin.api.get(`/api/tasks/${t}`)).json.task.completedAt).not.toBeNull();
-  expect((await admin.api.post(`/api/tasks/${t}/move`, { sectionId: p.doing })).status).toBe(200);
+  expect((await admin.api.post(`/api/tasks/${t}/move`, { sectionId: p.doing, expectedUpdatedAt: (await getTask(admin, t)).updatedAt })).status).toBe(200);
   expect((await admin.api.get(`/api/tasks/${t}`)).json.task.completedAt).toBeNull();
 });
 

@@ -21,7 +21,7 @@ test("AC1: the Leader names an approver (Leader or Editor, not the assignee); a 
   await admin.api.post(`/api/projects/${p.id}/members`, { userId: viewer.id, role: "VIEWER" });
   await admin.api.post(`/api/projects/${p.id}/members`, { userId: gone.id, role: "EDITOR" });
   await admin.api.post(`/api/team/${gone.id}/deactivate`, { reassign: "leaders" });
-  const put = (who: Who, id: string | null) => who.api.put(`/api/tasks/${t}/approver`, { approverId: id });
+  const put = async (who: Who, id: string | null) => who.api.put(`/api/tasks/${t}/approver`, { approverId: id, expectedUpdatedAt: (await getTask(who, t)).updatedAt });
   expect((await put(member, boss.id)).status).toBe(403); // the assignee
   expect((await put(admin, member.user.id)).status).toBe(400); // is the assignee
   expect((await put(admin, viewer.id)).status).toBe(400);
@@ -34,16 +34,16 @@ test("AC1: the Leader names an approver (Leader or Editor, not the assignee); a 
 test("AC1: the task creator may set the approver (a creator who is not the assignee)", async ({ admin, member, later }) => {
   const { p, boss } = await setup(admin, member, later, "4.6 creator");
   const t = await newTask(admin, p.id, { assigneeId: member.user.id }); // created by the Super Admin, held by the Member
-  expect((await admin.api.put(`/api/tasks/${t}/approver`, { approverId: boss.id })).status).toBe(200);
+  expect((await admin.api.put(`/api/tasks/${t}/approver`, { approverId: boss.id, expectedUpdatedAt: (await getTask(admin, t)).updatedAt })).status).toBe(200);
 });
 
 test("AC2: with an approver, the assignee can only hand the task to the approver, and cannot complete it", async ({ admin, member, later }) => {
   const { p, boss, t } = await setup(admin, member, later, "4.6 ac2");
-  await admin.api.put(`/api/tasks/${t}/approver`, { approverId: boss.id });
+  await admin.api.put(`/api/tasks/${t}/approver`, { approverId: boss.id, expectedUpdatedAt: (await getTask(admin, t)).updatedAt });
   const other = await ghost(admin, later, "other");
   await admin.api.post(`/api/projects/${p.id}/members`, { userId: other.id, role: "EDITOR" });
-  expect((await member.api.post(`/api/tasks/${t}/assign`, { assigneeId: other.id })).status).toBe(403);
-  expect((await member.api.post(`/api/tasks/${t}/complete`)).status).toBe(403);
+  expect((await member.api.post(`/api/tasks/${t}/assign`, { assigneeId: other.id, expectedUpdatedAt: (await getTask(member, t)).updatedAt })).status).toBe(403);
+  expect((await member.api.post(`/api/tasks/${t}/complete`, { expectedUpdatedAt: (await getTask(member, t)).updatedAt })).status).toBe(403);
   expect((await getTask(admin, t)).assignee.id).toBe(member.user.id);
 });
 
@@ -51,7 +51,7 @@ test("AC3+AC7: sending for approval makes the approver the assignee, notified, i
   const p = await newProject(admin, later, { label: "4.6 ac3", members: [{ who: member, role: "EDITOR" }] });
   const title = zz("4.6 handover");
   const t = await newTask(member, p.id, { title });
-  await admin.api.put(`/api/tasks/${t}/approver`, { approverId: admin.user.id }); // the Leader approves
+  await admin.api.put(`/api/tasks/${t}/approver`, { approverId: admin.user.id, expectedUpdatedAt: (await getTask(admin, t)).updatedAt }); // the Leader approves
   expect((await member.api.post(`/api/tasks/${t}/send-for-approval`)).status).toBe(200);
   const held = await getTask(admin, t);
   expect(held.assignee.id).toBe(admin.user.id);
@@ -64,17 +64,17 @@ test("AC3+AC7: sending for approval makes the approver the assignee, notified, i
 
 test("AC4: only the approver, the Leader or an Admin can close it; the assignee cannot, including by moving it to Done", async ({ admin, member, later }) => {
   const { p, boss, t } = await setup(admin, member, later, "4.6 ac4");
-  await admin.api.put(`/api/tasks/${t}/approver`, { approverId: boss.id });
-  expect((await member.api.post(`/api/tasks/${t}/complete`)).status).toBe(403);
-  expect((await member.api.post(`/api/tasks/${t}/move`, { sectionId: p.done })).status).toBe(403);
+  await admin.api.put(`/api/tasks/${t}/approver`, { approverId: boss.id, expectedUpdatedAt: (await getTask(admin, t)).updatedAt });
+  expect((await member.api.post(`/api/tasks/${t}/complete`, { expectedUpdatedAt: (await getTask(member, t)).updatedAt })).status).toBe(403);
+  expect((await member.api.post(`/api/tasks/${t}/move`, { sectionId: p.done, expectedUpdatedAt: (await getTask(member, t)).updatedAt })).status).toBe(403);
   expect((await getTask(admin, t)).completedAt).toBeNull();
-  expect((await admin.api.post(`/api/tasks/${t}/complete`)).status).toBe(200); // the Leader / Admin may
+  expect((await admin.api.post(`/api/tasks/${t}/complete`, { expectedUpdatedAt: (await getTask(admin, t)).updatedAt })).status).toBe(200); // the Leader / Admin may
   expect((await getTask(admin, t)).completedAt).not.toBeNull();
 });
 
 test("AC5: Send back returns the task, open, to the previous assignee; if they are gone it goes to the Leader", async ({ admin, member, later }) => {
   const a = await setup(admin, member, later, "4.6 ac5 back");
-  await admin.api.put(`/api/tasks/${a.t}/approver`, { approverId: a.boss.id });
+  await admin.api.put(`/api/tasks/${a.t}/approver`, { approverId: a.boss.id, expectedUpdatedAt: (await getTask(admin, a.t)).updatedAt });
   expect((await member.api.post(`/api/tasks/${a.t}/send-for-approval`)).status).toBe(200);
   expect((await getTask(admin, a.t)).assignee.id).toBe(a.boss.id);
   expect((await admin.api.post(`/api/tasks/${a.t}/send-back`)).status).toBe(200); // the Admin acts for the approver
@@ -84,7 +84,7 @@ test("AC5: Send back returns the task, open, to the previous assignee; if they a
   expect(JSON.stringify((await member.api.get("/api/my-tasks")).json)).toContain(a.t);
 
   const b = await setup(admin, member, later, "4.6 ac5 gone");
-  await admin.api.put(`/api/tasks/${b.t}/approver`, { approverId: b.boss.id });
+  await admin.api.put(`/api/tasks/${b.t}/approver`, { approverId: b.boss.id, expectedUpdatedAt: (await getTask(admin, b.t)).updatedAt });
   await member.api.post(`/api/tasks/${b.t}/send-for-approval`);
   expect((await admin.api.del(`/api/projects/${b.p.id}/members/${member.user.id}?handoverTo=${admin.user.id}`)).status).toBe(204);
   expect((await admin.api.post(`/api/tasks/${b.t}/send-back`)).status).toBe(200);
@@ -96,12 +96,12 @@ test("AC6: with no approver the 4.3 completion rules apply unchanged (another Ed
   const p = await newProject(admin, later, { label: "4.6 ac6", members: [{ who: member, role: "EDITOR" }] });
   const t = await newTask(admin, p.id);
   expect((await getTask(admin, t)).approver).toBeNull();
-  expect((await member.api.post(`/api/tasks/${t}/complete`)).status).toBe(200);
+  expect((await member.api.post(`/api/tasks/${t}/complete`, { expectedUpdatedAt: (await getTask(member, t)).updatedAt })).status).toBe(200);
 });
 
 test("AC8: when a named approver is removed from the project, the Leader becomes the approver and is told", async ({ admin, member, later }) => {
   const { p, boss, t } = await setup(admin, member, later, "4.6 ac8");
-  await admin.api.put(`/api/tasks/${t}/approver`, { approverId: boss.id });
+  await admin.api.put(`/api/tasks/${t}/approver`, { approverId: boss.id, expectedUpdatedAt: (await getTask(admin, t)).updatedAt });
   expect((await admin.api.del(`/api/projects/${p.id}/members/${boss.id}`)).status).toBe(204); // holds nothing, so no taker is needed
   const got = await getTask(admin, t);
   expect(got.approver.id).toBe(admin.user.id);
@@ -115,10 +115,10 @@ test("AC9: mid-approval only the Leader or an Admin can change the approver; the
   const { p, boss, t } = await setup(admin, member, later, "4.6 ac9");
   const next = await ghost(admin, later, "newapprover");
   await admin.api.post(`/api/projects/${p.id}/members`, { userId: next.id, role: "EDITOR" });
-  await admin.api.put(`/api/tasks/${t}/approver`, { approverId: boss.id });
+  await admin.api.put(`/api/tasks/${t}/approver`, { approverId: boss.id, expectedUpdatedAt: (await getTask(admin, t)).updatedAt });
   await member.api.post(`/api/tasks/${t}/send-for-approval`);
-  expect((await member.api.put(`/api/tasks/${t}/approver`, { approverId: next.id })).status).toBe(403); // the creator, not the Leader
-  expect((await admin.api.put(`/api/tasks/${t}/approver`, { approverId: next.id })).status).toBe(200);
+  expect((await member.api.put(`/api/tasks/${t}/approver`, { approverId: next.id, expectedUpdatedAt: (await getTask(member, t)).updatedAt })).status).toBe(403); // the creator, not the Leader
+  expect((await admin.api.put(`/api/tasks/${t}/approver`, { approverId: next.id, expectedUpdatedAt: (await getTask(admin, t)).updatedAt })).status).toBe(200);
   const got = await getTask(admin, t);
   expect(got.approver.id).toBe(next.id);
   expect(got.assignee.id).toBe(next.id);
@@ -126,7 +126,7 @@ test("AC9: mid-approval only the Leader or an Admin can change the approver; the
 
 test("AC3: the assignee sees 'Send for approval' and, after pressing it, 'Waiting for <approver> to approve this task.' (screen)", async ({ admin, member, later }) => {
   const { p, boss, t } = await setup(admin, member, later, "4.6 screen");
-  await admin.api.put(`/api/tasks/${t}/approver`, { approverId: boss.id });
+  await admin.api.put(`/api/tasks/${t}/approver`, { approverId: boss.id, expectedUpdatedAt: (await getTask(admin, t)).updatedAt });
   await member.page.goto(`/projects/${p.id}?task=${t}`);
   const dlg = member.page.getByRole("dialog");
   await dlg.getByRole("button", { name: "Send for approval" }).click();

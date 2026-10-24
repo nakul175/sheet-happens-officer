@@ -252,8 +252,14 @@ test("AC7: each screen shows the mockup's key elements at 1440x900 and 390x844",
     await shot(admin.page, `Task detail ${width}x${height}`);
 
     await admin.page.goto("/team");
-    await expect(admin.page.getByRole("columnheader", { name: "Role", exact: true })).toBeVisible();
-    await expect(admin.page.getByRole("columnheader", { name: "Status", exact: true })).toBeVisible();
+    if (width < 600) {
+      // The phone layout labels each cell instead of rendering a separate header row.
+      await expect(admin.page.locator('td[data-label="Role"]').first()).toBeVisible();
+      await expect(admin.page.locator('td[data-label="Status"]').first()).toBeVisible();
+    } else {
+      await expect(admin.page.getByRole("columnheader", { name: "Role", exact: true })).toBeVisible();
+      await expect(admin.page.getByRole("columnheader", { name: "Status", exact: true })).toBeVisible();
+    }
     await brand(admin.page);
     await shot(admin.page, `Team ${width}x${height}`);
   }

@@ -3,6 +3,7 @@
 // AC3 concierge stays usable, AC4 task link and "This task isn't available", AC5 stale save warning.
 // Data: every project and task is named "ZZ-TEST ..."; projects are archived afterwards.
 import { test, expect, zz, type Who, type Page } from "../support";
+import { getTask } from "../g2";
 
 const ist = (d: number) => new Date(Date.now() + 5.5 * 3600e3 + d * 864e5).toISOString().slice(0, 10);
 
@@ -108,7 +109,7 @@ test("AC5: saving over someone else's change shows the warning and offers to re-
   const d = dialog(admin.page);
   await expect(d.getByLabel("Title")).toHaveValue(zz("stale"));
   // someone else changes the task after the overlay opened (a second client, same account is enough to move updatedAt)
-  expect((await admin.api.patch(`/api/tasks/${t}`, { priority: "HIGH" })).status).toBe(200);
+  expect((await admin.api.patch(`/api/tasks/${t}`, { priority: "HIGH", expectedUpdatedAt: (await getTask(admin, t)).updatedAt })).status).toBe(200);
   await d.getByLabel("Title").fill(zz("stale edited"));
   await d.getByLabel("Title").press("Enter");
   const warn = d.getByRole("alert").filter({ hasText: "changed this task while you were editing" });

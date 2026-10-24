@@ -10,7 +10,7 @@ test("AC1: a blocked task stays in its Section and shows a Blocked badge on the 
   const p = await newProject(admin, later, { label: "4.4 badge" });
   const title = zz("4.4 stuck");
   const t = await newTask(admin, p.id, { title, sectionId: p.doing });
-  const r = await admin.api.patch(`/api/tasks/${t}`, { blocked: true, blockedReason: "Waiting on data" });
+  const r = await admin.api.patch(`/api/tasks/${t}`, { blocked: true, blockedReason: "Waiting on data", expectedUpdatedAt: (await getTask(admin, t)).updatedAt });
   expect(r.status).toBe(200);
   const got = await getTask(admin, t);
   expect(got.blocked).toBe(true);
@@ -24,8 +24,8 @@ test("AC2: clearing the flag removes the badge and the reason", async ({ admin, 
   const p = await newProject(admin, later, { label: "4.4 clear" });
   const title = zz("4.4 cleared");
   const t = await newTask(admin, p.id, { title });
-  await admin.api.patch(`/api/tasks/${t}`, { blocked: true, blockedReason: "Waiting" });
-  const r = await admin.api.patch(`/api/tasks/${t}`, { blocked: false });
+  await admin.api.patch(`/api/tasks/${t}`, { blocked: true, blockedReason: "Waiting", expectedUpdatedAt: (await getTask(admin, t)).updatedAt });
+  const r = await admin.api.patch(`/api/tasks/${t}`, { blocked: false, expectedUpdatedAt: (await getTask(admin, t)).updatedAt });
   expect(r.status).toBe(200);
   const got = await getTask(admin, t);
   expect(got.blocked).toBe(false);
@@ -52,11 +52,11 @@ test("AC2: ticking 'This task is blocked' in the task panel sets and clears it (
 test("AC3: a Viewer cannot set or clear the flag, and nobody can in an archived project", async ({ admin, member, later }) => {
   const p = await newProject(admin, later, { label: "4.4 viewer", members: [{ who: member, role: "VIEWER" }] });
   const t = await newTask(admin, p.id);
-  expect((await member.api.patch(`/api/tasks/${t}`, { blocked: true })).status).toBe(403);
-  await admin.api.patch(`/api/tasks/${t}`, { blocked: true, blockedReason: "x" });
-  expect((await member.api.patch(`/api/tasks/${t}`, { blocked: false })).status).toBe(403);
+  expect((await member.api.patch(`/api/tasks/${t}`, { blocked: true, expectedUpdatedAt: (await getTask(member, t)).updatedAt })).status).toBe(403);
+  await admin.api.patch(`/api/tasks/${t}`, { blocked: true, blockedReason: "x", expectedUpdatedAt: (await getTask(admin, t)).updatedAt });
+  expect((await member.api.patch(`/api/tasks/${t}`, { blocked: false, expectedUpdatedAt: (await getTask(member, t)).updatedAt })).status).toBe(403);
   await admin.api.post(`/api/projects/${p.id}/archive`);
-  expect((await admin.api.patch(`/api/tasks/${t}`, { blocked: false })).status).toBe(409);
+  expect((await admin.api.patch(`/api/tasks/${t}`, { blocked: false, expectedUpdatedAt: (await getTask(admin, t)).updatedAt })).status).toBe(409);
 });
 
 test("AC4: the Leader gets one notice naming the task, who flagged and why; none when the Leader flags or when cleared", async ({ admin, member, later }) => {
@@ -64,21 +64,21 @@ test("AC4: the Leader gets one notice naming the task, who flagged and why; none
   const title = zz("4.4 notice task");
   const t = await newTask(member, p.id, { title });
   expect(await count(admin, title)).toHaveLength(0);
-  expect((await member.api.patch(`/api/tasks/${t}`, { blocked: true, blockedReason: "Need the budget" })).status).toBe(200);
+  expect((await member.api.patch(`/api/tasks/${t}`, { blocked: true, blockedReason: "Need the budget", expectedUpdatedAt: (await getTask(member, t)).updatedAt })).status).toBe(200);
   const first = await count(admin, title);
   expect(first).toHaveLength(1);
   expect(first[0].text).toContain(String(member.user.name));
   expect(first[0].text).toContain("Need the budget");
   // Editing the reason while blocked sends nothing new; clearing sends nothing.
-  await member.api.patch(`/api/tasks/${t}`, { blockedReason: "Need the budget by Friday" });
-  await member.api.patch(`/api/tasks/${t}`, { blocked: false });
+  await member.api.patch(`/api/tasks/${t}`, { blockedReason: "Need the budget by Friday", expectedUpdatedAt: (await getTask(member, t)).updatedAt });
+  await member.api.patch(`/api/tasks/${t}`, { blocked: false, expectedUpdatedAt: (await getTask(member, t)).updatedAt });
   expect(await count(admin, title)).toHaveLength(1);
   // Setting it again after clearing sends a new one.
-  await member.api.patch(`/api/tasks/${t}`, { blocked: true, blockedReason: "Again" });
+  await member.api.patch(`/api/tasks/${t}`, { blocked: true, blockedReason: "Again", expectedUpdatedAt: (await getTask(member, t)).updatedAt });
   expect(await count(admin, title)).toHaveLength(2);
   // The Leader flagging their own task sends no notice to the Leader.
   const own = zz("4.4 leader flags");
   const lt = await newTask(admin, p.id, { title: own });
-  await admin.api.patch(`/api/tasks/${lt}`, { blocked: true, blockedReason: "mine" });
+  await admin.api.patch(`/api/tasks/${lt}`, { blocked: true, blockedReason: "mine", expectedUpdatedAt: (await getTask(admin, lt)).updatedAt });
   expect(await count(admin, own)).toHaveLength(0);
 });

@@ -12,7 +12,7 @@ test("AC1: an assignee sees the task in My tasks and is notified; so is an added
   const title = zz("4.3 assigned");
   const t = await newTask(admin, p.id, { title });
   expect(await inMyTasks(member, t)).toBe(false);
-  expect((await admin.api.post(`/api/tasks/${t}/assign`, { assigneeId: member.user.id })).status).toBe(200);
+  expect((await admin.api.post(`/api/tasks/${t}/assign`, { assigneeId: member.user.id, expectedUpdatedAt: (await getTask(admin, t)).updatedAt })).status).toBe(200);
   expect(await inMyTasks(member, t)).toBe(true);
   expect(await mentions(member, title), "an assignment notice naming the task").toBeGreaterThan(0);
 
@@ -30,10 +30,10 @@ test("AC2: a Viewer, a non-member or a deactivated person cannot be the assignee
   const gone = await ghost(admin, later, "gone");
   await admin.api.post(`/api/projects/${p.id}/members`, { userId: gone.id });
   await admin.api.post(`/api/team/${gone.id}/deactivate`, { reassign: "leaders" });
-  expect((await admin.api.post(`/api/tasks/${t}/assign`, { assigneeId: member.user.id })).status).toBe(400);
-  expect((await admin.api.post(`/api/tasks/${t}/assign`, { assigneeId: outsider.id })).status).toBe(400);
-  expect((await admin.api.post(`/api/tasks/${t}/assign`, { assigneeId: gone.id })).status).toBe(400);
-  expect((await admin.api.post(`/api/tasks/${t}/assign`, { assigneeId: "" })).status).toBe(400);
+  expect((await admin.api.post(`/api/tasks/${t}/assign`, { assigneeId: member.user.id, expectedUpdatedAt: (await getTask(admin, t)).updatedAt })).status).toBe(400);
+  expect((await admin.api.post(`/api/tasks/${t}/assign`, { assigneeId: outsider.id, expectedUpdatedAt: (await getTask(admin, t)).updatedAt })).status).toBe(400);
+  expect((await admin.api.post(`/api/tasks/${t}/assign`, { assigneeId: gone.id, expectedUpdatedAt: (await getTask(admin, t)).updatedAt })).status).toBe(400);
+  expect((await admin.api.post(`/api/tasks/${t}/assign`, { assigneeId: "", expectedUpdatedAt: (await getTask(admin, t)).updatedAt })).status).toBe(400);
   expect((await getTask(admin, t)).assignee.id).toBe(admin.user.id);
 });
 
@@ -56,7 +56,7 @@ test("AC3: only active project members can be collaborators; a Viewer may be", a
 test("AC4: a Viewer cannot assign or add collaborators", async ({ admin, member, later }) => {
   const p = await newProject(admin, later, { label: "4.3 ac4", members: [{ who: member, role: "VIEWER" }] });
   const t = await newTask(admin, p.id);
-  expect((await member.api.post(`/api/tasks/${t}/assign`, { assigneeId: admin.user.id })).status).toBe(403);
+  expect((await member.api.post(`/api/tasks/${t}/assign`, { assigneeId: admin.user.id, expectedUpdatedAt: (await getTask(member, t)).updatedAt })).status).toBe(403);
   expect((await member.api.post(`/api/tasks/${t}/collaborators`, { userId: member.user.id })).status).toBe(403);
 });
 
@@ -78,15 +78,15 @@ test("AC5: a collaborator removed from the project is dropped from its tasks, wi
 test("AC6: with no approver, the assignee, any Editor and the Leader may complete; a Viewer collaborator may not", async ({ admin, member, later }) => {
   const p = await newProject(admin, later, { label: "4.3 ac6", members: [{ who: member, role: "EDITOR" }] });
   const t = await newTask(admin, p.id); // assigned to the Super Admin, no approver
-  expect((await member.api.post(`/api/tasks/${t}/complete`)).status).toBe(200); // another Editor
+  expect((await member.api.post(`/api/tasks/${t}/complete`, { expectedUpdatedAt: (await getTask(member, t)).updatedAt })).status).toBe(200); // another Editor
   expect((await getTask(admin, t)).completedAt).not.toBeNull();
   const own = await newTask(member, p.id);
-  expect((await member.api.post(`/api/tasks/${own}/complete`)).status).toBe(200); // the assignee
+  expect((await member.api.post(`/api/tasks/${own}/complete`, { expectedUpdatedAt: (await getTask(member, own)).updatedAt })).status).toBe(200); // the assignee
   const led = await newTask(member, p.id);
-  expect((await admin.api.post(`/api/tasks/${led}/complete`)).status).toBe(200); // the Leader
+  expect((await admin.api.post(`/api/tasks/${led}/complete`, { expectedUpdatedAt: (await getTask(admin, led)).updatedAt })).status).toBe(200); // the Leader
 
   const v = await newProject(admin, later, { label: "4.3 ac6 viewer", members: [{ who: member, role: "VIEWER" }] });
   const vt = await newTask(admin, v.id);
   expect((await admin.api.post(`/api/tasks/${vt}/collaborators`, { userId: member.user.id })).status).toBe(201);
-  expect((await member.api.post(`/api/tasks/${vt}/complete`)).status).toBe(403);
+  expect((await member.api.post(`/api/tasks/${vt}/complete`, { expectedUpdatedAt: (await getTask(member, vt)).updatedAt })).status).toBe(403);
 });

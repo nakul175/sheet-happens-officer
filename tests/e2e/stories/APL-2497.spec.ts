@@ -3,6 +3,7 @@
 // AC5 archived project read-only.
 // Data: every project and task is named "ZZ-TEST ..."; projects are archived afterwards.
 import { test, expect, zz, type Who } from "../support";
+import { getTask } from "../g2";
 
 const ist = (d: number) => new Date(Date.now() + 5.5 * 3600e3 + d * 864e5).toISOString().slice(0, 10);
 
@@ -60,7 +61,7 @@ test("AC4: a Done section with more than 10 shows the 10 most recent and Show al
   const p = await proj(admin, "list-done", later);
   for (let i = 1; i <= 12; i++) {
     const id = await mk(admin, p.id, zz(`d${i}`));
-    expect((await admin.api.post(`/api/tasks/${id}/complete`)).status).toBe(200);
+    expect((await admin.api.post(`/api/tasks/${id}/complete`, { expectedUpdatedAt: (await getTask(admin, id)).updatedAt })).status).toBe(200);
   }
   await admin.page.goto(`/projects/${p.id}`);
   const done = admin.page.locator(`section[aria-label^="Done"]`).first();

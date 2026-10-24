@@ -59,7 +59,7 @@ test("AC4: a task always has an assignee: it cannot be saved or reassigned to no
   const t = await newTask(admin, p.id);
   expect((await getTask(admin, t)).assignee.id).toBe(admin.user.id); // defaults to the creator
   for (const bad of [null, "", undefined]) {
-    const r = await admin.api.post(`/api/tasks/${t}/assign`, { assigneeId: bad });
+    const r = await admin.api.post(`/api/tasks/${t}/assign`, { assigneeId: bad, expectedUpdatedAt: (await getTask(admin, t)).updatedAt });
     expect(r.status).toBe(400);
   }
   expect((await getTask(admin, t)).assignee.id).toBe(admin.user.id);
