@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { agingDatabase } from "./e2e/helpers/owned-local-aging";
 const base = "http://127.0.0.1:3469";
 const raw = "postgresql://synthetic:synthetic@127.0.0.1:55432/sho_test?schema=sho_owned_aging_guard";
-const env = { SHO_OWNED_LOCAL_AGING: "true", DATABASE_URL: raw } as NodeJS.ProcessEnv;
+const env = { SHO_OWNED_LOCAL_AGING: "true", DATABASE_URL: raw };
 describe("owned local aging scope", () => {
   it("accepts a disposable local schema with explicit opt-in", () => expect(agingDatabase(env,base)).toBe(raw));
   it.each([{}, {...env,SHO_OWNED_LOCAL_AGING:"false"}, {...env,DATABASE_URL:undefined}])("rejects missing local fixture prerequisites", v=>expect(()=>agingDatabase(v,base)).toThrow());

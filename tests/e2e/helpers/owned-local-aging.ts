@@ -3,7 +3,7 @@ import { execFileSync } from "node:child_process";
 import { localPgClient, schemaFromDatabaseUrl } from "./local-db-pool";
 import { RUN, BASE_URL, type Json } from "../support";
 
-export function agingDatabase(env: NodeJS.ProcessEnv = process.env, appUrl = BASE_URL) {
+export function agingDatabase(env: Record<string, string | undefined> = process.env, appUrl = BASE_URL) {
   if (env.SHO_OWNED_LOCAL_AGING !== "true") throw Error("SHO_OWNED_LOCAL_AGING=true is required for owned aging fixtures");
   const hosts = ["127.0.0.1", "localhost", "::1"];
   if (!hosts.includes(new URL(appUrl).hostname.replace(/^\[|\]$/g, ""))) throw Error("Owned aging requires a loopback application");
