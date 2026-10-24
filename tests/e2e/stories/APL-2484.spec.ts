@@ -1,11 +1,13 @@
 // SHO-US-2.5 Team page by role (APL-2484). Acceptance criteria AC1 to AC4.
+// qa:TC: unpublished. No test-case id of the form qa:TC-APL2484-<hash> exists in this repo or in its history, so
+// each title ends "qa:TC missing". Replace that marker with the real id when it is published; never invent one.
 import { test, expect, RUN, type Json } from "../support";
 import { PASS, alias, deactivate, passwordOk, personByEmail, signUp, zz } from "./qa";
 
 const SLOW = { timeout: 90_000 }; // the Team table can be long on a busy workspace
 
 test.describe("SHO-US-2.5 / APL-2484", () => {
-  test("AC1: a Member sees active people's names only, with no email, status or management action", async ({ member }) => {
+  test("AC1: a Member sees active people's names only, with no email, status or management action qa:TC missing", async ({ member }) => {
     await member.page.goto("/team");
     await expect(member.page.getByRole("heading", { name: "Team" }).first()).toBeVisible(SLOW);
     await expect(member.page.locator(".list .item").first()).toBeVisible(SLOW);
@@ -20,7 +22,7 @@ test.describe("SHO-US-2.5 / APL-2484", () => {
     }
   });
 
-  test("AC2: an Admin or Super Admin also sees email, role and status columns and the actions their role allows", async ({ admin }) => {
+  test("AC2: an Admin or Super Admin also sees email, role and status columns and the actions their role allows qa:TC missing", async ({ admin }) => {
     test.setTimeout(240_000);
     await admin.page.goto("/team");
     for (const h of ["Name", "Email", "Role", "Status", "Actions"]) await expect(admin.page.getByRole("columnheader", { name: h, exact: true }).first()).toBeVisible(SLOW);
@@ -31,7 +33,7 @@ test.describe("SHO-US-2.5 / APL-2484", () => {
     expect(people.every((p) => "email" in p && "status" in p && "orgRole" in p)).toBe(true);
   });
 
-  test("AC3: deactivated people show a grey Deactivated chip to Admins and are hidden from Members", async ({ admin, member, later }) => {
+  test("AC3: deactivated people show a grey Deactivated chip to Admins and are hidden from Members qa:TC missing", async ({ admin, member, later }) => {
     test.setTimeout(240_000);
     const r = await admin.api.post("/api/team", { firstName: "ZZ-TEST", lastName: `hidden ${RUN}`, email: `zz-test-${RUN}-hidden@example.invalid`, role: "MEMBER" });
     expect(r.status).toBe(201);
@@ -52,7 +54,7 @@ test.describe("SHO-US-2.5 / APL-2484", () => {
     await expect(member.page.getByText(name)).toHaveCount(0);
   });
 
-  test("AC3 (unverified): unverified people show an Unverified status to Admins and are hidden from Members", async ({ anon, admin, member, later }) => {
+  test("AC3 (unverified): unverified people show an Unverified status to Admins and are hidden from Members qa:TC missing", async ({ anon, admin, member, later }) => {
     test.setTimeout(180_000);
     if (!passwordOk(PASS)) throw new Error("Set SHO_QA_PASS (at least 8 characters, with a letter and a number).");
     const email = alias("2484", "unverified", "aplyd.com");
@@ -72,7 +74,7 @@ test.describe("SHO-US-2.5 / APL-2484", () => {
     await expect(member.page.getByText(name)).toHaveCount(0);
   });
 
-  test("AC4: the Super Admin's own row has no management action", async ({ admin }) => {
+  test("AC4: the Super Admin's own row has no management action qa:TC missing", async ({ admin }) => {
     test.setTimeout(240_000);
     await admin.page.goto("/team");
     const mine = admin.page.locator("tr", { hasText: String(admin.user.email).toLowerCase() }).first();

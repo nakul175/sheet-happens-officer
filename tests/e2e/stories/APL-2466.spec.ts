@@ -1,5 +1,7 @@
 // APL-2466 · [SHO-E2] People and roles. One test per acceptance criterion.
-// Pam qa:TC: none on the issue. Password comes from SHO_QA_PASS. Names use ZZ-TEST. Emails are nakul17+ aliases.
+// qa:TC: unpublished. No test-case id of the form qa:TC-APL2466-<hash> exists in this repo or in its history, so
+// each title ends "qa:TC missing". Replace that marker with the real id when it is published; never invent one.
+// Password comes from SHO_QA_PASS. Names use ZZ-TEST. Emails are nakul17+ aliases.
 import { test, login } from "../support";
 import {
   PASS, passwordOk, alias, zz, gate, signUp, signInAs, verifiedUser, personByEmail, deactivate,
@@ -19,7 +21,7 @@ async function taskFor(api: Api, projectId: string, assigneeId: string, title: s
   return r.json.task.id as string;
 }
 
-test("AC1: the configured first Super Admin has the Super Admin role, and a new sign-up does not", async ({ admin, anon, later }) => {
+test("AC1: the configured first Super Admin has the Super Admin role, and a new sign-up does not qa:TC missing", async ({ admin, anon, later }) => {
   // A fresh database is not created here. The configured account (SHO_ADMIN_EMAIL, from SUPER_ADMIN_EMAILS) is that first Super Admin.
   const me = await admin.api.get("/api/auth/me");
   expect(me.json.user.orgRole).toBe("SUPER_ADMIN");
@@ -34,7 +36,7 @@ test("AC1: the configured first Super Admin has the Super Admin role, and a new 
   later(() => deactivate(admin.api, person!.id));
 });
 
-test("AC2: the Super Admin can promote a Member to Admin and demote them, and the person is notified", async ({ admin, browser, anon, later }) => {
+test("AC2: the Super Admin can promote a Member to Admin and demote them, and the person is notified qa:TC missing", async ({ admin, browser, anon, later }) => {
   const member = await verifiedUser(browser, anon.request, "2466", "ac2");
   later(() => member.ctx.close());
   later(() => deactivate(admin.api, member.user.id as string));
@@ -52,7 +54,7 @@ test("AC2: the Super Admin can promote a Member to Admin and demote them, and th
   expect(again.some((n) => n.text === `${admin.user.name} changed your role to member.`)).toBe(true);
 });
 
-test("AC3: deactivating a person blocks sign-in and keeps the record; reactivating restores access", async ({ admin, browser, anon, later }) => {
+test("AC3: deactivating a person blocks sign-in and keeps the record; reactivating restores access qa:TC missing", async ({ admin, browser, anon, later }) => {
   const member = await verifiedUser(browser, anon.request, "2466", "ac3");
   later(() => member.ctx.close());
   later(() => deactivate(admin.api, member.user.id as string));
@@ -75,7 +77,7 @@ test("AC3: deactivating a person blocks sign-in and keeps the record; reactivati
   expect(back.user.id).toBe(member.user.id);
 });
 
-test("AC4: open tasks move to a chosen receiver, and a receiver outside the project falls back to the Leader", async ({ admin, browser, anon, later }) => {
+test("AC4: open tasks move to a chosen receiver, and a receiver outside the project falls back to the Leader qa:TC missing", async ({ admin, browser, anon, later }) => {
   const leaver = await verifiedUser(browser, anon.request, "2466", "ac4-leave");
   const taker = await verifiedUser(browser, anon.request, "2466", "ac4-take");
   const outsider = await verifiedUser(browser, anon.request, "2466", "ac4-out");
@@ -113,7 +115,7 @@ test("AC4: open tasks move to a chosen receiver, and a receiver outside the proj
   expect(["LEADER", "EDITOR"]).toContain(members.find((member) => member.userId === assigneeId)?.role);
 });
 
-test("AC5: the only Super Admin cannot be demoted or deactivated", async ({ admin }) => {
+test("AC5: the only Super Admin cannot be demoted or deactivated qa:TC missing", async ({ admin }) => {
   const id = admin.user.id as string;
   const demote = await admin.api.patch(`/api/team/${id}`, { orgRole: "MEMBER" });
   expect(demote.status).toBe(403);
@@ -128,7 +130,7 @@ test("AC5: the only Super Admin cannot be demoted or deactivated", async ({ admi
   await expect(mine.getByRole("button", { name: /Deactivate|Make Member/ })).toHaveCount(0);
 });
 
-test("AC6: the Team page shows people by role, and deactivated people are shown as deactivated", async ({ admin, browser, anon, later }) => {
+test("AC6: the Team page shows people by role, and deactivated people are shown as deactivated qa:TC missing", async ({ admin, browser, anon, later }) => {
   const member = await verifiedUser(browser, anon.request, "2466", "ac6-member");
   const orgAdmin = await verifiedUser(browser, anon.request, "2466", "ac6-admin");
   later(() => member.ctx.close());

@@ -1,5 +1,7 @@
 // SHO-US-2.3 Deactivate and reactivate people (APL-2482). Acceptance criteria AC1 to AC3.
 // Session checks use a nakul17+ alias. When the test mail sink has the password, the person signs in.
+// qa:TC: unpublished. No test-case id of the form qa:TC-APL2482-<hash> exists in this repo or in its history, so
+// each title ends "qa:TC missing". Replace that marker with the real id when it is published; never invent one.
 import { readFileSync } from "node:fs";
 import { test, expect, RUN, zz, type Api, type Json } from "../support";
 import { alias, BASE_URL, sinkText } from "./qa";
@@ -22,7 +24,7 @@ async function project(admin: Ctx, later: (f: () => Promise<unknown>) => void, l
 const statusOf = async (admin: Ctx, id: string) => (await admin.api.get(`/api/team/${id}`)).json.person.status as string;
 
 test.describe("SHO-US-2.3 / APL-2482", () => {
-  test("AC1: an Admin deactivates a Member: they are kept (never deleted), cannot be given new tasks, and their open tasks are handed over", async ({ admin, later }) => {
+  test("AC1: an Admin deactivates a Member: they are kept (never deleted), cannot be given new tasks, and their open tasks are handed over qa:TC missing", async ({ admin, later }) => {
     const p = await person(admin, later, "leaver");
     const proj = await project(admin, later, "2.3 ac1");
     expect((await admin.api.post(`/api/projects/${proj}/members`, { userId: p.id, role: "EDITOR" })).status).toBe(201);
@@ -44,7 +46,7 @@ test.describe("SHO-US-2.3 / APL-2482", () => {
     expect([404, 405]).toContain((await admin.api.del(`/api/team/${p.id}`)).status);
   });
 
-  test("AC1 (sessions and sign-in): their sessions end and they cannot sign in", async ({ admin, browser, later }) => {
+  test("AC1 (sessions and sign-in): their sessions end and they cannot sign in qa:TC missing", async ({ admin, browser, later }) => {
     const email = alias("2482", "session");
     const r = await admin.api.post("/api/team", { firstName: "ZZ-TEST", lastName: `session ${RUN}`, email, role: "MEMBER" });
     expect(r.status, JSON.stringify(r.json)).toBe(201);
@@ -72,7 +74,7 @@ test.describe("SHO-US-2.3 / APL-2482", () => {
     await ctx.close();
   });
 
-  test("AC2: only the Super Admin can act on Admins; a Member cannot act on anyone; nobody can deactivate a Super Admin", async ({ admin, member, later }) => {
+  test("AC2: only the Super Admin can act on Admins; a Member cannot act on anyone; nobody can deactivate a Super Admin qa:TC missing", async ({ admin, member, later }) => {
     const adminPerson = await person(admin, later, "adminrole", "ADMIN");
     const plain = await person(admin, later, "plainrole");
     // A Member may not deactivate an Admin or a Member.
@@ -89,7 +91,7 @@ test.describe("SHO-US-2.3 / APL-2482", () => {
     expect(await statusOf(admin, adminPerson.id)).toBe("DEACTIVATED");
   });
 
-  test("AC2 (Admin acting on an Admin): an Admin who is not the Super Admin is refused, for deactivating and for reactivating", async ({ admin, member, later }) => {
+  test("AC2 (Admin acting on an Admin): an Admin who is not the Super Admin is refused, for deactivating and for reactivating qa:TC missing", async ({ admin, member, later }) => {
     // The plain Member is made an Admin for the length of this test only. The role is put back in the finally block and again by `later`.
     later(() => admin.api.patch(`/api/team/${member.user.id}`, { orgRole: "MEMBER" }));
     const target = await person(admin, later, "adminfoe", "ADMIN");
@@ -105,7 +107,7 @@ test.describe("SHO-US-2.3 / APL-2482", () => {
     }
   });
 
-  test("AC3: reactivating restores the person and their old project membership, but does not hand reassigned tasks back", async ({ admin, later }) => {
+  test("AC3: reactivating restores the person and their old project membership, but does not hand reassigned tasks back qa:TC missing", async ({ admin, later }) => {
     const p = await person(admin, later, "returner");
     const proj = await project(admin, later, "2.3 ac3");
     await admin.api.post(`/api/projects/${proj}/members`, { userId: p.id, role: "EDITOR" });
@@ -124,7 +126,7 @@ test.describe("SHO-US-2.3 / APL-2482", () => {
     expect((await admin.api.post(`/api/team/${p.id}/reactivate`)).status).toBe(409);
   });
 
-  test("AC3 (sign-in): the reactivated person can sign in again", async ({ admin, browser, later }) => {
+  test("AC3 (sign-in): the reactivated person can sign in again qa:TC missing", async ({ admin, browser, later }) => {
     const email = alias("2482", "back");
     const r = await admin.api.post("/api/team", { firstName: "ZZ-TEST", lastName: `back ${RUN}`, email, role: "MEMBER" });
     expect(r.status, JSON.stringify(r.json)).toBe(201);
