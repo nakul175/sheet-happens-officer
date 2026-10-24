@@ -1,11 +1,13 @@
 // Actual HTTP + PostgreSQL integration of the approved creation-only policy.
-import { afterAll, expect, it } from "vitest";
-import { account, zzProject, type Account } from "./helpers";
+import { afterAll, beforeAll, expect, it } from "vitest";
+import { account, BASE, zzProject, type Account } from "./helpers";
 import { db } from "../src/lib/db";
 import { newTurn, runTool } from "../src/lib/concierge/tools";
+import { assertCreationCompatTarget } from "./future-feature-creation-target";
 const people:Account[]=[], projects:string[]=[];
+beforeAll(() => assertCreationCompatTarget(process.env, BASE));
 afterAll(async()=>{ // This file creates only its own IDs in a separately provisioned local schema.
- const url=new URL(process.env.DATABASE_URL??"http://invalid");if(url.searchParams.get("schema")!=="sho_future_features_20261024")throw Error("Refusing nonowned cleanup");
+ assertCreationCompatTarget(process.env, BASE);
  const ids=people.map(p=>p.id);
  await db.actionLog.deleteMany({where:{actorId:{in:ids}}});await db.notification.deleteMany({where:{recipientId:{in:ids}}});
  await db.task.deleteMany({where:{projectId:{in:projects}}});await db.section.deleteMany({where:{projectId:{in:projects}}});await db.projectMember.deleteMany({where:{projectId:{in:projects}}});await db.project.deleteMany({where:{id:{in:projects}}});

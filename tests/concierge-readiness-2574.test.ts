@@ -9,7 +9,7 @@ beforeAll(async () => {
   const candidates = [process.env.PW_CHROMIUM, "/usr/bin/google-chrome", "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"].filter((p): p is string => !!p);
   const executablePath = candidates.find(p => existsSync(p));
   browser = await chromium.launch({ headless: true, ...(executablePath ? { executablePath } : {}) });
-});
+}, 60_000);
 afterAll(async () => { await browser?.close(); });
 
 it("waits for delayed disabled reason instead of asserting chips during loading", async () => {
