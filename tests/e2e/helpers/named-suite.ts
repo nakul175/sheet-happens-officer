@@ -30,8 +30,14 @@ function suiteEnv(): NodeJS.ProcessEnv {
     if (host !== "127.0.0.1" && host !== "localhost") throw new Error("Refusing to run the named suite against a non-local database.");
     env.DATABASE_URL = db;
   }
-  env.TASKBOARD_URL = "http://127.0.0.1:3100";
-  env.APP_URL = "http://127.0.0.1:3100";
+  const base = process.env.TASKBOARD_URL ?? process.env.BASE_URL ?? "http://127.0.0.1:3100";
+  const url = new URL(base);
+  if (!["127.0.0.1", "localhost", "[::1]"].includes(url.hostname) ||
+      !["http:", "https:"].includes(url.protocol) || url.username || url.password) {
+    throw new Error("Refusing to run the named suite against a non-local application.");
+  }
+  env.TASKBOARD_URL = url.origin;
+  env.APP_URL = url.origin;
   return env;
 }
 

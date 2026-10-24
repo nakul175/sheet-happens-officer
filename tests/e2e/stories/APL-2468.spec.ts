@@ -55,9 +55,9 @@ test("AC2: title, description, assignee, collaborators, due date and priority ar
   const id = created.json.task.id as string;
   const title = zz("saved");
   const description = zz("notes");
-  const saved = await editor.api.patch(`/api/tasks/${id}`, { title, description, dueDate: "2026-11-02", priority: "HIGH" });
+  const saved = await editor.api.patch(`/api/tasks/${id}`, { title, description, dueDate: "2026-11-02", priority: "HIGH", expectedUpdatedAt: (await editor.api.get(`/api/tasks/${id}`)).json.task.updatedAt });
   expect(saved.status, JSON.stringify(saved.json)).toBe(200);
-  expect((await editor.api.post(`/api/tasks/${id}/assign`, { assigneeId: mate.user.id })).status).toBe(200);
+  expect((await editor.api.post(`/api/tasks/${id}/assign`, { assigneeId: mate.user.id, expectedUpdatedAt: (await editor.api.get(`/api/tasks/${id}`)).json.task.updatedAt })).status).toBe(200);
   expect((await editor.api.post(`/api/tasks/${id}/collaborators`, { userId: editor.user.id })).status).toBe(201);
 
   const task = (await editor.api.get(`/api/tasks/${id}`)).json.task;
@@ -85,7 +85,7 @@ test("AC3: setting or clearing Blocked shows on the task in every view", async (
   const title = zz("flagged");
   const created = await editor.api.post(`/api/projects/${project.id}/tasks`, { title, assigneeId: editor.user.id });
   const id = created.json.task.id as string;
-  expect((await editor.api.patch(`/api/tasks/${id}`, { blocked: true, blockedReason: "Waiting on a file" })).status).toBe(200);
+  expect((await editor.api.patch(`/api/tasks/${id}`, { blocked: true, blockedReason: "Waiting on a file", expectedUpdatedAt: (await editor.api.get(`/api/tasks/${id}`)).json.task.updatedAt })).status).toBe(200);
 
   const inList = async () => {
     const sections = (await editor.api.get(`/api/projects/${project.id}/tasks`)).json.sections as { tasks: { id: string; blocked: boolean }[] }[];
@@ -105,7 +105,7 @@ test("AC3: setting or clearing Blocked shows on the task in every view", async (
   await editor.page.goto("/");
   await expect(editor.page.locator(".item", { hasText: title }).locator(".chip.red", { hasText: "Blocked" })).toBeVisible();
 
-  expect((await editor.api.patch(`/api/tasks/${id}`, { blocked: false })).status).toBe(200);
+  expect((await editor.api.patch(`/api/tasks/${id}`, { blocked: false, expectedUpdatedAt: (await editor.api.get(`/api/tasks/${id}`)).json.task.updatedAt })).status).toBe(200);
   expect(await inList()).toBe(false);
   await editor.page.goto(`/projects/${project.id}`);
   await expect(editor.page.locator(".item", { hasText: title }).locator(".chip.red", { hasText: "Blocked" })).toHaveCount(0);
@@ -124,7 +124,7 @@ test("AC4: completing a parent with open subtasks asks for confirmation, then co
   await dialog.getByRole("button", { name: "Mark complete" }).click();
   const confirm = admin.page.getByRole("dialog", { name: "Open subtasks" });
   await expect(confirm).toContainText("1 open subtask");
-  const refused = await admin.api.post(`/api/tasks/${parentId}/complete`, {});
+  const refused = await admin.api.post(`/api/tasks/${parentId}/complete`, { expectedUpdatedAt: (await admin.api.get(`/api/tasks/${parentId}`)).json.task.updatedAt });
   expect(refused.status).toBe(409);
   expect(refused.json.needsConfirm).toBe("open_subtasks");
   expect((await admin.api.get(`/api/tasks/${childId}`)).json.task.completedAt).toBeNull();
@@ -152,7 +152,7 @@ test("AC5: a finished task with an approver waits for them, and they can approve
   expect((await admin.api.post(`/api/projects/${project.id}/members`, { userId: approver.user.id, role: "EDITOR" })).status).toBe(201);
   const created = await admin.api.post(`/api/projects/${project.id}/tasks`, { title: zz("review"), assigneeId: assignee.user.id });
   const id = created.json.task.id as string;
-  expect((await admin.api.put(`/api/tasks/${id}/approver`, { approverId: approver.user.id })).status).toBe(200);
+  expect((await admin.api.put(`/api/tasks/${id}/approver`, { approverId: approver.user.id, expectedUpdatedAt: (await admin.api.get(`/api/tasks/${id}`)).json.task.updatedAt })).status).toBe(200);
 
   expect((await assignee.api.post(`/api/tasks/${id}/send-for-approval`, {})).status).toBe(200);
   let task = (await approver.api.get(`/api/tasks/${id}`)).json.task;
@@ -165,7 +165,7 @@ test("AC5: a finished task with an approver waits for them, and they can approve
   expect(task.assignee.id).toBe(assignee.user.id);
 
   expect((await assignee.api.post(`/api/tasks/${id}/send-for-approval`, {})).status).toBe(200);
-  expect((await approver.api.post(`/api/tasks/${id}/complete`, {})).status).toBe(200);
+  expect((await approver.api.post(`/api/tasks/${id}/complete`, { expectedUpdatedAt: (await approver.api.get(`/api/tasks/${id}`)).json.task.updatedAt })).status).toBe(200);
   task = (await approver.api.get(`/api/tasks/${id}`)).json.task;
   expect(task.completedAt).not.toBeNull();
   expect(task.awaitingApproval).toBe(false);

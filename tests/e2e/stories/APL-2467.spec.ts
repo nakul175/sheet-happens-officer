@@ -47,7 +47,7 @@ test("AC2: a Member who is not on a project cannot see it in lists, search, or b
   expect((await outsider.api.get(`/api/projects/${project.id}/tasks`)).status).toBe(404);
   const hiddenTask = await outsider.api.get(`/api/tasks/${taskId}`);
   expect(hiddenTask.status).toBe(404);
-  expect(hiddenTask.json.error).toBe("Project not found");
+  expect(hiddenTask.json.error).toBe("Task not found");
   expect(JSON.stringify(hiddenTask.json)).not.toContain(zz("secret"));
   await outsider.page.goto(`/projects/${project.id}`);
   await expect(outsider.page.getByText("This project isn't available")).toBeVisible();
@@ -87,7 +87,7 @@ test("AC4: a Leader manages members and tasks, an Editor edits tasks, and a View
   const taskId = task.json.task.id as string;
 
   expect((await admin.api.post(`/api/projects/${project.id}/members`, { userId: editor.user.id, role: "EDITOR" })).status).toBe(409);
-  const renamed = await editor.api.patch(`/api/tasks/${taskId}`, { title: zz("edited") });
+  const renamed = await editor.api.patch(`/api/tasks/${taskId}`, { title: zz("edited"), expectedUpdatedAt: (await editor.api.get(`/api/tasks/${taskId}`)).json.task.updatedAt });
   expect(renamed.status, JSON.stringify(renamed.json)).toBe(200);
   const viewerWrite = await viewer.api.patch(`/api/tasks/${taskId}`, { title: zz("nope") });
   expect(viewerWrite.status).toBe(403);
