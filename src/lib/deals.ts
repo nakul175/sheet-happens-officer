@@ -1,3 +1,4 @@
+import { DealDateFilterError, dealDateWhere, type DealDateFilter } from "@/lib/deal-date-filter";
 import { parseSubmissionDeadline, serializeSubmissionDeadline } from "@/lib/submission-deadline";
 // SHO-E10 and SHO-E12: Deals are projects of type Deal. This file holds creation, stages, details,
 // next step and stalled logic. Access is still project membership (src/lib/access.ts).
@@ -377,15 +378,21 @@ export const isStalled = (category: string | null | undefined, lastActivity: Dat
 const visibleTo = (user: Actor): Prisma.ProjectWhereInput => (isAdmin(user) ? {} : { members: { some: { userId: user.id } } });
 
 /** SHO-US-12.6 data and the Deals screen. `mine` limits to deals the person leads or holds a task in (AC6). */
-export async function listDeals(user: Actor, o: { archived?: boolean; mine?: boolean; pipelineId?: string; lifecycle?: "sales" | "delivery" | "all" } = {}) {
+export async function listDeals(user: Actor, o: { archived?: boolean; mine?: boolean; pipelineId?: string; lifecycle?: "sales" | "delivery" | "all"; dateFilter?: DealDateFilter } = {}) {
   requireCrm(user);
+  let dateWhere;
+  try { dateWhere = dealDateWhere(o.dateFilter); }
+  catch (error) { if (error instanceof DealDateFilterError) throw new ApiError(400, error.message); throw error; }
   // project-lookup-ok: requireCrm plus visibleTo enforces role/membership; archive filter is explicitly selected by the caller.
   const projects = await db.project.findMany({
     where: {
       typeId: WORKSTREAM_DEAL, archivedAt: o.archived ? { not: null } : null, ...visibleTo(user),
       ...(o.pipelineId ? { pipelineId: o.pipelineId } : {}),
       ...(o.lifecycle === "delivery" ? { stage: { category: "DELIVERY" } } : o.lifecycle === "sales" ? { OR: [{ stageId: null }, { stage: { category: { not: "DELIVERY" } } }] } : {}),
-      ...(o.mine ? { AND: [{ OR: [{ members: { some: { userId: user.id, role: "LEADER" } } }, { tasks: { some: { assigneeId: user.id, deletedAt: null, completedAt: null } } }] }] } : {}),
+      ...((o.mine || dateWhere) ? { AND: [
+        ...(o.mine ? [{ OR: [{ members: { some: { userId: user.id, role: "LEADER" as const } } }, { tasks: { some: { assigneeId: user.id, deletedAt: null, completedAt: null } } }] }] : []),
+        ...(dateWhere ? [dateWhere] : []),
+      ] } : {}),
     },
     orderBy: { createdAt: "desc" },
     include: {
@@ -407,6 +414,8 @@ export async function listDeals(user: Actor, o: { archived?: boolean; mine?: boo
       value: p.deal?.value === null || p.deal?.value === undefined ? null : Number(p.deal.value), currency: p.deal?.currency ?? null,
       opportunityType: p.deal?.opportunityType ?? null, athenaEntity: p.deal?.athenaEntity ?? null, netFeeRevenueUsd: revenueNumber(p.deal?.netFeeRevenueUsd),
       probability: p.deal?.probability ?? null,
+      createdAt: p.createdAt.toISOString(),
+      expectedClose: dayOnly(p.deal?.expectedClose ?? null),
       submissionDeadline: serializeSubmissionDeadline(p.deal?.submissionDeadline, p.deal?.submissionDeadlineHasTime),
       submissionDeadlineHasTime: p.deal?.submissionDeadlineHasTime ?? false,
       nextStep: sig.nextStep,
