@@ -92,13 +92,15 @@ describe("qa:TC missing APL-2748 AC1: a fixed pool of nakul17+ aliases", () => {
       expect(text, spec).not.toContain("/api/auth/signup");
       expect(text, spec).not.toContain("qaEmail(");
     }
-    // APL-2609 is main's local-sandbox spec (#112): it signs up from the local outbox, so beforeAll skips, with that
-    // reason, when EMAIL_OUTBOX_DIR is unset or unreadable (SHO-2897). It never makes an outbox of its own, which
-    // would hide a server that writes its mail elsewhere.
+    // APL-2609 is an isolated account-creation test, not a consumer of the pre-provisioned
+    // shared alias helper above. Its private outbox is safe only because the app that
+    // writes the mail is also owned by that spec and receives the exact same path.
+    // Missing/unreadable external outboxes must no longer turn those assertions into skips.
     const sandbox = readFileSync("tests/e2e/stories/APL-2609.spec.ts", "utf8");
-    expect(sandbox, "APL-2609 skips on a missing outbox").toContain('test.skip(Boolean(noOutbox), noOutbox ?? "")');
-    expect(sandbox, "APL-2609 makes no outbox of its own").not.toMatch(/mkdtemp|mkdirSync/);
-    expect(sandbox, "APL-2609 guesses no outbox folder").not.toContain('EMAIL_OUTBOX_DIR ?? ".outbox"');
+    expect(sandbox, "APL-2609 owns the mail writer").toContain('import { startOwnedOutboxApp } from "../owned-outbox-app"');
+    expect(sandbox, "owned writer receives the spec outbox").toContain('startOwnedOutboxApp({ outbox: OUTBOX, mode })');
+    expect(sandbox, "APL-2609 does not skip for external outbox setup").not.toMatch(/test\.skip\([^;]*(?:outbox|OUTBOX)/);
+    expect(sandbox, "APL-2609 guesses no external outbox folder").not.toContain('EMAIL_OUTBOX_DIR ?? ".outbox"');
   });
 
   it("qa:TC missing AC1: each staging job gets its own slot, so two shards never share a person", () => {
