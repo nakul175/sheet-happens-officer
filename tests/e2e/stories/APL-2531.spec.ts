@@ -103,15 +103,15 @@ test("AC2: Bid sales stages are separate columns; Proactive retains its grouped 
   const deal = await makeDeal(admin, later, { label: "2531 columns" });
   await admin.page.setViewportSize({ width: 1400, height: 900 });
   await admin.page.goto("/deals");
-  const boards = admin.page.getByRole("region", { name: "Deal board", exact: true });
+  const boards = admin.page.getByRole("region", { name: /^Deal board(?: —|$)/ });
   await expect(boards.first()).toBeVisible();
   for (const board of await boards.all()) await expect(board.locator(".dcol header b")).toHaveText(proactive);
-  await expect(boards.filter({ has: admin.page.getByRole("button", { name: `Move ${deal.name}`, exact: true }) }).getByRole("region", { name: "Lead", exact: true }).locator(".dcard", { hasText: deal.name })).toBeVisible();
-  await expect(boards.getByRole("region", { name: "On hold / Won / Lost", exact: true }).locator(".dcard", { hasText: deal.name })).toHaveCount(0);
+  await expect(boards.filter({ has: admin.page.getByRole("button", { name: `Move ${deal.name}`, exact: true }) }).getByRole("region", { name: /^Lead(?: —|$)/ }).locator(".dcard", { hasText: deal.name })).toBeVisible();
+  await expect(boards.getByRole("region", { name: /^On hold \/ Won \/ Lost(?: —|$)/ }).locator(".dcard", { hasText: deal.name })).toHaveCount(0);
 
   await admin.page.getByRole("tab", { name: "Bid" }).click();
   await expect(admin.page.locator(".dcol header b")).toHaveText(bidTitles);
-  await expect(admin.page.getByRole("region", { name: "Lead", exact: true })).toHaveCount(0);
+  await expect(admin.page.getByRole("region", { name: /^Lead(?: —|$)/ })).toHaveCount(0);
   await expect(admin.page.getByRole("region", { name: "Leads" })).toBeVisible();
   await expect(admin.page.getByText(deal.name)).toHaveCount(0);
 });

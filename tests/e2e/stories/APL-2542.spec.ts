@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 // SHO-US-12.6 Pipeline board (APL-2542).
 // One test per acceptance criterion; AC2 and AC3 are in APL-2542-totals.spec.ts, which runs serially. ZZ-TEST deals and organisations are archived afterwards.
 // The plain Member is the second person for "who can see this" and "only my deals".
@@ -11,8 +12,8 @@ test("AC1: active stages are columns, On hold / Won / Lost share the last one, a
   const d = await makeDeal(admin, later, { label: "columns", step: zz("open step") });
   await admin.page.setViewportSize({ width: 1400, height: 900 });
   await admin.page.goto("/deals");
-  const board = admin.page.getByRole("region", { name: "Deal board", exact: true }).filter({ has: admin.page.getByRole("button", { name: `Move ${d.name}`, exact: true }) });
-  await expect(board.getByRole("region", { name: "Lead", exact: true })).toBeVisible();
+  const board = admin.page.getByRole("region", { name: /^Deal board(?: —|$)/ }).filter({ has: admin.page.getByRole("button", { name: `Move ${d.name}`, exact: true }) });
+  await expect(board.getByRole("region", { name: /^Lead(?: —|$)/ })).toBeVisible();
   await expect(board.locator(".dcol header b")).toHaveText(["Lead", "Conversation", "Concept note", "Proposal", "Negotiation", "On hold / Won / Lost"]);
 
   await dropDeal(admin.page, d.name, "On hold / Won / Lost");
@@ -138,7 +139,7 @@ test("AC6: Only my deals keeps deals the person leads or holds an open assigned 
 test("AC7: on a wide pipeline the board scrolls inside itself", async ({ admin }) => {
   await admin.page.setViewportSize({ width: 1280, height: 800 });
   await admin.page.goto("/deals");
-  const boards = admin.page.getByRole("region", { name: "Deal board", exact: true });
+  const boards = admin.page.getByRole("region", { name: /^Deal board(?: —|$)/ });
   await expect(boards.first()).toBeVisible();
   for (const board of await boards.all()) {
     await expect(board).toBeVisible();
@@ -151,7 +152,7 @@ test("AC7: on a wide pipeline the board scrolls inside itself", async ({ admin }
 test("AC8: at 700 px and below the columns stack, and just above that they stay in a row", async ({ admin }) => {
   test.setTimeout(120_000);
   await admin.page.goto("/deals");
-  const boards = admin.page.getByRole("region", { name: "Deal board", exact: true });
+  const boards = admin.page.getByRole("region", { name: /^Deal board(?: —|$)/ });
   await expect(boards.first()).toBeVisible();
   for (const board of await boards.all()) {
     const layout = () => board.evaluate((el) => {
@@ -165,8 +166,31 @@ test("AC8: at 700 px and below the columns stack, and just above that they stay 
     for (const width of [700, 390]) {
       await admin.page.setViewportSize({ width, height: 800 });
       await expect.poll(layout, { timeout: 10_000 }).toMatchObject({ dir: "column", stacked: true });
-      await expect(board.getByRole("region", { name: "Lead", exact: true })).toBeVisible();
-      await expect(board.getByRole("region", { name: "On hold / Won / Lost", exact: true })).toBeVisible();
+      await expect(board.getByRole("region", { name: /^Lead(?: —|$)/ })).toBeVisible();
+      await expect(board.getByRole("region", { name: /^On hold \/ Won \/ Lost(?: —|$)/ })).toBeVisible();
     }
+  }
+});
+
+
+test("Opportunity groups have distinct board and stage landmarks", async ({ admin, later }) => {
+  const classified = await makeDeal(admin, later, { label: "classified landmarks" });
+  const other = await makeDeal(admin, later, { label: "unclassified landmarks" });
+  expect((await admin.api.patch(`/api/projects/${classified.id}/deal`, { opportunityType: "RFP_RFA" })).status).toBe(200);
+  await admin.page.goto("/deals");
+  for (const name of [classified.name, other.name]) await expect(admin.page.getByRole("button", { name: `Move ${name}`, exact: true })).toBeVisible();
+  const boards = admin.page.getByRole("region", { name: /^Deal board —/ });
+  expect(await boards.count()).toBeGreaterThanOrEqual(2);
+  const names = await boards.evaluateAll(nodes => nodes.map(node => node.getAttribute("aria-label")));
+  expect(new Set(names).size).toBe(names.length);
+  await admin.page.addScriptTag({ content: readFileSync("node_modules/axe-core/axe.min.js", "utf8") });
+  for (const width of [1280, 390]) {
+    await admin.page.setViewportSize({ width, height: 900 });
+    const violations = await admin.page.evaluate(async () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- axe is injected into this browser page.
+      const result = await (window as any).axe.run(document, { runOnly: { type: "rule", values: ["landmark-unique"] } });
+      return result.violations;
+    });
+    expect(violations).toEqual([]);
   }
 });
