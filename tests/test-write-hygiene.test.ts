@@ -66,6 +66,8 @@ const SCANNER_BLIND =
   "the local that shadows another function's `dir`. Verified by reading the file, not assumed.";
 
 const UNRESOLVED: Record<string, string> = {
+  "tests/owned-outbox-app.test.ts:17":
+    "Embedded child-server source writes only EMAIL_OUTBOX_DIR, supplied by the runner from this test's mkdtemp root; the real subprocess test verifies that exact private destination and cleans it.",
   "tests/e2e/stories/APL-2651.spec.ts:314":
     "opt-in debug dump to $SHAPE_OUT, written only when that variable is set. An env-named fixed path, " +
     "so two runs setting the same value collide; recorded, not fixed, because it is a debugging aid.",

@@ -41,9 +41,10 @@ test("the tag list comes from the story files, not from a list of ids", () => {
   const all = labels();
   assert.ok(all.length > 0, "no @local-only spec found; the extractor or the directory moved");
   // The four the hand-written line knew, plus the four it did not.
-  for (const label of ["APL-2471 AC4", "APL-2609", "APL-2624", "APL-2669", "APL-2674", "APL-2721", "APL-2737", "APL-2742"]) {
+  for (const label of ["APL-2471 AC4", "APL-2624", "APL-2669", "APL-2674", "APL-2721", "APL-2737", "APL-2742"]) {
     assert.ok(all.includes(label), `${label} is tagged @local-only but was not found`);
   }
+  assert.ok(!all.includes("APL-2609"), "SHO-2897 owns its writer/outbox and must not be silently excluded from staging");
   // Every label names a real story file: no label can outlive the spec it came from.
   for (const label of all) {
     const id = label.split(" ")[0];
@@ -79,7 +80,6 @@ test("the exclusion behaviour is unchanged (SHO-3000 AC2)", () => {
 test("SHO-2882 AC1: only a whole-spec tag names a file the staging collection must leave out", () => {
   const files = localOnlyFiles();
   assert.deepEqual(files, [
-    "APL-2609.spec.ts",
     "APL-2624.spec.ts",
     "APL-2669.spec.ts",
     "APL-2674.spec.ts",

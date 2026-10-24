@@ -1,13 +1,7 @@
-// SHO-2897: the APL-2609 story spec must SKIP, with a stated reason, only when its outbox is not configured, and must
-// RUN when it is. c490867 pinned that as a string match on the spec's source; a string match cannot say whether the gate
-// opens, so this runs the spec for real and reads Playwright's own JSON report:
-//   - EMAIL_OUTBOX_DIR unset                     -> every test skipped, and the skip states the reason;
-//   - EMAIL_OUTBOX_DIR naming a folder that does not exist yet -> the spec RUNS (no outbox skip). src/lib/email.ts makes
-//     the folder on the first email, and nothing on a fresh sandbox has written one yet, so a configured folder that is
-//     still absent is the normal cold case, not a misconfiguration;
-//   - EMAIL_OUTBOX_DIR naming an existing folder -> the spec RUNS.
-// The server is deliberately unreachable (port 9), so "RUNS" shows up as a failed first test, not a skip. Nothing here
-// needs a database, a server or a browser.
+// SHO-2897: missing/shared/unreadable inherited outboxes never skip the story.
+// The spec creates its own private directory and starts its actual app writer there.
+// These cheap gate probes deliberately omit owned-app configuration: they must fail setup,
+// not silently skip. The only legitimate skip is a missing SHO_QA_PASS.
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -40,9 +34,13 @@ function outcomes(report: Report): Outcome[] {
 }
 
 /** One real `playwright test` run of the APL-2609 spec, with the outbox configured exactly as the case needs. */
-function run(outbox: string | undefined): Outcome[] {
-  const env: NodeJS.ProcessEnv = { ...process.env, TASKBOARD_URL: "http://127.0.0.1:9", SHO_QA_PASS: "w13-gate-probe-pass" };
+function run(outbox: string | undefined, qaPass = "w13-gate-probe-pass"): Outcome[] {
+  const env: NodeJS.ProcessEnv = { ...process.env, TASKBOARD_URL: "http://127.0.0.1:9", SHO_QA_PASS: qaPass };
   delete env.EMAIL_OUTBOX_DIR;
+  delete env.SHO_QA_APP_ROOT;
+  delete env.SHO_QA_RELEASE;
+  delete env.BASE_URL;
+  delete env.STAGING_URL;
   if (outbox !== undefined) env.EMAIL_OUTBOX_DIR = outbox;
   const outputDir = mkdtempSync(path.join(tmpdir(), "sho-2897-gate-"));
   try {
@@ -63,45 +61,26 @@ const outboxSkips = (list: Outcome[]) =>
 /** Whether the first test actually started against the server (it fails on the unreachable port, it does not skip). */
 const attempted = (list: Outcome[]) => list.some((o) => o.statuses.some((s) => s === "failed" || s === "timedOut"));
 
-describe("SHO-2897: the APL-2609 spec skips without an outbox and runs with one", () => {
-  it("skips every test, with a stated reason, when EMAIL_OUTBOX_DIR is unset", () => {
-    const list = run(undefined);
-    expect(list.length).toBe(4);
-    expect(list.map((o) => o.statuses)).toEqual([["skipped"], ["skipped"], ["skipped"], ["skipped"]]);
-    const reasons = outboxSkips(list);
-    expect(reasons.length).toBe(4);
-    for (const a of reasons) expect(a.description).toContain("APL-2609");
+describe("SHO-2897: only the missing QA password can skip the story", () => {
+  it("skips every case with a password reason when SHO_QA_PASS is missing", () => {
+    const list = run(undefined, "");
+    expect(list).toHaveLength(4);
+    expect(list.map(o => o.statuses)).toEqual([["skipped"], ["skipped"], ["skipped"], ["skipped"]]);
+    for (const o of list) expect(o.annotations.some(a => a.type === "skip" && a.description?.includes("SHO_QA_PASS"))).toBe(true);
   }, TIMEOUT);
 
-  it("runs when EMAIL_OUTBOX_DIR is configured, even before the server has made the folder", () => {
-    const missing = path.join(mkdtempSync(path.join(tmpdir(), "sho-2897-missing-")), "outbox-not-made-yet");
-    const list = run(missing);
-    expect(outboxSkips(list), "a configured outbox must not skip").toEqual([]);
-    expect(attempted(list), "the spec must reach the server").toBe(true);
-  }, TIMEOUT);
-
-  it("skips, with a stated reason, when the configured outbox exists but is not a readable directory", () => {
-    const file = path.join(mkdtempSync(path.join(tmpdir(), "sho-2897-file-")), "not-a-folder");
-    writeFileSync(file, "");
-    try {
-      const list = run(file);
-      expect(list.every((o) => o.statuses.join() === "skipped")).toBe(true);
-      const reasons = outboxSkips(list);
-      expect(reasons.length).toBe(4);
-      for (const a of reasons) expect(a.description).toContain("not a readable directory");
-    } finally {
-      rmSync(path.dirname(file), { recursive: true, force: true });
-    }
-  }, TIMEOUT);
-
-  it("runs when EMAIL_OUTBOX_DIR names an existing folder", () => {
-    const existing = mkdtempSync(path.join(tmpdir(), "sho-2897-outbox-"));
-    try {
-      const list = run(existing);
-      expect(outboxSkips(list), "a readable outbox must not skip").toEqual([]);
-      expect(attempted(list), "the spec must reach the server").toBe(true);
-    } finally {
-      rmSync(existing, { recursive: true, force: true });
-    }
-  }, TIMEOUT);
+  for (const shape of ["unset", "missing", "file", "directory"] as const) {
+    it(`does not skip with an inherited ${shape} outbox; missing owned-app setup fails`, () => {
+      const temp = mkdtempSync(path.join(tmpdir(), "sho-2897-gate-input-"));
+      try {
+        const file = path.join(temp, "not-a-directory");
+        if (shape === "file") writeFileSync(file, "");
+        const input = shape === "unset" ? undefined : shape === "missing" ? path.join(temp, "absent") : shape === "file" ? file : temp;
+        const list = run(input);
+        expect(list).toHaveLength(4);
+        expect(outboxSkips(list)).toEqual([]);
+        expect(attempted(list), "a setup failure must be reported rather than hidden by a skip").toBe(true);
+      } finally { rmSync(temp, { recursive: true, force: true }); }
+    }, TIMEOUT);
+  }
 });
