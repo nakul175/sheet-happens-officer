@@ -12,7 +12,7 @@ import { todayLine } from "@/lib/concierge/dates";
 import { isEcho } from "@/lib/concierge/echo";
 import { exactTitleRead } from "@/lib/concierge/exact-title-read";
 import { claimsWrite } from "@/lib/concierge/claims";
-import { explicitProposal } from "@/lib/concierge/explicit-proposal";
+import { explicitProposal, whoQuestion } from "@/lib/concierge/explicit-proposal";
 import { screenOnlyHelp } from "@/lib/concierge/screen-help";
 import { taskSelectionForRequest } from "@/lib/concierge/task-selection";
 import { flat, personById, projectById, quickAnswer, taskById, QUICK_ACTIONS, type TaskRec } from "@/lib/concierge/reads";
@@ -152,7 +152,6 @@ const asksForAssign = (request: string) => /\b(?:re)?assign\b/.test(request.toLo
  * (`!s.pending` → 404 "Message not found"), so before it was here the only button on the question answered 404.
  * It has no `kind`: "none" is handled before the kind is read, and the person is free to name somebody instead.
  */
-const WHO_QUESTION = "Who should I assign it to? Tell me the person's name and I will show you the card to confirm.";
 
 /**
  * SHO-2693 w148: what the person is told instead of the model's sentence when the turn wrote nothing but the sentence
@@ -163,10 +162,7 @@ const WHO_QUESTION = "Who should I assign it to? Tell me the person's name and I
 const NOTHING_CHANGED = "Nothing has changed. I cannot change anything without a card you confirm, so tell me which task should change and how, and I will show you the card.";
 
 const UNKNOWN = "I could not work that out. Try asking in a different way.";
-const whoQuestion = (request: string) => ({
-  kind: "choices" as const, text: WHO_QUESTION, choices: [{ id: "none", label: "Never mind" }],
-  pending: { request, question: WHO_QUESTION },
-});
+
 
 function buildReply(turn: Turn, modelText: string, request: string): Stored {
   if (turn.card) {

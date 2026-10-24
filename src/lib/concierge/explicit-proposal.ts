@@ -5,6 +5,13 @@ import { buildCard, MAX_CHANGES } from "./changes";
 import { findPeople, listProjects, projectTasks } from "./reads";
 import type { Stored } from "./types";
 
+const WHO_QUESTION = "Who should I assign it to? Tell me the person's name and I will show you the card to confirm.";
+/** Existing missing-person contract, shared by model refusal and the trusted no-op clarification boundary. */
+export const whoQuestion = (request: string) => ({
+  kind: "choices" as const, text: WHO_QUESTION, choices: [{ id: "none", label: "Never mind" }],
+  pending: { request, question: WHO_QUESTION },
+});
+
 export type ExplicitRequest = { kind: "complete-open"; project: string } | { kind: "remove-member"; project: string; email: string } | { kind: "clarify-bulk" };
 export function explicitRequest(text: string): ExplicitRequest | null {
   const s = text.trim();
@@ -24,6 +31,7 @@ const textReply = (text: string): Stored => ({ kind: "text", text });
 export async function explicitProposal(user: Actor, request: string): Promise<Stored | null> {
   const parsed = explicitRequest(request);
   if (!parsed) return null;
+  if (parsed.kind === "clarify-bulk" && /^(?:please\s+)?(?:re)?assign\s+(?:all|every|both)\s+of\s+(?:them|those|these)\b/i.test(request.trim())) return whoQuestion(request);
   if (parsed.kind === "clarify-bulk") return textReply("Please name one exact project and the complete set of open tasks to change. I cannot safely narrow a bulk request for you. Nothing changed.");
   const matches = (await listProjects(user, parsed.project)).filter(p => p.name.toLowerCase() === parsed.project.toLowerCase());
   // No fallback to unverified ids or model guesses. Identical visible names must be disambiguated first.
