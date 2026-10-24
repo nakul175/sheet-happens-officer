@@ -215,6 +215,7 @@ async function plan(row: any, user: Actor, projectId: string): Promise<Plan> {
       const task = await db.task.findUnique({ where: { id }, include: { project: true } });
       if (!task || task.projectId !== projectId) throw bad("The task is no longer in this deal, so the conversion cannot be undone.");
       if (task.deletedAt) throw bad("The task is in Trash. Restore it first.");
+      // project-lookup-ok: Undo resolves the recorded conversion source; prepare has authorized the action and its current project.
       const src = await db.project.findUnique({ where: { id: b.sourceProjectId } });
       if (!src) throw bad("The original project no longer exists.");
       if (src.archivedAt) throw bad("The original project is archived. Unarchive it first.");

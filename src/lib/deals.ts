@@ -77,6 +77,7 @@ export async function createDeal(
   const { value, currency } = normaliseValue(input.value, input.currency);
   const probability = checkProbability(input.probability);
 
+  // project-lookup-ok: Workspace-wide duplicate confirmation for the supplied name and buyer, after requireCrm; includes archived deals.
   const dup = await db.project.findFirst({
     where: { workspaceId: u.workspaceId, typeId: WORKSTREAM_DEAL, name: { equals: name, mode: "insensitive" }, parties: { some: { organisationId: org.id, role: "BUYER" } } },
     select: { id: true },
@@ -249,6 +250,7 @@ export async function removeStage(user: Actor, stageId: string, input: { moveTo?
   if (!targets.length) {
     throw new ApiError(409, `No other stage in ${stage.pipeline.name} can take the items in "${stage.name}", so it cannot be removed.`);
   }
+  // project-lookup-ok: removeStage requires SUPER_ADMIN and counts every item that must be moved.
   const items = await db.project.count({ where: { stageId: stage.id } });
   const moveTo = clean(input.moveTo);
   if (!moveTo) {
@@ -342,6 +344,7 @@ const visibleTo = (user: Actor): Prisma.ProjectWhereInput => (isAdmin(user) ? {}
 /** SHO-US-12.6 data and the Deals screen. `mine` limits to deals the person leads or holds a task in (AC6). */
 export async function listDeals(user: Actor, o: { archived?: boolean; mine?: boolean; pipelineId?: string } = {}) {
   requireCrm(user);
+  // project-lookup-ok: requireCrm plus visibleTo enforces role/membership; archive filter is explicitly selected by the caller.
   const projects = await db.project.findMany({
     where: {
       typeId: WORKSTREAM_DEAL, archivedAt: o.archived ? { not: null } : null, ...visibleTo(user),
@@ -376,6 +379,7 @@ export async function listDeals(user: Actor, o: { archived?: boolean; mine?: boo
 
 /** The deal block on the project page: details, parties, pipeline stages, next step and flags. */
 export async function dealBlock(projectId: string) {
+  // project-lookup-ok: dealBlock is called only by getProject after projectAccess authorizes this exact ID.
   const p = await db.project.findUnique({
     where: { id: projectId },
     include: { stage: true, pipeline: { include: { stages: { orderBy: { position: "asc" } } } }, deal: true, parties: { include: { organisation: { select: { id: true, name: true } } }, orderBy: { createdAt: "asc" } } },
@@ -488,6 +492,7 @@ export async function convertTaskToDeal(user: Actor, taskId: string, input: Conv
   const { value, currency } = normaliseValue(input.value, input.currency);
   const probability = checkProbability(input.probability);
   if (dueDate) isoDate(dueDate);
+  // project-lookup-ok: Workspace-wide duplicate confirmation for the supplied name and buyer, after requireCrm; includes archived deals.
   const dup = await db.project.findFirst({
     where: { workspaceId: u.workspaceId, typeId: WORKSTREAM_DEAL, name: { equals: name, mode: "insensitive" }, parties: { some: { organisationId: org.id, role: "BUYER" } } },
     select: { id: true },
@@ -548,6 +553,7 @@ export async function convertTaskToDeal(user: Actor, taskId: string, input: Conv
 /** SHO-US-12.5 AC2 and 13.1 AC3: deals the person leads that are working and have no dated open task. */
 export async function dealsNeedingNextStep(user: Actor) {
   if (!crmVisible(user)) return [];
+  // project-lookup-ok: crmVisible is checked first; only active deals where this user is Leader are selected.
   const deals = await db.project.findMany({
     where: { typeId: WORKSTREAM_DEAL, archivedAt: null, members: { some: { userId: user.id, role: "LEADER" } }, stage: { category: { in: [...WORKING_CATEGORIES] } } },
     select: { id: true, name: true, stage: { select: { name: true } } },
@@ -591,6 +597,7 @@ export function stalledDealWhere(): Prisma.ProjectWhereInput {
 export async function notifyStalledDeals(now = new Date()) {
   if (crmMode() === "off") return { stalled: 0, notified: 0, skipped: true };
   const mode = crmMode();
+  // project-lookup-ok: Scheduled notification job scans stalled deals; stalledDealWhere and recipient filtering enforce CRM mode.
   const deals = await db.project.findMany({
     where: stalledDealWhere(),
     include: {

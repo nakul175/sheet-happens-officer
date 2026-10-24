@@ -75,6 +75,7 @@ async function load(ops: Op[]): Promise<Loaded> {
   const sectionIds = r.map((x) => x.sectionId).filter((x): x is string => !!x);
   const [users, projects, sections] = await Promise.all([
     db.user.findMany({ where: { id: { in: [...userIds] } }, select: { id: true, name: true, email: true, deactivatedAt: true, emailVerifiedAt: true } }),
+    // project-lookup-ok: Internal operation snapshot for fingerprints and cards; blockedReason checks projectAccess before execution.
     db.project.findMany({ where: { id: { in: [...projectIds] } }, select: { id: true, name: true, archivedAt: true, members: { select: { userId: true, role: true } } } }),
     db.section.findMany({ where: { id: { in: sectionIds } }, select: { id: true, name: true, isDone: true, projectId: true } }),
   ]);
