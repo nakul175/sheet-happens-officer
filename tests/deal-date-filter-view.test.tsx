@@ -37,3 +37,26 @@ it("Deals counts and groups follow filtered server rows, and Clear restores the 
  expect(document.querySelector('[aria-label="Open commercial pipeline"]')?.textContent).toContain("RFP/RFA + OTC: 1");expect(document.querySelector('[aria-label="Open commercial pipeline"]')?.textContent).not.toContain("INR 200");expect(document.querySelector('a[href="/projects/sales-eoi"]')).toBeNull();
  await click("Clear date filter");expect(document.querySelector('[aria-label="Open commercial pipeline"]')?.textContent).toContain("RFP/RFA + OTC: 2");expect(document.querySelector('a[href="/projects/sales-eoi"]')).not.toBeNull();expect(calls.filter(call=>call.startsWith("/api/deals?")).at(-1)).not.toContain("dateBasis");
 });
+
+it("a date range with no matches retains all eight Bid sales columns and keeps Delivery separate", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (String(input).startsWith("/api/deals?") && String(input).includes("dateBasis=")) return new Response(JSON.stringify({ deals: [] }), { headers: { "content-type": "application/json" } });
+    return originalFetch(input, init);
+  });
+  await mount(h(DealsView));
+  await act(async () => {
+    const select = document.querySelector<HTMLSelectElement>('[aria-label="Date basis"]')!;
+    Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")!.set!.call(select, "submissionDeadline");
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  await act(async () => {
+    const from = document.querySelector<HTMLInputElement>('[aria-label="From date (IST, inclusive)"]')!;
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(from, "2026-10-25");
+    from.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  await act(async () => document.querySelector('[aria-label="Deal date filter"] form')!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
+  expect(document.querySelector('[aria-label="No matching deals"]')?.textContent).toContain("No matching sales deals");
+  expect([...document.querySelectorAll(".dcol header b")].map(x => x.textContent)).toEqual(["Leads", "Under Evaluation", "Go", "No-Go", "Submitted", "Won", "Lost", "On Hold"]);
+  expect(document.querySelector('[aria-label="Open commercial pipeline"]')?.textContent).toContain("RFP/RFA + OTC: 0");
+});
