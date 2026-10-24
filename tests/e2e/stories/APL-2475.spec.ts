@@ -27,18 +27,19 @@ test.describe("SHO-US-1.2 / APL-2475", () => {
     expect(first.ok(), await first.text()).toBe(true);
     const second = await anon.request.post("/api/auth/verify", { data: { token } });
     expect(second.status()).toBe(400);
-    expect((await second.json()).error).toBe("This link has expired or was already used.");
+    expect((await second.json()).error).toBe("This link is invalid, has expired, was already used or was replaced by a newer one.");
   });
 
   test("AC2: an unknown, expired or used link shows the Link expired screen with a way to get a new one, and verifies nobody", async ({ anon }) => {
     const bogus = "x".repeat(40);
     const api = await anon.request.post("/api/auth/verify", { data: { token: bogus } });
     expect(api.status()).toBe(400);
-    expect((await api.json()).error).toBe("This link has expired or was already used.");
+    expect((await api.json()).error).toBe("This link is invalid, has expired, was already used or was replaced by a newer one.");
 
     await anon.goto(`/verify?token=${bogus}`);
+    await anon.getByRole("button", { name: "Verify my email" }).click();
     await expect(anon).toHaveURL(/\/expired/);
-    await expect(anon.getByRole("heading", { name: "This link has expired" })).toBeVisible();
+    await expect(anon.getByRole("heading", { name: "This link can't be used" })).toBeVisible();
     await expect(anon.getByRole("button", { name: "Send a new verification link" })).toBeVisible();
     // Differs (as the story says): with no remembered email the button sends the person to Sign in.
     await anon.getByRole("button", { name: "Send a new verification link" }).click();

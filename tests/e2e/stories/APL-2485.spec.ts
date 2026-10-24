@@ -33,7 +33,7 @@ test("AC2: no Leader is refused by the server (an empty Leader says 'Choose a Le
 
 test("AC2: the Leader field on the form is pre-filled with the creator (screen)", async ({ admin }) => {
   await admin.page.goto("/projects/new");
-  const sel = admin.page.getByLabel("Leader");
+  const sel = admin.page.getByRole("combobox", { name: "Leader", exact: true });
   await expect(sel).toBeVisible();
   await expect(sel.locator("option:checked")).toContainText("(you)", { timeout: 30_000 });
 });

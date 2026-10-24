@@ -3,7 +3,7 @@
 // sink has it. Otherwise the test checks resetMail and the route that sends and consumes it.
 import { readFileSync } from "node:fs";
 import type { Page } from "@playwright/test";
-import { test, expect, RUN } from "../support";
+import { test, expect, RUN, BASE_URL } from "../support";
 import { PASS, alias, deactivate, nextPass, passwordOk, personByEmail, signUp, sinkToken, zz } from "./qa";
 import { resetMail } from "../../../src/lib/email";
 
@@ -70,12 +70,12 @@ test.describe("SHO-US-1.4 / APL-2477", () => {
     const token = await sinkToken(email, "Reset");
     expect(token).toBeTruthy();
     const changed = nextPass(PASS);
-    const reset = await anon.request.post("/api/auth/reset-password", { data: { token, password: changed } });
+    const reset = await anon.request.post("/api/auth/reset-password", { data: { token, password: changed, confirm: changed } });
     expect(reset.ok(), await reset.text()).toBe(true);
     expect((await anon.request.get("/api/auth/me")).status()).toBe(401);
-    const again = await anon.request.post("/api/auth/reset-password", { data: { token, password: changed } });
+    const again = await anon.request.post("/api/auth/reset-password", { data: { token, password: changed, confirm: changed } });
     expect(again.status()).toBe(400);
-    const who = await browser.newContext();
+    const who = await browser.newContext({ baseURL: BASE_URL });
     const ok = await who.request.post("/api/auth/signin", { data: { email, password: changed } });
     expect(ok.ok()).toBe(true);
     await who.close();
@@ -105,7 +105,7 @@ test.describe("SHO-US-1.4 / APL-2477", () => {
     await anon.getByLabel("Confirm new password").fill(`Zz${RUN}9x`);
     await anon.getByRole("button", { name: "Save and sign in" }).click();
     await expect(anon).toHaveURL(/\/expired/);
-    await expect(anon.getByRole("heading", { name: "This link has expired" })).toBeVisible();
+    await expect(anon.getByRole("heading", { name: "This link can't be used" })).toBeVisible();
     await anon.getByRole("link", { name: "Request a new reset link" }).click();
     await expect(anon).toHaveURL(/\/forgot/);
   });
@@ -163,7 +163,7 @@ test.describe("SHO-US-1.4 / APL-2477", () => {
     const token = await sinkToken(email, "Reset");
     expect(token).toBeTruthy();
     const changed = nextPass(PASS);
-    expect((await anon.request.post("/api/auth/reset-password", { data: { token, password: changed } })).ok()).toBe(true);
+    expect((await anon.request.post("/api/auth/reset-password", { data: { token, password: changed, confirm: changed } })).ok()).toBe(true);
     const back = await anon.request.post("/api/auth/signin", { data: { email, password: changed } });
     expect(back.ok(), await back.text()).toBe(true);
   });

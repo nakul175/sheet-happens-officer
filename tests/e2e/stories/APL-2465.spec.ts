@@ -19,7 +19,7 @@ test("AC1: an @aplyd.com sign-up creates an unverified account and sends a verif
   const email = alias("2465", "ac1", "aplyd.com");
   const signed = await signUp(anon.request, zz("ac1"), email);
   expect(signed.status, signed.body).toBe(201);
-  expect(signed.json).toEqual({ status: "check_email" });
+  expect(signed.json).toEqual({ status: "check_email", emailSent: true });
   const person = await personByEmail(admin.api, email);
   expect(person?.status).toBe("UNVERIFIED");
   later(() => deactivate(admin.api, person!.id));
@@ -46,6 +46,8 @@ test("AC2: opening the verification link verifies the account and it can sign in
   const token = mailToken(email, "Verify");
   expect(token, "verification email").toBeTruthy();
   await anon.goto(`/verify?token=${token}`);
+  // APL-2742: mail scanners may open the link; only the explicit button consumes it.
+  await anon.getByRole("button", { name: "Verify my email" }).click();
   await expect(anon.getByRole("heading", { name: "Email verified" })).toBeVisible();
   const person = await personByEmail(admin.api, email);
   expect(person?.status).toBe("ACTIVE");
@@ -183,10 +185,12 @@ test("AC7: staging auth mail is in the test mail sink within 60 seconds and each
   expect(second.token).not.toBe(first.token);
   for (const mail of [first, second]) {
     const host = mail.text?.match(/https?:\/\/([^/\s]+)/)?.[1]?.toLowerCase() ?? "";
-    expect(PRODUCTION_HOSTS.has(host), "the link stays on staging").toBe(false);
-    expect(host).toBe(new URL(BASE_URL).hostname);
+    expect(PRODUCTION_HOSTS.has(new URL(`http://${host}`).hostname), "the link stays on staging").toBe(false);
+    expect(host).toBe(new URL(BASE_URL).host);
   }
   await anon.goto(`/verify?token=${second.token}`);
+  // APL-2742: mail scanners may open the link; only the explicit button consumes it.
+  await anon.getByRole("button", { name: "Verify my email" }).click();
   await expect(anon.getByRole("heading", { name: "Email verified" })).toBeVisible();
   const person = await personByEmail(admin.api, email);
   expect(person?.status).toBe("ACTIVE");
@@ -196,8 +200,8 @@ test("AC7: staging auth mail is in the test mail sink within 60 seconds and each
   const reset = await waitForSinkMail(email, "Reset");
   expect(reset.to?.toLowerCase()).toBe(email.toLowerCase());
   const resetHost = reset.text?.match(/https?:\/\/([^/\s]+)/)?.[1]?.toLowerCase() ?? "";
-  expect(PRODUCTION_HOSTS.has(resetHost)).toBe(false);
-  expect(resetHost).toBe(new URL(BASE_URL).hostname);
+  expect(PRODUCTION_HOSTS.has(new URL(`http://${resetHost}`).hostname)).toBe(false);
+  expect(resetHost).toBe(new URL(BASE_URL).host);
   const updated = nextPass(PASS);
   await anon.goto(`/reset?token=${reset.token}`);
   await anon.getByLabel("New password", { exact: true }).fill(updated);

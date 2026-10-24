@@ -6,8 +6,8 @@ import { ghost, getTask, newProject, newTask } from "../g2";
 test("AC1: an Editor creates, edits, assigns and deletes a task", async ({ admin, member, later }) => {
   const p = await newProject(admin, later, { label: "3.3 editor", members: [{ who: member, role: "EDITOR" }] });
   const t = await newTask(member, p.id);
-  expect((await member.api.patch(`/api/tasks/${t}`, { title: zz("3.3 renamed") })).status).toBe(200);
-  expect((await member.api.post(`/api/tasks/${t}/assign`, { assigneeId: admin.user.id })).status).toBe(200);
+  expect((await member.api.patch(`/api/tasks/${t}`, { title: zz("3.3 renamed"), expectedUpdatedAt: (await getTask(member, t)).updatedAt })).status).toBe(200);
+  expect((await member.api.post(`/api/tasks/${t}/assign`, { assigneeId: admin.user.id, expectedUpdatedAt: (await getTask(member, t)).updatedAt })).status).toBe(200);
   expect((await getTask(member, t)).assignee.id).toBe(admin.user.id);
   expect((await member.api.del(`/api/tasks/${t}`)).status).toBe(204);
 });

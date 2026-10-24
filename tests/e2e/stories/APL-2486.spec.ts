@@ -98,10 +98,9 @@ test("AC6: search shows a Member nothing from a project they are not in (archive
 });
 
 test("AC6 (concierge half): a quick action on a project the person is not in is Project not found and does not name it", async ({ admin, member, later }) => {
-  const reads = readFileSync("src/lib/concierge/reads.ts", "utf8");
-  const fn = reads.slice(reads.indexOf("export async function quickAnswer"), reads.indexOf("export async function taskById"));
-  expect(fn).toContain('throw new ApiError(404, "Project not found")');
-  expect(fn).toContain("members: { some: { userId: user.id } }");
+  const visible = await newProject(admin, later, { label: "3.2 concierge visible", members: [{ who: member }] });
+  const allowed = await quickAction(member, "due-week", visible.id);
+  expect(allowed.status, allowed.body).toBe(200);
   const secret = await newProject(admin, later, { label: "3.2 concierge secret" });
   const r = await quickAction(member, "due-week", secret.id);
   expect(r.status, r.body).toBe(404);

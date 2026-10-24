@@ -51,12 +51,12 @@ test.describe("SHO-US-1.3 / APL-2476", () => {
     later(() => deactivate(admin.api, person!.id));
     const api = await anon.request.post("/api/auth/signin", { data: { email, password: PASS } });
     expect(api.status()).toBe(403);
-    expect((await api.json()).error).toBe("Verify your email first.");
+    expect((await api.json()).error).toBe("Verify your email before you sign in. No working verification link? Use Resend link.");
     await anon.goto("/signin");
     await anon.getByLabel("Work email").fill(email);
     await anon.getByLabel("Password").fill(PASS);
     await anon.getByRole("button", { name: "Sign in" }).click();
-    await expect(alertOf(anon)).toContainText("Verify your email first.");
+    await expect(alertOf(anon)).toContainText("Verify your email before you sign in. No working verification link? Use Resend link.");
     await expect(anon.getByRole("button", { name: "Resend link" })).toBeVisible();
   });
 
