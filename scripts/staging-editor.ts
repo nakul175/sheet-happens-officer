@@ -95,9 +95,21 @@ function parseDatabaseUrl(raw: string): DatabaseTarget | { refusal: string } {
   if (keys.some((key) => OVERRIDE_PARAMS.includes(key))) {
     return { refusal: "Refusing to run: the database URL must not set host or dbname in the query." };
   }
-  const allowed = new Set(["schema", "sslmode", "connection_limit", "pool_timeout", "connect_timeout"]);
+  const allowed = new Set(["schema", "sslmode", "connection_limit", "pool_timeout", "connect_timeout", "sslcert", "sslaccept"]);
   if (rawKeys.some((key) => !allowed.has(key)) || new Set(rawKeys).size !== rawKeys.length) {
     return { refusal: "Refusing to run: database URL overrides or repeated parameters are not allowed." };
+  }
+  // Prisma uses sslcert for a CA certificate and defaults sslaccept to accept_invalid_certs.
+  // Accept the certificate options only as an explicit strict pair; never silently use that default.
+  const certificate = url.searchParams.get("sslcert");
+  const acceptance = url.searchParams.get("sslaccept");
+  if (certificate !== null || acceptance !== null) {
+    if (!certificate || !certificate.startsWith("/") || certificate.includes("\\") ||
+        certificate.split("/").some((part) => part === ".." || part === ".") ||
+        /[\x00-\x1f\x7f]/.test(certificate) || acceptance !== "strict" ||
+        url.searchParams.get("sslmode") !== "require") {
+      return { refusal: "Refusing to run: certificate TLS requires an absolute CA path, sslaccept=strict and sslmode=require." };
+    }
   }
   const schema = url.searchParams.get("schema") ?? "public";
   if (!/^[a-z_][a-z0-9_]*$/.test(schema)) {
