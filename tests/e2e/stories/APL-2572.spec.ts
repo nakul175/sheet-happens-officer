@@ -17,7 +17,7 @@ async function give(admin: Who, member: Who, later: Later, n: number, label: str
   const id = r.json.project.id as string;
   later(() => admin.api.post(`/api/projects/${id}/archive`));
   expect((await admin.api.post(`/api/projects/${id}/members`, { userId: member.user.id, role: "EDITOR" })).status).toBe(201);
-  for (let i = 0; i < n; i++) expect((await admin.api.post(`/api/projects/${id}/tasks`, { title: `${zz(label)} ${i}`, assigneeId: member.user.id })).status).toBe(201);
+  for (let i = 0; i < n; i++) expect((await admin.api.post(`/api/projects/${id}/tasks`, { dueDate: "2026-11-03", title: `${zz(label)} ${i}`, assigneeId: member.user.id })).status).toBe(201);
   return id;
 }
 const unread = async (member: Who) => (await member.api.get("/api/notifications")).json.unread as number;

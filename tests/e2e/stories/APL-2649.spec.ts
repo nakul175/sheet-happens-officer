@@ -24,13 +24,13 @@ test.describe("APL-2649", () => {
   test("AC1: an Editor who deletes a task does not see the Undo toast", async ({ admin, member, later }) => {
     test.info().annotations.push({ type: "qa:TC", description: "qa:TC missing" });
     const p = await newProject(admin, later, { label: "2649 editor", members: [{ who: member, role: "EDITOR" }] });
-    const t = await newTask(admin, p.id);
+    const t = await newTask(admin, p.id, { dueDate: "2026-11-03" });
     await trashFromScreen(member, p.id, t);
     await expect.poll(async () => (await member.api.get(`/api/tasks/${t}`)).status).toBe(404);
     await expect(member.page.getByRole("status").filter({ hasText: "Task deleted" })).toHaveCount(0);
     expect((await member.api.get(`/api/tasks/${t}`)).status).toBe(404); // the delete itself went through
     // The server sends no Undo id either, so no other screen can raise the toast.
-    const t2 = await newTask(admin, p.id);
+    const t2 = await newTask(admin, p.id, { dueDate: "2026-11-03" });
     const del = await deleteTask(member, t2);
     expect(del.status).toBe(204);
     expect(del.undoId).toBeNull();
@@ -40,7 +40,7 @@ test.describe("APL-2649", () => {
   test("AC2: a Leader or Admin who deletes a task still sees the Undo toast, and Undo brings the task back", async ({ admin, later }) => {
     test.info().annotations.push({ type: "qa:TC", description: "qa:TC missing" });
     const p = await newProject(admin, later, { label: "2649 leader" });
-    const t = await newTask(admin, p.id);
+    const t = await newTask(admin, p.id, { dueDate: "2026-11-03" });
     await trashFromScreen(admin, p.id, t);
     const toast = admin.page.getByRole("status").filter({ hasText: "Task deleted." });
     await expect(toast).toContainText("Task deleted.");

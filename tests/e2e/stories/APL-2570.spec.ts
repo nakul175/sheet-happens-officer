@@ -9,7 +9,7 @@ async function proj(admin: Who, member: Who, later: Later, n: number, extra: (i:
   expect((await admin.api.post(`/api/projects/${id}/members`, { userId: member.user.id, role: "EDITOR" })).status).toBe(201);
   const ids: string[] = [];
   for (let i = 0; i < n; i++) {
-    const t = await admin.api.post(`/api/projects/${id}/tasks`, { title: `${zz("job")} ${i}`, assigneeId: admin.user.id, ...extra(i) });
+    const t = await admin.api.post(`/api/projects/${id}/tasks`, { dueDate: "2026-11-03", title: `${zz("job")} ${i}`, assigneeId: admin.user.id, ...extra(i) });
     expect(t.status).toBe(201);
     ids.push(t.json.task.id);
   }

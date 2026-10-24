@@ -116,7 +116,7 @@ test.describe("APL-2669 a malformed expectedUpdatedAt is a bad request", { tag: 
     expect(created.status()).toBe(201);
     projectId = (await created.json()).project.id as string;
     expect((await lead.post(`/api/projects/${projectId}/members`, { data: { userId: editor.id, role: "EDITOR" } })).status()).toBe(201);
-    const made = await lead.post(`/api/projects/${projectId}/tasks`, { data: { title: "Original" } });
+    const made = await lead.post(`/api/projects/${projectId}/tasks`, { data: { dueDate: "2026-11-03", title: "Original" } });
     expect(made.status()).toBe(201);
     taskId = (await made.json()).task.id as string;
   });

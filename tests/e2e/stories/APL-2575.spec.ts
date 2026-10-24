@@ -35,7 +35,7 @@ async function held(admin: Who, member: Who, later: Later, label: string) {
   later(() => admin.api.post(`/api/projects/${id}/archive`));
   expect((await admin.api.post(`/api/projects/${id}/members`, { userId: member.user.id, role: "EDITOR" })).status).toBe(201);
   const title = zz(label);
-  const t = (await admin.api.post(`/api/projects/${id}/tasks`, { title, assigneeId: member.user.id, approverId: admin.user.id })).json.task.id as string;
+  const t = (await admin.api.post(`/api/projects/${id}/tasks`, { dueDate: "2026-11-03", title, assigneeId: member.user.id, approverId: admin.user.id })).json.task.id as string;
   expect((await member.api.post(`/api/tasks/${t}/send-for-approval`)).status).toBe(200);
   return { id, t, title };
 }
@@ -74,7 +74,7 @@ test("AC3: with nothing waiting, the group is absent", tag("APL-2575 AC3"), asyn
   expect((await admin.api.post(`/api/projects/${id}/members`, { userId: member.user.id, role: "EDITOR" })).status).toBe(201);
   expect((await admin.api.post(`/api/projects/${id}/members`, { userId: approver.user.id, role: "EDITOR" })).status).toBe(201);
   const title = zz("gone");
-  const t = (await admin.api.post(`/api/projects/${id}/tasks`, { title, assigneeId: member.user.id, approverId: approver.user.id })).json.task.id as string;
+  const t = (await admin.api.post(`/api/projects/${id}/tasks`, { dueDate: "2026-11-03", title, assigneeId: member.user.id, approverId: approver.user.id })).json.task.id as string;
   expect((await member.api.post(`/api/tasks/${t}/send-for-approval`)).status).toBe(200);
   expect((await approver.api.post(`/api/tasks/${t}/send-back`)).status).toBe(200);
   const rest = (await approver.api.get("/api/my-tasks")).json.waitingOnMe as unknown[];

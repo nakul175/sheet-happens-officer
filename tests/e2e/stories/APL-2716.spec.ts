@@ -159,7 +159,7 @@ test.beforeAll(async ({ browser }) => {
   });
   const plainFor = async (who: Who, label: string): Promise<Plain> => {
     const title = zz(`Pack the cartons ${label}`);
-    const id = await newTask(admin, packing.id, { title, assigneeId: who.user.id });
+    const id = await newTask(admin, packing.id, { dueDate: "2026-11-03", title, assigneeId: who.user.id });
     return { title, id };
   };
   world = {

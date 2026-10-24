@@ -8,7 +8,7 @@ test("After a send-back to the Leader-approver the task is no longer awaiting ap
   const pid = pr.json.project.id as string;
   later(() => admin.api.post(`/api/projects/${pid}/archive`));
   expect((await admin.api.post(`/api/projects/${pid}/members`, { userId: member.user.id, role: "EDITOR" })).status).toBe(201);
-  const t = await admin.api.post(`/api/projects/${pid}/tasks`, { title: zz("held task"), assigneeId: member.user.id, approverId: admin.user.id });
+  const t = await admin.api.post(`/api/projects/${pid}/tasks`, { dueDate: "2026-11-03", title: zz("held task"), assigneeId: member.user.id, approverId: admin.user.id });
   expect(t.status, JSON.stringify(t.json)).toBe(201);
   const tid = t.json.task.id as string;
 

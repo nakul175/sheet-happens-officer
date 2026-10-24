@@ -75,7 +75,7 @@ async function newProject(admin: Who, label: string) {
 }
 
 async function trashItem(who: Who, projectId: string, title: string) {
-  const r = await who.req.post(`/api/projects/${projectId}/tasks`, { data: { title } });
+  const r = await who.req.post(`/api/projects/${projectId}/tasks`, { data: { dueDate: "2026-11-03", title } });
   expect(r.status()).toBe(201);
   const id = ((await r.json()) as { task: { id: string } }).task.id;
   expect((await who.req.delete(`/api/tasks/${id}`)).status()).toBe(204);
