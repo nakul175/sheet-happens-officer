@@ -84,7 +84,7 @@ async function person(local: string, opts: { deactivated: boolean; ageHours: num
 }
 
 async function board() {
-  const project = await db.project.create({ data: { workspaceId, name: "ZZ purge", typeId: "wst_project" } });
+  const project = await db.project.create({ data: { workspaceId, name: "ZZ-TEST purge", typeId: "wst_project" } });
   const section = await db.section.create({ data: { projectId: project.id, name: "To do", position: 0 } });
   return { project, section };
 }

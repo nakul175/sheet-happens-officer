@@ -65,7 +65,7 @@ type CountTable = (typeof COUNT_TABLES)[number];
 type Db = PrismaClient | Prisma.TransactionClient;
 type TaskRef = { id: string; parentId: string | null; assigneeId: string; createdById: string };
 type Person = { id: string; email: string };
-type Plan = { people: Person[]; taskIds: string[]; counts: Record<CountTable, number> };
+type Plan = { workspaceId: string; people: Person[]; taskIds: string[]; counts: Record<CountTable, number> };
 type ModifyRelation = (typeof MODIFY_RELATIONS)[number];
 type Safety = {
   relations: Record<ModifyRelation, number>;
@@ -423,6 +423,13 @@ async function safetyReport(db: Db, plan: Plan): Promise<Safety> {
   if (all.length && await db.task.count({ where: { id: { in: all }, NOT: { title: { startsWith: "ZZ-TEST" } } } })) {
     throw new ScriptRefusal("Refusing to run: affected tasks are not marked ZZ-TEST.");
   }
+  if (all.length && await db.task.count({ where: { id: { in: all }, OR: [
+    { workspaceId: { not: plan.workspaceId } },
+    { project: { workspaceId: { not: plan.workspaceId } } },
+    { project: { NOT: { name: { startsWith: "ZZ-TEST" } } } },
+  ] } })) {
+    throw new ScriptRefusal("Refusing to run: affected tasks belong to another workspace or an unmarked project.");
+  }
   cascade.task = all.length;
   cascade.collaborator = collaborators;
   cascade.collaboratorOutside = collaboratorsOutside;
@@ -480,7 +487,7 @@ async function buildPlan(db: Db, workspaceId: string): Promise<Plan> {
   const purge = new Set(settled.purgeIds);
   const people = eligible.filter((row) => purge.has(row.id)).sort((a, b) => a.id.localeCompare(b.id));
   const counts = await countsFor(db, people.map((person) => person.id), people.map((person) => person.email), settled.deleteTaskIds);
-  return { people, taskIds: settled.deleteTaskIds, counts };
+  return { workspaceId, people, taskIds: settled.deleteTaskIds, counts };
 }
 
 async function applyDeletes(db: Db, plan: Plan) {

@@ -210,7 +210,7 @@ describe("purge zz-test people (APL-2625)", () => {
       data: { userId: partner.id, model: "test", inputTokens: 1, outputTokens: 1, costUsd: 0 },
     });
 
-    const project = await db.project.create({ data: { workspaceId, name: "ZZ purge", typeId: "wst_project" } });
+    const project = await db.project.create({ data: { workspaceId, name: "ZZ-TEST purge", typeId: "wst_project" } });
     const section = await db.section.create({ data: { projectId: project.id, name: "To do", position: 0 } });
     const owned = await db.task.create({
       data: { workspaceId, projectId: project.id, sectionId: section.id, title: "ZZ-TEST owned", assigneeId: eligible.id, createdById: partner.id },
@@ -292,6 +292,20 @@ describe("purge zz-test people (APL-2625)", () => {
     expect(result.code, result.text).toBe(1);
     expect(await db.user.findUnique({ where: { id: eligible.id } })).not.toBeNull();
     expect(await db.comment.findUnique({ where: { id: comment.id } })).not.toBeNull();
+  });
+
+  it.each(["unmarked-task", "foreign-task", "foreign-project", "unmarked-project"])("refuses %s even when its assignee and creator are eligible", async variant => {
+    const eligible = await person("scope-owner", { deactivated: true, ageHours: 48 });
+    const project = await db.project.create({ data: { workspaceId: variant === "foreign-project" ? otherWorkspaceId : workspaceId, name: variant === "unmarked-project" ? "Real customer project" : "ZZ-TEST scope", typeId: "wst_project" } });
+    const section = await db.section.create({ data: { projectId: project.id, name: "Todo", position: 0 } });
+    const task = await db.task.create({ data: { workspaceId: variant === "foreign-task" ? otherWorkspaceId : workspaceId, projectId: project.id, sectionId: section.id, title: variant === "unmarked-task" ? "Real customer work" : "ZZ-TEST scope", assigneeId: eligible.id, createdById: eligible.id } });
+    for (const apply of [false, true]) {
+      const result = await capture(() => runPurge(env(), argv(apply)));
+      expect(result.code, result.text).toBe(1);
+      expect(await db.user.findUnique({ where: { id: eligible.id } })).not.toBeNull();
+      expect(await db.task.findUnique({ where: { id: task.id } })).not.toBeNull();
+      expect(await db.project.findUnique({ where: { id: project.id } })).not.toBeNull();
+    }
   });
 
 });
