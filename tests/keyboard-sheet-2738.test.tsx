@@ -5,7 +5,7 @@
 // the real Modal and drives a shrinking visualViewport, so the tier fails when the wiring stops happening.
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Modal } from "@/components/ui";
 
 const PHONE = 844;
@@ -15,7 +15,8 @@ type VV = { height: number; offsetTop: number; addEventListener: (t: string, f: 
 const resizeListeners = new Set<() => void>();
 let vv: VV;
 let root: Root | null = null;
-let nudged: Mock<(arg?: boolean | ScrollIntoViewOptions) => void>;
+const frames = new Map<number, FrameRequestCallback>();
+let frameId = 0;
 
 /** jsdom has no visualViewport; this is the part of it the dialog uses. */
 function visualViewport(height: number, offsetTop = 0): VV {
@@ -39,8 +40,9 @@ beforeEach(() => {
   resizeListeners.clear();
   vv = visualViewport(PHONE);
   Object.defineProperty(window, "visualViewport", { configurable: true, value: vv });
-  nudged = vi.fn<(arg?: boolean | ScrollIntoViewOptions) => void>();
-  HTMLElement.prototype.scrollIntoView = nudged;
+  frames.clear();
+  vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => { frames.set(++frameId, cb); return frameId; });
+  vi.stubGlobal("cancelAnimationFrame", (id: number) => frames.delete(id));
   document.body.innerHTML = '<div id="root"></div>';
   document.body.className = "";
   document.documentElement.removeAttribute("style");
@@ -49,6 +51,7 @@ beforeEach(() => {
 afterEach(() => {
   act(() => root?.unmount());
   root = null;
+  vi.unstubAllGlobals();
   document.body.className = "";
   document.documentElement.removeAttribute("style");
   document.body.innerHTML = "";
@@ -97,19 +100,24 @@ describe("SHO-2738 the dialog tells the sheet where the keyboard is", () => {
 
   it("nudges a focused field back above the pinned footer, and only when it is actually under it", () => {
     const { sheet, desc } = mount();
-    // A 508 px sheet whose bottom padding ends 140 px above its bottom edge, so the footer is pinned at 508 - 140 = 368.
-    sheet.style.paddingBottom = "140px";
-    sheet.getBoundingClientRect = () => ({ top: 0, bottom: PHONE - 336, height: PHONE - 336 } as DOMRect);
-    const at = (bottom: number) => () => ({ top: bottom - 44, bottom, height: 44 } as DOMRect);
+    sheet.getBoundingClientRect = () => ({ top: 0, bottom: REMAINING, height: REMAINING } as DOMRect);
+    sheet.querySelector<HTMLElement>(".actions")!.getBoundingClientRect = () => ({ top: 368, bottom: REMAINING } as DOMRect);
+    let fieldBottom = 300;
+    desc.getBoundingClientRect = () => ({ top: fieldBottom - 44 - sheet.scrollTop, bottom: fieldBottom - sheet.scrollTop, height: 44 } as DOMRect);
 
     keyboard(REMAINING);
-    desc.getBoundingClientRect = at(300); // above the pin line: fully visible
-    nudged.mockClear();
     act(() => { desc.focus(); document.dispatchEvent(new Event("focusin")); });
-    expect(nudged, "a field that is already visible is left where it is").not.toHaveBeenCalled();
+    expect(sheet.scrollTop, "an already visible field is left where it is").toBe(0);
 
-    desc.getBoundingClientRect = at(500); // past the pin line: under the footer and the keyboard
+    fieldBottom = 500;
     act(() => { document.dispatchEvent(new Event("focusin")); });
-    expect(nudged, "a focused field under the footer is scrolled back into the visible area").toHaveBeenCalledWith({ block: "nearest" });
+    expect(desc.getBoundingClientRect().bottom, "the field ends above the footer, including its gap").toBeLessThanOrEqual(360);
+
+    // A late native focus scroll can undo the first correction after the resize event has returned.
+    sheet.scrollTop = 0;
+    const pending = [...frames.entries()];
+    frames.clear();
+    act(() => { for (const [, cb] of pending) cb(0); });
+    expect(desc.getBoundingClientRect().bottom, "post-layout reconciliation repairs late focus scrolling").toBeLessThanOrEqual(360);
   });
 });

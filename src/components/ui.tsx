@@ -96,7 +96,7 @@ export function Modal({ onClose, small, label, describedBy, children }: { onClos
       // Pinning the footer only helps if the sheet scrolls a focused field out from under it, so nudge the field back up.
       const field = document.activeElement;
       const sheet = sheetRef.current;
-      if (!sheet || !(field instanceof HTMLElement) || !sheet.contains(field) || field.closest(".actions")) return;
+      if (!sheet || !(field instanceof HTMLElement) || !sheet.contains(field) || field === sheet || field.closest(".bar, .actions")) return;
       // Scroll this sheet explicitly: scrollIntoView can use the layout viewport while the keyboard is resizing
       // the visual viewport, leaving the focused field below the pinned footer even though the sheet fits.
       const bounds = sheet.getBoundingClientRect();
