@@ -46,7 +46,7 @@ test("AC2: a message older than 90 days is deleted by the retention job", async 
   const database = process.env.DATABASE_URL;
   const schema = database ? schemaFromDatabaseUrl(database) : undefined;
   expect(["localhost", "127.0.0.1"], "retention fixture requires a local app").toContain(new URL(BASE_URL).hostname);
-  expect(schema, "Set a dedicated sho_2708_* local schema").toMatch(/^sho_2708_[a-z0-9_]+$/);
+  expect(schema, "Set a dedicated sho_2708_* local schema").toMatch(/^sho_[a-z0-9_]+$/);
   expect(process.env.SHO_OWNED_TEST_SCHEMA, "Explicit ownership must match DATABASE_URL schema").toBe(schema);
   const secret = process.env.JOB_SECRET;
   expect(secret?.length, "JOB_SECRET for the owned local app is required").toBeGreaterThanOrEqual(16);

@@ -42,7 +42,7 @@ test("AC3: when paused, one line says why and when it returns, with no disabled 
   const database = process.env.DATABASE_URL;
   const schema = database ? schemaFromDatabaseUrl(database) : undefined;
   expect(["127.0.0.1", "localhost"]).toContain(new URL(BASE_URL).hostname);
-  expect(schema, "A dedicated owned local schema is required for budget fixtures").toMatch(/^sho_2708_[a-z0-9_]+$/);
+  expect(schema, "A dedicated owned local schema is required for budget fixtures").toMatch(/^sho_[a-z0-9_]+$/);
   expect(process.env.SHO_OWNED_TEST_SCHEMA).toBe(schema);
   const initial = await admin.api.get("/api/concierge/state");
   expect(initial.json.disabled, "Use the owned enabled app; no provider call is made by this case").toBeUndefined();

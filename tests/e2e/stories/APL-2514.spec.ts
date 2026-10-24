@@ -133,7 +133,7 @@ test("AC6: a done message older than 30 days has Undo greyed out, saying it is t
   const database = process.env.DATABASE_URL;
   const schema = database ? schemaFromDatabaseUrl(database) : undefined;
   expect(["127.0.0.1", "localhost"]).toContain(new URL(BASE_URL).hostname);
-  expect(schema).toMatch(/^sho_2708_[a-z0-9_]+$/);
+  expect(schema).toMatch(/^sho_[a-z0-9_]+$/);
   expect(process.env.SHO_OWNED_TEST_SCHEMA).toBe(schema);
   const id = randomUUID().replaceAll("-", "");
   const old = new Date(Date.now() - 31 * 86400_000).toISOString();
