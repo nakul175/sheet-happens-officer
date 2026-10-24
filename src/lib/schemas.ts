@@ -93,6 +93,8 @@ export const taskCreate = z.object({
   assigneeId: z.string().min(1).optional(),
   approverId: z.string().min(1).optional(),
   collaboratorIds: z.array(z.string().min(1)).max(50).optional(),
+  addAssigneeToProject: z.boolean().optional(),
+  addCollaboratorsToProject: z.array(z.string().min(1)).max(50).optional(),
 });
 // The updatedAt the person saw when they opened the task; a different value means someone else saved first.
 // APL-2669 / APL-2670: kept as unknown so a missing, empty or malformed token is classified
@@ -107,8 +109,8 @@ export const taskUpdate = z.object({
   blockedReason: z.string().trim().max(300).nullish(),
   expectedUpdatedAt: taskVersion,
 });
-export const taskAssign = z.object({ assigneeId: z.string().min(1), expectedUpdatedAt: taskVersion });
-export const taskCollaborator = z.object({ userId: z.string().min(1) });
+export const taskAssign = z.object({ assigneeId: z.string().min(1), expectedUpdatedAt: taskVersion, addToProject: z.boolean().optional() });
+export const taskCollaborator = z.object({ userId: z.string().min(1), addToProject: z.boolean().optional(), expectedUpdatedAt: z.unknown().optional() });
 export const taskApprover = z.object({ approverId: z.string().min(1).nullable(), expectedUpdatedAt: taskVersion });
 export const taskComplete = z.object({ completeAll: z.boolean().optional(), expectedUpdatedAt: taskVersion });
 export const taskReopen = z.object({ sectionId: z.string().min(1).optional() });

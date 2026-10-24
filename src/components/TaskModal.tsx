@@ -1,5 +1,6 @@
 "use client";
 import Link from "next/link";
+import { WorkspaceTaskPerson } from "@/components/WorkspaceTaskPerson";
 import { useState } from "react";
 import { PRIORITY, ROLE, api, dueLabel, useGet } from "@/components/api";
 import { BLOCKED_REASON_MAX_LENGTH, blockedReasonRef, fitBlockedReason } from "@/components/blocked-reason";
@@ -153,6 +154,11 @@ export function TaskModal({ id, me, onClose, onChanged, asPage }: { id: string; 
                   {workers.map((w) => <option key={w.userId} value={w.userId}>{w.name}</option>)}
                 </select>
               ) : task.assignee.name}
+              {canManage && canEdit && !holding && <WorkspaceTaskPerson projectId={task.projectId} purpose="assignee" excludeIds={[task.assignee.id]} onChoose={async (person, addToProject) => {
+                const result = await run(api("POST", `/api/tasks/${id}/assign`, { assigneeId: person.id, expectedUpdatedAt: version, addToProject }));
+                if (result?.ok) pr.reload();
+                return { ok: !!result?.ok, error: result?.error };
+              }} />}
             </div>
             <span className="lbl">Collaborators</span>
             <div className="pills">
@@ -170,6 +176,11 @@ export function TaskModal({ id, me, onClose, onChanged, asPage }: { id: string; 
                 </select>
               )}
             </div>
+            {canManage && canEdit && !holding && <><span className="lbl">Workspace collaborators</span><div><WorkspaceTaskPerson projectId={task.projectId} purpose="collaborator" excludeIds={[task.assignee.id, ...task.collaborators.map(person => person.id)]} onChoose={async (person, addToProject) => {
+              const result = await run(api("POST", `/api/tasks/${id}/collaborators`, { userId: person.id, expectedUpdatedAt: version, addToProject }));
+              if (result?.ok) pr.reload();
+              return { ok: !!result?.ok, error: result?.error };
+            }} /></div></>}
             <span className="lbl">Approver</span>
             <div>
               {(canManage || task.createdById === me) && canEdit && !task.awaitingApproval && !task.parentId && task.assignee.id !== me ? (
