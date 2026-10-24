@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { parseSubmissionDeadline } from "@/lib/submission-deadline";
 import { dealClassificationFields } from "@/lib/deal-classification";
 
 // Domain rule for self-signup: exactly these two, checked on the server (SHO-US-1.1 AC2, SHO-US-15.1).
@@ -127,12 +128,13 @@ export const orgUpdate = z.object({
 });
 export const orgArchive = z.object({ archive: z.boolean() });
 export const currencyField = z.enum(["INR", "USD", "EUR"]);
+const submissionDeadlineField = z.string().max(40).refine(value => { try { parseSubmissionDeadline(value); return true; } catch { return false; } }, "Use a valid submission date, with an optional time and timezone.");
 export const dealDetails = dealClassificationFields.extend({
   whyPursue: z.string().trim().min(1).max(1000).optional(),
   need: optText(2000), serviceLine: optText(200),
   value: z.number().positive().max(1e13).nullish(), currency: currencyField.nullish(),
   probability: z.number().int().min(0).max(100).nullish(),
-  expectedClose: isoDay.nullish(), introducedBy: optText(200), submissionDeadline: isoDay.nullish(),
+  expectedClose: isoDay.nullish(), introducedBy: optText(200), submissionDeadline: submissionDeadlineField.nullish(),
 });
 export const dealCreate = dealDetails.extend({
   name: z.string().trim().min(1, "Give the deal a name.").max(200),

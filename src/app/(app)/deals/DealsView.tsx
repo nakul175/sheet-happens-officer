@@ -1,5 +1,6 @@
 "use client";
 import Link from "next/link";
+import { submissionDeadlineLabel, submissionDeadlineOverdue } from "@/lib/submission-deadline";
 import { Skeleton } from "@/components/ui";
 import { useState } from "react";
 import { dueLabel, isOverdue, useGet } from "@/components/api";
@@ -77,12 +78,13 @@ export default function DealsView() {
 
 function DealList({ deals }: { deals: D[] }) {
   return <div style={{ overflowX: "auto" }}><table className="tbl">
-    <thead><tr><th>Deal</th><th>Opportunity type</th><th>Organisation</th><th>Stage</th><th>Value</th><th>Next step</th><th>Leader</th></tr></thead>
+    <thead><tr><th>Deal</th><th>Opportunity type</th><th>Organisation</th><th>Stage</th><th>Submission deadline</th><th>Value</th><th>Next step</th><th>Leader</th></tr></thead>
     <tbody>{deals.map(d => <tr key={d.id}>
       <td><Link href={`/projects/${d.id}`}>{d.name}</Link> {d.stalled && <span className="chip gold">Stalled</span>}</td>
       <td>{OPPORTUNITY_TYPES.find(o => o.value === d.opportunityType)?.label ?? "Unclassified"}</td>
       <td>{d.organisation ? <Link href={`/accounts/${d.organisation.id}`}>{d.organisation.name}</Link> : "—"}</td>
       <td><span className="chip">{d.stage?.name}{d.stage?.isRetired ? " · legacy stage" : ""}</span><div style={{ fontSize: 12, color: "var(--muted)" }}>{d.pipeline?.name}</div></td>
+      <td className={submissionDeadlineOverdue(d.submissionDeadline) ? "over" : ""}>{submissionDeadlineLabel(d.submissionDeadline) || "—"}</td>
       <td>{money(d.value, d.currency)}</td>
       <td>{d.nextStep ? <>{d.nextStep.title} · <span className={isOverdue(d.nextStep.dueDate) ? "over" : ""}>{dueLabel(d.nextStep.dueDate)}</span></> : d.needsNextStep ? <span className="chip red">None</span> : "—"}</td>
       <td>{d.leader?.name ?? "—"}</td>

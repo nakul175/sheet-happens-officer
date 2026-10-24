@@ -4,6 +4,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useState } from "react";
 import { api, todayIST, useGet } from "@/components/api";
 import { ATHENA_ENTITIES, OPPORTUNITY_TYPES } from "@/lib/deal-classification";
+import { submissionDeadlineInput, SUBMISSION_TIME_ZONE_LABEL } from "@/lib/submission-deadline";
 import { Field } from "@/components/ui";
 import { Page, useMe } from "../../Shell";
 
@@ -14,19 +15,22 @@ function Form() {
   const team = useGet<{ people: { id: string; name: string }[] }>("/api/team");
   const orgs = useGet<{ organisations: { id: string; name: string }[] }>("/api/orgs");
   const pipes = useGet<{ pipelines: { id: string; key: string; name: string }[] }>("/api/deals/pipelines");
-  const [v, setV] = useState({ name: "", organisationId: sp.get("org") ?? "", pipelineId: "", leaderId: me.id, whyPursue: "", step: "", due: todayIST(), submissionDeadline: "", value: "", currency: "INR", opportunityType: "", netFeeRevenueUsd: "", athenaEntity: "", probability: "" });
+  const [v, setV] = useState({ name: "", organisationId: sp.get("org") ?? "", pipelineId: "", leaderId: me.id, whyPursue: "", step: "", due: todayIST(), submissionDeadline: "", submissionTime: "", value: "", currency: "INR", opportunityType: "", netFeeRevenueUsd: "", athenaEntity: "", probability: "" });
   const [err, setErr] = useState<string | null>(null);
   const [dup, setDup] = useState(false);
   const [busy, setBusy] = useState(false);
-  const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setV({ ...v, [k]: e.target.value });
+  const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setV({ ...v, [k]: e.target.value, ...(k === "submissionDeadline" && !e.target.value ? { submissionTime: "" } : {}) });
   const pipeline = pipes.data?.pipelines.find((p) => p.id === (v.pipelineId || pipes.data?.pipelines[0]?.id));
   async function submit(e: React.FormEvent, force = false) {
     e.preventDefault(); setBusy(true); setErr(null);
+    let submissionDeadline: string | null = null;
+    try { if (pipeline?.key === "DEAL_BID") submissionDeadline = submissionDeadlineInput(v.submissionDeadline, v.submissionTime); }
+    catch (error) { setBusy(false); setErr(error instanceof Error ? error.message : "Choose a valid submission deadline."); return; }
     const body: Record<string, unknown> = {
       name: v.name, organisationId: v.organisationId, pipelineId: pipeline?.id, leaderId: v.leaderId, whyPursue: v.whyPursue,
       nextStep: { title: v.step, dueDate: v.due }, force,
     };
-    if (pipeline?.key === "DEAL_BID") body.submissionDeadline = v.submissionDeadline || null;
+    if (pipeline?.key === "DEAL_BID") body.submissionDeadline = submissionDeadline;
     body.opportunityType = v.opportunityType || null;
     body.netFeeRevenueUsd = v.netFeeRevenueUsd === "" ? null : Number(v.netFeeRevenueUsd);
     body.athenaEntity = v.athenaEntity || null;
@@ -46,7 +50,7 @@ function Form() {
       </Field>
       <p style={{ marginTop: -8, fontSize: 14 }}><Link href="/accounts">Open Accounts to add a buyer</Link></p>
       <Field label="Pipeline">{(id) => <select id={id} className="in" value={pipeline?.id ?? ""} onChange={set("pipelineId")}>{pipes.data?.pipelines.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select>}</Field>
-      {pipeline?.key === "DEAL_BID" && <Field label="Submission deadline">{(id) => <input id={id} className="in" type="date" required value={v.submissionDeadline} onChange={set("submissionDeadline")} />}</Field>}
+      {pipeline?.key === "DEAL_BID" && <><Field label="Submission deadline">{(id) => <input id={id} className="in" type="date" required value={v.submissionDeadline} onChange={set("submissionDeadline")} />}</Field><Field label={`Submission time (optional) · ${SUBMISSION_TIME_ZONE_LABEL}`}>{(id) => <input id={id} className="in" type="time" value={v.submissionTime} disabled={!v.submissionDeadline} onChange={set("submissionTime")} />}</Field></>}
       <Field label="Opportunity type">{(id) => <select id={id} className="in" value={v.opportunityType} onChange={set("opportunityType")}><option value="">Unclassified</option>{OPPORTUNITY_TYPES.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}</select>}</Field>
       <Field label="Net Fee Revenue (USD)">{(id) => <input id={id} className="in" type="number" min="0" max="9999999999999.99" step="0.01" value={v.netFeeRevenueUsd} onChange={set("netFeeRevenueUsd")} />}</Field>
       <Field label="PWin (%)">{(id) => <input id={id} className="in" type="number" min="0" max="100" step="1" value={v.probability} onChange={set("probability")} />}</Field>

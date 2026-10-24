@@ -494,7 +494,8 @@ model DealDetails {
   netFeeRevenueUsd   Decimal?  @db.Decimal(15, 2)
   expectedClose      DateTime? @db.Date
   introducedBy       String?
-  submissionDeadline DateTime? @db.Date
+  submissionDeadline DateTime? @db.Timestamp(3)
+  submissionDeadlineHasTime Boolean @default(false)
   createdAt          DateTime  @default(now())
 
   @@index([workspaceId])

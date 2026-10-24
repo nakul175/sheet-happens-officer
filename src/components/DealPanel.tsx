@@ -1,5 +1,7 @@
 "use client";
 import Link from "next/link";
+import { submissionDeadlineFields, submissionDeadlineEdit, submissionDeadlineLabel, submissionDeadlineOverdue, SUBMISSION_TIME_ZONE_LABEL } from "@/lib/submission-deadline";
+import { ChangeDealBuyer } from "@/components/ChangeDealBuyer";
 import { ATHENA_ENTITIES, OPPORTUNITY_TYPES, type AthenaEntity, type OpportunityType } from "@/lib/deal-classification";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { api, dueLabel, isOverdue, useGet } from "@/components/api";
@@ -10,7 +12,7 @@ export type DealBlock = {
   pipeline: { id: string; key: string; name: string; stages: Stage[] } | null;
   stage: { id: string; name: string; category: string; isRetired?: boolean } | null;
   stageReason: string | null;
-  details: { whyPursue: string | null; need: string | null; serviceLine: string | null; value: number | null; currency: string | null; probability: number | null; expectedClose: string | null; introducedBy: string | null; submissionDeadline: string | null; opportunityType?: OpportunityType | null; netFeeRevenueUsd?: number | null; athenaEntity?: AthenaEntity | null } | null;
+  details: { whyPursue: string | null; need: string | null; serviceLine: string | null; value: number | null; currency: string | null; probability: number | null; expectedClose: string | null; introducedBy: string | null; submissionDeadline: string | null; submissionDeadlineHasTime?: boolean; opportunityType?: OpportunityType | null; netFeeRevenueUsd?: number | null; athenaEntity?: AthenaEntity | null } | null;
   parties: { id: string; role: string; organisation: { id: string; name: string } }[];
   organisation: { id: string; name: string } | null;
   nextStep: { id: string; title: string; dueDate: string | null; assignee?: { id: string; name: string } | null } | null;
@@ -153,19 +155,22 @@ function DetailsDialog({ projectId, deal, onClose, onDone }: { projectId: string
   const [v, setV] = useState<Record<string, string>>({
     whyPursue: d.whyPursue ?? "", need: d.need ?? "", serviceLine: d.serviceLine ?? "", value: d.value === null ? "" : String(d.value), currency: d.currency ?? "",
     opportunityType: d.opportunityType ?? "", netFeeRevenueUsd: d.netFeeRevenueUsd == null ? "" : String(d.netFeeRevenueUsd), athenaEntity: d.athenaEntity ?? "",
-    probability: d.probability === null ? "" : String(d.probability), expectedClose: d.expectedClose ?? "", introducedBy: d.introducedBy ?? "", submissionDeadline: d.submissionDeadline ?? "",
+    probability: d.probability === null ? "" : String(d.probability), expectedClose: d.expectedClose ?? "", introducedBy: d.introducedBy ?? "", submissionDeadline: submissionDeadlineFields(d.submissionDeadline).date, submissionTime: submissionDeadlineFields(d.submissionDeadline).time,
   });
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => setV({ ...v, [k]: e.target.value });
+  const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => setV({ ...v, [k]: e.target.value, ...(k === "submissionDeadline" && !e.target.value ? { submissionTime: "" } : {}) });
   async function save(e: React.FormEvent) {
     e.preventDefault();
     if (busy) return;
     setBusy(true); setErr(null);
+    let submissionDeadline: string | null;
+    try { submissionDeadline = submissionDeadlineEdit(d.submissionDeadline, v.submissionDeadline, v.submissionTime); }
+    catch (error) { setBusy(false); setErr(error instanceof Error ? error.message : "Choose a valid submission deadline."); return; }
     const body: Record<string, unknown> = {
       whyPursue: v.whyPursue, need: v.need || null, serviceLine: v.serviceLine || null, introducedBy: v.introducedBy || null,
       value: v.value === "" ? null : Number(v.value), currency: v.currency || null, probability: v.probability === "" ? null : Number(v.probability),
-      expectedClose: v.expectedClose || null, submissionDeadline: v.submissionDeadline || null,
+      expectedClose: v.expectedClose || null, submissionDeadline,
       opportunityType: v.opportunityType || null, netFeeRevenueUsd: v.netFeeRevenueUsd === "" ? null : Number(v.netFeeRevenueUsd), athenaEntity: v.athenaEntity || null,
     };
     const r = await api("PATCH", `/api/projects/${projectId}/deal`, body);
@@ -188,7 +193,7 @@ function DetailsDialog({ projectId, deal, onClose, onDone }: { projectId: string
       <Field label="Net Fee Revenue (USD)">{(id) => <input id={id} className="in" type="number" min="0" max="9999999999999.99" step="0.01" value={v.netFeeRevenueUsd} onChange={set("netFeeRevenueUsd")} />}</Field>
       <Field label="Athena Entity">{(id) => <select id={id} className="in" value={v.athenaEntity} onChange={set("athenaEntity")}><option value="">Not specified</option>{ATHENA_ENTITIES.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}</select>}</Field>
       <Field label="Expected close">{(id) => <input id={id} className="in" type="date" value={v.expectedClose} onChange={set("expectedClose")} />}</Field>
-      {deal.pipeline?.key === "DEAL_BID" && <Field label="Submission deadline">{(id) => <input id={id} className="in" type="date" value={v.submissionDeadline} onChange={set("submissionDeadline")} />}</Field>}
+      {deal.pipeline?.key === "DEAL_BID" && <><Field label="Submission deadline">{(id) => <input id={id} className="in" type="date" value={v.submissionDeadline} onChange={set("submissionDeadline")} />}</Field><Field label={`Submission time (optional) · ${SUBMISSION_TIME_ZONE_LABEL}`}>{(id) => <input id={id} className="in" type="time" value={v.submissionTime} disabled={!v.submissionDeadline} onChange={set("submissionTime")} />}</Field></>}
       <Field label="Introduced by">{(id) => <input id={id} className="in" value={v.introducedBy} onChange={set("introducedBy")} />}</Field>
       {err && <div className="err" role="alert">{err}</div>}
       </form>
@@ -273,6 +278,7 @@ export function DealPanel({ projectId, projectName, deal, canWrite, canManage = 
   const [armed, setArmed] = useState<Stage | null>(null);
   const [edit, setEdit] = useState(false);
   const [rename, setRename] = useState(false);
+  const [buyerEdit, setBuyerEdit] = useState(false);
   const pending = useRef(false);
   const ticket = useRef(0); // a closed or replaced click ignores a list that arrives later
   const d = deal.details;
@@ -337,11 +343,12 @@ export function DealPanel({ projectId, projectName, deal, canWrite, canManage = 
         {d?.athenaEntity && <span>Athena Entity: {ATHENA_ENTITIES.find(o => o.value === d.athenaEntity)?.label ?? d.athenaEntity}</span>}
         {d?.probability !== null && d?.probability !== undefined && <span>PWin: {d.probability}%</span>}
         {d?.expectedClose && <span>Close {dueLabel(d.expectedClose)}</span>}
-        {d?.submissionDeadline && <span className={isOverdue(d.submissionDeadline) ? "over" : ""}>Submit by {dueLabel(d.submissionDeadline)}</span>}
+        {d?.submissionDeadline && <span className={submissionDeadlineOverdue(d.submissionDeadline) ? "over" : ""}>Submit by {submissionDeadlineLabel(d.submissionDeadline)}</span>}
         {deal.stalled && <span className="chip gold">Stalled · no activity for 30 days</span>}
         {deal.stageReason && <span>Reason: {deal.stageReason}</span>}
         {canWrite && <button className="btn ghost sm" onClick={() => setEdit(true)}>Edit details</button>}
         {canManage && projectName !== undefined && <button className="btn ghost sm" onClick={() => setRename(true)}>Rename opportunity</button>}
+        {canManage && canWrite && deal.organisation && <button className="btn ghost sm" onClick={() => setBuyerEdit(true)}>Change Buyer</button>}
         {canManage && <Link className="btn ghost sm" href={`/projects/${projectId}/members`}>Change leader</Link>}
       </div>
       {d?.whyPursue && <p style={{ margin: "8px 0 0", fontSize: 14 }}><b>Why:</b> {d.whyPursue}</p>}
@@ -354,6 +361,7 @@ export function DealPanel({ projectId, projectName, deal, canWrite, canManage = 
       <Parties projectId={projectId} deal={deal} canWrite={canWrite} onChange={onChange} />
       {pick && deal && <StageDialog projectId={projectId} stage={pick.stage} deal={deal} initial={{ blocked: pick.blocked, loadError: pick.loadError }} onClose={close} onDone={() => { close(); onChange(); }} />}
       {rename && canManage && projectName !== undefined && <RenameDeal projectId={projectId} name={projectName} onClose={() => setRename(false)} onDone={() => { setRename(false); onChange(); }} />}
+      {buyerEdit && canManage && canWrite && deal.organisation && <ChangeDealBuyer projectId={projectId} buyer={deal.organisation} onClose={() => setBuyerEdit(false)} onDone={() => { setBuyerEdit(false); onChange(); }} />}
       {edit && d && <DetailsDialog projectId={projectId} deal={deal} onClose={() => setEdit(false)} onDone={() => { setEdit(false); onChange(); }} />}
     </section>
   );

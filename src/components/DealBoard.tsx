@@ -2,6 +2,7 @@
 // SHO-US-10.5 / 12.6: the one grouped view of deals. Columns are a pipeline's stages (Paused, Done and Lost share the last
 // column for Proactive only; Bid stages stay distinct). Desktop: columns scroll sideways inside the board. Phone: the same groups as a vertical list.
 import Link from "next/link";
+import { submissionDeadlineSortValue, submissionDeadlineLabel, submissionDeadlineOverdue } from "@/lib/submission-deadline";
 import { OPPORTUNITY_TYPES, type OpportunityType } from "@/lib/deal-classification";
 import { useMemo, useState } from "react";
 import { api, dueLabel, isOverdue } from "@/components/api";
@@ -37,7 +38,7 @@ export function columnsFor(stages: BoardStage[], deals: BoardDeal[], bid: boolea
     const c = cols.find(c => c.stages.some(s => s.id === d.stage!.id));
     c?.deals.push(d);
   }
-  if (bid) for (const c of cols) c.deals.sort((a, b) => (a.submissionDeadline ?? "9999").localeCompare(b.submissionDeadline ?? "9999"));
+  if (bid) for (const c of cols) c.deals.sort((a, b) => submissionDeadlineSortValue(a.submissionDeadline) - submissionDeadlineSortValue(b.submissionDeadline));
   return cols;
 }
 
@@ -76,7 +77,7 @@ function Card({ d, stages, onMove, bid, canMove }: { d: BoardDeal; stages: Board
       {d.stage?.isRetired && <div className="sub2">{d.stage.name} · legacy stage</div>}
       {d.organisation && <div className="sub2">{d.organisation.name}</div>}
       <div className="sub2">{money(d.value, d.currency)}{d.leader ? ` · ${d.leader.name}` : ""}</div>
-      {bid && d.submissionDeadline && <div className={`sub2${isOverdue(d.submissionDeadline) ? " over" : ""}`}>{isOverdue(d.submissionDeadline) ? "Deadline passed " : "Submit by "}{dueLabel(d.submissionDeadline)}</div>}
+      {bid && d.submissionDeadline && <div className={`sub2${submissionDeadlineOverdue(d.submissionDeadline) ? " over" : ""}`}>{submissionDeadlineOverdue(d.submissionDeadline) ? "Deadline passed " : "Submit by "}{submissionDeadlineLabel(d.submissionDeadline)}</div>}
       <div className="sub2">
         {d.nextStep ? <>Next: {d.nextStep.title} · <span className={isOverdue(d.nextStep.dueDate) ? "over" : ""}>{dueLabel(d.nextStep.dueDate)}</span></> : d.needsNextStep ? <span className="chip red">Needs a next step</span> : null}
         {d.stalled && <span className="chip gold" style={{ marginLeft: 4 }}>Stalled</span>}

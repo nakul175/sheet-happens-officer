@@ -1,3 +1,4 @@
+import { parseSubmissionDeadline, serializeSubmissionDeadline } from "@/lib/submission-deadline";
 // SHO-E10 and SHO-E12: Deals are projects of type Deal. This file holds creation, stages, details,
 // next step and stalled logic. Access is still project membership (src/lib/access.ts).
 import type { Prisma } from "@/generated/prisma/client";
@@ -33,6 +34,14 @@ const revenueNumber = (value: unknown): number | null => value == null ? null : 
 const clean = (v: string | null | undefined) => (v?.trim() ? v.trim() : null);
 const isoDate = (s: string) => { if (!/^\d{4}-\d{2}-\d{2}$/.test(s) || Number.isNaN(Date.parse(`${s}T00:00:00Z`))) throw new ApiError(400, "Use a date like 2026-10-31."); return new Date(`${s}T00:00:00Z`); };
 const dayOnly = (d: Date | null) => (d ? d.toISOString().slice(0, 10) : null);
+function deadlinePatch(value: string | null | undefined) {
+  try { const parsed = parseSubmissionDeadline(value ?? null); return { submissionDeadline: parsed.deadline, submissionDeadlineHasTime: parsed.hasTime }; }
+  catch { throw new ApiError(400, "Use a valid submission date, with an optional time and timezone."); }
+}
+function deadlineAudit(value: string | null | undefined) {
+  const patch = deadlinePatch(value);
+  return { submissionDeadline: serializeSubmissionDeadline(patch.submissionDeadline, patch.submissionDeadlineHasTime), submissionDeadlineHasTime: patch.submissionDeadlineHasTime };
+}
 
 /** Pipelines with their stages, for pickers and the board. Type Deal only. */
 export async function dealPipelines(user: Actor) {
@@ -108,7 +117,7 @@ export async function createDeal(
       data: {
         projectId: project.id, workspaceId: u.workspaceId, whyPursue: why, need: clean(input.need), serviceLine: clean(input.serviceLine),
         value, currency, probability, ...classifications, expectedClose: input.expectedClose ? isoDate(input.expectedClose) : null,
-        introducedBy: clean(input.introducedBy), submissionDeadline: input.submissionDeadline ? isoDate(input.submissionDeadline) : null,
+        introducedBy: clean(input.introducedBy), ...deadlinePatch(input.submissionDeadline),
       },
     });
     await tx.dealParty.create({ data: { projectId: project.id, organisationId: org.id, role: "BUYER" } });
@@ -123,7 +132,7 @@ export async function createDeal(
     await notify(tx, [leader.id], "TASK_ASSIGNED", { actorId: user.id, taskId: firstStep.id, projectId: project.id, data: { title: firstStep.title } });
     await logAction(tx, { actorId: user.id, projectId: project.id, targetType: "task", targetId: firstStep.id, action: "task.created", after: { title: firstStep.title, assigneeId: leader.id, sectionId: sections[0].id, parentId: null }, primary: false });
     await notify(tx, [leader.id], "MADE_LEADER", { actorId: user.id, projectId: project.id, data: { project: project.name } });
-    await logAction(tx, { actorId: user.id, projectId: project.id, targetType: "deal", targetId: project.id, action: "deal.created", after: { name, organisationId: org.id, pipeline: pipeline.name, leaderId: leader.id, ...classifications } });
+    await logAction(tx, { actorId: user.id, projectId: project.id, targetType: "deal", targetId: project.id, action: "deal.created", after: { name, organisationId: org.id, pipeline: pipeline.name, leaderId: leader.id, ...classifications, ...deadlineAudit(input.submissionDeadline) } });
     return project;
   });
 }
@@ -218,7 +227,8 @@ function detailsState(d: DetailsRow | Record<string, unknown>) {
     whyPursue: r.whyPursue, need: r.need, serviceLine: r.serviceLine, value: r.value === null || r.value === undefined ? null : Number(r.value), currency: r.currency,
     opportunityType: r.opportunityType ?? null, athenaEntity: r.athenaEntity ?? null, netFeeRevenueUsd: revenueNumber(r.netFeeRevenueUsd),
     probability: r.probability, expectedClose: r.expectedClose ? dayOnly(r.expectedClose) : null, introducedBy: r.introducedBy,
-    submissionDeadline: r.submissionDeadline ? dayOnly(r.submissionDeadline) : null,
+    submissionDeadline: serializeSubmissionDeadline(r.submissionDeadline, r.submissionDeadlineHasTime),
+    submissionDeadlineHasTime: r.submissionDeadlineHasTime ?? false,
   };
 }
 
@@ -237,7 +247,7 @@ function detailsPatch(input: DealDetailsInput, cur: DetailsRow) {
   if (input.probability !== undefined) data.probability = checkProbability(input.probability);
   if (input.expectedClose !== undefined) data.expectedClose = input.expectedClose ? isoDate(input.expectedClose) : null;
   if (input.introducedBy !== undefined) data.introducedBy = clean(input.introducedBy);
-  if (input.submissionDeadline !== undefined) data.submissionDeadline = input.submissionDeadline ? isoDate(input.submissionDeadline) : null;
+  if (input.submissionDeadline !== undefined) Object.assign(data, deadlinePatch(input.submissionDeadline));
   return data;
 }
 
@@ -394,7 +404,8 @@ export async function listDeals(user: Actor, o: { archived?: boolean; mine?: boo
       value: p.deal?.value === null || p.deal?.value === undefined ? null : Number(p.deal.value), currency: p.deal?.currency ?? null,
       opportunityType: p.deal?.opportunityType ?? null, athenaEntity: p.deal?.athenaEntity ?? null, netFeeRevenueUsd: revenueNumber(p.deal?.netFeeRevenueUsd),
       probability: p.deal?.probability ?? null,
-      submissionDeadline: dayOnly(p.deal?.submissionDeadline ?? null),
+      submissionDeadline: serializeSubmissionDeadline(p.deal?.submissionDeadline, p.deal?.submissionDeadlineHasTime),
+      submissionDeadlineHasTime: p.deal?.submissionDeadlineHasTime ?? false,
       nextStep: sig.nextStep,
       needsNextStep: isWorking(p.stage?.category) && !p.archivedAt && !sig.nextStep,
       stalled: !p.archivedAt && isStalled(p.stage?.category, sig.lastActivity, now),
@@ -420,7 +431,7 @@ export async function dealBlock(projectId: string) {
     details: d ? {
       whyPursue: d.whyPursue, need: d.need, serviceLine: d.serviceLine, value: d.value === null ? null : Number(d.value), currency: d.currency,
       opportunityType: d.opportunityType ?? null, athenaEntity: d.athenaEntity ?? null, netFeeRevenueUsd: revenueNumber(d.netFeeRevenueUsd),
-      probability: d.probability, expectedClose: dayOnly(d.expectedClose), introducedBy: d.introducedBy, submissionDeadline: dayOnly(d.submissionDeadline),
+      probability: d.probability, expectedClose: dayOnly(d.expectedClose), introducedBy: d.introducedBy, submissionDeadline: serializeSubmissionDeadline(d.submissionDeadline, d.submissionDeadlineHasTime), submissionDeadlineHasTime: d.submissionDeadlineHasTime ?? false,
     } : null,
     parties: p.parties.map((x) => ({ id: x.id, role: x.role, organisation: x.organisation })),
     organisation: p.parties.find((x) => x.role === "BUYER")?.organisation ?? null,
@@ -550,7 +561,7 @@ export async function convertTaskToDeal(user: Actor, taskId: string, input: Conv
       data: {
         projectId: project.id, workspaceId: u.workspaceId, whyPursue: why!, need: clean(input.need), serviceLine: clean(input.serviceLine), value, currency, probability, ...classifications,
         expectedClose: input.expectedClose ? isoDate(input.expectedClose) : null, introducedBy: clean(input.introducedBy),
-        submissionDeadline: input.submissionDeadline ? isoDate(input.submissionDeadline) : null,
+        ...deadlinePatch(input.submissionDeadline),
       },
     });
     await tx.dealParty.create({ data: { projectId: project.id, organisationId: org.id, role: "BUYER" } });
@@ -572,7 +583,7 @@ export async function convertTaskToDeal(user: Actor, taskId: string, input: Conv
         sourceProjectId: t.projectId, sectionId: t.sectionId, previousSectionId: t.previousSectionId, isIdea: t.isIdea, approverId: t.approverId,
         dueDate: t.dueDate?.toISOString() ?? null, subtaskIds: subs.map((s) => s.id),
       },
-      after: { dealId: project.id, name, organisationId: org.id, pipeline: pipeline!.name, leaderId: leader.id, ...classifications },
+      after: { dealId: project.id, name, organisationId: org.id, pipeline: pipeline!.name, leaderId: leader.id, ...classifications, ...deadlineAudit(input.submissionDeadline) },
     });
     return project;
   });

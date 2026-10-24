@@ -1,3 +1,4 @@
+import { parseSubmissionDeadline, serializeSubmissionDeadline } from "@/lib/submission-deadline";
 /* eslint-disable @typescript-eslint/no-explicit-any */
 // SHO-US-6.4: Undo from the stored before-state, with a conflict warning and "Undo anyway".
 import { db } from "@/lib/db";
@@ -254,10 +255,17 @@ async function plan(row: any, user: Actor, projectId: string): Promise<Plan> {
       const now: Record<string, unknown> = {
         whyPursue: d.whyPursue, need: d.need, serviceLine: d.serviceLine, value: d.value === null ? null : Number(d.value), currency: d.currency,
         probability: d.probability, expectedClose: d.expectedClose?.toISOString().slice(0, 10) ?? null, introducedBy: d.introducedBy,
-        submissionDeadline: d.submissionDeadline?.toISOString().slice(0, 10) ?? null,
+        submissionDeadline: serializeSubmissionDeadline(d.submissionDeadline, d.submissionDeadlineHasTime),
+        submissionDeadlineHasTime: d.submissionDeadlineHasTime ?? false,
       };
       const data: Record<string, unknown> = {};
-      for (const k of keys) data[k] = (k === "expectedClose" || k === "submissionDeadline") && b[k] ? new Date(`${b[k]}T00:00:00Z`) : b[k] ?? null;
+      for (const k of keys) {
+        if (k === "submissionDeadline") {
+          const parsed = parseSubmissionDeadline(b[k] ?? null);
+          data.submissionDeadline = parsed.deadline;
+          data.submissionDeadlineHasTime = b.submissionDeadlineHasTime ?? parsed.hasTime;
+        } else data[k] = k === "expectedClose" && b[k] ? new Date(`${b[k]}T00:00:00Z`) : b[k] ?? null;
+      }
       return { conflicts: fieldConflicts(keys, b, f, now), subject: "the deal", fields: keys.join(", "), apply: async (tx) => { await tx.dealDetails.update({ where: { projectId }, data }); } };
     }
     case "project.updated": {

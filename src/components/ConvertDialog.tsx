@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { api, useGet } from "@/components/api";
 import { ATHENA_ENTITIES, OPPORTUNITY_TYPES } from "@/lib/deal-classification";
+import { submissionDeadlineInput, SUBMISSION_TIME_ZONE_LABEL } from "@/lib/submission-deadline";
 import { Field, Modal } from "@/components/ui";
 
 export function ConvertDialog({ task, meId, onClose }: { task: { id: string; title: string; dueDate: string | null; assignee: { id: string } }; meId: string; onClose: () => void }) {
@@ -11,12 +12,12 @@ export function ConvertDialog({ task, meId, onClose }: { task: { id: string; tit
   const orgs = useGet<{ organisations: { id: string; name: string }[] }>("/api/orgs");
   const pipes = useGet<{ pipelines: { id: string; key: string; name: string }[] }>("/api/deals/pipelines");
   const team = useGet<{ people: { id: string; name: string }[] }>("/api/team");
-  const [v, setV] = useState({ organisationId: "", pipelineId: "", name: task.title, leaderId: task.assignee.id, whyPursue: "", dueDate: task.dueDate ?? "", submissionDeadline: "", value: "", currency: "INR", opportunityType: "", netFeeRevenueUsd: "", athenaEntity: "", probability: "", newOrg: "", newKind: "" });
+  const [v, setV] = useState({ organisationId: "", pipelineId: "", name: task.title, leaderId: task.assignee.id, whyPursue: "", dueDate: task.dueDate ?? "", submissionDeadline: "", submissionTime: "", value: "", currency: "INR", opportunityType: "", netFeeRevenueUsd: "", athenaEntity: "", probability: "", newOrg: "", newKind: "" });
   const [err, setErr] = useState<string | null>(null);
   const [dup, setDup] = useState(false);
   const [busy, setBusy] = useState(false);
   const [extraOrgs, setExtraOrgs] = useState<{ id: string; name: string }[]>([]);
-  const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => setV({ ...v, [k]: e.target.value });
+  const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => setV({ ...v, [k]: e.target.value, ...(k === "submissionDeadline" && !e.target.value ? { submissionTime: "" } : {}) });
   const pipe = pipes.data?.pipelines.find((p) => p.id === (v.pipelineId || pipes.data?.pipelines[0]?.id));
   void meId;
 
@@ -26,6 +27,9 @@ export function ConvertDialog({ task, meId, onClose }: { task: { id: string; tit
     else setErr(r.error ?? "Could not add the organisation.");
   }
   async function go(force = false) {
+    let submissionDeadline: string | null = null;
+    try { if (pipe?.key === "DEAL_BID") submissionDeadline = submissionDeadlineInput(v.submissionDeadline, v.submissionTime); }
+    catch (error) { setBusy(false); setErr(error instanceof Error ? error.message : "Choose a valid submission deadline."); return; }
     if (v.netFeeRevenueUsd && (!Number.isFinite(Number(v.netFeeRevenueUsd)) || Number(v.netFeeRevenueUsd) < 0 || Number(v.netFeeRevenueUsd) > 9999999999999.99 || !/^\d+(?:\.\d{1,2})?$/.test(v.netFeeRevenueUsd))) { setErr("Net Fee Revenue must be a nonnegative USD amount with at most two decimal places."); return; }
     if (v.probability && (!Number.isInteger(Number(v.probability)) || Number(v.probability) < 0 || Number(v.probability) > 100)) { setErr("PWin must be a whole percentage from 0 to 100."); return; }
     setBusy(true); setErr(null);
@@ -33,7 +37,7 @@ export function ConvertDialog({ task, meId, onClose }: { task: { id: string; tit
       organisationId: v.organisationId || undefined, pipelineId: pipe?.id, name: v.name, leaderId: v.leaderId, whyPursue: v.whyPursue,
       dueDate: task.dueDate ? undefined : v.dueDate || undefined, force,
     };
-    if (pipe?.key === "DEAL_BID") body.submissionDeadline = v.submissionDeadline || undefined;
+    if (pipe?.key === "DEAL_BID") body.submissionDeadline = submissionDeadline || undefined;
     body.opportunityType = v.opportunityType || null;
     body.netFeeRevenueUsd = v.netFeeRevenueUsd === "" ? null : Number(v.netFeeRevenueUsd);
     body.athenaEntity = v.athenaEntity || null;
@@ -66,7 +70,7 @@ export function ConvertDialog({ task, meId, onClose }: { task: { id: string; tit
       <Field label="Leader">{(id) => <select id={id} className="in" value={v.leaderId} onChange={set("leaderId")}>{team.data?.people.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select>}</Field>
       <Field label="Why are we pursuing this?">{(id) => <input id={id} className="in" value={v.whyPursue} onChange={set("whyPursue")} />}</Field>
       {!task.dueDate && <Field label="Due date (becomes the next step)">{(id) => <input id={id} className="in" type="date" value={v.dueDate} onChange={set("dueDate")} />}</Field>}
-      {pipe?.key === "DEAL_BID" && <Field label="Submission deadline">{(id) => <input id={id} className="in" type="date" value={v.submissionDeadline} onChange={set("submissionDeadline")} />}</Field>}
+      {pipe?.key === "DEAL_BID" && <><Field label="Submission deadline">{(id) => <input id={id} className="in" type="date" value={v.submissionDeadline} onChange={set("submissionDeadline")} />}</Field><Field label={`Submission time (optional) · ${SUBMISSION_TIME_ZONE_LABEL}`}>{(id) => <input id={id} className="in" type="time" value={v.submissionTime} disabled={!v.submissionDeadline} onChange={set("submissionTime")} />}</Field></>}
       <div style={{ display: "flex", gap: 10 }}>
         <Field label="Value (optional)">{(id) => <input id={id} className="in" type="number" min="1" value={v.value} onChange={set("value")} />}</Field>
         <Field label="Currency">{(id) => <select id={id} className="in" value={v.currency} onChange={set("currency")}><option>INR</option><option>USD</option><option>EUR</option></select>}</Field>
