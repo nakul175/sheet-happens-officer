@@ -358,10 +358,19 @@ describe("staging editor (APL-2682)", () => {
 
   it("checks the actual connected database and schema before any fixture mutation", async () => {
     const before = { users: await db.user.count(), projects: await db.project.count() };
+    const [actual] = await db.$queryRaw<Array<{ database: string; schema: string | null }>>`SELECT current_database() AS database, current_schema() AS schema`;
+    expect(["sho_test", "sho_staging"]).toContain(actual.database);
     for (const mismatch of ["database", "schema"]) {
       const claimed = new URL(databaseUrl!);
-      if (mismatch === "database") claimed.pathname = "/sho_test";
-      else claimed.searchParams.set("schema", "different_owned_schema");
+      // Both allowed local test targets must genuinely differ from the connection.
+      // CI uses sho_test; hard-coding that name accidentally exercised the success path there.
+      if (mismatch === "database") {
+        claimed.pathname = actual.database === "sho_test" ? "/sho_staging" : "/sho_test";
+        expect(claimed.pathname.slice(1)).not.toBe(actual.database);
+      } else {
+        claimed.searchParams.set("schema", actual.schema === "different_owned_schema" ? "another_owned_schema" : "different_owned_schema");
+        expect(claimed.searchParams.get("schema")).not.toBe(actual.schema);
+      }
       // A connector that resolves elsewhere must fail even though the URL passed the preflight.
       const result = await capture(() => runStagingEditor(
         env({ DATABASE_URL: claimed.href, DIRECT_DATABASE_URL: claimed.href }), [],
