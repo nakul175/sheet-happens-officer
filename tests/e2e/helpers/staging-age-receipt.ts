@@ -12,9 +12,14 @@ export function assertStagingAgeReceipt(issue: "2505" | "2526") {
   expect(receipt.url).toBe(BASE_URL.replace(/\/$/, ""));
   expect(process.env.EXPECTED_RELEASE).toMatch(/^[a-f0-9]{40}$/);
   expect(receipt.sha).toBe(process.env.EXPECTED_RELEASE);
+  expect(receipt.failed).not.toBe(true);
+  expect(receipt.cleanupFailed).not.toBe(true);
   expect(receipt.cases[issue]).toBe(true);
   expect(receipt.timestampsRestored).toBe(true);
   expect(receipt.projectArchived).toBe(true);
   expect(receipt.sessionClosed).toBe(true);
+  expect(receipt.newActiveMemberSessions).toBe(0);
   expect(receipt.preservation.preserved66).toBe(true);
+  expect(receipt.preservation.existingSessionsPreserved).toBe(true);
+  expect(receipt.preservation.newActiveBaselineSessions).toBe(0);
 }
