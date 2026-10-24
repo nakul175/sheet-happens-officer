@@ -1,5 +1,8 @@
 // SHO-US-14.15 Concierge discoverability (APL-2574).
-import { test, expect, zz } from "../support";
+import { randomUUID } from "node:crypto";
+import { test, expect, zz, BASE_URL } from "../support";
+import { localPgPool, schemaFromDatabaseUrl } from "../helpers/local-db-pool";
+import { showConcierge } from "../helpers/jim-concierge";
 import { settledConciergeContent } from "../helpers/concierge-readiness";
 
 test.use({ viewport: { width: 1440, height: 900 } });
@@ -35,9 +38,42 @@ test("AC2: on a project the suggested chips refer to that project", async ({ adm
   await expect(admin.page.getByRole("button", { name: "Show overdue here" })).toHaveCount(0); // generic chips elsewhere
 });
 
-test.skip("AC3: when paused, one line says why and when it returns, with no disabled controls beside it", async () => {
-  // The paused state is produced by the monthly ceiling, the weekly cap or MODEL_DATA_APPROVED being off on the server.
-  // A browser test cannot switch those settings on staging; tests/ux-orientation.test.ts and tests/concierge-limits.test.ts cover the wording.
+test("AC3: when paused, one line says why and when it returns, with no disabled controls beside it", async ({ admin, later }) => {
+  const database = process.env.DATABASE_URL;
+  const schema = database ? schemaFromDatabaseUrl(database) : undefined;
+  expect(["127.0.0.1", "localhost"]).toContain(new URL(BASE_URL).hostname);
+  expect(schema, "A dedicated owned local schema is required for budget fixtures").toMatch(/^sho_2708_[a-z0-9_]+$/);
+  expect(process.env.SHO_OWNED_TEST_SCHEMA).toBe(schema);
+  const initial = await admin.api.get("/api/concierge/state");
+  expect(initial.json.disabled, "Use the owned enabled app; no provider call is made by this case").toBeUndefined();
+  const usage = await admin.api.get("/api/usage");
+  expect(usage.status).toBe(200);
+  const cap = usage.json.ceiling.weeklyMessageCap as number;
+  expect(cap).toBeGreaterThan(0);
+  expect(cap, "Bound synthetic fixture size").toBeLessThanOrEqual(1000);
+  const ids = Array.from({ length: cap }, () => randomUUID().replaceAll("-", ""));
+  const pool = localPgPool(database);
+  try {
+    const actor = await pool.query('SELECT email FROM "User" WHERE id=$1', [admin.user.id]);
+    expect(actor.rows[0]?.email).toBe(admin.user.email);
+    await pool.query('INSERT INTO "ModelUsage"(id,"userId",model,"inputTokens","outputTokens","costUsd",counted,"createdAt") SELECT id,$2,$3,0,0,0,true,NOW() FROM unnest($1::text[]) AS id', [ids, admin.user.id, "ZZ-TEST paused-UI"]);
+    const state = await admin.api.get("/api/concierge/state");
+    expect(state.json.disabled?.code).toBe("WEEK_CAP");
+    expect(Date.parse(state.json.disabled.resumesAt)).toBeGreaterThan(Date.now());
+    await showConcierge(admin, later);
+    await admin.page.goto("/");
+    const dock = admin.page.getByRole("complementary", { name: "Concierge" });
+    const notice = dock.locator(".cc-disabled");
+    await expect(notice).toHaveCount(1);
+    await expect(notice).toContainText(state.json.disabled.message);
+    await expect(notice).toContainText(/resets.*India time/);
+    await expect(dock.locator("button:disabled, input:disabled, textarea:disabled")).toHaveCount(0);
+    await expect(dock.getByLabel("Message the concierge")).toHaveCount(0);
+    test.info().annotations.push({ type: "evidence-scope", description: "Real budget pause from owned local ledger rows; no provider call and no mocked browser response." });
+  } finally {
+    await pool.query('DELETE FROM "ModelUsage" WHERE id=ANY($1::text[]) AND "userId"=$2', [ids, admin.user.id]);
+    await pool.end();
+  }
 });
 
 test("AC4: after Hide, no floating Show button covers a row or a button; Show lives in the sidebar", async ({ admin, later }) => {
