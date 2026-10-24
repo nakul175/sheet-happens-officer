@@ -235,14 +235,16 @@ export function TaskModal({ id, me, onClose, onChanged, asPage }: { id: string; 
               <span className="lbl">Subtasks {task.subtaskList.length > 0 && `(${task.subtaskList.filter((s) => s.completedAt).length} of ${task.subtaskList.length})`}</span>
               {task.subtaskList.map((s) => (
                 <div className="sub-item" key={s.id}>
-                  <input type="checkbox" aria-label={`Mark "${s.title}" ${s.completedAt ? "not done" : "done"}`} checked={!!s.completedAt} disabled={!canEdit || busy || (!s.canClose && !s.completedAt)}
-                    onChange={() => run(api("POST", `/api/tasks/${s.id}/${s.completedAt ? "reopen" : "complete"}`, s.completedAt ? {} : { expectedUpdatedAt: s.updatedAt }))} />
+                  <label style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", minWidth: 44, minHeight: 44, flexShrink: 0 }}>
+                    <input type="checkbox" aria-label={`Mark "${s.title}" ${s.completedAt ? "not done" : "done"}`} checked={!!s.completedAt} disabled={!canEdit || busy || (!s.canClose && !s.completedAt)}
+                      onChange={() => run(api("POST", `/api/tasks/${s.id}/${s.completedAt ? "reopen" : "complete"}`, s.completedAt ? {} : { expectedUpdatedAt: s.updatedAt }))} />
+                  </label>
                   <span style={s.completedAt ? { textDecoration: "line-through", color: "var(--muted)" } : undefined}><Link href={`/tasks/${s.id}`}>{s.title}</Link></span>
                 </div>
               ))}
               {canEdit && (
                 <form className="addrow" style={{ flexWrap: "wrap", alignItems: "end" }} onSubmit={async (e) => { e.preventDefault(); const v = newSub.trim(); if (!v) return; await run(api("POST", `/api/projects/${task.projectId}/tasks`, { title: v, parentId: id, dueDate: subDue || null, ...(subAssignee ? { assigneeId: subAssignee } : {}) }), () => { setNewSub(""); setSubDue(""); setSubAssignee(""); }); }}>
-                  <input className="in" aria-label="New subtask" placeholder="Add a subtask" value={newSub} onChange={(e) => setNewSub(e.target.value)} />
+                  <input className="in" style={{ flexBasis: "100%" }} aria-label="New subtask" placeholder="Add a subtask" value={newSub} onChange={(e) => setNewSub(e.target.value)} />
                   <label>Due date (optional)<input className="in" type="date" aria-label="Subtask due date" value={subDue} onChange={(e) => setSubDue(e.target.value)} /></label>
                   <label>Assignee<select className="in" aria-label="Subtask assignee" value={subAssignee} onChange={(e) => setSubAssignee(e.target.value)}><option value="">Default owner (me when eligible)</option>{workers.map((w) => <option key={w.userId} value={w.userId}>{w.name}</option>)}</select></label>
                   {task.dueDate && subDue > task.dueDate && <span className="hint" role="status">This subtask is due after its parent task. You can still add it.</span>}
