@@ -42,7 +42,7 @@ beforeAll(async () => {
   root = await superAdmin();
   const p = await project(root, root, [{ who: writer, role: "EDITOR" }, { who: colleague, role: "EDITOR" }], `ZZ-TEST phone ${RUN}`);
   projectId = p.id;
-  taskId = await task(writer, p.id, { title: "ZZ-TEST phone comment" });
+  taskId = await task(writer, p.id, { dueDate: "2031-03-20", title: "ZZ-TEST phone comment" });
   const probe = await writer.c.get(`/api/tasks/${taskId}`);
   if (probe.json?.task?.commentsEnabled) {
     app = BASE;

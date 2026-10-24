@@ -17,7 +17,7 @@ beforeAll(async () => {
   const root = await superAdmin();
   const editor = await account("loadeditor");
   const p = await project(root, root, [{ who: editor }]);
-  await task(root, p.id, { title: "A task to show" });
+  await task(root, p.id, { dueDate: "2031-03-20", title: "A task to show" });
   projectId = p.id;
   personId = editor.id;
   personName = editor.name;
