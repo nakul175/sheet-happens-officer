@@ -8,15 +8,16 @@ const allowed = new Set([
   "src/app/(app)/app.css", "src/app/(app)/team/Team.tsx", "src/app/(app)/usage/screen.tsx",
   "src/app/api/deals/pipelines/[id]/route.ts", "src/lib/deals.ts", "src/lib/team.ts",
   "src/lib/usage-percent.ts", "src/lib/usage.ts",
+  "src/lib/concierge/engine.ts", "src/lib/concierge/tools.ts", "src/lib/concierge/claims.ts", "src/lib/model.ts", "src/lib/concierge/limits.ts",
 ]);
-test("accepted12 contains only the reviewed runtime delta", () => {
+test("accepted14 contains only the reviewed runtime delta", () => {
   const changed = execFileSync("git", ["diff", "--name-only", baseline, "--", "src"], { encoding: "utf8" }).trim().split("\n").filter(Boolean);
   assert.ok(changed.length > 0);
   for (const file of changed) assert.ok(allowed.has(file), `Unapproved runtime delta: ${file}`);
-  assert.equal(execFileSync("git", ["diff", baseline, "--", "prisma"], { encoding: "utf8" }), "", "No schema migration belongs to accepted12");
+  assert.equal(execFileSync("git", ["diff", baseline, "--", "prisma"], { encoding: "utf8" }), "", "No schema migration belongs to accepted14");
 });
-test("central login, excluded AI behavior and accepted shutdown runtime are preserved", () => {
-  for (const file of ["src/lib/auth.ts", "src/lib/central-client.ts", "src/lib/central-status.ts", "src/app/signin/page.tsx", "src/app/signin/SignInForm.tsx", "src/lib/model.ts", "src/lib/concierge/engine.ts", "src/lib/concierge/echo.ts", "src/lib/shutdown.ts", "src/lib/sho-accept.so", "server.js"]) {
+test("central login, excluded echo behavior and accepted shutdown runtime are preserved", () => {
+  for (const file of ["src/lib/auth.ts", "src/lib/central-client.ts", "src/lib/central-status.ts", "src/app/signin/page.tsx", "src/app/signin/SignInForm.tsx", "src/lib/concierge/echo.ts", "src/lib/shutdown.ts", "src/lib/sho-accept.so", "server.js"]) {
     assert.deepEqual(readFileSync(file), execFileSync("git", ["show", `${baseline}:${file}`]), file);
   }
 });

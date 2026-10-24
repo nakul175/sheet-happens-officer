@@ -1,5 +1,5 @@
 {
-  "release": "accepted12 preparation only",
+  "release": "accepted14 preparation only",
   "baselineProductionSha": "fffd4ed47f4bfb0f6a249f33f211a911afece1e8",
   "acceptedBugs": [
     "SHO-2736",
@@ -13,12 +13,12 @@
     "SHO-3013",
     "SHO-3024",
     "SHO-3029",
-    "SHO-3030"
+    "SHO-3030",
+    "SHO-2693",
+    "SHO-2897"
   ],
   "excludedPendingBugs": [
-    "SHO-2693",
     "SHO-2725",
-    "SHO-2897",
     "SHO-3010",
     "SHO-3017"
   ],
@@ -31,7 +31,12 @@
     "src/lib/deals.ts",
     "src/lib/team.ts",
     "src/lib/usage-percent.ts",
-    "src/lib/usage.ts"
+    "src/lib/usage.ts",
+    "src/lib/concierge/engine.ts",
+    "src/lib/concierge/tools.ts",
+    "src/lib/concierge/claims.ts",
+    "src/lib/model.ts",
+    "src/lib/concierge/limits.ts"
   ],
   "schemaDelta": "none",
   "testOnlyOrExistingBehavior": [
@@ -54,13 +59,31 @@
     "acceptedTests": "67PASS",
     "baselineTests": "48PASS10flag-offSKIP",
     "mappedLocatorCases": "3PASS",
-    "sourceScopeAndRefusalContracts": "5PASS"
+    "sourceScopeAndRefusalContracts": "5PASS",
+    "aiContracts": "119PASS initially; missing environment example documented; targeted9/9PASS. FinalCI runsall120."
   },
   "remainingGates": [
-    "Final verification-branch Linux CI",
-    "Same-SHA isolated slot9 acceptance and smoke",
+    "Final14 verification-branch Linux CI",
+    "Same final-SHA isolated slot9 API/browser/live-provider acceptance",
     "Actual slot9 rollback and restoration",
-    "Counts-only66-account identity/verification/login preservation across different-SHA deployment",
+    "Counts-only66-account preservation across different-SHA deployment",
     "Explicit user production approval before deployment"
-  ]
+  ],
+  "prerequisite": "Stage-only model key isolation (SHO-2927) needed to reproduce approved synthetic live-provider tests; production remains default when stage is unset.",
+  "integrationProvenance": {
+    "2693": [
+      "f3a4c03",
+      "d89ef4b",
+      "2286bce",
+      "485ccef",
+      "4938596",
+      "04a3595",
+      "d279210",
+      "3ec8fca",
+      "dfbbac8",
+      "d7ea3ac"
+    ],
+    "stageKeyIsolation": "ad5dfc9",
+    "2897": "abc29d1 test/owned-outbox chain; no unrelated shared-head runtime copied"
+  }
 }

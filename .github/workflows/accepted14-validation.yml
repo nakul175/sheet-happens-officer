@@ -1,12 +1,12 @@
-name: Accepted12 release validation
+name: Accepted14 release validation
 on:
   push:
-    branches: [release/accepted12-20261024]
+    branches: [release/accepted14-20261024]
   workflow_dispatch:
 permissions:
   contents: read
 concurrency:
-  group: accepted12-validation
+  group: accepted14-validation
   cancel-in-progress: false
 defaults:
   run:
@@ -29,8 +29,8 @@ jobs:
           --health-timeout 5s
           --health-retries 12
     env:
-      DATABASE_URL: postgresql://sho:sho@localhost:5432/sho_test?schema=accepted12
-      DIRECT_DATABASE_URL: postgresql://sho:sho@localhost:5432/sho_test?schema=accepted12
+      DATABASE_URL: postgresql://sho:sho@localhost:5432/sho_test?schema=accepted14
+      DIRECT_DATABASE_URL: postgresql://sho:sho@localhost:5432/sho_test?schema=accepted14
       TASKBOARD_URL: http://localhost:3100
       BASE_URL: http://localhost:3100
       APP_URL: http://localhost:3100
@@ -38,7 +38,7 @@ jobs:
       SUPER_ADMIN_EMAILS: root.test@aplyd.com
       SHO_ADMIN_EMAIL: root.test@aplyd.com
       SHO_ADMIN_PASS: correct-horse-9
-      JOB_SECRET: accepted12-ci-only-not-a-real-secret
+      JOB_SECRET: accepted14-ci-only-not-a-real-secret
       FF_TASK_COMMENTS: "1"
       PW_CHROMIUM: /usr/bin/google-chrome
       RELEASE: ${{ github.sha }}
@@ -53,7 +53,7 @@ jobs:
           cache: npm
       - run: npm ci --no-audit --no-fund
       - name: Scope and refusal contract
-        run: node --test scripts/acceptance/release12-scope.test.mjs scripts/acceptance/refusal-probe.test.mjs
+        run: node --test scripts/acceptance/release14-scope.test.mjs scripts/acceptance/refusal-probe.test.mjs
       - run: npx prisma migrate deploy
       - run: npm run build
       - name: Start the exact built release
@@ -65,8 +65,10 @@ jobs:
             sleep 1
           done
           exit 1
-      - name: Accepted12 component, database and SQL regressions
-        run: npx vitest run -c vitest.release12.config.mts | tee validation-accepted12.log
+      - name: Accepted14 component, database and SQL regressions
+        run: npx vitest run -c vitest.release12.config.mts | tee validation-accepted14.log
+      - name: Deterministic2693 and2897 owned-outbox contracts
+        run: npx vitest run -c vitest.accepted-ai.config.mts | tee validation-accepted-ai.log
       - name: Deployed18 baseline regressions
         run: npx vitest run -c vitest.release18.config.mts | tee validation-baseline18.log
       - name: Accepted locator browser cases
@@ -80,7 +82,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: accepted12-${{ github.sha }}
+          name: accepted14-${{ github.sha }}
           path: |
             validation-*.log
             release12-drain.json
