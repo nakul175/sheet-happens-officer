@@ -109,7 +109,7 @@ test("AC2: Bid sales stages are separate columns; Proactive retains its grouped 
 
   await admin.page.getByRole("tab", { name: "Bid" }).click();
   await expect(admin.page.locator(".dcol header b")).toHaveText(bidTitles);
-  await expect(admin.page.getByRole("region", { name: "Lead" })).toHaveCount(0);
+  await expect(admin.page.getByRole("region", { name: "Lead", exact: true })).toHaveCount(0);
   await expect(admin.page.getByRole("region", { name: "Leads" })).toBeVisible();
   await expect(admin.page.getByText(deal.name)).toHaveCount(0);
 });
