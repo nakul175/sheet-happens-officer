@@ -11,8 +11,9 @@ test("AC1: active stages are columns, On hold / Won / Lost share the last one, a
   const d = await makeDeal(admin, later, { label: "columns", step: zz("open step") });
   await admin.page.setViewportSize({ width: 1400, height: 900 });
   await admin.page.goto("/deals");
-  await expect(admin.page.getByRole("region", { name: "Lead" })).toBeVisible();
-  await expect(admin.page.locator(".dcol header b")).toHaveText(["Lead", "Conversation", "Concept note", "Proposal", "Negotiation", "On hold / Won / Lost"]);
+  const board = admin.page.getByRole("region", { name: "Deal board", exact: true }).filter({ has: admin.page.getByRole("button", { name: `Move ${d.name}`, exact: true }) });
+  await expect(board.getByRole("region", { name: "Lead", exact: true })).toBeVisible();
+  await expect(board.locator(".dcol header b")).toHaveText(["Lead", "Conversation", "Concept note", "Proposal", "Negotiation", "On hold / Won / Lost"]);
 
   await dropDeal(admin.page, d.name, "On hold / Won / Lost");
   const which = admin.page.getByRole("dialog", { name: "Move to which stage?" });
@@ -137,29 +138,35 @@ test("AC6: Only my deals keeps deals the person leads or holds an open assigned 
 test("AC7: on a wide pipeline the board scrolls inside itself", async ({ admin }) => {
   await admin.page.setViewportSize({ width: 1280, height: 800 });
   await admin.page.goto("/deals");
-  const board = admin.page.locator(".dboard");
-  await expect(board).toBeVisible();
-  const box = await board.evaluate((el) => ({ overflowX: getComputedStyle(el).overflowX, scrolls: el.scrollWidth > el.clientWidth + 1 }));
-  expect(box.overflowX).toBe("auto");
-  expect(box.scrolls, "the columns are wider than the board, so the board is the scroller").toBe(true);
+  const boards = admin.page.getByRole("region", { name: "Deal board", exact: true });
+  await expect(boards.first()).toBeVisible();
+  for (const board of await boards.all()) {
+    await expect(board).toBeVisible();
+    const box = await board.evaluate((el) => ({ overflowX: getComputedStyle(el).overflowX, scrolls: el.scrollWidth > el.clientWidth + 1 }));
+    expect(box.overflowX).toBe("auto");
+    expect(box.scrolls, "the columns are wider than the board, so the board is the scroller").toBe(true);
+  }
 });
 
 test("AC8: at 700 px and below the columns stack, and just above that they stay in a row", async ({ admin }) => {
   test.setTimeout(120_000);
   await admin.page.goto("/deals");
-  await expect(admin.page.locator(".dboard")).toBeVisible();
-  const layout = () => admin.page.locator(".dboard").evaluate((el) => {
-    const cols = [...el.querySelectorAll(".dcol")].map((c) => c.getBoundingClientRect());
-    const stacked = cols.length >= 2 && cols[1].top >= cols[0].bottom - 1;
-    const row = cols.length >= 2 && Math.abs(cols[1].top - cols[0].top) < 2 && cols[1].left > cols[0].left;
-    return { dir: getComputedStyle(el).flexDirection, stacked, row };
-  });
-  await admin.page.setViewportSize({ width: 701, height: 800 });
-  await expect.poll(layout).toMatchObject({ dir: "row", row: true });
-  for (const width of [700, 390]) {
-    await admin.page.setViewportSize({ width, height: 800 });
-    await expect.poll(layout, { timeout: 10_000 }).toMatchObject({ dir: "column", stacked: true });
-    await expect(admin.page.getByRole("region", { name: "Lead" })).toBeVisible();
-    await expect(admin.page.getByRole("region", { name: "On hold / Won / Lost" })).toBeVisible();
+  const boards = admin.page.getByRole("region", { name: "Deal board", exact: true });
+  await expect(boards.first()).toBeVisible();
+  for (const board of await boards.all()) {
+    const layout = () => board.evaluate((el) => {
+      const cols = [...el.querySelectorAll(".dcol")].map((c) => c.getBoundingClientRect());
+      const stacked = cols.length >= 2 && cols[1].top >= cols[0].bottom - 1;
+      const row = cols.length >= 2 && Math.abs(cols[1].top - cols[0].top) < 2 && cols[1].left > cols[0].left;
+      return { dir: getComputedStyle(el).flexDirection, stacked, row };
+    });
+    await admin.page.setViewportSize({ width: 701, height: 800 });
+    await expect.poll(layout).toMatchObject({ dir: "row", row: true });
+    for (const width of [700, 390]) {
+      await admin.page.setViewportSize({ width, height: 800 });
+      await expect.poll(layout, { timeout: 10_000 }).toMatchObject({ dir: "column", stacked: true });
+      await expect(board.getByRole("region", { name: "Lead", exact: true })).toBeVisible();
+      await expect(board.getByRole("region", { name: "On hold / Won / Lost", exact: true })).toBeVisible();
+    }
   }
 });

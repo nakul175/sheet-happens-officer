@@ -51,7 +51,8 @@ export const dealsOf = async (api: Api, pipeId: string, extra = "") =>
 export async function dropDeal(page: Page, dealName: string, column: string) {
   // The card is found by its "Move <deal>" menu button and the column by its region name. No class selectors.
   const move = page.getByRole("button", { name: `Move ${dealName}`, exact: true });
-  const region = page.getByRole("region", { name: column, exact: true });
+  const board = page.getByRole("region", { name: "Deal board", exact: true }).filter({ has: move });
+  const region = board.getByRole("region", { name: column, exact: true });
   await move.scrollIntoViewIfNeeded();
   await region.scrollIntoViewIfNeeded();
   const [trigger, col] = [await move.elementHandle(), await region.elementHandle()];
