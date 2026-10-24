@@ -37,7 +37,10 @@ test("AC1: Home opens grouped By date: Overdue, Next 7 days, Later, with undated
   await newTask(admin, project.id, { title: overdue, assigneeId: holder.user.id, dueDate: ymd(-1) });
   await newTask(admin, project.id, { title: soon, assigneeId: holder.user.id, dueDate: ymd(2) });
   await newTask(admin, project.id, { title: far, assigneeId: holder.user.id, dueDate: ymd(20) });
-  await newTask(admin, project.id, { title: undated, assigneeId: holder.user.id });
+  // Existing undated task fixture: creation now requires a date; ordinary legacy edits may clear it.
+  const legacyId = await newTask(admin, project.id, { title: undated, assigneeId: holder.user.id, dueDate: ymd(7) });
+  const legacy = (await admin.api.get(`/api/tasks/${legacyId}`)).json.task;
+  expect((await admin.api.patch(`/api/tasks/${legacyId}`, { dueDate: null, expectedUpdatedAt: legacy.updatedAt })).status).toBe(200);
   const groups = await home(holder);
   expect(groups.overdue.map((t) => t.title)).toContain(overdue);
   expect(groups.next7.map((t) => t.title)).toContain(soon);
