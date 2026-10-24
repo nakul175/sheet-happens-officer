@@ -46,7 +46,7 @@ test("AC1: the concierge fills the visible screen with the composer inside it (k
   const b = (await sheet.boundingBox())!;
   expect(b.height).toBeGreaterThanOrEqual(780 * 0.95);
   expect(b.width).toBeGreaterThanOrEqual(390 * 0.98);
-  const c = (await page.getByLabel("Message the concierge").boundingBox())!;
+  const c = (await sheet.getByLabel("Message the concierge", { exact: true }).boundingBox())!;
   expect(c.y + c.height).toBeLessThanOrEqual(780);
   await ctx.close();
 });
