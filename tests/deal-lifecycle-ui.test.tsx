@@ -76,3 +76,15 @@ it("deal picker preserves current retired name while offering only active stages
   expect([...group.querySelectorAll("button")].map(b => b.textContent)).toEqual(stages.map(s => s.name));
   expect(group.querySelectorAll("button")).toHaveLength(9);
 });
+
+it("empty delivery explains Won-to-Ongoing workflow without a create-deal dead end", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => String(input).includes("lifecycle=delivery")
+    ? new Response(JSON.stringify({ deals: [] }), { headers: { "content-type": "application/json" } })
+    : originalFetch(input, init));
+  await mount(h(DealsView)); await click("Delivery projects");
+  const empty = document.querySelector('[aria-label="No matching deals"]')!;
+  expect(empty.textContent).toContain("move an existing Won deal to Ongoing Projects");
+  expect(empty.textContent).not.toContain("Create");
+  expect(empty.querySelector('a[href="/deals/new"]')).toBeNull();
+});
