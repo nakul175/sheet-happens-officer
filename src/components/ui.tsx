@@ -97,19 +97,34 @@ export function Modal({ onClose, small, label, describedBy, children }: { onClos
       const field = document.activeElement;
       const sheet = sheetRef.current;
       if (!sheet || !(field instanceof HTMLElement) || !sheet.contains(field) || field.closest(".actions")) return;
-      // The pin line: the sheet's padding ends this far above its bottom edge (see body.vv-sheet .modal in app.css).
-      const pin = sheet.getBoundingClientRect().bottom - parseFloat(getComputedStyle(sheet).paddingBottom || "0");
-      if (field.getBoundingClientRect().bottom > pin) field.scrollIntoView({ block: "nearest" });
+      // Scroll this sheet explicitly: scrollIntoView can use the layout viewport while the keyboard is resizing
+      // the visual viewport, leaving the focused field below the pinned footer even though the sheet fits.
+      const bounds = sheet.getBoundingClientRect();
+      const footer = sheet.querySelector<HTMLElement>(".actions")?.getBoundingClientRect();
+      const header = sheet.querySelector<HTMLElement>(".bar")?.getBoundingClientRect();
+      const bottom = Math.min(bounds.bottom, footer && footer.top > bounds.top ? footer.top : bounds.bottom) - 8;
+      const top = Math.max(bounds.top, header?.bottom ?? bounds.top) + 8;
+      const box = field.getBoundingClientRect();
+      if (box.bottom > bottom) sheet.scrollTop += box.bottom - bottom;
+      else if (box.top < top) sheet.scrollTop -= top - box.top;
     };
-    fit();
-    vv?.addEventListener("resize", fit);
-    vv?.addEventListener("scroll", fit);
-    document.addEventListener("focusin", fit);
+    let frame = 0;
+    const scheduleFit = () => {
+      fit();
+      cancelAnimationFrame(frame);
+      // Focus scrolling and viewport layout can finish after the event. Reconcile once after that layout too.
+      frame = requestAnimationFrame(() => { fit(); frame = requestAnimationFrame(fit); });
+    };
+    scheduleFit();
+    vv?.addEventListener("resize", scheduleFit);
+    vv?.addEventListener("scroll", scheduleFit);
+    document.addEventListener("focusin", scheduleFit);
     return () => {
       document.body.classList.remove("vv-sheet");
-      document.removeEventListener("focusin", fit);
-      vv?.removeEventListener("resize", fit);
-      vv?.removeEventListener("scroll", fit);
+      cancelAnimationFrame(frame);
+      document.removeEventListener("focusin", scheduleFit);
+      vv?.removeEventListener("resize", scheduleFit);
+      vv?.removeEventListener("scroll", scheduleFit);
       root.style.removeProperty("--vvh");
       root.style.removeProperty("--vvt");
     };
