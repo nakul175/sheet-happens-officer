@@ -569,7 +569,7 @@ test("preparing a build root from this checkout writes nothing into its .next", 
     assert.equal(out.status, 0, out.stdout + out.stderr);
     assert.ok(existsSync(path.join(base, "app", "server.js")), "the entry is in the copy");
     assert.ok(!existsSync(path.join(base, "app", ".next")), "no dev artifacts in the copy");
-    assert.ok(!existsSync(buildIdPath), "no BUILD_ID appeared in the checkout");
+    assert.equal(existsSync(buildIdPath), before !== null, "the checkout's existing build-id presence is unchanged");
     assert.equal(existsSync(path.join(root, ".next", "dev")), hadDev, "the dev server's directory is unchanged");
     assert.equal(before, existsSync(buildIdPath) ? readFileSync(buildIdPath, "utf8") : null);
   } finally {

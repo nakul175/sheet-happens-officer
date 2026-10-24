@@ -13,6 +13,7 @@
 //                  completed build (`.next/BUILD_ID`) and refuses a directory that carries a
 //                  dev server's artifacts (`.next/dev`).
 import net from "node:net";
+import { probeRefusal, refusalAccepted } from "./acceptance/refusal-probe.mjs";
 import path from "node:path";
 import { spawn } from "node:child_process";
 // W184: "is this directory a release" is asked of the ONE implementation in the acceptance
@@ -170,26 +171,7 @@ function readResponse(socket) {
   });
 }
 
-function probe() {
-  return new Promise((resolve) => {
-    const socket = net.connect({ port, host: "127.0.0.1" });
-    const timer = setTimeout(() => {
-      socket.destroy();
-      resolve("hung");
-    }, 300);
-    socket.once("connect", () => {
-      clearTimeout(timer);
-      socket.destroy();
-      resolve("open");
-    });
-    socket.once("error", (err) => {
-      clearTimeout(timer);
-      resolve(err.code === "ECONNREFUSED" ? "refused" : err.code ?? "error");
-    });
-  });
-}
-
-const probeAt = (t0, at) => new Promise((r) => setTimeout(() => r(probe()), Math.max(0, t0 + at - Date.now())));
+const probeAt = (t0, at) => new Promise((r) => setTimeout(() => r(probeRefusal(port)), Math.max(0, t0 + at - Date.now())));
 
 await waitFor(/sho ready (\d+)/, 180000);
 const countHits = () => stdout.split("sho-hit\n").length - 1;
@@ -237,7 +219,9 @@ await new Promise((r) => setTimeout(r, SIGTERM_DELAY_MS));
 const stillOpenAtSigterm = done.filter((flag) => !flag).length;
 const t0 = Date.now();
 child.kill("SIGTERM");
-const [late16, late143] = await Promise.all([probeAt(t0, 16), probeAt(t0, 143)]);
+const [probe16, probe143] = await Promise.all([probeAt(t0, 16), probeAt(t0, 143)]);
+const late16 = probe16.state;
+const late143 = probe143.state;
 const settled = await pending;
 const lastDone = Date.now();
 const result = await exited;
@@ -276,6 +260,7 @@ const summary = {
   connections: settled.map((r, index) => ({ index, status: r.status, reset: r.reset, bytes: r.bytes })),
   acceptedBeforeSigterm: { all200: non200 === 0 },
   afterSigterm: { late16, late143 },
+  refusalTiming: { limitMs: 1200, late16: probe16, late143: probe143 },
   exit: result,
   shutdownLines: lines,
   drainedLine: drainedAt,
@@ -295,6 +280,7 @@ if (ASSERT) {
   if (bodyDone !== N) reasons.push(`bodyDone ${bodyDone} != n ${N}`);
   if (non200 !== 0) reasons.push(`statuses ${JSON.stringify(statuses)}`);
   if (late16 !== "refused" || late143 !== "refused") reasons.push(`probes ${late16}/${late143} != refused/refused`);
+  if (!refusalAccepted(probe16) || !refusalAccepted(probe143)) reasons.push(`refusal outside1200ms: ${JSON.stringify(summary.refusalTiming)}`);
   // Keep stdout as one JSON document for the acceptance gate.
   process.stderr.write(
     `drain-burst N=${N} mode=${summary.mode}: ${reasons.length === 0 ? "PASS" : "FAIL"} stillOpenAtSigterm=${stillOpenAtSigterm} hits=${hits} statuses=${JSON.stringify(statuses)} exit=${result.code} late16=${late16} late143=${late143}${reasons.length ? ` -- ${reasons.join("; ")}` : ""}\n`,

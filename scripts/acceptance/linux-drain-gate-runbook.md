@@ -1,5 +1,20 @@
 # Linux drain gate — operator runbook (SHO-2689)
 
+## SHO-2760 accepted timing criterion (24 October 2026)
+
+The owner selected refusal within one SYN retransmission, at most **1,200 ms**, with
+**no new connection accepted**. No host firewall or sysctl change is part of this decision.
+The early (+16 ms) and later (+143 ms) connection probes measure time from each
+connect attempt using a monotonic clock. `refusalTiming` in each burst JSON records
+both elapsed values and states. Only `ECONNREFUSED` within the limit passes; an
+accepted connection, timeout, another error, missing timing or an over-limit result fails.
+This replaces the probe's former 300 ms observation timeout, consistent with SHO-2689 AC2 v1.1.
+
+Retain each burst JSON with deployed release SHA and listener URL. A historical
+`late16=refused late143=refused` line without timing is not sufficient evidence for
+SHO-2760. Run the updated harness against a built isolated staging release; never
+signal the shared production process or change host networking to make the test pass.
+
 The gate is `scripts/acceptance/linux-drain-gate.sh`. Its conditions are printed by
 `--explain`; this page is the part an operator needs before running it: what it is for, and what
 it deliberately does not do. Threat model: **operator error on a host you already control** — not
