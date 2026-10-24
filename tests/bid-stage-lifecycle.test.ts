@@ -1,6 +1,6 @@
 import { beforeEach, expect, it, vi } from "vitest";
 import { ApiError } from "@/lib/http";
-const m = vi.hoisted(() => ({ db: { $queryRaw: vi.fn(), stage: { findFirst: vi.fn(), findUnique: vi.fn() }, pipeline: { findUnique: vi.fn(), findMany: vi.fn() }, project: { update: vi.fn(), updateMany: vi.fn(), findMany: vi.fn(), findUniqueOrThrow: vi.fn() }, task: { findMany: vi.fn(), groupBy: vi.fn() }, dealDetails: { findUnique: vi.fn() }, actionLog: { groupBy: vi.fn(), findUnique: vi.fn(), update: vi.fn() }, note: { groupBy: vi.fn() }, $transaction: vi.fn() }, access: vi.fn(), write: vi.fn(), notify: vi.fn(), log: vi.fn(), audit: vi.fn() }));
+const m = vi.hoisted(() => ({ db: { $queryRaw: vi.fn(), stage: { delete: vi.fn(), findFirst: vi.fn(), findUnique: vi.fn() }, pipeline: { findUnique: vi.fn(), findMany: vi.fn() }, project: { count: vi.fn(), update: vi.fn(), updateMany: vi.fn(), findMany: vi.fn(), findUniqueOrThrow: vi.fn() }, task: { findMany: vi.fn(), groupBy: vi.fn() }, dealDetails: { findUnique: vi.fn() }, actionLog: { groupBy: vi.fn(), findUnique: vi.fn(), update: vi.fn() }, note: { groupBy: vi.fn() }, $transaction: vi.fn() }, access: vi.fn(), write: vi.fn(), notify: vi.fn(), log: vi.fn(), audit: vi.fn() }));
 vi.mock("@/lib/db", () => ({ db: m.db }));
 vi.mock("@/lib/access", () => ({ projectAccess: m.access, requireWrite: m.write, isActive: () => true, isAdmin: () => false }));
 vi.mock("@/lib/crm", () => ({ WORKSTREAM_DEAL: "wst_deal", requireCrm: () => {}, crmMode: () => "all", crmVisible: () => true, crmProjectWhere: () => ({}) }));
@@ -50,4 +50,13 @@ it('3049 refuses Submitted with incomplete fresh details and preserves stage/not
   m.db.dealDetails.findUnique.mockResolvedValue({probability:null,netFeeRevenueUsd:0,athenaEntity:'ATHENA_INDIA'});
   await expect(moveStage(user,'deal',{stageId:'st_bid_submitted'})).rejects.toMatchObject({status:409});
   expect(m.db.project.update).not.toHaveBeenCalled(); expect(m.notify).not.toHaveBeenCalled();
+});
+it('3049 admin stage removal cannot bulk-remap incomplete drafts to Submitted',async()=>{
+  const target={id:'st_bid_submitted',name:'Submitted',category:'ACTIVE',requiredFields:[],needsReason:false,isRetired:false};
+  const source={...target,id:'custom-draft',name:'Draft',pipeline:{id:'pl_bid',name:'Bid',stages:[target]}};
+  m.db.stage.findFirst.mockResolvedValue(source);m.db.project.count.mockResolvedValue(1);m.db.project.findMany.mockResolvedValue([{id:'deal'}]);
+  m.db.$queryRaw.mockResolvedValueOnce([{id:'custom-draft'}]).mockResolvedValueOnce([{pipelineId:'pl_bid',key:'DEAL_BID',stageId:'custom-draft'}]);
+  m.db.dealDetails.findUnique.mockResolvedValue({probability:null,netFeeRevenueUsd:null,athenaEntity:null});
+  await expect(removeStage({...user,orgRole:'SUPER_ADMIN'},'custom-draft',{moveTo:'st_bid_submitted'})).rejects.toMatchObject({status:409});
+  expect(m.db.project.updateMany).not.toHaveBeenCalled();expect(m.db.stage.delete).not.toHaveBeenCalled();expect(m.audit).not.toHaveBeenCalled();
 });
