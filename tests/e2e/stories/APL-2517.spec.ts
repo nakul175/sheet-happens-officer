@@ -1,7 +1,9 @@
 import { dueBeforeNextMonday } from "../helpers/proposal-fixture-date";
 // SHO-US-8.8 Private chat history kept 90 days (APL-2517).
-// One test per acceptance criterion. AC2 cannot run the retention job or age a message, so it skips.
+// AC2 owns its disposable local actor and ages only its own fixture rows.
 // AC3 is the one model prompt: a confirmed change. The other checks use a quick action or the privacy line.
+import { ownedAging } from "../helpers/owned-local-aging";
+import { verifiedUser, deactivate } from "./qa";
 import { test, expect, zz } from "../support";
 import { newProject, newTask } from "../g2";
 import { chatMessages, cleanChat, quickAction } from "../helpers/jim-http";
@@ -40,8 +42,37 @@ test("AC1: no screen or endpoint returns another person's chat", async ({ admin,
   await expect(admin.page.locator("aside.cc-slot")).not.toContainText(token);
 });
 
-test("AC2: a message older than 90 days is deleted by the retention job", async () => {
-  test.skip(true, "A browser session cannot age a concierge message past 90 days or run the retention job. tests/concierge.test.ts covers purgeChat.");
+test("AC2: a message older than 90 days is deleted by the retention job @local-only", async ({ browser, anon, admin, later }) => {
+  const who = await verifiedUser(browser, anon.context().request, "2517", "retention");
+  later(() => who.ctx.close());
+  later(() => deactivate(admin.api, who.user.id));
+  const aging = await ownedAging(who.user);
+  later(() => aging.close());
+  await requireConcierge(who);
+  await cleanChat(who, later);
+  const project = await newProject(admin, later, { label: "retention", members: [{ who, role: "EDITOR" }] });
+  for (let i=0;i<3;i++) expect((await quickAction(who,"due-week",project.id)).status).toBe(200);
+  const ids = (await chatMessages(who)).map(m=>m.id);
+  expect(ids.length).toBeGreaterThanOrEqual(3);
+  const now = new Date();
+  const boundary = now.getTime()-90*86400000;
+  await aging.age([ids[0]], new Date(boundary-1));
+  await aging.age([ids[1]], new Date(boundary));
+  await aging.age([ids[2]], new Date(boundary+1));
+  await aging.assertOnlyOwnedExpiry(ids,now);
+  expect(aging.purgeAt(now)).toBe(1);
+  expect((await aging.messages(ids)).map(r=>r.id)).not.toContain(ids[0]);
+  expect((await aging.messages(ids)).map(r=>r.id)).toEqual(expect.arrayContaining([ids[1],ids[2]]));
+  await aging.age([ids[1]],new Date(Date.now()-91*86400000));
+  await aging.age([ids[2]],new Date(Date.now()-89*86400000));
+  await aging.assertOnlyOwnedExpiry(ids,new Date());
+  const secret=process.env.JOB_SECRET;
+  expect(secret?.length, "A matching synthetic local JOB_SECRET is required").toBeGreaterThanOrEqual(16);
+  const job=await anon.context().request.post("/api/jobs/purge-chat", { headers: { authorization: `Bearer ${secret}` } });
+  expect(job.status(),await job.text()).toBe(200);
+  const kept=(await aging.messages(ids)).map(r=>r.id);
+  expect(kept).not.toContain(ids[1]);
+  expect(kept).toEqual(expect.arrayContaining(ids.slice(2)));
 });
 
 test("AC3: a change made through chat is in the action log, and the chat text is not", async ({ admin, later }) => {

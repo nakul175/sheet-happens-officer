@@ -1,7 +1,9 @@
 import { dueBeforeNextMonday } from "../helpers/proposal-fixture-date";
 // SHO-US-8.5 Undo from the chat (APL-2514).
 // One test per acceptance criterion. The prompt proposes the change; Confirm and Undo are taps, not further model calls.
-// AC6 cannot age a message past 30 days from a browser session, so it skips with that reason.
+// AC6 ages only a fresh synthetic actor's confirmed local card and action-log rows.
+import { ownedAging } from "../helpers/owned-local-aging";
+import { verifiedUser, deactivate } from "./qa";
 import { test, expect, zz } from "../support";
 import { newProject, newTask } from "../g2";
 import { cleanChat, patchCurrent } from "../helpers/jim-http";
@@ -136,6 +138,38 @@ test("AC5: a member-removal card says it cannot be undone, and the done message 
   expect((await taskOf(admin, id)).assignee.id).toBe(admin.user.id);
 });
 
-test("AC6: a done message older than 30 days has Undo greyed out, saying it is too old", async () => {
-  test.skip(true, "A browser session cannot age a concierge message past 30 days, and staging has no control to backdate one. tests/concierge.test.ts and tests/undo.test.ts cover the \"Too old to undo\" refusal.");
+test("AC6: a done message older than 30 days has Undo greyed out, saying it is too old @local-only", async ({ browser, anon, admin, later }) => {
+  const who = await verifiedUser(browser, anon.context().request, "2514", "expired");
+  later(() => who.ctx.close());
+  later(() => deactivate(admin.api,who.user.id));
+  const aging=await ownedAging(who.user);
+  later(() => aging.close());
+  await requireModel(who);
+  await showConcierge(who,later);
+  await cleanChat(who,later);
+  const project=await newProject(admin,later,{label:"expired-undo",members:[{who,role:"EDITOR"}]});
+  const title=zz("expired-task"),due=dueBeforeNextMonday();
+  const id=await newTask(who,project.id,{title,assigneeId:who.user.id,dueDate:due});
+  const asked=await ask(who,`Move "${title}" to Monday.`);
+  expect(asked.status,JSON.stringify(asked.json)).toBe(200);
+  const card=cardOf(asked.messages);
+  expect(card?.canConfirm).toBe(true);
+  const done=await postJson(who,`/api/concierge/cards/${card!.id}/confirm`,{});
+  expect(done.status,JSON.stringify(done.json)).toBe(200);
+  const result=(done.json.messages as ConciergeMessage[]).find(m=>m.result);
+  expect(result?.id).toBeTruthy();
+  const before=await taskOf(who,id);
+  expect(before.dueDate).not.toBe(due);
+  await aging.expireUndo(card!.id,result!.id,new Date(Date.now()-31*86400000));
+  await who.page.goto(`/projects/${project.id}`);
+  const expired=who.page.locator("aside.cc-slot .cc-result").filter({hasText:title});
+  await expect(expired.getByRole("button",{name:"Too old to undo",exact:true})).toBeVisible();
+  await expect(expired.getByRole("button",{name:"Too old to undo",exact:true})).toBeDisabled();
+  await expect(expired.getByRole("button",{name:"Undo",exact:true})).toHaveCount(0);
+  const state=await who.api.get("/api/concierge/state");
+  expect(state.json.messages.find((m:ConciergeMessage)=>m.id===result!.id)?.result?.undoExpired).toBe(true);
+  const refused=await postJson(who,`/api/concierge/cards/${card!.id}/undo`,{});
+  expect(refused.status,JSON.stringify(refused.json)).toBe(409);
+  expect(refused.json.tooOld).toBe(true);
+  expect(await taskOf(who,id)).toEqual(before);
 });
