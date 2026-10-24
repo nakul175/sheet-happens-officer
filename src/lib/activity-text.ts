@@ -112,6 +112,9 @@ export function sentence(a: Row, names: Names, now = new Date()): string {
     case "task.idea_changed": return f.isIdea ? `marked ${T} as an idea` : `took the idea mark off ${T}`;
     case "task.link_added": return `linked ${T} to ${typeof f.label === "string" && f.label ? q(f.label) : "a record"}`;
     case "task.link_removed": return `removed a link from ${T}`;
+    case "comment.added": return `commented on ${T}`;
+    case "comment.edited": return `edited a comment on ${T}`;
+    case "comment.removed": return `deleted a comment on ${T}`;
     case "task.moved_to_deal": return `moved ${T} to the deal ${q(String(f.deal ?? ""))}`;
     case "deal.created": return `created the deal ${q(String(f.name ?? ""))}`;
     case "deal.stage_changed": return `moved the deal from ${String(b.stage ?? "no stage")} to ${String(f.stage ?? "no stage")}${f.reason ? ` (${String(f.reason)})` : ""}`;

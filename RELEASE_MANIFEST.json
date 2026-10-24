@@ -1,0 +1,43 @@
+{
+  "baseline": "Exact live central-20261022 credential-free source snapshot",
+  "included_verified_bugs": [
+    "SHO-2671",
+    "SHO-2689",
+    "SHO-2738",
+    "SHO-2840",
+    "SHO-2917",
+    "SHO-2918",
+    "SHO-2919",
+    "SHO-2920",
+    "SHO-2921",
+    "SHO-2922",
+    "SHO-2923",
+    "SHO-2924",
+    "SHO-3000",
+    "SHO-3019",
+    "SHO-3025",
+    "SHO-3031",
+    "SHO-3032",
+    "SHO-3033"
+  ],
+  "excluded_pending_bugs": [
+    "SHO-2693",
+    "SHO-2725",
+    "SHO-2760",
+    "SHO-2897",
+    "SHO-3010",
+    "SHO-3011",
+    "SHO-3017",
+    "SHO-3024",
+    "SHO-3029",
+    "SHO-3030"
+  ],
+  "prerequisite": "Task comments feature from mergedPR128, with additive Comment table, required by2840 and3019; FF_TASK_COMMENTS unchanged on production",
+  "preserved": "Live central accounts and suite integration; their schema models and auth sources remain unchanged",
+  "validation": {
+    "build": "PASS",
+    "api_and_db": "43PASS10expectedflag-offSKIP",
+    "browser": "2738/3025 real app3PASS2excluded3030SKIP"
+  },
+  "production_switch": "Not yet performed"
+}

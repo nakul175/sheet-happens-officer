@@ -283,7 +283,7 @@ export function DealPanel({ projectId, deal, canWrite, onChange, feed }: { proje
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [armed, feed.status]);
   return (
-    <div className="card" style={{ marginBottom: 14 }}>
+    <section className="card" aria-label="Deal" style={{ marginBottom: 14 }}>
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }} role="group" aria-label="Stage">
         {deal.pipeline?.stages.map((s) => (
           <button key={s.id} className={`btn sm${s.id === cur ? "" : " ghost"}`} aria-current={s.id === cur ? "step" : undefined} disabled={!canWrite || s.id === cur} onClick={() => void choose(s)}>{s.name}</button>
@@ -310,6 +310,6 @@ export function DealPanel({ projectId, deal, canWrite, onChange, feed }: { proje
       <Parties projectId={projectId} deal={deal} canWrite={canWrite} onChange={onChange} />
       {pick && deal && <StageDialog projectId={projectId} stage={pick.stage} deal={deal} initial={{ blocked: pick.blocked, loadError: pick.loadError }} onClose={close} onDone={() => { close(); onChange(); }} />}
       {edit && d && <DetailsDialog projectId={projectId} deal={deal} onClose={() => setEdit(false)} onDone={() => { setEdit(false); onChange(); }} />}
-    </div>
+    </section>
   );
 }

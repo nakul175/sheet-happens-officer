@@ -7,6 +7,7 @@ import { errorMessage, isVersionConflict, versionConflictMessage } from "@/lib/v
 import { Confirm, Modal, Skeleton } from "@/components/ui";
 import { ConvertDialog } from "@/components/ConvertDialog";
 import { TaskLinks } from "@/components/TaskLinks";
+import { Comments } from "@/components/Comments";
 import { closeControlOffered } from "@/lib/approver-ui";
 import { useMe } from "@/app/(app)/Shell";
 
@@ -19,6 +20,7 @@ type Task = {
   section: { id: string; name: string; isDone: boolean }; project: { id: string; name: string; archived: boolean };
   subtaskList: Sub[];
   links?: { id: string; organisation: { id: string; name: string } | null; contact: { id: string; name: string; organisationId: string } | null }[];
+  commentsEnabled?: boolean;
 };
 type Project = {
   id: string; role: string; type?: "PROJECT" | "DEAL"; archived: boolean; sections: { id: string; name: string; isDone: boolean }[];
@@ -247,6 +249,17 @@ export function TaskModal({ id, me, onClose, onChanged, asPage }: { id: string; 
             </div>
           )}
           {meCtx.crm && !task.parentId && <TaskLinks taskId={id} links={task.links ?? []} canEdit={canEdit && !holding} onChanged={() => { t.reload(); onChanged?.(); }} />}
+
+          {task.approver && !task.awaitingApproval && !done && task.assignee.id === me && (
+            <p className="hint">Only {task.approver.name} or the project Leader can close this task. Send it for approval when it is ready.</p>
+          )}
+          {canEdit && !holding && (
+            <div className="box dng" style={{ display: "flex", gap: 12, alignItems: "center", justifyContent: "space-between", flexWrap: "wrap" }}>
+              <span className="hint" style={{ color: "var(--danger)" }}>Kept 30 days. Everyone on the task is told. ({ROLE[role]})</span>
+
+            </div>
+          )}
+          {task.commentsEnabled && <Comments taskId={id} onChanged={onChanged} />}
           <div className="actions" style={{ justifyContent: "flex-start" }}>
             {canEdit && !done && task.approver && !task.awaitingApproval && !task.parentId && task.assignee.id === me && (
               <button className="btn" disabled={busy} onClick={() => run(api("POST", `/api/tasks/${id}/send-for-approval`, {}))}>Send for approval</button>
@@ -258,16 +271,10 @@ export function TaskModal({ id, me, onClose, onChanged, asPage }: { id: string; 
               <button className="btn" disabled={busy} onClick={() => complete()}>{task.approver ? "Close task" : "Mark complete"}</button>
             )}
             {canEdit && done && <button className="btn ghost" disabled={busy} onClick={() => run(api("POST", `/api/tasks/${id}/reopen`, {}))}>Reopen</button>}
-          </div>
-          {task.approver && !task.awaitingApproval && !done && task.assignee.id === me && (
-            <p className="hint">Only {task.approver.name} or the project Leader can close this task. Send it for approval when it is ready.</p>
-          )}
-          {canEdit && !holding && (
-            <div className="box dng" style={{ display: "flex", gap: 12, alignItems: "center", justifyContent: "space-between", flexWrap: "wrap" }}>
-              <span className="hint" style={{ color: "var(--danger)" }}>Kept 30 days. Everyone on the task is told. ({ROLE[role]})</span>
+            {canEdit && !holding && (
               <button className="btn ghost sm" style={{ color: "var(--danger)", borderColor: "var(--danger-line)" }} onClick={() => setTrash(true)}>Move to Trash</button>
-            </div>
-          )}
+            )}
+          </div>
         </>,
       )}
       {convert && <ConvertDialog task={task} meId={me} onClose={() => setConvert(false)} />}
