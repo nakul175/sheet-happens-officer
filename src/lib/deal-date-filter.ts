@@ -7,6 +7,19 @@ export const DEAL_DATE_BASES = [
 export type DealDateBasis = (typeof DEAL_DATE_BASES)[number]["value"];
 export type DealDateFilter = { basis: DealDateBasis; from?: string; to?: string; includeUndated: boolean };
 export class DealDateFilterError extends Error {}
+const publicValidationMessages = new Set([
+  "From date must be a valid calendar date (YYYY-MM-DD).",
+  "To date must be a valid calendar date (YYYY-MM-DD).",
+  "Include undated must be true or false.",
+  "Choose Submission deadline, Created date or Expected close as the date basis.",
+  "Choose at least one From or To date to apply the date filter.",
+  "From date must be on or before To date.",
+]);
+/** Only fixed validation copy may reach an ApiError, even for a forged error instance. */
+export function publicDealDateError(value: unknown) {
+  return value instanceof DealDateFilterError && publicValidationMessages.has(value.message)
+    ? value.message : "Choose a valid deal date filter.";
+}
 const IST_OFFSET_MS = 330 * 60_000;
 function day(value: unknown, label: string): string | undefined {
   if (value === undefined || value === null || value === "") return undefined;

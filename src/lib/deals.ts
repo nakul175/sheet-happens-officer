@@ -1,4 +1,4 @@
-import { DealDateFilterError, dealDateWhere, type DealDateFilter } from "@/lib/deal-date-filter";
+import { DealDateFilterError, publicDealDateError, dealDateWhere, type DealDateFilter } from "@/lib/deal-date-filter";
 import { parseSubmissionDeadline, serializeSubmissionDeadline } from "@/lib/submission-deadline";
 // SHO-E10 and SHO-E12: Deals are projects of type Deal. This file holds creation, stages, details,
 // next step and stalled logic. Access is still project membership (src/lib/access.ts).
@@ -382,7 +382,7 @@ export async function listDeals(user: Actor, o: { archived?: boolean; mine?: boo
   requireCrm(user);
   let dateWhere;
   try { dateWhere = dealDateWhere(o.dateFilter); }
-  catch (error) { if (error instanceof DealDateFilterError) throw new ApiError(400, error.message); throw error; }
+  catch (error) { if (error instanceof DealDateFilterError) throw new ApiError(400, publicDealDateError(error)); throw error; }
   // project-lookup-ok: requireCrm plus visibleTo enforces role/membership; archive filter is explicitly selected by the caller.
   const projects = await db.project.findMany({
     where: {
