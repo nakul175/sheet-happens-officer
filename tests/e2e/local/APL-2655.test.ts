@@ -38,18 +38,12 @@ async function editorSession(ed: Account) {
   return { ctx, page };
 }
 
-/**
- * The Editor's Undo button for their delete. An Editor sees Undo only on their own actions (src/lib/feed.ts), and the
- * Editor's one action here is the delete, so the single Undo button on the page belongs to that row.
- */
-async function undoButtonOn(page: Page, title: string) {
+/** Later APL-2674 hides delete Undo from Editors. A stale/direct authenticated
+ * request must still obey APL-2655's already-undone-before-permission contract. */
+async function noEditorDeleteUndo(page: Page, title: string) {
   await page.getByText(`moved "${title}" to Trash`).waitFor();
-  const undo = page.getByRole("button", { name: "Undo", exact: true });
-  expect(await undo.count()).toBe(1);
-  return undo;
+  expect(await page.getByRole("button", { name: "Undo", exact: true }).count()).toBe(0);
 }
-
-const toast = (page: Page, text: string) => page.getByRole("status").filter({ hasText: text });
 
 describe.skipIf(!process.env.SHO_QA_PASS)("qa:TC missing APL-2655 editor Undo of a delete", () => {
   beforeAll(async () => {
@@ -68,23 +62,20 @@ describe.skipIf(!process.env.SHO_QA_PASS)("qa:TC missing APL-2655 editor Undo of
     await cleanupZz();
   });
 
-  it("qa:TC missing AC1 already undone wins: Activity Undo returns 409 This was already undone and nothing changes", async () => {
+  it("qa:TC missing AC1 already undone wins: Editor UI hides Undo, direct request returns 409 This was already undone and nothing changes", async () => {
     const { lead, ed, projectId, t, title, row } = await editorDeletedT1();
     const { ctx, page } = await editorSession(ed);
     try {
       await page.goto(`/projects/${projectId}/activity`);
-      const undo = await undoButtonOn(page, title);
+      await noEditorDeleteUndo(page, title);
       expect((await lead.c.post(`/api/actions/${row.id}/undo`)).status).toBe(200);
       const before = await snapshot(t, row.id);
       expect(before.deletedAt).toBeNull();
       expect(before.undoneById).toBe(lead.id);
 
-      const pending = page.waitForResponse((r) => r.url().includes(`/api/actions/${row.id}/undo`) && r.request().method() === "POST");
-      await undo.click();
-      const res = await pending;
+      const res = await page.request.post(`/api/actions/${row.id}/undo`, { data: {} });
       expect(res.status()).toBe(409);
       expect((await res.json()).error).toBe("This was already undone.");
-      await toast(page, "This was already undone.").waitFor();
       expect(await snapshot(t, row.id)).toEqual(before);
 
       await page.goto(`/projects/${projectId}/trash`);
@@ -97,7 +88,7 @@ describe.skipIf(!process.env.SHO_QA_PASS)("qa:TC missing APL-2655 editor Undo of
     }
   }, 120000);
 
-  it("qa:TC missing AC2 not-yet-undone delete: Activity Undo returns 403 and T1 stays in Trash", async () => {
+  it("qa:TC missing AC2 not-yet-undone delete: Editor UI hides Undo, direct request returns 403 and T1 stays in Trash", async () => {
     const { ed, projectId, t, title, row } = await editorDeletedT1();
     const before = await snapshot(t, row.id);
     expect(before.deletedAt).not.toBeNull();
@@ -105,13 +96,10 @@ describe.skipIf(!process.env.SHO_QA_PASS)("qa:TC missing APL-2655 editor Undo of
     const { ctx, page } = await editorSession(ed);
     try {
       await page.goto(`/projects/${projectId}/activity`);
-      const undo = await undoButtonOn(page, title);
-      const pending = page.waitForResponse((r) => r.url().includes(`/api/actions/${row.id}/undo`) && r.request().method() === "POST");
-      await undo.click();
-      const res = await pending;
+      await noEditorDeleteUndo(page, title);
+      const res = await page.request.post(`/api/actions/${row.id}/undo`, { data: {} });
       expect(res.status()).toBe(403);
       expect((await res.json()).error).toBe("Only the project Leader or an Admin can do this.");
-      await toast(page, "Only the project Leader or an Admin can do this.").waitFor();
       expect(await snapshot(t, row.id)).toEqual(before);
 
       await page.goto(`/projects/${projectId}/trash`);
@@ -122,4 +110,25 @@ describe.skipIf(!process.env.SHO_QA_PASS)("qa:TC missing APL-2655 editor Undo of
       await ctx.close();
     }
   }, 120000);
+  it("positive control: Leader sees delete Undo and restores through the actual Activity control", async () => {
+    const { lead, projectId, t, title, row } = await editorDeletedT1();
+    const { ctx, page } = await editorSession(lead);
+    try {
+      await page.goto(`/projects/${projectId}/activity`);
+      await page.getByText(`moved "${title}" to Trash`).waitFor();
+      const undo = page.getByRole("listitem").filter({ hasText: `moved "${title}" to Trash` }).getByRole("button", { name: "Undo", exact: true });
+      await undo.waitFor({ state: "visible" });
+      expect(await undo.count()).toBe(1);
+      const pending = page.waitForResponse(r => r.url().includes(`/api/actions/${row.id}/undo`) && r.request().method() === "POST");
+      await undo.click();
+      expect((await pending).status()).toBe(200);
+      const after = await snapshot(t, row.id);
+      expect(after.deletedAt).toBeNull();
+      expect(after.undoneById).toBe(lead.id);
+      await page.goto(`/projects/${projectId}/trash`);
+      await page.getByText("Trash is empty.").waitFor();
+      expect((await lead.c.get(`/api/tasks/${t}`)).status).toBe(200);
+    } finally { await ctx.close(); }
+  }, 120000);
+
 });
