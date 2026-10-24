@@ -39,7 +39,7 @@ export function BuyerAccountPicker({ value, onChange, disabled = false, onBusyCh
     {captureKind && query.trim() && !exact && <Field label="Kind (optional, new Account)">{id => <select id={id} className="in" value={kind} disabled={disabled || busy} onChange={e => setKind(e.target.value)}><option value="">Not specified</option>{ORGANISATION_KINDS.map(k => <option key={k}>{k}</option>)}</select>}</Field>}
     {query.trim() && (exact ? <button type="button" className="btn ghost sm" disabled={disabled || busy} onClick={() => onChange(exact)}>Use existing Account: {exact.name}</button> : <button type="button" className="btn ghost sm" disabled={disabled || busy || accounts.loading || !!accounts.error} onClick={create}>{busy ? "Creating…" : `Create Account “${query.trim()}”`}</button>)}
     <p className="sub">Creating an Account saves it immediately. It remains in Accounts if you cancel or the deal cannot be saved. Choose an existing match to avoid duplicates.</p>
-    {created && <p role="status">Account “{created.name}” saved and selected. It remains available even if this deal is not saved.</p>}
+    {created && <p role="status">Account “{created.name}” saved{value?.id === created.id ? " and selected" : ""}. It remains available even if this deal is not saved.</p>}
     {match && <button type="button" className="btn ghost sm" disabled={disabled || busy} onClick={() => { onChange(match); setError(null); }}>Use existing Account: {match.name}</button>}
     {(error || accounts.error) && <div className="err" role="alert">{error || accounts.error}</div>}
   </div>;

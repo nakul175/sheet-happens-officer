@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act } from "react";
+import { act, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { ChangeDealBuyer } from "@/components/ChangeDealBuyer";
@@ -32,4 +32,14 @@ it('cancel after explicit Account creation never deletes the retained Account or
   const close=vi.fn();m.api.mockResolvedValue({ok:true,data:{organisation:{id:'new',name:'New Buyer'}}});
   await act(async()=>root.render(<ChangeDealBuyer projectId="deal" buyer={{id:'old',name:'Old'}} onDone={change} onClose={close}/>));
   await type('New Buyer');await click('Create Account');await click('Cancel');expect(close).toHaveBeenCalledOnce();expect(m.api).toHaveBeenCalledOnce();expect(m.api.mock.calls[0][0]).toBe('POST');expect(change).not.toHaveBeenCalled();
+});
+
+it('retained Account notice reflects selecting another existing Buyer after creation',async()=>{
+  m.orgs=[{id:'other',name:'Existing Buyer'}];m.api.mockResolvedValue({ok:true,data:{organisation:{id:'new',name:'New Buyer'}}});
+  function Form(){const [value,setValue]=useState<{id:string;name:string}|null>(null);return <BuyerAccountPicker value={value} onChange={setValue}/>;}
+  await act(async()=>root.render(<Form/>));await type('New Buyer');await click('Create Account');
+  expect(document.querySelector('[role="status"]')?.textContent).toContain('saved and selected');
+  await act(async()=>{const select=document.querySelector('select')!;select.value='other';select.dispatchEvent(new Event('change',{bubbles:true}));});
+  expect(document.querySelector('select')!.value).toBe('other');
+  expect(document.querySelector('[role="status"]')?.textContent).toBe('Account “New Buyer” saved. It remains available even if this deal is not saved.');
 });
