@@ -40,7 +40,7 @@
 //      is a literal argv the scanner could judge, but the rule would have to price every literal argv of every
 //      child-process call in tests/; it is left out rather than shipped unpriced. The child inherits the environment of
 //      the parent by design, so no text in this file can prove the child does not print it.
-//   3. An assembly built at run time: `["print","env"].join("")`, a base64/char-code string, or a `Reflect`/`Proxy` read
+//   3. An assembly built at run time: `["print","env"].join("")`, a char-code string, or a `Reflect`/`Proxy` read
 //      of `globalThis["pro" + "cess"].env`. The scanner reads source, and these are values, not text.
 // A text scanner proves that the files it reads contain no banned FORM; it cannot prove absence of a behaviour.
 // The guard is not exhaustive; tests/sec-2917-f3-sinking-w93.test.ts pins what the F3 pass sees,
@@ -84,14 +84,38 @@ function callName(node: ts.CallExpression): string | null {
   return null;
 }
 
-/**
- * A literal string's text; null for anything computed (`` `${body}` ``, `body.join("\n")`). A name bound to a literal in
- * the same file resolves to that literal (W239, W169 row 29): `const CMD = "printenv"; execSync(CMD)` runs printenv.
- */
-function literalText(node: ts.Node | undefined, bindings?: Bindings): string | null {
-  if (!node) return null;
+/** Resolve only bounded, deterministic string expressions; never execute source. */
+function literalText(node: ts.Node | undefined, bindings?: Bindings, depth = 0): string | null {
+  if (!node || depth > 16) return null;
+  const read = (part: ts.Node | undefined) => literalText(part, bindings, depth + 1);
   if (ts.isStringLiteralLike(node)) return node.text;
+  if (ts.isParenthesizedExpression(node)) return read(node.expression);
   if (bindings && ts.isIdentifier(node)) return bindings.strings.get(node.text) ?? null;
+  if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.PlusToken) {
+    const left = read(node.left), right = read(node.right);
+    return left !== null && right !== null ? left + right : null;
+  }
+  if (ts.isTemplateExpression(node)) {
+    let text = node.head.text;
+    for (const span of node.templateSpans) {
+      const value = read(span.expression);
+      if (value === null) return null;
+      text += value + span.literal.text;
+    }
+    return text;
+  }
+  if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)
+      && node.expression.name.text === "toString" && node.arguments.length === 0) {
+    const from = node.expression.expression;
+    if (ts.isCallExpression(from) && ts.isPropertyAccessExpression(from.expression)
+        && ts.isIdentifier(from.expression.expression) && from.expression.expression.text === "Buffer"
+        && from.expression.name.text === "from" && from.arguments.length === 2) {
+      const value = read(from.arguments[0]), encoding = read(from.arguments[1]);
+      if (value !== null && value.length <= 65536 && (encoding === "base64" || encoding === "hex")) {
+        return Buffer.from(value, encoding).toString();
+      }
+    }
+  }
   return null;
 }
 
