@@ -111,7 +111,7 @@ export async function deactivate(actor: Actor, targetId: string, reassign: strin
         if (ok) newAssignee = reassign;
         else if (visible) fellBack.push(m.project.name);
       }
-      const r = await releasePerson(tx, { projectId: m.projectId, userId: targetId, newAssigneeId: newAssignee, actorId: actor.id });
+      const r = await releasePerson(tx, { projectId: m.projectId, userId: targetId, newAssigneeId: newAssignee, actorId: actor.id, notifyActor: true });
       // Tasks on a hidden deal still go to its Leader; only what this caller is told is redacted.
       if (visible) moved += r.moved;
     }

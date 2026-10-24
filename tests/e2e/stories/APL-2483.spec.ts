@@ -111,20 +111,18 @@ test.describe("SHO-US-2.4 / APL-2483", () => {
     expect((await admin.api.post(`/api/team/${lead.id}/deactivate`, { reassign: "leaders" })).status).toBe(200);
   });
 
-  // The story's build note says each affected Leader gets one counted notice "also when the Leader is the person deactivating".
-  // The code does not do that: lib/notify.ts drops the actor unless includeActor is set, and lib/people.ts only sets it when approver duties moved.
-  // Kept as an expected failure so it shows up; if the product is changed to match the note, this test starts passing and test.fail() must be removed.
+  // AC5 includes the acting Leader: deactivation must send one counted handover notice.
   test("AC5: the person who receives tasks and the Leader are told", async ({ admin, later }) => {
-    test.fail(true, "Linear 2.4 build note vs code: the Leader is not notified when they are the one deactivating (src/lib/notify.ts, src/lib/people.ts).");
     const leaver = await person(admin, later, "leaver5");
     const p = await project(admin, later, "2.4 ac5");
     await add(admin, p.id, leaver.id, "EDITOR");
     await task(admin, p.id, leaver.id);
     expect((await admin.api.post(`/api/team/${leaver.id}/deactivate`, { reassign: "leaders" })).status).toBe(200);
     const after = await admin.api.get("/api/notifications?limit=50");
-    const texts = (after.json.items as { text: string }[]).map((i) => i.text).join("\n");
-    expect(texts).toContain(p.name);
-    // The receiver's own notice sits in a bell nobody here can open (the person's password is only emailed).
+    const notes = after.json.items as { text: string; href: string }[];
+    const handover = notes.filter((n) => n.href === `/projects/${p.id}` && /handed over/.test(n.text));
+    expect(handover).toHaveLength(1);
+    expect(handover[0].text).toContain("1 open task is now yours");
   });
 
   test("AC5 (receiver): the named person who receives a task is told", async ({ admin, member, later }) => {
