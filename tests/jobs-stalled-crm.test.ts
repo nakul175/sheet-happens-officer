@@ -4,6 +4,11 @@
 // Rows are checked in the test database and on GET /api/notifications. The job sends no email;
 // the outbox is checked so a deal name cannot leave that way either. Names are ZZ-TEST.
 // qa:TC missing: QA has not assigned TC ids for this story yet.
+// APL-2754 (SHO-2903), detection attribution: main already went red under M1 (the already-notified check at
+// src/lib/deals.ts:616 removed) through the all and admins cases, whose second run asserted the job's global
+// notified count was 0. The unset case's second-run assertion on main was `toBeGreaterThanOrEqual(0)`, which
+// proves nothing, so it added no detection. It is not the origin of the detection now either: the all and
+// admins second-run assertions are the ones that fail under M1 both before and after this follow-up.
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { crmMode } from "../src/lib/crm";
 import { notifyStalledDeals, stalledDealWhere } from "../src/lib/deals";
@@ -19,6 +24,7 @@ import {
   expectStalledNotice,
   seedStalledWorld,
   storedRows,
+  worldDeals,
   type Mode,
   type StalledWorld,
 } from "./stalled-crm-fixture";
@@ -40,17 +46,35 @@ async function dealIds() {
   return new Set(rows.map((row) => row.id));
 }
 
-/** DEAL_STALLED rows on this test's ZZ-TEST deals. Other tests' stalled deals cannot move this count. */
-async function worldStalledRows() {
-  const projectId = { in: [world.owned.id, world.adminDeal.id, world.rootDeal.id] };
-  return db.notification.count({ where: { type: "DEAL_STALLED", projectId } });
+/** The three ZZ-TEST deal ids, from the fixture's one definition (APL-2754 D4). */
+function worldDealIds() {
+  return worldDeals(world).map((deal) => deal.id);
 }
 
-/** APL-2754. One job run, with notified counted on this test's ZZ-TEST deals only. */
-async function notifyWorldDeals() {
-  const before = await worldStalledRows();
-  await notifyStalledDeals();
-  return { notified: (await worldStalledRows()) - before };
+/** The exact set of DEAL_STALLED rows on this world's deals. A count would let an add and a remove cancel (D2). */
+async function worldStalledIds() {
+  const rows = await db.notification.findMany({
+    where: { type: "DEAL_STALLED", projectId: { in: worldDealIds() } },
+    select: { id: true },
+  });
+  return rows.map((row) => row.id).sort();
+}
+
+/**
+ * APL-2754. One job run, reported as the change to this world's notice set: what it added and what it removed.
+ * The job's own `notified` is global, so the assertions below read `added` instead of it (D3).
+ */
+async function runJob() {
+  const before = await worldStalledIds();
+  const result = await notifyStalledDeals();
+  const after = await worldStalledIds();
+  return {
+    ...result,
+    before,
+    after,
+    added: after.filter((id) => !before.includes(id)),
+    removed: before.filter((id) => !after.includes(id)),
+  };
 }
 
 /** Allowed leaders keep today's notice. A follower, and any other deal, stays out of their bell. */
@@ -82,10 +106,11 @@ describe("qa:TC missing APL-2741 stalled-deal notices respect CRM_VISIBLE", () =
       const ids = await dealIds();
       expect(ids.has(world.owned.id)).toBe(true);
       expect(ids.has(world.adminDeal.id)).toBe(true);
-      const first = await notifyStalledDeals();
-      expect(first.notified).toBeGreaterThanOrEqual(3);
-      const second = await notifyWorldDeals();
-      expect(second.notified).toBe(0);
+      const first = await runJob();
+      expect(first.added.length).toBeGreaterThanOrEqual(3);
+      const second = await runJob();
+      expect(second.added).toEqual([]);
+      expect(second.after).toEqual(second.before);
     });
     await expectStalledNotice(world.owner, world.owned, true);
     await expectAllowed(true);
@@ -96,9 +121,11 @@ describe("qa:TC missing APL-2741 stalled-deal notices respect CRM_VISIBLE", () =
     await clearStalledNotes(world);
     await withMode("all", async () => {
       expect(crmMode()).toBe("all");
-      expect((await notifyStalledDeals()).notified).toBeGreaterThanOrEqual(3);
-      const second = await notifyWorldDeals();
-      expect(second.notified).toBe(0);
+      const first = await runJob();
+      expect(first.added.length).toBeGreaterThanOrEqual(3);
+      const second = await runJob();
+      expect(second.added).toEqual([]);
+      expect(second.after).toEqual(second.before);
     });
     await expectStalledNotice(world.owner, world.owned, true);
     await expectAllowed(true);
@@ -113,9 +140,11 @@ describe("qa:TC missing APL-2741 stalled-deal notices respect CRM_VISIBLE", () =
       expect(ids.has(world.owned.id)).toBe(false);
       expect(ids.has(world.adminDeal.id)).toBe(true);
       expect(ids.has(world.rootDeal.id)).toBe(true);
-      expect((await notifyStalledDeals()).notified).toBeGreaterThanOrEqual(2);
-      const second = await notifyWorldDeals();
-      expect(second.notified).toBe(0);
+      const first = await runJob();
+      expect(first.added.length).toBeGreaterThanOrEqual(2);
+      const second = await runJob();
+      expect(second.added).toEqual([]);
+      expect(second.after).toEqual(second.before);
     });
     await expectNoDealNotice(world, world.owner);
     await expectNoDealNotice(world, world.follower);

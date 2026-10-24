@@ -29,6 +29,11 @@ export type StalledDeals = Pick<StalledWorld, "owned" | "adminDeal" | "rootDeal"
 
 const PEOPLE = (world: StalledWorld) => [world.owner, world.follower, world.orgAdmin, world.superLead];
 
+/** The three ZZ-TEST deals this world owns. The job-scoped queries, the clock reset and the needles all read this list. */
+export function worldDeals(world: StalledWorld): DealFix[] {
+  return [world.owned, world.adminDeal, world.rootDeal];
+}
+
 export function assertLocalTestDatabase() {
   const raw = process.env.DATABASE_URL;
   if (!raw) throw new Error("DATABASE_URL is required and must point at the local test database");
@@ -113,7 +118,7 @@ export async function seedStalledWorld(tag = stalledTag()): Promise<StalledWorld
  *  ActionLog.createdAt, one deal at a time in world order. The only place a fixture ages a deal. */
 export async function ageDeals(world: StalledDeals) {
   const t = new Date(Date.now() - 31 * 86400_000);
-  for (const id of [world.owned.id, world.adminDeal.id, world.rootDeal.id]) {
+  for (const { id } of worldDeals(world)) {
     await db.$executeRaw`UPDATE "Project" SET "createdAt" = ${t}, "stageChangedAt" = ${t} WHERE id = ${id}`;
     await db.$executeRaw`UPDATE "Task" SET "updatedAt" = ${t} WHERE "projectId" = ${id}`;
     await db.$executeRaw`UPDATE "ActionLog" SET "createdAt" = ${t} WHERE "projectId" = ${id}`;
@@ -139,9 +144,8 @@ export async function bell(who: Account) {
 }
 
 export function dealNeedles(world: StalledWorld) {
-  const deals = [world.owned, world.adminDeal, world.rootDeal];
   const needles: string[] = [];
-  for (const deal of deals) {
+  for (const deal of worldDeals(world)) {
     needles.push(deal.name, deal.title, deal.id, `/projects/${deal.id}`);
   }
   return needles;
