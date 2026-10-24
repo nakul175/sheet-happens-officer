@@ -29,8 +29,10 @@ export type StalledDeals = Pick<StalledWorld, "owned" | "adminDeal" | "rootDeal"
 
 const PEOPLE = (world: StalledWorld) => [world.owner, world.follower, world.orgAdmin, world.superLead];
 
-/** The three ZZ-TEST deals this world owns. The job-scoped queries, the clock reset and the needles all read this list. */
-export function worldDeals(world: StalledWorld): DealFix[] {
+/** The three ZZ-TEST deals this world owns. The job-scoped queries, the clock reset and the needles all read this list.
+ *  The parameter is StalledDeals, not StalledWorld: the clock reset (ageDeals) is handed only the deals, so a whole-world
+ *  parameter would be a claim this reader cannot keep - and it made `next build`'s type check reject the call. */
+export function worldDeals(world: StalledDeals): DealFix[] {
   return [world.owned, world.adminDeal, world.rootDeal];
 }
 
