@@ -50,9 +50,29 @@ export function labels(dir = STORIES) {
   return [...all].sort((a, b) => a.localeCompare(b, "en", { numeric: true }));
 }
 
+/** A label that covers its whole spec (`APL-2609`) rather than one test in it (`APL-2471 AC4`). */
+const wholeFile = (label) => !label.includes(" ");
+
+/**
+ * SHO-2882: the spec files a tag covers whole -- a describe-level tag, not a tagged test title. Their tests are all
+ * filtered out by `--grep-invert`, so a run that collected one would only ever end in "No tests found"; staging-e2e
+ * leaves them out of the collection instead. APL-2471 is not here: only its AC4 is tagged, and the rest still run.
+ */
+export function localOnlyFiles(dir = STORIES) {
+  const out = [];
+  for (const name of readdirSync(dir).filter((n) => n.endsWith(".spec.ts")).sort()) {
+    const id = name.slice(0, -".spec.ts".length);
+    if (labelsIn(id, readFileSync(join(dir, name), "utf8")).some(wholeFile)) out.push(name);
+  }
+  return out;
+}
+
 /** The markdown line the staging-regression summary prints. */
 export const summaryLine = (dir = STORIES) => `**Excluded (@local-only):** ${labels(dir).join(", ")}.`;
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  console.log(process.argv.includes("--summary") ? summaryLine() : labels().join(", "));
+  if (process.argv.includes("--summary")) console.log(summaryLine());
+  // Space-separated basenames for the workflow's collection step (`is_local_only` compares basenames).
+  else if (process.argv.includes("--files")) console.log(localOnlyFiles().join(" "));
+  else console.log(labels().join(", "));
 }

@@ -7,15 +7,24 @@
 // EXCLUDED_TAGS, and that tag set still holds @local-only.
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { labels, labelsIn, summaryLine, STORIES } from "./local-only-specs.mjs";
+import { labels, labelsIn, localOnlyFiles, summaryLine, STORIES } from "./local-only-specs.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const WORKFLOW = readFileSync(join(ROOT, ".github/workflows/staging-regression.yml"), "utf8");
 /** The "Write the summary" step's body, up to the next step. */
 const SUMMARY_STEP = WORKFLOW.split("- name: Write the summary")[1].split("- name: Upload the counts")[0];
+
+// SHO-2882: staging-e2e collects the spec files itself, so the exclusion has to happen there too -- --grep-invert only
+// filters tests inside the files it is given.
+const E2E = readFileSync(join(ROOT, ".github/workflows/staging-e2e.yml"), "utf8");
+/** The plan job's "Split them into parallel and serial" step, up to the next step. */
+const PICK_STEP = (E2E.split("- name: Split them into parallel and serial")[1] ?? "").split("- uses: actions/setup-node")[0];
+/** The serial spec ids the workflow names. */
+const SERIAL_IDS = (E2E.split("SERIAL_SPECS: >-")[1] ?? "").split("jobs:")[0].trim().split(/\s+/).filter(Boolean);
 
 test("a describe tag, a tagged title and a comment mention are told apart", () => {
   const source = [
@@ -65,4 +74,43 @@ test("the workflow keeps no hand-written copy of the tagged list (SHO-2996)", ()
 test("the exclusion behaviour is unchanged (SHO-3000 AC2)", () => {
   assert.match(WORKFLOW, /EXCLUDED_TAGS: "@local-only\|@static\|@manual"/);
   assert.match(WORKFLOW, /npx playwright test --workers=1 --grep-invert "\$EXCLUDED_TAGS"/);
+});
+
+test("SHO-2882 AC1: only a whole-spec tag names a file the staging collection must leave out", () => {
+  const files = localOnlyFiles();
+  assert.deepEqual(files, [
+    "APL-2609.spec.ts",
+    "APL-2624.spec.ts",
+    "APL-2669.spec.ts",
+    "APL-2674.spec.ts",
+    "APL-2721.spec.ts",
+    "APL-2737.spec.ts",
+    "APL-2742.spec.ts",
+  ]);
+  // APL-2471 carries the tag on AC4 alone; its other tests do run on staging, so the file stays in the collection and
+  // only the one test is left to --grep-invert.
+  assert.ok(!files.includes("APL-2471.spec.ts"), "a one-test tag must not remove the whole file");
+  for (const file of files) {
+    assert.ok(labels().includes(file.slice(0, -".spec.ts".length)), `${file} is not a whole-file label`);
+  }
+});
+
+test("SHO-2882 AC2: the workflow takes that list from the tags and filters the collection with it", () => {
+  assert.match(PICK_STEP, /local_only=\$\(node scripts\/ci\/local-only-specs\.mjs --files\)/);
+  assert.match(PICK_STEP, /is_local_only\(\) \{ \[\[ " \$local_only " == \*" \$\(basename "\$1"\) "\* \]\]/);
+  // Both ways a file becomes part of the run consult it: an issue id or glob, and the empty-input sweep.
+  assert.match(PICK_STEP, /elif is_local_only "\$f"; then local_hit\+=\("\$f"\)/);
+  assert.match(PICK_STEP, /is_vitest "\$f" \|\| is_local_only "\$f" \|\| files\+=\("\$f"\)/);
+  // A token that names only local-only specs is an error, not a run that ends in "No tests found".
+  assert.match(PICK_STEP, /selects only @local-only story specs/);
+  // The command the step runs prints exactly the files this test derives.
+  const printed = execFileSync(process.execPath, ["scripts/ci/local-only-specs.mjs", "--files"], { cwd: ROOT, encoding: "utf8" }).trim();
+  assert.deepEqual(printed.split(" "), localOnlyFiles());
+});
+
+test("SHO-2882 AC3: no @local-only spec is named as a serial spec", () => {
+  assert.ok(SERIAL_IDS.length > 0, "SERIAL_SPECS was not found in staging-e2e.yml");
+  // APL-2609 was on this list and is tagged @local-only: the serial job ran one file and got "Error: No tests found."
+  const offenders = SERIAL_IDS.filter((id) => localOnlyFiles().includes(`${id}.spec.ts`));
+  assert.deepEqual(offenders, [], "a local-only spec in SERIAL_SPECS leaves the serial job with no tests");
 });
