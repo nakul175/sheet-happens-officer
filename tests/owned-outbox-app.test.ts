@@ -5,7 +5,7 @@ import {mkdtempSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {startOwnedOutboxApp} from './e2e/owned-outbox-app';
-test('actual child writer uses private directory; staging key/consent preserved; production credentials absent; process stops',async()=>{
+test('actual child writer uses private directory; staging key/consent preserved; production credentials absent; pool bounded; process stops',async()=>{
  const root=mkdtempSync(path.join(tmpdir(),'sho2897-runner-'));
  const outbox=path.join(root,'private-mail');await mkdir(outbox,{mode:0o700});
  const sha='0123456789012345678901234567890123456789';let app: Awaited<ReturnType<typeof startOwnedOutboxApp>> | undefined;
@@ -13,12 +13,12 @@ test('actual child writer uses private directory; staging key/consent preserved;
  const saved=new Map(keys.map(k=>[k,process.env[k]]));
  try{
   await writeFile(path.join(root,'server.js'),`const http=require('http'),fs=require('fs');
-  if(process.env.ANTHROPIC_API_KEY||process.env.RESEND_API_KEY||process.env.ANTHROPIC_API_KEY_STAGE!=='stage-fixture-only'||process.env.MODEL_DATA_APPROVED!=='true'||process.env.SHO_DEPLOY_STAGE!=='staging')process.exit(8);
+  if(process.env.ANTHROPIC_API_KEY||process.env.RESEND_API_KEY||process.env.ANTHROPIC_API_KEY_STAGE!=='stage-fixture-only'||process.env.MODEL_DATA_APPROVED!=='true'||process.env.SHO_DEPLOY_STAGE!=='staging'||new URL(process.env.DATABASE_URL).searchParams.get('connection_limit')!=='1'||new URL(process.env.DATABASE_URL).searchParams.get('pool_timeout')!=='30')process.exit(8);
   fs.writeFileSync(process.env.EMAIL_OUTBOX_DIR+'/writer-proof','owned-mail');
   const server=http.createServer((req,res)=>{res.setHeader('Content-Type','application/json');res.end(JSON.stringify({release:process.env.RELEASE}));});
   server.listen(0,'127.0.0.1',()=>console.log('sho ready '+server.address().port));
   process.on('SIGTERM',()=>server.close(()=>process.exit(0)));`);
-  Object.assign(process.env,{SHO_QA_APP_ROOT:root,SHO_QA_RELEASE:sha,DATABASE_URL:'postgresql://fixture:fixture@127.0.0.1:55432/test',ANTHROPIC_API_KEY:'must-not-pass',RESEND_API_KEY:'must-not-pass',ANTHROPIC_API_KEY_STAGE:'stage-fixture-only',MODEL_DATA_APPROVED:'true',SHO_DEPLOY_STAGE:'production'});
+  Object.assign(process.env,{SHO_QA_APP_ROOT:root,SHO_QA_RELEASE:sha,DATABASE_URL:'postgresql://fixture:fixture@127.0.0.1:55432/test?connection_limit=20',ANTHROPIC_API_KEY:'must-not-pass',RESEND_API_KEY:'must-not-pass',ANTHROPIC_API_KEY_STAGE:'stage-fixture-only',MODEL_DATA_APPROVED:'true',SHO_DEPLOY_STAGE:'production'});
   app=await startOwnedOutboxApp({outbox,mode:'all'});
   assert.equal(await readFile(path.join(outbox,'writer-proof'),'utf8'),'owned-mail');
   await app.stop();

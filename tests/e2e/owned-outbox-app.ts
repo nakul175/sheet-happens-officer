@@ -30,6 +30,11 @@ export async function startOwnedOutboxApp({outbox,mode}: {outbox: string; mode: 
  for(const key of ['PATH','HOME','DATABASE_URL','DIRECT_DATABASE_URL','SUPER_ADMIN_EMAILS','FF_TASK_COMMENTS','SIGNIN_RETURN_TO','TZ','JOB_SECRET','MODEL_PROVIDER','MODEL_NAME','MODEL_DATA_APPROVED','ANTHROPIC_API_KEY_STAGE']){
   if(env[key]!==undefined)childEnv[key]=env[key];
  }
+ // One connection per owned app leaves the shared slot service's pool untouched.
+ // Bound only this child URL after validating its host, role, database and schema.
+ database.searchParams.set('connection_limit','1');
+ database.searchParams.set('pool_timeout','30');
+ childEnv.DATABASE_URL=database.toString();
  const child=spawn(process.execPath,[path.join(root,'server.js')],{cwd:root,env:childEnv,stdio:['ignore','pipe','pipe']});
  // The app's HTTP handler deliberately logs only exception class/database code.
  // Forward only that exact safe form; never relay arbitrary stderr, stacks, query text or env.
