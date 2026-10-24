@@ -12,7 +12,7 @@ afterEach(() => { if (saved === undefined) delete process.env.CRM_VISIBLE; else 
 it("uses the existing membership-scoped deal service and flattens workspace names", async () => {
  const result = await findDeals(member, "jeevika");
  expect(m.list).toHaveBeenCalledExactlyOnceWith(member, { lifecycle: "all" });
- expect(result.deals[0]).toMatchObject({ id: "d", name: "JEEViKA Bid", stage: "Submitted", pipeline: "Bid", organisation: { id: "o", name: "Buyer Office" }, nextStep: { title: "Call Buyer", due: "2026-11-01" }, stalled: true });
+ expect(result.deals[0]).toMatchObject({ id: "d", name: "JEEViKA Bid", stage: "Submitted", pipeline: "Bid", organisation: { id: "o", name: "Buyer Office" } });
 });
 it("caps tool results at25 and reports truncation after filtering", async () => { m.list.mockResolvedValue(Array.from({ length: 28 }, (_, n) => row(String(n)))); const result = await findDeals(member, "JEEViKA"); expect(result.deals).toHaveLength(25); expect(result.truncated).toBe(true); expect((await findDeals(member, "absent")).deals).toEqual([]); });
 it.each(["admins", "off"])("refuses hidden CRM before reading any records in %s mode", async mode => { process.env.CRM_VISIBLE = mode; await expect(findDeals(member, "JEEViKA")).rejects.toMatchObject({ status: 404 }); await expect(dealSummary(member, "d")).rejects.toMatchObject({ status: 404 }); expect(m.list).not.toHaveBeenCalled(); expect(m.access).not.toHaveBeenCalled(); expect(m.block).not.toHaveBeenCalled(); });
@@ -71,9 +71,29 @@ it("notes target validation still refuses both or neither target before any read
  expect(turn.seen.notes.size).toBe(0);
 });
 it("a deal's fetched Buyer and next-step title are grounded links too", async () => {
- const { deals } = await findDeals(member, "JEEViKA");
+ const deals = [await dealSummary(member, "d")];
  expect(crmDealLinks(deals, "JEEViKA Bid: Buyer Office; next step Call Buyer")).toEqual(expect.arrayContaining([
   { label: "Buyer Office", href: "/accounts/o" },
   { label: "Call Buyer", href: "/tasks/t" },
  ]));
+});
+it.each([
+ {}, { organisation_id: "" }, { deal_id: "" }, { organisation_id: "  " }, { deal_id: "\n\t" },
+ { organisation_id: "o", deal_id: "" }, { organisation_id: "", deal_id: "d" }, { organisation_id: "o", deal_id: "d" },
+ { organisation_id: null }, { deal_id: 12 }, { organisation_id: [] }, { deal_id: { id: "d" } },
+ { workspace_id: "w" }, { organisation_id: "o", workspace_id: "w" }, { organisation_id: "o", deal_id: null },
+ [], "d", JSON.parse('{"organisation_id":"o","__proto__":{"polluted":true}}'),
+])("rejects malformed notes target %# before any service read", async raw => {
+ const turn = newTurn(member, new Date());
+ const result = await runTool(turn, "notes", raw as Record<string, unknown>).catch(error => ({ errorClass: error.constructor.name }));
+ expect(result).toMatchObject({ isError: true, content: "Invalid arguments." });
+ expect(turn.reads.calls).toBe(0); expect(turn.seen.notes.size).toBe(0);
+ expect(m.access).not.toHaveBeenCalled(); expect(m.list).not.toHaveBeenCalled();
+});
+it("search results do not pretend to be a current full deal summary", async () => {
+ const { deals } = await findDeals(member, "JEEViKA");
+ expect(deals[0]).not.toHaveProperty("nextStep");
+ expect(deals[0]).not.toHaveProperty("stalled");
+ expect(deals[0]).not.toHaveProperty("needsNextStep");
+ expect(await dealSummary(member, "d")).toMatchObject({ nextStep: { title: "Call Buyer" }, stalled: true });
 });

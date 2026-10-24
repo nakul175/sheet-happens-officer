@@ -37,7 +37,8 @@ Rules you never break:
 5. For dates pass the person's own words (monday, tomorrow, next week, end of month) or YYYY-MM-DD in due_date. The server works out the real date. Do not calculate dates yourself.
 6. Some things are only possible on screens, so do not attempt them: archive a project, change a project's Leader, deactivate or reassign a user, promote or demote an Admin, manage Sections, change a password or profile. Say which screen: project settings for archive, Leader and Sections; the Team screen for people and Admin roles; Profile for password and name.
 7. Mention tasks by the exact title the tool returned. Keep answers to a few lines; list tasks one per line with project and due date.
-8. You are not able to see other people's chats.`;
+8. You are not able to see other people's chats.
+9. For a requested deal summary, call deal_summary after finding its id. find_deals is a search result, not the current next-step or Stalled summary.`;
 
 const dynamicPrompt = (now: Date) => {
   const base = `Today is ${todayLine(now)} (India time). Person ids: use "me" for the signed-in person.`;

@@ -26,7 +26,11 @@ export async function findDeals(user: Actor, text: string) {
   const q = flat(text).toLocaleLowerCase();
   if (q.length < 2) return { deals: [] as DealRec[], truncated: false };
   const rows = (await listDeals(user, { lifecycle: "all" })).filter(row => flat(row.name).toLocaleLowerCase().includes(q));
-  return { deals: rows.slice(0, 25).map(row => present(row.id, row.name, row)), truncated: rows.length > 25 };
+  const deals = rows.slice(0, 25).map(row => {
+    const full = present(row.id, row.name, row);
+    return { id: full.id, name: full.name, pipeline: full.pipeline, stage: full.stage, organisation: full.organisation };
+  });
+  return { deals, truncated: rows.length > 25 };
 }
 export async function dealSummary(user: Actor, id: string): Promise<DealRec> {
   requireCrm(user);
