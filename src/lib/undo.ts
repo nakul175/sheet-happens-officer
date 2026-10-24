@@ -204,6 +204,7 @@ async function plan(row: any, user: Actor, projectId: string): Promise<Plan> {
     }
     case "deal.stage_changed": {
       const p = await db.project.findUniqueOrThrow({ where: { id: projectId } });
+      // Retired stages remain valid historical targets. Normal moves reject them; Undo preserves the original ID.
       if (!b.stageId || !(await db.stage.findFirst({ where: { id: b.stageId, pipelineId: p.pipelineId ?? "" } }))) throw bad("The earlier stage no longer exists.");
       return {
         conflicts: p.stageId !== f.stageId ? [{ field: "stage", before: b.stage, after: f.stage, now: p.stageId }] : [], subject: p.name, fields: "Stage",

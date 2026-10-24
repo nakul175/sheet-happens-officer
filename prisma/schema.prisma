@@ -390,6 +390,7 @@ model JobRun {
 // ---------------------------------------------------------------------------
 
 enum StageCategory {
+  DELIVERY
   NOT_STARTED
   ACTIVE
   PAUSED
@@ -472,6 +473,7 @@ model Stage {
   category       StageCategory
   needsReason    Boolean       @default(false)
   requiredFields String[]
+  isRetired      Boolean       @default(false)
   projects       Project[]
 
   @@index([pipelineId, position])

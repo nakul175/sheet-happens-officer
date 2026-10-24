@@ -37,7 +37,7 @@ const dayOnly = (d: Date | null) => (d ? d.toISOString().slice(0, 10) : null);
 /** Pipelines with their stages, for pickers and the board. Type Deal only. */
 export async function dealPipelines(user: Actor) {
   requireCrm(user);
-  const pipes = await db.pipeline.findMany({ where: { typeId: WORKSTREAM_DEAL }, orderBy: { position: "asc" }, include: { stages: { orderBy: { position: "asc" } } } });
+  const pipes = await db.pipeline.findMany({ where: { typeId: WORKSTREAM_DEAL }, orderBy: { position: "asc" }, include: { stages: { where: { isRetired: false }, orderBy: { position: "asc" } } } });
   return pipes.map((p) => ({
     id: p.id, key: p.key, name: p.name,
     stages: p.stages.map((s) => ({ id: s.id, name: s.name, position: s.position, category: s.category, needsReason: s.needsReason, requiredFields: s.requiredFields })),
@@ -71,7 +71,7 @@ export async function createDeal(
   if (!input.organisationId) throw new ApiError(400, "Choose an organisation.");
   const org = await orgOf(user, input.organisationId).catch(() => { throw new ApiError(400, "Choose an organisation."); });
   if (org.archivedAt) throw new ApiError(400, "That organisation is archived.");
-  const pipeline = await db.pipeline.findFirst({ where: { id: input.pipelineId, typeId: WORKSTREAM_DEAL }, include: { stages: { orderBy: { position: "asc" } } } });
+  const pipeline = await db.pipeline.findFirst({ where: { id: input.pipelineId, typeId: WORKSTREAM_DEAL }, include: { stages: { where: { isRetired: false }, orderBy: { position: "asc" } } } });
   if (!pipeline) throw new ApiError(400, "Choose a pipeline.");
   const first = pipeline.stages[0];
   const why = input.whyPursue?.trim();
@@ -157,8 +157,13 @@ export async function moveStage(user: Actor, projectId: string, input: { stageId
   requireWrite(a);
   if (a.project.typeId !== WORKSTREAM_DEAL || !a.project.pipelineId) throw new ApiError(400, "Only deals have stages.");
   const stage = await db.stage.findFirst({ where: { id: input.stageId, pipelineId: a.project.pipelineId } });
-  if (!stage) throw new ApiError(400, "Choose a stage from this deal's pipeline.");
+  if (!stage || stage.isRetired) throw new ApiError(400, "Choose an active stage from this deal's pipeline.");
   const cur = a.project.stageId ? await db.stage.findUnique({ where: { id: a.project.stageId } }) : null;
+  if (stage.category === "DELIVERY") {
+    const pipeline = await db.pipeline.findUnique({ where: { id: a.project.pipelineId }, select: { key: true } });
+    if (pipeline?.key !== "DEAL_BID") throw new ApiError(400, "Delivery is available only in the Bid pipeline.");
+    if (cur?.id !== stage.id && cur?.id !== "st_bid_won") throw new ApiError(409, "Mark this Bid deal Won before moving it to Ongoing Projects.");
+  }
   if (cur?.id === stage.id) return { stage };
   const reason = clean(input.reason);
   if (stage.needsReason && !reason) throw new ApiError(400, `Say why this deal is moving to "${stage.name}".`, { needsReason: true });
@@ -182,7 +187,12 @@ export async function moveStage(user: Actor, projectId: string, input: { stageId
 
   return db.$transaction(async (tx) => {
     if (input.fields && Object.keys(stripUndefined(input.fields)).length) await applyDetails(tx, projectId, input.fields, details);
-    await tx.project.update({ where: { id: projectId }, data: { stageId: stage.id, stageReason: reason, stageChangedAt: new Date() } });
+    const stagePatch = { stageId: stage.id, stageReason: reason, stageChangedAt: new Date() };
+    if (stage.category === "DELIVERY") {
+      // Do not let a concurrent commercial move turn an earlier Won read into a delivery bypass.
+      const changed = await tx.project.updateMany({ where: { id: projectId, pipelineId: a.project.pipelineId, stageId: "st_bid_won" }, data: stagePatch });
+      if (changed.count !== 1) throw new ApiError(409, "This deal's stage changed. Refresh before moving it to Ongoing Projects.");
+    } else await tx.project.update({ where: { id: projectId }, data: stagePatch });
     const leader = a.project.members.find((m) => m.role === "LEADER")!.userId;
     await notify(tx, [leader], "DEAL_STAGE_CHANGED", { actorId: user.id, projectId, data: { project: a.project.name, stage: stage.name } });
     await logAction(tx, {
@@ -246,14 +256,15 @@ const isOpenCategory = (c: string) => (OPEN_CATEGORIES as readonly string[]).inc
 export async function removeStage(user: Actor, stageId: string, input: { moveTo?: string | null }) {
   requireCrm(user);
   if (user.orgRole !== "SUPER_ADMIN") throw notFound("Stage");
-  const stage = await db.stage.findFirst({ where: { id: stageId, pipeline: { typeId: WORKSTREAM_DEAL } }, include: { pipeline: { include: { stages: { orderBy: { position: "asc" } } } } } });
+  const stage = await db.stage.findFirst({ where: { id: stageId, pipeline: { typeId: WORKSTREAM_DEAL } }, include: { pipeline: { include: { stages: { where: { isRetired: false }, orderBy: { position: "asc" } } } } } });
   if (!stage) throw notFound("Stage");
+  if (stage.isRetired) throw new ApiError(409, "This retired stage is preserved for history and Undo and cannot be removed.");
   const others = stage.pipeline.stages.filter((s) => s.id !== stage.id);
   if (stage.category === "DONE" && !others.some((s) => s.category === "DONE")) {
     throw new ApiError(409, `${stage.pipeline.name} must keep a Done stage, so "${stage.name}" cannot be removed.`);
   }
   const canTake = (t: (typeof others)[number]) =>
-    (isOpenCategory(stage.category) ? isOpenCategory(t.category) : t.category === stage.category) &&
+    !t.isRetired && (isOpenCategory(stage.category) ? isOpenCategory(t.category) : t.category === stage.category) &&
     !(t.needsReason && !stage.needsReason) && t.requiredFields.every((f) => stage.requiredFields.includes(f));
   // Only the stages that can take the items are offered; with none, nothing is asked.
   const targets = others.filter(canTake);
@@ -349,13 +360,14 @@ export const isStalled = (category: string | null | undefined, lastActivity: Dat
 const visibleTo = (user: Actor): Prisma.ProjectWhereInput => (isAdmin(user) ? {} : { members: { some: { userId: user.id } } });
 
 /** SHO-US-12.6 data and the Deals screen. `mine` limits to deals the person leads or holds a task in (AC6). */
-export async function listDeals(user: Actor, o: { archived?: boolean; mine?: boolean; pipelineId?: string } = {}) {
+export async function listDeals(user: Actor, o: { archived?: boolean; mine?: boolean; pipelineId?: string; lifecycle?: "sales" | "delivery" | "all" } = {}) {
   requireCrm(user);
   const projects = await db.project.findMany({
     where: {
       typeId: WORKSTREAM_DEAL, archivedAt: o.archived ? { not: null } : null, ...visibleTo(user),
       ...(o.pipelineId ? { pipelineId: o.pipelineId } : {}),
-      ...(o.mine ? { OR: [{ members: { some: { userId: user.id, role: "LEADER" } } }, { tasks: { some: { assigneeId: user.id, deletedAt: null, completedAt: null } } }] } : {}),
+      ...(o.lifecycle === "delivery" ? { stage: { category: "DELIVERY" } } : o.lifecycle === "sales" ? { OR: [{ stageId: null }, { stage: { category: { not: "DELIVERY" } } }] } : {}),
+      ...(o.mine ? { AND: [{ OR: [{ members: { some: { userId: user.id, role: "LEADER" } } }, { tasks: { some: { assigneeId: user.id, deletedAt: null, completedAt: null } } }] }] } : {}),
     },
     orderBy: { createdAt: "desc" },
     include: {
@@ -370,8 +382,9 @@ export async function listDeals(user: Actor, o: { archived?: boolean; mine?: boo
     const sig = signals.get(p.id)!;
     return {
       id: p.id, name: p.name, archived: !!p.archivedAt,
+      lifecycle: p.stage?.category === "DELIVERY" ? "delivery" as const : "sales" as const,
       pipeline: p.pipeline ? { id: p.pipeline.id, key: p.pipeline.key, name: p.pipeline.name } : null,
-      stage: p.stage ? { id: p.stage.id, name: p.stage.name, category: p.stage.category } : null,
+      stage: p.stage ? { id: p.stage.id, name: p.stage.name, category: p.stage.category, isRetired: p.stage.isRetired } : null,
       organisation: p.parties[0]?.organisation ?? null, leader: p.members[0]?.user ?? null,
       value: p.deal?.value === null || p.deal?.value === undefined ? null : Number(p.deal.value), currency: p.deal?.currency ?? null,
       opportunityType: p.deal?.opportunityType ?? null, athenaEntity: p.deal?.athenaEntity ?? null, netFeeRevenueUsd: revenueNumber(p.deal?.netFeeRevenueUsd),
@@ -389,14 +402,14 @@ export async function listDeals(user: Actor, o: { archived?: boolean; mine?: boo
 export async function dealBlock(projectId: string) {
   const p = await db.project.findUnique({
     where: { id: projectId },
-    include: { stage: true, pipeline: { include: { stages: { orderBy: { position: "asc" } } } }, deal: true, parties: { include: { organisation: { select: { id: true, name: true } } }, orderBy: { createdAt: "asc" } } },
+    include: { stage: true, pipeline: { include: { stages: { where: { isRetired: false }, orderBy: { position: "asc" } } } }, deal: true, parties: { include: { organisation: { select: { id: true, name: true } } }, orderBy: { createdAt: "asc" } } },
   });
   if (!p || p.typeId !== WORKSTREAM_DEAL) return null;
   const sig = (await dealSignals([p])).get(p.id)!;
   const d = p.deal;
   return {
     pipeline: p.pipeline ? { id: p.pipeline.id, key: p.pipeline.key, name: p.pipeline.name, stages: p.pipeline.stages.map((s) => ({ id: s.id, name: s.name, category: s.category, needsReason: s.needsReason, requiredFields: s.requiredFields })) } : null,
-    stage: p.stage ? { id: p.stage.id, name: p.stage.name, category: p.stage.category } : null,
+    stage: p.stage ? { id: p.stage.id, name: p.stage.name, category: p.stage.category, isRetired: p.stage.isRetired } : null,
     stageReason: p.stageReason,
     details: d ? {
       whyPursue: d.whyPursue, need: d.need, serviceLine: d.serviceLine, value: d.value === null ? null : Number(d.value), currency: d.currency,
@@ -479,7 +492,7 @@ export async function convertTaskToDeal(user: Actor, taskId: string, input: Conv
   const leaderId = input.leaderId ?? t.assigneeId;
   const why = input.whyPursue?.trim();
   const dueDate = input.dueDate ?? (t.dueDate ? formatDueDate(t.dueDate) : null);
-  const pipeline = input.pipelineId ? await db.pipeline.findFirst({ where: { id: input.pipelineId, typeId: WORKSTREAM_DEAL }, include: { stages: { orderBy: { position: "asc" } } } }) : null;
+  const pipeline = input.pipelineId ? await db.pipeline.findFirst({ where: { id: input.pipelineId, typeId: WORKSTREAM_DEAL }, include: { stages: { where: { isRetired: false }, orderBy: { position: "asc" } } } }) : null;
 
   // The gate (AC2): every field, same refusal as the dialog. No bypass.
   const missing: string[] = [];
