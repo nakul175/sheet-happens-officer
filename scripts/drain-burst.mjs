@@ -291,7 +291,8 @@ if (ASSERT) {
   if (bodyDone !== N) reasons.push(`bodyDone ${bodyDone} != n ${N}`);
   if (non200 !== 0) reasons.push(`statuses ${JSON.stringify(statuses)}`);
   if (late16 !== "refused" || late143 !== "refused") reasons.push(`probes ${late16}/${late143} != refused/refused`);
-  process.stdout.write(
+  // Keep stdout as one JSON document for the acceptance gate.
+  process.stderr.write(
     `drain-burst N=${N} mode=${summary.mode}: ${reasons.length === 0 ? "PASS" : "FAIL"} stillOpenAtSigterm=${stillOpenAtSigterm} hits=${hits} statuses=${JSON.stringify(statuses)} exit=${result.code} late16=${late16} late143=${late143}${reasons.length ? ` -- ${reasons.join("; ")}` : ""}\n`,
   );
   if (reasons.length !== 0) {

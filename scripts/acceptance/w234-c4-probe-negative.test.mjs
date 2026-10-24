@@ -63,6 +63,10 @@ function burstWith(documentObject, work) {
   writeFileSync(
     stub,
     `import { readFileSync } from "node:fs";
+if (!process.argv.includes("--slow") || !process.argv.includes("--assert")) {
+  process.stderr.write("missing in-flight acceptance assertions");
+  process.exit(1);
+}
 const doc = JSON.parse(readFileSync(process.env.STUB_DOC, "utf8"));
 doc.release = process.env.RELEASE ?? null;
 process.stdout.write(JSON.stringify(doc) + "\\n");

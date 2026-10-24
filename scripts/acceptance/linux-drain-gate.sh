@@ -584,14 +584,14 @@ run_bursts() {
   for ((run = 1; run <= GATE_RUNS; run += 1)); do
     if [ "$mode" = "production" ]; then
       if ! SHO_APP_ROOT="$app" SHO_ENTRY="$ENTRY" RELEASE="$sha" BURST_SIGTERM_DELAY_MS=40 \
-        node "$BURST" "$GATE_N" 0 --production >"$tmp/$run.json" 2>"$tmp/$run.err"; then
+        node "$BURST" "$GATE_N" 0 --production --slow --assert >"$tmp/$run.json" 2>"$tmp/$run.err"; then
         printf 'GATE=FAIL run-%s-harness-error (see stderr: %s)\n' "$run" "$(tr '\n' ' ' <"$tmp/$run.err" | cut -c1-300)"
         ok=false
         continue
       fi
     else
       if ! SHO_APP_ROOT="$app" SHO_ENTRY="$ENTRY" BURST_SIGTERM_DELAY_MS=40 \
-        node "$BURST" "$GATE_N" 0 >"$tmp/$run.json" 2>"$tmp/$run.err"; then
+        node "$BURST" "$GATE_N" 0 --slow --assert >"$tmp/$run.json" 2>"$tmp/$run.err"; then
         printf 'GATE=FAIL run-%s-harness-error (see stderr: %s)\n' "$run" "$(tr '\n' ' ' <"$tmp/$run.err" | cut -c1-300)"
         ok=false
         continue
