@@ -1,9 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
-import { productionRefusal, runStagingEditor } from "../scripts/staging-editor";
+import { defaultConnect, productionRefusal, runStagingEditor } from "../scripts/staging-editor";
 const base = "postgresql://fixture:unused@staging.invalid:25060/sho_staging?schema=sho_pr9";
 const strict = "&sslmode=require&sslcert=%2Fprivate%2Fofficial-ca.crt&sslaccept=strict";
 const env = (suffix: string) => ({ DATABASE_URL: base + suffix, SHO_STAGING_CONFIRM: "1", STAGING_WORKSPACE_ID: "fixture" });
 describe("staging Editor strict CA transport guard", () => {
+  it("constructs the real default Prisma client with strict transport without opening a connection", async () => {
+    const client = defaultConnect(base + strict);
+    expect(client).toBeDefined();
+    await client.$disconnect();
+  });
   it("allows an explicit Prisma strict CA transport without changing the guarded destination", () => {
     expect(productionRefusal(env(strict))).toBeNull();
   });
