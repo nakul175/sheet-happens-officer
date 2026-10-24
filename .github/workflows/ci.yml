@@ -47,11 +47,12 @@ jobs:
         with:
           node-version: 22
           cache: npm
+      # CI tests import locked dependencies such as pg. Install before collecting them.
+      - run: npm ci
       # Node 22 treats `node --test scripts/ci/` as a file and exits MODULE_NOT_FOUND.
       # This glob is that directory on Node 22: every *.test.mjs under scripts/ci/.
       - name: Node tests for scripts/ci
         run: node --test "scripts/ci/**/*.test.mjs"
-      - run: npm ci
       # APL-2761. Listing loads every story spec without a browser or a server. One file that cannot load (a vitest import)
       # makes Playwright collect 0 tests, so a total of 0 fails here instead of in staging-e2e.
       - name: Playwright collects the story specs

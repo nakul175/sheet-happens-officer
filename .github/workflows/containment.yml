@@ -36,6 +36,10 @@ jobs:
     name: Containment scripts (offline)
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      # Prisma generation needs a URL during npm ci; offline checks never connect.
+      DATABASE_URL: postgresql://unused:unused@127.0.0.1:1/unused
+      DIRECT_DATABASE_URL: postgresql://unused:unused@127.0.0.1:1/unused
     steps:
       - uses: actions/checkout@v4
         with:
