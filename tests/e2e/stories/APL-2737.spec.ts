@@ -103,7 +103,9 @@ test.describe("qa:TC missing APL-2737 a 300-character blocked reason is fully re
     }
   });
 
-  test("qa:TC missing AC1: typing the reason up to 300 characters grows the box with it, with no scrolling inside", async () => {
+  // The 300 characters are set in one go (fill), not typed: only 40 of them are typed here. Typing is the
+  // multi-line test below. qa:TC stays "missing": APL-2737's TC ids are not published in the repo (SHO-2762).
+  test("qa:TC missing AC1: 40 typed characters fit with nothing clipped, and setting the full 300-character reason in one go grows the box to fit it", async () => {
     const { page, reason } = await openSheet(320, SUPER_EMAIL);
     try {
       await reason.fill("");
@@ -114,7 +116,7 @@ test.describe("qa:TC missing APL-2737 a 300-character blocked reason is fully re
       await reason.dispatchEvent("input");
       const full = await metrics(reason);
       expect(full.ch).toBeGreaterThan(short.ch);
-      expect(full.sh, "clipped vertically after typing").toBeLessThanOrEqual(full.ch + 2);
+      expect(full.sh, "clipped vertically after the full reason was set").toBeLessThanOrEqual(full.ch + 2);
       // Leave without saving: the reason on the task stays as it was.
       await reason.fill(REASON);
     } finally { await page.context().close(); }
