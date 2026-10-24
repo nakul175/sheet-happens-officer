@@ -58,7 +58,7 @@ test("AC3: sending back clears the banner and the chip and shows the new holder"
   await expect(dialog.getByText(/Waiting for/)).toBeVisible();
   await dialog.getByRole("button", { name: "Send back" }).click();
   await expect(dialog.getByText(/Waiting for/)).toHaveCount(0);
-  await expect(dialog.getByLabel("Assignee")).toHaveValue(member.user.id); // the new holder is the person it went back to
+  await expect(dialog.getByLabel("Assignee", { exact: true })).toHaveValue(member.user.id); // the new holder is the person it went back to
   await dialog.getByRole("button", { name: "Close", exact: true }).click();
   await expect(page.locator("main .item", { hasText: s.title }).last().getByText(/Awaiting/)).toHaveCount(0);
 });

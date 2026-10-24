@@ -46,7 +46,7 @@ test("AC1: opening a task shows all its fields, and Close returns to the same sc
   await expect(d.getByLabel("Title")).toHaveValue(zz("parent"));
   for (const l of ["Assignee", "Due date", "Section", "Priority"]) await expect(d.getByLabel(l, { exact: true })).toBeVisible();
   await expect(d.getByText("Approver", { exact: true })).toBeVisible(); // a control only when someone else is the assignee
-  await expect(d.getByLabel("Due date")).toHaveValue(ist(3));
+  await expect(d.getByLabel("Due date", { exact: true })).toHaveValue(ist(3));
   await expect(d.locator("textarea#desc")).toHaveValue("Some details");
   await expect(d.getByText(zz("child"))).toBeVisible(); // subtask checklist
   await expect(d.getByRole("button", { name: "Move to Trash" })).toBeVisible();

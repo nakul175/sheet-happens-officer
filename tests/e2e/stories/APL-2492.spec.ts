@@ -40,7 +40,7 @@ test("AC3: a Viewer sees every field read-only and the API refuses; an archived 
   expect((await member.api.patch(`/api/tasks/${t}`, { title: zz("x"), expectedUpdatedAt: (await getTask(member, t)).updatedAt })).status).toBe(403);
   await member.page.goto(`/projects/${p.id}?task=${t}`);
   await expect(member.page.getByLabel("Title", { exact: true })).toHaveAttribute("readonly", "");
-  await expect(member.page.getByRole("dialog").getByLabel("Due date")).toHaveCount(0); // a plain date instead of the date input
+  await expect(member.page.getByRole("dialog").getByLabel("Due date", { exact: true })).toHaveCount(0); // a plain date instead of the date input
   await expect(member.page.getByRole("dialog").getByLabel("Priority")).toHaveCount(0);
   await expect(member.page.locator("#desc")).toHaveAttribute("readonly", "");
   await admin.api.post(`/api/projects/${p.id}/archive`);

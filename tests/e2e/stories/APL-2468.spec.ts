@@ -70,8 +70,8 @@ test("AC2: title, description, assignee, collaborators, due date and priority ar
   await expect(dialog.getByLabel("Title")).toHaveValue(title);
   await expect(dialog.getByLabel("Description")).toHaveValue(description);
   await expect(dialog.getByLabel("Priority")).toHaveValue("HIGH");
-  await expect(dialog.getByLabel("Due date")).toHaveValue("2026-11-02");
-  await expect(dialog.getByLabel("Assignee")).toHaveValue(mate.user.id as string);
+  await expect(dialog.getByLabel("Due date", { exact: true })).toHaveValue("2026-11-02");
+  await expect(dialog.getByLabel("Assignee", { exact: true })).toHaveValue(mate.user.id as string);
   await expect(dialog.locator(".chip", { hasText: editor.name })).toBeVisible();
 });
 
