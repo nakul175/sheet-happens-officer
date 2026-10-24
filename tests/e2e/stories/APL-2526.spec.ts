@@ -5,11 +5,12 @@
 // A new idea is not 30 days old, so the review cannot render Convert and Drop for one this spec creates.
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
-import { test, expect, zz, RUN } from "../support";
+import { test, expect, zz, RUN, BASE_URL } from "../support";
 import { runVitest } from "../helpers/named-suite";
 import { newProject, newTask, ymd, type Who } from "../g2";
 import { createDeal, createOrg, dealBody, projectOf } from "../helpers/claude-a";
 import { pipelines } from "../helpers/deal-board";
+import { localPgPool, schemaFromDatabaseUrl } from "../helpers/local-db-pool";
 import { cast, gateFile } from "../helpers/qa-alias";
 
 gateFile();
@@ -183,4 +184,40 @@ test("AC6: existing My tasks tests pass unchanged", async () => {
   // The default vitest config excludes tests/viewport, so this file runs with the viewport config.
   const a11y = await runVitest(["tests/viewport/a11y.test.ts"], "vitest.viewport.config.mts");
   expect(a11y.numPassedTests).toBe(a11y.numTotalTests);
+});
+
+
+test("AC4: an owned idea crossing 30 days appears with its Convert and Drop controls", async ({ admin, later }) => {
+  const database = process.env.DATABASE_URL;
+  const schema = database ? schemaFromDatabaseUrl(database) : undefined;
+  expect(["127.0.0.1", "localhost"]).toContain(new URL(BASE_URL).hostname);
+  expect(schema).toMatch(/^sho_[a-z0-9_]+$/);
+  expect(process.env.SHO_OWNED_TEST_SCHEMA).toBe(schema);
+  const project = await newProject(admin, later, { label: "aged review idea" });
+  const title = zz("aged review idea");
+  const id = await newTask(admin, project.id, { title, assigneeId: admin.user.id });
+  expect((await admin.api.post(`/api/tasks/${id}/idea`, { isIdea: true })).status).toBe(200);
+  expect((await reviewOf(admin)).ideas.some(row => row.id === id)).toBe(false);
+  const pool = localPgPool(database);
+  let original: Date | undefined;
+  try {
+    const actor = await pool.query('SELECT email FROM "User" WHERE id=$1', [admin.user.id]);
+    expect(actor.rows[0]?.email).toBe(admin.user.email);
+    const row = await pool.query('SELECT "createdAt" FROM "Task" WHERE id=$1 AND "projectId"=$2', [id, project.id]);
+    expect(row.rowCount).toBe(1);
+    original = row.rows[0].createdAt;
+    expect((await pool.query(`UPDATE "Task" SET "createdAt"=NOW()-INTERVAL '31 days' WHERE id=$1 AND "projectId"=$2`, [id, project.id])).rowCount).toBe(1);
+    expect((await reviewOf(admin)).ideas.find(row => row.id === id)?.canEdit).toBe(true);
+    await admin.page.goto("/review");
+    const region = admin.page.getByRole("region", { name: "Ideas older than 30 days" });
+    await expect(region.getByText(title, { exact: true })).toBeVisible();
+    // This owned fixture is the only unarchived old idea created by this case; controls are asserted on its row.
+    const link = region.getByRole("link", { name: title, exact: true });
+    const item = link.locator("../..");
+    await expect(item.getByRole("button", { name: "Convert to deal" })).toBeVisible();
+    await expect(item.getByRole("button", { name: "Drop" })).toBeVisible();
+  } finally {
+    if (original) expect((await pool.query('UPDATE "Task" SET "createdAt"=$1 WHERE id=$2 AND "projectId"=$3', [original, id, project.id])).rowCount).toBe(1);
+    await pool.end();
+  }
 });

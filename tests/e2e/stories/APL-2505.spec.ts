@@ -4,10 +4,11 @@
 // AC6 locks the 30-day Undo rule. AC7 locks the concierge card onto the same Undo path.
 // Nothing here is pointed at production: BASE_URL is staging or a pr1–pr8 preview.
 import { readFileSync } from "node:fs";
-import { test, expect, zz } from "../support";
+import { test, expect, zz, BASE_URL } from "../support";
 import { getTask, newProject, newTask } from "../g2";
 import { activity, audit, editTask, notices } from "../helpers/claude-a";
-import { localSql, sourceOf, sqlId } from "../helpers/local-clock";
+import { sourceOf } from "../helpers/local-clock";
+import { localPgPool, schemaFromDatabaseUrl } from "../helpers/local-db-pool";
 import { activityRow } from "../helpers/screen-row";
 
 test.beforeAll(() => {
@@ -170,7 +171,21 @@ test("APL-2505 > AC6: an action older than 30 days cannot be undone and says Too
   expect(undoId).toBeTruthy();
   expect((await activity(admin, p.id)).find((row) => row.id === undoId)?.undo).toBe("available");
 
-  if (localSql(`UPDATE "ActionLog" SET "createdAt" = NOW() - INTERVAL '31 days' WHERE id = '${sqlId(undoId)}'`)) {
+  const database = process.env.DATABASE_URL;
+  const schema = database ? schemaFromDatabaseUrl(database) : undefined;
+  expect(["127.0.0.1", "localhost"]).toContain(new URL(BASE_URL).hostname);
+  expect(schema).toMatch(/^sho_[a-z0-9_]+$/);
+  expect(process.env.SHO_OWNED_TEST_SCHEMA).toBe(schema);
+  const pool = localPgPool(database);
+  let original: Date | undefined;
+  try {
+    const actor = await pool.query('SELECT email FROM "User" WHERE id=$1', [admin.user.id]);
+    expect(actor.rows[0]?.email).toBe(admin.user.email);
+    const row = await pool.query('SELECT "createdAt" FROM "ActionLog" WHERE id=$1 AND "actorId"=$2', [undoId, admin.user.id]);
+    expect(row.rowCount).toBe(1);
+    original = row.rows[0].createdAt;
+    const aged = await pool.query(`UPDATE "ActionLog" SET "createdAt" = NOW() - INTERVAL '31 days' WHERE id=$1 AND "actorId"=$2`, [undoId, admin.user.id]);
+    expect(aged.rowCount).toBe(1);
     expect((await activity(admin, p.id)).find((row) => row.id === undoId)?.undo).toBe("too_old");
     const refused = await admin.api.post(`/api/actions/${undoId}/undo`, {});
     expect(refused.status, JSON.stringify(refused.json)).toBe(409);
@@ -182,6 +197,12 @@ test("APL-2505 > AC6: an action older than 30 days cannot be undone and says Too
     await expect(line.getByText("Too old to undo")).toBeVisible();
     await expect(line.getByRole("button", { name: "Undo" })).toHaveCount(0);
     expect((await getTask(admin, id)).title).toBe(zz("aged after"));
+  } finally {
+    if (original) {
+      const restored = await pool.query('UPDATE "ActionLog" SET "createdAt"=$1 WHERE id=$2 AND "actorId"=$3', [original, undoId, admin.user.id]);
+      expect(restored.rowCount).toBe(1);
+    }
+    await pool.end();
   }
 });
 
