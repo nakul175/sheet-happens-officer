@@ -94,6 +94,7 @@ describe("W274 the notification text (SECURITY)", () => {
   it("a failing job tells only Super Admins, and the notice text carries no marker", async () => {
     const sa = await superAdmin();
     const member = await account("w274member");
+    const recipients = await db.user.findMany({ where: { orgRole: "SUPER_ADMIN", deactivatedAt: null }, select: { id: true } });
     const probe = `zz-w274-sink-${Date.now()}`;
     JOBS.push({ name: probe, about: "SECURITY probe W274: fails with a fake DSN", run: async () => { throw new Error(MESSAGE); } });
     try {
@@ -102,7 +103,11 @@ describe("W274 the notification text (SECURITY)", () => {
       expect(rows.length, "the notice was written").toBeGreaterThan(0);
       // Reachability: every recipient is inside the operator group.
       expect(rows.map((r) => r.recipient.orgRole)).toEqual(rows.map(() => "SUPER_ADMIN"));
-      for (const r of rows) expect(r.recipient.email).toBe(sa.email);
+      // Other suites may legitimately create another active Super Admin. The contract
+      // is every active operator exactly once, not a singleton root email.
+      expect(rows.map(r => r.recipientId).sort()).toEqual(recipients.map(r => r.id).sort());
+      expect(rows.some(r => r.recipient.email === sa.email)).toBe(true);
+      for (const leak of LEAKS) expect(JSON.stringify(rows)).not.toContain(leak);
 
       const bell = (await sa.c.get("/api/notifications")).json.items as { text: string }[];
       const notice = bell.find((n) => n.text.includes(probe));
