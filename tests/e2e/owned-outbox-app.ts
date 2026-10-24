@@ -30,7 +30,18 @@ export async function startOwnedOutboxApp({outbox,mode}: {outbox: string; mode: 
  for(const key of ['PATH','HOME','DATABASE_URL','DIRECT_DATABASE_URL','SUPER_ADMIN_EMAILS','FF_TASK_COMMENTS','SIGNIN_RETURN_TO','TZ','JOB_SECRET','MODEL_PROVIDER','MODEL_NAME','MODEL_DATA_APPROVED','ANTHROPIC_API_KEY_STAGE']){
   if(env[key]!==undefined)childEnv[key]=env[key];
  }
- const child=spawn(process.execPath,[path.join(root,'server.js')],{cwd:root,env:childEnv,stdio:['ignore','pipe','ignore']});
+ const child=spawn(process.execPath,[path.join(root,'server.js')],{cwd:root,env:childEnv,stdio:['ignore','pipe','pipe']});
+ // The app's HTTP handler deliberately logs only exception class/database code.
+ // Forward only that exact safe form; never relay arbitrary stderr, stacks, query text or env.
+ let errorLine = "";
+ child.stderr.on("data", chunk => {
+  errorLine = (errorLine + chunk.toString()).slice(-8192);
+  const lines = errorLine.split("\n"); errorLine = lines.pop() || "";
+  for (const line of lines) {
+   const safe = line.trim().match(/^unexpected error ([A-Za-z][A-Za-z0-9_]*)\s*(P[0-9]{4})?$/);
+   if (safe) console.info("OWNED_APP_ERROR", JSON.stringify({ name: safe[1], code: safe[2] || null }));
+  }
+ });
  const stopped=once(child,'exit');
  let ended=false;child.once('exit',()=>{ended=true;});
  const stop=async()=>{
