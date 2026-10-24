@@ -76,7 +76,7 @@ function linksFor(t: Turn, text: string) {
   for (const p of t.seen.projects.values()) if (p.name.length >= 3 && lower.includes(p.name.toLowerCase())) links.push({ label: p.name, href: hrefOf.project(p.id) });
   links.push(...crmDealLinks(t.seen.deals.values(), text));
   links.push(...crmRecordLinks({ organisations: t.seen.organisations.values(), contacts: t.seen.contacts.values(), notes: t.seen.notes.values() }, text));
-  return links.slice(0, 12);
+  return [...new Map(links.map(link => [`${link.href}|${link.label}`, link])).values()].slice(0, 12);
 }
 
 function choiceOptions(t: Turn, kind: Kind, ids: string[]) {

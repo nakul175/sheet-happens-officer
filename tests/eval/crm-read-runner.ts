@@ -4,6 +4,7 @@ import { existsSync, readFileSync, writeFileSync, mkdirSync, appendFileSync } fr
 import path from "node:path";
 import { db } from "../../src/lib/db";
 import { hashPassword } from "../../src/lib/auth";
+import { namedCrmLinks } from "./crm-read-grading";
 import { CRM_READ_CASES, CRM_READ_TOOLS, type CrmReadCase, type CrmEvalWorld } from "./crm-read-cases";
 import { estimateRunUsd } from "./budget";
 import { modelConfig } from "../../src/lib/model";
@@ -101,7 +102,7 @@ async function main() {
    for (const value of expected.requireText ?? []) if (!lower.includes(value.toLowerCase())) reasons.push(`missing expected fact ${value}`);
    const visibleToModel = text + "\n" + JSON.stringify(modelCalls.flatMap(call => call.toolResults ?? []));
    for (const value of expected.forbidText ?? []) if (visibleToModel.toLowerCase().includes(value.toLowerCase())) reasons.push(`private or unfetched marker disclosed: ${value}`);
-   for (const link of expected.links ?? []) if (!(assistant?.links ?? []).some((actual: { label: string; href: string }) => actual.label === link.label && actual.href === link.href)) reasons.push(`missing grounded link ${link.label}`);
+   for (const link of [...(expected.links ?? []), ...namedCrmLinks(modelCalls.flatMap(call => call.toolResults ?? []), text)]) if (!(assistant?.links ?? []).some((actual: { label: string; href: string }) => actual.label === link.label && actual.href === link.href)) reasons.push(`missing grounded link ${link.label}`);
    if (expected.empty && text !== "I found nothing." && text !== "I can't find that.") reasons.push("expected not-found answer");
    const row = { id: c.id, tool: c.tool, intent: c.intent, run, pass: reasons.length === 0, reasons, durationMs: Date.now() - started, tools: tools.map(tool => tool.name), kind: assistant?.kind ?? null, text, links: assistant?.links ?? [], modelCalls: modelCalls.length, spentUsd: modelCalls.at(-1)?.spentUsd ?? null, businessUnchanged: before === after };
    rows.push(row); appendFileSync(path.join(g.output, "progress.jsonl"), JSON.stringify(row) + "\n");

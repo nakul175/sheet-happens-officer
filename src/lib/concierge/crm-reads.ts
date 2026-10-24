@@ -42,6 +42,12 @@ export async function dealById(user: Actor, id: string) {
   catch (error) { if (error instanceof ApiError && error.status === 404) return null; throw error; }
 }
 export function crmDealLinks(deals: Iterable<DealRec>, text: string) {
-  const lower = text.toLocaleLowerCase();
-  return [...deals].filter(row => row.name.length >= 3 && lower.includes(row.name.toLocaleLowerCase())).map(row => ({ label: row.name, href: `/projects/${row.id}` }));
+  const lower = text.toLocaleLowerCase(), links = new Map<string, { label: string; href: string }>();
+  const add = (label: string, href: string) => { if (label.length >= 3 && lower.includes(label.toLocaleLowerCase())) links.set(`${href}|${label}`, { label, href }); };
+  for (const row of deals) {
+    add(row.name, `/projects/${row.id}`);
+    if (row.organisation) add(row.organisation.name, `/accounts/${row.organisation.id}`);
+    if (row.nextStep) add(row.nextStep.title, `/tasks/${row.nextStep.id}`);
+  }
+  return [...links.values()];
 }

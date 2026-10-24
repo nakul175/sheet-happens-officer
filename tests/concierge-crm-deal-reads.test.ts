@@ -70,3 +70,10 @@ it("notes target validation still refuses both or neither target before any read
  expect(turn.reads.calls).toBe(0);
  expect(turn.seen.notes.size).toBe(0);
 });
+it("a deal's fetched Buyer and next-step title are grounded links too", async () => {
+ const { deals } = await findDeals(member, "JEEViKA");
+ expect(crmDealLinks(deals, "JEEViKA Bid: Buyer Office; next step Call Buyer")).toEqual(expect.arrayContaining([
+  { label: "Buyer Office", href: "/accounts/o" },
+  { label: "Call Buyer", href: "/tasks/t" },
+ ]));
+});
