@@ -15,7 +15,8 @@ const CRM_OFF = "CRM routes answer not found on this server (CRM_VISIBLE is off)
 const CRM_MEMBER = "CRM is hidden from this Member (CRM_VISIBLE is admins or off).";
 const isTail = (c: string) => c === "PAUSED" || c === "DONE" || c === "LOST";
 
-function boardTitles(stages: Stage[]) {
+function boardTitles(stages: Stage[], bid = false) {
+  if (bid) return stages.filter((s) => s.category !== "DELIVERY").map((s) => s.name);
   const main = stages.filter((s) => !isTail(s.category)).map((s) => s.name);
   const tail = stages.filter((s) => isTail(s.category)).map((s) => s.name);
   return tail.length ? [...main, tail.join(" / ")] : main;
@@ -88,15 +89,16 @@ test("AC1: a deal list shows a deal to its members and to an Admin, and hides it
   await expect(member.page.getByRole("link", { name: hidden.name })).toBeVisible();
 });
 
-test("AC2: a pipeline's board columns are that pipeline's stages, with On hold, Won and Lost in the last column", async ({ admin, later }) => {
+test("AC2: Bid sales stages are separate columns; Proactive retains its grouped final column", async ({ admin, later }) => {
   test.setTimeout(120_000);
   const pipes = await crmPipes(admin, CRM_OFF);
   const pro = pipes.find((p) => p.key === "DEAL_PROACTIVE")!;
   const bid = pipes.find((p) => p.key === "DEAL_BID")!;
   const proactive = ["Lead", "Conversation", "Concept note", "Proposal", "Negotiation", "On hold / Won / Lost"];
-  const bidTitles = ["Identified", "Go/No-go", "Preparing", "Submitted", "Awaiting result", "Won / Lost"];
+  // Owner-approved Bid sales stages; post-win delivery is shown in its separate view.
+  const bidTitles = ["Leads", "Under Evaluation", "Go", "No-Go", "Submitted", "Won", "Lost", "On Hold"];
   expect(boardTitles(pro.stages), "active stages stay columns; On hold, Won and Lost share the last").toEqual(proactive);
-  expect(boardTitles(bid.stages), "Bid has no On hold, so Won and Lost share the last column").toEqual(bidTitles);
+  expect(boardTitles(bid.stages, true), "Bid sales stages are separate; delivery has its own view").toEqual(bidTitles);
 
   const deal = await makeDeal(admin, later, { label: "2531 columns" });
   await admin.page.setViewportSize({ width: 1400, height: 900 });
@@ -108,7 +110,7 @@ test("AC2: a pipeline's board columns are that pipeline's stages, with On hold, 
   await admin.page.getByRole("tab", { name: "Bid" }).click();
   await expect(admin.page.locator(".dcol header b")).toHaveText(bidTitles);
   await expect(admin.page.getByRole("region", { name: "Lead" })).toHaveCount(0);
-  await expect(admin.page.getByRole("region", { name: "Identified" })).toBeVisible();
+  await expect(admin.page.getByRole("region", { name: "Leads" })).toBeVisible();
   await expect(admin.page.getByText(deal.name)).toHaveCount(0);
 });
 

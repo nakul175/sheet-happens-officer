@@ -208,7 +208,7 @@ describe("qa:TC missing APL-2736 removing a stage asks where its items go", () =
   it("qa:TC missing AC1: the chosen stage must be another open stage of the same pipeline", async () => {
     const zz = await zzStage();
     const deal = await dealIn(zz);
-    for (const moveTo of [zz, named(bid, "Preparing").id, named(pro, "Won").id, named(pro, "Lost").id, named(pro, "On hold").id, "st_nope"]) {
+    for (const moveTo of [zz, named(bid, "Go").id, named(pro, "Won").id, named(pro, "Lost").id, named(pro, "On hold").id, "st_nope"]) {
       const r = await sa.c.del(`/api/deals/pipelines/${zz}?moveTo=${moveTo}`);
       expect(r.status, `${moveTo} ${JSON.stringify(r.json)}`).toBe(400);
     }

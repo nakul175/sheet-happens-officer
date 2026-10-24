@@ -5,10 +5,10 @@ import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { api, dueLabel, isOverdue, useGet } from "@/components/api";
 import { Field, Modal } from "@/components/ui";
 
-export type Stage = { id: string; name: string; category: string; needsReason: boolean; requiredFields: string[] };
+export type Stage = { id: string; name: string; category: string; needsReason: boolean; requiredFields: string[]; isRetired?: boolean };
 export type DealBlock = {
   pipeline: { id: string; key: string; name: string; stages: Stage[] } | null;
-  stage: { id: string; name: string; category: string } | null;
+  stage: { id: string; name: string; category: string; isRetired?: boolean } | null;
   stageReason: string | null;
   details: { whyPursue: string | null; need: string | null; serviceLine: string | null; value: number | null; currency: string | null; probability: number | null; expectedClose: string | null; introducedBy: string | null; submissionDeadline: string | null; opportunityType?: OpportunityType | null; netFeeRevenueUsd?: number | null; athenaEntity?: AthenaEntity | null } | null;
   parties: { id: string; role: string; organisation: { id: string; name: string } }[];
@@ -323,7 +323,8 @@ export function DealPanel({ projectId, projectName, deal, canWrite, canManage = 
   return (
     <section className="card" aria-label="Deal" style={{ marginBottom: 14 }}>
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }} role="group" aria-label="Stage">
-        {deal.pipeline?.stages.map((s) => (
+        {deal.stage?.isRetired && <span className="chip">{deal.stage.name} · legacy stage</span>}
+        {deal.pipeline?.stages.filter(s => !s.isRetired).map((s) => (
           <button key={s.id} className={`btn sm${s.id === cur ? "" : " ghost"}`} aria-current={s.id === cur ? "step" : undefined} disabled={!canWrite || s.id === cur} onClick={() => void choose(s)}>{s.name}</button>
         ))}
       </div>

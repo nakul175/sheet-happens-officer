@@ -53,7 +53,7 @@ test("AC4: Bid cards are ordered by submission deadline, with no deadline last, 
 
   await admin.page.goto("/deals");
   await admin.page.getByRole("tab", { name: "Bid" }).click();
-  const col = admin.page.getByRole("region", { name: "Identified" });
+  const col = admin.page.getByRole("region", { name: "Leads" });
   await expect(col.locator(".dcard", { hasText: passed.name })).toBeVisible();
   const titles = (await col.locator(".dcard b").allTextContents()).map((t) => t.trim());
   const at = (name: string) => titles.indexOf(name);

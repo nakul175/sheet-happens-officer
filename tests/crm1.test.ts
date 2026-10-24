@@ -33,7 +33,7 @@ describe("types and pipelines (10.1, 10.2)", () => {
     const m = await account("pipe");
     const { proactive, bid } = await pipelines(m);
     expect(proactive.stages.map((s: { name: string }) => s.name)).toEqual(["Lead", "Conversation", "Concept note", "Proposal", "Negotiation", "On hold", "Won", "Lost"]);
-    expect(bid.stages.map((s: { name: string }) => s.name)).toEqual(["Identified", "Go/No-go", "Preparing", "Submitted", "Awaiting result", "Won", "Lost"]);
+    expect(bid.stages.map((s: { name: string }) => s.name)).toEqual(["Leads", "Under Evaluation", "Go", "No-Go", "Submitted", "Won", "Lost", "On Hold", "Ongoing Projects"]);
     const cat = (p: { stages: { name: string; category: string }[] }, n: string) => p.stages.find((s) => s.name === n)!.category;
     expect(cat(proactive, "On hold")).toBe("PAUSED");
     expect(cat(proactive, "Won")).toBe("DONE");

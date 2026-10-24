@@ -15,7 +15,7 @@ export async function leadsAnyDeal(user: Actor) {
 
 export async function pipelineReview(user: Actor) {
   requireCrm(user);
-  const deals = (await listDeals(user)).filter((d) => !d.archived);
+  const deals = (await listDeals(user, { lifecycle: "sales" })).filter((d) => !d.archived);
   const today = startOfTodayIST();
   const todayStr = formatDueDate(today)!;
   const pick = (d: (typeof deals)[number]) => ({ id: d.id, name: d.name, stage: d.stage?.name ?? null, pipeline: d.pipeline?.name ?? null, organisation: d.organisation, leader: d.leader, nextStep: d.nextStep });
@@ -39,7 +39,7 @@ export async function pipelineReview(user: Actor) {
   }));
 
   // Pipeline counts by stage; unknown value is never zero.
-  const pipes = await db.pipeline.findMany({ where: { typeId: WORKSTREAM_DEAL }, orderBy: { position: "asc" }, include: { stages: { orderBy: { position: "asc" } } } });
+  const pipes = await db.pipeline.findMany({ where: { typeId: WORKSTREAM_DEAL }, orderBy: { position: "asc" }, include: { stages: { where: { isRetired: false, category: { not: "DELIVERY" } }, orderBy: { position: "asc" } } } });
   const counts = pipes.map((p) => ({
     id: p.id, name: p.name,
     stages: p.stages.map((s) => {
