@@ -16,6 +16,7 @@ import { explicitProposal } from "@/lib/concierge/explicit-proposal";
 import { screenOnlyHelp } from "@/lib/concierge/screen-help";
 import { taskSelectionForRequest } from "@/lib/concierge/task-selection";
 import { flat, personById, projectById, quickAnswer, taskById, QUICK_ACTIONS, type TaskRec } from "@/lib/concierge/reads";
+import { crmDealLinks, dealById } from "@/lib/concierge/crm-reads";
 import { conciergeTools, newTurn, runTool, wrap, type Kind, type Turn } from "@/lib/concierge/tools";
 import { commentsEnabled } from "@/lib/flags";
 import { addMessage, casStored, chatWhere, dropPendingChoices, ownMessage, parse, present } from "@/lib/concierge/thread";
@@ -24,7 +25,7 @@ import type { Message, Stored } from "@/lib/concierge/types";
 export const MAX_MODEL_CALLS = 4;
 export const MAX_TEXT = 2000;
 
-const SYSTEM_STABLE = `You are the concierge of Sheet Happens Officer, a task-management app. You help one signed-in person with their tasks and projects. Be brief and plain. No tables, no emojis.
+const SYSTEM_STABLE = `You are the concierge of Sheet Happens Officer, a task-management app. You help one signed-in person with their tasks, projects and visible CRM deals. Read-only deal tools report buyer, pipeline, stage and next step; they never write CRM details. Be brief and plain. No tables, no emojis.
 
 Rules you never break:
 1. Facts come only from the tools you call in this turn. Never answer from memory or from earlier messages: call a tool again. If tools return nothing, say "I found nothing." Never invent a task, person, project, date or number.
@@ -71,6 +72,7 @@ function linksFor(t: Turn, text: string) {
   const links: { label: string; href: string }[] = [];
   for (const x of t.seen.tasks.values()) if (x.title.length >= 3 && lower.includes(x.title.toLowerCase())) links.push({ label: x.title, href: hrefOf.task(x.id) });
   for (const p of t.seen.projects.values()) if (p.name.length >= 3 && lower.includes(p.name.toLowerCase())) links.push({ label: p.name, href: hrefOf.project(p.id) });
+  links.push(...crmDealLinks(t.seen.deals.values(), text));
   return links.slice(0, 12);
 }
 
@@ -78,6 +80,7 @@ function choiceOptions(t: Turn, kind: Kind, ids: string[]) {
   const row = (id: string): { id: string; label: string; detail?: string; sort: string } | null => {
     if (kind === "task") { const x = t.seen.tasks.get(id); return x ? { id, label: x.title, detail: `${x.project} · ${x.dueText ? `due ${x.dueText}` : "no due date"}`, sort: `${x.project}|${x.due ?? "9999"}` } : null; }
     if (kind === "project") { const x = t.seen.projects.get(id); return x ? { id, label: x.name, detail: x.leader ? `Leader ${x.leader} · ${x.openTasks} open tasks` : `${x.openTasks} open tasks`, sort: x.name } : null; }
+    if (kind === "deal") { const x = t.seen.deals.get(id); return x ? { id, label: x.name, detail: `${x.organisation?.name ?? "No buyer"} · ${x.stage ?? "No stage"}`, sort: `${x.organisation?.name ?? ""}|${x.stage ?? ""}|${x.name}` } : null; }
     const x = t.seen.people.get(id);
     return x ? { id, label: x.name, detail: x.email, sort: x.name } : null;
   };
@@ -97,7 +100,7 @@ async function runModel(user: Actor, turn: Turn, userText: string, history: Mode
     }
     let resp;
     try {
-      resp = await generate({ system: { stable: SYSTEM_STABLE, dynamic: dynamicPrompt(now) }, tools: conciergeTools(), messages, maxTokens: 1024 });
+      resp = await generate({ system: { stable: SYSTEM_STABLE, dynamic: dynamicPrompt(now) }, tools: conciergeTools(user), messages, maxTokens: 1024 });
     } catch (e) {
       if (e instanceof ModelError && e.code === "PROVIDER_DOWN") markProviderDown();
       throw e;
@@ -184,7 +187,7 @@ function buildReply(turn: Turn, modelText: string, request: string): Stored {
   if (pick) {
     const options = choiceOptions(turn, pick.kind, pick.ids);
     if (options.length > 2) {
-      const question = turn.choice?.question || { task: "Which task do you mean?", project: "Which project do you mean?", person: "Which person do you mean?" }[pick.kind];
+      const question = turn.choice?.question || { task: "Which task do you mean?", project: "Which project do you mean?", person: "Which person do you mean?", deal: "Which deal do you mean?" }[pick.kind];
       return {
         kind: "choices", text: question, choices: options,
         pending: { request, question, kind: pick.kind, optionIds: options.filter((o) => o.id !== "none" && o.id !== "narrow").map((o) => o.id) },
@@ -350,7 +353,7 @@ export async function answerChoice(user: Actor, messageId: string, choiceId: str
   if (disabled) return { messages: [] as Message[], disabled };
   const kind = s.pending.kind!;
   // The record must still be one the person may see; it becomes the one allowed pick for this turn.
-  const rec = kind === "task" ? await taskById(user, choiceId) : kind === "project" ? await projectById(user, choiceId) : await personById(user, choiceId);
+  const rec = kind === "task" ? await taskById(user, choiceId) : kind === "project" ? await projectById(user, choiceId) : kind === "deal" ? await dealById(user, choiceId) : await personById(user, choiceId);
   if (!rec) throw new ApiError(409, "That option is no longer available. Ask again.");
   await claim();
   const userRow = await addMessage(user, "USER", { kind: "text", text: picked.label, internal: { fromChoice: true } });
@@ -367,6 +370,7 @@ export async function answerChoice(user: Actor, messageId: string, choiceId: str
       turn.chosen.add(choiceId);
       if (kind === "task") turn.seen.tasks.set(choiceId, rec as TaskRec);
       else if (kind === "project") turn.seen.projects.set(choiceId, rec as never);
+      else if (kind === "deal") turn.seen.deals.set(choiceId, rec as never);
       else turn.seen.people.set(choiceId, rec as never);
     });
   } catch (e) {
