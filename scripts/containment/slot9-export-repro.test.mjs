@@ -20,7 +20,14 @@ const here = fileURLToPath(new URL(".", import.meta.url));
 const REPO = fileURLToPath(new URL("../..", import.meta.url));
 const EXPORT = join(here, "slot9-export.sh");
 const RUNBOOKS = ["slot9-optionR.sh", "slot9-proof.sh"];
-const LIBS = ["prod-marker-scan.sh", "unit-env-sources.sh"];
+// A lib ships executable exactly when a shipped runbook exec-tests it with `[ -x ... ]`
+// (slot9-optionR.sh:179 does that to the scanner). prod-marker-scan.sh is *invoked* as
+// `bash "$MARKER_SCAN"`, so it would run at 0644 - but the guard beside it refuses without +x, so shipping
+// it 0644 makes the artifact fail its own precondition on the host. That happened for real on the 94cf6d9
+// root run: `REFUSING (partial=0): marker scanner missing`, immediately after MANIFEST verified 5/5,
+// because file mode is not part of a sha256. unit-env-sources.sh is only ever sourced, so it stays 0644.
+const EXEC_LIBS = ["prod-marker-scan.sh"];
+const LIBS = ["unit-env-sources.sh"];
 const rel = (p) => `scripts/containment/${p}`;
 
 const env = { PATH: process.env.PATH, HOME: process.env.HOME, TZ: "UTC" };
@@ -81,7 +88,7 @@ test("MANIFEST.sha256 verifies from a fresh extraction, and each file is the com
   for (const line of lines) assert.match(line, /: OK$/, `manifest line not OK: ${line}`);
   assert.deepEqual(
     lines.map((l) => l.replace(/: OK$/, "")).sort(),
-    ["COMMIT", ...LIBS.map((l) => rel(`lib/${l}`)), ...RUNBOOKS.map(rel)].sort(),
+    ["COMMIT", ...EXEC_LIBS.map((l) => rel(`lib/${l}`)), ...LIBS.map((l) => rel(`lib/${l}`)), ...RUNBOOKS.map(rel)].sort(),
     "the manifest must cover exactly the shipped files",
   );
 
@@ -100,11 +107,12 @@ test("MANIFEST.sha256 verifies from a fresh extraction, and each file is the com
   }
 });
 
-test("modes in the artifact: runbooks executable, libs not", () => {
+test("modes in the artifact: runbooks and exec-tested libs executable, sourced libs not", () => {
   const root = extract(cut().tarball);
   const mode = (path) => statSync(join(root, path)).mode & 0o777;
   for (const r of RUNBOOKS) assert.equal(mode(rel(r)), 0o755, `${r} must be 0755`);
-  for (const l of LIBS) assert.equal(mode(rel(`lib/${l}`)), 0o644, `lib/${l} must be 0644`);
+  for (const l of EXEC_LIBS) assert.equal(mode(rel(`lib/${l}`)), 0o755, `lib/${l} must be 0755 - a shipped runbook exec-tests it`);
+  for (const l of LIBS) assert.equal(mode(rel(`lib/${l}`)), 0o644, `lib/${l} must be 0644 - it is sourced, never exec-tested`);
   assert.equal(mode("COMMIT"), 0o644);
 });
 

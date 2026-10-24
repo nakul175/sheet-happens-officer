@@ -55,10 +55,20 @@ for f in "${FILES[@]}"; do
   mkdir -p "$OUTDIR/slot9/$(dirname "$f")"
   git show "$FULL:$f" > "$OUTDIR/slot9/$f"
 done
+# Executable bits are part of the shipped contract, not decoration. slot9-optionR.sh:179 refuses with
+# "marker scanner missing at <path>" when `[ -x "$MARKER_SCAN" ]` fails. The scanner is invoked as
+# `bash "$MARKER_SCAN"`, so it does NOT need +x in order to run - but the guard shipped beside it demands
+# +x, and an artifact must satisfy its own preconditions. Shipping it 0644 made the pinned tarball fail on
+# a clean host with `REFUSING (partial=0): marker scanner missing`, AFTER `sha256sum -c MANIFEST.sha256`
+# had verified 5/5: file mode is not part of a sha256, so integrity and executability are independent
+# properties and only one of them was pinned. That happened for real on the root run of 94cf6d9.
+# unit-env-sources.sh stays 0644: it is only ever sourced (`. "$UNIT_ENV_LIB"`), never `-x` tested.
+# scripts/containment/export-modes.test.mjs derives both requirements from these scripts and fails if this
+# block and the guards ever disagree again.
 chmod 0755 "$OUTDIR/slot9/scripts/containment/slot9-optionR.sh" \
-           "$OUTDIR/slot9/scripts/containment/slot9-proof.sh"
-chmod 0644 "$OUTDIR/slot9/scripts/containment/lib/prod-marker-scan.sh" \
-           "$OUTDIR/slot9/scripts/containment/lib/unit-env-sources.sh"
+           "$OUTDIR/slot9/scripts/containment/slot9-proof.sh" \
+           "$OUTDIR/slot9/scripts/containment/lib/prod-marker-scan.sh"
+chmod 0644 "$OUTDIR/slot9/scripts/containment/lib/unit-env-sources.sh"
 
 # The commit the bytes came from, recorded inside the artifact as well as in its name.
 printf '%s\n' "$FULL" > "$OUTDIR/slot9/COMMIT"
