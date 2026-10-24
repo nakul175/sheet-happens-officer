@@ -4,6 +4,7 @@
 // Data: every project and task is named "ZZ-TEST ..."; the one person AC3 creates is named "ZZ-TEST ..." with an address at
 // example.invalid (no real inbox) and is deactivated afterwards. Projects are archived afterwards.
 import { test, expect, zz, RUN, type Who } from "../support";
+import { randomUUID } from "node:crypto";
 
 async function proj(admin: Who, label: string, later: (f: () => Promise<unknown>) => void) {
   const r = await admin.api.post("/api/projects", { name: zz(label), leaderId: admin.user.id });
@@ -49,7 +50,8 @@ test("AC2: restoring a subtask whose parent is also in Trash asks to restore bot
 
 test("AC3: when the assignee has been deactivated, the restored task goes to the Leader", async ({ admin, later }) => {
   const p = await proj(admin, "restore-gone", later);
-  const email = `zz-test-${RUN}-leaver@example.invalid`;
+  // This fixture is deactivated, not deleted: use an invocation-specific email even when a worker reuses RUN.
+  const email = `zz-test-2503-${randomUUID()}@example.invalid`;
   const add = await admin.api.post("/api/team", { firstName: "ZZ-TEST", lastName: `leaver ${RUN}`, email, role: "MEMBER" });
   expect(add.status, JSON.stringify(add.json)).toBe(201);
   const id = (add.json.person?.id ?? add.json.user?.id ?? add.json.id) as string;
