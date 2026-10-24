@@ -341,8 +341,20 @@ test("AC3: an authorised caller with a bad body still gets today's 400 shape, an
   expect(role.status, role.text).toBe(200);
   expect(role.json).toEqual({ status: "ok" });
 
-  const said = await send(lead.request, "POST", "/api/concierge/messages", { text: zz("hello") });
+  // This criterion proves parse/permission ordering in either configured mode.
+  // A valid enabled request must return its conversation, not an off-only shape.
+  const before = await (await lead.request.get("/api/concierge/state")).json();
+  const hello = zz("hello");
+  const said = await send(lead.request, "POST", "/api/concierge/messages", { text: hello });
   expect(said.status, said.text).toBe(200);
   expect(said.json?.error).toBeUndefined();
-  expect(said.json?.disabled).toMatchObject({ code: "NOT_ENABLED" });
+  if (before.disabled?.code) {
+    expect(said.json?.disabled).toMatchObject({ code: before.disabled.code });
+  } else {
+    expect(said.json?.disabled).toBeUndefined();
+    const messages = said.json?.messages as { role: string; text: string }[];
+    expect(Array.isArray(messages)).toBe(true);
+    expect(messages.some((message) => message.role === "USER" && message.text === hello)).toBe(true);
+    expect(messages.some((message) => message.role === "ASSISTANT" && message.text.length > 0)).toBe(true);
+  }
 });

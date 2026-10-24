@@ -1,3 +1,4 @@
+import { dueBeforeNextMonday } from "../helpers/proposal-fixture-date";
 // SHO-US-8.4 Clarifying questions and choices (APL-2513).
 // One test per acceptance criterion. Each model turn is one short prompt. "Narrow it down" is a choice tap, not another model call.
 // AC6 sends a second short message because that is the criterion: something else arrives while a question is waiting.
@@ -88,7 +89,7 @@ test("AC5: Monday on the confirm card is the next Monday's full date", async ({ 
   await cleanChat(admin, later);
   const project = await newProject(admin, later, { label: "us84-monday" });
   const title = zz("monday");
-  const due = dueIn(2);
+  const due = dueBeforeNextMonday();
   const id = await newTask(admin, project.id, { title, assigneeId: admin.user.id, dueDate: due });
   const asked = await ask(admin, `Move "${title}" to Monday.`);
   expect(asked.status, JSON.stringify(asked.json)).toBe(200);

@@ -91,8 +91,27 @@ const BARE =
  * agent-based, not a word list, which is what lets the data sentences in w225/LEGIT through while refusing every
  * FABRIC row in the same file.
  */
-export function claimsWrite(text: string): boolean {
-  const flat = text.toLowerCase().replace(/(?<=[a-z])[-–—_](?=[a-z])/g, "");
+export function claimsWrite(text: string, readTasks: readonly { title: string; assignee: string }[] = []): boolean {
+  // A fetched task can report its current owner as a factual list clause.
+  // Mask only comma/parenthetical clauses on a line naming that exact task,
+  // and only for its fetched assignee. A sole named task may have its owner
+  // described on the following line; multiple tasks still require line-local
+  // association. Do not mask first-person, perfect,
+  // reassignment, bare-outcome or unverified-person claims.
+  const escape = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const mentioned = readTasks.filter((task) => task.title && text.includes(task.title));
+  const single = mentioned.length === 1 ? mentioned[0] : null;
+  const checked = readTasks.length ? text.split("\n").map((line) => {
+    let factual = line;
+    for (const task of readTasks) {
+      if (task.title && task.assignee && (line.includes(task.title) || task === single)) {
+        const currentOwner = new RegExp(`([,(]\\s*)(?:is\\s+)?assigned\\s+to\\s+${escape(task.assignee)}(?=$|[),.;])`, "g");
+        factual = factual.replace(currentOwner, "$1current assignee");
+      }
+    }
+    return factual;
+  }).join("\n") : text;
+  const flat = checked.toLowerCase().replace(/(?<=[a-z])[-–—_](?=[a-z])/g, "");
   for (const raw of flat.split(/(?<=[.!?])\s+|\n+/)) {
     const s = raw.trim();
     if (!s || s.endsWith("?")) continue;

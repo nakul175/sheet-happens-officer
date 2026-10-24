@@ -53,6 +53,7 @@ export function ConciergeProvider({ children }: { children: React.ReactNode }) {
   const [draft, setDraft] = useState("");
   const [tick, setTick] = useState(0);
   const tmp = useRef(0);
+  const interactedBeforeLoad = useRef(false);
 
   useEffect(() => {
     let live = true;
@@ -65,6 +66,31 @@ export function ConciergeProvider({ children }: { children: React.ReactNode }) {
     });
     return () => { live = false; };
   }, [tick]);
+
+  useEffect(() => {
+    if (loaded) return;
+    const mark = () => { interactedBeforeLoad.current = true; };
+    window.addEventListener("pointerdown", mark, true);
+    window.addEventListener("keydown", mark, true);
+    return () => {
+      window.removeEventListener("pointerdown", mark, true);
+      window.removeEventListener("keydown", mark, true);
+    };
+  }, [loaded]);
+
+  useEffect(() => {
+    if (!loaded || interactedBeforeLoad.current || document.activeElement !== document.body) return;
+    // Hydrating the enabled quick-action controls can leave Chromium's native
+    // sequential-navigation starting point at that inserted fragment. A person
+    // who has not interacted should still start at the document's skip
+    // link. Never reset a field/link the person already focused.
+    const body = document.body;
+    const before = body.getAttribute("tabindex");
+    body.tabIndex = -1;
+    body.focus({ preventScroll: true });
+    if (before === null) body.removeAttribute("tabindex");
+    else body.setAttribute("tabindex", before);
+  }, [loaded]);
 
   const run = useCallback(async <T,>(fn: () => Promise<T>): Promise<T> => {
     setBusy(true); setError(null);

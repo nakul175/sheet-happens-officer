@@ -228,20 +228,32 @@ describe("propose and confirm (8.3)", () => {
 
   it("screens-only actions are not offered: the concierge points to the screen and writes nothing (AC3)", async () => {
     const { lead, ed } = await team();
-    script(
-      () => [tu("propose_changes", { changes: [{ action: "deactivate_user", person_id: ed.id }] })],
-      (r) => {
-        expect(lastResultText(r)).toMatch(/screens/);
-        return [say("Deactivating people is done on the Team screen.")];
-      },
-    );
+    script(() => [say("I deactivated the person.")]); // Must never be called for fixed server routing.
     const r = await ask(lead, "Deactivate the editor");
+    // Capability routing comes from a fixed server map, never arbitrary model prose.
     expect(r.messages[1]).toMatchObject({
       kind: "text",
-      text: "Nothing has changed. To deactivate a person, open the Team screen. Your permissions are checked there.",
+      text: "Use the Team screen to deactivate a person if your role permits it. Nothing has changed.",
     });
+    expect(fakeCallCount()).toBe(0);
+    expect(await conciergeLogs(lead.id)).toHaveLength(0);
+
     expect(r.messages.some((m) => m.kind === "card")).toBe(false);
     expect((await db.user.findUniqueOrThrow({ where: { id: ed.id } })).deactivatedAt).toBeNull();
+  });
+
+  it("unsupported tool actions still cannot relay model success or mutate a person", async () => {
+    const { lead, ed } = await team();
+    script(
+      () => [tu("propose_changes", { changes: [{ action: "deactivate_user", person_id: ed.id }] })],
+      r => { expect(lastResultText(r)).toMatch(/screens/); return [say("I deactivated the person.")]; },
+    );
+    const r = await ask(lead, "Help me manage this person");
+    expect(r.messages[1]).toMatchObject({ kind: "text", text: "Nothing has changed. I cannot change anything without a card you confirm, so tell me which task should change and how, and I will show you the card." });
+    expect(r.messages.some(m => m.kind === "card")).toBe(false);
+    expect(await conciergeLogs(lead.id)).toHaveLength(0);
+    expect((await db.user.findUniqueOrThrow({ where: { id: ed.id } })).deactivatedAt).toBeNull();
+    expect(fakeCallCount()).toBe(2);
   });
 
   it("a card that was based on old data writes nothing and is replaced by a fresh one (AC7)", async () => {
@@ -527,6 +539,32 @@ describe("clarifying questions (8.4)", () => {
     expect(q.choices!.filter((c) => c.id !== "none" && c.id !== "narrow").map((c) => c.id).sort()).toEqual([a, b].sort());
     expect(q.text).toBe("Which budget task?");
     await expect(answerChoice(actor(lead), q.id, "made-up-id")).rejects.toMatchObject({ status: 400 });
+  });
+
+  it("an ambiguous change shows server choices even when the model asks for a date first", async () => {
+    const lead = await account("choice-date");
+    const p = await project(lead, lead);
+    const ids: string[] = [];
+    for (let i = 0; i < 6; i++) ids.push(await task(lead, p.id, { title: `Reviewwaitdate ${i}`, dueDate: `2031-04-0${i + 1}` }));
+    script(() => [tu("find_tasks", { text: "reviewwaitdate" })], () => [say("Which date should I use?")]);
+    const q = (await ask(lead, "Move the reviewwaitdate task")).messages[1];
+    expect(q.kind).toBe("choices");
+    expect(q.choices!.filter(c => c.id !== "none" && c.id !== "narrow").map(c => c.id)).toEqual(ids.slice(0, 5));
+    expect(q.choices!.slice(-2)).toEqual([{ id: "none", label: "None of these" }, { id: "narrow", label: "Narrow it down" }]);
+    expect(await conciergeLogs(lead.id)).toHaveLength(0);
+    expect(await db.task.count({ where: { id: { in: ids }, completedAt: null } })).toBe(6);
+  });
+
+  it("the same multi-match task read remains an answer rather than a forced change selection", async () => {
+    const lead = await account("choice-read");
+    const p = await project(lead, lead);
+    for (let i = 0; i < 6; i++) await task(lead, p.id, { title: `Reviewonlyread ${i}`, dueDate: `2031-04-0${i + 1}` });
+    script(() => [tu("find_tasks", { text: "reviewonlyread" })], () => [say("I found six Reviewonlyread tasks.")]);
+    const q = (await ask(lead, "Find the reviewonlyread tasks")).messages[1];
+    expect(q.kind).toBe("answer");
+    expect(q.text).toBe("I found six Reviewonlyread tasks.");
+    expect(q.choices).toBeUndefined();
+    expect(await conciergeLogs(lead.id)).toHaveLength(0);
   });
 
   it("more than 5 matches: the 5 most relevant plus 'None of these' and 'Narrow it down'; narrow asks for a detail (AC4)", async () => {

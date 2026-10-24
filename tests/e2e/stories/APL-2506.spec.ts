@@ -146,16 +146,21 @@ test("AC3: another person's notifications are never returned or changed", tag("A
 
 test("AC4: each event in the list gives exactly one notification to the affected person and none to the person who caused it", tag("APL-2506 AC4"), async ({ admin, member, later }) => {
   const p = await withMember(admin, member, "bell-types", later);
+  // A separate project may legitimately have an identical task title and notice.
+  const unrelated = await withMember(admin, member, "bell-types-other", later);
+  await mk(admin, unrelated, zz("collab"), { collaboratorIds: [member.user.id] });
   const t = await mk(admin, p, zz("typed"), { assigneeId: member.user.id });                       // assigned
-  await mk(admin, p, zz("collab"), { collaboratorIds: [member.user.id] });               // added as collaborator
+  const collab = await mk(admin, p, zz("collab"), { collaboratorIds: [member.user.id] }); // added as collaborator
   expect((await member.api.patch(`/api/tasks/${t}`, { blocked: true, blockedReason: "Waiting", expectedUpdatedAt: await version(member, t) })).status).toBe(200); // blocked: to the Leader
   expect((await admin.api.patch(`/api/projects/${p}/members/${member.user.id}`, { role: "VIEWER", handoverTo: admin.user.id })).status).toBe(200); // project role changed
-  const mine = (await inbox(member)).items.map((n) => n.text);
+  // Other stories can use the same title labels in this worker. Count this test's actual records, not matching text from earlier projects.
+  const owned = new Set([`/tasks/${t}`, `/tasks/${collab}`, `/projects/${p}`]);
+  const mine = (await inbox(member)).items.filter((n) => owned.has(n.href)).map((n) => n.text);
   const count = (re: RegExp) => mine.filter((x) => re.test(x)).length;
   expect(count(new RegExp(`assigned you "${zz("typed")}"`))).toBe(1);
   expect(count(new RegExp(`added you as a collaborator on "${zz("collab")}"`))).toBe(1);
   expect(count(/changed your role in .* to viewer/)).toBeGreaterThanOrEqual(1);
-  const lead = (await inbox(admin)).items.map((n) => n.text);
+  const lead = (await inbox(admin)).items.filter((n) => owned.has(n.href)).map((n) => n.text);
   expect(lead.filter((x) => x.includes(`marked "${zz("typed")}" as blocked`))).toHaveLength(1);
   expect(mine.some((x) => x.includes("as blocked") && x.includes(zz("typed")))).toBe(false); // the actor is not told
 });
