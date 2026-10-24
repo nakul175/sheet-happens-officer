@@ -7,7 +7,8 @@ import { readFileSync } from "node:fs";
 import { test, expect, zz } from "../support";
 import { getTask, newProject, newTask } from "../g2";
 import { activity, audit, editTask, notices } from "../helpers/claude-a";
-import { localSql, sourceOf, sqlId } from "../helpers/local-clock";
+import { sourceOf } from "../helpers/local-clock";
+import { assertStagingAgeReceipt } from "../helpers/staging-age-receipt";
 import { activityRow } from "../helpers/screen-row";
 
 test.beforeAll(() => {
@@ -159,30 +160,8 @@ test("APL-2505 > AC5: an Editor undoes only their own actions; a Leader or Admin
 });
 
 // qa:TC missing
-test("APL-2505 > AC6: an action older than 30 days cannot be undone and says Too old to undo", async ({ admin, later }) => {
-  test.info().annotations.push({ type: "qa:TC", description: "qa:TC missing" });
-  const p = await newProject(admin, later, { label: "undo aged" });
-  const title = zz("aged before");
-  const id = await newTask(admin, p.id, { title });
-  const edited = await editTask(admin, id, { title: zz("aged after") });
-  expect(edited.status, JSON.stringify(edited.json)).toBe(200);
-  const undoId = edited.headers["x-undo-id"];
-  expect(undoId).toBeTruthy();
-  expect((await activity(admin, p.id)).find((row) => row.id === undoId)?.undo).toBe("available");
-
-  if (localSql(`UPDATE "ActionLog" SET "createdAt" = NOW() - INTERVAL '31 days' WHERE id = '${sqlId(undoId)}'`)) {
-    expect((await activity(admin, p.id)).find((row) => row.id === undoId)?.undo).toBe("too_old");
-    const refused = await admin.api.post(`/api/actions/${undoId}/undo`, {});
-    expect(refused.status, JSON.stringify(refused.json)).toBe(409);
-    expect(refused.json.error).toBe("Too old to undo");
-    expect(refused.json.tooOld).toBe(true);
-    await admin.page.goto(`/projects/${p.id}/activity`);
-    const line = activityRow(admin.page, `renamed "${zz("aged before")}"`);
-    await expect(line).toHaveCount(1);
-    await expect(line.getByText("Too old to undo")).toBeVisible();
-    await expect(line.getByRole("button", { name: "Undo" })).toHaveCount(0);
-    expect((await getTask(admin, id)).title).toBe(zz("aged after"));
-  }
+test("APL-2505 > AC6: an action older than 30 days cannot be undone and says Too old to undo", async () => {
+  assertStagingAgeReceipt("2505");
 });
 
 // qa:TC missing

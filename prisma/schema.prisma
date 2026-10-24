@@ -103,6 +103,7 @@ model User {
 }
 
 model Session {
+  centralLink CentralSessionLink?
   id         String    @id @default(cuid())
   userId     String
   user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -631,4 +632,30 @@ model SavedView {
 
   @@unique([userId, projectId, name])
   @@index([userId, projectId, position])
+}
+
+// OAuth authorization-code handoff to the first-party Bug Off client.
+// Opaque codes and access tokens are stored only as SHA-256 hashes.
+model SuiteGrant {
+  id              String    @id @default(cuid())
+  clientId        String    @default("bugoff")
+  codeHash        String    @unique
+  accessTokenHash String?   @unique
+  userId          String
+  sessionId       String
+  challenge       String
+  expiresAt       DateTime
+  redeemedAt      DateTime?
+  accessExpiresAt DateTime?
+  createdAt       DateTime  @default(now())
+
+  @@index([expiresAt])
+}
+
+model CentralSessionLink {
+  sessionId String @id
+  session Session @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  subject String
+  sessionUid String
+  createdAt DateTime @default(now())
 }

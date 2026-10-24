@@ -129,7 +129,7 @@ describe("w225 SHO-2693: a real read relays the answer, and does not license a w
       );
       expect(await stateOf(lead, projectId, taskId)).toEqual(before); // no card, no proposal, no result, same assignee
       expect(reply.text).not.toContain(claim);
-      expect(reply.text).toBe(NOTHING_CHANGED);
+      expect(reply.text.startsWith(NOTHING_CHANGED)).toBe(true); // optional server-rendered current records; never the rejected claim
     });
   }
 

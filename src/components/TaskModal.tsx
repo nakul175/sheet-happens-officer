@@ -13,7 +13,7 @@ import { closeControlOffered } from "@/lib/approver-ui";
 import { useMe } from "@/app/(app)/Shell";
 
 type P = { id: string; name: string };
-type Sub = { id: string; title: string; completedAt: string | null; canClose: boolean; updatedAt: string };
+type Sub = { id: string; title: string; completedAt: string | null; canClose: boolean; updatedAt: string; dueDate: string | null; assignee: P; awaitingApproval: boolean; approver: P | null };
 type Task = {
   id: string; projectId: string; parentId: string | null; createdById: string; title: string; description: string | null; priority: string;
   dueDate: string | null; blocked: boolean; blockedReason: string | null; completedAt: string | null; isIdea?: boolean;
@@ -245,12 +245,22 @@ export function TaskModal({ id, me, onClose, onChanged, asPage }: { id: string; 
             <div className="field">
               <span className="lbl">Subtasks {task.subtaskList.length > 0 && `(${task.subtaskList.filter((s) => s.completedAt).length} of ${task.subtaskList.length})`}</span>
               {task.subtaskList.map((s) => (
-                <div className="sub-item" key={s.id}>
+                <div className="sub-item" key={s.id} style={{ flexWrap: "wrap" }}>
                   <label style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", minWidth: 44, minHeight: 44, flexShrink: 0 }}>
                     <input type="checkbox" aria-label={`Mark "${s.title}" ${s.completedAt ? "not done" : "done"}`} checked={!!s.completedAt} disabled={!canEdit || busy || (!s.canClose && !s.completedAt)}
                       onChange={() => run(api("POST", `/api/tasks/${s.id}/${s.completedAt ? "reopen" : "complete"}`, s.completedAt ? {} : { expectedUpdatedAt: s.updatedAt }))} />
                   </label>
                   <span style={s.completedAt ? { textDecoration: "line-through", color: "var(--muted)" } : undefined}><Link href={`/tasks/${s.id}`}>{s.title}</Link></span>
+                  <label>Due date (optional)<input className="in" type="date" aria-label={`Due date for ${s.title}`} defaultValue={s.dueDate ?? ""} key={s.updatedAt}
+                    disabled={!canEdit || busy || (s.awaitingApproval && s.approver?.id === me && !canManage)}
+                    onBlur={(e) => { if (!canEdit || busy || (s.awaitingApproval && s.approver?.id === me && !canManage)) return; const dueDate = e.target.value || null; if (dueDate !== s.dueDate) run(api("PATCH", `/api/tasks/${s.id}`, { dueDate, expectedUpdatedAt: s.updatedAt })); }} /></label>
+                  <label>Assignee<select className="in" aria-label={`Assignee for ${s.title}`} value={s.assignee.id}
+                    disabled={!canEdit || busy || (s.awaitingApproval && s.approver?.id === me && !canManage)}
+                    onChange={(e) => { if (!canEdit || busy || (s.awaitingApproval && s.approver?.id === me && !canManage)) return; run(api("POST", `/api/tasks/${s.id}/assign`, { assigneeId: e.target.value, expectedUpdatedAt: s.updatedAt })); }}>
+                    {!workers.some(w => w.userId === s.assignee.id) && <option value={s.assignee.id}>{s.assignee.name}</option>}
+                    {workers.map(w => <option key={w.userId} value={w.userId}>{w.name}</option>)}
+                  </select></label>
+                  {task.dueDate && s.dueDate && s.dueDate > task.dueDate && <span className="hint" role="status">This subtask is due after its parent task. You can still edit it.</span>}
                 </div>
               ))}
               {canEdit && (

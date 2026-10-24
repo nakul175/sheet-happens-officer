@@ -1,3 +1,4 @@
+import { guardBidSubmissionWrite } from "@/lib/bid-submission-policy";
 import { parseSubmissionDeadline, serializeSubmissionDeadline } from "@/lib/submission-deadline";
 /* eslint-disable @typescript-eslint/no-explicit-any */
 // SHO-US-6.4: Undo from the stored before-state, with a conflict warning and "Undo anyway".
@@ -210,6 +211,7 @@ async function plan(row: any, user: Actor, projectId: string): Promise<Plan> {
       return {
         conflicts: p.stageId !== f.stageId ? [{ field: "stage", before: b.stage, after: f.stage, now: p.stageId }] : [], subject: p.name, fields: "Stage",
         apply: async (tx) => {
+          await guardBidSubmissionWrite(tx, projectId, {}, b.stageId, p.pipelineId);
           try { await tx.project.update({ where: { id: projectId, pipelineId: p.pipelineId }, data: { stageId: b.stageId, stageReason: b.reason ?? null, stageChangedAt: new Date() } }); }
           catch (error) { if ((error as { code?: string }).code === "P2025") throw bad("This deal's pipeline changed. Refresh before undoing its stage."); throw error; }
         },
@@ -269,7 +271,7 @@ async function plan(row: any, user: Actor, projectId: string): Promise<Plan> {
           data.submissionDeadlineHasTime = b.submissionDeadlineHasTime ?? parsed.hasTime;
         } else data[k] = k === "expectedClose" && b[k] ? new Date(`${b[k]}T00:00:00Z`) : b[k] ?? null;
       }
-      return { conflicts: fieldConflicts(keys, b, f, now), subject: "the deal", fields: keys.join(", "), apply: async (tx) => { await tx.dealDetails.update({ where: { projectId }, data }); } };
+      return { conflicts: fieldConflicts(keys, b, f, now), subject: "the deal", fields: keys.join(", "), apply: async (tx) => { await guardBidSubmissionWrite(tx, projectId, data); await tx.dealDetails.update({ where: { projectId }, data }); } };
     }
     case "project.updated": {
       const p = await db.project.findUniqueOrThrow({ where: { id: projectId } });

@@ -28,14 +28,18 @@ function DisabledNotice() {
 
 function Thread({ variant }: { variant: Variant }) {
   const c = useConcierge()!;
-  const end = useRef<HTMLDivElement>(null);
-  useEffect(() => { end.current?.scrollIntoView?.({ block: "end" }); }, [c.messages.length, c.busy, variant]);
+  const thread = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    // Scroll only the conversation. scrollIntoView also moves Chromium's sequential
+    // keyboard starting point, causing the first Tab to bypass Skip to content.
+    const el = thread.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [c.messages.length, c.busy, variant]);
   return (
-    <div className="cc-thread" role="log" aria-label="Conversation" aria-live="polite">
+    <div ref={thread} className="cc-thread" role="log" aria-label="Conversation" aria-live="polite">
       {c.loaded && !c.loadError && !isPaused(c) && c.messages.length === 0 && <p className="cc-empty">Ask about your tasks, or tell me what to change. Nothing changes until you tap Confirm.</p>}
       <ul>{c.messages.map((m) => <MessageView key={m.id} m={m} />)}</ul>
       {c.busy && <p className="cc-thinking" role="status">Working on it…</p>}
-      <div ref={end} />
     </div>
   );
 }

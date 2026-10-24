@@ -5,10 +5,10 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import styles from "@/components/auth.module.css";
 import { post, rememberEmail } from "@/components/client";
-import { returnToEnabled, safeReturnPath } from "@/lib/return-to";
+import { signInDestination } from "@/lib/signin-destination";
 import s from "./signin.module.css";
 
-export function SignInForm({ justReset, sessionExpired = false, next }: { justReset: boolean; sessionExpired?: boolean; next?: string }) {
+export function SignInForm({ justReset, sessionExpired = false, next, centralEnabled = false }: { justReset: boolean; sessionExpired?: boolean; next?: string; centralEnabled?: boolean }) {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
   const [needsVerify, setNeedsVerify] = useState<string | null>(null);
@@ -26,7 +26,7 @@ export function SignInForm({ justReset, sessionExpired = false, next }: { justRe
     if (r.ok) {
       // A failed attempt never reaches here, so `next` stays in the address bar (APL-2652 AC4).
       // Checked again: the prop is only a path, and router.push is never given an absolute URL.
-      router.push(returnToEnabled() ? (safeReturnPath(next, 1) ?? "/") : "/");
+      router.push(signInDestination(next, new URLSearchParams(window.location.search).get("returnTo")));
       router.refresh();
       return;
     }
@@ -53,6 +53,7 @@ export function SignInForm({ justReset, sessionExpired = false, next }: { justRe
       </div>
       <section className={styles.card}>
       <h2 className={s.h2}>Sign in</h2>
+      {centralEnabled && <p><a className={styles.linkbtn} href="/api/auth/aplyd/start">Continue with Aplyd</a></p>}
       <form onSubmit={submit} className={styles.card} style={{ border: 0, padding: 0 }} noValidate>
         {sessionExpired && !error && <div role="alert" className={styles.alert}>Your session has expired, please sign in again</div>}
         {justReset && !error && <div role="status" className={styles.notice}>Password changed. Sign in with your new password.</div>}

@@ -157,7 +157,8 @@ describe("w243 SHO-2693: the matrix, and the boundary the predicate is decided o
     console.log(
       `w243 BOUNDARY/CLAIM ${JSON.stringify(CLAIM_WITH_NO_CLAIM_WORD)} -> claimsWrite=${claimsWrite(CLAIM_WITH_NO_CLAIM_WORD)} wordList=${WORD_LIST.test(CLAIM_WITH_NO_CLAIM_WORD)} kind=${reply.kind} reply=${JSON.stringify(reply.text)}`,
     );
-    expect(reply.text).toBe(NOTHING_CHANGED); // ... and it is refused anyway: the outcome is the test
+    expect(reply.text.startsWith(NOTHING_CHANGED)).toBe(true); // rejected model prose is replaced by denial and actual records
+    expect(reply.text).not.toContain(CLAIM_WITH_NO_CLAIM_WORD);
     expect(await stateOf(lead, projectId, taskId)).toEqual(before);
   });
 

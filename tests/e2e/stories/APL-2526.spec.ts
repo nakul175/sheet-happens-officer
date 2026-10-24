@@ -1,3 +1,4 @@
+import { assertStagingAgeReceipt } from "../helpers/staging-age-receipt";
 // SHO-E13 Home and Monday review (Linear APL-2526).
 // One test per acceptance criterion. People are nakul17+ aliases signed in with SHO_QA_PASS.
 // Projects, deals and tasks are ZZ-TEST and archived afterwards.
@@ -10,6 +11,7 @@ import { runVitest } from "../helpers/named-suite";
 import { newProject, newTask, ymd, type Who } from "../g2";
 import { createDeal, createOrg, dealBody, projectOf } from "../helpers/claude-a";
 import { pipelines } from "../helpers/deal-board";
+
 import { cast, gateFile } from "../helpers/qa-alias";
 
 gateFile();
@@ -183,4 +185,10 @@ test("AC6: existing My tasks tests pass unchanged", async () => {
   // The default vitest config excludes tests/viewport, so this file runs with the viewport config.
   const a11y = await runVitest(["tests/viewport/a11y.test.ts"], "vitest.viewport.config.mts");
   expect(a11y.numPassedTests).toBe(a11y.numTotalTests);
+});
+
+
+
+test("AC4: staging old-idea transition has exact-release owned-fixture proof", async () => {
+  assertStagingAgeReceipt("2526");
 });

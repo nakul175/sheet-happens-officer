@@ -1,5 +1,6 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { deliverSinkMail } from "@/lib/mail-sink";
 
 export type Mail = { to: string; subject: string; text: string };
 
@@ -35,6 +36,8 @@ async function resendError(res: Response): Promise<{ name: string; message: stri
  * never the key, the recipient or the body, which can hold a sign-in link or a password.
  */
 export async function sendMail(mail: Mail): Promise<void> {
+  // An armed staging sink fails closed before the external provider path.
+  if (process.env.MAIL_SINK) return deliverSinkMail(mail, FROM);
   const key = process.env.RESEND_API_KEY;
   if (key) {
     let res: Response;

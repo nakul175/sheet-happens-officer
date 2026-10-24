@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Prisma } from "@/generated/prisma/client";
 import { dealCreate, dealDetails, taskConvert } from "@/lib/schemas";
-const m = vi.hoisted(() => ({ db: { user: { findUniqueOrThrow: vi.fn(), findUnique: vi.fn() }, pipeline: { findFirst: vi.fn() }, project: { findFirst: vi.fn(), create: vi.fn(), findUnique: vi.fn(), findMany: vi.fn() }, projectMember: { create: vi.fn() }, section: { create: vi.fn() }, dealDetails: { create: vi.fn(), findUnique: vi.fn(), update: vi.fn() }, dealParty: { create: vi.fn() }, task: { create: vi.fn(), findUnique: vi.fn(), findMany: vi.fn(), groupBy: vi.fn(), update: vi.fn() }, actionLog: { groupBy: vi.fn(), findUnique: vi.fn(), update: vi.fn() }, note: { groupBy: vi.fn() }, taskCollaborator: { deleteMany: vi.fn() }, $transaction: vi.fn() }, access: vi.fn(), requireWrite: vi.fn(), log: vi.fn() }));
+const m = vi.hoisted(() => ({ db: { $queryRaw: vi.fn(), user: { findUniqueOrThrow: vi.fn(), findUnique: vi.fn() }, pipeline: { findFirst: vi.fn() }, project: { findFirst: vi.fn(), create: vi.fn(), findUnique: vi.fn(), findMany: vi.fn() }, projectMember: { create: vi.fn() }, section: { create: vi.fn() }, dealDetails: { create: vi.fn(), findUnique: vi.fn(), update: vi.fn() }, dealParty: { create: vi.fn() }, task: { create: vi.fn(), findUnique: vi.fn(), findMany: vi.fn(), groupBy: vi.fn(), update: vi.fn() }, actionLog: { groupBy: vi.fn(), findUnique: vi.fn(), update: vi.fn() }, note: { groupBy: vi.fn() }, taskCollaborator: { deleteMany: vi.fn() }, $transaction: vi.fn() }, access: vi.fn(), requireWrite: vi.fn(), log: vi.fn() }));
 vi.mock("@/lib/db", () => ({ db: m.db }));
 vi.mock("@/lib/access", () => ({ isActive: () => true, isAdmin: () => false, projectAccess: m.access, requireWrite: m.requireWrite }));
 vi.mock("@/lib/notify", () => ({ auditTx: vi.fn(), logAction: m.log, notify: vi.fn() }));
@@ -16,7 +16,7 @@ const actor = { id: "person", orgRole: "MEMBER" as const };
 const existing = { projectId: "deal", workspaceId: "ws", whyPursue: "Purpose", need: null, serviceLine: null, value: null, currency: null, probability: 40, expectedClose: null, introducedBy: null, submissionDeadline: null, submissionDeadlineHasTime: false, createdAt: new Date(), opportunityType: null, athenaEntity: null, netFeeRevenueUsd: null };
 const create = { name: "Opportunity", organisationId: "org", pipelineId: "pipe", leaderId: "person", whyPursue: "Purpose", nextStep: { title: "Follow up", dueDate: "2026-11-01" } };
 beforeEach(() => {
-  vi.clearAllMocks();
+  vi.clearAllMocks(); m.db.$queryRaw.mockResolvedValue([{pipelineId:"pipe",key:"DEAL_PROACTIVE",stageId:"stage"}]);
   m.db.$transaction.mockImplementation(async (fn) => fn(m.db));
   m.db.user.findUniqueOrThrow.mockResolvedValue({ id: "person", workspaceId: "ws" });
   m.db.user.findUnique.mockResolvedValue({ id: "person", workspaceId: "ws" });
@@ -80,4 +80,11 @@ describe("SHO-3054 API submission deadline precision", () => {
     await undoAction(actor,"log");
     expect(m.db.dealDetails.update).toHaveBeenCalledWith({where:{projectId:"deal"},data:{submissionDeadline:stored,submissionDeadlineHasTime:true}});
   });
+});
+it('3049 Undo cannot remove required PWin from an already submitted deal',async()=>{
+  m.db.$queryRaw.mockResolvedValue([{pipelineId:'bid',key:'DEAL_BID',stageId:'st_bid_submitted'}]);
+  m.db.actionLog.findUnique.mockResolvedValue({id:'log',projectId:'deal',targetId:'deal',targetType:'deal',action:'deal.details_updated',actorId:actor.id,createdAt:new Date(),undoneAt:null,beforeState:{probability:null},afterState:{probability:0}});
+  m.db.dealDetails.findUnique.mockResolvedValue({...existing,probability:0,netFeeRevenueUsd:0,athenaEntity:'ATHENA_INDIA'});
+  await expect(undoAction(actor,'log')).rejects.toMatchObject({status:409});
+  expect(m.db.dealDetails.update).not.toHaveBeenCalled();expect(m.db.actionLog.update).not.toHaveBeenCalled();
 });

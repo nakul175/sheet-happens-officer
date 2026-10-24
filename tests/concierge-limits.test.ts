@@ -100,6 +100,26 @@ describe("model wrapper (9.1)", () => {
     expect(q.messages.at(-1)?.text).toBe("I found nothing.");
   });
 
+  it("default small model is recorded for a successful message when MODEL_NAME is unset", async () => {
+    delete process.env.MODEL_NAME;
+    const u = await account("defaultmodel");
+    script(() => [say("Hello.")]);
+    const result = await sendMessage(actor(u), "hello");
+    expect(result.disabled).toBeUndefined();
+    const rows = await db.modelUsage.findMany({ where: { userId: u.id } });
+    expect(rows).toHaveLength(1);
+    expect(rows[0].model).toBe("claude-haiku-5-5");
+  });
+
+  it("default two-second retry waits before its only second attempt", async () => {
+    delete process.env.MODEL_RETRY_DELAY_MS;
+    const attempts: number[] = [];
+    setFakeModel(() => { attempts.push(Date.now()); throw new Error("controlled unavailable provider"); });
+    await expect(generate(req)).rejects.toMatchObject({ code: "PROVIDER_DOWN" });
+    expect(attempts).toHaveLength(2);
+    expect(attempts[1] - attempts[0]).toBeGreaterThanOrEqual(2000);
+  });
+
   it("a failure followed by a success counts as one message (9.2 AC5)", async () => {
     const u = await account("retry2");
     let calls = 0;

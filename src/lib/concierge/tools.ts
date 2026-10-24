@@ -33,6 +33,7 @@ export type Turn = {
    * which is how a turn worded "reassign everything to me" still asks who.
    */
   needsWho?: boolean;
+  screen?: "team";
   forced?: { kind: Kind; ids: string[] };
 };
 
@@ -301,6 +302,7 @@ async function toOps(t: Turn, changes: Change[]): Promise<{ ops: Op[]; refs: { k
         break;
       }
       default:
+        if (c.action === "deactivate_user") t.screen = "team";
         reject(`"${c.action}" is not something the concierge can do. Archiving a project, changing a Leader, deactivating or reassigning a user, Admin roles, Sections, password and profile are done on their screens; tell the person where.`);
     }
   }

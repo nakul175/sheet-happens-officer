@@ -84,6 +84,8 @@ async function cleanupSeed() {
     const off = await call(server.base, sa.cookie, "POST", `/api/team/${id}/deactivate`, { reassign: "leaders" });
     if (off.status !== 200 && !(off.status === 409 && /already deactivated/.test(off.text))) problems.push(`deactivate ${id}: ${off.status}`);
   }
+  const signedOut = await call(server.base, sa.cookie, "POST", "/api/auth/signout");
+  if (signedOut.status !== 204) problems.push(`sign out cleanup admin: ${signedOut.status}`);
   expect(problems).toEqual([]);
 }
 
@@ -321,6 +323,55 @@ describe("CRM_VISIBLE modes are tested against a real server per mode", () => {
       for (const server of [...running.values(), ...extra.values()]) killGroup(server.pid);
       for (const dir of outboxes) removeOutbox(dir);
       await db.$disconnect();
+    }
+  });
+
+  it("SHO-2533 AC5: contact and note routes obey all/admins/off for Member, Admin and Super Admin", async () => {
+    const open = extra.get("all")!;
+    const memberEmail = `member-contacts.${tag}@aplyd.com`.toLowerCase();
+    const adminEmail = `admin-contacts.${tag}@aplyd.com`.toLowerCase();
+    const member = await signIn(open, `ZZ-TEST contact Member ${tag}`, memberEmail);
+    const administrator = await signIn(open, `ZZ-TEST contact Admin ${tag}`, adminEmail);
+    seed.userIds.push(member.id, administrator.id);
+    seed.emails.push(memberEmail, adminEmail);
+    await promoteToAdmin(running.get("on")!, administrator.id);
+    const sa = await superAdminOn(running.get("on")!);
+    const org = await call(open.base, member.cookie, "POST", "/api/orgs", { name: `ZZ-TEST contact visibility ${tag}` });
+    expect(org.status, org.text).toBe(201);
+    const orgId = (org.json?.organisation as { id: string }).id;
+    seed.orgIds.push(orgId);
+    const contactName = `ZZ-TEST mode contact ${tag}`;
+    const made = await call(open.base, member.cookie, "POST", `/api/orgs/${orgId}/contacts`, { name: contactName });
+    expect(made.status, made.text).toBe(201);
+    const contactId = (made.json?.contact as { id: string }).id;
+    const noteText = `ZZ-TEST mode note ${tag}`;
+    const note = await call(open.base, member.cookie, "POST", `/api/orgs/${orgId}/notes`, { kind: "CALL", date: istDate(0), text: noteText, contactIds: [contactId] });
+    expect(note.status, note.text).toBe(201);
+    const noteId = (note.json?.note as { id: string }).id;
+    try {
+      for (const [mode, server] of [["all", open], ["admins", running.get("admins")!], ["off", running.get("off")!]] as const) {
+        for (const [role, person] of [["MEMBER", member], ["ADMIN", administrator], ["SUPER_ADMIN", sa]] as const) {
+          const visible = mode === "all" || (mode === "admins" && role !== "MEMBER");
+          for (const [endpoint, marker] of [
+            [`/api/orgs/${orgId}`, contactName],
+            [`/api/orgs/${orgId}/contacts`, contactName],
+            [`/api/contacts/${contactId}`, contactName],
+            [`/api/orgs/${orgId}/notes`, noteText],
+          ]) {
+            const result = await call(server.base, person.cookie, "GET", endpoint);
+            expect(result.status, `${mode}/${role}/${endpoint}`).toBe(visible ? 200 : 404);
+            if (visible) expect(result.text).toContain(marker);
+            else {
+              expect(result.text).not.toContain(contactId);
+              expect(result.text).not.toContain(contactName);
+              expect(result.text).not.toContain(noteText);
+            }
+          }
+        }
+      }
+    } finally {
+      expect((await call(open.base, sa.cookie, "DELETE", `/api/notes/${noteId}`)).status).toBe(204);
+      expect((await call(open.base, sa.cookie, "DELETE", `/api/contacts/${contactId}`)).status).toBe(204);
     }
   });
 

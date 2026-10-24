@@ -2,16 +2,13 @@
 // AC8 is the sign-in answer's mustChangePassword (from APL-2715, closed as a duplicate).
 // No TC id is written on the issue, so every describe and test title carries qa:TC missing.
 // workers=1: the cases in this file run one after another, and the suite runs one file at a time.
-// Local only: it reads the emailed passwords from EMAIL_OUTBOX_DIR, so TASKBOARD_URL must be localhost.
-// That check refuses production too, without reading the process image as ../base-url does.
+// Local mode reads EMAIL_OUTBOX_DIR; isolated slot9 reads the authenticated staging mailbox.
+// Missing credentials fail, and production targets are refused.
 // Thrown-away people use ZZ-TEST names and nakul17+zz-…@aplyd.com aliases; afterAll deactivates them.
-// Playwright (APL-2911): ci.yml runs it against the CI server after npm test. The API calls go through ../local-api,
-// which has no vitest import, so Playwright can load this file.
-import { readdirSync, readFileSync } from "node:fs";
-import path from "node:path";
+// Playwright (APL-2911): the fixture helper has no Vitest imports and supports local CI or slot9.
 import { expect, test, type Browser, type Locator, type Page } from "@playwright/test";
 import { signInDetailsMail } from "@/lib/email";
-import { account, BASE, Client, OUTBOX, PW, superAdmin, type Account } from "../local-api";
+import { account, BASE, Client, PW, ADMIN_PW, superAdmin, mailText, browserCredentials, requirePasswordFixture, type Account } from "../password-fixture";
 
 const WALL = "Set your own password";
 const REPLACE = "The person must replace it with their own when they first sign in.";
@@ -25,17 +22,10 @@ let browser: Browser;
 let admin: Account;
 const created: string[] = [];
 
-function mails(email: string, subject: RegExp) {
-  return readdirSync(OUTBOX).sort()
-    .map((f) => JSON.parse(readFileSync(path.join(OUTBOX, f), "utf8")))
-    .filter((m) => m.to === email && subject.test(m.subject));
-}
-
-const emailedPassword = (email: string) =>
-  ((mails(email, /Your Sheet Happens Officer account/).at(-1)?.text ?? "") as string).match(/Password: (\S+)/)?.[1] ?? "";
-
-const resetToken = (email: string) =>
-  ((mails(email, /Reset your Sheet Happens Officer password/).at(-1)?.text ?? "") as string).match(/token=([\w-]+)/)?.[1] ?? "";
+const emailedPassword = async (email: string, previous?: string) =>
+  (await mailText(email, /Your Sheet Happens Officer account/, previous)).match(/Password: (\S+)/)?.[1] ?? "";
+const resetToken = async (email: string) =>
+  (await mailText(email, /Reset your Sheet Happens Officer password/)).match(/token=([\w-]+)/)?.[1] ?? "";
 
 /** A ZZ-TEST person added by the Super Admin. Returns the emailed password. */
 async function issued() {
@@ -44,7 +34,7 @@ async function issued() {
   const r = await admin.c.post("/api/team", { firstName: "ZZ-TEST", lastName: `Forced${tag}`, email, role: "MEMBER" });
   expect(r.status, JSON.stringify(r.json)).toBe(201);
   created.push(r.json.person.id as string);
-  const password = emailedPassword(email);
+  const password = await emailedPassword(email);
   expect(password).toMatch(/^[A-Za-z0-9]{12}$/);
   return { email, password, id: r.json.person.id as string };
 }
@@ -58,7 +48,7 @@ async function ownPassword() {
 }
 
 async function openPage() {
-  return (await browser.newContext({ baseURL: BASE })).newPage();
+  return (await browser.newContext({ baseURL: BASE, httpCredentials: browserCredentials })).newPage();
 }
 
 /**
@@ -102,19 +92,21 @@ async function setOwn(page: Page, emailed: string, next: string) {
   await page.getByRole("button", { name: "Save and continue" }).click();
 }
 
-test.describe("qa:TC missing APL-2624 a Super-Admin-issued password must be changed at first sign-in", { tag: "@local-only" }, () => {
+test.describe("qa:TC missing APL-2624 a Super-Admin-issued password must be changed at first sign-in", { tag: "@staging-capable" }, () => {
   // The browser is Playwright's own (playwright.config.ts: PW_CHROMIUM or the installed Chromium).
   test.beforeAll(async ({ browser: b }) => {
     test.setTimeout(180000);
-    if (!/^(localhost|127\.0\.0\.1)$/.test(new URL(BASE).hostname)) {
-      throw new Error(`Refusing to run against ${BASE}: this spec is local only.`);
-    }
+    requirePasswordFixture();
     browser = b;
     admin = await superAdmin();
   });
 
   test.afterAll(async () => {
-    for (const id of created) await admin?.c.post(`/api/team/${id}/deactivate`, { reassign: "leaders" });
+    for (const id of created) {
+      const result = await admin.c.post(`/api/team/${id}/deactivate`, { reassign: "leaders" });
+      expect(result.status, "Owned fixture deactivation must succeed").toBe(200);
+    }
+    if (admin) expect((await admin.c.post("/api/auth/signout")).status).toBe(204);
   });
 
   test("qa:TC missing AC1: after signing in on an emailed password every screen but Set your own password and Sign out is blocked", async () => {
@@ -201,7 +193,7 @@ test.describe("qa:TC missing APL-2624 a Super-Admin-issued password must be chan
     await setOwn(page, password, NEW_PW);
     await visible(page.getByRole("heading", { name: "Projects" }));
     expect((await admin.c.post(`/api/team/${id}/resend`)).status).toBe(200);
-    const fresh = emailedPassword(email);
+    const fresh = await emailedPassword(email, password);
     expect(fresh).not.toBe(password);
     await page.goto("/projects");
     await page.waitForURL(/\/signin/); // Resend signs every session out
@@ -226,7 +218,7 @@ test.describe("qa:TC missing APL-2624 a Super-Admin-issued password must be chan
   test("qa:TC missing AC6: a person who reset their password with Forgot password is never forced", async () => {
     const { email, password } = await issued();
     expect((await new Client().post("/api/auth/forgot-password", { email })).status).toBe(200);
-    const token = resetToken(email);
+    const token = await resetToken(email);
     expect(token).toBeTruthy();
     const page = await openPage();
     await page.goto(`/reset?token=${token}`);
@@ -250,7 +242,7 @@ test.describe("qa:TC missing APL-2624 a Super-Admin-issued password must be chan
     expect(mail.text).not.toMatch(/stays valid/i);
 
     const page = await openPage();
-    await signIn(page, admin.email, PW);
+    await signIn(page, admin.email, ADMIN_PW);
     await page.goto("/team");
     await page.getByRole("button", { name: /Add person/ }).click();
     const dlg = page.getByRole("dialog", { name: "Add person" });
