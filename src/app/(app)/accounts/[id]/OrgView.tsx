@@ -5,12 +5,13 @@ import { api, dueLabel, todayIST, useGet } from "@/components/api";
 import { Confirm, Field, Modal } from "@/components/ui";
 import { Page, useMe } from "../../Shell";
 import "../scroll.css";
+import OrgDialog from "../OrgDialog";
 
 type Contact = { id: string; name: string; role: string | null; email: string | null; phone: string | null; canEdit: boolean; knownBy: { id: string; name: string; active: boolean }[]; lastSpoke: string | null };
 type Note = { id: string; kind: string; date: string; text: string; author: { id: string; name: string }; deal: { id: string; name: string } | null; contacts: { id: string; name: string }[]; canDelete: boolean };
 type Tree = { id: string; name: string; children: Tree[] };
 type Org = {
-  id: string; name: string; kind: string | null; country: string | null; archived: boolean; path: { id: string; name: string }[]; canEdit: boolean; createdBy: string | null;
+  id: string; name: string; kind: string | null; country: string | null; archived: boolean; parentId: string | null; level: "GROUP" | "LEGAL_ENTITY" | "BUYING_OFFICE" | null; path: { id: string; name: string }[]; canEdit: boolean; createdBy: string | null;
   deals: { projectId: string; name: string; role: string; archived: boolean; stage: { name: string } | null; pipeline: string | null; leader: { name: string } | null }[];
   contacts: Contact[]; notes: Note[]; tree: Tree | null;
   tasks: { id: string; title: string; done: boolean; dueDate: string | null; assignee: string; project: { id: string; name: string; type: string } }[];
@@ -98,6 +99,7 @@ export default function OrgView({ params }: { params: Promise<{ id: string }> })
   const { id } = use(params);
   const me = useMe();
   const { data, status, reload } = useGet<{ organisation: Org }>(`/api/orgs/${id}`);
+  const [editing, setEditing] = useState(false);
   const [hist, setHist] = useState<H | null>(null);
   const [dlg, setDlg] = useState<null | { contact?: Contact }>(null);
   const [rm, setRm] = useState<Contact | null>(null);
@@ -109,6 +111,7 @@ export default function OrgView({ params }: { params: Promise<{ id: string }> })
     <Page title={o?.name ?? "…"} sub={o && <span className="crumb"><Link href="/accounts">Accounts</Link>{o.path.slice(0, -1).map((p) => <span key={p.id}> / <Link href={`/accounts/${p.id}`}>{p.name}</Link></span>)}</span>}
       actions={o && <>
         <Link className="btn" href={`/deals/new?org=${o.id}`}>+ Deal</Link>
+        {o.canEdit && !o.archived && <button className="btn ghost" onClick={() => setEditing(true)}>Edit details</button>}
         {o.canEdit && <button className="btn ghost" onClick={archive}>{o.archived ? "Unarchive" : "Archive"}</button>}
         {me.orgRole !== "MEMBER" && <button className="btn ghost" onClick={showHistory}>History</button>}
       </>}>
@@ -170,6 +173,7 @@ export default function OrgView({ params }: { params: Promise<{ id: string }> })
       {o?.tree && <><div className="grp">Organisation tree</div><div className="card">{<TreeView node={o.tree} current={o.id} />}</div></>}
       {hist && <><div className="grp">History</div><div className="list">{hist.map((h) => <div key={h.id} className="row">{h.who} · {h.action} · {new Date(h.at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}</div>)}</div></>}
 
+      {editing && o?.canEdit && !o.archived && <OrgDialog organisation={o} onClose={() => setEditing(false)} onDone={() => { setEditing(false); reload(); }} />}
       {dlg && <ContactDialog orgId={id} contact={dlg.contact} onClose={() => setDlg(null)} onDone={() => { setDlg(null); reload(); }} />}
       {rm && <Confirm title="Remove contact?" yes="Remove" danger body={`${rm.name} is removed. You can undo this right after.`} onNo={() => setRm(null)} onYes={async () => { await api("DELETE", `/api/contacts/${rm.id}`); setRm(null); reload(); }} />}
     </Page>

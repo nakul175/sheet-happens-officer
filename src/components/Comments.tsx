@@ -86,7 +86,7 @@ export function Comments({ taskId, onChanged }: { taskId: string; onChanged?: ()
   const data = list.data;
   return (
     <section className="comments" aria-labelledby="comments-heading">
-      <h3 id="comments-heading">Comments{data ? ` (${data.comments.length})` : ""}</h3>
+      <h2 id="comments-heading">Comments{data ? ` (${data.comments.length})` : ""}</h2>
       {list.loading && !data && <p className="hint">Loading comments…</p>}
       {list.error && !data && <p className="hint" role="alert">{list.error}</p>}
       {data && data.comments.length === 0 && <p className="hint">No comments yet.</p>}
@@ -125,7 +125,7 @@ export function Comments({ taskId, onChanged }: { taskId: string; onChanged?: ()
           <textarea
             id="new-comment" className="in" rows={3} maxLength={5000} value={text}
             placeholder="Write a comment. Type @ to mention someone."
-            aria-autocomplete="list" aria-controls="mention-list"
+            aria-autocomplete="list" aria-controls={matches.length ? "mention-list" : undefined}
             aria-activedescendant={matches.length ? `mention-opt-${matches[shown].id}` : undefined}
             onChange={(e) => { setText(e.target.value); setCaret(e.target.selectionStart ?? e.target.value.length); setClosed(false); setActive(0); }}
             onClick={(e) => setCaret((e.target as HTMLTextAreaElement).selectionStart ?? 0)}

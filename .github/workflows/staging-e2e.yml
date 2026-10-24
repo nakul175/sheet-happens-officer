@@ -24,7 +24,6 @@
 #               20 when the parallel matrix runs, plus 1 when serial specs were picked. Fewer files, a failed
 #               download, or a missing-report marker fails the job. It also fails when run is 0 or skipped equals total.
 #   report      merges every job's blob report into one HTML report.
-
 #
 # max_parallel: the staging database is shared with production and allows 25 connections. Do not raise it above 5 until NJ approves
 # a connection pool (PgBouncer) or a bigger database.
@@ -75,8 +74,9 @@ env:
   PLAYWRIGHT_HTML_OPEN: never
   # Specs that read or change org-wide state another shard would disturb (counts, Trash, Activity, people, notifications, a shared
   # account's password or sessions), so they run in the e2e-serial job, alone. APL-2610 covers APL-2671 too. Ids are file names.
+  # A @local-only spec is never named here (SHO-2882): it is left out of the collection, so it would only empty the serial job.
   SERIAL_SPECS: >-
-    APL-2479 APL-2483 APL-2521 APL-2542-totals APL-2572 APL-2609 APL-2610 APL-2640 APL-2649
+    APL-2479 APL-2483 APL-2521 APL-2542-totals APL-2572 APL-2610 APL-2640 APL-2649
 
 jobs:
   plan:
@@ -94,7 +94,9 @@ jobs:
         env:
           TARGET: ${{ inputs.target }}
         run: |
-          if [[ "${TARGET,,}" =~ ^(www\.|app\.)?sheethappensofficer\.com\.?$ ]]; then
+          # ${TARGET,,} is bash 4+; lower-case with tr so the check also runs under bash 3.2 (tests/staging-e2e-seed.test.ts).
+          target_lc=$(printf '%s' "$TARGET" | tr '[:upper:]' '[:lower:]')
+          if [[ "$target_lc" =~ ^(www\.|app\.)?sheethappensofficer\.com\.?$ ]]; then
             echo "::error::Refusing to run against production ($TARGET)."; exit 1
           fi
           if ! [[ "$TARGET" =~ $TARGET_ALLOWLIST ]]; then
@@ -130,6 +132,13 @@ jobs:
           vitest_specs=$(node -e 'process.stdout.write(require("./tests/e2e/vitest-specs.cjs").vitestSpecFiles().join(" "))')
           is_vitest() { [[ " $vitest_specs " == *" $(basename "$1") "* ]]; }
           echo "Vitest story specs, never picked: ${vitest_specs:-none}"
+          # SHO-2882: a spec whose describe carries @local-only is never picked either. The shard and serial commands
+          # invert that tag, so collecting the file only gives a job with no tests at all ("Error: No tests found"), which
+          # is how APL-2609 failed the serial job. The list is read from the tags by scripts/ci/local-only-specs.mjs, the
+          # same source the staging-regression summary prints; a spec tagged on one test (APL-2471 AC4) is still picked.
+          local_only=$(node scripts/ci/local-only-specs.mjs --files)
+          is_local_only() { [[ " $local_only " == *" $(basename "$1") "* ]]; }
+          echo "@local-only story specs, never picked: ${local_only:-none}"
           files=()
           read -ra toks <<< "$SPECS"   # split on spaces without expanding globs against the repo root
           for tok in "${toks[@]}"; do
@@ -144,21 +153,25 @@ jobs:
               pattern="tests/e2e/stories/$tok"
               [[ "$pattern" == *.ts ]] || pattern="$pattern.spec.ts"
             fi
-            matched=(); vitest_hit=()
+            matched=(); vitest_hit=(); local_hit=()
             for f in $pattern; do
               [[ -f "$f" && "$f" == tests/e2e/stories/*.spec.ts ]] || continue
-              if is_vitest "$f"; then vitest_hit+=("$f"); else matched+=("$f"); fi
+              if is_vitest "$f"; then vitest_hit+=("$f"); elif is_local_only "$f"; then local_hit+=("$f"); else matched+=("$f"); fi
             done
             if [ ${#matched[@]} -eq 0 ] && [ ${#vitest_hit[@]} -gt 0 ]; then
               echo "::error::$tok selects only Vitest story specs (${vitest_hit[*]}). npm test runs them; Playwright ignores them (VITEST_SPECS)."; exit 1
             fi
+            if [ ${#matched[@]} -eq 0 ] && [ ${#local_hit[@]} -gt 0 ]; then
+              echo "::error::$tok selects only @local-only story specs (${local_hit[*]}). They sign up and verify aliases from a local outbox; staging has real accounts and mail (APL-2925)."; exit 1
+            fi
             if [ ${#matched[@]} -eq 0 ]; then echo "::error::No spec file matches: $tok"; exit 1; fi
             [ ${#vitest_hit[@]} -eq 0 ] || echo "$tok: left out Vitest story specs ${vitest_hit[*]}"
+            [ ${#local_hit[@]} -eq 0 ] || echo "$tok: left out @local-only story specs ${local_hit[*]}"
             files+=("${matched[@]}")
           done
           if [ ${#files[@]} -eq 0 ]; then
-            for f in tests/e2e/stories/*.spec.ts; do is_vitest "$f" || files+=("$f"); done
-            [ ${#files[@]} -gt 0 ] || { echo "::error::No Playwright spec files in tests/e2e/stories on this branch (Vitest specs are not picked). Start the run from the branch with the specs (e.g. qa/story-e2e)."; exit 1; }
+            for f in tests/e2e/stories/*.spec.ts; do is_vitest "$f" || is_local_only "$f" || files+=("$f"); done
+            [ ${#files[@]} -gt 0 ] || { echo "::error::No Playwright spec files in tests/e2e/stories on this branch (Vitest and @local-only specs are not picked). Start the run from the branch with the specs (e.g. qa/story-e2e)."; exit 1; }
           fi
           parallel=(); serial=()
           for f in $(printf '%s\n' "${files[@]}" | sort -u); do
@@ -192,8 +205,10 @@ jobs:
             echo "::error::Refusing to seed '$TARGET': only pr1-pr8.staging.sheethappensofficer.com (never staging or production)."; exit 1
           fi
           slot="pr${BASH_REMATCH[1]}"; want_schema="sho_${slot}"
+          # ${var,,} is bash 4+; the offline regression runs this step with a dev machine's bash 3.2, so lower-case with tr.
+          lower() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
           # AC23(a): never seed with NODE_ENV=production (APL-2590 D4).
-          if [ "${NODE_ENV,,}" = production ]; then
+          if [ "$(lower "$NODE_ENV")" = production ]; then
             echo "::error::NODE_ENV=production. Refusing to seed."; exit 1
           fi
           url="$SEED_DATABASE_URL"
@@ -213,7 +228,7 @@ jobs:
           echo "::add-mask::$url"
           rest="${url#*://}"; authority="${rest%%[/?#]*}"; userinfo=""; [[ "$authority" == *@* ]] && userinfo="${authority%@*}"
           [[ "$userinfo" == *:* ]] && echo "::add-mask::${userinfo#*:}"
-          hostport="${authority##*@}"; host="${hostport%:*}"; host="${host,,}"; host="${host%.}"
+          hostport="${authority##*@}"; host=$(lower "${hostport%:*}"); host="${host%.}"
           path="${rest#"$authority"}"; path="${path%%#*}"; db="${path%%\?*}"; db="${db#/}"
           query=""; [[ "$path" == *\?* ]] && query="${path#*\?}"
           if [[ "$url" == *unused:unused@127.0.0.1* || "$host" == 127.0.0.1 || "$host" == localhost || "$host" == "::1" || "$host" == "[::1]" ]]; then
@@ -222,7 +237,7 @@ jobs:
           # AC23(a) allowlist, matched exactly (APL-2590 D1): the one staging DB host (#128's STAGING_DB_HOSTS) and the sho_staging DB.
           # Anything else is refused: multi-host lists, IP forms, sslip/nip names, production, a port-less look-alike.
           # The whole host:port is matched, so "host:1,other" and "[::ffff:...]" cannot pass on a stripped port.
-          if ! [[ "${hostport,,}" =~ ^private-sho-db-do-user-45345612-0\.k\.db\.ondigitalocean\.com\.?(:[0-9]{1,5})?$ ]]; then
+          if ! [[ "$(lower "$hostport")" =~ ^private-sho-db-do-user-45345612-0\.k\.db\.ondigitalocean\.com\.?(:[0-9]{1,5})?$ ]]; then
             echo "::error::SHO_PR_SLOT_DATABASE_URL host is not the staging DB host. Refusing to seed."; exit 1
           fi
           if [ "$db" != sho_staging ]; then
@@ -233,7 +248,7 @@ jobs:
           schemas=()
           IFS='&' read -ra params <<< "$query"
           for kv in "${params[@]}"; do
-            key="${kv%%=*}"; key="${key,,}"
+            key=$(lower "${kv%%=*}")
             case "$key" in
               host|hostaddr|dbname|options|*%*)
                 echo "::error::SHO_PR_SLOT_DATABASE_URL overrides the host, DB name or search path in its query. Refusing to seed."; exit 1;;

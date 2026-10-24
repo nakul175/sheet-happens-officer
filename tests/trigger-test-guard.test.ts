@@ -1,4 +1,11 @@
 // APL-2700. Unit tests for the guard. No database connection.
+//
+// Test-case ids. A title carrying `qa:TC-<TICKET>-<8 hex>@v<n>` is the QA-assigned traceability tag for that
+// case (the APL-2700 cases below carry qa:TC-APL2700-6f0a11d1..d9). QA assigns the id for a case; nothing in
+// this repo mints, lists or derives one. There is no registry, generator, fixture or doc holding the ids, and
+// a `git log -S'qa:TC-APL2764'` over every ref finds nothing, so an id QA has not assigned cannot be looked up
+// here. A title ending `qa:TC missing` is a case whose id is still outstanding: leave the marker, do not
+// invent an id.
 import { describe, expect, it } from "vitest";
 import { connectionTarget, triggerTestAllowed, triggerUrlAllowed, type TriggerTestTarget } from "./trigger-test-guard";
 
@@ -14,6 +21,10 @@ describe("@APL-2700 trigger test guard", () => {
     expect(triggerTestAllowed({ ...local, host: "127.0.0.1" })).toBe(true);
   });
 
+  // TODO(SHO-2878): this APL-2764 case (1 of 2) has no QA-assigned test-case id. To close it, QA must assign
+  // one id of the form qa:TC-APL2764-<8 hex>@v1 for "allows the CI database sho_test exactly, and nothing else
+  // that only resembles it", then that id replaces the `qa:TC missing` marker at the end of the title below.
+  // It cannot be pinned from this repo: see the header note on test-case ids.
   it("@APL-2764 allows the CI database sho_test exactly, and nothing else that only resembles it qa:TC missing", () => {
     expect(triggerTestAllowed({ ...local, database: "sho_test" })).toBe(true);
     expect(triggerTestAllowed({ ...local, database: "SHO_TEST" })).toBe(true);
@@ -27,6 +38,10 @@ describe("@APL-2700 trigger test guard", () => {
     expect(triggerTestAllowed({ ...local, database: "defaultdb" }, "1")).toBe(false);
   });
 
+  // TODO(SHO-2878): this APL-2764 case (2 of 2) has no QA-assigned test-case id. To close it, QA must assign
+  // one id of the form qa:TC-APL2764-<8 hex>@v1 for "refuses sho_test on a remote host, with public or sho_pr*
+  // schemas, or via a query override", then that id replaces the `qa:TC missing` marker at the end of the title
+  // below. It cannot be pinned from this repo: see the header note on test-case ids.
   it("@APL-2764 refuses sho_test on a remote host, with public or sho_pr* schemas, or via a query override qa:TC missing", () => {
     expect(triggerTestAllowed({ ...local, host: "db.example.com", database: "sho_test" }, "1")).toBe(false);
     expect(triggerTestAllowed({ ...local, database: "sho_test", schema: "public" }, "1")).toBe(false);

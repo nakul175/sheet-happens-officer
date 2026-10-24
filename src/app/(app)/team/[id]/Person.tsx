@@ -3,13 +3,11 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useState } from "react";
 import { api, useGet } from "@/components/api";
+import { PASSWORD_CHANGE_REQUIRED } from "@/lib/auth-messages";
 import { LoadFailed, Skeleton } from "@/components/ui";
 import { Page, roleLabel, useMe } from "../../Shell";
 
 type Proj = { id?: string; name: string; href?: string | null; role?: string; openTasks?: number };
-
-/** One fixed sentence. No count, no deal name, no link. */
-export const HIDDEN_DEAL_SENTENCE = "A deal you can't view.";
 
 /** A hidden deal is that sentence with no link. A visible project keeps /projects/<id>. */
 export function personProjectHref(project: { id?: string; href?: string | null }): string | null {
@@ -29,10 +27,9 @@ export default function PersonPage() {
   const g = useGet<{ person: Person }>(`/api/team/${id}`);
   const [note, setNote] = useState<null | { ok: boolean; text: string }>(null);
   // APL-2664 v1.2. Each failed read has its own plain message. A 403 is no access, except the
-  // forced-password 403 (APL-2624). The shared client is unchanged, so this matches the error text
-  // that client already returns for PASSWORD_CHANGE_REQUIRED. Mocked until PR #8 merges.
+  // forced-password 403 (APL-2624), which this branches on by its code (SHO-2695) so the sentence can be reworded.
   const settled = !g.loading;
-  const passwordChange = settled && g.status === 403 && g.error === "Set your own password first.";
+  const passwordChange = settled && g.status === 403 && g.code === PASSWORD_CHANGE_REQUIRED;
   const denied = settled && g.status === 403 && !passwordChange;
   // AC5: a 401 shows no message and no Retry here. The global redirect stays in api(), and the
   // visible session-expired sentence is APL-2652.
@@ -43,6 +40,10 @@ export default function PersonPage() {
   const p = denied || passwordChange || expired || missing ? undefined : g.data?.person;
   const admin = me.orgRole !== "MEMBER";
   const self = p?.id === me.id;
+  // SHO-2872. The hidden-deal sentence is the model's (team.ts HIDDEN_DEAL_LABEL, emitted as the
+  // `name` of an href-null row by getPerson). This page prints that value; it keeps no copy of its
+  // own, so a reword on the model side reaches the screen instead of leaving a stale sentence here.
+  const hiddenDeal = p?.projects.find((x) => x.href === null);
 
   async function resend() {
     if (!p) return;
@@ -99,8 +100,8 @@ export default function PersonPage() {
             </div>
           )}
           <h2 style={{ fontSize: 17 }}>{admin ? "Projects" : "Projects you share"}</h2>
-          {p.projects.some((x) => x.href === null) && <p>{HIDDEN_DEAL_SENTENCE}</p>}
-          {p.projects.filter((x) => personProjectHref(x)).length === 0 && !p.projects.some((x) => x.href === null) && <p className="hint">{admin ? "Not on any project yet." : "You are not on a project together."}</p>}
+          {hiddenDeal && <p>{hiddenDeal.name}</p>}
+          {p.projects.filter((x) => personProjectHref(x)).length === 0 && !hiddenDeal && <p className="hint">{admin ? "Not on any project yet." : "You are not on a project together."}</p>}
           {p.projects.some((x) => personProjectHref(x)) && (
             <div className="scroll">
               <table className="tbl stack">

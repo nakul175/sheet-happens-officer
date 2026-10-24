@@ -91,7 +91,7 @@ const WORDS = [
   { n: 0, text: "0 days left" },
 ] as const;
 
-describe("qa:TC-APL2720-01@v1 qa:TC-APL2720-02@v1 @APL-2720 Trash says how many days are left", () => {
+describe("@APL-2720 Trash says how many days are left", () => {
   it.each(WORDS)("qa:TC-APL2720-01@v1 @APL-2720 AC1@v1.0 Time left for daysLeft $n reads exactly $text", async ({ n, text }) => {
     installFetch("LEADER", false, [item(n)]);
     const page = await show(<Trash params={params} />);

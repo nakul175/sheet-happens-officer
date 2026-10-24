@@ -13,7 +13,7 @@
 // qa:TC missing 40 concurrent reminder requests
 import "dotenv/config";
 import { spawn, type ChildProcess } from "node:child_process";
-import { closeSync, existsSync, mkdtempSync, openSync, readdirSync, readFileSync, readlinkSync } from "node:fs";
+import { closeSync, existsSync, mkdtempSync, openSync, readdirSync, readFileSync } from "node:fs";
 import net from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -21,6 +21,7 @@ import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { db } from "../src/lib/db";
 import { istDate, PW } from "./helpers";
+import { portAnswers, stopTree } from "./spawned-listener";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const LOAD = 40;
@@ -82,83 +83,11 @@ function freePort(): Promise<number> {
   });
 }
 
-function descendantPids(rootPid: number) {
-  const children = new Map<number, number[]>();
-  for (const dir of readdirSync("/proc")) {
-    if (!/^\d+$/.test(dir)) continue;
-    const pid = Number(dir);
-    let stat = "";
-    try { stat = readFileSync(`/proc/${pid}/stat`, "utf8"); } catch { continue; }
-    const ppid = Number(stat.slice(stat.lastIndexOf(")") + 2).split(" ")[1]);
-    const list = children.get(ppid) ?? [];
-    list.push(pid);
-    children.set(ppid, list);
-  }
-  const out: number[] = [];
-  const stack = [...(children.get(rootPid) ?? [])];
-  const seen = new Set<number>();
-  while (stack.length) {
-    const pid = stack.pop();
-    if (pid === undefined || seen.has(pid) || pid === process.pid || pid < 2) continue;
-    seen.add(pid);
-    out.push(pid);
-    stack.push(...(children.get(pid) ?? []));
-  }
-  return out;
-}
-
-function listeningPids(port: number) {
-  const hexPort = port.toString(16).toUpperCase().padStart(4, "0");
-  const inodes = new Set<string>();
-  for (const file of ["/proc/net/tcp", "/proc/net/tcp6"]) {
-    let text = "";
-    try { text = readFileSync(file, "utf8"); } catch { continue; }
-    for (const line of text.split("\n").slice(1)) {
-      const parts = line.trim().split(/\s+/);
-      if (parts.length < 10 || parts[3] !== "0A") continue;
-      if ((parts[1].split(":").pop() ?? "").toUpperCase() === hexPort) inodes.add(parts[9]);
-    }
-  }
-  if (!inodes.size) return [];
-  const found: number[] = [];
-  for (const dir of readdirSync("/proc")) {
-    if (!/^\d+$/.test(dir)) continue;
-    let fds: string[];
-    try { fds = readdirSync(`/proc/${dir}/fd`); } catch { continue; }
-    for (const fd of fds) {
-      try {
-        const target = readlinkSync(`/proc/${dir}/fd/${fd}`);
-        const inode = /^socket:\[(\d+)\]$/.exec(target)?.[1];
-        if (inode && inodes.has(inode)) { found.push(Number(dir)); break; }
-      } catch { /* fd vanished */ }
-    }
-  }
-  return found;
-}
-
-function isInGroup(ancestor: number, pid: number) {
-  let cur = pid;
-  const seen = new Set<number>();
-  while (cur > 1 && !seen.has(cur)) {
-    if (cur === ancestor) return true;
-    seen.add(cur);
-    let stat = "";
-    try { stat = readFileSync(`/proc/${cur}/stat`, "utf8"); } catch { return false; }
-    const ppid = Number(stat.slice(stat.lastIndexOf(")") + 2).split(" ")[1]);
-    if (!ppid) return false;
-    cur = ppid;
-  }
-  return false;
-}
-
-/** Stops this server and the children it spawned, each by exact PID. */
+/** Stops this server and everything it spawned. The child is `detached: true`, so it leads its own
+ *  process group and kill(-pid) reaches every process the spawn started - no process table read. */
 function stopServer(server: Running | null) {
   if (!server || server.pid === process.pid || server.pid < 2) return;
-  const listeners = listeningPids(server.port).filter((pid) => pid !== process.pid && isInGroup(server.pid, pid));
-  const targets = [...new Set([...descendantPids(server.pid), ...listeners, server.pid])].filter((pid) => pid > 1 && pid !== process.pid);
-  for (const pid of targets) {
-    try { process.kill(pid, "SIGKILL"); } catch { /* already gone */ }
-  }
+  stopTree(server.pid);
   spawned.delete(server.pid);
 }
 
@@ -383,10 +312,11 @@ async function expectOpsReminder(base: string, exact: boolean) {
 }
 
 /** The listener was started with this mode. A later change in this process does not rewrite that line. */
-function expectOwnProcess(server: Running) {
+async function expectOwnProcess(server: Running) {
   expect(server.pid).not.toBe(process.pid);
-  const listeners = listeningPids(server.port).filter((pid) => isInGroup(server.pid, pid));
-  expect(listeners.length, `${server.mode} is listening`).toBeGreaterThan(0);
+  // SHO-2771: the listener used to be found through /proc/net/tcp and /proc/<pid>/fd, so this assertion
+  // could only run on Linux. The port answers or it does not, and nothing else was started on it.
+  expect(await portAnswers(server.port), `${server.mode} is listening`).toBe(true);
   const previous = process.env.CRM_VISIBLE;
   process.env.CRM_VISIBLE = server.mode === "off" ? "all" : "off";
   try {
@@ -425,7 +355,7 @@ async function postReminders(base: string, count: number) {
 async function runMode(mode: Mode) {
   const server = await startModeServer(mode);
   try {
-    expectOwnProcess(server);
+    await expectOwnProcess(server);
     await clearReminders();
     await postReminders(server.base, 1);
     if (mode === "unset" || mode === "all") {
@@ -464,6 +394,8 @@ describe("qa:TC missing APL-2729 AC4: reminder jobs run on one server process pe
     if (!existsSync(path.join(root, ".next", "BUILD_ID"))) {
       throw new Error("CRM_VISIBLE mode cannot start: the production build is missing (.next/BUILD_ID)");
     }
+    // SHO-2771: no procfs precondition here any more - seed, stopServer and the mode checks read no
+    // process table, so the tier runs on macOS as well as Linux.
     const server = await startModeServer("unset");
     try {
       await seed(server);
@@ -474,10 +406,7 @@ describe("qa:TC missing APL-2729 AC4: reminder jobs run on one server process pe
 
   afterAll(async () => {
     for (const pid of [...spawned]) {
-      const targets = [...descendantPids(pid), pid].filter((target) => target > 1 && target !== process.pid);
-      for (const target of targets) {
-        try { process.kill(target, "SIGKILL"); } catch { /* already gone */ }
-      }
+      stopTree(pid);
       spawned.delete(pid);
     }
     if (member?.id) {

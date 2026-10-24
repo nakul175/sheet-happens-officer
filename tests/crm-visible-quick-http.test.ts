@@ -6,6 +6,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { account, admin, istDate, superAdmin, task, type Account } from "./helpers";
+import { hiddenDeal } from "./hidden-project";
 import { db, trackModelUsage } from "./concierge-helpers";
 import { QUICK_ACTIONS } from "../src/lib/concierge/reads";
 
@@ -51,16 +52,14 @@ describe.skipIf(!built)("POST /api/concierge/quick/:id with a hidden deal, over 
     const viewer = await account("qhviewer");
     const out = await account("qhout");
     const tag = `qhtag${Date.now()}`;
-    const dealName = `Quiet deal ${tag}`;
-    const pipe = (await lead.c.get("/api/deals/pipelines")).json.pipelines.find((p: { key: string }) => p.key === "DEAL_PROACTIVE");
-    const orgId = (await lead.c.post("/api/orgs", { name: `Org ${tag}` })).json.organisation.id;
-    const made = await lead.c.post("/api/deals", { name: dealName, organisationId: orgId, pipelineId: pipe.id, leaderId: lead.id, whyPursue: "fit", nextStep: { title: "First step", dueDate: istDate(3) } });
-    expect(made.status, JSON.stringify(made.json)).toBe(201);
-    const dealId = made.json.deal.id as string;
     // Editor and Admin hold deal work; the Viewer (a second non-admin role) is a member who holds none.
-    for (const [who, role] of [[ed, "EDITOR"], [ad, "EDITOR"], [viewer, "VIEWER"]] as const) {
-      expect((await lead.c.post(`/api/projects/${dealId}/members`, { userId: who.id, role })).status).toBe(201);
-    }
+    const fixture = await hiddenDeal(sa, {
+      leader: lead,
+      label: tag,
+      members: [{ who: ed, role: "EDITOR" }, { who: ad, role: "EDITOR" }, { who: viewer, role: "VIEWER" }],
+    });
+    const dealId = fixture.deal.id;
+    const dealName = fixture.deal.name;
     await task(ed, dealId, { title: `Soon step ${tag}`, dueDate: istDate(2) });
     await task(ad, dealId, { title: `Admin step ${tag}`, dueDate: istDate(2) });
 

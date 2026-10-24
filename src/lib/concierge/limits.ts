@@ -5,7 +5,11 @@ import { modelConfig, modelEnabled } from "@/lib/model";
 import { fullDate, monthStartIST, nextMonthStartIST, nextWeekStartIST, weekStartIST } from "@/lib/concierge/dates";
 
 export type DisabledCode = "NOT_ENABLED" | "MONTH_CAP" | "WEEK_CAP" | "PROVIDER_DOWN";
-export type Disabled = { code: DisabledCode; message: string; resumesAt?: string };
+/**
+ * SHO-2927: `reason` says why the concierge is off when the cause is the model key rather than the
+ * owner's switch. The message text is unchanged (the UI shares it); this is for operators and tests.
+ */
+export type Disabled = { code: DisabledCode; message: string; resumesAt?: string; reason?: "STAGE_KEY_MISSING" | "UNKNOWN_STAGE" };
 
 const numEnv = (v: string | undefined, d: number) => {
   const n = v === undefined || v.trim() === "" ? NaN : Number(v);
@@ -32,7 +36,10 @@ export const markProviderDown = (now = Date.now()) => { downUntil = now + DOWN_M
 export const clearProviderDown = () => { downUntil = 0; };
 export const providerDownUntil = (now = Date.now()) => (downUntil > now ? new Date(downUntil) : null);
 
-export const notEnabled = (): Disabled => ({ code: "NOT_ENABLED", message: "The concierge is not switched on yet." });
+export const notEnabled = (reason?: Disabled["reason"]): Disabled =>
+  reason
+    ? { code: "NOT_ENABLED", message: "The concierge is not switched on yet.", reason }
+    : { code: "NOT_ENABLED", message: "The concierge is not switched on yet." };
 export const providerDown = (until: Date): Disabled => ({
   code: "PROVIDER_DOWN",
   message: "The concierge cannot reach its language service right now. The rest of the app works normally; try again in a minute.",
@@ -41,7 +48,8 @@ export const providerDown = (until: Date): Disabled => ({
 
 /** Why the concierge cannot answer this person right now, or null. Order: switch, month, week, provider. */
 export async function disabledFor(userId: string, now = new Date()): Promise<Disabled | null> {
-  if (!modelEnabled(modelConfig())) return notEnabled();
+  const cfg = modelConfig();
+  if (!modelEnabled(cfg)) return notEnabled(cfg.keyProblem ?? undefined);
   const month = await monthCap(now);
   if (month) return month;
   const used = await weekMessages(userId, now);

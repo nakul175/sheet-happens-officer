@@ -32,8 +32,10 @@ export async function usageSummary(user: Actor, now = new Date()) {
     monthStart: monthStart.toISOString(),
     weekStart: weekStart.toISOString(),
     resumesAt: nextMonthStartIST(now).toISOString(),
-    // percent is the whole number (0 when the screen shows "0%" or "<1%", or no ceiling is set). The screen prints percentUsedLabel, not this field.
-    // configured is false when MONTHLY_CEILING_USD is 0 or unset: usd is then the default safety cap, which still applies (APL-2950).
+    // percent is the whole number against the ceiling above. There is no "no ceiling is set" case here: when
+    // MONTHLY_CEILING_USD is 0 or unset, usd is the $100 default safety cap, which still applies (APL-2950), so
+    // percent is worked out against it. It is 0 only when the screen shows "0%" or "<1%".
+    // The screen prints percentUsedLabel, not this field.
     ceiling: { usd: ceiling, configured: monthlyCeilingConfigured(), spendUsd: spend, percent: percentUsedNumber(spend, ceiling), warnAtPercent: WARN_AT * 100, weeklyMessageCap: weeklyMessageCap() },
     month: {
       calls: month._count, inputTokens: month._sum.inputTokens ?? 0, outputTokens: month._sum.outputTokens ?? 0, costUsd: spend,

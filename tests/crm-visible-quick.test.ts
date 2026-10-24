@@ -4,6 +4,7 @@
 // Only the Next request APIs the route needs (cookies, connection) are stubbed.
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { account, admin, istDate, superAdmin, task, type Account } from "./helpers";
+import { hiddenProjectFixture } from "./hidden-project";
 import { actor, db, say, script, useFakeModel } from "./concierge-helpers";
 import { fakeCallCount, type ModelRequest } from "../src/lib/model";
 import { QUICK_ACTIONS } from "../src/lib/concierge/reads";
@@ -73,18 +74,11 @@ async function hiddenDeal(label: string) {
   const member = await account(`${label}ed`);
   const outsider = await account(`${label}out`);
   const tag = `${label}${Date.now()}`;
-  const dealName = `Hush deal ${tag}`;
-  const pipe = (await lead.c.get("/api/deals/pipelines")).json.pipelines.find((p: { key: string }) => p.key === "DEAL_PROACTIVE");
-  const orgId = (await lead.c.post("/api/orgs", { name: `Org ${tag}` })).json.organisation.id;
-  const made = await lead.c.post("/api/deals", { name: dealName, organisationId: orgId, pipelineId: pipe.id, leaderId: lead.id, whyPursue: "fit", nextStep: { title: "First step", dueDate: istDate(3) } });
-  expect(made.status, JSON.stringify(made.json)).toBe(201);
-  const dealId = made.json.deal.id as string;
-  for (const who of [member, ad]) expect((await lead.c.post(`/api/projects/${dealId}/members`, { userId: who.id, role: "EDITOR" })).status).toBe(201);
-  await task(member, dealId, { title: `Soon step ${tag}`, dueDate: istDate(2) });
-  await task(ad, dealId, { title: `Admin step ${tag}`, dueDate: istDate(2) });
-  const plain = await outsider.c.post("/api/projects", { name: `Plain ${tag}`, leaderId: outsider.id });
-  expect(plain.status, JSON.stringify(plain.json)).toBe(201);
-  return { ad, member, tag, dealName, dealId, otherId: plain.json.project.id as string };
+  // plainMembers: [] keeps the control a project the deal's people are not in, so it is the reference refusal.
+  const fixture = await hiddenProjectFixture(sa, { leader: lead, label: tag, members: [member, ad], plainLeader: outsider, plainMembers: [] });
+  await task(member, fixture.deal.id, { title: `Soon step ${tag}`, dueDate: istDate(2) });
+  await task(ad, fixture.deal.id, { title: `Admin step ${tag}`, dueDate: istDate(2) });
+  return { ad, member, tag, dealName: fixture.deal.name, dealId: fixture.deal.id, otherId: fixture.plain.id };
 }
 
 describe("CRM_VISIBLE and concierge quick actions (SHO-BUG-11)", () => {
@@ -98,14 +92,11 @@ describe("CRM_VISIBLE and concierge quick actions (SHO-BUG-11)", () => {
     const ed = await account("cqed");
     const out = await account("cqout");
     const tag = `cqtag${Date.now()}`;
-    const dealName = `Hush deal ${tag}`;
     // A deal led by `lead`, with the Member `ed` and the Admin `ad` both members holding work due this week and overdue.
-    const pipe = (await lead.c.get("/api/deals/pipelines")).json.pipelines.find((p: { key: string }) => p.key === "DEAL_PROACTIVE");
-    const orgId = (await lead.c.post("/api/orgs", { name: `Org ${tag}` })).json.organisation.id;
-    const made = await lead.c.post("/api/deals", { name: dealName, organisationId: orgId, pipelineId: pipe.id, leaderId: lead.id, whyPursue: "fit", nextStep: { title: "First step", dueDate: istDate(3) } });
-    expect(made.status, JSON.stringify(made.json)).toBe(201);
-    const dealId = made.json.deal.id as string;
-    for (const who of [ed, ad]) expect((await lead.c.post(`/api/projects/${dealId}/members`, { userId: who.id, role: "EDITOR" })).status).toBe(201);
+    // plainMembers: [] keeps the control a project `out` leads alone, so it is the reference refusal for `out`.
+    const fixture = await hiddenProjectFixture(sa, { leader: lead, label: tag, members: [ed, ad], plainLeader: out, plainMembers: [] });
+    const dealId = fixture.deal.id;
+    const dealName = fixture.deal.name;
     await task(ed, dealId, { title: `Soon step ${tag}`, dueDate: istDate(2) });
     await task(ed, dealId, { title: `Late step ${tag}`, dueDate: istDate(-2) });
     await task(ad, dealId, { title: `Admin step ${tag}`, dueDate: istDate(2) });

@@ -1,3 +1,4 @@
+import { addWorkspaceTaskMember } from "@/lib/project-task-membership";
 import type { Prisma } from "@/generated/prisma/client";
 import { assertTaskReadable } from "@/lib/task-access";
 import { ensureNextStep } from "@/lib/deals";
@@ -124,6 +125,7 @@ export async function createTask(
   input: {
     title: string; description?: string | null; dueDate?: string | null; priority?: "LOW" | "MEDIUM" | "HIGH" | "URGENT";
     sectionId?: string; parentId?: string; assigneeId?: string; approverId?: string; collaboratorIds?: string[];
+    addAssigneeToProject?: boolean; addCollaboratorsToProject?: string[];
   },
 ) {
   const a = await projectAccess(user, projectId, { write: true });
@@ -148,6 +150,12 @@ export async function createTask(
     }
     const mine = await activeMember(tx, projectId, user.id, WORKERS);
     const assigneeId = input.assigneeId ?? (mine ? user.id : await leaderId(tx, projectId));
+    if (input.addAssigneeToProject || input.addCollaboratorsToProject?.length) requireManage(a);
+    if (input.addAssigneeToProject) await addWorkspaceTaskMember(tx, user, projectId, assigneeId);
+    for (const collaborator of [...new Set(input.addCollaboratorsToProject ?? [])]) {
+      if (!input.collaboratorIds?.includes(collaborator)) throw new ApiError(400, "Confirm only selected collaborators.");
+      await addWorkspaceTaskMember(tx, user, projectId, collaborator);
+    }
     await requireWorker(tx, projectId, assigneeId, "The assignee");
     if (input.approverId) {
       if (input.approverId === assigneeId) throw new ApiError(400, "The approver cannot be the assignee.");
@@ -184,13 +192,18 @@ export async function createTask(
 // ---------------------------------------------------------------- read
 export async function getTask(user: Actor, id: string) {
   const { t, a } = await loadTask(user, id);
-  const [section, subtasks] = await Promise.all([
+  const [section, subtasks, creator, parent] = await Promise.all([
     db.section.findUniqueOrThrow({ where: { id: t.sectionId } }),
     db.task.findMany({ where: { parentId: id, deletedAt: null }, include: taskInclude, orderBy: [...ORDER] }),
+    db.user.findUnique({ where: { id: t.createdById }, select: { name: true, deactivatedAt: true } }),
+    t.parentId ? db.task.findUnique({ where: { id: t.parentId }, select: { dueDate: true } }) : null,
   ]);
   const viewer = { id: user.id, role: a.role };
   const task = {
     ...present(t, viewer),
+    createdAt: t.createdAt,
+    createdBy: creator && !creator.deactivatedAt ? { name: creator.name } : null,
+    parentDueDate: parent ? formatDueDate(parent.dueDate) : null,
     section: { id: section.id, name: section.name, isDone: section.isDone },
     project: { id: a.project.id, name: a.project.name, archived: !!a.project.archivedAt },
     subtaskList: subtasks.map((s) => present(s, viewer)),
@@ -312,13 +325,21 @@ export async function updateTask(
 }
 
 // ---------------------------------------------------------------- assign, collaborators, approver (4.3, 4.6)
-export async function assignTask(user: Actor, id: string, assigneeId: string, expectedUpdatedAt: unknown) {
+export async function assignTask(user: Actor, id: string, assigneeId: string, expectedUpdatedAt: unknown, addToProject = false) {
   const { t, a } = await guardVersion(user, id, expectedUpdatedAt);
   // The assignee may only hand a task with an approver on to that approver; the Leader and Admins keep full authority (SHO-BUG-6).
   if (t.approverId && user.id === t.assigneeId && assigneeId !== t.approverId && a.role !== "LEADER") {
     throw new ApiError(403, "With an approver, this task can only be handed to the approver.");
   }
+  if (addToProject) requireManage(a);
   return db.$transaction(async (tx) => {
+    if (addToProject) {
+      await addWorkspaceTaskMember(tx, user, t.projectId, assigneeId);
+      await tx.$queryRaw`SELECT "id" FROM "Task" WHERE "id" = ${id} FOR UPDATE`;
+      const current = await tx.task.findUnique({ where: { id }, include: taskInclude });
+      if (!current || current.deletedAt) throw notFound("Task");
+      if (current.updatedAt.getTime() !== classifyExpectedUpdatedAt(expectedUpdatedAt)) await versionConflict(user, id, current, a.role);
+    }
     await requireWorker(tx, t.projectId, assigneeId, "The assignee");
     const toApprover = t.approverId === assigneeId && t.assigneeId !== assigneeId;
     const row = await tx.task.update({ where: { id }, data: { assigneeId, ...(toApprover ? { previousAssigneeId: t.assigneeId } : {}) } });
@@ -330,12 +351,26 @@ export async function assignTask(user: Actor, id: string, assigneeId: string, ex
   });
 }
 
-export async function addCollaborator(user: Actor, id: string, userId: string) {
-  const { t } = await loadTask(user, id, { write: true });
+export async function addCollaborator(user: Actor, id: string, userId: string, options: { addToProject?: boolean; expectedUpdatedAt?: unknown } = {}) {
+  const { t, a } = await loadTask(user, id, { write: true });
+  if (options.addToProject) { requireManage(a); classifyExpectedUpdatedAt(options.expectedUpdatedAt); }
   await db.$transaction(async (tx) => {
+    let collaborators = t.collaborators;
+    if (options.addToProject) {
+      await addWorkspaceTaskMember(tx, user, t.projectId, userId);
+      await tx.$queryRaw`SELECT "id" FROM "Task" WHERE "id" = ${id} FOR UPDATE`;
+      const current = await tx.task.findUnique({ where: { id }, include: taskInclude });
+      if (!current || current.deletedAt) throw notFound("Task");
+      if (current.updatedAt.getTime() !== classifyExpectedUpdatedAt(options.expectedUpdatedAt)) await versionConflict(user, id, current, a.role);
+      collaborators = current.collaborators;
+    }
     await requireMember(tx, t.projectId, userId);
-    if (t.collaborators.some((c) => c.user.id === userId)) throw new ApiError(409, "Already a collaborator.");
-    await tx.taskCollaborator.create({ data: { taskId: id, userId } });
+    if (collaborators.some((c) => c.user.id === userId)) throw new ApiError(409, "Already a collaborator.");
+    try { await tx.taskCollaborator.create({ data: { taskId: id, userId } }); }
+    catch (error) {
+      if (error && typeof error === "object" && "code" in error && error.code === "P2002") throw new ApiError(409, "Already a collaborator.");
+      throw error;
+    }
     await notify(tx, [userId], "COLLABORATOR_ADDED", { actorId: user.id, taskId: id, projectId: t.projectId, data: { title: t.title } });
     await logAction(tx, { actorId: user.id, projectId: t.projectId, targetType: "task", targetId: id, action: "task.collaborator_added", after: { userId } });
   });

@@ -1,4 +1,6 @@
 import { z } from "zod";
+import { parseSubmissionDeadline } from "@/lib/submission-deadline";
+import { dealClassificationFields } from "@/lib/deal-classification";
 
 // Domain rule for self-signup: exactly these two, checked on the server (SHO-US-1.1 AC2, SHO-US-15.1).
 // A Super Admin adding a person is not bound by it (SHO-US-15.2, decision D1).
@@ -91,6 +93,8 @@ export const taskCreate = z.object({
   assigneeId: z.string().min(1).optional(),
   approverId: z.string().min(1).optional(),
   collaboratorIds: z.array(z.string().min(1)).max(50).optional(),
+  addAssigneeToProject: z.boolean().optional(),
+  addCollaboratorsToProject: z.array(z.string().min(1)).max(50).optional(),
 });
 // The updatedAt the person saw when they opened the task; a different value means someone else saved first.
 // APL-2669 / APL-2670: kept as unknown so a missing, empty or malformed token is classified
@@ -105,8 +109,8 @@ export const taskUpdate = z.object({
   blockedReason: z.string().trim().max(300).nullish(),
   expectedUpdatedAt: taskVersion,
 });
-export const taskAssign = z.object({ assigneeId: z.string().min(1), expectedUpdatedAt: taskVersion });
-export const taskCollaborator = z.object({ userId: z.string().min(1) });
+export const taskAssign = z.object({ assigneeId: z.string().min(1), expectedUpdatedAt: taskVersion, addToProject: z.boolean().optional() });
+export const taskCollaborator = z.object({ userId: z.string().min(1), addToProject: z.boolean().optional(), expectedUpdatedAt: z.unknown().optional() });
 export const taskApprover = z.object({ approverId: z.string().min(1).nullable(), expectedUpdatedAt: taskVersion });
 export const taskComplete = z.object({ completeAll: z.boolean().optional(), expectedUpdatedAt: taskVersion });
 export const taskReopen = z.object({ sectionId: z.string().min(1).optional() });
@@ -126,12 +130,13 @@ export const orgUpdate = z.object({
 });
 export const orgArchive = z.object({ archive: z.boolean() });
 export const currencyField = z.enum(["INR", "USD", "EUR"]);
-export const dealDetails = z.object({
+const submissionDeadlineField = z.string().max(40).refine(value => { try { parseSubmissionDeadline(value); return true; } catch { return false; } }, "Use a valid submission date, with an optional time and timezone.");
+export const dealDetails = dealClassificationFields.extend({
   whyPursue: z.string().trim().min(1).max(1000).optional(),
   need: optText(2000), serviceLine: optText(200),
   value: z.number().positive().max(1e13).nullish(), currency: currencyField.nullish(),
   probability: z.number().int().min(0).max(100).nullish(),
-  expectedClose: isoDay.nullish(), introducedBy: optText(200), submissionDeadline: isoDay.nullish(),
+  expectedClose: isoDay.nullish(), introducedBy: optText(200), submissionDeadline: submissionDeadlineField.nullish(),
 });
 export const dealCreate = dealDetails.extend({
   name: z.string().trim().min(1, "Give the deal a name.").max(200),

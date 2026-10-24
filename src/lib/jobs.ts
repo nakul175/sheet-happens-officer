@@ -98,6 +98,59 @@ export async function sendReminders(now = new Date()) {
   });
 }
 
+/**
+ * SECURITY (W226): the one place a job's thrown error becomes data.
+ * The string goes to `JobRun.lastError` (read by GET /api/jobs for the Audit page's tooltip),
+ * into the JOB_FAILED notice text every Super Admin's bell shows (src/lib/feed.ts:81), and into
+ * the 500 the cron caller sees (deploy/job.sh copies that body into /var/log/sho/jobs.log). A
+ * driver, a `fetch()` or a config dump can put a DSN, a token or a host path in `err.message`, so
+ * the shapes that carry one are redacted here by label. The whole message is not dropped: the row
+ * still has to say what failed.
+ *
+ * SECURITY (W244): the fourth sink is the file log. deploy/job.sh:12-13 appends this same 500 body
+ * to /var/log/sho/jobs.log, one line per cron run, where it outlives the row and is read by any
+ * operator with the box. A routine database failure carries no credential, only topology - the host
+ * and port of the machine behind the DSN - so the topology is redacted here too rather than at any
+ * one sink: the port stays, the host goes, and the error class and operation are untouched.
+ */
+const REDACTIONS: [RegExp, string][] = [
+  // scheme://user:password@host — the whole userinfo, because the user name is half of it.
+  [/\b([a-z][a-z0-9+.-]*:\/\/)[^\s/@]+@/gi, "$1[redacted]@"],
+  // `Bearer <token>` before the keyed rule, so the token goes and only the label is left.
+  [/\b(bearer\s+)[A-Za-z0-9._~+/=-]{8,}/gi, "$1[redacted]"],
+  // ?password=… &token=… password: … "apiKey": "…"
+  [/\b(password|passwd|pwd|secret|token|api[_-]?key|apikey|access[_-]?token|authorization)(\s*["']?\s*[=:]\s*["']?)[^\s"',;&)\]}]+/gi, "$1$2[redacted]"],
+  // An absolute host path keeps the file name and loses the directories that name the machine.
+  [/(^|[\s"'(=,[])\/(?:[^\s"'()[\],;/]+\/)+([^\s"'()[\],;/]+)/g, "$1[path]/$2"],
+  // A host and port name a machine on the network: the port stays (it says which service), the host
+  // goes. This is the shape a routine database failure has when it carries no credential at all -
+  // Prisma says "Can't reach database server at db.internal:5432", Node says "connect ECONNREFUSED
+  // 10.0.3.7:5432", a DSN says "postgresql://db.internal:5432/sho". A host needs two dots (or to be
+  // an address, or localhost) so that a repo path such as `src/lib/jobs.ts:86` is left readable.
+  [/\b(?:(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.){2,}[a-z]{2,}|(?:\d{1,3}\.){3}\d{1,3}|localhost):(\d{2,5})\b/gi, "[host]:$1"],
+];
+
+/** The size every one of the three sinks can carry: one log line, one bell entry, one API field. */
+const ERROR_TEXT_CAP = 500;
+
+/**
+ * `err.message` with the shapes that carry a credential or a host path redacted, capped at 500.
+ *
+ * QA (W265): the cap keeps the head *and* the tail. Prisma's message for a failed query is a code
+ * frame first and the cause last (`The table … does not exist in the current database.`), so a
+ * head-only cut returned the frame and dropped the reason: a failing `reminders` job answered 500
+ * with a body that ended mid-frame and never said what went wrong, which is the one thing the
+ * operator reading /var/log/sho/jobs.log needs. Redaction runs over the whole message before the
+ * elision, so a secret in the tail is already gone by the time the tail is kept.
+ */
+export function redactError(err: unknown): string {
+  let text = String((err as Error)?.message ?? err);
+  for (const [find, replace] of REDACTIONS) text = text.replace(find, replace);
+  if (text.length <= ERROR_TEXT_CAP) return text;
+  const tail = 180;
+  return `${text.slice(0, ERROR_TEXT_CAP - tail - 3)} … ${text.slice(-tail)}`;
+}
+
 export function requireJobSecret(req: Request) {
   const secret = process.env.JOB_SECRET ?? "";
   const given = req.headers.get("authorization")?.replace(/^Bearer /, "") ?? "";
@@ -115,7 +168,7 @@ export async function runJob(name: string) {
     await db.jobRun.update({ where: { job: name }, data: { lastFinishedAt: new Date(), lastStatus: "OK", lastError: null } });
     return { job: name, status: "OK", result };
   } catch (err) {
-    const error = String((err as Error)?.message ?? err).slice(0, 500);
+    const error = redactError(err);
     await db.jobRun.update({ where: { job: name }, data: { lastFinishedAt: new Date(), lastStatus: "FAILED", lastError: error } });
     await tellSuperAdmins("JOB_FAILED", name, error);
     throw new ApiError(500, `Job ${name} failed: ${error}`);

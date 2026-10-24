@@ -14,3 +14,10 @@ export const UNVERIFIED_SIGNIN = "Verify your email before you sign in. No worki
 
 /** The verify API's answer for a token that is unknown, expired, already used or replaced. */
 export const VERIFY_LINK_UNUSABLE = "This link is invalid, has expired, was already used or was replaced by a newer one.";
+
+/**
+ * SHO-2695. The machine-readable code on the SHO-US-23.5 forced-password 403, next to the sentence
+ * "Set your own password first." Clients route on this, never on the sentence, so the sentence can be reworded.
+ * Plain string with no server imports, so a client screen and the API route share one definition.
+ */
+export const PASSWORD_CHANGE_REQUIRED = "PASSWORD_CHANGE_REQUIRED";
