@@ -203,7 +203,11 @@ if (warm.status !== 200) throw new Error(`warm-up ${WARM_PATH} was ${warm.status
 let release = null;
 if (PRODUCTION) {
   try {
-    release = JSON.parse(warmBody).release ?? null;
+    // Slow-route warmup returns text, so obtain identity from health separately.
+    const identityBody = SLOW
+      ? await (await fetch(`http://127.0.0.1:${port}/api/health`)).text()
+      : warmBody;
+    release = JSON.parse(identityBody).release ?? null;
   } catch {
     release = null;
   }
