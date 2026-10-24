@@ -118,8 +118,8 @@ test("@static AC3: checks.ts names the four rules qa:TC missing", () => {
   expect(source).toContain("viewport-fit=cover");
 });
 
-test("@static AC4: the phone-checks job sets timeout-minutes to 10 qa:TC missing", () => {
-  expect(readFileSync(WORKFLOW, "utf8")).toMatch(/timeout-minutes:\s*10\b/);
+test("@static AC4: the phone-check suite has its own 10-minute limit qa:TC missing", () => {
+  expect(readFileSync(WORKFLOW, "utf8")).toMatch(/- name: Phone checks\n\s+timeout-minutes: 10\n\s+run: npm run test:viewport/);
 });
 
 test("AC5: a failure attaches screenshots of the failing state qa:TC missing", async ({ browser }) => {
