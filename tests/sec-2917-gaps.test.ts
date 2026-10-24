@@ -53,6 +53,7 @@ describe("REVIEW-2917 F1: a child process that prints the whole environment is c
     ["absolute path printenv", `execFileSync("/usr/bin/printenv", []);`],
     ["VAR=VAL prefix", `execSync("DEBUG=1 printenv");`],
     ["cp.execSync env", `cp.execSync("env");`],
+    ["constant-folded printenv", `const script = "print" + "env"; spawnSync("bash", ["-c", script]);`],
   ];
   const HEAD = `import { execFileSync, execSync, spawn, spawnSync } from "node:child_process";\nimport cp from "node:child_process";\n`;
 
@@ -71,8 +72,6 @@ describe("REVIEW-2917 F1: a child process that prints the whole environment is c
       // The explicit env: allowlist — the reason a child process is not banned outright.
       `spawnSync("npm", ["run", "typecheck"], { env: { ...process.env, CI: "1" } });`,
       `spawn(bin, args, { env: { ...process.env, PORT: "3191" } });`,
-      // A shell running a script this file does not spell out.
-      "const script = \"print\" + \"env\"; spawnSync(\"bash\", [\"-c\", script]);",
     ];
     for (const source of allowed) {
       const dir = tree({ "tests/allowed.test.ts": `${HEAD}const bin = "node"; const args: string[] = [];\n${source}\n` });
