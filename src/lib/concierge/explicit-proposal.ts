@@ -16,7 +16,8 @@ export function explicitRequest(text: string): ExplicitRequest | null {
   if (remove) return { kind: "remove-member", email: remove[1].toLowerCase(), project: remove[2].trim() };
   // Quantified write intent that this route cannot fully scope must never fall back to a model subset.
   // The quantifier immediately follows an imperative, so reads and quoted titles such as "All hands" are not intercepted.
-  if (/^(?:(?:please|can you|could you|would you|will you)\s+)*(?:complete|finish|close)\s+(?:all|every|\d+|eleven|twelve|thirteen|fourteen|fifteen|twenty)\b/i.test(s) || /^(?:(?:please|can you|could you|would you|will you)\s+)*mark\s+(?:all|every|\d+)\b[\s\S]*\b(?:done|complete|completed)\b/i.test(s)) return { kind: "clarify-bulk" };
+  const imperative = /^(?:(?:please|can you|could you|would you|will you)\s+)*(?:complete|finish|close|mark|delete|trash|move|assign|reassign|re-assign|set|change|edit|update|create|add|remove|reopen|block|unblock|send|comment|demote|promote)\s+(?:(?:on|to|for)\s+)?(?:all|every|each|both|[2-9]\d*|1\d+|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|twenty)\b/i;
+  if (imperative.test(s)) return { kind: "clarify-bulk" };
   return null;
 }
 const textReply = (text: string): Stored => ({ kind: "text", text });
