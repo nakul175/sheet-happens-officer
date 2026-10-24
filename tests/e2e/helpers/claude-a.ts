@@ -22,7 +22,10 @@ export async function noSideways(page: Page) {
     for (const el of document.querySelectorAll("body *")) {
       const ox = getComputedStyle(el).overflowX;
       if (ox !== "auto" && ox !== "scroll") continue;
-      box = Math.max(box, el.scrollWidth - el.clientWidth);
+      // APL-2692 permits a wide table inside a bounded, keyboard-accessible region.
+      // Judge the region's placement, not the width of its scrollable contents.
+      const rect = el.getBoundingClientRect();
+      box = Math.max(box, -rect.left, rect.right - document.documentElement.clientWidth);
     }
     return Math.max(doc, box);
   });

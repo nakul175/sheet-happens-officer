@@ -176,3 +176,11 @@ test("APL-2536 > AC5: at 390px the organisation page and the Accounts list do no
   await expect(admin.page.getByRole("link", { name: org.name })).toBeVisible();
   await noSideways(admin.page);
 });
+
+test("APL-2536 > AC5: layout guard allows a bounded scroller and rejects document overflow", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.setContent('<style>body{margin:0}</style><div style="width:300px;overflow-x:auto"><div style="width:600px;height:50px">Wide table</div></div>');
+  await noSideways(page);
+  await page.setContent('<style>body{margin:0}</style><div style="width:600px;height:50px">Overflowing page</div>');
+  await expect(noSideways(page)).rejects.toThrow("the page scrolls sideways");
+});
