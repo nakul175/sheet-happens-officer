@@ -435,4 +435,58 @@ describe("qa:TC missing APL-2917: no test file reads the whole process environme
       expect(environReaders([{ file: "x.ts", text }]), text).toEqual(["x.ts"]);
     }
   });
+
+  // SHO-3032, second half: the ticket asks for the LIMIT to be decided, not for a wider rule. The resolver already
+  // catches the ticket's own split (the test above) because it follows the composition a source file can state:
+  // literals joined by `+`, template pieces and their ${...}, const/let/var names bound to a path, path.join, and an
+  // array literal joined by .join. What it does not do is evaluate code. The rows below are that boundary, MEASURED at
+  // this head: each `missed` row is a way to build the banned file that the authoritative guard does not report, and
+  // each is missed by the pre-fix guard too, so it is one shared limit, not a regression from the resolver.
+  //
+  // Why the pin and not a wider rule: the one cheap wider rule is the rule SHO-3031 removed - "a proc piece somewhere
+  // plus an environ piece somewhere" - which flags a file that reads /proc/cpuinfo and serves a route called
+  // "environ" (the test above). The other option, following every call and returned value, is a partial evaluator:
+  // unbounded to write and still beaten by one more indirection. A run-time fs spy is the stronger control and is
+  // recorded as follow-up, not built here (see the LIMITS note on SHO-3032). So the reach stays as it is and is
+  // stated in a test: these rows are documented misses, not a clean bill. If one is later taught to the resolver, it
+  // moves to `caught` in the same commit - this test is the record of the decision.
+  it("qa:TC missing AC3: states the boundary of the source scan (SHO-3032)", () => {
+    // Static composition the guard does resolve: the authoritative verdict must be a violation for each.
+    const caught = [
+      // The ticket's own split, inside the word.
+      `readFileSync('/pr' + 'oc/self/environ')`,
+      // The shape SHO-2771 removed from the mode tier at e86f239: the pid is a run-time value and the PATH SHAPE is
+      // what is matched, so guessing a pid does not help a reader hide.
+      "readFileSync(`/proc/${pid}/environ`)",
+      // The same shape from an enumeration of the process table: "find a process's environment" in one line.
+      'for (const p of readdirSync("/proc")) readFileSync(`/proc/${p}/environ`)',
+      // Names bound to the pieces in more than one statement (the resolver knows the bindings, not just literals).
+      `const a = "/pr"; const b = "oc/self/environ"; readFileSync(a + b)`,
+      // An array literal joined with no separator.
+      `readFileSync(["/pr", "oc/self", "/environ"].join(""))`,
+      // A call around a finished literal: the resolver stops at the call, the AST pass rebuilds the argument.
+      `readFileSync(String("/pr" + "oc/self/environ"))`,
+    ];
+    for (const text of caught) {
+      expect(violations([{ file: "x.ts", text }]).length, text).toBeGreaterThan(0);
+    }
+    // Composition the guard does not resolve. Both guards miss these, so it is a limit of a source scan, not a
+    // difference between the old and the new one.
+    const missed: [string, string][] = [
+      ["two declarators in one statement: only the first is bound", `const a = "/pr", b = "oc/self/environ"; readFileSync(a + b)`],
+      ["a method other than path.join/.join, here .concat", `readFileSync("/pr".concat("oc/self/environ"))`],
+      ["an array held in a name, then joined", `const parts = ["/pr", "oc/self"]; readFileSync(parts.join("") + "/environ")`],
+      ["a property of a local object", `const o = { p: "/pr" }; readFileSync(o.p + "oc/self/environ")`],
+      ["a path computed at run time, here String.fromCharCode", `readFileSync(String.fromCharCode(47,112,114,111,99,47,115,101,108,102,47,101,110,118,105,114,111,110))`],
+      ["a path decoded at run time, here base64", `readFileSync(Buffer.from("L3Byb2Mvc2VsZi9lbnZpcm9u", "base64").toString())`],
+      ["a piece that comes from outside the file", `readFileSync(process.argv[2] + "oc/self/environ")`],
+    ];
+    for (const [why, text] of missed) {
+      expect(violations([{ file: "x.ts", text }]).length, why).toBe(0);
+      expect(legacyEnvironReaders([{ file: "x.ts", text }]), why).toEqual([]);
+    }
+    // The seven rows above are the whole documented gap at this head, so a widening shows up as a red count here.
+    expect(missed).toHaveLength(7);
+  });
+
 });

@@ -17,7 +17,6 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { db } from "../src/lib/db";
 import { istDate, PW } from "./helpers";
 import { ageDeals, clearNotesFor, setOrgRole } from "./stalled-crm-fixture";
-import { assertProcfs } from "./procfs-precondition";
 import { portAnswers, stopTree } from "./spawned-listener";
 
 const root = fileURLToPath(new URL("..", import.meta.url));

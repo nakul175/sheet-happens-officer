@@ -65,6 +65,13 @@ describe("w272/SHO-2771: a mode tier finds its server without procfs", () => {
   it.each(TIERS)("%s discovers its server through the port, not through /proc", (file) => {
     const text = readFileSync(path.join(root, file), "utf8");
     expect(PROCFS_READ.test(text), `${file} reads the process table again`).toBe(false);
+    // SHO-2771: the whole IDENTIFIER is checked, not a call `assertProcfs(`. Deliberate, and proven both ways: a real
+    // call turns this red (mutant on the stalled tier, 1 failed | 5 passed), and so does an import left behind after the
+    // call was removed (the red this assertion was first seen with, at HEAD 5ad6fcf, dead import at
+    // jobs-stalled-crm-server.test.ts:20). The second red is the useful one: a dead import says the tier still believes
+    // it needs procfs. The fix belongs in the tier (delete the import), not in this matcher - a call-only regex would
+    // have passed that file and would also pass `const need = assertProcfs` handed around. A comment that names the
+    // identifier is the one false positive, and it is cheap: rename the mention.
     expect(text, `${file} still needs the procfs precondition`).not.toContain("assertProcfs");
     expect(text, `${file} asks the port instead`).toContain("portAnswers(");
   });
