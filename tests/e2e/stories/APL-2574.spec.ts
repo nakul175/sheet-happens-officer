@@ -63,7 +63,7 @@ test("AC3: when paused, one line says why and when it returns, with no disabled 
     await showConcierge(admin, later);
     await admin.page.goto("/");
     const dock = admin.page.getByRole("complementary", { name: "Concierge" });
-    const notice = dock.locator(".cc-disabled");
+    const notice = dock.getByRole("status").filter({ hasText: state.json.disabled.message });
     await expect(notice).toHaveCount(1);
     await expect(notice).toContainText(state.json.disabled.message);
     await expect(notice).toContainText(/resets.*India time/);
