@@ -70,8 +70,10 @@ describe("qa:TC missing APL-2719 Undo and purge share one timestamp", () => {
     const t = await deletedTask();
     const activity = await lead.c.get(`/api/projects/${projectId}/activity`);
     expect(activity.status).toBe(200);
-    const item = (activity.json.items as { what: string; ts: number; undo: string }[]).find((i) => i.what.includes(`moved "${t.title}" to Trash`))!;
+    // SHO-2701: the row is found by its kind; the sentence it reads as is still asserted below.
+    const item = (activity.json.items as { what: string; kind: string; ts: number; undo: string }[]).find((i) => i.kind === "task.deleted")!;
     expect(item).toBeDefined();
+    expect(item.what).toBe(`moved "${t.title}" to Trash`);
     const trash = await lead.c.get(`/api/projects/${projectId}/trash`);
     expect(trash.status).toBe(200);
     const inTrash = (trash.json.items as { id: string; deletedAt: string }[]).find((i) => i.id === t.id)!;

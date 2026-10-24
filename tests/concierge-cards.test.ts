@@ -194,4 +194,46 @@ describe("@APL-2675 Concierge delete card offers Undo only to people who may res
     expect((await db.task.findUniqueOrThrow({ where: { id: toEdit } })).title).toBe("T1 edit revised");
     expect(await db.actionLog.count({ where: { action: "undo", targetId: { in: [toTrash, toEdit] } } })).toBe(0);
   });
+
+  it("qa:TC missing card visibility: lost membership cannot expose a newly private title while refreshing a stale card", async () => {
+    const taskId = await taskT1();
+    const cardId = await pendingCard(editor, [{ k: "task.edit", taskId, title: "Public proposal" }]);
+    const membership = await db.projectMember.findUniqueOrThrow({ where: { projectId_userId: { projectId, userId: editor.id } } });
+    try {
+      await db.projectMember.delete({ where: { projectId_userId: { projectId, userId: editor.id } } });
+      await db.task.update({ where: { id: taskId }, data: { title: "ZZ-TEST newly private acquisition" } });
+      const err = await confirmCard(editor, cardId).catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(ApiError);
+      expect(err).toMatchObject({ status: 409, extra: { stale: true } });
+      expect(JSON.stringify((err as ApiError).extra)).not.toContain("newly private acquisition");
+      expect((err as ApiError).extra?.messages).toEqual([expect.objectContaining({ kind: "notice" })]);
+      expect((await db.task.findUniqueOrThrow({ where: { id: taskId } })).title).toBe("ZZ-TEST newly private acquisition");
+    } finally {
+      await db.projectMember.create({ data: membership });
+    }
+  });
+
+  it("qa:TC missing card visibility: an outsider cannot receive project names or member handover task titles", async () => {
+    await taskT1();
+    const membership = await db.projectMember.findUniqueOrThrow({ where: { projectId_userId: { projectId, userId: editor.id } } });
+    try {
+      await db.projectMember.delete({ where: { projectId_userId: { projectId, userId: editor.id } } });
+      await expect(buildCard(editor, [{ k: "member.remove", projectId, userId: leader.id }])).rejects.toMatchObject({ status: 404 });
+    } finally {
+      await db.projectMember.create({ data: membership });
+    }
+  });
+
+  it("qa:TC missing card visibility: a Viewer still receives a read-visible blocked card", async () => {
+    const taskId = await taskT1();
+    try {
+      await db.projectMember.update({ where: { projectId_userId: { projectId, userId: editor.id } }, data: { role: "VIEWER" } });
+      const built = await buildCard(editor, [{ k: "task.edit", taskId, title: "Viewer proposal" }]);
+      expect(built.card).toMatchObject({ canConfirm: false, blockedReason: "Viewers cannot make changes." });
+      expect(JSON.stringify(built.card)).toContain("T1");
+    } finally {
+      await db.projectMember.update({ where: { projectId_userId: { projectId, userId: editor.id } }, data: { role: "EDITOR" } });
+    }
+  });
+
 });

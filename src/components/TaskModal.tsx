@@ -1,5 +1,6 @@
 "use client";
 import Link from "next/link";
+import { WorkspaceTaskPerson } from "@/components/WorkspaceTaskPerson";
 import { useState } from "react";
 import { PRIORITY, ROLE, api, dueLabel, useGet } from "@/components/api";
 import { BLOCKED_REASON_MAX_LENGTH, blockedReasonRef, fitBlockedReason } from "@/components/blocked-reason";
@@ -18,6 +19,7 @@ type Task = {
   dueDate: string | null; blocked: boolean; blockedReason: string | null; completedAt: string | null; isIdea?: boolean;
   assignee: P; approver: P | null; collaborators: P[]; awaitingApproval: boolean; updatedAt: string; canClose: boolean;
   section: { id: string; name: string; isDone: boolean }; project: { id: string; name: string; archived: boolean };
+  createdAt?: string; createdBy?: { name: string } | null; parentDueDate?: string | null;
   subtaskList: Sub[];
   links?: { id: string; organisation: { id: string; name: string } | null; contact: { id: string; name: string; organisationId: string } | null }[];
   commentsEnabled?: boolean;
@@ -37,6 +39,8 @@ export function TaskModal({ id, me, onClose, onChanged, asPage }: { id: string; 
   const [confirm, setConfirm] = useState<null | { kind: "complete" | "move"; n: number; sectionId?: string }>(null);
   const [trash, setTrash] = useState(false);
   const [newSub, setNewSub] = useState("");
+  const [subDue, setSubDue] = useState("");
+  const [subAssignee, setSubAssignee] = useState("");
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
   const [convert, setConvert] = useState(false);
@@ -137,6 +141,10 @@ export function TaskModal({ id, me, onClose, onChanged, asPage }: { id: string; 
             <div className="box warn">Waiting for <b>{task.approver?.name}</b> to approve this task.</div>
           )}
           <div className="fgrid">
+            {task.createdAt && <>
+              <span className="lbl">Created by</span><span>{task.createdBy?.name ?? "Former member"}</span>
+              <span className="lbl">Created on</span><time dateTime={task.createdAt}>{new Intl.DateTimeFormat("en-GB", { dateStyle: "medium", timeStyle: "short", timeZone: "Asia/Kolkata" }).format(new Date(task.createdAt))} IST</time>
+            </>}
             <span className="lbl">Assignee</span>
             <div>
               {canEdit && !holding ? (
@@ -146,6 +154,11 @@ export function TaskModal({ id, me, onClose, onChanged, asPage }: { id: string; 
                   {workers.map((w) => <option key={w.userId} value={w.userId}>{w.name}</option>)}
                 </select>
               ) : task.assignee.name}
+              {canManage && canEdit && !holding && <WorkspaceTaskPerson projectId={task.projectId} purpose="assignee" excludeIds={[task.assignee.id]} onChoose={async (person, addToProject) => {
+                const result = await run(api("POST", `/api/tasks/${id}/assign`, { assigneeId: person.id, expectedUpdatedAt: version, addToProject }));
+                if (result?.ok) pr.reload();
+                return { ok: !!result?.ok, error: result?.error };
+              }} />}
             </div>
             <span className="lbl">Collaborators</span>
             <div className="pills">
@@ -163,6 +176,11 @@ export function TaskModal({ id, me, onClose, onChanged, asPage }: { id: string; 
                 </select>
               )}
             </div>
+            {canManage && canEdit && !holding && <><span className="lbl">Workspace collaborators</span><div><WorkspaceTaskPerson projectId={task.projectId} purpose="collaborator" excludeIds={[task.assignee.id, ...task.collaborators.map(person => person.id)]} onChoose={async (person, addToProject) => {
+              const result = await run(api("POST", `/api/tasks/${id}/collaborators`, { userId: person.id, expectedUpdatedAt: version, addToProject }));
+              if (result?.ok) pr.reload();
+              return { ok: !!result?.ok, error: result?.error };
+            }} /></div></>}
             <span className="lbl">Approver</span>
             <div>
               {(canManage || task.createdById === me) && canEdit && !task.awaitingApproval && !task.parentId && task.assignee.id !== me ? (
@@ -180,6 +198,7 @@ export function TaskModal({ id, me, onClose, onChanged, asPage }: { id: string; 
                   <input className="in" type="date" aria-label="Due date" style={{ width: "auto" }} defaultValue={task.dueDate ?? ""} key={task.updatedAt}
                     onChange={(e) => save({ dueDate: e.target.value || null })} />
                   {task.dueDate && <button className="link" onClick={() => save({ dueDate: null })}>Clear</button>}
+                  {task.parentDueDate && task.dueDate && task.dueDate > task.parentDueDate && <span className="hint" role="status">This subtask is due after its parent task.</span>}
                 </span>
               ) : dueLabel(task.dueDate)}
             </div>
@@ -226,15 +245,20 @@ export function TaskModal({ id, me, onClose, onChanged, asPage }: { id: string; 
             <div className="field">
               <span className="lbl">Subtasks {task.subtaskList.length > 0 && `(${task.subtaskList.filter((s) => s.completedAt).length} of ${task.subtaskList.length})`}</span>
               {task.subtaskList.map((s) => (
-                <label className="sub-item" key={s.id}>
-                  <input type="checkbox" aria-label={`Mark "${s.title}" ${s.completedAt ? "not done" : "done"}`} checked={!!s.completedAt} disabled={!canEdit || busy || (!s.canClose && !s.completedAt)}
-                    onChange={() => run(api("POST", `/api/tasks/${s.id}/${s.completedAt ? "reopen" : "complete"}`, s.completedAt ? {} : { expectedUpdatedAt: s.updatedAt }))} />
-                  <span style={s.completedAt ? { textDecoration: "line-through", color: "var(--muted)" } : undefined}>{s.title}</span>
-                </label>
+                <div className="sub-item" key={s.id}>
+                  <label style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", minWidth: 44, minHeight: 44, flexShrink: 0 }}>
+                    <input type="checkbox" aria-label={`Mark "${s.title}" ${s.completedAt ? "not done" : "done"}`} checked={!!s.completedAt} disabled={!canEdit || busy || (!s.canClose && !s.completedAt)}
+                      onChange={() => run(api("POST", `/api/tasks/${s.id}/${s.completedAt ? "reopen" : "complete"}`, s.completedAt ? {} : { expectedUpdatedAt: s.updatedAt }))} />
+                  </label>
+                  <span style={s.completedAt ? { textDecoration: "line-through", color: "var(--muted)" } : undefined}><Link href={`/tasks/${s.id}`}>{s.title}</Link></span>
+                </div>
               ))}
               {canEdit && (
-                <form className="addrow" onSubmit={async (e) => { e.preventDefault(); const v = newSub.trim(); if (!v) return; await run(api("POST", `/api/projects/${task.projectId}/tasks`, { title: v, parentId: id }), () => setNewSub("")); }}>
-                  <input className="in" aria-label="New subtask" placeholder="Add a subtask" value={newSub} onChange={(e) => setNewSub(e.target.value)} />
+                <form className="addrow" style={{ flexWrap: "wrap", alignItems: "end" }} onSubmit={async (e) => { e.preventDefault(); const v = newSub.trim(); if (!v) return; await run(api("POST", `/api/projects/${task.projectId}/tasks`, { title: v, parentId: id, dueDate: subDue || null, ...(subAssignee ? { assigneeId: subAssignee } : {}) }), () => { setNewSub(""); setSubDue(""); setSubAssignee(""); }); }}>
+                  <input className="in" style={{ flexBasis: "100%" }} aria-label="New subtask" placeholder="Add a subtask" value={newSub} onChange={(e) => setNewSub(e.target.value)} />
+                  <label>Due date (optional)<input className="in" type="date" aria-label="Subtask due date" value={subDue} onChange={(e) => setSubDue(e.target.value)} /></label>
+                  <label>Assignee<select className="in" aria-label="Subtask assignee" value={subAssignee} onChange={(e) => setSubAssignee(e.target.value)}><option value="">Default owner (me when eligible)</option>{workers.map((w) => <option key={w.userId} value={w.userId}>{w.name}</option>)}</select></label>
+                  {task.dueDate && subDue > task.dueDate && <span className="hint" role="status">This subtask is due after its parent task. You can still add it.</span>}
                   <button className="btn ghost" disabled={busy || !newSub.trim()}>Add</button>
                 </form>
               )}
@@ -249,6 +273,17 @@ export function TaskModal({ id, me, onClose, onChanged, asPage }: { id: string; 
             </div>
           )}
           {meCtx.crm && !task.parentId && <TaskLinks taskId={id} links={task.links ?? []} canEdit={canEdit && !holding} onChanged={() => { t.reload(); onChanged?.(); }} />}
+
+          {task.approver && !task.awaitingApproval && !done && task.assignee.id === me && (
+            <p className="hint">Only {task.approver.name} or the project Leader can close this task. Send it for approval when it is ready.</p>
+          )}
+          {canEdit && !holding && (
+            <div className="box dng" style={{ display: "flex", gap: 12, alignItems: "center", justifyContent: "space-between", flexWrap: "wrap" }}>
+              <span className="hint" style={{ color: "var(--danger)" }}>Kept 30 days. Everyone on the task is told. ({ROLE[role]})</span>
+
+            </div>
+          )}
+          {task.commentsEnabled && <Comments taskId={id} onChanged={onChanged} />}
           <div className="actions" style={{ justifyContent: "flex-start" }}>
             {canEdit && !done && task.approver && !task.awaitingApproval && !task.parentId && task.assignee.id === me && (
               <button className="btn" disabled={busy} onClick={() => run(api("POST", `/api/tasks/${id}/send-for-approval`, {}))}>Send for approval</button>
@@ -260,17 +295,10 @@ export function TaskModal({ id, me, onClose, onChanged, asPage }: { id: string; 
               <button className="btn" disabled={busy} onClick={() => complete()}>{task.approver ? "Close task" : "Mark complete"}</button>
             )}
             {canEdit && done && <button className="btn ghost" disabled={busy} onClick={() => run(api("POST", `/api/tasks/${id}/reopen`, {}))}>Reopen</button>}
-          </div>
-          {task.approver && !task.awaitingApproval && !done && task.assignee.id === me && (
-            <p className="hint">Only {task.approver.name} or the project Leader can close this task. Send it for approval when it is ready.</p>
-          )}
-          {canEdit && !holding && (
-            <div className="box dng" style={{ display: "flex", gap: 12, alignItems: "center", justifyContent: "space-between", flexWrap: "wrap" }}>
-              <span className="hint" style={{ color: "var(--danger)" }}>Kept 30 days. Everyone on the task is told. ({ROLE[role]})</span>
+            {canEdit && !holding && (
               <button className="btn ghost sm" style={{ color: "var(--danger)", borderColor: "var(--danger-line)" }} onClick={() => setTrash(true)}>Move to Trash</button>
-            </div>
-          )}
-          {task.commentsEnabled && <Comments taskId={id} onChanged={onChanged} />}
+            )}
+          </div>
         </>,
       )}
       {convert && <ConvertDialog task={task} meId={me} onClose={() => setConvert(false)} />}

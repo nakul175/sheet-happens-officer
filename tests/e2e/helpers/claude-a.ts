@@ -9,8 +9,10 @@ export type Later = (fn: () => Promise<unknown>) => void;
 export type Act = { id: string; who: string; what: string; undo: "available" | "undone" | "too_old" | "none" };
 export type Notice = { id: string; text: string; href: string };
 
-/** The deal panel: the box that holds the Stage group (DealPanel.tsx renders the group as its first child). */
-export const dealPanel = (page: Page) => page.getByRole("group", { name: "Stage" }).locator("..");
+/** The deal panel: the "Deal" region DealPanel.tsx renders, inside <main>. It is a landmark of its own (SHO-2996), so the
+ *  locator names the panel and not <main>, which also holds the task list below it. The same locator APL-2540 AC1/AC3
+ *  use, so the two tests cannot disagree about what the panel is, and neither walks to a parent. */
+export const dealPanel = (page: Page) => page.getByRole("region", { name: "Deal", exact: true });
 
 /** The page, and any box that can scroll sideways (the Accounts table, for example), stays inside the viewport. */
 export async function noSideways(page: Page) {
@@ -20,7 +22,10 @@ export async function noSideways(page: Page) {
     for (const el of document.querySelectorAll("body *")) {
       const ox = getComputedStyle(el).overflowX;
       if (ox !== "auto" && ox !== "scroll") continue;
-      box = Math.max(box, el.scrollWidth - el.clientWidth);
+      // APL-2692 permits a wide table inside a bounded, keyboard-accessible region.
+      // Judge the region's placement, not the width of its scrollable contents.
+      const rect = el.getBoundingClientRect();
+      box = Math.max(box, -rect.left, rect.right - document.documentElement.clientWidth);
     }
     return Math.max(doc, box);
   });

@@ -233,8 +233,11 @@ test.describe("APL-2674 activity delete undo", { tag: "@local-only" }, () => {
     const projectId = await zzProject(leader, [{ who: editor }]);
     const created = await zzTask(editor, projectId, "Still deleted");
     expect((await call(editor.req, "DELETE", `/api/tasks/${created.id}`)).status).toBe(204);
-    const items = (await call(editor.req, "GET", `/api/projects/${projectId}/activity`)).json.items as { id: string; what: string }[];
-    const actionId = items.find((item) => item.what === `moved "${created.title}" to Trash`)?.id;
+    const items = (await call(editor.req, "GET", `/api/projects/${projectId}/activity`)).json.items as { id: string; what: string; kind: string }[];
+    // SHO-2701: the delete row is found by its kind; the sentence it reads as is asserted beside it.
+    const del = items.find((item) => item.kind === "task.deleted");
+    expect(del?.what, "the delete still reads as a move to Trash").toBe(`moved "${created.title}" to Trash`);
+    const actionId = del?.id;
     expect(actionId).toBeTruthy();
 
     const ctx = await signedIn(browser, editor);
@@ -279,8 +282,8 @@ test.describe("APL-2674 activity delete undo", { tag: "@local-only" }, () => {
     try {
       const page = await openActivity(plainCtx, projectId);
       // The feed does not list Erin's delete to an editor who is not involved in the task: the row is absent.
-      const feed = (await call(uninvolved.req, "GET", `/api/projects/${projectId}/activity`)).json.items as { what: string }[];
-      expect(feed.some((item) => item.what === what)).toBe(false);
+      const feed = (await call(uninvolved.req, "GET", `/api/projects/${projectId}/activity`)).json.items as { what: string; kind: string }[];
+      expect(feed.some((item) => item.kind === "task.deleted"), "no delete row at all for this editor").toBe(false);
       // The feed has rendered: either the Activity list or its empty message (only one of them is ever on the page).
       await expect(page.getByRole("list", { name: "Activity" }).or(page.getByText("Nothing has happened yet."))).toBeVisible({ timeout: 30_000 });
       await expect(actRow(page, erin.name, what)).toHaveCount(0);
@@ -327,8 +330,11 @@ test.describe("APL-2674 activity delete undo", { tag: "@local-only" }, () => {
     const projectId = await zzProject(leader, [{ who: editor }]);
     const created = await zzTask(editor, projectId, "Undo target");
     expect((await call(editor.req, "DELETE", `/api/tasks/${created.id}`)).status).toBe(204);
-    const items = (await call(leader.req, "GET", `/api/projects/${projectId}/activity`)).json.items as { id: string; what: string }[];
-    const actionId = items.find((item) => item.what === `moved "${created.title}" to Trash`)?.id;
+    const items = (await call(leader.req, "GET", `/api/projects/${projectId}/activity`)).json.items as { id: string; what: string; kind: string }[];
+    // SHO-2701: the kind picks the row; the sentence is asserted beside it.
+    const del = items.find((item) => item.kind === "task.deleted");
+    expect(del?.what, "the delete still reads as a move to Trash").toBe(`moved "${created.title}" to Trash`);
+    const actionId = del?.id;
     expect(actionId).toBeTruthy();
 
     const ctx = await signedIn(browser, leader);

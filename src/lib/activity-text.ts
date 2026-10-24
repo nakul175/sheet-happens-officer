@@ -7,6 +7,17 @@ type Row = { action: string; beforeState: unknown; afterState: unknown; targetId
 type Names = Map<string, string>;
 type Rec = Record<string, unknown>;
 
+/** SHO-2701: the event kinds a consumer may branch on. They are the actions rows are logged with. */
+export const TASK_DELETED = "task.deleted";
+
+/**
+ * The stable kind of an activity event: the action the row was logged with (`task.deleted`, `task.updated`, ...).
+ * Deliberately reads nothing but that column, so rewording `sentence` below cannot change what a consumer branches on.
+ */
+export function activityKind(a: { action: string }): string {
+  return a.action;
+}
+
 /** "10 Oct", or "10 Oct 2025" when it is not this year. Takes a YYYY-MM-DD date or an instant (shown in India time). */
 export function shortDay(v: unknown, now = new Date()): string | null {
   if (typeof v !== "string" && !(v instanceof Date)) return null;
@@ -43,8 +54,6 @@ export function idsIn(a: { beforeState: unknown; afterState: unknown; targetId: 
   }
   return [...out];
 }
-
-const FIELD: Record<string, string> = { title: "title", description: "description", dueDate: "due date", priority: "priority", blocked: "blocked", blockedReason: "blocked reason" };
 
 function person(names: Names, id: unknown) {
   return typeof id === "string" && id ? names.get(id) ?? "someone no longer on the project" : "no one";
@@ -119,6 +128,8 @@ export function sentence(a: Row, names: Names, now = new Date()): string {
     case "deal.created": return `created the deal ${q(String(f.name ?? ""))}`;
     case "deal.stage_changed": return `moved the deal from ${String(b.stage ?? "no stage")} to ${String(f.stage ?? "no stage")}${f.reason ? ` (${String(f.reason)})` : ""}`;
     case "deal.details_updated": return "edited the deal details";
+    case "deal.pipeline_converted": return "converted the deal from Proactive to Bid Leads";
+    case "deal.buyer_changed": return `changed the Buyer from ${String(b.organisation ?? "the previous organisation")} to ${String(f.organisation ?? "the selected organisation")}`;
     case "deal.party_added": return `added ${String(f.organisation ?? "an organisation")} to the deal`;
     case "deal.party_removed": return `removed ${String(b.organisation ?? "an organisation")} from the deal`;
     case "deal.converted": return `converted ${T} to this deal`;

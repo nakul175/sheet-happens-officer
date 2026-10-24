@@ -5,7 +5,7 @@ import { db } from "@/lib/db";
 import { ApiError } from "@/lib/http";
 import { currentSessionId, deviceLabel, hashPassword, verifyPassword } from "@/lib/auth";
 import { WORKSTREAM_DEAL, crmMode, crmVisible, projectAccess, type Actor } from "@/lib/access";
-import { idsIn, sentence, whenText } from "@/lib/activity-text";
+import { activityKind, idsIn, sentence, whenText } from "@/lib/activity-text";
 import { purgeExpiredComments } from "@/lib/comments";
 import { COMMENT_ACTION_PREFIX, COMMENT_NOTICE_TYPES, commentsEnabled } from "@/lib/flags";
 import { isTooOldToUndo, isUndoable } from "@/lib/undoable";
@@ -124,6 +124,7 @@ async function hiddenDealIds(user: Actor, projectIds: (string | null)[]): Promis
   if (crmMode() === "all" || crmVisible(user)) return hidden;
   const ids = [...new Set(projectIds.filter((id): id is string => !!id))];
   if (!ids.length) return hidden;
+  // project-lookup-ok: Read only IDs of already-addressed notifications to redact hidden deal content.
   const deals = await db.project.findMany({
     where: { id: { in: ids }, typeId: WORKSTREAM_DEAL },
     select: { id: true },
@@ -236,6 +237,8 @@ export async function projectActivity(user: Actor, projectId: string, cursor?: s
       when: whenText(r.createdAt),
       who: r.actor.name,
       what: sentence(r, names),
+      // SHO-2701: the event kind a consumer branches on. Additive: `what` stays the sentence people read.
+      kind: activityKind(r),
       // "How" is only worth a word when it was not the screen (SHO-US-14.14 AC4).
       via: r.channel === "CONCIERGE" ? "concierge" : "screen",
       // Undo stays on the row (AC5); an Editor can only undo their own actions, as the server enforces.
@@ -278,6 +281,7 @@ export async function auditLog(user: Actor, q: z.infer<typeof auditQuery>) {
   // A "deal" target is the deal's project row (DEAL_CREATED, DEAL_CLOSED), or the task that became one (DEAL_CONVERTED) (SHO-BUG-4).
   const [us, ps, ts, ss] = await Promise.all([
     db.user.findMany({ where: { id: { in: byType(["user", "member"]) } }, select: { id: true, name: true } }),
+    // project-lookup-ok: auditLog rejects every role except SUPER_ADMIN before resolving target labels.
     db.project.findMany({ where: { id: { in: byType(["project", "deal"]) } }, select: { id: true, name: true } }),
     db.task.findMany({ where: { id: { in: byType(["task", "deal"]) } }, select: { id: true, title: true } }),
     db.section.findMany({ where: { id: { in: byType(["section"]) } }, select: { id: true, name: true } }),

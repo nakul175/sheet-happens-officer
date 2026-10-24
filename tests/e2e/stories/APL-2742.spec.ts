@@ -8,6 +8,7 @@
 // APL-2895: a Playwright spec (@playwright/test), so `npx playwright test` collects it; vitest.config.mts excludes it from `npm test`.
 // Servers: the spec starts its own two `next start` processes from the existing build (`npm run build` first), on
 // 127.0.0.1 only, against the local database (anything else in DATABASE_URL is refused):
+//   the reads below use the same schema Prisma does, since ?schema= is a Prisma parameter pg ignores (SHO-3011);
 //   mail-ok      writes mail to a temp outbox this spec creates and removes in afterAll;
 //   mail-failing has no RESEND_API_KEY and no outbox, so every send fails as it does in production today.
 // The outbox is read for the newest "Verify your email" mail to the exact address only; no token or mail body is logged.
@@ -21,6 +22,7 @@ import os from "node:os";
 import path from "node:path";
 import { chromium, expect, test, type Browser, type Locator, type Page } from "@playwright/test";
 import pg from "pg";
+import { assertLocalDatabaseUrl, localPgPool } from "../helpers/local-db-pool";
 
 const QA_PASS = process.env.SHO_QA_PASS ?? "";
 const PORT = Number(process.env.APL2742_PORT ?? 3142);
@@ -164,6 +166,8 @@ async function signIn(page: Page, base: string, email: string) {
 
 // Read-only SELECTs on the local database (beforeAll refuses any other). Playwright cannot load src/lib/db (APL-2895):
 // the generated Prisma client is an ES module and its "@/" import does not resolve here, so the spec reads with pg.
+// The pool comes from helpers/local-db-pool.ts: ?schema= in DATABASE_URL is Prisma's parameter, not pg's, so pg must
+// be told the schema itself or it reads public while the app writes elsewhere (SHO-3011).
 let pool: pg.Pool | undefined;
 async function rows<T>(sql: string, params: unknown[]): Promise<T[]> {
   if (!pool) throw new Error("The database pool is not open: beforeAll did not run.");
@@ -190,9 +194,8 @@ test.describe("qa:TC missing APL-2742: unverified sign-in and verification email
 
   test.beforeAll(async () => {
     test.setTimeout(240_000);
-    const dbHost = process.env.DATABASE_URL ? new URL(process.env.DATABASE_URL).hostname : "";
-    if (!/^(localhost|127\.0\.0\.1)$/.test(dbHost)) throw new Error("Refusing to run: DATABASE_URL must point at a local database.");
-    pool = new pg.Pool({ connectionString: process.env.DATABASE_URL, max: 1 });
+    assertLocalDatabaseUrl(process.env.DATABASE_URL);
+    pool = localPgPool(process.env.DATABASE_URL);
     if (!existsSync(".next/BUILD_ID")) throw new Error("Run `npm run build` first: this spec starts its own `next start`.");
     mkdirSync(SHOTS, { recursive: true });
     outbox = mkdtempSync(path.join(os.tmpdir(), "apl2742-outbox-"));

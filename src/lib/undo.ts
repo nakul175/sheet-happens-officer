@@ -1,3 +1,4 @@
+import { parseSubmissionDeadline, serializeSubmissionDeadline } from "@/lib/submission-deadline";
 /* eslint-disable @typescript-eslint/no-explicit-any */
 // SHO-US-6.4: Undo from the stored before-state, with a conflict warning and "Undo anyway".
 import { db } from "@/lib/db";
@@ -204,10 +205,14 @@ async function plan(row: any, user: Actor, projectId: string): Promise<Plan> {
     }
     case "deal.stage_changed": {
       const p = await db.project.findUniqueOrThrow({ where: { id: projectId } });
+      // Retired stages remain valid historical targets. Normal moves reject them; Undo preserves the original ID.
       if (!b.stageId || !(await db.stage.findFirst({ where: { id: b.stageId, pipelineId: p.pipelineId ?? "" } }))) throw bad("The earlier stage no longer exists.");
       return {
         conflicts: p.stageId !== f.stageId ? [{ field: "stage", before: b.stage, after: f.stage, now: p.stageId }] : [], subject: p.name, fields: "Stage",
-        apply: async (tx) => { await tx.project.update({ where: { id: projectId }, data: { stageId: b.stageId, stageReason: b.reason ?? null, stageChangedAt: new Date() } }); },
+        apply: async (tx) => {
+          try { await tx.project.update({ where: { id: projectId, pipelineId: p.pipelineId }, data: { stageId: b.stageId, stageReason: b.reason ?? null, stageChangedAt: new Date() } }); }
+          catch (error) { if ((error as { code?: string }).code === "P2025") throw bad("This deal's pipeline changed. Refresh before undoing its stage."); throw error; }
+        },
       };
     }
     case "deal.converted": {
@@ -215,6 +220,7 @@ async function plan(row: any, user: Actor, projectId: string): Promise<Plan> {
       const task = await db.task.findUnique({ where: { id }, include: { project: true } });
       if (!task || task.projectId !== projectId) throw bad("The task is no longer in this deal, so the conversion cannot be undone.");
       if (task.deletedAt) throw bad("The task is in Trash. Restore it first.");
+      // project-lookup-ok: Undo resolves the recorded conversion source; prepare has authorized the action and its current project.
       const src = await db.project.findUnique({ where: { id: b.sourceProjectId } });
       if (!src) throw bad("The original project no longer exists.");
       if (src.archivedAt) throw bad("The original project is archived. Unarchive it first.");
@@ -252,10 +258,17 @@ async function plan(row: any, user: Actor, projectId: string): Promise<Plan> {
       const now: Record<string, unknown> = {
         whyPursue: d.whyPursue, need: d.need, serviceLine: d.serviceLine, value: d.value === null ? null : Number(d.value), currency: d.currency,
         probability: d.probability, expectedClose: d.expectedClose?.toISOString().slice(0, 10) ?? null, introducedBy: d.introducedBy,
-        submissionDeadline: d.submissionDeadline?.toISOString().slice(0, 10) ?? null,
+        submissionDeadline: serializeSubmissionDeadline(d.submissionDeadline, d.submissionDeadlineHasTime),
+        submissionDeadlineHasTime: d.submissionDeadlineHasTime ?? false,
       };
       const data: Record<string, unknown> = {};
-      for (const k of keys) data[k] = (k === "expectedClose" || k === "submissionDeadline") && b[k] ? new Date(`${b[k]}T00:00:00Z`) : b[k] ?? null;
+      for (const k of keys) {
+        if (k === "submissionDeadline") {
+          const parsed = parseSubmissionDeadline(b[k] ?? null);
+          data.submissionDeadline = parsed.deadline;
+          data.submissionDeadlineHasTime = b.submissionDeadlineHasTime ?? parsed.hasTime;
+        } else data[k] = k === "expectedClose" && b[k] ? new Date(`${b[k]}T00:00:00Z`) : b[k] ?? null;
+      }
       return { conflicts: fieldConflicts(keys, b, f, now), subject: "the deal", fields: keys.join(", "), apply: async (tx) => { await tx.dealDetails.update({ where: { projectId }, data }); } };
     }
     case "project.updated": {

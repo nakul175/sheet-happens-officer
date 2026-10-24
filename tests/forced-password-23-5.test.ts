@@ -146,6 +146,38 @@ describe("qa:TC missing 23.5 AC4 the server refuses app APIs in the forced state
   });
 });
 
+// SHO-2695. The gate's 403 carries a machine-readable code next to its human sentence, and a successful answer carries
+// no code at all, so a client never has to read prose to tell "you must change your password" from "no access".
+describe("qa:TC missing 23.5 AC4 the forced-password 403 carries a stable code, and a success carries none", () => {
+  it("qa:TC missing answers { error, code: PASSWORD_CHANGE_REQUIRED } while forced, and no code once the password is their own", async () => {
+    const sa = await superAdmin();
+    const p = await added(sa);
+
+    const refused = await p.c.get("/api/projects");
+    expect(refused.status).toBe(403);
+    expect(refused.json.code).toBe("PASSWORD_CHANGE_REQUIRED");
+    expect(refused.json.error).toBe("Set your own password first."); // the human sentence stays for the UI
+    for (const [method, url] of [["GET", "/api/my-tasks"], ["PATCH", "/api/profile"]] as const) {
+      const r = await p.c.call(method, url, method === "PATCH" ? { name: "X" } : undefined);
+      expect(r.json.code, `${method} ${url}`).toBe("PASSWORD_CHANGE_REQUIRED");
+    }
+
+    // The password is now the person's own: the same call succeeds and its body has no code key at all.
+    expect((await p.c.post("/api/profile/password", { current: p.pw, password: NEW_PW, confirm: NEW_PW })).status).toBe(200);
+    const ok = await p.c.get("/api/projects");
+    expect(ok.status).toBe(200);
+    expect(Object.prototype.hasOwnProperty.call(ok.json, "code")).toBe(false);
+    const me = await p.c.get("/api/auth/me");
+    expect(me.status).toBe(200);
+    expect(Object.prototype.hasOwnProperty.call(me.json, "code")).toBe(false);
+
+    // A successful sign-in is not the gate either, so its answer has no code.
+    const signed = await new Client().post("/api/auth/signin", { email: p.email, password: NEW_PW });
+    expect(signed.status).toBe(200);
+    expect(signed.json.code).toBeUndefined();
+  });
+});
+
 describe("qa:TC missing 23.5 AC5 Resend puts the person back in the forced state", () => {
   it("qa:TC missing forces a change again after they had already set their own", async () => {
     const sa = await superAdmin();

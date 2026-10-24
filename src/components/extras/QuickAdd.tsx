@@ -45,12 +45,13 @@ export function QuickAdd({ projects, lastId, onClose }: { projects: Target[]; la
           </div>
           <div>
             <label className="lbl" htmlFor="qa-date">Due (optional)</label>
-            <input id="qa-date" className="in" value={when} autoComplete="off" placeholder="tomorrow, fri, 2026-10-30" aria-describedby="qa-date-note" onChange={(e) => setWhen(e.target.value)} />
+            <input id="qa-date" className="in" value={when} autoComplete="off" placeholder="25/10/2026, 25 Oct, tomorrow" aria-describedby="qa-date-note qa-date-format" onChange={(e) => setWhen(e.target.value)} />
           </div>
         </div>
         <p id="qa-date-note" className={`hint qa-note${badDate ? " bad" : ""}`} role="status">
-          {date ? `Due ${dateLabel(date)}` : badDate ? "Not a date I know. Try tomorrow, fri, in 3 days or 2026-10-30." : "Assigned to you. Press Enter to add."}
+          {date ? `Due ${dateLabel(date, true)}` : badDate ? "Not a date I know. Try DD/MM/YYYY, 25 Oct, tomorrow, fri or YYYY-MM-DD." : "Assigned to you. Press Enter to add."}
         </p>
+        <p id="qa-date-format" className="hint">Dates use DD/MM/YYYY. Without a year, use the current year in India time.</p>
         {err && <div className="err" role="alert">{err}</div>}
         <div className="actions">
           <button type="button" className="btn ghost" onClick={onClose}>Cancel</button>

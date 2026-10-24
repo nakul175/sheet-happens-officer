@@ -1,12 +1,17 @@
 // APL-2684: Include archived search. Membership and the archive flag are separate, so an
 // Admin or Super Admin sees archived projects they are not a member of, and a Member does not.
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Actor } from "@/lib/access";
 
+// search() reads db.comment too once ff_task_comments is on (APL-2590). The mock has to cover every
+// delegate the function can touch, or the file only passes in a shell that happens to leave the flag
+// off. That is what this file did: with FF_TASK_COMMENTS=1 both tests died at search.ts:28 on
+// `db.comment.findMany` and never reached an assertion.
 const db = vi.hoisted(() => ({
   user: { findUniqueOrThrow: vi.fn() },
   organisation: { findMany: vi.fn() },
   contact: { findMany: vi.fn() },
+  comment: { findMany: vi.fn() },
   project: { findMany: vi.fn() },
   task: { findMany: vi.fn() },
 }));
@@ -25,11 +30,20 @@ const other: Actor = { id: "member-2", orgRole: "MEMBER" };
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // State the precondition instead of inheriting it: the assertions below are about archived
+  // visibility, so one ambient flag must not decide whether they run.
+  vi.stubEnv("FF_TASK_COMMENTS", "false");
+  vi.stubEnv("FEATURE_COMMENTS", "false");
   db.user.findUniqueOrThrow.mockResolvedValue({ workspaceId: "ws-1" });
   db.organisation.findMany.mockResolvedValue([]);
   db.contact.findMany.mockResolvedValue([]);
+  db.comment.findMany.mockResolvedValue([]);
   db.project.findMany.mockResolvedValue([]);
   db.task.findMany.mockResolvedValue([]);
+});
+
+afterEach(() => {
+  vi.unstubAllEnvs();
 });
 
 describe("Include archived search (APL-2684)", () => {
@@ -72,5 +86,27 @@ describe("Include archived search (APL-2684)", () => {
         }
       }
     }
+  });
+
+  // APL-2590 added a second way for a task to match: comment text. That path must carry the same
+  // `visible` project filter, or a comment becomes a way to read a task in a project you cannot see.
+  // The delegate it needs was missing from the mock until this test existed.
+  it("keeps the archived visibility filter on the comment path when the flag is on", async () => {
+    vi.stubEnv("FF_TASK_COMMENTS", "1");
+    db.comment.findMany.mockResolvedValue([{ taskId: "t-arch" }]);
+
+    await search(admin, "vault", true);
+    expect(db.comment.findMany).toHaveBeenCalledTimes(1);
+    const adminTaskWhere = argWhere(db.task.findMany);
+    expect(adminTaskWhere.project).not.toHaveProperty("members");
+    expect(adminTaskWhere.project).not.toHaveProperty("archivedAt");
+    expect(adminTaskWhere).toHaveProperty("OR");
+
+    await search(member, "vault", false);
+    const memberTaskWhere = argWhere(db.task.findMany);
+    expect(memberTaskWhere.project).toEqual({
+      members: { some: { userId: member.id } },
+      archivedAt: null,
+    });
   });
 });

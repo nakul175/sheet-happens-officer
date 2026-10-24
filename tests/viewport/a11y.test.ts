@@ -4,7 +4,7 @@
 // Fails with: screen, width, element, and a screenshot saved under test-results/viewport/.
 import { mkdirSync } from "node:fs";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { chromium, type Browser, type BrowserContext } from "playwright-core";
+import { chromium, type Browser } from "playwright-core";
 import { account, BASE, istDate, PW, project, superAdmin, task } from "../helpers";
 import { readFileSync } from "node:fs";
 import { SCREENS, type Ids } from "./screens";

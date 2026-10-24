@@ -31,10 +31,11 @@ jobs:
           --health-timeout 5s
           --health-retries 12
     env:
-      DATABASE_URL: postgresql://sho:sho@localhost:5432/sho_test?schema=public
-      DIRECT_DATABASE_URL: postgresql://sho:sho@localhost:5432/sho_test?schema=public
+      DATABASE_URL: postgresql://sho:sho@localhost:5432/sho_test?schema=sho_ci
+      DIRECT_DATABASE_URL: postgresql://sho:sho@localhost:5432/sho_test?schema=sho_ci
       EMAIL_OUTBOX_DIR: ${{ github.workspace }}/.outbox-ci
       SUPER_ADMIN_EMAILS: root.test@aplyd.com
+      FF_TASK_COMMENTS: "1"
       APP_URL: http://localhost:3100
       TASKBOARD_URL: http://localhost:3100
       JOB_SECRET: ci-only-not-a-real-secret-0123
@@ -47,11 +48,12 @@ jobs:
         with:
           node-version: 22
           cache: npm
+      # CI tests import locked dependencies such as pg. Install before collecting them.
+      - run: npm ci
       # Node 22 treats `node --test scripts/ci/` as a file and exits MODULE_NOT_FOUND.
       # This glob is that directory on Node 22: every *.test.mjs under scripts/ci/.
       - name: Node tests for scripts/ci
         run: node --test "scripts/ci/**/*.test.mjs"
-      - run: npm ci
       # APL-2761. Listing loads every story spec without a browser or a server. One file that cannot load (a vitest import)
       # makes Playwright collect 0 tests, so a total of 0 fails here instead of in staging-e2e.
       - name: Playwright collects the story specs
@@ -77,9 +79,11 @@ jobs:
       # APL-2609: tests/e2e/local/APL-2609.spec.ts drives these mode servers in Playwright Chromium.
       - name: Install Playwright Chromium
         run: npx playwright-core install --with-deps chromium
-      # APL-2713. These servers are excluded from `npm test`. A failure here fails the job.
-      - name: CRM mode tests
-        run: npm run test:crm-modes
+      # APL-2688 / APL-2689. Spawns next start and server.js, fires 6/40/100 concurrent
+      # requests (including signed-in GET /), SIGTERMs mid-flight. Excluded from `npm test`
+      # because it rebuilds .next, so it runs here before the app is started.
+      - name: SIGTERM drain tests
+        run: npx vitest run -c vitest.shutdown.config.mts
       - name: Start the app
         run: |
           # APL-2652: RETURN_PATH_LOG=1 makes the proxy log the return path it forwards, for tests/return-to.test.ts.
@@ -108,12 +112,20 @@ jobs:
         run: |
           specs=(tests/e2e/stories/APL-2624.spec.ts tests/e2e/stories/APL-2721.spec.ts tests/e2e/stories/APL-2737.spec.ts)
           for f in "${specs[@]}"; do
-            total=$(npx playwright test --list "$f" | sed -n 's/^Total: \([0-9][0-9]*\) tests\{0,1\} in .*/\1/p')
-            echo "$f: ${total:-0} tests"
-            if [ "${total:-0}" -eq 0 ]; then echo "::error::Playwright collected 0 tests from $f."; exit 1; fi
+            # SHO-2886. Capture --list as the story-specs step above does. A spec that cannot load exits 1 with the
+            # cause on stderr; piped straight into sed it reads as "0 tests", which blames the count, not the import.
+            out=$(npx playwright test --list "$f" 2>&1) || true
+            total=$(printf '%s\n' "$out" | sed -n 's/^Total: \([0-9][0-9]*\) tests\{0,1\} in .*/\1/p')
+            if [ "${total:-0}" -eq 0 ]; then
+              printf '%s\n' "$out" | tail -n 40
+              echo "::error::Playwright collected 0 tests from $f."
+              exit 1
+            fi
+            echo "$f: $total tests"
           done
           npx playwright test "${specs[@]}"
       # APL-2728 AC4. One production server per CRM_VISIBLE mode. Needs the build above. Not part of npm test.
+      # SHO-2873: the only invocation of this tier. An identical step (APL-2713) ran it a second time higher up.
       - name: CRM visible modes
         run: npm run test:crm-modes
       # APL-2729 AC4. One production server per CRM_VISIBLE mode, after the build.

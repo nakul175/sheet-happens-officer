@@ -687,7 +687,8 @@ describe("approver (4.6)", () => {
     expect((await sa.c.post(`/api/tasks/${t}/send-back`)).status).toBe(200);
     expect(await get()).toMatchObject({ approver: null, awaitingApproval: false });
     const notes = (await lead.c.get("/api/notifications")).json.items as { text: string }[];
-    expect(notes.some((n) => n.text === 'Root sent "needs review" back to you. It no longer has an approver.')).toBe(true);
+    const sender = (await sa.c.get("/api/auth/me")).json.user.name;
+    expect(notes.some((n) => n.text === `${sender} sent "needs review" back to you. It no longer has an approver.`)).toBe(true);
     // From there the Leader can reassign it and name an approver again.
     expect((await lead.c.post(`/api/tasks/${t}/assign`, await withVersion(lead, t, { assigneeId: other.id }))).status).toBe(200);
     expect((await lead.c.put(`/api/tasks/${t}/approver`, await withVersion(lead, t, { approverId: boss.id }))).status).toBe(200);

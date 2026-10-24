@@ -45,7 +45,7 @@ export function vitestChain(file, seen = new Set()) {
   return null;
 }
 
-test("specifiers finds static, dynamic, side-effect and require imports qa:TC missing", () => {
+test("qa:TC missing APL-2761 specifiers finds static, dynamic, side-effect and require imports", () => {
   const src = [
     'import { a } from "vitest";',
     'import type { B } from "../../helpers";',
@@ -73,7 +73,7 @@ function loadedSpecsReachingVitest(dir, ignored) {
   return bad;
 }
 
-test("the guard still catches a loaded story spec that reaches vitest through a helper qa:TC missing", () => {
+test("qa:TC missing APL-2879 the guard still catches a loaded story spec that reaches vitest through a helper", () => {
   const dir = mkdtempSync(join(tmpdir(), "story-specs-"));
   try {
     writeFileSync(join(dir, "APL-1.spec.ts"), 'import { it } from "vitest";\n');
@@ -90,7 +90,7 @@ test("the guard still catches a loaded story spec that reaches vitest through a 
   }
 });
 
-test("no story spec Playwright loads from tests/e2e/stories reaches vitest qa:TC missing", () => {
+test("qa:TC missing APL-2879 no story spec Playwright loads from tests/e2e/stories reaches vitest", () => {
   const bad = loadedSpecsReachingVitest(STORIES, ignoredByPlaywright());
   assert.deepEqual(bad, [], `Playwright would collect 0 tests. Move Vitest suites to tests/e2e/local:\n${bad.join("\n")}`);
 });
@@ -106,7 +106,7 @@ const MENTIONS_ONLY = [
   'test("ZZ-TEST mention", () => { expect(re.test(note)).toBe(true); expect(tpl).toContain("vitest"); });',
 ].join("\n");
 
-test("a spec with from \"vitest\" only in a comment, string or regex is not a Vitest spec qa:TC missing", () => {
+test("qa:TC missing APL-2892 D3: a spec with from \"vitest\" only in a comment, string or regex is not a Vitest spec", () => {
   assert.deepEqual(specifiers(MENTIONS_ONLY), ["@playwright/test"]);
   const dir = mkdtempSync(join(tmpdir(), "story-specs-"));
   try {
@@ -121,7 +121,7 @@ test("a spec with from \"vitest\" only in a comment, string or regex is not a Vi
 });
 
 // APL-2892 AC3: every real `import ... from "vitest"` form is still a Vitest spec.
-test("a spec with a real import ... from \"vitest\" is still a Vitest spec qa:TC missing", () => {
+test("qa:TC missing APL-2892 AC3: a spec with a real import ... from \"vitest\" is still a Vitest spec", () => {
   const dir = mkdtempSync(join(tmpdir(), "story-specs-"));
   try {
     writeFileSync(join(dir, "APL-1.spec.ts"), 'import { it } from "vitest";\n');
@@ -150,11 +150,11 @@ export function assertConfigAppliesVitestSpecs(file = CONFIG) {
   );
 }
 
-test("playwright.config.ts applies VITEST_SPECS to testIgnore qa:TC missing", () => {
+test("qa:TC missing APL-2892 D2: playwright.config.ts applies VITEST_SPECS to testIgnore", () => {
   assertConfigAppliesVitestSpecs();
 });
 
-test("the config check fails naming playwright.config.ts when testIgnore drops VITEST_SPECS qa:TC missing", () => {
+test("qa:TC missing APL-2892 D2: the config check fails naming playwright.config.ts when testIgnore drops VITEST_SPECS", () => {
   const real = readFileSync(CONFIG, "utf8");
   assert.match(real, /testIgnore: VITEST_SPECS,/);
   const dir = mkdtempSync(join(tmpdir(), "pw-config-"));
@@ -177,4 +177,29 @@ test("the config check fails naming playwright.config.ts when testIgnore drops V
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+// SHO-2904: no qa:TC id is published for the guards in this file. Ids are written `TC-<TICKET>-<suffix>`
+// (TC-APL2720-01, TC-APL2716-3abdb652, TC-SHO2559-6a1d0e11) and 159 of them exist across 21 tickets, none of them
+// APL-2761, APL-2879, APL-2892 or SHO-2904 - so these ids are unpublished and must not be invented. What every title
+// can carry is the suite's missing-id marker with the ticket whose AC it guards - the form the rest of the suite writes
+// ("qa:TC missing SHO-2693 assign without a person ...", and tests/apl-2721.test.ts:3 states the rule). A bare
+// "qa:TC missing" says an id is absent but not whose AC the test carries, so nothing ties the test to a ticket and
+// nothing can be swept later.
+const SELF = fileURLToPath(import.meta.url);
+
+/** Every `test("<title>", ...)` title in `source`, read as code so a title quoted in a comment or string is not one. */
+export function testTitles(source) {
+  const { code, strings } = codeAndStrings(source);
+  return [...code.matchAll(/\btest\(\s*"#(\d+)"/g)].map((m) => strings[Number(m[1])]);
+}
+
+/** A published id (`qa:TC TC-<TICKET>-<suffix>`), or `qa:TC missing <TICKET>` naming the ticket an unpublished one belongs to. */
+const QA_TITLE = /qa:TC (?:TC-[A-Z0-9]+-[A-Za-z0-9]+|missing [A-Z]+-\d+)\b/;
+
+test("every title in this file names its qa:TC id or the ticket an unpublished one belongs to qa:TC missing SHO-2904", () => {
+  const titles = testTitles(readFileSync(SELF, "utf8"));
+  assert.ok(titles.length >= 8, `read ${titles.length} titles from ${relative(ROOT, SELF)}, so the reader found no tests`);
+  const bad = titles.filter((t) => !QA_TITLE.test(t));
+  assert.deepEqual(bad, [], `Write "qa:TC TC-<TICKET>-<suffix>" for a published id, or "qa:TC missing <TICKET> ..." for an unpublished one:\n${bad.join("\n")}`);
 });
