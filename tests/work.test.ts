@@ -8,6 +8,14 @@ import { execute } from "../src/lib/concierge/changes";
 
 const db = new PrismaClient();
 
+/** Owned historical fixture: new ordinary tasks now require dates; legacy undated reads remain supported. */
+async function legacyUndatedTask(who: Account, projectId: string, body: Record<string, unknown>) {
+  const id = await task(who, projectId, { ...body, dueDate: istDate(7) });
+  await db.task.update({ where: { id, projectId }, data: { dueDate: null } });
+  return id;
+}
+
+
 describe("people and roles (2.x)", () => {
   it("makes the configured address Super Admin", async () => {
     const sa = await superAdmin();
@@ -48,7 +56,7 @@ describe("people and roles (2.x)", () => {
     expect((await ad.c.post(`/api/team/${ad2.id}/deactivate`, { reassign: "leaders" })).status).toBe(403);
     expect((await ad.c.post(`/api/team/${sa.id}/deactivate`, { reassign: "leaders" })).status).toBe(403);
     expect((await ad.c.post(`/api/team/${lead.id}/deactivate`, { reassign: "leaders" })).status).toBe(409); // leads a project
-    const t = await task(leaver, p.id);
+    const t = await task(leaver, p.id, { dueDate: istDate(7) });
     const r = await ad.c.post(`/api/team/${leaver.id}/deactivate`, { reassign: "leaders" });
     expect(r.status).toBe(200);
     expect(r.json.moved).toBe(1);
@@ -69,8 +77,8 @@ describe("people and roles (2.x)", () => {
     const friend = await account("friend");
     const inP = await project(lead, lead, [{ who: leaver }, { who: friend }]);
     const outP = await project(lead, lead, [{ who: leaver }]); // friend is not a member here
-    const a = await task(leaver, inP.id);
-    const b = await task(leaver, outP.id);
+    const a = await task(leaver, inP.id, { dueDate: istDate(7) });
+    const b = await task(leaver, outP.id, { dueDate: istDate(7) });
     const r = await sa.c.post(`/api/team/${leaver.id}/deactivate`, { reassign: friend.id });
     expect(r.status).toBe(200);
     expect(r.json.fellBack).toHaveLength(1);
@@ -99,7 +107,7 @@ describe("projects and access (3.x)", () => {
     const lead = await account("lead");
     const outsider = await account("outsider");
     const p = await project(lead, lead);
-    const t = await task(lead, p.id);
+    const t = await task(lead, p.id, { dueDate: istDate(7) });
     expect((await outsider.c.get(`/api/projects/${p.id}`)).status).toBe(404);
     expect((await outsider.c.get(`/api/projects/${p.id}/tasks`)).status).toBe(404);
     expect((await outsider.c.get(`/api/tasks/${t}`)).status).toBe(404);
@@ -117,7 +125,7 @@ describe("projects and access (3.x)", () => {
     expect((await ed.c.post(`/api/projects/${p.id}/members`, { userId: extra.id })).status).toBe(403);
     expect((await lead.c.post(`/api/projects/${p.id}/members`, { userId: extra.id })).status).toBe(201);
     expect((await lead.c.post(`/api/projects/${p.id}/members`, { userId: extra.id })).status).toBe(409);
-    const t = await task(ed, p.id);
+    const t = await task(ed, p.id, { dueDate: istDate(7) });
     expect((await lead.c.del(`/api/projects/${p.id}/members/${ed.id}`)).status).toBe(409); // no taker chosen
     const viewer = await account("viewer");
     await lead.c.post(`/api/projects/${p.id}/members`, { userId: viewer.id, role: "VIEWER" });
@@ -131,7 +139,7 @@ describe("projects and access (3.x)", () => {
     const lead = await account("lead");
     const ed = await account("editor");
     const p = await project(lead, lead, [{ who: ed }]);
-    const t = await task(ed, p.id);
+    const t = await task(ed, p.id, { dueDate: istDate(7) });
     expect((await lead.c.patch(`/api/projects/${p.id}/members/${ed.id}`, { role: "VIEWER" })).status).toBe(409);
     expect((await lead.c.patch(`/api/projects/${p.id}/members/${ed.id}`, { role: "VIEWER", handoverTo: lead.id })).status).toBe(200);
     expect((await lead.c.get(`/api/tasks/${t}`)).json.task.assignee.id).toBe(lead.id);
@@ -156,7 +164,7 @@ describe("projects and access (3.x)", () => {
     const lead = await account("lead");
     const next = await account("next");
     const p = await project(lead, lead, [{ who: next }]);
-    const t = await task(lead, p.id);
+    const t = await task(lead, p.id, { dueDate: istDate(7) });
     expect((await lead.c.post(`/api/projects/${p.id}/leader`, { newLeaderId: next.id, previousRole: "REMOVE" })).status).toBe(409);
     expect((await lead.c.post(`/api/projects/${p.id}/leader`, { newLeaderId: next.id, previousRole: "REMOVE", handoverTo: next.id })).status).toBe(200);
     expect((await next.c.get(`/api/tasks/${t}`)).json.task.assignee.id).toBe(next.id);
@@ -167,7 +175,7 @@ describe("projects and access (3.x)", () => {
     const lead = await account("lead");
     const viewer = await account("viewer");
     const p = await project(lead, lead, [{ who: viewer, role: "VIEWER" }]);
-    const t = await task(lead, p.id);
+    const t = await task(lead, p.id, { dueDate: istDate(7) });
     expect((await viewer.c.post(`/api/projects/${p.id}/tasks`, { title: "x" })).status).toBe(403);
     expect((await patchTask(viewer, t, { title: "x" })).status).toBe(403);
     expect((await viewer.c.del(`/api/tasks/${t}`)).status).toBe(403);
@@ -201,7 +209,7 @@ describe("sections (5.4)", () => {
   it("requires a destination on delete, and protects the done and last Sections", async () => {
     const lead = await account("lead");
     const p = await project(lead, lead);
-    const t = await task(lead, p.id, { sectionId: p.doing });
+    const t = await task(lead, p.id, { dueDate: istDate(7), sectionId: p.doing });
     expect((await lead.c.del(`/api/projects/${p.id}/sections/${p.doing}`)).status).toBe(400);
     expect((await lead.c.del(`/api/projects/${p.id}/sections/${p.done}?moveTo=${p.todo}`)).status).toBe(409);
     expect((await lead.c.patch(`/api/projects/${p.id}/sections/${p.done}`, { isDone: false })).status).toBe(409);
@@ -212,7 +220,7 @@ describe("sections (5.4)", () => {
   it("closes open subtasks with their parent when a section becomes the done section or is deleted into it, one log row each (SHO-BUG-3)", async () => {
     const lead = await account("lead");
     const p = await project(lead, lead);
-    const parent = await task(lead, p.id, { title: "Parent", sectionId: p.doing });
+    const parent = await task(lead, p.id, { dueDate: istDate(7), title: "Parent", sectionId: p.doing });
     const subs = [await task(lead, p.id, { parentId: parent }), await task(lead, p.id, { parentId: parent })];
     const all = [parent, ...subs].sort();
     const completedAt = async (id: string) => (await lead.c.get(`/api/tasks/${id}`)).json.task.completedAt as string | null;
@@ -283,12 +291,12 @@ describe("sections (5.4)", () => {
   it("refuses a capped done-section record and leaves every task as it is (APL-2680)", async () => {
     const lead = await account("lead");
     const p = await project(lead, lead);
-    const reopened = [await task(lead, p.id, { title: "old a", sectionId: p.todo }), await task(lead, p.id, { title: "old b", sectionId: p.todo })];
+    const reopened = [await task(lead, p.id, { dueDate: istDate(7), title: "old a", sectionId: p.todo }), await task(lead, p.id, { dueDate: istDate(7), title: "old b", sectionId: p.todo })];
     for (const id of reopened) expect((await lead.c.post(`/api/tasks/${id}/complete`, await withVersion(lead, id))).status).toBe(200);
     const closing = [
-      await task(lead, p.id, { title: "new a", sectionId: p.doing }),
-      await task(lead, p.id, { title: "new b", sectionId: p.doing }),
-      await task(lead, p.id, { title: "new c", sectionId: p.doing }),
+      await task(lead, p.id, { dueDate: istDate(7), title: "new a", sectionId: p.doing }),
+      await task(lead, p.id, { dueDate: istDate(7), title: "new b", sectionId: p.doing }),
+      await task(lead, p.id, { dueDate: istDate(7), title: "new c", sectionId: p.doing }),
     ];
     const r = await lead.c.patch(`/api/projects/${p.id}/sections/${p.doing}`, { isDone: true });
     expect(r.status, JSON.stringify(r.json)).toBe(200);
@@ -315,7 +323,7 @@ describe("tasks (4.x, 5.x)", () => {
     const lead = await account("lead");
     const p = await project(lead, lead);
     const late = await task(lead, p.id, { title: "late", dueDate: istDate(20) });
-    const none = await task(lead, p.id, { title: "none" });
+    const none = await legacyUndatedTask(lead, p.id, { title: "none" });
     const soon = await task(lead, p.id, { title: "soon", dueDate: istDate(2) });
     const got = (await lead.c.get(`/api/tasks/${soon}`)).json.task;
     expect(got.assignee.id).toBe(lead.id);
@@ -351,7 +359,7 @@ describe("tasks (4.x, 5.x)", () => {
     const viewer = await account("viewer");
     const outsider = await account("outsider");
     const p = await project(lead, lead, [{ who: ed }, { who: viewer, role: "VIEWER" }]);
-    const t = await task(lead, p.id);
+    const t = await task(lead, p.id, { dueDate: istDate(7) });
     expect((await lead.c.post(`/api/tasks/${t}/assign`, await withVersion(lead, t, { assigneeId: viewer.id }))).status).toBe(400);
     expect((await lead.c.post(`/api/tasks/${t}/assign`, await withVersion(lead, t, { assigneeId: outsider.id }))).status).toBe(400);
     expect((await lead.c.post(`/api/tasks/${t}/assign`, await withVersion(lead, t, { assigneeId: ed.id }))).status).toBe(200);
@@ -365,7 +373,7 @@ describe("tasks (4.x, 5.x)", () => {
     const lead = await account("lead");
     const ed = await account("editor");
     const p = await project(lead, lead, [{ who: ed }]);
-    const t = await task(lead, p.id);
+    const t = await task(lead, p.id, { dueDate: istDate(7) });
     const seen = (await ed.c.get(`/api/tasks/${t}`)).json.task.updatedAt;
     expect((await patchTask(lead, t, { dueDate: istDate(3) })).status).toBe(200);
     const r = await ed.c.patch(`/api/tasks/${t}`, { title: "mine", expectedUpdatedAt: seen });
@@ -380,7 +388,7 @@ describe("tasks (4.x, 5.x)", () => {
   it("refuses an edit without a version and changes nothing", async () => {
     const lead = await account("lead");
     const p = await project(lead, lead);
-    const t = await task(lead, p.id, { title: "Original", priority: "LOW" });
+    const t = await task(lead, p.id, { dueDate: istDate(7), title: "Original", priority: "LOW" });
     const before = (await lead.c.get(`/api/tasks/${t}`)).json.task;
     const r = await lead.c.patch(`/api/tasks/${t}`, { title: "Overwritten", priority: "URGENT" });
     expect(r.status).toBe(400);
@@ -395,7 +403,7 @@ describe("tasks (4.x, 5.x)", () => {
     const lead = await account("lead");
     const ed = await account("editor");
     const p = await project(lead, lead, [{ who: ed }]);
-    const t = await task(lead, p.id, { title: "Original" });
+    const t = await task(lead, p.id, { dueDate: istDate(7), title: "Original" });
     const seen = (await ed.c.get(`/api/tasks/${t}`)).json.task.updatedAt;
     expect((await patchTask(lead, t, { title: "Theirs" })).status).toBe(200);
     const r = await ed.c.patch(`/api/tasks/${t}`, { title: "Mine", expectedUpdatedAt: seen });
@@ -407,7 +415,7 @@ describe("tasks (4.x, 5.x)", () => {
   it("saves an edit made on the current version", async () => {
     const lead = await account("lead");
     const p = await project(lead, lead);
-    const t = await task(lead, p.id, { title: "Original" });
+    const t = await task(lead, p.id, { dueDate: istDate(7), title: "Original" });
     const seen = (await lead.c.get(`/api/tasks/${t}`)).json.task.updatedAt;
     const r = await lead.c.patch(`/api/tasks/${t}`, { title: "Saved", expectedUpdatedAt: seen });
     expect(r.status).toBe(200);
@@ -418,7 +426,7 @@ describe("tasks (4.x, 5.x)", () => {
     const lead = await account("lead");
     const ed = await account("editor");
     const p = await project(lead, lead, [{ who: ed }]);
-    const t = await task(ed, p.id, { sectionId: p.doing });
+    const t = await task(ed, p.id, { dueDate: istDate(7), sectionId: p.doing });
     const r = await patchTask(ed, t, { blocked: true, blockedReason: "Waiting on data" });
     expect(r.json.task.blocked).toBe(true);
     expect(r.json.task.blockedReason).toBe("Waiting on data");
@@ -431,7 +439,7 @@ describe("tasks (4.x, 5.x)", () => {
     const lead = await account("lead");
     const ed = await account("editor");
     const p = await project(lead, lead, [{ who: ed }]);
-    const t = await task(ed, p.id);
+    const t = await task(ed, p.id, { dueDate: istDate(7) });
     const before = (await ed.c.get(`/api/tasks/${t}`)).json.task as { blocked: boolean; updatedAt: string };
     for (const blocked of [true, false]) {
       const r = await ed.c.patch(`/api/tasks/${t}`, { blocked });
@@ -447,7 +455,7 @@ describe("tasks (4.x, 5.x)", () => {
   it("completes with the open-subtask choice, and reopens to the previous Section", async () => {
     const lead = await account("lead");
     const p = await project(lead, lead);
-    const t = await task(lead, p.id, { sectionId: p.doing });
+    const t = await task(lead, p.id, { dueDate: istDate(7), sectionId: p.doing });
     const sub = await task(lead, p.id, { parentId: t });
     const warn = await lead.c.post(`/api/tasks/${t}/complete`, await withVersion(lead, t));
     expect(warn.status).toBe(409);
@@ -469,7 +477,7 @@ describe("tasks (4.x, 5.x)", () => {
     const ed = await account("editor");
     const viewer = await account("viewer");
     const p = await project(lead, lead, [{ who: ed }, { who: viewer, role: "VIEWER" }]);
-    const t = await task(ed, p.id);
+    const t = await task(ed, p.id, { dueDate: istDate(7) });
     expect((await viewer.c.post(`/api/tasks/${t}/move`, await withVersion(viewer, t, { sectionId: p.done }))).status).toBe(403);
     expect((await ed.c.post(`/api/tasks/${t}/move`, await withVersion(ed, t, { sectionId: p.done }))).status).toBe(200);
     expect((await ed.c.get(`/api/tasks/${t}`)).json.task.completedAt).not.toBeNull();
@@ -489,7 +497,7 @@ describe("a version on assign, move, complete and approver (APL-2668)", () => {
     const ed = await account("editor");
     const other = await account("other");
     const p = await project(lead, lead, [{ who: ed }, { who: other }]);
-    const t = await task(lead, p.id, { title: "Original", assigneeId: other.id }); // the Leader may set its approver
+    const t = await task(lead, p.id, { dueDate: istDate(7), title: "Original", assigneeId: other.id }); // the Leader may set its approver
     return { lead, ed, other, p, t };
   }
   type S = Awaited<ReturnType<typeof setup>>;
@@ -572,7 +580,7 @@ describe("a version on assign, move, complete and approver (APL-2668)", () => {
 
     it(`bulk ${action}: refuses a request missing a version for any task with 400 and changes nothing`, async () => {
       const s = await setup();
-      const t2 = await task(s.lead, s.p.id);
+      const t2 = await task(s.lead, s.p.id, { dueDate: istDate(7) });
       const rows = await logs(s.t);
       const none = await s.lead.c.post(`/api/projects/${s.p.id}/tasks/bulk`, { taskIds: [s.t, t2], action, ...extra(s) });
       expect(none.status).toBe(400);
@@ -585,7 +593,7 @@ describe("a version on assign, move, complete and approver (APL-2668)", () => {
 
     it(`bulk ${action}: a task changed since the page showed it lands in skipped; the rest save`, async () => {
       const s = await setup();
-      const t2 = await task(s.lead, s.p.id);
+      const t2 = await task(s.lead, s.p.id, { dueDate: istDate(7) });
       const body = await bulkWithVersions(s.lead, [s.t, t2], { action, ...extra(s) });
       expect((await patchTask(s.other, s.t, { title: "Theirs" })).status).toBe(200);
       const r = await s.lead.c.post(`/api/projects/${s.p.id}/tasks/bulk`, body);
@@ -606,7 +614,7 @@ describe("approver (4.6)", () => {
     const boss = await account("approver");
     const other = await account("other");
     const p = await project(lead, lead, [{ who: worker }, { who: boss }, { who: other }]);
-    const t = await task(worker, p.id, { title: "needs review" });
+    const t = await task(worker, p.id, { dueDate: istDate(7), title: "needs review" });
     return { lead, worker, boss, other, p, t };
   }
 
@@ -696,7 +704,7 @@ describe("approver (4.6)", () => {
 
   it("lets the Leader hand on a task they hold even though it has an approver; an Editor still cannot (SHO-BUG-6)", async () => {
     const { lead, worker, boss, other, p } = await setup();
-    const t = await task(lead, p.id, { title: "Leader holds", assigneeId: lead.id, approverId: boss.id });
+    const t = await task(lead, p.id, { dueDate: istDate(7), title: "Leader holds", assigneeId: lead.id, approverId: boss.id });
     expect((await lead.c.post(`/api/tasks/${t}/assign`, await withVersion(lead, t, { assigneeId: other.id }))).status).toBe(200);
     expect((await lead.c.get(`/api/tasks/${t}`)).json.task).toMatchObject({ assignee: { id: other.id }, approver: { id: boss.id }, awaitingApproval: false });
     expect((await other.c.post(`/api/tasks/${t}/assign`, await withVersion(other, t, { assigneeId: worker.id }))).status).toBe(403); // the assignee may only hand it to the approver
@@ -705,7 +713,7 @@ describe("approver (4.6)", () => {
 
   it("hands a removed approver's tasks to the Leader, who also becomes the holder when awaiting", async () => {
     const { lead, worker, boss, p, t } = await setup();
-    const t2 = await task(worker, p.id);
+    const t2 = await task(worker, p.id, { dueDate: istDate(7) });
     await lead.c.put(`/api/tasks/${t}/approver`, await withVersion(lead, t, { approverId: boss.id }));
     await lead.c.put(`/api/tasks/${t2}/approver`, await withVersion(lead, t2, { approverId: boss.id }));
     await worker.c.post(`/api/tasks/${t}/send-for-approval`); // t awaits boss, t2 does not
@@ -726,7 +734,7 @@ describe("trash (6.1, 6.2)", () => {
     const ed = await account("editor");
     const viewer = await account("viewer");
     const p = await project(lead, lead, [{ who: ed }, { who: viewer, role: "VIEWER" }]);
-    const t = await task(ed, p.id, { sectionId: p.doing });
+    const t = await task(ed, p.id, { dueDate: istDate(7), sectionId: p.doing });
     const sub = await task(ed, p.id, { parentId: t });
     expect((await ed.c.del(`/api/tasks/${t}`)).status).toBe(204);
     expect((await ed.c.get(`/api/tasks/${t}`)).status).toBe(404);
@@ -746,7 +754,7 @@ describe("trash (6.1, 6.2)", () => {
   it("lists a subtask deleted on its own even when its parent is later in Trash, but not one deleted together with its parent", async () => {
     const lead = await account("lead");
     const p = await project(lead, lead, []);
-    const t = await task(lead, p.id);
+    const t = await task(lead, p.id, { dueDate: istDate(7) });
     const early = await task(lead, p.id, { parentId: t });
     const together = await task(lead, p.id, { parentId: t });
     expect((await lead.c.del(`/api/tasks/${early}`)).status).toBe(204);
@@ -762,7 +770,7 @@ describe("trash (6.1, 6.2)", () => {
   it("restores a deleted parent with its subtask after a confirmation", async () => {
     const lead = await account("lead");
     const p = await project(lead, lead);
-    const t = await task(lead, p.id);
+    const t = await task(lead, p.id, { dueDate: istDate(7) });
     const sub = await task(lead, p.id, { parentId: t });
     await lead.c.del(`/api/tasks/${t}`);
     const r = await lead.c.post(`/api/tasks/${sub}/restore`);
@@ -777,7 +785,7 @@ describe("trash (6.1, 6.2)", () => {
     const lead = await account("lead");
     const ed = await account("editor");
     const p = await project(lead, lead, [{ who: ed }]);
-    const t = await task(ed, p.id);
+    const t = await task(ed, p.id, { dueDate: istDate(7) });
     await lead.c.del(`/api/tasks/${t}`);
     await sa.c.post(`/api/team/${ed.id}/deactivate`, { reassign: "leaders" });
     expect((await lead.c.post(`/api/tasks/${t}/restore`)).status).toBe(200);
@@ -790,7 +798,7 @@ describe("trash (6.1, 6.2)", () => {
     const lead = await account("lead");
     const ed = await account("editor");
     const p = await project(lead, lead, [{ who: ed }]);
-    const t = await task(lead, p.id);
+    const t = await task(lead, p.id, { dueDate: istDate(7) });
     const sub = await task(ed, p.id, { parentId: t });
     await lead.c.del(`/api/tasks/${t}`);
     await sa.c.post(`/api/team/${ed.id}/deactivate`, { reassign: "leaders" });
@@ -810,7 +818,7 @@ describe("My tasks (5.1)", () => {
     const soon = await task(lead, p.id, { assigneeId: me.id, dueDate: istDate(3) });
     const later = await task(lead, p.id, { assigneeId: me.id, dueDate: istDate(30) });
     const collab = await task(lead, p.id, { collaboratorIds: [me.id, viewer.id], dueDate: istDate(1) });
-    const inQ = await task(lead, q.id, { assigneeId: me.id });
+    const inQ = await legacyUndatedTask(lead, q.id, { assigneeId: me.id });
     const mine = (await me.c.get("/api/my-tasks")).json;
     expect(mine.overdue.map((t: { id: string }) => t.id)).toEqual([overdue]);
     expect(mine.next7.map((t: { id: string }) => t.id)).toEqual([collab, soon]);

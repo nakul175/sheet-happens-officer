@@ -13,7 +13,7 @@ const person=(id:string)=>({id,workspaceId:m.workspace,orgRole:m.actorOrgRole,de
 const task=()=>({id:"task",projectId:"project",parentId:null,assigneeId:"actor",approverId:null,previousAssigneeId:null,createdById:"actor",title:"Task",priority:"MEDIUM",description:null,dueDate:null,blocked:false,blockedReason:null,completedAt:null,deletedAt:null,updatedAt:new Date(version),assignee:{id:"actor",name:"Actor"},approver:null,collaborators:[],subtasks:[]});
 beforeEach(()=>{
  vi.clearAllMocks();m.actorRole="LEADER";m.actorOrgRole="MEMBER";m.workspace="ws";m.targetRole=null;m.targetActive=true;m.failWrite=false;
- m.access.mockResolvedValue({role:"LEADER",admin:false,project:{id:"project",workspaceId:"ws",archivedAt:null,members:[{userId:"actor",role:"LEADER"}]}});
+ m.access.mockResolvedValue({role:"LEADER",admin:false,project:{id:"project",workspaceId:"ws",typeId:"wst_project",archivedAt:null,members:[{userId:"actor",role:"LEADER"}]}});
  m.tx.$queryRaw.mockResolvedValue([{id:"project",workspaceId:"ws",name:"Private project",archivedAt:null}]);
  m.tx.user.findUnique.mockImplementation(async()=>person("actor"));m.db.user.findUnique.mockImplementation(async()=>person("actor"));
  m.tx.user.findFirst.mockImplementation(async()=>m.targetActive?{id:"target"}:null);
@@ -46,16 +46,16 @@ describe("SHO3058 explicit workspace membership for task actions",()=>{
   await addCollaborator(actor,"task","target",{addToProject:true,expectedUpdatedAt:version});expect(m.tx.taskCollaborator.create).toHaveBeenCalledWith({data:{taskId:"task",userId:"target"}});expect(m.log).toHaveBeenCalledWith(m.tx,expect.objectContaining({action:"task.collaborator_added"}));
  });
  it("creation adds the explicitly confirmed assignee in its task transaction",async()=>{
-  await createTask(actor,"project",{title:"New",sectionId:"section",assigneeId:"target",addAssigneeToProject:true});
+  await createTask(actor,"project",{title:"New",dueDate:"2026-10-25",sectionId:"section",assigneeId:"target",addAssigneeToProject:true});
   expect(m.tx.task.create).toHaveBeenCalledWith({data:expect.objectContaining({assigneeId:"target",collaborators:{create:[]}})});expect(m.targetRole).toBe("EDITOR");
  });
  it("creation adds explicitly confirmed collaborators without changing the default creator owner",async()=>{
-  await createTask(actor,"project",{title:"New",sectionId:"section",collaboratorIds:["target"],addCollaboratorsToProject:["target"]});
+  await createTask(actor,"project",{title:"New",dueDate:"2026-10-25",sectionId:"section",collaboratorIds:["target"],addCollaboratorsToProject:["target"]});
   expect(m.tx.task.create).toHaveBeenCalledWith({data:expect.objectContaining({assigneeId:"actor",collaborators:{create:[{userId:"target"}]}})});expect(m.targetRole).toBe("EDITOR");
  });
  it("creation refuses unconfirmed nonmembers and unmatched membership grants",async()=>{
-  await expect(createTask(actor,"project",{title:"New",sectionId:"section",assigneeId:"target"})).rejects.toMatchObject({status:400});expect(m.tx.projectMember.createMany).not.toHaveBeenCalled();
-  await expect(createTask(actor,"project",{title:"New",sectionId:"section",assigneeId:"actor",addCollaboratorsToProject:["target"]})).rejects.toMatchObject({status:400});expect(m.tx.task.create).not.toHaveBeenCalled();
+  await expect(createTask(actor,"project",{title:"New",dueDate:"2026-10-25",sectionId:"section",assigneeId:"target"})).rejects.toMatchObject({status:400});expect(m.tx.projectMember.createMany).not.toHaveBeenCalled();
+  await expect(createTask(actor,"project",{title:"New",dueDate:"2026-10-25",sectionId:"section",assigneeId:"actor",addCollaboratorsToProject:["target"]})).rejects.toMatchObject({status:400});expect(m.tx.task.create).not.toHaveBeenCalled();
  });
  it("locked collaborator snapshot detects a concurrent duplicate despite unchanged task version",async()=>{
   m.tx.task.findUnique.mockResolvedValue({...task(),collaborators:[{user:{id:"target",name:"Target"}}]});
