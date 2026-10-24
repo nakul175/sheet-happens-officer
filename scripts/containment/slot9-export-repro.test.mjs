@@ -75,6 +75,8 @@ test("two cuts of the same commit are byte-identical (the pin is reproducible)",
     `two cuts of ${HEAD.slice(0, 7)} produced different tarballs:\n  ${a.sha}\n  ${b.sha}\n` +
       "A published hash is only a pin if re-cutting the same commit reproduces it.",
   );
+});
+
 test("MANIFEST.sha256 verifies from a fresh extraction, and each file is the commit's blob", () => {
   const root = extract(cut().tarball);
 
@@ -134,6 +136,4 @@ test("the shipped set covers every dependency the runbooks source or call", () =
     [...needed].sort(),
     "the export ships files no runbook names (an unpinned extra cannot be reviewed as part of the run)",
   );
-});
-
 });
