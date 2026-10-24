@@ -57,8 +57,13 @@ test("AC3: moving from a project list to its board keeps the same conversation",
   await p.goto(`/projects/${project.id}`);
   await expect(p.locator("aside.cc-slot")).toContainText(marker);
   await p.goto(`/projects/${project.id}?view=board`);
-  await p.locator("aside.cc-barslot").getByRole("button", { name: "Open chat" }).click();
-  await expect(p.locator("aside.cc-barslot")).toContainText(marker);
+  const bar = p.locator("aside.cc-barslot");
+  // The persisted thread loads asynchronously and automatically expands the bar.
+  // Wait for that state before choosing whether expansion is still needed.
+  await expect(bar.getByLabel("Message the concierge", { exact: true })).toBeEnabled();
+  const toggle = bar.getByRole("button", { name: /^(Open chat|Collapse)$/ });
+  if (await toggle.getAttribute("aria-expanded") === "false") await toggle.click();
+  await expect(bar).toContainText(marker);
 });
 
 test("AC4: at 390 pixels a floating button opens the concierge full screen", async ({ admin, later }) => {
