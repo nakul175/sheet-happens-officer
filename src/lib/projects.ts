@@ -14,13 +14,13 @@ const DEFAULT_SECTIONS = ["To do", "In progress", "Done"];
 export async function createProject(user: Actor, input: { name: string; description?: string | null; leaderId: string; members?: { userId: string; role: "EDITOR" | "VIEWER" }[] }) {
   const leader = await db.user.findUnique({ where: { id: input.leaderId } });
   const me = await db.user.findUniqueOrThrow({ where: { id: user.id } });
-  if (!leader || !isActive(leader) || leader.workspaceId !== me.workspaceId) throw new ApiError(400, "Choose an active person from this workspace as Leader.");
+  if (!leader || !isActive(leader) || leader.workspaceId !== me.workspaceId) throw new ApiError(400, "Choose an active person as Leader.");
   // SHO-US-14.17: the people added with the project must be active; the Leader and the creator already have a seat.
   const wanted = new Map<string, "EDITOR" | "VIEWER">();
   for (const m of input.members ?? []) if (m.userId !== leader.id && m.userId !== user.id) wanted.set(m.userId, m.role);
   if (wanted.size) {
     const found = await db.user.findMany({ where: { id: { in: [...wanted.keys()] } } });
-    if (found.length !== wanted.size || !found.every(person => isActive(person) && person.workspaceId === me.workspaceId)) throw new ApiError(400, "Choose active people from this workspace to add.");
+    if (found.length !== wanted.size || !found.every(person => isActive(person) && person.workspaceId === me.workspaceId)) throw new ApiError(400, "Choose active people to add.");
   }
   return db.$transaction(async (tx) => {
     const project = await tx.project.create({
@@ -139,7 +139,7 @@ export async function addMember(user: Actor, projectId: string, userId: string, 
   const a = await projectAccess(user, projectId, { write: true });
   requireManage(a);
   const person = await db.user.findUnique({ where: { id: userId } });
-  if (!person || !isActive(person) || person.workspaceId !== a.project.workspaceId) throw new ApiError(400, "Choose an active person from this workspace.");
+  if (!person || !isActive(person) || person.workspaceId !== a.project.workspaceId) throw new ApiError(400, "Choose an active person.");
   if (a.project.members.some((m) => m.userId === userId)) throw new ApiError(409, "This person is already a member.");
   await db.$transaction(async (tx) => {
     await tx.projectMember.create({ data: { projectId, userId, role } });
