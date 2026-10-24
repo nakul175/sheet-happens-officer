@@ -249,6 +249,17 @@ export function TaskModal({ id, me, onClose, onChanged, asPage }: { id: string; 
             </div>
           )}
           {meCtx.crm && !task.parentId && <TaskLinks taskId={id} links={task.links ?? []} canEdit={canEdit && !holding} onChanged={() => { t.reload(); onChanged?.(); }} />}
+
+          {task.approver && !task.awaitingApproval && !done && task.assignee.id === me && (
+            <p className="hint">Only {task.approver.name} or the project Leader can close this task. Send it for approval when it is ready.</p>
+          )}
+          {canEdit && !holding && (
+            <div className="box dng" style={{ display: "flex", gap: 12, alignItems: "center", justifyContent: "space-between", flexWrap: "wrap" }}>
+              <span className="hint" style={{ color: "var(--danger)" }}>Kept 30 days. Everyone on the task is told. ({ROLE[role]})</span>
+
+            </div>
+          )}
+          {task.commentsEnabled && <Comments taskId={id} onChanged={onChanged} />}
           <div className="actions" style={{ justifyContent: "flex-start" }}>
             {canEdit && !done && task.approver && !task.awaitingApproval && !task.parentId && task.assignee.id === me && (
               <button className="btn" disabled={busy} onClick={() => run(api("POST", `/api/tasks/${id}/send-for-approval`, {}))}>Send for approval</button>
@@ -260,17 +271,10 @@ export function TaskModal({ id, me, onClose, onChanged, asPage }: { id: string; 
               <button className="btn" disabled={busy} onClick={() => complete()}>{task.approver ? "Close task" : "Mark complete"}</button>
             )}
             {canEdit && done && <button className="btn ghost" disabled={busy} onClick={() => run(api("POST", `/api/tasks/${id}/reopen`, {}))}>Reopen</button>}
-          </div>
-          {task.approver && !task.awaitingApproval && !done && task.assignee.id === me && (
-            <p className="hint">Only {task.approver.name} or the project Leader can close this task. Send it for approval when it is ready.</p>
-          )}
-          {canEdit && !holding && (
-            <div className="box dng" style={{ display: "flex", gap: 12, alignItems: "center", justifyContent: "space-between", flexWrap: "wrap" }}>
-              <span className="hint" style={{ color: "var(--danger)" }}>Kept 30 days. Everyone on the task is told. ({ROLE[role]})</span>
+            {canEdit && !holding && (
               <button className="btn ghost sm" style={{ color: "var(--danger)", borderColor: "var(--danger-line)" }} onClick={() => setTrash(true)}>Move to Trash</button>
-            </div>
-          )}
-          {task.commentsEnabled && <Comments taskId={id} onChanged={onChanged} />}
+            )}
+          </div>
         </>,
       )}
       {convert && <ConvertDialog task={task} meId={me} onClose={() => setConvert(false)} />}
