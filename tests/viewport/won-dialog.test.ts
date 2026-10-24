@@ -132,8 +132,16 @@ describe("qa:TC missing APL-2691 Move to Won dialog", () => {
       const move = dialog.getByRole("button", { name: "Move deal" });
       await move.evaluate((el) => el.scrollIntoView({ block: "end", inline: "nearest" }));
       const button = await move.boundingBox();
+      expect(button, "Move deal must have a rendered box").not.toBeNull();
+      // Font metrics differ across Chromium builds. Arrange the collision explicitly instead of
+      // assuming the dialog footer naturally overlaps the tab bar. Keep both z-indices intact:
+      // removing the dialog stacking fix must still make this real click fail.
+      await bar.evaluate((el, top) => {
+        (el as HTMLElement).style.top = `${top}px`;
+        (el as HTMLElement).style.bottom = "auto";
+      }, button!.y);
       const tab = await bar.boundingBox();
-      expect(button && tab && button.y < tab.y + tab.height && button.y + button.height > tab.y).toBe(true);
+      expect(tab && button!.y < tab.y + tab.height && button!.y + button!.height > tab.y).toBe(true);
       await move.click();
       await alert.waitFor({ state: "visible", timeout: WITHIN });
       expect(await alert.innerText()).toContain("21");

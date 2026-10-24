@@ -104,7 +104,7 @@ jobs:
         env:
           POSTGRES_USER: sho
           POSTGRES_PASSWORD: sho
-          POSTGRES_DB: sho_browser
+          POSTGRES_DB: sho_test_browser
         ports: ["5432:5432"]
         options: >-
           --health-cmd "pg_isready -U sho"
@@ -112,8 +112,8 @@ jobs:
           --health-timeout 5s
           --health-retries 12
     env:
-      DATABASE_URL: postgresql://sho:sho@localhost:5432/sho_browser?schema=public
-      DIRECT_DATABASE_URL: postgresql://sho:sho@localhost:5432/sho_browser?schema=public
+      DATABASE_URL: postgresql://sho:sho@localhost:5432/sho_test_browser?schema=public
+      DIRECT_DATABASE_URL: postgresql://sho:sho@localhost:5432/sho_test_browser?schema=public
       EMAIL_OUTBOX_DIR: ${{ github.workspace }}/.outbox-ci
       SUPER_ADMIN_EMAILS: root.test@aplyd.com
       APP_URL: http://localhost:3100
