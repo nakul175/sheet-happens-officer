@@ -12,17 +12,17 @@ type Person = { id: string; name: string; email?: string; status?: "ACTIVE" | "U
 export default function Members({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const pr = useGet<{ project: Proj }>(`/api/projects/${id}`);
-  const team = useGet<{ people: Person[] }>("/api/team");
   const [q, setQ] = useState("");
   const [addRole, setAddRole] = useState("EDITOR");
   const [err, setErr] = useState<string | null>(null);
   const [dlg, setDlg] = useState<null | { kind: "remove" | "viewer" | "leader" | "archive"; m?: M }>(null);
   const p = pr.data?.project;
+  const manage = p?.role === "LEADER" && !p?.archived;
+  const team = useGet<{ people: Person[] }>(manage && q.trim() ? `/api/projects/${id}/member-candidates?q=${encodeURIComponent(q.trim())}` : null);
   if (!p && pr.failed) return <Page title="Members"><LoadFailed onRetry={pr.reload} /></Page>;
   if (pr.error && !p) return <Page title="This project isn't available"><div className="card empty">It may not exist, or you are not a member.<br /><Link href="/projects">Back to Projects</Link></div></Page>;
-  const manage = p?.role === "LEADER" && !p?.archived;
   const inProject = new Set(p?.members.map((m) => m.userId));
-  const found = q.trim().length < 1 ? [] : (team.data?.people ?? []).filter((x) => (!x.status || x.status === "ACTIVE") && !inProject.has(x.id) && (x.name + " " + (x.email ?? "")).toLowerCase().includes(q.trim().toLowerCase())).slice(0, 8);
+  const found = q.trim().length < 1 ? [] : (team.data?.people ?? []).filter((x) => (!x.status || x.status === "ACTIVE") && !inProject.has(x.id)).slice(0, 8);
 
   async function add(userId: string) {
     const r = await api("POST", `/api/projects/${id}/members`, { userId, role: addRole });
