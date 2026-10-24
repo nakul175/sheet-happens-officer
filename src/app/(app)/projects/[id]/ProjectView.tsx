@@ -287,7 +287,7 @@ function Inner({ id }: { id: string }) {
         </div>
         <div className="board" ref={boardEl} onScroll={onBoardScroll}>
           {secs.map((s) => (
-            <div key={s.id} className={`col${overCol === s.id ? " over" : ""}`} aria-label={s.name}
+            <div key={s.id} className={`col${overCol === s.id ? " over" : ""}`} role="group" aria-label={s.name}
               onDragOver={(e) => { if (dragId && canWrite && canDrop(dragId, s)) { e.preventDefault(); setOverCol(s.id); } }}
               onDragLeave={() => setOverCol((c) => (c === s.id ? null : c))}
               onDrop={(e) => { e.preventDefault(); setOverCol(null); const tid = dragId; setDragId(null); if (tid && canWrite && canDrop(tid, s)) { const from = secs.flatMap((x) => tasksOf(x)).find((x) => x.id === tid); if (from && from.sectionId !== s.id) moveTo(tid, s.id); } }}>

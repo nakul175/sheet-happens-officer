@@ -265,3 +265,24 @@ test("AC7: each screen shows the mockup's key elements at 1440x900 and 390x844",
   }
   expect(MOCKUP_SCREENS.map(([screen]) => screen)).toEqual(["My tasks", "Project list", "Project board", "Task detail", "Team"]);
 });
+
+test("Board column names are exposed as groups on desktop and phone", async ({ admin, later }) => {
+  const project = await makeProject(admin.api, "board semantics", admin.user.id as string);
+  later(() => archiveProject(admin.api, project.id, admin.user.id as string));
+  for (const width of [1280, 390]) {
+    await admin.page.setViewportSize({ width, height: 900 });
+    await admin.page.goto(`/projects/${project.id}?view=board`);
+    for (const name of ["To do", "In progress", "Done"]) {
+      const column = admin.page.getByRole("group", { name, exact: true });
+      await expect(column).toHaveCount(1);
+      await expect(column.getByRole("heading", { name: new RegExp(`^${name}`) })).toBeVisible();
+    }
+    await admin.page.addScriptTag({ content: readFileSync("node_modules/axe-core/axe.min.js", "utf8") });
+    const unresolved = await admin.page.evaluate(async () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- owned browser axe injection.
+      const result = await (window as any).axe.run(document, { runOnly: { type: "rule", values: ["aria-prohibited-attr"] } });
+      return [...result.violations, ...result.incomplete];
+    });
+    expect(unresolved).toEqual([]);
+  }
+});
