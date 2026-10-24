@@ -1,8 +1,7 @@
 // SHO-US-12.6 Pipeline board (APL-2542).
 // One test per acceptance criterion; AC2 and AC3 are in APL-2542-totals.spec.ts, which runs serially. ZZ-TEST deals and organisations are archived afterwards.
 // The plain Member is the second person for "who can see this" and "only my deals".
-// No stage in the seeded pipelines has required fields, and stages cannot be edited (APL-2528 AC3), so AC5
-// checks the reason and open-task gates and records that the required-field list is empty.
+// Negotiation requires value and currency (APL-2739); AC5 also checks that gate.
 import { test, expect, zz } from "../support";
 import { newTask, ymd } from "../g2";
 import { dealsOf, dropDeal, makeDeal, pipelines } from "../helpers/deal-board";
@@ -77,8 +76,11 @@ test("AC5: Move to… and a drop both follow the stage rules for reason and open
   const blocked = await admin.api.post(`/api/projects/${d.id}/stage`, { stageId: lost.id, reason: "ZZ-TEST lost" });
   expect(blocked.status).toBe(409);
   expect(JSON.stringify(blocked.json.tasks)).toContain(d.step);
-  // Every seeded stage has an empty required-field list, so a move is not asked for extra fields. Nothing in the product edits that list.
-  expect(d.pipe.stages.every((s) => Array.isArray(s.requiredFields) && s.requiredFields.length === 0)).toBe(true);
+  const negotiation = d.pipe.stages.find((s) => s.name === "Negotiation")!;
+  expect(negotiation.requiredFields).toEqual(["value", "currency"]);
+  const missing = await admin.api.post(`/api/projects/${d.id}/stage`, { stageId: negotiation.id });
+  expect(missing.status).toBe(409);
+  expect(missing.json.needsFields).toContain("value");
 
   await admin.page.setViewportSize({ width: 1400, height: 900 });
   await admin.page.goto("/deals");
@@ -127,7 +129,7 @@ test("AC6: Only my deals keeps deals the person leads or holds an open assigned 
   await expect(member.page.locator(".dcard", { hasText: held.name })).toBeVisible();
   await expect(member.page.getByText(other.name)).toHaveCount(0);
 
-  expect((await member.api.post(`/api/tasks/${taskId}/complete`, {})).status).toBe(200);
+  expect((await member.api.post(`/api/tasks/${taskId}/complete`, { expectedUpdatedAt: (await member.api.get(`/api/tasks/${taskId}`)).json.task.updatedAt })).status).toBe(200);
   expect(await mine(), "a completed task no longer keeps the deal in Only my deals").not.toContain(held.id);
   expect(await mine()).toContain(led.id);
 });

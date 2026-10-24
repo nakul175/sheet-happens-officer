@@ -28,5 +28,5 @@ test("After a send-back to the Leader-approver the task is no longer awaiting ap
   expect(after.assignee.id).toBe(admin.user.id);
   expect(after.approver, "approver cleared in the same write").toBeNull();
   // The Leader can work the task normally again: it can be completed.
-  expect((await admin.api.post(`/api/tasks/${tid}/complete`, {})).status).toBe(200);
+  expect((await admin.api.post(`/api/tasks/${tid}/complete`, { expectedUpdatedAt: (await admin.api.get(`/api/tasks/${tid}`)).json.task.updatedAt })).status).toBe(200);
 });

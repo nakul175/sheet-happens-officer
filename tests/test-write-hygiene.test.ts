@@ -80,8 +80,8 @@ const UNRESOLVED: Record<string, string> = {
   "tests/typecheck.test.ts:197": SCANNER_BLIND,
   "tests/sec-2917-gaps.test.ts:30": SCANNER_BLIND,
   "tests/sec-2917-gaps.test.ts:31": SCANNER_BLIND,
-  "tests/sec-2917-gaps.test.ts:162": SCANNER_BLIND,
-  "tests/sec-2917-gaps.test.ts:173": SCANNER_BLIND,
+  "tests/sec-2917-gaps.test.ts:161": SCANNER_BLIND,
+  "tests/sec-2917-gaps.test.ts:172": SCANNER_BLIND,
   "tests/staging-e2e-seed.test.ts:39": SCANNER_BLIND,
 };
 

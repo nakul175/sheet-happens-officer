@@ -115,7 +115,7 @@ test("AC4: Monday review lists deals that need a next step, overdue next steps, 
     name: zz("e13 needs deal"), organisationId: org.id, pipelineId: pro.id, leaderId: admin.user.id,
   }));
   const stepId = (await projectOf(admin, empty.id)).deal.nextStep.id as string;
-  expect((await admin.api.post(`/api/tasks/${stepId}/complete`, {})).status).toBe(200);
+  expect((await admin.api.post(`/api/tasks/${stepId}/complete`, { expectedUpdatedAt: (await admin.api.get(`/api/tasks/${stepId}`)).json.task.updatedAt })).status).toBe(200);
   const project = await newProject(admin, later, { label: "e13 idea project" });
   const fresh = zz("fresh idea");
   const ideaId = await newTask(admin, project.id, { title: fresh, assigneeId: admin.user.id, dueDate: ymd(6) });

@@ -94,7 +94,7 @@ test("AC4: an edit to a task that changed elsewhere shows the stale-edit message
   await page.goto(`/projects/${s.pid}`);
   await expect(row(page, title)).toBeVisible();
   // Somebody else (here: the API as the same account) changes the task after the page loaded.
-  expect((await admin.api.patch(`/api/tasks/${tid}`, { priority: "LOW" })).status).toBe(200);
+  expect((await admin.api.patch(`/api/tasks/${tid}`, { priority: "LOW", expectedUpdatedAt: (await admin.api.get(`/api/tasks/${tid}`)).json.task.updatedAt })).status).toBe(200);
   await row(page, title).getByRole("button", { name: /^Priority .*Change$/ }).click();
   await page.getByRole("dialog", { name: "Choose priority" }).getByRole("button", { name: "Urgent" }).click();
   const note = page.getByRole("alert").filter({ hasText: "while you were editing" });

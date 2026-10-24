@@ -6,7 +6,6 @@
 // AC5 note: the reminder job needs a job secret that a browser session does not have, so the test checks the input the job reads
 // (src/lib/jobs.ts sendReminders only picks tasks with completedAt null): a closed subtask must be gone from the assignee's My tasks.
 // Data: one ZZ-TEST project per test, archived afterwards. No people are created; the Super Admin holds the subtasks. No secret is read or printed.
-import { readFileSync } from "node:fs";
 import { test, expect, zz } from "../support";
 import { getTask, newProject, newTask, ymd, type Who } from "../g2";
 
@@ -188,7 +187,7 @@ test("APL-2671 AC2: a subtask ticked done on its own before the parent was compl
   // Both subtasks ticked on their own, so nothing cascades when the parent completes.
   for (const s of [f.a, f.b]) expect((await finish(admin, s)).status).toBe(200);
   const ticked = await Promise.all([f.a, f.b].map(async (s) => (await getTask(admin, s)).completedAt));
-  expect((await admin.api.post(`/api/tasks/${f.parent}/complete`, {})).status).toBe(200);
+  expect((await admin.api.post(`/api/tasks/${f.parent}/complete`, { expectedUpdatedAt: (await admin.api.get(`/api/tasks/${f.parent}`)).json.task.updatedAt })).status).toBe(200);
   expect(await states(admin, [f.parent, f.a, f.b])).toEqual([true, true, true]);
   expect((await admin.api.post(`/api/tasks/${f.parent}/reopen`, {})).status).toBe(200);
   expect(await states(admin, [f.parent, f.a, f.b]), "the parent reopens; both subtasks ticked on their own stay done").toEqual([false, true, true]);
@@ -207,14 +206,16 @@ test("APL-2671 AC3: with A ticked alone and B cascaded under one parent, reopeni
   expect((await getTask(admin, f.parent)).subtasks, "the parent shows one open subtask of two").toEqual({ total: 2, open: 1 });
 });
 
-test("AC4: the done-flag move back reopens subtasks closed with the parent and does not clear a trashed parent", () => {
-  // APL-2721: origin/main reopens parentId null only, and that write includes tasks in Trash.
-  const src = readFileSync("src/lib/sections.ts", "utf8");
-  const start = src.indexOf("if (old) {");
-  const reopen = src.slice(start, src.indexOf("const now = new Date();", start));
-  expect(reopen, "subtasks closed with the parent reopen with it").toMatch(/parentId:\s*\{\s*in:/);
-  expect(reopen, "a parent already in Trash keeps completedAt").toContain("deletedAt: null");
-  const tasks = readFileSync("src/lib/tasks.ts", "utf8");
-  const fn = tasks.slice(tasks.indexOf("export async function reopenTask"), tasks.indexOf("/** Dragging a card"));
-  expect(fn, "reopening a parent reopens the subtasks that closed with it").toMatch(/withParent/);
+test("AC4: the done-flag move back reopens subtasks closed with the parent and does not clear a trashed parent", async ({ admin, later }) => {
+  const t = await tree(admin, later, "done flag trash");
+  const trashed = await newTask(admin, t.p.id, { title: zz("closed in trash"), sectionId: t.p.doing });
+  expect((await admin.api.patch(`/api/projects/${t.p.id}/sections/${t.p.doing}`, { isDone: true })).status).toBe(200);
+  expect(await states(admin, t.all)).toEqual([true, true, true]);
+  const closedAt = (await getTask(admin, trashed)).completedAt;
+  expect(closedAt).not.toBeNull();
+  expect((await admin.api.del(`/api/tasks/${trashed}`)).status).toBe(204);
+  expect((await admin.api.patch(`/api/projects/${t.p.id}/sections/${t.p.done}`, { isDone: true })).status).toBe(200);
+  expect(await states(admin, t.all)).toEqual([false, false, false]);
+  expect((await admin.api.post(`/api/tasks/${trashed}/restore`)).status).toBe(200);
+  expect((await getTask(admin, trashed)).completedAt).toBe(closedAt);
 });

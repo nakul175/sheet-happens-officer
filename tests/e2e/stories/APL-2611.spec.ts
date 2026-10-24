@@ -20,7 +20,7 @@ test("Closing a deal writes an audit row that names the deal, not 'deal (removed
   // A deal cannot be won while a task is open, so close the first step first.
   const step = ((await admin.api.get(`/api/deals?pipelineId=${pro.id}`)).json.deals as Json[]).find((x) => x.id === id)?.nextStep?.id as string;
   expect(step, "the deal's first next step").toBeTruthy();
-  expect((await admin.api.post(`/api/tasks/${step}/complete`, {})).status).toBe(200);
+  expect((await admin.api.post(`/api/tasks/${step}/complete`, { expectedUpdatedAt: (await admin.api.get(`/api/tasks/${step}`)).json.task.updatedAt })).status).toBe(200);
   const won = pro.stages.find((s: { name: string }) => s.name === "Won").id;
   expect((await admin.api.post(`/api/projects/${id}/stage`, { stageId: won })).status).toBe(200);
 

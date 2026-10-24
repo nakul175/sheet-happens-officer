@@ -40,7 +40,7 @@ test("AC2: a closed task shows no Awaiting chip on the list or the board", async
   await page.goto(`/projects/${s.pid}`);
   const row = page.locator("main .item", { hasText: s.title }).last();
   await expect(row.getByText("Awaiting approval")).toBeVisible(); // control: it is awaiting before the close
-  expect((await admin.api.post(`/api/tasks/${s.tid}/complete`, {})).status).toBe(200);
+  expect((await admin.api.post(`/api/tasks/${s.tid}/complete`, { expectedUpdatedAt: (await admin.api.get(`/api/tasks/${s.tid}`)).json.task.updatedAt })).status).toBe(200);
   await page.goto(`/projects/${s.pid}`);
   await expect(page.locator("main .item", { hasText: s.title }).last()).toBeVisible();
   await expect(page.locator("main .item", { hasText: s.title }).last().getByText(/Awaiting/)).toHaveCount(0);

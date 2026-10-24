@@ -86,7 +86,7 @@ test("AC3: a deal the person leads that needs a next step is a heading with + Ad
   test.setTimeout(120_000);
   const deal = await makeDeal(admin, later, "needs");
   const stepId = ((await admin.api.get("/api/deals")).json.deals as { id: string; nextStep: { id: string } | null }[]).find((d) => d.id === deal.id)!.nextStep!.id;
-  expect((await admin.api.post(`/api/tasks/${stepId}/complete`, {})).status).toBe(200);
+  expect((await admin.api.post(`/api/tasks/${stepId}/complete`, { expectedUpdatedAt: (await admin.api.get(`/api/tasks/${stepId}`)).json.task.updatedAt })).status).toBe(200);
 
   await admin.page.goto("/");
   await admin.page.getByRole("button", { name: "By project" }).click();

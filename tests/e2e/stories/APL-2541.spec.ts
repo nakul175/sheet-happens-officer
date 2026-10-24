@@ -64,7 +64,7 @@ test("AC1: the next step is the earliest-due open top-level dated task, includin
   expect((await dealRow(admin, d.pro.id, d.id)).nextStep?.title).toBe(soonTitle);
 
   // The assignee cannot name their own approver, so the Leader sets one and the holder sends it.
-  expect((await admin.api.put(`/api/tasks/${soon}/approver`, { approverId: approver.id })).status).toBe(200);
+  expect((await admin.api.put(`/api/tasks/${soon}/approver`, { approverId: approver.id, expectedUpdatedAt: (await admin.api.get(`/api/tasks/${soon}`)).json.task.updatedAt })).status).toBe(200);
   expect((await member.api.post(`/api/tasks/${soon}/send-for-approval`, {})).status).toBe(200);
   expect((await getTask(admin, soon)).awaitingApproval, "the task is waiting for approval").toBe(true);
   expect((await dealRow(admin, d.pro.id, d.id)).nextStep, "a task awaiting approval still counts").toMatchObject({ id: soon, title: soonTitle });
@@ -79,7 +79,7 @@ test("AC2: a working deal with no next step is flagged on the deal, the board, t
   test.setTimeout(180_000);
   const d = await makeDeal(admin, later, { label: "flag", due: ymd(3) });
   const stepId = (await dealRow(admin, d.pro.id, d.id)).nextStep!.id;
-  expect((await admin.api.post(`/api/tasks/${stepId}/complete`, {})).status).toBe(200);
+  expect((await admin.api.post(`/api/tasks/${stepId}/complete`, { expectedUpdatedAt: (await admin.api.get(`/api/tasks/${stepId}`)).json.task.updatedAt })).status).toBe(200);
 
   await admin.page.goto(`/projects/${d.id}`);
   await expect(admin.page.getByText("No next step. Add a dated task.")).toBeVisible();
@@ -101,16 +101,16 @@ test("AC2: a working deal with no next step is flagged on the deal, the board, t
 
   // An undated task is not a next step, and finishing it does not send another notice while one is unread.
   const undated = await newTask(admin, d.id, { title: zz("no date") });
-  expect((await admin.api.post(`/api/tasks/${undated}/complete`, {})).status).toBe(200);
+  expect((await admin.api.post(`/api/tasks/${undated}/complete`, { expectedUpdatedAt: (await admin.api.get(`/api/tasks/${undated}`)).json.task.updatedAt })).status).toBe(200);
   expect(await stepNotices(admin, d.id)).toHaveLength(1);
   // Losing the only dated task is the same gate: still one unread notice, so nothing new is sent.
   const dated = await newTask(admin, d.id, { title: zz("dated again"), dueDate: ymd(2) });
-  expect((await admin.api.patch(`/api/tasks/${dated}`, { dueDate: null })).status).toBe(200);
+  expect((await admin.api.patch(`/api/tasks/${dated}`, { dueDate: null, expectedUpdatedAt: (await admin.api.get(`/api/tasks/${dated}`)).json.task.updatedAt })).status).toBe(200);
   expect(await stepNotices(admin, d.id)).toHaveLength(1);
 
   expect((await admin.api.post(`/api/notifications/${first[0].id}/read`)).status).toBe(204);
   const again = await newTask(admin, d.id, { title: zz("dated once more"), dueDate: ymd(4) });
-  expect((await admin.api.post(`/api/tasks/${again}/complete`, {})).status).toBe(200);
+  expect((await admin.api.post(`/api/tasks/${again}/complete`, { expectedUpdatedAt: (await admin.api.get(`/api/tasks/${again}`)).json.task.updatedAt })).status).toBe(200);
   expect(await stepNotices(admin, d.id), "once the first notice is read, the deal can notify again").toHaveLength(2);
 });
 
@@ -143,7 +143,7 @@ test("AC4: Paused, Done, Lost and archived deals are not flagged, and neither is
   const paused = await makeDeal(admin, later, { label: "paused" });
   expect((await admin.api.post(`/api/projects/${paused.id}/stage`, { stageId: stage("On hold").id, reason: "ZZ-TEST pause" })).status).toBe(200);
   const pausedStep = (await dealRow(admin, pro.id, paused.id)).nextStep!.id;
-  expect((await admin.api.post(`/api/tasks/${pausedStep}/complete`, {})).status).toBe(200);
+  expect((await admin.api.post(`/api/tasks/${pausedStep}/complete`, { expectedUpdatedAt: (await admin.api.get(`/api/tasks/${pausedStep}`)).json.task.updatedAt })).status).toBe(200);
   expect((await dealRow(admin, pro.id, paused.id)).needsNextStep).toBe(false);
   expect(await stepNotices(admin, paused.id)).toHaveLength(0);
   expect(await needs()).not.toContain(paused.id);
@@ -155,7 +155,7 @@ test("AC4: Paused, Done, Lost and archived deals are not flagged, and neither is
   for (const name of ["Won", "Lost"] as const) {
     const d = await makeDeal(admin, later, { label: name.toLowerCase() });
     const step = (await dealRow(admin, pro.id, d.id)).nextStep!.id;
-    expect((await admin.api.post(`/api/tasks/${step}/complete`, {})).status).toBe(200);
+    expect((await admin.api.post(`/api/tasks/${step}/complete`, { expectedUpdatedAt: (await admin.api.get(`/api/tasks/${step}`)).json.task.updatedAt })).status).toBe(200);
     expect((await dealRow(admin, pro.id, d.id)).needsNextStep, `${name}: flagged while the deal is still working`).toBe(true);
     const body = name === "Lost" ? { stageId: stage(name).id, reason: "ZZ-TEST lost" } : { stageId: stage(name).id };
     expect((await admin.api.post(`/api/projects/${d.id}/stage`, body)).status, name).toBe(200);
@@ -168,7 +168,7 @@ test("AC4: Paused, Done, Lost and archived deals are not flagged, and neither is
 
   const archived = await makeDeal(admin, later, { label: "archived" });
   const archivedStep = (await dealRow(admin, pro.id, archived.id)).nextStep!.id;
-  expect((await admin.api.post(`/api/tasks/${archivedStep}/complete`, {})).status).toBe(200);
+  expect((await admin.api.post(`/api/tasks/${archivedStep}/complete`, { expectedUpdatedAt: (await admin.api.get(`/api/tasks/${archivedStep}`)).json.task.updatedAt })).status).toBe(200);
   expect((await admin.api.post(`/api/projects/${archived.id}/archive`)).status).toBeLessThan(300);
   const live = (await admin.api.get(`/api/deals?pipelineId=${pro.id}`)).json.deals as { id: string }[];
   expect(live.some((d) => d.id === archived.id)).toBe(false);
@@ -178,7 +178,7 @@ test("AC4: Paused, Done, Lost and archived deals are not flagged, and neither is
 
   const plain = await newProject(admin, later, { label: "plain" });
   const task = await newTask(admin, plain.id, { title: zz("plain task"), dueDate: ymd(1), assigneeId: admin.user.id });
-  expect((await admin.api.post(`/api/tasks/${task}/complete`, {})).status).toBe(200);
+  expect((await admin.api.post(`/api/tasks/${task}/complete`, { expectedUpdatedAt: (await admin.api.get(`/api/tasks/${task}`)).json.task.updatedAt })).status).toBe(200);
   expect(await needs()).not.toContain(plain.id);
   expect(await stepNotices(admin, plain.id)).toHaveLength(0);
 });
