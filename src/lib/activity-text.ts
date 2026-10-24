@@ -129,6 +129,7 @@ export function sentence(a: Row, names: Names, now = new Date()): string {
     case "deal.stage_changed": return `moved the deal from ${String(b.stage ?? "no stage")} to ${String(f.stage ?? "no stage")}${f.reason ? ` (${String(f.reason)})` : ""}`;
     case "deal.details_updated": return "edited the deal details";
     case "deal.pipeline_converted": return "converted the deal from Proactive to Bid Leads";
+    case "deal.buyer_changed": return `changed the Buyer from ${String(b.organisation ?? "the previous organisation")} to ${String(f.organisation ?? "the selected organisation")}`;
     case "deal.party_added": return `added ${String(f.organisation ?? "an organisation")} to the deal`;
     case "deal.party_removed": return `removed ${String(b.organisation ?? "an organisation")} from the deal`;
     case "deal.converted": return `converted ${T} to this deal`;

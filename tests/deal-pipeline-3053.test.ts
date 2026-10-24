@@ -21,6 +21,7 @@ beforeEach(() => {
 });
 describe("SHO-3053 explicit Proactive→Bid conversion", () => {
   it("renders a readable distinct conversion history action", () => { expect(sentence({ action: "deal.pipeline_converted", targetId: "deal", beforeState: {}, afterState: {} }, new Map())).toBe("converted the deal from Proactive to Bid Leads"); });
+  it("renders Buyer replacement names rather than internal IDs in history", () => { expect(sentence({ action: "deal.buyer_changed", targetId: "deal", beforeState: { organisationId: "old-id", organisation: "Old Account" }, afterState: { organisationId: "new-id", organisation: "New Account" } }, new Map())).toBe("changed the Buyer from Old Account to New Account"); });
   it("requires confirmation, expected pipeline/stage and a valid deadline; derives precision", () => {
     expect(proactiveToBidInput.parse({ ...request, submissionDeadlineHasTime: false })).toEqual(request);
     for (const input of [{ ...request, confirmed: false }, { ...request, expectedPipelineId: "" }, { ...request, submissionDeadline: null }, { ...request, submissionDeadline: "2026-02-30" }]) expect(proactiveToBidInput.safeParse(input).success).toBe(false);
