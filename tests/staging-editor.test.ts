@@ -334,6 +334,68 @@ describe("staging editor (APL-2682)", () => {
     expect(await db.user.findUnique({ where: { email: LEADER_EMAIL } })).toBeNull();
   });
 
+  it("refuses protocols, path suffixes, options and ambiguous schema parameters before connecting", async () => {
+    const base = "postgresql://example:example@localhost:5432/sho_staging";
+    const targets = [
+      base.replace("postgresql:", "https:"),
+      base + "/prod", base + "%2Fprod", base + "/", base + "#fragment",
+      base + "?options=-csearch_path%3Dpublic", base + "?Options=x",
+      base + "?SCHEMA=public", base + "?schema=public&schema=sho_pr9",
+      base + "?schema=public&Schema=sho_pr9", base + "?schema=public%2Csho_pr9",
+      base + "?schema=", base + "?schema=sho_pr9%22", base + "?unknown=x",
+    ];
+    const before = { users: await db.user.count(), projects: await db.project.count() };
+    for (const target of targets) {
+      let connected = false;
+      const connect: DbConnect = () => { connected = true; throw new Error("unexpected connect"); };
+      const result = await capture(() => runStagingEditor(env({ DATABASE_URL: target, DIRECT_DATABASE_URL: target }), [], connect));
+      expect(result.code).toBe(1);
+      expect(connected).toBe(false);
+      expectNoSecrets(result.text, [target, PASSWORD]);
+    }
+    expect({ users: await db.user.count(), projects: await db.project.count() }).toEqual(before);
+  });
+
+  it("checks the actual connected database and schema before any fixture mutation", async () => {
+    const before = { users: await db.user.count(), projects: await db.project.count() };
+    for (const mismatch of ["database", "schema"]) {
+      const claimed = new URL(databaseUrl!);
+      if (mismatch === "database") claimed.pathname = "/sho_test";
+      else claimed.searchParams.set("schema", "different_owned_schema");
+      // A connector that resolves elsewhere must fail even though the URL passed the preflight.
+      const result = await capture(() => runStagingEditor(
+        env({ DATABASE_URL: claimed.href, DIRECT_DATABASE_URL: claimed.href }), [],
+        () => new PrismaClient({ datasourceUrl: databaseUrl }),
+      ));
+      expect(result.code).toBe(1);
+      expect(result.text).toContain("connected database or schema does not match");
+      expectNoSecrets(result.text, [databaseUrl!, PASSWORD]);
+    }
+    expect({ users: await db.user.count(), projects: await db.project.count() }).toEqual(before);
+  });
+
+  it("refuses an existing Editor or Leader fixture owned by another workspace without changing it", async () => {
+    const other = await db.workspace.create({ data: { name: "ZZ-TEST foreign fixture owner" } });
+    try {
+      for (const email of [EDITOR_EMAIL, LEADER_EMAIL]) {
+        const foreign = await db.user.create({ data: {
+          workspaceId: other.id, email, name: "ZZ-TEST foreign fixture",
+          passwordHash: "unchanged-fixture-hash", orgRole: "ADMIN", deactivatedAt: new Date("2020-01-01"),
+        } });
+        const before = { users: await db.user.count(), projects: await db.project.count() };
+        const result = await capture(() => runStagingEditor(env(), []));
+        expect(result.code).toBe(1);
+        expect(result.text).toContain("fixture belongs to another workspace");
+        expect(await db.user.findUnique({ where: { id: foreign.id } })).toEqual(foreign);
+        expect({ users: await db.user.count(), projects: await db.project.count() }).toEqual(before);
+        await db.user.delete({ where: { id: foreign.id } });
+      }
+    } finally {
+      await db.user.deleteMany({ where: { workspaceId: other.id } });
+      await db.workspace.delete({ where: { id: other.id } });
+    }
+  });
+
   // qa:TC-APL2682-da0df1dc@v1
   it("allows a DigitalOcean host only when the database name is sho_staging", async () => {
     let connected = false;

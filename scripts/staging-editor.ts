@@ -17,7 +17,11 @@
 // compared without regard to case, so SHO_PROD matches sho_prod. The sho_staging allowlist
 // stays an exact, case-sensitive match. The host app.sheethappensofficer.com
 // is always refused. A URL that sets host or dbname in the query is refused, so those
-// parameters cannot replace the host or database in the authority.
+// parameters cannot replace the host or database in the authority. Only named connection
+// settings and one lowercase schema identifier are allowed; protocols, fragments, repeated
+// keys and full decoded database path suffixes are refused. After connecting, current_database()
+// and current_schema() must match before any mutation. An existing fixture in another
+// workspace is refused rather than moved or stripped of that workspace's roles.
 //
 // Vitest may use the database name sho_test only when NODE_ENV is test and the host is
 // loopback: localhost, ::1, or an address in 127.0.0.0/8. CI reaches Postgres at localhost
@@ -57,7 +61,7 @@ export class ScriptRefusal extends Error {
 
 export type DbConnect = (databaseUrl: string) => PrismaClient | Promise<PrismaClient>;
 
-type DatabaseTarget = { host: string; name: string };
+type DatabaseTarget = { host: string; name: string; schema: string };
 
 function normalizeHost(host: string): string {
   return host.trim().toLowerCase().replace(/\.$/, "");
@@ -83,14 +87,29 @@ function parseDatabaseUrl(raw: string): DatabaseTarget | { refusal: string } {
   } catch {
     return { refusal: "Refusing to run: the database URL is not valid." };
   }
-  const keys = [...url.searchParams.keys()].map((key) => key.toLowerCase());
+  if (!["postgres:", "postgresql:"].includes(url.protocol) || url.hash) {
+    return { refusal: "Refusing to run: invalid database URL protocol or fragment." };
+  }
+  const rawKeys = [...url.searchParams.keys()];
+  const keys = rawKeys.map((key) => key.toLowerCase());
   if (keys.some((key) => OVERRIDE_PARAMS.includes(key))) {
     return { refusal: "Refusing to run: the database URL must not set host or dbname in the query." };
   }
+  const allowed = new Set(["schema", "sslmode", "connection_limit", "pool_timeout", "connect_timeout"]);
+  if (rawKeys.some((key) => !allowed.has(key)) || new Set(rawKeys).size !== rawKeys.length) {
+    return { refusal: "Refusing to run: database URL overrides or repeated parameters are not allowed." };
+  }
+  const schema = url.searchParams.get("schema") ?? "public";
+  if (!/^[a-z_][a-z0-9_]*$/.test(schema)) {
+    return { refusal: "Refusing to run: invalid database schema." };
+  }
   const host = normalizeHost(url.hostname);
-  const name = decodeURIComponent(url.pathname.replace(/^\//, "").split("/")[0] ?? "");
+  let name: string;
+  try { name = decodeURIComponent(url.pathname.slice(1)); } catch {
+    return { refusal: "Refusing to run: the database URL is not valid." };
+  }
   if (!host || !name) return { refusal: "Refusing to run: the database URL is not valid." };
-  return { host, name };
+  return { host, name, schema };
 }
 
 function targetRefusal(target: DatabaseTarget, prodHost: string, prodName: string, allowTestDb: boolean): string | null {
@@ -220,7 +239,9 @@ async function ensurePerson(
     if (user.orgRole !== "MEMBER") data.orgRole = "MEMBER";
     if (!user.emailVerifiedAt) data.emailVerifiedAt = new Date();
     if (user.deactivatedAt) data.deactivatedAt = null;
-    if (user.workspaceId !== opts.workspaceId) data.workspaceId = opts.workspaceId;
+    if (user.workspaceId !== opts.workspaceId) {
+      throw new ScriptRefusal("Refusing to run: an existing fixture belongs to another workspace.");
+    }
     if (Object.keys(data).length) user = await tx.user.update({ where: { id: user.id }, data });
   }
 
@@ -264,8 +285,11 @@ export async function ensureStagingEditor(
   const workspace = await resolveWorkspace(db, opts.workspaceId);
   const existing = await db.user.findMany({
     where: { email: { in: [EDITOR_EMAIL, LEADER_EMAIL] } },
-    select: { email: true },
+    select: { email: true, workspaceId: true },
   });
+  if (existing.some((row) => row.workspaceId !== opts.workspaceId)) {
+    throw new ScriptRefusal("Refusing to run: an existing fixture belongs to another workspace.");
+  }
   const have = new Set(existing.map((row) => row.email));
   if ((!have.has(EDITOR_EMAIL) || !have.has(LEADER_EMAIL)) && !opts.password) {
     throw new ScriptRefusal("Set STAGING_EDITOR_PASSWORD or STAGING_EDITOR_PASSWORD_FILE.");
@@ -332,6 +356,12 @@ export async function runStagingEditor(env: NodeJS.ProcessEnv, argv: readonly st
     const workspaceId = env.STAGING_WORKSPACE_ID?.trim() ?? "";
     if (!workspaceId) throw new ScriptRefusal("Refusing to run: STAGING_WORKSPACE_ID is not set.");
     db = await connect(env.DATABASE_URL ?? "");
+    const target = parseDatabaseUrl(env.DATABASE_URL ?? "");
+    if ("refusal" in target) throw new ScriptRefusal(target.refusal);
+    const actual = await db.$queryRaw<Array<{ database: string; schema: string | null }>>`SELECT current_database() AS database, current_schema() AS schema`;
+    if (actual.length !== 1 || actual[0]?.database !== target.name || actual[0]?.schema !== target.schema) {
+      throw new ScriptRefusal("Refusing to run: connected database or schema does not match the guarded target.");
+    }
     const existing = await db.user.findMany({
       where: { email: { in: [EDITOR_EMAIL, LEADER_EMAIL] } },
       select: { email: true },
