@@ -21,6 +21,9 @@ export default defineConfig({
     env: { SHO_E2E_START_BASE_URL: startBaseUrl },
     exclude: [
       ...configDefaults.exclude,
+      // SHO-2625 must exercise the exact sho_staging DB guard in its dedicated seeded tier.
+      "tests/purge-zz-test.test.ts",
+      "tests/purge-zz-test-cascade.test.ts",
       "tests/viewport/**",
       "tests/e2e/stories/APL-2669.spec.ts",
       "tests/e2e/stories/APL-2670.spec.ts",
