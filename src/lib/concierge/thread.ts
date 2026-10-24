@@ -6,6 +6,7 @@ import { ApiError } from "@/lib/http";
 import { crmVisible, type Actor } from "@/lib/access";
 import { isTooOldToUndo } from "@/lib/undoable";
 import { disabledFor } from "@/lib/concierge/limits";
+import { canOfferDealAttention, CRM_ATTENTION_ACTION } from "@/lib/concierge/crm-quick";
 import { QUICK_ACTIONS } from "@/lib/concierge/reads";
 import type { Message, State, Stored } from "@/lib/concierge/types";
 
@@ -103,7 +104,7 @@ export async function state(user: Actor, now = new Date()): Promise<State> {
     ...(disabled ? { disabled } : {}),
     hidden: me.conciergeHidden,
     voiceNoticeAcked: !!me.voiceNoticeAckedAt,
-    quickActions: QUICK_ACTIONS.map((q) => ({ id: q.id as State["quickActions"][number]["id"], label: q.label })),
+    quickActions: [...QUICK_ACTIONS.map((q) => ({ id: q.id as State["quickActions"][number]["id"], label: q.label })), ...(await canOfferDealAttention(user) ? [CRM_ATTENTION_ACTION] : [])],
     messages,
   };
 }

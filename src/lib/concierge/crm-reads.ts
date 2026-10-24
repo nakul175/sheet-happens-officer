@@ -8,8 +8,8 @@ import { flat } from "@/lib/concierge/reads";
 export type DealRec = {
   id: string; name: string; pipeline: string | null; stage: string | null;
   organisation: { id: string; name: string } | null;
-  nextStep: { id: string; title: string; due: string } | null;
-  stalled: boolean; needsNextStep: boolean;
+  nextStep?: { id: string; title: string; due: string } | null;
+  stalled?: boolean; needsNextStep?: boolean;
 };
 type Projection = Pick<Awaited<ReturnType<typeof listDeals>>[number], "pipeline" | "stage" | "nextStep" | "stalled" | "needsNextStep"> & { organisation: { id: string; name: string } | null };
 function present(id: string, name: string, row: Projection): DealRec {
