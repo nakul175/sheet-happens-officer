@@ -12,6 +12,7 @@ import { todayLine } from "@/lib/concierge/dates";
 import { isEcho } from "@/lib/concierge/echo";
 import { exactTitleRead } from "@/lib/concierge/exact-title-read";
 import { claimsWrite } from "@/lib/concierge/claims";
+import { explicitProposal } from "@/lib/concierge/explicit-proposal";
 import { screenOnlyHelp } from "@/lib/concierge/screen-help";
 import { taskSelectionForRequest } from "@/lib/concierge/task-selection";
 import { flat, personById, projectById, quickAnswer, taskById, QUICK_ACTIONS, type TaskRec } from "@/lib/concierge/reads";
@@ -257,10 +258,16 @@ function buildReply(turn: Turn, modelText: string, request: string): Stored {
 }
 
 async function respond(user: Actor, userRow: { id: string }, userText: string, request: string, counted: boolean, now: Date, seed?: (t: Turn) => void): Promise<{ messages: Message[]; disabled?: Disabled }> {
+  const userMsg = present((await db.chatMessage.findUniqueOrThrow({ where: { id: userRow.id } })));
+  // Apply this boundary to direct requests and resumed choice/narrowing turns alike.
+  const explicit = await explicitProposal(user, request);
+  if (explicit) {
+    const reply = await addMessage(user, "ASSISTANT", explicit);
+    return { messages: [userMsg, present(reply)] };
+  }
   const history = await recentHistory(user, userRow.id);
   const turn = newTurn(user, now);
   seed?.(turn);
-  const userMsg = present((await db.chatMessage.findUniqueOrThrow({ where: { id: userRow.id } })));
   let loop: Loop;
   try {
     loop = { reply: buildReply(turn, await runModel(user, turn, userText, history, counted, now), request) };
