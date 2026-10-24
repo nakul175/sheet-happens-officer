@@ -1,3 +1,4 @@
+import { validTaskDue } from "@/lib/task-creation-policy";
 import { z } from "zod";
 import { parseSubmissionDeadline } from "@/lib/submission-deadline";
 import { dealClassificationFields } from "@/lib/deal-classification";
@@ -80,11 +81,12 @@ export const sectionUpdate = z.object({
 
 // ---- tasks ----
 export const taskPriority = z.enum(["LOW", "MEDIUM", "HIGH", "URGENT"]);
-const dueDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use a date like 2026-10-31.");
+const dueDate = z.string().refine(validTaskDue, "Choose a valid date like 2026-10-31.");
 const title = z.string().trim().min(1, "Give the task a title.").max(500);
 
 export const taskCreate = z.object({
   title,
+  isIdea: z.boolean().optional(),
   description: z.string().trim().max(20000).nullish(),
   dueDate: dueDate.nullish(),
   priority: taskPriority.optional(),
