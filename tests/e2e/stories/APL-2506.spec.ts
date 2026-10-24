@@ -146,6 +146,9 @@ test("AC3: another person's notifications are never returned or changed", tag("A
 
 test("AC4: each event in the list gives exactly one notification to the affected person and none to the person who caused it", tag("APL-2506 AC4"), async ({ admin, member, later }) => {
   const p = await withMember(admin, member, "bell-types", later);
+  // A separate project may legitimately have an identical task title and notice.
+  const unrelated = await withMember(admin, member, "bell-types-other", later);
+  await mk(admin, unrelated, zz("collab"), { collaboratorIds: [member.user.id] });
   const t = await mk(admin, p, zz("typed"), { assigneeId: member.user.id });                       // assigned
   const collab = await mk(admin, p, zz("collab"), { collaboratorIds: [member.user.id] }); // added as collaborator
   expect((await member.api.patch(`/api/tasks/${t}`, { blocked: true, blockedReason: "Waiting", expectedUpdatedAt: await version(member, t) })).status).toBe(200); // blocked: to the Leader
