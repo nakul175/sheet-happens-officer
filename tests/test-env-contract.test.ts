@@ -155,10 +155,12 @@ describe("return-path probe: the documented dev server can write what the test r
   // every push to main — kept starting `next start` without the variable and could not pass the return-path probe. The
   // check is over every workflow that runs the tier now, so a new one (or a rename) cannot miss it either.
   it("every workflow that runs npm test starts the server under test the same way", () => {
-    const files = readdirSync(".github/workflows")
-      .filter((name) => /\.ya?ml$/.test(name))
-      .map((name) => `.github/workflows/${name}`)
-      .filter((file) => /^\s*-?\s*run:\s*npm test\s*$/m.test(readFileSync(file, "utf8")));
+    // W311, SHO-3024 residual. This filter used to be one flat regex, /^\s*-?\s*run:\s*npm test\s*$/m, so a workflow
+    // that wrote the same tier as `run: |` + `npm test`, as `npm run test`, with a trailing pipe or with a KEY=value
+    // prefix was invisible to the guard that is supposed to catch a third runner. workflowsRunningNpmTest() reads the
+    // YAML and then the shell instead (see the parser at the end of this file); it also refuses the two prose mentions
+    // of `npm test` in staging-e2e.yml, which a word-grep would have counted as a runner.
+    const files = workflowsRunningNpmTest();
     expect(files, "the scan finds the workflows that run the tier").toEqual(
       expect.arrayContaining([".github/workflows/ci.yml", ".github/workflows/deploy.yml"]),
     );
@@ -166,6 +168,55 @@ describe("return-path probe: the documented dev server can write what the test r
       expect(readFileSync(file, "utf8"), `${file} sets RETURN_PATH_LOG=1 for the server under test`)
         .toMatch(/RETURN_PATH_LOG=1\s+npx next start/);
     }
+  });
+
+  // W311. The other half of that widening: staging-e2e.yml mentions `npm test` twice and runs it zero times — once in
+  // a `#` comment inside a `run: |` block (:130) and once inside the `echo "::error::…"` string beside it (:155). Both
+  // are prose about the tier, not a runner of it. A scan that widened by grepping for the words would pull this
+  // workflow into the set above and demand a `next start` line it has no business having, so the negative is pinned
+  // here rather than left to the reader of a green run.
+  it("staging-e2e.yml is not a runner: its npm test mentions are a comment and an echo", () => {
+    expect(workflowsRunningNpmTest(), "a prose mention of npm test is not an invocation")
+      .not.toContain(".github/workflows/staging-e2e.yml");
+    // …and the file still contains those mentions, so the assertion above is not green because they were deleted.
+    expect(readFileSync(".github/workflows/staging-e2e.yml", "utf8"), "the prose this refuses is still in the file")
+      .toMatch(/^\s*#.*npm test/m);
+    expect(readFileSync(".github/workflows/staging-e2e.yml", "utf8"), "the echo this refuses is still in the file")
+      .toMatch(/echo "[^"\n]*npm test[^"\n]*"/);
+  });
+
+  // The shapes the flat regex skipped, as fixtures. A new workflow can be written in any of them tomorrow; these say
+  // the scan would still count it, which the two real runners cannot say because neither uses these shapes today.
+  it("the scan counts every shape a workflow can write the invocation in", () => {
+    const step = (body: string) => `jobs:\n  t:\n    runs-on: ubuntu-latest\n    steps:\n${body}`;
+    const shapes: Record<string, string> = {
+      "single line (`- run: npm test`)": "      - run: npm test\n",
+      "literal block (`run: |`)": "      - run: |\n          npx prisma migrate deploy\n          npm test\n",
+      "folded block (`run: >`)": "      - run: >\n          npm test\n",
+      "long form (`npm run test`)": "      - run: npm run test\n",
+      "trailing pipe (`npm test | tee …`)": "      - run: npm test | tee vitest.log\n",
+      "env prefix (`KEY=value npm test`)":
+        "      - run: DATABASE_URL=postgresql://nobody@localhost:5432/t JOB_SECRET=0123456789abcdef npm test\n",
+    };
+    const missed = Object.entries(shapes).filter(([, body]) => !runsTier(step(body))).map(([name]) => name);
+    expect(missed, "shapes the scan still cannot see").toEqual([]);
+    // The reader locates the step's key, not the line the word happens to be on, so a failure can name the step.
+    const block = step("      - run: |\n          echo hi\n          npm test\n");
+    expect(runScripts(block).map((run) => run.line), "the YAML key line of the run step").toEqual([5]);
+  });
+
+  // The widening must not turn into a word-grep: a workflow only runs the tier if a shell would start `npm test` there.
+  it("the scan refuses prose and sibling npm scripts", () => {
+    const step = (body: string) => `jobs:\n  t:\n    runs-on: ubuntu-latest\n    steps:\n${body}`;
+    const notInvocations: Record<string, string> = {
+      "a shell comment inside a run block": "      - run: |\n          # npm test covers this elsewhere\n          echo hi\n",
+      "an echoed string": "      - run: |\n          echo \"::error::npm test runs them; Playwright ignores them\"\n",
+      "a different npm script": "      - run: npm run test:browser\n",
+      "a step name": "      - name: npm test\n        run: echo hi\n",
+      "a YAML comment above a step": "      # - run: npm test\n      - run: echo hi\n",
+    };
+    const counted = Object.entries(notInvocations).filter(([, body]) => runsTier(step(body))).map(([name]) => name);
+    expect(counted, "prose or another script counted as a runner of the tier").toEqual([]);
   });
 });
 
@@ -236,3 +287,134 @@ describe("comments-19-1: every flag-off case owns the flag it asserts", () => {
     expect(src, "the note names the flag it could not control").toContain("was started with FF_TASK_COMMENTS on");
   });
 });
+
+// ---- SHO-3024 residual (W311): which workflows run the tier ------------------------------------------------------
+//
+// The guard above began as one flat regex, /^\s*-?\s*run:\s*npm test\s*$/m. It saw the two runners of the day and
+// would have missed the same tier written four other ways — a `run: |` block, `npm run test`, a trailing pipe, or a
+// leading KEY=value — which is exactly the "a third runner cannot miss it either" the ticket asks for, unmet. The
+// opposite mistake is just as easy: `npm test` also appears twice in staging-e2e.yml as prose (a `#` comment and an
+// echoed ::error:: string), and a word-grep would count that workflow as a runner and demand a log line it should not
+// have. So the text is read the way YAML and then the shell read it, in that order: which scalar belongs to which
+// `run:` key, then where a shell would actually start a command.
+//
+// What this does not model, and does not need to: heredocs (no workflow here uses one in a run block), a `run:` written
+// as a flow mapping or as an anchor/alias, and command prefixes other than KEY=value (`if npm test`, `time npm test`).
+// A workflow written that way would still be invisible — the honest statement of the widening, not a claim of parsers.
+
+type RunScript = { line: number; script: string };
+
+/** A YAML block-scalar header: `|`, `|-`, `|+`, `>`, `>+`, and the optional indent indicator (`|2`). */
+const BLOCK_SCALAR = /^[|>][+-]?\d*$/;
+
+/**
+ * Every `run:` value in a workflow file, with the line number of its key. The body of one step's block scalar is
+ * consumed as content, so a workflow that prints workflow YAML (or a `run:`-shaped comment inside a script) cannot
+ * make this see a step that is not there.
+ */
+function runScripts(yaml: string): RunScript[] {
+  const lines = yaml.split("\n");
+  const found: RunScript[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const key = lines[i].match(/^(\s*)(?:-\s+)?run:[ \t]*(.*)$/);
+    if (!key) continue;
+    const keyIndent = key[1].length;
+    const header = key[2].replace(/\s+#.*$/, "").trim(); // a YAML comment after the scalar on the key line
+    if (!BLOCK_SCALAR.test(header)) {
+      const inline = header.replace(/^(['"])([\s\S]*)\1$/, "$2");
+      if (inline !== "") found.push({ line: i + 1, script: inline });
+      continue;
+    }
+    // Block scalar: the lines below it that are indented further than the key, dedented by their own common indent.
+    const body: string[] = [];
+    let indent = Number.POSITIVE_INFINITY;
+    let j = i + 1;
+    for (; j < lines.length; j++) {
+      const line = lines[j];
+      if (line.trim() === "") { body.push(""); continue; }
+      const lineIndent = line.length - line.trimStart().length;
+      if (lineIndent <= keyIndent) break;
+      indent = Math.min(indent, lineIndent);
+      body.push(line);
+    }
+    const keyLine = i + 1;
+    i = j - 1;
+    const dedented = body.map((line) => (line.trim() === "" ? "" : line.slice(indent)));
+    // `>` folds adjacent lines into one and turns a blank line into a newline; `|` keeps every line as written.
+    found.push({ line: keyLine, script: header.startsWith(">") ? foldScalar(dedented) : dedented.join("\n") });
+  }
+  return found;
+}
+
+/** YAML `>` folding, to the extent a shell line needs it: neighbours join with a space, a blank line stays a newline. */
+function foldScalar(lines: string[]): string {
+  let folded = "";
+  for (const line of lines) {
+    if (line.trim() === "") folded += "\n";
+    else folded += folded === "" || folded.endsWith("\n") ? line : ` ${line}`;
+  }
+  return folded;
+}
+
+/**
+ * The simple commands a shell script can start, as the shell splits them: `#` runs to the end of the line outside
+ * quotes, a quoted `;` or `|` separates nothing, a trailing `\` continues the line, and `; & | ( ) < >` each end a
+ * command. Only the start of each command matters here: that is what tells an invocation from a mention of one.
+ */
+function shellCommands(script: string): string[] {
+  const found: string[] = [];
+  let command = "";
+  let quote: '"' | "'" | null = null;
+  const end = () => {
+    if (command.trim() !== "") found.push(command.trim());
+    command = "";
+  };
+  for (let i = 0; i < script.length; i++) {
+    const ch = script[i];
+    if (quote) {
+      command += ch;
+      if (ch === "\\" && quote === '"') command += script[++i] ?? "";
+      else if (ch === quote) quote = null;
+      continue;
+    }
+    if (ch === '"' || ch === "'") { quote = ch; command += ch; continue; }
+    if (ch === "\\") {
+      const next = script[++i];
+      command += next === "\n" || next === undefined ? " " : next;
+      continue;
+    }
+    if (ch === "#" && (command === "" || /\s$/.test(command))) {
+      const eol = script.indexOf("\n", i);
+      i = eol < 0 ? script.length : eol - 1; // the loop's i++ lands on the newline, which ends the command
+      continue;
+    }
+    if ("\n;&|()<>".includes(ch)) { end(); continue; }
+    command += ch;
+  }
+  end();
+  return found;
+}
+
+/** The KEY=value assignments a workflow can put in front of the command on the same line. */
+const ENV_PREFIX = /^(?:[A-Za-z_][A-Za-z0-9_]*=(?:"[^"]*"|'[^']*'|\S*)\s+)+/;
+
+/** `npm test`, and its long form `npm run test` — but not `npm run test:browser`, which is a different tier. */
+const NPM_TEST = /^npm\s+(?:run\s+)?test(?=$|\s)/;
+
+/** True when a `run:` script really starts the tier, whichever shape the step is written in. */
+function runsNpmTest(script: string): boolean {
+  return shellCommands(script).some((command) => NPM_TEST.test(command.replace(ENV_PREFIX, "")));
+}
+
+/** True when a workflow file (YAML text) has a step that really starts the tier. */
+function runsTier(yaml: string): boolean {
+  return runScripts(yaml).some((run) => runsNpmTest(run.script));
+}
+
+/** The workflows that run the tier, i.e. the ones the RETURN_PATH_LOG contract above applies to. */
+function workflowsRunningNpmTest(): string[] {
+  return readdirSync(".github/workflows")
+    .filter((name) => /\.ya?ml$/.test(name))
+    .map((name) => `.github/workflows/${name}`)
+    .filter((file) => runsTier(readFileSync(file, "utf8")));
+}
