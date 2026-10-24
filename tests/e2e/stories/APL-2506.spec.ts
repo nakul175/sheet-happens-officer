@@ -110,7 +110,7 @@ test("AC1: a new notification raises the count and appears first in the panel", 
   expect(now.items[0].text).toContain(zz("count me")); // newest first
   expect((await member.api.get("/api/notifications")).json.items.length).toBeLessThanOrEqual(50); // default page, SHO-US-14.13
   await member.page.goto("/");
-  await expect(member.page.getByRole("button", { name: `Notifications, ${before + 1} unread` })).toBeVisible();
+  await expect(member.page.getByRole("button", { name: `Notifications, ${before + 1 > 99 ? "99+" : before + 1} unread` })).toBeVisible();
   const dlg = await openBell(member.page);
   await expect(dlg.getByRole("link", { name: zz("count me") })).toBeVisible();
 });

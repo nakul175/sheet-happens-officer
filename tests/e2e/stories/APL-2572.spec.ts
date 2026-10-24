@@ -46,7 +46,9 @@ test("AC2: clicking an item opens its task and marks it read", tag("APL-2572 AC2
   await p.goto("/");
   await bell(p).click();
   await p.getByRole("dialog", { name: "Notifications" }).getByRole("link", { name: `${zz("triage-click")} 0` }).click();
-  await expect(p).toHaveURL(/task=|\/projects\//);
+  await expect(p.getByLabel("Title", { exact: true })).toHaveValue(`${zz("triage-click")} 0`);
+  // APL-2652 keeps /tasks/<id> when return-to is enabled; otherwise the project overlay opens.
+  await expect(p).toHaveURL(/\/tasks\/[^/?]+|\/projects\/[^?]+\?task=/);
   await expect.poll(() => unread(member)).toBe(before - 1);
 });
 

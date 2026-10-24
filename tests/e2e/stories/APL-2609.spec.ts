@@ -204,16 +204,20 @@ async function searchScreen(browser: Browser, who: Who, q: string) {
   }
 }
 
-/** The task screen in the browser: a visible task redirects to its project; a hidden one answers 404 and stays put. */
+/** Visible tasks open in place with APL-2652 enabled, otherwise over their project; hidden tasks answer 404. */
 async function taskScreen(browser: Browser, who: Who) {
   const page = await pageAs(browser, who);
   try {
     const answered = page.waitForResponse((r) => r.url().endsWith(`/api/tasks/${seed.dealTaskId}`), { timeout: 30_000 });
     await page.goto(`${BASE}/tasks/${seed.dealTaskId}`, { waitUntil: "domcontentloaded" });
     const status = (await answered).status();
-    if (status === 200) await page.waitForURL(/\/projects\//, { timeout: 30_000 });
-    else await expect(page.getByRole("heading", { name: "This task isn't available" })).toBeVisible({ timeout: 30_000 });
-    return { status, url: page.url(), text: (await page.getByRole("main").textContent()) ?? "" };
+    if (status === 200) {
+      const stay = await page.evaluate(() => (window as Window & { __SHO_RETURN_TO?: number }).__SHO_RETURN_TO === 1);
+      await expect(page).toHaveURL(new RegExp(stay ? `/tasks/${seed.dealTaskId}$` : `/projects/${seed.dealId}\\?task=${seed.dealTaskId}$`));
+      await expect(page.getByLabel("Title", { exact: true })).toHaveValue(DEAL_TASK);
+    }
+    else await expect(page.getByRole("heading", { name: "This task isn't available", exact: true })).toBeVisible({ timeout: 30_000 });
+    return { status, url: page.url(), title: status === 200 ? await page.getByLabel("Title", { exact: true }).inputValue() : null, text: (await page.getByRole("main").textContent()) ?? "" };
   } finally {
     await page.context().close();
   }
@@ -333,7 +337,7 @@ test.describe("qa:TC missing APL-2609 CRM_VISIBLE hides deals on this server's m
 
     const task = await taskScreen(browser, editor);
     expect(task.status).toBe(shown ? 200 : 404);
-    expect(task.url.includes(`/projects/${seed.dealId}`)).toBe(shown);
+    expect(task.title).toBe(shown ? DEAL_TASK : null);
     if (!shown) for (const word of [DEAL_NAME, DEAL_TASK, STAGE]) expect(task.text).not.toContain(word);
   });
 

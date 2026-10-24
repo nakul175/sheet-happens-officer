@@ -85,21 +85,23 @@ test("AC4: a task link opens the task over its project; a trashed, missing or fo
   const p = await proj(admin, "ov-link", later);
   const t = await mk(admin, p, zz("linked"));
   await admin.page.goto(`/tasks/${t}`);
-  await expect(admin.page).toHaveURL(new RegExp(`/projects/${p}\\?task=${t}`));
-  await expect(dialog(admin.page).getByLabel("Title")).toHaveValue(zz("linked"));
-  await expect(dialog(admin.page).getByRole("button", { name: "Copy link" })).toBeVisible();
+  // APL-2652 preserves the task URL when return-to is enabled; the legacy mode opens the project overlay.
+  const stay = await admin.page.evaluate(() => (window as Window & { __SHO_RETURN_TO?: number }).__SHO_RETURN_TO === 1);
+  await expect(admin.page).toHaveURL(new RegExp(stay ? `/tasks/${t}$` : `/projects/${p}\\?task=${t}$`));
+  await expect(admin.page.getByLabel("Title", { exact: true })).toHaveValue(zz("linked"));
+  await expect(admin.page.getByRole("button", { name: "Copy link" })).toBeVisible();
   // not a member
   await member.page.goto(`/tasks/${t}`);
-  await expect(member.page.getByText("This task isn't available")).toBeVisible();
+  await expect(member.page.getByRole("heading", { name: "This task isn't available", exact: true })).toBeVisible();
   await expect(member.page.getByText(zz("linked"))).toHaveCount(0);
   // in Trash
   expect((await admin.api.del(`/api/tasks/${t}`)).status).toBe(204);
   await admin.page.goto(`/tasks/${t}`);
-  await expect(admin.page.getByText("This task isn't available")).toBeVisible();
+  await expect(admin.page.getByRole("heading", { name: "This task isn't available", exact: true })).toBeVisible();
   await expect(admin.page.getByText(zz("linked"))).toHaveCount(0);
   // does not exist
   await admin.page.goto(`/tasks/zz-test-does-not-exist`);
-  await expect(admin.page.getByText("This task isn't available")).toBeVisible();
+  await expect(admin.page.getByRole("heading", { name: "This task isn't available", exact: true })).toBeVisible();
 });
 
 test("AC5: saving over someone else's change shows the warning and offers to re-apply the edit", async ({ admin, later }) => {

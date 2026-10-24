@@ -51,7 +51,7 @@ test("AC1: the bell shows the unread count and the panel lists the notices; open
   expect(hit[0].read).toBe(false);
   expect(now.unread).toBeGreaterThanOrEqual(1);
   await member.page.goto("/");
-  await expect(member.page.getByRole("button", { name: `Notifications, ${now.unread} unread` })).toBeVisible();
+  await expect(member.page.getByRole("button", { name: `Notifications, ${now.unread > 99 ? "99+" : now.unread} unread` })).toBeVisible();
   const dlg = await openBell(member.page);
   // Each notice is a link whose name holds the task title (unique to this run).
   const notice = dlg.getByRole("link", { name: title });
