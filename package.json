@@ -1,0 +1,47 @@
+{
+  "name": "taskboard",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint",
+    "typecheck": "node scripts/typecheck.mjs",
+    "test": "vitest run",
+    "eval:concierge": "tsx tests/eval/runner.ts",
+    "test:viewport": "vitest run -c vitest.viewport.config.mts",
+    "test:e2e": "vitest run -c vitest.e2e.config.mts",
+    "test:crm-modes": "vitest run -c vitest.crm-visible-modes.config.mts",
+    "test:reminder-modes": "vitest run -c vitest.reminder-modes.config.mts",
+    "test:stalled-modes": "vitest run -c vitest.stalled-modes.config.mts",
+    "db:migrate": "prisma migrate dev",
+    "postinstall": "prisma generate"
+  },
+  "dependencies": {
+    "@prisma/client": "^6.19.3",
+    "next": "16.4.2",
+    "openid-client": "6.8.8",
+    "prisma": "^6.19.3",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.64.1",
+    "@types/node": "^22.20.5",
+    "@types/pg": "^8.23.1",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "axe-core": "^4.14.0",
+    "dotenv": "^18.0.8",
+    "eslint": "^9",
+    "eslint-config-next": "16.4.2",
+    "jsdom": "^29.1.1",
+    "pg": "^8.23.1",
+    "playwright-core": "^1.64.1",
+    "tsx": "^4.23.15",
+    "typescript": "^5",
+    "vitest": "^5.0.5"
+  }
+}

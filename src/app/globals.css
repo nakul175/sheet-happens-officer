@@ -1,0 +1,37 @@
+:root {
+  --navy: #2c2f71;
+  --navy-dark: #1f2252;
+  --gold: #d99d29;
+  --bg: #f5f6f8;
+  --card: #ffffff;
+  --line: #e3e6eb;
+  --field: #c9ced6;
+  --ink: #171b22;
+  --ink-2: #3a4250;
+  --muted: #5e6673;
+  --danger-bg: #fceaea;
+  --danger-line: #f0b8b8;
+  --danger: #8c1d1d;
+  --ok-bg: #e8f4ec;
+  --ok-line: #b5d9c1;
+  --ok: #1d5c33;
+}
+
+* { box-sizing: border-box; }
+
+html, body { margin: 0; padding: 0; }
+
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-public-sans), system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+a { color: var(--navy); }
+@media (hover: hover) { a:hover { color: var(--navy-dark); } }
+
+/* SHO-US-22.9: Reduce motion turns off slide and fade animations everywhere. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
+}
