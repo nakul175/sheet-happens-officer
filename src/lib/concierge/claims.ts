@@ -91,8 +91,21 @@ const BARE =
  * agent-based, not a word list, which is what lets the data sentences in w225/LEGIT through while refusing every
  * FABRIC row in the same file.
  */
-export function claimsWrite(text: string): boolean {
-  const flat = text.toLowerCase().replace(/(?<=[a-z])[-–—_](?=[a-z])/g, "");
+export function claimsWrite(text: string, readTasks: readonly { title: string; assignee: string }[] = []): boolean {
+  // A tool-grounded list item can attach the current owner as data, e.g.
+  // `Budget — due Friday (assigned to Sam)`. This is not a claim of a write.
+  // Exempt only that exact parenthetical on a line naming the matching fetched
+  // task; first-person/perfect/completion claims elsewhere still reach the gate.
+  const checked = readTasks.length ? text.split("\n").map((line) => {
+    let factual = line;
+    for (const task of readTasks) {
+      if (task.title && task.assignee && line.includes(task.title)) {
+        factual = factual.replaceAll(`(assigned to ${task.assignee})`, "(current assignee)");
+      }
+    }
+    return factual;
+  }).join("\n") : text;
+  const flat = checked.toLowerCase().replace(/(?<=[a-z])[-–—_](?=[a-z])/g, "");
   for (const raw of flat.split(/(?<=[.!?])\s+|\n+/)) {
     const s = raw.trim();
     if (!s || s.endsWith("?")) continue;

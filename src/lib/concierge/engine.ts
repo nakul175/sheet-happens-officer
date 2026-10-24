@@ -241,7 +241,7 @@ function buildReply(turn: Turn, modelText: string, request: string): Stored {
   // refuses the two w199 sentences again. Containment, not closure: §5 of W215-REPORT.md names the version that does
   // close it - render the answer from the rows the tools returned instead of the model's prose - and why that is a
   // product decision this packet does not take.
-  if (r.records === 0 || claimsWrite(modelText)) return { kind: "text", text: NOTHING_CHANGED };
+  if (r.records === 0 || claimsWrite(modelText, [...turn.seen.tasks.values()])) return { kind: "text", text: NOTHING_CHANGED };
   const body = modelText || UNKNOWN;
   return { kind: "answer", text: body.slice(0, 4000), links: linksFor(turn, body) };
 }
