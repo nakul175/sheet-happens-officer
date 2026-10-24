@@ -15,10 +15,18 @@ import { assertStoryTargetAllowed } from "../base-url";
 const QA_PASS = process.env.SHO_QA_PASS ?? "";
 let BASE = (process.env.BASE_URL || process.env.TASKBOARD_URL || "http://localhost:3100").replace(/\/+$/, "");
 const MODE = (process.env.CRM_VISIBLE || "all") as "all" | "admins" | "off";
-let SEED = (process.env.APL2609_SEED_URL || (MODE === "all" ? BASE : "")).replace(/\/+$/, "");
+let SEED = (process.env.APL2609_SEED_URL || BASE).replace(/\/+$/, "");
 let OUTBOX = "";
 let app: Awaited<ReturnType<typeof startOwnedOutboxApp>> | undefined;
 let seedApp: Awaited<ReturnType<typeof startOwnedOutboxApp>> | undefined;
+let activeMode: typeof MODE | undefined;
+// Release the previous pool before switching modes; at most one owned app runs.
+async function switchOwnedMode(mode: typeof MODE) {
+  if (app && activeMode === mode) return;
+  if (app) await app.stop();
+  app = await startOwnedOutboxApp({ outbox: OUTBOX, mode });
+  seedApp = app; activeMode = mode; BASE = app.base; SEED = app.base;
+}
 const originalOutbox = process.env.EMAIL_OUTBOX_DIR;
 const SUPER_EMAIL = process.env.SHO_ADMIN_EMAIL || "nakul17+zz-sa@aplyd.com";
 const runId = `${Date.now().toString(36)}${process.pid.toString(36)}`;
@@ -235,11 +243,7 @@ test.describe("qa:TC missing APL-2609 CRM_VISIBLE hides deals on this server's m
     assertStoryTargetAllowed(process.env, SEED);
     OUTBOX = mkdtempSync(path.join(process.env.SHO_QA_OUTBOX_PARENT || tmpdir(), "sho-2609-"));
     process.env.EMAIL_OUTBOX_DIR = OUTBOX;
-    app = await startOwnedOutboxApp({ outbox: OUTBOX, mode: MODE });
-    BASE = app.base;
-    seedApp = MODE === "all" ? app : await startOwnedOutboxApp({ outbox: OUTBOX, mode: "all" });
-    SEED = seedApp.base;
-    console.info("SHO_2897_OWNED_APP", JSON.stringify({ release: process.env.SHO_QA_RELEASE, url: BASE, seedUrl: SEED, mode: MODE, privateOutbox: true }));
+    await switchOwnedMode("all");
     expect(SEED, `CRM_VISIBLE=${MODE}: set APL2609_SEED_URL to an all server on the same database (a deal cannot be made while the CRM is hidden)`).toBeTruthy();
     // Both URLs are passed in, so the guard never falls back to reading the process environment.
     assertStoryTargetAllowed(process.env, BASE);
@@ -293,11 +297,14 @@ test.describe("qa:TC missing APL-2609 CRM_VISIBLE hides deals on this server's m
     seed.plainTaskId = (plainTask.json?.task as { id: string }).id;
     // The Admin and the Super Admin hold the plain task too, so My tasks has a row for them in every mode.
     for (const who of [admin, people.superAdmin]) expect((await call(SEED, lead.cookie, "POST", `/api/tasks/${seed.plainTaskId}/collaborators`, { userId: who.id })).status).toBe(201);
+    await switchOwnedMode(MODE);
+    console.info("SHO_2897_OWNED_APP", JSON.stringify({ release: process.env.SHO_QA_RELEASE, url: BASE, seedUrl: SEED, mode: MODE, privateOutbox: true }));
   });
 
   test.afterAll(async () => {
     if (!QA_PASS) return;
     try {
+      if (app) await switchOwnedMode("all");
       const failed = await cleanup();
       if (failed.length) throw new Error(`ZZ-TEST cleanup failed: ${failed.join("; ")}`);
     } finally {
@@ -354,12 +361,15 @@ test.describe("qa:TC missing APL-2609 CRM_VISIBLE hides deals on this server's m
   });
 
   test("qa:TC missing AC4 AC8: chat written while the CRM was visible is shown on this server only to people this mode shows the CRM to", async () => {
-    // Asked on the seed server, where the CRM is visible, so the stored answer names the deal task.
+    // Ask on an all-mode owned app, then restart in the mode under test.
+    // Sessions and stored chat remain in the same scoped database.
+    await switchOwnedMode("all");
     for (const who of [people.editor!, people.admin!]) {
       const asked = await call(SEED, who.cookie, "POST", "/api/concierge/quick/due-week", {});
       expect(asked.status, asked.text).toBe(200);
       expect(asked.text).toContain(DEAL_TASK);
     }
+    await switchOwnedMode(MODE);
     for (const who of [people.editor!, people.admin!]) {
       const now = await chat(who);
       expect(now.includes(DEAL_TASK), who.label).toBe(visibleTo(who.role));
