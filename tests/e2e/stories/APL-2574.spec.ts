@@ -7,13 +7,13 @@ test("AC1: the concierge is reachable from the sidebar in one click on any main 
   const p = admin.page;
   for (const path of ["/", "/projects", "/team"]) {
     await p.goto(path);
-    const entry = p.locator("nav button.navbtn", { hasText: "Concierge" }).first();
+    const entry = p.getByRole("navigation").getByRole("button", { name: /^Concierge/ }).first();
     await expect(entry, `Concierge entry on ${path}`).toBeVisible();
   }
   await p.goto("/projects");
-  await p.locator("nav button.navbtn", { hasText: "Concierge" }).first().click();
+  await p.getByRole("navigation").getByRole("button", { name: /^Concierge/ }).first().click();
   // one click brings the concierge up: the docked panel, or the full-screen sheet where a screen has no dock
-  await expect(p.locator(".cc-slot, .cc-barslot, .cc-host").first()).toBeVisible();
+  await expect(p.getByRole("complementary", { name: "Concierge" }).or(p.getByRole("dialog", { name: "Concierge" })).first()).toBeVisible();
 });
 
 test("AC2: on a project the suggested chips refer to that project", async ({ admin, later }) => {
@@ -22,7 +22,7 @@ test("AC2: on a project the suggested chips refer to that project", async ({ adm
   const id = r.json.project.id as string;
   later(() => admin.api.post(`/api/projects/${id}/archive`));
   await admin.page.goto(`/projects/${id}`);
-  await expect(admin.page.locator("aside.cc-slot")).toBeVisible();
+  await expect(admin.page.getByRole("complementary", { name: "Concierge" })).toBeVisible();
   // When the concierge is not switched on (MODEL_DATA_APPROVED off) it shows no chips at all, so there is nothing to check.
   test.skip(await admin.page.getByText("not switched on yet").isVisible(), "The concierge is not switched on in this environment, so it shows no suggested chips.");
   const quick = admin.page.getByRole("group", { name: "Quick actions" }).first();
@@ -44,13 +44,15 @@ test("AC4: after Hide, no floating Show button covers a row or a button; Show li
   await admin.api.post(`/api/projects/${id}/tasks`, { title: zz("row") });
   const p = admin.page;
   await p.goto(`/projects/${id}`);
-  await p.locator("aside.cc-slot").getByRole("button", { name: "Hide" }).click();
-  await expect(p.locator("aside.cc-slot")).toHaveCount(0);
-  await expect(p.locator(".cc-show")).toHaveCount(0);
+  // The dock panel is the concierge landmark that offers Hide; the page keeps other concierge regions.
+  const dock = p.getByRole("complementary", { name: "Concierge" }).filter({ has: p.getByRole("button", { name: "Hide" }) });
+  await dock.getByRole("button", { name: "Hide" }).click();
+  await expect(dock).toHaveCount(0);
+  // The floating pill SHO-US-14.15 AC4 removed: no button by that name anywhere on the page.
   await expect(p.getByRole("button", { name: "Show concierge" })).toHaveCount(0);
-  await expect(p.locator("nav button.navbtn", { hasText: "Concierge" }).first()).toContainText("hidden");
-  await p.locator("nav button.navbtn", { hasText: "Concierge" }).first().click(); // leave the person's setting as we found it
-  await expect(p.locator("aside.cc-slot")).toBeVisible();
+  await expect(p.getByRole("navigation").getByRole("button", { name: /^Concierge/ }).first()).toContainText("hidden");
+  await p.getByRole("navigation").getByRole("button", { name: /^Concierge/ }).first().click(); // leave the person's setting as we found it
+  await expect(p.getByRole("complementary", { name: "Concierge" })).toBeVisible();
 });
 
 test.skip("AC5: pressing the accepted shortcut focuses the concierge input", async () => {
