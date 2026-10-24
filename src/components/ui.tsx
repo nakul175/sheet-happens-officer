@@ -100,8 +100,8 @@ export function Modal({ onClose, small, label, describedBy, children }: { onClos
       // Scroll this sheet explicitly: scrollIntoView can use the layout viewport while the keyboard is resizing
       // the visual viewport, leaving the focused field below the pinned footer even though the sheet fits.
       const bounds = sheet.getBoundingClientRect();
-      const footer = sheet.querySelector<HTMLElement>(".actions")?.getBoundingClientRect();
-      const header = sheet.querySelector<HTMLElement>(".bar")?.getBoundingClientRect();
+      const footer = sheet.querySelector<HTMLElement>(":scope > .actions")?.getBoundingClientRect();
+      const header = sheet.querySelector<HTMLElement>(":scope > .bar")?.getBoundingClientRect();
       const bottom = Math.min(bounds.bottom, footer && footer.top > bounds.top ? footer.top : bounds.bottom) - 8;
       const top = Math.max(bounds.top, header?.bottom ?? bounds.top) + 8;
       const box = field.getBoundingClientRect();
@@ -115,6 +115,10 @@ export function Modal({ onClose, small, label, describedBy, children }: { onClos
       // Focus scrolling and viewport layout can finish after the event. Reconcile once after that layout too.
       frame = requestAnimationFrame(() => { fit(); frame = requestAnimationFrame(fit); });
     };
+    // Comments and other fetched form sections can settle after the resize frames.
+    // Observe the sheet rather than the document so viewport CSS writes cannot retrigger this observer.
+    const content = new MutationObserver(scheduleFit);
+    if (sheetRef.current) content.observe(sheetRef.current, { childList: true, subtree: true, characterData: true });
     scheduleFit();
     vv?.addEventListener("resize", scheduleFit);
     vv?.addEventListener("scroll", scheduleFit);
@@ -122,6 +126,7 @@ export function Modal({ onClose, small, label, describedBy, children }: { onClos
     return () => {
       document.body.classList.remove("vv-sheet");
       cancelAnimationFrame(frame);
+      content.disconnect();
       document.removeEventListener("focusin", scheduleFit);
       vv?.removeEventListener("resize", scheduleFit);
       vv?.removeEventListener("scroll", scheduleFit);

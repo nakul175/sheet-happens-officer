@@ -64,6 +64,7 @@ function mount() {
       <Modal label="Task" onClose={() => {}}>
         <div className="fgrid">Project · To do</div>
         <div className="field"><label htmlFor="desc">Description</label><textarea id="desc" rows={3} /></div>
+        <section><div className="actions">Comment actions</div></section>
         <div className="actions"><button className="btn">Mark complete</button></div>
       </Modal>,
     );
@@ -98,10 +99,27 @@ describe("SHO-2738 the dialog tells the sheet where the keyboard is", () => {
     expect(document.documentElement.style.getPropertyValue("--vvt")).toBe("");
   });
 
+  it("refits after asynchronous content moves a focused field below the footer", async () => {
+    const { sheet, desc } = mount();
+    sheet.getBoundingClientRect = () => ({ top: 0, bottom: REMAINING, height: REMAINING } as DOMRect);
+    sheet.querySelector<HTMLElement>(":scope > .actions")!.getBoundingClientRect = () => ({ top: 368, bottom: REMAINING } as DOMRect);
+    let fieldBottom = 300;
+    desc.getBoundingClientRect = () => ({ top: fieldBottom - 90 - sheet.scrollTop, bottom: fieldBottom - sheet.scrollTop, height: 90 } as DOMRect);
+    act(() => desc.focus());
+    // Network-loaded form content can arrive well after both resize animation frames.
+    frames.clear();
+    fieldBottom = 500;
+    await act(async () => { sheet.querySelector(".fgrid")!.append(document.createElement("input")); });
+    const pending = [...frames.values()];
+    frames.clear();
+    act(() => pending.forEach(cb => cb(0)));
+    expect(desc.getBoundingClientRect().bottom).toBeLessThanOrEqual(360);
+  });
+
   it("nudges a focused field back above the pinned footer, and only when it is actually under it", () => {
     const { sheet, desc } = mount();
     sheet.getBoundingClientRect = () => ({ top: 0, bottom: REMAINING, height: REMAINING } as DOMRect);
-    sheet.querySelector<HTMLElement>(".actions")!.getBoundingClientRect = () => ({ top: 368, bottom: REMAINING } as DOMRect);
+    sheet.querySelector<HTMLElement>(":scope > .actions")!.getBoundingClientRect = () => ({ top: 368, bottom: REMAINING } as DOMRect);
     let fieldBottom = 300;
     desc.getBoundingClientRect = () => ({ top: fieldBottom - 44 - sheet.scrollTop, bottom: fieldBottom - sheet.scrollTop, height: 44 } as DOMRect);
 
