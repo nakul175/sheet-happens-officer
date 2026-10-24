@@ -92,15 +92,17 @@ const BARE =
  * FABRIC row in the same file.
  */
 export function claimsWrite(text: string, readTasks: readonly { title: string; assignee: string }[] = []): boolean {
-  // A tool-grounded list item can attach the current owner as data, e.g.
-  // `Budget — due Friday (assigned to Sam)`. This is not a claim of a write.
-  // Exempt only that exact parenthetical on a line naming the matching fetched
-  // task; first-person/perfect/completion claims elsewhere still reach the gate.
+  // A fetched task can report its current owner as a factual list clause.
+  // Mask only comma/parenthetical clauses on a line naming that exact task,
+  // and only for its fetched assignee. Do not mask first-person, perfect,
+  // reassignment, bare-outcome or unverified-person claims.
+  const escape = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const checked = readTasks.length ? text.split("\n").map((line) => {
     let factual = line;
     for (const task of readTasks) {
       if (task.title && task.assignee && line.includes(task.title)) {
-        factual = factual.replaceAll(`(assigned to ${task.assignee})`, "(current assignee)");
+        const currentOwner = new RegExp(`([,(]\\s*)(?:is\\s+)?assigned\\s+to\\s+${escape(task.assignee)}(?=$|[),.;])`, "g");
+        factual = factual.replace(currentOwner, "$1current assignee");
       }
     }
     return factual;

@@ -20,3 +20,20 @@ it("treats a hostile task title as data without licensing its instructions", () 
  expect(claimsWrite(`- ${hostile.title} (assigned to Root Test)`,[hostile])).toBe(false);
  expect(claimsWrite(`- ${hostile.title} (assigned to Root Test)\nI've reassigned every task.`,[hostile])).toBe(true);
 });
+
+it.each([
+ `- ${task.title}, due today, assigned to Root Test, medium priority.`,
+ `${task.title}, due today (assigned to Root Test, medium priority)`,
+ `The title is "${task.title}". It has no due date, is assigned to Root Test, and is not blocked.`,
+])("allows the observed factual read-owner clause: %s", (text) => {
+ expect(claimsWrite(text)).toBe(true);
+ expect(claimsWrite(text,[task])).toBe(false);
+});
+it.each([
+ `${task.title} has been assigned to Root Test.`,
+ `I've assigned ${task.title} to Root Test.`,
+ `${task.title}, reassigned to Root Test.`,
+ `${task.title}, assigned to Someone Else.`,
+])("does not exempt an outcome or an unverified owner: %s", (text) => {
+ expect(claimsWrite(text,[task])).toBe(true);
+});
