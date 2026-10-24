@@ -114,7 +114,7 @@ test("AC4: a task linked to an organisation or a contact shows on the task and o
   later(() => admin.api.del(`/api/contacts/${contactId}`));
   const project = await newProject(admin, later, { label: "e11 link project", members: [{ who: insider, role: "EDITOR" }] });
   const title = zz("linked task");
-  const taskId = await newTask(admin, project.id, { title, assigneeId: insider.user.id });
+  const taskId = await newTask(admin, project.id, { dueDate: "2031-03-20", title, assigneeId: insider.user.id });
   expect((await admin.api.post(`/api/tasks/${taskId}/links`, { organisationId: org.id })).status).toBe(201);
   expect((await admin.api.post(`/api/tasks/${taskId}/links`, { contactId })).status).toBe(201);
   const task = (await insider.api.get(`/api/tasks/${taskId}`)).json.task as { links: { organisation: { id: string } | null; contact: { id: string } | null }[] };
@@ -201,7 +201,7 @@ test("AC7: the organisation page lists a deal, its notes and linked tasks only f
   expect((await admin.api.post(`/api/orgs/${org.id}/notes`, { kind: "CALL", date: ymd(0), text: note, projectId: dealId })).status).toBe(201);
   const project = await newProject(admin, later, { label: "e11 hidden project" });
   const title = zz("hidden linked");
-  const taskId = await newTask(admin, project.id, { title, assigneeId: admin.user.id });
+  const taskId = await newTask(admin, project.id, { dueDate: "2031-03-20", title, assigneeId: admin.user.id });
   expect((await admin.api.post(`/api/tasks/${taskId}/links`, { organisationId: org.id })).status).toBe(201);
 
   const before = await load(member, org.id);

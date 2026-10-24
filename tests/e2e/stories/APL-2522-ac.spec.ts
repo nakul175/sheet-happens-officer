@@ -9,7 +9,7 @@ async function setup(admin: Who, member: Who, later: (fn: () => Promise<unknown>
   const p = await newProject(admin, later, { label, members: [{ who: member, role: "EDITOR" }] });
   const boss = await ghost(admin, later, "approver");
   expect((await admin.api.post(`/api/projects/${p.id}/members`, { userId: boss.id, role: "EDITOR" })).status).toBe(201);
-  const t = await newTask(member, p.id, { title: zz(`${label} task`) });
+  const t = await newTask(member, p.id, { dueDate: "2031-03-20", title: zz(`${label} task`) });
   return { p, boss, t };
 }
 
@@ -33,7 +33,7 @@ test("AC1: the Leader names an approver (Leader or Editor, not the assignee); a 
 
 test("AC1: the task creator may set the approver (a creator who is not the assignee)", async ({ admin, member, later }) => {
   const { p, boss } = await setup(admin, member, later, "4.6 creator");
-  const t = await newTask(admin, p.id, { assigneeId: member.user.id }); // created by the Super Admin, held by the Member
+  const t = await newTask(admin, p.id, { dueDate: "2031-03-20", assigneeId: member.user.id }); // created by the Super Admin, held by the Member
   expect((await admin.api.put(`/api/tasks/${t}/approver`, { approverId: boss.id, expectedUpdatedAt: (await getTask(admin, t)).updatedAt })).status).toBe(200);
 });
 
@@ -50,7 +50,7 @@ test("AC2: with an approver, the assignee can only hand the task to the approver
 test("AC3+AC7: sending for approval makes the approver the assignee, notified, in My tasks, and remembers the previous assignee", async ({ admin, member, later }) => {
   const p = await newProject(admin, later, { label: "4.6 ac3", members: [{ who: member, role: "EDITOR" }] });
   const title = zz("4.6 handover");
-  const t = await newTask(member, p.id, { title });
+  const t = await newTask(member, p.id, { dueDate: "2031-03-20", title });
   await admin.api.put(`/api/tasks/${t}/approver`, { approverId: admin.user.id, expectedUpdatedAt: (await getTask(admin, t)).updatedAt }); // the Leader approves
   expect((await member.api.post(`/api/tasks/${t}/send-for-approval`)).status).toBe(200);
   const held = await getTask(admin, t);
@@ -94,7 +94,7 @@ test("AC5: Send back returns the task, open, to the previous assignee; if they a
 
 test("AC6: with no approver the 4.3 completion rules apply unchanged (another Editor may complete)", async ({ admin, member, later }) => {
   const p = await newProject(admin, later, { label: "4.6 ac6", members: [{ who: member, role: "EDITOR" }] });
-  const t = await newTask(admin, p.id);
+  const t = await newTask(admin, p.id, { dueDate: "2031-03-20" });
   expect((await getTask(admin, t)).approver).toBeNull();
   expect((await member.api.post(`/api/tasks/${t}/complete`, { expectedUpdatedAt: (await getTask(member, t)).updatedAt })).status).toBe(200);
 });

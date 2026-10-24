@@ -67,7 +67,7 @@ test("AC4: a request to change something writes nothing until Confirm is tapped"
   await cleanChat(admin, later);
   const project = await newProject(admin, later, { label: "us83-silent" });
   const title = zz("silent");
-  const id = await newTask(admin, project.id, { title, assigneeId: admin.user.id });
+  const id = await newTask(admin, project.id, { dueDate: "2031-03-20", title, assigneeId: admin.user.id });
   const before = await activity(admin, project.id);
   const asked = await ask(admin, `Complete "${title}".`);
   expect(asked.status, JSON.stringify(asked.json)).toBe(200);
@@ -100,7 +100,7 @@ test("AC6: a request for more than 10 changes makes no card and leaves the tasks
   await cleanChat(admin, later);
   const project = await newProject(admin, later, { label: "us83-ten" });
   const ids: string[] = [];
-  for (let i = 0; i < 11; i++) ids.push(await newTask(admin, project.id, { title: zz(`batch-${i}`), assigneeId: admin.user.id }));
+  for (let i = 0; i < 11; i++) ids.push(await newTask(admin, project.id, { dueDate: "2031-03-20", title: zz(`batch-${i}`), assigneeId: admin.user.id }));
   const asked = await ask(admin, `Complete every open task in ${project.name}. There are 11.`);
   expect(asked.status, JSON.stringify(asked.json)).toBe(200);
   expect(cardOf(asked.messages), "more than 10 changes is not a card").toBeFalsy();
@@ -135,7 +135,7 @@ test("AC8: removing a member who holds tasks lists those tasks, blocks Confirm u
   await cleanChat(admin, later);
   const project = await newProject(admin, later, { label: "us83-remove", members: [{ who: member, role: "EDITOR" }] });
   const title = zz("held");
-  const id = await newTask(admin, project.id, { title, assigneeId: member.user.id });
+  const id = await newTask(admin, project.id, { dueDate: "2031-03-20", title, assigneeId: member.user.id });
   const asked = await ask(admin, `Remove the person with email ${member.user.email} from ${project.name}.`);
   expect(asked.status, JSON.stringify(asked.json)).toBe(200);
   const card = cardOf(asked.messages);
@@ -159,7 +159,7 @@ test("AC9: confirming a deletion sends the task to Trash, with Undo", async ({ a
   await cleanChat(admin, later);
   const project = await newProject(admin, later, { label: "us83-trash", members: [{ who: member, role: "EDITOR" }] });
   const title = zz("bin");
-  const id = await newTask(admin, project.id, { title, assigneeId: member.user.id });
+  const id = await newTask(admin, project.id, { dueDate: "2031-03-20", title, assigneeId: member.user.id });
   const asked = await ask(admin, `Delete "${title}".`);
   expect(asked.status, JSON.stringify(asked.json)).toBe(200);
   const card = cardOf(asked.messages);

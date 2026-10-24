@@ -33,7 +33,7 @@ test("AC2: assigning a task without naming a person asks who, and assigns nobody
   await cleanChat(admin, later);
   const project = await newProject(admin, later, { label: "us84-who" });
   const title = zz("unassigned-ask");
-  const id = await newTask(admin, project.id, { title, assigneeId: admin.user.id });
+  const id = await newTask(admin, project.id, { dueDate: "2031-03-20", title, assigneeId: admin.user.id });
   const asked = await ask(admin, `Assign "${title}".`);
   expect(asked.status, JSON.stringify(asked.json)).toBe(200);
   expect(cardOf(asked.messages), "a missing person is not guessed").toBeFalsy();

@@ -109,8 +109,8 @@ test("AC3: Search can be filtered to ideas only", async ({ admin, later }) => {
   const token = `ZZ-TEST-IDEA${Date.now().toString(36)}`;
   const ideaTitle = `${token} ${zz("idea")}`;
   const plainTitle = `${token} ${zz("plain")}`;
-  const idea = await newTask(admin, p.id, { title: ideaTitle, assigneeId: admin.user.id });
-  await newTask(admin, p.id, { title: plainTitle, assigneeId: admin.user.id });
+  const idea = await newTask(admin, p.id, { dueDate: "2031-03-20", title: ideaTitle, assigneeId: admin.user.id });
+  await newTask(admin, p.id, { dueDate: "2031-03-20", title: plainTitle, assigneeId: admin.user.id });
   expect((await admin.api.post(`/api/tasks/${idea}/idea`, { isIdea: true })).status).toBe(200);
 
   const only = (await admin.api.get(`/api/search?q=${encodeURIComponent(token)}&idea=true`)).json.tasks as { title: string; isIdea: boolean }[];

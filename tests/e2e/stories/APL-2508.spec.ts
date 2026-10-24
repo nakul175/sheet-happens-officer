@@ -26,7 +26,7 @@ const mk = async (who: Who, p: string, title: string, extra: Record<string, unkn
 
 test("AC1: when an Editor deletes a task, the Leader is told at once with the title, the deleter's name and a link to Trash", async ({ admin, member, later }) => {
   const p = await proj(admin, member, "del-notice", later);
-  const t = await mk(member, p, zz("gone"), { assigneeId: admin.user.id });
+  const t = await mk(member, p, zz("gone"), { dueDate: "2031-03-20", assigneeId: admin.user.id });
   expect((await member.api.del(`/api/tasks/${t}`)).status).toBe(204);
   const hit = (await inbox(admin)).find((n) => n.text.includes(`"${zz("gone")}"`));
   expect(hit, "the Leader was told").toBeTruthy();
@@ -38,14 +38,14 @@ test("AC1: when an Editor deletes a task, the Leader is told at once with the ti
 
 test("AC2: deleting a task when nobody else is on it creates no notice", async ({ admin, later }) => {
   const p = await proj(admin, null, "del-alone", later);
-  const t = await mk(admin, p, zz("solo gone"), { assigneeId: admin.user.id });
+  const t = await mk(admin, p, zz("solo gone"), { dueDate: "2031-03-20", assigneeId: admin.user.id });
   expect((await admin.api.del(`/api/tasks/${t}`)).status).toBe(204);
   expect((await inbox(admin)).some((n) => n.text.includes(zz("solo gone")))).toBe(false);
 });
 
 test("AC3: a person who is both Leader and assignee gets one notice, not two", async ({ admin, member, later }) => {
   const p = await proj(admin, member, "del-once", later);
-  const t = await mk(member, p, zz("once only"), { assigneeId: admin.user.id });
+  const t = await mk(member, p, zz("once only"), { dueDate: "2031-03-20", assigneeId: admin.user.id });
   expect((await member.api.del(`/api/tasks/${t}`)).status).toBe(204);
   expect((await inbox(admin)).filter((n) => n.text.includes(`"${zz("once only")}"`) && n.text.includes("to Trash"))).toHaveLength(1);
 });
