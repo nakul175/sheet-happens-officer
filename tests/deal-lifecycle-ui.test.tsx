@@ -88,3 +88,34 @@ it("empty delivery explains Won-to-Ongoing workflow without a create-deal dead e
   expect(empty.textContent).not.toContain("Create");
   expect(empty.querySelector('a[href="/deals/new"]')).toBeNull();
 });
+
+const proactiveStages = [stage("lead", "Lead", "NOT_STARTED"), stage("contact", "Contacted", "ACTIVE"), stage("qualify", "Qualified", "ACTIVE"), stage("proposal", "Proposal", "ACTIVE"), stage("negotiate", "Negotiation", "ACTIVE"), stage("paused", "Paused", "PAUSED"), stage("prowon", "Won", "DONE"), stage("prolost", "Lost", "LOST")];
+function emptyPipelines() {
+  globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => new Response(JSON.stringify(String(input) === "/api/deals/pipelines"
+    ? { pipelines: [{ id: "proactive", key: "DEAL_PROACTIVE", name: "Proactive", stages: proactiveStages }, { ...pipe, stages: [...stages, retired] }] }
+    : { deals: [] }), { headers: { "content-type": "application/json" } }));
+}
+const boardColumns = () => [...document.querySelectorAll('[aria-label="Deal board"] > section')].map(s => s.getAttribute("aria-label"));
+it("empty pipeline switch retains one board: Proactive six original columns, Bid eight active columns", async () => {
+ emptyPipelines(); await mount(h(DealsView));
+ expect(document.querySelectorAll('[aria-label="Deal board"]')).toHaveLength(1);
+ expect(boardColumns()).toEqual(["Lead", "Contacted", "Qualified", "Proposal", "Negotiation", "Paused / Won / Lost"]);
+ expect(document.querySelector('[aria-label="No matching deals"]')).not.toBeNull();
+ await click("Bid");
+ expect(document.querySelectorAll('[aria-label="Deal board"]')).toHaveLength(1);
+ expect(boardColumns()).toEqual(["Leads", "Under Evaluation", "Go", "No-Go", "Submitted", "Won", "Lost", "On Hold"]);
+ expect(boardColumns()).not.toContain("Awaiting result");
+});
+it("empty delivery keeps Bid delivery column, no Proactive sales columns, and Won guidance", async () => {
+ emptyPipelines(); await mount(h(DealsView)); await click("Delivery projects");
+ expect(boardColumns()).toEqual([]);
+ expect(document.querySelector('[aria-label="No matching deals"]')?.textContent).toContain("move an existing Won deal to Ongoing Projects");
+ await click("Bid"); expect(boardColumns()).toEqual(["Ongoing Projects"]);
+ expect(document.querySelectorAll('[aria-label="Deal board"]')).toHaveLength(1);
+});
+it("empty archived and list layouts never render an active empty board", async () => {
+ emptyPipelines(); await mount(h(DealsView)); await click("List");
+ expect(document.querySelector('[aria-label="Deal board"]')).toBeNull();
+ await click("Board"); await click("Show archived");
+ expect(document.querySelector('[aria-label="Deal board"]')).toBeNull();
+});
