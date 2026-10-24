@@ -89,7 +89,7 @@ export function DealBoard({ deals, stages, bid, canMove = true, onChange }: { de
   return (
     <>
       {err && <div className="err" role="alert">{err}</div>}
-      <div className="dboard">
+      <div className="dboard" role="region" aria-label="Deal board" tabIndex={0}>
         {cols.map((c) => {
           const t = totals(c.deals);
           return (

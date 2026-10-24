@@ -53,7 +53,8 @@ test("AC2: assigning 5 tasks to the Member is one request, one notice for them, 
 test("AC3: tasks the person may not change are skipped and the result says '4 changed, 1 skipped (no permission)'", async ({ admin, member, later }) => {
   const { id, ids } = await proj(admin, member, later, 5, (i) => (i < 4 ? { assigneeId: member.user.id } : { assigneeId: admin.user.id, approverId: member.user.id }));
   expect((await admin.api.post(`/api/tasks/${ids[4]}/send-for-approval`)).status).toBe(200); // the Member now holds it and may only close or send it back
-  const r = await member.api.post(`/api/projects/${id}/tasks/bulk`, { taskIds: ids, action: "assign", assigneeId: admin.user.id });
+  const versions = Object.fromEntries(await Promise.all(ids.map(async (taskId) => [taskId, (await member.api.get(`/api/tasks/${taskId}`)).json.task.updatedAt])));
+  const r = await member.api.post(`/api/projects/${id}/tasks/bulk`, { taskIds: ids, versions, action: "assign", assigneeId: admin.user.id });
   expect(r.status).toBe(200);
   expect(r.json.changed).toBe(4);
   expect(r.json.message).toBe("4 changed, 1 skipped (no permission)");
