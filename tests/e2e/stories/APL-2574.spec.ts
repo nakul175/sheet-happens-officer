@@ -1,5 +1,6 @@
 // SHO-US-14.15 Concierge discoverability (APL-2574).
 import { test, expect, zz } from "../support";
+import { settledConciergeContent } from "../helpers/concierge-readiness";
 
 test.use({ viewport: { width: 1440, height: 900 } });
 
@@ -22,10 +23,12 @@ test("AC2: on a project the suggested chips refer to that project", async ({ adm
   const id = r.json.project.id as string;
   later(() => admin.api.post(`/api/projects/${id}/archive`));
   await admin.page.goto(`/projects/${id}`);
-  await expect(admin.page.getByRole("complementary", { name: "Concierge" })).toBeVisible();
-  // When the concierge is not switched on (MODEL_DATA_APPROVED off) it shows no chips at all, so there is nothing to check.
-  test.skip(await admin.page.getByText("not switched on yet").isVisible(), "The concierge is not switched on in this environment, so it shows no suggested chips.");
-  const quick = admin.page.getByRole("group", { name: "Quick actions" }).first();
+  const dock = admin.page.getByRole("complementary", { name: "Concierge" });
+  await expect(dock).toBeVisible();
+  // The landmark arrives before async state. A transient missing disabled notice is not proof that chips are ready.
+  const content = await settledConciergeContent(dock);
+  test.skip(content.kind === "disabled" && /not switched on yet/i.test(content.reason), "The concierge is not switched on in this environment, so it shows no suggested chips.");
+  const quick = dock.getByRole("group", { name: "Quick actions" });
   await expect(quick.getByRole("button", { name: "Show overdue here" })).toBeVisible();
   await expect(quick.getByRole("button", { name: /Blocked here/ })).toBeVisible();
   await admin.page.goto("/projects");
