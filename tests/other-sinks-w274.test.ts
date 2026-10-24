@@ -94,6 +94,10 @@ describe("W274 the notification text (SECURITY)", () => {
   it("a failing job tells only Super Admins, and the notice text carries no marker", async () => {
     const sa = await superAdmin();
     const member = await account("w274member");
+    const workspace = await db.user.findUniqueOrThrow({ where: { id: sa.id }, select: { workspaceId: true } });
+    const marker = `zz-w274-operators-${Date.now()}`;
+    const active = await db.user.create({ data: { workspaceId: workspace.workspaceId, name: "ZZ-TEST active operator", email: `${marker}-active@example.invalid`, passwordHash: "not-a-login", orgRole: "SUPER_ADMIN", emailVerifiedAt: new Date() } });
+    const inactive = await db.user.create({ data: { workspaceId: workspace.workspaceId, name: "ZZ-TEST inactive operator", email: `${marker}-inactive@example.invalid`, passwordHash: "not-a-login", orgRole: "SUPER_ADMIN", emailVerifiedAt: new Date(), deactivatedAt: new Date() } });
     const recipients = await db.user.findMany({ where: { orgRole: "SUPER_ADMIN", deactivatedAt: null }, select: { id: true } });
     const probe = `zz-w274-sink-${Date.now()}`;
     JOBS.push({ name: probe, about: "SECURITY probe W274: fails with a fake DSN", run: async () => { throw new Error(MESSAGE); } });
@@ -107,6 +111,8 @@ describe("W274 the notification text (SECURITY)", () => {
       // is every active operator exactly once, not a singleton root email.
       expect(rows.map(r => r.recipientId).sort()).toEqual(recipients.map(r => r.id).sort());
       expect(rows.some(r => r.recipient.email === sa.email)).toBe(true);
+      expect(rows.some(r => r.recipientId === active.id)).toBe(true);
+      expect(rows.some(r => r.recipientId === inactive.id || r.recipientId === member.id)).toBe(false);
       for (const leak of LEAKS) expect(JSON.stringify(rows)).not.toContain(leak);
 
       const bell = (await sa.c.get("/api/notifications")).json.items as { text: string }[];
@@ -123,6 +129,7 @@ describe("W274 the notification text (SECURITY)", () => {
       JOBS.splice(JOBS.findIndex((j) => j.name === probe), 1);
       await db.jobRun.deleteMany({ where: { job: probe } });
       await db.notification.deleteMany({ where: { type: "JOB_FAILED", data: { path: ["job"], equals: probe } } });
+      await db.user.deleteMany({ where: { id: { in: [active.id, inactive.id] } } });
     }
   });
 });
