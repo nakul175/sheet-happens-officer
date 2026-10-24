@@ -36,7 +36,7 @@ test.describe("SHO-US-23.3 / APL-2622", () => {
   test("AC2 (APL-2624): the temporary password signs in and must be replaced", async ({ admin, browser, later }) => {
     const email = alias("2622", "ac2");
     const copy = signInDetailsMail(email, "ZZ-TEST", "A Super Admin", "secret-pass-1").text;
-    expect(copy).toMatch(/temporary.*sign in.*set your own password/s);
+    expect(copy).toMatch(/temporary[\s\S]*sign in[\s\S]*set your own password/);
     expect(copy).not.toContain("stays valid");
     const r = await admin.api.post("/api/team", { firstName: "ZZ-TEST", lastName: `keep ${RUN}`, email, role: "MEMBER" });
     expect(r.status).toBe(201);
