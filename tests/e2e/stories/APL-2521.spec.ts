@@ -214,7 +214,7 @@ test("AC7 (30-day purge): one TASK_PURGED row is written for a purge run", async
 test("APL-2521 AC7: a purge run writes one TASK_PURGED row in the source @static", async () => {
   test.info().annotations.push({ type: "qa:TC", description: "qa:TC missing" });
   const body = sourceOf("src/lib/tasks.ts", "export async function purgeTrash", "export async function myTasks");
-  expect(body).toContain("if (r.count) await db.auditLog.create");
+  expect(body).toMatch(/if \(r\.count\)\s*\{?\s*await db\.auditLog\.create/);
   expect(body).toContain('event: "TASK_PURGED"');
-  expect(body).toContain("30 * 86400_000");
+  expect(body).toContain("trashPurgeBefore(now)");
 });

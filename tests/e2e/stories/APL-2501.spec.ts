@@ -44,7 +44,7 @@ test("AC2: at 390 px the sidebar collapses and no page scrolls sideways", async 
 test("AC3: the icon-only mark shows at 24 px and the text uses Public Sans", async ({ admin }) => {
   await admin.page.setViewportSize({ width: 1280, height: 800 });
   await admin.page.goto("/");
-  const img = admin.page.locator(".brand img").first();
+  const img = admin.page.locator(".brand img:visible").first();
   await expect(img).toHaveAttribute("src", "/logo-icon.svg");
   const box = (await img.boundingBox())!;
   expect(Math.round(box.width)).toBeGreaterThanOrEqual(24);
@@ -52,7 +52,7 @@ test("AC3: the icon-only mark shows at 24 px and the text uses Public Sans", asy
   const svg = await admin.page.request.get("/logo-icon.svg");
   expect(svg.status()).toBe(200);
   const font = await admin.page.evaluate(() => getComputedStyle(document.body).fontFamily);
-  expect(font).toMatch(/Public Sans/i);
+  expect(font).toMatch(/Public\s*Sans/i);
 });
 
 test("AC4: Usage and Audit log are for the Super Admin only; a Member who types the address gets the refusal", async ({ admin, member }) => {

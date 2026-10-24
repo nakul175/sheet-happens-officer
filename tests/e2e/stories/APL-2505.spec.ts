@@ -213,7 +213,7 @@ test("APL-2505 AC7: undoCard uses the same undo path @static", async () => {
   expect(cards).toContain("await checkUndo(user, r.id)");
   expect(cards).toContain("await undoAction(user, r.id, anyway)");
   expect(cards).toContain('throw new ApiError(409, "Too old to undo", { tooOld: true })');
-  expect(cards).toContain("UNDO_DAYS * 86400_000");
+  expect(cards).toContain("isTooOldToUndo(confirmedAt)");
 });
 
 // qa:TC missing

@@ -63,7 +63,7 @@ test("AC3: a person added by the Super Admin receives an email with their sign-i
   expect(text.includes(pass)).toBe(false);
 });
 
-test("AC4: signing in with the emailed password shows a banner to set their own", async ({ admin, browser, later }) => {
+test("AC4 (superseded by APL-2624): emailed sign-in requires setting an own password", async ({ admin, browser, later }) => {
   const email = alias("2619", "ac4");
   const created = await admin.api.post("/api/team", { firstName: "ZZ-TEST", lastName: `ac4 ${RUN}`, email, role: "MEMBER" });
   expect(created.status, JSON.stringify(created.json)).toBe(201);
@@ -73,8 +73,9 @@ test("AC4: signing in with the emailed password shows a banner to set their own"
   const who = await signInAs(browser, email, pass!);
   later(() => who.ctx.close());
   await who.page.goto("/");
-  await expect(who.page.getByText("Set your own password. The emailed one still works until you do.")).toBeVisible();
-  await expect(who.page.getByRole("link", { name: "Change password" })).toHaveAttribute("href", "/profile");
+  await expect(who.page.getByRole("heading", { name: "Set your own password" })).toBeVisible();
+  await expect(who.page.getByRole("button", { name: "Save and continue" })).toBeVisible();
+  await expect(who.page.getByRole("button", { name: "Close this message" })).toHaveCount(0);
 });
 
 test("AC5: clicking a person's name on the Team page opens their full profile", async ({ admin, later }) => {

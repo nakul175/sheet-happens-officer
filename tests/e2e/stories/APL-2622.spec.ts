@@ -33,9 +33,11 @@ test.describe("SHO-US-23.3 / APL-2622", () => {
     expect(text).toMatch(/^Password: .+$/m);
   });
 
-  test("AC2: the password stays valid until the person changes it", async ({ admin, browser, later }) => {
+  test("AC2 (APL-2624): the temporary password signs in and must be replaced", async ({ admin, browser, later }) => {
     const email = alias("2622", "ac2");
-    expect(signInDetailsMail(email, "ZZ-TEST", "A Super Admin", "secret-pass-1").text).toContain("This password stays valid until you change it.");
+    const copy = signInDetailsMail(email, "ZZ-TEST", "A Super Admin", "secret-pass-1").text;
+    expect(copy).toMatch(/temporary.*sign in.*set your own password/s);
+    expect(copy).not.toContain("stays valid");
     const r = await admin.api.post("/api/team", { firstName: "ZZ-TEST", lastName: `keep ${RUN}`, email, role: "MEMBER" });
     expect(r.status).toBe(201);
     later(async () => { await admin.api.post(`/api/team/${r.json.person.id}/deactivate`, { reassign: "leaders" }); });
@@ -52,12 +54,8 @@ test.describe("SHO-US-23.3 / APL-2622", () => {
     await ctx.close();
   });
 
-  test("AC3: the first sign-in shows a closable 'Set your own password' banner linking to Profile", async ({ admin, browser, later }) => {
+  test("AC3 (superseded by APL-2624): first sign-in shows the mandatory password screen", async ({ admin, browser, later }) => {
     const email = alias("2622", "ac3");
-    const bar = readFileSync("src/app/(app)/Shell.tsx", "utf8");
-    expect(bar).toContain("Set your own password. The emailed one still works until you do.");
-    expect(bar).toContain('Link href="/profile"');
-    expect(bar).toContain('aria-label="Close this message"');
     const r = await admin.api.post("/api/team", { firstName: "ZZ-TEST", lastName: `bar ${RUN}`, email, role: "MEMBER" });
     expect(r.status).toBe(201);
     later(async () => { await admin.api.post(`/api/team/${r.json.person.id}/deactivate`, { reassign: "leaders" }); });
@@ -74,11 +72,9 @@ test.describe("SHO-US-23.3 / APL-2622", () => {
     await page.getByLabel("Work email").fill(email);
     await page.getByLabel("Password").fill(password!);
     await page.getByRole("button", { name: "Sign in" }).click();
-    const banner = page.locator(".pwbar");
-    await expect(banner).toContainText("Set your own password");
-    await expect(banner.getByRole("link", { name: "Change password" })).toHaveAttribute("href", "/profile");
-    await banner.getByRole("button", { name: "Close this message" }).click();
-    await expect(banner).toHaveCount(0);
+    await expect(page.getByRole("heading", { name: "Set your own password" })).toBeVisible();
+    await expect(page.getByLabel("New password", { exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Close this message" })).toHaveCount(0);
     await ctx.close();
   });
 

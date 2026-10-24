@@ -197,6 +197,6 @@ test("APL-2504 AC6: Undo is refused after 30 days in the source @static", async 
   test.info().annotations.push({ type: "qa:TC", description: "qa:TC missing" });
   expect(sourceOf("src/lib/undoable.ts", "export const UNDO_DAYS")).toContain("export const UNDO_DAYS = 30;");
   expect(sourceOf("src/lib/undo.ts", 'throw bad("Too old to undo"')).toContain("tooOld: true");
-  expect(sourceOf("src/lib/feed.ts", "UNDO_DAYS * 86400_000")).toContain('"too_old"');
-  expect(sourceOf("src/app/(app)/projects/[id]/activity/Activity.tsx", 'r.undo === "too_old"')).toContain("Too old to undo");
+  expect(sourceOf("src/lib/feed.ts", "isTooOldToUndo(r.createdAt)")).toContain('"too_old"');
+  expect(sourceOf("src/app/(app)/projects/[id]/activity/Activity.tsx", '{showTooOld(r, pr.data?.project.role)')).toContain("Too old to undo");
 });

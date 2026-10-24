@@ -46,7 +46,7 @@ test("AC3: a completed task sends no reminder", async ({ browser, later }) => {
   const open = zz("still open");
   const doneId = await newTask(admin, project.id, { title: done, assigneeId: holder.user.id, dueDate: ymd(1) });
   await newTask(admin, project.id, { title: open, assigneeId: holder.user.id, dueDate: ymd(1) });
-  expect((await holder.api.post(`/api/tasks/${doneId}/complete`, {})).status).toBe(200);
+  expect((await holder.api.post(`/api/tasks/${doneId}/complete`, { expectedUpdatedAt: (await holder.api.get(`/api/tasks/${doneId}`)).json.task.updatedAt })).status).toBe(200);
   await runLocalJob("reminders");
   const texts = await notices(holder);
   expect(about(texts, done)).toHaveLength(0);
@@ -85,7 +85,7 @@ test("AC5: while a task awaits approval the approver gets the reminder and the p
   const project = await newProject(admin, later, { label: "us74 approval", members: [{ who: holder, role: "EDITOR" }, { who: approver, role: "EDITOR" }] });
   const title = zz("awaiting");
   const id = await newTask(admin, project.id, { title, assigneeId: holder.user.id, dueDate: ymd(1) });
-  expect((await admin.api.put(`/api/tasks/${id}/approver`, { approverId: approver.user.id })).status).toBe(200);
+  expect((await admin.api.put(`/api/tasks/${id}/approver`, { approverId: approver.user.id, expectedUpdatedAt: (await admin.api.get(`/api/tasks/${id}`)).json.task.updatedAt })).status).toBe(200);
   expect((await holder.api.post(`/api/tasks/${id}/send-for-approval`, {})).status).toBe(200);
   const task = (await admin.api.get(`/api/tasks/${id}`)).json.task as { assignee: { id: string } };
   expect(task.assignee.id).toBe(approver.user.id);
@@ -100,10 +100,10 @@ test("AC6: a blocked task sends no reminder, and the next run after the flag is 
   const project = await newProject(admin, later, { label: "us74 blocked", members: [{ who: holder, role: "EDITOR" }] });
   const title = zz("blocked due");
   const id = await newTask(admin, project.id, { title, assigneeId: holder.user.id, dueDate: ymd(1) });
-  expect((await admin.api.patch(`/api/tasks/${id}`, { blocked: true, blockedReason: "ZZ-TEST wait" })).status).toBe(200);
+  expect((await admin.api.patch(`/api/tasks/${id}`, { blocked: true, blockedReason: "ZZ-TEST wait", expectedUpdatedAt: (await admin.api.get(`/api/tasks/${id}`)).json.task.updatedAt })).status).toBe(200);
   await runLocalJob("reminders");
   expect(about(await notices(holder), title)).toHaveLength(0);
-  expect((await admin.api.patch(`/api/tasks/${id}`, { blocked: false })).status).toBe(200);
+  expect((await admin.api.patch(`/api/tasks/${id}`, { blocked: false, expectedUpdatedAt: (await admin.api.get(`/api/tasks/${id}`)).json.task.updatedAt })).status).toBe(200);
   await runLocalJob("reminders");
   expect(about(await notices(holder), title)).toEqual([`"${title}" is due tomorrow.`]);
 });

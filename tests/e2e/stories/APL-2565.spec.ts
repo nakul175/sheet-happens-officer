@@ -53,6 +53,7 @@ test("AC2: in a list, J then Enter opens the second row", async ({ admin, later 
   await expect(dialog.getByLabel("Title")).toHaveValue(secondTitle);
   // K goes back up once the panel is closed.
   await page.keyboard.press("Escape");
+  await expect(dialog).toHaveCount(0);
   await rows.nth(2).focus();
   await page.keyboard.press("k");
   await expect(rows.nth(1)).toBeFocused();
@@ -79,7 +80,7 @@ test("AC3: no single-key shortcut fires while focus is in an input, textarea or 
   const title = page.getByRole("dialog", { name: "Task" }).getByLabel("Title");
   await expect(title).toBeEditable(); // the title stays read-only until the project role has loaded
   await title.click();
-  await page.keyboard.press("End");
+  await title.evaluate((el: HTMLTextAreaElement) => el.setSelectionRange(el.value.length, el.value.length));
   await page.keyboard.type("?c");
   await expect(title).toHaveValue(/\?c$/);
   await expect(page.getByRole("dialog", { name: "Keyboard shortcuts" })).toHaveCount(0);

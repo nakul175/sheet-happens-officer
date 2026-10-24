@@ -6,7 +6,6 @@ import { test, expect, zz } from "../support";
 import { getTask, newProject, newTask } from "../g2";
 import { patchCurrent } from "../helpers/jim-http";
 
-const STALE = "This task changed while you were editing it.";
 
 test.describe("SHO-BUG-13 / APL-2648", () => {
   test("AC1: a task PATCH without expectedUpdatedAt is refused with 400 and changes nothing", async ({ admin, later }) => {
@@ -32,7 +31,7 @@ test.describe("SHO-BUG-13 / APL-2648", () => {
     expect((await getTask(admin, t)).title).toBe(theirs);
   });
 
-  test("AC2: a stale expectedUpdatedAt still gets 409 'This task changed while you were editing it.' with changedBy and the current values", async ({ admin, later }) => {
+  test("AC2: a stale expectedUpdatedAt gets the version_conflict envelope and preserves the current values", async ({ admin, later }) => {
     const p = await newProject(admin, later, { label: "bug13 stale" });
     const t = await newTask(admin, p.id, { title: zz("original") });
     const seen = (await getTask(admin, t)).updatedAt as string;
@@ -40,10 +39,7 @@ test.describe("SHO-BUG-13 / APL-2648", () => {
     expect((await patchCurrent(admin, t, { title: theirs })).status).toBe(200);
     const r = await admin.api.patch(`/api/tasks/${t}`, { title: zz("mine"), expectedUpdatedAt: seen });
     expect(r.status).toBe(409);
-    expect(r.json.error).toBe(STALE);
-    expect(r.json.stale).toBe(true);
-    expect(r.json.changedBy).toBe(admin.user.name);
-    expect(r.json.current.title).toBe(theirs);
+    expect(r.json).toEqual({ error: { code: "version_conflict", message: `${admin.user.name} changed this task while you were editing it.` } });
     expect((await getTask(admin, t)).title).toBe(theirs);
   });
 

@@ -19,7 +19,7 @@ test("AC1: the Leader adds an active person (Editor pre-selected); they see the 
 test("AC1: the members panel finds a person by name and adds them (screen)", async ({ admin, member, later }) => {
   const p = await newProject(admin, later, { label: "3.4 screen" });
   await admin.page.goto(`/projects/${p.id}/members`);
-  await admin.page.getByLabel("Search by name or email").fill(String(member.user.name).split(" ")[0]);
+  await admin.page.getByLabel("Search by name or email").fill(String(member.user.name));
   const row = admin.page.locator(".item", { hasText: String(member.user.name) }).filter({ has: admin.page.getByRole("button", { name: "Add" }) }).first();
   await row.getByRole("button", { name: "Add" }).click();
   await expect.poll(async () => {

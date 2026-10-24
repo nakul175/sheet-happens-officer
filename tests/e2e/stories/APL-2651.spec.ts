@@ -213,8 +213,8 @@ test("AC2: signed-in without access gets 403 or the existing not-found answer, n
     { route: "sections", who: outsider, method: "PATCH", path: sectionPath, body: { move: "up" }, status: 404, error: "Project not found" },
     { route: "sections", who: editor, method: "PATCH", path: sectionPath, body: MALFORMED, status: 403, error: "Only the project Leader or an Admin can do this." },
     { route: "sections", who: editor, method: "PATCH", path: sectionPath, body: { move: "up" }, status: 403, error: "Only the project Leader or an Admin can do this." },
-    { route: "tasks", who: outsider, method: "PATCH", path: taskPath, body: MALFORMED, status: 404, error: "Project not found" },
-    { route: "tasks", who: outsider, method: "PATCH", path: taskPath, body: { title: "" }, status: 404, error: "Project not found" },
+    { route: "tasks", who: outsider, method: "PATCH", path: taskPath, body: MALFORMED, status: 404, error: "Task not found" },
+    { route: "tasks", who: outsider, method: "PATCH", path: taskPath, body: { title: "" }, status: 404, error: "Task not found" },
     { route: "tasks", who: viewer, method: "PATCH", path: taskPath, body: MALFORMED, status: 403, error: "Viewers cannot make changes." },
     { route: "tasks", who: viewer, method: "PATCH", path: taskPath, body: { title: "" }, status: 403, error: "Viewers cannot make changes." },
     { route: "views", who: editor, method: "PATCH", path: viewPath, body: MALFORMED, status: 404, error: "View not found" },
@@ -243,7 +243,7 @@ test("AC2 bulk-undo: another person's action is 403; a signed-in invalid body st
   expectValidation(await send(outsider.request, "POST", "/api/actions/bulk-undo", { ids: [] }));
 
   const bulk = await send(lead.request, "POST", `/api/projects/${projectId}/tasks/bulk`, {
-    taskIds: [taskId],
+    taskIds: [taskId], versions: { [taskId]: (await (await lead.request.get(`/api/tasks/${taskId}`)).json()).task.updatedAt },
     action: "move",
     sectionId: doing,
   });
@@ -267,7 +267,7 @@ test("AC3: an authorised caller with a bad body still gets today's 400 shape, an
   const viewPath = `/api/views/${viewId}`;
   const contactPath = `/api/contacts/${contactId}`;
 
-  const badTitle = await send(lead.request, "PATCH", taskPath, { title: "" });
+  const badTitle = await send(lead.request, "PATCH", taskPath, { title: "", expectedUpdatedAt: (await (await lead.request.get(taskPath)).json()).task.updatedAt });
   expectValidation(badTitle);
   expect(badTitle.json?.issues).toEqual([{ path: ["title"], message: "Give the task a title." }]);
   const badTaskJson = await send(lead.request, "PATCH", taskPath, MALFORMED);
@@ -314,7 +314,7 @@ test("AC3: an authorised caller with a bad body still gets today's 400 shape, an
   if (process.env.SHAPE_OUT) writeFileSync(process.env.SHAPE_OUT, JSON.stringify(shapes, null, 2));
   await test.info().attach("ac3-shapes", { body: JSON.stringify(shapes, null, 2), contentType: "application/json" });
 
-  const renamed = await send(lead.request, "PATCH", taskPath, { title: zz("still here") });
+  const renamed = await send(lead.request, "PATCH", taskPath, { title: zz("still here"), expectedUpdatedAt: (await (await lead.request.get(taskPath)).json()).task.updatedAt });
   expect(renamed.status, renamed.text).toBe(200);
   expect(renamed.json?.task).toMatchObject({ title: expect.stringContaining("ZZ-TEST") });
 

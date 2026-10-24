@@ -107,6 +107,6 @@ test.describe("SHO-US-23.4 / APL-2623", () => {
     await expect(admin.page.locator(".chip", { hasText: "Deactivated" })).toBeVisible(SLOW);
     expect((await member.api.get(`/api/team/${p.id}`)).status).toBe(404);
     await member.page.goto(`/team/${p.id}`);
-    await expect(member.page.getByText("This person was not found.")).toBeVisible(SLOW);
+    await expect(member.page.getByRole("alert").filter({ hasText: /^Not found$/ })).toBeVisible(SLOW);
   });
 });

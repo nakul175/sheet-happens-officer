@@ -1,3 +1,4 @@
+import { isTooOldToUndo, trashPurgeBefore } from "../../../src/lib/undoable";
 // APL-2502 · SHO-US-6.1 Delete a task to Trash
 // Acceptance criteria: AC1 delete with subtasks, toast offers Undo; AC2 30-day purge; AC3 Viewer refused;
 // AC4 people on the task are notified; AC5 Leader restores to the original Section.
@@ -86,10 +87,14 @@ test("APL-2502 AC2: purge-trash removes a task that has been in Trash for 30 day
 test("APL-2502 AC2: purge-trash keeps a task for 30 days before it removes it @static", async () => {
   test.info().annotations.push({ type: "qa:TC", description: "qa:TC missing" });
   const body = sourceOf("src/lib/tasks.ts", "export async function purgeTrash", "export async function myTasks");
-  expect(body).toContain("const cutoff = new Date(now.getTime() - 30 * 86400_000)");
-  expect(body).toContain("deletedAt: { lte: cutoff }");
+  const now = Date.UTC(2026, 9, 24);
+  const exact = now - 30 * 24 * 60 * 60 * 1000;
+  expect(trashPurgeBefore(now).getTime()).toBe(exact);
+  expect(isTooOldToUndo(exact, now)).toBe(false);
+  expect(isTooOldToUndo(exact - 1, now)).toBe(true);
+  expect(body).toContain("deletedAt: { lt: trashPurgeBefore(now) }");
   expect(body).toContain('event: "TASK_PURGED"');
-  expect(sourceOf("src/lib/jobs.ts", "export const JOBS", "const DAILY_GRACE_HOURS")).toContain('name: "purge-trash", about: "Removes tasks that have been in Trash for 30 days"');
+  expect(sourceOf("src/lib/jobs.ts", "export const JOBS", "const DAILY_GRACE_HOURS")).toContain('name: "purge-trash", about: "Removes tasks that have been in Trash for more than 30 days, and soft-deleted comments once they are older than 30 days"');
 });
 
 // qa:TC missing

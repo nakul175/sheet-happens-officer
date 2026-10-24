@@ -123,11 +123,12 @@ test.describe("qa:TC missing APL-2555 the task panel is a full-screen sheet on a
       await page.goto(`/projects/${projectId}?task=${taskId}`, { waitUntil: "load" });
       const dialog = page.getByRole("dialog", { name: "Task" });
       await expect(dialog).toBeVisible();
+      await expect(dialog.getByLabel("Title")).toBeEditable();
       const fit = await dialog.evaluate((el) => {
         const vv = window.visualViewport?.height ?? window.innerHeight;
-        return { min: parseFloat(getComputedStyle(el).minHeight), vv };
+        return { height: el.getBoundingClientRect().height, vv };
       });
-      expect(Math.abs(fit.min - fit.vv)).toBeLessThanOrEqual(2);
+      expect(Math.abs(fit.height - fit.vv)).toBeLessThanOrEqual(2);
       await expect(dialog.getByRole("button", { name: "Close" })).toBeInViewport();
     } finally { await ctx.close(); }
   });
@@ -180,13 +181,13 @@ test.describe("qa:TC missing APL-2555 the task panel is a full-screen sheet on a
       await scrollClear(desc);
       await desc.focus();
       await page.setViewportSize({ width: 390, height: 380 });
-      const kept = await desc.evaluate((el) => {
+      const kept = () => desc.evaluate((el) => {
         const r = el.getBoundingClientRect();
         const h = window.visualViewport?.height ?? window.innerHeight;
         return r.height > 0 && r.top >= 0 && r.bottom <= h + 1;
       });
       // APL-2709 defect (Linear APL-2709): the sheet does not follow visualViewport, and the footer is not pinned in that area.
-      expect(kept, "APL-2709 APL-2555 defect: with the visible area shortened to 380 px (the keyboard), the focused description is outside it").toBe(true);
+      await expect.poll(kept, { message: "APL-2709 APL-2555 defect: with the visible area shortened to 380 px (the keyboard), the focused description is outside it" }).toBe(true);
       await expect(desc).toBeInViewport();
       await expect(dialog.getByRole("button", { name: "Close" })).toBeInViewport();
       await expect(dialog.getByRole("button", { name: "Mark complete" })).toBeInViewport();

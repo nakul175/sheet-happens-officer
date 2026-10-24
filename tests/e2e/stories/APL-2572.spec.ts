@@ -29,14 +29,14 @@ test("AC1: opening the bell leaves 5 unread items unread and the badge stays", t
   expect(before).toBeGreaterThanOrEqual(5);
   const p = member.page;
   await p.goto("/");
-  await expect(bell(p)).toHaveAttribute("aria-label", new RegExp(`${before} unread`));
+  await expect(bell(p)).toHaveAttribute("aria-label", `Notifications, ${before > 99 ? "99+" : before} unread`);
   await bell(p).click();
   const panel = p.getByRole("dialog", { name: "Notifications" });
   const row = panel.getByRole("link", { name: `${zz("triage-open")} 0` });
   await expect(row).toBeVisible();
   await expect(row.getByRole("img", { name: "Unread" })).toBeVisible();
   await expect.poll(() => unread(member)).toBe(before);
-  await expect(bell(p)).toHaveAttribute("aria-label", new RegExp(`${before} unread`));
+  await expect(bell(p)).toHaveAttribute("aria-label", `Notifications, ${before > 99 ? "99+" : before} unread`);
 });
 
 test("AC2: clicking an item opens its task and marks it read", tag("APL-2572 AC2"), async ({ admin, member, later }) => {
