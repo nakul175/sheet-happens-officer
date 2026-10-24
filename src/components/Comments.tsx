@@ -86,7 +86,7 @@ export function Comments({ taskId, onChanged }: { taskId: string; onChanged?: ()
   const data = list.data;
   return (
     <section className="comments" aria-labelledby="comments-heading">
-      <h3 id="comments-heading">Comments{data ? ` (${data.comments.length})` : ""}</h3>
+      <h2 id="comments-heading">Comments{data ? ` (${data.comments.length})` : ""}</h2>
       {list.loading && !data && <p className="hint">Loading comments…</p>}
       {list.error && !data && <p className="hint" role="alert">{list.error}</p>}
       {data && data.comments.length === 0 && <p className="hint">No comments yet.</p>}

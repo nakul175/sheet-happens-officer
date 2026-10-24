@@ -137,7 +137,7 @@ textarea.in.blocked-reason { display: block; margin-top: 6px; min-height: 0; lin
 .sub-item { display: flex; gap: 10px; align-items: center; padding: 6px 0; border-bottom: 1px solid var(--line); }
 .box { border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; margin-top: 14px; background: #fafbfc; }
 .comments { margin-top: 18px; }
-.comments h3 { font-size: 15px; margin: 0 0 8px; }
+.comments h2 { font-size: 15px; margin: 0 0 8px; }
 .comment { padding: 10px 0; border-top: 1px solid var(--line); }
 .comment-meta { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
 .comment-text { margin: 4px 0; white-space: pre-wrap; overflow-wrap: anywhere; }
