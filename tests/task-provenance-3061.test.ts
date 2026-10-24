@@ -1,0 +1,13 @@
+import {beforeEach,expect,it,vi} from 'vitest';
+const m=vi.hoisted(()=>({db:{task:{findUnique:vi.fn(),findMany:vi.fn()},section:{findUniqueOrThrow:vi.fn()},user:{findUnique:vi.fn()}},access:vi.fn()}));
+vi.mock('@/lib/db',()=>({db:m.db}));
+vi.mock('@/lib/access',async original=>({...await original<typeof import('@/lib/access')>(),projectAccess:m.access}));
+vi.mock('@/lib/records',()=>({linksOfTask:vi.fn().mockResolvedValue([])}));
+import {getTask} from '@/lib/tasks';
+import {notFound} from '@/lib/http';
+const createdAt=new Date('2026-10-24T00:00:00Z');
+const actor={id:'reader',workspaceId:'ws',orgRole:'MEMBER' as const};
+beforeEach(()=>{vi.clearAllMocks();m.db.task.findUnique.mockResolvedValue({id:'task',projectId:'project',sectionId:'section',parentId:null,createdById:'author',createdAt,deletedAt:null,dueDate:null,assigneeId:'reader',approverId:null,collaborators:[],subtasks:[],assignee:{id:'reader',name:'Reader'},approver:null});m.db.task.findMany.mockResolvedValue([]);m.db.section.findUniqueOrThrow.mockResolvedValue({id:'section',name:'Todo',isDone:false});m.access.mockResolvedValue({role:'VIEWER',project:{id:'project',name:'Project',archivedAt:null}});});
+it.each([null,{name:'Former author',deactivatedAt:new Date('2026-10-24T01:00:00Z')}])('returns safe null creator for missing or deactivated author without changing creation instant',async creator=>{m.db.user.findUnique.mockResolvedValue(creator);const task=await getTask(actor,'task');expect(task.createdBy).toBeNull();expect(task.createdAt).toBe(createdAt);expect(m.db.user.findUnique).toHaveBeenCalledWith({where:{id:'author'},select:{name:true,deactivatedAt:true}});});
+it('active creator presentation never returns private profile fields',async()=>{m.db.user.findUnique.mockResolvedValue({name:'Author',deactivatedAt:null,email:'private@example.invalid',passwordHash:'not-public'});const task=await getTask(actor,'task');expect(task.createdBy).toEqual({name:'Author'});expect(JSON.stringify(task)).not.toContain('private@example.invalid');expect(JSON.stringify(task)).not.toContain('not-public');});
+it('refuses inaccessible task before loading creator identity',async()=>{m.access.mockRejectedValue(notFound('Project'));await expect(getTask(actor,'task')).rejects.toMatchObject({status:404});expect(m.db.user.findUnique).not.toHaveBeenCalled();});

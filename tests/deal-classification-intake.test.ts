@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Prisma } from "@/generated/prisma/client";
 import { dealCreate, dealDetails, taskConvert } from "@/lib/schemas";
 import { ATHENA_ENTITIES, OPPORTUNITY_TYPES, netFeeRevenueUsdField } from "@/lib/deal-classification";
-const m = vi.hoisted(() => ({ db: { user: { findUniqueOrThrow: vi.fn(), findUnique: vi.fn() }, pipeline: { findFirst: vi.fn() }, project: { findFirst: vi.fn(), create: vi.fn(), findUnique: vi.fn(), findMany: vi.fn() }, projectMember: { create: vi.fn() }, section: { create: vi.fn() }, dealDetails: { create: vi.fn(), findUnique: vi.fn(), update: vi.fn() }, dealParty: { create: vi.fn() }, task: { create: vi.fn(), findUnique: vi.fn(), findMany: vi.fn(), groupBy: vi.fn(), update: vi.fn() }, actionLog: { groupBy: vi.fn() }, note: { groupBy: vi.fn() }, taskCollaborator: { deleteMany: vi.fn() }, $transaction: vi.fn() }, access: vi.fn(), requireWrite: vi.fn(), log: vi.fn() }));
+const m = vi.hoisted(() => ({ db: { $queryRaw: vi.fn(), user: { findUniqueOrThrow: vi.fn(), findUnique: vi.fn() }, pipeline: { findFirst: vi.fn() }, project: { findFirst: vi.fn(), create: vi.fn(), findUnique: vi.fn(), findMany: vi.fn() }, projectMember: { create: vi.fn() }, section: { create: vi.fn() }, dealDetails: { create: vi.fn(), findUnique: vi.fn(), update: vi.fn() }, dealParty: { create: vi.fn() }, task: { create: vi.fn(), findUnique: vi.fn(), findMany: vi.fn(), groupBy: vi.fn(), update: vi.fn() }, actionLog: { groupBy: vi.fn() }, note: { groupBy: vi.fn() }, taskCollaborator: { deleteMany: vi.fn() }, $transaction: vi.fn() }, access: vi.fn(), requireWrite: vi.fn(), log: vi.fn() }));
 vi.mock("@/lib/db", () => ({ db: m.db }));
 vi.mock("@/lib/access", () => ({ isActive: () => true, isAdmin: () => false, projectAccess: m.access, requireWrite: m.requireWrite }));
 vi.mock("@/lib/notify", () => ({ auditTx: vi.fn(), logAction: m.log, notify: vi.fn() }));
@@ -15,7 +15,7 @@ const fields = { opportunityType: "RFP_RFA" as const, athenaEntity: "ATHENA_KENY
 const existing = { projectId: "deal", workspaceId: "ws", whyPursue: "Purpose", need: null, serviceLine: null, value: null, currency: null, probability: 40, expectedClose: null, introducedBy: null, submissionDeadline: null, createdAt: new Date(), opportunityType: null, athenaEntity: null, netFeeRevenueUsd: null };
 const create = { name: "Opportunity", organisationId: "org", pipelineId: "pipe", leaderId: "person", whyPursue: "Purpose", nextStep: { title: "Follow up", dueDate: "2026-11-01" } };
 beforeEach(() => {
-  vi.clearAllMocks();
+  vi.clearAllMocks(); m.db.$queryRaw.mockResolvedValue([{pipelineId:"pipe",key:"DEAL_PROACTIVE",stageId:"stage"}]);
   m.db.$transaction.mockImplementation(async (fn) => fn(m.db));
   m.db.user.findUniqueOrThrow.mockResolvedValue({ id: "person", workspaceId: "ws" });
   m.db.user.findUnique.mockResolvedValue({ id: "person", workspaceId: "ws" });
@@ -87,4 +87,22 @@ describe("SHO-3044 / SHO-3049 additive deal classification API", () => {
     m.db.project.findUnique.mockResolvedValue({ ...project, deal: { ...existing } });
     expect((await dealBlock("deal"))?.details).toMatchObject({ opportunityType: null, athenaEntity: null, netFeeRevenueUsd: null });
   });
+});
+it.each(['probability','netFeeRevenueUsd','athenaEntity'])('3049 blocks direct clearing %s at Submitted before update/audit', async key => {
+  m.db.$queryRaw.mockResolvedValue([{pipelineId:'bid',key:'DEAL_BID',stageId:'st_bid_submitted'}]);
+  m.db.dealDetails.findUnique.mockResolvedValue({...existing,probability:0,netFeeRevenueUsd:0,athenaEntity:'ATHENA_INDIA'});
+  await expect(updateDealDetails(actor,'deal',{[key]:null})).rejects.toMatchObject({status:409});
+  expect(m.db.dealDetails.update).not.toHaveBeenCalled(); expect(m.log).not.toHaveBeenCalled();
+});
+it('3049 rejects create or task conversion directly into a configured Submitted first stage without required fields', async () => {
+  m.db.pipeline.findFirst.mockResolvedValue({id:'bid',key:'DEAL_BID',stages:[{id:'st_bid_submitted',requiredFields:[]}]});
+  await expect(createDeal(actor,{...create,submissionDeadline:'2026-11-01'})).rejects.toMatchObject({status:409});
+  m.access.mockResolvedValue({project:{id:'source',typeId:'normal'}});
+  await expect(convertTaskToDeal(actor,'task',{...create,submissionDeadline:'2026-11-01',dueDate:'2026-11-02'})).rejects.toMatchObject({status:409});
+  expect(m.db.project.create).not.toHaveBeenCalled(); expect(m.db.task.update).not.toHaveBeenCalled();
+});
+it('3049 still permits incomplete Bid Leads drafts', async () => {
+  m.db.pipeline.findFirst.mockResolvedValue({id:'bid',key:'DEAL_BID',stages:[{id:'st_bid_identified',requiredFields:[]}]});
+  await createDeal(actor,{...create,submissionDeadline:'2026-11-01'});
+  expect(m.db.project.create).toHaveBeenCalledOnce();
 });

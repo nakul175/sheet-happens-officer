@@ -27,6 +27,11 @@ test("AC1: at 1280 px the shell shows the sidebar, the content and a 340 px conc
   const w = (await dock.boundingBox())!.width;
   expect(Math.round(w)).toBeGreaterThanOrEqual(336);
   expect(Math.round(w)).toBeLessThanOrEqual(344);
+  const main = admin.page.locator("main.content, main#main").first();
+  const before = (await main.boundingBox())!.width;
+  await dock.getByRole("button", { name: "Hide", exact: true }).click();
+  await expect(dock).toHaveCount(0);
+  await expect.poll(async () => (await main.boundingBox())!.width - before).toBeGreaterThanOrEqual(330);
 });
 
 test("AC2: at 390 px the sidebar collapses and no page scrolls sideways", async ({ admin, later }) => {
@@ -47,8 +52,8 @@ test("AC3: the icon-only mark shows at 24 px and the text uses Public Sans", asy
   const img = admin.page.locator(".brand img:visible").first();
   await expect(img).toHaveAttribute("src", "/logo-icon.svg");
   const box = (await img.boundingBox())!;
-  expect(Math.round(box.width)).toBeGreaterThanOrEqual(24);
-  expect(Math.round(box.width)).toBeLessThanOrEqual(36);
+  expect(Math.round(box.width)).toBe(24);
+  expect(Math.round(box.height)).toBe(24);
   const svg = await admin.page.request.get("/logo-icon.svg");
   expect(svg.status()).toBe(200);
   const font = await admin.page.evaluate(() => getComputedStyle(document.body).fontFamily);
@@ -98,4 +103,22 @@ test("AC5: the bell shows the unread count, lists notices newest first with link
   expect((await member.api.get("/api/notifications")).json.unread).toBe(count);
   await rows.first().click();
   await expect.poll(async () => (await member.api.get("/api/notifications")).json.unread).toBe(count - 1);
+});
+
+
+test("AC5: 100 unread caps the visible badge at 99+ and refreshes after 60 seconds", async ({ admin, member, later }) => {
+  const p = await proj(admin, "shell-refresh", later);
+  expect((await admin.api.post(`/api/projects/${p}/members`, { userId: member.user.id, role: "EDITOR" })).status).toBe(201);
+  await member.api.post("/api/notifications/read-all");
+  await member.page.clock.install();
+  await member.page.goto("/");
+  await expect(member.page.getByRole("button", { name: "Notifications", exact: true })).toBeVisible();
+  for (let i = 0; i < 100; i++) {
+    expect((await admin.api.post(`/api/projects/${p}/tasks`, { title: zz(`refresh ${i}`), assigneeId: member.user.id })).status).toBe(201);
+  }
+  expect((await member.api.get("/api/notifications")).json.unread).toBe(100);
+  const refresh = member.page.waitForResponse(r => r.url().includes("/api/notifications") && r.request().method() === "GET");
+  await member.page.clock.fastForward(60_001);
+  await refresh;
+  await expect(member.page.getByRole("button", { name: /^Notifications/ })).toContainText("99+");
 });

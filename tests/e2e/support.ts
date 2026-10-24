@@ -115,14 +115,20 @@ export const test = base.extend<Fixtures>({
   admin: async ({ browser }, use) => {
     const s = await as(browser, "ADMIN");
     await use({ page: s.page, api: s.api, user: s.user });
-    await s.ctx.close();
+    try {
+      const signedOut = await s.ctx.request.post("/api/auth/signout");
+      expect(signedOut.ok(), "Owned browser session must sign out before context closes").toBe(true);
+    } finally { await s.ctx.close(); }
   },
   member: async ({ browser }, use) => {
     // No skip: the harness never skips (even the SHO_QA_PASS gate in qa-alias gateFile throws). A missing account fails loudly.
     if (!hasMember()) throw new Error("Needs SHO_MEMBER_EMAIL and SHO_MEMBER_PASS (a plain Member account on staging).");
     const s = await as(browser, "MEMBER");
     await use({ page: s.page, api: s.api, user: s.user });
-    await s.ctx.close();
+    try {
+      const signedOut = await s.ctx.request.post("/api/auth/signout");
+      expect(signedOut.ok(), "Owned browser session must sign out before context closes").toBe(true);
+    } finally { await s.ctx.close(); }
   },
   later: async ({}, use) => {
     const fns: (() => Promise<unknown>)[] = [];

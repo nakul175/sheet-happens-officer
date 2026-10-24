@@ -1,3 +1,4 @@
+import { assertBidSubmissionFields, guardBidSubmissionWrite } from "@/lib/bid-submission-policy";
 import { parseSubmissionDeadline, serializeSubmissionDeadline } from "@/lib/submission-deadline";
 // SHO-E10 and SHO-E12: Deals are projects of type Deal. This file holds creation, stages, details,
 // next step and stalled logic. Access is still project membership (src/lib/access.ts).
@@ -95,6 +96,7 @@ export async function createDeal(
   const { value, currency } = normaliseValue(input.value, input.currency);
   const probability = checkProbability(input.probability);
   const classifications = classification(input);
+  assertBidSubmissionFields(pipeline.key, first.id, { ...input, probability, ...classifications });
 
   // project-lookup-ok: Workspace-wide duplicate confirmation for the supplied name and buyer, after requireCrm; includes archived deals.
   const dup = await db.project.findFirst({
@@ -196,7 +198,8 @@ export async function moveStage(user: Actor, projectId: string, input: { stageId
   }
 
   return db.$transaction(async (tx) => {
-    if (input.fields && Object.keys(stripUndefined(input.fields)).length) await applyDetails(tx, projectId, input.fields, details);
+    const fresh = await guardBidSubmissionWrite(tx, projectId, input.fields ?? {}, stage.id, a.project.pipelineId);
+    if (input.fields && Object.keys(stripUndefined(input.fields)).length) await applyDetails(tx, projectId, input.fields, fresh);
     const stagePatch = { stageId: stage.id, stageReason: reason, stageChangedAt: new Date() };
     if (stage.category === "DELIVERY") {
       // Do not let a concurrent commercial move turn an earlier Won read into a delivery bypass.
@@ -305,6 +308,8 @@ export async function removeStage(user: Actor, stageId: string, input: { moveTo?
     // keeps a deal from losing it.
     const locked = await tx.$queryRaw<{ id: string }[]>`SELECT "id" FROM "Stage" WHERE "id" = ${stage.id} FOR UPDATE`;
     if (!locked.length) throw notFound("Stage");
+    const affected = await tx.project.findMany({ where: { stageId: stage.id }, select: { id: true }, orderBy: { id: "asc" } });
+    for (const project of affected) await guardBidSubmissionWrite(tx, project.id, {}, target.id, stage.pipeline.id);
     // A reason was given for the removed stage. It carries over only to a stage that also asks for one.
     const moved = await tx.project.updateMany({
       where: { stageId: stage.id },
@@ -331,6 +336,7 @@ export async function updateDealDetails(user: Actor, projectId: string, input: D
   if (!Object.keys(data).length) return;
   const before = detailsState(cur);
   await db.$transaction(async (tx) => {
+    await guardBidSubmissionWrite(tx, projectId, data);
     const next = await tx.dealDetails.update({ where: { projectId }, data });
     const after = detailsState(next);
     const keys = (Object.keys(after) as (keyof typeof after)[]).filter((k) => JSON.stringify(before[k]) !== JSON.stringify(after[k]));
@@ -523,6 +529,7 @@ export async function convertTaskToDeal(user: Actor, taskId: string, input: Conv
   if (pipeline?.key === "DEAL_BID" && !input.submissionDeadline) missing.push("submissionDeadline");
   if (pipeline) {
     const merged: Record<string, unknown> = { ...input, whyPursue: why };
+    assertBidSubmissionFields(pipeline.key, pipeline.stages[0].id, merged);
     for (const k of missingFields(pipeline.stages[0].requiredFields, merged)) if (!missing.includes(k)) missing.push(k);
   }
   if (missing.length) throw new ApiError(400, `Fill in ${missing.join(", ")} first.`, { needsFields: missing });

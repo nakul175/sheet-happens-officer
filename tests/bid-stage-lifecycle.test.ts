@@ -1,6 +1,6 @@
 import { beforeEach, expect, it, vi } from "vitest";
 import { ApiError } from "@/lib/http";
-const m = vi.hoisted(() => ({ db: { stage: { findFirst: vi.fn(), findUnique: vi.fn() }, pipeline: { findUnique: vi.fn(), findMany: vi.fn() }, project: { update: vi.fn(), updateMany: vi.fn(), findMany: vi.fn(), findUniqueOrThrow: vi.fn() }, task: { findMany: vi.fn(), groupBy: vi.fn() }, dealDetails: { findUnique: vi.fn() }, actionLog: { groupBy: vi.fn(), findUnique: vi.fn(), update: vi.fn() }, note: { groupBy: vi.fn() }, $transaction: vi.fn() }, access: vi.fn(), write: vi.fn(), notify: vi.fn(), log: vi.fn(), audit: vi.fn() }));
+const m = vi.hoisted(() => ({ db: { $queryRaw: vi.fn(), stage: { delete: vi.fn(), findFirst: vi.fn(), findUnique: vi.fn() }, pipeline: { findUnique: vi.fn(), findMany: vi.fn() }, project: { count: vi.fn(), update: vi.fn(), updateMany: vi.fn(), findMany: vi.fn(), findUniqueOrThrow: vi.fn() }, task: { findMany: vi.fn(), groupBy: vi.fn() }, dealDetails: { findUnique: vi.fn() }, actionLog: { groupBy: vi.fn(), findUnique: vi.fn(), update: vi.fn() }, note: { groupBy: vi.fn() }, $transaction: vi.fn() }, access: vi.fn(), write: vi.fn(), notify: vi.fn(), log: vi.fn(), audit: vi.fn() }));
 vi.mock("@/lib/db", () => ({ db: m.db }));
 vi.mock("@/lib/access", () => ({ projectAccess: m.access, requireWrite: m.write, isActive: () => true, isAdmin: () => false }));
 vi.mock("@/lib/crm", () => ({ WORKSTREAM_DEAL: "wst_deal", requireCrm: () => {}, crmMode: () => "all", crmVisible: () => true, crmProjectWhere: () => ({}) }));
@@ -14,7 +14,7 @@ import { undoAction } from "@/lib/undo";
 const user = { id: "me", orgRole: "MEMBER" as const };
 const access = () => ({ role: "LEADER", project: { id: "deal", typeId: "wst_deal", pipelineId: "pl_bid", stageId: "st_bid_won", members: [{ role: "LEADER", userId: "me" }] } });
 const delivery = { id: "st_bid_ongoing", name: "Ongoing Projects", category: "DELIVERY", isRetired: false, requiredFields: [], needsReason: false };
-beforeEach(() => { vi.resetAllMocks(); m.access.mockResolvedValue(access()); m.db.stage.findFirst.mockResolvedValue(delivery); m.db.stage.findUnique.mockResolvedValue({ id: "st_bid_won", category: "DONE" }); m.db.pipeline.findUnique.mockResolvedValue({ key: "DEAL_BID" }); m.db.dealDetails.findUnique.mockResolvedValue({}); m.db.$transaction.mockImplementation(async (fn) => fn(m.db)); m.db.project.updateMany.mockResolvedValue({ count: 1 }); m.db.task.findMany.mockResolvedValue([]); m.db.task.groupBy.mockResolvedValue([]); m.db.actionLog.groupBy.mockResolvedValue([]); m.db.note.groupBy.mockResolvedValue([]); });
+beforeEach(() => { vi.resetAllMocks(); m.db.$queryRaw.mockResolvedValue([{pipelineId:"pl_bid",key:"DEAL_BID",stageId:"st_bid_won"}]); m.access.mockResolvedValue(access()); m.db.stage.findFirst.mockResolvedValue(delivery); m.db.stage.findUnique.mockResolvedValue({ id: "st_bid_won", category: "DONE" }); m.db.pipeline.findUnique.mockResolvedValue({ key: "DEAL_BID" }); m.db.dealDetails.findUnique.mockResolvedValue({probability:0,netFeeRevenueUsd:0,athenaEntity:"ATHENA_INDIA"}); m.db.$transaction.mockImplementation(async (fn) => fn(m.db)); m.db.project.updateMany.mockResolvedValue({ count: 1 }); m.db.task.findMany.mockResolvedValue([]); m.db.task.groupBy.mockResolvedValue([]); m.db.actionLog.groupBy.mockResolvedValue([]); m.db.note.groupBy.mockResolvedValue([]); });
 it("permits Won→Bid delivery without closing or mutating follow-up tasks", async () => { await moveStage(user, "deal", { stageId: delivery.id }); expect(m.db.project.updateMany).toHaveBeenCalledWith(expect.objectContaining({ where: { id: "deal", pipelineId: "pl_bid", stageId: "st_bid_won" }, data: expect.objectContaining({ stageId: delivery.id }) })); expect(m.db.task.findMany).not.toHaveBeenCalled(); expect(m.audit).not.toHaveBeenCalled(); });
 it("refuses lead→delivery and Proactive delivery", async () => { m.db.stage.findUnique.mockResolvedValue({ id: "st_bid_identified", category: "ACTIVE" }); await expect(moveStage(user, "deal", { stageId: delivery.id })).rejects.toMatchObject({ status: 409 }); m.db.pipeline.findUnique.mockResolvedValue({ key: "DEAL_PROACTIVE" }); await expect(moveStage(user, "deal", { stageId: delivery.id })).rejects.toMatchObject({ status: 400 }); expect(m.db.project.update).not.toHaveBeenCalled(); });
 it("refuses retired moves even when already current, and preserves retired deletion targets", async () => { m.db.stage.findFirst.mockResolvedValue({ ...delivery, id: "legacy", isRetired: true }); await expect(moveStage(user, "deal", { stageId: "legacy" })).rejects.toMatchObject({ status: 400 }); await expect(removeStage({ ...user, orgRole: "SUPER_ADMIN" }, "legacy", {})).rejects.toMatchObject({ status: 409 }); });
@@ -37,10 +37,26 @@ it("refuses a normal stage move prepared before a concurrent pipeline conversion
 
 it("refuses stage Undo prepared before a concurrent pipeline conversion", async () => {
   m.db.actionLog.findUnique.mockResolvedValue({ id: "action", projectId: "deal", actorId: "me", action: "deal.stage_changed", targetId: "deal", targetType: "deal", beforeState: { stageId: "earlier", stage: "Earlier" }, afterState: { stageId: "later", stage: "Later" }, createdAt: new Date(), undoneAt: null });
+  m.db.$queryRaw.mockResolvedValue([{pipelineId:"pro",key:"DEAL_PROACTIVE",stageId:"later"}]);
   m.db.project.findUniqueOrThrow.mockResolvedValue({ id: "deal", pipelineId: "pro", stageId: "later", name: "Deal" });
   m.db.stage.findFirst.mockResolvedValue({ id: "earlier", pipelineId: "pro" });
   m.db.project.update.mockRejectedValueOnce({ code: "P2025" });
   await expect(undoAction(user, "action")).rejects.toMatchObject({ status: 409 });
   expect(m.db.project.update).toHaveBeenCalledWith(expect.objectContaining({ where: { id: "deal", pipelineId: "pro" } }));
   expect(m.db.actionLog.update).not.toHaveBeenCalled();
+});
+it('3049 refuses Submitted with incomplete fresh details and preserves stage/notifications', async () => {
+  m.db.stage.findFirst.mockResolvedValue({...delivery,id:'st_bid_submitted',category:'ACTIVE'});
+  m.db.dealDetails.findUnique.mockResolvedValue({probability:null,netFeeRevenueUsd:0,athenaEntity:'ATHENA_INDIA'});
+  await expect(moveStage(user,'deal',{stageId:'st_bid_submitted'})).rejects.toMatchObject({status:409});
+  expect(m.db.project.update).not.toHaveBeenCalled(); expect(m.notify).not.toHaveBeenCalled();
+});
+it('3049 admin stage removal cannot bulk-remap incomplete drafts to Submitted',async()=>{
+  const target={id:'st_bid_submitted',name:'Submitted',category:'ACTIVE',requiredFields:[],needsReason:false,isRetired:false};
+  const source={...target,id:'custom-draft',name:'Draft',pipeline:{id:'pl_bid',name:'Bid',stages:[target]}};
+  m.db.stage.findFirst.mockResolvedValue(source);m.db.project.count.mockResolvedValue(1);m.db.project.findMany.mockResolvedValue([{id:'deal'}]);
+  m.db.$queryRaw.mockResolvedValueOnce([{id:'custom-draft'}]).mockResolvedValueOnce([{pipelineId:'pl_bid',key:'DEAL_BID',stageId:'custom-draft'}]);
+  m.db.dealDetails.findUnique.mockResolvedValue({probability:null,netFeeRevenueUsd:null,athenaEntity:null});
+  await expect(removeStage({...user,orgRole:'SUPER_ADMIN'},'custom-draft',{moveTo:'st_bid_submitted'})).rejects.toMatchObject({status:409});
+  expect(m.db.project.updateMany).not.toHaveBeenCalled();expect(m.db.stage.delete).not.toHaveBeenCalled();expect(m.audit).not.toHaveBeenCalled();
 });

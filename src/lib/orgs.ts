@@ -106,6 +106,21 @@ export async function updateOrganisation(user: Actor, id: string, input: Partial
     set("parentId", input.parentId, org.parentId);
   }
   if (!Object.keys(data).length) return org;
+  // Editing or moving an account must retain the create flow's same-parent,
+  // case-insensitive duplicate guard. Unchanged names remain editable, including
+  // duplicates that were deliberately confirmed when they were created.
+  if ("name" in data || "parentId" in data) {
+    const dup = await db.organisation.findFirst({
+      where: {
+        workspaceId: org.workspaceId,
+        parentId: input.parentId === undefined ? org.parentId : input.parentId,
+        id: { not: id },
+        name: { equals: "name" in data ? String(data.name) : org.name, mode: "insensitive" },
+      },
+      select: { id: true, name: true },
+    });
+    if (dup) throw new ApiError(409, `An organisation called "${dup.name}" already exists here.`);
+  }
   return db.$transaction(async (tx) => {
     const row = await tx.organisation.update({ where: { id }, data });
     await logAction(tx, { actorId: user.id, projectId: null, targetType: "organisation", targetId: id, action: "organisation.updated", before, after });

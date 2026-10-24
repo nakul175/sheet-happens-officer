@@ -21,7 +21,7 @@ export type DealBlock = {
 };
 
 export const money = (v: number | null, c: string | null) => (v === null ? "No value yet" : `${c ?? ""} ${v.toLocaleString("en-IN")}`.trim());
-const LABELS: Record<string, string> = { value: "Value", currency: "Currency", expectedClose: "Expected close", submissionDeadline: "Submission deadline", probability: "PWin (%)", need: "Need", serviceLine: "Service line", introducedBy: "Introduced by" };
+const LABELS: Record<string, string> = { netFeeRevenueUsd: "NFR (USD)", athenaEntity: "Athena Entity", value: "Value", currency: "Currency", expectedClose: "Expected close", submissionDeadline: "Submission deadline", probability: "PWin (%)", need: "Need", serviceLine: "Service line", introducedBy: "Introduced by" };
 
 export type Blocked = { openTasks: number; tasks: { id: string; title: string; assignee?: string | null }[] };
 
@@ -104,7 +104,7 @@ export function StageDialog({ projectId, stage, deal, initial, onClose, onDone }
     const f: Record<string, unknown> = {};
     for (const k of ask) {
       const raw = fields[k]; if (raw === undefined || raw === "") continue;
-      f[k] = k === "value" || k === "probability" ? Number(raw) : raw;
+      f[k] = k === "value" || k === "probability" || k === "netFeeRevenueUsd" ? Number(raw) : raw;
     }
     if (Object.keys(f).length) body.fields = f;
     const r = await api("POST", `/api/projects/${projectId}/stage`, body);
@@ -126,7 +126,8 @@ export function StageDialog({ projectId, stage, deal, initial, onClose, onDone }
         <Field key={k} label={`${LABELS[k] ?? k} (required)`}>
           {(id) => k === "currency"
             ? <select id={id} className="in" value={fields[k] ?? ""} onChange={(e) => setFields({ ...fields, [k]: e.target.value })}><option value="">Choose</option><option>INR</option><option>USD</option><option>EUR</option></select>
-            : <input id={id} className="in" type={k === "value" || k === "probability" ? "number" : k.includes("Close") || k.includes("Deadline") ? "date" : "text"} value={fields[k] ?? ""} onChange={(e) => setFields({ ...fields, [k]: e.target.value })} />}
+            : k === "athenaEntity" ? <select id={id} className="in" value={fields[k] ?? ""} onChange={(e) => setFields({ ...fields, [k]: e.target.value })}><option value="">Choose</option>{ATHENA_ENTITIES.map(entity => <option key={entity.value} value={entity.value}>{entity.label}</option>)}</select>
+            : <input id={id} className="in" step={k === "netFeeRevenueUsd" ? "0.01" : undefined} type={k === "value" || k === "probability" || k === "netFeeRevenueUsd" ? "number" : k.includes("Close") || k.includes("Deadline") ? "date" : "text"} value={fields[k] ?? ""} onChange={(e) => setFields({ ...fields, [k]: e.target.value })} />}
         </Field>
       ))}
       {(blocked || problem) && (

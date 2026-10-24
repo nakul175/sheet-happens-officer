@@ -2,7 +2,7 @@
 // A hidden deal, an archived project, and a project the person is not in are the same 404 "Project not found".
 // The name never reaches the response or the stored chat, which is the history the next model request would send.
 // Each test checks at run time (tests/e2e/helpers/jim-gate.ts) that the concierge is on, which CRM_VISIBLE mode staging runs,
-// and that PR #10 is live; it skips with the reason otherwise. CRM_VISIBLE is a server setting the browser cannot change,
+// and that PR #10 behavior is present; a missing behavior fails acceptance. CRM_VISIBLE is a server setting the browser cannot change,
 // and under `off` every CRM route is "not found", so no deal can be made: those cases stay skipped here
 // and are covered by tests/crm-visible-quick.test.ts and tests/crm-visible-quick-http.test.ts (PR #10).
 // Deals and organisations are ZZ-TEST and archived afterwards; the concierge chats are cleared (helpers/jim-http.ts cleanChat).
@@ -40,12 +40,12 @@ async function storedDelta(who: Who, before: Set<string>) {
 
 const chatIds = async (who: Who) => new Set((await chatMessages(who)).map((m) => m.id));
 
-// File-level skip. Runs before the admin fixture, which throws "Set SHO_ADMIN_EMAIL" when that variable is unset.
+// Fail missing runtime credentials before any fixture can run; never silently omit acceptance.
 test.beforeAll(() => {
-  test.skip(!process.env.SHO_QA_PASS, "Set SHO_QA_PASS (the password for nakul17+ aliases).");
+  if (!process.env.SHO_QA_PASS?.trim()) throw new Error("Set SHO_QA_PASS at runtime; APL-2646 acceptance cannot run without it.");
 });
 
-/** Skips unless the concierge is on and PR #10 is live. Hidden-deal cases also need CRM_VISIBLE=admins. */
+/** Mode-specific cases require their runtime matrix; missing security behavior is a failure. */
 async function ready(admin: Who, member: Who, later: Later, opts: { admins?: boolean } = {}) {
   const c = await conciergeLive(admin);
   test.skip(!c.live, conciergeOff(c));
@@ -55,7 +55,7 @@ async function ready(admin: Who, member: Who, later: Later, opts: { admins?: boo
     test.skip(mode !== "admins", NEEDS_MODE("admins", mode));
   }
   const gate = await prLive(10, admin, member, later);
-  test.skip(!gate.deployed, notLive(gate, WHY));
+  expect(gate.deployed, notLive(gate, WHY)).toBe(true);
   return mode;
 }
 

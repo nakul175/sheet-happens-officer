@@ -25,3 +25,26 @@ it("warns without blocking creation when optional subtask due date exceeds paren
   mock.task = { ...mock.task, parentId: "parent", parentDueDate: "2026-10-24" }; render(); expect(document.body.textContent).toContain("This subtask is due after its parent task."); expect(document.querySelector<HTMLInputElement>('[aria-label="Due date"]')).not.toBeNull(); });
 it("does not offer write controls to Viewers", () => { mock.role = "VIEWER"; render(); expect(document.querySelector('[aria-label="Subtask assignee"]')).toBeNull(); expect(document.querySelector('[aria-label="Add a collaborator"]')).toBeNull(); });
 it("Editors can use existing member controls but cannot search or add workspace people", () => { mock.role = "EDITOR"; render(); expect(document.querySelector('[aria-label="Assignee"]')).not.toBeNull(); expect(document.querySelector('[aria-label="Search workspace assignees"]')).toBeNull(); expect(document.querySelector('[aria-label="Search workspace collaborators"]')).toBeNull(); });
+it("edits child date and assignee in parent context using the child version", async () => {
+  mock.task.subtaskList = [{ id: "child", title: "Child", completedAt: null, canClose: true, updatedAt: "child-version", dueDate: "2026-10-26", assignee: { id: "me", name: "Leader" }, awaitingApproval: false, approver: null }];
+  render();
+  const date = document.querySelector<HTMLInputElement>('[aria-label="Due date for Child"]');
+  expect(date).not.toBeNull();
+  expect(document.body.textContent).toContain("This subtask is due after its parent task.");
+  await act(async () => { date!.value = ""; date!.dispatchEvent(new FocusEvent("focusout", { bubbles: true })); });
+  expect(mock.api).toHaveBeenCalledWith("PATCH", "/api/tasks/child", { dueDate: null, expectedUpdatedAt: "child-version" });
+  const owner = document.querySelector<HTMLSelectElement>('[aria-label="Assignee for Child"]')!;
+  expect(Array.from(owner.options, o => o.value)).toEqual(["me", "editor"]);
+  await act(async () => { owner.value = "editor"; owner.dispatchEvent(new Event("change", { bubbles: true })); });
+  expect(mock.api).toHaveBeenCalledWith("POST", "/api/tasks/child/assign", { assigneeId: "editor", expectedUpdatedAt: "child-version" });
+  mock.role = "VIEWER"; render(); expect(document.querySelector<HTMLInputElement>('[aria-label="Due date for Child"]')!.disabled).toBe(true); expect(document.querySelector<HTMLSelectElement>('[aria-label="Assignee for Child"]')!.disabled).toBe(true);
+});
+it("re-evaluates persisted child warnings and does not enable an awaiting approver", () => {
+  const child = { id: "child", title: "Child", completedAt: null, canClose: true, updatedAt: "v", dueDate: "2026-10-26", assignee: { id: "editor", name: "Editor" }, awaitingApproval: true, approver: { id: "me", name: "Me" } };
+  mock.role = "EDITOR"; mock.task.subtaskList = [child]; render();
+  expect(document.querySelector<HTMLInputElement>('[aria-label="Due date for Child"]')!.disabled).toBe(true);
+  expect(document.querySelector<HTMLSelectElement>('[aria-label="Assignee for Child"]')!.disabled).toBe(true);
+  expect(document.body.textContent).toContain("You can still edit it.");
+  mock.task.dueDate = null; render(); expect(document.body.textContent).not.toContain("You can still edit it.");
+  mock.task.dueDate = "2026-10-25"; mock.task.subtaskList = [{ ...child, dueDate: null }]; render(); expect(document.body.textContent).not.toContain("You can still edit it.");
+});

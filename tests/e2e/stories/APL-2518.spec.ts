@@ -1,21 +1,34 @@
 // SHO-US-9.1 Provider-agnostic model wrapper (APL-2518).
-// One test per acceptance criterion. AC1, AC2 and AC4 need a server setting or a forced provider failure, which a browser
-// session cannot raise, so they skip with the reason. AC3 runs only when MODEL_DATA_APPROVED is off. AC5 sends one short prompt
+// AC1, AC2 and AC4 run the real wrapper/engine against a controlled provider and local database.
+// The named-suite guard refuses remote targets; these are component evidence, never a live-provider/staging claim. AC5 sends one short prompt
 // and checks the endpoints a session can read, other than the person's own chat.
 import { test, expect, zz } from "../support";
 import { cleanChat } from "../helpers/jim-http";
 import { conciergeLive, conciergeOff } from "../helpers/jim-gate";
 import { ask, requireModel, showConcierge } from "../helpers/jim-concierge";
+import { runVitest, type SuiteReport } from "../helpers/named-suite";
 
 test.describe.configure({ timeout: 150_000 });
 test.use({ viewport: { width: 1440, height: 900 } });
 
+let wrapperSuite: Promise<SuiteReport> | undefined;
+async function wrapperEvidence(title: string) {
+  test.info().annotations.push({ type: "evidence-scope", description: "Real wrapper and engine with controlled provider, local database only; not live-provider acceptance." });
+  wrapperSuite ??= runVitest(["tests/concierge-limits.test.ts"]);
+  const report = await wrapperSuite;
+  const matching = report.testResults.flatMap((f) => f.assertionResults).filter((r) => r.fullName.includes(title));
+  expect(matching, `named behavioral test exists: ${title}`).toHaveLength(1);
+  expect(matching[0].status).toBe("passed");
+}
+
 test("AC1: changing the configured model leaves the concierge working with no code change", async () => {
-  test.skip(true, "The model name is the server setting MODEL_NAME. A browser session cannot change it, and these tests do not restart staging.");
+  test.setTimeout(180_000);
+  await wrapperEvidence("the usage record shows the configured model, so a swap needs no code");
 });
 
 test("AC2: a message uses the default small model and the usage record shows that name", async () => {
-  test.skip(true, "The usage screen and /api/usage show counts and cost only. They do not include the model name on each record, and a browser session cannot read the usage table. tests/concierge-limits.test.ts covers the recorded model name.");
+  test.setTimeout(180_000);
+  await wrapperEvidence("default small model is recorded for a successful message when MODEL_NAME is unset");
 });
 
 test("AC3: while MODEL_DATA_APPROVED is off, nothing is sent to a provider and the concierge says it is not enabled yet", async ({ admin }) => {
@@ -41,7 +54,9 @@ test("AC3: while MODEL_DATA_APPROVED is off, nothing is sent to a provider and t
 });
 
 test("AC4: a provider error is retried once after 2 seconds, then the concierge shows a disabled reason", async () => {
-  test.skip(true, "A browser session cannot make the model provider return an error or time out, so the one retry after 2 seconds cannot be raised here. tests/concierge-limits.test.ts covers that path.");
+  test.setTimeout(180_000);
+  await wrapperEvidence("default two-second retry waits before its only second attempt");
+  await wrapperEvidence("retries once after the delay, then PROVIDER_DOWN; the retry is not counted");
 });
 
 test("AC5: an API key, chat text and task text are not written to the usage, audit or activity the session can read", async ({ admin, later }) => {

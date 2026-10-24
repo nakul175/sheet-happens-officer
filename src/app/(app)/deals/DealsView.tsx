@@ -68,7 +68,7 @@ export default function DealsView() {
           <h2 style={{ fontSize: 18 }}>{group.label} · {group.deals.length} {lifecycle === "delivery" ? "delivery projects" : "deals"}</h2>
           <p className="sub">{lifecycle === "delivery" ? "Delivery only; excluded from sales pipeline counts." : "All shown sales stages, including outcomes."} {t.sums.join(" · ")}{t.unknown > 0 ? ` · ${t.unknown} without value` : ""}</p>
           {group.deals.length === 0 ? <p className="sub">No {group.label} {lifecycle === "delivery" ? "delivery projects" : "deals"}.</p>
-            : view === "board" && !old ? <DealBoard deals={group.deals} stages={cur.stages} lifecycle={lifecycle} bid={cur.key === "DEAL_BID"} onChange={reload} />
+            : view === "board" && !old ? <DealBoard landmarkContext={groups.filter(g => g.deals.length > 0).length > 1 ? `${group.label} ${lifecycle}` : undefined} deals={group.deals} stages={cur.stages} lifecycle={lifecycle} bid={cur.key === "DEAL_BID"} onChange={reload} />
             : <DealList deals={group.deals} />}
         </section>;
       })}

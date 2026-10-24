@@ -86,7 +86,7 @@ function Card({ d, stages, onMove, bid, canMove }: { d: BoardDeal; stages: Board
   );
 }
 
-export function DealBoard({ deals, stages, bid, lifecycle = "all", canMove = true, onChange }: { deals: BoardDeal[]; stages: BoardStage[]; bid: boolean; lifecycle?: DealLifecycle; canMove?: boolean; onChange: () => void }) {
+export function DealBoard({ deals, stages, bid, lifecycle = "all", landmarkContext, canMove = true, onChange }: { deals: BoardDeal[]; stages: BoardStage[]; bid: boolean; lifecycle?: DealLifecycle; landmarkContext?: string; canMove?: boolean; onChange: () => void }) {
   const legacy = deals.filter(d => !d.archived && d.stage?.isRetired && inLifecycle(d, lifecycle));
   const cols = useMemo(() => columnsFor(stages, deals, bid, lifecycle), [stages, deals, bid, lifecycle]);
   const [dialog, setDialog] = useState<null | { deal: BoardDeal; stage: BoardStage; initial?: StageInitial }>(null);
@@ -113,16 +113,16 @@ export function DealBoard({ deals, stages, bid, lifecycle = "all", canMove = tru
   return (
     <>
       {err && <div className="err" role="alert">{err}</div>}
-      {legacy.length > 0 && <section className="card" aria-label="Legacy stage deals" style={{ marginBottom: 12 }}>
+      {legacy.length > 0 && <section className="card" aria-label={landmarkContext ? `Legacy stage deals — ${landmarkContext}` : "Legacy stage deals"} style={{ marginBottom: 12 }}>
         <h3>Legacy stage restored by Undo</h3>
         <p className="sub">These deals retain their historical stage. Move to an active stage to return them to the board.</p>
         {legacy.map(d => <Card key={d.id} d={d} stages={stages} onMove={move} bid={bid} canMove={canMove} />)}
       </section>}
-      <div className="dboard" role="region" aria-label="Deal board" tabIndex={0}>
+      <div className="dboard" role="region" aria-label={landmarkContext ? `Deal board — ${landmarkContext}` : "Deal board"} tabIndex={0}>
         {cols.map((c) => {
           const t = totals(c.deals);
           return (
-            <section key={c.key} className={`dcol${over === c.key ? " over" : ""}`} aria-label={c.title}
+            <section key={c.key} className={`dcol${over === c.key ? " over" : ""}`} aria-label={landmarkContext ? `${c.title} — ${landmarkContext}` : c.title}
               onDragOver={(e) => { if (canMove && c.stages.length) { e.preventDefault(); setOver(c.key); } }} onDragLeave={() => setOver(null)}
               onDrop={(e) => { e.preventDefault(); setOver(null); const id = e.dataTransfer.getData("text/deal"); if (id) drop(c, id); }}>
               <header>

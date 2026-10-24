@@ -2,7 +2,7 @@
 .shell { min-height: 100vh; min-height: 100dvh; display: grid; grid-template-columns: 232px 1fr; }
 .side { background: var(--navy); color: #fff; padding: 20px 14px; display: flex; flex-direction: column; gap: 4px; position: sticky; top: 0; height: 100vh; height: 100dvh; }
 .brand { display: flex; align-items: center; gap: 10px; font-weight: 600; font-size: 15px; line-height: 1.2; padding: 0 8px 18px; color: #fff; text-decoration: none; }
-.brand img { width: 32px; height: 32px; background: #fff; border-radius: 8px; padding: 3px; }
+.brand img { width: 24px; height: 24px; background: #fff; border-radius: 8px; }
 .nav { display: flex; flex-direction: column; gap: 2px; }
 .nav a { color: #d7d9ef; text-decoration: none; padding: 9px 10px; border-radius: 8px; font-size: 14px; font-weight: 500; }
 @media (hover: hover) { .nav a:hover { background: rgba(255,255,255,.08); color: #fff; } }

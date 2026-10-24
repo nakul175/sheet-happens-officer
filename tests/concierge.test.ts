@@ -237,6 +237,7 @@ describe("propose and confirm (8.3)", () => {
     });
     expect(fakeCallCount()).toBe(0);
     expect(await conciergeLogs(lead.id)).toHaveLength(0);
+
     expect(r.messages.some((m) => m.kind === "card")).toBe(false);
     expect((await db.user.findUniqueOrThrow({ where: { id: ed.id } })).deactivatedAt).toBeNull();
   });
@@ -248,7 +249,7 @@ describe("propose and confirm (8.3)", () => {
       r => { expect(lastResultText(r)).toMatch(/screens/); return [say("I deactivated the person.")]; },
     );
     const r = await ask(lead, "Help me manage this person");
-    expect(r.messages[1]).toMatchObject({ kind: "text", text: "Nothing has changed. I cannot change anything without a card you confirm, so tell me which task should change and how, and I will show you the card." });
+    expect(r.messages[1]).toMatchObject({ kind: "text", text: "Nothing has changed. To deactivate a person, open the Team screen. Your permissions are checked there." });
     expect(r.messages.some(m => m.kind === "card")).toBe(false);
     expect(await conciergeLogs(lead.id)).toHaveLength(0);
     expect((await db.user.findUniqueOrThrow({ where: { id: ed.id } })).deactivatedAt).toBeNull();

@@ -21,6 +21,9 @@ export default defineConfig({
     env: { SHO_E2E_START_BASE_URL: startBaseUrl },
     exclude: [
       ...configDefaults.exclude,
+      // SHO-2625 must exercise the exact sho_staging DB guard in its dedicated seeded tier.
+      "tests/purge-zz-test.test.ts",
+      "tests/purge-zz-test-cascade.test.ts",
       "tests/viewport/**",
       "tests/e2e/stories/APL-2669.spec.ts",
       "tests/e2e/stories/APL-2670.spec.ts",
@@ -33,6 +36,7 @@ export default defineConfig({
       "tests/e2e/local/APL-2728.test.ts",
       "tests/e2e/stories/APL-2735.spec.ts",
       "tests/e2e/local/APL-2609.spec.ts",
+      "tests/e2e/owned-local/**", // Explicit Playwright-only owned fixture tier.
       "tests/e2e/stories/**", // every file here is a Playwright story, not Vitest (see the note at the top)
       "e2e/**",
       "scripts/**",

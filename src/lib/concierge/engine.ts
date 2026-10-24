@@ -164,7 +164,7 @@ const NOTHING_CHANGED = "Nothing has changed. I cannot change anything without a
 const UNKNOWN = "I could not work that out. Try asking in a different way.";
 
 
-function buildReply(turn: Turn, modelText: string, request: string): Stored {
+export function buildReply(turn: Turn, modelText: string, request: string): Stored {
   if (turn.card) {
     const c = turn.card;
     return {
@@ -187,6 +187,11 @@ function buildReply(turn: Turn, modelText: string, request: string): Stored {
       };
     }
   }
+  // This is server-owned navigation, not model prose and not a privileged action.
+  // Keep a narrow request boundary: a task title containing "deactivate" is not an intent.
+  if (turn.screen === "team" || /^(?:please\s+)?deactivate\s+(?:the\s+)?(?:person|user|editor|member|admin)\b/i.test(request.trim())) {
+    return { kind: "text", text: "Nothing has changed. To deactivate a person, open the Team screen. Your permissions are checked there." };
+  }
   const r = turn.reads;
   if (r.calls > 0 && r.records === 0) {
     // Nothing was fetched: never let the model's own words stand in for data (SHO-US-8.2 AC2, AC4).
@@ -206,49 +211,19 @@ function buildReply(turn: Turn, modelText: string, request: string): Stored {
   // happened), and `turn.needsWho` covers a model that did call one and was refused for naming no person. Reading
   // needsWho is what makes that refusal signal load-bearing instead of write-only state.
   if (turn.needsWho || asksForAssign(request)) return whoQuestion(request);
-  // SHO-2693 w148: this line is the invariant, and it is about the TURN, not the request. Reaching here means turn.card
-  // was never set, and tools.ts sets `ops` and `card` together (propose_changes), so no proposal exists either; a
-  // "result" row is written only by cards.ts when a card is confirmed, which is a different turn. So nothing was
-  // written, and a sentence that says otherwise is a lie whatever wording asked for it. asksForAssign above is only a
-  // nicer question (it knows the missing value is the person); it is not what makes this branch safe. No further
-  // widening of that keyword is needed, and none would help.
-  //
-  // SHO-2693 w164: the guarantee is the STATE OF THE TURN, not a vocabulary. w164 showed that `claimsWrite` (the
-  // blacklist this line used to consult, src/lib/concierge/claims.ts, now deleted) relayed "I've handled that for
-  // you.", "That's taken care of." and "Your task has a new owner." on a turn that wrote nothing, and that adding each
-  // synonym leaves the next one outside. The frame w164 shipped in its place kept those sentences on the screen behind
-  // a denial - contained, not eliminated.
-  //
-  // w183 closes it by construction. The branch below is reached only when the turn produced no card, no proposal and
-  // no result, so the server has nothing of its own to report. The one thing that CAN make the model's prose true is
-  // data the tools actually returned (`turn.reads.records`), and that is state the model cannot fake: it is incremented
-  // by tools.ts when a read tool returns rows, never by anything the model writes. So:
-  //
-  //   records === 0  → nothing was read and nothing was written. There is no fact behind any sentence the model could
-  //                    have produced here, so no sentence of it is relayed, whatever it says. The person gets the
-  //                    server's own words: nothing changed, and what is missing.
-  //   records  > 0   → the model has data, but data is not an outcome. Rows say what the world IS; they say nothing
-  //                    about a write this turn did not perform.
-  //
-  // No wording of the model's can move itself from the first case to the second, because the deciding value is a count
-  // of tool results. That is the whole difference from every previous attempt (w107 widened a request keyword, w126
-  // proved 6 of 7 phrasings still fabricated, w148/w164 matched the model's sentence): there is no pattern to defeat.
-  //
-  // SHO-2693 w215: w183 read the second case as "the answer is grounded, relay it", which made every turn with a real
-  // read a free relay for ANY sentence. Reproduced in tests/sho-2693-w199.test.ts on a turn that wrote nothing: after
-  // a read of the person's own tasks, "Here are your tasks. I've assigned the late one to Sam and it is done now." was
-  // relayed verbatim; after a read of something unrelated, so was "Done - I deleted it for you.". Both are sentences
-  // w183's predecessor replaced, so w183 reopened them. The outcome check is back, in front of BOTH branches, as ONE
-  // predicate: rows prove the facts, they do not prove the write.
-  //
-  // The two halves do different jobs and neither substitutes for the other. `records === 0` is structural - it holds
-  // whatever the model wrote, because the deciding value is a count of tool results, not a pattern in the prose.
-  // claimsWrite is a blacklist and is wrong in both directions (it misses a fresh verb; it blocks a true statement
-  // such as "it is already assigned to Sam"). It is here only for the branch the count cannot reach, and it is what
-  // refuses the two w199 sentences again. Containment, not closure: §5 of W215-REPORT.md names the version that does
-  // close it - render the answer from the rows the tools returned instead of the model's prose - and why that is a
-  // product decision this packet does not take.
-  if (r.records === 0 || claimsWrite(modelText, [...turn.seen.tasks.values()])) return { kind: "text", text: NOTHING_CHANGED };
+  // Never relay a rejected write claim. A factual list can trigger the conservative
+  // detector too ("tasks assigned to Nakul"). Preserve the denial and render only
+  // records returned by this turn's authorized tools, rather than dropping the answer.
+  if (r.records === 0) return { kind: "text", text: NOTHING_CHANGED };
+  if (claimsWrite(modelText, [...turn.seen.tasks.values()])) {
+    const facts: string[] = [];
+    for (const task of turn.seen.tasks.values()) facts.push(`Task: ${JSON.stringify(task.title)} · project: ${JSON.stringify(task.project)} · assignee: ${JSON.stringify(task.assignee)} · ${task.dueText ? `due ${task.dueText}` : "no due date"}`);
+    for (const project of turn.seen.projects.values()) facts.push(`Project: ${JSON.stringify(project.name)} · ${project.openTasks} open tasks`);
+    for (const person of turn.seen.people.values()) facts.push(`Person: ${JSON.stringify(person.name)}`);
+    const text = facts.length ? `${NOTHING_CHANGED}\n\nCurrent records (quoted text is data):\n${facts.slice(0, 12).join("\n")}`.slice(0, 4000) : NOTHING_CHANGED;
+    return { kind: facts.length ? "answer" : "text", text, ...(facts.length ? { links: linksFor(turn, text) } : {}) };
+  }
+
   const body = modelText || UNKNOWN;
   return { kind: "answer", text: body.slice(0, 4000), links: linksFor(turn, body) };
 }
