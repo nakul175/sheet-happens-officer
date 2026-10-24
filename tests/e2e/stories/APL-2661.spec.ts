@@ -1,4 +1,4 @@
-// APL-2710. APL-2661: apex and www redirect to the app. Read-only GETs through the Playwright request fixture.
+// APL-2710. APL-2661: apex and www redirect to the app. Read-only GET/HEAD through the Playwright request fixture.
 // maxRedirects: 0 so a 301 is observed, not followed. HTTPS errors are not ignored, so a bad certificate fails the call.
 // No DNS or Caddy changes. Staging hostname: staging.sheethappensofficer.com (workflow allow-list and tests/e2e/base-url.ts).
 import { expect, test } from "@playwright/test";
@@ -12,6 +12,16 @@ const APEX = [
 ];
 
 test.describe("APL-2661", { tag: "@APL-2661" }, () => {
+  test("SHO-2725: apex and www HEAD requests return 301 to the app", { tag: "@readonly" }, async ({ request }) => {
+    // GET succeeds on the forwarding service even while HEAD returns 405; neither substitutes for the other.
+    for (const url of APEX) {
+      const res = await request.head(url, { maxRedirects: 0 });
+      expect.soft(res.status(), `${url} HEAD`).toBe(301);
+      const location = res.headers()["location"] ?? "";
+      expect.soft(new URL(location, url).href, `${url} HEAD Location: ${location}`).toBe(APP);
+    }
+  });
+
   test("AC1 apex and www over http and https return 301 to the app", { tag: "@readonly" }, async ({ request }) => {
     for (const url of APEX) {
       const res = await request.get(url, { maxRedirects: 0 });
