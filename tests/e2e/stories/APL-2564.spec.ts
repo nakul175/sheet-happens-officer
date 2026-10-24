@@ -15,7 +15,7 @@ async function tasksOf(who: Who, pid: string) {
   return (r.json.sections as { tasks: { id: string; title: string; assignee: { id: string } }[] }[]).flatMap((s) => s.tasks);
 }
 const IST = (offset: number) => new Date(Date.now() + 5.5 * 3600_000 + offset * 86400_000);
-const label = (d: Date) => `${d.toLocaleString("en-GB", { weekday: "short", timeZone: "UTC" })} ${d.getUTCDate()} ${d.toLocaleString("en-GB", { month: "short", timeZone: "UTC" })}`;
+const label = (d: Date) => `${d.toLocaleString("en-GB", { weekday: "short", timeZone: "UTC" })} ${d.getUTCDate()} ${d.toLocaleString("en-GB", { month: "short", timeZone: "UTC" })} ${d.getUTCFullYear()}`;
 
 test("AC1: pressing C on a screen where I can write focuses a title field within 200 ms", async ({ admin, later }) => {
   await project(admin, later, "14.5 focus"); // the admin can write somewhere, so the shortcut is live
@@ -78,7 +78,7 @@ test("AC3: 'tomorrow' and 'fri' in the date field resolve to a date that is show
   await page.locator("#qa-date").fill("tomorrow");
   await expect(note).toHaveText(`Due ${label(IST(1))}`);
   await page.locator("#qa-date").fill("fri");
-  await expect(note).toHaveText(/^Due Fri \d{1,2} [A-Z][a-z]{2}$/);
+  await expect(note).toHaveText(/^Due Fri \d{1,2} [A-Z][a-z]{2} \d{4}$/);
   await page.locator("#qa-date").fill("not a date at all");
   await expect(note).toContainText("Not a date I know");
   await expect(page.getByRole("dialog", { name: "New task" }).getByRole("button", { name: "Add task" })).toBeDisabled();
