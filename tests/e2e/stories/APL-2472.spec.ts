@@ -132,7 +132,11 @@ test("AC5: spoken English is transcribed into the composer and sent like typed t
   const notice = box.getByRole("alertdialog", { name: "About dictation" });
   if (await notice.isVisible()) await notice.getByRole("button", { name: "Got it" }).click();
   await expect(box.getByLabel("Message the concierge")).toHaveValue(spoken);
+  // The optimistic USER bubble appears before the request has stored its assistant reply.
+  // Wait for the actual send to finish before asserting the persisted conversation.
+  const sent = admin.page.waitForResponse((response) => response.url().endsWith("/api/concierge/messages") && response.request().method() === "POST");
   await box.getByRole("button", { name: "Send" }).click();
+  expect((await sent).status()).toBe(200);
   await expect(box).toContainText(spoken);
   const messages = ((await admin.api.get("/api/concierge/state")).json.messages ?? []) as { role: string; text: string }[];
   expect(messages.some((m) => m.role === "USER" && m.text === spoken)).toBe(true);
