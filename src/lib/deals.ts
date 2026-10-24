@@ -10,16 +10,25 @@ import { auditTx, logAction, notify } from "@/lib/notify";
 import { orgOf } from "@/lib/orgs";
 import { taskAccess } from "@/lib/tasks";
 
+import { dealClassificationFields, type DealClassificationInput } from "@/lib/deal-classification";
+
 export const STALL_DAYS = 30;
 const DEFAULT_SECTIONS = ["To do", "In progress", "Done"];
 export const OPEN_CATEGORIES = ["NOT_STARTED", "ACTIVE", "PAUSED"] as const;
 const WORKING_CATEGORIES = ["NOT_STARTED", "ACTIVE"] as const; // "Needs a next step" and "Stalled" apply to these only
 
 export type Currency = "INR" | "USD" | "EUR";
-export type DealDetailsInput = {
+export type DealDetailsInput = DealClassificationInput & {
   whyPursue?: string; need?: string | null; serviceLine?: string | null; value?: number | null; currency?: Currency | null;
   probability?: number | null; expectedClose?: string | null; introducedBy?: string | null; submissionDeadline?: string | null;
 };
+
+function classification(input: DealClassificationInput) {
+  const parsed = dealClassificationFields.safeParse(input);
+  if (!parsed.success) throw new ApiError(400, parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; "));
+  return parsed.data;
+}
+const revenueNumber = (value: unknown): number | null => value == null ? null : Number(value);
 
 const clean = (v: string | null | undefined) => (v?.trim() ? v.trim() : null);
 const isoDate = (s: string) => { if (!/^\d{4}-\d{2}-\d{2}$/.test(s) || Number.isNaN(Date.parse(`${s}T00:00:00Z`))) throw new ApiError(400, "Use a date like 2026-10-31."); return new Date(`${s}T00:00:00Z`); };
@@ -76,6 +85,7 @@ export async function createDeal(
   if (!leader || !isActive(leader) || leader.workspaceId !== u.workspaceId) throw new ApiError(400, "Choose an active person as Leader.");
   const { value, currency } = normaliseValue(input.value, input.currency);
   const probability = checkProbability(input.probability);
+  const classifications = classification(input);
 
   // project-lookup-ok: Workspace-wide duplicate confirmation for the supplied name and buyer, after requireCrm; includes archived deals.
   const dup = await db.project.findFirst({
@@ -97,7 +107,7 @@ export async function createDeal(
     await tx.dealDetails.create({
       data: {
         projectId: project.id, workspaceId: u.workspaceId, whyPursue: why, need: clean(input.need), serviceLine: clean(input.serviceLine),
-        value, currency, probability, expectedClose: input.expectedClose ? isoDate(input.expectedClose) : null,
+        value, currency, probability, ...classifications, expectedClose: input.expectedClose ? isoDate(input.expectedClose) : null,
         introducedBy: clean(input.introducedBy), submissionDeadline: input.submissionDeadline ? isoDate(input.submissionDeadline) : null,
       },
     });
@@ -113,7 +123,7 @@ export async function createDeal(
     await notify(tx, [leader.id], "TASK_ASSIGNED", { actorId: user.id, taskId: firstStep.id, projectId: project.id, data: { title: firstStep.title } });
     await logAction(tx, { actorId: user.id, projectId: project.id, targetType: "task", targetId: firstStep.id, action: "task.created", after: { title: firstStep.title, assigneeId: leader.id, sectionId: sections[0].id, parentId: null }, primary: false });
     await notify(tx, [leader.id], "MADE_LEADER", { actorId: user.id, projectId: project.id, data: { project: project.name } });
-    await logAction(tx, { actorId: user.id, projectId: project.id, targetType: "deal", targetId: project.id, action: "deal.created", after: { name, organisationId: org.id, pipeline: pipeline.name, leaderId: leader.id } });
+    await logAction(tx, { actorId: user.id, projectId: project.id, targetType: "deal", targetId: project.id, action: "deal.created", after: { name, organisationId: org.id, pipeline: pipeline.name, leaderId: leader.id, ...classifications } });
     return project;
   });
 }
@@ -196,6 +206,7 @@ function detailsState(d: DetailsRow | Record<string, unknown>) {
   const r = d as DetailsRow;
   return {
     whyPursue: r.whyPursue, need: r.need, serviceLine: r.serviceLine, value: r.value === null || r.value === undefined ? null : Number(r.value), currency: r.currency,
+    opportunityType: r.opportunityType ?? null, athenaEntity: r.athenaEntity ?? null, netFeeRevenueUsd: revenueNumber(r.netFeeRevenueUsd),
     probability: r.probability, expectedClose: r.expectedClose ? dayOnly(r.expectedClose) : null, introducedBy: r.introducedBy,
     submissionDeadline: r.submissionDeadline ? dayOnly(r.submissionDeadline) : null,
   };
@@ -203,7 +214,7 @@ function detailsState(d: DetailsRow | Record<string, unknown>) {
 
 /** Builds a Prisma update from a validated patch. Returns what changed for the action log. */
 function detailsPatch(input: DealDetailsInput, cur: DetailsRow) {
-  const data: Prisma.DealDetailsUpdateInput = {};
+  const data: Prisma.DealDetailsUpdateInput = { ...classification(input) };
   if (input.whyPursue !== undefined) { const v = input.whyPursue.trim(); if (!v) throw new ApiError(400, "Say in one line why to pursue this."); data.whyPursue = v; }
   if (input.need !== undefined) data.need = clean(input.need);
   if (input.serviceLine !== undefined) data.serviceLine = clean(input.serviceLine);
@@ -368,6 +379,8 @@ export async function listDeals(user: Actor, o: { archived?: boolean; mine?: boo
       stage: p.stage ? { id: p.stage.id, name: p.stage.name, category: p.stage.category } : null,
       organisation: p.parties[0]?.organisation ?? null, leader: p.members[0]?.user ?? null,
       value: p.deal?.value === null || p.deal?.value === undefined ? null : Number(p.deal.value), currency: p.deal?.currency ?? null,
+      opportunityType: p.deal?.opportunityType ?? null, athenaEntity: p.deal?.athenaEntity ?? null, netFeeRevenueUsd: revenueNumber(p.deal?.netFeeRevenueUsd),
+      probability: p.deal?.probability ?? null,
       submissionDeadline: dayOnly(p.deal?.submissionDeadline ?? null),
       nextStep: sig.nextStep,
       needsNextStep: isWorking(p.stage?.category) && !p.archivedAt && !sig.nextStep,
@@ -393,6 +406,7 @@ export async function dealBlock(projectId: string) {
     stageReason: p.stageReason,
     details: d ? {
       whyPursue: d.whyPursue, need: d.need, serviceLine: d.serviceLine, value: d.value === null ? null : Number(d.value), currency: d.currency,
+      opportunityType: d.opportunityType ?? null, athenaEntity: d.athenaEntity ?? null, netFeeRevenueUsd: revenueNumber(d.netFeeRevenueUsd),
       probability: d.probability, expectedClose: dayOnly(d.expectedClose), introducedBy: d.introducedBy, submissionDeadline: dayOnly(d.submissionDeadline),
     } : null,
     parties: p.parties.map((x) => ({ id: x.id, role: x.role, organisation: x.organisation })),
@@ -491,6 +505,7 @@ export async function convertTaskToDeal(user: Actor, taskId: string, input: Conv
   if (!leader || !isActive(leader) || leader.workspaceId !== u.workspaceId) throw new ApiError(400, "Choose an active person as Leader.");
   const { value, currency } = normaliseValue(input.value, input.currency);
   const probability = checkProbability(input.probability);
+  const classifications = classification(input);
   if (dueDate) isoDate(dueDate);
   // project-lookup-ok: Workspace-wide duplicate confirmation for the supplied name and buyer, after requireCrm; includes archived deals.
   const dup = await db.project.findFirst({
@@ -520,7 +535,7 @@ export async function convertTaskToDeal(user: Actor, taskId: string, input: Conv
     for (const [i, n] of DEFAULT_SECTIONS.entries()) sections.push(await tx.section.create({ data: { projectId: project.id, name: n, position: i, isDone: i === DEFAULT_SECTIONS.length - 1 } }));
     await tx.dealDetails.create({
       data: {
-        projectId: project.id, workspaceId: u.workspaceId, whyPursue: why!, need: clean(input.need), serviceLine: clean(input.serviceLine), value, currency, probability,
+        projectId: project.id, workspaceId: u.workspaceId, whyPursue: why!, need: clean(input.need), serviceLine: clean(input.serviceLine), value, currency, probability, ...classifications,
         expectedClose: input.expectedClose ? isoDate(input.expectedClose) : null, introducedBy: clean(input.introducedBy),
         submissionDeadline: input.submissionDeadline ? isoDate(input.submissionDeadline) : null,
       },
@@ -544,7 +559,7 @@ export async function convertTaskToDeal(user: Actor, taskId: string, input: Conv
         sourceProjectId: t.projectId, sectionId: t.sectionId, previousSectionId: t.previousSectionId, isIdea: t.isIdea, approverId: t.approverId,
         dueDate: t.dueDate?.toISOString() ?? null, subtaskIds: subs.map((s) => s.id),
       },
-      after: { dealId: project.id, name, organisationId: org.id, pipeline: pipeline!.name, leaderId: leader.id },
+      after: { dealId: project.id, name, organisationId: org.id, pipeline: pipeline!.name, leaderId: leader.id, ...classifications },
     });
     return project;
   });

@@ -3,6 +3,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useState } from "react";
 import { api, todayIST, useGet } from "@/components/api";
+import { ATHENA_ENTITIES, OPPORTUNITY_TYPES } from "@/lib/deal-classification";
 import { Field } from "@/components/ui";
 import { Page, useMe } from "../../Shell";
 
@@ -13,7 +14,7 @@ function Form() {
   const team = useGet<{ people: { id: string; name: string }[] }>("/api/team");
   const orgs = useGet<{ organisations: { id: string; name: string }[] }>("/api/orgs");
   const pipes = useGet<{ pipelines: { id: string; key: string; name: string }[] }>("/api/deals/pipelines");
-  const [v, setV] = useState({ name: "", organisationId: sp.get("org") ?? "", pipelineId: "", leaderId: me.id, whyPursue: "", step: "", due: todayIST(), submissionDeadline: "", value: "", currency: "INR" });
+  const [v, setV] = useState({ name: "", organisationId: sp.get("org") ?? "", pipelineId: "", leaderId: me.id, whyPursue: "", step: "", due: todayIST(), submissionDeadline: "", value: "", currency: "INR", opportunityType: "", netFeeRevenueUsd: "", athenaEntity: "", probability: "" });
   const [err, setErr] = useState<string | null>(null);
   const [dup, setDup] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -26,6 +27,10 @@ function Form() {
       nextStep: { title: v.step, dueDate: v.due }, force,
     };
     if (pipeline?.key === "DEAL_BID") body.submissionDeadline = v.submissionDeadline || null;
+    body.opportunityType = v.opportunityType || null;
+    body.netFeeRevenueUsd = v.netFeeRevenueUsd === "" ? null : Number(v.netFeeRevenueUsd);
+    body.athenaEntity = v.athenaEntity || null;
+    body.probability = v.probability === "" ? null : Number(v.probability);
     if (v.value) { body.value = Number(v.value); body.currency = v.currency; }
     const r = await api("POST", "/api/deals", body);
     setBusy(false);
@@ -42,6 +47,10 @@ function Form() {
       <p style={{ marginTop: -8, fontSize: 14 }}><Link href="/accounts">Open Accounts to add a buyer</Link></p>
       <Field label="Pipeline">{(id) => <select id={id} className="in" value={pipeline?.id ?? ""} onChange={set("pipelineId")}>{pipes.data?.pipelines.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select>}</Field>
       {pipeline?.key === "DEAL_BID" && <Field label="Submission deadline">{(id) => <input id={id} className="in" type="date" required value={v.submissionDeadline} onChange={set("submissionDeadline")} />}</Field>}
+      <Field label="Opportunity type">{(id) => <select id={id} className="in" value={v.opportunityType} onChange={set("opportunityType")}><option value="">Unclassified</option>{OPPORTUNITY_TYPES.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}</select>}</Field>
+      <Field label="Net Fee Revenue (USD)">{(id) => <input id={id} className="in" type="number" min="0" max="9999999999999.99" step="0.01" value={v.netFeeRevenueUsd} onChange={set("netFeeRevenueUsd")} />}</Field>
+      <Field label="PWin (%)">{(id) => <input id={id} className="in" type="number" min="0" max="100" step="1" value={v.probability} onChange={set("probability")} />}</Field>
+      <Field label="Athena Entity">{(id) => <select id={id} className="in" value={v.athenaEntity} onChange={set("athenaEntity")}><option value="">Not specified</option>{ATHENA_ENTITIES.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}</select>}</Field>
       <Field label="Leader">{(id) => <select id={id} className="in" value={v.leaderId} onChange={set("leaderId")}>{team.data?.people.map((p) => <option key={p.id} value={p.id}>{p.name}{p.id === me.id ? " (you)" : ""}</option>)}</select>}</Field>
       <Field label="Why are we pursuing this?">{(id) => <input id={id} className="in" required maxLength={1000} value={v.whyPursue} onChange={set("whyPursue")} />}</Field>
       <Field label="First next step">{(id) => <input id={id} className="in" required value={v.step} onChange={set("step")} />}</Field>
