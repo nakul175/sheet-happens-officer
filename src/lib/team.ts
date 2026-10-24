@@ -100,15 +100,20 @@ export async function deactivate(actor: Actor, targetId: string, reassign: strin
     const fellBack: string[] = [];
     let moved = 0;
     for (const m of memberships) {
+      // APL-2995 and SHO-3029: one rule decides what this caller may know about the project.
+      // A hidden deal is never named, and its moved tasks are left out of the count, because the
+      // count alone would reveal that a deal the caller cannot see exists.
+      const visible = showDeals || m.project.typeId !== WORKSTREAM_DEAL;
       const leader = await leaderId(tx, m.projectId);
       let newAssignee = leader;
       if (reassign !== "leaders") {
         const ok = await activeMember(tx, m.projectId, reassign, ["LEADER", "EDITOR"]);
         if (ok) newAssignee = reassign;
-        else if (showDeals || m.project.typeId !== WORKSTREAM_DEAL) fellBack.push(m.project.name);
+        else if (visible) fellBack.push(m.project.name);
       }
       const r = await releasePerson(tx, { projectId: m.projectId, userId: targetId, newAssigneeId: newAssignee, actorId: actor.id });
-      moved += r.moved;
+      // Tasks on a hidden deal still go to its Leader; only what this caller is told is redacted.
+      if (visible) moved += r.moved;
     }
     await tx.user.update({ where: { id: targetId }, data: { deactivatedAt: new Date() } });
     await tx.session.updateMany({ where: { userId: targetId, revokedAt: null }, data: { revokedAt: new Date() } });

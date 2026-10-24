@@ -1,43 +1,66 @@
 {
-  "baseline": "Exact live central-20261022 credential-free source snapshot",
-  "included_verified_bugs": [
-    "SHO-2671",
-    "SHO-2689",
-    "SHO-2738",
-    "SHO-2840",
-    "SHO-2917",
-    "SHO-2918",
-    "SHO-2919",
-    "SHO-2920",
-    "SHO-2921",
-    "SHO-2922",
-    "SHO-2923",
-    "SHO-2924",
-    "SHO-3000",
-    "SHO-3019",
-    "SHO-3025",
-    "SHO-3031",
-    "SHO-3032",
-    "SHO-3033"
-  ],
-  "excluded_pending_bugs": [
-    "SHO-2693",
-    "SHO-2725",
+  "release": "accepted12 preparation only",
+  "baselineProductionSha": "fffd4ed47f4bfb0f6a249f33f211a911afece1e8",
+  "acceptedBugs": [
+    "SHO-2736",
     "SHO-2760",
-    "SHO-2897",
-    "SHO-3010",
+    "SHO-2951",
+    "SHO-2996",
+    "SHO-2997",
+    "SHO-2998",
     "SHO-3011",
-    "SHO-3017",
+    "SHO-3012",
+    "SHO-3013",
     "SHO-3024",
     "SHO-3029",
     "SHO-3030"
   ],
-  "prerequisite": "Task comments feature from mergedPR128, with additive Comment table, required by2840 and3019; FF_TASK_COMMENTS unchanged on production",
-  "preserved": "Live central accounts and suite integration; their schema models and auth sources remain unchanged",
-  "validation": {
-    "build": "PASS",
-    "api_and_db": "43PASS10expectedflag-offSKIP",
-    "browser": "2738/3025 real app3PASS2excluded3030SKIP"
+  "excludedPendingBugs": [
+    "SHO-2693",
+    "SHO-2725",
+    "SHO-2897",
+    "SHO-3010",
+    "SHO-3017"
+  ],
+  "productionDeploymentAuthorized": false,
+  "runtimeDelta": [
+    "src/app/(app)/app.css",
+    "src/app/(app)/team/Team.tsx",
+    "src/app/(app)/usage/screen.tsx",
+    "src/app/api/deals/pipelines/[id]/route.ts",
+    "src/lib/deals.ts",
+    "src/lib/team.ts",
+    "src/lib/usage-percent.ts",
+    "src/lib/usage.ts"
+  ],
+  "schemaDelta": "none",
+  "testOnlyOrExistingBehavior": [
+    "2760: accepted1200ms measured; shutdown runtime unchanged",
+    "2996/2997/2998: historical semantic locators; existing Deal panel landmark preserved",
+    "3011: local SQL schema isolation and remote-host guards; no production runtime delta",
+    "3024: no advertised/dead logging reference in production baseline; owner accepted existing technical evidence"
+  ],
+  "acceptanceDecisions": [
+    "Owner accepted refusal within1200ms",
+    "Owner replaces Pam for3024/3029/3030",
+    "Current3030 Leader-or-Editor wording approved"
+  ],
+  "preserve": [
+    "All production central-login sources and environment configuration",
+    "Slot9 private66-account baseline and credentials in place; never export or print"
+  ],
+  "validationSoFar": {
+    "localBuild": "PASS",
+    "acceptedTests": "67PASS",
+    "baselineTests": "48PASS10flag-offSKIP",
+    "mappedLocatorCases": "3PASS",
+    "sourceScopeAndRefusalContracts": "5PASS"
   },
-  "production_switch": "Not yet performed"
+  "remainingGates": [
+    "Final verification-branch Linux CI",
+    "Same-SHA isolated slot9 acceptance and smoke",
+    "Actual slot9 rollback and restoration",
+    "Counts-only66-account identity/verification/login preservation across different-SHA deployment",
+    "Explicit user production approval before deployment"
+  ]
 }

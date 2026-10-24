@@ -1,0 +1,573 @@
+// APL-2742 (prod hotfix). Two parts:
+// 1. Sign-in refuses an unverified account and says how to get a new link (live server, like auth.test.ts).
+// 2. When Resend rejects or cannot be reached, the failure is logged with the status and Resend's error name and
+//    message only (no key, no body, no link), and sign-up / resend tell the person instead of failing with a 500.
+//    The provider is faked here: sendMail is called in this process, and the routes are called through their own
+//    POST handlers with sendMail made to fail.
+import { randomUUID } from "node:crypto";
+import { readdirSync, readFileSync } from "node:fs";
+import path from "node:path";
+import pg from "pg";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { BASE, Client, OUTBOX, PW } from "./helpers";
+import { localPgClient, localPgPool, schemaFromDatabaseUrl } from "./e2e/helpers/local-db-pool";
+import { db } from "../src/lib/db";
+
+vi.mock("next/server", async (orig) => ({ ...(await orig<typeof import("next/server")>()), connection: async () => {} }));
+const failSend = vi.hoisted(() => ({ on: false }));
+vi.mock("@/lib/email", async (orig) => {
+  const real = await orig<typeof import("../src/lib/email")>();
+  return {
+    ...real,
+    sendMail: async (mail: Parameters<typeof real.sendMail>[0]) => {
+      if (failSend.on) throw new real.MailError("Resend rejected the email (HTTP 403)", 403, "validation_error");
+      return real.sendMail(mail);
+    },
+  };
+});
+
+const { sendMail, MailError } = await import("../src/lib/email");
+const { POST: signUp } = await import("../src/app/api/auth/signup/route");
+const { POST: resendVerification } = await import("../src/app/api/auth/resend-verification/route");
+const { POST: verifyEmail } = await import("../src/app/api/auth/verify/route");
+
+// APL-2742 D1 (QA): the exact texts on the failure paths. Literal on purpose: a wording change must change this test.
+const UNVERIFIED_TEXT = "Verify your email before you sign in. No working verification link? Use Resend link.";
+const RESEND_TEXT = "Request received. If this address has an account waiting for verification, and it has not reached the limit of 3 requests an hour, we will try to email it a new link. If nothing arrives within a few minutes, check spam, then try again later.";
+const UNUSABLE_TEXT = "This link is invalid, has expired, was already used or was replaced by a newer one.";
+
+const run = Date.now();
+let n = 0;
+const fresh = () => `nakul17+zztest-apl2742-${run}-${n++}@aplyd.com`;
+const FAKE_KEY = "re_test_not_a_real_key_0000";
+const MAIL = { to: "nakul17+zztest-apl2742@aplyd.com", subject: "Verify your email for Sheet Happens Officer", text: "Open https://app.example/verify?token=SECRET-TOKEN-123" };
+
+const post = (route: (req: Request) => Promise<Response>, path: string, body: unknown) =>
+  route(new Request(`http://localhost${path}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }));
+
+/** The newest verification token mailed to this address (outbox), or null. */
+function lastVerifyToken(email: string): string | null {
+  let files: string[] = [];
+  try { files = readdirSync(OUTBOX).sort(); } catch { return null; }
+  const mails = files.map((f) => JSON.parse(readFileSync(path.join(OUTBOX, f), "utf8"))).filter((m) => m.to === email && /Verify/.test(m.subject));
+  return mails.at(-1)?.text.match(/token=([\w-]+)/)?.[1] ?? null;
+}
+
+/** A request as it reaches the app behind Caddy: X-Forwarded-For names the client, plus a browser user agent. */
+const viaProxy = (method: string, p: string, ip: string, ua: string, body?: unknown) =>
+  fetch(BASE + p, {
+    method,
+    headers: { "content-type": "application/json", "x-forwarded-for": `${ip}, 10.0.0.1`, "user-agent": ua },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+
+afterEach(() => {
+  failSend.on = false;
+  vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
+  vi.restoreAllMocks();
+});
+
+describe("qa:TC missing AC1: unverified accounts cannot sign in", () => {
+  it("qa:TC missing AC1: unverified user cannot sign in after sign-up, sign-out and sign-in", async () => {
+    const email = fresh();
+    const c = new Client();
+    const up = await c.post("/api/auth/signup", { name: "ZZ-TEST Unverified", email, password: PW });
+    expect(up.status).toBe(201);
+    expect(up.setCookie, "sign-up never sets a session cookie").toBeNull();
+    expect((await c.get("/api/auth/me")).status).toBe(401);
+    expect((await c.post("/api/auth/signout")).status).toBe(204);
+    const r = await c.post("/api/auth/signin", { email, password: PW });
+    expect(r.status).toBe(403);
+    expect(r.setCookie, "a refused sign-in sets no session cookie").toBeNull();
+    expect(r.json.code).toBe("EMAIL_NOT_VERIFIED");
+    expect(r.json.error).toBe(UNVERIFIED_TEXT);
+    expect((await c.get("/api/auth/me")).status).toBe(401);
+    const user = await db.user.findUniqueOrThrow({ where: { email } });
+    expect(await db.session.count({ where: { userId: user.id } })).toBe(0);
+  });
+
+  it("qa:TC missing AC1: a wrong password still gets the generic answer, not the verify prompt", async () => {
+    const email = fresh();
+    const c = new Client();
+    await c.post("/api/auth/signup", { name: "ZZ-TEST Unverified", email, password: PW });
+    const r = await c.post("/api/auth/signin", { email, password: "wrong-pass-1" });
+    expect(r.status).toBe(401);
+    expect(r.json.code).toBeUndefined();
+  });
+});
+
+describe("qa:TC missing AC2: sendMail logs a Resend rejection without secrets", () => {
+  it("qa:TC missing AC2: a 403 from Resend throws MailError and logs status, error name and message only", async () => {
+    vi.stubEnv("RESEND_API_KEY", FAKE_KEY);
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json(
+      { statusCode: 403, name: "validation_error", message: "The sheethappensofficer.aplyd.org domain is not verified." },
+      { status: 403 },
+    )));
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    const err = await sendMail(MAIL).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(MailError);
+    expect((err as InstanceType<typeof MailError>).status).toBe(403);
+    expect((err as InstanceType<typeof MailError>).providerName).toBe("validation_error");
+    expect(log).toHaveBeenCalledTimes(1);
+    const line = log.mock.calls[0].join(" ");
+    expect(line).toContain("HTTP 403");
+    expect(line).toContain("validation_error");
+    expect(line).toContain("The sheethappensofficer.aplyd.org domain is not verified.");
+    expect(line).not.toContain(FAKE_KEY);
+    expect(line).not.toContain("SECRET-TOKEN-123");
+    expect(line).not.toContain(MAIL.to);
+  });
+
+  it("qa:TC missing AC2: a Resend error body that is not JSON still logs the status", async () => {
+    vi.stubEnv("RESEND_API_KEY", FAKE_KEY);
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("<html>bad gateway</html>", { status: 502 })));
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    await expect(sendMail(MAIL)).rejects.toBeInstanceOf(MailError);
+    const line = log.mock.calls[0].join(" ");
+    expect(line).toContain("HTTP 502");
+    expect(line).not.toContain("<html>");
+  });
+
+  it("qa:TC missing AC2: a network failure reaching Resend throws MailError and is logged", async () => {
+    vi.stubEnv("RESEND_API_KEY", FAKE_KEY);
+    vi.stubGlobal("fetch", vi.fn(async () => { throw new TypeError("fetch failed"); }));
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    await expect(sendMail(MAIL)).rejects.toBeInstanceOf(MailError);
+    const line = log.mock.calls[0].join(" ");
+    expect(line).toContain("fetch failed");
+    expect(line).not.toContain(FAKE_KEY);
+  });
+
+  it("qa:TC missing AC2: production without a key throws MailError and is logged", async () => {
+    vi.stubEnv("RESEND_API_KEY", "");
+    vi.stubEnv("EMAIL_OUTBOX_DIR", "");
+    vi.stubEnv("NODE_ENV", "production");
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    await expect(sendMail(MAIL)).rejects.toBeInstanceOf(MailError);
+    expect(log.mock.calls[0].join(" ")).toContain("RESEND_API_KEY is not set");
+  });
+});
+
+describe("qa:TC missing AC3: a failed verification send is reported to the person", () => {
+  it("qa:TC missing AC3: sign-up still creates the unverified account and answers 201 with emailSent false and a message", async () => {
+    failSend.on = true;
+    const email = fresh();
+    const res = await post(signUp, "/api/auth/signup", { name: "ZZ-TEST Mailfail", email, password: PW });
+    expect(res.status).toBe(201);
+    const json = await res.json();
+    expect(json.status).toBe("check_email");
+    expect(json.emailSent).toBe(false);
+    expect(json.message).toMatch(/could not send/i);
+    const user = await db.user.findUniqueOrThrow({ where: { email } });
+    expect(user.emailVerifiedAt).toBeNull();
+    expect(await db.session.count({ where: { userId: user.id } })).toBe(0);
+    expect(await db.authToken.count({ where: { userId: user.id } }), "the unsent token is gone, so it does not count toward the limit").toBe(0);
+  });
+
+  it("qa:TC missing AC3: sign-up answers emailSent true when the send works", async () => {
+    const res = await post(signUp, "/api/auth/signup", { name: "ZZ-TEST Mailok", email: fresh(), password: PW });
+    expect(res.status).toBe(201);
+    expect((await res.json()).emailSent).toBe(true);
+  });
+
+  it("qa:TC missing AC3: a failed resend keeps the delivered link working, does not use up the limit and is audited FAILED", async () => {
+    const email = fresh();
+    expect((await post(signUp, "/api/auth/signup", { name: "ZZ-TEST Mailfail", email, password: PW })).status).toBe(201);
+    const user = await db.user.findUniqueOrThrow({ where: { email } });
+    const delivered = await db.authToken.findFirstOrThrow({ where: { userId: user.id, type: "VERIFY" } });
+    failSend.on = true;
+    for (let i = 0; i < 2; i++) expect((await post(resendVerification, "/api/auth/resend-verification", { email })).status).toBe(200);
+    expect((await db.authToken.findUniqueOrThrow({ where: { id: delivered.id } })).usedAt, "the delivered link still works").toBeNull();
+    expect(await db.authToken.count({ where: { userId: user.id, type: "VERIFY" } }), "failed sends leave no token").toBe(1);
+    // The provider recovers: the next request is not limited, sends, and only then voids the old link.
+    failSend.on = false;
+    expect((await post(resendVerification, "/api/auth/resend-verification", { email })).status).toBe(200);
+    expect(await db.authToken.count({ where: { userId: user.id, type: "VERIFY" } })).toBe(2);
+    expect((await db.authToken.findUniqueOrThrow({ where: { id: delivered.id } })).usedAt).not.toBeNull();
+    const results = (await db.auditLog.findMany({ where: { actorId: user.id, event: "VERIFY_EMAIL_REQUESTED" }, orderBy: { createdAt: "asc" } }))
+      .map((r) => (r.data as { result: string }).result);
+    expect(results).toEqual(["FAILED", "FAILED", "SENT"]);
+  });
+
+  it("qa:TC missing AC3: failed, failed, then a successful resend: the original link still verifies after the two failures", async () => {
+    const email = fresh();
+    expect((await post(signUp, "/api/auth/signup", { name: "ZZ-TEST Mailfail", email, password: PW })).status).toBe(201);
+    failSend.on = true;
+    for (let i = 0; i < 2; i++) {
+      const res = await post(resendVerification, "/api/auth/resend-verification", { email });
+      expect(res.status, "a failed send answers like any other request").toBe(200);
+      expect((await res.json()).message).not.toMatch(/has been sent/i);
+    }
+    failSend.on = false;
+    // The two failures neither voided the delivered link nor used up the limit: the next request still sends.
+    expect((await post(resendVerification, "/api/auth/resend-verification", { email })).status).toBe(200);
+    const user = await db.user.findUniqueOrThrow({ where: { email } });
+    expect(await db.authToken.count({ where: { userId: user.id, type: "VERIFY" } }), "sign-up's link plus the one successful resend").toBe(2);
+    // A second address: the original link is used right after two failed resends, and it verifies.
+    const other = fresh();
+    expect((await post(signUp, "/api/auth/signup", { name: "ZZ-TEST Mailfail", email: other, password: PW })).status).toBe(201);
+    const first = lastVerifyToken(other)!;
+    failSend.on = true;
+    for (let i = 0; i < 2; i++) expect((await post(resendVerification, "/api/auth/resend-verification", { email: other })).status).toBe(200);
+    failSend.on = false;
+    expect((await post(verifyEmail, "/api/auth/verify", { token: first })).status).toBe(200);
+    expect((await db.user.findUniqueOrThrow({ where: { email: other } })).emailVerifiedAt).not.toBeNull();
+  });
+
+  it("qa:TC missing AC3: failed resends are capped at 3 an hour, so a client cannot hammer the provider", async () => {
+    const email = fresh();
+    expect((await post(signUp, "/api/auth/signup", { name: "ZZ-TEST Mailfail", email, password: PW })).status).toBe(201);
+    const user = await db.user.findUniqueOrThrow({ where: { email } });
+    failSend.on = true;
+    for (let i = 0; i < 5; i++) expect((await post(resendVerification, "/api/auth/resend-verification", { email })).status).toBe(200);
+    const results = (await db.auditLog.findMany({ where: { actorId: user.id, event: "VERIFY_EMAIL_REQUESTED" }, orderBy: { createdAt: "asc" } }))
+      .map((r) => (r.data as { result: string }).result);
+    expect(results).toEqual(["FAILED", "FAILED", "FAILED", "LIMITED"]);
+  });
+
+  it("qa:TC missing AC3: resend gives one neutral answer for a failed send, a sent one and an unknown address", async () => {
+    const failing = fresh();
+    const working = fresh();
+    expect((await post(signUp, "/api/auth/signup", { name: "ZZ-TEST Neutral", email: failing, password: PW })).status).toBe(201);
+    expect((await post(signUp, "/api/auth/signup", { name: "ZZ-TEST Neutral", email: working, password: PW })).status).toBe(201);
+    const answer = async (email: string) => {
+      const res = await post(resendVerification, "/api/auth/resend-verification", { email });
+      return { status: res.status, body: await res.json() };
+    };
+    const sent = await answer(working);
+    failSend.on = true;
+    const failed = await answer(failing);
+    const unknown = await answer(fresh());
+    expect(failed).toEqual(sent);
+    expect(unknown).toEqual(sent);
+    expect(sent.status).toBe(200);
+    expect(sent.body).toEqual({ status: "ok", message: RESEND_TEXT });
+  });
+
+  it("qa:TC missing AC3: a resend over the limit and a capped failed resend get the exact neutral text, never a claim that it went", async () => {
+    const email = fresh();
+    expect((await post(signUp, "/api/auth/signup", { name: "ZZ-TEST Neutral", email, password: PW })).status).toBe(201);
+    failSend.on = true;
+    const answers: unknown[] = [];
+    // Three failed sends reach the failed-send cap; the 4th is limited without trying.
+    for (let i = 0; i < 4; i++) answers.push(await (await post(resendVerification, "/api/auth/resend-verification", { email })).json());
+    for (const a of answers) expect(a).toEqual({ status: "ok", message: RESEND_TEXT });
+  });
+
+  it("qa:TC missing AC3: an unknown, used or replaced verify token gets the exact unusable-link text", async () => {
+    const email = fresh();
+    expect((await post(signUp, "/api/auth/signup", { name: "ZZ-TEST Unusable", email, password: PW })).status).toBe(201);
+    const first = lastVerifyToken(email)!;
+    expect((await post(resendVerification, "/api/auth/resend-verification", { email })).status).toBe(200);
+    const second = lastVerifyToken(email)!;
+    const answer = async (token: string) => {
+      const res = await post(verifyEmail, "/api/auth/verify", { token });
+      return { status: res.status, body: await res.json() };
+    };
+    expect(await answer(first), "replaced by the resent link").toEqual({ status: 400, body: { error: UNUSABLE_TEXT } });
+    expect(await answer("x".repeat(43)), "unknown").toEqual({ status: 400, body: { error: UNUSABLE_TEXT } });
+    expect((await answer(second)).status).toBe(200);
+    expect(await answer(second), "already used").toEqual({ status: 400, body: { error: UNUSABLE_TEXT } });
+  });
+
+  it("qa:TC missing AC3: resend stays rate-limited at 3 an hour", async () => {
+    const email = fresh();
+    expect((await post(signUp, "/api/auth/signup", { name: "ZZ-TEST Limit", email, password: PW })).status).toBe(201);
+    const user = await db.user.findUniqueOrThrow({ where: { email } });
+    for (let i = 0; i < 4; i++) {
+      expect((await post(resendVerification, "/api/auth/resend-verification", { email })).status).toBe(200);
+    }
+    // One token at sign-up plus two resends reach the limit of 3; the 3rd and 4th resends send nothing.
+    expect(await db.authToken.count({ where: { userId: user.id, type: "VERIFY" } })).toBe(3);
+  });
+});
+
+describe("qa:TC missing AC4: verification needs a click, and verification events are traceable", () => {
+  it("qa:TC missing AC4: a link scanner's GET of /verify?token=... leaves the account unverified and the token unused", async () => {
+    const email = fresh();
+    expect((await new Client().post("/api/auth/signup", { name: "ZZ-TEST Scanner", email, password: PW })).status).toBe(201);
+    const token = lastVerifyToken(email)!;
+    const page = await fetch(`${BASE}/verify?token=${token}`, { headers: { "user-agent": "ZZ-TEST link scanner" } });
+    expect(page.status).toBe(200);
+    await page.text();
+    const user = await db.user.findUniqueOrThrow({ where: { email } });
+    expect(user.emailVerifiedAt).toBeNull();
+    const row = await db.authToken.findFirstOrThrow({ where: { userId: user.id, type: "VERIFY" }, orderBy: { createdAt: "desc" } });
+    expect(row.usedAt).toBeNull();
+  });
+
+  it("qa:TC missing AC4: EMAIL_VERIFIED stores the client IP and user agent, and nothing else", async () => {
+    const email = fresh();
+    expect((await new Client().post("/api/auth/signup", { name: "ZZ-TEST Trace", email, password: PW })).status).toBe(201);
+    const ua = "ZZ-TEST-UA verify " + "x".repeat(400);
+    const res = await viaProxy("POST", "/api/auth/verify", "203.0.113.7", ua, { token: lastVerifyToken(email) });
+    expect(res.status).toBe(200);
+    const user = await db.user.findUniqueOrThrow({ where: { email } });
+    expect(user.emailVerifiedAt).not.toBeNull();
+    const row = await db.auditLog.findFirstOrThrow({ where: { actorId: user.id, event: "EMAIL_VERIFIED" } });
+    expect(row.ip).toBe("203.0.113.7");
+    expect(row.data).toEqual({ userAgent: ua.slice(0, 300) });
+  });
+
+  it("qa:TC missing AC4: a resend request stores the client IP, user agent and result, and never the address", async () => {
+    const email = fresh();
+    expect((await new Client().post("/api/auth/signup", { name: "ZZ-TEST Trace", email, password: PW })).status).toBe(201);
+    const ua = "ZZ-TEST-UA resend";
+    expect((await viaProxy("POST", "/api/auth/resend-verification", "198.51.100.9", ua, { email })).status).toBe(200);
+    const user = await db.user.findUniqueOrThrow({ where: { email } });
+    const rows = await db.auditLog.findMany({ where: { actorId: user.id, event: "VERIFY_EMAIL_REQUESTED" } });
+    expect(rows).toHaveLength(1);
+    expect(rows[0].ip).toBe("198.51.100.9");
+    expect(rows[0].data).toEqual({ result: "SENT", userAgent: ua });
+    expect(JSON.stringify(rows[0])).not.toContain(email);
+  });
+
+  it("qa:TC missing AC4: a resend over the limit is audited as LIMITED once an hour; an unknown address leaves no row", async () => {
+    const email = fresh();
+    expect((await new Client().post("/api/auth/signup", { name: "ZZ-TEST Limit", email, password: PW })).status).toBe(201);
+    // Sign-up's link plus two resends reach the limit; the 3rd to 6th requests send nothing, and only one LIMITED row is written.
+    for (let i = 0; i < 6; i++) await viaProxy("POST", "/api/auth/resend-verification", "198.51.100.10", "ZZ-TEST-UA", { email });
+    const user = await db.user.findUniqueOrThrow({ where: { email } });
+    const results = (await db.auditLog.findMany({ where: { actorId: user.id, event: "VERIFY_EMAIL_REQUESTED" }, orderBy: { createdAt: "asc" } }))
+      .map((r) => (r.data as { result: string }).result);
+    expect(results).toEqual(["SENT", "SENT", "LIMITED"]);
+    const before = await db.auditLog.count({ where: { event: "VERIFY_EMAIL_REQUESTED" } });
+    expect((await viaProxy("POST", "/api/auth/resend-verification", "198.51.100.11", "ZZ-TEST-UA", { email: fresh() })).status).toBe(200);
+    expect(await db.auditLog.count({ where: { event: "VERIFY_EMAIL_REQUESTED" } })).toBe(before);
+  });
+});
+
+// SHO-3011 (also cited as SHO-3036). The APL-2742 story spec reads the app's rows with `pg`, and ?schema= is a
+// Prisma parameter pg ignores, so the spec's pool must carry it itself or it reads public while the app writes
+// elsewhere. Proven on a throwaway schema: current_schema() and search_path come from the URL, an unqualified table
+// lands in that schema, and public cannot see it. Only a local database is touched, and only that schema is dropped.
+describe("qa:TC missing SHO-3011: the APL-2742 pool reads the schema DATABASE_URL names", () => {
+  const RAW = process.env.DATABASE_URL ?? "";
+  let local = false;
+  try {
+    local = /^(localhost|127\.0\.0\.1|::1)$/i.test(new URL(RAW).hostname.replace(/^\[|\]$/g, ""));
+  } catch {
+    local = false;
+  }
+  const SCHEMA = `sho_test_apl2742_${randomUUID().replace(/-/g, "").slice(0, 12)}`;
+  const TABLE = `apl2742_probe_${randomUUID().replace(/-/g, "").slice(0, 8)}`;
+  const urlWithSchema = (schema: string) => {
+    const url = new URL(RAW);
+    url.searchParams.set("schema", schema);
+    return url.toString();
+  };
+  let admin: pg.Client | undefined;
+  let pool: pg.Pool | undefined;
+
+  beforeAll(async () => {
+    if (!local) return;
+    admin = localPgClient(RAW);
+    await admin.connect();
+    await admin.query(`CREATE SCHEMA "${SCHEMA}"`);
+  });
+
+  afterAll(async () => {
+    await pool?.end();
+    // Only the throwaway schema this block made, and never public or anything else.
+    if (local && admin && /^sho_test_apl2742_[a-z0-9]+$/.test(SCHEMA)) await admin.query(`DROP SCHEMA IF EXISTS "${SCHEMA}" CASCADE`);
+    await admin?.end();
+  });
+
+  it.skipIf(!local)("qa:TC missing SHO-3011 AC1: ?schema= sets current_schema() and search_path on the pool's connections", async () => {
+    // The defect itself: pg alone keeps its own parameters and drops Prisma's ?schema=, so it reads the default schema.
+    const bare = new pg.Pool({ connectionString: urlWithSchema(SCHEMA), max: 1 });
+    try {
+      const bareSchema = (await bare.query<{ s: string }>("SELECT current_schema() AS s")).rows[0].s;
+      expect(bareSchema, "a bare pg pool ignores ?schema= and reads the default schema").not.toBe(SCHEMA);
+    } finally {
+      await bare.end();
+    }
+
+    pool = localPgPool(urlWithSchema(SCHEMA));
+    const row = (await pool.query<{ current: string; schemas: string; searchPath: string }>(
+      'SELECT current_schema() AS current, array_to_string(current_schemas(false), \',\') AS schemas, current_setting(\'search_path\') AS "searchPath"',
+    )).rows[0];
+    expect(row.current, "current_schema() is the URL's schema").toBe(SCHEMA);
+    expect(row.schemas, "search_path holds that schema and nothing else, so no public fallback").toBe(SCHEMA);
+    expect(row.searchPath).toContain(SCHEMA);
+
+    // An unqualified write and read land in that schema: the same search_path Prisma would give the app.
+    await pool.query(`CREATE TABLE ${TABLE} (value text)`);
+    await pool.query(`INSERT INTO ${TABLE} (value) VALUES ($1)`, ["zz-sho-3011"]);
+    expect((await pool.query<{ value: string }>(`SELECT value FROM ${TABLE}`)).rows).toEqual([{ value: "zz-sho-3011" }]);
+    const inSchema = (await admin!.query<{ nspname: string }>(
+      "SELECT n.nspname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE c.relname = $1",
+      [TABLE],
+    )).rows;
+    expect(inSchema.map((r) => r.nspname), "the unqualified table was created in that schema").toEqual([SCHEMA]);
+    expect((await admin!.query<{ t: string | null }>("SELECT to_regclass($1) AS t", [`public.${TABLE}`])).rows[0].t,
+      "public does not have the table").toBeNull();
+  });
+
+  it.skipIf(!local)("qa:TC missing SHO-3011 AC2: without ?schema= the pool is unchanged (default schema)", async () => {
+    const plain = new URL(RAW);
+    plain.searchParams.delete("schema");
+    const ours = localPgPool(plain.toString());
+    const before = new pg.Pool({ connectionString: plain.toString(), max: 1 }); // the construction this replaces
+    try {
+      const sql = "SELECT current_schema() AS current, array_to_string(current_schemas(false), ',') AS schemas, current_setting('search_path') AS sp";
+      expect((await ours.query(sql)).rows[0], "indistinguishable from a plain pg pool").toEqual((await before.query(sql)).rows[0]);
+      expect(schemaFromDatabaseUrl(plain.toString())).toBeUndefined();
+    } finally {
+      await ours.end();
+      await before.end();
+    }
+  });
+
+  it.skipIf(!local)("qa:TC missing SHO-3011 AC1: the spec's own admin connection reads the URL's schema, not public", async () => {
+    // AC1 covers every SQL read in this file, and `admin` in beforeAll is a read connection built from DATABASE_URL.
+    // It is the construction the story spec bans for good reason (the AC1 test at the end of this describe): a bare pg
+    // client drops ?schema= and answers from public. On the shared local cluster that is 16882 rows against this
+    // schema's 17 for "User" - a wrong answer, not an error, and only the assertions that happen to look at it notice.
+    const currentSchema = async (c: pg.Client) => (await c.query<{ s: string | null }>("SELECT current_schema() AS s")).rows[0].s;
+    const want = schemaFromDatabaseUrl(RAW)!;
+    expect(await currentSchema(admin!), "the spec's admin connection did not receive ?schema=").toBe(want);
+
+    // The construction this replaces, on a throwaway schema, for the record: it lands elsewhere.
+    const bare = new pg.Client({ connectionString: urlWithSchema(SCHEMA) });
+    try {
+      await bare.connect();
+      expect(await currentSchema(bare), "a bare pg client drops ?schema= - the escape this test closes").not.toBe(SCHEMA);
+      expect(await currentSchema(bare), "and it lands on the server default, which is public").toBe("public");
+    } finally {
+      await bare.end();
+    }
+  });
+
+  it.skipIf(!local)("qa:TC missing SHO-3011 AC1: nothing this spec builds can see a sibling schema's sentinel row", async () => {
+    // The property behind AC1, stated as an experiment rather than as a reading of the URL: a sentinel row lives in a
+    // sibling schema under the *same table name* as the row the spec should read. A connection that did not receive the
+    // schema has no way to answer the unqualified SELECT with the schema's own row, so it either returns the sentinel
+    // or fails on a missing table - both fail this test.
+    const SIBLING = `sho_test_apl2742_sib_${randomUUID().replace(/-/g, "").slice(0, 12)}`;
+    const PROBE = `apl2742_sentinel_${randomUUID().replace(/-/g, "").slice(0, 8)}`;
+    const SENTINEL = "SENTINEL-MUST-NOT-BE-SEEN";
+    const OWN = schemaFromDatabaseUrl(RAW)!;
+    await admin!.query(`CREATE SCHEMA "${SIBLING}"`);
+    const sibling = localPgPool(urlWithSchema(SIBLING));
+    try {
+      for (const [schema, value] of [[SIBLING, SENTINEL], [OWN, "OWN"]] as const) {
+        await admin!.query(`CREATE TABLE "${schema}".${PROBE} (value text)`);
+        await admin!.query(`INSERT INTO "${schema}".${PROBE} (value) VALUES ($1)`, [value]);
+      }
+      // The sentinel is real and readable when it is named: the negative results below are not a missing table.
+      expect((await sibling.query<{ value: string }>(`SELECT value FROM ${PROBE}`)).rows.map((r) => r.value),
+        "a connection on the sibling schema reads the sentinel").toEqual([SENTINEL]);
+
+      const own = localPgPool(RAW);
+      try {
+        // Both connections this spec reads with, addressed the same way: admin (DDL + probes) and the helper pool.
+        const readers = [
+          { who: "admin", query: (sql: string) => admin!.query<{ value: string; schemas: string }>(sql) },
+          { who: "the helper pool", query: (sql: string) => own.query<{ value: string; schemas: string }>(sql) },
+        ];
+        for (const { who, query } of readers) {
+          expect((await query(`SELECT value FROM ${PROBE}`)).rows.map((r) => r.value),
+            `${who}: the unqualified read answers with the URL's own row`).toEqual(["OWN"]);
+          const schemas = (await query("SELECT array_to_string(current_schemas(false), ',') AS schemas")).rows[0].schemas.split(",");
+          expect(schemas, `${who}: search_path names no sibling schema`).not.toContain(SIBLING);
+          expect(schemas, `${who}: and no public fallback`).not.toContain("public");
+        }
+      } finally {
+        await own.end();
+      }
+    } finally {
+      await sibling.end();
+      for (const schema of [SIBLING, OWN]) await admin!.query(`DROP TABLE IF EXISTS "${schema}".${PROBE}`).catch(() => {});
+      // Only the throwaway schema this test made, named the way this test named it.
+      if (/^sho_test_apl2742_sib_[a-z0-9]+$/.test(SIBLING)) await admin!.query(`DROP SCHEMA IF EXISTS "${SIBLING}" CASCADE`);
+    }
+  });
+
+  it.skipIf(!local)("qa:TC missing SHO-3011 AC1: every connection the pool opens, not only the first, lands on the schema", async () => {
+    // AC1 says every SQL read targets the schema, and a pool holds more than one connection. An implementation that
+    // set search_path once - on the first connection, or in a single SET after connect - would pass the one-connection
+    // check above and still read the default schema here.
+    const two = localPgPool(urlWithSchema(SCHEMA), 2);
+    try {
+      const sql = "SELECT pg_backend_pid() AS pid, current_schema() AS s";
+      const [a, b] = await Promise.all([two.query<{ pid: number; s: string }>(sql), two.query<{ pid: number; s: string }>(sql)]);
+      expect(a.rows[0].s, "the first connection").toBe(SCHEMA);
+      expect(b.rows[0].s, "the second connection").toBe(SCHEMA);
+      expect(a.rows[0].pid, "two distinct connections were checked, not one reused twice").not.toBe(b.rows[0].pid);
+    } finally {
+      await two.end();
+    }
+  });
+
+  it.skipIf(!local)("qa:TC missing SHO-3011 AC4: a schema whose name has capitals is reached by exactly that name", async () => {
+    // Prisma creates whatever ?schema= spells, capitals included, so the pool must land on that exact schema. The
+    // start-up option is quoted for this reason: unquoted, Postgres folds the name to lower case, search_path then names
+    // a schema that does not exist and current_schema() is NULL - a wrong answer, not an error, which is the defect.
+    const MIXED = `ZZ_Sho3011_Mixed_${randomUUID().replace(/-/g, "").slice(0, 8)}`;
+    const MIXED_TABLE = `zz_mixed_${randomUUID().replace(/-/g, "").slice(0, 8)}`;
+    await admin!.query(`CREATE SCHEMA "${MIXED}"`);
+    try {
+      const unquoted = new pg.Pool({ connectionString: urlWithSchema(MIXED), max: 1, options: `-c search_path=${MIXED}` });
+      try {
+        expect((await unquoted.query<{ s: string | null }>("SELECT current_schema() AS s")).rows[0].s,
+          "unquoted, the name is folded to lower case and the schema is missed, without an error").not.toBe(MIXED);
+      } finally {
+        await unquoted.end();
+      }
+
+      const ours = localPgPool(urlWithSchema(MIXED));
+      try {
+        expect((await ours.query<{ s: string }>("SELECT current_schema() AS s")).rows[0].s, "the URL's schema, capitals and all").toBe(MIXED);
+        await ours.query(`CREATE TABLE ${MIXED_TABLE} (value text)`);
+        const where = (await admin!.query<{ nspname: string }>(
+          "SELECT n.nspname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE c.relname = $1",
+          [MIXED_TABLE],
+        )).rows.map((r) => r.nspname);
+        expect(where, "the unqualified table landed in the capitalised schema, not a folded twin").toEqual([MIXED]);
+      } finally {
+        await ours.end();
+      }
+    } finally {
+      // Only the throwaway schema this block made, named the way this block named it.
+      if (/^ZZ_Sho3011_Mixed_[a-z0-9]+$/.test(MIXED)) await admin!.query(`DROP SCHEMA IF EXISTS "${MIXED}" CASCADE`);
+    }
+  });
+
+  it("qa:TC missing SHO-3011 AC3: a non-local database, an ambiguous URL and a hostile schema name are refused, without echoing the URL", () => {
+    const secret = "s3cretDbPw9";
+    for (const bad of [
+      `postgresql://sho:${secret}@db.example.com:5432/sho_test?schema=sho_test`,
+      `postgresql://sho:${secret}@10.255.0.9:5432/sho_test?schema=sho_test`,
+    ]) {
+      let message = "";
+      try { localPgPool(bad); } catch (e) { message = (e as Error).message; }
+      expect(message).toMatch(/local database/);
+      expect(message).not.toContain(secret);
+      expect(message).not.toContain("db.example.com");
+    }
+    const local = `postgresql://sho:${secret}@127.0.0.1:55432/sho_test`;
+    expect(() => localPgPool(`${local}?schema=${encodeURIComponent('public; DROP TABLE "User"')}`)).toThrow(/plain identifier/);
+    expect(() => localPgPool(`${local}?schema=one&schema=two`)).toThrow(/more than one schema/);
+    expect(() => localPgPool(`${local}?schema=sho_test&options=-c%20search_path%3Dpublic`)).toThrow(/\?options=/);
+    expect(() => localPgPool(undefined)).toThrow(/not set/);
+  });
+
+  it("qa:TC missing SHO-3011 AC1: the story spec builds its pool with that helper, not a bare pg pool", () => {
+    const spec = readFileSync(path.join(process.cwd(), "tests/e2e/stories/APL-2742.spec.ts"), "utf8");
+    expect(spec).toContain('from "../helpers/local-db-pool"');
+    expect(spec).toContain("localPgPool(process.env.DATABASE_URL)");
+    // AC1 covers every SQL read, so no second client may be built from DATABASE_URL either: a pg.Client drops ?schema=
+    // exactly as the pre-SHO-3011 pool did, and a ban on `new pg.Pool(` alone would let it through.
+    for (const construction of ["new pg.Pool(", "new pg.Client("]) expect(spec, construction).not.toContain(construction);
+
+    // This file has to hold to the same rule for its own connections. The bare constructions it still contains are
+    // controls that must land OFF the schema (a pool and a client on a throwaway schema), so neither may be built from
+    // DATABASE_URL itself; anything built from RAW has to come from the helper above. Written as a pattern, not as a
+    // literal: a literal would match itself in this source and could never pass.
+    const self = readFileSync(path.join(process.cwd(), "tests/apl-2742.test.ts"), "utf8");
+    expect(self, "a connection built from DATABASE_URL without the helper").not.toMatch(/new pg\.(?:Pool|Client)\(\{ connectionString: RAW/);
+  });
+});
+

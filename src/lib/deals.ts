@@ -224,6 +224,62 @@ async function applyDetails(tx: Parameters<Parameters<typeof db.$transaction>[0]
   if (Object.keys(data).length) await tx.dealDetails.update({ where: { projectId }, data });
 }
 
+const isOpenCategory = (c: string) => (OPEN_CATEGORIES as readonly string[]).includes(c);
+
+/**
+ * SHO-US-10.2 AC3 (APL-2736). The Super Admin removes a deal stage. Without `moveTo` nothing is removed:
+ * the answer is 409 and asks which other stage of the same pipeline its items should move to.
+ * A target must not let a move skip a rule moveStage applies: open stays open, Won stays Won, Lost stays Lost,
+ * and the target asks for no reason or field the removed stage did not already ask for.
+ */
+export async function removeStage(user: Actor, stageId: string, input: { moveTo?: string | null }) {
+  requireCrm(user);
+  if (user.orgRole !== "SUPER_ADMIN") throw notFound("Stage");
+  const stage = await db.stage.findFirst({ where: { id: stageId, pipeline: { typeId: WORKSTREAM_DEAL } }, include: { pipeline: { include: { stages: { orderBy: { position: "asc" } } } } } });
+  if (!stage) throw notFound("Stage");
+  const others = stage.pipeline.stages.filter((s) => s.id !== stage.id);
+  if (stage.category === "DONE" && !others.some((s) => s.category === "DONE")) {
+    throw new ApiError(409, `${stage.pipeline.name} must keep a Done stage, so "${stage.name}" cannot be removed.`);
+  }
+  const canTake = (t: (typeof others)[number]) =>
+    (isOpenCategory(stage.category) ? isOpenCategory(t.category) : t.category === stage.category) &&
+    !(t.needsReason && !stage.needsReason) && t.requiredFields.every((f) => stage.requiredFields.includes(f));
+  // Only the stages that can take the items are offered; with none, nothing is asked.
+  const targets = others.filter(canTake);
+  if (!targets.length) {
+    throw new ApiError(409, `No other stage in ${stage.pipeline.name} can take the items in "${stage.name}", so it cannot be removed.`);
+  }
+  const items = await db.project.count({ where: { stageId: stage.id } });
+  const moveTo = clean(input.moveTo);
+  if (!moveTo) {
+    throw new ApiError(409, `Where should the ${items} item${items === 1 ? "" : "s"} in "${stage.name}" go? Choose another stage to move ${items === 1 ? "it" : "them"} to before removing this stage.`, {
+      needsMoveTo: true, items, stages: targets.map((s) => ({ id: s.id, name: s.name, category: s.category })),
+    });
+  }
+  const target = others.find((s) => s.id === moveTo);
+  if (!target) throw new ApiError(400, `Choose another stage from ${stage.pipeline.name}.`);
+  if (!canTake(target)) throw new ApiError(400, `Items in "${stage.name}" cannot move to "${target.name}". Choose a stage of the same kind.`);
+
+  return db.$transaction(async (tx) => {
+    // Lock the stage row first. A deal being moved into it meanwhile either commits before this lock, and is moved
+    // below, or waits and then fails, because the stage is gone. The foreign key is ON DELETE SET NULL: moving every project before
+    // deletion is what keeps its stage from being silently cleared.
+    const locked = await tx.$queryRaw<{ id: string }[]>`SELECT "id" FROM "Stage" WHERE "id" = ${stage.id} FOR UPDATE`;
+    if (!locked.length) throw notFound("Stage");
+    // A reason was given for the removed stage. It carries over only to a stage that also asks for one.
+    const moved = await tx.project.updateMany({
+      where: { stageId: stage.id },
+      data: { stageId: target.id, stageChangedAt: new Date(), ...(target.needsReason ? {} : { stageReason: null }) },
+    });
+    await tx.stage.delete({ where: { id: stage.id } });
+    await auditTx(tx, "STAGE_REMOVED", {
+      actorId: user.id, targetId: stage.id, targetType: "stage",
+      data: { pipeline: stage.pipeline.name, stage: stage.name, movedTo: target.name, movedToId: target.id, items: moved.count },
+    });
+    return { removed: { id: stage.id, name: stage.name }, movedTo: { id: target.id, name: target.name }, items: moved.count };
+  });
+}
+
 /** Edits the facts on a deal. Editors and the Leader may; Viewers and archived deals are refused. */
 export async function updateDealDetails(user: Actor, projectId: string, input: DealDetailsInput) {
   requireCrm(user);
