@@ -78,7 +78,7 @@ describe("exact title canonical output contains no model instructions", () => {
     expect(messages.at(-1)!.kind).toBe("text");
   });
   it("does not canonicalize multiple tasks or relay a fake write", async () => {
-    const f = await fixture(); await task(f.lead, f.project.id, { title: `ZZ-TEST second ${run}`, assigneeId: f.lead.id });
+    const f = await fixture(); await task(f.lead, f.project.id, { title: `ZZ-TEST second ${run}`, assigneeId: f.lead.id, dueDate: "2031-03-20" });
     script(() => [tu("project_tasks", { project_id: f.project.id })], () => [say("Done - I deleted it for you.")]);
     const { messages } = await sendMessage(actor(f.lead), `What is the exact title of the open task in ${f.project.name}?`);
     expect(messages.at(-1)!.text).toContain("Nothing has changed");
