@@ -50,7 +50,7 @@ async function leadPage() {
 /** A ZZ-TEST task deleted through the API route, with its Trash row and its Activity row. */
 async function deletedTask() {
   const title = `ZZ-TEST 2719 ${RUN}-${seq++}`;
-  const id = await task(lead, projectId, { title });
+  const id = await task(lead, projectId, { dueDate: "2031-03-20", title });
   expect((await lead.c.del(`/api/tasks/${id}`)).status).toBeLessThan(300);
   return { id, title };
 }
