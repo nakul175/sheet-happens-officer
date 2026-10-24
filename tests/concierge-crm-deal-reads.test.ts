@@ -56,3 +56,17 @@ it("a hidden read tool cannot bypass CRM gating by being called directly", async
  expect(turn.seen.deals.size).toBe(0);
  expect(m.block).not.toHaveBeenCalled();
 });
+it("every offered provider tool has an object root without unsupported schema combinators", () => {
+ for (const tool of conciergeTools(member)) {
+  expect(tool.input_schema.type, tool.name).toBe("object");
+  for (const key of ["oneOf", "allOf", "anyOf"]) expect(tool.input_schema, `${tool.name}: provider rejects top-level ${key}`).not.toHaveProperty(key);
+ }
+});
+
+it("notes target validation still refuses both or neither target before any read", async () => {
+ const turn = newTurn(member, new Date());
+ expect(await runTool(turn, "notes", {})).toMatchObject({ isError: true, content: "Invalid arguments." });
+ expect(await runTool(turn, "notes", { organisation_id: "o", deal_id: "d" })).toMatchObject({ isError: true, content: "Invalid arguments." });
+ expect(turn.reads.calls).toBe(0);
+ expect(turn.seen.notes.size).toBe(0);
+});
