@@ -3,7 +3,7 @@
 // are archived or deactivated afterwards. The plain Member is the second person.
 // There is no tests/e2e/jim-gate.ts. CRM_VISIBLE is read from the live /api/orgs answer, never a hard skip.
 // The file fails clearly when SHO_QA_PASS is unset. Credentials come from the environment. workers is 1 in playwright.config.ts. Traces stay off.
-import { test, expect, zz, RUN } from "../support";
+import { test as base, expect, zz, RUN } from "../support";
 import { ghost, newProject, newTask, ymd, type Who } from "../g2";
 import { raw } from "../helpers/jim-http";
 import type { Locator } from "@playwright/test";
@@ -13,6 +13,22 @@ import type { Page } from "@playwright/test";
 import { PASS, passwordOk } from "./qa";
 
 type Later = (fn: () => Promise<unknown>) => void;
+// Fail the test if cleanup fails, while attempting every owned cleanup operation.
+const test = base.extend<{ later: Later }>({ later: async ({}, use) => {
+  const cleanups: (() => Promise<unknown>)[] = [];
+  // eslint-disable-next-line react-hooks/rules-of-hooks -- Playwright fixture callback, not a React hook
+  await use(fn => { cleanups.push(fn); });
+  const failures: string[] = [];
+  for (const cleanup of cleanups.reverse()) {
+    try {
+      const result = await cleanup() as { status?: number; json?: { error?: string } };
+      const alreadyGone = result?.status === 404 && result.json?.error === "Contact not found";
+      const alreadyInactive = result?.status === 409 && /^(This organisation is already archived\.|This person is already deactivated\.|This project is already archived\.)$/.test(result.json?.error ?? "");
+      if (![200, 204].includes(result?.status ?? 0) && !alreadyGone && !alreadyInactive) failures.push(`Cleanup returned HTTP ${result?.status ?? "missing"}`);
+    } catch { failures.push("Cleanup request failed"); }
+  }
+  expect(failures, "All owned contact-story fixtures must be cleaned").toEqual([]);
+} });
 type Known = { id: string; name: string; active: boolean };
 type Contact = {
   id: string; name: string; role: string | null; email: string | null; phone: string | null;
@@ -26,8 +42,7 @@ test.beforeAll(() => {
 
 test.beforeEach(async ({ admin }) => {
   const r = await admin.api.get("/api/orgs");
-  expect(r.status, "Contact acceptance requires CRM_VISIBLE=all; off/admins refusal is covered by the CRM mode tier").toBe(200);
-  expect(r.status).toBe(200);
+  expect(r.status, "Contact acceptance requires CRM_VISIBLE=all; off/admins refusal is covered by SHO-2533 AC5 in the CRM mode tier").toBe(200);
 });
 
 async function memberCrm(member: Who) {
