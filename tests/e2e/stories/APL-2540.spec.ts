@@ -126,14 +126,13 @@ test("APL-2540 > AC4: an archived organisation stays on existing deals and canno
   const still = await partiesOf(admin, deal.id);
   expect(still.some((p) => p.role === "BUYER" && p.organisation.id === buyer.id)).toBe(true);
   await admin.page.goto(`/projects/${deal.id}`);
-  // The archived buyer is linked twice in the deal panel (beside the pipeline and in the parties line). Scope to the parties line's "Buyer:" chip.
-  const buyerParty = admin.page.getByRole("main").locator("span.chip").filter({ hasText: /^Buyer:/ });
-  // SHO-2923: the archived buyer really is linked more than once inside main, so a bare link name is ambiguous; the
-  // parties line's one "Buyer:" chip must still name exactly one link, and it is that buyer's.
-  await expect.poll(() => admin.page.getByRole("main").getByRole("link", { name: buyer.name, exact: true }).count()).toBeGreaterThan(1);
-  await expect(buyerParty).toHaveCount(1);
-  await expect(buyerParty.getByRole("link", { name: buyer.name, exact: true })).toHaveCount(1);
-  await expect(buyerParty.getByRole("link", { name: buyer.name, exact: true })).toHaveAttribute("href", `/accounts/${buyer.id}`);
+  // SHO-2998: use the named links in the Deal landmark, without parent traversal or a CSS chip class.
+  // SHO-2923: both the summary and the parties line link to this archived buyer; verify both destinations.
+  const buyerLinks = admin.page.getByRole("region", { name: "Deal", exact: true }).getByRole("link", { name: buyer.name, exact: true });
+  await expect(buyerLinks).toHaveCount(2);
+  for (const link of await buyerLinks.all()) {
+    await expect(link).toHaveAttribute("href", `/accounts/${buyer.id}`);
+  }
 
   const fresh = dealBody({ name: zz("refused deal"), organisationId: buyer.id, pipelineId: pipes.pro.id, leaderId: admin.user.id });
   const refused = await admin.api.post("/api/deals", fresh);
