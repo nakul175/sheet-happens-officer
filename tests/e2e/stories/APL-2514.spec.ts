@@ -82,13 +82,19 @@ test("AC4: Undo reverses every change on a card, and the thread lists them", asy
   const title = zz("whole");
   const due = dueBeforeNextMonday();
   const id = await newTask(admin, project.id, { title, assigneeId: admin.user.id, dueDate: due });
-  const asked = await ask(admin, `Set "${title}" to high priority and move it to Monday.`);
+  // A card row is an operation, and multiple fields on one task may correctly share one edit operation.
+  // Two distinct task IDs guarantee this criterion really tests reversing more than one operation.
+  const priorityTitle = zz("whole-priority");
+  const priorityId = await newTask(admin, project.id, { title: priorityTitle, assigneeId: admin.user.id, dueDate: due });
+  const asked = await ask(admin, `Move "${title}" to Monday and set "${priorityTitle}" to high priority.`);
   expect(asked.status, JSON.stringify(asked.json)).toBe(200);
   const card = cardOf(asked.messages);
   expect(card?.canConfirm).toBe(true);
   expect((card?.changes ?? []).length).toBeGreaterThanOrEqual(2);
   const done = await postJson(admin, `/api/concierge/cards/${card!.id}/confirm`, {});
   expect(done.status, JSON.stringify(done.json)).toBe(200);
+  expect((await taskOf(admin, id)).dueDate).not.toBe(due);
+  expect((await taskOf(admin, priorityId)).priority).toBe("HIGH");
   const summary = (done.json.messages as ConciergeMessage[])[0]?.result?.summary ?? [];
   expect(summary.length).toBeGreaterThanOrEqual(2);
   const back = await postJson(admin, `/api/concierge/cards/${card!.id}/undo`, {});
@@ -99,6 +105,8 @@ test("AC4: Undo reverses every change on a card, and the thread lists them", asy
   const task = await taskOf(admin, id);
   expect(task.dueDate).toBe(due);
   expect(task.priority).toBe("MEDIUM");
+  expect((await taskOf(admin, priorityId)).priority).toBe("MEDIUM");
+  expect((await taskOf(admin, priorityId)).dueDate).toBe(due);
 });
 
 test("AC5: a member-removal card says it cannot be undone, and the done message has no Undo", async ({ admin, member, later }) => {

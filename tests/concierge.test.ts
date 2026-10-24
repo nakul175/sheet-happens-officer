@@ -540,6 +540,32 @@ describe("clarifying questions (8.4)", () => {
     await expect(answerChoice(actor(lead), q.id, "made-up-id")).rejects.toMatchObject({ status: 400 });
   });
 
+  it("an ambiguous change shows server choices even when the model asks for a date first", async () => {
+    const lead = await account("choice-date");
+    const p = await project(lead, lead);
+    const ids: string[] = [];
+    for (let i = 0; i < 6; i++) ids.push(await task(lead, p.id, { title: `Reviewwaitdate ${i}`, dueDate: `2031-04-0${i + 1}` }));
+    script(() => [tu("find_tasks", { text: "reviewwaitdate" })], () => [say("Which date should I use?")]);
+    const q = (await ask(lead, "Move the reviewwaitdate task")).messages[1];
+    expect(q.kind).toBe("choices");
+    expect(q.choices!.filter(c => c.id !== "none" && c.id !== "narrow").map(c => c.id)).toEqual(ids.slice(0, 5));
+    expect(q.choices!.slice(-2)).toEqual([{ id: "none", label: "None of these" }, { id: "narrow", label: "Narrow it down" }]);
+    expect(await conciergeLogs(lead.id)).toHaveLength(0);
+    expect(await db.task.count({ where: { id: { in: ids }, completedAt: null } })).toBe(6);
+  });
+
+  it("the same multi-match task read remains an answer rather than a forced change selection", async () => {
+    const lead = await account("choice-read");
+    const p = await project(lead, lead);
+    for (let i = 0; i < 6; i++) await task(lead, p.id, { title: `Reviewonlyread ${i}`, dueDate: `2031-04-0${i + 1}` });
+    script(() => [tu("find_tasks", { text: "reviewonlyread" })], () => [say("I found six Reviewonlyread tasks.")]);
+    const q = (await ask(lead, "Find the reviewonlyread tasks")).messages[1];
+    expect(q.kind).toBe("answer");
+    expect(q.text).toBe("I found six Reviewonlyread tasks.");
+    expect(q.choices).toBeUndefined();
+    expect(await conciergeLogs(lead.id)).toHaveLength(0);
+  });
+
   it("more than 5 matches: the 5 most relevant plus 'None of these' and 'Narrow it down'; narrow asks for a detail (AC4)", async () => {
     const lead = await account("lead");
     const p = await project(lead, lead);

@@ -12,6 +12,7 @@ import { todayLine } from "@/lib/concierge/dates";
 import { isEcho } from "@/lib/concierge/echo";
 import { claimsWrite } from "@/lib/concierge/claims";
 import { screenOnlyHelp } from "@/lib/concierge/screen-help";
+import { taskSelectionForRequest } from "@/lib/concierge/task-selection";
 import { flat, personById, projectById, quickAnswer, taskById, QUICK_ACTIONS, type TaskRec } from "@/lib/concierge/reads";
 import { conciergeTools, newTurn, runTool, wrap, type Kind, type Turn } from "@/lib/concierge/tools";
 import { commentsEnabled } from "@/lib/flags";
@@ -177,7 +178,7 @@ function buildReply(turn: Turn, modelText: string, request: string): Stored {
   if (turn.tooMany) {
     return { kind: "text", text: `That would be ${turn.tooMany} changes, and a card can hold at most 10. Please narrow the request, for example one project or one week at a time.` };
   }
-  const pick = turn.choice ?? turn.forced;
+  const pick = turn.choice ?? turn.forced ?? taskSelectionForRequest(request, turn.ambiguous, new Set(turn.seen.tasks.keys()), turn.chosen);
   if (pick) {
     const options = choiceOptions(turn, pick.kind, pick.ids);
     if (options.length > 2) {
