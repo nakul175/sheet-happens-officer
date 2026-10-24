@@ -150,7 +150,7 @@ test("AC5: the review counts deals in each stage and how many have no value", as
   const { admin } = await cast(browser, later, []);
   const { pro } = await pipelines(admin.api);
   const org = await createOrg(admin, later, "e13 count org");
-  const deal = await createDeal(admin, later, dealBody({ name: zz("e13 no value"), organisationId: org.id, pipelineId: pro.id, leaderId: admin.user.id }));
+  const deal = await createDeal(admin, later, { ...dealBody({ name: zz("e13 no value"), organisationId: org.id, pipelineId: pro.id, leaderId: admin.user.id }), opportunityType: "RFP_RFA" });
   const data = await reviewOf(admin);
   const stage = data.counts.flatMap((p) => p.stages).find((s) => s.id === pro.stages[0].id)!;
   expect(stage.count).toBeGreaterThanOrEqual(1);

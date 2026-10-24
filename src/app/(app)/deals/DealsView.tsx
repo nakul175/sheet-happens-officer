@@ -56,7 +56,10 @@ export default function DealsView() {
       </div>
       {loading && !data && <Skeleton />}
       {error && <div className="err" role="alert">{error}</div>}
-      {data && deals.length === 0 && <div className="card empty"><b>No deals yet.</b><br />Create one to track an opportunity.<div className="empty-act"><Link className="btn" href="/deals/new">New deal</Link></div></div>}
+      {data && deals.length === 0 && <div className="card empty" role="region" aria-label="No matching deals">
+        {lifecycle === "delivery" ? <><b>No matching delivery projects.</b><br />In the Bid sales pipeline, move an existing Won deal to Ongoing Projects to begin delivery.</>
+          : <><b>No matching sales deals.</b><br />Create a deal to track an opportunity.<div className="empty-act"><Link className="btn" href="/deals/new">New deal</Link></div></>}
+      </div>}
       {data && cur && groups.map(group => {
         const t = totals(group.deals);
         return <section key={group.key} aria-label={`${group.label} ${lifecycle}`} style={{ marginBottom: 20 }}>
