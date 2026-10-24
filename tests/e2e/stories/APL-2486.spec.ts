@@ -10,7 +10,7 @@ test("AC1: a Member in two projects sees only those two, and cannot read another
   const a = await newProject(admin, later, { label: "3.2 A", members: [{ who: member }] });
   const b = await newProject(admin, later, { label: "3.2 B", members: [{ who: member }] });
   const c = await newProject(admin, later, { label: "3.2 C (member not in it)" });
-  const t = await newTask(admin, c.id, { title: zz("3.2 secret task") });
+  const t = await newTask(admin, c.id, { dueDate: "2026-11-03", title: zz("3.2 secret task") });
   const ids = ((await member.api.get("/api/projects")).json.projects as { id: string }[]).map((p) => p.id);
   expect(ids).toContain(a.id);
   expect(ids).toContain(b.id);
@@ -54,7 +54,7 @@ test("AC3: the Super Admin lists a project they are not a member of, and can act
   expect(d.members.some((m: { userId: string }) => m.userId === admin.user.id)).toBe(false);
   const all = ((await admin.api.get("/api/projects")).json.projects as { id: string }[]).map((x) => x.id);
   expect(all).toContain(p.id);
-  const r = await admin.api.post(`/api/projects/${p.id}/tasks`, { title: zz("3.2 admin task") });
+  const r = await admin.api.post(`/api/projects/${p.id}/tasks`, { dueDate: "2026-11-03", title: zz("3.2 admin task") });
   expect(r.status, JSON.stringify(r.json)).toBe(201);
 });
 
@@ -62,14 +62,14 @@ test("AC4: a Member requesting a project they are not in gets 'not found', not '
   const p = await newProject(admin, later, { label: "3.2 ac4" });
   const r = await member.api.get(`/api/projects/${p.id}`);
   expect(r.status).toBe(404);
-  const w = await member.api.post(`/api/projects/${p.id}/tasks`, { title: zz("x") });
+  const w = await member.api.post(`/api/projects/${p.id}/tasks`, { dueDate: "2026-11-03", title: zz("x") });
   expect(w.status).toBe(404);
 });
 
 test("AC5: an archived project stays readable to its members, hidden from non-members, and refuses changes", async ({ admin, member, later }) => {
   const mem = await newProject(admin, later, { label: "3.2 archived (member in)", members: [{ who: member }] });
   const out = await newProject(admin, later, { label: "3.2 archived (member out)" });
-  const t = await newTask(admin, mem.id);
+  const t = await newTask(admin, mem.id, { dueDate: "2026-11-03" });
   expect((await admin.api.post(`/api/projects/${mem.id}/archive`)).status).toBe(200);
   expect((await admin.api.post(`/api/projects/${out.id}/archive`)).status).toBe(200);
   expect((await member.api.get(`/api/projects/${mem.id}`)).status).toBe(200);
@@ -79,17 +79,17 @@ test("AC5: an archived project stays readable to its members, hidden from non-me
   expect(archivedList).toContain(mem.id);
   expect(archivedList).not.toContain(out.id);
   expect((await admin.api.patch(`/api/tasks/${t}`, { title: zz("changed") })).status).toBe(409);
-  expect((await admin.api.post(`/api/projects/${mem.id}/tasks`, { title: zz("new") })).status).toBe(409);
+  expect((await admin.api.post(`/api/projects/${mem.id}/tasks`, { dueDate: "2026-11-03", title: zz("new") })).status).toBe(409);
 });
 
 test("AC6: search shows a Member nothing from a project they are not in (archived ones only when asked)", async ({ admin, member, later }) => {
   const word = `zzsearch${Date.now().toString(36)}`;
   const mine = await newProject(admin, later, { label: "3.2 search mine", members: [{ who: member }] });
   const secret = await newProject(admin, later, { label: "3.2 search secret" });
-  await newTask(admin, mine.id, { title: `${word} visible`, assigneeId: member.user.id });
-  await newTask(admin, secret.id, { title: `${word} hidden` });
+  await newTask(admin, mine.id, { dueDate: "2026-11-03", title: `${word} visible`, assigneeId: member.user.id });
+  await newTask(admin, secret.id, { dueDate: "2026-11-03", title: `${word} hidden` });
   const old = await newProject(admin, later, { label: "3.2 search archived", members: [{ who: member }] });
-  await newTask(admin, old.id, { title: `${word} archived task`, assigneeId: member.user.id });
+  await newTask(admin, old.id, { dueDate: "2026-11-03", title: `${word} archived task`, assigneeId: member.user.id });
   expect((await admin.api.post(`/api/projects/${old.id}/archive`)).status).toBe(200);
   const titles = async (extra = "") => ((await member.api.get(`/api/search?q=${word}${extra}`)).json.tasks as { title: string }[]).map((t) => t.title);
   expect(await titles()).toEqual([`${word} visible`]);

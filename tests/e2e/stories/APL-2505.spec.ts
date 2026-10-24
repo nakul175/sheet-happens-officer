@@ -20,7 +20,7 @@ test("APL-2505 > AC1: undoing an unchanged edit restores the previous values and
   const p = await newProject(admin, later, { label: "undo plain" });
   const title = zz("before title");
   const detail = zz("before detail");
-  const id = await newTask(admin, p.id, { title, description: detail });
+  const id = await newTask(admin, p.id, { dueDate: "2026-11-03", title, description: detail });
   const edited = await editTask(admin, id, { title: zz("after title"), description: zz("after detail") });
   expect(edited.status, JSON.stringify(edited.json)).toBe(200);
   expect(edited.headers["x-undo-id"], "the edit is undoable").toBeTruthy();
@@ -43,7 +43,7 @@ test("APL-2505 > AC2: a later edit of the same field warns with Before, After an
   const original = zz("conflict before");
   const mine = zz("conflict after");
   const theirs = zz("conflict now");
-  const id = await newTask(admin, p.id, { title: original });
+  const id = await newTask(admin, p.id, { dueDate: "2026-11-03", title: original });
   const edited = await editTask(admin, id, { title: mine });
   expect(edited.status, JSON.stringify(edited.json)).toBe(200);
   const laterEdit = await editTask(member, id, { title: theirs, description: zz("their other edit") });
@@ -79,7 +79,7 @@ test("APL-2505 > AC3: Undo anyway reverts only my fields, keeps their other edit
   const mine = zz("anyway after");
   const theirs = zz("anyway now");
   const theirNote = zz("anyway note");
-  const id = await newTask(admin, p.id, { title: original, description: zz("original note") });
+  const id = await newTask(admin, p.id, { dueDate: "2026-11-03", title: original, description: zz("original note") });
   const edited = await editTask(admin, id, { title: mine });
   expect(edited.status, JSON.stringify(edited.json)).toBe(200);
   expect((await editTask(member, id, { title: theirs, description: theirNote })).status).toBe(200);
@@ -111,7 +111,7 @@ test("APL-2505 > AC4: undoing an action that sent a notice says the notice was a
   test.info().annotations.push({ type: "qa:TC", description: "qa:TC missing" });
   const p = await newProject(admin, later, { label: "undo notice", members: [{ who: member, role: "EDITOR" }] });
   const title = zz("noticed task");
-  const id = await newTask(admin, p.id, { title, assigneeId: member.user.id });
+  const id = await newTask(admin, p.id, { dueDate: "2026-11-03", title, assigneeId: member.user.id });
   const sent = (await notices(member)).find((n) => n.text === `${admin.user.name} assigned you "${title}".`);
   expect(sent, "creating the task told the assignee").toBeTruthy();
 
@@ -130,7 +130,7 @@ test("APL-2505 > AC5: an Editor undoes only their own actions; a Leader or Admin
   test.info().annotations.push({ type: "qa:TC", description: "qa:TC missing" });
   const p = await newProject(admin, later, { label: "undo who", members: [{ who: member, role: "EDITOR" }] });
   const title = zz("whose task");
-  const id = await newTask(admin, p.id, { title, assigneeId: member.user.id });
+  const id = await newTask(admin, p.id, { dueDate: "2026-11-03", title, assigneeId: member.user.id });
   const byAdmin = await editTask(admin, id, { title: zz("leader edit") });
   expect(byAdmin.status).toBe(200);
   const byMember = await editTask(member, id, { description: zz("editor edit") });
@@ -163,7 +163,7 @@ test("APL-2505 > AC6: an action older than 30 days cannot be undone and says Too
   test.info().annotations.push({ type: "qa:TC", description: "qa:TC missing" });
   const p = await newProject(admin, later, { label: "undo aged" });
   const title = zz("aged before");
-  const id = await newTask(admin, p.id, { title });
+  const id = await newTask(admin, p.id, { dueDate: "2026-11-03", title });
   const edited = await editTask(admin, id, { title: zz("aged after") });
   expect(edited.status, JSON.stringify(edited.json)).toBe(200);
   const undoId = edited.headers["x-undo-id"];
@@ -198,7 +198,7 @@ test("APL-2505 > AC7: a concierge change undoes through the same mechanism, limi
   // The card's Undo calls the same /api/actions undo AC1 to AC3 already run. This checks that path is live.
   const p = await newProject(admin, later, { label: "undo card path" });
   const title = zz("card path before");
-  const id = await newTask(admin, p.id, { title, description: zz("card path detail") });
+  const id = await newTask(admin, p.id, { dueDate: "2026-11-03", title, description: zz("card path detail") });
   const edited = await editTask(admin, id, { title: zz("card path after") });
   expect(edited.status).toBe(200);
   const undo = await admin.api.post(`/api/actions/${edited.headers["x-undo-id"]}/undo`, {});

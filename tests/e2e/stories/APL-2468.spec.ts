@@ -26,7 +26,7 @@ test("AC1: a Leader or Editor can create a task and one subtask, and a subtask o
   later(() => archiveProject(admin.api, project.id, admin.user.id as string));
   expect((await admin.api.post(`/api/projects/${project.id}/members`, { userId: editor.user.id, role: "EDITOR" })).status).toBe(201);
 
-  const parent = await editor.api.post(`/api/projects/${project.id}/tasks`, { title: zz("parent") });
+  const parent = await editor.api.post(`/api/projects/${project.id}/tasks`, { dueDate: "2026-11-03", title: zz("parent") });
   expect(parent.status, JSON.stringify(parent.json)).toBe(201);
   const parentId = parent.json.task.id as string;
   const child = await editor.api.post(`/api/projects/${project.id}/tasks`, { title: zz("child"), parentId });
@@ -51,7 +51,7 @@ test("AC2: title, description, assignee, collaborators, due date and priority ar
   later(() => archiveProject(admin.api, project.id, admin.user.id as string));
   expect((await admin.api.post(`/api/projects/${project.id}/members`, { userId: editor.user.id, role: "EDITOR" })).status).toBe(201);
   expect((await admin.api.post(`/api/projects/${project.id}/members`, { userId: mate.user.id, role: "EDITOR" })).status).toBe(201);
-  const created = await editor.api.post(`/api/projects/${project.id}/tasks`, { title: zz("draft") });
+  const created = await editor.api.post(`/api/projects/${project.id}/tasks`, { dueDate: "2026-11-03", title: zz("draft") });
   const id = created.json.task.id as string;
   const title = zz("saved");
   const description = zz("notes");
@@ -83,7 +83,7 @@ test("AC3: setting or clearing Blocked shows on the task in every view", async (
   later(() => archiveProject(admin.api, project.id, admin.user.id as string));
   expect((await admin.api.post(`/api/projects/${project.id}/members`, { userId: editor.user.id, role: "EDITOR" })).status).toBe(201);
   const title = zz("flagged");
-  const created = await editor.api.post(`/api/projects/${project.id}/tasks`, { title, assigneeId: editor.user.id });
+  const created = await editor.api.post(`/api/projects/${project.id}/tasks`, { dueDate: "2026-11-03", title, assigneeId: editor.user.id });
   const id = created.json.task.id as string;
   expect((await editor.api.patch(`/api/tasks/${id}`, { blocked: true, blockedReason: "Waiting on a file", expectedUpdatedAt: (await editor.api.get(`/api/tasks/${id}`)).json.task.updatedAt })).status).toBe(200);
 
@@ -114,7 +114,7 @@ test("AC3: setting or clearing Blocked shows on the task in every view", async (
 test("AC4: completing a parent with open subtasks asks for confirmation, then completes them; reopening makes it open", async ({ admin, later }) => {
   const project = await makeProject(admin.api, "complete", admin.user.id as string);
   later(() => archiveProject(admin.api, project.id, admin.user.id as string));
-  const parent = await admin.api.post(`/api/projects/${project.id}/tasks`, { title: zz("parent") });
+  const parent = await admin.api.post(`/api/projects/${project.id}/tasks`, { dueDate: "2026-11-03", title: zz("parent") });
   const parentId = parent.json.task.id as string;
   const child = await admin.api.post(`/api/projects/${project.id}/tasks`, { title: zz("child"), parentId });
   const childId = child.json.task.id as string;
@@ -150,7 +150,7 @@ test("AC5: a finished task with an approver waits for them, and they can approve
   later(() => archiveProject(admin.api, project.id, admin.user.id as string));
   expect((await admin.api.post(`/api/projects/${project.id}/members`, { userId: assignee.user.id, role: "EDITOR" })).status).toBe(201);
   expect((await admin.api.post(`/api/projects/${project.id}/members`, { userId: approver.user.id, role: "EDITOR" })).status).toBe(201);
-  const created = await admin.api.post(`/api/projects/${project.id}/tasks`, { title: zz("review"), assigneeId: assignee.user.id });
+  const created = await admin.api.post(`/api/projects/${project.id}/tasks`, { dueDate: "2026-11-03", title: zz("review"), assigneeId: assignee.user.id });
   const id = created.json.task.id as string;
   expect((await admin.api.put(`/api/tasks/${id}/approver`, { approverId: approver.user.id, expectedUpdatedAt: (await admin.api.get(`/api/tasks/${id}`)).json.task.updatedAt })).status).toBe(200);
 
@@ -178,11 +178,11 @@ test("AC6: a Viewer cannot write a task", async ({ admin, browser, anon, later }
   const project = await makeProject(admin.api, "viewer", admin.user.id as string);
   later(() => archiveProject(admin.api, project.id, admin.user.id as string));
   expect((await admin.api.post(`/api/projects/${project.id}/members`, { userId: viewer.user.id, role: "VIEWER" })).status).toBe(201);
-  const created = await admin.api.post(`/api/projects/${project.id}/tasks`, { title: zz("locked") });
+  const created = await admin.api.post(`/api/projects/${project.id}/tasks`, { dueDate: "2026-11-03", title: zz("locked") });
   const id = created.json.task.id as string;
 
   for (const attempt of [
-    () => viewer.api.post(`/api/projects/${project.id}/tasks`, { title: zz("nope") }),
+    () => viewer.api.post(`/api/projects/${project.id}/tasks`, { dueDate: "2026-11-03", title: zz("nope") }),
     () => viewer.api.patch(`/api/tasks/${id}`, { title: zz("nope") }),
     () => viewer.api.post(`/api/tasks/${id}/complete`, {}),
     () => viewer.api.del(`/api/tasks/${id}`),

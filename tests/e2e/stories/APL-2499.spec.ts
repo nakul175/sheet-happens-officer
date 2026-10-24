@@ -37,7 +37,7 @@ test("AC1: a Leader or Admin adds a Section and it appears on the board and in t
 
 test("AC2: deleting a Section with tasks needs a destination and never deletes the tasks", async ({ admin, later }) => {
   const p = await proj(admin, "sec-delete", later);
-  const t = await mk(admin, p.id, zz("stays"), { sectionId: p.doing });
+  const t = await mk(admin, p.id, zz("stays"), { dueDate: "2026-11-03", sectionId: p.doing });
   const noDest = await admin.api.del(`/api/projects/${p.id}/sections/${p.doing}`);
   expect(noDest.status).toBe(400);
   expect((await admin.api.get(`/api/tasks/${t}`)).status).toBe(200);
@@ -68,7 +68,7 @@ test("AC3: an Editor or Viewer cannot change Sections", async ({ admin, member, 
 
 test("AC4: tasks moved into the done Section count as complete", async ({ admin, later }) => {
   const p = await proj(admin, "sec-done", later);
-  const t = await mk(admin, p.id, zz("to finish"));
+  const t = await mk(admin, p.id, zz("to finish"), { dueDate: "2026-11-03" });
   expect((await admin.api.get(`/api/tasks/${t}`)).json.task.completedAt).toBeNull();
   expect((await admin.api.post(`/api/tasks/${t}/move`, { sectionId: p.done, expectedUpdatedAt: (await getTask(admin, t)).updatedAt })).status).toBe(200);
   expect((await admin.api.get(`/api/tasks/${t}`)).json.task.completedAt).not.toBeNull();

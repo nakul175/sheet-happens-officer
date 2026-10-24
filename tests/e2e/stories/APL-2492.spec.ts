@@ -5,7 +5,10 @@ import { getTask, newProject, newTask, ymd } from "../g2";
 
 test("AC1: an Editor changes the due date; it shows on the task and is logged with its before-state", async ({ admin, member, later }) => {
   const p = await newProject(admin, later, { label: "4.2 date", members: [{ who: member, role: "EDITOR" }] });
-  const t = await newTask(member, p.id);
+  const t = await newTask(member, p.id, { dueDate: "2026-11-03" });
+  // Keep the original no-date before-state without violating the new-task contract.
+  expect((await member.api.patch(`/api/tasks/${t}`, { dueDate: null, expectedUpdatedAt: (await getTask(member, t)).updatedAt })).status).toBe(200);
+  expect((await getTask(member, t)).dueDate).toBeNull();
   expect((await member.api.patch(`/api/tasks/${t}`, { dueDate: ymd(5), expectedUpdatedAt: (await getTask(member, t)).updatedAt })).status).toBe(200);
   expect((await getTask(admin, t)).dueDate).toBe(ymd(5));
   const items = (await admin.api.get(`/api/projects/${p.id}/activity`)).json.items as { what: string; kind: string; undo: string }[];
@@ -20,7 +23,7 @@ test("AC1: an Editor changes the due date; it shows on the task and is logged wi
 
 test("AC2: an empty title is refused with 'Give the task a title.' (API and screen)", async ({ admin, later }) => {
   const p = await newProject(admin, later, { label: "4.2 title" });
-  const t = await newTask(admin, p.id);
+  const t = await newTask(admin, p.id, { dueDate: "2026-11-03" });
   const r = await admin.api.patch(`/api/tasks/${t}`, { title: "   ", expectedUpdatedAt: (await getTask(admin, t)).updatedAt });
   expect(r.status).toBe(400);
   expect(JSON.stringify(r.json)).toContain("Give the task a title.");
@@ -36,7 +39,7 @@ test("AC2: an empty title is refused with 'Give the task a title.' (API and scre
 
 test("AC3: a Viewer sees every field read-only and the API refuses; an archived project is read-only for everyone", async ({ admin, member, later }) => {
   const p = await newProject(admin, later, { label: "4.2 viewer", members: [{ who: member, role: "VIEWER" }] });
-  const t = await newTask(admin, p.id);
+  const t = await newTask(admin, p.id, { dueDate: "2026-11-03" });
   expect((await member.api.patch(`/api/tasks/${t}`, { title: zz("x"), expectedUpdatedAt: (await getTask(member, t)).updatedAt })).status).toBe(403);
   await member.page.goto(`/projects/${p.id}?task=${t}`);
   await expect(member.page.getByLabel("Title", { exact: true })).toHaveAttribute("readonly", "");
@@ -52,7 +55,7 @@ test("AC3: a Viewer sees every field read-only and the API refuses; an archived 
 
 test("AC4: a save on a task someone else changed is refused, names them, shows current values (API)", async ({ admin, member, later }) => {
   const p = await newProject(admin, later, { label: "4.2 stale api", members: [{ who: member, role: "EDITOR" }] });
-  const t = await newTask(admin, p.id);
+  const t = await newTask(admin, p.id, { dueDate: "2026-11-03" });
   const seen = (await getTask(member, t)).updatedAt;
   expect((await admin.api.patch(`/api/tasks/${t}`, { dueDate: ymd(3), expectedUpdatedAt: (await getTask(admin, t)).updatedAt })).status).toBe(200);
   const r = await member.api.patch(`/api/tasks/${t}`, { title: zz("mine"), expectedUpdatedAt: seen });
@@ -65,7 +68,7 @@ test("AC4: a save on a task someone else changed is refused, names them, shows c
 
 test("AC4: on the screen the stale warning keeps my edit and 'Re-apply my edit' saves it", async ({ admin, member, later }) => {
   const p = await newProject(admin, later, { label: "4.2 stale ui", members: [{ who: member, role: "EDITOR" }] });
-  const t = await newTask(admin, p.id);
+  const t = await newTask(admin, p.id, { dueDate: "2026-11-03" });
   await admin.page.goto(`/projects/${p.id}?task=${t}`);
   const title = admin.page.getByLabel("Title", { exact: true });
   await expect(title).toBeVisible();

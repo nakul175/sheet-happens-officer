@@ -32,7 +32,7 @@ const rows = async (who: Who, p: string) => (await who.api.get(`/api/projects/${
 test("AC1: each write leaves one row with who, what, and the before and after values", async ({ admin, later }) => {
   test.info().annotations.push({ type: "qa:TC", description: "qa:TC missing" });
   const p = await proj(admin, "log-rows", later);
-  const t = await mk(admin, p, zz("old name"));
+  const t = await mk(admin, p, zz("old name"), { dueDate: "2026-11-03" });
   expect((await patchCurrent(admin, t, { priority: "HIGH" })).status).toBe(200);
   expect((await admin.api.del(`/api/tasks/${t}`)).status).toBe(204);
   const items = await rows(admin, p);
@@ -48,7 +48,7 @@ test("AC1: each write leaves one row with who, what, and the before and after va
 test("APL-2504 AC2: a change made on screen is not tagged via concierge", async ({ admin, later }) => {
   test.info().annotations.push({ type: "qa:TC", description: "qa:TC missing" });
   const p = await proj(admin, "log-via", later);
-  const t = await mk(admin, p, zz("screen write"));
+  const t = await mk(admin, p, zz("screen write"), { dueDate: "2026-11-03" });
   expect((await patchCurrent(admin, t, { priority: "HIGH" })).status).toBe(200);
   const screen = (await rows(admin, p)).find((r) => /changed priority/.test(r.what));
   expect(screen?.via).toBe("screen");
@@ -66,7 +66,7 @@ test("APL-2504 AC2: a change made through the concierge carries a via concierge 
   await cleanChat(admin, later);
   const p = await proj(admin, "log-via-live", later);
   const title = zz("concierge priority");
-  await mk(admin, p, title);
+  await mk(admin, p, title, { dueDate: "2026-11-03" });
   const asked = await ask(admin, `Set the priority of "${title}" to Low.`);
   expect(asked.status, JSON.stringify(asked.json)).toBe(200);
   const card = cardOf(asked.messages);
@@ -92,8 +92,8 @@ test("AC3: a Member cannot read another project's rows; a Leader reads their own
   test.info().annotations.push({ type: "qa:TC", description: "qa:TC missing" });
   const mine = await proj(admin, "log-led", later, member.user.id); // the member leads this project
   const other = await proj(admin, "log-other", later); // the member is not in this one
-  await mk(admin, mine, zz("led task"));
-  await mk(admin, other, zz("other task"));
+  await mk(admin, mine, zz("led task"), { dueDate: "2026-11-03" });
+  await mk(admin, other, zz("other task"), { dueDate: "2026-11-03" });
   expect((await member.api.get(`/api/projects/${mine}/activity`)).status).toBe(200);
   expect((await rows(member, mine)).some((r) => r.what.includes(zz("led task")))).toBe(true);
   expect((await member.api.get(`/api/projects/${other}/activity`)).status).toBe(404);
@@ -105,7 +105,7 @@ test("AC3: a Member cannot read another project's rows; a Leader reads their own
 test("AC4: a Leader or Admin opens Activity and sees the project's rows newest first; a Viewer is refused", async ({ admin, member, later }) => {
   test.info().annotations.push({ type: "qa:TC", description: "qa:TC missing" });
   const p = await proj(admin, "log-screen", later);
-  const t = await mk(admin, p, zz("screen task"));
+  const t = await mk(admin, p, zz("screen task"), { dueDate: "2026-11-03" });
   expect((await patchCurrent(admin, t, { priority: "HIGH" })).status).toBe(200);
   await admin.page.goto(`/projects/${p}/activity`);
   // SHO-US-14.14 turned the When/Who/What/How table into one sentence per row (who, what, local date, channel chip, Undo).
@@ -132,8 +132,8 @@ test("AC4 (Editor, per SHO-US-14.14): an Editor sees only rows about their own t
   const p = await proj(admin, "log-editor", later);
   expect((await admin.api.post(`/api/projects/${p}/members`, { userId: member.user.id, role: "EDITOR" })).status).toBe(201);
   later(() => admin.api.del(`/api/projects/${p}/members/${member.user.id}?handoverTo=${admin.user.id}`));
-  await mk(admin, p, zz("leader's task"));
-  await mk(member, p, zz("editor's task"));
+  await mk(admin, p, zz("leader's task"), { dueDate: "2026-11-03" });
+  await mk(member, p, zz("editor's task"), { dueDate: "2026-11-03" });
   const seen = (await rows(member, p)).map((r) => r.what).join(" | ");
   expect(seen).toContain(zz("editor's task"));
   expect(seen).not.toContain(zz("leader's task"));
@@ -143,7 +143,7 @@ test("AC4 (Editor, per SHO-US-14.14): an Editor sees only rows about their own t
 test("APL-2504 AC5: rows older than 12 months are removed and a newer row stays", async ({ admin, later }) => {
   test.info().annotations.push({ type: "qa:TC", description: "qa:TC missing" });
   const p = await proj(admin, "log-year", later);
-  const t = await mk(admin, p, zz("kept row"));
+  const t = await mk(admin, p, zz("kept row"), { dueDate: "2026-11-03" });
   const items = (await admin.api.get(`/api/projects/${p}/activity`)).json.items as { id: string; what: string }[];
   const created = items.find((i) => i.what.includes(zz("kept row")) && /added/.test(i.what));
   expect(created, "the new row is still in the log").toBeTruthy();
@@ -172,7 +172,7 @@ test("APL-2504 AC5: action rows are kept for 12 months in the source @static", a
 test("APL-2504 AC6: Undo is disabled with Too old to undo after 30 days", async ({ admin, later }) => {
   test.info().annotations.push({ type: "qa:TC", description: "qa:TC missing" });
   const p = await proj(admin, "log-old", later);
-  const t = await mk(admin, p, zz("age me"));
+  const t = await mk(admin, p, zz("age me"), { dueDate: "2026-11-03" });
   expect((await patchCurrent(admin, t, { priority: "LOW" })).status).toBe(200);
   const items = (await admin.api.get(`/api/projects/${p}/activity`)).json.items as { id: string; what: string; undo: string }[];
   const row = items.find((i) => /changed priority/.test(i.what));

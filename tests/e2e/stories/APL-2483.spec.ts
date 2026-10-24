@@ -32,7 +32,7 @@ test.describe("SHO-US-2.4 / APL-2483", () => {
     const p = await project(admin, later, "2.4 ac1");
     await add(admin, p.id, leaver.id, "EDITOR");
     await add(admin, p.id, taker.id, "EDITOR");
-    const t = await task(admin, p.id, leaver.id);
+    const t = await task(admin, p.id, leaver.id, { dueDate: "2026-11-03" });
     const r = await admin.api.post(`/api/team/${leaver.id}/deactivate`, { reassign: taker.id });
     expect(r.status, JSON.stringify(r.json)).toBe(200);
     expect(r.json.fellBack).toEqual([]);
@@ -48,8 +48,8 @@ test.describe("SHO-US-2.4 / APL-2483", () => {
     await add(admin, p.id, leaver.id, "EDITOR");
     await add(admin, p.id, viewer.id, "VIEWER");
     await add(admin, q.id, leaver.id, "EDITOR");
-    const tp = await task(admin, p.id, leaver.id);
-    const tq = await task(admin, q.id, leaver.id);
+    const tp = await task(admin, p.id, leaver.id, { dueDate: "2026-11-03" });
+    const tq = await task(admin, q.id, leaver.id, { dueDate: "2026-11-03" });
 
     const r = await admin.api.post(`/api/team/${leaver.id}/deactivate`, { reassign: viewer.id });
     expect(r.status, JSON.stringify(r.json)).toBe(200);
@@ -66,7 +66,7 @@ test.describe("SHO-US-2.4 / APL-2483", () => {
     const leaver = await person(admin, later, "leaver2ui");
     const p = await project(admin, later, "2.4 ac2 ui");
     await add(admin, p.id, leaver.id, "EDITOR");
-    await task(admin, p.id, leaver.id);
+    await task(admin, p.id, leaver.id, { dueDate: "2026-11-03" });
     await admin.page.goto("/team");
     const row = admin.page.locator("tr", { hasText: leaver.name });
     await expect(row).toBeVisible({ timeout: 60_000 });
@@ -86,8 +86,8 @@ test.describe("SHO-US-2.4 / APL-2483", () => {
     const q = await project(admin, later, "2.4 ac3 b");
     await add(admin, p.id, leaver.id, "EDITOR");
     await add(admin, q.id, leaver.id, "EDITOR");
-    const tp = await task(admin, p.id, leaver.id);
-    const tq = await task(admin, q.id, leaver.id);
+    const tp = await task(admin, p.id, leaver.id, { dueDate: "2026-11-03" });
+    const tq = await task(admin, q.id, leaver.id, { dueDate: "2026-11-03" });
     const r = await admin.api.post(`/api/team/${leaver.id}/deactivate`, { reassign: "leaders" });
     expect(r.status).toBe(200);
     expect(r.json.moved).toBeGreaterThanOrEqual(2);
@@ -116,7 +116,7 @@ test.describe("SHO-US-2.4 / APL-2483", () => {
     const leaver = await person(admin, later, "leaver5");
     const p = await project(admin, later, "2.4 ac5");
     await add(admin, p.id, leaver.id, "EDITOR");
-    await task(admin, p.id, leaver.id);
+    await task(admin, p.id, leaver.id, { dueDate: "2026-11-03" });
     expect((await admin.api.post(`/api/team/${leaver.id}/deactivate`, { reassign: "leaders" })).status).toBe(200);
     const after = await admin.api.get("/api/notifications?limit=50");
     const notes = after.json.items as { text: string; href: string }[];
@@ -132,7 +132,7 @@ test.describe("SHO-US-2.4 / APL-2483", () => {
     await add(admin, p.id, member.user.id, "EDITOR");
     later(() => admin.api.del(`/api/projects/${p.id}/members/${member.user.id}?handoverTo=${admin.user.id}`));
     const title = zz("handed over");
-    await task(admin, p.id, leaver.id, { title });
+    await task(admin, p.id, leaver.id, { dueDate: "2026-11-03", title });
     const read = async () => (await member.api.get("/api/notifications?limit=200")).json as { unread: number; items: { id: string; text: string }[] };
     const before = await read();
     expect((await admin.api.post(`/api/team/${leaver.id}/deactivate`, { reassign: member.user.id })).status).toBe(200);
@@ -151,7 +151,7 @@ test.describe("SHO-US-2.4 / APL-2483", () => {
     const p = await project(admin, later, "2.4 ac6");
     await add(admin, p.id, leaver.id, "EDITOR");
     await add(admin, p.id, taker.id, "EDITOR");
-    const parent = await task(admin, p.id, admin.user.id);
+    const parent = await task(admin, p.id, admin.user.id, { dueDate: "2026-11-03" });
     const sub = await task(admin, p.id, leaver.id, { parentId: parent });
     expect((await admin.api.post(`/api/team/${leaver.id}/deactivate`, { reassign: taker.id })).status).toBe(200);
     expect(await assignee(admin, sub)).toBe(taker.id);

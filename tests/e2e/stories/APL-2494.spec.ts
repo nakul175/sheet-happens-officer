@@ -9,7 +9,7 @@ const count = async (who: { api: Api }, text: string) =>
 test("AC1: a blocked task stays in its Section and shows a Blocked badge on the list (API and screen)", async ({ admin, later }) => {
   const p = await newProject(admin, later, { label: "4.4 badge" });
   const title = zz("4.4 stuck");
-  const t = await newTask(admin, p.id, { title, sectionId: p.doing });
+  const t = await newTask(admin, p.id, { dueDate: "2026-11-03", title, sectionId: p.doing });
   const r = await admin.api.patch(`/api/tasks/${t}`, { blocked: true, blockedReason: "Waiting on data", expectedUpdatedAt: (await getTask(admin, t)).updatedAt });
   expect(r.status).toBe(200);
   const got = await getTask(admin, t);
@@ -23,7 +23,7 @@ test("AC1: a blocked task stays in its Section and shows a Blocked badge on the 
 test("AC2: clearing the flag removes the badge and the reason", async ({ admin, later }) => {
   const p = await newProject(admin, later, { label: "4.4 clear" });
   const title = zz("4.4 cleared");
-  const t = await newTask(admin, p.id, { title });
+  const t = await newTask(admin, p.id, { dueDate: "2026-11-03", title });
   await admin.api.patch(`/api/tasks/${t}`, { blocked: true, blockedReason: "Waiting", expectedUpdatedAt: (await getTask(admin, t)).updatedAt });
   const r = await admin.api.patch(`/api/tasks/${t}`, { blocked: false, expectedUpdatedAt: (await getTask(admin, t)).updatedAt });
   expect(r.status).toBe(200);
@@ -38,7 +38,7 @@ test("AC2: clearing the flag removes the badge and the reason", async ({ admin, 
 
 test("AC2: ticking 'This task is blocked' in the task panel sets and clears it (screen)", async ({ admin, later }) => {
   const p = await newProject(admin, later, { label: "4.4 panel" });
-  const t = await newTask(admin, p.id);
+  const t = await newTask(admin, p.id, { dueDate: "2026-11-03" });
   await admin.page.goto(`/projects/${p.id}?task=${t}`);
   const box = admin.page.getByRole("dialog").getByLabel("This task is blocked");
   await box.click();
@@ -51,7 +51,7 @@ test("AC2: ticking 'This task is blocked' in the task panel sets and clears it (
 
 test("AC3: a Viewer cannot set or clear the flag, and nobody can in an archived project", async ({ admin, member, later }) => {
   const p = await newProject(admin, later, { label: "4.4 viewer", members: [{ who: member, role: "VIEWER" }] });
-  const t = await newTask(admin, p.id);
+  const t = await newTask(admin, p.id, { dueDate: "2026-11-03" });
   expect((await member.api.patch(`/api/tasks/${t}`, { blocked: true, expectedUpdatedAt: (await getTask(member, t)).updatedAt })).status).toBe(403);
   await admin.api.patch(`/api/tasks/${t}`, { blocked: true, blockedReason: "x", expectedUpdatedAt: (await getTask(admin, t)).updatedAt });
   expect((await member.api.patch(`/api/tasks/${t}`, { blocked: false, expectedUpdatedAt: (await getTask(member, t)).updatedAt })).status).toBe(403);
@@ -62,7 +62,7 @@ test("AC3: a Viewer cannot set or clear the flag, and nobody can in an archived 
 test("AC4: the Leader gets one notice naming the task, who flagged and why; none when the Leader flags or when cleared", async ({ admin, member, later }) => {
   const p = await newProject(admin, later, { label: "4.4 notice", members: [{ who: member, role: "EDITOR" }] });
   const title = zz("4.4 notice task");
-  const t = await newTask(member, p.id, { title });
+  const t = await newTask(member, p.id, { dueDate: "2026-11-03", title });
   expect(await count(admin, title)).toHaveLength(0);
   expect((await member.api.patch(`/api/tasks/${t}`, { blocked: true, blockedReason: "Need the budget", expectedUpdatedAt: (await getTask(member, t)).updatedAt })).status).toBe(200);
   const first = await count(admin, title);
@@ -78,7 +78,7 @@ test("AC4: the Leader gets one notice naming the task, who flagged and why; none
   expect(await count(admin, title)).toHaveLength(2);
   // The Leader flagging their own task sends no notice to the Leader.
   const own = zz("4.4 leader flags");
-  const lt = await newTask(admin, p.id, { title: own });
+  const lt = await newTask(admin, p.id, { dueDate: "2026-11-03", title: own });
   await admin.api.patch(`/api/tasks/${lt}`, { blocked: true, blockedReason: "mine", expectedUpdatedAt: (await getTask(admin, lt)).updatedAt });
   expect(await count(admin, own)).toHaveLength(0);
 });

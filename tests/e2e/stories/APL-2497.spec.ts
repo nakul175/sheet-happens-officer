@@ -23,7 +23,9 @@ const mk = async (admin: Who, p: string, title: string, extra: Record<string, un
 
 test("AC1: tasks sit under their Sections, soonest due first, undated last", async ({ admin, later }) => {
   const p = await proj(admin, "list-order", later);
-  const c = await mk(admin, p.id, zz("no date"));
+  const c = await mk(admin, p.id, zz("no date"), { dueDate: "2026-11-03" });
+  expect((await admin.api.patch(`/api/tasks/${c}`, { dueDate: null, expectedUpdatedAt: (await admin.api.get(`/api/tasks/${c}`)).json.task.updatedAt })).status).toBe(200);
+  expect((await admin.api.get(`/api/tasks/${c}`)).json.task.dueDate).toBeNull();
   const b = await mk(admin, p.id, zz("in 5"), { dueDate: ist(5) });
   const a = await mk(admin, p.id, zz("in 1"), { dueDate: ist(1) });
   const api = (await admin.api.get(`/api/projects/${p.id}/tasks`)).json.sections.find((s: { id: string }) => s.id === p.todo);
@@ -48,7 +50,7 @@ test("AC2: a long list loads page by page in the same order", async ({ admin, la
 
 test("AC3: a person who is not a member cannot load the project", async ({ admin, member, later }) => {
   const p = await proj(admin, "list-private", later);
-  await mk(admin, p.id, zz("secret row"));
+  await mk(admin, p.id, zz("secret row"), { dueDate: "2026-11-03" });
   expect((await member.api.get(`/api/projects/${p.id}`)).status).toBe(404);
   expect((await member.api.get(`/api/projects/${p.id}/tasks`)).status).toBe(404);
   await member.page.goto(`/projects/${p.id}`);
@@ -60,7 +62,7 @@ test("AC4: a Done section with more than 10 shows the 10 most recent and Show al
   test.setTimeout(120_000);
   const p = await proj(admin, "list-done", later);
   for (let i = 1; i <= 12; i++) {
-    const id = await mk(admin, p.id, zz(`d${i}`));
+    const id = await mk(admin, p.id, zz(`d${i}`), { dueDate: "2026-11-03" });
     expect((await admin.api.post(`/api/tasks/${id}/complete`, { expectedUpdatedAt: (await getTask(admin, id)).updatedAt })).status).toBe(200);
   }
   await admin.page.goto(`/projects/${p.id}`);
@@ -73,9 +75,9 @@ test("AC4: a Done section with more than 10 shows the 10 most recent and Show al
 
 test("AC5: an archived project shows its list read-only", async ({ admin, later }) => {
   const p = await proj(admin, "list-archived", later);
-  await mk(admin, p.id, zz("kept"));
+  await mk(admin, p.id, zz("kept"), { dueDate: "2026-11-03" });
   expect((await admin.api.post(`/api/projects/${p.id}/archive`)).status).toBe(200);
-  expect((await admin.api.post(`/api/projects/${p.id}/tasks`, { title: zz("late") })).status).toBe(409);
+  expect((await admin.api.post(`/api/projects/${p.id}/tasks`, { dueDate: "2026-11-03", title: zz("late") })).status).toBe(409);
   await admin.page.goto(`/projects/${p.id}`);
   await expect(admin.page.getByText("This project is archived and read-only.")).toBeVisible();
   await expect(admin.page.getByText(zz("kept")).first()).toBeVisible();

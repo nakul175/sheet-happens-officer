@@ -45,7 +45,7 @@ test("AC2: a Viewer cannot drag cards", async ({ admin, member, later }) => {
   const p = await proj(admin, "board-viewer", later);
   expect((await admin.api.post(`/api/projects/${p.id}/members`, { userId: member.user.id, role: "VIEWER" })).status).toBe(201);
   later(() => admin.api.del(`/api/projects/${p.id}/members/${member.user.id}?handoverTo=${admin.user.id}`));
-  const t = await mk(admin, p.id, zz("viewer card"));
+  const t = await mk(admin, p.id, zz("viewer card"), { dueDate: "2026-11-03" });
   await board(member.page, p.id);
   const card = member.page.locator(".bcard", { hasText: zz("viewer card") });
   await expect(card).toBeVisible();
@@ -56,7 +56,7 @@ test("AC2: a Viewer cannot drag cards", async ({ admin, member, later }) => {
 test("AC3: four columns show at 1280 px without the page scrolling sideways", async ({ admin, later }) => {
   const p = await proj(admin, "board-width", later);
   expect((await admin.api.post(`/api/projects/${p.id}/sections`, { name: "Client review" })).status).toBe(201);
-  await mk(admin, p.id, zz("w"));
+  await mk(admin, p.id, zz("w"), { dueDate: "2026-11-03" });
   await admin.page.setViewportSize({ width: 1280, height: 800 });
   await board(admin.page, p.id);
   await expect(admin.page.locator(".board .col")).toHaveCount(4);
@@ -68,7 +68,9 @@ test("AC3: four columns show at 1280 px without the page scrolling sideways", as
 
 test("AC4: cards in a column are ordered by due date, soonest first, undated last", async ({ admin, later }) => {
   const p = await proj(admin, "board-order", later);
-  await mk(admin, p.id, zz("none"));
+  const undated = await mk(admin, p.id, zz("none"), { dueDate: "2026-11-03" });
+  expect((await admin.api.patch(`/api/tasks/${undated}`, { dueDate: null, expectedUpdatedAt: (await admin.api.get(`/api/tasks/${undated}`)).json.task.updatedAt })).status).toBe(200);
+  expect((await admin.api.get(`/api/tasks/${undated}`)).json.task.dueDate).toBeNull();
   await mk(admin, p.id, zz("far"), { dueDate: ist(9) });
   await mk(admin, p.id, zz("near"), { dueDate: ist(1) });
   await board(admin.page, p.id);
@@ -79,7 +81,7 @@ test("AC5: a Done column with more than 10 shows the 10 most recent and Show all
   test.setTimeout(120_000);
   const p = await proj(admin, "board-done", later);
   for (let i = 1; i <= 12; i++) {
-    const id = await mk(admin, p.id, zz(`b${i}`));
+    const id = await mk(admin, p.id, zz(`b${i}`), { dueDate: "2026-11-03" });
     expect((await admin.api.post(`/api/tasks/${id}/complete`, { expectedUpdatedAt: (await getTask(admin, id)).updatedAt })).status).toBe(200);
   }
   await board(admin.page, p.id);
@@ -94,7 +96,7 @@ test("AC6: someone who may not close a task cannot move it to Done, and an archi
   expect((await admin.api.post(`/api/projects/${p.id}/members`, { userId: member.user.id, role: "EDITOR" })).status).toBe(201);
   later(() => admin.api.del(`/api/projects/${p.id}/members/${member.user.id}?handoverTo=${admin.user.id}`));
   // The approver is the admin, so the assignee (member) may not close it.
-  const t = await mk(admin, p.id, zz("needs approval"), { assigneeId: member.user.id, approverId: admin.user.id });
+  const t = await mk(admin, p.id, zz("needs approval"), { dueDate: "2026-11-03", assigneeId: member.user.id, approverId: admin.user.id });
   const refused = await member.api.post(`/api/tasks/${t}/move`, { sectionId: p.done, expectedUpdatedAt: (await getTask(member, t)).updatedAt });
   expect([403, 409]).toContain(refused.status);
   expect((await admin.api.get(`/api/tasks/${t}`)).json.task.completedAt).toBeNull();

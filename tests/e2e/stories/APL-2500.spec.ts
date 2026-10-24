@@ -56,7 +56,7 @@ test("AC2: a Viewer sees every field read-only and no action buttons; the Leader
   const p = await proj(admin, "ov-role", later);
   expect((await admin.api.post(`/api/projects/${p}/members`, { userId: member.user.id, role: "VIEWER" })).status).toBe(201);
   later(() => admin.api.del(`/api/projects/${p}/members/${member.user.id}?handoverTo=${admin.user.id}`));
-  const t = await mk(admin, p, zz("role task"));
+  const t = await mk(admin, p, zz("role task"), { dueDate: "2026-11-03" });
   await member.page.goto(`/projects/${p}?task=${t}`);
   const v = dialog(member.page);
   await expect(v.getByLabel("Title")).toHaveJSProperty("readOnly", true);
@@ -72,7 +72,7 @@ test("AC2: a Viewer sees every field read-only and no action buttons; the Leader
 
 test("AC3: the concierge stays visible while the overlay is open", async ({ admin, later }) => {
   const p = await proj(admin, "ov-concierge", later);
-  const t = await mk(admin, p, zz("concierge task"));
+  const t = await mk(admin, p, zz("concierge task"), { dueDate: "2026-11-03" });
   await admin.page.goto(`/projects/${p}?task=${t}`);
   await expect(dialog(admin.page)).toBeVisible();
   const c = admin.page.locator('aside[aria-label="Concierge"]');
@@ -83,7 +83,7 @@ test("AC3: the concierge stays visible while the overlay is open", async ({ admi
 
 test("AC4: a task link opens the task over its project; a trashed, missing or foreign task says it isn't available", async ({ admin, member, later }) => {
   const p = await proj(admin, "ov-link", later);
-  const t = await mk(admin, p, zz("linked"));
+  const t = await mk(admin, p, zz("linked"), { dueDate: "2026-11-03" });
   await admin.page.goto(`/tasks/${t}`);
   // APL-2652 preserves the task URL when return-to is enabled; the legacy mode opens the project overlay.
   const stay = await admin.page.evaluate(() => (window as Window & { __SHO_RETURN_TO?: number }).__SHO_RETURN_TO === 1);
@@ -106,7 +106,7 @@ test("AC4: a task link opens the task over its project; a trashed, missing or fo
 
 test("AC5: saving over someone else's change shows the warning and offers to re-apply the edit", async ({ admin, later }) => {
   const p = await proj(admin, "ov-stale", later);
-  const t = await mk(admin, p, zz("stale"));
+  const t = await mk(admin, p, zz("stale"), { dueDate: "2026-11-03" });
   await admin.page.goto(`/projects/${p}?task=${t}`);
   const d = dialog(admin.page);
   await expect(d.getByLabel("Title")).toHaveValue(zz("stale"));
