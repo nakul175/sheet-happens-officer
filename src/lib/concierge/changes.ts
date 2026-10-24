@@ -11,7 +11,7 @@ import type { Handover } from "@/lib/people";
 import { addMember, changeMemberRole, createProject, removeMember } from "@/lib/projects";
 import {
   addCollaborator, assignTask, awaiting, canClose, completeTask, createTask, deleteTask, moveTask, removeCollaborator, reopenTask,
-  sendBack, sendForApproval, setApprover, updateTask,
+  sendBack, sendForApproval, setApprover, updateTask, visibleTask,
 } from "@/lib/tasks";
 import { addComment, commentExcerpt } from "@/lib/comments";
 import { fullDate } from "@/lib/concierge/dates";
@@ -75,7 +75,7 @@ async function load(ops: Op[]): Promise<Loaded> {
   const sectionIds = r.map((x) => x.sectionId).filter((x): x is string => !!x);
   const [users, projects, sections] = await Promise.all([
     db.user.findMany({ where: { id: { in: [...userIds] } }, select: { id: true, name: true, email: true, deactivatedAt: true, emailVerifiedAt: true } }),
-    // project-lookup-ok: Internal operation snapshot for fingerprints and cards; blockedReason checks projectAccess before execution.
+    // project-lookup-ok: Internal snapshot for fingerprints; buildCard checks read access before loading, and blockedReason checks writes before execution.
     db.project.findMany({ where: { id: { in: [...projectIds] } }, select: { id: true, name: true, archivedAt: true, members: { select: { userId: true, role: true } } } }),
     db.section.findMany({ where: { id: { in: sectionIds } }, select: { id: true, name: true, isDone: true, projectId: true } }),
   ]);
@@ -331,6 +331,12 @@ export type BuiltCard = {
 /** Builds the card for these operations from the records as they are now. Throws ApiError(404) when a record is gone. */
 export async function buildCard(user: Actor, ops: Op[]): Promise<BuiltCard> {
   if (ops.length > MAX_CHANGES) throw new ApiError(400, "A card can hold at most 10 changes.");
+  // A blocked write card still contains names, before-values and handover tasks. Check read visibility first,
+  // including when an old card is refreshed after membership or CRM visibility changed. A Viewer may read a
+  // blocked card; an outsider must get no card at all. Write permission is checked separately below.
+  const references = ops.map(refs);
+  for (const id of new Set(references.flatMap((r) => r.taskId ? [r.taskId] : []))) await visibleTask(user, id);
+  for (const id of new Set(references.flatMap((r) => r.projectId ? [r.projectId] : []))) await projectAccess(user, id);
   const L = await load(ops);
   const described = ops.map((op) => describe(op, L));
   let blocked: string | null = null;
