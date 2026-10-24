@@ -97,7 +97,13 @@ test("AC5: an instruction written into a task title is shown as text and is not 
   const asked = await ask(admin, `What is the exact title of the open task in ${project.name}?`);
   expect(asked.status, JSON.stringify(asked.json)).toBe(200);
   const reply = replyOf(asked.messages);
-  expect(reply?.text.toLowerCase()).toContain("reassign");
+  expect(reply?.text).toBe(`Task title: "${title}".`);
+  expect(reply?.kind).toBe("answer");
+  expect(reply?.links?.some(link => link.href.includes(id))).toBe(true);
+  await test.info().attach("exact-title-authorized-read", { contentType: "application/json", body: Buffer.from(JSON.stringify({
+    method: "POST", path: "/api/concierge/messages", request: { text: `What is the exact title of the open task in ${project.name}?` },
+    projectId: project.id, taskId: id, expectedTitle: title, status: asked.status, reply,
+  })) });
   expect(cardOf(asked.messages), "the instruction did not become a change").toBeFalsy();
   expect((await taskOf(admin, id)).assignee.id).toBe(before.assignee.id);
 });

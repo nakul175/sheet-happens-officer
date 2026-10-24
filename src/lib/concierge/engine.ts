@@ -10,7 +10,9 @@ import {
 } from "@/lib/concierge/limits";
 import { todayLine } from "@/lib/concierge/dates";
 import { isEcho } from "@/lib/concierge/echo";
+import { exactTitleRead } from "@/lib/concierge/exact-title-read";
 import { claimsWrite } from "@/lib/concierge/claims";
+import { explicitProposal, whoQuestion } from "@/lib/concierge/explicit-proposal";
 import { screenOnlyHelp } from "@/lib/concierge/screen-help";
 import { taskSelectionForRequest } from "@/lib/concierge/task-selection";
 import { flat, personById, projectById, quickAnswer, taskById, QUICK_ACTIONS, type TaskRec } from "@/lib/concierge/reads";
@@ -150,7 +152,6 @@ const asksForAssign = (request: string) => /\b(?:re)?assign\b/.test(request.toLo
  * (`!s.pending` → 404 "Message not found"), so before it was here the only button on the question answered 404.
  * It has no `kind`: "none" is handled before the kind is read, and the person is free to name somebody instead.
  */
-const WHO_QUESTION = "Who should I assign it to? Tell me the person's name and I will show you the card to confirm.";
 
 /**
  * SHO-2693 w148: what the person is told instead of the model's sentence when the turn wrote nothing but the sentence
@@ -161,10 +162,7 @@ const WHO_QUESTION = "Who should I assign it to? Tell me the person's name and I
 const NOTHING_CHANGED = "Nothing has changed. I cannot change anything without a card you confirm, so tell me which task should change and how, and I will show you the card.";
 
 const UNKNOWN = "I could not work that out. Try asking in a different way.";
-const whoQuestion = (request: string) => ({
-  kind: "choices" as const, text: WHO_QUESTION, choices: [{ id: "none", label: "Never mind" }],
-  pending: { request, question: WHO_QUESTION },
-});
+
 
 export function buildReply(turn: Turn, modelText: string, request: string): Stored {
   if (turn.card) {
@@ -199,6 +197,13 @@ export function buildReply(turn: Turn, modelText: string, request: string): Stor
     // Nothing was fetched: never let the model's own words stand in for data (SHO-US-8.2 AC2, AC4).
     return { kind: "answer", text: r.notFound > 0 ? "I can't find that." : "I found nothing." };
   }
+  // APL-2511 AC5: answer this single-field read from fresh authorized tool data, never model prose.
+  // Hostile text in a title remains text; no proposal or write can be manufactured by this branch.
+  const titleTask = exactTitleRead(request, turn);
+  if (titleTask) {
+    const text = `Task title: "${titleTask.title}".`;
+    return { kind: "answer", text, links: linksFor(turn, text) };
+  }
   // SHO-2693 (APL-2513 AC1): a request that asks to assign, and did not end in a card, must ask who. Nothing is written
   // either way, so nothing changes until a person is named (AC2).
   //
@@ -224,10 +229,16 @@ export function buildReply(turn: Turn, modelText: string, request: string): Stor
 }
 
 async function respond(user: Actor, userRow: { id: string }, userText: string, request: string, counted: boolean, now: Date, seed?: (t: Turn) => void): Promise<{ messages: Message[]; disabled?: Disabled }> {
+  const userMsg = present((await db.chatMessage.findUniqueOrThrow({ where: { id: userRow.id } })));
+  // Apply this boundary to direct requests and resumed choice/narrowing turns alike.
+  const explicit = await explicitProposal(user, request);
+  if (explicit) {
+    const reply = await addMessage(user, "ASSISTANT", explicit);
+    return { messages: [userMsg, present(reply)] };
+  }
   const history = await recentHistory(user, userRow.id);
   const turn = newTurn(user, now);
   seed?.(turn);
-  const userMsg = present((await db.chatMessage.findUniqueOrThrow({ where: { id: userRow.id } })));
   let loop: Loop;
   try {
     loop = { reply: buildReply(turn, await runModel(user, turn, userText, history, counted, now), request) };

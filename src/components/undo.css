@@ -1,4 +1,5 @@
-.undo-toast { position: fixed; left: 50%; bottom: calc(22px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); z-index: 90; display: flex; gap: 14px; align-items: center;
+/* A task edit can raise Undo while its .scrim (z-index100) remains open; the real Undo control must stay clickable above it. */
+.undo-toast { position: fixed; left: 50%; bottom: calc(22px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); z-index: 110; display: flex; gap: 14px; align-items: center;
   background: #14213d; color: #fff; padding: 11px 16px; border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,.28); font-size: 14px; max-width: calc(100vw - 28px); }
 .undo-toast button { background: none; border: 0; color: #f2c14e; font-weight: 600; cursor: pointer; font-size: 14px; padding: 0 8px; min-height: 44px; min-width: 44px; }
 .undo-toast small { display: block; opacity: .75; font-size: 12px; margin-top: 2px; }
@@ -9,4 +10,4 @@
 /* SHO-US-22.8 AC5: the toast never covers the tab bar, the board's concierge bar or the concierge entry. */
 @media (max-width: 599px) { .undo-toast { bottom: calc(72px + env(safe-area-inset-bottom, 0px)); } }
 @media (min-width: 1024px) { body:has(.bardock) .undo-toast { bottom: calc(64px + env(safe-area-inset-bottom, 0px)); } }
-body:has(.cc-sheet) .undo-toast { bottom: auto; top: calc(64px + env(safe-area-inset-top, 0px)); z-index: 90; }
+body:has(.cc-sheet) .undo-toast { bottom: auto; top: calc(64px + env(safe-area-inset-top, 0px)); z-index: 110; }

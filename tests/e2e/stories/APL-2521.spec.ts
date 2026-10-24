@@ -1,9 +1,11 @@
 // APL-2521 · SHO-US-6.5 Organisation audit log for the Super Admin
 // Acceptance criteria: AC1 one row per listed event, AC2 only the Super Admin, AC3 no secrets, AC4 retention and no hand editing,
-// AC5 five failed sign-ins and the lockout, AC6 IP only on sign-in events, AC7 task delete/restore/purge, Undo anyway, approver.
+// AC5 five failed sign-ins and the lockout, AC6 IP only on the specified authentication security events (APL-2742 adds verification), AC7 task delete/restore/purge, Undo anyway, approver.
 // Data: every project and task is named "ZZ-TEST ..."; the person created for AC5 is "ZZ-TEST ..." at example.invalid (no inbox) and is
 // deactivated afterwards. AC2 briefly makes the Member an Admin and puts the role back in a finally block.
 import { test, expect, zz, RUN, login, type Who } from "../support";
+import { verifiedUser, deactivate } from "./qa";
+import { auditEventMayCarryIp } from "../helpers/audit-ip-contract";
 import { patchCurrent } from "../helpers/jim-http";
 import { localSql, runLocalJob, sourceOf, sqlId } from "../helpers/local-clock";
 
@@ -139,8 +141,15 @@ test("APL-2521 AC4: audit rows are kept for 12 months in the source @static", as
 });
 
 // qa:TC missing
-test("AC5 and AC6: five failed sign-ins and the lockout are logged, with the IP on those rows only", async ({ admin, anon, later }) => {
+test("AC5 and AC6: five failed sign-ins and the lockout are logged; only specified authentication security rows carry IP", async ({ browser, admin, anon, later }) => {
   test.info().annotations.push({ type: "qa:TC", description: "qa:TC missing" });
+  // Preserve the order-sensitive trigger: a real successful verification immediately before this audit check.
+  const verified = await verifiedUser(browser, anon.context().request, "2521", "verification-audit");
+  later(() => verified.ctx.close());
+  later(() => deactivate(admin.api, verified.user.id));
+  const verificationRows = await audit(admin, `event=EMAIL_VERIFIED&person=${verified.user.id}`);
+  expect(verificationRows).toHaveLength(1);
+  expect(verificationRows[0].ip, "APL-2742 retains the client IP on successful verification").toBeTruthy();
   const email = `zz-test-lock-${RUN}@example.invalid`;
   const add = await admin.api.post("/api/team", { firstName: "ZZ-TEST", lastName: `lockout ${RUN}`, email, role: "MEMBER" });
   expect(add.status, JSON.stringify(add.json)).toBe(201);
@@ -155,9 +164,10 @@ test("AC5 and AC6: five failed sign-ins and the lockout are logged, with the IP 
   const locked = await audit(admin, `event=SIGN_IN_LOCKED&person=${id}`);
   expect(locked.length, "the lockout row is written on the 5th failure").toBeGreaterThanOrEqual(1);
   for (const r of [...failed, ...locked]) expect(r.ip, "sign-in rows carry the IP").toBeTruthy();
-  // AC6, the other half: no other event stores an IP
+  // AC6: task/project/member events carry no IP. APL-2742 AC4 explicitly requires IP for
+  // EMAIL_VERIFIED and VERIFY_EMAIL_REQUESTED too; retain those exact exceptions, not an arbitrary prefix.
   const all = await audit(admin, "");
-  expect(all.filter((r) => !/^SIGN_IN/.test(r.event) && r.ip)).toHaveLength(0);
+  expect(all.filter((r) => !auditEventMayCarryIp(r.event) && r.ip)).toHaveLength(0);
 });
 
 // qa:TC missing

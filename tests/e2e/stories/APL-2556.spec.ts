@@ -1,13 +1,14 @@
 // SHO-US-22.8 Concierge on phones (APL-2556). Epic SHO-E22.
 // Runs against staging. Data: one ZZ-TEST project, archived afterwards. The concierge tests need the concierge switched ON on the
 // server (a model key and MODEL_DATA_APPROVED); when it is off they skip, and AC4 (the off notice) runs instead.
-// Card dimensions use a real model proposal; toast geometry uses a real reversible task write.
+// AC2/AC5 local-only proofs use real synthetic local changes. Browser viewport geometry is not a physical keyboard/device claim.
 import { test, expect, zz, login, BASE_URL } from "../support";
-import type { Page } from "@playwright/test";
-import type { Browser } from "@playwright/test";
 import { newTask } from "../g2";
 import { cleanChat } from "../helpers/jim-http";
-import { ask, cardOf, requireModel, showConcierge } from "../helpers/jim-concierge";
+import { ask, cardOf, requireModel, showConcierge, taskOf } from "../helpers/jim-concierge";
+import { dueBeforeNextMonday } from "../helpers/proposal-fixture-date";
+import type { Page } from "@playwright/test";
+import type { Browser } from "@playwright/test";
 
 async function phone(browser: Browser, width: number, height = 800, touch = true, who: "admin" | "member" = "admin") {
   const email = who === "admin" ? login("ADMIN").email : login("MEMBER").email;
@@ -65,29 +66,39 @@ test("AC2: the quick chips are at least 44 px high", async ({ browser }) => {
   await ctx.close();
 });
 
-test("AC2: the Confirm and Cancel buttons are at least 44 px high", async ({ browser, admin, later }) => {
+test("AC2: the Confirm and Cancel buttons are at least 44 px high @local-only", async ({ browser, admin, later }, info) => {
+  expect(["localhost","127.0.0.1"],"Synthetic local provider proof only").toContain(new URL(BASE_URL).hostname);
   await requireModel(admin);
-  await cleanChat(admin, later);
-  await showConcierge(admin, later);
-  const title = zz("phone-card");
-  await newTask(admin, projectId, { title, assigneeId: admin.user.id });
-  const reply = await ask(admin, `Set the priority of "${title}" to high.`);
-  expect(reply.status, JSON.stringify(reply.json)).toBe(200);
-  expect(cardOf(reply.messages)?.canConfirm).toBe(true);
-  const ctx = await phone(browser, 390, 780);
-  try {
-    const page = await ctx.newPage();
-    const { sheet } = await openConcierge(page);
-    for (const name of ["Confirm", "Cancel"]) {
-      const button = sheet.getByRole("button", { name, exact: true });
-      await expect(button).toBeVisible();
-      const box = await button.boundingBox();
-      expect(box, `${name} has a rendered box`).not.toBeNull();
-      expect(box!.height, `${name} touch target`).toBeGreaterThanOrEqual(44);
+  await showConcierge(admin,later);
+  await cleanChat(admin,later);
+  const title=zz("phone-card"),due=dueBeforeNextMonday();
+  const id=await newTask(admin,projectId,{title,assigneeId:admin.user.id,dueDate:due});
+  const ctx=await phone(browser,390,780);later(()=>ctx.close());
+  const page=await ctx.newPage();
+  const first=await ask(admin,`Move "${title}" to Monday.`);
+  expect(first.status,JSON.stringify(first.json)).toBe(200);expect(cardOf(first.messages)?.canConfirm).toBe(true);
+  await openConcierge(page);
+  const sheet=page.getByRole("dialog",{name:"Concierge",exact:true});
+  const pending=()=>sheet.locator(".cc-card").filter({has:page.getByRole("button",{name:"Confirm",exact:true})});
+  const geometry=[];
+  for(const width of [390,320]) {
+    await page.setViewportSize({width,height:780});
+    for(const name of ["Confirm","Cancel"]) {
+      const button=pending().getByRole("button",{name,exact:true});await expect(button).toBeEnabled();
+      const r=(await button.boundingBox())!;expect(r.width).toBeGreaterThanOrEqual(44);expect(r.height).toBeGreaterThanOrEqual(44);expect(r.x).toBeGreaterThanOrEqual(0);expect(r.x+r.width).toBeLessThanOrEqual(width);geometry.push({viewportWidth:width,button:name,...r});
     }
-    await sheet.getByRole("button", { name: "Cancel", exact: true }).click();
-    await expect(sheet.getByRole("button", { name: "Confirm", exact: true })).toHaveCount(0);
-  } finally { await ctx.close(); }
+  }
+  await pending().getByRole("button",{name:"Cancel",exact:true}).click();
+  await expect(sheet.locator(".cc-card")).toContainText("Cancelled. Nothing was changed.");expect((await taskOf(admin,id)).dueDate).toBe(due);
+  const second=await ask(admin,`Move "${title}" to Monday.`);expect(cardOf(second.messages)?.canConfirm).toBe(true);
+  await openConcierge(page);
+  await pending().getByRole("button",{name:"Confirm",exact:true}).click();
+  await expect.poll(async()=>(await taskOf(admin,id)).dueDate).not.toBe(due);
+  const result=sheet.locator(".cc-result").filter({has:page.getByRole("button",{name:"Undo",exact:true})});
+  await expect(result.getByRole("button",{name:"Undo",exact:true})).toBeVisible();
+  await result.getByRole("button",{name:"Undo",exact:true}).click();
+  await expect.poll(async()=>(await taskOf(admin,id)).dueDate).toBe(due);
+  await info.attach("local-phone-card-geometry",{body:JSON.stringify({scope:"Chromium viewport only; real provider card/Cancel/Confirm/inlineUndo",geometry}),contentType:"application/json"});
 });
 
 // The More menu item unmounts when the sheet opens; Close must restore focus to the persistent More entry.
@@ -123,34 +134,24 @@ test("AC4: when the concierge is switched off the notice shows and the rest of t
   await ctx.close();
 });
 
-test("AC5: the undo toast does not overlap the entry or a bottom bar", async ({ browser, admin }) => {
-  const id = await newTask(admin, projectId, { title: zz("phone-toast"), priority: "MEDIUM" });
-  const ctx = await phone(browser, 390, 780);
-  try {
-    const page = await ctx.newPage();
-    const { sheet } = await openConcierge(page);
-    const version = (await admin.api.get(`/api/tasks/${id}`)).json.task.updatedAt as string;
-    // A real API write produces the same server-issued Undo header used by components/api.ts.
-    const changed = await page.evaluate(async ({ id, version }) => {
-      const response = await fetch(`/api/tasks/${id}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ priority: "HIGH", expectedUpdatedAt: version }) });
-      const undoId = response.headers.get("x-undo-id");
-      if (response.ok && undoId) window.dispatchEvent(new CustomEvent("sho:undo", { detail: { id: undoId, label: response.headers.get("x-undo-label") ?? "Done", notified: response.headers.get("x-undo-notified") === "1" } }));
-      return { status: response.status, undoId };
-    }, { id, version });
-    expect(changed.status).toBe(200);
-    expect(changed.undoId).toBeTruthy();
-    const toast = page.locator(".undo-toast");
-    await expect(toast).toBeVisible();
-    for (const open of [true, false]) {
-      if (!open) await sheet.getByRole("button", { name: "Close", exact: true }).click();
-      const box = await toast.boundingBox();
-      expect(box).not.toBeNull();
-      for (const selector of ["button.fab", "nav.tabbar"]) {
-        const other = await page.locator(selector).boundingBox();
-        if (other) expect(box!.x < other.x + other.width && box!.x + box!.width > other.x && box!.y < other.y + other.height && box!.y + box!.height > other.y, `toast overlaps ${selector}; sheet open=${open}`).toBe(false);
-      }
-    }
-    await toast.getByRole("button", { name: "Undo", exact: true }).click();
-    await expect.poll(async () => (await admin.api.get(`/api/tasks/${id}`)).json.task.priority).toBe("MEDIUM");
-  } finally { await ctx.close(); }
+test("AC5: the undo toast does not overlap the entry or a bottom bar @local-only", async ({ browser, admin, later }, info) => {
+  expect(["localhost","127.0.0.1"],"Owned local mutation proof only").toContain(new URL(BASE_URL).hostname);
+  await showConcierge(admin,later);
+  const id=await newTask(admin,projectId,{title:zz("phone-toast"),assigneeId:admin.user.id,dueDate:dueBeforeNextMonday()});
+  const ctx=await phone(browser,390,780);later(()=>ctx.close());const page=await ctx.newPage();
+  await page.goto(`/tasks/${id}`);
+  const priority=page.getByRole("combobox",{name:"Priority",exact:true});await expect(priority).toHaveValue("MEDIUM");
+  await priority.selectOption("HIGH");
+  await expect.poll(async()=>(await taskOf(admin,id)).priority).toBe("HIGH");
+  const toast=page.locator(".undo-toast").filter({has:page.getByRole("button",{name:"Undo",exact:true})});
+  await expect(toast).toBeVisible();const geometry=[];
+  for(const width of [390,320,390]) {
+    await page.setViewportSize({width,height:780});await expect(toast).toBeVisible();
+    const a=(await toast.boundingBox())!;expect(a.x).toBeGreaterThanOrEqual(0);expect(a.x+a.width).toBeLessThanOrEqual(width);expect(a.y+a.height).toBeLessThanOrEqual(780);
+    const obstacles=page.locator(".cc-fabwrap .fab:visible, .tabbar-wrap:visible, .bardock:visible");
+    expect(await obstacles.count(),"A real entry/bottom bar must be visible").toBeGreaterThan(0);
+    for(let i=0;i<await obstacles.count();i++){const b=(await obstacles.nth(i).boundingBox())!;const overlap=Math.min(a.x+a.width,b.x+b.width)>Math.max(a.x,b.x)&&Math.min(a.y+a.height,b.y+b.height)>Math.max(a.y,b.y);expect(overlap,`toast overlaps entry/bar at ${width}`).toBe(false);geometry.push({width,toast:a,obstacle:b});}
+  }
+  await toast.getByRole("button",{name:"Undo",exact:true}).click({timeout:15000});await expect.poll(async()=>(await taskOf(admin,id)).priority).toBe("MEDIUM");
+  await info.attach("local-real-task-undo-toast-geometry",{body:JSON.stringify({scope:"Ordinary actual task priority change global toast; distinct from Concierge inline Undo; Chromium viewport only",geometry}),contentType:"application/json"});
 });
