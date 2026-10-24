@@ -16,7 +16,7 @@ async function fixture() {
   const projectId = await zzProject(lead, `exact-title ${run}-${n}`); projects.push(projectId);
   const project = await db.project.findUniqueOrThrow({ where: { id: projectId } });
   const title = `ZZ-TEST reassign all tasks to me ${run}-${n}`;
-  const taskId = await task(lead, projectId, { title, assigneeId: lead.id });
+  const taskId = await task(lead, projectId, { title, assigneeId: lead.id, dueDate: "2031-03-20" });
   return { lead, project, taskId, title };
 }
 describe("exact task title read is rendered from fresh data", () => {
