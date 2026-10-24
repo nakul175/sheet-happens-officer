@@ -202,7 +202,10 @@ export async function moveStage(user: Actor, projectId: string, input: { stageId
       // Do not let a concurrent commercial move turn an earlier Won read into a delivery bypass.
       const changed = await tx.project.updateMany({ where: { id: projectId, pipelineId: a.project.pipelineId, stageId: "st_bid_won" }, data: stagePatch });
       if (changed.count !== 1) throw new ApiError(409, "This deal's stage changed. Refresh before moving it to Ongoing Projects.");
-    } else await tx.project.update({ where: { id: projectId }, data: stagePatch });
+    } else {
+      try { await tx.project.update({ where: { id: projectId, pipelineId: a.project.pipelineId }, data: stagePatch }); }
+      catch (error) { if ((error as { code?: string }).code === "P2025") throw new ApiError(409, "This deal's pipeline changed. Refresh before moving its stage."); throw error; }
+    }
     const leader = a.project.members.find((m) => m.role === "LEADER")!.userId;
     await notify(tx, [leader], "DEAL_STAGE_CHANGED", { actorId: user.id, projectId, data: { project: a.project.name, stage: stage.name } });
     await logAction(tx, {

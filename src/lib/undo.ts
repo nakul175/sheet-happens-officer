@@ -209,7 +209,10 @@ async function plan(row: any, user: Actor, projectId: string): Promise<Plan> {
       if (!b.stageId || !(await db.stage.findFirst({ where: { id: b.stageId, pipelineId: p.pipelineId ?? "" } }))) throw bad("The earlier stage no longer exists.");
       return {
         conflicts: p.stageId !== f.stageId ? [{ field: "stage", before: b.stage, after: f.stage, now: p.stageId }] : [], subject: p.name, fields: "Stage",
-        apply: async (tx) => { await tx.project.update({ where: { id: projectId }, data: { stageId: b.stageId, stageReason: b.reason ?? null, stageChangedAt: new Date() } }); },
+        apply: async (tx) => {
+          try { await tx.project.update({ where: { id: projectId, pipelineId: p.pipelineId }, data: { stageId: b.stageId, stageReason: b.reason ?? null, stageChangedAt: new Date() } }); }
+          catch (error) { if ((error as { code?: string }).code === "P2025") throw bad("This deal's pipeline changed. Refresh before undoing its stage."); throw error; }
+        },
       };
     }
     case "deal.converted": {

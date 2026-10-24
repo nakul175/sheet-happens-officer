@@ -1,5 +1,6 @@
 "use client";
 import Link from "next/link";
+import { ConvertDealToBid } from "@/components/ConvertDealToBid";
 import { submissionDeadlineFields, submissionDeadlineEdit, submissionDeadlineLabel, submissionDeadlineOverdue, SUBMISSION_TIME_ZONE_LABEL } from "@/lib/submission-deadline";
 import { ChangeDealBuyer } from "@/components/ChangeDealBuyer";
 import { ATHENA_ENTITIES, OPPORTUNITY_TYPES, type AthenaEntity, type OpportunityType } from "@/lib/deal-classification";
@@ -279,6 +280,8 @@ export function DealPanel({ projectId, projectName, deal, canWrite, canManage = 
   const [edit, setEdit] = useState(false);
   const [rename, setRename] = useState(false);
   const [buyerEdit, setBuyerEdit] = useState(false);
+  const [converting, setConverting] = useState(false);
+  const canConvert = canManage && canWrite && deal.pipeline?.key === "DEAL_PROACTIVE" && !!deal.stage && !deal.stage.isRetired && ["NOT_STARTED", "ACTIVE", "PAUSED"].includes(deal.stage.category);
   const pending = useRef(false);
   const ticket = useRef(0); // a closed or replaced click ignores a list that arrives later
   const d = deal.details;
@@ -349,6 +352,7 @@ export function DealPanel({ projectId, projectName, deal, canWrite, canManage = 
         {canWrite && <button className="btn ghost sm" onClick={() => setEdit(true)}>Edit details</button>}
         {canManage && projectName !== undefined && <button className="btn ghost sm" onClick={() => setRename(true)}>Rename opportunity</button>}
         {canManage && canWrite && deal.organisation && <button className="btn ghost sm" onClick={() => setBuyerEdit(true)}>Change Buyer</button>}
+        {canConvert && <button className="btn ghost sm" onClick={() => setConverting(true)}>Convert to Bid</button>}
         {canManage && <Link className="btn ghost sm" href={`/projects/${projectId}/members`}>Change leader</Link>}
       </div>
       {d?.whyPursue && <p style={{ margin: "8px 0 0", fontSize: 14 }}><b>Why:</b> {d.whyPursue}</p>}
@@ -361,6 +365,7 @@ export function DealPanel({ projectId, projectName, deal, canWrite, canManage = 
       <Parties projectId={projectId} deal={deal} canWrite={canWrite} onChange={onChange} />
       {pick && deal && <StageDialog projectId={projectId} stage={pick.stage} deal={deal} initial={{ blocked: pick.blocked, loadError: pick.loadError }} onClose={close} onDone={() => { close(); onChange(); }} />}
       {rename && canManage && projectName !== undefined && <RenameDeal projectId={projectId} name={projectName} onClose={() => setRename(false)} onDone={() => { setRename(false); onChange(); }} />}
+      {converting && canConvert && deal.pipeline && deal.stage && <ConvertDealToBid projectId={projectId} pipelineId={deal.pipeline.id} stageId={deal.stage.id} deadline={d?.submissionDeadline ?? null} onClose={() => setConverting(false)} onDone={() => { setConverting(false); onChange(); }} />}
       {buyerEdit && canManage && canWrite && deal.organisation && <ChangeDealBuyer projectId={projectId} buyer={deal.organisation} onClose={() => setBuyerEdit(false)} onDone={() => { setBuyerEdit(false); onChange(); }} />}
       {edit && d && <DetailsDialog projectId={projectId} deal={deal} onClose={() => setEdit(false)} onDone={() => { setEdit(false); onChange(); }} />}
     </section>
