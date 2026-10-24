@@ -153,7 +153,7 @@ test("APL-2539 > AC6: a Viewer cannot move the stage or edit details, and an arc
 
 test("APL-2539 > AC7: at 390px the deal page does not scroll sideways", async ({ admin, later }) => {
   const pipes = await pipelines(admin.api);
-  const org = await createOrg(admin, later, "narrow buyer");
+  const org = await createOrg(admin, later, "narrow buyer with a long organisation name");
   const deal = await createDeal(admin, later, dealBody({ name: zz("narrow deal"), organisationId: org.id, pipelineId: pipes.pro.id, leaderId: admin.user.id }));
   await admin.page.setViewportSize({ width: 390, height: 844 });
   await admin.page.goto(`/projects/${deal.id}`);

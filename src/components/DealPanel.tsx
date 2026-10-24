@@ -199,7 +199,7 @@ function Parties({ projectId, deal, canWrite, onChange }: { projectId: string; d
     <div style={{ marginTop: 10, fontSize: 14 }}>
       <b>Organisations:</b>{" "}
       {deal.parties.map((p) => (
-        <span key={p.id} className="chip" style={{ marginRight: 4 }}>
+        <span key={p.id} className="chip" style={{ marginRight: 4, maxWidth: "100%", whiteSpace: "normal", overflowWrap: "anywhere" }}>
           {PARTY_LABEL[p.role]}: <Link href={`/accounts/${p.organisation.id}`}>{p.organisation.name}</Link>
           {canWrite && p.role !== "BUYER" && <button className="link" aria-label={`Remove ${p.organisation.name}`} onClick={() => remove(p.id)} style={{ marginLeft: 4 }}>×</button>}
         </span>
