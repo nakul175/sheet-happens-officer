@@ -1,0 +1,12 @@
+import { beforeEach, expect, it, vi } from 'vitest';
+const m=vi.hoisted(()=>({tx:{$executeRaw:vi.fn(),organisation:{findFirst:vi.fn(),create:vi.fn()}},user:{findUniqueOrThrow:vi.fn()},log:vi.fn()}));
+vi.mock('@/lib/db',()=>({db:{user:m.user,$transaction:async(fn:(t:typeof m.tx)=>unknown)=>fn(m.tx)}}));
+vi.mock('@/lib/crm',()=>({requireCrm:vi.fn()}));
+vi.mock('@/lib/notify',()=>({logAction:m.log}));
+import {createOrganisation} from '@/lib/orgs';
+const user={id:'person',orgRole:'MEMBER' as const};
+beforeEach(()=>{vi.resetAllMocks();m.user.findUniqueOrThrow.mockResolvedValue({id:'person',workspaceId:'own'});m.tx.organisation.findFirst.mockResolvedValue(null);m.tx.organisation.create.mockResolvedValue({id:'created',name:'Buyer',parentId:null});});
+it('locks sibling name before duplicate read and creation, preserving creator/workspace authority',async()=>{await createOrganisation(user,{name:' Buyer '});expect(m.tx.$executeRaw.mock.invocationCallOrder[0]).toBeLessThan(m.tx.organisation.findFirst.mock.invocationCallOrder[0]);expect(m.tx.organisation.findFirst.mock.invocationCallOrder[0]).toBeLessThan(m.tx.organisation.create.mock.invocationCallOrder[0]);expect(m.tx.organisation.create).toHaveBeenCalledWith({data:expect.objectContaining({workspaceId:'own',createdById:'person',name:'Buyer'})});expect(m.log).toHaveBeenCalledOnce();});
+it('duplicate refuses a second Account and returns a safe active match',async()=>{m.tx.organisation.findFirst.mockResolvedValue({id:'old',name:'Buyer',archivedAt:null});await expect(createOrganisation(user,{name:'buyer'})).rejects.toMatchObject({status:409});expect(m.tx.organisation.create).not.toHaveBeenCalled();expect(m.log).not.toHaveBeenCalled();});
+it('archived duplicate remains refused',async()=>{m.tx.organisation.findFirst.mockResolvedValue({id:'old',name:'Buyer',archivedAt:new Date()});await expect(createOrganisation(user,{name:'Buyer'})).rejects.toMatchObject({status:409});expect(m.tx.organisation.create).not.toHaveBeenCalled();});
+it('existing explicit Accounts force policy remains unchanged',async()=>{m.tx.organisation.findFirst.mockResolvedValue({id:'old',name:'Buyer',archivedAt:null});await createOrganisation(user,{name:'Buyer',force:true});expect(m.tx.organisation.create).toHaveBeenCalledOnce();});

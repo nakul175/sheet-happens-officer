@@ -5,6 +5,7 @@ import { Suspense, useState } from "react";
 import { api, todayIST, useGet } from "@/components/api";
 import { ATHENA_ENTITIES, OPPORTUNITY_TYPES } from "@/lib/deal-classification";
 import { submissionDeadlineInput, SUBMISSION_TIME_ZONE_LABEL } from "@/lib/submission-deadline";
+import { BuyerAccountPicker } from "@/components/BuyerAccountPicker";
 import { Field } from "@/components/ui";
 import { Page, useMe } from "../../Shell";
 
@@ -13,7 +14,8 @@ function Form() {
   const router = useRouter();
   const sp = useSearchParams();
   const team = useGet<{ people: { id: string; name: string }[] }>("/api/team");
-  const orgs = useGet<{ organisations: { id: string; name: string }[] }>("/api/orgs");
+  const [buyer, setBuyer] = useState<{ id: string; name: string } | null>(sp.get("org") ? { id: sp.get("org")!, name: "Selected Account" } : null);
+  const [creatingBuyer, setCreatingBuyer] = useState(false);
   const pipes = useGet<{ pipelines: { id: string; key: string; name: string }[] }>("/api/deals/pipelines");
   const [v, setV] = useState({ name: "", organisationId: sp.get("org") ?? "", pipelineId: "", leaderId: me.id, whyPursue: "", step: "", due: todayIST(), submissionDeadline: "", submissionTime: "", value: "", currency: "INR", opportunityType: "", netFeeRevenueUsd: "", athenaEntity: "", probability: "" });
   const [err, setErr] = useState<string | null>(null);
@@ -22,7 +24,7 @@ function Form() {
   const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setV({ ...v, [k]: e.target.value, ...(k === "submissionDeadline" && !e.target.value ? { submissionTime: "" } : {}) });
   const pipeline = pipes.data?.pipelines.find((p) => p.id === (v.pipelineId || pipes.data?.pipelines[0]?.id));
   async function submit(e: React.FormEvent, force = false) {
-    e.preventDefault(); setBusy(true); setErr(null);
+    e.preventDefault(); if (creatingBuyer || busy) return; setBusy(true); setErr(null);
     let submissionDeadline: string | null = null;
     try { if (pipeline?.key === "DEAL_BID") submissionDeadline = submissionDeadlineInput(v.submissionDeadline, v.submissionTime); }
     catch (error) { setBusy(false); setErr(error instanceof Error ? error.message : "Choose a valid submission deadline."); return; }
@@ -45,10 +47,7 @@ function Form() {
   return (
     <form className="card" style={{ maxWidth: 600 }} onSubmit={(e) => submit(e)}>
       <Field label="Deal name">{(id) => <input id={id} className="in" required maxLength={200} value={v.name} onChange={set("name")} />}</Field>
-      <Field label="Organisation (buyer)" hint="Not listed? Add it under Accounts first.">
-        {(id) => <select id={id} className="in" required value={v.organisationId} onChange={set("organisationId")}><option value="">Choose</option>{orgs.data?.organisations.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}</select>}
-      </Field>
-      <p style={{ marginTop: -8, fontSize: 14 }}><Link href="/accounts">Open Accounts to add a buyer</Link></p>
+      <BuyerAccountPicker value={buyer} disabled={busy || creatingBuyer} onBusyChange={setCreatingBuyer} onChange={account => { setBuyer(account); setV(current => ({ ...current, organisationId: account.id })); }} />
       <Field label="Pipeline">{(id) => <select id={id} className="in" value={pipeline?.id ?? ""} onChange={set("pipelineId")}>{pipes.data?.pipelines.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select>}</Field>
       {pipeline?.key === "DEAL_BID" && <><Field label="Submission deadline">{(id) => <input id={id} className="in" type="date" required value={v.submissionDeadline} onChange={set("submissionDeadline")} />}</Field><Field label={`Submission time (optional) · ${SUBMISSION_TIME_ZONE_LABEL}`}>{(id) => <input id={id} className="in" type="time" value={v.submissionTime} disabled={!v.submissionDeadline} onChange={set("submissionTime")} />}</Field></>}
       <Field label="Opportunity type">{(id) => <select id={id} className="in" value={v.opportunityType} onChange={set("opportunityType")}><option value="">Unclassified</option>{OPPORTUNITY_TYPES.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}</select>}</Field>
@@ -65,8 +64,8 @@ function Form() {
       </div>
       {err && <div className="err" role="alert">{err}</div>}
       <div style={{ display: "flex", gap: 8 }}>
-        <button className="btn" disabled={busy}>Create deal</button>
-        {dup && <button type="button" className="btn ghost" disabled={busy} onClick={(e) => submit(e, true)}>Create anyway</button>}
+        <button className="btn" disabled={busy || creatingBuyer}>Create deal</button>
+        {dup && <button type="button" className="btn ghost" disabled={busy || creatingBuyer} onClick={(e) => submit(e, true)}>Create anyway</button>}
       </div>
     </form>
   );
