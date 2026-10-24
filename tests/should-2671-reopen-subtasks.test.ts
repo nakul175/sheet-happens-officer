@@ -28,7 +28,7 @@ const isOpen = async (who: Account, id: string) => (await completedAt(who, id)) 
 
 /** P in the "In progress" section, with the subtasks it is given. */
 async function parentWith(who: Account, proj: { id: string; doing: string }, subtasks: number) {
-  const parent = await task(who, proj.id, { title: "ZZ-TEST P", sectionId: proj.doing });
+  const parent = await task(who, proj.id, { dueDate: "2031-03-20", title: "ZZ-TEST P", sectionId: proj.doing });
   const subs: string[] = [];
   for (let i = 0; i < subtasks; i++) subs.push(await task(who, proj.id, { title: `ZZ-TEST S${i}`, parentId: parent }));
   return { parent, subs };

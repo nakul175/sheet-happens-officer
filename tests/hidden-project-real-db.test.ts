@@ -96,15 +96,15 @@ describe("qa:TC missing SHO-3027 real-DB hidden project isolation (APL-2995 fell
 
     // Each leaver holds one open task in the deal and one in the plain project: the hidden project
     // must still be processed, only not named.
-    dealTaskId = await task(sa, off.deal.id, { title: `ZZ-TEST ${RUN} deal work`, assigneeId: target.id });
-    plainTaskId = await task(sa, off.plain.id, { title: `ZZ-TEST ${RUN} plain work`, assigneeId: target.id });
+    dealTaskId = await task(sa, off.deal.id, { dueDate: "2031-03-20", title: `ZZ-TEST ${RUN} deal work`, assigneeId: target.id });
+    plainTaskId = await task(sa, off.plain.id, { dueDate: "2031-03-20", title: `ZZ-TEST ${RUN} plain work`, assigneeId: target.id });
     // Three in the deal and two in the plain project, so a leaked count is unmistakable: 5 vs 2.
-    for (const i of [0, 1, 2]) await task(sa, visible.deal.id, { title: `ZZ-TEST ${RUN} visible deal work ${i}`, assigneeId: targetVisible.id });
-    for (const i of [0, 1]) await task(sa, visible.plain.id, { title: `ZZ-TEST ${RUN} visible plain work ${i}`, assigneeId: targetVisible.id });
+    for (const i of [0, 1, 2]) await task(sa, visible.deal.id, { dueDate: "2031-03-20", title: `ZZ-TEST ${RUN} visible deal work ${i}`, assigneeId: targetVisible.id });
+    for (const i of [0, 1]) await task(sa, visible.plain.id, { dueDate: "2031-03-20", title: `ZZ-TEST ${RUN} visible plain work ${i}`, assigneeId: targetVisible.id });
     // SHO-3029: the same 3 + 2 shape again, on the fixture that is hidden under CRM_VISIBLE=off. One
     // leaver, measured twice on these very rows, so the count delta is the proof and not an absolute number.
-    for (const i of [0, 1, 2]) deltaTaskIds.push(await task(sa, off.deal.id, { title: `ZZ-TEST ${RUN} delta deal work ${i}`, assigneeId: deltaTarget.id }));
-    for (const i of [0, 1]) deltaTaskIds.push(await task(sa, off.plain.id, { title: `ZZ-TEST ${RUN} delta plain work ${i}`, assigneeId: deltaTarget.id }));
+    for (const i of [0, 1, 2]) deltaTaskIds.push(await task(sa, off.deal.id, { dueDate: "2031-03-20", title: `ZZ-TEST ${RUN} delta deal work ${i}`, assigneeId: deltaTarget.id }));
+    for (const i of [0, 1]) deltaTaskIds.push(await task(sa, off.plain.id, { dueDate: "2031-03-20", title: `ZZ-TEST ${RUN} delta plain work ${i}`, assigneeId: deltaTarget.id }));
   });
 
   it("qa:TC missing AC: under off the real projector and person page hide the deal but keep the plain project", async () => {

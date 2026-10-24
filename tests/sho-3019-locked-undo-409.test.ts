@@ -78,7 +78,7 @@ describe("SHO-3019: Undo's locked comment restore", () => {
     const lead = await account("lead");
     const worker = await account("worker");
     const p = await project(lead, lead, [{ who: worker, role: "EDITOR" }]);
-    const t = await task(worker, p.id, { title: "ZZ-TEST SHO-3019 locked undo" });
+    const t = await task(worker, p.id, { dueDate: "2031-03-20", title: "ZZ-TEST SHO-3019 locked undo" });
 
     // The comment Undo will restore: written, then deleted by its author.
     const comment = await addComment(actor(worker), t, { text: "ZZ-TEST SHO-3019 restored" });

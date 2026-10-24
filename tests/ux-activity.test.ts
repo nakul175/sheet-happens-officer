@@ -36,7 +36,7 @@ describe("activity feed", () => {
     const view = await account("aview");
     const p = await project(lead, lead, [{ who: ed }, { who: other }, { who: view, role: "VIEWER" }]);
     const mine = await task(lead, p.id, { title: "Mine to do", assigneeId: ed.id, dueDate: "2026-10-10" });
-    const theirs = await task(lead, p.id, { title: "Theirs alone", assigneeId: other.id });
+    const theirs = await task(lead, p.id, { dueDate: "2031-03-20", title: "Theirs alone", assigneeId: other.id });
     expect((await patchTask(ed, mine, { dueDate: "2026-10-14" })).status).toBe(200);
     await lead.c.del(`/api/tasks/${theirs}`);
     const all = (await lead.c.get(`/api/projects/${p.id}/activity`)).json.items as { who: string; what: string; when: string; via: string }[];

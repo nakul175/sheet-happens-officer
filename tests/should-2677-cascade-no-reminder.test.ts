@@ -77,13 +77,13 @@ afterAll(async () => {
 describe("qa:TC missing SHO-2677 AC5: a cascaded subtask gets no reminder", () => {
   it("qa:TC missing a parent completed with completeAll reminds the open tasks and none of the cascaded subtasks", async () => {
     const stamp = Date.now();
-    const parent = await task(lead, proj.id, { title: `ZZ-TEST cascaded parent ${stamp}`, sectionId: proj.doing });
+    const parent = await task(lead, proj.id, { dueDate: "2031-03-20", title: `ZZ-TEST cascaded parent ${stamp}`, sectionId: proj.doing });
     const cascaded = [
       await task(lead, proj.id, { title: `ZZ-TEST cascaded one ${stamp}`, parentId: parent, assigneeId: holder.id, dueDate: istDate(1) }),
       await task(lead, proj.id, { title: `ZZ-TEST cascaded two ${stamp}`, parentId: parent, assigneeId: holder.id, dueDate: istDate(1) }),
     ];
     // Both held by the same person and due tomorrow, so each would be reminded if it were open.
-    const openParent = await task(lead, proj.id, { title: `ZZ-TEST open parent ${stamp}`, sectionId: proj.doing });
+    const openParent = await task(lead, proj.id, { dueDate: "2031-03-20", title: `ZZ-TEST open parent ${stamp}`, sectionId: proj.doing });
     const openSub = await task(lead, proj.id, { title: `ZZ-TEST open subtask ${stamp}`, parentId: openParent, assigneeId: holder.id, dueDate: istDate(1) });
     const plain = await task(lead, proj.id, { title: `ZZ-TEST ordinary ${stamp}`, assigneeId: holder.id, dueDate: istDate(1) });
 

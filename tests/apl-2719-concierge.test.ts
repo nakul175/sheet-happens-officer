@@ -34,7 +34,7 @@ async function cardDeletedTask() {
   const projectId = await zzProject(lead, `APL-2719 card ${RUN}-${n}`);
   projectIds.push(projectId);
   const title = `ZZ-TEST card delete ${RUN}-${n}`;
-  const taskId = await task(lead, projectId, { title });
+  const taskId = await task(lead, projectId, { dueDate: "2031-03-20", title });
   script(
     () => [tu("find_tasks", { text: title })],
     (r) => [tu("propose_changes", { changes: [{ action: "delete_task", task_id: lastData(r).tasks[0].id }] })],

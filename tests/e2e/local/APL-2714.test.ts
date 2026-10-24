@@ -87,7 +87,7 @@ function setup() {
     for (const [who, role] of [[edAcc, "EDITOR"], [viewAcc, "VIEWER"]] as const) {
       expect((await leadAcc.c.post(`/api/projects/${projectId}/members`, { userId: who.id, role })).status).toBe(201);
     }
-    const t = await leadAcc.c.post(`/api/projects/${projectId}/tasks`, { title: `ZZ-TEST T1 ${RUN}` });
+    const t = await leadAcc.c.post(`/api/projects/${projectId}/tasks`, { title: `ZZ-TEST T1 ${RUN}`, dueDate: "2031-03-20" });
     expect(t.status, JSON.stringify(t.json)).toBe(201);
 
     return {

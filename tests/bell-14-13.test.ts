@@ -7,7 +7,7 @@ describe("notification triage (14.13)", () => {
     const lead = await account("lead");
     const ed = await account("ed");
     const p = await project(lead, lead, [{ who: ed }]);
-    for (let i = 0; i < 5; i++) await task(lead, p.id, { assigneeId: ed.id, title: `Job ${i}` });
+    for (let i = 0; i < 5; i++) await task(lead, p.id, { dueDate: "2031-03-20", assigneeId: ed.id, title: `Job ${i}` });
     const before = (await ed.c.get("/api/notifications")).json;
     const mine = before.items.filter((n: { text: string }) => /Job/.test(n.text));
     expect(mine.length).toBe(5);
@@ -42,7 +42,7 @@ describe("notification triage (14.13)", () => {
     const lead = await account("lead");
     const ed = await account("ed");
     const p = await project(lead, lead, [{ who: ed }]);
-    for (let b = 0; b < 3; b++) await Promise.all(Array.from({ length: 20 }, (_, i) => task(lead, p.id, { assigneeId: ed.id, title: `Bulk ${b}-${i}` })));
+    for (let b = 0; b < 3; b++) await Promise.all(Array.from({ length: 20 }, (_, i) => task(lead, p.id, { dueDate: "2031-03-20", assigneeId: ed.id, title: `Bulk ${b}-${i}` })));
     const first = (await ed.c.get("/api/notifications")).json;
     expect(first.items.length).toBe(50);
     expect(first.next).toBeTruthy();

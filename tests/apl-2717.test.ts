@@ -52,7 +52,7 @@ describe("qa:TC missing APL-2717 concierge too-old-to-undo matches undo.ts", () 
     it(`qa:TC missing ${c.name}: isTooOldToUndo, undo.ts, cards.ts and thread.ts agree (tooOld=${c.tooOld})`, async () => {
       const lead = await account("lead");
       const p = await project(lead, lead);
-      const t = await task(lead, p.id, { title: "Boundary" });
+      const t = await task(lead, p.id, { dueDate: "2031-03-20", title: "Boundary" });
       const logId = (await patchTask(lead, t, { title: "Boundary edited" })).headers.get("x-undo-id")!;
       expect(logId).toBeTruthy();
 

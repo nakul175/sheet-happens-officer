@@ -27,7 +27,7 @@ const iso = (d: Date | null) => d?.toISOString() ?? null;
 
 /** Parent P in `sectionId`, with open subtasks A and B. */
 async function parentWithOpenSubs(who: Account, sectionId: string, proj: { id: string }) {
-  const parent = await task(who, proj.id, { title: "ZZ-TEST P", sectionId });
+  const parent = await task(who, proj.id, { dueDate: "2031-03-20", title: "ZZ-TEST P", sectionId });
   const a = await task(who, proj.id, { title: "ZZ-TEST A", parentId: parent });
   const b = await task(who, proj.id, { title: "ZZ-TEST B", parentId: parent });
   return { parent, a, b };
@@ -65,7 +65,7 @@ describe("qa:TC missing APL-2721 unit: done-flag reopen", () => {
 
     // Done-flag move: C was ticked before P closed. A closed with P.
     const flag = await zz.project(lead);
-    const parent = await task(lead, flag.id, { title: "ZZ-TEST P", sectionId: flag.doing });
+    const parent = await task(lead, flag.id, { dueDate: "2031-03-20", title: "ZZ-TEST P", sectionId: flag.doing });
     const cascaded = await task(lead, flag.id, { title: "ZZ-TEST A", parentId: parent });
     const own = await task(lead, flag.id, { title: "ZZ-TEST C", parentId: parent });
     await completeTask(me(lead), own, await versionOf(own));
@@ -78,7 +78,7 @@ describe("qa:TC missing APL-2721 unit: done-flag reopen", () => {
 
     // reopenTask: same rule, on a parent closed by hand.
     const hand = await zz.project(lead);
-    const parent2 = await task(lead, hand.id, { title: "ZZ-TEST P", sectionId: hand.doing });
+    const parent2 = await task(lead, hand.id, { dueDate: "2031-03-20", title: "ZZ-TEST P", sectionId: hand.doing });
     const cascaded2 = await task(lead, hand.id, { title: "ZZ-TEST A", parentId: parent2 });
     const own2 = await task(lead, hand.id, { title: "ZZ-TEST C", parentId: parent2 });
     await completeTask(me(lead), own2, await versionOf(own2));
@@ -130,8 +130,8 @@ describe("qa:TC missing APL-2721 unit: done-flag reopen", () => {
   it("qa:TC missing a trashed parent stays complete in its original section", async () => {
     const lead = await zz.person("lead");
     const proj = await zz.project(lead);
-    const trashed = await task(lead, proj.id, { title: "ZZ-TEST T", sectionId: proj.doing });
-    const live = await task(lead, proj.id, { title: "ZZ-TEST Live", sectionId: proj.doing });
+    const trashed = await task(lead, proj.id, { dueDate: "2031-03-20", title: "ZZ-TEST T", sectionId: proj.doing });
+    const live = await task(lead, proj.id, { dueDate: "2031-03-20", title: "ZZ-TEST Live", sectionId: proj.doing });
     await updateSection(me(lead), proj.id, proj.doing, { isDone: true });
     const beforeTrash = await rowOf(trashed);
     expect(beforeTrash.completedAt).not.toBeNull();
@@ -161,7 +161,7 @@ describe("qa:TC missing APL-2721 route: done-flag reopen", () => {
   it("qa:TC missing cascaded subtasks reopen with their parent", async () => {
     const lead = await zz.person("lead");
     const proj = await zz.project(lead);
-    const parent = await task(lead, proj.id, { title: "ZZ-TEST P", sectionId: proj.doing });
+    const parent = await task(lead, proj.id, { dueDate: "2031-03-20", title: "ZZ-TEST P", sectionId: proj.doing });
     const a = await task(lead, proj.id, { title: "ZZ-TEST A", parentId: parent });
     const b = await task(lead, proj.id, { title: "ZZ-TEST B", parentId: parent });
     expect((await lead.c.patch(`/api/projects/${proj.id}/sections/${proj.doing}`, { isDone: true })).status).toBe(200);
@@ -186,7 +186,7 @@ describe("qa:TC missing APL-2721 route: done-flag reopen", () => {
     const lead = await zz.person("lead");
 
     const flag = await zz.project(lead);
-    const parent = await task(lead, flag.id, { title: "ZZ-TEST P", sectionId: flag.doing });
+    const parent = await task(lead, flag.id, { dueDate: "2031-03-20", title: "ZZ-TEST P", sectionId: flag.doing });
     const cascaded = await task(lead, flag.id, { title: "ZZ-TEST A", parentId: parent });
     const own = await task(lead, flag.id, { title: "ZZ-TEST C", parentId: parent });
     expect((await lead.c.post(`/api/tasks/${own}/complete`, await withVersion(lead, own))).status).toBe(200);
@@ -200,7 +200,7 @@ describe("qa:TC missing APL-2721 route: done-flag reopen", () => {
     expect(flagSubs.find((s) => s.id === own)?.completedAt).toBe(ownBefore);
 
     const hand = await zz.project(lead);
-    const parent2 = await task(lead, hand.id, { title: "ZZ-TEST P", sectionId: hand.doing });
+    const parent2 = await task(lead, hand.id, { dueDate: "2031-03-20", title: "ZZ-TEST P", sectionId: hand.doing });
     const cascaded2 = await task(lead, hand.id, { title: "ZZ-TEST A", parentId: parent2 });
     const own2 = await task(lead, hand.id, { title: "ZZ-TEST C", parentId: parent2 });
     expect((await lead.c.post(`/api/tasks/${own2}/complete`, await withVersion(lead, own2))).status).toBe(200);
@@ -217,8 +217,8 @@ describe("qa:TC missing APL-2721 route: done-flag reopen", () => {
   it("qa:TC missing a trashed parent stays complete in its original section", async () => {
     const lead = await zz.person("lead");
     const proj = await zz.project(lead);
-    const trashed = await task(lead, proj.id, { title: "ZZ-TEST T", sectionId: proj.doing });
-    const live = await task(lead, proj.id, { title: "ZZ-TEST Live", sectionId: proj.doing });
+    const trashed = await task(lead, proj.id, { dueDate: "2031-03-20", title: "ZZ-TEST T", sectionId: proj.doing });
+    const live = await task(lead, proj.id, { dueDate: "2031-03-20", title: "ZZ-TEST Live", sectionId: proj.doing });
     expect((await lead.c.patch(`/api/projects/${proj.id}/sections/${proj.doing}`, { isDone: true })).status).toBe(200);
     const closed = await lead.c.get(`/api/tasks/${trashed}`);
     const completedAt = closed.json.task.completedAt as string;

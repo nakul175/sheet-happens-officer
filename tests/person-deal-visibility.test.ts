@@ -120,7 +120,7 @@ describe("qa:TC missing APL-2728 person page hides a deal CRM_VISIBLE conceals",
     projectIds.push(plainId);
     expect((await adminUser.c.post(`/api/projects/${plainId}/members`, { userId: member.id, role: "EDITOR" })).status).toBe(201);
     expect((await adminUser.c.post(`/api/projects/${plainId}/members`, { userId: outsider.id, role: "EDITOR" })).status).toBe(201);
-    await task(adminUser, plainId, { title: `ZZ-TEST Shared task ${RUN}`, assigneeId: adminUser.id });
+    await task(adminUser, plainId, { dueDate: "2031-03-20", title: `ZZ-TEST Shared task ${RUN}`, assigneeId: adminUser.id });
   });
 
   function body(person: unknown) {
@@ -226,8 +226,8 @@ describe("qa:TC missing APL-2728 person page hides a deal CRM_VISIBLE conceals",
 
   // The AC names an admin opening a non-admin's page. The rep has one plain task and one deal task.
   it("qa:TC missing admin path, off: an admin viewing a non-admin rep hides that rep's deal", async () => {
-    await task(adminUser, plainId, { title: `ZZ-TEST Rep plain ${RUN}`, assigneeId: member.id });
-    await task(adminUser, dealId, { title: `ZZ-TEST Rep deal ${RUN}`, assigneeId: member.id });
+    await task(adminUser, plainId, { dueDate: "2031-03-20", title: `ZZ-TEST Rep plain ${RUN}`, assigneeId: member.id });
+    await task(adminUser, dealId, { dueDate: "2031-03-20", title: `ZZ-TEST Rep deal ${RUN}`, assigneeId: member.id });
     const person = await withMode("off", () => getPerson(actor(adminUser, "ADMIN"), member.id));
     expect(person.id).toBe(member.id);
     expect(person.email).toBe(member.email);

@@ -18,7 +18,7 @@ describe("idea flag (13.2)", () => {
     const lead = await account("ilead");
     const viewer = await account("iview");
     const p = await project(lead, lead, [{ who: viewer, role: "VIEWER" }]);
-    const t = await task(lead, p.id, { title: "Maybe a deal" });
+    const t = await task(lead, p.id, { title: "Maybe a deal", dueDate: "2031-03-20" });
     const on = await lead.c.post(`/api/tasks/${t}/idea`, { isIdea: true });
     expect(on.status).toBe(200);
     expect(on.headers.get("x-undo-label")).toBe("Idea flag changed");
@@ -32,8 +32,8 @@ describe("idea flag (13.2)", () => {
     const lead = await account("isearch");
     const p = await project(lead, lead);
     const tag = `zebra${Date.now()}`;
-    const a = await task(lead, p.id, { title: `${tag} idea` });
-    await task(lead, p.id, { title: `${tag} plain` });
+    const a = await task(lead, p.id, { title: `${tag} idea`, dueDate: "2031-03-20" });
+    await task(lead, p.id, { title: `${tag} plain`, dueDate: "2031-03-20" });
     await lead.c.post(`/api/tasks/${a}/idea`, { isIdea: true });
     const all = (await lead.c.get(`/api/search?q=${tag}`)).json.tasks;
     expect(all).toHaveLength(2);
@@ -88,7 +88,9 @@ describe("convert a task to a deal (12.2)", () => {
   it("refuses when any gate field is missing, with no bypass", async () => {
     const lead = await account("gate");
     const p = await project(lead, lead);
-    const nodate = await task(lead, p.id, { title: "No date" });
+    const nodate = await task(lead, p.id, { title: "No date", dueDate: "2031-03-20" });
+    // Existing undated records remain supported; creation itself now requires a date.
+    expect((await lead.c.patch(`/api/tasks/${nodate}`, await withVersion(lead, nodate, { dueDate: null }))).status).toBe(200);
     const g = await gate(lead);
     const miss = async (id: string, body: Record<string, unknown>) => { const r = await lead.c.post(`/api/tasks/${id}/convert`, body); expect(r.status).toBe(400); return r.json.needsFields as string[]; };
     expect(await miss(nodate, g)).toContain("dueDate");

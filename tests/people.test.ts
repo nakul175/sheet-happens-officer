@@ -214,7 +214,7 @@ describe("15.4 person profile", () => {
     const lead = await account("lead");
     const b = await account("bob");
     const p1 = await project(sa, lead, [{ who: b }]);
-    await task(lead, p1.id, { title: "Ping", assigneeId: b.id });
+    await task(lead, p1.id, { dueDate: "2031-03-20", title: "Ping", assigneeId: b.id });
     const r = await ad.c.get(`/api/team/${b.id}`);
     expect(r.status).toBe(200);
     const pr = r.json.person;

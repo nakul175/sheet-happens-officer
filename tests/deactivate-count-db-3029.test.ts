@@ -21,8 +21,8 @@ it.each(["leaders", "viewer"] as const)("SHO-3029: real hidden-deal tasks move b
     members: [leaver, { who: viewer, role: "VIEWER" }],
   });
   fixtures.push(fixture);
-  const visible = await task(sa, fixture.plain.id, { title: "ZZ-TEST visible handover", assigneeId: leaver.id });
-  const hidden = await Promise.all([1, 2, 3].map((n) => task(sa, fixture.deal.id, {
+  const visible = await task(sa, fixture.plain.id, { dueDate: "2031-03-20", title: "ZZ-TEST visible handover", assigneeId: leaver.id });
+  const hidden = await Promise.all([1, 2, 3].map((n) => task(sa, fixture.deal.id, { dueDate: "2031-03-20",
     title: `ZZ-TEST hidden handover ${n}`, assigneeId: leaver.id,
   })));
   const actor = await db.user.findUniqueOrThrow({ where: { id: sa.id } });

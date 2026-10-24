@@ -13,12 +13,14 @@ describe("project list filters (14.9)", () => {
     const o2 = await task(lead, p.id, { dueDate: istDate(-1) });
     const o3 = await task(lead, p.id, { dueDate: istDate(-9), priority: "URGENT" });
     const fut = await task(lead, p.id, { dueDate: istDate(5) });
-    const none = await task(lead, p.id, {});
+    const none = await task(lead, p.id, { dueDate: "2031-03-20" });
+    expect((await patchTask(lead, none, { dueDate: null })).status).toBe(200);
     const done = await task(lead, p.id, { dueDate: istDate(-20) });
     expect((await lead.c.post(`/api/tasks/${done}/complete`, await withVersion(lead, done))).status).toBe(200);
     const blocked = await task(lead, p.id, { dueDate: istDate(2) });
     expect((await patchTask(lead, blocked, { blocked: true, blockedReason: "waiting" })).status).toBe(200);
-    const wait = await task(lead, p.id, { assigneeId: meera.id, approverId: lead.id });
+    const wait = await task(lead, p.id, { assigneeId: meera.id, approverId: lead.id, dueDate: "2031-03-20" });
+    expect((await patchTask(lead, wait, { dueDate: null })).status).toBe(200);
     expect((await meera.c.post(`/api/tasks/${wait}/send-for-approval`)).status).toBe(200);
 
     const all = await lead.c.get(`/api/projects/${p.id}/tasks`);

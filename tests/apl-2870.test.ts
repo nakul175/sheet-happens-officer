@@ -22,7 +22,7 @@ describe("qa:TC missing APL-2870 route: undo of a reopen", () => {
   it("qa:TC missing a reopened subtask moved to Trash closes again, and one ticked on its own keeps its time", async () => {
     const lead = await zz.person("lead");
     const proj = await zz.project(lead);
-    const parent = await task(lead, proj.id, { title: "ZZ-TEST P", sectionId: proj.doing });
+    const parent = await task(lead, proj.id, { dueDate: "2031-03-20", title: "ZZ-TEST P", sectionId: proj.doing });
     const a = await task(lead, proj.id, { title: "ZZ-TEST A", parentId: parent });
     const c = await task(lead, proj.id, { title: "ZZ-TEST C", parentId: parent });
 

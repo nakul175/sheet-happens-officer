@@ -66,7 +66,7 @@ async function setup() {
   const orgAdmin = await admin(sa, "orgad");
   const admin2 = await admin(sa, "orgadtwo");
   const p = await project(lead, lead, [{ who: editor }, { who: viewer, role: "VIEWER" }]);
-  const t1 = await task(lead, p.id);
+  const t1 = await task(lead, p.id, { dueDate: "2031-03-20" });
   return { sa, lead, editor, viewer, outsider, other, orgAdmin, admin2, p, t1 };
 }
 

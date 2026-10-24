@@ -79,7 +79,7 @@ async function setup() {
   const p = await lead.c.get(`/api/projects/${pid}`);
   const sections = p.json.project.sections as { id: string; isDone: boolean }[];
   const newTask = async (title: string) => {
-    const r = await lead.c.post(`/api/projects/${pid}/tasks`, { title, assigneeId: lead.id });
+    const r = await lead.c.post(`/api/projects/${pid}/tasks`, { title, assigneeId: lead.id, dueDate: "2031-03-20" });
     expect(r.status, JSON.stringify(r.json)).toBe(201);
     return r.json.task.id as string;
   };

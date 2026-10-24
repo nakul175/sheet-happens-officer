@@ -11,8 +11,8 @@ describe("SHO-2701 the activity API names the event kind", () => {
     const lead = await account("klead");
     const ed = await account("ked");
     const p = await project(lead, lead, [{ who: ed }]);
-    const gone = await task(lead, p.id, { title: "Kind me a delete" });
-    const kept = await task(ed, p.id, { title: "Kind me an update" });
+    const gone = await task(lead, p.id, { dueDate: "2031-03-20", title: "Kind me a delete" });
+    const kept = await task(ed, p.id, { dueDate: "2031-03-20", title: "Kind me an update" });
     expect((await lead.c.del(`/api/tasks/${gone}`)).status).toBe(204);
     const upd = await patchTask(ed, kept, { dueDate: "2026-10-14" });
     expect(upd.status, JSON.stringify(upd.json)).toBe(200);

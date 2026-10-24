@@ -76,7 +76,7 @@ describe("auth before body (APL-2651)", () => {
     const outsider = await account("out");
     const orgAdmin = await admin(sa, "orgad");
     const p = await project(lead, lead, [{ who: editor }, { who: viewer, role: "VIEWER" }]);
-    const taskId = await task(lead, p.id);
+    const taskId = await task(lead, p.id, { dueDate: "2031-03-20" });
     const view = await lead.c.post(`/api/projects/${p.id}/views`, { name: "Overdue", state: viewState });
     expect(view.status).toBe(201);
     const viewId = view.json.view.id as string;
