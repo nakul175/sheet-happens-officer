@@ -315,25 +315,6 @@ export type Bindings = { env: Set<string>; proc: Set<string>; process: Set<strin
 /** A path piece under /proc: "/proc", "/proc/self/", or a template head that names /proc. */
 const PROC_PIECE = /^\/proc\/?(self\/?|\d+\/?)?$/;
 
-/** `process.env` written directly, as `process.env`, `process["env"]`, `process[`env`]`, `globalThis.process.env`. */
-function isEnvAccess(node: ts.Node): boolean {
-  if (ts.isParenthesizedExpression(node) || ts.isNonNullExpression(node)) return isEnvAccess(node.expression);
-  const keyOf = (inner: ts.Node): string | null => {
-    if (ts.isPropertyAccessExpression(inner)) return inner.name.text;
-    if (ts.isElementAccessExpression(inner) && inner.argumentExpression && ts.isStringLiteralLike(inner.argumentExpression)) return inner.argumentExpression.text;
-    return null;
-  };
-  const ownerName = (inner: ts.Node): string | null => {
-    if (ts.isPropertyAccessExpression(inner) || ts.isElementAccessExpression(inner)) return ownerName(inner.expression);
-    if (ts.isIdentifier(inner)) return inner.text;
-    return null;
-  };
-  if (keyOf(node) !== "env") return false;
-  const owner = ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node) ? ownerName(node.expression) : null;
-  // `process.env`, `env:` on an object literal's own key is not this shape, and `x.env` on a custom object is not either.
-  return owner === "process";
-}
-
 /** `process` itself, `globalThis.process`, `globalThis["process"]`, or a name bound to any of those (`const p = process`). */
 function isProcessObject(node: ts.Node, bindings: Bindings, depth = 0): boolean {
   if (depth > 4) return false;
@@ -570,24 +551,24 @@ function moduleIndex(sources: { file: string; source: ts.SourceFile }[]): Module
       // W105: `export { dump } from "./impl"` and `export * from "./impl"` declare nothing, so the barrel's own function
       // map is empty and an import of the barrel used to resolve to nothing. Record the hand-off so it can be followed.
       if (ts.isExportDeclaration(node) && node.moduleSpecifier && ts.isStringLiteralLike(node.moduleSpecifier)) {
-        const module = node.moduleSpecifier.text;
-        if (!node.exportClause) addReExport(STAR, module, STAR);
+        const moduleName = node.moduleSpecifier.text;
+        if (!node.exportClause) addReExport(STAR, moduleName, STAR);
         else if (ts.isNamedExports(node.exportClause)) {
           for (const element of node.exportClause.elements) {
-            addReExport(element.name.text, module, (element.propertyName ?? element.name).getText());
+            addReExport(element.name.text, moduleName, (element.propertyName ?? element.name).getText());
           }
         }
       }
       if (ts.isImportDeclaration(node) && ts.isStringLiteralLike(node.moduleSpecifier) && node.importClause) {
-        const module = node.moduleSpecifier.text;
+        const moduleName = node.moduleSpecifier.text;
         const clause = node.importClause;
-        if (clause.name) imports.set(clause.name.text, { module, name: "default" });
+        if (clause.name) imports.set(clause.name.text, { module: moduleName, name: "default" });
         if (clause.namedBindings && ts.isNamedImports(clause.namedBindings)) {
           for (const element of clause.namedBindings.elements) {
-            imports.set(element.name.text, { module, name: (element.propertyName ?? element.name).getText() });
+            imports.set(element.name.text, { module: moduleName, name: (element.propertyName ?? element.name).getText() });
           }
         }
-        if (clause.namedBindings && ts.isNamespaceImport(clause.namedBindings)) namespaces.set(clause.namedBindings.name.text, module);
+        if (clause.namedBindings && ts.isNamespaceImport(clause.namedBindings)) namespaces.set(clause.namedBindings.name.text, moduleName);
       }
       ts.forEachChild(node, visit);
     };
@@ -614,10 +595,10 @@ function exportedFrom(index: ModuleIndex, file: string, name: string, seen: Set<
   const reexports = index.reexports.get(file);
   if (!reexports) return null;
   const follow = (target: ReExport, exported: string): Callee | null => {
-    const module = resolveModule(file, target.module, index.files);
+    const moduleName = resolveModule(file, target.module, index.files);
     // `export * from "./impl"` re-exports whatever the caller asked for, so the name travels unchanged.
     const wanted = target.name === STAR ? exported : target.name;
-    return module ? exportedFrom(index, module, wanted, seen, depth + 1) : null;
+    return moduleName ? exportedFrom(index, moduleName, wanted, seen, depth + 1) : null;
   };
   const direct = reexports.get(name)?.find((target) => target.name !== STAR);
   if (direct) return follow(direct, name);
@@ -634,15 +615,15 @@ function calleeOf(index: ModuleIndex, file: string, call: ts.CallExpression): Ca
   const imported = (name: string): Callee | null => {
     const target = index.imports.get(file)?.get(name);
     if (!target) return null;
-    const module = resolveModule(file, target.module, index.files);
-    return module ? exportedFrom(index, module, target.name, new Set()) : null;
+    const moduleName = resolveModule(file, target.module, index.files);
+    return moduleName ? exportedFrom(index, moduleName, target.name, new Set()) : null;
   };
   const expression = call.expression;
   if (ts.isIdentifier(expression)) return imported(expression.text) ?? sameFile(expression.text);
   if (ts.isPropertyAccessExpression(expression) && ts.isIdentifier(expression.expression)) {
-    const module = index.namespaces.get(file)?.get(expression.expression.text);
-    if (module) {
-      const resolved = resolveModule(file, module, index.files);
+    const moduleName = index.namespaces.get(file)?.get(expression.expression.text);
+    if (moduleName) {
+      const resolved = resolveModule(file, moduleName, index.files);
       return resolved ? exportedFrom(index, resolved, expression.name.text, new Set()) : null;
     }
   }
