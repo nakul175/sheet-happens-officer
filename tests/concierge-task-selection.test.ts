@@ -15,3 +15,6 @@ it("does not turn one visible match or people-only results into a task choice", 
   expect(taskSelectionForRequest("Move budget", groups, new Set(["a"]), new Set())).toBeUndefined();
   expect(taskSelectionForRequest("Move budget", [{ kind: "person", ids: ["a", "b"] }], seen, new Set())).toBeUndefined();
 });
+it.each(["Move all budget tasks", "Complete every budget task", "Set both budget tasks to high priority", "Set of budget tasks"])("does not narrow an explicit bulk request or a noun-phrase read: %s", request => {
+  expect(taskSelectionForRequest(request, groups, seen, new Set())).toBeUndefined();
+});
