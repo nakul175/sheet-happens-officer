@@ -118,6 +118,37 @@ test("AC coverage manifest: no entry falls back from TESTED, and the counts are 
   assert.match(LIMIT, /GOOD test/, "the limit paragraph must still say what a TESTED entry cannot prove");
 });
 
+// W352, SHO-3024 residual. A description of a guard is the one kind of prose here that can rot without any file
+// moving: the pattern it quotes can be rewritten underneath it and every other assertion in this file stays green,
+// because they check a test against the filesystem and this note only checks a sentence against a reader's trust.
+// So the note is checked against the scan it cites. Every `/…/` pattern the note quotes must appear verbatim in
+// tests/test-env-contract.test.ts, and the note must name the shapes that scan cannot see, so a reader cannot take
+// "every workflow that runs npm test" for the enforcement. Widen the guard, and this goes red until the note is
+// re-derived - which is the point, not a nuisance.
+test("AC coverage manifest: the 3024 BULLET-1 note describes the workflow scan it cites", () => {
+  const note = ENTRIES.find((entry) => entry.id === "3024 BULLET-1")?.note ?? "";
+  assert.ok(note, "the entry needs a note");
+
+  const guardFile = resolve(ROOT, "tests/test-env-contract.test.ts");
+  assert.ok(existsSync(guardFile), "the guard file the note cites exists");
+  const guard = readFileSync(guardFile, "utf8");
+
+  const quoted = [...note.matchAll(/`(\/[^`\n]+\/[a-z]*)`/g)].map((match) => match[1]);
+  assert.ok(quoted.length >= 2, `the note quotes the scan's patterns, got ${JSON.stringify(quoted)}`);
+  for (const pattern of quoted) {
+    assert.ok(guard.includes(pattern),
+      `the note quotes ${pattern}, which tests/test-env-contract.test.ts does not contain: the scan it describes `
+      + "is no longer the scan that runs, so re-derive the note");
+  }
+
+  const unseen = ["run: |", "run: >", "npm run test", "npm test | tee", "KEY=value"];
+  const missing = unseen.filter((shape) => !note.includes(shape));
+  assert.deepEqual(missing, [],
+    `the note must name what the scan cannot see (missing: ${missing.join(", ")}) - otherwise it reads as a `
+    + "guarantee over every spelling of the invocation");
+  assert.match(note, /cannot see/, "the note must say those shapes are unseen, not only list them");
+});
+
 
 /** Regex-escape a literal, so a ticket id is matched as an id and not as a pattern. */
 const escape = (value) => String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
