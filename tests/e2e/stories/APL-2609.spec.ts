@@ -184,8 +184,14 @@ async function searchScreen(browser: Browser, who: Who, q: string) {
     const box = page.getByRole("searchbox", { name: "Search" });
     await expect(box).toBeVisible({ timeout: 30_000 });
     const answered = page.waitForResponse((r) => r.url().includes("/api/search?q=") && r.status() === 200, { timeout: 30_000 });
-    await box.fill(q);
-    try { await answered; }
+    // SSR exposes an editable input before React handles its onChange. Retry the
+    // real interaction until the debounced UI acknowledges it; never use a sleep.
+    const queryAcknowledged = expect(async () => {
+      await box.fill("");
+      await box.fill(q);
+      await expect(page.getByText("Type at least two letters.", {exact: true})).not.toBeVisible({timeout: 1000});
+    }).toPass({timeout: 15000, intervals: [1000]});
+    try { await Promise.all([answered, queryAcknowledged]); }
     catch (error) {
       console.info("SHO_2897_SEARCH_DIAGNOSTIC", JSON.stringify({
         responses, errors, inputMatchesSyntheticQuery: await box.inputValue() === q,
