@@ -37,3 +37,13 @@ it.each([
 ])("does not exempt an outcome or an unverified owner: %s", (text) => {
  expect(claimsWrite(text,[task])).toBe(true);
 });
+
+it("allows the sole fetched task's owner on the following line without licensing writes", () => {
+ const text=`The task is:\n"${task.title}"\nIt has no due date, is assigned to Root Test, and is not blocked. I haven't changed anything.`;
+ expect(claimsWrite(text,[task])).toBe(false);
+ expect(claimsWrite(text+"\nI've reassigned it.",[task])).toBe(true);
+});
+it("does not guess owner association across multiple named tasks", () => {
+ const other={title:"ZZ-TEST another task",assignee:"Someone Else"};
+ expect(claimsWrite(`${task.title} and ${other.title}\nThe task is assigned to Root Test.`,[task,other])).toBe(true);
+});
