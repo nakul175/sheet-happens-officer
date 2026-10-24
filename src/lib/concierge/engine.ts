@@ -10,6 +10,7 @@ import {
 } from "@/lib/concierge/limits";
 import { todayLine } from "@/lib/concierge/dates";
 import { isEcho } from "@/lib/concierge/echo";
+import { exactTitleRead } from "@/lib/concierge/exact-title-read";
 import { claimsWrite } from "@/lib/concierge/claims";
 import { screenOnlyHelp } from "@/lib/concierge/screen-help";
 import { taskSelectionForRequest } from "@/lib/concierge/task-selection";
@@ -193,6 +194,13 @@ function buildReply(turn: Turn, modelText: string, request: string): Stored {
   if (r.calls > 0 && r.records === 0) {
     // Nothing was fetched: never let the model's own words stand in for data (SHO-US-8.2 AC2, AC4).
     return { kind: "answer", text: r.notFound > 0 ? "I can't find that." : "I found nothing." };
+  }
+  // APL-2511 AC5: answer this single-field read from fresh authorized tool data, never model prose.
+  // Hostile text in a title remains text; no proposal or write can be manufactured by this branch.
+  const titleTask = exactTitleRead(request, turn);
+  if (titleTask) {
+    const text = `Task title: "${titleTask.title}".`;
+    return { kind: "answer", text, links: linksFor(turn, text) };
   }
   // SHO-2693 (APL-2513 AC1): a request that asks to assign, and did not end in a card, must ask who. Nothing is written
   // either way, so nothing changes until a person is named (AC2).
