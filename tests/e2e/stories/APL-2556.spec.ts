@@ -78,7 +78,8 @@ test("AC2: the Confirm and Cancel buttons are at least 44 px high @local-only", 
   const first=await ask(admin,`Move "${title}" to Monday.`);
   expect(first.status,JSON.stringify(first.json)).toBe(200);expect(cardOf(first.messages)?.canConfirm).toBe(true);
   await openConcierge(page);
-  const pending=()=>page.locator(".cc-card").filter({has:page.getByRole("button",{name:"Confirm",exact:true})});
+  const sheet=page.getByRole("dialog",{name:"Concierge",exact:true});
+  const pending=()=>sheet.locator(".cc-card").filter({has:page.getByRole("button",{name:"Confirm",exact:true})});
   const geometry=[];
   for(const width of [390,320]) {
     await page.setViewportSize({width,height:780});
@@ -88,12 +89,12 @@ test("AC2: the Confirm and Cancel buttons are at least 44 px high @local-only", 
     }
   }
   await pending().getByRole("button",{name:"Cancel",exact:true}).click();
-  await expect(page.locator(".cc-card")).toContainText("Cancelled. Nothing was changed.");expect((await taskOf(admin,id)).dueDate).toBe(due);
+  await expect(sheet.locator(".cc-card")).toContainText("Cancelled. Nothing was changed.");expect((await taskOf(admin,id)).dueDate).toBe(due);
   const second=await ask(admin,`Move "${title}" to Monday.`);expect(cardOf(second.messages)?.canConfirm).toBe(true);
   await openConcierge(page);
   await pending().getByRole("button",{name:"Confirm",exact:true}).click();
   await expect.poll(async()=>(await taskOf(admin,id)).dueDate).not.toBe(due);
-  const result=page.locator(".cc-result").filter({has:page.getByRole("button",{name:"Undo",exact:true})});
+  const result=sheet.locator(".cc-result").filter({has:page.getByRole("button",{name:"Undo",exact:true})});
   await expect(result.getByRole("button",{name:"Undo",exact:true})).toBeVisible();
   await result.getByRole("button",{name:"Undo",exact:true}).click();
   await expect.poll(async()=>(await taskOf(admin,id)).dueDate).toBe(due);
@@ -151,6 +152,6 @@ test("AC5: the undo toast does not overlap the entry or a bottom bar @local-only
     expect(await obstacles.count(),"A real entry/bottom bar must be visible").toBeGreaterThan(0);
     for(let i=0;i<await obstacles.count();i++){const b=(await obstacles.nth(i).boundingBox())!;const overlap=Math.min(a.x+a.width,b.x+b.width)>Math.max(a.x,b.x)&&Math.min(a.y+a.height,b.y+b.height)>Math.max(a.y,b.y);expect(overlap,`toast overlaps entry/bar at ${width}`).toBe(false);geometry.push({width,toast:a,obstacle:b});}
   }
-  await toast.getByRole("button",{name:"Undo",exact:true}).click();await expect.poll(async()=>(await taskOf(admin,id)).priority).toBe("MEDIUM");
+  await toast.getByRole("button",{name:"Undo",exact:true}).click({timeout:15000});await expect.poll(async()=>(await taskOf(admin,id)).priority).toBe("MEDIUM");
   await info.attach("local-real-task-undo-toast-geometry",{body:JSON.stringify({scope:"Ordinary actual task priority change global toast; distinct from Concierge inline Undo; Chromium viewport only",geometry}),contentType:"application/json"});
 });
