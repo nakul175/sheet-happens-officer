@@ -183,6 +183,29 @@ function DetailsDialog({ projectId, deal, onClose, onDone }: { projectId: string
   );
 }
 
+/** Deal names use the existing project-management endpoint and permission. */
+function RenameDeal({ projectId, name, onClose, onDone }: { projectId: string; name: string; onClose: () => void; onDone: () => void }) {
+  const [value, setValue] = useState(name);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  async function save(e: React.FormEvent) {
+    e.preventDefault();
+    if (busy || !value.trim()) return;
+    setBusy(true); setErr(null);
+    const r = await api("PATCH", `/api/projects/${projectId}`, { name: value.trim() });
+    setBusy(false);
+    if (r.ok) onDone(); else setErr(r.error ?? "Could not rename the deal.");
+  }
+  return <Modal small onClose={onClose} label="Rename opportunity">
+    <form onSubmit={save}>
+      <h2>Rename opportunity</h2>
+      <Field label="Opportunity name">{(id) => <input id={id} className="in" required maxLength={200} value={value} onChange={(e) => setValue(e.target.value)} />}</Field>
+      {err && <div className="err" role="alert">{err}</div>}
+      <div className="actions"><button type="button" className="btn ghost" onClick={onClose}>Cancel</button><button className="btn" disabled={busy || !value.trim()}>Save name</button></div>
+    </form>
+  </Modal>;
+}
+
 const PARTY_LABEL: Record<string, string> = { BUYER: "Buyer", FUNDER: "Funder", IMPLEMENTING_OFFICE: "Implementing office", PARTNER: "Partner", OTHER: "Other" };
 function Parties({ projectId, deal, canWrite, onChange }: { projectId: string; deal: DealBlock; canWrite: boolean; onChange: () => void }) {
   const [adding, setAdding] = useState(false);
@@ -231,10 +254,11 @@ function DealNotes({ projectId, orgId }: { projectId: string; orgId: string | nu
   );
 }
 
-export function DealPanel({ projectId, deal, canWrite, onChange, feed }: { projectId: string; deal: DealBlock; canWrite: boolean; onChange: () => void; feed: OpenTaskFeed }) {
+export function DealPanel({ projectId, projectName, deal, canWrite, canManage = false, onChange, feed }: { projectId: string; projectName?: string; deal: DealBlock; canWrite: boolean; canManage?: boolean; onChange: () => void; feed: OpenTaskFeed }) {
   const [pick, setPick] = useState<null | { stage: Stage; blocked: Blocked | null; loadError: string | null }>(null);
   const [armed, setArmed] = useState<Stage | null>(null);
   const [edit, setEdit] = useState(false);
+  const [rename, setRename] = useState(false);
   const pending = useRef(false);
   const ticket = useRef(0); // a closed or replaced click ignores a list that arrives later
   const d = deal.details;
@@ -299,6 +323,8 @@ export function DealPanel({ projectId, deal, canWrite, onChange, feed }: { proje
         {deal.stalled && <span className="chip gold">Stalled · no activity for 30 days</span>}
         {deal.stageReason && <span>Reason: {deal.stageReason}</span>}
         {canWrite && <button className="btn ghost sm" onClick={() => setEdit(true)}>Edit details</button>}
+        {canManage && projectName !== undefined && <button className="btn ghost sm" onClick={() => setRename(true)}>Rename opportunity</button>}
+        {canManage && <Link className="btn ghost sm" href={`/projects/${projectId}/members`}>Change leader</Link>}
       </div>
       {d?.whyPursue && <p style={{ margin: "8px 0 0", fontSize: 14 }}><b>Why:</b> {d.whyPursue}</p>}
       <p style={{ margin: "8px 0 0", fontSize: 14 }}>
@@ -309,6 +335,7 @@ export function DealPanel({ projectId, deal, canWrite, onChange, feed }: { proje
       <DealNotes projectId={projectId} orgId={deal.organisation?.id ?? null} />
       <Parties projectId={projectId} deal={deal} canWrite={canWrite} onChange={onChange} />
       {pick && deal && <StageDialog projectId={projectId} stage={pick.stage} deal={deal} initial={{ blocked: pick.blocked, loadError: pick.loadError }} onClose={close} onDone={() => { close(); onChange(); }} />}
+      {rename && canManage && projectName !== undefined && <RenameDeal projectId={projectId} name={projectName} onClose={() => setRename(false)} onDone={() => { setRename(false); onChange(); }} />}
       {edit && d && <DetailsDialog projectId={projectId} deal={deal} onClose={() => setEdit(false)} onDone={() => { setEdit(false); onChange(); }} />}
     </section>
   );

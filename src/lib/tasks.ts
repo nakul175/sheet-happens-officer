@@ -184,13 +184,18 @@ export async function createTask(
 // ---------------------------------------------------------------- read
 export async function getTask(user: Actor, id: string) {
   const { t, a } = await loadTask(user, id);
-  const [section, subtasks] = await Promise.all([
+  const [section, subtasks, creator, parent] = await Promise.all([
     db.section.findUniqueOrThrow({ where: { id: t.sectionId } }),
     db.task.findMany({ where: { parentId: id, deletedAt: null }, include: taskInclude, orderBy: [...ORDER] }),
+    db.user.findUnique({ where: { id: t.createdById }, select: { name: true, deactivatedAt: true } }),
+    t.parentId ? db.task.findUnique({ where: { id: t.parentId }, select: { dueDate: true } }) : null,
   ]);
   const viewer = { id: user.id, role: a.role };
   const task = {
     ...present(t, viewer),
+    createdAt: t.createdAt,
+    createdBy: creator && !creator.deactivatedAt ? { name: creator.name } : null,
+    parentDueDate: parent ? formatDueDate(parent.dueDate) : null,
     section: { id: section.id, name: section.name, isDone: section.isDone },
     project: { id: a.project.id, name: a.project.name, archived: !!a.project.archivedAt },
     subtaskList: subtasks.map((s) => present(s, viewer)),

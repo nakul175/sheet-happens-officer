@@ -18,6 +18,7 @@ type Task = {
   dueDate: string | null; blocked: boolean; blockedReason: string | null; completedAt: string | null; isIdea?: boolean;
   assignee: P; approver: P | null; collaborators: P[]; awaitingApproval: boolean; updatedAt: string; canClose: boolean;
   section: { id: string; name: string; isDone: boolean }; project: { id: string; name: string; archived: boolean };
+  createdAt?: string; createdBy?: { name: string } | null; parentDueDate?: string | null;
   subtaskList: Sub[];
   links?: { id: string; organisation: { id: string; name: string } | null; contact: { id: string; name: string; organisationId: string } | null }[];
   commentsEnabled?: boolean;
@@ -37,6 +38,8 @@ export function TaskModal({ id, me, onClose, onChanged, asPage }: { id: string; 
   const [confirm, setConfirm] = useState<null | { kind: "complete" | "move"; n: number; sectionId?: string }>(null);
   const [trash, setTrash] = useState(false);
   const [newSub, setNewSub] = useState("");
+  const [subDue, setSubDue] = useState("");
+  const [subAssignee, setSubAssignee] = useState("");
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
   const [convert, setConvert] = useState(false);
@@ -137,6 +140,10 @@ export function TaskModal({ id, me, onClose, onChanged, asPage }: { id: string; 
             <div className="box warn">Waiting for <b>{task.approver?.name}</b> to approve this task.</div>
           )}
           <div className="fgrid">
+            {task.createdAt && <>
+              <span className="lbl">Created by</span><span>{task.createdBy?.name ?? "Former member"}</span>
+              <span className="lbl">Created on</span><time dateTime={task.createdAt}>{new Intl.DateTimeFormat("en-GB", { dateStyle: "medium", timeStyle: "short", timeZone: "Asia/Kolkata" }).format(new Date(task.createdAt))} IST</time>
+            </>}
             <span className="lbl">Assignee</span>
             <div>
               {canEdit && !holding ? (
@@ -180,6 +187,7 @@ export function TaskModal({ id, me, onClose, onChanged, asPage }: { id: string; 
                   <input className="in" type="date" aria-label="Due date" style={{ width: "auto" }} defaultValue={task.dueDate ?? ""} key={task.updatedAt}
                     onChange={(e) => save({ dueDate: e.target.value || null })} />
                   {task.dueDate && <button className="link" onClick={() => save({ dueDate: null })}>Clear</button>}
+                  {task.parentDueDate && task.dueDate && task.dueDate > task.parentDueDate && <span className="hint" role="status">This subtask is due after its parent task.</span>}
                 </span>
               ) : dueLabel(task.dueDate)}
             </div>
@@ -226,15 +234,18 @@ export function TaskModal({ id, me, onClose, onChanged, asPage }: { id: string; 
             <div className="field">
               <span className="lbl">Subtasks {task.subtaskList.length > 0 && `(${task.subtaskList.filter((s) => s.completedAt).length} of ${task.subtaskList.length})`}</span>
               {task.subtaskList.map((s) => (
-                <label className="sub-item" key={s.id}>
+                <div className="sub-item" key={s.id}>
                   <input type="checkbox" aria-label={`Mark "${s.title}" ${s.completedAt ? "not done" : "done"}`} checked={!!s.completedAt} disabled={!canEdit || busy || (!s.canClose && !s.completedAt)}
                     onChange={() => run(api("POST", `/api/tasks/${s.id}/${s.completedAt ? "reopen" : "complete"}`, s.completedAt ? {} : { expectedUpdatedAt: s.updatedAt }))} />
-                  <span style={s.completedAt ? { textDecoration: "line-through", color: "var(--muted)" } : undefined}>{s.title}</span>
-                </label>
+                  <span style={s.completedAt ? { textDecoration: "line-through", color: "var(--muted)" } : undefined}><Link href={`/tasks/${s.id}`}>{s.title}</Link></span>
+                </div>
               ))}
               {canEdit && (
-                <form className="addrow" onSubmit={async (e) => { e.preventDefault(); const v = newSub.trim(); if (!v) return; await run(api("POST", `/api/projects/${task.projectId}/tasks`, { title: v, parentId: id }), () => setNewSub("")); }}>
+                <form className="addrow" style={{ flexWrap: "wrap", alignItems: "end" }} onSubmit={async (e) => { e.preventDefault(); const v = newSub.trim(); if (!v) return; await run(api("POST", `/api/projects/${task.projectId}/tasks`, { title: v, parentId: id, dueDate: subDue || null, ...(subAssignee ? { assigneeId: subAssignee } : {}) }), () => { setNewSub(""); setSubDue(""); setSubAssignee(""); }); }}>
                   <input className="in" aria-label="New subtask" placeholder="Add a subtask" value={newSub} onChange={(e) => setNewSub(e.target.value)} />
+                  <label>Due date (optional)<input className="in" type="date" aria-label="Subtask due date" value={subDue} onChange={(e) => setSubDue(e.target.value)} /></label>
+                  <label>Assignee<select className="in" aria-label="Subtask assignee" value={subAssignee} onChange={(e) => setSubAssignee(e.target.value)}><option value="">Default owner (me when eligible)</option>{workers.map((w) => <option key={w.userId} value={w.userId}>{w.name}</option>)}</select></label>
+                  {task.dueDate && subDue > task.dueDate && <span className="hint" role="status">This subtask is due after its parent task. You can still add it.</span>}
                   <button className="btn ghost" disabled={busy || !newSub.trim()}>Add</button>
                 </form>
               )}

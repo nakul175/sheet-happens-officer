@@ -39,6 +39,7 @@ function Form() {
       <Field label="Organisation (buyer)" hint="Not listed? Add it under Accounts first.">
         {(id) => <select id={id} className="in" required value={v.organisationId} onChange={set("organisationId")}><option value="">Choose</option>{orgs.data?.organisations.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}</select>}
       </Field>
+      <p style={{ marginTop: -8, fontSize: 14 }}><Link href="/accounts">Open Accounts to add a buyer</Link></p>
       <Field label="Pipeline">{(id) => <select id={id} className="in" value={pipeline?.id ?? ""} onChange={set("pipelineId")}>{pipes.data?.pipelines.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select>}</Field>
       {pipeline?.key === "DEAL_BID" && <Field label="Submission deadline">{(id) => <input id={id} className="in" type="date" required value={v.submissionDeadline} onChange={set("submissionDeadline")} />}</Field>}
       <Field label="Leader">{(id) => <select id={id} className="in" value={v.leaderId} onChange={set("leaderId")}>{team.data?.people.map((p) => <option key={p.id} value={p.id}>{p.name}{p.id === me.id ? " (you)" : ""}</option>)}</select>}</Field>
