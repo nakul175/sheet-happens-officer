@@ -77,7 +77,7 @@ describe("w215 SHO-2693: both branches of buildReply are defended", () => {
     console.log(`w215 STRUCTURAL-NO-READ -> kind=${reply.kind} reply=${JSON.stringify(reply.text)}`);
     expect(await stateOf(lead, projectId, taskId)).toEqual(before);
     expect(reply.text).not.toContain(NO_VERB_OUTCOME);
-    expect(reply.text).toBe(NOTHING_CHANGED);
+    expect(reply.text.startsWith(NOTHING_CHANGED)).toBe(true); // optional server-rendered current records; never the rejected claim
   });
 
   it("w215/READ-CLAIM: a read that returned rows does not license an outcome (w199 RED-READ-THEN-CLAIM)", async () => {
@@ -93,7 +93,7 @@ describe("w215 SHO-2693: both branches of buildReply are defended", () => {
     console.log(`w215 READ-CLAIM -> kind=${reply.kind} reply=${JSON.stringify(reply.text)} state=${JSON.stringify(await stateOf(lead, projectId, taskId))}`);
     expect(await stateOf(lead, projectId, taskId)).toEqual(before); // cards 0, proposals 0, results 0, assignee unchanged
     expect(reply.text).not.toContain("I've assigned the late one to Sam");
-    expect(reply.text).toBe(NOTHING_CHANGED);
+    expect(reply.text.startsWith(NOTHING_CHANGED)).toBe(true); // optional server-rendered current records; never the rejected claim
   });
 
   it("w215/RELAY-GENUINE-READ: the same read still relays a genuine answer, byte-exact and unframed", async () => {
