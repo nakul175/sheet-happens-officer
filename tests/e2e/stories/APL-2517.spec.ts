@@ -1,10 +1,11 @@
+import { dueBeforeNextMonday } from "../helpers/proposal-fixture-date";
 // SHO-US-8.8 Private chat history kept 90 days (APL-2517).
 // One test per acceptance criterion. AC2 cannot run the retention job or age a message, so it skips.
 // AC3 is the one model prompt: a confirmed change. The other checks use a quick action or the privacy line.
 import { test, expect, zz } from "../support";
 import { newProject, newTask } from "../g2";
 import { chatMessages, cleanChat, quickAction } from "../helpers/jim-http";
-import { ask, cardOf, dueIn, postJson, requireConcierge, requireModel, showConcierge } from "../helpers/jim-concierge";
+import { ask, cardOf, postJson, requireConcierge, requireModel, showConcierge } from "../helpers/jim-concierge";
 
 test.describe.configure({ timeout: 150_000 });
 test.use({ viewport: { width: 1440, height: 900 } });
@@ -49,14 +50,15 @@ test("AC3: a change made through chat is in the action log, and the chat text is
   const project = await newProject(admin, later, { label: "us88-log" });
   const title = zz("logged");
   const marker = zz("chat-only");
-  const id = await newTask(admin, project.id, { title, assigneeId: admin.user.id, dueDate: dueIn(2) });
+  const due = dueBeforeNextMonday();
+  const id = await newTask(admin, project.id, { title, assigneeId: admin.user.id, dueDate: due });
   const asked = await ask(admin, `Move "${title}" to Monday. ${marker}`);
   expect(asked.status, JSON.stringify(asked.json)).toBe(200);
   const card = cardOf(asked.messages);
   expect(card?.canConfirm).toBe(true);
   const done = await postJson(admin, `/api/concierge/cards/${card!.id}/confirm`, {});
   expect(done.status, JSON.stringify(done.json)).toBe(200);
-  expect((await admin.api.get(`/api/tasks/${id}`)).json.task.dueDate).not.toBe(dueIn(2));
+  expect((await admin.api.get(`/api/tasks/${id}`)).json.task.dueDate).not.toBe(due);
   const rows = (await admin.api.get(`/api/projects/${project.id}/activity`)).json.items as { what: string; via: string }[];
   expect(rows.some((r) => r.via === "concierge")).toBe(true);
   expect(JSON.stringify(rows)).not.toContain(marker);

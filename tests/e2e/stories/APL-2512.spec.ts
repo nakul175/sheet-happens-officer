@@ -1,3 +1,4 @@
+import { dueBeforeNextMonday } from "../helpers/proposal-fixture-date";
 // SHO-US-8.3 Propose a change and confirm it (APL-2512).
 // One test per acceptance criterion, and one short prompt in each. Nothing is confirmed unless that criterion is the confirm itself.
 // ZZ-TEST projects are archived afterwards; the concierge thread is cleared when it started empty.
@@ -16,7 +17,7 @@ test("AC1: moving a task to Monday shows the old and new date, and nothing chang
   await cleanChat(admin, later);
   const project = await newProject(admin, later, { label: "us83-move" });
   const title = zz("budget");
-  const due = dueIn(3);
+  const due = dueBeforeNextMonday();
   const id = await newTask(admin, project.id, { title, assigneeId: admin.user.id, dueDate: due });
   const asked = await ask(admin, `Move "${title}" to Monday.`);
   expect(asked.status, JSON.stringify(asked.json)).toBe(200);
@@ -35,7 +36,7 @@ test("AC2: without the right to change a task, there is no Confirm, and the serv
   await cleanChat(member, later);
   const project = await newProject(admin, later, { label: "us83-viewer", members: [{ who: member, role: "VIEWER" }] });
   const title = zz("viewer-task");
-  const due = dueIn(2);
+  const due = dueBeforeNextMonday();
   const id = await newTask(admin, project.id, { title, assigneeId: admin.user.id, dueDate: due });
   const asked = await ask(member, `Move "${title}" to Monday.`);
   expect(asked.status, JSON.stringify(asked.json)).toBe(200);
@@ -112,7 +113,7 @@ test("AC7: confirming after the task changed writes nothing and returns a fresh 
   await cleanChat(admin, later);
   const project = await newProject(admin, later, { label: "us83-stale" });
   const title = zz("stale");
-  const due = dueIn(2);
+  const due = dueBeforeNextMonday();
   const id = await newTask(admin, project.id, { title, assigneeId: admin.user.id, dueDate: due });
   const asked = await ask(admin, `Move "${title}" to Monday.`);
   expect(asked.status, JSON.stringify(asked.json)).toBe(200);

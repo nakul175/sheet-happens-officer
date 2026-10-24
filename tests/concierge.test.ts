@@ -228,26 +228,31 @@ describe("propose and confirm (8.3)", () => {
 
   it("screens-only actions are not offered: the concierge points to the screen and writes nothing (AC3)", async () => {
     const { lead, ed } = await team();
-    script(
-      () => [tu("propose_changes", { changes: [{ action: "deactivate_user", person_id: ed.id }] })],
-      (r) => {
-        expect(lastResultText(r)).toMatch(/screens/);
-        return [say("Deactivating people is done on the Team screen.")];
-      },
-    );
+    script(() => [say("I deactivated the person.")]); // Must never be called for fixed server routing.
     const r = await ask(lead, "Deactivate the editor");
-    // SHO-2693 w183: the turn read nothing and wrote nothing (the proposal was refused), so the person gets the server's
-    // own sentence and NONE of the model's prose - whatever it says. AC3's substance is unchanged: no card is offered and
-    // no write happens. DISCLOSED COST: the model's pointer to the Team screen is no longer relayed either, because the
-    // server cannot tell that sentence from a claim without reading its words. Restoring the pointer needs a
-    // server-authored screen map for refused actions (a product decision, not a wording match).
+    // Capability routing comes from a fixed server map, never arbitrary model prose.
     expect(r.messages[1]).toMatchObject({
       kind: "text",
-      text: "Nothing has changed. I cannot change anything without a card you confirm, so tell me which task should change and how, and I will show you the card.",
+      text: "Use the Team screen to deactivate a person if your role permits it. Nothing has changed.",
     });
-    expect((r.messages[1] as { text: string }).text).not.toMatch(/screen/i);
+    expect(fakeCallCount()).toBe(0);
+    expect(await conciergeLogs(lead.id)).toHaveLength(0);
     expect(r.messages.some((m) => m.kind === "card")).toBe(false);
     expect((await db.user.findUniqueOrThrow({ where: { id: ed.id } })).deactivatedAt).toBeNull();
+  });
+
+  it("unsupported tool actions still cannot relay model success or mutate a person", async () => {
+    const { lead, ed } = await team();
+    script(
+      () => [tu("propose_changes", { changes: [{ action: "deactivate_user", person_id: ed.id }] })],
+      r => { expect(lastResultText(r)).toMatch(/screens/); return [say("I deactivated the person.")]; },
+    );
+    const r = await ask(lead, "Help me manage this person");
+    expect(r.messages[1]).toMatchObject({ kind: "text", text: "Nothing has changed. I cannot change anything without a card you confirm, so tell me which task should change and how, and I will show you the card." });
+    expect(r.messages.some(m => m.kind === "card")).toBe(false);
+    expect(await conciergeLogs(lead.id)).toHaveLength(0);
+    expect((await db.user.findUniqueOrThrow({ where: { id: ed.id } })).deactivatedAt).toBeNull();
+    expect(fakeCallCount()).toBe(2);
   });
 
   it("a card that was based on old data writes nothing and is replaced by a fresh one (AC7)", async () => {
