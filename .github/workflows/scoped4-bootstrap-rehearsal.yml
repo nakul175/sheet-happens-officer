@@ -1,0 +1,47 @@
+name: Scoped4 restricted bootstrap PostgreSQL16 rehearsal
+on:
+  push:
+    branches: [qa/scoped4-bootstrap-rehearsal-20261026]
+permissions:
+  contents: read
+concurrency:
+  group: scoped4-bootstrap-rehearsal
+  cancel-in-progress: false
+jobs:
+  rehearse:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: sho
+          POSTGRES_PASSWORD: sho
+          POSTGRES_DB: sho_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      DATABASE_URL: postgresql://sho:sho@localhost:5432/sho_test?schema=sho_pr9_scoped4
+      DIRECT_DATABASE_URL: postgresql://sho:sho@localhost:5432/sho_test?schema=sho_pr9_scoped4
+      NEXT_TELEMETRY_DISABLED: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - name: Prove no SET ROLE or database CREATE required for bounded bootstrap
+        run: python3 scripts/scoped4/rehearse.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: scoped4-bootstrap-rehearsal-${{ github.run_id }}
+          path: bootstrap-rehearsal-receipts/
+          if-no-files-found: ignore
