@@ -90,7 +90,9 @@ describe("qa:TC missing SHO-2951 the usage month message figure is the ledger ro
     // A month with zero messages is a real 0 (the screen prints 0, not "Not counted").
     const fresh = await usageSummary(sa, nextMonthStartIST(now));
     expect(fresh.month.messages).toBe(0);
-    expect(fresh.people.some((p) => p.id === person!.id)).toBe(false);
+    // The people list also includes current-week activity. When the month turns during a week,
+    // the person can remain listed, but their new-month message figure must be exactly zero.
+    expect(fresh.people.find((p) => p.id === person!.id)?.monthMessages ?? 0).toBe(0);
 
     // SHO-3013 boundary: put the spend above the safety cap. The cap refuses the next message before any row is
     // written, so the figure neither drops nor double counts, and it still equals the counted rows.

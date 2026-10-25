@@ -16,6 +16,8 @@ const allowed = new Set([
   "src/lib/tasks.ts",
   "tests/workspace-task-membership.test.ts",
   "tests/workspace-task-person-ui.test.tsx",
+  "tests/usage-month.test.tsx",
+  "tests/usage-month-figure-2951.test.ts",
   "vitest.sho-3038.config.mts",
   "scripts/acceptance/sho-3038-scope.test.mjs",
   ".github/workflows/scoped4-validation.yml",
