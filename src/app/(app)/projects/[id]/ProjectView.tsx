@@ -6,6 +6,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Suspense } from "react";
 import { PRIORITY, ROLE, api, dueLabel, dueState, rowKeys, initials, isOverdue, todayIST, useGet } from "@/components/api";
 import { errorMessage, isVersionConflict } from "@/lib/version-error";
+import { WorkspaceTaskPerson, type WorkspaceTaskCandidate } from "@/components/WorkspaceTaskPerson";
 import { TaskModal } from "@/components/TaskModal";
 import { AvatarGroup, Pri, Tick } from "@/components/TaskParts";
 import { Confirm, Field, LoadFailed, Menu, Modal, Skeleton } from "@/components/ui";
@@ -403,6 +404,14 @@ function NewTask({ p, onClose, onAdded }: { p: Proj; onClose: () => void; onAdde
   const [assignee, setAssignee] = useState(workers.some((w) => w.userId === me.id) ? me.id : workers[0]?.userId ?? "");
   const [due, setDue] = useState("");
   const [priority, setPriority] = useState("MEDIUM");
+  const [collaborators, setCollaborators] = useState<string[]>([]);
+  const [pendingPeople, setPendingPeople] = useState<WorkspaceTaskCandidate[]>([]);
+  const [pendingCollaborators, setPendingCollaborators] = useState<WorkspaceTaskCandidate[]>([]);
+  const [addAssignee, setAddAssignee] = useState(false);
+  const [addCollaborators, setAddCollaborators] = useState<string[]>([]);
+  const canAddPeople = p.role === "LEADER" && !p.archived;
+  const remember = (person: WorkspaceTaskCandidate) => setPendingPeople(current => current.some(p => p.id === person.id) ? current : [...current, person]);
+  const rememberCollaborator = (person: WorkspaceTaskCandidate) => setPendingCollaborators(current => current.some(p => p.id === person.id) ? current : [...current, person]);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   return (
@@ -411,13 +420,16 @@ function NewTask({ p, onClose, onAdded }: { p: Proj; onClose: () => void; onAdde
       <form onSubmit={async (e) => {
         e.preventDefault();
         setBusy(true);
-        const r = await api("POST", `/api/projects/${p.id}/tasks`, { title, sectionId: section, assigneeId: assignee || undefined, dueDate: due || null, priority });
+        const r = await api("POST", `/api/projects/${p.id}/tasks`, { title, sectionId: section, assigneeId: assignee || undefined, dueDate: due || null, priority, collaboratorIds: collaborators.filter((id) => id !== assignee), addAssigneeToProject: addAssignee, addCollaboratorsToProject: addCollaborators.filter(id => collaborators.includes(id) && id !== assignee) });
         setBusy(false);
         if (r.ok) onAdded(); else setErr(r.error ?? "Could not add the task.");
       }}>
         <Field label="Title">{(id) => <input id={id} className="in" value={title} required maxLength={500} autoFocus={finePointer()} onChange={(e) => setTitle(e.target.value)} />}</Field>
         <Field label="Section">{(id) => <select id={id} className="in" value={section} onChange={(e) => setSection(e.target.value)}>{p.sections.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select>}</Field>
-        <Field label="Assignee">{(id) => <select id={id} className="in" value={assignee} onChange={(e) => setAssignee(e.target.value)}>{workers.map((w) => <option key={w.userId} value={w.userId}>{w.name}</option>)}</select>}</Field>
+        <Field label="Assignee">{(id) => <select id={id} className="in" value={assignee} onChange={(e) => { setAssignee(e.target.value); setAddAssignee(pendingPeople.some(p => p.id === e.target.value && !p.isMember)); }}>{pendingPeople.filter(person => !workers.some(w => w.userId === person.id)).map(person => <option key={person.id} value={person.id}>{person.name} (will join project)</option>)}{workers.map((w) => <option key={w.userId} value={w.userId}>{w.name}</option>)}</select>}</Field>
+        {canAddPeople && <WorkspaceTaskPerson projectId={p.id} purpose="assignee" whenSaved excludeIds={[assignee]} onChoose={async (person, addToProject) => { remember(person); setAssignee(person.id); setAddAssignee(addToProject); return { ok: true }; }} />}
+        <Field label="Collaborators (optional)">{(id) => <select id={id} className="in" multiple value={collaborators.filter((id) => id !== assignee)} onChange={(e) => setCollaborators(Array.from(e.target.selectedOptions, (option) => option.value))}>{pendingCollaborators.filter(person => person.id !== assignee && !p.members.some(m => m.userId === person.id)).map(person => <option key={person.id} value={person.id}>{person.name} (will join project)</option>)}{p.members.filter((m) => m.active && m.userId !== assignee).map((m) => <option key={m.userId} value={m.userId}>{m.name}</option>)}</select>}</Field>
+        {canAddPeople && <WorkspaceTaskPerson projectId={p.id} purpose="collaborator" whenSaved excludeIds={[assignee, ...collaborators]} onChoose={async (person, addToProject) => { rememberCollaborator(person); setCollaborators(current => current.includes(person.id) ? current : [...current, person.id]); if (addToProject) setAddCollaborators(current => current.includes(person.id) ? current : [...current, person.id]); return { ok: true }; }} />}
         <Field label="Due date (optional)">{(id) => <input id={id} className="in" type="date" value={due} onChange={(e) => setDue(e.target.value)} />}</Field>
         <Field label="Priority">{(id) => <select id={id} className="in" value={priority} onChange={(e) => setPriority(e.target.value)}>{Object.entries(PRIORITY).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select>}</Field>
         {err && <div className="err" role="alert">{err}</div>}
