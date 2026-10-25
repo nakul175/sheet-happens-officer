@@ -1,0 +1,116 @@
+name: Production535 runtime isolated scoped QA
+on:
+  push:
+    branches: [qa/scoped4-production-baseline-20261026]
+permissions:
+  contents: read
+concurrency:
+  group: scoped4-production535-isolated-qa
+  cancel-in-progress: false
+defaults:
+  run:
+    shell: bash
+jobs:
+  validate-baseline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: sho
+          POSTGRES_PASSWORD: sho
+          POSTGRES_DB: sho_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+          POSTGRES_USER: sho
+          POSTGRES_PASSWORD: sho
+          POSTGRES_DB: sho_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      DATABASE_URL: postgresql://sho:sho@localhost:5432/sho_test?schema=baseline535qa
+      DIRECT_DATABASE_URL: postgresql://sho:sho@localhost:5432/sho_test?schema=baseline535qa
+      TASKBOARD_URL: http://localhost:3100
+      BASE_URL: http://localhost:3100
+      APP_URL: http://localhost:3100
+      EMAIL_OUTBOX_DIR: ${{ github.workspace }}/.outbox-ci
+      SUPER_ADMIN_EMAILS: root.test@aplyd.com
+      SHO_ADMIN_EMAIL: root.test@aplyd.com
+      SHO_ADMIN_PASS: correct-horse-9
+      JOB_SECRET: accepted15-ci-only-not-a-real-secret
+      FF_TASK_COMMENTS: "1"
+      SIGNIN_RETURN_TO: "on"
+      RETURN_PATH_LOG: "1"
+      SERVER_LOG: ${{ github.workspace }}/validation-server.log
+      PW_CHROMIUM: /usr/bin/google-chrome
+      RELEASE: 5346f49f187d41082becb7dacf87237656295aa2
+      NEXT_TELEMETRY_DISABLED: "1"
+      MODEL_DATA_APPROVED: "false"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: 5346f49f187d41082becb7dacf87237656295aa2
+          path: runtime535
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Verify actual production and exact tested runtime revision
+        run: |
+          test "$(git -C runtime535 rev-parse HEAD)" = 5346f49f187d41082becb7dacf87237656295aa2
+          curl -fsS https://sheethappensofficer.aplyd.org/api/health > baseline-live-health.json
+          node -e 'if(JSON.parse(require("fs").readFileSync("baseline-live-health.json")).release!==process.env.RELEASE)process.exit(1)'
+      - run: npm ci --no-audit --no-fund
+      - run: npm ci --no-audit --no-fund
+        working-directory: runtime535
+      - run: npx prisma migrate deploy
+        working-directory: runtime535
+      - run: npm run build
+        working-directory: runtime535
+      - name: Start only isolated exact535 runtime
+        run: |
+          mkdir -p "$EMAIL_OUTBOX_DIR"
+          (cd runtime535; NODE_ENV=production PORT=3100 node --import tsx server.js > ../baseline-server.log 2>&1 &)
+          for i in $(seq 1 40); do
+            if curl -fsS http://localhost:3100/api/health > baseline-tested-health.json; then break; fi
+            sleep 1
+          done
+          node -e 'if(JSON.parse(require("fs").readFileSync("baseline-tested-health.json")).release!==process.env.RELEASE)process.exit(1)'
+      - name: Owned2736 acceptance on exact deployed source
+        run: npx vitest run -c vitest.release12.config.mts tests/sho-2736-ac1-local.test.ts | tee baseline-2736.log
+      - name: Prepare isolated people fixture
+        run: |
+          export SHO_QA_PASS="$(openssl rand -hex 16)Aa9"
+          echo "::add-mask::$SHO_QA_PASS"
+          echo "SHO_QA_PASS=$SHO_QA_PASS" >> "$GITHUB_ENV"
+          SEED_TARGET=test npx tsx scripts/seed-apl2590-fixtures.ts
+          echo "SHO_MEMBER_EMAIL=nakul17+apl2590-worker@gmail.com" >> "$GITHUB_ENV"
+          echo "SHO_MEMBER_PASS=$SHO_QA_PASS" >> "$GITHUB_ENV"
+      - name: SHO2705 four people suites on exact535 runtime
+        run: >-
+          npx playwright test tests/e2e/stories/APL-2466.spec.ts tests/e2e/stories/APL-2480.spec.ts
+          tests/e2e/stories/APL-2482.spec.ts tests/e2e/stories/APL-2484.spec.ts
+          | tee baseline-2705.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: baseline535-scoped-qa-${{ github.run_id }}
+          path: |
+            baseline-*.json
+            baseline-*.log
+            test-results/
+          if-no-files-found: ignore
