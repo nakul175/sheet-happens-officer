@@ -1,6 +1,9 @@
-node_modules/
-.next/
-src/generated/
-*.log
+/node_modules
+/src/generated/prisma
+/.next
+/out
+*.tsbuildinfo
+next-env.d.ts
+.outbox-ci/
+test-results/
 .env*
-.outbox*/

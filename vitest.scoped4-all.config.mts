@@ -1,0 +1,1 @@
+import {defineConfig} from "vitest/config";import {fileURLToPath} from "node:url";export default defineConfig({resolve:{alias:{"@":fileURLToPath(new URL("./src",import.meta.url))}},test:{env:{SHO_E2E_START_BASE_URL:process.env.BASE_URL??""},include:["tests/**/*.test.ts","tests/**/*.test.tsx"],testTimeout:120000,hookTimeout:120000,fileParallelism:false}});

@@ -1,0 +1,119 @@
+name: Scoped four release validation
+on:
+  push:
+    branches: [release/scoped4-20261025]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: scoped4-validation
+  cancel-in-progress: false
+defaults:
+  run:
+    shell: bash
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: sho
+          POSTGRES_PASSWORD: sho
+          POSTGRES_DB: sho_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      DATABASE_URL: postgresql://sho:sho@localhost:5432/sho_test?schema=accepted15
+      DIRECT_DATABASE_URL: postgresql://sho:sho@localhost:5432/sho_test?schema=accepted15
+      TASKBOARD_URL: http://localhost:3100
+      BASE_URL: http://localhost:3100
+      APP_URL: http://localhost:3100
+      EMAIL_OUTBOX_DIR: ${{ github.workspace }}/.outbox-ci
+      SUPER_ADMIN_EMAILS: root.test@aplyd.com
+      SHO_ADMIN_EMAIL: root.test@aplyd.com
+      SHO_ADMIN_PASS: correct-horse-9
+      JOB_SECRET: accepted15-ci-only-not-a-real-secret
+      FF_TASK_COMMENTS: "1"
+      SIGNIN_RETURN_TO: "on"
+      RETURN_PATH_LOG: "1"
+      SERVER_LOG: ${{ github.workspace }}/validation-server.log
+      PW_CHROMIUM: /usr/bin/google-chrome
+      RELEASE: ${{ github.sha }}
+      NEXT_TELEMETRY_DISABLED: "1"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - name: Scoped release runtime contract
+        run: node --test scripts/acceptance/scoped4-scope.test.mjs
+      - name: SHO-3010 echo and improve contracts
+        run: npx vitest run -c vitest.accepted15-echo.config.mts | tee validation-3010.log
+      - run: npx prisma migrate deploy
+      - run: npm run build
+      - name: Start the exact built release
+        run: |
+          mkdir -p "$EMAIL_OUTBOX_DIR"
+          (NODE_ENV=production PORT=3100 node --import tsx server.js > validation-server.log 2>&1 & echo $! > .scoped4-server.pid)
+          for i in $(seq 1 40); do
+            if curl -fsS http://localhost:3100/api/health; then exit 0; fi
+            sleep 1
+          done
+          exit 1
+      - name: All unit and integration tests present in this selective release
+        run: npx vitest run -c vitest.scoped4-all.config.mts | tee validation-all-release.log
+      - name: Accepted15 component, database and SQL regressions
+        run: npx vitest run -c vitest.release12.config.mts | tee validation-accepted15.log
+      - name: Deterministic2693 and2897 owned-outbox contracts
+        run: npx vitest run -c vitest.accepted-ai.config.mts | tee validation-accepted-ai.log
+      - name: Deployed18 baseline regressions
+        run: npx vitest run -c vitest.release18.config.mts | tee validation-baseline18.log
+      - name: Accepted locator browser cases
+        run: >-
+          npx playwright test tests/e2e/stories/APL-2539.spec.ts tests/e2e/stories/APL-2540.spec.ts
+          --grep 'APL-2539 > AC1:|APL-2540 > AC1:|APL-2540 > AC4:'
+          | tee validation-locators.log
+      - name: Linux built-entry refusal and drain receipt
+        run: node scripts/acceptance/release12-drain-receipt.mjs release12-drain.json | tee validation-drain.log
+      - name: Seed comments fixture in isolated CI database only
+        run: |
+          export SHO_QA_PASS="$(openssl rand -hex 16)Aa9"
+          echo "SHO_QA_PASS=$SHO_QA_PASS" >> "$GITHUB_ENV"
+          SEED_TARGET=test npx tsx scripts/seed-apl2590-fixtures.ts
+      - name: Four people-role suites and comments acceptance
+        run: >-
+          npx playwright test tests/e2e/stories/APL-2466.spec.ts tests/e2e/stories/APL-2480.spec.ts
+          tests/e2e/stories/APL-2482.spec.ts tests/e2e/stories/APL-2484.spec.ts tests/e2e/stories/APL-2590.spec.ts
+          | tee validation-scoped-stories.log
+      - name: Validate comments and return-path flag-off rollback
+        run: |
+          kill "$(cat .scoped4-server.pid)"
+          for i in $(seq 1 30); do
+            if ! kill -0 "$(cat .scoped4-server.pid)" 2>/dev/null; then break; fi
+            sleep 1
+          done
+          (FF_TASK_COMMENTS=0 SIGNIN_RETURN_TO=off NODE_ENV=production PORT=3100 node --import tsx server.js > validation-off-server.log 2>&1 & echo $! > .scoped4-off-server.pid)
+          for i in $(seq 1 40); do
+            if curl -fsS http://localhost:3100/api/health; then break; fi
+            sleep 1
+          done
+          FF_TASK_COMMENTS=0 SIGNIN_RETURN_TO=off npx vitest run -c vitest.scoped4-off.config.mts | tee validation-flag-off.log
+      - name: Preserve receipts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: accepted15-${{ github.sha }}
+          path: |
+            validation-*.log
+            release12-drain.json
+            test-results/e2e
