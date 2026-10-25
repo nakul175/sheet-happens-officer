@@ -6,6 +6,8 @@ import { attachCentralSession } from "@/lib/attach-central-session";
 import { centralSessionActive } from "@/lib/central-status";
 import { centralClient, SHO_ORIGIN, FLOW_COOKIE, flowCookieOptions, readFlow } from "@/lib/central-client";
 
+import { returnToEnabled, safeReturnPath } from "@/lib/return-to";
+
 export async function GET(req: Request) {
   try {
     const jar = await cookies(), value = jar.get(FLOW_COOKIE)?.value;
@@ -22,6 +24,6 @@ export async function GET(req: Request) {
         !(await centralSessionActive(claims.sub, claims.aplyd_session_uid, user.id))) return Response.json({ error: "Account is unavailable." }, { status: 403 });
     await attachCentralSession(claims.sho_source_session_id, user.id, claims.sub, claims.aplyd_session_uid);
     await audit("CENTRAL_SIGN_IN", { actorId: user.id });
-    return new Response(null, { status: 302, headers: { Location: SHO_ORIGIN + "/", "Cache-Control": "no-store", "Referrer-Policy": "no-referrer" } });
+    return new Response(null, { status: 302, headers: { Location: SHO_ORIGIN + (returnToEnabled() ? safeReturnPath(flow.returnPath, 1) ?? "/" : "/"), "Cache-Control": "no-store", "Referrer-Policy": "no-referrer" } });
   } catch { return Response.json({ error: "Central sign-in could not finish. Start again." }, { status: 400 }); }
 }

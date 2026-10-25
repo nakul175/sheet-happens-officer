@@ -57,6 +57,8 @@ jobs:
       - run: npm ci --no-audit --no-fund
       - name: Scoped release runtime contract
         run: node --test scripts/acceptance/scoped4-scope.test.mjs
+      - name: Review scoped authentication lint
+        run: npx eslint src/app/api/auth/aplyd/{start,callback}/route.ts src/lib/central-client.ts src/app/signin/SignInForm.tsx src/app/signin/page.tsx
       - name: SHO-3010 echo and improve contracts
         run: npx vitest run -c vitest.accepted15-echo.config.mts | tee validation-3010.log
       - run: npx prisma migrate deploy
@@ -114,7 +116,7 @@ jobs:
             if curl -fsS http://localhost:3100/api/health; then break; fi
             sleep 1
           done
-          FF_TASK_COMMENTS=0 SIGNIN_RETURN_TO=off npx vitest run -c vitest.scoped4-off.config.mts | tee validation-flag-off.log
+          FF_TASK_COMMENTS=0 SIGNIN_RETURN_TO=off SERVER_LOG="$GITHUB_WORKSPACE/validation-off-server.log" npx vitest run -c vitest.scoped4-off.config.mts | tee validation-flag-off.log
       - name: Preserve receipts
         if: always()
         uses: actions/upload-artifact@v4
