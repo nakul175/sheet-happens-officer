@@ -23,7 +23,8 @@ describe("inline editing (14.8)", () => {
   it("a date edit is stale-checked and undoable", async () => {
     const lead = await account("lead");
     const p = await project(lead, lead);
-    const t = await task(lead, p.id);
+    const t = await task(lead, p.id, { dueDate: "2031-03-20" });
+    expect((await patchTask(lead, t, { dueDate: null })).status).toBe(200);
     const seen = (await lead.c.get(`/api/tasks/${t}`)).json.task.updatedAt as string;
     const r = await lead.c.patch(`/api/tasks/${t}`, { dueDate: istDate(1), expectedUpdatedAt: seen });
     expect(r.status).toBe(200);
@@ -38,7 +39,7 @@ describe("inline editing (14.8)", () => {
     const view = await account("viewer");
     const ed = await account("ed");
     const p = await project(lead, lead, [{ who: view, role: "VIEWER" }, { who: ed }]);
-    const t = await task(lead, p.id, { assigneeId: ed.id, approverId: lead.id });
+    const t = await task(lead, p.id, { assigneeId: ed.id, approverId: lead.id, dueDate: "2031-03-20" });
     expect((await patchTask(view, t, { priority: "LOW" })).status).toBe(403);
     expect((await view.c.post(`/api/tasks/${t}/assign`, await withVersion(view, t, { assigneeId: lead.id }))).status).toBe(403);
     expect((await ed.c.post(`/api/tasks/${t}/send-for-approval`)).status).toBe(200);

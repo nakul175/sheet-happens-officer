@@ -44,7 +44,7 @@ test("AC1: the bell shows the unread count and the panel lists the notices; open
   const { admin, people: [member] } = await cast(browser, later, ["bell"]);
   const p = await newProject(admin, later, { label: "e7 bell", members: [{ who: member, role: "EDITOR" }] });
   const title = zz("bell task");
-  await newTask(admin, p.id, { title, assigneeId: member.user.id });
+  await newTask(admin, p.id, { dueDate: "2026-11-03", title, assigneeId: member.user.id });
   const now = await inbox(member);
   const hit = about(now.items, title);
   expect(hit).toHaveLength(1);
@@ -65,14 +65,14 @@ test("AC2: the new assignee is told about an assignment and a reassignment, and 
   const { admin, people: [member, other] } = await cast(browser, later, ["assignee", "next"]);
   const p = await newProject(admin, later, { label: "e7 assign", members: [{ who: member, role: "EDITOR" }, { who: other, role: "EDITOR" }] });
   const title = zz("handed");
-  const t = await newTask(admin, p.id, { title, assigneeId: admin.user.id });
+  const t = await newTask(admin, p.id, { dueDate: "2026-11-03", title, assigneeId: admin.user.id });
   expect((await assign(admin, t, String(member.user.id))).status).toBe(200);
   expect(about(await (await inbox(member)).items, title).map((n) => n.text)).toEqual([`${admin.user.name} assigned you "${title}".`]);
   expect((await assign(admin, t, String(other.user.id))).status).toBe(200);
   expect(about((await inbox(other)).items, title).some((n) => n.text.includes(`${admin.user.name} assigned you`))).toBe(true);
   expect(about((await inbox(member)).items, title).some((n) => n.text.includes("took"))).toBe(true);
   const own = zz("own assign");
-  await newTask(member, p.id, { title: own, assigneeId: member.user.id });
+  await newTask(member, p.id, { dueDate: "2026-11-03", title: own, assigneeId: member.user.id });
   expect(about((await inbox(member)).items, own)).toHaveLength(0);
 });
 
@@ -80,7 +80,7 @@ test("AC3: when an Editor deletes a task, the Leader and everyone on the task ar
   const { admin, people: [editor, holder, mate] } = await cast(browser, later, ["deleter", "holder", "mate"]);
   const p = await newProject(admin, later, { label: "e7 delete", members: [{ who: editor, role: "EDITOR" }, { who: holder, role: "EDITOR" }, { who: mate, role: "EDITOR" }] });
   const title = zz("trashed");
-  const t = await newTask(editor, p.id, { title, assigneeId: holder.user.id });
+  const t = await newTask(editor, p.id, { dueDate: "2026-11-03", title, assigneeId: holder.user.id });
   expect((await editor.api.post(`/api/tasks/${t}/collaborators`, { userId: mate.user.id })).status).toBe(201);
   const removed = await editor.api.del(`/api/tasks/${t}`);
   expect(removed.status).toBe(204);
@@ -130,7 +130,7 @@ test("AC6: when a deactivated person's tasks are reassigned, the receivers are t
   const p = await newProject(admin, later, { label: "e7 leave", leader, members: [{ who: leaver, role: "EDITOR" }] });
   later(() => admin.api.post(`/api/projects/${p.id}/leader`, { newLeaderId: admin.user.id, previousRole: "EDITOR" }));
   const title = zz("left behind");
-  const taskId = await newTask(admin, p.id, { title, assigneeId: leaver.user.id });
+  const taskId = await newTask(admin, p.id, { dueDate: "2026-11-03", title, assigneeId: leaver.user.id });
   const gone = await admin.api.post(`/api/team/${leaver.user.id}/deactivate`, { reassign: "leaders" });
   expect(gone.status, JSON.stringify(gone.json)).toBe(200);
   noSecret(JSON.stringify(gone.json));
@@ -147,7 +147,7 @@ test("AC7: one transaction that would notify one person twice about the same pro
   const { admin, people: [editor] } = await cast(browser, later, ["once"]);
   const p = await newProject(admin, later, { label: "e7 once", members: [{ who: editor, role: "EDITOR" }] });
   const title = zz("one notice");
-  const t = await newTask(editor, p.id, { title, assigneeId: admin.user.id });
+  const t = await newTask(editor, p.id, { dueDate: "2026-11-03", title, assigneeId: admin.user.id });
   expect((await editor.api.del(`/api/tasks/${t}`)).status).toBe(204);
   const hits = about((await inbox(admin)).items, title).filter((n) => n.text.includes("to Trash"));
   expect(hits, "Leader and assignee are the same person").toHaveLength(1);

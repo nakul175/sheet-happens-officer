@@ -33,7 +33,7 @@ afterAll(async () => {
   await db.$disconnect();
 });
 
-const newTask = async (title: string, parentId?: string) => ({ id: await task(lead, projectId, { title: `ZZ-TEST ${title} ${STAMP}`, ...(parentId ? { parentId } : {}) }) });
+const newTask = async (title: string, parentId?: string) => ({ id: await task(lead, projectId, { title: `ZZ-TEST ${title} ${STAMP}`, ...(parentId ? { parentId } : { dueDate: "2031-03-20" }) }) });
 
 const deleteRow = (taskId: string) => db.actionLog.findFirstOrThrow({ where: { action: "task.deleted", targetId: taskId } });
 

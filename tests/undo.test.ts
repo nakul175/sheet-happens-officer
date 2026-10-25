@@ -18,7 +18,7 @@ describe("undo (6.4)", () => {
     const lead = await account("lead");
     const ed = await account("editor");
     const p = await project(lead, lead, [{ who: ed }]);
-    const t = await task(ed, p.id, { title: "Before", priority: "LOW" });
+    const t = await task(ed, p.id, { dueDate: "2031-03-20", title: "Before", priority: "LOW" });
     const r = await patchTask(ed, t, { title: "After" });
     expect(r.headers.get("x-undo-id")).toBeTruthy();
     expect(r.headers.get("x-undo-label")).toBe("Task edited");
@@ -37,7 +37,7 @@ describe("undo (6.4)", () => {
     const lead = await account("lead");
     const ed = await account("editor");
     const p = await project(lead, lead, [{ who: ed }]);
-    const t = await task(ed, p.id, { title: "Keep", priority: "LOW" });
+    const t = await task(ed, p.id, { dueDate: "2031-03-20", title: "Keep", priority: "LOW" });
     const mine = await patchTask(ed, t, { priority: "HIGH" });
     await patchTask(lead, t, { priority: "URGENT", description: "their note" });
     const id = mine.headers.get("x-undo-id");
@@ -63,7 +63,7 @@ describe("undo (6.4)", () => {
     const other = await account("other");
     const viewer = await account("viewer");
     const p = await project(lead, lead, [{ who: ed }, { who: other }, { who: viewer, role: "VIEWER" }]);
-    const t = await task(ed, p.id, { title: "Mine" });
+    const t = await task(ed, p.id, { dueDate: "2031-03-20", title: "Mine" });
     const r = await patchTask(ed, t, { title: "Edited" });
     const id = r.headers.get("x-undo-id");
     expect((await other.c.post(`/api/actions/${id}/undo`)).status).toBe(403);
@@ -75,7 +75,7 @@ describe("undo (6.4)", () => {
   it("refuses actions older than 30 days with 'Too old to undo' (AC6, 6.3 AC6)", async () => {
     const lead = await account("lead");
     const p = await project(lead, lead);
-    const t = await task(lead, p.id, { title: "Old" });
+    const t = await task(lead, p.id, { dueDate: "2031-03-20", title: "Old" });
     const r = await patchTask(lead, t, { title: "Older" });
     const id = r.headers.get("x-undo-id")!;
     await db.actionLog.update({ where: { id }, data: { createdAt: new Date(Date.now() - 31 * 86400_000) } });
@@ -91,7 +91,7 @@ describe("undo (6.4)", () => {
     const ed = await account("editor");
     const p = await project(lead, lead, [{ who: ed }]);
     for (const who of [lead, sa]) {
-      const t = await task(lead, p.id, { title: "Oops", assigneeId: ed.id });
+      const t = await task(lead, p.id, { dueDate: "2031-03-20", title: "Oops", assigneeId: ed.id });
       const del = await who.c.del(`/api/tasks/${t}`);
       expect(del.status).toBe(204);
       expect(del.headers.get("x-undo-id")).toBeTruthy();
@@ -109,7 +109,7 @@ describe("undo (6.4)", () => {
     const lead = await account("lead");
     const ed = await account("editor");
     const p = await project(lead, lead, [{ who: ed }]);
-    const t = await task(lead, p.id, { title: "Oops", assigneeId: ed.id });
+    const t = await task(lead, p.id, { dueDate: "2031-03-20", title: "Oops", assigneeId: ed.id });
     const edit = await patchTask(ed, t, { title: "Oops again" });
     expect(edit.headers.get("x-undo-id")).toBeTruthy();
     expect(edit.headers.get("x-undo-label")).toBe("Task edited");
@@ -130,7 +130,7 @@ describe("undo (6.4)", () => {
     const lead = await account("lead");
     const ed = await account("editor");
     const p = await project(lead, lead, [{ who: ed }]);
-    const t = await task(lead, p.id, { title: "Oops", assigneeId: ed.id });
+    const t = await task(lead, p.id, { dueDate: "2031-03-20", title: "Oops", assigneeId: ed.id });
     expect((await ed.c.del(`/api/tasks/${t}`)).status).toBeLessThan(300);
     const { id } = await deleteRow(t, ed.id);
     const restore = await ed.c.post(`/api/tasks/${t}/restore`); // the unauthorised restore from Trash
@@ -155,7 +155,7 @@ describe("undo (6.4)", () => {
     const ed = await account("editor");
     const p = await project(lead, lead, [{ who: ed }]);
     for (const who of [lead, sa]) {
-      const t = await task(lead, p.id, { title: "Oops", assigneeId: ed.id });
+      const t = await task(lead, p.id, { dueDate: "2031-03-20", title: "Oops", assigneeId: ed.id });
       expect((await ed.c.del(`/api/tasks/${t}`)).status).toBeLessThan(300);
       expect((await ed.c.get(`/api/tasks/${t}`)).status).toBe(404);
       const { id } = await deleteRow(t, ed.id);
@@ -174,7 +174,7 @@ describe("undo (6.4)", () => {
     const lead = await account("lead");
     const ed = await account("editor");
     const p = await project(lead, lead, [{ who: ed }]);
-    const t = await task(lead, p.id, { title: "Flow", assigneeId: lead.id });
+    const t = await task(lead, p.id, { dueDate: "2031-03-20", title: "Flow", assigneeId: lead.id });
     const sub = await task(lead, p.id, { parentId: t });
     const done = await lead.c.post(`/api/tasks/${t}/complete`, await withVersion(lead, t, { completeAll: true }));
     expect(done.status).toBe(200);
@@ -215,7 +215,7 @@ describe("undo (6.4)", () => {
 
     // A removal that handed tasks over is not undoable (decided in 8.3).
     await lead.c.post(`/api/projects/${p.id}/members`, { userId: ed.id, role: "EDITOR" });
-    await task(lead, p.id, { assigneeId: ed.id });
+    await task(lead, p.id, { dueDate: "2031-03-20", assigneeId: ed.id });
     const rm = await lead.c.del(`/api/projects/${p.id}/members/${ed.id}?handoverTo=${lead.id}`);
     expect(rm.status, JSON.stringify(rm.json)).toBeLessThan(300);
     const u = await lead.c.post(`/api/actions/${rm.headers.get("x-undo-id")}/undo`);
@@ -229,7 +229,7 @@ describe("notices (7.1 to 7.3)", () => {
     const lead = await account("lead");
     const ed = await account("editor");
     const p = await project(lead, lead, [{ who: ed }]);
-    const t = await task(ed, p.id, { title: "Stuck" });
+    const t = await task(ed, p.id, { dueDate: "2031-03-20", title: "Stuck" });
     await patchTask(ed, t, { blocked: true, blockedReason: "Waiting for the client" });
     expect((await notices(lead)).some((n) => /marked "Stuck" as blocked: Waiting for the client/.test(n.text))).toBe(true);
   });
@@ -238,7 +238,7 @@ describe("notices (7.1 to 7.3)", () => {
     const lead = await account("lead");
     const ed = await account("editor");
     const p = await project(lead, lead, [{ who: ed }]);
-    const t = await task(lead, p.id, { title: "Handed", assigneeId: ed.id });
+    const t = await task(lead, p.id, { dueDate: "2031-03-20", title: "Handed", assigneeId: ed.id });
     await lead.c.post(`/api/tasks/${t}/assign`, await withVersion(lead, t, { assigneeId: lead.id }));
     expect((await notices(ed)).some((n) => /took "Handed" off you/.test(n.text))).toBe(true);
     await lead.c.post(`/api/tasks/${t}/assign`, await withVersion(lead, t, { assigneeId: ed.id }));
@@ -254,10 +254,10 @@ describe("notices (7.1 to 7.3)", () => {
     const p = await project(lead, lead, [{ who: ed }]);
     const worker = await account("worker");
     await lead.c.post(`/api/projects/${p.id}/members`, { userId: worker.id, role: "EDITOR" });
-    await task(lead, p.id, { assigneeId: ed.id });
-    await task(lead, p.id, { assigneeId: ed.id });
-    await task(lead, p.id, { assigneeId: worker.id, approverId: ed.id });
-    await task(lead, p.id, { assigneeId: lead.id, approverId: ed.id });
+    await task(lead, p.id, { dueDate: "2031-03-20", assigneeId: ed.id });
+    await task(lead, p.id, { dueDate: "2031-03-20", assigneeId: ed.id });
+    await task(lead, p.id, { dueDate: "2031-03-20", assigneeId: worker.id, approverId: ed.id });
+    await task(lead, p.id, { dueDate: "2031-03-20", assigneeId: lead.id, approverId: ed.id });
     const before = (await notices(lead)).length;
     expect((await sa.c.post(`/api/team/${ed.id}/deactivate`, { reassign: "leaders" })).status).toBe(200);
     const fresh = (await notices(lead)).slice(0, (await notices(lead)).length - before >= 0 ? (await notices(lead)).length - before : 0);
@@ -273,8 +273,8 @@ describe("notices (7.1 to 7.3)", () => {
     const few = await account("few");
     const many = await account("many");
     const p = await project(lead, lead, [{ who: few }, { who: many }]);
-    await task(lead, p.id, { title: "One", assigneeId: few.id });
-    for (let i = 0; i < 5; i++) await task(lead, p.id, { assigneeId: many.id });
+    await task(lead, p.id, { dueDate: "2031-03-20", title: "One", assigneeId: few.id });
+    for (let i = 0; i < 5; i++) await task(lead, p.id, { dueDate: "2031-03-20", assigneeId: many.id });
     await lead.c.del(`/api/projects/${p.id}/members/${few.id}?handoverTo=${lead.id}`);
     await lead.c.del(`/api/projects/${p.id}/members/${many.id}?handoverTo=${lead.id}`);
     expect((await notices(few))[0].text).toMatch(/Your open task "One" was handed to someone else/);
@@ -288,9 +288,9 @@ describe("action log and audit log (6.3, 6.5)", () => {
     const lead = await account("lead");
     const ed = await account("editor");
     const p = await project(lead, lead, [{ who: ed }]);
-    const t = await task(lead, p.id, { title: "Parent", assigneeId: ed.id });
+    const t = await task(lead, p.id, { dueDate: "2031-03-20", title: "Parent", assigneeId: ed.id });
     const sub = await task(lead, p.id, { parentId: t, assigneeId: ed.id });
-    await task(lead, p.id, { assigneeId: ed.id });
+    await task(lead, p.id, { dueDate: "2031-03-20", assigneeId: ed.id });
     await lead.c.post(`/api/tasks/${t}/complete`, await withVersion(lead, t, { completeAll: true }));
     await lead.c.del(`/api/projects/${p.id}/members/${ed.id}?handoverTo=${lead.id}`);
     const rows = await db.actionLog.findMany({ where: { projectId: p.id }, orderBy: { createdAt: "asc" } });
@@ -327,7 +327,7 @@ describe("action log and audit log (6.3, 6.5)", () => {
     const lead = await account("lead");
     const ed = await account("editor");
     const p = await project(lead, lead, [{ who: ed }]);
-    const t = await task(lead, p.id, { title: "Audited", approverId: ed.id });
+    const t = await task(lead, p.id, { dueDate: "2031-03-20", title: "Audited", approverId: ed.id });
     const row = await db.auditLog.findFirst({ where: { event: "APPROVER_CHANGED", targetId: t } });
     expect(row?.targetType).toBe("task");
     expect(row?.actorId).toBe(lead.id);

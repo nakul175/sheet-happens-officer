@@ -61,7 +61,7 @@ test.describe("SHO-US-23.4 / APL-2623", () => {
     const pid = proj.json.project.id as string;
     later(() => admin.api.post(`/api/projects/${pid}/archive`));
     expect((await admin.api.post(`/api/projects/${pid}/members`, { userId: p.id, role: "EDITOR" })).status).toBe(201);
-    expect((await admin.api.post(`/api/projects/${pid}/tasks`, { title: zz("23.4 task"), assigneeId: p.id })).status).toBe(201);
+    expect((await admin.api.post(`/api/projects/${pid}/tasks`, { dueDate: "2026-11-03", title: zz("23.4 task"), assigneeId: p.id })).status).toBe(201);
 
     const api = (await admin.api.get(`/api/team/${p.id}`)).json.person;
     expect(api).toMatchObject({ name: p.name, email: p.email, orgRole: "MEMBER", status: "ACTIVE", openTasks: 1 });

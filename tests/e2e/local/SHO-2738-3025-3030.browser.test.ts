@@ -42,7 +42,7 @@ beforeAll(async () => {
   root = await superAdmin();
   const p = await project(root, root, [], `ZZ-TEST 2738 sheet ${RUN}`);
   projectId = p.id;
-  taskId = await task(root, projectId, {
+  taskId = await task(root, projectId, { dueDate: "2031-03-20",
     title: `ZZ-TEST 2738 task ${RUN}`,
     description: Array.from({ length: 30 }, (_, i) => `A line of description ${i}.`).join("\n"),
   });
@@ -53,7 +53,7 @@ beforeAll(async () => {
   teamProjectName = `ZZ-TEST 3030 project ${RUN}`;
   const tp = await project(root, root, [{ who: leaving, role: "EDITOR" }, { who: named, role: "VIEWER" }], teamProjectName);
   teamProjectId = tp.id;
-  await task(root, teamProjectId, { title: `ZZ-TEST 3030 task ${RUN}` });
+  await task(root, teamProjectId, { dueDate: "2031-03-20", title: `ZZ-TEST 3030 task ${RUN}` });
 }, 240000);
 
 afterAll(async () => {

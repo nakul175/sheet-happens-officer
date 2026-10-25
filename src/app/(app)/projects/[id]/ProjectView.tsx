@@ -256,7 +256,7 @@ function Inner({ id }: { id: string }) {
             <div className="list">
               {list.map(rowOf)}
               {!list.length && <div className="item"><span className="hint">No tasks here.</span></div>}
-              {canWrite && !s.isDone && !wide && <QuickAdd projectId={id} sectionId={s.id} onAdded={refresh} />}
+              {canWrite && !s.isDone && !wide && <QuickAdd requiresDue={p.type !== "DEAL"} projectId={id} sectionId={s.id} onAdded={refresh} />}
             </div>
             {s.isDone && s.total > 10 && !wide && (
               <p className="hint">
@@ -318,7 +318,7 @@ function Inner({ id }: { id: string }) {
                   ? <p className="hint" style={{ margin: 4 }}>Collapsed: {tasksOf(s).length} most recent · <button className="link" onClick={() => loadMore(s, true)}>Show all {s.total}</button></p>
                   : <p className="hint" style={{ margin: 4 }}>Showing all {s.total} · <button className="link" onClick={() => showFewer(s.id)}>Collapse</button></p>
               )}
-              {canWrite && !s.isDone && <QuickAdd compact projectId={id} sectionId={s.id} onAdded={refresh} />}
+              {canWrite && !s.isDone && <QuickAdd compact requiresDue={p.type !== "DEAL"} projectId={id} sectionId={s.id} onAdded={refresh} />}
             </div>
           ))}
         </div>
@@ -379,20 +379,26 @@ function SectionMenu({ s, secs, projectId, onDialog, onDone, onErr }: { s: S; se
   );
 }
 
-function QuickAdd({ projectId, sectionId, onAdded, compact }: { projectId: string; sectionId: string; onAdded: () => void; compact?: boolean }) {
+function QuickAdd({ projectId, sectionId, onAdded, compact, requiresDue }: { requiresDue: boolean; projectId: string; sectionId: string; onAdded: () => void; compact?: boolean }) {
   const [v, setV] = useState("");
+  const [due, setDue] = useState("");
+  const [isIdea, setIsIdea] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   return (
     <form className={compact ? undefined : "item"} style={compact ? { marginTop: 4 } : undefined} onSubmit={async (e) => {
       e.preventDefault();
       if (!v.trim()) return;
+      if (requiresDue && !isIdea && !due) { setErr("Choose a due date for a new task, or mark it as an Idea."); return; }
       setBusy(true);
-      const r = await api("POST", `/api/projects/${projectId}/tasks`, { title: v.trim(), sectionId });
+      const r = await api("POST", `/api/projects/${projectId}/tasks`, { title: v.trim(), sectionId, dueDate: due || null, isIdea });
       setBusy(false);
-      if (r.ok) { setV(""); setErr(null); onAdded(); } else setErr(r.error ?? "Could not add the task.");
+      if (r.ok) { setV(""); setDue(""); setIsIdea(false); setErr(null); onAdded(); } else setErr(r.error ?? "Could not add the task.");
     }}>
       <input className="in" aria-label="Add a task" placeholder="+ Add a task" value={v} disabled={busy} onChange={(e) => setV(e.target.value)} style={compact ? { background: "transparent" } : { border: 0, padding: 0 }} />
+      <input className="in" type="date" aria-label={requiresDue && !isIdea ? "Due date (required)" : "Due date (optional)"} required={requiresDue && !isIdea} value={due} onChange={e => setDue(e.target.value)} disabled={busy} />
+      <label><input type="checkbox" checked={isIdea} onChange={e => setIsIdea(e.target.checked)} disabled={busy} /> Idea</label>
+      <button className="btn sm" disabled={busy || !v.trim()}>Add</button>
       {err && <span className="err" role="alert">{err}</span>}
     </form>
   );
@@ -405,6 +411,8 @@ function NewTask({ p, onClose, onAdded }: { p: Proj; onClose: () => void; onAdde
   const [section, setSection] = useState(p.sections.find((s) => !s.isDone)?.id ?? p.sections[0].id);
   const [assignee, setAssignee] = useState(workers.some((w) => w.userId === me.id) ? me.id : workers[0]?.userId ?? "");
   const [due, setDue] = useState("");
+  const [isIdea, setIsIdea] = useState(false);
+  const requiresDue = p.type !== "DEAL" && !isIdea;
   const [priority, setPriority] = useState("MEDIUM");
   const [collaborators, setCollaborators] = useState<string[]>([]);
   const [pendingPeople, setPendingPeople] = useState<WorkspaceTaskCandidate[]>([]);
@@ -421,8 +429,9 @@ function NewTask({ p, onClose, onAdded }: { p: Proj; onClose: () => void; onAdde
       <h2>Add task</h2>
       <form onSubmit={async (e) => {
         e.preventDefault();
+        if (requiresDue && !due) { setErr("Choose a due date for a new task, or mark it as an Idea."); return; }
         setBusy(true);
-        const r = await api("POST", `/api/projects/${p.id}/tasks`, { title, sectionId: section, assigneeId: assignee || undefined, dueDate: due || null, priority, collaboratorIds: collaborators.filter((id) => id !== assignee), addAssigneeToProject: addAssignee, addCollaboratorsToProject: addCollaborators.filter(id => collaborators.includes(id) && id !== assignee) });
+        const r = await api("POST", `/api/projects/${p.id}/tasks`, { title, isIdea, sectionId: section, assigneeId: assignee || undefined, dueDate: due || null, priority, collaboratorIds: collaborators.filter((id) => id !== assignee), addAssigneeToProject: addAssignee, addCollaboratorsToProject: addCollaborators.filter(id => collaborators.includes(id) && id !== assignee) });
         setBusy(false);
         if (r.ok) onAdded(); else setErr(r.error ?? "Could not add the task.");
       }}>
@@ -432,7 +441,8 @@ function NewTask({ p, onClose, onAdded }: { p: Proj; onClose: () => void; onAdde
         {canAddPeople && <WorkspaceTaskPerson projectId={p.id} purpose="assignee" whenSaved excludeIds={[assignee]} onChoose={async (person, addToProject) => { remember(person); setAssignee(person.id); setAddAssignee(addToProject); return { ok: true }; }} />}
         <Field label="Collaborators (optional)">{(id) => <select id={id} className="in" multiple value={collaborators.filter((id) => id !== assignee)} onChange={(e) => setCollaborators(Array.from(e.target.selectedOptions, (option) => option.value))}>{pendingCollaborators.filter(person => person.id !== assignee && !p.members.some(m => m.userId === person.id)).map(person => <option key={person.id} value={person.id}>{person.name} (will join project)</option>)}{p.members.filter((m) => m.active && m.userId !== assignee).map((m) => <option key={m.userId} value={m.userId}>{m.name}</option>)}</select>}</Field>
         {canAddPeople && <WorkspaceTaskPerson projectId={p.id} purpose="collaborator" whenSaved excludeIds={[assignee, ...collaborators]} onChoose={async (person, addToProject) => { rememberCollaborator(person); setCollaborators(current => current.includes(person.id) ? current : [...current, person.id]); if (addToProject) setAddCollaborators(current => current.includes(person.id) ? current : [...current, person.id]); return { ok: true }; }} />}
-        <Field label="Due date (optional)">{(id) => <input id={id} className="in" type="date" value={due} onChange={(e) => setDue(e.target.value)} />}</Field>
+        <label className="lbl"><input type="checkbox" checked={isIdea} onChange={e => setIsIdea(e.target.checked)} /> Idea (due date optional)</label>
+        <Field label={requiresDue ? "Due date (required)" : "Due date (optional)"}>{(id) => <input id={id} className="in" required={requiresDue} type="date" value={due} onChange={(e) => setDue(e.target.value)} />}</Field>
         <Field label="Priority">{(id) => <select id={id} className="in" value={priority} onChange={(e) => setPriority(e.target.value)}>{Object.entries(PRIORITY).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select>}</Field>
         {err && <div className="err" role="alert">{err}</div>}
         <div className="actions"><button type="button" className="btn ghost" onClick={onClose}>Cancel</button><button className="btn" disabled={busy || !title.trim()}>Add task</button></div>

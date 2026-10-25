@@ -38,7 +38,7 @@ test.beforeEach(async ({ admin, later }) => {
   const r = await admin.api.post("/api/projects", { name: zz("3025 sheet"), leaderId: admin.user.id });
   expect(r.status).toBe(201);
   projectId = r.json.project.id;
-  expect((await admin.api.post(`/api/projects/${projectId}/tasks`, { title: TITLE("task"), description: "A line of description.\n".repeat(30) })).status).toBe(201);
+  expect((await admin.api.post(`/api/projects/${projectId}/tasks`, { dueDate: "2026-11-03", title: TITLE("task"), description: "A line of description.\n".repeat(30) })).status).toBe(201);
   later(() => admin.api.post(`/api/projects/${projectId}/archive`));
 });
 

@@ -80,7 +80,7 @@ beforeAll(async () => {
     const proj = await zz.project(leader);
     const added = await leader.c.post(`/api/projects/${proj.id}/members`, { userId: who.id, role: "EDITOR" });
     expect(added.status, JSON.stringify(added.json)).toBe(201);
-    const taskId = await task(leader, proj.id, { title: TITLE, assigneeId: who.id });
+    const taskId = await task(leader, proj.id, { dueDate: "2031-03-20", title: TITLE, assigneeId: who.id });
     cases[len] = { name: who.name, projectId: proj.id, taskId };
   }
 }, 120_000);

@@ -28,7 +28,7 @@ test.describe("SHO-US-2.3 / APL-2482", () => {
     const p = await person(admin, later, "leaver");
     const proj = await project(admin, later, "2.3 ac1");
     expect((await admin.api.post(`/api/projects/${proj}/members`, { userId: p.id, role: "EDITOR" })).status).toBe(201);
-    const t = await admin.api.post(`/api/projects/${proj}/tasks`, { title: zz("leaver task"), assigneeId: p.id });
+    const t = await admin.api.post(`/api/projects/${proj}/tasks`, { dueDate: "2026-11-03", title: zz("leaver task"), assigneeId: p.id });
     expect(t.status).toBe(201);
     const taskId = t.json.task.id as string;
 
@@ -111,7 +111,7 @@ test.describe("SHO-US-2.3 / APL-2482", () => {
     const p = await person(admin, later, "returner");
     const proj = await project(admin, later, "2.3 ac3");
     await admin.api.post(`/api/projects/${proj}/members`, { userId: p.id, role: "EDITOR" });
-    const t = await admin.api.post(`/api/projects/${proj}/tasks`, { title: zz("returner task"), assigneeId: p.id });
+    const t = await admin.api.post(`/api/projects/${proj}/tasks`, { dueDate: "2026-11-03", title: zz("returner task"), assigneeId: p.id });
     const taskId = t.json.task.id as string;
     expect((await admin.api.post(`/api/team/${p.id}/deactivate`, { reassign: "leaders" })).status).toBe(200);
 

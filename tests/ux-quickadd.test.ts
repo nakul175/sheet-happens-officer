@@ -29,9 +29,9 @@ describe("quick add targets", () => {
     const b = await project(lead, lead, [{ who: ed }]);
     const e1 = (await ed.c.get("/api/quick-add")).json;
     expect(e1.projects.map((p: { id: string }) => p.id).sort()).toEqual([a.id, b.id].sort());
-    await task(ed, b.id, { title: "recent" });
+    await task(ed, b.id, { dueDate: "2031-03-20", title: "recent" });
     expect((await ed.c.get("/api/quick-add")).json.lastProjectId).toBe(b.id);
-    await task(ed, a.id, { title: "newer" });
+    await task(ed, a.id, { dueDate: "2031-03-20", title: "newer" });
     expect((await ed.c.get("/api/quick-add")).json.lastProjectId).toBe(a.id);
     // AC4: a person who is only a Viewer gets nothing
     const v = (await vw.c.get("/api/quick-add")).json;
@@ -59,8 +59,8 @@ describe("palette search visibility", () => {
     const b = await account("pb");
     const mine = await project(a, a);
     const theirs = await project(b, b);
-    await task(a, mine.id, { title: "Zebrafish plan" });
-    await task(b, theirs.id, { title: "Zebrafish secret" });
+    await task(a, mine.id, { dueDate: "2031-03-20", title: "Zebrafish plan" });
+    await task(b, theirs.id, { dueDate: "2031-03-20", title: "Zebrafish secret" });
     const r = (await a.c.get("/api/search?q=zebra")).json;
     expect(r.tasks.map((t: { title: string }) => t.title)).toEqual(["Zebrafish plan"]);
     expect(r.tasks[0].assignee).toBe("Pa");

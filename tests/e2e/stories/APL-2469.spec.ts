@@ -26,7 +26,7 @@ test("AC1: opening the app lands on My tasks and shows the member's open tasks",
   later(() => archiveProject(admin.api, project.id, admin.user.id as string));
   expect((await admin.api.post(`/api/projects/${project.id}/members`, { userId: member.user.id, role: "EDITOR" })).status).toBe(201);
   const title = zz("mine");
-  expect((await admin.api.post(`/api/projects/${project.id}/tasks`, { title, assigneeId: member.user.id })).status).toBe(201);
+  expect((await admin.api.post(`/api/projects/${project.id}/tasks`, { dueDate: "2026-11-03", title, assigneeId: member.user.id })).status).toBe(201);
 
   await member.page.goto("/");
   await expect(member.page).toHaveURL(/\/$/);
@@ -62,7 +62,7 @@ test("AC3: the board shows tasks in Section columns, and a Leader can add, renam
   const project = await makeProject(admin.api, "board", admin.user.id as string);
   later(() => archiveProject(admin.api, project.id, admin.user.id as string));
   const title = zz("card");
-  expect((await admin.api.post(`/api/projects/${project.id}/tasks`, { title })).status).toBe(201);
+  expect((await admin.api.post(`/api/projects/${project.id}/tasks`, { dueDate: "2026-11-03", title })).status).toBe(201);
   const sectionName = `ZZ ${RUN.slice(-4)}`;
 
   await admin.page.goto(`/projects/${project.id}?view=board`);
@@ -108,7 +108,7 @@ test("AC4: opening a task row or card shows the detail overlay without leaving t
   const project = await makeProject(admin.api, "overlay", admin.user.id as string);
   later(() => archiveProject(admin.api, project.id, admin.user.id as string));
   const title = zz("open");
-  expect((await admin.api.post(`/api/projects/${project.id}/tasks`, { title })).status).toBe(201);
+  expect((await admin.api.post(`/api/projects/${project.id}/tasks`, { dueDate: "2026-11-03", title })).status).toBe(201);
 
   await admin.page.goto(`/projects/${project.id}`);
   await calm(admin.page);
@@ -190,7 +190,7 @@ test("AC7: each screen shows the mockup's key elements at 1440x900 and 390x844",
   const project = await makeProject(admin.api, "mockup", admin.user.id as string);
   later(() => archiveProject(admin.api, project.id, admin.user.id as string));
   const title = zz("mockup row");
-  const made = await admin.api.post(`/api/projects/${project.id}/tasks`, { title, assigneeId: admin.user.id });
+  const made = await admin.api.post(`/api/projects/${project.id}/tasks`, { dueDate: "2026-11-03", title, assigneeId: admin.user.id });
   expect(made.status, JSON.stringify(made.json)).toBe(201);
   const taskId = made.json.task.id as string;
   expect((await patchCurrent(admin, taskId, { blocked: true, blockedReason: "ZZ-TEST hold" })).status).toBe(200);

@@ -10,7 +10,7 @@ import { patchCurrent } from "../helpers/jim-http";
 test.describe("SHO-BUG-13 / APL-2648", () => {
   test("AC1: a task PATCH without expectedUpdatedAt is refused with 400 and changes nothing", async ({ admin, later }) => {
     const p = await newProject(admin, later, { label: "bug13 no version" });
-    const t = await newTask(admin, p.id, { title: zz("original"), priority: "LOW" });
+    const t = await newTask(admin, p.id, { dueDate: "2026-11-03", title: zz("original"), priority: "LOW" });
     const before = await getTask(admin, t);
     const r = await admin.api.patch(`/api/tasks/${t}`, { title: zz("overwritten"), priority: "URGENT" });
     expect(r.status).toBe(400);
@@ -23,7 +23,7 @@ test.describe("SHO-BUG-13 / APL-2648", () => {
 
   test("AC1 (two people): User B's change survives User A's PATCH that omits the version", async ({ admin, member, later }) => {
     const p = await newProject(admin, later, { label: "bug13 two people", members: [{ who: member, role: "EDITOR" }] });
-    const t = await newTask(admin, p.id, { title: zz("v1") });
+    const t = await newTask(admin, p.id, { dueDate: "2026-11-03", title: zz("v1") });
     const theirs = zz("B's title");
     expect((await patchCurrent(member, t, { title: theirs })).status).toBe(200); // User B saves
     const a = await admin.api.patch(`/api/tasks/${t}`, { title: zz("A's title") }); // User A, no version
@@ -33,7 +33,7 @@ test.describe("SHO-BUG-13 / APL-2648", () => {
 
   test("AC2: a stale expectedUpdatedAt gets the version_conflict envelope and preserves the current values", async ({ admin, later }) => {
     const p = await newProject(admin, later, { label: "bug13 stale" });
-    const t = await newTask(admin, p.id, { title: zz("original") });
+    const t = await newTask(admin, p.id, { dueDate: "2026-11-03", title: zz("original") });
     const seen = (await getTask(admin, t)).updatedAt as string;
     const theirs = zz("theirs");
     expect((await patchCurrent(admin, t, { title: theirs })).status).toBe(200);
@@ -45,7 +45,7 @@ test.describe("SHO-BUG-13 / APL-2648", () => {
 
   test("AC3: on the screen, the stale warning keeps my edit and 'Re-apply my edit' saves it", async ({ admin, later }) => {
     const p = await newProject(admin, later, { label: "bug13 screen" });
-    const t = await newTask(admin, p.id);
+    const t = await newTask(admin, p.id, { dueDate: "2026-11-03" });
     await admin.page.goto(`/projects/${p.id}?task=${t}`);
     const title = admin.page.getByLabel("Title", { exact: true });
     await expect(title).toBeVisible();
@@ -66,7 +66,7 @@ test.describe("SHO-BUG-13 / APL-2648", () => {
   test("AC4 (matching version): an edit made on the current version saves", async ({ admin, later }) => {
     // AC4's other two cases are the AC1 (missing version) and AC2 (stale version) tests above.
     const p = await newProject(admin, later, { label: "bug13 matching" });
-    const t = await newTask(admin, p.id);
+    const t = await newTask(admin, p.id, { dueDate: "2026-11-03" });
     const seen = (await getTask(admin, t)).updatedAt as string;
     const saved = zz("saved");
     const r = await admin.api.patch(`/api/tasks/${t}`, { title: saved, expectedUpdatedAt: seen });

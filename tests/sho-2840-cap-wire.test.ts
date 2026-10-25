@@ -15,7 +15,7 @@ it("qa:TC SHO-2840 wire: Undo of a delete at 199 live lands on 200, at 200 retur
     db.comment.createMany({ data: Array.from({ length: n }, (_, i) => ({ taskId, authorId: lead.id, text: `ZZ-TEST 2840 wire ${tag} ${i}` })) });
   const live = (taskId: string) => db.comment.count({ where: { taskId, removedAt: null } });
   const seed = async (n: number, tag: string) => {
-    const t = await task(lead, p.id, { title: `ZZ-TEST 2840 wire ${tag}` });
+    const t = await task(lead, p.id, { dueDate: "2031-03-20", title: `ZZ-TEST 2840 wire ${tag}` });
     await fill(t, n, tag);
     const first = await db.comment.findFirstOrThrow({ where: { taskId: t, removedAt: null } });
     const gone = await lead.c.del(`/api/tasks/${t}/comments/${first.id}`);
@@ -70,7 +70,7 @@ it("qa:TC SHO-2840 wire: only the cap's 409 carries too_many_comments, and a ref
   };
 
   // 200 live, one delete: refused, and the refusal is the cap's, not "already undone".
-  const t = await task(lead, p.id, { title: "ZZ-TEST 2840 code 200" });
+  const t = await task(lead, p.id, { dueDate: "2031-03-20", title: "ZZ-TEST 2840 code 200" });
   await fill(t, 200, "200");
   const one = await del(t);
   expect(await live(t)).toBe(199);
@@ -102,7 +102,7 @@ it("qa:TC SHO-2840 wire: only the cap's 409 carries too_many_comments, and a ref
   expect(replayed.json?.code, "the already-undone 409 must not look like the cap").toBeUndefined();
 
   // 201 live, written out of band: refused, and the count never grows. Each slot freed down to 199 lets it through.
-  const u = await task(lead, p.id, { title: "ZZ-TEST 2840 code 201" });
+  const u = await task(lead, p.id, { dueDate: "2031-03-20", title: "ZZ-TEST 2840 code 201" });
   await fill(u, 200, "201");
   const three = await del(u);
   await fill(u, 2, "201-past");

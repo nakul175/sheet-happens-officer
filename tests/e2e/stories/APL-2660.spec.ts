@@ -200,7 +200,7 @@ test.describe("APL-2522 approver edge cases (APL-2660)", () => {
     const p = await zzProject(lead, lead, [
       { who: creator }, { who: worker }, { who: editor }, { who: gone }, { who: viewer, role: "VIEWER" },
     ]);
-    const t = await zzTask(creator, p.id, { title: "Plain creator", assigneeId: worker.id });
+    const t = await zzTask(creator, p.id, { dueDate: "2026-11-03", title: "Plain creator", assigneeId: worker.id });
     const put = async (id: string) => creator.c.put(`/api/tasks/${t}/approver`, await withVersion(creator, t, { approverId: id }));
 
     expect((await put(editor.id)).status).toBe(200);
@@ -220,7 +220,7 @@ test.describe("APL-2522 approver edge cases (APL-2660)", () => {
     const worker = await zzAccount("worker");
     const boss = await zzAccount("boss");
     const p = await zzProject(lead, lead, [{ who: worker }, { who: boss }]);
-    const t = await zzTask(lead, p.id, { title: "Ready to close", assigneeId: worker.id, approverId: boss.id });
+    const t = await zzTask(lead, p.id, { dueDate: "2026-11-03", title: "Ready to close", assigneeId: worker.id, approverId: boss.id });
     expect((await worker.c.post(`/api/tasks/${t}/send-for-approval`)).status).toBe(200);
     const held = await taskOf(boss, t);
     expect(held.assignee.id).toBe(boss.id);
@@ -239,7 +239,7 @@ test.describe("APL-2522 approver edge cases (APL-2660)", () => {
     const boss = await zzAccount("boss");
     const bystander = await zzAccount("bystander");
     const p = await zzProject(lead, lead, [{ who: worker }, { who: boss }, { who: bystander }]);
-    const t = await zzTask(lead, p.id, { title: "Not theirs to close", assigneeId: worker.id, approverId: boss.id });
+    const t = await zzTask(lead, p.id, { dueDate: "2026-11-03", title: "Not theirs to close", assigneeId: worker.id, approverId: boss.id });
 
     const detail = await taskOf(bystander, t);
     expect(detail.canClose).toBe(false);
@@ -264,10 +264,10 @@ test.describe("APL-2522 approver edge cases (APL-2660)", () => {
     const orgAdmin = await zzAccount("orgadmin");
     expect((await sa.c.patch(`/api/team/${orgAdmin.id}`, { orgRole: "ADMIN" })).status).toBe(200);
     const p = await zzProject(lead, lead, [{ who: worker }, { who: boss }, { who: bystander }]);
-    const blocked = await zzTask(lead, p.id, { title: "No drop", assigneeId: worker.id, approverId: boss.id });
-    const forBoss = await zzTask(lead, p.id, { title: "Boss drops", assigneeId: worker.id, approverId: boss.id });
-    const forLead = await zzTask(lead, p.id, { title: "Leader drops", assigneeId: worker.id, approverId: boss.id });
-    const forAdmin = await zzTask(lead, p.id, { title: "Admin drops", assigneeId: worker.id, approverId: boss.id });
+    const blocked = await zzTask(lead, p.id, { dueDate: "2026-11-03", title: "No drop", assigneeId: worker.id, approverId: boss.id });
+    const forBoss = await zzTask(lead, p.id, { dueDate: "2026-11-03", title: "Boss drops", assigneeId: worker.id, approverId: boss.id });
+    const forLead = await zzTask(lead, p.id, { dueDate: "2026-11-03", title: "Leader drops", assigneeId: worker.id, approverId: boss.id });
+    const forAdmin = await zzTask(lead, p.id, { dueDate: "2026-11-03", title: "Admin drops", assigneeId: worker.id, approverId: boss.id });
 
     const mine = card(await board(bystander, p.id), blocked);
     expect(canDropOnSection(mine, true)).toBe(false);
@@ -293,7 +293,7 @@ test.describe("APL-2522 approver edge cases (APL-2660)", () => {
     const bystander = await zzAccount("bystander");
     const p = await zzProject(lead, lead, [{ who: worker }, { who: boss }, { who: collab }, { who: bystander }]);
     const title = zzTitle("notice only the sender");
-    const t = await zzTask(lead, p.id, { title, assigneeId: worker.id, approverId: boss.id, collaboratorIds: [collab.id] });
+    const t = await zzTask(lead, p.id, { dueDate: "2026-11-03", title, assigneeId: worker.id, approverId: boss.id, collaboratorIds: [collab.id] });
     expect((await worker.c.post(`/api/tasks/${t}/send-for-approval`)).status).toBe(200);
     const before = new Map<string, Set<string>>();
     for (const who of [worker, boss, lead, collab, bystander]) before.set(who.id, new Set((await notes(who)).map((n) => n.id)));
@@ -318,7 +318,7 @@ test.describe("APL-2522 approver edge cases (APL-2660)", () => {
       const worker = await zzAccount("worker");
       const spare = await zzAccount("spare");
       const p = await zzProject(lead, lead, [{ who: worker }, { who: spare }]);
-      const t = await zzTask(lead, p.id, { title: kind, assigneeId: worker.id, approverId: lead.id });
+      const t = await zzTask(lead, p.id, { dueDate: "2026-11-03", title: kind, assigneeId: worker.id, approverId: lead.id });
       expect((await worker.c.post(`/api/tasks/${t}/send-for-approval`)).status).toBe(200);
       if (kind === "left") expect((await lead.c.del(`/api/projects/${p.id}/members/${worker.id}`)).status).toBe(204);
       else if (kind === "deactivated") expect((await sa.c.post(`/api/team/${worker.id}/deactivate`, { reassign: "leaders" })).status).toBe(200);
@@ -342,9 +342,9 @@ test.describe("APL-2522 approver edge cases (APL-2660)", () => {
     const boss = await zzAccount("boss");
     const p1 = await zzProject(lead, lead, [{ who: worker }, { who: boss }]);
     const p2 = await zzProject(lead, lead, [{ who: worker }, { who: boss }]);
-    const waiting = await zzTask(lead, p1.id, { title: "Awaiting", assigneeId: worker.id, approverId: boss.id });
-    const quiet = await zzTask(lead, p1.id, { title: "Open", assigneeId: worker.id, approverId: boss.id });
-    const elsewhere = await zzTask(lead, p2.id, { title: "Other project", assigneeId: worker.id, approverId: boss.id });
+    const waiting = await zzTask(lead, p1.id, { dueDate: "2026-11-03", title: "Awaiting", assigneeId: worker.id, approverId: boss.id });
+    const quiet = await zzTask(lead, p1.id, { dueDate: "2026-11-03", title: "Open", assigneeId: worker.id, approverId: boss.id });
+    const elsewhere = await zzTask(lead, p2.id, { dueDate: "2026-11-03", title: "Other project", assigneeId: worker.id, approverId: boss.id });
     expect((await worker.c.post(`/api/tasks/${waiting}/send-for-approval`)).status).toBe(200);
     const before = new Set((await notes(lead)).map((n) => n.id));
 
@@ -374,7 +374,7 @@ test.describe("APL-2522 approver edge cases (APL-2660)", () => {
       const lead = await zzAccount("lead");
       const ed = await zzAccount("ed");
       const p = await zzProject(lead, lead, [{ who: ed }]);
-      const t = await zzTask(lead, p.id, { title: `Leader holds ${kind}`, assigneeId: lead.id, approverId: ed.id });
+      const t = await zzTask(lead, p.id, { dueDate: "2026-11-03", title: `Leader holds ${kind}`, assigneeId: lead.id, approverId: ed.id });
       const before = new Set((await notes(lead)).map((n) => n.id));
       if (kind === "deactivated") expect((await sa.c.post(`/api/team/${ed.id}/deactivate`, { reassign: "leaders" })).status).toBe(200);
       else expect((await lead.c.del(`/api/projects/${p.id}/members/${ed.id}`)).status).toBe(204);

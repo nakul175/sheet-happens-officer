@@ -6,7 +6,7 @@ import { getTask, newProject, newTask } from "../g2";
 test("AC1: completing sets completedAt, moves the task to the Done Section, and it shows as done (tick on the list)", async ({ admin, later }) => {
   const p = await newProject(admin, later, { label: "4.5 tick" });
   const title = zz("4.5 tick me");
-  const t = await newTask(admin, p.id, { title });
+  const t = await newTask(admin, p.id, { dueDate: "2026-11-03", title });
   await admin.page.goto(`/projects/${p.id}`);
   await admin.page.getByRole("button", { name: `Complete "${title}"` }).click();
   await expect.poll(async () => (await getTask(admin, t)).completedAt).not.toBeNull();
@@ -17,7 +17,7 @@ test("AC1: completing sets completedAt, moves the task to the Done Section, and 
 
 test("AC1: moving a task into the Done Section completes it", async ({ admin, later }) => {
   const p = await newProject(admin, later, { label: "4.5 drag" });
-  const t = await newTask(admin, p.id);
+  const t = await newTask(admin, p.id, { dueDate: "2026-11-03" });
   expect((await admin.api.post(`/api/tasks/${t}/move`, { sectionId: p.done, expectedUpdatedAt: (await getTask(admin, t)).updatedAt })).status).toBe(200);
   const got = await getTask(admin, t);
   expect(got.completedAt).not.toBeNull();
@@ -26,7 +26,7 @@ test("AC1: moving a task into the Done Section completes it", async ({ admin, la
 
 test("AC2: reopening clears completedAt and returns the task to the Section it came from, or to the one it is dragged to", async ({ admin, later }) => {
   const p = await newProject(admin, later, { label: "4.5 reopen" });
-  const t = await newTask(admin, p.id, { sectionId: p.doing });
+  const t = await newTask(admin, p.id, { dueDate: "2026-11-03", sectionId: p.doing });
   await admin.api.post(`/api/tasks/${t}/complete`, { expectedUpdatedAt: (await getTask(admin, t)).updatedAt });
   expect((await admin.api.post(`/api/tasks/${t}/reopen`)).status).toBe(200);
   let got = await getTask(admin, t);
@@ -42,7 +42,7 @@ test("AC2: reopening clears completedAt and returns the task to the Section it c
 test("AC3: completing a task with open subtasks warns; 'Complete all' closes them with one log row each; no silent completion", async ({ admin, later }) => {
   const p = await newProject(admin, later, { label: "4.5 subtasks" });
   const names = [zz("4.5 sub parent"), zz("4.5 sub one"), zz("4.5 sub two")];
-  const parent = await newTask(admin, p.id, { title: names[0], sectionId: p.doing });
+  const parent = await newTask(admin, p.id, { dueDate: "2026-11-03", title: names[0], sectionId: p.doing });
   const subs = [await newTask(admin, p.id, { title: names[1], parentId: parent }), await newTask(admin, p.id, { title: names[2], parentId: parent })];
   const warn = await admin.api.post(`/api/tasks/${parent}/complete`, { expectedUpdatedAt: (await getTask(admin, parent)).updatedAt });
   expect(warn.status).toBe(409);
@@ -57,7 +57,7 @@ test("AC3: completing a task with open subtasks warns; 'Complete all' closes the
 
 test("AC2: when the Section it came from no longer exists, a reopened task returns to the first non-Done Section", async ({ admin, later }) => {
   const p = await newProject(admin, later, { label: "4.5 gone section" });
-  const t = await newTask(admin, p.id, { sectionId: p.doing });
+  const t = await newTask(admin, p.id, { dueDate: "2026-11-03", sectionId: p.doing });
   expect((await admin.api.post(`/api/tasks/${t}/complete`, { expectedUpdatedAt: (await getTask(admin, t)).updatedAt })).status).toBe(200);
   expect((await admin.api.del(`/api/projects/${p.id}/sections/${p.doing}?moveTo=${p.todo}`)).status).toBe(204); // the remembered Section goes
   expect((await admin.api.post(`/api/tasks/${t}/reopen`)).status).toBe(200);
@@ -69,7 +69,7 @@ test("AC2: when the Section it came from no longer exists, a reopened task retur
 test("AC3: the tick on a task with open subtasks asks 'Complete them all' or Cancel (screen)", async ({ admin, later }) => {
   const p = await newProject(admin, later, { label: "4.5 ask" });
   const title = zz("4.5 parent");
-  const parent = await newTask(admin, p.id, { title });
+  const parent = await newTask(admin, p.id, { dueDate: "2026-11-03", title });
   await newTask(admin, p.id, { parentId: parent });
   await admin.page.goto(`/projects/${p.id}`);
   await admin.page.getByRole("button", { name: `Complete "${title}"` }).click();
@@ -81,8 +81,8 @@ test("AC3: the tick on a task with open subtasks asks 'Complete them all' or Can
 
 test("AC4: a Viewer, or an archived project, cannot complete or reopen", async ({ admin, member, later }) => {
   const p = await newProject(admin, later, { label: "4.5 viewer", members: [{ who: member, role: "VIEWER" }] });
-  const t = await newTask(admin, p.id);
-  const done = await newTask(admin, p.id);
+  const t = await newTask(admin, p.id, { dueDate: "2026-11-03" });
+  const done = await newTask(admin, p.id, { dueDate: "2026-11-03" });
   await admin.api.post(`/api/tasks/${done}/complete`, { expectedUpdatedAt: (await getTask(admin, done)).updatedAt });
   expect((await member.api.post(`/api/tasks/${t}/complete`, { expectedUpdatedAt: (await getTask(member, t)).updatedAt })).status).toBe(403);
   expect((await member.api.post(`/api/tasks/${done}/reopen`)).status).toBe(403);
@@ -94,7 +94,7 @@ test("AC4: a Viewer, or an archived project, cannot complete or reopen", async (
 test("AC4: with an approver, a person who may not close it gets no usable tick and is refused moving it to Done", async ({ admin, member, later }) => {
   const p = await newProject(admin, later, { label: "4.5 approver", members: [{ who: member, role: "EDITOR" }] });
   const title = zz("4.5 needs approval");
-  const t = await newTask(admin, p.id, { title, assigneeId: member.user.id, approverId: admin.user.id });
+  const t = await newTask(admin, p.id, { dueDate: "2026-11-03", title, assigneeId: member.user.id, approverId: admin.user.id });
   expect((await member.api.post(`/api/tasks/${t}/complete`, { expectedUpdatedAt: (await getTask(member, t)).updatedAt })).status).toBe(403);
   expect((await member.api.post(`/api/tasks/${t}/move`, { sectionId: p.done, expectedUpdatedAt: (await getTask(member, t)).updatedAt })).status).toBe(403);
   await member.page.goto(`/projects/${p.id}`);

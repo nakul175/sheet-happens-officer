@@ -33,7 +33,7 @@ test("AC2: a Member who is not on a project cannot see it in lists, search, or b
   later(() => deactivate(admin.api, outsider.user.id as string));
   const project = await makeProject(admin.api, "hidden", admin.user.id as string);
   later(() => archiveProject(admin.api, project.id, admin.user.id as string));
-  const task = await admin.api.post(`/api/projects/${project.id}/tasks`, { title: zz("secret") });
+  const task = await admin.api.post(`/api/projects/${project.id}/tasks`, { dueDate: "2026-11-03", title: zz("secret") });
   expect(task.status).toBe(201);
   const taskId = task.json.task.id as string;
 
@@ -82,7 +82,7 @@ test("AC4: a Leader manages members and tasks, an Editor edits tasks, and a View
   later(() => archiveProject(admin.api, project.id, admin.user.id as string));
   expect((await admin.api.post(`/api/projects/${project.id}/members`, { userId: editor.user.id, role: "EDITOR" })).status).toBe(201);
   expect((await admin.api.post(`/api/projects/${project.id}/members`, { userId: viewer.user.id, role: "VIEWER" })).status).toBe(201);
-  const task = await editor.api.post(`/api/projects/${project.id}/tasks`, { title: zz("editable") });
+  const task = await editor.api.post(`/api/projects/${project.id}/tasks`, { dueDate: "2026-11-03", title: zz("editable") });
   expect(task.status, JSON.stringify(task.json)).toBe(201);
   const taskId = task.json.task.id as string;
 
@@ -115,7 +115,7 @@ test("AC5: a Leader searches active people, adds a member, and removing them han
     return members.some((m) => m.userId === editor.user.id);
   }).toBe(true);
 
-  const task = await admin.api.post(`/api/projects/${project.id}/tasks`, { title: zz("owned"), assigneeId: editor.user.id });
+  const task = await admin.api.post(`/api/projects/${project.id}/tasks`, { dueDate: "2026-11-03", title: zz("owned"), assigneeId: editor.user.id });
   expect(task.status).toBe(201);
   const taskId = task.json.task.id as string;
   await admin.page.reload();
@@ -160,7 +160,7 @@ test("AC7: an archived project stays visible to its members and is read-only", a
   const loaded = await editor.api.get(`/api/projects/${project.id}`);
   expect(loaded.status).toBe(200);
   expect(loaded.json.project.archived).toBe(true);
-  const write = await editor.api.post(`/api/projects/${project.id}/tasks`, { title: zz("too late") });
+  const write = await editor.api.post(`/api/projects/${project.id}/tasks`, { dueDate: "2026-11-03", title: zz("too late") });
   expect(write.status).toBe(409);
   expect(write.json.error).toBe("This project is archived and read-only.");
   await editor.page.goto(`/projects/${project.id}`);

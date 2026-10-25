@@ -15,8 +15,8 @@ test.beforeAll(async ({ request }) => {
   await gate(request);
 });
 
-async function taskFor(api: Api, projectId: string, assigneeId: string, title: string) {
-  const r = await api.post(`/api/projects/${projectId}/tasks`, { title, assigneeId });
+async function taskFor(api: Api, projectId: string, assigneeId: string, title: string, dueDate: string) {
+  const r = await api.post(`/api/projects/${projectId}/tasks`, { title, assigneeId, dueDate });
   expect(r.status, JSON.stringify(r.json)).toBe(201);
   return r.json.task.id as string;
 }
@@ -90,7 +90,7 @@ test("AC4: open tasks move to a chosen receiver, and a receiver outside the proj
   expect((await admin.api.post(`/api/projects/${project.id}/members`, { userId: leaver.user.id, role: "EDITOR" })).status).toBe(201);
   expect((await admin.api.post(`/api/projects/${project.id}/members`, { userId: taker.user.id, role: "EDITOR" })).status).toBe(201);
   const title = zz("handed");
-  const taskId = await taskFor(admin.api, project.id, leaver.user.id as string, title);
+  const taskId = await taskFor(admin.api, project.id, leaver.user.id as string, title, "2026-11-03");
 
   const moved = await admin.api.post(`/api/team/${leaver.user.id}/deactivate`, { reassign: taker.user.id });
   expect(moved.status, JSON.stringify(moved.json)).toBe(200);
@@ -103,7 +103,7 @@ test("AC4: open tasks move to a chosen receiver, and a receiver outside the proj
   later(() => other.ctx.close());
   later(() => deactivate(admin.api, other.user.id as string));
   expect((await admin.api.post(`/api/projects/${second.id}/members`, { userId: other.user.id, role: "EDITOR" })).status).toBe(201);
-  const stayed = await taskFor(admin.api, second.id, other.user.id as string, zz("stays"));
+  const stayed = await taskFor(admin.api, second.id, other.user.id as string, zz("stays"), "2026-11-03");
   const fell = await admin.api.post(`/api/team/${other.user.id}/deactivate`, { reassign: outsider.user.id });
   expect(fell.status, JSON.stringify(fell.json)).toBe(200);
   expect(fell.json.fellBack).toContain(second.name);

@@ -120,7 +120,7 @@ async function expectTooOld(page: Page, who: string, what: string) {
 }
 
 async function deletedTask(editor: Account, projectId: string, title: string) {
-  const taskId = await task(editor, projectId, { title });
+  const taskId = await task(editor, projectId, { dueDate: "2031-03-20", title });
   expect((await editor.c.del(`/api/tasks/${taskId}`)).status).toBe(204);
   const logId = await ageLog(taskId, editor.id, "task.deleted", 0);
   return { taskId, logId, what: `moved "${title}" to Trash` };
@@ -138,7 +138,7 @@ describe("APL-2674 activity delete undo", () => {
     const editor = await account("editor");
     const projectId = await alpha(leader, editor);
     const editorName = await displayName(editor);
-    const editorTask = await task(editor, projectId, { title: TITLE });
+    const editorTask = await task(editor, projectId, { dueDate: "2031-03-20", title: TITLE });
     expect((await editor.c.del(`/api/tasks/${editorTask}`)).status).toBe(204);
 
     const ctx = await signedIn(editor.email);
@@ -163,7 +163,7 @@ describe("APL-2674 activity delete undo", () => {
     const root = await superAdmin();
     const projectId = await alpha(leader, editor);
     const [leaderName, rootName] = await Promise.all([displayName(leader), displayName(root)]);
-    const leaderTask = await task(leader, projectId, { title: TITLE });
+    const leaderTask = await task(leader, projectId, { dueDate: "2031-03-20", title: TITLE });
     expect((await leader.c.del(`/api/tasks/${leaderTask}`)).status).toBe(204);
 
     const contexts: BrowserContext[] = [];
@@ -173,7 +173,7 @@ describe("APL-2674 activity delete undo", () => {
       const leaderPage = await openActivity(leaderCtx, projectId);
       await deleteRow(leaderPage, leaderName).getByRole("button", { name: "Undo" }).waitFor({ state: "visible", timeout: 30_000 });
 
-      const rootTask = await task(root, projectId, { title: TITLE });
+      const rootTask = await task(root, projectId, { dueDate: "2031-03-20", title: TITLE });
       expect((await root.c.del(`/api/tasks/${rootTask}`)).status).toBe(204);
       const rootCtx = await signedIn(root.email);
       contexts.push(rootCtx);
@@ -188,7 +188,7 @@ describe("APL-2674 activity delete undo", () => {
     const leader = await account("leader");
     const editor = await account("editor");
     const projectId = await alpha(leader, editor);
-    const id = await task(editor, projectId, { title: TITLE });
+    const id = await task(editor, projectId, { dueDate: "2031-03-20", title: TITLE });
     expect((await patchTask(editor, id, { title: RENAMED_TO })).status).toBe(200);
 
     const ctx = await signedIn(editor.email);
@@ -208,7 +208,7 @@ describe("APL-2674 activity delete undo", () => {
     const leader = await account("leader");
     const editor = await account("editor");
     const projectId = await alpha(leader, editor);
-    const id = await task(editor, projectId, { title: TITLE });
+    const id = await task(editor, projectId, { dueDate: "2031-03-20", title: TITLE });
     expect((await editor.c.del(`/api/tasks/${id}`)).status).toBe(204);
 
     const items = (await editor.c.get(`/api/projects/${projectId}/activity`)).json.items as { id: string; what: string; undo: string }[];
@@ -239,7 +239,7 @@ describe("APL-2674 activity delete undo", () => {
       const projectId = await alpha(leader, erin);
       const controlId = await alpha(leader, erin);
       const subject = await task(erin, projectId, body);
-      const byLeader = await task(leader, projectId, { title: "Pay vendor" });
+      const byLeader = await task(leader, projectId, { dueDate: "2031-03-20", title: "Pay vendor" });
       const control = await task(erin, controlId, body);
       const before = await preserved(subject);
       const beforeControl = await preserved(control);
@@ -281,7 +281,7 @@ describe("APL-2674 activity delete undo", () => {
     await addMember(leader, projectId, other, "EDITOR");
     await addMember(leader, projectId, uninvolved, "EDITOR");
     await addMember(leader, projectId, viewer, "VIEWER");
-    const id = await task(leader, projectId, { title: TITLE, assigneeId: other.id });
+    const id = await task(leader, projectId, { dueDate: "2031-03-20", title: TITLE, assigneeId: other.id });
     expect((await erin.c.del(`/api/tasks/${id}`)).status).toBe(204);
     const erinName = await displayName(erin);
 
@@ -327,7 +327,7 @@ describe("APL-2674 activity delete undo", () => {
     const leader = await account("leader");
     const editor = await account("editor");
     const projectId = await alpha(leader, editor);
-    const id = await task(editor, projectId, { title: TITLE });
+    const id = await task(editor, projectId, { dueDate: "2031-03-20", title: TITLE });
     expect((await editor.c.del(`/api/tasks/${id}`)).status).toBe(204);
     const items = (await leader.c.get(`/api/projects/${projectId}/activity`)).json.items as { id: string; what: string }[];
     const actionId = items.find((item) => item.what === DELETED)?.id;
@@ -447,8 +447,8 @@ describe("APL-2674 activity delete undo", () => {
     const oldTo = "old edit";
     const controlTitle = "Fix invoice control";
     const controlTo = "control edit";
-    const oldId = await task(editor, projectId, { title: oldTitle });
-    const controlId = await task(editor, projectId, { title: controlTitle });
+    const oldId = await task(editor, projectId, { dueDate: "2031-03-20", title: oldTitle });
+    const controlId = await task(editor, projectId, { dueDate: "2031-03-20", title: controlTitle });
     expect((await patchTask(editor, oldId, { title: oldTo })).status).toBe(200);
     expect((await patchTask(editor, controlId, { title: controlTo })).status).toBe(200);
     const oldLog = await ageLog(oldId, editor.id, "task.updated", 0);
@@ -494,7 +494,7 @@ describe("APL-2674 activity delete undo", () => {
     const projectId = await alpha(leader, editor);
     await addMember(leader, projectId, erin, "EDITOR");
     await addMember(leader, projectId, viewer, "VIEWER");
-    const id = await task(editor, projectId, { title: "Fix invoice 2" });
+    const id = await task(editor, projectId, { dueDate: "2031-03-20", title: "Fix invoice 2" });
     expect((await patchTask(editor, id, { title: RENAMED_TO })).status).toBe(200);
     expect((await editor.c.post(`/api/tasks/${id}/collaborators`, { userId: erin.id })).status).toBe(201);
     await ageLog(id, editor.id, "task.updated", 31 * DAY);
@@ -538,7 +538,7 @@ describe("APL-2674 activity delete undo", () => {
     const editor = await account("editor");
     const projectId = await alpha(leader, editor);
     const leaderName = await displayName(leader);
-    const first = await task(leader, projectId, { title: TITLE });
+    const first = await task(leader, projectId, { dueDate: "2031-03-20", title: TITLE });
     expect((await leader.c.del(`/api/tasks/${first}`)).status).toBe(204);
     const listed = await leader.c.get(`/api/projects/${projectId}/trash`);
     const item = (listed.json.items as { id: string; daysLeft: number }[]).find((row) => row.id === first);
@@ -554,7 +554,7 @@ describe("APL-2674 activity delete undo", () => {
       await row.getByRole("button", { name: "Restore" }).click();
       await expect.poll(async () => (await leader.c.get(`/api/tasks/${first}`)).status, { timeout: 20_000 }).toBe(200);
 
-      const again = await task(leader, projectId, { title: "Pay vendor" });
+      const again = await task(leader, projectId, { dueDate: "2031-03-20", title: "Pay vendor" });
       expect((await leader.c.del(`/api/tasks/${again}`)).status).toBe(204);
       const activity = await openActivity(ctx, projectId);
       await clickUndo(activity, leaderName, 'moved "Pay vendor" to Trash');
@@ -568,8 +568,8 @@ describe("APL-2674 activity delete undo", () => {
     const leader = await account("leader");
     const editor = await account("editor");
     const projectId = await alpha(leader, editor);
-    const keep = await task(leader, projectId, { title: TITLE });
-    const exact = await task(leader, projectId, { title: "Fix invoice 3" });
+    const keep = await task(leader, projectId, { dueDate: "2031-03-20", title: TITLE });
+    const exact = await task(leader, projectId, { dueDate: "2031-03-20", title: "Fix invoice 3" });
     expect((await leader.c.del(`/api/tasks/${keep}`)).status).toBe(204);
     expect((await leader.c.del(`/api/tasks/${exact}`)).status).toBe(204);
     // Fix invoice 3 sits at exactly 30×24h. APL-2711 owns that result, so it is not asserted.
@@ -590,7 +590,7 @@ describe("APL-2674 activity delete undo", () => {
     const editor = await account("editor");
     const projectId = await alpha(leader, editor);
     // The Leader deletes: an Editor's delete raises no Undo toast by design (APL-2649, tasks.ts canManage).
-    const id = await task(leader, projectId, { title: "ZZ-TEST Toast check" });
+    const id = await task(leader, projectId, { dueDate: "2031-03-20", title: "ZZ-TEST Toast check" });
 
     const ctx = await signedIn(leader.email);
     try {

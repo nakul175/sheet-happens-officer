@@ -11,7 +11,7 @@ async function setup(admin: Who, member: Who, later: (f: () => Promise<unknown>)
   const pid = p.json.project.id as string;
   later(() => admin.api.post(`/api/projects/${pid}/archive`));
   expect((await admin.api.post(`/api/projects/${pid}/members`, { userId: member.user.id, role: "EDITOR" })).status).toBe(201);
-  const t = await admin.api.post(`/api/projects/${pid}/tasks`, { title: zz(`${label} task`), assigneeId: member.user.id, approverId: admin.user.id });
+  const t = await admin.api.post(`/api/projects/${pid}/tasks`, { dueDate: "2031-03-20", title: zz(`${label} task`), assigneeId: member.user.id, approverId: admin.user.id });
   expect(t.status).toBe(201);
   const tid = t.json.task.id as string;
   later(() => admin.api.del(`/api/tasks/${tid}`));

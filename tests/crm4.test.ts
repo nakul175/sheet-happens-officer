@@ -150,7 +150,7 @@ describe("task links (11.4)", () => {
     const p = await project(lead, lead, [{ who: viewer, role: "VIEWER" }]);
     const org = await newOrg(lead);
     const c = await contact(lead, org, "Linked");
-    const t = await task(lead, p.id, { title: "Follow up with Linked" });
+    const t = await task(lead, p.id, { dueDate: "2031-03-20", title: "Follow up with Linked" });
     const l1 = await lead.c.post(`/api/tasks/${t}/links`, { organisationId: org });
     const l2 = await lead.c.post(`/api/tasks/${t}/links`, { contactId: c });
     expect(l1.status).toBe(201);
@@ -180,8 +180,8 @@ describe("task links (11.4)", () => {
     const p = await project(lead, lead);
     const p2 = await project(lead, lead);
     const org = await newOrg(lead);
-    const t1 = await task(lead, p.id, { title: "To trash" });
-    const t2 = await task(lead, p2.id, { title: "In archived" });
+    const t1 = await task(lead, p.id, { dueDate: "2031-03-20", title: "To trash" });
+    const t2 = await task(lead, p2.id, { dueDate: "2031-03-20", title: "In archived" });
     await lead.c.post(`/api/tasks/${t1}/links`, { organisationId: org });
     await lead.c.post(`/api/tasks/${t2}/links`, { organisationId: org });
     const n = async () => ((await lead.c.get(`/api/orgs/${org}`)).json.organisation.tasks as unknown[]).length;

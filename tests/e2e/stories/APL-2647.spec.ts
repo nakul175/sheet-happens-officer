@@ -38,7 +38,7 @@ const SCREENS: Screen[] = [
 /** A ZZ-TEST project with one task; the person page is the Super Admin's own, so no person is created. */
 async function ids(admin: Who, later: (fn: () => Promise<unknown>) => void): Promise<Ids> {
   const p = await newProject(admin, later, { label: "bug12 loading" });
-  await newTask(admin, p.id);
+  await newTask(admin, p.id, { dueDate: "2026-11-03" });
   return { project: p.id, person: admin.user.id as string };
 }
 

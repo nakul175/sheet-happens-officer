@@ -8,7 +8,7 @@ it("deactivation tells the acting Leader once when they receive the leaver's tas
   const sa = await superAdmin();
   const leaver = await account("notice-leaver");
   const p = await project(sa, sa, [{ who: leaver }]);
-  await task(sa, p.id, { assigneeId: leaver.id });
+  await task(sa, p.id, { dueDate: "2031-03-20", assigneeId: leaver.id });
   const actor = await db.user.findUniqueOrThrow({ where: { id: sa.id } });
   await deactivate(actor, leaver.id, "leaders");
   const notices = await db.notification.findMany({ where: { recipientId: sa.id, projectId: p.id, type: "TASKS_HANDED_OVER" } });
@@ -21,7 +21,7 @@ it("deactivation tells an acting receiver and a different Leader once each", asy
   const lead = await account("notice-leader");
   const leaver = await account("notice-leaver-other");
   const p = await project(sa, lead, [{ who: leaver }]);
-  await task(sa, p.id, { assigneeId: leaver.id });
+  await task(sa, p.id, { dueDate: "2031-03-20", assigneeId: leaver.id });
   const actor = await db.user.findUniqueOrThrow({ where: { id: sa.id } });
   await deactivate(actor, leaver.id, sa.id);
   const notices = await db.notification.findMany({ where: { projectId: p.id, type: "TASKS_HANDED_OVER" } });

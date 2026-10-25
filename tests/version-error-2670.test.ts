@@ -16,7 +16,7 @@ describe("one error shape for a task version (APL-2670)", () => {
     const worker = await account("worker");
     const outsider = await account("outsider");
     const p = await project(lead, lead, [{ who: worker }]);
-    const id = await task(lead, p.id, { title: "Original" });
+    const id = await task(lead, p.id, { dueDate: "2031-03-20", title: "Original" });
     // T0 is whatever the create saved, read back through the API.
     const t0 = (await shown(worker, id)).updatedAt;
     return { lead, worker, outsider, id, sectionId: p.doing, t0 };

@@ -27,7 +27,7 @@ test("AC1: deleting a task moves it to the project Trash, to be purged after 30 
   later(() => archiveProject(admin.api, project.id, admin.user.id as string));
   expect((await admin.api.post(`/api/projects/${project.id}/members`, { userId: editor.user.id, role: "EDITOR" })).status).toBe(201);
   const title = zz("gone");
-  const created = await editor.api.post(`/api/projects/${project.id}/tasks`, { title, description: zz("detail") });
+  const created = await editor.api.post(`/api/projects/${project.id}/tasks`, { dueDate: "2026-11-03", title, description: zz("detail") });
   const id = created.json.task.id as string;
   expect((await editor.api.del(`/api/tasks/${id}`)).status).toBe(204);
   expect((await editor.api.get(`/api/tasks/${id}`)).status).toBe(404);
@@ -53,7 +53,7 @@ test("AC2: restoring a task from Trash puts it back in the project with its data
   later(() => archiveProject(admin.api, project.id, admin.user.id as string));
   const title = zz("back");
   const description = zz("kept");
-  const created = await admin.api.post(`/api/projects/${project.id}/tasks`, { title, description });
+  const created = await admin.api.post(`/api/projects/${project.id}/tasks`, { dueDate: "2026-11-03", title, description });
   const id = created.json.task.id as string;
   expect((await admin.api.del(`/api/tasks/${id}`)).status).toBe(204);
   await admin.page.goto(`/projects/${project.id}/trash`);
@@ -73,7 +73,7 @@ test("AC3: a write records who, what, when and the before-state", async ({ admin
   later(() => archiveProject(admin.api, project.id, admin.user.id as string));
   const before = zz("before");
   const after = zz("after");
-  const created = await admin.api.post(`/api/projects/${project.id}/tasks`, { title: before });
+  const created = await admin.api.post(`/api/projects/${project.id}/tasks`, { dueDate: "2026-11-03", title: before });
   const id = created.json.task.id as string;
   expect((await patchCurrent(admin, id, { title: after })).status).toBe(200);
   const items = (await admin.api.get(`/api/projects/${project.id}/activity`)).json.items as Act[];
@@ -96,7 +96,7 @@ test("AC4: Undo restores a task, a project and a membership change", async ({ ad
 
   const before = zz("title");
   const after = zz("retitled");
-  const created = await admin.api.post(`/api/projects/${project.id}/tasks`, { title: before });
+  const created = await admin.api.post(`/api/projects/${project.id}/tasks`, { dueDate: "2026-11-03", title: before });
   const taskId = created.json.task.id as string;
   expect((await patchCurrent(admin, taskId, { title: after })).status).toBe(200);
   const renamed = zz("renamed project");
@@ -130,7 +130,7 @@ test("AC5: Undo warns when the data changed after the action, before it proceeds
   const original = zz("one");
   const second = zz("two");
   const third = zz("three");
-  const created = await admin.api.post(`/api/projects/${project.id}/tasks`, { title: original });
+  const created = await admin.api.post(`/api/projects/${project.id}/tasks`, { dueDate: "2026-11-03", title: original });
   const id = created.json.task.id as string;
   expect((await patchCurrent(admin, id, { title: second })).status).toBe(200);
   expect((await patchCurrent(admin, id, { title: third })).status).toBe(200);

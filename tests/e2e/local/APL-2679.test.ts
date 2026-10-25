@@ -50,7 +50,7 @@ const reopenedIds = async (logId: string) => (((await db.actionLog.findUniqueOrT
 describe("APL-2679 done-flag move logs reopened tasks qa:TC missing", () => {
   it("writes one task.reopened row per reopened task, with the mover as actor qa:TC missing", async () => {
     const { lead, editor, p } = await setup();
-    const reopening = [await task(lead, p.id, { title: title("old a"), sectionId: p.todo }), await task(lead, p.id, { title: title("old b"), sectionId: p.todo })];
+    const reopening = [await task(lead, p.id, { dueDate: "2031-03-20", title: title("old a"), sectionId: p.todo }), await task(lead, p.id, { dueDate: "2031-03-20", title: title("old b"), sectionId: p.todo })];
     for (const id of reopening) await closeAs(editor, id);
     for (const id of reopening) expect((await lead.c.get(`/api/tasks/${id}`)).json.task.sectionId).toBe(p.done);
 
@@ -75,7 +75,7 @@ describe("APL-2679 done-flag move logs reopened tasks qa:TC missing", () => {
 
   it("writes no task.reopened row when the old done section has no closed task qa:TC missing", async () => {
     const { lead, p } = await setup();
-    await task(lead, p.id, { title: title("open"), sectionId: p.doing });
+    await task(lead, p.id, { dueDate: "2031-03-20", title: title("open"), sectionId: p.doing });
     const since = new Date();
     expect((await lead.c.patch(`/api/projects/${p.id}/sections/${p.doing}`, { isDone: true })).status).toBe(200);
     expect(await rows(p.id, "task.reopened", since)).toHaveLength(0);
@@ -83,9 +83,9 @@ describe("APL-2679 done-flag move logs reopened tasks qa:TC missing", () => {
 
   it("still writes one task.completed row per open task in the new done section qa:TC missing", async () => {
     const { lead, editor, p } = await setup();
-    const was = await task(lead, p.id, { title: title("was done"), sectionId: p.todo });
+    const was = await task(lead, p.id, { dueDate: "2031-03-20", title: title("was done"), sectionId: p.todo });
     await closeAs(editor, was);
-    const closing = [await task(lead, p.id, { title: title("new a"), sectionId: p.doing }), await task(lead, p.id, { title: title("new b"), sectionId: p.doing })];
+    const closing = [await task(lead, p.id, { dueDate: "2031-03-20", title: title("new a"), sectionId: p.doing }), await task(lead, p.id, { dueDate: "2031-03-20", title: title("new b"), sectionId: p.doing })];
 
     const since = new Date();
     const r = await lead.c.patch(`/api/projects/${p.id}/sections/${p.doing}`, { isDone: true });
@@ -105,8 +105,8 @@ describe("APL-2679 done-flag move logs reopened tasks qa:TC missing", () => {
 describe("APL-2755 a done task in Trash and the done-flag move qa:TC missing", () => {
   it("leaves a done task in Trash closed, unlisted and without a task.reopened row, and Undo leaves it as it was qa:TC missing", async () => {
     const { lead, editor, p } = await setup();
-    const live = await task(lead, p.id, { title: title("live done"), sectionId: p.todo });
-    const trashed = await task(lead, p.id, { title: title("trashed done"), sectionId: p.todo });
+    const live = await task(lead, p.id, { dueDate: "2031-03-20", title: title("live done"), sectionId: p.todo });
+    const trashed = await task(lead, p.id, { dueDate: "2031-03-20", title: title("trashed done"), sectionId: p.todo });
     await closeAs(editor, live);
     await closeAs(editor, trashed);
     expect((await lead.c.del(`/api/tasks/${trashed}`)).status).toBeLessThan(300);
@@ -131,7 +131,7 @@ describe("APL-2755 a done task in Trash and the done-flag move qa:TC missing", (
 
   it("Undo of a done-flag move closes again a task it reopened that was moved to Trash after the move qa:TC missing", async () => {
     const { lead, editor, p } = await setup();
-    const id = await task(lead, p.id, { title: title("trashed later"), sectionId: p.todo });
+    const id = await task(lead, p.id, { dueDate: "2031-03-20", title: title("trashed later"), sectionId: p.todo });
     await closeAs(editor, id);
 
     const r = await lead.c.patch(`/api/projects/${p.id}/sections/${p.doing}`, { isDone: true });

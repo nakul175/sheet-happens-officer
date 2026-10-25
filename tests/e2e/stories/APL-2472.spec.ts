@@ -39,7 +39,7 @@ test("AC2: a change is a confirm card and nothing is written until the member ta
   await cleanChat(admin, later);
   const p = await newProject(admin, later, { label: "e8 confirm" });
   const title = zz("confirm me");
-  const id = await newTask(admin, p.id, { title, assigneeId: admin.user.id });
+  const id = await newTask(admin, p.id, { dueDate: "2026-11-03", title, assigneeId: admin.user.id });
   const asked = await ask(admin, `Complete "${title}".`);
   expect(asked.status, JSON.stringify(asked.json)).toBe(200);
   noSecret(JSON.stringify(asked.json));

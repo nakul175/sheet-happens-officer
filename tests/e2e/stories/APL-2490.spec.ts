@@ -11,18 +11,18 @@ const listed = async (who: { api: Api }, id: string, archived = false) =>
 
 test("AC1: archiving removes the project from active lists and refuses new or changed tasks", async ({ admin, later }) => {
   const p = await newProject(admin, later, { label: "3.6 ac1" });
-  const t = await newTask(admin, p.id);
+  const t = await newTask(admin, p.id, { dueDate: "2026-11-03" });
   expect((await admin.api.post(`/api/projects/${p.id}/archive`)).status).toBe(200);
   expect(await listed(admin, p.id)).toBe(false);
   expect(await listed(admin, p.id, true)).toBe(true);
-  expect((await admin.api.post(`/api/projects/${p.id}/tasks`, { title: zz("x") })).status).toBe(409);
+  expect((await admin.api.post(`/api/projects/${p.id}/tasks`, { dueDate: "2026-11-03", title: zz("x") })).status).toBe(409);
   expect((await admin.api.patch(`/api/tasks/${t}`, { title: zz("x"), expectedUpdatedAt: (await getTask(admin, t)).updatedAt })).status).toBe(409);
   expect((await admin.api.post(`/api/tasks/${t}/complete`, { expectedUpdatedAt: (await getTask(admin, t)).updatedAt })).status).toBe(409);
 });
 
 test("AC2: unarchiving returns the project unchanged and its open tasks to My tasks", async ({ admin, member, later }) => {
   const p = await newProject(admin, later, { label: "3.6 ac2", members: [{ who: member }] });
-  const t = await newTask(admin, p.id, { assigneeId: member.user.id });
+  const t = await newTask(admin, p.id, { dueDate: "2026-11-03", assigneeId: member.user.id });
   await admin.api.post(`/api/projects/${p.id}/archive`);
   expect(JSON.stringify((await member.api.get("/api/my-tasks")).json)).not.toContain(t);
   expect((await admin.api.post(`/api/projects/${p.id}/unarchive`)).status).toBe(200);
@@ -42,7 +42,7 @@ test("AC3: an Editor or a Viewer cannot archive or unarchive", async ({ admin, m
 
 test("AC4: members can still open and read an archived project; nobody can change it", async ({ admin, member, later }) => {
   const p = await newProject(admin, later, { label: "3.6 readonly", members: [{ who: member }] });
-  const t = await newTask(admin, p.id);
+  const t = await newTask(admin, p.id, { dueDate: "2026-11-03" });
   await admin.api.post(`/api/projects/${p.id}/archive`);
   expect((await member.api.get(`/api/projects/${p.id}`)).status).toBe(200);
   expect((await member.api.get(`/api/tasks/${t}`)).status).toBe(200);
@@ -54,8 +54,8 @@ test("AC4: members can still open and read an archived project; nobody can chang
 
 test("AC5: the confirmation states how many tasks are still open, and assignees are notified on confirming", async ({ admin, member, later }) => {
   const p = await newProject(admin, later, { label: "3.6 warning", members: [{ who: member }] });
-  await newTask(admin, p.id);
-  await newTask(member, p.id);
+  await newTask(admin, p.id, { dueDate: "2026-11-03" });
+  await newTask(member, p.id, { dueDate: "2026-11-03" });
   await admin.page.goto(`/projects/${p.id}/members`);
   await admin.page.getByRole("button", { name: "Archive…" }).click();
   const dlg = admin.page.getByRole("dialog");
@@ -71,7 +71,7 @@ test("AC6: archived tasks are missing from My tasks and default search; Include 
   const gate = await prLive(21, admin, member, later);
   const word = `zzarch${Date.now().toString(36)}`;
   const p = await newProject(admin, later, { label: "3.6 hidden", members: [{ who: member }] });
-  const t = await newTask(admin, p.id, { title: `${word} task`, assigneeId: member.user.id });
+  const t = await newTask(admin, p.id, { dueDate: "2026-11-03", title: `${word} task`, assigneeId: member.user.id });
   expect(JSON.stringify((await member.api.get("/api/my-tasks")).json)).toContain(t);
   await admin.api.post(`/api/projects/${p.id}/archive`);
   expect(JSON.stringify((await member.api.get("/api/my-tasks")).json)).not.toContain(t);
@@ -81,7 +81,7 @@ test("AC6: archived tasks are missing from My tasks and default search; Include 
 
   // A Member still sees only their own projects, flag on or off. This holds on either build.
   const secret = await newProject(admin, later, { label: "3.6 not a member" });
-  const secretTask = await newTask(admin, secret.id, { title: `${word} secret` });
+  const secretTask = await newTask(admin, secret.id, { dueDate: "2026-11-03", title: `${word} secret` });
   expect((await admin.api.post(`/api/projects/${secret.id}/archive`)).status).toBe(200);
   const memberJson = async (extra = "") => JSON.stringify((await member.api.get(`/api/search?q=${encodeURIComponent(secret.name)}${extra}`)).json);
   expect(await memberJson(), "default search hides another person's archived project").not.toContain(secret.id);
@@ -92,7 +92,7 @@ test("AC6: archived tasks are missing from My tasks and default search; Include 
   // The Member leads this one, so the Super Admin has no seat. Include archived is the gated half.
   const token = `zzadm${Date.now().toString(36)}`;
   const foreign = await newProject(admin, later, { label: `3.6 ${token}`, leader: member, creator: member });
-  const foreignTask = await newTask(member, foreign.id, { title: `${token} task` });
+  const foreignTask = await newTask(member, foreign.id, { dueDate: "2026-11-03", title: `${token} task` });
   expect((await member.api.post(`/api/projects/${foreign.id}/archive`)).status).toBe(200);
   const hits = async (who: { api: { get: (path: string) => Promise<{ status: number; json: { projects?: { id: string; archived?: boolean }[]; tasks?: { id: string }[] } }> } }, extra = "") => {
     const r = await who.api.get(`/api/search?q=${encodeURIComponent(token)}${extra}`);

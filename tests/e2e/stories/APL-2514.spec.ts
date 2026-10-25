@@ -62,7 +62,7 @@ test("AC3: when the action notified someone, the thread says the notice cannot b
   await cleanChat(admin, later);
   const project = await newProject(admin, later, { label: "us85-notice", members: [{ who: member, role: "EDITOR" }] });
   const title = zz("notice");
-  const id = await newTask(admin, project.id, { title, assigneeId: admin.user.id });
+  const id = await newTask(admin, project.id, { dueDate: "2031-03-20", title, assigneeId: admin.user.id });
   const asked = await ask(admin, `Assign "${title}" to the person with email ${member.user.email}.`);
   expect(asked.status, JSON.stringify(asked.json)).toBe(200);
   const card = cardOf(asked.messages);
@@ -117,7 +117,7 @@ test("AC5: a member-removal card says it cannot be undone, and the done message 
   await cleanChat(admin, later);
   const project = await newProject(admin, later, { label: "us85-irrev", members: [{ who: member, role: "EDITOR" }] });
   const title = zz("handover");
-  const id = await newTask(admin, project.id, { title, assigneeId: member.user.id });
+  const id = await newTask(admin, project.id, { dueDate: "2031-03-20", title, assigneeId: member.user.id });
   const asked = await ask(admin, `Remove the person with email ${member.user.email} from ${project.name}.`);
   expect(asked.status, JSON.stringify(asked.json)).toBe(200);
   const card = cardOf(asked.messages);

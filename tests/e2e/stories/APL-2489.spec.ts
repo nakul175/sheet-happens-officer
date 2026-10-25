@@ -54,7 +54,7 @@ test("AC4: handing over to the current Leader is refused and leaves exactly one 
 
 test("AC5: a previous Leader with open tasks who becomes Viewer or leaves must name who takes them", async ({ admin, member, later }) => {
   const p = await newProject(admin, later, { label: "3.5 tasks", members: [{ who: member }] });
-  const t = await newTask(admin, p.id);
+  const t = await newTask(admin, p.id, { dueDate: "2026-11-03" });
   expect((await admin.api.post(`/api/projects/${p.id}/leader`, { newLeaderId: member.user.id, previousRole: "REMOVE" })).status).toBe(409);
   expect((await getTask(admin, t)).assignee.id).toBe(admin.user.id); // nothing moved
   expect(await leaders(admin, p.id)).toHaveLength(1);

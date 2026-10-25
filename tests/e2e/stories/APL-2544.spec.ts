@@ -5,6 +5,8 @@
 import { test, expect, zz } from "../support";
 import { newProject, newTask, ymd, type Who } from "../g2";
 
+import { patchCurrent } from "../helpers/jim-http";
+
 type Later = (fn: () => Promise<unknown>) => void;
 
 async function makeDeal(admin: Who, later: Later, label: string, due = ymd(3)) {
@@ -35,7 +37,8 @@ test("AC1: By date is the default and groups Overdue, Next 7 days and Later, wit
   await newTask(admin, p.id, { title: overdue, dueDate: ymd(-2), assigneeId: admin.user.id });
   await newTask(admin, p.id, { title: soon, dueDate: ymd(3), assigneeId: admin.user.id });
   await newTask(admin, p.id, { title: laterTitle, dueDate: ymd(20), assigneeId: admin.user.id });
-  await newTask(admin, p.id, { title: undated, assigneeId: admin.user.id });
+  const undatedId = await newTask(admin, p.id, { dueDate: "2031-03-20", title: undated, assigneeId: admin.user.id });
+  expect((await patchCurrent(admin, undatedId, { dueDate: null })).status).toBe(200);
 
   const mine = (await admin.api.get("/api/my-tasks")).json as { overdue: { title: string; project: { id: string } }[]; next7: { title: string; project: { id: string } }[]; later: { title: string; dueDate: string | null; project: { id: string } }[] };
   const inGroup = (rows: { title: string; project: { id: string } }[], title: string) => rows.some((t) => t.project.id === p.id && t.title === title);
@@ -62,7 +65,8 @@ test("AC2: By project shows each project as a heading, tasks soonest first, and 
   await newTask(admin, p.id, { title: titles[0], dueDate: ymd(-1), assigneeId: admin.user.id });
   await newTask(admin, p.id, { title: titles[1], dueDate: ymd(2), assigneeId: admin.user.id });
   await newTask(admin, p.id, { title: titles[2], dueDate: ymd(16), assigneeId: admin.user.id });
-  await newTask(admin, p.id, { title: titles[3], assigneeId: admin.user.id });
+  const undatedId = await newTask(admin, p.id, { dueDate: "2031-03-20", title: titles[3], assigneeId: admin.user.id });
+  expect((await patchCurrent(admin, undatedId, { dueDate: null })).status).toBe(200);
   const deal = await makeDeal(admin, later, "heading", ymd(4));
 
   await admin.page.goto("/");

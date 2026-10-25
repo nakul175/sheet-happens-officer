@@ -172,7 +172,7 @@ test.describe("APL-2674 activity delete undo", { tag: "@local-only" }, () => {
     const editor = await zzAccount("editor");
     const projectId = await zzProject(leader, [{ who: editor }]);
 
-    const editorTask = await zzTask(editor, projectId, "Editor delete");
+    const editorTask = await zzTask(editor, projectId, "Editor delete", { dueDate: "2026-11-03" });
     expect((await call(editor.req, "DELETE", `/api/tasks/${editorTask.id}`)).status).toBe(204);
     const editorCtx = await signedIn(browser, editor);
     try {
@@ -184,7 +184,7 @@ test.describe("APL-2674 activity delete undo", { tag: "@local-only" }, () => {
       await editorCtx.close();
     }
 
-    const leaderTask = await zzTask(leader, projectId, "Leader delete");
+    const leaderTask = await zzTask(leader, projectId, "Leader delete", { dueDate: "2026-11-03" });
     expect((await call(leader.req, "DELETE", `/api/tasks/${leaderTask.id}`)).status).toBe(204);
     const leaderCtx = await signedIn(browser, leader);
     try {
@@ -194,7 +194,7 @@ test.describe("APL-2674 activity delete undo", { tag: "@local-only" }, () => {
       await leaderCtx.close();
     }
 
-    const rootTask = await zzTask(root, projectId, "Super admin delete");
+    const rootTask = await zzTask(root, projectId, "Super admin delete", { dueDate: "2026-11-03" });
     expect((await call(root.req, "DELETE", `/api/tasks/${rootTask.id}`)).status).toBe(204);
     const rootCtx = await signedIn(browser, root);
     try {
@@ -210,7 +210,7 @@ test.describe("APL-2674 activity delete undo", { tag: "@local-only" }, () => {
     const leader = await zzAccount("leader");
     const editor = await zzAccount("editor");
     const projectId = await zzProject(leader, [{ who: editor }]);
-    const created = await zzTask(editor, projectId, "Edit me");
+    const created = await zzTask(editor, projectId, "Edit me", { dueDate: "2026-11-03" });
     const renamed = zzTitle("Edited");
     expect((await patchTask(editor, created.id, { title: renamed })).status).toBe(200);
 
@@ -231,7 +231,7 @@ test.describe("APL-2674 activity delete undo", { tag: "@local-only" }, () => {
     const leader = await zzAccount("leader");
     const editor = await zzAccount("editor");
     const projectId = await zzProject(leader, [{ who: editor }]);
-    const created = await zzTask(editor, projectId, "Still deleted");
+    const created = await zzTask(editor, projectId, "Still deleted", { dueDate: "2026-11-03" });
     expect((await call(editor.req, "DELETE", `/api/tasks/${created.id}`)).status).toBe(204);
     const items = (await call(editor.req, "GET", `/api/projects/${projectId}/activity`)).json.items as { id: string; what: string; kind: string }[];
     // SHO-2701: the delete row is found by its kind; the sentence it reads as is asserted beside it.
@@ -263,7 +263,7 @@ test.describe("APL-2674 activity delete undo", { tag: "@local-only" }, () => {
     const projectId = await zzProject(leader, [
       { who: erin }, { who: other }, { who: uninvolved }, { who: viewer, role: "VIEWER" },
     ]);
-    const created = await zzTask(leader, projectId, "Erin delete", { assigneeId: other.id });
+    const created = await zzTask(leader, projectId, "Erin delete", { dueDate: "2026-11-03", assigneeId: other.id });
     expect((await call(erin.req, "DELETE", `/api/tasks/${created.id}`)).status).toBe(204);
     const what = `moved "${created.title}" to Trash`;
 
@@ -328,7 +328,7 @@ test.describe("APL-2674 activity delete undo", { tag: "@local-only" }, () => {
     const leader = await zzAccount("leader");
     const editor = await zzAccount("editor");
     const projectId = await zzProject(leader, [{ who: editor }]);
-    const created = await zzTask(editor, projectId, "Undo target");
+    const created = await zzTask(editor, projectId, "Undo target", { dueDate: "2026-11-03" });
     expect((await call(editor.req, "DELETE", `/api/tasks/${created.id}`)).status).toBe(204);
     const items = (await call(leader.req, "GET", `/api/projects/${projectId}/activity`)).json.items as { id: string; what: string; kind: string }[];
     // SHO-2701: the kind picks the row; the sentence is asserted beside it.
@@ -360,7 +360,7 @@ test.describe("APL-2674 activity delete undo", { tag: "@local-only" }, () => {
     test.setTimeout(120_000);
     const leader = await zzAccount("leader");
     const projectId = await zzProject(leader);
-    const first = await zzTask(leader, projectId, "Trash me");
+    const first = await zzTask(leader, projectId, "Trash me", { dueDate: "2026-11-03" });
     expect((await call(leader.req, "DELETE", `/api/tasks/${first.id}`)).status).toBe(204);
     const listed = await call(leader.req, "GET", `/api/projects/${projectId}/trash`);
     const item = (listed.json.items as { id: string; daysLeft: number }[]).find((row) => row.id === first.id);
@@ -376,7 +376,7 @@ test.describe("APL-2674 activity delete undo", { tag: "@local-only" }, () => {
       await row.getByRole("button", { name: "Restore" }).click();
       await expect.poll(async () => (await call(leader.req, "GET", `/api/tasks/${first.id}`)).status, { timeout: 20_000 }).toBe(200);
 
-      const again = await zzTask(leader, projectId, "Undo me");
+      const again = await zzTask(leader, projectId, "Undo me", { dueDate: "2026-11-03" });
       expect((await call(leader.req, "DELETE", `/api/tasks/${again.id}`)).status).toBe(204);
       const activity = await openActivity(ctx, projectId);
       const button = actRow(activity, leader.name, `moved "${again.title}" to Trash`).getByRole("button", { name: "Undo" });

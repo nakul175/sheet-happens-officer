@@ -33,8 +33,8 @@ test.beforeAll(async ({ browser: b }) => {
   expect(p.status, JSON.stringify(p.json)).toBe(201);
   projectId = p.json.project.id as string;
   expect((await root.c.post(`/api/projects/${projectId}/members`, { userId: viewer.id, role: "VIEWER" })).status).toBe(201);
-  taskId = await task(root, projectId, { title: zz("22.7 task"), description: "Line of description.\n".repeat(60) });
-  longId = await task(root, projectId, { title: LONGTITLE });
+  taskId = await task(root, projectId, { title: zz("22.7 task"), dueDate: "2031-03-20", description: "Line of description.\n".repeat(60) });
+  longId = await task(root, projectId, { title: LONGTITLE, dueDate: "2031-03-20" });
   const b2 = await patchTask(root, longId, { blocked: true, blockedReason: LONGREASON });
   expect(b2.status, JSON.stringify(b2.json)).toBe(200);
 });

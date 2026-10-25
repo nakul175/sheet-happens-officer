@@ -53,7 +53,7 @@ test.describe("qa:TC missing APL-2670 a version conflict shows who saved last on
     expect((await lead.api.post(`/api/projects/${projectId}/members`, { data: { userId: other.id, role: "EDITOR" } })).status()).toBe(201);
     const sections = (await (await lead.api.get(`/api/projects/${projectId}`)).json()).project.sections as Board["sections"];
     const title = `ZZ-TEST ${label} ${RUN}`;
-    const t = await lead.api.post(`/api/projects/${projectId}/tasks`, { data: { title, ...task } });
+    const t = await lead.api.post(`/api/projects/${projectId}/tasks`, { data: { dueDate: "2026-11-03", title, ...task } });
     expect(t.status()).toBe(201);
     return { projectId, taskId: (await t.json()).task.id as string, title, sections };
   }

@@ -38,6 +38,7 @@ test("AC1: pressing C on a screen where I can write focuses a title field within
 });
 
 test("AC2: a title and Enter creates the task in the last-used project, assigned to me, with an Undo toast", async ({ admin, later }) => {
+  test.info().annotations.push({ type: "owner amendment", description: "New Project tasks require a due date; owner also approved Inbox: Inbox ke naye tasks par bhi mandatory karo. See docs/team-intake-required-task-due.md." });
   const p = await project(admin, later, "14.5 add");
   const page = admin.page;
   const first = zz("14.5 first");
@@ -48,14 +49,23 @@ test("AC2: a title and Enter creates the task in the last-used project, assigned
   await page.keyboard.press("c");
   await page.locator("#qa-title").fill(first);
   await page.locator("#qa-proj").selectOption({ label: p.name });
+  // Owner amendment: newly created Project AND Inbox tasks require explicit dates.
+  // Title-only Enter must leave the dialog open and create nothing; this supersedes
+  // the older title-only shortcut acceptance (docs/team-intake-required-task-due.md).
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("dialog", { name: "New task" })).toBeVisible();
+  expect((await tasksOf(admin, p.pid)).some(t => t.title === first)).toBe(false);
+  expect(await page.locator("#qa-date").evaluate((input: HTMLInputElement) => input.validity.valueMissing)).toBe(true);
+  await page.locator("#qa-date").fill("2031-03-20");
   const reloaded = page.waitForResponse((r) => r.url().includes("/api/quick-add") && r.request().method() === "GET");
   await page.keyboard.press("Enter");
   await expect(page.getByRole("dialog", { name: "New task" })).toHaveCount(0);
   await reloaded; // the screen refreshes its list of places to add to after each add
-  // Second add: three actions in total. C, type, Enter.
+  // Second add retains last-project/assignee/Undo behavior, with an explicit new date.
   await page.keyboard.press("c");
   await expect(page.locator("#qa-proj")).toHaveValue(p.pid); // last used
   await page.keyboard.type(second);
+  await page.locator("#qa-date").fill("2031-03-20");
   await page.keyboard.press("Enter");
   const toast = page.locator(".undo-toast");
   await expect(toast).toContainText("Undo");

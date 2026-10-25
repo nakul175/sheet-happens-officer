@@ -24,10 +24,10 @@ test.beforeEach(async ({ admin, later }) => {
   projectId = r.json.project.id;
   const secs = (await admin.api.get(`/api/projects/${projectId}`)).json.project.sections as { id: string; isDone: boolean }[];
   todo = secs[0].id; doing = secs[1].id; done = secs.find((s) => s.isDone)!.id;
-  taskId = (await admin.api.post(`/api/projects/${projectId}/tasks`, { title: zz("22.6 card"), sectionId: todo })).json.task.id;
-  parentId = (await admin.api.post(`/api/projects/${projectId}/tasks`, { title: zz("22.6 parent"), sectionId: todo })).json.task.id;
+  taskId = (await admin.api.post(`/api/projects/${projectId}/tasks`, { dueDate: "2031-03-20", title: zz("22.6 card"), sectionId: todo })).json.task.id;
+  parentId = (await admin.api.post(`/api/projects/${projectId}/tasks`, { dueDate: "2031-03-20", title: zz("22.6 parent"), sectionId: todo })).json.task.id;
   await admin.api.post(`/api/projects/${projectId}/tasks`, { title: zz("22.6 open subtask"), parentId });
-  longId = (await admin.api.post(`/api/projects/${projectId}/tasks`, { title: LONGTITLE, sectionId: todo })).json.task.id;
+  longId = (await admin.api.post(`/api/projects/${projectId}/tasks`, { dueDate: "2031-03-20", title: LONGTITLE, sectionId: todo })).json.task.id;
   later(() => admin.api.post(`/api/projects/${projectId}/archive`));
 });
 

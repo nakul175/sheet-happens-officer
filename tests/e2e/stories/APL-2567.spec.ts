@@ -26,7 +26,7 @@ const getTask = async (who: Who, id: string) => (await who.api.get(`/api/tasks/$
 test("AC1: clicking the assignee cell opens a person picker; choosing saves in one action with a toast and Undo", async ({ admin, member, later }) => {
   const s = await setup(admin, member, later, "14.8 who");
   const title = zz("14.8 assign");
-  const tid = await s.mk(title);
+  const tid = await s.mk(title, { dueDate: "2031-03-20" });
   const page = admin.page;
   await page.goto(`/projects/${s.pid}`);
   await row(page, title).getByRole("button", { name: /^Assignee .*Change$/ }).click();
@@ -44,7 +44,7 @@ test("AC1: clicking the assignee cell opens a person picker; choosing saves in o
 test("AC2: clicking the date cell opens a picker with Today, Tomorrow and Next week buttons", async ({ admin, member, later }) => {
   const s = await setup(admin, member, later, "14.8 date");
   const title = zz("14.8 date");
-  const tid = await s.mk(title);
+  const tid = await s.mk(title, { dueDate: "2031-03-20" });
   const page = admin.page;
   await page.goto(`/projects/${s.pid}`);
   await row(page, title).getByRole("button", { name: /^Due date .*Change$/ }).click();
@@ -61,7 +61,7 @@ test("AC2: clicking the date cell opens a picker with Today, Tomorrow and Next w
 test("AC3: cells are read-only for a Viewer", async ({ admin, member, later }) => {
   const s = await setup(admin, member, later, "14.8 viewer", "VIEWER");
   const title = zz("14.8 viewer task");
-  await s.mk(title);
+  await s.mk(title, { dueDate: "2031-03-20" });
   const page = member.page;
   await page.goto(`/projects/${s.pid}`);
   await expect(row(page, title)).toBeVisible();
@@ -71,7 +71,7 @@ test("AC3: cells are read-only for a Viewer", async ({ admin, member, later }) =
 test("AC3 (awaiting approval): cells are read-only for an Editor who is not the holder", async ({ admin, member, later }) => {
   const s = await setup(admin, member, later, "14.8 held");
   const title = zz("14.8 held task");
-  const tid = await s.mk(title, { assigneeId: member.user.id, approverId: admin.user.id });
+  const tid = await s.mk(title, { dueDate: "2031-03-20", assigneeId: member.user.id, approverId: admin.user.id });
   // Control: while the task is with the Member, the Member can edit it in place.
   const page = member.page;
   await page.goto(`/projects/${s.pid}`);
@@ -89,7 +89,7 @@ test("AC3 (awaiting approval): cells are read-only for an Editor who is not the 
 test("AC4: an edit to a task that changed elsewhere shows the stale-edit message and offers to re-apply", async ({ admin, member, later }) => {
   const s = await setup(admin, member, later, "14.8 stale");
   const title = zz("14.8 stale");
-  const tid = await s.mk(title);
+  const tid = await s.mk(title, { dueDate: "2031-03-20" });
   const page = admin.page;
   await page.goto(`/projects/${s.pid}`);
   await expect(row(page, title)).toBeVisible();
@@ -108,7 +108,7 @@ test("AC4: an edit to a task that changed elsewhere shows the stale-edit message
 test("AC5: with focus on a row, each cell is reachable and editable by keyboard", async ({ admin, member, later }) => {
   const s = await setup(admin, member, later, "14.8 keys");
   const title = zz("14.8 keys");
-  const tid = await s.mk(title);
+  const tid = await s.mk(title, { dueDate: "2031-03-20" });
   const page = admin.page;
   await page.goto(`/projects/${s.pid}`);
   const r = row(page, title);

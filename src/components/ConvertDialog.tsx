@@ -5,28 +5,25 @@ import { useState } from "react";
 import { api, useGet } from "@/components/api";
 import { ATHENA_ENTITIES, OPPORTUNITY_TYPES } from "@/lib/deal-classification";
 import { submissionDeadlineInput, SUBMISSION_TIME_ZONE_LABEL } from "@/lib/submission-deadline";
+import { BuyerAccountPicker } from "@/components/BuyerAccountPicker";
 import { Field, Modal } from "@/components/ui";
 
 export function ConvertDialog({ task, meId, onClose }: { task: { id: string; title: string; dueDate: string | null; assignee: { id: string } }; meId: string; onClose: () => void }) {
   const router = useRouter();
-  const orgs = useGet<{ organisations: { id: string; name: string }[] }>("/api/orgs");
+  const [buyer, setBuyer] = useState<{ id: string; name: string } | null>(null);
+  const [creatingBuyer, setCreatingBuyer] = useState(false);
   const pipes = useGet<{ pipelines: { id: string; key: string; name: string }[] }>("/api/deals/pipelines");
   const team = useGet<{ people: { id: string; name: string }[] }>("/api/team");
-  const [v, setV] = useState({ organisationId: "", pipelineId: "", name: task.title, leaderId: task.assignee.id, whyPursue: "", dueDate: task.dueDate ?? "", submissionDeadline: "", submissionTime: "", value: "", currency: "INR", opportunityType: "", netFeeRevenueUsd: "", athenaEntity: "", probability: "", newOrg: "", newKind: "" });
+  const [v, setV] = useState({ organisationId: "", pipelineId: "", name: task.title, leaderId: task.assignee.id, whyPursue: "", dueDate: task.dueDate ?? "", submissionDeadline: "", submissionTime: "", value: "", currency: "INR", opportunityType: "", netFeeRevenueUsd: "", athenaEntity: "", probability: "" });
   const [err, setErr] = useState<string | null>(null);
   const [dup, setDup] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [extraOrgs, setExtraOrgs] = useState<{ id: string; name: string }[]>([]);
   const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => setV({ ...v, [k]: e.target.value, ...(k === "submissionDeadline" && !e.target.value ? { submissionTime: "" } : {}) });
   const pipe = pipes.data?.pipelines.find((p) => p.id === (v.pipelineId || pipes.data?.pipelines[0]?.id));
   void meId;
 
-  async function addOrg() {
-    const r = await api("POST", "/api/orgs", { name: v.newOrg, kind: v.newKind || null });
-    if (r.ok) { setExtraOrgs((o) => [...o, { id: r.data.organisation.id, name: v.newOrg }]); setV({ ...v, organisationId: r.data.organisation.id, newOrg: "", newKind: "" }); setErr(null); }
-    else setErr(r.error ?? "Could not add the organisation.");
-  }
   async function go(force = false) {
+    if (busy || creatingBuyer) return;
     let submissionDeadline: string | null = null;
     try { if (pipe?.key === "DEAL_BID") submissionDeadline = submissionDeadlineInput(v.submissionDeadline, v.submissionTime); }
     catch (error) { setBusy(false); setErr(error instanceof Error ? error.message : "Choose a valid submission deadline."); return; }
@@ -49,18 +46,12 @@ export function ConvertDialog({ task, meId, onClose }: { task: { id: string; tit
     setDup(r.data?.needsConfirm === "duplicate");
     setErr(r.error ?? "Could not convert the task.");
   }
-  const all = [...(orgs.data?.organisations ?? []), ...extraOrgs.filter((e) => !orgs.data?.organisations.some((o) => o.id === e.id))];
   const ready = v.organisationId && pipe && v.name.trim() && v.whyPursue.trim() && (task.dueDate || v.dueDate) && (pipe.key !== "DEAL_BID" || v.submissionDeadline);
   return (
     <Modal onClose={onClose} label="Convert to deal">
       <h2>Convert to deal</h2>
       <p className="sub">The task moves into the new deal with its subtasks. Undo is available right after.</p>
-      <Field label="Organisation (buyer)">{(id) => <select id={id} className="in" value={v.organisationId} onChange={set("organisationId")}><option value="">Choose</option>{all.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}</select>}</Field>
-      <div style={{ display: "flex", gap: 6, alignItems: "end", flexWrap: "wrap" }}>
-        <Field label="Not listed? New organisation">{(id) => <input id={id} className="in" value={v.newOrg} onChange={set("newOrg")} placeholder="Name" />}</Field>
-        <Field label="Kind">{(id) => <input id={id} className="in" value={v.newKind} onChange={set("newKind")} placeholder="e.g. Ministry" />}</Field>
-        <button type="button" className="btn ghost sm" disabled={!v.newOrg.trim()} onClick={addOrg}>Add</button>
-      </div>
+      <BuyerAccountPicker captureKind value={buyer} disabled={busy || creatingBuyer} onBusyChange={setCreatingBuyer} onChange={account => { setBuyer(account); setV(current => ({ ...current, organisationId: account.id })); }} />
       <Field label="Pipeline">{(id) => <select id={id} className="in" value={pipe?.id ?? ""} onChange={set("pipelineId")}>{pipes.data?.pipelines.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select>}</Field>
       <Field label="Deal name">{(id) => <input id={id} className="in" value={v.name} onChange={set("name")} />}</Field>
       <Field label="Opportunity type">{(id) => <select id={id} className="in" value={v.opportunityType} onChange={set("opportunityType")}><option value="">Unclassified</option>{OPPORTUNITY_TYPES.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}</select>}</Field>
@@ -77,9 +68,9 @@ export function ConvertDialog({ task, meId, onClose }: { task: { id: string; tit
       </div>
       {err && <div className="err" role="alert">{err}</div>}
       <div className="actions">
-        <button className="btn ghost" onClick={onClose}>Cancel</button>
-        {dup && <button className="btn ghost" disabled={busy} onClick={() => go(true)}>Create anyway</button>}
-        <button className="btn" disabled={busy || !ready} onClick={() => go()}>Convert to deal</button>
+        <button className="btn ghost" disabled={busy || creatingBuyer} onClick={onClose}>Cancel</button>
+        {dup && <button className="btn ghost" disabled={busy || creatingBuyer} onClick={() => go(true)}>Create anyway</button>}
+        <button className="btn" disabled={busy || creatingBuyer || !ready} onClick={() => go()}>Convert to deal</button>
       </div>
     </Modal>
   );

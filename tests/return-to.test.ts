@@ -909,7 +909,7 @@ describe("APL-2652 signed-out redirect", () => {
     const owner = await account("nfowner");
     const outsider = await account("nfout");
     const p = await project(owner, owner);
-    const hidden = await task(owner, p.id, { title: "ZZ-TEST APL2652 hidden task", description: "ZZ-TEST APL2652 secret body" });
+    const hidden = await task(owner, p.id, { dueDate: "2031-03-20", title: "ZZ-TEST APL2652 hidden task", description: "ZZ-TEST APL2652 secret body" });
     const missing = "c".repeat(hidden.length);
     const apartFromId = (text: string) => text.split(hidden).join("ID").split(missing).join("ID");
     const titleOf = (html: string) => html.match(/<title[^>]*>([^<]*)<\/title>/i)?.[1] ?? "";

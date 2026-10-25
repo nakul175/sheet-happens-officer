@@ -36,7 +36,7 @@ export async function editorDeletedT1() {
   const ed = await zzAccount("Editor");
   const projectId = await zzProject(lead, ed);
   const title = `ZZ-TEST T1 ${RUN}-${seq++}`;
-  const t = await task(lead, projectId, { title, assigneeId: ed.id });
+  const t = await task(lead, projectId, { title, assigneeId: ed.id, dueDate: "2031-03-20" });
   expect((await ed.c.del(`/api/tasks/${t}`)).status).toBeLessThan(300);
   const row = await db.actionLog.findFirstOrThrow({ where: { action: "task.deleted", targetId: t, actorId: ed.id }, orderBy: { createdAt: "desc" } });
   return { lead, ed, projectId, t, title, row };

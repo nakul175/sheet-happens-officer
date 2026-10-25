@@ -22,7 +22,7 @@ test("APL-2536 > AC1: the organisation page shows open deals, contacts, notes, t
   later(() => admin.api.del(`/api/notes/${note.json.note.id}`));
   const project = await newProject(admin, later, { label: "tree tasks" });
   const taskTitle = zz("tree task");
-  const taskId = await newTask(admin, project.id, { title: taskTitle });
+  const taskId = await newTask(admin, project.id, { dueDate: "2031-03-20", title: taskTitle });
   expect((await admin.api.post(`/api/tasks/${taskId}/links`, { organisationId: leaf.id })).status).toBe(201);
 
   const org = await orgPage(admin.api, leaf.id);
@@ -66,7 +66,7 @@ test("APL-2536 > AC2: deals, notes and linked tasks follow membership, and deals
   later(() => admin.api.del(`/api/notes/${n2.json.note.id}`));
   const project = await newProject(admin, later, { label: "hidden tasks" });
   const taskTitle = zz("hidden linked task");
-  const taskId = await newTask(admin, project.id, { title: taskTitle });
+  const taskId = await newTask(admin, project.id, { dueDate: "2031-03-20", title: taskTitle });
   expect((await admin.api.post(`/api/tasks/${taskId}/links`, { organisationId: org.id })).status).toBe(201);
 
   const hidden = await orgPage(member.api, org.id);

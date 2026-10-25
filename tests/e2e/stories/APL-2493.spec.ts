@@ -10,14 +10,14 @@ const inMyTasks = async (who: { api: Api }, id: string) => JSON.stringify((await
 test("AC1: an assignee sees the task in My tasks and is notified; so is an added collaborator", async ({ admin, member, later }) => {
   const p = await newProject(admin, later, { label: "4.3 ac1", members: [{ who: member, role: "EDITOR" }] });
   const title = zz("4.3 assigned");
-  const t = await newTask(admin, p.id, { title });
+  const t = await newTask(admin, p.id, { dueDate: "2026-11-03", title });
   expect(await inMyTasks(member, t)).toBe(false);
   expect((await admin.api.post(`/api/tasks/${t}/assign`, { assigneeId: member.user.id, expectedUpdatedAt: (await getTask(admin, t)).updatedAt })).status).toBe(200);
   expect(await inMyTasks(member, t)).toBe(true);
   expect(await mentions(member, title), "an assignment notice naming the task").toBeGreaterThan(0);
 
   const title2 = zz("4.3 collab");
-  const c = await newTask(admin, p.id, { title: title2 }); // stays with the Super Admin
+  const c = await newTask(admin, p.id, { dueDate: "2026-11-03", title: title2 }); // stays with the Super Admin
   expect((await admin.api.post(`/api/tasks/${c}/collaborators`, { userId: member.user.id })).status).toBe(201);
   expect(await inMyTasks(member, c)).toBe(true);
   expect(await mentions(member, title2), "a collaborator notice naming the task").toBeGreaterThan(0);
@@ -25,7 +25,7 @@ test("AC1: an assignee sees the task in My tasks and is notified; so is an added
 
 test("AC2: a Viewer, a non-member or a deactivated person cannot be the assignee, and the assignee cannot be cleared", async ({ admin, member, later }) => {
   const p = await newProject(admin, later, { label: "4.3 ac2", members: [{ who: member, role: "VIEWER" }] });
-  const t = await newTask(admin, p.id);
+  const t = await newTask(admin, p.id, { dueDate: "2026-11-03" });
   const outsider = await ghost(admin, later, "outsider");
   const gone = await ghost(admin, later, "gone");
   await admin.api.post(`/api/projects/${p.id}/members`, { userId: gone.id });
@@ -39,7 +39,7 @@ test("AC2: a Viewer, a non-member or a deactivated person cannot be the assignee
 
 test("AC3: only active project members can be collaborators; a Viewer may be", async ({ admin, later }) => {
   const p = await newProject(admin, later, { label: "4.3 ac3" });
-  const t = await newTask(admin, p.id);
+  const t = await newTask(admin, p.id, { dueDate: "2026-11-03" });
   const viewer = await ghost(admin, later, "viewer");
   const outsider = await ghost(admin, later, "outsider");
   const gone = await ghost(admin, later, "gone");
@@ -55,15 +55,15 @@ test("AC3: only active project members can be collaborators; a Viewer may be", a
 
 test("AC4: a Viewer cannot assign or add collaborators", async ({ admin, member, later }) => {
   const p = await newProject(admin, later, { label: "4.3 ac4", members: [{ who: member, role: "VIEWER" }] });
-  const t = await newTask(admin, p.id);
+  const t = await newTask(admin, p.id, { dueDate: "2026-11-03" });
   expect((await member.api.post(`/api/tasks/${t}/assign`, { assigneeId: admin.user.id, expectedUpdatedAt: (await getTask(member, t)).updatedAt })).status).toBe(403);
   expect((await member.api.post(`/api/tasks/${t}/collaborators`, { userId: member.user.id })).status).toBe(403);
 });
 
 test("AC5: a collaborator removed from the project is dropped from its tasks, with one removal notice, not one per task", async ({ admin, member, later }) => {
   const p = await newProject(admin, later, { label: "4.3 ac5", members: [{ who: member, role: "EDITOR" }] });
-  const t1 = await newTask(admin, p.id, { title: zz("4.3 drop one") });
-  const t2 = await newTask(admin, p.id, { title: zz("4.3 drop two") });
+  const t1 = await newTask(admin, p.id, { dueDate: "2026-11-03", title: zz("4.3 drop one") });
+  const t2 = await newTask(admin, p.id, { dueDate: "2026-11-03", title: zz("4.3 drop two") });
   for (const t of [t1, t2]) expect((await admin.api.post(`/api/tasks/${t}/collaborators`, { userId: member.user.id })).status).toBe(201);
   expect((await admin.api.del(`/api/projects/${p.id}/members/${member.user.id}`)).status).toBe(204); // no taker needed: they hold no task
   for (const t of [t1, t2]) expect(((await getTask(admin, t)).collaborators as unknown[]).length).toBe(0);
@@ -77,16 +77,16 @@ test("AC5: a collaborator removed from the project is dropped from its tasks, wi
 
 test("AC6: with no approver, the assignee, any Editor and the Leader may complete; a Viewer collaborator may not", async ({ admin, member, later }) => {
   const p = await newProject(admin, later, { label: "4.3 ac6", members: [{ who: member, role: "EDITOR" }] });
-  const t = await newTask(admin, p.id); // assigned to the Super Admin, no approver
+  const t = await newTask(admin, p.id, { dueDate: "2026-11-03" }); // assigned to the Super Admin, no approver
   expect((await member.api.post(`/api/tasks/${t}/complete`, { expectedUpdatedAt: (await getTask(member, t)).updatedAt })).status).toBe(200); // another Editor
   expect((await getTask(admin, t)).completedAt).not.toBeNull();
-  const own = await newTask(member, p.id);
+  const own = await newTask(member, p.id, { dueDate: "2026-11-03" });
   expect((await member.api.post(`/api/tasks/${own}/complete`, { expectedUpdatedAt: (await getTask(member, own)).updatedAt })).status).toBe(200); // the assignee
-  const led = await newTask(member, p.id);
+  const led = await newTask(member, p.id, { dueDate: "2026-11-03" });
   expect((await admin.api.post(`/api/tasks/${led}/complete`, { expectedUpdatedAt: (await getTask(admin, led)).updatedAt })).status).toBe(200); // the Leader
 
   const v = await newProject(admin, later, { label: "4.3 ac6 viewer", members: [{ who: member, role: "VIEWER" }] });
-  const vt = await newTask(admin, v.id);
+  const vt = await newTask(admin, v.id, { dueDate: "2026-11-03" });
   expect((await admin.api.post(`/api/tasks/${vt}/collaborators`, { userId: member.user.id })).status).toBe(201);
   expect((await member.api.post(`/api/tasks/${vt}/complete`, { expectedUpdatedAt: (await getTask(member, vt)).updatedAt })).status).toBe(403);
 });

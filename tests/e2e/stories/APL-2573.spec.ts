@@ -41,8 +41,8 @@ test("AC2: a date change reads 'changed due date from 10 Dec to 14 Dec'", async 
 
 test("AC3: an Editor sees activity of tasks they are on, not the whole project", async ({ admin, member, later }) => {
   const id = await seed(admin, later, member);
-  const mine = (await admin.api.post(`/api/projects/${id}/tasks`, { title: zz("mine"), assigneeId: member.user.id })).json.task.id;
-  const theirs = (await admin.api.post(`/api/projects/${id}/tasks`, { title: zz("theirs"), assigneeId: admin.user.id })).json.task.id;
+  const mine = (await admin.api.post(`/api/projects/${id}/tasks`, { dueDate: "2026-11-03", title: zz("mine"), assigneeId: member.user.id })).json.task.id;
+  const theirs = (await admin.api.post(`/api/projects/${id}/tasks`, { dueDate: "2026-11-03", title: zz("theirs"), assigneeId: admin.user.id })).json.task.id;
   await admin.api.patch(`/api/tasks/${mine}`, { priority: "HIGH", expectedUpdatedAt: (await admin.api.get(`/api/tasks/${mine}`)).json.task.updatedAt });
   await admin.api.patch(`/api/tasks/${theirs}`, { priority: "HIGH", expectedUpdatedAt: (await admin.api.get(`/api/tasks/${theirs}`)).json.task.updatedAt });
   const all = await rows(admin, id);
@@ -57,7 +57,7 @@ test("AC3: an Editor sees activity of tasks they are on, not the whole project",
 
 test("AC4: HOW is not shown on rows made on screen", async ({ admin, later }) => {
   const id = await seed(admin, later);
-  await admin.api.post(`/api/projects/${id}/tasks`, { title: zz("screenonly") });
+  await admin.api.post(`/api/projects/${id}/tasks`, { dueDate: "2026-11-03", title: zz("screenonly") });
   await admin.page.goto(`/projects/${id}/activity`);
   const row = admin.page.locator(".act").filter({ hasText: zz("screenonly") }).first();
   await expect(row).toBeVisible();
@@ -67,7 +67,7 @@ test("AC4: HOW is not shown on rows made on screen", async ({ admin, later }) =>
 
 test("AC5: Undo stays on the row", async ({ admin, later }) => {
   const id = await seed(admin, later);
-  const t = (await admin.api.post(`/api/projects/${id}/tasks`, { title: zz("undoable"), priority: "LOW" })).json.task.id;
+  const t = (await admin.api.post(`/api/projects/${id}/tasks`, { dueDate: "2026-11-03", title: zz("undoable"), priority: "LOW" })).json.task.id;
   expect((await admin.api.patch(`/api/tasks/${t}`, { priority: "HIGH", expectedUpdatedAt: (await admin.api.get(`/api/tasks/${t}`)).json.task.updatedAt })).status).toBe(200);
   await admin.page.goto(`/projects/${id}/activity`);
   const row = admin.page.locator(".act").filter({ hasText: "changed priority" }).filter({ hasText: zz("undoable") }).first();

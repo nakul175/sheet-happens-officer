@@ -56,7 +56,7 @@ const texts = async (who: Who) => ((await who.api.get("/api/notifications?limit=
 
 test("AC1: being assigned a task gives one notice naming the task and who assigned it", tag("APL-2507 AC1"), async ({ admin, member, later }) => {
   const p = await withMember(admin, member, "assign-notice", later);
-  const t = await mk(admin, p.id, zz("assign me"));
+  const t = await mk(admin, p.id, zz("assign me"), { dueDate: "2031-03-20" });
   expect((await admin.api.post(`/api/tasks/${t}/assign`, { assigneeId: member.user.id, expectedUpdatedAt: await version(admin, t) })).status).toBe(200);
   const hits = (await texts(member)).filter((x) => x.includes(`"${zz("assign me")}"`));
   expect(hits).toHaveLength(1);
@@ -65,16 +65,16 @@ test("AC1: being assigned a task gives one notice naming the task and who assign
 
 test("AC2: assigning a task to myself creates no notice", tag("APL-2507 AC2"), async ({ admin, member, later }) => {
   const p = await withMember(admin, member, "assign-self", later);
-  await mk(member, p.id, zz("mine already"), { assigneeId: member.user.id });
+  await mk(member, p.id, zz("mine already"), { dueDate: "2031-03-20", assigneeId: member.user.id });
   expect((await texts(member)).some((x) => x.includes(zz("mine already")))).toBe(false);
 });
 
 test("AC3: being removed from a task as collaborator or assignee gives a notice naming the task", tag("APL-2507 AC3"), async ({ admin, member, later }) => {
   const p = await withMember(admin, member, "remove-notice", later);
-  const c = await mk(admin, p.id, zz("collab out"));
+  const c = await mk(admin, p.id, zz("collab out"), { dueDate: "2031-03-20" });
   expect((await admin.api.post(`/api/tasks/${c}/collaborators`, { userId: member.user.id })).status).toBe(201);
   expect((await admin.api.del(`/api/tasks/${c}/collaborators/${member.user.id}`)).status).toBeLessThan(300);
-  const a = await mk(admin, p.id, zz("assignee out"), { assigneeId: member.user.id });
+  const a = await mk(admin, p.id, zz("assignee out"), { dueDate: "2031-03-20", assigneeId: member.user.id });
   expect((await admin.api.post(`/api/tasks/${a}/assign`, { assigneeId: admin.user.id, expectedUpdatedAt: await version(admin, a) })).status).toBe(200);
   const mine = await texts(member);
   expect(mine.filter((x) => x.includes(`removed you from "${zz("collab out")}"`))).toHaveLength(1);
@@ -86,7 +86,7 @@ test("AC3 (grouping): removing a person from a project with 6 of their tasks giv
   const p = r.json.project.id as string;
   later(() => admin.api.post(`/api/projects/${p}/archive`));
   expect((await admin.api.post(`/api/projects/${p}/members`, { userId: member.user.id, role: "EDITOR" })).status).toBe(201);
-  for (let i = 0; i < 6; i++) await mk(admin, p, zz(`bulk ${i}`), { assigneeId: member.user.id });
+  for (let i = 0; i < 6; i++) await mk(admin, p, zz(`bulk ${i}`), { dueDate: "2031-03-20", assigneeId: member.user.id });
   expect((await admin.api.del(`/api/projects/${p}/members/${member.user.id}?handoverTo=${admin.user.id}`)).status).toBeLessThan(300);
   const hits = (await texts(member)).filter((x) => x.includes(`removed you from "${zz("remove-many")}"`));
   expect(hits, "one notice for the whole event").toHaveLength(1);
@@ -116,8 +116,8 @@ test("AC5: a leaver's tasks fall back to the Leader with one notice", tag("APL-2
   const id = made.json.project.id as string;
   later(() => archiveProject(admin.api, id, admin.user.id as string));
   expect((await admin.api.post(`/api/projects/${id}/members`, { userId: leaver.user.id, role: "EDITOR" })).status).toBe(201);
-  const a = await mk(admin, id, zz("handed one"), { assigneeId: leaver.user.id });
-  const b = await mk(admin, id, zz("handed two"), { assigneeId: leaver.user.id });
+  const a = await mk(admin, id, zz("handed one"), { dueDate: "2031-03-20", assigneeId: leaver.user.id });
+  const b = await mk(admin, id, zz("handed two"), { dueDate: "2031-03-20", assigneeId: leaver.user.id });
   const gone = await admin.api.post(`/api/team/${leaver.user.id}/deactivate`, { reassign: "leaders" });
   expect(gone.status, JSON.stringify(gone.json)).toBe(200);
   expect((await admin.api.get(`/api/tasks/${a}`)).json.task.assignee.id).toBe(leader.user.id);

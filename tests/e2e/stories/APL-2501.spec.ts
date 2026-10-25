@@ -81,8 +81,8 @@ test("AC5: the bell shows the unread count, lists notices newest first with link
   await member.api.post("/api/notifications/read-all");
   await member.page.goto("/");
   await expect(member.page.getByRole("button", { name: "Notifications", exact: true })).toBeVisible(); // none: no count in the name
-  expect((await admin.api.post(`/api/projects/${p}/tasks`, { title: zz("first notice"), assigneeId: member.user.id })).status).toBe(201);
-  const t2 = (await admin.api.post(`/api/projects/${p}/tasks`, { title: zz("second notice"), assigneeId: member.user.id })).json.task.id;
+  expect((await admin.api.post(`/api/projects/${p}/tasks`, { dueDate: "2026-11-03", title: zz("first notice"), assigneeId: member.user.id })).status).toBe(201);
+  const t2 = (await admin.api.post(`/api/projects/${p}/tasks`, { dueDate: "2026-11-03", title: zz("second notice"), assigneeId: member.user.id })).json.task.id;
   await member.page.reload();
   const bell = member.page.getByRole("button", { name: /^Notifications, \d+ unread$/ });
   await expect(bell).toBeVisible();

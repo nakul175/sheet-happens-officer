@@ -11,7 +11,7 @@ async function listProject(admin: Who, later: (f: () => Promise<unknown>) => voi
   later(() => admin.api.post(`/api/projects/${pid}/archive`));
   const ids: string[] = [];
   for (let i = 1; i <= n; i++) {
-    const t = await admin.api.post(`/api/projects/${pid}/tasks`, { title: zz(`${label} task ${i}`), assigneeId: admin.user.id });
+    const t = await admin.api.post(`/api/projects/${pid}/tasks`, { dueDate: "2031-03-20", title: zz(`${label} task ${i}`), assigneeId: admin.user.id });
     expect(t.status).toBe(201);
     ids.push(t.json.task.id);
     later(() => admin.api.del(`/api/tasks/${t.json.task.id}`));

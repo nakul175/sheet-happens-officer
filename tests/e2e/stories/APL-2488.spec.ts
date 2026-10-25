@@ -49,7 +49,7 @@ test("AC3: removing a member with open tasks needs a Leader or Editor to take ev
   const p = await newProject(admin, later, { label: "3.4 remove", members: [{ who: member, role: "EDITOR" }] });
   const viewer = await ghost(admin, later, "viewer");
   await admin.api.post(`/api/projects/${p.id}/members`, { userId: viewer.id, role: "VIEWER" });
-  const t = await newTask(member, p.id);
+  const t = await newTask(member, p.id, { dueDate: "2026-11-03" });
   expect((await admin.api.del(`/api/projects/${p.id}/members/${member.user.id}`)).status).toBe(409); // no taker chosen
   expect((await admin.api.del(`/api/projects/${p.id}/members/${member.user.id}?handoverTo=${viewer.id}`)).status).toBe(409); // a Viewer cannot take it
   expect((await getTask(admin, t)).assignee.id).toBe(member.user.id);
@@ -79,7 +79,7 @@ test("AC4: the Leader cannot be removed or have their role changed here; the mes
 
 test("AC5: a role change to Viewer for a member with open tasks follows 3.3 AC5 (needs a taker)", async ({ admin, member, later }) => {
   const p = await newProject(admin, later, { label: "3.4 role", members: [{ who: member, role: "EDITOR" }] });
-  const t = await newTask(member, p.id);
+  const t = await newTask(member, p.id, { dueDate: "2026-11-03" });
   expect((await admin.api.patch(`/api/projects/${p.id}/members/${member.user.id}`, { role: "VIEWER" })).status).toBe(409);
   expect((await admin.api.patch(`/api/projects/${p.id}/members/${member.user.id}`, { role: "VIEWER", handoverTo: admin.user.id })).status).toBe(200);
   expect((await getTask(admin, t)).assignee.id).toBe(admin.user.id);

@@ -38,7 +38,7 @@ test("AC1: listed events each leave a row with time, actor, event, target and ch
   const p = await proj(admin, "audit-rows", later);
   expect((await admin.api.post(`/api/projects/${p}/members`, { userId: member.user.id, role: "EDITOR" })).status).toBe(201);
   later(() => admin.api.del(`/api/projects/${p}/members/${member.user.id}?handoverTo=${admin.user.id}`));
-  const t = await mk(admin, p, zz("audited"));
+  const t = await mk(admin, p, zz("audited"), { dueDate: "2031-03-20" });
   expect((await admin.api.del(`/api/tasks/${t}`)).status).toBe(204);
   expect((await admin.api.post(`/api/tasks/${t}/restore`)).status).toBe(200);
   // What each new row must name. A project's creator may also be logged as a member, so MEMBER_ADDED is matched on the Member's name.
@@ -176,7 +176,7 @@ test("AC7: task delete and restore, an approver being set, and 'Undo anyway' eac
   const p = await proj(admin, "audit-added", later);
   expect((await admin.api.post(`/api/projects/${p}/members`, { userId: member.user.id, role: "EDITOR" })).status).toBe(201);
   later(() => admin.api.del(`/api/projects/${p}/members/${member.user.id}?handoverTo=${admin.user.id}`));
-  const t = await mk(admin, p, zz("approver task"), { assigneeId: member.user.id });
+  const t = await mk(admin, p, zz("approver task"), { dueDate: "2031-03-20", assigneeId: member.user.id });
   const seen = (await admin.api.get(`/api/tasks/${t}`)).json.task.updatedAt as string;
   expect((await admin.api.put(`/api/tasks/${t}/approver`, { approverId: admin.user.id, expectedUpdatedAt: seen })).status).toBe(200);
   const approver = (await audit(admin, `event=APPROVER_CHANGED&person=${admin.user.id}`)).filter((r) => (r.target ?? "").includes(zz("approver task")));
@@ -199,8 +199,8 @@ test("AC7: task delete and restore, an approver being set, and 'Undo anyway' eac
 test("AC7 (30-day purge): one TASK_PURGED row is written for a purge run", async ({ admin, later }) => {
   test.info().annotations.push({ type: "qa:TC", description: "qa:TC missing" });
   const p = await proj(admin, "audit-purge", later);
-  const aged = await mk(admin, p, zz("purged task"));
-  const fresh = await mk(admin, p, zz("kept task"));
+  const aged = await mk(admin, p, zz("purged task"), { dueDate: "2031-03-20" });
+  const fresh = await mk(admin, p, zz("kept task"), { dueDate: "2031-03-20" });
   expect((await admin.api.del(`/api/tasks/${aged}`)).status).toBe(204);
   expect((await admin.api.del(`/api/tasks/${fresh}`)).status).toBe(204);
   const still = (await admin.api.get(`/api/projects/${p}/trash`)).json.items as { id: string; daysLeft: number }[];

@@ -83,7 +83,7 @@ async function pendingCard(user: Actor, ops: Op[]) {
 }
 
 async function taskT1() {
-  return createTask(leader, projectId, { title: "T1" });
+  return createTask(leader, projectId, { title: "T1", dueDate: "2026-10-25" });
 }
 
 describe("@APL-2675 Concierge delete card offers Undo only to people who may restore", () => {
@@ -176,7 +176,7 @@ describe("@APL-2675 Concierge delete card offers Undo only to people who may res
 
   it("@APL-2675 a mixed delete-and-edit card hides Undo for the whole card", async () => {
     const toTrash = await taskT1();
-    const toEdit = await createTask(leader, projectId, { title: "T1 edit" });
+    const toEdit = await createTask(leader, projectId, { title: "T1 edit", dueDate: "2026-10-25" });
     const cardId = await pendingCard(editor, [
       { k: "task.delete", taskId: toTrash },
       { k: "task.edit", taskId: toEdit, title: "T1 edit revised" },

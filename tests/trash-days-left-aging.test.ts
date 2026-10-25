@@ -33,7 +33,7 @@ beforeAll(async () => {
   projectId = p.json.project.id as string;
   for (const a of AGES) {
     const title = `ZZ-TEST 2720 ${a.label} ${RUN}`;
-    const id = await task(leader, projectId, { title });
+    const id = await task(leader, projectId, { title, dueDate: "2031-03-20" });
     expect((await leader.c.del(`/api/tasks/${id}`)).status).toBe(204);
   }
   const listed = await leader.c.get(`/api/projects/${projectId}/trash`);

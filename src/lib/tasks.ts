@@ -1,3 +1,4 @@
+import { creationNeedsDue, REQUIRED_TASK_DUE, validTaskDue } from "@/lib/task-creation-policy";
 import { addWorkspaceTaskMember } from "@/lib/project-task-membership";
 import type { Prisma } from "@/generated/prisma/client";
 import { assertTaskReadable } from "@/lib/task-access";
@@ -124,12 +125,15 @@ export async function createTask(
   projectId: string,
   input: {
     title: string; description?: string | null; dueDate?: string | null; priority?: "LOW" | "MEDIUM" | "HIGH" | "URGENT";
-    sectionId?: string; parentId?: string; assigneeId?: string; approverId?: string; collaboratorIds?: string[];
+    sectionId?: string; parentId?: string; isIdea?: boolean; assigneeId?: string; approverId?: string; collaboratorIds?: string[];
     addAssigneeToProject?: boolean; addCollaboratorsToProject?: string[];
   },
 ) {
   const a = await projectAccess(user, projectId, { write: true });
   requireWrite(a);
+  if (input.dueDate != null && !validTaskDue(input.dueDate)) throw new ApiError(400, "Choose a valid due date.");
+  if (creationNeedsDue(a.project.typeId, input) && !input.dueDate) throw new ApiError(400, REQUIRED_TASK_DUE);
+  if (input.parentId && input.isIdea) throw new ApiError(400, "Subtasks cannot be Ideas.");
   return db.$transaction(async (tx) => {
     let sectionId: string;
     if (input.parentId) {
@@ -170,6 +174,7 @@ export async function createTask(
         projectId,
         sectionId,
         parentId: input.parentId ?? null,
+        isIdea: input.isIdea ?? false,
         title: input.title,
         description: input.description ?? null,
         dueDate: input.dueDate ? parseDueDate(input.dueDate) : null,
@@ -184,7 +189,7 @@ export async function createTask(
     await notify(tx, collaboratorIds, "COLLABORATOR_ADDED", { actorId: user.id, taskId: created.id, projectId, data: { title: created.title } });
     await notify(tx, [input.approverId], "APPROVER_NAMED", { actorId: user.id, taskId: created.id, projectId, data: { title: created.title } });
     if (input.approverId) await auditTx(tx, "APPROVER_CHANGED", { actorId: user.id, targetType: "task", targetId: created.id, data: { projectId, approverId: input.approverId, when: "created" } });
-    await logAction(tx, { actorId: user.id, projectId, targetType: "task", targetId: created.id, action: "task.created", after: { title: created.title, assigneeId, sectionId, parentId: input.parentId ?? null } });
+    await logAction(tx, { actorId: user.id, projectId, targetType: "task", targetId: created.id, action: "task.created", after: { title: created.title, assigneeId, sectionId, parentId: input.parentId ?? null, isIdea: input.isIdea ?? false } });
     return created.id;
   });
 }

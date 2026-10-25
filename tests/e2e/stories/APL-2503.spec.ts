@@ -35,7 +35,7 @@ test("AC1: restoring returns the task with its subtasks to its old Section and o
 
 test("AC2: restoring a subtask whose parent is also in Trash asks to restore both, and both return on confirm", async ({ admin, later }) => {
   const p = await proj(admin, "restore-parent", later);
-  const parent = await mk(admin, p.id, zz("the parent"));
+  const parent = await mk(admin, p.id, zz("the parent"), { dueDate: "2026-11-03" });
   const child = await mk(admin, p.id, zz("the child"), { parentId: parent });
   expect((await admin.api.del(`/api/tasks/${child}`)).status).toBe(204); // deleted on its own first, so it is listed
   expect((await admin.api.del(`/api/tasks/${parent}`)).status).toBe(204);
@@ -58,7 +58,7 @@ test("AC3: when the assignee has been deactivated, the restored task goes to the
   expect(id).toBeTruthy();
   later(() => admin.api.post(`/api/team/${id}/deactivate`, { reassign: "leaders" }));
   expect((await admin.api.post(`/api/projects/${p.id}/members`, { userId: id, role: "EDITOR" })).status).toBe(201);
-  const t = await mk(admin, p.id, zz("orphan"), { assigneeId: id });
+  const t = await mk(admin, p.id, zz("orphan"), { dueDate: "2026-11-03", assigneeId: id });
   const sub = await mk(admin, p.id, zz("orphan child"), { parentId: t, assigneeId: id });
   expect((await admin.api.del(`/api/tasks/${t}`)).status).toBe(204);
   expect((await admin.api.post(`/api/team/${id}/deactivate`, { reassign: "leaders" })).status).toBe(200);
@@ -71,7 +71,7 @@ test("AC4: an Editor and a Viewer can see the Trash list but Restore is refused"
   const p = await proj(admin, "restore-roles", later);
   expect((await admin.api.post(`/api/projects/${p.id}/members`, { userId: member.user.id, role: "EDITOR" })).status).toBe(201);
   later(() => admin.api.del(`/api/projects/${p.id}/members/${member.user.id}?handoverTo=${admin.user.id}`));
-  const t = await mk(admin, p.id, zz("seen not restored"));
+  const t = await mk(admin, p.id, zz("seen not restored"), { dueDate: "2026-11-03" });
   expect((await admin.api.del(`/api/tasks/${t}`)).status).toBe(204);
   for (const role of ["EDITOR", "VIEWER"]) {
     if (role === "VIEWER") expect((await admin.api.patch(`/api/projects/${p.id}/members/${member.user.id}`, { role })).status).toBe(200);
@@ -84,7 +84,7 @@ test("AC4: an Editor and a Viewer can see the Trash list but Restore is refused"
 
 test("AC5: each Trash row shows the task, who deleted it, when, and the days left", async ({ admin, later }) => {
   const p = await proj(admin, "restore-list", later);
-  const t = await mk(admin, p.id, zz("listed"));
+  const t = await mk(admin, p.id, zz("listed"), { dueDate: "2026-11-03" });
   expect((await admin.api.del(`/api/tasks/${t}`)).status).toBe(204);
   await admin.page.goto(`/projects/${p.id}/trash`);
   await expect(admin.page.getByRole("columnheader")).toContainText(["Item", "Deleted by", "Deleted", "Time left"]);

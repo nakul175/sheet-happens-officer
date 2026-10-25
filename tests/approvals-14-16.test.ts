@@ -8,8 +8,8 @@ describe("approvals view (14.16)", () => {
     const worker = await account("worker");
     const boss = await account("boss");
     const p = await project(lead, lead, [{ who: worker }, { who: boss }]);
-    const t = await task(lead, p.id, { assigneeId: worker.id, approverId: boss.id });
-    const plain = await task(lead, p.id, { assigneeId: boss.id });
+    const t = await task(lead, p.id, { dueDate: "2031-03-20", assigneeId: worker.id, approverId: boss.id });
+    const plain = await task(lead, p.id, { dueDate: "2031-03-20", assigneeId: boss.id });
 
     let mine = (await boss.c.get("/api/my-tasks")).json;
     expect(mine.waitingOnMe).toEqual([]); // nothing sent yet
@@ -39,7 +39,7 @@ describe("approvals view (14.16)", () => {
     const worker = await account("worker");
     const boss = await account("boss");
     const p = await project(lead, lead, [{ who: worker }, { who: boss }]);
-    const t = await task(lead, p.id, { assigneeId: worker.id, approverId: boss.id });
+    const t = await task(lead, p.id, { dueDate: "2031-03-20", assigneeId: worker.id, approverId: boss.id });
     await worker.c.post(`/api/tasks/${t}/send-for-approval`);
     expect((await boss.c.post(`/api/tasks/${t}/send-back`)).status).toBe(200);
     expect((await boss.c.get("/api/my-tasks")).json.waitingOnMe).toEqual([]);

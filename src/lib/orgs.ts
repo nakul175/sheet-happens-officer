@@ -64,14 +64,17 @@ export async function createOrganisation(user: Actor, input: OrgInput) {
     if (!parent) throw new ApiError(400, "Choose a parent organisation that exists.");
     if (parent.archivedAt) throw new ApiError(400, "That parent organisation is archived.");
   }
-  const dup = await db.organisation.findFirst({
-    where: { workspaceId: u.workspaceId, parentId: input.parentId ?? null, name: { equals: name, mode: "insensitive" } },
-    select: { id: true, name: true },
-  });
-  if (dup && !input.force) {
-    throw new ApiError(409, `An organisation called "${dup.name}" already exists here.`, { needsConfirm: "duplicate", existingId: dup.id });
-  }
   return db.$transaction(async (tx) => {
+    // Serialize case-insensitive sibling names, matching the existing duplicate policy.
+    // The explicit force path remains available to Accounts; inline Buyer creation never uses it.
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${u.workspaceId} || ':' || ${input.parentId ?? ""} || ':' || lower(${name}), 0))`;
+    const dup = await tx.organisation.findFirst({
+      where: { workspaceId: u.workspaceId, parentId: input.parentId ?? null, name: { equals: name, mode: "insensitive" } },
+      select: { id: true, name: true, archivedAt: true },
+    });
+    if (dup && !input.force) {
+      throw new ApiError(409, `An organisation called "${dup.name}" already exists here.`, { needsConfirm: "duplicate", existingId: dup.id, existingName: dup.name, existingArchived: !!dup.archivedAt });
+    }
     const org = await tx.organisation.create({
       data: { workspaceId: u.workspaceId, name, kind: clean(input.kind), country: clean(input.country), level: input.level ?? null, parentId: input.parentId ?? null, createdById: user.id },
     });

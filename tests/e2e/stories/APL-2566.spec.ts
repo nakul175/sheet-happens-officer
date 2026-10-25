@@ -9,7 +9,7 @@ async function projectWithTask(admin: Who, later: (f: () => Promise<unknown>) =>
   expect(r.status).toBe(201);
   const pid = r.json.project.id as string;
   later(() => admin.api.post(`/api/projects/${pid}/archive`));
-  const t = await admin.api.post(`/api/projects/${pid}/tasks`, { title, assigneeId: admin.user.id });
+  const t = await admin.api.post(`/api/projects/${pid}/tasks`, { dueDate: "2031-03-20", title, assigneeId: admin.user.id });
   expect(t.status).toBe(201);
   const tid = t.json.task.id as string;
   later(() => admin.api.del(`/api/tasks/${tid}`));

@@ -1,5 +1,7 @@
 "use client";
 import Link from "next/link";
+import { DealDateFilter } from "@/components/DealDateFilter";
+import { dealDateQuery, type DealDateFilter as DateFilter } from "@/lib/deal-date-filter";
 import { submissionDeadlineLabel, submissionDeadlineOverdue } from "@/lib/submission-deadline";
 import { Skeleton } from "@/components/ui";
 import { useState } from "react";
@@ -17,11 +19,13 @@ export default function DealsView() {
   const [old, setOld] = useState(false);
   const [view, setView] = useState<"board" | "list">("board");
   const [pipe, setPipe] = useState("");
+  const [dateFilter, setDateFilter] = useState<DateFilter | undefined>();
+  const dateQuery = dealDateQuery(dateFilter);
   const me = useMe();
   void me;
   const pipes = useGet<{ pipelines: { id: string; key: string; name: string; stages: BoardStage[] }[] }>("/api/deals/pipelines");
   const cur = pipes.data?.pipelines.find((p) => p.id === pipe) ?? pipes.data?.pipelines[0];
-  const { data, loading, error, reload } = useGet<{ deals: D[] }>(cur ? `/api/deals?pipelineId=${cur.id}&lifecycle=${lifecycle}${mine ? "&mine=true" : ""}${old ? "&archived=true" : ""}` : null);
+  const { data, loading, error, reload } = useGet<{ deals: D[] }>(cur ? `/api/deals?pipelineId=${cur.id}&lifecycle=${lifecycle}${mine ? "&mine=true" : ""}${old ? "&archived=true" : ""}${dateQuery ? `&${dateQuery}` : ""}` : null);
   const deals = (data?.deals ?? []).filter(d => inLifecycle(d, lifecycle));
   const groups = opportunityGroups(deals);
   const openCommercial = groups[0].deals.filter(d => ["NOT_STARTED", "ACTIVE", "PAUSED"].includes(d.stage?.category ?? ""));
@@ -40,6 +44,7 @@ export default function DealsView() {
         <button aria-pressed={lifecycle === "sales"} onClick={() => setLifecycle("sales")}>Sales pipeline</button>
         <button aria-pressed={lifecycle === "delivery"} onClick={() => setLifecycle("delivery")}>Delivery projects</button>
       </div>
+      <DealDateFilter value={dateFilter} onChange={setDateFilter} />
       {data && lifecycle === "sales" && <div className="card" role="region" aria-label="Open commercial pipeline" style={{ marginBottom: 12 }}>
         <b>{old ? "Archived open-stage" : "Open"} RFP/RFA + OTC: {openCommercial.length}</b>
         <div className="sub">Includes not-started, active and paused sales stages; excludes Won, Lost, No-Go and delivery.</div>

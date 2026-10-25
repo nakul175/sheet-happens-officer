@@ -5,6 +5,7 @@ import { ApiError } from "@/lib/http";
 import type { Actor } from "@/lib/access";
 import { monthStartIST, nextMonthStartIST, weekStartIST } from "@/lib/concierge/dates";
 import { monthlyCeilingConfigured, monthlyCeilingUsd, weeklyMessageCap, WARN_AT } from "@/lib/concierge/limits";
+import { CRM_ATTENTION_ACTION } from "@/lib/concierge/crm-quick";
 import { QUICK_ACTIONS } from "@/lib/concierge/reads";
 import { percentUsedNumber } from "@/lib/usage-percent";
 
@@ -41,7 +42,7 @@ export async function usageSummary(user: Actor, now = new Date()) {
       calls: month._count, inputTokens: month._sum.inputTokens ?? 0, outputTokens: month._sum.outputTokens ?? 0, costUsd: spend,
       messages: [...monthBy.values()].reduce((a, b) => a + b, 0),
     },
-    quickActions: QUICK_ACTIONS.map((q) => ({ id: q.id, label: q.label, count: quickBy.get(q.id) ?? 0 })),
+    quickActions: [...QUICK_ACTIONS, ...(quickBy.has(CRM_ATTENTION_ACTION.id) ? [CRM_ATTENTION_ACTION] : [])].map((q) => ({ id: q.id, label: q.label, count: quickBy.get(q.id) ?? 0 })),
     // weekCalls keeps its old name for the existing screen; it now counts messages sent (the number the weekly cap uses).
     people: ids.map((id) => ({
       id, name: names.get(id) ?? "Unknown",

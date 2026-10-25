@@ -1,3 +1,4 @@
+import { creationNeedsDue, REQUIRED_TASK_DUE } from "@/lib/task-creation-policy";
 // SHO-US-8.3: proposed changes. The model can only PROPOSE; this file turns a proposal into typed
 // operations, shows them as a card (with before and after), re-checks permission, fingerprints the
 // records the card was based on, and on Confirm calls the existing lib functions so every existing
@@ -247,6 +248,7 @@ async function blockedReason(user: Actor, op: Op, L: Loaded): Promise<string | n
     if (op.k === "task.create") {
       const a = await needWrite(op.projectId);
       if (typeof a === "string") return a;
+      if (creationNeedsDue(a.project.typeId, {}) && !op.due) return REQUIRED_TASK_DUE;
       if (op.assigneeId && !(await activeMember(db, op.projectId, op.assigneeId, WORKERS))) return `${U(L, op.assigneeId).name} must be an active Leader or Editor of this project.`;
       return null;
     }

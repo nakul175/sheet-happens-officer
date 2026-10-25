@@ -14,7 +14,7 @@ describe("bulk actions (14.11)", () => {
     const old = await account("old");
     const p = await project(lead, lead, [{ who: meera }, { who: old }]);
     const ids: string[] = [];
-    for (let i = 0; i < 5; i++) ids.push(await task(lead, p.id, { assigneeId: i < 3 ? old.id : lead.id }));
+    for (let i = 0; i < 5; i++) ids.push(await task(lead, p.id, { dueDate: "2031-03-20", assigneeId: i < 3 ? old.id : lead.id }));
     const r = await lead.c.post(`/api/projects/${p.id}/tasks/bulk`, await bulkWithVersions(lead, ids, { action: "assign", assigneeId: meera.id }));
     expect(r.status).toBe(200);
     expect(r.json.changed).toBe(5);
@@ -38,7 +38,7 @@ describe("bulk actions (14.11)", () => {
     const lead = await account("lead");
     const p = await project(lead, lead);
     const a = await task(lead, p.id, { dueDate: istDate(1) });
-    const b = await task(lead, p.id);
+    const b = await task(lead, p.id, { dueDate: "2031-03-20" });
     const d = (await lead.c.post(`/api/projects/${p.id}/tasks/bulk`, { taskIds: [a, b], action: "date", dueDate: istDate(1) })).json;
     expect(d.changed).toBe(1);
     expect(d.message).toBe("1 changed, 1 skipped (already up to date)");
@@ -62,8 +62,8 @@ describe("bulk actions (14.11)", () => {
     const other = await account("other");
     const p = await project(lead, lead, [{ who: ed }, { who: other }]);
     const ids: string[] = [];
-    for (let i = 0; i < 4; i++) ids.push(await task(lead, p.id, { assigneeId: ed.id }));
-    const held = await task(lead, p.id, { assigneeId: other.id, approverId: ed.id });
+    for (let i = 0; i < 4; i++) ids.push(await task(lead, p.id, { dueDate: "2031-03-20", assigneeId: ed.id }));
+    const held = await task(lead, p.id, { dueDate: "2031-03-20", assigneeId: other.id, approverId: ed.id });
     expect((await other.c.post(`/api/tasks/${held}/send-for-approval`)).status).toBe(200); // ed now holds it and may only close or send back
     const r = await ed.c.post(`/api/projects/${p.id}/tasks/bulk`, await bulkWithVersions(ed, [...ids, held], { action: "assign", assigneeId: other.id }));
     expect(r.status).toBe(200);
@@ -76,7 +76,7 @@ describe("bulk actions (14.11)", () => {
   it("refuses more than 50 with a clear message and changes nothing", async () => {
     const lead = await account("lead");
     const p = await project(lead, lead);
-    const first = await task(lead, p.id);
+    const first = await task(lead, p.id, { dueDate: "2031-03-20" });
     const ids = [first, ...Array.from({ length: 50 }, (_, i) => `fake${i}`)];
     const r = await lead.c.post(`/api/projects/${p.id}/tasks/bulk`, await bulkWithVersions(lead, ids, { action: "complete" }));
     expect(r.status).toBe(400);
@@ -94,7 +94,7 @@ describe("bulk actions (14.11)", () => {
     const view = await account("view");
     const out = await account("out");
     const p = await project(lead, lead, [{ who: view, role: "VIEWER" }]);
-    const t = await task(lead, p.id);
+    const t = await task(lead, p.id, { dueDate: "2031-03-20" });
     expect((await view.c.post(`/api/projects/${p.id}/tasks/bulk`, await bulkWithVersions(view, [t], { action: "complete" }))).status).toBe(403);
     expect((await out.c.post(`/api/projects/${p.id}/tasks/bulk`, await bulkWithVersions(out, [t], { action: "complete" }))).status).toBe(404);
     const bad = await lead.c.post(`/api/projects/${p.id}/tasks/bulk`, await bulkWithVersions(lead, [t], { action: "assign", assigneeId: view.id }));

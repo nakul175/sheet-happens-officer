@@ -5,7 +5,7 @@ import { test, expect, zz } from "../support";
 import { getTask, ghost, newProject, newTask, ymd, type Who } from "../g2";
 import { pipelines } from "../helpers/deal-board";
 import { atDeal } from "../helpers/deal-wait";
-import { raw } from "../helpers/jim-http";
+import { raw, patchCurrent } from "../helpers/jim-http";
 import { activity, audit, createOrg, projectOf } from "../helpers/claude-a";
 
 async function gate(admin: Who, orgId: string, pipelineId: string, extra: Record<string, unknown> = {}) {
@@ -59,7 +59,9 @@ test("APL-2538 > AC1: convert moves the task and its subtasks into a first-stage
 test("APL-2538 > AC2: missing gate fields block the dialog and the server returns 400 with the list", async ({ admin, later }) => {
   test.setTimeout(120_000);
   const p = await newProject(admin, later, { label: "convert gate" });
-  const undated = await newTask(admin, p.id, { title: zz("no date yet") });
+  const undated = await newTask(admin, p.id, { dueDate: "2031-03-20", title: zz("no date yet") });
+  // Owner creation-only policy preserves pre-existing undated records via normal versioned edits.
+  expect((await patchCurrent(admin, undated, { dueDate: null })).status).toBe(200);
   const dated = await newTask(admin, p.id, { title: zz("has a date"), dueDate: ymd(3) });
   const miss = async (id: string, body: Record<string, unknown>) => {
     const r = await admin.api.post(`/api/tasks/${id}/convert`, body);
@@ -105,15 +107,17 @@ test("APL-2538 > AC3: Not listed? New organisation creates the organisation inli
   await admin.page.goto(`/projects/${p.id}?task=${taskId}`);
   await admin.page.getByRole("dialog", { name: "Task" }).getByRole("button", { name: "Convert to deal" }).click();
   const dialog = admin.page.getByRole("dialog", { name: "Convert to deal" });
-  await dialog.getByLabel("Not listed? New organisation").fill(orgName);
-  await dialog.getByLabel("Kind").fill("Ministry");
-  await dialog.getByRole("button", { name: "Add" }).click();
+  // SHO-3040: the approved typed Buyer flow explicitly creates and links an Account.
+  await dialog.getByLabel("Search accounts").fill(orgName);
+  await dialog.getByLabel("Kind (optional, new Account)", { exact: true }).selectOption("Ministry");
+  await dialog.getByRole("button", { name: `Create Account “${orgName}”`, exact: true }).click();
   await expect.poll(async () => {
     const rows = (await admin.api.get(`/api/orgs?q=${encodeURIComponent(orgName)}`)).json.organisations as { id: string; name: string }[];
     return rows.find((row) => row.name === orgName)?.id ?? "";
   }).not.toBe("");
   const orgId = (await admin.api.get(`/api/orgs?q=${encodeURIComponent(orgName)}`)).json.organisations.find((row: { name: string }) => row.name === orgName).id as string;
   await expect(dialog.getByLabel("Organisation (buyer)")).toHaveValue(orgId);
+  expect((await admin.api.get(`/api/orgs/${orgId}`)).json.organisation.kind).toBe("Ministry");
   await dialog.getByLabel("Deal name").fill(dealName);
   await dialog.getByLabel("Why are we pursuing this?").fill("ZZ-TEST inline");
   // The task is open at /projects/<source>?task=<task>. AC3: wait for the deal this dialog just moved it to, by that

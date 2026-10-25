@@ -139,7 +139,7 @@ test.beforeAll(async ({ browser, playwright }) => {
   const sections = (loaded.json?.project as { sections: { id: string; isDone: boolean }[] }).sections;
   doing = sections[1].id;
 
-  const task = await send(lead.request, "POST", `/api/projects/${projectId}/tasks`, { title: zz("apl-2651 task") });
+  const task = await send(lead.request, "POST", `/api/projects/${projectId}/tasks`, { dueDate: "2026-11-03", title: zz("apl-2651 task") });
   expect(task.status, task.text).toBe(201);
   taskId = (task.json?.task as { id: string }).id;
 

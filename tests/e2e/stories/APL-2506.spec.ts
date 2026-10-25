@@ -104,7 +104,7 @@ const inbox = async (who: Who) => (await who.api.get("/api/notifications?limit=2
 test("AC1: a new notification raises the count and appears first in the panel", tag("APL-2506 AC1"), async ({ admin, member, later }) => {
   const p = await withMember(admin, member, "bell-new", later);
   const before = (await inbox(member)).unread;
-  await mk(admin, p, zz("count me"), { assigneeId: member.user.id });
+  await mk(admin, p, zz("count me"), { dueDate: "2026-11-03", assigneeId: member.user.id });
   const now = await inbox(member);
   expect(now.unread).toBe(before + 1);
   expect(now.items[0].text).toContain(zz("count me")); // newest first
@@ -117,8 +117,8 @@ test("AC1: a new notification raises the count and appears first in the panel", 
 
 test("AC2: opening an item marks it read and the count drops; Mark all as read clears the count", tag("APL-2506 AC2"), async ({ admin, member, later }) => {
   const p = await withMember(admin, member, "bell-read", later);
-  await mk(admin, p, zz("read one"), { assigneeId: member.user.id });
-  await mk(admin, p, zz("read two"), { assigneeId: member.user.id });
+  await mk(admin, p, zz("read one"), { dueDate: "2026-11-03", assigneeId: member.user.id });
+  await mk(admin, p, zz("read two"), { dueDate: "2026-11-03", assigneeId: member.user.id });
   const start = (await inbox(member)).unread;
   expect(start).toBeGreaterThanOrEqual(2);
   const d1 = await openBell(member.page);
@@ -133,7 +133,7 @@ test("AC2: opening an item marks it read and the count drops; Mark all as read c
 
 test("AC3: another person's notifications are never returned or changed", tag("APL-2506 AC3"), async ({ admin, member, later }) => {
   const p = await withMember(admin, member, "bell-private", later);
-  await mk(member, p, zz("for the leader"), { assigneeId: admin.user.id });
+  await mk(member, p, zz("for the leader"), { dueDate: "2026-11-03", assigneeId: admin.user.id });
   const mine = await inbox(admin);
   const note = mine.items.find((n) => n.text.includes(zz("for the leader")));
   expect(note, "the Leader was told").toBeTruthy();
@@ -148,9 +148,9 @@ test("AC4: each event in the list gives exactly one notification to the affected
   const p = await withMember(admin, member, "bell-types", later);
   // A separate project may legitimately have an identical task title and notice.
   const unrelated = await withMember(admin, member, "bell-types-other", later);
-  await mk(admin, unrelated, zz("collab"), { collaboratorIds: [member.user.id] });
-  const t = await mk(admin, p, zz("typed"), { assigneeId: member.user.id });                       // assigned
-  const collab = await mk(admin, p, zz("collab"), { collaboratorIds: [member.user.id] }); // added as collaborator
+  await mk(admin, unrelated, zz("collab"), { dueDate: "2026-11-03", collaboratorIds: [member.user.id] });
+  const t = await mk(admin, p, zz("typed"), { dueDate: "2026-11-03", assigneeId: member.user.id });                       // assigned
+  const collab = await mk(admin, p, zz("collab"), { dueDate: "2026-11-03", collaboratorIds: [member.user.id] }); // added as collaborator
   expect((await member.api.patch(`/api/tasks/${t}`, { blocked: true, blockedReason: "Waiting", expectedUpdatedAt: await version(member, t) })).status).toBe(200); // blocked: to the Leader
   expect((await admin.api.patch(`/api/projects/${p}/members/${member.user.id}`, { role: "VIEWER", handoverTo: admin.user.id })).status).toBe(200); // project role changed
   // Other stories can use the same title labels in this worker. Count this test's actual records, not matching text from earlier projects.
@@ -169,11 +169,11 @@ test("AC5: notifications older than 90 days are removed", tag("APL-2506 AC5"), a
   const secret = process.env.JOB_SECRET ?? "";
   if (secret.length < 16) throw new Error("Set JOB_SECRET (16 characters or more) to run purge-old on the local server.");
   const p = await withMember(admin, member, "bell-old", later);
-  await mk(admin, p, zz("aged notice"), { assigneeId: member.user.id });
+  await mk(admin, p, zz("aged notice"), { dueDate: "2026-11-03", assigneeId: member.user.id });
   const aged = (await inbox(member)).items.find((n) => n.text.includes(zz("aged notice")));
   expect(aged, "the notice to age").toBeTruthy();
   ageNotification(aged!.id, member.user.id as string);
-  await mk(admin, p, zz("fresh notice"), { assigneeId: member.user.id });
+  await mk(admin, p, zz("fresh notice"), { dueDate: "2026-11-03", assigneeId: member.user.id });
   const fresh = (await inbox(member)).items.find((n) => n.text.includes(zz("fresh notice")));
   expect(fresh, "a new notice stays").toBeTruthy();
   const res = await fetch(new URL("/api/jobs/purge-old", BASE_URL), { method: "POST", headers: { authorization: `Bearer ${secret}` } });
@@ -188,7 +188,7 @@ test("AC5: notifications older than 90 days are removed", tag("APL-2506 AC5"), a
 test("AC6: no email is sent for a notification", tag("APL-2506 AC6"), async ({ admin, member, later }) => {
   const before = mailFiles(member.user.email as string);
   const p = await withMember(admin, member, "bell-mail", later);
-  await mk(admin, p, zz("no mail"), { assigneeId: member.user.id });
+  await mk(admin, p, zz("no mail"), { dueDate: "2026-11-03", assigneeId: member.user.id });
   const note = (await inbox(member)).items.find((n) => n.text.includes(zz("no mail")));
   expect(note, "the notice was created in the bell").toBeTruthy();
   expect([...mailFiles(member.user.email as string)].filter((file) => !before.has(file))).toEqual([]);

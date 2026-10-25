@@ -20,7 +20,10 @@ test("AC1: tasks assigned to me in two projects appear in the right date group w
   const over = (await admin.api.post(`/api/projects/${p1}/tasks`, { title: zz("overdue"), assigneeId: admin.user.id, dueDate: ist(-2) })).json.task.id;
   const soon = (await admin.api.post(`/api/projects/${p2}/tasks`, { title: zz("soon"), assigneeId: admin.user.id, dueDate: ist(3) })).json.task.id;
   const far = (await admin.api.post(`/api/projects/${p2}/tasks`, { title: zz("later"), assigneeId: admin.user.id, dueDate: ist(30) })).json.task.id;
-  const nodate = (await admin.api.post(`/api/projects/${p2}/tasks`, { title: zz("nodate"), assigneeId: admin.user.id })).json.task.id;
+  const nodate = (await admin.api.post(`/api/projects/${p2}/tasks`, { dueDate: "2026-11-03", title: zz("nodate"), assigneeId: admin.user.id })).json.task.id;
+  // Retain actual undated sorting coverage through the supported versioned edit path.
+  expect((await admin.api.patch(`/api/tasks/${nodate}`, { dueDate: null, expectedUpdatedAt: (await admin.api.get(`/api/tasks/${nodate}`)).json.task.updatedAt })).status).toBe(200);
+  expect((await admin.api.get(`/api/tasks/${nodate}`)).json.task.dueDate).toBeNull();
   const mine = (await admin.api.get("/api/my-tasks")).json;
   expect(ids(mine.overdue)).toContain(over);
   expect(ids(mine.next7)).toContain(soon);
@@ -60,8 +63,8 @@ test("AC3: a task in a project I was removed from, or an archived project, no lo
   const p = await proj(admin, "mt-access", later);
   const q = await proj(admin, "mt-archived", later);
   for (const id of [p, q]) expect((await admin.api.post(`/api/projects/${id}/members`, { userId: member.user.id, role: "EDITOR" })).status).toBe(201);
-  const inP = (await admin.api.post(`/api/projects/${p}/tasks`, { title: zz("removed"), assigneeId: member.user.id })).json.task.id;
-  const inQ = (await admin.api.post(`/api/projects/${q}/tasks`, { title: zz("archived"), assigneeId: member.user.id })).json.task.id;
+  const inP = (await admin.api.post(`/api/projects/${p}/tasks`, { dueDate: "2026-11-03", title: zz("removed"), assigneeId: member.user.id })).json.task.id;
+  const inQ = (await admin.api.post(`/api/projects/${q}/tasks`, { dueDate: "2026-11-03", title: zz("archived"), assigneeId: member.user.id })).json.task.id;
   const all = async () => { const m = (await member.api.get("/api/my-tasks")).json; return ids([...m.overdue, ...m.next7, ...m.later]); };
   expect(await all()).toEqual(expect.arrayContaining([inP, inQ]));
   expect((await admin.api.del(`/api/projects/${p}/members/${member.user.id}?handoverTo=${admin.user.id}`)).status).toBe(204);

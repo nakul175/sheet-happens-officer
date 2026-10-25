@@ -7,7 +7,7 @@ describe("notifications", () => {
     const lead = await account("lead");
     const ed = await account("ed");
     const p = await project(lead, lead, [{ who: ed }]);
-    await task(lead, p.id, { title: "Ship it", assigneeId: ed.id });
+    await task(lead, p.id, { dueDate: "2031-03-20", title: "Ship it", assigneeId: ed.id });
     const n = (await ed.c.get("/api/notifications")).json;
     expect(n.unread).toBeGreaterThan(0);
     const assigned = n.items.find((i: { text: string }) => /Ship it/.test(i.text));
@@ -28,7 +28,7 @@ describe("activity log", () => {
     const lead = await account("lead");
     const ed = await account("ed");
     const p = await project(lead, lead, [{ who: ed }]);
-    await task(ed, p.id, { title: "Logged" });
+    await task(ed, p.id, { dueDate: "2031-03-20", title: "Logged" });
     const r = await lead.c.get(`/api/projects/${p.id}/activity`);
     expect(r.status).toBe(200);
     expect(r.json.items[0]).toMatchObject({ who: "Ed", via: "screen" });

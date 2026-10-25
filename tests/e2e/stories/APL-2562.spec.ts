@@ -28,7 +28,7 @@ async function tabTo(page: Page, ok: () => boolean | Promise<boolean>, max = 80)
 
 test("AC1: Tab reaches a list row, Enter opens the task panel, and the row shows a visible focus ring", async ({ admin, later }) => {
   const s = await seed(admin, later, "14.3 rows");
-  await s.mk(zz("14.3 row task"));
+  await s.mk(zz("14.3 row task"), { dueDate: "2031-03-20" });
   const page = admin.page;
   await page.goto(`/projects/${s.pid}`);
   await expect(page.locator("main [role=link].item").first()).toBeVisible();
@@ -42,7 +42,7 @@ test("AC1: Tab reaches a list row, Enter opens the task panel, and the row shows
 
 test("AC2: with the panel open, 40 Tabs never leave it, and Escape returns focus to the row", async ({ admin, later }) => {
   const s = await seed(admin, later, "14.3 trap");
-  const tid = await s.mk(zz("14.3 trap task"));
+  const tid = await s.mk(zz("14.3 trap task"), { dueDate: "2031-03-20" });
   const page = admin.page;
   await page.goto(`/projects/${s.pid}`);
   const row = page.locator("main [role=link].item", { hasText: zz("14.3 trap task") }).first();

@@ -81,7 +81,7 @@ test.describe("qa:TC missing APL-2721 done flag on the project page", { tag: "@l
   test.describe.configure({ timeout: 180000 });
   test("qa:TC missing cascaded subtasks reopen with their parent", async () => {
     const proj = await zzProject();
-    const parent = await task(lead, proj.id, { title: "ZZ-TEST Parent P", sectionId: proj.doing });
+    const parent = await task(lead, proj.id, { dueDate: "2026-11-03", title: "ZZ-TEST Parent P", sectionId: proj.doing });
     await task(lead, proj.id, { title: "ZZ-TEST Sub A", parentId: parent });
     await task(lead, proj.id, { title: "ZZ-TEST Sub B", parentId: parent });
     expect((await lead.c.patch(`/api/projects/${proj.id}/sections/${proj.doing}`, { isDone: true })).status).toBe(200);
@@ -107,14 +107,14 @@ test.describe("qa:TC missing APL-2721 done flag on the project page", { tag: "@l
 
   test("qa:TC missing a subtask ticked done on its own stays done", async () => {
     const flag = await zzProject();
-    const parent = await task(lead, flag.id, { title: "ZZ-TEST Parent flag", sectionId: flag.doing });
+    const parent = await task(lead, flag.id, { dueDate: "2026-11-03", title: "ZZ-TEST Parent flag", sectionId: flag.doing });
     await task(lead, flag.id, { title: "ZZ-TEST Sub A flag", parentId: parent });
     const own = await task(lead, flag.id, { title: "ZZ-TEST Sub C flag", parentId: parent });
     expect((await lead.c.post(`/api/tasks/${own}/complete`, await withVersion(lead, own))).status).toBe(200);
     expect((await lead.c.patch(`/api/projects/${flag.id}/sections/${flag.doing}`, { isDone: true })).status).toBe(200);
 
     const hand = await zzProject();
-    const parent2 = await task(lead, hand.id, { title: "ZZ-TEST Parent hand", sectionId: hand.doing });
+    const parent2 = await task(lead, hand.id, { dueDate: "2026-11-03", title: "ZZ-TEST Parent hand", sectionId: hand.doing });
     await task(lead, hand.id, { title: "ZZ-TEST Sub A hand", parentId: parent2 });
     const own2 = await task(lead, hand.id, { title: "ZZ-TEST Sub C hand", parentId: parent2 });
     expect((await lead.c.post(`/api/tasks/${own2}/complete`, await withVersion(lead, own2))).status).toBe(200);
@@ -143,7 +143,7 @@ test.describe("qa:TC missing APL-2721 done flag on the project page", { tag: "@l
   test("qa:TC missing a trashed parent stays complete in its original section", async () => {
     const proj = await zzProject();
     const title = "ZZ-TEST Parent T";
-    const trashed = await task(lead, proj.id, { title, sectionId: proj.doing });
+    const trashed = await task(lead, proj.id, { dueDate: "2026-11-03", title, sectionId: proj.doing });
     expect((await lead.c.patch(`/api/projects/${proj.id}/sections/${proj.doing}`, { isDone: true })).status).toBe(200);
     expect((await lead.c.del(`/api/tasks/${trashed}`)).status).toBe(204);
 

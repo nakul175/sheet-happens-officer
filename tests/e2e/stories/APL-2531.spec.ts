@@ -69,7 +69,7 @@ test("AC1: a deal list shows a deal to its members and to an Admin, and hides it
   expect(adminOrg.some((d) => d.projectId === hidden.id)).toBe(true);
 
   await member.page.goto("/deals");
-  await expect(member.page.getByRole("region", { name: "Lead" })).toBeVisible();
+  await expect(member.page.getByRole("region", { name: "Lead", exact: true })).toBeVisible();
   await expect(member.page.getByText(hidden.name)).toHaveCount(0);
   await admin.page.goto("/deals");
   await expect(admin.page.locator(".dcard", { hasText: hidden.name })).toBeVisible();
@@ -104,7 +104,7 @@ test("AC2: Bid sales stages are separate columns; Proactive retains its grouped 
   await admin.page.setViewportSize({ width: 1400, height: 900 });
   await admin.page.goto("/deals");
   await expect(admin.page.locator(".dcol header b")).toHaveText(proactive);
-  await expect(admin.page.getByRole("region", { name: "Lead" }).locator(".dcard", { hasText: deal.name })).toBeVisible();
+  await expect(admin.page.getByRole("region", { name: "Lead", exact: true }).locator(".dcard", { hasText: deal.name })).toBeVisible();
   await expect(admin.page.getByRole("region", { name: "On hold / Won / Lost" }).locator(".dcard", { hasText: deal.name })).toHaveCount(0);
 
   await admin.page.getByRole("tab", { name: "Bid" }).click();
@@ -136,7 +136,7 @@ test("AC4: archiving leaves a deal off the live list, and Trash still only holds
   const trashed = await newTask(admin, deal.id, { title: trashedTitle });
   const plain = await newProject(admin, later, { label: "2531 plain trash" });
   const plainTitle = zz("plain trashed");
-  const plainTask = await newTask(admin, plain.id, { title: plainTitle });
+  const plainTask = await newTask(admin, plain.id, { title: plainTitle, dueDate: ymd(7) });
 
   await admin.page.goto("/deals");
   await expect(admin.page.locator(".dcard", { hasText: deal.name })).toBeVisible();

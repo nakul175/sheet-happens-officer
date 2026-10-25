@@ -29,7 +29,7 @@ const mk = async (admin: Who, p: string, title: string, extra: Record<string, un
 test("AC1: deleting a task with subtasks takes both out of the views, lists them in Trash, and the toast offers Undo", async ({ admin, later }) => {
   test.info().annotations.push({ type: "qa:TC", description: "qa:TC missing" });
   const p = await proj(admin, "trash-del", later);
-  const t = await mk(admin, p.id, zz("parent to delete"));
+  const t = await mk(admin, p.id, zz("parent to delete"), { dueDate: "2026-11-03" });
   const sub = await mk(admin, p.id, zz("its subtask"), { parentId: t });
   await admin.page.goto(`/projects/${p.id}?task=${t}`);
   await clickAboveTabBar(admin.page.getByRole("dialog", { name: "Task" }).getByRole("button", { name: "Move to Trash" }));
@@ -49,7 +49,7 @@ test("AC1: deleting a task with subtasks takes both out of the views, lists them
 test("AC2: an item stays in Trash for 30 days before it is removed (the purge itself runs from the server's cron)", async ({ admin, later }) => {
   test.info().annotations.push({ type: "qa:TC", description: "qa:TC missing" });
   const p = await proj(admin, "trash-days", later);
-  const t = await mk(admin, p.id, zz("kept 30 days"));
+  const t = await mk(admin, p.id, zz("kept 30 days"), { dueDate: "2026-11-03" });
   expect((await admin.api.del(`/api/tasks/${t}`)).status).toBe(204);
   const item = (await admin.api.get(`/api/projects/${p.id}/trash`)).json.items.find((i: { id: string }) => i.id === t);
   expect(item.daysLeft).toBe(30);
@@ -61,8 +61,8 @@ test("AC2: an item stays in Trash for 30 days before it is removed (the purge it
 test("APL-2502 AC2: purge-trash removes a task that has been in Trash for 30 days and keeps a newer one", async ({ admin, later }) => {
   test.info().annotations.push({ type: "qa:TC", description: "qa:TC missing" });
   const p = await proj(admin, "trash-purge", later);
-  const fresh = await mk(admin, p.id, zz("still kept"));
-  const aged = await mk(admin, p.id, zz("aged out"));
+  const fresh = await mk(admin, p.id, zz("still kept"), { dueDate: "2026-11-03" });
+  const aged = await mk(admin, p.id, zz("aged out"), { dueDate: "2026-11-03" });
   expect((await admin.api.del(`/api/tasks/${fresh}`)).status).toBe(204);
   expect((await admin.api.del(`/api/tasks/${aged}`)).status).toBe(204);
   const kept = (await admin.api.get(`/api/projects/${p.id}/trash`)).json.items.find((i: { id: string; daysLeft: number }) => i.id === fresh);
@@ -103,7 +103,7 @@ test("AC3: a Viewer cannot delete", async ({ admin, member, later }) => {
   const p = await proj(admin, "trash-viewer", later);
   expect((await admin.api.post(`/api/projects/${p.id}/members`, { userId: member.user.id, role: "VIEWER" })).status).toBe(201);
   later(() => admin.api.del(`/api/projects/${p.id}/members/${member.user.id}?handoverTo=${admin.user.id}`));
-  const t = await mk(admin, p.id, zz("viewer cannot"));
+  const t = await mk(admin, p.id, zz("viewer cannot"), { dueDate: "2026-11-03" });
   expect((await member.api.del(`/api/tasks/${t}`)).status).toBe(403);
   await member.page.goto(`/projects/${p.id}?task=${t}`);
   await expect(member.page.getByRole("dialog", { name: "Task" }).getByLabel("Title")).toBeVisible();
@@ -117,7 +117,7 @@ test("AC4: when an Editor deletes a task the Leader is told, and the deleter is 
   const p = await proj(admin, "trash-notify", later);
   expect((await admin.api.post(`/api/projects/${p.id}/members`, { userId: member.user.id, role: "EDITOR" })).status).toBe(201);
   later(() => admin.api.del(`/api/projects/${p.id}/members/${member.user.id}?handoverTo=${admin.user.id}`));
-  const t = await mk(admin, p.id, zz("who is told"), { assigneeId: member.user.id });
+  const t = await mk(admin, p.id, zz("who is told"), { dueDate: "2026-11-03", assigneeId: member.user.id });
   expect((await member.api.del(`/api/tasks/${t}`)).status).toBe(204);
   const mine = (await admin.api.get("/api/notifications?limit=50")).json.items as { text: string; href: string }[];
   const note = mine.find((n) => n.text.includes(zz("who is told")) && /to Trash/.test(n.text));
@@ -133,7 +133,7 @@ test("AC5: the Leader restores a task with its subtasks to its original Section;
   const p = await proj(admin, "trash-restore", later);
   expect((await admin.api.post(`/api/projects/${p.id}/members`, { userId: member.user.id, role: "EDITOR" })).status).toBe(201);
   later(() => admin.api.del(`/api/projects/${p.id}/members/${member.user.id}?handoverTo=${admin.user.id}`));
-  const t = await mk(admin, p.id, zz("restore me"), { sectionId: p.doing });
+  const t = await mk(admin, p.id, zz("restore me"), { dueDate: "2026-11-03", sectionId: p.doing });
   const sub = await mk(admin, p.id, zz("restore child"), { parentId: t });
   expect((await member.api.del(`/api/tasks/${t}`)).status).toBe(204);
   expect((await member.api.post(`/api/tasks/${t}/restore`)).status).toBe(403);

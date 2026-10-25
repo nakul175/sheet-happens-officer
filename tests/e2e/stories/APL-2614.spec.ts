@@ -9,7 +9,7 @@ test("Reference (screen path): removing a member who holds 3 tasks sends the lea
   later(() => admin.api.post(`/api/projects/${pid}/archive`));
   expect((await admin.api.post(`/api/projects/${pid}/members`, { userId: member.user.id, role: "EDITOR" })).status).toBe(201);
   for (const n of ["one", "two", "three"]) {
-    expect((await admin.api.post(`/api/projects/${pid}/tasks`, { title: zz(`held ${n}`), assigneeId: member.user.id })).status).toBe(201);
+    expect((await admin.api.post(`/api/projects/${pid}/tasks`, { title: zz(`held ${n}`), assigneeId: member.user.id, dueDate: "2026-11-03" })).status).toBe(201);
   }
   expect((await admin.api.del(`/api/projects/${pid}/members/${member.user.id}?handoverTo=${admin.user.id}`)).status).toBe(204);
   const after = (await member.api.get("/api/notifications")).json.items as { text: string }[];

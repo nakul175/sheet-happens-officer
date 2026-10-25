@@ -67,8 +67,8 @@ describe("Monday review (13.3)", () => {
     const lead = await account("rvidea");
     const viewer = await account("rvview");
     const p = await project(lead, lead, [{ who: viewer, role: "VIEWER" }]);
-    const old = await task(lead, p.id, { title: "Old idea" });
-    const fresh = await task(lead, p.id, { title: "Fresh idea" });
+    const old = await task(lead, p.id, { title: "Old idea", dueDate: "2031-03-20" });
+    const fresh = await task(lead, p.id, { title: "Fresh idea", dueDate: "2031-03-20" });
     for (const t of [old, fresh]) await lead.c.post(`/api/tasks/${t}/idea`, { isIdea: true });
     await db.$executeRaw`UPDATE "Task" SET "createdAt" = ${new Date(Date.now() - 40 * 86400_000)} WHERE id = ${old}`;
     const r = await review(lead);

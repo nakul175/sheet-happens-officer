@@ -14,7 +14,7 @@ type Later = (fn: () => Promise<unknown>) => void;
 /** A project, a parent in the Doing section and two open subtasks held by the Super Admin and due tomorrow. */
 async function tree(admin: Who, later: Later, label: string) {
   const p = await newProject(admin, later, { label });
-  const parent = await newTask(admin, p.id, { title: zz(`${label} parent`), sectionId: p.doing });
+  const parent = await newTask(admin, p.id, { dueDate: "2026-11-03", title: zz(`${label} parent`), sectionId: p.doing });
   const subs = [
     await newTask(admin, p.id, { title: zz(`${label} sub one`), parentId: parent, assigneeId: admin.user.id, dueDate: ymd(1) }),
     await newTask(admin, p.id, { title: zz(`${label} sub two`), parentId: parent, assigneeId: admin.user.id, dueDate: ymd(1) }),
@@ -152,8 +152,8 @@ test("AC5: a subtask with a due date that closed with its parent gets no reminde
 test("APL-2678: moving the done flag leaves a parent task in Trash untouched", async ({ admin, later }) => {
   const p = await newProject(admin, later, { label: "bug3 trash" });
   // Two completed parents in the done section: one moved to Trash, one left live as the control that does reopen.
-  const trashed = await newTask(admin, p.id, { title: zz("bug3 trashed parent") });
-  const live = await newTask(admin, p.id, { title: zz("bug3 live parent") });
+  const trashed = await newTask(admin, p.id, { dueDate: "2026-11-03", title: zz("bug3 trashed parent") });
+  const live = await newTask(admin, p.id, { dueDate: "2026-11-03", title: zz("bug3 live parent") });
   for (const id of [trashed, live]) expect((await finish(admin, id)).status).toBe(200);
   const before = await getTask(admin, trashed);
   expect(before.completedAt, "the parent is complete before it goes to Trash").toBeTruthy();
@@ -176,7 +176,7 @@ test("APL-2678: moving the done flag leaves a parent task in Trash untouched", a
 /** A parent with two open subtasks held by the Super Admin. */
 async function family(admin: Who, later: Later, label: string) {
   const p = await newProject(admin, later, { label });
-  const parent = await newTask(admin, p.id, { title: zz(`${label} parent`) });
+  const parent = await newTask(admin, p.id, { dueDate: "2026-11-03", title: zz(`${label} parent`) });
   const a = await newTask(admin, p.id, { title: zz(`${label} sub A`), parentId: parent, assigneeId: admin.user.id });
   const b = await newTask(admin, p.id, { title: zz(`${label} sub B`), parentId: parent, assigneeId: admin.user.id });
   return { parent, a, b };
@@ -208,7 +208,7 @@ test("APL-2671 AC3: with A ticked alone and B cascaded under one parent, reopeni
 
 test("AC4: the done-flag move back reopens subtasks closed with the parent and does not clear a trashed parent", async ({ admin, later }) => {
   const t = await tree(admin, later, "done flag trash");
-  const trashed = await newTask(admin, t.p.id, { title: zz("closed in trash"), sectionId: t.p.doing });
+  const trashed = await newTask(admin, t.p.id, { dueDate: "2026-11-03", title: zz("closed in trash"), sectionId: t.p.doing });
   expect((await admin.api.patch(`/api/projects/${t.p.id}/sections/${t.p.doing}`, { isDone: true })).status).toBe(200);
   expect(await states(admin, t.all)).toEqual([true, true, true]);
   const closedAt = (await getTask(admin, trashed)).completedAt;
