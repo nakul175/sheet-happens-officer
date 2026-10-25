@@ -1,4 +1,4 @@
-name: Scoped four release validation
+name: Scoped four non-provider validation
 on:
   push:
     branches: [release/scoped4-20261025]
@@ -88,13 +88,20 @@ jobs:
       - name: Seed comments fixture in isolated CI database only
         run: |
           export SHO_QA_PASS="$(openssl rand -hex 16)Aa9"
+          echo "::add-mask::$SHO_QA_PASS"
           echo "SHO_QA_PASS=$SHO_QA_PASS" >> "$GITHUB_ENV"
           SEED_TARGET=test npx tsx scripts/seed-apl2590-fixtures.ts
-      - name: Four people-role suites and comments acceptance
+          echo "SHO_MEMBER_EMAIL=nakul17+apl2590-worker@gmail.com" >> "$GITHUB_ENV"
+          echo "SHO_MEMBER_PASS=$SHO_QA_PASS" >> "$GITHUB_ENV"
+      - name: Four people-role suites and non-provider comments acceptance
         run: >-
           npx playwright test tests/e2e/stories/APL-2466.spec.ts tests/e2e/stories/APL-2480.spec.ts
           tests/e2e/stories/APL-2482.spec.ts tests/e2e/stories/APL-2484.spec.ts tests/e2e/stories/APL-2590.spec.ts
+          --grep-invert " AC(14|15|16) "
           | tee validation-scoped-stories.log
+      - name: Record separate mandatory live-provider gate
+        run: |
+          node -e 'require("node:fs").writeFileSync("scoped4-live-gate.json",JSON.stringify({sha:process.env.RELEASE,deployReady:false,requiredStagingTests:["SHO2590AC14","SHO2590AC15","SHO2590AC16"],reason:"Live-provider cases remain mandatory on exact SHA; this CI job covers non-provider behavior only"}))'
       - name: Validate comments and return-path flag-off rollback
         run: |
           kill "$(cat .scoped4-server.pid)"
@@ -114,6 +121,7 @@ jobs:
         with:
           name: accepted15-${{ github.sha }}
           path: |
+            scoped4-live-gate.json
             validation-*.log
             release12-drain.json
             test-results/e2e
