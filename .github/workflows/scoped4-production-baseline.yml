@@ -28,16 +28,6 @@ jobs:
           --health-timeout 5s
           --health-retries 12
     env:
-          POSTGRES_USER: sho
-          POSTGRES_PASSWORD: sho
-          POSTGRES_DB: sho_test
-        ports: ["5432:5432"]
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 12
-    env:
       DATABASE_URL: postgresql://sho:sho@localhost:5432/sho_test?schema=baseline535qa
       DIRECT_DATABASE_URL: postgresql://sho:sho@localhost:5432/sho_test?schema=baseline535qa
       TASKBOARD_URL: http://localhost:3100
