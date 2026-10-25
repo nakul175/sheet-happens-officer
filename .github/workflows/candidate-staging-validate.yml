@@ -1,0 +1,132 @@
+name: Scoped4 one-schema provisioning only
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: Exact frozen application SHA
+        required: true
+        type: string
+      schema:
+        description: Only sho_pr9_scoped4
+        required: true
+        type: choice
+        options: [sho_pr9_scoped4]
+      operation:
+        description: Create empty schema or clean up only the owned test schema
+        required: true
+        type: choice
+        options: [create, cleanup]
+      confirm:
+        description: SCOPED4-ISOLATED-SCHEMA-ONLY or SCOPED4-OWNED-FIXTURES-CLEANUP
+        required: true
+        type: string
+      schema_oid:
+        description: Required exact creation receipt OID for cleanup; 0 for create
+        required: true
+        default: '0'
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: sho-slot9-scoped4-exclusive
+  cancel-in-progress: false
+jobs:
+  provision:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: ops
+          persist-credentials: false
+      - name: Refuse wrong repository, branch, schema, SHA, or confirmation
+        env:
+          APP_SHA: ${{ inputs.sha }}
+          WANT_SCHEMA: ${{ inputs.schema }}
+          OPERATION: ${{ inputs.operation }}
+          CONFIRM: ${{ inputs.confirm }}
+          SCHEMA_OID: ${{ inputs.schema_oid }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = nakul175/sheet-happens-officer
+          test "$GITHUB_REF" = refs/heads/release/scoped4-provision-20261026
+          test "$APP_SHA" = ee59582dffcbd8cc3067e689b2bb73cf63781cb7
+          test "$WANT_SCHEMA" = sho_pr9_scoped4
+          [[ "$SCHEMA_OID" =~ ^[0-9]+$ ]]
+          if [ "$OPERATION" = create ]; then
+            test "$CONFIRM" = SCOPED4-ISOLATED-SCHEMA-ONLY
+            test "$SCHEMA_OID" = 0
+          else
+            test "$OPERATION" = cleanup
+            test "$CONFIRM" = SCOPED4-OWNED-FIXTURES-CLEANUP
+            test "$SCHEMA_OID" != 0
+          fi
+          test "$(gh api repos/nakul175/sheet-happens-officer/git/ref/heads/release/scoped4-20261025 --jq .object.sha)" = "$APP_SHA"
+          test "$(gh api repos/nakul175/sheet-happens-officer/actions/runs/40220257862 --jq '.head_sha+":"+.conclusion')" = "$APP_SHA:success"
+          openssl x509 -in ops/.github/scoped4/database-ca.crt -outform DER > /tmp/scoped4-ca.der
+          echo 'fd536bb0e464f80e14776b3793d33eb9c0476493ddf36dc6ddd27f8bf6ffea37  /tmp/scoped4-ca.der' | sha256sum -c -
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.sha }}
+          path: candidate
+          persist-credentials: false
+      - name: Check exact application checkout
+        run: test "$(git -C candidate rev-parse HEAD)" = ee59582dffcbd8cc3067e689b2bb73cf63781cb7
+      - name: Operate only approved schema with existing masked secret
+        env:
+          SEED_DATABASE_URL: ${{ secrets.SHO_PR_SLOT_DATABASE_URL }}
+          OPERATION: ${{ inputs.operation }}
+          SCHEMA_OID: ${{ inputs.schema_oid }}
+        run: |
+          python3 - <<'PY'
+          import os,pathlib,urllib.parse,subprocess,json,re
+          phase='parse-secret'
+          try:
+            raw=os.environ.get('SEED_DATABASE_URL','');assert raw and '\n' not in raw and '\r' not in raw
+            print('::add-mask::'+raw,flush=True)
+            u=urllib.parse.urlparse(raw);pairs=urllib.parse.parse_qsl(u.query,keep_blank_values=True);qs=dict(pairs)
+            assert u.scheme in ('postgres','postgresql') and not u.fragment and u.hostname=='private-sho-db-do-user-45345612-0.k.db.ondigitalocean.com' and u.port==25060 and u.path=='/sho_staging'
+            assert len(qs)==len(pairs) and all(k in ('schema','sslmode','sslaccept','sslcert','sslrootcert','connection_limit','pool_timeout','connect_timeout') for k in qs)
+            assert qs.get('schema') in (None,'sho_pr9_scoped4'), 'Seed schema differs; refusing retarget'
+            assert u.username and u.password
+            password=urllib.parse.unquote(u.password);assert '\n' not in password and '\r' not in password
+            print('::add-mask::'+password,flush=True)
+            env={'PATH':os.environ['PATH'],'PGHOST':u.hostname,'PGPORT':'25060','PGDATABASE':'sho_staging','PGUSER':urllib.parse.unquote(u.username),'PGPASSWORD':password,'PGSSLMODE':'verify-full','PGSSLROOTCERT':str(pathlib.Path('ops/.github/scoped4/database-ca.crt').resolve()),'PGCONNECT_TIMEOUT':'10','PGAPPNAME':'sho-scoped4-approved-single-schema','PGOPTIONS':'-c search_path=sho_pr9_scoped4 -c statement_timeout=10000 -c lock_timeout=5000'}
+            def sql(query):
+              x=subprocess.run(['psql','-X','-q','-A','-t','-v','ON_ERROR_STOP=1'],input=query,env=env,text=True,capture_output=True,timeout=25)
+              if x.returncode:
+                category='permission' if 'permission denied' in x.stderr or 'must be' in x.stderr else 'connection' if 'connect' in x.stderr or 'authentication' in x.stderr else 'database-operation'
+                raise RuntimeError(category)
+              return x.stdout.strip()
+            phase='read-only-invariants'
+            assert sql('SELECT current_database()')=='sho_staging'
+            catalog="SELECT json_build_object('publicTables',(SELECT count(*) FROM pg_tables WHERE schemaname='public'),'oldTables',(SELECT count(*) FROM pg_tables WHERE schemaname='sho_pr9'),'oldOwner',(SELECT nspowner FROM pg_namespace WHERE nspname='sho_pr9'),'oldACL',(SELECT nspacl::text FROM pg_namespace WHERE nspname='sho_pr9'),'oldStageCount',(SELECT count(*) FROM sho_pr9.\"Stage\"))"
+            before=sql('BEGIN READ ONLY; '+catalog+'; COMMIT;')
+            phase='exact-schema-operation'
+            if os.environ['OPERATION']=='create':
+              assert sql("SELECT count(*) FROM pg_namespace WHERE nspname='sho_pr9_scoped4'")=='0'
+              assert sql("SELECT has_database_privilege(current_user,current_database(),'CREATE')")=='t','Identity lacks schema-create permission'
+              sql('BEGIN; CREATE SCHEMA sho_pr9_scoped4 AUTHORIZATION sho_slot_pr9_app; REVOKE ALL ON SCHEMA sho_pr9_scoped4 FROM PUBLIC; COMMIT;')
+              assert sql("SELECT pg_get_userbyid(nspowner) FROM pg_namespace WHERE nspname='sho_pr9_scoped4'")=='sho_slot_pr9_app'
+              assert sql("SELECT count(*) FROM pg_tables WHERE schemaname='sho_pr9_scoped4'")=='0'
+              oid=sql("SELECT oid FROM pg_namespace WHERE nspname='sho_pr9_scoped4'")
+            else:
+              oid=os.environ['SCHEMA_OID'];assert re.fullmatch(r'[0-9]+',oid) and oid!='0'
+              assert sql("SELECT oid::text||':'||pg_get_userbyid(nspowner) FROM pg_namespace WHERE nspname='sho_pr9_scoped4'")==oid+':sho_slot_pr9_app'
+              sql('BEGIN; DROP SCHEMA sho_pr9_scoped4 CASCADE; COMMIT;')
+              assert sql("SELECT count(*) FROM pg_namespace WHERE nspname='sho_pr9_scoped4'")=='0'
+            phase='post-invariants'
+            assert before==sql('BEGIN READ ONLY; '+catalog+'; COMMIT;')
+            result={'ok':True,'candidateSHA':'ee59582dffcbd8cc3067e689b2bb73cf63781cb7','schema':'sho_pr9_scoped4','schemaOID':oid,'operation':os.environ['OPERATION'],'priorSchemaCatalogUnchanged':True,'migrationsExecuted':False,'next':'Existing restricted slot role must migrate only new schema on host; no admin-owned app objects','productionTouched':False}
+            pathlib.Path('scoped4-schema-receipt.json').write_text(json.dumps(result,indent=2))
+            env.pop('PGPASSWORD',None);print(json.dumps(result))
+          except Exception as e:
+            print(json.dumps({'ok':False,'phase':phase,'errorType':type(e).__name__,'category':str(e) if str(e) in ('permission','connection','database-operation','Identity lacks schema-create permission','Seed schema differs; refusing retarget') else 'guard-refused','productionTouched':False}));raise SystemExit(1)
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: scoped4-schema-${{ github.run_id }}
+          path: scoped4-schema-receipt.json
+          if-no-files-found: ignore
