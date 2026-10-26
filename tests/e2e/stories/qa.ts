@@ -58,12 +58,12 @@ export function mailToken(email: string, subjectIncludes: string) {
 }
 
 /**
- * Token from the local outbox, or from MAIL_SINK_URL when that is set.
+ * Token from the local outbox, or from the protected staging sink when MAIL_SINK_TOKEN is set.
  * Returns null at once when neither has the message, so a staging run with no sink does not wait.
  */
 export async function sinkToken(email: string, subjectIncludes: string, waitMs = 3000): Promise<string | null> {
   const immediate = mailToken(email, subjectIncludes);
-  if (immediate || !process.env.MAIL_SINK_URL) return immediate;
+  if (immediate || !process.env.MAIL_SINK_TOKEN) return immediate;
   const deadline = Date.now() + waitMs;
   while (Date.now() < deadline) {
     const hits = (await sinkMails(email))
@@ -79,7 +79,7 @@ export async function sinkToken(email: string, subjectIncludes: string, waitMs =
 /** Plain text of the newest matching message, or null when the sink has none. */
 export async function sinkText(email: string, subjectIncludes: string, waitMs = 3000): Promise<string | null> {
   const local = latestMail(email, subjectIncludes);
-  if (local || !process.env.MAIL_SINK_URL) return local;
+  if (local || !process.env.MAIL_SINK_TOKEN) return local;
   const deadline = Date.now() + waitMs;
   while (Date.now() < deadline) {
     const hits = (await sinkMails(email)).filter((mail) => (mail.subject ?? "").includes(subjectIncludes));
@@ -105,14 +105,20 @@ function sinkRow(row: unknown): Mail | null {
   return { to, subject, text };
 }
 
-/** JSON messages from the staging test mail sink: the outbox folder, and MAIL_SINK_URL when that folder is exposed over HTTP. */
+/** JSON messages from the local outbox and the protected staging-only `/api/qa/mail` endpoint. */
 async function sinkMails(email: string): Promise<Mail[]> {
   const want = email.toLowerCase();
   const found = mailsTo(email);
-  const url = process.env.MAIL_SINK_URL;
-  if (!url) return found;
+  const token = process.env.MAIL_SINK_TOKEN;
+  if (!token) return found;
   try {
-    const res = await fetch(url, { signal: AbortSignal.timeout(5_000) });
+    const url = new URL("/api/qa/mail", BASE_URL);
+    url.searchParams.set("to", email);
+    const headers: Record<string, string> = { "x-qa-token": token };
+    if (process.env.STAGING_USER) {
+      headers.authorization = `Basic ${Buffer.from(`${process.env.STAGING_USER}:${process.env.STAGING_PASS ?? ""}`, "utf8").toString("base64")}`;
+    }
+    const res = await fetch(url, { headers, signal: AbortSignal.timeout(5_000) });
     if (!res.ok) return found;
     const json = await res.json() as unknown;
     const rows = Array.isArray(json) ? json : (json && typeof json === "object" ? ((json as { messages?: unknown; items?: unknown }).messages ?? (json as { items?: unknown }).items) : []);

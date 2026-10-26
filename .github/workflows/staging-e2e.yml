@@ -4,7 +4,7 @@
 # Input "specs": space-separated issue ids (APL-2481) or globs (APL-26*, tests/e2e/stories/APL-25*.spec.ts); empty runs every spec.
 # Secrets (repository settings): STAGING_USER, STAGING_PASS, SHO_QA_PASS, SHO_ADMIN_EMAIL, SHO_ADMIN_PASS, SHO_MEMBER_EMAIL,
 # SHO_MEMBER_PASS, and ZZ_TEST_01_EMAIL / ZZ_TEST_01_PASS ... ZZ_TEST_20_EMAIL / ZZ_TEST_20_PASS (01-05 Super Admins, 06-20 plain Members).
-# SHO_QA_PASS is the shared password for the nakul17+ story accounts. Story specs skip without it, and Playwright then exits 0.
+# SHO_QA_PASS is the shared password for the nakul17+ story accounts. MAIL_SINK_TOKEN reads staging-only captured mail.
 # The previews use the same STAGING_USER / STAGING_PASS basic-auth gate as staging.
 # They reach the jobs as environment variables only and are never echoed. Runs queue in one group so two never run at once.
 # This workflow is workflow_dispatch only. It does not run on pull_request or pull_request_target, so a fork cannot read these secrets.
@@ -195,6 +195,7 @@ jobs:
       ZZ_PREFIX: ZZ-TEST-${{ matrix.nn }}
       SHARD_ROLE: ${{ matrix.role }}
       PEER_ROLE: ${{ matrix.role == 'ADMIN' && 'MEMBER' || 'ADMIN' }}
+      MAIL_SINK_TOKEN: ${{ secrets.MAIL_SINK_TOKEN }}
     steps:
       - name: Check the secrets are set (names only, never values)
         env:
@@ -205,6 +206,7 @@ jobs:
           SHO_MEMBER_EMAIL: ${{ secrets.SHO_MEMBER_EMAIL }}
           SHO_MEMBER_PASS: ${{ secrets.SHO_MEMBER_PASS }}
           SHO_QA_PASS: ${{ secrets.SHO_QA_PASS }}
+          MAIL_SINK_TOKEN: ${{ secrets.MAIL_SINK_TOKEN }}
           SHARD_EMAIL: ${{ secrets[format('ZZ_TEST_{0}_EMAIL', matrix.nn)] }}
           SHARD_PASS: ${{ secrets[format('ZZ_TEST_{0}_PASS', matrix.nn)] }}
           PEER_EMAIL: ${{ secrets[format('ZZ_TEST_{0}_EMAIL', matrix.peer)] }}
@@ -213,7 +215,7 @@ jobs:
           PEER: ${{ matrix.peer }}
         run: |
           missing=""
-          for n in STAGING_USER STAGING_PASS SHO_ADMIN_EMAIL SHO_ADMIN_PASS SHO_MEMBER_EMAIL SHO_MEMBER_PASS SHO_QA_PASS; do
+          for n in STAGING_USER STAGING_PASS SHO_ADMIN_EMAIL SHO_ADMIN_PASS SHO_MEMBER_EMAIL SHO_MEMBER_PASS SHO_QA_PASS MAIL_SINK_TOKEN; do
             [ -n "${!n}" ] || missing="$missing $n"
           done
           [ -n "$SHARD_EMAIL" ] || missing="$missing ZZ_TEST_${NN}_EMAIL"
@@ -252,6 +254,7 @@ jobs:
           SHO_MEMBER_EMAIL: ${{ secrets.SHO_MEMBER_EMAIL }}
           SHO_MEMBER_PASS: ${{ secrets.SHO_MEMBER_PASS }}
           SHO_QA_PASS: ${{ secrets.SHO_QA_PASS }}
+          MAIL_SINK_TOKEN: ${{ secrets.MAIL_SINK_TOKEN }}
           SHARD_EMAIL: ${{ secrets[format('ZZ_TEST_{0}_EMAIL', matrix.nn)] }}
           SHARD_PASS: ${{ secrets[format('ZZ_TEST_{0}_PASS', matrix.nn)] }}
           PEER_EMAIL: ${{ secrets[format('ZZ_TEST_{0}_EMAIL', matrix.peer)] }}
@@ -302,6 +305,7 @@ jobs:
       BASE_URL: ${{ needs.plan.outputs.base_url }}
       ZZ_PREFIX: ZZ-TEST-SERIAL
       PLAYWRIGHT_BLOB_OUTPUT_NAME: report-serial.zip
+      MAIL_SINK_TOKEN: ${{ secrets.MAIL_SINK_TOKEN }}
     steps:
       - name: Check the secrets are set (names only, never values)
         env:
@@ -312,9 +316,10 @@ jobs:
           SHO_MEMBER_EMAIL: ${{ secrets.SHO_MEMBER_EMAIL }}
           SHO_MEMBER_PASS: ${{ secrets.SHO_MEMBER_PASS }}
           SHO_QA_PASS: ${{ secrets.SHO_QA_PASS }}
+          MAIL_SINK_TOKEN: ${{ secrets.MAIL_SINK_TOKEN }}
         run: |
           missing=""
-          for n in STAGING_USER STAGING_PASS SHO_ADMIN_EMAIL SHO_ADMIN_PASS SHO_MEMBER_EMAIL SHO_MEMBER_PASS SHO_QA_PASS; do
+          for n in STAGING_USER STAGING_PASS SHO_ADMIN_EMAIL SHO_ADMIN_PASS SHO_MEMBER_EMAIL SHO_MEMBER_PASS SHO_QA_PASS MAIL_SINK_TOKEN; do
             [ -n "${!n}" ] || missing="$missing $n"
           done
           if [ -n "$missing" ]; then
@@ -340,6 +345,7 @@ jobs:
           SHO_MEMBER_EMAIL: ${{ secrets.SHO_MEMBER_EMAIL }}
           SHO_MEMBER_PASS: ${{ secrets.SHO_MEMBER_PASS }}
           SHO_QA_PASS: ${{ secrets.SHO_QA_PASS }}
+          MAIL_SINK_TOKEN: ${{ secrets.MAIL_SINK_TOKEN }}
           PLAYWRIGHT_JSON_OUTPUT_FILE: playwright-report.json
           FILES: ${{ needs.plan.outputs.serial }}
           TRACE: ${{ inputs.trace }}
