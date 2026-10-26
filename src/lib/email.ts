@@ -1,5 +1,6 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { deliverSinkMail } from "./mail-sink";
 
 export type Mail = { to: string; subject: string; text: string };
 
@@ -35,6 +36,10 @@ async function resendError(res: Response): Promise<{ name: string; message: stri
  * never the key, the recipient or the body, which can hold a sign-in link or a password.
  */
 export async function sendMail(mail: Mail): Promise<void> {
+  if (process.env.MAIL_SINK) {
+    await deliverSinkMail(mail, FROM);
+    return;
+  }
   const key = process.env.RESEND_API_KEY;
   if (key) {
     let res: Response;
@@ -66,7 +71,7 @@ export async function sendMail(mail: Mail): Promise<void> {
   await writeFile(path.join(dir, name), JSON.stringify({ ...mail, from: FROM }, null, 2));
 }
 
-export { VERIFY_SEND_FAILED } from "@/lib/auth-messages";
+export { VERIFY_SEND_FAILED } from "./auth-messages";
 
 export const appUrl = () => (process.env.APP_URL ?? "http://localhost:3000").replace(/\/$/, "");
 

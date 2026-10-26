@@ -71,6 +71,8 @@ jobs:
         run: npx vitest run -c vitest.sho-3047.config.mts
       - name: SHO-3048 vertical boards and classification contracts
         run: npx vitest run -c vitest.sho-3048.config.mts
+      - name: SHO-2681 staging mail-sink contracts
+        run: npx vitest run -c vitest.sho-2681.config.mts
       - name: Review scoped authentication lint
         run: npx eslint src/app/api/auth/aplyd/{start,callback}/route.ts src/lib/central-client.ts src/app/signin/SignInForm.tsx src/app/signin/page.tsx
       - name: SHO-3010 echo and improve contracts
