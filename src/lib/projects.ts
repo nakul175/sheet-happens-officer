@@ -43,13 +43,15 @@ export async function createProject(user: Actor, input: { name: string; descript
 }
 
 /** SHO-US-3.2. Members see their own projects; Admins see all. Archived ones only when asked for. */
-export async function listProjects(user: Actor, archived: boolean) {
+export async function listProjects(user: Actor, archived: boolean, deleted = false) {
+  // project-lookup-ok: explicit member scope below; Trash additionally requires the Leader seat; Admins see all.
   const projects = await db.project.findMany({
     where: {
       // SHO-US-10.4: deals have their own place; this list is for type Project only.
       typeId: WORKSTREAM_PROJECT,
-      archivedAt: archived ? { not: null } : null,
-      ...(isAdmin(user) ? {} : { members: { some: { userId: user.id } } }),
+      deletedAt: deleted ? { not: null } : null,
+      ...(deleted ? {} : { archivedAt: archived ? { not: null } : null }),
+      ...(isAdmin(user) ? {} : { members: { some: { userId: user.id, ...(deleted ? { role: "LEADER" as const } : {}) } } }),
     },
     orderBy: { createdAt: "asc" },
     include: {
@@ -63,6 +65,7 @@ export async function listProjects(user: Actor, archived: boolean) {
     name: p.name,
     description: p.description,
     archived: !!p.archivedAt,
+    deletedAt: p.deletedAt?.toISOString() ?? null,
     leader: p.members[0]?.user ?? null,
     openTasks: p._count.tasks,
     role: isAdmin(user) ? "LEADER" : mine.find((m) => m.projectId === p.id)?.role ?? null,
@@ -131,6 +134,35 @@ export async function unarchiveProject(user: Actor, projectId: string) {
     await tx.project.update({ where: { id: projectId }, data: { archivedAt: null } });
     await logAction(tx, { actorId: user.id, projectId, targetType: "project", targetId: projectId, action: "project.unarchived", before: { archivedAt: a.project.archivedAt!.toISOString() }, after: { archivedAt: null } });
   });
+}
+
+/** Recoverable removal: preserve all linked records and restore the original archive state. */
+export async function deleteProject(user: Actor, projectId: string, confirmationName: string) {
+  const a = await projectAccess(user, projectId);
+  requireManage(a);
+  if (a.project.typeId !== WORKSTREAM_PROJECT) throw new ApiError(400, "Only projects can use project Trash.");
+  if (confirmationName !== a.project.name) throw new ApiError(400, "Enter the exact project name to confirm deletion.");
+  const now = new Date();
+  return db.$transaction(async tx => {
+    const changed = await tx.project.updateMany({ where: { id: projectId, deletedAt: null, updatedAt: a.project.updatedAt }, data: { deletedAt: now, deletedPreviousArchivedAt: a.project.archivedAt, archivedAt: a.project.archivedAt ?? now } });
+    if (changed.count !== 1) throw new ApiError(409, "Project changed; reload before deleting.");
+    await notify(tx, a.project.members.map(m => m.userId), "PROJECT_DELETED", { actorId: user.id, projectId, data: { project: a.project.name } });
+    await logAction(tx, { actorId: user.id, projectId, targetType: "project", targetId: projectId, action: "project.deleted", before: { archivedAt: a.project.archivedAt?.toISOString() ?? null }, after: { deletedAt: now.toISOString(), recoverable: true } });
+    return { deleted: true };
+  });
+}
+
+export async function restoreProject(user: Actor, projectId: string) {
+  const a = await projectAccess(user, projectId, { deleted: true });
+  requireManage(a);
+  if (!a.project.deletedAt) throw new ApiError(409, "This project is not in Trash.");
+  await db.$transaction(async tx => {
+    const changed = await tx.project.updateMany({ where: { id: projectId, deletedAt: a.project.deletedAt }, data: { deletedAt: null, archivedAt: a.project.deletedPreviousArchivedAt, deletedPreviousArchivedAt: null } });
+    if (changed.count !== 1) throw new ApiError(409, "Project changed; reload before restoring.");
+    await notify(tx, a.project.members.map(m => m.userId), "PROJECT_RESTORED", { actorId: user.id, projectId, data: { project: a.project.name } });
+    await logAction(tx, { actorId: user.id, projectId, targetType: "project", targetId: projectId, action: "project.restored", before: { deletedAt: a.project.deletedAt!.toISOString() }, after: { archivedAt: a.project.deletedPreviousArchivedAt?.toISOString() ?? null } });
+  });
+  return { restored: true };
 }
 
 /** SHO-US-3.4 AC1. Role defaults to Editor; "Leader" is only reachable through Change Leader. */
