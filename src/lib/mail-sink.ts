@@ -58,6 +58,18 @@ function appHost(appUrl: string | undefined): string | null {
   }
 }
 
+/** The isolated acceptance slot has no public hostname. Admit its exact loopback
+ * address only when both independent staging markers name slot 9. */
+function isIsolatedSlot9(appUrl: string | undefined, env: NodeJS.ProcessEnv): boolean {
+  if (env.SHO_DEPLOY_STAGE !== "staging" || env.SHO_SLOT !== "9" || !appUrl) return false;
+  try {
+    const url = new URL(appUrl);
+    return url.protocol === "http:" && url.hostname === "127.0.0.1" && url.port === "3109";
+  } catch {
+    return false;
+  }
+}
+
 /** MAIL_SINK unset: inert. Set to anything that is not a full staging configuration: armed and refused. */
 export function sinkMode(env: NodeJS.ProcessEnv = process.env): SinkMode {
   const flag = env.MAIL_SINK;
@@ -66,7 +78,7 @@ export function sinkMode(env: NodeJS.ProcessEnv = process.env): SinkMode {
   const token = env.MAIL_SINK_TOKEN ?? "";
   if (!token) return { active: false, armed: true, reason: "MAIL_SINK_TOKEN is empty" };
   const host = appHost(env.APP_URL);
-  if (!host || !STAGING_HOST.test(host)) {
+  if (!host || (!STAGING_HOST.test(host) && !isIsolatedSlot9(env.APP_URL, env))) {
     return { active: false, armed: true, reason: `APP_URL host is not a staging host (${host ?? "missing or invalid"})` };
   }
   const dir = env.EMAIL_OUTBOX_DIR ?? "";
