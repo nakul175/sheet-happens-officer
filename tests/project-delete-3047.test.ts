@@ -8,7 +8,7 @@ import { deleteProject, restoreProject, listProjects } from "@/lib/projects";
 const lead = { id: "lead", orgRole: "MEMBER" as const };
 const editor = { id: "editor", orgRole: "MEMBER" as const };
 const admin = { id: "admin", orgRole: "ADMIN" as const };
-const original = { id: "p", name: "Keep history", typeId: "wst_project", archivedAt: null as Date | null, deletedAt: null as Date | null, deletedPreviousArchivedAt: null as Date | null, updatedAt: new Date("2026-10-01"), members: [{ userId: "lead", role: "LEADER" }, { userId: "editor", role: "EDITOR" }, { userId: "viewer", role: "VIEWER" }] };
+const original = { id: "p", name: "Keep history", typeId: "wst_project", archivedAt: null as Date | null, deletedAt: null as Date | null, deletedPreviousArchivedAt: null as Date | null, updatedAt: new Date("2026-10-01"), actionLogs: [] as { id: string }[], members: [{ userId: "lead", role: "LEADER" }, { userId: "editor", role: "EDITOR" }, { userId: "viewer", role: "VIEWER" }] };
 beforeEach(() => {
   vi.clearAllMocks(); m.project.findUnique.mockResolvedValue({ ...original });
   m.project.updateMany.mockResolvedValue({ count: 1 });
@@ -24,6 +24,10 @@ it.each([lead, admin])("Leader/Admin deletes recoverably with exact confirmation
 it.each([editor, { id: "viewer", orgRole: "MEMBER" as const }])("rejects non-managing roles", async actor => {
   await expect(deleteProject(actor, "p", "Keep history")).rejects.toMatchObject({ status: 403 });
   expect(m.transaction).not.toHaveBeenCalled();
+});
+it("lets a Member who created the project manage and delete it", async () => {
+  m.project.findUnique.mockResolvedValue({ ...original, actionLogs: [{ id: "created" }] });
+  await expect(deleteProject(editor, "p", "Keep history")).resolves.toEqual({ deleted: true });
 });
 it("rejects outsiders, mismatched name, unsupported work items and stale deletion", async () => {
   await expect(deleteProject({ id: "outside", orgRole: "MEMBER" }, "p", "Keep history")).rejects.toMatchObject({ status: 404 });
@@ -46,9 +50,9 @@ it.each([null, new Date("2026-09-01")])("restores previous archive state %s with
   expect(m.project.updateMany.mock.calls[0][0].data).toEqual({ deletedAt: null, archivedAt: archived, deletedPreviousArchivedAt: null });
   expect(m.log.mock.calls[0][1].action).toBe("project.restored");
 });
-it("Trash query restricts members to their Leader seat; normal and archived lists exclude deleted", async () => {
+it("Trash query includes a Member's Leader seat or their own created project; normal and archived lists exclude deleted", async () => {
   await listProjects(editor, false, true);
-  expect(m.project.findMany.mock.calls[0][0].where).toMatchObject({ deletedAt: { not: null }, members: { some: { userId: "editor", role: "LEADER" } } });
+  expect(m.project.findMany.mock.calls[0][0].where).toMatchObject({ deletedAt: { not: null }, OR: expect.any(Array) });
   await listProjects(lead, true);
   expect(m.project.findMany.mock.calls[1][0].where).toMatchObject({ deletedAt: null, archivedAt: { not: null } });
 });
