@@ -360,11 +360,15 @@ export const isStalled = (category: string | null | undefined, lastActivity: Dat
 const visibleTo = (user: Actor): Prisma.ProjectWhereInput => (isAdmin(user) ? {} : { members: { some: { userId: user.id } } });
 
 /** SHO-US-12.6 data and the Deals screen. `mine` limits to deals the person leads or holds a task in (AC6). */
-export async function listDeals(user: Actor, o: { archived?: boolean; mine?: boolean; pipelineId?: string; lifecycle?: "sales" | "delivery" | "all" } = {}) {
+export async function listDeals(user: Actor, o: { archived?: boolean; deleted?: boolean; mine?: boolean; pipelineId?: string; lifecycle?: "sales" | "delivery" | "all" } = {}) {
   requireCrm(user);
+  // project-lookup-ok: explicit CRM visibility below; Trash additionally restricts non-admins to their Leader seat.
   const projects = await db.project.findMany({
     where: {
-      typeId: WORKSTREAM_DEAL, archivedAt: o.archived ? { not: null } : null, ...visibleTo(user),
+      typeId: WORKSTREAM_DEAL,
+      deletedAt: o.deleted ? { not: null } : null,
+      ...(o.deleted ? {} : { archivedAt: o.archived ? { not: null } : null }),
+      ...(o.deleted && !isAdmin(user) ? { members: { some: { userId: user.id, role: "LEADER" } } } : visibleTo(user)),
       ...(o.pipelineId ? { pipelineId: o.pipelineId } : {}),
       ...(o.lifecycle === "delivery" ? { stage: { category: "DELIVERY" } } : o.lifecycle === "sales" ? { OR: [{ stageId: null }, { stage: { category: { not: "DELIVERY" } } }] } : {}),
       ...(o.mine ? { AND: [{ OR: [{ members: { some: { userId: user.id, role: "LEADER" } } }, { tasks: { some: { assigneeId: user.id, deletedAt: null, completedAt: null } } }] }] } : {}),
@@ -381,7 +385,7 @@ export async function listDeals(user: Actor, o: { archived?: boolean; mine?: boo
   return projects.map((p) => {
     const sig = signals.get(p.id)!;
     return {
-      id: p.id, name: p.name, archived: !!p.archivedAt,
+      id: p.id, name: p.name, archived: !!p.archivedAt, deletedAt: p.deletedAt?.toISOString() ?? null,
       lifecycle: p.stage?.category === "DELIVERY" ? "delivery" as const : "sales" as const,
       pipeline: p.pipeline ? { id: p.pipeline.id, key: p.pipeline.key, name: p.pipeline.name } : null,
       stage: p.stage ? { id: p.stage.id, name: p.stage.name, category: p.stage.category, isRetired: p.stage.isRetired } : null,

@@ -99,10 +99,10 @@ export default function Members({ params }: { params: Promise<{ id: string }> })
           <button className="btn ghost sm" style={{ color: "var(--danger)" }} onClick={() => setDlg({ kind: "archive" })}>{p.archived ? "Unarchive…" : "Archive…"}</button>
         </div>
       )}
-      {p?.role === "LEADER" && p.type !== "DEAL" && (!p.isVertical || admin) && <div className="box dng">
-        <b>Delete project</b>
-        <p className="hint">Move this project to Trash. Tasks, notes, people and history are kept. A Leader or Admin can restore it from Projects → Trash. Nothing is permanently deleted.</p>
-        <button className="btn ghost sm" onClick={() => setDlg({ kind: "delete" })}>Delete project…</button>
+      {p?.role === "LEADER" && (!p.isVertical || admin) && <div className="box dng">
+        <b>Delete {p.type === "DEAL" ? "deal" : "project"}</b>
+        <p className="hint">Move this {p.type === "DEAL" ? "deal" : "project"} to Trash. Tasks, notes, people and history are kept. A Leader or Admin can restore it later. Nothing is permanently deleted.</p>
+        <button className="btn ghost sm" onClick={() => setDlg({ kind: "delete" })}>Delete {p.type === "DEAL" ? "deal" : "project"}…</button>
       </div>}
 
       {dlg && (dlg.kind === "remove" || dlg.kind === "viewer") && dlg.m && (
@@ -114,7 +114,7 @@ export default function Members({ params }: { params: Promise<{ id: string }> })
       )}
       {dlg?.kind === "leader" && p && <ChangeLeader p={p} id={id} onClose={() => setDlg(null)} onDone={() => { setDlg(null); pr.reload(); }} />}
       {dlg?.kind === "archive" && p && <Archive id={id} archived={p.archived} onClose={() => setDlg(null)} onDone={() => { setDlg(null); pr.reload(); }} />}
-      {dlg?.kind === "delete" && p && <DeleteProject id={id} name={p.name} onClose={() => setDlg(null)} />}
+      {dlg?.kind === "delete" && p && <DeleteProject id={id} name={p.name} kind={p.type === "DEAL" ? "deal" : "project"} onClose={() => setDlg(null)} />}
       {classify && p && <Confirm title={`Reclassify “${p.name}”?`} yes="Reclassify" body={`It becomes a ${p.isVertical ? "delivery project" : "vertical task board"}. Existing tasks, URLs, members and permissions stay unchanged. ${p.isVertical ? "Linked delivery projects must be reassigned first." : "Its current vertical link is cleared."}`} busy={classifying} error={err} onNo={() => setClassify(false)} onYes={async () => {
         setClassifying(true); const result = await api("POST", `/api/projects/${id}/classification`, { isVertical: !p.isVertical }); setClassifying(false);
         if (result.ok) { setClassify(false); pr.reload(); verticals.reload(); } else setErr(result.error ?? "Could not reclassify.");
@@ -123,15 +123,15 @@ export default function Members({ params }: { params: Promise<{ id: string }> })
   );
 }
 
-export function DeleteProject({ id, name, onClose }: { id: string; name: string; onClose: () => void }) {
+export function DeleteProject({ id, name, kind = "project", onClose }: { id: string; name: string; kind?: "project" | "deal"; onClose: () => void }) {
   const router = useRouter();
   const [confirmationName, setName] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  return <Confirm title={`Delete “${name}”?`} yes="Move to Trash" danger busy={busy || confirmationName !== name} error={error} onNo={onClose}
-    body="This project and its work disappear from active views. All tasks, subtasks, notes, links, memberships and history are retained. Restore from Projects → Trash; there is no automatic permanent deletion. Members are notified."
-    onYes={async () => { setBusy(true); const result = await api("POST", `/api/projects/${id}/delete`, { confirmationName }); setBusy(false); if (result.ok) router.push("/projects"); else setError(result.error ?? "Could not delete project."); }}>
-    <Field label="Type the exact project name">{inputId => <input id={inputId} className="in" value={confirmationName} onChange={e => setName(e.target.value)} />}</Field>
+  return <Confirm title={`Delete ${kind} “${name}”?`} yes="Move to Trash" danger busy={busy || confirmationName !== name} error={error} onNo={onClose}
+    body={`This ${kind} and its work disappear from active views. All tasks, subtasks, notes, links, memberships and history are retained. Restore from ${kind === "deal" ? "Deals" : "Projects"} → Trash; there is no automatic permanent deletion. Members are notified.`}
+    onYes={async () => { setBusy(true); const result = await api("POST", `/api/projects/${id}/delete`, { confirmationName }); setBusy(false); if (result.ok) router.push(kind === "deal" ? "/deals" : "/projects"); else setError(result.error ?? `Could not delete ${kind}.`); }}>
+    <Field label={`Type the exact ${kind} name`}>{inputId => <input id={inputId} className="in" value={confirmationName} onChange={e => setName(e.target.value)} />}</Field>
   </Confirm>;
 }
 

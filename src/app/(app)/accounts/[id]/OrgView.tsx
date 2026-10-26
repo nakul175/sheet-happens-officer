@@ -29,6 +29,27 @@ function TreeView({ node, current }: { node: Tree; current: string }) {
   );
 }
 
+export function OrganisationEdit({ organisation, onClose, onDone }: { organisation: Org; onClose: () => void; onDone: () => void }) {
+  const [name, setName] = useState(organisation.name);
+  const [kind, setKind] = useState(organisation.kind ?? "");
+  const [country, setCountry] = useState(organisation.country ?? "");
+  const [err, setErr] = useState<string | null>(null);
+  async function save() {
+    const r = await api("PATCH", `/api/orgs/${organisation.id}`, { name: name.trim(), kind: kind.trim() || null, country: country.trim() || null });
+    if (r.ok) onDone(); else setErr(r.error ?? "Could not update the organisation.");
+  }
+  return (
+    <Modal onClose={onClose} label="Edit organisation">
+      <h2>Edit organisation</h2>
+      <Field label="Organisation / client name">{(id) => <input id={id} className="in" value={name} onChange={(e) => setName(e.target.value)} />}</Field>
+      <Field label="Organisation kind">{(id) => <input id={id} className="in" value={kind} onChange={(e) => setKind(e.target.value)} />}</Field>
+      <Field label="Country">{(id) => <input id={id} className="in" value={country} onChange={(e) => setCountry(e.target.value)} />}</Field>
+      {err && <div className="err" role="alert">{err}</div>}
+      <div className="actions"><button className="btn ghost" onClick={onClose}>Cancel</button><button className="btn" disabled={!name.trim()} onClick={save}>Save changes</button></div>
+    </Modal>
+  );
+}
+
 function ContactDialog({ orgId, contact, onClose, onDone }: { orgId: string; contact?: Contact; onClose: () => void; onDone: () => void }) {
   const me = useMe();
   const team = useGet<{ people: { id: string; name: string }[] }>("/api/team");
@@ -100,6 +121,7 @@ export default function OrgView({ params }: { params: Promise<{ id: string }> })
   const { data, status, reload } = useGet<{ organisation: Org }>(`/api/orgs/${id}`);
   const [hist, setHist] = useState<H | null>(null);
   const [dlg, setDlg] = useState<null | { contact?: Contact }>(null);
+  const [edit, setEdit] = useState(false);
   const [rm, setRm] = useState<Contact | null>(null);
   const o = data?.organisation;
   if (status === 404) return <Page title="This organisation isn't available"><div className="card empty"><Link href="/accounts">Back to Accounts</Link></div></Page>;
@@ -109,6 +131,7 @@ export default function OrgView({ params }: { params: Promise<{ id: string }> })
     <Page title={o?.name ?? "…"} sub={o && <span className="crumb"><Link href="/accounts">Accounts</Link>{o.path.slice(0, -1).map((p) => <span key={p.id}> / <Link href={`/accounts/${p.id}`}>{p.name}</Link></span>)}</span>}
       actions={o && <>
         <Link className="btn" href={`/deals/new?org=${o.id}`}>+ Deal</Link>
+        {o.canEdit && !o.archived && <button className="btn ghost" onClick={() => setEdit(true)}>Edit organisation</button>}
         {o.canEdit && <button className="btn ghost" onClick={archive}>{o.archived ? "Unarchive" : "Archive"}</button>}
         {me.orgRole !== "MEMBER" && <button className="btn ghost" onClick={showHistory}>History</button>}
       </>}>
@@ -171,6 +194,7 @@ export default function OrgView({ params }: { params: Promise<{ id: string }> })
       {hist && <><div className="grp">History</div><div className="list">{hist.map((h) => <div key={h.id} className="row">{h.who} · {h.action} · {new Date(h.at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}</div>)}</div></>}
 
       {dlg && <ContactDialog orgId={id} contact={dlg.contact} onClose={() => setDlg(null)} onDone={() => { setDlg(null); reload(); }} />}
+      {edit && o && <OrganisationEdit organisation={o} onClose={() => setEdit(false)} onDone={() => { setEdit(false); reload(); }} />}
       {rm && <Confirm title="Remove contact?" yes="Remove" danger body={`${rm.name} is removed. You can undo this right after.`} onNo={() => setRm(null)} onYes={async () => { await api("DELETE", `/api/contacts/${rm.id}`); setRm(null); reload(); }} />}
     </Page>
   );
