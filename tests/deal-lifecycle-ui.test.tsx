@@ -29,6 +29,28 @@ beforeEach(() => {
 });
 afterEach(() => { act(() => root?.unmount()); root = undefined; vi.restoreAllMocks(); });
 
+it("SHO-3043 date filter updates board, list and totals together and clears", async () => {
+  await mount(h(DealsView));
+  const select = document.querySelector<HTMLSelectElement>('select')!;
+  await act(async () => {
+    select.value = "expectedClose";
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  const undated = [...document.querySelectorAll<HTMLSelectElement>("select")][1];
+  await act(async () => {
+    undated.value = "exclude";
+    undated.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  expect(document.body.textContent).toContain("Open RFP/RFA + OTC: 0");
+  expect(document.body.textContent).toContain("No matching sales deals.");
+  expect(document.querySelectorAll(".dcard")).toHaveLength(0);
+  await click("List");
+  expect(document.querySelectorAll("tbody tr")).toHaveLength(0);
+  await click("Clear timeline filter");
+  expect(document.body.textContent).toContain("Open RFP/RFA + OTC: 2");
+  expect(document.querySelectorAll("tbody tr")).toHaveLength(7);
+});
+
 it("Bid has distinct active decisions/outcomes, sales excludes delivery, delivery has its own column", () => {
   expect(columnsFor([...stages, retired], rows, true, "sales").map(c => c.title)).toEqual(["Leads", "Under Evaluation", "Go", "No-Go", "Submitted", "Won", "Lost", "On Hold"]);
   const delivery = columnsFor(stages, rows, true, "delivery");

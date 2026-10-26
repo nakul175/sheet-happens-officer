@@ -4,6 +4,7 @@ import { Skeleton } from "@/components/ui";
 import { useState } from "react";
 import { dueLabel, isOverdue, useGet } from "@/components/api";
 import { OPPORTUNITY_TYPES } from "@/lib/deal-classification";
+import { DEAL_DATE_FIELDS, matchesDealDate, type DealDateFilter } from "@/lib/deal-date-filter";
 import { money } from "@/components/DealPanel";
 import { DealBoard, inLifecycle, opportunityGroups, totals, type BoardDeal, type BoardStage } from "@/components/DealBoard";
 import { Page, useMe } from "../Shell";
@@ -16,12 +17,14 @@ export default function DealsView() {
   const [old, setOld] = useState(false);
   const [view, setView] = useState<"board" | "list">("board");
   const [pipe, setPipe] = useState("");
+  const [dateFilter, setDateFilter] = useState<DealDateFilter>({ field: "submissionDeadline", start: "", end: "", undated: "include" });
+  const invalidRange = !!(dateFilter.start && dateFilter.end && dateFilter.start > dateFilter.end);
   const me = useMe();
   void me;
   const pipes = useGet<{ pipelines: { id: string; key: string; name: string; stages: BoardStage[] }[] }>("/api/deals/pipelines");
   const cur = pipes.data?.pipelines.find((p) => p.id === pipe) ?? pipes.data?.pipelines[0];
   const { data, loading, error, reload } = useGet<{ deals: D[] }>(cur ? `/api/deals?pipelineId=${cur.id}&lifecycle=${lifecycle}${mine ? "&mine=true" : ""}${old ? "&archived=true" : ""}` : null);
-  const deals = (data?.deals ?? []).filter(d => inLifecycle(d, lifecycle));
+  const deals = (data?.deals ?? []).filter(d => inLifecycle(d, lifecycle) && matchesDealDate(d, dateFilter));
   const groups = opportunityGroups(deals);
   const openCommercial = groups[0].deals.filter(d => ["NOT_STARTED", "ACTIVE", "PAUSED"].includes(d.stage?.category ?? ""));
   const openTotals = totals(openCommercial);
@@ -39,6 +42,20 @@ export default function DealsView() {
         <button aria-pressed={lifecycle === "sales"} onClick={() => setLifecycle("sales")}>Sales pipeline</button>
         <button aria-pressed={lifecycle === "delivery"} onClick={() => setLifecycle("delivery")}>Delivery projects</button>
       </div>
+      <fieldset className="card" style={{ marginBottom: 12 }}>
+        <legend>Timeline filter · inclusive dates (IST)</legend>
+        <label>Date basis <select value={dateFilter.field} onChange={e => setDateFilter({ ...dateFilter, field: e.target.value as DealDateFilter["field"] })}>
+          {DEAL_DATE_FIELDS.map(field => <option key={field.value} value={field.value}>{field.label}</option>)}
+        </select></label>{" "}
+        <label>From <input type="date" value={dateFilter.start} onChange={e => setDateFilter({ ...dateFilter, start: e.target.value })} /></label>{" "}
+        <label>Through <input type="date" value={dateFilter.end} onChange={e => setDateFilter({ ...dateFilter, end: e.target.value })} /></label>{" "}
+        <label>No date <select value={dateFilter.undated} onChange={e => setDateFilter({ ...dateFilter, undated: e.target.value as DealDateFilter["undated"] })}>
+          <option value="include">Include</option><option value="exclude">Exclude</option><option value="only">Only no date</option>
+        </select></label>{" "}
+        <button className="btn ghost" onClick={() => setDateFilter({ field: "submissionDeadline", start: "", end: "", undated: "include" })}>Clear timeline filter</button>
+        <p className="sub">Applies to board, list and all displayed counts. {deals.filter(d => !d[dateFilter.field]).length} shown without a date.</p>
+        {invalidRange && <p className="err" role="alert">From must be on or before Through.</p>}
+      </fieldset>
       {data && lifecycle === "sales" && <div className="card" role="region" aria-label="Open commercial pipeline" style={{ marginBottom: 12 }}>
         <b>{old ? "Archived open-stage" : "Open"} RFP/RFA + OTC: {openCommercial.length}</b>
         <div className="sub">Includes not-started, active and paused sales stages; excludes Won, Lost, No-Go and delivery.</div>

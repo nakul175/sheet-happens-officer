@@ -27,6 +27,7 @@ const allowed = new Set([
   "src/components/WorkspaceTaskPerson.tsx",
   "src/lib/project-task-membership.ts",
   "src/lib/deal-classification.ts",
+  "src/lib/deal-date-filter.ts",
   "src/lib/deals.ts",
   "src/lib/review.ts",
   "src/lib/schemas.ts",
@@ -46,6 +47,7 @@ const allowed = new Set([
   "tests/bid-stage-migration-intake.test.ts",
   "tests/deal-lifecycle-route.test.ts",
   "tests/deal-lifecycle-ui.test.tsx",
+  "tests/deal-date-filter.test.ts",
   "tests/review-commercial-counts.test.tsx",
   "tests/usage-month.test.tsx",
   "tests/usage-month-figure-2951.test.ts",
@@ -54,6 +56,7 @@ const allowed = new Set([
   "vitest.sho-3044.config.mts",
   "vitest.sho-3042.config.mts",
   "vitest.sho-3041.config.mts",
+  "vitest.sho-3043.config.mts",
   "scripts/acceptance/sho-3038-scope.test.mjs",
   ".github/workflows/scoped4-validation.yml",
 ]);
