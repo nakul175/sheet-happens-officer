@@ -1,8 +1,8 @@
 "use client";
 import Link from "next/link";
-import { Skeleton } from "@/components/ui";
+import { Confirm, Skeleton } from "@/components/ui";
 import { useState } from "react";
-import { dueLabel, isOverdue, useGet } from "@/components/api";
+import { api, dueLabel, isOverdue, useGet } from "@/components/api";
 import { OPPORTUNITY_TYPES } from "@/lib/deal-classification";
 import { DEAL_DATE_FIELDS, matchesDealDate, type DealDateFilter } from "@/lib/deal-date-filter";
 import { money } from "@/components/DealPanel";
@@ -20,12 +20,16 @@ export default function DealsView() {
   const [opportunity, setOpportunity] = useState("");
   const [stage, setStage] = useState("");
   const [dateFilter, setDateFilter] = useState<DealDateFilter>({ field: "submissionDeadline", start: "", end: "", undated: "include" });
+  const [restore, setRestore] = useState<{ id: string; name: string } | null>(null);
+  const [restoreError, setRestoreError] = useState<string | null>(null);
+  const [restoring, setRestoring] = useState(false);
   const invalidRange = !!(dateFilter.start && dateFilter.end && dateFilter.start > dateFilter.end);
   const me = useMe();
   void me;
   const pipes = useGet<{ pipelines: { id: string; key: string; name: string; stages: BoardStage[] }[] }>("/api/deals/pipelines");
   const cur = pipes.data?.pipelines.find((p) => p.id === pipe) ?? pipes.data?.pipelines[0];
   const { data, loading, error, reload } = useGet<{ deals: D[] }>(cur ? `/api/deals?pipelineId=${cur.id}&lifecycle=${lifecycle}${mine ? "&mine=true" : ""}${old ? "&archived=true" : ""}` : null);
+  const trash = useGet<{ deals: { id: string; name: string }[] }>("/api/deals?deleted=true&lifecycle=all");
   const deals = (data?.deals ?? []).filter(d => inLifecycle(d, lifecycle) && matchesDealDate(d, dateFilter)
     && (!opportunity || (opportunity === "unclassified" ? !d.opportunityType : d.opportunityType === opportunity))
     && (!stage || d.stage?.id === stage));
@@ -97,6 +101,19 @@ export default function DealsView() {
             : <DealList deals={group.deals} />}
         </section>;
       })}
+
+      <section aria-label="Deal Trash">
+        <h2 className="grp">Trash</h2>
+        <p className="hint">Deleted deals stay recoverable. Their tasks, notes, parties, memberships and history are preserved.</p>
+        {trash.error && <div className="err" role="alert">{trash.error} <button className="link" onClick={trash.reload}>Retry</button></div>}
+        {trash.data?.deals.map(deal => <div className="box" key={deal.id}><b>{deal.name}</b>{" "}<button className="btn ghost sm" onClick={() => { setRestore(deal); setRestoreError(null); }}>Restore deal…</button></div>)}
+        {trash.data && !trash.data.deals.length && <p className="hint">No deleted deals.</p>}
+      </section>
+      {restore && <Confirm title={`Restore “${restore.name}”?`} yes="Restore deal" body="All preserved work, parties and memberships return. The deal returns to its previous active or archived state. Members are notified."
+        busy={restoring} error={restoreError} onNo={() => setRestore(null)} onYes={async () => {
+          setRestoring(true); const result = await api("POST", `/api/projects/${restore.id}/restore`, {}); setRestoring(false);
+          if (result.ok) { setRestore(null); reload(); trash.reload(); } else setRestoreError(result.error ?? "Could not restore deal.");
+        }} />}
 
     </Page>
   );

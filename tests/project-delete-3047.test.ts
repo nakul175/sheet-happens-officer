@@ -25,13 +25,18 @@ it.each([editor, { id: "viewer", orgRole: "MEMBER" as const }])("rejects non-man
   await expect(deleteProject(actor, "p", "Keep history")).rejects.toMatchObject({ status: 403 });
   expect(m.transaction).not.toHaveBeenCalled();
 });
-it("rejects outsiders, mismatched name, deals and stale deletion", async () => {
+it("rejects outsiders, mismatched name, unsupported work items and stale deletion", async () => {
   await expect(deleteProject({ id: "outside", orgRole: "MEMBER" }, "p", "Keep history")).rejects.toMatchObject({ status: 404 });
   await expect(deleteProject(lead, "p", "wrong")).rejects.toMatchObject({ status: 400 });
-  m.project.findUnique.mockResolvedValue({ ...original, typeId: "wst_deal" });
+  m.project.findUnique.mockResolvedValue({ ...original, typeId: "wst_other" });
   await expect(deleteProject(admin, "p", "Keep history")).rejects.toMatchObject({ status: 400 });
   m.project.findUnique.mockResolvedValue(original); m.project.updateMany.mockResolvedValue({ count: 0 });
   await expect(deleteProject(lead, "p", "Keep history")).rejects.toMatchObject({ status: 409 });
+});
+it("moves a deal to the same recoverable Trash workflow", async () => {
+  m.project.findUnique.mockResolvedValue({ ...original, typeId: "wst_deal" });
+  await expect(deleteProject(lead, "p", "Keep history")).resolves.toEqual({ deleted: true });
+  expect(m.project.updateMany.mock.calls[0][0].data).toMatchObject({ deletedAt: expect.any(Date), archivedAt: expect.any(Date) });
 });
 it.each([null, new Date("2026-09-01")])("restores previous archive state %s without changing linked rows", async archived => {
   m.project.findUnique.mockResolvedValue({ ...original, deletedAt: new Date(), archivedAt: new Date(), deletedPreviousArchivedAt: archived });

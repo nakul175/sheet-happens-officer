@@ -11,7 +11,7 @@ it("names the project and retained work; cancellation sends no delete request", 
   const fetcher = vi.spyOn(globalThis, "fetch");
   const close = vi.fn();
   await act(async () => { root = createRoot(document.getElementById("root")!); root.render(h(DeleteProject, { id: "owned", name: "Annual plan", onClose: close })); });
-  expect(document.body.textContent).toContain("Delete “Annual plan”?");
+  expect(document.body.textContent).toContain("Delete project “Annual plan”?");
   expect(document.body.textContent).toContain("All tasks, subtasks, notes, links, memberships and history are retained.");
   expect([...document.querySelectorAll("button")].find(b => b.textContent === "Move to Trash")!.disabled).toBe(true);
   const cancel = [...document.querySelectorAll("button")].find(b => /cancel/i.test(b.textContent ?? ""))!;
