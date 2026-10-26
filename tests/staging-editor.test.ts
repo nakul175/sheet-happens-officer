@@ -512,7 +512,10 @@ describe("staging editor (APL-2682)", () => {
     const editor = new Client();
     const signin = await editor.post("/api/auth/signin", { email: EDITOR_EMAIL, password: PASSWORD });
     expect(signin.status, JSON.stringify(signin.json)).toBe(200);
-    const created = await editor.post(`/api/projects/${project.id}/tasks`, { title: "QA edit" });
+    const created = await editor.post(`/api/projects/${project.id}/tasks`, {
+      title: "QA edit",
+      dueDate: "2099-12-31",
+    });
     expect(created.status, JSON.stringify(created.json)).toBe(201);
     const taskId = created.json.task.id as string;
     const seen = (await editor.get(`/api/tasks/${taskId}`)).json.task.updatedAt as string;
