@@ -17,6 +17,8 @@ export default function DealsView() {
   const [old, setOld] = useState(false);
   const [view, setView] = useState<"board" | "list">("board");
   const [pipe, setPipe] = useState("");
+  const [opportunity, setOpportunity] = useState("");
+  const [stage, setStage] = useState("");
   const [dateFilter, setDateFilter] = useState<DealDateFilter>({ field: "submissionDeadline", start: "", end: "", undated: "include" });
   const invalidRange = !!(dateFilter.start && dateFilter.end && dateFilter.start > dateFilter.end);
   const me = useMe();
@@ -24,7 +26,9 @@ export default function DealsView() {
   const pipes = useGet<{ pipelines: { id: string; key: string; name: string; stages: BoardStage[] }[] }>("/api/deals/pipelines");
   const cur = pipes.data?.pipelines.find((p) => p.id === pipe) ?? pipes.data?.pipelines[0];
   const { data, loading, error, reload } = useGet<{ deals: D[] }>(cur ? `/api/deals?pipelineId=${cur.id}&lifecycle=${lifecycle}${mine ? "&mine=true" : ""}${old ? "&archived=true" : ""}` : null);
-  const deals = (data?.deals ?? []).filter(d => inLifecycle(d, lifecycle) && matchesDealDate(d, dateFilter));
+  const deals = (data?.deals ?? []).filter(d => inLifecycle(d, lifecycle) && matchesDealDate(d, dateFilter)
+    && (!opportunity || (opportunity === "unclassified" ? !d.opportunityType : d.opportunityType === opportunity))
+    && (!stage || d.stage?.id === stage));
   const groups = opportunityGroups(deals);
   const openCommercial = groups[0].deals.filter(d => ["NOT_STARTED", "ACTIVE", "PAUSED"].includes(d.stage?.category ?? ""));
   const openTotals = totals(openCommercial);
@@ -44,6 +48,12 @@ export default function DealsView() {
       </div>
       <fieldset className="card" style={{ marginBottom: 12 }}>
         <legend>Timeline filter · inclusive dates (IST)</legend>
+        <label>Opportunity type <select value={opportunity} onChange={e => setOpportunity(e.target.value)}>
+          <option value="">All types</option>{OPPORTUNITY_TYPES.map(type => <option key={type.value} value={type.value}>{type.label}</option>)}<option value="unclassified">Unclassified</option>
+        </select></label>{" "}
+        <label>Stage <select value={stage} onChange={e => setStage(e.target.value)}>
+          <option value="">All stages</option>{cur?.stages.map(stage => <option key={stage.id} value={stage.id}>{stage.name}</option>)}
+        </select></label>{" "}
         <label>Date basis <select value={dateFilter.field} onChange={e => setDateFilter({ ...dateFilter, field: e.target.value as DealDateFilter["field"] })}>
           {DEAL_DATE_FIELDS.map(field => <option key={field.value} value={field.value}>{field.label}</option>)}
         </select></label>{" "}
@@ -63,7 +73,7 @@ export default function DealsView() {
       </div>}
       <div className="tabs" style={{ marginBottom: 12 }}>
         <div className="seg" role="tablist" aria-label="Pipeline">
-          {pipes.data?.pipelines.map((p) => <button key={p.id} role="tab" aria-selected={cur?.id === p.id} onClick={() => setPipe(p.id)}>{p.name}</button>)}
+          {pipes.data?.pipelines.map((p) => <button key={p.id} role="tab" aria-selected={cur?.id === p.id} onClick={() => { setPipe(p.id); setStage(""); }}>{p.name}</button>)}
         </div>
         <span className="sp" />
         <div className="seg" role="group" aria-label="Layout">

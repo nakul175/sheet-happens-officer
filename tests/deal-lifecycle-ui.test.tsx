@@ -31,12 +31,12 @@ afterEach(() => { act(() => root?.unmount()); root = undefined; vi.restoreAllMoc
 
 it("SHO-3043 date filter updates board, list and totals together and clears", async () => {
   await mount(h(DealsView));
-  const select = document.querySelector<HTMLSelectElement>('select')!;
+  const select = [...document.querySelectorAll<HTMLSelectElement>('select')][2];
   await act(async () => {
     select.value = "expectedClose";
     select.dispatchEvent(new Event("change", { bubbles: true }));
   });
-  const undated = [...document.querySelectorAll<HTMLSelectElement>("select")][1];
+  const undated = [...document.querySelectorAll<HTMLSelectElement>("select")][3];
   await act(async () => {
     undated.value = "exclude";
     undated.dispatchEvent(new Event("change", { bubbles: true }));
@@ -49,6 +49,23 @@ it("SHO-3043 date filter updates board, list and totals together and clears", as
   await click("Clear timeline filter");
   expect(document.body.textContent).toContain("Open RFP/RFA + OTC: 2");
   expect(document.querySelectorAll("tbody tr")).toHaveLength(7);
+});
+
+it("SHO-3043 composes timeline with opportunity and stage", async () => {
+  await mount(h(DealsView));
+  const selects = [...document.querySelectorAll<HTMLSelectElement>("select")];
+  await act(async () => {
+    selects[0].value = "OTC";
+    selects[0].dispatchEvent(new Event("change", { bubbles: true }));
+    selects[1].value = "hold";
+    selects[1].dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  expect(document.querySelectorAll(".dcard")).toHaveLength(1);
+  expect(document.querySelector('a[href="/projects/sales-otc"]')).not.toBeNull();
+  expect(document.body.textContent).toContain("Open RFP/RFA + OTC: 1");
+  await click("Only my deals");
+  expect(calls.at(-1)).toContain("mine=true");
+  expect(document.querySelectorAll(".dcard")).toHaveLength(1);
 });
 
 it("Bid has distinct active decisions/outcomes, sales excludes delivery, delivery has its own column", () => {
