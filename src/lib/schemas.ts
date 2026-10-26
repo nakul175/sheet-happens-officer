@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { dealClassificationFields } from "@/lib/deal-classification";
 
 // Domain rule for self-signup: exactly these two, checked on the server (SHO-US-1.1 AC2, SHO-US-15.1).
 // A Super Admin adding a person is not bound by it (SHO-US-15.2, decision D1).
@@ -128,7 +129,7 @@ export const orgUpdate = z.object({
 });
 export const orgArchive = z.object({ archive: z.boolean() });
 export const currencyField = z.enum(["INR", "USD", "EUR"]);
-export const dealDetails = z.object({
+export const dealDetails = dealClassificationFields.extend({
   whyPursue: z.string().trim().min(1).max(1000).optional(),
   need: optText(2000), serviceLine: optText(200),
   value: z.number().positive().max(1e13).nullish(), currency: currencyField.nullish(),

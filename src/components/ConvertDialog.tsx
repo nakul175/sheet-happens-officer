@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { api, useGet } from "@/components/api";
+import { ATHENA_ENTITIES, OPPORTUNITY_TYPES } from "@/lib/deal-classification";
 import { Field, Modal } from "@/components/ui";
 
 export function ConvertDialog({ task, meId, onClose }: { task: { id: string; title: string; dueDate: string | null; assignee: { id: string } }; meId: string; onClose: () => void }) {
@@ -10,7 +11,7 @@ export function ConvertDialog({ task, meId, onClose }: { task: { id: string; tit
   const orgs = useGet<{ organisations: { id: string; name: string }[] }>("/api/orgs");
   const pipes = useGet<{ pipelines: { id: string; key: string; name: string }[] }>("/api/deals/pipelines");
   const team = useGet<{ people: { id: string; name: string }[] }>("/api/team");
-  const [v, setV] = useState({ organisationId: "", pipelineId: "", name: task.title, leaderId: task.assignee.id, whyPursue: "", dueDate: task.dueDate ?? "", submissionDeadline: "", value: "", currency: "INR", newOrg: "", newKind: "" });
+  const [v, setV] = useState({ organisationId: "", pipelineId: "", name: task.title, leaderId: task.assignee.id, whyPursue: "", dueDate: task.dueDate ?? "", submissionDeadline: "", value: "", currency: "INR", opportunityType: "", netFeeRevenueUsd: "", athenaEntity: "", probability: "", newOrg: "", newKind: "" });
   const [err, setErr] = useState<string | null>(null);
   const [dup, setDup] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -25,12 +26,18 @@ export function ConvertDialog({ task, meId, onClose }: { task: { id: string; tit
     else setErr(r.error ?? "Could not add the organisation.");
   }
   async function go(force = false) {
+    if (v.netFeeRevenueUsd && (!Number.isFinite(Number(v.netFeeRevenueUsd)) || Number(v.netFeeRevenueUsd) < 0 || Number(v.netFeeRevenueUsd) > 9999999999999.99 || !/^\d+(?:\.\d{1,2})?$/.test(v.netFeeRevenueUsd))) { setErr("Net Fee Revenue must be a nonnegative USD amount with at most two decimal places."); return; }
+    if (v.probability && (!Number.isInteger(Number(v.probability)) || Number(v.probability) < 0 || Number(v.probability) > 100)) { setErr("PWin must be a whole percentage from 0 to 100."); return; }
     setBusy(true); setErr(null);
     const body: Record<string, unknown> = {
       organisationId: v.organisationId || undefined, pipelineId: pipe?.id, name: v.name, leaderId: v.leaderId, whyPursue: v.whyPursue,
       dueDate: task.dueDate ? undefined : v.dueDate || undefined, force,
     };
     if (pipe?.key === "DEAL_BID") body.submissionDeadline = v.submissionDeadline || undefined;
+    body.opportunityType = v.opportunityType || null;
+    body.netFeeRevenueUsd = v.netFeeRevenueUsd === "" ? null : Number(v.netFeeRevenueUsd);
+    body.athenaEntity = v.athenaEntity || null;
+    body.probability = v.probability === "" ? null : Number(v.probability);
     if (v.value) { body.value = Number(v.value); body.currency = v.currency; }
     const r = await api("POST", `/api/tasks/${task.id}/convert`, body);
     setBusy(false);
@@ -52,6 +59,10 @@ export function ConvertDialog({ task, meId, onClose }: { task: { id: string; tit
       </div>
       <Field label="Pipeline">{(id) => <select id={id} className="in" value={pipe?.id ?? ""} onChange={set("pipelineId")}>{pipes.data?.pipelines.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select>}</Field>
       <Field label="Deal name">{(id) => <input id={id} className="in" value={v.name} onChange={set("name")} />}</Field>
+      <Field label="Opportunity type">{(id) => <select id={id} className="in" value={v.opportunityType} onChange={set("opportunityType")}><option value="">Unclassified</option>{OPPORTUNITY_TYPES.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}</select>}</Field>
+      <Field label="Net Fee Revenue (USD)">{(id) => <input id={id} className="in" type="number" min="0" max="9999999999999.99" step="0.01" value={v.netFeeRevenueUsd} onChange={set("netFeeRevenueUsd")} />}</Field>
+      <Field label="PWin (%)">{(id) => <input id={id} className="in" type="number" min="0" max="100" step="1" value={v.probability} onChange={set("probability")} />}</Field>
+      <Field label="Athena Entity">{(id) => <select id={id} className="in" value={v.athenaEntity} onChange={set("athenaEntity")}><option value="">Not specified</option>{ATHENA_ENTITIES.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}</select>}</Field>
       <Field label="Leader">{(id) => <select id={id} className="in" value={v.leaderId} onChange={set("leaderId")}>{team.data?.people.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select>}</Field>
       <Field label="Why are we pursuing this?">{(id) => <input id={id} className="in" value={v.whyPursue} onChange={set("whyPursue")} />}</Field>
       {!task.dueDate && <Field label="Due date (becomes the next step)">{(id) => <input id={id} className="in" type="date" value={v.dueDate} onChange={set("dueDate")} />}</Field>}

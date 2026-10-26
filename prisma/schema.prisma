@@ -403,6 +403,23 @@ enum Currency {
   EUR
 }
 
+enum OpportunityType {
+  RFP_RFA
+  EOI
+  OTC
+  CV_LTA
+}
+
+enum AthenaEntity {
+  ATHENA_INDIA
+  APLYD_INDIA
+  ATHENA_USA
+  ATHENA_KENYA
+  ATHENA_UK
+  ATHENA_BANGLADESH
+  TOLADATA
+}
+
 enum PartyRole {
   BUYER
   FUNDER
@@ -471,6 +488,9 @@ model DealDetails {
   value              Decimal?  @db.Decimal(16, 2)
   currency           Currency?
   probability        Int?
+  opportunityType    OpportunityType?
+  athenaEntity       AthenaEntity?
+  netFeeRevenueUsd   Decimal?  @db.Decimal(15, 2)
   expectedClose      DateTime? @db.Date
   introducedBy       String?
   submissionDeadline DateTime? @db.Date
