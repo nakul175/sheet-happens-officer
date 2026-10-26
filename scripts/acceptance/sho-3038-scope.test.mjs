@@ -15,6 +15,7 @@ const allowed = new Set([
   "tests/project-verticals-3048.test.ts",
   "tests/project-verticals-ui-3048.test.tsx",
   "tests/project-verticals-db-3048.test.ts",
+  "tests/failed-flag-views.test.tsx",
   "vitest.sho-3048.config.mts",
   "prisma/migrations/20261026100000_recoverable_project_delete/migration.sql",
   "src/app/(app)/projects/ProjectsView.tsx",

@@ -96,6 +96,7 @@ function okBody(url: string, empty: boolean) {
       },
     };
   }
+  if (url === "/api/verticals") return { verticals: [], suggestions: ["Growth", "Marketing", "Founder's Office"] };
   throw new Error(`unexpected ${url}`);
 }
 
