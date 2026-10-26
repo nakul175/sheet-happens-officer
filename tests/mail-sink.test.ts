@@ -32,7 +32,7 @@ const PASSWORD = "ZzTemp9only";
 const ZZ_TO = "zz-test-ac1@example.com";
 const OTHER_TO = "not-a-zz-recipient@example.com";
 const STAGING = "https://staging.sheethappensofficer.com";
-const ENV_KEYS = ["MAIL_SINK", "MAIL_SINK_TOKEN", "EMAIL_OUTBOX_DIR", "APP_URL", "RESEND_API_KEY", "NODE_ENV", "BASE_URL", "EMAIL_FROM", "STAGING_USER", "STAGING_PASS"] as const;
+const ENV_KEYS = ["MAIL_SINK", "MAIL_SINK_TOKEN", "EMAIL_OUTBOX_DIR", "APP_URL", "RESEND_API_KEY", "NODE_ENV", "BASE_URL", "EMAIL_FROM", "STAGING_USER", "STAGING_PASS", "SHO_DEPLOY_STAGE", "SHO_SLOT"] as const;
 
 let restoreEnv: () => void;
 let outbox: string;
@@ -197,6 +197,21 @@ describe("AC1 staging mail is captured", () => {
     expect(isZzTestAddress("nakul17+zz-2681-ac1@example.com")).toBe(true);
     expect(isZzTestAddress(OTHER_TO)).toBe(false);
     expect(isZzTestAddress("buzztest@example.com")).toBe(false);
+  });
+
+  it("accepts exact slot9 loopback only with both staging markers", async () => {
+    arm({ APP_URL: "http://127.0.0.1:3109", SHO_DEPLOY_STAGE: "staging", SHO_SLOT: "9" });
+    await expect(sendMail(verifyMail(ZZ_TO, "slot9-token"))).resolves.toBeUndefined();
+
+    for (const env of [
+      { APP_URL: "http://127.0.0.1:3109", SHO_DEPLOY_STAGE: "staging", SHO_SLOT: undefined },
+      { APP_URL: "http://127.0.0.1:3109", SHO_DEPLOY_STAGE: undefined, SHO_SLOT: "9" },
+      { APP_URL: "http://127.0.0.1:3110", SHO_DEPLOY_STAGE: "staging", SHO_SLOT: "9" },
+      { APP_URL: "http://localhost:3109", SHO_DEPLOY_STAGE: "staging", SHO_SLOT: "9" },
+    ]) {
+      arm(env);
+      await expect(sendMail(verifyMail(ZZ_TO, "refused"))).rejects.toThrow(/not a staging host/);
+    }
   });
 });
 
