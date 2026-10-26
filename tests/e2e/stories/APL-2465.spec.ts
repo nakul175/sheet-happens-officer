@@ -3,19 +3,19 @@
 // athenainfonomics.com self-signup belongs to SHO-E23 and is not re-tested here.
 import type { Page } from "@playwright/test";
 import { test, login } from "../support";
-import { PASS, passwordOk, alias, zz, gate, signUp, signInAs, mailToken, nextPass, personByEmail, deactivate, expect, BASE_URL, waitForSinkMail } from "./qa";
+import { PASS, alias, zz, gate, signUp, signInAs, mailToken, nextPass, personByEmail, deactivate, expect, BASE_URL, waitForSinkMail, requireQaPass } from "./qa";
 
 const DOMAIN = "Use your @aplyd.com or @athenainfonomics.com email address.";
 const alertOf = (p: Page) => p.locator('[role="alert"]:not(#__next-route-announcer__)');
+requireQaPass();
 
 test.beforeAll(async ({ request }) => {
-  if (!PASS) throw new Error("Set SHO_QA_PASS (the shared password for the nakul17+ accounts).");
-  if (!passwordOk(PASS)) throw new Error("SHO_QA_PASS must be at least 8 characters with a letter and a number.");
-  login("ADMIN");
+  login("ADMIN"); // no Super Admin login is a failure, not a skip: only SHO_QA_PASS gates the run
   await gate(request);
 });
 
-test("AC1: an @aplyd.com sign-up creates an unverified account and sends a verification email; other domains are refused", async ({ anon, admin, later }) => {
+// qa:TC missing
+test("AC1: an @aplyd.com sign-up creates an unverified account and sends a verification email; other domains are refused qa:TC missing", { annotation: { type: "qa:TC", description: "qa:TC missing" } }, async ({ anon, admin, later }) => {
   const email = alias("2465", "ac1", "aplyd.com");
   const signed = await signUp(anon.request, zz("ac1"), email);
   expect(signed.status, signed.body).toBe(201);
@@ -39,7 +39,8 @@ test("AC1: an @aplyd.com sign-up creates an unverified account and sends a verif
   expect((await personByEmail(admin.api, alias("2465", "ac1-page")))).toBeNull();
 });
 
-test("AC2: opening the verification link verifies the account and it can sign in", async ({ anon, admin, browser, later }) => {
+// qa:TC missing
+test("AC2: opening the verification link verifies the account and it can sign in qa:TC missing", { annotation: { type: "qa:TC", description: "qa:TC missing" } }, async ({ anon, admin, browser, later }) => {
   const email = alias("2465", "ac2", "aplyd.com");
   const signed = await signUp(anon.request, zz("ac2"), email);
   expect(signed.status, signed.body).toBe(201);
@@ -57,7 +58,8 @@ test("AC2: opening the verification link verifies the account and it can sign in
   await expect(who.page.getByRole("heading", { name: "My tasks" })).toBeVisible();
 });
 
-test("AC3: the right password reaches Home; a wrong password shows an error and does not sign in", async ({ anon, admin, browser, later }) => {
+// qa:TC missing
+test("AC3: the right password reaches Home; a wrong password shows an error and does not sign in qa:TC missing", { annotation: { type: "qa:TC", description: "qa:TC missing" } }, async ({ anon, admin, browser, later }) => {
   const email = alias("2465", "ac3", "aplyd.com");
   expect((await signUp(anon.request, zz("ac3"), email)).status).toBe(201);
   const token = mailToken(email, "Verify");
@@ -91,7 +93,8 @@ test("AC3: the right password reaches Home; a wrong password shows an error and 
   expect(me.status()).toBe(401);
 });
 
-test("AC4: a reset link sets a new password and the old one stops working", async ({ anon, admin, later }) => {
+// qa:TC missing
+test("AC4: a reset link sets a new password and the old one stops working qa:TC missing", { annotation: { type: "qa:TC", description: "qa:TC missing" } }, async ({ anon, admin, later }) => {
   const email = alias("2465", "ac4", "aplyd.com");
   expect((await signUp(anon.request, zz("ac4"), email)).status).toBe(201);
   const verify = mailToken(email, "Verify");
@@ -122,7 +125,8 @@ test("AC4: a reset link sets a new password and the old one stops working", asyn
   expect(neu.status()).toBe(200);
 });
 
-test("AC5: sign-out ends the session, and the old email-only sign-in no longer grants access", async ({ anon, admin, browser, later }) => {
+// qa:TC missing
+test("AC5: sign-out ends the session, and the old email-only sign-in no longer grants access qa:TC missing", { annotation: { type: "qa:TC", description: "qa:TC missing" } }, async ({ anon, admin, browser, later }) => {
   const email = alias("2465", "ac5", "aplyd.com");
   expect((await signUp(anon.request, zz("ac5"), email)).status).toBe(201);
   const token = mailToken(email, "Verify");
@@ -142,7 +146,8 @@ test("AC5: sign-out ends the session, and the old email-only sign-in no longer g
   expect((await anon.request.get("/api/auth/me")).status()).toBe(401);
 });
 
-test("AC6: editing the profile and ending other sessions both take effect", async ({ anon, admin, browser, later }) => {
+// qa:TC missing
+test("AC6: editing the profile and ending other sessions both take effect qa:TC missing", { annotation: { type: "qa:TC", description: "qa:TC missing" } }, async ({ anon, admin, browser, later }) => {
   const email = alias("2465", "ac6", "aplyd.com");
   expect((await signUp(anon.request, zz("ac6"), email)).status).toBe(201);
   const token = mailToken(email, "Verify");
@@ -170,7 +175,14 @@ test("AC6: editing the profile and ending other sessions both take effect", asyn
 
 const PRODUCTION_HOSTS = new Set(["sheethappensofficer.com", "www.sheethappensofficer.com", "app.sheethappensofficer.com"]);
 
-test("AC7: staging auth mail is in the test mail sink within 60 seconds and each link completes", async ({ anon, admin, later }) => {
+function mailLinkHost(text: string | null | undefined) {
+  const raw = text?.match(/https?:\/\/[^\s"'<>]+/)?.[0] ?? "http://invalid";
+  const url = new URL(raw);
+  return { host: url.host.toLowerCase(), hostname: url.hostname.toLowerCase() };
+}
+
+// qa:TC missing
+test("AC7: staging auth mail is in the test mail sink within 60 seconds and each link completes qa:TC missing", { annotation: { type: "qa:TC", description: "qa:TC missing" } }, async ({ anon, admin, later }) => {
   test.setTimeout(240_000);
   const email = alias("2465", "ac7", "aplyd.com");
   expect(email.startsWith("nakul17+"), "the address is a nakul17+ alias").toBe(true);
@@ -182,9 +194,9 @@ test("AC7: staging auth mail is in the test mail sink within 60 seconds and each
   const second = await waitForSinkMail(email, "Verify", first.token);
   expect(second.token).not.toBe(first.token);
   for (const mail of [first, second]) {
-    const host = mail.text?.match(/https?:\/\/([^/\s]+)/)?.[1]?.toLowerCase() ?? "";
-    expect(PRODUCTION_HOSTS.has(host), "the link stays on staging").toBe(false);
-    expect(host).toBe(new URL(BASE_URL).hostname);
+    const link = mailLinkHost(mail.text);
+    expect(PRODUCTION_HOSTS.has(link.hostname), "the link stays on staging").toBe(false);
+    expect(link.host).toBe(new URL(BASE_URL).host);
   }
   await anon.goto(`/verify?token=${second.token}`);
   await expect(anon.getByRole("heading", { name: "Email verified" })).toBeVisible();
@@ -195,9 +207,9 @@ test("AC7: staging auth mail is in the test mail sink within 60 seconds and each
   expect((await anon.request.post("/api/auth/forgot-password", { data: { email } })).ok()).toBe(true);
   const reset = await waitForSinkMail(email, "Reset");
   expect(reset.to?.toLowerCase()).toBe(email.toLowerCase());
-  const resetHost = reset.text?.match(/https?:\/\/([^/\s]+)/)?.[1]?.toLowerCase() ?? "";
-  expect(PRODUCTION_HOSTS.has(resetHost)).toBe(false);
-  expect(resetHost).toBe(new URL(BASE_URL).hostname);
+  const resetLink = mailLinkHost(reset.text);
+  expect(PRODUCTION_HOSTS.has(resetLink.hostname)).toBe(false);
+  expect(resetLink.host).toBe(new URL(BASE_URL).host);
   const updated = nextPass(PASS);
   await anon.goto(`/reset?token=${reset.token}`);
   await anon.getByLabel("New password", { exact: true }).fill(updated);
