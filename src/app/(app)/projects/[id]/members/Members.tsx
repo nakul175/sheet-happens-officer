@@ -1,5 +1,6 @@
 "use client";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { use, useState } from "react";
 import { ROLE, api, useGet } from "@/components/api";
 import { Confirm, Field, LoadFailed, Skeleton } from "@/components/ui";
@@ -16,7 +17,7 @@ export default function Members({ params }: { params: Promise<{ id: string }> })
   const [q, setQ] = useState("");
   const [addRole, setAddRole] = useState("EDITOR");
   const [err, setErr] = useState<string | null>(null);
-  const [dlg, setDlg] = useState<null | { kind: "remove" | "viewer" | "leader" | "archive"; m?: M }>(null);
+  const [dlg, setDlg] = useState<null | { kind: "remove" | "viewer" | "leader" | "archive" | "delete"; m?: M }>(null);
   const p = pr.data?.project;
   if (!p && pr.failed) return <Page title="Members"><LoadFailed onRetry={pr.reload} /></Page>;
   if (pr.error && !p) return <Page title="This project isn't available"><div className="card empty">It may not exist, or you are not a member.<br /><Link href="/projects">Back to Projects</Link></div></Page>;
@@ -86,6 +87,11 @@ export default function Members({ params }: { params: Promise<{ id: string }> })
           <button className="btn ghost sm" style={{ color: "var(--danger)" }} onClick={() => setDlg({ kind: "archive" })}>{p.archived ? "Unarchive…" : "Archive…"}</button>
         </div>
       )}
+      {p?.role === "LEADER" && <div className="box dng">
+        <b>Delete project</b>
+        <p className="hint">Move this project to Trash. Tasks, notes, people and history are kept. A Leader or Admin can restore it from Projects → Trash. Nothing is permanently deleted.</p>
+        <button className="btn ghost sm" onClick={() => setDlg({ kind: "delete" })}>Delete project…</button>
+      </div>}
 
       {dlg && (dlg.kind === "remove" || dlg.kind === "viewer") && dlg.m && (
         <Handover title={dlg.kind === "remove" ? `Remove ${dlg.m.name}?` : `Make ${dlg.m.name} a Viewer?`} yes={dlg.kind === "remove" ? "Remove" : "Make Viewer"} danger={dlg.kind === "remove"}
@@ -96,8 +102,21 @@ export default function Members({ params }: { params: Promise<{ id: string }> })
       )}
       {dlg?.kind === "leader" && p && <ChangeLeader p={p} id={id} onClose={() => setDlg(null)} onDone={() => { setDlg(null); pr.reload(); }} />}
       {dlg?.kind === "archive" && p && <Archive id={id} archived={p.archived} onClose={() => setDlg(null)} onDone={() => { setDlg(null); pr.reload(); }} />}
+      {dlg?.kind === "delete" && p && <DeleteProject id={id} name={p.name} onClose={() => setDlg(null)} />}
     </Page>
   );
+}
+
+export function DeleteProject({ id, name, onClose }: { id: string; name: string; onClose: () => void }) {
+  const router = useRouter();
+  const [confirmationName, setName] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  return <Confirm title={`Delete “${name}”?`} yes="Move to Trash" danger busy={busy || confirmationName !== name} error={error} onNo={onClose}
+    body="This project and its work disappear from active views. All tasks, subtasks, notes, links, memberships and history are retained. Restore from Projects → Trash; there is no automatic permanent deletion. Members are notified."
+    onYes={async () => { setBusy(true); const result = await api("POST", `/api/projects/${id}/delete`, { confirmationName }); setBusy(false); if (result.ok) router.push("/projects"); else setError(result.error ?? "Could not delete project."); }}>
+    <Field label="Type the exact project name">{inputId => <input id={inputId} className="in" value={confirmationName} onChange={e => setName(e.target.value)} />}</Field>
+  </Confirm>;
 }
 
 function Handover({ title, yes, danger, who, options, defaultTo, onClose, onGo, onDone }: {

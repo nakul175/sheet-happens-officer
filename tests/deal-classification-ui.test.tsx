@@ -49,6 +49,21 @@ beforeEach(() => {
 });
 afterEach(() => { act(() => root?.unmount()); vi.restoreAllMocks(); });
 
+it("rechecks a typed buyer absent from the initial Account list before duplicate confirmation", async () => {
+  const initialFetch = globalThis.fetch;
+  globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (String(input).startsWith("/api/orgs?q=")) return new Response(JSON.stringify({ organisations: [{ id: "late-buyer", name: "Delayed buyer" }] }), { headers: { "content-type": "application/json" } });
+    return initialFetch(input, init);
+  });
+  await mount(h(NewDeal));
+  await fill("Deal name", "Buyer race regression");
+  await fill("Client / Buyer", "Delayed buyer");
+  await act(async () => { document.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })); });
+  expect(writes.find(write => write.path === "/api/deals")?.body.organisationId).toBe("late-buyer");
+  expect(writes.some(write => write.path === "/api/orgs")).toBe(false);
+  expect(document.body.textContent).not.toContain("No existing organisation exactly matches");
+});
+
 it("reads canonical type, USD NFR zero, entity and existing PWin, without conflating unknown with zero", async () => {
   await panel();
   expect(field("Opportunity type").value).toBe("EOI");

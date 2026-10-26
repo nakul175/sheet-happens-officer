@@ -150,6 +150,8 @@ model Project {
   name           String
   description    String?
   archivedAt     DateTime?
+  deletedAt      DateTime?
+  deletedPreviousArchivedAt DateTime?
   // CRM (SHO-E10). The column default keeps the previous build working: a project created
   // by the old code is a plain Project. A null pipeline/stage means "Active" (type Project).
   typeId         String          @default("wst_project")
