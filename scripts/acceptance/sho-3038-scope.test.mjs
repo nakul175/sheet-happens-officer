@@ -18,12 +18,13 @@ const allowed = new Set([
   "tests/workspace-task-person-ui.test.tsx",
   "tests/usage-month.test.tsx",
   "tests/usage-month-figure-2951.test.ts",
+  "tests/no-proc-environ-2917.test.ts",
   "vitest.sho-3038.config.mts",
   "scripts/acceptance/sho-3038-scope.test.mjs",
   ".github/workflows/scoped4-validation.yml",
 ]);
 
-test("SHO-3038 release changes only collaborator-assignment surfaces", () => {
+test("sequential release changes only explicitly reviewed surfaces", () => {
   const changed = execFileSync("git", ["diff", "--name-only", production, "--"], { encoding: "utf8" })
     .trim().split("\n").filter(Boolean);
   assert.ok(changed.length);
