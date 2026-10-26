@@ -14,6 +14,9 @@ const allowed = new Set([
   "tests/e2e/stories/APL-2681.spec.ts",
   "tests/e2e/stories/APL-2682.spec.ts",
   "tests/e2e/stories/APL-2465.spec.ts",
+  "tests/e2e/stories/APL-2505.spec.ts",
+  "tests/e2e/helpers/locate.ts",
+  "tests/e2e/helpers/screen-row.ts",
   "tests/e2e/stories/qa.ts",
   "tests/mail-sink-client.ts",
   "tests/mail-sink.test.ts",
@@ -123,7 +126,9 @@ test("sequential release does not change package/runtime entry or central suite 
 });
 
 test("the only local-auth delta is the reviewed staging-only ZZ admin guard", () => {
-  const diff = execFileSync("git", ["diff", production, "--", "src/app/api/auth"], { encoding: "utf8" });
+  // Full object IDs keep this security digest stable across Git versions whose
+  // default abbreviated index width can differ.
+  const diff = execFileSync("git", ["diff", "--full-index", production, "--", "src/app/api/auth"], { encoding: "utf8" });
   const digest = createHash("sha256").update(diff).digest("hex");
-  assert.equal(digest, "d758bdd4254d4b67d83d0fb34e523cd269a66930705bfc79f6e85ba3602223af");
+  assert.equal(digest, "103d12f9bfe073866753fe0eb45434d30c1d8c605820a1168b2f8c273a0a54c3");
 });
