@@ -10,7 +10,8 @@ export const GET = handle(async (req: Request) => {
   if (lifecycle !== "sales" && lifecycle !== "delivery" && lifecycle !== "all") {
     throw new ApiError(400, "Lifecycle must be sales, delivery or all.");
   }
-  return Response.json({ deals: await listDeals(me, { archived: sp.get("archived") === "true", deleted: sp.get("deleted") === "true", mine: sp.get("mine") === "true", pipelineId: sp.get("deleted") === "true" ? undefined : sp.get("pipelineId") ?? undefined, lifecycle }) });
+  const deleted = sp.get("deleted") === "true";
+  return Response.json({ deals: await listDeals(me, { archived: sp.get("archived") === "true", ...(deleted ? { deleted: true } : {}), mine: sp.get("mine") === "true", pipelineId: deleted ? undefined : sp.get("pipelineId") ?? undefined, lifecycle }) });
 });
 
 export const POST = handle(async (req: Request) => {
