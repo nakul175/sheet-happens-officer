@@ -12,6 +12,7 @@ const allowed = new Set([
   "src/components/TaskModal.tsx",
   "src/components/WorkspaceTaskPerson.tsx",
   "src/lib/project-task-membership.ts",
+  "src/lib/deals.ts",
   "src/lib/schemas.ts",
   "src/lib/tasks.ts",
   "tests/workspace-task-membership.test.ts",
