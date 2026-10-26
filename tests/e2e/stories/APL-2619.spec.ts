@@ -4,7 +4,7 @@
 import { test, login } from "../support";
 import {
   PASS, alias, zz, RUN, gate, signUp, signInAs, personByEmail, deactivate,
-  latestMail, mailedPassword, mailToken, expect, requireQaPass,
+  sinkText, sinkToken, expect, requireQaPass,
 } from "./qa";
 
 const DOMAIN = "Use your @aplyd.com or @athenainfonomics.com email address.";
@@ -22,7 +22,7 @@ test("AC1: self-signup allows @aplyd.com and @athenainfonomics.com, and refuses 
     const signed = await signUp(anon.request, zz(tag), email);
     expect(signed.status, signed.body).toBe(201);
     expect(signed.json.status).toBe("check_email");
-    expect(mailToken(email, "Verify"), email).toBeTruthy();
+    expect(await sinkToken(email, "Verify", 60_000), email).toBeTruthy();
     const person = await personByEmail(admin.api, email);
     expect(person?.status).toBe("UNVERIFIED");
     later(() => deactivate(admin.api, person!.id));
@@ -46,7 +46,7 @@ test("AC2: the Super Admin adds a person on any domain, active, with no verifica
   later(() => deactivate(admin.api, created.json.person.id as string));
   const person = await personByEmail(admin.api, email);
   expect(person?.status).toBe("ACTIVE");
-  expect(mailToken(email, "Verify"), "an added person does not get a verification link").toBeNull();
+  expect(await sinkToken(email, "Verify"), "an added person does not get a verification link").toBeNull();
 });
 
 // qa:TC missing
@@ -57,7 +57,7 @@ test("AC3: a person added by the Super Admin receives an email with their sign-i
   expect(created.status, text).toBe(201);
   expect(created.json.person.emailSent).toBe(true);
   later(() => deactivate(admin.api, created.json.person.id as string));
-  const mail = latestMail(email, "Your Sheet Happens Officer account");
+  const mail = await sinkText(email, "Your Sheet Happens Officer account", 60_000);
   expect(mail, "sign-in email in the local outbox").toBeTruthy();
   expect(mail!).toContain(`Username: ${email}`);
   expect(mail!).toContain("Password: ");
@@ -71,7 +71,7 @@ test("AC4: signing in with the emailed password shows a banner to set their own 
   const created = await admin.api.post("/api/team", { firstName: "ZZ-TEST", lastName: `ac4 ${RUN}`, email, role: "MEMBER" });
   expect(created.status, JSON.stringify(created.json)).toBe(201);
   later(() => deactivate(admin.api, created.json.person.id as string));
-  const pass = mailedPassword(email);
+  const pass = (await sinkText(email, "Your Sheet Happens Officer account", 60_000))?.match(/^Password: (.+)$/m)?.[1];
   expect(pass, "emailed password").toBeTruthy();
   const who = await signInAs(browser, email, pass!);
   later(() => who.ctx.close());

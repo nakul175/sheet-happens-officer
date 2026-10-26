@@ -3,7 +3,7 @@
 // athenainfonomics.com self-signup belongs to SHO-E23 and is not re-tested here.
 import type { Page } from "@playwright/test";
 import { test, login } from "../support";
-import { PASS, alias, zz, gate, signUp, signInAs, mailToken, nextPass, personByEmail, deactivate, expect, BASE_URL, waitForSinkMail, requireQaPass } from "./qa";
+import { PASS, alias, zz, gate, signUp, signInAs, sinkToken, nextPass, personByEmail, deactivate, expect, BASE_URL, waitForSinkMail, requireQaPass } from "./qa";
 
 const DOMAIN = "Use your @aplyd.com or @athenainfonomics.com email address.";
 const alertOf = (p: Page) => p.locator('[role="alert"]:not(#__next-route-announcer__)');
@@ -19,11 +19,11 @@ test("AC1: an @aplyd.com sign-up creates an unverified account and sends a verif
   const email = alias("2465", "ac1", "aplyd.com");
   const signed = await signUp(anon.request, zz("ac1"), email);
   expect(signed.status, signed.body).toBe(201);
-  expect(signed.json).toEqual({ status: "check_email" });
+  expect(signed.json).toMatchObject({ status: "check_email", emailSent: true });
   const person = await personByEmail(admin.api, email);
   expect(person?.status).toBe("UNVERIFIED");
   later(() => deactivate(admin.api, person!.id));
-  expect(mailToken(email, "Verify"), "verification email in the local outbox").toBeTruthy();
+  expect(await sinkToken(email, "Verify", 60_000), "verification email in the staging sink").toBeTruthy();
 
   for (const refused of [alias("2465", "ac1-gmail"), alias("2465", "ac1-look", "aplyd.co")]) {
     const r = await signUp(anon.request, zz("refused"), refused);
@@ -44,7 +44,7 @@ test("AC2: opening the verification link verifies the account and it can sign in
   const email = alias("2465", "ac2", "aplyd.com");
   const signed = await signUp(anon.request, zz("ac2"), email);
   expect(signed.status, signed.body).toBe(201);
-  const token = mailToken(email, "Verify");
+  const token = await sinkToken(email, "Verify", 60_000);
   expect(token, "verification email").toBeTruthy();
   await anon.goto(`/verify?token=${token}`);
   await expect(anon.getByRole("heading", { name: "Email verified" })).toBeVisible();
@@ -62,7 +62,7 @@ test("AC2: opening the verification link verifies the account and it can sign in
 test("AC3: the right password reaches Home; a wrong password shows an error and does not sign in qa:TC missing", { annotation: { type: "qa:TC", description: "qa:TC missing" } }, async ({ anon, admin, browser, later }) => {
   const email = alias("2465", "ac3", "aplyd.com");
   expect((await signUp(anon.request, zz("ac3"), email)).status).toBe(201);
-  const token = mailToken(email, "Verify");
+  const token = await sinkToken(email, "Verify", 60_000);
   expect(token).toBeTruthy();
   expect((await anon.request.post("/api/auth/verify", { data: { token } })).ok()).toBe(true);
   const person = await personByEmail(admin.api, email);
@@ -97,7 +97,7 @@ test("AC3: the right password reaches Home; a wrong password shows an error and 
 test("AC4: a reset link sets a new password and the old one stops working qa:TC missing", { annotation: { type: "qa:TC", description: "qa:TC missing" } }, async ({ anon, admin, later }) => {
   const email = alias("2465", "ac4", "aplyd.com");
   expect((await signUp(anon.request, zz("ac4"), email)).status).toBe(201);
-  const verify = mailToken(email, "Verify");
+  const verify = await sinkToken(email, "Verify", 60_000);
   expect(verify).toBeTruthy();
   expect((await anon.request.post("/api/auth/verify", { data: { token: verify } })).ok()).toBe(true);
   const person = await personByEmail(admin.api, email);
@@ -107,7 +107,7 @@ test("AC4: a reset link sets a new password and the old one stops working qa:TC 
   await anon.getByLabel("Work email").fill(email);
   await anon.getByRole("button", { name: "Send reset link" }).click();
   await expect(anon).toHaveURL(/\/check-reset/);
-  const token = mailToken(email, "Reset");
+  const token = await sinkToken(email, "Reset", 60_000);
   expect(token, "reset email").toBeTruthy();
   const updated = nextPass(PASS);
   await anon.goto(`/reset?token=${token}`);
@@ -129,7 +129,7 @@ test("AC4: a reset link sets a new password and the old one stops working qa:TC 
 test("AC5: sign-out ends the session, and the old email-only sign-in no longer grants access qa:TC missing", { annotation: { type: "qa:TC", description: "qa:TC missing" } }, async ({ anon, admin, browser, later }) => {
   const email = alias("2465", "ac5", "aplyd.com");
   expect((await signUp(anon.request, zz("ac5"), email)).status).toBe(201);
-  const token = mailToken(email, "Verify");
+  const token = await sinkToken(email, "Verify", 60_000);
   expect((await anon.request.post("/api/auth/verify", { data: { token } })).ok()).toBe(true);
   const person = await personByEmail(admin.api, email);
   later(() => deactivate(admin.api, person!.id));
@@ -150,7 +150,7 @@ test("AC5: sign-out ends the session, and the old email-only sign-in no longer g
 test("AC6: editing the profile and ending other sessions both take effect qa:TC missing", { annotation: { type: "qa:TC", description: "qa:TC missing" } }, async ({ anon, admin, browser, later }) => {
   const email = alias("2465", "ac6", "aplyd.com");
   expect((await signUp(anon.request, zz("ac6"), email)).status).toBe(201);
-  const token = mailToken(email, "Verify");
+  const token = await sinkToken(email, "Verify", 60_000);
   expect((await anon.request.post("/api/auth/verify", { data: { token } })).ok()).toBe(true);
   const person = await personByEmail(admin.api, email);
   later(() => deactivate(admin.api, person!.id));
