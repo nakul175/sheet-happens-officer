@@ -72,10 +72,14 @@ it("clears optional fields to null and preserves error inputs on server rejectio
   expect(field("Net Fee Revenue (USD)").value).toBe(""); expect(document.querySelector('[role="alert"]')?.textContent).toBe("Review this amount."); expect(changed).not.toHaveBeenCalled();
 });
 it("create captures same canonical fields, keeps blanks optional, and applies USD cents bounds", async () => {
-  await mount(h(NewDeal)); await fill("Opportunity type", "RFP_RFA"); await fill("Net Fee Revenue (USD)", "25.01"); await fill("Athena Entity", "APLYD_INDIA"); await fill("PWin (%)", "0");
+  await mount(h(NewDeal));
+  await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+  await fill("Client / Buyer", "Test buyer"); await fill("Opportunity type", "RFP_RFA"); await fill("Net Fee Revenue (USD)", "25.01"); await fill("Athena Entity", "APLYD_INDIA"); await fill("PWin (%)", "0");
   const amount = field("Net Fee Revenue (USD)") as HTMLInputElement;
   expect(amount.min).toBe("0"); expect(amount.step).toBe("0.01"); expect(amount.required).toBe(false);
-  await submit(); expect(writes[0].body).toMatchObject({ opportunityType: "RFP_RFA", netFeeRevenueUsd: 25.01, athenaEntity: "APLYD_INDIA", probability: 0 });
+  await submit();
+  const create = writes.find((write) => write.path === "/api/deals");
+  expect(create?.body).toMatchObject({ organisationId: "org", opportunityType: "RFP_RFA", netFeeRevenueUsd: 25.01, athenaEntity: "APLYD_INDIA", probability: 0 });
 });
 it("task conversion includes classification and rejects NFR over two decimals before request", async () => {
   await mount(h(ConvertDialog, { task: { id: "task", title: "Test", dueDate: "2026-12-01", assignee: { id: "me" } }, meId: "me", onClose: vi.fn() }));
