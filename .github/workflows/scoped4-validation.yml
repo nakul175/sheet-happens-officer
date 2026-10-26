@@ -90,6 +90,8 @@ jobs:
             sleep 1
           done
           exit 1
+      - name: SHO-2682 staging Editor safety and idempotency contracts
+        run: npx vitest run -c vitest.sho-2682.config.mts
       - name: All unit and integration tests present in this selective release
         run: npx vitest run -c vitest.scoped4-all.config.mts | tee validation-all-release.log
       - name: Accepted15 component, database and SQL regressions

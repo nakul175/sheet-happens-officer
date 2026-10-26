@@ -12,10 +12,13 @@ const allowed = new Set([
   "src/lib/email.ts",
   "src/lib/mail-sink.ts",
   "tests/e2e/stories/APL-2681.spec.ts",
+  "tests/e2e/stories/APL-2682.spec.ts",
   "tests/mail-sink-client.ts",
   "tests/mail-sink.test.ts",
   "tests/qa-account-provisioning.test.ts",
+  "tests/staging-editor.test.ts",
   "vitest.sho-2681.config.mts",
+  "vitest.sho-2682.config.mts",
   "vitest.sho-2703.config.mts",
   "docs/team-intake-workspace-assignment.md",
   "docs/team-intake-bid-stages.md",
@@ -101,6 +104,7 @@ const allowed = new Set([
   "vitest.sho-3041.config.mts",
   "vitest.sho-3043.config.mts",
   "scripts/acceptance/sho-3038-scope.test.mjs",
+  "scripts/staging-editor.ts",
   ".github/workflows/scoped4-validation.yml",
 ]);
 
