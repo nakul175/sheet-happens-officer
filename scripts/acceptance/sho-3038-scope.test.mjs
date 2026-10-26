@@ -4,6 +4,14 @@ import test from "node:test";
 
 const production = "ee59582dffcbd8cc3067e689b2bb73cf63781cb7";
 const allowed = new Set([
+  ".env.example",
+  "src/app/api/qa/mail/route.ts",
+  "src/lib/email.ts",
+  "src/lib/mail-sink.ts",
+  "tests/e2e/stories/APL-2681.spec.ts",
+  "tests/mail-sink-client.ts",
+  "tests/mail-sink.test.ts",
+  "vitest.sho-2681.config.mts",
   "docs/team-intake-workspace-assignment.md",
   "docs/team-intake-bid-stages.md",
   "docs/project-trash-3047.md",
