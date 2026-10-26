@@ -36,7 +36,7 @@ it("review UI labels and displays all three count categories distinctly", async 
   await act(async () => { root = createRoot(document.getElementById("root")!); root.render(h(ReviewView)); });
   const commercial = document.querySelector('[aria-label="Commercial pipeline by stage · RFP/RFA + OTC"]')!;
   const other = document.querySelector('[aria-label="Other opportunities by stage · EOI + CV/LTA"]')!;
-  const unknown = document.querySelector('[aria-label="Unclassified opportunities by stage"]')!;
+  const unknown = document.querySelector('[aria-label="Unclassified opportunities by stage · not included in commercial/other totals"]')!;
   expect(commercial.textContent).toContain("USD 100 · INR 200 · 1 without value");
   expect(other.textContent).toContain("Submitted"); expect(other.textContent).toContain("1 without value");
   expect(unknown.textContent).toContain("Lead1USD 100");
