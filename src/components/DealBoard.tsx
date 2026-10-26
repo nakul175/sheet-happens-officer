@@ -12,6 +12,7 @@ export type BoardDeal = {
   id: string; name: string; archived: boolean; pipeline: { id: string; key: string; name: string } | null; stage: { id: string; name: string; category: string; isRetired?: boolean } | null;
   organisation: { id: string; name: string } | null; leader: { id: string; name: string } | null; value: number | null; currency: string | null;
   opportunityType?: OpportunityType | null; lifecycle?: "sales" | "delivery";
+  expectedClose?: string | null; createdAt?: string | null; stageChangedAt?: string | null;
   submissionDeadline: string | null; nextStep: { title: string; dueDate: string | null } | null; needsNextStep: boolean; stalled: boolean;
 };
 export type BoardStage = Stage & { id: string; name: string; category: string };
