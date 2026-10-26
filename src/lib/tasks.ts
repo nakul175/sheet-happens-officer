@@ -130,6 +130,13 @@ export async function createTask(
 ) {
   const a = await projectAccess(user, projectId, { write: true });
   requireWrite(a);
+  // SHO-3037: every newly-created top-level project task needs an explicit date.
+  // Subtasks remain optional-date work, and existing undated tasks are not backfilled.
+  if (!input.parentId && !input.dueDate) throw new ApiError(400, "Add a due date.");
+  const dueDate = input.dueDate ? parseDueDate(input.dueDate) : null;
+  if (input.dueDate && (!Number.isFinite(dueDate!.getTime()) || formatDueDate(dueDate) !== input.dueDate)) {
+    throw new ApiError(400, "Enter a valid due date.");
+  }
   return db.$transaction(async (tx) => {
     let sectionId: string;
     if (input.parentId) {
@@ -172,7 +179,7 @@ export async function createTask(
         parentId: input.parentId ?? null,
         title: input.title,
         description: input.description ?? null,
-        dueDate: input.dueDate ? parseDueDate(input.dueDate) : null,
+        dueDate,
         priority: input.priority ?? "MEDIUM",
         assigneeId,
         approverId: input.approverId ?? null,
