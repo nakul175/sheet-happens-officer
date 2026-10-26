@@ -21,6 +21,7 @@ const allowed = new Set([
   "tests/project-delete-3047.test.ts",
   "tests/project-delete-db-3047.test.ts",
   "tests/project-delete-ui-3047.test.tsx",
+  "tests/viewport/return-to.story.test.ts",
   "vitest.sho-3047.config.mts",
   "prisma/schema.prisma",
   "prisma/migrations/20261024101000_deal_classification_revenue/migration.sql",

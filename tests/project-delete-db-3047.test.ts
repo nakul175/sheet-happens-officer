@@ -37,6 +37,7 @@ it("SHO-3047 real delete/restore preserves linked work, hides active views, and 
   } finally {
     const current = await db.project.findUniqueOrThrow({ where: { id: p.id } });
     if (current.deletedAt) expect((await owner.c.post(`/api/projects/${p.id}/restore`)).status).toBe(200);
-    if (!current.archivedAt) expect((await owner.c.post(`/api/projects/${p.id}/archive`)).status).toBe(200);
+    const restored = await db.project.findUniqueOrThrow({ where: { id: p.id } });
+    if (!restored.archivedAt) expect((await owner.c.post(`/api/projects/${p.id}/archive`)).status).toBe(200);
   }
 });
