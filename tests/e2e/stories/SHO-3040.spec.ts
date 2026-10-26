@@ -16,7 +16,7 @@ test("SHO-3040 > typed buyer is retained and explicitly creates one linked Accou
   await fillDeal(admin.page, buyer, deal);
 
   await admin.page.getByRole("button", { name: "Create deal", exact: true }).click();
-  await expect(admin.page.getByRole("alert")).toContainText(`No existing organisation exactly matches "${buyer}"`);
+  await expect(admin.page.locator(".err[role=alert]")).toContainText(`No existing organisation exactly matches "${buyer}"`);
   await expect(admin.page.getByLabel("Deal name")).toHaveValue(deal);
   await expect(admin.page.getByLabel("Client / Buyer")).toHaveValue(buyer);
 
