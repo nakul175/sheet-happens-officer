@@ -152,6 +152,10 @@ model Project {
   archivedAt     DateTime?
   deletedAt      DateTime?
   deletedPreviousArchivedAt DateTime?
+  isVertical     Boolean         @default(false)
+  verticalId     String?
+  vertical       Project?        @relation("ProjectVertical", fields: [verticalId], references: [id], onDelete: SetNull)
+  deliveryProjects Project[]      @relation("ProjectVertical")
   // CRM (SHO-E10). The column default keeps the previous build working: a project created
   // by the old code is a plain Project. A null pipeline/stage means "Active" (type Project).
   typeId         String          @default("wst_project")
@@ -176,6 +180,7 @@ model Project {
   @@index([workspaceId])
   @@index([typeId])
   @@index([stageId])
+  @@index([verticalId])
 }
 
 model ProjectMember {

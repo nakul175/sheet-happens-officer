@@ -2,7 +2,7 @@
 // SHO-US-6.4: Undo from the stored before-state, with a conflict warning and "Undo anyway".
 import { db } from "@/lib/db";
 import { ApiError, notFound } from "@/lib/http";
-import { WORKERS, activeMember, requireManage, requireWrite, type Actor, type Tx } from "@/lib/access";
+import { WORKERS, activeMember, isAdmin, requireManage, requireWrite, type Actor, type Tx } from "@/lib/access";
 import { formatDueDate } from "@/lib/dates";
 import { auditTx, logAction, notify } from "@/lib/notify";
 import { deleteTask, recordAccess, restoreTask } from "@/lib/tasks";
@@ -262,7 +262,9 @@ async function plan(row: any, user: Actor, projectId: string): Promise<Plan> {
     case "project.updated": {
       const p = await db.project.findUniqueOrThrow({ where: { id: projectId } });
       const keys = Object.keys(f);
-      return { conflicts: fieldConflicts(keys, b, f, { name: p.name, description: p.description }), subject: p.name, fields: keys.join(", "), apply: async (tx) => { await tx.project.update({ where: { id: projectId }, data: Object.fromEntries(keys.map((k) => [k, b[k]])) }); } };
+      if (p.isVertical && keys.includes("name") && !isAdmin(user)) throw new ApiError(403, "Only Admins rename verticals.");
+      if (p.isVertical && keys.includes("verticalId")) throw new ApiError(409, "A vertical board cannot belong to another vertical.");
+      return { conflicts: fieldConflicts(keys, b, f, { name: p.name, description: p.description, verticalId: p.verticalId }), subject: p.name, fields: keys.join(", "), apply: async (tx) => { await tx.project.update({ where: { id: projectId }, data: Object.fromEntries(keys.map((k) => [k, b[k]])) }); } };
     }
     case "project.archived": {
       const p = await db.project.findUniqueOrThrow({ where: { id: projectId } });

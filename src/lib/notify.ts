@@ -103,6 +103,7 @@ const AUDITED: Record<string, string> = {
   "project.unarchived": "PROJECT_UNARCHIVED",
   "project.deleted": "PROJECT_DELETED",
   "project.restored": "PROJECT_RESTORED",
+  "project.classified": "PROJECT_CLASSIFIED",
   "project.leader_changed": "PROJECT_LEADER_CHANGED",
   "member.added": "MEMBER_ADDED",
   "member.removed": "MEMBER_REMOVED",

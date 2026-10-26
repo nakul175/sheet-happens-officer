@@ -10,11 +10,42 @@ import { dealBlock } from "@/lib/deals";
 
 const DEFAULT_SECTIONS = ["To do", "In progress", "Done"];
 
+async function validateVertical(id: string, workspaceId: string) {
+  // project-lookup-ok: classification vocabulary is workspace-scoped; it does not grant board membership.
+  const vertical = await db.project.findFirst({ where: { id, workspaceId, typeId: WORKSTREAM_PROJECT, isVertical: true, archivedAt: null, deletedAt: null }, select: { id: true } });
+  if (!vertical) throw new ApiError(400, "Choose an active vertical in this workspace.");
+}
+
+export const VERTICAL_SUGGESTIONS = ["Growth", "Marketing", "Founder's Office"] as const;
+export async function listVerticals(user: Actor) {
+  const me = await db.user.findUniqueOrThrow({ where: { id: user.id }, select: { workspaceId: true } });
+  // project-lookup-ok: only vocabulary labels in the actor's workspace; board access still uses projectAccess.
+  const rows = await db.project.findMany({ where: { workspaceId: me.workspaceId, typeId: WORKSTREAM_PROJECT, isVertical: true, deletedAt: null }, orderBy: { name: "asc" }, select: { id: true, name: true, archivedAt: true } });
+  return rows.map(row => ({ id: row.id, name: row.name, retired: !!row.archivedAt }));
+}
+
+export async function classifyProject(user: Actor, projectId: string, isVertical: boolean) {
+  if (!isAdmin(user)) throw new ApiError(403, "Only Admins classify vertical boards.");
+  const a = await projectAccess(user, projectId, { write: true });
+  if (a.project.typeId !== WORKSTREAM_PROJECT) throw new ApiError(400, "Deals cannot become vertical boards.");
+  const me = await db.user.findUniqueOrThrow({ where: { id: user.id }, select: { workspaceId: true } });
+  if (a.project.workspaceId !== me.workspaceId) throw notFound("Project");
+  // project-lookup-ok: count references to the already-authorized workspace board to prevent dangling classifications.
+  if (!isVertical && await db.project.count({ where: { verticalId: projectId } })) throw new ApiError(409, "Reclassify linked delivery projects before changing this vertical board.");
+  await db.$transaction(async tx => {
+    await tx.project.update({ where: { id: projectId }, data: { isVertical, ...(isVertical ? { verticalId: null } : {}) } });
+    await logAction(tx, { actorId: user.id, projectId, targetType: "project", targetId: projectId, action: "project.classified", before: { isVertical: a.project.isVertical, verticalId: a.project.verticalId }, after: { isVertical, ...(isVertical ? { verticalId: null } : {}) } });
+  });
+}
+
 /** SHO-US-3.1. The Leader is required and must be active; a creator who names someone else becomes an Editor. */
-export async function createProject(user: Actor, input: { name: string; description?: string | null; leaderId: string; members?: { userId: string; role: "EDITOR" | "VIEWER" }[] }) {
+export async function createProject(user: Actor, input: { name: string; description?: string | null; leaderId: string; verticalId?: string | null; isVertical?: boolean; members?: { userId: string; role: "EDITOR" | "VIEWER" }[] }) {
+  if (input.isVertical && !isAdmin(user)) throw new ApiError(403, "Only Admins manage verticals.");
   const leader = await db.user.findUnique({ where: { id: input.leaderId } });
   if (!leader || !isActive(leader)) throw new ApiError(400, "Choose an active person as Leader.");
   const me = await db.user.findUniqueOrThrow({ where: { id: user.id } });
+  if (input.verticalId) await validateVertical(input.verticalId, me.workspaceId);
+  if (input.isVertical && input.verticalId) throw new ApiError(400, "A vertical board cannot belong to another vertical.");
   // SHO-US-14.17: the people added with the project must be active; the Leader and the creator already have a seat.
   const wanted = new Map<string, "EDITOR" | "VIEWER">();
   for (const m of input.members ?? []) if (m.userId !== leader.id && m.userId !== user.id) wanted.set(m.userId, m.role);
@@ -24,7 +55,7 @@ export async function createProject(user: Actor, input: { name: string; descript
   }
   return db.$transaction(async (tx) => {
     const project = await tx.project.create({
-      data: { workspaceId: me.workspaceId, name: input.name, description: input.description ?? null },
+      data: { workspaceId: me.workspaceId, name: input.name, description: input.description ?? null, ...(input.isVertical ? { isVertical: true } : {}), ...(input.verticalId ? { verticalId: input.verticalId } : {}) },
     });
     await tx.projectMember.create({ data: { projectId: project.id, userId: leader.id, role: "LEADER" } });
     if (leader.id !== user.id) await tx.projectMember.create({ data: { projectId: project.id, userId: user.id, role: "EDITOR" } });
@@ -55,6 +86,7 @@ export async function listProjects(user: Actor, archived: boolean, deleted = fal
     },
     orderBy: { createdAt: "asc" },
     include: {
+      vertical: { select: { id: true, name: true, archivedAt: true, deletedAt: true } },
       members: { where: { role: "LEADER" }, include: { user: { select: { id: true, name: true } } } },
       _count: { select: { tasks: { where: { deletedAt: null, completedAt: null, parentId: null } } } },
     },
@@ -65,6 +97,8 @@ export async function listProjects(user: Actor, archived: boolean, deleted = fal
     name: p.name,
     description: p.description,
     archived: !!p.archivedAt,
+    isVertical: p.isVertical,
+    vertical: p.vertical ? { id: p.vertical.id, name: p.vertical.name, retired: !!(p.vertical.archivedAt || p.vertical.deletedAt) } : null,
     deletedAt: p.deletedAt?.toISOString() ?? null,
     leader: p.members[0]?.user ?? null,
     openTasks: p._count.tasks,
@@ -91,6 +125,8 @@ export async function getProject(user: Actor, projectId: string) {
     name: a.project.name,
     description: a.project.description,
     archived: !!a.project.archivedAt,
+    isVertical: a.project.isVertical,
+    verticalId: a.project.verticalId,
     role: a.role,
     openTasks: open,
     sections: sections.map((s) => ({ id: s.id, name: s.name, position: s.position, isDone: s.isDone })),
@@ -104,12 +140,17 @@ export async function getProject(user: Actor, projectId: string) {
   };
 }
 
-export async function updateProject(user: Actor, projectId: string, input: { name?: string; description?: string | null }) {
+export async function updateProject(user: Actor, projectId: string, input: { name?: string; description?: string | null; verticalId?: string | null }) {
   const a = await projectAccess(user, projectId, { write: true });
   requireManage(a);
+  if (a.project.isVertical && input.name !== undefined && !isAdmin(user)) throw new ApiError(403, "Only Admins rename verticals.");
+  if (input.verticalId !== undefined) {
+    if (a.project.isVertical || a.project.typeId !== WORKSTREAM_PROJECT) throw new ApiError(400, "Only delivery projects can have a vertical.");
+    if (input.verticalId) await validateVertical(input.verticalId, a.project.workspaceId);
+  }
   await db.$transaction(async (tx) => {
     await tx.project.update({ where: { id: projectId }, data: input });
-    await logAction(tx, { actorId: user.id, projectId, targetType: "project", targetId: projectId, action: "project.updated", before: { name: a.project.name, description: a.project.description }, after: input });
+    await logAction(tx, { actorId: user.id, projectId, targetType: "project", targetId: projectId, action: "project.updated", before: { name: a.project.name, description: a.project.description, verticalId: a.project.verticalId }, after: input });
   });
 }
 
@@ -117,6 +158,7 @@ export async function updateProject(user: Actor, projectId: string, input: { nam
 export async function archiveProject(user: Actor, projectId: string) {
   const a = await projectAccess(user, projectId, { write: true });
   requireManage(a);
+  if (a.project.isVertical && !isAdmin(user)) throw new ApiError(403, "Only Admins retire verticals.");
   return db.$transaction(async (tx) => {
     const open = await tx.task.findMany({ where: { projectId, deletedAt: null, completedAt: null }, select: { assigneeId: true } });
     await tx.project.update({ where: { id: projectId }, data: { archivedAt: new Date() } });
@@ -129,6 +171,7 @@ export async function archiveProject(user: Actor, projectId: string) {
 export async function unarchiveProject(user: Actor, projectId: string) {
   const a = await projectAccess(user, projectId);
   requireManage(a);
+  if (a.project.isVertical && !isAdmin(user)) throw new ApiError(403, "Only Admins reactivate verticals.");
   if (!a.project.archivedAt) throw new ApiError(409, "This project is not archived.");
   await db.$transaction(async (tx) => {
     await tx.project.update({ where: { id: projectId }, data: { archivedAt: null } });
@@ -140,6 +183,7 @@ export async function unarchiveProject(user: Actor, projectId: string) {
 export async function deleteProject(user: Actor, projectId: string, confirmationName: string) {
   const a = await projectAccess(user, projectId);
   requireManage(a);
+  if (a.project.isVertical && !isAdmin(user)) throw new ApiError(403, "Only Admins delete verticals.");
   if (a.project.typeId !== WORKSTREAM_PROJECT) throw new ApiError(400, "Only projects can use project Trash.");
   if (confirmationName !== a.project.name) throw new ApiError(400, "Enter the exact project name to confirm deletion.");
   const now = new Date();
@@ -155,6 +199,7 @@ export async function deleteProject(user: Actor, projectId: string, confirmation
 export async function restoreProject(user: Actor, projectId: string) {
   const a = await projectAccess(user, projectId, { deleted: true });
   requireManage(a);
+  if (a.project.isVertical && !isAdmin(user)) throw new ApiError(403, "Only Admins restore verticals.");
   if (!a.project.deletedAt) throw new ApiError(409, "This project is not in Trash.");
   await db.$transaction(async tx => {
     const changed = await tx.project.updateMany({ where: { id: projectId, deletedAt: a.project.deletedAt }, data: { deletedAt: null, archivedAt: a.project.deletedPreviousArchivedAt, deletedPreviousArchivedAt: null } });
