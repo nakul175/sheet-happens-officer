@@ -1,4 +1,4 @@
-// SHO-2917 / SHO-3031. Test code must never read the complete process environment image.
+// SHO-2917 / SHO-3031 / SHO-3032. Test code must never read the complete process environment image.
 // Analyse only filesystem-read argument expressions; unrelated proc paths and route/title text
 // elsewhere in the same file must not create a file-level false positive.
 import { readdirSync, readFileSync, statSync } from "node:fs";
@@ -64,7 +64,7 @@ export function environReaders(files: { file: string; text: string }[]) {
   }).map(({ file }) => file);
 }
 
-describe("SHO-3031: proc-environ guard is expression-scoped", () => {
+describe("SHO-3031/SHO-3032: proc-environ guard is expression-scoped", () => {
   it("finds real direct and constructed reads", () => {
     for (const text of [
       `readFileSync("/proc/self/environ")`,
@@ -72,6 +72,9 @@ describe("SHO-3031: proc-environ guard is expression-scoped", () => {
       `readFileSync(path.join("/proc", "self", "environ"))`,
       `const dir="/proc/self/"; readFileSync(dir + "environ")`,
       `const root="/proc"; readFileSync(\`${"${root}"}/${"${process.pid}"}/environ\`)`,
+      `readFileSync("/pr" + "oc/self/environ")`,
+      `readFileSync("/proc/self/env" + "iron")`,
+      `const root="/pr"; const leaf="oc/self/env"; readFileSync(root + leaf + "iron")`,
     ]) expect(environReaders([{ file: "bad.ts", text }]), text).toEqual(["bad.ts"]);
   });
 
