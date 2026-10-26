@@ -6,10 +6,11 @@
 import { existsSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { test, expect, RUN, BASE_URL, login } from "../support";
-import { mailedPassword, waitForSinkMail, PASS, passwordOk } from "./qa";
+import { mailedPassword, waitForSinkMail, requireQaPass } from "./qa";
 
 const SLOW = { timeout: 90_000 };
 const email = (label: string) => `zz-test-${RUN}-${label}@example.invalid`;
+requireQaPass();
 
 /** On a local server, put a file where the outbox directory is so sendMail throws. Staging is left alone. */
 async function blockLocalOutbox(): Promise<() => void> {
@@ -28,8 +29,6 @@ async function blockLocalOutbox(): Promise<() => void> {
 
 test.describe("SHO-US-23.2 / APL-2621 qa:TC missing", () => {
   test.beforeAll(() => {
-    test.skip(!PASS, "Set SHO_QA_PASS (the shared password for the nakul17+ accounts).");
-    test.skip(!passwordOk(PASS), "SHO_QA_PASS must be at least 8 characters with a letter and a number.");
     login("ADMIN"); // no Super Admin login is a failure, not a skip: only SHO_QA_PASS gates the run
     login("MEMBER"); // the same for the Member login, so the member fixture never skips silently (D11)
   });

@@ -1,19 +1,17 @@
 // SHO-US-1.2 Verify email with a link (APL-2475). Acceptance criteria AC1 to AC4.
 // Verification links are read from the test mail sink. Accounts use nakul17+ aliases and are deactivated afterwards.
 import { test, expect, RUN, login } from "../support";
-import { PASS, passwordOk, alias, zz, signUp, personByEmail, deactivate, waitForSinkMail, matchingMails } from "./qa";
+import { PASS, alias, zz, signUp, personByEmail, deactivate, waitForSinkMail, matchingMails, requireQaPass } from "./qa";
 
 const ghost = `zz-test-${RUN}-nobody@aplyd.com`; // never has an account
+requireQaPass();
 
 function needPass() {
-  test.skip(!PASS, "Set SHO_QA_PASS (the shared password for the nakul17+ accounts).");
-  test.skip(!passwordOk(PASS), "SHO_QA_PASS must be at least 8 characters with a letter and a number.");
+  requireQaPass();
 }
 
 test.describe("SHO-US-1.2 / APL-2475 qa:TC missing", () => {
   test.beforeAll(() => {
-    test.skip(!PASS, "Set SHO_QA_PASS (the shared password for the nakul17+ accounts).");
-    test.skip(!passwordOk(PASS), "SHO_QA_PASS must be at least 8 characters with a letter and a number.");
     login("ADMIN"); // no Super Admin login is a failure, not a skip: only SHO_QA_PASS gates the run
   });
 

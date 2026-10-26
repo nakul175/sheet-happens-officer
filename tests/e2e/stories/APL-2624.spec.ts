@@ -3,12 +3,13 @@
 // New people are nakul17+ aliases and are deactivated afterwards.
 import { readFileSync } from "node:fs";
 import { test, expect, RUN } from "../support";
-import { alias, BASE_URL, sinkText } from "./qa";
+import { alias, BASE_URL, sinkText, requireQaPass } from "./qa";
 import { signInDetailsMail } from "../../../src/lib/email";
 
 const WALL = "Set your own password";
 const REPLACE = "The person must replace it with their own when they first sign in.";
 const REFUSED = "Choose a new password. It cannot be the one we emailed you.";
+requireQaPass();
 
 test.describe("SHO-US-23.5 / APL-2624", () => {
   test("AC1: after signing in with a Super-Admin-issued password, every screen but 'Set your own password' and sign-out is blocked", async ({ admin, browser, later }) => {

@@ -2,17 +2,17 @@
 // Reset links are read from the test mail sink. Accounts use nakul17+ aliases and are deactivated afterwards.
 import type { Page } from "@playwright/test";
 import { test, expect, RUN, login } from "../support";
-import { PASS, passwordOk, alias, zz, nextPass, signUp, personByEmail, deactivate, waitForSinkMail, matchingMails, signInAs } from "./qa";
+import { PASS, alias, zz, nextPass, signUp, personByEmail, deactivate, waitForSinkMail, matchingMails, signInAs, requireQaPass } from "./qa";
 
 const alertOf = (p: Page) => p.locator('[role="alert"]:not(#__next-route-announcer__)');
 const DOMAIN_MESSAGE = "Use your @aplyd.com or @athenainfonomics.com email address.";
 const PASSWORD_MESSAGE = "Use at least 8 characters, with at least one letter and one number.";
 const ghost = (tag: string) => `zz-test-${RUN}-${tag}@aplyd.com`; // no account, so no email is ever sent
 const token = "t".repeat(40); // long enough to pass the format check, never a real token
+requireQaPass();
 
 function needPass() {
-  test.skip(!PASS, "Set SHO_QA_PASS (the shared password for the nakul17+ accounts).");
-  test.skip(!passwordOk(PASS), "SHO_QA_PASS must be at least 8 characters with a letter and a number.");
+  requireQaPass();
 }
 
 async function verified(anon: { request: import("@playwright/test").APIRequestContext }, admin: { api: import("../support").Api }, later: (fn: () => Promise<unknown>) => void, tag: string) {
@@ -27,8 +27,6 @@ async function verified(anon: { request: import("@playwright/test").APIRequestCo
 
 test.describe("SHO-US-1.4 / APL-2477 qa:TC missing", () => {
   test.beforeAll(() => {
-    test.skip(!PASS, "Set SHO_QA_PASS (the shared password for the nakul17+ accounts).");
-    test.skip(!passwordOk(PASS), "SHO_QA_PASS must be at least 8 characters with a letter and a number.");
     login("ADMIN"); // no Super Admin login is a failure, not a skip: only SHO_QA_PASS gates the run
   });
 

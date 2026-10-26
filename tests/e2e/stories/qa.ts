@@ -16,6 +16,12 @@ export function passwordOk(pass: string) {
   return pass.length >= 8 && pass.length <= 128 && /[A-Za-z]/.test(pass) && /[0-9]/.test(pass);
 }
 
+/** Collection-time gate: missing or invalid QA credentials must fail, never silently skip. */
+export function requireQaPass() {
+  if (!PASS) throw new Error("Set SHO_QA_PASS (the shared password for the nakul17+ accounts).");
+  if (!passwordOk(PASS)) throw new Error("SHO_QA_PASS must be at least 8 characters with a letter and a number.");
+}
+
 /** A second password derived at runtime, so the file never contains a password literal. */
 export function nextPass(current: string) {
   let n = current.slice(1) + current.slice(0, 1);

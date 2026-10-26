@@ -3,17 +3,17 @@
 // Names use ZZ-TEST. The account is deactivated afterwards.
 import type { Page } from "@playwright/test";
 import { test, expect, RUN, login } from "../support";
-import { PASS, passwordOk, alias, zz, signUp, personByEmail, deactivate, waitForSinkMail } from "./qa";
+import { PASS, alias, zz, signUp, personByEmail, deactivate, waitForSinkMail, requireQaPass } from "./qa";
 
 const alertOf = (p: Page) => p.locator('[role="alert"]:not(#__next-route-announcer__)');
 const DOMAIN_MESSAGE = "Use your @aplyd.com or @athenainfonomics.com email address."; // 1.1 AC2 wording, widened by SHO-US-23.1
 const PASSWORD_MESSAGE = "Use at least 8 characters, with at least one letter and one number.";
 const okPw = `Zz${RUN}9x`; // throw-away value for an account that is never created
 const fresh = (tag: string) => `zz-test-${RUN}-${tag}@aplyd.com`;
+requireQaPass();
 
 function needPass() {
-  test.skip(!PASS, "Set SHO_QA_PASS (the shared password for the nakul17+ accounts).");
-  test.skip(!passwordOk(PASS), "SHO_QA_PASS must be at least 8 characters with a letter and a number.");
+  requireQaPass();
 }
 
 async function fillSignUp(page: Page, name: string, email: string, password: string) {
@@ -26,8 +26,6 @@ async function fillSignUp(page: Page, name: string, email: string, password: str
 
 test.describe("SHO-US-1.1 / APL-2474 qa:TC missing", () => {
   test.beforeAll(() => {
-    test.skip(!PASS, "Set SHO_QA_PASS (the shared password for the nakul17+ accounts).");
-    test.skip(!passwordOk(PASS), "SHO_QA_PASS must be at least 8 characters with a letter and a number.");
     login("ADMIN"); // no Super Admin login is a failure, not a skip: only SHO_QA_PASS gates the run
   });
 

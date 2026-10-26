@@ -1,20 +1,18 @@
 // SHO-US-1.3 Sign in with email and password (APL-2476). Acceptance criteria AC1 to AC5.
 import type { Page } from "@playwright/test";
 import { test, expect, RUN, login } from "../support";
-import { PASS, passwordOk, alias, zz, signUp, personByEmail, deactivate, waitForSinkMail } from "./qa";
+import { PASS, alias, zz, signUp, personByEmail, deactivate, waitForSinkMail, requireQaPass } from "./qa";
 
 const alertOf = (p: Page) => p.locator('[role="alert"]:not(#__next-route-announcer__)');
 const WRONG = "Email or password is incorrect.";
+requireQaPass();
 
 function needPass() {
-  test.skip(!PASS, "Set SHO_QA_PASS (the shared password for the nakul17+ accounts).");
-  test.skip(!passwordOk(PASS), "SHO_QA_PASS must be at least 8 characters with a letter and a number.");
+  requireQaPass();
 }
 
 test.describe("SHO-US-1.3 / APL-2476 qa:TC missing", () => {
   test.beforeAll(() => {
-    test.skip(!PASS, "Set SHO_QA_PASS (the shared password for the nakul17+ accounts).");
-    test.skip(!passwordOk(PASS), "SHO_QA_PASS must be at least 8 characters with a letter and a number.");
     login("ADMIN"); // no Super Admin login is a failure, not a skip: only SHO_QA_PASS gates the run
   });
 

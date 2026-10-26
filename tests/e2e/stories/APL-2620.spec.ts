@@ -2,17 +2,16 @@
 // Sign-up uses a nakul17+ alias. The verification link is read from the test mail sink, and the account is deactivated afterwards.
 import type { Page } from "@playwright/test";
 import { test, expect, RUN, login } from "../support";
-import { PASS, passwordOk, alias, zz, signUp, personByEmail, deactivate, waitForSinkMail } from "./qa";
+import { alias, zz, signUp, personByEmail, deactivate, waitForSinkMail, requireQaPass } from "./qa";
 
 const alertOf = (p: Page) => p.locator('[role="alert"]:not(#__next-route-announcer__)');
 const MESSAGE = "Use your @aplyd.com or @athenainfonomics.com email address.";
 const pw = `Zz${RUN}9x`;
 const refused = [`zz-test-${RUN}@mail.aplyd.com`, `zz-test-${RUN}@athenainfonomics.com.evil.com`, `zz-test-${RUN}@gmail.com`, `zz-test-${RUN}@aplyd.co`];
+requireQaPass();
 
 test.describe("SHO-US-23.1 / APL-2620 qa:TC missing", () => {
   test.beforeAll(() => {
-    test.skip(!PASS, "Set SHO_QA_PASS (the shared password for the nakul17+ accounts).");
-    test.skip(!passwordOk(PASS), "SHO_QA_PASS must be at least 8 characters with a letter and a number.");
     login("ADMIN"); // no Super Admin login is a failure, not a skip: only SHO_QA_PASS gates the run
   });
 
@@ -32,8 +31,6 @@ test.describe("SHO-US-23.1 / APL-2620 qa:TC missing", () => {
 
   // qa:TC missing
   test("AC1 (sign-up): an @athenainfonomics.com colleague signs up and gets the verification email qa:TC missing", { annotation: { type: "qa:TC", description: "qa:TC missing" } }, async ({ anon, admin, later }) => {
-    test.skip(!PASS, "Set SHO_QA_PASS (the shared password for the nakul17+ accounts).");
-    test.skip(!passwordOk(PASS), "SHO_QA_PASS must be at least 8 characters with a letter and a number.");
     const email = alias("2620", "ac1", "athenainfonomics.com");
     const signed = await signUp(anon.request, zz("athena"), email);
     expect(signed.status, signed.body).toBe(201);

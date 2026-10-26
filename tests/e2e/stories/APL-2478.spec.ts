@@ -1,11 +1,11 @@
 // SHO-US-1.5 Stay signed in, sign out, and retire the email-only session (APL-2478). Acceptance criteria AC1 to AC3.
 import { test, expect, login } from "../support";
-import { PASS, passwordOk, alias, zz, signUp, personByEmail, deactivate, waitForSinkMail, signInAs } from "./qa";
+import { PASS, alias, zz, signUp, personByEmail, deactivate, waitForSinkMail, signInAs, requireQaPass } from "./qa";
+
+requireQaPass();
 
 test.describe("SHO-US-1.5 / APL-2478 qa:TC missing", () => {
   test.beforeAll(() => {
-    test.skip(!PASS, "Set SHO_QA_PASS (the shared password for the nakul17+ accounts).");
-    test.skip(!passwordOk(PASS), "SHO_QA_PASS must be at least 8 characters with a letter and a number.");
     login("ADMIN"); // no Super Admin login is a failure, not a skip: only SHO_QA_PASS gates the run
   });
 
@@ -30,8 +30,6 @@ test.describe("SHO-US-1.5 / APL-2478 qa:TC missing", () => {
 
   // qa:TC missing
   test("AC1 (after 30 days): the session ends 30 days after sign-in, and a deactivated person's session is not extended qa:TC missing", { annotation: { type: "qa:TC", description: "qa:TC missing" } }, async ({ anon, admin, browser, later }) => {
-    test.skip(!PASS, "Set SHO_QA_PASS (the shared password for the nakul17+ accounts).");
-    test.skip(!passwordOk(PASS), "SHO_QA_PASS must be at least 8 characters with a letter and a number.");
     const email = alias("2478", "ac1", "aplyd.com");
     expect((await signUp(anon.request, zz("ac1"), email)).status).toBe(201);
     const token = (await waitForSinkMail(email, "Verify")).token;

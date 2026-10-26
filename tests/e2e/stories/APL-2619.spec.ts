@@ -3,15 +3,14 @@
 // SHO-US-23.5 (forced change at first sign-in) is not built and is not covered here.
 import { test, login } from "../support";
 import {
-  PASS, passwordOk, alias, zz, RUN, gate, signUp, signInAs, personByEmail, deactivate,
-  latestMail, mailedPassword, mailToken, expect,
+  PASS, alias, zz, RUN, gate, signUp, signInAs, personByEmail, deactivate,
+  latestMail, mailedPassword, mailToken, expect, requireQaPass,
 } from "./qa";
 
 const DOMAIN = "Use your @aplyd.com or @athenainfonomics.com email address.";
+requireQaPass();
 
 test.beforeAll(async ({ request }) => {
-  test.skip(!PASS, "Set SHO_QA_PASS (the shared password for the nakul17+ accounts).");
-  test.skip(!passwordOk(PASS), "SHO_QA_PASS must be at least 8 characters with a letter and a number.");
   login("ADMIN"); // no Super Admin login is a failure, not a skip: only SHO_QA_PASS gates the run
   await gate(request);
 });
