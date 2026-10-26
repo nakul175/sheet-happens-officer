@@ -84,8 +84,8 @@ jobs:
         run: npx vitest run -c vitest.release18.config.mts | tee validation-baseline18.log
       - name: Accepted locator browser cases
         run: >-
-          npx playwright test tests/e2e/stories/APL-2539.spec.ts tests/e2e/stories/APL-2540.spec.ts
-          --grep 'APL-2539 > AC1:|APL-2540 > AC1:|APL-2540 > AC4:'
+          npx playwright test tests/e2e/stories/APL-2539.spec.ts tests/e2e/stories/APL-2540.spec.ts tests/e2e/stories/SHO-3040.spec.ts
+          --grep 'APL-2539 > AC1:|APL-2540 > AC1:|APL-2540 > AC4:|SHO-3040 >'
           | tee validation-locators.log
       - name: Linux built-entry refusal and drain receipt
         run: node scripts/acceptance/release12-drain-receipt.mjs release12-drain.json | tee validation-drain.log
