@@ -157,9 +157,98 @@ jobs:
           echo "Count files expected: $expected"
           echo "expected_counts=$expected" >> "$GITHUB_OUTPUT"
 
+  provision:
+    name: Reset isolated QA accounts
+    needs: plan
+    if: needs.plan.outputs.parallel != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      BASE_URL: ${{ needs.plan.outputs.base_url }}
+      STAGING_USER: ${{ secrets.STAGING_USER }}
+      STAGING_PASS: ${{ secrets.STAGING_PASS }}
+      MAIL_SINK_TOKEN: ${{ secrets.MAIL_SINK_TOKEN }}
+      ZZ_TEST_01_EMAIL: ${{ secrets.ZZ_TEST_01_EMAIL }}
+      ZZ_TEST_01_PASS: ${{ secrets.ZZ_TEST_01_PASS }}
+      ZZ_TEST_02_EMAIL: ${{ secrets.ZZ_TEST_02_EMAIL }}
+      ZZ_TEST_02_PASS: ${{ secrets.ZZ_TEST_02_PASS }}
+      ZZ_TEST_03_EMAIL: ${{ secrets.ZZ_TEST_03_EMAIL }}
+      ZZ_TEST_03_PASS: ${{ secrets.ZZ_TEST_03_PASS }}
+      ZZ_TEST_04_EMAIL: ${{ secrets.ZZ_TEST_04_EMAIL }}
+      ZZ_TEST_04_PASS: ${{ secrets.ZZ_TEST_04_PASS }}
+      ZZ_TEST_05_EMAIL: ${{ secrets.ZZ_TEST_05_EMAIL }}
+      ZZ_TEST_05_PASS: ${{ secrets.ZZ_TEST_05_PASS }}
+      ZZ_TEST_06_EMAIL: ${{ secrets.ZZ_TEST_06_EMAIL }}
+      ZZ_TEST_06_PASS: ${{ secrets.ZZ_TEST_06_PASS }}
+      ZZ_TEST_07_EMAIL: ${{ secrets.ZZ_TEST_07_EMAIL }}
+      ZZ_TEST_07_PASS: ${{ secrets.ZZ_TEST_07_PASS }}
+      ZZ_TEST_08_EMAIL: ${{ secrets.ZZ_TEST_08_EMAIL }}
+      ZZ_TEST_08_PASS: ${{ secrets.ZZ_TEST_08_PASS }}
+      ZZ_TEST_09_EMAIL: ${{ secrets.ZZ_TEST_09_EMAIL }}
+      ZZ_TEST_09_PASS: ${{ secrets.ZZ_TEST_09_PASS }}
+      ZZ_TEST_10_EMAIL: ${{ secrets.ZZ_TEST_10_EMAIL }}
+      ZZ_TEST_10_PASS: ${{ secrets.ZZ_TEST_10_PASS }}
+      ZZ_TEST_11_EMAIL: ${{ secrets.ZZ_TEST_11_EMAIL }}
+      ZZ_TEST_11_PASS: ${{ secrets.ZZ_TEST_11_PASS }}
+      ZZ_TEST_12_EMAIL: ${{ secrets.ZZ_TEST_12_EMAIL }}
+      ZZ_TEST_12_PASS: ${{ secrets.ZZ_TEST_12_PASS }}
+      ZZ_TEST_13_EMAIL: ${{ secrets.ZZ_TEST_13_EMAIL }}
+      ZZ_TEST_13_PASS: ${{ secrets.ZZ_TEST_13_PASS }}
+      ZZ_TEST_14_EMAIL: ${{ secrets.ZZ_TEST_14_EMAIL }}
+      ZZ_TEST_14_PASS: ${{ secrets.ZZ_TEST_14_PASS }}
+      ZZ_TEST_15_EMAIL: ${{ secrets.ZZ_TEST_15_EMAIL }}
+      ZZ_TEST_15_PASS: ${{ secrets.ZZ_TEST_15_PASS }}
+      ZZ_TEST_16_EMAIL: ${{ secrets.ZZ_TEST_16_EMAIL }}
+      ZZ_TEST_16_PASS: ${{ secrets.ZZ_TEST_16_PASS }}
+      ZZ_TEST_17_EMAIL: ${{ secrets.ZZ_TEST_17_EMAIL }}
+      ZZ_TEST_17_PASS: ${{ secrets.ZZ_TEST_17_PASS }}
+      ZZ_TEST_18_EMAIL: ${{ secrets.ZZ_TEST_18_EMAIL }}
+      ZZ_TEST_18_PASS: ${{ secrets.ZZ_TEST_18_PASS }}
+      ZZ_TEST_19_EMAIL: ${{ secrets.ZZ_TEST_19_EMAIL }}
+      ZZ_TEST_19_PASS: ${{ secrets.ZZ_TEST_19_PASS }}
+      ZZ_TEST_20_EMAIL: ${{ secrets.ZZ_TEST_20_EMAIL }}
+      ZZ_TEST_20_PASS: ${{ secrets.ZZ_TEST_20_PASS }}
+    steps:
+      - name: Reset all 20 fixtures before any shard starts
+        run: |
+          node <<'NODE'
+          (async () => {
+          const required = ["BASE_URL", "STAGING_USER", "STAGING_PASS", "MAIL_SINK_TOKEN"];
+          for (let n = 1; n <= 20; n++) {
+            const nn = String(n).padStart(2, "0");
+            required.push(`ZZ_TEST_${nn}_EMAIL`, `ZZ_TEST_${nn}_PASS`);
+          }
+          const missing = required.filter((key) => !process.env[key]);
+          if (missing.length) throw new Error(`Missing repository secrets: ${missing.join(", ")}`);
+          const basic = Buffer.from(`${process.env.STAGING_USER}:${process.env.STAGING_PASS}`).toString("base64");
+          for (let start = 1; start <= 20; start += 2) {
+            const accounts = [start, start + 1].map((n) => {
+              const nn = String(n).padStart(2, "0");
+              return {
+                email: process.env[`ZZ_TEST_${nn}_EMAIL`],
+                password: process.env[`ZZ_TEST_${nn}_PASS`],
+                role: n <= 5 ? "ADMIN" : "MEMBER",
+                name: `ZZ Test ${nn}`,
+              };
+            });
+            const response = await fetch(`${process.env.BASE_URL}/api/qa/accounts`, {
+              method: "POST",
+              headers: {
+                authorization: `Basic ${basic}`,
+                "content-type": "application/json",
+                "x-qa-token": process.env.MAIL_SINK_TOKEN,
+              },
+              body: JSON.stringify({ accounts }),
+            });
+            if (!response.ok) throw new Error(`QA fixture reset failed with HTTP ${response.status}`);
+          }
+          console.log("All 20 isolated QA fixtures reset.");
+          })().catch((error) => { console.error(error.message); process.exit(1); });
+          NODE
+
   e2e:
     name: Shard ${{ matrix.nn }} of 20 (${{ matrix.role }})
-    needs: plan
+    needs: [plan, provision]
     if: needs.plan.outputs.parallel != ''
     runs-on: ubuntu-latest
     timeout-minutes: 120
