@@ -13,7 +13,7 @@ export type SinkMessage = { to: string; subject: string; text: string; sentAt: s
 
 type Outbound = { to: string; subject: string; text: string };
 
-type SinkMode =
+export type SinkMode =
   | { active: false; armed: false }
   | { active: false; armed: true; reason: string }
   | { active: true; token: string; dir: string };

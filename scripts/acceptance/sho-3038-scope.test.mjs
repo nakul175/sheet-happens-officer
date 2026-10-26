@@ -1,17 +1,22 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import test from "node:test";
 
 const production = "ee59582dffcbd8cc3067e689b2bb73cf63781cb7";
 const allowed = new Set([
   ".env.example",
   "src/app/api/qa/mail/route.ts",
+  "src/app/api/qa/accounts/route.ts",
+  "src/app/api/auth/signin/route.ts",
   "src/lib/email.ts",
   "src/lib/mail-sink.ts",
   "tests/e2e/stories/APL-2681.spec.ts",
   "tests/mail-sink-client.ts",
   "tests/mail-sink.test.ts",
+  "tests/qa-account-provisioning.test.ts",
   "vitest.sho-2681.config.mts",
+  "vitest.sho-2703.config.mts",
   "docs/team-intake-workspace-assignment.md",
   "docs/team-intake-bid-stages.md",
   "docs/project-trash-3047.md",
@@ -103,7 +108,13 @@ test("sequential release changes only explicitly reviewed surfaces", () => {
   for (const file of changed) assert.ok(allowed.has(file), file);
 });
 
-test("sequential release does not change package/runtime entry or central auth", () => {
-  for (const path of ["package.json", "package-lock.json", "server.js", "src/app/api/auth", "src/app/api/suite"])
+test("sequential release does not change package/runtime entry or central suite auth", () => {
+  for (const path of ["package.json", "package-lock.json", "server.js", "src/app/api/suite"])
     assert.equal(execFileSync("git", ["diff", production, "--", path], { encoding: "utf8" }), "", path);
+});
+
+test("the only local-auth delta is the reviewed staging-only ZZ admin guard", () => {
+  const diff = execFileSync("git", ["diff", production, "--", "src/app/api/auth"], { encoding: "utf8" });
+  const digest = createHash("sha256").update(diff).digest("hex");
+  assert.equal(digest, "d758bdd4254d4b67d83d0fb34e523cd269a66930705bfc79f6e85ba3602223af");
 });
