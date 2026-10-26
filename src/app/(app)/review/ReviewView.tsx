@@ -9,7 +9,7 @@ import { Page, useMe } from "../Shell";
 type DealRow = { id: string; name: string; stage: string | null; pipeline: string | null; organisation: { id: string; name: string } | null; leader: { name: string } | null; nextStep: { title: string; dueDate: string | null } | null; lastActivity?: string };
 type Idea = { id: string; title: string; dueDate: string | null; createdAt: string; assignee: { id: string; name: string }; project: { id: string; name: string }; canEdit: boolean };
 type Counts = { id: string; name: string; stages: { id: string; name: string; count: number; sums: { currency: string; total: number }[]; withoutValue: number }[] }[];
-type R = { needsNextStep: DealRow[]; overdueNextStep: DealRow[]; stalled: DealRow[]; ideas: Idea[]; counts: Counts };
+type R = { needsNextStep: DealRow[]; overdueNextStep: DealRow[]; stalled: DealRow[]; ideas: Idea[]; counts: Counts; otherCounts: Counts; unclassifiedCounts: Counts; timeline: string; openCommercialCount: number; headlineRule: string };
 
 function Deals({ title, rows, empty, red }: { title: string; rows: DealRow[]; empty: string; red?: boolean }) {
   return (
@@ -32,7 +32,8 @@ function Deals({ title, rows, empty, red }: { title: string; rows: DealRow[]; em
 export default function ReviewView() {
   const me = useMe();
   void me;
-  const { data, loading, error, reload } = useGet<R>("/api/review");
+  const [timeline, setTimeline] = useState("all");
+  const { data, loading, error, reload } = useGet<R>(`/api/review?timeline=${timeline}`);
   const [conv, setConv] = useState<Idea | null>(null);
   async function drop(t: Idea) { await api("POST", `/api/tasks/${t.id}/idea`, { isIdea: false }); reload(); }
   return (
@@ -57,23 +58,32 @@ export default function ReviewView() {
               </div>
             )}
           </section>
-          <div className="grp">Pipeline by stage</div>
-          {data.counts.map((p) => (
-            <div key={p.id} style={{ marginBottom: 12 }}>
-              <b style={{ fontSize: 14 }}>{p.name}</b>
-              <div style={{ overflowX: "auto" }}>
-                <table className="tbl">
-                  <thead><tr><th>Stage</th><th>Deals</th><th>Value</th></tr></thead>
-                  <tbody>{p.stages.map((s) => (
-                    <tr key={s.id}><td>{s.name}</td><td>{s.count}</td><td>{s.sums.length ? s.sums.map((x) => `${x.currency} ${x.total.toLocaleString("en-IN")}`).join(" · ") : "—"}{s.withoutValue ? ` · ${s.withoutValue} without value` : ""}</td></tr>
-                  ))}</tbody>
-                </table>
-              </div>
-            </div>
-          ))}
+          <section aria-label="Opportunity reporting filters" className="card" style={{ marginBottom: 12 }}>
+            <label htmlFor="review-timeline"><b>Timeline</b></label>{" "}
+            <select id="review-timeline" className="in" value={timeline} onChange={(e) => setTimeline(e.target.value)} style={{ width: "auto", marginLeft: 8 }}>
+              <option value="all">All deadlines</option><option value="overdue">Overdue</option><option value="30d">Next 30 days</option><option value="90d">Next 90 days</option>
+            </select>
+            <p style={{ marginBottom: 0 }}><b>Open commercial · {data.openCommercialCount}</b><br /><small>{data.headlineRule}</small></p>
+          </section>
+          <StageCounts title="Commercial pipeline by stage · RFP/RFA + OTC" counts={data.counts} />
+          <StageCounts title="Other opportunities by stage · EOI + CV/LTA" counts={data.otherCounts ?? []} />
+          <StageCounts title="Unclassified opportunities by stage · not included in commercial/other totals" counts={data.unclassifiedCounts ?? []} />
         </>
       )}
       {conv && <ConvertDialog task={{ id: conv.id, title: conv.title, dueDate: conv.dueDate, assignee: conv.assignee }} meId={me.id} onClose={() => setConv(null)} />}
     </Page>
   );
+}
+
+function StageCounts({ title, counts }: { title: string; counts: Counts }) {
+  return <section aria-label={title}>
+    <div className="grp">{title}</div>
+    {counts.map((p) => <div key={p.id} style={{ marginBottom: 12 }}>
+      <b style={{ fontSize: 14 }}>{p.name}</b>
+      <div style={{ overflowX: "auto" }}><table className="tbl">
+        <thead><tr><th>Stage</th><th>Deals</th><th>Value by currency</th></tr></thead>
+        <tbody>{p.stages.map((s) => <tr key={s.id}><td>{s.name}</td><td>{s.count}</td><td>{s.sums.length ? s.sums.map((x) => `${x.currency} ${x.total.toLocaleString("en-IN")}`).join(" · ") : "—"}{s.withoutValue ? ` · ${s.withoutValue} without value` : ""}</td></tr>)}</tbody>
+      </table></div>
+    </div>)}
+  </section>;
 }

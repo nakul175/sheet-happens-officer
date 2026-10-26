@@ -6,6 +6,19 @@ import { formatDueDate, startOfTodayIST } from "@/lib/dates";
 import { listDeals } from "@/lib/deals";
 
 export const IDEA_STALE_DAYS = 30;
+export const REVIEW_TIMELINES = ["all", "overdue", "30d", "90d"] as const;
+export type ReviewTimeline = (typeof REVIEW_TIMELINES)[number];
+
+const OPEN_HEADLINE_CATEGORIES = new Set(["NOT_STARTED", "ACTIVE", "PAUSED"]);
+
+function inTimeline(deadline: string | null | undefined, timeline: ReviewTimeline, today: string) {
+  if (timeline === "all") return true;
+  if (!deadline) return false;
+  if (timeline === "overdue") return deadline < today;
+  const end = new Date(`${today}T00:00:00.000+05:30`);
+  end.setUTCDate(end.getUTCDate() + (timeline === "30d" ? 30 : 90));
+  return deadline >= today && deadline <= formatDueDate(end)!;
+}
 
 export async function leadsAnyDeal(user: Actor) {
   if (!crmVisible(user)) return false;
@@ -13,7 +26,7 @@ export async function leadsAnyDeal(user: Actor) {
   return !!(await db.projectMember.findFirst({ where: { userId: user.id, role: "LEADER", project: { typeId: WORKSTREAM_DEAL, archivedAt: null } }, select: { projectId: true } }));
 }
 
-export async function pipelineReview(user: Actor) {
+export async function pipelineReview(user: Actor, timeline: ReviewTimeline = "all") {
   requireCrm(user);
   const deals = (await listDeals(user)).filter((d) => !d.archived);
   const today = startOfTodayIST();
@@ -38,17 +51,29 @@ export async function pipelineReview(user: Actor) {
     canEdit: isAdmin(user) || (t.project.members[0]?.role ?? "VIEWER") !== "VIEWER",
   }));
 
-  // Pipeline counts by stage; unknown value is never zero.
+  // Opportunity-type reporting uses the canonical persisted type. Operational
+  // queues above still include every visible deal. Unknown value is never zero
+  // and currency totals are never combined.
   const pipes = await db.pipeline.findMany({ where: { typeId: WORKSTREAM_DEAL }, orderBy: { position: "asc" }, include: { stages: { orderBy: { position: "asc" } } } });
-  const counts = pipes.map((p) => ({
+  const timelineDeals = deals.filter((d) => inTimeline(d.submissionDeadline, timeline, todayStr));
+  const countsFor = (include: (deal: (typeof deals)[number]) => boolean) => pipes.map((p) => ({
     id: p.id, name: p.name,
     stages: p.stages.map((s) => {
-      const here = deals.filter((d) => d.stage?.id === s.id);
+      const here = timelineDeals.filter((d) => d.stage?.id === s.id && include(d));
       const sums = new Map<string, number>();
       let withoutValue = 0;
       for (const d of here) { if (d.value === null || !d.currency) withoutValue++; else sums.set(d.currency, (sums.get(d.currency) ?? 0) + d.value); }
       return { id: s.id, name: s.name, category: s.category, count: here.length, sums: [...sums].map(([currency, total]) => ({ currency, total })), withoutValue };
     }),
   }));
-  return { needsNextStep, overdueNextStep, stalled, ideas, counts };
+  const commercial = (d: (typeof deals)[number]) => d.opportunityType === "RFP_RFA" || d.opportunityType === "OTC";
+  const other = (d: (typeof deals)[number]) => d.opportunityType === "EOI" || d.opportunityType === "CV_LTA";
+  const unclassified = (d: (typeof deals)[number]) => !d.opportunityType;
+  const openCommercialCount = timelineDeals.filter((d) => commercial(d) && OPEN_HEADLINE_CATEGORIES.has(d.stage?.category ?? "")).length;
+  return {
+    needsNextStep, overdueNextStep, stalled, ideas,
+    counts: countsFor(commercial), otherCounts: countsFor(other), unclassifiedCounts: countsFor(unclassified),
+    timeline, openCommercialCount,
+    headlineRule: "Open commercial includes Not started, Active and On hold; Won, Lost and Ongoing/Delivery outcomes stay visible by stage but are excluded from the headline.",
+  };
 }
