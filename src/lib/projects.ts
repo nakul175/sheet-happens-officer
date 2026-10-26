@@ -82,11 +82,17 @@ export async function listProjects(user: Actor, archived: boolean, deleted = fal
       typeId: WORKSTREAM_PROJECT,
       deletedAt: deleted ? { not: null } : null,
       ...(deleted ? {} : { archivedAt: archived ? { not: null } : null }),
-      ...(isAdmin(user) ? {} : { members: { some: { userId: user.id, ...(deleted ? { role: "LEADER" as const } : {}) } } }),
+      ...(isAdmin(user) ? {} : deleted
+        ? { OR: [
+            { members: { some: { userId: user.id, role: "LEADER" as const } } },
+            { members: { some: { userId: user.id } }, actionLogs: { some: { action: { in: ["project.created", "deal.created"] }, actorId: user.id } } },
+          ] }
+        : { members: { some: { userId: user.id } } }),
     },
     orderBy: { createdAt: "asc" },
     include: {
       vertical: { select: { id: true, name: true, archivedAt: true, deletedAt: true } },
+      actionLogs: { where: { action: { in: ["project.created", "deal.created"] }, actorId: user.id }, select: { id: true }, take: 1 },
       members: { where: { role: "LEADER" }, include: { user: { select: { id: true, name: true } } } },
       _count: { select: { tasks: { where: { deletedAt: null, completedAt: null, parentId: null } } } },
     },
@@ -102,7 +108,7 @@ export async function listProjects(user: Actor, archived: boolean, deleted = fal
     deletedAt: p.deletedAt?.toISOString() ?? null,
     leader: p.members[0]?.user ?? null,
     openTasks: p._count.tasks,
-    role: isAdmin(user) ? "LEADER" : mine.find((m) => m.projectId === p.id)?.role ?? null,
+    role: isAdmin(user) || p.actionLogs?.length ? "LEADER" : mine.find((m) => m.projectId === p.id)?.role ?? null,
     // The person's own seat, if any (Admins see every project but only some are theirs).
     myRole: mine.find((m) => m.projectId === p.id)?.role ?? null,
   }));
