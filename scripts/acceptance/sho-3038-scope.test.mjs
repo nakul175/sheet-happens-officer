@@ -13,6 +13,7 @@ const allowed = new Set([
   "src/lib/mail-sink.ts",
   "tests/e2e/stories/APL-2681.spec.ts",
   "tests/e2e/stories/APL-2682.spec.ts",
+  "tests/e2e/stories/APL-2465.spec.ts",
   "tests/mail-sink-client.ts",
   "tests/mail-sink.test.ts",
   "tests/qa-account-provisioning.test.ts",
