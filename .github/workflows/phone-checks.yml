@@ -22,7 +22,9 @@ jobs:
   viewport:
     name: Phone-size layout checks
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # Browser dependencies can take several minutes to download on a cold GitHub runner.
+    # Keep enough headroom for the unchanged viewport suite to actually execute.
+    timeout-minutes: 20
     services:
       postgres:
         image: postgres:16
