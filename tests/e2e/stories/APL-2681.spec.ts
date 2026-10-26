@@ -64,7 +64,9 @@ test.describe("APL-2681 staging mail sink", () => {
       const page = await ctx.newPage();
       await page.goto("/");
       await expect(page).not.toHaveURL(/\/signin/);
-      await expect(page.locator("#main")).toBeVisible();
+      // Admin-issued credentials are intentionally temporary. A successful first
+      // sign-in must reach the mandatory password wall, not the authenticated shell.
+      await expect(page.getByRole("heading", { name: "Set your own password" })).toBeVisible();
     } finally {
       await ctx.close();
       await request.post(`/api/team/${id}/deactivate`, { data: { reassign: "leaders" } });
