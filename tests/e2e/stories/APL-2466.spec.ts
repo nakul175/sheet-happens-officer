@@ -16,7 +16,7 @@ test.beforeAll(async ({ request }) => {
 });
 
 async function taskFor(api: Api, projectId: string, assigneeId: string, title: string) {
-  const r = await api.post(`/api/projects/${projectId}/tasks`, { title, assigneeId });
+  const r = await api.post(`/api/projects/${projectId}/tasks`, { title, assigneeId, dueDate: "2099-12-31" });
   expect(r.status, JSON.stringify(r.json)).toBe(201);
   return r.json.task.id as string;
 }

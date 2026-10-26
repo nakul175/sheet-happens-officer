@@ -67,7 +67,7 @@ async function signIn(role: Role): Promise<Person> {
 }
 
 async function taskFor(role: Role, projectId: string, title: string, extra: Record<string, unknown> = {}) {
-  const res = await read(await person(role).ctx.post(`/api/projects/${projectId}/tasks`, { data: { title, ...extra } }));
+  const res = await read(await person(role).ctx.post(`/api/projects/${projectId}/tasks`, { data: { title, dueDate: "2099-12-31", ...extra } }));
   expect(res.status, JSON.stringify(res.json)).toBe(201);
   return (res.json as { task: { id: string } }).task.id;
 }

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-const m=vi.hoisted(()=>({ access:vi.fn(), db:{user:{findUnique:vi.fn(),findMany:vi.fn()},task:{findUnique:vi.fn()},actionLog:{findFirst:vi.fn()},$transaction:vi.fn()},tx:{$queryRaw:vi.fn(),user:{findUnique:vi.fn(),findFirst:vi.fn()},projectMember:{findUnique:vi.fn(),createMany:vi.fn()},task:{findUnique:vi.fn(),update:vi.fn(),create:vi.fn()},section:{findFirst:vi.fn()},taskCollaborator:{create:vi.fn()}},notify:vi.fn(),log:vi.fn(),targetRole:null as string|null,actorRole:"LEADER",actorOrgRole:"MEMBER",workspace:"ws",targetActive:true,failWrite:false}));
+const m=vi.hoisted(()=>({ access:vi.fn(), db:{user:{findUnique:vi.fn(),findMany:vi.fn()},task:{findUnique:vi.fn()},actionLog:{findFirst:vi.fn()},$transaction:vi.fn()},tx:{$queryRaw:vi.fn(),user:{findUnique:vi.fn(),findFirst:vi.fn()},projectMember:{findUnique:vi.fn(),createMany:vi.fn()},task:{findUnique:vi.fn(),findFirst:vi.fn(),update:vi.fn(),create:vi.fn()},section:{findFirst:vi.fn()},taskCollaborator:{create:vi.fn()}},notify:vi.fn(),log:vi.fn(),targetRole:null as string|null,actorRole:"LEADER",actorOrgRole:"MEMBER",workspace:"ws",targetActive:true,failWrite:false}));
 vi.mock("@/lib/db",()=>({db:m.db}));
 vi.mock("@/lib/access",async original=>({...await original<typeof import("@/lib/access")>(),projectAccess:m.access}));
 vi.mock("@/lib/notify",()=>({notify:m.notify,logAction:m.log,auditTx:vi.fn()}));
@@ -20,6 +20,7 @@ beforeEach(()=>{
  m.tx.projectMember.findUnique.mockImplementation(async({where})=>where.projectId_userId.userId==="actor"?{role:m.actorRole,user:person("actor")}:(m.targetRole?{role:m.targetRole,user:person("target")}:null));
  m.tx.projectMember.createMany.mockImplementation(async()=>{if(m.targetRole)return{count:0};m.targetRole="EDITOR";return{count:1};});
  m.tx.section.findFirst.mockResolvedValue({id:"section",isDone:false});m.tx.task.create.mockResolvedValue({id:"created",title:"New"});
+ m.tx.task.findFirst.mockResolvedValue({...task(),id:"parent",parentId:null,sectionId:"section"});
  m.db.task.findUnique.mockImplementation(async()=>task());m.tx.task.findUnique.mockImplementation(async()=>task());m.db.actionLog.findFirst.mockResolvedValue(null);
  m.tx.task.update.mockImplementation(async()=>{if(m.failWrite)throw Error("task write failed");return{updatedAt:new Date(version)};});
  m.db.$transaction.mockImplementation(async fn=>{const before=m.targetRole;try{return await fn(m.tx);}catch(error){m.targetRole=before;throw error;}});
@@ -46,16 +47,30 @@ describe("SHO3058 explicit workspace membership for task actions",()=>{
   await addCollaborator(actor,"task","target",{addToProject:true,expectedUpdatedAt:version});expect(m.tx.taskCollaborator.create).toHaveBeenCalledWith({data:{taskId:"task",userId:"target"}});expect(m.log).toHaveBeenCalledWith(m.tx,expect.objectContaining({action:"task.collaborator_added"}));
  });
  it("creation adds the explicitly confirmed assignee in its task transaction",async()=>{
-  await createTask(actor,"project",{title:"New",sectionId:"section",assigneeId:"target",addAssigneeToProject:true});
+  await createTask(actor,"project",{title:"New",dueDate:"2026-10-31",sectionId:"section",assigneeId:"target",addAssigneeToProject:true});
   expect(m.tx.task.create).toHaveBeenCalledWith({data:expect.objectContaining({assigneeId:"target",collaborators:{create:[]}})});expect(m.targetRole).toBe("EDITOR");
  });
  it("creation adds explicitly confirmed collaborators without changing the default creator owner",async()=>{
-  await createTask(actor,"project",{title:"New",sectionId:"section",collaboratorIds:["target"],addCollaboratorsToProject:["target"]});
+  await createTask(actor,"project",{title:"New",dueDate:"2026-10-31",sectionId:"section",collaboratorIds:["target"],addCollaboratorsToProject:["target"]});
   expect(m.tx.task.create).toHaveBeenCalledWith({data:expect.objectContaining({assigneeId:"actor",collaborators:{create:[{userId:"target"}]}})});expect(m.targetRole).toBe("EDITOR");
  });
  it("creation refuses unconfirmed nonmembers and unmatched membership grants",async()=>{
-  await expect(createTask(actor,"project",{title:"New",sectionId:"section",assigneeId:"target"})).rejects.toMatchObject({status:400});expect(m.tx.projectMember.createMany).not.toHaveBeenCalled();
-  await expect(createTask(actor,"project",{title:"New",sectionId:"section",assigneeId:"actor",addCollaboratorsToProject:["target"]})).rejects.toMatchObject({status:400});expect(m.tx.task.create).not.toHaveBeenCalled();
+  await expect(createTask(actor,"project",{title:"New",dueDate:"2026-10-31",sectionId:"section",assigneeId:"target"})).rejects.toMatchObject({status:400});expect(m.tx.projectMember.createMany).not.toHaveBeenCalled();
+  await expect(createTask(actor,"project",{title:"New",dueDate:"2026-10-31",sectionId:"section",assigneeId:"actor",addCollaboratorsToProject:["target"]})).rejects.toMatchObject({status:400});expect(m.tx.task.create).not.toHaveBeenCalled();
+ });
+ it("SHO-3037 requires an explicit due date for a new top-level task before writing",async()=>{
+  await expect(createTask(actor,"project",{title:"New",sectionId:"section"})).rejects.toMatchObject({status:400,message:"Add a due date."});
+  expect(m.db.$transaction).not.toHaveBeenCalled();expect(m.tx.task.create).not.toHaveBeenCalled();
+ });
+ it("SHO-3037 rejects an invalid date and persists a valid India calendar date",async()=>{
+  await expect(createTask(actor,"project",{title:"New",dueDate:"2026-02-30",sectionId:"section"})).rejects.toMatchObject({status:400});
+  expect(m.tx.task.create).not.toHaveBeenCalled();
+  await createTask(actor,"project",{title:"New",dueDate:"2026-10-31",sectionId:"section"});
+  expect(m.tx.task.create).toHaveBeenCalledWith({data:expect.objectContaining({dueDate:new Date("2026-10-30T18:30:00.000Z")})});
+ });
+ it("SHO-3037 keeps the documented subtask exception optional without inventing a date",async()=>{
+  await createTask(actor,"project",{title:"Subtask",parentId:"parent"});
+  expect(m.tx.task.create).toHaveBeenCalledWith({data:expect.objectContaining({parentId:"parent",dueDate:null})});
  });
  it("locked collaborator snapshot detects a concurrent duplicate despite unchanged task version",async()=>{
   m.tx.task.findUnique.mockResolvedValue({...task(),collaborators:[{user:{id:"target",name:"Target"}}]});

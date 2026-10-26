@@ -379,18 +379,20 @@ function SectionMenu({ s, secs, projectId, onDialog, onDone, onErr }: { s: S; se
 
 function QuickAdd({ projectId, sectionId, onAdded, compact }: { projectId: string; sectionId: string; onAdded: () => void; compact?: boolean }) {
   const [v, setV] = useState("");
+  const [due, setDue] = useState("");
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   return (
     <form className={compact ? undefined : "item"} style={compact ? { marginTop: 4 } : undefined} onSubmit={async (e) => {
       e.preventDefault();
-      if (!v.trim()) return;
+      if (!v.trim() || !due) { setErr(!due ? "Add a due date." : null); return; }
       setBusy(true);
-      const r = await api("POST", `/api/projects/${projectId}/tasks`, { title: v.trim(), sectionId });
+      const r = await api("POST", `/api/projects/${projectId}/tasks`, { title: v.trim(), sectionId, dueDate: due });
       setBusy(false);
-      if (r.ok) { setV(""); setErr(null); onAdded(); } else setErr(r.error ?? "Could not add the task.");
+      if (r.ok) { setV(""); setDue(""); setErr(null); onAdded(); } else setErr(r.error ?? "Could not add the task.");
     }}>
       <input className="in" aria-label="Add a task" placeholder="+ Add a task" value={v} disabled={busy} onChange={(e) => setV(e.target.value)} style={compact ? { background: "transparent" } : { border: 0, padding: 0 }} />
+      <input className="in" aria-label="Due date" type="date" required value={due} disabled={busy} onChange={(e) => { setDue(e.target.value); if (e.target.value) setErr(null); }} />
       {err && <span className="err" role="alert">{err}</span>}
     </form>
   );
@@ -430,10 +432,10 @@ function NewTask({ p, onClose, onAdded }: { p: Proj; onClose: () => void; onAdde
         {canAddPeople && <WorkspaceTaskPerson projectId={p.id} purpose="assignee" whenSaved excludeIds={[assignee]} onChoose={async (person, addToProject) => { remember(person); setAssignee(person.id); setAddAssignee(addToProject); return { ok: true }; }} />}
         <Field label="Collaborators (optional)">{(id) => <select id={id} className="in" multiple value={collaborators.filter((id) => id !== assignee)} onChange={(e) => setCollaborators(Array.from(e.target.selectedOptions, (option) => option.value))}>{pendingCollaborators.filter(person => person.id !== assignee && !p.members.some(m => m.userId === person.id)).map(person => <option key={person.id} value={person.id}>{person.name} (will join project)</option>)}{p.members.filter((m) => m.active && m.userId !== assignee).map((m) => <option key={m.userId} value={m.userId}>{m.name}</option>)}</select>}</Field>
         {canAddPeople && <WorkspaceTaskPerson projectId={p.id} purpose="collaborator" whenSaved excludeIds={[assignee, ...collaborators]} onChoose={async (person, addToProject) => { rememberCollaborator(person); setCollaborators(current => current.includes(person.id) ? current : [...current, person.id]); if (addToProject) setAddCollaborators(current => current.includes(person.id) ? current : [...current, person.id]); return { ok: true }; }} />}
-        <Field label="Due date (optional)">{(id) => <input id={id} className="in" type="date" value={due} onChange={(e) => setDue(e.target.value)} />}</Field>
+        <Field label="Due date">{(id) => <input id={id} className="in" type="date" required value={due} onChange={(e) => setDue(e.target.value)} />}</Field>
         <Field label="Priority">{(id) => <select id={id} className="in" value={priority} onChange={(e) => setPriority(e.target.value)}>{Object.entries(PRIORITY).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select>}</Field>
         {err && <div className="err" role="alert">{err}</div>}
-        <div className="actions"><button type="button" className="btn ghost" onClick={onClose}>Cancel</button><button className="btn" disabled={busy || !title.trim()}>Add task</button></div>
+        <div className="actions"><button type="button" className="btn ghost" onClick={onClose}>Cancel</button><button className="btn" disabled={busy || !title.trim() || !due}>Add task</button></div>
       </form>
     </Modal>
   );
