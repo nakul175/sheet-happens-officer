@@ -36,6 +36,13 @@ function Form() {
     let organisationId = v.organisationId;
     if (!organisationId) {
       if (!buyerName) { setBusy(false); setErr("Type or choose a buyer."); return; }
+      // Typing may beat the initial Account fetch (and that list is capped).
+      // Resolve the current name before claiming it does not exist.
+      const found = await api("GET", `/api/orgs?q=${encodeURIComponent(buyerName)}`);
+      if (!found.ok) { setBusy(false); setErr(found.error ?? "Could not check existing buyer Accounts. Try again."); return; }
+      organisationId = found.data.organisations.find((o: { id: string; name: string }) => o.name.localeCompare(buyerName, undefined, { sensitivity: "accent" }) === 0)?.id ?? "";
+    }
+    if (!organisationId) {
       if (!createBuyer) {
         setBusy(false); setDup(true);
         setErr(`No existing organisation exactly matches "${buyerName}". Create it as a new Account and use it as the buyer?`);
