@@ -29,7 +29,7 @@ type T = {
 type S = { id: string; name: string; isDone: boolean; total: number; tasks: T[]; nextCursor: string | null };
 type Summary = { open: number; overdue: number; blocked: number; awaiting: number; openTasks?: number };
 type Proj = {
-  id: string; name: string; archived: boolean; role: string; type?: "PROJECT" | "DEAL"; deal?: DealBlock | null;
+  id: string; name: string; archived: boolean; role: string; isVertical?: boolean; type?: "PROJECT" | "DEAL"; deal?: DealBlock | null;
   sections: { id: string; name: string; isDone: boolean }[];
   members: { userId: string; name: string; role: string; active: boolean }[];
 };
@@ -185,7 +185,7 @@ function Inner({ id }: { id: string }) {
   return (
     <Page dock={view === "list"} bar={view === "board"} docTitle={p?.name}
       title={<span className="crumb"><Link href={p?.type === "DEAL" ? "/deals" : "/projects"}>{p?.type === "DEAL" ? "Deals" : "Projects"}</Link> / <span style={{ color: "var(--ink)" }}>{p?.name ?? "…"}</span></span>}
-      sub={p && <><span className="chip">You: {ROLE[p.role]}</span>{tk.data?.summary && (
+      sub={p && <>{p.isVertical && <span className="chip">Vertical task board</span>}<span className="chip">You: {ROLE[p.role]}</span>{tk.data?.summary && (
         <span className="lc-sum">
           {tk.data.summary.overdue > 0 && <span className="chip red">{tk.data.summary.overdue} overdue</span>}
           {tk.data.summary.blocked > 0 && <span className="chip red">{tk.data.summary.blocked} blocked</span>}
