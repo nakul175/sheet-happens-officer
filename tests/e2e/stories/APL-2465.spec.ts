@@ -47,6 +47,7 @@ test("AC2: opening the verification link verifies the account and it can sign in
   const token = await sinkToken(email, "Verify", 60_000);
   expect(token, "verification email").toBeTruthy();
   await anon.goto(`/verify?token=${token}`);
+  await anon.getByRole("button", { name: "Verify my email" }).click();
   await expect(anon.getByRole("heading", { name: "Email verified" })).toBeVisible();
   const person = await personByEmail(admin.api, email);
   expect(person?.status).toBe("ACTIVE");
@@ -199,6 +200,7 @@ test("AC7: staging auth mail is in the test mail sink within 60 seconds and each
     expect(link.host).toBe(new URL(BASE_URL).host);
   }
   await anon.goto(`/verify?token=${second.token}`);
+  await anon.getByRole("button", { name: "Verify my email" }).click();
   await expect(anon.getByRole("heading", { name: "Email verified" })).toBeVisible();
   const person = await personByEmail(admin.api, email);
   expect(person?.status).toBe("ACTIVE");
