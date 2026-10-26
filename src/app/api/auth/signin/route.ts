@@ -3,6 +3,7 @@ import { LOCKOUT_FAILURES, LOCKOUT_MINUTES, audit, clientIp, publicUser, startSe
 import { ApiError, handle, parseBody } from "@/lib/http";
 import { signInInput } from "@/lib/schemas";
 import { UNVERIFIED_SIGNIN } from "@/lib/auth-messages";
+import { isZzTestAddress, sinkActive } from "@/lib/mail-sink";
 
 const WRONG = "Email or password is incorrect.";
 
@@ -39,7 +40,7 @@ export const POST = handle(async (req: Request) => {
     await db.user.update({ where: { id: user.id }, data: { orgRole: "SUPER_ADMIN" } });
     await audit("ORG_ROLE_CHANGED", { actorId: user.id, data: { role: "SUPER_ADMIN", source: "SUPER_ADMIN_EMAILS" } });
     user.orgRole = "SUPER_ADMIN";
-  } else if (!listed && user.orgRole === "SUPER_ADMIN" && superAdminEmails().length > 0) { // an empty list never demotes anyone
+  } else if (!listed && user.orgRole === "SUPER_ADMIN" && superAdminEmails().length > 0 && !(sinkActive() && isZzTestAddress(user.email))) { // an empty list never demotes anyone; isolated staging fixtures keep their provisioned role
     await db.user.update({ where: { id: user.id }, data: { orgRole: "MEMBER" } });
     await audit("ORG_ROLE_CHANGED", { actorId: user.id, data: { role: "MEMBER", source: "SUPER_ADMIN_EMAILS" } });
     user.orgRole = "MEMBER";
