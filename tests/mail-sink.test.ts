@@ -23,9 +23,8 @@ vi.mock("next/server", () => ({
   connection: () => Promise.resolve(),
 }));
 
-import { GET } from "../src/app/api/qa/mail/route";
 import { resetMail, sendMail, signInDetailsMail, verifyMail } from "../src/lib/email";
-import { isZzTestAddress } from "../src/lib/mail-sink";
+import { isZzTestAddress, qaMailResponse } from "../src/lib/mail-sink";
 import { MAIL_WAIT_MS, mailSinkHeaders, mailboxSpecsSkip, waitForMail } from "./mail-sink-client";
 
 const TOKEN = "zz-test-sink-token";
@@ -79,7 +78,7 @@ function arm(over: Partial<Record<(typeof ENV_KEYS)[number], string | undefined>
 async function endpoint(url: string, token?: string, extra?: Record<string, string>) {
   const headers = new Headers(extra);
   if (token !== undefined) headers.set("x-qa-token", token);
-  const response = await GET(new Request(url, { headers }));
+  const response = await qaMailResponse(new Request(url, { headers }));
   const text = await response.text();
   let json: unknown = null;
   try { json = text ? JSON.parse(text) : null; } catch { json = text; }
@@ -94,7 +93,7 @@ async function withServer(run: (baseUrl: string) => Promise<void>) {
       else if (Array.isArray(value)) headers.set(key, value.join(", "));
     }
     try {
-      const response = await GET(new Request(`http://${req.headers.host}${req.url}`, { headers }));
+      const response = await qaMailResponse(new Request(`http://${req.headers.host}${req.url}`, { headers }));
       res.statusCode = response.status;
       response.headers.forEach((value, key) => res.setHeader(key, value));
       res.end(Buffer.from(await response.arrayBuffer()));

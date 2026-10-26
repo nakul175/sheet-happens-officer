@@ -1,6 +1,6 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { deliverSinkMail } from "@/lib/mail-sink";
+import { deliverSinkMail } from "./mail-sink";
 
 export type Mail = { to: string; subject: string; text: string };
 
@@ -71,7 +71,7 @@ export async function sendMail(mail: Mail): Promise<void> {
   await writeFile(path.join(dir, name), JSON.stringify({ ...mail, from: FROM }, null, 2));
 }
 
-export { VERIFY_SEND_FAILED } from "@/lib/auth-messages";
+export { VERIFY_SEND_FAILED } from "./auth-messages";
 
 export const appUrl = () => (process.env.APP_URL ?? "http://localhost:3000").replace(/\/$/, "");
 
