@@ -3,11 +3,11 @@
 // athenainfonomics.com self-signup belongs to SHO-E23 and is not re-tested here.
 import type { Page } from "@playwright/test";
 import { test, login } from "../support";
-import { PASS, alias, zz, gate, signUp, signInAs, sinkToken, nextPass, personByEmail, deactivate, expect, BASE_URL, waitForSinkMail, requireQaPass } from "./qa";
+import { PASS, alias, zz, gate, signUp, signInAs, sinkToken, nextPass, personByEmail, deactivate, expect, BASE_URL, waitForSinkMail, passwordOk } from "./qa";
 
 const DOMAIN = "Use your @aplyd.com or @athenainfonomics.com email address.";
 const alertOf = (p: Page) => p.locator('[role="alert"]:not(#__next-route-announcer__)');
-requireQaPass();
+if (!passwordOk(PASS)) throw new Error("SHO_QA_PASS must be at least 8 characters with a letter and a number.");
 
 test.beforeAll(async ({ request }) => {
   login("ADMIN"); // no Super Admin login is a failure, not a skip: only SHO_QA_PASS gates the run
