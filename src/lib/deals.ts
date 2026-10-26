@@ -261,9 +261,9 @@ export async function removeStage(user: Actor, stageId: string, input: { moveTo?
   if (!canTake(target)) throw new ApiError(400, `Items in "${stage.name}" cannot move to "${target.name}". Choose a stage of the same kind.`);
 
   return db.$transaction(async (tx) => {
-    // Lock the stage row first. A deal being moved into it meanwhile either commits before this lock, and is moved
-    // below, or waits and then fails, because the stage is gone. The foreign key is ON DELETE SET NULL: moving every project before
-    // deletion is what keeps its stage from being silently cleared.
+    // Lock the stage row first. A concurrent deal move must wait on this row; it either commits before the lock and
+    // is included in updateMany below, or resumes after deletion and fails because the stage is gone. That row lock,
+    // not the ON DELETE SET NULL foreign key, prevents a concurrent move from leaving stageId silently cleared.
     const locked = await tx.$queryRaw<{ id: string }[]>`SELECT "id" FROM "Stage" WHERE "id" = ${stage.id} FOR UPDATE`;
     if (!locked.length) throw notFound("Stage");
     // A reason was given for the removed stage. It carries over only to a stage that also asks for one.
