@@ -3,7 +3,15 @@ import { db } from "@/lib/db";
 import { account, cleanupZz, project, superAdmin, task, type Account } from "./helpers";
 const projects: string[] = [];
 const people: Account[] = [];
-afterAll(async () => cleanupZz(projects, people));
+afterAll(async () => {
+  const sa = await superAdmin();
+  for (const id of projects) {
+    const state = await sa.c.get(`/api/projects/${id}`);
+    expect(state.status).toBe(200);
+    if (state.json.project.archived) expect((await sa.c.post(`/api/projects/${id}/unarchive`)).status).toBe(200);
+  }
+  await cleanupZz(projects, people);
+});
 it("SHO-3048 preserves legacy board identity/work and does not inherit vertical access", async () => {
   const sa = await superAdmin();
   const verticalMember = await account("zz3048", `nakul17+zz-3048-${Date.now()}@aplyd.com`, "ZZ-TEST vertical-only member"); people.push(verticalMember);
