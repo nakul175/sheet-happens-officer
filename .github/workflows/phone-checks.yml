@@ -55,7 +55,14 @@ jobs:
       - run: npm ci
       - run: npx prisma migrate deploy
       - run: npm run build
-      - run: npx playwright-core install --with-deps chromium
+      - name: Use runner Chrome or install Chromium
+        run: |
+          if viewport_browser=$(command -v google-chrome); then
+            printf 'PW_CHROMIUM=%s\n' "$viewport_browser" >> "$GITHUB_ENV"
+            "$viewport_browser" --version
+          else
+            npx playwright-core install --with-deps chromium
+          fi
       - name: Start the app
         run: |
           (npx next start -p 3100 > server.log 2>&1 &)
