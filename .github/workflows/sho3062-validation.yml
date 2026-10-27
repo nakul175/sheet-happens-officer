@@ -3,6 +3,14 @@ on:
   pull_request:
     branches: [qualification/holy-sheet-current-release]
   workflow_dispatch:
+    inputs:
+      phase:
+        type: choice
+        options: [validate, live]
+        default: validate
+      expected_sho_sha:
+        type: string
+        default: ''
 permissions:
   contents: read
 concurrency:
@@ -13,6 +21,7 @@ defaults:
     shell: bash
 jobs:
   validate:
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.phase == 'validate' }}
     runs-on: ubuntu-latest
     timeout-minutes: 55
     services:
@@ -149,3 +158,57 @@ jobs:
             validation-*.log
             release12-drain.json
             test-results/e2e
+
+  live_qa:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.phase == 'live' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      HOLY_QA_LIVE: "1"
+      HOLY_QA_LOGIN_FILE: ${{ github.workspace }}/.holy3062-login.json
+      HOLY_QA_EXPECTED_SHO_SHA: ${{ inputs.expected_sho_sha }}
+      PW_CHROMIUM: /usr/bin/google-chrome
+      STAGING_USER: ${{ secrets.STAGING_USER }}
+      STAGING_PASS: ${{ secrets.STAGING_PASS }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Refuse a different runtime candidate or missing existing gate credential
+        run: |
+          test "$HOLY_QA_EXPECTED_SHO_SHA" = "$GITHUB_SHA"
+          test -n "$STAGING_USER" && test -n "$STAGING_PASS"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Configure existing SSH identity with a pinned host key
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          HOST_KEY: ${{ vars.DROPLET_HOST_KEY }}
+        run: |
+          test -n "$HOST_KEY"
+          umask 077
+          mkdir -p ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
+          printf '%s\n' "$HOST_KEY" > ~/.ssh/known_hosts
+      - name: Retrieve only the reviewed temporary synthetic login fixture
+        run: |
+          umask 077
+          ssh -o StrictHostKeyChecking=yes -o BatchMode=yes deploy@168.144.144.69 'cat /home/deploy/.local/share/sho3062-qa/login.json' > "$HOLY_QA_LOGIN_FILE"
+      - name: Real paired normal-login workflow and permission revocation
+        run: npx playwright test -c playwright.holy-qa.config.ts | tee holy3062-live.log
+      - name: Preserve the private ID receipt only on the host
+        if: always()
+        run: |
+          if [ -f test-results/holy3062-private-receipt.json ]; then
+            ssh -o StrictHostKeyChecking=yes -o BatchMode=yes deploy@168.144.144.69 'umask 077; cat > /home/deploy/.local/share/sho3062-qa/execution-receipt.json' < test-results/holy3062-private-receipt.json
+          fi
+          rm -f "$HOLY_QA_LOGIN_FILE"
+      - name: Save non-secret screenshots and bounded result summary
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: holy3062-live-${{ github.sha }}
+          path: |
+            test-results/holy3062-public-summary.json
+            test-results/holy3062-*.png
