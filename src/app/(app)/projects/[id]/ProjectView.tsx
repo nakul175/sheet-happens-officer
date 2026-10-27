@@ -6,6 +6,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Suspense } from "react";
 import { PRIORITY, ROLE, api, dueLabel, dueState, rowKeys, initials, isOverdue, todayIST, useGet } from "@/components/api";
 import { errorMessage, isVersionConflict } from "@/lib/version-error";
+import { HolySheetDocuments } from "@/components/HolySheetDocuments";
 import { WorkspaceTaskPerson, type WorkspaceTaskCandidate } from "@/components/WorkspaceTaskPerson";
 import { TaskModal } from "@/components/TaskModal";
 import { AvatarGroup, Pri, Tick } from "@/components/TaskParts";
@@ -208,6 +209,7 @@ function Inner({ id }: { id: string }) {
           <button className="btn ghost sm" onClick={() => { nudgeSeen(p.id, true); setNudgeOff(true); }}>Dismiss</button>
         </div>
       )}
+      <HolySheetDocuments key={id} kind="projects" id={id} />
       {p?.deal && <DealPanel projectId={id} deal={p.deal} canWrite={canWrite} onChange={refresh} feed={openFeed} />}
       <div className="tabs">
         <div className="seg" role="tablist" aria-label="View">

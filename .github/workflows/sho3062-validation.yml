@@ -1,0 +1,286 @@
+name: SHO-3062 current-release integration validation
+on:
+  pull_request:
+    branches: [qualification/holy-sheet-current-release]
+  workflow_dispatch:
+    inputs:
+      phase:
+        type: choice
+        options: [validate, live, matrix]
+        default: validate
+      expected_sho_sha:
+        type: string
+        default: ''
+permissions:
+  contents: read
+concurrency:
+  group: sho3062-${{ github.ref }}
+  cancel-in-progress: false
+defaults:
+  run:
+    shell: bash
+jobs:
+  validate:
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.phase == 'validate' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: sho
+          POSTGRES_PASSWORD: sho
+          POSTGRES_DB: sho_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      DATABASE_URL: postgresql://sho:sho@localhost:5432/sho_test?schema=accepted15
+      DIRECT_DATABASE_URL: postgresql://sho:sho@localhost:5432/sho_test?schema=accepted15
+      TASKBOARD_URL: http://localhost:3100
+      BASE_URL: http://localhost:3100
+      APP_URL: http://localhost:3100
+      EMAIL_OUTBOX_DIR: ${{ github.workspace }}/.outbox-ci
+      SUPER_ADMIN_EMAILS: root.test@aplyd.com
+      SHO_ADMIN_EMAIL: root.test@aplyd.com
+      SHO_ADMIN_PASS: correct-horse-9
+      JOB_SECRET: accepted15-ci-only-not-a-real-secret
+      FF_TASK_COMMENTS: "1"
+      SIGNIN_RETURN_TO: "on"
+      RETURN_PATH_LOG: "1"
+      SERVER_LOG: ${{ github.workspace }}/validation-server.log
+      PW_CHROMIUM: /usr/bin/google-chrome
+      RELEASE: ${{ github.sha }}
+      NEXT_TELEMETRY_DISABLED: "1"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - name: SHO-3062 current-release scope
+        run: node --test scripts/acceptance/sho3062-scope.test.mjs
+      - name: Verify pinned HS editor artifact
+        run: node scripts/verify-holy-sheet-package.mjs --source-check
+      - name: SHO-3038 collaborator acceptance
+        run: npx vitest run -c vitest.sho-3038.config.mts
+      - name: SHO-3044 opportunity classification acceptance
+        run: npx vitest run -c vitest.sho-3044.config.mts
+      - name: SHO-3042 opportunity reporting acceptance
+        run: npx vitest run -c vitest.sho-3042.config.mts
+      - name: SHO-3041 Bid stage lifecycle acceptance
+        run: npx vitest run -c vitest.sho-3041.config.mts
+      - name: SHO-3043 timeline filter acceptance
+        run: npx vitest run -c vitest.sho-3043.config.mts
+      - name: SHO-3047 recoverable project deletion contracts
+        run: npx vitest run -c vitest.sho-3047.config.mts
+      - name: SHO-3048 vertical boards and classification contracts
+        run: npx vitest run -c vitest.sho-3048.config.mts
+      - name: Reported delete and organisation-edit contracts
+        run: npx vitest run -c vitest.reported-delete-org-edit.config.mts
+      - name: SHO-2681 staging mail-sink contracts
+        run: npx vitest run -c vitest.sho-2681.config.mts
+      - name: Review scoped authentication lint
+        run: npx eslint src/app/api/auth/aplyd/{start,callback}/route.ts src/lib/central-client.ts src/app/signin/SignInForm.tsx src/app/signin/page.tsx
+      - name: SHO-3010 echo and improve contracts
+        run: npx vitest run -c vitest.accepted15-echo.config.mts | tee validation-3010.log
+      - run: npx prisma migrate deploy
+      - run: npm run build
+      - name: Start the exact built release
+        run: |
+          mkdir -p "$EMAIL_OUTBOX_DIR"
+          (NODE_ENV=production PORT=3100 node --import tsx server.js > validation-server.log 2>&1 & echo $! > .scoped4-server.pid)
+          for i in $(seq 1 40); do
+            if curl -fsS http://localhost:3100/api/health; then exit 0; fi
+            sleep 1
+          done
+          exit 1
+      - name: SHO-2682 staging Editor safety and idempotency contracts
+        run: npx vitest run -c vitest.sho-2682.config.mts
+      - name: All unit and integration tests present in this selective release
+        run: npx vitest run -c vitest.scoped4-all.config.mts | tee validation-all-release.log
+      - name: Accepted15 component, database and SQL regressions
+        run: npx vitest run -c vitest.release12.config.mts | tee validation-accepted15.log
+      - name: Deterministic2693 and2897 owned-outbox contracts
+        run: npx vitest run -c vitest.accepted-ai.config.mts | tee validation-accepted-ai.log
+      - name: Deployed18 baseline regressions
+        run: npx vitest run -c vitest.release18.config.mts | tee validation-baseline18.log
+      - name: Accepted locator browser cases
+        run: >-
+          npx playwright test tests/e2e/stories/APL-2539.spec.ts tests/e2e/stories/APL-2540.spec.ts tests/e2e/stories/SHO-3040.spec.ts
+          --grep 'APL-2539 > AC1:|APL-2540 > AC1:|APL-2540 > AC4:|SHO-3040 >'
+          | tee validation-locators.log
+      - name: Linux built-entry refusal and drain receipt
+        run: node scripts/acceptance/release12-drain-receipt.mjs release12-drain.json | tee validation-drain.log
+      - name: Seed comments fixture in isolated CI database only
+        run: |
+          export SHO_QA_PASS="$(openssl rand -hex 16)Aa9"
+          echo "::add-mask::$SHO_QA_PASS"
+          echo "SHO_QA_PASS=$SHO_QA_PASS" >> "$GITHUB_ENV"
+          SEED_TARGET=test npx tsx scripts/seed-apl2590-fixtures.ts
+          echo "SHO_MEMBER_EMAIL=nakul17+apl2590-worker@gmail.com" >> "$GITHUB_ENV"
+          echo "SHO_MEMBER_PASS=$SHO_QA_PASS" >> "$GITHUB_ENV"
+      - name: Four people-role suites and non-provider comments acceptance
+        run: >-
+          npx playwright test tests/e2e/stories/APL-2466.spec.ts tests/e2e/stories/APL-2480.spec.ts
+          tests/e2e/stories/APL-2482.spec.ts tests/e2e/stories/APL-2484.spec.ts tests/e2e/stories/APL-2590.spec.ts
+          --grep-invert " AC(14|15|16) "
+          | tee validation-scoped-stories.log
+      - name: Record separate mandatory live-provider gate
+        run: |
+          node -e 'require("node:fs").writeFileSync("scoped4-live-gate.json",JSON.stringify({sha:process.env.RELEASE,deployReady:false,requiredStagingTests:["SHO2590AC14","SHO2590AC15","SHO2590AC16"],reason:"Live-provider cases remain mandatory on exact SHA; this CI job covers non-provider behavior only"}))'
+      - name: Validate comments and return-path flag-off rollback
+        run: |
+          kill "$(cat .scoped4-server.pid)"
+          for i in $(seq 1 30); do
+            if ! kill -0 "$(cat .scoped4-server.pid)" 2>/dev/null; then break; fi
+            sleep 1
+          done
+          (FF_TASK_COMMENTS=0 SIGNIN_RETURN_TO=off NODE_ENV=production PORT=3100 node --import tsx server.js > validation-off-server.log 2>&1 & echo $! > .scoped4-off-server.pid)
+          for i in $(seq 1 40); do
+            if curl -fsS http://localhost:3100/api/health; then break; fi
+            sleep 1
+          done
+          FF_TASK_COMMENTS=0 SIGNIN_RETURN_TO=off SERVER_LOG="$GITHUB_WORKSPACE/validation-off-server.log" npx vitest run -c vitest.scoped4-off.config.mts | tee validation-flag-off.log
+      - name: Preserve receipts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sho3062-${{ github.sha }}
+          path: |
+            scoped4-live-gate.json
+            validation-*.log
+            release12-drain.json
+            test-results/e2e
+
+  live_qa:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.phase == 'live' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      HOLY_QA_LIVE: "1"
+      HOLY_QA_LOGIN_FILE: ${{ github.workspace }}/.holy3062-login.json
+      HOLY_QA_EXPECTED_SHO_SHA: ${{ inputs.expected_sho_sha }}
+      PW_CHROMIUM: /usr/bin/google-chrome
+      STAGING_USER: ${{ secrets.STAGING_USER }}
+      STAGING_PASS: ${{ secrets.STAGING_PASS }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Refuse a different runtime candidate or missing existing gate credential
+        run: |
+          [[ "$HOLY_QA_EXPECTED_SHO_SHA" =~ ^[0-9a-f]{40}$ ]]
+          git merge-base --is-ancestor "$HOLY_QA_EXPECTED_SHO_SHA" "$GITHUB_SHA"
+          node --input-type=module - <<'JS'
+          import {execFileSync} from 'node:child_process';
+          const allowed=new Set(['tests/qa/holy-sheet-live.spec.ts','.github/workflows/sho3062-validation.yml','playwright.holy-qa.config.ts']);
+          const files=execFileSync('git',['diff','--name-only',process.env.HOLY_QA_EXPECTED_SHO_SHA,process.env.GITHUB_SHA],{encoding:'utf8'}).trim().split('\n').filter(Boolean);
+          if(files.some(file=>!allowed.has(file)))throw Error('Live test source differs from the tested runtime');
+          JS
+          test -n "$STAGING_USER" && test -n "$STAGING_PASS"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Configure existing SSH identity with a pinned host key
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          HOST_KEY: ${{ vars.DROPLET_HOST_KEY }}
+        run: |
+          test -n "$HOST_KEY"
+          umask 077
+          mkdir -p ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
+          printf '%s\n' "$HOST_KEY" > ~/.ssh/known_hosts
+      - name: Retrieve only the reviewed temporary synthetic login fixture
+        run: |
+          umask 077
+          ssh -o StrictHostKeyChecking=yes -o BatchMode=yes deploy@168.144.144.69 'cat /home/deploy/.local/share/sho3062-qa/login.json' > "$HOLY_QA_LOGIN_FILE"
+      - name: Real paired normal-login workflow and permission revocation
+        run: npx playwright test -c playwright.holy-qa.config.ts | tee holy3062-live.log
+      - name: Preserve the private ID receipt only on the host
+        if: always()
+        run: |
+          if [ -f test-results/holy3062-private-receipt.json ]; then
+            ssh -o StrictHostKeyChecking=yes -o BatchMode=yes deploy@168.144.144.69 'umask 077; cat > /home/deploy/.local/share/sho3062-qa/execution-receipt.json' < test-results/holy3062-private-receipt.json
+          fi
+          rm -f "$HOLY_QA_LOGIN_FILE"
+      - name: Save non-secret screenshots and bounded result summary
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: holy3062-live-${{ github.sha }}
+          path: |
+            test-results/holy3062-public-summary.json
+            test-results/holy3062-*.png
+
+  matrix:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.phase == 'matrix' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      HOLY4_MATRIX: "1"
+      HOLY4_FIXTURE_FILE: ${{ github.workspace }}/.holy3062-login.json
+      HOLY4_EXPECTED_SHA: ${{ inputs.expected_sho_sha }}
+      PW_CHROMIUM: /usr/bin/google-chrome
+      STAGING_USER: ${{ secrets.STAGING_USER }}
+      STAGING_PASS: ${{ secrets.STAGING_PASS }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Refuse a different runtime candidate or missing existing gate credential
+        run: |
+          [[ "$HOLY4_EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]]
+          git merge-base --is-ancestor "$HOLY4_EXPECTED_SHA" "$GITHUB_SHA"
+          node --input-type=module - <<'JS'
+          import {execFileSync} from 'node:child_process';
+          const allowed=new Set(['tests/qa/holy4-matrix.spec.ts','.github/workflows/sho3062-validation.yml','playwright.holy4-matrix.config.ts']);
+          const files=execFileSync('git',['diff','--name-only',process.env.HOLY4_EXPECTED_SHA,process.env.GITHUB_SHA],{encoding:'utf8'}).trim().split('\n').filter(Boolean);
+          if(files.some(file=>!allowed.has(file)))throw Error('Live test source differs from the tested runtime');
+          JS
+          test -n "$STAGING_USER" && test -n "$STAGING_PASS"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Configure existing SSH identity with a pinned host key
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          HOST_KEY: ${{ vars.DROPLET_HOST_KEY }}
+        run: |
+          test -n "$HOST_KEY"
+          umask 077
+          mkdir -p ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
+          printf '%s\n' "$HOST_KEY" > ~/.ssh/known_hosts
+      - name: Retrieve only the reviewed temporary synthetic login fixture
+        run: |
+          umask 077
+          ssh -o StrictHostKeyChecking=yes -o BatchMode=yes deploy@168.144.144.69 'cat /home/deploy/holy4-matrix-ops/fixture-private.json' > "$HOLY4_FIXTURE_FILE"
+      - name: Real paired normal-login workflow and permission revocation
+        run: npx playwright test -c playwright.holy4-matrix.config.ts | tee holy4-matrix.log
+      - name: Preserve the private ID receipt only on the host
+        if: always()
+        run: |
+          if [ -f test-results/holy4-matrix-private-receipt.json ]; then
+            ssh -o StrictHostKeyChecking=yes -o BatchMode=yes deploy@168.144.144.69 'umask 077; cat > /home/deploy/holy4-matrix-ops/execution-receipt.json' < test-results/holy4-matrix-private-receipt.json
+          fi
+          rm -f "$HOLY4_FIXTURE_FILE"
+      - name: Save non-secret screenshots and bounded result summary
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: holy4-matrix-${{ github.sha }}
+          path: |
+            test-results/holy4-matrix-public-summary.json
+            test-results/holy4-matrix-*.png

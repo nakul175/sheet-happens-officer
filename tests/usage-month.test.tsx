@@ -11,7 +11,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { usageSummary } from "@/lib/usage";
 import { sendMessage } from "@/lib/concierge/engine";
 import { clearProviderDown } from "@/lib/concierge/limits";
-import { nextMonthStartIST } from "@/lib/concierge/dates";
+import { nextMonthStartIST, weekStartIST } from "@/lib/concierge/dates";
 import { QUICK_ACTIONS } from "@/lib/concierge/reads";
 import { setFakeModel } from "@/lib/model";
 import { UsageContents } from "@/app/(app)/usage/screen";
@@ -90,14 +90,14 @@ describe("qa:TC missing APL-2641 Usage figures reset on the 1st, India time (AC2
       expect(count(thisMonth, q.id) - count(before, q.id), q.id).toBe(0);
     }
 
-    // AC3: at 00:00 IST on the 1st of next month, nothing from this month counts.
+    // AC3: monthly figures reset; the independent Monday-based week can span two months.
     const fresh = await usageSummary(sa, firstOfNext);
     expect(fresh.monthStart).toBe(firstOfNext.toISOString());
     expect(fresh.month.messages).toBe(0);
-    // The people list is the union of this month and this week. At a month boundary the same
-    // calendar week can still contain earlier activity, so the person may remain with a zero
-    // month figure while their week figure is non-zero.
-    expect(fresh.people.find((p) => p.id === person!.id)?.monthMessages ?? 0).toBe(0);
+    const weeklyRows = await db.modelUsage.count({ where: { userId: person.id, counted: true, createdAt: { gte: weekStartIST(firstOfNext) } } });
+    const freshPerson = fresh.people.find((p) => p.id === person!.id);
+    if (weeklyRows === 0) expect(freshPerson).toBeUndefined();
+    else expect(freshPerson).toMatchObject({ monthCalls: 0, monthMessages: 0, monthCostUsd: 0, weekCalls: weeklyRows, weekMessages: weeklyRows });
     expect(fresh.quickActions.map((q) => q.id)).toEqual(QUICK_ACTIONS.map((q) => q.id));
     expect(fresh.quickActions.every((q) => q.count === 0)).toBe(true);
 

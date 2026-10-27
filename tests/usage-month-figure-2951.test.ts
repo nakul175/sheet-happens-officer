@@ -11,7 +11,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { usageSummary } from "@/lib/usage";
 import { sendMessage } from "@/lib/concierge/engine";
 import { clearProviderDown, monthCap, monthSpendUsd } from "@/lib/concierge/limits";
-import { monthStartIST, nextMonthStartIST } from "@/lib/concierge/dates";
+import { monthStartIST, nextMonthStartIST, weekStartIST } from "@/lib/concierge/dates";
 import { setFakeModel } from "@/lib/model";
 import { account, superAdmin, type Account } from "./helpers";
 import { actor, db, say, script } from "./concierge-helpers";
@@ -88,11 +88,14 @@ describe("qa:TC missing SHO-2951 the usage month message figure is the ledger ro
     expect(mine(after)).toBe(mine(before) + 1);
 
     // A month with zero messages is a real 0 (the screen prints 0, not "Not counted").
-    const fresh = await usageSummary(sa, nextMonthStartIST(now));
+    const firstOfNext = nextMonthStartIST(now);
+    const fresh = await usageSummary(sa, firstOfNext);
     expect(fresh.month.messages).toBe(0);
-    // The people list also includes current-week activity. When the month turns during a week,
-    // the person can remain listed, but their new-month message figure must be exactly zero.
-    expect(fresh.people.find((p) => p.id === person!.id)?.monthMessages ?? 0).toBe(0);
+    // The person can still have this week's usage when the month changes midweek.
+    const weeklyRows = await db.modelUsage.count({ where: { userId: person.id, counted: true, createdAt: { gte: weekStartIST(firstOfNext) } } });
+    const freshPerson = fresh.people.find((p) => p.id === person!.id);
+    if (weeklyRows === 0) expect(freshPerson).toBeUndefined();
+    else expect(freshPerson).toMatchObject({ monthCalls: 0, monthMessages: 0, monthCostUsd: 0, weekCalls: weeklyRows, weekMessages: weeklyRows });
 
     // SHO-3013 boundary: put the spend above the safety cap. The cap refuses the next message before any row is
     // written, so the figure neither drops nor double counts, and it still equals the counted rows.
