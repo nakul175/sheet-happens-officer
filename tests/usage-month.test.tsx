@@ -88,7 +88,12 @@ describe("qa:TC missing APL-2641 Usage figures reset on the 1st, India time (AC2
     const fresh = await usageSummary(sa, firstOfNext);
     expect(fresh.monthStart).toBe(firstOfNext.toISOString());
     expect(fresh.month.messages).toBe(0);
-    expect(fresh.people.find((p) => p.id === person!.id)).toBeUndefined();
+    // The list includes people with either monthly or weekly activity. A month can
+    // start during the same IST week, so a zero-month row may still have week usage.
+    const freshPerson = fresh.people.find((p) => p.id === person!.id);
+    expect(freshPerson?.monthMessages ?? 0).toBe(0);
+    expect(freshPerson?.monthCalls ?? 0).toBe(0);
+    expect(freshPerson?.monthCostUsd ?? 0).toBe(0);
     expect(fresh.quickActions.map((q) => q.id)).toEqual(QUICK_ACTIONS.map((q) => q.id));
     expect(fresh.quickActions.every((q) => q.count === 0)).toBe(true);
 
