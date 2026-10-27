@@ -50,7 +50,7 @@ export function Extras({ children }: { children: React.ReactNode }) {
       const k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
       if (g && Date.now() - g < 1200) {
         g = 0;
-        if (k === "m") { e.preventDefault(); router.push("/"); return; }
+        if (k === "m") { e.preventDefault(); router.push("/my-tasks"); return; }
         if (k === "p") { e.preventDefault(); router.push("/projects"); return; }
       }
       if (k === "g" && !e.shiftKey) { g = Date.now(); return; }
@@ -75,7 +75,8 @@ export function Extras({ children }: { children: React.ReactNode }) {
   const commands = useMemo<Command[]>(() => [
     ...(canAdd ? [{ id: "new-task", label: "New task", hint: "Press C", words: "add create", run: () => setTimeout(() => setDialog("add"), 0) }] : []),
     { id: "new-project", label: "New project", words: "add create", run: () => router.push("/projects/new") },
-    { id: "go-my", label: "Go to My tasks", words: "home", run: () => router.push("/") },
+    { id: "go-home", label: "Go to Home", run: () => router.push("/") },
+    { id: "go-my", label: "Go to My tasks", words: "assigned work", run: () => router.push("/my-tasks") },
     { id: "go-projects", label: "Go to Projects", run: () => router.push("/projects") },
     { id: "go-team", label: "Go to Team", words: "people", run: () => router.push("/team") },
     { id: "go-search", label: "Open the Search screen", run: () => router.push("/search") },

@@ -81,5 +81,5 @@ export function ConciergeHost() {
 export function ConciergeNavItem({ onPick }: { onPick?: () => void }) {
   const c = useConcierge();
   if (!c) return null;
-  return <button className="navbtn" onClick={() => { onPick?.(); openConcierge(); }}>Concierge{c.hidden && <small> (hidden)</small>}</button>;
+  return <button className="navbtn" onClick={() => { onPick?.(); openConcierge(); }}>{c.hidden ? "Show Concierge" : "Open Concierge"}</button>;
 }
