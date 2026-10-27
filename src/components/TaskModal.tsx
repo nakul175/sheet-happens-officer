@@ -8,6 +8,7 @@ import { errorMessage, isVersionConflict, versionConflictMessage } from "@/lib/v
 import { Confirm, Modal, Skeleton } from "@/components/ui";
 import { ConvertDialog } from "@/components/ConvertDialog";
 import { TaskLinks } from "@/components/TaskLinks";
+import { HolySheetLauncher } from "@/components/HolySheetLauncher";
 import { Comments } from "@/components/Comments";
 import { closeControlOffered } from "@/lib/approver-ui";
 import { useMe } from "@/app/(app)/Shell";
@@ -264,6 +265,7 @@ export function TaskModal({ id, me, onClose, onChanged, asPage }: { id: string; 
             </div>
           )}
           {meCtx.crm && !task.parentId && <TaskLinks taskId={id} links={task.links ?? []} canEdit={canEdit && !holding} onChanged={() => { t.reload(); onChanged?.(); }} />}
+          <HolySheetLauncher key={id} taskId={id} />
 
           {task.approver && !task.awaitingApproval && !done && task.assignee.id === me && (
             <p className="hint">Only {task.approver.name} or the project Leader can close this task. Send it for approval when it is ready.</p>
