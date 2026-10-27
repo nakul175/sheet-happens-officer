@@ -265,6 +265,7 @@ describe("SHO-3030: the deactivate dialog and its summary, mounted by the real T
       await page.goto("/team", { waitUntil: "load", timeout: 120000 });
       const row = page.locator("tr", { hasText: leaving.name }).first();
       await row.waitFor({ state: "visible", timeout: 60000 });
+      await row.locator("summary").click();
       await row.getByRole("button", { name: "Deactivate", exact: true }).click();
 
       const dialog = page.getByRole("dialog", { name: `Deactivate ${leaving.name}?` });
