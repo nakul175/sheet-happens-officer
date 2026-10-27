@@ -7,9 +7,9 @@ local entry containing its real editor/API/recovery implementation. The hosted
 transport keeps credentials and recovery at the HS origin. No duplicated document
 or client-supplied role is accepted.
 
-Version `0.1.0-holy3.1` is pinned to the tarball under vendor/ and its lockfile
+Version `0.1.0-holy3.2` is pinned to the tarball under vendor/ and its lockfile
 integrity. The provenance receipt identifies canonical HS source commit
-78cc38fbd42e8fbb90a38dfa84f69e384be42f7e and its source manifest. The verification
+a7a1e7fb46dec3a40251c16965ec5efbdedca3ef and its source manifest. The verification
 script checks archive integrity, installed manifest and all 51 source hashes
 against that exact public Git commit. CI checks source without executing it.
 No npm registry publication or new shared-service credentials are involved.
