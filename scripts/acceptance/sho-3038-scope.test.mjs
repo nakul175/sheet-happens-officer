@@ -5,6 +5,15 @@ import test from "node:test";
 
 const production = "ee59582dffcbd8cc3067e689b2bb73cf63781cb7";
 const allowed = new Set([
+  // SHO-3103 approved Sign-in presentation; auth/API invariants below remain unchanged.
+  "src/app/signin/SignInForm.tsx",
+  "src/app/signin/page.tsx",
+  "src/app/signin/Hero.tsx",
+  "src/app/signin/signin.module.css",
+  "public/aplyd-symbol.svg",
+  "tests/signin-approved.test.tsx",
+  "vitest.signin-approved.config.mts",
+  "docs/signin-approved-release.md",
   // SHO-3098..3102 approved forms and Team member details.
   "src/components/ui.tsx",
   "src/app/(app)/accounts/forms-approved.css",

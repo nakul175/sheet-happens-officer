@@ -26,7 +26,7 @@ export default function Page({ searchParams }: PageProps<"/signin">) {
     <main className={s.wrap}>
       <div className={s.brandtop}>
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src="/logo-mark.svg" alt="" />
+        <img src="/logo-icon-reversed.svg" alt="" />
         <span>Sheet Happens Officer</span>
       </div>
       <Hero />
