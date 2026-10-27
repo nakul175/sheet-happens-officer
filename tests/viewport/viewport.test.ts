@@ -52,13 +52,33 @@ async function signedIn(width: number, who: "root" | "viewer" | null) {
 async function check(ctx: BrowserContext, path: string, width: number, wait?: string) {
   const page = await ctx.newPage();
   try {
-    await page.goto(path, { waitUntil: "load" });
-    await page.waitForFunction(() => !document.querySelector(".skel, .skel-wrap"), undefined, { timeout: 15000 }).catch(() => {});
+    const response = await page.goto(path, { waitUntil: "load" });
+    expect(response?.ok(), `${path} must load successfully, not a responsive error page`).toBe(true);
+    expect(new URL(page.url()).pathname, `${path} must not silently redirect to another screen`).toBe(new URL(path, BASE).pathname);
+    await page.waitForFunction(() => !document.querySelector(".skel, .skel-wrap"), undefined, { timeout: 15000 });
     if (wait) await page.waitForSelector(wait, { timeout: 10000 });
     await page.waitForTimeout(400);
+    // SHO-2559 AC2: this test-only switch deliberately breaks one real public route.
+    // beforeAll refuses every remote target before any fixture is created.
+    if (process.env.SHO_VIEWPORT_NEGATIVE_CONTROL === "1" && path === "/signin" && width === 320) {
+      await page.evaluate(() => {
+        const fault = document.createElement("div");
+        fault.id = "sho-2559-negative-control";
+        fault.style.cssText = "width:400px;height:20px";
+        fault.textContent = "Deliberate 400px viewport regression";
+        document.body.append(fault);
+      });
+    }
     const found: Finding[] = await page.evaluate(collect, width < PHONE_MAX);
     return { page, found };
-  } catch (e) { await page.close(); throw e; }
+  } catch (e) {
+    const shot = `${SHOTS}/${path.replace(/[^a-z0-9]+/gi, "-")}-${width}-load-error.png`;
+    let evidence = `screenshot: ${shot}`;
+    try { await page.screenshot({ path: shot, fullPage: true }); }
+    catch (shotError) { evidence = `screenshot unavailable: ${String(shotError)}`; }
+    await page.close();
+    throw new Error(`${path} at ${width} px did not finish loading; ${evidence}\n${String(e)}`);
+  }
 }
 
 for (const width of WIDTHS) {
