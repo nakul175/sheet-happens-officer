@@ -9,10 +9,12 @@ import { money } from "@/components/DealPanel";
 import { DealBoard, inLifecycle, opportunityGroups, totals, type BoardDeal, type BoardStage } from "@/components/DealBoard";
 import { Page, useMe } from "../Shell";
 
+import "./deals-approved.css";
 type D = BoardDeal;
 
 export default function DealsView() {
   const [lifecycle, setLifecycle] = useState<"sales" | "delivery">("sales");
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [mine, setMine] = useState(false);
   const [old, setOld] = useState(false);
   const [view, setView] = useState<"board" | "list">("board");
@@ -37,7 +39,7 @@ export default function DealsView() {
   const openCommercial = groups[0].deals.filter(d => ["NOT_STARTED", "ACTIVE", "PAUSED"].includes(d.stage?.category ?? ""));
   const openTotals = totals(openCommercial);
   return (
-    <Page title="Deals" sub="Deals you lead or belong to"
+    <Page className="deals-approved" title="Deals" sub="Deals you lead or belong to"
       actions={<>
         <div className="seg" role="group" aria-label="Which deals">
           <button aria-pressed={!mine} onClick={() => setMine(false)}>All mine</button>
@@ -50,7 +52,8 @@ export default function DealsView() {
         <button aria-pressed={lifecycle === "sales"} onClick={() => setLifecycle("sales")}>Sales pipeline</button>
         <button aria-pressed={lifecycle === "delivery"} onClick={() => setLifecycle("delivery")}>Delivery projects</button>
       </div>
-      <fieldset className="card" style={{ marginBottom: 12 }}>
+      <div className="deal-filter-summary"><button className="btn ghost" aria-expanded={filtersOpen} aria-controls="deal-filters" onClick={() => setFiltersOpen(!filtersOpen)}>Filters</button><span>{opportunity || "All opportunity types"} · {cur?.stages.find(s => s.id === stage)?.name ?? "All stages"} · {DEAL_DATE_FIELDS.find(f => f.value === dateFilter.field)?.label} · {dateFilter.start || "Any start"} through {dateFilter.end || "Any end"} · No date: {dateFilter.undated}{data && ` · ${deals.length} shown`}</span></div>
+      <fieldset id="deal-filters" hidden={!filtersOpen} className="card" style={{ marginBottom: 12 }}>
         <legend>Timeline filter · inclusive dates (IST)</legend>
         <label>Opportunity type <select value={opportunity} onChange={e => setOpportunity(e.target.value)}>
           <option value="">All types</option>{OPPORTUNITY_TYPES.map(type => <option key={type.value} value={type.value}>{type.label}</option>)}<option value="unclassified">Unclassified</option>
@@ -70,6 +73,7 @@ export default function DealsView() {
         <p className="sub">Applies to board, list and all displayed counts. {deals.filter(d => !d[dateFilter.field]).length} shown without a date.</p>
         {invalidRange && <p className="err" role="alert">From must be on or before Through.</p>}
       </fieldset>
+      {!filtersOpen && invalidRange && <p className="err" role="alert">From must be on or before Through.</p>}
       {data && lifecycle === "sales" && <div className="card" role="region" aria-label="Open commercial pipeline" style={{ marginBottom: 12 }}>
         <b>{old ? "Archived open-stage" : "Open"} RFP/RFA + OTC: {openCommercial.length}</b>
         <div className="sub">Includes not-started, active and paused sales stages; excludes Won, Lost, No-Go and delivery.</div>
@@ -120,7 +124,7 @@ export default function DealsView() {
 }
 
 function DealList({ deals }: { deals: D[] }) {
-  return <div style={{ overflowX: "auto" }}><table className="tbl">
+  return <div className="deal-list-scroll" tabIndex={0} role="region" aria-label="Deals table"><table className="tbl">
     <thead><tr><th>Deal</th><th>Opportunity type</th><th>Organisation</th><th>Stage</th><th>Value</th><th>Next step</th><th>Leader</th></tr></thead>
     <tbody>{deals.map(d => <tr key={d.id}>
       <td><Link href={`/projects/${d.id}`}>{d.name}</Link> {d.stalled && <span className="chip gold">Stalled</span>}</td>

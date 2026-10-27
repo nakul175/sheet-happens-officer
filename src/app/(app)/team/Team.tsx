@@ -5,6 +5,7 @@ import { api, useGet } from "@/components/api";
 import { Confirm, Field, Modal, Skeleton } from "@/components/ui";
 import { Page, roleLabel, useMe } from "../Shell";
 
+import "./team-approved.css";
 type P = { id: string; name: string; email?: string; orgRole?: "MEMBER" | "ADMIN" | "SUPER_ADMIN"; leads?: { id: string; name: string }[]; status?: "ACTIVE" | "UNVERIFIED" | "DEACTIVATED" };
 const STATUS: Record<string, [string, string]> = { ACTIVE: ["Active", "green"], UNVERIFIED: ["Unverified", "gold"], DEACTIVATED: ["Deactivated", "grey"] };
 
@@ -51,7 +52,7 @@ export default function Team() {
   }
 
   return (
-    <Page dock title="Team" sub={admin ? "Everyone in the workspace" : "People you can add to projects"}
+    <Page className="team-approved" title="Team" sub={admin ? "Everyone in the workspace" : "People you can add to projects"}
       actions={me.orgRole === "SUPER_ADMIN" ? <button className="btn" onClick={() => setAdding(true)}>+ Add person</button> : undefined}>
       {err && <div className="err" role="alert">{err}</div>}
       {note && <div className={note.ok ? "ok" : "err"} role="status">{note.text} <button className="btn ghost sm" onClick={() => setNote(null)}>Close</button></div>}
@@ -70,20 +71,19 @@ export default function Team() {
       {t.data && admin && (
         <div className="scroll">
           <table className="tbl stack">
-            <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Leads</th><th>Status</th><th>Actions</th></tr></thead>
+            <thead><tr><th>Person</th><th>Workspace role</th><th>Leads</th><th>Status</th><th>Actions</th></tr></thead>
             <tbody>
               {people.map((p) => {
                 const [sl, sc] = STATUS[p.status ?? "ACTIVE"];
                 const self = p.id === me.id;
                 return (
                   <tr key={p.id}>
-                    <td data-label="Name"><b style={{ fontWeight: 500 }}><Link href={`/team/${p.id}`} prefetch={false}>{p.name}</Link></b>{self && " (you)"}</td>
-                    <td data-label="Email">{p.email}</td>
-                    <td data-label="Role"><span className={`chip${p.orgRole === "MEMBER" ? " grey" : ""}`}>{roleLabel(p.orgRole!)}</span></td>
+                    <td data-label="Person"><b style={{ fontWeight: 500 }}><Link href={`/team/${p.id}`} prefetch={false}>{p.name}</Link></b>{self && " (you)"}<small className="team-email">{p.email}</small></td>
+                    <td data-label="Workspace role"><span>{roleLabel(p.orgRole!)}</span></td>
                     <td data-label="Leads"><Leads p={p} /></td>
-                    <td data-label="Status"><span className={`chip ${sc}`}>{sl}</span></td>
+                    <td data-label="Status"><span className={`team-status ${sc}`}>{sl}</span></td>
                     <td data-label="Actions">
-                      <span className="pills">
+                      {((p.status === "ACTIVE" && p.orgRole !== "SUPER_ADMIN") || (me.orgRole === "SUPER_ADMIN" && !self && p.status !== "DEACTIVATED") || p.status === "DEACTIVATED") ? <details className="team-more" onKeyDown={e => { if (e.key === "Escape") { e.currentTarget.open = false; e.currentTarget.querySelector("summary")?.focus(); } }}><summary className="btn ghost" aria-label={`More actions for ${p.name}`}>More</summary><div className="team-more-actions">
                         {p.status === "ACTIVE" && p.orgRole !== "SUPER_ADMIN" && (
                           me.orgRole === "SUPER_ADMIN"
                             ? p.orgRole === "ADMIN"
@@ -98,7 +98,7 @@ export default function Team() {
                           <button className="btn ghost sm" onClick={() => resend(p)}>Resend sign-in details</button>
                         )}
                         {p.status === "DEACTIVATED" && <button className="btn ghost sm" onClick={() => act(p, "reactivate")}>Reactivate</button>}
-                      </span>
+                      </div></details> : "—"}
                     </td>
                   </tr>
                 );

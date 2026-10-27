@@ -22,9 +22,9 @@ const KIND: Record<string, string> = { MEETING: "Meeting", CALL: "Call", INTRODU
 
 function TreeView({ node, current }: { node: Tree; current: string }) {
   return (
-    <ul style={{ listStyle: "none", paddingLeft: 14, margin: "2px 0" }}>
+    <ul className="org-tree-list">
       <li>
-        {node.id === current ? <b aria-current="page" className="chip">{node.name}</b> : <Link href={`/accounts/${node.id}`}>{node.name}</Link>}
+        {node.id === current ? <b aria-current="page" className="org-tree-current">{node.name}</b> : <Link href={`/accounts/${node.id}`}>{node.name}</Link>}
         {node.children.map((c) => <TreeView key={c.id} node={c} current={current} />)}
       </li>
     </ul>
@@ -128,6 +128,7 @@ export default function OrgView({ params }: { params: Promise<{ id: string }> })
   const [hist, setHist] = useState<H | null>(null);
   const [dlg, setDlg] = useState<null | { contact?: Contact }>(null);
   const [edit, setEdit] = useState(false);
+  const [addingNote, setAddingNote] = useState(false);
   const [rm, setRm] = useState<Contact | null>(null);
   const o = data?.organisation;
   if (status === 404) return <Page title="This organisation isn't available"><div className="card empty"><Link href="/accounts">Back to Accounts</Link></div></Page>;
@@ -174,36 +175,33 @@ export default function OrgView({ params }: { params: Promise<{ id: string }> })
       </div>
 
       </section><section hidden={section !== "notes"} aria-label="Notes">
-      <div className="grp">Notes</div>
-      {o && !o.archived && <NoteForm org={o} onDone={reload} />}
+      <div className="org-overview-panel org-notes-panel"><div className="org-preview-heading"><h2>Notes</h2>{o && !o.archived && <button className="btn" aria-expanded={addingNote} aria-controls="org-note-form" onClick={() => setAddingNote(!addingNote)}>{addingNote ? "Cancel note" : "+ Add note"}</button>}</div>
+      {o && !o.archived && addingNote && <div id="org-note-form"><NoteForm org={o} onDone={reload} /></div>}
       {o && o.notes.length === 0 && <div className="card empty">No notes yet.</div>}
       {o && o.notes.length > 0 && (
-        <div className="list">
+        <div className="org-notes-feed">
           {o.notes.map((n) => (
             <div key={n.id} className="item" style={{ alignItems: "flex-start" }}>
               <div className="t">
-                <div><span className="chip">{KIND[n.kind]}</span> {dueLabel(n.date)} · {n.author.name}{n.deal && <> · <Link href={`/projects/${n.deal.id}`}>{n.deal.name}</Link></>}</div>
+                <div><span className="note-kind">{KIND[n.kind]}</span> {dueLabel(n.date)} · {n.author.name}{n.deal && <> · <Link href={`/projects/${n.deal.id}`}>{n.deal.name}</Link></>}</div>
                 <div style={{ whiteSpace: "pre-wrap" }}>{n.text}</div>
                 {n.contacts.length > 0 && <small style={{ display: "block" }}>With {n.contacts.map((c) => c.name).join(", ")}</small>}
               </div>
-              {n.canDelete && <button className="link" onClick={async () => { await api("DELETE", `/api/notes/${n.id}`); reload(); }}>Delete</button>}
+              {n.canDelete && <button className="link" aria-label={`Delete ${KIND[n.kind]} note by ${n.author.name}`} onClick={async () => { await api("DELETE", `/api/notes/${n.id}`); reload(); }}>Delete</button>}
             </div>
           ))}
         </div>
       )}
 
-      </section><section hidden={section !== "tasks"} aria-label="Linked tasks">
-      <div className="grp">Tasks linked here</div>
+      </div></section><section hidden={section !== "tasks"} aria-label="Linked tasks">
+      <div className="org-overview-panel"><h2>Linked tasks {o && `(${o.tasks.length})`}</h2>
       {o && o.tasks.length === 0 && <div className="card empty">No linked tasks you can see.</div>}
-      {o && o.tasks.length > 0 && (
-        <div className="list">{o.tasks.map((t) => (
-          <Link key={t.id} href={`/projects/${t.project.id}?task=${t.id}`} className="item"><div className="t"><b style={t.done ? { textDecoration: "line-through" } : undefined}>{t.title}</b><small>{t.project.name} · {t.assignee}</small></div><span>{dueLabel(t.dueDate)}</span></Link>
-        ))}</div>
-      )}
+      {o && o.tasks.length > 0 && <div className="acct-scroll" tabIndex={0} role="region" aria-label="Linked tasks table"><table className="tbl"><thead><tr><th>Task</th><th>Project</th><th>Assignee</th><th>Due date</th></tr></thead><tbody>{o.tasks.map(t => <tr key={t.id}><td><Link href={`/projects/${t.project.id}?task=${t.id}`} style={t.done ? { textDecoration: "line-through" } : undefined}>{t.title}</Link>{t.done && <small className="contact-secondary">Completed</small>}</td><td><Link href={`/projects/${t.project.id}`}>{t.project.name}</Link></td><td>{t.assignee}</td><td>{dueLabel(t.dueDate)}</td></tr>)}</tbody></table></div>}
+      </div>
 
       </section><section hidden={section !== "tree"} aria-label="Organisation tree">
       {o && !o.tree && <p>No organisation tree available.</p>}
-      {o?.tree && <><div className="grp">Organisation tree</div><div className="card">{<TreeView node={o.tree} current={o.id} />}</div></>}
+      {o?.tree && <div className="org-overview-panel"><h2>Organisation structure</h2><div className="org-tree-scroll" tabIndex={0} role="region" aria-label="Organisation hierarchy"><TreeView node={o.tree} current={o.id} /></div></div>}
       </section>
       {hist && <><div className="grp">History</div><div className="list">{hist.map((h) => <div key={h.id} className="row">{h.who} · {h.action} · {new Date(h.at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}</div>)}</div></>}
 

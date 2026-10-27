@@ -5,6 +5,13 @@ import test from "node:test";
 
 const production = "ee59582dffcbd8cc3067e689b2bb73cf63781cb7";
 const allowed = new Set([
+  // SHO-3093..3097 approved Notes, Linked tasks, Tree, Deals and Team.
+  "src/app/(app)/deals/deals-approved.css",
+  "src/app/(app)/team/Team.tsx",
+  "src/app/(app)/team/team-approved.css",
+  "tests/team-approved.test.tsx",
+  "tests/e2e/stories/APL-2484.spec.ts",
+  "docs/notes-deals-team-release.md",
   // SHO-3090..3092 approved Accounts, Organisation overview and Contacts.
   "src/app/(app)/accounts/AccountsView.tsx",
   "src/app/(app)/accounts/accounts-approved.css",

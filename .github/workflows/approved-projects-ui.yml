@@ -1,7 +1,7 @@
 name: Approved Projects UI release validation
 on:
   pull_request:
-    branches: [release/scoped4-20261025, change/sho-3077-projects, change/sho-3084-settings, change/sho-3087-dashboard]
+    branches: [release/scoped4-20261025, change/sho-3077-projects, change/sho-3084-settings, change/sho-3087-dashboard, change/sho-3090-accounts]
   workflow_dispatch:
 permissions:
   contents: read
