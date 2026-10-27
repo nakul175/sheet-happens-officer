@@ -15,3 +15,8 @@ export function centralIdentitySecret(env: Record<string, string | undefined> = 
         throw Error('Central login not configured');
     return value;
 }
+
+/** Fixed public origin; never trust the reverse proxy's internal request URL or caller forwarding headers. */
+export function holySheetHostOrigin(env: Record<string, string | undefined> = process.env) {
+ return holyQaIdentity(env)?.origin ?? 'https://sheethappensofficer.aplyd.org';
+}

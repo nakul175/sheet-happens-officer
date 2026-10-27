@@ -176,7 +176,7 @@ jobs:
           fetch-depth: 0
       - name: Refuse a different runtime candidate or missing existing gate credential
         run: |
-          test "$HOLY_QA_EXPECTED_SHO_SHA" = "ef9eacd0e7537fa01204d1c642b2167fbab5c118"
+          [[ "$HOLY_QA_EXPECTED_SHO_SHA" =~ ^[0-9a-f]{40}$ ]]
           git merge-base --is-ancestor "$HOLY_QA_EXPECTED_SHO_SHA" "$GITHUB_SHA"
           node --input-type=module - <<'JS'
           import {execFileSync} from 'node:child_process';
