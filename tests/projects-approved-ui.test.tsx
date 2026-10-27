@@ -29,7 +29,7 @@ async function click(text: string) { await act(async () => { [...document.queryS
 afterEach(() => { act(() => root?.unmount()); root = undefined; vi.restoreAllMocks(); });
 it("keeps the desktop navigation at content height on short project screens", () => {
   const css = readFileSync("src/app/(app)/nav-header.css", "utf8");
-  expect(css).toMatch(/\.shell\.shell\s*\{[^}]*grid-template-rows:\s*auto minmax\(0,1fr\)/s);
+  expect(css).toMatch(/\.shell\.shell\s*\{[^}]*grid-template-rows:\s*auto minmax\(0,1fr\)/);
 });
 it("keeps full stored names, classification, absent-data fallbacks and explicit task counts", async () => {
   await mount();
