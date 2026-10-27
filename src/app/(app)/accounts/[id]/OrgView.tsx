@@ -74,7 +74,7 @@ function ContactDialog({ orgId, contact, onClose, onDone }: { orgId: string; con
       </div><Field label="Phone">{(id) => <input id={id} className="in" value={v.phone} onChange={set("phone")} />}</Field>
       <fieldset style={{ border: 0, padding: 0, margin: "8px 0" }}>
         <legend style={{ fontSize: 13, fontWeight: 600 }}>Known by</legend><p className="hint">Choose at least one person.</p>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
+        <div className="known-person-list">
           {team.data?.people.map((p) => (
             <label key={p.id} style={{ fontSize: 14 }}><input type="checkbox" checked={known.includes(p.id)} onChange={(e) => setKnown(e.target.checked ? [...known, p.id] : known.filter((x) => x !== p.id))} /> {p.name}</label>
           ))}
