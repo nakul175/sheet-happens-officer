@@ -16,6 +16,7 @@ import { DealPanel, openTaskFeed, type DealBlock, type OpenTaskFeed } from "@/co
 import { Page, useMe } from "../../Shell";
 import "../projects.css";
 import "./approved-list.css";
+import "./approved-board.css";
 import { InlineCells, inlineEditable, useInlineEdit } from "@/components/inline";
 import { ListControls } from "./ListControls";
 import { apiQuery, groupTasks, isFiltered, readState, sameState, type ListState } from "./listview";
@@ -185,9 +186,9 @@ function Inner({ id }: { id: string }) {
   const archivedBanner = p?.archived && <div className="box warn" style={{ marginBottom: 12 }}>This project is archived and read-only.</div>;
 
   return (
-    <Page bar className={view === "list" ? "project-list-view" : undefined} docTitle={p?.name}
-      beforeTitle={view === "list" && <nav className="project-breadcrumb" aria-label="Breadcrumb"><Link href={p?.type === "DEAL" ? "/deals" : "/projects"}>{p?.type === "DEAL" ? "Deals" : "Projects"}</Link> / {p?.name ?? "…"}</nav>}
-      title={view === "list" ? (p?.name ?? "…") : <span className="crumb"><Link href={p?.type === "DEAL" ? "/deals" : "/projects"}>{p?.type === "DEAL" ? "Deals" : "Projects"}</Link> / <span style={{ color: "var(--ink)" }}>{p?.name ?? "…"}</span></span>}
+    <Page bar className={view === "list" ? "project-list-view" : "project-board-view"} docTitle={p?.name}
+      beforeTitle={<nav className="project-breadcrumb" aria-label="Breadcrumb"><Link href={p?.type === "DEAL" ? "/deals" : "/projects"}>{p?.type === "DEAL" ? "Deals" : "Projects"}</Link> / {p?.name ?? "…"}</nav>}
+      title={p?.name ?? "…"}
       sub={p && <>{p.isVertical && <span className="chip">Vertical task board</span>}<span className="chip">You: {ROLE[p.role]}</span>{tk.data?.summary && (
         <span className="lc-sum">
           {tk.data.summary.overdue > 0 && <span className="chip red">{tk.data.summary.overdue} overdue</span>}
@@ -196,7 +197,7 @@ function Inner({ id }: { id: string }) {
         </span>
       )}</>}
       actions={<>
-        {view === "list" && <div className="project-secondary-actions"><Link href={`/projects/${id}/members`}>Members</Link>{p && p.role !== "VIEWER" && <Link href={`/projects/${id}/activity`}>Activity</Link>}<Link href={`/projects/${id}/trash`}>Trash</Link></div>}
+        {<div className="project-secondary-actions"><Link href={`/projects/${id}/members`}>Members</Link>{p && p.role !== "VIEWER" && <Link href={`/projects/${id}/activity`}>Activity</Link>}<Link href={`/projects/${id}/trash`}>Trash</Link></div>}
         {canWrite && <button className="btn" onClick={() => setAdding(true)}>+ Add task</button>}
       </>}>
       {archivedBanner}
@@ -219,7 +220,7 @@ function Inner({ id }: { id: string }) {
           </div>
         )}
         <span className="sp" />
-        {view === "board" && <><Link href={`/projects/${id}/members`}>Members</Link><Link href={`/projects/${id}/trash`}>Trash</Link>{p && p.role !== "VIEWER" && <Link href={`/projects/${id}/activity`}>Activity</Link>}</>}
+
       </div>
       {p && secs && (
         <ListControls state={ls} members={p.members} onChange={setList} showGroup={view === "list"}
@@ -299,7 +300,7 @@ function Inner({ id }: { id: string }) {
               {tasksOf(s).map((t) => (
                 <div key={t.id} className="bcard" draggable={canWrite && mouse} onDragStart={() => setDragId(t.id)} onDragEnd={() => { setDragId(null); setOverCol(null); }}
                   onClick={() => openTask(t.id)} tabIndex={0} onKeyDown={(e) => { if (e.key === "Enter") openTask(t.id); }}>
-                  <div>{t.title}</div>
+                  <div className="board-task-title">{t.title}{t.completedAt && <span className="board-complete" aria-label="Completed"> ✓</span>}</div>
                   <div className="row2">
                     <span className={!t.completedAt && isOverdue(t.dueDate) ? "over" : undefined} style={isOverdue(t.dueDate) && !t.completedAt ? { color: "var(--danger)" } : undefined}>{dueState(t.dueDate, !!t.completedAt)}</span>
                     <Pri p={t.priority} />

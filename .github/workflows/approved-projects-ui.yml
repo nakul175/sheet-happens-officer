@@ -1,7 +1,5 @@
 name: Approved Projects UI release validation
 on:
-  push:
-    branches: [change/sho-3077-projects]
   pull_request:
     branches: [release/scoped4-20261025]
   workflow_dispatch:
@@ -59,7 +57,7 @@ jobs:
       - run: npm ci --no-audit --no-fund
       - name: Sequential SHO-3038 release scope
         run: node --test scripts/acceptance/sho-3038-scope.test.mjs
-      - name: Approved Projects, Vertical boards, New project and task-list regression
+      - name: Approved Projects UI, Board and task-details regressions
         run: npx vitest run -c vitest.projects-approved.config.mts
       - name: SHO-3038 collaborator acceptance
         run: npx vitest run -c vitest.sho-3038.config.mts

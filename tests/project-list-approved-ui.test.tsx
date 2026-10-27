@@ -7,8 +7,8 @@ vi.mock("next/navigation", () => ({ usePathname: () => "/projects/fixture", useS
 vi.mock("@/app/(app)/Shell", () => ({ Page: ({ children, actions, beforeTitle, title, className }: { children: React.ReactNode; actions: React.ReactNode; beforeTitle: React.ReactNode; title: React.ReactNode; className: string }) => h("main", { className }, beforeTitle, h("h1", null, title), actions, children), useMe: () => ({ id: "me", orgRole: "MEMBER" }) }));
 import ProjectView from "../src/app/(app)/projects/[id]/ProjectView";
 let root: Root | undefined;
-async function mount(role = "EDITOR", archived = false) {
-  nav.query = ""; nav.push.mockReset(); nav.replace.mockReset();
+async function mount(role = "EDITOR", archived = false, query = "") {
+  nav.query = query; nav.push.mockReset(); nav.replace.mockReset();
   Object.defineProperty(window, "matchMedia", { configurable: true, value: () => ({ matches: false, addEventListener() {}, removeEventListener() {} }) });
   document.body.innerHTML = '<div id="root"></div>';
   const task = { updatedAt: "2026-10-27T00:00:00.000Z", sectionId: "todo", priority: "MEDIUM", dueDate: "2026-10-30", blocked: false, completedAt: null, assignee: { id: "me", name: "Me" }, collaborators: [], awaitingApproval: false, canClose: true, subtasks: { total: 0, open: 0 } };
@@ -53,4 +53,17 @@ it("archived Viewer has no write or selection actions while keeping navigation",
   expect(document.querySelector('.sel')).toBeNull();
   expect([...document.querySelectorAll('button')].some(b => b.textContent === "+ Add task")).toBe(false);
   expect(document.querySelector('a[href="/projects/fixture/members"]')).not.toBeNull();
+});
+
+it("Board hides Group and bulk selectors, preserves visible Move to and isolates its click", async () => {
+  await mount("EDITOR", false, "view=board");
+  expect(document.querySelector(".project-board-view")).not.toBeNull();
+  expect(document.querySelector(".sel")).toBeNull();
+  expect(document.body.textContent).not.toContain("Group by");
+  const move = document.querySelector<HTMLButtonElement>(".bmove")!;
+  expect(move).not.toBeNull();
+  await act(async () => move.click());
+  expect(document.querySelector('[role="dialog"]')).not.toBeNull();
+  expect(nav.push).not.toHaveBeenCalled();
+  expect(document.querySelector('[aria-label^="Section menu"]')).toBeNull();
 });

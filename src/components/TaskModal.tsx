@@ -1,5 +1,6 @@
 "use client";
 import Link from "next/link";
+import "./task-details.css";
 import { WorkspaceTaskPerson } from "@/components/WorkspaceTaskPerson";
 import { useState } from "react";
 import { PRIORITY, ROLE, api, dueLabel, useGet } from "@/components/api";
@@ -44,7 +45,7 @@ export function TaskModal({ id, me, onClose, onChanged, asPage }: { id: string; 
   const [convert, setConvert] = useState(false);
   const meCtx = useMe();
 
-  const body = (inner: React.ReactNode) => (asPage ? <div className="modal" style={{ margin: "0 auto" }}>{inner}</div> : <Modal label="Task" onClose={onClose}>{inner}</Modal>);
+  const body = (inner: React.ReactNode) => (asPage ? <div className="modal task-details task-details-page" style={{ margin: "0 auto" }}>{inner}</div> : <Modal label="Task" onClose={onClose}><div className="task-details">{inner}</div></Modal>);
 
   if (t.loading) return body(<Skeleton />);
   if (!task) {
@@ -138,6 +139,23 @@ export function TaskModal({ id, me, onClose, onChanged, asPage }: { id: string; 
           {task.awaitingApproval && (
             <div className="box warn">Waiting for <b>{task.approver?.name}</b> to approve this task.</div>
           )}
+          <div className="actions" style={{ justifyContent: "flex-start" }}>
+            {canEdit && !done && task.approver && !task.awaitingApproval && !task.parentId && task.assignee.id === me && (
+              <button className="btn" disabled={busy} onClick={() => run(api("POST", `/api/tasks/${id}/send-for-approval`, {}))}>Send for approval</button>
+            )}
+            {canEdit && task.awaitingApproval && (task.approver?.id === me || canManage) && (
+              <button className="btn ghost" disabled={busy} onClick={() => run(api("POST", `/api/tasks/${id}/send-back`, {}))}>Send back</button>
+            )}
+            {closeControlOffered({ canEdit, done, canClose: task.canClose }) && (
+              <button className="btn" disabled={busy} onClick={() => complete()}>{task.approver ? "Close task" : "Mark complete"}</button>
+            )}
+            {canEdit && done && <button className="btn ghost" disabled={busy} onClick={() => run(api("POST", `/api/tasks/${id}/reopen`, {}))}>Reopen</button>}
+            {canEdit && !holding && (
+              <button className="btn ghost sm" style={{ color: "var(--danger)", borderColor: "var(--danger-line)" }} onClick={() => setTrash(true)}>Move to Trash</button>
+            )}
+          </div>
+          <div className="task-detail-layout">
+          <aside className="task-details-panel" aria-label="Task details"><h2>Details</h2>
           <div className="fgrid">
             <span className="lbl">Assignee</span>
             <div>
@@ -229,6 +247,8 @@ export function TaskModal({ id, me, onClose, onChanged, asPage }: { id: string; 
               )}
             </div>
           </div>
+          </aside>
+          <div className="task-main-panel">
           <div className="field">
             <label htmlFor="desc">Description</label>
             <textarea id="desc" className="in" readOnly={!canEdit || holding} defaultValue={task.description ?? ""} key={task.updatedAt} placeholder={canEdit ? "Add details" : "No description"}
@@ -275,21 +295,9 @@ export function TaskModal({ id, me, onClose, onChanged, asPage }: { id: string; 
             </div>
           )}
           {task.commentsEnabled && <Comments taskId={id} onChanged={onChanged} />}
-          <div className="actions" style={{ justifyContent: "flex-start" }}>
-            {canEdit && !done && task.approver && !task.awaitingApproval && !task.parentId && task.assignee.id === me && (
-              <button className="btn" disabled={busy} onClick={() => run(api("POST", `/api/tasks/${id}/send-for-approval`, {}))}>Send for approval</button>
-            )}
-            {canEdit && task.awaitingApproval && (task.approver?.id === me || canManage) && (
-              <button className="btn ghost" disabled={busy} onClick={() => run(api("POST", `/api/tasks/${id}/send-back`, {}))}>Send back</button>
-            )}
-            {closeControlOffered({ canEdit, done, canClose: task.canClose }) && (
-              <button className="btn" disabled={busy} onClick={() => complete()}>{task.approver ? "Close task" : "Mark complete"}</button>
-            )}
-            {canEdit && done && <button className="btn ghost" disabled={busy} onClick={() => run(api("POST", `/api/tasks/${id}/reopen`, {}))}>Reopen</button>}
-            {canEdit && !holding && (
-              <button className="btn ghost sm" style={{ color: "var(--danger)", borderColor: "var(--danger-line)" }} onClick={() => setTrash(true)}>Move to Trash</button>
-            )}
           </div>
+          </div>
+
         </>,
       )}
       {convert && <ConvertDialog task={task} meId={me} onClose={() => setConvert(false)} />}

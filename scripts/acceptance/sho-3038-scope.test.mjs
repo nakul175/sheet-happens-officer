@@ -5,8 +5,15 @@ import test from "node:test";
 
 const production = "ee59582dffcbd8cc3067e689b2bb73cf63781cb7";
 const allowed = new Set([
-  // SHO-3077..3080: explicitly approved UI surfaces; runtime/auth invariants below remain unchanged.
+  // SHO-3077..3083: explicitly approved UI surfaces; runtime/auth invariants below remain unchanged.
   "src/app/(app)/Shell.tsx",
+  "src/app/(app)/nav-header.css",
+  "public/logo-icon-reversed.svg",
+  "src/app/(app)/projects/[id]/approved-board.css",
+  "src/components/TaskModal.tsx",
+  "src/components/task-details.css",
+  "src/app/(app)/tasks/[id]/TaskPage.tsx",
+  "tests/task-details-approved-ui.test.tsx",
   "src/app/(app)/projects/projects.css",
   "src/app/(app)/projects/[id]/ProjectView.tsx",
   "src/app/(app)/projects/[id]/approved-list.css",
