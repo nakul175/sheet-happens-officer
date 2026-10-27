@@ -203,7 +203,7 @@ jobs:
       - name: Retrieve only the reviewed temporary synthetic login fixture
         run: |
           umask 077
-          ssh -o StrictHostKeyChecking=yes -o BatchMode=yes deploy@168.144.144.69 'cat /home/deploy/.local/share/sho3062-qa/login.json' > "$HOLY_QA_LOGIN_FILE"
+          ssh -o StrictHostKeyChecking=yes -o BatchMode=yes deploy@168.144.144.69 'cat /home/deploy/.local/share/sho3062-qa/holy3-closeout-login.json' > "$HOLY_QA_LOGIN_FILE"
       - name: Real paired normal-login workflow and permission revocation
         run: npx playwright test -c playwright.holy-qa.config.ts | tee holy3062-live.log
       - name: Preserve the private ID receipt only on the host

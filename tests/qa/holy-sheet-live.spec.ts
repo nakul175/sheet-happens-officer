@@ -1,8 +1,13 @@
 import {test,expect} from '@playwright/test';
 import {readFile,writeFile} from 'node:fs/promises';
 import {createHash} from 'node:crypto';
+import {execFileSync} from 'node:child_process';
 const SHO='https://sho-qa.aplyd.org',HS='https://staging.holysheet.aplyd.org';
 const sha=(value:string)=>createHash('sha256').update(value).digest('hex');
+const signal=(phase:string)=>{
+ const receipt={phase,run:process.env.GITHUB_RUN_ID,source:process.env.GITHUB_SHA,at:new Date().toISOString()};
+ execFileSync('ssh',['-o','StrictHostKeyChecking=yes','-o','BatchMode=yes','deploy@168.144.144.69','umask 077; cat > /home/deploy/.local/share/sho3062-qa/holy3-closeout-status.json'],{input:JSON.stringify(receipt),stdio:['pipe','ignore','pipe']});
+};
 // No production target, role provisioning, bearer token, cookie import or trace.
 test('SHO-3062 paired normal-login qualification and HOLY-4 AC16',async({browser})=>{
  test.setTimeout(600000);
@@ -14,6 +19,7 @@ test('SHO-3062 paired normal-login qualification and HOLY-4 AC16',async({browser
  ctx.setDefaultTimeout(30000);ctx.setDefaultNavigationTimeout(45000);
  const page=await ctx.newPage(),results:{mapping:string;result:string}[]=[];
  page.on('response',async response=>{if(response.url().startsWith(SHO+'/api/')&&response.url().endsWith('/documents')&&response.request().method()!=='GET'){console.log('QA_LINK_RESPONSE '+response.status());if(!response.ok()){try{console.log('QA_LINK_ERROR '+(await response.json()).error);}catch{}}}});
+ signal('STARTED');
  const projectName=`ZZ-TEST HOLY3062 ${Date.now()}`;let projectId='',createdPageId='',taskId='';
  async function call(method:string,path:string,data?:unknown){return ctx.request.fetch(SHO+path,{method,headers:{Origin:SHO},data});}
  async function hsDocument(id:string){return ctx.request.get(`${HS}/api/v1/pages/${id}/document`);}
@@ -62,6 +68,7 @@ test('SHO-3062 paired normal-login qualification and HOLY-4 AC16',async({browser
    await docs().getByRole('button',{name:'Link existing page',exact:true}).click();await picker().getByRole('combobox',{name:'Space',exact:true}).selectOption('');await picker().getByLabel('Find existing page',{exact:true}).fill(document.title);await picker().getByRole('button',{name:document.title,exact:true}).click();
    await expect(editor().getByLabel('Page title',{exact:true})).toHaveValue(document.title,{timeout:30000});expect((await metadata('tasks',taskId)).links.some((p:{pageId:string})=>p.pageId===fixture.sharedPageId)).toBe(true);
    await page.screenshot({path:'test-results/holy3062-embedded-allowed.png'});
+   signal('READY_FOR_OWNER_REVOCATION');
    console.log('HOLY3062_READY_FOR_OWNER_REVOCATION');
    // Coordinator removes only this dummy's grant on the dedicated HOLY4 fixture.
    await expect.poll(async()=>(await hsDocument(fixture.sharedPageId)).status(),{timeout:180000,intervals:[1000,2000,3000]}).toBe(404);
@@ -71,6 +78,7 @@ test('SHO-3062 paired normal-login qualification and HOLY-4 AC16',async({browser
    const denied=await ctx.request.post(`${HS}/api/v1/pages/${fixture.sharedPageId}/operations`,{headers:{Origin:HS},data:{operationId:crypto.randomUUID(),baseVersion:document.version,title:document.title,document:document.document}});expect(denied.status()).toBe(404);
    await page.screenshot({path:'test-results/holy3062-native-member-hs-revoked.png'});
    results.push({mapping:'SHO-3062-053/HOLY-4-047',result:'native membership retained; actual embedded read and save denied after HS revoke; session still valid'});
+   signal('READY_FOR_OWNER_RESTORE');
    console.log('HOLY3062_READY_FOR_OWNER_RESTORE');
    await expect.poll(async()=>(await hsDocument(fixture.sharedPageId)).status(),{timeout:180000,intervals:[1000,2000,3000]}).toBe(200);
    const restored=await(await hsDocument(fixture.sharedPageId)).json();expect((restored.page??restored).version).toBe(document.version);
@@ -82,6 +90,7 @@ test('SHO-3062 paired normal-login qualification and HOLY-4 AC16',async({browser
   if(projectId){const cleanup=await call('POST',`/api/projects/${projectId}/delete`,{confirmationName:projectName});results.push({mapping:'owned-native-fixture-cleanup',result:cleanup.status()===200?'recoverable project trash':'retained; inspect private receipt'});}
   await writeFile('test-results/holy3062-private-receipt.json',JSON.stringify({...receipts,results},null,2),{mode:0o600});
   await writeFile('test-results/holy3062-public-summary.json',JSON.stringify({sho:process.env.HOLY_QA_EXPECTED_SHO_SHA,results,fixtureFingerprint:sha(fixture.sharedPageId),scope:'one synthetic actor role phases; not full original O/E/V/X W1/W2 manual matrix'},null,2));
+  signal('FINISHED');
   await ctx.close();
  }
 });
