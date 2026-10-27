@@ -2,6 +2,7 @@
 import { act, createElement as h } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, expect, it, vi } from "vitest";
+import { readFileSync } from "node:fs";
 const state = vi.hoisted(() => ({ orgRole: "ADMIN" }));
 vi.mock("@/app/(app)/Shell", () => ({ Page: ({ children, actions }: { children: React.ReactNode; actions: React.ReactNode }) => h("main", null, actions, children), useMe: () => state }));
 import ProjectsView from "../src/app/(app)/projects/ProjectsView";
@@ -26,6 +27,10 @@ async function mount(role = "ADMIN", error = false) {
 }
 async function click(text: string) { await act(async () => { [...document.querySelectorAll("button")].find(b => b.textContent === text)!.click(); }); }
 afterEach(() => { act(() => root?.unmount()); root = undefined; vi.restoreAllMocks(); });
+it("keeps the desktop navigation at content height on short project screens", () => {
+  const css = readFileSync("src/app/(app)/nav-header.css", "utf8");
+  expect(css).toMatch(/\.shell\.shell\s*\{[^}]*grid-template-rows:\s*auto minmax\(0,1fr\)/s);
+});
 it("keeps full stored names, classification, absent-data fallbacks and explicit task counts", async () => {
   await mount();
   const card = document.querySelector('a[href="/projects/delivery"]')!;
