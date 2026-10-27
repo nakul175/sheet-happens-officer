@@ -8,7 +8,7 @@ import { PRIORITY, ROLE, api, dueLabel, dueState, rowKeys, initials, isOverdue, 
 import { errorMessage, isVersionConflict } from "@/lib/version-error";
 import { WorkspaceTaskPerson, type WorkspaceTaskCandidate } from "@/components/WorkspaceTaskPerson";
 import { TaskModal } from "@/components/TaskModal";
-import { AvatarGroup, Pri, Tick } from "@/components/TaskParts";
+import { AvatarGroup, Pri, SectionSelection, Tick } from "@/components/TaskParts";
 import { Confirm, Field, LoadFailed, Menu, Modal, Skeleton } from "@/components/ui";
 import { MoveSheet } from "@/components/MoveSheet";
 import "@/components/board.css";
@@ -16,6 +16,8 @@ import { DealPanel, openTaskFeed, type DealBlock, type OpenTaskFeed } from "@/co
 import { Page, useMe } from "../../Shell";
 import "../projects.css";
 import "./approved-list.css";
+import "../../accounts/forms-approved.css";
+import "./add-task-approved.css";
 import "./approved-board.css";
 import { InlineCells, inlineEditable, useInlineEdit } from "@/components/inline";
 import { ListControls } from "./ListControls";
@@ -174,7 +176,7 @@ function Inner({ id }: { id: string }) {
   const rowOf = (t: T) => (
     <div key={t.id} className={`item click${canWrite ? " sel-row" : ""}${sel.has(t.id) ? " picked" : ""}`} {...rowKeys(() => openTask(t.id))}>
       {canWrite && <label className="sel" onClick={(e) => e.stopPropagation()}><input type="checkbox" checked={sel.has(t.id)} aria-label={`Select "${t.title}"`} onChange={(e) => pick([t.id], e.target.checked)} /></label>}
-      <Tick id={t.id} title={t.title} done={!!t.completedAt} allowed={completeTickAllowed({ canWrite, canClose: t.canClose, completedAt: t.completedAt })} version={t.updatedAt} onDone={refresh} onStale={refresh} />
+      <Tick id={t.id} title={t.title} done={!!t.completedAt} allowed={completeTickAllowed({ canWrite, canClose: t.canClose, completedAt: t.completedAt })} disabledReason={p?.archived ? "This project is archived and read-only." : p?.role === "VIEWER" ? "Viewers can read tasks but cannot change them." : undefined} version={t.updatedAt} onDone={refresh} onStale={refresh} />
       <div className="t"><b className="ttl">{t.title}</b>{t.subtasks.total > 0 && <small>{t.subtasks.total - t.subtasks.open} of {t.subtasks.total} subtasks</small>}{!!t.commentCount && <small>{t.commentCount} {t.commentCount === 1 ? "comment" : "comments"}</small>}</div>
       <div className="meta">
         {t.awaitingApproval && <span className="chip gold">Awaiting approval</span>}
@@ -197,7 +199,7 @@ function Inner({ id }: { id: string }) {
         </span>
       )}</>}
       actions={<>
-        {<div className="project-secondary-actions"><Link href={`/projects/${id}/members`}>Members</Link>{p && p.role !== "VIEWER" && <Link href={`/projects/${id}/activity`}>Activity</Link>}<Link href={`/projects/${id}/trash`}>Trash</Link></div>}
+        {<div className="project-secondary-actions"><Link href={`/projects/${id}/members`}>Settings</Link>{p && p.role !== "VIEWER" && <Link href={`/projects/${id}/activity`}>Activity</Link>}<Link href={`/projects/${id}/trash`}>Trash</Link></div>}
         {canWrite && <button className="btn" onClick={() => setAdding(true)}>+ Add task</button>}
       </>}>
       {archivedBanner}
@@ -252,7 +254,7 @@ function Inner({ id }: { id: string }) {
         return (
           <section className="project-task-section" key={s.id} aria-label={s.name}>
             <div className="grp" style={{ display: "flex", alignItems: "center" }}>
-              {canWrite && list.length > 0 && <label className="selall"><input type="checkbox" checked={list.every((t) => sel.has(t.id))} aria-label={`Select all in ${s.name}`} onChange={(e) => pick(list.map((t) => t.id), e.target.checked)} /></label>}
+              {canWrite && list.length > 0 && <SectionSelection selected={list.filter(t => sel.has(t.id)).length} total={list.length} label={`Select all in ${s.name}`} onChange={checked => pick(list.map(t => t.id), checked)} />}
               <span>{s.name} · {s.total}{s.isDone && " (done)"}</span>
               {manage && <SectionMenu s={s} secs={secs} projectId={id} onDialog={(kind) => setDialog({ kind, s })} onDone={refresh} onErr={setErr} />}
             </div>
@@ -276,7 +278,7 @@ function Inner({ id }: { id: string }) {
       {secs && view === "list" && ls.group !== "section" && groupTasks(secs.flatMap((x) => x.tasks), ls.group, todayIST(), ls.sort).map((g) => (
         <section className="project-task-section" key={g.key} aria-label={g.name}>
           <div className="grp">
-            {canWrite && <label className="selall"><input type="checkbox" checked={g.tasks.every((t) => sel.has(t.id))} aria-label={`Select all in ${g.name}`} onChange={(e) => pick(g.tasks.map((t) => t.id), e.target.checked)} /></label>}
+            {canWrite && <SectionSelection selected={g.tasks.filter(t => sel.has(t.id)).length} total={g.tasks.length} label={`Select all in ${g.name}`} onChange={checked => pick(g.tasks.map(t => t.id), checked)} />}
             <span>{g.name} · {g.tasks.length}</span>
           </div>
           <div className="list">{g.tasks.map(rowOf)}</div>
@@ -385,19 +387,20 @@ function SectionMenu({ s, secs, projectId, onDialog, onDone, onErr }: { s: S; se
 function QuickAdd({ projectId, sectionId, onAdded, compact }: { projectId: string; sectionId: string; onAdded: () => void; compact?: boolean }) {
   const [v, setV] = useState("");
   const [due, setDue] = useState("");
+  const [dateOpen, setDateOpen] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   return (
-    <form className={compact ? undefined : "item"} style={compact ? { marginTop: 4 } : undefined} onSubmit={async (e) => {
+    <form className={`quick-add-row${compact ? "" : " item"}`} style={compact ? { marginTop: 4 } : undefined} onSubmit={async (e) => {
       e.preventDefault();
-      if (!v.trim() || !due) { setErr(!due ? "Add a due date." : null); return; }
+      if (!v.trim() || !due) { setDateOpen(true); setErr(!due ? "Add a due date." : null); return; }
       setBusy(true);
       const r = await api("POST", `/api/projects/${projectId}/tasks`, { title: v.trim(), sectionId, dueDate: due });
       setBusy(false);
       if (r.ok) { setV(""); setDue(""); setErr(null); onAdded(); } else setErr(r.error ?? "Could not add the task.");
     }}>
       <input className="in" aria-label="Add a task" placeholder="+ Add a task" value={v} disabled={busy} onChange={(e) => setV(e.target.value)} style={compact ? { background: "transparent" } : { border: 0, padding: 0 }} />
-      <input className="in" aria-label="Due date" type="date" required value={due} disabled={busy} onChange={(e) => { setDue(e.target.value); if (e.target.value) setErr(null); }} />
+      <button type="button" className="btn ghost sm" aria-expanded={dateOpen} onClick={() => setDateOpen(!dateOpen)}>Due date{due ? ` · ${dueLabel(due)}` : ""}</button>{dateOpen && <input className="in" aria-label="Due date" type="date" required value={due} disabled={busy} onChange={(e) => { setDue(e.target.value); if (e.target.value) setErr(null); }} />}
       {err && <span className="err" role="alert">{err}</span>}
     </form>
   );
@@ -422,9 +425,9 @@ function NewTask({ p, onClose, onAdded }: { p: Proj; onClose: () => void; onAdde
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   return (
-    <Modal label="Add task" onClose={onClose}>
-      <h2>Add task</h2>
-      <form onSubmit={async (e) => {
+    <Modal className="approved-record-form" label="Add task" onClose={onClose}>
+      <div className="record-form-heading"><h2>Add task</h2><button type="button" className="link" aria-label="Close Add task" onClick={onClose}>×</button></div>
+      <form className="new-task-form" onSubmit={async (e) => {
         e.preventDefault();
         setBusy(true);
         const r = await api("POST", `/api/projects/${p.id}/tasks`, { title, sectionId: section, assigneeId: assignee || undefined, dueDate: due || null, priority, collaboratorIds: collaborators.filter((id) => id !== assignee), addAssigneeToProject: addAssignee, addCollaboratorsToProject: addCollaborators.filter(id => collaborators.includes(id) && id !== assignee) });

@@ -27,8 +27,8 @@ export default function AuditView() {
   return (
     <Page title="Audit log" sub="Sign-ins, role changes and other sensitive events. Kept 12 months.">
       {jobs.data && (
-        <div className="card" style={{ marginBottom: 14 }}>
-          <b style={{ fontSize: 14 }}>Scheduled jobs</b>
+        <details className="card audit-jobs" style={{ marginBottom: 14 }}>
+          <summary>Scheduled jobs</summary>
           <div className="list" style={{ marginTop: 8, border: 0 }}>
             {jobs.data.jobs.map((j) => (
               <div className="item" key={j.job} style={{ padding: "8px 0" }}>
@@ -40,7 +40,7 @@ export default function AuditView() {
               </div>
             ))}
           </div>
-        </div>
+        </details>
       )}
       <div className="card" style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 14 }}>
         <label className="field" style={{ margin: 0 }}><span className="lbl">Person</span>

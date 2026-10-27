@@ -1,0 +1,7 @@
+# SHO-3104–3108 approved authentication pages
+
+Signup, Forgot password, Reset password, Check email and Verify opt into the approved navy/Lato/real-SHO-vector split layout. Other AuthShell consumers retain the original layout. This adds an optional presentation flag only. Check email and Verify have decorative accents; pending verification remains explicitly pending until the existing successful POST branch.
+
+No request handlers, state transitions, token extraction or API/session/security rules change. Verify posts only on explicit click with the existing started ref; missing token remains disabled/expired. Signup retains normalized email, duplicate recovery and failed-send routing. Check email retains failed/neutral/normal distinctions and hydration fallback. Forgot remains enumeration-safe; reset retains its payload, expiry branch and sign-out notice. Reset adds the same actual password-policy helper and a nonmutating Back link.
+
+Local validation:16 focused tests including click-only/one-time verification, missing token, precise failed/neutral delivery states, signup duplicate/send failure, normalized forgot and reset expiry, plus preserved Sign-in bridge/redirect cases. Build, TypeScript, lint and scope invariants required. Synthetic desktop and320–390px mobile images for all5 reviewed without submitting; fullCI/staging/exact-production verification/rollback remain required. No actual credentials, accounts, emails or tokens were changed for visual checks. Original API auth digest and runtime/suite auth invariants remain unchanged.

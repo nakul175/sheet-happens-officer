@@ -1,5 +1,21 @@
 "use client";
-import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import { Children, Fragment, cloneElement, isValidElement, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+
+/** Keep actions in normal flow and give only the body its own scroll area. Forms stay forms. */
+function dialogSections(children: React.ReactNode): React.ReactNode {
+  const flatten = (nodes: React.ReactNode): React.ReactNode[] => Children.toArray(nodes).flatMap(node => isValidElement<{ children?: React.ReactNode }>(node) && node.type === Fragment ? flatten(node.props.children) : [node]);
+  const nodes = flatten(children);
+  const header: React.ReactNode[] = [], body: React.ReactNode[] = [], footer: React.ReactNode[] = [];
+  nodes.forEach(node => {
+    const el = isValidElement<{ className?: string }>(node) ? node : null;
+    const classes = el?.props.className?.split(/\s+/) ?? [];
+    if (el?.type === "h2" || classes.includes("bar") || classes.includes("record-form-heading")) header.push(node);
+    else if (classes.includes("actions")) footer.push(node);
+    else body.push(node);
+  });
+  const hasForm = body.some(node => isValidElement<{ className?: string }>(node) && (node.type === "form" || node.props.className?.split(/\s+/).includes("task-details")));
+  return <>{header.length > 0 && <div className="dialog-header">{header}</div>}{hasForm ? <div className="dialog-forms">{body.map(node => isValidElement<{ className?: string; children?: React.ReactNode }>(node) && (node.type === "form" || node.props.className?.split(/\s+/).includes("task-details")) ? cloneElement(node, { className: `${node.props.className ?? ""} ${node.type === "form" ? "dialog-form" : "dialog-task-layout"}` }, dialogSections(node.props.children)) : node)}</div> : <div className="dialog-body">{body}</div>}{footer.length > 0 && <div className="dialog-footer">{footer}</div>}</>;
+}
 
 /** An open dialog: its identity for this render tree and the element a keypress has to belong to. */
 type Open = { me: symbol; el: HTMLElement | null };
@@ -33,7 +49,7 @@ function topDialog(): HTMLElement | null {
 const useCommitEffect = typeof window === "undefined" ? useEffect : useLayoutEffect;
 
 /** Centred dialog over a dimmed page. Escape and the dim area close it; focus moves in and returns. */
-export function Modal({ onClose, small, label, describedBy, children }: { onClose: () => void; small?: boolean; label: string; describedBy?: string; children: React.ReactNode }) {
+export function Modal({ onClose, small, label, describedBy, className, children }: { onClose: () => void; small?: boolean; label: string; describedBy?: string; className?: string; children: React.ReactNode }) {
   const ref = useRef<HTMLDivElement>(null);
   // The handler to call now. A re-render of the parent gives a new one; the key listener reads it from here, so it
   // is never torn down and added again (a gap a keypress could fall into, or one that holds a stale handler).
@@ -99,14 +115,15 @@ export function Modal({ onClose, small, label, describedBy, children }: { onClos
       if (!sheet || !(field instanceof HTMLElement) || !sheet.contains(field) || field === sheet || field.closest(".bar, .actions")) return;
       // Scroll this sheet explicitly: scrollIntoView can use the layout viewport while the keyboard is resizing
       // the visual viewport, leaving the focused field below the pinned footer even though the sheet fits.
-      const bounds = sheet.getBoundingClientRect();
+      const scroller = field.closest<HTMLElement>(".dialog-body") ?? sheet;
+      const bounds = scroller.getBoundingClientRect();
       const footer = sheet.querySelector<HTMLElement>(":scope > .actions")?.getBoundingClientRect();
       const header = sheet.querySelector<HTMLElement>(":scope > .bar")?.getBoundingClientRect();
       const bottom = Math.min(bounds.bottom, footer && footer.top > bounds.top ? footer.top : bounds.bottom) - 8;
       const top = Math.max(bounds.top, header?.bottom ?? bounds.top) + 8;
       const box = field.getBoundingClientRect();
-      if (box.bottom > bottom) sheet.scrollTop += box.bottom - bottom;
-      else if (box.top < top) sheet.scrollTop -= top - box.top;
+      if (box.bottom > bottom) scroller.scrollTop += box.bottom - bottom;
+      else if (box.top < top) scroller.scrollTop -= top - box.top;
     };
     let frame = 0;
     const scheduleFit = () => {
@@ -136,8 +153,8 @@ export function Modal({ onClose, small, label, describedBy, children }: { onClos
   }, []);
   return (
     <div className="scrim" ref={scrim} onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className={`modal${small ? " sm" : ""}`} role="dialog" aria-modal="true" aria-label={label} aria-describedby={describedBy} tabIndex={-1} ref={(el) => { ref.current = el; sheetRef.current = el; }} style={{ outline: "none" }}>
-        {children}
+      <div className={`modal${small ? " sm" : ""}${className ? ` ${className}` : ""}`} role="dialog" aria-modal="true" aria-label={label} aria-describedby={describedBy} tabIndex={-1} ref={(el) => { ref.current = el; sheetRef.current = el; }} style={{ outline: "none" }}>
+        {dialogSections(children)}
       </div>
     </div>
   );

@@ -9,6 +9,7 @@ vi.mock("@/lib/crm", () => ({ WORKSTREAM_DEAL: "wst_deal", crmVisible: () => tru
 vi.mock("@/lib/access", () => ({ isAdmin: () => false }));
 vi.mock("@/app/(app)/Shell", () => ({ Page: ({ children }: { children: React.ReactNode }) => h("div", null, children), useMe: () => ({ id: "me" }) }));
 import { pipelineReview } from "../src/lib/review";
+import ReportingView from "../src/app/(app)/review/reporting/ReportingView";
 import ReviewView from "../src/app/(app)/review/ReviewView";
 let root: Root | undefined;
 const row = (id: string, opportunityType: string | null, stageId = "lead", value: number | null = 100, currency = "USD") => ({ id, name: id, archived: false, opportunityType, stage: { id: stageId, name: stageId, category: "ACTIVE" }, value, currency, needsNextStep: true, stalled: true, lastActivity: "2026-01-01", pipeline: { name: "Proactive" }, organisation: null, leader: null, nextStep: null });
@@ -30,15 +31,18 @@ it("separates commercial, EOI/CV and unclassified stage counts without changing 
   expect(result.stalled.map(d => d.id)).toEqual(["rfp", "otc", "eoi", "cv", "legacy", "unknown-value-rfp"]);
   expect(fake.db.pipeline.findMany).toHaveBeenCalledWith(expect.objectContaining({ include: { stages: { where: { isRetired: false, category: { not: "DELIVERY" } }, orderBy: { position: "asc" } } } }));
 });
-it("review UI labels and displays all three count categories distinctly", async () => {
+it("reporting keeps all three category data sets reachable with separate currencies and missing values", async () => {
   const result = await pipelineReview({ id: "me", orgRole: "MEMBER" });
   globalThis.fetch = vi.fn(async () => new Response(JSON.stringify(result), { headers: { "content-type": "application/json" } }));
-  await act(async () => { root = createRoot(document.getElementById("root")!); root.render(h(ReviewView)); });
+  await act(async () => { root = createRoot(document.getElementById("root")!); root.render(h(ReportingView)); });
   const commercial = document.querySelector('[aria-label="Commercial pipeline by stage · RFP/RFA + OTC"]')!;
+  expect(commercial.textContent).toContain("USD 100 · INR 200");
+  expect(commercial.querySelector('td[data-label="Missing value"]')!.textContent).toBe("1");
+  await act(async () => [...document.querySelectorAll("button")].find(b => b.textContent === "Other opportunities")!.click());
   const other = document.querySelector('[aria-label="Other opportunities by stage · EOI + CV/LTA"]')!;
-  const unknown = document.querySelector('[aria-label="Unclassified opportunities by stage · not included in commercial/other totals"]')!;
-  expect(commercial.textContent).toContain("USD 100 · INR 200 · 1 without value");
-  expect(other.textContent).toContain("Submitted"); expect(other.textContent).toContain("1 without value");
-  expect(unknown.textContent).toContain("Lead1USD 100");
-  expect(document.querySelector('[aria-label="Needs a next step"]')?.textContent).toContain("eoi");
+  expect(other.textContent).toContain("Submitted"); expect(other.textContent).toContain("1 opportunity has no recorded value");
+  await act(async () => [...document.querySelectorAll("button")].find(b => b.textContent === "Unclassified")!.click());
+  expect(document.querySelector('[aria-label^="Unclassified opportunities"]')!.textContent).toContain("Lead1USD 100");
+  await act(async () => root!.render(h(ReviewView)));
+  expect(document.querySelector('[aria-label="Review queue"]')!.textContent).toContain("eoi");
 });

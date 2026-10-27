@@ -26,14 +26,14 @@ export function ListControls({ state, members, onChange, showGroup, found, onSav
         <button type="button" className="btn ghost" aria-expanded={open} aria-controls={`${id}-p`} onClick={() => setOpen((v) => !v)}>
           Filter{n > 0 && <span className="lc-n">{n}</span>}
         </button>
-        <label className="lc-sel">Sort
+        <label className="lc-sel"><span>Sort</span>
           <select className="in" value={state.sort} onChange={(e) => onChange({ sort: e.target.value as "date" | "priority" })}>
             <option value="date">Due date</option>
             <option value="priority">Priority</option>
           </select>
         </label>
         {showGroup && (
-          <label className="lc-sel">Group by
+          <label className="lc-sel"><span>Group by</span>
             <select className="in" value={state.group} onChange={(e) => onChange({ group: e.target.value as Group })}>
               <option value="section">Section</option>
               <option value="assignee">Assignee</option>

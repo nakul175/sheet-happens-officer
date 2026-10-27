@@ -113,6 +113,7 @@ export function TaskModal({ id, me, onClose, onChanged, asPage }: { id: string; 
             </span>
           </div>
           {task.project.archived && <div className="box warn">This project is archived and read-only.</div>}
+          {!task.project.archived && role === "VIEWER" && <p className="box" role="note">You have Viewer access. Task details are read-only.</p>}
           {stale && (
             <div className="box warn" role="alert">
               {stale}

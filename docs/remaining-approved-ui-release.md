@@ -1,0 +1,11 @@
+# Remaining approved UI release — 27 October 2026
+
+User explicitly authorized testing and coordinated production deployment of remaining approved UI. Combined candidate starts from production e1d3c721017e67d1987401ee07b6ba76f2130eb1 and includes29 pending approved items SHO3084–3113, excluding already deployed Home SHO3087. Scope: Settings/Activity/Trash; Review/Reporting; Accounts/Organisation/Contacts/Notes/Linked tasks/Tree; Deals/Team; record forms/person detail; Sign-in/Signup/recovery/email verification/offline/password-wall/Add task. Individual approved acceptance records remain in design-review. No unapproved Profile/Usage/Search/Audit or later designs included.
+
+The deployed Shell, header styles, My tasks, Home/dashboard API and routing are preserved byte-for-byte. Merge conflicts resolved by retaining those production files and combining all required validation jobs and explicit reviewed file allowlists. Existing user-approved exclusion remains only SHO2590AC14–16 live provider checks. No other validation gate waived; no provider configuration required.
+
+Payloads, authentication/session logic, API/schema, role/feature checks, confirmations, undo and modal focus remain as reviewed in the individual release notes. Review queue combines existing authorized actionable reasons into a stable deduplicated list; Reporting preserves counts/currency/date filters. Styling is scoped to approved pages/components. Tests must include existing regression/security/database/browser/full acceptance on this combined candidate, not only prior branch results.
+
+Initial validation:59 focused tests across12files, scope and optimized webpack build passed. Full CI, combined actual staging desktop/mobile/form/role checks, rollback rehearsal and exact production revision/browser acceptance remain required. Only isolated test fixtures may be submitted or mutated. Public auth screens may be viewed without consuming production tokens or changing credentials. Screenshots from synthetic previews remain diagnostic evidence, distinct from actual staging/production.
+
+Single deployment owner remains Sheet Happens Officer. This chat prepares/reviews the candidate and independently verifies actual staging/production; no competing environment switches. Keep schedules paused. Do not mark items Done before exact production acceptance.

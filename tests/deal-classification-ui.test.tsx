@@ -106,7 +106,7 @@ it("task conversion includes classification and rejects NFR over two decimals be
 
 it("details Save retains shared sheet footer structure and native amount validation", async () => {
   await panel();
-  expect(document.querySelector('[role="dialog"] > .actions button[form]')?.textContent).toBe("Save");
+  expect(document.querySelector('[role="dialog"] > .dialog-footer > .actions button[form]')?.textContent).toBe("Save");
   await fill("Net Fee Revenue (USD)", "-1");
   expect((field("Net Fee Revenue (USD)") as HTMLInputElement).checkValidity()).toBe(false);
   await click("Save"); expect(writes).toHaveLength(0);

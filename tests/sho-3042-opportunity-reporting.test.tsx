@@ -11,7 +11,7 @@ vi.mock("@/lib/access", () => ({ isAdmin: () => false }));
 vi.mock("@/app/(app)/Shell", () => ({ Page: ({ children }: { children: React.ReactNode }) => h("div", null, children), useMe: () => ({ id: "me" }) }));
 
 import { pipelineReview } from "../src/lib/review";
-import ReviewView from "../src/app/(app)/review/ReviewView";
+import ReportingView from "../src/app/(app)/review/reporting/ReportingView";
 
 let root: Root | undefined;
 const row = (id: string, opportunityType: string | null, opts: { stage?: string; category?: string; value?: number | null; currency?: string | null; deadline?: string | null } = {}) => ({
@@ -67,10 +67,13 @@ it("applies explicit deadline timelines without hiding missing types in the all 
 it("renders labelled categories, timeline control and the agreed headline rule", async () => {
   const result = await pipelineReview({ id: "me", orgRole: "MEMBER" });
   globalThis.fetch = vi.fn(async () => new Response(JSON.stringify(result), { headers: { "content-type": "application/json" } }));
-  await act(async () => { root = createRoot(document.getElementById("root")!); root.render(h(ReviewView)); });
+  await act(async () => { root = createRoot(document.getElementById("root")!); root.render(h(ReportingView)); });
   expect(document.querySelector('[aria-label="Commercial pipeline by stage · RFP/RFA + OTC"]')?.textContent).toContain("USD 100");
-  expect(document.querySelector('[aria-label="Other opportunities by stage · EOI + CV/LTA"]')?.textContent).toContain("1 without value");
-  expect(document.querySelector('[aria-label^="Unclassified opportunities"]')?.textContent).toContain("not included");
   expect(document.querySelector<HTMLSelectElement>("#review-timeline")?.value).toBe("all");
   expect(document.body.textContent).toContain("Open commercial · 2");
+  await act(async () => [...document.querySelectorAll("button")].find(b => b.textContent === "Other opportunities")!.click());
+  expect(document.querySelector('[aria-label="Other opportunities by stage · EOI + CV/LTA"]')?.textContent).toContain("1 opportunity has no recorded value");
+  await act(async () => [...document.querySelectorAll("button")].find(b => b.textContent === "Unclassified")!.click());
+  expect(document.querySelector('[aria-label^="Unclassified opportunities"]')).not.toBeNull();
+  expect(document.body.textContent).toContain("excluded from commercial and other totals");
 });

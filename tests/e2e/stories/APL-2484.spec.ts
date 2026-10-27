@@ -25,10 +25,12 @@ test.describe("SHO-US-2.5 / APL-2484", () => {
   test("AC2: an Admin or Super Admin also sees email, role and status columns and the actions their role allows qa:TC missing", async ({ admin }) => {
     test.setTimeout(240_000);
     await admin.page.goto("/team");
-    for (const h of ["Name", "Email", "Role", "Status", "Actions"]) await expect(admin.page.getByRole("columnheader", { name: h, exact: true }).first()).toBeVisible(SLOW);
+    for (const h of ["Person", "Workspace role", "Status", "Actions"]) await expect(admin.page.getByRole("columnheader", { name: h, exact: true }).first()).toBeVisible(SLOW);
     await expect(admin.page.getByRole("button", { name: "+ Add person" })).toBeVisible(SLOW);
-    await expect(admin.page.getByRole("button", { name: "Make Admin" }).first()).toBeVisible(SLOW);
-    await expect(admin.page.getByRole("button", { name: "Deactivate" }).first()).toBeVisible(SLOW);
+    const manageable = admin.page.locator("tr").filter({ has: admin.page.getByRole("button", { name: "Make Admin", includeHidden: true }) }).first();
+    await manageable.locator("summary").click();
+    await expect(manageable.getByRole("button", { name: "Make Admin" })).toBeVisible(SLOW);
+    await expect(manageable.getByRole("button", { name: "Deactivate" })).toBeVisible(SLOW);
     const people = (await admin.api.get("/api/team")).json.people as Json[];
     expect(people.every((p) => "email" in p && "status" in p && "orgRole" in p)).toBe(true);
   });
@@ -45,7 +47,7 @@ test.describe("SHO-US-2.5 / APL-2484", () => {
     await admin.page.goto("/team");
     const row = admin.page.locator("tr", { hasText: name });
     await expect(row).toContainText("Deactivated", SLOW);
-    await expect(row.locator(".chip.grey", { hasText: "Deactivated" })).toBeVisible();
+    await expect(row.locator(".team-status.grey", { hasText: "Deactivated" })).toBeVisible();
 
     const seen = (await member.api.get("/api/team")).json.people as Json[];
     expect(seen.some((p) => p.id === id), "a Member must not see a deactivated person").toBe(false);

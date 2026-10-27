@@ -26,7 +26,7 @@ export function ForgotForm() {
   }
 
   return (
-    <AuthShell>
+    <AuthShell approved>
       <h1>Forgot password</h1>
       <p className={styles.lead}>Enter your work email and we will send you a link to set a new password.</p>
       <form onSubmit={submit} className={styles.card} style={{ border: 0, padding: 0 }} noValidate>

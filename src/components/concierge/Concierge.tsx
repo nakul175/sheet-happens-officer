@@ -202,7 +202,7 @@ export function ConciergeFab({ kind }: { kind: "dock" | "bar" }) {
   if (c.hidden) return null; // SHO-US-14.15 AC4: no floating "Show" pill over rows; use Concierge in the menu
   return (
     <div className={`cc-fabwrap k-${kind}`}>
-      <button ref={btn} className="fab" aria-label="Concierge" aria-expanded={open} onClick={toggle}>💬</button>
+      <button ref={btn} className="fab" aria-label="Concierge" aria-expanded={open} onClick={toggle}><span aria-hidden="true">💬</span><span className="cc-launcher-text">Concierge</span></button>
       {open && (
         <div className="cc-sheet" role="dialog" aria-label="Concierge">
           <Panel variant="sheet" onClose={close} />
