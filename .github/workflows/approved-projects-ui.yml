@@ -1,7 +1,7 @@
 name: Approved Projects UI release validation
 on:
   pull_request:
-    branches: [release/scoped4-20261025, change/sho-3077-projects, change/sho-3084-settings, change/sho-3087-dashboard, change/sho-3090-accounts, change/sho-3093-batch5, change/sho-3098-forms]
+    branches: [release/scoped4-20261025, change/sho-3077-projects, change/sho-3084-settings, change/sho-3087-dashboard, change/sho-3090-accounts, change/sho-3093-batch5, change/sho-3098-forms, change/sho-3103-signin]
   workflow_dispatch:
 permissions:
   contents: read
@@ -67,6 +67,8 @@ jobs:
         run: npx vitest run -c vitest.accounts-approved.config.mts
       - name: Approved Sign-in and preserved central return-path regressions
         run: npx vitest run -c vitest.signin-approved.config.mts
+      - name: Approved Signup, Forgot, Reset and verification screens
+        run: npx vitest run -c vitest.auth-pages-approved.config.mts
       - name: SHO-3038 collaborator acceptance
         run: npx vitest run -c vitest.sho-3038.config.mts
       - name: SHO-3044 opportunity classification acceptance

@@ -5,6 +5,16 @@ import test from "node:test";
 
 const production = "ee59582dffcbd8cc3067e689b2bb73cf63781cb7";
 const allowed = new Set([
+  // SHO-3104..3108 opt-in approved auth-page presentation.
+  "src/components/AuthShell.tsx",
+  "src/app/signup/SignUpForm.tsx",
+  "src/app/forgot/ForgotForm.tsx",
+  "src/app/reset/ResetForm.tsx",
+  "src/app/check-email/CheckEmail.tsx",
+  "src/app/verify/Verify.tsx",
+  "tests/auth-pages-approved.test.tsx",
+  "vitest.auth-pages-approved.config.mts",
+  "docs/auth-pages-approved-release.md",
   // SHO-3103 approved Sign-in presentation; auth/API invariants below remain unchanged.
   "src/app/signin/SignInForm.tsx",
   "src/app/signin/page.tsx",
