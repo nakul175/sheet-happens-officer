@@ -46,6 +46,7 @@ jobs:
       JOB_SECRET: ci-only-not-a-real-secret-0123
       # The product default is off. Phone checks turn the return path on so the story can run.
       SIGNIN_RETURN_TO: "on"
+      FF_WORKLOAD: "1"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
