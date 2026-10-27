@@ -5,6 +5,7 @@
 .shell .side, .shell .top { background: #2c2f71; color: white; }
 .shell .brand, .shell .top-brand { color: white; }
 .shell .brand img, .shell .top-brand img { background: transparent; padding: 0; border-radius: 0; }
+.shell .brand:focus-visible, .shell .top-brand:focus-visible { outline: 3px solid #D99D29; outline-offset: 3px; border-radius: 6px; }
 .shell .top .burger { color: white; }
 .shell .top :is(.density, .bell, .search-trigger) { color: white; background: transparent; border-color: #ffffff66; }
 .shell .side :is(a,button):focus-visible, .shell .top :is(a,button):focus-visible { outline: 2px solid white; outline-offset: 3px; }
