@@ -129,7 +129,7 @@ export function Shell({ user, children }: { user: Me; children: React.ReactNode 
     <MeCtx.Provider value={user}>
       <ConciergeProvider>
       <Extras>
-      <div className="shell" data-density={compact ? "compact" : undefined}>
+      <div className={`shell${(path === "/projects" || path === "/projects/new") ? " projects-shell" : ""}`} data-density={compact ? "compact" : undefined}>
         <a className="skip" href="#main" onClick={(e) => { e.preventDefault(); const m = document.getElementById("main"); m?.focus(); m?.scrollIntoView(); }}>Skip to content</a>
         {open && <div className="veil" onClick={() => setMenu(null)} />}
         <aside ref={drawer} className={`side${open ? " open" : ""}`} aria-label="Main">
@@ -167,14 +167,15 @@ export function Shell({ user, children }: { user: Me; children: React.ReactNode 
 }
 
 /** Page frame. `dock` reserves the 340 px concierge column on wide screens (list screens only). */
-export function Page({ title, docTitle, sub, actions, dock, bar, children }: { title?: React.ReactNode; docTitle?: string; sub?: React.ReactNode; actions?: React.ReactNode; dock?: boolean; bar?: boolean; children: React.ReactNode }) {
+export function Page({ title, docTitle, sub, actions, dock, bar, beforeTitle, className = "", children }: { title?: React.ReactNode; docTitle?: string; sub?: React.ReactNode; actions?: React.ReactNode; dock?: boolean; bar?: boolean; beforeTitle?: React.ReactNode; className?: string; children: React.ReactNode }) {
   const slot = dock || bar;
   const tab = docTitle ?? (typeof title === "string" ? title : undefined);
   useEffect(() => { if (tab) document.title = `${tab} · Sheet Happens Officer`; }, [tab]);
   const hidden = useConcierge()?.hidden ?? false; // a hidden concierge gives its space back
   return (
     <>
-      <main id="main" tabIndex={-1} className={`content${dock && !hidden ? " with-dock" : ""}${bar && !hidden ? " with-bar" : ""}`}>
+      <main id="main" tabIndex={-1} className={`content ${className}${dock && !hidden ? " with-dock" : ""}${bar && !hidden ? " with-bar" : ""}`}>
+        {beforeTitle}
         {(title || actions) && (
           <div className="head">
             <div className="grow">

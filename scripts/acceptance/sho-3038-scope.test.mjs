@@ -5,6 +5,20 @@ import test from "node:test";
 
 const production = "ee59582dffcbd8cc3067e689b2bb73cf63781cb7";
 const allowed = new Set([
+  // SHO-3077..3080: explicitly approved UI surfaces; runtime/auth invariants below remain unchanged.
+  "src/app/(app)/Shell.tsx",
+  "src/app/(app)/projects/projects.css",
+  "src/app/(app)/projects/[id]/ProjectView.tsx",
+  "src/app/(app)/projects/[id]/approved-list.css",
+  "public/fonts/Lato-Regular.ttf",
+  "public/fonts/Lato-Bold.ttf",
+  "public/fonts/Lato-OFL.txt",
+  "tests/projects-approved-ui.test.tsx",
+  "tests/new-project-approved-ui.test.tsx",
+  "tests/project-list-approved-ui.test.tsx",
+  "vitest.projects-approved.config.mts",
+  ".github/workflows/approved-projects-ui.yml",
+  "docs/approved-projects-ui-release.md",
   ".env.example",
   "src/app/api/qa/mail/route.ts",
   "src/app/api/qa/accounts/route.ts",

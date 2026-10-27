@@ -14,6 +14,8 @@ import { MoveSheet } from "@/components/MoveSheet";
 import "@/components/board.css";
 import { DealPanel, openTaskFeed, type DealBlock, type OpenTaskFeed } from "@/components/DealPanel";
 import { Page, useMe } from "../../Shell";
+import "../projects.css";
+import "./approved-list.css";
 import { InlineCells, inlineEditable, useInlineEdit } from "@/components/inline";
 import { ListControls } from "./ListControls";
 import { apiQuery, groupTasks, isFiltered, readState, sameState, type ListState } from "./listview";
@@ -183,8 +185,9 @@ function Inner({ id }: { id: string }) {
   const archivedBanner = p?.archived && <div className="box warn" style={{ marginBottom: 12 }}>This project is archived and read-only.</div>;
 
   return (
-    <Page dock={view === "list"} bar={view === "board"} docTitle={p?.name}
-      title={<span className="crumb"><Link href={p?.type === "DEAL" ? "/deals" : "/projects"}>{p?.type === "DEAL" ? "Deals" : "Projects"}</Link> / <span style={{ color: "var(--ink)" }}>{p?.name ?? "…"}</span></span>}
+    <Page bar className={view === "list" ? "project-list-view" : undefined} docTitle={p?.name}
+      beforeTitle={view === "list" && <nav className="project-breadcrumb" aria-label="Breadcrumb"><Link href={p?.type === "DEAL" ? "/deals" : "/projects"}>{p?.type === "DEAL" ? "Deals" : "Projects"}</Link> / {p?.name ?? "…"}</nav>}
+      title={view === "list" ? (p?.name ?? "…") : <span className="crumb"><Link href={p?.type === "DEAL" ? "/deals" : "/projects"}>{p?.type === "DEAL" ? "Deals" : "Projects"}</Link> / <span style={{ color: "var(--ink)" }}>{p?.name ?? "…"}</span></span>}
       sub={p && <>{p.isVertical && <span className="chip">Vertical task board</span>}<span className="chip">You: {ROLE[p.role]}</span>{tk.data?.summary && (
         <span className="lc-sum">
           {tk.data.summary.overdue > 0 && <span className="chip red">{tk.data.summary.overdue} overdue</span>}
@@ -192,7 +195,10 @@ function Inner({ id }: { id: string }) {
           {tk.data.summary.awaiting > 0 && <span className="chip gold">{tk.data.summary.awaiting} awaiting approval</span>}
         </span>
       )}</>}
-      actions={canWrite && <button className="btn" onClick={() => setAdding(true)}>+ Add task</button>}>
+      actions={<>
+        {view === "list" && <div className="project-secondary-actions"><Link href={`/projects/${id}/members`}>Members</Link>{p && p.role !== "VIEWER" && <Link href={`/projects/${id}/activity`}>Activity</Link>}<Link href={`/projects/${id}/trash`}>Trash</Link></div>}
+        {canWrite && <button className="btn" onClick={() => setAdding(true)}>+ Add task</button>}
+      </>}>
       {archivedBanner}
       {manage && p && p.members.filter((m) => m.active).length === 1 && !nudgeOff && !nudgeSeen(p.id) && (
         <div className="nudge" role="region" aria-label="Add people">
@@ -213,9 +219,7 @@ function Inner({ id }: { id: string }) {
           </div>
         )}
         <span className="sp" />
-        <Link href={`/projects/${id}/members`}>Members</Link>
-        <Link href={`/projects/${id}/trash`}>Trash</Link>
-        {p && (p.role !== "VIEWER") && <Link href={`/projects/${id}/activity`}>Activity</Link>}
+        {view === "board" && <><Link href={`/projects/${id}/members`}>Members</Link><Link href={`/projects/${id}/trash`}>Trash</Link>{p && p.role !== "VIEWER" && <Link href={`/projects/${id}/activity`}>Activity</Link>}</>}
       </div>
       {p && secs && (
         <ListControls state={ls} members={p.members} onChange={setList} showGroup={view === "list"}
@@ -245,7 +249,7 @@ function Inner({ id }: { id: string }) {
         const list = tasksOf(s);
         const more = s.isDone ? s.total > list.length : !!s.nextCursor && list.length < s.total;
         return (
-          <section key={s.id} aria-label={s.name}>
+          <section className="project-task-section" key={s.id} aria-label={s.name}>
             <div className="grp" style={{ display: "flex", alignItems: "center" }}>
               {canWrite && list.length > 0 && <label className="selall"><input type="checkbox" checked={list.every((t) => sel.has(t.id))} aria-label={`Select all in ${s.name}`} onChange={(e) => pick(list.map((t) => t.id), e.target.checked)} /></label>}
               <span>{s.name} · {s.total}{s.isDone && " (done)"}</span>
@@ -269,7 +273,7 @@ function Inner({ id }: { id: string }) {
       })}
 
       {secs && view === "list" && ls.group !== "section" && groupTasks(secs.flatMap((x) => x.tasks), ls.group, todayIST(), ls.sort).map((g) => (
-        <section key={g.key} aria-label={g.name}>
+        <section className="project-task-section" key={g.key} aria-label={g.name}>
           <div className="grp">
             {canWrite && <label className="selall"><input type="checkbox" checked={g.tasks.every((t) => sel.has(t.id))} aria-label={`Select all in ${g.name}`} onChange={(e) => pick(g.tasks.map((t) => t.id), e.target.checked)} /></label>}
             <span>{g.name} · {g.tasks.length}</span>
