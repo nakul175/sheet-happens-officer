@@ -6,6 +6,9 @@ import { readFileSync } from "node:fs";
 
 const production = "ee59582dffcbd8cc3067e689b2bb73cf63781cb7";
 const allowed = new Set([
+  // SHO-2589: disabled Workload counting core; UI, drill-down and privacy acceptance remain pending.
+  "src/lib/workload.ts",
+  "tests/workload-2589.test.ts",
   // SHO-3133–3135: approved clean controls, identity disambiguation and board sorting.
   "src/app/(app)/select-controls.css",
   "src/components/PeopleSelect.tsx",
