@@ -41,13 +41,13 @@ it("SHO-3043 date filter updates board, list and totals together and clears", as
     undated.value = "exclude";
     undated.dispatchEvent(new Event("change", { bubbles: true }));
   });
-  expect(document.body.textContent).toContain("Open RFP/RFA + OTC: 0");
+  expect(document.body.textContent).not.toContain("Open RFP/RFA + OTC:");
   expect(document.body.textContent).toContain("No matching sales deals.");
   expect(document.querySelectorAll(".dcard")).toHaveLength(0);
   await click("List");
   expect(document.querySelectorAll("tbody tr")).toHaveLength(0);
   await click("Clear timeline filter");
-  expect(document.body.textContent).toContain("Open RFP/RFA + OTC: 2");
+  expect(document.body.textContent).not.toContain("Open RFP/RFA + OTC:");
   expect(document.querySelectorAll("tbody tr")).toHaveLength(7);
 });
 
@@ -60,7 +60,7 @@ it("SHO-3043 composes timeline with opportunity and stage", async () => {
   });
   expect(document.querySelectorAll(".dcard")).toHaveLength(1);
   expect(document.querySelector('a[href="/projects/sales-otc"]')).not.toBeNull();
-  expect(document.body.textContent).toContain("Open RFP/RFA + OTC: 1");
+  expect(document.body.textContent).not.toContain("Open RFP/RFA + OTC:");
   await click("Only my deals");
   expect(calls.at(-1)).toContain("mine=true");
   expect(document.querySelectorAll(".dcard")).toHaveLength(1);
@@ -115,11 +115,10 @@ it("commercial classification cannot count EOI/CV or unknown and totals never mi
   expect(grouped.map(g => g.deals.length)).toEqual([4, 2, 1]);
   expect(totals(grouped[0].deals).sums).toEqual(["USD 300", "INR 200"]);
 });
-it("default sales query and open commercial count exclude outcomes and delivery; other categories visible", async () => {
+it("default sales query removes duplicate summaries while preserving populated categories", async () => {
   await mount(h(DealsView));
   expect(calls.some(c => c.includes("lifecycle=sales"))).toBe(true);
-  const summary = document.querySelector('[aria-label="Open commercial pipeline"]')!;
-  expect(summary.textContent).toContain("Open RFP/RFA + OTC: 2"); expect(summary.textContent).toContain("USD 100 · INR 200");
+  expect(document.querySelector('[aria-label="Open commercial pipeline"]')).toBeNull();
   expect(document.querySelector('a[href="/projects/sales-eoi"]')).not.toBeNull();
   expect(document.querySelector('a[href="/projects/sales-cv"]')).not.toBeNull();
   expect(document.querySelector('a[href="/projects/sales-unclassified"]')).not.toBeNull();
@@ -129,6 +128,19 @@ it("default sales query and open commercial count exclude outcomes and delivery;
   expect(document.querySelector('[aria-label="Open commercial pipeline"]')).toBeNull();
   expect(document.querySelector('a[href="/projects/delivery-rfp"]')).not.toBeNull();
   expect(document.querySelector('a[href="/projects/sales-rfp"]')).toBeNull();
+});
+
+it("SHO-3133 omits empty opportunity category sections without hiding populated categories", async () => {
+  globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+    const path = String(input); calls.push(path);
+    const data = path === "/api/deals/pipelines" ? { pipelines: [{ ...pipe, stages }] } : path.startsWith("/api/deals?") ? { deals: [deal("only-unclassified", stages[0], null)] } : { notes: [] };
+    return new Response(JSON.stringify(data), { headers: { "content-type": "application/json" } });
+  });
+  await mount(h(DealsView));
+  expect(document.querySelector('[aria-label="RFP/RFA + OTC sales"]')).toBeNull();
+  expect(document.querySelector('[aria-label="EOI + CV/LTA sales"]')).toBeNull();
+  expect(document.querySelector('[aria-label="Unclassified sales"]')).not.toBeNull();
+  expect(document.querySelector('a[href="/projects/only-unclassified"]')).not.toBeNull();
 });
 it("deal picker preserves current retired name while offering only active stages", async () => {
   await mount(h(DealPanel, { projectId: "old", deal: { pipeline: { ...pipe, stages: [...stages, retired] }, stage: retired, stageReason: null, details: null, parties: [], organisation: null, nextStep: null, needsNextStep: false, stalled: false }, canWrite: true, onChange: vi.fn(), feed: { status: "ready", openCount: 0, tasks: [] } }));

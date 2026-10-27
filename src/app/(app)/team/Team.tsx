@@ -78,12 +78,12 @@ export default function Team() {
                 const self = p.id === me.id;
                 return (
                   <tr key={p.id}>
-                    <td data-label="Person"><b style={{ fontWeight: 500 }}><Link href={`/team/${p.id}`} prefetch={false}>{p.name}</Link></b>{self && " (you)"}<small className="team-email">{p.email}</small></td>
+                    <td data-label="Person"><div className="team-identity"><span className="av sm" aria-hidden="true">{p.name[0]}</span><span><b><Link href={`/team/${p.id}`} prefetch={false}>{p.name}</Link>{self && " (you)"}</b><small className="team-email">{p.email}</small></span></div></td>
                     <td data-label="Workspace role"><span>{roleLabel(p.orgRole!)}</span></td>
                     <td data-label="Leads"><Leads p={p} /></td>
                     <td data-label="Status"><span className={`team-status ${sc}`}>{sl}</span></td>
                     <td data-label="Actions">
-                      {((p.status === "ACTIVE" && p.orgRole !== "SUPER_ADMIN") || (me.orgRole === "SUPER_ADMIN" && !self && p.status !== "DEACTIVATED") || p.status === "DEACTIVATED") ? <details className="team-more" onKeyDown={e => { if (e.key === "Escape") { e.currentTarget.open = false; e.currentTarget.querySelector("summary")?.focus(); } }}><summary className="btn ghost" aria-label={`More actions for ${p.name}`}>More</summary><div className="team-more-actions">
+                      {((p.status === "ACTIVE" && p.orgRole !== "SUPER_ADMIN") || (me.orgRole === "SUPER_ADMIN" && !self && p.status !== "DEACTIVATED") || p.status === "DEACTIVATED") ? <details className="team-more" onKeyDown={e => { if (e.key === "Escape") { e.currentTarget.open = false; e.currentTarget.querySelector("summary")?.focus(); } }}><summary aria-label={`More actions for ${p.name}`}><span aria-hidden="true">•••</span></summary><div className="team-more-actions">
                         {p.status === "ACTIVE" && p.orgRole !== "SUPER_ADMIN" && (
                           me.orgRole === "SUPER_ADMIN"
                             ? p.orgRole === "ADMIN"
