@@ -32,12 +32,12 @@ export default function ReviewView() {
       <section className="review-panel" aria-label="Review queue">
         <div className="review-table-wrap"><table className="tbl stack review-table"><thead><tr><th>Opportunity</th><th>Needs attention</th><th>Context</th><th>Action</th></tr></thead><tbody>
           {rows.map(r => <tr key={r.key}>
-            <td data-label="Opportunity"><strong>{r.name}</strong><small>{r.deal?.organisation?.name ?? r.idea?.project.name}</small></td>
-            <td data-label="Needs attention">{r.reasons.map(reason => <span className={reason === "overdue" ? "review-overdue" : "review-reason"} key={reason}>{reasonLabels[reason]}</span>)}</td>
-            <td data-label="Context">{r.deal ? <>
+            <td data-label="Opportunity"><div className="review-cell-copy"><strong>{r.name}</strong><small>{r.deal?.organisation?.name ?? r.idea?.project.name}</small></div></td>
+            <td data-label="Needs attention"><div className="review-cell-copy">{r.reasons.map(reason => <span className={reason === "overdue" ? "review-overdue" : "review-reason"} key={reason}>{reasonLabels[reason]}</span>)}</div></td>
+            <td data-label="Context"><div className="review-cell-copy">{r.deal ? <>
               {r.deal.nextStep ? <span>{r.deal.nextStep.title} · {dueLabel(r.deal.nextStep.dueDate)}</span> : r.deal.lastActivity ? <span>Last active {dueLabel(r.deal.lastActivity.slice(0, 10))}</span> : <span>{r.deal.stage ?? "No next step"}</span>}
               <details><summary>More context</summary><p>{[r.deal.pipeline, r.deal.stage, r.deal.leader?.name].filter(Boolean).join(" · ")}</p>{r.deal.lastActivity && <p>Last activity {dueLabel(r.deal.lastActivity.slice(0, 10))}</p>}</details>
-            </> : <>{r.idea!.assignee.name}<small>Added {dueLabel(r.idea!.createdAt.slice(0, 10))}</small></>}</td>
+            </> : <>{r.idea!.assignee.name}<small>Added {dueLabel(r.idea!.createdAt.slice(0, 10))}</small></>}</div></td>
             <td data-label="Action"><div className="review-actions"><Link href={r.deal ? `/projects/${r.deal.id}` : `/projects/${r.idea!.project.id}?task=${r.idea!.id}`}>Open</Link>{r.idea?.canEdit && <><button className="btn ghost sm" aria-label="Convert to deal" onClick={() => setConv(r.idea!)}>Convert</button><button className="link" disabled={!!busy} onClick={() => drop(r.idea!)}>Drop</button></>}</div></td>
           </tr>)}
         </tbody></table></div>
