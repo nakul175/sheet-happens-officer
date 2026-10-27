@@ -6,6 +6,7 @@ import { Field, Modal, Skeleton } from "@/components/ui";
 import { Page } from "../Shell";
 import "./scroll.css";
 import "./accounts-approved.css";
+import "./forms-approved.css";
 
 type O = { id: string; name: string; kind: string | null; country: string | null; parent: { id: string; name: string } | null; openDeals: number };
 
@@ -21,8 +22,8 @@ function NewOrg({ onClose, onDone }: { onClose: () => void; onDone: (id: string)
     else { setDup(r.data?.needsConfirm === "duplicate"); setErr(r.error ?? "Could not save."); }
   }
   return (
-    <Modal onClose={onClose} label="New organisation">
-      <h2>New organisation</h2>
+    <Modal className="approved-record-form" onClose={onClose} label="New organisation">
+      <div className="record-form-heading"><h2>New organisation</h2><button className="link" aria-label="Close new organisation" onClick={onClose}>×</button></div>
       <Field label="Name">{(id) => <input id={id} className="in" value={v.name} onChange={set("name")} />}</Field>
       <Field label="Kind (e.g. Ministry, Company)">{(id) => <input id={id} className="in" value={v.kind} onChange={set("kind")} />}</Field>
       <Field label="Country">{(id) => <input id={id} className="in" value={v.country} onChange={set("country")} />}</Field>

@@ -7,6 +7,7 @@ import { ATHENA_ENTITIES, OPPORTUNITY_TYPES } from "@/lib/deal-classification";
 import { Field } from "@/components/ui";
 import { Page, useMe } from "../../Shell";
 
+import "./new-deal-approved.css";
 function Form() {
   const me = useMe();
   const router = useRouter();
@@ -71,7 +72,8 @@ function Form() {
     setErr(r.error ?? "Could not create the deal.");
   }
   return (
-    <form className="card" style={{ maxWidth: 600 }} onSubmit={(e) => submit(e)}>
+    <form className="card new-deal-form" onSubmit={(e) => submit(e)}>
+      <fieldset><legend>Opportunity</legend>
       <Field label="Deal name">{(id) => <input id={id} className="in" required maxLength={200} value={v.name} onChange={set("name")} />}</Field>
       <Field label="Client / Buyer" hint="Start typing to reuse an Account. If there is no exact match, you can create a linked Account here.">
         {(id) => <><input id={id} className="in" required maxLength={200} list={`${id}-buyers`} autoComplete="off" value={v.buyerName || selectedBuyer?.name || ""} onChange={setBuyer} /><datalist id={`${id}-buyers`}>{organisations.map((o) => <option key={o.id} value={o.name} />)}</datalist></>}
@@ -79,19 +81,24 @@ function Form() {
       <Field label="Pipeline">{(id) => <select id={id} className="in" value={pipeline?.id ?? ""} onChange={set("pipelineId")}>{pipes.data?.pipelines.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select>}</Field>
       {pipeline?.key === "DEAL_BID" && <Field label="Submission deadline">{(id) => <input id={id} className="in" type="date" required value={v.submissionDeadline} onChange={set("submissionDeadline")} />}</Field>}
       <Field label="Opportunity type">{(id) => <select id={id} className="in" value={v.opportunityType} onChange={set("opportunityType")}><option value="">Unclassified</option>{OPPORTUNITY_TYPES.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}</select>}</Field>
+      <Field label="Leader">{(id) => <select id={id} className="in" value={v.leaderId} onChange={set("leaderId")}>{team.data?.people.map((p) => <option key={p.id} value={p.id}>{p.name}{p.id === me.id ? " (you)" : ""}</option>)}</select>}</Field>
+      </fieldset><fieldset><legend>Commercial details</legend>
       <Field label="Net Fee Revenue (USD)">{(id) => <input id={id} className="in" type="number" min="0" max="9999999999999.99" step="0.01" value={v.netFeeRevenueUsd} onChange={set("netFeeRevenueUsd")} />}</Field>
       <Field label="PWin (%)">{(id) => <input id={id} className="in" type="number" min="0" max="100" step="1" value={v.probability} onChange={set("probability")} />}</Field>
       <Field label="Athena Entity">{(id) => <select id={id} className="in" value={v.athenaEntity} onChange={set("athenaEntity")}><option value="">Not specified</option>{ATHENA_ENTITIES.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}</select>}</Field>
-      <Field label="Leader">{(id) => <select id={id} className="in" value={v.leaderId} onChange={set("leaderId")}>{team.data?.people.map((p) => <option key={p.id} value={p.id}>{p.name}{p.id === me.id ? " (you)" : ""}</option>)}</select>}</Field>
-      <Field label="Why are we pursuing this?">{(id) => <input id={id} className="in" required maxLength={1000} value={v.whyPursue} onChange={set("whyPursue")} />}</Field>
-      <Field label="First next step">{(id) => <input id={id} className="in" required value={v.step} onChange={set("step")} />}</Field>
-      <Field label="Next step due">{(id) => <input id={id} className="in" type="date" required value={v.due} onChange={set("due")} />}</Field>
+
       <div style={{ display: "flex", gap: 10 }}>
         <Field label="Value (optional)">{(id) => <input id={id} className="in" type="number" min="1" value={v.value} onChange={set("value")} />}</Field>
         <Field label="Currency">{(id) => <select id={id} className="in" value={v.currency} onChange={set("currency")}><option>INR</option><option>USD</option><option>EUR</option></select>}</Field>
       </div>
+      </fieldset><fieldset><legend>First next step</legend>
+      <Field label="Why are we pursuing this?">{(id) => <input id={id} className="in" required maxLength={1000} value={v.whyPursue} onChange={set("whyPursue")} />}</Field>
+      <Field label="First next step">{(id) => <input id={id} className="in" required value={v.step} onChange={set("step")} />}</Field>
+      <Field label="Next step due">{(id) => <input id={id} className="in" type="date" required value={v.due} onChange={set("due")} />}</Field>
+
+      </fieldset>
       {err && <div className="err" role="alert">{err}</div>}
-      <div style={{ display: "flex", gap: 8 }}>
+      <div className="actions"><Link className="btn ghost" href="/deals">Cancel</Link>
         <button className="btn" disabled={busy}>Create deal</button>
         {dup && !v.organisationId && <button type="button" className="btn ghost" disabled={busy} onClick={(e) => submit(e, false, true)}>Create buyer and deal</button>}
         {dup && v.organisationId && <button type="button" className="btn ghost" disabled={busy} onClick={(e) => submit(e, true)}>Create deal anyway</button>}
@@ -100,5 +107,5 @@ function Form() {
   );
 }
 export default function NewDeal() {
-  return <Page title="New deal" sub={<Link href="/deals">← Deals</Link>}><Suspense><Form /></Suspense></Page>;
+  return <Page className="new-deal-approved" title="New deal" beforeTitle={<nav aria-label="Breadcrumb"><Link href="/deals">Deals</Link> / New deal</nav>} sub="Start an opportunity with a clear next step."><Suspense><Form /></Suspense></Page>;
 }

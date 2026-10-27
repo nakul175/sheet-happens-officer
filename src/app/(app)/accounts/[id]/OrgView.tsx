@@ -6,6 +6,7 @@ import { Confirm, Field, Modal } from "@/components/ui";
 import { Page, useMe } from "../../Shell";
 import "../scroll.css";
 import "../accounts-approved.css";
+import "../forms-approved.css";
 import { useSearchParams } from "next/navigation";
 
 type Contact = { id: string; name: string; role: string | null; email: string | null; phone: string | null; canEdit: boolean; knownBy: { id: string; name: string; active: boolean }[]; lastSpoke: string | null };
@@ -65,14 +66,14 @@ function ContactDialog({ orgId, contact, onClose, onDone }: { orgId: string; con
     if (r.ok) onDone(); else setErr(r.error ?? "Could not save.");
   }
   return (
-    <Modal onClose={onClose} label={contact ? "Edit contact" : "New contact"}>
-      <h2>{contact ? "Edit contact" : "New contact"}</h2>
+    <Modal className="approved-record-form" onClose={onClose} label={contact ? "Edit contact" : "New contact"}>
+      <div className="record-form-heading"><h2>{contact ? "Edit contact" : "New contact"}</h2><button className="link" aria-label="Close contact" onClick={onClose}>×</button></div>
       <Field label="Name">{(id) => <input id={id} className="in" value={v.name} onChange={set("name")} />}</Field>
-      <Field label="Role">{(id) => <input id={id} className="in" value={v.role} onChange={set("role")} />}</Field>
+      <div className="record-form-row"><Field label="Role">{(id) => <input id={id} className="in" value={v.role} onChange={set("role")} />}</Field>
       <Field label="Email">{(id) => <input id={id} className="in" type="email" value={v.email} onChange={set("email")} />}</Field>
-      <Field label="Phone">{(id) => <input id={id} className="in" value={v.phone} onChange={set("phone")} />}</Field>
+      </div><Field label="Phone">{(id) => <input id={id} className="in" value={v.phone} onChange={set("phone")} />}</Field>
       <fieldset style={{ border: 0, padding: 0, margin: "8px 0" }}>
-        <legend style={{ fontSize: 13, fontWeight: 600 }}>Known by</legend>
+        <legend style={{ fontSize: 13, fontWeight: 600 }}>Known by</legend><p className="hint">Choose at least one person.</p>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
           {team.data?.people.map((p) => (
             <label key={p.id} style={{ fontSize: 14 }}><input type="checkbox" checked={known.includes(p.id)} onChange={(e) => setKnown(e.target.checked ? [...known, p.id] : known.filter((x) => x !== p.id))} /> {p.name}</label>
@@ -85,7 +86,7 @@ function ContactDialog({ orgId, contact, onClose, onDone }: { orgId: string; con
   );
 }
 
-function NoteForm({ org, onDone }: { org: Org; onDone: () => void }) {
+function NoteForm({ org, onDone, onClose }: { org: Org; onDone: () => void; onClose: () => void }) {
   const [kind, setKind] = useState("CALL");
   const [date, setDate] = useState(todayIST());
   const [text, setText] = useState("");
@@ -97,23 +98,25 @@ function NoteForm({ org, onDone }: { org: Org; onDone: () => void }) {
     if (r.ok) { setText(""); setWho([]); setDeal(""); setErr(null); onDone(); } else setErr(r.error ?? "Could not save the note.");
   }
   return (
-    <div className="card" style={{ marginBottom: 10 }}>
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-        <select className="in" aria-label="Kind" value={kind} onChange={(e) => setKind(e.target.value)}>{Object.entries(KIND).map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select>
-        <input className="in" type="date" aria-label="Date" value={date} onChange={(e) => setDate(e.target.value)} />
+    <Modal className="approved-record-form" label="Add note" onClose={onClose}>
+      <div className="record-form-heading"><h2>Add note</h2><button className="link" aria-label="Close note" onClick={onClose}>×</button></div>
+      <div className="record-form-row">
+        <label>Type<select className="in" aria-label="Kind" value={kind} onChange={(e) => setKind(e.target.value)}>{Object.entries(KIND).map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select></label>
+        <label>Date<input className="in" type="date" aria-label="Date" value={date} onChange={(e) => setDate(e.target.value)} /></label>
+      </div><label>Deal (optional)
         <select className="in" aria-label="Deal" value={deal} onChange={(e) => setDeal(e.target.value)}>
           <option value="">No deal</option>{org.deals.filter((d) => !d.archived).map((d) => <option key={d.projectId} value={d.projectId}>{d.name}</option>)}
         </select>
-      </div>
-      <textarea className="in" aria-label="Note" placeholder="What happened?" style={{ marginTop: 8 }} value={text} onChange={(e) => setText(e.target.value)} />
+      </label>
+      <label>Note<textarea className="in" aria-label="Note" placeholder="What happened?" style={{ marginTop: 8 }} value={text} onChange={(e) => setText(e.target.value)} /></label>
       {org.contacts.length > 0 && (
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 10, margin: "6px 0" }}>
+        <fieldset className="record-choices"><legend>Contacts (optional)</legend>
           {org.contacts.map((c) => <label key={c.id} style={{ fontSize: 13 }}><input type="checkbox" checked={who.includes(c.id)} onChange={(e) => setWho(e.target.checked ? [...who, c.id] : who.filter((x) => x !== c.id))} /> {c.name}</label>)}
-        </div>
+        </fieldset>
       )}
       {err && <div className="err" role="alert">{err}</div>}
-      <button className="btn sm" disabled={!text.trim()} onClick={save}>Add note</button>
-    </div>
+      <div className="actions"><button className="btn ghost" onClick={onClose}>Cancel</button><button className="btn" disabled={!text.trim()} onClick={save}>Add note</button></div>
+    </Modal>
   );
 }
 
@@ -176,7 +179,7 @@ export default function OrgView({ params }: { params: Promise<{ id: string }> })
 
       </section><section hidden={section !== "notes"} aria-label="Notes">
       <div className="org-overview-panel org-notes-panel"><div className="org-preview-heading"><h2>Notes</h2>{o && !o.archived && <button className="btn" aria-expanded={addingNote} aria-controls="org-note-form" onClick={() => setAddingNote(!addingNote)}>{addingNote ? "Cancel note" : "+ Add note"}</button>}</div>
-      {o && !o.archived && addingNote && <div id="org-note-form"><NoteForm org={o} onDone={reload} /></div>}
+      {o && !o.archived && addingNote && <div id="org-note-form"><NoteForm org={o} onDone={reload} onClose={() => setAddingNote(false)} /></div>}
       {o && o.notes.length === 0 && <div className="card empty">No notes yet.</div>}
       {o && o.notes.length > 0 && (
         <div className="org-notes-feed">
