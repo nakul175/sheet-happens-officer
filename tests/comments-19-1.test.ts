@@ -180,7 +180,11 @@ describe("flag off (AC9)", () => {
     on();
     try {
       const back = await projectActivity(actor(lead), p.id);
-      for (const log of logs) expect(back.items.find((i) => i.id === log.id)?.undo).toBe("available");
+      for (const log of logs) {
+        const item = back.items.find((i) => i.id === log.id);
+        expect(item?.undo).toBe("available");
+        expect(item?.kind).toBe(log.action);
+      }
     } finally { off(); }
   });
 });
