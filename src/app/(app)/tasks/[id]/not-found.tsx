@@ -10,7 +10,7 @@ export default function TaskNotFound() {
       <div className="modal" style={{ margin: "0 auto" }}>
         <h2>This task isn&apos;t available</h2>
         <p className="sub">It may have been moved to Trash, or you may not be a member of its project.</p>
-        <div className="actions"><Link className="btn" href="/">Go to My tasks</Link></div>
+        <div className="actions"><Link className="btn" href="/my-tasks">Go to My tasks</Link></div>
       </div>
     </main>
   );

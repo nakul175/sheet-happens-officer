@@ -63,7 +63,7 @@ function TabBar({ user, here, more }: { user: Me; here: (p: string) => boolean; 
     document.addEventListener("pointerdown", away);
     return () => { document.removeEventListener("keydown", esc); document.removeEventListener("pointerdown", away); };
   }, [open]);
-  const tabs: [string, string, string][] = [["/", "My tasks", "✓"], ["/projects", "Projects", "▤"], ["/search", "Search", "⌕"]];
+  const tabs: [string, string, string][] = [["/", "Home", "⌂"], ["/my-tasks", "My tasks", "✓"], ["/projects", "Projects", "▤"], ["/search", "Search", "⌕"]];
   const moreHere = more.some(([h]) => here(h)) || here("/profile");
   return (
     <div className={`tabbar-wrap${typing ? " typing" : ""}`} ref={box}>
@@ -105,9 +105,9 @@ export function Shell({ user, children }: { user: Me; children: React.ReactNode 
   const [menu, setMenu] = useState<string | null>(null);
   const open = menu === path;
   const here = (p: string) => (p === "/" ? path === "/" : path === p || path.startsWith(p + "/"));
-  const items: [string, string][] = [["/", "My tasks"], ["/projects", "Projects"], ...(user.crm ? [["/deals", "Deals"], ["/accounts", "Accounts"], ...(user.review ? [["/review", "Pipeline review"]] : [])] as [string, string][] : []), ["/team", "Team"], ["/search", "Search"]];
+  const items: [string, string][] = [["/", "Home"], ["/my-tasks", "My tasks"], ["/projects", "Projects"], ...(user.crm ? [["/deals", "Deals"], ["/accounts", "Accounts"], ...(user.review ? [["/review", "Pipeline review"]] : [])] as [string, string][] : []), ["/team", "Team"], ["/search", "Search"]];
   if (user.orgRole === "SUPER_ADMIN") items.push(["/usage", "Usage"], ["/audit", "Audit log"]);
-  const more = items.filter(([h]) => !["/", "/projects", "/search"].includes(h));
+  const more = items.filter(([h]) => !["/", "/my-tasks", "/projects", "/search"].includes(h));
   const drawer = useRef<HTMLElement>(null);
   const shellElement = useRef<HTMLDivElement>(null);
   useEffect(() => {

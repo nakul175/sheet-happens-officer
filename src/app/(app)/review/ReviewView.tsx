@@ -1,89 +1,50 @@
 "use client";
 import Link from "next/link";
-import { Skeleton } from "@/components/ui";
+import { Skeleton, LoadFailed } from "@/components/ui";
 import { useState } from "react";
-import { api, dueLabel, isOverdue, useGet } from "@/components/api";
+import { api, dueLabel, useGet } from "@/components/api";
 import { ConvertDialog } from "@/components/ConvertDialog";
+import { reviewQueue, type ReviewData, type ReviewCategory, type Idea } from "@/lib/review-queue";
 import { Page, useMe } from "../Shell";
-
-type DealRow = { id: string; name: string; stage: string | null; pipeline: string | null; organisation: { id: string; name: string } | null; leader: { name: string } | null; nextStep: { title: string; dueDate: string | null } | null; lastActivity?: string };
-type Idea = { id: string; title: string; dueDate: string | null; createdAt: string; assignee: { id: string; name: string }; project: { id: string; name: string }; canEdit: boolean };
-type Counts = { id: string; name: string; stages: { id: string; name: string; count: number; sums: { currency: string; total: number }[]; withoutValue: number }[] }[];
-type R = { needsNextStep: DealRow[]; overdueNextStep: DealRow[]; stalled: DealRow[]; ideas: Idea[]; counts: Counts; otherCounts: Counts; unclassifiedCounts: Counts; timeline: string; openCommercialCount: number; headlineRule: string };
-
-function Deals({ title, rows, empty, red }: { title: string; rows: DealRow[]; empty: string; red?: boolean }) {
-  return (
-    <section aria-label={title}>
-      <div className={`grp${red ? " red" : ""}`}>{title} · {rows.length}</div>
-      {rows.length === 0 ? <div className="card empty">{empty}</div> : (
-        <div className="list">
-          {rows.map((d) => (
-            <Link key={d.id} href={`/projects/${d.id}`} className="item">
-              <div className="t"><b>{d.name}</b><small>{[d.organisation?.name, d.pipeline, d.stage, d.leader?.name].filter(Boolean).join(" · ")}</small></div>
-              <div className="meta">{d.nextStep ? <span className={isOverdue(d.nextStep.dueDate) ? "over" : undefined}>{d.nextStep.title} · {dueLabel(d.nextStep.dueDate)}</span> : d.lastActivity ? <span>Last activity {dueLabel(d.lastActivity.slice(0, 10))}</span> : <span className="chip red">No next step</span>}</div>
-            </Link>
-          ))}
-        </div>
-      )}
-    </section>
-  );
-}
-
+import "./review.css";
+const categories: [ReviewCategory, string][] = [["all", "All"], ["missing", "Missing next step"], ["overdue", "Overdue"], ["inactive", "Inactive"], ["ideas", "Ideas"]];
+const reasonLabels = { missing: "Next step missing", overdue: "Next step overdue", inactive: "Inactive 30+ days", ideas: "Idea · 30+ days" };
 export default function ReviewView() {
   const me = useMe();
-  void me;
-  const [timeline, setTimeline] = useState("all");
-  const { data, loading, error, reload } = useGet<R>(`/api/review?timeline=${timeline}`);
+  const { data, loading, error, reload } = useGet<ReviewData>("/api/review?timeline=all");
+  const [category, setCategory] = useState<ReviewCategory>("all");
   const [conv, setConv] = useState<Idea | null>(null);
-  async function drop(t: Idea) { await api("POST", `/api/tasks/${t.id}/idea`, { isIdea: false }); reload(); }
-  return (
-    <Page title="Pipeline review" sub="What needs a decision this week">
-      {loading && !data && <Skeleton />}
-      {error && <div className="err" role="alert">{error}</div>}
-      {data && (
-        <>
-          <Deals title="Needs a next step" rows={data.needsNextStep} empty="Every working deal has a dated next step." red />
-          <Deals title="Next step is overdue" rows={data.overdueNextStep} empty="No overdue next steps." red />
-          <Deals title="Stalled for 30 days" rows={data.stalled} empty="Nothing is stalled." />
-          <section aria-label="Ideas older than 30 days">
-            <div className="grp">Ideas older than 30 days · {data.ideas.length}</div>
-            {data.ideas.length === 0 ? <div className="card empty">No old ideas.</div> : (
-              <div className="list">
-                {data.ideas.map((t) => (
-                  <div key={t.id} className="item" style={{ alignItems: "flex-start" }}>
-                    <div className="t"><Link href={`/projects/${t.project.id}?task=${t.id}`}><b>{t.title}</b></Link><small>{t.project.name} · {t.assignee.name} · since {dueLabel(t.createdAt.slice(0, 10))}</small></div>
-                    {t.canEdit && <div className="meta"><button className="btn ghost sm" onClick={() => setConv(t)}>Convert to deal</button><button className="btn ghost sm" onClick={() => drop(t)}>Drop</button></div>}
-                  </div>
-                ))}
-              </div>
-            )}
-          </section>
-          <section aria-label="Opportunity reporting filters" className="card" style={{ marginBottom: 12 }}>
-            <label htmlFor="review-timeline"><b>Timeline</b></label>{" "}
-            <select id="review-timeline" className="in" value={timeline} onChange={(e) => setTimeline(e.target.value)} style={{ width: "auto", marginLeft: 8 }}>
-              <option value="all">All deadlines</option><option value="overdue">Overdue</option><option value="30d">Next 30 days</option><option value="90d">Next 90 days</option>
-            </select>
-            <p style={{ marginBottom: 0 }}><b>Open commercial · {data.openCommercialCount}</b><br /><small>{data.headlineRule}</small></p>
-          </section>
-          <StageCounts title="Commercial pipeline by stage · RFP/RFA + OTC" counts={data.counts} />
-          <StageCounts title="Other opportunities by stage · EOI + CV/LTA" counts={data.otherCounts ?? []} />
-          <StageCounts title="Unclassified opportunities by stage · not included in commercial/other totals" counts={data.unclassifiedCounts ?? []} />
-        </>
-      )}
-      {conv && <ConvertDialog task={{ id: conv.id, title: conv.title, dueDate: conv.dueDate, assignee: conv.assignee }} meId={me.id} onClose={() => setConv(null)} />}
-    </Page>
-  );
-}
-
-function StageCounts({ title, counts }: { title: string; counts: Counts }) {
-  return <section aria-label={title}>
-    <div className="grp">{title}</div>
-    {counts.map((p) => <div key={p.id} style={{ marginBottom: 12 }}>
-      <b style={{ fontSize: 14 }}>{p.name}</b>
-      <div style={{ overflowX: "auto" }}><table className="tbl">
-        <thead><tr><th>Stage</th><th>Deals</th><th>Value by currency</th></tr></thead>
-        <tbody>{p.stages.map((s) => <tr key={s.id}><td>{s.name}</td><td>{s.count}</td><td>{s.sums.length ? s.sums.map((x) => `${x.currency} ${x.total.toLocaleString("en-IN")}`).join(" · ") : "—"}{s.withoutValue ? ` · ${s.withoutValue} without value` : ""}</td></tr>)}</tbody>
-      </table></div>
-    </div>)}
-  </section>;
+  const [busy, setBusy] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const queue = data ? reviewQueue(data) : null;
+  const rows = queue?.rows.filter(r => category === "all" || r.reasons.includes(category)) ?? [];
+  async function drop(t: Idea) {
+    if (busy) return; setBusy(t.id); setActionError(null);
+    const r = await api("POST", `/api/tasks/${t.id}/idea`, { isIdea: false }); setBusy(null);
+    if (r.ok) reload(); else setActionError(r.error ?? "Could not drop the idea.");
+  }
+  return <Page className="review-view" title="Review" sub="Keep opportunities moving." actions={<Link className="btn ghost" href="/review/reporting">Open reporting ↗</Link>}>
+    {loading && !data && <Skeleton />}
+    {error && <LoadFailed onRetry={reload} />}
+    {actionError && <div className="err" role="alert">{actionError}</div>}
+    {queue && <>
+      <div className="review-categories" role="group" aria-label="Review categories">{categories.map(([key, label]) => <button key={key} aria-pressed={category === key} onClick={() => setCategory(key)}>{label} <span>{queue.counts[key]}</span></button>)}</div>
+      <section className="review-panel" aria-label="Review queue">
+        <div className="review-table-wrap"><table className="tbl stack review-table"><thead><tr><th>Opportunity</th><th>Needs attention</th><th>Context</th><th>Action</th></tr></thead><tbody>
+          {rows.map(r => <tr key={r.key}>
+            <td data-label="Opportunity"><strong>{r.name}</strong><small>{r.deal?.organisation?.name ?? r.idea?.project.name}</small></td>
+            <td data-label="Needs attention">{r.reasons.map(reason => <span className={reason === "overdue" ? "review-overdue" : "review-reason"} key={reason}>{reasonLabels[reason]}</span>)}</td>
+            <td data-label="Context">{r.deal ? <>
+              {r.deal.nextStep ? <span>{r.deal.nextStep.title} · {dueLabel(r.deal.nextStep.dueDate)}</span> : r.deal.lastActivity ? <span>Last active {dueLabel(r.deal.lastActivity.slice(0, 10))}</span> : <span>{r.deal.stage ?? "No next step"}</span>}
+              <details><summary>More context</summary><p>{[r.deal.pipeline, r.deal.stage, r.deal.leader?.name].filter(Boolean).join(" · ")}</p>{r.deal.lastActivity && <p>Last activity {dueLabel(r.deal.lastActivity.slice(0, 10))}</p>}</details>
+            </> : <>{r.idea!.assignee.name}<small>Added {dueLabel(r.idea!.createdAt.slice(0, 10))}</small></>}</td>
+            <td data-label="Action"><div className="review-actions"><Link href={r.deal ? `/projects/${r.deal.id}` : `/projects/${r.idea!.project.id}?task=${r.idea!.id}`}>Open</Link>{r.idea?.canEdit && <><button className="btn ghost sm" aria-label="Convert to deal" onClick={() => setConv(r.idea!)}>Convert</button><button className="link" disabled={!!busy} onClick={() => drop(r.idea!)}>Drop</button></>}</div></td>
+          </tr>)}
+        </tbody></table></div>
+        {!rows.length && <p className="review-empty">{queue.rows.length ? "No items in this category." : "Nothing needs attention."}</p>}
+        <p className="hint" role="status">{rows.length} item{rows.length === 1 ? "" : "s"} need{rows.length === 1 ? "s" : ""} attention</p>
+      </section>
+    </>}
+    {conv && <ConvertDialog task={{ id: conv.id, title: conv.title, dueDate: conv.dueDate, assignee: conv.assignee }} meId={me.id} onClose={() => setConv(null)} />}
+  </Page>;
 }

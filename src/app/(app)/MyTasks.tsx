@@ -1,5 +1,5 @@
 "use client";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import Link from "next/link";
 import { Suspense, useEffect, useState } from "react";
 import "./approvals.css";
@@ -73,7 +73,12 @@ const GROUP_KEY = (id: string) => `sho.home.group.${id}`;
 function Inner() {
   const me = useMe();
   const { canAdd, openAdd } = useExtras();
-  const { data, error, loading, reload } = useGet<Groups>("/api/my-tasks");
+  const { data: rawData, error, loading, reload } = useGet<Groups>("/api/my-tasks");
+  const query = useSearchParams();
+  const path = usePathname() || "/my-tasks";
+  const overdueOnly = query.get("filter") === "overdue";
+  const data = overdueOnly && rawData ? { ...rawData, waitingOnMe: rawData.waitingOnMe?.filter(t => isOverdue(t.dueDate)), waitingOnOthers: [], next7: [], later: [], needsNextStep: [] } : rawData;
+  const taskHref = (id?: string) => { const q = new URLSearchParams(query.toString()); if (id) q.set("task", id); else q.delete("task"); return `${path}${q.size ? `?${q}` : ""}`; };
   const [mode, setMode] = useState<"date" | "project">("date");
   const [done, setDone] = useState<{ projectId: string; name: string }[]>([]);
   const [dismissed, setDismissed] = useState<string[]>([]);
@@ -84,7 +89,7 @@ function Inner() {
   const pick = (m: "date" | "project") => { setMode(m); try { localStorage.setItem(GROUP_KEY(me.id), m); } catch { /* ignore */ } };
   const router = useRouter();
   useEffect(() => { window.addEventListener("sho:task-added", reload); return () => window.removeEventListener("sho:task-added", reload); }, [reload]); // SHO-US-14.5
-  const open = useSearchParams().get("task");
+  const open = query.get("task");
   const wait = data?.waitingOnMe ?? [];
   const others = data?.waitingOnOthers ?? [];
   const total = data ? wait.length + data.overdue.length + data.next7.length + data.later.length : 0;
@@ -92,7 +97,7 @@ function Inner() {
   const labels = { overdue: "Overdue", next7: "Next 7 days", later: "Later" };
   const all = data ? [...data.overdue, ...data.next7, ...data.later] : [];
   const waitRow = (t: Waiting, mine: boolean) => (
-    <div key={t.id} className="item click nt" {...rowKeys(() => router.push(`/?task=${t.id}`, { scroll: false }))}>
+    <div key={t.id} className="item click nt" {...rowKeys(() => router.push(taskHref(t.id), { scroll: false }))}>
       <div className="t">
         <b>{t.title}</b>
         <small>{t.parent ? `Subtask of ${t.parent.title} · ` : ""}{t.project.name}{mine ? "" : ` · with ${t.assignee.name}`}</small>
@@ -116,7 +121,7 @@ function Inner() {
   })();
   const prompts = done.filter((d) => needs.some((n) => n.id === d.projectId) && !dismissed.includes(d.projectId));
   const row = (t: Item) => (
-    <div key={t.id} className="item click" {...rowKeys(() => router.push(`/?task=${t.id}`, { scroll: false }))}>
+    <div key={t.id} className="item click" {...rowKeys(() => router.push(taskHref(t.id), { scroll: false }))}>
       <Tick id={t.id} title={t.title} done={false} allowed={t.canClose} version={t.updatedAt} onStale={reload} onDone={() => { if (t.project.type === "DEAL") setDone((d) => [...d, { projectId: t.project.id, name: t.project.name }]); reload(); }} />
       <div className="t">
         <b className="ttl"><a href={`/tasks/${t.id}`} style={{ color: "inherit", textDecoration: "none" }} onClick={(e) => { e.preventDefault(); }}>{t.title}</a></b>
@@ -133,13 +138,14 @@ function Inner() {
     </div>
   );
   return (
-    <Page dock title="My tasks" sub={data ? `${total} open task${total === 1 ? "" : "s"} assigned to you or shared with you` : " "}
+    <Page dock title="My tasks" sub={data ? `${total} ${overdueOnly ? "overdue" : "open"} task${total === 1 ? "" : "s"} assigned to you or shared with you` : " "}
       actions={me.crm && (
         <div className="seg" role="group" aria-label="Group tasks">
           <button aria-pressed={mode === "date"} onClick={() => pick("date")}>By date</button>
           <button aria-pressed={mode === "project"} onClick={() => pick("project")}>By project</button>
         </div>
       )}>
+      {overdueOnly && <p className="hint">Showing all overdue own work, including any awaiting your approval. <Link href="/my-tasks">Show all My tasks</Link></p>}
       {me.startGuide && !guideGone && <StartGuide onDismiss={() => setGuideGone(true)} />}
       {loading && !data && <Skeleton />}
       {error && !data && <LoadFailed onRetry={reload} />}
@@ -198,7 +204,7 @@ function Inner() {
           ))}
         </section>
       )}
-      {open && <TaskModal id={open} me={me.id} onClose={() => router.push("/", { scroll: false })} onChanged={reload} />}
+      {open && <TaskModal id={open} me={me.id} onClose={() => router.push(taskHref(), { scroll: false })} onChanged={reload} />}
     </Page>
   );
 }

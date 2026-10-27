@@ -22,3 +22,5 @@
   .shell .bardock { left: 0; }
   .shell .dock { top: var(--shell-header-height,128px); }
 }
+
+@media (max-width: 599px) { .shell .tabbar { grid-template-columns: repeat(5, minmax(0, 1fr)); } }

@@ -6,6 +6,30 @@ import test from "node:test";
 const production = "ee59582dffcbd8cc3067e689b2bb73cf63781cb7";
 const allowed = new Set([
   "tests/e2e/stories/APL-2539.spec.ts",
+  "src/components/extras/Extras.tsx",
+  // SHO-3087..3089 approved dashboard, review and reporting.
+  "src/app/(app)/MyTasks.tsx",
+  "src/app/(app)/page.tsx",
+  "src/app/(app)/Dashboard.tsx",
+  "src/app/(app)/dashboard.css",
+  "src/app/(app)/approvals/Approvals.tsx",
+  "src/app/(app)/approvals/page.tsx",
+  "src/app/(app)/my-tasks/page.tsx",
+  "src/app/(app)/review/page.tsx",
+  "src/app/(app)/review/review.css",
+  "src/app/(app)/review/reporting/ReportingView.tsx",
+  "src/app/(app)/review/reporting/page.tsx",
+  "src/app/(app)/tasks/[id]/not-found.tsx",
+  "src/app/api/dashboard/route.ts",
+  "src/lib/dashboard.ts",
+  "src/lib/review-queue.ts",
+  "src/lib/tasks.ts",
+  "tests/dashboard-db-approved.test.ts",
+  "tests/dashboard-ui-approved.test.tsx",
+  "tests/review-queue-approved.test.tsx",
+  "vitest.dashboard-approved.config.mts",
+  "docs/dashboard-review-reporting-release.md",
+
   // SHO-3084..3086 approved Settings, Activity and Project Trash surfaces.
   "src/app/(app)/projects/[id]/members/settings.css",
   "src/app/(app)/projects/[id]/members/page.tsx",
