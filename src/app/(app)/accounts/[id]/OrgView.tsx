@@ -132,6 +132,8 @@ export default function OrgView({ params }: { params: Promise<{ id: string }> })
   const [dlg, setDlg] = useState<null | { contact?: Contact }>(null);
   const [edit, setEdit] = useState(false);
   const [addingNote, setAddingNote] = useState(false);
+  const [noteSection, setNoteSection] = useState(section);
+  if (noteSection !== section) { setNoteSection(section); setAddingNote(false); }
   const [rm, setRm] = useState<Contact | null>(null);
   const o = data?.organisation;
   if (status === 404) return <Page title="This organisation isn't available"><div className="card empty"><Link href="/accounts">Back to Accounts</Link></div></Page>;
@@ -179,7 +181,7 @@ export default function OrgView({ params }: { params: Promise<{ id: string }> })
 
       </section><section hidden={section !== "notes"} aria-label="Notes">
       <div className="org-overview-panel org-notes-panel"><div className="org-preview-heading"><h2>Notes</h2>{o && !o.archived && <button className="btn" aria-expanded={addingNote} aria-controls="org-note-form" onClick={() => setAddingNote(!addingNote)}>{addingNote ? "Cancel note" : "+ Add note"}</button>}</div>
-      {o && !o.archived && addingNote && <div id="org-note-form"><NoteForm org={o} onDone={reload} onClose={() => setAddingNote(false)} /></div>}
+      {o && !o.archived && addingNote && section === "notes" && <div id="org-note-form"><NoteForm org={o} onDone={reload} onClose={() => setAddingNote(false)} /></div>}
       {o && o.notes.length === 0 && <div className="card empty">No notes yet.</div>}
       {o && o.notes.length > 0 && (
         <div className="org-notes-feed">
