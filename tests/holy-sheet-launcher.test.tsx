@@ -57,5 +57,13 @@ it("ignores an older successful check after a newer denial", async () => {
   await focus(); fetcher.mockResolvedValueOnce(new Response("{}", {status: 401})); await focus();
   await act(async () => finish(context()));
   expect(host.querySelector("iframe")).toBeNull();
-  expect(host.querySelector("button")?.disabled).toBe(true);
+  expect(host.textContent).toContain("Sign in to your task again.");
+});
+it.each([
+  {origin:"https://evil.test",subject:"qa-owner"},
+  {origin,subject:""},
+  {origin,subject:"x".repeat(201)},
+])("does not mount content for invalid provider context",async result=>{
+  await render();fetcher.mockResolvedValue(Response.json(result));await open();
+  expect(host.querySelector("iframe")).toBeNull();expect(host.textContent).toContain("Document access could not be checked");
 });
