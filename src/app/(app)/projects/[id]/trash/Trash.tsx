@@ -27,6 +27,7 @@ export default function Trash({ params }: { params: Promise<{ id: string }> }) {
   return (
     <Page className="project-trash-view" title="Trash" beforeTitle={<nav className="trash-breadcrumb" aria-label="Breadcrumb"><Link href="/projects">Projects</Link> / <Link href={`/projects/${id}`}>{p?.name ?? "Project"}</Link> / Trash</nav>} sub={`Deleted tasks from ${p?.name ?? "this project"}`} actions={<Link className="btn ghost" href={`/projects/${id}`}>Back to project</Link>}>
       <p className="trash-retention">Tasks are kept for 30 days, then permanently removed.</p>
+      {p && !canRestore && <p className="box" role="note">{p.archived ? "This project is archived and read-only. Restore actions are unavailable while it is archived." : "Only the project Leader can restore deleted tasks. You can read these recoverable items."}</p>}
       {err && <div className="err" role="alert">{err}</div>}
       {tr.loading && !tr.data && <Skeleton />}
       <section className="trash-panel"><h2>Deleted items {tr.data && `(${tr.data.items.length})`}</h2>
@@ -38,7 +39,7 @@ export default function Trash({ params }: { params: Promise<{ id: string }> }) {
             <tbody>
               {tr.data.items.map((i) => (
                 <tr key={i.id}>
-                  <td data-label="Item"><strong>{i.title}</strong>{i.isSubtask && <> <span className="trash-parent">Subtask{i.parentTitle ? ` of ${i.parentTitle}` : ""}</span></>}</td>
+                  <td data-label="Item"><div className="trash-item-copy"><strong>{i.title}</strong>{i.isSubtask && <> <span className="trash-parent">Subtask{i.parentTitle ? ` of ${i.parentTitle}` : ""}</span></>}</div></td>
                   <td data-label="Deleted by">{i.deletedBy?.name ?? "—"}</td>
                   <td data-label="Deleted">{ago(i.deletedAt)}</td>
                   <td data-label="Time left">{i.daysLeft} day{i.daysLeft === 1 ? "" : "s"} left</td>

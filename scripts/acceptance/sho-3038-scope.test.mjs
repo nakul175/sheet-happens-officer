@@ -5,6 +5,20 @@ import test from "node:test";
 
 const production = "ee59582dffcbd8cc3067e689b2bb73cf63781cb7";
 const allowed = new Set([
+  // User-approved production audit SHO3114–3132, same combined release.
+  "src/app/(app)/audit-ui.css",
+  "src/components/TaskParts.tsx",
+  "src/components/inline.tsx",
+  "src/components/ui.tsx",
+  "src/components/concierge/Concierge.tsx",
+  "src/app/(app)/audit/AuditView.tsx",
+  "src/app/(app)/profile/Profile.tsx",
+  "src/app/(app)/usage/screen.tsx",
+  "src/app/(app)/projects/[id]/ListControls.tsx",
+  "tests/audit-ui-approved.test.tsx",
+  "tests/deal-classification-ui.test.tsx",
+  "docs/remaining-audit-release.md",
+
   "docs/remaining-approved-ui-release.md",
   // User-approved Home dashboard and production layout correction, 27 October 2026.
   "src/app/(app)/Dashboard.tsx",

@@ -1,5 +1,21 @@
 "use client";
-import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import { Children, Fragment, cloneElement, isValidElement, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+
+/** Keep actions in normal flow and give only the body its own scroll area. Forms stay forms. */
+function dialogSections(children: React.ReactNode): React.ReactNode {
+  const flatten = (nodes: React.ReactNode): React.ReactNode[] => Children.toArray(nodes).flatMap(node => isValidElement<{ children?: React.ReactNode }>(node) && node.type === Fragment ? flatten(node.props.children) : [node]);
+  const nodes = flatten(children);
+  const header: React.ReactNode[] = [], body: React.ReactNode[] = [], footer: React.ReactNode[] = [];
+  nodes.forEach(node => {
+    const el = isValidElement<{ className?: string }>(node) ? node : null;
+    const classes = el?.props.className?.split(/\s+/) ?? [];
+    if (el?.type === "h2" || classes.includes("bar") || classes.includes("record-form-heading")) header.push(node);
+    else if (classes.includes("actions")) footer.push(node);
+    else body.push(node);
+  });
+  const hasForm = body.some(node => isValidElement(node) && node.type === "form");
+  return <>{header.length > 0 && <div className="dialog-header">{header}</div>}{hasForm ? <div className="dialog-forms">{body.map(node => isValidElement<{ className?: string; children?: React.ReactNode }>(node) && node.type === "form" ? cloneElement(node, { className: `${node.props.className ?? ""} dialog-form` }, dialogSections(node.props.children)) : node)}</div> : <div className="dialog-body">{body}</div>}{footer.length > 0 && <div className="dialog-footer">{footer}</div>}</>;
+}
 
 /** An open dialog: its identity for this render tree and the element a keypress has to belong to. */
 type Open = { me: symbol; el: HTMLElement | null };
@@ -99,14 +115,15 @@ export function Modal({ onClose, small, label, describedBy, className, children 
       if (!sheet || !(field instanceof HTMLElement) || !sheet.contains(field) || field === sheet || field.closest(".bar, .actions")) return;
       // Scroll this sheet explicitly: scrollIntoView can use the layout viewport while the keyboard is resizing
       // the visual viewport, leaving the focused field below the pinned footer even though the sheet fits.
-      const bounds = sheet.getBoundingClientRect();
+      const scroller = field.closest<HTMLElement>(".dialog-body") ?? sheet;
+      const bounds = scroller.getBoundingClientRect();
       const footer = sheet.querySelector<HTMLElement>(":scope > .actions")?.getBoundingClientRect();
       const header = sheet.querySelector<HTMLElement>(":scope > .bar")?.getBoundingClientRect();
       const bottom = Math.min(bounds.bottom, footer && footer.top > bounds.top ? footer.top : bounds.bottom) - 8;
       const top = Math.max(bounds.top, header?.bottom ?? bounds.top) + 8;
       const box = field.getBoundingClientRect();
-      if (box.bottom > bottom) sheet.scrollTop += box.bottom - bottom;
-      else if (box.top < top) sheet.scrollTop -= top - box.top;
+      if (box.bottom > bottom) scroller.scrollTop += box.bottom - bottom;
+      else if (box.top < top) scroller.scrollTop -= top - box.top;
     };
     let frame = 0;
     const scheduleFit = () => {
@@ -137,7 +154,7 @@ export function Modal({ onClose, small, label, describedBy, className, children 
   return (
     <div className="scrim" ref={scrim} onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div className={`modal${small ? " sm" : ""}${className ? ` ${className}` : ""}`} role="dialog" aria-modal="true" aria-label={label} aria-describedby={describedBy} tabIndex={-1} ref={(el) => { ref.current = el; sheetRef.current = el; }} style={{ outline: "none" }}>
-        {children}
+        {dialogSections(children)}
       </div>
     </div>
   );

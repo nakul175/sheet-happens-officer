@@ -7,8 +7,8 @@ import { errorMessage, isVersionConflict } from "@/lib/version-error";
 import { Confirm } from "@/components/ui";
 
 /** Tick circle. Calls complete (or reopen) on the version the row shows, and asks before completing open subtasks. */
-export function Tick({ id, title, done, allowed, version, onDone, onStale }: {
-  id: string; title: string; done: boolean; allowed: boolean; version: string; onDone: () => void; onStale?: () => void;
+export function Tick({ id, title, done, allowed, version, onDone, onStale, disabledReason }: {
+  id: string; title: string; done: boolean; allowed: boolean; version: string; onDone: () => void; onStale?: () => void; disabledReason?: string;
 }) {
   const [ask, setAsk] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
@@ -25,8 +25,8 @@ export function Tick({ id, title, done, allowed, version, onDone, onStale }: {
   return (
     <>
       <button className={`tick${done ? " done" : ""}${allowed ? "" : " off"}`} disabled={!allowed || busy}
-        aria-label={allowed ? `${done ? "Reopen" : "Complete"} "${title}"` : `"${title}" can only be closed by its approver`}
-        title={allowed ? undefined : "Only the approver or the project Leader can close this task"}
+        aria-label={allowed ? `${done ? "Reopen" : "Complete"} "${title}"` : disabledReason ? `"${title}": ${disabledReason}` : `"${title}" can only be closed by its approver`}
+        title={allowed ? undefined : disabledReason ?? "Only the approver or the project Leader can close this task"}
         onClick={(e) => { e.stopPropagation(); go(); }}>{done ? "✓" : ""}</button>
       {ask !== null && (
         <Confirm title="Open subtasks" yes="Complete them all" busy={busy} onNo={() => setAsk(null)}
@@ -69,16 +69,16 @@ export function AvatarGroup({ assignee, collaborators, className }: { assignee: 
   );
 }
 
-const LEVEL: Record<string, number> = { LOW: 1, MEDIUM: 2, HIGH: 3, URGENT: 4 };
-/** SHO-US-14.12: priority as a small bar icon plus its word (the word is hidden on compact rows but stays for screen readers). Not link-coloured. */
+const PRIORITY_ICON: Record<string, string> = { LOW: "↓", MEDIUM: "−", HIGH: "↑", URGENT: "⚠" };
+/** Visible icon and label retain all four existing priority values in every density. */
 export function Pri({ p }: { p: string }) {
-  const n = LEVEL[p] ?? 2;
-  return (
-    <span className={`pri pri-${p}`} title={PRIORITY[p]}>
-      <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden focusable="false">
-        {[0, 1, 2, 3].map((i) => <rect key={i} x={0.75 + i * 3} y={11 - (3 + i * 2.4)} width="2.5" height={3 + i * 2.4 - 0.25} rx=".5" fill={i < n ? "currentColor" : "none"} stroke="currentColor" strokeWidth="1" />)}
-      </svg>
-      <span className="pri-t">{PRIORITY[p]}</span>
-    </span>
-  );
+  return <span className={`pri priority-badge pri-${p}`} title={PRIORITY[p] ?? "Not set"}><span aria-hidden="true">{PRIORITY_ICON[p] ?? "−"}</span><span className="pri-t">{PRIORITY[p] ?? "Not set"}</span></span>;
+}
+
+/** Selects only the caller's displayed task IDs; completion is a separate control. */
+export function SectionSelection({ selected, total, label, onChange, disabled = false }: { selected: number; total: number; label: string; onChange: (checked: boolean) => void; disabled?: boolean }) {
+  const input = useRef<HTMLInputElement>(null);
+  const mixed = selected > 0 && selected < total;
+  useEffect(() => { if (input.current) input.current.indeterminate = mixed; }, [mixed]);
+  return <label className="selall"><input ref={input} type="checkbox" aria-label={label} aria-checked={mixed ? "mixed" : selected === total && total > 0} checked={total > 0 && selected === total} disabled={disabled || total === 0} onChange={e => onChange(e.target.checked)} /><span className="section-selection-mark" aria-hidden="true">{mixed ? "−" : selected === total && total > 0 ? "✓" : ""}</span></label>;
 }

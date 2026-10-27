@@ -106,13 +106,13 @@ export default function DealsView() {
         </section>;
       })}
 
-      <section aria-label="Deal Trash">
-        <h2 className="grp">Trash</h2>
+      <details className="deal-trash" aria-label="Deal Trash">
+        <summary>Trash</summary>
         <p className="hint">Deleted deals stay recoverable. Their tasks, notes, parties, memberships and history are preserved.</p>
         {trash.error && <div className="err" role="alert">{trash.error} <button className="link" onClick={trash.reload}>Retry</button></div>}
         {trash.data?.deals.map(deal => <div className="box" key={deal.id}><b>{deal.name}</b>{" "}<button className="btn ghost sm" onClick={() => { setRestore(deal); setRestoreError(null); }}>Restore deal…</button></div>)}
         {trash.data && !trash.data.deals.length && <p className="hint">No deleted deals.</p>}
-      </section>
+      </details>
       {restore && <Confirm title={`Restore “${restore.name}”?`} yes="Restore deal" body="All preserved work, parties and memberships return. The deal returns to its previous active or archived state. Members are notified."
         busy={restoring} error={restoreError} onNo={() => setRestore(null)} onYes={async () => {
           setRestoring(true); const result = await api("POST", `/api/projects/${restore.id}/restore`, {}); setRestoring(false);

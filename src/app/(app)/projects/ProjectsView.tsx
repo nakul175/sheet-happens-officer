@@ -117,13 +117,13 @@ export default function ProjectsView() {
       )}
       {!archived.length && old.data && <div className="projects-no-archived"><h2 className="grp">Archived · 0</h2><p className="hint">No archived {kind === "vertical" ? "vertical boards" : "projects"} in this view.</p></div>}
       {old.error && <LoadFailed onRetry={old.reload} />}
-      <section aria-label="Project Trash">
-        <h2 className="grp">Trash</h2>
+      <details className="project-trash" aria-label="Project Trash">
+        <summary>Trash</summary>
         <p className="hint">Deleted projects stay recoverable. Only their Leader or an Admin can view and restore them. Restoring preserves the previous active or archived state.</p>
         {trash.error && <LoadFailed onRetry={trash.reload} />}
         {trash.data?.projects.map(project => <div className="box" key={project.id}><b>{project.name}</b>{" "}<button className="btn ghost sm" onClick={() => { setRestore(project); setRestoreError(null); }}>Restore project…</button></div>)}
         {trash.data && !trash.data.projects.length && <p className="hint">No deleted projects.</p>}
-      </section>
+      </details>
       {restore && <Confirm title={`Restore “${restore.name}”?`} yes="Restore project" body="All preserved work and memberships return. The project returns to its previous active or archived state. Members are notified."
         busy={restoring} error={restoreError} onNo={() => setRestore(null)} onYes={async () => {
           setRestoring(true); const result = await api("POST", `/api/projects/${restore.id}/restore`, {}); setRestoring(false);

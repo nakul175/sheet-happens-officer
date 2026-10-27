@@ -71,8 +71,8 @@ export function UsageContents({ role, loading, error, data }: {
             <SpendCeiling ceiling={data.ceiling} />
             <MessagesThisMonth messages={data.month.messages} />
             <QuickActionCounts actions={data.quickActions ?? []} />
+            <MonthCounts month={data.month} />
           </div>
-          <MonthCounts month={data.month} />
           <PeopleUsage people={data.people} />
         </>
       )}
@@ -102,7 +102,7 @@ export function SpendCeiling({ ceiling }: { ceiling: UsagePayload["ceiling"] }) 
         <h2 className="usage-h" id="usage-ceiling">Spend to date: {NO_CEILING}</h2>
         <dl className="usage-figs">
           <div><dt>Spend to date</dt><dd>{amount}</dd></div>
-          <div><dt>Monthly ceiling</dt><dd>{NO_CEILING}{safetyCap}</dd></div>
+          <div><dt>Monthly ceiling</dt><dd className="usage-ceiling-note">{NO_CEILING}<small>{safetyCap}</small></dd></div>
         </dl>
         {capReached && (
           <p className="usage-warn" role="status">
@@ -171,7 +171,7 @@ export function QuickActionCounts({ actions }: { actions: NonNullable<UsagePaylo
 
 function MonthCounts({ month }: { month: UsagePayload["month"] }) {
   return (
-    <div className="cards" style={{ marginTop: 14 }}>
+    <div className="usage-month-counts">
       <div className="card"><small>Calls this month</small><div className="stat">{month.calls}</div></div>
       <div className="card"><small>Tokens in / out</small><div className="stat">{month.inputTokens.toLocaleString("en-IN")} / {month.outputTokens.toLocaleString("en-IN")}</div></div>
     </div>

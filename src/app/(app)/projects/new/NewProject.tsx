@@ -40,20 +40,20 @@ export default function NewProject() {
   const toggle = (id: string, on: boolean) => setPick((m) => { const n = { ...m }; if (on) n[id] = "EDITOR"; else delete n[id]; return n; });
   if (!team.data && team.failed) {
     return (
-      <Page title="New project" sub="Set up your project and choose who joins." beforeTitle={breadcrumb}>
+      <Page className="bounded-form-page" title="New project" sub="Set up your project and choose who joins." beforeTitle={breadcrumb}>
         <LoadFailed onRetry={team.reload} />
       </Page>
     );
   }
   if (team.loading && !team.data) {
     return (
-      <Page title="New project" sub="Set up your project and choose who joins." beforeTitle={breadcrumb}>
+      <Page className="bounded-form-page" title="New project" sub="Set up your project and choose who joins." beforeTitle={breadcrumb}>
         <Skeleton />
       </Page>
     );
   }
   return (
-    <Page title="New project" sub="Set up your project and choose who joins." beforeTitle={breadcrumb}>
+    <Page className="bounded-form-page" title="New project" sub="Set up your project and choose who joins." beforeTitle={breadcrumb}>
       <form className="card new-project-form" onSubmit={submit} aria-busy={busy}>
         <Field label="Project name *">{(id) => <input id={id} className="in" value={name} maxLength={200} required onChange={(e) => setName(e.target.value)} />}</Field>
         <Field label="Description (optional)">{(id) => <textarea id={id} className="in" value={desc} onChange={(e) => setDesc(e.target.value)} />}</Field>
