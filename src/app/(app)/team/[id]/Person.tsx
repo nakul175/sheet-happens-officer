@@ -9,9 +9,6 @@ import { Page, roleLabel, useMe } from "../../Shell";
 import "../team-approved.css";
 type Proj = { id?: string; name: string; href?: string | null; role?: string; openTasks?: number };
 
-/** One fixed sentence. No count, no deal name, no link. */
-export const HIDDEN_DEAL_SENTENCE = "A deal you can't view.";
-
 /** A hidden deal is that sentence with no link. A visible project keeps /projects/<id>. */
 export function personProjectHref(project: { id?: string; href?: string | null }): string | null {
   if (project.href === null || !project.id) return null;
@@ -100,7 +97,7 @@ export default function PersonPage() {
             </div>
           )}
           <h2 style={{ fontSize: 17 }}>{admin ? "Projects" : "Projects you share"}</h2>
-          {p.projects.some((x) => x.href === null) && <p>{HIDDEN_DEAL_SENTENCE}</p>}
+          {p.projects.some((x) => x.href === null) && <p>{p.projects.find((x) => x.href === null)?.name}</p>}
           {p.projects.filter((x) => personProjectHref(x)).length === 0 && !p.projects.some((x) => x.href === null) && <p className="hint">{admin ? "Not on any project yet." : "You are not on a project together."}</p>}
           {p.projects.some((x) => personProjectHref(x)) && (
             <div className="scroll">

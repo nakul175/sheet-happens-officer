@@ -12,6 +12,11 @@ const allowed = new Set([
   "src/components/people-select.css",
   "tests/people-select-clean-ui.test.tsx",
   "tests/modal-focus-return.test.tsx",
+  // SHO-2872 and SHO-2617: redacted server text and approved install copy/guide.
+  "tests/person-deal-visibility-page.test.tsx",
+  "src/components/extras/StartGuide.tsx",
+  "src/lib/install-guidance.ts",
+  "tests/install-guidance-2617.test.tsx",
   "docs/sho-next50-manifest.json",
   "package.json",
   // SHO-3133 approved responsive board layout; product behavior remains in the
