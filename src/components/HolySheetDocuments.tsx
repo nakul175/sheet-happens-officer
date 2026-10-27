@@ -1,5 +1,6 @@
 'use client';
-import { useEffect, useRef, useState } from 'react';
+import { HolySheetEditor, type HostSessionProvider } from '@aplyd/holy-sheet-editor/hosted';
+import { useEffect, useRef, useState, useMemo } from 'react';
 type Context = {
     origin: string;
     subject: string;
@@ -23,6 +24,17 @@ export function HolySheetDocuments({ kind, id }: {
     const endpoint = `/api/${kind}/${encodeURIComponent(id)}/documents`;
     const [context, setContext] = useState<Context | null>(null), [visible, setVisible] = useState(false), [error, setError] = useState(''), [frame, setFrame] = useState(''), [picker, setPicker] = useState(''), [pending, setPending] = useState<Selection | null>(null), [busy, setBusy] = useState(false), [retry, setRetry] = useState(0);
     const verified = useRef<Context | null>(null), iframe = useRef<HTMLIFrameElement>(null), active = useRef(true), channel = useRef(''), mutation = useRef(false), epoch = useRef(0), checks = useRef(0);
+    const provider = useMemo<HostSessionProvider>(() => ({ async check({ signal }) {
+            const response = await fetch(endpoint, { cache: 'no-store', signal });
+            if (response.status === 401)
+                return { status: 'signin' };
+            if (!response.ok)
+                return { status: 'unavailable' };
+            const data = await response.json();
+            if (data.origin !== 'https://staging.holysheet.aplyd.org' || data.subject !== context?.subject)
+                return { status: 'signin' };
+            return { status: 'ready', origin: data.origin, subject: data.subject };
+        } }), [endpoint, context?.subject]);
     const key = (subject: string) => `sho.hs.pending:${subject}:${kind}:${id}`;
     useEffect(() => {
         active.current = true;
@@ -111,7 +123,7 @@ export function HolySheetDocuments({ kind, id }: {
                 catch { }
                 setPending(null);
                 setPicker('');
-                setFrame(`${c.origin}/embed/pages/${selection.pageId}#hs-user=${encodeURIComponent(c.subject)}`);
+                setFrame(selection.pageId);
                 setContext(v => v ? { ...v, defaultSpaceId: selection.setDefault || !v.defaultSpaceId ? selection.spaceId : v.defaultSpaceId, links: v.links.some(l => l.pageId === selection.pageId) ? v.links : [...v.links, { pageId: selection.pageId }] } : v);
             }
         }
@@ -128,8 +140,12 @@ export function HolySheetDocuments({ kind, id }: {
     const saveRef = useRef(save);
     saveRef.current = save;
     useEffect(() => {
-        const receive = (event: MessageEvent) => { const c = verified.current, data = event.data; if (!c || event.origin !== c.origin || event.source !== iframe.current?.contentWindow || !data || data.type !== 'hs-document-selected' || data.channel !== channel.current || data.subject !== c.subject || !uuid.test(data.pageId) || typeof data.spaceId !== 'string' || data.spaceId.length > 200 || typeof data.created !== 'boolean')
-            return; void saveRef.current({ pageId: data.pageId, spaceId: data.spaceId, created: data.created, setDefault: data.setDefault === true }); };
+        const receive = (event: MessageEvent) => {
+            const c = verified.current, data = event.data;
+            if (!c || event.origin !== c.origin || event.source !== iframe.current?.contentWindow || !data || data.type !== 'hs-document-selected' || data.channel !== channel.current || data.subject !== c.subject || !uuid.test(data.pageId) || typeof data.spaceId !== 'string' || data.spaceId.length > 200 || typeof data.created !== 'boolean')
+                return;
+            void saveRef.current({ pageId: data.pageId, spaceId: data.spaceId, created: data.created, setDefault: data.setDefault === true });
+        };
         window.addEventListener('message', receive);
         return () => window.removeEventListener('message', receive);
     }, []);
@@ -138,10 +154,16 @@ export function HolySheetDocuments({ kind, id }: {
     return <section aria-label="Holy Sheet documents" className="card" style={{ marginTop: 16, padding: 16 }}><h3>Holy Sheet documents</h3><p className="sub">Pages keep their Holy Sheet permissions. Removing a link keeps the page.</p>
  {error && <p role="alert">{error}</p>}
  <button className="btn ghost" disabled={busy} onClick={() => setRetry(n => n + 1)}>Check access again</button>
- {context?.canWrite && (['create', 'link'] as const).map(mode => <button key={mode} className="btn" disabled={busy || !!pending} onClick={() => { channel.current = crypto.randomUUID(); const hash = new URLSearchParams({ 'hs-user': context.subject, 'hs-channel': channel.current, 'hs-mode': mode }); if (context.defaultSpaceId)
-        hash.set('hs-space', context.defaultSpaceId); setFrame(''); setPicker(`${context.origin}/embed/picker#${hash}`); }}>{mode === 'create' ? 'Create page' : 'Link existing page'}</button>)}
+ {context?.canWrite && (['create', 'link'] as const).map(mode => <button key={mode} className="btn" disabled={busy || !!pending} onClick={() => {
+                channel.current = crypto.randomUUID();
+                const hash = new URLSearchParams({ 'hs-user': context.subject, 'hs-channel': channel.current, 'hs-mode': mode });
+                if (context.defaultSpaceId)
+                    hash.set('hs-space', context.defaultSpaceId);
+                setFrame('');
+                setPicker(`${context.origin}/embed/picker#${hash}`);
+            }}>{mode === 'create' ? 'Create page' : 'Link existing page'}</button>)}
  {pending && <p>A page is waiting to be linked. <button disabled={busy || !context?.canWrite} onClick={() => void save(pending)}>Retry saving link</button></p>}
- <ul>{context?.links.map(({ pageId }, i) => <li key={pageId}><button className="btn ghost" disabled={busy} onClick={() => { setPicker(''); setFrame(`${context.origin}/embed/pages/${pageId}#hs-user=${encodeURIComponent(context.subject)}`); }}>Document {i + 1}</button> <a href={`${context.origin}/pages/${pageId}`} target="_blank" rel="noopener noreferrer">Open in Holy Sheet</a> {context.canWrite && <button className="btn ghost" disabled={busy} onClick={() => void save({ pageId, spaceId: '', created: false }, true)}>Remove link</button>}</li>)}</ul>
- {(picker || frame) && <><button className="btn ghost" disabled={busy} onClick={() => { setPicker(''); setFrame(''); }}>Close document</button><iframe ref={iframe} key={picker || frame} title={picker ? 'Choose Holy Sheet page' : 'Holy Sheet document'} src={picker || frame} referrerPolicy="no-referrer" sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox allow-downloads" style={{ width: '100%', height: '70vh', border: '1px solid var(--border)' }}/></>}
+ <ul>{context?.links.map(({ pageId }, i) => <li key={pageId}><button className="btn ghost" disabled={busy} onClick={() => { setPicker(''); setFrame(pageId); }}>Document {i + 1}</button> <a href={`${context.origin}/pages/${pageId}`} target="_blank" rel="noopener noreferrer">Open in Holy Sheet</a> {context.canWrite && <button className="btn ghost" disabled={busy} onClick={() => void save({ pageId, spaceId: '', created: false }, true)}>Remove link</button>}</li>)}</ul>
+ {(picker || frame) && <><button className="btn ghost" disabled={busy} onClick={() => { setPicker(''); setFrame(''); }}>Close document</button>{picker ? <iframe ref={iframe} key={picker} title={picker ? 'Choose Holy Sheet page' : 'Holy Sheet document'} src={picker} referrerPolicy="no-referrer" sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox allow-downloads" style={{ width: '100%', height: '70vh', border: '1px solid var(--border)' }}/> : <HolySheetEditor key={frame} pageId={frame} viewContext="embedded" sessionProvider={provider}/>}</>}
  </section>;
 }

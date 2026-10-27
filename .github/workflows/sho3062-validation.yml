@@ -52,6 +52,8 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci --no-audit --no-fund
+      - name: Verify pinned HS-owned editor artifact
+        run: node scripts/verify-holy-sheet-package.mjs --source-check
       - name: Scope and refusal contract
         run: node --test scripts/acceptance/sho3062-scope.test.mjs scripts/acceptance/refusal-probe.test.mjs
       - name: SHO-3010 echo and improve contracts
@@ -93,7 +95,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: holy3-launcher-${{ github.sha }}
+          name: sho3062-${{ github.sha }}
           path: |
             validation-*.log
             release12-drain.json
