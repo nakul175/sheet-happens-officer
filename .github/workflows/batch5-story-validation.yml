@@ -1,0 +1,36 @@
+name: Batch 5 story validation
+on:
+  pull_request:
+    paths:
+      - "tests/e2e/**"
+      - "tests/viewport/checks.ts"
+      - "scripts/ci/story-specs-no-vitest.test.mjs"
+      - "playwright.config.ts"
+      - "tsconfig.e2e.json"
+      - ".github/workflows/batch5-story-validation.yml"
+permissions:
+  contents: read
+jobs:
+  static-story-validation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - name: Typecheck story specs
+        run: npx tsc --noEmit -p tsconfig.e2e.json
+      - name: Lint migrated story files
+        run: >-
+          npx eslint
+          tests/e2e/stories/APL-{2523,2525,2527,2528,2529,2530,2532,2533,2534,2535,2543,2546,2551,2558,2563}.spec.ts
+          tests/e2e/helpers/{qa-alias,alias-pool}.ts tests/viewport/checks.ts
+      - name: Story specs stay out of Vitest
+        run: node --test scripts/ci/story-specs-no-vitest.test.mjs
+      - name: Playwright collects migrated stories
+        run: >-
+          npx playwright test --list
+          tests/e2e/stories/APL-{2523,2525,2527,2528,2529,2530,2532,2533,2534,2535,2543,2546,2551,2558,2563}.spec.ts
