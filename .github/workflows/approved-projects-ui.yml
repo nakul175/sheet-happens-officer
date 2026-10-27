@@ -87,6 +87,8 @@ jobs:
         run: npx vitest run -c vitest.sho-3047.config.mts
       - name: SHO-3048 vertical boards and classification contracts
         run: npx vitest run -c vitest.sho-3048.config.mts
+      - name: SHO-3136 approved branding contracts
+        run: npx vitest run -c vitest.sho-3136.config.mts
       - name: Reported delete and organisation-edit contracts
         run: npx vitest run -c vitest.reported-delete-org-edit.config.mts
       - name: SHO-2681 staging mail-sink contracts
