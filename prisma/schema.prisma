@@ -170,10 +170,30 @@ model Project {
   tasks          Task[]
   actionLogs     ActionLog[]
   savedViews     SavedView[]
+  holySheetLinks HolySheetLink[]
+  holySheetDefault HolySheetDefault?
 
   @@index([workspaceId])
   @@index([typeId])
   @@index([stageId])
+}
+
+// Document identity only: titles, content and grants remain in Holy Sheet.
+model HolySheetLink {
+  id String @id @default(cuid())
+  projectId String
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  taskId String?
+  task Task? @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  originKey String
+  pageId String
+  createdAt DateTime @default(now())
+  @@unique([projectId, originKey, pageId])
+}
+model HolySheetDefault {
+  projectId String @id
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  spaceId String
 }
 
 model ProjectMember {
@@ -203,6 +223,7 @@ model Section {
 }
 
 model Task {
+  holySheetLinks HolySheetLink[]
   id                 String             @id @default(cuid())
   workspaceId        String
   workspace          Workspace          @relation(fields: [workspaceId], references: [id])
