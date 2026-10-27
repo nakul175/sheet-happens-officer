@@ -46,7 +46,7 @@ export function TaskModal({ id, me, onClose, onChanged, asPage }: { id: string; 
   const [convert, setConvert] = useState(false);
   const meCtx = useMe();
 
-  const body = (inner: React.ReactNode) => (asPage ? <div className="modal task-details task-details-page" style={{ margin: "0 auto" }}>{inner}</div> : <Modal label="Task" onClose={onClose}><div className="task-details">{inner}</div></Modal>);
+  const body = (inner: React.ReactNode) => (asPage ? <div className="modal task-details task-details-page" style={{ margin: "0 auto" }}>{inner}</div> : <Modal label="Task" className="task-sheet" onClose={onClose}><div className="task-details">{inner}</div></Modal>);
 
   if (t.loading) return body(<Skeleton />);
   if (!task) {

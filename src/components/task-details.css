@@ -33,6 +33,14 @@
   .task-details :is(.btn,select) { min-height: 44px; }
 }
 /* Preserve SHO-2738: the task action footer remains inside the visible phone sheet. */
+@media (max-width:599px) {
+  body.vv-sheet .scrim:has(> .task-sheet) { padding:0; align-items:stretch; }
+  body.vv-sheet .scrim > .modal.task-sheet {
+    width:100%; max-width:none; height:100%; min-height:0; max-height:100%;
+    margin:0; border-radius:0; box-shadow:none; box-sizing:border-box; overflow:hidden;
+    padding:max(12px, env(safe-area-inset-top, 0px)) max(12px, env(safe-area-inset-right, 0px)) max(12px, env(safe-area-inset-bottom, 0px)) max(12px, env(safe-area-inset-left, 0px));
+  }
+}
 @media (max-width: 599px), (pointer: coarse) {
   body.vv-sheet .modal > .task-details { display: flex; flex-direction: column; }
   body.vv-sheet .modal > .task-details > .actions { order: 100; position: sticky; bottom: 0; z-index: 2; background: var(--card); margin: 0 -18px; padding: 10px 18px; border-top: 1px solid var(--line); }

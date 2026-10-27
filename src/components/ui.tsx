@@ -143,14 +143,18 @@ export function Modal({ onClose, small, label, describedBy, className, children 
     vv?.addEventListener("scroll", scheduleFit);
     document.addEventListener("focusin", scheduleFit);
     return () => {
-      document.body.classList.remove("vv-sheet");
       cancelAnimationFrame(frame);
       content.disconnect();
       document.removeEventListener("focusin", scheduleFit);
       vv?.removeEventListener("resize", scheduleFit);
       vv?.removeEventListener("scroll", scheduleFit);
-      root.style.removeProperty("--vvh");
-      root.style.removeProperty("--vvt");
+      // A nested confirmation must not remove the viewport sizing still used by its parent.
+      // The commit-effect cleanup removes this dialog from OPEN before this effect runs.
+      if (!OPEN.length) {
+        document.body.classList.remove("vv-sheet");
+        root.style.removeProperty("--vvh");
+        root.style.removeProperty("--vvt");
+      }
     };
   }, []);
   return (
