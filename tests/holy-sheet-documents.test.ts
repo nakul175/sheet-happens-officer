@@ -48,7 +48,7 @@ it('rejects a switched Aplyd identity before a write', async () => {
     await expect(changeDocument(actor, origin, { ...input, subject: 'old-account' })).rejects.toMatchObject({ status: 409 });
     expect(m.transaction).not.toHaveBeenCalled();
 });
-it.each([{ archivedAt: new Date(), members: [{ userId: 'native', role: 'EDITOR' }] }, { archivedAt: null, members: [{ userId: 'native', role: 'VIEWER' }] }, { archivedAt: null, members: [] }])('refuses membership loss, downgrade or archive during the operation', async (project) => {
+it.each([{ archivedAt: new Date(), members: [{ userId: 'native', role: 'EDITOR' }] }, { archivedAt: null, members: [{ userId: 'native', role: 'VIEWER' }] }, { archivedAt: null, members: [] }, { deletedAt:new Date(),archivedAt:null,members:[{userId:'native',role:'EDITOR'}] }])('refuses membership loss, downgrade or archive during the operation', async (project) => {
     m.project.mockResolvedValue(project);
     await expect(changeDocument(actor, origin, input)).rejects.toHaveProperty('status');
     expect(m.upsert).not.toHaveBeenCalled();
@@ -68,3 +68,5 @@ it('keeps the integration unavailable when its flag is disabled', async () => {
     await expect(documents(actor, origin)).rejects.toMatchObject({ status: 404 });
     expect(m.session).not.toHaveBeenCalled();
 });
+
+it('uses the latest native role when preparing the displayed controls',async()=>{m.access.mockResolvedValueOnce({role:'EDITOR',project:{archivedAt:null}}).mockResolvedValueOnce({role:'VIEWER',project:{archivedAt:null}});expect((await documents(actor,origin)).canWrite).toBe(false);});

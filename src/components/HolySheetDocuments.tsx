@@ -2,6 +2,7 @@
 import { HolySheetEditor, type HostSessionProvider } from '@aplyd/holy-sheet-editor/hosted';
 import { useEffect, useRef, useState, useMemo } from 'react';
 type Context = {
+    hostOrigin?:string;
     origin: string;
     subject: string;
     canWrite: boolean;
@@ -156,7 +157,7 @@ export function HolySheetDocuments({ kind, id }: {
  <button className="btn ghost" disabled={busy} onClick={() => setRetry(n => n + 1)}>Check access again</button>
  {context?.canWrite && (['create', 'link'] as const).map(mode => <button key={mode} className="btn" disabled={busy || !!pending} onClick={() => {
                 channel.current = crypto.randomUUID();
-                const hash = new URLSearchParams({ 'hs-user': context.subject, 'hs-channel': channel.current, 'hs-mode': mode });
+                const hash = new URLSearchParams({ 'hs-user': context.subject, 'hs-channel': channel.current, 'hs-mode': mode, 'hs-host': context.hostOrigin??'https://sheethappensofficer.aplyd.org' });
                 if (context.defaultSpaceId)
                     hash.set('hs-space', context.defaultSpaceId);
                 setFrame('');
