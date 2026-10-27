@@ -1,0 +1,94 @@
+# SHO-US-22.11: every change runs the phone-size checks on all screens and widths (tests/viewport).
+# It fails naming the screen, width and element, and keeps a screenshot of each failing page (download "viewport-screenshots" from the run).
+# Uses its own throw-away Postgres and invented accounts; it never reaches the production database or any real data.
+name: Phone checks
+
+# Push only on main and qa/story-e2e. Other branches run through pull_request, so a push to a PR branch does not start a second run.
+on:
+  pull_request:
+  push:
+    branches: [main, qa/story-e2e]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  # A run for refs/heads/main is never cancelled. Every other ref cancels the previous run in this group.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  viewport:
+    name: Phone-size layout checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: sho
+          POSTGRES_PASSWORD: sho
+          POSTGRES_DB: sho_viewport
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U sho"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      DATABASE_URL: postgresql://sho:sho@localhost:5432/sho_viewport?schema=public
+      DIRECT_DATABASE_URL: postgresql://sho:sho@localhost:5432/sho_viewport?schema=public
+      EMAIL_OUTBOX_DIR: ${{ github.workspace }}/.outbox-ci
+      SUPER_ADMIN_EMAILS: root.test@aplyd.com
+      APP_URL: http://localhost:3100
+      TASKBOARD_URL: http://localhost:3100
+      JOB_SECRET: ci-only-not-a-real-secret-0123
+      # The product default is off. Phone checks turn the return path on so the story can run.
+      SIGNIN_RETURN_TO: "on"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx prisma migrate deploy
+      - run: npm run build
+      - name: Use runner Chrome or install Chromium
+        run: |
+          if viewport_browser=$(command -v google-chrome); then
+            printf 'PW_CHROMIUM=%s\n' "$viewport_browser" >> "$GITHUB_ENV"
+            "$viewport_browser" --version
+          else
+            npx playwright-core install --with-deps chromium
+          fi
+      - name: Start the app
+        run: |
+          (npx next start -p 3100 > server.log 2>&1 &)
+          for i in $(seq 1 30); do curl -fsS http://localhost:3100/api/health && break; sleep 2; done
+      - name: Prove a real 400px regression fails with diagnostics
+        run: node scripts/ci/viewport-negative-control.mjs
+      - name: Phone checks
+        run: npm run test:viewport
+      - name: Negative-control evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: viewport-negative-control
+          path: |
+            test-results/viewport/negative-control.*
+            test-results/viewport/negative-control-400px-320.png
+          if-no-files-found: error
+          retention-days: 14
+      - name: Screenshots of failing pages
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: viewport-screenshots
+          path: test-results/viewport/
+          if-no-files-found: ignore
+          retention-days: 14
+      - name: Server log (on failure)
+        if: failure()
+        run: tail -n 200 server.log || true
