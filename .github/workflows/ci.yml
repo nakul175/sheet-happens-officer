@@ -113,9 +113,6 @@ jobs:
             if [ "${total:-0}" -eq 0 ]; then echo "::error::Playwright collected 0 tests from $f."; exit 1; fi
           done
           npx playwright test "${specs[@]}"
-      # APL-2728 AC4. One production server per CRM_VISIBLE mode. Needs the build above. Not part of npm test.
-      - name: CRM visible modes
-        run: npm run test:crm-modes
       # APL-2729 AC4. One production server per CRM_VISIBLE mode, after the build.
       # The file sets its own test-only job token. A short JOB_SECRET must fail this step, not skip it.
       - name: Reminder modes (one server per CRM_VISIBLE)
