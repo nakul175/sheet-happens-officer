@@ -1,6 +1,6 @@
 import * as client from "openid-client";
 import { createHash, createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
-import { holyQaIdentity, centralIdentitySecret } from "@/lib/holy-qa-identity";
+import { holyQaIdentity, centralIdentitySecret, centralIdentityIssuer } from "@/lib/holy-qa-identity";
 export const SHO_ORIGIN = holyQaIdentity()?.origin ?? "https://sheethappensofficer.aplyd.org";
 export const CENTRAL_CALLBACK = SHO_ORIGIN + "/api/auth/aplyd/callback";
 export const FLOW_COOKIE = "__Host-sho_oidc_flow";
@@ -14,7 +14,7 @@ export type Flow = {
 };
 function secret() { return centralIdentitySecret(); }
 export async function centralClient() {
-    if (process.env.APLYD_ACCOUNTS_SSO !== "true" || process.env.APLYD_ACCOUNTS_ISSUER !== "https://accounts.aplyd.org")
+    if (process.env.APLYD_ACCOUNTS_SSO !== "true" || process.env.APLYD_ACCOUNTS_ISSUER !== centralIdentityIssuer())
         throw new Error("Central login disabled");
     const config = await client.discovery(new URL(process.env.APLYD_ACCOUNTS_ISSUER), holyQaIdentity()?.clientId ?? "sho", secret(), client.ClientSecretBasic(secret()));
     config.timeout = 5;

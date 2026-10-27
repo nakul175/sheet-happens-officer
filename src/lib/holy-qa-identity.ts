@@ -20,3 +20,15 @@ export function centralIdentitySecret(env: Record<string, string | undefined> = 
 export function holySheetHostOrigin(env: Record<string, string | undefined> = process.env) {
  return holyQaIdentity(env)?.origin ?? 'https://sheethappensofficer.aplyd.org';
 }
+
+/** Disposable four-user acceptance realm; never uses the shared staging schema. */
+export function holyQaRealm(env: Record<string, string | undefined> = process.env) {
+ if(env.SHO_HOLY_QA_REALM!=='1')return null;
+ const qa=holyQaIdentity(env),schema=env.SHO_HOLY_QA_DATABASE_SCHEMA;
+ if(!qa||env.APLYD_ACCOUNTS_ISSUER!==qa.origin||!/^holy4_matrix_[a-f0-9]{12}$/.test(schema??''))throw Error('Explicit isolated matrix realm required');
+ for(const key of ['DATABASE_URL','DIRECT_DATABASE_URL']){const db=new URL(env[key]??'');if(db.pathname!=='/sho_staging'||db.searchParams.get('schema')!==schema)throw Error('Isolated matrix database required');}
+ return {origin:qa.origin,schema:schema!};
+}
+export function centralIdentityIssuer(env: Record<string, string | undefined> = process.env) {
+ return holyQaRealm(env)?.origin ?? 'https://accounts.aplyd.org';
+}
