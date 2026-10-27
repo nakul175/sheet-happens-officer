@@ -12,38 +12,6 @@ defaults:
   run:
     shell: bash
 jobs:
-  upload_verified_sho_2760_source:
-    name: Upload verified SHO-2760 source for root-controlled release
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    env:
-      RELEASE_SHA: 2b21ab7a294d4c3f60f7b45d9a3cd8b1556e8f51
-      HOST: ${{ vars.DROPLET_HOST || 'sheethappensofficer.aplyd.org' }}
-      HOST_KEY: ${{ vars.DROPLET_HOST_KEY }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ env.RELEASE_SHA }}
-      - name: Configure the existing deploy credential
-        env:
-          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
-        run: |
-          mkdir -p ~/.ssh && chmod 700 ~/.ssh
-          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
-          chmod 600 ~/.ssh/id_ed25519
-          if [ -n "$HOST_KEY" ]; then
-            printf '%s\n' "$HOST_KEY" > ~/.ssh/known_hosts
-          else
-            ssh-keyscan -H "$HOST" > ~/.ssh/known_hosts 2>/dev/null
-          fi
-      - name: Upload source without switching any service
-        run: >-
-          rsync -az --delete
-          --exclude .git --exclude node_modules --exclude .next --exclude '.env*' --exclude '.outbox*'
-          ./ "deploy@$HOST:/home/deploy/sho-2760-source/"
-      - name: Confirm uploaded commit marker
-        run: ssh "deploy@$HOST" "printf '%s\n' '$RELEASE_SHA' > /home/deploy/sho-2760-source/UPLOADED_RELEASE_SHA"
-
   validate:
     runs-on: ubuntu-latest
     timeout-minutes: 55
