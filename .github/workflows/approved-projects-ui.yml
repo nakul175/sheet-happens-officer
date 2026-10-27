@@ -59,6 +59,8 @@ jobs:
         run: node --test scripts/acceptance/sho-3038-scope.test.mjs
       - name: Approved Projects UI, Board and task-details regressions
         run: npx vitest run -c vitest.projects-approved.config.mts
+      - name: Approved Home and single-row shell regressions
+        run: npx vitest run -c vitest.scoped4-all.config.mts tests/dashboard-ui-approved.test.tsx tests/shell-layout-approved.test.tsx
       - name: SHO-3038 collaborator acceptance
         run: npx vitest run -c vitest.sho-3038.config.mts
       - name: SHO-3044 opportunity classification acceptance

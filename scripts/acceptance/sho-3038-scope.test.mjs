@@ -5,6 +5,28 @@ import test from "node:test";
 
 const production = "ee59582dffcbd8cc3067e689b2bb73cf63781cb7";
 const allowed = new Set([
+  // User-approved Home dashboard and production layout correction, 27 October 2026.
+  "src/app/(app)/Dashboard.tsx",
+  "src/app/(app)/MyTasks.tsx",
+  "src/app/(app)/approvals/Approvals.tsx",
+  "src/app/(app)/approvals/page.tsx",
+  "src/app/(app)/dashboard.css",
+  "src/app/(app)/my-tasks/page.tsx",
+  "src/app/(app)/page.tsx",
+  "src/app/(app)/tasks/[id]/not-found.tsx",
+  "src/app/api/dashboard/route.ts",
+  "src/components/TaskModal.tsx",
+  "src/components/extras/Extras.tsx",
+  "src/components/concierge/Launcher.tsx",
+  "src/lib/dashboard.ts",
+  "src/lib/tasks.ts",
+  "tests/dashboard-db-approved.test.ts",
+  "tests/dashboard-ui-approved.test.tsx",
+  "tests/shell-layout-approved.test.tsx",
+  "tests/viewport/return-to.story.test.ts",
+  "vitest.dashboard-approved.config.mts",
+  "docs/home-layout-release.md",
+
   // SHO-3077..3083: explicitly approved UI surfaces; runtime/auth invariants below remain unchanged.
   "src/app/(app)/Shell.tsx",
   "src/app/(app)/nav-header.css",

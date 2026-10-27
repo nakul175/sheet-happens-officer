@@ -119,7 +119,7 @@ describe("APL-2652 sign-in returns to the deep link", () => {
       try {
         await page.goto(`/signin?next=${encodeURIComponent(next)}`);
         await signIn(page, memberEmail, PW);
-        await page.getByRole("heading", { name: "My tasks" }).waitFor({ timeout: 20000 });
+        await page.getByRole("heading", { name: "Your workspace" }).waitFor({ timeout: 20000 });
         const url = new URL(page.url());
         expect(url.origin, next).toBe(origin());
         expect(url.pathname, next).toBe("/");
