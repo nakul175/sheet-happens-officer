@@ -146,7 +146,7 @@ test("AC6: the Team page shows people by role, and deactivated people are shown 
   const adminRow = admin.page.locator("tr", { hasText: orgAdmin.name });
   await expect(memberRow).toContainText("Member");
   await expect(memberRow).toContainText("Deactivated");
-  await expect(memberRow.locator(".chip.grey", { hasText: "Deactivated" })).toBeVisible();
+  await expect(memberRow.locator(".team-status.grey", { hasText: "Deactivated" })).toBeVisible();
   await expect(adminRow).toContainText("Admin");
   await expect(admin.page.locator("tr", { hasText: String(admin.user.email) }).first()).toContainText("Super Admin");
 });

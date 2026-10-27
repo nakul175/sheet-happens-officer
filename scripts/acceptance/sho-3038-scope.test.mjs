@@ -5,6 +5,7 @@ import test from "node:test";
 
 const production = "ee59582dffcbd8cc3067e689b2bb73cf63781cb7";
 const allowed = new Set([
+  "tests/e2e/stories/APL-2466.spec.ts",
   "tests/e2e/local/SHO-2738-3025-3030.browser.test.ts",
   // SHO-3093..3097 approved Notes, Linked tasks, Tree, Deals and Team.
   "src/app/(app)/deals/deals-approved.css",
