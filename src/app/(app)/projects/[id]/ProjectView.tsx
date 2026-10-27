@@ -5,7 +5,7 @@ import Link from "next/link";
 import { use, useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Suspense } from "react";
-import { PRIORITY, ROLE, api, dueLabel, dueState, rowKeys, initials, isOverdue, todayIST, useGet } from "@/components/api";
+import { PRIORITY, ROLE, api, dueLabel, dueState, rowKeys, isOverdue, todayIST, useGet } from "@/components/api";
 import { errorMessage, isVersionConflict } from "@/lib/version-error";
 import { WorkspaceTaskPerson, type WorkspaceTaskCandidate } from "@/components/WorkspaceTaskPerson";
 import { TaskModal } from "@/components/TaskModal";
