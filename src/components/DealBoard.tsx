@@ -30,19 +30,19 @@ export function sortDeals(deals: BoardDeal[], sort: DealSort, stages: BoardStage
   const stageOrder = new Map(stages.map((stage, index) => [stage.id, index]));
   return [...deals].sort((a, b) => {
     let result = 0;
-    if (sort === "name-asc" || sort === "name-desc") result = a.name.localeCompare(b.name, undefined, { sensitivity: "base" }) * (sort === "name-desc" ? -1 : 1);
+    if (sort === "name-asc" || sort === "name-desc") result = a.name.localeCompare(b.name, "en", { sensitivity: "base" }) * (sort === "name-desc" ? -1 : 1);
     if (sort === "stage") result = (stageOrder.get(a.stage?.id ?? "") ?? Number.MAX_SAFE_INTEGER) - (stageOrder.get(b.stage?.id ?? "") ?? Number.MAX_SAFE_INTEGER);
     if (sort === "date-asc" || sort === "date-desc") {
       const ad = a.submissionDeadline;
       const bd = b.submissionDeadline;
       if (ad && bd) result = ad.localeCompare(bd) * (sort === "date-desc" ? -1 : 1);
-      else if (ad !== bd) result = ad ? -1 : 1;
+      else if (Boolean(ad) !== Boolean(bd)) result = ad ? -1 : 1;
     }
-    return result || a.id.localeCompare(b.id);
+    return result || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
   });
 }
 
-export function columnsFor(stages: BoardStage[], deals: BoardDeal[], bid: boolean, lifecycle: DealLifecycle = "all"): Col[] {
+export function columnsFor(stages: BoardStage[], deals: BoardDeal[], bid: boolean, lifecycle: DealLifecycle = "all", sort?: DealSort): Col[] {
   const active = stages.filter(s => !s.isRetired && (lifecycle === "all" || (s.category === "DELIVERY" ? "delivery" : "sales") === lifecycle));
   // Bid decisions and outcomes are separate stages. Proactive keeps its original grouped tail.
   const cols: Col[] = active.filter(s => bid || !isLastGroup(s.category)).map(s => ({ key: s.id, title: s.name, stages: [s], deals: [] }));
@@ -55,7 +55,10 @@ export function columnsFor(stages: BoardStage[], deals: BoardDeal[], bid: boolea
     const c = cols.find(c => c.stages.some(s => s.id === d.stage!.id));
     c?.deals.push(d);
   }
-  if (bid) for (const c of cols) c.deals.sort((a, b) => (a.submissionDeadline ?? "9999").localeCompare(b.submissionDeadline ?? "9999"));
+  for (const c of cols) {
+    if (sort) c.deals = sortDeals(c.deals, sort, stages);
+    else if (bid) c.deals.sort((a, b) => (a.submissionDeadline ?? "9999").localeCompare(b.submissionDeadline ?? "9999"));
+  }
   return cols;
 }
 
@@ -65,8 +68,9 @@ export const OPPORTUNITY_GROUPS = [
   { key: "unclassified", label: "Unclassified", types: [] },
 ] as const;
 export function opportunityGroups(deals: BoardDeal[]) {
-  return OPPORTUNITY_GROUPS.map(group => ({ ...group, deals: deals.filter(d => group.key === "unclassified" ? !d.opportunityType : (group.types as readonly string[]).includes(d.opportunityType ?? "")) }));
+  return OPPORTUNITY_GROUPS.map(group => ({ ...group, deals: deals.filter(d => group.key === "unclassified" ? opportunityFilterValue(d.opportunityType) === "unclassified" : (group.types as readonly string[]).includes(d.opportunityType ?? "")) }));
 }
+export const opportunityFilterValue = (value?: string | null) => OPPORTUNITY_TYPES.some(type => type.value === value) ? value! : "unclassified";
 
 export function totals(deals: BoardDeal[]) {
   const sums = new Map<string, number>();
@@ -105,7 +109,8 @@ function Card({ d, stages, onMove, bid, canMove }: { d: BoardDeal; stages: Board
 
 export function DealBoard({ deals, stages, bid, lifecycle = "all", sort = "stage", canMove = true, onChange }: { deals: BoardDeal[]; stages: BoardStage[]; bid: boolean; lifecycle?: DealLifecycle; sort?: DealSort; canMove?: boolean; onChange: () => void }) {
   const legacy = deals.filter(d => !d.archived && d.stage?.isRetired && inLifecycle(d, lifecycle));
-  const cols = useMemo(() => columnsFor(stages, sortDeals(deals, sort, stages), bid, lifecycle), [stages, deals, bid, lifecycle, sort]);
+  const cols = useMemo(() => columnsFor(stages, deals, bid, lifecycle, sort), [stages, deals, bid, lifecycle, sort]);
+  const unplaced = sortDeals(deals.filter(d => !d.archived && !d.stage?.isRetired && inLifecycle(d, lifecycle) && !cols.some(c => c.deals.some(item => item.id === d.id))), sort, stages);
   const [dialog, setDialog] = useState<null | { deal: BoardDeal; stage: BoardStage; initial?: StageInitial }>(null);
   const [which, setWhich] = useState<null | { deal: BoardDeal; stages: BoardStage[] }>(null);
   const [over, setOver] = useState<string | null>(null);
@@ -135,6 +140,7 @@ export function DealBoard({ deals, stages, bid, lifecycle = "all", sort = "stage
         <p className="sub">These deals retain their historical stage. Move to an active stage to return them to the board.</p>
         {legacy.map(d => <Card key={d.id} d={d} stages={stages} onMove={move} bid={bid} canMove={canMove} />)}
       </section>}
+      {unplaced.length > 0 && <section className="card" aria-label="Unassigned stage deals" style={{ marginBottom: 12 }}><h3>Unassigned stage</h3><p className="hint">These deals have no available stage and remain accessible here.</p>{unplaced.map(d => <Card key={d.id} d={d} stages={stages} onMove={move} bid={bid} canMove={canMove} />)}</section>}
       <div className="dboard" role="region" aria-label="Deal board" tabIndex={0}>
         {cols.map((c) => {
           const t = totals(c.deals);

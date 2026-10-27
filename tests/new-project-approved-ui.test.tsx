@@ -26,7 +26,7 @@ async function submit() { await act(async () => { document.querySelector("form")
 afterEach(() => { act(() => root?.unmount()); root = undefined; vi.restoreAllMocks(); });
 it("keeps default Leader, required name, retired exclusion and a navigation-only Cancel", async () => {
   const fetcher = await mount();
-  expect(named("Leader").value).toBe("me");
+  expect(named("Leader").textContent).toContain("Me (you)");
   expect((named("Project name *") as HTMLInputElement).maxLength).toBe(200);
   expect((named("Project name *") as HTMLInputElement).required).toBe(true);
   expect(named("Vertical (optional)").textContent).not.toContain("Retired");
@@ -51,7 +51,8 @@ it("keeps eligible member search and submits Viewer membership with first-task n
 });
 it("excludes the new Leader from members, explains creator Editor and retries API failure", async () => {
   const fetcher = await mount();
-  await change(named("Leader"), "p0");
+  await act(async () => { named("Leader").click(); });
+  await act(async () => { [...document.querySelectorAll<HTMLButtonElement>('[role="option"]')].find(option => option.textContent === "Person 0")!.click(); });
   expect(document.body.textContent).toContain("you are added as an Editor");
   expect([...document.querySelectorAll('.ppl-l')].some(n => n.textContent === "Person 0")).toBe(false);
   await change(named("Project name *"), "Failed then retried");

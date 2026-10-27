@@ -31,12 +31,13 @@ afterEach(() => { act(() => root?.unmount()); root = undefined; vi.restoreAllMoc
 
 it("SHO-3043 date filter updates board, list and totals together and clears", async () => {
   await mount(h(DealsView));
-  const select = [...document.querySelectorAll<HTMLSelectElement>('select')][0];
+  await click("Date filters");
+  const select = [...document.querySelectorAll<HTMLLabelElement>("label")].find(label => label.firstChild?.textContent?.trim() === "Date basis")!.querySelector("select")!;
   await act(async () => {
     select.value = "expectedClose";
     select.dispatchEvent(new Event("change", { bubbles: true }));
   });
-  const undated = [...document.querySelectorAll<HTMLSelectElement>("select")][1];
+  const undated = [...document.querySelectorAll<HTMLLabelElement>("label")].find(label => label.firstChild?.textContent?.trim() === "No date")!.querySelector("select")!;
   await act(async () => {
     undated.value = "exclude";
     undated.dispatchEvent(new Event("change", { bubbles: true }));
@@ -76,7 +77,7 @@ it("SHO-3134 combines multi-select values with OR within a dimension and AND acr
     checks.find(input => input.parentElement?.textContent?.includes("On Hold"))!.click();
   });
   expect([...document.querySelectorAll(".dcard a")].map(a => a.textContent)).toEqual(["sales-rfp", "sales-otc"]);
-  await click("Clear type and stage filters");
+  await click("Clear filters");
   expect(document.querySelectorAll(".dcard")).toHaveLength(7);
 });
 
@@ -148,4 +149,43 @@ it("empty delivery explains Won-to-Ongoing workflow without a create-deal dead e
   expect(empty.textContent).toContain("move an existing Won deal to Ongoing Projects");
   expect(empty.textContent).not.toContain("Create");
   expect(empty.querySelector('a[href="/deals/new"]')).toBeNull();
+});
+
+it.each([true, false])("SHO-3135 selected within-stage ordering survives grouping (Bid=%s)", async bid => {
+  const examples = [
+    { ...deal("b", stages[0]), name: "Alpha", submissionDeadline: "2026-12-03" },
+    { ...deal("a", stages[0]), name: "Zulu", submissionDeadline: "2026-12-01" },
+    { ...deal("c", stages[0]), name: "Alpha", submissionDeadline: null },
+    { ...deal("d", stages[0]), name: "Alpha", submissionDeadline: undefined as unknown as null },
+  ];
+  const expected = { "name-asc": ["b", "c", "d", "a"], "name-desc": ["a", "b", "c", "d"], "date-asc": ["a", "b", "c", "d"], "date-desc": ["b", "a", "c", "d"], stage: ["a", "b", "c", "d"] };
+  for (const [sort, ids] of Object.entries(expected)) {
+    const selected = sort as Parameters<typeof sortDeals>[1];
+    expect(columnsFor(stages, examples, bid, "sales", selected)[0].deals.map(d => d.id)).toEqual(ids);
+    await mount(h(DealBoard, { stages, deals: examples, bid, lifecycle: "sales", sort: selected, onChange: vi.fn() }));
+    expect([...document.querySelectorAll('.dcol:first-child .dcard a')].map(a => a.getAttribute("href")!.split("/").at(-1))).toEqual(ids);
+    act(() => root?.unmount()); root = undefined;
+  }
+});
+
+it("SHO-3134 preserves legacy unknown opportunity and unavailable-stage records without changing canonical stages", async () => {
+  const unknown = { ...deal("legacy-type", stages[0]), opportunityType: "LEGACY_UNKNOWN" as BoardDeal["opportunityType"] };
+  const noStage = { ...deal("no-stage", stages[0]), stage: null };
+  expect(opportunityGroups([unknown, noStage])[2].deals.map(d => d.id)).toEqual(["legacy-type"]);
+  await mount(h(DealBoard, { stages, deals: [unknown, noStage], bid: true, lifecycle: "sales", canMove: false, onChange: vi.fn() }));
+  expect(document.querySelector('[aria-label="Unassigned stage deals"] a')?.getAttribute('href')).toBe('/projects/no-stage');
+  expect([...document.querySelectorAll('.dcol>header>b')].map(e => e.textContent)).toEqual(stages.filter(s => s.category !== 'DELIVERY').map(s => s.name));
+  expect(document.querySelectorAll('[role="menuitem"]')).toHaveLength(0);
+});
+
+it("SHO-3133 omits empty opportunity sections but leaves every category available in the filter", async () => {
+  const old = globalThis.fetch;
+  globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => String(input).startsWith('/api/deals?')
+    ? new Response(JSON.stringify({deals:[deal('only-unclassified',stages[0],null)]}),{headers:{'content-type':'application/json'}})
+    : old(input,init));
+  await mount(h(DealsView));
+  expect(document.querySelectorAll('section[aria-label$=" sales"]')).toHaveLength(1);
+  expect(document.querySelector('section[aria-label="Unclassified sales"]')).not.toBeNull();
+  expect(document.querySelectorAll('.deal-multi-popup input[type=checkbox]')).toHaveLength(5+stages.length);
+  expect(document.querySelector('[aria-label="Open commercial pipeline"]')?.className).not.toContain('card');
 });

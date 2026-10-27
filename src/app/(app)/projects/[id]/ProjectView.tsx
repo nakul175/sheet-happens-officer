@@ -1,4 +1,5 @@
 "use client";
+import { personText } from "@/components/PeopleSelect";
 import { finePointer } from "@/components/client";
 import Link from "next/link";
 import { use, useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
@@ -36,7 +37,7 @@ type Summary = { open: number; overdue: number; blocked: number; awaiting: numbe
 type Proj = {
   id: string; name: string; archived: boolean; role: string; isVertical?: boolean; type?: "PROJECT" | "DEAL"; deal?: DealBlock | null;
   sections: { id: string; name: string; isDone: boolean }[];
-  members: { userId: string; name: string; role: string; active: boolean }[];
+  members: { userId: string; name: string; email?: string; role: string; active: boolean }[];
 };
 const MAX_SECTIONS = 8;
 // SHO-US-22.6 AC6: dragging is for devices with a mouse. On a touch screen it would fight scrolling, so Move to… is used.
@@ -436,9 +437,9 @@ function NewTask({ p, onClose, onAdded }: { p: Proj; onClose: () => void; onAdde
       }}>
         <Field label="Title">{(id) => <input id={id} className="in" value={title} required maxLength={500} autoFocus={finePointer()} onChange={(e) => setTitle(e.target.value)} />}</Field>
         <Field label="Section">{(id) => <select id={id} className="in" value={section} onChange={(e) => setSection(e.target.value)}>{p.sections.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select>}</Field>
-        <Field label="Assignee">{(id) => <select id={id} className="in" value={assignee} onChange={(e) => { setAssignee(e.target.value); setAddAssignee(pendingPeople.some(p => p.id === e.target.value && !p.isMember)); }}>{pendingPeople.filter(person => !workers.some(w => w.userId === person.id)).map(person => <option key={person.id} value={person.id}>{person.name} (will join project)</option>)}{workers.map((w) => <option key={w.userId} value={w.userId}>{w.name}</option>)}</select>}</Field>
+        <Field label="Assignee">{(id) => <select id={id} className="in" value={assignee} onChange={(e) => { setAssignee(e.target.value); setAddAssignee(pendingPeople.some(p => p.id === e.target.value && !p.isMember)); }}>{pendingPeople.filter(person => !workers.some(w => w.userId === person.id)).map(person => <option key={person.id} value={person.id}>{person.name} (will join project)</option>)}{workers.map((w) => <option key={w.userId} value={w.userId}>{personText(w)}</option>)}</select>}</Field>
         {canAddPeople && <WorkspaceTaskPerson projectId={p.id} purpose="assignee" whenSaved excludeIds={[assignee]} onChoose={async (person, addToProject) => { remember(person); setAssignee(person.id); setAddAssignee(addToProject); return { ok: true }; }} />}
-        <Field label="Collaborators (optional)">{(id) => <select id={id} className="in" multiple value={collaborators.filter((id) => id !== assignee)} onChange={(e) => setCollaborators(Array.from(e.target.selectedOptions, (option) => option.value))}>{pendingCollaborators.filter(person => person.id !== assignee && !p.members.some(m => m.userId === person.id)).map(person => <option key={person.id} value={person.id}>{person.name} (will join project)</option>)}{p.members.filter((m) => m.active && m.userId !== assignee).map((m) => <option key={m.userId} value={m.userId}>{m.name}</option>)}</select>}</Field>
+        <Field label="Collaborators (optional)">{(id) => <select id={id} className="in" multiple value={collaborators.filter((id) => id !== assignee)} onChange={(e) => setCollaborators(Array.from(e.target.selectedOptions, (option) => option.value))}>{pendingCollaborators.filter(person => person.id !== assignee && !p.members.some(m => m.userId === person.id)).map(person => <option key={person.id} value={person.id}>{person.name} (will join project)</option>)}{p.members.filter((m) => m.active && m.userId !== assignee).map((m) => <option key={m.userId} value={m.userId}>{personText(m)}</option>)}</select>}</Field>
         {canAddPeople && <WorkspaceTaskPerson projectId={p.id} purpose="collaborator" whenSaved excludeIds={[assignee, ...collaborators]} onChoose={async (person, addToProject) => { rememberCollaborator(person); setCollaborators(current => current.includes(person.id) ? current : [...current, person.id]); if (addToProject) setAddCollaborators(current => current.includes(person.id) ? current : [...current, person.id]); return { ok: true }; }} />}
         <Field label="Due date">{(id) => <input id={id} className="in" type="date" required value={due} onChange={(e) => setDue(e.target.value)} />}</Field>
         <Field label="Priority">{(id) => <select id={id} className="in" value={priority} onChange={(e) => setPriority(e.target.value)}>{Object.entries(PRIORITY).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select>}</Field>

@@ -2,9 +2,17 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import test from "node:test";
+import { readFileSync } from "node:fs";
 
 const production = "ee59582dffcbd8cc3067e689b2bb73cf63781cb7";
 const allowed = new Set([
+  // SHO-3133–3135: approved clean controls, identity disambiguation and board sorting.
+  "src/app/(app)/select-controls.css",
+  "src/components/PeopleSelect.tsx",
+  "src/components/people-select.css",
+  "tests/people-select-clean-ui.test.tsx",
+  "docs/sho-next50-manifest.json",
+  "package.json",
   // SHO-3133 approved responsive board layout; product behavior remains in the
   // separately reviewed DealsView and DealBoard surfaces below.
   "src/app/(app)/app.css",
@@ -326,8 +334,18 @@ test("sequential release changes only explicitly reviewed surfaces", () => {
 });
 
 test("sequential release does not change package/runtime entry or central suite auth", () => {
-  for (const path of ["package.json", "package-lock.json", "server.js", "src/app/api/suite"])
+  for (const path of ["package-lock.json", "server.js", "src/app/api/suite"])
     assert.equal(execFileSync("git", ["diff", production, "--", path], { encoding: "utf8" }), "", path);
+});
+
+test("the package delta only repairs the missing typecheck entry", () => {
+  const before = JSON.parse(execFileSync("git", ["show", `${production}:package.json`], { encoding: "utf8" }));
+  // Read the working candidate, including an unstaged reviewed script repair.
+  const current = JSON.parse(readFileSync("package.json", "utf8"));
+  assert.equal(before.scripts.typecheck, "node scripts/typecheck.mjs");
+  assert.equal(current.scripts.typecheck, "next typegen && tsc --noEmit");
+  current.scripts.typecheck = before.scripts.typecheck;
+  assert.deepEqual(current, before);
 });
 
 test("the only local-auth delta is the reviewed staging-only ZZ admin guard", () => {

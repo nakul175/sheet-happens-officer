@@ -1,4 +1,5 @@
 "use client";
+import { personText } from "@/components/PeopleSelect";
 import Link from "next/link";
 import "./settings.css";
 import { useRouter } from "next/navigation";
@@ -152,7 +153,7 @@ function Handover({ title, yes, danger, who, options, defaultTo, onClose, onGo, 
     <Confirm title={title} yes={yes} danger={danger} busy={busy || !to} error={err} onNo={onClose}
       body={`Any open tasks ${who} holds must go to someone. Choose who takes them.`}
       onYes={async () => { setBusy(true); const r = await onGo(to); setBusy(false); if (r.ok) onDone(); else setErr(r.error ?? "Could not do that."); }}>
-      <Field label="Who takes their tasks?">{(id) => <select id={id} className="in" value={to} onChange={(e) => setTo(e.target.value)}>{options.map((o) => <option key={o.userId} value={o.userId}>{o.name}</option>)}</select>}</Field>
+      <Field label="Who takes their tasks?">{(id) => <select id={id} className="in" value={to} onChange={(e) => setTo(e.target.value)}>{options.map((o) => <option key={o.userId} value={o.userId}>{personText(o)}</option>)}</select>}</Field>
     </Confirm>
   );
 }
@@ -177,14 +178,14 @@ function ChangeLeader({ p, id, onClose, onDone }: { p: Proj; id: string; onClose
       }}>
       {!cands.length ? <p className="hint">Add another member first. A Leader must come from the project&apos;s members.</p> : (
         <>
-          <Field label="New leader">{(i) => <select id={i} className="in" value={next} onChange={(e) => setNext(e.target.value)}>{cands.map((m) => <option key={m.userId} value={m.userId}>{m.name} ({ROLE[m.role]})</option>)}</select>}</Field>
+          <Field label="New leader">{(i) => <select id={i} className="in" value={next} onChange={(e) => setNext(e.target.value)}>{cands.map((m) => <option key={m.userId} value={m.userId}>{personText(m)} ({ROLE[m.role]})</option>)}</select>}</Field>
           <Field label="The current Leader becomes" hint={needsTaker ? "Choose who takes their open tasks. The default is the new Leader." : undefined}>
             {(i) => <select id={i} className="in" value={prev} onChange={(e) => setPrev(e.target.value)}><option value="EDITOR">Editor</option><option value="VIEWER">Viewer</option><option value="REMOVE">Removed from the project</option></select>}
           </Field>
           {needsTaker && (
             <Field label="Who takes their open tasks?">
               {(i) => <select id={i} className="in" value={taker || next} onChange={(e) => setTaker(e.target.value)}>
-                {[...takers.filter((m) => m.userId === next), ...takers.filter((m) => m.userId !== next)].map((m) => <option key={m.userId} value={m.userId}>{m.name} ({ROLE[m.role]}){m.userId === next ? ", new Leader" : ""}</option>)}
+                {[...takers.filter((m) => m.userId === next), ...takers.filter((m) => m.userId !== next)].map((m) => <option key={m.userId} value={m.userId}>{personText(m)} ({ROLE[m.role]}){m.userId === next ? ", new Leader" : ""}</option>)}
               </select>}
             </Field>
           )}

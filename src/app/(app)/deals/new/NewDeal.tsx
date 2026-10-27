@@ -5,6 +5,7 @@ import { Suspense, useState } from "react";
 import { api, todayIST, useGet } from "@/components/api";
 import { ATHENA_ENTITIES, OPPORTUNITY_TYPES } from "@/lib/deal-classification";
 import { Field } from "@/components/ui";
+import { PeopleSelect } from "@/components/PeopleSelect";
 import { Page, useMe } from "../../Shell";
 
 import "./new-deal-approved.css";
@@ -12,7 +13,7 @@ function Form() {
   const me = useMe();
   const router = useRouter();
   const sp = useSearchParams();
-  const team = useGet<{ people: { id: string; name: string }[] }>("/api/team");
+  const team = useGet<{ people: { id: string; name: string; email?: string }[] }>("/api/team");
   const orgs = useGet<{ organisations: { id: string; name: string }[] }>("/api/orgs");
   const pipes = useGet<{ pipelines: { id: string; key: string; name: string }[] }>("/api/deals/pipelines");
   const initialOrgId = sp.get("org") ?? "";
@@ -81,7 +82,7 @@ function Form() {
       <Field label="Pipeline">{(id) => <select id={id} className="in" value={pipeline?.id ?? ""} onChange={set("pipelineId")}>{pipes.data?.pipelines.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select>}</Field>
       {pipeline?.key === "DEAL_BID" && <Field label="Submission deadline">{(id) => <input id={id} className="in" type="date" required value={v.submissionDeadline} onChange={set("submissionDeadline")} />}</Field>}
       <Field label="Opportunity type">{(id) => <select id={id} className="in" value={v.opportunityType} onChange={set("opportunityType")}><option value="">Unclassified</option>{OPPORTUNITY_TYPES.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}</select>}</Field>
-      <Field label="Leader">{(id) => <select id={id} className="in" value={v.leaderId} onChange={set("leaderId")}>{team.data?.people.map((p) => <option key={p.id} value={p.id}>{p.name}{p.id === me.id ? " (you)" : ""}</option>)}</select>}</Field>
+      <Field label="Leader">{(id) => <PeopleSelect id={id} label="Leader" value={v.leaderId} onChange={leaderId => setV({ ...v, leaderId })} people={(team.data?.people ?? []).map(p => ({ ...p, name: `${p.name}${p.id === me.id ? " (you)" : ""}` }))} />}</Field>
       </fieldset><fieldset><legend>Commercial details</legend>
       <Field label="Net Fee Revenue (USD)">{(id) => <input id={id} className="in" type="number" min="0" max="9999999999999.99" step="0.01" value={v.netFeeRevenueUsd} onChange={set("netFeeRevenueUsd")} />}</Field>
       <Field label="PWin (%)">{(id) => <input id={id} className="in" type="number" min="0" max="100" step="1" value={v.probability} onChange={set("probability")} />}</Field>

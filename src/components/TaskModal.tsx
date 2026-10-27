@@ -1,4 +1,5 @@
 "use client";
+import { personText } from "@/components/PeopleSelect";
 import Link from "next/link";
 import "./task-details.css";
 import { WorkspaceTaskPerson } from "@/components/WorkspaceTaskPerson";
@@ -26,7 +27,7 @@ type Task = {
 };
 type Project = {
   id: string; role: string; type?: "PROJECT" | "DEAL"; archived: boolean; sections: { id: string; name: string; isDone: boolean }[];
-  members: { userId: string; name: string; role: string; active: boolean }[];
+  members: { userId: string; name: string; email?: string; role: string; active: boolean }[];
 };
 
 export function TaskModal({ id, me, onClose, onChanged, asPage }: { id: string; me: string; onClose: () => void; onChanged?: () => void; asPage?: boolean }) {
@@ -164,7 +165,7 @@ export function TaskModal({ id, me, onClose, onChanged, asPage }: { id: string; 
                 <select className="in" aria-label="Assignee" value={task.assignee.id} disabled={busy}
                   onChange={(e) => run(api("POST", `/api/tasks/${id}/assign`, { assigneeId: e.target.value, expectedUpdatedAt: version }))}>
                   {!workers.some((w) => w.userId === task.assignee.id) && <option value={task.assignee.id}>{task.assignee.name}</option>}
-                  {workers.map((w) => <option key={w.userId} value={w.userId}>{w.name}</option>)}
+                  {workers.map((w) => <option key={w.userId} value={w.userId}>{personText(w)}</option>)}
                 </select>
               ) : task.assignee.name}
               {canManage && canEdit && !holding && <WorkspaceTaskPerson projectId={task.projectId} purpose="assignee" excludeIds={[task.assignee.id]} onChoose={async (person, addToProject) => {
@@ -185,7 +186,7 @@ export function TaskModal({ id, me, onClose, onChanged, asPage }: { id: string; 
                 <select className="in" style={{ width: "auto" }} aria-label="Add a collaborator" value="" disabled={busy}
                   onChange={(e) => e.target.value && run(api("POST", `/api/tasks/${id}/collaborators`, { userId: e.target.value }))}>
                   <option value="">+ Add</option>
-                  {everyone.filter((m) => m.userId !== task.assignee.id && !task.collaborators.some((c) => c.id === m.userId)).map((m) => <option key={m.userId} value={m.userId}>{m.name}</option>)}
+                  {everyone.filter((m) => m.userId !== task.assignee.id && !task.collaborators.some((c) => c.id === m.userId)).map((m) => <option key={m.userId} value={m.userId}>{personText(m)}</option>)}
                 </select>
               )}
             </div>
@@ -200,7 +201,7 @@ export function TaskModal({ id, me, onClose, onChanged, asPage }: { id: string; 
                 <select className="in" aria-label="Approver" value={task.approver?.id ?? ""} disabled={busy}
                   onChange={(e) => run(api("PUT", `/api/tasks/${id}/approver`, { approverId: e.target.value || null, expectedUpdatedAt: version }))}>
                   <option value="">None</option>
-                  {workers.filter((w) => w.userId !== task.assignee.id).map((w) => <option key={w.userId} value={w.userId}>{w.name}</option>)}
+                  {workers.filter((w) => w.userId !== task.assignee.id).map((w) => <option key={w.userId} value={w.userId}>{personText(w)}</option>)}
                 </select>
               ) : task.approver?.name ?? <span className="hint">None</span>}
             </div>

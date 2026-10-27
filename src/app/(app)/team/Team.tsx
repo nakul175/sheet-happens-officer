@@ -1,4 +1,5 @@
 "use client";
+import { personText } from "@/components/PeopleSelect";
 import Link from "next/link";
 import { useState } from "react";
 import { api, useGet } from "@/components/api";
@@ -23,7 +24,9 @@ export function fellBackHint(names: string[]): string {
 /** SHO-US-14.4 AC3: the projects a person leads (only those the viewer can see). */
 function Leads({ p }: { p: P }) {
   if (!p.leads?.length) return null;
-  return <span className="pills"><span className="hint">Leads</span>{p.leads.map((l) => <Link key={l.id} className="chip" href={`/projects/${l.id}`}>{l.name}</Link>)}</span>;
+  const first = p.leads.slice(0, 2), rest = p.leads.slice(2);
+  const projectLink = (l: { id: string; name: string }) => <Link key={l.id} className="chip" href={`/projects/${l.id}`}>{l.name}</Link>;
+  return <div className="team-leads" aria-label={`Projects led by ${p.name}`}>{first.map(projectLink)}{rest.length > 0 && <details><summary aria-label={`Show ${rest.length} more projects led by ${p.name}`}>{rest.length} more projects</summary><div>{rest.map(projectLink)}</div></details>}</div>;
 }
 
 export default function Team() {
@@ -71,6 +74,7 @@ export default function Team() {
       {t.data && admin && (
         <div className="scroll">
           <table className="tbl stack">
+            <colgroup><col className="team-col-person" /><col className="team-col-role" /><col className="team-col-leads" /><col className="team-col-status" /><col className="team-col-actions" /></colgroup>
             <thead><tr><th>Person</th><th>Workspace role</th><th>Leads</th><th>Status</th><th>Actions</th></tr></thead>
             <tbody>
               {people.map((p) => {
@@ -78,7 +82,7 @@ export default function Team() {
                 const self = p.id === me.id;
                 return (
                   <tr key={p.id}>
-                    <td data-label="Person"><b style={{ fontWeight: 500 }}><Link href={`/team/${p.id}`} prefetch={false}>{p.name}</Link></b>{self && " (you)"}<small className="team-email">{p.email}</small></td>
+                    <td data-label="Person"><div className="team-identity"><b style={{ fontWeight: 500 }}><Link href={`/team/${p.id}`} prefetch={false}>{p.name}</Link>{self && " (you)"}</b><small className="team-email">{p.email}</small></div></td>
                     <td data-label="Workspace role"><span>{roleLabel(p.orgRole!)}</span></td>
                     <td data-label="Leads"><Leads p={p} /></td>
                     <td data-label="Status"><span className={`team-status ${sc}`}>{sl}</span></td>
@@ -132,7 +136,7 @@ function Deactivate({ p, others, onClose, onDone }: { p: P; others: P[]; onClose
         {(id) => (
           <select id={id} className="in" value={to} onChange={(e) => setTo(e.target.value)}>
             <option value="leaders">The Leader of each project</option>
-            {others.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+            {others.map((o) => <option key={o.id} value={o.id}>{personText(o)}</option>)}
           </select>
         )}
       </Field>

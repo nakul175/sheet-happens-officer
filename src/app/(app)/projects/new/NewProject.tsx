@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { api, useGet } from "@/components/api";
 import { Field, LoadFailed, Skeleton } from "@/components/ui";
+import { PeopleSelect, PersonIdentity } from "@/components/PeopleSelect";
 import { Page, useMe } from "../../Shell";
 import "../projects.css";
 
@@ -61,9 +62,7 @@ export default function NewProject() {
         <Field label="Vertical (optional)" hint="Classification does not add people or change access.">{id => <select id={id} className="in" value={verticalId} onChange={e => setVertical(e.target.value)}><option value="">Unclassified</option>{verticals.data?.verticals?.filter(v => !v.retired).map(v => <option key={v.id} value={v.id}>{v.name}</option>)}</select>}</Field>
         <Field label="Leader" hint={leader !== me.id ? "If you choose someone else, you are added as an Editor." : "You will be the Leader."}>
           {(id) => (
-            <select id={id} className="in" value={leader} onChange={(e) => setLeader(e.target.value)}>
-              {team.data?.people.filter((p) => !p.status || p.status === "ACTIVE").map((p) => <option key={p.id} value={p.id}>{p.name}{p.id === me.id ? " (you)" : ""}</option>)}
-            </select>
+            <PeopleSelect id={id} label="Leader" value={leader} onChange={setLeader} people={(team.data?.people ?? []).filter(p => !p.status || p.status === "ACTIVE").map(p => ({ ...p, name: `${p.name}${p.id === me.id ? " (you)" : ""}` }))} />
           )}
         </Field>
         </div>
@@ -76,7 +75,7 @@ export default function NewProject() {
               <div className="ppl-row" key={p.id}>
                 <label className="ppl-l">
                   <input type="checkbox" checked={!!pick[p.id]} onChange={(e) => toggle(p.id, e.target.checked)} />
-                  <span>{p.name}</span>
+                  <PersonIdentity person={p} />
                 </label>
                 {pick[p.id] && (
                   <select className="in ppl-r" aria-label={`Role of ${p.name}`} value={pick[p.id]} onChange={(e) => setPick((m) => ({ ...m, [p.id]: e.target.value as "EDITOR" | "VIEWER" }))}>
