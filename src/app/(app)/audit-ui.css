@@ -106,3 +106,5 @@
 .modal .dialog-task-layout { display:flex; flex-direction:column; flex:1 1 auto; min-height:0; }
 .modal .dialog-footer .actions { position:sticky; bottom:0; }
 .shell .usage-figs > div:nth-child(2) dd { font-size:16px; font-weight:500; }
+.shell .selall .section-selection-mark { inset:0; display:grid; place-items:center; }
+.shell .grp .selall { display:inline-grid; place-items:center; justify-content:center; align-items:center; }
