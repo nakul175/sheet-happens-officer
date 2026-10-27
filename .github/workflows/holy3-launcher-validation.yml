@@ -52,6 +52,8 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci --no-audit --no-fund
+      - name: Verify pinned shared editor package and canonical source
+        run: node scripts/verify-holy-sheet-package.mjs --source-check
       - name: Scope and refusal contract
         run: node --test scripts/acceptance/holy3-launcher-scope.test.mjs scripts/acceptance/refusal-probe.test.mjs
       - name: SHO-3010 echo and improve contracts
