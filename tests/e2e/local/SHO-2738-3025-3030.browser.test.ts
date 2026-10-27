@@ -10,7 +10,7 @@
 import { existsSync } from "node:fs";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { chromium, type Browser, type BrowserContext, type Page } from "playwright-core";
-import { account, BASE, project, PW, superAdmin, task, type Account } from "../../helpers";
+import { account, BASE, patchTask, project, PW, superAdmin, task, type Account } from "../../helpers";
 
 const host = new URL(BASE).hostname;
 if (host !== "localhost") throw new Error(`Refusing to run against ${host}: this spec needs the localhost origin the dev server hydrates under.`);
@@ -29,6 +29,9 @@ let browser: Browser;
 let root: Account;
 let taskId = "";
 let projectId = "";
+let longTaskId = "";
+const longTitle = `ZZ-TEST 2555 ${"Long title with readable wrapping. ".repeat(6)}`.slice(0, 150);
+const longReason = "A complete blocked reason must stay readable without scrolling inside this field. ".repeat(5).slice(0, 300);
 /** SHO-3030: the person who goes, the person named to take the tasks, and the project both are on. */
 let leaving: Account;
 let named: Account;
@@ -46,6 +49,8 @@ beforeAll(async () => {
     title: `ZZ-TEST 2738 task ${RUN}`,
     description: Array.from({ length: 30 }, (_, i) => `A line of description ${i}.`).join("\n"),
   });
+  longTaskId = await task(root, projectId, { title: longTitle });
+  expect((await patchTask(root, longTaskId, { blocked: true, blockedReason: longReason })).status).toBe(200);
 
   // The name is the throw-away label; the address has to be a real-shaped alias, so it is given explicitly.
   leaving = await account("zzLeaving", `nakul17+zz-3030-leaving-${RUN}@aplyd.com`, `ZZ-TEST 3030 leaving ${RUN}`);
@@ -184,6 +189,46 @@ describe("SHO-2738: the real sheet, a real phone viewport, a real focus, a short
       await ctx.close();
     }
   }, 240000);
+});
+
+describe("SHO-2555: full phone task sheet and complete long fields", () => {
+  it.each([320, 390, 599, 600])("keeps Close visible and all 150/300 characters readable at %i px", async width => {
+    const ctx = await signedIn(root.email, { width, height: 844 });
+    const page = await ctx.newPage();
+    try {
+      await page.goto(`/projects/${projectId}?task=${longTaskId}`, { waitUntil: "load", timeout: 120000 });
+      const sheet = page.getByRole("dialog", { name: "Task", exact: true });
+      const title = sheet.getByRole("textbox", { name: "Title", exact: true });
+      const reason = sheet.getByRole("textbox", { name: "Why is it blocked?", exact: true });
+      await reason.waitFor({ state: "visible", timeout: 30000 });
+      expect(await title.inputValue()).toBe(longTitle);
+      expect(await reason.inputValue()).toBe(longReason);
+      for (const field of [title, reason]) {
+        expect(await field.evaluate(el => ({ clippedVertically: el.scrollHeight > el.clientHeight + 2, clippedHorizontally: el.scrollWidth > el.clientWidth + 2 }))).toEqual({ clippedVertically: false, clippedHorizontally: false });
+      }
+      const box = await sheet.boundingBox();
+      expect(box).not.toBeNull();
+      if (width < 600) {
+        expect(box!.x).toBeLessThanOrEqual(1);
+        expect(box!.y).toBeLessThanOrEqual(1);
+        expect(box!.width).toBeGreaterThanOrEqual(width - 1);
+        expect(box!.height).toBeGreaterThanOrEqual(843);
+      } else {
+        expect(box!.x).toBeGreaterThan(0);
+        expect(Math.abs(box!.x - (width - box!.x - box!.width))).toBeLessThanOrEqual(2);
+      }
+      expect(await page.evaluate(() => document.body.style.overflow)).toBe("hidden");
+      await sheet.locator(".dialog-body").evaluate(el => { el.scrollTop = el.scrollHeight; });
+      const close = await sheet.getByRole("button", { name: "Close", exact: true }).boundingBox();
+      expect(close).not.toBeNull();
+      expect(close!.width).toBeGreaterThanOrEqual(44);
+      expect(close!.height).toBeGreaterThanOrEqual(44);
+      expect(close!.y).toBeGreaterThanOrEqual(0);
+      expect(close!.y + close!.height).toBeLessThanOrEqual(844);
+      await sheet.getByRole("button", { name: "Close", exact: true }).click();
+      await sheet.waitFor({ state: "detached", timeout: 15000 });
+    } finally { await ctx.close(); }
+  }, 180000);
 });
 
 describe("SHO-3025: one Escape, one dialog, in a real browser", () => {
