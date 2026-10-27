@@ -82,9 +82,10 @@ test("AC5: the bell shows the unread count, lists notices newest first with link
   await member.api.post("/api/notifications/read-all");
   await member.page.goto("/");
   await expect(member.page.getByRole("button", { name: "Notifications", exact: true })).toBeVisible(); // none: no count in the name
-  const first = await admin.api.post(`/api/projects/${p}/tasks`, { title: zz("first notice"), assigneeId: member.user.id });
+  const dueDate = new Date(Date.now() + 3 * 86_400_000).toISOString().slice(0, 10);
+  const first = await admin.api.post(`/api/projects/${p}/tasks`, { title: zz("first notice"), assigneeId: member.user.id, dueDate });
   expect(first.status, JSON.stringify(first.json)).toBe(201);
-  const second = await admin.api.post(`/api/projects/${p}/tasks`, { title: zz("second notice"), assigneeId: member.user.id });
+  const second = await admin.api.post(`/api/projects/${p}/tasks`, { title: zz("second notice"), assigneeId: member.user.id, dueDate });
   expect(second.status, JSON.stringify(second.json)).toBe(201);
   const t2 = second.json.task.id;
   await member.page.reload();
