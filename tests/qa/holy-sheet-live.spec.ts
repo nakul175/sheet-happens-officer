@@ -52,7 +52,7 @@ test('SHO-3062 paired normal-login qualification and HOLY-4 AC16',async({browser
    results.push({mapping:'SHO-3062-051/052',result:'same document persisted standalone; native unlink retained HS page'});
   });
   await step('SC/TC/MS-SHO-3062-048,050: task entry inherits the project default',async()=>{
-   const made=await call('POST',`/api/projects/${projectId}/tasks`,{title:projectName+' task'});expect(made.status()).toBe(201);taskId=(await made.json()).task.id;mask(taskId);receipts.taskId=taskId;
+   const made=await call('POST',`/api/projects/${projectId}/tasks`,{title:projectName+' task',dueDate:new Date(Date.now()+86400000).toISOString().slice(0,10)});expect(made.status()).toBe(201);taskId=(await made.json()).task.id;mask(taskId);receipts.taskId=taskId;
    const project=await metadata('projects',projectId),task=await metadata('tasks',taskId);expect(task.defaultSpaceId).toBe(project.defaultSpaceId);
    await page.goto(`${SHO}/tasks/${taskId}`);await docs().getByRole('button',{name:'Create page',exact:true}).click();await expect(picker().getByRole('combobox',{name:'Space',exact:true})).toHaveValue(project.defaultSpaceId);
    await docs().getByRole('button',{name:'Close document',exact:true}).click();results.push({mapping:'SHO-3062-048/050',result:'task entry/default subset passed'});
