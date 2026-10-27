@@ -3,7 +3,7 @@ import { personText } from "@/components/PeopleSelect";
 import Link from "next/link";
 import "./task-details.css";
 import { WorkspaceTaskPerson } from "@/components/WorkspaceTaskPerson";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { PRIORITY, ROLE, api, dueLabel, useGet } from "@/components/api";
 import { BLOCKED_REASON_MAX_LENGTH, blockedReasonRef, fitBlockedReason } from "@/components/blocked-reason";
 import { errorMessage, isVersionConflict, versionConflictMessage } from "@/lib/version-error";
@@ -44,14 +44,28 @@ export function TaskModal({ id, me, onClose, onChanged, asPage }: { id: string; 
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
   const [convert, setConvert] = useState(false);
+  const [confirmExit, setConfirmExit] = useState(false);
+  const details = useRef<HTMLDivElement>(null);
   const meCtx = useMe();
 
-  const body = (inner: React.ReactNode) => (asPage ? <div className="modal task-details task-details-page" style={{ margin: "0 auto" }}>{inner}</div> : <Modal label="Task" className="task-sheet" onClose={onClose}><div className="task-details">{inner}</div></Modal>);
+  function requestClose() {
+    const changed = (selector: string, saved: string | null | undefined, trim = true) => {
+      const field = details.current?.querySelector<HTMLTextAreaElement>(selector);
+      if (!field || field.readOnly) return false;
+      return (trim ? field.value.trim() : field.value) !== (saved ?? "");
+    };
+    if (busy || lost || newSub.trim() || changed('[aria-label="Title"]', task?.title) || changed('#desc', task?.description) || changed('.blocked-reason', task?.blockedReason, false)) {
+      setConfirmExit(true);
+    } else onClose();
+  }
+  const body = (inner: React.ReactNode) => (asPage ? <div ref={details} className="modal task-details task-details-page" style={{ margin: "0 auto" }}>{inner}</div> : <Modal label="Task" className="task-sheet" onClose={requestClose}><div ref={details} className="task-details">{inner}</div></Modal>);
+  const stateHeader = !asPage && <div className="bar"><span>Task</span><button type="button" className="link" onClick={onClose}>Close</button></div>;
 
-  if (t.loading) return body(<Skeleton />);
+  if (t.loading) return body(<>{stateHeader}<Skeleton /></>);
   if (!task) {
     return body(
       <>
+        {stateHeader}
         <h2>This task isn&apos;t available</h2>
         <p className="sub">It may have been moved to Trash, or you may not be a member of its project.</p>
         <div className="actions"><Link className="btn" href="/my-tasks">Go to My tasks</Link></div>
@@ -110,7 +124,7 @@ export function TaskModal({ id, me, onClose, onChanged, asPage }: { id: string; 
             <span>{task.parentId ? "Subtask · " : ""}<Link href={`/projects/${task.project.id}`}>{task.project.name}</Link> · {task.section.name}</span>
             <span>
               <button className="link" onClick={async () => { try { await navigator.clipboard.writeText(`${location.origin}/tasks/${id}`); setCopied(true); setTimeout(() => setCopied(false), 1800); } catch { setErr("Could not copy. The link is " + location.origin + "/tasks/" + id); } }}>{copied ? "Copied" : "Copy link"}</button>
-              {" · "}<button className="link" onClick={onClose}>Close</button>
+              {" · "}<button className="link" onClick={requestClose}>Close</button>
             </span>
           </div>
           {task.project.archived && <div className="box warn">This project is archived and read-only.</div>}
@@ -302,6 +316,8 @@ export function TaskModal({ id, me, onClose, onChanged, asPage }: { id: string; 
 
         </>,
       )}
+      {confirmExit && <Confirm title="Close without saving?" yes="Close anyway" onNo={() => setConfirmExit(false)} onYes={onClose}
+        body="Some edits have not been saved or a save is still in progress. Closing can lose these edits. A save already sent may still finish. Choose Cancel to keep editing." />}
       {convert && <ConvertDialog task={task} meId={me} onClose={() => setConvert(false)} />}
       {confirm && (
         <Confirm title="Open subtasks" yes="Complete them all" busy={busy} onNo={() => setConfirm(null)}
