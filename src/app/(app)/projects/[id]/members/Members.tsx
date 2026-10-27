@@ -1,22 +1,27 @@
 "use client";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { use, useState } from "react";
 import { ROLE, api, useGet } from "@/components/api";
 import { Confirm, Field, LoadFailed, Skeleton } from "@/components/ui";
-import { Page } from "../../../Shell";
+import { Page, useMe } from "../../../Shell";
 
 type M = { userId: string; name: string; role: string; active: boolean; email?: string };
-type Proj = { id: string; name: string; archived: boolean; role: string; members: M[] };
+type Proj = { id: string; name: string; archived: boolean; role: string; type?: string; isVertical?: boolean; verticalId?: string | null; members: M[] };
 type Person = { id: string; name: string; email?: string; status?: "ACTIVE" | "UNVERIFIED" | "DEACTIVATED" };
 
 export default function Members({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
+  const admin = useMe().orgRole !== "MEMBER";
+  const verticals = useGet<{ verticals: { id: string; name: string; retired: boolean }[] }>("/api/verticals");
+  const [classify, setClassify] = useState(false);
+  const [classifying, setClassifying] = useState(false);
   const pr = useGet<{ project: Proj }>(`/api/projects/${id}`);
   const team = useGet<{ people: Person[] }>("/api/team");
   const [q, setQ] = useState("");
   const [addRole, setAddRole] = useState("EDITOR");
   const [err, setErr] = useState<string | null>(null);
-  const [dlg, setDlg] = useState<null | { kind: "remove" | "viewer" | "leader" | "archive"; m?: M }>(null);
+  const [dlg, setDlg] = useState<null | { kind: "remove" | "viewer" | "leader" | "archive" | "delete"; m?: M }>(null);
   const p = pr.data?.project;
   if (!p && pr.failed) return <Page title="Members"><LoadFailed onRetry={pr.reload} /></Page>;
   if (pr.error && !p) return <Page title="This project isn't available"><div className="card empty">It may not exist, or you are not a member.<br /><Link href="/projects">Back to Projects</Link></div></Page>;
@@ -59,6 +64,14 @@ export default function Members({ params }: { params: Promise<{ id: string }> })
       {manage && (
         <>
           <h2 className="grp">Project settings</h2>
+          {p && p.type !== "DEAL" && <div className="box">
+            <b>{p.isVertical ? "Vertical task board" : "Delivery project"}</b>
+            {!p.isVertical && <label>Vertical (optional) <select value={p.verticalId ?? ""} onChange={async e => { const result = await api("PATCH", `/api/projects/${id}`, { verticalId: e.target.value || null }); if (!result.ok) setErr(result.error ?? "Could not change vertical."); pr.reload(); }}>
+              <option value="">Unclassified</option>{verticals.data?.verticals?.filter(v => !v.retired || v.id === p.verticalId).map(v => <option key={v.id} value={v.id}>{v.name}{v.retired ? " (retired)" : ""}</option>)}
+            </select></label>}
+            <p className="hint">This classification does not add members or change access.</p>
+            {admin && <button className="btn ghost sm" onClick={() => setClassify(true)}>{p.isVertical ? "Reclassify as delivery project…" : "Reclassify as vertical board…"}</button>}
+          </div>}
           <div className="box">
             <b>Change leader</b>
             <p className="hint">The new Leader takes over. Choose what happens to the current Leader.</p>
@@ -79,13 +92,18 @@ export default function Members({ params }: { params: Promise<{ id: string }> })
           </div>
         </>
       )}
-      {p && (p.role === "LEADER") && (
+      {p && (p.role === "LEADER") && (!p.isVertical || admin) && (
         <div className="box dng">
           <b>{p.archived ? "Unarchive this project" : "Archive this project"}</b>
           <p className="hint">{p.archived ? "It becomes editable again." : "It becomes read-only. Everyone with an open task is told. You can unarchive it later."}</p>
           <button className="btn ghost sm" style={{ color: "var(--danger)" }} onClick={() => setDlg({ kind: "archive" })}>{p.archived ? "Unarchive…" : "Archive…"}</button>
         </div>
       )}
+      {p?.role === "LEADER" && (!p.isVertical || admin) && <div className="box dng">
+        <b>Delete {p.type === "DEAL" ? "deal" : "project"}</b>
+        <p className="hint">Move this {p.type === "DEAL" ? "deal" : "project"} to Trash. Tasks, notes, people and history are kept. A Leader or Admin can restore it later. Nothing is permanently deleted.</p>
+        <button className="btn ghost sm" onClick={() => setDlg({ kind: "delete" })}>Delete {p.type === "DEAL" ? "deal" : "project"}…</button>
+      </div>}
 
       {dlg && (dlg.kind === "remove" || dlg.kind === "viewer") && dlg.m && (
         <Handover title={dlg.kind === "remove" ? `Remove ${dlg.m.name}?` : `Make ${dlg.m.name} a Viewer?`} yes={dlg.kind === "remove" ? "Remove" : "Make Viewer"} danger={dlg.kind === "remove"}
@@ -96,8 +114,25 @@ export default function Members({ params }: { params: Promise<{ id: string }> })
       )}
       {dlg?.kind === "leader" && p && <ChangeLeader p={p} id={id} onClose={() => setDlg(null)} onDone={() => { setDlg(null); pr.reload(); }} />}
       {dlg?.kind === "archive" && p && <Archive id={id} archived={p.archived} onClose={() => setDlg(null)} onDone={() => { setDlg(null); pr.reload(); }} />}
+      {dlg?.kind === "delete" && p && <DeleteProject id={id} name={p.name} kind={p.type === "DEAL" ? "deal" : "project"} onClose={() => setDlg(null)} />}
+      {classify && p && <Confirm title={`Reclassify “${p.name}”?`} yes="Reclassify" body={`It becomes a ${p.isVertical ? "delivery project" : "vertical task board"}. Existing tasks, URLs, members and permissions stay unchanged. ${p.isVertical ? "Linked delivery projects must be reassigned first." : "Its current vertical link is cleared."}`} busy={classifying} error={err} onNo={() => setClassify(false)} onYes={async () => {
+        setClassifying(true); const result = await api("POST", `/api/projects/${id}/classification`, { isVertical: !p.isVertical }); setClassifying(false);
+        if (result.ok) { setClassify(false); pr.reload(); verticals.reload(); } else setErr(result.error ?? "Could not reclassify.");
+      }} />}
     </Page>
   );
+}
+
+export function DeleteProject({ id, name, kind = "project", onClose }: { id: string; name: string; kind?: "project" | "deal"; onClose: () => void }) {
+  const router = useRouter();
+  const [confirmationName, setName] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  return <Confirm title={`Delete ${kind} “${name}”?`} yes="Move to Trash" danger busy={busy || confirmationName !== name} error={error} onNo={onClose}
+    body={`This ${kind} and its work disappear from active views. All tasks, subtasks, notes, links, memberships and history are retained. Restore from ${kind === "deal" ? "Deals" : "Projects"} → Trash; there is no automatic permanent deletion. Members are notified.`}
+    onYes={async () => { setBusy(true); const result = await api("POST", `/api/projects/${id}/delete`, { confirmationName }); setBusy(false); if (result.ok) router.push(kind === "deal" ? "/deals" : "/projects"); else setError(result.error ?? `Could not delete ${kind}.`); }}>
+    <Field label={`Type the exact ${kind} name`}>{inputId => <input id={inputId} className="in" value={confirmationName} onChange={e => setName(e.target.value)} />}</Field>
+  </Confirm>;
 }
 
 function Handover({ title, yes, danger, who, options, defaultTo, onClose, onGo, onDone }: {

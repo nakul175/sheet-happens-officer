@@ -12,6 +12,8 @@ export default function NewProject() {
   const me = useMe();
   const router = useRouter();
   const team = useGet<{ people: Person[] }>("/api/team");
+  const verticals = useGet<{ verticals: { id: string; name: string; retired: boolean }[] }>("/api/verticals");
+  const [verticalId, setVertical] = useState("");
   const [name, setName] = useState("");
   const [desc, setDesc] = useState("");
   const [leader, setLeader] = useState(me.id);
@@ -27,7 +29,7 @@ export default function NewProject() {
     e.preventDefault();
     setBusy(true); setErr(null);
     const members = chosen.map((p) => ({ userId: p.id, role: pick[p.id] }));
-    const r = await api("POST", "/api/projects", { name, description: desc || null, leaderId: leader, ...(members.length ? { members } : {}) });
+    const r = await api("POST", "/api/projects", { name, description: desc || null, leaderId: leader, ...(verticalId ? { verticalId } : {}), ...(members.length ? { members } : {}) });
     setBusy(false);
     if (r.ok) router.push(`/projects/${r.data.project.id}?new=1`); // then it asks for the first task
     else setErr(r.error ?? "Could not create the project.");
@@ -52,6 +54,7 @@ export default function NewProject() {
       <form className="card" style={{ maxWidth: 560 }} onSubmit={submit}>
         <Field label="Project name">{(id) => <input id={id} className="in" value={name} maxLength={200} required onChange={(e) => setName(e.target.value)} />}</Field>
         <Field label="Description (optional)">{(id) => <textarea id={id} className="in" value={desc} onChange={(e) => setDesc(e.target.value)} />}</Field>
+        <Field label="Vertical (optional)" hint="Classification does not add people or change access.">{id => <select id={id} className="in" value={verticalId} onChange={e => setVertical(e.target.value)}><option value="">Unclassified</option>{verticals.data?.verticals?.filter(v => !v.retired).map(v => <option key={v.id} value={v.id}>{v.name}</option>)}</select>}</Field>
         <Field label="Leader" hint={leader !== me.id ? "If you choose someone else, you are added as an Editor." : "You will be the Leader."}>
           {(id) => (
             <select id={id} className="in" value={leader} onChange={(e) => setLeader(e.target.value)}>

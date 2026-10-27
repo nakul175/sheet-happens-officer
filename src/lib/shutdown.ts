@@ -194,6 +194,7 @@ type NativeAccept = {
   arm: (fd: number) => number;
   seized: () => boolean;
   ok: () => boolean;
+  dropWindowUs: () => number;
   take: () => number[];
 };
 
@@ -218,11 +219,13 @@ function loadNative(): NativeAccept | null {
     const arm = lib.func("int sho_arm(int fd)");
     const seized = lib.func("int sho_seized(void)");
     const seizeOk = lib.func("int sho_seize_ok(void)");
+    const dropWindowUs = lib.func("int sho_drop_window_us(void)");
     const take = lib.func("int sho_take(int *out, int cap)");
     nativeCache = {
       arm: (fd) => arm(fd) as number,
       seized: () => (seized() as number) !== 0,
       ok: () => (seizeOk() as number) !== 0,
+      dropWindowUs: () => dropWindowUs() as number,
       take: () => {
         const out = koffi.alloc("int", 8192);
         const n = take(out, 8192) as number;
@@ -454,6 +457,10 @@ async function onSigterm(servers: http.Server[], options: ShutdownOptions) {
     native?.seized() && servers[0]
       ? [{ server: servers[0], fds: native.take(), ok: native.ok() }]
       : servers.map((server) => ({ server, ...seizeAcceptQueue(server) }));
+  if (native?.seized()) {
+    const dropWindowUs = native.dropWindowUs();
+    process.stdout.write(`graceful shutdown: post-SIGTERM SYN drop window ${dropWindowUs >= 0 ? `${dropWindowUs}us` : "unavailable"}\n`);
+  }
   if (seized.some((item) => !item.ok)) state.queueDrainFailed = true;
   for (const server of servers) stopAccepting(server);
   options.onStoppedAccepting?.();

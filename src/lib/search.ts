@@ -13,6 +13,7 @@ export async function search(user: Actor, q: string, includeArchived: boolean, i
   // Membership and archive are separate filters. Include archived must not put the membership
   // limit back onto an Admin or Super Admin (APL-2684).
   const visible = {
+    deletedAt: null,
     ...(isAdmin(user) ? {} : { members: { some: { userId: user.id } } }),
     ...(includeArchived ? {} : { archivedAt: null }),
     ...crmProjectWhere(user), // neither a deal nor its tasks while the CRM is hidden (SHO-BUG-2)
@@ -39,6 +40,7 @@ export async function search(user: Actor, q: string, includeArchived: boolean, i
     ? { deletedAt: null, ...(ideasOnly ? { isIdea: true } : {}), project: visible, OR: [{ title: titleMatch }, { id: { in: commentTaskIds } }] }
     : { deletedAt: null, ...(ideasOnly ? { isIdea: true } : {}), title: titleMatch, project: visible };
   const [projects, tasks] = await Promise.all([
+    // project-lookup-ok: visible applies membership, CRM, archive and project-Trash exclusion above.
     db.project.findMany({
       where: { ...visible, name: { contains: text, mode: "insensitive" } },
       orderBy: { name: "asc" }, take: 20, select: { id: true, name: true, archivedAt: true, typeId: true },

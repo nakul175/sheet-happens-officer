@@ -1,5 +1,6 @@
 "use client";
 import Link from "next/link";
+import { WorkspaceTaskPerson } from "@/components/WorkspaceTaskPerson";
 import { useState } from "react";
 import { PRIORITY, ROLE, api, dueLabel, useGet } from "@/components/api";
 import { BLOCKED_REASON_MAX_LENGTH, blockedReasonRef, fitBlockedReason } from "@/components/blocked-reason";
@@ -36,6 +37,7 @@ export function TaskModal({ id, me, onClose, onChanged, asPage }: { id: string; 
   const [lost, setLost] = useState<Record<string, unknown> | null>(null); // the edit that was refused as stale, so it can be re-applied
   const [confirm, setConfirm] = useState<null | { kind: "complete" | "move"; n: number; sectionId?: string }>(null);
   const [trash, setTrash] = useState(false);
+  const [trashSub, setTrashSub] = useState<Sub | null>(null);
   const [newSub, setNewSub] = useState("");
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -146,6 +148,11 @@ export function TaskModal({ id, me, onClose, onChanged, asPage }: { id: string; 
                   {workers.map((w) => <option key={w.userId} value={w.userId}>{w.name}</option>)}
                 </select>
               ) : task.assignee.name}
+              {canManage && canEdit && !holding && <WorkspaceTaskPerson projectId={task.projectId} purpose="assignee" excludeIds={[task.assignee.id]} onChoose={async (person, addToProject) => {
+                const result = await run(api("POST", `/api/tasks/${id}/assign`, { assigneeId: person.id, expectedUpdatedAt: version, addToProject }));
+                if (result?.ok) pr.reload();
+                return { ok: !!result?.ok, error: result?.error };
+              }} />}
             </div>
             <span className="lbl">Collaborators</span>
             <div className="pills">
@@ -163,6 +170,11 @@ export function TaskModal({ id, me, onClose, onChanged, asPage }: { id: string; 
                 </select>
               )}
             </div>
+            {canManage && canEdit && !holding && <><span className="lbl">Workspace collaborators</span><div><WorkspaceTaskPerson projectId={task.projectId} purpose="collaborator" excludeIds={[task.assignee.id, ...task.collaborators.map(person => person.id)]} onChoose={async (person, addToProject) => {
+              const result = await run(api("POST", `/api/tasks/${id}/collaborators`, { userId: person.id, expectedUpdatedAt: version, addToProject }));
+              if (result?.ok) pr.reload();
+              return { ok: !!result?.ok, error: result?.error };
+            }} /></div></>}
             <span className="lbl">Approver</span>
             <div>
               {(canManage || task.createdById === me) && canEdit && !task.awaitingApproval && !task.parentId && task.assignee.id !== me ? (
@@ -226,11 +238,14 @@ export function TaskModal({ id, me, onClose, onChanged, asPage }: { id: string; 
             <div className="field">
               <span className="lbl">Subtasks {task.subtaskList.length > 0 && `(${task.subtaskList.filter((s) => s.completedAt).length} of ${task.subtaskList.length})`}</span>
               {task.subtaskList.map((s) => (
-                <label className="sub-item" key={s.id}>
-                  <input type="checkbox" aria-label={`Mark "${s.title}" ${s.completedAt ? "not done" : "done"}`} checked={!!s.completedAt} disabled={!canEdit || busy || (!s.canClose && !s.completedAt)}
-                    onChange={() => run(api("POST", `/api/tasks/${s.id}/${s.completedAt ? "reopen" : "complete"}`, s.completedAt ? {} : { expectedUpdatedAt: s.updatedAt }))} />
-                  <span style={s.completedAt ? { textDecoration: "line-through", color: "var(--muted)" } : undefined}>{s.title}</span>
-                </label>
+                <div className="sub-item" key={s.id}>
+                  <label style={{ display: "flex", gap: 8, alignItems: "center", flex: 1 }}>
+                    <input type="checkbox" aria-label={`Mark "${s.title}" ${s.completedAt ? "not done" : "done"}`} checked={!!s.completedAt} disabled={!canEdit || busy || (!s.canClose && !s.completedAt)}
+                      onChange={() => run(api("POST", `/api/tasks/${s.id}/${s.completedAt ? "reopen" : "complete"}`, s.completedAt ? {} : { expectedUpdatedAt: s.updatedAt }))} />
+                    <span style={s.completedAt ? { textDecoration: "line-through", color: "var(--muted)" } : undefined}>{s.title}</span>
+                  </label>
+                  {canEdit && !holding && <button className="link" aria-label={`Move subtask "${s.title}" to Trash`} onClick={() => setTrashSub(s)}>Delete</button>}
+                </div>
               ))}
               {canEdit && (
                 <form className="addrow" onSubmit={async (e) => { e.preventDefault(); const v = newSub.trim(); if (!v) return; await run(api("POST", `/api/projects/${task.projectId}/tasks`, { title: v, parentId: id }), () => setNewSub("")); }}>
@@ -287,6 +302,11 @@ export function TaskModal({ id, me, onClose, onChanged, asPage }: { id: string; 
         <Confirm title="Move to Trash?" yes="Move to Trash" danger busy={busy} error={err} onNo={() => setTrash(false)}
           body="The task and its subtasks are kept for 30 days and can be restored from the project's Trash. Everyone on the task is told."
           onYes={async () => { const r = await api("DELETE", `/api/tasks/${id}`); if (r.ok) { onChanged?.(); onClose(); } else setErr(r.error ?? "Could not move it."); }} />
+      )}
+      {trashSub && (
+        <Confirm title={`Delete subtask “${trashSub.title}”?`} yes="Move to Trash" danger busy={busy} error={err} onNo={() => setTrashSub(null)}
+          body="The subtask is kept for 30 days and can be restored from the project's Trash."
+          onYes={async () => { const r = await run(api("DELETE", `/api/tasks/${trashSub.id}`), () => setTrashSub(null)); if (!r?.ok) setErr(r?.error ?? "Could not move the subtask."); }} />
       )}
     </>
   );
