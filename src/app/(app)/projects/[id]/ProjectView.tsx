@@ -7,6 +7,7 @@ import { Suspense } from "react";
 import { PRIORITY, ROLE, api, dueLabel, dueState, rowKeys, initials, isOverdue, todayIST, useGet } from "@/components/api";
 import { errorMessage, isVersionConflict } from "@/lib/version-error";
 import { HolySheetDocuments } from "@/components/HolySheetDocuments";
+import { WorkspaceTaskPerson, type WorkspaceTaskCandidate } from "@/components/WorkspaceTaskPerson";
 import { TaskModal } from "@/components/TaskModal";
 import { AvatarGroup, Pri, Tick } from "@/components/TaskParts";
 import { Confirm, Field, LoadFailed, Menu, Modal, Skeleton } from "@/components/ui";
@@ -14,6 +15,9 @@ import { MoveSheet } from "@/components/MoveSheet";
 import "@/components/board.css";
 import { DealPanel, openTaskFeed, type DealBlock, type OpenTaskFeed } from "@/components/DealPanel";
 import { Page, useMe } from "../../Shell";
+import "../projects.css";
+import "./approved-list.css";
+import "./approved-board.css";
 import { InlineCells, inlineEditable, useInlineEdit } from "@/components/inline";
 import { ListControls } from "./ListControls";
 import { apiQuery, groupTasks, isFiltered, readState, sameState, type ListState } from "./listview";
@@ -29,7 +33,7 @@ type T = {
 type S = { id: string; name: string; isDone: boolean; total: number; tasks: T[]; nextCursor: string | null };
 type Summary = { open: number; overdue: number; blocked: number; awaiting: number; openTasks?: number };
 type Proj = {
-  id: string; name: string; archived: boolean; role: string; type?: "PROJECT" | "DEAL"; deal?: DealBlock | null;
+  id: string; name: string; archived: boolean; role: string; isVertical?: boolean; type?: "PROJECT" | "DEAL"; deal?: DealBlock | null;
   sections: { id: string; name: string; isDone: boolean }[];
   members: { userId: string; name: string; role: string; active: boolean }[];
 };
@@ -183,16 +187,20 @@ function Inner({ id }: { id: string }) {
   const archivedBanner = p?.archived && <div className="box warn" style={{ marginBottom: 12 }}>This project is archived and read-only.</div>;
 
   return (
-    <Page dock={view === "list"} bar={view === "board"} docTitle={p?.name}
-      title={<span className="crumb"><Link href={p?.type === "DEAL" ? "/deals" : "/projects"}>{p?.type === "DEAL" ? "Deals" : "Projects"}</Link> / <span style={{ color: "var(--ink)" }}>{p?.name ?? "…"}</span></span>}
-      sub={p && <><span className="chip">You: {ROLE[p.role]}</span>{tk.data?.summary && (
+    <Page bar className={view === "list" ? "project-list-view" : "project-board-view"} docTitle={p?.name}
+      beforeTitle={<nav className="project-breadcrumb" aria-label="Breadcrumb"><Link href={p?.type === "DEAL" ? "/deals" : "/projects"}>{p?.type === "DEAL" ? "Deals" : "Projects"}</Link> / {p?.name ?? "…"}</nav>}
+      title={p?.name ?? "…"}
+      sub={p && <>{p.isVertical && <span className="chip">Vertical task board</span>}<span className="chip">You: {ROLE[p.role]}</span>{tk.data?.summary && (
         <span className="lc-sum">
           {tk.data.summary.overdue > 0 && <span className="chip red">{tk.data.summary.overdue} overdue</span>}
           {tk.data.summary.blocked > 0 && <span className="chip red">{tk.data.summary.blocked} blocked</span>}
           {tk.data.summary.awaiting > 0 && <span className="chip gold">{tk.data.summary.awaiting} awaiting approval</span>}
         </span>
       )}</>}
-      actions={canWrite && <button className="btn" onClick={() => setAdding(true)}>+ Add task</button>}>
+      actions={<>
+        {<div className="project-secondary-actions"><Link href={`/projects/${id}/members`}>Members</Link>{p && p.role !== "VIEWER" && <Link href={`/projects/${id}/activity`}>Activity</Link>}<Link href={`/projects/${id}/trash`}>Trash</Link></div>}
+        {canWrite && <button className="btn" onClick={() => setAdding(true)}>+ Add task</button>}
+      </>}>
       {archivedBanner}
       {manage && p && p.members.filter((m) => m.active).length === 1 && !nudgeOff && !nudgeSeen(p.id) && (
         <div className="nudge" role="region" aria-label="Add people">
@@ -214,9 +222,7 @@ function Inner({ id }: { id: string }) {
           </div>
         )}
         <span className="sp" />
-        <Link href={`/projects/${id}/members`}>Members</Link>
-        <Link href={`/projects/${id}/trash`}>Trash</Link>
-        {p && (p.role !== "VIEWER") && <Link href={`/projects/${id}/activity`}>Activity</Link>}
+
       </div>
       {p && secs && (
         <ListControls state={ls} members={p.members} onChange={setList} showGroup={view === "list"}
@@ -246,7 +252,7 @@ function Inner({ id }: { id: string }) {
         const list = tasksOf(s);
         const more = s.isDone ? s.total > list.length : !!s.nextCursor && list.length < s.total;
         return (
-          <section key={s.id} aria-label={s.name}>
+          <section className="project-task-section" key={s.id} aria-label={s.name}>
             <div className="grp" style={{ display: "flex", alignItems: "center" }}>
               {canWrite && list.length > 0 && <label className="selall"><input type="checkbox" checked={list.every((t) => sel.has(t.id))} aria-label={`Select all in ${s.name}`} onChange={(e) => pick(list.map((t) => t.id), e.target.checked)} /></label>}
               <span>{s.name} · {s.total}{s.isDone && " (done)"}</span>
@@ -270,7 +276,7 @@ function Inner({ id }: { id: string }) {
       })}
 
       {secs && view === "list" && ls.group !== "section" && groupTasks(secs.flatMap((x) => x.tasks), ls.group, todayIST(), ls.sort).map((g) => (
-        <section key={g.key} aria-label={g.name}>
+        <section className="project-task-section" key={g.key} aria-label={g.name}>
           <div className="grp">
             {canWrite && <label className="selall"><input type="checkbox" checked={g.tasks.every((t) => sel.has(t.id))} aria-label={`Select all in ${g.name}`} onChange={(e) => pick(g.tasks.map((t) => t.id), e.target.checked)} /></label>}
             <span>{g.name} · {g.tasks.length}</span>
@@ -296,7 +302,7 @@ function Inner({ id }: { id: string }) {
               {tasksOf(s).map((t) => (
                 <div key={t.id} className="bcard" draggable={canWrite && mouse} onDragStart={() => setDragId(t.id)} onDragEnd={() => { setDragId(null); setOverCol(null); }}
                   onClick={() => openTask(t.id)} tabIndex={0} onKeyDown={(e) => { if (e.key === "Enter") openTask(t.id); }}>
-                  <div>{t.title}</div>
+                  <div className="board-task-title">{t.title}{t.completedAt && <span className="board-complete" aria-label="Completed"> ✓</span>}</div>
                   <div className="row2">
                     <span className={!t.completedAt && isOverdue(t.dueDate) ? "over" : undefined} style={isOverdue(t.dueDate) && !t.completedAt ? { color: "var(--danger)" } : undefined}>{dueState(t.dueDate, !!t.completedAt)}</span>
                     <Pri p={t.priority} />
@@ -380,18 +386,20 @@ function SectionMenu({ s, secs, projectId, onDialog, onDone, onErr }: { s: S; se
 
 function QuickAdd({ projectId, sectionId, onAdded, compact }: { projectId: string; sectionId: string; onAdded: () => void; compact?: boolean }) {
   const [v, setV] = useState("");
+  const [due, setDue] = useState("");
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   return (
     <form className={compact ? undefined : "item"} style={compact ? { marginTop: 4 } : undefined} onSubmit={async (e) => {
       e.preventDefault();
-      if (!v.trim()) return;
+      if (!v.trim() || !due) { setErr(!due ? "Add a due date." : null); return; }
       setBusy(true);
-      const r = await api("POST", `/api/projects/${projectId}/tasks`, { title: v.trim(), sectionId });
+      const r = await api("POST", `/api/projects/${projectId}/tasks`, { title: v.trim(), sectionId, dueDate: due });
       setBusy(false);
-      if (r.ok) { setV(""); setErr(null); onAdded(); } else setErr(r.error ?? "Could not add the task.");
+      if (r.ok) { setV(""); setDue(""); setErr(null); onAdded(); } else setErr(r.error ?? "Could not add the task.");
     }}>
       <input className="in" aria-label="Add a task" placeholder="+ Add a task" value={v} disabled={busy} onChange={(e) => setV(e.target.value)} style={compact ? { background: "transparent" } : { border: 0, padding: 0 }} />
+      <input className="in" aria-label="Due date" type="date" required value={due} disabled={busy} onChange={(e) => { setDue(e.target.value); if (e.target.value) setErr(null); }} />
       {err && <span className="err" role="alert">{err}</span>}
     </form>
   );
@@ -405,6 +413,14 @@ function NewTask({ p, onClose, onAdded }: { p: Proj; onClose: () => void; onAdde
   const [assignee, setAssignee] = useState(workers.some((w) => w.userId === me.id) ? me.id : workers[0]?.userId ?? "");
   const [due, setDue] = useState("");
   const [priority, setPriority] = useState("MEDIUM");
+  const [collaborators, setCollaborators] = useState<string[]>([]);
+  const [pendingPeople, setPendingPeople] = useState<WorkspaceTaskCandidate[]>([]);
+  const [pendingCollaborators, setPendingCollaborators] = useState<WorkspaceTaskCandidate[]>([]);
+  const [addAssignee, setAddAssignee] = useState(false);
+  const [addCollaborators, setAddCollaborators] = useState<string[]>([]);
+  const canAddPeople = p.role === "LEADER" && !p.archived;
+  const remember = (person: WorkspaceTaskCandidate) => setPendingPeople(current => current.some(p => p.id === person.id) ? current : [...current, person]);
+  const rememberCollaborator = (person: WorkspaceTaskCandidate) => setPendingCollaborators(current => current.some(p => p.id === person.id) ? current : [...current, person]);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   return (
@@ -413,17 +429,20 @@ function NewTask({ p, onClose, onAdded }: { p: Proj; onClose: () => void; onAdde
       <form onSubmit={async (e) => {
         e.preventDefault();
         setBusy(true);
-        const r = await api("POST", `/api/projects/${p.id}/tasks`, { title, sectionId: section, assigneeId: assignee || undefined, dueDate: due || null, priority });
+        const r = await api("POST", `/api/projects/${p.id}/tasks`, { title, sectionId: section, assigneeId: assignee || undefined, dueDate: due || null, priority, collaboratorIds: collaborators.filter((id) => id !== assignee), addAssigneeToProject: addAssignee, addCollaboratorsToProject: addCollaborators.filter(id => collaborators.includes(id) && id !== assignee) });
         setBusy(false);
         if (r.ok) onAdded(); else setErr(r.error ?? "Could not add the task.");
       }}>
         <Field label="Title">{(id) => <input id={id} className="in" value={title} required maxLength={500} autoFocus={finePointer()} onChange={(e) => setTitle(e.target.value)} />}</Field>
         <Field label="Section">{(id) => <select id={id} className="in" value={section} onChange={(e) => setSection(e.target.value)}>{p.sections.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select>}</Field>
-        <Field label="Assignee">{(id) => <select id={id} className="in" value={assignee} onChange={(e) => setAssignee(e.target.value)}>{workers.map((w) => <option key={w.userId} value={w.userId}>{w.name}</option>)}</select>}</Field>
-        <Field label="Due date (optional)">{(id) => <input id={id} className="in" type="date" value={due} onChange={(e) => setDue(e.target.value)} />}</Field>
+        <Field label="Assignee">{(id) => <select id={id} className="in" value={assignee} onChange={(e) => { setAssignee(e.target.value); setAddAssignee(pendingPeople.some(p => p.id === e.target.value && !p.isMember)); }}>{pendingPeople.filter(person => !workers.some(w => w.userId === person.id)).map(person => <option key={person.id} value={person.id}>{person.name} (will join project)</option>)}{workers.map((w) => <option key={w.userId} value={w.userId}>{w.name}</option>)}</select>}</Field>
+        {canAddPeople && <WorkspaceTaskPerson projectId={p.id} purpose="assignee" whenSaved excludeIds={[assignee]} onChoose={async (person, addToProject) => { remember(person); setAssignee(person.id); setAddAssignee(addToProject); return { ok: true }; }} />}
+        <Field label="Collaborators (optional)">{(id) => <select id={id} className="in" multiple value={collaborators.filter((id) => id !== assignee)} onChange={(e) => setCollaborators(Array.from(e.target.selectedOptions, (option) => option.value))}>{pendingCollaborators.filter(person => person.id !== assignee && !p.members.some(m => m.userId === person.id)).map(person => <option key={person.id} value={person.id}>{person.name} (will join project)</option>)}{p.members.filter((m) => m.active && m.userId !== assignee).map((m) => <option key={m.userId} value={m.userId}>{m.name}</option>)}</select>}</Field>
+        {canAddPeople && <WorkspaceTaskPerson projectId={p.id} purpose="collaborator" whenSaved excludeIds={[assignee, ...collaborators]} onChoose={async (person, addToProject) => { rememberCollaborator(person); setCollaborators(current => current.includes(person.id) ? current : [...current, person.id]); if (addToProject) setAddCollaborators(current => current.includes(person.id) ? current : [...current, person.id]); return { ok: true }; }} />}
+        <Field label="Due date">{(id) => <input id={id} className="in" type="date" required value={due} onChange={(e) => setDue(e.target.value)} />}</Field>
         <Field label="Priority">{(id) => <select id={id} className="in" value={priority} onChange={(e) => setPriority(e.target.value)}>{Object.entries(PRIORITY).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select>}</Field>
         {err && <div className="err" role="alert">{err}</div>}
-        <div className="actions"><button type="button" className="btn ghost" onClick={onClose}>Cancel</button><button className="btn" disabled={busy || !title.trim()}>Add task</button></div>
+        <div className="actions"><button type="button" className="btn ghost" onClick={onClose}>Cancel</button><button className="btn" disabled={busy || !title.trim() || !due}>Add task</button></div>
       </form>
     </Modal>
   );

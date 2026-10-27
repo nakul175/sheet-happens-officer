@@ -1,0 +1,40 @@
+.task-details { font-family: Lato, sans-serif; color: #171b22; min-width: 0; }
+.modal:has(> .task-details) { width: min(1200px, calc(100vw - 32px)); max-width: 1200px; }
+.modal.task-details-page { width: 100%; max-width: 1400px; padding: 0; border: 0; background: transparent; box-shadow: none; }
+.task-details .bar { flex-wrap: wrap; gap: 12px; overflow-wrap: anywhere; }
+.task-details .tt { font-family: inherit; font-size: clamp(26px, 3vw, 38px); color: #10143e; font-weight: 700; margin: 16px 0; padding: 8px; min-height: 60px; }
+.task-details > .actions { margin: 12px 0 24px; gap: 12px; }
+.task-detail-layout { display: grid; grid-template-columns: minmax(0, 2fr) minmax(280px, 1fr); gap: 24px; align-items: start; }
+.task-details-panel, .task-main-panel { min-width: 0; padding: 24px; border: 1px solid #dce0e7; border-radius: 12px; background: white; box-shadow: 0 2px 4px #171b2210, 0 8px 20px #171b2210; overflow-wrap: anywhere; }
+.task-details-panel { grid-column: 2; grid-row: 1; }
+.task-main-panel { grid-column: 1; grid-row: 1; }
+.task-details-panel h2 { color: #10143e; font-size: 22px; margin: 0 0 24px; }
+.task-details-panel h2::before { content: '▤'; color: #b77b0e; margin-right: 12px; }
+.task-details-panel .fgrid { grid-template-columns: minmax(0,1fr); gap: 8px; margin: 0; }
+.task-details-panel .fgrid > .lbl { margin-top: 16px; font-size: 14px; color: var(--muted); }
+.task-details-panel .fgrid > .lbl:first-child { margin-top: 0; }
+.task-details :is(input,select,textarea,button) { font-family: inherit; }
+.task-details .in { min-height: 40px; padding: 10px 12px; max-width: 100%; }
+.task-main-panel > .field { margin-bottom: 24px; gap: 12px; }
+.task-main-panel > .field > :is(label,.lbl) { color: #10143e; font-size: 22px; font-weight: 700; }
+.task-main-panel textarea.in { min-height: 110px; }
+.task-main-panel .sub-item { padding: 14px 0; gap: 12px; align-items: start; }
+.task-main-panel .sub-item input { accent-color: var(--navy); }
+.task-main-panel .comments { border-top: 1px solid var(--line); padding-top: 24px; }
+.task-main-panel .comments h3 { font-size: 22px; color: #10143e; }
+.task-details :is(a,button,input,select,textarea):focus-visible { outline: 2px solid var(--navy); outline-offset: 2px; }
+@media (max-width: 767px) {
+  .task-detail-layout { display: flex; flex-direction: column; gap: 24px; }
+  .task-details-panel, .task-main-panel { width: 100%; padding: 20px; }
+  .task-details-panel { order: 2; }
+  .task-main-panel { order: 1; }
+  .task-details .addrow { flex-wrap: wrap; }
+  .task-details .addrow input { min-width: 0; width: 100%; }
+  .task-details :is(.btn,select) { min-height: 44px; }
+}
+/* Preserve SHO-2738: the task action footer remains inside the visible phone sheet. */
+@media (max-width: 599px), (pointer: coarse) {
+  body.vv-sheet .modal > .task-details { display: flex; flex-direction: column; }
+  body.vv-sheet .modal > .task-details > .actions { order: 100; position: sticky; bottom: 0; z-index: 2; background: var(--card); margin: 0 -18px; padding: 10px 18px; border-top: 1px solid var(--line); }
+  body.vv-sheet .modal:has(> .task-details) { width: 100%; }
+}

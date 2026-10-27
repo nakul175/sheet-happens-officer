@@ -5,9 +5,10 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import styles from "@/components/auth.module.css";
 import { post, rememberEmail } from "@/components/client";
+import { returnToEnabled, safeReturnPath } from "@/lib/return-to";
 import s from "./signin.module.css";
 
-export function SignInForm({ justReset, centralEnabled = false }: { justReset: boolean; centralEnabled?: boolean }) {
+export function SignInForm({ justReset, centralEnabled = false, sessionExpired = false, next }: { justReset: boolean; centralEnabled?: boolean; sessionExpired?: boolean; next?: string }) {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
   const [needsVerify, setNeedsVerify] = useState<string | null>(null);
@@ -23,8 +24,10 @@ export function SignInForm({ justReset, centralEnabled = false }: { justReset: b
     const r = await post("/api/auth/signin", { email, password: f.get("password") });
     setBusy(false);
     if (r.ok) {
-      const returnTo = new URLSearchParams(window.location.search).get("returnTo");
-      router.push(returnTo?.startsWith("/api/suite/authorize?") ? returnTo : "/");
+      const bridgeReturn = new URLSearchParams(window.location.search).get("returnTo");
+      router.push(bridgeReturn?.startsWith("/api/suite/authorize?")
+        ? bridgeReturn
+        : returnToEnabled() ? (safeReturnPath(next, 1) ?? "/") : "/");
       router.refresh();
       return;
     }
@@ -51,8 +54,9 @@ export function SignInForm({ justReset, centralEnabled = false }: { justReset: b
       </div>
       <section className={styles.card}>
       <h2 className={s.h2}>Sign in</h2>
-      {centralEnabled && <p><a className={styles.linkbtn} href="/api/auth/aplyd/start">Continue with Aplyd</a></p>}
+      {centralEnabled && <p><a className={styles.linkbtn} href={returnToEnabled() && safeReturnPath(next, 1) ? `/api/auth/aplyd/start?next=${encodeURIComponent(safeReturnPath(next, 1)!)}` : "/api/auth/aplyd/start"}>Continue with Aplyd</a></p>}
       <form onSubmit={submit} className={styles.card} style={{ border: 0, padding: 0 }} noValidate>
+        {sessionExpired && !error && <div role="alert" className={styles.alert}>Your session has expired, please sign in again</div>}
         {justReset && !error && <div role="status" className={styles.notice}>Password changed. Sign in with your new password.</div>}
         {error && (
           <div role="alert" className={styles.alert}>

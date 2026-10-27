@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { AuthShell } from "@/components/AuthShell";
 import styles from "@/components/auth.module.css";
 import { post } from "@/components/client";
+import { legacySignInHref, sessionSignInTarget } from "@/lib/return-to";
 
 /** SHO-US-23.5. A wall, not a nudge: a Super-Admin-issued password must be replaced before anything else opens. */
 export function SetOwnPassword({ email }: { email: string }) {
@@ -21,7 +22,8 @@ export function SetOwnPassword({ email }: { email: string }) {
     const r = await post("/api/profile/password", { current: f.get("current"), password: f.get("password"), confirm: f.get("confirm") });
     if (r.ok) { router.refresh(); return; } // same URL: the page they asked for now opens
     setBusy(false);
-    if (r.status === 401) { router.replace("/signin"); return; }
+    // APL-2652 AC6: a 401 here goes to /signin?expired=1 with this page as next, the same as api(). Flag off is plain /signin.
+    if (r.status === 401) { router.replace(sessionSignInTarget(window.location.pathname, window.location.search) ?? legacySignInHref()); return; }
     setError(r.error ?? null);
   }
 

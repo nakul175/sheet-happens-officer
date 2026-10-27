@@ -1,0 +1,181 @@
+name: Scoped four non-provider validation
+on:
+  push:
+    branches: [release/scoped4-20261025]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: scoped4-validation
+  cancel-in-progress: false
+defaults:
+  run:
+    shell: bash
+jobs:
+  upload_verified_sho_ui_source:
+    name: Upload verified SHO UI source for root-controlled release
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      RELEASE_SHA: ${{ github.sha }}
+      HOST: ${{ vars.DROPLET_HOST || 'sheethappensofficer.aplyd.org' }}
+      HOST_KEY: ${{ vars.DROPLET_HOST_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_SHA }}
+      - name: Configure the existing deploy credential
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          if [ -n "$HOST_KEY" ]; then
+            printf '%s\n' "$HOST_KEY" > ~/.ssh/known_hosts
+          else
+            ssh-keyscan -H "$HOST" > ~/.ssh/known_hosts 2>/dev/null
+          fi
+      - name: Upload source without switching any service
+        run: >-
+          rsync -az --delete
+          --exclude .git --exclude node_modules --exclude .next --exclude '.env*' --exclude '.outbox*'
+          ./ "deploy@$HOST:/home/deploy/sho-ui-3d1f-source/"
+      - name: Confirm uploaded commit marker
+        run: ssh "deploy@$HOST" "printf '%s\n' '$RELEASE_SHA' > /home/deploy/sho-ui-3d1f-source/UPLOADED_RELEASE_SHA"
+
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: sho
+          POSTGRES_PASSWORD: sho
+          POSTGRES_DB: sho_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      DATABASE_URL: postgresql://sho:sho@localhost:5432/sho_test?schema=accepted15
+      DIRECT_DATABASE_URL: postgresql://sho:sho@localhost:5432/sho_test?schema=accepted15
+      TASKBOARD_URL: http://localhost:3100
+      BASE_URL: http://localhost:3100
+      APP_URL: http://localhost:3100
+      EMAIL_OUTBOX_DIR: ${{ github.workspace }}/.outbox-ci
+      SUPER_ADMIN_EMAILS: root.test@aplyd.com
+      SHO_ADMIN_EMAIL: root.test@aplyd.com
+      SHO_ADMIN_PASS: correct-horse-9
+      JOB_SECRET: accepted15-ci-only-not-a-real-secret
+      FF_TASK_COMMENTS: "1"
+      SIGNIN_RETURN_TO: "on"
+      RETURN_PATH_LOG: "1"
+      SERVER_LOG: ${{ github.workspace }}/validation-server.log
+      PW_CHROMIUM: /usr/bin/google-chrome
+      RELEASE: ${{ github.sha }}
+      NEXT_TELEMETRY_DISABLED: "1"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - name: Sequential SHO-3038 release scope
+        run: node --test scripts/acceptance/sho-3038-scope.test.mjs
+      - name: SHO-3038 collaborator acceptance
+        run: npx vitest run -c vitest.sho-3038.config.mts
+      - name: SHO-3044 opportunity classification acceptance
+        run: npx vitest run -c vitest.sho-3044.config.mts
+      - name: SHO-3042 opportunity reporting acceptance
+        run: npx vitest run -c vitest.sho-3042.config.mts
+      - name: SHO-3041 Bid stage lifecycle acceptance
+        run: npx vitest run -c vitest.sho-3041.config.mts
+      - name: SHO-3043 timeline filter acceptance
+        run: npx vitest run -c vitest.sho-3043.config.mts
+      - name: SHO-3047 recoverable project deletion contracts
+        run: npx vitest run -c vitest.sho-3047.config.mts
+      - name: SHO-3048 vertical boards and classification contracts
+        run: npx vitest run -c vitest.sho-3048.config.mts
+      - name: Reported delete and organisation-edit contracts
+        run: npx vitest run -c vitest.reported-delete-org-edit.config.mts
+      - name: SHO-2681 staging mail-sink contracts
+        run: npx vitest run -c vitest.sho-2681.config.mts
+      - name: Review scoped authentication lint
+        run: npx eslint src/app/api/auth/aplyd/{start,callback}/route.ts src/lib/central-client.ts src/app/signin/SignInForm.tsx src/app/signin/page.tsx
+      - name: SHO-3010 echo and improve contracts
+        run: npx vitest run -c vitest.accepted15-echo.config.mts | tee validation-3010.log
+      - run: npx prisma migrate deploy
+      - run: npm run build
+      - name: Start the exact built release
+        run: |
+          mkdir -p "$EMAIL_OUTBOX_DIR"
+          (NODE_ENV=production PORT=3100 node --import tsx server.js > validation-server.log 2>&1 & echo $! > .scoped4-server.pid)
+          for i in $(seq 1 40); do
+            if curl -fsS http://localhost:3100/api/health; then exit 0; fi
+            sleep 1
+          done
+          exit 1
+      - name: SHO-2682 staging Editor safety and idempotency contracts
+        run: npx vitest run -c vitest.sho-2682.config.mts
+      - name: All unit and integration tests present in this selective release
+        run: npx vitest run -c vitest.scoped4-all.config.mts | tee validation-all-release.log
+      - name: Accepted15 component, database and SQL regressions
+        run: npx vitest run -c vitest.release12.config.mts | tee validation-accepted15.log
+      - name: Deterministic2693 and2897 owned-outbox contracts
+        run: npx vitest run -c vitest.accepted-ai.config.mts | tee validation-accepted-ai.log
+      - name: Deployed18 baseline regressions
+        run: npx vitest run -c vitest.release18.config.mts | tee validation-baseline18.log
+      - name: Accepted locator browser cases
+        run: >-
+          npx playwright test tests/e2e/stories/APL-2539.spec.ts tests/e2e/stories/APL-2540.spec.ts tests/e2e/stories/SHO-3040.spec.ts
+          --grep 'APL-2539 > AC1:|APL-2540 > AC1:|APL-2540 > AC4:|SHO-3040 >'
+          | tee validation-locators.log
+      - name: Linux built-entry refusal and drain receipt
+        run: node scripts/acceptance/release12-drain-receipt.mjs release12-drain.json | tee validation-drain.log
+      - name: Seed comments fixture in isolated CI database only
+        run: |
+          export SHO_QA_PASS="$(openssl rand -hex 16)Aa9"
+          echo "::add-mask::$SHO_QA_PASS"
+          echo "SHO_QA_PASS=$SHO_QA_PASS" >> "$GITHUB_ENV"
+          SEED_TARGET=test npx tsx scripts/seed-apl2590-fixtures.ts
+          echo "SHO_MEMBER_EMAIL=nakul17+apl2590-worker@gmail.com" >> "$GITHUB_ENV"
+          echo "SHO_MEMBER_PASS=$SHO_QA_PASS" >> "$GITHUB_ENV"
+      - name: Four people-role suites and non-provider comments acceptance
+        run: >-
+          npx playwright test tests/e2e/stories/APL-2466.spec.ts tests/e2e/stories/APL-2480.spec.ts
+          tests/e2e/stories/APL-2482.spec.ts tests/e2e/stories/APL-2484.spec.ts tests/e2e/stories/APL-2590.spec.ts
+          --grep-invert " AC(14|15|16) "
+          | tee validation-scoped-stories.log
+      - name: Record separate mandatory live-provider gate
+        run: |
+          node -e 'require("node:fs").writeFileSync("scoped4-live-gate.json",JSON.stringify({sha:process.env.RELEASE,deployReady:false,requiredStagingTests:["SHO2590AC14","SHO2590AC15","SHO2590AC16"],reason:"Live-provider cases remain mandatory on exact SHA; this CI job covers non-provider behavior only"}))'
+      - name: Validate comments and return-path flag-off rollback
+        run: |
+          kill "$(cat .scoped4-server.pid)"
+          for i in $(seq 1 30); do
+            if ! kill -0 "$(cat .scoped4-server.pid)" 2>/dev/null; then break; fi
+            sleep 1
+          done
+          (FF_TASK_COMMENTS=0 SIGNIN_RETURN_TO=off NODE_ENV=production PORT=3100 node --import tsx server.js > validation-off-server.log 2>&1 & echo $! > .scoped4-off-server.pid)
+          for i in $(seq 1 40); do
+            if curl -fsS http://localhost:3100/api/health; then break; fi
+            sleep 1
+          done
+          FF_TASK_COMMENTS=0 SIGNIN_RETURN_TO=off SERVER_LOG="$GITHUB_WORKSPACE/validation-off-server.log" npx vitest run -c vitest.scoped4-off.config.mts | tee validation-flag-off.log
+      - name: Preserve receipts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: accepted15-${{ github.sha }}
+          path: |
+            scoped4-live-gate.json
+            validation-*.log
+            release12-drain.json
+            test-results/e2e

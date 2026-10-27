@@ -16,6 +16,7 @@
 #include <string.h>
 #include <sys/resource.h>
 #include <sys/socket.h>
+#include <time.h>
 #include <unistd.h>
 
 #define MAX_LISTEN 4
@@ -29,12 +30,18 @@ static int seized[MAX_SEIZED];
 static volatile sig_atomic_t seized_n = 0;
 static volatile sig_atomic_t did_seize = 0;
 static volatile sig_atomic_t seize_ok = 1;
+/* Time from listen(0), which can drop a SYN while the old accept queue is
+ * drained, through SHUT_RD, after which the kernel replies with RST. */
+static volatile sig_atomic_t drop_window_us = -1;
 static int wake_read = -1;
 static int wake_write = -1;
 
 static void seize_all(void) {
   int n = 0;
   int ok = 1;
+  struct timespec drop_start;
+  struct timespec drop_end;
+  int timed = clock_gettime(CLOCK_MONOTONIC, &drop_start) == 0;
   for (int i = 0; i < listen_n; i++) {
     /* Refuse before accept(). A handshake that completes during the loop would
      * otherwise be taken and look like a connection accepted after SIGTERM. */
@@ -58,6 +65,12 @@ static void seize_all(void) {
       break;
     }
     if (shutdown(fd, SHUT_RD) != 0 && errno != ENOTCONN && errno != EBADF) ok = 0;
+  }
+  if (timed && clock_gettime(CLOCK_MONOTONIC, &drop_end) == 0) {
+    long seconds = drop_end.tv_sec - drop_start.tv_sec;
+    long nanos = drop_end.tv_nsec - drop_start.tv_nsec;
+    long micros = seconds * 1000000L + nanos / 1000L;
+    drop_window_us = micros >= 0 && micros <= 2147483647L ? (sig_atomic_t)micros : -1;
   }
   seized_n = n;
   seize_ok = ok;
@@ -117,6 +130,8 @@ int sho_arm(int fd) {
 }
 
 int sho_seize_ok(void) { return seize_ok; }
+
+int sho_drop_window_us(void) { return drop_window_us; }
 
 int sho_seized(void) { return did_seize; }
 

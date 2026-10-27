@@ -5,7 +5,7 @@ export const SHO_ORIGIN = "https://sheethappensofficer.aplyd.org";
 export const CENTRAL_CALLBACK = SHO_ORIGIN + "/api/auth/aplyd/callback";
 export const FLOW_COOKIE = "__Host-sho_oidc_flow";
 export const flowCookieOptions = { httpOnly: true, secure: true, sameSite: "lax" as const, path: "/", maxAge: 600 };
-export type Flow = { state: string; nonce: string; verifier: string; expires: number };
+export type Flow = { state: string; nonce: string; verifier: string; expires: number; returnPath?: string };
 function secret() {
   const value = process.env.APLYD_ACCOUNTS_CLIENT_SECRET;
   if (!value || value.length < 32) throw new Error("Central login not configured");
@@ -24,7 +24,7 @@ export function sealFlow(flow: Flow): string {
   return Buffer.concat([iv, cipher.getAuthTag(), data]).toString("base64url");
 }
 export function readFlow(value: string): Flow {
-  if (value.length > 2000) throw new Error("Invalid flow");
+  if (value.length > 4096) throw new Error("Invalid flow");
   const data = Buffer.from(value, "base64url");
   const key = createHash("sha256").update(secret() + "/sho-oidc-flow").digest();
   const decipher = createDecipheriv("aes-256-gcm", key, data.subarray(0, 12));
