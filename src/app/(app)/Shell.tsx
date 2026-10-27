@@ -63,7 +63,7 @@ function TabBar({ user, here, more }: { user: Me; here: (p: string) => boolean; 
     document.addEventListener("pointerdown", away);
     return () => { document.removeEventListener("keydown", esc); document.removeEventListener("pointerdown", away); };
   }, [open]);
-  const tabs: [string, string, string][] = [["/", "My tasks", "✓"], ["/projects", "Projects", "▤"], ["/search", "Search", "⌕"]];
+  const tabs: [string, string, string][] = [["/", "Home", "⌂"], ["/my-tasks", "My tasks", "✓"], ["/projects", "Projects", "▤"], ["/search", "Search", "⌕"]];
   const moreHere = more.some(([h]) => here(h)) || here("/profile");
   return (
     <div className={`tabbar-wrap${typing ? " typing" : ""}`} ref={box}>
@@ -105,16 +105,27 @@ export function Shell({ user, children }: { user: Me; children: React.ReactNode 
   const [menu, setMenu] = useState<string | null>(null);
   const open = menu === path;
   const here = (p: string) => (p === "/" ? path === "/" : path === p || path.startsWith(p + "/"));
-  const items: [string, string][] = [["/", "My tasks"], ["/projects", "Projects"], ...(user.crm ? [["/deals", "Deals"], ["/accounts", "Accounts"], ...(user.review ? [["/review", "Pipeline review"]] : [])] as [string, string][] : []), ["/team", "Team"], ["/search", "Search"]];
+  const items: [string, string][] = [["/", "Home"], ["/my-tasks", "My tasks"], ["/projects", "Projects"], ...(user.crm ? [["/deals", "Deals"], ["/accounts", "Accounts"], ...(user.review ? [["/review", "Pipeline review"]] : [])] as [string, string][] : []), ["/team", "Team"], ["/search", "Search"]];
   if (user.orgRole === "SUPER_ADMIN") items.push(["/usage", "Usage"], ["/audit", "Audit log"]);
-  const more = items.filter(([h]) => !["/", "/projects", "/search"].includes(h));
+  const more = items.filter(([h]) => !["/", "/my-tasks", "/projects", "/search"].includes(h));
+  const [utilityAt, setUtilityAt] = useState<string | null>(null);
+  const utilityOpen = utilityAt === path;
+  const utility = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!utilityOpen) return;
+    const close = (e: KeyboardEvent) => { if (e.key === "Escape") { setUtilityAt(null); utility.current?.querySelector<HTMLButtonElement>(".account-trigger")?.focus(); } };
+    const away = (e: PointerEvent) => { if (!utility.current?.contains(e.target as Node)) setUtilityAt(null); };
+    document.addEventListener("keydown", close); document.addEventListener("pointerdown", away);
+    return () => { document.removeEventListener("keydown", close); document.removeEventListener("pointerdown", away); };
+  }, [utilityOpen]);
+  const primary = items.filter(([h]) => !["/search", "/usage", "/audit"].includes(h));
   const drawer = useRef<HTMLElement>(null);
   const shellElement = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const shell = shellElement.current;
     if (!shell || typeof ResizeObserver === "undefined") return;
     const top = shell.querySelector<HTMLElement>(".top");
-    const paint = () => shell.style.setProperty("--shell-header-height", `${(window.innerWidth >= 1024 ? drawer.current?.offsetHeight ?? 0 : 0) + (top?.offsetHeight ?? 0)}px`);
+    const paint = () => shell.style.setProperty("--shell-header-height", `${top?.offsetHeight ?? 0}px`);
     const observer = new ResizeObserver(paint);
     if (drawer.current) observer.observe(drawer.current);
     if (top) observer.observe(top);
@@ -161,12 +172,23 @@ export function Shell({ user, children }: { user: Me; children: React.ReactNode 
         <div className="main">
           <header className="top">
             <button className="burger" aria-label="Open menu" onClick={() => setMenu(path)}>☰</button>
-            <span className="top-brand"><img src="/logo-icon-reversed.svg" alt="" />SHO</span>
+            <Link href="/" className="top-brand"><img src="/logo-icon-reversed.svg" alt="" /><span className="wordmark-full">Sheet Happens Officer</span><span className="wordmark-short">SHO</span></Link>
+            <nav className="primary-nav" aria-label="Primary">{primary.map(([href, label]) => <Link key={href} href={href} aria-current={here(href) ? "page" : undefined}>{label}</Link>)}</nav>
             <span className="grow" />
             <SearchButton />
             <NewTaskButton />
-            <DensityToggle compact={compact} onChange={chooseDensity} />
             <Bell />
+            <div className="account-menu" ref={utility}>
+              <button className="account-trigger" aria-label="Account and utilities" aria-expanded={utilityOpen} aria-controls="account-utilities" onClick={() => setUtilityAt(utilityOpen ? null : path)}><span className="av">{initials(user.name)}</span></button>
+              {utilityOpen && <div className="account-options" id="account-utilities" aria-label="Account and utilities">
+                <strong>{user.name}</strong><small>{roleLabel(user.orgRole)}</small>
+                <Link href="/profile">Profile</Link>
+                {items.filter(([h]) => ["/usage", "/audit"].includes(h)).map(([h,l]) => <Link href={h} key={h}>{l}</Link>)}
+                <DensityToggle compact={compact} onChange={chooseDensity} />
+                <ConciergeNavItem onPick={() => setUtilityAt(null)} />
+                <SignOut />
+              </div>}
+            </div>
           </header>
           {children}
         </div>
@@ -184,7 +206,8 @@ export function Page({ title, docTitle, sub, actions, dock, bar, beforeTitle, cl
   const slot = dock || bar;
   const tab = docTitle ?? (typeof title === "string" ? title : undefined);
   useEffect(() => { if (tab) document.title = `${tab} · Sheet Happens Officer`; }, [tab]);
-  const hidden = useConcierge()?.hidden ?? false; // a hidden concierge gives its space back
+  const concierge = useConcierge();
+  const hidden = !concierge?.loaded || concierge.hidden; // a hidden concierge gives its space back
   return (
     <>
       <main id="main" tabIndex={-1} className={`content ${className}${dock && !hidden ? " with-dock" : ""}${bar && !hidden ? " with-bar" : ""}`}>
@@ -200,8 +223,8 @@ export function Page({ title, docTitle, sub, actions, dock, bar, beforeTitle, cl
         )}
         {children}
       </main>
-      {dock && <ConciergeDock />}
-      {bar && <ConciergeBar />}
+      {dock && !hidden && <ConciergeDock />}
+      {bar && !hidden && <ConciergeBar />}
       {slot && <ConciergeFab kind={dock ? "dock" : "bar"} />}
     </>
   );

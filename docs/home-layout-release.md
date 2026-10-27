@@ -1,0 +1,11 @@
+# Home and layout correction — 27 October 2026
+
+User explicitly authorized layout correction, proper testing, one coordinated production deployment and making the approved Home dashboard live. Based on production34c976a759863cd813e7d7333fd7e15eee8ff5a2; no unrelated pending UI batches included.
+
+The deployed shell had separate72px navigation and55px utility rows. Its1180px left-aligned content limit left a332px right gutter at1512px. The older expanding grid-row regression was already corrected in the base. This change makes one72px desktop/64px phone header, collapses long navigation into the existing focus-trapped drawer below1440px, and moves admin links, density and Concierge into an account disclosure. Full wordmark remains on wide desktop. Search palette, task creation, notifications, role/feature gates, shortcuts and mobile navigation remain. Content uses shared centered1600px bounds and responsive padding. Concierge reserves its actual column only after preferences load and only while visible. Start guide retains all three lines and Dismiss.
+
+Routes: `/` approved Home dashboard; `/my-tasks` existing My tasks; legacy `/?task=...` redirects retaining all query parameters; `/approvals` authorized approval queue. Aggregate API is authenticated, private/no-store, membership-scoped even for administrators, and returns bounded lists with independent totals. Open work deduplicates assignment/collaboration; overdue uses IST; approval scope retains actual review permissions. Active projects exclude deleted/archived. Completion uses nondeleted top-level tasks, rounded percent. Activity retains accessible-project visibility and retention. No schema, authentication, provider configuration or production sample data changes.
+
+Validation: focused dashboard and shell tests, optimized webpack build, TypeScript and scope checks; full release workflow required including database isolation/security, regressions and browser acceptance. Only existing user-approved SHO2590AC14–16 provider exclusion applies. No other gate waived. CI/staging/rollback and exact production SHA/screenshots must be recorded before acceptance; fixture preview is diagnostic evidence only.
+
+Single deployment owner: Sheet Happens Officer chat. Do not deploy competing candidates. Pending broader UI stack remains separate.
