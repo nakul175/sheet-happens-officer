@@ -1,8 +1,8 @@
 {
   "repository": "https://github.com/nakul175/holy-sheet.git",
-  "sourceCommit": "a7a1e7fb46dec3a40251c16965ec5efbdedca3ef",
-  "version": "0.1.0-holy3.2",
-  "filename": "aplyd-holy-sheet-editor-0.1.0-holy3.2.tgz",
-  "integrity": "sha512-XEG22nk4nLLLNjw3WLatI0TRjj1901sm31pXNq7/bc73+HVVHkdbp70KTByRX3/Ri6v018iwBCEhePlsC0RRWg==",
-  "manifestSha256": "cff477ad4d27b7bc3e267a6110cdea11583c33ef1730764f561e17ed6e1330c7"
+  "sourceCommit": "401cf1bf2c9df2e9ffd4e870c7bc50eb75f1336a",
+  "version": "0.1.0-holy3.3",
+  "filename": "aplyd-holy-sheet-editor-0.1.0-holy3.3.tgz",
+  "integrity": "sha512-xVhjAQLFhZAsutqNoPtsMmSldWFOFTIDTNfcaFT9UlYm3YdVJp1CVKK0ciVgGUlw9w0lFRjGorkEvJW7FFd/Gw==",
+  "manifestSha256": "d252e97d053a87e500ca45b5acf348f42e3cefb19f2016cba7614ed8209ee60a"
 }
