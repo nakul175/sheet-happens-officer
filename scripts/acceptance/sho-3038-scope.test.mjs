@@ -5,6 +5,16 @@ import test from "node:test";
 
 const production = "ee59582dffcbd8cc3067e689b2bb73cf63781cb7";
 const allowed = new Set([
+  // SHO-3109..3113 approved recovery/offline/password wall and Add task.
+  "src/app/check-reset/page.tsx",
+  "src/app/expired/page.tsx",
+  "src/app/offline/page.tsx",
+  "src/app/offline/offline.module.css",
+  "src/app/(app)/SetOwnPassword.tsx",
+  "src/app/(app)/projects/[id]/add-task-approved.css",
+  "tests/remainder-approved.test.tsx",
+  "vitest.remainder-approved.config.mts",
+  "docs/remainder-approved-release.md",
   // SHO-3104..3108 opt-in approved auth-page presentation.
   "src/components/AuthShell.tsx",
   "src/app/signup/SignUpForm.tsx",

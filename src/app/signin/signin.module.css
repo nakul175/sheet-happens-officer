@@ -7,3 +7,4 @@
 
 .signcard:has(.stateIcon){text-align:center}.signcard:has(.stateIcon) [role=alert]{text-align:left}
 .signcard:has(.stateIcon)>a{align-self:center}
+.signcard:has(.stateIcon)>a{align-self:stretch;justify-content:center}

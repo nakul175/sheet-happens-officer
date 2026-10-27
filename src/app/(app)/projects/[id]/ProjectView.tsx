@@ -16,6 +16,8 @@ import { DealPanel, openTaskFeed, type DealBlock, type OpenTaskFeed } from "@/co
 import { Page, useMe } from "../../Shell";
 import "../projects.css";
 import "./approved-list.css";
+import "../../accounts/forms-approved.css";
+import "./add-task-approved.css";
 import "./approved-board.css";
 import { InlineCells, inlineEditable, useInlineEdit } from "@/components/inline";
 import { ListControls } from "./ListControls";
@@ -422,9 +424,9 @@ function NewTask({ p, onClose, onAdded }: { p: Proj; onClose: () => void; onAdde
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   return (
-    <Modal label="Add task" onClose={onClose}>
-      <h2>Add task</h2>
-      <form onSubmit={async (e) => {
+    <Modal className="approved-record-form" label="Add task" onClose={onClose}>
+      <div className="record-form-heading"><h2>Add task</h2><button type="button" className="link" aria-label="Close Add task" onClick={onClose}>×</button></div>
+      <form className="new-task-form" onSubmit={async (e) => {
         e.preventDefault();
         setBusy(true);
         const r = await api("POST", `/api/projects/${p.id}/tasks`, { title, sectionId: section, assigneeId: assignee || undefined, dueDate: due || null, priority, collaboratorIds: collaborators.filter((id) => id !== assignee), addAssigneeToProject: addAssignee, addCollaboratorsToProject: addCollaborators.filter(id => collaborators.includes(id) && id !== assignee) });
