@@ -17,6 +17,11 @@ const allowed = new Set([
   "src/components/extras/StartGuide.tsx",
   "src/lib/install-guidance.ts",
   "tests/install-guidance-2617.test.tsx",
+  // SHO-2559: actual phone guard and CI negative-control evidence on this integration tree.
+  ".github/workflows/phone-checks.yml",
+  "vitest.viewport.config.mts",
+  "tests/viewport/viewport.test.ts",
+  "scripts/ci/viewport-negative-control.mjs",
   "docs/sho-next50-manifest.json",
   "package.json",
   // SHO-3133 approved responsive board layout; product behavior remains in the
