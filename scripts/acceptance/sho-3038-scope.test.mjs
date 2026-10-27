@@ -11,6 +11,7 @@ const allowed = new Set([
   "src/components/PeopleSelect.tsx",
   "src/components/people-select.css",
   "tests/people-select-clean-ui.test.tsx",
+  "tests/modal-focus-return.test.tsx",
   "docs/sho-next50-manifest.json",
   "package.json",
   // SHO-3133 approved responsive board layout; product behavior remains in the

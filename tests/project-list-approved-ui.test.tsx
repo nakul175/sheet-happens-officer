@@ -7,7 +7,7 @@ vi.mock("next/navigation", () => ({ usePathname: () => "/projects/fixture", useS
 vi.mock("@/app/(app)/Shell", () => ({ Page: ({ children, actions, beforeTitle, title, className }: { children: React.ReactNode; actions: React.ReactNode; beforeTitle: React.ReactNode; title: React.ReactNode; className: string }) => h("main", { className }, beforeTitle, h("h1", null, title), actions, children), useMe: () => ({ id: "me", orgRole: "MEMBER" }) }));
 import ProjectView from "../src/app/(app)/projects/[id]/ProjectView";
 let root: Root | undefined;
-async function mount(role = "EDITOR", archived = false, query = "", many = false) {
+async function mount(role = "EDITOR", archived = false, query = "", many = false, identities = false) {
   nav.query = query; nav.push.mockReset(); nav.replace.mockReset();
   Object.defineProperty(window, "matchMedia", { configurable: true, value: () => ({ matches: false, addEventListener() {}, removeEventListener() {} }) });
   document.body.innerHTML = '<div id="root"></div>';
@@ -18,7 +18,8 @@ async function mount(role = "EDITOR", archived = false, query = "", many = false
     const sections: {id:string;name:string;isDone:boolean;total:number;nextCursor:null;tasks:(Omit<typeof task,"completedAt"> & {id:string;title:string;completedAt:string|null})[]}[] = [{ id: "todo", name: "To do", isDone: false, total: 1, nextCursor: null, tasks: [{ ...task, id: "open", title: "Open task with full name" }] }, { id: "done", name: "Done", isDone: true, total: 1, nextCursor: null, tasks: [{ ...task, id: "closed", sectionId: "done", title: "Completed task", completedAt: "2026-10-26T00:00:00Z" }] }];
     if (many) sections[0].tasks.push({ ...task, id: "extra", title: "Another task", priority: "HIGH" });
     if (many) sections[0].total = 2;
-    const data = path.includes("/tasks") ? { sections: path.includes("priority=HIGH") ? sections.map(s => ({...s,tasks:s.tasks.filter(t => t.priority === "HIGH")})) : sections } : path.includes("/views") ? { views: [], max: 10 } : { project: { id: "fixture", name: "Full Project Name", archived, role, sections, members: [{ userId: "me", name: "Me", role, active: true }, { userId: "leader", name: "Leader", role: "LEADER", active: true }] } };
+    if (identities && path.includes('/assignment-people')) return new Response(JSON.stringify({ people: [{ id: 'pending', name: 'Alex Morgan', email: 'pending@example.test', isMember: false }] }), { headers: { 'content-type': 'application/json' } });
+    const data = path.includes("/tasks") ? { sections: path.includes("priority=HIGH") ? sections.map(s => ({...s,tasks:s.tasks.filter(t => t.priority === "HIGH")})) : sections } : path.includes("/views") ? { views: [], max: 10 } : { project: { id: "fixture", name: "Full Project Name", archived, role, sections, members: identities ? [{ userId: "me", name: "Alex Morgan", ...(role === "LEADER" ? { email: "alex.a@example.test" } : {}), role, active: true }, { userId: "leader", name: "Alex Morgan", ...(role === "LEADER" ? { email: "alex.b@example.test" } : {}), role: "LEADER", active: true }] : [{ userId: "me", name: "Me", role, active: true }, { userId: "leader", name: "Leader", role: "LEADER", active: true }] } };
     return new Response(JSON.stringify(data), { headers: { "content-type": "application/json" } });
   }); globalThis.fetch = fetcher;
   const params = Promise.resolve({ id: "fixture" });
@@ -96,4 +97,27 @@ it("read-only completion descriptions distinguish archived and Viewer restrictio
  await mount("LEADER", true);expect(document.querySelector('.tick[disabled]')!.getAttribute('aria-label')).toContain('archived and read-only');
  act(()=>root?.unmount());root=undefined;
  await mount("VIEWER", false);expect(document.querySelector('.tick[disabled]')!.getAttribute('aria-label')).toContain('Viewers can read tasks but cannot change them');
+});
+
+it.each(["LEADER", "EDITOR"])("Add task displays only supplied authorized identities (%s)", async role => {
+  await mount(role, false, "new=1", false, true);
+  const dialog = document.querySelector('[role="dialog"]')!;
+  const select = [...dialog.querySelectorAll('label')].find(el => el.textContent === 'Assignee')?.parentElement?.querySelector('select') ?? [...dialog.querySelectorAll('select')][1];
+  expect([...select.options].map(o => o.value)).toEqual(['me', 'leader']);
+  expect(select.textContent).toContain('Alex Morgan');
+  if (role === 'LEADER') {
+    expect(select.options[0].text).toBe('Alex Morgan — alex.a@example.test');
+    expect(select.options[1].text).toBe('Alex Morgan — alex.b@example.test');
+  } else expect(dialog.textContent).not.toContain('@example.test');
+});
+it("Add task retains available pending identity and defers the ID-based grant until save", async () => {
+  const fetcher = await mount('LEADER', false, 'new=1', false, true);
+  const input = document.querySelector<HTMLInputElement>('input[placeholder="Search by name"]') ?? [...document.querySelectorAll<HTMLInputElement>('input')].find(el => el.closest('.new-task-form') && el.parentElement?.textContent?.includes('Search workspace assignees'))!;
+  await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, 'Alex'); input.dispatchEvent(new Event('input', { bubbles: true })); });
+  await act(async () => [...document.querySelectorAll<HTMLButtonElement>('button')].find(b => b.textContent === 'Choose assignee')!.click());
+  await act(async () => [...document.querySelectorAll<HTMLButtonElement>('button')].find(b => b.textContent === 'Add to project and assign')!.click());
+  const option = document.querySelector<HTMLOptionElement>('option[value="pending"]')!;
+  expect(option.textContent).toBe('Alex Morgan — pending@example.test (will join project)');
+  expect(option.selected).toBe(true);
+  expect(fetcher.mock.calls.every(([,init]) => !init?.method || init.method === 'GET')).toBe(true);
 });
