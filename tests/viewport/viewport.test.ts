@@ -61,13 +61,17 @@ async function check(ctx: BrowserContext, path: string, width: number, wait?: st
     // SHO-2559 AC2: this test-only switch deliberately breaks one real public route.
     // beforeAll refuses every remote target before any fixture is created.
     if (process.env.SHO_VIEWPORT_NEGATIVE_CONTROL === "1" && path === "/signin" && width === 320) {
-      await page.evaluate(() => {
+      const geometry = await page.evaluate(() => {
         const fault = document.createElement("div");
         fault.id = "sho-2559-negative-control";
         fault.style.cssText = "width:400px;height:20px";
         fault.textContent = "Deliberate 400px viewport regression";
         document.body.append(fault);
+        const rect = fault.getBoundingClientRect();
+        return { innerWidth: window.innerWidth, documentClientWidth: document.documentElement.clientWidth, bodyScrollWidth: document.body.scrollWidth, faultWidth: rect.width, faultRight: rect.right };
       });
+      console.log("SHO-2559 injected geometry:", JSON.stringify({ requestedWidth: width, ...geometry }));
+      expect(geometry.faultWidth, "the negative-control fault must actually be 400px wide").toBe(400);
     }
     const found: Finding[] = await page.evaluate(collect, { phone: width < PHONE_MAX, width });
     return { page, found };

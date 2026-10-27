@@ -19,7 +19,12 @@ for (const expected of ['Sign in at 320 px', 'div#sho-2559-negative-control', 's
   assert.ok(output.includes(expected), `Failure must name ${expected}; see negative-control.log`);
 }
 assert.ok(statSync(`${directory}/Sign-in-320.png`).size > 0, 'Failure screenshot must exist');
+const geometryMatch = output.match(/SHO-2559 injected geometry: (\{[^\n]+\})/);
+assert.ok(geometryMatch, 'Actual mobile fault geometry must be recorded');
+const geometry = JSON.parse(geometryMatch[1]);
+assert.equal(geometry.requestedWidth, 320);
+assert.equal(geometry.faultWidth, 400);
 const proofScreenshot = `${directory}/negative-control-400px-320.png`;
 copyFileSync(`${directory}/Sign-in-320.png`, proofScreenshot);
-writeFileSync(`${directory}/negative-control.json`, JSON.stringify({ screen: 'Sign in', width: 320, element: 'div#sho-2559-negative-control', injectedWidth: 400, suiteExitCode: result.status, screenshot: proofScreenshot, expectedFailureProven: true }, null, 2));
+writeFileSync(`${directory}/negative-control.json`, JSON.stringify({ screen: 'Sign in', width: 320, element: 'div#sho-2559-negative-control', injectedWidth: 400, geometry, suiteExitCode: result.status, screenshot: proofScreenshot, expectedFailureProven: true }, null, 2));
 console.log('Proved: real Sign in @320px suite fails on a 400px element, names screen/width/element, and saves a screenshot.');
