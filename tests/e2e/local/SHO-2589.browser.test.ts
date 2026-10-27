@@ -10,7 +10,7 @@ let f: Awaited<ReturnType<typeof workloadFixture>>;
 beforeAll(async () => {
   const paths = [process.env.PW_CHROMIUM, "/usr/bin/google-chrome", "/usr/bin/chromium"].filter((p): p is string => !!p);
   browser = await chromium.launch({ executablePath: paths.find(p => existsSync(p)), args: ["--no-sandbox"] });
-  mkdirSync("test-results/e2e", { recursive: true });
+  mkdirSync("workload-ui-previews", { recursive: true });
   f = await workloadFixture();
 }, 120000);
 afterAll(async () => { try { await f?.cleanup(); } finally { await browser?.close(); } }, 120000);
@@ -30,8 +30,16 @@ it.each([390, 1280])("shows readable %i px workload rows/cards and opens the mat
     const geometry = await count.boundingBox();
     expect(geometry!.width).toBeGreaterThanOrEqual(44); expect(geometry!.height).toBeGreaterThanOrEqual(44);
     expect(await count.evaluate(el => getComputedStyle(el.closest("tr")!).display)).toBe(width < 768 ? "grid" : "table-row");
+    if (width < 768) {
+      const nameWidth = await count.evaluate(el => {
+        const row = el.closest("tr")!, name = row.querySelector("th")!;
+        const style = getComputedStyle(row);
+        return { name: name.getBoundingClientRect().width, available: row.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight) };
+      });
+      expect(nameWidth.name).toBeGreaterThanOrEqual(nameWidth.available - 2);
+    }
     expect(await page.getByRole("table").textContent()).not.toContain(f.outsider.name);
-    await page.screenshot({ path: `test-results/e2e/workload-${width}-people.png`, fullPage: false });
+    await page.screenshot({ path: `workload-ui-previews/workload-${width}-people.png`, fullPage: false });
     await count.click();
     const tasks = page.locator("#workload-tasks");
     await tasks.getByRole("button", { name: `ZZ-TEST Workload blocked parent ${f.run}`, exact: true }).waitFor({ state: "visible", timeout: 30000 });
@@ -40,7 +48,7 @@ it.each([390, 1280])("shows readable %i px workload rows/cards and opens the mat
     expect(new URL(page.url()).searchParams.get("assignee")).toBe(f.worker.id);
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
     await tasks.scrollIntoViewIfNeeded();
-    await page.screenshot({ path: `test-results/e2e/workload-${width}-tasks.png`, fullPage: false });
+    await page.screenshot({ path: `workload-ui-previews/workload-${width}-tasks.png`, fullPage: false });
   } finally { await ctx.close(); }
 }, 120000);
 it("reassigns through Task details, exposes Undo and refreshes the scoped list without a document reload", async () => {
@@ -71,6 +79,6 @@ it("reassigns through Task details, exposes Undo and refreshes the scoped list w
     await page.locator("#workload-tasks").getByRole("button", { name: title, exact: true }).waitFor({ state: "visible", timeout: 30000 });
     expect((await f.root.c.get(`/api/tasks/${f.parent}`)).json.task.assignee.id).toBe(f.worker.id);
     expect(await page.evaluate(() => (window as unknown as { __workloadSameDocument: boolean }).__workloadSameDocument)).toBe(true);
-    await page.screenshot({ path: "test-results/e2e/workload-390-after-undo.png", fullPage: false });
+    await page.screenshot({ path: "workload-ui-previews/workload-390-after-undo.png", fullPage: false });
   } finally { await ctx.close(); }
 }, 180000);

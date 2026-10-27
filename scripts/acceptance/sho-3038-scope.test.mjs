@@ -9,6 +9,7 @@ const allowed = new Set([
   // SHO-2589: Workload stays disabled pending complete acceptance and hidden-CRM policy resolution.
   "src/lib/workload.ts",
   "src/lib/workload-query.ts",
+  ".gitignore",
   "tests/workload-2589.test.ts",
   "tests/workload-2589-ui.test.tsx",
   "tests/workload-2589-fixtures.ts",

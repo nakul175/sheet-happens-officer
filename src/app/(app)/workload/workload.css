@@ -32,11 +32,11 @@
 .workload-pagination { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:12px; margin-top:20px; }
 .workload-page :is(a,button):focus-visible { outline:2px solid var(--navy); outline-offset:3px; }
 @media(max-width:767px) {
-  .workload-panel { padding:16px; border:0; background:transparent; box-shadow:none; margin:16px 0; }
+  .workload-panel { padding:0; border:0; background:transparent; box-shadow:none; margin:16px 0; }
   .workload-table,.workload-table tbody { display:block; }
   .workload-table thead { position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%); }
   .workload-table tbody tr { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:0 16px; margin:0 0 16px; padding:16px; border:1px solid #dce0e7; border-radius:14px; background:white; box-shadow:0 2px 4px #10143e08,0 8px 18px #10143e08; }
-  .workload-table tbody th { grid-column:1/-1; width:auto; padding:0 0 12px; text-align:left; }
+  .workload-table tbody th:first-child { grid-column:1/-1; width:auto; padding:0 0 12px; text-align:left; }
   .workload-table tbody td { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:8px 0; border-bottom:0; }
   .workload-mobile-label { display:block; min-width:0; color:var(--muted); font-size:12px; text-align:left; }
   .workload-count { flex-shrink:0; padding:0; }
