@@ -75,7 +75,8 @@ test('SHO-3062 paired normal-login qualification and HOLY-4 AC16',async({browser
    const restored=await(await hsDocument(fixture.sharedPageId)).json();expect((restored.page??restored).version).toBe(document.version);
    results.push({mapping:'SHO-3062-055',result:'live permission-unavailable state subset passed; document unchanged after rejected save'});
   });
- }catch(error){const url=new URL(page.url());console.log('QA_STOP '+url.origin+url.pathname);console.log('QA_LOGIN_FORM '+await page.getByLabel('Work email',{exact:true}).count());console.log('QA_SIGNIN_ERROR '+await page.getByText(/invalid.*(email|password)|incorrect.*password|Account is unavailable|Central sign-in could not finish|temporarily unavailable/i).count());throw error;
+ }catch(error){const url=new URL(page.url());console.log('QA_STOP '+url.origin+url.pathname);for(const f of page.frames()){const u=new URL(f.url()==='about:blank'?'https://blank.invalid':f.url());console.log('QA_FRAME '+u.origin+u.pathname);console.log('QA_FRAME_HEADINGS '+JSON.stringify(await f.locator('h1,h2').allTextContents()));console.log('QA_FRAME_STATUS '+JSON.stringify(await f.getByRole('status').allTextContents()));}
+ console.log('QA_LOGIN_FORM '+await page.getByLabel('Work email',{exact:true}).count());console.log('QA_SIGNIN_ERROR '+await page.getByText(/invalid.*(email|password)|incorrect.*password|Account is unavailable|Central sign-in could not finish|temporarily unavailable/i).count());throw error;
  }finally{
   if(projectId){const cleanup=await call('POST',`/api/projects/${projectId}/delete`,{confirmationName:projectName});results.push({mapping:'owned-native-fixture-cleanup',result:cleanup.status()===200?'recoverable project trash':'retained; inspect private receipt'});}
   await writeFile('test-results/holy3062-private-receipt.json',JSON.stringify({...receipts,results},null,2),{mode:0o600});
