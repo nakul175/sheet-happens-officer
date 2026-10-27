@@ -4,6 +4,7 @@ import { useState } from "react";
 import { ROLE, api, useGet } from "@/components/api";
 import { Confirm, LoadFailed, Skeleton } from "@/components/ui";
 import { Page, useMe } from "../Shell";
+import "./projects.css";
 
 type Pr = { id: string; name: string; description: string | null; archived: boolean; isVertical?: boolean; vertical?: { id: string; name: string; retired: boolean } | null; leader: { id: string; name: string } | null; openTasks: number; role: string | null; myRole: string | null };
 
@@ -11,13 +12,15 @@ function Card({ p, admin }: { p: Pr; admin: boolean }) {
   return (
     <Link href={`/projects/${p.id}`} className="card pcard">
       <h2>{p.name}</h2>
-      <p>{p.description || "No description"}</p>
-      <span className="chip">{p.isVertical ? "Vertical board" : p.vertical ? `${p.vertical.name}${p.vertical.retired ? " (retired)" : ""}` : "Unclassified delivery project"}</span>
-      <div className="meta" style={{ justifyContent: "flex-start" }}>
-        <span className="chip">{p.myRole ? `You: ${ROLE[p.myRole]}` : admin ? "Admin view" : "Member"}</span>
-        <span>Leader: {p.leader?.name ?? "none"}</span>
-        <span>{p.openTasks} open task{p.openTasks === 1 ? "" : "s"}</span>
-        {p.archived && <span className="chip grey">Read-only</span>}
+      <span className="project-classification">{p.isVertical ? "Vertical board" : p.vertical ? `${p.vertical.name}${p.vertical.retired ? " (retired)" : ""}` : "Unclassified delivery project"}</span>
+      <p className="project-description">{p.description || "No description"}</p>
+      <div className="project-footer">
+        <div className="project-people">
+          <span className="project-leader">Leader: {p.leader?.name ?? "none"}</span>
+          <span>{p.myRole ? `You: ${ROLE[p.myRole]}` : admin ? "Admin view" : "Member"}</span>
+          {p.archived && <span className="project-readonly">Read-only</span>}
+        </div>
+        <span className="project-task-count"><svg aria-hidden="true" width="20" height="24" viewBox="0 0 20 24" fill="none"><rect x="3" y="2" width="14" height="20" rx="2" stroke="currentColor" strokeWidth="1.7"/><path d="M6 7h8M6 11h8M6 15h5M6 18h3" stroke="currentColor" strokeWidth="1.5"/></svg>{p.openTasks} open task{p.openTasks === 1 ? "" : "s"}</span>
       </div>
     </Link>
   );
@@ -68,25 +71,29 @@ export default function ProjectsView() {
   const active = show(live.data?.projects);
   const archived = show(old.data?.projects);
   return (
-    <Page dock title="Projects" sub="Every project you belong to"
+    <Page bar title="Projects" sub="Delivery work and vertical boards"
       actions={
         <>
-          {admin && (
-            <div className="seg" role="group" aria-label="Which projects">
-              <button aria-pressed={!all} onClick={() => setAll(false)}>Mine</button>
-              <button aria-pressed={all} onClick={() => setAll(true)}>All projects</button>
-            </div>
-          )}
-          <Link className="btn" href="/projects/new">+ New project</Link>
-          {admin && <button className="btn ghost" onClick={() => { setVerticalName(""); setVerticalError(null); setNewVertical(true); }}>+ New vertical</button>}
+          {admin && <button className={`btn${kind === "vertical" ? "" : " ghost"}`} onClick={() => { setVerticalName(""); setVerticalError(null); setNewVertical(true); }}>+ New vertical</button>}
+          <Link className={`btn${kind === "vertical" ? " ghost" : ""}`} href="/projects/new">+ New project</Link>
         </>
       }>
-      <div className="seg" role="group" aria-label="Work area">
+      <div className="seg projects-tabs" role="group" aria-label="Work area">
         <button aria-pressed={kind === "delivery"} onClick={() => setKind("delivery")}>Delivery projects</button>
         <button aria-pressed={kind === "vertical"} onClick={() => setKind("vertical")}>Vertical task boards</button>
       </div>
-      {kind === "delivery" && <label>Vertical <select value={verticalFilter} onChange={e => setVerticalFilter(e.target.value)}><option value="">All verticals</option><option value="unclassified">Unclassified</option>{vocabulary.data?.verticals?.map(v => <option key={v.id} value={v.id}>{v.name}{v.retired ? " (retired)" : ""}</option>)}</select></label>}
-      <p className="hint">Verticals hold ongoing functional work; delivery projects have their own boards. Classification never changes membership or access. Existing records remain Unclassified until explicitly linked.</p>
+      <div className="projects-toolbar">
+        <div className="projects-scope">
+          {admin && <div className="seg" role="group" aria-label="Which projects">
+            <button aria-pressed={!all} onClick={() => setAll(false)}>Mine</button>
+            <button aria-pressed={all} onClick={() => setAll(true)}>All projects</button>
+          </div>}
+          {live.data && <span className="hint" role="status">{active.length} {kind === "vertical" ? (active.length === 1 ? "board" : "boards") : (active.length === 1 ? "project" : "projects")}</span>}
+        </div>
+      {kind === "delivery" && <label className="projects-filter">Vertical <select value={verticalFilter} onChange={e => setVerticalFilter(e.target.value)}><option value="">All verticals</option><option value="unclassified">Unclassified</option>{vocabulary.data?.verticals?.map(v => <option key={v.id} value={v.id}>{v.name}{v.retired ? " (retired)" : ""}</option>)}</select></label>}
+      </div>
+      {kind === "vertical" && <p className="projects-helper">Ongoing work, organised by function.</p>}
+      <details className="projects-help"><summary>About verticals and access</summary><p>Verticals hold ongoing functional work; delivery projects have their own boards. Classification never changes membership or access. Existing records remain Unclassified until explicitly linked.</p></details>
       {newVertical && <Confirm title="Create a vertical task board" yes="Create vertical" body="Admins manage this vocabulary. You become the board Leader and can add its members separately. No one gains access to linked delivery projects." busy={savingVertical || !verticalName.trim()} error={verticalError} onNo={() => setNewVertical(false)} onYes={async () => {
         setSavingVertical(true); const result = await api("POST", "/api/verticals", { name: verticalName }); setSavingVertical(false);
         if (result.ok) { setNewVertical(false); setKind("vertical"); live.reload(); vocabulary.reload(); } else setVerticalError(result.error ?? "Could not create vertical.");
@@ -104,10 +111,12 @@ export default function ProjectsView() {
       <div className="cards">{active.map((p) => <Card key={p.id} p={p} admin={admin} />)}</div>
       {archived.length > 0 && (
         <>
-          <div className="grp">Archived (read-only)</div>
-          <div className="cards">{archived.map((p) => <Card key={p.id} p={p} admin={admin} />)}</div>
+          <h2 className="grp">Archived (read-only) · {archived.length}</h2>
+          <div className="cards projects-archived">{archived.map((p) => <Card key={p.id} p={p} admin={admin} />)}</div>
         </>
       )}
+      {!archived.length && old.data && <div className="projects-no-archived"><h2 className="grp">Archived · 0</h2><p className="hint">No archived {kind === "vertical" ? "vertical boards" : "projects"} in this view.</p></div>}
+      {old.error && <LoadFailed onRetry={old.reload} />}
       <section aria-label="Project Trash">
         <h2 className="grp">Trash</h2>
         <p className="hint">Deleted projects stay recoverable. Only their Leader or an Admin can view and restore them. Restoring preserves the previous active or archived state.</p>

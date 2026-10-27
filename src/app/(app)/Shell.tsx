@@ -1,5 +1,6 @@
 "use client";
 import Link from "next/link";
+import "./nav-header.css";
 import { usePathname, useRouter } from "next/navigation";
 import { createContext, useContext, useEffect, useRef, useState } from "react";
 import { ago, api, initials, useGet } from "@/components/api";
@@ -108,6 +109,18 @@ export function Shell({ user, children }: { user: Me; children: React.ReactNode 
   if (user.orgRole === "SUPER_ADMIN") items.push(["/usage", "Usage"], ["/audit", "Audit log"]);
   const more = items.filter(([h]) => !["/", "/projects", "/search"].includes(h));
   const drawer = useRef<HTMLElement>(null);
+  const shellElement = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const shell = shellElement.current;
+    if (!shell || typeof ResizeObserver === "undefined") return;
+    const top = shell.querySelector<HTMLElement>(".top");
+    const paint = () => shell.style.setProperty("--shell-header-height", `${(window.innerWidth >= 1024 ? drawer.current?.offsetHeight ?? 0 : 0) + (top?.offsetHeight ?? 0)}px`);
+    const observer = new ResizeObserver(paint);
+    if (drawer.current) observer.observe(drawer.current);
+    if (top) observer.observe(top);
+    window.addEventListener("resize", paint); paint();
+    return () => { observer.disconnect(); window.removeEventListener("resize", paint); };
+  }, []);
   useEffect(() => {
     // Drawer (600 to 1023 px): Escape closes it, Tab stays inside it, and focus returns to the burger.
     if (!open) return;
@@ -129,11 +142,11 @@ export function Shell({ user, children }: { user: Me; children: React.ReactNode 
     <MeCtx.Provider value={user}>
       <ConciergeProvider>
       <Extras>
-      <div className="shell" data-density={compact ? "compact" : undefined}>
+      <div ref={shellElement} className={`shell${(path === "/projects" || path === "/projects/new") ? " projects-shell" : ""}`} data-density={compact ? "compact" : undefined}>
         <a className="skip" href="#main" onClick={(e) => { e.preventDefault(); const m = document.getElementById("main"); m?.focus(); m?.scrollIntoView(); }}>Skip to content</a>
         {open && <div className="veil" onClick={() => setMenu(null)} />}
         <aside ref={drawer} className={`side${open ? " open" : ""}`} aria-label="Main">
-          <Link href="/" className="brand"><img src="/logo-icon.svg" alt="" />Sheet Happens Officer</Link>
+          <Link href="/" className="brand"><img src="/logo-icon-reversed.svg" alt="" />Sheet Happens Officer</Link>
           <nav className="nav">
             {items.map(([href, label]) => (
               <Link key={href} href={href} aria-current={here(href) ? "page" : undefined}>{label}</Link>
@@ -148,7 +161,7 @@ export function Shell({ user, children }: { user: Me; children: React.ReactNode 
         <div className="main">
           <header className="top">
             <button className="burger" aria-label="Open menu" onClick={() => setMenu(path)}>☰</button>
-            <span className="top-brand"><img src="/logo-icon.svg" alt="" />SHO</span>
+            <span className="top-brand"><img src="/logo-icon-reversed.svg" alt="" />SHO</span>
             <span className="grow" />
             <SearchButton />
             <NewTaskButton />
@@ -167,14 +180,15 @@ export function Shell({ user, children }: { user: Me; children: React.ReactNode 
 }
 
 /** Page frame. `dock` reserves the 340 px concierge column on wide screens (list screens only). */
-export function Page({ title, docTitle, sub, actions, dock, bar, children }: { title?: React.ReactNode; docTitle?: string; sub?: React.ReactNode; actions?: React.ReactNode; dock?: boolean; bar?: boolean; children: React.ReactNode }) {
+export function Page({ title, docTitle, sub, actions, dock, bar, beforeTitle, className = "", children }: { title?: React.ReactNode; docTitle?: string; sub?: React.ReactNode; actions?: React.ReactNode; dock?: boolean; bar?: boolean; beforeTitle?: React.ReactNode; className?: string; children: React.ReactNode }) {
   const slot = dock || bar;
   const tab = docTitle ?? (typeof title === "string" ? title : undefined);
   useEffect(() => { if (tab) document.title = `${tab} · Sheet Happens Officer`; }, [tab]);
   const hidden = useConcierge()?.hidden ?? false; // a hidden concierge gives its space back
   return (
     <>
-      <main id="main" tabIndex={-1} className={`content${dock && !hidden ? " with-dock" : ""}${bar && !hidden ? " with-bar" : ""}`}>
+      <main id="main" tabIndex={-1} className={`content ${className}${dock && !hidden ? " with-dock" : ""}${bar && !hidden ? " with-bar" : ""}`}>
+        {beforeTitle}
         {(title || actions) && (
           <div className="head">
             <div className="grow">
