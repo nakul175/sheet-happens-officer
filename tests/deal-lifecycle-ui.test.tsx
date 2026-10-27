@@ -2,7 +2,7 @@
 import { act, createElement as h } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { DealBoard, columnsFor, opportunityGroups, totals, type BoardDeal, type BoardStage } from "../src/components/DealBoard";
+import { DealBoard, columnsFor, opportunityGroups, sortDeals, totals, type BoardDeal, type BoardStage } from "../src/components/DealBoard";
 import { DealPanel } from "../src/components/DealPanel";
 import DealsView from "../src/app/(app)/deals/DealsView";
 vi.mock("@/app/(app)/Shell", () => ({ Page: ({ children, actions }: { children: React.ReactNode; actions: React.ReactNode }) => h("div", null, actions, children), useMe: () => ({ id: "me" }) }));
@@ -31,12 +31,12 @@ afterEach(() => { act(() => root?.unmount()); root = undefined; vi.restoreAllMoc
 
 it("SHO-3043 date filter updates board, list and totals together and clears", async () => {
   await mount(h(DealsView));
-  const select = [...document.querySelectorAll<HTMLSelectElement>('select')][2];
+  const select = [...document.querySelectorAll<HTMLSelectElement>('select')][0];
   await act(async () => {
     select.value = "expectedClose";
     select.dispatchEvent(new Event("change", { bubbles: true }));
   });
-  const undated = [...document.querySelectorAll<HTMLSelectElement>("select")][3];
+  const undated = [...document.querySelectorAll<HTMLSelectElement>("select")][1];
   await act(async () => {
     undated.value = "exclude";
     undated.dispatchEvent(new Event("change", { bubbles: true }));
@@ -53,12 +53,10 @@ it("SHO-3043 date filter updates board, list and totals together and clears", as
 
 it("SHO-3043 composes timeline with opportunity and stage", async () => {
   await mount(h(DealsView));
-  const selects = [...document.querySelectorAll<HTMLSelectElement>("select")];
+  const checks = [...document.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')];
   await act(async () => {
-    selects[0].value = "OTC";
-    selects[0].dispatchEvent(new Event("change", { bubbles: true }));
-    selects[1].value = "hold";
-    selects[1].dispatchEvent(new Event("change", { bubbles: true }));
+    checks.find(input => input.parentElement?.textContent?.includes("OTC"))!.click();
+    checks.find(input => input.parentElement?.textContent?.includes("On Hold"))!.click();
   });
   expect(document.querySelectorAll(".dcard")).toHaveLength(1);
   expect(document.querySelector('a[href="/projects/sales-otc"]')).not.toBeNull();
@@ -66,6 +64,30 @@ it("SHO-3043 composes timeline with opportunity and stage", async () => {
   await click("Only my deals");
   expect(calls.at(-1)).toContain("mine=true");
   expect(document.querySelectorAll(".dcard")).toHaveLength(1);
+});
+
+it("SHO-3134 combines multi-select values with OR within a dimension and AND across dimensions", async () => {
+  await mount(h(DealsView));
+  const checks = [...document.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')];
+  await act(async () => {
+    checks.find(input => input.parentElement?.textContent?.includes("RFP/RFA"))!.click();
+    checks.find(input => input.parentElement?.textContent?.includes("OTC"))!.click();
+    checks.find(input => input.parentElement?.textContent?.includes("Leads"))!.click();
+    checks.find(input => input.parentElement?.textContent?.includes("On Hold"))!.click();
+  });
+  expect([...document.querySelectorAll(".dcard a")].map(a => a.textContent)).toEqual(["sales-rfp", "sales-otc"]);
+  await click("Clear type and stage filters");
+  expect(document.querySelectorAll(".dcard")).toHaveLength(7);
+});
+
+it("SHO-3135 sorting is stable, uses canonical stage order and keeps null submission dates last", () => {
+  const a = { ...deal("b", stages[1]), name: "Beta", submissionDeadline: null };
+  const b = { ...deal("a", stages[0]), name: "Alpha", submissionDeadline: "2026-12-02" };
+  const c = { ...deal("c", stages[0]), name: "Alpha", submissionDeadline: "2026-12-01" };
+  expect(sortDeals([a, b, c], "name-asc", stages).map(item => item.id)).toEqual(["a", "c", "b"]);
+  expect(sortDeals([a, b, c], "stage", stages).map(item => item.id)).toEqual(["a", "c", "b"]);
+  expect(sortDeals([a, b, c], "date-asc", stages).map(item => item.id)).toEqual(["c", "a", "b"]);
+  expect(sortDeals([a, b, c], "date-desc", stages).map(item => item.id)).toEqual(["a", "c", "b"]);
 });
 
 it("Bid has distinct active decisions/outcomes, sales excludes delivery, delivery has its own column", () => {
