@@ -68,7 +68,7 @@ test('SHO-3062 paired normal-login qualification and HOLY-4 AC16',async({browser
    expect((await ctx.request.get(HS+'/auth/session')).status()).toBe(200);expect((await hsDocument(createdPageId)).status()).toBe(200);
    const native=await metadata('tasks',taskId);expect(native.subject).toBe(fixture.subject);expect(native.links.some((p:{pageId:string})=>p.pageId===fixture.sharedPageId)).toBe(true);
    await expect(editor().getByRole('textbox',{name:'Document content',exact:true})).toHaveCount(0,{timeout:15000});
-   const denied=await ctx.request.post(`${HS}/api/v1/pages/${fixture.sharedPageId}/document`,{headers:{Origin:HS},data:{operationId:crypto.randomUUID(),baseVersion:document.version,title:document.title,document:document.document}});expect(denied.status()).toBe(404);
+   const denied=await ctx.request.post(`${HS}/api/v1/pages/${fixture.sharedPageId}/operations`,{headers:{Origin:HS},data:{operationId:crypto.randomUUID(),baseVersion:document.version,title:document.title,document:document.document}});expect(denied.status()).toBe(404);
    await page.screenshot({path:'test-results/holy3062-native-member-hs-revoked.png'});
    results.push({mapping:'SHO-3062-053/HOLY-4-047',result:'native membership retained; actual embedded read and save denied after HS revoke; session still valid'});
    console.log('HOLY3062_READY_FOR_OWNER_RESTORE');
