@@ -71,3 +71,8 @@
   .shell .wordmark-short { display: inline; }
 }
 @media (max-width: 599px) { .shell .burger, .shell .top-brand .wordmark-short { display: none; } }
+
+.shell .my-tasks-view { font-family: Lato, sans-serif; }
+.shell .my-tasks-view h1.pt { font-size: clamp(30px,3vw,42px); font-weight: 700; color: #10143e; }
+.shell .my-tasks-view .head { align-items: center; margin-bottom: 16px; }
+.shell .my-tasks-view .sub { margin-bottom: 0; }
