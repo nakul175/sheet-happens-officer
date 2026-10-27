@@ -128,4 +128,8 @@
  .shell :is(.project-list-view,.project-board-view) .lc-sel { height:48px; min-height:48px; }
  .shell :is(.project-list-view,.project-board-view) .lc-sel select.in { height:46px; min-height:46px; font-size:16px; }
  .shell :is(.project-list-view,.project-board-view) .lc-bar > .btn { height:48px; min-height:48px; }
+ .shell .review-table.stack td { display:grid; grid-template-columns:96px minmax(0,1fr); gap:12px; align-items:start; }
+ .shell .review-table.stack td[data-label]::before { width:auto; min-width:0; }
+ .shell .review-cell-copy { min-width:0; overflow-wrap:anywhere; }
+ .shell .review-cell-copy > strong { display:block; }
 }
