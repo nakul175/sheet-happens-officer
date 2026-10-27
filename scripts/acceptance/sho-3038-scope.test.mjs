@@ -5,6 +5,7 @@ import test from "node:test";
 
 const production = "ee59582dffcbd8cc3067e689b2bb73cf63781cb7";
 const allowed = new Set([
+  "tests/e2e/stories/APL-2539.spec.ts",
   // SHO-3084..3086 approved Settings, Activity and Project Trash surfaces.
   "src/app/(app)/projects/[id]/members/settings.css",
   "src/app/(app)/projects/[id]/members/page.tsx",

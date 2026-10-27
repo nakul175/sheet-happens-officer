@@ -99,7 +99,7 @@ test("AC3: the deal page shows members, sections, tasks, Trash and Activity, plu
   await dialog.getByLabel("Reason (required)").fill(reason);
   await dialog.getByRole("button", { name: "Move deal" }).click();
   await expect(stage.getByRole("button", { name: hold.name, exact: true })).toHaveAttribute("aria-current", "step");
-  await expect(admin.page.getByRole("link", { name: "Members" })).toBeVisible();
+  await expect(admin.page.getByRole("link", { name: "Settings" })).toBeVisible();
   await expect(admin.page.getByRole("link", { name: "Trash" })).toBeVisible();
   await expect(admin.page.getByRole("link", { name: "Activity" })).toBeVisible();
   await expect(admin.page.getByRole("region", { name: "To do" })).toBeVisible();
@@ -110,8 +110,8 @@ test("AC3: the deal page shows members, sections, tasks, Trash and Activity, plu
   await expect(admin.page.getByText("Buyer:")).toBeVisible();
   await expect(admin.page.getByText(`Reason: ${reason}`)).toBeVisible();
   await expect(admin.page.getByText(`Next step: ${step}`)).toBeVisible();
-  await admin.page.getByRole("link", { name: "Members" }).click();
-  await expect(admin.page.getByRole("heading", { name: "Members" })).toBeVisible();
+  await admin.page.getByRole("link", { name: "Settings" }).click();
+  await expect(admin.page.getByRole("heading", { name: "Settings" })).toBeVisible();
 });
 
 // qa:TC missing
