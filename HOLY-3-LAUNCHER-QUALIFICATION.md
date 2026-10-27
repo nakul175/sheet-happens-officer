@@ -28,7 +28,7 @@ JWT expiry; HS/accounts outages. Record revision, identities, task/page IDs and
 timestamps privately. Do not replace the shared live SHO service with this draft
 merely to run a qualification test.
 
-Validation: thirteen focused URL/context/lifecycle tests pass, including denial,
+Validation: sixteen focused URL/context/lifecycle tests pass, including denial,
 account changes, stale responses and stable standalone document links. Three
 scope/refusal checks pass; direct TypeScript and production build pass. The
 dedicated launcher CI repeats the release's database/browser regression gates
@@ -36,3 +36,11 @@ without weakening the original accepted15 scope gate. Broader release validation
 and live paired browser qualification remain required. The existing package's
 `typecheck` script refers to a missing `scripts/typecheck.mjs`; direct TypeScript
 and production build results must be recorded separately.
+
+First isolated CI at 251083e: 296 passed, 10 skipped, two existing usage-month
+tests failed because their next-month person-absence assertions encounter weekly
+usage from the preceding month. Launcher checks passed. Usage implementation and
+these tests are unchanged from the canonical base; an unchanged-release control
+run is pending. The job remains failed. Later independent regression gates run
+even after that suite failure, provided build and server startup succeeded; their
+results do not erase the failed suite. No assertions or original gates removed.

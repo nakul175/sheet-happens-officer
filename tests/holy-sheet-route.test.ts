@@ -34,3 +34,13 @@ it("refuses native-only and revoked central sessions", async () => {
 it("stays unavailable when the flag is off", async () => {
   vi.stubEnv("FF_HOLY_SHEET", "0"); expect((await run()).status).toBe(404); expect(mocks.user).not.toHaveBeenCalled();
 });
+it.each([
+  { userId: "another-native-user", revokedAt: null, expiresAt: new Date(Date.now()+60000) },
+  { userId: "native-user", revokedAt: new Date(), expiresAt: new Date(Date.now()+60000) },
+  { userId: "native-user", revokedAt: null, expiresAt: new Date(0) },
+])("refuses a changed, revoked or expired local session before releasing context", async session => {
+  mocks.session.mockResolvedValue({...session, centralLink: {subject: "accounts-sub", sessionUid: "central-session"}});
+  const response = await run(); expect(response.status).toBe(401);
+  expect(await response.text()).not.toContain("accounts-sub"); expect(mocks.active).not.toHaveBeenCalled();
+  expect(response.headers.get("cache-control")).toContain("no-store");
+});

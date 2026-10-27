@@ -57,8 +57,10 @@ jobs:
       - name: SHO-3010 echo and improve contracts
         run: npx vitest run -c vitest.accepted15-echo.config.mts | tee validation-3010.log
       - run: npx prisma migrate deploy
-      - run: npm run build
+      - id: build
+        run: npm run build
       - name: Start the exact built release
+        id: start
         run: |
           mkdir -p "$EMAIL_OUTBOX_DIR"
           (NODE_ENV=production PORT=3100 node --import tsx server.js > validation-server.log 2>&1 &)
@@ -70,17 +72,22 @@ jobs:
       - name: All unit and integration tests present in this selective release
         run: npx vitest run -c vitest.accepted15-all.config.mts | tee validation-all-release.log
       - name: Accepted15 component, database and SQL regressions
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.start.outcome == 'success' }}
         run: npx vitest run -c vitest.release12.config.mts | tee validation-accepted15.log
       - name: Deterministic2693 and2897 owned-outbox contracts
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.start.outcome == 'success' }}
         run: npx vitest run -c vitest.accepted-ai.config.mts | tee validation-accepted-ai.log
       - name: Deployed18 baseline regressions
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.start.outcome == 'success' }}
         run: npx vitest run -c vitest.release18.config.mts | tee validation-baseline18.log
       - name: Accepted locator browser cases
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.start.outcome == 'success' }}
         run: >-
           npx playwright test tests/e2e/stories/APL-2539.spec.ts tests/e2e/stories/APL-2540.spec.ts
           --grep 'APL-2539 > AC1:|APL-2540 > AC1:|APL-2540 > AC4:'
           | tee validation-locators.log
       - name: Linux built-entry refusal and drain receipt
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.start.outcome == 'success' }}
         run: node scripts/acceptance/release12-drain-receipt.mjs release12-drain.json | tee validation-drain.log
       - name: Preserve receipts
         if: always()
