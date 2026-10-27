@@ -6,6 +6,7 @@ import { api, useGet } from "@/components/api";
 import { LoadFailed, Skeleton } from "@/components/ui";
 import { Page, roleLabel, useMe } from "../../Shell";
 
+import "../team-approved.css";
 type Proj = { id?: string; name: string; href?: string | null; role?: string; openTasks?: number };
 
 /** One fixed sentence. No count, no deal name, no link. */
@@ -65,7 +66,7 @@ export default function PersonPage() {
   }
 
   return (
-    <Page title={p?.name ?? "Person"} sub={admin && p?.email ? `${p.email} · ${roleLabel(p.orgRole!)}` : undefined} docTitle={p?.name ?? "Person"}>
+    <Page className="team-approved person-approved" beforeTitle={<nav aria-label="Breadcrumb"><Link href="/team">Team</Link>{p && <> / {p.name}</>}</nav>} title={p?.name ?? "Person"} sub={admin && p?.email ? `${p.email} · ${roleLabel(p.orgRole!)}` : undefined} docTitle={p?.name ?? "Person"}>
       {/* APL-2664 AC3: a member sees the name and shared projects only, so email and role stay off this line. */}
       <p><Link href="/team">← Back to Team</Link></p>
       {g.loading && <Skeleton />}
@@ -88,13 +89,13 @@ export default function PersonPage() {
               <span className="hint">·</span>
               <span className="hint">{p.openTasks} open task{p.openTasks === 1 ? "" : "s"}</span>
               {me.orgRole === "SUPER_ADMIN" && !self && p.orgRole !== "SUPER_ADMIN" && p.status !== "DEACTIVATED" && (
-                <>
+                <details className="team-more" onKeyDown={e => { if (e.key === "Escape") { e.currentTarget.open = false; e.currentTarget.querySelector("summary")?.focus(); } }}><summary className="btn ghost">More</summary><div className="team-more-actions">
                   {p.orgRole === "ADMIN"
                     ? <button className="btn ghost sm" onClick={() => role("MEMBER")}>Make Member</button>
                     : <button className="btn ghost sm" onClick={() => role("ADMIN")}>Make Admin</button>}
                   <button className="btn ghost sm" onClick={resend}>Resend sign-in details</button>
                   <Link className="btn ghost sm" href="/team">Deactivate from the Team list</Link>
-                </>
+                </div></details>
               )}
             </div>
           )}

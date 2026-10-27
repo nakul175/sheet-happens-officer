@@ -27,8 +27,8 @@ test("APL-2539 > AC1: the panel shows the pipeline, the organisation and the sta
   await expect(main.getByRole("button", { name: "Put on hold", exact: true })).toHaveCount(0);
   await expect(main.getByRole("button", { name: "Close", exact: true })).toHaveCount(0);
   await expect(panel).not.toContainText(admin.user.name);
-  await admin.page.getByRole("link", { name: "Members", exact: true }).click();
-  await expect(admin.page.getByRole("heading", { name: "Members" })).toBeVisible();
+  await admin.page.getByRole("link", { name: "Settings", exact: true }).click();
+  await expect(admin.page.getByRole("heading", { name: "Settings" })).toBeVisible();
   // The Leader is the only member, so their name and the Leader role each appear once on the list.
   await expect(main.getByText(admin.user.name, { exact: true })).toBeVisible();
   await expect(main.getByText("Leader", { exact: true })).toBeVisible();
@@ -115,9 +115,9 @@ test("APL-2539 > AC5: Members, Activity and Trash are the project pages", async 
   const deal = await createDeal(admin, later, dealBody({ name, organisationId: org.id, pipelineId: pipes.pro.id, leaderId: admin.user.id }));
   expect((await activity(admin, deal.id)).some((row) => row.what === `created the deal "${name}"`)).toBe(true);
   await admin.page.goto(`/projects/${deal.id}`);
-  await admin.page.getByRole("link", { name: "Members", exact: true }).click();
+  await admin.page.getByRole("link", { name: "Settings", exact: true }).click();
   await expect(admin.page).toHaveURL(new RegExp(`/projects/${deal.id}/members$`));
-  await expect(admin.page.getByRole("heading", { name: "Members" })).toBeVisible();
+  await expect(admin.page.getByRole("heading", { name: "Settings" })).toBeVisible();
   await admin.page.goto(`/projects/${deal.id}/activity`);
   await expect(admin.page.getByRole("heading", { name: "Activity" })).toBeVisible();
   await expect(admin.page.locator(".item.act", { hasText: `created the deal "${name}"` })).toBeVisible();

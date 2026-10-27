@@ -33,7 +33,7 @@ function topDialog(): HTMLElement | null {
 const useCommitEffect = typeof window === "undefined" ? useEffect : useLayoutEffect;
 
 /** Centred dialog over a dimmed page. Escape and the dim area close it; focus moves in and returns. */
-export function Modal({ onClose, small, label, describedBy, children }: { onClose: () => void; small?: boolean; label: string; describedBy?: string; children: React.ReactNode }) {
+export function Modal({ onClose, small, label, describedBy, className, children }: { onClose: () => void; small?: boolean; label: string; describedBy?: string; className?: string; children: React.ReactNode }) {
   const ref = useRef<HTMLDivElement>(null);
   // The handler to call now. A re-render of the parent gives a new one; the key listener reads it from here, so it
   // is never torn down and added again (a gap a keypress could fall into, or one that holds a stale handler).
@@ -136,7 +136,7 @@ export function Modal({ onClose, small, label, describedBy, children }: { onClos
   }, []);
   return (
     <div className="scrim" ref={scrim} onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className={`modal${small ? " sm" : ""}`} role="dialog" aria-modal="true" aria-label={label} aria-describedby={describedBy} tabIndex={-1} ref={(el) => { ref.current = el; sheetRef.current = el; }} style={{ outline: "none" }}>
+      <div className={`modal${small ? " sm" : ""}${className ? ` ${className}` : ""}`} role="dialog" aria-modal="true" aria-label={label} aria-describedby={describedBy} tabIndex={-1} ref={(el) => { ref.current = el; sheetRef.current = el; }} style={{ outline: "none" }}>
         {children}
       </div>
     </div>
