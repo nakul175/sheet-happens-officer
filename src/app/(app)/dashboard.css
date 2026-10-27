@@ -5,7 +5,7 @@
 .dashboard-kpis { display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 20px; }
 .dashboard-kpi, .dashboard-panel { border: 1px solid #dce0e7; border-radius: 12px; padding: 24px; background: white; box-shadow: 0 2px 4px #171b2210, 0 8px 20px #171b2210; min-width: 0; }
 .dashboard-kpi { text-decoration: none; display: flex; gap: 20px; align-items: center; color: #10143e; overflow-wrap: anywhere; }
-.dashboard-kpi > span { font-size: 28px; color: var(--navy); }
+.dashboard-kpi > span { width: 40px; height: 40px; flex: 0 0 40px; display: grid; place-items: center; font-size: 28px; line-height: 1; color: var(--navy); }
 .dashboard-kpi strong { display: block; font-size: 32px; margin-top: 6px; }
 .dashboard-kpi.danger :is(strong,span) { color: var(--danger); }
 .dashboard-grid { display: grid; grid-template-columns: minmax(0,1.55fr) minmax(0,1fr); gap: 24px; margin: 24px 0; align-items: start; }
@@ -28,7 +28,7 @@
   .dashboard-view { padding: 24px 16px 100px; }
   .dashboard-kpis { gap: 12px; }
   .dashboard-kpi { padding: 16px; gap: 10px; font-size: 13px; }
-  .dashboard-kpi > span { font-size: 22px; }
+  .dashboard-kpi > span { width: 32px; height: 32px; flex-basis: 32px; font-size: 22px; }
   .dashboard-panel { padding: 20px; }
   .dashboard-row { flex-wrap: wrap; gap: 12px; }
   .dashboard-row > span { max-width: 100%; }

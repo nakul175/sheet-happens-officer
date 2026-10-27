@@ -172,15 +172,15 @@ textarea.in.blocked-reason { display: block; margin-top: 6px; min-height: 0; lin
 @media (min-width: 1280px) { .with-dock { margin-right: 340px; } .dock { display: block; } }
 
 /* CRM: pipeline board (SHO-US-12.6). Columns scroll inside the board; on a phone they become a vertical list. */
-.dboard { display: flex; gap: 12px; overflow-x: auto; padding-bottom: 8px; align-items: flex-start; }
-.dcol { flex: 0 0 260px; background: #f1f3f8; border: 1px solid var(--line); border-radius: 12px; padding: 10px; display: flex; flex-direction: column; gap: 8px; }
+.dboard { display: grid; grid-template-columns: repeat(auto-fit,minmax(min(260px,100%),1fr)); gap: 16px; padding-bottom: 8px; align-items: start; max-width: 100%; }
+.dcol { min-width: 0; background: #f1f3f8; border: 1px solid var(--line); border-radius: 12px; padding: 14px; display: flex; flex-direction: column; gap: 10px; }
 .dcol.over { outline: 2px solid var(--navy); }
 .dcol header { font-size: 14px; }
-.dcard { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 10px; font-size: 14px; display: flex; flex-direction: column; gap: 3px; cursor: grab; }
+.dcard { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 14px; font-size: 14px; display: flex; flex-direction: column; gap: 6px; cursor: grab; min-width: 0; overflow-wrap: anywhere; }
 .sub2 { font-size: 12px; color: var(--muted); }
 .sub2.over, .sub2 .over { color: var(--danger); font-weight: 600; }
 .mhead { font-size: 12px; color: var(--muted); padding: 6px 10px; }
-@media (max-width: 700px) { .dboard { flex-direction: column; overflow: visible; } .dcol { flex: none; width: 100%; } .dcard { cursor: default; } }
+@media (max-width: 700px) { .dboard { grid-template-columns: minmax(0,1fr); } .dcol { width: 100%; } .dcard { cursor: default; } }
 
 /* SHO-US-22.7: on a phone the task opens as a full-screen sheet with Close always in view. */
 @media (max-width: 599px) {
