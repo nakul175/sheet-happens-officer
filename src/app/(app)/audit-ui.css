@@ -108,6 +108,7 @@
 .shell .usage-figs > div:nth-child(2) dd { font-size:16px; font-weight:500; }
 .shell .selall .section-selection-mark { inset:0; display:grid; place-items:center; }
 .shell .grp .selall { display:inline-grid; place-items:center; justify-content:center; align-items:center; }
+.shell .new-deal-form > .actions { display:flex; justify-content:flex-end; flex-wrap:wrap; gap:12px; }
 /* Phone controls retain the approved visual scale while their real targets meet 44px. */
 @media(max-width:599px) {
  .shell .top :is(.top-brand,.account-trigger) { display:inline-flex; align-items:center; justify-content:center; min-width:44px; min-height:44px; }

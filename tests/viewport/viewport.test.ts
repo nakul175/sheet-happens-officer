@@ -104,6 +104,7 @@ for (const width of WIDTHS) {
         if (width === 390 && ["Home dashboard", "Project list", "New project", "New deal"].includes(s.name)) {
           mkdirSync(`${SHOTS}/previews`, { recursive: true });
           await page.screenshot({ path: `${SHOTS}/previews/${s.name.replace(/[^a-z0-9]+/gi, "-")}-${width}.png`, fullPage: true });
+          await page.screenshot({ path: `${SHOTS}/previews/${s.name.replace(/[^a-z0-9]+/gi, "-")}-${width}-viewport.png`, fullPage: false });
         }
         await page.close();
       });
