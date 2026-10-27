@@ -5,6 +5,9 @@ import test from "node:test";
 
 const production = "ee59582dffcbd8cc3067e689b2bb73cf63781cb7";
 const allowed = new Set([
+  // SHO-3133 approved responsive board layout; product behavior remains in the
+  // separately reviewed DealsView and DealBoard surfaces below.
+  "src/app/(app)/app.css",
   // User-approved production audit SHO3114–3132, same combined release.
   "src/app/(app)/audit-ui.css",
   "src/components/TaskParts.tsx",
