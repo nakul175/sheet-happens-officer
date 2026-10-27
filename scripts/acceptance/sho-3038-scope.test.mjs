@@ -5,6 +5,12 @@ import test from "node:test";
 
 const production = "ee59582dffcbd8cc3067e689b2bb73cf63781cb7";
 const allowed = new Set([
+  // SHO-3090..3092 approved Accounts, Organisation overview and Contacts.
+  "src/app/(app)/accounts/AccountsView.tsx",
+  "src/app/(app)/accounts/accounts-approved.css",
+  "tests/accounts-overview-approved.test.tsx",
+  "vitest.accounts-approved.config.mts",
+  "docs/accounts-overview-contacts-release.md",
   "tests/e2e/stories/APL-2539.spec.ts",
   "src/components/extras/Extras.tsx",
   // SHO-3087..3089 approved dashboard, review and reporting.

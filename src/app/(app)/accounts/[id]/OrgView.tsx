@@ -5,6 +5,8 @@ import { api, dueLabel, todayIST, useGet } from "@/components/api";
 import { Confirm, Field, Modal } from "@/components/ui";
 import { Page, useMe } from "../../Shell";
 import "../scroll.css";
+import "../accounts-approved.css";
+import { useSearchParams } from "next/navigation";
 
 type Contact = { id: string; name: string; role: string | null; email: string | null; phone: string | null; canEdit: boolean; knownBy: { id: string; name: string; active: boolean }[]; lastSpoke: string | null };
 type Note = { id: string; kind: string; date: string; text: string; author: { id: string; name: string }; deal: { id: string; name: string } | null; contacts: { id: string; name: string }[]; canDelete: boolean };
@@ -118,7 +120,11 @@ function NoteForm({ org, onDone }: { org: Org; onDone: () => void }) {
 export default function OrgView({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const me = useMe();
-  const { data, status, reload } = useGet<{ organisation: Org }>(`/api/orgs/${id}`);
+  const search = useSearchParams();
+  const requestedTab = search.get("tab") ?? "overview";
+  const section = ["contacts", "notes", "tasks", "tree"].includes(requestedTab) ? requestedTab : "overview";
+  const tabHref = (tab: string) => { const q = new URLSearchParams(search.toString()); if (tab === "overview") q.delete("tab"); else q.set("tab", tab); return `/accounts/${id}${q.size ? `?${q}` : ""}`; };
+  const { data, status, loading, error, reload } = useGet<{ organisation: Org }>(`/api/orgs/${id}`);
   const [hist, setHist] = useState<H | null>(null);
   const [dlg, setDlg] = useState<null | { contact?: Contact }>(null);
   const [edit, setEdit] = useState(false);
@@ -128,42 +134,46 @@ export default function OrgView({ params }: { params: Promise<{ id: string }> })
   async function archive() { if (o) { await api("POST", `/api/orgs/${id}/archive`, { archive: !o.archived }); reload(); } }
   async function showHistory() { const r = await api<{ items: H }>("GET", `/api/orgs/${id}/history`); if (r.ok) setHist(r.data.items); }
   return (
-    <Page title={o?.name ?? "…"} sub={o && <span className="crumb"><Link href="/accounts">Accounts</Link>{o.path.slice(0, -1).map((p) => <span key={p.id}> / <Link href={`/accounts/${p.id}`}>{p.name}</Link></span>)}</span>}
+    <Page className="accounts-approved org-detail-approved" title={o?.name ?? "…"} sub={o && <span className="crumb"><Link href="/accounts">Accounts</Link>{o.path.slice(0, -1).map((p) => <span key={p.id}> / <Link href={`/accounts/${p.id}`}>{p.name}</Link></span>)}</span>}
       actions={o && <>
-        <Link className="btn" href={`/deals/new?org=${o.id}`}>+ Deal</Link>
+        <Link className="btn" href={`/deals/new?org=${o.id}`}>+ New deal</Link>
         {o.canEdit && !o.archived && <button className="btn ghost" onClick={() => setEdit(true)}>Edit organisation</button>}
-        {o.canEdit && <button className="btn ghost" onClick={archive}>{o.archived ? "Unarchive" : "Archive"}</button>}
-        {me.orgRole !== "MEMBER" && <button className="btn ghost" onClick={showHistory}>History</button>}
+        {(o.canEdit || me.orgRole !== "MEMBER") && <details className="org-more" onKeyDown={e => { if (e.key === "Escape") { e.currentTarget.open = false; e.currentTarget.querySelector("summary")?.focus(); } }}><summary className="btn ghost">More</summary><div className="org-more-actions">
+          {o.canEdit && <button className="btn ghost" onClick={archive}>{o.archived ? "Unarchive" : "Archive"}</button>}
+          {me.orgRole !== "MEMBER" && <button className="btn ghost" onClick={showHistory}>History</button>}
+        </div></details>}
       </>}>
+      {loading && !o && <p role="status">Loading organisation…</p>}
+      {error && <div className="err" role="alert">{error}<button className="btn ghost" onClick={reload}>Retry</button></div>}
       {o?.archived && <div className="err">This organisation is archived.</div>}
-      {o && <p className="meta" style={{ justifyContent: "flex-start" }}>{o.kind && <span className="chip">{o.kind}</span>}{o.country && <span>{o.country}</span>}{o.createdBy && <span>Added by {o.createdBy}</span>}</p>}
+      {o && <p className="meta" style={{ justifyContent: "flex-start" }}>{o.kind && <span >{o.kind}</span>}{o.country && <span>{o.country}</span>}{o.createdBy && <span>Added by {o.createdBy}</span>}</p>}
 
-      <div className="grp">Open deals</div>
+      {o && <nav className="org-tabs" aria-label="Organisation sections">{[["overview", "Overview"], ["contacts", `Contacts ${o.contacts.length}`], ["notes", `Notes ${o.notes.length}`], ["tasks", `Linked tasks ${o.tasks.length}`], ["tree", "Organisation tree"]].map(([key, label]) => <Link key={key} href={tabHref(key)} aria-current={section === key ? "page" : undefined} scroll={false}>{label}</Link>)}</nav>}
+      <section hidden={section !== "overview"} aria-label="Overview">
+      <div className="org-overview-panel"><h2>Open deals {o && `(${o.deals.length})`}</h2>
       {o && o.deals.length === 0 && <div className="card empty">No deals you can see yet.</div>}
       {o && o.deals.length > 0 && (
-        <div className="acct-scroll" tabIndex={0} role="region" aria-label="Open deals"><table className="tbl"><thead><tr><th>Deal</th><th>Role</th><th>Stage</th><th>Leader</th></tr></thead>
+        <div className="acct-scroll" tabIndex={0} role="region" aria-label="Open deals"><table className="tbl"><thead><tr><th>Deal</th><th>Relationship</th><th>Stage</th><th>Leader</th></tr></thead>
           <tbody>{o.deals.map((d) => <tr key={d.projectId}><td><Link href={`/projects/${d.projectId}`}>{d.name}</Link></td><td>{d.role}</td><td>{d.stage?.name ?? "—"} <span style={{ color: "var(--muted)" }}>{d.pipeline}</span></td><td>{d.leader?.name ?? "—"}</td></tr>)}</tbody></table></div>
       )}
 
-      <div className="grp">Contacts</div>
-      {o && !o.archived && <button className="btn sm" style={{ marginBottom: 8 }} onClick={() => setDlg({})}>+ Contact</button>}
+      </div>
+      {o && <div className="org-previews"><section className="org-overview-panel" aria-label="Contacts preview"><div className="org-preview-heading"><h2>Contacts ({o.contacts.length})</h2><Link href={tabHref("contacts")} scroll={false}>View contacts</Link></div>{o.contacts.slice(0, 3).map(c => <div key={c.id} className="org-preview-row"><strong>{c.name}</strong><small>{c.role ?? "—"}</small></div>)}{!o.contacts.length && <p className="org-preview-row">No contacts yet.</p>}</section><section className="org-overview-panel" aria-label="Linked tasks preview"><div className="org-preview-heading"><h2>Linked tasks ({o.tasks.length})</h2><Link href={tabHref("tasks")} scroll={false}>View tasks</Link></div>{o.tasks.slice(0, 3).map(t => <Link key={t.id} className="org-preview-row" href={`/projects/${t.project.id}?task=${t.id}`}><strong style={t.done ? { textDecoration: "line-through" } : undefined}>{t.title}</strong><small>{t.project.name} · {t.assignee} · {dueLabel(t.dueDate)}</small></Link>)}{!o.tasks.length && <p className="org-preview-row">No linked tasks you can see.</p>}</section></div>}
+      </section>
+      <section hidden={section !== "contacts"} aria-label="Contacts">
+      <div className="org-overview-panel org-contacts-panel">
+      <div className="org-preview-heading"><h2>Contacts</h2>{o && !o.archived && <button className="btn" onClick={() => setDlg({})}>+ Contact</button>}</div>
       {o && o.contacts.length === 0 && <div className="card empty">No contacts yet.</div>}
-      {o && o.contacts.length > 0 && (
-        <div className="list">
-          {o.contacts.map((c) => (
-            <div key={c.id} className="item" style={{ alignItems: "flex-start" }}>
-              <div className="t">
-                <div><b>{c.name}</b>{c.role ? ` · ${c.role}` : ""}</div>
-                <small style={{ display: "block" }}>{[c.email, c.phone].filter(Boolean).join(" · ") || "No email or phone"}</small>
-                <small style={{ display: "block" }}>Known by: {c.knownBy.map((k) => <span key={k.id} className={k.active ? "chip" : "chip grey"} style={{ marginRight: 4 }} title={k.active ? undefined : "No longer active"}>{k.name}</span>)}</small>
-                <small style={{ display: "block" }}>Last spoke: {c.lastSpoke ? dueLabel(c.lastSpoke) : "never"}</small>
-              </div>
-              {c.canEdit && !o.archived && <div className="meta"><button className="link" onClick={() => setDlg({ contact: c })}>Edit</button><button className="link" onClick={() => setRm(c)}>Remove</button></div>}
-            </div>
-          ))}
-        </div>
-      )}
+      {o && o.contacts.length > 0 && <div className="acct-scroll" tabIndex={0} role="region" aria-label="Organisation contacts"><table className="tbl"><thead><tr><th>Contact</th><th>Contact details</th><th>Known by</th><th>Last spoke</th><th>Actions</th></tr></thead><tbody>{o.contacts.map(c => <tr key={c.id}>
+        <td><strong>{c.name}</strong>{c.role && <small className="contact-secondary">{c.role}</small>}</td>
+        <td><span className="contact-secondary">{c.email ?? "No email"}</span><span className="contact-secondary">{c.phone ?? "No phone"}</span></td>
+        <td>{c.knownBy.map(k => <span key={k.id} className="contact-secondary">{k.name}{!k.active && <span className="contact-inactive"> · inactive</span>}</span>)}</td>
+        <td>{c.lastSpoke ? dueLabel(c.lastSpoke) : "Never"}</td>
+        <td>{c.canEdit && !o.archived && <div className="contact-actions"><button className="link" aria-label={`Edit ${c.name}`} onClick={() => setDlg({ contact: c })}>Edit</button><button className="link contact-remove" aria-label={`Remove ${c.name}`} onClick={() => setRm(c)}>Remove</button></div>}</td>
+      </tr>)}</tbody></table></div>}
+      </div>
 
+      </section><section hidden={section !== "notes"} aria-label="Notes">
       <div className="grp">Notes</div>
       {o && !o.archived && <NoteForm org={o} onDone={reload} />}
       {o && o.notes.length === 0 && <div className="card empty">No notes yet.</div>}
@@ -182,6 +192,7 @@ export default function OrgView({ params }: { params: Promise<{ id: string }> })
         </div>
       )}
 
+      </section><section hidden={section !== "tasks"} aria-label="Linked tasks">
       <div className="grp">Tasks linked here</div>
       {o && o.tasks.length === 0 && <div className="card empty">No linked tasks you can see.</div>}
       {o && o.tasks.length > 0 && (
@@ -190,7 +201,10 @@ export default function OrgView({ params }: { params: Promise<{ id: string }> })
         ))}</div>
       )}
 
+      </section><section hidden={section !== "tree"} aria-label="Organisation tree">
+      {o && !o.tree && <p>No organisation tree available.</p>}
       {o?.tree && <><div className="grp">Organisation tree</div><div className="card">{<TreeView node={o.tree} current={o.id} />}</div></>}
+      </section>
       {hist && <><div className="grp">History</div><div className="list">{hist.map((h) => <div key={h.id} className="row">{h.who} · {h.action} · {new Date(h.at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}</div>)}</div></>}
 
       {dlg && <ContactDialog orgId={id} contact={dlg.contact} onClose={() => setDlg(null)} onDone={() => { setDlg(null); reload(); }} />}
