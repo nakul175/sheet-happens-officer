@@ -223,6 +223,8 @@ const allowed = new Set([
   "src/lib/access.ts",
   "src/lib/search.ts",
   "src/lib/feed.ts",
+  // SHO-2701: verify the returned event kind matches each persisted action.
+  "tests/comments-19-1.test.ts",
   "src/lib/notify.ts",
   "tests/project-delete-3047.test.ts",
   "tests/project-delete-db-3047.test.ts",
