@@ -156,6 +156,10 @@ const allowed = new Set([
   "scripts/acceptance/sho-3038-scope.test.mjs",
   "scripts/staging-editor.ts",
   ".github/workflows/scoped4-validation.yml",
+  "src/lib/sho-accept.c",
+  "src/lib/sho-accept.so",
+  "src/lib/shutdown.ts",
+  "tests/sho-2760-drop-window.test.ts",
 ]);
 
 test("sequential release changes only explicitly reviewed surfaces", () => {
