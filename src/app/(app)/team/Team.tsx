@@ -56,7 +56,7 @@ export default function Team() {
 
   return (
     <Page className="team-approved" title="Team" sub={admin ? "Everyone in the workspace" : "People you can add to projects"}
-      actions={me.orgRole === "SUPER_ADMIN" ? <button className="btn" onClick={() => setAdding(true)}>+ Add person</button> : undefined}>
+      actions={<>{me.workload && <Link className="btn ghost" href="/workload">Workload</Link>}{me.orgRole === "SUPER_ADMIN" && <button className="btn" onClick={() => setAdding(true)}>+ Add person</button>}</>}>
       {err && <div className="err" role="alert">{err}</div>}
       {note && <div className={note.ok ? "ok" : "err"} role="status">{note.text} <button className="btn ghost sm" onClick={() => setNote(null)}>Close</button></div>}
       {t.loading && <Skeleton />}

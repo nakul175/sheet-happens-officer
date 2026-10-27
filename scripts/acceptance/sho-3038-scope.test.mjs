@@ -6,6 +6,22 @@ import { readFileSync } from "node:fs";
 
 const production = "ee59582dffcbd8cc3067e689b2bb73cf63781cb7";
 const allowed = new Set([
+  // SHO-2589: Workload stays disabled pending complete acceptance and hidden-CRM policy resolution.
+  "src/lib/workload.ts",
+  "src/lib/workload-query.ts",
+  ".gitignore",
+  "tests/workload-2589.test.ts",
+  "tests/workload-2589-ui.test.tsx",
+  "tests/workload-2589-fixtures.ts",
+  "tests/workload-2589-api.test.ts",
+  "tests/workload-2589-availability.test.ts",
+  "tests/e2e/local/SHO-2589.browser.test.ts",
+  "vitest.scoped4-off.config.mts",
+  "src/app/(app)/layout.tsx",
+  "src/app/api/workload/route.ts",
+  "src/app/(app)/workload/page.tsx",
+  "src/app/(app)/workload/Workload.tsx",
+  "src/app/(app)/workload/workload.css",
   // SHO-3133–3135: approved clean controls, identity disambiguation and board sorting.
   "src/app/(app)/select-controls.css",
   "src/components/PeopleSelect.tsx",

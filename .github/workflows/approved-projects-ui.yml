@@ -40,6 +40,7 @@ jobs:
       SHO_ADMIN_PASS: correct-horse-9
       JOB_SECRET: accepted15-ci-only-not-a-real-secret
       FF_TASK_COMMENTS: "1"
+      FF_WORKLOAD: "1"
       SIGNIN_RETURN_TO: "on"
       RETURN_PATH_LOG: "1"
       SERVER_LOG: ${{ github.workspace }}/validation-server.log
@@ -151,12 +152,12 @@ jobs:
             if ! kill -0 "$(cat .scoped4-server.pid)" 2>/dev/null; then break; fi
             sleep 1
           done
-          (FF_TASK_COMMENTS=0 SIGNIN_RETURN_TO=off NODE_ENV=production PORT=3100 node --import tsx server.js > validation-off-server.log 2>&1 & echo $! > .scoped4-off-server.pid)
+          (FF_TASK_COMMENTS=0 FF_WORKLOAD=0 SIGNIN_RETURN_TO=off NODE_ENV=production PORT=3100 node --import tsx server.js > validation-off-server.log 2>&1 & echo $! > .scoped4-off-server.pid)
           for i in $(seq 1 40); do
             if curl -fsS http://localhost:3100/api/health; then break; fi
             sleep 1
           done
-          FF_TASK_COMMENTS=0 SIGNIN_RETURN_TO=off SERVER_LOG="$GITHUB_WORKSPACE/validation-off-server.log" npx vitest run -c vitest.scoped4-off.config.mts | tee validation-flag-off.log
+          FF_TASK_COMMENTS=0 FF_WORKLOAD=0 SIGNIN_RETURN_TO=off SERVER_LOG="$GITHUB_WORKSPACE/validation-off-server.log" npx vitest run -c vitest.scoped4-off.config.mts | tee validation-flag-off.log
       - name: Preserve receipts
         if: always()
         uses: actions/upload-artifact@v4
@@ -167,3 +168,4 @@ jobs:
             validation-*.log
             release12-drain.json
             test-results/e2e
+            workload-ui-previews/
