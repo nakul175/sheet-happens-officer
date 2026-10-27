@@ -1,7 +1,7 @@
 name: Approved Projects UI release validation
 on:
   pull_request:
-    branches: [release/scoped4-20261025]
+    branches: [release/scoped4-20261025, change/sho-3077-projects]
   workflow_dispatch:
 permissions:
   contents: read
@@ -59,6 +59,8 @@ jobs:
         run: node --test scripts/acceptance/sho-3038-scope.test.mjs
       - name: Approved Projects UI, Board and task-details regressions
         run: npx vitest run -c vitest.projects-approved.config.mts
+      - name: Approved Settings, Activity and Project Trash regressions
+        run: npx vitest run -c vitest.settings-approved.config.mts
       - name: SHO-3038 collaborator acceptance
         run: npx vitest run -c vitest.sho-3038.config.mts
       - name: SHO-3044 opportunity classification acceptance

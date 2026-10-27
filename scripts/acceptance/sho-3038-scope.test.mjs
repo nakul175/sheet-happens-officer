@@ -5,6 +5,16 @@ import test from "node:test";
 
 const production = "ee59582dffcbd8cc3067e689b2bb73cf63781cb7";
 const allowed = new Set([
+  // SHO-3084..3086 approved Settings, Activity and Project Trash surfaces.
+  "src/app/(app)/projects/[id]/members/settings.css",
+  "src/app/(app)/projects/[id]/members/page.tsx",
+  "src/app/(app)/projects/[id]/activity/Activity.tsx",
+  "src/app/(app)/projects/[id]/activity/activity.css",
+  "src/app/(app)/projects/[id]/trash/Trash.tsx",
+  "src/app/(app)/projects/[id]/trash/trash.css",
+  "tests/settings-activity-trash-approved.test.tsx",
+  "vitest.settings-approved.config.mts",
+  "docs/settings-activity-trash-release.md",
   // SHO-3077..3083: explicitly approved UI surfaces; runtime/auth invariants below remain unchanged.
   "src/app/(app)/Shell.tsx",
   "src/app/(app)/nav-header.css",

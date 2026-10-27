@@ -69,7 +69,7 @@ export default function NewProject() {
         </div>
         <fieldset className="addppl">
           <legend className="lbl">Add people (optional)</legend>
-          <p className="hint">They join as Editors. Choose Viewer for read-only. You can add more later from Members.</p>
+          <p className="hint">They join as Editors. Choose Viewer for read-only. You can add more later from Settings.</p>
           {people.length > 8 && <input className="in" aria-label="Find a person" placeholder="Find a person" value={find} onChange={(e) => setFind(e.target.value)} />}
           <div className="ppl" role="group" aria-label="People">
             {shown.map((p) => (

@@ -1,5 +1,6 @@
 "use client";
 import Link from "next/link";
+import "./settings.css";
 import { useRouter } from "next/navigation";
 import { use, useState } from "react";
 import { ROLE, api, useGet } from "@/components/api";
@@ -23,7 +24,7 @@ export default function Members({ params }: { params: Promise<{ id: string }> })
   const [err, setErr] = useState<string | null>(null);
   const [dlg, setDlg] = useState<null | { kind: "remove" | "viewer" | "leader" | "archive" | "delete"; m?: M }>(null);
   const p = pr.data?.project;
-  if (!p && pr.failed) return <Page title="Members"><LoadFailed onRetry={pr.reload} /></Page>;
+  if (!p && pr.failed) return <Page title="Settings"><LoadFailed onRetry={pr.reload} /></Page>;
   if (pr.error && !p) return <Page title="This project isn't available"><div className="card empty">It may not exist, or you are not a member.<br /><Link href="/projects">Back to Projects</Link></div></Page>;
   const manage = p?.role === "LEADER" && !p?.archived;
   const inProject = new Set(p?.members.map((m) => m.userId));
@@ -43,10 +44,12 @@ export default function Members({ params }: { params: Promise<{ id: string }> })
   const leaderM = p?.members.find((m) => m.role === "LEADER");
 
   return (
-    <Page title="Members" sub={p && <><Link href={`/projects/${id}`}>← {p.name}</Link> · <span className="chip">You: {ROLE[p.role]}</span></>}>
+    <Page className="project-settings-view" title="Settings" beforeTitle={<nav className="settings-breadcrumb" aria-label="Breadcrumb"><Link href="/projects">Projects</Link> / <Link href={`/projects/${id}`}>{p?.name ?? "…"}</Link> / Settings</nav>} sub={p && <>{p.name} · You: {ROLE[p.role]}</>} actions={<Link className="btn ghost" href={`/projects/${id}`}>Back to project</Link>}>
       {err && <div className="err" role="alert">{err}</div>}
       {p?.archived && <div className="box warn" style={{ marginBottom: 12 }}>This project is archived and read-only.</div>}
       {pr.loading && !p && <Skeleton />}
+      <div className="settings-grid">
+      <section className="settings-panel settings-members"><h2>Project members {p && `(${p.members.length})`}</h2>
       <div className="list">
         {p?.members.map((m) => (
           <div className="item" key={m.userId}>
@@ -61,24 +64,24 @@ export default function Members({ params }: { params: Promise<{ id: string }> })
           </div>
         ))}
       </div>
+      </section>
       {manage && (
         <>
-          <h2 className="grp">Project settings</h2>
-          {p && p.type !== "DEAL" && <div className="box">
+          {p && p.type !== "DEAL" && <section className="settings-panel settings-classification"><h2>Project settings</h2>
             <b>{p.isVertical ? "Vertical task board" : "Delivery project"}</b>
             {!p.isVertical && <label>Vertical (optional) <select value={p.verticalId ?? ""} onChange={async e => { const result = await api("PATCH", `/api/projects/${id}`, { verticalId: e.target.value || null }); if (!result.ok) setErr(result.error ?? "Could not change vertical."); pr.reload(); }}>
               <option value="">Unclassified</option>{verticals.data?.verticals?.filter(v => !v.retired || v.id === p.verticalId).map(v => <option key={v.id} value={v.id}>{v.name}{v.retired ? " (retired)" : ""}</option>)}
             </select></label>}
             <p className="hint">This classification does not add members or change access.</p>
             {admin && <button className="btn ghost sm" onClick={() => setClassify(true)}>{p.isVertical ? "Reclassify as delivery project…" : "Reclassify as vertical board…"}</button>}
-          </div>}
-          <div className="box">
-            <b>Change leader</b>
+          </section>}
+          <section className="settings-panel settings-leadership">
+            <h2>Leadership</h2>
             <p className="hint">The new Leader takes over. Choose what happens to the current Leader.</p>
             <button className="btn ghost sm" onClick={() => setDlg({ kind: "leader" })}>Change leader…</button>
-          </div>
-          <div className="box">
-            <b>Add people</b>
+          </section>
+          <section className="settings-panel settings-addpeople">
+            <h2>Add people</h2>
             <div className="addrow">
               <input className="in" aria-label="Search by name or email" placeholder="Search by name or email" value={q} onChange={(e) => setQ(e.target.value)} />
               <select className="in" style={{ width: "auto" }} aria-label="Role for new member" value={addRole} onChange={(e) => setAddRole(e.target.value)}>
@@ -89,9 +92,10 @@ export default function Members({ params }: { params: Promise<{ id: string }> })
               <div className="item" key={x.id}><div className="t"><b>{x.name}</b>{x.email && <small>{x.email}</small>}</div><button className="btn sm" onClick={() => add(x.id)}>Add</button></div>
             ))}
             {q.trim() && !found.length && <p className="hint">No one matches, or they are already in this project.</p>}
-          </div>
+          </section>
         </>
       )}
+      <section className="settings-panel settings-lifecycle" hidden={!(p?.role === "LEADER" && (!p.isVertical || admin))}><h2>Project lifecycle</h2>
       {p && (p.role === "LEADER") && (!p.isVertical || admin) && (
         <div className="box dng">
           <b>{p.archived ? "Unarchive this project" : "Archive this project"}</b>
@@ -105,6 +109,8 @@ export default function Members({ params }: { params: Promise<{ id: string }> })
         <button className="btn ghost sm" onClick={() => setDlg({ kind: "delete" })}>Delete {p.type === "DEAL" ? "deal" : "project"}…</button>
       </div>}
 
+      </section>
+      </div>
       {dlg && (dlg.kind === "remove" || dlg.kind === "viewer") && dlg.m && (
         <Handover title={dlg.kind === "remove" ? `Remove ${dlg.m.name}?` : `Make ${dlg.m.name} a Viewer?`} yes={dlg.kind === "remove" ? "Remove" : "Make Viewer"} danger={dlg.kind === "remove"}
           who={dlg.m.name} options={takers(dlg.m.userId)} defaultTo={leaderM?.userId}

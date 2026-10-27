@@ -197,7 +197,7 @@ function Inner({ id }: { id: string }) {
         </span>
       )}</>}
       actions={<>
-        {<div className="project-secondary-actions"><Link href={`/projects/${id}/members`}>Members</Link>{p && p.role !== "VIEWER" && <Link href={`/projects/${id}/activity`}>Activity</Link>}<Link href={`/projects/${id}/trash`}>Trash</Link></div>}
+        {<div className="project-secondary-actions"><Link href={`/projects/${id}/members`}>Settings</Link>{p && p.role !== "VIEWER" && <Link href={`/projects/${id}/activity`}>Activity</Link>}<Link href={`/projects/${id}/trash`}>Trash</Link></div>}
         {canWrite && <button className="btn" onClick={() => setAdding(true)}>+ Add task</button>}
       </>}>
       {archivedBanner}
