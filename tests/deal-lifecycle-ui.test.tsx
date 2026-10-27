@@ -189,3 +189,16 @@ it("SHO-3133 omits empty opportunity sections but leaves every category availabl
   expect(document.querySelectorAll('.deal-multi-popup input[type=checkbox]')).toHaveLength(5+stages.length);
   expect(document.querySelector('[aria-label="Open commercial pipeline"]')?.className).not.toContain('card');
 });
+
+it("SHO-3133 omits empty opportunity category sections without hiding populated categories", async () => {
+  globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+    const path = String(input); calls.push(path);
+    const data = path === "/api/deals/pipelines" ? { pipelines: [{ ...pipe, stages }] } : path.startsWith("/api/deals?") ? { deals: [deal("only-unclassified", stages[0], null)] } : { notes: [] };
+    return new Response(JSON.stringify(data), { headers: { "content-type": "application/json" } });
+  });
+  await mount(h(DealsView));
+  expect(document.querySelector('[aria-label="RFP/RFA + OTC sales"]')).toBeNull();
+  expect(document.querySelector('[aria-label="EOI + CV/LTA sales"]')).toBeNull();
+  expect(document.querySelector('[aria-label="Unclassified sales"]')).not.toBeNull();
+  expect(document.querySelector('a[href="/projects/only-unclassified"]')).not.toBeNull();
+});
