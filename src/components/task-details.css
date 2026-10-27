@@ -32,3 +32,9 @@
   .task-details .addrow input { min-width: 0; width: 100%; }
   .task-details :is(.btn,select) { min-height: 44px; }
 }
+/* Preserve SHO-2738: the task action footer remains inside the visible phone sheet. */
+@media (max-width: 599px), (pointer: coarse) {
+  body.vv-sheet .modal > .task-details { display: flex; flex-direction: column; }
+  body.vv-sheet .modal > .task-details > .actions { order: 100; position: sticky; bottom: calc(var(--vvh, 100dvh) - 100%); z-index: 2; background: var(--card); margin: 0 -18px; padding: 10px 18px; border-top: 1px solid var(--line); }
+  body.vv-sheet .modal:has(> .task-details) { width: 100%; }
+}
