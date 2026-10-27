@@ -123,9 +123,9 @@ jobs:
           tests/e2e/stories/APL-2482.spec.ts tests/e2e/stories/APL-2484.spec.ts tests/e2e/stories/APL-2590.spec.ts
           --grep-invert " AC(14|15|16) "
           | tee validation-scoped-stories.log
-      - name: Record separate mandatory live-provider gate
+      - name: Record user-approved UI-only provider exclusion
         run: |
-          node -e 'require("node:fs").writeFileSync("scoped4-live-gate.json",JSON.stringify({sha:process.env.RELEASE,deployReady:false,requiredStagingTests:["SHO2590AC14","SHO2590AC15","SHO2590AC16"],reason:"Live-provider cases remain mandatory on exact SHA; this CI job covers non-provider behavior only"}))'
+          node -e 'require("node:fs").writeFileSync("scoped4-live-gate.json",JSON.stringify({sha:process.env.RELEASE,deployReady:false,requiredStagingTests:[],excludedProviderTests:["SHO2590AC14","SHO2590AC15","SHO2590AC16"],approval:"User explicitly excluded only these three AI provider checks for this UI release on 2026-10-27",reason:"UI, regression, security, staging, exact-revision production verification and rollback checks remain required"}))'
       - name: Validate comments and return-path flag-off rollback
         run: |
           kill "$(cat .scoped4-server.pid)"
