@@ -1,0 +1,93 @@
+name: HOLY-3 launcher release validation
+on:
+  pull_request:
+    branches: [release/accepted15-20261024]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: holy3-launcher-${{ github.ref }}
+  cancel-in-progress: false
+defaults:
+  run:
+    shell: bash
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: sho
+          POSTGRES_PASSWORD: sho
+          POSTGRES_DB: sho_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      DATABASE_URL: postgresql://sho:sho@localhost:5432/sho_test?schema=accepted15
+      DIRECT_DATABASE_URL: postgresql://sho:sho@localhost:5432/sho_test?schema=accepted15
+      TASKBOARD_URL: http://localhost:3100
+      BASE_URL: http://localhost:3100
+      APP_URL: http://localhost:3100
+      EMAIL_OUTBOX_DIR: ${{ github.workspace }}/.outbox-ci
+      SUPER_ADMIN_EMAILS: root.test@aplyd.com
+      SHO_ADMIN_EMAIL: root.test@aplyd.com
+      SHO_ADMIN_PASS: correct-horse-9
+      JOB_SECRET: accepted15-ci-only-not-a-real-secret
+      FF_TASK_COMMENTS: "1"
+      PW_CHROMIUM: /usr/bin/google-chrome
+      RELEASE: ${{ github.sha }}
+      NEXT_TELEMETRY_DISABLED: "1"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - name: Scope and refusal contract
+        run: node --test scripts/acceptance/holy3-launcher-scope.test.mjs scripts/acceptance/refusal-probe.test.mjs
+      - name: SHO-3010 echo and improve contracts
+        run: npx vitest run -c vitest.accepted15-echo.config.mts | tee validation-3010.log
+      - run: npx prisma migrate deploy
+      - run: npm run build
+      - name: Start the exact built release
+        run: |
+          mkdir -p "$EMAIL_OUTBOX_DIR"
+          (NODE_ENV=production PORT=3100 node --import tsx server.js > validation-server.log 2>&1 &)
+          for i in $(seq 1 40); do
+            if curl -fsS http://localhost:3100/api/health; then exit 0; fi
+            sleep 1
+          done
+          exit 1
+      - name: All unit and integration tests present in this selective release
+        run: npx vitest run -c vitest.accepted15-all.config.mts | tee validation-all-release.log
+      - name: Accepted15 component, database and SQL regressions
+        run: npx vitest run -c vitest.release12.config.mts | tee validation-accepted15.log
+      - name: Deterministic2693 and2897 owned-outbox contracts
+        run: npx vitest run -c vitest.accepted-ai.config.mts | tee validation-accepted-ai.log
+      - name: Deployed18 baseline regressions
+        run: npx vitest run -c vitest.release18.config.mts | tee validation-baseline18.log
+      - name: Accepted locator browser cases
+        run: >-
+          npx playwright test tests/e2e/stories/APL-2539.spec.ts tests/e2e/stories/APL-2540.spec.ts
+          --grep 'APL-2539 > AC1:|APL-2540 > AC1:|APL-2540 > AC4:'
+          | tee validation-locators.log
+      - name: Linux built-entry refusal and drain receipt
+        run: node scripts/acceptance/release12-drain-receipt.mjs release12-drain.json | tee validation-drain.log
+      - name: Preserve receipts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: holy3-launcher-${{ github.sha }}
+          path: |
+            validation-*.log
+            release12-drain.json
+            test-results/e2e

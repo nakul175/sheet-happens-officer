@@ -48,7 +48,7 @@ export function HolySheetLauncher({ taskId }: { taskId: string }) {
       <button className="btn ghost" type="button" onClick={() => setGeneration(n => n + 1)}>Check access again</button>
     </form>
     {error && <p role="alert">{error}</p>}
-    {frame && <><a href={url.trim()} target="_blank" rel="noopener noreferrer">Open in Holy Sheet</a>
+    {frame && <><a href={frame.replace('/embed/pages/', '/pages/').split('#')[0]} target="_blank" rel="noopener noreferrer">Open in Holy Sheet</a>
       <iframe title="Holy Sheet document" src={frame} referrerPolicy="no-referrer"
         sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox allow-downloads"
         style={{width: "100%", height: "70vh", border: "1px solid var(--border)", marginTop: 12}} /></>}
