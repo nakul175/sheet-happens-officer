@@ -52,7 +52,7 @@ export function collect(viewport: boolean | { phone: boolean; width: number }): 
 
   if (phone) {
     // 2. Tap targets at least 44 by 44 px.
-    const sel = 'button,a[href],input:not([type=hidden]),select,textarea,[role=button],[role=tab],[role=link],[tabindex="0"]';
+    const sel = 'button,a[href],input:not([type=hidden]),select,textarea,summary,[role=button],[role=tab],[role=link],[tabindex="0"]';
     for (const e of document.querySelectorAll<HTMLElement>(sel)) {
       if (!visible(e)) continue;
       const cs = getComputedStyle(e);

@@ -119,7 +119,10 @@
  .shell .dashboard-panel header > a,
  .shell .dashboard-panel-link,
  .shell .dashboard-view > a,
+ .shell .review-actions a,
  .shell .org-preview-heading > a { display:inline-flex; align-items:center; min-width:44px; min-height:44px; }
+ :root .shell.shell summary { min-width:44px; min-height:44px; }
+ .shell summary:not(.btn):not(:has(.select-chevron)) { padding-block:12px; line-height:20px; }
  .shell nav[aria-label="Breadcrumb"] a { padding-inline:4px; vertical-align:middle; }
  .shell .dashboard-panel-link { display:flex; }
  .shell :is(.project-list-view,.project-board-view) .lc-sel { height:48px; min-height:48px; }

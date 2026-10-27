@@ -32,7 +32,8 @@ beforeAll(async () => {
   const pipes = (await root.c.get("/api/deals/pipelines")).json.pipelines as { id: string; key: string }[];
   const d = await root.c.post("/api/deals", {
     name: `Viewport Deal ${Date.now()}`, organisationId: orgId, pipelineId: pipes.find((x) => x.key === "DEAL_PROACTIVE")!.id, leaderId: root.id,
-    whyPursue: "Test deal", nextStep: { title: "Call the buyer", dueDate: istDate(3) },
+    // Keep Review populated so its row actions and native details disclosure are checked.
+    whyPursue: "Test deal", nextStep: { title: "Call the buyer", dueDate: istDate(-1) },
   });
   expect(d.status, JSON.stringify(d.json)).toBe(201);
   ids = { person: root.id, project: p.id, task: parent, deal: (d.json.deal?.id ?? d.json.project?.id) as string, org: orgId };
@@ -101,7 +102,7 @@ for (const width of WIDTHS) {
           const lines = found.slice(0, 12).map((f) => `  ${f.check}: ${f.element} (${f.detail})`).join("\n");
           expect.fail(`${s.name} at ${width} px has ${found.length} problem${found.length === 1 ? "" : "s"}:\n${lines}\n  screenshot: ${shot}`);
         }
-        if (width === 390 && ["Home dashboard", "Project list", "New project", "New deal"].includes(s.name)) {
+        if (width === 390 && ["Home dashboard", "Project list", "New project", "New deal", "Pipeline review"].includes(s.name)) {
           mkdirSync(`${SHOTS}/previews`, { recursive: true });
           await page.screenshot({ path: `${SHOTS}/previews/${s.name.replace(/[^a-z0-9]+/gi, "-")}-${width}.png`, fullPage: true });
           await page.screenshot({ path: `${SHOTS}/previews/${s.name.replace(/[^a-z0-9]+/gi, "-")}-${width}-viewport.png`, fullPage: false });
@@ -138,5 +139,9 @@ describe("the checks themselves", () => {
   it("fails a 30 px button, a 14 px field and a missing viewport-fit", async () => {
     const f = await run('<button style="width:30px;height:30px">x</button><input style="font-size:14px;height:44px">', 360, "width=device-width, initial-scale=1");
     expect(f.map((x) => x.check).sort()).toEqual(["field", "meta", "target"]);
+  });
+  it("checks the tap area of native disclosure controls", async () => {
+    const f = await run('<details><summary style="width:80px;height:30px">More</summary><p>Details</p></details>', 360);
+    expect(f.some(x => x.check === "target" && x.element.startsWith("summary"))).toBe(true);
   });
 });
