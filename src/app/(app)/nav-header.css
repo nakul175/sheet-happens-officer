@@ -9,7 +9,7 @@
 .shell .top :is(.density, .bell, .search-trigger) { color: white; background: transparent; border-color: #ffffff66; }
 .shell .side :is(a,button):focus-visible, .shell .top :is(a,button):focus-visible { outline: 2px solid white; outline-offset: 3px; }
 @media (min-width: 1024px) {
-  .shell.shell { grid-template-columns: minmax(0,1fr); }
+  .shell.shell { grid-template-columns: minmax(0,1fr); grid-template-rows: auto minmax(0,1fr); }
   .shell .side { position: relative; height: auto; min-height: 72px; padding: 12px 40px; flex-direction: row; align-items: center; flex-wrap: wrap; gap: 24px; border-bottom: 1px solid #ffffff33; }
   .shell .brand { padding: 0; font-size: 19px; max-width: 100%; }
   .shell .brand img { width: 40px; height: 40px; flex-shrink: 0; }

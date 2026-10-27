@@ -17,7 +17,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
-      RELEASE_SHA: 3d1f3674a15aa6c8940e2ea7a0a7d0d10fdadd17
+      RELEASE_SHA: ${{ github.sha }}
       HOST: ${{ vars.DROPLET_HOST || 'sheethappensofficer.aplyd.org' }}
       HOST_KEY: ${{ vars.DROPLET_HOST_KEY }}
     steps:
