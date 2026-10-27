@@ -238,6 +238,7 @@ export async function projectActivity(user: Actor, projectId: string, cursor?: s
       ts: r.createdAt.getTime(),
       when: whenText(r.createdAt),
       who: r.actor.name,
+      kind: r.action,
       what: sentence(r, names),
       // "How" is only worth a word when it was not the screen (SHO-US-14.14 AC4).
       via: r.channel === "CONCIERGE" ? "concierge" : "screen",
