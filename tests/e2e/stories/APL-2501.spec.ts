@@ -52,7 +52,8 @@ test("AC3: the icon-only mark shows at 24 px and the text uses Public Sans", asy
   const svg = await admin.page.request.get("/logo-icon.svg");
   expect(svg.status()).toBe(200);
   const font = await admin.page.evaluate(() => getComputedStyle(document.body).fontFamily);
-  expect(font).toMatch(/Public Sans/i);
+  // next/font exposes the configured family as the CSS alias `publicSans`.
+  expect(font).toMatch(/Public\s*Sans/i);
 });
 
 test("AC4: Usage and Audit log are for the Super Admin only; a Member who types the address gets the refusal", async ({ admin, member }) => {
@@ -81,8 +82,11 @@ test("AC5: the bell shows the unread count, lists notices newest first with link
   await member.api.post("/api/notifications/read-all");
   await member.page.goto("/");
   await expect(member.page.getByRole("button", { name: "Notifications", exact: true })).toBeVisible(); // none: no count in the name
-  expect((await admin.api.post(`/api/projects/${p}/tasks`, { title: zz("first notice"), assigneeId: member.user.id })).status).toBe(201);
-  const t2 = (await admin.api.post(`/api/projects/${p}/tasks`, { title: zz("second notice"), assigneeId: member.user.id })).json.task.id;
+  const first = await admin.api.post(`/api/projects/${p}/tasks`, { title: zz("first notice"), assigneeId: member.user.id });
+  expect(first.status, JSON.stringify(first.json)).toBe(201);
+  const second = await admin.api.post(`/api/projects/${p}/tasks`, { title: zz("second notice"), assigneeId: member.user.id });
+  expect(second.status, JSON.stringify(second.json)).toBe(201);
+  const t2 = second.json.task.id;
   await member.page.reload();
   const bell = member.page.getByRole("button", { name: /^Notifications, \d+ unread$/ });
   await expect(bell).toBeVisible();
