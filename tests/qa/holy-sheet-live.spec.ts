@@ -34,9 +34,9 @@ test('SHO-3062 paired normal-login qualification and HOLY-4 AC16',async({browser
   await step('SC/TC/MS-SHO-3062-048,049: project entry, permitted space and page creation',async()=>{
    const response=await call('POST','/api/projects',{name:projectName,leaderId:fixture.nativeId});expect(response.status()).toBe(201);projectId=(await response.json()).project.id;mask(projectId);receipts.projectId=projectId;
    await page.goto(`${SHO}/projects/${projectId}`);await docs().getByRole('button',{name:'Create page',exact:true}).click();
-   await picker().getByLabel('Workspace',{exact:true}).selectOption({index:1});
+   await picker().getByRole('combobox',{name:'Workspace',exact:true}).selectOption({index:1});
    await picker().getByLabel('New space name',{exact:true}).fill(projectName);await picker().getByRole('button',{name:'Create space',exact:true}).click();
-   await expect(picker().getByLabel('Space',{exact:true})).not.toHaveValue('');
+   await expect(picker().getByRole('combobox',{name:'Space',exact:true})).not.toHaveValue('');
    await picker().getByLabel('Page title',{exact:true}).fill(projectName+' page');await picker().getByRole('button',{name:'Create and link page',exact:true}).click();
    await expect(editor().getByLabel('Page title',{exact:true})).toHaveValue(projectName+' page',{timeout:30000});
    const state=await metadata('projects',projectId);expect(state.subject).toBe(fixture.subject);expect(state.links).toHaveLength(1);createdPageId=state.links[0].pageId;mask(createdPageId);receipts.createdPageId=createdPageId;expect(state.defaultSpaceId).toBeTruthy();
@@ -53,12 +53,12 @@ test('SHO-3062 paired normal-login qualification and HOLY-4 AC16',async({browser
   await step('SC/TC/MS-SHO-3062-048,050: task entry inherits the project default',async()=>{
    const made=await call('POST',`/api/projects/${projectId}/tasks`,{title:projectName+' task'});expect(made.status()).toBe(201);taskId=(await made.json()).task.id;mask(taskId);receipts.taskId=taskId;
    const project=await metadata('projects',projectId),task=await metadata('tasks',taskId);expect(task.defaultSpaceId).toBe(project.defaultSpaceId);
-   await page.goto(`${SHO}/tasks/${taskId}`);await docs().getByRole('button',{name:'Create page',exact:true}).click();await expect(picker().getByLabel('Space',{exact:true})).toHaveValue(project.defaultSpaceId);
+   await page.goto(`${SHO}/tasks/${taskId}`);await docs().getByRole('button',{name:'Create page',exact:true}).click();await expect(picker().getByRole('combobox',{name:'Space',exact:true})).toHaveValue(project.defaultSpaceId);
    await docs().getByRole('button',{name:'Close document',exact:true}).click();results.push({mapping:'SHO-3062-048/050',result:'task entry/default subset passed'});
   });
   await step('SC/TC/MS-SHO-3062-051,053 and HOLY-4-047: link an existing allowed private page',async()=>{
    await renewHs();const source=await hsDocument(fixture.sharedPageId);expect(source.status()).toBe(200);const data=await source.json(),document=data.page??data;
-   await docs().getByRole('button',{name:'Link existing page',exact:true}).click();await picker().getByLabel('Space',{exact:true}).selectOption('');await picker().getByLabel('Find existing page',{exact:true}).fill(document.title);await picker().getByRole('button',{name:document.title,exact:true}).click();
+   await docs().getByRole('button',{name:'Link existing page',exact:true}).click();await picker().getByRole('combobox',{name:'Space',exact:true}).selectOption('');await picker().getByLabel('Find existing page',{exact:true}).fill(document.title);await picker().getByRole('button',{name:document.title,exact:true}).click();
    await expect(editor().getByLabel('Page title',{exact:true})).toHaveValue(document.title,{timeout:30000});expect((await metadata('tasks',taskId)).links.some((p:{pageId:string})=>p.pageId===fixture.sharedPageId)).toBe(true);
    await page.screenshot({path:'test-results/holy3062-embedded-allowed.png'});
    console.log('HOLY3062_READY_FOR_OWNER_REVOCATION');
