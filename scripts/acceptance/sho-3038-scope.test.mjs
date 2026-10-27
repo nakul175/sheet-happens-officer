@@ -12,6 +12,7 @@ const allowed = new Set([
   "src/app/(app)/deals/new/new-deal-approved.css",
   "tests/person-approved.test.tsx",
   "docs/record-forms-person-release.md",
+  "tests/e2e/stories/APL-2466.spec.ts",
   "tests/e2e/local/SHO-2738-3025-3030.browser.test.ts",
   // SHO-3093..3097 approved Notes, Linked tasks, Tree, Deals and Team.
   "src/app/(app)/deals/deals-approved.css",
