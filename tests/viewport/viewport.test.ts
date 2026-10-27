@@ -69,7 +69,7 @@ async function check(ctx: BrowserContext, path: string, width: number, wait?: st
         document.body.append(fault);
       });
     }
-    const found: Finding[] = await page.evaluate(collect, width < PHONE_MAX);
+    const found: Finding[] = await page.evaluate(collect, { phone: width < PHONE_MAX, width });
     return { page, found };
   } catch (e) {
     const shot = `${SHOTS}/${path.replace(/[^a-z0-9]+/gi, "-")}-${width}-load-error.png`;
@@ -107,17 +107,21 @@ for (const width of WIDTHS) {
 describe("the checks themselves", () => {
   const html = (body: string, meta = "width=device-width, initial-scale=1, viewport-fit=cover") =>
     `<!doctype html><meta name="viewport" content="${meta}"><body style="margin:0">${body}</body>`;
-  async function run(body: string, width: number, meta?: string) {
-    const ctx = await browser.newContext({ viewport: { width, height: 700 } });
+  async function run(body: string, width: number, meta?: string, mobile = false) {
+    const ctx = await browser.newContext({ viewport: { width, height: 700 }, isMobile: mobile });
     const page = await ctx.newPage();
     await page.setContent(html(body, meta));
-    const found: Finding[] = await page.evaluate(collect, width < PHONE_MAX);
+    const found: Finding[] = await page.evaluate(collect, { phone: width < PHONE_MAX, width });
     await ctx.close();
     return found;
   }
   it("fails a page with 400 px of fixed width and names the element", async () => {
     const f = await run('<div class="board-fault" style="width:400px;height:20px">wide</div>', 320);
     expect(f.some((x) => x.check === "overflow" && x.element.includes("div.board-fault"))).toBe(true);
+  });
+  it("catches fixed width when mobile layout expands innerWidth to fit the fault", async () => {
+    const f = await run('<div id="mobile-fixed-width" style="width:400px;height:20px">wide</div>', 320, undefined, true);
+    expect(f.some(x => x.check === "overflow" && x.element.includes("div#mobile-fixed-width") && x.detail.includes("screen is 320 px"))).toBe(true);
   });
   it("does not fail a wide table that scrolls inside its own box", async () => {
     expect(await run('<div style="overflow-x:auto"><table style="width:900px"><tr><td>x</td></tr></table></div>', 320)).toEqual([]);

@@ -2,7 +2,8 @@
 export type Finding = { check: "overflow" | "target" | "field" | "meta"; element: string; detail: string };
 
 /** Runs every check on the page as it is now and returns what is wrong. `phone` is true under 600 px. */
-export function collect(phone: boolean): Finding[] {
+export function collect(viewport: boolean | { phone: boolean; width: number }): Finding[] {
+  const phone = typeof viewport === "boolean" ? viewport : viewport.phone;
   const out: Finding[] = [];
   const name = (e: Element) => {
     const id = e.id ? `#${e.id}` : "";
@@ -26,7 +27,9 @@ export function collect(phone: boolean): Finding[] {
   };
 
   // 1. No sideways scroll.
-  const vw = window.innerWidth;
+  // Mobile layout viewports can expand to fit an overflowing fixed-width element.
+  // Compare with the runner's configured viewport, not that expanded innerWidth.
+  const vw = typeof viewport === "boolean" ? window.innerWidth : viewport.width;
   const de = document.documentElement;
   if (de.scrollWidth > vw + 1 || document.body.scrollWidth > vw + 1) {
     const wide: { e: Element; right: number }[] = [];
