@@ -1,1 +1,38 @@
-.team-approved{font-family:Lato,sans-serif;color:#152052}.team-approved .scroll{background:white;border:1px solid #e2e6ed;border-radius:12px;box-shadow:0 6px 22px #17245108}.team-approved .tbl{margin:0}.team-approved .tbl th{background:#f6f7fa;font-weight:400}.team-approved .tbl td,.team-approved .tbl th{padding:20px;vertical-align:top;overflow-wrap:anywhere}.team-email{display:block;color:var(--muted);margin-top:5px}.team-approved td .pills .chip{border:0;padding:0;background:none;color:inherit}.team-status{display:inline-flex;align-items:center;gap:10px}.team-status:before{content:"";width:8px;height:8px;border-radius:50%;background:#6c7686}.team-status.green:before{background:#208444}.team-status.gold:before{background:#ac7600}.team-more summary{list-style:none;display:inline-flex}.team-more-actions{display:flex;flex-direction:column;align-items:flex-start;gap:8px;padding-top:12px}.team-more-actions button{white-space:normal;text-align:left}.team-more summary:focus-visible{outline:2px solid var(--gold);outline-offset:2px}@media(max-width:600px){.team-approved .tbl td{padding:12px}.team-more-actions{align-items:stretch}}
+.team-approved{font-family:Lato,sans-serif;color:#152052}
+.team-approved .scroll{background:white;border:1px solid #e2e6ed;border-radius:12px;box-shadow:0 6px 22px #17245108;overflow:visible}
+.team-approved .tbl{margin:0;table-layout:fixed}
+.team-approved .tbl th{background:#f6f7fa;font-weight:700;white-space:nowrap}
+.team-approved .tbl th:nth-child(1){width:30%}
+.team-approved .tbl th:nth-child(2){width:14%}
+.team-approved .tbl th:nth-child(3){width:30%}
+.team-approved .tbl th:nth-child(4){width:16%}
+.team-approved .tbl th:nth-child(5){width:10%;text-align:right}
+.team-approved .tbl td,.team-approved .tbl th{padding:16px 18px;vertical-align:middle;overflow-wrap:anywhere}
+.team-approved .tbl td:last-child{text-align:right;overflow:visible}
+.team-identity{display:flex;align-items:center;gap:12px;min-width:0;text-align:left}
+.team-identity>span:last-child{min-width:0}
+.team-identity b{font-size:13px;font-weight:700}
+.team-email{display:block;color:var(--muted);margin-top:4px;font-size:11px;overflow-wrap:anywhere}
+.team-approved td .pills{display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+.team-approved td .pills .chip{border:0;padding:0;background:none;color:inherit}
+.team-status{display:inline-flex;align-items:center;gap:7px;white-space:nowrap}
+.team-status:before{content:"";width:6px;height:6px;border-radius:50%;background:#6c7686;flex:0 0 auto}
+.team-status.green:before{background:#208444}
+.team-status.gold:before{background:#ac7600}
+.team-more{position:relative;display:inline-block;text-align:left}
+.team-more>summary{list-style:none;width:36px;height:36px;display:grid;place-items:center;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--muted);cursor:pointer;font-weight:700;letter-spacing:1px}
+.team-more>summary::-webkit-details-marker{display:none}
+.team-more-actions{position:absolute;z-index:30;right:0;top:calc(100% + 7px);min-width:210px;display:flex;flex-direction:column;align-items:stretch;gap:4px;padding:8px;border:1px solid var(--line);border-radius:9px;background:var(--card);box-shadow:0 12px 32px #11172b24}
+.team-more-actions button{white-space:normal;text-align:left;justify-content:flex-start}
+.team-more summary:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
+@media(max-width:1023px){
+  .team-approved .scroll{overflow:visible}
+  .team-approved .tbl.stack thead{display:none}
+  .team-approved .tbl.stack tr{display:block;padding:12px 14px;border-bottom:1px solid var(--line)}
+  .team-approved .tbl.stack td{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;padding:6px 0;border:0;text-align:right}
+  .team-approved .tbl.stack td[data-label]::before{flex:0 0 105px;text-align:left}
+  .team-approved .tbl.stack td:first-child{display:block;padding-bottom:10px;text-align:left}
+  .team-approved .tbl.stack td:first-child::before,.team-approved .tbl.stack td:last-child::before{display:none}
+  .team-approved .tbl.stack td:last-child{justify-content:flex-end}
+  .team-more>summary{width:44px;height:44px}
+}

@@ -14,7 +14,6 @@ type D = BoardDeal;
 
 export default function DealsView() {
   const [lifecycle, setLifecycle] = useState<"sales" | "delivery">("sales");
-  const [filtersOpen, setFiltersOpen] = useState(false);
   const [mine, setMine] = useState(false);
   const [old, setOld] = useState(false);
   const [view, setView] = useState<"board" | "list">("board");
@@ -38,8 +37,6 @@ export default function DealsView() {
     && (!stages.length || (!!d.stage && stages.includes(d.stage.id))));
   const deals = sortDeals(filteredDeals, sort, cur?.stages ?? []);
   const groups = opportunityGroups(deals);
-  const openCommercial = groups[0].deals.filter(d => ["NOT_STARTED", "ACTIVE", "PAUSED"].includes(d.stage?.category ?? ""));
-  const openTotals = totals(openCommercial);
   return (
     <Page className="deals-approved" title="Deals" sub="Deals you lead or belong to"
       actions={<>
@@ -50,45 +47,36 @@ export default function DealsView() {
         <button className="btn ghost" aria-pressed={old} onClick={() => setOld(!old)}>{old ? "Show live" : "Show archived"}</button>
         <Link className="btn" href="/deals/new">+ New deal</Link>
       </>}>
-      <div className="seg" role="group" aria-label="Deal lifecycle" style={{ marginBottom: 12 }}>
-        <button aria-pressed={lifecycle === "sales"} onClick={() => setLifecycle("sales")}>Sales pipeline</button>
-        <button aria-pressed={lifecycle === "delivery"} onClick={() => setLifecycle("delivery")}>Delivery projects</button>
-      </div>
-      <div className="deal-filter-summary"><button className="btn ghost" aria-expanded={filtersOpen} aria-controls="deal-filters" onClick={() => setFiltersOpen(!filtersOpen)}>Filters</button><span>{opportunities.length ? `${opportunities.length} opportunity type${opportunities.length === 1 ? "" : "s"}` : "All opportunity types"} · {stages.length ? `${stages.length} stage${stages.length === 1 ? "" : "s"}` : "All stages"} · {DEAL_DATE_FIELDS.find(f => f.value === dateFilter.field)?.label} · {dateFilter.start || "Any start"} through {dateFilter.end || "Any end"} · No date: {dateFilter.undated} · {sortLabel(sort)}{data && ` · ${deals.length} shown`}</span></div>
-      <fieldset id="deal-filters" hidden={!filtersOpen} className="card" style={{ marginBottom: 12 }}>
-        <legend>Timeline filter · inclusive dates (IST)</legend>
-        <CheckFilter label="Opportunity types" values={opportunities} onChange={setOpportunities} options={[...OPPORTUNITY_TYPES.map(type => ({ value: type.value, label: type.label })), { value: "unclassified", label: "Unclassified" }]} />
-        <CheckFilter label="Stages" values={stages} onChange={setStages} options={(cur?.stages ?? []).map(item => ({ value: item.id, label: item.name }))} />
-        <label>Date basis <select value={dateFilter.field} onChange={e => setDateFilter({ ...dateFilter, field: e.target.value as DealDateFilter["field"] })}>
-          {DEAL_DATE_FIELDS.map(field => <option key={field.value} value={field.value}>{field.label}</option>)}
-        </select></label>{" "}
-        <label>From <input type="date" value={dateFilter.start} onChange={e => setDateFilter({ ...dateFilter, start: e.target.value })} /></label>{" "}
-        <label>Through <input type="date" value={dateFilter.end} onChange={e => setDateFilter({ ...dateFilter, end: e.target.value })} /></label>{" "}
-        <label>No date <select value={dateFilter.undated} onChange={e => setDateFilter({ ...dateFilter, undated: e.target.value as DealDateFilter["undated"] })}>
-          <option value="include">Include</option><option value="exclude">Exclude</option><option value="only">Only no date</option>
-        </select></label>{" "}
-        <label>Sort <select value={sort} onChange={e => setSort(e.target.value as DealSort)}>
-          <option value="stage">Stage order</option><option value="name-asc">Deal name A–Z</option><option value="name-desc">Deal name Z–A</option><option value="date-asc">Submission deadline earliest</option><option value="date-desc">Submission deadline latest</option>
-        </select></label>
-        <button className="btn ghost" onClick={() => { setOpportunities([]); setStages([]); }}>Clear type and stage filters</button>
-        <button className="btn ghost" onClick={() => setDateFilter({ field: "submissionDeadline", start: "", end: "", undated: "include" })}>Clear timeline filter</button>
-        <p className="sub">Applies to board, list and all displayed counts. {deals.filter(d => !d[dateFilter.field]).length} shown without a date.</p>
-        {invalidRange && <p className="err" role="alert">From must be on or before Through.</p>}
-      </fieldset>
-      {!filtersOpen && invalidRange && <p className="err" role="alert">From must be on or before Through.</p>}
-      {data && lifecycle === "sales" && <div className="card" role="region" aria-label="Open commercial pipeline" style={{ marginBottom: 12 }}>
-        <b>{old ? "Archived open-stage" : "Open"} RFP/RFA + OTC: {openCommercial.length}</b>
-        <div className="sub">Includes not-started, active and paused sales stages; excludes Won, Lost, No-Go and delivery.</div>
-        <div>{openTotals.sums.length ? openTotals.sums.join(" · ") : "No values"}{openTotals.unknown ? ` · ${openTotals.unknown} without value` : ""}</div>
-      </div>}
-      <div className="tabs" style={{ marginBottom: 12 }}>
-        <div className="seg" role="tablist" aria-label="Pipeline">
-          {pipes.data?.pipelines.map((p) => <button key={p.id} role="tab" aria-selected={cur?.id === p.id} onClick={() => { setPipe(p.id); setStages([]); }}>{p.name}</button>)}
+      <div className="deal-work-tabs">
+        <div className="seg" role="group" aria-label="Deal lifecycle">
+          <button aria-pressed={lifecycle === "sales"} onClick={() => setLifecycle("sales")}>Sales pipeline</button>
+          <button aria-pressed={lifecycle === "delivery"} onClick={() => setLifecycle("delivery")}>Delivery projects</button>
         </div>
-        <span className="sp" />
         <div className="seg" role="group" aria-label="Layout">
           <button aria-pressed={view === "board"} onClick={() => setView("board")}>Board</button>
           <button aria-pressed={view === "list"} onClick={() => setView("list")}>List</button>
+        </div>
+      </div>
+      <div id="deal-filters" className="deal-filterbar" aria-label="Deal filters">
+        <CheckFilter label="Opportunity types" values={opportunities} onChange={setOpportunities} options={[...OPPORTUNITY_TYPES.map(type => ({ value: type.value, label: type.label })), { value: "unclassified", label: "Unclassified" }]} />
+        <CheckFilter label="Stages" values={stages} onChange={setStages} options={(cur?.stages ?? []).map(item => ({ value: item.id, label: item.name }))} />
+        <label><span>Date basis</span><select value={dateFilter.field} onChange={e => setDateFilter({ ...dateFilter, field: e.target.value as DealDateFilter["field"] })}>
+          {DEAL_DATE_FIELDS.map(field => <option key={field.value} value={field.value}>{field.label}</option>)}
+        </select></label>
+        <label><span>From</span><input type="date" value={dateFilter.start} onChange={e => setDateFilter({ ...dateFilter, start: e.target.value })} /></label>
+        <label><span>Through</span><input type="date" value={dateFilter.end} onChange={e => setDateFilter({ ...dateFilter, end: e.target.value })} /></label>
+        <label><span>No date</span><select value={dateFilter.undated} onChange={e => setDateFilter({ ...dateFilter, undated: e.target.value as DealDateFilter["undated"] })}>
+          <option value="include">Include</option><option value="exclude">Exclude</option><option value="only">Only no date</option>
+        </select></label>
+        <label><span>Sort by</span><select value={sort} onChange={e => setSort(e.target.value as DealSort)}>
+          <option value="stage">Stage order</option><option value="name-asc">Deal name A–Z</option><option value="name-desc">Deal name Z–A</option><option value="date-asc">Submission deadline earliest</option><option value="date-desc">Submission deadline latest</option>
+        </select></label>
+      </div>
+      <div className="deal-filter-meta"><span>{deals.length} shown · inclusive dates (IST){deals.filter(d => !d[dateFilter.field]).length ? ` · ${deals.filter(d => !d[dateFilter.field]).length} without a date` : ""}</span><span className="deal-filter-actions"><button className="link" onClick={() => { setOpportunities([]); setStages([]); }}>Clear type and stage filters</button><button className="link" onClick={() => setDateFilter({ field: "submissionDeadline", start: "", end: "", undated: "include" })}>Clear timeline filter</button><button className="link" onClick={() => { setOpportunities([]); setStages([]); setDateFilter({ field: "submissionDeadline", start: "", end: "", undated: "include" }); setSort("stage"); }}>Clear all</button></span></div>
+      {invalidRange && <p className="err" role="alert">From must be on or before Through.</p>}
+      <div className="tabs" style={{ marginBottom: 12 }}>
+        <div className="seg" role="tablist" aria-label="Pipeline">
+          {pipes.data?.pipelines.map((p) => <button key={p.id} role="tab" aria-selected={cur?.id === p.id} onClick={() => { setPipe(p.id); setStages([]); }}>{p.name}</button>)}
         </div>
       </div>
       {loading && !data && <Skeleton />}
@@ -97,13 +85,12 @@ export default function DealsView() {
         {lifecycle === "delivery" ? <><b>No matching delivery projects.</b><br />In the Bid sales pipeline, move an existing Won deal to Ongoing Projects to begin delivery.</>
           : <><b>No matching sales deals.</b><br />Create a deal to track an opportunity.<div className="empty-act"><Link className="btn" href="/deals/new">New deal</Link></div></>}
       </div>}
-      {data && cur && groups.map(group => {
+      {data && cur && groups.filter(group => group.deals.length > 0).map(group => {
         const t = totals(group.deals);
         return <section key={group.key} aria-label={`${group.label} ${lifecycle}`} style={{ marginBottom: 20 }}>
           <h2 style={{ fontSize: 18 }}>{group.label} · {group.deals.length} {lifecycle === "delivery" ? "delivery projects" : "deals"}</h2>
           <p className="sub">{lifecycle === "delivery" ? "Delivery only; excluded from sales pipeline counts." : "All shown sales stages, including outcomes."} {t.sums.join(" · ")}{t.unknown > 0 ? ` · ${t.unknown} without value` : ""}</p>
-          {group.deals.length === 0 ? <p className="sub">No {group.label} {lifecycle === "delivery" ? "delivery projects" : "deals"}.</p>
-            : view === "board" && !old ? <DealBoard deals={group.deals} stages={cur.stages} lifecycle={lifecycle} bid={cur.key === "DEAL_BID"} sort={sort} onChange={reload} />
+          {view === "board" && !old ? <DealBoard deals={group.deals} stages={cur.stages} lifecycle={lifecycle} bid={cur.key === "DEAL_BID"} sort={sort} onChange={reload} />
             : <DealList deals={group.deals} />}
         </section>;
       })}
@@ -130,10 +117,12 @@ function sortLabel(sort: DealSort) {
 }
 
 function CheckFilter({ label, options, values, onChange }: { label: string; options: { value: string; label: string }[]; values: string[]; onChange: (values: string[]) => void }) {
-  return <fieldset className="deal-check-filter"><legend>{label}</legend>
-    <div>{options.map(option => <label key={option.value}><input type="checkbox" checked={values.includes(option.value)} onChange={() => onChange(values.includes(option.value) ? values.filter(value => value !== option.value) : [...values, option.value])} /> {option.label}</label>)}</div>
-    {values.length > 0 && <button type="button" className="link" onClick={() => onChange([])}>Clear {label.toLowerCase()}</button>}
-  </fieldset>;
+  return <label className="deal-filter-field"><span>{label}</span><details className="deal-check-filter">
+    <summary>{values.length ? `${values.length} selected` : `All ${label.toLowerCase()}`}<span aria-hidden="true">⌄</span></summary>
+    <div className="deal-check-menu">{options.map(option => <label key={option.value}><input type="checkbox" checked={values.includes(option.value)} onChange={() => onChange(values.includes(option.value) ? values.filter(value => value !== option.value) : [...values, option.value])} /> {option.label}</label>)}
+      {values.length > 0 && <button type="button" className="link" onClick={() => onChange([])}>Clear {label.toLowerCase()}</button>}
+    </div>
+  </details></label>;
 }
 
 function DealList({ deals }: { deals: D[] }) {
