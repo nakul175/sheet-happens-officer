@@ -13,8 +13,8 @@ function dialogSections(children: React.ReactNode): React.ReactNode {
     else if (classes.includes("actions")) footer.push(node);
     else body.push(node);
   });
-  const hasForm = body.some(node => isValidElement(node) && node.type === "form");
-  return <>{header.length > 0 && <div className="dialog-header">{header}</div>}{hasForm ? <div className="dialog-forms">{body.map(node => isValidElement<{ className?: string; children?: React.ReactNode }>(node) && node.type === "form" ? cloneElement(node, { className: `${node.props.className ?? ""} dialog-form` }, dialogSections(node.props.children)) : node)}</div> : <div className="dialog-body">{body}</div>}{footer.length > 0 && <div className="dialog-footer">{footer}</div>}</>;
+  const hasForm = body.some(node => isValidElement<{ className?: string }>(node) && (node.type === "form" || node.props.className?.split(/\s+/).includes("task-details")));
+  return <>{header.length > 0 && <div className="dialog-header">{header}</div>}{hasForm ? <div className="dialog-forms">{body.map(node => isValidElement<{ className?: string; children?: React.ReactNode }>(node) && (node.type === "form" || node.props.className?.split(/\s+/).includes("task-details")) ? cloneElement(node, { className: `${node.props.className ?? ""} ${node.type === "form" ? "dialog-form" : "dialog-task-layout"}` }, dialogSections(node.props.children)) : node)}</div> : <div className="dialog-body">{body}</div>}{footer.length > 0 && <div className="dialog-footer">{footer}</div>}</>;
 }
 
 /** An open dialog: its identity for this render tree and the element a keypress has to belong to. */

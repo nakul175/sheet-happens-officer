@@ -102,7 +102,7 @@ export function SpendCeiling({ ceiling }: { ceiling: UsagePayload["ceiling"] }) 
         <h2 className="usage-h" id="usage-ceiling">Spend to date: {NO_CEILING}</h2>
         <dl className="usage-figs">
           <div><dt>Spend to date</dt><dd>{amount}</dd></div>
-          <div><dt>Monthly ceiling</dt><dd className="usage-ceiling-note">{NO_CEILING}<small>{safetyCap}</small></dd></div>
+          <div><dt>Monthly ceiling</dt><dd>{NO_CEILING}{safetyCap}</dd></div>
         </dl>
         {capReached && (
           <p className="usage-warn" role="status">

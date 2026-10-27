@@ -102,3 +102,7 @@
 .shell .task-details-page .bar { position:static; margin:0 0 12px; padding:8px 0; max-width:100%; flex-wrap:wrap; gap:10px; }
 @media(max-width:599px) { .shell .cc-fabwrap.k-dock .fab,.shell .cc-fabwrap.k-bar .fab { display:inline-flex; } }
 .shell .sel input { border:1px solid #aeb7c5; border-radius:4px; }
+/* Preserve the real phone keyboard footer contract within the separate normal-flow region. */
+.modal .dialog-task-layout { display:flex; flex-direction:column; flex:1 1 auto; min-height:0; }
+.modal .dialog-footer .actions { position:sticky; bottom:0; }
+.shell .usage-figs > div:nth-child(2) dd { font-size:16px; font-weight:500; }

@@ -23,3 +23,10 @@ it('dialog form, native validation, unsaved input and external submit associatio
  const button=document.querySelector<HTMLButtonElement>('.dialog-footer button')!;expect(button.form).toBe(document.querySelector('form'));
  await act(async()=>button.click());expect(document.querySelector('[role="alert"]')!.textContent).toBe('Retry this request');expect(document.querySelector('input')).toBe(input);expect(input.value).toBe('Unsaved title');
 });
+it('a task sheet keeps its action region outside the independently scrolling details body',async()=>{
+ await mount(h(Modal,{label:'Task',onClose:()=>{},children:h('div',{className:'task-details'},h('div',{className:'bar'},'Task context'),h('textarea',{id:'desc',defaultValue:'Unsaved description'}),h('div',{className:'actions'},h('button',null,'Mark complete')))}));
+ const task=document.querySelector('.dialog-task-layout')!;
+ expect(task.querySelector(':scope > .dialog-body #desc')).not.toBeNull();
+ expect(task.querySelector(':scope > .dialog-footer .actions')!.textContent).toBe('Mark complete');
+ expect(task.querySelector(':scope > .dialog-body .actions')).toBeNull();
+});
