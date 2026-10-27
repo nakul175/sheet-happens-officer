@@ -5,18 +5,12 @@
   "window_start_utc": "2026-10-27T18:21:00Z",
   "window_end_utc": "2026-10-28T04:21:00Z",
   "selected_count": 50,
-  "scope": "Selected existing BTF records, including three approved CRs. No parent epics or already-live logo counted. Selection is not a completion claim. Audit existing code first; do not reimplement present work. Continue independent work when blocked.",
+  "scope": "50 active existing BTF records. Four original policy-blocked records retained separately and replaced by independent stories with explicit contracts. Selection is not completion. No parent epics or already-live logo counted.",
   "logo_reconciliation": {
     "issue": "SHO-3136",
     "already_merged_pr": 218,
     "already_live_base": true,
     "counted_in_50": false
-  },
-  "known_policy_blockers": {
-    "SHO-3050": "Won/Lost post-win lifecycle/ownership decisions remain unspecified (AC1/AC4).",
-    "SHO-3052": "Authority, archived-buyer and duplicate replacement policy unspecified (AC2).",
-    "SHO-3053": "Target-stage mapping, authority and reversal semantics unspecified.",
-    "SHO-3054": "Timezone and legacy date-only compatibility policy unspecified."
   },
   "first_batch": [
     "SHO-3133",
@@ -288,55 +282,63 @@
     },
     {
       "order": 21,
-      "identifier": "SHO-3050",
-      "title": "Deals: support assigned post-win follow-up tasks without erasing sales outcomes",
-      "priority": "medium",
+      "identifier": "SHO-2589",
+      "title": "[SHO-US-18.2] Workload view",
+      "priority": "low",
       "btf_state_at_selection": "Backlog",
-      "url": "https://backlogtothefuture.aplyd.org/aplyd/issue/SHO-3050",
-      "status": "blocked-policy",
-      "blocker": "Won/Lost post-win lifecycle/ownership decisions remain unspecified (AC1/AC4).",
-      "contract_sha256": "95e08203865c3402dd75dcad5b8f6835effffcc86a0a881213ea3a352ae2f2b1",
+      "url": "https://backlogtothefuture.aplyd.org/aplyd/issue/SHO-2589",
+      "status": "selected-for-current-code-and-contract-audit",
+      "blocker": null,
+      "contract_sha256": "abd97a5521bc955a34dea6ac7aefc8c9a24c46c736cde0b3c0c7e9f44f41a0ac",
       "migration_acceptance": null,
-      "done": false
+      "done": false,
+      "replaces_blocked": "SHO-3050",
+      "replacement_rationale": "Explicit acceptance contract available; independent of undefined deal lifecycle, buyer authority and date/timezone decisions. General build instruction authorizes implementation; original security/acceptance gates remain."
     },
     {
       "order": 22,
-      "identifier": "SHO-3052",
-      "title": "Deals: allow controlled replacement of the linked Buyer on an existing deal",
-      "priority": "medium",
+      "identifier": "SHO-2594",
+      "title": "[SHO-US-20.1] Share a saved view, and views on Deals, Accounts and the review",
+      "priority": "low",
       "btf_state_at_selection": "Backlog",
-      "url": "https://backlogtothefuture.aplyd.org/aplyd/issue/SHO-3052",
-      "status": "blocked-policy",
-      "blocker": "Authority, archived-buyer and duplicate replacement policy unspecified (AC2).",
-      "contract_sha256": "a70be651335c24959d601e592e398504692162210d30961ab3b0afb9b9dc3c32",
+      "url": "https://backlogtothefuture.aplyd.org/aplyd/issue/SHO-2594",
+      "status": "selected-for-current-code-and-contract-audit",
+      "blocker": null,
+      "contract_sha256": "2ad2bcab5d6806efdddc946a5e3e716f3a3f6a43053bff5ca395e525a72f7689",
       "migration_acceptance": null,
-      "done": false
+      "done": false,
+      "replaces_blocked": "SHO-3052",
+      "replacement_rationale": "Explicit acceptance contract available; independent of undefined deal lifecycle, buyer authority and date/timezone decisions. General build instruction authorizes implementation; original security/acceptance gates remain."
     },
     {
       "order": 23,
-      "identifier": "SHO-3053",
-      "title": "Deals: convert an existing Proactive opportunity to the Bid pipeline safely",
-      "priority": "medium",
+      "identifier": "SHO-2595",
+      "title": "[SHO-US-20.2] Calendar view and a feed Outlook can subscribe to",
+      "priority": "low",
       "btf_state_at_selection": "Backlog",
-      "url": "https://backlogtothefuture.aplyd.org/aplyd/issue/SHO-3053",
-      "status": "blocked-policy",
-      "blocker": "Target-stage mapping, authority and reversal semantics unspecified.",
-      "contract_sha256": "5442aa29de7322a58772b10975155c9610fd4c52802beb5861a4aee03cd7a585",
+      "url": "https://backlogtothefuture.aplyd.org/aplyd/issue/SHO-2595",
+      "status": "selected-for-current-code-and-contract-audit",
+      "blocker": null,
+      "contract_sha256": "fb25a50ad47a09cd3ba2d138d06fc6a88fee6528e57ff56b044475eaafae507d",
       "migration_acceptance": null,
-      "done": false
+      "done": false,
+      "replaces_blocked": "SHO-3053",
+      "replacement_rationale": "Explicit acceptance contract available; independent of undefined deal lifecycle, buyer authority and date/timezone decisions. General build instruction authorizes implementation; original security/acceptance gates remain."
     },
     {
       "order": 24,
-      "identifier": "SHO-3054",
-      "title": "Deals: store submission deadline time and timezone as well as date",
+      "identifier": "SHO-2617",
+      "title": "[SHO-US-22.14] Home Screen install guidance",
       "priority": "low",
       "btf_state_at_selection": "Backlog",
-      "url": "https://backlogtothefuture.aplyd.org/aplyd/issue/SHO-3054",
-      "status": "blocked-policy",
-      "blocker": "Timezone and legacy date-only compatibility policy unspecified.",
-      "contract_sha256": "125a8ad4d2831e1672cb0e865ad7de405d7bf14860f22c9305eb9aaca66405ea",
+      "url": "https://backlogtothefuture.aplyd.org/aplyd/issue/SHO-2617",
+      "status": "selected-for-current-code-and-contract-audit",
+      "blocker": null,
+      "contract_sha256": "da683cffe2df7fde3937c07316dfbf40acd692170f3f2e01cb93de3e74febe57",
       "migration_acceptance": null,
-      "done": false
+      "done": false,
+      "replaces_blocked": "SHO-3054",
+      "replacement_rationale": "Explicit acceptance contract available; independent of undefined deal lifecycle, buyer authority and date/timezone decisions. General build instruction authorizes implementation; original security/acceptance gates remain."
     },
     {
       "order": 25,
@@ -676,5 +678,74 @@
       "migration_acceptance": null,
       "done": false
     }
-  ]
+  ],
+  "manifest_version": 2,
+  "blocked_original_records": [
+    {
+      "order": 21,
+      "identifier": "SHO-3050",
+      "title": "Deals: support assigned post-win follow-up tasks without erasing sales outcomes",
+      "priority": "medium",
+      "btf_state_at_selection": "Backlog",
+      "url": "https://backlogtothefuture.aplyd.org/aplyd/issue/SHO-3050",
+      "status": "blocked-policy",
+      "blocker": "Won/Lost post-win lifecycle/ownership decisions remain unspecified (AC1/AC4).",
+      "contract_sha256": "95e08203865c3402dd75dcad5b8f6835effffcc86a0a881213ea3a352ae2f2b1",
+      "migration_acceptance": null,
+      "done": false,
+      "replaced_by": "SHO-2589",
+      "counted_in_active50": false
+    },
+    {
+      "order": 22,
+      "identifier": "SHO-3052",
+      "title": "Deals: allow controlled replacement of the linked Buyer on an existing deal",
+      "priority": "medium",
+      "btf_state_at_selection": "Backlog",
+      "url": "https://backlogtothefuture.aplyd.org/aplyd/issue/SHO-3052",
+      "status": "blocked-policy",
+      "blocker": "Authority, archived-buyer and duplicate replacement policy unspecified (AC2).",
+      "contract_sha256": "a70be651335c24959d601e592e398504692162210d30961ab3b0afb9b9dc3c32",
+      "migration_acceptance": null,
+      "done": false,
+      "replaced_by": "SHO-2594",
+      "counted_in_active50": false
+    },
+    {
+      "order": 23,
+      "identifier": "SHO-3053",
+      "title": "Deals: convert an existing Proactive opportunity to the Bid pipeline safely",
+      "priority": "medium",
+      "btf_state_at_selection": "Backlog",
+      "url": "https://backlogtothefuture.aplyd.org/aplyd/issue/SHO-3053",
+      "status": "blocked-policy",
+      "blocker": "Target-stage mapping, authority and reversal semantics unspecified.",
+      "contract_sha256": "5442aa29de7322a58772b10975155c9610fd4c52802beb5861a4aee03cd7a585",
+      "migration_acceptance": null,
+      "done": false,
+      "replaced_by": "SHO-2595",
+      "counted_in_active50": false
+    },
+    {
+      "order": 24,
+      "identifier": "SHO-3054",
+      "title": "Deals: store submission deadline time and timezone as well as date",
+      "priority": "low",
+      "btf_state_at_selection": "Backlog",
+      "url": "https://backlogtothefuture.aplyd.org/aplyd/issue/SHO-3054",
+      "status": "blocked-policy",
+      "blocker": "Timezone and legacy date-only compatibility policy unspecified.",
+      "contract_sha256": "125a8ad4d2831e1672cb0e865ad7de405d7bf14860f22c9305eb9aaca66405ea",
+      "migration_acceptance": null,
+      "done": false,
+      "replaced_by": "SHO-2617",
+      "counted_in_active50": false
+    }
+  ],
+  "known_policy_blockers_retained_not_counted": {
+    "SHO-3050": "Won/Lost post-win lifecycle/ownership decisions remain unspecified (AC1/AC4).",
+    "SHO-3052": "Authority, archived-buyer and duplicate replacement policy unspecified (AC2).",
+    "SHO-3053": "Target-stage mapping, authority and reversal semantics unspecified.",
+    "SHO-3054": "Timezone and legacy date-only compatibility policy unspecified."
+  }
 }
