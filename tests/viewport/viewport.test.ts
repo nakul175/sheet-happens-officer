@@ -101,6 +101,10 @@ for (const width of WIDTHS) {
           const lines = found.slice(0, 12).map((f) => `  ${f.check}: ${f.element} (${f.detail})`).join("\n");
           expect.fail(`${s.name} at ${width} px has ${found.length} problem${found.length === 1 ? "" : "s"}:\n${lines}\n  screenshot: ${shot}`);
         }
+        if (width === 390 && ["Home dashboard", "Project list", "New project", "New deal"].includes(s.name)) {
+          mkdirSync(`${SHOTS}/previews`, { recursive: true });
+          await page.screenshot({ path: `${SHOTS}/previews/${s.name.replace(/[^a-z0-9]+/gi, "-")}-${width}.png`, fullPage: true });
+        }
         await page.close();
       });
     }

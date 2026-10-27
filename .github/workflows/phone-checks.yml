@@ -89,6 +89,14 @@ jobs:
           path: test-results/viewport/
           if-no-files-found: ignore
           retention-days: 14
+      - name: Mobile UI review previews
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: viewport-ui-previews
+          path: test-results/viewport/previews/
+          if-no-files-found: ignore
+          retention-days: 14
       - name: Server log (on failure)
         if: failure()
         run: tail -n 200 server.log || true

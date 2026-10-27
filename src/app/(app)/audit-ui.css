@@ -108,3 +108,20 @@
 .shell .usage-figs > div:nth-child(2) dd { font-size:16px; font-weight:500; }
 .shell .selall .section-selection-mark { inset:0; display:grid; place-items:center; }
 .shell .grp .selall { display:inline-grid; place-items:center; justify-content:center; align-items:center; }
+/* Phone controls retain the approved visual scale while their real targets meet 44px. */
+@media(max-width:599px) {
+ .shell .top :is(.top-brand,.account-trigger) { display:inline-flex; align-items:center; justify-content:center; min-width:44px; min-height:44px; }
+ .shell .top .account-trigger { padding:7px; }
+ :root :is(.shell,.modal) :is(input.in,select.in,textarea.in) { font-size:16px; min-height:44px; }
+ .shell nav[aria-label="Breadcrumb"] a,
+ .shell .project-secondary-actions a,
+ .shell .dashboard-panel header > a,
+ .shell .dashboard-panel-link,
+ .shell .dashboard-view > a,
+ .shell .org-preview-heading > a { display:inline-flex; align-items:center; min-width:44px; min-height:44px; }
+ .shell nav[aria-label="Breadcrumb"] a { padding-inline:4px; vertical-align:middle; }
+ .shell .dashboard-panel-link { display:flex; }
+ .shell :is(.project-list-view,.project-board-view) .lc-sel { height:48px; min-height:48px; }
+ .shell :is(.project-list-view,.project-board-view) .lc-sel select.in { height:46px; min-height:46px; font-size:16px; }
+ .shell :is(.project-list-view,.project-board-view) .lc-bar > .btn { height:48px; min-height:48px; }
+}
