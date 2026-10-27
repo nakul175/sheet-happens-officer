@@ -114,3 +114,13 @@ describe("qa:TC missing APL-2728 person page DOM", () => {
     expect(page.textContent).not.toContain(HIDDEN_DEAL_LABEL);
   });
 });
+
+it("SHO-2872 uses the server's hidden-row text exactly once as escaped plain text", async () => {
+  const serverNotice = 'Restricted workspace work <a href="/secret">private</a>';
+  const page = await open({ id: "rep-2728", name: "ZZ-TEST rep", projects: [{ name: serverNotice, href: null }, { name: serverNotice, href: null }] });
+  const paragraphs = [...page.querySelectorAll("p")].filter(p => p.textContent === serverNotice);
+  expect(paragraphs).toHaveLength(1);
+  expect(paragraphs[0].querySelector("a")).toBeNull();
+  expect(page.querySelector('a[href="/secret"]')).toBeNull();
+  expect(page.textContent).not.toContain(HIDDEN_DEAL_LABEL);
+});
