@@ -17,6 +17,7 @@ const allowed = new Set([
   "src/components/extras/StartGuide.tsx",
   "src/lib/install-guidance.ts",
   "tests/install-guidance-2617.test.tsx",
+  ".github/workflows/approved-projects-ui.yml",
   "docs/sho-next50-manifest.json",
   "package.json",
   // SHO-3133 approved responsive board layout; product behavior remains in the
