@@ -1,6 +1,7 @@
 // SHO-US-11.2 to 11.5: contacts, notes and task links on organisations. Visible to every signed-in Member except where a
 // note belongs to a deal (then deal members and Admins only). Changes are logged with no project; Undo is for 30 days.
 import type { Prisma } from "@/generated/prisma/client";
+import { contactDuplicate, duplicateWarning } from "@/lib/duplicates";
 import { db } from "@/lib/db";
 import { ApiError, notFound } from "@/lib/http";
 import { isActive, isAdmin, projectAccess, requireWrite, type Actor, type Tx } from "@/lib/access";
@@ -72,13 +73,15 @@ export async function listContacts(user: Actor, orgId: string) {
   }));
 }
 
-export async function createContact(user: Actor, orgId: string, input: { name: string; role?: string | null; email?: string | null; phone?: string | null; knownBy?: string[] }) {
+export async function createContact(user: Actor, orgId: string, input: { name: string; force?: boolean; role?: string | null; email?: string | null; phone?: string | null; knownBy?: string[] }) {
   requireCrm(user);
   const org = await orgOf(user, orgId);
   if (org.archivedAt) throw new ApiError(409, "This organisation is archived.");
   const name = input.name.trim();
   if (!name) throw new ApiError(400, "Give the contact a name.");
   const u = await me(user);
+  const duplicate = await contactDuplicate(u.workspaceId, orgId, name, input.email);
+  if (duplicate && !input.force) throw duplicateWarning("contact", duplicate);
   const known = await knownByList(input.knownBy, user, u.workspaceId);
   return db.$transaction(async (tx) => {
     const c = await tx.contact.create({ data: { workspaceId: u.workspaceId, organisationId: orgId, name, role: clean(input.role), email: clean(input.email), phone: clean(input.phone), createdById: user.id } });

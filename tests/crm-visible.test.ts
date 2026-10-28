@@ -28,7 +28,7 @@ describe("CRM_VISIBLE lever (SHO-BUG-2)", () => {
     const tag = `cvtag${Date.now()}`;
     // A deal led by `lead` with `ed` as Editor holding one of its tasks, and a plain project where `ed` holds a task too.
     const pipe = (await lead.c.get("/api/deals/pipelines")).json.pipelines.find((p: { key: string }) => p.key === "DEAL_PROACTIVE");
-    const orgId = (await lead.c.post("/api/orgs", { name: `Org ${tag}` })).json.organisation.id;
+    const orgId = (await lead.c.post("/api/orgs", { force: true, name: `Org ${tag}` })).json.organisation.id;
     const made = await lead.c.post("/api/deals", { name: `Deal ${tag}`, organisationId: orgId, pipelineId: pipe.id, leaderId: lead.id, whyPursue: "fit", nextStep: { title: "First step", dueDate: istDate(3) } });
     expect(made.status, JSON.stringify(made.json)).toBe(201);
     const dealId = made.json.deal.id as string;

@@ -80,7 +80,7 @@ describe("auth before body (APL-2651)", () => {
     const view = await lead.c.post(`/api/projects/${p.id}/views`, { name: "Overdue", state: viewState });
     expect(view.status).toBe(201);
     const viewId = view.json.view.id as string;
-    const org = await lead.c.post("/api/orgs", { name: `Org ${Date.now()}` });
+    const org = await lead.c.post("/api/orgs", { force: true, name: `Org ${Date.now()}` });
     expect(org.status).toBe(201);
     const contact = await lead.c.post(`/api/orgs/${org.json.organisation.id}/contacts`, { name: "Asha" });
     expect(contact.status).toBe(201);

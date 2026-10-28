@@ -9,7 +9,7 @@ let seq = 0;
 async function negotiationDeal(lead: Account, extra: Record<string, unknown> = {}) {
   const pipes = (await lead.c.get("/api/deals/pipelines")).json.pipelines as { key: string; id: string; stages: Stage[] }[];
   const pro = pipes.find((p) => p.key === "DEAL_PROACTIVE")!;
-  const org = await lead.c.post("/api/orgs", { name: `Org 2739 ${Date.now()}-${seq++}` });
+  const org = await lead.c.post("/api/orgs", { force: true, name: `Org 2739 ${Date.now()}-${seq++}` });
   expect(org.status, JSON.stringify(org.json)).toBe(201);
   const r = await lead.c.post("/api/deals", {
     name: `Deal 2739 ${Date.now()}-${seq++}`, organisationId: org.json.organisation.id, pipelineId: pro.id, leaderId: lead.id,

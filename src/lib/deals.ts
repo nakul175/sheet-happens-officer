@@ -1,6 +1,7 @@
 // SHO-E10 and SHO-E12: Deals are projects of type Deal. This file holds creation, stages, details,
 // next step and stalled logic. Access is still project membership (src/lib/access.ts).
 import type { Prisma } from "@/generated/prisma/client";
+import { dealDuplicate, duplicateWarning } from "@/lib/duplicates";
 import { db } from "@/lib/db";
 import { ApiError, notFound } from "@/lib/http";
 import { isActive, isAdmin, projectAccess, requireWrite, type Actor } from "@/lib/access";
@@ -79,9 +80,10 @@ export async function createDeal(
 
   const dup = await db.project.findFirst({
     where: { workspaceId: u.workspaceId, typeId: WORKSTREAM_DEAL, name: { equals: name, mode: "insensitive" }, parties: { some: { organisationId: org.id, role: "BUYER" } } },
-    select: { id: true },
+    select: { id: true, name: true },
   });
-  if (dup && !input.force) throw new ApiError(409, `A deal called "${name}" already exists for ${org.name}.`, { needsConfirm: "duplicate", existingId: dup.id });
+  const candidate = dup ?? await dealDuplicate(u.workspaceId, name);
+  if (candidate && !input.force) throw duplicateWarning("deal", candidate);
 
   return db.$transaction(async (tx) => {
     const project = await tx.project.create({
@@ -488,9 +490,10 @@ export async function convertTaskToDeal(user: Actor, taskId: string, input: Conv
   if (dueDate) isoDate(dueDate);
   const dup = await db.project.findFirst({
     where: { workspaceId: u.workspaceId, typeId: WORKSTREAM_DEAL, name: { equals: name, mode: "insensitive" }, parties: { some: { organisationId: org.id, role: "BUYER" } } },
-    select: { id: true },
+    select: { id: true, name: true },
   });
-  if (dup && !input.force) throw new ApiError(409, `A deal called "${name}" already exists for ${org.name}.`, { needsConfirm: "duplicate", existingId: dup.id });
+  const candidate = dup ?? await dealDuplicate(u.workspaceId, name);
+  if (candidate && !input.force) throw duplicateWarning("deal", candidate);
 
   const first = pipeline!.stages[0];
   return db.$transaction(async (tx) => {

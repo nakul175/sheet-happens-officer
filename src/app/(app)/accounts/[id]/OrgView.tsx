@@ -35,11 +35,12 @@ function ContactDialog({ orgId, contact, onClose, onDone }: { orgId: string; con
   const [v, setV] = useState({ name: contact?.name ?? "", role: contact?.role ?? "", email: contact?.email ?? "", phone: contact?.phone ?? "" });
   const [known, setKnown] = useState<string[]>(contact ? contact.knownBy.map((k) => k.id) : [me.id]);
   const [err, setErr] = useState<string | null>(null);
+  const [duplicate, setDuplicate] = useState<{ id: string; orgId: string } | null>(null);
   const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement>) => setV({ ...v, [k]: e.target.value });
-  async function save() {
-    const body = { name: v.name, role: v.role || null, email: v.email || null, phone: v.phone || null, knownBy: known };
+  async function save(force = false) {
+    const body = { force, name: v.name, role: v.role || null, email: v.email || null, phone: v.phone || null, knownBy: known };
     const r = contact ? await api("PATCH", `/api/contacts/${contact.id}`, body) : await api("POST", `/api/orgs/${orgId}/contacts`, body);
-    if (r.ok) onDone(); else setErr(r.error ?? "Could not save.");
+    if (r.ok) onDone(); else { setErr(r.error ?? "Could not save."); setDuplicate(r.data?.needsConfirm === "duplicate" ? { id: r.data.existingId, orgId: r.data.organisationId } : null); }
   }
   return (
     <Modal onClose={onClose} label={contact ? "Edit contact" : "New contact"}>
@@ -57,7 +58,8 @@ function ContactDialog({ orgId, contact, onClose, onDone }: { orgId: string; con
         </div>
       </fieldset>
       {err && <div className="err" role="alert">{err}</div>}
-      <div className="actions"><button className="btn ghost" onClick={onClose}>Cancel</button><button className="btn" disabled={!v.name.trim() || known.length === 0} onClick={save}>Save</button></div>
+      {duplicate && <div className="actions"><a className="btn ghost" href={`/accounts/${duplicate.orgId}`}>Use this one</a><button className="btn ghost" onClick={() => save(true)}>Create anyway</button></div>}
+      <div className="actions"><button className="btn ghost" onClick={onClose}>Cancel</button><button className="btn" disabled={!v.name.trim() || known.length === 0} onClick={() => save()}>Save</button></div>
     </Modal>
   );
 }

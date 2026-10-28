@@ -15,7 +15,7 @@ function Form() {
   const pipes = useGet<{ pipelines: { id: string; key: string; name: string }[] }>("/api/deals/pipelines");
   const [v, setV] = useState({ name: "", organisationId: sp.get("org") ?? "", pipelineId: "", leaderId: me.id, whyPursue: "", step: "", due: todayIST(), submissionDeadline: "", value: "", currency: "INR" });
   const [err, setErr] = useState<string | null>(null);
-  const [dup, setDup] = useState(false);
+  const [dup, setDup] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setV({ ...v, [k]: e.target.value });
   const pipeline = pipes.data?.pipelines.find((p) => p.id === (v.pipelineId || pipes.data?.pipelines[0]?.id));
@@ -30,7 +30,7 @@ function Form() {
     const r = await api("POST", "/api/deals", body);
     setBusy(false);
     if (r.ok) { router.push(`/projects/${r.data.deal.id}`); return; }
-    setDup(r.data?.needsConfirm === "duplicate");
+    setDup(r.data?.needsConfirm === "duplicate" ? r.data.existingId : null);
     setErr(r.error ?? "Could not create the deal.");
   }
   return (
@@ -52,6 +52,7 @@ function Form() {
       {err && <div className="err" role="alert">{err}</div>}
       <div style={{ display: "flex", gap: 8 }}>
         <button className="btn" disabled={busy}>Create deal</button>
+        {dup && <Link className="btn ghost" href={`/projects/${dup}`}>Use this one</Link>}
         {dup && <button type="button" className="btn ghost" disabled={busy} onClick={(e) => submit(e, true)}>Create anyway</button>}
       </div>
     </form>

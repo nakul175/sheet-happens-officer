@@ -151,6 +151,7 @@ export const taskConvert = dealDetails.extend({
 });
 const optStr = (n: number) => z.string().trim().max(n).nullish();
 export const contactCreate = z.object({
+  force: z.boolean().optional(),
   name: z.string().trim().min(1, "Give the contact a name.").max(200), role: optStr(200), email: z.string().trim().email("Use a valid email.").max(200).nullish().or(z.literal("")),
   phone: optStr(60), knownBy: z.array(z.string().min(1)).max(50).optional(),
 });

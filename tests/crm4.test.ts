@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { account, admin, istDate, project, superAdmin, task, type Account } from "./helpers";
 
 let seq = 0;
-const newOrg = async (a: Account, extra: Record<string, unknown> = {}) => (await a.c.post("/api/orgs", { name: `Org4 ${Date.now()}-${seq++}`, ...extra })).json.organisation.id as string;
+const newOrg = async (a: Account, extra: Record<string, unknown> = {}) => (await a.c.post("/api/orgs", { force: true, name: `Org4 ${Date.now()}-${seq++}`, ...extra })).json.organisation.id as string;
 const contact = async (a: Account, org: string, name = `Person ${seq++}`, extra: Record<string, unknown> = {}) => {
   const r = await a.c.post(`/api/orgs/${org}/contacts`, { name, ...extra });
   expect(r.status, JSON.stringify(r.json)).toBe(201);
@@ -223,7 +223,7 @@ describe("organisation page and Undo for CRM records (11.5)", () => {
 
   it("undoes organisation changes (create archives, edit restores)", async () => {
     const a = await account("orgundo");
-    const made = await a.c.post("/api/orgs", { name: `Undo me ${Date.now()}` });
+    const made = await a.c.post("/api/orgs", { force: true, name: `Undo me ${Date.now()}` });
     expect(made.headers.get("x-undo-label")).toBe("Organisation added");
     const id = made.json.organisation.id as string;
     const ed = await a.c.patch(`/api/orgs/${id}`, { country: "Kenya" });

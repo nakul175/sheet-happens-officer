@@ -1,5 +1,6 @@
 // SHO-US-11.1: organisations with a parent tree. Visible to every signed-in Member (owner decision
 // 17 Oct 2026); only the creator and Admins edit or archive. Changes are logged with no project.
+import { organisationDuplicate, duplicateWarning } from "@/lib/duplicates";
 import { db } from "@/lib/db";
 import { ApiError, notFound } from "@/lib/http";
 import { isAdmin, type Actor } from "@/lib/access";
@@ -68,9 +69,8 @@ export async function createOrganisation(user: Actor, input: OrgInput) {
     where: { workspaceId: u.workspaceId, parentId: input.parentId ?? null, name: { equals: name, mode: "insensitive" } },
     select: { id: true, name: true },
   });
-  if (dup && !input.force) {
-    throw new ApiError(409, `An organisation called "${dup.name}" already exists here.`, { needsConfirm: "duplicate", existingId: dup.id });
-  }
+  const candidate = dup ?? await organisationDuplicate(u.workspaceId, name);
+  if (candidate && !input.force) throw duplicateWarning("organisation", candidate);
   return db.$transaction(async (tx) => {
     const org = await tx.organisation.create({
       data: { workspaceId: u.workspaceId, name, kind: clean(input.kind), country: clean(input.country), level: input.level ?? null, parentId: input.parentId ?? null, createdById: user.id },

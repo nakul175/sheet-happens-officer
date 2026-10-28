@@ -3,7 +3,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { api, useGet } from "@/components/api";
 import { Field, Modal, Skeleton } from "@/components/ui";
-import { Page } from "../Shell";
+import { Page, useMe } from "../Shell";
 import "./scroll.css";
 
 type O = { id: string; name: string; kind: string | null; country: string | null; parent: { id: string; name: string } | null; openDeals: number };
@@ -12,12 +12,12 @@ function NewOrg({ onClose, onDone }: { onClose: () => void; onDone: (id: string)
   const all = useGet<{ organisations: O[] }>("/api/orgs");
   const [v, setV] = useState({ name: "", kind: "", country: "", parentId: "" });
   const [err, setErr] = useState<string | null>(null);
-  const [dup, setDup] = useState(false);
+  const [dup, setDup] = useState<string | null>(null);
   const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setV({ ...v, [k]: e.target.value });
   async function save(force = false) {
     const r = await api("POST", "/api/orgs", { name: v.name, kind: v.kind || null, country: v.country || null, parentId: v.parentId || null, force });
     if (r.ok) onDone(r.data.organisation.id);
-    else { setDup(r.data?.needsConfirm === "duplicate"); setErr(r.error ?? "Could not save."); }
+    else { setDup(r.data?.needsConfirm === "duplicate" ? r.data.existingId : null); setErr(r.error ?? "Could not save."); }
   }
   return (
     <Modal onClose={onClose} label="New organisation">
@@ -29,14 +29,21 @@ function NewOrg({ onClose, onDone }: { onClose: () => void; onDone: (id: string)
       {err && <div className="err" role="alert">{err}</div>}
       <div className="actions">
         <button className="btn ghost" onClick={onClose}>Cancel</button>
-        {dup && <button className="btn ghost" onClick={() => save(true)}>Add anyway</button>}
+        {dup && <><button className="btn ghost" onClick={() => onDone(dup)}>Use this one</button><button className="btn ghost" onClick={() => save(true)}>Create anyway</button></>}
         <button className="btn" disabled={!v.name.trim()} onClick={() => save()}>Add</button>
       </div>
     </Modal>
   );
 }
 
+function DuplicateReview() {
+  const { data, error, reload } = useGet<{ pairs: { kind: "organisation" | "contact"; leftId: string; rightId: string; leftName: string; rightName: string; leftOrg: string; rightOrg: string }[] }>("/api/accounts/duplicates");
+  const [err, setErr] = useState<string | null>(null);
+  return <section className="card"><h2>Likely duplicates</h2>{(error || err) && <div role="alert" className="err">{error || err}</div>}{data?.pairs.length === 0 && <p>No likely duplicates.</p>}{data?.pairs.map((p) => <div key={`${p.kind}-${p.leftId}-${p.rightId}`}><span>{p.kind}: </span><Link href={`/accounts/${p.leftOrg}`}>{p.leftName}</Link> · <Link href={`/accounts/${p.rightOrg}`}>{p.rightName}</Link> <button className="btn ghost sm" onClick={async () => { const r = await api("POST", "/api/accounts/duplicates", p); if (r.ok) reload(); else setErr(r.error ?? "Could not dismiss."); }}>Not a duplicate</button></div>)}</section>;
+}
+
 export default function AccountsView({ initialQuery = "", initialKind = "" }: { initialQuery?: string; initialKind?: string }) {
+  const me = useMe();
   const [q, setQ] = useState(initialQuery);
   const [kind, setKind] = useState(initialKind);
   const [adding, setAdding] = useState(false);
@@ -66,7 +73,8 @@ export default function AccountsView({ initialQuery = "", initialKind = "" }: { 
           </table>
         </div>
       )}
-      {adding && <NewOrg onClose={() => setAdding(false)} onDone={() => { setAdding(false); reload(); }} />}
+      {me.orgRole !== "MEMBER" && <DuplicateReview />}
+      {adding && <NewOrg onClose={() => setAdding(false)} onDone={(id) => { window.location.href = `/accounts/${id}`; }} />}
     </Page>
   );
 }

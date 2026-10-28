@@ -7,7 +7,7 @@ async function pipes(a: Account) {
   const pr = (await a.c.get("/api/deals/pipelines")).json.pipelines;
   return { proactive: pr.find((p: { key: string }) => p.key === "DEAL_PROACTIVE"), bid: pr.find((p: { key: string }) => p.key === "DEAL_BID") };
 }
-const newOrg = async (a: Account) => (await a.c.post("/api/orgs", { name: `Org3 ${Date.now()}-${seq++}` })).json.organisation.id as string;
+const newOrg = async (a: Account) => (await a.c.post("/api/orgs", { force: true, name: `Org3 ${Date.now()}-${seq++}` })).json.organisation.id as string;
 const gate = async (a: Account, bid = false, extra: Record<string, unknown> = {}) => {
   const p = await pipes(a);
   return { organisationId: await newOrg(a), pipelineId: (bid ? p.bid : p.proactive).id, whyPursue: "Fits our work", ...(bid ? { submissionDeadline: istDate(30) } : {}), ...extra };

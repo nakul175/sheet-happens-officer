@@ -6,9 +6,9 @@ let seq = 0;
 async function setup(leader: Account, bid = false) {
   const pr = (await leader.c.get("/api/deals/pipelines")).json.pipelines;
   const pipe = pr.find((p: { key: string }) => p.key === (bid ? "DEAL_BID" : "DEAL_PROACTIVE"));
-  const org = (await leader.c.post("/api/orgs", { name: `Org2 ${Date.now()}-${seq++}` })).json.organisation.id as string;
+  const org = (await leader.c.post("/api/orgs", { force: true, name: `Org2 ${Date.now()}-${seq++}` })).json.organisation.id as string;
   const r = await leader.c.post("/api/deals", {
-    name: `Deal2 ${Date.now()}-${seq++}`, organisationId: org, pipelineId: pipe.id, leaderId: leader.id, whyPursue: "fit",
+    force: true, name: `Deal2 ${Date.now()}-${seq++}`, organisationId: org, pipelineId: pipe.id, leaderId: leader.id, whyPursue: "fit",
     nextStep: { title: "First call", dueDate: istDate(2) }, ...(bid ? { submissionDeadline: istDate(10) } : {}),
   });
   expect(r.status, JSON.stringify(r.json)).toBe(201);
@@ -78,7 +78,7 @@ describe("parties (12.4)", () => {
     const viewer = await account("pview");
     const d = await setup(lead);
     await lead.c.post(`/api/projects/${d.id}/members`, { userId: viewer.id, role: "VIEWER" });
-    const funder = (await lead.c.post("/api/orgs", { name: `Funder ${Date.now()}` })).json.organisation.id;
+    const funder = (await lead.c.post("/api/orgs", { force: true, name: `Funder ${Date.now()}` })).json.organisation.id;
     const add = await lead.c.post(`/api/projects/${d.id}/parties`, { organisationId: funder, role: "FUNDER" });
     expect(add.status, JSON.stringify(add.json)).toBe(201);
     expect((await lead.c.post(`/api/projects/${d.id}/parties`, { organisationId: funder, role: "FUNDER" })).status).toBe(409);
@@ -90,7 +90,7 @@ describe("parties (12.4)", () => {
     expect((await lead.c.del(`/api/projects/${d.id}/parties/${parties.find((p) => p.role === "BUYER")!.id}`)).status).toBe(400);
     expect((await lead.c.del(`/api/projects/${d.id}/parties/${parties.find((p) => p.role === "FUNDER")!.id}`)).status).toBe(204);
     // Archived organisations cannot be added to a deal.
-    const old = (await lead.c.post("/api/orgs", { name: `Old ${Date.now()}` })).json.organisation.id;
+    const old = (await lead.c.post("/api/orgs", { force: true, name: `Old ${Date.now()}` })).json.organisation.id;
     await lead.c.post(`/api/orgs/${old}/archive`, { archive: true });
     expect((await lead.c.post(`/api/projects/${d.id}/parties`, { organisationId: old, role: "OTHER" })).status).toBe(400);
   });
@@ -99,7 +99,7 @@ describe("parties (12.4)", () => {
     const lead = await account("porg");
     const stranger = await account("pstranger");
     const d = await setup(lead);
-    const funder = (await lead.c.post("/api/orgs", { name: `Funder ${Date.now()}` })).json.organisation.id;
+    const funder = (await lead.c.post("/api/orgs", { force: true, name: `Funder ${Date.now()}` })).json.organisation.id;
     await lead.c.post(`/api/projects/${d.id}/parties`, { organisationId: funder, role: "FUNDER" });
     const seen = (await lead.c.get(`/api/orgs/${funder}`)).json.organisation.deals;
     expect(seen.find((x: { projectId: string }) => x.projectId === d.id).role).toBe("FUNDER");
