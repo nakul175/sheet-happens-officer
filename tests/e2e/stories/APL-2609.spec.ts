@@ -151,7 +151,7 @@ async function pageAs(browser: Browser, who: Who): Promise<Page> {
 async function myTasksScreen(browser: Browser, who: Who, waitFor: string, project: string) {
   const page = await pageAs(browser, who);
   try {
-    await page.goto(`${BASE}/`, { waitUntil: "domcontentloaded" });
+    await page.goto(`${BASE}/my-tasks`, { waitUntil: "domcontentloaded" });
     const row = (section: string) => page.getByRole("region", { name: section, exact: true }).getByRole("link", { name: waitFor, exact: true });
     await expect(row("Next 7 days")).toBeVisible({ timeout: 30_000 });
     const grouping = (await page.getByRole("group", { name: "Group tasks" }).count()) > 0;
