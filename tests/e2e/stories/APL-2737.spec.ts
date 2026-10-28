@@ -103,7 +103,7 @@ test.describe("qa:TC missing APL-2737 a 300-character blocked reason is fully re
     }
   });
 
-  test("qa:TC missing AC1: typing the reason up to 300 characters grows the box with it, with no scrolling inside", async () => {
+  test("qa:TC missing AC1: filling the field with a 300-character reason grows the box, with no scrolling inside", async () => {
     const { page, reason } = await openSheet(320, SUPER_EMAIL);
     try {
       await reason.fill("");
