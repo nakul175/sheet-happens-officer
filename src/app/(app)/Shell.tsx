@@ -23,7 +23,7 @@ function followOverlayLink(e: React.MouseEvent, close: (after?: () => void) => v
   e.preventDefault(); close(() => push(`${url.pathname}${url.search}${url.hash}`));
 }
 
-export type Me = { id: string; name: string; email: string; orgRole: "MEMBER" | "ADMIN" | "SUPER_ADMIN"; crm?: boolean; review?: boolean; compact?: boolean; startGuide?: boolean };
+export type Me = { id: string; name: string; email: string; orgRole: "MEMBER" | "ADMIN" | "SUPER_ADMIN"; crm?: boolean; review?: boolean; workload?: boolean; compact?: boolean; startGuide?: boolean };
 const MeCtx = createContext<Me | null>(null);
 export const useMe = () => useContext(MeCtx)!;
 export const roleLabel = (r: Me["orgRole"]) => (r === "SUPER_ADMIN" ? "Super Admin" : r === "ADMIN" ? "Admin" : "Member");
@@ -121,7 +121,7 @@ export function Shell({ user, children }: { user: Me; children: React.ReactNode 
   const [menu, setMenu] = useState<string | null>(null);
   const open = menu === path;
   const here = (p: string) => (p === "/" ? path === "/" : path === p || path.startsWith(p + "/"));
-  const items: [string, string][] = [["/", "Home"], ["/my-tasks", "My tasks"], ["/projects", "Projects"], ...(user.crm ? [["/deals", "Deals"], ["/accounts", "Accounts"], ...(user.review ? [["/review", "Pipeline review"]] : [])] as [string, string][] : []), ["/team", "Team"], ["/search", "Search"]];
+  const items: [string, string][] = [["/", "Home"], ["/my-tasks", "My tasks"], ["/projects", "Projects"], ...(user.crm ? [["/deals", "Deals"], ["/accounts", "Accounts"], ...(user.review ? [["/review", "Pipeline review"]] : [])] as [string, string][] : []), ...(user.workload ? [["/workload", "Workload"]] as [string, string][] : []), ["/team", "Team"], ["/search", "Search"]];
   if (user.orgRole === "SUPER_ADMIN") items.push(["/usage", "Usage"], ["/audit", "Audit log"]);
   const more = items.filter(([h]) => !["/", "/my-tasks", "/projects", "/search"].includes(h));
   const [utilityAt, setUtilityAt] = useState<string | null>(null);
