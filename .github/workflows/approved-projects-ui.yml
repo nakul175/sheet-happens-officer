@@ -139,6 +139,12 @@ jobs:
           tests/e2e/stories/APL-2482.spec.ts tests/e2e/stories/APL-2484.spec.ts tests/e2e/stories/APL-2590.spec.ts
           --grep-invert " AC(14|15|16) "
           | tee validation-scoped-stories.log
+      - name: Mobile sheet actual-pass validator regression checks
+        run: node --test scripts/ci/task-sheet-result.test.mjs
+      - name: Mobile task-sheet browser acceptance (Chromium emulation, not physical-device proof)
+        run: |
+          npx playwright test tests/e2e/stories/APL-2555.spec.ts --output=test-results/sho-mobile-sheet --reporter=json > validation-mobile-sheet.json
+          node scripts/ci/task-sheet-result.mjs validation-mobile-sheet.json | tee validation-mobile-sheet.log
       - name: SHO-3133 distinct Proactive outcomes at desktop and phone widths
         run: |
           npx playwright test tests/e2e/stories/APL-2523.spec.ts --grep 'AC5: Proactive keeps' --output=test-results/sho-3133-outcomes --reporter=json > validation-3133-outcomes.json
@@ -170,6 +176,9 @@ jobs:
             scoped4-live-gate.json
             validation-*.log
             validation-3133-outcomes.json
+            validation-mobile-sheet.json
             release12-drain.json
             test-results/e2e
             test-results/sho-3133-outcomes/
+            test-results/sho-mobile-sheet/
+            test-results/sho-mobile-local/

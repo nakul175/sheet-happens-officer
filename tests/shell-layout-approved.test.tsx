@@ -23,7 +23,7 @@ it('keeps admin utilities out of primary navigation and preserves account keyboa
  await act(async()=>trigger.click());expect(document.querySelector('.account-options')!.textContent).toContain('Audit log');
  await act(async()=>document.querySelector<HTMLButtonElement>('.account-options .density')!.click());expect(state.density).toHaveBeenCalledWith('PUT','/api/profile/density',{compact:true});
  await act(async()=>document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true})));
- expect(document.querySelector('.account-options')).toBeNull();expect(document.activeElement).toBe(trigger);
+ await vi.waitFor(async()=>{await act(async()=>{});expect(document.querySelector('.account-options')).toBeNull();expect(document.activeElement).toBe(trigger);});
 });
 it('does not expose admin links to members and retains distinct Home and My tasks destinations',async()=>{
  await mount('MEMBER');await act(async()=>document.querySelector<HTMLButtonElement>('.account-trigger')!.click());
@@ -34,4 +34,16 @@ it('reserves no Concierge column before preferences load or when hidden',async()
  await mount();expect(document.querySelector('.with-dock')).toBeNull();expect(document.querySelector('[data-dock]')).toBeNull();
  state.loaded=true;state.hidden=true;await act(async()=>root.render(h(Shell,{user,children:h(Page,{dock:true,children:'Content'})})));expect(document.querySelector('.with-dock')).toBeNull();
  state.hidden=false;await act(async()=>root.render(h(Shell,{user,children:h(Page,{dock:true,children:'Content'})})));expect(document.querySelector('.with-dock')).not.toBeNull();
+});
+it('transfers focus to the incoming phone menu after the outgoing history entry is consumed',async()=>{
+ await mount();
+ const more=[...document.querySelectorAll<HTMLButtonElement>('.tabbar button')].find(b=>b.textContent?.includes('More'))!;
+ const account=document.querySelector<HTMLButtonElement>('.account-trigger')!;
+ await act(async()=>more.click());
+ await act(async()=>{account.dispatchEvent(new Event('pointerdown',{bubbles:true}));account.click();});
+ await vi.waitFor(async()=>{await act(async()=>{});expect(document.querySelector('.tabmore')).toBeNull();expect(document.querySelector('.account-options')).not.toBeNull();expect(document.activeElement).toBe(account);});
+ await act(async()=>{more.dispatchEvent(new Event('pointerdown',{bubbles:true}));more.click();});
+ await vi.waitFor(async()=>{await act(async()=>{});expect(document.querySelector('.account-options')).toBeNull();expect(document.querySelector('.tabmore')).not.toBeNull();expect(document.activeElement).toBe(more);});
+ await act(async()=>document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true})));
+ await vi.waitFor(async()=>{await act(async()=>{});expect(document.querySelector('.tabmore')).toBeNull();});
 });

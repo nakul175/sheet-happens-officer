@@ -6,6 +6,24 @@ import { readFileSync } from "node:fs";
 
 const production = "ee59582dffcbd8cc3067e689b2bb73cf63781cb7";
 const allowed = new Set([
+  // User-approved isolated SHO-2555/2616 mobile task-sheet and overlay Back batch.
+  "src/components/Comments.tsx",
+  "src/components/MoveSheet.tsx",
+  "src/components/use-overlay-back.ts",
+  "src/components/use-task-sheet-back.ts",
+  "src/lib/task-sheet-history.ts",
+  "src/lib/overlay-history.ts",
+  "src/lib/overlay-popstate.ts",
+  "src/instrumentation-client.ts",
+  "tests/task-sheet-history-2616.test.ts",
+  "tests/overlay-history-2616.test.ts",
+  "tests/overlay-popstate-2616.test.ts",
+  "tests/e2e/stories/APL-2555.spec.ts",
+  "scripts/ci/task-sheet-result.mjs",
+  "scripts/ci/task-sheet-result.test.mjs",
+  "docs/mobile-sheet-back-release.md",
+  "vitest.mobile-sheet.config.mts",
+
   "tests/e2e/stories/APL-2523.spec.ts",
   // SHO-3133–3135: approved clean controls, identity disambiguation and board sorting.
   "src/app/(app)/select-controls.css",
