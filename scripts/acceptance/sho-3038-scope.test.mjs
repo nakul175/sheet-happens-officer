@@ -406,6 +406,16 @@ const allowed = new Set([
   "tests/sho-2760-drop-window.test.ts",
 ]);
 
+// HOLY-15: reviewed delegated checklist-task surface. This release deliberately
+// extends only the suite token TTL selector; the other suite endpoints stay pinned.
+for (const file of [
+  '.env.example','prisma/migrations/20261028223000_holy_sheet_checklist_tasks/migration.sql',
+  'scripts/acceptance/sho3062-scope.test.mjs','scripts/acceptance/sho-3038-scope.test.mjs',
+  'src/app/api/suite/token/route.ts','src/lib/holy-sheet-checklist-tasks.ts','src/lib/holy-sheet-checklist-tasks.test.ts','src/lib/suite-oauth-holy-sheet.test.ts',
+  'src/app/api/integrations/holy-sheet/checklist/projects/route.ts','src/app/api/integrations/holy-sheet/checklist/projects/[projectId]/assignees/route.ts','src/app/api/integrations/holy-sheet/checklist/review/route.ts','src/app/api/integrations/holy-sheet/checklist/tasks/route.ts','src/app/api/integrations/holy-sheet/checklist/intents/[intentId]/route.ts',
+  'prisma/schema.prisma','src/lib/suite-oauth.ts','vitest.holy15.config.mts',
+]) allowed.add(file);
+
 test("sequential release changes only explicitly reviewed surfaces", () => {
   const changed = execFileSync("git", ["diff", "--name-only", production, "--"], { encoding: "utf8" })
     .trim().split("\n").filter(Boolean);
@@ -414,7 +424,7 @@ test("sequential release changes only explicitly reviewed surfaces", () => {
 });
 
 test("sequential release does not change the runtime entry or suite API", () => {
-  for (const path of ["server.js", "src/app/api/suite"])
+  for (const path of ["server.js", "src/app/api/suite/authorize/route.ts", "src/app/api/suite/status/route.ts", "src/app/api/suite/userinfo/route.ts"])
     assert.equal(execFileSync("git", ["diff", production, "--", path], { encoding: "utf8" }), "", path);
 });
 

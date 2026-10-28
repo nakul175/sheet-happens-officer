@@ -1,6 +1,6 @@
 import { connection } from "next/server";
 import { db } from "@/lib/db";
-import { activeSuiteIdentity, oauthJson, pkceChallenge, sameSecret, suiteConfig, suiteHash, suiteToken } from "@/lib/suite-oauth";
+import { activeSuiteIdentity, holySheetClient, oauthJson, pkceChallenge, sameSecret, suiteConfig, suiteHash, suiteToken } from "@/lib/suite-oauth";
 
 export async function POST(req: Request) {
   try {
@@ -27,9 +27,10 @@ export async function POST(req: Request) {
       !sameSecret(grant.challenge, pkceChallenge(p.get("code_verifier")!)) ||
       !(await activeSuiteIdentity(grant.userId, grant.sessionId))) return oauthJson({ error: "invalid_grant" }, 400);
     const token = suiteToken(); const now = new Date();
+    const ttl = holySheetClient(cfg.id) ? 300 : 60;
     const claimed = await db.suiteGrant.updateMany({ where: { id: grant.id, redeemedAt: null, expiresAt: { gt: now } },
-      data: { redeemedAt: now, accessTokenHash: suiteHash(token), accessExpiresAt: new Date(now.getTime() + 60000) } });
+      data: { redeemedAt: now, accessTokenHash: suiteHash(token), accessExpiresAt: new Date(now.getTime() + ttl * 1000) } });
     if (claimed.count !== 1) return oauthJson({ error: "invalid_grant" }, 400);
-    return oauthJson({ access_token: token, token_type: "Bearer", expires_in: 60, scope: "email profile" });
+    return oauthJson({ access_token: token, token_type: "Bearer", expires_in: ttl, scope: "email profile" });
   } catch { return oauthJson({ error: "server_error" }, 503); }
 }

@@ -1,0 +1,5 @@
+import {afterEach,expect,it} from 'vitest';
+import {suiteConfig,validAuthorization} from './suite-oauth';
+afterEach(()=>{delete process.env.SUITE_HOLY_SHEET_CLIENT_SECRET;delete process.env.SUITE_HOLY_SHEET_STAGING_CLIENT_SECRET;});
+it('registers separate exact production and staging callbacks',()=>{process.env.SUITE_HOLY_SHEET_CLIENT_SECRET='p'.repeat(32);process.env.SUITE_HOLY_SHEET_STAGING_CLIENT_SECRET='s'.repeat(32);expect(suiteConfig('holy-sheet')).toMatchObject({callback:'https://holysheet.aplyd.org/integrations/sho/callback'});expect(suiteConfig('holy-sheet-staging')).toMatchObject({callback:'https://staging.holysheet.aplyd.org/integrations/sho/callback'});});
+it('requires exact callback and S256 PKCE',()=>{process.env.SUITE_HOLY_SHEET_CLIENT_SECRET='p'.repeat(32);const cfg=suiteConfig('holy-sheet'),p=new URLSearchParams({client_id:'holy-sheet',redirect_uri:cfg.callback,response_type:'code',code_challenge_method:'S256',code_challenge:'a'.repeat(43),state:'b'.repeat(43)});expect(validAuthorization(p,cfg)).toBe(true);p.set('redirect_uri','https://evil.invalid/callback');expect(validAuthorization(p,cfg)).toBe(false);});
