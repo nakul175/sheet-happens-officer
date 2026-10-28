@@ -8,7 +8,7 @@
 // is released as soon as a second connection sees in pg_stat_activity two runs waiting past their read: two inserts waiting (the bug),
 // or one insert plus one run waiting on the reminders advisory lock (the fix).
 // The CRM_VISIBLE filter (AC3) is covered unchanged by tests/jobs-reminders-crm.test.ts and
-// tests/jobs-reminders-crm-server.test.ts (`npm run test:reminder-modes`).
+// tests/jobs-reminders-crm-server.mode.test.ts (`npm run test:modes`).
 //
 // qa:TC missing single run
 // qa:TC missing 40 concurrent reminder requests

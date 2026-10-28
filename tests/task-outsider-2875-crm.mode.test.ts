@@ -1,6 +1,6 @@
 // APL-2875 AC1, example T3: a task in a deal hidden by CRM_VISIBLE=admins answers a non-admin exactly like a missing id
-// on R1-R17, over HTTP. Same shape as tests/apl-2713-crm-modes.test.ts: its own `next start` with CRM_VISIBLE=admins.
-// Run with `npm run test:crm-modes` after `npm run build`. `npm test` does not start this server.
+// on R1-R17, over HTTP. Same shape as tests/apl-2713-crm-modes.mode.test.ts: its own `next start` with CRM_VISIBLE=admins.
+// Run with `npm run test:modes` after `npm run build`. `npm test` does not start this server.
 // Test data: ZZ-TEST names and nakul17+ aliases, set up and cleaned up through the API only.
 import "dotenv/config";
 import { spawn } from "node:child_process";

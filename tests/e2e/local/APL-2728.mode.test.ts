@@ -1,8 +1,8 @@
 // APL-2728 AC1 in a real browser. A deal the viewer cannot see is one fixed sentence on the person page,
 // with no deal name, no deal id, no /projects/<dealId> link and no deal-derived text.
-// Each CRM_VISIBLE mode is its own `next start` process (as tests/crm-visible-modes-server.test.ts), and
+// Each CRM_VISIBLE mode is its own `next start` process (as tests/crm-visible-modes-server.mode.test.ts), and
 // Chromium is driven with playwright-core at 1280x800 and 390x844. Needs `npm run build` first.
-// Run with `npm run test:crm-modes` (CI runs it after the build). `npm test` does not start these servers.
+// Run with `npm run test:modes` (CI runs it after the build). `npm test` does not start these servers.
 // Skipped without SHO_QA_PASS, the password for the nakul17+ aliases. CI does not set it, so CI skips this file;
 // QA runs set it. No workflow file may hold a SHO_QA_PASS value.
 // Seeding and clean-up go through the app's API only; this file writes nothing to the database itself.
