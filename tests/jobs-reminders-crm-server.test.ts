@@ -21,6 +21,7 @@ import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { db } from "../src/lib/db";
 import { istDate, PW } from "./helpers";
+import { cleanupReminderResources, reminderResources } from "./reminder-cleanup-2751";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const LOAD = 40;
@@ -31,16 +32,20 @@ const TEST_JOB_SECRET = "test-only-job-secret-012345";
 type Mode = "unset" | "all" | "admins" | "off";
 
 const runId = `${Date.now().toString(36)}-${process.pid}`;
-const tag = `ZZ-TEST-${runId}`;
-const dealName = `ZZ-TEST Acme renewal ${tag}`;
-const memberTitle = `ZZ-TEST Acme kickoff ${tag}`;
-const adminTitle = `ZZ-TEST Acme kickoff ${tag} admin`;
-const opsTitle = `ZZ-TEST Ops check ${tag}`;
+let sequence = 0;
+let tag = "";
+let dealName = "";
+let memberTitle = "";
+let adminTitle = "";
+let opsTitle = "";
 
 type Running = { mode: Mode; port: number; pid: number; outbox: string; base: string };
 type Who = { id: string; cookie: string };
 
 const spawned = new Set<number>();
+let rootWho: Who;
+const resources = reminderResources();
+const setupNotices = new Map<string, Set<string>>();
 let member: Who;
 let dealAdmin: Who;
 let dealId = "";
@@ -281,11 +286,17 @@ async function signIn(server: Running, name: string, email: string): Promise<Who
 }
 
 async function seed(server: Running) {
-  const memberEmail = `zzmember.${tag}@aplyd.com`.toLowerCase();
-  const adminEmail = `zzdealadmin.${tag}@aplyd.com`.toLowerCase();
-  dealAdmin = await signIn(server, `zzdealadmin ${tag}`, adminEmail);
-  member = await signIn(server, `zzmember ${tag}`, memberEmail);
-  await db.user.update({ where: { id: dealAdmin.id }, data: { orgRole: "ADMIN" } });
+  tag = `${runId}-${++sequence}`;
+  dealName = `ZZ-TEST Acme renewal ${tag}`;
+  memberTitle = `ZZ-TEST Acme kickoff ${tag}`;
+  adminTitle = `ZZ-TEST Acme kickoff ${tag} admin`;
+  opsTitle = `ZZ-TEST Ops check ${tag}`;
+  rootWho = await signIn(server, "ZZ-TEST reminder root", "root.test@aplyd.com");
+  dealAdmin = await signIn(server, `ZZ-TEST reminder admin ${tag}`, `nakul17+zz-2729-server-${tag}-admin@aplyd.com`);
+  resources.people.push({ id: dealAdmin.id, deactivated: false });
+  member = await signIn(server, `ZZ-TEST reminder member ${tag}`, `nakul17+zz-2729-server-${tag}-member@aplyd.com`);
+  resources.people.push({ id: member.id, deactivated: false });
+  expectStatus(await call(server.base, rootWho.cookie, "PATCH", `/api/team/${dealAdmin.id}`, { orgRole: "ADMIN" }), 200, "promote through API");
 
   const pipes = await call(server.base, dealAdmin.cookie, "GET", "/api/deals/pipelines");
   expectStatus(pipes, 200, "pipelines");
@@ -293,6 +304,7 @@ async function seed(server: Running) {
   expect(pipe?.id).toBeTruthy();
   const org = await call(server.base, dealAdmin.cookie, "POST", "/api/orgs", { name: `ZZ-TEST Org ${tag}` });
   expectStatus(org, 201, "org");
+  resources.organisations.push({ id: (org.json?.organisation as { id: string }).id, archived: false });
   const made = await call(server.base, dealAdmin.cookie, "POST", "/api/deals", {
     name: dealName,
     organisationId: (org.json?.organisation as { id: string }).id,
@@ -304,6 +316,7 @@ async function seed(server: Running) {
   expectStatus(made, 201, "deal");
   dealId = (made.json?.deal as { id: string }).id;
   expect(dealId).toBeTruthy();
+  resources.projects.push({ id: dealId, leaderId: dealAdmin.id, archived: false });
   expectStatus(await call(server.base, dealAdmin.cookie, "POST", `/api/projects/${dealId}/members`, { userId: member.id, role: "EDITOR" }), 201, "member");
 
   const memberTask = await call(server.base, dealAdmin.cookie, "POST", `/api/projects/${dealId}/tasks`, {
@@ -320,16 +333,18 @@ async function seed(server: Running) {
   const ops = await call(server.base, dealAdmin.cookie, "POST", "/api/projects", { name: `ZZ-TEST Ops ${tag}`, leaderId: dealAdmin.id });
   expectStatus(ops, 201, "ops project");
   opsProjectId = (ops.json?.project as { id: string }).id;
+  resources.projects.push({ id: opsProjectId, leaderId: dealAdmin.id, archived: false });
   expectStatus(await call(server.base, dealAdmin.cookie, "POST", `/api/projects/${opsProjectId}/members`, { userId: member.id, role: "EDITOR" }), 201, "ops member");
   const opsTask = await call(server.base, dealAdmin.cookie, "POST", `/api/projects/${opsProjectId}/tasks`, {
     title: opsTitle, assigneeId: member.id, dueDate: istDate(1),
   });
   expectStatus(opsTask, 201, "ops task");
   opsTaskId = (opsTask.json?.task as { id: string }).id;
-}
-
-async function clearReminders() {
-  await db.notification.deleteMany({ where: { recipientId: { in: [member.id, dealAdmin.id] } } });
+  for (const who of [member, dealAdmin]) {
+    const seen = await call(server.base, who.cookie, "GET", "/api/notifications?limit=200");
+    expectStatus(seen, 200, "setup bell");
+    setupNotices.set(who.id, new Set((seen.json?.items as { id: string }[]).map(item => item.id)));
+  }
 }
 
 async function dueRows(recipientId: string) {
@@ -342,7 +357,7 @@ async function dueRows(recipientId: string) {
 async function bell(base: string, who: Who) {
   const result = await call(base, who.cookie, "GET", "/api/notifications?limit=200");
   expectStatus(result, 200, "bell");
-  return (result.json?.items ?? []) as { text: string; href: string | null }[];
+  return ((result.json?.items ?? []) as { id: string; text: string; href: string | null }[]).filter(item => !setupNotices.get(who.id)?.has(item.id));
 }
 
 async function expectNoDealReminder(base: string, who: Who) {
@@ -422,11 +437,17 @@ async function postReminders(base: string, count: number) {
   }
 }
 
+async function cleanup(server: Running) {
+  if (rootWho) await cleanupReminderResources(rootWho.id, (path, body) => call(server.base, rootWho.cookie, "POST", path, body), resources);
+}
+
 async function runMode(mode: Mode) {
-  const server = await startModeServer(mode);
+  const seedServer = await startModeServer("unset");
+  let server: Running | undefined;
   try {
+    await seed(seedServer);
+    server = await startModeServer(mode);
     expectOwnProcess(server);
-    await clearReminders();
     await postReminders(server.base, 1);
     if (mode === "unset" || mode === "all") {
       await expectDealReminder(server.base, member, memberTaskId, memberTitle, true);
@@ -440,21 +461,24 @@ async function runMode(mode: Mode) {
     }
     await expectOpsReminder(server.base, true);
 
-    await clearReminders();
+    // A new API-seeded world makes all forty calls eligible to create reminders; no direct deletes.
+    await cleanup(seedServer);
+    await seed(seedServer);
     await postReminders(server.base, LOAD);
     if (mode === "unset" || mode === "all") {
-      await expectDealReminder(server.base, member, memberTaskId, memberTitle, false);
-      await expectDealReminder(server.base, dealAdmin, adminTaskId, adminTitle, false);
+      await expectDealReminder(server.base, member, memberTaskId, memberTitle, true);
+      await expectDealReminder(server.base, dealAdmin, adminTaskId, adminTitle, true);
     } else if (mode === "admins") {
       await expectNoDealReminder(server.base, member);
-      await expectDealReminder(server.base, dealAdmin, adminTaskId, adminTitle, false);
+      await expectDealReminder(server.base, dealAdmin, adminTaskId, adminTitle, true);
     } else {
       await expectNoDealReminder(server.base, member);
       await expectNoDealReminder(server.base, dealAdmin);
     }
-    await expectOpsReminder(server.base, false);
+    await expectOpsReminder(server.base, true);
   } finally {
-    stopServer(server);
+    try { await cleanup(seedServer); }
+    finally { if (server) stopServer(server); stopServer(seedServer); }
   }
 }
 
@@ -463,12 +487,6 @@ describe("qa:TC missing APL-2729 AC4: reminder jobs run on one server process pe
     assertLocalTestDatabase();
     if (!existsSync(path.join(root, ".next", "BUILD_ID"))) {
       throw new Error("CRM_VISIBLE mode cannot start: the production build is missing (.next/BUILD_ID)");
-    }
-    const server = await startModeServer("unset");
-    try {
-      await seed(server);
-    } finally {
-      stopServer(server);
     }
   }, 180_000);
 
@@ -480,9 +498,9 @@ describe("qa:TC missing APL-2729 AC4: reminder jobs run on one server process pe
       }
       spawned.delete(pid);
     }
-    if (member?.id) {
-      await db.notification.deleteMany({ where: { recipientId: { in: [member.id, dealAdmin.id] } } });
-    }
+    expect((await db.user.findMany({ where: { id: { in: resources.people.map(p => p.id) } }, select: { deactivatedAt: true } })).every(p => p.deactivatedAt !== null)).toBe(true);
+    expect((await db.project.findMany({ where: { id: { in: resources.projects.map(p => p.id) } }, select: { archivedAt: true } })).every(p => p.archivedAt !== null)).toBe(true);
+    expect((await db.organisation.findMany({ where: { id: { in: resources.organisations.map(o => o.id) } }, select: { archivedAt: true } })).every(o => o.archivedAt !== null)).toBe(true);
     await db.$disconnect();
   });
 
