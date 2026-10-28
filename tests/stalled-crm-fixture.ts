@@ -69,10 +69,10 @@ export async function seedStalledWorld(tag = stalledTag()): Promise<StalledWorld
     resources.people.push({ id: follower.id, deactivated: false });
     const orgAdmin = await account(`ZZ-TEST admin ${tag}`, `nakul17+zz-2741-${tag}-admin@aplyd.com`);
     resources.people.push({ id: orgAdmin.id, deactivated: false });
-    const superLead = await account(`ZZ-TEST super ${tag}`, `nakul17+zz-2741-${tag}-super@aplyd.com`);
-    resources.people.push({ id: superLead.id, deactivated: false });
+    // Super Admin is provisioned by server configuration, never by the Team API.
+    // Reuse the existing CI bootstrap account; it is not a run-owned person to deactivate.
+    const superLead = root;
     expect((await root.c.patch(`/api/team/${orgAdmin.id}`, { orgRole: "ADMIN" })).status).toBe(200);
-    expect((await root.c.patch(`/api/team/${superLead.id}`, { orgRole: "SUPER_ADMIN" })).status).toBe(200);
 
     const owned: DealFix = { id: "", name: `ZZ-TEST Acme renewal ${tag}`, title: `ZZ-TEST Acme kickoff ${tag}` };
     const adminDeal: DealFix = { id: "", name: `ZZ-TEST Admin renewal ${tag}`, title: `ZZ-TEST Admin kickoff ${tag}` };
@@ -188,9 +188,9 @@ export async function cleanupStalledWorld(world: StalledWorld | undefined) {
   await cleanupReminderResources(root.id, (p, body) => root.c.post(p, body), world.resources);
   for (const person of PEOPLE(world)) setupByPerson.delete(person.id);
   const projects = await db.project.findMany({ where: { id: { in: worldDeals(world).map(p => p.id) } }, select: { archivedAt: true } });
-  const people = await db.user.findMany({ where: { id: { in: PEOPLE(world).map(p => p.id) } }, select: { deactivatedAt: true } });
+  const people = await db.user.findMany({ where: { id: { in: world.resources.people.map(p => p.id) } }, select: { deactivatedAt: true } });
   expect(projects).toHaveLength(3);
-  expect(people).toHaveLength(4);
+  expect(people).toHaveLength(3);
   expect(projects.every(p => p.archivedAt !== null)).toBe(true);
   expect(people.every(p => p.deactivatedAt !== null)).toBe(true);
 }
