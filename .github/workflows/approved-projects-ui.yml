@@ -44,7 +44,7 @@ jobs:
       RETURN_PATH_LOG: "1"
       SERVER_LOG: ${{ github.workspace }}/validation-server.log
       PW_CHROMIUM: /usr/bin/google-chrome
-      RELEASE: ${{ github.sha }}
+      RELEASE: ${{ github.event.pull_request.head.sha || github.sha }}
       NEXT_TELEMETRY_DISABLED: "1"
     steps:
       - uses: actions/checkout@v4
@@ -176,7 +176,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: accepted15-${{ github.sha }}
+          name: accepted15-${{ github.event.pull_request.head.sha || github.sha }}
           path: |
             scoped4-live-gate.json
             validation-*.log
