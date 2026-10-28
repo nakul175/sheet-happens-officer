@@ -18,7 +18,7 @@ function dialogSections(children: React.ReactNode): React.ReactNode {
 }
 
 /** An open dialog: its identity for this render tree and the element a keypress has to belong to. */
-type Open = { me: symbol; el: HTMLElement | null };
+type Open = { me: symbol; el: HTMLElement | null; close: () => void };
 
 /**
  * SHO-3025: the dialogs that are open. Only the one on top answers Escape, and it stops the event there.
@@ -32,7 +32,7 @@ const OPEN: Open[] = [];
  * inner one is on top. Two dialogs opened together in one commit are therefore ordered by the tree, not by
  * whichever layout effect happened to run first.
  */
-function topDialog(): HTMLElement | null {
+export function topDialog(): HTMLElement | null {
   const els = OPEN.map((o) => o.el).filter((el): el is HTMLElement => !!el);
   for (let i = OPEN.length - 1; i >= 0; i--) {
     const el = OPEN[i].el;
@@ -40,6 +40,9 @@ function topDialog(): HTMLElement | null {
   }
   return null;
 }
+
+/** A captured dialog may already have closed while a history traversal was restoring. */
+export function closeDialog(dialog: HTMLElement) { OPEN.find(o => o.el === dialog)?.close(); }
 
 /**
  * SHO-3025: the key listener, the scroll lock and the focus move belong to the commit that paints the dialog, not
@@ -51,6 +54,8 @@ const useCommitEffect = typeof window === "undefined" ? useEffect : useLayoutEff
 /** Centred dialog over a dimmed page. Escape and the dim area close it; focus moves in and returns. */
 export function Modal({ onClose, small, label, describedBy, className, children }: { onClose: () => void; small?: boolean; label: string; describedBy?: string; className?: string; children: React.ReactNode }) {
   const ref = useRef<HTMLDivElement>(null);
+  // Capture before child autoFocus runs during commit, so cleanup restores the invoker.
+  const [opener] = useState<HTMLElement | null>(() => typeof document === "undefined" ? null : document.activeElement as HTMLElement | null);
   // The handler to call now. A re-render of the parent gives a new one; the key listener reads it from here, so it
   // is never torn down and added again (a gap a keypress could fall into, or one that holds a stale handler).
   const latest = useRef(onClose);
@@ -58,8 +63,8 @@ export function Modal({ onClose, small, label, describedBy, className, children 
   useCommitEffect(() => {
     const me = Symbol("dialog");
     const dialog = ref.current;
-    OPEN.push({ me, el: dialog });
-    const prev = document.activeElement as HTMLElement | null;
+    OPEN.push({ me, el: dialog, close: () => latest.current() });
+    const prev = opener;
     if (topDialog() === dialog) (dialog?.querySelector<HTMLElement>("[data-autofocus]") ?? dialog)?.focus(); // SHO-US-14.5: a dialog can name the field that gets focus
     // SHO-US-22.7: the page behind a dialog must not scroll.
     const before = document.body.style.overflow;
@@ -93,7 +98,7 @@ export function Modal({ onClose, small, label, describedBy, className, children 
       document.body.style.overflow = before;
       if (prev?.isConnected) prev.focus();
     };
-  }, []);
+  }, [opener]);
   // SHO-2738: on a phone the keyboard shortens the visible area, not the page, so the sheet is sized from visualViewport
   // (--vvh/--vvt, the same pair the Concierge sheet uses) and the footer is pinned to the bottom of that area.
   // On a desktop visualViewport is the window, so the dialog there is unchanged.
@@ -141,14 +146,18 @@ export function Modal({ onClose, small, label, describedBy, className, children 
     vv?.addEventListener("scroll", scheduleFit);
     document.addEventListener("focusin", scheduleFit);
     return () => {
-      document.body.classList.remove("vv-sheet");
       cancelAnimationFrame(frame);
       content.disconnect();
       document.removeEventListener("focusin", scheduleFit);
       vv?.removeEventListener("resize", scheduleFit);
       vv?.removeEventListener("scroll", scheduleFit);
-      root.style.removeProperty("--vvh");
-      root.style.removeProperty("--vvt");
+      // A nested confirmation must not remove the viewport sizing still used by its parent.
+      // The commit-effect cleanup removes this dialog from OPEN before this effect runs.
+      if (!OPEN.length) {
+        document.body.classList.remove("vv-sheet");
+        root.style.removeProperty("--vvh");
+        root.style.removeProperty("--vvt");
+      }
     };
   }, []);
   return (

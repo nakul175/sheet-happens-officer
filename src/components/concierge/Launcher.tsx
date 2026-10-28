@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Panel } from "./Concierge";
 import { useConcierge } from "./ConciergeProvider";
+import { useOverlayBack } from "@/components/use-overlay-back";
 
 const EVENT = "sho:concierge";
 /** Ask the shell to bring the concierge up: show it if hidden, then focus its input (or open the sheet where there is no panel). */
@@ -20,6 +21,8 @@ export function ConciergeHost() {
   const hidden = c?.hidden ?? false;
   const setHidden = c?.setHidden;
   const pending = useRef(false);
+  const panel = useRef<HTMLDivElement>(null);
+  const close = useOverlayBack(sheet, () => { setSheet(false); setTimeout(() => from.current?.focus?.(), 0); }, () => panel.current);
 
   const reveal = useCallback(() => {
     const slot = [...document.querySelectorAll(".cc-slot, .cc-barslot")].find(visible);
@@ -69,17 +72,15 @@ export function ConciergeHost() {
       document.documentElement.style.removeProperty("--vvh");
       document.documentElement.style.removeProperty("--vvt");
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sheet]);
+  }, [sheet, close]);
 
-  function close() { setSheet(false); setTimeout(() => from.current?.focus?.(), 0); }
   if (!c || !sheet) return null;
-  return <div className="cc-sheet cc-host" role="dialog" aria-label="Concierge"><Panel variant="sheet" onClose={close} /></div>;
+  return <div ref={panel} className="cc-sheet cc-host" role="dialog" aria-label="Concierge"><Panel variant="sheet" onClose={() => close()} onHide={() => close(() => { void c.setHidden(true); })} /></div>;
 }
 
 /** Sidebar entry. Styled like the other nav links. */
-export function ConciergeNavItem({ onPick }: { onPick?: () => void }) {
+export function ConciergeNavItem({ onPick }: { onPick?: (reveal: () => void) => void }) {
   const c = useConcierge();
   if (!c) return null;
-  return <button className="navbtn" onClick={() => { onPick?.(); openConcierge(); }}>{c.hidden ? "Show Concierge" : "Open Concierge"}</button>;
+  return <button className="navbtn" onClick={() => { if (onPick) onPick(openConcierge); else openConcierge(); }}>{c.hidden ? "Show Concierge" : "Open Concierge"}</button>;
 }

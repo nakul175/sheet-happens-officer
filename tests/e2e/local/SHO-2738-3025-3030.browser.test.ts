@@ -10,7 +10,7 @@
 import { existsSync } from "node:fs";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { chromium, type Browser, type BrowserContext, type Page } from "playwright-core";
-import { account, BASE, project, PW, superAdmin, task, type Account } from "../../helpers";
+import { account, BASE, patchTask, project, PW, superAdmin, task, type Account } from "../../helpers";
 
 const host = new URL(BASE).hostname;
 if (host !== "localhost") throw new Error(`Refusing to run against ${host}: this spec needs the localhost origin the dev server hydrates under.`);
@@ -29,6 +29,9 @@ let browser: Browser;
 let root: Account;
 let taskId = "";
 let projectId = "";
+let longTaskId = "";
+const longTitle = `ZZ-TEST 2555 ${"Long title with readable wrapping. ".repeat(6)}`.slice(0, 150);
+const longReason = "A complete blocked reason must stay readable without scrolling inside this field. ".repeat(5).slice(0, 300);
 /** SHO-3030: the person who goes, the person named to take the tasks, and the project both are on. */
 let leaving: Account;
 let named: Account;
@@ -46,6 +49,8 @@ beforeAll(async () => {
     title: `ZZ-TEST 2738 task ${RUN}`,
     description: Array.from({ length: 30 }, (_, i) => `A line of description ${i}.`).join("\n"),
   });
+  longTaskId = await task(root, projectId, { title: longTitle });
+  expect((await patchTask(root, longTaskId, { blocked: true, blockedReason: longReason })).status).toBe(200);
 
   // The name is the throw-away label; the address has to be a real-shaped alias, so it is given explicitly.
   leaving = await account("zzLeaving", `nakul17+zz-3030-leaving-${RUN}@aplyd.com`, `ZZ-TEST 3030 leaving ${RUN}`);
@@ -186,6 +191,46 @@ describe("SHO-2738: the real sheet, a real phone viewport, a real focus, a short
   }, 240000);
 });
 
+describe("SHO-2555: full phone task sheet and complete long fields", () => {
+  it.each([320, 390, 599, 600])("keeps Close visible and all 150/300 characters readable at %i px", async width => {
+    const ctx = await signedIn(root.email, { width, height: 844 });
+    const page = await ctx.newPage();
+    try {
+      await page.goto(`/projects/${projectId}?task=${longTaskId}`, { waitUntil: "load", timeout: 120000 });
+      const sheet = page.getByRole("dialog", { name: "Task", exact: true });
+      const title = sheet.getByRole("textbox", { name: "Title", exact: true });
+      const reason = sheet.getByRole("textbox", { name: "Why is it blocked?", exact: true });
+      await reason.waitFor({ state: "visible", timeout: 30000 });
+      expect(await title.inputValue()).toBe(longTitle);
+      expect(await reason.inputValue()).toBe(longReason);
+      for (const field of [title, reason]) {
+        expect(await field.evaluate(el => ({ clippedVertically: el.scrollHeight > el.clientHeight + 2, clippedHorizontally: el.scrollWidth > el.clientWidth + 2 }))).toEqual({ clippedVertically: false, clippedHorizontally: false });
+      }
+      const box = await sheet.boundingBox();
+      expect(box).not.toBeNull();
+      if (width < 600) {
+        expect(box!.x).toBeLessThanOrEqual(1);
+        expect(box!.y).toBeLessThanOrEqual(1);
+        expect(box!.width).toBeGreaterThanOrEqual(width - 1);
+        expect(box!.height).toBeGreaterThanOrEqual(843);
+      } else {
+        expect(box!.x).toBeGreaterThan(0);
+        expect(Math.abs(box!.x - (width - box!.x - box!.width))).toBeLessThanOrEqual(2);
+      }
+      expect(await page.evaluate(() => document.body.style.overflow)).toBe("hidden");
+      await sheet.locator(".dialog-body").evaluate(el => { el.scrollTop = el.scrollHeight; });
+      const close = await sheet.getByRole("button", { name: "Close", exact: true }).boundingBox();
+      expect(close).not.toBeNull();
+      expect(close!.width).toBeGreaterThanOrEqual(44);
+      expect(close!.height).toBeGreaterThanOrEqual(44);
+      expect(close!.y).toBeGreaterThanOrEqual(0);
+      expect(close!.y + close!.height).toBeLessThanOrEqual(844);
+      await sheet.getByRole("button", { name: "Close", exact: true }).click();
+      await sheet.waitFor({ state: "detached", timeout: 15000 });
+    } finally { await ctx.close(); }
+  }, 180000);
+});
+
 describe("SHO-3025: one Escape, one dialog, in a real browser", () => {
   it("Escape closes the sheet and returns focus, and a stacked confirm takes its own Escape only", async () => {
     const ctx = await signedIn(root.email, { width: 390, height: 800 }, true);
@@ -257,6 +302,162 @@ describe("SHO-3025: one Escape, one dialog, in a real browser", () => {
   }, 240000);
 });
 
+describe("SHO-2616: real browser history closes a task without dropping drafts", () => {
+  it("Back closes a row-opened task, returns focus, then continues to the previous page", async () => {
+    const ctx = await signedIn(root.email, { width: 390, height: 844 }, true);
+    const page = await ctx.newPage();
+    try {
+      await page.goto("/team", { waitUntil: "load", timeout: 120000 });
+      await page.goto(`/projects/${projectId}`, { waitUntil: "load", timeout: 120000 });
+      const { row, sheet } = await openSheet(page);
+      await page.goBack();
+      await sheet.waitFor({ state: "detached", timeout: 15000 });
+      expect(new URL(page.url()).searchParams.has("task")).toBe(false);
+      expect(await row.evaluate(el => document.activeElement === el)).toBe(true);
+      await page.goBack();
+      await page.waitForURL("**/team", { timeout: 15000 });
+    } finally { await ctx.close(); }
+  }, 180000);
+
+  it("a reloaded direct link closes to its background exactly once", async () => {
+    const ctx = await signedIn(root.email, { width: 390, height: 844 }, true);
+    const page = await ctx.newPage();
+    try {
+      await page.goto("/team", { waitUntil: "load", timeout: 120000 });
+      await page.goto(`/projects/${projectId}?task=${taskId}`, { waitUntil: "load", timeout: 120000 });
+      await page.getByRole("dialog", { name: "Task", exact: true }).locator("#desc").waitFor();
+      await page.reload({ waitUntil: "load" });
+      const sheet = page.getByRole("dialog", { name: "Task", exact: true });
+      await sheet.locator("#desc").waitFor();
+      await page.goBack();
+      await sheet.waitFor({ state: "detached", timeout: 15000 });
+      expect(new URL(page.url()).pathname).toBe(`/projects/${projectId}`);
+      expect(new URL(page.url()).searchParams.has("task")).toBe(false);
+      await page.goBack();
+      await page.waitForURL("**/team", { timeout: 15000 });
+    } finally { await ctx.close(); }
+  }, 180000);
+
+  it("Back preserves a focused unsaved description, and Cancel or discard never sends a blur save", async () => {
+    const ctx = await signedIn(root.email, { width: 390, height: 844 }, true);
+    const page = await ctx.newPage();
+    const patches: string[] = [];
+    page.on("request", r => { if (r.method() === "PATCH" && new URL(r.url()).pathname === `/api/tasks/${taskId}`) patches.push(r.postData() ?? ""); });
+    try {
+      await page.goto(`/projects/${projectId}`, { waitUntil: "load", timeout: 120000 });
+      const { sheet } = await openSheet(page);
+      const original = await sheet.locator("#desc").inputValue();
+      const draft = `${original}\nZZ-TEST unsaved Back draft`;
+      await sheet.locator("#desc").fill(draft);
+      await page.evaluate(() => history.back());
+      const confirm = page.getByRole("dialog", { name: "Close without saving?", exact: true });
+      await confirm.waitFor({ state: "visible", timeout: 15000 });
+      expect(new URL(page.url()).searchParams.get("task")).toBe(taskId);
+      expect(patches).toEqual([]);
+      await confirm.getByRole("button", { name: "Cancel", exact: true }).click();
+      await confirm.waitFor({ state: "detached" });
+      expect(await sheet.locator("#desc").inputValue()).toBe(draft);
+      await page.evaluate(() => history.back());
+      await confirm.waitFor({ state: "visible", timeout: 15000 });
+      await confirm.getByRole("button", { name: "Close anyway", exact: true }).click();
+      await sheet.waitFor({ state: "detached", timeout: 15000 });
+      expect(patches).toEqual([]);
+      const response = await ctx.request.get(`/api/tasks/${taskId}`);
+      expect((await response.json()).task.description).toBe(original);
+    } finally { await ctx.close(); }
+  }, 180000);
+
+  it("Back dismisses only a nested confirmation and keeps the task and scroll lock", async () => {
+    const ctx = await signedIn(root.email, { width: 390, height: 844 }, true);
+    const page = await ctx.newPage();
+    try {
+      await page.goto(`/projects/${projectId}`, { waitUntil: "load", timeout: 120000 });
+      const { sheet } = await openSheet(page);
+      const trigger = sheet.getByRole("button", { name: "Move to Trash", exact: true });
+      await trigger.click();
+      const confirm = page.getByRole("dialog", { name: "Move to Trash?", exact: true });
+      await confirm.waitFor();
+      await page.evaluate(() => history.back());
+      await confirm.waitFor({ state: "detached", timeout: 15000 });
+      expect(await page.getByRole("dialog").count()).toBe(1);
+      expect(new URL(page.url()).searchParams.get("task")).toBe(taskId);
+      expect(await page.evaluate(() => document.body.style.overflow)).toBe("hidden");
+      expect(await trigger.evaluate(el => document.activeElement === el)).toBe(true);
+      await page.evaluate(() => history.back());
+      await sheet.waitFor({ state: "detached", timeout: 15000 });
+    } finally { await ctx.close(); }
+  }, 180000);
+});
+
+describe("SHO-2616 AC2: Back closes the real navigation and Move to overlays", () => {
+  it("Back closes the phone More menu, returns focus, then leaves the screen normally", async () => {
+    const ctx = await signedIn(root.email, { width: 390, height: 844 }, true), page = await ctx.newPage();
+    try {
+      await page.goto("/team", { waitUntil: "load", timeout: 120000 });
+      await page.goto(`/projects/${projectId}`, { waitUntil: "load", timeout: 120000 });
+      const more = page.getByRole("button", { name: "More", exact: true });
+      await more.click();
+      const menu = page.getByRole("menu", { name: "More", exact: true }); await menu.waitFor();
+      await page.evaluate(() => history.back()); await menu.waitFor({ state: "detached" });
+      expect(new URL(page.url()).pathname).toBe(`/projects/${projectId}`);
+      expect(await more.evaluate(el => el === document.activeElement)).toBe(true);
+      await page.goBack(); await page.waitForURL("**/team");
+    } finally { await ctx.close(); }
+  }, 180000);
+
+  it("Back closes the tablet drawer before navigating away", async () => {
+    const ctx = await signedIn(root.email, { width: 800, height: 900 }, true), page = await ctx.newPage();
+    try {
+      await page.goto("/team", { waitUntil: "load", timeout: 120000 });
+      await page.goto(`/projects/${projectId}`, { waitUntil: "load", timeout: 120000 });
+      const menu = page.getByRole("button", { name: "Open menu", exact: true }); await menu.click();
+      expect(await menu.getAttribute("aria-expanded")).toBe("true");
+      await page.evaluate(() => history.back());
+      await page.waitForFunction(() => document.querySelector('.burger')?.getAttribute('aria-expanded') === 'false');
+      expect(new URL(page.url()).pathname).toBe(`/projects/${projectId}`);
+      expect(await menu.evaluate(el => el === document.activeElement)).toBe(true);
+      await page.goBack(); await page.waitForURL("**/team");
+    } finally { await ctx.close(); }
+  }, 180000);
+
+  it("Back and Cancel consume the Move to sheet entry without moving the task or leaving a duplicate page", async () => {
+    const ctx = await signedIn(root.email, { width: 390, height: 844 }, true), page = await ctx.newPage();
+    try {
+      await page.goto("/team", { waitUntil: "load", timeout: 120000 });
+      await page.goto(`/projects/${projectId}?view=board`, { waitUntil: "load", timeout: 120000 });
+      const opener = page.getByRole("button", { name: `Move to… "ZZ-TEST 2738 task ${RUN}"`, exact: true });
+      await opener.click();
+      const sheet = page.getByRole("dialog", { name: /^Move to…/ }); await sheet.waitFor();
+      await page.evaluate(() => history.back()); await sheet.waitFor({ state: "detached" });
+      expect(await opener.evaluate(el => el === document.activeElement)).toBe(true);
+      expect(new URL(page.url()).searchParams.get("view")).toBe("board");
+      await opener.click(); await sheet.waitFor();
+      await sheet.getByRole("button", { name: "Cancel", exact: true }).click(); await sheet.waitFor({ state: "detached" });
+      await page.goBack(); await page.waitForURL("**/team");
+    } finally { await ctx.close(); }
+  }, 180000);
+
+  it("More hands off to Concierge after closing its own entry; Back then closes only Concierge", async () => {
+    const ctx = await signedIn(root.email, { width: 390, height: 844 }, true), page = await ctx.newPage();
+    const before = await root.c.get("/api/concierge/state");
+    expect(before.status).toBe(200);
+    try {
+      await page.goto("/team", { waitUntil: "load", timeout: 120000 });
+      await page.goto(`/projects/${projectId}`, { waitUntil: "load", timeout: 120000 });
+      await page.getByRole("button", { name: "More", exact: true }).click();
+      await page.getByRole("menuitem", { name: "Concierge", exact: true }).click();
+      const sheet = page.getByRole("dialog", { name: "Concierge", exact: true }); await sheet.waitFor({ timeout: 30000 });
+      expect(await page.getByRole("menu", { name: "More", exact: true }).count()).toBe(0);
+      await page.evaluate(() => history.back()); await sheet.waitFor({ state: "detached" });
+      expect(new URL(page.url()).pathname).toBe(`/projects/${projectId}`);
+      await page.goBack(); await page.waitForURL("**/team");
+    } finally {
+      try { expect((await root.c.patch("/api/concierge/preferences", { hidden: before.json.hidden })).status).toBe(200); }
+      finally { await ctx.close(); }
+    }
+  }, 180000);
+});
+
 describe("SHO-3030: the deactivate dialog and its summary, mounted by the real Team screen", () => {
   it("the dialog and the summary explain the fallback by the role, not by membership", async () => {
     const ctx = await signedIn(root.email, { width: 1280, height: 900 });
@@ -275,7 +476,9 @@ describe("SHO-3030: the deactivate dialog and its summary, mounted by the real T
       expect(hint, "and never claims membership").not.toMatch(/\bnot on (a|that|those) projects?\b/);
 
       // A VIEWER is on the project, so its tasks still fall back to its Leader: the summary must say why.
-      await dialog.locator("select").selectOption({ label: named.name });
+      const handover = dialog.locator("select");
+      expect(await handover.locator(`option[value="${named.id}"]`).textContent()).toBe(`${named.name} — ${named.email}`);
+      await handover.selectOption({ value: named.id });
       await dialog.getByRole("button", { name: "Deactivate", exact: true }).click();
 
       const done = page.getByRole("dialog", { name: `${leaving.name} is deactivated` });

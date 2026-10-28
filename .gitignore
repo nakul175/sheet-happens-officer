@@ -7,3 +7,6 @@ next-env.d.ts
 .outbox-ci/
 test-results/
 .env*
+
+# Local/CI Workload visual acceptance receipts
+/workload-ui-previews/

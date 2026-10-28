@@ -26,6 +26,14 @@ function Status({ loading, error, data, retry }: { loading: boolean; error: stri
   if (error) return <LoadFailed onRetry={retry} />;
   return null;
 }
+function SummaryIcon({ kind }: { kind: string }) {
+  return <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
+    {kind === "tasks" ? <><rect x="5" y="3" width="14" height="18" rx="2" /><path d="m8 9 1.5 1.5L12 8M14 9h2M8 15h8" /></>
+      : kind === "overdue" ? <><circle cx="12" cy="12" r="9" /><path d="M12 7v6m0 4h.01" /></>
+      : kind === "approval" ? <><circle cx="12" cy="12" r="9" /><path d="m8 12 3 3 5-6" /></>
+      : <><path d="M3 7a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v10H3Z" /><path d="M3 11h18" /></>}
+  </svg>;
+}
 export default function Dashboard() {
   const tasks = useGet<Tasks>("/api/dashboard?panel=tasks");
   const projects = useGet<Projects>("/api/dashboard?panel=projects");
@@ -34,15 +42,15 @@ export default function Dashboard() {
   const { canAdd, openAdd } = useExtras();
   const date = tasks.data ? new Intl.DateTimeFormat("en-IN", { weekday: "long", day: "numeric", month: "long", timeZone: "Asia/Kolkata" }).format(new Date(tasks.data.asOf)) : null;
   const kpis = [
-    { label: "Open tasks", value: tasks.data?.open, href: "/my-tasks", icon: "▤" },
-    { label: "Overdue", value: tasks.data?.overdue, href: "/my-tasks?filter=overdue", icon: "!", danger: true },
-    { label: "Awaiting your approval", value: tasks.data?.awaiting, href: "/approvals", icon: "♙" },
-    { label: "Active projects", value: projects.data?.total, href: "/projects", icon: "▱" },
+    { label: "Open tasks", value: tasks.data?.open, href: "/my-tasks", icon: "tasks" },
+    { label: "Overdue", value: tasks.data?.overdue, href: "/my-tasks?filter=overdue", icon: "overdue", danger: true },
+    { label: "Awaiting your approval", value: tasks.data?.awaiting, href: "/approvals", icon: "approval" },
+    { label: "Active projects", value: projects.data?.total, href: "/projects", icon: "projects" },
   ];
   return <Page className="dashboard-view" title="Your workspace" sub="A clear view of what needs your attention." actions={<>{canAdd && <button className="btn" onClick={openAdd}>+ New task</button>}<Link className="btn ghost" href="/projects/new">+ New project</Link></>}>
     {date && <p className="dashboard-date">{date}</p>}
     <div className="dashboard-kpis" aria-label="Your work summary">
-      {kpis.map(k => <Link className={`dashboard-kpi${k.danger ? " danger" : ""}`} href={k.href} key={k.label}><span aria-hidden="true">{k.icon}</span><div>{k.label}<strong>{k.value === undefined ? "—" : k.value}</strong></div></Link>)}
+      {kpis.map(k => <Link className={`dashboard-kpi${k.danger ? " danger" : ""}`} href={k.href} key={k.label}><span className="dashboard-kpi-icon" aria-hidden="true"><SummaryIcon kind={k.icon} /></span><div>{k.label}<strong>{k.value === undefined ? "—" : k.value}</strong></div></Link>)}
     </div>
     <p className="hint">Approval tasks also count as your open work and may be overdue. Active projects includes delivery projects and vertical boards you belong to.</p>
     <div className="dashboard-grid">

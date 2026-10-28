@@ -2,9 +2,86 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import test from "node:test";
+import { readFileSync } from "node:fs";
 
 const production = "ee59582dffcbd8cc3067e689b2bb73cf63781cb7";
 const allowed = new Set([
+  "scripts/ci/task-sheet-result.mjs",
+  "scripts/ci/task-sheet-result.test.mjs",
+  "tests/e2e/stories/APL-2555.spec.ts",
+  "tests/e2e/stories/APL-2609.spec.ts",
+  "tests/apl-2739.test.ts",
+  "tests/README.md",
+  "scripts/ci/stalled-m1-freshness.test.mjs",
+  "tests/stalled-crm-fixture.ts",
+  "tests/jobs-stalled-crm.test.ts",
+  "tests/local-stalled-clock-2902.ts",
+  "tests/local-stalled-clock-2902.test.ts",
+  "e2e/APL-2741-stalled-bell.spec.ts",
+  "scripts/ci/stalled-m1-proof.mjs",
+  "scripts/ci/stalled-m1-result.mjs",
+  "scripts/ci/stalled-m1-result.test.mjs",
+  "vitest.stalled-bell-2902.config.mts",
+
+  "tests/e2e/stories/APL-2720.spec.ts",
+  "tests/trash-days-left.test.tsx",
+  "tests/trash-days-left-aging.test.ts",
+  "tests/e2e/stories/APL-2691.spec.ts",
+  "tests/jobs-reminders-crm.test.ts",
+  "tests/jobs-reminders-crm-server.test.ts",
+  "tests/reminder-cleanup-2751.ts",
+  "tests/reminder-cleanup-2751.test.ts",
+  "src/lib/overlay-history.ts",
+  "src/components/use-overlay-back.ts",
+  "tests/overlay-history-2616.test.ts",
+  "src/components/MoveSheet.tsx",
+  "src/instrumentation-client.ts",
+  "src/lib/overlay-popstate.ts",
+  "tests/overlay-popstate-2616.test.ts",
+  // SHO-2616 / SHO-2555: task-only Back traversal and unsaved comment protection.
+  "src/lib/task-sheet-history.ts",
+  "src/components/use-task-sheet-back.ts",
+  "src/components/Comments.tsx",
+  "tests/task-sheet-history-2616.test.ts",
+  "tests/bell-redaction-2727.test.ts",
+  "tests/bell-null-href-2727.test.tsx",
+  "tests/bell-activity-2727.test.ts",
+  "tests/cascade-reminder-2610.test.ts",
+  // SHO-2589: Workload stays disabled pending complete acceptance and hidden-CRM policy resolution.
+  "src/lib/workload.ts",
+  "src/lib/workload-query.ts",
+  ".gitignore",
+  "tests/workload-2589.test.ts",
+  "tests/workload-2589-ui.test.tsx",
+  "tests/workload-2589-fixtures.ts",
+  "tests/workload-2589-api.test.ts",
+  "tests/workload-2589-availability.test.ts",
+  "tests/e2e/local/SHO-2589.browser.test.ts",
+  "vitest.scoped4-off.config.mts",
+  "src/app/(app)/layout.tsx",
+  "src/app/api/workload/route.ts",
+  "src/app/(app)/workload/page.tsx",
+  "src/app/(app)/workload/Workload.tsx",
+  "src/app/(app)/workload/workload.css",
+  "tests/e2e/stories/APL-2523.spec.ts",
+  // SHO-3133–3135: approved clean controls, identity disambiguation and board sorting.
+  "src/app/(app)/select-controls.css",
+  "src/components/PeopleSelect.tsx",
+  "src/components/people-select.css",
+  "tests/people-select-clean-ui.test.tsx",
+  "tests/modal-focus-return.test.tsx",
+  // SHO-2872 and SHO-2617: redacted server text and approved install copy/guide.
+  "tests/person-deal-visibility-page.test.tsx",
+  "src/components/extras/StartGuide.tsx",
+  "src/lib/install-guidance.ts",
+  "tests/install-guidance-2617.test.tsx",
+  // SHO-2559: actual phone guard and CI negative-control evidence on this integration tree.
+  ".github/workflows/phone-checks.yml",
+  "vitest.viewport.config.mts",
+  "tests/viewport/viewport.test.ts",
+  "scripts/ci/viewport-negative-control.mjs",
+  "docs/sho-next50-manifest.json",
+  "package.json",
   // SHO-3133 approved responsive board layout; product behavior remains in the
   // separately reviewed DealsView and DealBoard surfaces below.
   "src/app/(app)/app.css",
@@ -204,6 +281,8 @@ const allowed = new Set([
   "src/lib/access.ts",
   "src/lib/search.ts",
   "src/lib/feed.ts",
+  // SHO-2701: verify the returned event kind matches each persisted action.
+  "tests/comments-19-1.test.ts",
   "src/lib/notify.ts",
   "tests/project-delete-3047.test.ts",
   "tests/project-delete-db-3047.test.ts",
@@ -326,8 +405,18 @@ test("sequential release changes only explicitly reviewed surfaces", () => {
 });
 
 test("sequential release does not change package/runtime entry or central suite auth", () => {
-  for (const path of ["package.json", "package-lock.json", "server.js", "src/app/api/suite"])
+  for (const path of ["package-lock.json", "server.js", "src/app/api/suite"])
     assert.equal(execFileSync("git", ["diff", production, "--", path], { encoding: "utf8" }), "", path);
+});
+
+test("the package delta only repairs the missing typecheck entry", () => {
+  const before = JSON.parse(execFileSync("git", ["show", `${production}:package.json`], { encoding: "utf8" }));
+  // Read the working candidate, including an unstaged reviewed script repair.
+  const current = JSON.parse(readFileSync("package.json", "utf8"));
+  assert.equal(before.scripts.typecheck, "node scripts/typecheck.mjs");
+  assert.equal(current.scripts.typecheck, "next typegen && tsc --noEmit");
+  current.scripts.typecheck = before.scripts.typecheck;
+  assert.deepEqual(current, before);
 });
 
 test("the only local-auth delta is the reviewed staging-only ZZ admin guard", () => {

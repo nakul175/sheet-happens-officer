@@ -1,7 +1,7 @@
 name: Approved Projects UI release validation
 on:
   pull_request:
-    branches: [release/scoped4-20261025, change/sho-3077-projects, change/sho-3084-settings, change/sho-3087-dashboard, change/sho-3090-accounts, change/sho-3093-batch5, change/sho-3098-forms, change/sho-3103-signin, change/sho-3104-auth]
+    branches: [integration/sho-next50-20261027, release/scoped4-20261025, change/sho-3077-projects, change/sho-3084-settings, change/sho-3087-dashboard, change/sho-3090-accounts, change/sho-3093-batch5, change/sho-3098-forms, change/sho-3103-signin, change/sho-3104-auth]
   workflow_dispatch:
 permissions:
   contents: read
@@ -40,6 +40,7 @@ jobs:
       SHO_ADMIN_PASS: correct-horse-9
       JOB_SECRET: accepted15-ci-only-not-a-real-secret
       FF_TASK_COMMENTS: "1"
+      FF_WORKLOAD: "1"
       SIGNIN_RETURN_TO: "on"
       RETURN_PATH_LOG: "1"
       SERVER_LOG: ${{ github.workspace }}/validation-server.log
@@ -56,7 +57,7 @@ jobs:
           cache: npm
       - run: npm ci --no-audit --no-fund
       - name: Sequential SHO-3038 release scope
-        run: node --test scripts/acceptance/sho-3038-scope.test.mjs
+        run: node --test scripts/acceptance/sho-3038-scope.test.mjs scripts/ci/stalled-m1-result.test.mjs scripts/ci/stalled-m1-freshness.test.mjs
       - name: Approved Projects UI, Board and task-details regressions
         run: npx vitest run -c vitest.projects-approved.config.mts
       - name: Approved Home and single-row shell regressions
@@ -112,6 +113,10 @@ jobs:
         run: npx vitest run -c vitest.sho-2682.config.mts
       - name: All unit and integration tests present in this selective release
         run: npx vitest run -c vitest.scoped4-all.config.mts | tee validation-all-release.log
+      - name: SHO-2903 exact-row assertions detect M1
+        run: node scripts/ci/stalled-m1-proof.mjs
+      - name: SHO-2902 stalled notice Bell browser acceptance
+        run: npx vitest run -c vitest.stalled-bell-2902.config.mts | tee validation-2902-bell.log
       - name: Accepted15 component, database and SQL regressions
         run: npx vitest run -c vitest.release12.config.mts | tee validation-accepted15.log
       - name: Deterministic2693 and2897 owned-outbox contracts
@@ -123,6 +128,13 @@ jobs:
           npx playwright test tests/e2e/stories/APL-2539.spec.ts tests/e2e/stories/APL-2540.spec.ts tests/e2e/stories/SHO-3040.spec.ts
           --grep 'APL-2539 > AC1:|APL-2540 > AC1:|APL-2540 > AC4:|SHO-3040 >'
           | tee validation-locators.log
+      - name: SHO-2759 exact Won and Lost refusal browser cases
+        env:
+          # CI-only throwaway fixture password; the spec's admin uses SHO_ADMIN_* above.
+          SHO_QA_PASS: correct-horse-9
+        run: |
+          npx playwright test tests/e2e/stories/APL-2691.spec.ts --reporter=json > validation-2759-browser.json
+          node -e 'const r=require("./validation-2759-browser.json");const s=r.stats;if(!s||s.expected!==3||s.unexpected!==0||s.skipped!==0||s.flaky!==0||(r.errors??[]).length){console.error("SHO-2759 requires 3 passed, zero failures/skips",s);process.exit(1)}console.log("SHO-2759: 3 passed, zero failures/skips")' | tee validation-2759-browser.log
       - name: Linux built-entry refusal and drain receipt
         run: node scripts/acceptance/release12-drain-receipt.mjs release12-drain.json | tee validation-drain.log
       - name: Seed comments fixture in isolated CI database only
@@ -139,6 +151,28 @@ jobs:
           tests/e2e/stories/APL-2482.spec.ts tests/e2e/stories/APL-2484.spec.ts tests/e2e/stories/APL-2590.spec.ts
           --grep-invert " AC(14|15|16) "
           | tee validation-scoped-stories.log
+      - name: SHO-2882 retained CRM story executes all four owned-outbox cases
+        env:
+          CRM_VISIBLE: all
+          SHO_QA_APP_ROOT: ${{ github.workspace }}
+          SHO_QA_RELEASE: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          npx playwright test tests/e2e/stories/APL-2609.spec.ts --reporter=json > validation-2882-browser.json
+          node -e 'const r=require("./validation-2882-browser.json"),s=r.stats;if(!s||s.expected!==4||s.unexpected||s.skipped||s.flaky||(r.errors??[]).length)throw Error("APL-2609 requires four passed, zero skipped/failed");console.log("SHO-2882: four local outbox cases passed")' | tee validation-2882-browser.log
+      - name: SHO-2900 Trash aging and role browser cases at desktop and phone sizes
+        run: |
+          npx playwright test tests/e2e/stories/APL-2720.spec.ts --reporter=json > validation-2900-browser.json
+          node -e 'const r=require("./validation-2900-browser.json");const s=r.stats;if(!s||s.expected!==6||s.unexpected!==0||s.skipped!==0||s.flaky!==0||(r.errors??[]).length){console.error("SHO-2900 requires 6 passed, zero failures/skips",s);process.exit(1)}console.log("SHO-2900: 6 passed, zero failures/skips")' | tee validation-2900-browser.log
+      - name: SHO-2905 actual-pass validator regression checks
+        run: node --test scripts/ci/task-sheet-result.test.mjs
+      - name: SHO-2905 migrated task sheet browser acceptance (Chromium emulation only)
+        run: |
+          npx playwright test tests/e2e/stories/APL-2555.spec.ts --output=test-results/sho-2905-sheet --reporter=json > validation-2905-browser.json
+          node scripts/ci/task-sheet-result.mjs validation-2905-browser.json | tee validation-2905-browser.log
+      - name: SHO-3133 distinct Proactive outcomes at desktop and phone widths
+        run: |
+          npx playwright test tests/e2e/stories/APL-2523.spec.ts --grep 'AC5: Proactive keeps' --output=test-results/sho-3133-outcomes --reporter=json > validation-3133-outcomes.json
+          node -e 'const r=require("./validation-3133-outcomes.json"),s=r.stats;if(!s||s.expected!==1||s.unexpected||s.skipped||s.flaky||(r.errors??[]).length)throw Error("Distinct outcomes browser case must pass without skips");console.log("SHO-3133: distinct outcomes passed at1280 and390")' | tee validation-3133-outcomes.log
       - name: Existing public offline and no-private-cache browser acceptance
         run: npx playwright test tests/e2e/stories/APL-2558.spec.ts --grep "AC4:" | tee validation-offline.log
       - name: Record user-approved UI-only provider exclusion
@@ -151,12 +185,12 @@ jobs:
             if ! kill -0 "$(cat .scoped4-server.pid)" 2>/dev/null; then break; fi
             sleep 1
           done
-          (FF_TASK_COMMENTS=0 SIGNIN_RETURN_TO=off NODE_ENV=production PORT=3100 node --import tsx server.js > validation-off-server.log 2>&1 & echo $! > .scoped4-off-server.pid)
+          (FF_TASK_COMMENTS=0 FF_WORKLOAD=0 SIGNIN_RETURN_TO=off NODE_ENV=production PORT=3100 node --import tsx server.js > validation-off-server.log 2>&1 & echo $! > .scoped4-off-server.pid)
           for i in $(seq 1 40); do
             if curl -fsS http://localhost:3100/api/health; then break; fi
             sleep 1
           done
-          FF_TASK_COMMENTS=0 SIGNIN_RETURN_TO=off SERVER_LOG="$GITHUB_WORKSPACE/validation-off-server.log" npx vitest run -c vitest.scoped4-off.config.mts | tee validation-flag-off.log
+          FF_TASK_COMMENTS=0 FF_WORKLOAD=0 SIGNIN_RETURN_TO=off SERVER_LOG="$GITHUB_WORKSPACE/validation-off-server.log" npx vitest run -c vitest.scoped4-off.config.mts | tee validation-flag-off.log
       - name: Preserve receipts
         if: always()
         uses: actions/upload-artifact@v4
@@ -165,5 +199,14 @@ jobs:
           path: |
             scoped4-live-gate.json
             validation-*.log
+            validation-2882-browser.json
+            test-results/sho-2903-m1/
+            validation-2900-browser.json
+            validation-2759-browser.json
+            validation-3133-outcomes.json
             release12-drain.json
             test-results/e2e
+            test-results/sho-2905-sheet/
+            validation-2905-browser.json
+            workload-ui-previews/
+            test-results/sho-3133-outcomes/

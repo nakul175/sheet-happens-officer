@@ -6,6 +6,7 @@ import "./approvals.css";
 import { api, dueLabel, dueState, rowKeys, isOverdue, todayIST, useGet } from "@/components/api";
 import { errorMessage, isVersionConflict } from "@/lib/version-error";
 import { TaskModal } from "@/components/TaskModal";
+import { openTaskSheet } from "@/lib/task-sheet-history";
 import { Pri, Tick } from "@/components/TaskParts";
 import { Confirm, LoadFailed, Skeleton } from "@/components/ui";
 import { useExtras } from "@/components/extras/Extras";
@@ -88,6 +89,7 @@ function Inner() {
   useEffect(() => { try { if (localStorage.getItem(GROUP_KEY(me.id)) === "project") setMode("project"); } catch { /* storage blocked: stay By date */ } }, [me.id]);
   const pick = (m: "date" | "project") => { setMode(m); try { localStorage.setItem(GROUP_KEY(me.id), m); } catch { /* ignore */ } };
   const router = useRouter();
+  const openTask = (id: string) => { const href = taskHref(id); if (!openTaskSheet(href)) router.push(href, { scroll: false }); };
   useEffect(() => { window.addEventListener("sho:task-added", reload); return () => window.removeEventListener("sho:task-added", reload); }, [reload]); // SHO-US-14.5
   const open = query.get("task");
   const wait = data?.waitingOnMe ?? [];
@@ -97,7 +99,7 @@ function Inner() {
   const labels = { overdue: "Overdue", next7: "Next 7 days", later: "Later" };
   const all = data ? [...data.overdue, ...data.next7, ...data.later] : [];
   const waitRow = (t: Waiting, mine: boolean) => (
-    <div key={t.id} className="item click nt" {...rowKeys(() => router.push(taskHref(t.id), { scroll: false }))}>
+    <div key={t.id} className="item click nt" {...rowKeys(() => openTask(t.id))}>
       <div className="t">
         <b>{t.title}</b>
         <small>{t.parent ? `Subtask of ${t.parent.title} · ` : ""}{t.project.name}{mine ? "" : ` · with ${t.assignee.name}`}</small>
@@ -121,7 +123,7 @@ function Inner() {
   })();
   const prompts = done.filter((d) => needs.some((n) => n.id === d.projectId) && !dismissed.includes(d.projectId));
   const row = (t: Item) => (
-    <div key={t.id} className="item click" {...rowKeys(() => router.push(taskHref(t.id), { scroll: false }))}>
+    <div key={t.id} className="item click" {...rowKeys(() => openTask(t.id))}>
       <Tick id={t.id} title={t.title} done={false} allowed={t.canClose} version={t.updatedAt} onStale={reload} onDone={() => { if (t.project.type === "DEAL") setDone((d) => [...d, { projectId: t.project.id, name: t.project.name }]); reload(); }} />
       <div className="t">
         <b className="ttl"><a href={`/tasks/${t.id}`} style={{ color: "inherit", textDecoration: "none" }} onClick={(e) => { e.preventDefault(); }}>{t.title}</a></b>
@@ -204,7 +206,7 @@ function Inner() {
           ))}
         </section>
       )}
-      {open && <TaskModal id={open} me={me.id} onClose={() => router.push(taskHref(), { scroll: false })} onChanged={reload} />}
+      {open && <TaskModal id={open} me={me.id} onClose={() => router.replace(taskHref(), { scroll: false })} onChanged={reload} />}
     </Page>
   );
 }

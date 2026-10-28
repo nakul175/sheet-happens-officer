@@ -4,7 +4,7 @@
 // Projects, deals and organisations are ZZ-TEST and archived afterwards.
 // Pam left no qa:TC cases on this issue.
 import { test, expect, zz } from "../support";
-import { newProject, type Who } from "../g2";
+import { getTask, newProject, type Who } from "../g2";
 import { pipelines, type Pipe } from "../helpers/deal-board";
 import { createDeal, createOrg, dealBody, projectOf } from "../helpers/claude-a";
 import { cast, gateFile, noSecret } from "../helpers/qa-alias";
@@ -114,16 +114,41 @@ test("AC4: the Projects list hides deals, and deals are reached from /deals, wit
 });
 
 // qa:TC missing
-test("AC5: the Deals board uses the shared view and groups deals by stage qa:TC missing", async ({ browser, later }) => {
+test("AC5: Proactive keeps On hold, Won and Lost in separate columns qa:TC missing", async ({ admin, later }) => {
   test.setTimeout(120_000);
-  const { admin } = await cast(browser, later, []);
   const { pro } = await pipes(admin);
   const org = await createOrg(admin, later, "e10 board org");
   const deal = await createDeal(admin, later, dealBody({ name: zz("e10 board deal"), organisationId: org.id, pipelineId: pro.id, leaderId: admin.user.id }));
-  await admin.page.goto("/deals");
-  const column = admin.page.getByRole("region", { name: pro.stages[0].name, exact: true });
-  await expect(column.getByRole("link", { name: deal.name, exact: true })).toBeVisible();
-  await expect(admin.page.getByRole("region", { name: "On hold / Won / Lost" })).toBeVisible();
+  const outcomes: { name: string; id: string; stage: string }[] = [];
+  for (const name of ["On hold", "Won", "Lost"]) {
+    const target = pro.stages.find(stage => stage.name === name)!;
+    expect(target, name).toBeTruthy();
+    const outcome = await createDeal(admin, later, { ...dealBody({ name: zz(`distinct ${name}`), organisationId: org.id, pipelineId: pro.id, leaderId: admin.user.id }), value: 100, currency: "INR" });
+    const project = await projectOf(admin, outcome.id);
+    const stepId = (project.deal as { nextStep: { id: string } }).nextStep.id;
+    const task = await getTask(admin, stepId);
+    const completed = await admin.api.post(`/api/tasks/${stepId}/complete`, { expectedUpdatedAt: task.updatedAt });
+    expect(completed.status, JSON.stringify(completed.json)).toBe(200);
+    const moved = await admin.api.post(`/api/projects/${outcome.id}/stage`, { stageId: target.id, reason: "ZZ-TEST distinct outcomes acceptance" });
+    expect(moved.status, JSON.stringify(moved.json)).toBe(200);
+    outcomes.push({ ...outcome, stage: name });
+  }
+  for (const width of [1280, 390]) {
+    await admin.page.setViewportSize({ width, height: 900 });
+    await admin.page.goto("/deals");
+    const board = admin.page.getByRole("region", { name: "Deal board", exact: true }).filter({ has: admin.page.getByRole("link", { name: deal.name, exact: true }) });
+    await expect(board).toHaveCount(1);
+    await expect(board.getByRole("region", { name: "On hold / Won / Lost", exact: true })).toHaveCount(0);
+    for (const outcome of outcomes) {
+      const column = board.getByRole("region", { name: outcome.stage, exact: true });
+      await expect(column.getByRole("link", { name: outcome.name, exact: true })).toBeVisible();
+      for (const other of outcomes.filter(d => d.id !== outcome.id)) await expect(column.getByRole("link", { name: other.name, exact: true })).toHaveCount(0);
+    }
+    const geometry = await board.evaluate(el => ({ width: el.clientWidth, scroll: el.scrollWidth }));
+    expect(geometry.scroll).toBeLessThanOrEqual(geometry.width);
+    expect(await admin.page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+    await board.screenshot({ path: test.info().outputPath(`proactive-outcomes-${width}.png`) });
+  }
 });
 
 // qa:TC missing

@@ -1,2 +1,4 @@
 .new-task-form{display:grid;grid-template-columns:1fr 1fr;gap:20px 16px;min-width:0}.new-task-form>.field{margin:0;min-width:0}.new-task-form>.field:first-child,.new-task-form>.field:has(select[multiple]),.new-task-form>div:not(.field){grid-column:1/-1}.new-task-form .in:not([multiple]){height:40px}.new-task-form select[multiple]{min-height:96px}.new-task-form>.actions{justify-content:flex-end;border-top:1px solid var(--line);padding-top:20px}@media(max-width:600px){.new-task-form{grid-template-columns:1fr}.new-task-form>*{grid-column:1/-1}}@media(max-width:599px),(pointer:coarse){body.vv-sheet .approved-record-form>.new-task-form>.actions{position:sticky;bottom:0;z-index:2;background:white;padding:12px 0}}
 .modal.approved-record-form .record-form-heading h2{font-size:26px}
+
+@media(max-width:599px),(pointer:coarse){.new-task-form .in:not([multiple]){min-height:44px;height:44px}}

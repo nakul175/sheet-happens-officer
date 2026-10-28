@@ -35,3 +35,5 @@
   .dashboard-project > div { flex-basis: 100%; }
   .dashboard-view .btn { min-height: 44px; }
 }
+
+.dashboard-kpi-icon svg{display:block;width:24px;height:24px;flex:none}.dashboard-kpi>div{min-width:0;line-height:1.4}.dashboard-kpi-icon{border-radius:10px;background:#f0f1f8}.dashboard-kpi.danger .dashboard-kpi-icon{background:#fff0ef}

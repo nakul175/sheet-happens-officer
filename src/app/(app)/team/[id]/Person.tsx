@@ -9,9 +9,6 @@ import { Page, roleLabel, useMe } from "../../Shell";
 import "../team-approved.css";
 type Proj = { id?: string; name: string; href?: string | null; role?: string; openTasks?: number };
 
-/** One fixed sentence. No count, no deal name, no link. */
-export const HIDDEN_DEAL_SENTENCE = "A deal you can't view.";
-
 /** A hidden deal is that sentence with no link. A visible project keeps /projects/<id>. */
 export function personProjectHref(project: { id?: string; href?: string | null }): string | null {
   if (project.href === null || !project.id) return null;
@@ -29,11 +26,10 @@ export default function PersonPage() {
   const me = useMe();
   const g = useGet<{ person: Person }>(`/api/team/${id}`);
   const [note, setNote] = useState<null | { ok: boolean; text: string }>(null);
-  // APL-2664 v1.2. Each failed read has its own plain message. A 403 is no access, except the
-  // forced-password 403 (APL-2624). The shared client is unchanged, so this matches the error text
-  // that client already returns for PASSWORD_CHANGE_REQUIRED. Mocked until PR #8 merges.
+  // SHO-2695: APL-2624 already returns this stable code and useGet exposes it.
+  // Server copy can change without turning the password wall into an access denial.
   const settled = !g.loading;
-  const passwordChange = settled && g.status === 403 && g.error === "Set your own password first.";
+  const passwordChange = settled && g.status === 403 && g.code === "PASSWORD_CHANGE_REQUIRED";
   const denied = settled && g.status === 403 && !passwordChange;
   // AC5: a 401 shows no message and no Retry here. The global redirect stays in api(), and the
   // visible session-expired sentence is APL-2652.
@@ -100,7 +96,7 @@ export default function PersonPage() {
             </div>
           )}
           <h2 style={{ fontSize: 17 }}>{admin ? "Projects" : "Projects you share"}</h2>
-          {p.projects.some((x) => x.href === null) && <p>{HIDDEN_DEAL_SENTENCE}</p>}
+          {p.projects.some((x) => x.href === null) && <p>{p.projects.find((x) => x.href === null)?.name}</p>}
           {p.projects.filter((x) => personProjectHref(x)).length === 0 && !p.projects.some((x) => x.href === null) && <p className="hint">{admin ? "Not on any project yet." : "You are not on a project together."}</p>}
           {p.projects.some((x) => personProjectHref(x)) && (
             <div className="scroll">
