@@ -223,7 +223,7 @@ async function taskScreen(browser: Browser, who: Who) {
       const stay = ["1", "on"].includes((process.env.SIGNIN_RETURN_TO ?? "").trim().toLowerCase());
       const expectedPath = stay ? `/tasks/${seed.dealTaskId}` : `/projects/${seed.dealId}`;
       await expect(page).toHaveURL(url => url.origin === new URL(BASE).origin && url.pathname === expectedPath &&
-        (stay ? url.search === "" : url.searchParams.get("task") === seed.dealTaskId));
+        url.hash === "" && url.search === (stay ? "" : `?task=${seed.dealTaskId}`));
       await expect(page.getByLabel("Title", { exact: true })).toHaveValue(DEAL_TASK);
     }
     else await expect(page.getByRole("heading", { name: "This task isn't available", exact: true })).toBeVisible({ timeout: 30_000 });
