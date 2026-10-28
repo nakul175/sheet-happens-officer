@@ -35,7 +35,7 @@ jobs:
       BASE_URL: http://localhost:3100
       APP_URL: http://localhost:3100
       EMAIL_OUTBOX_DIR: ${{ github.workspace }}/.outbox-ci
-      SUPER_ADMIN_EMAILS: root.test@aplyd.com
+      SUPER_ADMIN_EMAILS: root.test@aplyd.com,nakul17+zz-sa@aplyd.com
       SHO_ADMIN_EMAIL: root.test@aplyd.com
       SHO_ADMIN_PASS: correct-horse-9
       JOB_SECRET: accepted15-ci-only-not-a-real-secret
@@ -147,6 +147,12 @@ jobs:
           tests/e2e/stories/APL-2482.spec.ts tests/e2e/stories/APL-2484.spec.ts tests/e2e/stories/APL-2590.spec.ts
           --grep-invert " AC(14|15|16) "
           | tee validation-scoped-stories.log
+      - name: SHO-2882 local outbox CRM story executes all four cases
+        env:
+          CRM_VISIBLE: all
+        run: |
+          npx playwright test tests/e2e/stories/APL-2609.spec.ts --reporter=json > validation-2882-browser.json
+          node -e 'const r=require("./validation-2882-browser.json"),s=r.stats;if(!s||s.expected!==4||s.unexpected||s.skipped||s.flaky||(r.errors??[]).length)throw Error("APL-2609 requires four passed, zero skipped/failed");console.log("SHO-2882: four local outbox cases passed")' | tee validation-2882-browser.log
       - name: Existing public offline and no-private-cache browser acceptance
         run: npx playwright test tests/e2e/stories/APL-2558.spec.ts --grep "AC4:" | tee validation-offline.log
       - name: Record user-approved UI-only provider exclusion
@@ -173,6 +179,7 @@ jobs:
           path: |
             scoped4-live-gate.json
             validation-*.log
+            validation-2882-browser.json
             validation-2759-browser.json
             release12-drain.json
             test-results/e2e
