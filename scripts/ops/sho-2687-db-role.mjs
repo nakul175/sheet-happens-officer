@@ -120,7 +120,7 @@ async function roleSnapshot(admin, role, schema) {
 async function assertLeastPrivilege(admin, role, schema) {
   const snapshot = await roleSnapshot(admin, role, schema);
   if (!snapshot.exists) fail(`${role} does not exist.`);
-  for (const attribute of ["rolsuper", "rolcreatedb", "rolcreaterole", "rolinherit", "rolreplication", "rolbypassrls"]) {
+  for (const attribute of ["rolsuper", "rolcreatedb", "rolcreaterole", "rolreplication", "rolbypassrls"]) {
     if (snapshot[attribute]) fail(`${role} retains forbidden role attribute ${attribute}.`);
   }
   if (!snapshot.schema_usage || snapshot.schema_create) fail(`${role} schema privileges are not DML-only.`);
@@ -221,11 +221,11 @@ async function main() {
           fail(`${role} must already exist because SHO_2687_MANAGED_ROLE=true.`);
         }
         if (!managedRole && existing.rowCount === 0) {
-          await query(admin, `CREATE ROLE ${JSON.stringify(role)} LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS`);
+          await query(admin, `CREATE ROLE ${JSON.stringify(role)} LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE INHERIT NOREPLICATION NOBYPASSRLS`);
         }
         if (!managedRole) {
           const passwordLiteral = (await query(admin, "SELECT quote_literal($1) AS value", [password])).rows[0].value;
-          await query(admin, `ALTER ROLE ${JSON.stringify(role)} WITH LOGIN PASSWORD ${passwordLiteral} NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS`);
+          await query(admin, `ALTER ROLE ${JSON.stringify(role)} WITH LOGIN PASSWORD ${passwordLiteral} NOSUPERUSER NOCREATEDB NOCREATEROLE INHERIT NOREPLICATION NOBYPASSRLS`);
         }
         const database = (await query(admin, "SELECT current_database() AS value")).rows[0].value;
         await query(admin, `REVOKE ALL PRIVILEGES ON DATABASE ${JSON.stringify(database)} FROM ${JSON.stringify(role)}`);

@@ -92,9 +92,10 @@ describe("SHO-2687 least-privilege database rollout contract", () => {
     for (const privilege of ["SELECT", "INSERT", "UPDATE", "DELETE"]) {
       expect(implementation).toContain(privilege);
     }
-    for (const forbidden of ["NOSUPERUSER", "NOCREATEDB", "NOCREATEROLE", "NOINHERIT", "NOREPLICATION", "NOBYPASSRLS"]) {
+    for (const forbidden of ["NOSUPERUSER", "NOCREATEDB", "NOCREATEROLE", "NOREPLICATION", "NOBYPASSRLS"]) {
       expect(implementation).toContain(forbidden);
     }
+    expect(implementation).toContain("INHERIT");
     expect(implementation).toContain("REVOKE ALL ON SCHEMA");
     expect(implementation).toContain("GRANT USAGE ON SCHEMA");
     expect(implementation).toContain("ALTER DEFAULT PRIVILEGES");

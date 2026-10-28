@@ -45,8 +45,13 @@ or grants, preventing staging grants from landing in the maintenance database.
 Set `SHO_2687_MANAGED_ROLE=true` when DigitalOcean created the database user or
 reset its password. The operator then requires the role to exist and never
 attempts SQL role creation or password/attribute changes. It still proves that
-the managed role has no elevated attributes, memberships, schema `CREATE`, or
+the managed role has no elevated attributes, role memberships, schema `CREATE`, or
 DDL capability before switching the runtime.
+
+PostgreSQL's default `INHERIT` attribute is permitted only because the operator
+independently requires zero role memberships. With no memberships there is no
+indirect privilege path; rejecting `INHERIT` would make control-plane-managed
+users unusable without strengthening the least-privilege boundary.
 
 After the staging receipt, exact health response, application smoke tests, migration status, DML checks, DDL denial and rollback have been verified, run production with the explicit production approval and pinned release:
 
