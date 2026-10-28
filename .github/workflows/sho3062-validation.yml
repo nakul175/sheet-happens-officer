@@ -1,7 +1,7 @@
 name: SHO-3062 current-release integration validation
 on:
   pull_request:
-    branches: [qualification/holy-sheet-current-release]
+    branches: [release/scoped4-20261025]
   workflow_dispatch:
     inputs:
       phase:
