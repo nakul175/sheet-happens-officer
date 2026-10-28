@@ -5,6 +5,13 @@ import path from "node:path";
 import { expect } from "vitest";
 import { db } from "../src/lib/db";
 import { account, istDate, type Account } from "./helpers";
+import {
+  ageZzStalledProjects,
+  clearZzNotifications,
+  setZzOrgRoles,
+} from "./approved-stalled-crm-db-helper";
+
+export { assertLocalTestDatabase } from "./approved-stalled-crm-db-helper";
 
 export type Mode = "unset" | "all" | "admins" | "off";
 export type BellItem = { text: string; href: string | null };
@@ -23,19 +30,10 @@ export type StalledWorld = {
 
 const PEOPLE = (world: StalledWorld) => [world.owner, world.follower, world.orgAdmin, world.superLead];
 
-export function assertLocalTestDatabase() {
-  const raw = process.env.DATABASE_URL;
-  if (!raw) throw new Error("DATABASE_URL is required and must point at the local test database");
-  let host = "";
-  try {
-    host = new URL(raw.replace(/^postgres(ql)?:/i, "http:")).hostname;
-  } catch {
-    throw new Error("DATABASE_URL must point at the local test database");
-  }
-  if (host !== "localhost" && host !== "127.0.0.1" && host !== "::1") {
-    throw new Error("Refusing to run: stalled-deal tests use the local test database only");
-  }
-}
+/** The three deals owned by this fixture. All scoped assertions and leak checks derive from here. */
+export const worldDeals = (world: StalledWorld) => [world.owned, world.adminDeal, world.rootDeal] as const;
+
+export const worldDealIds = (world: StalledWorld) => worldDeals(world).map((deal) => deal.id);
 
 export function stalledTag() {
   return `${Date.now().toString(36)}-${process.pid}`;
@@ -65,8 +63,10 @@ export async function seedStalledWorld(tag = stalledTag()): Promise<StalledWorld
   const follower = await account(`ZZ-TEST follower ${tag}`, `nakul17+zz-2741-${tag}-follower@aplyd.com`);
   const orgAdmin = await account(`ZZ-TEST admin ${tag}`, `nakul17+zz-2741-${tag}-admin@aplyd.com`);
   const superLead = await account(`ZZ-TEST super ${tag}`, `nakul17+zz-2741-${tag}-super@aplyd.com`);
-  await db.user.update({ where: { id: orgAdmin.id }, data: { orgRole: "ADMIN" } });
-  await db.user.update({ where: { id: superLead.id }, data: { orgRole: "SUPER_ADMIN" } });
+  await setZzOrgRoles([
+    { person: orgAdmin, role: "ADMIN" },
+    { person: superLead, role: "SUPER_ADMIN" },
+  ]);
 
   const owned: DealFix = { id: "", name: `ZZ-TEST Acme renewal ${tag}`, title: `ZZ-TEST Acme kickoff ${tag}` };
   const adminDeal: DealFix = { id: "", name: `ZZ-TEST Admin renewal ${tag}`, title: `ZZ-TEST Admin kickoff ${tag}` };
@@ -94,15 +94,11 @@ export async function seedStalledWorld(tag = stalledTag()): Promise<StalledWorld
 
 export async function ageDeals(world: StalledWorld) {
   const t = new Date(Date.now() - 31 * 86400_000);
-  for (const id of [world.owned.id, world.adminDeal.id, world.rootDeal.id]) {
-    await db.$executeRaw`UPDATE "Project" SET "createdAt" = ${t}, "stageChangedAt" = ${t} WHERE id = ${id}`;
-    await db.$executeRaw`UPDATE "Task" SET "updatedAt" = ${t} WHERE "projectId" = ${id}`;
-    await db.$executeRaw`UPDATE "ActionLog" SET "createdAt" = ${t} WHERE "projectId" = ${id}`;
-  }
+  await ageZzStalledProjects([world.owned, world.adminDeal, world.rootDeal], t);
 }
 
 export async function clearStalledNotes(world: StalledWorld) {
-  await db.notification.deleteMany({ where: { recipientId: { in: PEOPLE(world).map((p) => p.id) } } });
+  await clearZzNotifications(PEOPLE(world));
 }
 
 export async function storedRows(recipientId: string) {
@@ -120,9 +116,8 @@ export async function bell(who: Account) {
 }
 
 export function dealNeedles(world: StalledWorld) {
-  const deals = [world.owned, world.adminDeal, world.rootDeal];
   const needles: string[] = [];
-  for (const deal of deals) {
+  for (const deal of worldDeals(world)) {
     needles.push(deal.name, deal.title, deal.id, `/projects/${deal.id}`);
   }
   return needles;
@@ -178,5 +173,5 @@ export function expectNoDealMail(needles: string[]) {
 
 export async function cleanupStalledWorld(world: StalledWorld | undefined) {
   if (!world) return;
-  await db.notification.deleteMany({ where: { recipientId: { in: PEOPLE(world).map((p) => p.id) } } });
+  await clearZzNotifications(PEOPLE(world));
 }
