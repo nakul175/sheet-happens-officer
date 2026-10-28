@@ -168,11 +168,13 @@ export async function listNotifications(user: Actor, o: { filter?: string; befor
   const unread = await db.notification.count({ where: { recipientId: user.id, readAt: null, ...hideComments } });
   const page = rows.slice(0, limit);
   const hiddenDeals = await hiddenDealIds(user, page.map((n) => n.projectId));
+  const hideCrm = !crmVisible(user);
   const last = page.at(-1);
   return {
     unread,
     items: page.map((n) => {
-      const notice = noticeForReader(n, !!n.projectId && hiddenDeals.has(n.projectId));
+      // A typed deal notice remains private even after its project was purged or its FK was omitted.
+      const notice = noticeForReader(n, (hideCrm && n.type.startsWith("DEAL_")) || (!!n.projectId && hiddenDeals.has(n.projectId)));
       return { id: n.id, text: notice.text, href: notice.href, read: !!n.readAt, createdAt: n.createdAt.toISOString() };
     }),
     next: rows.length > limit && last ? `${last.createdAt.toISOString()}|${last.id}` : null,
