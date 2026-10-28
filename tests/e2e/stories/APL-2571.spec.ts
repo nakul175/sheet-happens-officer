@@ -29,13 +29,18 @@ test("AC1: Compact shows at least 16 rows at 1440 by 900 and the setting persist
   const visibleRows = () => p.evaluate(() => [...document.querySelectorAll("main.content .item")].filter((el) => { const r = el.getBoundingClientRect(); return r.height > 0 && r.top >= 0 && r.bottom <= window.innerHeight; }).length);
   await expect(p.getByText(`${zz("row")} 00`).first()).toBeVisible();
   const comfortable = await visibleRows();
+  await p.getByRole("button", { name: /^Account and utilities, \S+$/ }).click();
+  await expect(p.getByRole("button", { name: /Compact/ })).toBeVisible();
   await p.getByRole("button", { name: /Compact/ }).click();
   await expect(p.getByRole("button", { name: /Compact/ })).toHaveAttribute("aria-pressed", "true");
+  await p.keyboard.press("Escape");
   await expect.poll(visibleRows).toBeGreaterThanOrEqual(16);
   expect(await visibleRows()).toBeGreaterThan(comfortable);
   await expect.poll(async () => (await admin.api.get("/api/profile/density")).json).toEqual({ compact: true }); // saved on the person
   await p.reload();
+  await p.getByRole("button", { name: /^Account and utilities, \S+$/ }).click();
   await expect(p.getByRole("button", { name: /Compact/ })).toHaveAttribute("aria-pressed", "true");
+  await p.keyboard.press("Escape");
 });
 
 test("AC2: metadata is not link-coloured; only the title is interactive", async ({ admin, later }) => {
@@ -60,20 +65,25 @@ test("AC2: metadata is not link-coloured; only the title is interactive", async 
 });
 
 test("AC3: hiding the concierge dock frees the width and the concierge stays reachable from a labelled button", async ({ admin, later }) => {
-  const id = await listProject(admin, later, 3);
+  const prior = await admin.api.get("/api/concierge/state");
+  expect(prior.status).toBe(200);
+  later(() => admin.api.patch("/api/concierge/preferences", { hidden: !!prior.json.hidden }));
+  expect((await admin.api.patch("/api/concierge/preferences", { hidden: false })).status).toBe(200);
   const p = admin.page;
-  await p.goto(`/projects/${id}`);
+  // The approved project view uses the bottom bar; My tasks retains the right-hand dock.
+  await p.goto("/my-tasks");
   const dock = p.locator("aside.cc-slot");
   const width = () => p.locator("main.content").first().evaluate((el) => el.getBoundingClientRect().width);
   await expect(dock).toBeVisible();
   const before = await width();
-  await dock.getByRole("button", { name: "Hide" }).click();
+  await dock.getByRole("button", { name: "Hide", exact: true }).click();
   await expect(dock).toHaveCount(0);
   expect(await width()).toBeGreaterThan(before);
-  const btn = p.getByRole("button", { name: /^Concierge/ }).first();
-  await expect(btn).toBeVisible();
-  await btn.click();
-  await expect(p.locator("aside.cc-slot")).toBeVisible();
+  await p.getByRole("button", { name: /^Account and utilities, \S+$/ }).click();
+  const show = p.getByRole("button", { name: "Show Concierge", exact: true });
+  await expect(show).toBeVisible();
+  await show.click();
+  await expect(dock).toBeVisible();
 });
 
 /** WCAG contrast of the visible text and SVG icons inside one row. Large text (24 px, or 18.66 px and bold) and icons need 3:1; other text needs 4.5:1. */
@@ -114,7 +124,8 @@ function rowContrast(root: HTMLElement | SVGElement): string[] {
     const cs = getComputedStyle(el);
     if (cs.visibility === "hidden" || Number(cs.opacity) === 0) continue;
     const own = [...el.childNodes].filter((n) => n.nodeType === Node.TEXT_NODE).map((n) => n.textContent ?? "").join("").trim();
-    const icon = el instanceof SVGElement;
+    // Released priority icons are glyph spans rather than SVGs; check their contrast too.
+    const icon = el instanceof SVGElement || el.matches(".priority-badge > span[aria-hidden=\"true\"]");
     if (!own && !icon) continue;
     const fg = parse(cs.color);
     const bg = bgOf(el);

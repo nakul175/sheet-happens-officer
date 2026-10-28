@@ -26,7 +26,7 @@ test("AC1: pressing ? opens a sheet that lists every shortcut", async ({ admin, 
   await newProject(admin, later, { label: "14.6 shortcuts" }); // "+ New task" only renders when there is a project this person can add to
   const page = admin.page;
   await page.goto("/");
-  await expect(page.getByRole("button", { name: "+ New task" })).toBeVisible(); // the page is hydrated: key handlers are attached
+  await expect(page.getByRole("banner").getByRole("button", { name: "+ New task", exact: true })).toBeVisible(); // the page is hydrated: key handlers are attached
   await page.keyboard.press("?");
   const sheet = page.getByRole("dialog", { name: "Keyboard shortcuts" });
   await expect(sheet).toBeVisible();
@@ -82,14 +82,15 @@ test("AC3: no single-key shortcut fires while focus is in an input, textarea or 
   const title = page.getByRole("dialog", { name: "Task" }).getByLabel("Title");
   await expect(title).toBeEditable(); // the title stays read-only until the project role has loaded
   await title.click();
-  await page.keyboard.press("End");
+  const originalTitle = await title.inputValue();
+  await title.press("ControlOrMeta+a");
   await page.keyboard.type("?c");
-  await expect(title).toHaveValue(/\?c$/);
+  await expect(title).toHaveValue("?c");
   await expect(page.getByRole("dialog", { name: "Keyboard shortcuts" })).toHaveCount(0);
-  await title.evaluate((el: HTMLTextAreaElement) => { el.value = el.defaultValue; }); // do not save the typed text
+  await title.fill(originalTitle); // restore before blur so the keyboard check does not rename the fixture
   // A select: the project picker in quick add. Typing a letter on a select picks an option, it must not run a shortcut.
   await page.goto("/");
-  await page.getByRole("button", { name: "+ New task" }).click();
+  await page.getByRole("banner").getByRole("button", { name: "+ New task", exact: true }).click();
   const sel = page.locator("#qa-proj");
   await sel.focus();
   await page.keyboard.type("?");
@@ -101,7 +102,7 @@ test("AC4: browser and screen-reader keys (anything with Ctrl, Alt or Meta) are 
   await newProject(admin, later, { label: "14.6 modifiers" }); // "+ New task" only renders when there is a project this person can add to
   const page = admin.page;
   await page.goto("/");
-  await expect(page.getByRole("button", { name: "+ New task" })).toBeVisible();
+  await expect(page.getByRole("banner").getByRole("button", { name: "+ New task", exact: true })).toBeVisible();
   await page.evaluate(() => {
     (window as unknown as { __prevented: string[] }).__prevented = [];
     // A window listener runs after the product's document listener, so it sees whether the product called preventDefault.

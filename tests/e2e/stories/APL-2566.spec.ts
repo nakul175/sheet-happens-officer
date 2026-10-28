@@ -18,7 +18,7 @@ async function projectWithTask(admin: Who, later: (f: () => Promise<unknown>) =>
   later(() => deleteFixtureTask(admin, tid));
   return { pid, tid, name: zz(label) };
 }
-const ready = (page: import("@playwright/test").Page) => expect(page.getByRole("button", { name: "+ New task" })).toBeVisible(); // hydrated: key handlers are attached
+const ready = (page: import("@playwright/test").Page) => expect(page.getByRole("banner").getByRole("button", { name: "+ New task", exact: true })).toBeVisible(); // hydrated: key handlers are attached
 const palette = (page: import("@playwright/test").Page) => page.getByRole("dialog", { name: "Search and commands" });
 
 test("AC1: Ctrl+K opens the palette on any screen with focus in the field", async ({ admin, later }) => {
@@ -98,7 +98,7 @@ test("AC5: Escape closes the palette and returns focus to where it was", async (
   const page = admin.page;
   await page.goto("/projects");
   await ready(page);
-  const button = page.getByRole("button", { name: "+ New task" });
+  const button = page.getByRole("banner").getByRole("button", { name: "+ New task", exact: true });
   await button.focus();
   await page.keyboard.press("Control+k");
   await expect(palette(page)).toBeVisible();

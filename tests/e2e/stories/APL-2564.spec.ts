@@ -1,4 +1,4 @@
-import { archiveProject } from "../helpers/migration-2731";
+import { archiveProject, deleteFixtureTask } from "../helpers/migration-2731";
 import { test } from "./qa";
 // SHO-US-14.5 Quick add from anywhere (Linear APL-2564).
 import { expect, zz, type Json } from "../support";
@@ -14,7 +14,7 @@ async function project(admin: Who, later: (f: () => Promise<unknown>) => void, l
 }
 async function tasksOf(who: Who, pid: string) {
   const r = await who.api.get(`/api/projects/${pid}/tasks`);
-  return (r.json.sections as { tasks: { id: string; title: string; assignee: { id: string } }[] }[]).flatMap((s) => s.tasks);
+  return (r.json.sections as { tasks: { id: string; title: string; dueDate: string | null; assignee: { id: string } }[] }[]).flatMap((s) => s.tasks);
 }
 const IST = (offset: number) => new Date(Date.now() + 5.5 * 3600_000 + offset * 86400_000);
 const label = (d: Date) => `${d.toLocaleString("en-GB", { weekday: "short", timeZone: "UTC" })} ${d.getUTCDate()} ${d.toLocaleString("en-GB", { month: "short", timeZone: "UTC" })}`;
@@ -24,7 +24,7 @@ test("AC1: pressing C on a screen where I can write focuses a title field within
   const page = admin.page;
   for (const path of ["/", "/projects", "/team"]) {
     await page.goto(path);
-    await expect(page.getByRole("button", { name: "+ New task" })).toBeVisible(); // the targets have loaded
+    await expect(page.getByRole("banner").getByRole("button", { name: "+ New task", exact: true })).toBeVisible(); // the targets have loaded
     await page.evaluate(() => {
       const w = window as Window & { __t0?: number; __t1?: number };
       w.__t0 = undefined; w.__t1 = undefined;
@@ -39,42 +39,51 @@ test("AC1: pressing C on a screen where I can write focuses a title field within
   }
 });
 
-test("AC2: a title and Enter creates the task in the last-used project, assigned to me, with an Undo toast", async ({ admin, later }) => {
+test("AC2: a dated title and Enter creates the task in the last-used project, assigned to me, with an Undo toast", async ({ admin, later }) => {
   const p = await project(admin, later, "14.5 add");
   const page = admin.page;
   const first = zz("14.5 first");
   const second = zz("14.5 second");
   await page.goto("/");
-  await expect(page.getByRole("button", { name: "+ New task" })).toBeVisible();
+  await expect(page.getByRole("banner").getByRole("button", { name: "+ New task", exact: true })).toBeVisible();
   // First add: choose the ZZ-TEST project once, so it becomes the last-used one.
   await page.keyboard.press("c");
   await page.locator("#qa-title").fill(first);
   await page.locator("#qa-proj").selectOption({ label: p.name });
+  // Released due-date requirement supersedes the old undated three-action flow: Enter alone must not create a task.
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("dialog", { name: "New task" })).toBeVisible();
+  await expect(page.getByRole("dialog", { name: "New task" }).getByRole("button", { name: "Add task", exact: true })).toBeDisabled();
+  expect(await tasksOf(admin, p.pid)).toHaveLength(0);
+  await page.locator("#qa-date").fill("tomorrow");
+  await expect(page.locator("#qa-date-note")).toHaveText(`Due ${label(IST(1))}`);
   const reloaded = page.waitForResponse((r) => r.url().includes("/api/quick-add") && r.request().method() === "GET");
   await page.keyboard.press("Enter");
   await expect(page.getByRole("dialog", { name: "New task" })).toHaveCount(0);
   await reloaded; // the screen refreshes its list of places to add to after each add
-  // Second add: three actions in total. C, type, Enter.
+  // Second add retains the last project and supplies the now-required due date.
   await page.keyboard.press("c");
   await expect(page.locator("#qa-proj")).toHaveValue(p.pid); // last used
   await page.keyboard.type(second);
+  await page.locator("#qa-date").fill("tomorrow");
   await page.keyboard.press("Enter");
   const toast = page.locator(".undo-toast");
   await expect(toast).toContainText("Undo");
   let found: Awaited<ReturnType<typeof tasksOf>>[number] | undefined;
   await expect(async () => { found = (await tasksOf(admin, p.pid)).find((t) => t.title === second); expect(found, "the task exists in the last-used project").toBeTruthy(); }).toPass({ timeout: 8000 });
   expect(found!.assignee.id).toBe(admin.user.id); // assigned to me
+  expect(found!.dueDate?.slice(0, 10)).toBe(IST(1).toISOString().slice(0, 10));
   // Undo removes it again.
   await toast.getByRole("button", { name: "Undo" }).click();
   await expect(async () => { expect((await tasksOf(admin, p.pid)).some((t) => t.title === second)).toBe(false); }).toPass({ timeout: 8000 });
-  later(async () => { for (const t of await tasksOf(admin, p.pid)) await admin.api.del(`/api/tasks/${t.id}`); });
+  later(async () => { for (const t of await tasksOf(admin, p.pid)) await deleteFixtureTask(admin, t.id); });
 });
 
 test("AC3: 'tomorrow' and 'fri' in the date field resolve to a date that is shown before saving", async ({ admin, later }) => {
   await project(admin, later, "14.5 dates");
   const page = admin.page;
   await page.goto("/");
-  await expect(page.getByRole("button", { name: "+ New task" })).toBeVisible();
+  await expect(page.getByRole("banner").getByRole("button", { name: "+ New task", exact: true })).toBeVisible();
   await page.keyboard.press("c");
   const note = page.locator("#qa-date-note");
   await page.locator("#qa-date").fill("tomorrow");
@@ -97,7 +106,7 @@ test("AC4: with only Viewer roles the shortcut does nothing and the button is ab
   await page.route("**/api/quick-add", (r) => r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ projects: [], lastProjectId: null }) }));
   await page.goto("/my-tasks");
   await expect(page.getByRole("heading", { name: "My tasks" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "+ New task" })).toHaveCount(0);
+  await expect(page.getByRole("banner").getByRole("button", { name: "+ New task", exact: true })).toHaveCount(0);
   await page.keyboard.press("c");
   await expect(page.getByRole("dialog", { name: "New task" })).toHaveCount(0);
 });
