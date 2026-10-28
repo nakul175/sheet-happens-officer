@@ -78,3 +78,24 @@
 .shell:is(.projects-shell, :has(.project-list-view), :has(.project-board-view)) .projects-archived .pcard h2 { font-size: 18px; }
 .shell:is(.projects-shell, :has(.project-list-view), :has(.project-board-view)) .projects-archived .project-description { margin: 8px 0 12px; font-size: 14px; }
 .shell:is(.projects-shell, :has(.project-list-view), :has(.project-board-view)) .projects-archived .project-people { flex-direction: row; flex-wrap: wrap; gap: 12px; }
+
+/* SHO-2909 / APL-2571: keep the saved Compact choice effective after approved List styling. */
+@media (min-width: 1024px) {
+  .shell[data-density="compact"] .project-list-view { padding-top: 12px; }
+  .shell[data-density="compact"] .project-list-view .project-breadcrumb { margin-bottom: 4px; }
+  .shell[data-density="compact"] .project-list-view .head { margin-bottom: 6px; }
+  .shell[data-density="compact"] .project-list-view .head h1.pt { margin: 0; font-size: 20px; }
+  .shell[data-density="compact"] .project-list-view .head .sub { margin: 2px 0; font-size: 12.5px; }
+  .shell[data-density="compact"] .project-list-view .head .sub .chip { padding: 2px 8px; font-size: 12px; line-height: 16px; }
+  .shell[data-density="compact"] .project-list-view .nudge { margin: 6px 0; padding: 6px 12px; }
+  .shell[data-density="compact"] .project-list-view .nudge .btn { min-height: 28px; padding: 3px 8px; font-size: 13px; }
+  .shell[data-density="compact"] .project-list-view > .tabs { margin: 2px 0 6px; }
+  .shell[data-density="compact"] .project-list-view .tabs [role="tab"] { min-height: 34px; padding: 4px 8px; }
+  .shell[data-density="compact"] .project-list-view .project-task-section { padding: 8px 12px; margin: 10px 0 4px; }
+  .shell[data-density="compact"] .project-list-view .project-task-section > .grp { margin: 0 0 4px; font-size: 14px; }
+  .shell[data-density="compact"] .project-list-view .project-task-section > .grp .btn { min-height: 28px; padding: 2px 8px; }
+  .shell[data-density="compact"] .project-list-view .project-task-section > .grp .selall { width: 28px; min-width: 28px; height: 28px; }
+  .shell[data-density="compact"] .project-list-view .item { padding: 3px 4px; min-height: 30px; gap: 10px; font-size: 13.5px; }
+  .shell[data-density="compact"] .project-list-view .item .t b { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .shell[data-density="compact"] .project-list-view .item .meta { display: flex; gap: 8px; flex-wrap: nowrap; }
+}
