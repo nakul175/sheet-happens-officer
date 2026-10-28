@@ -18,7 +18,7 @@ test.beforeAll(() => {
   if (!passwordOk(PASS)) throw new Error("SHO_QA_PASS must be at least 8 characters with a letter and a number.");
 });
 
-async function project(admin: { api: import("../support").Api; user: { id: string } }, later: (f: () => Promise<unknown>) => void, label: string) {
+async function project(admin: import("../support").Who, later: (f: () => Promise<unknown>) => void, label: string) {
   const r = await admin.api.post("/api/projects", { name: zz(label), leaderId: admin.user.id });
   expect(r.status).toBe(201);
   const id = r.json.project.id as string;
