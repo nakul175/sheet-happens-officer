@@ -76,7 +76,7 @@ test.describe("qa:TC missing APL-2691", { tag: "@APL-2691" }, () => {
       await admin.page.goto(`/projects/${deal.id}`);
       // Read the order the person actually sees, before the dialog hides the task rows.
       const titlePattern = new RegExp(made.titles.map(title => title.replace(/[.*+?^$(){}|[\]\\]/g, "\\$&")).join("|"));
-      const taskRows = admin.page.getByRole("button").filter({ hasText: titlePattern });
+      const taskRows = admin.page.getByRole("link").filter({ hasText: titlePattern });
       await expect(taskRows).toHaveCount(21);
       const displayedTitles = (await taskRows.allTextContents()).map(text => {
         const matches = made.titles.filter(title => text.includes(title));
