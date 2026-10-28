@@ -72,7 +72,7 @@ describe("qa:TC missing open tasks that block Won (APL-2691)", () => {
     const orgId = (await lead.c.post("/api/orgs", { force: true, name: `Org 2691 ${Date.now()}` })).json.organisation.id as string;
     const step = `Call the buyer ${Date.now()}`;
     const made = await lead.c.post("/api/deals", {
-      name: `Deal 2691 ${Date.now()}`, organisationId: orgId, pipelineId: pro.id, leaderId: lead.id, whyPursue: "fit",
+      force: true, name: `Deal 2691 ${Date.now()}`, organisationId: orgId, pipelineId: pro.id, leaderId: lead.id, whyPursue: "fit",
       nextStep: { title: step, dueDate: istDate(3) },
     });
     expect(made.status, JSON.stringify(made.json)).toBe(201);
@@ -114,7 +114,7 @@ describe("qa:TC missing open tasks that block Won (APL-2691)", () => {
     const orgId = (await lead.c.post("/api/orgs", { force: true, name: `Org sub 2691 ${Date.now()}` })).json.organisation.id as string;
     const step = `Parent step ${Date.now()}`;
     const made = await lead.c.post("/api/deals", {
-      name: `Deal sub 2691 ${Date.now()}`, organisationId: orgId, pipelineId: pro.id, leaderId: lead.id, whyPursue: "fit",
+      force: true, name: `Deal sub 2691 ${Date.now()}`, organisationId: orgId, pipelineId: pro.id, leaderId: lead.id, whyPursue: "fit",
       nextStep: { title: step, dueDate: istDate(3) },
     });
     expect(made.status, JSON.stringify(made.json)).toBe(201);

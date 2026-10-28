@@ -145,7 +145,7 @@ describe("qa:TC missing APL-2729 AC1-AC3: reminder jobs apply crmProjectWhere in
     const org = await dealAdmin.c.post("/api/orgs", { force: true, name: `ZZ-TEST Org ${tag}` });
     expect(org.status, JSON.stringify(org.json)).toBe(201);
     const made = await dealAdmin.c.post("/api/deals", {
-      name: dealName,
+      force: true, name: dealName,
       organisationId: org.json.organisation.id,
       pipelineId: pipe!.id,
       leaderId: dealAdmin.id,

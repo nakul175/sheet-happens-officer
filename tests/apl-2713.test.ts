@@ -77,7 +77,7 @@ describe("qa:TC missing APL-2713 handed-off deal tasks follow CRM visibility", (
     const org = await approver.c.post("/api/orgs", { force: true, name: `ZZ-TEST Buyer ${Date.now()}` });
     expect(org.status, JSON.stringify(org.json)).toBe(201);
     const made = await editor.c.post("/api/deals", {
-      name: DEAL_NAME,
+      force: true, name: DEAL_NAME,
       organisationId: org.json.organisation.id,
       pipelineId: proactive.id,
       leaderId: approver.id,

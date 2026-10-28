@@ -164,7 +164,7 @@ describe("qa:TC missing APL-2875 a caller who cannot see a task gets the missing
     const org = await s.lead.c.post("/api/orgs", { force: true, name: `ZZ-TEST APL-2875 buyer ${RUN}` });
     expect(org.status, JSON.stringify(org.json)).toBe(201);
     const deal = await s.lead.c.post("/api/deals", {
-      name: `ZZ-TEST APL-2875 deal ${RUN}`, organisationId: org.json.organisation.id, pipelineId: pipeline.id,
+      force: true, name: `ZZ-TEST APL-2875 deal ${RUN}`, organisationId: org.json.organisation.id, pipelineId: pipeline.id,
       leaderId: s.lead.id, whyPursue: "ZZ-TEST", nextStep: { title: "ZZ-TEST call", dueDate: istDate(3) },
     });
     expect(deal.status, JSON.stringify(deal.json)).toBe(201);

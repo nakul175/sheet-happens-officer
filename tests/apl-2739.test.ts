@@ -12,7 +12,7 @@ async function negotiationDeal(lead: Account, extra: Record<string, unknown> = {
   const org = await lead.c.post("/api/orgs", { force: true, name: `Org 2739 ${Date.now()}-${seq++}` });
   expect(org.status, JSON.stringify(org.json)).toBe(201);
   const r = await lead.c.post("/api/deals", {
-    name: `Deal 2739 ${Date.now()}-${seq++}`, organisationId: org.json.organisation.id, pipelineId: pro.id, leaderId: lead.id,
+    force: true, name: `Deal 2739 ${Date.now()}-${seq++}`, organisationId: org.json.organisation.id, pipelineId: pro.id, leaderId: lead.id,
     whyPursue: "Strong fit", nextStep: { title: "Call the buyer", dueDate: istDate(3) }, ...extra,
   });
   expect(r.status, JSON.stringify(r.json)).toBe(201);

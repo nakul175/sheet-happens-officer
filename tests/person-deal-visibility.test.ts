@@ -97,7 +97,7 @@ describe("qa:TC missing APL-2728 person page hides a deal CRM_VISIBLE conceals",
     organisationId = org.json.organisation.id as string;
     // Member A is an editor. The admin leads the deal, so GET /api/team/<adminId> lists it.
     const made = await sa.c.post("/api/deals", {
-      name: DEAL_NAME,
+      force: true, name: DEAL_NAME,
       organisationId: org.json.organisation.id,
       pipelineId: pipe!.id,
       leaderId: adminUser.id,
@@ -144,7 +144,7 @@ describe("qa:TC missing APL-2728 person page hides a deal CRM_VISIBLE conceals",
   async function addHiddenDeal(name: string) {
     const sa = await superAdmin();
     const made = await sa.c.post("/api/deals", {
-      name,
+      force: true, name,
       organisationId,
       pipelineId,
       leaderId: adminUser.id,

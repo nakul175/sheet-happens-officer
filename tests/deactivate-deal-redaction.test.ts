@@ -114,7 +114,7 @@ describe("qa:TC missing APL-2735 deactivate 409 hides deals the caller cannot se
 
     for (const name of dealNames) {
       const made = await sa.c.post("/api/deals", {
-        name,
+        force: true, name,
         organisationId,
         pipelineId: pipe!.id,
         leaderId: dealLeader.id,
@@ -136,7 +136,7 @@ describe("qa:TC missing APL-2735 deactivate 409 hides deals the caller cannot se
     mixedDealName = `ZZ-TEST Mixed deal ${RUN}`;
     mixedProjectName = `ZZ-TEST Mixed project ${RUN}`;
     const mixedDeal = await sa.c.post("/api/deals", {
-      name: mixedDealName,
+      force: true, name: mixedDealName,
       organisationId,
       pipelineId: pipe!.id,
       leaderId: mixedLeader.id,
