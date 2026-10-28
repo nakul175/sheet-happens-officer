@@ -171,7 +171,7 @@ test("AC2: a contact is not a user and cannot be an assignee, collaborator, appr
   const worker = await ghost(admin, later, "worker");
   const project = await newProject(admin, later, { label: "contact roles" });
   expect((await admin.api.post(`/api/projects/${project.id}/members`, { userId: worker.id, role: "EDITOR" })).status).toBe(201);
-  const taskId = await newTask(admin, project.id, { title: zz("held by the worker"), assigneeId: worker.id });
+  const taskId = await newTask(admin, project.id, { title: zz("held by the worker"), dueDate: ymd(3), assigneeId: worker.id });
 
   const asAssignee = await admin.api.post(`/api/tasks/${taskId}/assign`, await withTaskVersion(admin.api, taskId, { assigneeId: contactId }));
   expect(asAssignee.status).toBe(400);
@@ -185,7 +185,7 @@ test("AC2: a contact is not a user and cannot be an assignee, collaborator, appr
   const asMember = await admin.api.post(`/api/projects/${project.id}/members`, { userId: contactId, role: "EDITOR" });
   expect(asMember.status).toBe(400);
   expect(asMember.json.error).toContain("active person");
-  const onCreate = await admin.api.post(`/api/projects/${project.id}/tasks`, { title: zz("refused assignee"), assigneeId: contactId });
+  const onCreate = await admin.api.post(`/api/projects/${project.id}/tasks`, { title: zz("refused assignee"), dueDate: ymd(3), assigneeId: contactId });
   expect(onCreate.status).toBe(400);
   const task = (await admin.api.get(`/api/tasks/${taskId}`)).json.task as { assignee: { id: string }; collaborators: { id: string }[]; approver: { id: string } | null };
   expect(task.assignee.id).toBe(worker.id);
