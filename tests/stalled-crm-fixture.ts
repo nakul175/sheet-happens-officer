@@ -193,4 +193,7 @@ export async function cleanupStalledWorld(world: StalledWorld | undefined) {
   expect(people).toHaveLength(3);
   expect(projects.every(p => p.archivedAt !== null)).toBe(true);
   expect(people.every(p => p.deactivatedAt !== null)).toBe(true);
+  const organisations = await db.organisation.findMany({ where: { id: { in: world.resources.organisations.map(org => org.id) } }, select: { archivedAt: true } });
+  expect(organisations).toHaveLength(3);
+  expect(organisations.every(org => org.archivedAt !== null)).toBe(true);
 }

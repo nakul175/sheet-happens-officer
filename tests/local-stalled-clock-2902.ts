@@ -8,6 +8,15 @@ export function assertStalledFixtureTarget(databaseUrl = process.env.DATABASE_UR
   if (!LOCAL.has(host(database)) || !LOCAL.has(host(api)) || !/^postgres(?:ql)?:$/.test(database.protocol) || !/^https?:$/.test(api.protocol) || database.pathname !== "/sho_test") {
     throw new Error("Stalled fixtures require localhost API and sho_test database");
   }
+  // pg connection-string query keys can override authority fields (for example ?host=).
+  // Accept only the Prisma test schema and bounded local pool settings; never a target override.
+  const allowed = new Set(["schema", "connection_limit", "pool_timeout"]);
+  for (const [key, value] of database.searchParams) {
+    if (!allowed.has(key) || database.searchParams.getAll(key).length !== 1 ||
+      (key === "schema" ? !/^[A-Za-z_][A-Za-z0-9_]{0,62}$/.test(value) : !/^\d{1,3}$/.test(value))) {
+      throw new Error("Stalled fixtures refuse database target overrides");
+    }
+  }
 }
 /** The only non-API fixture operation: age three validated, run-owned deals atomically. */
 export async function ageLocalStalledDeals(ids: string[], tag: string) {

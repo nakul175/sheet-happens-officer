@@ -23,6 +23,11 @@ describe("qa:TC missing SHO-2902 guarded local fixture backdating", () => {
     await expect(ageLocalStalledDeals(ids, tag)).rejects.toThrow("localhost API and sho_test");
     expect(mocks.transaction).not.toHaveBeenCalled();
   });
+  it.each(["host=remote.example", "hostaddr=203.0.113.1", "dbname=live", "options=-csearch_path%3Dlive", "schema=one&schema=two", "schema=public%3Bdrop", "HOST=remote.example"])("qa:TC missing refuses connection override %s before any database call", async query => {
+    vi.stubEnv("DATABASE_URL", `postgresql://test:test@localhost/sho_test?${query}`);
+    await expect(ageLocalStalledDeals(ids, tag)).rejects.toThrow("database target overrides");
+    expect(mocks.transaction).not.toHaveBeenCalled();
+  });
   it("qa:TC missing accepts IPv6 localhost without exposing URL credentials", () => {
     expect(() => assertStalledFixtureTarget("postgresql://test:secret@[::1]/sho_test", "http://[::1]:3100")).not.toThrow();
     expect(() => assertStalledFixtureTarget("not-a-url-secret", "http://localhost")).toThrow("Stalled fixtures require local test targets");
