@@ -155,6 +155,10 @@ jobs:
         run: |
           npx playwright test tests/e2e/stories/APL-2720.spec.ts --reporter=json > validation-2900-browser.json
           node -e 'const r=require("./validation-2900-browser.json");const s=r.stats;if(!s||s.expected!==6||s.unexpected!==0||s.skipped!==0||s.flaky!==0||(r.errors??[]).length){console.error("SHO-2900 requires 6 passed, zero failures/skips",s);process.exit(1)}console.log("SHO-2900: 6 passed, zero failures/skips")' | tee validation-2900-browser.log
+      - name: SHO-2905 migrated task sheet browser acceptance (Chromium emulation only)
+        run: |
+          npx playwright test tests/e2e/stories/APL-2555.spec.ts --output=test-results/sho-2905-sheet --reporter=json > validation-2905-browser.json
+          node -e 'const r=require("./validation-2905-browser.json"),s=r.stats;if(!s||s.expected!==9||s.unexpected||s.skipped||s.flaky||(r.errors??[]).length)throw Error("Task sheet requires nine passed, zero skipped/failed");console.log("SHO-2905: nine task sheet browser cases passed; no physical device claim")' | tee validation-2905-browser.log
       - name: Existing public offline and no-private-cache browser acceptance
         run: npx playwright test tests/e2e/stories/APL-2558.spec.ts --grep "AC4:" | tee validation-offline.log
       - name: Record user-approved UI-only provider exclusion
@@ -186,4 +190,6 @@ jobs:
             validation-2759-browser.json
             release12-drain.json
             test-results/e2e
+            test-results/sho-2905-sheet/
+            validation-2905-browser.json
             workload-ui-previews/
