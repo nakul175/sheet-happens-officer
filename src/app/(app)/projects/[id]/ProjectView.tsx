@@ -9,6 +9,7 @@ import { PRIORITY, ROLE, api, dueLabel, dueState, rowKeys, isOverdue, todayIST, 
 import { errorMessage, isVersionConflict } from "@/lib/version-error";
 import { WorkspaceTaskPerson, type WorkspaceTaskCandidate } from "@/components/WorkspaceTaskPerson";
 import { TaskModal } from "@/components/TaskModal";
+import { openTaskSheet } from "@/lib/task-sheet-history";
 import { AvatarGroup, Pri, SectionSelection, Tick } from "@/components/TaskParts";
 import { Confirm, Field, LoadFailed, Menu, Modal, Skeleton } from "@/components/ui";
 import { MoveSheet } from "@/components/MoveSheet";
@@ -128,8 +129,8 @@ function Inner({ id }: { id: string }) {
     return `${path}${t ? `?${t}` : ""}`;
   };
   const setView = (v: string) => router.push(urlWith({ view: v === "board" ? "board" : null, task: null }), { scroll: false });
-  const openTask = (tid: string) => router.push(urlWith({ task: tid }), { scroll: false });
-  const closeTask = () => router.push(urlWith({ task: null }), { scroll: false });
+  const openTask = (tid: string) => { const href = urlWith({ task: tid }); if (!openTaskSheet(href)) router.push(href, { scroll: false }); };
+  const closeTask = () => router.replace(urlWith({ task: null }), { scroll: false });
   const views = vw.data?.views ?? [];
   const maxViews = vw.data?.max ?? 10;
   const activeView = view === "list" ? views.find((v) => sameState(v.state, ls)) : undefined;

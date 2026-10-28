@@ -16,5 +16,16 @@ it('restores the invoking control after an autofocus form closes with Escape',as
   await mount();const opener=await click('Open form');expect(document.querySelector('[role="dialog"]')).not.toBeNull();await escape();expect(document.querySelector('[role="dialog"]')).toBeNull();expect(document.activeElement).toBe(opener);
 });
 it('returns from nested confirmation to its trigger, then Cancel to the original invoker',async()=>{
-  await mount();const opener=await click('Open form');const nested=await click('Open confirmation');expect(document.querySelectorAll('[role="dialog"]')).toHaveLength(2);await escape();expect(document.querySelectorAll('[role="dialog"]')).toHaveLength(1);expect(document.activeElement).toBe(nested);await click('Cancel');expect(document.activeElement).toBe(opener);
+  await mount();
+  const opener=await click('Open form');
+  const nested=await click('Open confirmation');
+  expect(document.querySelectorAll('[role="dialog"]')).toHaveLength(2);
+  await escape();
+  expect(document.querySelectorAll('[role="dialog"]')).toHaveLength(1);
+  expect(document.activeElement).toBe(nested);
+  expect(document.body.style.overflow).toBe('hidden');
+  expect(document.body.classList.contains('vv-sheet')).toBe(true);
+  await click('Cancel');
+  expect(document.activeElement).toBe(opener);
+  expect(document.body.classList.contains('vv-sheet')).toBe(false);
 });

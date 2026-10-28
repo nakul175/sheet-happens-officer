@@ -23,7 +23,7 @@ it('keeps admin utilities out of primary navigation and preserves account keyboa
  await act(async()=>trigger.click());expect(document.querySelector('.account-options')!.textContent).toContain('Audit log');
  await act(async()=>document.querySelector<HTMLButtonElement>('.account-options .density')!.click());expect(state.density).toHaveBeenCalledWith('PUT','/api/profile/density',{compact:true});
  await act(async()=>document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true})));
- expect(document.querySelector('.account-options')).toBeNull();expect(document.activeElement).toBe(trigger);
+ await vi.waitFor(async()=>{await act(async()=>{});expect(document.querySelector('.account-options')).toBeNull();expect(document.activeElement).toBe(trigger);});
 });
 it('does not expose admin links to members and retains distinct Home and My tasks destinations',async()=>{
  await mount('MEMBER');await act(async()=>document.querySelector<HTMLButtonElement>('.account-trigger')!.click());

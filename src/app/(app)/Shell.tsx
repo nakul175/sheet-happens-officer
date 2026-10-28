@@ -11,6 +11,16 @@ import { ConciergeBar, ConciergeDock, ConciergeFab } from "@/components/concierg
 import { Bell } from "./Bell";
 import { ConciergeHost, ConciergeNavItem, openConcierge } from "@/components/concierge/Launcher";
 import { Extras, NewTaskButton, SearchButton } from "@/components/extras/Extras";
+import { useOverlayBack } from "@/components/use-overlay-back";
+
+function followOverlayLink(e: React.MouseEvent, close: (after?: () => void) => void, push: (href: string) => void) {
+  if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+  const anchor = (e.target as Element).closest<HTMLAnchorElement>("a[href]");
+  if (!anchor || anchor.target || anchor.hasAttribute("download")) return;
+  const url = new URL(anchor.href);
+  if (url.origin !== location.origin) return;
+  e.preventDefault(); close(() => push(`${url.pathname}${url.search}${url.hash}`));
+}
 
 export type Me = { id: string; name: string; email: string; orgRole: "MEMBER" | "ADMIN" | "SUPER_ADMIN"; crm?: boolean; review?: boolean; compact?: boolean; startGuide?: boolean };
 const MeCtx = createContext<Me | null>(null);
@@ -20,11 +30,13 @@ export const roleLabel = (r: Me["orgRole"]) => (r === "SUPER_ADMIN" ? "Super Adm
 /** SHO-US-22.4: bottom tab bar under 600 px. The server still decides who may open Usage and Audit; this only decides what is listed. */
 function TabBar({ user, here, more }: { user: Me; here: (p: string) => boolean; more: [string, string][] }) {
   const path = usePathname();
+  const router = useRouter();
   const [openAt, setOpenAt] = useState<string | null>(null); // the menu belongs to the page it was opened on
   const open = openAt === path;
   const setOpen = (v: boolean | ((x: boolean) => boolean)) => setOpenAt((cur) => ((typeof v === "function" ? v(cur === path) : v) ? path : null));
   const [typing, setTyping] = useState(false);
   const box = useRef<HTMLDivElement>(null);
+  const closeMore = useOverlayBack(open, () => { setOpenAt(null); box.current?.querySelector<HTMLButtonElement>('.tabbar button[aria-haspopup="menu"]')?.focus(); }, () => box.current);
   useEffect(() => {
     // The keyboard hides the bar (a field has focus), so it never sits on top of what is being typed.
     // A pointer that starts while a field is focused keeps the bar hidden until pointerup: otherwise
@@ -59,20 +71,20 @@ function TabBar({ user, here, more }: { user: Me; here: (p: string) => boolean; 
   }, []);
   useEffect(() => {
     if (!open) return;
-    const esc = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
-    const away = (e: Event) => { if (!box.current?.contains(e.target as Node)) setOpen(false); };
+    const esc = (e: KeyboardEvent) => { if (e.key === "Escape") closeMore(); };
+    const away = (e: Event) => { if (!box.current?.contains(e.target as Node)) closeMore(); };
     document.addEventListener("keydown", esc);
     document.addEventListener("pointerdown", away);
     return () => { document.removeEventListener("keydown", esc); document.removeEventListener("pointerdown", away); };
-  }, [open]);
+  }, [open, closeMore]);
   const tabs: [string, string, string][] = [["/", "Home", "⌂"], ["/my-tasks", "My tasks", "✓"], ["/projects", "Projects", "▤"], ["/search", "Search", "⌕"]];
   const moreHere = more.some(([h]) => here(h)) || here("/profile");
   return (
     <div className={`tabbar-wrap${typing ? " typing" : ""}`} ref={box}>
       {open && (
-        <div className="tabmore" role="menu" aria-label="More">
+        <div className="tabmore" role="menu" aria-label="More" onClickCapture={e => followOverlayLink(e, closeMore, href => router.push(href))}>
           {more.map(([h, l]) => <Link key={h} href={h} role="menuitem">{l}</Link>)}
-          <button role="menuitem" onClick={() => { setOpen(false); openConcierge(); }}>Concierge</button>
+          <button role="menuitem" onClick={() => closeMore(openConcierge)}>Concierge</button>
           <Link href="/profile" role="menuitem">Profile</Link>
           <button role="menuitem" onClick={async () => { await api("POST", "/api/auth/signout", {}); window.location.href = "/signin"; }}>Sign out</button>
         </div>
@@ -81,7 +93,7 @@ function TabBar({ user, here, more }: { user: Me; here: (p: string) => boolean; 
         {tabs.map(([h, l, i]) => (
           <Link key={h} href={h} aria-current={here(h) ? "page" : undefined}><span aria-hidden>{i}</span>{l}</Link>
         ))}
-        <button aria-expanded={open} aria-haspopup="menu" aria-current={moreHere ? "true" : undefined} onClick={() => setOpen((v) => !v)}><span aria-hidden>⋯</span>More</button>
+        <button aria-expanded={open} aria-haspopup="menu" aria-current={moreHere ? "true" : undefined} onClick={() => { if (open) closeMore(); else setOpen(true); }}><span aria-hidden>⋯</span>More</button>
       </nav>
     </div>
   );
@@ -98,6 +110,7 @@ function DensityToggle({ compact, onChange }: { compact: boolean; onChange: (v: 
 
 export function Shell({ user, children }: { user: Me; children: React.ReactNode }) {
   const path = usePathname();
+  const router = useRouter();
   const [compact, setCompact] = useState(!!user.compact);
   const chooseDensity = async (v: boolean) => {
     setCompact(v);
@@ -113,15 +126,17 @@ export function Shell({ user, children }: { user: Me; children: React.ReactNode 
   const [utilityAt, setUtilityAt] = useState<string | null>(null);
   const utilityOpen = utilityAt === path;
   const utility = useRef<HTMLDivElement>(null);
+  const closeUtility = useOverlayBack(utilityOpen, () => { setUtilityAt(null); utility.current?.querySelector<HTMLButtonElement>(".account-trigger")?.focus(); }, () => utility.current);
   useEffect(() => {
     if (!utilityOpen) return;
-    const close = (e: KeyboardEvent) => { if (e.key === "Escape") { setUtilityAt(null); utility.current?.querySelector<HTMLButtonElement>(".account-trigger")?.focus(); } };
-    const away = (e: PointerEvent) => { if (!utility.current?.contains(e.target as Node)) setUtilityAt(null); };
+    const close = (e: KeyboardEvent) => { if (e.key === "Escape") closeUtility(); };
+    const away = (e: PointerEvent) => { if (!utility.current?.contains(e.target as Node)) closeUtility(); };
     document.addEventListener("keydown", close); document.addEventListener("pointerdown", away);
     return () => { document.removeEventListener("keydown", close); document.removeEventListener("pointerdown", away); };
-  }, [utilityOpen]);
+  }, [utilityOpen, closeUtility]);
   const primary = items.filter(([h]) => !["/search", "/usage", "/audit"].includes(h));
   const drawer = useRef<HTMLElement>(null);
+  const closeDrawer = useOverlayBack(open, () => setMenu(null), () => drawer.current);
   const shellElement = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const shell = shellElement.current;
@@ -140,7 +155,7 @@ export function Shell({ user, children }: { user: Me; children: React.ReactNode 
     const el = drawer.current;
     el?.querySelector<HTMLElement>("a")?.focus();
     const key = (e: KeyboardEvent) => {
-      if (e.key === "Escape") { setMenu(null); return; }
+      if (e.key === "Escape") { closeDrawer(); return; }
       if (e.key !== "Tab" || !el) return;
       const f = [...el.querySelectorAll<HTMLElement>("a[href], button")];
       if (!f.length) return;
@@ -150,21 +165,21 @@ export function Shell({ user, children }: { user: Me; children: React.ReactNode 
     };
     document.addEventListener("keydown", key);
     return () => { document.removeEventListener("keydown", key); document.querySelector<HTMLElement>(".burger")?.focus(); };
-  }, [open]);
+  }, [open, closeDrawer]);
   return (
     <MeCtx.Provider value={user}>
       <ConciergeProvider>
       <Extras>
       <div ref={shellElement} className={`shell${(path === "/projects" || path === "/projects/new") ? " projects-shell" : ""}`} data-density={compact ? "compact" : undefined}>
         <a className="skip" href="#main" onClick={(e) => { e.preventDefault(); const m = document.getElementById("main"); m?.focus(); m?.scrollIntoView(); }}>Skip to content</a>
-        {open && <div className="veil" onClick={() => setMenu(null)} />}
-        <aside ref={drawer} className={`side${open ? " open" : ""}`} aria-label="Main">
+        {open && <div className="veil" onClick={() => closeDrawer()} />}
+        <aside ref={drawer} className={`side${open ? " open" : ""}`} aria-label="Main" onClickCapture={open ? e => followOverlayLink(e, closeDrawer, href => router.push(href)) : undefined}>
           <Link href="/" className="brand" aria-label="Sheet Happens Officer home"><img src="/logo-icon-reversed.svg" alt="" />Sheet Happens Officer</Link>
           <nav className="nav">
             {items.map(([href, label]) => (
               <Link key={href} href={href} aria-current={here(href) ? "page" : undefined}>{label}</Link>
             ))}
-            <ConciergeNavItem onPick={() => setMenu(null)} />
+            <ConciergeNavItem onPick={reveal => closeDrawer(reveal)} />
           </nav>
           <Link href="/profile" className="me" aria-current={here("/profile") ? "page" : undefined}>
             <span className="av">{initials(user.name)}</span>
@@ -173,7 +188,7 @@ export function Shell({ user, children }: { user: Me; children: React.ReactNode 
         </aside>
         <div className="main">
           <header className="top">
-            <button className="burger" aria-label="Open menu" onClick={() => setMenu(path)}>☰</button>
+            <button className="burger" aria-label="Open menu" aria-expanded={open} onClick={() => setMenu(path)}>☰</button>
             <Link href="/" className="top-brand" aria-label="Sheet Happens Officer home"><img src="/logo-icon-reversed.svg" alt="" /><span className="wordmark-full" aria-hidden="true">Sheet Happens Officer</span><span className="wordmark-short" aria-hidden="true">SHO</span></Link>
             <nav className="primary-nav" aria-label="Primary">{primary.map(([href, label]) => <Link key={href} href={href} aria-current={here(href) ? "page" : undefined}>{label}</Link>)}</nav>
             <span className="grow" />
@@ -181,13 +196,13 @@ export function Shell({ user, children }: { user: Me; children: React.ReactNode 
             <NewTaskButton />
             <Bell />
             <div className="account-menu" ref={utility}>
-              <button className="account-trigger" aria-label="Account and utilities" aria-expanded={utilityOpen} aria-controls="account-utilities" onClick={() => setUtilityAt(utilityOpen ? null : path)}><span className="av">{initials(user.name)}</span></button>
-              {utilityOpen && <div className="account-options" id="account-utilities" aria-label="Account and utilities">
+              <button className="account-trigger" aria-label="Account and utilities" aria-expanded={utilityOpen} aria-controls="account-utilities" onClick={() => { if (utilityOpen) closeUtility(); else setUtilityAt(path); }}><span className="av">{initials(user.name)}</span></button>
+              {utilityOpen && <div className="account-options" id="account-utilities" aria-label="Account and utilities" onClickCapture={e => followOverlayLink(e, closeUtility, href => router.push(href))}>
                 <strong>{user.name}</strong><small>{roleLabel(user.orgRole)}</small>
                 <Link href="/profile">Profile</Link>
                 {items.filter(([h]) => ["/usage", "/audit"].includes(h)).map(([h,l]) => <Link href={h} key={h}>{l}</Link>)}
                 <DensityToggle compact={compact} onChange={chooseDensity} />
-                <ConciergeNavItem onPick={() => setUtilityAt(null)} />
+                <ConciergeNavItem onPick={reveal => closeUtility(reveal)} />
                 <SignOut />
               </div>}
             </div>
