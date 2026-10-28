@@ -57,7 +57,7 @@ jobs:
           cache: npm
       - run: npm ci --no-audit --no-fund
       - name: Sequential SHO-3038 release scope
-        run: node --test scripts/acceptance/sho-3038-scope.test.mjs
+        run: node --test scripts/acceptance/sho-3038-scope.test.mjs scripts/ci/stalled-m1-result.test.mjs scripts/ci/stalled-m1-freshness.test.mjs
       - name: Approved Projects UI, Board and task-details regressions
         run: npx vitest run -c vitest.projects-approved.config.mts
       - name: Approved Home and single-row shell regressions
@@ -113,6 +113,10 @@ jobs:
         run: npx vitest run -c vitest.sho-2682.config.mts
       - name: All unit and integration tests present in this selective release
         run: npx vitest run -c vitest.scoped4-all.config.mts | tee validation-all-release.log
+      - name: SHO-2903 exact-row assertions detect M1
+        run: node scripts/ci/stalled-m1-proof.mjs
+      - name: SHO-2902 stalled notice Bell browser acceptance
+        run: npx vitest run -c vitest.stalled-bell-2902.config.mts | tee validation-2902-bell.log
       - name: Accepted15 component, database and SQL regressions
         run: npx vitest run -c vitest.release12.config.mts | tee validation-accepted15.log
       - name: Deterministic2693 and2897 owned-outbox contracts
@@ -181,6 +185,7 @@ jobs:
           path: |
             scoped4-live-gate.json
             validation-*.log
+            test-results/sho-2903-m1/
             validation-2900-browser.json
             validation-2759-browser.json
             validation-3133-outcomes.json
