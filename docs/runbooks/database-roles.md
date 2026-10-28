@@ -25,6 +25,7 @@ SHO_2687_ENV_FILE=/etc/sho-staging/db.env \
 SHO_2687_ADMIN_ENV_FILE=/etc/sho/app.env \
 SHO_2687_APP_ROLE=sho_staging_app \
 SHO_2687_ADMIN_ROLE=doadmin \
+SHO_2687_MANAGED_ROLE=true \
 SHO_2687_SCHEMA=sho \
 SHO_2687_SERVICE=sho-staging.service \
 SHO_2687_RELEASE_ROOT=/opt/sho-staging \
@@ -40,6 +41,12 @@ When `SHO_2687_ADMIN_ENV_FILE` differs from the selected runtime env, only its
 root-only `DIRECT_DATABASE_URL` credentials are used. The operator forcibly
 retargets that connection to the runtime URL's database before changing roles
 or grants, preventing staging grants from landing in the maintenance database.
+
+Set `SHO_2687_MANAGED_ROLE=true` when DigitalOcean created the database user or
+reset its password. The operator then requires the role to exist and never
+attempts SQL role creation or password/attribute changes. It still proves that
+the managed role has no elevated attributes, memberships, schema `CREATE`, or
+DDL capability before switching the runtime.
 
 After the staging receipt, exact health response, application smoke tests, migration status, DML checks, DDL denial and rollback have been verified, run production with the explicit production approval and pinned release:
 

@@ -80,6 +80,14 @@ describe("SHO-2687 least-privilege database rollout contract", () => {
     expect(implementation).not.toContain("NODE_TLS_REJECT_UNAUTHORIZED");
   });
 
+  it("supports control-plane-managed users without SQL password rotation", () => {
+    expect(implementation).toContain('value("SHO_2687_MANAGED_ROLE", "false") === "true"');
+    expect(implementation).toContain("must already exist because SHO_2687_MANAGED_ROLE=true");
+    expect(implementation).toContain("if (!managedRole) {");
+    expect(implementation).toContain("managedRole,");
+    expect(runbook).toContain("SHO_2687_MANAGED_ROLE=true");
+  });
+
   it("enforces DML-only rights and forbidden role attributes", () => {
     for (const privilege of ["SELECT", "INSERT", "UPDATE", "DELETE"]) {
       expect(implementation).toContain(privilege);

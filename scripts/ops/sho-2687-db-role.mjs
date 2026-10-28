@@ -167,6 +167,7 @@ async function main() {
   const service = value("SHO_2687_SERVICE", "sho.service");
   const healthUrl = value("SHO_2687_HEALTH_URL", "http://127.0.0.1:3000/api/health");
   const passwordFile = process.env.SHO_2687_PASSWORD_FILE;
+  const managedRole = value("SHO_2687_MANAGED_ROLE", "false") === "true";
 
   if (!ROLE_RE.test(role) || !ROLE_RE.test(schema) || !ROLE_RE.test(expectedAdmin)) fail("Role/schema names must be plain PostgreSQL identifiers.");
   const stat = await lstat(envFile);
@@ -195,7 +196,7 @@ async function main() {
   }
   if (directUrl.username !== expectedAdmin) fail(`DIRECT_DATABASE_URL must remain ${expectedAdmin}; found ${directUrl.username}.`);
   if (MODE === "plan") {
-    console.log(JSON.stringify({ mode: MODE, envFile, adminEnvFile, runtime: redacted(runtimeUrl), direct: redacted(directUrl), role, schema, service, healthUrl }));
+    console.log(JSON.stringify({ mode: MODE, envFile, adminEnvFile, runtime: redacted(runtimeUrl), direct: redacted(directUrl), role, schema, service, healthUrl, managedRole }));
     return;
   }
 
@@ -216,11 +217,16 @@ async function main() {
       await query(admin, "BEGIN");
       try {
         const existing = await query(admin, "SELECT 1 FROM pg_roles WHERE rolname = $1", [role]);
-        if (existing.rowCount === 0) {
+        if (managedRole && existing.rowCount === 0) {
+          fail(`${role} must already exist because SHO_2687_MANAGED_ROLE=true.`);
+        }
+        if (!managedRole && existing.rowCount === 0) {
           await query(admin, `CREATE ROLE ${JSON.stringify(role)} LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS`);
         }
-        const passwordLiteral = (await query(admin, "SELECT quote_literal($1) AS value", [password])).rows[0].value;
-        await query(admin, `ALTER ROLE ${JSON.stringify(role)} WITH LOGIN PASSWORD ${passwordLiteral} NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS`);
+        if (!managedRole) {
+          const passwordLiteral = (await query(admin, "SELECT quote_literal($1) AS value", [password])).rows[0].value;
+          await query(admin, `ALTER ROLE ${JSON.stringify(role)} WITH LOGIN PASSWORD ${passwordLiteral} NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS`);
+        }
         const database = (await query(admin, "SELECT current_database() AS value")).rows[0].value;
         await query(admin, `REVOKE ALL PRIVILEGES ON DATABASE ${JSON.stringify(database)} FROM ${JSON.stringify(role)}`);
         await query(admin, `GRANT CONNECT ON DATABASE ${JSON.stringify(database)} TO ${JSON.stringify(role)}`);
@@ -266,6 +272,7 @@ async function main() {
       runtimeUsesAppRole: true,
       directUsesAdminRole: directUrl.username === expectedAdmin,
       adminSourceSeparate: adminEnvFile !== envFile,
+      managedRole,
       dmlPrivilegesVerified: true,
       ddlDenied: true,
       service,
