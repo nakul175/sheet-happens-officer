@@ -30,7 +30,7 @@ describe("SHO-2589 workload", () => {
   });
   it("limits Leaders to their active led projects and those projects' active members", async () => {
     const result = await workload(leader);
-    expect(mocks.project.findMany.mock.calls[0][0].where).toEqual({ workspaceId: "w", archivedAt: null, members: { some: { userId: "lead", role: "LEADER" } } });
+    expect(mocks.project.findMany.mock.calls[0][0].where).toEqual({ workspaceId: "w", archivedAt: null, deletedAt: null, members: { some: { userId: "lead", role: "LEADER" } } });
     expect(mocks.user.findMany.mock.calls[0][0].where).toMatchObject({ workspaceId: "w", deactivatedAt: null, emailVerifiedAt: { not: null }, id: { in: ["worker"] } });
     expect(mocks.task.findMany.mock.calls[0][0].where).toMatchObject({ workspaceId: "w", projectId: { in: ["p1"] }, deletedAt: null, completedAt: null, OR: [{ parentId: null }, { parent: { deletedAt: null } }] });
     expect(result.people[0].counts).toMatchObject({ open: 1, overdue: 1, blocked: 0, awaiting: 0 });
@@ -43,7 +43,7 @@ describe("SHO-2589 workload", () => {
   });
   it("lets Admins count the whole workspace, including people with no tasks", async () => {
     const result = await workload(admin);
-    expect(mocks.project.findMany.mock.calls[0][0].where).toEqual({ workspaceId: "w", archivedAt: null });
+    expect(mocks.project.findMany.mock.calls[0][0].where).toEqual({ workspaceId: "w", archivedAt: null, deletedAt: null });
     expect(mocks.user.findMany.mock.calls[0][0].where.id).toBeUndefined();
     expect(result.people.find(p => p.id === "lead")?.counts.open).toBe(0);
   });

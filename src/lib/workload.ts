@@ -19,15 +19,16 @@ export function matchesWorkload(t: CountableTask, filter: WorkloadFilter, today 
 
 export async function workloadAvailable(user: Actor) {
   if (isAdmin(user)) return true;
-  return !!await db.projectMember.findFirst({ where: { userId: user.id, role: "LEADER", project: { archivedAt: null } }, select: { projectId: true } });
+  return !!await db.projectMember.findFirst({ where: { userId: user.id, role: "LEADER", project: { archivedAt: null, deletedAt: null } }, select: { projectId: true } });
 }
 
 export async function workload(user: Actor, query = new URLSearchParams()) {
   // Never accept project ids or a workspace from the caller.
   const actor = await db.user.findUnique({ where: { id: user.id }, select: { workspaceId: true, deactivatedAt: true, emailVerifiedAt: true } });
   if (!actor || actor.deactivatedAt || !actor.emailVerifiedAt) throw notFound("Workload");
+  // project-lookup-ok: Workload authorizes Admin workspace or led projects only; hidden CRM rows are redacted below.
   const projects = await db.project.findMany({
-    where: { workspaceId: actor.workspaceId, archivedAt: null, ...(isAdmin(user) ? {} : { members: { some: { userId: user.id, role: "LEADER" } } }) },
+    where: { workspaceId: actor.workspaceId, archivedAt: null, deletedAt: null, ...(isAdmin(user) ? {} : { members: { some: { userId: user.id, role: "LEADER" } } }) },
     select: { id: true, name: true, typeId: true, members: { select: { userId: true } } },
   });
   if (!isAdmin(user) && !projects.length) throw notFound("Workload");

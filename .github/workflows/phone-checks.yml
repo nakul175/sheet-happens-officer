@@ -48,6 +48,8 @@ jobs:
       SIGNIN_RETURN_TO: "on"
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: actions/setup-node@v4
         with:
           node-version: 22

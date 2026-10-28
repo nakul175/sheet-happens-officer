@@ -49,12 +49,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
       - run: npm ci --no-audit --no-fund
+      - name: SHO-2589 workload scope and focused permissions
+        run: |
+          node --test scripts/acceptance/sho2589-scope.test.mjs
+          npx vitest run -c vitest.scoped4-all.config.mts tests/workload-unit.test.ts
       - name: Sequential SHO-3038 release scope
         run: node --test scripts/acceptance/sho-3038-scope.test.mjs
       - name: Approved Projects UI, Board and task-details regressions
