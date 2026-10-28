@@ -1,0 +1,10 @@
+.workload { width: 100%; }
+.workload td a { display: inline-flex; min-width: 44px; min-height: 44px; align-items: center; justify-content: center; }
+@media (max-width: 599px) {
+  .workload, .workload tbody { display: block; }
+  .workload thead { display: none; }
+  .workload tr { display: grid; grid-template-columns: 1fr 1fr; border: 1px solid var(--line); border-radius: 12px; margin-bottom: 12px; padding: 12px; }
+  .workload th { grid-column: 1 / -1; text-align: left; overflow-wrap: anywhere; }
+  .workload td { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px; }
+  .workload td::before { content: attr(data-label); }
+}
