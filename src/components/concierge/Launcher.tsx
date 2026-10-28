@@ -69,7 +69,6 @@ export function ConciergeHost() {
       document.documentElement.style.removeProperty("--vvh");
       document.documentElement.style.removeProperty("--vvt");
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sheet]);
 
   function close() { setSheet(false); setTimeout(() => from.current?.focus?.(), 0); }
