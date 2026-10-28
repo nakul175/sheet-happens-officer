@@ -12,7 +12,7 @@ it("SHO-2589 counts only led active projects, includes subtasks, and reassigns w
     const child = await task(lead, p.id, { title: "Workload child", parentId: top, assigneeId: worker.id, dueDate: istDate(1) });
     expect((await patchTask(lead, child, { blocked: true, blockedReason: "Awaiting input" })).status).toBe(200);
     const gone = await task(lead, p.id, { title: "Trash excluded", assigneeId: worker.id });
-    expect((await lead.c.del(`/api/tasks/${gone}`)).status).toBe(200);
+    expect((await lead.c.del(`/api/tasks/${gone}`)).status).toBe(204);
     const r = await lead.c.get(`/api/workload?assignee=${worker.id}&f=open`);
     expect(r.status).toBe(200);
     expect(r.json.people.find((x: { id: string }) => x.id === worker.id).counts).toMatchObject({ open: 2, overdue: 1, next7: 1, blocked: 1 });
