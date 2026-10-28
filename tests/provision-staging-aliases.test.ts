@@ -5,30 +5,59 @@ import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { POOL_SIZE, SLOTS, poolFor, provisionTarget, stagingOnlyTarget } from "./e2e/helpers/alias-pool";
-import { createMissing, createPassed, createSummary, type Http } from "./e2e/tools/provision-aliases";
+import { createMissing, createPassed, createSummary, createVerdict, type Http } from "./e2e/tools/provision-aliases";
 
 const PASS = "zz-test-only-not-a-real-password";
 const WORKFLOW = ".github/workflows/provision-staging-aliases.yml";
 
-/** /api/auth/signup only: 201 for a new address, 409 for one that exists. `fail` addresses get a 500, `drop` ones throw. */
+/** /api/auth/signin and /api/auth/signup: the same answers as the app. `fail` addresses get a 500 on sign-up, `drop` ones throw. */
 function signupServer(existing: string[] = [], fail: string[] = [], drop: string[] = []) {
-  const accts = new Set(existing);
+  // An address that exists is a working alias (verified, on PASS) until `verifyLink()` or a test says otherwise.
+  const accts = new Map(existing.map((email) => [email, { verified: true, deactivated: false, password: PASS }]));
   const calls: { method: string; path: string; body?: unknown }[] = [];
-  const http: Http = async (method, path, body) => {
+  // Every successful sign-in creates one Session row that lives 30 days (src/lib/auth.ts startSession). Sign-out revokes it.
+  const sessions = new Set<string>();
+  let issued = 0;
+  const http: Http = async (method, path, body, cookie) => {
     calls.push({ method, path, body });
-    const { email } = (body ?? {}) as { email: string };
+    const { email, password } = (body ?? {}) as { email: string; password: string };
     if (drop.includes(email)) throw new Error("socket hang up");
+    if (path === "/api/auth/signout") {
+      if (cookie) sessions.delete(cookie);
+      return { status: 204, json: {}, cookie: null };
+    }
+    if (path === "/api/auth/signin") {
+      const a = accts.get(email);
+      if (!a || a.password !== password) return { status: 401, json: { error: "Email or password is incorrect." }, cookie: null };
+      if (a.deactivated) return { status: 403, json: { error: "This account is deactivated." }, cookie: null };
+      if (!a.verified) return { status: 403, json: { error: "Verify your email first." }, cookie: null };
+      const session = `sho_session=s${++issued}`;
+      sessions.add(session);
+      return { status: 200, json: { user: { email, orgRole: "MEMBER" } }, cookie: session }; // publicUser carries orgRole
+    }
     if (path !== "/api/auth/signup") return { status: 404, json: {}, cookie: null };
     if (fail.includes(email)) return { status: 500, json: { error: "Something went wrong." }, cookie: null };
     if (accts.has(email)) return { status: 409, json: { error: "An account with this email already exists." }, cookie: null };
-    accts.add(email);
+    accts.set(email, { verified: false, deactivated: false, password });
     return { status: 201, json: { status: "check_email" }, cookie: null };
   };
-  return { http, calls, accts };
+  return {
+    http,
+    calls,
+    accts,
+    /** Sessions that a sign-in created and no sign-out has revoked: what the app would still accept. */
+    openSessions: () => [...sessions],
+    /** The operator following the Verify link(s) in the inbox. */
+    verifyLink: () => { for (const a of accts.values()) a.verified = true; },
+    signups: () => calls.filter((c) => c.path === "/api/auth/signup"),
+    signIns: () => calls.filter((c) => c.path === "/api/auth/signin"),
+  };
 }
 
 const ALL = SLOTS.flatMap(poolFor).map((p) => p.email);
 const create = (s: ReturnType<typeof signupServer>) => createMissing({ password: PASS, http: s.http, pause: 0 });
+const createdEmails = (s: ReturnType<typeof signupServer>) => s.signups().map((c) => (c.body as { email: string }).email);
+const calledEmails = (calls: { body?: unknown }[]) => calls.map((c) => (c.body as { email: string }).email);
 
 describe("qa:TC missing APL-2748 create mode: idempotent, counts only", () => {
   it("qa:TC missing create: the pool is 66 nakul17+zz-qa- addresses", () => {
@@ -37,46 +66,81 @@ describe("qa:TC missing APL-2748 create mode: idempotent, counts only", () => {
     for (const e of ALL) expect(e).toMatch(/^nakul17\+zz-qa-/);
   });
 
-  it("qa:TC missing create: on an empty staging it creates all 66 with SHO_QA_PASS, and only signs up", async () => {
+  it("qa:TC missing create: on an empty staging it creates all 66 with SHO_QA_PASS, and none of them is ready", async () => {
     const s = signupServer();
     const c = await create(s);
-    expect(c).toEqual({ created: 66, skipped: 0, failed: 0 });
-    expect(createPassed(c)).toBe(true);
-    expect(s.calls.every((x) => x.method === "POST" && x.path === "/api/auth/signup")).toBe(true);
-    expect(s.calls.map((x) => (x.body as { email: string }).email)).toEqual(ALL);
-    for (const x of s.calls) expect((x.body as { password: string }).password).toBe(PASS);
+    expect(c).toEqual({ created: 66, skipped: 0, failed: 0, ready: 0 });
+    // APL-3017: a new account is unverified, so the run that made it is not a pass and says so.
+    expect(createPassed(c)).toBe(false);
+    expect(createVerdict(c)).toContain("66 of 66 not ready");
+    expect(calledEmails(s.signIns())).toEqual(ALL);
+    expect(createdEmails(s)).toEqual(ALL);
+    for (const x of s.signups()) expect((x.body as { password: string }).password).toBe(PASS);
+    for (const e of ALL) expect(s.accts.get(e)!.verified, e).toBe(false);
   });
 
-  it("qa:TC missing create: a second run creates 0 and counts all 66 as skipped, not failed", async () => {
+  it("qa:TC missing create: a second run creates nothing, never signs an existing alias up, and passes once every link is followed", async () => {
     const s = signupServer();
     await create(s);
+    s.calls.length = 0;
     const again = await create(s);
-    expect(again).toEqual({ created: 0, skipped: 66, failed: 0 });
-    expect(createPassed(again)).toBe(true);
+    expect(again).toEqual({ created: 0, skipped: 66, failed: 0, ready: 0 });
+    expect(createPassed(again)).toBe(false);
+    // The 66 exist (unverified): a sign-up could only answer 409, and a sign-up is the request that makes an unverified row.
+    expect(s.signups()).toEqual([]);
     expect(s.accts.size).toBe(66);
+    s.verifyLink(); // the operator follows the 66 Verify links in the inbox
+    s.calls.length = 0;
+    const ready = await create(s);
+    expect(ready).toEqual({ created: 0, skipped: 66, failed: 0, ready: 66 });
+    expect(createPassed(ready)).toBe(true);
+    expect(createVerdict(ready)).toContain("All 66 aliases are ready");
+    expect(s.signups()).toEqual([]); // read with a sign-in only
+    for (const e of ALL) expect(s.accts.get(e)!.verified, e).toBe(true);
   });
 
-  it("qa:TC missing create: existing aliases are skipped and only the missing ones are created", async () => {
+  it("qa:TC missing APL-3017: a create run signs its probe out, so re-running it leaves nothing live behind", async () => {
+    // Read-only is not the same as side-effect free: sign-in is what creates a Session, and a Session is a credential
+    // the app honours for 30 days (src/lib/auth.ts startSession). A run that reports created 0 must not leave 66 of them.
+    const s = signupServer(ALL);
+    const first = await create(s);
+    expect(first).toEqual({ created: 0, skipped: 66, failed: 0, ready: 66 });
+    expect(s.signIns()).toHaveLength(66); // the probe is still a sign-in, not a sign-up
+    expect(s.openSessions()).toEqual([]);
+    const second = await create(s);
+    expect(second).toEqual(first);
+    expect(s.openSessions()).toEqual([]); // running it again adds nothing at all
+  });
+
+  it("qa:TC missing create: existing aliases are read, never signed up, and only the missing ones are created", async () => {
     const s = signupServer(ALL.slice(0, 10));
-    expect(await create(s)).toEqual({ created: 56, skipped: 10, failed: 0 });
+    const c = await create(s);
+    expect(c).toEqual({ created: 56, skipped: 10, failed: 0, ready: 10 });
+    expect(createdEmails(s)).toEqual(ALL.slice(10));
   });
 
   it("qa:TC missing create: a server error or a dropped request is failed, and the run does not pass", async () => {
     const s = signupServer([ALL[0]], [ALL[1]], [ALL[2]]);
     const c = await create(s);
-    expect(c).toEqual({ created: 63, skipped: 1, failed: 2 });
+    expect(c).toEqual({ created: 63, skipped: 1, failed: 2, ready: 1 });
     expect(createPassed(c)).toBe(false);
   });
 
-  it("qa:TC missing create: the run does not pass unless the counts add up to 66", () => {
-    expect(createPassed({ created: 65, skipped: 0, failed: 0 })).toBe(false);
-    expect(createPassed({ created: 60, skipped: 7, failed: 0 })).toBe(false);
-    expect(createPassed({ created: 30, skipped: 36, failed: 0 })).toBe(true);
+  it("qa:TC missing create: the run does not pass unless all 66 are accounted for AND sign in", () => {
+    expect(createPassed({ created: 65, skipped: 0, failed: 0, ready: 65 })).toBe(false);
+    expect(createPassed({ created: 0, skipped: 66, failed: 0, ready: 66 })).toBe(true);
+    expect(createPassed({ created: 0, skipped: 66, failed: 0, ready: 65 })).toBe(false);
+    expect(createPassed({ created: 0, skipped: 66, failed: 1, ready: 66 })).toBe(false);
+    // APL-3017, the 20 Oct state: all 66 exist, all unverified, nothing failed. Existing is not ready.
+    expect(createPassed({ created: 0, skipped: 66, failed: 0, ready: 0 })).toBe(false);
+    // The run that created them, and any run that had to create one: creating is not provisioning.
+    expect(createPassed({ created: 66, skipped: 0, failed: 0, ready: 0 })).toBe(false);
+    expect(createPassed({ created: 30, skipped: 36, failed: 0, ready: 66 })).toBe(false);
   });
 
   it("qa:TC missing create: the summary is counts only, with no address and no password", async () => {
     const out = createSummary(await create(signupServer(ALL.slice(0, 4), [ALL[5]])));
-    expect(out).toBe("created 61, skipped 4, failed 1, total 66 of 66");
+    expect(out).toBe("created 61, skipped 4, failed 1, ready 4, total 66 of 66");
     expect(out).not.toContain("@");
     expect(out).not.toContain(PASS);
   });

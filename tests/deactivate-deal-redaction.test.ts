@@ -5,7 +5,8 @@ import { afterAll, describe, expect, it } from "vitest";
 import { ApiError } from "@/lib/http";
 import { db } from "@/lib/db";
 import { deactivate } from "@/lib/team";
-import { account, istDate, superAdmin, type Account } from "./helpers";
+import { account, superAdmin, type Account } from "./helpers";
+import { cleanupHiddenProject, hiddenDeal, hiddenProjectFixture, withCrmMode, type HiddenDealFixture } from "./hidden-project";
 
 const GENERIC = "Name a new Leader first.";
 const FORBIDDEN = "You cannot deactivate this person.";
@@ -16,18 +17,7 @@ type Role = "MEMBER" | "ADMIN" | "SUPER_ADMIN";
 const RUN = `${Date.now().toString(36)}${process.pid.toString(36)}`;
 let seq = 0;
 const people: Account[] = [];
-const projectIds: string[] = [];
-
-async function withMode<T>(mode: Mode, fn: () => Promise<T>): Promise<T> {
-  const prev = process.env.CRM_VISIBLE;
-  process.env.CRM_VISIBLE = mode;
-  try {
-    return await fn();
-  } finally {
-    if (prev === undefined) delete process.env.CRM_VISIBLE;
-    else process.env.CRM_VISIBLE = prev;
-  }
-}
+const fixtures: HiddenDealFixture[] = [];
 
 async function zzAccount(role: string) {
   const n = seq++;
@@ -61,6 +51,7 @@ describe("qa:TC missing APL-2735 deactivate 409 hides deals the caller cannot se
   let dealLeader: Account;
   let projectLeader: Account;
   let mixedLeader: Account;
+  let spareLeader: Account;
   const dealNames = [`ZZ-TEST Northwind ${RUN}`, `ZZ-TEST Contoso ${RUN}`];
   const dealIds: string[] = [];
   let mixedDealName = "";
@@ -71,28 +62,7 @@ describe("qa:TC missing APL-2735 deactivate 409 hides deals the caller cannot se
   let plainId = "";
 
   afterAll(async () => {
-    const sa = await superAdmin();
-    const problems: string[] = [];
-    for (const id of projectIds) {
-      const added = await sa.c.post(`/api/projects/${id}/members`, { userId: sa.id, role: "EDITOR" });
-      if (added.status !== 201 && !(added.status === 409 && /already a member/.test(added.json?.error ?? ""))) {
-        problems.push(`add member ${id}: ${added.status}`);
-      }
-      const led = await sa.c.post(`/api/projects/${id}/leader`, { newLeaderId: sa.id, previousRole: "EDITOR" });
-      if (led.status !== 200 && !(led.status === 400 && /already the Leader/.test(led.json?.error ?? ""))) {
-        problems.push(`change leader ${id}: ${led.status}`);
-      }
-      const archived = await sa.c.post(`/api/projects/${id}/archive`);
-      if (archived.status !== 200) problems.push(`archive ${id}: ${archived.status} ${JSON.stringify(archived.json)}`);
-    }
-    for (const who of people) {
-      if (who.id === sa.id) continue;
-      const off = await sa.c.post(`/api/team/${who.id}/deactivate`, { reassign: "leaders" });
-      if (off.status !== 200 && !(off.status === 409 && /already deactivated/.test(off.json?.error ?? ""))) {
-        problems.push(`deactivate ${who.email}: ${off.status} ${JSON.stringify(off.json)}`);
-      }
-    }
-    expect(problems, problems.join("\n")).toEqual([]);
+    await cleanupHiddenProject(fixtures, people);
   });
 
   it("qa:TC missing AC3: seeds two deals, a plain project, and a mixed leadership", async () => {
@@ -102,54 +72,24 @@ describe("qa:TC missing APL-2735 deactivate 409 hides deals the caller cannot se
     dealLeader = await zzAccount("deal leader");
     projectLeader = await zzAccount("project leader");
     mixedLeader = await zzAccount("mixed leader");
+    spareLeader = await zzAccount("spare leader");
     expect((await sa.c.patch(`/api/team/${adminUser.id}`, { orgRole: "ADMIN" })).status).toBe(200);
 
-    const pipes = await sa.c.get("/api/deals/pipelines");
-    expect(pipes.status, JSON.stringify(pipes.json)).toBe(200);
-    const pipe = (pipes.json.pipelines as { id: string; key: string }[]).find((p) => p.key === "DEAL_PROACTIVE");
-    expect(pipe?.id).toBeTruthy();
-    const org = await sa.c.post("/api/orgs", { name: `ZZ-TEST Buyer ${RUN}` });
-    expect(org.status, JSON.stringify(org.json)).toBe(201);
-    const organisationId = org.json.organisation.id as string;
+    // Two deals for one Leader, the plain project for another, and a mixed leadership.
+    const first = await hiddenDeal(sa, { leader: dealLeader, label: `Northwind ${RUN}` });
+    const second = await hiddenDeal(sa, { leader: dealLeader, label: `Contoso ${RUN}`, organisationId: first.organisationId, pipelineId: first.pipelineId });
+    const plainFixture = await hiddenProjectFixture(sa, { leader: spareLeader, plainLeader: projectLeader, label: `Plain ${RUN}`, organisationId: first.organisationId, pipelineId: first.pipelineId });
+    const mixed = await hiddenProjectFixture(sa, { leader: mixedLeader, label: `Mixed ${RUN}`, organisationId: first.organisationId, pipelineId: first.pipelineId });
+    fixtures.push(first, second, plainFixture, mixed);
 
-    for (const name of dealNames) {
-      const made = await sa.c.post("/api/deals", {
-        name,
-        organisationId,
-        pipelineId: pipe!.id,
-        leaderId: dealLeader.id,
-        whyPursue: "ZZ-TEST fit",
-        nextStep: { title: `ZZ-TEST step ${RUN}`, dueDate: istDate(3) },
-      });
-      expect(made.status, JSON.stringify(made.json)).toBe(201);
-      dealIds.push(made.json.deal.id as string);
-      projectIds.push(made.json.deal.id as string);
-    }
-    expect(dealIds).toHaveLength(2);
-
-    plainName = `ZZ-TEST Plain ${RUN}`;
-    const plain = await sa.c.post("/api/projects", { name: plainName, leaderId: projectLeader.id });
-    expect(plain.status, JSON.stringify(plain.json)).toBe(201);
-    plainId = plain.json.project.id as string;
-    projectIds.push(plainId);
-
-    mixedDealName = `ZZ-TEST Mixed deal ${RUN}`;
-    mixedProjectName = `ZZ-TEST Mixed project ${RUN}`;
-    const mixedDeal = await sa.c.post("/api/deals", {
-      name: mixedDealName,
-      organisationId,
-      pipelineId: pipe!.id,
-      leaderId: mixedLeader.id,
-      whyPursue: "ZZ-TEST fit",
-      nextStep: { title: `ZZ-TEST mixed step ${RUN}`, dueDate: istDate(4) },
-    });
-    expect(mixedDeal.status, JSON.stringify(mixedDeal.json)).toBe(201);
-    mixedDealId = mixedDeal.json.deal.id as string;
-    projectIds.push(mixedDealId);
-    const mixedProject = await sa.c.post("/api/projects", { name: mixedProjectName, leaderId: mixedLeader.id });
-    expect(mixedProject.status, JSON.stringify(mixedProject.json)).toBe(201);
-    mixedProjectId = mixedProject.json.project.id as string;
-    projectIds.push(mixedProjectId);
+    dealIds.push(first.deal.id, second.deal.id);
+    dealNames.splice(0, dealNames.length, first.deal.name, second.deal.name);
+    plainName = plainFixture.plain.name;
+    plainId = plainFixture.plain.id;
+    mixedDealName = mixed.deal.name;
+    mixedDealId = mixed.deal.id;
+    mixedProjectName = mixed.plain.name;
+    mixedProjectId = mixed.plain.id;
   });
 
   // on and all: everyone can see the CRM. admins: only an admin can. off: nobody can.
@@ -168,7 +108,7 @@ describe("qa:TC missing APL-2735 deactivate 409 hides deals the caller cannot se
     ];
     for (const mode of MODES) {
       for (const caller of callers) {
-        const res = await withMode(mode, () => attempt(caller.who, caller.role, dealLeader.id));
+        const res = await withCrmMode(mode, () => attempt(caller.who, caller.role, dealLeader.id));
         const label = `CRM_VISIBLE=${mode} ${caller.role} ${res.text}`;
         const expected = kind(mode, caller.role);
         if (expected === "detail") {
@@ -191,7 +131,7 @@ describe("qa:TC missing APL-2735 deactivate 409 hides deals the caller cannot se
     }
     // Anyone under off, including the Super Admin, gets the generic 409.
     const sa = await superAdmin();
-    const asSuper = await withMode("off", () => attempt(sa, "SUPER_ADMIN", dealLeader.id));
+    const asSuper = await withCrmMode("off", () => attempt(sa, "SUPER_ADMIN", dealLeader.id));
     expect(asSuper.status).toBe(409);
     expect(asSuper.body).toEqual({ error: GENERIC });
     assertNoDeal(asSuper.text, dealNames, dealIds);
@@ -199,7 +139,7 @@ describe("qa:TC missing APL-2735 deactivate 409 hides deals the caller cannot se
   });
 
   it("qa:TC missing AC1: still names a plain project when the CRM is off", async () => {
-    const res = await withMode("off", () => attempt(adminUser, "ADMIN", projectLeader.id));
+    const res = await withCrmMode("off", () => attempt(adminUser, "ADMIN", projectLeader.id));
     expect(res.status).toBe(409);
     expect(res.body).toEqual({
       error: `Name a new Leader first for: ${plainName}`,
@@ -208,7 +148,7 @@ describe("qa:TC missing APL-2735 deactivate 409 hides deals the caller cannot se
   });
 
   it("qa:TC missing AC1 AC2: names the visible project and omits the hidden deal", async () => {
-    const hidden = await withMode("off", () => attempt(adminUser, "ADMIN", mixedLeader.id));
+    const hidden = await withCrmMode("off", () => attempt(adminUser, "ADMIN", mixedLeader.id));
     expect(hidden.status).toBe(409);
     expect(hidden.body).toEqual({
       error: `Name a new Leader first for: ${mixedProjectName}`,
@@ -217,7 +157,7 @@ describe("qa:TC missing APL-2735 deactivate 409 hides deals the caller cannot se
     assertNoDeal(hidden.text, [mixedDealName], [mixedDealId]);
     expect(hidden.text).not.toMatch(/\b2\b/);
 
-    const shown = await withMode("all", () => attempt(adminUser, "ADMIN", mixedLeader.id));
+    const shown = await withCrmMode("all", () => attempt(adminUser, "ADMIN", mixedLeader.id));
     expect(shown.status).toBe(409);
     const body = shown.body as { error: string; leads: { id: string; name: string }[] };
     expect(body.error).toBe("Name a new Leader first for: " + body.leads.map((row) => row.name).join(", "));

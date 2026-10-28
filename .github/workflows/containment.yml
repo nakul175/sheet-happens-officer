@@ -1,0 +1,95 @@
+# CONTAINMENT (slot 9, Option R). scripts/containment/*.sh is the only thing standing between
+# "slot 9 is contained" and an unfounded claim. Its 38 tests run OFFLINE (no host, no root, no env file),
+# but nothing ran them automatically: a red-team commit that inverted the proof verdict (208a279) had to be
+# caught by hand. This workflow is that missing repeatable gate.
+#
+# It is safe on a fork pull request: read-only token, no secret, nothing installed but the npm dev tree,
+# and no step reaches a host. It does NOT and cannot prove host isolation - see
+# app/sho-status-plan/execution/W94-REPORT.md for what is out of reach here.
+#
+# Kept separate from ci.yml on purpose: that pipeline is known-good and this one must be cheap to run alone.
+name: Containment gate
+
+on:
+  push:
+    paths:
+      - scripts/containment/**
+      - .github/workflows/**
+      - package.json
+      - package-lock.json
+  pull_request:
+    paths:
+      - scripts/containment/**
+      - .github/workflows/**
+      - package.json
+      - package-lock.json
+
+permissions:
+  contents: read
+
+concurrency:
+  group: containment-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gate:
+    name: Containment scripts (offline)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      # Prisma generation needs a URL during npm ci; offline checks never connect.
+      DATABASE_URL: postgresql://unused:unused@127.0.0.1:1/unused
+      DIRECT_DATABASE_URL: postgresql://unused:unused@127.0.0.1:1/unused
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # pull_request workflows otherwise check out a merge commit. Pin the head so the run is that SHA.
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          # Keep this equal to ci.yml's node-version. scripts/containment/ci-gate.test.mjs reads ci.yml and
+          # fails if the two drift, so the gate runs on the same Node major as the pipeline it protects.
+          node-version: 22
+          cache: npm
+      - name: Install
+        run: npm ci
+      # Fast fail first: a shell syntax break must not wait for the test run. `find` recurses, so
+      # lib/*.sh are covered without a second list to keep in sync.
+      - name: bash -n on every containment script
+        shell: bash
+        run: |
+          files=$(find scripts/containment -type f -name '*.sh' | sort)
+          count=0
+          while IFS= read -r f; do
+            [ -n "$f" ] || continue
+            bash -n "$f"
+            echo "bash -n ok: $f"
+            count=$((count + 1))
+          done <<< "$files"
+          if [ "$count" -eq 0 ]; then
+            echo "::error::no .sh file found under scripts/containment - the gate would pass vacuously."
+            exit 1
+          fi
+          echo "bash -n: $count file(s) parse"
+      - name: Containment tests (offline, no host, no secret)
+        # The glob is the directory on Node 22 (`node --test scripts/containment/` is a MODULE_NOT_FOUND
+        # there). A new *.test.mjs is picked up without editing this file.
+        run: node --test "scripts/containment/*.test.mjs"
+      - name: ShellCheck (only if the runner image provides it)
+        shell: bash
+        run: |
+          if ! command -v shellcheck >/dev/null 2>&1; then
+            echo "shellcheck: not installed on this runner image - static analysis SKIPPED (bash -n above still enforced)."
+            exit 0
+          fi
+          echo "shellcheck: present - $(shellcheck --version | awk '/^version:/ {print $2}')"
+          files=$(find scripts/containment -type f -name '*.sh' | sort)
+          count=0
+          while IFS= read -r f; do
+            [ -n "$f" ] || continue
+            shellcheck -x --severity=error "$f"
+            # Warnings are reported, not gated: this branch could not be checked against a real shellcheck.
+            shellcheck -x --severity=warning "$f" || true
+            count=$((count + 1))
+          done <<< "$files"
+          echo "shellcheck: $count file(s) free of severity=error findings (warning output above is informational)"

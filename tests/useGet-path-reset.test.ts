@@ -333,8 +333,12 @@ describe("useGet resets its loading state when the path changes", () => {
     }).toEqual({ role: "status", live: "polite", busy: "true", announced: "Loading" });
     expect(skeleton?.textContent).toContain("Loading");
     const snapshot = accessSnapshot(content!);
-    mkdirSync("test-results/a11y", { recursive: true });
-    writeFileSync("test-results/a11y/TC-APL2663-2437ecb8.txt", snapshot);
+    mkdirSync("test-results/useGet-path-reset", { recursive: true });
+    // W240: this jsdom unit test used to write into test-results/a11y, the folder the browser tier's
+    // a11y suite (tests/viewport/a11y.test.ts) owns for screenshots. Nothing reads this file and the
+    // assertion below is on the `snapshot` variable, so it is evidence only — but evidence belongs in
+    // a folder named after the test file, not in another suite's.
+    writeFileSync("test-results/useGet-path-reset/TC-APL2663-2437ecb8.txt", snapshot);
     expect(snapshot).toBe([
       'section name="Project B"',
       '  div role=status aria-live=polite aria-busy=true',

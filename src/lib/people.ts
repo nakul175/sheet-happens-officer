@@ -27,7 +27,7 @@ const listNames = (names: string[]) => (names.length <= 1 ? names.join("") : `${
 
 export async function releasePerson(
   tx: Tx,
-  o: { projectId: string; userId: string; newAssigneeId: string; actorId: string; keepCollaborations?: boolean; handover?: Handover[] },
+  o: { projectId: string; userId: string; newAssigneeId: string; actorId: string; keepCollaborations?: boolean; handover?: Handover[]; notifyActor?: boolean },
 ): Promise<Released> {
   const leader = await leaderId(tx, o.projectId);
   const open = { projectId: o.projectId, completedAt: null, deletedAt: null };
@@ -97,12 +97,12 @@ export async function releasePerson(
     const elsewhere = owners.filter((to) => to !== leader);
     for (const to of elsewhere) {
       const n = byOwner.get(to)?.length ?? 0;
-      if (n) await notify(tx, [to], "TASKS_HANDED_OVER", { actorId: o.actorId, projectId: o.projectId, data: { fromName: base.fromName, approver: 0, cleared: 0, moved: n, toYou: true } });
+      if (n) await notify(tx, [to], "TASKS_HANDED_OVER", { actorId: o.actorId, projectId: o.projectId, includeActor: o.notifyActor, data: { fromName: base.fromName, approver: 0, cleared: 0, moved: n, toYou: true } });
     }
     // The Leader hears the whole picture: what went elsewhere (and to whom), what came to them, and the approver duties.
     const toLeader = byOwner.get(leader)?.length ?? 0;
     await notify(tx, [leader], "TASKS_HANDED_OVER", {
-      actorId: o.actorId, projectId: o.projectId, includeActor: !!asApprover.length,
+      actorId: o.actorId, projectId: o.projectId, includeActor: o.notifyActor || !!asApprover.length,
       data: elsewhere.length
         ? { ...base, moved: moved - toLeader, toYou: false, to: listNames(elsewhere.map((to) => nameOf(to) ?? "someone else")), ...(toLeader ? { movedToYou: toLeader } : {}) }
         : { ...base, moved, toYou: true },

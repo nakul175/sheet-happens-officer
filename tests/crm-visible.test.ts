@@ -2,7 +2,8 @@
 // concierge; with `admins` the same for everyone but Admins. The server runs with the default `all`, so these call src/lib
 // directly (same database) and flip process.env.CRM_VISIBLE in this process; `crmMode()` reads it at call time.
 import { describe, expect, it } from "vitest";
-import { account, admin, istDate, project, superAdmin, task } from "./helpers";
+import { account, admin, istDate, superAdmin, task } from "./helpers";
+import { hiddenProjectFixture } from "./hidden-project";
 import { actor } from "./concierge-helpers";
 import type { Actor } from "../src/lib/access";
 import { crmMode } from "../src/lib/crm";
@@ -27,15 +28,10 @@ describe("CRM_VISIBLE lever (SHO-BUG-2)", () => {
     const ed = await account("cved");
     const tag = `cvtag${Date.now()}`;
     // A deal led by `lead` with `ed` as Editor holding one of its tasks, and a plain project where `ed` holds a task too.
-    const pipe = (await lead.c.get("/api/deals/pipelines")).json.pipelines.find((p: { key: string }) => p.key === "DEAL_PROACTIVE");
-    const orgId = (await lead.c.post("/api/orgs", { name: `Org ${tag}` })).json.organisation.id;
-    const made = await lead.c.post("/api/deals", { name: `Deal ${tag}`, organisationId: orgId, pipelineId: pipe.id, leaderId: lead.id, whyPursue: "fit", nextStep: { title: "First step", dueDate: istDate(3) } });
-    expect(made.status, JSON.stringify(made.json)).toBe(201);
-    const dealId = made.json.deal.id as string;
-    expect((await lead.c.post(`/api/projects/${dealId}/members`, { userId: ed.id, role: "EDITOR" })).status).toBe(201);
+    const fixture = await hiddenProjectFixture(sa, { leader: lead, label: tag, members: [ed] });
+    const dealId = fixture.deal.id;
     const dealTask = await task(ed, dealId, { title: `Deal step ${tag}`, dueDate: istDate(2) });
-    const p = await project(lead, lead, [{ who: ed }]);
-    const plainTask = await task(ed, p.id, { title: `Plain step ${tag}`, dueDate: istDate(2) });
+    const plainTask = await task(ed, fixture.plain.id, { title: `Plain step ${tag}`, dueDate: istDate(2) });
 
     const me = actor(ed);
     const adm = actor(ad, "ADMIN");

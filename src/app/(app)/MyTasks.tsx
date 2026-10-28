@@ -3,7 +3,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { Suspense, useEffect, useState } from "react";
 import "./approvals.css";
-import { api, dueLabel, dueState, rowKeys, isOverdue, todayIST, useGet } from "@/components/api";
+import { api, dueState, rowKeys, isOverdue, todayIST, useGet } from "@/components/api";
 import { errorMessage, isVersionConflict } from "@/lib/version-error";
 import { TaskModal } from "@/components/TaskModal";
 import { Pri, Tick } from "@/components/TaskParts";

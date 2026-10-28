@@ -17,6 +17,17 @@ export function ConciergeHost() {
   const c = useConcierge();
   const [sheet, setSheet] = useState(false);
   const from = useRef<HTMLElement | null>(null);
+  const pushed = useRef(false);
+  const restoreFocus = useCallback(() => {
+    const entry = from.current;
+    const target = entry?.isConnected ? entry : document.querySelector<HTMLElement>(".tabbar button[aria-haspopup=menu]");
+    target?.focus();
+  }, []);
+  const close = useCallback(() => {
+    if (pushed.current) { window.history.back(); return; }
+    setSheet(false);
+    setTimeout(restoreFocus, 0);
+  }, [restoreFocus]);
   const hidden = c?.hidden ?? false;
   const setHidden = c?.setHidden;
   const pending = useRef(false);
@@ -27,6 +38,10 @@ export function ConciergeHost() {
       (slot.querySelector<HTMLElement>("textarea:not([disabled])") ?? slot.querySelector<HTMLElement>("button:not([disabled])"))?.focus();
       return;
     }
+    try {
+      window.history.pushState({ ...(window.history.state ?? {}), cc: 1 }, "");
+      pushed.current = true;
+    } catch { /* Close still works when history is unavailable. */ }
     setSheet(true);
   }, []);
 
@@ -51,6 +66,12 @@ export function ConciergeHost() {
   useEffect(() => {
     if (!sheet) return;
     const esc = (e: KeyboardEvent) => { if (e.key === "Escape" && !document.querySelector("[aria-modal='true']")) close(); };
+    const back = () => {
+      pushed.current = false;
+      setSheet(false);
+      setTimeout(restoreFocus, 0);
+    };
+    window.addEventListener("popstate", back);
     document.addEventListener("keydown", esc);
     document.querySelector<HTMLTextAreaElement>(".cc-host textarea")?.focus();
     const vv = window.visualViewport;
@@ -63,16 +84,15 @@ export function ConciergeHost() {
     vv?.addEventListener("resize", fit);
     vv?.addEventListener("scroll", fit);
     return () => {
+      window.removeEventListener("popstate", back);
       document.removeEventListener("keydown", esc);
       vv?.removeEventListener("resize", fit);
       vv?.removeEventListener("scroll", fit);
       document.documentElement.style.removeProperty("--vvh");
       document.documentElement.style.removeProperty("--vvt");
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sheet]);
+  }, [sheet, close, restoreFocus]);
 
-  function close() { setSheet(false); setTimeout(() => from.current?.focus?.(), 0); }
   if (!c || !sheet) return null;
   return <div className="cc-sheet cc-host" role="dialog" aria-label="Concierge"><Panel variant="sheet" onClose={close} /></div>;
 }

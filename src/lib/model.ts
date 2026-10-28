@@ -5,8 +5,16 @@
 // Configuration (server settings only):
 //   MODEL_PROVIDER       "anthropic" (default) or "fake" (tests only; refused when NODE_ENV is production)
 //   MODEL_NAME           default "claude-haiku-5-5"
-//   ANTHROPIC_API_KEY    the provider key
+//   SHO_DEPLOY_STAGE     "production" (default when unset) or "staging"; any other value refuses to guess
+//   ANTHROPIC_API_KEY    the provider key, read in production only
+//   ANTHROPIC_API_KEY_STAGE  the provider key, read in staging only (SHO-2927)
 //   MODEL_DATA_APPROVED  must be exactly "true" or no request is ever sent to any provider
+//
+// SHO-2927: staging used to share the production key because there was only one key variable and no
+// environment to choose by. The two keys are now disjoint: staging reads the stage key and never the
+// production one, production reads the production key and never the stage one, and an unrecognised
+// stage reads neither. A missing key still means "off", so the failure is a disabled concierge, not a
+// request sent with no key.
 //   MODEL_USD_IN_PER_MTOK, MODEL_USD_OUT_PER_MTOK, MODEL_USD_CACHE_WRITE_PER_MTOK, MODEL_USD_CACHE_READ_PER_MTOK
 //   MODEL_RETRY_DELAY_MS (default 2000), MODEL_TIMEOUT_MS (default 15000)
 
@@ -51,7 +59,47 @@ export type ModelConfig = {
   retryDelayMs: number;
   timeoutMs: number;
   price: { inPerMTok: number; outPerMTok: number; cacheWritePerMTok: number; cacheReadPerMTok: number };
+  /** SHO-2927: which environment this is, which key variable answered, and why a key is missing. */
+  stage: ModelStage;
+  keySource: ModelKeySource;
+  keyProblem: ModelKeyProblem;
 };
+
+export type ModelStage = "production" | "staging" | "unknown";
+export type ModelKeySource = "production" | "stage" | "none";
+export type ModelKeyProblem = "STAGE_KEY_MISSING" | "UNKNOWN_STAGE" | null;
+
+export const STAGE_VAR = "SHO_DEPLOY_STAGE";
+export const PRODUCTION_KEY_VAR = "ANTHROPIC_API_KEY";
+export const STAGE_KEY_VAR = "ANTHROPIC_API_KEY_STAGE";
+
+/**
+ * SHO-2927. Unset means production, which is what every host did before this variable existed, so the
+ * production droplet needs no change. Set but empty is a misconfiguration, not production: it fails
+ * closed. Only the two exact names are accepted; a typo must never fall back to the production key,
+ * because that fallback is the defect.
+ */
+export function modelStage(env: NodeJS.ProcessEnv = process.env): ModelStage {
+  const raw = env[STAGE_VAR];
+  if (raw === undefined) return "production";
+  const v = raw.trim().toLowerCase();
+  if (v === "production" || v === "prod") return "production";
+  if (v === "staging") return "staging";
+  return "unknown";
+}
+
+/** The one place that decides which key this process may use. The two keys never cross. */
+export function stageKey(env: NodeJS.ProcessEnv = process.env): { apiKey: string; keySource: ModelKeySource; problem: ModelKeyProblem } {
+  const stage = modelStage(env);
+  if (stage === "unknown") return { apiKey: "", keySource: "none", problem: "UNKNOWN_STAGE" };
+  const name = stage === "staging" ? STAGE_KEY_VAR : PRODUCTION_KEY_VAR;
+  const key = (env[name] ?? "").trim();
+  if (key) return { apiKey: key, keySource: stage === "staging" ? "stage" : "production", problem: null };
+  // Production with no key is simply off (it always was). Staging with no stage key is a named problem.
+  return { apiKey: "", keySource: "none", problem: stage === "staging" ? "STAGE_KEY_MISSING" : null };
+}
+
+export const modelKeyProblem = (cfg: ModelConfig): ModelKeyProblem => cfg.keyProblem;
 
 const num = (v: string | undefined, d: number) => {
   const n = v === undefined || v.trim() === "" ? NaN : Number(v);
@@ -59,13 +107,18 @@ const num = (v: string | undefined, d: number) => {
 };
 
 export function modelConfig(env: NodeJS.ProcessEnv = process.env): ModelConfig {
+  // SHO-2927: the key comes from the stage resolver, never straight from a named variable.
+  const key = stageKey(env);
   return {
     provider: (env.MODEL_PROVIDER || "anthropic").toLowerCase(),
     model: env.MODEL_NAME || "claude-haiku-5-5",
-    apiKey: env.ANTHROPIC_API_KEY ?? "",
+    apiKey: key.apiKey,
     approved: env.MODEL_DATA_APPROVED === "true",
     retryDelayMs: num(env.MODEL_RETRY_DELAY_MS, 2000),
     timeoutMs: num(env.MODEL_TIMEOUT_MS, 15000),
+    stage: modelStage(env),
+    keySource: key.keySource,
+    keyProblem: key.problem,
     // Anthropic pricing page, read 17 Oct 2026: Haiku 5.5 (prompts up to 100k tokens).
     price: {
       inPerMTok: num(env.MODEL_USD_IN_PER_MTOK, 0.1),
@@ -87,6 +140,21 @@ export function modelEnabled(cfg = modelConfig()) {
   if (cfg.provider === "fake") return process.env.NODE_ENV !== "production";
   return cfg.provider === "anthropic" && cfg.apiKey.length > 0;
 }
+
+// SHO-2927: a missing or unusable key used to be indistinguishable from "the owner has not switched the
+// concierge on". One line, once per process, names the variable and never a value.
+let keyProblemWarned = false;
+function warnKeyProblem(cfg: ModelConfig) {
+  if (keyProblemWarned || !cfg.keyProblem) return;
+  keyProblemWarned = true;
+  if (cfg.keyProblem === "STAGE_KEY_MISSING") {
+    console.warn(`[model] ${STAGE_VAR}=staging but ${STAGE_KEY_VAR} is not set; the concierge is off here.`);
+  } else {
+    console.warn(`[model] ${STAGE_VAR} is not "production" or "staging"; the concierge is off rather than guessing a key.`);
+  }
+}
+/** Test seam for the once-per-process warning. */
+export const resetKeyProblemWarning = () => { keyProblemWarned = false; };
 
 // ------------------------------------------------------------------ Anthropic Messages API (plain fetch)
 const anthropic: ModelProvider = {
@@ -158,6 +226,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
  * An error or timeout is retried once after the configured delay (AC4); a second failure is PROVIDER_DOWN.
  */
 export async function generate(req: ModelRequest, cfg = modelConfig()): Promise<ModelResponse & { model: string; costUsd: number }> {
+  warnKeyProblem(cfg);
   if (!modelEnabled(cfg)) throw new ModelError("NOT_ENABLED", "The assistant is not switched on yet.");
   const provider = PROVIDERS[cfg.provider];
   for (let attempt = 0; attempt < 2; attempt++) {

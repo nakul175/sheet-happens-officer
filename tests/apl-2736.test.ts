@@ -19,6 +19,27 @@ let pro: Pipe;
 let bid: Pipe;
 let seq = 0;
 
+/**
+ * The local test database, for the two raw pg connections the race test needs (SHO-2736). Prisma's `?schema=` is
+ * Prisma-only: the pg driver would send it as an unknown startup setting, so it is carried over as `search_path`
+ * instead. Without that the raw connections land in `public` while Prisma - and the route under test - work in the
+ * named schema, so the mover holds a row lock on a deal nobody is looking at and the race never overlaps.
+ */
+const testSchema = () => new URL(process.env.DATABASE_URL ?? "").searchParams.get("schema") ?? "public";
+
+function rawDatabaseUrl() {
+  const raw = process.env.DATABASE_URL;
+  if (!raw) throw new Error("DATABASE_URL is required and must point at the local test database");
+  const url = new URL(raw);
+  if (url.hostname !== "localhost" && url.hostname !== "127.0.0.1" && url.hostname !== "[::1]") {
+    throw new Error("Refusing to run: the stage-removal race test uses the local test database only");
+  }
+  const schema = url.searchParams.get("schema");
+  url.search = "";
+  if (schema) url.searchParams.set("options", `-c search_path=${schema}`);
+  return url.toString().replaceAll("+", "%20");
+}
+
 async function pipes(who: Account) {
   const r = await who.c.get("/api/deals/pipelines");
   expect(r.status).toBe(200);
@@ -123,6 +144,59 @@ describe("qa:TC missing APL-2736 removing a stage asks where its items go", () =
     expect(audit?.actorId).toBe(sa.id);
   });
 
+  it("qa:TC missing AC1: every item lands in the stage that was chosen, and two removals can choose different stages", async () => {
+    // The tests around this one move a single item each: the one above picks Proposal, the "every stage the
+    // answer offers" one takes offered[last]. Neither checks that a stage holding more than one item moves
+    // all of them, or that a deal in a stage nobody asked about is left alone. Here two stages are removed
+    // with different destinations (neither the last one offered), one holds two items, and a deal in a
+    // third stage must keep its stage.
+    const zzA = await zzStage();
+    const zzB = await zzStage();
+    const offered = ((await sa.c.del(`/api/deals/pipelines/${zzA}`)).json.stages ?? []) as Stage[];
+    const byName = new Map(offered.map((s) => [s.name, s] as const));
+    const conversation = byName.get("Conversation");
+    const lead = byName.get("Lead");
+    expect(conversation, `offered: ${offered.map((s) => s.name).join(", ")}`).toBeDefined();
+    expect(lead, `offered: ${offered.map((s) => s.name).join(", ")}`).toBeDefined();
+    expect(offered[offered.length - 1].id, "the last offered stage is a third one").not.toBe(conversation!.id);
+    expect(offered[offered.length - 1].id).not.toBe(lead!.id);
+
+    const a1 = await dealIn(zzA);
+    const a2 = await dealIn(zzA);
+    const b1 = await dealIn(zzB);
+    // A deal in a stage nobody asked about. Removing zzA must not touch it.
+    const untouched = await dealIn(named(pro, "Negotiation").id);
+
+    // The question names how many items there are - two, not one - and offers both stages this test goes on to
+    // choose. Nothing moves and nothing is removed while the answer waits.
+    const asked = await sa.c.del(`/api/deals/pipelines/${zzA}`);
+    expect(asked.status, JSON.stringify(asked.json)).toBe(409);
+    expect(asked.json).toMatchObject({ needsMoveTo: true, items: 2 });
+    const offeredIds = (asked.json.stages as Stage[]).map((s) => s.id);
+    expect(offeredIds).toEqual(expect.arrayContaining([conversation!.id, lead!.id]));
+    expect(offeredIds).not.toContain(zzA);
+    expect(await exists(zzA)).toBe(true);
+    expect(await stageOf(a1)).toBe(zzA);
+    expect(await stageOf(a2)).toBe(zzA);
+
+    const first = await sa.c.del(`/api/deals/pipelines/${zzA}?moveTo=${conversation!.id}`);
+    expect(first.status, JSON.stringify(first.json)).toBe(200);
+    expect(first.json).toMatchObject({ removed: { id: zzA }, movedTo: { id: conversation!.id, name: "Conversation" }, items: 2 });
+    expect(await stageOf(a1), "the first item of the removed stage").toBe(conversation!.id);
+    expect(await stageOf(a2), "the second item of the removed stage").toBe(conversation!.id);
+    expect(await stageOf(untouched), "a deal in another stage is not dragged along").toBe(named(pro, "Negotiation").id);
+
+    const second = await sa.c.del(`/api/deals/pipelines/${zzB}?moveTo=${lead!.id}`);
+    expect(second.status, JSON.stringify(second.json)).toBe(200);
+    expect(second.json).toMatchObject({ removed: { id: zzB }, movedTo: { id: lead!.id, name: "Lead" }, items: 1 });
+    expect(await stageOf(b1), "the second removal follows its own choice").toBe(lead!.id);
+    // The second removal's choice did not drag the first stage's items along.
+    expect(await stageOf(a1)).toBe(conversation!.id);
+    expect(await stageOf(a2)).toBe(conversation!.id);
+    expect(await exists(zzA)).toBe(false);
+    expect(await exists(zzB)).toBe(false);
+  });
+
   it("qa:TC missing AC1: an empty stage still asks before it is removed", async () => {
     const zz = await zzStage();
     const r = await sa.c.del(`/api/deals/pipelines/${zz}`);
@@ -134,7 +208,7 @@ describe("qa:TC missing APL-2736 removing a stage asks where its items go", () =
   it("qa:TC missing AC1: the chosen stage must be another open stage of the same pipeline", async () => {
     const zz = await zzStage();
     const deal = await dealIn(zz);
-    for (const moveTo of [zz, named(bid, "Preparing").id, named(pro, "Won").id, named(pro, "Lost").id, named(pro, "On hold").id, "st_nope"]) {
+    for (const moveTo of [zz, named(bid, "Go").id, named(pro, "Won").id, named(pro, "Lost").id, named(pro, "On hold").id, "st_nope"]) {
       const r = await sa.c.del(`/api/deals/pipelines/${zz}?moveTo=${moveTo}`);
       expect(r.status, `${moveTo} ${JSON.stringify(r.json)}`).toBe(400);
     }
@@ -173,11 +247,15 @@ describe("qa:TC missing APL-2736 removing a stage asks where its items go", () =
     const zz = await zzStage();
     const proposal = named(pro, "Proposal");
     const deal = await dealIn(named(pro, "Lead").id);
-    const mover = new pg.Client({ connectionString: process.env.DATABASE_URL });
-    const watcher = new pg.Client({ connectionString: process.env.DATABASE_URL });
+    const mover = new pg.Client({ connectionString: rawDatabaseUrl() });
+    const watcher = new pg.Client({ connectionString: rawDatabaseUrl() });
     await mover.connect();
     await watcher.connect();
     try {
+      // The raw connections must see the tables the route writes, or the lock below guards no rows and this
+      // test passes without ever overlapping the removal (it did: the mover sat in `public`, holding nothing).
+      const where = (await watcher.query<{ schema: string }>("SELECT current_schema() AS schema")).rows[0].schema;
+      expect(where, "the raw pg connections are not in the schema DATABASE_URL names").toBe(testSchema());
       // Allowed direct DB write (D1 race transaction only): the mover puts the deal in the stage and holds its
       // transaction open while the removal runs. An HTTP request cannot hold a transaction open across calls.
       await mover.query("BEGIN");
@@ -195,6 +273,8 @@ describe("qa:TC missing APL-2736 removing a stage asks where its items go", () =
       await mover.query("COMMIT");
       const r = await removing;
       expect(r.status, JSON.stringify(r.json)).toBe(200);
+      // The deal that raced into the stage is one of the items the move carried, not a row the delete stranded.
+      expect(r.json, "the raced-in deal is one of the moved items").toMatchObject({ removed: { id: zz }, movedTo: { id: proposal.id }, items: 1 });
     } finally {
       await mover.query("ROLLBACK").catch(() => {});
       await mover.end();

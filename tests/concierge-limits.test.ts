@@ -110,7 +110,14 @@ describe("model wrapper (9.1)", () => {
     });
     const r = await sendMessage(actor(u), "hello");
     expect(r.disabled).toBeUndefined();
-    expect(r.messages.at(-1)?.text).toBe("Back again.");
+    // SHO-2693 (w164 d279210, then w183 3ec8fca) changed the reply for a turn that read nothing and wrote nothing:
+    // buildReply() in src/lib/concierge/engine.ts no longer relays the model's sentence there (`records === 0` ->
+    // NOTHING_CHANGED), so the person reads the server's own words and not "Back again.". This test is about 9.2 AC5,
+    // which is the budget: what it must show is that the retry's SUCCESS is the turn that landed - an ordinary reply,
+    // not the provider-down notice (kind "notice") - and that the turn counted once. The new reply shape is asserted
+    // where it was decided: tests/concierge-fixes.test.ts:287 pins the same server sentence for an ungrounded turn.
+    expect(r.messages).toHaveLength(2);
+    expect(r.messages.at(-1)?.kind).toBe("text");
     expect(calls).toBe(2);
     expect(await weekMessages(u.id)).toBe(1);
     expect(await db.modelUsage.count({ where: { userId: u.id } })).toBe(1);

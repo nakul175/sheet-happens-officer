@@ -6,12 +6,15 @@
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { expect, request, test, type APIRequestContext } from "@playwright/test";
+import { outboxDir } from "../outbox";
 
 const QA_PASS = process.env.SHO_QA_PASS ?? "";
 // The local Super Admin of tests/helpers.ts. The server must run with SUPER_ADMIN_EMAILS=root.test@aplyd.com.
 const SUPER = { email: "root.test@aplyd.com", password: "correct-horse-9" };
 const RUN = `${Date.now().toString(36)}${process.pid.toString(36)}`;
-const OUTBOX = process.env.EMAIL_OUTBOX_DIR ?? ".outbox";
+// SHO-2897: no shared ".outbox" default. outboxDir() fails loudly naming EMAIL_OUTBOX_DIR, so this spec can never be
+// satisfied by a mail another spec's server wrote into a folder it also resolved.
+const OUTBOX = () => outboxDir("tests/e2e/stories/APL-2669.spec.ts");
 const baseURL = process.env.BASE_URL ?? process.env.TASKBOARD_URL ?? "http://localhost:3100";
 const MALFORMED = [
   "abc",
@@ -29,9 +32,9 @@ const MALFORMED = [
 ] as const;
 
 function verifyToken(email: string) {
-  const files = readdirSync(OUTBOX).sort();
+  const files = readdirSync(OUTBOX()).sort();
   const mails = files
-    .map((f) => JSON.parse(readFileSync(path.join(OUTBOX, f), "utf8")) as { to: string; subject: string; text: string })
+    .map((f) => JSON.parse(readFileSync(path.join(OUTBOX(), f), "utf8")) as { to: string; subject: string; text: string })
     .filter((m) => m.to === email && /Verify/.test(m.subject));
   return mails.at(-1)?.text.match(/token=([\w-]+)/)?.[1] ?? null;
 }

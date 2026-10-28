@@ -150,6 +150,36 @@ function git(args: string[]): { status: number | null; stdout: string; stderr: s
   return { status: result.status, stdout: result.stdout ?? "", stderr: result.stderr ?? "" };
 }
 
+/**
+ * "The app did not come up" is the health wait's FAILURE message: ci.yml prints it just before `exit 1`
+ * (asserted by tests/ci-pr-2696.test.ts), viewport.yml does the same, and phone-checks.yml does too since
+ * SHO-2559 gave its browser-tier job a real precondition. So the string being present in a workflow is not a
+ * defect - what APL-2662 must keep out of the workflows it did not touch is the WORKAROUND: printing that note
+ * and carrying on, so a run against a dead app looks like a green job. Each occurrence therefore has to be a
+ * hard failure: the shell block it opens must reach `exit 1`, and the message line itself must not swallow its
+ * own status (`|| true`, `|| :`, `exit 0`). Returns one line per occurrence that is a workaround instead.
+ */
+function nonFailingAppWaits(text: string): string[] {
+  const lines = text.split(/\r?\n/);
+  const offenders: string[] = [];
+  lines.forEach((line, index) => {
+    if (!line.includes("The app did not come up")) return;
+    const indent = line.search(/\S/);
+    // The shell block this message belongs to: the following lines at its own indentation, stopping at the
+    // first one indented less (the next step, `fi`, or a sibling key).
+    const block: string[] = [line];
+    for (let next = index + 1; next < lines.length; next++) {
+      if (lines[next].trim() !== "" && lines[next].search(/\S/) < indent) break;
+      block.push(lines[next]);
+    }
+    const why: string[] = [];
+    if (!/\bexit 1\b/.test(block.join("\n"))) why.push("the block never exits 1");
+    if (/\|\|\s*(true|:)\s*$/.test(line.trim()) || /\bexit 0\b/.test(line)) why.push("the message line swallows the failure");
+    if (why.length > 0) offenders.push(`${line.trim()} -> ${why.join(", ")}`);
+  });
+  return offenders;
+}
+
 describe("CI runs the viewport tests in Playwright Chromium (APL-2662)", () => {
   it("Viewport tests run on every PR (qa:TC-APL2662-e1e4aac1@v1)", () => {
     const { doc, job, steps } = loadWorkflow();
@@ -187,7 +217,10 @@ describe("CI runs the viewport tests in Playwright Chromium (APL-2662)", () => {
       expect(text, file).not.toContain("APL-2662");
       expect(text, file).not.toContain("playwright-browsers");
       expect(text, file).not.toContain("Playwright browsers restored from cache");
-      expect(text, file).not.toContain("The app did not come up");
+      // Not "the message is absent" - it is the health wait's real failure message and phone-checks.yml now
+      // prints it for the browser tier (SHO-2559). What must stay out is the workaround: the message as a note
+      // the job carries on past. Every occurrence has to fail the step (see nonFailingAppWaits).
+      expect(nonFailingAppWaits(text), `${file} fails when the app does not come up`).toEqual([]);
     }
     const base = git(["rev-parse", "--verify", "origin/main"]);
     const onMain = git(["cat-file", "-e", "origin/main:.github/workflows/viewport.yml"]);
@@ -195,6 +228,35 @@ describe("CI runs the viewport tests in Playwright Chromium (APL-2662)", () => {
       const diff = git(["diff", "--exit-code", "origin/main", "--", ...UNTOUCHED_WORKFLOWS]);
       expect(diff.status, `${diff.stdout}\n${diff.stderr}`).toBe(0);
     }
+  });
+
+  it("the narrowed app-start guard still rejects the workaround it exists for", () => {
+    // Printable proof that narrowing the target kept it sharp: the workaround shape goes red...
+    const workaround = [
+      "      - name: Start the app",
+      "        run: |",
+      "          (npx next start -p 3100 > server.log 2>&1 &)",
+      "          sleep 5",
+      '          echo "The app did not come up: no answer" || true',
+      "      - name: Viewport tests",
+      "        run: npm run test:viewport",
+    ].join("\n");
+    const caught = nonFailingAppWaits(workaround);
+    expect(caught).toHaveLength(1);
+    expect(caught[0]).toContain("swallows the failure");
+    // ...and the note printed without any failure at all is caught too...
+    const silent = ["          echo 'The app did not come up' >&2", "      - run: npm run test:viewport"].join("\n");
+    expect(nonFailingAppWaits(silent)).toHaveLength(1);
+    // ...while the legitimate shape - the message, then a hard exit, as ci.yml, viewport.yml and
+    // phone-checks.yml all have it - passes.
+    const legitimate = [
+      "          if [ \"$ready\" -ne 1 ]; then",
+      '            echo "The app did not come up: ${url} did not answer within the timeout" >&2',
+      "            tail -n 50 server.log >&2 || true",
+      "            exit 1",
+      "          fi",
+    ].join("\n");
+    expect(nonFailingAppWaits(legitimate)).toEqual([]);
   });
 
   it("A failing viewport test fails the job (qa:TC-APL2662-d83a7e4c@v1)", { timeout: 90_000 }, () => {

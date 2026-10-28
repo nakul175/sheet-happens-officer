@@ -144,6 +144,21 @@ describe("Usage screen (SHO-US-9.2 AC6)", () => {
     expect(html).not.toContain(CHAT);
   });
 
+  it("qa:TC missing SHO-2951: a payload with no message figure says Not counted, and a real zero still says 0", () => {
+    const missing = payload();
+    delete missing.month.messages;
+    const html = htmlFor("SUPER_ADMIN", missing);
+    expect(html).toMatch(/Messages this month<\/h2>\s*<p class="usage-count usage-unknown">Not counted<\/p>/);
+    expect(html).not.toMatch(/Messages this month<\/h2>\s*<p class="usage-count">0<\/p>/);
+    expect(html).toContain("This calendar month, India time. Quick actions are not included.");
+    expect(html).not.toContain(CHAT);
+
+    // A figure the API did count stays a figure, even when it is zero.
+    const zero = payload();
+    zero.month = { ...zero.month, messages: 0 };
+    expect(htmlFor("SUPER_ADMIN", zero)).toMatch(/Messages this month<\/h2>\s*<p class="usage-count">0<\/p>/);
+  });
+
   // AC6 v1.1 (Dwight, 19 Oct 01:24 IST). Render data only, named ZZ-TEST; nothing is written anywhere.
   const zz = (ceiling: Partial<UsagePayload["ceiling"]>): UsagePayload => ({
     ...payload(ceiling),

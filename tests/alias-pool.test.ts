@@ -1,9 +1,9 @@
 // APL-2748. The verified alias pool and its provisioning script, without a server: the script's HTTP is a fake
 // that behaves like /api/auth and /api/team. Pam left no qa:TC id on the issue; each title says "qa:TC missing".
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { PER_SLOT, QA_ADMIN_EMAIL, SLOTS, parseSlots, poolFor, poolPerson, provisionTarget, slotFromEnv } from "./e2e/helpers/alias-pool";
-import { provision, report, type Http, type Reply } from "./e2e/tools/provision-aliases";
+import { createMissing, createPassed, provision, report, type Http, type Reply } from "./e2e/tools/provision-aliases";
 
 const PASS = "zz-test-only-not-a-real-password";
 
@@ -92,8 +92,15 @@ describe("qa:TC missing APL-2748 AC1: a fixed pool of nakul17+ aliases", () => {
       expect(text, spec).not.toContain("/api/auth/signup");
       expect(text, spec).not.toContain("qaEmail(");
     }
-    // APL-2609 is main's local-sandbox spec (#112): it signs up from the local outbox, so beforeAll fails without one.
-    expect(readFileSync("tests/e2e/stories/APL-2609.spec.ts", "utf8")).toContain("expect(existsSync(OUTBOX)");
+    // APL-2609 is an isolated account-creation test, not a consumer of the pre-provisioned
+    // shared alias helper above. Its private outbox is safe only because the app that
+    // writes the mail is also owned by that spec and receives the exact same path.
+    // Missing/unreadable external outboxes must no longer turn those assertions into skips.
+    const sandbox = readFileSync("tests/e2e/stories/APL-2609.spec.ts", "utf8");
+    expect(sandbox, "APL-2609 owns the mail writer").toContain('import { startOwnedOutboxApp } from "../owned-outbox-app"');
+    expect(sandbox, "owned writer receives the spec outbox").toContain('startOwnedOutboxApp({ outbox: OUTBOX, mode })');
+    expect(sandbox, "APL-2609 does not skip for external outbox setup").not.toMatch(/test\.skip\([^;]*(?:outbox|OUTBOX)/);
+    expect(sandbox, "APL-2609 guesses no external outbox folder").not.toContain('EMAIL_OUTBOX_DIR ?? ".outbox"');
   });
 
   it("qa:TC missing AC1: each staging job gets its own slot, so two shards never share a person", () => {
@@ -187,6 +194,79 @@ describe("qa:TC missing APL-2748 AC1: pool Members are handed back active", () =
     expect(src).toContain("/reactivate");
     expect(src).toMatch(/later\(\(\) => restore\(/);
     expect(src).not.toContain("/deactivate");
+  });
+});
+
+describe("qa:TC missing APL-3017: a verified alias is never reset to unverified", () => {
+  const everyAlias = SLOTS.flatMap(poolFor).map((p) => p.email);
+  const signUps = (calls: Call[]) => calls.filter((c) => c.path === "/api/auth/signup");
+
+  it("qa:TC missing APL-3017: a full provisioning run over a verified pool writes nothing and leaves all 66 verified", async () => {
+    const s = fakeServer([admin, ...everyAlias.map((email) => ({ email }))]);
+    const r = await run(s, [...SLOTS]);
+    expect(r.rows).toHaveLength(1 + SLOTS.length * PER_SLOT);
+    expect(r.ready).toBe(true);
+    // Sign-in only: no sign-up, no resend, no reactivate, no role change. That is what keeps a verified alias verified.
+    expect(writes(s.calls)).toEqual([]);
+    expect(s.calls.some((c) => c.path.includes("resend"))).toBe(false);
+    for (const email of everyAlias) {
+      expect(s.accts.get(email)!.verified, email).toBe(true);
+      expect(s.accts.get(email)!.deactivated, email).toBe(false);
+      expect(s.accts.get(email)!.orgRole, email).toBe("MEMBER");
+    }
+  });
+
+  it("qa:TC missing APL-3017: create mode never sends a sign-up for an alias that already exists, verified or not", async () => {
+    // The 20 Oct state: all 66 exist and none is verified. A sign-up is the one request in this repo that makes an
+    // unverified row, so none is sent; the run says they are not ready instead of reporting success.
+    const oct20 = fakeServer(everyAlias.map((email) => ({ email, verified: false })));
+    const down = await createMissing({ password: PASS, http: oct20.http, pause: 0 });
+    expect(down).toEqual({ created: 0, skipped: 66, failed: 0, ready: 0 });
+    expect(createPassed(down)).toBe(false);
+    expect(signUps(oct20.calls)).toEqual([]);
+    for (const email of everyAlias) expect(oct20.accts.get(email)!.verified, email).toBe(false);
+
+    // Verified again: the same run is a pass and still writes nothing at all.
+    const verified = fakeServer(everyAlias.map((email) => ({ email })));
+    const up = await createMissing({ password: PASS, http: verified.http, pause: 0 });
+    expect(up).toEqual({ created: 0, skipped: 66, failed: 0, ready: 66 });
+    expect(createPassed(up)).toBe(true);
+    expect(writes(verified.calls)).toEqual([]);
+    for (const email of everyAlias) expect(verified.accts.get(email)!.verified, email).toBe(true);
+  });
+
+  it("qa:TC missing APL-3017: the run that created 66 unverified aliases cannot pass, and neither can a rerun over them", async () => {
+    const s = fakeServer();
+    const made = await createMissing({ password: PASS, http: s.http, pause: 0 });
+    expect(made).toEqual({ created: 66, skipped: 0, failed: 0, ready: 0 });
+    expect(createPassed(made)).toBe(false); // creating them is not provisioning them
+    const again = await createMissing({ password: PASS, http: s.http, pause: 0 });
+    expect(again).toEqual({ created: 0, skipped: 66, failed: 0, ready: 0 });
+    expect(createPassed(again)).toBe(false); // existing and unverified is not ready
+    expect(signUps(s.calls)).toHaveLength(66); // the first run only; the second sent none
+  });
+
+  it("qa:TC missing APL-3017: no app code, script, seed or migration writes emailVerifiedAt back to NULL", () => {
+    const walk = (dir: string): string[] => readdirSync(dir, { withFileTypes: true }).flatMap((d) =>
+      d.isDirectory() ? walk(`${dir}/${d.name}`) : /\.tsx?$/.test(d.name) ? [`${dir}/${d.name}`] : []);
+    // Every writer in the repo, not just the app: the seed is the step the ticket blamed, so it is inside the guard.
+    for (const file of [...walk("src"), ...walk("tests/e2e/helpers"), ...walk("tests/e2e/tools"), ...walk("scripts")]) {
+      expect(readFileSync(file, "utf8"), file).not.toMatch(/emailVerifiedAt\s*:\s*null/);
+    }
+    // Sign-up is the only place a pool alias is created, and it leaves the column unset: NULL is what "unverified" is.
+    expect(readFileSync("src/app/api/auth/signup/route.ts", "utf8")).not.toContain("emailVerifiedAt");
+    // The one writer sets a date. There is no route, job or script that can clear it again.
+    expect(readFileSync("src/app/api/auth/verify/route.ts", "utf8")).toContain("emailVerifiedAt: new Date()");
+    // The seed (APL-2590) verifies its own nakul17+apl2590-* rows and never names the pool: it cannot reset an alias.
+    const seed = readFileSync("scripts/seed-apl2590-fixtures.ts", "utf8");
+    expect(seed).toContain("emailVerifiedAt: now");
+    expect(seed).toContain("nakul17+apl2590-");
+    expect(seed).not.toContain("zz-qa");
+    // No migration updates the column after init; only the init's column definition mentions it.
+    const migrations = readdirSync("prisma/migrations", { withFileTypes: true })
+      .filter((d) => d.isDirectory()).map((d) => `prisma/migrations/${d.name}/migration.sql`);
+    expect(migrations.length).toBeGreaterThan(0);
+    for (const file of migrations) expect(readFileSync(file, "utf8"), file).not.toMatch(/SET\s+"?emailVerifiedAt"?\s*=/i);
   });
 });
 

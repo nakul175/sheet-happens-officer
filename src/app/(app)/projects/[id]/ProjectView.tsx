@@ -4,8 +4,9 @@ import Link from "next/link";
 import { use, useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Suspense } from "react";
-import { PRIORITY, ROLE, api, dueLabel, dueState, rowKeys, initials, isOverdue, todayIST, useGet } from "@/components/api";
+import { PRIORITY, ROLE, api, dueState, rowKeys, isOverdue, todayIST, useGet } from "@/components/api";
 import { errorMessage, isVersionConflict } from "@/lib/version-error";
+import { WorkspaceTaskPerson, type WorkspaceTaskCandidate } from "@/components/WorkspaceTaskPerson";
 import { TaskModal } from "@/components/TaskModal";
 import { AvatarGroup, Pri, Tick } from "@/components/TaskParts";
 import { Confirm, Field, LoadFailed, Menu, Modal, Skeleton } from "@/components/ui";
@@ -59,6 +60,7 @@ function Inner({ id }: { id: string }) {
   const wide = filtered || ls.sort !== "date" || ls.group !== "section"; // the server sent every matching task, not one page per section
   const tk = useGet<{ sections: S[]; summary?: Summary }>(`/api/projects/${id}/tasks${apiQuery(ls)}`);
   const [extra, setExtra] = useState<Record<string, T[]>>({}); // pages beyond the first, by section
+  const [renamingProject, setRenamingProject] = useState(false);
   const [adding, setAdding] = useState(sp.get("new") === "1"); // SHO-US-14.17: a new project asks for its first task
   const [nudgeOff, setNudgeOff] = useState(false);
   const [dialog, setDialog] = useState<null | { kind: "rename" | "delete" | "addSection"; s?: S }>(null);
@@ -191,8 +193,9 @@ function Inner({ id }: { id: string }) {
           {tk.data.summary.awaiting > 0 && <span className="chip gold">{tk.data.summary.awaiting} awaiting approval</span>}
         </span>
       )}</>}
-      actions={canWrite && <button className="btn" onClick={() => setAdding(true)}>+ Add task</button>}>
+      actions={canWrite && <><button className="btn" onClick={() => setAdding(true)}>+ Add task</button>{manage && p?.type !== "DEAL" && <button className="btn ghost" onClick={() => setRenamingProject(true)}>Rename project</button>}</>}>
       {archivedBanner}
+      {renamingProject && p && <SectionName title="Rename project" fieldLabel="Project name" maxLength={200} yes="Save" initial={p.name} onClose={() => setRenamingProject(false)} onSave={(name) => api("PATCH", `/api/projects/${id}`, { name })} onDone={() => { setRenamingProject(false); refresh(); }} />}
       {manage && p && p.members.filter((m) => m.active).length === 1 && !nudgeOff && !nudgeSeen(p.id) && (
         <div className="nudge" role="region" aria-label="Add people">
           <span className="grow"><b>Only you are in this project.</b> Add the people who will work on it.</span>
@@ -200,7 +203,7 @@ function Inner({ id }: { id: string }) {
           <button className="btn ghost sm" onClick={() => { nudgeSeen(p.id, true); setNudgeOff(true); }}>Dismiss</button>
         </div>
       )}
-      {p?.deal && <DealPanel projectId={id} deal={p.deal} canWrite={canWrite} onChange={refresh} feed={openFeed} />}
+      {p?.deal && <DealPanel projectId={id} projectName={p.name} canManage={manage} deal={p.deal} canWrite={canWrite} onChange={refresh} feed={openFeed} />}
       <div className="tabs">
         <div className="seg" role="tablist" aria-label="View">
           <button role="tab" aria-selected={view === "list"} onClick={() => setView("list")}>List</button>
@@ -403,6 +406,14 @@ function NewTask({ p, onClose, onAdded }: { p: Proj; onClose: () => void; onAdde
   const [assignee, setAssignee] = useState(workers.some((w) => w.userId === me.id) ? me.id : workers[0]?.userId ?? "");
   const [due, setDue] = useState("");
   const [priority, setPriority] = useState("MEDIUM");
+  const [collaborators, setCollaborators] = useState<string[]>([]);
+  const [pendingPeople, setPendingPeople] = useState<WorkspaceTaskCandidate[]>([]);
+  const [pendingCollaborators, setPendingCollaborators] = useState<WorkspaceTaskCandidate[]>([]);
+  const [addAssignee, setAddAssignee] = useState(false);
+  const [addCollaborators, setAddCollaborators] = useState<string[]>([]);
+  const canAddPeople = p.role === "LEADER" && !p.archived;
+  const remember = (person: WorkspaceTaskCandidate) => setPendingPeople(current => current.some(p => p.id === person.id) ? current : [...current, person]);
+  const rememberCollaborator = (person: WorkspaceTaskCandidate) => setPendingCollaborators(current => current.some(p => p.id === person.id) ? current : [...current, person]);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   return (
@@ -411,13 +422,16 @@ function NewTask({ p, onClose, onAdded }: { p: Proj; onClose: () => void; onAdde
       <form onSubmit={async (e) => {
         e.preventDefault();
         setBusy(true);
-        const r = await api("POST", `/api/projects/${p.id}/tasks`, { title, sectionId: section, assigneeId: assignee || undefined, dueDate: due || null, priority });
+        const r = await api("POST", `/api/projects/${p.id}/tasks`, { title, sectionId: section, assigneeId: assignee || undefined, dueDate: due || null, priority, collaboratorIds: collaborators.filter((id) => id !== assignee), addAssigneeToProject: addAssignee, addCollaboratorsToProject: addCollaborators.filter(id => collaborators.includes(id) && id !== assignee) });
         setBusy(false);
         if (r.ok) onAdded(); else setErr(r.error ?? "Could not add the task.");
       }}>
         <Field label="Title">{(id) => <input id={id} className="in" value={title} required maxLength={500} autoFocus={finePointer()} onChange={(e) => setTitle(e.target.value)} />}</Field>
         <Field label="Section">{(id) => <select id={id} className="in" value={section} onChange={(e) => setSection(e.target.value)}>{p.sections.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select>}</Field>
-        <Field label="Assignee">{(id) => <select id={id} className="in" value={assignee} onChange={(e) => setAssignee(e.target.value)}>{workers.map((w) => <option key={w.userId} value={w.userId}>{w.name}</option>)}</select>}</Field>
+        <Field label="Assignee">{(id) => <select id={id} className="in" value={assignee} onChange={(e) => { setAssignee(e.target.value); setAddAssignee(pendingPeople.some(p => p.id === e.target.value && !p.isMember)); }}>{pendingPeople.filter(person => !workers.some(w => w.userId === person.id)).map(person => <option key={person.id} value={person.id}>{person.name} (will join project)</option>)}{workers.map((w) => <option key={w.userId} value={w.userId}>{w.name}</option>)}</select>}</Field>
+        {canAddPeople && <WorkspaceTaskPerson projectId={p.id} purpose="assignee" whenSaved excludeIds={[assignee]} onChoose={async (person, addToProject) => { remember(person); setAssignee(person.id); setAddAssignee(addToProject); return { ok: true }; }} />}
+        <Field label="Collaborators (optional)">{(id) => <select id={id} className="in" multiple value={collaborators.filter((id) => id !== assignee)} onChange={(e) => setCollaborators(Array.from(e.target.selectedOptions, (option) => option.value))}>{pendingCollaborators.filter(person => person.id !== assignee && !p.members.some(m => m.userId === person.id)).map(person => <option key={person.id} value={person.id}>{person.name} (will join project)</option>)}{p.members.filter((m) => m.active && m.userId !== assignee).map((m) => <option key={m.userId} value={m.userId}>{m.name}</option>)}</select>}</Field>
+        {canAddPeople && <WorkspaceTaskPerson projectId={p.id} purpose="collaborator" whenSaved excludeIds={[assignee, ...collaborators]} onChoose={async (person, addToProject) => { rememberCollaborator(person); setCollaborators(current => current.includes(person.id) ? current : [...current, person.id]); if (addToProject) setAddCollaborators(current => current.includes(person.id) ? current : [...current, person.id]); return { ok: true }; }} />}
         <Field label="Due date (optional)">{(id) => <input id={id} className="in" type="date" value={due} onChange={(e) => setDue(e.target.value)} />}</Field>
         <Field label="Priority">{(id) => <select id={id} className="in" value={priority} onChange={(e) => setPriority(e.target.value)}>{Object.entries(PRIORITY).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select>}</Field>
         {err && <div className="err" role="alert">{err}</div>}
@@ -427,7 +441,7 @@ function NewTask({ p, onClose, onAdded }: { p: Proj; onClose: () => void; onAdde
   );
 }
 
-function SectionName({ title, yes, initial = "", onSave, onClose, onDone }: { title: string; yes: string; initial?: string; onSave: (n: string) => Promise<{ ok: boolean; error?: string }>; onClose: () => void; onDone: () => void }) {
+function SectionName({ title, yes, initial = "", fieldLabel = "Section name", maxLength = 60, onSave, onClose, onDone }: { fieldLabel?: string; maxLength?: number; title: string; yes: string; initial?: string; onSave: (n: string) => Promise<{ ok: boolean; error?: string }>; onClose: () => void; onDone: () => void }) {
   const [v, setV] = useState(initial);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -435,7 +449,7 @@ function SectionName({ title, yes, initial = "", onSave, onClose, onDone }: { ti
     <Modal small label={title} onClose={onClose}>
       <h2>{title}</h2>
       <form onSubmit={async (e) => { e.preventDefault(); setBusy(true); const r = await onSave(v.trim()); setBusy(false); if (r.ok) onDone(); else setErr(r.error ?? "Could not save."); }}>
-        <Field label="Section name">{(id) => <input id={id} className="in" value={v} maxLength={60} autoFocus={finePointer()} onChange={(e) => setV(e.target.value)} />}</Field>
+        <Field label={fieldLabel}>{(id) => <input id={id} className="in" value={v} maxLength={maxLength} autoFocus={finePointer()} onChange={(e) => setV(e.target.value)} />}</Field>
         {err && <div className="err" role="alert">{err}</div>}
         <div className="actions"><button type="button" className="btn ghost" onClick={onClose}>Cancel</button><button className="btn" disabled={busy || !v.trim()}>{yes}</button></div>
       </form>

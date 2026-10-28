@@ -1,11 +1,14 @@
 // APL-2652. Same-origin return path after sign-in, and the signed-out redirect that carries it.
 // The cases at the top do not need a server. The "signed-out redirect" cases hit TASKBOARD_URL.
-import { existsSync, readFileSync } from "node:fs";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { existsSync, readFileSync, statSync } from "node:fs";
+import { randomBytes } from "node:crypto";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 import { api } from "@/components/api";
 import { proxy } from "@/proxy";
-import { account, BASE, project, task } from "./helpers";
+import { account, BASE, project, SUPER_EMAIL, task } from "./helpers";
+import { hashToken, SESSION_COOKIE } from "@/lib/auth";
+import { db } from "@/lib/db";
 import { isSignInScreen, RETURN_PATH_HEADER, returnToEnabled, safeReturnPath, sessionSignInTarget, signedOutSignInHref, signInHref } from "@/lib/return-to";
 
 const BASE_ORIGIN = "http://return.invalid";
@@ -511,6 +514,109 @@ function assertSameOriginSignIn(target: string, next: string | null) {
   }
 }
 
+describe("APL-2652 expiry on a live browser: AC6 v1.2 keeps the target, AC7 v1.2 changes nothing", () => {
+  // This file runs from a test process whose environment may itself carry SIGNIN_RETURN_TO=on (a mode server).
+  // The checks below are about the running server's flag, like every other case in the file, so the flag is turned
+  // off here and read back from the server instead.
+  const previous = process.env.SIGNIN_RETURN_TO;
+  afterEach(() => {
+    if (previous === undefined) delete process.env.SIGNIN_RETURN_TO;
+    else process.env.SIGNIN_RETURN_TO = previous;
+  });
+
+  /**
+   * The person the expired session belongs to. This file owns the fixture instead of reading whichever account an
+   * earlier test file happened to create: `npm test` runs files one at a time in path order, so `people.test.ts` and
+   * the viewport specs left root.test@aplyd.com behind before this file ran, and running this file on its own threw
+   * `findUniqueOrThrow` before the 401 the case is about. `account` reuses the row when it is already there (signup
+   * answers 409, then sign-in), so the full-suite order is unchanged.
+   */
+  let superUserId = "";
+  beforeAll(async () => {
+    superUserId = (await account("root", SUPER_EMAIL)).id;
+  });
+
+  /**
+   * A session row whose expiry is already past, and whose `lastSeenAt` is recent so `sessionUser` does not write to it.
+   * `sessionUser` looks the token up by its hash and refuses it on `expiresAt`, so the app treats the browser as signed out.
+   */
+  async function expiredCookie(): Promise<string> {
+    const token = randomBytes(32).toString("base64url");
+    const now = new Date();
+    await db.session.create({
+      data: { userId: superUserId, tokenHash: hashToken(token), expiresAt: new Date(now.getTime() - 60_000), lastSeenAt: now, userAgent: "qa:APL-2652 expired session" },
+    });
+    return `${SESSION_COOKIE}=${token}`;
+  }
+
+  /** Every Set-Cookie line a response carries. `headers.getSetCookie` exists on Node's fetch; the fallback keeps older stubs honest. */
+  function setCookies(res: Response): string[] {
+    const lines = typeof res.headers.getSetCookie === "function" ? res.headers.getSetCookie() : [];
+    const single = res.headers.get("set-cookie");
+    return single && lines.length === 0 ? [single] : lines;
+  }
+
+  it("AC6 v1.2: an expired session on an app page answers 401, and the 401 target keeps the validated path and the fixed message", async () => {
+    const cookie = await expiredCookie();
+    // The state the browser is in: signed out, because the session row has expired.
+    const api = await fetch(`${BASE}/api/tasks/T1`, { headers: { cookie }, redirect: "manual" });
+    expect(api.status, "an expired session answers 401, the trigger AC6 depends on").toBe(401);
+    await api.arrayBuffer();
+    // The trigger above is the server's; what follows is this process's decision, so the flag is set explicitly here
+    // rather than read from whatever environment this runner happens to carry (a mode server sets it to on).
+    // AC8 is covered separately by the flag-off cases in SIGNIN_RETURN_TO.
+    process.env.SIGNIN_RETURN_TO = "on";
+    // What `src/components/api.ts` does with that 401, for the same browser.
+    expect(sessionSignInTarget("/tasks/T1")).toBe("/signin?expired=1&next=%2Ftasks%2FT1");
+    expect(signedOutSignInHref("/tasks/T1?tab=comments")).toBe("/signin?next=%2Ftasks%2FT1%3Ftab%3Dcomments");
+    // AC6 v1.2: the next it carries passes the same AC2 validation sign-in will apply to it.
+    expect(safeReturnPath("/tasks/T1")).toBe("/tasks/T1");
+    // And on a server that runs with the flag on, the screen really shows the one fixed sentence and does not bounce.
+    // ci.yml's server runs with the flag off, so that half is asserted only where the server has it on (phone-checks.yml,
+    // viewport.yml and the mode servers all set SIGNIN_RETURN_TO=on).
+    if (await serverReturnToEnabled()) {
+      const screen = await documentTarget("/signin?expired=1&next=%2Ftasks%2FT1");
+      expect(screen.status).toBe(200);
+      expect(screen.target, "sign-in does not bounce anywhere on its own").toBeNull();
+      expect(screen.html).toMatch(/<div role="alert"[^>]*>Your session has expired, please sign in again<\/div>/);
+      expect(screen.html).toContain('\\"next\\":\\"/tasks/T1\\"');
+    }
+  });
+
+  /** The document with every `<script>` removed: what a person can actually see, as opposed to the framework's payload. */
+  function visible(html: string): string {
+    return html.replace(/<script\b[^>]*>[\s\S]*?(?:<\/script>|$)/gi, "");
+  }
+
+  it("AC7 v1.2: /signin?expired=<anything> writes and clears nothing, and renders no text from the URL", async () => {
+    const enabled = await serverReturnToEnabled();
+    // The tests below call the pure helpers, so the flag in this process has to match the server's.
+    if (enabled) process.env.SIGNIN_RETURN_TO = "on";
+    else process.env.SIGNIN_RETURN_TO = "off";
+    for (const query of ["", "?expired=1", "?expired=0", "?expired=yes", "?expired=%3Cb%3Ezz-2652-ac7%3C%2Fb%3E", "?expired=1&zz-2652-ac7=1"]) {
+      const path = `/signin${query}`;
+      const res = await fetch(BASE + path, { redirect: "manual" });
+      const html = await res.text();
+      expect(res.status, path).toBe(200);
+      expect(res.headers.get("location"), path).toBeNull();
+      // AC7 v1.2: nothing written or cleared, and no session cookie touched, by opening the expired screen.
+      expect(setCookies(res), path).toEqual([]);
+      // The URL's own text is never shown. The framework carries the request URL in its own payload, inert, so the
+      // check is on the document: no element, attribute or text node renders what the URL said.
+      expect(visible(html), path).not.toContain("zz-2652-ac7");
+      // ...and that check is not vacuous: the probe really is in the response (in the framework payload), and stripping
+      // only the scripts is what removes it. A blank page, or a page that echoed nothing at all, would fail here.
+      if (path.includes("zz-2652-ac7")) {
+        expect(html, `${path}: the probe reaches the response`).toContain("zz-2652-ac7");
+        expect(visible(html).length, `${path}: the document still has content`).toBeGreaterThan(1000);
+      }
+      // The sentence is the fixed one and appears only where it belongs: expired=1 on a flag-on server.
+      const shows = /Your session has expired, please sign in again/.test(visible(html));
+      expect(shows, path).toBe(query.includes("expired=1") && enabled);
+    }
+  });
+});
+
 describe("SIGNIN_RETURN_TO", () => {
   const previous = process.env.SIGNIN_RETURN_TO;
   function restoreEnv() {
@@ -644,6 +750,10 @@ describe("APL-2652 signed-out redirect", () => {
   });
 
   it("D9 AC2 v1.6: a signed-out redirect keeps %09 and %0A in a query value encoded in the Location", async () => {
+    // Where the running server writes: CI redirects `next start` to server.log, otherwise SERVER_LOG. Only bytes this
+    // test appends count (see the check at the end), so the size is taken before the first probe is sent.
+    const log = process.env.SERVER_LOG ?? "server.log";
+    const logSizeAtStart = existsSync(log) ? statSync(log).size : 0;
     const enabled = await serverReturnToEnabled();
     for (const [path, q] of [["/tasks/v16-probe?q=a%09b", "a\tb"], ["/tasks/v16-probe?q=a%0Ab", "a\nb"], ["/tasks/v16-probe?q=a%0D%0Ab", "a\r\nb"]] as const) {
       const doc = await documentTarget(path);
@@ -690,14 +800,21 @@ describe("APL-2652 signed-out redirect", () => {
     for (const line of lines) expect(line).not.toMatch(RAW_CONTROL_IN_LINE);
     // The server's own log, where CI writes it (server.log) or where SERVER_LOG points. It must exist: a missing log
     // would make this check pass without looking at anything (Pam's D11).
-    const log = process.env.SERVER_LOG ?? "server.log";
     expect(existsSync(log), `server log at ${log} (set SERVER_LOG to the running server's log)`).toBe(true);
     // Scan the whole text, not line by line: splitting on LF would hide a raw LF inside a logged value (Pam's D11).
-    const text = readFileSync(log, "utf8");
+    const bytes = readFileSync(log);
+    const text = bytes.toString("utf8");
     // Pam's D12: the scan must have something to look at. `next start` logs no requests, so the server runs with
     // RETURN_PATH_LOG=1 and the proxy logs the return path it forwards. Each probe must be there, still encoded.
+    // Only bytes appended while this test ran count. A server.log left behind by an earlier run would otherwise let a
+    // server with RETURN_PATH_LOG unset — one that writes nothing at all — pass this check (SHO-3024).
+    const appended = bytes.subarray(Math.min(logSizeAtStart, bytes.length)).toString("utf8");
     for (const encoded of ["a%09b", "a%0Ab", "a%0D%0Ab"]) {
-      expect(text, `server log has the v16-probe line for q=${encoded} (start the server with RETURN_PATH_LOG=1)`).toContain(`[return-path] /tasks/v16-probe?q=${encoded}`);
+      expect(
+        appended,
+        `the server under test appended no [return-path] line for q=${encoded} to ${log} while this test ran. Start it with `
+        + `RETURN_PATH_LOG=1 and send its output to ${log} (SERVER_LOG); a log left by an earlier run does not count.`,
+      ).toContain(`[return-path] /tasks/v16-probe?q=${encoded}`);
     }
     expect(serverLogLeaks(text)).toEqual([]);
   });

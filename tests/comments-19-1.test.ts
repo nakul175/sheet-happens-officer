@@ -1,10 +1,15 @@
 // SHO-US-19.1 (APL-2590): comments with @mentions, behind ff_task_comments.
 // Each qa:TC-APL2590-<id>@vN marker is one of Pam's cases at the register version.
-// Flag-on cases call the library in this process. The live server is started with the flag off, so the HTTP cases
-// prove the routes and the task payload do not change for users. The clock in the undo and purge cases is Vitest's
-// Date, or a `now` argument on the server job. No request field sets it.
+// Flag-on cases call the library in this process. The flag-off cases are about what the SERVER does, and a server
+// reads ff_task_comments from its own environment (src/lib/flags.ts:12) — `on()`/`off()` below change this process
+// only, and AC9 says no request field can change the server's copy. So the flag-off cases ask the server what it was
+// started with and, when it was started with the flag on, check what this process can check and then SKIP with that
+// reason on the record (requireFlagOffServer). A skip with no note would be the same lie as a false green: the run
+// must be repeated against a server started without FF_TASK_COMMENTS (W190, tests/comments-19-1.test.ts).
+// The clock in the undo and purge cases is Vitest's Date, or a `now` argument on the server job. No request field sets it.
 import { readdirSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { TestContext } from "vitest";
 import { account, admin, project, superAdmin, task, withVersion, BASE, OUTBOX, type Client } from "./helpers";
 import { actor, db, lastData, say, script, tu, useFakeModel } from "./concierge-helpers";
 import { sentence } from "../src/lib/activity-text";
@@ -32,6 +37,38 @@ const FLAG = "FF_TASK_COMMENTS";
 const on = () => { process.env[FLAG] = "true"; };
 const off = () => { delete process.env[FLAG]; delete process.env.FEATURE_COMMENTS; };
 
+/**
+ * Whether the server this run talks to was started with ff_task_comments on.
+ * `commentsEnabled()` reads the environment of the process it runs in (src/lib/flags.ts:12), so `on()`/`off()` above
+ * change THIS process only: the server's copy was fixed at its start-up and AC9 says no request field can change it.
+ * The probe asks the server itself, signed in, because the route is authenticated: with the flag off the route's own
+ * `listComments` answers 404, with it on it answers 200. A server that cannot be reached leaves this false, so the
+ * case runs and goes red on its own HTTP assertion instead of skipping over an unreachable server.
+ */
+let serverFlagOn: Promise<boolean> | null = null;
+function serverCommentsOn() {
+  serverFlagOn ??= (async () => {
+    const { worker, t1 } = await cast();
+    return (await worker.c.get(`/api/tasks/${t1}/comments`)).status !== 404;
+  })();
+  return serverFlagOn;
+}
+
+/**
+ * The named reason a flag-off case cannot finish against this run's server. It rides on `ctx.skip(note)` so the
+ * reporter prints it, and it says which half ran and what the run needed.
+ */
+const SERVER_FLAG_ON_NOTE =
+  "the server this run talks to was started with FF_TASK_COMMENTS on; a server reads the flag from its own " +
+  "environment at start-up (src/lib/flags.ts:12) and no request field can change it (AC9), so its half of this " +
+  "case cannot be run from here. The checks above ran in this process. Rerun this file against a server started " +
+  "without FF_TASK_COMMENTS to run the whole case";
+
+/** Skips the callers' remaining HTTP assertions when this run's server has the flag on, with the reason on record. */
+async function requireFlagOffServer(ctx: TestContext) {
+  if (await serverCommentsOn()) ctx.skip(SERVER_FLAG_ON_NOTE);
+}
+
 async function cast() {
   const lead = await account("lead");
   const worker = await account("worker");
@@ -56,8 +93,12 @@ describe("flag off (AC9)", () => {
   beforeEach(off);
   afterEach(off);
 
-  it("qa:TC-APL2590-ab3d0659@v2: flag off comment routes answer 404 for every role and nothing is stored", async () => {
+  it("qa:TC-APL2590-ab3d0659@v2: flag off comment routes answer 404 for every role and nothing is stored", async (ctx) => {
     const { lead, worker, viewer, outsider, t1 } = await cast();
+    // This process's half first: it does not need the server's flag. Then the server's half.
+    expect(conciergeTools()).toBe(TOOLS);
+    await expect(listComments(actor(worker), t1)).rejects.toMatchObject({ status: 404 });
+    await requireFlagOffServer(ctx);
     for (const who of [lead, worker, viewer, outsider]) {
       for (const r of await commentRoutes(who.c, t1)) expect(r.status).toBe(404);
     }
@@ -67,12 +108,11 @@ describe("flag off (AC9)", () => {
     expect(taskBody.commentCount).toBeUndefined();
     expect(taskBody.comments).toBeUndefined();
     expect(taskBody.title).toBe("T1");
-    expect(conciergeTools()).toBe(TOOLS);
-    await expect(listComments(actor(worker), t1)).rejects.toMatchObject({ status: 404 });
   });
 
-  it("qa:TC-APL2590-1087d214@v2: flag off has no comments panel or count on the task, list or board", async () => {
+  it("qa:TC-APL2590-1087d214@v2: flag off has no comments panel or count on the task, list or board", async (ctx) => {
     const { worker, p, t1 } = await cast();
+    await requireFlagOffServer(ctx);
     const taskBody = (await worker.c.get(`/api/tasks/${t1}`)).json.task;
     expect(taskBody.commentsEnabled).toBeUndefined();
     expect(taskBody.commentCount).toBeUndefined();
@@ -86,12 +126,13 @@ describe("flag off (AC9)", () => {
     expect(JSON.stringify(mine.json)).not.toContain("commentCount");
   });
 
-  it("qa:TC-APL2590-00cd067d@v2: flag off hides a comment that was added while the flag was on", async () => {
+  it("qa:TC-APL2590-00cd067d@v2: flag off hides a comment that was added while the flag was on", async (ctx) => {
     const { worker, t1 } = await cast();
     const secret = "ZZ-TEST hidden-after-off";
     on();
     await addComment(actor(worker), t1, { text: secret });
     off();
+    await requireFlagOffServer(ctx);
     for (const r of await commentRoutes(worker.c, t1)) expect(r.status).toBe(404);
     await expect(listComments(actor(worker), t1)).rejects.toMatchObject({ status: 404 });
     await expect(commentExcerpts(actor(worker), t1)).rejects.toMatchObject({ status: 404 });
@@ -103,7 +144,7 @@ describe("flag off (AC9)", () => {
   });
 
   // APL-2590 QA D1 (Pam, #49 @3337a90): with the flag off, Activity listed a comment row with Undo available, and Undo answered 200.
-  it("qa:TC missing D1: flag off, Activity hides comment rows and their Undo answers 404 with nothing changed", async () => {
+  it("qa:TC missing D1: flag off, Activity hides comment rows and their Undo answers 404 with nothing changed", async (ctx) => {
     const { lead, worker, p, t1 } = await cast();
     on();
     const kept = await addComment(actor(worker), t1, { text: "ZZ-TEST flag-off keep" });
@@ -113,7 +154,8 @@ describe("flag off (AC9)", () => {
     const logs = await db.actionLog.findMany({ where: { targetId: t1, action: { in: ["comment.added", "comment.removed"] } } });
     expect(logs).toHaveLength(3);
 
-    // Pam's steps, over HTTP against the server, which runs with the flag off.
+    // Pam's steps, over HTTP against a server whose flag is off (requireFlagOffServer skips with the reason otherwise).
+    await requireFlagOffServer(ctx);
     const activity = await lead.c.get(`/api/projects/${p.id}/activity`);
     expect(activity.status).toBe(200);
     const shown = (activity.json.items as { id: string }[]).map((i) => i.id);
@@ -148,7 +190,7 @@ describe("flag off, QA #128 (D1, D2)", () => {
   afterEach(off);
 
   // Pam #128 @3a96042 D1: with the flag off, Activity still showed 'undid "comment deleted"' rows. Undo logs "undo" with the original in before.action.
-  it("qa:TC missing D1 (#128): flag off, Activity hides the Undo rows of comment actions", async () => {
+  it("qa:TC missing D1 (#128): flag off, Activity hides the Undo rows of comment actions", async (ctx) => {
     const { lead, worker, p, t1 } = await cast();
     on();
     const kept = await addComment(actor(worker), t1, { text: "ZZ-TEST undo rows" });
@@ -167,7 +209,9 @@ describe("flag off, QA #128 (D1, D2)", () => {
     // Pam #128 @49dca62 D1: everything after the promotion runs in try, so the finally always deactivates the test Admin.
     try {
       expect((await sa.c.patch(`/api/team/${adm.id}`, { orgRole: "ADMIN" })).status).toBe(200);
-      // Pam's steps, over HTTP against the flag-off server, as the writer's Leader, the writer and an Admin.
+      // Pam's steps, over HTTP against a server whose flag is off, as the writer's Leader, the writer and an Admin.
+      // Inside the try, so the finally deactivates the test Admin even when this run skips from here.
+      await requireFlagOffServer(ctx);
       for (const who of [lead, worker, adm]) {
         const activity = await who.c.get(`/api/projects/${p.id}/activity`);
         expect(activity.status).toBe(200);
@@ -188,7 +232,7 @@ describe("flag off, QA #128 (D1, D2)", () => {
 
   // Pam #128 @8da5384 D3: the flag-off filter also hid Undo rows with no before.action (rows logged before it was recorded).
   // The app no longer writes that shape, so the row is logged here through the app's own logAction, in the older shape.
-  it("qa:TC missing D3 (#128): flag off, an Undo row without before.action still shows in Activity", async () => {
+  it("qa:TC missing D3 (#128): flag off, an Undo row without before.action still shows in Activity", async (ctx) => {
     const { lead, p, t1 } = await cast();
     await db.$transaction((tx) => logAction(tx, {
       actorId: lead.id, projectId: p.id, targetType: "task", targetId: t1, action: "undo",
@@ -196,14 +240,17 @@ describe("flag off, QA #128 (D1, D2)", () => {
     }));
     const row = await db.actionLog.findFirstOrThrow({ where: { targetId: t1, action: "undo" }, orderBy: { createdAt: "desc" } });
     expect((row.beforeState as { action?: string }).action).toBeUndefined();
+    // This process's half first: projectActivity reads THIS process's flag, so the flag-off filter is on here and the
+    // row must survive it. Then the server's half, which needs a server whose flag is off.
+    expect((await projectActivity(actor(lead), p.id)).items.map((i) => i.id)).toContain(row.id);
+    await requireFlagOffServer(ctx);
     const activity = await lead.c.get(`/api/projects/${p.id}/activity`);
     expect(activity.status).toBe(200);
     expect((activity.json.items as { id: string }[]).map((i) => i.id)).toContain(row.id);
-    expect((await projectActivity(actor(lead), p.id)).items.map((i) => i.id)).toContain(row.id);
   });
 
   // Pam #128 @3a96042 D2: with the flag off, POST /api/notifications/read-all marked the hidden comment notices read.
-  it("qa:TC missing D2 (#128): flag off, Mark all read leaves hidden comment notices unchanged", async () => {
+  it("qa:TC missing D2 (#128): flag off, Mark all read leaves hidden comment notices unchanged", async (ctx) => {
     const { lead, worker, p, t1 } = await cast();
     on();
     await addComment(actor(lead), t1, { text: "@worker ZZ-TEST read-all" });
@@ -215,6 +262,7 @@ describe("flag off, QA #128 (D1, D2)", () => {
     const before = await unreadComments();
     expect(before).toBeGreaterThan(0);
     expect(await unreadOthers()).toBeGreaterThan(0);
+    await requireFlagOffServer(ctx);
     expect((await worker.c.post("/api/notifications/read-all")).status).toBe(204);
     expect(await unreadComments()).toBe(before);
     expect(await unreadOthers()).toBe(0);
@@ -241,7 +289,7 @@ describe("flag off notices (D1b)", () => {
   afterEach(off);
 
   // APL-2590 QA D1b (Toby, #128): with the flag off, the bell still listed COMMENT_ADDED and COMMENT_MENTION notices and counted them as unread.
-  it("qa:TC missing D1b: flag off, the bell lists no comment notices and its unread count leaves them out", async () => {
+  it("qa:TC missing D1b: flag off, the bell lists no comment notices and its unread count leaves them out", async (ctx) => {
     const { lead, worker, t1 } = await cast();
     on();
     await addComment(actor(worker), t1, { text: "@lead ZZ-TEST bell" });
@@ -252,7 +300,8 @@ describe("flag off notices (D1b)", () => {
       const stored = await db.notification.findMany({ where: { recipientId: who.id, taskId: t1, type: { in: commentTypes } } });
       expect(stored.length).toBeGreaterThan(0);
       const otherUnread = await db.notification.count({ where: { recipientId: who.id, readAt: null, type: { notIn: commentTypes } } });
-      // Toby's steps, over HTTP against the server, which runs with the flag off.
+      // Toby's steps, over HTTP against a server whose flag is off (requireFlagOffServer skips with the reason otherwise).
+      await requireFlagOffServer(ctx);
       for (const path of ["/api/notifications", "/api/notifications?filter=unread"]) {
         const bell = await who.c.get(path);
         expect(bell.status).toBe(200);
@@ -276,7 +325,7 @@ describe("flag off concierge (AC9)", () => {
   beforeEach(off);
   afterEach(off);
 
-  it("qa:TC-APL2590-b3257ada@v2: a client cannot turn the flag on, and the concierge cannot comment", async () => {
+  it("qa:TC-APL2590-b3257ada@v2: a client cannot turn the flag on, and the concierge cannot comment", async (ctx) => {
     const { lead, worker, p, t1 } = await cast();
     const cookie = worker.c.cookie;
     const post = (url: string, headers: Record<string, string> = {}) => fetch(url, {
@@ -284,9 +333,8 @@ describe("flag off concierge (AC9)", () => {
       headers: { "content-type": "application/json", cookie, ...headers },
       body: JSON.stringify({ text: "ZZ-TEST x" }),
     });
-    expect((await post(`${BASE}/api/tasks/${t1}/comments?ff_task_comments=1`)).status).toBe(404);
-    expect((await post(`${BASE}/api/tasks/${t1}/comments`, { "x-ff-task-comments": "1" })).status).toBe(404);
-    expect((await post(`${BASE}/api/tasks/${t1}/comments`, { cookie: `${cookie}; ff_task_comments=1` })).status).toBe(404);
+    // This process's half first: the concierge runs in this process and reads this process's flag. Then the client
+    // cannot turn the SERVER's flag on, which needs a server whose flag is off.
     expect(conciergeTools()).toBe(TOOLS);
     const title = `ZZ-TEST-T1-${Date.now()}`;
     expect((await worker.c.patch(`/api/tasks/${t1}`, await withVersion(worker, t1, { title }))).status).toBe(200);
@@ -297,9 +345,13 @@ describe("flag off concierge (AC9)", () => {
     await sendMessage(actor(lead), "comment on T1: ZZ-TEST x");
     expect(await db.comment.count({ where: { taskId: t1 } })).toBe(0);
     expect(await db.comment.count({ where: { task: { projectId: p.id } } })).toBe(0);
+    await requireFlagOffServer(ctx);
+    expect((await post(`${BASE}/api/tasks/${t1}/comments?ff_task_comments=1`)).status).toBe(404);
+    expect((await post(`${BASE}/api/tasks/${t1}/comments`, { "x-ff-task-comments": "1" })).status).toBe(404);
+    expect((await post(`${BASE}/api/tasks/${t1}/comments`, { cookie: `${cookie}; ff_task_comments=1` })).status).toBe(404);
   });
 
-  it("qa:TC-APL2590-27d276a2@v1: (CRITICAL) The flag comes from the server-side setting only", async () => {
+  it("qa:TC-APL2590-27d276a2@v1: (CRITICAL) The flag comes from the server-side setting only", async (ctx) => {
     const env = (values: Record<string, string | undefined>) => values as NodeJS.ProcessEnv;
     expect(commentsEnabled(env({}))).toBe(false);
     expect(commentsEnabled(env({ FF_TASK_COMMENTS: "false" }))).toBe(false);
@@ -308,6 +360,8 @@ describe("flag off concierge (AC9)", () => {
     const { worker, t1 } = await cast();
     const cookie = worker.c.cookie;
     const get = (url: string, headers: Record<string, string> = {}) => fetch(url, { headers: { cookie, ...headers } });
+    // A request field cannot turn the flag on — a claim about a server whose flag is off.
+    await requireFlagOffServer(ctx);
     expect((await get(`${BASE}/api/tasks/${t1}/comments?ff_task_comments=1`)).status).toBe(404);
     expect((await get(`${BASE}/api/tasks/${t1}/comments`, { "x-ff-task-comments": "true" })).status).toBe(404);
     expect((await get(`${BASE}/api/tasks/${t1}/comments`, { cookie: `${cookie}; ff_task_comments=1` })).status).toBe(404);
@@ -788,6 +842,151 @@ describe("flag on (AC1–AC8)", () => {
     await undoAction(actor(worker), removed.id);
     expect((await db.comment.findUniqueOrThrow({ where: { id: first.id } })).removedAt).toBeNull();
     expect(await db.comment.count({ where: { taskId: t, removedAt: null } })).toBe(200);
+  }, 120_000);
+
+  // SHO-2840 (Pam #128, AC17 boundary): Undo of a comment delete is the one restore path the 200 cap
+  // has to hold on its own. Fill to exactly 200, delete one, Undo: the restore lands ON the cap.
+  it("qa:TC SHO-2840: 200 live, delete one, Undo restores to exactly 200 and never 201", async () => {
+    const { worker, p } = await cast();
+    const t = await task(worker, p.id, { title: "ZZ-TEST 2840 fill then delete" });
+    const target = await addComment(actor(worker), t, { text: "ZZ-TEST 2840 target" });
+    await db.comment.createMany({ data: Array.from({ length: 199 }, (_, i) => ({ taskId: t, authorId: worker.id, text: `ZZ-TEST 2840 fill ${i}` })) });
+    const live = () => db.comment.count({ where: { taskId: t, removedAt: null } });
+    expect(await live()).toBe(200);
+    await expect(addComment(actor(worker), t, { text: "ZZ-TEST 2840 at cap" })).rejects.toMatchObject({ status: 400, extra: { code: "too_many_comments" } });
+    await removeComment(actor(worker), t, target.id);
+    expect(await live()).toBe(199);
+    const log = await db.actionLog.findFirstOrThrow({ where: { targetId: t, action: "comment.removed" } });
+    const undone = await undoAction(actor(worker), log.id);
+    expect(undone.label).toBe("Comment deleted");
+    expect(await live()).toBe(200);
+    expect(await live()).toBeLessThanOrEqual(200);
+    expect(await db.comment.count({ where: { taskId: t } })).toBe(200);
+    expect((await db.comment.findUniqueOrThrow({ where: { id: target.id } })).removedAt).toBeNull();
+    expect((await db.actionLog.findUniqueOrThrow({ where: { id: log.id } })).undoneAt).not.toBeNull();
+  }, 120_000);
+
+  // SHO-2840: with the task refilled to 200 after the delete, the same Undo is refused (409, the cap
+  // message) and "Undo anyway" cannot bypass it; the live count stays at 200.
+  it("qa:TC SHO-2840: a refill back to 200 refuses the Undo of an earlier delete (no 201, no bypass)", async () => {
+    const { worker, p } = await cast();
+    const t = await task(worker, p.id, { title: "ZZ-TEST 2840 delete then refill" });
+    const target = await addComment(actor(worker), t, { text: "ZZ-TEST 2840 target" });
+    await db.comment.createMany({ data: Array.from({ length: 199 }, (_, i) => ({ taskId: t, authorId: worker.id, text: `ZZ-TEST 2840 fill ${i}` })) });
+    const live = () => db.comment.count({ where: { taskId: t, removedAt: null } });
+    await removeComment(actor(worker), t, target.id);
+    expect(await live()).toBe(199);
+    await addComment(actor(worker), t, { text: "ZZ-TEST 2840 refill" });
+    expect(await live()).toBe(200);
+    const log = await db.actionLog.findFirstOrThrow({ where: { targetId: t, action: "comment.removed" } });
+    const refused = { status: 409, message: "A task can have at most 200 comments.", extra: { code: "too_many_comments" } };
+    await expect(checkUndo(actor(worker), log.id)).rejects.toMatchObject(refused);
+    await expect(undoAction(actor(worker), log.id)).rejects.toMatchObject(refused);
+    await expect(undoAction(actor(worker), log.id, true)).rejects.toMatchObject(refused);
+    expect(await live()).toBe(200);
+    expect((await db.comment.findUniqueOrThrow({ where: { id: target.id } })).removedAt).not.toBeNull();
+    expect((await db.actionLog.findUniqueOrThrow({ where: { id: log.id } })).undoneAt).toBeNull();
+  }, 120_000);
+
+  // SHO-2840: the last slot. Two deleted comments, 199 live, both Undos at once: the task row lock lets
+  // exactly one restore in. Anything else (0 or 2) breaks either the cap or the promise.
+  it("qa:TC SHO-2840: two Undos racing for the last slot restore exactly one comment (200, not 201)", async () => {
+    const { worker, p } = await cast();
+    const t = await task(worker, p.id, { title: "ZZ-TEST 2840 last slot" });
+    const a = await addComment(actor(worker), t, { text: "ZZ-TEST 2840 a" });
+    const b = await addComment(actor(worker), t, { text: "ZZ-TEST 2840 b" });
+    await db.comment.createMany({ data: Array.from({ length: 198 }, (_, i) => ({ taskId: t, authorId: worker.id, text: `ZZ-TEST 2840 fill ${i}` })) });
+    await removeComment(actor(worker), t, a.id);
+    await removeComment(actor(worker), t, b.id);
+    await addComment(actor(worker), t, { text: "ZZ-TEST 2840 last slot filler" });
+    const live = () => db.comment.count({ where: { taskId: t, removedAt: null } });
+    expect(await live()).toBe(199);
+    const logs = await db.actionLog.findMany({ where: { targetId: t, action: "comment.removed" } });
+    expect(logs).toHaveLength(2);
+    const results = await Promise.allSettled(logs.map((l) => undoAction(actor(worker), l.id)));
+    const code = (r: PromiseSettledResult<unknown>) => (r.status === "rejected" ? (r.reason as { extra?: { code?: string } }).extra?.code ?? "other" : "restored");
+    expect(results.map(code).sort()).toEqual(["restored", "too_many_comments"]);
+    expect(await live()).toBe(200);
+    expect(await live()).toBeLessThanOrEqual(200);
+  }, 120_000);
+
+  // SHO-2840: the refill path racing the Undo path for the same last slot. Add and Undo take the same
+  // task row lock, so exactly one gets the slot and the task still ends on 200, never 201.
+  it("qa:TC SHO-2840: an add and an Undo racing for the last slot leave exactly 200 live", async () => {
+    const { worker, p } = await cast();
+    const t = await task(worker, p.id, { title: "ZZ-TEST 2840 add vs undo" });
+    const target = await addComment(actor(worker), t, { text: "ZZ-TEST 2840 target" });
+    await db.comment.createMany({ data: Array.from({ length: 199 }, (_, i) => ({ taskId: t, authorId: worker.id, text: `ZZ-TEST 2840 fill ${i}` })) });
+    await removeComment(actor(worker), t, target.id); // 199 live, one slot, one deleted comment
+    const live = () => db.comment.count({ where: { taskId: t, removedAt: null } });
+    expect(await live()).toBe(199);
+    const log = await db.actionLog.findFirstOrThrow({ where: { targetId: t, action: "comment.removed" } });
+    const results = await Promise.allSettled([
+      addComment(actor(worker), t, { text: "ZZ-TEST 2840 racer" }),
+      undoAction(actor(worker), log.id),
+    ]);
+    expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1);
+    expect(await live()).toBe(200);
+    expect(await live()).toBeLessThanOrEqual(200);
+  }, 120_000);
+
+  // SHO-2840 boundary proof (AC17): the cap is 200 live comments, so the delete-Undo boundary is proved on
+  // both sides of it. 199 live has exactly one slot and the restore is allowed; 200 has none and the restore
+  // is refused; an out-of-band 201 is not pushed to 202. Every case counts live rows after the attempt, so a
+  // refusal that still wrote (or an allow that wrote twice) cannot pass.
+  it("qa:TC SHO-2840: at 199 live comments Undo of a delete restores exactly one, landing on 200", async () => {
+    const { worker, p } = await cast();
+    const t = await task(worker, p.id, { title: "ZZ-TEST 2840 boundary 199" });
+    const target = await addComment(actor(worker), t, { text: "ZZ-TEST 2840 boundary target" });
+    await db.comment.createMany({ data: Array.from({ length: 199 }, (_, i) => ({ taskId: t, authorId: worker.id, text: `ZZ-TEST 2840 199 fill ${i}` })) });
+    await removeComment(actor(worker), t, target.id);
+    const live = () => db.comment.count({ where: { taskId: t, removedAt: null } });
+    expect(await live()).toBe(199); // 199 live, one soft-deleted row: the one free slot is the boundary under test
+    const log = await db.actionLog.findFirstOrThrow({ where: { targetId: t, action: "comment.removed" } });
+    await expect(checkUndo(actor(worker), log.id)).resolves.toBeUndefined();
+    expect((await undoAction(actor(worker), log.id)).label).toBe("Comment deleted");
+    expect(await live()).toBe(200);
+    expect(await db.comment.count({ where: { taskId: t } })).toBe(200); // restored in place, no duplicate row
+    expect((await db.comment.findUniqueOrThrow({ where: { id: target.id } })).removedAt).toBeNull();
+    expect((await db.actionLog.findUniqueOrThrow({ where: { id: log.id } })).undoneAt).not.toBeNull();
+  }, 120_000);
+
+  it("qa:TC SHO-2840: at 200 live comments Undo of a delete is refused and the count stays 200", async () => {
+    const { worker, p } = await cast();
+    const t = await task(worker, p.id, { title: "ZZ-TEST 2840 boundary 200" });
+    const target = await addComment(actor(worker), t, { text: "ZZ-TEST 2840 boundary target" });
+    await removeComment(actor(worker), t, target.id);
+    await db.comment.createMany({ data: Array.from({ length: 200 }, (_, i) => ({ taskId: t, authorId: worker.id, text: `ZZ-TEST 2840 200 fill ${i}` })) });
+    const live = () => db.comment.count({ where: { taskId: t, removedAt: null } });
+    expect(await live()).toBe(200); // full: the restore would be the 201st
+    const log = await db.actionLog.findFirstOrThrow({ where: { targetId: t, action: "comment.removed" } });
+    const refused = { status: 409, message: "A task can have at most 200 comments.", extra: { code: "too_many_comments" } };
+    await expect(checkUndo(actor(worker), log.id)).rejects.toMatchObject(refused);
+    await expect(undoAction(actor(worker), log.id)).rejects.toMatchObject(refused);
+    await expect(undoAction(actor(worker), log.id, true)).rejects.toMatchObject(refused); // "Undo anyway" cannot bypass the cap
+    expect(await live()).toBe(200);
+    expect((await db.comment.findUniqueOrThrow({ where: { id: target.id } })).removedAt).not.toBeNull();
+    expect((await db.actionLog.findUniqueOrThrow({ where: { id: log.id } })).undoneAt).toBeNull();
+  }, 120_000);
+
+  it("qa:TC SHO-2840: at 201 live comments Undo of a delete is refused and never reaches 202", async () => {
+    const { worker, p } = await cast();
+    const t = await task(worker, p.id, { title: "ZZ-TEST 2840 boundary 201" });
+    const target = await addComment(actor(worker), t, { text: "ZZ-TEST 2840 boundary target" });
+    await removeComment(actor(worker), t, target.id);
+    // The API refuses the 201st live comment, so 201 is an out-of-band state (rows written before the cap,
+    // or by a migration). The constant is untouched by the refusal: the guard must be >= the cap, not ==.
+    await db.comment.createMany({ data: Array.from({ length: 201 }, (_, i) => ({ taskId: t, authorId: worker.id, text: `ZZ-TEST 2840 201 fill ${i}` })) });
+    const live = () => db.comment.count({ where: { taskId: t, removedAt: null } });
+    expect(await live()).toBe(201);
+    await expect(addComment(actor(worker), t, { text: "ZZ-TEST 2840 past cap" })).rejects.toMatchObject({ status: 400, extra: { code: "too_many_comments" } });
+    const log = await db.actionLog.findFirstOrThrow({ where: { targetId: t, action: "comment.removed" } });
+    const refused = { status: 409, message: "A task can have at most 200 comments.", extra: { code: "too_many_comments" } };
+    await expect(checkUndo(actor(worker), log.id)).rejects.toMatchObject(refused);
+    await expect(undoAction(actor(worker), log.id)).rejects.toMatchObject(refused);
+    expect(await live()).toBe(201); // never 202
+    expect((await db.comment.findUniqueOrThrow({ where: { id: target.id } })).removedAt).not.toBeNull();
+    expect((await db.actionLog.findUniqueOrThrow({ where: { id: log.id } })).undoneAt).toBeNull();
   }, 120_000);
 
   it("qa:TC-APL2590-093cbb6e@v2: purge keeps a comment at exactly 30x24h and removes it 1ms later", async () => {
