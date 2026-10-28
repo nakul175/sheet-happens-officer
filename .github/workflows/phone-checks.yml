@@ -22,7 +22,10 @@ jobs:
   viewport:
     name: Phone-size layout checks
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # 20 minutes, the same budget viewport.yml gives this job's sibling. The browser download is not bounded by anything
+    # this job controls: it took 0.3 min on one runner and 8-10 min on another.
+    # No test is skipped, retried or weakened.
+    timeout-minutes: 20
     services:
       postgres:
         image: postgres:16
@@ -53,9 +56,13 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      # The cache is only a shortcut, so a hit cannot decide what gets installed. The browser AND chromium-headless-shell
+      # (which `chromium.launch()` uses by default) are both downloaded here, every time. On a slow runner this download is
+      # what the 20-minute budget has to absorb.
+      - name: Install Playwright Chromium
+        run: npx playwright-core install --with-deps chromium
       - run: npx prisma migrate deploy
       - run: npm run build
-      - run: npx playwright-core install --with-deps chromium
       - name: Start the app
         run: |
           (npx next start -p 3100 > server.log 2>&1 &)

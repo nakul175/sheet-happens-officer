@@ -1,11 +1,14 @@
 // APL-2652. Same-origin return path after sign-in, and the signed-out redirect that carries it.
 // The cases at the top do not need a server. The "signed-out redirect" cases hit TASKBOARD_URL.
 import { existsSync, readFileSync } from "node:fs";
+import { randomBytes } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 import { api } from "@/components/api";
 import { proxy } from "@/proxy";
-import { account, BASE, project, task } from "./helpers";
+import { account, BASE, project, SUPER_EMAIL, superAdmin, task } from "./helpers";
+import { hashToken, SESSION_COOKIE } from "@/lib/auth";
+import { db } from "@/lib/db";
 import { isSignInScreen, RETURN_PATH_HEADER, returnToEnabled, safeReturnPath, sessionSignInTarget, signedOutSignInHref, signInHref } from "@/lib/return-to";
 
 const BASE_ORIGIN = "http://return.invalid";
@@ -510,6 +513,153 @@ function assertSameOriginSignIn(target: string, next: string | null) {
     if (got) expect(got).not.toMatch(/evil\.example|javascript|\\/);
   }
 }
+
+describe("APL-2652 expiry on a live browser: AC6 v1.2 keeps the target, AC7 v1.2 changes nothing", () => {
+  // This file runs from a test process whose environment may itself carry SIGNIN_RETURN_TO=on (a mode server).
+  // The checks below are about the running server's flag, like every other case in the file, so the flag is turned
+  // off here and read back from the server instead.
+  const previous = process.env.SIGNIN_RETURN_TO;
+  afterEach(() => {
+    if (previous === undefined) delete process.env.SIGNIN_RETURN_TO;
+    else process.env.SIGNIN_RETURN_TO = previous;
+  });
+
+  /**
+   * A session row whose expiry is already past, and whose `lastSeenAt` is recent so `sessionUser` does not write to it.
+   * `sessionUser` looks the token up by its hash and refuses it on `expiresAt`, so the app treats the browser as signed out.
+   */
+  async function expiredCookie(): Promise<string> {
+    const user = await db.user.findUniqueOrThrow({ where: { email: SUPER_EMAIL } });
+    const token = randomBytes(32).toString("base64url");
+    const now = new Date();
+    await db.session.create({
+      data: { userId: user.id, tokenHash: hashToken(token), expiresAt: new Date(now.getTime() - 60_000), lastSeenAt: now, userAgent: "qa:APL-2652 expired session" },
+    });
+    return `${SESSION_COOKIE}=${token}`;
+  }
+
+  /** Every Set-Cookie line a response carries. `headers.getSetCookie` exists on Node's fetch; the fallback keeps older stubs honest. */
+  function setCookies(res: Response): string[] {
+    const lines = typeof res.headers.getSetCookie === "function" ? res.headers.getSetCookie() : [];
+    const single = res.headers.get("set-cookie");
+    return single && lines.length === 0 ? [single] : lines;
+  }
+
+  it("AC6 v1.2: an expired session on an app page answers 401, and the 401 target keeps the validated path and the fixed message", async () => {
+    const cookie = await expiredCookie();
+    // The state the browser is in: signed out, because the session row has expired.
+    const api = await fetch(`${BASE}/api/tasks/T1`, { headers: { cookie }, redirect: "manual" });
+    expect(api.status, "an expired session answers 401, the trigger AC6 depends on").toBe(401);
+    await api.arrayBuffer();
+    // The trigger above is the server's; what follows is this process's decision, so the flag is set explicitly here
+    // rather than read from whatever environment this runner happens to carry (a mode server sets it to on).
+    // AC8 is covered separately by the flag-off cases in SIGNIN_RETURN_TO.
+    process.env.SIGNIN_RETURN_TO = "on";
+    // What `src/components/api.ts` does with that 401, for the same browser.
+    expect(sessionSignInTarget("/tasks/T1")).toBe("/signin?expired=1&next=%2Ftasks%2FT1");
+    expect(signedOutSignInHref("/tasks/T1?tab=comments")).toBe("/signin?next=%2Ftasks%2FT1%3Ftab%3Dcomments");
+    // AC6 v1.2: the next it carries passes the same AC2 validation sign-in will apply to it.
+    expect(safeReturnPath("/tasks/T1")).toBe("/tasks/T1");
+    // And on a server that runs with the flag on, the screen really shows the one fixed sentence and does not bounce.
+    // ci.yml's server runs with the flag off, so that half is asserted only where the server has it on (phone-checks.yml,
+    // viewport.yml and the mode servers all set SIGNIN_RETURN_TO=on).
+    if (await serverReturnToEnabled()) {
+      const screen = await documentTarget("/signin?expired=1&next=%2Ftasks%2FT1");
+      expect(screen.status).toBe(200);
+      expect(screen.target, "sign-in does not bounce anywhere on its own").toBeNull();
+      expect(screen.html).toMatch(/<div role="alert"[^>]*>Your session has expired, please sign in again<\/div>/);
+      expect(screen.html).toContain('\\"next\\":\\"/tasks/T1\\"');
+    }
+  });
+
+  it("AC6 v1.2: a person's page — an expired session answers 401 on a real person, and a signed-in one gets the page, not a redirect", async () => {
+    // A real row, not a fixture id: `/api/team/p2` answers 401 for an expired cookie whether or not `p2` exists
+    // (currentUser() runs before getPerson()), so a made-up id would pass this row for the wrong reason.
+    // Total order: with a bare createdAt this could one day pick a different row, in principle the Super Admin.
+    const person = await db.user.findFirstOrThrow({
+      where: { deactivatedAt: null },
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+      select: { id: true, email: true },
+    });
+    const page = `/team/${person.id}`;
+
+    // 1. The trigger AC6 depends on.
+    const cookie = await expiredCookie();
+    const api = await fetch(`${BASE}/api/team/${person.id}`, { headers: { cookie }, redirect: "manual" });
+    expect(api.status, "an expired session on a person's page answers 401").toBe(401);
+    await api.arrayBuffer();
+
+    // 2. A signed-in Super Admin is NOT bounced off the page.
+    //    Measured on this build: a person's page that the (app) layout refuses answers **200** with no Location and
+    //    puts the bounce in the RSC payload (`"digest":"NEXT_REDIRECT;replace;/signin?next=...</bounced>"`). So
+    //    status and Location cannot see it, and the expired-session wording is a sign-in-screen marker, not a
+    //    page-bounce marker. The bounce itself is the thing to assert on: a good page has no NEXT_REDIRECT digest,
+    //    a bounced one always does.
+    const sa = await superAdmin();
+    expect(sa.email, "the person under test must not be the signed-in Super Admin").not.toBe(person.email);
+    const pageRes = await fetch(BASE + page, { headers: { cookie: sa.c.cookie }, redirect: "manual" });
+    const html = await pageRes.text();
+    expect(pageRes.status, `a signed-in person opening ${page} gets the page itself`).toBe(200);
+    expect(pageRes.headers.get("location") ?? "", `${page} must not redirect a signed-in person`).toBe("");
+    expect(html, `a signed-in person must not be bounced to sign-in from ${page}`).not.toMatch(/NEXT_REDIRECT;replace;\/signin/);
+    expect(html, "the page is the person's screen, not the sign-in one").not.toMatch(/Your session has expired/);
+
+    // 3. What `src/components/api.ts` does with a 401 on that page, the same way the /tasks/T1 row checks it.
+    const before = process.env.SIGNIN_RETURN_TO;
+    process.env.SIGNIN_RETURN_TO = "on";
+    const signedInTarget = sessionSignInTarget(page) ?? "";
+    expect(signedInTarget).toBe(`/signin?expired=1&next=${encodeURIComponent(page)}`);
+    const roundTrip = new URL(signedInTarget, "http://return.invalid").searchParams.get("next") ?? "";
+    expect(roundTrip).toBe(page);
+    expect(safeReturnPath(roundTrip)).toBe(page);
+    if (before === undefined) delete process.env.SIGNIN_RETURN_TO;
+    else process.env.SIGNIN_RETURN_TO = before;
+
+    // 4. The flag-on screen itself: the fixed sentence, no bounce, and the payload carries the page as `next`.
+    //    Asserted against the product's flag directly (`signInReturnToEnabled()`), not inferred from a redirect the
+    //    page may or may not make, so a server with the flag on can never skip this block silently.
+    if (returnToEnabled()) {
+      const screen = await documentTarget(`/signin?expired=1&next=${encodeURIComponent(page)}`);
+      expect(screen.status).toBe(200);
+      expect(screen.target, "sign-in does not bounce anywhere on its own").toBeNull();
+      expect(screen.html).toMatch(/<div role="alert"[^>]*>Your session has expired, please sign in again<\/div>/);
+      expect(screen.html).toContain(`\\"next\\":\\"${page}\\"`);
+    }
+  });
+
+  /** The document with every `<script>` removed: what a person can actually see, as opposed to the framework's payload. */
+  function visible(html: string): string {
+    return html.replace(/<script\b[^>]*>[\s\S]*?(?:<\/script>|$)/gi, "");
+  }
+
+  it("AC7 v1.2: /signin?expired=<anything> writes and clears nothing, and renders no text from the URL", async () => {
+    const enabled = await serverReturnToEnabled();
+    // The tests below call the pure helpers, so the flag in this process has to match the server's.
+    if (enabled) process.env.SIGNIN_RETURN_TO = "on";
+    else process.env.SIGNIN_RETURN_TO = "off";
+    for (const query of ["", "?expired=1", "?expired=0", "?expired=yes", "?expired=%3Cb%3Ezz-2652-ac7%3C%2Fb%3E", "?expired=1&zz-2652-ac7=1"]) {
+      const path = `/signin${query}`;
+      const res = await fetch(BASE + path, { redirect: "manual" });
+      const html = await res.text();
+      expect(res.status, path).toBe(200);
+      expect(res.headers.get("location"), path).toBeNull();
+      // AC7 v1.2: nothing written or cleared, and no session cookie touched, by opening the expired screen.
+      expect(setCookies(res), path).toEqual([]);
+      // The URL's own text is never shown. The framework carries the request URL in its own payload, inert, so the
+      // check is on the document: no element, attribute or text node renders what the URL said.
+      expect(visible(html), path).not.toContain("zz-2652-ac7");
+      // ...and that check is not vacuous: the probe really is in the response (in the framework payload), and stripping
+      // only the scripts is what removes it. A blank page, or a page that echoed nothing at all, would fail here.
+      if (path.includes("zz-2652-ac7")) {
+        expect(html, `${path}: the probe reaches the response`).toContain("zz-2652-ac7");
+        expect(visible(html).length, `${path}: the document still has content`).toBeGreaterThan(1000);
+      }
+      // The sentence is the fixed one and appears only where it belongs: expired=1 on a flag-on server.
+      const shows = /Your session has expired, please sign in again/.test(visible(html));
+      expect(shows, path).toBe(query.includes("expired=1") && enabled);
+    }
+  });
+});
 
 describe("SIGNIN_RETURN_TO", () => {
   const previous = process.env.SIGNIN_RETURN_TO;
