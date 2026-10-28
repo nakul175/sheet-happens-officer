@@ -15,7 +15,7 @@ import { purgeChat } from "@/lib/concierge/thread";
 import { warnIfNearCeiling } from "@/lib/concierge/limits";
 import { crmMode, crmProjectWhere } from "@/lib/crm";
 
-type Job = { name: string; about: string; run: () => Promise<unknown> };
+type Job = { name: string; about: string; run: (now?: Date) => Promise<unknown> };
 
 export const JOBS: Job[] = [
   { name: "purge-trash", about: "Removes tasks that have been in Trash for more than 30 days, and soft-deleted comments once they are older than 30 days", run: () => purgeTrash() },
@@ -23,7 +23,7 @@ export const JOBS: Job[] = [
   { name: "purge-chat", about: "Deletes concierge chat messages after 90 days", run: () => purgeChat() },
   { name: "concierge-budget", about: "Tells the Super Admin once a month when concierge spend reaches 80 percent of the ceiling", run: async () => ({ warned: await warnIfNearCeiling() }) },
   { name: "reminders", about: "Due-tomorrow, due-today and overdue reminders to the holder of each open task, 8:00 am India time", run: () => sendReminders() },
-  { name: "stalled-deals", about: "Tells the Leader of each deal with no activity for 30 days, once per stall, 7:50 am India time", run: () => notifyStalledDeals() },
+  { name: "stalled-deals", about: "Tells the Leader of each deal with no activity for 30 days, once per stall, 7:50 am India time", run: (now) => notifyStalledDeals(now) },
   { name: "check", about: "Tells the Super Admin when a job failed or did not run", run: () => checkJobs() },
 ];
 const DAILY_GRACE_HOURS = 30;
@@ -105,13 +105,13 @@ export function requireJobSecret(req: Request) {
   if (!ok) throw new ApiError(401, "Not allowed");
 }
 
-export async function runJob(name: string) {
+export async function runJob(name: string, now?: Date) {
   const job = JOBS.find((j) => j.name === name);
   if (!job) throw new ApiError(404, "No such job");
   const started = new Date();
   await db.jobRun.upsert({ where: { job: name }, create: { job: name, lastStartedAt: started }, update: { lastStartedAt: started } });
   try {
-    const result = await job.run();
+    const result = await job.run(now);
     await db.jobRun.update({ where: { job: name }, data: { lastFinishedAt: new Date(), lastStatus: "OK", lastError: null } });
     return { job: name, status: "OK", result };
   } catch (err) {

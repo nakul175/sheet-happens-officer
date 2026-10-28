@@ -2,11 +2,12 @@ import { currentUser } from "@/lib/auth";
 import { createDeal, listDeals } from "@/lib/deals";
 import { handle, parseBody } from "@/lib/http";
 import { dealCreate } from "@/lib/schemas";
+import { requestNow } from "@/lib/test-clock";
 
 export const GET = handle(async (req: Request) => {
   const me = await currentUser();
   const sp = new URL(req.url).searchParams;
-  return Response.json({ deals: await listDeals(me, { archived: sp.get("archived") === "true", mine: sp.get("mine") === "true", pipelineId: sp.get("pipelineId") ?? undefined }) });
+  return Response.json({ deals: await listDeals(me, { archived: sp.get("archived") === "true", mine: sp.get("mine") === "true", pipelineId: sp.get("pipelineId") ?? undefined }, requestNow(req)) });
 });
 
 export const POST = handle(async (req: Request) => {
