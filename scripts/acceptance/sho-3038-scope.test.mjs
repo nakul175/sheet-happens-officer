@@ -6,6 +6,8 @@ import { readFileSync } from "node:fs";
 
 const production = "ee59582dffcbd8cc3067e689b2bb73cf63781cb7";
 const allowed = new Set([
+  "scripts/ci/task-sheet-result.mjs",
+  "scripts/ci/task-sheet-result.test.mjs",
   "tests/e2e/stories/APL-2555.spec.ts",
   "scripts/ci/stalled-m1-freshness.test.mjs",
   "tests/stalled-crm-fixture.ts",
