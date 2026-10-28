@@ -163,6 +163,12 @@ jobs:
         run: |
           npx playwright test tests/e2e/stories/APL-2720.spec.ts --reporter=json > validation-2900-browser.json
           node -e 'const r=require("./validation-2900-browser.json");const s=r.stats;if(!s||s.expected!==6||s.unexpected!==0||s.skipped!==0||s.flaky!==0||(r.errors??[]).length){console.error("SHO-2900 requires 6 passed, zero failures/skips",s);process.exit(1)}console.log("SHO-2900: 6 passed, zero failures/skips")' | tee validation-2900-browser.log
+      - name: SHO-2905 actual-pass validator regression checks
+        run: node --test scripts/ci/task-sheet-result.test.mjs
+      - name: SHO-2905 migrated task sheet browser acceptance (Chromium emulation only)
+        run: |
+          npx playwright test tests/e2e/stories/APL-2555.spec.ts --output=test-results/sho-2905-sheet --reporter=json > validation-2905-browser.json
+          node scripts/ci/task-sheet-result.mjs validation-2905-browser.json | tee validation-2905-browser.log
       - name: SHO-3133 distinct Proactive outcomes at desktop and phone widths
         run: |
           npx playwright test tests/e2e/stories/APL-2523.spec.ts --grep 'AC5: Proactive keeps' --output=test-results/sho-3133-outcomes --reporter=json > validation-3133-outcomes.json
@@ -200,5 +206,7 @@ jobs:
             validation-3133-outcomes.json
             release12-drain.json
             test-results/e2e
+            test-results/sho-2905-sheet/
+            validation-2905-browser.json
             workload-ui-previews/
             test-results/sho-3133-outcomes/
