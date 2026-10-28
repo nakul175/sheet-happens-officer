@@ -7,6 +7,7 @@ import type { APIRequestContext, Browser, BrowserContext } from "@playwright/tes
 import { api, BASE_URL, expect, test } from "../support";
 import type { Who } from "../g2";
 import { PER_SLOT, QA_ADMIN_EMAIL, poolPerson, slotFromEnv } from "./alias-pool";
+import { restorePoolPerson } from "./qa-cleanup";
 
 export { QA_ADMIN_EMAIL };
 export const QA_PASS = process.env.SHO_QA_PASS ?? "";
@@ -81,18 +82,7 @@ type Later = (fn: () => Promise<unknown>) => void;
  * Put a pool Member back the way the next spec expects it: active and a Member. A spec may deactivate one (APL-2471 AC6)
  * or promote one; the pool is reused, so both are undone here.
  */
-async function restore(admin: Who, id: string, email: string) {
-  const seen = await admin.api.get(`/api/team/${id}`);
-  if (seen.status !== 200) return;
-  if (seen.json.person?.status === "DEACTIVATED") {
-    const back = await admin.api.post(`/api/team/${id}/reactivate`);
-    expect(back.status, `reactivate ${email}`).toBe(200);
-  }
-  if (seen.json.person?.orgRole !== "MEMBER") {
-    const role = await admin.api.patch(`/api/team/${id}`, { orgRole: "MEMBER" });
-    expect(role.status, `put ${email} back to Member`).toBe(200);
-  }
-}
+const restore = (admin: Who, id: string) => restorePoolPerson(admin.api, id);
 
 /**
  * The Super Admin (nakul17+zz-sa) plus one pool Member per label, from this job's slot. The labels say what each
@@ -110,14 +100,14 @@ export async function cast(browser: Browser, later: Later, labels: string[]) {
   const team = await admin.who.api.get("/api/team");
   expect(team.status, "the Super Admin can read the Team list").toBe(200);
   for (const row of (team.json.people ?? []) as { id: string; email: string; status: string; orgRole: string }[]) {
-    if (emails.includes(row.email) && (row.status === "DEACTIVATED" || row.orgRole !== "MEMBER")) await restore(admin.who, row.id, row.email);
+    if (emails.includes(row.email) && (row.status === "DEACTIVATED" || row.orgRole !== "MEMBER")) await restore(admin.who, row.id);
   }
   const people: Who[] = [];
   for (const email of emails) {
     const signed = await signInAlias(browser, email);
     track(later, signed.ctx);
     const id = String(signed.who.user.id);
-    later(() => restore(admin.who, id, email));
+    later(() => restore(admin.who, id));
     people.push(signed.who);
   }
   return { admin: admin.who, people };

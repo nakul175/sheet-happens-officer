@@ -11,7 +11,6 @@ import { QA_PASS, cast, gateFile, noSecret, runLocalJob } from "../helpers/qa-al
 gateFile();
 
 type Note = { id: string; text: string; href: string; read: boolean };
-type Later = (fn: () => Promise<unknown>) => void;
 
 const inbox = async (who: Who) => {
   const r = await who.api.get("/api/notifications?limit=200");
