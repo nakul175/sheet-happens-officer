@@ -2,22 +2,22 @@
 // Session checks use a ZZ-TEST person when the test mail sink has their password.
 // Otherwise they use the Member account from the environment, and that account is restored afterwards.
 import type { Browser } from "@playwright/test";
-import { test, expect, RUN, login, zz, type Api, type Json } from "../support";
-import { PASS, alias, BASE_URL, passwordOk, signInAs, sinkText } from "./qa";
+import { expect, RUN, login, zz, type Api, type Json } from "../support";
+import { test, deactivate, archiveProject, PASS, alias, BASE_URL, passwordOk, signInAs, sinkText } from "./qa";
 
 type Ctx = { api: Api; user: Json };
 async function person(admin: Ctx, later: (f: () => Promise<unknown>) => void, label: string, role: "MEMBER" | "ADMIN" = "MEMBER") {
   const r = await admin.api.post("/api/team", { firstName: "ZZ-TEST", lastName: `${label} ${RUN}`, email: alias("2482", label), role });
   expect(r.status, JSON.stringify(r.json)).toBe(201);
   const id = r.json.person.id as string;
-  later(async () => { const s = (await admin.api.get(`/api/team/${id}`)).json.person?.status; if (s !== "DEACTIVATED") await admin.api.post(`/api/team/${id}/deactivate`, { reassign: "leaders" }); });
+  later(async () => { const s = (await admin.api.get(`/api/team/${id}`)).json.person?.status; if (s !== "DEACTIVATED") await deactivate(admin.api, id); });
   return { id, name: `ZZ-TEST ${label} ${RUN}` };
 }
 async function project(admin: Ctx, later: (f: () => Promise<unknown>) => void, label: string) {
   const r = await admin.api.post("/api/projects", { name: zz(label), leaderId: admin.user.id });
   expect(r.status).toBe(201);
   const id = r.json.project.id as string;
-  later(() => admin.api.post(`/api/projects/${id}/archive`));
+  later(() => archiveProject(admin.api, id, admin.user.id as string));
   return id;
 }
 const statusOf = async (admin: Ctx, id: string) => (await admin.api.get(`/api/team/${id}`)).json.person.status as string;
@@ -64,7 +64,7 @@ test.describe("SHO-US-2.3 / APL-2482", () => {
     const p = await person(admin, later, "leaver");
     const proj = await project(admin, later, "2.3 ac1");
     expect((await admin.api.post(`/api/projects/${proj}/members`, { userId: p.id, role: "EDITOR" })).status).toBe(201);
-    const t = await admin.api.post(`/api/projects/${proj}/tasks`, { title: zz("leaver task"), assigneeId: p.id });
+    const t = await admin.api.post(`/api/projects/${proj}/tasks`, { title: zz("leaver task"), assigneeId: p.id, dueDate: new Date(Date.now() + 3 * 86400_000).toISOString().slice(0, 10) });
     expect(t.status).toBe(201);
     const taskId = t.json.task.id as string;
 
@@ -168,7 +168,7 @@ test.describe("SHO-US-2.3 / APL-2482", () => {
     const p = await person(admin, later, "returner");
     const proj = await project(admin, later, "2.3 ac3");
     await admin.api.post(`/api/projects/${proj}/members`, { userId: p.id, role: "EDITOR" });
-    const t = await admin.api.post(`/api/projects/${proj}/tasks`, { title: zz("returner task"), assigneeId: p.id });
+    const t = await admin.api.post(`/api/projects/${proj}/tasks`, { title: zz("returner task"), assigneeId: p.id, dueDate: new Date(Date.now() + 3 * 86400_000).toISOString().slice(0, 10) });
     const taskId = t.json.task.id as string;
     expect((await admin.api.post(`/api/team/${p.id}/deactivate`, { reassign: "leaders" })).status).toBe(200);
 

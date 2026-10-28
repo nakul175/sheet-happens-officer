@@ -1,8 +1,8 @@
 // SHO-US-2.5 Team page by role (APL-2484). Acceptance criteria AC1 to AC4.
-import { test, expect, type Json } from "../support";
+import { expect, type Json } from "../support";
 import {
-  PASS, alias, deactivate, passwordOk, personByEmail, signUp, zz,
-  addPersonOnTeam, deactivateOnTeam, expectChip, expectTeamColumns, mainOf, memberItem, teamRow, type Api,
+  test, PASS, alias, deactivate, passwordOk, personByEmail, signUp, zz,
+  addPersonOnTeam, deactivateOnTeam, openTeamActions, expectChip, expectTeamColumns, mainOf, memberItem, teamRow, type Api,
 } from "./qa";
 
 const SLOW = { timeout: 90_000 }; // the Team table can be long on a busy workspace
@@ -60,6 +60,8 @@ test.describe("SHO-US-2.5 / APL-2484", () => {
     await expect(row).toContainText(email);
     await expectChip(row, "Member");
     await expectChip(row, "Active", "green");
+    await expect(row).toContainText(name);
+    await openTeamActions(row, name);
     await expect(row.getByRole("button", { name: "Make Admin" })).toBeVisible();
     await expect(row.getByRole("button", { name: "Deactivate" })).toBeVisible();
     const person = await personByEmail(admin.api, email);
@@ -121,6 +123,7 @@ test.describe("SHO-US-2.5 / APL-2484", () => {
     await addPersonOnTeam(admin.page, name.slice(0, space), name.slice(space + 1), email);
     const created = teamRow(admin.page, email);
     await expect(created).toHaveCount(1, SLOW);
+    await openTeamActions(created, name);
     await expect(created.getByRole("button", { name: "Deactivate" })).toBeVisible();
     await expect(created.getByRole("button", { name: "Make Admin" })).toBeVisible();
 

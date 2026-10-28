@@ -2,10 +2,10 @@
 // New people are named ZZ-TEST and deactivated afterwards.
 // Sign-up uses SHO_QA_PASS. The file fails when that is unset.
 // Sign-in checks use the Member account from the environment (its password is known here). Its role and status are put back.
-import { test, login } from "../support";
+import { login } from "../support";
 import {
-  PASS, passwordOk, alias, zz, gate, signUp, signInAs, personByEmail, deactivate,
-  addPersonOnTeam, deactivateOnTeam, expectChip, expectTeamColumns, teamRow, makeProject, archiveProject, expect, type Api,
+  test, PASS, passwordOk, alias, zz, gate, signUp, signInAs, personByEmail, deactivate,
+  addPersonOnTeam, deactivateOnTeam, openTeamActions, expectChip, expectTeamColumns, teamRow, makeProject, archiveProject, expect, type Api,
 } from "./qa";
 
 type Who = { api: Api; user: { id?: string; name?: string; email?: string } };
@@ -18,7 +18,7 @@ test.beforeAll(async ({ request }) => {
 });
 
 async function taskFor(api: Api, projectId: string, assigneeId: string, title: string) {
-  const r = await api.post(`/api/projects/${projectId}/tasks`, { title, assigneeId });
+  const r = await api.post(`/api/projects/${projectId}/tasks`, { title, assigneeId, dueDate: new Date(Date.now() + 3 * 86400_000).toISOString().slice(0, 10) });
   expect(r.status, JSON.stringify(r.json)).toBe(201);
   return r.json.task.id as string;
 }
@@ -37,7 +37,7 @@ async function added(admin: Who, later: (fn: () => Promise<unknown>) => void, la
   const id = r.json.person.id as string;
   later(async () => {
     const status = (await admin.api.get(`/api/team/${id}`)).json.person?.status;
-    if (status !== "DEACTIVATED") await admin.api.post(`/api/team/${id}/deactivate`, { reassign: "leaders" });
+    if (status !== "DEACTIVATED") await deactivate(admin.api, id);
   });
   return { id, name: r.json.person.name as string, email: r.json.person.email as string };
 }
@@ -193,6 +193,7 @@ test("AC5: the only Super Admin cannot be demoted or deactivated (qa:TC missing)
   await addPersonOnTeam(admin.page, name.slice(0, space), name.slice(space + 1), email);
   const created = teamRow(admin.page, email);
   await expect(created).toHaveCount(1, { timeout: 90_000 });
+  await openTeamActions(created, name);
   await expect(created.getByRole("button", { name: "Deactivate" })).toBeVisible();
   await deactivateOnTeam(admin.page, name);
 
@@ -226,8 +227,8 @@ test("AC6: the Team page shows people by role, and deactivated people are shown 
   const adminRow = teamRow(admin.page, adminEmail);
   await expect(memberRow).toHaveCount(1);
   await expect(adminRow).toHaveCount(1);
-  await expectTeamColumns(admin.page, memberRow, ["Role"]);
-  await expectTeamColumns(admin.page, adminRow, ["Role"]);
+  await expectTeamColumns(admin.page, memberRow, ["Workspace role"]);
+  await expectTeamColumns(admin.page, adminRow, ["Workspace role"]);
   await expectChip(memberRow, "Member");
   await expectChip(memberRow, "Deactivated", "grey");
   await expectChip(adminRow, "Admin");

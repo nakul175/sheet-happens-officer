@@ -1,8 +1,8 @@
 // SHO-US-2.1 First Super Admin from configuration (APL-2480). Acceptance criteria AC1 to AC4.
 // SUPER_ADMIN_EMAILS is server config. A new nakul17+ alias is not on that list, so sign-up leaves them a Member.
 import { readFileSync } from "node:fs";
-import { test, expect } from "../support";
-import { PASS, alias, deactivate, passwordOk, personByEmail, signUp, teamRow, zz } from "./qa";
+import { expect } from "../support";
+import { test, PASS, alias, deactivate, passwordOk, personByEmail, signUp, teamRow, zz } from "./qa";
 
 test.describe("SHO-US-2.1 / APL-2480", () => {
   test.beforeAll(() => {

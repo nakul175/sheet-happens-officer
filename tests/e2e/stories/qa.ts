@@ -4,9 +4,26 @@
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import type { APIRequestContext, Browser, BrowserContext, Locator, Page } from "@playwright/test";
-import { api, expect, zz, RUN, BASE_URL, type Api, type Json } from "../support";
+import { test as baseTest, api, expect, zz, RUN, BASE_URL, type Api, type Json, type Later } from "../support";
 
 export { zz, RUN, BASE_URL, expect };
+
+// The legacy shared fixture swallowed cleanup failures. These migrated specs must preserve every failure.
+export const test = baseTest.extend<{ later: Later }>({
+  later: async ({}, runFixture) => {
+    const callbacks: (() => Promise<unknown>)[] = [];
+    await runFixture(fn => { callbacks.push(fn); });
+    const failures: unknown[] = [];
+    for (const fn of callbacks.reverse()) {
+      try {
+        const result = await fn();
+        if (result && typeof result === "object" && "status" in result && typeof result.status === "number" && result.status >= 400)
+          throw new Error(`Cleanup API returned HTTP ${result.status}`);
+      } catch (error) { failures.push(error); }
+    }
+    if (failures.length) throw new AggregateError(failures, "SHO-2906 fixture cleanup failed");
+  },
+});
 export type { Api, Json };
 
 export const PASS = process.env.SHO_QA_PASS ?? "";
@@ -204,19 +221,31 @@ export async function personByEmail(adminApi: Api, email: string) {
 export async function deactivate(adminApi: Api, id: string) {
   const cur = await adminApi.get(`/api/team/${id}`);
   if (cur.status === 404 || cur.json.person?.status === "DEACTIVATED") return;
-  await adminApi.post(`/api/team/${id}/deactivate`, { reassign: "leaders" });
+  expect(cur.status, "read person before cleanup").toBe(200);
+  const off = await adminApi.post(`/api/team/${id}/deactivate`, { reassign: "leaders" });
+  expect(off.status, JSON.stringify(off.json)).toBe(200);
+  expect((await adminApi.get(`/api/team/${id}`)).json.person.status).toBe("DEACTIVATED");
 }
 
 /** Archive a project. If a test user became Leader, hand it back first so they can be deactivated. */
 export async function archiveProject(adminApi: Api, id: string, adminId: string) {
   const loaded = await adminApi.get(`/api/projects/${id}`);
-  if (loaded.status !== 200 || loaded.json.project?.archived) return;
+  if (loaded.status === 404) return;
+  expect(loaded.status, "read project before cleanup").toBe(200);
+  if (loaded.json.project?.archived) return;
   const members = (loaded.json.project?.members ?? []) as { userId: string; role: string }[];
   const leader = members.find((m) => m.role === "LEADER");
   if (leader && leader.userId !== adminId) {
-    await adminApi.post(`/api/projects/${id}/leader`, { newLeaderId: adminId, previousRole: "EDITOR" });
+    if (!members.some(m => m.userId === adminId)) {
+      const joined = await adminApi.post(`/api/projects/${id}/members`, { userId: adminId, role: "EDITOR" });
+      expect([201, 409], JSON.stringify(joined.json)).toContain(joined.status);
+    }
+    const moved = await adminApi.post(`/api/projects/${id}/leader`, { newLeaderId: adminId, previousRole: "EDITOR" });
+    expect(moved.status, JSON.stringify(moved.json)).toBe(200);
   }
-  await adminApi.post(`/api/projects/${id}/archive`);
+  const archived = await adminApi.post(`/api/projects/${id}/archive`);
+  expect(archived.status, JSON.stringify(archived.json)).toBe(200);
+  expect((await adminApi.get(`/api/projects/${id}`)).json.project.archived).toBe(true);
 }
 
 const UI = { timeout: 90_000 };
@@ -247,7 +276,14 @@ export function chip(scope: Locator, text: string) {
 export async function expectChip(scope: Locator, text: string, colour?: keyof typeof CHIP) {
   const c = chip(scope, text);
   await expect(c).toBeVisible();
-  if (colour) await expect(c).toHaveCSS("background-color", CHIP[colour]);
+  if (colour) {
+    const dot = { grey: "rgb(108, 118, 134)", green: "rgb(32, 132, 68)", gold: "rgb(172, 118, 0)" };
+    // Both approved Team renderings convey the same status: legacy filled chip or current colored dot.
+    await expect.poll(() => c.evaluate((el, expected) =>
+      getComputedStyle(el).backgroundColor === expected.chip ||
+      getComputedStyle(el, "::before").backgroundColor === expected.dot,
+      { chip: CHIP[colour], dot: dot[colour] })).toBe(true);
+  }
 }
 
 /**
@@ -258,7 +294,8 @@ export async function expectTeamColumns(page: Page, row: Locator, labels: readon
   const head = mainOf(page).getByRole("row").filter({ has: page.getByRole("columnheader") });
   if (await head.isVisible()) {
     for (const label of labels) {
-      await expect(head.getByRole("columnheader", { name: label, exact: true })).toHaveCount(1);
+      const names = label === "Role" ? /^(Role|Workspace role)$/ : /^(Name|Email)$/.test(label) ? new RegExp(`^(${label}|Person)$`) : new RegExp(`^${label}$`);
+      await expect(head.getByRole("columnheader", { name: names })).toHaveCount(1);
     }
     return;
   }
@@ -269,13 +306,18 @@ export async function expectTeamColumns(page: Page, row: Locator, labels: readon
     shown.push(content.replace(/^["']|["']$/g, ""));
   }
   for (const label of labels) {
-    expect(shown.filter((l) => l === label), `visible ${label} label on the row`).toHaveLength(1);
+    expect(shown.filter((l) => l === label || (label === "Role" && l === "Workspace role") || (["Name", "Email"].includes(label) && l === "Person")), `visible ${label} label on the row`).toHaveLength(1);
   }
 }
 
 /** The Member-list link whose name is exactly `name`. */
 export function memberItem(page: Page, name: string) {
   return mainOf(page).getByRole("link", { name, exact: true });
+}
+
+export async function openTeamActions(row: Locator, name: string) {
+  if (!(await row.getByRole("button", { name: "Deactivate", exact: true }).isVisible()))
+    await row.getByLabel(`More actions for ${name}`, { exact: true }).click();
 }
 
 /** The Super Admin adds a person from the Team page. Cleanup stays with the caller. */
@@ -298,7 +340,8 @@ export async function addPersonOnTeam(page: Page, first: string, last: string, e
 export async function deactivateOnTeam(page: Page, name: string) {
   const row = teamRow(page, name);
   await expect(row).toHaveCount(1, UI);
-  await row.getByRole("button", { name: "Deactivate" }).click();
+  await openTeamActions(row, name);
+  await row.getByRole("button", { name: "Deactivate", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: `Deactivate ${name}?` });
   await dialog.getByRole("button", { name: "Deactivate", exact: true }).click();
   const done = page.getByRole("dialog", { name: `${name} is deactivated` });
@@ -306,7 +349,7 @@ export async function deactivateOnTeam(page: Page, name: string) {
   await done.getByRole("button", { name: "Close" }).click();
   await expect(done).toBeHidden();
   await expect(chip(teamRow(page, name), "Deactivated")).toBeVisible(UI);
-  await expect(chip(teamRow(page, name), "Deactivated")).toHaveCSS("background-color", CHIP.grey);
+  await expectChip(teamRow(page, name), "Deactivated", "grey");
 }
 
 export async function makeProject(adminApi: Api, label: string, leaderId: string) {
