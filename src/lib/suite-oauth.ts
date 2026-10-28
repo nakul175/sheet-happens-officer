@@ -1,4 +1,5 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
+import { holyQaRealm } from "@/lib/holy-qa-identity";
 import { db } from "@/lib/db";
 
 export const suiteHash = (value: string) => createHash("sha256").update(value).digest("hex");
@@ -11,11 +12,12 @@ export function suiteConfig(id = "bugoff") {
   if (!["bugoff", "accounts"].includes(id)) throw new Error("Unknown suite client");
   const secret = id === "accounts" ? process.env.SUITE_ACCOUNTS_CLIENT_SECRET : process.env.SUITE_BUGOFF_CLIENT_SECRET;
   if (!secret || secret.length < 32) throw new Error("Suite sign-in not configured");
+  const realm = id === "accounts" ? holyQaRealm() : null;
   return {
     id,
     secret,
-    origin: "https://sheethappensofficer.aplyd.org",
-    callback: id === "accounts" ? "https://accounts.aplyd.org/bridge/callback" : "https://bugoff.aplyd.org/api/auth/callback/aplyd",
+    origin: realm?.origin ?? "https://sheethappensofficer.aplyd.org",
+    callback: id === "accounts" ? (realm ? realm.origin + "/bridge/callback" : "https://accounts.aplyd.org/bridge/callback") : "https://bugoff.aplyd.org/api/auth/callback/aplyd",
   };
 }
 export function validAuthorization(p: URLSearchParams, cfg: ReturnType<typeof suiteConfig>) {
