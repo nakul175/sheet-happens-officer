@@ -175,10 +175,27 @@ async function main() {
   const originalText = await readFile(envFile, "utf8");
   const parsed = parseEnv(originalText);
   const runtimeUrl = safeUrl(parsed.get("DATABASE_URL"), "DATABASE_URL");
-  const directUrl = safeUrl(parsed.get("DIRECT_DATABASE_URL"), "DIRECT_DATABASE_URL");
+  const adminEnvFile = process.env.SHO_2687_ADMIN_ENV_FILE
+    ? resolve(process.env.SHO_2687_ADMIN_ENV_FILE)
+    : envFile;
+  let adminText = originalText;
+  if (adminEnvFile !== envFile) {
+    const adminStat = await lstat(adminEnvFile);
+    if (!adminStat.isFile() || (adminStat.mode & 0o077) !== 0) {
+      fail(`${adminEnvFile} must be a regular file inaccessible to group/other.`);
+    }
+    adminText = await readFile(adminEnvFile, "utf8");
+  }
+  const directUrl = safeUrl(parseEnv(adminText).get("DIRECT_DATABASE_URL"), "DIRECT_DATABASE_URL");
+  if (adminEnvFile !== envFile) {
+    // A managed-cluster admin URL can name its maintenance database. Force
+    // the connection back to the runtime database so grants cannot land in a
+    // different database than the selected staging environment.
+    directUrl.pathname = runtimeUrl.pathname;
+  }
   if (directUrl.username !== expectedAdmin) fail(`DIRECT_DATABASE_URL must remain ${expectedAdmin}; found ${directUrl.username}.`);
   if (MODE === "plan") {
-    console.log(JSON.stringify({ mode: MODE, envFile, runtime: redacted(runtimeUrl), direct: redacted(directUrl), role, schema, service, healthUrl }));
+    console.log(JSON.stringify({ mode: MODE, envFile, adminEnvFile, runtime: redacted(runtimeUrl), direct: redacted(directUrl), role, schema, service, healthUrl }));
     return;
   }
 
@@ -248,6 +265,7 @@ async function main() {
       schema,
       runtimeUsesAppRole: true,
       directUsesAdminRole: directUrl.username === expectedAdmin,
+      adminSourceSeparate: adminEnvFile !== envFile,
       dmlPrivilegesVerified: true,
       ddlDenied: true,
       service,

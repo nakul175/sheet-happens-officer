@@ -12,7 +12,7 @@ const runbook = readFileSync(resolve(root, "docs/runbooks/database-roles.md"), "
 describe("SHO-2687 least-privilege database rollout contract", () => {
   it("keeps runtime and migration identities separate without printing secrets", () => {
     expect(implementation).toContain('parsed.get("DATABASE_URL")');
-    expect(implementation).toContain('parsed.get("DIRECT_DATABASE_URL")');
+    expect(implementation).toContain('parseEnv(adminText).get("DIRECT_DATABASE_URL")');
     expect(implementation).toContain("DIRECT_DATABASE_URL must remain");
     expect(implementation).toContain("<redacted>");
     expect(implementation).not.toMatch(/console\.(?:log|error)\([^\n]*(?:password|connectionString)/i);
@@ -37,6 +37,39 @@ describe("SHO-2687 least-privilege database rollout contract", () => {
     expect(stdout).toContain('"role":"sho_app"');
     expect(stdout).not.toContain("runtime-secret");
     expect(stdout).not.toContain("direct-secret");
+  });
+
+  it("can source cluster-admin credentials separately while pinning the staging database", () => {
+    const dir = mkdtempSync(resolve(tmpdir(), "sho-2687-admin-"));
+    const envFile = resolve(dir, "staging.env");
+    const adminEnvFile = resolve(dir, "admin.env");
+    writeFileSync(
+      envFile,
+      [
+        'DATABASE_URL="postgresql://sho_staging:runtime-secret@db.example.test:25060/sho_staging?sslmode=require"',
+        'DIRECT_DATABASE_URL="postgresql://sho_staging:direct-secret@db.example.test:25060/sho_staging?sslmode=require"',
+      ].join("\n"),
+    );
+    writeFileSync(
+      adminEnvFile,
+      'DIRECT_DATABASE_URL="postgresql://doadmin:admin-secret@db.example.test:25060/defaultdb?sslmode=require"',
+    );
+    chmodSync(envFile, 0o600);
+    chmodSync(adminEnvFile, 0o600);
+    const stdout = execFileSync(process.execPath, [resolve(root, "scripts/ops/sho-2687-db-role.mjs"), "plan"], {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        SHO_2687_ENV_FILE: envFile,
+        SHO_2687_ADMIN_ENV_FILE: adminEnvFile,
+        SHO_2687_ADMIN_ROLE: "doadmin",
+      },
+    });
+    expect(stdout).toContain(`"adminEnvFile":"${adminEnvFile}"`);
+    expect(stdout).toContain("doadmin:<redacted>@db.example.test:25060/sho_staging");
+    expect(stdout).not.toContain("runtime-secret");
+    expect(stdout).not.toContain("direct-secret");
+    expect(stdout).not.toContain("admin-secret");
   });
 
   it("preserves the declared libpq TLS contract for managed PostgreSQL", () => {

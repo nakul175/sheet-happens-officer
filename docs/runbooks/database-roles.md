@@ -22,7 +22,9 @@ Run the same sequence against isolated staging first, using staging-specific fil
 
 ```sh
 SHO_2687_ENV_FILE=/etc/sho-staging/db.env \
+SHO_2687_ADMIN_ENV_FILE=/etc/sho/app.env \
 SHO_2687_APP_ROLE=sho_staging_app \
+SHO_2687_ADMIN_ROLE=doadmin \
 SHO_2687_SCHEMA=sho \
 SHO_2687_SERVICE=sho-staging.service \
 SHO_2687_RELEASE_ROOT=/opt/sho-staging \
@@ -33,6 +35,11 @@ SHO_2687_BACKUP_FILE=/etc/sho-staging/db.env.sho-2687-backup \
 SHO_2687_RECEIPT_FILE=/var/lib/sho/sho-2687-staging-receipt.json \
   scripts/ops/sho-2687-apply.sh apply
 ```
+
+When `SHO_2687_ADMIN_ENV_FILE` differs from the selected runtime env, only its
+root-only `DIRECT_DATABASE_URL` credentials are used. The operator forcibly
+retargets that connection to the runtime URL's database before changing roles
+or grants, preventing staging grants from landing in the maintenance database.
 
 After the staging receipt, exact health response, application smoke tests, migration status, DML checks, DDL denial and rollback have been verified, run production with the explicit production approval and pinned release:
 
