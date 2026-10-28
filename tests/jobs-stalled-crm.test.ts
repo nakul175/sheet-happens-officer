@@ -19,6 +19,7 @@ import {
   expectStalledNotice,
   seedStalledWorld,
   storedRows,
+  worldDeals,
   type Mode,
   type StalledWorld,
 } from "./stalled-crm-fixture";
@@ -40,17 +41,19 @@ async function dealIds() {
   return new Set(rows.map((row) => row.id));
 }
 
-/** DEAL_STALLED rows on this test's ZZ-TEST deals. Other tests' stalled deals cannot move this count. */
+/** Exact DEAL_STALLED rows on this test's ZZ-TEST deals. Foreign worlds never affect these assertions. */
 async function worldStalledRows() {
-  const projectId = { in: [world.owned.id, world.adminDeal.id, world.rootDeal.id] };
-  return db.notification.count({ where: { type: "DEAL_STALLED", projectId } });
+  const projectId = { in: worldDeals(world).map(deal => deal.id) };
+  return db.notification.findMany({ where: { type: "DEAL_STALLED", projectId }, orderBy: { id: "asc" } });
 }
 
-/** APL-2754. One job run, with notified counted on this test's ZZ-TEST deals only. */
+/** SHO-2903: scoped first-run count and exact second-run snapshot.
+ * M1 detection comes from the all/admins cases, not from the unset assertion alone. */
 async function notifyWorldDeals() {
   const before = await worldStalledRows();
   await notifyStalledDeals();
-  return { notified: (await worldStalledRows()) - before };
+  const after = await worldStalledRows();
+  return { notified: after.length - before.length, before, after };
 }
 
 /** Allowed leaders keep today's notice. A follower, and any other deal, stays out of their bell. */
@@ -82,30 +85,30 @@ describe("qa:TC missing APL-2741 stalled-deal notices respect CRM_VISIBLE", () =
       const ids = await dealIds();
       expect(ids.has(world.owned.id)).toBe(true);
       expect(ids.has(world.adminDeal.id)).toBe(true);
-      const first = await notifyStalledDeals();
+      const first = await notifyWorldDeals();
       expect(first.notified).toBeGreaterThanOrEqual(3);
       const second = await notifyWorldDeals();
-      expect(second.notified).toBe(0);
+      expect(second.after).toEqual(second.before); // exact rows: additions/removals cannot cancel out
     });
     await expectStalledNotice(world.owner, world.owned, true);
     await expectAllowed(true);
     expectNoDealMail(dealNeedles(world));
   });
 
-  it("qa:TC missing AC2: CRM_VISIBLE=all matches today", async () => {
+  it("qa:TC missing AC2: all preserves exact world notices on a second run (M1 detection)", async () => {
     await clearStalledNotes(world);
     await withMode("all", async () => {
       expect(crmMode()).toBe("all");
-      expect((await notifyStalledDeals()).notified).toBeGreaterThanOrEqual(3);
+      expect((await notifyWorldDeals()).notified).toBeGreaterThanOrEqual(3);
       const second = await notifyWorldDeals();
-      expect(second.notified).toBe(0);
+      expect(second.after).toEqual(second.before); // exact rows: additions/removals cannot cancel out
     });
     await expectStalledNotice(world.owner, world.owned, true);
     await expectAllowed(true);
     expectNoDealMail(dealNeedles(world));
   });
 
-  it("qa:TC missing AC1 AC2: admins: a non-admin owner or follower gets no deal notice, and admins still do", async () => {
+  it("qa:TC missing AC1 AC2: admins hides non-admin deals and preserves exact world notices on a second run (M1 detection)", async () => {
     await clearStalledNotes(world);
     await withMode("admins", async () => {
       expect(crmMode()).toBe("admins");
@@ -113,9 +116,9 @@ describe("qa:TC missing APL-2741 stalled-deal notices respect CRM_VISIBLE", () =
       expect(ids.has(world.owned.id)).toBe(false);
       expect(ids.has(world.adminDeal.id)).toBe(true);
       expect(ids.has(world.rootDeal.id)).toBe(true);
-      expect((await notifyStalledDeals()).notified).toBeGreaterThanOrEqual(2);
+      expect((await notifyWorldDeals()).notified).toBeGreaterThanOrEqual(2);
       const second = await notifyWorldDeals();
-      expect(second.notified).toBe(0);
+      expect(second.after).toEqual(second.before); // exact rows: additions/removals cannot cancel out
     });
     await expectNoDealNotice(world, world.owner);
     await expectNoDealNotice(world, world.follower);

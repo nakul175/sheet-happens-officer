@@ -22,6 +22,8 @@ export type StalledWorld = {
 };
 
 const PEOPLE = (world: StalledWorld) => [world.owner, world.follower, world.orgAdmin, world.superLead];
+/** One definition of the deals owned by this isolated test world. */
+export const worldDeals = (world: StalledWorld) => [world.owned, world.adminDeal, world.rootDeal];
 
 export function assertLocalTestDatabase() {
   const raw = process.env.DATABASE_URL;
@@ -94,7 +96,7 @@ export async function seedStalledWorld(tag = stalledTag()): Promise<StalledWorld
 
 export async function ageDeals(world: StalledWorld) {
   const t = new Date(Date.now() - 31 * 86400_000);
-  for (const id of [world.owned.id, world.adminDeal.id, world.rootDeal.id]) {
+  for (const id of worldDeals(world).map(deal => deal.id)) {
     await db.$executeRaw`UPDATE "Project" SET "createdAt" = ${t}, "stageChangedAt" = ${t} WHERE id = ${id}`;
     await db.$executeRaw`UPDATE "Task" SET "updatedAt" = ${t} WHERE "projectId" = ${id}`;
     await db.$executeRaw`UPDATE "ActionLog" SET "createdAt" = ${t} WHERE "projectId" = ${id}`;
@@ -120,7 +122,7 @@ export async function bell(who: Account) {
 }
 
 export function dealNeedles(world: StalledWorld) {
-  const deals = [world.owned, world.adminDeal, world.rootDeal];
+  const deals = worldDeals(world);
   const needles: string[] = [];
   for (const deal of deals) {
     needles.push(deal.name, deal.title, deal.id, `/projects/${deal.id}`);
