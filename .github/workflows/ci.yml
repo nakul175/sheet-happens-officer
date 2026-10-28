@@ -102,6 +102,15 @@ jobs:
           fi
       - name: Unit tests
         run: npm test
+      - name: SHO-2903 exact-row assertions detect the M1 mutation
+        run: node scripts/ci/stalled-m1-proof.mjs
+      - name: Preserve SHO-2903 mutation evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sho-2903-m1-${{ github.sha }}
+          path: test-results/sho-2903-m1/
+          if-no-files-found: warn
       # APL-2911. Story specs that drive this local server in Playwright Chromium (outbox mail, the CI Super Admin), so
       # staging cannot run them and npm test no longer does. Each file must collect at least one test, then every test runs.
       - name: Local Playwright story specs
