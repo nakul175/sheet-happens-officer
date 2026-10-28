@@ -103,6 +103,25 @@ describe("qa:TC missing APL-2728 person page DOM", () => {
     expect([...page.querySelectorAll("a")].some((a) => a.textContent === HIDDEN_DEAL_LABEL)).toBe(false);
   });
 
+  it("SHO-2872 AC1: renders the server's hidden row once as escaped plain text", async () => {
+    const serverSentence = "ZZ-TEST server notice <a href='/private'>hidden</a>";
+    const page = await open({
+      id: "rep-2728",
+      name: "ZZ-TEST rep",
+      projects: [
+        { id: PLAIN_ID, name: PLAIN_NAME },
+        { name: serverSentence, href: null },
+        { name: serverSentence, href: null },
+      ],
+    });
+    const notices = [...page.querySelectorAll("p")].filter((p) => p.textContent === serverSentence);
+    expect(notices).toHaveLength(1);
+    expect(notices[0].children).toHaveLength(0);
+    expect(page.querySelector('a[href="/private"]')).toBeNull();
+    expect(page.textContent).not.toContain(HIDDEN_DEAL_LABEL);
+    expect(page.querySelector(`a[href="/projects/${PLAIN_ID}"]`)?.textContent).toBe(PLAIN_NAME);
+  });
+
   it("qa:TC missing AC2 and AC3: a visible deal keeps its name and /projects/<id> link", async () => {
     const page = await open({
       id: "rep-2728",
