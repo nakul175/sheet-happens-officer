@@ -103,6 +103,44 @@ async function openSheet(page: Page) {
   return { row, sheet };
 }
 
+/** Temporary, test-only history trace: own marker metadata only, no drafts, cookies or router tree. */
+async function traceTaskHistory(page: Page) {
+  await page.addInitScript(() => {
+    const w = window as unknown as { __taskHistoryTrace: unknown[] };
+    w.__taskHistoryTrace = [];
+    const own = (state: Record<string, unknown> | null) => ({ task: state?.__shoTaskSheet, base: state?.__shoTaskBase });
+    const add = window.addEventListener.bind(window), remove = window.removeEventListener.bind(window);
+    const wrappers = new Map<EventListenerOrEventListenerObject, EventListener>();
+    const target = window as unknown as { addEventListener: (type: string, listener: EventListenerOrEventListenerObject, options?: boolean | AddEventListenerOptions) => void; removeEventListener: (type: string, listener: EventListenerOrEventListenerObject, options?: boolean | EventListenerOptions) => void };
+    target.addEventListener = (type, listener, options) => {
+      if (type === "popstate" && options === true) {
+        w.__taskHistoryTrace.push({ method: "attach-capture", url: location.href });
+        const wrapped: EventListener = event => {
+          w.__taskHistoryTrace.push({ method: "capture-callback", url: location.href, own: own((event as PopStateEvent).state) });
+          try { if (typeof listener === "function") listener.call(window, event); else listener.handleEvent(event); }
+          finally { w.__taskHistoryTrace.push({ method: "capture-finished", stopped: event.cancelBubble }); }
+        };
+        wrappers.set(listener, wrapped); add(type, wrapped, options);
+      } else add(type, listener, options);
+    };
+    target.removeEventListener = (type, listener, options) => {
+      if (type === "popstate" && options === true) w.__taskHistoryTrace.push({ method: "detach-capture", url: location.href });
+      remove(type, wrappers.get(listener) ?? listener, options);
+    };
+    for (const method of ["pushState", "replaceState"] as const) {
+      const original = History.prototype[method];
+      History.prototype[method] = function (data, unused, url) {
+        w.__taskHistoryTrace.push({ method, url: String(url ?? ""), own: own(data) });
+        return original.call(this, data, unused, url);
+      };
+    }
+    window.addEventListener("popstate", event => { w.__taskHistoryTrace.push({ method: "pop", url: location.href, own: own(event.state) }); }, true);
+  });
+}
+async function printTaskHistory(page: Page) {
+  console.log("SHO-2616 own-history diagnostics", JSON.stringify(await page.evaluate(() => ({ trace: (window as unknown as { __taskHistoryTrace?: unknown[] }).__taskHistoryTrace, url: location.href, stateKeys: Object.keys(history.state ?? {}), dialogs: [...document.querySelectorAll('[role="dialog"]')].map(el => el.getAttribute("aria-label")) }))));
+}
+
 describe("W86 hydration: the localhost page is interactive and talks to /api/", () => {
   it("a client click routes without a document load, and the page fetched /api/ first", async () => {
     const ctx = await signedIn(root.email, { width: 1280, height: 900 });
@@ -341,6 +379,7 @@ describe("SHO-2616: real browser history closes a task without dropping drafts",
   it("Back preserves a focused unsaved description, and Cancel or discard never sends a blur save", async () => {
     const ctx = await signedIn(root.email, { width: 390, height: 844 }, true);
     const page = await ctx.newPage();
+    await traceTaskHistory(page);
     const patches: string[] = [];
     page.on("request", r => { if (r.method() === "PATCH" && new URL(r.url()).pathname === `/api/tasks/${taskId}`) patches.push(r.postData() ?? ""); });
     try {
@@ -364,12 +403,14 @@ describe("SHO-2616: real browser history closes a task without dropping drafts",
       expect(patches).toEqual([]);
       const response = await ctx.request.get(`/api/tasks/${taskId}`);
       expect((await response.json()).task.description).toBe(original);
-    } finally { await ctx.close(); }
+    } catch (error) { await printTaskHistory(page); throw error; }
+    finally { await ctx.close(); }
   }, 180000);
 
   it("Back dismisses only a nested confirmation and keeps the task and scroll lock", async () => {
     const ctx = await signedIn(root.email, { width: 390, height: 844 }, true);
     const page = await ctx.newPage();
+    await traceTaskHistory(page);
     try {
       await page.goto(`/projects/${projectId}`, { waitUntil: "load", timeout: 120000 });
       const { sheet } = await openSheet(page);
@@ -385,7 +426,8 @@ describe("SHO-2616: real browser history closes a task without dropping drafts",
       expect(await trigger.evaluate(el => document.activeElement === el)).toBe(true);
       await page.evaluate(() => history.back());
       await sheet.waitFor({ state: "detached", timeout: 15000 });
-    } finally { await ctx.close(); }
+    } catch (error) { await printTaskHistory(page); throw error; }
+    finally { await ctx.close(); }
   }, 180000);
 });
 

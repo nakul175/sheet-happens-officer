@@ -1,3 +1,4 @@
+import { onOverlayPopstate } from "@/lib/overlay-popstate";
 const PANEL = "__shoPanel", BASE = "__shoPanelBase";
 type PanelEntry = { id: string; token: string; href: string };
 const object = (state: unknown): Record<string, unknown> => state && typeof state === "object" && !Array.isArray(state) ? { ...state } : {};
@@ -36,6 +37,6 @@ export function attachOverlayBack(id: string, onClose: () => void, nestedClose: 
     if (nested) { restoring = nested; history.forward(); }
     else finish();
   };
-  window.addEventListener("popstate", pop, true);
-  return { close, detach: () => window.removeEventListener("popstate", pop, true) };
+  const detach = onOverlayPopstate(pop);
+  return { close, detach };
 }

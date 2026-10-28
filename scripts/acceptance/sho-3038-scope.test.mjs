@@ -10,11 +10,15 @@ const allowed = new Set([
   "src/components/use-overlay-back.ts",
   "tests/overlay-history-2616.test.ts",
   "src/components/MoveSheet.tsx",
+  "src/instrumentation-client.ts",
+  "src/lib/overlay-popstate.ts",
+  "tests/overlay-popstate-2616.test.ts",
   // SHO-2616 / SHO-2555: task-only Back traversal and unsaved comment protection.
   "src/lib/task-sheet-history.ts",
   "src/components/use-task-sheet-back.ts",
   "src/components/Comments.tsx",
   "tests/task-sheet-history-2616.test.ts",
+  "tests/cascade-reminder-2610.test.ts",
   // SHO-2589: Workload stays disabled pending complete acceptance and hidden-CRM policy resolution.
   "src/lib/workload.ts",
   "src/lib/workload-query.ts",

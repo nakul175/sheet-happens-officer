@@ -1,3 +1,4 @@
+import { onOverlayPopstate } from "@/lib/overlay-popstate";
 /** Task-only history metadata. Draft text never goes into history or browser storage. */
 const ENTRY = "__shoTaskSheet";
 const BASE = "__shoTaskBase";
@@ -87,7 +88,7 @@ export function attachTaskSheetBack(options: TaskBackOptions) {
     if (!options.blocked()) return;
     event.preventDefault(); event.returnValue = "";
   };
-  window.addEventListener("popstate", pop, true);
+  const detachPop = onOverlayPopstate(pop);
   window.addEventListener("beforeunload", unload);
-  return { close, detach: () => { window.removeEventListener("popstate", pop, true); window.removeEventListener("beforeunload", unload); } };
+  return { close, detach: () => { detachPop(); window.removeEventListener("beforeunload", unload); } };
 }

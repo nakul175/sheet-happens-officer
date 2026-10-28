@@ -104,3 +104,41 @@ it("warns before closing a refused stale edit and permits an explicit exit", asy
   await act(async () => [...document.querySelectorAll<HTMLButtonElement>('button')].find(b => b.textContent === "Close anyway")!.click());
   expect(onClose).toHaveBeenCalledOnce();
 });
+it("Back restores a real mounted task before prompting without saving its focused draft", async () => {
+  history.replaceState({}, "", "/projects/project?task=task");
+  try {
+    const { fetcher } = await mount("LEADER", false, true, false);
+    const state = history.state, entry = state.__shoTaskSheet;
+    expect(entry).toBeDefined();
+    vi.spyOn(history, "forward").mockImplementation(() => {});
+    const desc = document.querySelector<HTMLTextAreaElement>('#desc')!;
+    desc.focus(); desc.value = "Unsaved Back draft";
+    await act(async () => {
+      History.prototype.replaceState.call(history, { __shoTaskBase: entry.token }, "", entry.base);
+      window.dispatchEvent(new PopStateEvent("popstate", { state: history.state }));
+      History.prototype.replaceState.call(history, state, "", entry.href);
+      window.dispatchEvent(new PopStateEvent("popstate", { state }));
+    });
+    expect(document.body.textContent).toContain("Close without saving?");
+    expect(desc.value).toBe("Unsaved Back draft");
+    expect(fetcher.mock.calls.filter(([, init]) => init?.method === "PATCH")).toEqual([]);
+  } finally { history.replaceState({}, "", "/"); }
+});
+it("Back dismisses the mounted nested Trash confirm without closing its task", async () => {
+  history.replaceState({}, "", "/projects/project?task=task");
+  try {
+    const { onClose } = await mount("LEADER", false, true, false);
+    const state = history.state, entry = state.__shoTaskSheet;
+    vi.spyOn(history, "forward").mockImplementation(() => {});
+    await act(async () => [...document.querySelectorAll<HTMLButtonElement>('button')].find(b => b.textContent === "Move to Trash")!.click());
+    expect(document.querySelectorAll('[role="dialog"]')).toHaveLength(2);
+    await act(async () => {
+      History.prototype.replaceState.call(history, { __shoTaskBase: entry.token }, "", entry.base);
+      window.dispatchEvent(new PopStateEvent("popstate", { state: history.state }));
+      History.prototype.replaceState.call(history, state, "", entry.href);
+      window.dispatchEvent(new PopStateEvent("popstate", { state }));
+    });
+    expect(document.querySelectorAll('[role="dialog"]')).toHaveLength(1);
+    expect(onClose).not.toHaveBeenCalled();
+  } finally { history.replaceState({}, "", "/"); }
+});
