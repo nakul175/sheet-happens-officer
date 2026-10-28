@@ -63,6 +63,7 @@ export function attachTaskSheetBack(options: TaskBackOptions) {
   let restoring: (() => void) | null = null, allowClose = false, queuedClose = false;
   const close = () => {
     if (restoring) { queuedClose = true; return true; }
+    if (allowClose) return true; // a second tap must not queue another Back before the first pop arrives
     if (readEntry(history.state, entry.id)?.token !== entry.token || location.href !== entry.href) return false;
     allowClose = true; history.back(); return true;
   };

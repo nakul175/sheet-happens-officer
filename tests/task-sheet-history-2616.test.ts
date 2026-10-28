@@ -92,7 +92,7 @@ it("Close consumes the marked task entry once, allowing the router's resulting B
   const e = history.state.__shoTaskSheet;
   const { close, prompt } = attach(true);
   const back = vi.spyOn(history, "back").mockImplementation(() => {});
-  expect(close()).toBe(true); expect(back).toHaveBeenCalledOnce();
+  expect(close()).toBe(true); expect(close()).toBe(true); expect(back).toHaveBeenCalledOnce();
   expect(pop({ __shoTaskBase: e.token }, e.base)).not.toHaveBeenCalled();
   expect(prompt).not.toHaveBeenCalled(); expect(close()).toBe(false);
 });
