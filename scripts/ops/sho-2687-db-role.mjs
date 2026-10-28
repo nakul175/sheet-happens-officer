@@ -67,13 +67,16 @@ async function query(client, text, params = []) {
 async function connect(connectionString, applicationName) {
   const parsed = new URL(connectionString);
   const sslmode = parsed.searchParams.get("sslmode");
+  if (sslmode === "require") {
+    // `sslmode` in a connection string overrides a separately supplied `ssl`
+    // object in node-postgres. Use its documented compatibility flag so the
+    // URL keeps libpq `require` semantics instead of being promoted to
+    // `verify-full` by the current parser.
+    parsed.searchParams.set("uselibpqcompat", "true");
+  }
   const client = new Client({
-    connectionString,
+    connectionString: parsed.toString(),
     application_name: applicationName,
-    // libpq's `require` guarantees encryption but does not verify the CA.
-    // node-postgres is moving toward stricter semantics, so make the
-    // existing URL contract explicit instead of depending on its alias.
-    ...(sslmode === "require" ? { ssl: { rejectUnauthorized: false } } : {}),
   });
   await client.connect();
   return client;

@@ -41,8 +41,9 @@ describe("SHO-2687 least-privilege database rollout contract", () => {
 
   it("preserves the declared libpq TLS contract for managed PostgreSQL", () => {
     expect(implementation).toContain('sslmode === "require"');
-    expect(implementation).toContain("ssl: { rejectUnauthorized: false }");
-    expect(implementation).toContain("libpq's `require` guarantees encryption");
+    expect(implementation).toContain('parsed.searchParams.set("uselibpqcompat", "true")');
+    expect(implementation).toContain("connectionString: parsed.toString()");
+    expect(implementation).toContain("connection string overrides a separately supplied `ssl`");
     expect(implementation).not.toContain("NODE_TLS_REJECT_UNAUTHORIZED");
   });
 
