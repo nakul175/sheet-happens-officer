@@ -94,7 +94,7 @@ function TabBar({ user, here, more }: { user: Me; here: (p: string) => boolean; 
         {tabs.map(([h, l, i]) => (
           <Link key={h} href={h} aria-current={here(h) ? "page" : undefined}><span aria-hidden>{i}</span>{l}</Link>
         ))}
-        <button aria-expanded={open} aria-haspopup="menu" aria-current={moreHere ? "true" : undefined} onClick={() => { if (open) closeMore(); else closeTopOverlayThen(() => setOpen(true)); }}><span aria-hidden>⋯</span>More</button>
+        <button aria-expanded={open} aria-haspopup="menu" aria-current={moreHere ? "true" : undefined} onClick={() => { if (open) closeMore(); else closeTopOverlayThen(() => { setOpen(true); box.current?.querySelector<HTMLButtonElement>('.tabbar button[aria-haspopup="menu"]')?.focus(); }); }}><span aria-hidden>⋯</span>More</button>
       </nav>
     </div>
   );
@@ -197,7 +197,7 @@ export function Shell({ user, children }: { user: Me; children: React.ReactNode 
             <NewTaskButton />
             <Bell />
             <div className="account-menu" ref={utility}>
-              <button className="account-trigger" aria-label="Account and utilities" aria-expanded={utilityOpen} aria-controls="account-utilities" onClick={() => { if (utilityOpen) closeUtility(); else closeTopOverlayThen(() => setUtilityAt(path)); }}><span className="av">{initials(user.name)}</span></button>
+              <button className="account-trigger" aria-label="Account and utilities" aria-expanded={utilityOpen} aria-controls="account-utilities" onClick={() => { if (utilityOpen) closeUtility(); else closeTopOverlayThen(() => { setUtilityAt(path); utility.current?.querySelector<HTMLButtonElement>(".account-trigger")?.focus(); }); }}><span className="av">{initials(user.name)}</span></button>
               {utilityOpen && <div className="account-options" id="account-utilities" aria-label="Account and utilities" onClickCapture={e => followOverlayLink(e, closeUtility, href => router.push(href))}>
                 <strong>{user.name}</strong><small>{roleLabel(user.orgRole)}</small>
                 <Link href="/profile">Profile</Link>

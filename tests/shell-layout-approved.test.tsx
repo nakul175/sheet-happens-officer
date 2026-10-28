@@ -35,3 +35,15 @@ it('reserves no Concierge column before preferences load or when hidden',async()
  state.loaded=true;state.hidden=true;await act(async()=>root.render(h(Shell,{user,children:h(Page,{dock:true,children:'Content'})})));expect(document.querySelector('.with-dock')).toBeNull();
  state.hidden=false;await act(async()=>root.render(h(Shell,{user,children:h(Page,{dock:true,children:'Content'})})));expect(document.querySelector('.with-dock')).not.toBeNull();
 });
+it('transfers focus to the incoming phone menu after the outgoing history entry is consumed',async()=>{
+ await mount();
+ const more=[...document.querySelectorAll<HTMLButtonElement>('.tabbar button')].find(b=>b.textContent?.includes('More'))!;
+ const account=document.querySelector<HTMLButtonElement>('.account-trigger')!;
+ await act(async()=>more.click());
+ await act(async()=>{account.dispatchEvent(new Event('pointerdown',{bubbles:true}));account.click();});
+ await vi.waitFor(async()=>{await act(async()=>{});expect(document.querySelector('.tabmore')).toBeNull();expect(document.querySelector('.account-options')).not.toBeNull();expect(document.activeElement).toBe(account);});
+ await act(async()=>{more.dispatchEvent(new Event('pointerdown',{bubbles:true}));more.click();});
+ await vi.waitFor(async()=>{await act(async()=>{});expect(document.querySelector('.account-options')).toBeNull();expect(document.querySelector('.tabmore')).not.toBeNull();expect(document.activeElement).toBe(more);});
+ await act(async()=>document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true})));
+ await vi.waitFor(async()=>{await act(async()=>{});expect(document.querySelector('.tabmore')).toBeNull();});
+});

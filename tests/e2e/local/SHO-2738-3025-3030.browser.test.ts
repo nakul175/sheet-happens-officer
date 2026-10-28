@@ -439,6 +439,7 @@ describe("SHO-2616 AC2: Back closes the real navigation and Move to overlays", (
       await trigger.click();
       await page.locator("#account-utilities").waitFor({ state: "visible" });
       await page.getByRole("menu", { name: "More", exact: true }).waitFor({ state: "detached" });
+      expect(await trigger.evaluate(el => document.activeElement === el)).toBe(true);
       await page.goBack();
       await page.locator("#account-utilities").waitFor({ state: "detached" });
       expect(new URL(page.url()).pathname).toBe(`/projects/${projectId}`);
@@ -448,6 +449,7 @@ describe("SHO-2616 AC2: Back closes the real navigation and Move to overlays", (
       await more.click();
       await page.getByRole("menu", { name: "More", exact: true }).waitFor({ state: "visible" });
       await page.locator("#account-utilities").waitFor({ state: "detached" });
+      expect(await more.evaluate(el => document.activeElement === el)).toBe(true);
       await page.keyboard.press("Escape");
       await page.getByRole("menu", { name: "More", exact: true }).waitFor({ state: "detached" });
       await page.goBack();
