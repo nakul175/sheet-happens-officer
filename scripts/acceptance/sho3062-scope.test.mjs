@@ -7,6 +7,8 @@ test('SHO-3062 extends the reviewed launcher and preserves canonical auth and re
  execFileSync('git',['merge-base','--is-ancestor',base,'HEAD']);
  // SHO-2909: add only the reviewed accessibility prerequisite; retain integration and protected-surface gates.
  for (const path of ['src/app/(app)/Shell.tsx', 'src/app/(app)/projects/projects.css', 'src/components/PeopleSelect.tsx']) allowed.add(path);
+ // SHO-3134: reviewed disclosure dismissal fix; preserve all other protected surfaces.
+ allowed.add('src/app/(app)/deals/DealsView.tsx');
  const files=execFileSync('git',['diff','--name-only',base,'--','src','prisma'],{encoding:'utf8'}).trim().split('\n').filter(Boolean);
  for(const file of files)assert.ok(allowed.has(file),`Unexpected runtime change: ${file}`);
  assert.equal(execFileSync('git',['diff','c2700202ed0789dab36a33dfde2a0edff57f07c0','--','scripts/acceptance/holy3-launcher-scope.test.mjs'],{encoding:'utf8'}),'');

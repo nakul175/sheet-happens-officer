@@ -129,9 +129,10 @@ function MultiFilter({ label, options, values, onChange }: { label: string; opti
   const box = useRef<HTMLDetailsElement>(null);
   const labelId = useId();
   useEffect(() => {
-    const away = (event: PointerEvent) => { if (box.current && !box.current.contains(event.target as Node)) box.current.open = false; };
-    document.addEventListener("pointerdown", away);
-    return () => document.removeEventListener("pointerdown", away);
+    const away = (event: MouseEvent) => { if (box.current && !box.current.contains(event.target as Node)) box.current.open = false; };
+    // A phone popup is in flow: dismiss after click targeting, so closing it cannot move the next control between pointer-down and pointer-up.
+    document.addEventListener("click", away);
+    return () => document.removeEventListener("click", away);
   }, []);
   return <div className="deal-multi-control"><span id={labelId} className="deal-control-label">{label}</span><details className="deal-multi" ref={box} onKeyDown={event => { if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); if (box.current) { box.current.open = false; box.current.querySelector("summary")?.focus(); } } }}>
     <summary aria-labelledby={`${labelId} ${labelId}-value`}><span id={`${labelId}-value`}>{values.length === 1 ? options.find(option => option.value === values[0])?.label ?? "1 selected" : values.length ? `${values.length} selected` : "All"}</span><span className="select-chevron" aria-hidden="true" /></summary>
