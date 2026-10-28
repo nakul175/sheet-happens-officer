@@ -37,6 +37,7 @@ enum TaskPriority {
 enum AuthTokenType {
   VERIFY
   RESET
+  FEED
 }
 
 enum ActionChannel {
@@ -87,7 +88,6 @@ model User {
   createdTasks        Task[]             @relation("TaskCreator")
   deletedTasks        Task[]             @relation("TaskDeleter")
   collaborations      TaskCollaborator[]
-  feedToken           FeedToken?
   sessions            Session[]
   authTokens          AuthToken[]
   notifications       Notification[]     @relation("NotificationRecipient")
@@ -126,7 +126,7 @@ model AuthToken {
   user      User          @relation(fields: [userId], references: [id], onDelete: Cascade)
   type      AuthTokenType
   tokenHash String        @unique
-  expiresAt DateTime
+  expiresAt DateTime?
   usedAt    DateTime?
   createdAt DateTime      @default(now())
 
@@ -609,13 +609,4 @@ model SavedView {
 
   @@unique([userId, projectId, name])
   @@index([userId, projectId, position])
-}
-
-// A non-expiring, revocable calendar subscription. Only the SHA-256 digest is stored.
-model FeedToken {
-  userId String @id
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
-  type String @default("FEED")
-  tokenHash String @unique
-  createdAt DateTime @default(now())
 }

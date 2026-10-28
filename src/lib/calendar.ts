@@ -9,15 +9,15 @@ export async function issueFeed(user: Actor) {
   const secret = randomBytes(32).toString("hex");
   // One row per person makes concurrent resets atomic: exactly one secret survives.
   await db.$transaction(async (tx) => {
-    await tx.feedToken.upsert({ where: { userId: user.id }, create: { userId: user.id, tokenHash: feedHash(secret) }, update: { tokenHash: feedHash(secret), createdAt: new Date() } });
+    await tx.authToken.upsert({ where: { id: `feed:${user.id}` }, create: { id: `feed:${user.id}`, userId: user.id, type: "FEED", expiresAt: null, tokenHash: feedHash(secret) }, update: { tokenHash: feedHash(secret), usedAt: null, expiresAt: null, createdAt: new Date() } });
     await tx.auditLog.create({ data: { event: "FEED_TOKEN_RESET", actorId: user.id, channel: "SCREEN" } });
   });
   return secret;
 }
 export async function feedUser(secret: string) {
   if (!/^[a-f0-9]{64}$/.test(secret)) return null;
-  const row = await db.feedToken.findUnique({ where: { tokenHash: feedHash(secret) }, include: { user: true } });
-  return row && row.type === "FEED" && !row.user.deactivatedAt && row.user.emailVerifiedAt && !row.user.tempPasswordAt ? row.user : null;
+  const row = await db.authToken.findUnique({ where: { tokenHash: feedHash(secret) }, include: { user: true } });
+  return row && row.type === "FEED" && !row.usedAt && row.expiresAt === null && !row.user.deactivatedAt && row.user.emailVerifiedAt && !row.user.tempPasswordAt ? row.user : null;
 }
 export async function calendarEvents(user: Actor, from: Date, to: Date): Promise<CalendarEvent[]> {
   const projectWhere = { archivedAt: null, ...crmProjectWhere(user), ...(isAdmin(user) ? {} : { members: { some: { userId: user.id } } }) };
