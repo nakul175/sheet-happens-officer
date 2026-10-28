@@ -1,8 +1,7 @@
 "use client";
 import { useEffect, useMemo, useState } from "react";
 import { HolySheetEditor, type HostSessionProvider } from "@aplyd/holy-sheet-editor/hosted";
-import { holySheetDocumentId } from "@/lib/holy-sheet-url";
-const origin = "https://staging.holysheet.aplyd.org";
+import { holySheetDocumentId, isApprovedHolySheetOrigin } from "@/lib/holy-sheet-url";
 
 export function HolySheetLauncher({ taskId }: { taskId: string }) {
   const [visible, setVisible] = useState(false), [error, setError] = useState("");
@@ -12,7 +11,7 @@ export function HolySheetLauncher({ taskId }: { taskId: string }) {
     if (response.status === 401) return {status: "signin"};
     if (!response.ok) return {status: "unavailable"};
     const data = await response.json();
-    if (data.origin !== origin || typeof data.subject !== "string" || !data.subject) return {status: "unavailable"};
+    if (!isApprovedHolySheetOrigin(data.origin) || typeof data.subject !== "string" || !data.subject) return {status: "unavailable"};
     return {status: "ready", origin: data.origin, subject: data.subject};
   }}), [taskId]);
   useEffect(() => {
@@ -29,8 +28,11 @@ export function HolySheetLauncher({ taskId }: { taskId: string }) {
     <h3>Holy Sheet</h3>
     <p className="sub">Open a document here. Its Holy Sheet permissions still apply.</p>
     <form onSubmit={event => {
-      event.preventDefault();const id = holySheetDocumentId(url.trim(), origin);
-      if (!id) {setError("Enter a page URL from Holy Sheet staging.");return;}
+      event.preventDefault();
+      let candidateOrigin = "";
+      try { candidateOrigin = new URL(url.trim()).origin; } catch { /* handled below */ }
+      const id = isApprovedHolySheetOrigin(candidateOrigin) ? holySheetDocumentId(url.trim(), candidateOrigin) : null;
+      if (!id) {setError("Enter a page URL from the approved Holy Sheet service.");return;}
       setError("");setPageId(id);
     }}>
       <label>Document URL <input type="url" required value={url} onChange={e => setUrl(e.target.value)} /></label>

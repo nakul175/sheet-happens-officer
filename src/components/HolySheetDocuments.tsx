@@ -1,6 +1,7 @@
 'use client';
 import { HolySheetEditor, type HostSessionProvider } from '@aplyd/holy-sheet-editor/hosted';
 import { useEffect, useRef, useState, useMemo } from 'react';
+import { isApprovedHolySheetOrigin } from '@/lib/holy-sheet-url';
 type Context = {
     hostOrigin?:string;
     origin: string;
@@ -32,7 +33,7 @@ export function HolySheetDocuments({ kind, id }: {
             if (!response.ok)
                 return { status: 'unavailable' };
             const data = await response.json();
-            if (data.origin !== 'https://staging.holysheet.aplyd.org' || data.subject !== context?.subject)
+            if (!isApprovedHolySheetOrigin(data.origin) || data.origin !== context?.origin || data.subject !== context?.subject)
                 return { status: 'signin' };
             return { status: 'ready', origin: data.origin, subject: data.subject };
         } }), [endpoint, context?.subject]);
@@ -57,7 +58,7 @@ export function HolySheetDocuments({ kind, id }: {
                 const data: Context = await response.json();
                 if (!active.current || attempt !== checks.current)
                     return;
-                if (data.origin !== 'https://staging.holysheet.aplyd.org' || !data.subject || !Array.isArray(data.links))
+                if (!isApprovedHolySheetOrigin(data.origin) || !data.subject || !Array.isArray(data.links))
                     throw Error('Holy Sheet access could not be checked.');
                 if (verified.current && verified.current.subject !== data.subject)
                     lock();

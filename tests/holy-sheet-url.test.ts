@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { holySheetDocumentId, holySheetOrigin } from "../src/lib/holy-sheet-url";
 const origin = "https://staging.holysheet.aplyd.org";
+const productionOrigin = "https://holysheet.aplyd.org";
 const id = "12345678-1234-1234-1234-123456789abc";
 describe("Holy Sheet launcher URL boundary", () => {
   it("requires explicit qualification flag and approved origin", () => {
     expect(holySheetOrigin({})).toBeNull();
     expect(holySheetOrigin({FF_HOLY_SHEET: "1", HOLY_SHEET_ORIGIN: origin})).toBe(origin);
+    expect(holySheetOrigin({FF_HOLY_SHEET: "1", HOLY_SHEET_ORIGIN: productionOrigin})).toBe(productionOrigin);
     expect(holySheetOrigin({FF_HOLY_SHEET: "1", HOLY_SHEET_ORIGIN: "https://evil.test"})).toBeNull();
   });
   it("accepts only a page UUID at the approved origin", () => {
