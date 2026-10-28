@@ -21,6 +21,14 @@ export default defineConfig({
     env: { SHO_E2E_START_BASE_URL: startBaseUrl },
     exclude: [
       ...configDefaults.exclude,
+      "tests/e2e/stories/APL-2506.spec.ts", // SHO-2912: Playwright story
+      "tests/e2e/stories/APL-2507.spec.ts", // SHO-2912: Playwright story
+      "tests/e2e/stories/APL-2561.spec.ts", // SHO-2912: Playwright story
+      "tests/e2e/stories/APL-2572.spec.ts", // SHO-2912: Playwright story
+      "tests/e2e/stories/APL-2575.spec.ts", // SHO-2912: Playwright story
+      "tests/e2e/stories/APL-2643.spec.ts", // SHO-2912: Playwright story
+      "tests/e2e/stories/APL-2647.spec.ts", // SHO-2912: Playwright story
+
       "tests/e2e/stories/APL-2466.spec.ts", // SHO-2906: Playwright story
       "tests/e2e/stories/APL-2480.spec.ts", // SHO-2906: Playwright story
       "tests/e2e/stories/APL-2482.spec.ts", // SHO-2906: Playwright story
