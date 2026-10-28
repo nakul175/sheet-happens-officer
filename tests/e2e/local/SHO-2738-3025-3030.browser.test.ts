@@ -439,7 +439,7 @@ describe("SHO-2616 AC2: Back closes the real navigation and Move to overlays", (
     try {
       await page.goto("/team", { waitUntil: "load", timeout: 120000 });
       await page.goto(`/projects/${projectId}`, { waitUntil: "load", timeout: 120000 });
-      const trigger = page.getByRole("button", { name: /^Account and utilities \([^)]+\)$/ });
+      const trigger = page.getByRole("button", { name: /^Account and utilities, \S+$/ });
       const more = page.getByRole("button", { name: "More", exact: true });
       await more.click();
       await page.getByRole("menu", { name: "More", exact: true }).waitFor({ state: "visible" });

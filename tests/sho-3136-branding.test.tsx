@@ -26,7 +26,7 @@ describe("SHO-3136 approved branding", () => {
   it("keeps one meaningful Home name while decorative brand content stays silent", () => {
     const shell = read("src/app/(app)/Shell.tsx");
     expect(shell.match(/aria-label="Sheet Happens Officer home"/g)).toHaveLength(1);
-    expect(shell).toContain('aria-label="Sheet Happens Officer home (SHO)"');
+    expect(shell).toContain('aria-label="SHO, Sheet Happens Officer home"');
     expect(shell).toContain('<img src="/logo-icon-reversed.svg" alt="" />');
     expect(shell).toContain('aria-hidden="true">Sheet Happens Officer');
   });
