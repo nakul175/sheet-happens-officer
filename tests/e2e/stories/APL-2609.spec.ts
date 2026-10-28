@@ -151,7 +151,7 @@ async function pageAs(browser: Browser, who: Who): Promise<Page> {
 async function myTasksScreen(browser: Browser, who: Who, waitFor: string, project: string) {
   const page = await pageAs(browser, who);
   try {
-    await page.goto(`${BASE}/`, { waitUntil: "domcontentloaded" });
+    await page.goto(`${BASE}/my-tasks`, { waitUntil: "domcontentloaded" });
     const row = (section: string) => page.getByRole("region", { name: section, exact: true }).getByRole("link", { name: waitFor, exact: true });
     await expect(row("Next 7 days")).toBeVisible({ timeout: 30_000 });
     const grouping = (await page.getByRole("group", { name: "Group tasks" }).count()) > 0;
@@ -219,8 +219,11 @@ async function taskScreen(browser: Browser, who: Who) {
     const status = detail.status();
     await page.goto(`${BASE}/tasks/${seed.dealTaskId}`, { waitUntil: "domcontentloaded" });
     if (status === 200) {
-      const stay = await page.evaluate(() => (window as Window & { __SHO_RETURN_TO?: number }).__SHO_RETURN_TO === 1);
-      await expect(page).toHaveURL(new RegExp(stay ? `/tasks/${seed.dealTaskId}$` : `/projects/${seed.dealId}\\?task=${seed.dealTaskId}$`));
+      // The owned app receives this configured switch. Do not sample a client bridge before hydration.
+      const stay = ["1", "on"].includes((process.env.SIGNIN_RETURN_TO ?? "").trim().toLowerCase());
+      const expectedPath = stay ? `/tasks/${seed.dealTaskId}` : `/projects/${seed.dealId}`;
+      await expect(page).toHaveURL(url => url.origin === new URL(BASE).origin && url.pathname === expectedPath &&
+        url.hash === "" && url.search === (stay ? "" : `?task=${seed.dealTaskId}`));
       await expect(page.getByLabel("Title", { exact: true })).toHaveValue(DEAL_TASK);
     }
     else await expect(page.getByRole("heading", { name: "This task isn't available", exact: true })).toBeVisible({ timeout: 30_000 });

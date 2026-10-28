@@ -151,6 +151,14 @@ jobs:
           tests/e2e/stories/APL-2482.spec.ts tests/e2e/stories/APL-2484.spec.ts tests/e2e/stories/APL-2590.spec.ts
           --grep-invert " AC(14|15|16) "
           | tee validation-scoped-stories.log
+      - name: SHO-2882 retained CRM story executes all four owned-outbox cases
+        env:
+          CRM_VISIBLE: all
+          SHO_QA_APP_ROOT: ${{ github.workspace }}
+          SHO_QA_RELEASE: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          npx playwright test tests/e2e/stories/APL-2609.spec.ts --reporter=json > validation-2882-browser.json
+          node -e 'const r=require("./validation-2882-browser.json"),s=r.stats;if(!s||s.expected!==4||s.unexpected||s.skipped||s.flaky||(r.errors??[]).length)throw Error("APL-2609 requires four passed, zero skipped/failed");console.log("SHO-2882: four local outbox cases passed")' | tee validation-2882-browser.log
       - name: SHO-2900 Trash aging and role browser cases at desktop and phone sizes
         run: |
           npx playwright test tests/e2e/stories/APL-2720.spec.ts --reporter=json > validation-2900-browser.json
@@ -191,6 +199,7 @@ jobs:
           path: |
             scoped4-live-gate.json
             validation-*.log
+            validation-2882-browser.json
             test-results/sho-2903-m1/
             validation-2900-browser.json
             validation-2759-browser.json
