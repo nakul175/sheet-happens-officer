@@ -54,6 +54,13 @@ export default defineConfig({
       "tests/e2e/stories/APL-2490.spec.ts",
       "tests/e2e/stories/APL-2489.spec.ts",
       ...configDefaults.exclude,
+      "tests/e2e/stories/APL-2470.spec.ts", // SHO-2913: Playwright story
+      "tests/e2e/stories/APL-2502.spec.ts", // SHO-2913: Playwright story
+      "tests/e2e/stories/APL-2504.spec.ts", // SHO-2913: Playwright story
+      "tests/e2e/stories/APL-2505.spec.ts", // SHO-2913: Playwright story
+      "tests/e2e/stories/APL-2521.spec.ts", // SHO-2913: Playwright story
+      "tests/e2e/stories/APL-2640.spec.ts", // SHO-2913: Playwright story
+      "tests/e2e/stories/APL-2649.spec.ts", // SHO-2913: Playwright story
       "tests/e2e/stories/APL-2506.spec.ts", // SHO-2912: Playwright story
       "tests/e2e/stories/APL-2507.spec.ts", // SHO-2912: Playwright story
       "tests/e2e/stories/APL-2561.spec.ts", // SHO-2912: Playwright story
@@ -93,6 +100,8 @@ export default defineConfig({
       "tests/e2e/stories/APL-2624.spec.ts",
       "tests/e2e/stories/APL-2721.spec.ts",
       "tests/e2e/stories/APL-2737.spec.ts",
+      "tests/e2e/stories/APL-2646.spec.ts", // Playwright; actual staging/Pam acceptance remains required.
+      "tests/e2e/stories/APL-2716.spec.ts", // Playwright; collected by staging-e2e, not Vitest.
     ],
   },
 });
