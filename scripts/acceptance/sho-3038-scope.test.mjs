@@ -342,6 +342,9 @@ const allowed = new Set([
   "tests/bid-stage-migration-intake.test.ts",
   "tests/deal-lifecycle-route.test.ts",
   "tests/deal-lifecycle-ui.test.tsx",
+  // SHO-3134: native pointer/disclosure regression on an isolated app.
+  "tests/deal-filter-browser.story.ts",
+  "vitest.deal-filters.config.mts",
   "tests/deal-date-filter.test.ts",
   "tests/review-commercial-counts.test.tsx",
   "tests/usage-month.test.tsx",

@@ -1,7 +1,7 @@
 name: Approved Projects UI release validation
 on:
   pull_request:
-    branches: [integration/sho-next50-20261027, release/scoped4-20261025, change/sho-3077-projects, change/sho-3084-settings, change/sho-3087-dashboard, change/sho-3090-accounts, change/sho-3093-batch5, change/sho-3098-forms, change/sho-3103-signin, change/sho-3104-auth]
+    branches: [codex/sho-3134-live-base, integration/sho-next50-20261027, release/scoped4-20261025, change/sho-3077-projects, change/sho-3084-settings, change/sho-3087-dashboard, change/sho-3090-accounts, change/sho-3093-batch5, change/sho-3098-forms, change/sho-3103-signin, change/sho-3104-auth]
   workflow_dispatch:
 permissions:
   contents: read
@@ -44,11 +44,12 @@ jobs:
       RETURN_PATH_LOG: "1"
       SERVER_LOG: ${{ github.workspace }}/validation-server.log
       PW_CHROMIUM: /usr/bin/google-chrome
-      RELEASE: ${{ github.sha }}
+      RELEASE: ${{ github.event.pull_request.head.sha || github.sha }}
       NEXT_TELEMETRY_DISABLED: "1"
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
@@ -123,6 +124,8 @@ jobs:
           npx playwright test tests/e2e/stories/APL-2539.spec.ts tests/e2e/stories/APL-2540.spec.ts tests/e2e/stories/SHO-3040.spec.ts
           --grep 'APL-2539 > AC1:|APL-2540 > AC1:|APL-2540 > AC4:|SHO-3040 >'
           | tee validation-locators.log
+      - name: SHO-3134 multi-select filter disclosure regression
+        run: npx vitest run -c vitest.deal-filters.config.mts
       - name: Linux built-entry refusal and drain receipt
         run: node scripts/acceptance/release12-drain-receipt.mjs release12-drain.json | tee validation-drain.log
       - name: Seed comments fixture in isolated CI database only

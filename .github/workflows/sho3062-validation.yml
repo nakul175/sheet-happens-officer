@@ -1,7 +1,7 @@
 name: SHO-3062 current-release integration validation
 on:
   pull_request:
-    branches: [release/scoped4-20261025]
+    branches: [release/scoped4-20261025, codex/sho-3134-live-base]
   workflow_dispatch:
     inputs:
       phase:
@@ -53,11 +53,12 @@ jobs:
       RETURN_PATH_LOG: "1"
       SERVER_LOG: ${{ github.workspace }}/validation-server.log
       PW_CHROMIUM: /usr/bin/google-chrome
-      RELEASE: ${{ github.sha }}
+      RELEASE: ${{ github.event.pull_request.head.sha || github.sha }}
       NEXT_TELEMETRY_DISABLED: "1"
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
