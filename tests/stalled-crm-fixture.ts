@@ -30,6 +30,11 @@ export type StalledWorld = {
 
 const PEOPLE = (world: StalledWorld) => [world.owner, world.follower, world.orgAdmin, world.superLead];
 
+/** The three deals owned by this fixture. All scoped assertions and leak checks derive from here. */
+export const worldDeals = (world: StalledWorld) => [world.owned, world.adminDeal, world.rootDeal] as const;
+
+export const worldDealIds = (world: StalledWorld) => worldDeals(world).map((deal) => deal.id);
+
 export function stalledTag() {
   return `${Date.now().toString(36)}-${process.pid}`;
 }
@@ -111,9 +116,8 @@ export async function bell(who: Account) {
 }
 
 export function dealNeedles(world: StalledWorld) {
-  const deals = [world.owned, world.adminDeal, world.rootDeal];
   const needles: string[] = [];
-  for (const deal of deals) {
+  for (const deal of worldDeals(world)) {
     needles.push(deal.name, deal.title, deal.id, `/projects/${deal.id}`);
   }
   return needles;
