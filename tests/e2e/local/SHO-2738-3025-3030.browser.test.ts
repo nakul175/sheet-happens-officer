@@ -109,6 +109,24 @@ async function traceTaskHistory(page: Page) {
     const w = window as unknown as { __taskHistoryTrace: unknown[] };
     w.__taskHistoryTrace = [];
     const own = (state: Record<string, unknown> | null) => ({ task: state?.__shoTaskSheet, base: state?.__shoTaskBase });
+    const add = window.addEventListener.bind(window), remove = window.removeEventListener.bind(window);
+    const wrappers = new Map<EventListenerOrEventListenerObject, EventListener>();
+    const target = window as unknown as { addEventListener: (type: string, listener: EventListenerOrEventListenerObject, options?: boolean | AddEventListenerOptions) => void; removeEventListener: (type: string, listener: EventListenerOrEventListenerObject, options?: boolean | EventListenerOptions) => void };
+    target.addEventListener = (type, listener, options) => {
+      if (type === "popstate" && options === true) {
+        w.__taskHistoryTrace.push({ method: "attach-capture", url: location.href });
+        const wrapped: EventListener = event => {
+          w.__taskHistoryTrace.push({ method: "capture-callback", url: location.href, own: own((event as PopStateEvent).state) });
+          try { if (typeof listener === "function") listener.call(window, event); else listener.handleEvent(event); }
+          finally { w.__taskHistoryTrace.push({ method: "capture-finished", stopped: event.cancelBubble }); }
+        };
+        wrappers.set(listener, wrapped); add(type, wrapped, options);
+      } else add(type, listener, options);
+    };
+    target.removeEventListener = (type, listener, options) => {
+      if (type === "popstate" && options === true) w.__taskHistoryTrace.push({ method: "detach-capture", url: location.href });
+      remove(type, wrappers.get(listener) ?? listener, options);
+    };
     for (const method of ["pushState", "replaceState"] as const) {
       const original = History.prototype[method];
       History.prototype[method] = function (data, unused, url) {
