@@ -6,6 +6,7 @@ import { readFileSync } from "node:fs";
 
 const production = "ee59582dffcbd8cc3067e689b2bb73cf63781cb7";
 const allowed = new Set([
+  "tests/e2e/stories/APL-2523.spec.ts",
   // SHO-3133–3135: approved clean controls, identity disambiguation and board sorting.
   "src/app/(app)/select-controls.css",
   "src/components/PeopleSelect.tsx",
