@@ -1,6 +1,10 @@
+import { deleteFixtureTask } from "../helpers/migration-2731";
+import { archiveProject, postTaskCurrent } from "../helpers/migration-2731";
+import { patchCurrent } from "../helpers/jim-http";
+import { test } from "./qa";
 // SHO-US-14.8 Inline editing in lists (Linear APL-2567).
 // Choosing a different assignee needs a second worker in the project, so most checks use the Member account.
-import { test, expect, zz, type Json } from "../support";
+import { expect, zz, type Json } from "../support";
 
 type Who = { api: import("../support").Api; user: Json; page: import("@playwright/test").Page };
 type Later = (f: () => Promise<unknown>) => void;
@@ -9,12 +13,12 @@ async function setup(admin: Who, member: Who, later: Later, label: string, role:
   const r = await admin.api.post("/api/projects", { name: zz(label), leaderId: admin.user.id });
   expect(r.status).toBe(201);
   const pid = r.json.project.id as string;
-  later(() => admin.api.post(`/api/projects/${pid}/archive`));
+  later(() => archiveProject(admin.api, pid, admin.user.id));
   expect((await admin.api.post(`/api/projects/${pid}/members`, { userId: member.user.id, role })).status).toBe(201);
   const mk = async (title: string, extra: Record<string, unknown> = {}) => {
-    const t = await admin.api.post(`/api/projects/${pid}/tasks`, { title, assigneeId: admin.user.id, ...extra });
+    const t = await admin.api.post(`/api/projects/${pid}/tasks`, { dueDate: new Date(Date.now() + 3 * 86400_000).toISOString().slice(0, 10), title, assigneeId: admin.user.id, ...extra });
     expect(t.status).toBe(201);
-    later(() => admin.api.del(`/api/tasks/${t.json.task.id}`));
+    later(() => deleteFixtureTask(admin, t.json.task.id));
     return t.json.task.id as string;
   };
   return { pid, mk };
@@ -75,7 +79,7 @@ test("AC3 (awaiting approval): cells are read-only for an Editor who is not the 
   await page.goto(`/projects/${s.pid}`);
   await expect(row(page, title).locator(".ic-cell").first()).toBeVisible();
   // After the Member sends it for approval it is held by the Leader, and the Member's cells turn read-only.
-  expect((await member.api.post(`/api/tasks/${tid}/send-for-approval`)).status).toBe(200);
+  expect((await postTaskCurrent(member, tid, "send-for-approval")).status).toBe(200);
   await page.goto(`/projects/${s.pid}`);
   await expect(row(page, title)).toBeVisible();
   await expect(row(page, title).locator(".ic-cell")).toHaveCount(0);
@@ -92,7 +96,7 @@ test("AC4: an edit to a task that changed elsewhere shows the stale-edit message
   await page.goto(`/projects/${s.pid}`);
   await expect(row(page, title)).toBeVisible();
   // Somebody else (here: the API as the same account) changes the task after the page loaded.
-  expect((await admin.api.patch(`/api/tasks/${tid}`, { priority: "LOW" })).status).toBe(200);
+  expect((await patchCurrent(admin, tid, { priority: "LOW" })).status).toBe(200);
   await row(page, title).getByRole("button", { name: /^Priority .*Change$/ }).click();
   await page.getByRole("dialog", { name: "Choose priority" }).getByRole("button", { name: "Urgent" }).click();
   const note = page.getByRole("alert").filter({ hasText: "while you were editing" });

@@ -1,5 +1,8 @@
+import { deleteFixtureTask } from "../helpers/migration-2731";
+import { archiveProject, postTaskCurrent } from "../helpers/migration-2731";
+import { test } from "./qa";
 // SHO-US-11.4 Link tasks to an organisation or contact  (Linear APL-2535)
-import { test, expect, zz, hasMember, type Json, type Who } from "../support";
+import { expect, zz, hasMember, type Json, type Who } from "../support";
 
 let n = 0;
 async function setup(admin: Who, later: (f: () => Promise<unknown>) => void) {
@@ -10,18 +13,18 @@ async function setup(admin: Who, later: (f: () => Promise<unknown>) => void) {
   const pr = await admin.api.post("/api/projects", { name: zz("proj"), leaderId: admin.user.id });
   expect(pr.status).toBe(201);
   const projectId = pr.json.project.id as string;
-  later(() => admin.api.post(`/api/projects/${projectId}/archive`));
-  const t = await admin.api.post(`/api/projects/${projectId}/tasks`, { title: zz("linked task") });
+  later(() => archiveProject(admin.api, projectId, admin.user.id));
+  const t = await admin.api.post(`/api/projects/${projectId}/tasks`, { dueDate: new Date(Date.now() + 3 * 86400_000).toISOString().slice(0, 10), title: zz("linked task") });
   expect(t.status).toBe(201);
   const taskId = t.json.task.id as string;
-  later(() => admin.api.del(`/api/tasks/${taskId}`));
+  later(() => deleteFixtureTask(admin, taskId));
   return { org, contact, projectId, taskId };
 }
 
 test("AC1: an Editor links an organisation or a contact and it shows on the task", async ({ admin, later }) => {
   const s = await setup(admin, later);
-  expect((await admin.api.post(`/api/tasks/${s.taskId}/links`, { organisationId: s.org })).status).toBe(201);
-  expect((await admin.api.post(`/api/tasks/${s.taskId}/links`, { contactId: s.contact })).status).toBe(201);
+  expect((await postTaskCurrent(admin, s.taskId, "links", { organisationId: s.org })).status).toBe(201);
+  expect((await postTaskCurrent(admin, s.taskId, "links", { contactId: s.contact })).status).toBe(201);
   const shown = (await admin.api.get(`/api/tasks/${s.taskId}`)).json.task.links as Json[];
   expect(shown).toHaveLength(2);
   // On screen: the task overlay has a Links section.
@@ -31,14 +34,14 @@ test("AC1: an Editor links an organisation or a contact and it shows on the task
 
 test("AC2: 'Tasks linked here' on the organisation lists the linked task, including via its contacts", async ({ admin, later }) => {
   const s = await setup(admin, later);
-  expect((await admin.api.post(`/api/tasks/${s.taskId}/links`, { contactId: s.contact })).status).toBe(201);
+  expect((await postTaskCurrent(admin, s.taskId, "links", { contactId: s.contact })).status).toBe(201);
   await admin.page.goto(`/accounts/${s.org}`);
   await expect(admin.page.getByText(zz("linked task")).first()).toBeVisible();
 });
 
 test("AC3: removing a link leaves the task unchanged", async ({ admin, later }) => {
   const s = await setup(admin, later);
-  const l = await admin.api.post(`/api/tasks/${s.taskId}/links`, { organisationId: s.org });
+  const l = await postTaskCurrent(admin, s.taskId, "links", { organisationId: s.org });
   const linkId = l.json.link.id as string;
   expect((await admin.api.del(`/api/tasks/${s.taskId}/links/${linkId}`)).status).toBeLessThan(300);
   const t = (await admin.api.get(`/api/tasks/${s.taskId}`)).json.task;
@@ -48,14 +51,14 @@ test("AC3: removing a link leaves the task unchanged", async ({ admin, later }) 
 
 test("AC4: a task in Trash or in an archived project is not listed on the organisation", async ({ admin, later }) => {
   const s = await setup(admin, later);
-  await admin.api.post(`/api/tasks/${s.taskId}/links`, { organisationId: s.org });
+  await postTaskCurrent(admin, s.taskId, "links", { organisationId: s.org });
   const listed = async () => JSON.stringify((await admin.api.get(`/api/orgs/${s.org}`)).json);
   expect(await listed()).toContain(zz("linked task"));
   expect((await admin.api.del(`/api/tasks/${s.taskId}`)).status).toBeLessThan(300);
   expect(await listed()).not.toContain(zz("linked task"));
   // A task in an archived project is left out too.
-  const t2 = await admin.api.post(`/api/projects/${s.projectId}/tasks`, { title: zz("second linked task") });
-  await admin.api.post(`/api/tasks/${t2.json.task.id}/links`, { organisationId: s.org });
+  const t2 = await admin.api.post(`/api/projects/${s.projectId}/tasks`, { dueDate: new Date(Date.now() + 3 * 86400_000).toISOString().slice(0, 10), title: zz("second linked task") });
+  await postTaskCurrent(admin, t2.json.task.id, "links", { organisationId: s.org });
   expect(await listed()).toContain(zz("second linked task"));
   expect((await admin.api.post(`/api/projects/${s.projectId}/archive`)).status).toBeLessThan(300);
   expect(await listed()).not.toContain(zz("second linked task"));
@@ -66,7 +69,7 @@ test("AC5: the server refuses a Viewer's link change", async ({ admin, member, l
   const s = await setup(admin, later);
   const add = await admin.api.post(`/api/projects/${s.projectId}/members`, { userId: member.user.id, role: "VIEWER" });
   expect(add.status).toBe(201);
-  const r = await member.api.post(`/api/tasks/${s.taskId}/links`, { organisationId: s.org });
+  const r = await postTaskCurrent(member, s.taskId, "links", { organisationId: s.org });
   expect(r.status).toBe(403);
 });
 

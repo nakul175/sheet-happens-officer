@@ -1,20 +1,22 @@
+import { archiveProject, deactivate, postTaskCurrent, removeMember } from "../helpers/migration-2731";
+import { test } from "./qa";
 // APL-2503 · SHO-US-6.2 Restore from Trash
 // Acceptance criteria: AC1 restore with subtasks to the old Section; AC2 parent also in Trash asks to Restore both;
 // AC3 deactivated assignee falls back to the Leader; AC4 Editor and Viewer see the list but cannot restore; AC5 list columns.
 // Data: every project and task is named "ZZ-TEST ..."; the one person AC3 creates is named "ZZ-TEST ..." with an address at
 // example.invalid (no real inbox) and is deactivated afterwards. Projects are archived afterwards.
-import { test, expect, zz, RUN, type Who } from "../support";
+import { expect, zz, RUN, type Who } from "../support";
 
 async function proj(admin: Who, label: string, later: (f: () => Promise<unknown>) => void) {
   const r = await admin.api.post("/api/projects", { name: zz(label), leaderId: admin.user.id });
   expect(r.status, JSON.stringify(r.json)).toBe(201);
   const id = r.json.project.id as string;
-  later(() => admin.api.post(`/api/projects/${id}/archive`));
+  later(() => archiveProject(admin.api, id, admin.user.id));
   const s = (await admin.api.get(`/api/projects/${id}`)).json.project.sections as { id: string; isDone: boolean }[];
   return { id, todo: s[0].id, doing: s[1].id };
 }
 const mk = async (admin: Who, p: string, title: string, extra: Record<string, unknown> = {}) => {
-  const r = await admin.api.post(`/api/projects/${p}/tasks`, { title, ...extra });
+  const r = await admin.api.post(`/api/projects/${p}/tasks`, { dueDate: new Date(Date.now() + 3 * 86400_000).toISOString().slice(0, 10), title, ...extra });
   expect(r.status, JSON.stringify(r.json)).toBe(201);
   return r.json.task.id as string;
 };
@@ -26,7 +28,7 @@ test("AC1: restoring returns the task with its subtasks to its old Section and o
   const last = await mk(admin, p.id, zz("last"), { sectionId: p.doing, dueDate: "2030-03-01" });
   const sub = await mk(admin, p.id, zz("middle child"), { parentId: t });
   expect((await admin.api.del(`/api/tasks/${t}`)).status).toBe(204);
-  expect((await admin.api.post(`/api/tasks/${t}/restore`)).status).toBe(200);
+  expect((await postTaskCurrent(admin, t, "restore")).status).toBe(200);
   const sec = (await admin.api.get(`/api/projects/${p.id}/tasks?sectionId=${p.doing}`)).json.sections[0].tasks.map((x: { id: string }) => x.id);
   expect(sec).toEqual([first, t, last]);
   expect((await admin.api.get(`/api/tasks/${sub}`)).status).toBe(200);
@@ -54,13 +56,13 @@ test("AC3: when the assignee has been deactivated, the restored task goes to the
   expect(add.status, JSON.stringify(add.json)).toBe(201);
   const id = (add.json.person?.id ?? add.json.user?.id ?? add.json.id) as string;
   expect(id).toBeTruthy();
-  later(() => admin.api.post(`/api/team/${id}/deactivate`, { reassign: "leaders" }));
+  later(() => deactivate(admin.api, id));
   expect((await admin.api.post(`/api/projects/${p.id}/members`, { userId: id, role: "EDITOR" })).status).toBe(201);
   const t = await mk(admin, p.id, zz("orphan"), { assigneeId: id });
   const sub = await mk(admin, p.id, zz("orphan child"), { parentId: t, assigneeId: id });
   expect((await admin.api.del(`/api/tasks/${t}`)).status).toBe(204);
   expect((await admin.api.post(`/api/team/${id}/deactivate`, { reassign: "leaders" })).status).toBe(200);
-  expect((await admin.api.post(`/api/tasks/${t}/restore`)).status).toBe(200);
+  expect((await postTaskCurrent(admin, t, "restore")).status).toBe(200);
   expect((await admin.api.get(`/api/tasks/${t}`)).json.task.assignee.id).toBe(admin.user.id);
   expect((await admin.api.get(`/api/tasks/${sub}`)).json.task.assignee.id).toBe(admin.user.id);
 });
@@ -68,7 +70,7 @@ test("AC3: when the assignee has been deactivated, the restored task goes to the
 test("AC4: an Editor and a Viewer can see the Trash list but Restore is refused", async ({ admin, member, later }) => {
   const p = await proj(admin, "restore-roles", later);
   expect((await admin.api.post(`/api/projects/${p.id}/members`, { userId: member.user.id, role: "EDITOR" })).status).toBe(201);
-  later(() => admin.api.del(`/api/projects/${p.id}/members/${member.user.id}?handoverTo=${admin.user.id}`));
+  later(() => removeMember(admin, p.id, member.user.id));
   const t = await mk(admin, p.id, zz("seen not restored"));
   expect((await admin.api.del(`/api/tasks/${t}`)).status).toBe(204);
   for (const role of ["EDITOR", "VIEWER"]) {
@@ -76,7 +78,7 @@ test("AC4: an Editor and a Viewer can see the Trash list but Restore is refused"
     await member.page.goto(`/projects/${p.id}/trash`);
     await expect(member.page.getByRole("cell", { name: zz("seen not restored") })).toBeVisible();
     await expect(member.page.getByRole("button", { name: "Restore" })).toHaveCount(0);
-    expect((await member.api.post(`/api/tasks/${t}/restore`)).status, role).toBe(403);
+    expect((await postTaskCurrent(member, t, "restore")).status, role).toBe(403);
   }
 });
 

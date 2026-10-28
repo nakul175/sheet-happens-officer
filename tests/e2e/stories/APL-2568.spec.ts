@@ -1,6 +1,8 @@
+import { archiveProject } from "../helpers/migration-2731";
+import { test } from "./qa";
 // SHO-US-14.9 Filters, sort and group on lists (APL-2568).
 import { readFileSync } from "node:fs";
-import { test, expect, zz, type Api, type Json } from "../support";
+import { expect, zz, type Api, type Json } from "../support";
 
 const day = (n: number) => new Date(Date.now() + 5.5 * 3600_000 + n * 86400_000).toISOString().slice(0, 10);
 
@@ -8,9 +10,9 @@ async function seed(admin: { api: Api; user: Json }, later: (f: () => Promise<un
   const r = await admin.api.post("/api/projects", { name: zz("filters"), leaderId: admin.user.id });
   expect(r.status).toBe(201);
   const id = r.json.project.id as string;
-  later(() => admin.api.post(`/api/projects/${id}/archive`));
+  later(() => archiveProject(admin.api, id, admin.user.id));
   const mk = async (title: string, dueDate: string | null, extra: object = {}) => {
-    const t = await admin.api.post(`/api/projects/${id}/tasks`, { title, ...(dueDate ? { dueDate } : {}), ...extra });
+    const t = await admin.api.post(`/api/projects/${id}/tasks`, { dueDate: new Date(Date.now() + 3 * 86400_000).toISOString().slice(0, 10), title, ...(dueDate ? { dueDate } : {}), ...extra });
     expect(t.status).toBe(201);
     return t.json.task.id as string;
   };

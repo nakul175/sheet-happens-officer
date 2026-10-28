@@ -2,8 +2,8 @@
 // The emailed password is only ever in the person's inbox, so what the email says and what the person sees at first sign-in are manual.
 // Resend sign-in details is exercised on throw-away "ZZ-TEST" people at an .invalid address.
 import { readFileSync } from "node:fs";
-import { test, expect, RUN, type Json } from "../support";
-import { alias, BASE_URL, sinkText } from "./qa";
+import { expect, RUN, type Json } from "../support";
+import { test, alias, BASE_URL, sinkText } from "./qa";
 import { signInDetailsMail } from "../../../src/lib/email";
 
 const mk = async (admin: { api: { post: (p: string, b?: unknown) => Promise<{ status: number; json: Json }>; get: (p: string) => Promise<{ status: number; json: Json }> } }, later: (f: () => Promise<unknown>) => void, label: string) => {

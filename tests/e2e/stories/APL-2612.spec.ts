@@ -1,6 +1,8 @@
+import { archiveProject } from "../helpers/migration-2731";
+import { test } from "./qa";
 // SHO-BUG-5 A deal's first next step is created without a task.created row or a TASK_ASSIGNED notice  (Linear APL-2612)
 // No numbered ACs in the issue; follows its "Expected" and "Test" paragraphs.
-import { test, expect, zz, type Json, type Who } from "../support";
+import { expect, zz, type Json, type Who } from "../support";
 
 async function newDeal(admin: Who, leaderId: string, later: (f: () => Promise<unknown>) => void, label: string) {
   const org = await admin.api.post("/api/orgs", { name: zz(`org ${label}`) });
@@ -13,7 +15,7 @@ async function newDeal(admin: Who, leaderId: string, later: (f: () => Promise<un
     whyPursue: "ZZ-TEST first step check", nextStep: { title: step, dueDate: new Date(Date.now() + 3 * 86400_000).toISOString().slice(0, 10) },
   });
   expect(d.status, JSON.stringify(d.json)).toBe(201);
-  later(() => admin.api.post(`/api/projects/${d.json.deal.id}/archive`));
+  later(() => archiveProject(admin.api, d.json.deal.id, admin.user.id));
   return { id: d.json.deal.id as string, step };
 }
 

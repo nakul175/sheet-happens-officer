@@ -1,6 +1,9 @@
+import { deleteFixtureTask } from "../helpers/migration-2731";
+import { archiveProject } from "../helpers/migration-2731";
+import { test } from "./qa";
 // SHO-US-14.7 Global search and command palette (Linear APL-2566).
-import { test, expect, zz, RUN, type Json } from "../support";
-import { newProject } from "../g2";
+import { expect, zz, RUN, type Json } from "../support";
+import { newProject } from "../helpers/migration-2731";
 
 type Who = { api: import("../support").Api; user: Json; page: import("@playwright/test").Page };
 
@@ -8,11 +11,11 @@ async function projectWithTask(admin: Who, later: (f: () => Promise<unknown>) =>
   const r = await admin.api.post("/api/projects", { name: zz(label), leaderId: admin.user.id });
   expect(r.status).toBe(201);
   const pid = r.json.project.id as string;
-  later(() => admin.api.post(`/api/projects/${pid}/archive`));
-  const t = await admin.api.post(`/api/projects/${pid}/tasks`, { title, assigneeId: admin.user.id });
+  later(() => archiveProject(admin.api, pid, admin.user.id));
+  const t = await admin.api.post(`/api/projects/${pid}/tasks`, { dueDate: new Date(Date.now() + 3 * 86400_000).toISOString().slice(0, 10), title, assigneeId: admin.user.id });
   expect(t.status).toBe(201);
   const tid = t.json.task.id as string;
-  later(() => admin.api.del(`/api/tasks/${tid}`));
+  later(() => deleteFixtureTask(admin, tid));
   return { pid, tid, name: zz(label) };
 }
 const ready = (page: import("@playwright/test").Page) => expect(page.getByRole("button", { name: "+ New task" })).toBeVisible(); // hydrated: key handlers are attached

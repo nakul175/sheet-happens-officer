@@ -1,3 +1,6 @@
+import { isTooOldToUndo } from "../../../src/lib/undoable";
+import { archiveProject, removeMember } from "../helpers/migration-2731";
+import { test } from "./qa";
 // APL-2504 · SHO-US-6.3 Action log with before-state
 // Acceptance criteria: AC1 one row per write with who/what/before/after, AC2 "via concierge" tag, AC3 visibility by role,
 // AC4 Activity screen newest first, AC5 12-month retention, AC6 "Too old to undo" after 30 days.
@@ -5,18 +8,18 @@
 // the live 14.14 behaviour (Editor: own tasks only; Viewer: refused) and say so.
 // Data: every project and task is named "ZZ-TEST ..."; projects are archived afterwards.
 import { readFileSync } from "node:fs";
-import { test, expect, zz, type Who } from "../support";
+import { expect, zz, type Who } from "../support";
 import { patchCurrent } from "../helpers/jim-http";
 
 async function proj(admin: Who, label: string, later: (f: () => Promise<unknown>) => void, leaderId?: string) {
   const r = await admin.api.post("/api/projects", { name: zz(label), leaderId: leaderId ?? admin.user.id });
   expect(r.status, JSON.stringify(r.json)).toBe(201);
   const id = r.json.project.id as string;
-  later(() => admin.api.post(`/api/projects/${id}/archive`));
+  later(() => archiveProject(admin.api, id, admin.user.id));
   return id;
 }
 const mk = async (who: Who, p: string, title: string, extra: Record<string, unknown> = {}) => {
-  const r = await who.api.post(`/api/projects/${p}/tasks`, { title, ...extra });
+  const r = await who.api.post(`/api/projects/${p}/tasks`, { dueDate: new Date(Date.now() + 3 * 86400_000).toISOString().slice(0, 10), title, ...extra });
   expect(r.status, JSON.stringify(r.json)).toBe(201);
   return r.json.task.id as string;
 };
@@ -69,7 +72,7 @@ test("AC4: a Leader or Admin opens Activity and sees the project's rows newest f
   await expect(rowsUi.last()).toContainText("created the project");
   // Viewer: no Activity link and the API refuses
   expect((await admin.api.post(`/api/projects/${p}/members`, { userId: member.user.id, role: "VIEWER" })).status).toBe(201);
-  later(() => admin.api.del(`/api/projects/${p}/members/${member.user.id}?handoverTo=${admin.user.id}`));
+  later(() => removeMember(admin, p, member.user.id));
   await member.page.goto(`/projects/${p}`);
   await expect(member.page.getByRole("tab", { name: "List" })).toBeVisible();
   await expect(member.page.getByRole("link", { name: "Activity" })).toHaveCount(0);
@@ -81,7 +84,7 @@ test("AC4: a Leader or Admin opens Activity and sees the project's rows newest f
 test("AC4 (Editor, per SHO-US-14.14): an Editor sees only rows about their own tasks", async ({ admin, member, later }) => {
   const p = await proj(admin, "log-editor", later);
   expect((await admin.api.post(`/api/projects/${p}/members`, { userId: member.user.id, role: "EDITOR" })).status).toBe(201);
-  later(() => admin.api.del(`/api/projects/${p}/members/${member.user.id}?handoverTo=${admin.user.id}`));
+  later(() => removeMember(admin, p, member.user.id));
   await mk(admin, p, zz("leader's task"));
   await mk(member, p, zz("editor's task"));
   const seen = (await rows(member, p)).map((r) => r.what).join(" | ");
@@ -103,8 +106,11 @@ test("AC6: Undo is disabled with Too old to undo after 30 days", () => {
   expect(readFileSync("src/lib/undoable.ts", "utf8")).toContain("export const UNDO_DAYS = 30");
   const undo = readFileSync("src/lib/undo.ts", "utf8");
   expect(undo).toContain('throw bad("Too old to undo", { tooOld: true })');
-  expect(undo).toContain("UNDO_DAYS * 86400_000");
+  expect(undo).toContain("isTooOldToUndo(row.createdAt)");
+  const now = Date.parse("2026-10-29T00:00:00Z");
+  expect(isTooOldToUndo(now - 30 * 86400_000, now)).toBe(false);
+  expect(isTooOldToUndo(now - 30 * 86400_000 - 1, now)).toBe(true);
   const screen = readFileSync("src/app/(app)/projects/[id]/activity/Activity.tsx", "utf8");
   expect(screen).toContain("Too old to undo");
-  expect(screen).toContain('r.undo === "too_old"');
+  expect(screen).toContain('row.undo === "too_old"');
 });

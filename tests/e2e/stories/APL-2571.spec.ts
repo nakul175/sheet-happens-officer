@@ -1,5 +1,7 @@
+import { archiveProject } from "../helpers/migration-2731";
+import { test } from "./qa";
 // SHO-US-14.12 Density and visual hierarchy (APL-2571).
-import { test, expect, zz, type Who, type Later } from "../support";
+import { expect, zz, type Who, type Later } from "../support";
 
 test.use({ viewport: { width: 1440, height: 900 } });
 
@@ -7,7 +9,7 @@ async function listProject(admin: Who, later: Later, n: number) {
   const r = await admin.api.post("/api/projects", { name: zz("density"), leaderId: admin.user.id });
   expect(r.status).toBe(201);
   const id = r.json.project.id as string;
-  later(() => admin.api.post(`/api/projects/${id}/archive`));
+  later(() => archiveProject(admin.api, id, admin.user.id));
   for (let i = 0; i < n; i++) {
     const t = await admin.api.post(`/api/projects/${id}/tasks`, { title: `${zz("row")} ${String(i).padStart(2, "0")}`, assigneeId: admin.user.id, priority: "HIGH", dueDate: "2030-01-0" + ((i % 9) + 1) });
     expect(t.status).toBe(201);

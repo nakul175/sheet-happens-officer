@@ -1,6 +1,8 @@
+import { newDeal } from "../helpers/jim-http";
+import { test } from "./qa";
 // SHO-US-10.2 Pipelines and stages as configuration  (Linear APL-2528)
 // Source: acceptance criteria in the Linear issue. Runs against staging; credentials come from the environment (see playwright.config.ts).
-import { test, expect, type Json } from "../support";
+import { expect, type Json } from "../support";
 
 type Stage = { id: string; name: string; position: number; category: string; needsReason: boolean; requiredFields: string[] };
 type Pipe = { id: string; key: string; name: string; stages: Stage[] };
@@ -23,8 +25,9 @@ test("AC1: the Proactive and Bid deal pipelines exist with the agreed stages and
     "On hold:PAUSED:true", "Won:DONE:false", "Lost:LOST:true",
   ]);
   expect(view(bid)).toEqual([
-    "Identified:ACTIVE:false", "Go/No-go:ACTIVE:false", "Preparing:ACTIVE:false", "Submitted:ACTIVE:false", "Awaiting result:ACTIVE:false",
-    "Won:DONE:false", "Lost:LOST:true",
+    // Released20261024110100_bid_stage_mapping supersedes the original Bid seed.
+    "Leads:ACTIVE:false", "Under Evaluation:ACTIVE:false", "Go:ACTIVE:false", "No-Go:LOST:true", "Submitted:ACTIVE:false",
+    "Won:DONE:false", "Lost:LOST:true", "On Hold:PAUSED:true", "Ongoing Projects:DELIVERY:false",
   ]);
 });
 
@@ -37,9 +40,10 @@ test("AC2: each pipeline owns its own stage rows, so changing one leaves the oth
   expect(shared, "no stage row is shared between pipelines (even Won and Lost)").toEqual([]);
 });
 
-test("AC1 (screen): the Deals screen shows the Proactive stages as board columns", async ({ admin }) => {
+test("AC1 (screen): the Deals screen shows the Proactive stages as board columns", async ({ admin, later }) => {
+  await newDeal(admin, later, "2528 board");
   await admin.page.goto("/deals");
-  await expect(admin.page.getByText("Negotiation").first()).toBeVisible();
+  await expect(admin.page.getByRole("region", { name: "Negotiation", exact: true }).first()).toBeVisible();
 });
 
 test.skip("AC3: removing a stage asks where its items go", () => {

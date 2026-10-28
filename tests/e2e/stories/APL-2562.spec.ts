@@ -1,6 +1,9 @@
+import { deleteFixtureTask } from "../helpers/migration-2731";
+import { archiveProject } from "../helpers/migration-2731";
+import { test } from "./qa";
 // SHO-US-14.3 Keyboard and accessibility fixes (Linear APL-2562).
 import { readFileSync } from "node:fs";
-import { test, expect, zz, type Json } from "../support";
+import { expect, zz, type Json } from "../support";
 
 const AXE = readFileSync("node_modules/axe-core/axe.min.js", "utf8");
 type Page = import("@playwright/test").Page;
@@ -9,11 +12,11 @@ async function seed(admin: { api: import("../support").Api; user: Json }, later:
   const r = await admin.api.post("/api/projects", { name: zz(label), leaderId: admin.user.id });
   expect(r.status).toBe(201);
   const pid = r.json.project.id as string;
-  later(() => admin.api.post(`/api/projects/${pid}/archive`));
+  later(() => archiveProject(admin.api, pid, admin.user.id));
   const mk = async (title: string, extra: Record<string, unknown> = {}) => {
-    const t = await admin.api.post(`/api/projects/${pid}/tasks`, { title, assigneeId: admin.user.id, ...extra });
+    const t = await admin.api.post(`/api/projects/${pid}/tasks`, { dueDate: new Date(Date.now() + 3 * 86400_000).toISOString().slice(0, 10), title, assigneeId: admin.user.id, ...extra });
     expect(t.status).toBe(201);
-    later(() => admin.api.del(`/api/tasks/${t.json.task.id}`));
+    later(() => deleteFixtureTask(admin, t.json.task.id));
     return t.json.task.id as string;
   };
   return { pid, mk, name: zz(label) };
@@ -71,7 +74,7 @@ test("AC3: an overdue task is marked with the word Overdue as well as colour, in
   await expect(page.locator("main .item", { hasText: title }).first().getByText(/Overdue ·/)).toBeVisible();
   await page.goto(`/projects/${s.pid}?view=board`);
   await expect(page.locator(".bcard", { hasText: title }).first().getByText(/Overdue ·/)).toBeVisible();
-  await page.goto("/");
+  await page.goto("/my-tasks");
   await expect(page.getByRole("region", { name: "Overdue" }).or(page.locator("section[aria-label='Overdue']")).first()).toBeVisible();
   await expect(page.locator("main .item", { hasText: title }).first().getByText(/Overdue ·/)).toBeVisible();
 });

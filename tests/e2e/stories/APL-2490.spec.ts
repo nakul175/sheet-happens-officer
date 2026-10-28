@@ -1,10 +1,12 @@
+import { postTaskCurrent } from "../helpers/migration-2731";
+import { patchCurrent } from "../helpers/jim-http";
+import { test } from "./qa";
 // SHO-US-3.6 Archive a project (Linear APL-2490).
 // The Super Admin acts as Leader; the plain Member (SHO_MEMBER_*) is the Editor/Viewer/assignee. Member tests skip without it.
 // AC6's non-member check follows PR #21 (tests/e2e/helpers/jim-gate.ts). The plain Admin role shares isAdmin with the Super Admin;
 // the second staging account is a Member, so the check signs in as the Super Admin.
-import { test, expect, zz, type Api } from "../support";
-import { newProject, newTask } from "../g2";
-import { notLive, prLive } from "../helpers/jim-gate";
+import { expect, zz, type Api } from "../support";
+import { newProject, newTask } from "../helpers/migration-2731";
 
 const listed = async (who: { api: Api }, id: string, archived = false) =>
   ((await who.api.get(`/api/projects${archived ? "?archived=true" : ""}`)).json.projects as { id: string }[]).some((p) => p.id === id);
@@ -15,9 +17,9 @@ test("AC1: archiving removes the project from active lists and refuses new or ch
   expect((await admin.api.post(`/api/projects/${p.id}/archive`)).status).toBe(200);
   expect(await listed(admin, p.id)).toBe(false);
   expect(await listed(admin, p.id, true)).toBe(true);
-  expect((await admin.api.post(`/api/projects/${p.id}/tasks`, { title: zz("x") })).status).toBe(409);
-  expect((await admin.api.patch(`/api/tasks/${t}`, { title: zz("x") })).status).toBe(409);
-  expect((await admin.api.post(`/api/tasks/${t}/complete`)).status).toBe(409);
+  expect((await admin.api.post(`/api/projects/${p.id}/tasks`, { dueDate: new Date(Date.now() + 3 * 86400_000).toISOString().slice(0, 10), title: zz("x") })).status).toBe(409);
+  expect((await patchCurrent(admin, t, { title: zz("x") })).status).toBe(409);
+  expect((await postTaskCurrent(admin, t, "complete")).status).toBe(409);
 });
 
 test("AC2: unarchiving returns the project unchanged and its open tasks to My tasks", async ({ admin, member, later }) => {
@@ -28,7 +30,7 @@ test("AC2: unarchiving returns the project unchanged and its open tasks to My ta
   expect((await admin.api.post(`/api/projects/${p.id}/unarchive`)).status).toBe(200);
   expect(await listed(admin, p.id)).toBe(true);
   expect(JSON.stringify((await member.api.get("/api/my-tasks")).json)).toContain(t);
-  expect((await admin.api.patch(`/api/tasks/${t}`, { title: zz("3.6 editable again") })).status).toBe(200);
+  expect((await patchCurrent(admin, t, { title: zz("3.6 editable again") })).status).toBe(200);
 });
 
 test("AC3: an Editor or a Viewer cannot archive or unarchive", async ({ admin, member, later }) => {
@@ -46,8 +48,8 @@ test("AC4: members can still open and read an archived project; nobody can chang
   await admin.api.post(`/api/projects/${p.id}/archive`);
   expect((await member.api.get(`/api/projects/${p.id}`)).status).toBe(200);
   expect((await member.api.get(`/api/tasks/${t}`)).status).toBe(200);
-  expect((await member.api.patch(`/api/tasks/${t}`, { title: zz("x") })).status).toBe(409);
-  expect((await admin.api.patch(`/api/tasks/${t}`, { title: zz("x") })).status).toBe(409);
+  expect((await patchCurrent(member, t, { title: zz("x") })).status).toBe(409);
+  expect((await patchCurrent(admin, t, { title: zz("x") })).status).toBe(409);
   await member.page.goto(`/projects/${p.id}`);
   await expect(member.page.getByText("This project is archived and read-only.").first()).toBeVisible();
 });
@@ -68,7 +70,6 @@ test("AC5: the confirmation states how many tasks are still open, and assignees 
 
 test("AC6: archived tasks are missing from My tasks and default search; Include archived shows a member their own, and a Super Admin archived projects they are not a member of", async ({ admin, member, later }) => {
   test.setTimeout(120_000);
-  const gate = await prLive(21, admin, member, later);
   const word = `zzarch${Date.now().toString(36)}`;
   const p = await newProject(admin, later, { label: "3.6 hidden", members: [{ who: member }] });
   const t = await newTask(admin, p.id, { title: `${word} task`, assigneeId: member.user.id });
@@ -104,11 +105,6 @@ test("AC6: archived tasks are missing from My tasks and default search; Include 
   const on = await hits(admin, "&archived=true");
   const seenProject = on.projects.some((x) => x.id === foreign.id && x.archived === true);
   const seenTask = on.tasks.some((x) => x.id === foreignTask);
-  if (gate.deployed) {
-    expect(seenProject, "a Super Admin who is not a member sees the archived project").toBe(true);
-    expect(seenTask, "and its task").toBe(true);
-  } else {
-    expect(seenProject, notLive(gate, "Include archived hides that project from a Super Admin who is not a member.")).toBe(false);
-    expect(seenTask, notLive(gate, "Include archived hides that project's task from a Super Admin who is not a member.")).toBe(false);
-  }
+  expect(seenProject, "a Super Admin who is not a member sees the archived project").toBe(true);
+  expect(seenTask, "and its task").toBe(true);
 });

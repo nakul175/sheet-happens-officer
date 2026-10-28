@@ -1,5 +1,8 @@
+import { archiveProject } from "../helpers/migration-2731";
+import { patchCurrent } from "../helpers/jim-http";
+import { test } from "./qa";
 // SHO-US-14.14 Readable activity (APL-2573). AC3 needs the optional Member account.
-import { test, expect, zz, type Who, type Later } from "../support";
+import { expect, zz, type Who, type Later } from "../support";
 
 const year = new Date(Date.now() + 5.5 * 3600_000).getUTCFullYear();
 
@@ -7,7 +10,7 @@ async function seed(admin: Who, later: Later, member?: Who) {
   const r = await admin.api.post("/api/projects", { name: zz("activity"), leaderId: admin.user.id });
   expect(r.status).toBe(201);
   const id = r.json.project.id as string;
-  later(() => admin.api.post(`/api/projects/${id}/archive`));
+  later(() => archiveProject(admin.api, id, admin.user.id));
   if (member) expect((await admin.api.post(`/api/projects/${id}/members`, { userId: member.user.id, role: "EDITOR" })).status).toBe(201);
   return id;
 }
@@ -17,7 +20,7 @@ const rows = async (a: Who, id: string) => (await a.api.get(`/api/projects/${id}
 test("AC1: no activity row has a database id, a field name or an ISO timestamp", async ({ admin, later }) => {
   const id = await seed(admin, later);
   const t = (await admin.api.post(`/api/projects/${id}/tasks`, { title: zz("readable"), dueDate: `${year}-12-10`, priority: "MEDIUM" })).json.task.id;
-  expect((await admin.api.patch(`/api/tasks/${t}`, { dueDate: `${year}-12-14`, priority: "HIGH" })).status).toBe(200);
+  expect((await patchCurrent(admin, t, { dueDate: `${year}-12-14`, priority: "HIGH" })).status).toBe(200);
   expect((await admin.api.del(`/api/tasks/${t}`)).status).toBeLessThan(300);
   const list = await rows(admin, id);
   expect(list.length).toBeGreaterThan(0);
@@ -34,17 +37,17 @@ test("AC1: no activity row has a database id, a field name or an ISO timestamp",
 test("AC2: a date change reads 'changed due date from 10 Dec to 14 Dec'", async ({ admin, later }) => {
   const id = await seed(admin, later);
   const t = (await admin.api.post(`/api/projects/${id}/tasks`, { title: zz("datechange"), dueDate: `${year}-12-10` })).json.task.id;
-  expect((await admin.api.patch(`/api/tasks/${t}`, { dueDate: `${year}-12-14` })).status).toBe(200);
+  expect((await patchCurrent(admin, t, { dueDate: `${year}-12-14` })).status).toBe(200);
   await admin.page.goto(`/projects/${id}/activity`);
   await expect(admin.page.getByText(`changed due date from 10 Dec to 14 Dec on "${zz("datechange")}"`)).toBeVisible();
 });
 
 test("AC3: an Editor sees activity of tasks they are on, not the whole project", async ({ admin, member, later }) => {
   const id = await seed(admin, later, member);
-  const mine = (await admin.api.post(`/api/projects/${id}/tasks`, { title: zz("mine"), assigneeId: member.user.id })).json.task.id;
-  const theirs = (await admin.api.post(`/api/projects/${id}/tasks`, { title: zz("theirs"), assigneeId: admin.user.id })).json.task.id;
-  await admin.api.patch(`/api/tasks/${mine}`, { priority: "HIGH" });
-  await admin.api.patch(`/api/tasks/${theirs}`, { priority: "HIGH" });
+  const mine = (await admin.api.post(`/api/projects/${id}/tasks`, { dueDate: new Date(Date.now() + 3 * 86400_000).toISOString().slice(0, 10), title: zz("mine"), assigneeId: member.user.id })).json.task.id;
+  const theirs = (await admin.api.post(`/api/projects/${id}/tasks`, { dueDate: new Date(Date.now() + 3 * 86400_000).toISOString().slice(0, 10), title: zz("theirs"), assigneeId: admin.user.id })).json.task.id;
+  await patchCurrent(admin, mine, { priority: "HIGH" });
+  await patchCurrent(admin, theirs, { priority: "HIGH" });
   const all = await rows(admin, id);
   expect(all.some((r) => r.what.includes(zz("theirs")))).toBe(true);
   const seen = await rows(member, id);
@@ -57,7 +60,7 @@ test("AC3: an Editor sees activity of tasks they are on, not the whole project",
 
 test("AC4: HOW is not shown on rows made on screen", async ({ admin, later }) => {
   const id = await seed(admin, later);
-  await admin.api.post(`/api/projects/${id}/tasks`, { title: zz("screenonly") });
+  await admin.api.post(`/api/projects/${id}/tasks`, { dueDate: new Date(Date.now() + 3 * 86400_000).toISOString().slice(0, 10), title: zz("screenonly") });
   await admin.page.goto(`/projects/${id}/activity`);
   const row = admin.page.locator(".act").filter({ hasText: zz("screenonly") }).first();
   await expect(row).toBeVisible();
@@ -67,8 +70,8 @@ test("AC4: HOW is not shown on rows made on screen", async ({ admin, later }) =>
 
 test("AC5: Undo stays on the row", async ({ admin, later }) => {
   const id = await seed(admin, later);
-  const t = (await admin.api.post(`/api/projects/${id}/tasks`, { title: zz("undoable"), priority: "LOW" })).json.task.id;
-  expect((await admin.api.patch(`/api/tasks/${t}`, { priority: "HIGH" })).status).toBe(200);
+  const t = (await admin.api.post(`/api/projects/${id}/tasks`, { dueDate: new Date(Date.now() + 3 * 86400_000).toISOString().slice(0, 10), title: zz("undoable"), priority: "LOW" })).json.task.id;
+  expect((await patchCurrent(admin, t, { priority: "HIGH" })).status).toBe(200);
   await admin.page.goto(`/projects/${id}/activity`);
   const row = admin.page.locator(".act").filter({ hasText: "changed priority" }).filter({ hasText: zz("undoable") }).first();
   await expect(row).toBeVisible();

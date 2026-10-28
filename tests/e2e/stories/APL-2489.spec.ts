@@ -1,7 +1,8 @@
+import { test, archiveProject } from "./qa";
 // SHO-US-3.5 Hand over project leadership (Linear APL-2489).
 // The Super Admin hands over to / takes over from the plain Member (SHO_MEMBER_*); those tests skip without it.
-import { test, expect, type Api } from "../support";
-import { ghost, getTask, newProject, newTask } from "../g2";
+import { expect, type Api } from "../support";
+import { ghost, getTask, newProject, newTask } from "../helpers/migration-2731";
 
 const leaders = async (who: { api: Api }, id: string) =>
   ((await who.api.get(`/api/projects/${id}`)).json.project.members as { userId: string; role: string }[]).filter((m) => m.role === "LEADER");
@@ -43,6 +44,7 @@ test("AC3: an Editor or a Viewer cannot change the Leader; an Admin can", async 
   expect((await member.api.post(`/api/projects/${q.id}/members`, { userId: next.id })).status).toBe(201);
   expect((await admin.api.post(`/api/projects/${q.id}/leader`, { newLeaderId: next.id })).status).toBe(200);
   expect((await leaders(admin, q.id))[0].userId).toBe(next.id);
+  later(() => archiveProject(admin.api, q.id, admin.user.id)); // restore leadership before the disposable next Leader is deactivated
 });
 
 test("AC4: handing over to the current Leader is refused and leaves exactly one Leader", async ({ admin, member, later }) => {

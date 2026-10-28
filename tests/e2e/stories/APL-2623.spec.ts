@@ -1,5 +1,7 @@
+import { archiveProject } from "../helpers/migration-2731";
+import { test } from "./qa";
 // SHO-US-23.4 Click a name, open the full profile (APL-2623). Acceptance criteria AC1 to AC6.
-import { test, expect, RUN, zz, type Who } from "../support";
+import { expect, RUN, zz, type Who } from "../support";
 
 const SLOW = { timeout: 90_000 };
 const mk = async (admin: Who, later: (f: () => Promise<unknown>) => void, label: string) => {
@@ -59,9 +61,9 @@ test.describe("SHO-US-23.4 / APL-2623", () => {
     const p = await mk(admin, later, "profile");
     const proj = await admin.api.post("/api/projects", { name: zz("23.4 ac4"), leaderId: admin.user.id });
     const pid = proj.json.project.id as string;
-    later(() => admin.api.post(`/api/projects/${pid}/archive`));
+    later(() => archiveProject(admin.api, pid, admin.user.id));
     expect((await admin.api.post(`/api/projects/${pid}/members`, { userId: p.id, role: "EDITOR" })).status).toBe(201);
-    expect((await admin.api.post(`/api/projects/${pid}/tasks`, { title: zz("23.4 task"), assigneeId: p.id })).status).toBe(201);
+    expect((await admin.api.post(`/api/projects/${pid}/tasks`, { dueDate: new Date(Date.now() + 3 * 86400_000).toISOString().slice(0, 10), title: zz("23.4 task"), assigneeId: p.id })).status).toBe(201);
 
     const api = (await admin.api.get(`/api/team/${p.id}`)).json.person;
     expect(api).toMatchObject({ name: p.name, email: p.email, orgRole: "MEMBER", status: "ACTIVE", openTasks: 1 });

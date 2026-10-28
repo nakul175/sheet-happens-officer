@@ -1,8 +1,11 @@
+import { archiveProject, removeMember } from "../helpers/migration-2731";
+import { patchCurrent } from "../helpers/jim-http";
+import { test } from "./qa";
 // APL-2500 · SHO-US-5.5 Task detail overlay
 // Acceptance criteria: AC1 fields and Close returns to the same scroll position, AC2 role (Viewer read-only),
 // AC3 concierge stays usable, AC4 task link and "This task isn't available", AC5 stale save warning.
 // Data: every project and task is named "ZZ-TEST ..."; projects are archived afterwards.
-import { test, expect, zz, type Who, type Page } from "../support";
+import { expect, zz, type Who, type Page } from "../support";
 
 const ist = (d: number) => new Date(Date.now() + 5.5 * 3600e3 + d * 864e5).toISOString().slice(0, 10);
 
@@ -10,11 +13,11 @@ async function proj(admin: Who, label: string, later: (f: () => Promise<unknown>
   const r = await admin.api.post("/api/projects", { name: zz(label), leaderId: admin.user.id });
   expect(r.status, JSON.stringify(r.json)).toBe(201);
   const id = r.json.project.id as string;
-  later(() => admin.api.post(`/api/projects/${id}/archive`));
+  later(() => archiveProject(admin.api, id, admin.user.id));
   return id;
 }
 const mk = async (admin: Who, p: string, title: string, extra: Record<string, unknown> = {}) => {
-  const r = await admin.api.post(`/api/projects/${p}/tasks`, { title, ...extra });
+  const r = await admin.api.post(`/api/projects/${p}/tasks`, { dueDate: new Date(Date.now() + 3 * 86400_000).toISOString().slice(0, 10), title, ...extra });
   expect(r.status, JSON.stringify(r.json)).toBe(201);
   return r.json.task.id as string;
 };
@@ -24,7 +27,7 @@ test("AC1: opening a task shows all its fields, and Close returns to the same sc
   test.setTimeout(120_000);
   const p = await proj(admin, "ov-fields", later);
   const sub = await mk(admin, p, zz("parent"), { description: "Some details", dueDate: ist(3), priority: "HIGH" });
-  await admin.api.post(`/api/projects/${p}/tasks`, { title: zz("child"), parentId: sub });
+  await admin.api.post(`/api/projects/${p}/tasks`, { dueDate: new Date(Date.now() + 3 * 86400_000).toISOString().slice(0, 10), title: zz("child"), parentId: sub });
   for (let i = 0; i < 30; i++) await mk(admin, p, zz(`filler ${String(i).padStart(2, "0")}`), { dueDate: ist(10 + i) });
   await admin.page.goto(`/projects/${p}`);
   await admin.page.locator(".item.click").first().waitFor();
@@ -54,7 +57,7 @@ test("AC1: opening a task shows all its fields, and Close returns to the same sc
 test("AC2: a Viewer sees every field read-only and no action buttons; the Leader can edit", async ({ admin, member, later }) => {
   const p = await proj(admin, "ov-role", later);
   expect((await admin.api.post(`/api/projects/${p}/members`, { userId: member.user.id, role: "VIEWER" })).status).toBe(201);
-  later(() => admin.api.del(`/api/projects/${p}/members/${member.user.id}?handoverTo=${admin.user.id}`));
+  later(() => removeMember(admin, p, member.user.id));
   const t = await mk(admin, p, zz("role task"));
   await member.page.goto(`/projects/${p}?task=${t}`);
   const v = dialog(member.page);
@@ -108,7 +111,7 @@ test("AC5: saving over someone else's change shows the warning and offers to re-
   const d = dialog(admin.page);
   await expect(d.getByLabel("Title")).toHaveValue(zz("stale"));
   // someone else changes the task after the overlay opened (a second client, same account is enough to move updatedAt)
-  expect((await admin.api.patch(`/api/tasks/${t}`, { priority: "HIGH" })).status).toBe(200);
+  expect((await patchCurrent(admin, t, { priority: "HIGH" })).status).toBe(200);
   await d.getByLabel("Title").fill(zz("stale edited"));
   await d.getByLabel("Title").press("Enter");
   const warn = d.getByRole("alert").filter({ hasText: "changed this task while you were editing" });

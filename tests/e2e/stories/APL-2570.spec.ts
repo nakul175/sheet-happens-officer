@@ -1,15 +1,17 @@
+import { archiveProject, postTaskCurrent } from "../helpers/migration-2731";
+import { test } from "./qa";
 // SHO-US-14.11 Bulk actions (APL-2570). Needs the optional Member account for the second person.
-import { test, expect, zz, type Who, type Later } from "../support";
+import { expect, zz, type Who, type Later } from "../support";
 
 async function proj(admin: Who, member: Who, later: Later, n: number, extra: (i: number) => object = () => ({})) {
   const r = await admin.api.post("/api/projects", { name: zz("bulk"), leaderId: admin.user.id });
   expect(r.status).toBe(201);
   const id = r.json.project.id as string;
-  later(() => admin.api.post(`/api/projects/${id}/archive`));
+  later(() => archiveProject(admin.api, id, admin.user.id));
   expect((await admin.api.post(`/api/projects/${id}/members`, { userId: member.user.id, role: "EDITOR" })).status).toBe(201);
   const ids: string[] = [];
   for (let i = 0; i < n; i++) {
-    const t = await admin.api.post(`/api/projects/${id}/tasks`, { title: `${zz("job")} ${i}`, assigneeId: admin.user.id, ...extra(i) });
+    const t = await admin.api.post(`/api/projects/${id}/tasks`, { dueDate: new Date(Date.now() + 3 * 86400_000).toISOString().slice(0, 10), title: `${zz("job")} ${i}`, assigneeId: admin.user.id, ...extra(i) });
     expect(t.status).toBe(201);
     ids.push(t.json.task.id);
   }
@@ -52,7 +54,7 @@ test("AC2: assigning 5 tasks to the Member is one request, one notice for them, 
 
 test("AC3: tasks the person may not change are skipped and the result says '4 changed, 1 skipped (no permission)'", async ({ admin, member, later }) => {
   const { id, ids } = await proj(admin, member, later, 5, (i) => (i < 4 ? { assigneeId: member.user.id } : { assigneeId: admin.user.id, approverId: member.user.id }));
-  expect((await admin.api.post(`/api/tasks/${ids[4]}/send-for-approval`)).status).toBe(200); // the Member now holds it and may only close or send it back
+  expect((await postTaskCurrent(admin, ids[4], "send-for-approval")).status).toBe(200); // the Member now holds it and may only close or send it back
   const r = await member.api.post(`/api/projects/${id}/tasks/bulk`, { taskIds: ids, action: "assign", assigneeId: admin.user.id });
   expect(r.status).toBe(200);
   expect(r.json.changed).toBe(4);

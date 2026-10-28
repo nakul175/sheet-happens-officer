@@ -1,19 +1,21 @@
+import { archiveProject, postTaskCurrent, removeMember } from "../helpers/migration-2731";
+import { test } from "./qa";
 // APL-2499 · SHO-US-5.4 Manage a project's Sections
 // Acceptance criteria: AC1 add a Section, AC2 delete only after choosing where tasks go, AC3 authority,
 // AC4 done Section completes tasks, AC5 limit of 8, AC6 done Section protected (proposed, not confirmed by the owner).
 // Data: every project and task is named "ZZ-TEST ..."; projects are archived afterwards.
-import { test, expect, zz, type Who, type Page } from "../support";
+import { expect, zz, type Who, type Page } from "../support";
 
 async function proj(admin: Who, label: string, later: (f: () => Promise<unknown>) => void) {
   const r = await admin.api.post("/api/projects", { name: zz(label), leaderId: admin.user.id });
   expect(r.status, JSON.stringify(r.json)).toBe(201);
   const id = r.json.project.id as string;
-  later(() => admin.api.post(`/api/projects/${id}/archive`));
+  later(() => archiveProject(admin.api, id, admin.user.id));
   const s = (await admin.api.get(`/api/projects/${id}`)).json.project.sections as { id: string; name: string; isDone: boolean }[];
   return { id, todo: s[0].id, doing: s[1].id, done: s.find((x) => x.isDone)!.id };
 }
 const mk = async (admin: Who, p: string, title: string, extra: Record<string, unknown> = {}) => {
-  const r = await admin.api.post(`/api/projects/${p}/tasks`, { title, ...extra });
+  const r = await admin.api.post(`/api/projects/${p}/tasks`, { dueDate: new Date(Date.now() + 3 * 86400_000).toISOString().slice(0, 10), title, ...extra });
   expect(r.status, JSON.stringify(r.json)).toBe(201);
   return r.json.task.id as string;
 };
@@ -54,7 +56,7 @@ test("AC2: deleting a Section with tasks needs a destination and never deletes t
 test("AC3: an Editor or Viewer cannot change Sections", async ({ admin, member, later }) => {
   const p = await proj(admin, "sec-authority", later);
   expect((await admin.api.post(`/api/projects/${p.id}/members`, { userId: member.user.id, role: "EDITOR" })).status).toBe(201);
-  later(() => admin.api.del(`/api/projects/${p.id}/members/${member.user.id}?handoverTo=${admin.user.id}`));
+  later(() => removeMember(admin, p.id, member.user.id));
   expect((await member.api.post(`/api/projects/${p.id}/sections`, { name: "Nope" })).status).toBe(403);
   expect((await member.api.patch(`/api/projects/${p.id}/sections/${p.todo}`, { name: "Renamed" })).status).toBe(403);
   expect((await member.api.del(`/api/projects/${p.id}/sections/${p.doing}?moveTo=${p.todo}`)).status).toBe(403);
@@ -69,9 +71,9 @@ test("AC4: tasks moved into the done Section count as complete", async ({ admin,
   const p = await proj(admin, "sec-done", later);
   const t = await mk(admin, p.id, zz("to finish"));
   expect((await admin.api.get(`/api/tasks/${t}`)).json.task.completedAt).toBeNull();
-  expect((await admin.api.post(`/api/tasks/${t}/move`, { sectionId: p.done })).status).toBe(200);
+  expect((await postTaskCurrent(admin, t, "move", { sectionId: p.done })).status).toBe(200);
   expect((await admin.api.get(`/api/tasks/${t}`)).json.task.completedAt).not.toBeNull();
-  expect((await admin.api.post(`/api/tasks/${t}/move`, { sectionId: p.doing })).status).toBe(200);
+  expect((await postTaskCurrent(admin, t, "move", { sectionId: p.doing })).status).toBe(200);
   expect((await admin.api.get(`/api/tasks/${t}`)).json.task.completedAt).toBeNull();
 });
 

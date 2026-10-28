@@ -1,5 +1,7 @@
+import { archiveProject } from "../helpers/migration-2731";
+import { test } from "./qa";
 // SHO-US-14.5 Quick add from anywhere (Linear APL-2564).
-import { test, expect, zz, type Json } from "../support";
+import { expect, zz, type Json } from "../support";
 
 type Who = { api: import("../support").Api; user: Json; page: import("@playwright/test").Page };
 
@@ -7,7 +9,7 @@ async function project(admin: Who, later: (f: () => Promise<unknown>) => void, l
   const r = await admin.api.post("/api/projects", { name: zz(label), leaderId: admin.user.id });
   expect(r.status).toBe(201);
   const pid = r.json.project.id as string;
-  later(() => admin.api.post(`/api/projects/${pid}/archive`));
+  later(() => archiveProject(admin.api, pid, admin.user.id));
   return { pid, name: zz(label) };
 }
 async function tasksOf(who: Who, pid: string) {
@@ -93,7 +95,7 @@ test("AC4: with only Viewer roles the shortcut does nothing and the button is ab
   // The screen with nothing to write to (simulated: this Member may be an Editor elsewhere).
   const page = member.page;
   await page.route("**/api/quick-add", (r) => r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ projects: [], lastProjectId: null }) }));
-  await page.goto("/");
+  await page.goto("/my-tasks");
   await expect(page.getByRole("heading", { name: "My tasks" })).toBeVisible();
   await expect(page.getByRole("button", { name: "+ New task" })).toHaveCount(0);
   await page.keyboard.press("c");

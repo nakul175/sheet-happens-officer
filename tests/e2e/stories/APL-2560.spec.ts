@@ -1,6 +1,9 @@
+import { deleteFixtureTask } from "../helpers/migration-2731";
+import { archiveProject, postTaskCurrent } from "../helpers/migration-2731";
+import { test } from "./qa";
 // SHO-US-14.1 Approval state stays truthful (Linear APL-2560).
 // Needs a second person (the Member account) because a task awaits approval only when it sits with a different person than its assignee.
-import { test, expect, zz, type Json } from "../support";
+import { expect, zz, type Json } from "../support";
 
 type Who = { api: import("../support").Api; user: Json };
 
@@ -9,14 +12,14 @@ async function setup(admin: Who, member: Who, later: (f: () => Promise<unknown>)
   const p = await admin.api.post("/api/projects", { name: zz(label), leaderId: admin.user.id });
   expect(p.status).toBe(201);
   const pid = p.json.project.id as string;
-  later(() => admin.api.post(`/api/projects/${pid}/archive`));
+  later(() => archiveProject(admin.api, pid, admin.user.id));
   expect((await admin.api.post(`/api/projects/${pid}/members`, { userId: member.user.id, role: "EDITOR" })).status).toBe(201);
-  const t = await admin.api.post(`/api/projects/${pid}/tasks`, { title: zz(`${label} task`), assigneeId: member.user.id, approverId: admin.user.id });
+  const t = await admin.api.post(`/api/projects/${pid}/tasks`, { dueDate: new Date(Date.now() + 3 * 86400_000).toISOString().slice(0, 10), title: zz(`${label} task`), assigneeId: member.user.id, approverId: admin.user.id });
   expect(t.status).toBe(201);
   const tid = t.json.task.id as string;
-  later(() => admin.api.del(`/api/tasks/${tid}`));
+  later(() => deleteFixtureTask(admin, tid));
   // The member sends it for approval: it now sits with the admin and awaits approval.
-  expect((await member.api.post(`/api/tasks/${tid}/send-for-approval`)).status).toBe(200);
+  expect((await postTaskCurrent(member, tid, "send-for-approval")).status).toBe(200);
   return { pid, tid, title: zz(`${label} task`) };
 }
 
@@ -40,7 +43,7 @@ test("AC2: a closed task shows no Awaiting chip on the list or the board", async
   await page.goto(`/projects/${s.pid}`);
   const row = page.locator("main .item", { hasText: s.title }).last();
   await expect(row.getByText("Awaiting approval")).toBeVisible(); // control: it is awaiting before the close
-  expect((await admin.api.post(`/api/tasks/${s.tid}/complete`, {})).status).toBe(200);
+  expect((await postTaskCurrent(admin, s.tid, "complete", {})).status).toBe(200);
   await page.goto(`/projects/${s.pid}`);
   await expect(page.locator("main .item", { hasText: s.title }).last()).toBeVisible();
   await expect(page.locator("main .item", { hasText: s.title }).last().getByText(/Awaiting/)).toHaveCount(0);
@@ -58,7 +61,7 @@ test("AC3: sending back clears the banner and the chip and shows the new holder"
   await expect(dialog.getByText(/Waiting for/)).toBeVisible();
   await dialog.getByRole("button", { name: "Send back" }).click();
   await expect(dialog.getByText(/Waiting for/)).toHaveCount(0);
-  await expect(dialog.getByLabel("Assignee")).toHaveValue(member.user.id); // the new holder is the person it went back to
+  await expect(dialog.getByLabel("Assignee", { exact: true })).toHaveValue(member.user.id); // the new holder is the person it went back to
   await dialog.getByRole("button", { name: "Close", exact: true }).click();
   await expect(page.locator("main .item", { hasText: s.title }).last().getByText(/Awaiting/)).toHaveCount(0);
 });

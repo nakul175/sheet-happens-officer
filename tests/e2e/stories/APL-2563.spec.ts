@@ -1,7 +1,9 @@
+import { archiveProject } from "../helpers/migration-2731";
+import { test } from "./qa";
 // SHO-US-14.4 First-run orientation (Linear APL-2563).
 // The start guide is shown once per account. A spec can only see it on an account that has not dismissed it yet, so AC1, AC2 and AC5
 // skip with a reason when the Member account has already dismissed it (dismissing is permanent for that account, by design).
-import { test, expect, zz, login, type Json } from "../support";
+import { expect, zz, login, type Json } from "../support";
 
 type Who = { api: import("../support").Api; user: Json; page: import("@playwright/test").Page };
 
@@ -9,7 +11,7 @@ async function ledProject(admin: Who, later: (f: () => Promise<unknown>) => void
   const r = await admin.api.post("/api/projects", { name: zz(label), leaderId: admin.user.id });
   expect(r.status).toBe(201);
   const pid = r.json.project.id as string;
-  later(() => admin.api.post(`/api/projects/${pid}/archive`));
+  later(() => archiveProject(admin.api, pid, admin.user.id));
   for (const m of members) expect((await admin.api.post(`/api/projects/${pid}/members`, { userId: m.user.id, role: "EDITOR" })).status).toBe(201);
   return { pid, name: zz(label) };
 }
@@ -43,7 +45,7 @@ test("AC4: a person with no projects sees the Leaders by name and a Request to b
 test("AC1: first sign-in shows the start guide above everything else on My tasks", async ({ member }) => {
   test.skip(!(await guideShown(member)), "The Member account has already dismissed its start guide. Use an account that has never dismissed it.");
   const page = member.page;
-  await page.goto("/");
+  await page.goto("/my-tasks");
   const guide = page.getByRole("region", { name: "Start guide" });
   await expect(guide).toBeVisible();
   const guideTop = (await guide.boundingBox())!.y;
@@ -57,7 +59,7 @@ test("AC5: the guide has at most 3 items and fits above the fold at 1440 by 900"
   test.skip(!(await guideShown(member)), "The Member account has already dismissed its start guide. Use an account that has never dismissed it.");
   const page = member.page;
   await page.setViewportSize({ width: 1440, height: 900 });
-  await page.goto("/");
+  await page.goto("/my-tasks");
   const guide = page.getByRole("region", { name: "Start guide" });
   await expect(guide).toBeVisible();
   await expect(guide.locator("ol > li")).toHaveCount(3);
@@ -67,7 +69,7 @@ test("AC5: the guide has at most 3 items and fits above the fold at 1440 by 900"
 test("AC2: Dismiss removes the guide for good, also on another device", async ({ member, anon }) => {
   test.skip(!(await guideShown(member)), "The Member account has already dismissed its start guide. Use an account that has never dismissed it.");
   const page = member.page;
-  await page.goto("/");
+  await page.goto("/my-tasks");
   await page.getByRole("region", { name: "Start guide" }).getByRole("button", { name: "Dismiss" }).click();
   await expect(page.getByRole("region", { name: "Start guide" })).toHaveCount(0);
   await page.reload();
@@ -75,7 +77,7 @@ test("AC2: Dismiss removes the guide for good, also on another device", async ({
   // A second browser with its own cookies: a different "device".
   const r = await anon.context().request.post("/api/auth/signin", { data: { email: login("MEMBER").email, password: login("MEMBER").password } });
   expect(r.ok()).toBe(true);
-  await anon.goto("/");
+  await anon.goto("/my-tasks");
   await expect(anon.getByRole("heading", { name: "My tasks" })).toBeVisible();
   await expect(anon.getByRole("region", { name: "Start guide" })).toHaveCount(0);
 });
@@ -91,4 +93,3 @@ test("AC3: Team shows each person's organisation role and the projects they lead
     await expect(row.getByText("Super Admin")).toBeVisible(); // the organisation role of the Leader
   }
 });
-

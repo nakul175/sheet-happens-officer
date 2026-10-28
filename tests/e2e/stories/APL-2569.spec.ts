@@ -1,5 +1,7 @@
+import { archiveProject } from "../helpers/migration-2731";
+import { test } from "./qa";
 // SHO-US-14.10 Saved views (APL-2569).
-import { test, expect, zz, type Who, type Later } from "../support";
+import { expect, zz, type Who, type Later } from "../support";
 
 const day = (n: number) => new Date(Date.now() + 5.5 * 3600_000 + n * 86400_000).toISOString().slice(0, 10);
 const state = (over: object = {}) => ({ assignee: "", flags: ["overdue"], priority: "", sort: "date", group: "section", ...over });
@@ -8,7 +10,7 @@ async function proj(admin: Who, later: Later) {
   const r = await admin.api.post("/api/projects", { name: zz("views"), leaderId: admin.user.id });
   expect(r.status).toBe(201);
   const id = r.json.project.id as string;
-  later(() => admin.api.post(`/api/projects/${id}/archive`));
+  later(() => archiveProject(admin.api, id, admin.user.id));
   await admin.api.post(`/api/projects/${id}/tasks`, { title: zz("late"), dueDate: day(-2) });
   return id;
 }

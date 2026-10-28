@@ -1,21 +1,24 @@
+import { trashPurgeBefore } from "../../../src/lib/undoable";
+import { archiveProject, deactivate, postTaskCurrent, removeMember } from "../helpers/migration-2731";
+import { test } from "./qa";
 // APL-2521 · SHO-US-6.5 Organisation audit log for the Super Admin
 // Acceptance criteria: AC1 one row per listed event, AC2 only the Super Admin, AC3 no secrets, AC4 retention and no hand editing,
 // AC5 five failed sign-ins and the lockout, AC6 IP only on sign-in events, AC7 task delete/restore/purge, Undo anyway, approver.
 // Data: every project and task is named "ZZ-TEST ..."; the person created for AC5 is "ZZ-TEST ..." at example.invalid (no inbox) and is
 // deactivated afterwards. AC2 briefly makes the Member an Admin and puts the role back in a finally block.
 import { readFileSync } from "node:fs";
-import { test, expect, zz, RUN, login, type Who } from "../support";
-import { getTask } from "../g2";
+import { expect, zz, RUN, login, type Who } from "../support";
+import { getTask } from "../helpers/migration-2731";
 
 async function proj(admin: Who, label: string, later: (f: () => Promise<unknown>) => void) {
   const r = await admin.api.post("/api/projects", { name: zz(label), leaderId: admin.user.id });
   expect(r.status, JSON.stringify(r.json)).toBe(201);
   const id = r.json.project.id as string;
-  later(() => admin.api.post(`/api/projects/${id}/archive`));
+  later(() => archiveProject(admin.api, id, admin.user.id));
   return id;
 }
 const mk = async (admin: Who, p: string, title: string, extra: Record<string, unknown> = {}) => {
-  const r = await admin.api.post(`/api/projects/${p}/tasks`, { title, ...extra });
+  const r = await admin.api.post(`/api/projects/${p}/tasks`, { dueDate: new Date(Date.now() + 3 * 86400_000).toISOString().slice(0, 10), title, ...extra });
   expect(r.status, JSON.stringify(r.json)).toBe(201);
   return r.json.task.id as string;
 };
@@ -29,10 +32,10 @@ test("AC1: listed events each leave a row with time, actor, event, target and ch
   for (const event of EVENTS) for (const r of await audit(admin, `event=${event}&person=${admin.user.id}`)) seen.add(r.id);
   const p = await proj(admin, "audit-rows", later);
   expect((await admin.api.post(`/api/projects/${p}/members`, { userId: member.user.id, role: "EDITOR" })).status).toBe(201);
-  later(() => admin.api.del(`/api/projects/${p}/members/${member.user.id}?handoverTo=${admin.user.id}`));
+  later(() => removeMember(admin, p, member.user.id));
   const t = await mk(admin, p, zz("audited"));
   expect((await admin.api.del(`/api/tasks/${t}`)).status).toBe(204);
-  expect((await admin.api.post(`/api/tasks/${t}/restore`)).status).toBe(200);
+  expect((await postTaskCurrent(admin, t, "restore")).status).toBe(200);
   // What each new row must name. A project's creator may also be logged as a member, so MEMBER_ADDED is matched on the Member's name.
   const names: Record<string, string> = {
     PROJECT_CREATED: zz("audit-rows"),
@@ -101,7 +104,7 @@ test("AC5 and AC6: five failed sign-ins and the lockout are logged, with the IP 
   const add = await admin.api.post("/api/team", { firstName: "ZZ-TEST", lastName: `lockout ${RUN}`, email, role: "MEMBER" });
   expect(add.status, JSON.stringify(add.json)).toBe(201);
   const id = (add.json.person?.id ?? add.json.user?.id ?? add.json.id) as string;
-  later(() => admin.api.post(`/api/team/${id}/deactivate`, { reassign: "leaders" }));
+  later(() => deactivate(admin.api, id));
   for (let i = 0; i < 5; i++) {
     const r = await anon.request.post("/api/auth/signin", { data: { email, password: `wrong-${i}-ZZ-test` }, headers: { "x-forwarded-for": "203.0.113.77" } });
     expect(r.status()).toBe(401);
@@ -119,9 +122,9 @@ test("AC5 and AC6: five failed sign-ins and the lockout are logged, with the IP 
 test("AC7: task delete and restore, an approver being set, and 'Undo anyway' each leave an audit row", async ({ admin, member, later }) => {
   const p = await proj(admin, "audit-added", later);
   expect((await admin.api.post(`/api/projects/${p}/members`, { userId: member.user.id, role: "EDITOR" })).status).toBe(201);
-  later(() => admin.api.del(`/api/projects/${p}/members/${member.user.id}?handoverTo=${admin.user.id}`));
+  later(() => removeMember(admin, p, member.user.id));
   const t = await mk(admin, p, zz("approver task"), { assigneeId: member.user.id });
-  expect((await admin.api.put(`/api/tasks/${t}/approver`, { approverId: admin.user.id })).status).toBe(200);
+  expect((await admin.api.put(`/api/tasks/${t}/approver`, { approverId: admin.user.id, expectedUpdatedAt: (await getTask(admin, t)).updatedAt })).status).toBe(200);
   const approver = (await audit(admin, `event=APPROVER_CHANGED&person=${admin.user.id}`)).filter((r) => (r.target ?? "").includes(zz("approver task")));
   expect(approver.length).toBeGreaterThanOrEqual(1);
   // Undo anyway: admin changes priority, the member changes it again, admin undoes over the member's change
@@ -139,8 +142,10 @@ test("AC7: task delete and restore, an approver being set, and 'Undo anyway' eac
 test("AC7 (30-day purge): one audit row is written for a purge run that removes tasks", () => {
   const tasks = readFileSync("src/lib/tasks.ts", "utf8");
   const fn = tasks.slice(tasks.indexOf("export async function purgeTrash"), tasks.indexOf("// ---------------------------------------------------------------- My tasks"));
-  expect(fn).toContain("30 * 86400_000");
-  expect(fn).toContain("if (r.count) await db.auditLog.create");
+  const now = new Date("2026-10-29T00:00:00Z");
+  expect(trashPurgeBefore(now).getTime()).toBe(now.getTime() - 30 * 86400_000);
+  expect(fn).toContain("deletedAt: { lt: trashPurgeBefore(now) }");
+  expect(fn).toMatch(/if \(r.count\)\s*\{\s*await db.auditLog.create/);
   expect(fn).toContain('event: "TASK_PURGED"');
   expect(readFileSync("src/lib/jobs.ts", "utf8")).toContain("purgeTrash()");
 });

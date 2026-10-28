@@ -1,6 +1,8 @@
+import { archiveProject, postTaskCurrent } from "../helpers/migration-2731";
+import { test } from "./qa";
 // SHO-BUG-4 Audit log shows "deal (removed)" for every DEAL_CLOSED row  (Linear APL-2611)
 // No numbered ACs in the issue; follows its "Expected" and "Test" paragraphs.
-import { test, expect, zz, type Json } from "../support";
+import { expect, zz, type Json } from "../support";
 
 test("Closing a deal writes an audit row that names the deal, not 'deal (removed)'", async ({ admin, later }) => {
   const dealName = `${zz("audit deal")}`;
@@ -16,11 +18,11 @@ test("Closing a deal writes an audit row that names the deal, not 'deal (removed
   });
   expect(d.status, JSON.stringify(d.json)).toBe(201);
   const id = d.json.deal.id as string;
-  later(() => admin.api.post(`/api/projects/${id}/archive`));
+  later(() => archiveProject(admin.api, id, admin.user.id));
   // A deal cannot be won while a task is open, so close the first step first.
   const step = ((await admin.api.get(`/api/deals?pipelineId=${pro.id}`)).json.deals as Json[]).find((x) => x.id === id)?.nextStep?.id as string;
   expect(step, "the deal's first next step").toBeTruthy();
-  expect((await admin.api.post(`/api/tasks/${step}/complete`, {})).status).toBe(200);
+  expect((await postTaskCurrent(admin, step, "complete", {})).status).toBe(200);
   const won = pro.stages.find((s: { name: string }) => s.name === "Won").id;
   expect((await admin.api.post(`/api/projects/${id}/stage`, { stageId: won })).status).toBe(200);
 

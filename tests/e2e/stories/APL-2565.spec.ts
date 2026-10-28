@@ -1,6 +1,9 @@
+import { deleteFixtureTask } from "../helpers/migration-2731";
+import { archiveProject } from "../helpers/migration-2731";
+import { test } from "./qa";
 // SHO-US-14.6 Keyboard shortcuts and help sheet (Linear APL-2565).
-import { test, expect, zz, type Json } from "../support";
-import { newProject } from "../g2";
+import { expect, zz, type Json } from "../support";
+import { newProject } from "../helpers/migration-2731";
 
 type Who = { api: import("../support").Api; user: Json; page: import("@playwright/test").Page };
 
@@ -8,13 +11,13 @@ async function listProject(admin: Who, later: (f: () => Promise<unknown>) => voi
   const r = await admin.api.post("/api/projects", { name: zz(label), leaderId: admin.user.id });
   expect(r.status).toBe(201);
   const pid = r.json.project.id as string;
-  later(() => admin.api.post(`/api/projects/${pid}/archive`));
+  later(() => archiveProject(admin.api, pid, admin.user.id));
   const ids: string[] = [];
   for (let i = 1; i <= n; i++) {
-    const t = await admin.api.post(`/api/projects/${pid}/tasks`, { title: zz(`${label} task ${i}`), assigneeId: admin.user.id });
+    const t = await admin.api.post(`/api/projects/${pid}/tasks`, { dueDate: new Date(Date.now() + 3 * 86400_000).toISOString().slice(0, 10), title: zz(`${label} task ${i}`), assigneeId: admin.user.id });
     expect(t.status).toBe(201);
     ids.push(t.json.task.id);
-    later(() => admin.api.del(`/api/tasks/${t.json.task.id}`));
+    later(() => deleteFixtureTask(admin, t.json.task.id));
   }
   return { pid, ids };
 }
