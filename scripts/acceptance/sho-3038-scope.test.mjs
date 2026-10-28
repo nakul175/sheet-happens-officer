@@ -18,6 +18,9 @@ const allowed = new Set([
   "src/components/use-task-sheet-back.ts",
   "src/components/Comments.tsx",
   "tests/task-sheet-history-2616.test.ts",
+  "tests/bell-redaction-2727.test.ts",
+  "tests/bell-null-href-2727.test.tsx",
+  "tests/bell-activity-2727.test.ts",
   "tests/cascade-reminder-2610.test.ts",
   // SHO-2589: Workload stays disabled pending complete acceptance and hidden-CRM policy resolution.
   "src/lib/workload.ts",
