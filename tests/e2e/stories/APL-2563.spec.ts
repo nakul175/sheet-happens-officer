@@ -1,11 +1,19 @@
 import { archiveProject } from "../helpers/migration-2731";
-import { test } from "./qa";
+import { test as qaTest, verifiedUser, deactivate, PASS } from "./qa";
 // SHO-US-14.4 First-run orientation (Linear APL-2563).
-// The start guide is shown once per account. A spec can only see it on an account that has not dismissed it yet, so AC1, AC2 and AC5
-// skip with a reason when the Member account has already dismissed it (dismissing is permanent for that account, by design).
-import { expect, zz, login, type Json } from "../support";
+// Each case gets an independent verified synthetic Member, so guide dismissal and project state never skip coverage.
+import { expect, zz, type Json } from "../support";
 
 type Who = { api: import("../support").Api; user: Json; page: import("@playwright/test").Page };
+let freshMembers = 0;
+const test = qaTest.extend({
+  member: async ({ admin, browser, anon, later }, use) => {
+    const fresh = await verifiedUser(browser, anon.context().request, "2563", `fresh${freshMembers++}`);
+    later(() => fresh.ctx.close());
+    later(() => deactivate(admin.api, fresh.user.id));
+    await use({ page: fresh.page, api: fresh.api, user: fresh.user });
+  },
+});
 
 async function ledProject(admin: Who, later: (f: () => Promise<unknown>) => void, label: string, members: Who[] = []) {
   const r = await admin.api.post("/api/projects", { name: zz(label), leaderId: admin.user.id });
@@ -21,11 +29,11 @@ async function guideShown(member: Who) {
   return !!me.json.user?.startGuide;
 }
 
-// Order matters: AC2 dismisses the guide and AC3 adds the Member to a project, so the checks that need a fresh account run first.
+// Fresh per-case accounts keep all first-run and empty-state checks independent.
 test("AC4: a person with no projects sees the Leaders by name and a Request to be added that tells the Leader", async ({ admin, member, later }) => {
   await member.page.goto("/projects");
   const empty = await member.page.getByText("Ask a project Leader to add you.").waitFor({ timeout: 6000 }).then(() => 1, () => 0);
-  test.skip(empty === 0, "The Member account already belongs to projects, so the empty Projects screen is not shown. Use a Member with no projects.");
+  expect(empty, "fresh Member has no project memberships").toBe(1);
   const p = await ledProject(admin, later, "14.4 leader");
   await member.page.reload();
   const list = member.page.getByLabel("Leaders");
@@ -43,7 +51,7 @@ test("AC4: a person with no projects sees the Leaders by name and a Request to b
 });
 
 test("AC1: first sign-in shows the start guide above everything else on My tasks", async ({ member }) => {
-  test.skip(!(await guideShown(member)), "The Member account has already dismissed its start guide. Use an account that has never dismissed it.");
+  expect(await guideShown(member), "fresh Member has an undismissed start guide").toBe(true);
   const page = member.page;
   await page.goto("/my-tasks");
   const guide = page.getByRole("region", { name: "Start guide" });
@@ -56,7 +64,7 @@ test("AC1: first sign-in shows the start guide above everything else on My tasks
 });
 
 test("AC5: the guide has at most 3 items and fits above the fold at 1440 by 900", async ({ member }) => {
-  test.skip(!(await guideShown(member)), "The Member account has already dismissed its start guide. Use an account that has never dismissed it.");
+  expect(await guideShown(member), "fresh Member has an undismissed start guide").toBe(true);
   const page = member.page;
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto("/my-tasks");
@@ -67,7 +75,7 @@ test("AC5: the guide has at most 3 items and fits above the fold at 1440 by 900"
   expect(box.y + box.height).toBeLessThanOrEqual(900);
 });
 test("AC2: Dismiss removes the guide for good, also on another device", async ({ member, anon }) => {
-  test.skip(!(await guideShown(member)), "The Member account has already dismissed its start guide. Use an account that has never dismissed it.");
+  expect(await guideShown(member), "fresh Member has an undismissed start guide").toBe(true);
   const page = member.page;
   await page.goto("/my-tasks");
   await page.getByRole("region", { name: "Start guide" }).getByRole("button", { name: "Dismiss" }).click();
@@ -75,7 +83,7 @@ test("AC2: Dismiss removes the guide for good, also on another device", async ({
   await page.reload();
   await expect(page.getByRole("region", { name: "Start guide" })).toHaveCount(0);
   // A second browser with its own cookies: a different "device".
-  const r = await anon.context().request.post("/api/auth/signin", { data: { email: login("MEMBER").email, password: login("MEMBER").password } });
+  const r = await anon.context().request.post("/api/auth/signin", { data: { email: member.user.email, password: PASS } });
   expect(r.ok()).toBe(true);
   await anon.goto("/my-tasks");
   await expect(anon.getByRole("heading", { name: "My tasks" })).toBeVisible();

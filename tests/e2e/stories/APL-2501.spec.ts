@@ -73,7 +73,7 @@ test("AC4: Usage and Audit log are for the Super Admin only; a Member who types 
   await admin.page.setViewportSize({ width: 1280, height: 800 });
   await member.page.setViewportSize({ width: 1280, height: 800 });
   await admin.page.goto("/");
-  await admin.page.getByRole("button", { name: "Account and utilities", exact: true }).click();
+  await admin.page.getByRole("button", { name: /^Account and utilities, \S+$/ }).click();
   const adminNav = admin.page.locator("#account-utilities");
   await expect(adminNav.getByRole("link", { name: "Usage" })).toBeVisible();
   await expect(adminNav.getByRole("link", { name: "Audit log" })).toBeVisible();
@@ -82,7 +82,7 @@ test("AC4: Usage and Audit log are for the Super Admin only; a Member who types 
   const memberNav = member.page.locator("aside[aria-label='Main'] nav.nav");
   for (const l of ["My tasks", "Projects", "Team"]) await expect(memberNav.getByRole("link", { name: l, exact: true })).toBeVisible();
   await member.page.keyboard.press("Escape");
-  await member.page.getByRole("button", { name: "Account and utilities", exact: true }).click();
+  await member.page.getByRole("button", { name: /^Account and utilities, \S+$/ }).click();
   await expect(member.page.locator("#account-utilities").getByRole("link", { name: "Usage" })).toHaveCount(0);
   await expect(member.page.locator("#account-utilities").getByRole("link", { name: "Audit log" })).toHaveCount(0);
   for (const path of ["/usage", "/audit"]) {

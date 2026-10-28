@@ -2,7 +2,7 @@ import { deleteFixtureTask } from "../helpers/migration-2731";
 import { archiveProject, postTaskCurrent } from "../helpers/migration-2731";
 import { test } from "./qa";
 // SHO-US-11.4 Link tasks to an organisation or contact  (Linear APL-2535)
-import { expect, zz, hasMember, type Json, type Who } from "../support";
+import { expect, zz, type Json, type Who } from "../support";
 
 let n = 0;
 async function setup(admin: Who, later: (f: () => Promise<unknown>) => void) {
@@ -65,7 +65,6 @@ test("AC4: a task in Trash or in an archived project is not listed on the organi
 });
 
 test("AC5: the server refuses a Viewer's link change", async ({ admin, member, later }) => {
-  test.skip(!hasMember(), "needs SHO_MEMBER_EMAIL/PASS");
   const s = await setup(admin, later);
   const add = await admin.api.post(`/api/projects/${s.projectId}/members`, { userId: member.user.id, role: "VIEWER" });
   expect(add.status).toBe(201);
@@ -73,6 +72,13 @@ test("AC5: the server refuses a Viewer's link change", async ({ admin, member, l
   expect(r.status).toBe(403);
 });
 
-test.skip("AC5 (screen): the Links section renders read-only for a Viewer", () => {
-  // Reason: the Linear issue says this is NOT verified; the exact read-only markup is not specified, so it needs a person's look.
+test("AC5 (screen): the Links section renders read-only for a Viewer", async ({ admin, member, later }) => {
+  const s = await setup(admin, later);
+  expect((await postTaskCurrent(admin, s.taskId, "links", { organisationId: s.org })).status).toBe(201);
+  expect((await admin.api.post(`/api/projects/${s.projectId}/members`, { userId: member.user.id, role: "VIEWER" })).status).toBe(201);
+  await member.page.goto(`/projects/${s.projectId}?task=${s.taskId}`);
+  const dialog = member.page.getByRole("dialog");
+  await expect(dialog.getByRole("link", { name: zz("org"), exact: false })).toBeVisible();
+  await expect(dialog.getByRole("button", { name: "Remove link", exact: true })).toHaveCount(0);
+  await expect(dialog.getByRole("button", { name: "+ Link", exact: true })).toHaveCount(0);
 });
