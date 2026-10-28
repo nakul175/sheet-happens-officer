@@ -124,6 +124,13 @@ jobs:
           npx playwright test tests/e2e/stories/APL-2539.spec.ts tests/e2e/stories/APL-2540.spec.ts tests/e2e/stories/SHO-3040.spec.ts
           --grep 'APL-2539 > AC1:|APL-2540 > AC1:|APL-2540 > AC4:|SHO-3040 >'
           | tee validation-locators.log
+      - name: SHO-2759 exact Won and Lost refusal browser cases
+        env:
+          # CI-only throwaway fixture password; the spec's admin uses SHO_ADMIN_* above.
+          SHO_QA_PASS: correct-horse-9
+        run: |
+          npx playwright test tests/e2e/stories/APL-2691.spec.ts --reporter=json > validation-2759-browser.json
+          node -e 'const r=require("./validation-2759-browser.json");const s=r.stats;if(!s||s.expected!==3||s.unexpected!==0||s.skipped!==0||s.flaky!==0||(r.errors??[]).length){console.error("SHO-2759 requires 3 passed, zero failures/skips",s);process.exit(1)}console.log("SHO-2759: 3 passed, zero failures/skips")' | tee validation-2759-browser.log
       - name: Linux built-entry refusal and drain receipt
         run: node scripts/acceptance/release12-drain-receipt.mjs release12-drain.json | tee validation-drain.log
       - name: Seed comments fixture in isolated CI database only
@@ -166,6 +173,7 @@ jobs:
           path: |
             scoped4-live-gate.json
             validation-*.log
+            validation-2759-browser.json
             release12-drain.json
             test-results/e2e
             workload-ui-previews/
