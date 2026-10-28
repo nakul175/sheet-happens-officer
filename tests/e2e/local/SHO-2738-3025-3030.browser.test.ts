@@ -389,6 +389,75 @@ describe("SHO-2616: real browser history closes a task without dropping drafts",
   }, 180000);
 });
 
+describe("SHO-2616 AC2: Back closes the real navigation and Move to overlays", () => {
+  it("Back closes the phone More menu, returns focus, then leaves the screen normally", async () => {
+    const ctx = await signedIn(root.email, { width: 390, height: 844 }, true), page = await ctx.newPage();
+    try {
+      await page.goto("/team", { waitUntil: "load", timeout: 120000 });
+      await page.goto(`/projects/${projectId}`, { waitUntil: "load", timeout: 120000 });
+      const more = page.getByRole("button", { name: "More", exact: true });
+      await more.click();
+      const menu = page.getByRole("menu", { name: "More", exact: true }); await menu.waitFor();
+      await page.evaluate(() => history.back()); await menu.waitFor({ state: "detached" });
+      expect(new URL(page.url()).pathname).toBe(`/projects/${projectId}`);
+      expect(await more.evaluate(el => el === document.activeElement)).toBe(true);
+      await page.goBack(); await page.waitForURL("**/team");
+    } finally { await ctx.close(); }
+  }, 180000);
+
+  it("Back closes the tablet drawer before navigating away", async () => {
+    const ctx = await signedIn(root.email, { width: 800, height: 900 }, true), page = await ctx.newPage();
+    try {
+      await page.goto("/team", { waitUntil: "load", timeout: 120000 });
+      await page.goto(`/projects/${projectId}`, { waitUntil: "load", timeout: 120000 });
+      const menu = page.getByRole("button", { name: "Open menu", exact: true }); await menu.click();
+      expect(await menu.getAttribute("aria-expanded")).toBe("true");
+      await page.evaluate(() => history.back());
+      await page.waitForFunction(() => document.querySelector('.burger')?.getAttribute('aria-expanded') === 'false');
+      expect(new URL(page.url()).pathname).toBe(`/projects/${projectId}`);
+      expect(await menu.evaluate(el => el === document.activeElement)).toBe(true);
+      await page.goBack(); await page.waitForURL("**/team");
+    } finally { await ctx.close(); }
+  }, 180000);
+
+  it("Back and Cancel consume the Move to sheet entry without moving the task or leaving a duplicate page", async () => {
+    const ctx = await signedIn(root.email, { width: 390, height: 844 }, true), page = await ctx.newPage();
+    try {
+      await page.goto("/team", { waitUntil: "load", timeout: 120000 });
+      await page.goto(`/projects/${projectId}?view=board`, { waitUntil: "load", timeout: 120000 });
+      const opener = page.getByRole("button", { name: `Move to… "ZZ-TEST 2738 task ${RUN}"`, exact: true });
+      await opener.click();
+      const sheet = page.getByRole("dialog", { name: /^Move to…/ }); await sheet.waitFor();
+      await page.evaluate(() => history.back()); await sheet.waitFor({ state: "detached" });
+      expect(await opener.evaluate(el => el === document.activeElement)).toBe(true);
+      expect(new URL(page.url()).searchParams.get("view")).toBe("board");
+      await opener.click(); await sheet.waitFor();
+      await sheet.getByRole("button", { name: "Cancel", exact: true }).click(); await sheet.waitFor({ state: "detached" });
+      await page.goBack(); await page.waitForURL("**/team");
+    } finally { await ctx.close(); }
+  }, 180000);
+
+  it("More hands off to Concierge after closing its own entry; Back then closes only Concierge", async () => {
+    const ctx = await signedIn(root.email, { width: 390, height: 844 }, true), page = await ctx.newPage();
+    const before = await root.c.get("/api/concierge/state");
+    expect(before.status).toBe(200);
+    try {
+      await page.goto("/team", { waitUntil: "load", timeout: 120000 });
+      await page.goto(`/projects/${projectId}`, { waitUntil: "load", timeout: 120000 });
+      await page.getByRole("button", { name: "More", exact: true }).click();
+      await page.getByRole("menuitem", { name: "Concierge", exact: true }).click();
+      const sheet = page.getByRole("dialog", { name: "Concierge", exact: true }); await sheet.waitFor({ timeout: 30000 });
+      expect(await page.getByRole("menu", { name: "More", exact: true }).count()).toBe(0);
+      await page.evaluate(() => history.back()); await sheet.waitFor({ state: "detached" });
+      expect(new URL(page.url()).pathname).toBe(`/projects/${projectId}`);
+      await page.goBack(); await page.waitForURL("**/team");
+    } finally {
+      try { expect((await root.c.patch("/api/concierge/preferences", { hidden: before.json.hidden })).status).toBe(200); }
+      finally { await ctx.close(); }
+    }
+  }, 180000);
+});
+
 describe("SHO-3030: the deactivate dialog and its summary, mounted by the real Team screen", () => {
   it("the dialog and the summary explain the fallback by the role, not by membership", async () => {
     const ctx = await signedIn(root.email, { width: 1280, height: 900 });

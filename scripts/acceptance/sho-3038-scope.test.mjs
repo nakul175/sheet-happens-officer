@@ -6,6 +6,10 @@ import { readFileSync } from "node:fs";
 
 const production = "ee59582dffcbd8cc3067e689b2bb73cf63781cb7";
 const allowed = new Set([
+  "src/lib/overlay-history.ts",
+  "src/components/use-overlay-back.ts",
+  "tests/overlay-history-2616.test.ts",
+  "src/components/MoveSheet.tsx",
   "src/instrumentation-client.ts",
   "src/lib/overlay-popstate.ts",
   "tests/overlay-popstate-2616.test.ts",
