@@ -1,7 +1,7 @@
 // APL-2658. Each CRM_VISIBLE mode is its own `next start` process and its own environment.
 // Michael's scenario names the open mode `on`. crmMode() treats every value other than `admins` and `off`
 // as everyone, so the server for that row is started with CRM_VISIBLE=on.
-// Run with `npm run test:crm-modes` after `npm run build`. `npm test` does not start these servers.
+// Run with `npm run test:modes` after `npm run build`. `npm test` does not start these servers.
 // A missing build, or a mode that never answers /api/health, fails this file.
 import "dotenv/config";
 import { spawn, type ChildProcess } from "node:child_process";

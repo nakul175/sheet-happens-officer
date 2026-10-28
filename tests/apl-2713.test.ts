@@ -1,6 +1,6 @@
 // APL-2713. A task handed to an approver (previousAssigneeId → Waiting on others) must use the same
 // CRM project filter as open work. These call myTasks in this process and flip CRM_VISIBLE here.
-// The live server per mode is tests/apl-2713-crm-modes.test.ts (npm run test:crm-modes).
+// The live server per mode is tests/apl-2713-crm-modes.mode.test.ts (npm run test:modes).
 // Seeding goes through the app, which must be running with the CRM visible (the default).
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { actor } from "./concierge-helpers";

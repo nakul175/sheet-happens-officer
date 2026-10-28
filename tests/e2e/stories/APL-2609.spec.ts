@@ -1,5 +1,5 @@
 // APL-2609 (SHO-BUG-2) and APL-2726 (CRM_VISIBLE enforcement) story spec for one running server, in Playwright.
-// tests/e2e/local/APL-2609.spec.ts starts one server per mode and stays the full check (`npm run test:crm-modes`).
+// tests/e2e/local/APL-2609.mode.test.ts starts one server per mode and stays the full check (`npm run test:modes`).
 // This file runs against BASE_URL (or TASKBOARD_URL), the way staging-e2e.yml runs every story spec.
 // CRM_VISIBLE names the server's mode (all, admins or off; staging runs all). Every test asserts what that mode must show,
 // so a server whose lever differs from CRM_VISIBLE fails here. Nothing is skipped except by the SHO_QA_PASS gate.
