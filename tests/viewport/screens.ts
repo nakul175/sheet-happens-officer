@@ -30,6 +30,7 @@ export const SCREENS: Screen[] = [
   { name: "Project trash", path: (i) => `/projects/${i.project}/trash` },
   { name: "Project activity", path: (i) => `/projects/${i.project}/activity` },
   { name: "Task page", path: (i) => `/tasks/${i.task}`, wait: 'textarea[aria-label="Title"]' },
+  { name: "Workload", path: () => "/workload", wait: ".workload tbody tr" },
   { name: "Team", path: () => "/team" },
   { name: "Team member", path: (i) => `/team/${i.person}` },
   { name: "Approvals", path: () => "/approvals" },
