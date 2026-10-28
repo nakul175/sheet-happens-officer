@@ -59,9 +59,10 @@ beforeAll(async () => {
   projectId = p.id;
   taskId = await task(root, projectId, {
     title: `ZZ-TEST 2738 task ${RUN}`,
+    dueDate: new Date(Date.now() + 3 * 86400_000).toISOString().slice(0, 10),
     description: Array.from({ length: 30 }, (_, i) => `A line of description ${i}.`).join("\n"),
   });
-  longTaskId = await task(root, projectId, { title: longTitle });
+  longTaskId = await task(root, projectId, { title: longTitle, dueDate: new Date(Date.now() + 3 * 86400_000).toISOString().slice(0, 10) });
   expect((await patchTask(root, longTaskId, { blocked: true, blockedReason: longReason })).status).toBe(200);
 
   // The name is the throw-away label; the address has to be a real-shaped alias, so it is given explicitly.
@@ -70,7 +71,7 @@ beforeAll(async () => {
   teamProjectName = `ZZ-TEST 3030 project ${RUN}`;
   const tp = await ownedProject([{ who: leaving, role: "EDITOR" }, { who: named, role: "VIEWER" }], teamProjectName);
   teamProjectId = tp.id;
-  await task(root, teamProjectId, { title: `ZZ-TEST 3030 task ${RUN}` });
+  await task(root, teamProjectId, { title: `ZZ-TEST 3030 task ${RUN}`, dueDate: new Date(Date.now() + 3 * 86400_000).toISOString().slice(0, 10) });
 }, 240000);
 
 afterAll(async () => {
@@ -80,11 +81,17 @@ afterAll(async () => {
     expect(readback.status).toBe(200);
     expect(readback.json.project.archived).toBe(true);
   }));
+  const people = await Promise.allSettled([leaving, named].filter(Boolean).map(async who => {
+    const current = await root.c.get(`/api/team/${who.id}`);
+    expect(current.status).toBe(200);
+    if (current.json.person.status !== "DEACTIVATED") expect((await root.c.post(`/api/team/${who.id}/deactivate`, { reassign: "leaders" })).status).toBe(200);
+    expect((await root.c.get(`/api/team/${who.id}`)).json.person.status).toBe("DEACTIVATED");
+  }));
   const closed = await Promise.allSettled(ownedContexts.map(context => context.close()));
   await browser?.close();
   mkdirSync(evidenceDirectory, { recursive: true });
   writeFileSync(`${evidenceDirectory}/cleanup.json`, JSON.stringify({ ownedProjects, archives: results.map(r => r.status), contexts: closed.map(r => r.status) }, null, 2));
-  const failures = [...results, ...closed].filter((r): r is PromiseRejectedResult => r.status === "rejected");
+  const failures = [...results, ...people, ...closed].filter((r): r is PromiseRejectedResult => r.status === "rejected");
   if (failures.length) throw new AggregateError(failures.map(r => r.reason), "Run-owned mobile browser fixture cleanup failed");
 }, 120000);
 
@@ -432,7 +439,7 @@ describe("SHO-2616 AC2: Back closes the real navigation and Move to overlays", (
     try {
       await page.goto("/team", { waitUntil: "load", timeout: 120000 });
       await page.goto(`/projects/${projectId}`, { waitUntil: "load", timeout: 120000 });
-      const trigger = page.getByRole("button", { name: "Account and utilities", exact: true });
+      const trigger = page.getByRole("button", { name: /^Account and utilities, \S+$/ });
       const more = page.getByRole("button", { name: "More", exact: true });
       await more.click();
       await page.getByRole("menu", { name: "More", exact: true }).waitFor({ state: "visible" });

@@ -8,6 +8,8 @@ const allowed=new Set(['src/lib/suite-oauth.ts','src/components/TaskModal.tsx','
  'prisma/migrations/20261028223000_holy_sheet_checklist_tasks/migration.sql']);
 test('SHO-3062 extends the reviewed launcher and preserves canonical auth and release gates',()=>{
  execFileSync('git',['merge-base','--is-ancestor',base,'HEAD']);
+ // SHO-2909: add only the reviewed accessibility prerequisite; retain integration and protected-surface gates.
+ for (const path of ['src/app/(app)/Shell.tsx', 'src/app/(app)/projects/projects.css', 'src/components/PeopleSelect.tsx']) allowed.add(path);
  const files=execFileSync('git',['diff','--name-only',base,'--','src','prisma'],{encoding:'utf8'}).trim().split('\n').filter(Boolean);
  for(const file of files)assert.ok(allowed.has(file),`Unexpected runtime change: ${file}`);
  assert.equal(execFileSync('git',['diff','c2700202ed0789dab36a33dfde2a0edff57f07c0','--','scripts/acceptance/holy3-launcher-scope.test.mjs'],{encoding:'utf8'}),'');

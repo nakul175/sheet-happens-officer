@@ -190,14 +190,14 @@ export function Shell({ user, children }: { user: Me; children: React.ReactNode 
         <div className="main">
           <header className="top">
             <button className="burger" aria-label="Open menu" aria-expanded={open} onClick={() => closeTopOverlayThen(() => setMenu(path))}>☰</button>
-            <Link href="/" className="top-brand" aria-label="Sheet Happens Officer home"><img src="/logo-icon-reversed.svg" alt="" /><span className="wordmark-full" aria-hidden="true">Sheet Happens Officer</span><span className="wordmark-short" aria-hidden="true">SHO</span></Link>
+            <Link href="/" className="top-brand" aria-label="SHO, Sheet Happens Officer home"><img src="/logo-icon-reversed.svg" alt="" /><span className="wordmark-full" aria-hidden="true">Sheet Happens Officer</span><span className="wordmark-short" aria-hidden="true">SHO</span></Link>
             <nav className="primary-nav" aria-label="Primary">{primary.map(([href, label]) => <Link key={href} href={href} aria-current={here(href) ? "page" : undefined}>{label}</Link>)}</nav>
             <span className="grow" />
             <SearchButton />
             <NewTaskButton />
             <Bell />
             <div className="account-menu" ref={utility}>
-              <button className="account-trigger" aria-label="Account and utilities" aria-expanded={utilityOpen} aria-controls="account-utilities" onClick={() => { if (utilityOpen) closeUtility(); else closeTopOverlayThen(() => { setUtilityAt(path); utility.current?.querySelector<HTMLButtonElement>(".account-trigger")?.focus(); }); }}><span className="av">{initials(user.name)}</span></button>
+              <button className="account-trigger" aria-label={`Account and utilities, ${initials(user.name)}`} aria-expanded={utilityOpen} aria-controls="account-utilities" onClick={() => { if (utilityOpen) closeUtility(); else closeTopOverlayThen(() => { setUtilityAt(path); utility.current?.querySelector<HTMLButtonElement>(".account-trigger")?.focus(); }); }}><span className="av">{initials(user.name)}</span></button>
               {utilityOpen && <div className="account-options" id="account-utilities" aria-label="Account and utilities" onClickCapture={e => followOverlayLink(e, closeUtility, href => router.push(href))}>
                 <strong>{user.name}</strong><small>{roleLabel(user.orgRole)}</small>
                 <Link href="/profile">Profile</Link>
