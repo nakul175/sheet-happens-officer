@@ -2,7 +2,7 @@
 import { act, createElement as h } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, expect, it, vi } from "vitest";
-const nav = vi.hoisted(() => ({ push: vi.fn(), query: "", path: "/my-tasks" }));
+const nav = vi.hoisted(() => ({ push: vi.fn(), replace: vi.fn(), query: "", path: "/my-tasks" }));
 vi.mock("next/navigation", () => ({ useRouter: () => nav, useSearchParams: () => new URLSearchParams(nav.query), usePathname: () => nav.path }));
 vi.mock("@/components/extras/Extras", () => ({ useExtras: () => ({ canAdd: false, openAdd: vi.fn() }) }));
 vi.mock("@/components/TaskModal", () => ({ TaskModal: ({ onClose }: { onClose: () => void }) => h("button", { onClick: onClose }, "Close fixture task") }));
@@ -12,7 +12,7 @@ import MyTasks from "../src/app/(app)/MyTasks";
 let root: Root | undefined;
 const item = { id: "task", title: "Full task name", dueDate: "2020-01-01", priority: "MEDIUM", canClose: true, project: { id: "project", name: "Full project name" }, parent: null, awaitingApproval: false, relation: "ASSIGNEE", updatedAt: "2026-10-27T00:00:00Z" };
 async function mount(which: "home" | "tasks", partialError = false) {
-  document.body.innerHTML = '<div id="root"></div>'; nav.push.mockReset();
+  document.body.innerHTML = '<div id="root"></div>'; nav.push.mockReset(); nav.replace.mockReset();
   globalThis.fetch = vi.fn(async input => {
     const path = String(input);
     const data = path.includes("panel=tasks") ? { asOf: "2026-10-27T00:00:00Z", open: 300, overdue: 12, awaiting: 1, priorities: [item], approvals: [] } : path.includes("panel=projects") ? { asOf: "2026-10-27T00:00:00Z", total: 10, items: [{ id: "project", name: "Full project name", total: 8, completed: 3, percent: 38 }] } : path.includes("panel=activity") ? { items: [], asOf: "2026-10-27T00:00:00Z" } : { waitingOnMe: [], waitingOnOthers: [], overdue: [item], next7: [], later: [] };
@@ -40,7 +40,8 @@ it("My tasks preserves route/filter context when opening and closing an overlay"
   nav.query = "filter=overdue&task=task";
   await mount("tasks");
   await act(async () => [...document.querySelectorAll('button')].find(b => b.textContent === "Close fixture task")!.click());
-  expect(nav.push).toHaveBeenCalledWith("/my-tasks?filter=overdue", { scroll: false });
+  expect(nav.replace).toHaveBeenCalledWith("/my-tasks?filter=overdue", { scroll: false });
+  expect(nav.push).not.toHaveBeenCalled(); // fallback Close must not create another task/background history pair
   await act(async () => document.querySelector<HTMLElement>('.item.click')!.click());
   expect(nav.push).toHaveBeenCalledWith("/my-tasks?filter=overdue&task=task", { scroll: false });
 });
