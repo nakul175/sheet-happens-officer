@@ -74,6 +74,15 @@ test.describe("qa:TC missing APL-2691", { tag: "@APL-2691" }, () => {
       const made = await openTasks(admin, deal.id, next, 20);
 
       await admin.page.goto(`/projects/${deal.id}`);
+      // Read the order the person actually sees, before the dialog hides the task rows.
+      const titlePattern = new RegExp(made.titles.map(title => title.replace(/[.*+?^$(){}|[\]\\]/g, "\\$&")).join("|"));
+      const taskRows = admin.page.getByRole("button").filter({ hasText: titlePattern });
+      await expect(taskRows).toHaveCount(21);
+      const displayedTitles = (await taskRows.allTextContents()).map(text => {
+        const matches = made.titles.filter(title => text.includes(title));
+        expect(matches).toHaveLength(1);
+        return matches[0];
+      });
       await admin.page.getByRole("group", { name: "Stage" }).getByRole("button", { name: "Won", exact: true }).click();
       const dialog = admin.page.getByRole("dialog", { name: "Move to Won" });
       const alert = dialog.getByRole("alert");
@@ -82,7 +91,8 @@ test.describe("qa:TC missing APL-2691", { tag: "@APL-2691" }, () => {
       await expect(alert).toContainText("21 open tasks", { timeout: WITHIN });
       const shown = (await dialog.getByRole("link").allTextContents()).map((t: string) => t.trim());
       expect(shown).toHaveLength(20);
-      expect(made.titles.filter((t) => !shown.includes(t))).toHaveLength(1);
+      expect(shown).toEqual(displayedTitles.slice(0, 20));
+      expect(made.titles.filter((t) => !shown.includes(t))).toEqual([displayedTitles[20]]);
 
       const after = await projectOf(admin, deal.id);
       expect(after.deal.stage.name).toBe("Lead");
