@@ -18,9 +18,14 @@
 .settings-panel .item .t { min-width: min(150px, 100%); }
 .settings-panel .item .t :is(b,small) { overflow-wrap: anywhere; }
 .project-settings-view :is(button,input,select) { font-family: inherit; }
-.project-settings-view :is(.in,.btn), .settings-panel select { min-height: 40px; max-width: 100%; }
-.settings-classification label { display: flex; flex-direction: column; gap: 8px; margin: 16px 0; }
-.settings-classification select { font: inherit; padding: 10px 12px; border: 1px solid var(--field); border-radius: 8px; background: white; }
+.shell .project-settings-view :is(.in,.btn,select) { min-height: 44px; max-width: 100%; }
+.settings-classification { display: flex; flex-direction: column; align-items: stretch; gap: 16px; }
+.settings-classification > h2, .settings-classification > .hint { margin: 0; }
+.settings-classification > b { font-size: 16px; line-height: 1.4; }
+.settings-classification label { display: flex; flex-direction: column; align-items: stretch; gap: 8px; margin: 0; font-size: 14px; }
+.settings-classification > .hint { font-size: 13px; line-height: 1.5; }
+.settings-classification > .btn { align-self: flex-start; justify-content: flex-start; min-width: 0; max-width: 100%; white-space: normal; text-align: left; line-height: 1.4; }
+.settings-classification select { width: 100%; box-sizing: border-box; font: inherit; padding: 10px 12px; border: 1px solid var(--field); border-radius: 8px; background: white; }
 .settings-panel .box { margin-top: 16px; background: transparent; }
 .project-settings-view :is(a,button,input,select):focus-visible { outline: 2px solid var(--navy); outline-offset: 3px; }
 @media (max-width: 767px) {
