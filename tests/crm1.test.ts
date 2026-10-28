@@ -21,7 +21,7 @@ async function deal(creator: Account, leader: Account, o: { orgId?: string; bid?
   const orgId = o.orgId ?? (await org(creator));
   const body = {
     name: `Deal ${Date.now()}-${seq++}`, organisationId: orgId, pipelineId: (o.bid ? p.bid : p.proactive).id, leaderId: leader.id,
-    force: true, whyPursue: "Strong fit", nextStep: { title: "Call the buyer", dueDate: istDate(3) },
+    force: !o.extra?.name, whyPursue: "Strong fit", nextStep: { title: "Call the buyer", dueDate: istDate(3) },
     ...(o.bid ? { submissionDeadline: istDate(20) } : {}), ...o.extra,
   };
   const r = await creator.c.post("/api/deals", body);

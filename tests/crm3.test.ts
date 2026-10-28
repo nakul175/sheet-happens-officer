@@ -152,7 +152,7 @@ describe("convert a task to a deal (12.2)", () => {
     const lead = await account("dlead3");
     const org = await newOrg(lead);
     const pr = await pipes(lead);
-    const d = await lead.c.post("/api/deals", { name: `D ${Date.now()}`, organisationId: org, pipelineId: pr.proactive.id, leaderId: lead.id, whyPursue: "x", nextStep: { title: "n", dueDate: istDate(2) } });
+    const d = await lead.c.post("/api/deals", { force: true, name: `D ${Date.now()}`, organisationId: org, pipelineId: pr.proactive.id, leaderId: lead.id, whyPursue: "x", nextStep: { title: "n", dueDate: istDate(2) } });
     const t = await task(lead, d.json.deal.id, { title: "Inside", dueDate: istDate(2) });
     expect((await lead.c.post(`/api/tasks/${t}/convert`, await gate(lead))).status).toBe(400);
   });
@@ -163,7 +163,7 @@ describe("Home data (13.1, 12.5 AC3)", () => {
     const lead = await account("hlead");
     const org = await newOrg(lead);
     const pr = await pipes(lead);
-    const d = await lead.c.post("/api/deals", { name: `HD ${Date.now()}`, organisationId: org, pipelineId: pr.proactive.id, leaderId: lead.id, whyPursue: "x", nextStep: { title: "n", dueDate: istDate(2) } });
+    const d = await lead.c.post("/api/deals", { force: true, name: `HD ${Date.now()}`, organisationId: org, pipelineId: pr.proactive.id, leaderId: lead.id, whyPursue: "x", nextStep: { title: "n", dueDate: istDate(2) } });
     const id = d.json.deal.id as string;
     const mine = (await lead.c.get("/api/my-tasks")).json;
     const item = [...mine.overdue, ...mine.next7, ...mine.later].find((x: { project: { id: string } }) => x.project.id === id);
