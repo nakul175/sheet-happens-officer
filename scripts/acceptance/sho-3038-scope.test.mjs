@@ -6,6 +6,10 @@ import { readFileSync } from "node:fs";
 
 const production = "ee59582dffcbd8cc3067e689b2bb73cf63781cb7";
 const allowed = new Set([
+  "tests/jobs-reminders-crm.test.ts",
+  "tests/jobs-reminders-crm-server.test.ts",
+  "tests/reminder-cleanup-2751.ts",
+  "tests/reminder-cleanup-2751.test.ts",
   "tests/cascade-reminder-2610.test.ts",
   // SHO-2589: Workload stays disabled pending complete acceptance and hidden-CRM policy resolution.
   "src/lib/workload.ts",
