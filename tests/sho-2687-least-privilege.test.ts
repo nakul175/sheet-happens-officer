@@ -117,6 +117,8 @@ describe("SHO-2687 least-privilege database rollout contract", () => {
     expect(wrapper).toContain("SHO_2687_RELEASE_ROOT");
     expect(wrapper).toContain("selected service release changed");
     expect(wrapper).toContain('current_health="$(curl -fsS');
+    expect(wrapper).toContain("for attempt in $(seq 1 30)");
+    expect(wrapper).toContain("Health endpoint did not become ready within 30 seconds.");
     expect(wrapper).toContain('health.release !== expected');
     expect(wrapper).toContain('systemctl is-active --quiet');
     expect(wrapper).toContain("prisma migrate status");

@@ -16,7 +16,7 @@ remain certificate-verifying modes.
 
 ## SHO-2687 staged rollout
 
-The checked-in operator is `scripts/ops/sho-2687-apply.sh`. It never prints either URL or a password. The selected environment file and the password file must be root-only (`0600` or stricter). `apply` is idempotent and writes a root-only receipt. If validation fails after replacing the runtime environment, the previous environment file is restored automatically.
+The checked-in operator is `scripts/ops/sho-2687-apply.sh`. It never prints either URL or a password. The selected environment file and the password file must be root-only (`0600` or stricter). `apply` is idempotent and writes a root-only receipt. If validation fails after replacing the runtime environment, the previous environment file is restored automatically. After restart it waits up to 30 seconds for health readiness, while still requiring the exact pinned release and migration status.
 
 Run the same sequence against isolated staging first, using staging-specific files, role, service and health URL:
 
