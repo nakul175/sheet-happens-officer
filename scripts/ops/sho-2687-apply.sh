@@ -46,7 +46,14 @@ if [[ "$MODE" == apply ]]; then
   trap rollback_runtime ERR
   systemctl restart "$SHO_2687_SERVICE"
   systemctl is-active --quiet "$SHO_2687_SERVICE"
-  health="$(curl -fsS "$SHO_2687_HEALTH_URL")"
+  health=""
+  for attempt in $(seq 1 30); do
+    if health="$(curl -fsS "$SHO_2687_HEALTH_URL" 2>/dev/null)"; then
+      break
+    fi
+    sleep 1
+  done
+  [[ -n "$health" ]] || { echo "Health endpoint did not become ready within 30 seconds." >&2; false; }
   HEALTH_JSON="$health" node - <<'NODE'
 const health = JSON.parse(process.env.HEALTH_JSON);
 const expected = process.env.SHO_2687_EXPECTED_RELEASE;
