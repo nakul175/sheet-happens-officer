@@ -150,7 +150,7 @@ export async function visibleOpenDealCounts(user: Actor, orgIds: string[]) {
   return new Map([...seen].map(([k, v]) => [k, v.size]));
 }
 
-export async function listOrganisations(user: Actor, o: { q?: string; kind?: string; archived?: boolean } = {}) {
+export async function listOrganisations(user: Actor, o: { q?: string; kind?: string; country?: string; archived?: boolean } = {}) {
   requireCrm(user);
   const u = await me(user);
   const rows = await db.organisation.findMany({
@@ -159,6 +159,7 @@ export async function listOrganisations(user: Actor, o: { q?: string; kind?: str
       archivedAt: o.archived ? { not: null } : null,
       ...(o.q?.trim() ? { name: { contains: o.q.trim(), mode: "insensitive" } } : {}),
       ...(o.kind ? { kind: { equals: o.kind, mode: "insensitive" } } : {}),
+      ...(o.country ? { country: { equals: o.country, mode: "insensitive" } } : {}),
     },
     orderBy: { name: "asc" },
     take: 500,

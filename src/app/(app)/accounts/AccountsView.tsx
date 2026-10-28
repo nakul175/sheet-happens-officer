@@ -44,10 +44,10 @@ export default function AccountsView({ initialQuery = "", initialKind = "", init
   const [q, setQ] = useState(initial.q);
   const [kind, setKind] = useState(initial.kind);
   const [adding, setAdding] = useState(false);
-  const qs = [q ? `q=${encodeURIComponent(q)}` : "", kind ? `kind=${encodeURIComponent(kind)}` : ""].filter(Boolean).join("&");
+  const qs = [q ? `q=${encodeURIComponent(q)}` : "", kind ? `kind=${encodeURIComponent(kind)}` : "", country ? `country=${encodeURIComponent(country)}` : ""].filter(Boolean).join("&");
   const { data, loading, error, reload } = useGet<{ organisations: O[] }>(`/api/orgs${qs ? `?${qs}` : ""}`);
   const kinds = useGet<{ organisations: O[] }>("/api/orgs");
-  const rows = (data?.organisations ?? []).filter(o => !country || o.country === country);
+  const rows = data?.organisations ?? [];
   return (
     <Page title="Accounts" sub="Organisations you can start deals with" actions={<button className="btn" onClick={() => setAdding(true)}>+ New organisation</button>}>
       <ScreenViews screen="ACCOUNTS" state={{ ...initial, q, kind, country }} selected={selectedView} />
@@ -57,7 +57,7 @@ export default function AccountsView({ initialQuery = "", initialKind = "", init
           <option value="">All kinds</option>
           {[...new Set((kinds.data?.organisations ?? []).map((o) => o.kind).filter((k): k is string => !!k))].sort().map((k) => <option key={k} value={k}>{k}</option>)}
         </select>
-        <select className="in" aria-label="Country" value={country} onChange={e => setCountry(e.target.value)}><option value="">All countries</option>{[...new Set((kinds.data?.organisations ?? []).map(o => o.country).filter((c): c is string => !!c))].sort().map(c => <option key={c}>{c}</option>)}</select>
+        <input className="in" aria-label="Country" placeholder="All countries" list="account-countries" maxLength={100} value={country} onChange={e => setCountry(e.target.value)} /><datalist id="account-countries">{[...new Set((kinds.data?.organisations ?? []).map(o => o.country).filter((c): c is string => !!c))].sort().map(c => <option key={c} value={c} />)}</datalist>
       </div>
       {loading && !data && <Skeleton />}
       {error && <div className="err" role="alert">{error}</div>}
