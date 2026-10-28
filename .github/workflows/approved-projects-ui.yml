@@ -141,7 +141,7 @@ jobs:
           | tee validation-scoped-stories.log
       - name: SHO-3133 distinct Proactive outcomes at desktop and phone widths
         run: |
-          npx playwright test tests/e2e/stories/APL-2523.spec.ts --grep 'AC5: Proactive keeps' --reporter=json > validation-3133-outcomes.json
+          npx playwright test tests/e2e/stories/APL-2523.spec.ts --grep 'AC5: Proactive keeps' --output=test-results/sho-3133-outcomes --reporter=json > validation-3133-outcomes.json
           node -e 'const r=require("./validation-3133-outcomes.json"),s=r.stats;if(!s||s.expected!==1||s.unexpected||s.skipped||s.flaky||(r.errors??[]).length)throw Error("Distinct outcomes browser case must pass without skips");console.log("SHO-3133: distinct outcomes passed at1280 and390")' | tee validation-3133-outcomes.log
       - name: Existing public offline and no-private-cache browser acceptance
         run: npx playwright test tests/e2e/stories/APL-2558.spec.ts --grep "AC4:" | tee validation-offline.log
@@ -172,3 +172,4 @@ jobs:
             validation-3133-outcomes.json
             release12-drain.json
             test-results/e2e
+            test-results/sho-3133-outcomes/
