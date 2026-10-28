@@ -44,6 +44,7 @@ export async function createProject(user: Actor, input: { name: string; descript
 
 /** SHO-US-3.2. Members see their own projects; Admins see all. Archived ones only when asked for. */
 export async function listProjects(user: Actor, archived: boolean) {
+  // project-lookup-ok: project type, archive state and explicit Admin or project-member access scope this list
   const projects = await db.project.findMany({
     where: {
       // SHO-US-10.4: deals have their own place; this list is for type Project only.
