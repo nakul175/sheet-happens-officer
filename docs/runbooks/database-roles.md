@@ -16,7 +16,7 @@ remain certificate-verifying modes.
 
 ## SHO-2687 staged rollout
 
-The checked-in operator is `scripts/ops/sho-2687-apply.sh`. It never prints either URL or a password. The selected environment file and the password file must be root-only (`0600` or stricter). `apply` is idempotent and writes a root-only receipt. If validation fails after replacing the runtime environment, the previous environment file is restored automatically.
+The checked-in operator is `scripts/ops/sho-2687-apply.sh`. It never prints either URL or a password. The selected environment file and the password file must be root-only (`0600` or stricter). `apply` is idempotent and writes a root-only receipt. If validation fails after replacing the runtime environment, the previous environment file is restored automatically. After restart it waits up to 30 seconds for health readiness, while still requiring the exact pinned release and migration status.
 
 Run the same sequence against isolated staging first, using staging-specific files, role, service and health URL:
 
@@ -47,6 +47,10 @@ reset its password. The operator then requires the role to exist and never
 attempts SQL role creation or password/attribute changes. It still proves that
 the managed role has no elevated attributes, role memberships, schema `CREATE`, or
 DDL capability before switching the runtime.
+
+DigitalOcean managed-database passwords are provider-generated at 24
+characters. The operator accepts that fixed minimum only in managed-role mode;
+self-managed roles retain the 32-character minimum.
 
 PostgreSQL's default `INHERIT` attribute is permitted only because the operator
 independently requires zero role memberships. With no memberships there is no

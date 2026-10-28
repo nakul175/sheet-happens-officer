@@ -88,6 +88,12 @@ describe("SHO-2687 least-privilege database rollout contract", () => {
     expect(runbook).toContain("SHO_2687_MANAGED_ROLE=true");
   });
 
+  it("accepts provider-generated managed-user passwords without weakening self-managed roles", () => {
+    expect(implementation).toContain("const minimumPasswordLength = managedRole ? 24 : 32");
+    expect(implementation).toContain("password.length < minimumPasswordLength");
+    expect(implementation).toContain("for a managed role");
+  });
+
   it("enforces DML-only rights and forbidden role attributes", () => {
     for (const privilege of ["SELECT", "INSERT", "UPDATE", "DELETE"]) {
       expect(implementation).toContain(privilege);
@@ -111,6 +117,8 @@ describe("SHO-2687 least-privilege database rollout contract", () => {
     expect(wrapper).toContain("SHO_2687_RELEASE_ROOT");
     expect(wrapper).toContain("selected service release changed");
     expect(wrapper).toContain('current_health="$(curl -fsS');
+    expect(wrapper).toContain("for attempt in $(seq 1 30)");
+    expect(wrapper).toContain("Health endpoint did not become ready within 30 seconds.");
     expect(wrapper).toContain('health.release !== expected');
     expect(wrapper).toContain('systemctl is-active --quiet');
     expect(wrapper).toContain("prisma migrate status");
