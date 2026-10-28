@@ -4,16 +4,16 @@ import { type Who } from "../support";
 // Needs the optional plain Member account (SHO_MEMBER_EMAIL / SHO_MEMBER_PASS): every notice goes to a second person.
 // AC5 uses a nakul17+ Leader and a nakul17+ leaver, then deactivates only those two.
 // Data: every project and task is named "ZZ-TEST ..."; projects are archived afterwards.
-// The file skips only when SHO_QA_PASS is unset.
+// The file fails when SHO_QA_PASS is unset.
 import type { APIRequestContext, Browser } from "@playwright/test";
-import { test, expect, zz, type Api } from "../support";
-import { PASS, alias, archiveProject, deactivate, passwordOk, signInAs, signUp, sinkToken } from "./qa";
+import { expect, zz, type Api } from "../support";
+import { test, PASS, alias, archiveProject, deactivate, passwordOk, signInAs, signUp, sinkToken } from "./qa";
 
 // qa:TC uses the AC id already on the test. Pam has not published a separate hash for these cases.
 const tag = (id: string) => ({ annotation: [{ type: "ac", description: id }, { type: "qa:TC", description: id }] });
 
 test.beforeAll(() => {
-  test.skip(!PASS, "Set SHO_QA_PASS (the password for nakul17+ aliases).");
+  if (!PASS) throw new Error("Set SHO_QA_PASS (the password for nakul17+ aliases).");
   if (!passwordOk(PASS)) throw new Error("SHO_QA_PASS must be at least 8 characters with a letter and a number.");
 });
 
@@ -49,7 +49,7 @@ async function withMember(admin: Who, member: Who, label: string, later: (f: () 
   return { id: p, name: zz(label) };
 }
 const mk = async (who: Who, p: string, title: string, extra: Record<string, unknown> = {}) => {
-  const r = await who.api.post(`/api/projects/${p}/tasks`, { title, ...extra });
+  const r = await who.api.post(`/api/projects/${p}/tasks`, { dueDate: new Date(Date.now() + 3 * 86400_000).toISOString().slice(0, 10), title, ...extra });
   expect(r.status, JSON.stringify(r.json)).toBe(201);
   return r.json.task.id as string;
 };

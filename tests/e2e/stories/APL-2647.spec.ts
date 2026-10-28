@@ -1,11 +1,13 @@
 // SHO-BUG-12 Slow load shows 'Could not reach the server' because in-flight status 0 is treated as a network failure (Linear APL-2647, PR #12).
 // The issue's four unnumbered acceptance criteria are taken in order as AC1 to AC4.
 // Slow and failed loads are simulated in the browser (route interception), so nothing on the server is touched.
-// The file skips only when SHO_QA_PASS is unset. Slow loads expect the skeleton (the fix is on main).
+// The file fails when SHO_QA_PASS is unset. Slow loads expect the skeleton (the fix is on main).
 import type { Page } from "@playwright/test";
-import { test, expect, zz } from "../support";
-import { newProject, newTask, type Who } from "../g2";
-import { PASS, passwordOk } from "./qa";
+import { expect, zz } from "../support";
+import { newProject, newTask as legacyNewTask, type Who } from "../g2";
+const newTask: typeof legacyNewTask = (who, projectId, body = {}) =>
+  legacyNewTask(who, projectId, { dueDate: new Date(Date.now() + 3 * 86400_000).toISOString().slice(0, 10), ...body });
+import { test, PASS, passwordOk } from "./qa";
 
 // qa:TC uses the AC id already on the test. Pam has not published a separate hash for these cases.
 const tag = (id: string) => ({ annotation: [{ type: "ac", description: id }, { type: "qa:TC", description: id }] });
@@ -16,7 +18,7 @@ const skeleton = (page: Page) => page.getByRole("status").filter({ hasText: "Loa
 const skeletonRows = (page: Page) => skeleton(page).getByText("Loading", { exact: true });
 
 test.beforeAll(() => {
-  test.skip(!PASS, "Set SHO_QA_PASS (the password for nakul17+ aliases).");
+  if (!PASS) throw new Error("Set SHO_QA_PASS (the password for nakul17+ aliases).");
   if (!passwordOk(PASS)) throw new Error("SHO_QA_PASS must be at least 8 characters with a letter and a number.");
 });
 

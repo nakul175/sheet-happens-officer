@@ -4,18 +4,18 @@ import { type Who, type Page } from "../support";
 // AC5 90-day retention, AC6 no email.
 // Note: AC1 says the latest 30; SHO-US-14.13 changed the panel to 50 at a time with Load older. The test follows 14.13.
 // Data: every project and task is named "ZZ-TEST ..."; projects are archived afterwards.
-// The file skips only when SHO_QA_PASS is unset. AC5 ages one row this test created and runs purge-old on localhost only.
+// The file fails when SHO_QA_PASS is unset. AC5 ages one row this test created and runs purge-old on localhost only.
 import { execFileSync } from "node:child_process";
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
-import { test, expect, zz, BASE_URL, type Api } from "../support";
-import { PASS, passwordOk } from "./qa";
+import { expect, zz, BASE_URL, type Api } from "../support";
+import { test, PASS, passwordOk } from "./qa";
 
 // qa:TC uses the AC id already on the test. Pam has not published a separate hash for these cases.
 const tag = (id: string) => ({ annotation: [{ type: "ac", description: id }, { type: "qa:TC", description: id }] });
 
 test.beforeAll(() => {
-  test.skip(!PASS, "Set SHO_QA_PASS (the password for nakul17+ aliases).");
+  if (!PASS) throw new Error("Set SHO_QA_PASS (the password for nakul17+ aliases).");
   if (!passwordOk(PASS)) throw new Error("SHO_QA_PASS must be at least 8 characters with a letter and a number.");
 });
 
@@ -74,7 +74,7 @@ const withMember = async (admin: Who, member: Who, label: string, later: (f: () 
   return p;
 };
 const mk = async (who: Who, p: string, title: string, extra: Record<string, unknown> = {}) => {
-  const r = await who.api.post(`/api/projects/${p}/tasks`, { title, ...extra });
+  const r = await who.api.post(`/api/projects/${p}/tasks`, { dueDate: new Date(Date.now() + 3 * 86400_000).toISOString().slice(0, 10), title, ...extra });
   expect(r.status, JSON.stringify(r.json)).toBe(201);
   return r.json.task.id as string;
 };

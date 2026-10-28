@@ -1,9 +1,9 @@
 // SHO-US-14.2 Honest loading, empty, error and offline states (Linear APL-2561).
 // Network failures and slow loads are simulated in the browser (route interception), so nothing on the server is touched.
-// The file skips only when SHO_QA_PASS is unset. The slow project load expects the skeleton (APL-2647 is on main).
-import { test, expect, zz } from "../support";
+// The file fails when SHO_QA_PASS is unset. The slow project load expects the skeleton (APL-2647 is on main).
+import { expect, zz } from "../support";
 import { newProject } from "../g2";
-import { PASS, passwordOk } from "./qa";
+import { test, PASS, passwordOk } from "./qa";
 
 // qa:TC uses the AC id already on the test. Pam has not published a separate hash for these cases.
 const tag = (id: string) => ({ annotation: [{ type: "ac", description: id }, { type: "qa:TC", description: id }] });
@@ -14,7 +14,7 @@ const skeleton = (page: import("@playwright/test").Page) => page.getByRole("stat
 const skeletonRows = (page: import("@playwright/test").Page) => skeleton(page).getByText("Loading", { exact: true });
 
 test.beforeAll(() => {
-  test.skip(!PASS, "Set SHO_QA_PASS (the password for nakul17+ aliases).");
+  if (!PASS) throw new Error("Set SHO_QA_PASS (the password for nakul17+ aliases).");
   if (!passwordOk(PASS)) throw new Error("SHO_QA_PASS must be at least 8 characters with a letter and a number.");
 });
 
@@ -29,7 +29,7 @@ async function project(admin: import("../support").Who, later: (f: () => Promise
 test("AC1: a load slower than 400 ms shows a skeleton of the layout (My tasks)", tag("APL-2561 AC1"), async ({ admin }) => {
   const page = admin.page;
   await page.route("**/api/my-tasks", async (r) => { await new Promise((x) => setTimeout(x, 2500)); await r.continue(); });
-  await page.goto("/", { waitUntil: "commit" });
+  await page.goto("/my-tasks", { waitUntil: "commit" });
   const skel = skeleton(page);
   await expect(skel).toHaveAttribute("aria-busy", "true", { timeout: 2000 });
   await expect(skeletonRows(page)).not.toHaveCount(0, { timeout: 2000 });
@@ -81,7 +81,7 @@ test("AC4: an empty My tasks says what the screen is for and offers the next ste
   await newProject(admin, later, { label: "14.2 plate" }); // "+ New task" only renders when there is a project this person can add to
   const page = admin.page;
   await page.route("**/api/my-tasks", (r) => r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ overdue: [], next7: [], later: [], waitingOnMe: [], waitingOnOthers: [] }) }));
-  await page.goto("/");
+  await page.goto("/my-tasks");
   await expect(page.getByText("Nothing on your plate.")).toBeVisible();
   await expect(page.getByText(/Tasks assigned to you, or that you collaborate on, show up here/)).toBeVisible();
   await expect(page.getByRole("link", { name: "Open a project" })).toBeVisible();

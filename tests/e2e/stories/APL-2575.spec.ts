@@ -1,16 +1,16 @@
 import { type Who, type Later } from "../support";
 // SHO-US-14.16 Approvals view (APL-2575). Needs the optional Member account: the Member sends, the Super Admin approves.
 // AC3 uses a nakul17+ approver who starts with nothing waiting, then deactivates that person.
-// The file skips only when SHO_QA_PASS is unset.
+// The file fails when SHO_QA_PASS is unset.
 import type { APIRequestContext, Browser } from "@playwright/test";
-import { test, expect, zz, type Api } from "../support";
-import { PASS, alias, deactivate, passwordOk, signInAs, signUp, sinkToken } from "./qa";
+import { expect, zz, type Api } from "../support";
+import { test, PASS, alias, deactivate, passwordOk, signInAs, signUp, sinkToken } from "./qa";
 
 // qa:TC uses the AC id already on the test. Pam has not published a separate hash for these cases.
 const tag = (id: string) => ({ annotation: [{ type: "ac", description: id }, { type: "qa:TC", description: id }] });
 
 test.beforeAll(() => {
-  test.skip(!PASS, "Set SHO_QA_PASS (the password for nakul17+ aliases).");
+  if (!PASS) throw new Error("Set SHO_QA_PASS (the password for nakul17+ aliases).");
   if (!passwordOk(PASS)) throw new Error("SHO_QA_PASS must be at least 8 characters with a letter and a number.");
 });
 
@@ -36,7 +36,7 @@ async function held(admin: Who, member: Who, later: Later, label: string) {
   later(() => admin.api.post(`/api/projects/${id}/archive`));
   expect((await admin.api.post(`/api/projects/${id}/members`, { userId: member.user.id, role: "EDITOR" })).status).toBe(201);
   const title = zz(label);
-  const t = (await admin.api.post(`/api/projects/${id}/tasks`, { title, assigneeId: member.user.id, approverId: admin.user.id })).json.task.id as string;
+  const t = (await admin.api.post(`/api/projects/${id}/tasks`, { dueDate: new Date(Date.now() + 3 * 86400_000).toISOString().slice(0, 10), title, assigneeId: member.user.id, approverId: admin.user.id })).json.task.id as string;
   expect((await member.api.post(`/api/tasks/${t}/send-for-approval`)).status).toBe(200);
   return { id, t, title };
 }
@@ -45,7 +45,7 @@ const ids = (xs: { id: string }[]) => xs.map((x) => x.id);
 test("AC1: tasks awaiting my approval sit in a group at the top of My tasks with their age in days", tag("APL-2575 AC1"), async ({ admin, member, later }) => {
   const { t, title } = await held(admin, member, later, "waiting");
   const p = admin.page;
-  await p.goto("/");
+  await p.goto("/my-tasks");
   const group = p.getByRole("region", { name: "Waiting on me" });
   await expect(group).toBeVisible();
   await expect(group.getByText(title)).toBeVisible();
@@ -59,7 +59,7 @@ test("AC1: tasks awaiting my approval sit in a group at the top of My tasks with
 test("AC2: Close in the row closes the task in one step and offers Undo", tag("APL-2575 AC2"), async ({ admin, member, later }) => {
   const { t, title } = await held(admin, member, later, "close");
   const p = admin.page;
-  await p.goto("/");
+  await p.goto("/my-tasks");
   await p.getByRole("button", { name: `Close "${title}"` }).click();
   await expect(p.getByRole("button", { name: `Close "${title}"` })).toHaveCount(0);
   expect((await admin.api.get(`/api/tasks/${t}`)).json.task.completedAt).toBeTruthy();
@@ -75,12 +75,12 @@ test("AC3: with nothing waiting, the group is absent", tag("APL-2575 AC3"), asyn
   expect((await admin.api.post(`/api/projects/${id}/members`, { userId: member.user.id, role: "EDITOR" })).status).toBe(201);
   expect((await admin.api.post(`/api/projects/${id}/members`, { userId: approver.user.id, role: "EDITOR" })).status).toBe(201);
   const title = zz("gone");
-  const t = (await admin.api.post(`/api/projects/${id}/tasks`, { title, assigneeId: member.user.id, approverId: approver.user.id })).json.task.id as string;
+  const t = (await admin.api.post(`/api/projects/${id}/tasks`, { dueDate: new Date(Date.now() + 3 * 86400_000).toISOString().slice(0, 10), title, assigneeId: member.user.id, approverId: approver.user.id })).json.task.id as string;
   expect((await member.api.post(`/api/tasks/${t}/send-for-approval`)).status).toBe(200);
   expect((await approver.api.post(`/api/tasks/${t}/send-back`)).status).toBe(200);
   const rest = (await approver.api.get("/api/my-tasks")).json.waitingOnMe as unknown[];
   expect(rest, "this approver started with nothing waiting").toEqual([]);
-  await approver.page.goto("/");
+  await approver.page.goto("/my-tasks");
   await expect(approver.page.getByRole("region", { name: "Waiting on me" })).toHaveCount(0);
   await expect(approver.page.getByText(title)).toHaveCount(0);
   void id;
@@ -92,7 +92,7 @@ test("AC4: a task I sent for approval appears under 'Waiting on others' and not 
   expect(ids(mine.waitingOnOthers)).toContain(t);
   expect([...mine.overdue, ...mine.next7, ...mine.later, ...(mine.waitingOnMe ?? [])].some((x: { id: string }) => x.id === t)).toBe(false);
   const p = member.page;
-  await p.goto("/");
+  await p.goto("/my-tasks");
   await expect(p.getByRole("region", { name: "Waiting on others" }).getByText(title)).toBeVisible();
   await expect(p.getByRole("region", { name: "Waiting on me" }).getByText(title)).toHaveCount(0);
 });

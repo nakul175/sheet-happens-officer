@@ -1,14 +1,14 @@
 import { type Who, type Later, type Page } from "../support";
 // SHO-US-14.13 Notification triage (APL-2572). Needs the optional Member account (it receives the notices).
-// The file skips only when SHO_QA_PASS is unset. AC3 always checks the Unread tab (APL-2672 is on main).
-import { test, expect, zz } from "../support";
-import { PASS, passwordOk } from "./qa";
+// The file fails when SHO_QA_PASS is unset. AC3 always checks the Unread tab (APL-2672 is on main).
+import { expect, zz } from "../support";
+import { test, PASS, passwordOk } from "./qa";
 
 // qa:TC uses the AC id already on the test. Pam has not published a separate hash for these cases.
 const tag = (id: string) => ({ annotation: [{ type: "ac", description: id }, { type: "qa:TC", description: id }] });
 
 test.beforeAll(() => {
-  test.skip(!PASS, "Set SHO_QA_PASS (the password for nakul17+ aliases).");
+  if (!PASS) throw new Error("Set SHO_QA_PASS (the password for nakul17+ aliases).");
   if (!passwordOk(PASS)) throw new Error("SHO_QA_PASS must be at least 8 characters with a letter and a number.");
 });
 
@@ -18,7 +18,7 @@ async function give(admin: Who, member: Who, later: Later, n: number, label: str
   const id = r.json.project.id as string;
   later(() => admin.api.post(`/api/projects/${id}/archive`));
   expect((await admin.api.post(`/api/projects/${id}/members`, { userId: member.user.id, role: "EDITOR" })).status).toBe(201);
-  for (let i = 0; i < n; i++) expect((await admin.api.post(`/api/projects/${id}/tasks`, { title: `${zz(label)} ${i}`, assigneeId: member.user.id })).status).toBe(201);
+  for (let i = 0; i < n; i++) expect((await admin.api.post(`/api/projects/${id}/tasks`, { dueDate: new Date(Date.now() + 3 * 86400_000).toISOString().slice(0, 10), title: `${zz(label)} ${i}`, assigneeId: member.user.id })).status).toBe(201);
   return id;
 }
 const unread = async (member: Who) => (await member.api.get("/api/notifications")).json.unread as number;

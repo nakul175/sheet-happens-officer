@@ -1,17 +1,17 @@
 // SHO-BUG-9 Notification bell spoken label omits visible unread count, WCAG 2.5.3 (Linear APL-2643, PR #18). Acceptance criteria AC1 to AC3.
 // The unread count is set in the browser (tests/e2e/helpers/jim-bell.ts), so no notification is created and no real notice is read.
-// The file skips only when SHO_QA_PASS is unset. Over 99 unread the name must be "Notifications, 99+ unread" (the fix on main).
+// The file fails when SHO_QA_PASS is unset. Over 99 unread the name must be "Notifications, 99+ unread" (the fix on main).
 import AxeBuilder from "@axe-core/playwright";
 import type { Page } from "@playwright/test";
-import { test, expect } from "../support";
+import { expect } from "../support";
 import { withUnread } from "../helpers/jim-bell";
-import { PASS, passwordOk } from "./qa";
+import { test, PASS, passwordOk } from "./qa";
 
 // qa:TC uses the AC id already on the test. Pam has not published a separate hash for these cases.
 const tag = (id: string) => ({ annotation: [{ type: "ac", description: id }, { type: "qa:TC", description: id }] });
 
 test.beforeAll(() => {
-  test.skip(!PASS, "Set SHO_QA_PASS (the password for nakul17+ aliases).");
+  if (!PASS) throw new Error("Set SHO_QA_PASS (the password for nakul17+ aliases).");
   if (!passwordOk(PASS)) throw new Error("SHO_QA_PASS must be at least 8 characters with a letter and a number.");
 });
 
