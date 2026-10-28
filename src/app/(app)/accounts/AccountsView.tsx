@@ -1,5 +1,7 @@
 "use client";
 import Link from "next/link";
+import { ScreenViews } from "@/components/ScreenViews";
+import { screenFilters, type ScreenFilters } from "@/lib/screen-view-state";
 import { useState } from "react";
 import { api, useGet } from "@/components/api";
 import { Field, Modal, Skeleton } from "@/components/ui";
@@ -36,22 +38,26 @@ function NewOrg({ onClose, onDone }: { onClose: () => void; onDone: (id: string)
   );
 }
 
-export default function AccountsView({ initialQuery = "", initialKind = "" }: { initialQuery?: string; initialKind?: string }) {
-  const [q, setQ] = useState(initialQuery);
-  const [kind, setKind] = useState(initialKind);
+export default function AccountsView({ initialQuery = "", initialKind = "", initialFilters, selectedView }: { initialQuery?: string; initialKind?: string; initialFilters?: ScreenFilters; selectedView?: string }) {
+  const initial = initialFilters ?? screenFilters.parse({ q: initialQuery, kind: initialKind });
+  const [country, setCountry] = useState(initial.country);
+  const [q, setQ] = useState(initial.q);
+  const [kind, setKind] = useState(initial.kind);
   const [adding, setAdding] = useState(false);
   const qs = [q ? `q=${encodeURIComponent(q)}` : "", kind ? `kind=${encodeURIComponent(kind)}` : ""].filter(Boolean).join("&");
   const { data, loading, error, reload } = useGet<{ organisations: O[] }>(`/api/orgs${qs ? `?${qs}` : ""}`);
   const kinds = useGet<{ organisations: O[] }>("/api/orgs");
-  const rows = data?.organisations ?? [];
+  const rows = (data?.organisations ?? []).filter(o => !country || o.country === country);
   return (
     <Page title="Accounts" sub="Organisations you can start deals with" actions={<button className="btn" onClick={() => setAdding(true)}>+ New organisation</button>}>
+      <ScreenViews screen="ACCOUNTS" state={{ ...initial, q, kind, country }} selected={selectedView} />
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12, minWidth: 0 }}>
-        <input className="in" style={{ maxWidth: 360, minWidth: 0 }} placeholder="Search organisations" aria-label="Search organisations" value={q} onChange={(e) => setQ(e.target.value)} />
+        <input className="in" style={{ maxWidth: 360, minWidth: 0 }} maxLength={200} placeholder="Search organisations" aria-label="Search organisations" value={q} onChange={(e) => setQ(e.target.value)} />
         <select className="in" style={{ maxWidth: 200, minWidth: 0 }} aria-label="Kind" value={kind} onChange={(e) => setKind(e.target.value)}>
           <option value="">All kinds</option>
           {[...new Set((kinds.data?.organisations ?? []).map((o) => o.kind).filter((k): k is string => !!k))].sort().map((k) => <option key={k} value={k}>{k}</option>)}
         </select>
+        <select className="in" aria-label="Country" value={country} onChange={e => setCountry(e.target.value)}><option value="">All countries</option>{[...new Set((kinds.data?.organisations ?? []).map(o => o.country).filter((c): c is string => !!c))].sort().map(c => <option key={c}>{c}</option>)}</select>
       </div>
       {loading && !data && <Skeleton />}
       {error && <div className="err" role="alert">{error}</div>}

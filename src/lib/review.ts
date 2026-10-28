@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { isAdmin, type Actor } from "@/lib/access";
 import { WORKSTREAM_DEAL, crmVisible, requireCrm } from "@/lib/crm";
 import { formatDueDate, startOfTodayIST } from "@/lib/dates";
+import type { ScreenFilters } from "@/lib/screen-view-state";
 import { listDeals } from "@/lib/deals";
 
 export const IDEA_STALE_DAYS = 30;
@@ -13,9 +14,14 @@ export async function leadsAnyDeal(user: Actor) {
   return !!(await db.projectMember.findFirst({ where: { userId: user.id, role: "LEADER", project: { typeId: WORKSTREAM_DEAL, archivedAt: null } }, select: { projectId: true } }));
 }
 
-export async function pipelineReview(user: Actor) {
+export async function pipelineReview(user: Actor, filter?: ScreenFilters) {
   requireCrm(user);
-  const deals = (await listDeals(user)).filter((d) => !d.archived);
+  const deals = (await listDeals(user)).filter((d) => !d.archived
+    && (!filter?.pipelineId || d.pipeline?.id === filter.pipelineId)
+    && (!filter?.stageId || d.stage?.id === filter.stageId)
+    && (!filter?.organisationId || d.organisation?.id === filter.organisationId)
+    && (!filter?.leaderId || d.leader?.id === filter.leaderId)
+    && (!filter?.atRisk || d.stalled || d.needsNextStep || (d.nextStep?.dueDate && d.nextStep.dueDate < formatDueDate(startOfTodayIST())!)));
   const today = startOfTodayIST();
   const todayStr = formatDueDate(today)!;
   const pick = (d: (typeof deals)[number]) => ({ id: d.id, name: d.name, stage: d.stage?.name ?? null, pipeline: d.pipeline?.name ?? null, organisation: d.organisation, leader: d.leader, nextStep: d.nextStep });
@@ -40,9 +46,9 @@ export async function pipelineReview(user: Actor) {
 
   // Pipeline counts by stage; unknown value is never zero.
   const pipes = await db.pipeline.findMany({ where: { typeId: WORKSTREAM_DEAL }, orderBy: { position: "asc" }, include: { stages: { orderBy: { position: "asc" } } } });
-  const counts = pipes.map((p) => ({
+  const counts = pipes.filter(p => !filter?.pipelineId || p.id === filter.pipelineId).map((p) => ({
     id: p.id, name: p.name,
-    stages: p.stages.map((s) => {
+    stages: p.stages.filter(s => !filter?.stageId || s.id === filter.stageId).map((s) => {
       const here = deals.filter((d) => d.stage?.id === s.id);
       const sums = new Map<string, number>();
       let withoutValue = 0;

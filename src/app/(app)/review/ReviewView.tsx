@@ -1,5 +1,7 @@
 "use client";
 import Link from "next/link";
+import { ScreenViews } from "@/components/ScreenViews";
+import { screenFilters, type ScreenFilters } from "@/lib/screen-view-state";
 import { Skeleton } from "@/components/ui";
 import { useState } from "react";
 import { api, dueLabel, isOverdue, useGet } from "@/components/api";
@@ -29,14 +31,27 @@ function Deals({ title, rows, empty, red }: { title: string; rows: DealRow[]; em
   );
 }
 
-export default function ReviewView() {
+export default function ReviewView({ initialFilters = screenFilters.parse({}), selectedView }: { initialFilters?: ScreenFilters; selectedView?: string }) {
+  const [filters, setFilters] = useState(initialFilters);
+  const filterQuery = new URLSearchParams(Object.entries(filters).filter(([,v]) => v !== "" && v !== false).map(([k,v]) => [k, String(v)]));
+  const pipelines = useGet<{ pipelines: { id: string; name: string; stages: { id: string; name: string }[] }[] }>("/api/deals/pipelines");
+  const orgs = useGet<{ organisations: { id: string; name: string }[] }>("/api/orgs");
+  const team = useGet<{ people: { id: string; name: string }[] }>("/api/team");
   const me = useMe();
   void me;
-  const { data, loading, error, reload } = useGet<R>("/api/review");
+  const { data, loading, error, reload } = useGet<R>(`/api/review?${filterQuery}`);
   const [conv, setConv] = useState<Idea | null>(null);
   async function drop(t: Idea) { await api("POST", `/api/tasks/${t.id}/idea`, { isIdea: false }); reload(); }
   return (
     <Page title="Pipeline review" sub="What needs a decision this week">
+      <ScreenViews screen="REVIEW" state={filters} selected={selectedView} />
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 12 }}>
+        <select className="in" aria-label="Pipeline" value={filters.pipelineId} onChange={e => setFilters({ ...filters, pipelineId: e.target.value, stageId: "" })}><option value="">All pipelines</option>{pipelines.data?.pipelines.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select>
+        <select className="in" aria-label="Stage" value={filters.stageId} onChange={e => setFilters({ ...filters, stageId: e.target.value })}><option value="">All stages</option>{pipelines.data?.pipelines.filter(p => !filters.pipelineId || p.id === filters.pipelineId).flatMap(p => p.stages).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select>
+        <select className="in" aria-label="Organisation" value={filters.organisationId} onChange={e => setFilters({ ...filters, organisationId: e.target.value })}><option value="">All organisations</option>{orgs.data?.organisations.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}</select>
+        <select className="in" aria-label="Leader" value={filters.leaderId} onChange={e => setFilters({ ...filters, leaderId: e.target.value })}><option value="">All Leaders</option>{team.data?.people.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select>
+        <label><input type="checkbox" checked={filters.atRisk} onChange={e => setFilters({ ...filters, atRisk: e.target.checked })} /> At risk</label>
+      </div>
       {loading && !data && <Skeleton />}
       {error && <div className="err" role="alert">{error}</div>}
       {data && (

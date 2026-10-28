@@ -57,6 +57,7 @@ model Workspace {
   projects      Project[]
   tasks         Task[]
   organisations Organisation[]
+  screenViews   ScreenSavedView[]
   contacts      Contact[]
   notes         Note[]
 }
@@ -96,6 +97,7 @@ model User {
   auditLogs           AuditLog[]
   chatMessages        ChatMessage[]
   modelUsage          ModelUsage[]
+  screenViews         ScreenSavedView[]
   savedViews          SavedView[]
   authoredComments    Comment[]          @relation("CommentAuthor")
 
@@ -168,6 +170,7 @@ model Project {
   sections       Section[]
   tasks          Task[]
   actionLogs     ActionLog[]
+  screenViews    ScreenSavedView[]
   savedViews     SavedView[]
 
   @@index([workspaceId])
@@ -608,4 +611,25 @@ model SavedView {
 
   @@unique([userId, projectId, name])
   @@index([userId, projectId, position])
+}
+
+// SHO-2594: shared filters, never a snapshot of record data or permissions.
+model ScreenSavedView {
+  id          String    @id @default(cuid())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  screen      String
+  name        String
+  scope       String    @default("PRIVATE")
+  projectId   String?
+  project     Project?  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  state       Json
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([workspaceId, screen, scope])
+  @@index([userId, screen])
+  @@index([projectId])
 }

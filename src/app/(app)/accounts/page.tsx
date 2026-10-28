@@ -1,12 +1,7 @@
 import AccountsView from "./AccountsView";
+import { screenPageState } from "../screen-view-page";
 export const metadata = { title: "Accounts · Sheet Happens Officer" };
-
-function one(v: string | string[] | undefined) {
-  return (Array.isArray(v) ? v[0] : v) ?? "";
-}
-
-/** The query is read on the server, so the first paint is the accounts page and not an empty suspense hole. */
 export default async function Page({ searchParams }: PageProps<"/accounts">) {
-  const sp = await searchParams;
-  return <AccountsView initialQuery={one(sp.q)} initialKind={one(sp.kind)} />;
+  const state = await screenPageState("ACCOUNTS", await searchParams);
+  return <AccountsView key={state.key} initialFilters={state.initialFilters} selectedView={state.selectedView} />;
 }
