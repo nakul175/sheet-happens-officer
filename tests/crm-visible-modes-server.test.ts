@@ -15,6 +15,7 @@ import { db } from "../src/lib/db";
 import { HIDDEN_DEAL_TEXT } from "../src/lib/feed";
 import { QUICK_ACTIONS } from "../src/lib/concierge/reads";
 import { istDate, PW } from "./helpers";
+import { startCrmModeSeedApi } from "./crm-mode-seed-api";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 // Run-scoped so a shared test database cannot mix this seed with another spec's "Acme renewal".
@@ -376,8 +377,7 @@ describe("CRM_VISIBLE modes are tested against a real server per mode", () => {
     const member = await signIn(open!, `member ${tag}`, memberEmail);
     const admin = await signIn(open!, `admin ${tag}`, adminEmail);
     seed.userIds.push(member.id, admin.id);
-    // Role lives on the user row, which every mode's server reads. Skip the shared Super Admin account.
-    await db.user.update({ where: { id: admin.id }, data: { orgRole: "ADMIN" } });
+    await promoteToAdmin(open!, admin.id);
 
     const pipes = await call(open!.base, member.cookie, "GET", "/api/deals/pipelines");
     expect(pipes.status, pipes.text).toBe(200);
@@ -398,8 +398,10 @@ describe("CRM_VISIBLE modes are tested against a real server per mode", () => {
     expect((made.json?.deal as { name: string }).name).toBe(dealName);
     const task = await db.task.findFirst({ where: { projectId: dealId, deletedAt: null }, select: { id: true } });
     expect(task?.id).toBeTruthy();
-    await db.projectMember.create({ data: { projectId: dealId, userId: admin.id, role: "EDITOR" } });
-    await db.taskCollaborator.create({ data: { taskId: task!.id, userId: admin.id } });
+    const joined = await call(open!.base, member.cookie, "POST", `/api/projects/${dealId}/members`, { userId: admin.id, role: "EDITOR" });
+    expect(joined.status, joined.text).toBe(201);
+    const collaborated = await call(open!.base, member.cookie, "POST", `/api/tasks/${task!.id}/collaborators`, { userId: admin.id });
+    expect(collaborated.status, collaborated.text).toBe(201);
     // Bell rows store the deal name, a deal task title and the deal id. APL-2698 checks the
     // name. APL-2716 checks that a hidden reader gets one generic sentence and no deal link.
     const outsiderEmail = `outsider.${tag}@aplyd.com`.toLowerCase();
@@ -407,34 +409,43 @@ describe("CRM_VISIBLE modes are tested against a real server per mode", () => {
     const outsider = await signIn(open!, `outsider ${tag}`, outsiderEmail);
     seed.userIds.push(outsider.id);
     const taskTitle = `ZZ-TEST Acme kickoff ${runId}`;
-    const kickoffTaskId = `kickoff-${tag}`;
     const plainTitle = `Pack the cartons ${tag}`;
-    const plainTaskId = `plain-${tag}`;
-    const dealRow = await db.project.findUnique({ where: { id: dealId }, select: { workspaceId: true } });
-    expect(dealRow?.workspaceId).toBeTruthy();
-    const plain = await db.project.create({ data: { workspaceId: dealRow!.workspaceId, name: `Packing ${tag}`, typeId: "wst_project" } });
+    const plainMade = await call(open!.base, member.cookie, "POST", "/api/projects", { name: `ZZ-TEST Packing ${tag}`, leaderId: member.id });
+    expect(plainMade.status, plainMade.text).toBe(201);
+    const plain = plainMade.json?.project as { id: string; name: string };
     seed.plainProjectId = plain.id;
+    const plainTaskMade = await call(open!.base, member.cookie, "POST", `/api/projects/${plain.id}/tasks`, { title: plainTitle, assigneeId: member.id });
+    expect(plainTaskMade.status, plainTaskMade.text).toBe(201);
+    const plainTaskId = (plainTaskMade.json?.task as { id: string }).id;
+    const kickoffTaskId = task!.id;
     const hiddenText = HIDDEN_DEAL_TEXT;
     const stageText = `Someone moved "${dealName}" to Proposal.`;
     const nextStepText = `"${dealName}" needs a next step.`;
     const stalledText = `"${dealName}" has had no activity for 30 days.`;
     const taskText = `Someone assigned you "${taskTitle}".`;
     const plainText = `Someone assigned you "${plainTitle}".`;
-    // ADDED_TO_PROJECT is written with the deal's projectId (projects.ts addMember). The packing
-    // project is the non-deal control: its sentence and href stay in every mode.
+    // The helper API records ADDED_TO_PROJECT with each exact projectId. The packing project is
+    // the non-deal control: its sentence and href stay in every mode.
     const addedDealText = `Someone added you to "${dealName}" as editor.`;
-    const addedPlainText = `Someone added you to "Packing ${tag}" as editor.`;
-    await db.notification.createMany({
-      data: [member.id, admin.id, outsider.id].flatMap((recipientId) => [
-        { recipientId, type: "DEAL_STAGE_CHANGED", projectId: dealId, data: { project: dealName, stage: "Proposal" } },
-        { recipientId, type: "DEAL_NEEDS_NEXT_STEP", projectId: dealId, data: { project: dealName } },
-        { recipientId, type: "DEAL_STALLED", projectId: dealId, data: { project: dealName } },
-        { recipientId, type: "TASK_ASSIGNED", projectId: dealId, taskId: kickoffTaskId, data: { title: taskTitle, project: dealName } },
-        { recipientId, type: "ADDED_TO_PROJECT", projectId: dealId, data: { project: dealName, role: "EDITOR" } },
-        { recipientId, type: "TASK_ASSIGNED", projectId: plain.id, taskId: plainTaskId, data: { title: plainTitle, project: `Packing ${tag}` } },
-        { recipientId, type: "ADDED_TO_PROJECT", projectId: plain.id, data: { project: `Packing ${tag}`, role: "EDITOR" } },
-      ]),
-    });
+    const addedPlainText = `Someone added you to "${plain.name}" as editor.`;
+    const fixtureApi = await startCrmModeSeedApi();
+    try {
+      await fixtureApi.replaceNotifications({
+        people: [member, admin, outsider].map((person) => ({ ...person, email: person === member ? memberEmail : person === admin ? adminEmail : outsiderEmail })),
+        projects: [{ id: dealId, name: dealName }, { id: plain.id, name: plain.name }],
+        notices: [member.id, admin.id, outsider.id].flatMap((recipientId) => [
+          { recipientId, type: "DEAL_STAGE_CHANGED", projectId: dealId, data: { project: dealName, stage: "Proposal" } },
+          { recipientId, type: "DEAL_NEEDS_NEXT_STEP", projectId: dealId, data: { project: dealName } },
+          { recipientId, type: "DEAL_STALLED", projectId: dealId, data: { project: dealName } },
+          { recipientId, type: "TASK_ASSIGNED", projectId: dealId, taskId: kickoffTaskId, data: { title: taskTitle, project: dealName } },
+          { recipientId, type: "ADDED_TO_PROJECT", projectId: dealId, data: { project: dealName, role: "EDITOR" } },
+          { recipientId, type: "TASK_ASSIGNED", projectId: plain.id, taskId: plainTaskId, data: { title: plainTitle, project: plain.name } },
+          { recipientId, type: "ADDED_TO_PROJECT", projectId: plain.id, data: { project: plain.name, role: "EDITOR" } },
+        ]),
+      });
+    } finally {
+      await fixtureApi.close();
+    }
 
     const people = { member, admin };
     // Pam's AC1 cases. `on` is covered below as the everyone mode (crmMode reads it as all).
@@ -828,7 +839,7 @@ describe("CRM_VISIBLE modes are tested against a real server per mode", () => {
     const admin = await signIn(open!, `ZZ-TEST admin ${runId}`, adminEmail);
     const member = await signIn(open!, `ZZ-TEST member ${runId}`, memberEmail);
     seed.userIds.push(leader.id, admin.id, member.id);
-    await db.user.update({ where: { id: admin.id }, data: { orgRole: "ADMIN" } });
+    await promoteToAdmin(open!, admin.id);
 
     const pipes = await call(open!.base, admin.cookie, "GET", "/api/deals/pipelines");
     expect(pipes.status, pipes.text).toBe(200);
