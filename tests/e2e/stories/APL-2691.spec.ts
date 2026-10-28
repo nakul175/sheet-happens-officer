@@ -49,7 +49,7 @@ async function openTasks(admin: Who, dealId: string, step: { id: string; title: 
   const ids = [step.id];
   for (let i = 0; i < extra; i++) {
     const title = zz(`open ${i}`);
-    ids.push(await newTask(admin, dealId, { title }));
+    ids.push(await newTask(admin, dealId, { title, dueDate: ymd(6) }));
     titles.push(title);
   }
   return { titles, ids };
