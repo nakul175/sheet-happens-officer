@@ -7,6 +7,7 @@ import { currentSessionId, deviceLabel, hashPassword, verifyPassword } from "@/l
 import { WORKSTREAM_DEAL, crmMode, crmVisible, projectAccess, type Actor } from "@/lib/access";
 import { idsIn, sentence, whenText } from "@/lib/activity-text";
 import { purgeExpiredComments } from "@/lib/comments";
+import { attachmentsEnabled } from "@/lib/flags";
 import { COMMENT_ACTION_PREFIX, COMMENT_NOTICE_TYPES, commentsEnabled } from "@/lib/flags";
 import { isTooOldToUndo, isUndoable } from "@/lib/undoable";
 import { passwordField } from "@/lib/schemas";
@@ -204,15 +205,16 @@ export async function projectActivity(user: Actor, projectId: string, cursor?: s
   // APL-2590 D1: with the switch off, leave out comment rows and the Undo rows that reversed one (before.action).
   // The Undo rows are matched positively and excluded by id: inside a NOT, a row with no before.action makes the
   // JSON test NULL and Postgres drops it, which hid older Undo rows too (QA #128 D3).
-  const hiddenUndoIds = commentsEnabled() ? [] : (await db.actionLog.findMany({
-    where: { projectId, action: "undo", beforeState: { path: ["action"], string_starts_with: COMMENT_ACTION_PREFIX } },
+  const hiddenPrefixes = [...(commentsEnabled() ? [] : [COMMENT_ACTION_PREFIX]), ...(attachmentsEnabled() ? [] : ["attachment."])];
+  const hiddenUndoIds = !hiddenPrefixes.length ? [] : (await db.actionLog.findMany({
+    where: { projectId, action: "undo", OR: hiddenPrefixes.map(prefix => ({ beforeState: { path: ["action"], string_starts_with: prefix } })) },
     select: { id: true },
   })).map((r) => r.id);
   const rows = await db.actionLog.findMany({
     where: {
       projectId,
       ...(mine ? { targetType: "task", targetId: { in: mine } } : {}),
-      ...(commentsEnabled() ? {} : { NOT: { action: { startsWith: COMMENT_ACTION_PREFIX } }, id: { notIn: hiddenUndoIds } }),
+      ...(hiddenPrefixes.length ? { NOT: hiddenPrefixes.map(prefix => ({ action: { startsWith: prefix } })), id: { notIn: hiddenUndoIds } } : {}),
     },
     orderBy: [{ createdAt: "desc" }, { id: "desc" }],
     take: limit + 1,

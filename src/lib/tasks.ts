@@ -12,6 +12,8 @@ import { addDays, formatDueDate, parseDueDate, startOfTodayIST } from "@/lib/dat
 import { auditTx, logAction, notify } from "@/lib/notify";
 import { reqCtx } from "@/lib/reqctx";
 import { attachCommentCounts, commentCount, purgeExpiredComments } from "@/lib/comments";
+import { attachmentsEnabled } from "@/lib/flags";
+import { purgeExpiredAttachments, removeTaskAttachmentObjects } from "@/lib/attachments";
 import { commentsEnabled } from "@/lib/flags";
 import { classifyExpectedUpdatedAt } from "@/lib/task-version";
 import { trashPurgeBefore } from "@/lib/undoable";
@@ -191,6 +193,7 @@ export async function getTask(user: Actor, id: string) {
   const viewer = { id: user.id, role: a.role };
   const task = {
     ...present(t, viewer),
+    ...(attachmentsEnabled() && a.project.typeId !== "wst_deal" ? { attachmentsEnabled: true as const } : {}),
     section: { id: section.id, name: section.name, isDone: section.isDone },
     project: { id: a.project.id, name: a.project.name, archived: !!a.project.archivedAt },
     subtaskList: subtasks.map((s) => present(s, viewer)),
@@ -620,7 +623,17 @@ export async function listTrash(user: Actor, projectId: string) {
 export async function purgeTrash(now = new Date(), only?: Prisma.TaskWhereInput) {
   const expired: Prisma.TaskWhereInput = { deletedAt: { lt: trashPurgeBefore(now) } };
   const where: Prisma.TaskWhereInput = only ? { AND: [expired, only] } : expired;
-  const r = await db.task.deleteMany({ where });
+  const r = await db.$transaction(async tx => {
+    const candidates = await tx.task.findMany({ where, select: { id: true } });
+    if (!candidates.length) return { count: 0 };
+    // Lock before storage deletion so a concurrent restore cannot revive a purged task.
+    for (const candidate of candidates) await tx.$queryRaw`SELECT 1 FROM "Task" WHERE "id" = ${candidate.id} FOR UPDATE`;
+    const remaining = await tx.task.findMany({ where: { AND: [where, { id: { in: candidates.map(t => t.id) } }] }, select: { id: true } });
+    const ids = remaining.map(t => t.id);
+    await removeTaskAttachmentObjects(tx, ids);
+    return tx.task.deleteMany({ where: { AND: [where, { id: { in: ids } }] } });
+  });
+  if (!only) await purgeExpiredAttachments(now);
   if (!only) await purgeExpiredComments(now); // APL-2590: soft-deleted comments past 30×24h; a scoped call never widens to them
   if (r.count) {
     await db.auditLog.create({

@@ -7,6 +7,7 @@ import { errorMessage, isVersionConflict, versionConflictMessage } from "@/lib/v
 import { Confirm, Modal, Skeleton } from "@/components/ui";
 import { ConvertDialog } from "@/components/ConvertDialog";
 import { TaskLinks } from "@/components/TaskLinks";
+import { TaskAttachments } from "@/components/TaskAttachments";
 import { Comments } from "@/components/Comments";
 import { closeControlOffered } from "@/lib/approver-ui";
 import { useMe } from "@/app/(app)/Shell";
@@ -20,6 +21,7 @@ type Task = {
   section: { id: string; name: string; isDone: boolean }; project: { id: string; name: string; archived: boolean };
   subtaskList: Sub[];
   links?: { id: string; organisation: { id: string; name: string } | null; contact: { id: string; name: string; organisationId: string } | null }[];
+  attachmentsEnabled?: boolean;
   commentsEnabled?: boolean;
 };
 type Project = {
@@ -270,6 +272,7 @@ export function TaskModal({ id, me, onClose, onChanged, asPage }: { id: string; 
               <button className="btn ghost sm" style={{ color: "var(--danger)", borderColor: "var(--danger-line)" }} onClick={() => setTrash(true)}>Move to Trash</button>
             </div>
           )}
+          {task.attachmentsEnabled && <TaskAttachments taskId={id} />}
           {task.commentsEnabled && <Comments taskId={id} onChanged={onChanged} />}
         </>,
       )}

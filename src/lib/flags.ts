@@ -13,3 +13,9 @@ export function commentsEnabled(env: NodeJS.ProcessEnv = process.env) {
   const raw = (env.FF_TASK_COMMENTS ?? env.FEATURE_COMMENTS ?? "false").trim().toLowerCase();
   return raw === "1" || raw === "true" || raw === "on" || raw === "yes";
 }
+
+/** SHO-2591 / 19.2a: off by default. The only supplied store is development/test-only. */
+export function attachmentsEnabled(env: NodeJS.ProcessEnv = process.env) {
+  return ["true", "1", "on", "yes"].includes((env.FF_ATTACHMENTS ?? "false").trim().toLowerCase());
+}
+export const isAttachmentAction = (action: string) => action.startsWith("attachment.");
