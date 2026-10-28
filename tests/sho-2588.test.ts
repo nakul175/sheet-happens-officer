@@ -1,3 +1,4 @@
+import { newTurn, runTool } from "../src/lib/concierge/tools";
 import { randomUUID } from "node:crypto";
 import { expect, it } from "vitest";
 import { account, admin, superAdmin, istDate } from "./helpers";
@@ -13,6 +14,12 @@ it("SHO-2588 warns across the tree and buyers, checks contacts, and permanently 
   const parent = await make(randomUUID());
   const warning = await member.c.post("/api/orgs", { name: `Ministry for Education ${tag}`, parentId: parent });
   expect(warning.status).toBe(409); expect(warning.json.existingId).toBe(first);
+  const turn = newTurn({ id: member.id, orgRole: "MEMBER" }, new Date());
+  const lookup = await runTool(turn, "find_account_records", { text: `Ministry of Education ${tag}` });
+  expect(lookup.isError).not.toBe(true);
+  expect(JSON.parse(lookup.content).untrusted_data).toMatchObject({ creationSupported: false, records: expect.arrayContaining([expect.objectContaining({ id: first })]) });
+  const forbidden = await runTool(turn, "propose_changes", { changes: [{ action: "create_organisation", name: "Must not create" }] });
+  expect(forbidden.isError).toBe(true);
   const second = await make(`Ministry for Education ${tag}`, parent);
   const email = `${tag}@example.com`;
   const c = await member.c.post(`/api/orgs/${first}/contacts`, { name: "Alexandra Smith", email });

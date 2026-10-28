@@ -52,3 +52,16 @@ export async function dismissDuplicate(user: Actor, kind: "organisation" | "cont
   if (count !== 2) throw new ApiError(404, "Records not found.");
   await db.$executeRaw`INSERT INTO "DuplicateDismissal" ("workspaceId", kind, "leftId", "rightId", "dismissedById") VALUES (${workspaceId}, ${kind}, ${leftId}, ${rightId}, ${user.id}) ON CONFLICT DO NOTHING`;
 }
+
+/** Concierge read only: name existing records instead of proposing an unsupported create. */
+export async function findAccountRecords(user: Actor, text: string) {
+  requireCrm(user);
+  const workspaceId = (await db.user.findUniqueOrThrow({ where: { id: user.id }, select: { workspaceId: true } })).workspaceId;
+  return db.$queryRaw<{ kind: string; id: string; name: string; organisationId: string }[]>`
+    SELECT 'organisation' AS kind, id, name, id AS "organisationId" FROM "Organisation"
+    WHERE "workspaceId" = ${workspaceId} AND (lower(name) = lower(${text}) OR similarity(lower(name), lower(${text})) >= ${duplicateThreshold()})
+    UNION ALL
+    SELECT 'contact', id, name, "organisationId" FROM "Contact"
+    WHERE "workspaceId" = ${workspaceId} AND "removedAt" IS NULL AND (lower(email) = lower(${text}) OR similarity(lower(name), lower(${text})) >= ${duplicateThreshold()})
+    LIMIT 10`;
+}
