@@ -242,11 +242,11 @@ describe("qa:TC missing CRM_VISIBLE modes hide handed-off deal tasks on a real s
     const pipe = pipelines.find((p) => p.key === "DEAL_PROACTIVE");
     const proposal = pipe?.stages.find((s) => s.name === STAGE);
     expect(proposal?.id).toBeTruthy();
-    const org = await call(open!.base, editor.cookie, "POST", "/api/orgs", { name: `Buyer ${tag}` });
+    const org = await call(open!.base, editor.cookie, "POST", "/api/orgs", { force: true, name: `Buyer ${tag}` });
     expect(org.status, org.text).toBe(201);
     seed.orgId = (org.json?.organisation as { id: string }).id;
     const made = await call(open!.base, editor.cookie, "POST", "/api/deals", {
-      name: DEAL_NAME, organisationId: seed.orgId, pipelineId: pipe!.id, leaderId: approver.id, whyPursue: tag,
+      force: true, name: DEAL_NAME, organisationId: seed.orgId, pipelineId: pipe!.id, leaderId: approver.id, whyPursue: tag,
       nextStep: { title: "Call the buyer", dueDate: istDate(3) },
     });
     expect(made.status, made.text).toBe(201);

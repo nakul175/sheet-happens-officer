@@ -326,11 +326,11 @@ describe("qa:TC missing APL-2609 CRM_VISIBLE hides deals on a real server per mo
     const pipe = (pipes.json?.pipelines as { id: string; key: string; stages: { id: string; name: string }[] }[]).find((p) => p.key === "DEAL_PROACTIVE");
     const proposal = pipe?.stages.find((s) => s.name === STAGE);
     expect(proposal?.id).toBeTruthy();
-    const org = await call(open.base, lead.cookie, "POST", "/api/orgs", { name: `ZZ-TEST buyer ${runId}` });
+    const org = await call(open.base, lead.cookie, "POST", "/api/orgs", { force: true, name: `ZZ-TEST buyer ${runId}` });
     expect(org.status, org.text).toBe(201);
     seed.orgId = (org.json?.organisation as { id: string }).id;
     const made = await call(open.base, lead.cookie, "POST", "/api/deals", {
-      name: DEAL_NAME, organisationId: seed.orgId, pipelineId: pipe!.id, leaderId: lead.id, whyPursue: tag,
+      force: true, name: DEAL_NAME, organisationId: seed.orgId, pipelineId: pipe!.id, leaderId: lead.id, whyPursue: tag,
       nextStep: { title: `ZZ-TEST first call ${runId}`, dueDate: istDate(3) },
     });
     expect(made.status, made.text).toBe(201);

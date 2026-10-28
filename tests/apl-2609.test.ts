@@ -137,7 +137,7 @@ describe("qa:TC missing APL-2609 CRM_VISIBLE hides deals from My tasks, search, 
     const orgId = (await lead.c.post("/api/orgs", { force: true, name: `ZZ-TEST Org ${tag}` })).json.organisation.id as string;
     made.orgId = orgId;
     const dealName = `ZZ-TEST Deal ${tag}`;
-    const deal = await lead.c.post("/api/deals", { name: dealName, organisationId: orgId, pipelineId: pipe.id, leaderId: lead.id, whyPursue: "fit", nextStep: { title: `ZZ-TEST First ${tag}`, dueDate: istDate(3) } });
+    const deal = await lead.c.post("/api/deals", { force: true, name: dealName, organisationId: orgId, pipelineId: pipe.id, leaderId: lead.id, whyPursue: "fit", nextStep: { title: `ZZ-TEST First ${tag}`, dueDate: istDate(3) } });
     expect(deal.status, JSON.stringify(deal.json)).toBe(201);
     const dealId = deal.json.deal.id as string;
     made.projectIds.push(dealId);

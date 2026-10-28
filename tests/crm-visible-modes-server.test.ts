@@ -384,12 +384,12 @@ describe("CRM_VISIBLE modes are tested against a real server per mode", () => {
     const pipelines = pipes.json?.pipelines as { id: string; key: string }[];
     const pipe = pipelines.find((p) => p.key === "DEAL_PROACTIVE");
     expect(pipe?.id).toBeTruthy();
-    const org = await call(open!.base, member.cookie, "POST", "/api/orgs", { name: `Buyer ${tag}` });
+    const org = await call(open!.base, member.cookie, "POST", "/api/orgs", { force: true, name: `Buyer ${tag}` });
     expect(org.status, org.text).toBe(201);
     const organisationId = (org.json?.organisation as { id: string }).id;
     seed.orgId = organisationId;
     const made = await call(open!.base, member.cookie, "POST", "/api/deals", {
-      name: dealName, organisationId, pipelineId: pipe!.id, leaderId: member.id, whyPursue: tag,
+      force: true, name: dealName, organisationId, pipelineId: pipe!.id, leaderId: member.id, whyPursue: tag,
       nextStep: { title: `Send the pack ${tag}`, dueDate: istDate(2) },
     });
     expect(made.status, made.text).toBe(201);
@@ -665,13 +665,13 @@ describe("CRM_VISIBLE modes are tested against a real server per mode", () => {
     expect(pipes.status, pipes.text).toBe(200);
     const pipe = (pipes.json?.pipelines as { id: string; key: string }[]).find((p) => p.key === "DEAL_PROACTIVE");
     expect(pipe?.id).toBeTruthy();
-    const org = await call(open!.base, admin.cookie, "POST", "/api/orgs", { name: `ZZ-TEST Buyer ${tag}` });
+    const org = await call(open!.base, admin.cookie, "POST", "/api/orgs", { force: true, name: `ZZ-TEST Buyer ${tag}` });
     expect(org.status, org.text).toBe(201);
     const organisationId = (org.json?.organisation as { id: string }).id;
     seed.orgIds.push(organisationId);
     // Member A is an editor. The admin leads the deal, so it shows on GET /api/team/<adminId>.
     const made = await call(open!.base, admin.cookie, "POST", "/api/deals", {
-      name: dealName, organisationId, pipelineId: pipe!.id, leaderId: admin.id, whyPursue: tag,
+      force: true, name: dealName, organisationId, pipelineId: pipe!.id, leaderId: admin.id, whyPursue: tag,
       nextStep: { title: taskTitle, dueDate: istDate(3) },
     });
     expect(made.status, made.text).toBe(201);
@@ -834,7 +834,7 @@ describe("CRM_VISIBLE modes are tested against a real server per mode", () => {
     expect(pipes.status, pipes.text).toBe(200);
     const pipe = (pipes.json?.pipelines as { id: string; key: string }[]).find((p) => p.key === "DEAL_PROACTIVE");
     expect(pipe?.id).toBeTruthy();
-    const org = await call(open!.base, admin.cookie, "POST", "/api/orgs", { name: `ZZ-TEST Buyer ${tag} deactivate` });
+    const org = await call(open!.base, admin.cookie, "POST", "/api/orgs", { force: true, name: `ZZ-TEST Buyer ${tag} deactivate` });
     expect(org.status, org.text).toBe(201);
     const organisationId = (org.json?.organisation as { id: string }).id;
     seed.orgIds.push(organisationId);

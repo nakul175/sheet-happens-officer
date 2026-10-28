@@ -219,7 +219,7 @@ beforeAll(async () => {
   expect(pipes.status, pipes.text).toBe(200);
   const pipe = (pipes.json?.pipelines as { id: string; key: string }[]).find((p) => p.key === "DEAL_PROACTIVE");
   expect(pipe?.id).toBeTruthy();
-  const org = await call(on.base, admin.cookie, "POST", "/api/orgs", { name: `ZZ-TEST Buyer ${tag}` });
+  const org = await call(on.base, admin.cookie, "POST", "/api/orgs", { force: true, name: `ZZ-TEST Buyer ${tag}` });
   expect(org.status, org.text).toBe(201);
   seed.orgIds.push((org.json?.organisation as { id: string }).id);
   for (const name of dealNames) {

@@ -76,7 +76,7 @@ async function hiddenDeal(label: string) {
   const dealName = `Hush deal ${tag}`;
   const pipe = (await lead.c.get("/api/deals/pipelines")).json.pipelines.find((p: { key: string }) => p.key === "DEAL_PROACTIVE");
   const orgId = (await lead.c.post("/api/orgs", { force: true, name: `Org ${tag}` })).json.organisation.id;
-  const made = await lead.c.post("/api/deals", { name: dealName, organisationId: orgId, pipelineId: pipe.id, leaderId: lead.id, whyPursue: "fit", nextStep: { title: "First step", dueDate: istDate(3) } });
+  const made = await lead.c.post("/api/deals", { force: true, name: dealName, organisationId: orgId, pipelineId: pipe.id, leaderId: lead.id, whyPursue: "fit", nextStep: { title: "First step", dueDate: istDate(3) } });
   expect(made.status, JSON.stringify(made.json)).toBe(201);
   const dealId = made.json.deal.id as string;
   for (const who of [member, ad]) expect((await lead.c.post(`/api/projects/${dealId}/members`, { userId: who.id, role: "EDITOR" })).status).toBe(201);
@@ -102,7 +102,7 @@ describe("CRM_VISIBLE and concierge quick actions (SHO-BUG-11)", () => {
     // A deal led by `lead`, with the Member `ed` and the Admin `ad` both members holding work due this week and overdue.
     const pipe = (await lead.c.get("/api/deals/pipelines")).json.pipelines.find((p: { key: string }) => p.key === "DEAL_PROACTIVE");
     const orgId = (await lead.c.post("/api/orgs", { force: true, name: `Org ${tag}` })).json.organisation.id;
-    const made = await lead.c.post("/api/deals", { name: dealName, organisationId: orgId, pipelineId: pipe.id, leaderId: lead.id, whyPursue: "fit", nextStep: { title: "First step", dueDate: istDate(3) } });
+    const made = await lead.c.post("/api/deals", { force: true, name: dealName, organisationId: orgId, pipelineId: pipe.id, leaderId: lead.id, whyPursue: "fit", nextStep: { title: "First step", dueDate: istDate(3) } });
     expect(made.status, JSON.stringify(made.json)).toBe(201);
     const dealId = made.json.deal.id as string;
     for (const who of [ed, ad]) expect((await lead.c.post(`/api/projects/${dealId}/members`, { userId: who.id, role: "EDITOR" })).status).toBe(201);

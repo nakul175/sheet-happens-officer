@@ -291,10 +291,10 @@ async function seed(server: Running) {
   expectStatus(pipes, 200, "pipelines");
   const pipe = (pipes.json?.pipelines as { id: string; key: string }[]).find((p) => p.key === "DEAL_PROACTIVE");
   expect(pipe?.id).toBeTruthy();
-  const org = await call(server.base, dealAdmin.cookie, "POST", "/api/orgs", { name: `ZZ-TEST Org ${tag}` });
+  const org = await call(server.base, dealAdmin.cookie, "POST", "/api/orgs", { force: true, name: `ZZ-TEST Org ${tag}` });
   expectStatus(org, 201, "org");
   const made = await call(server.base, dealAdmin.cookie, "POST", "/api/deals", {
-    name: dealName,
+    force: true, name: dealName,
     organisationId: (org.json?.organisation as { id: string }).id,
     pipelineId: pipe!.id,
     leaderId: dealAdmin.id,
