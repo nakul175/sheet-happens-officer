@@ -2,7 +2,7 @@
  * Flags hand-written project reads (SHO-BUG-11 / APL-2659).
  *
  * A call like db.project.findMany (also tx.project, and findFirst / findUnique / count,
- * including the OrThrow forms) is only allowed when:
+ * including the OrThrow forms and static bracket notation) is only allowed when:
  *   - it lives in the module that defines the visibility helpers (src/lib/access.ts), or
  *   - an argument calls visibleProjects, myProjects, or projectAccess, or
  *   - the call carries `// project-lookup-ok: <reason>` on the line above it, on its
@@ -31,14 +31,16 @@ export function inSrc(filename) {
   return /(^|\/)src\//.test(norm(filename));
 }
 
+function propertyName(node) {
+  if (node?.type !== "MemberExpression") return null;
+  if (!node.computed && node.property?.type === "Identifier") return node.property.name;
+  if (node.computed && node.property?.type === "Literal" && typeof node.property.value === "string") return node.property.value;
+  return null;
+}
+
 function projectMethod(node) {
-  const callee = node.callee;
-  if (!callee || callee.type !== "MemberExpression" || callee.computed) return null;
-  if (callee.property?.type !== "Identifier" || !METHODS.has(callee.property.name)) return null;
-  const obj = callee.object;
-  if (!obj || obj.type !== "MemberExpression" || obj.computed) return null;
-  if (obj.property?.type !== "Identifier" || obj.property.name !== "project") return null;
-  return callee.property.name;
+  const method = propertyName(node.callee);
+  return METHODS.has(method) && propertyName(node.callee.object) === "project" ? method : null;
 }
 
 function usesHelper(root) {
@@ -48,7 +50,7 @@ function usesHelper(root) {
     const node = stack.pop();
     if (!node || typeof node !== "object" || seen.has(node)) continue;
     seen.add(node);
-    if (node.type === "Identifier" && HELPERS.has(node.name)) return true;
+    if (node.type === "CallExpression" && node.callee?.type === "Identifier" && HELPERS.has(node.callee.name)) return true;
     for (const key of Object.keys(node)) {
       if (key === "parent" || key === "range" || key === "loc") continue;
       const child = node[key];

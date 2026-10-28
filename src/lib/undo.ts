@@ -203,7 +203,7 @@ async function plan(row: any, user: Actor, projectId: string): Promise<Plan> {
       return { conflicts: [], subject: t.title, apply: async () => {} };
     }
     case "deal.stage_changed": {
-      // project-lookup-ok: prepare already authorized projectAccess before undo reload
+      // project-lookup-ok: prepare authorizes recordAccess (projectAccess) before this undo reload
       const p = await db.project.findUniqueOrThrow({ where: { id: projectId } });
       if (!b.stageId || !(await db.stage.findFirst({ where: { id: b.stageId, pipelineId: p.pipelineId ?? "" } }))) throw bad("The earlier stage no longer exists.");
       return {
@@ -261,19 +261,19 @@ async function plan(row: any, user: Actor, projectId: string): Promise<Plan> {
       return { conflicts: fieldConflicts(keys, b, f, now), subject: "the deal", fields: keys.join(", "), apply: async (tx) => { await tx.dealDetails.update({ where: { projectId }, data }); } };
     }
     case "project.updated": {
-      // project-lookup-ok: prepare already authorized projectAccess before undo reload
+      // project-lookup-ok: prepare authorizes recordAccess (projectAccess) before this undo reload
       const p = await db.project.findUniqueOrThrow({ where: { id: projectId } });
       const keys = Object.keys(f);
       return { conflicts: fieldConflicts(keys, b, f, { name: p.name, description: p.description }), subject: p.name, fields: keys.join(", "), apply: async (tx) => { await tx.project.update({ where: { id: projectId }, data: Object.fromEntries(keys.map((k) => [k, b[k]])) }); } };
     }
     case "project.archived": {
-      // project-lookup-ok: prepare already authorized projectAccess before undo reload
+      // project-lookup-ok: prepare authorizes recordAccess (projectAccess) before this undo reload
       const p = await db.project.findUniqueOrThrow({ where: { id: projectId } });
       if (!p.archivedAt) throw bad("This project is not archived any more.");
       return { conflicts: [], subject: p.name, apply: async (tx) => { await tx.project.update({ where: { id: projectId }, data: { archivedAt: null } }); } };
     }
     case "project.unarchived": {
-      // project-lookup-ok: prepare already authorized projectAccess before undo reload
+      // project-lookup-ok: prepare authorizes recordAccess (projectAccess) before this undo reload
       const p = await db.project.findUniqueOrThrow({ where: { id: projectId } });
       if (p.archivedAt) throw bad("This project is archived again already.");
       return { conflicts: [], subject: p.name, apply: async (tx) => { await tx.project.update({ where: { id: projectId }, data: { archivedAt: new Date(b.archivedAt ?? Date.now()) } }); } };

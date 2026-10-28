@@ -6,7 +6,11 @@ import projectLookup from "./eslint/no-unguarded-project-lookup.mjs";
 const eslintConfig = defineConfig([
   ...nextVitals,
   ...nextTs,
-  { files: ["src/**/*.{ts,tsx}"], plugins: { sho: { rules: { "no-unguarded-project-lookup": projectLookup } } }, rules: { "sho/no-unguarded-project-lookup": "error" } },
+  {
+    files: ["src/**/*.{ts,tsx}"],
+    plugins: { sho: { rules: { "no-unguarded-project-lookup": projectLookup } } },
+    rules: { "sho/no-unguarded-project-lookup": "error" },
+  },
   // Override default ignores of eslint-config-next.
   globalIgnores([
     // Default ignores of eslint-config-next:
