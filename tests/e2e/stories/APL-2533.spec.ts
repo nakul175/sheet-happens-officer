@@ -5,13 +5,21 @@
 // There is no tests/e2e/jim-gate.ts. CRM_VISIBLE is read from the live /api/orgs answer, never a hard skip.
 // Credentials come from the environment. workers is 1 in playwright.config.ts. Traces stay off.
 import { expect, test, zz, RUN, type Api } from "../support";
-import { gateFile } from "../helpers/qa-alias";
-import { rowAround } from "../helpers/locate";
+import { gateFile, QA_PASS } from "../helpers/qa-alias";
 
+// SHO-2758 explicitly requires this story to skip when the alias password is unset.
+// The shared gate still fails closed for all authenticated runs and other story files.
+test.skip(!QA_PASS, "Set SHO_QA_PASS to run the contacts acceptance story.");
 gateFile();
 import { ghost, newProject, newTask, ymd, type Who } from "../g2";
 import { raw } from "../helpers/jim-http";
-import type { Page } from "@playwright/test";
+import type { Page, Locator } from "@playwright/test";
+
+/** Contact rows use the visible Contacts table, independent of layout wrappers. */
+function contactRow(page: Page, name: string): Locator {
+  return page.getByRole("region", { name: "Organisation contacts", exact: true })
+    .getByRole("row").filter({ has: page.getByRole("cell").filter({ has: page.getByText(name, { exact: true }) }) });
+}
 
 async function withTaskVersion(api: Api, id: string, body: Record<string, unknown> = {}) {
   const task = await api.get(`/api/tasks/${id}`);
@@ -67,7 +75,7 @@ test("AC1: a name saves a contact, role email and phone are optional, any Member
   await memberCrm(member);
   const org = await makeOrg(admin, later, "contacts org");
 
-  await member.page.goto(`/accounts/${org.id}`);
+  await member.page.goto(`/accounts/${org.id}?tab=contacts`);
   await member.page.getByRole("button", { name: "+ Contact" }).click();
   const dlg = member.page.getByRole("dialog", { name: "New contact" });
   await expect(dlg.getByRole("button", { name: "Save" })).toBeDisabled();
@@ -75,9 +83,9 @@ test("AC1: a name saves a contact, role email and phone are optional, any Member
   await dlg.getByLabel("Name").fill(bareName);
   await dlg.getByRole("button", { name: "Save" }).click();
   await expect(dlg).toHaveCount(0);
-  const bareRow = rowAround(member.page, bareName);
+  const bareRow = contactRow(member.page, bareName);
   await expect(bareRow).toBeVisible();
-  await expect(bareRow).toContainText("No email or phone");
+  await expect(bareRow.getByRole("cell", { name: "No email No phone", exact: true })).toBeVisible();
   const bare = (await contactsOf(member, org.id)).find((c) => c.name === bareName)!;
   expect(bare).toMatchObject({ role: null, email: null, phone: null, canEdit: true });
   later(() => admin.api.del(`/api/contacts/${bare.id}`));
@@ -89,7 +97,7 @@ test("AC1: a name saves a contact, role email and phone are optional, any Member
   const fullId = made.json.contact.id as string;
   later(() => admin.api.del(`/api/contacts/${fullId}`));
   await member.page.reload();
-  const fullRow = rowAround(member.page, fullName);
+  const fullRow = contactRow(member.page, fullName);
   await expect(fullRow).toContainText("Director");
   await expect(fullRow).toContainText(email);
   await expect(fullRow).toContainText("+91 99999");
@@ -109,21 +117,21 @@ test("AC1: a name saves a contact, role email and phone are optional, any Member
   expect((await member.api.del(`/api/contacts/${adminContact}`)).status).toBe(403);
   expect((await contactsOf(admin, org.id)).some((c) => c.id === adminContact)).toBe(true);
   await member.page.reload();
-  const adminRow = rowAround(member.page, byAdminName);
-  await expect(adminRow.getByRole("button", { name: "Edit" })).toHaveCount(0);
-  await expect(adminRow.getByRole("button", { name: "Remove" })).toHaveCount(0);
+  const adminRow = contactRow(member.page, byAdminName);
+  await expect(adminRow.getByRole("button", { name: `Edit ${byAdminName}`, exact: true })).toHaveCount(0);
+  await expect(adminRow.getByRole("button", { name: `Remove ${byAdminName}`, exact: true })).toHaveCount(0);
 
   expect((await admin.api.patch(`/api/contacts/${fullId}`, { role: "Advisor" })).status, "an Admin who did not create it may edit").toBe(200);
   expect((await contactsOf(member, org.id)).find((c) => c.id === fullId)?.role).toBe("Advisor");
   await member.page.reload();
-  await fullRow.getByRole("button", { name: "Edit" }).click();
+  await fullRow.getByRole("button", { name: `Edit ${fullName}`, exact: true }).click();
   const edit = member.page.getByRole("dialog", { name: "Edit contact" });
   await edit.getByLabel("Role").fill("Trustee");
   await edit.getByRole("button", { name: "Save" }).click();
   await expect(edit).toHaveCount(0);
   expect((await contactsOf(admin, org.id)).find((c) => c.id === fullId)?.role).toBe("Trustee");
 
-  await fullRow.getByRole("button", { name: "Remove" }).click();
+  await fullRow.getByRole("button", { name: `Remove ${fullName}`, exact: true }).click();
   const confirm = member.page.getByRole("dialog", { name: "Remove contact?" });
   await confirm.getByRole("button", { name: "Remove" }).click();
   await expect(member.page.getByText(fullName, { exact: true })).toHaveCount(0);
@@ -136,7 +144,7 @@ test("AC1: a name saves a contact, role email and phone are optional, any Member
   const late = await member.api.post(`/api/orgs/${org.id}/contacts`, { name: zz("too late") });
   expect(late.status).toBe(409);
   expect(late.json.error).toContain("archived");
-  await expect(rowAround(member.page, bareName)).toBeVisible();
+  await expect(contactRow(member.page, bareName)).toBeVisible();
 });
 // qa:TC missing
 test("AC2: a contact is not a user and cannot be an assignee, collaborator, approver or project member qa:TC missing", async ({ admin, later }) => {
@@ -163,7 +171,7 @@ test("AC2: a contact is not a user and cannot be an assignee, collaborator, appr
   const worker = await ghost(admin, later, "worker");
   const project = await newProject(admin, later, { label: "contact roles" });
   expect((await admin.api.post(`/api/projects/${project.id}/members`, { userId: worker.id, role: "EDITOR" })).status).toBe(201);
-  const taskId = await newTask(admin, project.id, { title: zz("held by the worker"), assigneeId: worker.id });
+  const taskId = await newTask(admin, project.id, { title: zz("held by the worker"), dueDate: ymd(3), assigneeId: worker.id });
 
   const asAssignee = await admin.api.post(`/api/tasks/${taskId}/assign`, await withTaskVersion(admin.api, taskId, { assigneeId: contactId }));
   expect(asAssignee.status).toBe(400);
@@ -177,7 +185,7 @@ test("AC2: a contact is not a user and cannot be an assignee, collaborator, appr
   const asMember = await admin.api.post(`/api/projects/${project.id}/members`, { userId: contactId, role: "EDITOR" });
   expect(asMember.status).toBe(400);
   expect(asMember.json.error).toContain("active person");
-  const onCreate = await admin.api.post(`/api/projects/${project.id}/tasks`, { title: zz("refused assignee"), assigneeId: contactId });
+  const onCreate = await admin.api.post(`/api/projects/${project.id}/tasks`, { title: zz("refused assignee"), dueDate: ymd(3), assigneeId: contactId });
   expect(onCreate.status).toBe(400);
   const task = (await admin.api.get(`/api/tasks/${taskId}`)).json.task as { assignee: { id: string }; collaborators: { id: string }[]; approver: { id: string } | null };
   expect(task.assignee.id).toBe(worker.id);
@@ -201,7 +209,7 @@ test("AC3: Known by lists one or more active members, defaults to the creator, k
   const person = await ghost(admin, later, "known");
   const personName = `ZZ-TEST known ${RUN}`;
 
-  await admin.page.goto(`/accounts/${org.id}`);
+  await admin.page.goto(`/accounts/${org.id}?tab=contacts`);
   await admin.page.getByRole("button", { name: "+ Contact" }).click();
   const dlg = admin.page.getByRole("dialog", { name: "New contact" });
   await expect(dlg.getByRole("checkbox", { name: admin.user.name, exact: true })).toBeChecked();
@@ -219,9 +227,9 @@ test("AC3: Known by lists one or more active members, defaults to the creator, k
   expect(saved.knownBy.map((k) => k.id).sort()).toEqual([admin.user.id, person.id].sort());
   expect(saved.knownBy.every((k) => k.active)).toBe(true);
   later(() => admin.api.del(`/api/contacts/${saved.id}`));
-  const row = rowAround(admin.page, name);
+  const row = contactRow(admin.page, name);
   await expect(row.getByText(personName, { exact: true })).toBeVisible();
-  await expect(row.getByTitle("No longer active")).toHaveCount(0);
+  await expect(row.getByText(/· inactive$/)).toHaveCount(0);
 
   const omitted = await admin.api.post(`/api/orgs/${org.id}/contacts`, { name: zz("creator only") });
   expect(omitted.status).toBe(201);
@@ -231,9 +239,9 @@ test("AC3: Known by lists one or more active members, defaults to the creator, k
 
   expect((await admin.api.post(`/api/team/${person.id}/deactivate`, { reassign: "leaders" })).status).toBe(200);
   await admin.page.reload();
-  const grey = rowAround(admin.page, name).getByTitle("No longer active");
+  const grey = contactRow(admin.page, name).getByText(`${personName} · inactive`, { exact: true });
   await expect(grey).toBeVisible();
-  await expect(grey).toHaveText(personName);
+  await expect(grey).toHaveText(`${personName} · inactive`);
 
   const again = await admin.api.patch(`/api/contacts/${saved.id}`, { knownBy: [admin.user.id, person.id] });
   expect(again.status).toBe(400);
@@ -241,7 +249,7 @@ test("AC3: Known by lists one or more active members, defaults to the creator, k
   const fresh = await admin.api.post(`/api/orgs/${org.id}/contacts`, { name: zz("refused known"), knownBy: [person.id] });
   expect(fresh.status).toBe(400);
 
-  await rowAround(admin.page, name).getByRole("button", { name: "Edit" }).click();
+  await contactRow(admin.page, name).getByRole("button", { name: `Edit ${name}`, exact: true }).click();
   const edit = admin.page.getByRole("dialog", { name: "Edit contact" });
   await edit.getByRole("button", { name: "Save" }).click();
   await expect(edit.getByRole("alert")).toContainText("Choose active members");
@@ -259,9 +267,9 @@ test("AC4: Last spoke is the date of the newest note on that contact the viewer 
   const contactId = made.json.contact.id as string;
   later(() => admin.api.del(`/api/contacts/${contactId}`));
   expect((await contactsOf(member, org.id)).find((c) => c.id === contactId)?.lastSpoke).toBeNull();
-  await member.page.goto(`/accounts/${org.id}`);
-  const row = () => rowAround(member.page, name);
-  await expect(row()).toContainText("Last spoke: never");
+  await member.page.goto(`/accounts/${org.id}?tab=contacts`);
+  const row = () => contactRow(member.page, name);
+  await expect(row().getByRole("cell", { name: "Never", exact: true })).toBeVisible();
 
   const older = ymd(-6);
   const newer = ymd(-1);
@@ -270,7 +278,7 @@ test("AC4: Last spoke is the date of the newest note on that contact the viewer 
   expect((await admin.api.post(`/api/orgs/${org.id}/notes`, { kind: "CALL", date: older, text: publicText, contactIds: [contactId] })).status).toBe(201);
   expect((await contactsOf(member, org.id)).find((c) => c.id === contactId)?.lastSpoke).toBe(older);
   await member.page.reload();
-  await expect(row()).toContainText(`Last spoke: ${await spokeLabel(member.page, older)}`);
+  await expect(row().getByRole("cell", { name: await spokeLabel(member.page, older), exact: true })).toBeVisible();
 
   const pipe = await proactive(admin);
   const deal = await admin.api.post("/api/deals", {
@@ -285,17 +293,19 @@ test("AC4: Last spoke is the date of the newest note on that contact the viewer 
   expect((await contactsOf(admin, org.id)).find((c) => c.id === contactId)?.lastSpoke).toBe(newer);
   expect((await contactsOf(member, org.id)).find((c) => c.id === contactId)?.lastSpoke).toBe(older);
   await member.page.reload();
-  await expect(row()).toContainText(`Last spoke: ${await spokeLabel(member.page, older)}`);
+  await expect(row().getByRole("cell", { name: await spokeLabel(member.page, older), exact: true })).toBeVisible();
   await expect(member.page.getByText(hiddenText)).toHaveCount(0);
-  await admin.page.goto(`/accounts/${org.id}`);
-  const adminRow = rowAround(admin.page, name);
-  await expect(adminRow).toContainText(`Last spoke: ${await spokeLabel(admin.page, newer)}`);
+  await admin.page.goto(`/accounts/${org.id}?tab=contacts`);
+  const adminRow = contactRow(admin.page, name);
+  await expect(adminRow.getByRole("cell", { name: await spokeLabel(admin.page, newer), exact: true })).toBeVisible();
+  await admin.page.getByRole("navigation", { name: "Organisation sections" }).getByRole("link", { name: /^Notes / }).click();
   await expect(admin.page.getByText(hiddenText)).toBeVisible();
 
   expect((await admin.api.post(`/api/projects/${dealId}/members`, { userId: member.user.id, role: "VIEWER" })).status).toBe(201);
   expect((await contactsOf(member, org.id)).find((c) => c.id === contactId)?.lastSpoke).toBe(newer);
   await member.page.reload();
-  await expect(row()).toContainText(`Last spoke: ${await spokeLabel(member.page, newer)}`);
+  await expect(row().getByRole("cell", { name: await spokeLabel(member.page, newer), exact: true })).toBeVisible();
+  await member.page.getByRole("navigation", { name: "Organisation sections" }).getByRole("link", { name: /^Notes / }).click();
   await expect(member.page.getByText(hiddenText)).toBeVisible();
 });
 
@@ -311,10 +321,13 @@ test("AC5: any signed-in Member sees all contacts, changes are logged with no pr
   const id = made.json.contact.id as string;
   later(() => admin.api.del(`/api/contacts/${id}`));
   expect((await contactsOf(admin, org.id)).some((c) => c.id === id)).toBe(true);
-  await admin.page.goto(`/accounts/${org.id}`);
-  // The note form lists the contact as a checkbox. The contacts list shows the same name.
+  await admin.page.goto(`/accounts/${org.id}?tab=contacts`);
+  // The contact remains visible in the table and is selectable in the note form.
+  await expect(contactRow(admin.page, name)).toBeVisible();
+  await admin.page.getByRole("navigation", { name: "Organisation sections" }).getByRole("link", { name: /^Notes / }).click();
+  await admin.page.getByRole("button", { name: "+ Add note", exact: true }).click();
   await expect(admin.page.getByRole("checkbox", { name, exact: true })).toBeVisible();
-  await expect(admin.page.getByText(name, { exact: true })).not.toHaveCount(0);
+  await admin.page.getByRole("button", { name: "Cancel note", exact: true }).click();
 
   const denied = await member.api.get(`/api/orgs/${org.id}/history`);
   expect(denied.status).toBe(404);
@@ -359,7 +372,7 @@ test("AC5: any signed-in Member sees all contacts, changes are logged with no pr
   expect(hit.map((c) => c.id)).toContain(keptId);
   await member.page.goto("/search");
   await member.page.getByLabel("Search").fill(searchable);
-  await expect(member.page.getByRole("main").getByText("Contacts", { exact: true })).toBeVisible();
+  await expect(member.page.getByRole("main").getByRole("heading", { name: "Contacts", exact: true })).toBeVisible();
   await expect(member.page.getByRole("main").getByRole("link", { name: searchable })).toBeVisible();
 
   expect((await member.api.del(`/api/contacts/${keptId}`)).status).toBe(204);
@@ -367,10 +380,10 @@ test("AC5: any signed-in Member sees all contacts, changes are logged with no pr
   expect(missed).toHaveLength(0);
   await member.page.reload();
   await member.page.getByLabel("Search").fill(searchable);
-  await expect(member.page.getByText(/Nothing matches/)).toBeVisible();
+  await expect(member.page.getByRole("status").filter({ hasText: /Nothing matches/ })).toBeVisible();
   await expect(member.page.getByRole("link", { name: searchable })).toHaveCount(0);
 
-  await admin.page.goto(`/accounts/${org.id}`);
+  await admin.page.goto(`/accounts/${org.id}?tab=contacts`);
   await admin.page.getByRole("button", { name: "History" }).click();
   await expect(admin.page.getByText("contact.created")).not.toHaveCount(0);
   await expect(admin.page.getByText("contact.updated")).not.toHaveCount(0);

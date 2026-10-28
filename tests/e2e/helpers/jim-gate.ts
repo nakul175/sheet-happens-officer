@@ -45,7 +45,7 @@ const PROBES: Record<number, (admin: Who, member: Who | null, later: Later) => P
     const page = await admin.page.context().newPage();
     try {
       await withUnread(page, () => 120);
-      await bell(page).locator(".badge").waitFor(); // the count has rendered
+      await expect(bell(page)).toHaveAttribute("aria-label", /^Notifications, [1-9]\d*\+? unread$/); // the count has rendered
       const name = await bell(page).getAttribute("aria-label");
       return { deployed: name === "Notifications, 99+ unread", how: `probe: bell at 120 unread is named "${name}"` };
     } finally { await page.close(); }
@@ -183,7 +183,7 @@ const PROBES: Record<number, (admin: Who, member: Who | null, later: Later) => P
       await expect(panel.getByText("All caught up")).toBeVisible();
       hold.release();
       await page.waitForTimeout(600); // the late All page has arrived; a panel that still accepts it has painted by now
-      const readRows = await panel.locator(".bell-row:not(.unread)").count();
+      const readRows = await panel.getByRole("button", { name: /^Mark as unread: / }).count();
       return { deployed: readRows === 0, how: `probe: a late All page left ${readRows} read row(s) on the Unread tab` };
     } finally { hold.release(); await page.close(); }
   },
