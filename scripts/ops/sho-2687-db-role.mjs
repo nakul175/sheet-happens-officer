@@ -206,7 +206,13 @@ async function main() {
     const passwordStat = await lstat(passwordFile);
     if (!passwordStat.isFile() || (passwordStat.mode & 0o077) !== 0) fail("The app-password file must be inaccessible to group/other.");
     password = (await readFile(passwordFile, "utf8")).trim();
-    if (password.length < 32) fail("The app password must contain at least 32 characters.");
+    // DigitalOcean generates 24-character passwords for managed database
+    // users. Accept the provider's fixed length only when the control plane
+    // owns the role; locally managed roles retain the stronger minimum.
+    const minimumPasswordLength = managedRole ? 24 : 32;
+    if (password.length < minimumPasswordLength) {
+      fail(`The app password must contain at least ${minimumPasswordLength} characters${managedRole ? " for a managed role" : ""}.`);
+    }
   }
 
   const admin = await connect(directUrl.toString(), "sho-2687-admin");

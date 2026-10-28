@@ -48,6 +48,10 @@ attempts SQL role creation or password/attribute changes. It still proves that
 the managed role has no elevated attributes, role memberships, schema `CREATE`, or
 DDL capability before switching the runtime.
 
+DigitalOcean managed-database passwords are provider-generated at 24
+characters. The operator accepts that fixed minimum only in managed-role mode;
+self-managed roles retain the 32-character minimum.
+
 PostgreSQL's default `INHERIT` attribute is permitted only because the operator
 independently requires zero role memberships. With no memberships there is no
 indirect privilege path; rejecting `INHERIT` would make control-plane-managed
