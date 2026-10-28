@@ -1,6 +1,6 @@
-// APL-2713 AC4. Same shape as tests/crm-visible-modes-server.test.ts: one `next start` per CRM_VISIBLE mode.
+// APL-2713 AC4. Same shape as tests/crm-visible-modes-server.mode.test.ts: one `next start` per CRM_VISIBLE mode.
 // crmMode() treats every value other than `admins` and `off` as everyone, so the open mode is CRM_VISIBLE=on.
-// Run with `npm run test:crm-modes` after `npm run build`. `npm test` does not start these servers.
+// Run with `npm run test:modes` after `npm run build`. `npm test` does not start these servers.
 // Fails when a hidden deal, its stage, its task or type DEAL shows up on GET /api/my-tasks.
 import "dotenv/config";
 import { spawn, type ChildProcess } from "node:child_process";

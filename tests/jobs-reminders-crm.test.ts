@@ -1,6 +1,6 @@
 // APL-2729. Library check: sendReminders applies crmProjectWhere for the assignee.
 // AC4 (one real server process per CRM_VISIBLE mode, including 40 concurrent POSTs) lives in
-// tests/jobs-reminders-crm-server.test.ts and runs in CI via `npm run test:reminder-modes`.
+// tests/jobs-reminders-crm-server.mode.test.ts and runs in CI via `npm run test:modes`.
 // The shared test server stays on the default CRM_VISIBLE (unset), so a deal can be seeded.
 // Rows are checked in the test database and on GET /api/notifications. Names are ZZ-TEST.
 // A non-local database is refused.

@@ -1,7 +1,7 @@
 // APL-2609 (SHO-BUG-2) and APL-2726 (CRM_VISIBLE enforcement) story spec, one test per acceptance criterion.
 // One `next start` per CRM_VISIBLE mode (all, admins, off) on the same database, the same shape as
-// tests/apl-2713-crm-modes.test.ts, and Playwright Chromium on My tasks, Search and the task screen.
-// Run with `npm run test:crm-modes` after `npm run build`. `npm test` does not start these servers.
+// tests/apl-2713-crm-modes.mode.test.ts, and Playwright Chromium on My tasks, Search and the task screen.
+// Run with `npm run test:modes` after `npm run build`. `npm test` does not start these servers.
 // It lives in tests/e2e/local, not tests/e2e/stories: it starts its own local servers, so the staging story workflow never
 // picks it up.
 // Locally set PW_CHROMIUM to a chrome binary; CI installs Playwright Chromium first.

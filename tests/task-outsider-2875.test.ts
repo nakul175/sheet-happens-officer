@@ -183,7 +183,7 @@ describe("qa:TC missing APL-2875 a caller who cannot see a task gets the missing
       expect({ status: hidden.status, message: hidden.message }).toEqual({ status: missing.status, message: missing.message });
       expect(hidden).toMatchObject({ status: 404, message: "Task not found" });
       // R1-R14 go through loadTask; links and convert call taskAccess directly; both end in recordAccess.
-      // tests/task-outsider-2875-crm.test.ts sends R1-R17 for this example over HTTP to a CRM_VISIBLE=admins server.
+      // tests/task-outsider-2875-crm.mode.test.ts sends R1-R17 for this example over HTTP to a CRM_VISIBLE=admins server.
       await expect(taskAccess(member, dealId, { write: true })).rejects.toMatchObject({ status: 404, message: "Task not found" });
     } finally {
       if (was === undefined) delete process.env.CRM_VISIBLE; else process.env.CRM_VISIBLE = was;
