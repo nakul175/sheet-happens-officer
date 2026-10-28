@@ -14,13 +14,13 @@ beforeEach(() => {
   mocks.task.findMany.mockResolvedValue([task]);
 });
 describe("SHO-2589 workload", () => {
-  it("uses India calendar boundaries, including today and six further days", () => {
+  it("uses India calendar boundaries, including today plus the next seven days", () => {
     const today = parseDueDate("2026-10-28");
     const t = { ...task, dueDate: today };
     expect(matchesWorkload(t, "overdue", today)).toBe(false);
     expect(matchesWorkload(t, "next7", today)).toBe(true);
-    expect(matchesWorkload({ ...t, dueDate: parseDueDate("2026-11-03") }, "next7", today)).toBe(true);
-    expect(matchesWorkload({ ...t, dueDate: parseDueDate("2026-11-04") }, "next7", today)).toBe(false);
+    expect(matchesWorkload({ ...t, dueDate: parseDueDate("2026-11-04") }, "next7", today)).toBe(true);
+    expect(matchesWorkload({ ...t, dueDate: parseDueDate("2026-11-05") }, "next7", today)).toBe(false);
     expect(matchesWorkload({ ...t, dueDate: null }, "next7", today)).toBe(false);
     expect(matchesWorkload({ ...t, dueDate: parseDueDate("2026-10-27") }, "overdue", today)).toBe(true);
     expect(matchesWorkload({ ...t, approverId: "worker" }, "awaiting", today)).toBe(true);

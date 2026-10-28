@@ -10,7 +10,7 @@ export type CountableTask = { assigneeId: string; approverId: string | null; due
 export function matchesWorkload(t: CountableTask, filter: WorkloadFilter, today = startOfTodayIST()) {
   switch (filter) {
     case "overdue": return !!t.dueDate && t.dueDate < today;
-    case "next7": return !!t.dueDate && t.dueDate >= today && t.dueDate < addDays(today, 7);
+    case "next7": return !!t.dueDate && t.dueDate >= today && t.dueDate < addDays(today, 8);
     case "awaiting": return t.approverId === t.assigneeId;
     case "blocked": return t.blocked;
     default: return true;
