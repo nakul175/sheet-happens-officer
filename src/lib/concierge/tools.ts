@@ -10,7 +10,7 @@ import type { ToolDef } from "@/lib/model";
 import { formatDueDate } from "@/lib/dates";
 import { buildCard, MAX_CHANGES, type BuiltCard, type Op } from "@/lib/concierge/changes";
 import { resolveDue } from "@/lib/concierge/dates";
-import { findPeople, findTasks, listProjects, myTasks, projectTasks, type PersonRec, type ProjectRec, type TaskRec } from "@/lib/concierge/reads";
+import { flat, findPeople, findTasks, listProjects, myTasks, projectTasks, type PersonRec, type ProjectRec, type TaskRec } from "@/lib/concierge/reads";
 import { commentExcerpts } from "@/lib/comments";
 import { commentsEnabled } from "@/lib/flags";
 
@@ -287,7 +287,7 @@ export async function runTool(t: Turn, name: string, raw: Record<string, unknown
       case "find_account_records": {
         const { text } = z.object({ text: z.string().trim().min(1).max(200) }).parse(raw);
         t.reads.calls++;
-        const records = await findAccountRecords(t.user, text);
+        const records = (await findAccountRecords(t.user, text)).map(record => ({ ...record, name: flat(record.name) }));
         t.reads.records += records.length;
         return { content: wrap({ records, creationSupported: false, screen: "Accounts" }) };
       }

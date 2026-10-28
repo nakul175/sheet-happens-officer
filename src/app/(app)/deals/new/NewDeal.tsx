@@ -30,7 +30,7 @@ function Form() {
     const r = await api("POST", "/api/deals", body);
     setBusy(false);
     if (r.ok) { router.push(`/projects/${r.data.deal.id}`); return; }
-    setDup(r.data?.needsConfirm === "duplicate" ? r.data.existingId : null);
+    setDup(r.data?.needsConfirm === "duplicate" ? r.data.existingId ?? "" : null);
     setErr(r.error ?? "Could not create the deal.");
   }
   return (
@@ -53,7 +53,7 @@ function Form() {
       <div style={{ display: "flex", gap: 8 }}>
         <button className="btn" disabled={busy}>Create deal</button>
         {dup && <Link className="btn ghost" href={`/projects/${dup}`}>Use this one</Link>}
-        {dup && <button type="button" className="btn ghost" disabled={busy} onClick={(e) => submit(e, true)}>Create anyway</button>}
+        {dup !== null && <button type="button" className="btn ghost" disabled={busy} onClick={(e) => submit(e, true)}>Create anyway</button>}
       </div>
     </form>
   );

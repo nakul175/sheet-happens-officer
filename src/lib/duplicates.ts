@@ -1,7 +1,7 @@
 // SHO-2588: advisory only. No merge or delete operations live here.
 import { db } from "@/lib/db";
 import { ApiError } from "@/lib/http";
-import { isAdmin, type Actor, WORKSTREAM_DEAL } from "@/lib/access";
+import { isAdmin, type Actor, WORKSTREAM_DEAL, projectAccess } from "@/lib/access";
 import { requireCrm } from "@/lib/crm";
 
 export function duplicateThreshold() {
@@ -23,6 +23,16 @@ export async function dealDuplicate(workspaceId: string, name: string) {
 }
 export function duplicateWarning(kind: string, duplicate: Duplicate) {
   return new ApiError(409, `Possible duplicate ${kind}: “${duplicate.name}”. Use this one or create anyway.`, { needsConfirm: "duplicate", existingId: duplicate.id, existingName: duplicate.name, organisationId: duplicate.organisationId });
+}
+/** Detection is broad, but identifying fields follow fresh project visibility. */
+export async function dealDuplicateWarning(user: Actor, duplicate: Duplicate) {
+  try {
+    await projectAccess(user, duplicate.id);
+    return duplicateWarning("deal", duplicate);
+  } catch (error) {
+    if (!(error instanceof ApiError) || error.status !== 404) throw error;
+    return new ApiError(409, "A possible duplicate deal exists. Create anyway if this is a separate deal.", { needsConfirm: "duplicate" });
+  }
 }
 async function adminWorkspace(user: Actor) {
   requireCrm(user);

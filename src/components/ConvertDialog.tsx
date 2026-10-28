@@ -36,7 +36,7 @@ export function ConvertDialog({ task, meId, onClose }: { task: { id: string; tit
     const r = await api("POST", `/api/tasks/${task.id}/convert`, body);
     setBusy(false);
     if (r.ok) { router.push(`/projects/${r.data.deal.id}`); return; }
-    setDup(r.data?.needsConfirm === "duplicate" ? r.data.existingId : null);
+    setDup(r.data?.needsConfirm === "duplicate" ? r.data.existingId ?? "" : null);
     setErr(r.error ?? "Could not convert the task.");
   }
   const all = [...(orgs.data?.organisations ?? []), ...extraOrgs.filter((e) => !orgs.data?.organisations.some((o) => o.id === e.id))];
@@ -66,7 +66,7 @@ export function ConvertDialog({ task, meId, onClose }: { task: { id: string; tit
       <div className="actions">
         <button className="btn ghost" onClick={onClose}>Cancel</button>
         {dup && <button className="btn ghost" onClick={() => router.push(`/projects/${dup}`)}>Use this one</button>}
-        {dup && <button className="btn ghost" disabled={busy} onClick={() => go(true)}>Create anyway</button>}
+        {dup !== null && <button className="btn ghost" disabled={busy} onClick={() => go(true)}>Create anyway</button>}
         <button className="btn" disabled={busy || !ready} onClick={() => go()}>Convert to deal</button>
       </div>
     </Modal>

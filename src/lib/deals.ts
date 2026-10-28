@@ -1,7 +1,7 @@
 // SHO-E10 and SHO-E12: Deals are projects of type Deal. This file holds creation, stages, details,
 // next step and stalled logic. Access is still project membership (src/lib/access.ts).
 import type { Prisma } from "@/generated/prisma/client";
-import { dealDuplicate, duplicateWarning } from "@/lib/duplicates";
+import { dealDuplicate, dealDuplicateWarning } from "@/lib/duplicates";
 import { db } from "@/lib/db";
 import { ApiError, notFound } from "@/lib/http";
 import { isActive, isAdmin, projectAccess, requireWrite, type Actor } from "@/lib/access";
@@ -83,7 +83,7 @@ export async function createDeal(
     select: { id: true, name: true },
   });
   const candidate = dup ?? await dealDuplicate(u.workspaceId, name);
-  if (candidate && !input.force) throw duplicateWarning("deal", candidate);
+  if (candidate && !input.force) throw await dealDuplicateWarning(user, candidate);
 
   return db.$transaction(async (tx) => {
     const project = await tx.project.create({
@@ -493,7 +493,7 @@ export async function convertTaskToDeal(user: Actor, taskId: string, input: Conv
     select: { id: true, name: true },
   });
   const candidate = dup ?? await dealDuplicate(u.workspaceId, name);
-  if (candidate && !input.force) throw duplicateWarning("deal", candidate);
+  if (candidate && !input.force) throw await dealDuplicateWarning(user, candidate);
 
   const first = pipeline!.stages[0];
   return db.$transaction(async (tx) => {
