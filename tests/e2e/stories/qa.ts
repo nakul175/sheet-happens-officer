@@ -3,7 +3,7 @@
 // Mail is read from EMAIL_OUTBOX_DIR (or .outbox), the same folder the dev server writes when Resend is off.
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
-import type { APIRequestContext, Browser, BrowserContext, Page } from "@playwright/test";
+import type { APIRequestContext, Browser, BrowserContext, Locator, Page } from "@playwright/test";
 import { api, expect, zz, RUN, BASE_URL, type Api, type Json } from "../support";
 
 export { zz, RUN, BASE_URL, expect };
@@ -235,6 +235,96 @@ export async function archiveProject(adminApi: Api, id: string, adminId: string)
     await adminApi.post(`/api/projects/${id}/leader`, { newLeaderId: adminId, previousRole: "EDITOR" });
   }
   await adminApi.post(`/api/projects/${id}/archive`);
+}
+
+const UI = { timeout: 90_000 };
+
+/** The page's main landmark. */
+export function mainOf(page: Page) {
+  return page.getByRole("main");
+}
+
+/** One Team table row whose text contains `text`. Callers assert a count of 1, so a shared `.first()` is not used. */
+export function teamRow(page: Page, text: string) {
+  return mainOf(page).getByRole("row").filter({ hasText: text });
+}
+
+/** Chip colours from app.css (.chip.grey, .chip.green, .chip.gold), read as computed styles instead of class names. */
+export const CHIP = {
+  grey: "rgb(236, 238, 241)",
+  green: "rgb(232, 244, 236)",
+  gold: "rgb(251, 239, 210)",
+} as const;
+
+/** The chip in `scope` whose whole text is `text`. */
+export function chip(scope: Locator, text: string) {
+  return scope.getByText(text, { exact: true });
+}
+
+/** The chip is visible and has that colour. */
+export async function expectChip(scope: Locator, text: string, colour?: keyof typeof CHIP) {
+  const c = chip(scope, text);
+  await expect(c).toBeVisible();
+  if (colour) await expect(c).toHaveCSS("background-color", CHIP[colour]);
+}
+
+/**
+ * The columns of one Team row.
+ * At 1024px and wider the header row is visible. Below that it is hidden and each cell shows its data-label.
+ */
+export async function expectTeamColumns(page: Page, row: Locator, labels: readonly string[]) {
+  const head = mainOf(page).getByRole("row").filter({ has: page.getByRole("columnheader") });
+  if (await head.isVisible()) {
+    for (const label of labels) {
+      await expect(head.getByRole("columnheader", { name: label, exact: true })).toHaveCount(1);
+    }
+    return;
+  }
+  const shown: string[] = [];
+  for (const cell of await row.getByRole("cell").all()) {
+    if (!(await cell.isVisible())) continue;
+    const content = await cell.evaluate((el) => getComputedStyle(el, "::before").content);
+    shown.push(content.replace(/^["']|["']$/g, ""));
+  }
+  for (const label of labels) {
+    expect(shown.filter((l) => l === label), `visible ${label} label on the row`).toHaveLength(1);
+  }
+}
+
+/** The Member-list link whose name is exactly `name`. */
+export function memberItem(page: Page, name: string) {
+  return mainOf(page).getByRole("link", { name, exact: true });
+}
+
+/** The Super Admin adds a person from the Team page. Cleanup stays with the caller. */
+export async function addPersonOnTeam(page: Page, first: string, last: string, email: string, role: "MEMBER" | "ADMIN" = "MEMBER") {
+  await page.goto("/team");
+  await mainOf(page).getByRole("button", { name: "+ Add person" }).click(UI);
+  const dialog = page.getByRole("dialog", { name: "Add person" });
+  await dialog.getByLabel("First name").fill(first);
+  await dialog.getByLabel("Last name").fill(last);
+  await dialog.getByLabel("Email").fill(email);
+  if (role === "ADMIN") await dialog.getByLabel("Role").selectOption("ADMIN");
+  await dialog.getByRole("button", { name: "Add and email" }).click();
+  await expect(page.getByRole("status").filter({ hasText: `${first} ${last} was added` })).toBeVisible({ timeout: 120_000 });
+}
+
+/**
+ * Deactivate that person from their own Team row.
+ * The grey Deactivated chip is the result of this click, not of a status painted onto the page.
+ */
+export async function deactivateOnTeam(page: Page, name: string) {
+  const row = teamRow(page, name);
+  await expect(row).toHaveCount(1, UI);
+  await row.getByRole("button", { name: "Deactivate" }).click();
+  const dialog = page.getByRole("dialog", { name: `Deactivate ${name}?` });
+  await dialog.getByRole("button", { name: "Deactivate", exact: true }).click();
+  const done = page.getByRole("dialog", { name: `${name} is deactivated` });
+  await expect(done).toBeVisible({ timeout: 120_000 });
+  await done.getByRole("button", { name: "Close" }).click();
+  await expect(done).toBeHidden();
+  await expect(chip(teamRow(page, name), "Deactivated")).toBeVisible(UI);
+  await expect(chip(teamRow(page, name), "Deactivated")).toHaveCSS("background-color", CHIP.grey);
 }
 
 export async function makeProject(adminApi: Api, label: string, leaderId: string) {
