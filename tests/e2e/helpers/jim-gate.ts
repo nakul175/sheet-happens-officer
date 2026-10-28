@@ -119,7 +119,7 @@ const PROBES: Record<number, (admin: Who, member: Who | null, later: Later) => P
   19: async (admin, _member, later) => {
     const crm = await admin.api.get("/api/orgs");
     if (crm.status === 404) return { deployed: false, how: "probe needs the CRM and GET /api/orgs answered 404" };
-    const made = await admin.api.post("/api/orgs", { name: zz("gate pr19") });
+    const made = await admin.api.post("/api/orgs", { force: true, name: zz("gate pr19") });
     expect(made.status, "probe creates an organisation").toBe(201);
     const id = made.json.organisation.id as string;
     later(() => admin.api.post(`/api/orgs/${id}/archive`, { archive: true }));

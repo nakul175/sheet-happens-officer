@@ -43,10 +43,10 @@ async function makeDeal(who: Account, name: string, title: string) {
   const pipes = (await who.c.get("/api/deals/pipelines")).json.pipelines as { id: string; key: string }[];
   const pipe = pipes.find((p) => p.key === "DEAL_PROACTIVE");
   expect(pipe?.id).toBeTruthy();
-  const org = await who.c.post("/api/orgs", { name: `ZZ-TEST Org ${name}` });
+  const org = await who.c.post("/api/orgs", { force: true, name: `ZZ-TEST Org ${name}` });
   expect(org.status, JSON.stringify(org.json)).toBe(201);
   const made = await who.c.post("/api/deals", {
-    name,
+    force: true, name,
     organisationId: org.json.organisation.id,
     pipelineId: pipe!.id,
     leaderId: who.id,

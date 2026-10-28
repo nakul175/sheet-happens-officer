@@ -22,12 +22,12 @@ beforeAll(async () => {
   const stamp = Date.now();
   orgName = `ZZ-TEST ${stamp} narrow org mve8ij02tlmf`;
   dealName = `ZZ-TEST ${stamp} narrow deal mve8ij02tlmf`;
-  const org = await root.c.post("/api/orgs", { name: orgName, kind: "ZZ-TEST" });
+  const org = await root.c.post("/api/orgs", { force: true, name: orgName, kind: "ZZ-TEST" });
   expect(org.status, JSON.stringify(org.json)).toBe(201);
   orgId = org.json.organisation.id as string;
   const pipes = (await root.c.get("/api/deals/pipelines")).json.pipelines as { id: string; key: string }[];
   const deal = await root.c.post("/api/deals", {
-    name: dealName, organisationId: orgId, pipelineId: pipes.find((x) => x.key === "DEAL_PROACTIVE")!.id, leaderId: root.id,
+    force: true, name: dealName, organisationId: orgId, pipelineId: pipes.find((x) => x.key === "DEAL_PROACTIVE")!.id, leaderId: root.id,
     whyPursue: "ZZ-TEST pursue this organisation", nextStep: { title: "ZZ-TEST call the buyer", dueDate: istDate(3) },
   });
   expect(deal.status, JSON.stringify(deal.json)).toBe(201);

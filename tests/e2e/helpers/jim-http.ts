@@ -36,13 +36,13 @@ export async function newDeal(leader: Who, later: (fn: () => Promise<unknown>) =
   const pipes = (await leader.api.get("/api/deals/pipelines")).json.pipelines as { id: string; key: string }[];
   const pipe = pipes.find((p) => p.key === "DEAL_PROACTIVE") ?? pipes[0];
   expect(pipe, "a deal pipeline").toBeTruthy();
-  const org = await leader.api.post("/api/orgs", { name: zz(`${label} org`) });
+  const org = await leader.api.post("/api/orgs", { force: true, name: zz(`${label} org`) });
   expect(org.status, JSON.stringify(org.json)).toBe(201);
   const orgId = org.json.organisation.id as string;
   later(() => leader.api.post(`/api/orgs/${orgId}/archive`));
   const name = zz(`${label} deal`);
   const ymd = new Date(Date.now() + 5.5 * 3600_000 + 3 * 86400_000).toISOString().slice(0, 10);
-  const d = await leader.api.post("/api/deals", { name, organisationId: orgId, pipelineId: pipe.id, leaderId: leader.user.id, whyPursue: "ZZ-TEST", nextStep: { title: zz("first step"), dueDate: ymd } });
+  const d = await leader.api.post("/api/deals", { force: true, name, organisationId: orgId, pipelineId: pipe.id, leaderId: leader.user.id, whyPursue: "ZZ-TEST", nextStep: { title: zz("first step"), dueDate: ymd } });
   expect(d.status, JSON.stringify(d.json)).toBe(201);
   const id = d.json.deal.id as string;
   later(() => leader.api.post(`/api/projects/${id}/archive`));

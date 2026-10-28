@@ -52,10 +52,10 @@ beforeAll(async () => {
   // Allowed direct DB write (ZZ-TEST setup only): the product has no API that creates a stage (stages are
   // migration-only), so the ZZ-TEST stage is inserted here. It is removed through DELETE /api/deals/pipelines/:id in afterAll.
   await db.stage.create({ data: { id: STAGE_ID, pipelineId: pro.id, name: STAGE_NAME, position: 100, category: "ACTIVE", requiredFields: [] } });
-  const org = (await sa.c.post("/api/orgs", { name: `ZZ-TEST Org 2736 ${RUN}` })).json.organisation.id as string;
+  const org = (await sa.c.post("/api/orgs", { force: true, name: `ZZ-TEST Org 2736 ${RUN}` })).json.organisation.id as string;
   orgId = org;
   const r = await sa.c.post("/api/deals", {
-    name: DEAL_NAME, organisationId: org, pipelineId: pro.id, leaderId: sa.id, whyPursue: "fit",
+    force: true, name: DEAL_NAME, organisationId: org, pipelineId: pro.id, leaderId: sa.id, whyPursue: "fit",
     nextStep: { title: "First call", dueDate: istDate(2) },
   });
   expect(r.status, JSON.stringify(r.json)).toBe(201);
