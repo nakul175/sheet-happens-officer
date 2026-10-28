@@ -1,0 +1,2 @@
+import {defineConfig} from '@playwright/test';
+export default defineConfig({testDir:'./tests/qa',testMatch:'holy-sheet-live.spec.ts',workers:1,retries:0,timeout:600000,expect:{timeout:15000},reporter:'list',use:{trace:'off',screenshot:'off',launchOptions:{executablePath:process.env.PW_CHROMIUM||'/usr/bin/google-chrome',args:process.env.HOLY_QA_BROWSER_LOOPBACK==='1'?['--host-resolver-rules=MAP sho-qa.aplyd.org 127.0.0.1']:[]}},outputDir:'test-results/holy3062-browser'});
