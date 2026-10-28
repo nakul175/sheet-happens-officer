@@ -95,7 +95,7 @@
   .shell[data-density="compact"] .project-list-view .project-task-section > .grp { margin: 0 0 4px; font-size: 14px; }
   .shell[data-density="compact"] .project-list-view .project-task-section > .grp .btn { min-height: 28px; padding: 2px 8px; }
   .shell[data-density="compact"] .project-list-view .project-task-section > .grp .selall { width: 28px; min-width: 28px; height: 28px; }
-  .shell[data-density="compact"] .project-list-view .item { padding: 3px 4px; min-height: 30px; gap: 10px; font-size: 13.5px; }
+  .shell[data-density="compact"] .project-list-view .item { padding: 2px 4px; min-height: 30px; gap: 10px; font-size: 13.5px; }
   .shell[data-density="compact"] .project-list-view .item .t b { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .shell[data-density="compact"] .project-list-view .item .meta { display: flex; gap: 8px; flex-wrap: nowrap; }
 }
