@@ -1,0 +1,8 @@
+CREATE TABLE "FeedToken" (
+ "userId" TEXT NOT NULL PRIMARY KEY,
+ "type" TEXT NOT NULL DEFAULT 'FEED',
+ "tokenHash" TEXT NOT NULL,
+ "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+ CONSTRAINT "FeedToken_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE
+);
+CREATE UNIQUE INDEX "FeedToken_tokenHash_key" ON "FeedToken"("tokenHash");
