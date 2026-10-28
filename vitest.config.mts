@@ -21,11 +21,12 @@ export default defineConfig({
     env: { SHO_E2E_START_BASE_URL: startBaseUrl },
     exclude: [
       ...configDefaults.exclude,
-      // SHO-2906: these four are Playwright specs, collected by the story runner.
-      "tests/e2e/stories/APL-2466.spec.ts",
-      "tests/e2e/stories/APL-2480.spec.ts",
-      "tests/e2e/stories/APL-2482.spec.ts",
-      "tests/e2e/stories/APL-2484.spec.ts",
+      "tests/e2e/stories/APL-2466.spec.ts", // SHO-2906: Playwright story
+      "tests/e2e/stories/APL-2480.spec.ts", // SHO-2906: Playwright story
+      "tests/e2e/stories/APL-2482.spec.ts", // SHO-2906: Playwright story
+      "tests/e2e/stories/APL-2484.spec.ts", // SHO-2906: Playwright story
+
+      "tests/e2e/stories/APL-2555.spec.ts", // SHO-2905: migrated Playwright story
       "tests/viewport/**",
       "tests/e2e/stories/APL-2669.spec.ts",
       "tests/e2e/stories/APL-2670.spec.ts",
