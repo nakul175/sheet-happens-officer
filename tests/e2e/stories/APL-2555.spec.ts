@@ -29,8 +29,13 @@ test.beforeEach(async ({ admin }) => {
   const r = await admin.api.post("/api/projects", { name: zz("22.7 sheet"), leaderId: admin.user.id });
   if (r.status === 201) projectId = r.json.project.id; // Own the resource before any later setup can fail.
   expect(r.status).toBe(201);
-  taskId = (await admin.api.post(`/api/projects/${projectId}/tasks`, { title: zz("22.7 task"), description: "Line of description.\n".repeat(60) })).json.task.id;
-  longId = (await admin.api.post(`/api/projects/${projectId}/tasks`, { title: LONGTITLE })).json.task.id;
+  const dueDate = new Date(Date.now() + 3 * 86400_000).toISOString().slice(0, 10);
+  const ordinary = await admin.api.post(`/api/projects/${projectId}/tasks`, { title: zz("22.7 task"), dueDate, description: "Line of description.\n".repeat(60) });
+  expect(ordinary.status, JSON.stringify(ordinary.json)).toBe(201);
+  taskId = ordinary.json.task.id;
+  const long = await admin.api.post(`/api/projects/${projectId}/tasks`, { title: LONGTITLE, dueDate });
+  expect(long.status, JSON.stringify(long.json)).toBe(201);
+  longId = long.json.task.id;
   const t = (await admin.api.get(`/api/tasks/${longId}`)).json.task;
   const b = await admin.api.patch(`/api/tasks/${longId}`, { blocked: true, blockedReason: LONGREASON, expectedUpdatedAt: t.updatedAt });
   expect(b.status, JSON.stringify(b.json)).toBe(200);
