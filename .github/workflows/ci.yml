@@ -113,6 +113,10 @@ jobs:
             if [ "${total:-0}" -eq 0 ]; then echo "::error::Playwright collected 0 tests from $f."; exit 1; fi
           done
           npx playwright test "${specs[@]}"
+      - name: SHO-2902 real Bell browser acceptance
+        run: |
+          export PW_CHROMIUM="$(node -p 'require("playwright-core").chromium.executablePath()')"
+          npx vitest run -c vitest.e2e.config.mts e2e/APL-2741-stalled-bell.spec.ts
       # APL-2728 AC4. One production server per CRM_VISIBLE mode. Needs the build above. Not part of npm test.
       - name: CRM visible modes
         run: npm run test:crm-modes

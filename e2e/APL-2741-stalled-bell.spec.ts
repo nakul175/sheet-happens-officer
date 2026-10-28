@@ -5,14 +5,14 @@
 // Local only, workers=1 (vitest.e2e.config.mts). ZZ-TEST deals, nakul17+ aliases. Run: npm run test:e2e
 // The job sends no email; the outbox is still checked.
 import "dotenv/config";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { chromium, type Browser } from "playwright-core";
+import { expect as browserExpect } from "@playwright/test";
 import { notifyStalledDeals } from "@/lib/deals";
 import { BASE, type Account } from "../tests/helpers";
 import {
   assertLocalTestDatabase,
   cleanupStalledWorld,
-  clearStalledNotes,
   dealNeedles,
   expectNoDealMail,
   seedStalledWorld,
@@ -36,8 +36,8 @@ async function withMode(mode: Mode, fn: () => Promise<void>) {
 
 /**
  * Opens the bell for `who` in a fresh browser context and returns the panel's text and links.
- * The context reuses the fixture's session. Signing in again would demote the seeded Super Admin,
- * whose address is not in SUPER_ADMIN_EMAILS.
+ * The context reuses each fixture session, including the configured bootstrap Super Admin.
+ * Setup notices were marked read through their recipient API; Unread contains the new job notices.
  */
 async function openBell(who: Account) {
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 }, baseURL: BASE });
@@ -51,17 +51,26 @@ async function openBell(who: Account) {
     const hydrated = page.waitForResponse((r) => new URL(r.url()).pathname === "/api/notifications", { timeout: 120000 });
     await page.goto("/", { waitUntil: "domcontentloaded", timeout: 120000 });
     await hydrated;
-    const button = page.locator("button.bell");
+    const button = page.getByRole("button", { name: /^Notifications\b/ });
     await button.waitFor({ state: "visible", timeout: 120000 });
     await button.click();
-    await page.waitForSelector('button.bell[aria-expanded="true"]', { timeout: 15000 });
+    await browserExpect(button).toHaveAttribute("aria-expanded", "true");
     const panel = page.getByRole("dialog", { name: "Notifications" });
     await panel.waitFor({ state: "visible", timeout: 15000 });
-    // Either a row or the empty state, so the list has finished loading.
-    await panel.locator(".bell-row, .empty").first().waitFor({ state: "visible", timeout: 15000 });
+    const unreadResponse = page.waitForResponse(response => {
+      const url = new URL(response.url());
+      return url.pathname === "/api/notifications" && url.searchParams.get("filter") === "unread";
+    });
+    await panel.getByRole("button", { name: /^Unread\b/ }).click();
+    const response = await unreadResponse;
+    expect(response.status()).toBe(200);
+    const data = await response.json() as { items: { id: string }[] };
+    if (data.items.length) {
+      await expect.poll(() => panel.getByRole("button", { name: /^Mark as read:/ }).count()).toBe(data.items.length);
+    } else await browserExpect(panel.getByText("All caught up", { exact: true })).toBeVisible();
     const text = await panel.innerText();
-    const links = await panel.locator("a.bell-main").evaluateAll((els) =>
-      els.map((el) => ({ href: el.getAttribute("href"), text: el.textContent ?? "" })));
+    const links = await panel.getByRole("link").evaluateAll(els =>
+      els.map(el => ({ href: el.getAttribute("href"), text: el.textContent ?? "" })));
     return { text, links };
   } finally {
     await ctx.close();
@@ -95,16 +104,16 @@ describe("qa:TC missing APL-2741 stalled-deal bell in the browser", () => {
       executablePath: process.env.PW_CHROMIUM || "/usr/local/bin/google-chrome",
       args: ["--no-sandbox"],
     });
-    world = await seedStalledWorld();
   }, 180000);
+
+  beforeEach(async () => { world = undefined!; world = await seedStalledWorld(); }, 60_000);
+  afterEach(async () => { await cleanupStalledWorld(world); });
 
   afterAll(async () => {
     await browser?.close();
-    await cleanupStalledWorld(world);
   });
 
   it("qa:TC missing AC2: unset, the bell shows today's stalled-deal sentence and link to the owner and admins", async () => {
-    await clearStalledNotes(world);
     await withMode("unset", async () => { expect((await notifyStalledDeals()).notified).toBeGreaterThanOrEqual(1); });
     await expectBellShows(world.owner, world.owned);
     await expectBellShows(world.orgAdmin, world.adminDeal);
@@ -114,7 +123,6 @@ describe("qa:TC missing APL-2741 stalled-deal bell in the browser", () => {
   });
 
   it("qa:TC missing AC2: CRM_VISIBLE=all, the bell matches unset", async () => {
-    await clearStalledNotes(world);
     await withMode("all", async () => { await notifyStalledDeals(); });
     await expectBellShows(world.owner, world.owned);
     await expectBellShows(world.orgAdmin, world.adminDeal);
@@ -124,7 +132,6 @@ describe("qa:TC missing APL-2741 stalled-deal bell in the browser", () => {
   });
 
   it("qa:TC missing AC1 AC2: admins, a non-admin owner or follower sees no deal name, id or link, and admins still do", async () => {
-    await clearStalledNotes(world);
     await withMode("admins", async () => { await notifyStalledDeals(); });
     await expectBellSilent(world.owner);
     await expectBellSilent(world.follower);
@@ -134,7 +141,6 @@ describe("qa:TC missing APL-2741 stalled-deal bell in the browser", () => {
   });
 
   it("qa:TC missing AC1: CRM_VISIBLE=off, no bell names a ZZ-TEST stalled deal", async () => {
-    await clearStalledNotes(world);
     await withMode("off", async () => {
       expect(await notifyStalledDeals()).toEqual({ stalled: 0, notified: 0, skipped: true });
     });
