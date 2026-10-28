@@ -77,6 +77,7 @@ export async function createDeal(
   const { value, currency } = normaliseValue(input.value, input.currency);
   const probability = checkProbability(input.probability);
 
+  // project-lookup-ok: workspace-scoped duplicate check must include hidden deals for this buyer
   const dup = await db.project.findFirst({
     where: { workspaceId: u.workspaceId, typeId: WORKSTREAM_DEAL, name: { equals: name, mode: "insensitive" }, parties: { some: { organisationId: org.id, role: "BUYER" } } },
     select: { id: true },
@@ -249,6 +250,7 @@ export async function removeStage(user: Actor, stageId: string, input: { moveTo?
   if (!targets.length) {
     throw new ApiError(409, `No other stage in ${stage.pipeline.name} can take the items in "${stage.name}", so it cannot be removed.`);
   }
+  // project-lookup-ok: pipeline stage administration is authorized before counting every item in that stage
   const items = await db.project.count({ where: { stageId: stage.id } });
   const moveTo = clean(input.moveTo);
   if (!moveTo) {
@@ -339,6 +341,7 @@ const visibleTo = (user: Actor): Prisma.ProjectWhereInput => (isAdmin(user) ? {}
 /** SHO-US-12.6 data and the Deals screen. `mine` limits to deals the person leads or holds a task in (AC6). */
 export async function listDeals(user: Actor, o: { archived?: boolean; mine?: boolean; pipelineId?: string } = {}) {
   requireCrm(user);
+  // project-lookup-ok: requireCrm and visibleTo(user) scope this deal list
   const projects = await db.project.findMany({
     where: {
       typeId: WORKSTREAM_DEAL, archivedAt: o.archived ? { not: null } : null, ...visibleTo(user),
@@ -373,6 +376,7 @@ export async function listDeals(user: Actor, o: { archived?: boolean; mine?: boo
 
 /** The deal block on the project page: details, parties, pipeline stages, next step and flags. */
 export async function dealBlock(projectId: string) {
+  // project-lookup-ok: getProject authorizes projectAccess before loading the deal block
   const p = await db.project.findUnique({
     where: { id: projectId },
     include: { stage: true, pipeline: { include: { stages: { orderBy: { position: "asc" } } } }, deal: true, parties: { include: { organisation: { select: { id: true, name: true } } }, orderBy: { createdAt: "asc" } } },
@@ -399,6 +403,7 @@ export async function dealBlock(projectId: string) {
 
 /** SHO-US-12.5 AC2: when a working deal is left with no dated open task, the Leader gets one notice (none while an unread one stands). */
 export async function ensureNextStep(tx: Prisma.TransactionClient, projectId: string, actorId: string | null) {
+  // project-lookup-ok: task transaction caller already authorizes projectAccess; this lookup determines leader notices
   const p = await tx.project.findUnique({ where: { id: projectId }, select: { name: true, typeId: true, archivedAt: true, stage: { select: { category: true } } } });
   if (!p || p.typeId !== WORKSTREAM_DEAL || p.archivedAt || !isWorking(p.stage?.category)) return;
   const open = await tx.task.count({ where: { projectId, deletedAt: null, completedAt: null, parentId: null, dueDate: { not: null } } });
@@ -486,6 +491,7 @@ export async function convertTaskToDeal(user: Actor, taskId: string, input: Conv
   const { value, currency } = normaliseValue(input.value, input.currency);
   const probability = checkProbability(input.probability);
   if (dueDate) isoDate(dueDate);
+  // project-lookup-ok: workspace-scoped duplicate check must include hidden deals for this buyer
   const dup = await db.project.findFirst({
     where: { workspaceId: u.workspaceId, typeId: WORKSTREAM_DEAL, name: { equals: name, mode: "insensitive" }, parties: { some: { organisationId: org.id, role: "BUYER" } } },
     select: { id: true },
@@ -546,6 +552,7 @@ export async function convertTaskToDeal(user: Actor, taskId: string, input: Conv
 /** SHO-US-12.5 AC2 and 13.1 AC3: deals the person leads that are working and have no dated open task. */
 export async function dealsNeedingNextStep(user: Actor) {
   if (!crmVisible(user)) return [];
+  // project-lookup-ok: CRM permission and LEADER membership explicitly scope these next-step notices
   const deals = await db.project.findMany({
     where: { typeId: WORKSTREAM_DEAL, archivedAt: null, members: { some: { userId: user.id, role: "LEADER" } }, stage: { category: { in: [...WORKING_CATEGORIES] } } },
     select: { id: true, name: true, stage: { select: { name: true } } },
@@ -589,6 +596,7 @@ export function stalledDealWhere(): Prisma.ProjectWhereInput {
 export async function notifyStalledDeals(now = new Date()) {
   if (crmMode() === "off") return { stalled: 0, notified: 0, skipped: true };
   const mode = crmMode();
+  // project-lookup-ok: scheduled job has no signed-in actor; recipient CRM access is checked before notifying
   const deals = await db.project.findMany({
     where: stalledDealWhere(),
     include: {

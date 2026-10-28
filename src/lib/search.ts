@@ -39,6 +39,7 @@ export async function search(user: Actor, q: string, includeArchived: boolean, i
     ? { deletedAt: null, ...(ideasOnly ? { isIdea: true } : {}), project: visible, OR: [{ title: titleMatch }, { id: { in: commentTaskIds } }] }
     : { deletedAt: null, ...(ideasOnly ? { isIdea: true } : {}), title: titleMatch, project: visible };
   const [projects, tasks] = await Promise.all([
+    // project-lookup-ok: visible was computed with visibleProjects(user) before this query
     db.project.findMany({
       where: { ...visible, name: { contains: text, mode: "insensitive" } },
       orderBy: { name: "asc" }, take: 20, select: { id: true, name: true, archivedAt: true, typeId: true },
