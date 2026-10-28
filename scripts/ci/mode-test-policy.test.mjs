@@ -3,6 +3,16 @@ import { globSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import test from "node:test";
 
 const modeGlob = "tests/**/*.mode.test.ts";
+const migratedModeTests = [
+  "tests/apl-2713-crm-modes.mode.test.ts",
+  "tests/crm-visible-modes-server.mode.test.ts",
+  "tests/e2e/local/APL-2609.mode.test.ts",
+  "tests/e2e/local/APL-2728.mode.test.ts",
+  "tests/e2e/local/APL-2735.mode.test.ts",
+  "tests/jobs-reminders-crm-server.mode.test.ts",
+  "tests/jobs-stalled-crm-server.mode.test.ts",
+  "tests/task-outsider-2875-crm.mode.test.ts",
+];
 
 test("SHO-2881 keeps every per-mode test behind one automatic glob", () => {
   const defaultConfig = readFileSync("vitest.config.mts", "utf8");
@@ -11,7 +21,11 @@ test("SHO-2881 keeps every per-mode test behind one automatic glob", () => {
   const packageJson = JSON.parse(readFileSync("package.json", "utf8"));
   const committedModeTests = globSync(modeGlob).sort();
 
-  assert.equal(committedModeTests.length, 8, committedModeTests.join("\n"));
+  assert.deepEqual(
+    migratedModeTests.filter((path) => !committedModeTests.includes(path)),
+    [],
+    `migrated mode tests dropped from the glob:\n${committedModeTests.join("\n")}`,
+  );
   assert.equal(defaultConfig.match(/tests\/\*\*\/\*\.mode\.test\.ts/g)?.length, 1);
   assert.equal(modeConfig.match(/tests\/\*\*\/\*\.mode\.test\.ts/g)?.length, 1);
   assert.equal(workflow.match(/npm run test:modes/g)?.length, 1);
