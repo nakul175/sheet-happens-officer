@@ -184,7 +184,8 @@ describe("qa:TC missing APL-2748 provisioning report: says the right next step",
 describe("qa:TC missing APL-2748 AC1: pool Members are handed back active", () => {
   it("qa:TC missing AC1: cast reactivates a deactivated pool Member and restores it after the test", () => {
     const src = readFileSync("tests/e2e/helpers/qa-alias.ts", "utf8");
-    expect(src).toContain("/reactivate");
+    expect(src).toContain("restorePoolPerson(admin.api, id)");
+    expect(readFileSync("tests/e2e/helpers/qa-cleanup.ts", "utf8")).toContain("/reactivate");
     expect(src).toMatch(/later\(\(\) => restore\(/);
     expect(src).not.toContain("/deactivate");
   });

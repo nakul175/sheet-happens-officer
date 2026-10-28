@@ -2,6 +2,7 @@
 import { test as base, expect, type APIRequestContext, type Browser, type BrowserContext, type Page } from "@playwright/test";
 
 import { BASE_URL } from "./base-url";
+import { runCleanup } from "./helpers/qa-cleanup";
 
 export { expect, BASE_URL };
 export type { Page };
@@ -127,7 +128,7 @@ export const test = base.extend<Fixtures>({
   later: async ({}, use) => {
     const fns: (() => Promise<unknown>)[] = [];
     await use((fn) => { fns.push(fn); });
-    for (const fn of fns.reverse()) { try { await fn(); } catch { /* clean-up is best effort */ } }
+    await runCleanup(fns);
   },
   anon: async ({ browser }, use) => {
     const ctx = await browser.newContext({
