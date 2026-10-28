@@ -18,7 +18,7 @@ test.beforeAll(() => {
   if (!passwordOk(PASS)) throw new Error("SHO_QA_PASS must be at least 8 characters with a letter and a number.");
 });
 
-async function project(admin: { api: import("../support").Api; user: Record<string, any> }, later: (f: () => Promise<unknown>) => void, label: string) {
+async function project(admin: { api: import("../support").Api; user: { id: string } }, later: (f: () => Promise<unknown>) => void, label: string) {
   const r = await admin.api.post("/api/projects", { name: zz(label), leaderId: admin.user.id });
   expect(r.status).toBe(201);
   const id = r.json.project.id as string;
@@ -101,10 +101,10 @@ test("AC5: Retry succeeds and the screen loads without a full page reload", tag(
   await page.route(re, (r) => r.abort("connectionfailed"));
   await page.goto(`/projects/${p.id}`);
   await expect(page.getByText("Could not reach the server.")).toBeVisible();
-  await page.evaluate(() => { (window as any).__noReload = "still here"; });
+  await page.evaluate(() => { (window as Window & { __noReload?: string }).__noReload = "still here"; });
   await page.unroute(re); // the network is back
   await page.getByRole("button", { name: "Retry" }).click();
   await expect(page.getByRole("heading", { level: 1, name: p.name })).toBeVisible();
   await expect(page.getByText("Could not reach the server.")).toHaveCount(0);
-  expect(await page.evaluate(() => (window as any).__noReload)).toBe("still here"); // same document: no reload
+  expect(await page.evaluate(() => (window as Window & { __noReload?: string }).__noReload)).toBe("still here"); // same document: no reload
 });

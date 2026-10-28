@@ -1,3 +1,4 @@
+import { type Who, type Later } from "../support";
 // SHO-US-14.16 Approvals view (APL-2575). Needs the optional Member account: the Member sends, the Super Admin approves.
 // AC3 uses a nakul17+ approver who starts with nothing waiting, then deactivates that person.
 // The file skips only when SHO_QA_PASS is unset.
@@ -28,7 +29,7 @@ async function freshPerson(browser: Browser, request: APIRequestContext, adminAp
   return who;
 }
 
-async function held(admin: any, member: any, later: any, label: string) {
+async function held(admin: Who, member: Who, later: Later, label: string) {
   const r = await admin.api.post("/api/projects", { name: zz("approvals"), leaderId: admin.user.id });
   expect(r.status).toBe(201);
   const id = r.json.project.id as string;
