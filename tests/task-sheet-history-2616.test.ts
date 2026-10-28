@@ -26,6 +26,18 @@ it("only handles an opening on the current page and preserves the background's o
   expect(history.state.__shoTaskSheet.base).toBe(`${location.origin}/projects/one`);
   expect(openTaskSheet("/projects/one?task=another")).toBe(false);
 });
+it("has the task URL and marked entry in place before a synchronous router observer mounts the sheet", () => {
+  let mounted: ReturnType<typeof attachTaskSheetBack> | undefined;
+  const observe = () => { mounted = attachTaskSheetBack({ id: "task-one", blocked: () => true, beforePrompt: vi.fn(), prompt: vi.fn(), nestedClose: () => null }); };
+  // Next updates its observers before calling the original History method. A sheet can mount there.
+  vi.spyOn(history, "pushState").mockImplementation((data, unused, url) => { observe(); History.prototype.pushState.call(history, data, unused, url); });
+  vi.spyOn(history, "replaceState").mockImplementation((data, unused, url) => { observe(); History.prototype.replaceState.call(history, data, unused, url); });
+  const back = vi.spyOn(history, "back").mockImplementation(() => {});
+  openTaskSheet("?task=task-one");
+  detach = () => mounted?.detach();
+  expect(mounted?.close()).toBe(true);
+  expect(back).toHaveBeenCalledOnce();
+});
 it("normalizes a direct link once and reuses that entry after remount/reload", () => {
   history.replaceState({ opaque: "router-state" }, "", "/projects/one?task=task-one");
   const before = history.length;

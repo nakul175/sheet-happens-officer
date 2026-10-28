@@ -28,9 +28,12 @@ export function openTaskSheet(href: string): boolean {
   if (!id || target.origin !== base.origin || target.pathname !== base.pathname || base.searchParams.has("task")) return false;
   const token = crypto.randomUUID();
   History.prototype.replaceState.call(history, { ...cleanState(), [BASE]: token }, "", base.href);
-  // Do not copy Next's internal state into this argument: its wrapper treats that as an internal
-  // navigation and skips updating useSearchParams. The wrapper copies its own state itself.
-  history.pushState({ [ENTRY]: { v: 1, token, id, href: target.href, base: base.href } satisfies Entry }, "", target.href);
+  const entry: Entry = { v: 1, token, id, href: target.href, base: base.href };
+  // Next can synchronously mount URL observers before its pushState wrapper writes the URL.
+  // Write the one native entry first, then notify the router via its public replaceState integration.
+  // Pass only our metadata to that wrapper: copied Next internals would bypass its observer update.
+  History.prototype.pushState.call(history, { ...cleanState(), [ENTRY]: entry }, "", target.href);
+  history.replaceState({ [ENTRY]: entry }, "", target.href);
   return true;
 }
 
