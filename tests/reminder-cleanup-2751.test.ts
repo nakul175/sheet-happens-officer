@@ -8,13 +8,14 @@ it("qa:TC missing SHO-2751/2769: only run-owned resources are cleaned through or
   const post = vi.fn(async () => ({ status: 200 }));
   await cleanupReminderResources("root", post, resources);
   expect(post.mock.calls).toEqual([
+    ["/api/projects/zz-project/members", { userId: "root", role: "EDITOR" }],
     ["/api/projects/zz-project/leader", { newLeaderId: "root", previousRole: "REMOVE", handoverTo: "root" }],
     ["/api/projects/zz-project/archive"],
     ["/api/team/zz-person/deactivate", { reassign: "leaders" }],
     ["/api/orgs/zz-org/archive", { archive: true }],
   ]);
   await cleanupReminderResources("root", post, resources);
-  expect(post).toHaveBeenCalledTimes(4);
+  expect(post).toHaveBeenCalledTimes(5);
 });
 it("qa:TC missing SHO-2751/2769: a failed project cleanup does not hide failures or prevent other cleanup", async () => {
   const resources = reminderResources();
