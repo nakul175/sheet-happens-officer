@@ -20,9 +20,17 @@ vi.mock("@/lib/db", () => ({
   },
 }));
 
+// SHO-3010 AC3 below calls POST /api/concierge/improve itself, so handle() runs and the thrown ApiError has to become
+// an HTTP answer. `connection()` needs a request scope the test does not have, and the session is the caller's, not
+// this clause's: both are stubbed the way tests/apl-2742.test.ts and tests/crm-visible-quick.test.ts stub them.
+vi.mock("next/server", async (orig) => ({ ...(await orig<typeof import("next/server")>()), connection: async () => {} }));
+vi.mock("@/lib/auth", () => ({ currentUser: async () => ({ id: "user-1", orgRole: "MEMBER" }) }));
+
 import { improvePrompt } from "../src/lib/concierge/engine";
 import { clearProviderDown } from "../src/lib/concierge/limits";
 import { generate, type ModelRequest } from "../src/lib/model";
+
+const { POST: improveRoute } = await import("../src/app/api/concierge/improve/route");
 
 const ORIGINAL = "Move the budget task to Monday";
 const REWRITE = "Please move the budget task to Monday.";
@@ -161,6 +169,9 @@ describe("qa:TC missing improve my prompt ignores near-copies (APL-2871)", () =>
     "move the budget task to monday",
     "Move the budget task to Monday.",
     "\u201cMove the budget task to Monday\u201d",
+    // SHO-3010 AC1/AC3: the typed text in wrapping quotes with one full stop after the closing quote, straight and curly.
+    "\"Move the budget task to Monday\".",
+    "\u2018Move the budget task to Monday\u2019.",
   ])("qa:TC missing AC1 v1.1: the reply %j is no rewrite: 502, counted once toward the week, nothing posted", async (reply) => {
     enableModel();
     mockModel(reply);
@@ -181,5 +192,73 @@ describe("qa:TC missing improve my prompt ignores near-copies (APL-2871)", () =>
     expect(usageCreate).toHaveBeenCalledTimes(1);
     expect(usageCreate.mock.calls[0][0].data).toMatchObject({ counted: true, userId: "user-1" });
     expect(chatCreate).not.toHaveBeenCalled();
+  });
+});
+
+// SHO-3010 AC3, verbatim: "improvePrompt (server) and offeredRewrite (client) both treat such a reply as an echo:
+// 502 \"No clearer version came back…\" with one `counted: true` row, and no rewrite offered."
+//
+// The two describe blocks above pin the engine half (the reply throws ApiError(502)) and the client half
+// (offeredRewrite is null, tests/concierge-echo.test.ts). Neither says the *request* is answered with 502: an ApiError
+// is a thrown object, and only handle() turns it into an HTTP status. A route that caught it, or a handle() that
+// mapped 502 to 200, would leave both existing blocks green and AC3 false. These cases call the route's POST.
+const IMPROVE_URL = "http://localhost/api/concierge/improve";
+const postImprove = (text: string) =>
+  improveRoute(new Request(IMPROVE_URL, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ text }),
+  }));
+
+describe("qa:TC missing SHO-3010 AC3 at the HTTP boundary", () => {
+  // AC3's own wording is the ellipsis; AC4 of the same ticket and tests/concierge-improve.test.ts:121 carry the full
+  // sentence. Pinned literally so a reworded message has to be a deliberate change.
+  const ECHO_TEXT = "No clearer version came back. Your text is unchanged; try again.";
+
+  it.each([
+    ["straight quotes, one full stop after them (the ticket's failing case)", `"${ORIGINAL}".`],
+    ["curly quotes, one full stop after them", `\u201c${ORIGINAL}\u201d.`],
+    ["no quotes, one full stop", `${ORIGINAL}.`],
+  ])("qa:TC missing AC3: %s is answered 502 with AC3's sentence and exactly one counted:true row, no rewrite", async (_label, reply) => {
+    enableModel();
+    mockModel(reply);
+    const res = await postImprove(ORIGINAL);
+
+    // The answer, not a thrown error: this is the half that no engine-level test can assert.
+    expect(res.status).toBe(502);
+    const body = (await res.json()) as { error?: string; improved?: unknown };
+    expect(body.error).toBe(ECHO_TEXT);
+    // AC3 quotes the sentence with an ellipsis; the answer has to start with the words it does quote.
+    expect(body.error?.startsWith("No clearer version came back")).toBe(true);
+    // "no rewrite offered": the body carries the error and nothing the composer could show as a rewrite.
+    expect(body.improved).toBeUndefined();
+
+    // "...with one `counted: true` row": exactly one, counted, on the standard model, and it is not a chat message.
+    expect(usageCreate).toHaveBeenCalledTimes(1);
+    expect(usageCreate.mock.calls[0][0].data).toMatchObject({ counted: true, model: "claude-haiku-5-5", userId: "user-1" });
+    expect(chatCreate).not.toHaveBeenCalled();
+  });
+
+  it("qa:TC missing AC3 (control): a real rewrite is answered 200 with the rewrite, so the 502 above is the echo path", async () => {
+    enableModel();
+    mockModel("Move the budget review task to Monday 9:00");
+    const res = await postImprove(ORIGINAL);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ improved: "Move the budget review task to Monday 9:00" });
+    expect(usageCreate).toHaveBeenCalledTimes(1);
+    expect(chatCreate).not.toHaveBeenCalled();
+  });
+
+  it("qa:TC missing AC3: an empty body is a 400, not the echo 502, so the two refusals are told apart", async () => {
+    enableModel();
+    mockModel(`"${ORIGINAL}".`);
+    const res = await improveRoute(new Request(IMPROVE_URL, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ text: "   " }),
+    }));
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error?: string }).error).toBe("Write something first.");
+    expect(usageCreate).not.toHaveBeenCalled();
   });
 });

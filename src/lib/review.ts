@@ -15,7 +15,7 @@ export async function leadsAnyDeal(user: Actor) {
 
 export async function pipelineReview(user: Actor) {
   requireCrm(user);
-  const deals = (await listDeals(user)).filter((d) => !d.archived);
+  const deals = (await listDeals(user, { lifecycle: "sales" })).filter((d) => !d.archived);
   const today = startOfTodayIST();
   const todayStr = formatDueDate(today)!;
   const pick = (d: (typeof deals)[number]) => ({ id: d.id, name: d.name, stage: d.stage?.name ?? null, pipeline: d.pipeline?.name ?? null, organisation: d.organisation, leader: d.leader, nextStep: d.nextStep });
@@ -38,17 +38,21 @@ export async function pipelineReview(user: Actor) {
     canEdit: isAdmin(user) || (t.project.members[0]?.role ?? "VIEWER") !== "VIEWER",
   }));
 
-  // Pipeline counts by stage; unknown value is never zero.
-  const pipes = await db.pipeline.findMany({ where: { typeId: WORKSTREAM_DEAL }, orderBy: { position: "asc" }, include: { stages: { orderBy: { position: "asc" } } } });
-  const counts = pipes.map((p) => ({
+  // Commercial counts and other opportunities are explicit; operational queues above include every type.
+  // Unknown value is never zero; currency totals remain separate.
+  const pipes = await db.pipeline.findMany({ where: { typeId: WORKSTREAM_DEAL }, orderBy: { position: "asc" }, include: { stages: { where: { isRetired: false, category: { not: "DELIVERY" } }, orderBy: { position: "asc" } } } });
+  const countsFor = (include: (deal: (typeof deals)[number]) => boolean) => pipes.map((p) => ({
     id: p.id, name: p.name,
     stages: p.stages.map((s) => {
-      const here = deals.filter((d) => d.stage?.id === s.id);
+      const here = deals.filter((d) => d.stage?.id === s.id && include(d));
       const sums = new Map<string, number>();
       let withoutValue = 0;
       for (const d of here) { if (d.value === null || !d.currency) withoutValue++; else sums.set(d.currency, (sums.get(d.currency) ?? 0) + d.value); }
       return { id: s.id, name: s.name, category: s.category, count: here.length, sums: [...sums].map(([currency, total]) => ({ currency, total })), withoutValue };
     }),
   }));
-  return { needsNextStep, overdueNextStep, stalled, ideas, counts };
+  const counts = countsFor(d => d.opportunityType === "RFP_RFA" || d.opportunityType === "OTC");
+  const otherCounts = countsFor(d => d.opportunityType === "EOI" || d.opportunityType === "CV_LTA");
+  const unclassifiedCounts = countsFor(d => !d.opportunityType);
+  return { needsNextStep, overdueNextStep, stalled, ideas, counts, otherCounts, unclassifiedCounts };
 }

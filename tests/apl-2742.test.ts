@@ -4,10 +4,13 @@
 //    message only (no key, no body, no link), and sign-up / resend tell the person instead of failing with a 500.
 //    The provider is faked here: sendMail is called in this process, and the routes are called through their own
 //    POST handlers with sendMail made to fail.
+import { randomUUID } from "node:crypto";
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import pg from "pg";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { BASE, Client, OUTBOX, PW } from "./helpers";
+import { localPgClient, localPgPool, schemaFromDatabaseUrl } from "./e2e/helpers/local-db-pool";
 import { db } from "../src/lib/db";
 
 vi.mock("next/server", async (orig) => ({ ...(await orig<typeof import("next/server")>()), connection: async () => {} }));
@@ -334,3 +337,237 @@ describe("qa:TC missing AC4: verification needs a click, and verification events
     expect(await db.auditLog.count({ where: { event: "VERIFY_EMAIL_REQUESTED" } })).toBe(before);
   });
 });
+
+// SHO-3011 (also cited as SHO-3036). The APL-2742 story spec reads the app's rows with `pg`, and ?schema= is a
+// Prisma parameter pg ignores, so the spec's pool must carry it itself or it reads public while the app writes
+// elsewhere. Proven on a throwaway schema: current_schema() and search_path come from the URL, an unqualified table
+// lands in that schema, and public cannot see it. Only a local database is touched, and only that schema is dropped.
+describe("qa:TC missing SHO-3011: the APL-2742 pool reads the schema DATABASE_URL names", () => {
+  const RAW = process.env.DATABASE_URL ?? "";
+  let local = false;
+  try {
+    local = /^(localhost|127\.0\.0\.1|::1)$/i.test(new URL(RAW).hostname.replace(/^\[|\]$/g, ""));
+  } catch {
+    local = false;
+  }
+  const SCHEMA = `sho_test_apl2742_${randomUUID().replace(/-/g, "").slice(0, 12)}`;
+  const TABLE = `apl2742_probe_${randomUUID().replace(/-/g, "").slice(0, 8)}`;
+  const urlWithSchema = (schema: string) => {
+    const url = new URL(RAW);
+    url.searchParams.set("schema", schema);
+    return url.toString();
+  };
+  let admin: pg.Client | undefined;
+  let pool: pg.Pool | undefined;
+
+  beforeAll(async () => {
+    if (!local) return;
+    admin = localPgClient(RAW);
+    await admin.connect();
+    await admin.query(`CREATE SCHEMA "${SCHEMA}"`);
+  });
+
+  afterAll(async () => {
+    await pool?.end();
+    // Only the throwaway schema this block made, and never public or anything else.
+    if (local && admin && /^sho_test_apl2742_[a-z0-9]+$/.test(SCHEMA)) await admin.query(`DROP SCHEMA IF EXISTS "${SCHEMA}" CASCADE`);
+    await admin?.end();
+  });
+
+  it.skipIf(!local)("qa:TC missing SHO-3011 AC1: ?schema= sets current_schema() and search_path on the pool's connections", async () => {
+    // The defect itself: pg alone keeps its own parameters and drops Prisma's ?schema=, so it reads the default schema.
+    const bare = new pg.Pool({ connectionString: urlWithSchema(SCHEMA), max: 1 });
+    try {
+      const bareSchema = (await bare.query<{ s: string }>("SELECT current_schema() AS s")).rows[0].s;
+      expect(bareSchema, "a bare pg pool ignores ?schema= and reads the default schema").not.toBe(SCHEMA);
+    } finally {
+      await bare.end();
+    }
+
+    pool = localPgPool(urlWithSchema(SCHEMA));
+    const row = (await pool.query<{ current: string; schemas: string; searchPath: string }>(
+      'SELECT current_schema() AS current, array_to_string(current_schemas(false), \',\') AS schemas, current_setting(\'search_path\') AS "searchPath"',
+    )).rows[0];
+    expect(row.current, "current_schema() is the URL's schema").toBe(SCHEMA);
+    expect(row.schemas, "search_path holds that schema and nothing else, so no public fallback").toBe(SCHEMA);
+    expect(row.searchPath).toContain(SCHEMA);
+
+    // An unqualified write and read land in that schema: the same search_path Prisma would give the app.
+    await pool.query(`CREATE TABLE ${TABLE} (value text)`);
+    await pool.query(`INSERT INTO ${TABLE} (value) VALUES ($1)`, ["zz-sho-3011"]);
+    expect((await pool.query<{ value: string }>(`SELECT value FROM ${TABLE}`)).rows).toEqual([{ value: "zz-sho-3011" }]);
+    const inSchema = (await admin!.query<{ nspname: string }>(
+      "SELECT n.nspname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE c.relname = $1",
+      [TABLE],
+    )).rows;
+    expect(inSchema.map((r) => r.nspname), "the unqualified table was created in that schema").toEqual([SCHEMA]);
+    expect((await admin!.query<{ t: string | null }>("SELECT to_regclass($1) AS t", [`public.${TABLE}`])).rows[0].t,
+      "public does not have the table").toBeNull();
+  });
+
+  it.skipIf(!local)("qa:TC missing SHO-3011 AC2: without ?schema= the pool is unchanged (default schema)", async () => {
+    const plain = new URL(RAW);
+    plain.searchParams.delete("schema");
+    const ours = localPgPool(plain.toString());
+    const before = new pg.Pool({ connectionString: plain.toString(), max: 1 }); // the construction this replaces
+    try {
+      const sql = "SELECT current_schema() AS current, array_to_string(current_schemas(false), ',') AS schemas, current_setting('search_path') AS sp";
+      expect((await ours.query(sql)).rows[0], "indistinguishable from a plain pg pool").toEqual((await before.query(sql)).rows[0]);
+      expect(schemaFromDatabaseUrl(plain.toString())).toBeUndefined();
+    } finally {
+      await ours.end();
+      await before.end();
+    }
+  });
+
+  it.skipIf(!local)("qa:TC missing SHO-3011 AC1: the spec's own admin connection reads the URL's schema, not public", async () => {
+    // AC1 covers every SQL read in this file, and `admin` in beforeAll is a read connection built from DATABASE_URL.
+    // It is the construction the story spec bans for good reason (the AC1 test at the end of this describe): a bare pg
+    // client drops ?schema= and answers from public. On the shared local cluster that is 16882 rows against this
+    // schema's 17 for "User" - a wrong answer, not an error, and only the assertions that happen to look at it notice.
+    const currentSchema = async (c: pg.Client) => (await c.query<{ s: string | null }>("SELECT current_schema() AS s")).rows[0].s;
+    const want = schemaFromDatabaseUrl(RAW)!;
+    expect(await currentSchema(admin!), "the spec's admin connection did not receive ?schema=").toBe(want);
+
+    // The construction this replaces, on a throwaway schema, for the record: it lands elsewhere.
+    const bare = new pg.Client({ connectionString: urlWithSchema(SCHEMA) });
+    try {
+      await bare.connect();
+      expect(await currentSchema(bare), "a bare pg client drops ?schema= - the escape this test closes").not.toBe(SCHEMA);
+      expect(await currentSchema(bare), "and it lands on the server default, which is public").toBe("public");
+    } finally {
+      await bare.end();
+    }
+  });
+
+  it.skipIf(!local)("qa:TC missing SHO-3011 AC1: nothing this spec builds can see a sibling schema's sentinel row", async () => {
+    // The property behind AC1, stated as an experiment rather than as a reading of the URL: a sentinel row lives in a
+    // sibling schema under the *same table name* as the row the spec should read. A connection that did not receive the
+    // schema has no way to answer the unqualified SELECT with the schema's own row, so it either returns the sentinel
+    // or fails on a missing table - both fail this test.
+    const SIBLING = `sho_test_apl2742_sib_${randomUUID().replace(/-/g, "").slice(0, 12)}`;
+    const PROBE = `apl2742_sentinel_${randomUUID().replace(/-/g, "").slice(0, 8)}`;
+    const SENTINEL = "SENTINEL-MUST-NOT-BE-SEEN";
+    const OWN = schemaFromDatabaseUrl(RAW)!;
+    await admin!.query(`CREATE SCHEMA "${SIBLING}"`);
+    const sibling = localPgPool(urlWithSchema(SIBLING));
+    try {
+      for (const [schema, value] of [[SIBLING, SENTINEL], [OWN, "OWN"]] as const) {
+        await admin!.query(`CREATE TABLE "${schema}".${PROBE} (value text)`);
+        await admin!.query(`INSERT INTO "${schema}".${PROBE} (value) VALUES ($1)`, [value]);
+      }
+      // The sentinel is real and readable when it is named: the negative results below are not a missing table.
+      expect((await sibling.query<{ value: string }>(`SELECT value FROM ${PROBE}`)).rows.map((r) => r.value),
+        "a connection on the sibling schema reads the sentinel").toEqual([SENTINEL]);
+
+      const own = localPgPool(RAW);
+      try {
+        // Both connections this spec reads with, addressed the same way: admin (DDL + probes) and the helper pool.
+        const readers = [
+          { who: "admin", query: (sql: string) => admin!.query<{ value: string; schemas: string }>(sql) },
+          { who: "the helper pool", query: (sql: string) => own.query<{ value: string; schemas: string }>(sql) },
+        ];
+        for (const { who, query } of readers) {
+          expect((await query(`SELECT value FROM ${PROBE}`)).rows.map((r) => r.value),
+            `${who}: the unqualified read answers with the URL's own row`).toEqual(["OWN"]);
+          const schemas = (await query("SELECT array_to_string(current_schemas(false), ',') AS schemas")).rows[0].schemas.split(",");
+          expect(schemas, `${who}: search_path names no sibling schema`).not.toContain(SIBLING);
+          expect(schemas, `${who}: and no public fallback`).not.toContain("public");
+        }
+      } finally {
+        await own.end();
+      }
+    } finally {
+      await sibling.end();
+      for (const schema of [SIBLING, OWN]) await admin!.query(`DROP TABLE IF EXISTS "${schema}".${PROBE}`).catch(() => {});
+      // Only the throwaway schema this test made, named the way this test named it.
+      if (/^sho_test_apl2742_sib_[a-z0-9]+$/.test(SIBLING)) await admin!.query(`DROP SCHEMA IF EXISTS "${SIBLING}" CASCADE`);
+    }
+  });
+
+  it.skipIf(!local)("qa:TC missing SHO-3011 AC1: every connection the pool opens, not only the first, lands on the schema", async () => {
+    // AC1 says every SQL read targets the schema, and a pool holds more than one connection. An implementation that
+    // set search_path once - on the first connection, or in a single SET after connect - would pass the one-connection
+    // check above and still read the default schema here.
+    const two = localPgPool(urlWithSchema(SCHEMA), 2);
+    try {
+      const sql = "SELECT pg_backend_pid() AS pid, current_schema() AS s";
+      const [a, b] = await Promise.all([two.query<{ pid: number; s: string }>(sql), two.query<{ pid: number; s: string }>(sql)]);
+      expect(a.rows[0].s, "the first connection").toBe(SCHEMA);
+      expect(b.rows[0].s, "the second connection").toBe(SCHEMA);
+      expect(a.rows[0].pid, "two distinct connections were checked, not one reused twice").not.toBe(b.rows[0].pid);
+    } finally {
+      await two.end();
+    }
+  });
+
+  it.skipIf(!local)("qa:TC missing SHO-3011 AC4: a schema whose name has capitals is reached by exactly that name", async () => {
+    // Prisma creates whatever ?schema= spells, capitals included, so the pool must land on that exact schema. The
+    // start-up option is quoted for this reason: unquoted, Postgres folds the name to lower case, search_path then names
+    // a schema that does not exist and current_schema() is NULL - a wrong answer, not an error, which is the defect.
+    const MIXED = `ZZ_Sho3011_Mixed_${randomUUID().replace(/-/g, "").slice(0, 8)}`;
+    const MIXED_TABLE = `zz_mixed_${randomUUID().replace(/-/g, "").slice(0, 8)}`;
+    await admin!.query(`CREATE SCHEMA "${MIXED}"`);
+    try {
+      const unquoted = new pg.Pool({ connectionString: urlWithSchema(MIXED), max: 1, options: `-c search_path=${MIXED}` });
+      try {
+        expect((await unquoted.query<{ s: string | null }>("SELECT current_schema() AS s")).rows[0].s,
+          "unquoted, the name is folded to lower case and the schema is missed, without an error").not.toBe(MIXED);
+      } finally {
+        await unquoted.end();
+      }
+
+      const ours = localPgPool(urlWithSchema(MIXED));
+      try {
+        expect((await ours.query<{ s: string }>("SELECT current_schema() AS s")).rows[0].s, "the URL's schema, capitals and all").toBe(MIXED);
+        await ours.query(`CREATE TABLE ${MIXED_TABLE} (value text)`);
+        const where = (await admin!.query<{ nspname: string }>(
+          "SELECT n.nspname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE c.relname = $1",
+          [MIXED_TABLE],
+        )).rows.map((r) => r.nspname);
+        expect(where, "the unqualified table landed in the capitalised schema, not a folded twin").toEqual([MIXED]);
+      } finally {
+        await ours.end();
+      }
+    } finally {
+      // Only the throwaway schema this block made, named the way this block named it.
+      if (/^ZZ_Sho3011_Mixed_[a-z0-9]+$/.test(MIXED)) await admin!.query(`DROP SCHEMA IF EXISTS "${MIXED}" CASCADE`);
+    }
+  });
+
+  it("qa:TC missing SHO-3011 AC3: a non-local database, an ambiguous URL and a hostile schema name are refused, without echoing the URL", () => {
+    const secret = "s3cretDbPw9";
+    for (const bad of [
+      `postgresql://sho:${secret}@db.example.com:5432/sho_test?schema=sho_test`,
+      `postgresql://sho:${secret}@10.255.0.9:5432/sho_test?schema=sho_test`,
+    ]) {
+      let message = "";
+      try { localPgPool(bad); } catch (e) { message = (e as Error).message; }
+      expect(message).toMatch(/local database/);
+      expect(message).not.toContain(secret);
+      expect(message).not.toContain("db.example.com");
+    }
+    const local = `postgresql://sho:${secret}@127.0.0.1:55432/sho_test`;
+    expect(() => localPgPool(`${local}?schema=${encodeURIComponent('public; DROP TABLE "User"')}`)).toThrow(/plain identifier/);
+    expect(() => localPgPool(`${local}?schema=one&schema=two`)).toThrow(/more than one schema/);
+    expect(() => localPgPool(`${local}?schema=sho_test&options=-c%20search_path%3Dpublic`)).toThrow(/\?options=/);
+    expect(() => localPgPool(undefined)).toThrow(/not set/);
+  });
+
+  it("qa:TC missing SHO-3011 AC1: the story spec builds its pool with that helper, not a bare pg pool", () => {
+    const spec = readFileSync(path.join(process.cwd(), "tests/e2e/stories/APL-2742.spec.ts"), "utf8");
+    expect(spec).toContain('from "../helpers/local-db-pool"');
+    expect(spec).toContain("localPgPool(process.env.DATABASE_URL)");
+    // AC1 covers every SQL read, so no second client may be built from DATABASE_URL either: a pg.Client drops ?schema=
+    // exactly as the pre-SHO-3011 pool did, and a ban on `new pg.Pool(` alone would let it through.
+    for (const construction of ["new pg.Pool(", "new pg.Client("]) expect(spec, construction).not.toContain(construction);
+
+    // This file has to hold to the same rule for its own connections. The bare constructions it still contains are
+    // controls that must land OFF the schema (a pool and a client on a throwaway schema), so neither may be built from
+    // DATABASE_URL itself; anything built from RAW has to come from the helper above. Written as a pattern, not as a
+    // literal: a literal would match itself in this source and could never pass.
+    const self = readFileSync(path.join(process.cwd(), "tests/apl-2742.test.ts"), "utf8");
+    expect(self, "a connection built from DATABASE_URL without the helper").not.toMatch(/new pg\.(?:Pool|Client)\(\{ connectionString: RAW/);
+  });
+});
+

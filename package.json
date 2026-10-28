@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "RETURN_PATH_LOG=1 next dev",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
@@ -11,6 +11,7 @@
     "test": "vitest run",
     "eval:concierge": "tsx tests/eval/runner.ts",
     "test:viewport": "vitest run -c vitest.viewport.config.mts",
+    "test:browser": "vitest run -c vitest.browser-tier.config.mts",
     "test:e2e": "vitest run -c vitest.e2e.config.mts",
     "test:crm-modes": "vitest run -c vitest.crm-visible-modes.config.mts",
     "test:reminder-modes": "vitest run -c vitest.reminder-modes.config.mts",
@@ -20,6 +21,7 @@
   },
   "dependencies": {
     "@prisma/client": "^6.19.3",
+    "koffi": "^3.3.3",
     "next": "16.4.2",
     "pg-connection-string": "^2.14.1",
     "prisma": "^6.19.3",

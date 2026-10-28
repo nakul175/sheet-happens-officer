@@ -4,9 +4,13 @@
 // Local only: PW is the throwaway password of the local test accounts, the same one tests/helpers.ts uses.
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
+import { outboxDir } from "./outbox";
 
 export const BASE = process.env.TASKBOARD_URL ?? "http://localhost:3000";
-export const OUTBOX = process.env.EMAIL_OUTBOX_DIR ?? ".outbox";
+// SHO-2897: no default. `.outbox` against a spec's cwd is a folder every other spec in the run also reads, so one spec's
+// mail could satisfy another's assertion. Read through outboxDir() (./outbox.ts), which names EMAIL_OUTBOX_DIR when it is
+// unset; an unset variable leaves this empty rather than pointing at a shared folder.
+export const OUTBOX = process.env.EMAIL_OUTBOX_DIR ?? "";
 export const PW = "correct-horse-9";
 export const SUPER_EMAIL = "root.test@aplyd.com"; // the server must run with SUPER_ADMIN_EMAILS=root.test@aplyd.com
 
@@ -42,9 +46,10 @@ export function must(r: Reply, want: number, what: string): Reply {
 }
 
 function verifyToken(email: string) {
+  const dir = outboxDir("tests/e2e/local-api.ts");
   let files: string[] = [];
-  try { files = readdirSync(OUTBOX).sort(); } catch { return null; }
-  const mails = files.map((f) => JSON.parse(readFileSync(path.join(OUTBOX, f), "utf8")));
+  try { files = readdirSync(dir).sort(); } catch { return null; }
+  const mails = files.map((f) => JSON.parse(readFileSync(path.join(dir, f), "utf8")));
   return mails.filter((m) => m.to === email && /Verify/.test(m.subject)).at(-1)?.text.match(/token=([\w-]+)/)?.[1] ?? null;
 }
 

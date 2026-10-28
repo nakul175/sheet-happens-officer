@@ -27,6 +27,12 @@ export type Turn = {
   card?: BuiltCard;
   tooMany?: number;
   choice?: { question: string; kind: Kind; ids: string[] };
+  /**
+   * Set when a proposal was refused only because it named no person. buildReply reads it (engine.ts) and answers with
+   * the server's own question instead of falling back to whatever sentence the model wrote (SHO-2693 / APL-2513 AC1),
+   * which is how a turn worded "reassign everything to me" still asks who.
+   */
+  needsWho?: boolean;
   forced?: { kind: Kind; ids: string[] };
 };
 
@@ -160,8 +166,26 @@ const change = z.object({
 type Change = z.infer<typeof change>;
 const input = z.object({ changes: z.array(change).min(1).max(25) });
 
-class Reject extends Error {}
-const reject = (m: string): never => { throw new Reject(m); };
+/** A proposal refusal. `askWho`: the request named no person, which the server must ask about itself (SHO-2693). */
+class Reject extends Error {
+  constructor(message: string, readonly askWho?: "person") { super(message); }
+}
+const reject = (m: string, askWho?: "person"): never => { throw new Reject(m, askWho); };
+
+/**
+ * SHO-2693: the required-person flag, read as a flag and as nothing else. Only an explicit `false` asks for an optional
+ * person; every other value — undefined, true, or a stray object such as a proposal's own Change — keeps the
+ * requirement on, so a proposal that names nobody is refused rather than sliding through.
+ *
+ * Honest history (re-review w70): the parent 597f67d was `person(c, required = true)` with the check
+ * `required ? reject("person_id is missing. …") : undefined`, and every call site passed one argument, so the refusal
+ * already fired and no Change ever reached the flag. The object-reading form this replaces
+ * (`typeof o === "object" ? o.required : o`) was introduced by f3a4c03's own options-bag spelling of this parameter,
+ * not inherited: there a Change would have read as undefined, i.e. "optional". d89ef4b removed that shape. So this is a
+ * fail-closed guard for future callers, not the repair of a shipped defect — the person-less proposal was refused
+ * before the fix as well.
+ */
+export const requiredPerson = (flag?: unknown): boolean => flag !== false;
 
 async function toOps(t: Turn, changes: Change[]): Promise<{ ops: Op[]; refs: { kind: Kind; id: string }[] }> {
   const ops: Op[] = [];
@@ -173,9 +197,18 @@ async function toOps(t: Turn, changes: Change[]): Promise<{ ops: Op[]; refs: { k
     refs.push({ kind: "task", id: c.task_id! });
     return rec!;
   };
-  const person = (c: Change, required = true) => {
+  /**
+   * SHO-2693: `required` is a boolean and nothing else. It briefly accepted an options bag — `{ required: true }` — and
+   * the flag was read off whatever object arrived (`typeof o === "object" ? o.required : o`), a shape in which a Change,
+   * which has no `required` key, would have read as "optional". No caller ever passed a Change, and that spelling is
+   * gone; passing one here is now a type error, and requiredPerson keeps the check on for anything that is not an
+   * explicit `false` (see its comment).
+   */
+  const person = (c: Change, required?: boolean): string | undefined => {
     const id = c.person_id === "me" ? t.user.id : c.person_id;
-    if (!id) return required ? reject("person_id is missing. Ask the person who.") : undefined;
+    // A refused proposal used to be thrown away, leaving whatever sentence the model wrote — often none. The server
+    // records that it must ask who, and buildReply asks it (APL-2513 AC1).
+    if (!id) return requiredPerson(required) ? reject("person_id is missing. Ask the person who.", "person") : undefined;
     if (id !== t.user.id && !t.seen.people.has(id)) reject(`person_id ${id} was not returned by find_people in this turn.`);
     refs.push({ kind: "person", id });
     return id;
@@ -232,15 +265,15 @@ async function toOps(t: Turn, changes: Change[]): Promise<{ ops: Op[]; refs: { k
         ops.push({ k: "task.section", taskId: rec.id, sectionId: secs[0].id });
         break;
       }
-      case "assign_task": { const rec = task(c); ops.push({ k: "task.assign", taskId: rec.id, assigneeId: person(c)! }); break; }
+      case "assign_task": { const rec = task(c); ops.push({ k: "task.assign", taskId: rec.id, assigneeId: person(c, true)! }); break; }
       case "complete_task": ops.push({ k: "task.complete", taskId: task(c).id }); break;
       case "reopen_task": ops.push({ k: "task.reopen", taskId: task(c).id }); break;
       case "delete_task": ops.push({ k: "task.delete", taskId: task(c).id }); break;
       case "send_for_approval": ops.push({ k: "task.send_for_approval", taskId: task(c).id }); break;
       case "send_back": ops.push({ k: "task.send_back", taskId: task(c).id }); break;
-      case "add_collaborator": { const rec = task(c); ops.push({ k: "task.collab", taskId: rec.id, userId: person(c)!, add: true }); break; }
-      case "remove_collaborator": { const rec = task(c); ops.push({ k: "task.collab", taskId: rec.id, userId: person(c)!, add: false }); break; }
-      case "set_approver": { const rec = task(c); ops.push({ k: "task.approver", taskId: rec.id, approverId: person(c)! }); break; }
+      case "add_collaborator": { const rec = task(c); ops.push({ k: "task.collab", taskId: rec.id, userId: person(c, true)!, add: true }); break; }
+      case "remove_collaborator": { const rec = task(c); ops.push({ k: "task.collab", taskId: rec.id, userId: person(c, true)!, add: false }); break; }
+      case "set_approver": { const rec = task(c); ops.push({ k: "task.approver", taskId: rec.id, approverId: person(c, true)! }); break; }
       case "clear_approver": ops.push({ k: "task.approver", taskId: task(c).id, approverId: null }); break;
       case "set_blocked": {
         const rec = task(c);
@@ -255,9 +288,9 @@ async function toOps(t: Turn, changes: Change[]): Promise<{ ops: Op[]; refs: { k
         ops.push({ k: "project.create", name: c.name!.trim(), description: c.description, leaderId: person(c, false) ?? t.user.id });
         break;
       }
-      case "add_member": ops.push({ k: "member.add", projectId: project(c), userId: person(c)!, role: role(c.role ?? "EDITOR") }); break;
-      case "change_member_role": ops.push({ k: "member.role", projectId: project(c), userId: person(c)!, role: role(c.role) }); break;
-      case "remove_member": ops.push({ k: "member.remove", projectId: project(c), userId: person(c)! }); break;
+      case "add_member": ops.push({ k: "member.add", projectId: project(c), userId: person(c, true)!, role: role(c.role ?? "EDITOR") }); break;
+      case "change_member_role": ops.push({ k: "member.role", projectId: project(c), userId: person(c, true)!, role: role(c.role) }); break;
+      case "remove_member": ops.push({ k: "member.remove", projectId: project(c), userId: person(c, true)! }); break;
       case "comment_on_task": {
         if (!commentsEnabled()) reject(`"${c.action}" is not something the concierge can do. Archiving a project, changing a Leader, deactivating or reassigning a user, Admin roles, Sections, password and profile are done on their screens; tell the person where.`);
         const rec = task(c);
@@ -353,12 +386,18 @@ export async function runTool(t: Turn, name: string, raw: Record<string, unknown
         }
         t.card = await buildCard(t.user, all);
         t.ops = all;
+        t.needsWho = false; // a card was built after all, so nothing is waiting on a person
         return { content: "A confirmation card is ready for the person. Nothing has changed yet. Do not say the change was made.", stop: true };
       }
     }
     return fail(`Unknown tool ${name}.`);
   } catch (e) {
-    if (e instanceof Reject) return fail(e.message);
+    if (e instanceof Reject) {
+      // SHO-2693: only a missing person leaves a question for the server to ask. Any other refusal means nothing is
+      // pending, so a stale flag never makes the reply ask who after a card or a different problem.
+      t.needsWho = e.askWho === "person";
+      return fail(e.message);
+    }
     if (e instanceof z.ZodError) return fail("Invalid arguments.");
     if (e instanceof ApiError) {
       if (isRead && e.status === 404) { t.reads.notFound++; return fail("Not found."); }

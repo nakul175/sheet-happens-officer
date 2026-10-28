@@ -12,8 +12,7 @@ import { taskAccess } from "@/lib/tasks";
 import { UNDO_LABELS, isTooOldToUndo, isUndoable } from "@/lib/undoable";
 
 const clean = (v: string | null | undefined) => (v?.trim() ? v.trim() : null);
-const NOTE_KINDS = ["MEETING", "CALL", "INTRODUCTION", "OTHER"] as const;
-export type NoteKindName = (typeof NOTE_KINDS)[number];
+export type NoteKindName = "MEETING" | "CALL" | "INTRODUCTION" | "OTHER";
 const dayOf = (d: Date) => d.toISOString().slice(0, 10);
 
 async function me(user: Actor) {

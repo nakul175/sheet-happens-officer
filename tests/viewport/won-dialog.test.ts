@@ -13,6 +13,7 @@ let lead: Account;
 let wonId = "";
 let wonTitles: string[] = [];
 let wonTaskIds: string[] = [];
+let wonClosedTitle = "";
 let lostId = "";
 let lostStep = "";
 let lostStepId = "";
@@ -43,6 +44,11 @@ beforeAll(async () => {
   wonId = won.id;
   wonTaskIds = [won.stepId];
   wonTitles = [step];
+  // Closed before the opens are created, so an alert that forgot to drop closed tasks would list it second and push a real open task off the end.
+  wonClosedTitle = `Closed e2e ${Date.now()}`;
+  const closedId = await task(lead, wonId, { title: wonClosedTitle });
+  expect((await lead.c.post(`/api/tasks/${closedId}/complete`, await withVersion(lead, closedId))).status).toBe(200);
+  expect((await lead.c.get(`/api/tasks/${closedId}`)).json.task.completedAt).not.toBeNull();
   for (let i = 0; i < 20; i++) {
     const title = `Open e2e ${i} ${Date.now()}`;
     wonTaskIds.push(await task(lead, wonId, { title }));
@@ -87,6 +93,10 @@ describe("qa:TC missing APL-2691 Move to Won dialog", () => {
     expect(text).toContain("and 1 more");
     const shown = (await dialog.getByRole("link").allTextContents()).map((t) => t.trim());
     expect(shown).toHaveLength(20);
+    // AC6 names which tasks: the exact first 20 open ones in list order, and the closed one never appears.
+    expect(shown).toEqual(wonTitles.slice(0, 20));
+    expect(shown).not.toContain(wonClosedTitle);
+    expect(text).not.toContain(wonClosedTitle);
     expect(wonTitles.filter((t) => !shown.includes(t))).toHaveLength(1);
     await dialog.getByRole("button", { name: "Move deal" }).click();
     await alert.waitFor({ state: "visible", timeout: WITHIN });
@@ -122,8 +132,16 @@ describe("qa:TC missing APL-2691 Move to Won dialog", () => {
       const move = dialog.getByRole("button", { name: "Move deal" });
       await move.evaluate((el) => el.scrollIntoView({ block: "end", inline: "nearest" }));
       const button = await move.boundingBox();
+      expect(button, "Move deal must have a rendered box").not.toBeNull();
+      // Font metrics differ across Chromium builds. Arrange the collision explicitly instead of
+      // assuming the dialog footer naturally overlaps the tab bar. Keep both z-indices intact:
+      // removing the dialog stacking fix must still make this real click fail.
+      await bar.evaluate((el, top) => {
+        (el as HTMLElement).style.top = `${top}px`;
+        (el as HTMLElement).style.bottom = "auto";
+      }, button!.y);
       const tab = await bar.boundingBox();
-      expect(button && tab && button.y < tab.y + tab.height && button.y + button.height > tab.y).toBe(true);
+      expect(tab && button!.y < tab.y + tab.height && button!.y + button!.height > tab.y).toBe(true);
       await move.click();
       await alert.waitFor({ state: "visible", timeout: WITHIN });
       expect(await alert.innerText()).toContain("21");

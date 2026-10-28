@@ -89,4 +89,82 @@ describe("qa:TC missing APL-2950 Usage spend vs ceiling fixes", () => {
     expect(monthlyCeilingConfigured()).toBe(true);
     expect(monthlyCeilingUsd()).toBe(250);
   });
+
+  it("qa:TC missing SHO-3013 AC1: $100.004 is at the default cap and shows the signal, $99.999 is not and stays silent", () => {
+    // AC1 names $100.004 explicitly: a fraction past the cap is still "at or above" it, so the signal shows.
+    // Both amounts print as $100.00, so the guard must compare the raw amounts, never the printed text.
+    const above = htmlFor({ usd: 100, configured: false, spendUsd: 100.004, percent: 0 });
+    expect(above).toContain('role="status"');
+    expect(above).toContain("The default $100.00 safety cap has been reached.");
+    expect(above).toContain("<dt>Spend to date</dt><dd>$100.00</dd>");
+    expect(above).not.toContain("Percentage used");
+    expect(above).not.toContain('role="meter"');
+
+    // AC2: just under the cap is below it, even though it too prints as $100.00. A rounded or
+    // formatted-string comparison would announce the cap here; the raw comparison must not.
+    const under = htmlFor({ usd: 100, configured: false, spendUsd: 99.999, percent: 0 });
+    expect(under).not.toContain('role="status"');
+    expect(under).not.toContain("safety cap has been reached");
+    expect(under).toContain("<dt>Monthly ceiling</dt><dd>No ceiling set, default $100.00 safety cap applies</dd>");
+  });
+
+  // SHO-3013 AC1/AC3 over the whole range, ported from the 3012+3013 branch (3c2e7dc) at the rebase.
+  // AC1 says "at or above $100", so every level there must speak; AC3 says the same card keeps no
+  // percentage, no meter and no "Over ceiling" flag. The set-ceiling card never borrows this sentence.
+  it("qa:TC missing SHO-3013 AC1+AC3: the signal speaks at every level at or above the cap and the card keeps its shape", () => {
+    for (const spendUsd of [100, 100.004, 150, 1000]) {
+      const html = htmlFor({ usd: 100, configured: false, spendUsd, percent: 0 });
+      expect(html, String(spendUsd)).toContain('role="status"');
+      expect(html, String(spendUsd)).toContain("The default $100.00 safety cap has been reached.");
+      expect(html, String(spendUsd)).toContain(`<dt>Spend to date</dt><dd>${formatUsd(spendUsd)}</dd>`);
+      expect(html, String(spendUsd)).not.toContain("Percentage used");
+      expect(html, String(spendUsd)).not.toContain('role="meter"');
+      expect(html, String(spendUsd)).not.toContain("Over ceiling");
+    }
+    for (const spendUsd of [0, 10, 99.99, 99.999]) {
+      const html = htmlFor({ usd: 100, configured: false, spendUsd, percent: 0 });
+      expect(html, String(spendUsd)).not.toContain('role="status"');
+      expect(html, String(spendUsd)).not.toContain("safety cap has been reached");
+      expect(html, String(spendUsd)).toContain("<dt>Monthly ceiling</dt><dd>No ceiling set, default $100.00 safety cap applies</dd>");
+      expect(html, String(spendUsd)).not.toContain("Percentage used");
+      expect(html, String(spendUsd)).not.toContain('role="meter"');
+    }
+    // A ceiling the owner set keeps its own card: above it the flag is "Over ceiling", never the safety-cap sentence.
+    const set = htmlFor({ usd: 100, configured: true, spendUsd: 150, percent: 150 });
+    expect(set).toContain("Over ceiling");
+    expect(set).not.toContain("safety cap has been reached");
+    expect(set).not.toContain('role="status"');
+  });
+
+  it("qa:TC missing SHO-3013: reaching the default $100 safety cap shows an accessible warning that the concierge is paused", () => {
+    const html = htmlFor({ usd: 100, configured: false, spendUsd: 100, percent: 0 });
+    // Text in the page, exposed to a screen reader as a status.
+    expect(html).toContain('role="status"');
+    expect(html).toContain(
+      "The default $100.00 safety cap has been reached. The concierge is paused until the 1st of next month, India time.",
+    );
+    expect(html).not.toMatch(/NaN|Infinity/);
+    // "Visible" is the sentence a person reads, in the rendered paragraph — not a prop, a class or an aria label.
+    // role="status" is how a screen reader gets it; the sentence is the text on the card.
+    expect(html).toMatch(
+      /<p class="usage-warn" role="status">The default \$100\.00 safety cap has been reached\. The concierge is paused until the 1st of next month, India time\.<\/p>/,
+    );
+    expect(html).not.toMatch(/aria-hidden="true"/);
+    expect(html).not.toMatch(/display:\s*none/);
+
+    // Over the cap the pause is still the truth, so the warning stays.
+    expect(htmlFor({ usd: 100, configured: false, spendUsd: 150, percent: 0 })).toContain('role="status"');
+
+    // Below the cap, a ceiling the owner set, or a payload with no cap amount: no warning.
+    const quiet = [
+      { usd: 100, configured: false, spendUsd: 99.99, percent: 0 },
+      { usd: 100, configured: true, spendUsd: 100, percent: 100 },
+      { usd: null, configured: false, spendUsd: 150, percent: 0 },
+    ];
+    for (const ceiling of quiet) {
+      const q = htmlFor(ceiling);
+      expect(q).not.toContain('role="status"');
+      expect(q).not.toContain("safety cap has been reached");
+    }
+  });
 });

@@ -5,7 +5,7 @@
 // A missing build, or a mode that never answers /api/health, fails this file.
 import "dotenv/config";
 import { spawn, type ChildProcess } from "node:child_process";
-import { closeSync, existsSync, mkdtempSync, openSync, readdirSync, readFileSync, readlinkSync, rmSync } from "node:fs";
+import { closeSync, existsSync, mkdtempSync, openSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import net from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -15,6 +15,7 @@ import { db } from "../src/lib/db";
 import { HIDDEN_DEAL_TEXT } from "../src/lib/feed";
 import { QUICK_ACTIONS } from "../src/lib/concierge/reads";
 import { istDate, PW } from "./helpers";
+import { portAnswers } from "./spawned-listener";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 // Run-scoped so a shared test database cannot mix this seed with another spec's "Acme renewal".
@@ -287,50 +288,6 @@ async function readPaths(base: string, cookie: string, dealId: string, name: str
   ];
 }
 
-function listeningPids(port: number) {
-  const hexPort = port.toString(16).toUpperCase().padStart(4, "0");
-  const inodes = new Set<string>();
-  for (const file of ["/proc/net/tcp", "/proc/net/tcp6"]) {
-    let text = "";
-    try { text = readFileSync(file, "utf8"); } catch { continue; }
-    for (const line of text.split("\n").slice(1)) {
-      const parts = line.trim().split(/\s+/);
-      if (parts.length < 10 || parts[3] !== "0A") continue;
-      if ((parts[1].split(":").pop() ?? "").toUpperCase() === hexPort) inodes.add(parts[9]);
-    }
-  }
-  if (!inodes.size) return [];
-  const found: number[] = [];
-  for (const dir of readdirSync("/proc")) {
-    if (!/^\d+$/.test(dir)) continue;
-    let fds: string[];
-    try { fds = readdirSync(`/proc/${dir}/fd`); } catch { continue; }
-    for (const fd of fds) {
-      try {
-        const target = readlinkSync(`/proc/${dir}/fd/${fd}`);
-        const inode = /^socket:\[(\d+)\]$/.exec(target)?.[1];
-        if (inode && inodes.has(inode)) { found.push(Number(dir)); break; }
-      } catch { /* fd vanished */ }
-    }
-  }
-  return found;
-}
-
-function isInGroup(ancestor: number, pid: number) {
-  let cur = pid;
-  const seen = new Set<number>();
-  while (cur > 1 && !seen.has(cur)) {
-    if (cur === ancestor) return true;
-    seen.add(cur);
-    let stat = "";
-    try { stat = readFileSync(`/proc/${cur}/stat`, "utf8"); } catch { return false; }
-    const ppid = Number(stat.slice(stat.lastIndexOf(")") + 2).split(" ")[1]);
-    if (!ppid) return false;
-    cur = ppid;
-  }
-  return false;
-}
-
 describe("bell mustName=false check (APL-2698 AC2)", () => {
   // qa:TC-APL2698-53c26943@v1 · AC2. A hidden bell response that includes the deal name fails the check.
   it("qa:TC-APL2698-53c26943@v1 fails when a hidden bell response includes the deal name", () => {
@@ -398,7 +355,12 @@ describe("CRM_VISIBLE modes are tested against a real server per mode", () => {
     expect((made.json?.deal as { name: string }).name).toBe(dealName);
     const task = await db.task.findFirst({ where: { projectId: dealId, deletedAt: null }, select: { id: true } });
     expect(task?.id).toBeTruthy();
-    await db.projectMember.create({ data: { projectId: dealId, userId: admin.id, role: "EDITOR" } });
+    // SHO-2753: the Editor add goes through the API as the Leader, the way the sibling mode tiers seed it
+    // (tests/jobs-reminders-crm-server.test.ts:236, tests/jobs-stalled-crm-server.test.ts:205). addMember
+    // writes the real ADDED_TO_PROJECT notice for admin (src/lib/projects.ts:145) with this Leader as the
+    // actor, so the synthetic deal-membership row below is seeded for the other two readers only.
+    const joined = await call(open!.base, member.cookie, "POST", `/api/projects/${dealId}/members`, { userId: admin.id, role: "EDITOR" });
+    expect(joined.status, joined.text).toBe(201);
     await db.taskCollaborator.create({ data: { taskId: task!.id, userId: admin.id } });
     // Bell rows store the deal name, a deal task title and the deal id. APL-2698 checks the
     // name. APL-2716 checks that a hidden reader gets one generic sentence and no deal link.
@@ -423,6 +385,8 @@ describe("CRM_VISIBLE modes are tested against a real server per mode", () => {
     // ADDED_TO_PROJECT is written with the deal's projectId (projects.ts addMember). The packing
     // project is the non-deal control: its sentence and href stay in every mode.
     const addedDealText = `Someone added you to "${dealName}" as editor.`;
+    // admin's deal membership is real (POST /api/projects/:id/members above), so its notice names the Leader.
+    const addedByMemberText = `${member.name} added you to "${dealName}" as editor.`;
     const addedPlainText = `Someone added you to "Packing ${tag}" as editor.`;
     await db.notification.createMany({
       data: [member.id, admin.id, outsider.id].flatMap((recipientId) => [
@@ -430,7 +394,8 @@ describe("CRM_VISIBLE modes are tested against a real server per mode", () => {
         { recipientId, type: "DEAL_NEEDS_NEXT_STEP", projectId: dealId, data: { project: dealName } },
         { recipientId, type: "DEAL_STALLED", projectId: dealId, data: { project: dealName } },
         { recipientId, type: "TASK_ASSIGNED", projectId: dealId, taskId: kickoffTaskId, data: { title: taskTitle, project: dealName } },
-        { recipientId, type: "ADDED_TO_PROJECT", projectId: dealId, data: { project: dealName, role: "EDITOR" } },
+        // admin is a real member (POST /api/projects/:id/members above) and already has that notice.
+        ...(recipientId === admin.id ? [] : [{ recipientId, type: "ADDED_TO_PROJECT", projectId: dealId, data: { project: dealName, role: "EDITOR" } }]),
         { recipientId, type: "TASK_ASSIGNED", projectId: plain.id, taskId: plainTaskId, data: { title: plainTitle, project: `Packing ${tag}` } },
         { recipientId, type: "ADDED_TO_PROJECT", projectId: plain.id, data: { project: `Packing ${tag}`, role: "EDITOR" } },
       ]),
@@ -484,16 +449,16 @@ describe("CRM_VISIBLE modes are tested against a real server per mode", () => {
     const taskHref = `/tasks/${kickoffTaskId}`;
     const plainHref = `/tasks/${plainTaskId}`;
     const plainProjectHref = `/projects/${plain.id}`;
-    const controls: { mode: Mode; who: { cookie: string }; user: string; sees: boolean; tc: string }[] = [
-      { mode: "on", who: admin, user: "admin", sees: true, tc: "qa:TC-APL2716-a8042ed1@v1" },
-      { mode: "admins", who: admin, user: "admin", sees: true, tc: "qa:TC-APL2716-3abdb652@v1" },
-      { mode: "off", who: admin, user: "admin", sees: false, tc: "qa:TC-APL2716-d2ec503b@v1" },
-      { mode: "on", who: member, user: "on-deal member", sees: true, tc: "qa:TC-APL2716-a8042ed1@v1" },
-      { mode: "admins", who: member, user: "member", sees: false, tc: "qa:TC-APL2716-3abdb652@v1" },
-      { mode: "off", who: member, user: "on-deal member", sees: false, tc: "qa:TC-APL2716-d2ec503b@v1" },
-      { mode: "on", who: outsider, user: "member with no access", sees: true, tc: "qa:TC-APL2716-a8042ed1@v1" },
-      { mode: "admins", who: outsider, user: "member with no access", sees: false, tc: "qa:TC-APL2716-85782555@v1" },
-      { mode: "off", who: outsider, user: "member with no access", sees: false, tc: "qa:TC-APL2716-fcc1861b@v1" },
+    const controls: { mode: Mode; who: { cookie: string }; user: string; sees: boolean; added: string; tc: string }[] = [
+      { mode: "on", who: admin, user: "admin", sees: true, added: addedByMemberText, tc: "qa:TC-APL2716-a8042ed1@v1" },
+      { mode: "admins", who: admin, user: "admin", sees: true, added: addedByMemberText, tc: "qa:TC-APL2716-3abdb652@v1" },
+      { mode: "off", who: admin, user: "admin", sees: false, added: addedByMemberText, tc: "qa:TC-APL2716-d2ec503b@v1" },
+      { mode: "on", who: member, user: "on-deal member", sees: true, added: addedDealText, tc: "qa:TC-APL2716-a8042ed1@v1" },
+      { mode: "admins", who: member, user: "member", sees: false, added: addedDealText, tc: "qa:TC-APL2716-3abdb652@v1" },
+      { mode: "off", who: member, user: "on-deal member", sees: false, added: addedDealText, tc: "qa:TC-APL2716-d2ec503b@v1" },
+      { mode: "on", who: outsider, user: "member with no access", sees: true, added: addedDealText, tc: "qa:TC-APL2716-a8042ed1@v1" },
+      { mode: "admins", who: outsider, user: "member with no access", sees: false, added: addedDealText, tc: "qa:TC-APL2716-85782555@v1" },
+      { mode: "off", who: outsider, user: "member with no access", sees: false, added: addedDealText, tc: "qa:TC-APL2716-fcc1861b@v1" },
     ];
     for (const row of controls) {
       const server = running.get(row.mode)!;
@@ -510,8 +475,8 @@ describe("CRM_VISIBLE modes are tested against a real server per mode", () => {
         expect(page.items, `qa:TC-APL2716-3abdb652@v1 ${label} deal name`).toContainEqual({ text: stageText, href: dealHref });
         expect(page.items, `qa:TC-APL2716-85782555@v1 ${label}`).toContainEqual({ text: nextStepText, href: dealHref });
         expect(page.items, `qa:TC-APL2716-fcc1861b@v1 ${label}`).toContainEqual({ text: stalledText, href: dealHref });
+        expect(page.items, `${label} added to deal`).toContainEqual({ text: row.added, href: dealHref });
         expect(page.items, `${label} task title`).toContainEqual({ text: taskText, href: taskHref });
-        expect(page.items, `${label} added to deal`).toContainEqual({ text: addedDealText, href: dealHref });
       } else {
         const hidden = page.items.filter((item) => item.text !== plainText && item.text !== addedPlainText);
         expect(hidden, label).toHaveLength(5);
@@ -542,9 +507,9 @@ describe("CRM_VISIBLE modes are tested against a real server per mode", () => {
     expect(extra.get("all")!.env.CRM_VISIBLE).toBe("all");
     expect(extra.get("unset")!.env.CRM_VISIBLE).toBeUndefined();
     const readers = [
-      { who: admin, user: "admin", nonAdmin: false },
-      { who: member, user: "on-deal member", nonAdmin: true },
-      { who: outsider, user: "non-member", nonAdmin: true },
+      { who: admin, user: "admin", nonAdmin: false, added: addedByMemberText },
+      { who: member, user: "on-deal member", nonAdmin: true, added: addedDealText },
+      { who: outsider, user: "non-member", nonAdmin: true, added: addedDealText },
     ];
     for (const row of modeServers) {
       for (const reader of readers) {
@@ -562,7 +527,7 @@ describe("CRM_VISIBLE modes are tested against a real server per mode", () => {
           expect(page.items, `qa:TC-APL2716-85782555@v1 ${label}`).toContainEqual({ text: nextStepText, href: dealHref });
           expect(page.items, `qa:TC-APL2716-fcc1861b@v1 ${label}`).toContainEqual({ text: stalledText, href: dealHref });
           expect(page.items, `${label} task title`).toContainEqual({ text: taskText, href: taskHref });
-          expect(page.items, `${label} added to deal`).toContainEqual({ text: addedDealText, href: dealHref });
+          expect(page.items, `${label} added to deal`).toContainEqual({ text: reader.added, href: dealHref });
         } else {
           const hidden = page.items.filter((item) => item.text !== plainText && item.text !== addedPlainText);
           expect(hidden, label).toHaveLength(5);
@@ -615,14 +580,14 @@ describe("CRM_VISIBLE modes are tested against a real server per mode", () => {
       const adminSees = adminDeals.status === 200;
       const observed = memberSees && adminSees ? "on" : !memberSees && adminSees ? "admins" : !memberSees && !adminSees ? "off" : "mixed";
       expect(observed, `${server.mode} member ${memberDeals.status} admin ${adminDeals.status}`).toBe(server.mode);
-      const listening = listeningPids(server.port);
-      expect(listening.length, `${server.mode} is listening`).toBeGreaterThan(0);
-      for (const pid of listening) {
-        expect(isInGroup(server.pid, pid), `${server.mode} listener ${pid} belongs to ${server.pid}`).toBe(true);
-      }
-      listeners.push(...listening);
+      // SHO-2771: this used to read /proc/net/tcp and /proc/<pid>/fd to name the pid holding the port,
+      // which is why the tier could only run on Linux. The port answers or it does not (a TCP connect),
+      // and the pid is the one startModeServer spawned in its own process group.
+      expect(await portAnswers(server.port), `${server.mode} is listening`).toBe(true);
+      listeners.push(server.pid);
     }
     expect(new Set(listeners).size, "no mode reuses another mode's process").toBe(listeners.length);
+    expect(new Set([...running.values()].map((server) => server.port)).size, "each mode has its own port").toBe(running.size);
     const modes = new Set([...running.values()].map((server) => server.mode));
     expect(modes).toEqual(new Set(MODES));
 

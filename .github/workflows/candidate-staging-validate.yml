@@ -1,0 +1,449 @@
+# DISPATCH-ONLY, NON-MAIN, NOT PART OF THE PRODUCTION DEPLOY PATH.
+#
+# This workflow exists for one purpose: prove that an exact candidate commit can be pushed into its OWN isolated
+# Postgres schema, `sho_pr<N>` of the logical database `sho_staging`, on the shared `sho-db` cluster - and that the
+# `public` schema of that database is not touched. It writes ONLY that one schema. It cannot reach production:
+#   * deploy.yml triggers on `push: branches: [main]` only, so this file can never deploy anything;
+#   * this file has no `push`, no `pull_request`, no `workflow_run` trigger - only `workflow_dispatch`;
+#   * preflight refuses to run from `main` or any `release/*` branch, so a dispatch from a main ref stops immediately.
+# This file MUST NOT be merged without review. See execution/CANDIDATE-STAGING-WORKFLOW.md for the operator runbook.
+#
+# Secrets: only `SHO_PR_SLOT_DATABASE_URL` (already used by staging-e2e.yml's pr-slot seeder). No new secret, no new
+# paid resource, no DNS change. Exactly one job (`identity-check`) and one later step (`migrate-slot`) read it, and the
+# URL is `::add-mask::`ed before any check so it never appears in a log.
+name: Candidate staging validate (isolated schema)
+
+on:
+  workflow_dispatch:
+    inputs:
+      slot:
+        description: "Preview slot whose schema this run owns. Writes ONLY schema sho_pr<N> of database sho_staging."
+        required: true
+        type: choice
+        options: [pr1, pr2, pr3, pr4, pr5, pr6, pr7, pr8]
+      sha:
+        description: "Full 40-hex commit SHA to validate. Must equal the checked-out HEAD; short SHAs are refused."
+        required: true
+        type: string
+      confirm:
+        description: "Type ISOLATED-STAGING-ONLY to acknowledge that this writes only schema sho_pr<N> of sho_staging."
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  # The repository this workflow is allowed to run in. Anything else is refused in preflight.
+  EXPECTED_REPO: nakul175/sheet-happens-officer
+  # The one staging DB host (same allowlist as staging-e2e.yml) and the one logical database.
+  STAGING_DB_HOST: private-sho-db-do-user-45345612-0.k.db.ondigitalocean.com
+  EXPECTED_DB: sho_staging
+  CONFIRM_PHRASE: ISOLATED-STAGING-ONLY
+  # pg client only; neighbours require it but this workflow never installs the app's node_modules.
+  PG_CLIENT_MAJOR: "16"
+  # prisma generate during `npm ci` needs a syntactically valid URL; nothing connects to this one.
+  DATABASE_URL: postgresql://unused:unused@127.0.0.1:1/unused
+  DIRECT_DATABASE_URL: postgresql://unused:unused@127.0.0.1:1/unused
+
+jobs:
+  preflight:
+    name: Preflight - exact SHA, non-main, not production
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Two runs can never own the same slot at once. cancel-in-progress stays false: a half-finished migrate is worse
+    # than a queued one.
+    concurrency:
+      group: candidate-staging-${{ inputs.slot }}
+      cancel-in-progress: false
+    outputs:
+      slot: ${{ steps.guards.outputs.slot }}
+      schema: ${{ steps.guards.outputs.schema }}
+      sha: ${{ steps.sha.outputs.sha }}
+    steps:
+      - name: Checkout the requested commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Refuse a production ref, a short SHA and a wrong repository
+        id: guards
+        env:
+          SLOT: ${{ inputs.slot }}
+          CONFIRM: ${{ inputs.confirm }}
+          WANT_SHA: ${{ inputs.sha }}
+          REF_NAME: ${{ github.ref_name }}
+          REF_TYPE: ${{ github.ref_type }}
+          HEAD_REF: ${{ github.head_ref }}
+          REPO: ${{ github.repository }}
+        run: |
+          fail() { echo "::error::$1"; exit 1; }
+
+          if [ "$REPO" != "$EXPECTED_REPO" ]; then fail "Wrong repository: expected $EXPECTED_REPO. Refusing."; fi
+
+          if [ "$CONFIRM" != "$CONFIRM_PHRASE" ]; then fail "confirm must be literally $CONFIRM_PHRASE (got: '$CONFIRM'). Refusing."; fi
+
+          # The workflow is dispatched FROM a branch; that branch must not be one that deploys. deploy.yml only runs on
+          # main, and this workflow must never be run from it either (a main ref is the production release ref).
+          if [ "$REF_TYPE" != branch ]; then fail "Dispatch from a branch ref, not '$REF_TYPE' ($REF_NAME). Refusing."; fi
+          ref_lc="${REF_NAME,,}"
+          if [ "$ref_lc" = main ] || [ "$ref_lc" = master ] || [[ "$ref_lc" =~ ^release[/-] ]]; then
+            fail "Refusing to run from '$REF_NAME': this workflow is non-main only (deploy.yml owns main)."
+          fi
+
+          # Exactly pr1..pr8, and the schema name is derived from the slot - never from the input text.
+          if ! [[ "$SLOT" =~ ^pr([1-8])$ ]]; then fail "slot must be pr1..pr8 (got: '$SLOT'). Refusing."; fi
+          slot="$SLOT"; schema="sho_${slot}"
+
+          # Full 40-hex only: a short SHA is ambiguous and could resolve to a different commit on a later day.
+          if ! [[ "$WANT_SHA" =~ ^[0-9a-f]{40}$ ]]; then fail "sha must be a full 40-character lowercase hex commit id (got: '${WANT_SHA}'). Refusing."; fi
+
+          echo "Branch: $REF_NAME | slot: $slot | schema: $schema"
+          echo "slot=$slot" >> "$GITHUB_OUTPUT"
+          echo "schema=$schema" >> "$GITHUB_OUTPUT"
+
+      - name: Assert HEAD is exactly the requested SHA
+        id: sha
+        env:
+          WANT_SHA: ${{ inputs.sha }}
+        run: |
+          HEAD_SHA=$(git rev-parse HEAD)
+          echo "Requested SHA: $WANT_SHA"
+          echo "Checked-out HEAD: $HEAD_SHA"
+          if [ "$HEAD_SHA" != "$WANT_SHA" ]; then
+            echo "::error::HEAD ($HEAD_SHA) is not the requested commit ($WANT_SHA). Refusing to migrate anything."; exit 1
+          fi
+          echo "sha=$HEAD_SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Assert this file is on a non-main branch and deploy.yml is still main-only
+        run: |
+          # belt and braces: deploy.yml must remain push-to-main only, or the isolation story above is wrong.
+          if ! grep -qE '^\s+branches:\s*\[main\]\s*$' .github/workflows/deploy.yml; then
+            echo "::error::deploy.yml is no longer push-to-[main] only. Stop and review before trusting this workflow."; exit 1
+          fi
+          if grep -qE '^\s+(push|pull_request|pull_request_target|workflow_run):' .github/workflows/candidate-staging-validate.yml; then
+            echo "::error::This workflow grew an automatic trigger. It must stay workflow_dispatch only."; exit 1
+          fi
+          if git ls-remote --exit-code origin refs/heads/main >/dev/null 2>&1 && [ "${{ github.ref_name }}" = main ]; then
+            echo "::error::Running from main. Refusing."; exit 1
+          fi
+          echo "Triggers and deploy path unchanged."
+
+  identity-check:
+    name: Identity check - staging credential, read-only, never doadmin
+    needs: preflight
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    concurrency:
+      group: candidate-staging-${{ inputs.slot }}
+      cancel-in-progress: false
+    outputs:
+      # Set to "true" only when every assertion passed. migrate-slot depends on it explicitly.
+      isolated: ${{ steps.assert.outputs.isolated }}
+    steps:
+      - name: Install the Postgres 16 client (no repository package installed, no app dependencies)
+        run: |
+          # psql only. The image ships a PG16 server/client mismatch risk, so pin the client major.
+          if ! command -v psql >/dev/null 2>&1 || ! psql --version | grep -q " $PG_CLIENT_MAJOR\."; then
+            sudo install -d /usr/share/postgresql-common/pgdg
+            sudo curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc https://www.postgresql.org/media/keys/ACCC4CF8.asc
+            echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(. /etc/os-release && echo $VERSION_CODENAME)-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list >/dev/null
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq --no-install-recommends postgresql-client-$PG_CLIENT_MAJOR
+          fi
+          psql --version
+
+      - name: Mask the URL, then assert identity and privileges with psql
+        id: assert
+        env:
+          # The ONLY place in this workflow that reads the staging credential, and the only job that has it at all.
+          SEED_DATABASE_URL: ${{ secrets.SHO_PR_SLOT_DATABASE_URL }}
+          WANT_SLOT: ${{ needs.preflight.outputs.slot }}
+          WANT_SCHEMA: ${{ needs.preflight.outputs.schema }}
+        run: |
+          # Never set -x, never dump env. Mask the URL (and the password inside it) before the first check.
+          set -uo pipefail
+          # fail() must end the STEP, not a child of it: inside $( ) or an `x && y` list `exit 1` only ends the child,
+          # so the assertions below are written to run in this shell (see the q() helper further down).
+          fail() { echo "::error::$1"; exit 1; }
+
+          url="$SEED_DATABASE_URL"
+          [ -n "$url" ] || fail "SHO_PR_SLOT_DATABASE_URL is missing or empty."
+          while IFS= read -r line || [ -n "$line" ]; do [ -z "$line" ] || echo "::add-mask::$line"; done < <(printf '%s' "$url" | tr '\r' '\n')
+          if [[ "$url" == *[$'\n\r']* ]]; then fail "SHO_PR_SLOT_DATABASE_URL contains a line break."; fi
+          rest="${url#*://}"; authority="${rest%%[/?#]*}"; userinfo=""
+          [[ "$authority" == *@* ]] && userinfo="${authority%@*}"
+          [[ "$userinfo" == *:* ]] && echo "::add-mask::${userinfo#*:}"
+          user="${userinfo%%:*}"
+          hostport="${authority##*@}"; host="${hostport%:*}"; host="${host,,}"; host="${host%.}"
+          query=""; case "$rest" in *\?*) query="${rest#*\?}" ;; esac
+
+          # (1) The credential must be the staging app user, never doadmin. A rejected connection runs nothing.
+          case "$user" in
+            sho_staging|sho_staging_app) ;;
+            doadmin) fail "SHO_PR_SLOT_DATABASE_URL authenticates as doadmin (cluster superuser). Refusing." ;;
+            *) fail "SHO_PR_SLOT_DATABASE_URL user is not a known staging user (names allowed: sho_staging, sho_staging_app)." ;;
+          esac
+          echo "Credential user: $user"
+
+          # (2) Host and database, matched whole, exactly as staging-e2e.yml's seeder does.
+          if [ "${hostport,,}" != "$STAGING_DB_HOST" ] && [ "${hostport,,}" != "$STAGING_DB_HOST:25060" ]; then
+            fail "SHO_PR_SLOT_DATABASE_URL host is not the staging DB host. Refusing."
+          fi
+          echo "Host: ${hostport,,} (staging)"
+
+          # (3) Query string: only the slot's own schema= may appear. Nothing may move the host, db or search_path.
+          schemas=()
+          if [ -n "$query" ]; then
+            IFS='&' read -ra params <<< "$query"
+            for kv in "${params[@]}"; do
+              key="${kv%%=*}"; key="${key,,}"
+              case "$key" in
+                host|hostaddr|dbname|options|*%*) fail "SHO_PR_SLOT_DATABASE_URL overrides host/db/search_path in its query. Refusing." ;;
+                schema) [ "${kv%%=*}" = schema ] || fail "The schema key must be lower case."; schemas+=("${kv#*=}");;
+                sslmode|sslcert|sslkey|sslrootcert|connect_timeout|application_name|pool_timeout|pgbouncer) ;;
+                *) fail "SHO_PR_SLOT_DATABASE_URL carries an unapproved query parameter. Refusing." ;;
+              esac
+            done
+          fi
+          # The one secret serves every slot, so the schema must be exactly this run's: sho_pr<N>, never public.
+          if [ "${#schemas[@]}" -eq 1 ]; then
+            [ "${schemas[0]}" = "$WANT_SCHEMA" ] || fail "SHO_PR_SLOT_DATABASE_URL sets schema=${schemas[0]}, but this run owns $WANT_SCHEMA. Refusing."
+            echo "Schema in URL: ${schemas[0]}"
+          elif [ "${#schemas[@]}" -eq 0 ]; then
+            echo "Schema in URL: none (migrate-slot will append ?schema=$WANT_SCHEMA)"
+          else
+            fail "SHO_PR_SLOT_DATABASE_URL sets schema= more than once. Refusing."
+          fi
+
+          # (4) Connect with libpq only (the app's node/pg is not assumed). Read-only session, then assert.
+          export PGCONNECT_TIMEOUT=15 PGAPPNAME="sho-candidate-identity" PGSSLMODE=require
+          # libpq defaults the port to 5432; the DO cluster listens on its own port. Never print either.
+          case "${hostport##*:}" in
+            25060|25061) export PGPORT="${hostport##*:}" ;;
+            *) export PGPORT=25060 ;;
+          esac
+          psql_base=(psql -X -q -A -t -v ON_ERROR_STOP=1 --dbname "$url")
+          if ! "${psql_base[@]}" -c 'SELECT 1' >/dev/null 2>&1; then
+            fail "Could not connect to the staging database with the slot credential (host, user, TLS or password). Nothing was written."
+          fi
+
+          # Every assertion below runs in THIS shell: a query that dies must abort the step, not be swallowed by $( ).
+          # The session is read-only from the first statement on (PGOPTIONS is applied server-side at connect).
+          q() {
+            if ! out=$("${psql_base[@]}" -c "$1" 2>/tmp/psql.err); then
+              echo "::error::Identity query failed; refusing to continue."
+              [ -s /tmp/psql.err ] && head -5 /tmp/psql.err >&2
+              return 1
+            fi
+            printf '%s' "$out"
+          }
+          export PGOPTIONS='--default_transaction_read_only=on'
+
+          cur_db=$(q 'SELECT current_database()') || exit 1
+          cur_user=$(q 'SELECT current_user') || exit 1
+          is_super=$(q "SELECT rolsuper FROM pg_roles WHERE rolname = current_user") || exit 1
+          can_createdb=$(q "SELECT rolcreatedb FROM pg_roles WHERE rolname = current_user") || exit 1
+          can_createrole=$(q "SELECT rolcreaterole FROM pg_roles WHERE rolname = current_user") || exit 1
+          server_v=$(q 'SHOW server_version_num') || exit 1
+          echo "current_database(): ${cur_db:-<empty>}"
+          echo "current_user: ${cur_user:-<empty>}"
+          echo "rolsuper: ${is_super:-<empty>} | rolcreatedb: ${can_createdb:-<empty>} | rolcreaterole: ${can_createrole:-<empty>}"
+          echo "server_version_num: ${server_v:-<empty>}"
+
+          [ "$cur_db" = "$EXPECTED_DB" ] || fail "current_database() is not $EXPECTED_DB. This is NOT the staging database. Refusing."
+          case "$cur_user" in
+            sho_staging|sho_staging_app) ;;
+            doadmin) fail "Connected as doadmin. The boundary is not privilege-enforced. Refusing." ;;
+            *) fail "current_user is not a known staging user." ;;
+          esac
+          [ "$is_super" = f ] || fail "current_user is a superuser (rolsuper=$is_super). Refusing."
+          [ "$can_createdb" = f ] || fail "current_user may CREATE DATABASE (rolcreatedb=$can_createdb). Refusing."
+          [ "$can_createrole" = f ] || fail "current_user may CREATE ROLE (rolcreaterole=$can_createrole). Refusing."
+          # PG16 = 160xxx. Older majors have no pg_maintain and different catalog behaviour; refuse rather than guess.
+          if ! [[ "$server_v" =~ ^16[0-9]{4}$ ]]; then fail "Server is not PostgreSQL 16 (server_version_num=$server_v). Refusing."; fi
+
+          # (5) No USAGE/CREATE outside public and this run's own sho_pr<N>.
+          stray=$(q "SELECT coalesce(string_agg(n.nspname || ':usage=' || has_schema_privilege(current_user, n.oid, 'USAGE') || ',create=' || has_schema_privilege(current_user, n.oid, 'CREATE'), ' '), '')
+                       FROM pg_namespace n
+                      WHERE n.nspname NOT LIKE 'pg\\_%' AND n.nspname <> 'information_schema'
+                        AND n.nspname <> 'public' AND n.nspname <> '$WANT_SCHEMA'
+                        AND (has_schema_privilege(current_user, n.oid, 'USAGE') OR has_schema_privilege(current_user, n.oid, 'CREATE'))") || exit 1
+          if [ -n "$stray" ]; then fail "current_user reaches a schema that is neither public nor $WANT_SCHEMA: $stray. Refusing."; fi
+          echo "Schema privileges: none beyond public and $WANT_SCHEMA."
+
+          # (6) The run may write ONLY its own schema. Verified directly, not inferred.
+          can_write_slot=$(q "SELECT has_schema_privilege(current_user, '$WANT_SCHEMA', 'CREATE')") || exit 1
+          if [ "$can_write_slot" != t ]; then
+            fail "current_user cannot CREATE in $WANT_SCHEMA (has_schema_privilege=$can_write_slot). Ask the DB owner; nothing was written."
+          fi
+          echo "CREATE in $WANT_SCHEMA: yes"
+
+          # (7) Nothing prod-like reachable.
+          prodlike=$(q "SELECT coalesce(string_agg(datname, ','), '') FROM pg_database
+                         WHERE datistemplate = false AND datname <> '$EXPECTED_DB' AND datname ~* 'prod'
+                           AND has_database_privilege(current_user, datname, 'CONNECT')")
+          if [ -n "$prodlike" ]; then fail "CONNECT granted on prod-like database(s): $prodlike. Refusing."; fi
+
+          echo "isolated=true" >> "$GITHUB_OUTPUT"
+          echo "::notice::Identity check passed: $cur_user@$cur_db, non-superuser, no CREATEDB, no stray schema grants. Verdict: ISOLATED."
+
+  migrate-slot:
+    name: Migrate into sho_pr<N> only
+    needs: [preflight, identity-check]
+    # Two independent gates: the job above must have succeeded AND it must have published isolated=true.
+    if: needs.identity-check.outputs.isolated == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    concurrency:
+      group: candidate-staging-${{ inputs.slot }}
+      cancel-in-progress: false
+    env:
+      WANT_SLOT: ${{ needs.preflight.outputs.slot }}
+      WANT_SCHEMA: ${{ needs.preflight.outputs.schema }}
+      WANT_SHA: ${{ needs.preflight.outputs.sha }}
+    steps:
+      - name: Checkout the same commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.preflight.outputs.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies without the staging credential
+        run: |
+          # npm ci runs install scripts; it gets neither secret (same rule as staging-e2e.yml's seeder).
+          env -u SEED_DATABASE_URL npm ci --no-audit --no-fund
+          git rev-parse HEAD
+          [ "$(git rev-parse HEAD)" = "$WANT_SHA" ] || { echo "::error::HEAD moved off $WANT_SHA."; exit 1; }
+
+      - name: Create the slot schema and run prisma migrate deploy inside it
+        env:
+          SEED_DATABASE_URL: ${{ secrets.SHO_PR_SLOT_DATABASE_URL }}
+        run: |
+          set -uo pipefail
+          unset DATABASE_URL DIRECT_DATABASE_URL || true
+          fail() { echo "::error::$1"; exit 1; }
+
+          url="$SEED_DATABASE_URL"
+          [ -n "$url" ] || fail "SHO_PR_SLOT_DATABASE_URL is missing or empty."
+          echo "::add-mask::$url"
+          rest="${url#*://}"; authority="${rest%%[/?#]*}"
+          query=""; case "$rest" in *\?*) query="${rest#*\?}" ;; esac
+
+          # REFUSE anything but this slot's schema, spelled exactly once and in lower case.
+          schema_hits=0; other_schema=""
+          if [ -n "$query" ]; then
+            IFS='&' read -ra params <<< "$query"
+            for kv in "${params[@]}"; do
+              key="${kv%%=*}"; key="${key,,}"
+              case "$key" in
+                options|host|hostaddr|dbname|*%*) fail "URL query overrides host/db/search_path. Refusing to migrate." ;;
+                schema)
+                  schema_hits=$((schema_hits + 1))
+                  [ "${kv%%=*}" = schema ] || fail "The schema key must be lower case. Refusing to migrate."
+                  value="${kv#*=}"
+                  [ "$value" = "$WANT_SCHEMA" ] || other_schema="$value"
+                  ;;
+              esac
+            done
+          fi
+          [ "$schema_hits" -le 1 ] || fail "URL carries schema= more than once ($schema_hits). Refusing to migrate."
+          [ "${other_schema:-}" != public ] || fail "URL carries schema=public. This workflow must never touch public. Refusing."
+          if [ -n "${other_schema:-}" ]; then
+            fail "URL carries schema=$other_schema but this run owns $WANT_SCHEMA. Refusing to migrate."
+          fi
+
+          # Build the migrate URL with exactly one ?schema=<slot> (or &schema= if other approved params exist).
+          base="${url%%\?*}"; qs=""
+          if [ "${url}" != "$base" ]; then qs="${url#*\?}"; fi
+          kept=""
+          if [ -n "$qs" ]; then
+            IFS='&' read -ra params <<< "$qs"
+            for kv in "${params[@]}"; do
+              key="${kv%%=*}"; case "${key,,}" in schema) continue;; esac
+              kept="${kept:+$kept&}$kv"
+            done
+          fi
+          migrate_url="$base?${kept:+$kept&}schema=$WANT_SCHEMA"
+          echo "::add-mask::$migrate_url"
+          # Prove the invariant on the final string rather than trusting the string surgery above.
+          hits=$(printf '%s' "$migrate_url" | grep -o 'schema=' | wc -l | tr -d ' ')
+          [ "$hits" = 1 ] || fail "Built URL has schema= $hits times, expected exactly 1. Refusing to migrate."
+          case "$migrate_url" in *"schema=$WANT_SCHEMA") ;; *) fail "Built URL does not end in schema=$WANT_SCHEMA. Refusing to migrate.";; esac
+          case "$migrate_url" in *$'\n'*|*$'\r'*) fail "Built URL contains a line break.";; esac
+
+          echo "Writing schema: $WANT_SCHEMA of database $EXPECTED_DB (and nothing else)."
+
+          # CREATE SCHEMA IF NOT EXISTS with libpq (no app deps). The URL is passed as a value, never printed.
+          export PGCONNECT_TIMEOUT=15 PGSSLMODE=require PGAPPNAME="sho-candidate-migrate"
+          hostport="${authority##*@}"
+          case "${hostport##*:}" in 25060|25061) export PGPORT="${hostport##*:}";; *) export PGPORT=25060;; esac
+          if ! psql -X -q -v ON_ERROR_STOP=1 --dbname "$url" -c "CREATE SCHEMA IF NOT EXISTS $WANT_SCHEMA" >/dev/null; then
+            echo "::error::Could not create schema $WANT_SCHEMA (psql unavailable, permissions, or connection). Nothing was migrated."; exit 1
+          fi
+          echo "Schema $WANT_SCHEMA present."
+
+          # prisma reads DATABASE_URL; it is exported for this one command only, after npm ci has finished.
+          DATABASE_URL="$migrate_url" DIRECT_DATABASE_URL="$migrate_url" npx --no-install prisma migrate deploy
+
+      - name: Record what this run wrote (schema, tables, public untouched)
+        env:
+          SEED_DATABASE_URL: ${{ secrets.SHO_PR_SLOT_DATABASE_URL }}
+        run: |
+          set -uo pipefail
+          url="$SEED_DATABASE_URL"; [ -n "$url" ] || { echo "::error::URL missing."; exit 1; }
+          echo "::add-mask::$url"
+          authority="${url#*://}"; authority="${authority%%[/?#]*}"
+          export PGCONNECT_TIMEOUT=15 PGSSLMODE=require PGAPPNAME="sho-candidate-record"
+          case "${authority##*@}" in *) port="${authority##*:}";; esac
+          case "$port" in 25060|25061) export PGPORT="$port";; *) export PGPORT=25060;; esac
+          {
+            echo "tables in $WANT_SCHEMA: $(psql -X -q -A -t -v ON_ERROR_STOP=1 --dbname "$url" -c "SELECT count(*) FROM pg_tables WHERE schemaname = '$WANT_SCHEMA'")"
+            echo "enums in $WANT_SCHEMA: $(psql -X -q -A -t -v ON_ERROR_STOP=1 --dbname "$url" -c "SELECT count(*) FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace WHERE n.nspname = '$WANT_SCHEMA' AND t.typtype = 'e'")"
+            echo "tables in public: $(psql -X -q -A -t -v ON_ERROR_STOP=1 --dbname "$url" -c "SELECT count(*) FROM pg_tables WHERE schemaname = 'public'")"
+            echo "_prisma_migrations rows in $WANT_SCHEMA: $(psql -X -q -A -t -v ON_ERROR_STOP=1 --dbname "$url" -c "SELECT count(*) FROM \"$WANT_SCHEMA\"._prisma_migrations")"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+          echo "::notice::Migrated only into schema $WANT_SCHEMA of database $EXPECTED_DB at commit $WANT_SHA."
+
+  collect-after:
+    name: Suite still collects and typechecks
+    needs: [preflight, migrate-slot]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    concurrency:
+      group: candidate-staging-${{ inputs.slot }}
+      cancel-in-progress: false
+    steps:
+      - name: Checkout the same commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.preflight.outputs.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies (no secrets in this job at all)
+        run: npm ci --no-audit --no-fund
+
+      - name: Typecheck the e2e suite
+        run: npx --no-install tsc --noEmit -p tsconfig.e2e.json
+
+      - name: Prove Playwright still collects
+        run: |
+          # --list only parses; it starts no browser and reaches no host.
+          npx --no-install playwright test --list | tee /tmp/collect.txt
+          total=$(grep -cE '^\s*\[' /tmp/collect.txt || true)
+          echo "Collected $total tests"
+          [ "$total" -gt 0 ] || { echo "::error::Playwright collected no tests."; exit 1; }

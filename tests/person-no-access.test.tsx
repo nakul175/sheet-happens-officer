@@ -290,9 +290,11 @@ describe("Person page shows a plain state for each failure", () => {
   });
 
   // Mocked until PR #8 (APL-2624) merges. main does not answer 403 PASSWORD_CHANGE_REQUIRED for a signed-in person.
+  // SHO-2695: the sentence here is deliberately not the one the server sends today. The screen must route on the code,
+  // so rewording the 403 message does not turn the password wall into "You don't have access to this person".
   it("A forced password change is not shown as no-access qa:TC-APL2664-0259816b@v2", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => json(403, {
-      error: "Set your own password first.",
+      error: "Choose a password of your own before you carry on.",
       code: "PASSWORD_CHANGE_REQUIRED",
       person: { id: "p2", name: P2_NAME, email: P2_EMAIL, projects: [{ id: "proj-private", name: PRIVATE_PROJECT }] },
     })));
@@ -307,5 +309,15 @@ describe("Person page shows a plain state for each failure", () => {
     expect(page.innerHTML).not.toContain(P2_EMAIL);
     expect(page.innerHTML).not.toContain(PRIVATE_PROJECT);
     expect(document.title).not.toContain(P2_NAME);
+  });
+
+  // SHO-2695. The other half of the same rule: the old sentence with no code is an ordinary no-access 403.
+  // If this ever renders the password wall, the screen is matching text again.
+  it("A 403 with the old sentence and no code is still no access @v3", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => json(403, { error: "Set your own password first." })));
+    const page = await openPerson();
+    expect(page.querySelector("[role=alert]")?.textContent).toBe(NO_ACCESS);
+    expect(page.textContent).not.toContain("Set your own password");
+    expect(page.querySelector("a[href='/profile']")).toBeNull();
   });
 });

@@ -4,35 +4,18 @@ import { use, useEffect, useState } from "react";
 import { ago, api, useGet } from "@/components/api";
 import { requestUndo } from "@/components/UndoHost";
 import { LoadFailed, Skeleton } from "@/components/ui";
+import { showTooOld, showUndo, type ActivityRow } from "@/lib/activity-row";
 import { Page } from "../../../Shell";
 
-type Row = { id: string; ts: number; when: string; who: string; via: string; what: string; undo: "available" | "undone" | "too_old" | "none" };
-
-/** A task.deleted row is the sentence `moved "…" to Trash`. A section move ends without that closing quote. */
-export function isDeletedTaskRow(what: string) {
-  return /^moved "[\s\S]*" to Trash$/.test(what);
-}
-
-/**
- * Undo on a delete follows Trash restore: only a Leader or an Admin (the project API reports both as LEADER).
- * Every other row keeps the feed's own undo flag. Hide the delete button until the role is known.
- */
-export function showUndo(row: Pick<Row, "undo" | "what">, role: string | undefined) {
-  if (row.undo !== "available") return false;
-  if (isDeletedTaskRow(row.what) && role !== "LEADER") return false;
-  return true;
-}
-
-/** AC6 v2.4: on a deleted-task row past the window, only whoever may restore (a Leader or Admin) sees "Too old to undo". */
-export function showTooOld(row: Pick<Row, "undo" | "what">, role: string | undefined) {
-  return row.undo === "too_old" && (!isDeletedTaskRow(row.what) || role === "LEADER");
-}
+// SHO-2701: the row decisions live in src/lib/activity-row.ts and branch on the row's `kind`, not on `what`.
+// Re-exported so the screen's own surface is unchanged.
+export { isDeletedTaskRow, showTooOld, showUndo } from "@/lib/activity-row";
 
 export default function Activity({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
-  const a = useGet<{ items: Row[]; nextCursor: string | null }>(`/api/projects/${id}/activity`);
+  const a = useGet<{ items: ActivityRow[]; nextCursor: string | null }>(`/api/projects/${id}/activity`);
   const pr = useGet<{ project: { role: string } }>(`/api/projects/${id}`);
-  const [more, setMore] = useState<Row[]>([]);
+  const [more, setMore] = useState<ActivityRow[]>([]);
   const [cursor, setCursor] = useState<string | null | undefined>(undefined);
   const { reload } = a;
   useEffect(() => {
@@ -69,7 +52,7 @@ export default function Activity({ params }: { params: Promise<{ id: string }> }
           ))}
         </div>
       )}
-      {next && <p><button className="btn ghost" onClick={async () => { const r = await api<{ items: Row[]; nextCursor: string | null }>("GET", `/api/projects/${id}/activity?cursor=${next}`); if (r.ok) { setMore((m) => [...m, ...r.data.items]); setCursor(r.data.nextCursor); } }}>Load more</button></p>}
+      {next && <p><button className="btn ghost" onClick={async () => { const r = await api<{ items: ActivityRow[]; nextCursor: string | null }>("GET", `/api/projects/${id}/activity?cursor=${next}`); if (r.ok) { setMore((m) => [...m, ...r.data.items]); setCursor(r.data.nextCursor); } }}>Load more</button></p>}
     </Page>
   );
 }

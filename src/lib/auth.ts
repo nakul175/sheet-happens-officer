@@ -1,6 +1,7 @@
 import { createHash, randomBytes, randomInt, scrypt, timingSafeEqual } from "node:crypto";
 import { cookies } from "next/headers";
 import { db } from "@/lib/db";
+import { PASSWORD_CHANGE_REQUIRED } from "@/lib/auth-messages";
 import { ApiError } from "@/lib/http";
 
 export const SESSION_COOKIE = "sho_session";
@@ -112,12 +113,11 @@ export async function endSession() {
   return s?.userId ?? null;
 }
 
-export const PASSWORD_CHANGE_REQUIRED = "PASSWORD_CHANGE_REQUIRED";
-
 /**
  * Signed-in, verified, active user, or ApiError(401).
  * SHO-US-23.5: a person still on a Super-Admin-issued password gets ApiError(403) until they set their own.
  * Only the change-password, "me" and app-layout callers pass `allowTempPassword`.
+ * SHO-2695: the 403 carries `code: PASSWORD_CHANGE_REQUIRED` (the machine-readable half) beside the sentence.
  */
 /** The signed-in user for a session token, or ApiError(401). Does not read the cookie jar. */
 export async function sessionUser(token: string | undefined, opts: { allowTempPassword?: boolean } = {}) {

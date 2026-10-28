@@ -236,7 +236,16 @@ describe("propose and confirm (8.3)", () => {
       },
     );
     const r = await ask(lead, "Deactivate the editor");
-    expect(r.messages[1]).toMatchObject({ kind: "text", text: "Deactivating people is done on the Team screen." });
+    // SHO-2693 w183: the turn read nothing and wrote nothing (the proposal was refused), so the person gets the server's
+    // own sentence and NONE of the model's prose - whatever it says. AC3's substance is unchanged: no card is offered and
+    // no write happens. DISCLOSED COST: the model's pointer to the Team screen is no longer relayed either, because the
+    // server cannot tell that sentence from a claim without reading its words. Restoring the pointer needs a
+    // server-authored screen map for refused actions (a product decision, not a wording match).
+    expect(r.messages[1]).toMatchObject({
+      kind: "text",
+      text: "Nothing has changed. I cannot change anything without a card you confirm, so tell me which task should change and how, and I will show you the card.",
+    });
+    expect((r.messages[1] as { text: string }).text).not.toMatch(/screen/i);
     expect(r.messages.some((m) => m.kind === "card")).toBe(false);
     expect((await db.user.findUniqueOrThrow({ where: { id: ed.id } })).deactivatedAt).toBeNull();
   });
@@ -566,11 +575,34 @@ describe("clarifying questions (8.4)", () => {
     script(
       () => [tu("find_tasks", { text: "budget" })],
       (r) => [tu("propose_changes", { changes: [{ action: "assign_task", task_id: lastData(r).tasks[0].id }] })],
-      (r) => { expect(lastResultText(r)).toMatch(/person_id is missing/); return [say("Who should I assign it to?")]; },
+      () => [say("Who should I assign it to?")],
     );
     const r = await ask(lead, "assign it");
-    expect(r.messages[1]).toMatchObject({ kind: "answer", text: "Who should I assign it to?" });
+    // SHO-2693 (APL-2513 AC1): "assign it" with nobody named now comes back as the server's own question, kind
+    // "choices" with one "Never mind" option, not as the model's sentence. The old assertion here pinned kind "answer"
+    // and the model's exact words, which is the reply APL-2513 recorded as failing.
+    expect(r.messages[1]).toMatchObject({
+      kind: "choices",
+      text: "Who should I assign it to? Tell me the person's name and I will show you the card to confirm.",
+      choices: [{ id: "none", label: "Never mind" }],
+    });
+    expect(r.messages[1].text).toMatch(/^Who should I assign it to\?/);
     expect(r.messages.some((m) => m.kind === "card")).toBe(false);
+  });
+
+  it("a missing person is refused, and the model is told so", async () => {
+    const lead = await account("lead");
+    const p = await project(lead, lead);
+    await task(lead, p.id, { title: "Budget" });
+    script(
+      () => [tu("find_tasks", { text: "budget" })],
+      (r) => [tu("propose_changes", { changes: [{ action: "assign_task", task_id: lastData(r).tasks[0].id }] })],
+      (r) => { expect(lastResultText(r)).toMatch(/person_id is missing/); return [say("Who?")]; },
+    );
+    const r = await ask(lead, "assign the budget task");
+    expect(r.messages.some((m) => m.kind === "card")).toBe(false);
+    const stored = JSON.parse((await db.chatMessage.findUniqueOrThrow({ where: { id: r.messages[1].id } })).content);
+    expect(stored.proposal).toBeUndefined();
   });
 
   it("an id the model never fetched is refused", async () => {

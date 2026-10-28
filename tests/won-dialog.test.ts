@@ -106,6 +106,45 @@ describe("qa:TC missing open tasks that block Won (APL-2691)", () => {
     expect(after.archived).toBe(false);
   });
 
+  // APL-2691 AC6 names *which* tasks the refusal lists: the first 20 still open, in creation order, and never a closed one.
+  it("@APL-2691 qa:TC-APL2691-5b1c0e42@v1 TC10 AC6: the refusal names exactly the 20 open tasks in creation order and never a closed one", async () => {
+    const sa = await superAdmin();
+    const lead = await admin(sa, "won2691names");
+    const pipes = await pipelines(lead);
+    const pro = pipes.find((p) => p.key === "DEAL_PROACTIVE")!;
+    const orgId = (await lead.c.post("/api/orgs", { name: `Org names 2691 ${Date.now()}` })).json.organisation.id as string;
+    const step = `Name the buyer ${Date.now()}`;
+    const made = await lead.c.post("/api/deals", {
+      name: `Deal names 2691 ${Date.now()}`, organisationId: orgId, pipelineId: pro.id, leaderId: lead.id, whyPursue: "fit",
+      nextStep: { title: step, dueDate: istDate(3) },
+    });
+    expect(made.status, JSON.stringify(made.json)).toBe(201);
+    const id = made.json.deal.id as string;
+    const stepId = (await lead.c.get(`/api/projects/${id}`)).json.project.deal.nextStep.id as string;
+
+    // Closed *second* in creation order: an alert built without the completedAt filter would put it on the list and push a real open task off.
+    const closed = `Closed ${Date.now()}`;
+    const closedId = await task(lead, id, { title: closed });
+    expect((await lead.c.post(`/api/tasks/${closedId}/complete`, await withVersion(lead, closedId))).status).toBe(200);
+    expect((await lead.c.get(`/api/tasks/${closedId}`)).json.task.completedAt).not.toBeNull();
+
+    const open: { id: string; title: string }[] = [];
+    for (let i = 0; i < 20; i++) {
+      const title = `Open ${i} ${Date.now()}`;
+      open.push({ id: await task(lead, id, { title }), title });
+    }
+
+    const won = pro.stages.find((s) => s.name === "Won")!.id;
+    const blocked = await lead.c.post(`/api/projects/${id}/stage`, { stageId: won });
+    expect(blocked.status).toBe(409);
+    const named = (blocked.json.tasks as { id: string; title: string }[]).map((t) => t.title);
+    // The exact 20, in creation order: the deal's first step, then the first 19 of the 20 created after it.
+    expect(named).toEqual([step, ...open.slice(0, 19).map((t) => t.title)]);
+    expect(named).not.toContain(closed);
+    expect(blocked.json.openTasks).toBe(21); // the step plus 20 opens; the closed task is not counted
+    expect((await lead.c.get(`/api/tasks/${stepId}`)).json.task.completedAt).toBeNull();
+  });
+
   it("qa:TC missing @APL-2691 TC9: the refusal count includes a subtask, and the task list reports that same count", async () => {
     const sa = await superAdmin();
     const lead = await admin(sa, "sub2691");

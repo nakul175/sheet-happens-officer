@@ -1,5 +1,7 @@
 // APL-2739 story spec (APL-2529 AC3): Negotiation lists value and currency as required fields.
 // An Editor's move without them is refused (409, needsFields), the stage dialog asks for them, and sending them moves the deal.
+// Runs a real Chromium, so this file belongs to the browser tier: `npm run test:browser` (vitest.browser-tier.config.mts).
+// `npm test` excludes it (vitest.config.mts), so a plain `npm test` never collects it.
 // workers=1: the cases in this file run one after another, and the suite runs one file at a time.
 // Local servers only: the target host must be localhost or 127.0.0.1, so staging and production are refused.
 // Thrown-away people, the organisation and the deal use ZZ-TEST names and nakul17+ aliases, then afterAll archives
@@ -36,7 +38,7 @@ async function zzAccount(role: string) {
   return who;
 }
 
-describe("qa:TC missing APL-2739 a stage that lists empty required fields refuses the move until they are sent", () => {
+describe("qa:TC missing APL-2739 a stage that requires value and currency refuses the move until they are sent", () => {
   let browser: Browser;
   let lead: Account;
   let editor: Account;

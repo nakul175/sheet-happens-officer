@@ -33,6 +33,7 @@ export default defineConfig({
       "tests/e2e/local/APL-2728.test.ts",
       "tests/e2e/stories/APL-2735.spec.ts",
       "tests/e2e/local/APL-2609.spec.ts",
+      "tests/e2e/stories/**", // every file here is a Playwright story, not Vitest (see the note at the top)
       "e2e/**",
       "scripts/**",
       "tests/e2e/stories/APL-2590.spec.ts", // a Playwright story (APL-2590)
@@ -46,6 +47,34 @@ export default defineConfig({
       "tests/e2e/stories/APL-2624.spec.ts",
       "tests/e2e/stories/APL-2721.spec.ts",
       "tests/e2e/stories/APL-2737.spec.ts",
+      // Browser tier: 8 Playwright/Chromium files that compete with these 107 files for the dev server and the
+      // machine, and lost 9 tests to the 30s testTimeout in the full run. They have their own config and
+      // their own npm script (`npm run test:browser`, vitest.browser-tier.config.mts, testTimeout 120s).
+      "tests/apl-2770-long-assignee.test.ts",
+      "tests/e2e/local/APL-2739.test.ts",
+      "tests/e2e/stories/APL-2736.spec.ts",
+      "tests/activity-delete-undo.test.ts",
+      "tests/inline-touch-2673.test.ts",
+      "tests/forced-password-23-5-browser.test.ts",
+      "tests/e2e/local/APL-2719.test.ts",
+      "tests/e2e/local/SHO-2738-3025-3030.browser.test.ts",
+      // SIGTERM drain (APL-2688 / APL-2689). tests/shutdown-next.test.ts is Linux-only whole, and
+      // `npm test` collected it anyway until W152 (its own header said the opposite), so `npm test`
+      // on darwin went red for a reason that had nothing to do with the change under test: it spawns
+      // `taskset`, reads /proc/<pid>/status and /proc/<pid>/limits, and runs `next build`, which
+      // would rewrite .next under the app the CI job already started at :3100.
+      //   * tests/shutdown.test.ts is NOT excluded. Only seven of its cases are Linux-only (they
+      //     assert exit 0 and CLEAN_LOG, which src/lib/shutdown.ts produces only where the Linux
+      //     accept-queue seizer loaded; loadNative/loadLibc return null off linux, :205 and :246),
+      //     and those seven gate themselves with `it.skipIf(process.platform !== "linux")` plus a
+      //     reason on the title. W152 excluded the whole file instead, which bought a green darwin
+      //     run by dropping the clock/env, module-identity, timeout-path and F7 cases from `npm test`
+      //     as well; W163 put them back.
+      // The Linux tier is vitest.shutdown.config.mts, which ci.yml runs on ubuntu-latest before the
+      // app starts; it names both files, so the seven skipped-off cases still run there. Named one by
+      // one, not a glob, so a new file here still lands in this run.
+      // tests/tier-placement.test.ts asserts both halves of that placement.
+      "tests/shutdown-next.test.ts",
     ],
   },
 });
