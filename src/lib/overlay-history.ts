@@ -1,6 +1,13 @@
 import { onOverlayPopstate } from "@/lib/overlay-popstate";
 const PANEL = "__shoPanel", BASE = "__shoPanelBase";
 type PanelEntry = { id: string; token: string; href: string };
+type ActiveOverlay = { close: (after?: () => void) => void };
+const activeOverlays: ActiveOverlay[] = [];
+/** Finish an outgoing menu's real Back traversal before opening another overlay. */
+export function closeTopOverlayThen(after: () => void) {
+  const active = activeOverlays.at(-1);
+  if (active) active.close(after); else after();
+}
 const object = (state: unknown): Record<string, unknown> => state && typeof state === "object" && !Array.isArray(state) ? { ...state } : {};
 const panel = (state: unknown) => object(state)[PANEL] as PanelEntry | undefined;
 
@@ -16,13 +23,16 @@ export function attachOverlayBack(id: string, onClose: () => void, nestedClose: 
     History.prototype.replaceState.call(history, { ...object(history.state), [BASE]: entry.token }, "", entry.href);
     History.prototype.pushState.call(history, { ...state, [PANEL]: entry }, "", entry.href);
   }
-  let restoring: (() => void) | null = null, closing = false, afterClose: (() => void) | undefined;
-  const finish = () => { onClose(); afterClose?.(); };
+  let restoring: (() => void) | null = null, closing = false, finished = false, afterClose: (() => void) | undefined;
+  const forget = () => { const index = activeOverlays.indexOf(control); if (index !== -1) activeOverlays.splice(index, 1); };
+  const finish = () => { if (finished) return; finished = true; forget(); onClose(); afterClose?.(); };
   const close = (after?: () => void) => {
-    if (closing) return;
-    if (restoring) { closing = true; afterClose = after; return; }
-    if (panel(history.state)?.token !== entry.token || location.href !== entry.href) { onClose(); after?.(); return; }
-    closing = true; afterClose = after;
+    if (finished) { after?.(); return; }
+    if (closing) { afterClose ??= after; return; }
+    afterClose = after;
+    if (restoring) { closing = true; return; }
+    if (panel(history.state)?.token !== entry.token || location.href !== entry.href) { finish(); return; }
+    closing = true;
     history.back();
   };
   const pop = (event: PopStateEvent) => {
@@ -38,5 +48,7 @@ export function attachOverlayBack(id: string, onClose: () => void, nestedClose: 
     else finish();
   };
   const detach = onOverlayPopstate(pop);
-  return { close, detach };
+  const control = { close, detach: () => { forget(); detach(); } };
+  activeOverlays.push(control);
+  return control;
 }

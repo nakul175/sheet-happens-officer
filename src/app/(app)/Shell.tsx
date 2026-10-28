@@ -12,6 +12,7 @@ import { Bell } from "./Bell";
 import { ConciergeHost, ConciergeNavItem, openConcierge } from "@/components/concierge/Launcher";
 import { Extras, NewTaskButton, SearchButton } from "@/components/extras/Extras";
 import { useOverlayBack } from "@/components/use-overlay-back";
+import { closeTopOverlayThen } from "@/lib/overlay-history";
 
 function followOverlayLink(e: React.MouseEvent, close: (after?: () => void) => void, push: (href: string) => void) {
   if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
@@ -93,7 +94,7 @@ function TabBar({ user, here, more }: { user: Me; here: (p: string) => boolean; 
         {tabs.map(([h, l, i]) => (
           <Link key={h} href={h} aria-current={here(h) ? "page" : undefined}><span aria-hidden>{i}</span>{l}</Link>
         ))}
-        <button aria-expanded={open} aria-haspopup="menu" aria-current={moreHere ? "true" : undefined} onClick={() => { if (open) closeMore(); else setOpen(true); }}><span aria-hidden>⋯</span>More</button>
+        <button aria-expanded={open} aria-haspopup="menu" aria-current={moreHere ? "true" : undefined} onClick={() => { if (open) closeMore(); else closeTopOverlayThen(() => setOpen(true)); }}><span aria-hidden>⋯</span>More</button>
       </nav>
     </div>
   );
@@ -188,7 +189,7 @@ export function Shell({ user, children }: { user: Me; children: React.ReactNode 
         </aside>
         <div className="main">
           <header className="top">
-            <button className="burger" aria-label="Open menu" aria-expanded={open} onClick={() => setMenu(path)}>☰</button>
+            <button className="burger" aria-label="Open menu" aria-expanded={open} onClick={() => closeTopOverlayThen(() => setMenu(path))}>☰</button>
             <Link href="/" className="top-brand" aria-label="Sheet Happens Officer home"><img src="/logo-icon-reversed.svg" alt="" /><span className="wordmark-full" aria-hidden="true">Sheet Happens Officer</span><span className="wordmark-short" aria-hidden="true">SHO</span></Link>
             <nav className="primary-nav" aria-label="Primary">{primary.map(([href, label]) => <Link key={href} href={href} aria-current={here(href) ? "page" : undefined}>{label}</Link>)}</nav>
             <span className="grow" />
@@ -196,7 +197,7 @@ export function Shell({ user, children }: { user: Me; children: React.ReactNode 
             <NewTaskButton />
             <Bell />
             <div className="account-menu" ref={utility}>
-              <button className="account-trigger" aria-label="Account and utilities" aria-expanded={utilityOpen} aria-controls="account-utilities" onClick={() => { if (utilityOpen) closeUtility(); else setUtilityAt(path); }}><span className="av">{initials(user.name)}</span></button>
+              <button className="account-trigger" aria-label="Account and utilities" aria-expanded={utilityOpen} aria-controls="account-utilities" onClick={() => { if (utilityOpen) closeUtility(); else closeTopOverlayThen(() => setUtilityAt(path)); }}><span className="av">{initials(user.name)}</span></button>
               {utilityOpen && <div className="account-options" id="account-utilities" aria-label="Account and utilities" onClickCapture={e => followOverlayLink(e, closeUtility, href => router.push(href))}>
                 <strong>{user.name}</strong><small>{roleLabel(user.orgRole)}</small>
                 <Link href="/profile">Profile</Link>

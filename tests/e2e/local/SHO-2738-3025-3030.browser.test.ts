@@ -427,22 +427,29 @@ describe("SHO-2616 AC2: Back closes the real navigation and Move to overlays", (
     } finally { await ctx.close(); }
   }, 180000);
 
-  it("Back closes Account and utilities before leaving, and Escape consumes its entry", async () => {
+  it("More and Account hand off one history entry at a time; Back and Escape leave no duplicate stop", async () => {
     const ctx = await signedIn(root.email, { width: 390, height: 844 }, true), page = await ctx.newPage();
     try {
       await page.goto("/team", { waitUntil: "load", timeout: 120000 });
       await page.goto(`/projects/${projectId}`, { waitUntil: "load", timeout: 120000 });
       const trigger = page.getByRole("button", { name: "Account and utilities", exact: true });
+      const more = page.getByRole("button", { name: "More", exact: true });
+      await more.click();
+      await page.getByRole("menu", { name: "More", exact: true }).waitFor({ state: "visible" });
       await trigger.click();
       await page.locator("#account-utilities").waitFor({ state: "visible" });
+      await page.getByRole("menu", { name: "More", exact: true }).waitFor({ state: "detached" });
       await page.goBack();
       await page.locator("#account-utilities").waitFor({ state: "detached" });
       expect(new URL(page.url()).pathname).toBe(`/projects/${projectId}`);
       expect(await trigger.evaluate(el => document.activeElement === el)).toBe(true);
       await trigger.click();
       await page.locator("#account-utilities").waitFor({ state: "visible" });
-      await page.keyboard.press("Escape");
+      await more.click();
+      await page.getByRole("menu", { name: "More", exact: true }).waitFor({ state: "visible" });
       await page.locator("#account-utilities").waitFor({ state: "detached" });
+      await page.keyboard.press("Escape");
+      await page.getByRole("menu", { name: "More", exact: true }).waitFor({ state: "detached" });
       await page.goBack();
       await page.waitForURL("**/team", { timeout: 15000 });
     } finally { await ctx.close(); }

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { attachOverlayBack } from "@/lib/overlay-history";
+import { attachOverlayBack, closeTopOverlayThen } from "@/lib/overlay-history";
 let detach: (() => void)[] = [];
 beforeEach(() => history.replaceState({ opaque: "router" }, "", "/projects/one?view=board"));
 afterEach(() => { detach.forEach(fn => fn()); detach = []; vi.restoreAllMocks(); });
@@ -56,4 +56,19 @@ it("ignores an unrelated navigation after detach", () => {
   const control = attach(); control.detach();
   pop({ __shoPanelBase: control.entry.token });
   expect(control.onClose).not.toHaveBeenCalled();
+});
+
+it("queues a new overlay after an outside-click Close already requested Back", () => {
+  const { close, onClose, entry } = attach("more"), revealAccount = vi.fn();
+  const back = vi.spyOn(history, "back").mockImplementation(() => {});
+  close(); closeTopOverlayThen(revealAccount);
+  expect(back).toHaveBeenCalledOnce(); expect(revealAccount).not.toHaveBeenCalled();
+  pop({ __shoPanelBase: entry.token });
+  expect(onClose).toHaveBeenCalledOnce(); expect(revealAccount).toHaveBeenCalledOnce();
+  expect(onClose.mock.invocationCallOrder[0]).toBeLessThan(revealAccount.mock.invocationCallOrder[0]);
+});
+it("finished or detached overlays do not delay a new opener", () => {
+  const control = attach("account"); control.detach();
+  const reveal = vi.fn(); closeTopOverlayThen(reveal);
+  expect(reveal).toHaveBeenCalledOnce();
 });
