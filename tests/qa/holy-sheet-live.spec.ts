@@ -17,7 +17,7 @@ test('SHO-3062 paired normal-login qualification and HOLY-4 AC16',async({browser
  const projectName=`ZZ-TEST HOLY3062 ${Date.now()}`;let projectId='',createdPageId='',taskId='';
  async function call(method:string,path:string,data?:unknown){return ctx.request.fetch(SHO+path,{method,headers:{Origin:SHO},data});}
  async function hsDocument(id:string){return ctx.request.get(`${HS}/api/v1/pages/${id}/document`);}
- async function renewHs(){const auth=await ctx.newPage();await auth.goto(`${HS}/auth/sign-in?next=%2F`);await auth.waitForURL(url=>url.origin===HS&&!url.pathname.startsWith('/auth/'),{timeout:45000});const session=await ctx.request.get(HS+'/auth/session');expect(session.status()).toBe(200);expect((await session.json()).userId).toBe(fixture.subject);await auth.close();}
+ async function renewHs(){const auth=await ctx.newPage();await auth.goto(`${HS}/auth/sign-in?next=%2F`);if(new URL(auth.url()).pathname==='/auth/sign-in')await auth.getByRole('link',{name:'Continue with Aplyd',exact:true}).click();await auth.waitForURL(url=>url.origin===HS&&!url.pathname.startsWith('/auth/'),{timeout:45000});const session=await ctx.request.get(HS+'/auth/session');expect(session.status()).toBe(200);expect((await session.json()).userId).toBe(fixture.subject);await auth.close();}
  async function metadata(kind:'projects'|'tasks',id:string){const response=await call('GET',`/api/${kind}/${id}/documents`);expect(response.status()).toBe(200);return response.json();}
  function docs(){return page.getByRole('region',{name:'Holy Sheet documents',exact:true});}
  function picker(){return page.frameLocator('iframe[title="Choose Holy Sheet page"]');}
