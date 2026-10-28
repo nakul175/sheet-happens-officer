@@ -51,6 +51,8 @@ const useCommitEffect = typeof window === "undefined" ? useEffect : useLayoutEff
 /** Centred dialog over a dimmed page. Escape and the dim area close it; focus moves in and returns. */
 export function Modal({ onClose, small, label, describedBy, className, children }: { onClose: () => void; small?: boolean; label: string; describedBy?: string; className?: string; children: React.ReactNode }) {
   const ref = useRef<HTMLDivElement>(null);
+  // Capture before child autoFocus runs during commit, so cleanup restores the invoker.
+  const [opener] = useState<HTMLElement | null>(() => typeof document === "undefined" ? null : document.activeElement as HTMLElement | null);
   // The handler to call now. A re-render of the parent gives a new one; the key listener reads it from here, so it
   // is never torn down and added again (a gap a keypress could fall into, or one that holds a stale handler).
   const latest = useRef(onClose);
@@ -59,7 +61,7 @@ export function Modal({ onClose, small, label, describedBy, className, children 
     const me = Symbol("dialog");
     const dialog = ref.current;
     OPEN.push({ me, el: dialog });
-    const prev = document.activeElement as HTMLElement | null;
+    const prev = opener;
     if (topDialog() === dialog) (dialog?.querySelector<HTMLElement>("[data-autofocus]") ?? dialog)?.focus(); // SHO-US-14.5: a dialog can name the field that gets focus
     // SHO-US-22.7: the page behind a dialog must not scroll.
     const before = document.body.style.overflow;
@@ -93,7 +95,7 @@ export function Modal({ onClose, small, label, describedBy, className, children 
       document.body.style.overflow = before;
       if (prev?.isConnected) prev.focus();
     };
-  }, []);
+  }, [opener]);
   // SHO-2738: on a phone the keyboard shortens the visible area, not the page, so the sheet is sized from visualViewport
   // (--vvh/--vvt, the same pair the Concierge sheet uses) and the footer is pinned to the bottom of that area.
   // On a desktop visualViewport is the window, so the dialog there is unchanged.

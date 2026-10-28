@@ -275,7 +275,9 @@ describe("SHO-3030: the deactivate dialog and its summary, mounted by the real T
       expect(hint, "and never claims membership").not.toMatch(/\bnot on (a|that|those) projects?\b/);
 
       // A VIEWER is on the project, so its tasks still fall back to its Leader: the summary must say why.
-      await dialog.locator("select").selectOption({ label: named.name });
+      const handover = dialog.locator("select");
+      expect(await handover.locator(`option[value="${named.id}"]`).textContent()).toBe(`${named.name} — ${named.email}`);
+      await handover.selectOption({ value: named.id });
       await dialog.getByRole("button", { name: "Deactivate", exact: true }).click();
 
       const done = page.getByRole("dialog", { name: `${leaving.name} is deactivated` });
