@@ -1,5 +1,5 @@
 import { archiveProject } from "../helpers/migration-2731";
-import { test } from "./qa";
+import { test, deactivate } from "./qa";
 // SHO-US-23.4 Click a name, open the full profile (APL-2623). Acceptance criteria AC1 to AC6.
 import { expect, RUN, zz, type Who } from "../support";
 
@@ -9,16 +9,17 @@ const mk = async (admin: Who, later: (f: () => Promise<unknown>) => void, label:
   const r = await admin.api.post("/api/team", { firstName: "ZZ-TEST", lastName: `${label} ${RUN}`, email, role: "MEMBER" });
   expect(r.status, JSON.stringify(r.json)).toBe(201);
   const id = r.json.person.id as string;
-  later(async () => { if ((await admin.api.get(`/api/team/${id}`)).json.person?.status !== "DEACTIVATED") await admin.api.post(`/api/team/${id}/deactivate`, { reassign: "leaders" }); });
+  later(() => deactivate(admin.api, id));
   return { id, email, name: `ZZ-TEST ${label} ${RUN}` };
 };
 
 test.describe("SHO-US-23.4 / APL-2623", () => {
-  test("AC1: my own name at the bottom of the sidebar opens my profile", async ({ admin }) => {
+  test("AC1: the account menu opens my own profile", async ({ admin }) => {
     await admin.page.goto("/");
-    const me = admin.page.locator("a.me").first();
-    await expect(me).toContainText(admin.user.name as string, SLOW);
-    await me.click();
+    await admin.page.getByRole("button", { name: /^Account and utilities, \S+$/ }).click();
+    const account = admin.page.locator("#account-utilities");
+    await expect(account.getByText(admin.user.name, { exact: true })).toBeVisible();
+    await account.getByRole("link", { name: "Profile", exact: true }).click();
     await expect(admin.page).toHaveURL(/\/profile$/);
     await expect(admin.page.getByRole("heading", { name: "Profile" }).first()).toBeVisible();
     await expect(admin.page.getByText((admin.user.email as string).toLowerCase()).first()).toBeVisible();
@@ -36,9 +37,9 @@ test.describe("SHO-US-23.4 / APL-2623", () => {
     await admin.page.goto("/team");
     const rows = admin.page.locator("table.tbl tbody tr");
     await expect(rows.first()).toBeVisible(SLOW);
-    expect(await rows.evaluateAll((els) => els.filter((e) => !e.querySelector("td[data-label='Name'] a[href^='/team/']")).length)).toBe(0);
+    expect(await rows.evaluateAll((els) => els.filter((e) => !e.querySelector("td[data-label='Person'] a[href^='/team/']")).length)).toBe(0);
     // And a click really opens the person.
-    const first = admin.page.locator("table.tbl tbody td[data-label='Name'] a[href^='/team/']").first();
+    const first = admin.page.locator("table.tbl tbody td[data-label='Person'] a[href^='/team/']").first();
     const name = (await first.textContent())!.trim();
     await expect(async () => { // a very long table can swallow the first click while it redraws, so the click is repeated until the page moves
       if (!/\/team\/[^/]+$/.test(admin.page.url())) await first.click({ timeout: 20_000 });
@@ -85,6 +86,7 @@ test.describe("SHO-US-23.4 / APL-2623", () => {
   test("AC5: the Super Admin can Make Admin or Member, Resend sign-in details and reach Deactivate from the person's page", async ({ admin, later }) => {
     const p = await mk(admin, later, "actions");
     await admin.page.goto(`/team/${p.id}`);
+    await admin.page.locator("details.team-more > summary").click();
     await expect(admin.page.getByRole("link", { name: "Deactivate from the Team list" })).toBeVisible(SLOW);
     await admin.page.getByRole("button", { name: "Make Admin" }).click();
     await expect(admin.page.getByText(`${p.name} is now an Admin.`)).toBeVisible(SLOW);
@@ -109,6 +111,6 @@ test.describe("SHO-US-23.4 / APL-2623", () => {
     await expect(admin.page.locator(".chip", { hasText: "Deactivated" })).toBeVisible(SLOW);
     expect((await member.api.get(`/api/team/${p.id}`)).status).toBe(404);
     await member.page.goto(`/team/${p.id}`);
-    await expect(member.page.getByText("This person was not found.")).toBeVisible(SLOW);
+    await expect(member.page.getByRole("main").getByRole("alert")).toHaveText("Not found", SLOW);
   });
 });

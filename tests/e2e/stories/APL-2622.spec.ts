@@ -1,16 +1,16 @@
 // SHO-US-23.3 New person gets sign-in details by email (APL-2622). Acceptance criteria AC1 to AC5.
-// The emailed password is only ever in the person's inbox, so what the email says and what the person sees at first sign-in are manual.
+// Generated credentials are read only from the isolated QA outbox; missing mail fails rather than silently passing.
 // Resend sign-in details is exercised on throw-away "ZZ-TEST" people at an .invalid address.
 import { readFileSync } from "node:fs";
-import { expect, RUN, type Json } from "../support";
-import { test, alias, BASE_URL, sinkText } from "./qa";
+import { expect, RUN, type Who } from "../support";
+import { test, alias, BASE_URL, sinkText, deactivate } from "./qa";
 import { signInDetailsMail } from "../../../src/lib/email";
 
-const mk = async (admin: { api: { post: (p: string, b?: unknown) => Promise<{ status: number; json: Json }>; get: (p: string) => Promise<{ status: number; json: Json }> } }, later: (f: () => Promise<unknown>) => void, label: string) => {
+const mk = async (admin: Pick<Who, "api">, later: (f: () => Promise<unknown>) => void, label: string) => {
   const r = await admin.api.post("/api/team", { firstName: "ZZ-TEST", lastName: `${label} ${RUN}`, email: `zz-test-${RUN}-${label}@example.invalid`, role: "MEMBER" });
   expect(r.status, JSON.stringify(r.json)).toBe(201);
   const id = r.json.person.id as string;
-  later(async () => { if ((await admin.api.get(`/api/team/${id}`)).json.person?.status !== "DEACTIVATED") await admin.api.post(`/api/team/${id}/deactivate`, { reassign: "leaders" }); });
+  later(() => deactivate(admin.api, id));
   return { id, name: `ZZ-TEST ${label} ${RUN}`, email: `zz-test-${RUN}-${label}@example.invalid` };
 };
 
@@ -23,63 +23,70 @@ test.describe("SHO-US-23.3 / APL-2622", () => {
     expect(built.text).toContain("Password: secret-pass-1");
     const r = await admin.api.post("/api/team", { firstName: "ZZ-TEST", lastName: `mail ${RUN}`, email, role: "MEMBER" });
     expect(r.status, JSON.stringify(r.json)).toBe(201);
-    later(async () => { await admin.api.post(`/api/team/${r.json.person.id}/deactivate`, { reassign: "leaders" }); });
+    later(() => deactivate(admin.api, r.json.person.id));
     expect(JSON.stringify(r.json).toLowerCase().includes("password")).toBe(false);
     expect(readFileSync("src/lib/team.ts", "utf8")).toContain("signInDetailsMail");
-    const text = await sinkText(email, "Your Sheet Happens Officer account");
-    if (!text) return;
+    const text = (await sinkText(email, "Your Sheet Happens Officer account")) ?? "";
+    expect(text, "synthetic sign-in details must reach the isolated outbox").not.toBe("");
     expect(text).toContain("/signin");
     expect(text).toContain(`Username: ${email}`);
     expect(text).toMatch(/^Password: .+$/m);
   });
 
-  test("AC2: the password stays valid until the person changes it", async ({ admin, browser, later }) => {
+  test("AC2: the emailed password stays valid until replaced, and stops working after the change", async ({ admin, browser, later }) => {
     const email = alias("2622", "ac2");
-    expect(signInDetailsMail(email, "ZZ-TEST", "A Super Admin", "secret-pass-1").text).toContain("This password stays valid until you change it.");
+    expect(signInDetailsMail(email, "ZZ-TEST", "A Super Admin", "secret-pass-1").text).toContain("This password is temporary.");
     const r = await admin.api.post("/api/team", { firstName: "ZZ-TEST", lastName: `keep ${RUN}`, email, role: "MEMBER" });
     expect(r.status).toBe(201);
-    later(async () => { await admin.api.post(`/api/team/${r.json.person.id}/deactivate`, { reassign: "leaders" }); });
-    const text = await sinkText(email, "Your Sheet Happens Officer account");
-    if (!text) return;
+    later(() => deactivate(admin.api, r.json.person.id));
+    const text = (await sinkText(email, "Your Sheet Happens Officer account")) ?? "";
     const password = text.match(/^Password: (.+)$/m)?.[1];
-    expect(password).toBeTruthy();
-    const ctx = await browser.newContext({
-      baseURL: BASE_URL,
-      httpCredentials: process.env.STAGING_USER ? { username: process.env.STAGING_USER, password: process.env.STAGING_PASS ?? "" } : undefined,
-    });
-    const signed = await ctx.request.post("/api/auth/signin", { data: { email, password } });
-    expect(signed.ok()).toBe(true);
-    await ctx.close();
+    expect(password, "generated test credential in private outbox").toBeTruthy();
+    const ctx = await browser.newContext({ baseURL: BASE_URL, httpCredentials: process.env.STAGING_USER ? { username: process.env.STAGING_USER, password: process.env.STAGING_PASS ?? "" } : undefined });
+    later(() => ctx.close());
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const signed = await ctx.request.post("/api/auth/signin", { data: { email, password } });
+      expect(signed.status()).toBe(200);
+      expect((await signed.json()).user.mustChangePassword).toBe(true);
+    }
+    expect((await ctx.request.get("/api/projects")).status()).toBe(403);
+    const replacement = `ZZ-TEST-replacement-${RUN}9`;
+    const changed = await ctx.request.post("/api/profile/password", { data: { current: password, password: replacement, confirm: replacement } });
+    expect(changed.status()).toBe(200);
+    expect((await ctx.request.post("/api/auth/signin", { data: { email, password } })).status()).toBe(401);
+    const signed = await ctx.request.post("/api/auth/signin", { data: { email, password: replacement } });
+    expect(signed.status()).toBe(200);
+    expect((await signed.json()).user.mustChangePassword).toBe(false);
+    expect((await ctx.request.get("/api/projects")).status()).toBe(200);
   });
 
-  test("AC3: the first sign-in shows a closable 'Set your own password' banner linking to Profile", async ({ admin, browser, later }) => {
+  test("AC3: first sign-in requires replacing the temporary password before protected pages open", async ({ admin, browser, later }) => {
+    // Released SHO-US-23.5 replaces the old dismissible banner with a mandatory password-change wall.
     const email = alias("2622", "ac3");
-    const bar = readFileSync("src/app/(app)/Shell.tsx", "utf8");
-    expect(bar).toContain("Set your own password. The emailed one still works until you do.");
-    expect(bar).toContain('Link href="/profile"');
-    expect(bar).toContain('aria-label="Close this message"');
     const r = await admin.api.post("/api/team", { firstName: "ZZ-TEST", lastName: `bar ${RUN}`, email, role: "MEMBER" });
     expect(r.status).toBe(201);
-    later(async () => { await admin.api.post(`/api/team/${r.json.person.id}/deactivate`, { reassign: "leaders" }); });
-    const text = await sinkText(email, "Your Sheet Happens Officer account");
-    if (!text) return;
+    later(() => deactivate(admin.api, r.json.person.id));
+    const text = (await sinkText(email, "Your Sheet Happens Officer account")) ?? "";
     const password = text.match(/^Password: (.+)$/m)?.[1];
-    expect(password).toBeTruthy();
-    const ctx = await browser.newContext({
-      baseURL: BASE_URL,
-      httpCredentials: process.env.STAGING_USER ? { username: process.env.STAGING_USER, password: process.env.STAGING_PASS ?? "" } : undefined,
-    });
+    expect(password, "generated test credential in private outbox").toBeTruthy();
+    const ctx = await browser.newContext({ baseURL: BASE_URL, httpCredentials: process.env.STAGING_USER ? { username: process.env.STAGING_USER, password: process.env.STAGING_PASS ?? "" } : undefined });
+    later(() => ctx.close());
     const page = await ctx.newPage();
     await page.goto("/signin");
     await page.getByLabel("Work email").fill(email);
-    await page.getByLabel("Password").fill(password!);
-    await page.getByRole("button", { name: "Sign in" }).click();
-    const banner = page.locator(".pwbar");
-    await expect(banner).toContainText("Set your own password");
-    await expect(banner.getByRole("link", { name: "Change password" })).toHaveAttribute("href", "/profile");
-    await banner.getByRole("button", { name: "Close this message" }).click();
-    await expect(banner).toHaveCount(0);
-    await ctx.close();
+    await page.getByLabel("Password", { exact: true }).fill(password!);
+    await page.getByRole("button", { name: "Sign in", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "Set your own password", exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Close this message", exact: true })).toHaveCount(0);
+    await page.goto("/projects");
+    await expect(page.getByRole("heading", { name: "Set your own password", exact: true })).toBeVisible();
+    await page.getByLabel("Emailed password", { exact: true }).fill(password!);
+    const replacement = `ZZ-TEST-replacement-${RUN}9`;
+    await page.getByLabel("New password", { exact: true }).fill(replacement);
+    await page.getByLabel("Confirm new password", { exact: true }).fill(replacement);
+    await page.getByRole("button", { name: "Save and continue", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "Projects", exact: true })).toBeVisible();
+    expect((await ctx.request.get("/api/projects")).status()).toBe(200);
   });
 
   test("AC4: Resend sign-in details answers with an emailed/not-emailed flag only, never a password, and is for the Super Admin only", async ({ admin, member, later }) => {
@@ -108,7 +115,8 @@ test.describe("SHO-US-23.3 / APL-2622", () => {
   test("AC4 (screen): the button on the person's page says what happened and shows no password", async ({ admin, later }) => {
     const p = await mk(admin, later, "resendui");
     await admin.page.goto(`/team/${p.id}`);
-    await admin.page.getByRole("button", { name: "Resend sign-in details" }).click({ timeout: 60_000 });
+    await admin.page.locator("details.team-more > summary").click();
+    await admin.page.getByRole("button", { name: "Resend sign-in details", exact: true }).click();
     const note = admin.page.getByRole("status").filter({ hasText: /New sign-in details were emailed|did not send/ });
     await expect(note).toBeVisible({ timeout: 60_000 });
     const body = await admin.page.locator("body").innerText();

@@ -26,7 +26,11 @@ test("AC1: Compact shows at least 16 rows at 1440 by 900 and the setting persist
   const id = await listProject(admin, later, 20);
   const p = admin.page;
   await p.goto(`/projects/${id}`);
-  const visibleRows = () => p.evaluate(() => [...document.querySelectorAll("main.content .item")].filter((el) => { const r = el.getBoundingClientRect(); return r.height > 0 && r.top >= 0 && r.bottom <= window.innerHeight; }).length);
+  const visibleRows = () => p.evaluate(() => {
+    const bar = document.querySelector("aside.bardock")?.getBoundingClientRect();
+    const bottom = bar?.height ? Math.min(window.innerHeight, bar.top) : window.innerHeight;
+    return [...document.querySelectorAll("main.content .item")].filter(el => { const r = el.getBoundingClientRect(); return r.height > 0 && r.top >= 0 && r.bottom <= bottom; }).length;
+  });
   await expect(p.getByText(`${zz("row")} 00`).first()).toBeVisible();
   const comfortable = await visibleRows();
   await p.getByRole("button", { name: /^Account and utilities, \S+$/ }).click();
@@ -34,6 +38,11 @@ test("AC1: Compact shows at least 16 rows at 1440 by 900 and the setting persist
   await p.getByRole("button", { name: /Compact/ }).click();
   await expect(p.getByRole("button", { name: /Compact/ })).toHaveAttribute("aria-pressed", "true");
   await p.keyboard.press("Escape");
+  console.info("SHO-2571 compact geometry", JSON.stringify(await p.evaluate(() => {
+    const main = document.querySelector("main.content")!;
+    const rect = (el: Element) => { const r = el.getBoundingClientRect(); return { top: r.top, bottom: r.bottom, height: r.height }; };
+    return { density: document.querySelector(".shell")?.getAttribute("data-density"), viewport: [innerWidth, innerHeight], rows: [...main.querySelectorAll(".item")].slice(0, 3).map(rect), regions: [...main.children].map(el => ({ tag: el.tagName, class: el.className, ...rect(el) })) };
+  })));
   await expect.poll(visibleRows).toBeGreaterThanOrEqual(16);
   expect(await visibleRows()).toBeGreaterThan(comfortable);
   await expect.poll(async () => (await admin.api.get("/api/profile/density")).json).toEqual({ compact: true }); // saved on the person
