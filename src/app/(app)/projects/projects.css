@@ -50,7 +50,7 @@
   .shell:is(.projects-shell, :has(.project-list-view), :has(.project-board-view)) .btn, .projects-toolbar .seg button { min-height: 44px; }
 }
 .project-breadcrumb { color: var(--muted); margin: 0 0 20px; font-size: 14px; }
-.project-breadcrumb a { text-decoration: none; }
+.project-breadcrumb a { text-decoration: underline; text-underline-offset: .15em; }
 .shell:is(.projects-shell, :has(.project-list-view), :has(.project-board-view)) .new-project-form { max-width: 800px; margin: 0 auto; padding: 32px; border-color: #dce0e7; box-shadow: inset 0 1px 0 #fff, 0 2px 4px #171b2210, 0 8px 20px #171b2210; }
 .new-project-form .field { gap: 8px; margin-bottom: 24px; }
 .new-project-form .field label, .new-project-form .lbl { font-size: 15px; color: #10143e; font-weight: 700; }
