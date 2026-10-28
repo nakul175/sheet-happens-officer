@@ -85,7 +85,7 @@ async function setup() {
   };
   const t1 = await newTask(`ZZ-TEST live ${RUN}`);
   const t2 = await newTask(`ZZ-TEST deleted ${RUN}`);
-  const org = await lead.c.post("/api/orgs", { name: `ZZ-TEST APL-2875 org ${RUN} ${++seeds}` });
+  const org = await lead.c.post("/api/orgs", { force: true, name: `ZZ-TEST APL-2875 org ${RUN} ${++seeds}` });
   expect(org.status, JSON.stringify(org.json)).toBe(201);
   const orgId = org.json.organisation.id as string;
   const link = await lead.c.post(`/api/tasks/${t1}/links`, { organisationId: orgId });
@@ -161,10 +161,10 @@ describe("qa:TC missing APL-2875 a caller who cannot see a task gets the missing
     const pipes = await s.lead.c.get("/api/deals/pipelines");
     expect(pipes.status, JSON.stringify(pipes.json)).toBe(200);
     const pipeline = pipes.json.pipelines.find((p: { key: string }) => p.key === "DEAL_PROACTIVE");
-    const org = await s.lead.c.post("/api/orgs", { name: `ZZ-TEST APL-2875 buyer ${RUN}` });
+    const org = await s.lead.c.post("/api/orgs", { force: true, name: `ZZ-TEST APL-2875 buyer ${RUN}` });
     expect(org.status, JSON.stringify(org.json)).toBe(201);
     const deal = await s.lead.c.post("/api/deals", {
-      name: `ZZ-TEST APL-2875 deal ${RUN}`, organisationId: org.json.organisation.id, pipelineId: pipeline.id,
+      force: true, name: `ZZ-TEST APL-2875 deal ${RUN}`, organisationId: org.json.organisation.id, pipelineId: pipeline.id,
       leaderId: s.lead.id, whyPursue: "ZZ-TEST", nextStep: { title: "ZZ-TEST call", dueDate: istDate(3) },
     });
     expect(deal.status, JSON.stringify(deal.json)).toBe(201);

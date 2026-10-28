@@ -1,4 +1,6 @@
 "use client";
+import { DuplicateChoices, type DuplicateChoice } from "@/components/DuplicateChoices";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { use, useState } from "react";
 import { api, dueLabel, todayIST, useGet } from "@/components/api";
@@ -30,16 +32,19 @@ function TreeView({ node, current }: { node: Tree; current: string }) {
 }
 
 function ContactDialog({ orgId, contact, onClose, onDone }: { orgId: string; contact?: Contact; onClose: () => void; onDone: () => void }) {
+  const router = useRouter();
   const me = useMe();
   const team = useGet<{ people: { id: string; name: string }[] }>("/api/team");
   const [v, setV] = useState({ name: contact?.name ?? "", role: contact?.role ?? "", email: contact?.email ?? "", phone: contact?.phone ?? "" });
   const [known, setKnown] = useState<string[]>(contact ? contact.knownBy.map((k) => k.id) : [me.id]);
   const [err, setErr] = useState<string | null>(null);
+  const [duplicate, setDuplicate] = useState<DuplicateChoice[] | null>(null);
+  const [truncated, setTruncated] = useState(false);
   const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement>) => setV({ ...v, [k]: e.target.value });
-  async function save() {
-    const body = { name: v.name, role: v.role || null, email: v.email || null, phone: v.phone || null, knownBy: known };
+  async function save(force = false) {
+    const body = { force, name: v.name, role: v.role || null, email: v.email || null, phone: v.phone || null, knownBy: known };
     const r = contact ? await api("PATCH", `/api/contacts/${contact.id}`, body) : await api("POST", `/api/orgs/${orgId}/contacts`, body);
-    if (r.ok) onDone(); else setErr(r.error ?? "Could not save.");
+    if (r.ok) onDone(); else { setErr(r.error ?? "Could not save."); setDuplicate(r.data?.needsConfirm === "duplicate" ? r.data.matches : null); setTruncated(!!r.data?.truncated); }
   }
   return (
     <Modal onClose={onClose} label={contact ? "Edit contact" : "New contact"}>
@@ -57,7 +62,8 @@ function ContactDialog({ orgId, contact, onClose, onDone }: { orgId: string; con
         </div>
       </fieldset>
       {err && <div className="err" role="alert">{err}</div>}
-      <div className="actions"><button className="btn ghost" onClick={onClose}>Cancel</button><button className="btn" disabled={!v.name.trim() || known.length === 0} onClick={save}>Save</button></div>
+      {duplicate && <><DuplicateChoices matches={duplicate} truncated={truncated} onUse={m => { router.push(`/accounts/${m.organisationId}`); }} /><div className="actions"><button className="btn ghost" onClick={() => save(true)}>Create anyway</button></div></>}
+      <div className="actions"><button className="btn ghost" onClick={onClose}>Cancel</button><button className="btn" disabled={!v.name.trim() || known.length === 0} onClick={() => save()}>Save</button></div>
     </Modal>
   );
 }

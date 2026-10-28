@@ -3,15 +3,15 @@ import { describe, expect, it } from "vitest";
 import { account, admin, istDate, project, superAdmin, task, type Account } from "./helpers";
 
 let seq = 0;
-const newOrg = async (a: Account, extra: Record<string, unknown> = {}) => (await a.c.post("/api/orgs", { name: `Org4 ${Date.now()}-${seq++}`, ...extra })).json.organisation.id as string;
+const newOrg = async (a: Account, extra: Record<string, unknown> = {}) => (await a.c.post("/api/orgs", { force: true, name: `Org4 ${Date.now()}-${seq++}`, ...extra })).json.organisation.id as string;
 const contact = async (a: Account, org: string, name = `Person ${seq++}`, extra: Record<string, unknown> = {}) => {
-  const r = await a.c.post(`/api/orgs/${org}/contacts`, { name, ...extra });
+  const r = await a.c.post(`/api/orgs/${org}/contacts`, { force: true, name, ...extra });
   expect(r.status, JSON.stringify(r.json)).toBe(201);
   return r.json.contact.id as string;
 };
 async function deal(a: Account, org: string, members: { who: Account; role: string }[] = []) {
   const pr = (await a.c.get("/api/deals/pipelines")).json.pipelines[0];
-  const r = await a.c.post("/api/deals", { name: `D4 ${Date.now()}-${seq++}`, organisationId: org, pipelineId: pr.id, leaderId: a.id, whyPursue: "fit", nextStep: { title: "n", dueDate: istDate(3) } });
+  const r = await a.c.post("/api/deals", { force: true, name: `D4 ${Date.now()}-${seq++}`, organisationId: org, pipelineId: pr.id, leaderId: a.id, whyPursue: "fit", nextStep: { title: "n", dueDate: istDate(3) } });
   expect(r.status, JSON.stringify(r.json)).toBe(201);
   for (const m of members) expect((await a.c.post(`/api/projects/${r.json.deal.id}/members`, { userId: m.who.id, role: m.role })).status).toBe(201);
   return r.json.deal.id as string;
@@ -223,7 +223,7 @@ describe("organisation page and Undo for CRM records (11.5)", () => {
 
   it("undoes organisation changes (create archives, edit restores)", async () => {
     const a = await account("orgundo");
-    const made = await a.c.post("/api/orgs", { name: `Undo me ${Date.now()}` });
+    const made = await a.c.post("/api/orgs", { force: true, name: `Undo me ${Date.now()}` });
     expect(made.headers.get("x-undo-label")).toBe("Organisation added");
     const id = made.json.organisation.id as string;
     const ed = await a.c.patch(`/api/orgs/${id}`, { country: "Kenya" });

@@ -108,13 +108,13 @@ describe("qa:TC missing APL-2735 deactivate 409 hides deals the caller cannot se
     expect(pipes.status, JSON.stringify(pipes.json)).toBe(200);
     const pipe = (pipes.json.pipelines as { id: string; key: string }[]).find((p) => p.key === "DEAL_PROACTIVE");
     expect(pipe?.id).toBeTruthy();
-    const org = await sa.c.post("/api/orgs", { name: `ZZ-TEST Buyer ${RUN}` });
+    const org = await sa.c.post("/api/orgs", { force: true, name: `ZZ-TEST Buyer ${RUN}` });
     expect(org.status, JSON.stringify(org.json)).toBe(201);
     const organisationId = org.json.organisation.id as string;
 
     for (const name of dealNames) {
       const made = await sa.c.post("/api/deals", {
-        name,
+        force: true, name,
         organisationId,
         pipelineId: pipe!.id,
         leaderId: dealLeader.id,
@@ -136,7 +136,7 @@ describe("qa:TC missing APL-2735 deactivate 409 hides deals the caller cannot se
     mixedDealName = `ZZ-TEST Mixed deal ${RUN}`;
     mixedProjectName = `ZZ-TEST Mixed project ${RUN}`;
     const mixedDeal = await sa.c.post("/api/deals", {
-      name: mixedDealName,
+      force: true, name: mixedDealName,
       organisationId,
       pipelineId: pipe!.id,
       leaderId: mixedLeader.id,

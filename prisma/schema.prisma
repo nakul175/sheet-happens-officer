@@ -57,6 +57,7 @@ model Workspace {
   projects      Project[]
   tasks         Task[]
   organisations Organisation[]
+  duplicateDismissals DuplicateDismissal[]
   contacts      Contact[]
   notes         Note[]
 }
@@ -80,6 +81,7 @@ model User {
   startGuideDismissedAt DateTime?
   createdAt          DateTime  @default(now())
 
+  duplicateDismissals DuplicateDismissal[]
   memberships         ProjectMember[]
   assignedTasks       Task[]             @relation("TaskAssignee")
   approvingTasks      Task[]             @relation("TaskApprover")
@@ -608,4 +610,18 @@ model SavedView {
 
   @@unique([userId, projectId, name])
   @@index([userId, projectId, position])
+}
+
+// Advisory review decisions survive changes to names and similarity settings.
+model DuplicateDismissal {
+  workspace Workspace @relation(fields: [workspaceId], references: [id])
+  dismissedBy User @relation(fields: [dismissedById], references: [id])
+  workspaceId   String
+  kind          String
+  leftId        String
+  rightId       String
+  dismissedById String
+  createdAt     DateTime @default(now()) @db.Timestamptz(6)
+
+  @@id([workspaceId, kind, leftId, rightId])
 }

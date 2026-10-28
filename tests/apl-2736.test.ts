@@ -38,10 +38,10 @@ async function zzStage(category: "ACTIVE" | "DONE" = "ACTIVE") {
 
 /** A deal led by the Super Admin, moved to `stageId` (with `reason`, if given) through the stage-move API. */
 async function dealIn(stageId: string, reason?: string) {
-  const org = (await sa.c.post("/api/orgs", { name: `ZZ-TEST Org 2736 ${RUN}-${seq++}` })).json.organisation.id as string;
+  const org = (await sa.c.post("/api/orgs", { force: true, name: `ZZ-TEST Org 2736 ${RUN}-${seq++}` })).json.organisation.id as string;
   zzOrgs.push(org);
   const r = await sa.c.post("/api/deals", {
-    name: `ZZ-TEST Deal 2736 ${RUN}-${seq++}`, organisationId: org, pipelineId: pro.id, leaderId: sa.id, whyPursue: "fit",
+    force: true, name: `ZZ-TEST Deal 2736 ${RUN}-${seq++}`, organisationId: org, pipelineId: pro.id, leaderId: sa.id, whyPursue: "fit",
     // Value and currency up front: Negotiation asks for them on a stage move (APL-2739).
     value: 1000, currency: "USD", nextStep: { title: "First call", dueDate: istDate(2) },
   });

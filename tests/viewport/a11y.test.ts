@@ -28,11 +28,11 @@ beforeAll(async () => {
   const parent = await task(root, p.id, { title: "Prepare the quarterly review pack with the finance team", dueDate: istDate(2), priority: "HIGH", collaboratorIds: [editor.id] });
   await task(root, p.id, { title: "W".repeat(100), sectionId: p.doing, dueDate: istDate(-1) }); // a 100-character unbreakable title
   await root.c.post(`/api/projects/${p.id}/tasks`, { title: "Draft the summary", parentId: parent });
-  const org = await root.c.post("/api/orgs", { name: `Viewport Org ${Date.now()}` });
+  const org = await root.c.post("/api/orgs", { force: true, name: `Viewport Org ${Date.now()}` });
   const orgId = org.json.organisation.id as string;
   const pipes = (await root.c.get("/api/deals/pipelines")).json.pipelines as { id: string; key: string }[];
   const d = await root.c.post("/api/deals", {
-    name: `Viewport Deal ${Date.now()}`, organisationId: orgId, pipelineId: pipes.find((x) => x.key === "DEAL_PROACTIVE")!.id, leaderId: root.id,
+    force: true, name: `Viewport Deal ${Date.now()}`, organisationId: orgId, pipelineId: pipes.find((x) => x.key === "DEAL_PROACTIVE")!.id, leaderId: root.id,
     whyPursue: "Test deal", nextStep: { title: "Call the buyer", dueDate: istDate(3) },
   });
   expect(d.status, JSON.stringify(d.json)).toBe(201);

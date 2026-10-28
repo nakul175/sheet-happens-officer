@@ -13,9 +13,9 @@ let seq = 0;
 async function mkDeal(a: Account, o: { due?: string; stage?: string; bid?: boolean; extra?: Record<string, unknown> } = {}) {
   const pipes = (await a.c.get("/api/deals/pipelines")).json.pipelines;
   const pipe = pipes.find((p: { key: string }) => p.key === (o.bid ? "DEAL_BID" : "DEAL_PROACTIVE"));
-  const org = (await a.c.post("/api/orgs", { name: `Org5 ${Date.now()}-${seq++}` })).json.organisation.id;
+  const org = (await a.c.post("/api/orgs", { force: true, name: `Org5 ${Date.now()}-${seq++}` })).json.organisation.id;
   const r = await a.c.post("/api/deals", {
-    name: `Deal5 ${Date.now()}-${seq++}`, organisationId: org, pipelineId: pipe.id, leaderId: a.id, whyPursue: "fit",
+    force: true, name: `Deal5 ${Date.now()}-${seq++}`, organisationId: org, pipelineId: pipe.id, leaderId: a.id, whyPursue: "fit",
     nextStep: { title: "Step", dueDate: o.due ?? istDate(5) }, ...(o.bid ? { submissionDeadline: istDate(20) } : {}), ...o.extra,
   });
   expect(r.status, JSON.stringify(r.json)).toBe(201);

@@ -23,7 +23,7 @@ export async function makeDeal(admin: Who, later: Later, o: {
   label: string; leaderId?: string; pipe?: Pipe; due?: string; step?: string; deadline?: string;
   value?: number; currency?: "INR" | "USD" | "EUR";
 }) {
-  const org = await admin.api.post("/api/orgs", { name: zz(`org ${o.label}`) });
+  const org = await admin.api.post("/api/orgs", { force: true, name: zz(`org ${o.label}`) });
   expect(org.status, JSON.stringify(org.json)).toBe(201);
   const orgId = org.json.organisation.id as string;
   later(() => admin.api.post(`/api/orgs/${orgId}/archive`, { archive: true }));

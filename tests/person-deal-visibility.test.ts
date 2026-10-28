@@ -92,12 +92,12 @@ describe("qa:TC missing APL-2728 person page hides a deal CRM_VISIBLE conceals",
     const pipe = (pipes.json.pipelines as { id: string; key: string }[]).find((p) => p.key === "DEAL_PROACTIVE");
     expect(pipe?.id).toBeTruthy();
     pipelineId = pipe!.id;
-    const org = await sa.c.post("/api/orgs", { name: `ZZ-TEST Buyer ${RUN}` });
+    const org = await sa.c.post("/api/orgs", { force: true, name: `ZZ-TEST Buyer ${RUN}` });
     expect(org.status, JSON.stringify(org.json)).toBe(201);
     organisationId = org.json.organisation.id as string;
     // Member A is an editor. The admin leads the deal, so GET /api/team/<adminId> lists it.
     const made = await sa.c.post("/api/deals", {
-      name: DEAL_NAME,
+      force: true, name: DEAL_NAME,
       organisationId: org.json.organisation.id,
       pipelineId: pipe!.id,
       leaderId: adminUser.id,
@@ -144,7 +144,7 @@ describe("qa:TC missing APL-2728 person page hides a deal CRM_VISIBLE conceals",
   async function addHiddenDeal(name: string) {
     const sa = await superAdmin();
     const made = await sa.c.post("/api/deals", {
-      name,
+      force: true, name,
       organisationId,
       pipelineId,
       leaderId: adminUser.id,

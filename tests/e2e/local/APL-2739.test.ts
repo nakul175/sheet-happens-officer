@@ -50,11 +50,11 @@ describe("qa:TC missing APL-2739 a stage that lists empty required fields refuse
     editor = await zzAccount("editor");
     const pipes = (await lead.c.get("/api/deals/pipelines")).json.pipelines as { key: string; id: string }[];
     const pro = pipes.find((p) => p.key === "DEAL_PROACTIVE")!;
-    const org = await lead.c.post("/api/orgs", { name: `ZZ-TEST org 2739 ${RUN}` });
+    const org = await lead.c.post("/api/orgs", { force: true, name: `ZZ-TEST org 2739 ${RUN}` });
     expect(org.status, JSON.stringify(org.json)).toBe(201);
     orgId = org.json.organisation.id as string;
     const d = await lead.c.post("/api/deals", {
-      name: `ZZ-TEST deal 2739 ${RUN}`, organisationId: orgId, pipelineId: pro.id, leaderId: lead.id,
+      force: true, name: `ZZ-TEST deal 2739 ${RUN}`, organisationId: orgId, pipelineId: pro.id, leaderId: lead.id,
       whyPursue: "ZZ-TEST fit", nextStep: { title: `ZZ-TEST step ${RUN}`, dueDate: istDate(6) },
     });
     expect(d.status, JSON.stringify(d.json)).toBe(201);

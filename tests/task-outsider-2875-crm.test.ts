@@ -140,10 +140,10 @@ describe("qa:TC missing APL-2875 T3: a task in a hidden deal answers like a miss
     const pipes = await send(seed.admin.cookie, "GET", "/api/deals/pipelines");
     expect(pipes.status, pipes.body).toBe(200);
     const pipeline = (pipes.json!.pipelines as { id: string; key: string }[]).find((p) => p.key === "DEAL_PROACTIVE");
-    const org = await send(seed.admin.cookie, "POST", "/api/orgs", JSON.stringify({ name: `ZZ-TEST APL-2875 buyer ${RUN}` }));
+    const org = await send(seed.admin.cookie, "POST", "/api/orgs", JSON.stringify({ force: true, name: `ZZ-TEST APL-2875 buyer ${RUN}` }));
     expect(org.status, org.body).toBe(201);
     const deal = await send(seed.admin.cookie, "POST", "/api/deals", JSON.stringify({
-      name: `ZZ-TEST APL-2875 deal ${RUN}`, organisationId: (org.json!.organisation as { id: string }).id, pipelineId: pipeline!.id,
+      force: true, name: `ZZ-TEST APL-2875 deal ${RUN}`, organisationId: (org.json!.organisation as { id: string }).id, pipelineId: pipeline!.id,
       leaderId: seed.admin.id, whyPursue: "ZZ-TEST", nextStep: { title: "ZZ-TEST call", dueDate: istDate(3) },
     }));
     expect(deal.status, deal.body).toBe(201);

@@ -25,11 +25,11 @@ beforeAll(async () => {
   lead = await admin(sa, "wone2e");
   const pipes = (await lead.c.get("/api/deals/pipelines")).json.pipelines as { id: string; key: string }[];
   const pro = pipes.find((p) => p.key === "DEAL_PROACTIVE")!;
-  const orgId = (await lead.c.post("/api/orgs", { name: `Org e2e 2691 ${Date.now()}` })).json.organisation.id as string;
+  const orgId = (await lead.c.post("/api/orgs", { force: true, name: `Org e2e 2691 ${Date.now()}` })).json.organisation.id as string;
 
   async function make(label: string, step: string) {
     const made = await lead.c.post("/api/deals", {
-      name: `Deal e2e 2691 ${label} ${Date.now()}`, organisationId: orgId, pipelineId: pro.id, leaderId: lead.id, whyPursue: "fit",
+    force: true,       name: `Deal e2e 2691 ${label} ${Date.now()}`, organisationId: orgId, pipelineId: pro.id, leaderId: lead.id, whyPursue: "fit",
       nextStep: { title: step, dueDate: istDate(4) },
     });
     expect(made.status, JSON.stringify(made.json)).toBe(201);

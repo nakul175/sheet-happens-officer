@@ -1,5 +1,6 @@
 "use client";
 // SHO-US-12.2: the gate dialog. The server enforces the same fields; this only helps fill them in.
+import { DuplicateChoices, type DuplicateChoice } from "@/components/DuplicateChoices";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { api, useGet } from "@/components/api";
@@ -12,17 +13,19 @@ export function ConvertDialog({ task, meId, onClose }: { task: { id: string; tit
   const team = useGet<{ people: { id: string; name: string }[] }>("/api/team");
   const [v, setV] = useState({ organisationId: "", pipelineId: "", name: task.title, leaderId: task.assignee.id, whyPursue: "", dueDate: task.dueDate ?? "", submissionDeadline: "", value: "", currency: "INR", newOrg: "", newKind: "" });
   const [err, setErr] = useState<string | null>(null);
-  const [dup, setDup] = useState(false);
+  const [dup, setDup] = useState<string | null>(null);
+  const [orgDup, setOrgDup] = useState<DuplicateChoice[] | null>(null);
+  const [truncated, setTruncated] = useState(false);
   const [busy, setBusy] = useState(false);
   const [extraOrgs, setExtraOrgs] = useState<{ id: string; name: string }[]>([]);
   const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => setV({ ...v, [k]: e.target.value });
   const pipe = pipes.data?.pipelines.find((p) => p.id === (v.pipelineId || pipes.data?.pipelines[0]?.id));
   void meId;
 
-  async function addOrg() {
-    const r = await api("POST", "/api/orgs", { name: v.newOrg, kind: v.newKind || null });
-    if (r.ok) { setExtraOrgs((o) => [...o, { id: r.data.organisation.id, name: v.newOrg }]); setV({ ...v, organisationId: r.data.organisation.id, newOrg: "", newKind: "" }); setErr(null); }
-    else setErr(r.error ?? "Could not add the organisation.");
+  async function addOrg(force = false) {
+    const r = await api("POST", "/api/orgs", { name: v.newOrg, kind: v.newKind || null, force });
+    if (r.ok) { setOrgDup(null); setExtraOrgs((o) => [...o, { id: r.data.organisation.id, name: v.newOrg }]); setV({ ...v, organisationId: r.data.organisation.id, newOrg: "", newKind: "" }); setErr(null); }
+    else { setErr(r.error ?? "Could not add the organisation."); setOrgDup(r.data?.needsConfirm === "duplicate" ? r.data.matches : null); setTruncated(!!r.data?.truncated); }
   }
   async function go(force = false) {
     setBusy(true); setErr(null);
@@ -35,7 +38,7 @@ export function ConvertDialog({ task, meId, onClose }: { task: { id: string; tit
     const r = await api("POST", `/api/tasks/${task.id}/convert`, body);
     setBusy(false);
     if (r.ok) { router.push(`/projects/${r.data.deal.id}`); return; }
-    setDup(r.data?.needsConfirm === "duplicate");
+    setDup(r.data?.needsConfirm === "duplicate" ? r.data.existingId ?? "" : null);
     setErr(r.error ?? "Could not convert the task.");
   }
   const all = [...(orgs.data?.organisations ?? []), ...extraOrgs.filter((e) => !orgs.data?.organisations.some((o) => o.id === e.id))];
@@ -48,8 +51,10 @@ export function ConvertDialog({ task, meId, onClose }: { task: { id: string; tit
       <div style={{ display: "flex", gap: 6, alignItems: "end", flexWrap: "wrap" }}>
         <Field label="Not listed? New organisation">{(id) => <input id={id} className="in" value={v.newOrg} onChange={set("newOrg")} placeholder="Name" />}</Field>
         <Field label="Kind">{(id) => <input id={id} className="in" value={v.newKind} onChange={set("newKind")} placeholder="e.g. Ministry" />}</Field>
-        <button type="button" className="btn ghost sm" disabled={!v.newOrg.trim()} onClick={addOrg}>Add</button>
+        <button type="button" className="btn ghost sm" disabled={!v.newOrg.trim()} onClick={() => addOrg()}>Add</button>
       </div>
+      {orgDup && <><DuplicateChoices matches={orgDup} truncated={truncated} onUse={match => { setExtraOrgs(o => [...o, match]); setV({ ...v, organisationId: match.id, newOrg: "" }); setOrgDup(null); setErr(null); }} /><button className="btn ghost" onClick={() => addOrg(true)}>Create anyway</button></>}
+
       <Field label="Pipeline">{(id) => <select id={id} className="in" value={pipe?.id ?? ""} onChange={set("pipelineId")}>{pipes.data?.pipelines.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select>}</Field>
       <Field label="Deal name">{(id) => <input id={id} className="in" value={v.name} onChange={set("name")} />}</Field>
       <Field label="Leader">{(id) => <select id={id} className="in" value={v.leaderId} onChange={set("leaderId")}>{team.data?.people.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select>}</Field>
@@ -63,7 +68,8 @@ export function ConvertDialog({ task, meId, onClose }: { task: { id: string; tit
       {err && <div className="err" role="alert">{err}</div>}
       <div className="actions">
         <button className="btn ghost" onClick={onClose}>Cancel</button>
-        {dup && <button className="btn ghost" disabled={busy} onClick={() => go(true)}>Create anyway</button>}
+        {dup && <button className="btn ghost" onClick={() => router.push(`/projects/${dup}`)}>Use this one</button>}
+        {dup !== null && <button className="btn ghost" disabled={busy} onClick={() => go(true)}>Create anyway</button>}
         <button className="btn" disabled={busy || !ready} onClick={() => go()}>Convert to deal</button>
       </div>
     </Modal>

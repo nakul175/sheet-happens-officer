@@ -168,11 +168,11 @@ describe.skipIf(!QA_PASS)("qa:TC missing APL-2728 person page in the browser", (
     expect(pipes.status, pipes.text).toBe(200);
     const pipe = (pipes.json?.pipelines as { id: string; key: string }[]).find((p) => p.key === "DEAL_PROACTIVE");
     expect(pipe?.id).toBeTruthy();
-    const org = await call(on.base, sa.cookie, "POST", "/api/orgs", { name: `ZZ-TEST Buyer ${tag}` });
+    const org = await call(on.base, sa.cookie, "POST", "/api/orgs", { force: true, name: `ZZ-TEST Buyer ${tag}` });
     expect(org.status, org.text).toBe(201);
     seed.orgIds.push((org.json?.organisation as { id: string }).id);
     const made = await call(on.base, sa.cookie, "POST", "/api/deals", {
-      name: dealName, organisationId: seed.orgIds[0], pipelineId: pipe!.id, leaderId: sa.id, whyPursue: tag,
+      force: true, name: dealName, organisationId: seed.orgIds[0], pipelineId: pipe!.id, leaderId: sa.id, whyPursue: tag,
       nextStep: { title: taskTitle, dueDate: istDate(3) },
     });
     expect(made.status, made.text).toBe(201);
