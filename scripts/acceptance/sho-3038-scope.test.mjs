@@ -6,6 +6,16 @@ import { readFileSync } from "node:fs";
 
 const production = "ee59582dffcbd8cc3067e689b2bb73cf63781cb7";
 const allowed = new Set([
+  "tests/stalled-crm-fixture.ts",
+  "tests/jobs-stalled-crm.test.ts",
+  "tests/local-stalled-clock-2902.ts",
+  "tests/local-stalled-clock-2902.test.ts",
+  "e2e/APL-2741-stalled-bell.spec.ts",
+  "scripts/ci/stalled-m1-proof.mjs",
+  "scripts/ci/stalled-m1-result.mjs",
+  "scripts/ci/stalled-m1-result.test.mjs",
+  "vitest.stalled-bell-2902.config.mts",
+
   "tests/e2e/stories/APL-2720.spec.ts",
   "tests/trash-days-left.test.tsx",
   "tests/trash-days-left-aging.test.ts",
