@@ -7,6 +7,10 @@ import { readFileSync } from "node:fs";
 const production = "ee59582dffcbd8cc3067e689b2bb73cf63781cb7";
 const allowed = new Set([
   "tests/e2e/stories/APL-2691.spec.ts",
+  "tests/jobs-reminders-crm.test.ts",
+  "tests/jobs-reminders-crm-server.test.ts",
+  "tests/reminder-cleanup-2751.ts",
+  "tests/reminder-cleanup-2751.test.ts",
   "src/lib/overlay-history.ts",
   "src/components/use-overlay-back.ts",
   "tests/overlay-history-2616.test.ts",
