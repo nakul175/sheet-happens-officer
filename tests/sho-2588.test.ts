@@ -21,6 +21,9 @@ it("SHO-2588 warns across the tree and buyers, checks contacts, and permanently 
   const forbidden = await runTool(turn, "propose_changes", { changes: [{ action: "create_organisation", name: "Must not create" }] });
   expect(forbidden.isError).toBe(true);
   const second = await make(`Ministry for Education ${tag}`, parent);
+  const multiple = await member.c.post("/api/orgs", { name: `Ministry of Education ${tag}` });
+  expect(multiple.status).toBe(409);
+  expect(multiple.json.matches.map((m: { id: string }) => m.id)).toEqual(expect.arrayContaining([first, second]));
   const email = `${tag}@example.com`;
   const c = await member.c.post(`/api/orgs/${first}/contacts`, { name: "Alexandra Smith", email });
   expect(c.status).toBe(201);

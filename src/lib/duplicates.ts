@@ -9,20 +9,23 @@ export function duplicateThreshold() {
   return Number.isFinite(value) && value > 0 && value <= 1 ? value : 0.4;
 }
 export type Duplicate = { id: string; name: string; organisationId?: string };
-export async function organisationDuplicate(workspaceId: string, name: string) {
-  const rows = await db.$queryRaw<Duplicate[]>`SELECT id, name FROM "Organisation" WHERE "workspaceId" = ${workspaceId} AND similarity(lower(name), lower(${name})) >= ${duplicateThreshold()} ORDER BY similarity(lower(name), lower(${name})) DESC, id LIMIT 1`;
-  return rows[0];
+export async function organisationDuplicates(workspaceId: string, name: string) {
+  const rows = await db.$queryRaw<Duplicate[]>`SELECT id, name FROM "Organisation" WHERE "workspaceId" = ${workspaceId} AND similarity(lower(name), lower(${name})) >= ${duplicateThreshold()} ORDER BY similarity(lower(name), lower(${name})) DESC, id LIMIT 6`;
+  return rows;
 }
-export async function contactDuplicate(workspaceId: string, organisationId: string, name: string, email?: string | null) {
-  const rows = await db.$queryRaw<Duplicate[]>`SELECT id, name, "organisationId" FROM "Contact" WHERE "workspaceId" = ${workspaceId} AND "removedAt" IS NULL AND ((nullif(${email?.trim() ?? ""}, '') IS NOT NULL AND lower(email) = lower(${email?.trim() ?? ""})) OR ("organisationId" = ${organisationId} AND similarity(lower(name), lower(${name})) >= ${duplicateThreshold()})) ORDER BY id LIMIT 1`;
-  return rows[0];
+export async function organisationDuplicate(workspaceId: string, name: string) { return (await organisationDuplicates(workspaceId, name))[0]; }
+export async function contactDuplicates(workspaceId: string, organisationId: string, name: string, email?: string | null) {
+  const rows = await db.$queryRaw<Duplicate[]>`SELECT id, name, "organisationId" FROM "Contact" WHERE "workspaceId" = ${workspaceId} AND "removedAt" IS NULL AND ((nullif(${email?.trim() ?? ""}, '') IS NOT NULL AND lower(email) = lower(${email?.trim() ?? ""})) OR ("organisationId" = ${organisationId} AND similarity(lower(name), lower(${name})) >= ${duplicateThreshold()})) ORDER BY id LIMIT 6`;
+  return rows;
 }
+export async function contactDuplicate(workspaceId: string, organisationId: string, name: string, email?: string | null) { return (await contactDuplicates(workspaceId, organisationId, name, email))[0]; }
 export async function dealDuplicate(workspaceId: string, name: string) {
   const rows = await db.$queryRaw<Duplicate[]>`SELECT id, name FROM "Project" WHERE "workspaceId" = ${workspaceId} AND "typeId" = ${WORKSTREAM_DEAL} AND similarity(lower(name), lower(${name})) >= ${duplicateThreshold()} ORDER BY similarity(lower(name), lower(${name})) DESC, id LIMIT 1`;
   return rows[0];
 }
-export function duplicateWarning(kind: string, duplicate: Duplicate) {
-  return new ApiError(409, `Possible duplicate ${kind}: “${duplicate.name}”. Use this one or create anyway.`, { needsConfirm: "duplicate", existingId: duplicate.id, existingName: duplicate.name, organisationId: duplicate.organisationId });
+export function duplicateWarning(kind: string, duplicate: Duplicate, candidates: Duplicate[] = [duplicate]) {
+  const matches = candidates.slice(0, 5);
+  return new ApiError(409, `Possible duplicate ${kind}: “${duplicate.name}”. Use this one or create anyway.`, { needsConfirm: "duplicate", existingId: duplicate.id, existingName: duplicate.name, organisationId: duplicate.organisationId, matches, truncated: candidates.length > 5 });
 }
 /** Detection is broad, but identifying fields follow fresh project visibility. */
 export async function dealDuplicateWarning(user: Actor, duplicate: Duplicate) {

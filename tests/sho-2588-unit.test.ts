@@ -49,3 +49,17 @@ it("answers CRM-off before duplicate lookup or any database access", async () =>
   expect(db.$queryRaw).not.toHaveBeenCalled();
   expect(db.project.findUnique).not.toHaveBeenCalled();
 });
+
+it("shows every bounded organisation choice and discloses truncation", async () => {
+  const { createElement } = await import("react");
+  const { renderToStaticMarkup } = await import("react-dom/server");
+  const { DuplicateChoices } = await import("@/components/DuplicateChoices");
+  const candidates = Array.from({ length: 6 }, (_, i) => ({ id: `org-${i}`, name: `Education Ministry ${i}` }));
+  const warning = duplicateWarning("organisation", candidates[0], candidates);
+  expect(warning.extra?.matches).toHaveLength(5);
+  expect(warning.extra?.truncated).toBe(true);
+  const html = renderToStaticMarkup(createElement(DuplicateChoices, { matches: candidates.slice(0, 2), truncated: false, onUse: () => {} }));
+  expect(html).toContain(candidates[0].name);
+  expect(html).toContain(candidates[1].name);
+  expect(html.match(/Use this one/g)).toHaveLength(2);
+});
