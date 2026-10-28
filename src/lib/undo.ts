@@ -463,7 +463,7 @@ export async function undoAction(user: Actor, logId: string, anyway = false) {
   if (p.conflicts.length && !anyway) throw await conflictError(row, p, user.id);
 
   // Deleting and restoring have their own transactions.
-  if (row.action === "task.deleted") await restoreTask(user, row.targetId, true, { skipLog: true }); // Undo logs its own row
+  if (row.action === "task.deleted") await restoreTask(user, row.targetId, true, { skipRestoredLog: true }); // Undo logs its own row
   if (row.action === "task.restored" || row.action === "task.created") await deleteTask(user, row.targetId, { byUndo: true });
 
   await db.$transaction(async (tx) => {
