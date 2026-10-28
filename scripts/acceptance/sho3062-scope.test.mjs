@@ -1,12 +1,18 @@
 import assert from 'node:assert/strict';
 import {execFileSync} from 'node:child_process';
 import test from 'node:test';
+import {createHash} from 'node:crypto';
+import {readFileSync} from 'node:fs';
 const base='afc38bd3e2973b0c4b0974a59d3c43e443648bb2';
 const allowed=new Set(['src/lib/suite-oauth.ts','src/components/TaskModal.tsx','src/components/HolySheetDocuments.tsx','src/app/(app)/projects/[id]/ProjectView.tsx','src/lib/holy-sheet-links.ts','src/app/api/projects/[id]/documents/route.ts','src/app/api/tasks/[id]/documents/route.ts','src/components/HolySheetLauncher.tsx','src/lib/holy-sheet-url.ts','src/app/api/tasks/[id]/holy-sheet/route.ts','src/lib/holy-qa-identity.ts','src/lib/central-client.ts','src/lib/central-status.ts','src/lib/attach-central-session.ts','src/app/api/auth/aplyd/callback/route.ts','prisma/schema.prisma','prisma/migrations/20261027120000_holy_sheet_links/migration.sql']);
 test('SHO-3062 extends the reviewed launcher and preserves canonical auth and release gates',()=>{
  execFileSync('git',['merge-base','--is-ancestor',base,'HEAD']);
  // SHO-2909: add only the reviewed accessibility prerequisite; retain integration and protected-surface gates.
  for (const path of ['src/app/(app)/Shell.tsx', 'src/app/(app)/projects/projects.css', 'src/components/PeopleSelect.tsx']) allowed.add(path);
+ // SHO-2695: allow only the complete reviewed stable-code Person renderer.
+ const person='src/app/(app)/team/[id]/Person.tsx';
+ allowed.add(person);
+ assert.equal(createHash('sha256').update(readFileSync(person)).digest('hex'),'86b66c58693f6bbdfc6ed8966dd8e5757208ebe1f9abed7929f2d7fa44f91204','Preserve the exact reviewed SHO-2695 renderer');
  const files=execFileSync('git',['diff','--name-only',base,'--','src','prisma'],{encoding:'utf8'}).trim().split('\n').filter(Boolean);
  for(const file of files)assert.ok(allowed.has(file),`Unexpected runtime change: ${file}`);
  assert.equal(execFileSync('git',['diff','c2700202ed0789dab36a33dfde2a0edff57f07c0','--','scripts/acceptance/holy3-launcher-scope.test.mjs'],{encoding:'utf8'}),'');

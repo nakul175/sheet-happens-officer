@@ -20,9 +20,9 @@ it.each(["Choose a new password to continue.", "Veuillez changer votre mot de pa
   expect(document.querySelector('a[href="/profile"]')!.textContent).toBe("Change password");
   expect(document.body.textContent).not.toContain("You don't have access to this person");
 });
-it("does not infer a forced-password condition from display text without its code", async () => {
+it.each([undefined, "FORBIDDEN"])("does not infer a forced-password condition from display text with code %s", async code => {
   status = 403;
-  await mount({ error: "Set your own password first.", code: "FORBIDDEN" });
+  await mount({ error: "Set your own password first.", code });
   expect(document.querySelector('a[href="/profile"]')).toBeNull();
   expect(document.body.textContent).toContain("You don't have access to this person");
 });
