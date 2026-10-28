@@ -757,7 +757,7 @@ describe("CRM_VISIBLE modes are tested against a real server per mode", () => {
       const hiddenCases = cases.filter((example) => example.hidden);
       const addDeal = async (name: string) => {
         const made = await call(open!.base, admin.cookie, "POST", "/api/deals", {
-          name, organisationId, pipelineId: pipe!.id, leaderId: admin.id, whyPursue: tag,
+          force: true, name, organisationId, pipelineId: pipe!.id, leaderId: admin.id, whyPursue: tag,
           nextStep: { title: `${name} step`, dueDate: istDate(3) },
         });
         expect(made.status, made.text).toBe(201);
@@ -842,7 +842,7 @@ describe("CRM_VISIBLE modes are tested against a real server per mode", () => {
     const dealIds: string[] = [];
     for (const name of dealNames) {
       const made = await call(open!.base, admin.cookie, "POST", "/api/deals", {
-        name, organisationId, pipelineId: pipe!.id, leaderId: leader.id, whyPursue: tag,
+        force: true, name, organisationId, pipelineId: pipe!.id, leaderId: leader.id, whyPursue: tag,
         nextStep: { title: `ZZ-TEST step ${tag}`, dueDate: istDate(4) },
       });
       expect(made.status, made.text).toBe(201);

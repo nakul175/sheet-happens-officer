@@ -224,7 +224,7 @@ beforeAll(async () => {
   seed.orgIds.push((org.json?.organisation as { id: string }).id);
   for (const name of dealNames) {
     const made = await call(on.base, admin.cookie, "POST", "/api/deals", {
-      name, organisationId: seed.orgIds[0], pipelineId: pipe!.id, leaderId: leader.id, whyPursue: tag,
+      force: true, name, organisationId: seed.orgIds[0], pipelineId: pipe!.id, leaderId: leader.id, whyPursue: tag,
       nextStep: { title: `ZZ-TEST step ${tag}`, dueDate: istDate(3) },
     });
     expect(made.status, made.text).toBe(201);
