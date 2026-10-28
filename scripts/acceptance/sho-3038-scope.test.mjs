@@ -6,6 +6,9 @@ import { readFileSync } from "node:fs";
 
 const production = "ee59582dffcbd8cc3067e689b2bb73cf63781cb7";
 const allowed = new Set([
+  "tests/e2e/stories/APL-2720.spec.ts",
+  "tests/trash-days-left.test.tsx",
+  "tests/trash-days-left-aging.test.ts",
   "tests/e2e/stories/APL-2691.spec.ts",
   "tests/jobs-reminders-crm.test.ts",
   "tests/jobs-reminders-crm-server.test.ts",
