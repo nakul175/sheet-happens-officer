@@ -99,7 +99,7 @@ describe("APL-2652 sign-in returns to the deep link", () => {
       expect(url.pathname).toBe("/signin");
       expect(url.searchParams.get("next")).toBe(`/tasks/${visibleId}?tab=comments`);
       expect(url.hash).toBe("");
-      expect(page.url()).not.toContain("c9");
+      expect(url.searchParams.get("next")).not.toContain("#");
       await signIn(page, memberEmail, PW);
       await landedOnTask(page, visibleId, visibleTitle, "?tab=comments");
     } finally { await ctx.close(); }

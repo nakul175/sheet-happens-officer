@@ -19,6 +19,7 @@ import {
   expectStalledNotice,
   seedStalledWorld,
   storedRows,
+  worldDealIds,
   type Mode,
   type StalledWorld,
 } from "./stalled-crm-fixture";
@@ -40,17 +41,35 @@ async function dealIds() {
   return new Set(rows.map((row) => row.id));
 }
 
-/** DEAL_STALLED rows on this test's ZZ-TEST deals. Other tests' stalled deals cannot move this count. */
-async function worldStalledRows() {
-  const projectId = { in: [world.owned.id, world.adminDeal.id, world.rootDeal.id] };
-  return db.notification.count({ where: { type: "DEAL_STALLED", projectId } });
+type WorldStalledRow = { id: string; recipientId: string; projectId: string | null };
+
+/** Exact DEAL_STALLED set for this test's ZZ-TEST deals; foreign worlds cannot affect it. */
+async function worldStalledRows(): Promise<WorldStalledRow[]> {
+  return db.notification.findMany({
+    where: { type: "DEAL_STALLED", projectId: { in: worldDealIds(world) } },
+    select: { id: true, recipientId: true, projectId: true },
+    orderBy: [{ projectId: "asc" }, { recipientId: "asc" }, { id: "asc" }],
+  });
 }
 
-/** APL-2754. One job run, with notified counted on this test's ZZ-TEST deals only. */
-async function notifyWorldDeals() {
+/** APL-2754. A repeat run must leave the exact world-scoped row set unchanged. */
+async function expectRepeatLeavesWorldUnchanged() {
   const before = await worldStalledRows();
   await notifyStalledDeals();
-  return { notified: (await worldStalledRows()) - before };
+  expect(await worldStalledRows()).toEqual(before);
+}
+
+function worldRowPairs(rows: WorldStalledRow[]) {
+  return rows.map(({ recipientId, projectId }) => ({ recipientId, projectId }));
+}
+
+function expectedWorldRowPairs(mode: "all" | "admins") {
+  const rows = [
+    { recipientId: world.orgAdmin.id, projectId: world.adminDeal.id as string | null },
+    { recipientId: world.superLead.id, projectId: world.rootDeal.id as string | null },
+  ];
+  if (mode === "all") rows.push({ recipientId: world.owner.id, projectId: world.owned.id });
+  return rows.sort((a, b) => `${a.projectId}:${a.recipientId}`.localeCompare(`${b.projectId}:${b.recipientId}`));
 }
 
 /** Allowed leaders keep today's notice. A follower, and any other deal, stays out of their bell. */
@@ -65,7 +84,7 @@ async function expectAllowed(exact: boolean) {
   await expectNoDealNotice(world, world.follower);
 }
 
-describe("qa:TC missing APL-2741 stalled-deal notices respect CRM_VISIBLE", () => {
+describe("qa:TC missing APL-2741 stalled-deal notices: all/admins cases detect duplicate-notice regressions", () => {
   beforeAll(async () => {
     assertLocalTestDatabase();
     world = await seedStalledWorld();
@@ -75,37 +94,35 @@ describe("qa:TC missing APL-2741 stalled-deal notices respect CRM_VISIBLE", () =
     await cleanupStalledWorld(world);
   });
 
-  it("qa:TC missing AC2: unset matches today: the owner, admin and super admin are told, the follower is not", async () => {
+  it("qa:TC missing AC2: unset preserves today's visibility without claiming independent mutation detection", async () => {
     await clearStalledNotes(world);
     await withMode("unset", async () => {
       expect(crmMode()).toBe("all");
       const ids = await dealIds();
       expect(ids.has(world.owned.id)).toBe(true);
       expect(ids.has(world.adminDeal.id)).toBe(true);
-      const first = await notifyStalledDeals();
-      expect(first.notified).toBeGreaterThanOrEqual(3);
-      const second = await notifyWorldDeals();
-      expect(second.notified).toBe(0);
+      await notifyStalledDeals();
+      expect(worldRowPairs(await worldStalledRows())).toEqual(expectedWorldRowPairs("all"));
     });
     await expectStalledNotice(world.owner, world.owned, true);
     await expectAllowed(true);
     expectNoDealMail(dealNeedles(world));
   });
 
-  it("qa:TC missing AC2: CRM_VISIBLE=all matches today", async () => {
+  it("qa:TC missing AC2: all detects duplicate-notice regressions with an exact world-scoped set", async () => {
     await clearStalledNotes(world);
     await withMode("all", async () => {
       expect(crmMode()).toBe("all");
-      expect((await notifyStalledDeals()).notified).toBeGreaterThanOrEqual(3);
-      const second = await notifyWorldDeals();
-      expect(second.notified).toBe(0);
+      await notifyStalledDeals();
+      expect(worldRowPairs(await worldStalledRows())).toEqual(expectedWorldRowPairs("all"));
+      await expectRepeatLeavesWorldUnchanged();
     });
     await expectStalledNotice(world.owner, world.owned, true);
     await expectAllowed(true);
     expectNoDealMail(dealNeedles(world));
   });
 
-  it("qa:TC missing AC1 AC2: admins: a non-admin owner or follower gets no deal notice, and admins still do", async () => {
+  it("qa:TC missing AC1 AC2: admins detects duplicate-notice regressions with an exact world-scoped set", async () => {
     await clearStalledNotes(world);
     await withMode("admins", async () => {
       expect(crmMode()).toBe("admins");
@@ -113,9 +130,9 @@ describe("qa:TC missing APL-2741 stalled-deal notices respect CRM_VISIBLE", () =
       expect(ids.has(world.owned.id)).toBe(false);
       expect(ids.has(world.adminDeal.id)).toBe(true);
       expect(ids.has(world.rootDeal.id)).toBe(true);
-      expect((await notifyStalledDeals()).notified).toBeGreaterThanOrEqual(2);
-      const second = await notifyWorldDeals();
-      expect(second.notified).toBe(0);
+      await notifyStalledDeals();
+      expect(worldRowPairs(await worldStalledRows())).toEqual(expectedWorldRowPairs("admins"));
+      await expectRepeatLeavesWorldUnchanged();
     });
     await expectNoDealNotice(world, world.owner);
     await expectNoDealNotice(world, world.follower);
