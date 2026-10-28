@@ -12,14 +12,15 @@
 // qa:TC missing off
 // qa:TC missing non-deal ops check
 // qa:TC missing 40 concurrent reminder requests
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { crmMode } from "../src/lib/crm";
 import { startOfTodayIST } from "../src/lib/dates";
 import { reminderTaskWhere, sendReminders } from "../src/lib/jobs";
 // The job's own client (APL-2889): a second PrismaClient here doubled the sessions the 40-way test holds,
 // and behind a session-mode PgBouncer (pool 20) the job waited on sessions the test never released.
 import { db } from "../src/lib/db";
-import { account, admin, istDate, project, superAdmin, task, type Account } from "./helpers";
+import { account, istDate, project, superAdmin, task, type Account } from "./helpers";
+import { cleanupReminderResources, reminderResources } from "./reminder-cleanup-2751";
 
 const DUE = ["TASK_DUE_TOMORROW", "TASK_DUE_TODAY", "TASK_OVERDUE"] as const;
 const LOAD = 40;
@@ -27,12 +28,17 @@ const LOAD = 40;
 type Mode = "unset" | "all" | "admins" | "off";
 type BellItem = { text: string; href: string | null };
 
-const tag = `ZZ-TEST-${Date.now().toString(36)}-${process.pid}`;
-const dealName = `ZZ-TEST Acme renewal ${tag}`;
-const memberTitle = `ZZ-TEST Acme kickoff ${tag}`;
-const adminTitle = `ZZ-TEST Acme kickoff ${tag} admin`;
-const opsTitle = `ZZ-TEST Ops check ${tag}`;
+const run = `${Date.now().toString(36)}-${process.pid}`;
+let sequence = 0;
+let tag = "";
+let dealName = "";
+let memberTitle = "";
+let adminTitle = "";
+let opsTitle = "";
 
+let sa: Account;
+const resources = reminderResources();
+const setupNotices = new Map<string, Set<string>>();
 let member: Account;
 let dealAdmin: Account;
 let dealId = "";
@@ -67,11 +73,6 @@ async function withMode(mode: Mode, fn: () => Promise<void>) {
   }
 }
 
-/** Drop every notice for these throwaway people so the bell shows only what the job just wrote. */
-async function clearReminders() {
-  await db.notification.deleteMany({ where: { recipientId: { in: [member.id, dealAdmin.id] } } });
-}
-
 async function dueRows(recipientId: string) {
   return db.notification.findMany({
     where: { recipientId, type: { in: [...DUE] } },
@@ -82,7 +83,7 @@ async function dueRows(recipientId: string) {
 async function bell(who: Account) {
   const r = await who.c.get("/api/notifications?limit=200");
   expect(r.status, JSON.stringify(r.json)).toBe(200);
-  return r.json.items as BellItem[];
+  return (r.json.items as (BellItem & { id: string })[]).filter(item => !setupNotices.get(who.id)?.has(item.id));
 }
 
 /** No reminder row, and no bell item, carries the deal, its task, or a link to either. */
@@ -124,7 +125,6 @@ async function expectOpsReminder(exact: boolean) {
 }
 
 async function runMode(mode: Mode) {
-  await clearReminders();
   await withMode(mode, async () => {
     if (mode === "unset") expect(crmMode()).toBe("all");
     else expect(crmMode()).toBe(mode);
@@ -134,16 +134,24 @@ async function runMode(mode: Mode) {
 }
 
 describe("qa:TC missing APL-2729 AC1-AC3: reminder jobs apply crmProjectWhere in process", () => {
-  beforeAll(async () => {
-    assertLocalTestDatabase();
-    const sa = await superAdmin();
-    dealAdmin = await admin(sa, "zzdealadmin");
-    member = await account("zzmember");
+  beforeAll(async () => { assertLocalTestDatabase(); sa = await superAdmin(); });
+  beforeEach(async () => {
+    tag = `${run}-${++sequence}`;
+    dealName = `ZZ-TEST Acme renewal ${tag}`;
+    memberTitle = `ZZ-TEST Acme kickoff ${tag}`;
+    adminTitle = `ZZ-TEST Acme kickoff ${tag} admin`;
+    opsTitle = `ZZ-TEST Ops check ${tag}`;
+    dealAdmin = await account(`ZZ-TEST reminder admin ${tag}`, `nakul17+zz-2729-${tag}-admin@aplyd.com`);
+    resources.people.push({ id: dealAdmin.id, deactivated: false });
+    expect((await sa.c.patch(`/api/team/${dealAdmin.id}`, { orgRole: "ADMIN" })).status).toBe(200);
+    member = await account(`ZZ-TEST reminder member ${tag}`, `nakul17+zz-2729-${tag}-member@aplyd.com`);
+    resources.people.push({ id: member.id, deactivated: false });
     const pipes = (await dealAdmin.c.get("/api/deals/pipelines")).json.pipelines as { id: string; key: string }[];
     const pipe = pipes.find((p) => p.key === "DEAL_PROACTIVE");
     expect(pipe?.id).toBeTruthy();
     const org = await dealAdmin.c.post("/api/orgs", { name: `ZZ-TEST Org ${tag}` });
     expect(org.status, JSON.stringify(org.json)).toBe(201);
+    resources.organisations.push({ id: org.json.organisation.id, archived: false });
     const made = await dealAdmin.c.post("/api/deals", {
       name: dealName,
       organisationId: org.json.organisation.id,
@@ -154,17 +162,29 @@ describe("qa:TC missing APL-2729 AC1-AC3: reminder jobs apply crmProjectWhere in
     });
     expect(made.status, JSON.stringify(made.json)).toBe(201);
     dealId = made.json.deal.id as string;
+    resources.projects.push({ id: dealId, leaderId: dealAdmin.id, archived: false });
     expect((await dealAdmin.c.post(`/api/projects/${dealId}/members`, { userId: member.id, role: "EDITOR" })).status).toBe(201);
     memberTaskId = await task(dealAdmin, dealId, { title: memberTitle, assigneeId: member.id, dueDate: istDate(1) });
     adminTaskId = await task(dealAdmin, dealId, { title: adminTitle, assigneeId: dealAdmin.id, dueDate: istDate(1) });
-    const ops = await project(dealAdmin, dealAdmin, [{ who: member }]);
+    const ops = await project(dealAdmin, dealAdmin, [{ who: member }], `ZZ-TEST Ops ${tag}`);
     opsProjectId = ops.id;
+    resources.projects.push({ id: ops.id, leaderId: dealAdmin.id, archived: false });
     opsTaskId = await task(dealAdmin, ops.id, { title: opsTitle, assigneeId: member.id, dueDate: istDate(1) });
-  }, 60_000);
 
+    // Only API setup notices are excluded. Every newly written reminder remains asserted in DB and bell.
+    for (const who of [member, dealAdmin]) {
+      const seen = await who.c.get("/api/notifications?limit=200");
+      expect(seen.status).toBe(200);
+      setupNotices.set(who.id, new Set((seen.json.items as { id: string }[]).map(item => item.id)));
+    }
+  }, 60_000);
+  afterEach(async () => { await cleanupReminderResources(sa.id, (path, body) => sa.c.post(path, body), resources); });
   afterAll(async () => {
-    if (!member?.id) return;
-    await db.notification.deleteMany({ where: { recipientId: { in: [member.id, dealAdmin.id] }, type: { in: [...DUE] } } });
+    if (sa) await cleanupReminderResources(sa.id, (path, body) => sa.c.post(path, body), resources);
+    const ids = resources.people.map(p => p.id);
+    expect((await db.user.findMany({ where: { id: { in: ids } }, select: { deactivatedAt: true } })).every(p => p.deactivatedAt !== null)).toBe(true);
+    expect((await db.project.findMany({ where: { id: { in: resources.projects.map(p => p.id) } }, select: { archivedAt: true } })).every(p => p.archivedAt !== null)).toBe(true);
+    expect((await db.organisation.findMany({ where: { id: { in: resources.organisations.map(o => o.id) } }, select: { archivedAt: true } })).every(o => o.archivedAt !== null)).toBe(true);
   });
 
   it("qa:TC missing AC2 AC3: unset matches main for member, admin and the ops check", async () => {
@@ -196,8 +216,7 @@ describe("qa:TC missing APL-2729 AC1-AC3: reminder jobs apply crmProjectWhere in
   });
 
   it("qa:TC missing AC1 AC2 AC3: 40 concurrent reminder runs under admins name no hidden deal to the member", async () => {
-    await clearReminders();
-    await withMode("admins", async () => {
+      await withMode("admins", async () => {
       const today = startOfTodayIST();
       const queries = await Promise.all(Array.from({ length: LOAD }, () => db.task.findMany({
         where: reminderTaskWhere(today),
