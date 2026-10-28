@@ -4,7 +4,7 @@
 // Rows are checked in the test database and on GET /api/notifications. The job sends no email;
 // the outbox is checked so a deal name cannot leave that way either. Names are ZZ-TEST.
 // qa:TC missing: QA has not assigned TC ids for this story yet.
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { crmMode } from "../src/lib/crm";
 import { notifyStalledDeals, stalledDealWhere } from "../src/lib/deals";
 import { db } from "../src/lib/db";
@@ -12,7 +12,6 @@ import {
   assertLocalTestDatabase,
   bell,
   cleanupStalledWorld,
-  clearStalledNotes,
   dealNeedles,
   expectNoDealMail,
   expectNoDealNotice,
@@ -69,17 +68,17 @@ async function expectAllowed(exact: boolean) {
 }
 
 describe("qa:TC missing APL-2741 stalled-deal notices respect CRM_VISIBLE", () => {
-  beforeAll(async () => {
+  beforeEach(async () => {
     assertLocalTestDatabase();
+    world = undefined!;
     world = await seedStalledWorld();
   }, 60_000);
 
-  afterAll(async () => {
+  afterEach(async () => {
     await cleanupStalledWorld(world);
   });
 
   it("qa:TC missing AC2: unset matches today: the owner, admin and super admin are told, the follower is not", async () => {
-    await clearStalledNotes(world);
     await withMode("unset", async () => {
       expect(crmMode()).toBe("all");
       const ids = await dealIds();
@@ -96,7 +95,6 @@ describe("qa:TC missing APL-2741 stalled-deal notices respect CRM_VISIBLE", () =
   });
 
   it("qa:TC missing AC2: all preserves exact world notices on a second run (M1 detection)", async () => {
-    await clearStalledNotes(world);
     await withMode("all", async () => {
       expect(crmMode()).toBe("all");
       expect((await notifyWorldDeals()).notified).toBeGreaterThanOrEqual(3);
@@ -109,7 +107,6 @@ describe("qa:TC missing APL-2741 stalled-deal notices respect CRM_VISIBLE", () =
   });
 
   it("qa:TC missing AC1 AC2: admins hides non-admin deals and preserves exact world notices on a second run (M1 detection)", async () => {
-    await clearStalledNotes(world);
     await withMode("admins", async () => {
       expect(crmMode()).toBe("admins");
       const ids = await dealIds();
@@ -127,7 +124,6 @@ describe("qa:TC missing APL-2741 stalled-deal notices respect CRM_VISIBLE", () =
   });
 
   it("qa:TC missing AC1: off: nobody is told, and the filter matches no ZZ-TEST deal", async () => {
-    await clearStalledNotes(world);
     await withMode("off", async () => {
       expect(crmMode()).toBe("off");
       expect(await notifyStalledDeals()).toEqual({ stalled: 0, notified: 0, skipped: true });

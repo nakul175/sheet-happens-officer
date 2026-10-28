@@ -5,14 +5,13 @@
 // Local only, workers=1 (vitest.e2e.config.mts). ZZ-TEST deals, nakul17+ aliases. Run: npm run test:e2e
 // The job sends no email; the outbox is still checked.
 import "dotenv/config";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { chromium, type Browser } from "playwright-core";
 import { notifyStalledDeals } from "@/lib/deals";
 import { BASE, type Account } from "../tests/helpers";
 import {
   assertLocalTestDatabase,
   cleanupStalledWorld,
-  clearStalledNotes,
   dealNeedles,
   expectNoDealMail,
   seedStalledWorld,
@@ -95,16 +94,16 @@ describe("qa:TC missing APL-2741 stalled-deal bell in the browser", () => {
       executablePath: process.env.PW_CHROMIUM || "/usr/local/bin/google-chrome",
       args: ["--no-sandbox"],
     });
-    world = await seedStalledWorld();
   }, 180000);
+
+  beforeEach(async () => { world = undefined!; world = await seedStalledWorld(); }, 60_000);
+  afterEach(async () => { await cleanupStalledWorld(world); });
 
   afterAll(async () => {
     await browser?.close();
-    await cleanupStalledWorld(world);
   });
 
   it("qa:TC missing AC2: unset, the bell shows today's stalled-deal sentence and link to the owner and admins", async () => {
-    await clearStalledNotes(world);
     await withMode("unset", async () => { expect((await notifyStalledDeals()).notified).toBeGreaterThanOrEqual(1); });
     await expectBellShows(world.owner, world.owned);
     await expectBellShows(world.orgAdmin, world.adminDeal);
@@ -114,7 +113,6 @@ describe("qa:TC missing APL-2741 stalled-deal bell in the browser", () => {
   });
 
   it("qa:TC missing AC2: CRM_VISIBLE=all, the bell matches unset", async () => {
-    await clearStalledNotes(world);
     await withMode("all", async () => { await notifyStalledDeals(); });
     await expectBellShows(world.owner, world.owned);
     await expectBellShows(world.orgAdmin, world.adminDeal);
@@ -124,7 +122,6 @@ describe("qa:TC missing APL-2741 stalled-deal bell in the browser", () => {
   });
 
   it("qa:TC missing AC1 AC2: admins, a non-admin owner or follower sees no deal name, id or link, and admins still do", async () => {
-    await clearStalledNotes(world);
     await withMode("admins", async () => { await notifyStalledDeals(); });
     await expectBellSilent(world.owner);
     await expectBellSilent(world.follower);
@@ -134,7 +131,6 @@ describe("qa:TC missing APL-2741 stalled-deal bell in the browser", () => {
   });
 
   it("qa:TC missing AC1: CRM_VISIBLE=off, no bell names a ZZ-TEST stalled deal", async () => {
-    await clearStalledNotes(world);
     await withMode("off", async () => {
       expect(await notifyStalledDeals()).toEqual({ stalled: 0, notified: 0, skipped: true });
     });

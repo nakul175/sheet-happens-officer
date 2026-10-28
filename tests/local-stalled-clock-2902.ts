@@ -1,0 +1,24 @@
+// Test-only clock setup. No production route imports this module.
+import { db } from "../src/lib/db";
+const LOCAL = new Set(["localhost", "127.0.0.1", "::1"]);
+export function assertStalledFixtureTarget(databaseUrl = process.env.DATABASE_URL, apiUrl = process.env.TASKBOARD_URL ?? "http://localhost:3000") {
+  let database: URL, api: URL;
+  try { database = new URL(databaseUrl ?? ""); api = new URL(apiUrl); } catch { throw new Error("Stalled fixtures require local test targets"); }
+  const host = (url: URL) => url.hostname.replace(/^\[|\]$/g, "").toLowerCase();
+  if (!LOCAL.has(host(database)) || !LOCAL.has(host(api)) || !/^postgres(?:ql)?:$/.test(database.protocol) || !/^https?:$/.test(api.protocol) || database.pathname !== "/sho_test") {
+    throw new Error("Stalled fixtures require localhost API and sho_test database");
+  }
+}
+/** The only non-API fixture operation: age three validated, run-owned deals atomically. */
+export async function ageLocalStalledDeals(ids: string[], tag: string) {
+  assertStalledFixtureTarget();
+  if (!/^[a-z0-9-]{6,80}$/i.test(tag) || ids.length !== 3 || new Set(ids).size !== 3 || ids.some(id => !id)) throw new Error("Invalid stalled fixture identity");
+  const time = new Date(Date.now() - 31 * 86400_000);
+  await db.$transaction(async tx => {
+    const projects = await tx.project.findMany({ where: { id: { in: ids } }, select: { id: true, name: true, archivedAt: true, tasks: { select: { title: true } } } });
+    if (projects.length !== 3 || projects.some(p => !p.name.startsWith("ZZ-TEST ") || !p.name.endsWith(` ${tag}`) || p.archivedAt || p.tasks.some(t => !t.title.startsWith("ZZ-TEST ") || !t.title.endsWith(` ${tag}`)))) throw new Error("Refusing to age non-fixture data");
+    await tx.project.updateMany({ where: { id: { in: ids } }, data: { createdAt: time, stageChangedAt: time } });
+    await tx.task.updateMany({ where: { projectId: { in: ids } }, data: { updatedAt: time } });
+    await tx.actionLog.updateMany({ where: { projectId: { in: ids } }, data: { createdAt: time } });
+  });
+}
