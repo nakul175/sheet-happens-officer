@@ -1,5 +1,15 @@
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { expect, it, vi } from "vitest";
 import { cleanupReminderResources, reminderResources } from "./reminder-cleanup-2751";
+
+it("qa:TC missing SHO-2751: reminder suites contain no direct database writes", () => {
+  const write = /\bdb\.[A-Za-z]+\.(?:create|createMany|update|updateMany|upsert|delete|deleteMany)\s*\(|\bdb\.\$executeRaw(?:Unsafe)?\s*\(/;
+  for (const name of ["jobs-reminders-crm.test.ts", "jobs-reminders-crm-server.test.ts"]) {
+    const source = readFileSync(fileURLToPath(new URL(name, import.meta.url)), "utf8");
+    expect(source, `${name} must set up and isolate fixtures through HTTP APIs`).not.toMatch(write);
+  }
+});
 it("qa:TC missing SHO-2751/2769: only run-owned resources are cleaned through ordered API calls", async () => {
   const resources = reminderResources();
   resources.projects.push({ id: "zz-project", leaderId: "zz-person", archived: false });
