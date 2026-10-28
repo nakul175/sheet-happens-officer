@@ -14,7 +14,8 @@ import { mkdirSync } from "node:fs";
 import { test, expect, type BrowserContext, type Locator, type Page } from "@playwright/test";
 import { assertStoryTargetAllowed, BASE_URL } from "../base-url";
 
-// The target is BASE_URL, then TASKBOARD_URL (base-url.ts). Pass it in, so the guard checks it without reading the process image.
+// Intended shared target precedence (base-url.ts): BASE_URL || TASKBOARD_URL || STAGING_URL || http://localhost:3100.
+// Pass it in so the guard checks it without reading the process image; production is refused.
 const BASE = BASE_URL;
 assertStoryTargetAllowed(process.env, BASE);
 
@@ -36,13 +37,14 @@ const FAILURES = [
 type Improve = { status: number; improved: string | null; error: string | null };
 
 let ctx: BrowserContext;
+let originalHidden: boolean | undefined;
 
 const basic = process.env.STAGING_USER ? { username: process.env.STAGING_USER, password: process.env.STAGING_PASS ?? "" } : undefined;
 
 async function conciergeState() {
   const r = await ctx.request.get(new URL("/api/concierge/state", BASE).href);
   expect(r.status()).toBe(200);
-  return (await r.json()) as { available: boolean; disabled?: { code: string; message: string }; messages: unknown[] };
+  return (await r.json()) as { available: boolean; hidden: boolean; disabled?: { code: string; message: string }; messages: unknown[] };
 }
 
 /** The concierge panel for this width: the right-hand dock on a wide list screen, the full-screen sheet on a phone. */
@@ -80,8 +82,8 @@ async function mustBeAvailable() {
 
 test.describe("qa:TC missing APL-2694: Improve my prompt in the concierge dock", () => {
   test.skip(!QA_PASS, "APL-2694: set SHO_QA_PASS (the password for nakul17+ aliases).");
-  // AC4 runs first, then AC1/AC3, all on the one signed-in context.
-  test.describe.configure({ mode: "serial" });
+  // Cases use separate pages/routes and do not rely on earlier results. Default mode lets later cases
+  // run after a failure (unlike serial); beforeAll/afterAll scope the context and preference to each worker.
 
   test.beforeAll(async ({ browser }) => {
     test.setTimeout(60_000);
@@ -91,12 +93,20 @@ test.describe("qa:TC missing APL-2694: Improve my prompt in the concierge dock",
     const text = await signed.text();
     expect(text.includes(QA_PASS), "the sign-in reply never echoes the password").toBe(false);
     expect(signed.status(), `${EMAIL} must be a provisioned, verified alias (APL-2748)`).toBe(200);
+    const before = await conciergeState();
+    expect(typeof before.hidden, "capture the existing preference before changing it").toBe("boolean");
+    originalHidden = before.hidden;
     const shown = await ctx.request.patch(new URL("/api/concierge/preferences", BASE).href, { data: { hidden: false } });
     expect(shown.status()).toBe(200);
   });
 
   test.afterAll(async () => {
-    await ctx?.close();
+    try {
+      if (ctx && originalHidden !== undefined) {
+        const restored = await ctx.request.patch(new URL("/api/concierge/preferences", BASE).href, { data: { hidden: originalHidden } });
+        expect(restored.status(), "restore the preference found before this worker changed it").toBe(200);
+      }
+    } finally { await ctx?.close(); }
   });
 
   for (const vp of VIEWPORTS) {
