@@ -64,7 +64,7 @@ afterAll(async () => {
   }
 });
 
-describe("qa:TC-APL2720-01@v1 @APL-2720 AC1@v1.0 listTrash daysLeft at Pam's seven ages", () => {
+describe("@APL-2720 AC1@v1.0 listTrash daysLeft at Pam's seven ages", () => {
   it.each(AGES)("qa:TC-APL2720-01@v1 @APL-2720 AC1@v1.0 a task deleted $label ago has daysLeft $daysLeft", async ({ label, age, daysLeft }) => {
     const row = deleted.get(`ZZ-TEST 2720 ${label} ${RUN}`);
     expect(row, label).toBeTruthy();
