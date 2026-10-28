@@ -3,6 +3,7 @@ import Link from "next/link";
 import { use, useState } from "react";
 import { ago, api, useGet } from "@/components/api";
 import { Confirm, LoadFailed, Skeleton } from "@/components/ui";
+import { AttachmentTrash } from "@/components/TaskAttachments";
 import { Page } from "../../../Shell";
 
 type Item = { id: string; title: string; isSubtask: boolean; parentTitle?: string | null; deletedAt: string; deletedBy: { name: string } | null; daysLeft: number };
@@ -10,7 +11,7 @@ type Item = { id: string; title: string; isSubtask: boolean; parentTitle?: strin
 export default function Trash({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const pr = useGet<{ project: { name: string; role: string; archived: boolean } }>(`/api/projects/${id}`);
-  const tr = useGet<{ items: Item[] }>(`/api/projects/${id}/trash`);
+  const tr = useGet<{ items: Item[]; attachmentsEnabled?: boolean }>(`/api/projects/${id}/trash`);
   const [err, setErr] = useState<string | null>(null);
   const [ask, setAsk] = useState<null | { item: Item; parent: string }>(null);
   const p = pr.data?.project;
@@ -46,6 +47,7 @@ export default function Trash({ params }: { params: Promise<{ id: string }> }) {
           </table>
         </div>
       )}
+      {tr.data?.attachmentsEnabled && <AttachmentTrash projectId={id} />}
       {ask && <Confirm title="Restore with its parent?" yes="Restore both" onNo={() => setAsk(null)} body={`The parent task "${ask.parent}" is also in Trash. Restore both "${ask.parent}" and "${ask.item.title}"?`} onYes={() => restore(ask.item, true)} />}
     </Page>
   );

@@ -8,6 +8,8 @@ import { auditTx, logAction, notify } from "@/lib/notify";
 import { deleteTask, recordAccess, restoreTask } from "@/lib/tasks";
 import { UNDO_LABELS, isTooOldToUndo, isUndoable } from "@/lib/undoable";
 import { undoRecord } from "@/lib/records";
+import { restoreAttachmentRow, softRemoveAttachmentRow } from "@/lib/attachments";
+import { attachmentsEnabled, isAttachmentAction } from "@/lib/flags";
 import { commentsEnabled, isCommentAction } from "@/lib/flags";
 import { assertCommentRoom } from "@/lib/comments";
 
@@ -168,6 +170,18 @@ async function plan(row: any, user: Actor, projectId: string): Promise<Plan> {
           await tx.task.update({ where: { id }, data: { sectionId: b.sectionId } });
         },
       };
+    }
+    case "attachment.added": case "attachment.restored": case "attachment.removed": {
+      const attachmentId = String(f.attachmentId ?? b.attachmentId ?? "");
+      const file = await db.taskAttachment.findFirst({ where: { id: attachmentId, taskId: id } });
+      if (!file) throw bad("This file no longer exists.");
+      const task = await liveTask(id, projectId);
+      if (row.action === "attachment.removed") {
+        if (!file.removedAt) throw bad("This file is already restored.");
+        return { conflicts: [], subject: task.title, apply: async tx => { await restoreAttachmentRow(tx,id,attachmentId); } };
+      }
+      if (file.removedAt) throw bad("This file is already removed.");
+      return { conflicts: [], subject: task.title, apply: async tx => { await softRemoveAttachmentRow(tx,id,attachmentId); } };
     }
     case "comment.added": {
       const commentId = String(f.commentId ?? "");
@@ -396,6 +410,7 @@ async function prepare(user: Actor, logId: string) {
   const row = await db.actionLog.findUnique({ where: { id: logId } });
   if (!row) throw notFound("Action");
   // APL-2590 D1: with the comments switch off, a comment row is the same 404 as an action that does not exist.
+  if (isAttachmentAction(row.action) && !attachmentsEnabled()) throw notFound("Action");
   if (isCommentAction(row.action) && !commentsEnabled()) throw notFound("Action");
   const projectId = row.projectId;
   if (!projectId) throw bad("This kind of action cannot be undone.");
