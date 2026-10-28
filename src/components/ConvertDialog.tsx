@@ -22,7 +22,7 @@ export function ConvertDialog({ task, meId, onClose }: { task: { id: string; tit
 
   async function addOrg(force = false) {
     const r = await api("POST", "/api/orgs", { name: v.newOrg, kind: v.newKind || null, force });
-    if (r.ok) { setExtraOrgs((o) => [...o, { id: r.data.organisation.id, name: v.newOrg }]); setV({ ...v, organisationId: r.data.organisation.id, newOrg: "", newKind: "" }); setErr(null); }
+    if (r.ok) { setOrgDup(null); setExtraOrgs((o) => [...o, { id: r.data.organisation.id, name: v.newOrg }]); setV({ ...v, organisationId: r.data.organisation.id, newOrg: "", newKind: "" }); setErr(null); }
     else { setErr(r.error ?? "Could not add the organisation."); setOrgDup(r.data?.needsConfirm === "duplicate" ? { id: r.data.existingId, name: r.data.existingName } : null); }
   }
   async function go(force = false) {
