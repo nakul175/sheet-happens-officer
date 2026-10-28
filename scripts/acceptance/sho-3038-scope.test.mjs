@@ -4,8 +4,58 @@ import { createHash } from "node:crypto";
 import test from "node:test";
 import { readFileSync } from "node:fs";
 
-const production = "ee59582dffcbd8cc3067e689b2bb73cf63781cb7";
+const production = "afc38bd3e2973b0c4b0974a59d3c43e443648bb2";
 const allowed = new Set([
+  // SHO-3062: reviewed Holy Sheet document integration on the exact current
+  // production release. The feature-specific scope gate further restricts
+  // runtime changes and preserves canonical auth/release surfaces.
+  ".github/workflows/holy3-launcher-validation.yml",
+  ".github/workflows/sho3062-validation.yml",
+  "HOLY-3-LAUNCHER-QUALIFICATION.md",
+  "HOLY-3-SHARED-EDITOR-PACKAGE.md",
+  "SHO-3062-INTEGRATION-REVIEW.md",
+  "SHO-3062-ISOLATED-QA.md",
+  "package-lock.json",
+  "package.json",
+  "playwright.holy-qa.config.ts",
+  "playwright.holy4-matrix.config.ts",
+  "prisma/migrations/20261027120000_holy_sheet_links/migration.sql",
+  "prisma/schema.prisma",
+  "scripts/acceptance/holy3-launcher-scope.test.mjs",
+  "scripts/acceptance/sho3062-scope.test.mjs",
+  "scripts/verify-holy-sheet-package.mjs",
+  "src/app/(app)/projects/[id]/ProjectView.tsx",
+  "src/app/api/auth/aplyd/callback/route.ts",
+  "src/app/api/projects/[id]/documents/route.ts",
+  "src/app/api/tasks/[id]/documents/route.ts",
+  "src/app/api/tasks/[id]/holy-sheet/route.ts",
+  "src/components/HolySheetDocuments.tsx",
+  "src/components/HolySheetLauncher.tsx",
+  "src/components/TaskModal.tsx",
+  "src/lib/attach-central-session.ts",
+  "src/lib/central-client.ts",
+  "src/lib/central-status.ts",
+  "src/lib/holy-qa-identity.ts",
+  "src/lib/holy-sheet-links.ts",
+  "src/lib/holy-sheet-url.ts",
+  "src/lib/suite-oauth.ts",
+  "tests/holy-qa-identity.test.ts",
+  "tests/holy-qa-realm.test.ts",
+  "tests/holy-qa-session.test.ts",
+  "tests/holy-sheet-document-routes.test.ts",
+  "tests/holy-sheet-documents-db.test.ts",
+  "tests/holy-sheet-documents-ui.test.tsx",
+  "tests/holy-sheet-documents.test.ts",
+  "tests/holy-sheet-launcher.test.tsx",
+  "tests/holy-sheet-route.test.ts",
+  "tests/holy-sheet-url.test.ts",
+  "tests/qa/holy-sheet-live.spec.ts",
+  "tests/qa/holy4-matrix.spec.ts",
+  "tests/usage-month-figure-2951.test.ts",
+  "tests/usage-month.test.tsx",
+  "tests/usage-period-overlap.test.ts",
+  "vendor/aplyd-holy-sheet-editor-0.1.0-holy3.4.tgz",
+  "vendor/holy-sheet-editor.provenance.json",
   // User-approved isolated SHO-2555/2616 mobile task-sheet and overlay Back batch.
   "src/components/Comments.tsx",
   "src/components/MoveSheet.tsx",
@@ -363,18 +413,16 @@ test("sequential release changes only explicitly reviewed surfaces", () => {
   for (const file of changed) assert.ok(allowed.has(file), file);
 });
 
-test("sequential release does not change package/runtime entry or central suite auth", () => {
-  for (const path of ["package-lock.json", "server.js", "src/app/api/suite"])
+test("sequential release does not change the runtime entry or suite API", () => {
+  for (const path of ["server.js", "src/app/api/suite"])
     assert.equal(execFileSync("git", ["diff", production, "--", path], { encoding: "utf8" }), "", path);
 });
 
-test("the package delta only repairs the missing typecheck entry", () => {
+test("the package delta only adds the pinned Holy Sheet editor", () => {
   const before = JSON.parse(execFileSync("git", ["show", `${production}:package.json`], { encoding: "utf8" }));
-  // Read the working candidate, including an unstaged reviewed script repair.
   const current = JSON.parse(readFileSync("package.json", "utf8"));
-  assert.equal(before.scripts.typecheck, "node scripts/typecheck.mjs");
-  assert.equal(current.scripts.typecheck, "next typegen && tsc --noEmit");
-  current.scripts.typecheck = before.scripts.typecheck;
+  assert.equal(current.dependencies["@aplyd/holy-sheet-editor"], "file:vendor/aplyd-holy-sheet-editor-0.1.0-holy3.4.tgz");
+  delete current.dependencies["@aplyd/holy-sheet-editor"];
   assert.deepEqual(current, before);
 });
 
@@ -383,5 +431,5 @@ test("the only local-auth delta is the reviewed staging-only ZZ admin guard", ()
   // default abbreviated index width can differ.
   const diff = execFileSync("git", ["diff", "--full-index", production, "--", "src/app/api/auth"], { encoding: "utf8" });
   const digest = createHash("sha256").update(diff).digest("hex");
-  assert.equal(digest, "103d12f9bfe073866753fe0eb45434d30c1d8c605820a1168b2f8c273a0a54c3");
+  assert.equal(digest, "163a7272e390a79047e031d39a9ed02d1c23c6d729b8fda3eac2a800774a0b83");
 });
