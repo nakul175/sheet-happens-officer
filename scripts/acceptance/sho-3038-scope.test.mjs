@@ -6,6 +6,8 @@ import { readFileSync } from "node:fs";
 
 const production = "ee59582dffcbd8cc3067e689b2bb73cf63781cb7";
 const allowed = new Set([
+  // SHO-2758: Search semantics only; exact attribute-only delta asserted below.
+  "src/app/(app)/search/SearchView.tsx",
   "scripts/ci/task-sheet-result.mjs",
   "scripts/ci/task-sheet-result.test.mjs",
   "tests/e2e/stories/APL-2555.spec.ts",
@@ -402,6 +404,18 @@ test("sequential release changes only explicitly reviewed surfaces", () => {
     .trim().split("\n").filter(Boolean);
   assert.ok(changed.length);
   for (const file of changed) assert.ok(allowed.has(file), file);
+});
+
+test("SHO-2758 Search changes only heading and empty-state semantics", () => {
+  const path = "src/app/(app)/search/SearchView.tsx";
+  const before = execFileSync("git", ["show", `${production}:${path}`], { encoding: "utf8" });
+  const current = readFileSync(path, "utf8");
+  assert.equal((current.match(/className="grp" role="heading" aria-level=\{2\}/g) ?? []).length, 4);
+  assert.equal((current.match(/className="card empty" role="status"/g) ?? []).length, 2);
+  const withoutSemantics = current
+    .replaceAll('className="grp" role="heading" aria-level={2}', 'className="grp"')
+    .replaceAll('className="card empty" role="status"', 'className="card empty"');
+  assert.equal(withoutSemantics, before, "Search logic, layout, classes and visible text must remain unchanged");
 });
 
 test("sequential release does not change package/runtime entry or central suite auth", () => {

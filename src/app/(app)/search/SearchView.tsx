@@ -36,24 +36,24 @@ export default function SearchView() {
           </label>
         )}
       </div>
-      {debounced.length < 2 && <div className="card empty">Type at least two letters.</div>}
+      {debounced.length < 2 && <div className="card empty" role="status">Type at least two letters.</div>}
       {r.error && <div className="err" role="alert">{r.error}</div>}
-      {none && <div className="card empty">Nothing matches &ldquo;{debounced}&rdquo;{archived ? "" : ". Archived projects are left out unless you tick Include archived"}.</div>}
+      {none && <div className="card empty" role="status">Nothing matches &ldquo;{debounced}&rdquo;{archived ? "" : ". Archived projects are left out unless you tick Include archived"}.</div>}
       {!!r.data?.organisations?.length && (
         <>
-          <div className="grp">Organisations</div>
+          <div className="grp" role="heading" aria-level={2}>Organisations</div>
           <div className="list">{r.data.organisations.map((o) => <Link key={o.id} href={`/accounts/${o.id}`} className="item"><div className="t"><b>{o.name}</b>{o.kind && <small>{o.kind}</small>}</div></Link>)}</div>
         </>
       )}
       {!!r.data?.contacts?.length && (
         <>
-          <div className="grp">Contacts</div>
+          <div className="grp" role="heading" aria-level={2}>Contacts</div>
           <div className="list">{r.data.contacts.map((c) => <Link key={c.id} href={`/accounts/${c.organisation.id}`} className="item"><div className="t"><b>{c.name}</b><small>{c.organisation.name}</small></div></Link>)}</div>
         </>
       )}
       {!!r.data?.projects.length && (
         <>
-          <div className="grp">Projects</div>
+          <div className="grp" role="heading" aria-level={2}>Projects</div>
           <div className="list">
             {r.data.projects.map((p) => (
               <Link key={p.id} href={`/projects/${p.id}`} className="item"><div className="t"><b>{p.name}</b></div>{p.archived && <span className="chip grey">Archived</span>}</Link>
@@ -63,7 +63,7 @@ export default function SearchView() {
       )}
       {!!r.data?.tasks.length && (
         <>
-          <div className="grp">Tasks</div>
+          <div className="grp" role="heading" aria-level={2}>Tasks</div>
           <div className="list">
             {r.data.tasks.map((t) => (
               <Link key={t.id} href={`/projects/${t.project.id}?task=${t.id}`} className="item">
