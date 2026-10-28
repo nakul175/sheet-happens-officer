@@ -72,7 +72,7 @@
 .shell .project-board-view .bmove { display:inline-flex; width:auto; margin:8px 0 0; min-height:40px; }
 .shell .project-board-view .bcard { padding:16px; margin-bottom:16px; }
 .shell .project-board-view .bcard .row2 { margin:12px 0; }
-.shell .settings-classification label { display:flex; flex-wrap:wrap; align-items:center; gap:12px; }
+.shell .settings-classification label { display:flex; flex-direction:column; align-items:stretch; gap:8px; }
 .shell .settings-member-identity { min-width:0; overflow-wrap:anywhere; }
 @media(max-width:599px) {
  .profile-sections { grid-template-columns:1fr; }
