@@ -3,7 +3,7 @@ import { expect, it } from "vitest";
 import { account, cleanupZz, istDate, patchTask, project, superAdmin, task, withVersion } from "./helpers";
 it("SHO-2589 counts only led active projects, includes subtasks, and reassigns with versioned Undo", async () => {
   const lead = await account("zzworklead"), worker = await account("zzworkworker"), viewer = await account("zzworkviewer"), outsider = await account("zzworkout");
-  const projects: string[] = [];
+  const projects: string[] = [], archived: string[] = [];
   try {
     const p = await project(lead, lead, [{ who: worker }, { who: viewer, role: "VIEWER" }], "ZZ-TEST workload visible"); projects.push(p.id);
     const other = await project(outsider, outsider, [{ who: worker }, { who: lead }], "ZZ-TEST workload not led"); projects.push(other.id);
@@ -29,9 +29,13 @@ it("SHO-2589 counts only led active projects, includes subtasks, and reassigns w
     expect((await lead.c.post(`/api/actions/${undo}/undo`)).status).toBe(200);
     expect((await lead.c.get(`/api/tasks/${top}`)).json.task.assignee.id).toBe(worker.id);
     expect((await lead.c.post(`/api/projects/${p.id}/archive`, { archive: true })).status).toBe(200);
+    archived.push(p.id);
     const sa = await superAdmin();
     const adminCounts = await sa.c.get(`/api/workload?assignee=${worker.id}`);
     expect(adminCounts.status).toBe(200);
     expect(adminCounts.json.items).toHaveLength(1); // only the other live project
-  } finally { await cleanupZz(projects, [lead, worker, viewer, outsider]); }
+  } finally {
+    for (const id of archived) expect((await lead.c.post(`/api/projects/${id}/unarchive`)).status).toBe(200);
+    await cleanupZz(projects, [lead, worker, viewer, outsider]);
+  }
 });
