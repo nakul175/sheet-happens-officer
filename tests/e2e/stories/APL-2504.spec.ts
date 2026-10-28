@@ -1,17 +1,18 @@
+import { test } from "./qa";
 // APL-2504 · SHO-US-6.3 Action log with before-state
 // Acceptance criteria: AC1 one row per write with who/what/before/after, AC2 "via concierge" tag, AC3 visibility by role,
 // AC4 Activity screen newest first, AC5 12-month retention, AC6 "Too old to undo" after 30 days.
 // AC4 text says an Editor must not reach the screen; SHO-US-14.14 later let Editors see rows for their own tasks. The tests follow
 // the live 14.14 behaviour (Editor: own tasks only; Viewer: refused) and say so.
 // Data: every project and task is named "ZZ-TEST ..."; projects are archived afterwards.
-import { test, expect, zz, type Who } from "../support";
+import { expect, zz, type Who } from "../support";
 import { cleanChat, patchCurrent } from "../helpers/jim-http";
 import { ask, cardOf } from "../helpers/jim-concierge";
 import { localSql, runLocalJob, sourceOf, sqlId } from "../helpers/local-clock";
 import { activityRow } from "../helpers/screen-row";
 
 test.beforeAll(() => {
-  test.skip(!process.env.SHO_QA_PASS, "Set SHO_QA_PASS (the shared password for the nakul17+ accounts).");
+  if (!process.env.SHO_QA_PASS) throw new Error("Set SHO_QA_PASS (the shared password for the nakul17+ accounts).");
 });
 
 async function proj(admin: Who, label: string, later: (f: () => Promise<unknown>) => void, leaderId?: string) {
@@ -22,7 +23,7 @@ async function proj(admin: Who, label: string, later: (f: () => Promise<unknown>
   return id;
 }
 const mk = async (who: Who, p: string, title: string, extra: Record<string, unknown> = {}) => {
-  const r = await who.api.post(`/api/projects/${p}/tasks`, { title, ...extra });
+  const r = await who.api.post(`/api/projects/${p}/tasks`, { dueDate: new Date(Date.now() + 3 * 86400_000).toISOString().slice(0, 10), title, ...extra });
   expect(r.status, JSON.stringify(r.json)).toBe(201);
   return r.json.task.id as string;
 };
@@ -57,12 +58,12 @@ test("APL-2504 AC2: a change made on screen is not tagged via concierge", async 
 });
 
 // qa:TC missing
-test("APL-2504 AC2: a change made through the concierge carries a via concierge tag @manual", async ({ admin, later }) => {
+test("APL-2504 AC2: a change made through the concierge carries a via concierge tag @provider", async ({ admin, later }) => {
   test.info().annotations.push({ type: "qa:TC", description: "qa:TC missing" });
   const state = await admin.api.get("/api/concierge/state");
   const code = (state.json.disabled as { code?: string } | undefined)?.code;
   const modelCan = state.status === 200 && !code;
-  test.skip(!modelCan, `APL-2504: the concierge cannot run in this environment${code ? ` (${code})` : ""}, so a via concierge row is not invented.`);
+  expect(modelCan, `Live staging Concierge configuration required${code ? ` (${code})` : ""}; disabled configuration is not a pass`).toBe(true);
   await cleanChat(admin, later);
   const p = await proj(admin, "log-via-live", later);
   const title = zz("concierge priority");
@@ -197,6 +198,10 @@ test("APL-2504 AC6: Undo is refused after 30 days in the source @static", async 
   test.info().annotations.push({ type: "qa:TC", description: "qa:TC missing" });
   expect(sourceOf("src/lib/undoable.ts", "export const UNDO_DAYS")).toContain("export const UNDO_DAYS = 30;");
   expect(sourceOf("src/lib/undo.ts", 'throw bad("Too old to undo"')).toContain("tooOld: true");
-  expect(sourceOf("src/lib/feed.ts", "UNDO_DAYS * 86400_000")).toContain('"too_old"');
-  expect(sourceOf("src/app/(app)/projects/[id]/activity/Activity.tsx", 'r.undo === "too_old"')).toContain("Too old to undo");
+  const { isTooOldToUndo } = await import("../../../src/lib/undoable");
+  const now = Date.parse("2026-10-28T12:00:00Z");
+  expect(isTooOldToUndo(now - 30 * 86400_000, now)).toBe(false);
+  expect(isTooOldToUndo(now - 30 * 86400_000 - 1, now)).toBe(true);
+  expect(sourceOf("src/lib/feed.ts", "isTooOldToUndo(r.createdAt)")).toContain('"too_old"');
+  expect(sourceOf("src/app/(app)/projects/[id]/activity/Activity.tsx", 'row.undo === "too_old"')).toContain("Too old to undo");
 });

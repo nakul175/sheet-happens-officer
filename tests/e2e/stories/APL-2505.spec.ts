@@ -1,17 +1,20 @@
+import { test } from "./qa";
 // SHO-US-6.4 Undo an action (Linear APL-2505).
 // One test per acceptance criterion. The admin and member fixtures sign in with login("ADMIN") / login("MEMBER").
 // Every project and task is ZZ-TEST (zz / ZZ_PREFIX) and the project is archived afterwards.
 // AC6 locks the 30-day Undo rule. AC7 locks the concierge card onto the same Undo path.
 // Nothing here is pointed at production: BASE_URL is staging or a pr1–pr8 preview.
 import { readFileSync } from "node:fs";
-import { test, expect, zz } from "../support";
-import { getTask, newProject, newTask } from "../g2";
+import { expect, zz } from "../support";
+import { getTask, newProject, newTask as legacyNewTask } from "../g2";
+const newTask: typeof legacyNewTask = (who, projectId, body = {}) =>
+  legacyNewTask(who, projectId, { dueDate: new Date(Date.now() + 3 * 86400_000).toISOString().slice(0, 10), ...body });
 import { activity, audit, editTask, notices } from "../helpers/claude-a";
 import { localSql, sourceOf, sqlId } from "../helpers/local-clock";
 import { activityRow } from "../helpers/screen-row";
 
 test.beforeAll(() => {
-  test.skip(!process.env.SHO_QA_PASS, "Set SHO_QA_PASS (the shared password for the nakul17+ accounts).");
+  if (!process.env.SHO_QA_PASS) throw new Error("Set SHO_QA_PASS (the shared password for the nakul17+ accounts).");
 });
 
 // qa:TC missing
@@ -213,7 +216,7 @@ test("APL-2505 AC7: undoCard uses the same undo path @static", async () => {
   expect(cards).toContain("await checkUndo(user, r.id)");
   expect(cards).toContain("await undoAction(user, r.id, anyway)");
   expect(cards).toContain('throw new ApiError(409, "Too old to undo", { tooOld: true })');
-  expect(cards).toContain("UNDO_DAYS * 86400_000");
+  expect(cards).toContain("isTooOldToUndo(confirmedAt)");
 });
 
 // qa:TC missing

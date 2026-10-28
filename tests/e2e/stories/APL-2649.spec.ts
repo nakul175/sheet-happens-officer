@@ -1,12 +1,15 @@
+import { test } from "./qa";
 // SHO-BUG Hide Undo toast for Editors after delete (Linear APL-2649, PR #14; follow-up to APL-2640). Acceptance criteria AC1 and AC2.
 // The Super Admin acts as Leader and Admin; the plain Member (SHO_MEMBER_*) is the Editor. Projects are ZZ-TEST and archived afterwards.
-import { test, expect } from "../support";
-import { newProject, newTask, type Who } from "../g2";
+import { expect } from "../support";
+import { newProject, newTask as legacyNewTask, type Who } from "../g2";
+const newTask: typeof legacyNewTask = (who, projectId, body = {}) =>
+  legacyNewTask(who, projectId, { dueDate: new Date(Date.now() + 3 * 86400_000).toISOString().slice(0, 10), ...body });
 import { deleteTask } from "../helpers/jim-http";
 import { clickAboveTabBar } from "../helpers/screen-row";
 
 test.beforeAll(() => {
-  test.skip(!process.env.SHO_QA_PASS, "Set SHO_QA_PASS (the shared password for the nakul17+ accounts).");
+  if (!process.env.SHO_QA_PASS) throw new Error("Set SHO_QA_PASS (the shared password for the nakul17+ accounts).");
 });
 
 /** Open the task on its project page and move it to Trash through the task's own dialog. */

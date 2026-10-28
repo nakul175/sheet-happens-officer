@@ -1,13 +1,14 @@
+import { test } from "./qa";
 // APL-2502 · SHO-US-6.1 Delete a task to Trash
 // Acceptance criteria: AC1 delete with subtasks, toast offers Undo; AC2 30-day purge; AC3 Viewer refused;
 // AC4 people on the task are notified; AC5 Leader restores to the original Section.
 // Data: every project and task is named "ZZ-TEST ..."; projects are archived afterwards.
-import { test, expect, zz, type Who } from "../support";
+import { expect, zz, type Who } from "../support";
 import { localSql, runLocalJob, sourceOf, sqlId } from "../helpers/local-clock";
 import { clickAboveTabBar } from "../helpers/screen-row";
 
 test.beforeAll(() => {
-  test.skip(!process.env.SHO_QA_PASS, "Set SHO_QA_PASS (the shared password for the nakul17+ accounts).");
+  if (!process.env.SHO_QA_PASS) throw new Error("Set SHO_QA_PASS (the shared password for the nakul17+ accounts).");
 });
 
 async function proj(admin: Who, label: string, later: (f: () => Promise<unknown>) => void) {
@@ -19,7 +20,7 @@ async function proj(admin: Who, label: string, later: (f: () => Promise<unknown>
   return { id, todo: s[0].id, doing: s[1].id };
 }
 const mk = async (admin: Who, p: string, title: string, extra: Record<string, unknown> = {}) => {
-  const r = await admin.api.post(`/api/projects/${p}/tasks`, { title, ...extra });
+  const r = await admin.api.post(`/api/projects/${p}/tasks`, { dueDate: new Date(Date.now() + 3 * 86400_000).toISOString().slice(0, 10), title, ...extra });
   expect(r.status, JSON.stringify(r.json)).toBe(201);
   return r.json.task.id as string;
 };
@@ -86,10 +87,12 @@ test("APL-2502 AC2: purge-trash removes a task that has been in Trash for 30 day
 test("APL-2502 AC2: purge-trash keeps a task for 30 days before it removes it @static", async () => {
   test.info().annotations.push({ type: "qa:TC", description: "qa:TC missing" });
   const body = sourceOf("src/lib/tasks.ts", "export async function purgeTrash", "export async function myTasks");
-  expect(body).toContain("const cutoff = new Date(now.getTime() - 30 * 86400_000)");
-  expect(body).toContain("deletedAt: { lte: cutoff }");
+  const { trashPurgeBefore } = await import("../../../src/lib/undoable");
+  const now = new Date("2026-10-28T12:00:00Z");
+  expect(trashPurgeBefore(now).getTime()).toBe(now.getTime() - 30 * 86400_000);
+  expect(body).toContain("deletedAt: { lt: trashPurgeBefore(now) }");
   expect(body).toContain('event: "TASK_PURGED"');
-  expect(sourceOf("src/lib/jobs.ts", "export const JOBS", "const DAILY_GRACE_HOURS")).toContain('name: "purge-trash", about: "Removes tasks that have been in Trash for 30 days"');
+  expect(sourceOf("src/lib/jobs.ts", "export const JOBS", "const DAILY_GRACE_HOURS")).toMatch(/name: "purge-trash", about: "Removes tasks that have been in Trash for (more than )?30 days/);
 });
 
 // qa:TC missing

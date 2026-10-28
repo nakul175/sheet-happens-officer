@@ -1,13 +1,16 @@
+import { test } from "./qa";
 // SHO-BUG-8 Editor can undo their own delete, skipping the Leader/Admin check (Linear APL-2640, PR #9). Acceptance criteria AC1 to AC4.
 // The Super Admin acts as Leader; the plain Member (SHO_MEMBER_*) is the Editor. Projects are ZZ-TEST and archived afterwards.
-import { test, expect } from "../support";
-import { newProject, newTask } from "../g2";
+import { expect } from "../support";
+import { newProject, newTask as legacyNewTask } from "../g2";
+const newTask: typeof legacyNewTask = (who, projectId, body = {}) =>
+  legacyNewTask(who, projectId, { dueDate: new Date(Date.now() + 3 * 86400_000).toISOString().slice(0, 10), ...body });
 import { deleteTask, raw } from "../helpers/jim-http";
 
 const REFUSED = "Only the project Leader or an Admin can do this.";
 
 test.beforeAll(() => {
-  test.skip(!process.env.SHO_QA_PASS, "Set SHO_QA_PASS (the shared password for the nakul17+ accounts).");
+  if (!process.env.SHO_QA_PASS) throw new Error("Set SHO_QA_PASS (the shared password for the nakul17+ accounts).");
 });
 
 test.describe("SHO-BUG-8 / APL-2640", () => {

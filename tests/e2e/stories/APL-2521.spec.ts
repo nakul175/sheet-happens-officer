@@ -1,14 +1,15 @@
+import { test } from "./qa";
 // APL-2521 · SHO-US-6.5 Organisation audit log for the Super Admin
 // Acceptance criteria: AC1 one row per listed event, AC2 only the Super Admin, AC3 no secrets, AC4 retention and no hand editing,
 // AC5 five failed sign-ins and the lockout, AC6 IP only on sign-in events, AC7 task delete/restore/purge, Undo anyway, approver.
 // Data: every project and task is named "ZZ-TEST ..."; the person created for AC5 is "ZZ-TEST ..." at example.invalid (no inbox) and is
 // deactivated afterwards. AC2 briefly makes the Member an Admin and puts the role back in a finally block.
-import { test, expect, zz, RUN, login, type Who } from "../support";
+import { expect, zz, RUN, login, type Who } from "../support";
 import { patchCurrent } from "../helpers/jim-http";
 import { localSql, runLocalJob, sourceOf, sqlId } from "../helpers/local-clock";
 
 test.beforeAll(() => {
-  test.skip(!process.env.SHO_QA_PASS, "Set SHO_QA_PASS (the shared password for the nakul17+ accounts).");
+  if (!process.env.SHO_QA_PASS) throw new Error("Set SHO_QA_PASS (the shared password for the nakul17+ accounts).");
 });
 
 async function proj(admin: Who, label: string, later: (f: () => Promise<unknown>) => void) {
@@ -19,7 +20,7 @@ async function proj(admin: Who, label: string, later: (f: () => Promise<unknown>
   return id;
 }
 const mk = async (admin: Who, p: string, title: string, extra: Record<string, unknown> = {}) => {
-  const r = await admin.api.post(`/api/projects/${p}/tasks`, { title, ...extra });
+  const r = await admin.api.post(`/api/projects/${p}/tasks`, { dueDate: new Date(Date.now() + 3 * 86400_000).toISOString().slice(0, 10), title, ...extra });
   expect(r.status, JSON.stringify(r.json)).toBe(201);
   return r.json.task.id as string;
 };
@@ -214,7 +215,7 @@ test("AC7 (30-day purge): one TASK_PURGED row is written for a purge run", async
 test("APL-2521 AC7: a purge run writes one TASK_PURGED row in the source @static", async () => {
   test.info().annotations.push({ type: "qa:TC", description: "qa:TC missing" });
   const body = sourceOf("src/lib/tasks.ts", "export async function purgeTrash", "export async function myTasks");
-  expect(body).toContain("if (r.count) await db.auditLog.create");
+  expect(body).toMatch(/if\s*\(r\.count\)\s*\{\s*await db\.auditLog\.create/);
   expect(body).toContain('event: "TASK_PURGED"');
-  expect(body).toContain("30 * 86400_000");
+  expect(body).toContain("trashPurgeBefore(now)");
 });
