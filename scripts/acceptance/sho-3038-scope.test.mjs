@@ -6,6 +6,18 @@ import { readFileSync } from "node:fs";
 
 const production = "afc38bd3e2973b0c4b0974a59d3c43e443648bb2";
 const allowed = new Set([
+  // SHO-2589 workload-only addition authorized by Product; live surfaces stay pinned.
+  "src/app/(app)/layout.tsx",
+  "src/app/(app)/workload/WorkloadView.tsx",
+  "src/app/(app)/workload/page.tsx",
+  "src/app/(app)/workload/workload.css",
+  "src/app/api/workload/route.ts",
+  "src/lib/workload.ts",
+  "tests/workload-unit.test.ts",
+  "tests/workload.test.ts",
+  "docs/runbooks/workload-release.md",
+  "scripts/acceptance/sho2589-scope.test.mjs",
+
   // SHO-3062: reviewed Holy Sheet document integration on the exact current
   // production release. The feature-specific scope gate further restricts
   // runtime changes and preserves canonical auth/release surfaces.
