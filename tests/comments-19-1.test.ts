@@ -158,6 +158,11 @@ describe("flag off (AC9)", () => {
     await requireFlagOffServer(ctx);
     const activity = await lead.c.get(`/api/projects/${p.id}/activity`);
     expect(activity.status).toBe(200);
+    expect(activity.json.items.length).toBeGreaterThan(0);
+    for (const item of activity.json.items as { id: string; kind: string }[]) {
+      const stored = await db.actionLog.findUniqueOrThrow({ where: { id: item.id } });
+      expect(item.kind).toBe(stored.action);
+    }
     const shown = (activity.json.items as { id: string }[]).map((i) => i.id);
     for (const log of logs) expect(shown).not.toContain(log.id);
     expect(JSON.stringify(activity.json)).not.toMatch(/comment/i);
@@ -180,7 +185,11 @@ describe("flag off (AC9)", () => {
     on();
     try {
       const back = await projectActivity(actor(lead), p.id);
-      for (const log of logs) expect(back.items.find((i) => i.id === log.id)?.undo).toBe("available");
+      for (const log of logs) {
+        const item = back.items.find((i) => i.id === log.id);
+        expect(item?.undo).toBe("available");
+        expect(item?.kind).toBe(log.action);
+      }
     } finally { off(); }
   });
 });

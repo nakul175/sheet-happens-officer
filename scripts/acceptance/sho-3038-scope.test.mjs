@@ -217,6 +217,7 @@ const allowed = new Set([
   "src/app/(app)/projects/[id]/trash/Trash.tsx",
   "src/app/(app)/projects/[id]/trash/trash.css",
   "tests/settings-activity-trash-approved.test.tsx",
+  "tests/comments-19-1.test.ts", // SHO-2701: assert each stored action kind survives Activity serialization
   "vitest.settings-approved.config.mts",
   "docs/settings-activity-trash-release.md",
   // SHO-3077..3083: explicitly approved UI surfaces; runtime/auth invariants below remain unchanged.
