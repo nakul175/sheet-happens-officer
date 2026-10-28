@@ -18,7 +18,7 @@ function dialogSections(children: React.ReactNode): React.ReactNode {
 }
 
 /** An open dialog: its identity for this render tree and the element a keypress has to belong to. */
-type Open = { me: symbol; el: HTMLElement | null };
+type Open = { me: symbol; el: HTMLElement | null; close: () => void };
 
 /**
  * SHO-3025: the dialogs that are open. Only the one on top answers Escape, and it stops the event there.
@@ -32,7 +32,7 @@ const OPEN: Open[] = [];
  * inner one is on top. Two dialogs opened together in one commit are therefore ordered by the tree, not by
  * whichever layout effect happened to run first.
  */
-function topDialog(): HTMLElement | null {
+export function topDialog(): HTMLElement | null {
   const els = OPEN.map((o) => o.el).filter((el): el is HTMLElement => !!el);
   for (let i = OPEN.length - 1; i >= 0; i--) {
     const el = OPEN[i].el;
@@ -40,6 +40,9 @@ function topDialog(): HTMLElement | null {
   }
   return null;
 }
+
+/** A captured dialog may already have closed while a history traversal was restoring. */
+export function closeDialog(dialog: HTMLElement) { OPEN.find(o => o.el === dialog)?.close(); }
 
 /**
  * SHO-3025: the key listener, the scroll lock and the focus move belong to the commit that paints the dialog, not
@@ -60,7 +63,7 @@ export function Modal({ onClose, small, label, describedBy, className, children 
   useCommitEffect(() => {
     const me = Symbol("dialog");
     const dialog = ref.current;
-    OPEN.push({ me, el: dialog });
+    OPEN.push({ me, el: dialog, close: () => latest.current() });
     const prev = opener;
     if (topDialog() === dialog) (dialog?.querySelector<HTMLElement>("[data-autofocus]") ?? dialog)?.focus(); // SHO-US-14.5: a dialog can name the field that gets focus
     // SHO-US-22.7: the page behind a dialog must not scroll.

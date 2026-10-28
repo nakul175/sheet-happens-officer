@@ -13,6 +13,7 @@ import { TaskLinks } from "@/components/TaskLinks";
 import { Comments } from "@/components/Comments";
 import { closeControlOffered } from "@/lib/approver-ui";
 import { useMe } from "@/app/(app)/Shell";
+import { useTaskSheetBack } from "@/components/use-task-sheet-back";
 
 type P = { id: string; name: string };
 type Sub = { id: string; title: string; completedAt: string | null; canClose: boolean; updatedAt: string };
@@ -46,20 +47,31 @@ export function TaskModal({ id, me, onClose, onChanged, asPage }: { id: string; 
   const [convert, setConvert] = useState(false);
   const [confirmExit, setConfirmExit] = useState(false);
   const details = useRef<HTMLDivElement>(null);
+  const pauseBlurSave = useRef(false);
   const meCtx = useMe();
 
-  function requestClose() {
+  function hasUnsavedChanges() {
     const changed = (selector: string, saved: string | null | undefined, trim = true) => {
       const field = details.current?.querySelector<HTMLTextAreaElement>(selector);
       if (!field || field.readOnly) return false;
       return (trim ? field.value.trim() : field.value) !== (saved ?? "");
     };
-    if (busy || lost || newSub.trim() || changed('[aria-label="Title"]', task?.title) || changed('#desc', task?.description) || changed('.blocked-reason', task?.blockedReason, false)) {
+    return !!(busy || lost || newSub.trim() || details.current?.querySelector('[data-unsaved-draft="true"]') || changed('[aria-label="Title"]', task?.title) || changed('#desc', task?.description) || changed('.blocked-reason', task?.blockedReason, false));
+  }
+  const closeByBack = useTaskSheetBack({ id, enabled: !asPage, root: () => details.current?.closest<HTMLElement>('[role="dialog"]') ?? null,
+    blocked: hasUnsavedChanges, beforePrompt: () => { pauseBlurSave.current = true; }, prompt: () => setConfirmExit(true) });
+  function finishClose() {
+    pauseBlurSave.current = true;
+    if (!closeByBack()) onClose();
+  }
+  function requestClose() {
+    if (hasUnsavedChanges()) {
+      pauseBlurSave.current = true;
       setConfirmExit(true);
-    } else onClose();
+    } else finishClose();
   }
   const body = (inner: React.ReactNode) => (asPage ? <div ref={details} className="modal task-details task-details-page" style={{ margin: "0 auto" }}>{inner}</div> : <Modal label="Task" className="task-sheet" onClose={requestClose}><div ref={details} className="task-details">{inner}</div></Modal>);
-  const stateHeader = !asPage && <div className="bar"><span>Task</span><button type="button" className="link" onClick={onClose}>Close</button></div>;
+  const stateHeader = !asPage && <div className="bar"><span>Task</span><button type="button" className="link" onClick={finishClose}>Close</button></div>;
 
   if (t.loading) return body(<>{stateHeader}<Skeleton /></>);
   if (!task) {
@@ -147,6 +159,7 @@ export function TaskModal({ id, me, onClose, onChanged, asPage }: { id: string; 
             onInput={(e) => { const el = e.currentTarget; el.style.height = "auto"; el.style.height = `${el.scrollHeight}px`; }}
             onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); e.currentTarget.blur(); } }}
             onBlur={(e) => {
+              if (pauseBlurSave.current) return;
               const v = e.target.value.trim();
               if (!v) { setErr("Give the task a title."); e.target.value = task.title; }
               else if (v !== task.title) save({ title: v });
@@ -259,7 +272,7 @@ export function TaskModal({ id, me, onClose, onChanged, asPage }: { id: string; 
                   placeholder={canEdit && !holding ? "Why is it blocked?" : undefined} defaultValue={task.blockedReason ?? ""} key={task.updatedAt}
                   ref={blockedReasonRef}
                   onInput={(e) => fitBlockedReason(e.currentTarget)}
-                  onBlur={(e) => { if (!canEdit || holding) return; if ((e.target.value || null) !== (task.blockedReason ?? null)) save({ blockedReason: e.target.value || null }); }} />
+                  onBlur={(e) => { if (!canEdit || holding || pauseBlurSave.current) return; if ((e.target.value || null) !== (task.blockedReason ?? null)) save({ blockedReason: e.target.value || null }); }} />
               )}
             </div>
           </div>
@@ -268,7 +281,7 @@ export function TaskModal({ id, me, onClose, onChanged, asPage }: { id: string; 
           <div className="field">
             <label htmlFor="desc">Description</label>
             <textarea id="desc" className="in" readOnly={!canEdit || holding} defaultValue={task.description ?? ""} key={task.updatedAt} placeholder={canEdit ? "Add details" : "No description"}
-              onBlur={(e) => { if ((e.target.value.trim() || null) !== (task.description ?? null)) save({ description: e.target.value.trim() || null }); }} />
+              onBlur={(e) => { if (pauseBlurSave.current) return; if ((e.target.value.trim() || null) !== (task.description ?? null)) save({ description: e.target.value.trim() || null }); }} />
           </div>
           {!task.parentId && (
             <div className="field">
@@ -316,7 +329,7 @@ export function TaskModal({ id, me, onClose, onChanged, asPage }: { id: string; 
 
         </>,
       )}
-      {confirmExit && <Confirm title="Close without saving?" yes="Close anyway" onNo={() => setConfirmExit(false)} onYes={onClose}
+      {confirmExit && <Confirm title="Close without saving?" yes="Close anyway" onNo={() => { pauseBlurSave.current = false; setConfirmExit(false); }} onYes={finishClose}
         body="Some edits have not been saved or a save is still in progress. Closing can lose these edits. A save already sent may still finish. Choose Cancel to keep editing." />}
       {convert && <ConvertDialog task={task} meId={me} onClose={() => setConvert(false)} />}
       {confirm && (
@@ -327,7 +340,7 @@ export function TaskModal({ id, me, onClose, onChanged, asPage }: { id: string; 
       {trash && (
         <Confirm title="Move to Trash?" yes="Move to Trash" danger busy={busy} error={err} onNo={() => setTrash(false)}
           body="The task and its subtasks are kept for 30 days and can be restored from the project's Trash. Everyone on the task is told."
-          onYes={async () => { const r = await api("DELETE", `/api/tasks/${id}`); if (r.ok) { onChanged?.(); onClose(); } else setErr(r.error ?? "Could not move it."); }} />
+          onYes={async () => { const r = await api("DELETE", `/api/tasks/${id}`); if (r.ok) { onChanged?.(); finishClose(); } else setErr(r.error ?? "Could not move it."); }} />
       )}
       {trashSub && (
         <Confirm title={`Delete subtask “${trashSub.title}”?`} yes="Move to Trash" danger busy={busy} error={err} onNo={() => setTrashSub(null)}

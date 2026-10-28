@@ -85,7 +85,7 @@ export function Comments({ taskId, onChanged }: { taskId: string; onChanged?: ()
 
   const data = list.data;
   return (
-    <section className="comments" aria-labelledby="comments-heading">
+    <section className="comments" aria-labelledby="comments-heading" data-unsaved-draft={busy || !!text.trim() || (!!editing && draft !== data?.comments.find(c => c.id === editing)?.text)}>
       <h3 id="comments-heading">Comments{data ? ` (${data.comments.length})` : ""}</h3>
       {list.loading && !data && <p className="hint">Loading comments…</p>}
       {list.error && !data && <p className="hint" role="alert">{list.error}</p>}

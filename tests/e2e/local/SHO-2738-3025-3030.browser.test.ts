@@ -302,6 +302,93 @@ describe("SHO-3025: one Escape, one dialog, in a real browser", () => {
   }, 240000);
 });
 
+describe("SHO-2616: real browser history closes a task without dropping drafts", () => {
+  it("Back closes a row-opened task, returns focus, then continues to the previous page", async () => {
+    const ctx = await signedIn(root.email, { width: 390, height: 844 }, true);
+    const page = await ctx.newPage();
+    try {
+      await page.goto("/team", { waitUntil: "load", timeout: 120000 });
+      await page.goto(`/projects/${projectId}`, { waitUntil: "load", timeout: 120000 });
+      const { row, sheet } = await openSheet(page);
+      await page.goBack();
+      await sheet.waitFor({ state: "detached", timeout: 15000 });
+      expect(new URL(page.url()).searchParams.has("task")).toBe(false);
+      expect(await row.evaluate(el => document.activeElement === el)).toBe(true);
+      await page.goBack();
+      await page.waitForURL("**/team", { timeout: 15000 });
+    } finally { await ctx.close(); }
+  }, 180000);
+
+  it("a reloaded direct link closes to its background exactly once", async () => {
+    const ctx = await signedIn(root.email, { width: 390, height: 844 }, true);
+    const page = await ctx.newPage();
+    try {
+      await page.goto("/team", { waitUntil: "load", timeout: 120000 });
+      await page.goto(`/projects/${projectId}?task=${taskId}`, { waitUntil: "load", timeout: 120000 });
+      await page.getByRole("dialog", { name: "Task", exact: true }).locator("#desc").waitFor();
+      await page.reload({ waitUntil: "load" });
+      const sheet = page.getByRole("dialog", { name: "Task", exact: true });
+      await sheet.locator("#desc").waitFor();
+      await page.goBack();
+      await sheet.waitFor({ state: "detached", timeout: 15000 });
+      expect(new URL(page.url()).pathname).toBe(`/projects/${projectId}`);
+      expect(new URL(page.url()).searchParams.has("task")).toBe(false);
+      await page.goBack();
+      await page.waitForURL("**/team", { timeout: 15000 });
+    } finally { await ctx.close(); }
+  }, 180000);
+
+  it("Back preserves a focused unsaved description, and Cancel or discard never sends a blur save", async () => {
+    const ctx = await signedIn(root.email, { width: 390, height: 844 }, true);
+    const page = await ctx.newPage();
+    const patches: string[] = [];
+    page.on("request", r => { if (r.method() === "PATCH" && new URL(r.url()).pathname === `/api/tasks/${taskId}`) patches.push(r.postData() ?? ""); });
+    try {
+      await page.goto(`/projects/${projectId}`, { waitUntil: "load", timeout: 120000 });
+      const { sheet } = await openSheet(page);
+      const original = await sheet.locator("#desc").inputValue();
+      const draft = `${original}\nZZ-TEST unsaved Back draft`;
+      await sheet.locator("#desc").fill(draft);
+      await page.evaluate(() => history.back());
+      const confirm = page.getByRole("dialog", { name: "Close without saving?", exact: true });
+      await confirm.waitFor({ state: "visible", timeout: 15000 });
+      expect(new URL(page.url()).searchParams.get("task")).toBe(taskId);
+      expect(patches).toEqual([]);
+      await confirm.getByRole("button", { name: "Cancel", exact: true }).click();
+      await confirm.waitFor({ state: "detached" });
+      expect(await sheet.locator("#desc").inputValue()).toBe(draft);
+      await page.evaluate(() => history.back());
+      await confirm.waitFor({ state: "visible", timeout: 15000 });
+      await confirm.getByRole("button", { name: "Close anyway", exact: true }).click();
+      await sheet.waitFor({ state: "detached", timeout: 15000 });
+      expect(patches).toEqual([]);
+      const response = await ctx.request.get(`/api/tasks/${taskId}`);
+      expect((await response.json()).task.description).toBe(original);
+    } finally { await ctx.close(); }
+  }, 180000);
+
+  it("Back dismisses only a nested confirmation and keeps the task and scroll lock", async () => {
+    const ctx = await signedIn(root.email, { width: 390, height: 844 }, true);
+    const page = await ctx.newPage();
+    try {
+      await page.goto(`/projects/${projectId}`, { waitUntil: "load", timeout: 120000 });
+      const { sheet } = await openSheet(page);
+      const trigger = sheet.getByRole("button", { name: "Move to Trash", exact: true });
+      await trigger.click();
+      const confirm = page.getByRole("dialog", { name: "Move to Trash?", exact: true });
+      await confirm.waitFor();
+      await page.evaluate(() => history.back());
+      await confirm.waitFor({ state: "detached", timeout: 15000 });
+      expect(await page.getByRole("dialog").count()).toBe(1);
+      expect(new URL(page.url()).searchParams.get("task")).toBe(taskId);
+      expect(await page.evaluate(() => document.body.style.overflow)).toBe("hidden");
+      expect(await trigger.evaluate(el => document.activeElement === el)).toBe(true);
+      await page.evaluate(() => history.back());
+      await sheet.waitFor({ state: "detached", timeout: 15000 });
+    } finally { await ctx.close(); }
+  }, 180000);
+});
+
 describe("SHO-3030: the deactivate dialog and its summary, mounted by the real Team screen", () => {
   it("the dialog and the summary explain the fallback by the role, not by membership", async () => {
     const ctx = await signedIn(root.email, { width: 1280, height: 900 });

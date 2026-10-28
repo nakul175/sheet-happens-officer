@@ -8,6 +8,7 @@ import { TaskModal } from "@/components/TaskModal";
 import { LoadFailed, Skeleton } from "@/components/ui";
 import type { WorkloadMetric, WorkloadPerson } from "@/lib/workload";
 import { workloadHref, workloadMetric, workloadQuery } from "@/lib/workload-query";
+import { openTaskSheet } from "@/lib/task-sheet-history";
 import { Page, useMe } from "../Shell";
 import "./workload.css";
 
@@ -78,7 +79,7 @@ export default function Workload() {
           <p className="hint">{tasks.data.total} matching task{tasks.data.total === 1 ? "" : "s"}. Open a task to change its assignee.</p>
           {!tasks.data.items.length && <p className="empty">No tasks match this count.</p>}
           <ul className="workload-tasks">{tasks.data.items.map(t => <li key={t.id}>
-            <div><button type="button" className="workload-task-title" onClick={() => router.push(modalHref(t.id), { scroll: false })}>{t.title}</button>
+            <div><button type="button" className="workload-task-title" onClick={() => { const href = modalHref(t.id); if (!openTaskSheet(href)) router.push(href, { scroll: false }); }}>{t.title}</button>
               <div className="workload-task-context">{t.parentId && <span>Subtask · </span>}<Link href={`/projects/${t.project.id}`}>{t.project.name}</Link></div></div>
             <div className="workload-task-meta"><Pri p={t.priority} /><span>{t.dueDate ? dueState(t.dueDate) : "No due date"}</span>{t.blocked && <span className="chip">Blocked</span>}</div>
           </li>)}</ul>
