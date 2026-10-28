@@ -55,6 +55,17 @@ export default function DealsView() {
         <button aria-pressed={lifecycle === "sales"} onClick={() => setLifecycle("sales")}>Sales pipeline</button>
         <button aria-pressed={lifecycle === "delivery"} onClick={() => setLifecycle("delivery")}>Delivery projects</button>
       </div>
+      <div className="tabs" style={{ marginBottom: 12 }}>
+        <div className="seg deal-pipeline-switcher" role="tablist" aria-label="Pipeline">
+          {pipes.data?.pipelines.map((p) => <button key={p.id} role="tab" aria-selected={cur?.id === p.id} onClick={() => { setPipe(p.id); setStages([]); }}>{p.name}</button>)}
+        </div>
+        <span className="sp" />
+        <div className="seg" role="group" aria-label="Layout">
+          <button aria-pressed={view === "board"} onClick={() => setView("board")}>Board</button>
+          <button aria-pressed={view === "list"} onClick={() => setView("list")}>List</button>
+        </div>
+      </div>
+      {cur && <p className="hint deal-pipeline-purpose">{cur.key === "DEAL_BID" ? "Formal bids and submission deadlines." : "Proactive opportunities and conversations."}</p>}
       <div className="deal-toolbar" aria-label="Deal filters and sorting">
         <MultiFilter label="Opportunity types" values={opportunities} onChange={setOpportunities} options={[...OPPORTUNITY_TYPES.map(type => ({ value: type.value, label: type.label })), { value: "unclassified", label: "Unclassified" }]} />
         <MultiFilter label="Stages" values={stages} onChange={setStages} options={(cur?.stages ?? []).map(item => ({ value: item.id, label: item.name }))} />
@@ -80,17 +91,6 @@ export default function DealsView() {
         {(opportunities.length > 0 || stages.length > 0 || dateActive) && <button className="link" onClick={() => { setOpportunities([]); setStages([]); setDateFilter({ field: "submissionDeadline", start: "", end: "", undated: "include" }); }}>Clear filters</button>}
       </div>
       {invalidRange && <p className="err" role="alert">From must be on or before Through.</p>}
-      <div className="tabs" style={{ marginBottom: 12 }}>
-        <div className="seg" role="tablist" aria-label="Pipeline">
-          {pipes.data?.pipelines.map((p) => <button key={p.id} role="tab" aria-selected={cur?.id === p.id} onClick={() => { setPipe(p.id); setStages([]); }}>{p.name}</button>)}
-        </div>
-        <span className="sp" />
-        <div className="seg" role="group" aria-label="Layout">
-          <button aria-pressed={view === "board"} onClick={() => setView("board")}>Board</button>
-          <button aria-pressed={view === "list"} onClick={() => setView("list")}>List</button>
-        </div>
-      </div>
-      {cur && <p className="hint deal-pipeline-purpose">{cur.key === "DEAL_BID" ? "Formal bids and submission deadlines." : "Proactive opportunities and conversations."}</p>}
       {loading && !data && <Skeleton />}
       {error && <div className="err" role="alert">{error}</div>}
       {data && deals.length === 0 && <div className="card empty" role="region" aria-label="No matching deals">
