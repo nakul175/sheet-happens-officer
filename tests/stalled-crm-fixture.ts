@@ -94,7 +94,6 @@ export async function seedStalledWorld(tag = stalledTag()): Promise<StalledWorld
       const r = await add.leader.c.post(`/api/projects/${add.dealId}/members`, { userId: add.userId, role: "EDITOR" });
       expect(r.status, JSON.stringify(r.json)).toBe(201);
     }
-    await ageDeals(world);
     const setup = await db.notification.findMany({ where: { recipientId: { in: PEOPLE(world).map(p => p.id) } }, select: { id: true, recipientId: true, projectId: true } });
     const projectIds = new Set(worldDeals(world).map(deal => deal.id));
     for (const notice of setup.filter(n => n.projectId && projectIds.has(n.projectId))) {
@@ -103,6 +102,8 @@ export async function seedStalledWorld(tag = stalledTag()): Promise<StalledWorld
     }
     world.setupNoticeIds = new Set(setup.map(n => n.id));
     for (const person of PEOPLE(world)) setupByPerson.set(person.id, world.setupNoticeIds);
+    // Snapshot setup before making the world eligible for a stalled job.
+    await ageDeals(world);
     return world;
   } catch (error) {
     try { await cleanupReminderResources(root.id, (p, body) => root.c.post(p, body), resources); }

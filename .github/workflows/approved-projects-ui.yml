@@ -57,7 +57,7 @@ jobs:
           cache: npm
       - run: npm ci --no-audit --no-fund
       - name: Sequential SHO-3038 release scope
-        run: node --test scripts/acceptance/sho-3038-scope.test.mjs
+        run: node --test scripts/acceptance/sho-3038-scope.test.mjs scripts/ci/stalled-m1-result.test.mjs scripts/ci/stalled-m1-freshness.test.mjs
       - name: Approved Projects UI, Board and task-details regressions
         run: npx vitest run -c vitest.projects-approved.config.mts
       - name: Approved Home and single-row shell regressions
