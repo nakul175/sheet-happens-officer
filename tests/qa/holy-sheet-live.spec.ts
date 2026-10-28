@@ -59,7 +59,7 @@ test('SHO-3062 paired normal-login qualification and HOLY-4 AC16',async({browser
   });
   await step('SC/TC/MS-SHO-3062-051,053 and HOLY-4-047: link an existing allowed private page',async()=>{
    await renewHs();const source=await hsDocument(fixture.sharedPageId);expect(source.status()).toBe(200);const data=await source.json(),document=data.page??data;
-   await docs().getByRole('button',{name:'Link existing page',exact:true}).click();await picker().getByRole('combobox',{name:'Space',exact:true}).selectOption('');await picker().getByLabel('Find existing page',{exact:true}).fill(document.title);await picker().getByRole('button',{name:document.title,exact:true}).click();
+  await docs().getByRole('button',{name:'Link existing page',exact:true}).click();await picker().getByRole('combobox',{name:'Space',exact:true}).selectOption('');await picker().getByLabel('Find existing page',{exact:true}).fill(document.title);await picker().getByRole('button',{name:'Search HS pages',exact:true}).click();await picker().getByRole('button',{name:document.title,exact:true}).click();
    await expect(editor().getByLabel('Page title',{exact:true})).toHaveValue(document.title,{timeout:30000});expect((await metadata('tasks',taskId)).links.some((p:{pageId:string})=>p.pageId===fixture.sharedPageId)).toBe(true);
    await page.screenshot({path:'test-results/holy3062-embedded-allowed.png'});
    console.log('HOLY3062_READY_FOR_OWNER_REVOCATION');
