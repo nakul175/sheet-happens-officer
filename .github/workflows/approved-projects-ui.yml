@@ -151,6 +151,10 @@ jobs:
           tests/e2e/stories/APL-2482.spec.ts tests/e2e/stories/APL-2484.spec.ts tests/e2e/stories/APL-2590.spec.ts
           --grep-invert " AC(14|15|16) "
           | tee validation-scoped-stories.log
+      - name: SHO-2758 contacts semantic locator acceptance on local next start
+        run: |
+          npx playwright test tests/e2e/stories/APL-2533.spec.ts --output=test-results/sho-2758-contacts --reporter=json > validation-2758-contacts.json
+          node -e 'const r=require("./validation-2758-contacts.json"),tests=[];function visit(s){for(const p of s.specs??[])tests.push(...p.tests);for(const c of s.suites??[])visit(c)}for(const s of r.suites??[])visit(s);if(tests.length!==5||(r.errors??[]).length||tests.some(t=>t.expectedStatus!=="passed"||t.status!=="expected"||t.results.length!==1||t.results[0].status!=="passed"))throw Error("SHO-2758 requires five ordinary passed contact cases with no skip, retry or expected failure");console.log("SHO-2758: five local contact cases passed")' | tee validation-2758-contacts.log
       - name: SHO-2882 retained CRM story executes all four owned-outbox cases
         env:
           CRM_VISIBLE: all
@@ -203,10 +207,12 @@ jobs:
             test-results/sho-2903-m1/
             validation-2900-browser.json
             validation-2759-browser.json
+            validation-2758-contacts.json
             validation-3133-outcomes.json
             release12-drain.json
             test-results/e2e
             test-results/sho-2905-sheet/
             validation-2905-browser.json
             workload-ui-previews/
+            test-results/sho-2758-contacts/
             test-results/sho-3133-outcomes/
