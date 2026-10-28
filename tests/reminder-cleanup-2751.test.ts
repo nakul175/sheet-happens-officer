@@ -10,6 +10,16 @@ it("qa:TC missing SHO-2751: reminder suites contain no direct database writes", 
     expect(source, `${name} must set up and isolate fixtures through HTTP APIs`).not.toMatch(write);
   }
 });
+it("qa:TC missing SHO-2769: reminder accounts use run-unique nakul17+ aliases", () => {
+  const inProcess = readFileSync(fileURLToPath(new URL("jobs-reminders-crm.test.ts", import.meta.url)), "utf8");
+  const server = readFileSync(fileURLToPath(new URL("jobs-reminders-crm-server.test.ts", import.meta.url)), "utf8");
+
+  expect(inProcess).toContain("`nakul17+zz-2729-${tag}-admin@aplyd.com`");
+  expect(inProcess).toContain("`nakul17+zz-2729-${tag}-member@aplyd.com`");
+  expect(server).toContain("`nakul17+zz-2729-server-${tag}-admin@aplyd.com`");
+  expect(server).toContain("`nakul17+zz-2729-server-${tag}-member@aplyd.com`");
+  expect(`${inProcess}\n${server}`).not.toMatch(/(?:zzmember|zzdealadmin)[.@]/i);
+});
 it("qa:TC missing SHO-2751/2769: only run-owned resources are cleaned through ordered API calls", async () => {
   const resources = reminderResources();
   resources.projects.push({ id: "zz-project", leaderId: "zz-person", archived: false });
