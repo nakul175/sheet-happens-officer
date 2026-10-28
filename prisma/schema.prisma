@@ -62,58 +62,59 @@ model Workspace {
 }
 
 model User {
-  id                 String    @id @default(cuid())
-  workspaceId        String
-  workspace          Workspace @relation(fields: [workspaceId], references: [id])
-  email              String    @unique
-  name               String
-  passwordHash       String
-  emailVerifiedAt    DateTime?
-  orgRole            OrgRole   @default(MEMBER)
-  deactivatedAt      DateTime?
+  id                    String    @id @default(cuid())
+  workspaceId           String
+  workspace             Workspace @relation(fields: [workspaceId], references: [id])
+  email                 String    @unique
+  name                  String
+  passwordHash          String
+  emailVerifiedAt       DateTime?
+  orgRole               OrgRole   @default(MEMBER)
+  deactivatedAt         DateTime?
   // SHO-US-15.3: set when a Super Admin issued the password; cleared when the person sets their own.
-  tempPasswordAt     DateTime?
-  conciergeHidden    Boolean   @default(false)
-  voiceNoticeAckedAt DateTime?
-  compactRows        Boolean   @default(false)
+  tempPasswordAt        DateTime?
+  conciergeHidden       Boolean   @default(false)
+  voiceNoticeAckedAt    DateTime?
+  compactRows           Boolean   @default(false)
   // SHO-US-14.4: when the start guide on My tasks was dismissed. Server side, so it stays gone on every device.
   startGuideDismissedAt DateTime?
-  createdAt          DateTime  @default(now())
+  createdAt             DateTime  @default(now())
 
-  memberships         ProjectMember[]
-  assignedTasks       Task[]             @relation("TaskAssignee")
-  approvingTasks      Task[]             @relation("TaskApprover")
-  previouslyAssigned  Task[]             @relation("TaskPreviousAssignee")
-  createdTasks        Task[]             @relation("TaskCreator")
-  deletedTasks        Task[]             @relation("TaskDeleter")
-  collaborations      TaskCollaborator[]
-  sessions            Session[]
-  authTokens          AuthToken[]
-  notifications       Notification[]     @relation("NotificationRecipient")
-  notificationsCaused Notification[]     @relation("NotificationActor")
-  actionLogs          ActionLog[]        @relation("ActionActor")
-  actionsUndone       ActionLog[]        @relation("ActionUndoneBy")
-  auditLogs           AuditLog[]
-  chatMessages        ChatMessage[]
-  modelUsage          ModelUsage[]
-  savedViews          SavedView[]
-  authoredComments    Comment[]          @relation("CommentAuthor")
+  memberships          ProjectMember[]
+  assignedTasks        Task[]                @relation("TaskAssignee")
+  approvingTasks       Task[]                @relation("TaskApprover")
+  previouslyAssigned   Task[]                @relation("TaskPreviousAssignee")
+  createdTasks         Task[]                @relation("TaskCreator")
+  deletedTasks         Task[]                @relation("TaskDeleter")
+  collaborations       TaskCollaborator[]
+  sessions             Session[]
+  authTokens           AuthToken[]
+  notifications        Notification[]        @relation("NotificationRecipient")
+  notificationsCaused  Notification[]        @relation("NotificationActor")
+  actionLogs           ActionLog[]           @relation("ActionActor")
+  actionsUndone        ActionLog[]           @relation("ActionUndoneBy")
+  auditLogs            AuditLog[]
+  chatMessages         ChatMessage[]
+  modelUsage           ModelUsage[]
+  savedViews           SavedView[]
+  holySheetTaskIntents HolySheetTaskIntent[]
+  authoredComments     Comment[]             @relation("CommentAuthor")
 
   @@index([workspaceId])
 }
 
 model Session {
-  id         String    @id @default(cuid())
-  userId     String
-  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  tokenHash  String    @unique
+  id          String              @id @default(cuid())
+  userId      String
+  user        User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash   String              @unique
   // Fixed 30 days from sign-in; not extended by use.
-  expiresAt  DateTime
-  revokedAt  DateTime?
+  expiresAt   DateTime
+  revokedAt   DateTime?
   // Shown on Profile as "Chrome on Mac · last active" (SHO-US-1.6).
-  userAgent  String?
-  lastSeenAt DateTime  @default(now())
-  createdAt  DateTime  @default(now())
+  userAgent   String?
+  lastSeenAt  DateTime            @default(now())
+  createdAt   DateTime            @default(now())
   centralLink CentralSessionLink?
 
   @@index([userId])
@@ -144,40 +145,41 @@ model LoginAttempt {
 }
 
 model Project {
-  id             String          @id @default(cuid())
-  workspaceId    String
-  workspace      Workspace       @relation(fields: [workspaceId], references: [id])
-  name           String
-  description    String?
-  archivedAt     DateTime?
-  deletedAt      DateTime?
+  id                        String                @id @default(cuid())
+  workspaceId               String
+  workspace                 Workspace             @relation(fields: [workspaceId], references: [id])
+  name                      String
+  description               String?
+  archivedAt                DateTime?
+  deletedAt                 DateTime?
   deletedPreviousArchivedAt DateTime?
-  isVertical     Boolean         @default(false)
-  verticalId     String?
-  vertical       Project?        @relation("ProjectVertical", fields: [verticalId], references: [id], onDelete: SetNull)
-  deliveryProjects Project[]      @relation("ProjectVertical")
+  isVertical                Boolean               @default(false)
+  verticalId                String?
+  vertical                  Project?              @relation("ProjectVertical", fields: [verticalId], references: [id], onDelete: SetNull)
+  deliveryProjects          Project[]             @relation("ProjectVertical")
   // CRM (SHO-E10). The column default keeps the previous build working: a project created
   // by the old code is a plain Project. A null pipeline/stage means "Active" (type Project).
-  typeId         String          @default("wst_project")
-  type           WorkstreamType  @relation(fields: [typeId], references: [id])
-  pipelineId     String?
-  pipeline       Pipeline?       @relation(fields: [pipelineId], references: [id])
-  stageId        String?
-  stage          Stage?          @relation(fields: [stageId], references: [id])
-  stageReason    String?
-  stageChangedAt DateTime?
-  deal           DealDetails?
-  parties        DealParty[]
-  notes          Note[]
-  createdAt      DateTime        @default(now())
-  updatedAt      DateTime        @updatedAt
-  members        ProjectMember[]
-  sections       Section[]
-  tasks          Task[]
-  actionLogs     ActionLog[]
-  savedViews     SavedView[]
-  holySheetLinks HolySheetLink[]
-  holySheetDefault HolySheetDefault?
+  typeId                    String                @default("wst_project")
+  type                      WorkstreamType        @relation(fields: [typeId], references: [id])
+  pipelineId                String?
+  pipeline                  Pipeline?             @relation(fields: [pipelineId], references: [id])
+  stageId                   String?
+  stage                     Stage?                @relation(fields: [stageId], references: [id])
+  stageReason               String?
+  stageChangedAt            DateTime?
+  deal                      DealDetails?
+  parties                   DealParty[]
+  notes                     Note[]
+  createdAt                 DateTime              @default(now())
+  updatedAt                 DateTime              @updatedAt
+  members                   ProjectMember[]
+  sections                  Section[]
+  tasks                     Task[]
+  actionLogs                ActionLog[]
+  savedViews                SavedView[]
+  holySheetTaskIntents      HolySheetTaskIntent[]
+  holySheetLinks            HolySheetLink[]
+  holySheetDefault          HolySheetDefault?
 
   @@index([workspaceId])
   @@index([typeId])
@@ -187,20 +189,22 @@ model Project {
 
 // Document identity only: titles, content and grants remain in Holy Sheet.
 model HolySheetLink {
-  id String @id @default(cuid())
+  id        String   @id @default(cuid())
   projectId String
-  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  taskId String?
-  task Task? @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  taskId    String?
+  task      Task?    @relation(fields: [taskId], references: [id], onDelete: Cascade)
   originKey String
-  pageId String
+  pageId    String
   createdAt DateTime @default(now())
+
   @@unique([projectId, originKey, pageId])
 }
+
 model HolySheetDefault {
-  projectId String @id
-  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  spaceId String
+  projectId String  @id
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  spaceId   String
 }
 
 model ProjectMember {
@@ -230,46 +234,47 @@ model Section {
 }
 
 model Task {
-  holySheetLinks HolySheetLink[]
-  id                 String             @id @default(cuid())
+  holySheetLinks     HolySheetLink[]
+  id                 String               @id @default(cuid())
   workspaceId        String
-  workspace          Workspace          @relation(fields: [workspaceId], references: [id])
+  workspace          Workspace            @relation(fields: [workspaceId], references: [id])
   projectId          String
-  project            Project            @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project            Project              @relation(fields: [projectId], references: [id], onDelete: Cascade)
   sectionId          String
-  section            Section            @relation(fields: [sectionId], references: [id])
+  section            Section              @relation(fields: [sectionId], references: [id])
   parentId           String?
-  parent             Task?              @relation("Subtasks", fields: [parentId], references: [id], onDelete: Cascade)
-  subtasks           Task[]             @relation("Subtasks")
+  parent             Task?                @relation("Subtasks", fields: [parentId], references: [id], onDelete: Cascade)
+  subtasks           Task[]               @relation("Subtasks")
   title              String
   description        String?
-  priority           TaskPriority       @default(MEDIUM)
-  blocked            Boolean            @default(false)
+  priority           TaskPriority         @default(MEDIUM)
+  blocked            Boolean              @default(false)
   blockedReason      String?
   dueDate            DateTime?
   // Float position lets us reorder within a Section without rewriting every row.
-  position           Float              @default(0)
+  position           Float                @default(0)
   assigneeId         String
-  assignee           User               @relation("TaskAssignee", fields: [assigneeId], references: [id])
+  assignee           User                 @relation("TaskAssignee", fields: [assigneeId], references: [id])
   approverId         String?
-  approver           User?              @relation("TaskApprover", fields: [approverId], references: [id])
+  approver           User?                @relation("TaskApprover", fields: [approverId], references: [id])
   previousAssigneeId String?
-  previousAssignee   User?              @relation("TaskPreviousAssignee", fields: [previousAssigneeId], references: [id])
+  previousAssignee   User?                @relation("TaskPreviousAssignee", fields: [previousAssigneeId], references: [id])
   createdById        String
-  createdBy          User               @relation("TaskCreator", fields: [createdById], references: [id])
+  createdBy          User                 @relation("TaskCreator", fields: [createdById], references: [id])
   // Soft delete: Trash for 30 days, then purged by the scheduled job.
   deletedAt          DateTime?
   deletedById        String?
-  deletedBy          User?              @relation("TaskDeleter", fields: [deletedById], references: [id])
+  deletedBy          User?                @relation("TaskDeleter", fields: [deletedById], references: [id])
   completedAt        DateTime?
   // Where a completed task returns to when reopened (SHO-US-4.5). Plain id, no foreign key.
   previousSectionId  String?
   // CRM (SHO-US-13.2): a task flagged as an early idea.
-  isIdea             Boolean            @default(false)
+  isIdea             Boolean              @default(false)
   links              TaskLink[]
-  createdAt          DateTime           @default(now())
-  updatedAt          DateTime           @updatedAt
+  createdAt          DateTime             @default(now())
+  updatedAt          DateTime             @updatedAt
   collaborators      TaskCollaborator[]
+  holySheetIntent    HolySheetTaskIntent?
   comments           Comment[]
 
   @@index([workspaceId])
@@ -508,23 +513,23 @@ model Stage {
 }
 
 model DealDetails {
-  projectId          String    @id
-  project            Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  projectId          String           @id
+  project            Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
   workspaceId        String
   whyPursue          String
   need               String?
   serviceLine        String?
   // Unknown stays null; it is never stored as zero.
-  value              Decimal?  @db.Decimal(16, 2)
+  value              Decimal?         @db.Decimal(16, 2)
   currency           Currency?
   probability        Int?
   opportunityType    OpportunityType?
   athenaEntity       AthenaEntity?
-  netFeeRevenueUsd   Decimal?  @db.Decimal(15, 2)
-  expectedClose      DateTime? @db.Date
+  netFeeRevenueUsd   Decimal?         @db.Decimal(15, 2)
+  expectedClose      DateTime?        @db.Date
   introducedBy       String?
-  submissionDeadline DateTime? @db.Date
-  createdAt          DateTime  @default(now())
+  submissionDeadline DateTime?        @db.Date
+  createdAt          DateTime         @default(now())
 
   @@index([workspaceId])
 }
@@ -679,10 +684,30 @@ model SuiteGrant {
   @@index([expiresAt])
 }
 
+// HOLY-15: one immutable cross-product intent creates at most one SHO task.
+// Source text and credentials are deliberately not retained in this receipt.
+model HolySheetTaskIntent {
+  intentId     String   @id @db.Uuid
+  subject      String
+  userId       String
+  user         User     @relation(fields: [userId], references: [id])
+  projectId    String
+  project      Project  @relation(fields: [projectId], references: [id])
+  taskId       String   @unique
+  task         Task     @relation(fields: [taskId], references: [id])
+  sourcePageId String
+  sourceItemId String   @db.Uuid
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([subject, createdAt])
+  @@index([projectId, createdAt])
+}
+
 model CentralSessionLink {
-  sessionId String @id
-  session Session @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-  subject String
+  sessionId  String   @id
+  session    Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  subject    String
   sessionUid String
-  createdAt DateTime @default(now())
+  createdAt  DateTime @default(now())
 }
