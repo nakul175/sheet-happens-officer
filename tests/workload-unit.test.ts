@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({ user: { findUnique: vi.fn(), findMany: vi.fn() }, project: { findMany: vi.fn() }, task: { findMany: vi.fn() }, projectMember: { findFirst: vi.fn() } }));
 vi.mock("@/lib/db", () => ({ db: mocks }));
 import { matchesWorkload, workload, workloadAvailable } from "@/lib/workload";
@@ -7,12 +7,13 @@ const leader = { id: "lead", orgRole: "MEMBER" as const };
 const admin = { id: "admin", orgRole: "ADMIN" as const };
 const task = { id: "t1", projectId: "p1", title: "Private task", assigneeId: "worker", approverId: null, dueDate: parseDueDate("2026-10-20"), blocked: false, updatedAt: new Date() };
 beforeEach(() => {
-  vi.resetAllMocks(); vi.unstubAllEnvs();
+  vi.resetAllMocks(); vi.unstubAllEnvs(); vi.useFakeTimers(); vi.setSystemTime(new Date("2026-10-28T12:00:00Z"));
   mocks.user.findUnique.mockResolvedValue({ workspaceId: "w", deactivatedAt: null, emailVerifiedAt: new Date() });
   mocks.project.findMany.mockResolvedValue([{ id: "p1", name: "Ops", typeId: "wst_project", members: [{ userId: "worker" }] }]);
   mocks.user.findMany.mockResolvedValue([{ id: "worker", name: "Worker" }, { id: "lead", name: "Leader" }]);
   mocks.task.findMany.mockResolvedValue([task]);
 });
+afterEach(() => vi.useRealTimers());
 describe("SHO-2589 workload", () => {
   it("uses India calendar boundaries, including today plus the next seven days", () => {
     const today = parseDueDate("2026-10-28");

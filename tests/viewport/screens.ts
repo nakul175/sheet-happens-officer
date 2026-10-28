@@ -21,6 +21,7 @@ export const SCREENS: Screen[] = [
   { name: "Project trash", path: (i) => `/projects/${i.project}/trash` },
   { name: "Project activity", path: (i) => `/projects/${i.project}/activity` },
   { name: "Task page", path: (i) => `/tasks/${i.task}` },
+  { name: "Workload", path: () => "/workload", wait: ".workload tbody tr" },
   { name: "Team", path: () => "/team" },
   { name: "Search", path: () => "/search" },
   { name: "Profile", path: () => "/profile" },
