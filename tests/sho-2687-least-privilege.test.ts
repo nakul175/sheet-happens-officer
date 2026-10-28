@@ -88,6 +88,12 @@ describe("SHO-2687 least-privilege database rollout contract", () => {
     expect(runbook).toContain("SHO_2687_MANAGED_ROLE=true");
   });
 
+  it("accepts provider-generated managed-user passwords without weakening self-managed roles", () => {
+    expect(implementation).toContain("const minimumPasswordLength = managedRole ? 24 : 32");
+    expect(implementation).toContain("password.length < minimumPasswordLength");
+    expect(implementation).toContain("for a managed role");
+  });
+
   it("enforces DML-only rights and forbidden role attributes", () => {
     for (const privilege of ["SELECT", "INSERT", "UPDATE", "DELETE"]) {
       expect(implementation).toContain(privilege);
