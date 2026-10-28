@@ -18,10 +18,13 @@ export function suiteConfig(id = "bugoff") {
         : process.env.SUITE_BUGOFF_CLIENT_SECRET;
   if (!secret || secret.length < 32) throw new Error("Suite sign-in not configured");
   const realm = id === "accounts" ? holyQaRealm() : null;
+  const origin = realm?.origin ?? (id === "holy-sheet-staging"
+    ? "https://staging.sheethappensofficer.com"
+    : "https://sheethappensofficer.aplyd.org");
   return {
     id,
     secret,
-    origin: realm?.origin ?? "https://sheethappensofficer.aplyd.org",
+    origin,
     callback: id === "accounts" ? (realm ? realm.origin + "/bridge/callback" : "https://accounts.aplyd.org/bridge/callback")
       : id === "holy-sheet" ? "https://holysheet.aplyd.org/integrations/sho/callback"
         : id === "holy-sheet-staging" ? "https://staging.holysheet.aplyd.org/integrations/sho/callback"
