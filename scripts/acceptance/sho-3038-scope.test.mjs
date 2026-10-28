@@ -6,6 +6,8 @@ import { readFileSync } from "node:fs";
 
 const production = "ee59582dffcbd8cc3067e689b2bb73cf63781cb7";
 const allowed = new Set([
+  "tests/bell-redaction-2727.test.ts",
+  "tests/bell-null-href-2727.test.tsx",
   // SHO-2589: Workload stays disabled pending complete acceptance and hidden-CRM policy resolution.
   "src/lib/workload.ts",
   "src/lib/workload-query.ts",
