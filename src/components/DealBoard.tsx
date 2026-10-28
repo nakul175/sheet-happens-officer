@@ -1,6 +1,6 @@
 "use client";
-// SHO-US-10.5 / 12.6: the one grouped view of deals. Columns are a pipeline's stages (Paused, Done and Lost share the last
-// column for Proactive only; Bid stages stay distinct). Desktop: columns scroll sideways inside the board. Phone: the same groups as a vertical list.
+// SHO-US-10.5 / 12.6: one shared view of deals. Every active stage has its own column.
+// SHO-3133: On hold, Won and Lost stay visually distinct in Proactive and Bid; responsive CSS wraps columns.
 import Link from "next/link";
 import { OPPORTUNITY_TYPES, type OpportunityType } from "@/lib/deal-classification";
 import { useMemo, useState } from "react";
@@ -18,7 +18,6 @@ export type BoardDeal = {
 export type BoardStage = Stage & { id: string; name: string; category: string };
 type Col = { key: string; title: string; stages: BoardStage[]; deals: BoardDeal[] };
 
-const isLastGroup = (c: string) => c === "PAUSED" || c === "DONE" || c === "LOST";
 
 export type DealLifecycle = "sales" | "delivery" | "all";
 export type DealSort = "name-asc" | "name-desc" | "stage" | "date-asc" | "date-desc";
@@ -44,12 +43,7 @@ export function sortDeals(deals: BoardDeal[], sort: DealSort, stages: BoardStage
 
 export function columnsFor(stages: BoardStage[], deals: BoardDeal[], bid: boolean, lifecycle: DealLifecycle = "all", sort?: DealSort): Col[] {
   const active = stages.filter(s => !s.isRetired && (lifecycle === "all" || (s.category === "DELIVERY" ? "delivery" : "sales") === lifecycle));
-  // Bid decisions and outcomes are separate stages. Proactive keeps its original grouped tail.
-  const cols: Col[] = active.filter(s => bid || !isLastGroup(s.category)).map(s => ({ key: s.id, title: s.name, stages: [s], deals: [] }));
-  if (!bid) {
-    const tail = active.filter(s => isLastGroup(s.category));
-    if (tail.length) cols.push({ key: "tail", title: tail.map(s => s.name).join(" / "), stages: tail, deals: [] });
-  }
+  const cols: Col[] = active.map(s => ({ key: s.id, title: s.name, stages: [s], deals: [] }));
   for (const d of deals) {
     if (d.archived || !d.stage || !inLifecycle(d, lifecycle)) continue;
     const c = cols.find(c => c.stages.some(s => s.id === d.stage!.id));

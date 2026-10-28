@@ -151,6 +151,10 @@ jobs:
         run: |
           npx playwright test tests/e2e/stories/APL-2720.spec.ts --reporter=json > validation-2900-browser.json
           node -e 'const r=require("./validation-2900-browser.json");const s=r.stats;if(!s||s.expected!==6||s.unexpected!==0||s.skipped!==0||s.flaky!==0||(r.errors??[]).length){console.error("SHO-2900 requires 6 passed, zero failures/skips",s);process.exit(1)}console.log("SHO-2900: 6 passed, zero failures/skips")' | tee validation-2900-browser.log
+      - name: SHO-3133 distinct Proactive outcomes at desktop and phone widths
+        run: |
+          npx playwright test tests/e2e/stories/APL-2523.spec.ts --grep 'AC5: Proactive keeps' --reporter=json > validation-3133-outcomes.json
+          node -e 'const r=require("./validation-3133-outcomes.json"),s=r.stats;if(!s||s.expected!==1||s.unexpected||s.skipped||s.flaky||(r.errors??[]).length)throw Error("Distinct outcomes browser case must pass without skips");console.log("SHO-3133: distinct outcomes passed at1280 and390")' | tee validation-3133-outcomes.log
       - name: Existing public offline and no-private-cache browser acceptance
         run: npx playwright test tests/e2e/stories/APL-2558.spec.ts --grep "AC4:" | tee validation-offline.log
       - name: Record user-approved UI-only provider exclusion
@@ -179,6 +183,7 @@ jobs:
             validation-*.log
             validation-2900-browser.json
             validation-2759-browser.json
+            validation-3133-outcomes.json
             release12-drain.json
             test-results/e2e
             workload-ui-previews/

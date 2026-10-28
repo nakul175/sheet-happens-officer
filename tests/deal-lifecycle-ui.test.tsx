@@ -97,9 +97,23 @@ it("Bid has distinct active decisions/outcomes, sales excludes delivery, deliver
   expect(delivery.map(c => c.title)).toEqual(["Ongoing Projects"]);
   expect(delivery[0].deals.map(d => d.id)).toEqual(["delivery-rfp"]);
 });
-it("Proactive retains original grouped-tail behavior", () => {
-  const proactive = [stage("new", "Potential", "NOT_STARTED"), stage("work", "Working", "ACTIVE"), stage("pause", "Paused", "PAUSED"), stage("done", "Done", "DONE"), stage("no", "Lost", "LOST")];
-  expect(columnsFor(proactive, [], false, "sales").map(c => c.title)).toEqual(["Potential", "Working", "Paused / Done / Lost"]);
+it("SHO-3133: Proactive On hold, Won and Lost have distinct columns with unchanged stage IDs and cards", async () => {
+  const proactive = [stage("new", "Potential", "NOT_STARTED"), stage("work", "Working", "ACTIVE"), stage("pause", "On hold", "PAUSED"), stage("done", "Won", "DONE"), stage("no", "Lost", "LOST")];
+  const outcomes = proactive.slice(2).map((s, i) => deal(`outcome-${i}`, s));
+  const columns = columnsFor(proactive, outcomes, false, "sales");
+  expect(columns.map(c => c.title)).toEqual(["Potential", "Working", "On hold", "Won", "Lost"]);
+  expect(columns.slice(2).map(c => ({ key: c.key, stages: c.stages.map(s => s.id), deals: c.deals.map(d => d.id) }))).toEqual([
+    { key: "pause", stages: ["pause"], deals: ["outcome-0"] },
+    { key: "done", stages: ["done"], deals: ["outcome-1"] },
+    { key: "no", stages: ["no"], deals: ["outcome-2"] },
+  ]);
+  await mount(h(DealBoard, { deals: outcomes, stages: proactive, bid: false, onChange: () => undefined }));
+  for (const [i, name] of ["On hold", "Won", "Lost"].entries()) {
+    const region = document.querySelector(`section[aria-label="${name}"]`)!;
+    expect(region).not.toBeNull();
+    expect(region.querySelectorAll(`a[href="/projects/outcome-${i}"]`)).toHaveLength(1);
+    for (const other of [0, 1, 2].filter(n => n !== i)) expect(region.querySelector(`a[href="/projects/outcome-${other}"]`)).toBeNull();
+  }
 });
 it("Undo-restored retired stage remains visible outside active board columns and is not a move target", async () => {
   const cols = columnsFor([...stages, retired], [deal("old-history", retired)], true, "sales");

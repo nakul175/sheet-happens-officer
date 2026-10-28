@@ -46,6 +46,7 @@ const allowed = new Set([
   "src/app/(app)/workload/page.tsx",
   "src/app/(app)/workload/Workload.tsx",
   "src/app/(app)/workload/workload.css",
+  "tests/e2e/stories/APL-2523.spec.ts",
   // SHO-3133–3135: approved clean controls, identity disambiguation and board sorting.
   "src/app/(app)/select-controls.css",
   "src/components/PeopleSelect.tsx",
