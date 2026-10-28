@@ -9,6 +9,11 @@ Sheet Happens Officer intentionally uses two PostgreSQL identities:
 
 `doadmin` must not be used by the running application. It is reserved for managed-database administration and migrations.
 
+The operator preserves the database URL's declared TLS policy. In particular,
+DigitalOcean's existing `sslmode=require` URLs use encrypted libpq semantics
+without silently upgrading to CA verification; `verify-ca` and `verify-full`
+remain certificate-verifying modes.
+
 ## SHO-2687 staged rollout
 
 The checked-in operator is `scripts/ops/sho-2687-apply.sh`. It never prints either URL or a password. The selected environment file and the password file must be root-only (`0600` or stricter). `apply` is idempotent and writes a root-only receipt. If validation fails after replacing the runtime environment, the previous environment file is restored automatically.

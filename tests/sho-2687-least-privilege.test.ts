@@ -39,6 +39,13 @@ describe("SHO-2687 least-privilege database rollout contract", () => {
     expect(stdout).not.toContain("direct-secret");
   });
 
+  it("preserves the declared libpq TLS contract for managed PostgreSQL", () => {
+    expect(implementation).toContain('sslmode === "require"');
+    expect(implementation).toContain("ssl: { rejectUnauthorized: false }");
+    expect(implementation).toContain("libpq's `require` guarantees encryption");
+    expect(implementation).not.toContain("NODE_TLS_REJECT_UNAUTHORIZED");
+  });
+
   it("enforces DML-only rights and forbidden role attributes", () => {
     for (const privilege of ["SELECT", "INSERT", "UPDATE", "DELETE"]) {
       expect(implementation).toContain(privilege);
