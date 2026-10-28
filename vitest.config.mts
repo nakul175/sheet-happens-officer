@@ -21,6 +21,7 @@ export default defineConfig({
     env: { SHO_E2E_START_BASE_URL: startBaseUrl },
     exclude: [
       ...configDefaults.exclude,
+      "tests/e2e/stories/APL-2555.spec.ts", // SHO-2905: migrated Playwright story
       "tests/viewport/**",
       "tests/e2e/stories/APL-2669.spec.ts",
       "tests/e2e/stories/APL-2670.spec.ts",
