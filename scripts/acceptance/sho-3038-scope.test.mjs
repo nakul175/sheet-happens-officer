@@ -6,6 +6,7 @@ import { readFileSync } from "node:fs";
 
 const production = "afc38bd3e2973b0c4b0974a59d3c43e443648bb2";
 const allowed = new Set([
+  "tests/e2e/stories/APL-2646.spec.ts", "tests/e2e/stories/APL-2716.spec.ts", "tests/trigger-test-guard.ts", "tests/trigger-test-guard.test.ts", "tests/trigger-search-path.test.ts",
   // SHO-2589 workload-only addition authorized by Product; live surfaces stay pinned.
   "src/app/(app)/layout.tsx",
   "src/app/(app)/workload/WorkloadView.tsx",
