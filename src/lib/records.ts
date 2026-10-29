@@ -166,7 +166,7 @@ function presentNotes(rows: Awaited<ReturnType<typeof loadNotes>>, user: Actor, 
 }
 async function loadNotes(where: Prisma.NoteWhereInput) {
   const rows = await db.note.findMany({
-    where, orderBy: [{ date: "desc" }, { createdAt: "desc" }], take: 200,
+    where, orderBy: [{ date: "desc" }, { createdAt: "desc" }, { id: "asc" }], take: 200,
     include: { project: { select: { id: true, name: true } }, contacts: { select: { contact: { select: { id: true, name: true } } } } },
   });
   const people = await db.user.findMany({ where: { id: { in: [...new Set(rows.map((r) => r.authorId))] } }, select: { id: true, name: true } });

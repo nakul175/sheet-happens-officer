@@ -31,7 +31,7 @@ export type State = {
   disabled?: Disabled;
   hidden: boolean;
   voiceNoticeAcked: boolean;
-  quickActions: { id: "due-week" | "overdue" | "waiting-on-me" | "blocked" | "recently-completed"; label: string }[];
+  quickActions: { id: "due-week" | "overdue" | "waiting-on-me" | "blocked" | "recently-completed" | "deals-attention"; label: string }[];
   messages: Message[];
 };
 
@@ -49,7 +49,7 @@ export type Stored = {
   proposal?: { ops: unknown[]; fingerprint: string; versions?: Record<string, string> };
   /** Set on a row written while the CRM was hidden from its owner (APL-2609). Only such rows are shown or replayed then. */
   crmHidden?: true;
-  pending?: { request: string; question?: string; kind?: "task" | "project" | "person"; optionIds?: string[]; narrowFor?: string };
+  pending?: { request: string; question?: string; kind?: "task" | "project" | "person" | "deal" | "organisation" | "contact"; optionIds?: string[]; narrowFor?: string };
   internal?: {
     logIds?: string[]; confirmedAt?: string; resultMessageId?: string; cardMessageId?: string;
     /** Card: RUNNING while it is being applied, PARTIAL when it stopped half way. */
@@ -58,5 +58,7 @@ export type Stored = {
     undoing?: boolean; undoingAt?: string; undoneIds?: string[];
     /** A user message that only repeats a picked option; never replayed to the model. */
     fromChoice?: boolean;
+    /** CRM tool answers are never replayed as facts in a later model request. */
+    crmRead?: boolean;
   };
 };
