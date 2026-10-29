@@ -14,7 +14,7 @@ type Raw = { id:string; kind:SearchKind; title:string; primary_text:string; seco
 export type SearchOptions = { ideasOnly?:boolean; kinds?:SearchKind[]; projectId?:string; includeDone?:boolean; limit?:number };
 
 const clean=(s:string)=>s.replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]+/g," ").replace(/\s+/g," ").trim();
-const words=(s:string)=>clean(s).toLowerCase().match(/[\p{L}\p{N}]+/gu)?.slice(0,12)??[];
+const words=(s:string)=>(clean(s).toLowerCase().match(/[\p{L}\p{N}]+/gu)??[]).filter(w=>w.length>1).slice(0,12);
 const snippet=(s:string,q:string)=>{const v=clean(s),w=words(q)[0],i=w?v.toLowerCase().indexOf(w):-1,start=Math.max(0,i<0?0:i-90),body=v.slice(start,start+220);return `${start?"…":""}${body}${start+body.length<v.length?"…":""}`;};
 const wants=(k:SearchKind[]|undefined,v:SearchKind)=>!k||k.includes(v);
 const empty=():SearchResponse=>({results:[],projects:[],tasks:[],organisations:[],contacts:[],notes:[]});
