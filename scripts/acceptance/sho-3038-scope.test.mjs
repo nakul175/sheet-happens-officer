@@ -6,6 +6,10 @@ import { readFileSync } from "node:fs";
 
 const production = "afc38bd3e2973b0c4b0974a59d3c43e443648bb2";
 const allowed = new Set([
+  // SHO-2727: isolated orphan-notice privacy fix and focused regressions.
+  "tests/bell-redaction-2727.test.ts",
+  "tests/bell-null-href-2727.test.tsx",
+  "tests/bell-activity-2727.test.ts",
   // SHO-3062: reviewed Holy Sheet document integration on the exact current
   // production release. The feature-specific scope gate further restricts
   // runtime changes and preserves canonical auth/release surfaces.
