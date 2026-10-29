@@ -255,9 +255,10 @@ async function plan(row: any, user: Actor, projectId: string): Promise<Plan> {
         whyPursue: d.whyPursue, need: d.need, serviceLine: d.serviceLine, value: d.value === null ? null : Number(d.value), currency: d.currency,
         probability: d.probability, expectedClose: d.expectedClose?.toISOString().slice(0, 10) ?? null, introducedBy: d.introducedBy,
         submissionDeadline: d.submissionDeadline?.toISOString().slice(0, 10) ?? null,
+        submissionDeadlineAt: d.submissionDeadlineAt?.toISOString() ?? null, submissionDeadlineZone: d.submissionDeadlineZone ?? null,
       };
       const data: Record<string, unknown> = {};
-      for (const k of keys) data[k] = (k === "expectedClose" || k === "submissionDeadline") && b[k] ? new Date(`${b[k]}T00:00:00Z`) : b[k] ?? null;
+      for (const k of keys) data[k] = (k === "expectedClose" || k === "submissionDeadline") && b[k] ? new Date(`${b[k]}T00:00:00Z`) : k === "submissionDeadlineAt" && b[k] ? new Date(b[k]) : b[k] ?? null;
       return { conflicts: fieldConflicts(keys, b, f, now), subject: "the deal", fields: keys.join(", "), apply: async (tx) => { await tx.dealDetails.update({ where: { projectId }, data }); } };
     }
     case "project.updated": {

@@ -9,7 +9,7 @@ async function setup(leader: Account, bid = false) {
   const org = (await leader.c.post("/api/orgs", { name: `Org2 ${Date.now()}-${seq++}` })).json.organisation.id as string;
   const r = await leader.c.post("/api/deals", {
     name: `Deal2 ${Date.now()}-${seq++}`, organisationId: org, pipelineId: pipe.id, leaderId: leader.id, whyPursue: "fit",
-    nextStep: { title: "First call", dueDate: istDate(2) }, ...(bid ? { submissionDeadline: istDate(10) } : {}),
+    nextStep: { title: "First call", dueDate: istDate(2) }, ...(bid ? { submissionDeadline: istDate(10), submissionDeadlineTime: "17:00", submissionDeadlineZone: "Asia/Kolkata" } : {}),
   });
   expect(r.status, JSON.stringify(r.json)).toBe(201);
   const id = r.json.deal.id as string;

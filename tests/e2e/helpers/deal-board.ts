@@ -35,7 +35,7 @@ export async function makeDeal(admin: Who, later: Later, o: {
     name, organisationId: orgId, pipelineId: pipe.id, leaderId: o.leaderId ?? admin.user.id, whyPursue: "ZZ-TEST fit",
     nextStep: { title: step, dueDate: o.due ?? ymd(5) },
   };
-  if (pipe.key === "DEAL_BID") body.submissionDeadline = o.deadline ?? ymd(14);
+  if (pipe.key === "DEAL_BID") Object.assign(body, { submissionDeadline: o.deadline ?? ymd(14), submissionDeadlineTime: "17:00", submissionDeadlineZone: "Asia/Kolkata" });
   if (o.value !== undefined) { body.value = o.value; body.currency = o.currency; }
   const d = await admin.api.post("/api/deals", body);
   expect(d.status, JSON.stringify(d.json)).toBe(201);

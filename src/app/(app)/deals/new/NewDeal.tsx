@@ -1,4 +1,6 @@
 "use client";
+import { SubmissionDeadlineFields } from "@/components/SubmissionDeadlineFields";
+import { DEFAULT_DEADLINE_ZONE } from "@/lib/submission-deadline";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useState } from "react";
@@ -13,7 +15,7 @@ function Form() {
   const team = useGet<{ people: { id: string; name: string }[] }>("/api/team");
   const orgs = useGet<{ organisations: { id: string; name: string }[] }>("/api/orgs");
   const pipes = useGet<{ pipelines: { id: string; key: string; name: string }[] }>("/api/deals/pipelines");
-  const [v, setV] = useState({ name: "", organisationId: sp.get("org") ?? "", pipelineId: "", leaderId: me.id, whyPursue: "", step: "", due: todayIST(), submissionDeadline: "", value: "", currency: "INR" });
+  const [v, setV] = useState({ name: "", organisationId: sp.get("org") ?? "", pipelineId: "", leaderId: me.id, whyPursue: "", step: "", due: todayIST(), submissionDeadline: "", submissionDeadlineTime: "", submissionDeadlineZone: DEFAULT_DEADLINE_ZONE, submissionDeadlineChoice: "", value: "", currency: "INR" });
   const [err, setErr] = useState<string | null>(null);
   const [dup, setDup] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -25,7 +27,7 @@ function Form() {
       name: v.name, organisationId: v.organisationId, pipelineId: pipeline?.id, leaderId: v.leaderId, whyPursue: v.whyPursue,
       nextStep: { title: v.step, dueDate: v.due }, force,
     };
-    if (pipeline?.key === "DEAL_BID") body.submissionDeadline = v.submissionDeadline || null;
+    if (pipeline?.key === "DEAL_BID") Object.assign(body, { submissionDeadline: v.submissionDeadline || null, submissionDeadlineTime: v.submissionDeadlineTime || null, submissionDeadlineZone: v.submissionDeadlineZone || null, submissionDeadlineChoice: v.submissionDeadlineChoice || undefined });
     if (v.value) { body.value = Number(v.value); body.currency = v.currency; }
     const r = await api("POST", "/api/deals", body);
     setBusy(false);
@@ -40,7 +42,7 @@ function Form() {
         {(id) => <select id={id} className="in" required value={v.organisationId} onChange={set("organisationId")}><option value="">Choose</option>{orgs.data?.organisations.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}</select>}
       </Field>
       <Field label="Pipeline">{(id) => <select id={id} className="in" value={pipeline?.id ?? ""} onChange={set("pipelineId")}>{pipes.data?.pipelines.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select>}</Field>
-      {pipeline?.key === "DEAL_BID" && <Field label="Submission deadline">{(id) => <input id={id} className="in" type="date" required value={v.submissionDeadline} onChange={set("submissionDeadline")} />}</Field>}
+      {pipeline?.key === "DEAL_BID" && <SubmissionDeadlineFields value={v} onChange={patch => setV({ ...v, ...patch })} />}
       <Field label="Leader">{(id) => <select id={id} className="in" value={v.leaderId} onChange={set("leaderId")}>{team.data?.people.map((p) => <option key={p.id} value={p.id}>{p.name}{p.id === me.id ? " (you)" : ""}</option>)}</select>}</Field>
       <Field label="Why are we pursuing this?">{(id) => <input id={id} className="in" required maxLength={1000} value={v.whyPursue} onChange={set("whyPursue")} />}</Field>
       <Field label="First next step">{(id) => <input id={id} className="in" required value={v.step} onChange={set("step")} />}</Field>
