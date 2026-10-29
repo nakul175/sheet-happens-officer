@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import test from "node:test";
-const production = "b0f09e78638dae4575a3095aa69181d834dcf1fa";
+const production = "2cf4e6d3c4eb3b7a74554ff8bbcae5e3758177ff";
 const allowed = new Set([
+  "tests/e2e/stories/APL-2646.spec.ts", "tests/e2e/stories/APL-2716.spec.ts", "tests/trigger-test-guard.ts", "tests/trigger-test-guard.test.ts", "tests/trigger-search-path.test.ts",
   "src/app/(app)/Shell.tsx", "src/app/(app)/layout.tsx", "src/app/(app)/workload/WorkloadView.tsx", "src/app/(app)/workload/page.tsx", "src/app/(app)/workload/workload.css",
   "src/app/api/workload/route.ts", "src/lib/workload.ts", "tests/viewport/screens.ts", "tests/workload-unit.test.ts", "tests/workload.test.ts", "docs/runbooks/workload-release.md",
   "scripts/acceptance/sho2589-scope.test.mjs", "scripts/acceptance/sho-3038-scope.test.mjs", "scripts/acceptance/sho3062-scope.test.mjs", ".github/workflows/approved-projects-ui.yml", ".github/workflows/sho3062-validation.yml", ".github/workflows/phone-checks.yml",
