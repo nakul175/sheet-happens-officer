@@ -34,7 +34,9 @@ export async function newProject(
 }
 
 export async function newTask(who: Who, projectId: string, body: Record<string, unknown> = {}) {
-  const r = await who.api.post(`/api/projects/${projectId}/tasks`, { title: zz("task"), ...body });
+  // SHO-3037: a new top-level task needs a due date. Subtasks and an explicit dueDate are left alone.
+  const dated = body.parentId || "dueDate" in body ? body : { dueDate: ymd(3), ...body };
+  const r = await who.api.post(`/api/projects/${projectId}/tasks`, { title: zz("task"), ...dated });
   expect(r.status, JSON.stringify(r.json)).toBe(201);
   return r.json.task.id as string;
 }
