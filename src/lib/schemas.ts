@@ -149,6 +149,12 @@ export const dealCreate = dealDetails.extend({
 });
 export const dealStage = z.object({ stageId: z.string().min(1), expectedStageId: z.string().min(1).nullable().optional(), reason: z.string().trim().max(1000).nullish(), fields: dealDetails.optional() });
 export const dealParty = z.object({ organisationId: z.string().min(1, "Choose an organisation."), role: z.enum(["FUNDER", "IMPLEMENTING_OFFICE", "PARTNER", "OTHER", "BUYER"]) });
+export const dealBuyerReplace = z.object({
+  organisationId: z.string().min(1, "Choose an organisation."),
+  expectedPartyId: z.string().min(1),
+  expectedOrganisationId: z.string().min(1),
+  force: z.boolean().optional(),
+});
 export const taskIdea = z.object({ isIdea: z.boolean() });
 export const taskConvert = dealDetails.extend({
   organisationId: z.string().optional(), pipelineId: z.string().optional(), name: z.string().trim().max(200).optional(),
