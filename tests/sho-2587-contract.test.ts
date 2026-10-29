@@ -19,6 +19,8 @@ describe("SHO-2587 Stage A contract",()=>{
     expect(service).toContain("to_tsvector('english'");
     expect(service).toContain("LEFT JOIN LATERAL");
     expect(service).toContain("nm.note_rank IS NOT NULL");
+    expect(service).toContain("lower(${doc}) % ${fuzzyToken}");
+    expect(service).not.toContain("OPERATOR(public.%)");
     expect(service).not.toContain("pgvector");
     expect(service).not.toContain("MODEL_API_KEY");
   });

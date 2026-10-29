@@ -29,7 +29,10 @@ export async function search(user:Actor,q:string,includeArchived:boolean,ideasOn
   // common word. The indexed AND tsquery requires every term. Stage A typo
   // tolerance is the specified one-token, 6+ character fallback.
   const fuzzyToken=safeTokens.length===1&&safeTokens[0].length>=6?safeTokens[0]:null;
-  const matches=(doc:Prisma.Sql)=>Prisma.sql`(to_tsvector('english',${doc})@@to_tsquery('english',${ts})${fuzzyToken?Prisma.sql` OR lower(${doc}) OPERATOR(public.%) ${fuzzyToken}`:Prisma.empty})`;
+  // Keep the pg_trgm operator unqualified. Managed PostgreSQL can install the
+  // extension outside `public`; operator lookup through the connection's
+  // search path is portable across local and hosted environments.
+  const matches=(doc:Prisma.Sql)=>Prisma.sql`(to_tsvector('english',${doc})@@to_tsquery('english',${ts})${fuzzyToken?Prisma.sql` OR lower(${doc}) % ${fuzzyToken}`:Prisma.empty})`;
   const visible=(a:Prisma.Sql)=>Prisma.sql`${includeArchived?Prisma.empty:Prisma.sql`AND ${a}."archivedAt" IS NULL`} ${crm?Prisma.empty:Prisma.sql`AND ${a}."typeId" <> ${WORKSTREAM_DEAL}`} ${admin?Prisma.empty:Prisma.sql`AND EXISTS (SELECT 1 FROM "ProjectMember" pm WHERE pm."projectId"=${a}.id AND pm."userId"=${user.id})`}`;
   const rows:Raw[]=[];
 
