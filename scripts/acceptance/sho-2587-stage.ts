@@ -22,15 +22,16 @@ await db.user.create({ data: { id: userId, workspaceId, email: "sho2587+admin@in
 await db.organisation.create({ data: { id: commonOrgId, workspaceId, name: "SHO-2587 Notes", createdById: userId } });
 
 const expected = queries as { query: string; expected: string }[];
-const taskRows = expected.filter((x) => x.expected.startsWith("task-")).map((x, position) => ({
-  id: x.expected, workspaceId, projectId: "sho2587-project", sectionId: "sho2587-section", title: x.query === "budgets" || x.query === "budegt" ? "Revised budget" : x.query,
-  description: `Acceptance record for ${x.query}`, position, assigneeId: userId, createdById: userId,
+const unique = (prefix: string) => [...new Set(expected.filter((x) => x.expected.startsWith(prefix)).map((x) => x.expected))].map((id) => ({ id, queries: expected.filter((x) => x.expected === id).map((x) => x.query) }));
+const taskRows = unique("task-").map((x, position) => ({
+  id: x.id, workspaceId, projectId: "sho2587-project", sectionId: "sho2587-section", title: x.id === "task-revised-budget" ? "Revised budget" : x.queries[0],
+  description: `Acceptance record for ${x.queries.join(" ")}`, position, assigneeId: userId, createdById: userId,
 }));
-const projectRows = expected.filter((x) => x.expected.startsWith("project-")).map((x) => ({ id: x.expected, workspaceId, name: x.query, description: `Acceptance project ${x.query}` }));
-const dealRows = expected.filter((x) => x.expected.startsWith("deal-")).map((x) => ({ id: x.expected, workspaceId, name: x.query, description: `Acceptance deal ${x.query}`, typeId: "wst_deal" }));
-const organisationRows = expected.filter((x) => x.expected.startsWith("organisation-")).map((x) => ({ id: x.expected, workspaceId, name: x.query, createdById: userId }));
-const contactRows = expected.filter((x) => x.expected.startsWith("contact-")).map((x) => ({ id: x.expected, workspaceId, organisationId: commonOrgId, name: x.query, createdById: userId }));
-const noteRows = expected.filter((x) => x.expected.startsWith("note-")).map((x) => ({ id: x.expected, workspaceId, organisationId: commonOrgId, kind: "OTHER" as const, date: new Date("2026-10-29"), text: x.query, authorId: userId }));
+const projectRows = unique("project-").map((x) => ({ id: x.id, workspaceId, name: x.queries[0], description: `Acceptance project ${x.queries.join(" ")}` }));
+const dealRows = unique("deal-").map((x) => ({ id: x.id, workspaceId, name: x.queries[0], description: `Acceptance deal ${x.queries.join(" ")}`, typeId: "wst_deal" }));
+const organisationRows = unique("organisation-").map((x) => ({ id: x.id, workspaceId, name: x.queries.join(" "), createdById: userId }));
+const contactRows = unique("contact-").map((x) => ({ id: x.id, workspaceId, organisationId: commonOrgId, name: x.queries.join(" "), createdById: userId }));
+const noteRows = unique("note-").map((x) => ({ id: x.id, workspaceId, organisationId: commonOrgId, kind: "OTHER" as const, date: new Date("2026-10-29"), text: x.queries.join(" "), authorId: userId }));
 
 await db.project.create({ data: { id: "sho2587-project", workspaceId, name: "SHO-2587 task corpus", members: { create: { userId, role: "LEADER" } }, sections: { create: { id: "sho2587-section", name: "Open", position: 0 } } } });
 await db.project.createMany({ data: [...projectRows, ...dealRows] });
