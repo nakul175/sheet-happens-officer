@@ -58,9 +58,10 @@ describe("SHO-3053 desktop and phone conversion", () => {
         await review(page, configuredStage); expect(await page.getByRole("dialog").innerText()).toContain("cannot be undone");
         expect(await page.getByRole("dialog").innerText()).toContain("Proactive / Lead"); expect(await page.getByRole("dialog").innerText()).toContain("Bid / ZZ-TEST Bid required fields");
         const size = await page.getByRole("dialog").boundingBox(); expect(size!.width).toBeLessThanOrEqual(width);
-        await page.screenshot({ path: path.join(output, `review-${width}.png`), fullPage: true });
+        await page.screenshot({ path: path.join(output, `review-${width}.png`), fullPage: false });
         await page.getByRole("button", { name: "Cancel", exact: true }).click(); expect(await sameDeal(id)).toEqual(before);
         await open(page); await review(page, configuredStage); await page.getByRole("button", { name: "Confirm conversion", exact: true }).click(); await page.getByRole("dialog").waitFor({ state: "hidden" });
+        await page.getByRole("button", { name: "Convert to Bid", exact: true }).waitFor({ state: "hidden" });
         expect(new URL(page.url()).pathname).toBe(`/projects/${id}`); expect(await page.getByRole("button", { name: "Convert to Bid", exact: true }).count()).toBe(0);
         const after = await sameDeal(id); expect(after.deal.value).toBe(before.deal.value); expect(after.deal.probability).toBe(0); expect(after.stageId).toBe(configuredStage);
         await page.screenshot({ path: path.join(output, `converted-${width}.png`), fullPage: true }); expect(errors).toEqual([]);
@@ -73,7 +74,7 @@ describe("SHO-3053 desktop and phone conversion", () => {
         expect((await leader.c.patch(`/api/projects/${id}/deal`, { need: "ZZ-TEST changed while reviewing" })).status).toBe(200); const before = await sameDeal(id);
         await page.getByRole("button", { name: "Confirm conversion", exact: true }).click(); await page.getByRole("alert").filter({ hasText: "Close and reopen" }).waitFor();
         expect(await page.getByRole("button", { name: "Review conversion", exact: true }).isEnabled()).toBe(false); expect(await sameDeal(id)).toEqual(before);
-        await page.screenshot({ path: path.join(output, `stale-${width}.png`), fullPage: true }); expect(errors).toEqual([]);
+        await page.screenshot({ path: path.join(output, `stale-${width}.png`), fullPage: false }); expect(errors).toEqual([]);
       } finally { await context.close(); }
     });
     it(`${width}px hides conversion for Viewers`, async () => {
