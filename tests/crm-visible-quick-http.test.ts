@@ -96,4 +96,21 @@ describe.skipIf(!built)("POST /api/concierge/quick/:id with a hidden deal, over 
       expect(o.body).not.toContain(dealName);
     }
   });
+  it("SHO-2584: CRM attention chip and route obey current HTTP visibility with provider disabled", async () => {
+    const sa = await superAdmin();
+    const ad = await admin(sa, "crm2584modeadmin");
+    const member = await account("crm2584modemember");
+    for (const mode of ["admins", "off"] as const) for (const who of [member, ad]) {
+      const allowed = mode === "admins" && who.id === ad.id;
+      const state = await fetch(`http://localhost:${PORTS[mode]}/api/concierge/state`, { headers: { cookie: who.c.cookie } });
+      expect(state.status).toBe(200);
+      const body = await state.json();
+      expect(JSON.stringify(body.quickActions).includes("deals-attention")).toBe(allowed);
+      const result = await fetch(`http://localhost:${PORTS[mode]}/api/concierge/quick/deals-attention`, {
+        method: "POST", headers: { "content-type": "application/json", cookie: who.c.cookie }, body: "{}",
+      });
+      expect(result.status).toBe(allowed ? 200 : 404);
+    }
+  });
+
 });

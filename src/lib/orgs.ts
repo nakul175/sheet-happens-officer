@@ -160,7 +160,7 @@ export async function listOrganisations(user: Actor, o: { q?: string; kind?: str
       ...(o.q?.trim() ? { name: { contains: o.q.trim(), mode: "insensitive" } } : {}),
       ...(o.kind ? { kind: { equals: o.kind, mode: "insensitive" } } : {}),
     },
-    orderBy: { name: "asc" },
+    orderBy: [{ name: "asc" }, { id: "asc" }],
     take: 500,
     include: { parent: { select: { id: true, name: true } } },
   });
