@@ -110,9 +110,3 @@ The concierge sends task text to Anthropic only when the owner switches it on. S
 | `WEEKLY_MESSAGE_CAP` | variable, optional | Default `200` messages per person per week (Monday 00:00 India time). |
 
 Unset values are simply left out of `/etc/sho/app.env`; the deploy still succeeds and the concierge shows "not switched on yet".
-
-### Local-only browser stories
-
-Mark any Playwright story that signs up accounts or verifies email from `EMAIL_OUTBOX_DIR` with the `@local-only` tag on its enclosing `test.describe`. Both staging-e2e runners exclude `@local-only` through `--grep-invert`; use the tag rather than `test.skip`, so staging never executes those local-outbox fixtures. Static and manual cases are also excluded there.
-
-Local QA retains those cases. With the local production build/server, `EMAIL_OUTBOX_DIR`, `SHO_QA_PASS` and the test accounts configured, run `npx playwright test tests/e2e/stories/APL-2609.spec.ts`. CI runs its four cases against throwaway localhost Postgres, the local outbox and CI-only account credentials; an exact-four gate rejects skipped or failed cases. `node scripts/ci/check-local-only-2882.mjs` checks that local collection retains the four cases and full staging selection excludes them without dropping all other coverage. This collection check does not execute tests or contact staging.
