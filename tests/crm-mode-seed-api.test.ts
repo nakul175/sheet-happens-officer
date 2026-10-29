@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
-const spec = readFileSync(new URL("./crm-visible-modes-server.test.ts", import.meta.url), "utf8");
+const spec = readFileSync(new URL("./crm-visible-modes-server.mode.test.ts", import.meta.url), "utf8");
 const helper = readFileSync(new URL("./crm-mode-seed-api.ts", import.meta.url), "utf8");
 
 describe("SHO-2753 CRM mode fixture API", () => {

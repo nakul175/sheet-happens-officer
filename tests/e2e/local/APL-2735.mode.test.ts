@@ -2,9 +2,9 @@
 // The person page does not call deactivate. An Admin while CRM_VISIBLE=off cannot see the CRM: the alert is the
 // generic sentence, with no deal name, no deal id and no change-leader link. An Admin while CRM_VISIBLE=on still
 // sees both deal names and a change-leader link for each.
-// Each CRM_VISIBLE mode is its own `next start` process (as tests/e2e/local/APL-2728.test.ts), and
+// Each CRM_VISIBLE mode is its own `next start` process (as tests/e2e/local/APL-2728.mode.test.ts), and
 // Chromium is driven with playwright-core. Needs `npm run build` first.
-// Run with `npm run test:crm-modes` (CI runs it after the build). `npm test` does not start these servers.
+// Run with `npm run test:modes` (CI runs it after the build). `npm test` does not start these servers.
 // Local or CI Postgres only: a DATABASE_URL on any other host is refused before anything starts.
 // People are run-unique nakul17+ aliases, data is named ZZ-TEST. Seeding and clean-up go through the app's API only;
 // this file writes nothing to the database itself. afterAll hands the projects to this run's Super Admin, archives

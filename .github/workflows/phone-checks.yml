@@ -55,13 +55,32 @@ jobs:
       - run: npm ci
       - run: npx prisma migrate deploy
       - run: npm run build
-      - run: npx playwright-core install --with-deps chromium
+      - name: Use runner Chrome or install Chromium
+        run: |
+          if viewport_browser=$(command -v google-chrome); then
+            printf 'PW_CHROMIUM=%s\n' "$viewport_browser" >> "$GITHUB_ENV"
+            "$viewport_browser" --version
+          else
+            npx playwright-core install --with-deps chromium
+          fi
       - name: Start the app
         run: |
           (npx next start -p 3100 > server.log 2>&1 &)
           for i in $(seq 1 30); do curl -fsS http://localhost:3100/api/health && break; sleep 2; done
+      - name: Prove a real 400px regression fails with diagnostics
+        run: node scripts/ci/viewport-negative-control.mjs
       - name: Phone checks
         run: npm run test:viewport
+      - name: Negative-control evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: viewport-negative-control
+          path: |
+            test-results/viewport/negative-control.*
+            test-results/viewport/negative-control-400px-320.png
+          if-no-files-found: error
+          retention-days: 14
       - name: Screenshots of failing pages
         if: failure()
         uses: actions/upload-artifact@v4

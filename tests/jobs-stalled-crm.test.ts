@@ -1,6 +1,6 @@
 // APL-2741. notifyStalledDeals applies crmProjectWhere for the Leader.
 // AC for one real server process per CRM_VISIBLE mode, including 40 concurrent job posts, lives in
-// tests/jobs-stalled-crm-server.test.ts and runs in CI via `npm run test:stalled-modes`.
+// tests/jobs-stalled-crm-server.mode.test.ts and runs in CI via `npm run test:modes`.
 // Rows are checked in the test database and on GET /api/notifications. The job sends no email;
 // the outbox is checked so a deal name cannot leave that way either. Names are ZZ-TEST.
 // qa:TC missing: QA has not assigned TC ids for this story yet.
