@@ -6,7 +6,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { PrismaClient } from "../src/generated/prisma/client";
 import { verifyPassword } from "../src/lib/auth";
 import { EDITOR_EMAIL, LEADER_EMAIL, QA_PROJECT_NAME, runStagingEditor, type DbConnect } from "../scripts/staging-editor";
-import { Client } from "./helpers";
+import { Client, istDate } from "./helpers";
 
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) throw new Error("DATABASE_URL is required for this test.");
@@ -512,7 +512,7 @@ describe("staging editor (APL-2682)", () => {
     const editor = new Client();
     const signin = await editor.post("/api/auth/signin", { email: EDITOR_EMAIL, password: PASSWORD });
     expect(signin.status, JSON.stringify(signin.json)).toBe(200);
-    const created = await editor.post(`/api/projects/${project.id}/tasks`, { title: "QA edit" });
+    const created = await editor.post(`/api/projects/${project.id}/tasks`, { title: "QA edit", dueDate: istDate(1) });
     expect(created.status, JSON.stringify(created.json)).toBe(201);
     const taskId = created.json.task.id as string;
     const seen = (await editor.get(`/api/tasks/${taskId}`)).json.task.updatedAt as string;
