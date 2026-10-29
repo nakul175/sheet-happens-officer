@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-const mocks = vi.hoisted(() => ({ user: { findUnique: vi.fn() }, projectMember: { findMany: vi.fn() }, screenSavedView: { findMany: vi.fn(), findFirst: vi.fn(), findUnique: vi.fn(), count: vi.fn(), create: vi.fn(), update: vi.fn(), delete: vi.fn() }, $executeRaw: vi.fn(), $transaction: vi.fn(), projectAccess: vi.fn() }));
+const mocks = vi.hoisted(() => ({ user: { findUnique: vi.fn() }, projectMember: { findMany: vi.fn(), findUnique: vi.fn() }, screenSavedView: { findMany: vi.fn(), findFirst: vi.fn(), findUnique: vi.fn(), count: vi.fn(), create: vi.fn(), update: vi.fn(), delete: vi.fn() }, $executeRaw: vi.fn(), $transaction: vi.fn(), projectAccess: vi.fn() }));
 vi.mock("@/lib/db", () => ({ db: mocks }));
 vi.mock("@/lib/access", async importOriginal => ({ ...await importOriginal<typeof import("@/lib/access")>(), projectAccess: mocks.projectAccess }));
 import { deleteScreenView, getScreenView, listScreenViews, saveScreenView } from "@/lib/screen-views";
@@ -12,6 +12,7 @@ beforeEach(() => {
   vi.resetAllMocks(); vi.unstubAllEnvs();
   mocks.user.findUnique.mockResolvedValue({ workspaceId: "w1" });
   mocks.projectMember.findMany.mockResolvedValue([{ projectId: "visible-project" }]);
+  mocks.projectMember.findUnique.mockResolvedValue({ projectId: "visible-project" });
   mocks.screenSavedView.findMany.mockResolvedValue([row]);
   mocks.screenSavedView.findFirst.mockResolvedValue(row);
   mocks.screenSavedView.findUnique.mockResolvedValue(row);
@@ -45,6 +46,14 @@ describe("SHO-2594 saved screen views", () => {
     expect(mocks.screenSavedView.findFirst.mock.calls[0][0].where).toMatchObject({ id: "view1", screen: "DEALS", workspaceId: "w1" });
     mocks.screenSavedView.findFirst.mockResolvedValue(null);
     await expect(getScreenView(user, "hidden", "DEALS")).rejects.toMatchObject({ status: 404 });
+  });
+  it("requires current project membership even for an Admin's project-shared views", async () => {
+    mocks.projectMember.findMany.mockResolvedValue([]);
+    await listScreenViews(admin, "REVIEW");
+    expect(mocks.screenSavedView.findMany.mock.calls[0][0].where.OR[2]).toEqual({ scope: "PROJECT", project: { id: { in: [] } } });
+    mocks.projectMember.findUnique.mockResolvedValue(null);
+    await expect(saveScreenView(admin, { ...input, scope: "PROJECT", projectId: "p1" })).rejects.toMatchObject({ status: 404 });
+    expect(mocks.screenSavedView.create).not.toHaveBeenCalled();
   });
   it("hides all saved CRM views before querying them when CRM is hidden", async () => {
     vi.stubEnv("CRM_VISIBLE", "off");

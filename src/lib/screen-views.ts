@@ -17,7 +17,7 @@ async function visibleWhere(user: Actor) {
   const memberships = await db.projectMember.findMany({ where: { userId: user.id, project: { workspaceId } }, select: { projectId: true } });
   return { workspaceId, OR: [
     { scope: "PRIVATE", userId: user.id }, { scope: "WORKSPACE" },
-    { scope: "PROJECT", project: { ...(isAdmin(user) ? {} : { id: { in: memberships.map(m => m.projectId) } }) } },
+    { scope: "PROJECT", project: { id: { in: memberships.map(m => m.projectId) } } },
   ] };
 }
 const ownerInclude = { user: { select: { id: true, name: true } } } as const;
@@ -56,6 +56,8 @@ export async function saveScreenView(user: Actor, input: z.infer<typeof screenVi
   if (input.projectId) {
     const { project } = await projectAccess(user, input.projectId);
     if (project.workspaceId !== workspaceId || project.archivedAt) throw notFound("Project");
+    const membership = await db.projectMember.findUnique({ where: { projectId_userId: { projectId: input.projectId, userId: user.id } } });
+    if (!membership) throw notFound("Project");
   }
   const ownerId = previous?.userId ?? user.id;
   const row = await db.$transaction(async tx => {

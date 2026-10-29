@@ -16,7 +16,7 @@ beforeAll(async () => {
     expect(r.status, JSON.stringify(r.json)).toBe(201);
     shared.push({ id: r.json.view.id, screen, path, name });
   }
-}, 60000);
+}, 120000);
 afterAll(async () => {
   await browser?.close();
   for (const view of shared) expect((await owner.c.del(`/api/screen-views/${view.id}?confirmShared=true`)).status).toBe(204);
@@ -43,16 +43,35 @@ for (const width of [1280, 390]) it(`SHO-2594 shared tabs apply current filters 
       } else await expect.poll(() => page.getByRole("checkbox", { name: "At risk", exact: true }).isChecked()).toBe(true);
       expect(await page.getByRole("button", { name: `Edit view ${view.name}`, exact: true }).count()).toBe(0);
     }
-    await page.goto("/accounts");
-    await page.getByRole("button", { name: "Save view", exact: true }).click();
-    const name = `${prefix} mine ${width}`;
-    await page.getByRole("textbox", { name: "View name", exact: true }).fill(name);
-    await page.getByRole("dialog").getByRole("button", { name: "Save", exact: true }).click();
-    await page.getByRole("link", { name, exact: true }).waitFor({ state: "visible" });
-    const list = await peer.c.get("/api/screen-views?screen=ACCOUNTS");
-    const saved = list.json.views.find((v: { name: string }) => v.name === name);
-    privateIds.push(saved.id); expect(saved.scope).toBe("PRIVATE");
-    await page.reload(); await page.getByRole("link", { name, exact: true }).waitFor({ state: "visible" });
+    for (const view of shared) {
+      await page.goto(view.path);
+      await page.getByRole("button", { name: "Save view", exact: true }).click();
+      const name = `${prefix} mine ${view.screen} ${width}`;
+      await page.getByRole("textbox", { name: "View name", exact: true }).fill(name);
+      expect(await page.getByLabel("Share with", { exact: true }).inputValue()).toBe("PRIVATE");
+      await page.getByRole("dialog").getByRole("button", { name: "Save", exact: true }).click();
+      await page.getByRole("link", { name, exact: true }).waitFor({ state: "visible" });
+      const list = await peer.c.get(`/api/screen-views?screen=${view.screen}`);
+      const saved = list.json.views.find((v: { name: string }) => v.name === name);
+      privateIds.push(saved.id); expect(saved.scope).toBe("PRIVATE");
+      await page.reload(); await page.getByRole("link", { name, exact: true }).click();
+      await page.waitForURL(url => url.searchParams.get("view") === saved.id);
+      mkdirSync("test-results/viewport", { recursive: true });
+      await page.screenshot({ path: `test-results/viewport/shared-views-${view.screen}-${width}-pass.png`, fullPage: true });
+      await page.getByRole("button", { name: `Edit view ${name}`, exact: true }).click();
+      await page.getByLabel("Share with", { exact: true }).selectOption("WORKSPACE");
+      await page.getByRole("dialog").getByRole("button", { name: "Save", exact: true }).click();
+      await page.getByRole("link", { name: `${name} · ${peer.name}`, exact: true }).waitFor({ state: "visible" });
+      await page.getByRole("button", { name: `Delete view ${name}`, exact: true }).click();
+      const confirmation = page.getByRole("dialog");
+      expect(await confirmation.innerText()).toContain("Everyone will lose this saved view");
+      await confirmation.getByRole("button", { name: "Cancel", exact: true }).click();
+      expect((await peer.c.get(`/api/screen-views?screen=${view.screen}`)).json.views.some((v: { id: string }) => v.id === saved.id)).toBe(true);
+      await page.getByRole("button", { name: `Delete view ${name}`, exact: true }).click();
+      await page.getByRole("dialog").getByRole("button", { name: "Delete view", exact: true }).click();
+      await page.getByRole("link", { name: `${name} · ${peer.name}`, exact: true }).waitFor({ state: "detached" });
+      privateIds.splice(privateIds.indexOf(saved.id), 1);
+    }
   } catch (error) {
     mkdirSync("test-results/viewport", { recursive: true });
     await page.screenshot({ path: `test-results/viewport/shared-views-${width}.png`, fullPage: true });
@@ -61,4 +80,4 @@ for (const width of [1280, 390]) it(`SHO-2594 shared tabs apply current filters 
     for (const id of privateIds) expect((await peer.c.del(`/api/screen-views/${id}`)).status).toBe(204);
     await context.close();
   }
-}, 60000);
+}, 120000);
