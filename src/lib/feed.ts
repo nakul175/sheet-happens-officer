@@ -124,6 +124,7 @@ async function hiddenDealIds(user: Actor, projectIds: (string | null)[]): Promis
   if (crmMode() === "all" || crmVisible(user)) return hidden;
   const ids = [...new Set(projectIds.filter((id): id is string => !!id))];
   if (!ids.length) return hidden;
+  // project-lookup-ok: privacy filter identifies deal IDs to remove before showing activity text
   const deals = await db.project.findMany({
     where: { id: { in: ids }, typeId: WORKSTREAM_DEAL },
     select: { id: true },
@@ -278,6 +279,7 @@ export async function auditLog(user: Actor, q: z.infer<typeof auditQuery>) {
   // A "deal" target is the deal's project row (DEAL_CREATED, DEAL_CLOSED), or the task that became one (DEAL_CONVERTED) (SHO-BUG-4).
   const [us, ps, ts, ss] = await Promise.all([
     db.user.findMany({ where: { id: { in: byType(["user", "member"]) } }, select: { id: true, name: true } }),
+    // project-lookup-ok: Super Admin audit log needs names of every referenced project, including archived projects
     db.project.findMany({ where: { id: { in: byType(["project", "deal"]) } }, select: { id: true, name: true } }),
     db.task.findMany({ where: { id: { in: byType(["task", "deal"]) } }, select: { id: true, title: true } }),
     db.section.findMany({ where: { id: { in: byType(["section"]) } }, select: { id: true, name: true } }),

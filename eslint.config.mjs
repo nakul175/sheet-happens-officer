@@ -1,10 +1,16 @@
 import { defineConfig, globalIgnores } from "eslint/config";
 import nextVitals from "eslint-config-next/core-web-vitals";
 import nextTs from "eslint-config-next/typescript";
+import projectLookup from "./eslint/no-unguarded-project-lookup.mjs";
 
 const eslintConfig = defineConfig([
   ...nextVitals,
   ...nextTs,
+  {
+    files: ["src/**/*.{ts,tsx}"],
+    plugins: { sho: { rules: { "no-unguarded-project-lookup": projectLookup } } },
+    rules: { "sho/no-unguarded-project-lookup": "error" },
+  },
   // Override default ignores of eslint-config-next.
   globalIgnores([
     // Default ignores of eslint-config-next:
@@ -14,6 +20,16 @@ const eslintConfig = defineConfig([
     "next-env.d.ts",
     "deploy/**", // ops scripts run on the server with plain node
   ]),
+  // Story specs run under Playwright, not the Next app. They use `any` for JSON
+  // fixtures and a callback named `use`, which the React hooks rule misreads.
+  {
+    files: ["tests/e2e/**/*.{ts,tsx}", "playwright.config.ts"],
+    rules: {
+      "@typescript-eslint/no-explicit-any": "off",
+      "@typescript-eslint/no-non-null-asserted-optional-chain": "off",
+      "react-hooks/rules-of-hooks": "off",
+    },
+  },
 ]);
 
 export default eslintConfig;
