@@ -24,7 +24,7 @@ export default function TaskPage({ params }: { params: Promise<{ id: string }> }
   }, [projectId, id, router, stay]);
   if (t.loading || (projectId && !stay)) return <Page><div className="skel">Opening the task…</div></Page>;
   return (
-    <Page title="Task">
+    <Page>
       <TaskModal asPage id={id} me={me.id} onClose={() => router.push("/")} />
     </Page>
   );

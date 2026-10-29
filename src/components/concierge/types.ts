@@ -35,7 +35,7 @@ export type Message = {
 };
 
 export type Disabled = { code: "NOT_ENABLED" | "MONTH_CAP" | "WEEK_CAP" | "PROVIDER_DOWN"; message: string; resumesAt?: string };
-export type QuickActionId = "due-week" | "overdue" | "waiting-on-me" | "blocked" | "recently-completed";
+export type QuickActionId = "due-week" | "overdue" | "waiting-on-me" | "blocked" | "recently-completed" | "deals-attention";
 
 export type State = {
   available: boolean;

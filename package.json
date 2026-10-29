@@ -19,8 +19,11 @@
     "postinstall": "prisma generate"
   },
   "dependencies": {
+    "@aplyd/holy-sheet-editor": "file:vendor/aplyd-holy-sheet-editor-0.1.0-holy3.4.tgz",
     "@prisma/client": "^6.19.3",
+    "koffi": "^3.3.3",
     "next": "16.4.2",
+    "openid-client": "6.8.8",
     "pg-connection-string": "^2.14.1",
     "prisma": "^6.19.3",
     "react": "19.3.0",

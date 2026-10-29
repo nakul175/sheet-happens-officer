@@ -16,8 +16,8 @@ export default function Profile() {
   const [outMsg, setOutMsg] = useState<string | null>(null);
 
   return (
-    <Page title="Profile" sub={`${me.email} · ${roleLabel(me.orgRole)}`}>
-      <div style={{ display: "grid", gap: 16, maxWidth: 620 }}>
+    <Page className="bounded-form-page profile-view" title="Profile" sub={`${me.email} · ${roleLabel(me.orgRole)}`}>
+      <div className="profile-sections">
         <form className="card" onSubmit={async (e) => {
           e.preventDefault();
           const r = await api("PATCH", "/api/profile", { name });

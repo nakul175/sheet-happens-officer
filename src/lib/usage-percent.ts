@@ -2,8 +2,9 @@
 // The screen prints percentUsedLabel(spend, ceiling). It does not echo ceiling.percent, so a payload
 // that still carries the old one-decimal figure (10 of 80 stored as 12.5, or 1 of 101 stored as 1)
 // still shows 13% and <1%.
-// GET /api/usage stores the matching whole number in ceiling.percent (0 when the label is "0%" or "<1%",
-// and 0 when no ceiling is set).
+// GET /api/usage stores the matching whole number in ceiling.percent (0 when the label is "0%" or "<1%").
+// That route always has a ceiling: MONTHLY_CEILING_USD 0 or unset means the $100 default safety cap (APL-2950),
+// so percent is worked out against it. percentUsedNumber itself still answers 0 when a caller gives it no ceiling.
 // AC6 v1.1: a ceiling of 0 or unset shows "No ceiling set" and no percentage; spend over the ceiling
 // shows the rounded percentage plus an "Over ceiling" flag.
 

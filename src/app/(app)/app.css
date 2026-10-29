@@ -172,15 +172,15 @@ textarea.in.blocked-reason { display: block; margin-top: 6px; min-height: 0; lin
 @media (min-width: 1280px) { .with-dock { margin-right: 340px; } .dock { display: block; } }
 
 /* CRM: pipeline board (SHO-US-12.6). Columns scroll inside the board; on a phone they become a vertical list. */
-.dboard { display: flex; gap: 12px; overflow-x: auto; padding-bottom: 8px; align-items: flex-start; }
-.dcol { flex: 0 0 260px; background: #f1f3f8; border: 1px solid var(--line); border-radius: 12px; padding: 10px; display: flex; flex-direction: column; gap: 8px; }
+.dboard { display: grid; grid-template-columns: repeat(auto-fit,minmax(min(260px,100%),1fr)); gap: 16px; padding-bottom: 8px; align-items: start; max-width: 100%; }
+.dcol { min-width: 0; background: #f1f3f8; border: 1px solid var(--line); border-radius: 12px; padding: 14px; display: flex; flex-direction: column; gap: 10px; }
 .dcol.over { outline: 2px solid var(--navy); }
 .dcol header { font-size: 14px; }
-.dcard { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 10px; font-size: 14px; display: flex; flex-direction: column; gap: 3px; cursor: grab; }
+.dcard { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 14px; font-size: 14px; display: flex; flex-direction: column; gap: 6px; cursor: grab; min-width: 0; overflow-wrap: anywhere; }
 .sub2 { font-size: 12px; color: var(--muted); }
 .sub2.over, .sub2 .over { color: var(--danger); font-weight: 600; }
 .mhead { font-size: 12px; color: var(--muted); padding: 6px 10px; }
-@media (max-width: 700px) { .dboard { flex-direction: column; overflow: visible; } .dcol { flex: none; width: 100%; } .dcard { cursor: default; } }
+@media (max-width: 700px) { .dboard { grid-template-columns: minmax(0,1fr); } .dcol { width: 100%; } .dcard { cursor: default; } }
 
 /* SHO-US-22.7: on a phone the task opens as a full-screen sheet with Close always in view. */
 @media (max-width: 599px) {
@@ -189,6 +189,19 @@ textarea.in.blocked-reason { display: block; margin-top: 6px; min-height: 0; lin
   .modal.sm { min-height: 0; margin: 12vh 14px 0; border-radius: 14px; padding: 22px; }
   .modal .bar { position: sticky; top: 0; z-index: 2; background: var(--card); margin: 0 -18px 10px; padding: calc(8px + env(safe-area-inset-top, 0px)) 18px 8px; border-bottom: 1px solid var(--line); min-height: 52px; }
   .modal .bar .link { min-height: 44px; min-width: 44px; padding: 0 8px; }
+}
+
+/* SHO-2738 (APL-2555 AC5): with the keyboard open, the sheet follows visualViewport (--vvt/--vvh, set on <html> by the dialog)
+   so the focused description and the footer stay inside the visible area. Outside this block a desktop dialog never shows
+   a pinned footer, so desktop behaviour is unchanged. */
+@media (max-width: 599px), (pointer: coarse) {
+  body.vv-sheet .scrim { top: var(--vvt, 0px); bottom: auto; height: var(--vvh, 100dvh); overscroll-behavior: contain; }
+  body.vv-sheet .modal { min-height: 0; max-height: 100%; overflow-y: auto; overscroll-behavior: contain;
+    padding-bottom: calc(22px + var(--vvh, 100dvh) - 100% + env(safe-area-inset-bottom, 0px)); }
+  /* the pin line: the sheet's own padding ends this far above its bottom edge, so the sticky footer sits exactly there */
+  body.vv-sheet .modal > .actions { position: sticky; bottom: calc(var(--vvh, 100dvh) - 100%); z-index: 2; background: var(--card);
+    margin: 0 -18px; padding: 10px 18px; border-top: 1px solid var(--line); }
+  body.vv-sheet .modal.sm { max-height: calc(var(--vvh, 100dvh) - 24vh); overflow-y: auto; }
 }
 
 /* SHO-US-22.2: 44 px tap areas on touch screens; the tick keeps its look. */
@@ -298,7 +311,11 @@ main:focus { outline: none; }
 .usage-figs dt { font-size: 13px; color: var(--muted); overflow-wrap: anywhere; }
 .usage-figs dd { margin: 2px 0 0; font-size: 1.17em; font-weight: 700; overflow-wrap: anywhere; }
 .usage-count { margin: 0 0 8px; font-size: 1.6rem; font-weight: 700; line-height: 1.2; overflow-wrap: anywhere; }
+/* SHO-2951: the payload left the message count out, so the card says so rather than printing a false 0. */
+.usage-unknown { font-size: 1.05rem; color: var(--muted); }
 .usage-meter { height: 10px; margin-top: 14px; border-radius: 99px; background: #eceef3; overflow: hidden; }
 .usage-meter > span { display: block; height: 100%; background: var(--navy); }
 /* AC6 v1.1: spend over the ceiling. The words carry the meaning; the colour only adds to it. */
 .usage-over { display: inline-block; margin-left: 6px; padding: 1px 8px; border-radius: 99px; border: 1px solid #b42318; background: #fef3f2; color: #b42318; font-size: 13px; font-weight: 600; vertical-align: middle; }
+/* SHO-3013: the default safety cap has been reached and the concierge is paused. Text, not colour alone. */
+.usage-warn { margin: 14px 0 0; padding: 8px 10px; border: 1px solid #b42318; border-radius: 8px; background: #fef3f2; color: #b42318; font-size: 14px; font-weight: 600; }

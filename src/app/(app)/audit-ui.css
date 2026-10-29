@@ -1,0 +1,135 @@
+/* SHO3114–3128: bounded shared presentation; header and business behavior remain intact. */
+:root { --ui-title: clamp(30px,3vw,42px); --ui-body: 16px; --ui-label: 14px; --ui-gap: 16px; --ui-radius: 12px; --ui-shadow: 0 2px 4px #171b2210,0 8px 20px #171b2210; }
+.shell .content { font-family: Lato,sans-serif; }
+.shell .content h1.pt { font-size: var(--ui-title); line-height: 1.2; color: #10143e; font-weight: 700; overflow-wrap: anywhere; }
+.shell .content .head { align-items: center; gap: 16px; margin-bottom: 20px; }
+.shell .content .sub { font-size: 15px; margin: 6px 0 0; }
+.shell .content .card { border-radius: var(--ui-radius); box-shadow: var(--ui-shadow); }
+.shell .content .tbl { font-size: 15px; }
+.shell .content .tbl :is(th,td) { padding-block: 14px; }
+.shell .content .empty { padding: 24px 16px; }
+/* An invariant footer cannot overlap the header or the body's scrolling fields. */
+.scrim .modal { font-family: Lato,sans-serif; display:flex; flex-direction:column; min-height:0; max-height:calc(100dvh - 80px); overflow:hidden; }
+.modal .dialog-header, .modal .dialog-footer { flex:0 0 auto; min-width:0; }
+.modal .dialog-header .bar { position:static; margin:0 0 12px; padding:0; }
+.modal .dialog-body { flex:1 1 auto; min-height:0; overflow-y:auto; overscroll-behavior:contain; padding:2px; scroll-padding:16px; }
+.modal .dialog-form { display:flex; flex-direction:column; flex:1 1 auto; min-height:0; gap:0; margin:0; }
+.modal .dialog-footer { padding-top:16px; margin-top:12px; border-top:1px solid var(--line); background:var(--card); }
+.modal .dialog-footer .actions { position:static; margin:0; padding:0; border:0; flex-wrap:wrap; }
+.modal .task-details > .actions { position:static; display:flex; flex-wrap:wrap; gap:10px; margin-block:16px; }
+.modal .task-details .tt { max-width:100%; white-space:pre-wrap; overflow-wrap:anywhere; }
+.modal .new-task-form > .dialog-body { display:grid; grid-template-columns:1fr 1fr; gap:20px 16px; }
+.modal .new-task-form > .dialog-body > :is(.field:first-child,.field:has(select[multiple]),div:not(.field)) { grid-column:1/-1; }
+/* Label and icon are always visible, including Compact density. */
+.shell .priority-badge { display:inline-flex; align-items:center; gap:6px; padding:4px 8px; border-radius:6px; font-size:13px; font-weight:700; line-height:1.2; white-space:nowrap; background:#f1f5f9; color:#475569; }
+.shell .priority-badge.pri-MEDIUM { background:#fff3cd; color:#73520a; }
+.shell .priority-badge.pri-HIGH { background:#ffead5; color:#9a3d05; }
+.shell .priority-badge.pri-URGENT { background:#fde6e6; color:#a31c26; }
+.shell[data-density] .priority-badge .pri-t { position:static; width:auto; height:auto; overflow:visible; clip:auto; white-space:normal; }
+.shell .selall { position:relative; display:inline-grid; place-items:center; width:44px; min-width:44px; height:44px; margin:0 4px 0 0; cursor:pointer; }
+.shell .selall input { appearance:none; width:24px; height:24px; margin:0; border:2px solid var(--navy); border-radius:6px; background:white; }
+.shell .selall input:is(:checked,:indeterminate) { background:var(--navy); }
+.shell .selall input:focus-visible { outline:2px solid var(--gold); outline-offset:3px; }
+.shell .section-selection-mark { position:absolute; pointer-events:none; color:white; font-size:22px; font-weight:900; line-height:1; }
+.shell .sel input { width:18px; height:18px; accent-color:var(--navy); }
+/* Compact inline toolbar labels share a baseline and control geometry. */
+.shell :is(.project-list-view,.project-board-view) .lc-bar { display:flex; flex-wrap:wrap; align-items:center; gap:12px; }
+.shell :is(.project-list-view,.project-board-view) .lc-sel { flex-direction:row; flex-wrap:nowrap; padding:0 8px 0 12px; gap:8px; height:40px; color:var(--muted); font-size:13px; border-radius:8px; }
+.shell :is(.project-list-view,.project-board-view) .lc-sel select { width:auto; height:38px; min-height:38px; padding:0 22px 0 2px; color:var(--ink); font-size:14px; }
+.shell :is(.project-list-view,.project-board-view) .lc-bar > .btn { height:40px; border-radius:8px; padding:0 14px; }
+.shell :is(.project-list-view,.project-board-view) > .tabs { margin:16px 0 12px; }
+.shell :is(.project-list-view,.project-board-view) .project-task-section { margin:16px 0; }
+.shell :is(.project-list-view,.project-board-view) .head .btn { white-space:nowrap; }
+.shell .quick-add-row { display:flex; flex-wrap:wrap; align-items:center; gap:10px; }
+.shell .quick-add-row input[aria-label='Add a task'] { flex:1 1 180px; min-width:0; }
+.shell .quick-add-row input[type='date'] { flex:0 1 160px; width:160px; }
+@media(max-width:599px),(pointer:coarse) {
+  body.vv-sheet .scrim { padding:12px; align-items:center; }
+  body.vv-sheet .scrim .modal,body.vv-sheet .scrim .modal.sm { min-height:0; max-height:100%; margin:0; padding:18px; border-radius:12px; overflow:hidden; }
+  .modal .new-task-form > .dialog-body { grid-template-columns:1fr; }
+  .modal .dialog-body { scroll-padding:12px; }
+}
+@media(max-width:1023px) {
+ .shell :is(.project-list-view,.project-board-view) .lc-sel { height:44px; flex:1 1 140px; }
+ .shell :is(.project-list-view,.project-board-view) .lc-sel select { height:42px; min-height:42px; flex:1; width:0; }
+ .shell :is(.project-list-view,.project-board-view) .lc-bar > .btn { height:44px; }
+ .shell .sel { min-width:44px; height:44px; margin:0; }
+}
+.shell .bounded-form-page, .shell .new-deal-approved { max-width:980px; margin-inline:auto; }
+.shell .bounded-form-page .new-project-form { max-width:none; margin-inline:0; }
+.profile-sections { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:20px; }
+.profile-sections > section { grid-column:1/-1; }
+.shell .usage-split { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); align-items:stretch; gap:20px; }
+.shell .usage-month-counts { display:contents; }
+.shell .usage-split > .card,.shell .usage-month-counts > .card { min-height:180px; margin:0; padding:20px; }
+.shell .usage-ceiling-note { font-size:16px; }
+.shell .usage-ceiling-note small { display:block; font-size:13px; font-weight:400; margin-top:6px; }
+.shell :is(.audit-jobs,.deal-trash) > summary { font-weight:700; cursor:pointer; min-height:44px; display:list-item; padding-block:10px; }
+.shell #deal-filters:not([hidden]) { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:16px; align-items:end; }
+.shell #deal-filters label { display:flex; flex-direction:column; gap:8px; font-size:14px; min-width:0; }
+.shell #deal-filters :is(select,input) { width:100%; min-width:0; height:40px; padding:8px 10px; border:1px solid var(--field); border-radius:8px; font:inherit; background:white; }
+.shell #deal-filters > p { grid-column:1/-1; }
+.shell .project-board-view .bmove { display:inline-flex; width:auto; margin:8px 0 0; min-height:40px; }
+.shell .project-board-view .bcard { padding:16px; margin-bottom:16px; }
+.shell .project-board-view .bcard .row2 { margin:12px 0; }
+.shell .settings-classification label { display:flex; flex-direction:column; align-items:stretch; gap:8px; }
+.shell .settings-member-identity { min-width:0; overflow-wrap:anywhere; }
+@media(max-width:599px) {
+ .profile-sections { grid-template-columns:1fr; }
+ .shell .usage-split { grid-template-columns:minmax(0,1fr); }
+ .shell #deal-filters:not([hidden]) { grid-template-columns:minmax(0,1fr); }
+ .shell #deal-filters :is(select,input) { height:44px; }
+ .shell .bounded-form-page,.shell .new-deal-approved { padding-inline:14px; }
+}
+.modal .dialog-forms { display:flex; flex-direction:column; flex:1 1 auto; min-height:0; }
+.shell .project-trash > summary { min-height:44px; padding-block:12px; cursor:pointer; font-weight:700; }
+.shell .projects-no-archived { display:flex; flex-wrap:wrap; gap:10px; align-items:baseline; margin-block:12px; }
+.shell .projects-no-archived .grp { margin:0; }
+.shell .lc-sel > span { color:var(--muted); font-size:13px; }
+.trash-item-copy { display:flex; flex-direction:column; min-width:0; gap:6px; flex:1; overflow-wrap:normal; word-break:normal; }
+.trash-item-copy strong,.trash-item-copy .trash-parent { overflow-wrap:anywhere; }
+.task-details-page .bar { position:static; margin:0 0 12px; padding:8px 0; max-width:100%; flex-wrap:wrap; gap:10px; }
+.task-details-page .bar > span { min-width:0; overflow-wrap:anywhere; }
+.task-details-page .bar > span:last-child { display:flex; flex-wrap:wrap; gap:8px; }
+.cc-launcher-text { display:none; }
+@media(max-width:599px) {
+ .shell .content:has(~ .cc-fabwrap) { padding-bottom:24px; }
+ .shell .cc-fabwrap { position:static; display:flex; justify-content:flex-end; padding:0 14px calc(90px + env(safe-area-inset-bottom,0px)); }
+ .shell .cc-fabwrap .fab { position:static; display:inline-flex; align-items:center; justify-content:center; gap:8px; width:auto; height:44px; min-width:44px; border-radius:22px; padding:10px 16px; font-size:16px; box-shadow:var(--ui-shadow); }
+ .shell .cc-launcher-text { display:inline; }
+ .trash-item-copy { width:100%; }
+}
+.shell .task-details-page .bar { position:static; margin:0 0 12px; padding:8px 0; max-width:100%; flex-wrap:wrap; gap:10px; }
+@media(max-width:599px) { .shell .cc-fabwrap.k-dock .fab,.shell .cc-fabwrap.k-bar .fab { display:inline-flex; } }
+.shell .sel input { border:1px solid #aeb7c5; border-radius:4px; }
+/* Preserve the real phone keyboard footer contract within the separate normal-flow region. */
+.modal .dialog-task-layout { display:flex; flex-direction:column; flex:1 1 auto; min-height:0; }
+.modal .dialog-footer .actions { position:sticky; bottom:0; }
+.shell .usage-figs > div:nth-child(2) dd { font-size:16px; font-weight:500; }
+.shell .selall .section-selection-mark { inset:0; display:grid; place-items:center; }
+.shell .grp .selall { display:inline-grid; place-items:center; justify-content:center; align-items:center; }
+.shell .new-deal-form > .actions { display:flex; justify-content:flex-end; flex-wrap:wrap; gap:12px; }
+/* Phone controls retain the approved visual scale while their real targets meet 44px. */
+@media(max-width:599px) {
+ .shell .top :is(.top-brand,.account-trigger) { display:inline-flex; align-items:center; justify-content:center; min-width:44px; min-height:44px; }
+ .shell .top .account-trigger { padding:7px; }
+ :root :is(.shell,.modal) :is(input.in,select.in,textarea.in) { font-size:16px; min-height:44px; }
+ .shell nav[aria-label="Breadcrumb"] a,
+ .shell .project-secondary-actions a,
+ .shell .dashboard-panel header > a,
+ .shell .dashboard-panel-link,
+ .shell .dashboard-view > a,
+ .shell .review-actions a,
+ .shell .org-preview-heading > a { display:inline-flex; align-items:center; min-width:44px; min-height:44px; }
+ :root .shell.shell summary { min-width:44px; min-height:44px; }
+ .shell summary:not(.btn):not(:has(.select-chevron)) { padding-block:12px; line-height:20px; }
+ .shell nav[aria-label="Breadcrumb"] a { padding-inline:4px; vertical-align:middle; }
+ .shell .dashboard-panel-link { display:flex; }
+ .shell :is(.project-list-view,.project-board-view) .lc-sel { height:48px; min-height:48px; }
+ .shell :is(.project-list-view,.project-board-view) .lc-sel select.in { height:46px; min-height:46px; font-size:16px; }
+ .shell :is(.project-list-view,.project-board-view) .lc-bar > .btn { height:48px; min-height:48px; }
+ .shell .review-table.stack td { display:grid; grid-template-columns:96px minmax(0,1fr); gap:12px; align-items:start; }
+ .shell .review-table.stack td[data-label]::before { width:auto; min-width:0; }
+ .shell .review-cell-copy { min-width:0; overflow-wrap:anywhere; }
+ .shell .review-cell-copy > strong { display:block; }
+}

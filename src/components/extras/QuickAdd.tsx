@@ -21,7 +21,7 @@ export function QuickAdd({ projects, lastId, onClose }: { projects: Target[]; la
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
-    if (busy || !title.trim() || badDate || !pid) return;
+    if (busy || !title.trim() || badDate || !date || !pid) return;
     setBusy(true); setErr(null);
     // No assigneeId: the server assigns the person who is adding it.
     const r = await api("POST", `/api/projects/${pid}/tasks`, { title: title.trim(), ...(date ? { dueDate: date } : {}) });
@@ -44,17 +44,17 @@ export function QuickAdd({ projects, lastId, onClose }: { projects: Target[]; la
             </select>
           </div>
           <div>
-            <label className="lbl" htmlFor="qa-date">Due (optional)</label>
-            <input id="qa-date" className="in" value={when} autoComplete="off" placeholder="tomorrow, fri, 2026-10-30" aria-describedby="qa-date-note" onChange={(e) => setWhen(e.target.value)} />
+            <label className="lbl" htmlFor="qa-date">Due date</label>
+            <input id="qa-date" className="in" required value={when} autoComplete="off" placeholder="tomorrow, fri, 2026-10-30" aria-describedby="qa-date-note" onChange={(e) => setWhen(e.target.value)} />
           </div>
         </div>
         <p id="qa-date-note" className={`hint qa-note${badDate ? " bad" : ""}`} role="status">
-          {date ? `Due ${dateLabel(date)}` : badDate ? "Not a date I know. Try tomorrow, fri, in 3 days or 2026-10-30." : "Assigned to you. Press Enter to add."}
+          {date ? `Due ${dateLabel(date)}` : badDate ? "Not a date I know. Try tomorrow, fri, in 3 days or 2026-10-30." : "Add a due date. The task will be assigned to you."}
         </p>
         {err && <div className="err" role="alert">{err}</div>}
         <div className="actions">
           <button type="button" className="btn ghost" onClick={onClose}>Cancel</button>
-          <button className="btn" disabled={busy || !title.trim() || badDate || !pid}>Add task</button>
+          <button className="btn" disabled={busy || !title.trim() || badDate || !date || !pid}>Add task</button>
         </div>
       </form>
     </Modal>

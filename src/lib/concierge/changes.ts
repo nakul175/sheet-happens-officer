@@ -75,7 +75,7 @@ async function load(ops: Op[]): Promise<Loaded> {
   const sectionIds = r.map((x) => x.sectionId).filter((x): x is string => !!x);
   const [users, projects, sections] = await Promise.all([
     db.user.findMany({ where: { id: { in: [...userIds] } }, select: { id: true, name: true, email: true, deactivatedAt: true, emailVerifiedAt: true } }),
-    // project-lookup-ok: internal fingerprint loader; callers validate tool references or own the stored card
+    // project-lookup-ok: Internal fingerprint snapshot only; per-operation projectAccess validation gates every preview and mutation.
     db.project.findMany({ where: { id: { in: [...projectIds] } }, select: { id: true, name: true, archivedAt: true, members: { select: { userId: true, role: true } } } }),
     db.section.findMany({ where: { id: { in: sectionIds } }, select: { id: true, name: true, isDone: true, projectId: true } }),
   ]);

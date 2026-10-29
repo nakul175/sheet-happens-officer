@@ -1,6 +1,7 @@
 "use client";
 import { usePathname } from "next/navigation";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useOverlayBack } from "@/components/use-overlay-back";
 import { Confirm } from "@/components/ui";
 import { Composer } from "./Composer";
 import { useConcierge } from "./ConciergeProvider";
@@ -46,13 +47,15 @@ function Quick({ off, onUsed }: { off: boolean; onUsed?: () => void }) {
   const path = usePathname();
   const project = /^\/projects\/([^/]+)/.exec(path)?.[1];
   const here = project && project !== "new" ? project : null;
-  const chips: { key: string; id: QuickActionId; label: string; projectId?: string }[] = here
+  const configuredChips: { key: string; id: QuickActionId; label: string; projectId?: string }[] = here
     ? [
         { key: "o", id: "overdue", label: "Show overdue here", projectId: here },
         { key: "d", id: "due-week", label: "Due this week here", projectId: here },
         { key: "b", id: "blocked", label: "Blocked here", projectId: here },
       ]
     : c.quickActions.map((q) => ({ key: q.id, id: q.id, label: q.label }));
+  // The new CRM query needs no provider; retain the existing disabled-provider behavior for task chips.
+  const chips = c.disabled?.code === "NOT_ENABLED" ? configuredChips.filter((q) => q.id === "deals-attention") : configuredChips;
   return (
     <div className="cc-quick" role="group" aria-label="Quick actions">
       {chips.map((q) => (
@@ -62,7 +65,7 @@ function Quick({ off, onUsed }: { off: boolean; onUsed?: () => void }) {
   );
 }
 
-export function Panel({ variant, onClose }: { variant: Variant; onClose?: () => void }) {
+export function Panel({ variant, onClose, onHide }: { variant: Variant; onClose?: () => void; onHide?: () => void }) {
   const c = useConcierge()!;
   const [confirmClear, setConfirmClear] = useState(false);
   const [clearErr, setClearErr] = useState<string | null>(null);
@@ -70,7 +73,7 @@ export function Panel({ variant, onClose }: { variant: Variant; onClose?: () => 
   const paused = isPaused(c);
   const off = !c.loaded || !!c.loadError || paused; // composer
   // Quick actions are plain queries that need no model, so they keep working when a cap pauses the concierge.
-  const quickOff = !c.loaded || !!c.loadError || c.disabled?.code === "NOT_ENABLED" || (!c.available && !c.disabled);
+  const quickOff = !c.loaded || !!c.loadError || (!c.available && !c.disabled);
   const bar = variant === "bar";
   const count = c.messages.length;
   const [seen, setSeen] = useState(count);
@@ -81,7 +84,7 @@ export function Panel({ variant, onClose }: { variant: Variant; onClose?: () => 
       <strong>Concierge</strong>
       <span className="grow" />
       {count > 0 && <button className="link" onClick={() => { setClearErr(null); setConfirmClear(true); }}>Clear my chat</button>}
-      {!bar && <button className="link" onClick={() => c.setHidden(true)}>Hide</button>}
+      {!bar && <button className="link" onClick={onHide ?? (() => { void c.setHidden(true); })}>Hide</button>}
       {onClose && <button className="link" onClick={onClose}>Close</button>}
     </header>
   );
@@ -113,7 +116,7 @@ export function Panel({ variant, onClose }: { variant: Variant; onClose?: () => 
         <>
           {head}<DisabledNotice />{loadErr || <Thread variant={variant} />}
           {errBox}
-          {!c.loadError && !(paused && c.disabled?.code === "NOT_ENABLED") && <Quick off={quickOff} />}
+          {!c.loadError && <Quick off={quickOff} />}
           {!paused && <Composer off={off} />}
           <p className="cc-privacy">{PRIVACY_SENTENCE}</p>
         </>
@@ -161,16 +164,11 @@ export function ConciergeFab({ kind }: { kind: "dock" | "bar" }) {
   const c = useConcierge();
   const [open, setOpen] = useState(false);
   const btn = useRef<HTMLButtonElement>(null);
-  const pushed = useRef(false); // SHO-US-22.8: opening adds a history entry so the phone Back button closes the concierge instead of leaving the page
-  const closeIt = useCallback(() => {
-    if (pushed.current) { window.history.back(); return; } // the popstate handler closes it and returns focus
-    setOpen(false); setTimeout(() => btn.current?.focus(), 0);
-  }, []);
+  const sheet = useRef<HTMLDivElement>(null);
+  const closeIt = useOverlayBack(open, () => { setOpen(false); setTimeout(() => btn.current?.focus(), 0); }, () => sheet.current);
   useEffect(() => {
     if (!open) return;
     const esc = (e: KeyboardEvent) => { if (e.key === "Escape" && !document.querySelector(".scrim")) closeIt(); };
-    const back = () => { if (pushed.current) { pushed.current = false; setOpen(false); setTimeout(() => btn.current?.focus(), 0); } };
-    window.addEventListener("popstate", back);
     document.addEventListener("keydown", esc);
     document.querySelector<HTMLTextAreaElement>(".cc-sheet textarea")?.focus();
     // SHO-US-22.3: iOS Safari does not shrink the page when the keyboard opens, so follow the visible area.
@@ -185,7 +183,6 @@ export function ConciergeFab({ kind }: { kind: "dock" | "bar" }) {
     vv?.addEventListener("scroll", fit);
     return () => {
       document.removeEventListener("keydown", esc);
-      window.removeEventListener("popstate", back);
       vv?.removeEventListener("resize", fit);
       vv?.removeEventListener("scroll", fit);
       document.documentElement.style.removeProperty("--vvh");
@@ -196,16 +193,15 @@ export function ConciergeFab({ kind }: { kind: "dock" | "bar" }) {
   const close = closeIt;
   const toggle = () => {
     if (open) { close(); return; }
-    try { window.history.pushState({ ...(window.history.state ?? {}), cc: 1 }, ""); pushed.current = true; } catch { /* no history: Close still works */ }
     setOpen(true);
   };
   if (c.hidden) return null; // SHO-US-14.15 AC4: no floating "Show" pill over rows; use Concierge in the menu
   return (
     <div className={`cc-fabwrap k-${kind}`}>
-      <button ref={btn} className="fab" aria-label="Concierge" aria-expanded={open} onClick={toggle}>💬</button>
+      <button ref={btn} className="fab" aria-label="Concierge" aria-expanded={open} onClick={toggle}><span aria-hidden="true">💬</span><span className="cc-launcher-text">Concierge</span></button>
       {open && (
-        <div className="cc-sheet" role="dialog" aria-label="Concierge">
-          <Panel variant="sheet" onClose={close} />
+        <div ref={sheet} className="cc-sheet" role="dialog" aria-label="Concierge">
+          <Panel variant="sheet" onClose={() => close()} onHide={() => close(() => { void c.setHidden(true); })} />
         </div>
       )}
     </div>

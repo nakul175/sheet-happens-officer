@@ -103,7 +103,6 @@ model User {
 }
 
 model Session {
-  centralLink CentralSessionLink?
   id         String    @id @default(cuid())
   userId     String
   user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -115,6 +114,7 @@ model Session {
   userAgent  String?
   lastSeenAt DateTime  @default(now())
   createdAt  DateTime  @default(now())
+  centralLink CentralSessionLink?
 
   @@index([userId])
   @@index([expiresAt])
@@ -150,6 +150,12 @@ model Project {
   name           String
   description    String?
   archivedAt     DateTime?
+  deletedAt      DateTime?
+  deletedPreviousArchivedAt DateTime?
+  isVertical     Boolean         @default(false)
+  verticalId     String?
+  vertical       Project?        @relation("ProjectVertical", fields: [verticalId], references: [id], onDelete: SetNull)
+  deliveryProjects Project[]      @relation("ProjectVertical")
   // CRM (SHO-E10). The column default keeps the previous build working: a project created
   // by the old code is a plain Project. A null pipeline/stage means "Active" (type Project).
   typeId         String          @default("wst_project")
@@ -170,10 +176,31 @@ model Project {
   tasks          Task[]
   actionLogs     ActionLog[]
   savedViews     SavedView[]
+  holySheetLinks HolySheetLink[]
+  holySheetDefault HolySheetDefault?
 
   @@index([workspaceId])
   @@index([typeId])
   @@index([stageId])
+  @@index([verticalId])
+}
+
+// Document identity only: titles, content and grants remain in Holy Sheet.
+model HolySheetLink {
+  id String @id @default(cuid())
+  projectId String
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  taskId String?
+  task Task? @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  originKey String
+  pageId String
+  createdAt DateTime @default(now())
+  @@unique([projectId, originKey, pageId])
+}
+model HolySheetDefault {
+  projectId String @id
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  spaceId String
 }
 
 model ProjectMember {
@@ -203,6 +230,7 @@ model Section {
 }
 
 model Task {
+  holySheetLinks HolySheetLink[]
   id                 String             @id @default(cuid())
   workspaceId        String
   workspace          Workspace          @relation(fields: [workspaceId], references: [id])
@@ -390,6 +418,7 @@ model JobRun {
 // ---------------------------------------------------------------------------
 
 enum StageCategory {
+  DELIVERY
   NOT_STARTED
   ACTIVE
   PAUSED
@@ -401,6 +430,23 @@ enum Currency {
   INR
   USD
   EUR
+}
+
+enum OpportunityType {
+  RFP_RFA
+  EOI
+  OTC
+  CV_LTA
+}
+
+enum AthenaEntity {
+  ATHENA_INDIA
+  APLYD_INDIA
+  ATHENA_USA
+  ATHENA_KENYA
+  ATHENA_UK
+  ATHENA_BANGLADESH
+  TOLADATA
 }
 
 enum PartyRole {
@@ -455,6 +501,7 @@ model Stage {
   category       StageCategory
   needsReason    Boolean       @default(false)
   requiredFields String[]
+  isRetired      Boolean       @default(false)
   projects       Project[]
 
   @@index([pipelineId, position])
@@ -471,6 +518,9 @@ model DealDetails {
   value              Decimal?  @db.Decimal(16, 2)
   currency           Currency?
   probability        Int?
+  opportunityType    OpportunityType?
+  athenaEntity       AthenaEntity?
+  netFeeRevenueUsd   Decimal?  @db.Decimal(15, 2)
   expectedClose      DateTime? @db.Date
   introducedBy       String?
   submissionDeadline DateTime? @db.Date
@@ -611,7 +661,7 @@ model SavedView {
   @@index([userId, projectId, position])
 }
 
-// OAuth authorization-code handoff to first-party suite clients.
+// OAuth authorization-code handoff to the first-party Bug Off client.
 // Opaque codes and access tokens are stored only as SHA-256 hashes.
 model SuiteGrant {
   id              String    @id @default(cuid())
@@ -630,9 +680,9 @@ model SuiteGrant {
 }
 
 model CentralSessionLink {
-  sessionId  String   @id
-  session    Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-  subject    String
+  sessionId String @id
+  session Session @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  subject String
   sessionUid String
-  createdAt  DateTime @default(now())
+  createdAt DateTime @default(now())
 }

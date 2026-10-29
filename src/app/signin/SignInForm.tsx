@@ -8,7 +8,7 @@ import { post, rememberEmail } from "@/components/client";
 import { returnToEnabled, safeReturnPath } from "@/lib/return-to";
 import s from "./signin.module.css";
 
-export function SignInForm({ justReset, sessionExpired = false, next }: { justReset: boolean; sessionExpired?: boolean; next?: string }) {
+export function SignInForm({ justReset, centralEnabled = false, sessionExpired = false, next }: { justReset: boolean; centralEnabled?: boolean; sessionExpired?: boolean; next?: string }) {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
   const [needsVerify, setNeedsVerify] = useState<string | null>(null);
@@ -24,9 +24,10 @@ export function SignInForm({ justReset, sessionExpired = false, next }: { justRe
     const r = await post("/api/auth/signin", { email, password: f.get("password") });
     setBusy(false);
     if (r.ok) {
-      // A failed attempt never reaches here, so `next` stays in the address bar (APL-2652 AC4).
-      // Checked again: the prop is only a path, and router.push is never given an absolute URL.
-      router.push(returnToEnabled() ? (safeReturnPath(next, 1) ?? "/") : "/");
+      const bridgeReturn = new URLSearchParams(window.location.search).get("returnTo");
+      router.push(bridgeReturn?.startsWith("/api/suite/authorize?")
+        ? bridgeReturn
+        : returnToEnabled() ? (safeReturnPath(next, 1) ?? "/") : "/");
       router.refresh();
       return;
     }
@@ -45,14 +46,13 @@ export function SignInForm({ justReset, sessionExpired = false, next }: { justRe
   }
 
   return (
-    <div className={styles.col}>
-      <div className={`${styles.brand} ${s.brand}`}>
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src="/logo-mark.svg" alt="" />
-        <span>Sheet Happens Officer</span>
-      </div>
-      <section className={styles.card}>
+    <div className={`${styles.col} ${s.col}`}>
+      <section className={`${styles.card} ${s.signcard}`}>
       <h2 className={s.h2}>Sign in</h2>
+      {centralEnabled && <><a className={s.sso} href={returnToEnabled() && safeReturnPath(next, 1) ? `/api/auth/aplyd/start?next=${encodeURIComponent(safeReturnPath(next, 1)!)}` : "/api/auth/aplyd/start"}>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src="/aplyd-symbol.svg" alt="" aria-hidden="true" /><span>Continue with Aplyd</span>
+      </a><div className={s.divider}>or use your email</div></>}
       <form onSubmit={submit} className={styles.card} style={{ border: 0, padding: 0 }} noValidate>
         {sessionExpired && !error && <div role="alert" className={styles.alert}>Your session has expired, please sign in again</div>}
         {justReset && !error && <div role="status" className={styles.notice}>Password changed. Sign in with your new password.</div>}

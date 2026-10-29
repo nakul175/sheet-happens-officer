@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { AuthShell } from "@/components/AuthShell";
 import styles from "@/components/auth.module.css";
+import approvedStyles from "@/app/signin/signin.module.css";
 import { post } from "@/components/client";
 
 // APL-2742: opening the link only shows a button. Mail link scanners open links without a person, so the token is
@@ -30,7 +31,8 @@ export function Verify() {
   }
 
   return (
-    <AuthShell>
+    <AuthShell approved>
+      <svg className={approvedStyles.stateIcon} viewBox="0 0 32 32" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><circle cx="16" cy="16" r="13"/><path d="m10 16 4 4 8-9"/></svg>
       {done ? (
         <>
           <h1>Email verified</h1>
@@ -44,6 +46,7 @@ export function Verify() {
           <button type="button" onClick={verify} disabled={busy || !token} className={styles.primary}>
             {busy ? "Verifying…" : "Verify my email"}
           </button>
+          <Link href="/signin" className={styles.center}>Back to sign in</Link>
         </>
       )}
     </AuthShell>

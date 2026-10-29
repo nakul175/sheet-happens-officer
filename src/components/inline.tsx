@@ -115,7 +115,7 @@ export function InlineCells({ t, people, editable, onEdit }: { t: Cell; people: 
       )}
       {open === k && k === "pri" && (
         <Pop label="Choose priority" onClose={close}>
-          {(["URGENT", "HIGH", "MEDIUM", "LOW"] as const).map((p) => <button key={p} type="button" aria-pressed={p === t.priority} onClick={() => p === t.priority ? close() : pick({ kind: "patch", patch: { priority: p } }, `Priority: ${PRIORITY[p]}`)}>{PRIORITY[p]}</button>)}
+          {(["URGENT", "HIGH", "MEDIUM", "LOW"] as const).map((p) => <button key={p} type="button" aria-pressed={p === t.priority} onClick={() => p === t.priority ? close() : pick({ kind: "patch", patch: { priority: p } }, `Priority: ${PRIORITY[p]}`)}><Pri p={p} /></button>)}
         </Pop>
       )}
     </span>

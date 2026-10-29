@@ -1,5 +1,7 @@
+import { INSTALL_GUIDANCE } from "./install-guidance";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { deliverSinkMail } from "./mail-sink";
 
 export type Mail = { to: string; subject: string; text: string };
 
@@ -35,6 +37,10 @@ async function resendError(res: Response): Promise<{ name: string; message: stri
  * never the key, the recipient or the body, which can hold a sign-in link or a password.
  */
 export async function sendMail(mail: Mail): Promise<void> {
+  if (process.env.MAIL_SINK) {
+    await deliverSinkMail(mail, FROM);
+    return;
+  }
   const key = process.env.RESEND_API_KEY;
   if (key) {
     let res: Response;
@@ -66,7 +72,7 @@ export async function sendMail(mail: Mail): Promise<void> {
   await writeFile(path.join(dir, name), JSON.stringify({ ...mail, from: FROM }, null, 2));
 }
 
-export { VERIFY_SEND_FAILED } from "@/lib/auth-messages";
+export { VERIFY_SEND_FAILED } from "./auth-messages";
 
 export const appUrl = () => (process.env.APP_URL ?? "http://localhost:3000").replace(/\/$/, "");
 
@@ -86,5 +92,5 @@ export const resetMail = (to: string, token: string): Mail => ({
 export const signInDetailsMail = (to: string, firstName: string, addedBy: string, password: string): Mail => ({
   to,
   subject: "Your Sheet Happens Officer account",
-  text: `Hi ${firstName},\n\n${addedBy} added you to Sheet Happens Officer. Sign in here:\n\n${appUrl()}/signin\n\nUsername: ${to}\nPassword: ${password}\n\nThis password is temporary. When you sign in, you will be asked to set your own password before you can do anything else. After that, this one stops working.\n\nIf you did not expect this email, ignore it and tell ${addedBy}. Do not forward this email, because it contains your password.`,
+  text: `Hi ${firstName},\n\n${addedBy} added you to Sheet Happens Officer. Sign in here:\n\n${appUrl()}/signin\n\nUsername: ${to}\nPassword: ${password}\n\nThis password is temporary. When you sign in, you will be asked to set your own password before you can do anything else. After that, this one stops working.\n\n${INSTALL_GUIDANCE}\n\nIf you did not expect this email, ignore it and tell ${addedBy}. Do not forward this email, because it contains your password.`,
 });

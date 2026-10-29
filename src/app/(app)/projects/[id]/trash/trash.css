@@ -1,0 +1,23 @@
+.project-trash-view { font-family: Lato, sans-serif; width: 100%; max-width: 1500px; }
+.project-trash-view .head { gap: 24px; align-items: center; margin: 16px 0 24px; }
+.project-trash-view .head h1 { font-size: 38px; color: #10143e; }
+.trash-breadcrumb { font-size: 14px; color: var(--muted); overflow-wrap: anywhere; }
+.trash-breadcrumb a { text-decoration: none; }
+.trash-retention { padding: 18px 24px; background: #fff7e9; color: #352d18; border-radius: 10px; margin: 0 0 24px; line-height: 1.5; }
+.trash-retention::before { content: '◷'; color: #a96d00; margin-right: 12px; font-size: 22px; }
+.trash-panel { padding: 24px; border: 1px solid #dce0e7; border-radius: 12px; background: white; box-shadow: 0 2px 4px #171b2210, 0 8px 20px #171b2210; }
+.trash-panel h2 { color: #10143e; font-size: 22px; margin: 0 0 24px; }
+.trash-panel .tbl { border: 0; border-radius: 0; }
+.trash-panel .tbl th { background: white; font-size: 14px; text-transform: none; letter-spacing: 0; padding: 16px 8px; }
+.trash-panel .tbl td { padding: 20px 8px; overflow-wrap: anywhere; }
+.trash-panel .tbl td:first-child { width: 38%; }
+.trash-parent { display: block; color: var(--muted); font-size: 13px; margin-top: 6px; overflow-wrap: anywhere; }
+.trash-panel .btn { min-height: 40px; padding: 10px 16px; font-family: inherit; }
+.project-trash-view :is(a,button):focus-visible { outline: 2px solid var(--navy); outline-offset: 3px; }
+@media (max-width: 599px) {
+  .trash-panel { padding: 20px; }
+  .trash-panel .tbl td:first-child { width: 100%; }
+  .trash-panel .tbl td { padding: 12px 0; min-width: 0; }
+  .trash-panel .tbl td::before { min-width: 80px; }
+  .trash-panel .btn { min-height: 44px; }
+}

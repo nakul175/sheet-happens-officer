@@ -1,0 +1,12 @@
+.project-board-view .board { gap: 24px; padding-bottom: 24px; max-width: 100%; }
+.project-board-view .col { background: #eef2f6; padding: 16px; border-radius: 12px; min-width: min(290px, calc(100vw - 64px)); max-width: 440px; }
+.project-board-view .col h2 { margin: 4px 4px 20px; font-size: 20px; overflow-wrap: anywhere; }
+.project-board-view .bcard { padding: 20px; border: 1px solid #dce0e7; border-radius: 12px; margin-bottom: 20px; box-shadow: 0 2px 4px #171b2210, 0 8px 20px #171b2210; overflow-wrap: anywhere; }
+.project-board-view .board-task-title { color: #10143e; font-size: 18px; line-height: 1.4; font-weight: 700; }
+.project-board-view .board-complete { color: var(--ok); font-size: 16px; }
+.project-board-view .bcard .row2 { gap: 12px; margin: 16px 0; font-size: 14px; }
+.project-board-view .bmove { display: block; width: 100%; min-height: 40px; margin-top: 16px; }
+.project-board-view .col form { border: 1px dashed var(--field); border-radius: 10px; padding: 12px; }
+.project-board-view .col form .in { width: 100%; min-width: 0; margin-bottom: 8px; }
+.project-board-view :is(.bcard,.bswitch button):focus-visible { outline: 2px solid var(--navy); outline-offset: 3px; }
+@media (max-width: 599px) { .project-board-view .board { gap: 16px; } .project-board-view .col { padding: 12px; } }
