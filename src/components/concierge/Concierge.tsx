@@ -47,13 +47,15 @@ function Quick({ off, onUsed }: { off: boolean; onUsed?: () => void }) {
   const path = usePathname();
   const project = /^\/projects\/([^/]+)/.exec(path)?.[1];
   const here = project && project !== "new" ? project : null;
-  const chips: { key: string; id: QuickActionId; label: string; projectId?: string }[] = here
+  const configuredChips: { key: string; id: QuickActionId; label: string; projectId?: string }[] = here
     ? [
         { key: "o", id: "overdue", label: "Show overdue here", projectId: here },
         { key: "d", id: "due-week", label: "Due this week here", projectId: here },
         { key: "b", id: "blocked", label: "Blocked here", projectId: here },
       ]
     : c.quickActions.map((q) => ({ key: q.id, id: q.id, label: q.label }));
+  // The new CRM query needs no provider; retain the existing disabled-provider behavior for task chips.
+  const chips = c.disabled?.code === "NOT_ENABLED" ? configuredChips.filter((q) => q.id === "deals-attention") : configuredChips;
   return (
     <div className="cc-quick" role="group" aria-label="Quick actions">
       {chips.map((q) => (
@@ -71,7 +73,7 @@ export function Panel({ variant, onClose, onHide }: { variant: Variant; onClose?
   const paused = isPaused(c);
   const off = !c.loaded || !!c.loadError || paused; // composer
   // Quick actions are plain queries that need no model, so they keep working when a cap pauses the concierge.
-  const quickOff = !c.loaded || !!c.loadError || c.disabled?.code === "NOT_ENABLED" || (!c.available && !c.disabled);
+  const quickOff = !c.loaded || !!c.loadError || (!c.available && !c.disabled);
   const bar = variant === "bar";
   const count = c.messages.length;
   const [seen, setSeen] = useState(count);
@@ -114,7 +116,7 @@ export function Panel({ variant, onClose, onHide }: { variant: Variant; onClose?
         <>
           {head}<DisabledNotice />{loadErr || <Thread variant={variant} />}
           {errBox}
-          {!c.loadError && !(paused && c.disabled?.code === "NOT_ENABLED") && <Quick off={quickOff} />}
+          {!c.loadError && <Quick off={quickOff} />}
           {!paused && <Composer off={off} />}
           <p className="cc-privacy">{PRIVACY_SENTENCE}</p>
         </>
