@@ -66,6 +66,7 @@ export default defineConfig({
       "tests/e2e/stories/APL-2521.spec.ts", // SHO-2913: Playwright story
       "tests/e2e/stories/APL-2640.spec.ts", // SHO-2913: Playwright story
       "tests/e2e/stories/APL-2649.spec.ts", // SHO-2913: Playwright story
+      "tests/e2e/stories/APL-2691.spec.ts", // SHO-2907: Playwright story
       "tests/e2e/stories/APL-2506.spec.ts", // SHO-2912: Playwright story
       "tests/e2e/stories/APL-2507.spec.ts", // SHO-2912: Playwright story
       "tests/e2e/stories/APL-2561.spec.ts", // SHO-2912: Playwright story
