@@ -26,9 +26,10 @@ export async function search(user:Actor,q:string,includeArchived:boolean,ideasOn
   const me=await db.user.findUniqueOrThrow({where:{id:user.id},select:{workspaceId:true}}),admin=isAdmin(user),crm=crmVisible(user);
   const safeTokens=tokens.map(t=>t.replace(/[':&|!()]/g,"")).filter(Boolean),ts=safeTokens.join(" & ");
   // Multi-word searches must not leak unrelated records that merely share a
-  // common word. Every term must match by stem, or (for 6+ character input)
-  // by trigram typo tolerance.
-  const matches=(doc:Prisma.Sql)=>Prisma.sql`(${Prisma.join(safeTokens.map(t=>Prisma.sql`(to_tsvector('english',${doc})@@plainto_tsquery('english',${t})${t.length>=6?Prisma.sql` OR ${doc} % ${t}`:Prisma.empty})`)," AND ")})`;
+  // common word. The indexed AND tsquery requires every term. Stage A typo
+  // tolerance is the specified one-token, 6+ character fallback.
+  const fuzzyToken=safeTokens.length===1&&safeTokens[0].length>=6?safeTokens[0]:null;
+  const matches=(doc:Prisma.Sql)=>Prisma.sql`(to_tsvector('english',${doc})@@to_tsquery('english',${ts})${fuzzyToken?Prisma.sql` OR ${doc} % ${fuzzyToken}`:Prisma.empty})`;
   const visible=(a:Prisma.Sql)=>Prisma.sql`${includeArchived?Prisma.empty:Prisma.sql`AND ${a}."archivedAt" IS NULL`} ${crm?Prisma.empty:Prisma.sql`AND ${a}."typeId" <> ${WORKSTREAM_DEAL}`} ${admin?Prisma.empty:Prisma.sql`AND EXISTS (SELECT 1 FROM "ProjectMember" pm WHERE pm."projectId"=${a}.id AND pm."userId"=${user.id})`}`;
   const rows:Raw[]=[];
 
