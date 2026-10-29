@@ -74,7 +74,7 @@ export function DealBoard({ deals, stages, bid, canMove = true, onChange }: { de
     setErr(null);
     if (d.stage?.id === s.id) return;
     if (s.needsReason) { setDialog({ deal: d, stage: s }); return; }
-    const r = await api("POST", `/api/projects/${d.id}/stage`, { stageId: s.id });
+    const r = await api("POST", `/api/projects/${d.id}/stage`, { stageId: s.id, expectedStageId: d.stage?.id ?? null });
     if (r.ok) { onChange(); return; }
     const blocked: Blocked | null = r.data?.openTasks ? { openTasks: r.data.openTasks, tasks: r.data.tasks ?? [] } : null;
     if (blocked || r.data?.needsFields) setDialog({ deal: d, stage: s, initial: { err: r.error, blocked, need: r.data?.needsFields } });
@@ -114,7 +114,7 @@ export function DealBoard({ deals, stages, bid, canMove = true, onChange }: { de
           </div>
         </Modal>
       )}
-      {dialog && <StageDialog projectId={dialog.deal.id} stage={dialog.stage} deal={{ details: null }} initial={dialog.initial} onClose={() => setDialog(null)} onDone={() => { setDialog(null); onChange(); }} />}
+      {dialog && <StageDialog projectId={dialog.deal.id} stage={dialog.stage} deal={{ details: null, stage: dialog.deal.stage }} initial={dialog.initial} onClose={() => setDialog(null)} onDone={() => { setDialog(null); onChange(); }} />}
     </>
   );
 }

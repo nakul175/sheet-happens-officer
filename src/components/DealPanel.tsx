@@ -21,8 +21,8 @@ const LABELS: Record<string, string> = { value: "Value", currency: "Currency", e
 
 export type Blocked = { openTasks: number; tasks: { id: string; title: string; assignee?: string | null }[] };
 
-/** Won and Lost are the stages a deal cannot enter while a task is open (SHO-US-10.3 AC6). */
-export const stageClosesDeal = (category: string) => category === "DONE" || category === "LOST";
+/** Lost still refuses open tasks; Won retains them as operational follow-ups (SHO-3050). */
+export const stageClosesDeal = (category: string) => category === "LOST";
 
 /** The alert payload: a positive count, and at most the first 20 tasks the server named. */
 export function closingAlert(data: { openTasks?: number; tasks?: Blocked["tasks"] } | null | undefined): Blocked | null {
@@ -54,7 +54,7 @@ type FeedTask = { id: string; title: string; completedAt: string | null; assigne
 type FeedSection = { isDone: boolean; total: number; nextCursor: string | null; tasks: FeedTask[] };
 
 /** Open tasks from the list the deal page already loaded. `partial` means that list is filtered or cut short.
- * `refusalCount` is the server's Won/Lost count, which includes subtasks. It wins over the top-level total. */
+ * `refusalCount` is the server's Lost count, which includes subtasks. It wins over the top-level total. */
 export function openTaskFeed(sections: FeedSection[], summaryOpen: number | undefined, filtered: boolean, refusalCount?: number): OpenTaskFeed {
   const tasks = sections.flatMap((s) => s.tasks.filter((t) => !t.completedAt)).map((t) => ({ id: t.id, title: t.title, assignee: t.assignee?.name ?? null }));
   const openCount = refusalCount ?? summaryOpen ?? tasks.length;
@@ -68,7 +68,7 @@ export type ClosingPlan =
   | { kind: "fetch" }
   | { kind: "open"; blocked: Blocked | null; loadError: string | null };
 
-/** What to do with a Won or Lost click. A second click while the first is still waiting is ignored. */
+/** What to do with a Lost click. A second click while the first is still waiting is ignored. */
 export function planClosing(o: { pending: boolean; status: OpenTaskFeed["status"]; openCount: number; tasks: OpenTaskFeed["tasks"] }): ClosingPlan {
   if (o.pending) return { kind: "ignore" };
   if (o.status === "loading") return { kind: "wait" };
@@ -78,7 +78,7 @@ export function planClosing(o: { pending: boolean; status: OpenTaskFeed["status"
 }
 
 export type StageInitial = { err?: string | null; blocked?: Blocked | null; need?: string[]; loadError?: string | null };
-export function StageDialog({ projectId, stage, deal, initial, onClose, onDone }: { projectId: string; stage: Stage; deal: Pick<DealBlock, "details">; initial?: StageInitial; onClose: () => void; onDone: () => void }) {
+export function StageDialog({ projectId, stage, deal, initial, onClose, onDone }: { projectId: string; stage: Stage; deal: Pick<DealBlock, "details" | "stage">; initial?: StageInitial; onClose: () => void; onDone: () => void }) {
   const alertId = useId();
   const [reason, setReason] = useState("");
   const [fields, setFields] = useState<Record<string, string>>({});
@@ -95,7 +95,7 @@ export function StageDialog({ projectId, stage, deal, initial, onClose, onDone }
   const ask = Array.from(new Set([...missing, ...need]));
   async function go() {
     setBusy(true); setErr(null);
-    const body: Record<string, unknown> = { stageId: stage.id };
+    const body: Record<string, unknown> = { stageId: stage.id, expectedStageId: deal.stage?.id ?? null };
     if (stage.needsReason) body.reason = reason;
     const f: Record<string, unknown> = {};
     for (const k of ask) {
@@ -260,7 +260,7 @@ export function DealPanel({ projectId, deal, canWrite, onChange, feed }: { proje
   }
   function choose(s: Stage) {
     if (!stageClosesDeal(s.category)) {
-      if (pending.current) return; // the list for a Won or Lost click is still loading
+      if (pending.current) return; // the list for a Lost click is still loading
       setPick({ stage: s, blocked: null, loadError: null });
       return;
     }
