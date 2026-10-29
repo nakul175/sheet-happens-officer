@@ -157,7 +157,7 @@ test("qa:TC-APL2652-c26e8af9@v1 five decodes of a safe path work and encoded whi
 
 test("qa:TC-APL2652-7526bdb0@v3 a hidden task and a missing task are the same 404 page", async ({ admin, browser, later }) => {
   const task = await openTask(admin, later, "hidden");
-  const signed = await signInAlias(browser, aplydAlias("out"), zz("outsider"));
+  const signed = await signInAlias(browser, aplydAlias("out"));
   track(later, signed.ctx);
   later(() => admin.api.post(`/api/team/${String(signed.who.user.id)}/deactivate`, { reassign: "leaders" }));
   const missing = task.id.slice(0, -1) + (task.id.endsWith("a") ? "b" : "a");
@@ -180,7 +180,7 @@ test("qa:TC-APL2652-7526bdb0@v3 a hidden task and a missing task are the same 40
 
 test("qa:TC-APL2652-5cb7edb7@v2 the hidden and missing task APIs are the same 404", async ({ admin, browser, later }) => {
   const task = await openTask(admin, later, "api404");
-  const signed = await signInAlias(browser, aplydAlias("api"), zz("api outsider"));
+  const signed = await signInAlias(browser, aplydAlias("api"));
   track(later, signed.ctx);
   later(() => admin.api.post(`/api/team/${String(signed.who.user.id)}/deactivate`, { reassign: "leaders" }));
   const missing = task.id.slice(0, -1) + (task.id.endsWith("a") ? "b" : "a");
