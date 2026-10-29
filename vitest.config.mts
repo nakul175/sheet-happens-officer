@@ -105,6 +105,7 @@ export default defineConfig({
       "tests/e2e/stories/APL-2641.spec.ts", // APL-2641: Playwright story
       "tests/e2e/stories/APL-2652.spec.ts", // APL-2652: Playwright story
       "tests/e2e/stories/APL-2693.spec.ts", // APL-2693: Playwright story
+      "tests/e2e/stories/APL-2729.spec.ts", // APL-2729: Playwright story
     ],
   },
 });
