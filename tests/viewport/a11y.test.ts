@@ -4,7 +4,7 @@
 // Fails with: screen, width, element, and a screenshot saved under test-results/viewport/.
 import { mkdirSync } from "node:fs";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { chromium, type Browser, type BrowserContext } from "playwright-core";
+import { chromium, type Browser } from "playwright-core";
 import { account, BASE, istDate, PW, project, superAdmin, task } from "../helpers";
 import { readFileSync } from "node:fs";
 import { SCREENS, type Ids } from "./screens";
@@ -114,19 +114,30 @@ describe("keyboard", () => {
   it("Retry loads the screen again without a full page reload", async () => {
     const ctx = await ctxFor("root", 1280);
     const page = await ctx.newPage();
+    const firstLoad = page.waitForResponse(r => new URL(r.url()).pathname === "/api/my-tasks" && r.ok());
     await page.goto("/", { waitUntil: "load" });
-    await page.waitForSelector("main#main");
+    await firstLoad;
+    await page.getByText("Prepare the quarterly review pack with the finance team", { exact: true }).first().waitFor();
     await page.evaluate(() => { (window as unknown as { __kept: number }).__kept = 1; });
-    await page.route("**/api/my-tasks", (r) => r.abort());
+    let aborted = 0;
+    await page.route("**/api/my-tasks", r => { aborted++; return r.abort(); });
     await page.getByRole("button", { name: "Open menu", exact: true }).click();
     await page.locator('.side.open a[href="/projects"]').click();
-    await page.waitForURL("**/projects");
+    // Finish leaving My tasks before returning; rapid clicks may coalesce navigation
+    // and never issue the request this test deliberately aborts.
+    await page.waitForURL(new URL("/projects", BASE).href);
+    await page.getByRole("heading", { name: "Projects", exact: true }).waitFor();
     await page.getByRole("button", { name: "Open menu", exact: true }).click();
     await page.locator('.side.open a[href="/my-tasks"]').click();
+    await page.waitForURL(new URL("/my-tasks", BASE).href);
     await page.getByText("Could not reach the server.").waitFor();
+    expect(aborted, "the intended API failure must actually have been injected").toBeGreaterThan(0);
     await page.unroute("**/api/my-tasks");
+    const recovered = page.waitForResponse(r => new URL(r.url()).pathname === "/api/my-tasks" && r.ok());
     await page.getByRole("button", { name: "Retry" }).click();
+    await recovered;
     await page.getByText("Could not reach the server.").waitFor({ state: "detached" });
+    await page.getByText("Prepare the quarterly review pack with the finance team", { exact: true }).first().waitFor();
     expect(await page.evaluate(() => (window as unknown as { __kept?: number }).__kept)).toBe(1);
     await ctx.close();
   });
