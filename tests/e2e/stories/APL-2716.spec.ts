@@ -5,7 +5,7 @@
 // a8042ed1 (all and unset), 4811612d (non-deal), d2ec503b (a leak fails the check).
 // qa:TC-APL2716-d72b698a@v1 is the prod read-only smoke and is not run from here.
 import { test, expect, zz } from "../support";
-import { newProject, newTask, type Who } from "../g2";
+import { newProject, newTask, ymd, type Who } from "../g2";
 import { createDeal, createOrg, dealBody, notices, projectOf } from "../helpers/claude-a";
 import { pipelines } from "../helpers/deal-board";
 import { bell } from "../helpers/jim-bell";
@@ -150,7 +150,7 @@ test.beforeAll(async ({ browser }) => {
   const added = await admin.api.post(`/api/projects/${memberDeal.id}/members`, { userId: outsider.user.id, role: "EDITOR" });
   expect(added.status, JSON.stringify(added.json)).toBe(201);
   const kickoffTitle = zz("Acme kickoff");
-  const kickoffId = await newTask(admin, memberDeal.id, { title: kickoffTitle, assigneeId: outsider.user.id });
+  const kickoffId = await newTask(admin, memberDeal.id, { title: kickoffTitle, dueDate: ymd(3), assigneeId: outsider.user.id });
   const removed = await admin.api.del(`/api/projects/${memberDeal.id}/members/${outsider.user.id}?handoverTo=${member.user.id}`);
   expect(removed.status, JSON.stringify(removed.json)).toBe(204);
   const packing = await newProject(admin, later, {
@@ -159,7 +159,7 @@ test.beforeAll(async ({ browser }) => {
   });
   const plainFor = async (who: Who, label: string): Promise<Plain> => {
     const title = zz(`Pack the cartons ${label}`);
-    const id = await newTask(admin, packing.id, { title, assigneeId: who.user.id });
+    const id = await newTask(admin, packing.id, { title, dueDate: ymd(3), assigneeId: who.user.id });
     return { title, id };
   };
   world = {
