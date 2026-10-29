@@ -101,6 +101,10 @@ export default defineConfig({
       "tests/e2e/stories/APL-2737.spec.ts",
       "tests/e2e/stories/APL-2646.spec.ts", // Playwright; actual staging/Pam acceptance remains required.
       "tests/e2e/stories/APL-2716.spec.ts", // Playwright; collected by staging-e2e, not Vitest.
+      "tests/e2e/stories/APL-2519.spec.ts", // APL-2519: Playwright story
+      "tests/e2e/stories/APL-2641.spec.ts", // APL-2641: Playwright story
+      "tests/e2e/stories/APL-2652.spec.ts", // APL-2652: Playwright story
+      "tests/e2e/stories/APL-2693.spec.ts", // APL-2693: Playwright story
     ],
   },
 });
