@@ -76,9 +76,15 @@ export async function project(creator: Account, leader: Account, members: { who:
 }
 
 export const task = async (who: Account, projectId: string, body: Record<string, unknown> = {}) => {
-  const r = await who.c.post(`/api/projects/${projectId}/tasks`, { title: "Task " + n++, ...body });
+  const r = await who.c.post(`/api/projects/${projectId}/tasks`, { title: "Task " + n++, dueDate: istDate(1), ...body });
   expect(r.status, JSON.stringify(r.json)).toBe(201);
-  return r.json.task.id as string;
+  const id = r.json.task.id as string;
+  // Preserve legacy undated fixtures without bypassing the new-task API date requirement.
+  if (!Object.hasOwn(body, "dueDate") && !body.parentId) {
+    const { db } = await import("@/lib/db");
+    await db.task.update({ where: { id }, data: { dueDate: null } });
+  }
+  return id;
 };
 
 /** PATCH a task on the version it is at right now (SHO-BUG-13: the server refuses an edit without one). */

@@ -61,8 +61,14 @@ export async function account(name: string, email: string): Promise<Account> {
 
 export const superAdmin = () => account("Root", SUPER_EMAIL);
 
+function defaultDue() {
+  return new Date(Date.now() + 5.5 * 3600_000 + 3 * 86400_000).toISOString().slice(0, 10);
+}
+
 export async function task(who: Account, projectId: string, body: Record<string, unknown>) {
-  const r = must(await who.c.post(`/api/projects/${projectId}/tasks`, body), 201, "create task");
+  // SHO-3037: a new top-level task needs a due date. Subtasks and an explicit dueDate are left alone.
+  const dated = body.parentId || "dueDate" in body ? body : { dueDate: defaultDue(), ...body };
+  const r = must(await who.c.post(`/api/projects/${projectId}/tasks`, dated), 201, "create task");
   return r.json.task.id as string;
 }
 

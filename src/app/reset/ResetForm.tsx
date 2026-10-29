@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useState } from "react";
 import { AuthShell } from "@/components/AuthShell";
@@ -25,7 +26,7 @@ export function ResetForm() {
   }
 
   return (
-    <AuthShell>
+    <AuthShell approved>
       <h1>Set a new password</h1>
       <form onSubmit={submit} className={styles.card} style={{ border: 0, padding: 0 }} noValidate>
         {error && <div role="alert" className={styles.alert}>{error}</div>}
@@ -37,9 +38,11 @@ export function ResetForm() {
           <label htmlFor="confirm" className={styles.label}>Confirm new password</label>
           <input id="confirm" name="confirm" type="password" autoComplete="new-password" placeholder="Type it again" required className={styles.input} />
         </div>
+        <p className={styles.hint}>Use at least 8 characters, with at least one letter and one number.</p>
         <button type="submit" disabled={busy} className={styles.primary}>{busy ? "Saving…" : "Save and sign in"}</button>
         <div className={styles.hint} style={{ textAlign: "center" }}>Saving signs you out on all other devices.</div>
       </form>
+      <div className={styles.center}><Link href="/signin">Back to sign in</Link></div>
     </AuthShell>
   );
 }

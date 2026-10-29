@@ -67,6 +67,8 @@ export function noticeText(n: N) {
     RESTORED_TO_LEADER: `${t} was restored to you because its owner is no longer on the project.`,
     MADE_LEADER: `${who} made you Leader of ${p}.`,
     PROJECT_ARCHIVED: `${who} archived ${p}. It is now read-only.`,
+    PROJECT_DELETED: `${who} moved ${p} to project Trash. Its work is preserved for restoration.`,
+    PROJECT_RESTORED: `${who} restored ${p} from project Trash.`,
     JOIN_REQUESTED: `${who} asked to be added to one of your projects.`,
     ADDED_TO_PROJECT: `${who} added you to ${p} as ${String(d.role ?? "Editor").toLowerCase()}.`,
     PROJECT_ROLE_CHANGED: `${who} changed your role in ${p} to ${String(d.role ?? "").toLowerCase()}.${leftNote(d)}`,
@@ -124,7 +126,7 @@ async function hiddenDealIds(user: Actor, projectIds: (string | null)[]): Promis
   if (crmMode() === "all" || crmVisible(user)) return hidden;
   const ids = [...new Set(projectIds.filter((id): id is string => !!id))];
   if (!ids.length) return hidden;
-  // project-lookup-ok: privacy filter identifies deal IDs to remove before showing activity text
+  // project-lookup-ok: ID-only lookup redacts hidden CRM notifications; never returns project details.
   const deals = await db.project.findMany({
     where: { id: { in: ids }, typeId: WORKSTREAM_DEAL },
     select: { id: true },
@@ -279,7 +281,7 @@ export async function auditLog(user: Actor, q: z.infer<typeof auditQuery>) {
   // A "deal" target is the deal's project row (DEAL_CREATED, DEAL_CLOSED), or the task that became one (DEAL_CONVERTED) (SHO-BUG-4).
   const [us, ps, ts, ss] = await Promise.all([
     db.user.findMany({ where: { id: { in: byType(["user", "member"]) } }, select: { id: true, name: true } }),
-    // project-lookup-ok: Super Admin audit log needs names of every referenced project, including archived projects
+    // project-lookup-ok: organisation audit view is Admin-only; retained names label historical events.
     db.project.findMany({ where: { id: { in: byType(["project", "deal"]) } }, select: { id: true, name: true } }),
     db.task.findMany({ where: { id: { in: byType(["task", "deal"]) } }, select: { id: true, title: true } }),
     db.section.findMany({ where: { id: { in: byType(["section"]) } }, select: { id: true, name: true } }),

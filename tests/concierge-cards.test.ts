@@ -10,6 +10,7 @@ import { addMessage } from "../src/lib/concierge/thread";
 import { db } from "../src/lib/db";
 import { ApiError } from "../src/lib/http";
 import { createProject } from "../src/lib/projects";
+import { istDate } from "./helpers";
 import { createTask } from "../src/lib/tasks";
 
 const PROJECT = "ZZ-TEST APL-2675";
@@ -83,7 +84,7 @@ async function pendingCard(user: Actor, ops: Op[]) {
 }
 
 async function taskT1() {
-  return createTask(leader, projectId, { title: "T1" });
+  return createTask(leader, projectId, { title: "T1", dueDate: istDate(1) });
 }
 
 describe("@APL-2675 Concierge delete card offers Undo only to people who may restore", () => {
@@ -176,7 +177,7 @@ describe("@APL-2675 Concierge delete card offers Undo only to people who may res
 
   it("@APL-2675 a mixed delete-and-edit card hides Undo for the whole card", async () => {
     const toTrash = await taskT1();
-    const toEdit = await createTask(leader, projectId, { title: "T1 edit" });
+    const toEdit = await createTask(leader, projectId, { title: "T1 edit", dueDate: istDate(1) });
     const cardId = await pendingCard(editor, [
       { k: "task.delete", taskId: toTrash },
       { k: "task.edit", taskId: toEdit, title: "T1 edit revised" },

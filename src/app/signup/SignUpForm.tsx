@@ -35,7 +35,7 @@ export function SignUpForm() {
   }
 
   return (
-    <AuthShell>
+    <AuthShell approved>
       <h1>Create your account</h1>
       <form onSubmit={submit} className={styles.card} style={{ border: 0, padding: 0 }} noValidate>
         {error && (

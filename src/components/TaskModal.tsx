@@ -1,18 +1,21 @@
 "use client";
+import { personText } from "@/components/PeopleSelect";
 import Link from "next/link";
-import { useState } from "react";
+import "./task-details.css";
+import { useRef, useState } from "react";
 import { PRIORITY, ROLE, api, dueLabel, useGet } from "@/components/api";
 import { BLOCKED_REASON_MAX_LENGTH, blockedReasonRef, fitBlockedReason } from "@/components/blocked-reason";
 import { errorMessage, isVersionConflict, versionConflictMessage } from "@/lib/version-error";
 import { Confirm, Modal, Skeleton } from "@/components/ui";
 import { ConvertDialog } from "@/components/ConvertDialog";
 import { TaskLinks } from "@/components/TaskLinks";
+import { HolySheetDocuments } from "@/components/HolySheetDocuments";
 import { Comments } from "@/components/Comments";
 import { closeControlOffered } from "@/lib/approver-ui";
 import { useMe } from "@/app/(app)/Shell";
+import { useTaskSheetBack } from "@/components/use-task-sheet-back";
 
 type P = { id: string; name: string };
-type WorkspacePerson = { id: string; name: string; email: string; memberRole: string | null };
 type Sub = { id: string; title: string; completedAt: string | null; canClose: boolean; updatedAt: string };
 type Task = {
   id: string; projectId: string; parentId: string | null; createdById: string; title: string; description: string | null; priority: string;
@@ -25,8 +28,10 @@ type Task = {
 };
 type Project = {
   id: string; role: string; type?: "PROJECT" | "DEAL"; archived: boolean; sections: { id: string; name: string; isDone: boolean }[];
-  members: { userId: string; name: string; role: string; active: boolean }[];
+  members: { userId: string; name: string; email?: string; role: string; active: boolean }[];
 };
+
+type WorkspacePerson = { id: string; name: string; email: string; memberRole: string | null };
 
 export function TaskModal({ id, me, onClose, onChanged, asPage }: { id: string; me: string; onClose: () => void; onChanged?: () => void; asPage?: boolean }) {
   const t = useGet<{ task: Task }>(`/api/tasks/${id}`);
@@ -37,25 +42,51 @@ export function TaskModal({ id, me, onClose, onChanged, asPage }: { id: string; 
   const [lost, setLost] = useState<Record<string, unknown> | null>(null); // the edit that was refused as stale, so it can be re-applied
   const [confirm, setConfirm] = useState<null | { kind: "complete" | "move"; n: number; sectionId?: string }>(null);
   const [trash, setTrash] = useState(false);
+  const [trashSub, setTrashSub] = useState<Sub | null>(null);
   const [newSub, setNewSub] = useState("");
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
   const [convert, setConvert] = useState(false);
+  const [confirmExit, setConfirmExit] = useState(false);
+  const details = useRef<HTMLDivElement>(null);
+  const pauseBlurSave = useRef(false);
   const [peopleQuery, setPeopleQuery] = useState("");
   const [people, setPeople] = useState<WorkspacePerson[]>([]);
   const [peopleSearched, setPeopleSearched] = useState(false);
   const [newMemberRole, setNewMemberRole] = useState<"EDITOR" | "VIEWER">("EDITOR");
   const meCtx = useMe();
 
-  const body = (inner: React.ReactNode) => (asPage ? <div className="modal" style={{ margin: "0 auto" }}>{inner}</div> : <Modal label="Task" onClose={onClose}>{inner}</Modal>);
+  function hasUnsavedChanges() {
+    const changed = (selector: string, saved: string | null | undefined, trim = true) => {
+      const field = details.current?.querySelector<HTMLTextAreaElement>(selector);
+      if (!field || field.readOnly) return false;
+      return (trim ? field.value.trim() : field.value) !== (saved ?? "");
+    };
+    return !!(busy || lost || newSub.trim() || details.current?.querySelector('[data-unsaved-draft="true"]') || changed('[aria-label="Title"]', task?.title) || changed('#desc', task?.description) || changed('.blocked-reason', task?.blockedReason, false));
+  }
+  const closeByBack = useTaskSheetBack({ id, enabled: !asPage, root: () => details.current?.closest<HTMLElement>('[role="dialog"]') ?? null,
+    blocked: hasUnsavedChanges, beforePrompt: () => { pauseBlurSave.current = true; }, prompt: () => setConfirmExit(true) });
+  function finishClose() {
+    pauseBlurSave.current = true;
+    if (!closeByBack()) onClose();
+  }
+  function requestClose() {
+    if (hasUnsavedChanges()) {
+      pauseBlurSave.current = true;
+      setConfirmExit(true);
+    } else finishClose();
+  }
+  const body = (inner: React.ReactNode) => (asPage ? <div ref={details} className="modal task-details task-details-page" style={{ margin: "0 auto" }}>{inner}</div> : <Modal label="Task" className="task-sheet" onClose={requestClose}><div ref={details} className="task-details">{inner}</div></Modal>);
+  const stateHeader = !asPage && <div className="bar"><span>Task</span><button type="button" className="link" onClick={finishClose}>Close</button></div>;
 
-  if (t.loading) return body(<Skeleton />);
+  if (t.loading) return body(<>{stateHeader}<Skeleton /></>);
   if (!task) {
     return body(
       <>
+        {stateHeader}
         <h2>This task isn&apos;t available</h2>
         <p className="sub">It may have been moved to Trash, or you may not be a member of its project.</p>
-        <div className="actions"><Link className="btn" href="/">Go to My tasks</Link></div>
+        <div className="actions"><Link className="btn" href="/my-tasks">Go to My tasks</Link></div>
       </>,
     );
   }
@@ -129,10 +160,11 @@ export function TaskModal({ id, me, onClose, onChanged, asPage }: { id: string; 
             <span>{task.parentId ? "Subtask · " : ""}<Link href={`/projects/${task.project.id}`}>{task.project.name}</Link> · {task.section.name}</span>
             <span>
               <button className="link" onClick={async () => { try { await navigator.clipboard.writeText(`${location.origin}/tasks/${id}`); setCopied(true); setTimeout(() => setCopied(false), 1800); } catch { setErr("Could not copy. The link is " + location.origin + "/tasks/" + id); } }}>{copied ? "Copied" : "Copy link"}</button>
-              {" · "}<button className="link" onClick={onClose}>Close</button>
+              {" · "}<button className="link" onClick={requestClose}>Close</button>
             </span>
           </div>
           {task.project.archived && <div className="box warn">This project is archived and read-only.</div>}
+          {!task.project.archived && role === "VIEWER" && <p className="box" role="note">You have Viewer access. Task details are read-only.</p>}
           {stale && (
             <div className="box warn" role="alert">
               {stale}
@@ -151,6 +183,7 @@ export function TaskModal({ id, me, onClose, onChanged, asPage }: { id: string; 
             onInput={(e) => { const el = e.currentTarget; el.style.height = "auto"; el.style.height = `${el.scrollHeight}px`; }}
             onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); e.currentTarget.blur(); } }}
             onBlur={(e) => {
+              if (pauseBlurSave.current) return;
               const v = e.target.value.trim();
               if (!v) { setErr("Give the task a title."); e.target.value = task.title; }
               else if (v !== task.title) save({ title: v });
@@ -159,6 +192,23 @@ export function TaskModal({ id, me, onClose, onChanged, asPage }: { id: string; 
           {task.awaitingApproval && (
             <div className="box warn">Waiting for <b>{task.approver?.name}</b> to approve this task.</div>
           )}
+          <div className="actions" style={{ justifyContent: "flex-start" }}>
+            {canEdit && !done && task.approver && !task.awaitingApproval && !task.parentId && task.assignee.id === me && (
+              <button className="btn" disabled={busy} onClick={() => run(api("POST", `/api/tasks/${id}/send-for-approval`, {}))}>Send for approval</button>
+            )}
+            {canEdit && task.awaitingApproval && (task.approver?.id === me || canManage) && (
+              <button className="btn ghost" disabled={busy} onClick={() => run(api("POST", `/api/tasks/${id}/send-back`, {}))}>Send back</button>
+            )}
+            {closeControlOffered({ canEdit, done, canClose: task.canClose }) && (
+              <button className="btn" disabled={busy} onClick={() => complete()}>{task.approver ? "Close task" : "Mark complete"}</button>
+            )}
+            {canEdit && done && <button className="btn ghost" disabled={busy} onClick={() => run(api("POST", `/api/tasks/${id}/reopen`, {}))}>Reopen</button>}
+            {canEdit && !holding && (
+              <button className="btn ghost sm" style={{ color: "var(--danger)", borderColor: "var(--danger-line)" }} onClick={() => setTrash(true)}>Move to Trash</button>
+            )}
+          </div>
+          <div className="task-detail-layout">
+          <aside className="task-details-panel" aria-label="Task details"><h2>Details</h2>
           <div className="fgrid">
             <span className="lbl">Assignee</span>
             <div>
@@ -166,9 +216,10 @@ export function TaskModal({ id, me, onClose, onChanged, asPage }: { id: string; 
                 <select className="in" aria-label="Assignee" value={task.assignee.id} disabled={busy}
                   onChange={(e) => run(api("POST", `/api/tasks/${id}/assign`, { assigneeId: e.target.value, expectedUpdatedAt: version }))}>
                   {!workers.some((w) => w.userId === task.assignee.id) && <option value={task.assignee.id}>{task.assignee.name}</option>}
-                  {workers.map((w) => <option key={w.userId} value={w.userId}>{w.name}</option>)}
+                  {workers.map((w) => <option key={w.userId} value={w.userId}>{personText(w)}</option>)}
                 </select>
               ) : task.assignee.name}
+
             </div>
             <span className="lbl">Collaborators</span>
             <div className="pills">
@@ -182,13 +233,13 @@ export function TaskModal({ id, me, onClose, onChanged, asPage }: { id: string; 
                 <select className="in" style={{ width: "auto" }} aria-label="Add a collaborator" value="" disabled={busy}
                   onChange={(e) => e.target.value && run(api("POST", `/api/tasks/${id}/collaborators`, { userId: e.target.value }))}>
                   <option value="">+ Add</option>
-                  {everyone.filter((m) => m.userId !== task.assignee.id && !task.collaborators.some((c) => c.id === m.userId)).map((m) => <option key={m.userId} value={m.userId}>{m.name}</option>)}
+                  {everyone.filter((m) => m.userId !== task.assignee.id && !task.collaborators.some((c) => c.id === m.userId)).map((m) => <option key={m.userId} value={m.userId}>{personText(m)}</option>)}
                 </select>
               )}
             </div>
             <span className="lbl">Workspace people</span>
             <div>
-              {canManage ? (
+              {canManage && canEdit && !holding ? (
                 <>
                   <form className="addrow" onSubmit={(e) => { e.preventDefault(); searchPeople(); }}>
                     <input className="in" aria-label="Search workspace people" placeholder="Search name or email" value={peopleQuery} onChange={(e) => setPeopleQuery(e.target.value)} />
@@ -213,7 +264,7 @@ export function TaskModal({ id, me, onClose, onChanged, asPage }: { id: string; 
                     </div>
                   ))}
                 </>
-              ) : canEdit ? (
+              ) : canEdit && !holding ? (
                 <span className="hint">Ask the project Leader to add someone who is not already a member.</span>
               ) : (
                 <span className="hint">Only the project Leader or an Admin can add workspace people.</span>
@@ -225,7 +276,7 @@ export function TaskModal({ id, me, onClose, onChanged, asPage }: { id: string; 
                 <select className="in" aria-label="Approver" value={task.approver?.id ?? ""} disabled={busy}
                   onChange={(e) => run(api("PUT", `/api/tasks/${id}/approver`, { approverId: e.target.value || null, expectedUpdatedAt: version }))}>
                   <option value="">None</option>
-                  {workers.filter((w) => w.userId !== task.assignee.id).map((w) => <option key={w.userId} value={w.userId}>{w.name}</option>)}
+                  {workers.filter((w) => w.userId !== task.assignee.id).map((w) => <option key={w.userId} value={w.userId}>{personText(w)}</option>)}
                 </select>
               ) : task.approver?.name ?? <span className="hint">None</span>}
             </div>
@@ -269,24 +320,29 @@ export function TaskModal({ id, me, onClose, onChanged, asPage }: { id: string; 
                   placeholder={canEdit && !holding ? "Why is it blocked?" : undefined} defaultValue={task.blockedReason ?? ""} key={task.updatedAt}
                   ref={blockedReasonRef}
                   onInput={(e) => fitBlockedReason(e.currentTarget)}
-                  onBlur={(e) => { if (!canEdit || holding) return; if ((e.target.value || null) !== (task.blockedReason ?? null)) save({ blockedReason: e.target.value || null }); }} />
+                  onBlur={(e) => { if (!canEdit || holding || pauseBlurSave.current) return; if ((e.target.value || null) !== (task.blockedReason ?? null)) save({ blockedReason: e.target.value || null }); }} />
               )}
             </div>
           </div>
+          </aside>
+          <div className="task-main-panel">
           <div className="field">
             <label htmlFor="desc">Description</label>
             <textarea id="desc" className="in" readOnly={!canEdit || holding} defaultValue={task.description ?? ""} key={task.updatedAt} placeholder={canEdit ? "Add details" : "No description"}
-              onBlur={(e) => { if ((e.target.value.trim() || null) !== (task.description ?? null)) save({ description: e.target.value.trim() || null }); }} />
+              onBlur={(e) => { if (pauseBlurSave.current) return; if ((e.target.value.trim() || null) !== (task.description ?? null)) save({ description: e.target.value.trim() || null }); }} />
           </div>
           {!task.parentId && (
             <div className="field">
               <span className="lbl">Subtasks {task.subtaskList.length > 0 && `(${task.subtaskList.filter((s) => s.completedAt).length} of ${task.subtaskList.length})`}</span>
               {task.subtaskList.map((s) => (
-                <label className="sub-item" key={s.id}>
-                  <input type="checkbox" aria-label={`Mark "${s.title}" ${s.completedAt ? "not done" : "done"}`} checked={!!s.completedAt} disabled={!canEdit || busy || (!s.canClose && !s.completedAt)}
-                    onChange={() => run(api("POST", `/api/tasks/${s.id}/${s.completedAt ? "reopen" : "complete"}`, s.completedAt ? {} : { expectedUpdatedAt: s.updatedAt }))} />
-                  <span style={s.completedAt ? { textDecoration: "line-through", color: "var(--muted)" } : undefined}>{s.title}</span>
-                </label>
+                <div className="sub-item" key={s.id}>
+                  <label style={{ display: "flex", gap: 8, alignItems: "center", flex: 1 }}>
+                    <input type="checkbox" aria-label={`Mark "${s.title}" ${s.completedAt ? "not done" : "done"}`} checked={!!s.completedAt} disabled={!canEdit || busy || (!s.canClose && !s.completedAt)}
+                      onChange={() => run(api("POST", `/api/tasks/${s.id}/${s.completedAt ? "reopen" : "complete"}`, s.completedAt ? {} : { expectedUpdatedAt: s.updatedAt }))} />
+                    <span style={s.completedAt ? { textDecoration: "line-through", color: "var(--muted)" } : undefined}>{s.title}</span>
+                  </label>
+                  {canEdit && !holding && <button className="link" aria-label={`Delete subtask "${s.title}" (move to Trash)`} onClick={() => setTrashSub(s)}>Delete</button>}
+                </div>
               ))}
               {canEdit && (
                 <form className="addrow" onSubmit={async (e) => { e.preventDefault(); const v = newSub.trim(); if (!v) return; await run(api("POST", `/api/projects/${task.projectId}/tasks`, { title: v, parentId: id }), () => setNewSub("")); }}>
@@ -305,30 +361,25 @@ export function TaskModal({ id, me, onClose, onChanged, asPage }: { id: string; 
             </div>
           )}
           {meCtx.crm && !task.parentId && <TaskLinks taskId={id} links={task.links ?? []} canEdit={canEdit && !holding} onChanged={() => { t.reload(); onChanged?.(); }} />}
-          <div className="actions" style={{ justifyContent: "flex-start" }}>
-            {canEdit && !done && task.approver && !task.awaitingApproval && !task.parentId && task.assignee.id === me && (
-              <button className="btn" disabled={busy} onClick={() => run(api("POST", `/api/tasks/${id}/send-for-approval`, {}))}>Send for approval</button>
-            )}
-            {canEdit && task.awaitingApproval && (task.approver?.id === me || canManage) && (
-              <button className="btn ghost" disabled={busy} onClick={() => run(api("POST", `/api/tasks/${id}/send-back`, {}))}>Send back</button>
-            )}
-            {closeControlOffered({ canEdit, done, canClose: task.canClose }) && (
-              <button className="btn" disabled={busy} onClick={() => complete()}>{task.approver ? "Close task" : "Mark complete"}</button>
-            )}
-            {canEdit && done && <button className="btn ghost" disabled={busy} onClick={() => run(api("POST", `/api/tasks/${id}/reopen`, {}))}>Reopen</button>}
-          </div>
+          <HolySheetDocuments key={id} kind="tasks" id={id} />
+
           {task.approver && !task.awaitingApproval && !done && task.assignee.id === me && (
             <p className="hint">Only {task.approver.name} or the project Leader can close this task. Send it for approval when it is ready.</p>
           )}
           {canEdit && !holding && (
             <div className="box dng" style={{ display: "flex", gap: 12, alignItems: "center", justifyContent: "space-between", flexWrap: "wrap" }}>
               <span className="hint" style={{ color: "var(--danger)" }}>Kept 30 days. Everyone on the task is told. ({ROLE[role]})</span>
-              <button className="btn ghost sm" style={{ color: "var(--danger)", borderColor: "var(--danger-line)" }} onClick={() => setTrash(true)}>Move to Trash</button>
+
             </div>
           )}
           {task.commentsEnabled && <Comments taskId={id} onChanged={onChanged} />}
+          </div>
+          </div>
+
         </>,
       )}
+      {confirmExit && <Confirm title="Close without saving?" yes="Close anyway" onNo={() => { pauseBlurSave.current = false; setConfirmExit(false); }} onYes={finishClose}
+        body="Some edits have not been saved or a save is still in progress. Closing can lose these edits. A save already sent may still finish. Choose Cancel to keep editing." />}
       {convert && <ConvertDialog task={task} meId={me} onClose={() => setConvert(false)} />}
       {confirm && (
         <Confirm title="Open subtasks" yes="Complete them all" busy={busy} onNo={() => setConfirm(null)}
@@ -338,7 +389,12 @@ export function TaskModal({ id, me, onClose, onChanged, asPage }: { id: string; 
       {trash && (
         <Confirm title="Move to Trash?" yes="Move to Trash" danger busy={busy} error={err} onNo={() => setTrash(false)}
           body="The task and its subtasks are kept for 30 days and can be restored from the project's Trash. Everyone on the task is told."
-          onYes={async () => { const r = await api("DELETE", `/api/tasks/${id}`); if (r.ok) { onChanged?.(); onClose(); } else setErr(r.error ?? "Could not move it."); }} />
+          onYes={async () => { const r = await api("DELETE", `/api/tasks/${id}`); if (r.ok) { onChanged?.(); finishClose(); } else setErr(r.error ?? "Could not move it."); }} />
+      )}
+      {trashSub && (
+        <Confirm title={`Delete subtask “${trashSub.title}”?`} yes="Move to Trash" danger busy={busy} error={err} onNo={() => setTrashSub(null)}
+          body="The subtask is kept for 30 days and can be restored from the project's Trash."
+          onYes={async () => { const r = await run(api("DELETE", `/api/tasks/${trashSub.id}`), () => setTrashSub(null)); if (!r?.ok) setErr(r?.error ?? "Could not move the subtask."); }} />
       )}
     </>
   );

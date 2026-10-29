@@ -72,6 +72,7 @@ function okBody(url: string, empty: boolean) {
           nextCursor: null,
         };
   }
+  if (url === "/api/verticals") return { verticals: [] };
   if (url.startsWith("/api/jobs")) return { jobs: [] };
   if (url === "/api/team") {
     return {

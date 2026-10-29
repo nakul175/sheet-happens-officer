@@ -33,7 +33,7 @@ export function SetOwnPassword({ email }: { email: string }) {
   }
 
   return (
-    <AuthShell>
+    <AuthShell approved>
       <h1>Set your own password</h1>
       <p className={styles.lead}>You signed in with a password we emailed you. Choose your own to continue. The emailed one stops working when you save.</p>
       <form onSubmit={submit} className={styles.card} style={{ border: 0, padding: 0 }} noValidate>

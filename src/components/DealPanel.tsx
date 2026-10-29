@@ -1,15 +1,16 @@
 "use client";
 import Link from "next/link";
+import { ATHENA_ENTITIES, OPPORTUNITY_TYPES, type AthenaEntity, type OpportunityType } from "@/lib/deal-classification";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { api, dueLabel, isOverdue, useGet } from "@/components/api";
 import { Field, Modal } from "@/components/ui";
 
-export type Stage = { id: string; name: string; category: string; needsReason: boolean; requiredFields: string[] };
+export type Stage = { id: string; name: string; category: string; needsReason: boolean; requiredFields: string[]; isRetired?: boolean };
 export type DealBlock = {
   pipeline: { id: string; key: string; name: string; stages: Stage[] } | null;
-  stage: { id: string; name: string; category: string } | null;
+  stage: { id: string; name: string; category: string; isRetired?: boolean } | null;
   stageReason: string | null;
-  details: { whyPursue: string | null; need: string | null; serviceLine: string | null; value: number | null; currency: string | null; probability: number | null; expectedClose: string | null; introducedBy: string | null; submissionDeadline: string | null } | null;
+  details: { whyPursue: string | null; need: string | null; serviceLine: string | null; value: number | null; currency: string | null; probability: number | null; expectedClose: string | null; introducedBy: string | null; submissionDeadline: string | null; opportunityType?: OpportunityType | null; netFeeRevenueUsd?: number | null; athenaEntity?: AthenaEntity | null } | null;
   parties: { id: string; role: string; organisation: { id: string; name: string } }[];
   organisation: { id: string; name: string } | null;
   nextStep: { id: string; title: string; dueDate: string | null; assignee?: { id: string; name: string } | null } | null;
@@ -17,7 +18,7 @@ export type DealBlock = {
 };
 
 export const money = (v: number | null, c: string | null) => (v === null ? "No value yet" : `${c ?? ""} ${v.toLocaleString("en-IN")}`.trim());
-const LABELS: Record<string, string> = { value: "Value", currency: "Currency", expectedClose: "Expected close", submissionDeadline: "Submission deadline", probability: "Probability", need: "Need", serviceLine: "Service line", introducedBy: "Introduced by" };
+const LABELS: Record<string, string> = { value: "Value", currency: "Currency", expectedClose: "Expected close", submissionDeadline: "Submission deadline", probability: "PWin (%)", need: "Need", serviceLine: "Service line", introducedBy: "Introduced by" };
 
 export type Blocked = { openTasks: number; tasks: { id: string; title: string; assignee?: string | null }[] };
 
@@ -147,38 +148,51 @@ export function StageDialog({ projectId, stage, deal, initial, onClose, onDone }
 }
 
 function DetailsDialog({ projectId, deal, onClose, onDone }: { projectId: string; deal: DealBlock; onClose: () => void; onDone: () => void }) {
+  const formId = useId();
   const d = deal.details!;
   const [v, setV] = useState<Record<string, string>>({
     whyPursue: d.whyPursue ?? "", need: d.need ?? "", serviceLine: d.serviceLine ?? "", value: d.value === null ? "" : String(d.value), currency: d.currency ?? "",
+    opportunityType: d.opportunityType ?? "", netFeeRevenueUsd: d.netFeeRevenueUsd == null ? "" : String(d.netFeeRevenueUsd), athenaEntity: d.athenaEntity ?? "",
     probability: d.probability === null ? "" : String(d.probability), expectedClose: d.expectedClose ?? "", introducedBy: d.introducedBy ?? "", submissionDeadline: d.submissionDeadline ?? "",
   });
   const [err, setErr] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
   const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => setV({ ...v, [k]: e.target.value });
-  async function save() {
+  async function save(e: React.FormEvent) {
+    e.preventDefault();
+    if (busy) return;
+    setBusy(true); setErr(null);
     const body: Record<string, unknown> = {
       whyPursue: v.whyPursue, need: v.need || null, serviceLine: v.serviceLine || null, introducedBy: v.introducedBy || null,
       value: v.value === "" ? null : Number(v.value), currency: v.currency || null, probability: v.probability === "" ? null : Number(v.probability),
       expectedClose: v.expectedClose || null, submissionDeadline: v.submissionDeadline || null,
+      opportunityType: v.opportunityType || null, netFeeRevenueUsd: v.netFeeRevenueUsd === "" ? null : Number(v.netFeeRevenueUsd), athenaEntity: v.athenaEntity || null,
     };
     const r = await api("PATCH", `/api/projects/${projectId}/deal`, body);
+    setBusy(false);
     if (r.ok) onDone(); else setErr(r.error ?? "Could not save.");
   }
   return (
     <Modal onClose={onClose} label="Deal details">
+      <form id={formId} onSubmit={save}>
       <h2>Deal details</h2>
+      <Field label="Opportunity type">{(id) => <select id={id} className="in" value={v.opportunityType} onChange={set("opportunityType")}><option value="">Unclassified</option>{OPPORTUNITY_TYPES.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}</select>}</Field>
       <Field label="Why we are pursuing this">{(id) => <input id={id} className="in" value={v.whyPursue} onChange={set("whyPursue")} />}</Field>
       <Field label="Need">{(id) => <textarea id={id} className="in" value={v.need} onChange={set("need")} />}</Field>
       <Field label="Service line">{(id) => <input id={id} className="in" value={v.serviceLine} onChange={set("serviceLine")} />}</Field>
       <div style={{ display: "flex", gap: 10 }}>
         <Field label="Value (blank = unknown)">{(id) => <input id={id} className="in" type="number" min="0" value={v.value} onChange={set("value")} />}</Field>
         <Field label="Currency">{(id) => <select id={id} className="in" value={v.currency} onChange={set("currency")}><option value="">—</option><option>INR</option><option>USD</option><option>EUR</option></select>}</Field>
-        <Field label="Probability %">{(id) => <input id={id} className="in" type="number" min="0" max="100" value={v.probability} onChange={set("probability")} />}</Field>
+        <Field label="PWin (%)">{(id) => <input id={id} className="in" type="number" min="0" max="100" value={v.probability} onChange={set("probability")} />}</Field>
       </div>
+      <Field label="Net Fee Revenue (USD)">{(id) => <input id={id} className="in" type="number" min="0" max="9999999999999.99" step="0.01" value={v.netFeeRevenueUsd} onChange={set("netFeeRevenueUsd")} />}</Field>
+      <Field label="Athena Entity">{(id) => <select id={id} className="in" value={v.athenaEntity} onChange={set("athenaEntity")}><option value="">Not specified</option>{ATHENA_ENTITIES.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}</select>}</Field>
       <Field label="Expected close">{(id) => <input id={id} className="in" type="date" value={v.expectedClose} onChange={set("expectedClose")} />}</Field>
       {deal.pipeline?.key === "DEAL_BID" && <Field label="Submission deadline">{(id) => <input id={id} className="in" type="date" value={v.submissionDeadline} onChange={set("submissionDeadline")} />}</Field>}
       <Field label="Introduced by">{(id) => <input id={id} className="in" value={v.introducedBy} onChange={set("introducedBy")} />}</Field>
       {err && <div className="err" role="alert">{err}</div>}
-      <div className="actions"><button className="btn ghost" onClick={onClose}>Cancel</button><button className="btn" onClick={save}>Save</button></div>
+      </form>
+      <div className="actions"><button type="button" className="btn ghost" onClick={onClose}>Cancel</button><button className="btn" form={formId} disabled={busy}>Save</button></div>
     </Modal>
   );
 }
@@ -283,9 +297,10 @@ export function DealPanel({ projectId, deal, canWrite, onChange, feed }: { proje
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [armed, feed.status]);
   return (
-    <div className="card" style={{ marginBottom: 14 }}>
+    <section className="card" aria-label="Deal" style={{ marginBottom: 14 }}>
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }} role="group" aria-label="Stage">
-        {deal.pipeline?.stages.map((s) => (
+        {deal.stage?.isRetired && <span className="chip">{deal.stage.name} · legacy stage</span>}
+        {deal.pipeline?.stages.filter(s => !s.isRetired).map((s) => (
           <button key={s.id} className={`btn sm${s.id === cur ? "" : " ghost"}`} aria-current={s.id === cur ? "step" : undefined} disabled={!canWrite || s.id === cur} onClick={() => void choose(s)}>{s.name}</button>
         ))}
       </div>
@@ -293,7 +308,10 @@ export function DealPanel({ projectId, deal, canWrite, onChange, feed }: { proje
         <span className="chip">{deal.pipeline?.name}</span>
         {deal.organisation && <Link href={`/accounts/${deal.organisation.id}`}>{deal.organisation.name}</Link>}
         <span>{money(d?.value ?? null, d?.currency ?? null)}</span>
-        {d?.probability !== null && d?.probability !== undefined && <span>{d.probability}%</span>}
+        <span>Opportunity type: {OPPORTUNITY_TYPES.find(o => o.value === d?.opportunityType)?.label ?? "Unclassified"}</span>
+        {d?.netFeeRevenueUsd != null && <span>Net Fee Revenue: {money(d.netFeeRevenueUsd, "USD")}</span>}
+        {d?.athenaEntity && <span>Athena Entity: {ATHENA_ENTITIES.find(o => o.value === d.athenaEntity)?.label ?? d.athenaEntity}</span>}
+        {d?.probability !== null && d?.probability !== undefined && <span>PWin: {d.probability}%</span>}
         {d?.expectedClose && <span>Close {dueLabel(d.expectedClose)}</span>}
         {d?.submissionDeadline && <span className={isOverdue(d.submissionDeadline) ? "over" : ""}>Submit by {dueLabel(d.submissionDeadline)}</span>}
         {deal.stalled && <span className="chip gold">Stalled · no activity for 30 days</span>}
@@ -310,6 +328,6 @@ export function DealPanel({ projectId, deal, canWrite, onChange, feed }: { proje
       <Parties projectId={projectId} deal={deal} canWrite={canWrite} onChange={onChange} />
       {pick && deal && <StageDialog projectId={projectId} stage={pick.stage} deal={deal} initial={{ blocked: pick.blocked, loadError: pick.loadError }} onClose={close} onDone={() => { close(); onChange(); }} />}
       {edit && d && <DetailsDialog projectId={projectId} deal={deal} onClose={() => setEdit(false)} onDone={() => { setEdit(false); onChange(); }} />}
-    </div>
+    </section>
   );
 }

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useState, useSyncExternalStore } from "react";
 import { AuthShell } from "@/components/AuthShell";
 import styles from "@/components/auth.module.css";
+import approvedStyles from "@/app/signin/signin.module.css";
 import { post, recalledEmail } from "@/components/client";
 import { RESEND_NOTICE, VERIFY_SEND_FAILED } from "@/lib/auth-messages";
 
@@ -24,7 +25,8 @@ export function CheckEmail({ sendFailed = false, resent = false }: { sendFailed?
   }
 
   return (
-    <AuthShell>
+    <AuthShell approved>
+      <svg className={approvedStyles.stateIcon} viewBox="0 0 32 32" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><rect x="3" y="6" width="26" height="20" rx="2"/><path d="m4 7 12 10L28 7"/></svg>
       <h1>Check your email</h1>
       {!sendFailed && !resent && (
         <p className={styles.lead}>

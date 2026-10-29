@@ -13,7 +13,7 @@ export async function GET(req: Request) {
     let user;
     try { user = await currentUser(); }
     catch (err) {
-      if (!(err instanceof ApiError) || ![401, 403].includes(err.status)) throw err;
+      if (!(err instanceof ApiError) || ![401,403].includes(err.status)) throw err;
       if (err.status === 403) return oauthJson({ error: "access_denied", message: "Set your own password in Sheet Happens Officer before continuing." }, 403);
       const signin = new URL("/signin", cfg.origin);
       signin.searchParams.set("returnTo", `/api/suite/authorize?${url.searchParams.toString()}`);
@@ -22,6 +22,7 @@ export async function GET(req: Request) {
     const sessionId = await currentSessionId();
     if (!sessionId) return oauthJson({ error: "access_denied" }, 403);
     const code = suiteToken();
+    // Short retention; no authorization code or token is logged.
     await db.suiteGrant.deleteMany({ where: { createdAt: { lt: new Date(Date.now() - 86400000) } } });
     await db.suiteGrant.create({ data: { codeHash: suiteHash(code), clientId: cfg.id, userId: user.id, sessionId,
       challenge: url.searchParams.get("code_challenge")!, expiresAt: new Date(Date.now() + 60000) } });

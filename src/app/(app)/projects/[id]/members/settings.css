@@ -1,0 +1,37 @@
+.project-settings-view { font-family: Lato, sans-serif; width: 100%; max-width: 1500px; }
+.project-settings-view .head { align-items: center; gap: 24px; margin: 16px 0 24px; }
+.project-settings-view .head h1 { font-size: 38px; color: #10143e; }
+.settings-breadcrumb { font-size: 14px; color: var(--muted); overflow-wrap: anywhere; }
+.settings-breadcrumb a { text-decoration: none; }
+.settings-grid { display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(280px, 1fr); gap: 24px; align-items: start; }
+.settings-panel { border: 1px solid #dce0e7; border-radius: 12px; padding: 24px; background: white; box-shadow: 0 2px 4px #171b2210, 0 8px 20px #171b2210; min-width: 0; }
+.settings-panel h2 { color: #10143e; font-size: 22px; margin: 0 0 20px; }
+.settings-panel h2::before { content: '◇'; color: #b77b0e; margin-right: 12px; }
+.settings-members { grid-column: 1; grid-row: 1; }
+.settings-addpeople { grid-column: 1; grid-row: 2; }
+.settings-classification { grid-column: 2; grid-row: 1; }
+.settings-leadership { grid-column: 2; grid-row: 2; }
+.settings-lifecycle { grid-column: 1 / -1; }
+.settings-lifecycle[hidden] { display: none; }
+.settings-panel .list { border: 0; border-radius: 0; }
+.settings-panel .item { padding: 16px 0; flex-wrap: wrap; }
+.settings-panel .item .t { min-width: min(150px, 100%); }
+.settings-panel .item .t :is(b,small) { overflow-wrap: anywhere; }
+.project-settings-view :is(button,input,select) { font-family: inherit; }
+.shell .project-settings-view :is(.in,.btn,select) { min-height: 44px; max-width: 100%; }
+.settings-classification { display: flex; flex-direction: column; align-items: stretch; gap: 16px; }
+.settings-classification > h2, .settings-classification > .hint { margin: 0; }
+.settings-classification > b { font-size: 16px; line-height: 1.4; }
+.settings-classification label { display: flex; flex-direction: column; align-items: stretch; gap: 8px; margin: 0; font-size: 14px; }
+.settings-classification > .hint { font-size: 13px; line-height: 1.5; }
+.settings-classification > .btn { align-self: flex-start; justify-content: flex-start; min-width: 0; max-width: 100%; white-space: normal; text-align: left; line-height: 1.4; }
+.settings-classification select { width: 100%; box-sizing: border-box; font: inherit; padding: 10px 12px; border: 1px solid var(--field); border-radius: 8px; background: white; }
+.settings-panel .box { margin-top: 16px; background: transparent; }
+.project-settings-view :is(a,button,input,select):focus-visible { outline: 2px solid var(--navy); outline-offset: 3px; }
+@media (max-width: 767px) {
+  .settings-grid { display: flex; flex-direction: column; }
+  .settings-panel { width: 100%; padding: 20px; }
+  .settings-panel .addrow { flex-wrap: wrap; }
+  .settings-panel .addrow input { min-width: 0; width: 100%; }
+  .project-settings-view :is(.btn,.in) { min-height: 44px; }
+}

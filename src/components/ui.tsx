@@ -1,33 +1,169 @@
 "use client";
-import { useEffect, useId, useRef, useState } from "react";
+import { Children, Fragment, cloneElement, isValidElement, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+
+/** Keep actions in normal flow and give only the body its own scroll area. Forms stay forms. */
+function dialogSections(children: React.ReactNode): React.ReactNode {
+  const flatten = (nodes: React.ReactNode): React.ReactNode[] => Children.toArray(nodes).flatMap(node => isValidElement<{ children?: React.ReactNode }>(node) && node.type === Fragment ? flatten(node.props.children) : [node]);
+  const nodes = flatten(children);
+  const header: React.ReactNode[] = [], body: React.ReactNode[] = [], footer: React.ReactNode[] = [];
+  nodes.forEach(node => {
+    const el = isValidElement<{ className?: string }>(node) ? node : null;
+    const classes = el?.props.className?.split(/\s+/) ?? [];
+    if (el?.type === "h2" || classes.includes("bar") || classes.includes("record-form-heading")) header.push(node);
+    else if (classes.includes("actions")) footer.push(node);
+    else body.push(node);
+  });
+  const hasForm = body.some(node => isValidElement<{ className?: string }>(node) && (node.type === "form" || node.props.className?.split(/\s+/).includes("task-details")));
+  return <>{header.length > 0 && <div className="dialog-header">{header}</div>}{hasForm ? <div className="dialog-forms">{body.map(node => isValidElement<{ className?: string; children?: React.ReactNode }>(node) && (node.type === "form" || node.props.className?.split(/\s+/).includes("task-details")) ? cloneElement(node, { className: `${node.props.className ?? ""} ${node.type === "form" ? "dialog-form" : "dialog-task-layout"}` }, dialogSections(node.props.children)) : node)}</div> : <div className="dialog-body">{body}</div>}{footer.length > 0 && <div className="dialog-footer">{footer}</div>}</>;
+}
+
+/** An open dialog: its identity for this render tree and the element a keypress has to belong to. */
+type Open = { me: symbol; el: HTMLElement | null; close: () => void };
+
+/**
+ * SHO-3025: the dialogs that are open. Only the one on top answers Escape, and it stops the event there.
+ * Before this, every open dialog put its own listener on `document`, so in a task sheet with a confirm over it a
+ * single Escape closed both - and any other Escape listener on the page (a drawer, a menu) acted on it too.
+ */
+const OPEN: Open[] = [];
+
+/**
+ * The dialog a keypress belongs to: the last one opened, unless a dialog is rendered inside another - then the
+ * inner one is on top. Two dialogs opened together in one commit are therefore ordered by the tree, not by
+ * whichever layout effect happened to run first.
+ */
+export function topDialog(): HTMLElement | null {
+  const els = OPEN.map((o) => o.el).filter((el): el is HTMLElement => !!el);
+  for (let i = OPEN.length - 1; i >= 0; i--) {
+    const el = OPEN[i].el;
+    if (el && !els.some((other) => other !== el && el.contains(other))) return el;
+  }
+  return null;
+}
+
+/** A captured dialog may already have closed while a history traversal was restoring. */
+export function closeDialog(dialog: HTMLElement) { OPEN.find(o => o.el === dialog)?.close(); }
+
+/**
+ * SHO-3025: the key listener, the scroll lock and the focus move belong to the commit that paints the dialog, not
+ * to an effect React runs after the paint. Keyed to the commit, a dialog is never on screen without answering
+ * Escape. (A layout effect does nothing on the server, where the dialog is not on screen either.)
+ */
+const useCommitEffect = typeof window === "undefined" ? useEffect : useLayoutEffect;
 
 /** Centred dialog over a dimmed page. Escape and the dim area close it; focus moves in and returns. */
-export function Modal({ onClose, small, label, describedBy, children }: { onClose: () => void; small?: boolean; label: string; describedBy?: string; children: React.ReactNode }) {
+export function Modal({ onClose, small, label, describedBy, className, children }: { onClose: () => void; small?: boolean; label: string; describedBy?: string; className?: string; children: React.ReactNode }) {
   const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    const prev = document.activeElement as HTMLElement | null;
-    (ref.current?.querySelector<HTMLElement>("[data-autofocus]") ?? ref.current)?.focus(); // SHO-US-14.5: a dialog can name the field that gets focus
+  // Capture before child autoFocus runs during commit, so cleanup restores the invoker.
+  const [opener] = useState<HTMLElement | null>(() => typeof document === "undefined" ? null : document.activeElement as HTMLElement | null);
+  // The handler to call now. A re-render of the parent gives a new one; the key listener reads it from here, so it
+  // is never torn down and added again (a gap a keypress could fall into, or one that holds a stale handler).
+  const latest = useRef(onClose);
+  useCommitEffect(() => { latest.current = onClose; });
+  useCommitEffect(() => {
+    const me = Symbol("dialog");
+    const dialog = ref.current;
+    OPEN.push({ me, el: dialog, close: () => latest.current() });
+    const prev = opener;
+    if (topDialog() === dialog) (dialog?.querySelector<HTMLElement>("[data-autofocus]") ?? dialog)?.focus(); // SHO-US-14.5: a dialog can name the field that gets focus
     // SHO-US-22.7: the page behind a dialog must not scroll.
     const before = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     const keys = (e: KeyboardEvent) => {
-      if (e.key === "Escape") { onClose(); return; }
-      // SHO-US-14.3: keep Tab inside the dialog.
-      if (e.key !== "Tab" || !ref.current) return;
-      const items = Array.from(ref.current.querySelectorAll<HTMLElement>('a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])')).filter((el) => el.offsetParent !== null);
+      // Capture phase: Escape belongs to the dialog on top. A drawer or menu that was already open behind it
+      // registered its own listener first, so it would otherwise take the key before the dialog did; the event
+      // stops here so nothing else acts on the same press.
+      if (e.key === "Escape") {
+        if (topDialog() !== dialog) return; // the dialog opened over this one owns Escape
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        if (e.repeat) return; // a held key is one close request, not one per repeat
+        latest.current();
+        return;
+      }
+      // SHO-US-14.3: keep Tab inside the dialog on top.
+      if (e.key !== "Tab" || !dialog || topDialog() !== dialog) return;
+      const items = Array.from(dialog.querySelectorAll<HTMLElement>('a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])')).filter((el) => el.offsetParent !== null);
       if (!items.length) { e.preventDefault(); return; }
       const first = items[0], last = items[items.length - 1], at = document.activeElement;
-      if (e.shiftKey && (at === first || at === ref.current)) { e.preventDefault(); last.focus(); }
+      if (e.shiftKey && (at === first || at === dialog)) { e.preventDefault(); last.focus(); }
       else if (!e.shiftKey && at === last) { e.preventDefault(); first.focus(); }
-      else if (!ref.current.contains(at)) { e.preventDefault(); first.focus(); }
+      else if (!dialog.contains(at)) { e.preventDefault(); first.focus(); }
     };
-    document.addEventListener("keydown", keys);
-    return () => { document.removeEventListener("keydown", keys); document.body.style.overflow = before; prev?.focus?.(); };
-  }, [onClose]);
+    document.addEventListener("keydown", keys, true);
+    return () => {
+      document.removeEventListener("keydown", keys, true);
+      const at = OPEN.findIndex((o) => o.me === me);
+      if (at !== -1) OPEN.splice(at, 1);
+      document.body.style.overflow = before;
+      if (prev?.isConnected) prev.focus();
+    };
+  }, [opener]);
+  // SHO-2738: on a phone the keyboard shortens the visible area, not the page, so the sheet is sized from visualViewport
+  // (--vvh/--vvt, the same pair the Concierge sheet uses) and the footer is pinned to the bottom of that area.
+  // On a desktop visualViewport is the window, so the dialog there is unchanged.
+  const scrim = useRef<HTMLDivElement>(null);
+  // SHO-3025 keeps its own `dialog` element local to the key effect above; this ref is the sheet the viewport fit works on.
+  const sheetRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const vv = window.visualViewport;
+    const root = document.documentElement;
+    document.body.classList.add("vv-sheet");
+    const fit = () => {
+      if (vv) {
+        root.style.setProperty("--vvh", `${vv.height}px`);
+        root.style.setProperty("--vvt", `${vv.offsetTop}px`);
+      }
+      // Pinning the footer only helps if the sheet scrolls a focused field out from under it, so nudge the field back up.
+      const field = document.activeElement;
+      const sheet = sheetRef.current;
+      if (!sheet || !(field instanceof HTMLElement) || !sheet.contains(field) || field === sheet || field.closest(".bar, .actions")) return;
+      // Scroll this sheet explicitly: scrollIntoView can use the layout viewport while the keyboard is resizing
+      // the visual viewport, leaving the focused field below the pinned footer even though the sheet fits.
+      const scroller = field.closest<HTMLElement>(".dialog-body") ?? sheet;
+      const bounds = scroller.getBoundingClientRect();
+      const footer = sheet.querySelector<HTMLElement>(":scope > .actions")?.getBoundingClientRect();
+      const header = sheet.querySelector<HTMLElement>(":scope > .bar")?.getBoundingClientRect();
+      const bottom = Math.min(bounds.bottom, footer && footer.top > bounds.top ? footer.top : bounds.bottom) - 8;
+      const top = Math.max(bounds.top, header?.bottom ?? bounds.top) + 8;
+      const box = field.getBoundingClientRect();
+      if (box.bottom > bottom) scroller.scrollTop += box.bottom - bottom;
+      else if (box.top < top) scroller.scrollTop -= top - box.top;
+    };
+    let frame = 0;
+    const scheduleFit = () => {
+      fit();
+      cancelAnimationFrame(frame);
+      // Focus scrolling and viewport layout can finish after the event. Reconcile once after that layout too.
+      frame = requestAnimationFrame(() => { fit(); frame = requestAnimationFrame(fit); });
+    };
+    // Comments and other fetched form sections can settle after the resize frames.
+    // Observe the sheet rather than the document so viewport CSS writes cannot retrigger this observer.
+    const content = new MutationObserver(scheduleFit);
+    if (sheetRef.current) content.observe(sheetRef.current, { childList: true, subtree: true, characterData: true });
+    scheduleFit();
+    vv?.addEventListener("resize", scheduleFit);
+    vv?.addEventListener("scroll", scheduleFit);
+    document.addEventListener("focusin", scheduleFit);
+    return () => {
+      cancelAnimationFrame(frame);
+      content.disconnect();
+      document.removeEventListener("focusin", scheduleFit);
+      vv?.removeEventListener("resize", scheduleFit);
+      vv?.removeEventListener("scroll", scheduleFit);
+      // A nested confirmation must not remove the viewport sizing still used by its parent.
+      // The commit-effect cleanup removes this dialog from OPEN before this effect runs.
+      if (!OPEN.length) {
+        document.body.classList.remove("vv-sheet");
+        root.style.removeProperty("--vvh");
+        root.style.removeProperty("--vvt");
+      }
+    };
+  }, []);
   return (
-    <div className="scrim" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className={`modal${small ? " sm" : ""}`} role="dialog" aria-modal="true" aria-label={label} aria-describedby={describedBy} tabIndex={-1} ref={ref} style={{ outline: "none" }}>
-        {children}
+    <div className="scrim" ref={scrim} onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className={`modal${small ? " sm" : ""}${className ? ` ${className}` : ""}`} role="dialog" aria-modal="true" aria-label={label} aria-describedby={describedBy} tabIndex={-1} ref={(el) => { ref.current = el; sheetRef.current = el; }} style={{ outline: "none" }}>
+        {dialogSections(children)}
       </div>
     </div>
   );

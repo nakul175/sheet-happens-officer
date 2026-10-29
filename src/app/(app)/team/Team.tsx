@@ -1,17 +1,32 @@
 "use client";
+import { personText } from "@/components/PeopleSelect";
 import Link from "next/link";
 import { useState } from "react";
 import { api, useGet } from "@/components/api";
 import { Confirm, Field, Modal, Skeleton } from "@/components/ui";
 import { Page, roleLabel, useMe } from "../Shell";
 
+import "./team-approved.css";
 type P = { id: string; name: string; email?: string; orgRole?: "MEMBER" | "ADMIN" | "SUPER_ADMIN"; leads?: { id: string; name: string }[]; status?: "ACTIVE" | "UNVERIFIED" | "DEACTIVATED" };
 const STATUS: Record<string, [string, string]> = { ACTIVE: ["Active", "green"], UNVERIFIED: ["Unverified", "gold"], DEACTIVATED: ["Deactivated", "grey"] };
+
+/**
+ * SHO-US-2.4 AC2: the fallback is about the role, not membership. A person who is on the project as a
+ * Viewer is still not a Leader or Editor there, so that project's Leader takes the tasks. SHO-3030.
+ */
+export const FALLBACK_HINT = "If the person you name is not a Leader or Editor on a project, that project's Leader takes those tasks.";
+
+/** The deactivation summary's explanation, naming each project that fell back to its Leader (SHO-3030). */
+export function fellBackHint(names: string[]): string {
+  return `The Leader took the tasks in ${names.join(", ")}, because the person you named is not a Leader or Editor on ${names.length === 1 ? "that project" : "those projects"}.`;
+}
 
 /** SHO-US-14.4 AC3: the projects a person leads (only those the viewer can see). */
 function Leads({ p }: { p: P }) {
   if (!p.leads?.length) return null;
-  return <span className="pills"><span className="hint">Leads</span>{p.leads.map((l) => <Link key={l.id} className="chip" href={`/projects/${l.id}`}>{l.name}</Link>)}</span>;
+  const first = p.leads.slice(0, 2), rest = p.leads.slice(2);
+  const projectLink = (l: { id: string; name: string }) => <Link key={l.id} className="chip" href={`/projects/${l.id}`}>{l.name}</Link>;
+  return <div className="team-leads" aria-label={`Projects led by ${p.name}`}>{first.map(projectLink)}{rest.length > 0 && <details><summary aria-label={`Show ${rest.length} more projects led by ${p.name}`}>{rest.length} more projects</summary><div>{rest.map(projectLink)}</div></details>}</div>;
 }
 
 export default function Team() {
@@ -40,7 +55,7 @@ export default function Team() {
   }
 
   return (
-    <Page dock title="Team" sub={admin ? "Everyone in the workspace" : "People you can add to projects"}
+    <Page className="team-approved" title="Team" sub={admin ? "Everyone in the workspace" : "People you can add to projects"}
       actions={me.orgRole === "SUPER_ADMIN" ? <button className="btn" onClick={() => setAdding(true)}>+ Add person</button> : undefined}>
       {err && <div className="err" role="alert">{err}</div>}
       {note && <div className={note.ok ? "ok" : "err"} role="status">{note.text} <button className="btn ghost sm" onClick={() => setNote(null)}>Close</button></div>}
@@ -59,20 +74,20 @@ export default function Team() {
       {t.data && admin && (
         <div className="scroll">
           <table className="tbl stack">
-            <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Leads</th><th>Status</th><th>Actions</th></tr></thead>
+            <colgroup><col className="team-col-person" /><col className="team-col-role" /><col className="team-col-leads" /><col className="team-col-status" /><col className="team-col-actions" /></colgroup>
+            <thead><tr><th>Person</th><th>Workspace role</th><th>Leads</th><th>Status</th><th>Actions</th></tr></thead>
             <tbody>
               {people.map((p) => {
                 const [sl, sc] = STATUS[p.status ?? "ACTIVE"];
                 const self = p.id === me.id;
                 return (
                   <tr key={p.id}>
-                    <td data-label="Name"><b style={{ fontWeight: 500 }}><Link href={`/team/${p.id}`} prefetch={false}>{p.name}</Link></b>{self && " (you)"}</td>
-                    <td data-label="Email">{p.email}</td>
-                    <td data-label="Role"><span className={`chip${p.orgRole === "MEMBER" ? " grey" : ""}`}>{roleLabel(p.orgRole!)}</span></td>
+                    <td data-label="Person"><div className="team-identity"><b style={{ fontWeight: 500 }}><Link href={`/team/${p.id}`} prefetch={false}>{p.name}</Link>{self && " (you)"}</b><small className="team-email">{p.email}</small></div></td>
+                    <td data-label="Workspace role"><span>{roleLabel(p.orgRole!)}</span></td>
                     <td data-label="Leads"><Leads p={p} /></td>
-                    <td data-label="Status"><span className={`chip ${sc}`}>{sl}</span></td>
+                    <td data-label="Status"><span className={`team-status ${sc}`}>{sl}</span></td>
                     <td data-label="Actions">
-                      <span className="pills">
+                      {((p.status === "ACTIVE" && p.orgRole !== "SUPER_ADMIN") || (me.orgRole === "SUPER_ADMIN" && !self && p.status !== "DEACTIVATED") || p.status === "DEACTIVATED") ? <details className="team-more" onKeyDown={e => { if (e.key === "Escape") { e.currentTarget.open = false; e.currentTarget.querySelector("summary")?.focus(); } }}><summary className="btn ghost" aria-label={`More actions for ${p.name}`}>More</summary><div className="team-more-actions">
                         {p.status === "ACTIVE" && p.orgRole !== "SUPER_ADMIN" && (
                           me.orgRole === "SUPER_ADMIN"
                             ? p.orgRole === "ADMIN"
@@ -87,7 +102,7 @@ export default function Team() {
                           <button className="btn ghost sm" onClick={() => resend(p)}>Resend sign-in details</button>
                         )}
                         {p.status === "DEACTIVATED" && <button className="btn ghost sm" onClick={() => act(p, "reactivate")}>Reactivate</button>}
-                      </span>
+                      </div></details> : "—"}
                     </td>
                   </tr>
                 );
@@ -101,7 +116,7 @@ export default function Team() {
       {done && (
         <Confirm title={`${done.name} is deactivated`} yes="Close" onNo={() => setDone(null)} onYes={() => setDone(null)}
           body={`${done.moved} open task${done.moved === 1 ? " was" : "s were"} handed over.`}>
-          {done.fellBack.length > 0 && <p className="hint">The Leader took the tasks in {done.fellBack.join(", ")}, because the person you named is not on {done.fellBack.length === 1 ? "that project" : "those projects"}.</p>}
+          {done.fellBack.length > 0 && <p className="hint">{fellBackHint(done.fellBack)}</p>}
         </Confirm>
       )}
     </Page>
@@ -121,11 +136,11 @@ function Deactivate({ p, others, onClose, onDone }: { p: P; others: P[]; onClose
         {(id) => (
           <select id={id} className="in" value={to} onChange={(e) => setTo(e.target.value)}>
             <option value="leaders">The Leader of each project</option>
-            {others.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+            {others.map((o) => <option key={o.id} value={o.id}>{personText(o)}</option>)}
           </select>
         )}
       </Field>
-      <p className="hint">If the person you name is not on a project, that project&apos;s Leader takes those tasks.</p>
+      <p className="hint">{FALLBACK_HINT}</p>
       {leads.length > 0 && (
         <div className="box warn">
           <b>{p.name} leads {leads.length === 1 ? "a project" : "projects"}.</b> Hand over the leadership first, then deactivate:

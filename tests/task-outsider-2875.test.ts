@@ -79,7 +79,7 @@ async function setup() {
   const p = await lead.c.get(`/api/projects/${pid}`);
   const sections = p.json.project.sections as { id: string; isDone: boolean }[];
   const newTask = async (title: string) => {
-    const r = await lead.c.post(`/api/projects/${pid}/tasks`, { title, assigneeId: lead.id });
+    const r = await lead.c.post(`/api/projects/${pid}/tasks`, { title, dueDate: istDate(1), assigneeId: lead.id });
     expect(r.status, JSON.stringify(r.json)).toBe(201);
     return r.json.task.id as string;
   };
@@ -171,7 +171,7 @@ describe("qa:TC missing APL-2875 a caller who cannot see a task gets the missing
     const dealId = deal.json.deal.id as string;
     projects.push({ id: dealId, lead: s.lead });
     expect((await s.lead.c.post(`/api/projects/${dealId}/members`, { userId: s.editor.id, role: "EDITOR" })).status).toBe(201);
-    const t3 = await s.lead.c.post(`/api/projects/${dealId}/tasks`, { title: `ZZ-TEST deal task ${RUN}`, assigneeId: s.lead.id });
+    const t3 = await s.lead.c.post(`/api/projects/${dealId}/tasks`, { title: `ZZ-TEST deal task ${RUN}`, dueDate: istDate(1), assigneeId: s.lead.id });
     expect(t3.status, JSON.stringify(t3.json)).toBe(201);
 
     const member = { id: s.editor.id, orgRole: "MEMBER" as const };

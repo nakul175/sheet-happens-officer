@@ -38,18 +38,11 @@ async function editorSession(ed: Account) {
   return { ctx, page };
 }
 
-/**
- * The Editor's Undo button for their delete. An Editor sees Undo only on their own actions (src/lib/feed.ts), and the
- * Editor's one action here is the delete, so the single Undo button on the page belongs to that row.
- */
-async function undoButtonOn(page: Page, title: string) {
+/** Editors cannot restore deleted tasks, so the Activity button must be hidden. */
+async function expectNoDeleteUndo(page: Page, title: string) {
   await page.getByText(`moved "${title}" to Trash`).waitFor();
-  const undo = page.getByRole("button", { name: "Undo", exact: true });
-  expect(await undo.count()).toBe(1);
-  return undo;
+  expect(await page.getByRole("button", { name: "Undo", exact: true }).count()).toBe(0);
 }
-
-const toast = (page: Page, text: string) => page.getByRole("status").filter({ hasText: text });
 
 describe.skipIf(!process.env.SHO_QA_PASS)("qa:TC missing APL-2655 editor Undo of a delete", () => {
   beforeAll(async () => {
@@ -73,18 +66,16 @@ describe.skipIf(!process.env.SHO_QA_PASS)("qa:TC missing APL-2655 editor Undo of
     const { ctx, page } = await editorSession(ed);
     try {
       await page.goto(`/projects/${projectId}/activity`);
-      const undo = await undoButtonOn(page, title);
+      await expectNoDeleteUndo(page, title);
       expect((await lead.c.post(`/api/actions/${row.id}/undo`)).status).toBe(200);
       const before = await snapshot(t, row.id);
       expect(before.deletedAt).toBeNull();
       expect(before.undoneById).toBe(lead.id);
 
-      const pending = page.waitForResponse((r) => r.url().includes(`/api/actions/${row.id}/undo`) && r.request().method() === "POST");
-      await undo.click();
-      const res = await pending;
+      // A forged request must still enforce the server rule, even though the UI hides it.
+      const res = await page.request.post(`${BASE}/api/actions/${row.id}/undo`);
       expect(res.status()).toBe(409);
       expect((await res.json()).error).toBe("This was already undone.");
-      await toast(page, "This was already undone.").waitFor();
       expect(await snapshot(t, row.id)).toEqual(before);
 
       await page.goto(`/projects/${projectId}/trash`);
@@ -105,13 +96,11 @@ describe.skipIf(!process.env.SHO_QA_PASS)("qa:TC missing APL-2655 editor Undo of
     const { ctx, page } = await editorSession(ed);
     try {
       await page.goto(`/projects/${projectId}/activity`);
-      const undo = await undoButtonOn(page, title);
-      const pending = page.waitForResponse((r) => r.url().includes(`/api/actions/${row.id}/undo`) && r.request().method() === "POST");
-      await undo.click();
-      const res = await pending;
+      await expectNoDeleteUndo(page, title);
+      // A forged request must still enforce the server rule, even though the UI hides it.
+      const res = await page.request.post(`${BASE}/api/actions/${row.id}/undo`);
       expect(res.status()).toBe(403);
       expect((await res.json()).error).toBe("Only the project Leader or an Admin can do this.");
-      await toast(page, "Only the project Leader or an Admin can do this.").waitFor();
       expect(await snapshot(t, row.id)).toEqual(before);
 
       await page.goto(`/projects/${projectId}/trash`);

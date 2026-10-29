@@ -82,9 +82,9 @@ describe("Monday review (13.3)", () => {
 
   it("counts deals per stage with per-currency totals and 'without value', never zero for unknown", async () => {
     const lead = await account("rvcount");
-    await mkDeal(lead, { extra: { value: 1000, currency: "INR" } });
-    await mkDeal(lead, { extra: { value: 50, currency: "USD" } });
-    await mkDeal(lead);
+    await mkDeal(lead, { extra: { opportunityType: "OTC", value: 1000, currency: "INR" } });
+    await mkDeal(lead, { extra: { opportunityType: "OTC", value: 50, currency: "USD" } });
+    await mkDeal(lead, { extra: { opportunityType: "OTC" } });
     const r = await review(lead);
     const lead1 = r.counts.find((p: { name: string }) => p.name === "Proactive").stages.find((s: { name: string }) => s.name === "Lead");
     expect(lead1.count).toBe(3);

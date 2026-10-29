@@ -1,0 +1,42 @@
+/* SHO-3080: scoped to List; Board and task dialogs retain their existing layout. */
+:is(.project-list-view, .project-board-view) .head h1 { overflow-wrap: anywhere; font-size: clamp(28px, 3vw, 38px); }
+:is(.project-list-view, .project-board-view) .head h1::before { display: none; }
+:is(.project-list-view, .project-board-view) .project-breadcrumb { overflow-wrap: anywhere; }
+.project-secondary-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 16px; }
+.project-secondary-actions a { min-height: 40px; display: inline-flex; align-items: center; text-decoration: none; font-size: 15px; }
+:is(.project-list-view, .project-board-view) > .tabs { border-bottom: 1px solid var(--line); gap: 16px; padding-bottom: 0; margin: 20px 0 16px; }
+:is(.project-list-view, .project-board-view) .tabs > .seg { border: 0; border-radius: 0; background: transparent; gap: 16px; }
+:is(.project-list-view, .project-board-view) .tabs [role='tab'] { background: transparent; color: var(--muted); min-height: 44px; border-bottom: 3px solid transparent; padding: 10px 8px; }
+:is(.project-list-view, .project-board-view) .tabs [role='tab'][aria-selected='true'] { color: var(--navy); border-bottom-color: var(--gold); font-weight: 700; }
+:is(.project-list-view, .project-board-view) .lc-bar { gap: 12px; align-items: center; }
+:is(.project-list-view, .project-board-view) .lc-sel { flex-direction: row; align-items: center; gap: 8px; border: 1px solid var(--field); border-radius: 8px; background: white; padding-left: 12px; }
+:is(.project-list-view, .project-board-view) .lc-sel select { border: 0; min-height: 40px; min-width: 0; }
+:is(.project-list-view, .project-board-view) .project-task-section { border: 1px solid #dce0e7; border-radius: 12px; background: white; box-shadow: 0 2px 4px #171b2210, 0 8px 20px #171b2210; padding: 20px; margin: 24px 0; min-width: 0; }
+:is(.project-list-view, .project-board-view) .project-task-section > .grp { margin: 0 0 16px; font-size: 20px; color: #10143e; text-transform: none; letter-spacing: 0; gap: 12px; }
+:is(.project-list-view, .project-board-view) .project-task-section > .grp > .wrapper { margin-left: auto; }
+:is(.project-list-view, .project-board-view) .project-task-section .list { border: 0; border-radius: 0; }
+:is(.project-list-view, .project-board-view) .item { gap: 12px; padding: 14px 4px; }
+:is(.project-list-view, .project-board-view) .item .t { min-width: 0; }
+:is(.project-list-view, .project-board-view) .item .t b { white-space: normal; overflow-wrap: anywhere; }
+:is(.project-list-view, .project-board-view) .item .meta { gap: 12px; }
+:is(.project-list-view, .project-board-view) .item .sel input { accent-color: var(--navy); }
+:is(.project-list-view, .project-board-view) .item .tick.done { background: var(--ok); }
+:is(.project-list-view, .project-board-view) .item form, :is(.project-list-view, .project-board-view) .item input { min-width: 0; }
+@media (min-width: 1100px) {
+  :is(.project-list-view, .project-board-view) .item.click { display: grid; grid-template-columns: 20px 24px minmax(160px, 1fr) minmax(290px, auto); }
+  :is(.project-list-view, .project-board-view) .item.click:not(.sel-row) { grid-template-columns: 24px minmax(160px, 1fr) minmax(290px, auto); }
+}
+@media (max-width: 599px) {
+  :is(.project-list-view, .project-board-view) .project-task-section { padding: 16px; }
+  :is(.project-list-view, .project-board-view) .item { flex-wrap: wrap; }
+  :is(.project-list-view, .project-board-view) .item .meta { width: 100%; justify-content: flex-start; }
+  :is(.project-list-view, .project-board-view) .lc-sel { flex-wrap: wrap; padding: 8px; }
+  :is(.project-list-view, .project-board-view) .lc-sel select { width: 100%; }
+  .project-secondary-actions { gap: 12px; }
+}
+.shell:has(:is(.project-list-view, .project-board-view)) :is(.project-list-view, .project-board-view) .head h1.pt { font-size: clamp(28px, 3vw, 38px); }
+.shell:has(:is(.project-list-view, .project-board-view)) :is(.project-list-view, .project-board-view) .head h1.pt::before { display: none; }
+:is(.project-list-view, .project-board-view) .lc-sel { white-space: nowrap; font-weight: 400; }
+:is(.project-list-view, .project-board-view) .item .meta { display: grid; grid-template-columns: minmax(90px, 1fr) minmax(90px, 1fr) minmax(65px, auto); align-items: center; }
+:is(.project-list-view, .project-board-view) .item .meta > .chip { grid-column: 1 / -1; justify-self: start; white-space: normal; }
+@media (max-width: 599px) { :is(.project-list-view, .project-board-view) .item .meta { display: flex; flex-wrap: wrap; } }

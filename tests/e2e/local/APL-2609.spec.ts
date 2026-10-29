@@ -243,7 +243,7 @@ const strip = (x: Awaited<ReturnType<typeof surfaces>>) => { const { plainShown,
 async function myTasksScreen(mode: Mode, who: Who, waitFor: string, project: string) {
   const page = await pageAs(mode, who);
   try {
-    await page.goto(`${server(mode).base}/`, { waitUntil: "domcontentloaded" });
+    await page.goto(`${server(mode).base}/my-tasks`, { waitUntil: "domcontentloaded" });
     // The task's row in its own list section. The concierge panel can link the same task, so the page as a whole is not enough.
     const row = (section: string) => page.getByRole("region", { name: section, exact: true }).getByRole("link", { name: waitFor, exact: true });
     await row("Next 7 days").waitFor({ timeout: 30_000 });

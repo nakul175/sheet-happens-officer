@@ -99,6 +99,9 @@ describe("keyboard", () => {
     await row.focus();
     await page.keyboard.press("Enter");
     await page.waitForSelector('[role="dialog"]');
+    // Wait for both task and project permissions before tabbing through the editor.
+    // Replacing the loading/Viewer state can otherwise remove the active control mid-loop.
+    await page.getByRole("dialog", { name: "Task", exact: true }).getByLabel("Search workspace people", { exact: true }).waitFor();
     for (let i = 0; i < 40; i++) {
       await page.keyboard.press("Tab");
       expect(await page.evaluate(() => !!document.activeElement?.closest('[role="dialog"]')), `Tab ${i + 1}`).toBe(true);
@@ -115,8 +118,11 @@ describe("keyboard", () => {
     await page.waitForSelector("main#main");
     await page.evaluate(() => { (window as unknown as { __kept: number }).__kept = 1; });
     await page.route("**/api/my-tasks", (r) => r.abort());
-    await page.getByRole("link", { name: "Projects" }).first().click();
-    await page.getByRole("link", { name: "My tasks" }).first().click();
+    await page.getByRole("button", { name: "Open menu", exact: true }).click();
+    await page.locator('.side.open a[href="/projects"]').click();
+    await page.waitForURL("**/projects");
+    await page.getByRole("button", { name: "Open menu", exact: true }).click();
+    await page.locator('.side.open a[href="/my-tasks"]').click();
     await page.getByText("Could not reach the server.").waitFor();
     await page.unroute("**/api/my-tasks");
     await page.getByRole("button", { name: "Retry" }).click();
@@ -130,7 +136,8 @@ describe("keyboard", () => {
     await page.goto("/projects", { waitUntil: "load" });
     await page.waitForSelector("main#main");
     await page.route("**/api/my-tasks", async (r) => { await new Promise((x) => setTimeout(x, 1500)); await r.continue(); });
-    await page.getByRole("link", { name: "My tasks" }).first().click();
+    await page.getByRole("button", { name: "Open menu", exact: true }).click();
+    await page.locator('.side.open a[href="/my-tasks"]').click();
     await page.waitForSelector(".skel-wrap");
     expect(await page.locator(".skel-row").count()).toBe(0);
     await page.waitForSelector(".skel-row", { timeout: 1000 });

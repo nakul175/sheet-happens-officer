@@ -2,6 +2,7 @@ import { createHash, randomBytes, randomInt, scrypt, timingSafeEqual } from "nod
 import { cookies } from "next/headers";
 import { db } from "@/lib/db";
 import { ApiError } from "@/lib/http";
+import { centralSessionActive } from "@/lib/central-status";
 
 export const SESSION_COOKIE = "sho_session";
 export const SESSION_DAYS = 30; // fixed from sign-in, never extended
@@ -127,6 +128,8 @@ export async function sessionUser(token: string | undefined, opts: { allowTempPa
   if (!session || session.revokedAt || session.expiresAt <= new Date() || !u || u.deactivatedAt || !u.emailVerifiedAt) {
     throw new ApiError(401, "Not signed in");
   }
+  const central = await db.centralSessionLink.findUnique({ where: { sessionId: session.id } });
+  if (central && !(await centralSessionActive(central.subject, central.sessionUid, u.id))) throw new ApiError(401, "Central session expired. Sign in again.");
   // Last-active time for the Profile screen; written at most every 5 minutes.
   if (Date.now() - session.lastSeenAt.getTime() > 5 * 60_000) {
     await db.session.update({ where: { id: session.id }, data: { lastSeenAt: new Date() } });
