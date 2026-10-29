@@ -8,8 +8,21 @@ vi.mock("@/app/(app)/Shell", () => ({ Page: ({ title, children, sub, beforeTitle
 import PersonPage from "../src/app/(app)/team/[id]/Person";
 let root: Root | undefined;
 const person = { id: "person", name: "Actual Person", email: "actual@example.test", orgRole: "ADMIN", status: "ACTIVE", joinedAt: "2026-01-01", openTasks: 2, projects: [{ id: "visible", name: "Actual project", role: "EDITOR", openTasks: 2 }, { href: null, name: "A deal you can't view." }] };
-async function mount() { document.body.innerHTML = '<div id="root"></div>'; vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify(status === 200 ? { person: role === "MEMBER" ? { id: person.id, name: person.name, projects: person.projects } : person } : { error: status === 403 ? "Forbidden" : "Unavailable" }), { status, headers: { "content-type": "application/json" } })); await act(async () => { root = createRoot(document.getElementById('root')!); root.render(h(PersonPage)); }); }
+async function mount(errorBody?: { error: string; code?: string }) { document.body.innerHTML = '<div id="root"></div>'; vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify(status === 200 ? { person: role === "MEMBER" ? { id: person.id, name: person.name, projects: person.projects } : person } : errorBody ?? { error: status === 403 ? "Forbidden" : "Unavailable" }), { status, headers: { "content-type": "application/json" } })); await act(async () => { root = createRoot(document.getElementById('root')!); root.render(h(PersonPage)); }); }
 afterEach(() => { act(() => root?.unmount()); root = undefined; role = "SUPER_ADMIN"; status = 200; vi.restoreAllMocks(); });
 it("preserves Member privacy and hidden-deal safe navigation", async () => { role = "MEMBER"; await mount(); expect(document.body.textContent).not.toContain("actual@example.test"); expect(document.body.textContent).not.toContain("Joined"); expect(document.body.textContent).not.toContain("open tasks"); expect(document.querySelector('details')).toBeNull(); expect(document.querySelector('a[href="/projects/visible"]')).not.toBeNull(); expect(document.querySelectorAll('a[href^="/projects/"]')).toHaveLength(1); expect(document.body.textContent).toContain("A deal you can't view."); });
 it("groups existing eligible controls without direct deactivation", async () => { await mount(); const more = document.querySelector('details')!; expect(more.querySelector('summary')!.textContent).toBe("More"); expect(more.textContent).toContain("Make Member"); expect(more.textContent).toContain("Resend sign-in details"); expect(more.querySelector('a[href="/team"]')!.textContent).toContain("Deactivate from the Team list"); expect([...more.querySelectorAll('button')].some(b => b.textContent === "Deactivate")).toBe(false); });
 it("retains denial, missing and server retry branches", async () => { for (const code of [403, 404, 500]) { status = code; await mount(); expect(document.querySelector('[role="alert"]')).not.toBeNull(); expect(document.body.textContent).not.toContain(person.email); if (code === 500) expect([...document.querySelectorAll('button')].some(b => b.textContent === "Retry")).toBe(true); act(() => root!.unmount()); root = undefined; vi.restoreAllMocks(); } });
+it.each(["Choose a new password to continue.", "Veuillez changer votre mot de passe."])("recognises the forced-password code when server copy changes: %s", async error => {
+  status = 403;
+  await mount({ error, code: "PASSWORD_CHANGE_REQUIRED" });
+  expect(document.querySelector('h1')!.textContent).toBe("Set your own password");
+  expect(document.querySelector('a[href="/profile"]')!.textContent).toBe("Change password");
+  expect(document.body.textContent).not.toContain("You don't have access to this person");
+});
+it.each([undefined, "FORBIDDEN"])("does not infer a forced-password condition from display text with code %s", async code => {
+  status = 403;
+  await mount({ error: "Set your own password first.", code });
+  expect(document.querySelector('a[href="/profile"]')).toBeNull();
+  expect(document.body.textContent).toContain("You don't have access to this person");
+});

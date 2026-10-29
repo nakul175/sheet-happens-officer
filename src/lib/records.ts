@@ -12,8 +12,7 @@ import { taskAccess } from "@/lib/tasks";
 import { UNDO_LABELS, isTooOldToUndo, isUndoable } from "@/lib/undoable";
 
 const clean = (v: string | null | undefined) => (v?.trim() ? v.trim() : null);
-const NOTE_KINDS = ["MEETING", "CALL", "INTRODUCTION", "OTHER"] as const;
-export type NoteKindName = (typeof NOTE_KINDS)[number];
+export type NoteKindName = "MEETING" | "CALL" | "INTRODUCTION" | "OTHER";
 const dayOf = (d: Date) => d.toISOString().slice(0, 10);
 
 async function me(user: Actor) {
@@ -166,7 +165,7 @@ function presentNotes(rows: Awaited<ReturnType<typeof loadNotes>>, user: Actor, 
 }
 async function loadNotes(where: Prisma.NoteWhereInput) {
   const rows = await db.note.findMany({
-    where, orderBy: [{ date: "desc" }, { createdAt: "desc" }], take: 200,
+    where, orderBy: [{ date: "desc" }, { createdAt: "desc" }, { id: "asc" }], take: 200,
     include: { project: { select: { id: true, name: true } }, contacts: { select: { contact: { select: { id: true, name: true } } } } },
   });
   const people = await db.user.findMany({ where: { id: { in: [...new Set(rows.map((r) => r.authorId))] } }, select: { id: true, name: true } });

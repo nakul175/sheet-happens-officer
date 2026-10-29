@@ -27,7 +27,9 @@ describe("SHO-3136 approved branding", () => {
     const shell = read("src/app/(app)/Shell.tsx");
     expect(shell.match(/aria-label="Sheet Happens Officer home"/g)).toHaveLength(1);
     expect(shell).toContain('aria-label="SHO, Sheet Happens Officer home"');
-    expect(shell).toContain('<img src="/logo-icon-reversed.svg" alt="" />');
+    expect(shell).toContain('import Image from "next/image"');
+    expect(shell).toContain('<Image src="/logo-icon-reversed.svg" alt="" width={40} height={40} />');
+    expect(shell).toContain('<Image src="/logo-icon-reversed.svg" alt="" width={36} height={36} />');
     expect(shell).toContain('aria-hidden="true">Sheet Happens Officer');
   });
 

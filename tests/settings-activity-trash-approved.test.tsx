@@ -18,7 +18,7 @@ async function mount(which: "settings" | "activity" | "trash", role = "LEADER", 
   globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = String(input); calls.push({ path, init });
     let status = 200;
-    let data: unknown = path.includes("/activity?") ? { items: [{ id: "page2", ts: Date.now(), when: "27 Oct 2026", who: "Actor", via: "", what: "page two", undo: "none" }], nextCursor: null } : path.endsWith("/activity") ? { items: [{ id: "a", ts: Date.now(), when: "27 Oct 2026", who: "Full Actor Name", via: "concierge", what: "changed a task", undo: "available" }], nextCursor: "next" } : path.endsWith("/trash") ? { items: [{ id: "child", title: "Full child title", isSubtask: true, parentTitle: "Full parent title", deletedAt: new Date().toISOString(), deletedBy: null, daysLeft: 1 }] } : path === "/api/team" ? { people: [{ id: "leader", name: "Leader", status: "ACTIVE" }, { id: "active", name: "Eligible Person", status: "ACTIVE" }, { id: "inactive", name: "Ineligible Person", status: "DEACTIVATED" }] } : path === "/api/verticals" ? { verticals: [{ id: "old", name: "Old vertical", retired: true }, { id: "retired", name: "Other retired", retired: true }] } : { project: { id: "fixture", name: "Full Project", role, archived, verticalId: "old", members: [{ userId: "leader", name: "Leader", role: "LEADER", active: true }, { userId: "editor", name: "Editor", role: "EDITOR", active: true }] } };
+    let data: unknown = path.includes("/activity?") ? { items: [{ id: "page2", ts: Date.now(), when: "27 Oct 2026", who: "Actor", via: "", kind: "task.updated", what: "page two", undo: "none" }], nextCursor: null } : path.endsWith("/activity") ? { items: [{ id: "a", ts: Date.now(), when: "27 Oct 2026", who: "Full Actor Name", via: "concierge", kind: "task.updated", what: "changed a task", undo: "available" }], nextCursor: "next" } : path.endsWith("/trash") ? { items: [{ id: "child", title: "Full child title", isSubtask: true, parentTitle: "Full parent title", deletedAt: new Date().toISOString(), deletedBy: null, daysLeft: 1 }] } : path === "/api/team" ? { people: [{ id: "leader", name: "Leader", status: "ACTIVE" }, { id: "active", name: "Eligible Person", status: "ACTIVE" }, { id: "inactive", name: "Ineligible Person", status: "DEACTIVATED" }] } : path === "/api/verticals" ? { verticals: [{ id: "old", name: "Old vertical", retired: true }, { id: "retired", name: "Other retired", retired: true }] } : { project: { id: "fixture", name: "Full Project", role, archived, verticalId: "old", members: [{ userId: "leader", name: "Leader", role: "LEADER", active: true }, { userId: "editor", name: "Editor", role: "EDITOR", active: true }] } };
     if (init?.method === "POST" && postMode === "parent") { status = 409; data = { needsConfirm: "parent", parentTitle: "Full parent title" }; }
     if (init?.method === "POST" && postMode === "error") { status = 500; data = { error: "Restore unavailable" }; }
     return new Response(JSON.stringify(data), { status, headers: { "content-type": "application/json" } });
@@ -46,10 +46,23 @@ it("Settings retains current retired classification and confirms Viewer handover
   expect(calls.some(c => c.init?.method === "PATCH")).toBe(false);
 });
 it("Activity keeps deleted-task Undo and too-old labels hidden for unknown or Editor role", () => {
-  const deleted = { what: 'moved "Task" to Trash', undo: "available" as const };
+  const deleted = { kind: "task.deleted", what: 'moved "Task" to Trash', undo: "available" as const };
   expect(showUndo(deleted, undefined)).toBe(false); expect(showUndo(deleted, "EDITOR")).toBe(false); expect(showUndo(deleted, "LEADER")).toBe(true);
   expect(showTooOld({ ...deleted, undo: "too_old" }, undefined)).toBe(false);
   expect(showTooOld({ ...deleted, undo: "too_old" }, "LEADER")).toBe(true);
+});
+it("Activity gates deletion Undo by kind even when display copy changes or mimics a delete", () => {
+  const renamedDelete = { kind: "task.deleted", what: "Task removed", undo: "available" as const };
+  expect(showUndo(renamedDelete, "EDITOR")).toBe(false);
+  expect(showUndo(renamedDelete, "LEADER")).toBe(true);
+  expect(showTooOld({ ...renamedDelete, undo: "too_old" }, "EDITOR")).toBe(false);
+  const sectionMove = { kind: "task.moved", what: 'moved "Task" to Trash', undo: "available" as const };
+  expect(showUndo(sectionMove, "EDITOR")).toBe(true);
+  expect(showTooOld({ ...sectionMove, undo: "too_old" }, "EDITOR")).toBe(true);
+});
+it("Activity offers no Undo until the API supplies its event kind", () => {
+  expect(showUndo({ what: "Unknown event", undo: "available" }, "EDITOR")).toBe(false);
+  expect(showTooOld({ what: "Unknown event", undo: "too_old" }, "EDITOR")).toBe(false);
 });
 it("Activity uses existing Undo request and resets loaded pagination on undone event", async () => {
   await mount("activity"); await click("Undo"); expect(undo).toHaveBeenCalledWith("a");
