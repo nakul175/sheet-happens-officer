@@ -200,7 +200,7 @@ function Inner({ id }: { id: string }) {
           <button className="btn ghost sm" onClick={() => { nudgeSeen(p.id, true); setNudgeOff(true); }}>Dismiss</button>
         </div>
       )}
-      {p?.deal && <DealPanel projectId={id} deal={p.deal} canWrite={canWrite} onChange={refresh} feed={openFeed} />}
+      {p?.deal && <DealPanel projectId={id} deal={p.deal} canWrite={canWrite} canManage={manage} onChange={refresh} feed={openFeed} />}
       <div className="tabs">
         <div className="seg" role="tablist" aria-label="View">
           <button role="tab" aria-selected={view === "list"} onClick={() => setView("list")}>List</button>

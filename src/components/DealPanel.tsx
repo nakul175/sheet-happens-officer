@@ -184,8 +184,71 @@ function DetailsDialog({ projectId, deal, onClose, onDone }: { projectId: string
 }
 
 const PARTY_LABEL: Record<string, string> = { BUYER: "Buyer", FUNDER: "Funder", IMPLEMENTING_OFFICE: "Implementing office", PARTNER: "Partner", OTHER: "Other" };
-function Parties({ projectId, deal, canWrite, onChange }: { projectId: string; deal: DealBlock; canWrite: boolean; onChange: () => void }) {
+function BuyerDialog({ projectId, buyer, onClose, onDone }: {
+  projectId: string;
+  buyer: DealBlock["parties"][number];
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const orgs = useGet<{ organisations: { id: string; name: string }[] }>("/api/orgs");
+  const [organisationId, setOrganisationId] = useState("");
+  const [confirmed, setConfirmed] = useState(false);
+  const [duplicate, setDuplicate] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const replacement = orgs.data?.organisations.find((o) => o.id === organisationId) ?? null;
+  async function save() {
+    if (!replacement || !confirmed || busy) return;
+    setBusy(true); setErr(null);
+    const r = await api("PATCH", `/api/projects/${projectId}/parties/buyer`, {
+      organisationId: replacement.id,
+      expectedPartyId: buyer.id,
+      expectedOrganisationId: buyer.organisation.id,
+      force: !!duplicate,
+    });
+    setBusy(false);
+    if (r.ok) { onDone(); return; }
+    if (r.status === 409 && r.data?.needsConfirm === "duplicate") {
+      setDuplicate(r.error ?? "Another deal with this name already uses the proposed Buyer.");
+      setConfirmed(false);
+      return;
+    }
+    setErr(r.error ?? "Could not replace the Buyer.");
+  }
+  const confirmation = replacement
+    ? duplicate
+      ? `I understand: replace ${buyer.organisation.name} with ${replacement.name} even though another deal with this name already exists for ${replacement.name}.`
+      : `Replace ${buyer.organisation.name} with ${replacement.name}.`
+    : "Choose a replacement Buyer first.";
+  return (
+    <Modal onClose={onClose} label="Replace Buyer">
+      <h2>Replace Buyer</h2>
+      <p>This changes the Buyer on this deal only. It does not rename either organisation or change any other party.</p>
+      <div className="box" style={{ marginBottom: 10 }}><b>Current Buyer</b><div>{buyer.organisation.name}</div></div>
+      <Field label="New Buyer (active organisations only)">{(id) => (
+        <select id={id} className="in" value={organisationId} onChange={(e) => { setOrganisationId(e.target.value); setConfirmed(false); setDuplicate(null); setErr(null); }}>
+          <option value="">Choose</option>
+          {orgs.data?.organisations.filter((o) => o.id !== buyer.organisation.id).map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+        </select>
+      )}</Field>
+      {replacement && <div className="box" style={{ marginTop: 10 }}><b>Proposed Buyer</b><div>{replacement.name}</div></div>}
+      {duplicate && <div className="box warn" role="alert" style={{ marginTop: 10 }}>{duplicate}</div>}
+      {err && <div className="err" role="alert">{err}</div>}
+      <label style={{ display: "flex", gap: 8, alignItems: "flex-start", marginTop: 12 }}>
+        <input type="checkbox" checked={confirmed} disabled={!replacement} onChange={(e) => setConfirmed(e.target.checked)} />
+        <span>{confirmation}</span>
+      </label>
+      <div className="actions">
+        <button className="btn ghost" disabled={busy} onClick={onClose}>Cancel</button>
+        <button className="btn" disabled={!replacement || !confirmed || busy} onClick={save}>{busy ? "Saving…" : duplicate ? "Replace anyway" : "Replace Buyer"}</button>
+      </div>
+    </Modal>
+  );
+}
+
+function Parties({ projectId, deal, canWrite, canManage, onChange }: { projectId: string; deal: DealBlock; canWrite: boolean; canManage: boolean; onChange: () => void }) {
   const [adding, setAdding] = useState(false);
+  const [changingBuyer, setChangingBuyer] = useState<DealBlock["parties"][number] | null>(null);
   const [org, setOrg] = useState("");
   const [role, setRole] = useState("FUNDER");
   const [err, setErr] = useState<string | null>(null);
@@ -201,6 +264,7 @@ function Parties({ projectId, deal, canWrite, onChange }: { projectId: string; d
       {deal.parties.map((p) => (
         <span key={p.id} className="chip" style={{ marginRight: 4 }}>
           {PARTY_LABEL[p.role]}: <Link href={`/accounts/${p.organisation.id}`}>{p.organisation.name}</Link>
+          {canManage && p.role === "BUYER" && <button className="link" onClick={() => setChangingBuyer(p)} style={{ marginLeft: 6 }}>Change Buyer</button>}
           {canWrite && p.role !== "BUYER" && <button className="link" aria-label={`Remove ${p.organisation.name}`} onClick={() => remove(p.id)} style={{ marginLeft: 4 }}>×</button>}
         </span>
       ))}
@@ -213,6 +277,7 @@ function Parties({ projectId, deal, canWrite, onChange }: { projectId: string; d
         </span>
       )}
       {err && <div className="err" role="alert">{err}</div>}
+      {changingBuyer && <BuyerDialog projectId={projectId} buyer={changingBuyer} onClose={() => setChangingBuyer(null)} onDone={() => { setChangingBuyer(null); onChange(); }} />}
     </div>
   );
 }
@@ -231,7 +296,7 @@ function DealNotes({ projectId, orgId }: { projectId: string; orgId: string | nu
   );
 }
 
-export function DealPanel({ projectId, deal, canWrite, onChange, feed }: { projectId: string; deal: DealBlock; canWrite: boolean; onChange: () => void; feed: OpenTaskFeed }) {
+export function DealPanel({ projectId, deal, canWrite, canManage, onChange, feed }: { projectId: string; deal: DealBlock; canWrite: boolean; canManage: boolean; onChange: () => void; feed: OpenTaskFeed }) {
   const [pick, setPick] = useState<null | { stage: Stage; blocked: Blocked | null; loadError: string | null }>(null);
   const [armed, setArmed] = useState<Stage | null>(null);
   const [edit, setEdit] = useState(false);
@@ -307,7 +372,7 @@ export function DealPanel({ projectId, deal, canWrite, onChange, feed }: { proje
           : deal.needsNextStep ? <span className="chip red">No next step. Add a dated task.</span> : <span style={{ color: "var(--muted)" }}>No next step needed in this stage.</span>}
       </p>
       <DealNotes projectId={projectId} orgId={deal.organisation?.id ?? null} />
-      <Parties projectId={projectId} deal={deal} canWrite={canWrite} onChange={onChange} />
+      <Parties projectId={projectId} deal={deal} canWrite={canWrite} canManage={canManage} onChange={onChange} />
       {pick && deal && <StageDialog projectId={projectId} stage={pick.stage} deal={deal} initial={{ blocked: pick.blocked, loadError: pick.loadError }} onClose={close} onDone={() => { close(); onChange(); }} />}
       {edit && d && <DetailsDialog projectId={projectId} deal={deal} onClose={() => setEdit(false)} onDone={() => { setEdit(false); onChange(); }} />}
     </div>
