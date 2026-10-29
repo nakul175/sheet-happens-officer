@@ -2,7 +2,7 @@
 import { mkdirSync } from "node:fs";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { chromium, type Browser } from "playwright-core";
-import { account, BASE, cleanupZz, PW, superAdmin, type Account } from "../helpers";
+import { account, BASE, cleanupZz, project, PW, superAdmin, type Account } from "../helpers";
 let browser: Browser, owner: Account, peer: Account;
 const prefix = `SV ${Date.now()}`;
 const shared: { id: string; screen: string; path: string; name: string }[] = [];
@@ -79,5 +79,29 @@ for (const width of [1280, 390]) it(`SHO-2594 shared tabs apply current filters 
   } finally {
     for (const id of privateIds) expect((await peer.c.del(`/api/screen-views/${id}`)).status).toBe(204);
     await context.close();
+  }
+}, 120000);
+
+it("SHO-2594 a revoked project member sees not-found when reopening the saved link", async () => {
+  const p = await project(owner, owner, [{ who: peer, role: "VIEWER" }], `ZZ-TEST shared-view revocation ${Date.now()}`);
+  let id = "";
+  const context = await browser.newContext({ baseURL: BASE, viewport: { width: 390, height: 900 } });
+  try {
+    const saved = await owner.c.post("/api/screen-views", { name: `${prefix} revoke`, screen: "DEALS", scope: "PROJECT", projectId: p.id, state: { atRisk: true } });
+    expect(saved.status).toBe(201); id = saved.json.view.id;
+    expect((await context.request.post("/api/auth/signin", { data: { email: peer.email, password: PW } })).ok()).toBe(true);
+    const page = await context.newPage();
+    await page.goto(`/deals?view=${id}`);
+    await expect.poll(() => page.getByRole("checkbox", { name: "At risk", exact: true }).isChecked()).toBe(true);
+    expect((await owner.c.del(`/api/projects/${p.id}/members/${peer.id}`)).status).toBe(204);
+    await page.reload();
+    // Next's streamed response can be HTTP 200; the rendered not-found UI is the browser contract.
+    await page.getByText("This page could not be found.", { exact: true }).waitFor({ state: "visible" });
+    expect(await page.getByRole("region", { name: "Saved views", exact: true }).count()).toBe(0);
+    await page.screenshot({ path: "test-results/viewport/shared-views-revoked-390-pass.png", fullPage: true });
+  } finally {
+    await context.close();
+    if (id) expect((await owner.c.del(`/api/screen-views/${id}?confirmShared=true`)).status).toBe(204);
+    await cleanupZz([p.id], []);
   }
 }, 120000);

@@ -3,6 +3,7 @@ import { expect, it } from "vitest";
 import { account, cleanupZz, istDate, project, superAdmin } from "./helpers";
 import { newTurn, runTool } from "@/lib/concierge/tools";
 import { db } from "@/lib/db";
+import { getScreenView } from "@/lib/screen-views";
 it("SHO-2594 shares filters per viewer, enforces owner rules and atomic private limits", async () => {
   const owner = await account("zzviewowner"), member = await account("zzviewmember"), outsider = await account("zzviewoutside");
   const ids: string[] = [], projects: string[] = [];
@@ -49,7 +50,8 @@ it("SHO-2594 shares filters per viewer, enforces owner rules and atomic private 
     const revoked = newTurn({ id: member.id, orgRole: "MEMBER" }, new Date());
     await runTool(revoked, "find_saved_views", { name: "Scope PROJECT" });
     expect(revoked.savedViews).toEqual([]);
-    expect((await member.c.get(`/deals?view=${ids[2]}`)).status).toBe(404);
+    // A streamed Next not-found page can retain HTTP 200; assert its authoritative lookup.
+    await expect(getScreenView({ id: member.id, orgRole: "MEMBER" }, ids[2], "DEALS")).rejects.toMatchObject({ status: 404 });
     // One private view already exists. Parallel writes must admit exactly nine more.
     const results = await Promise.all(Array.from({ length: 12 }, (_, i) => owner.c.post("/api/screen-views", input(`Concurrent ${i}`))));
     for (const r of results) if (r.status === 201) ids.push(r.json.view.id);
