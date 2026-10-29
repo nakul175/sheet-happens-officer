@@ -85,7 +85,7 @@ describe("SHO-3052 controlled Buyer replacement", () => {
     expect(log.beforeState).toEqual({ partyId: current.id, organisationId: oldBuyer.id, organisation: oldBuyer.name });
     expect(log.afterState).toEqual({ partyId: current.id, organisationId: newBuyer.id, organisation: newBuyer.name });
     const activity = (await leader.c.get(`/api/projects/${projectId}/activity`)).json.items as { what: string }[];
-    expect(activity.some((x) => x.what.includes(`changed Buyer from ${oldBuyer.name} to ${newBuyer.name}`))).toBe(true);
+    expect(activity.some((x) => x.what.includes(`changed the Buyer from ${oldBuyer.name} to ${newBuyer.name}`))).toBe(true);
   });
 
   it("limits replacement to Leaders/Admins and keeps the old Buyer on invalid, stale and unconfirmed duplicate requests", async () => {
