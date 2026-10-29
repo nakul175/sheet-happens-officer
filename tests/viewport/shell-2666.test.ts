@@ -73,11 +73,11 @@ describe("SHO-2666 Shell", () => {
       const { ctx, page } = await signedIn(width);
       try {
         const previousCookie = (await ctx.cookies()).map((cookie) => `${cookie.name}=${cookie.value}`).join("; ");
-        const logo = page.locator(width === 390 ? ".top-brand img" : ".brand img");
+        const logo = page.locator(".top-brand img");
         await logo.waitFor({ state: "visible" });
-        expect(await logo.getAttribute("src")).toBe("/logo-icon.svg");
+        expect(await logo.getAttribute("src")).toBe("/logo-icon-reversed.svg");
         expect(await logo.getAttribute("alt")).toBe("");
-        const size = width === 390 ? 24 : 32;
+        const size = width === 390 ? 28 : 36;
         expect(await logo.evaluate((img) => {
           const rect = img.getBoundingClientRect();
           return { width: rect.width, height: rect.height, loaded: (img as HTMLImageElement).complete && (img as HTMLImageElement).naturalWidth > 0 };
@@ -89,14 +89,17 @@ describe("SHO-2666 Shell", () => {
           await page.waitForURL("**/team");
           await page.getByRole("button", { name: "More", exact: true }).click();
         } else {
-          await page.locator("a.me").click();
+          await page.getByRole("button", { name: /^Account and utilities,/ }).click();
+          await page.locator(".account-options").getByRole("link", { name: "Profile", exact: true }).click();
           await page.waitForURL("**/profile");
+          await page.getByRole("button", { name: /^Account and utilities,/ }).click();
         }
-        const response = page.waitForResponse((r) => r.request().method() === "POST" && !!r.request().headers()["next-action"]);
-        await page.getByRole(width === 390 ? "menuitem" : "button", { name: "Sign out", exact: true }).click();
+        const response = page.waitForResponse((r) => r.request().method() === "POST" && new URL(r.url()).pathname === "/api/auth/signout");
+        if (width === 390) await page.getByRole("menuitem", { name: "Sign out", exact: true }).click();
+        else await page.locator(".account-options").getByRole("button", { name: "Sign out", exact: true }).click();
         const signedOut = await response;
-        expect(signedOut.status()).toBe(200);
-        expect(signedOut.headers()["x-action-redirect"]).toBe("/signin;replace");
+        expect(signedOut.status()).toBe(204);
+        expect(new URL(signedOut.url()).pathname).toBe("/api/auth/signout");
         await page.waitForURL(/\/signin(?:\?|$)/);
         // Next preserves inactive page DOM with cacheComponents; it must stay hidden and inaccessible.
         await page.locator(".shell").waitFor({ state: "hidden" });

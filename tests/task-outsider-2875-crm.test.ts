@@ -149,7 +149,7 @@ describe("qa:TC missing APL-2875 T3: a task in a hidden deal answers like a miss
     expect(deal.status, deal.body).toBe(201);
     seed.dealId = (deal.json!.deal as { id: string }).id;
     expect((await send(seed.admin.cookie, "POST", `/api/projects/${seed.dealId}/members`, JSON.stringify({ userId: editor.id, role: "EDITOR" }))).status).toBe(201);
-    const made = await send(seed.admin.cookie, "POST", `/api/projects/${seed.dealId}/tasks`, JSON.stringify({ title: `ZZ-TEST deal task ${RUN}`, assigneeId: seed.admin.id }));
+    const made = await send(seed.admin.cookie, "POST", `/api/projects/${seed.dealId}/tasks`, JSON.stringify({ title: `ZZ-TEST deal task ${RUN}`, assigneeId: seed.admin.id, dueDate: istDate(1) }));
     expect(made.status, made.body).toBe(201);
     const t3 = (made.json!.task as { id: string }).id;
     const before = (await send(seed.admin.cookie, "GET", `/api/tasks/${t3}`)).body;

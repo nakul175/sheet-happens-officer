@@ -294,7 +294,7 @@ export function TaskModal({ id, me, onClose, onChanged, asPage }: { id: string; 
                       onChange={() => run(api("POST", `/api/tasks/${s.id}/${s.completedAt ? "reopen" : "complete"}`, s.completedAt ? {} : { expectedUpdatedAt: s.updatedAt }))} />
                     <span style={s.completedAt ? { textDecoration: "line-through", color: "var(--muted)" } : undefined}>{s.title}</span>
                   </label>
-                  {canEdit && !holding && <button className="link" aria-label={`Move subtask "${s.title}" to Trash`} onClick={() => setTrashSub(s)}>Delete</button>}
+                  {canEdit && !holding && <button className="link" aria-label={`Delete subtask "${s.title}" (move to Trash)`} onClick={() => setTrashSub(s)}>Delete</button>}
                 </div>
               ))}
               {canEdit && (

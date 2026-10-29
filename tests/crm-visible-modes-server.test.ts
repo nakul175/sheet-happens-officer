@@ -414,7 +414,7 @@ describe("CRM_VISIBLE modes are tested against a real server per mode", () => {
     expect(plainMade.status, plainMade.text).toBe(201);
     const plain = plainMade.json?.project as { id: string; name: string };
     seed.plainProjectId = plain.id;
-    const plainTaskMade = await call(open!.base, member.cookie, "POST", `/api/projects/${plain.id}/tasks`, { title: plainTitle, assigneeId: member.id });
+    const plainTaskMade = await call(open!.base, member.cookie, "POST", `/api/projects/${plain.id}/tasks`, { title: plainTitle, assigneeId: member.id, dueDate: istDate(1) });
     expect(plainTaskMade.status, plainTaskMade.text).toBe(201);
     const plainTaskId = (plainTaskMade.json?.task as { id: string }).id;
     const kickoffTaskId = task!.id;
@@ -694,7 +694,7 @@ describe("CRM_VISIBLE modes are tested against a real server per mode", () => {
     const plainId = (plain.json?.project as { id: string }).id;
     seed.projectIds.push(plainId);
     expect((await call(open!.base, admin.cookie, "POST", `/api/projects/${plainId}/members`, { userId: member.id, role: "EDITOR" })).status).toBe(201);
-    expect((await call(open!.base, admin.cookie, "POST", `/api/projects/${plainId}/tasks`, { title: `ZZ-TEST Shared task ${tag}`, assigneeId: admin.id })).status).toBe(201);
+    expect((await call(open!.base, admin.cookie, "POST", `/api/projects/${plainId}/tasks`, { title: `ZZ-TEST Shared task ${tag}`, assigneeId: admin.id, dueDate: istDate(1) })).status).toBe(201);
     const stage = await db.project.findUnique({ where: { id: dealId }, select: { stage: { select: { name: true } } } });
     const stageName = stage?.stage?.name ?? "";
     expect(stageName).toBeTruthy();
@@ -753,8 +753,8 @@ describe("CRM_VISIBLE modes are tested against a real server per mode", () => {
 
       // Admin viewing a non-admin rep under off. The rep has one plain task and one deal task.
       const offServer = running.get("off")!;
-      expect((await call(open!.base, admin.cookie, "POST", `/api/projects/${dealId}/tasks`, { title: `ZZ-TEST Rep deal ${tag}`, assigneeId: member.id })).status).toBe(201);
-      expect((await call(open!.base, admin.cookie, "POST", `/api/projects/${plainId}/tasks`, { title: `ZZ-TEST Rep plain ${tag}`, assigneeId: member.id })).status).toBe(201);
+      expect((await call(open!.base, admin.cookie, "POST", `/api/projects/${dealId}/tasks`, { title: `ZZ-TEST Rep deal ${tag}`, assigneeId: member.id, dueDate: istDate(1) })).status).toBe(201);
+      expect((await call(open!.base, admin.cookie, "POST", `/api/projects/${plainId}/tasks`, { title: `ZZ-TEST Rep plain ${tag}`, assigneeId: member.id, dueDate: istDate(1) })).status).toBe(201);
       const repAtOne = await call(offServer.base, admin.cookie, "GET", `/api/team/${member.id}`);
       expect(repAtOne.status, repAtOne.text).toBe(200);
       assertHidden(repAtOne.text, repAtOne.json);

@@ -133,8 +133,16 @@ async function arrowScrolls(page: Page) {
 }
 
 function expectRegion(m: { innerWidth: number; boxes: Box[] }, label: string) {
-  expect(m.boxes.map((b) => b.cls), "the table wrapper is the element that scrolls").toEqual(["acct-scroll"]);
-  const box = m.boxes[0];
+  const navigation = m.boxes.filter(b => b.cls === "org-tabs");
+  expect(navigation.length).toBe(label === "Open deals" ? 1 : 0);
+  for (const nav of navigation) {
+    expect(nav.label).toBe("Organisation sections");
+    expect(nav.left).toBeGreaterThanOrEqual(-1);
+    expect(nav.right).toBeLessThanOrEqual(m.innerWidth + 1);
+  }
+  const tables = m.boxes.filter(b => b.cls !== "org-tabs");
+  expect(tables.map(b => b.cls), "the data table wrapper is the element that scrolls").toEqual(["acct-scroll"]);
+  const box = tables[0];
   expect(box.label).toBe(label);
   expect(box.role).toBe("region");
   expect(box.tab).toBe("0");
@@ -203,8 +211,8 @@ describe("@APL-2692 accounts sideways scroll", () => {
 
   it("@APL-2692 @AC3 @TC3 qa:TC-APL2692-07e24120@v1 at 1280x800 the columns sit where they did before this change", async () => {
     const cases = [
-      { path: `/accounts?q=${encodeURIComponent(orgName)}`, ready: `a[href="/accounts/${orgId}"]`, headers: ["Name", "Kind", "Country", "Under", "Open deals"] },
-      { path: `/accounts/${orgId}`, ready: `a[href="/projects/${dealId}"]`, headers: ["Deal", "Role", "Stage", "Leader"] },
+      { path: `/accounts?q=${encodeURIComponent(orgName)}`, ready: `a[href="/accounts/${orgId}"]`, headers: ["Name", "Kind", "Country", "Parent organisation", "Open deals"] },
+      { path: `/accounts/${orgId}`, ready: `a[href="/projects/${dealId}"]`, headers: ["Deal", "Relationship", "Stage", "Leader"] },
     ];
     for (const c of cases) {
       const page = await openAt(DESK, c.path, c.ready);

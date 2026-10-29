@@ -76,7 +76,7 @@ export async function project(creator: Account, leader: Account, members: { who:
 }
 
 export const task = async (who: Account, projectId: string, body: Record<string, unknown> = {}) => {
-  const r = await who.c.post(`/api/projects/${projectId}/tasks`, { title: "Task " + n++, ...body });
+  const r = await who.c.post(`/api/projects/${projectId}/tasks`, { title: "Task " + n++, dueDate: istDate(1), ...body });
   expect(r.status, JSON.stringify(r.json)).toBe(201);
   return r.json.task.id as string;
 };

@@ -183,6 +183,7 @@ async function attemptDeactivate(server: Server, viewer: Person, size: { width: 
   const page = await context.newPage();
   await page.goto(`${server.base}/team`);
   const row = page.locator("tr").filter({ hasText: leader.email });
+  await row.locator("summary").click();
   await row.getByRole("button", { name: "Deactivate", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: `Deactivate ${leader.name}?` });
   await dialog.waitFor();

@@ -1604,6 +1604,24 @@
       "liveSHA256": "2e3ed890499f7bc0ef0bc346096987f47090d1bf9acfd19e9f4d3ccd4fc5d539",
       "reconciledSHA256": "2e151deb8ae20260c6ec5b7f661db5aaba9220019889fea84e5102da7f230742",
       "reason": "Document existing authorization/transaction scope for main project-lookup lint policy; comments only"
+    },
+    {
+      "path": "src/app/(app)/tasks/[id]/TaskPage.tsx",
+      "liveSHA256": "1a0336d4e243b10bd1970e60b87bb8d8c2ab50fecc484547f9ceecd52b92f7e9",
+      "reconciledSHA256": "a8aa4797264fb86b7f853383105b87db86f9bf187286bfc1cd33b7f57c4311d2",
+      "reason": "Add screen-reader-only task heading for standalone task page landmark accessibility"
+    },
+    {
+      "path": "src/app/signin/SignInForm.tsx",
+      "liveSHA256": "71015798c830a5616fe3def960bea7163a7a9f465578102ec432a419593b0d3b",
+      "reconciledSHA256": "52b6d617715b4feec84df297cafcdb992efd7b413b738f21e9f58ef239bd469a",
+      "reason": "Use level-one sign-in heading when responsive brand heading is hidden"
+    },
+    {
+      "path": "src/components/TaskModal.tsx",
+      "liveSHA256": "a9363d72241c44b1f51c2d76a41299592b1d88bdd7da531333429acfa5ca3d24",
+      "reconciledSHA256": "03311f5c75b3c5a39ac816c0797ec92f63f03788168a590184f7c3f3f042c5c8",
+      "reason": "Include visible Delete label in subtask delete accessible name"
     }
   ],
   "currentLiveRevision": "ede5099caf6e77dc4bdb56aa83d3124e4f9c84ab",
@@ -1659,5 +1677,6 @@
     "ancestorOfLive7b79": false,
     "notCherryPicked": true
   },
-  "scopeDecision": "Finish the existing main-based reconciliation PR, preserving suite routes and the already-live SHO2589 delta. Inherited8b005578 ancestry is documented; deployment files are unchanged."
+  "scopeDecision": "Finish the existing main-based reconciliation PR, preserving suite routes and the already-live SHO2589 delta. Inherited8b005578 ancestry is documented; deployment files are unchanged.",
+  "ciCompatibilityRepairs": "Update synthetic task fixtures for required dueDate and browser selectors/expectations for restored live navigation, account menu, labels and return-to landing; retain authorization, cookie revocation and overflow assertions. No tests skipped or CI workflows relaxed."
 }
