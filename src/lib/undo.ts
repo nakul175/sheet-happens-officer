@@ -208,7 +208,10 @@ async function plan(row: any, user: Actor, projectId: string): Promise<Plan> {
       if (!b.stageId || !(await db.stage.findFirst({ where: { id: b.stageId, pipelineId: p.pipelineId ?? "" } }))) throw bad("The earlier stage no longer exists.");
       return {
         conflicts: p.stageId !== f.stageId ? [{ field: "stage", before: b.stage, after: f.stage, now: p.stageId }] : [], subject: p.name, fields: "Stage",
-        apply: async (tx) => { await tx.project.update({ where: { id: projectId }, data: { stageId: b.stageId, stageReason: b.reason ?? null, stageChangedAt: new Date() } }); },
+        apply: async (tx) => {
+          const changed = await tx.project.updateMany({ where: { id: projectId, pipelineId: p.pipelineId, stageId: p.stageId, updatedAt: p.updatedAt }, data: { stageId: b.stageId, stageReason: b.reason ?? null, stageChangedAt: new Date() } });
+          if (!changed.count) throw bad("This deal changed. Refresh before undoing its stage.");
+        },
       };
     }
     case "deal.converted": {
@@ -248,6 +251,8 @@ async function plan(row: any, user: Actor, projectId: string): Promise<Plan> {
       };
     }
     case "deal.details_updated": {
+      // project-lookup-ok: prepare authorizes recordAccess before preparing this guarded undo
+      const project = await db.project.findUniqueOrThrow({ where: { id: projectId } });
       const d = await db.dealDetails.findUnique({ where: { projectId } });
       if (!d) throw bad("This deal no longer exists.");
       const keys = Object.keys(f);
@@ -258,7 +263,11 @@ async function plan(row: any, user: Actor, projectId: string): Promise<Plan> {
       };
       const data: Record<string, unknown> = {};
       for (const k of keys) data[k] = (k === "expectedClose" || k === "submissionDeadline") && b[k] ? new Date(`${b[k]}T00:00:00Z`) : b[k] ?? null;
-      return { conflicts: fieldConflicts(keys, b, f, now), subject: "the deal", fields: keys.join(", "), apply: async (tx) => { await tx.dealDetails.update({ where: { projectId }, data }); } };
+      return { conflicts: fieldConflicts(keys, b, f, now), subject: "the deal", fields: keys.join(", "), apply: async (tx) => {
+        const changed = await tx.project.updateMany({ where: { id: projectId, pipelineId: project.pipelineId, updatedAt: project.updatedAt }, data: { updatedAt: new Date() } });
+        if (!changed.count) throw bad("This deal changed. Refresh before undoing its details.");
+        await tx.dealDetails.update({ where: { projectId }, data });
+      } };
     }
     case "project.updated": {
       // project-lookup-ok: prepare authorizes recordAccess (projectAccess) before this undo reload
