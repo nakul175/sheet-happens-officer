@@ -1,5 +1,5 @@
 // SHO-2594: exercise saved-view tabs and URL hydration in the real browser at desktop/phone widths.
-import { mkdirSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { chromium, type Browser } from "playwright-core";
 import { account, BASE, cleanupZz, project, PW, superAdmin, type Account } from "../helpers";
@@ -86,19 +86,25 @@ it("SHO-2594 a revoked project member sees not-found when reopening the saved li
   const p = await project(owner, owner, [{ who: peer, role: "VIEWER" }], `ZZ-TEST shared-view revocation ${Date.now()}`);
   let id = "";
   const context = await browser.newContext({ baseURL: BASE, viewport: { width: 390, height: 900 } });
+  const page = await context.newPage();
   try {
     const saved = await owner.c.post("/api/screen-views", { name: `${prefix} revoke`, screen: "DEALS", scope: "PROJECT", projectId: p.id, state: { atRisk: true } });
     expect(saved.status).toBe(201); id = saved.json.view.id;
     expect((await context.request.post("/api/auth/signin", { data: { email: peer.email, password: PW } })).ok()).toBe(true);
-    const page = await context.newPage();
     await page.goto(`/deals?view=${id}`);
     await expect.poll(() => page.getByRole("checkbox", { name: "At risk", exact: true }).isChecked()).toBe(true);
     expect((await owner.c.del(`/api/projects/${p.id}/members/${peer.id}`)).status).toBe(204);
-    await page.reload();
+    // Reopen the saved link: the screen may normalize the current URL to plain filter criteria.
+    await page.goto(`/deals?view=${id}`);
     // Next's streamed response can be HTTP 200; the rendered not-found UI is the browser contract.
     await page.getByText("This page could not be found.", { exact: true }).waitFor({ state: "visible" });
     expect(await page.getByRole("region", { name: "Saved views", exact: true }).count()).toBe(0);
     await page.screenshot({ path: "test-results/viewport/shared-views-revoked-390-pass.png", fullPage: true });
+  } catch (error) {
+    mkdirSync("test-results/viewport", { recursive: true });
+    await page.screenshot({ path: "test-results/viewport/shared-views-revoked-390-fail.png", fullPage: true });
+    writeFileSync("test-results/viewport/shared-views-revoked-390-fail.json", JSON.stringify({ url: page.url(), body: await page.locator("body").innerText() }));
+    throw error;
   } finally {
     await context.close();
     if (id) expect((await owner.c.del(`/api/screen-views/${id}?confirmShared=true`)).status).toBe(204);
