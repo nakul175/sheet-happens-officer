@@ -242,23 +242,79 @@ describe("stages (10.3)", () => {
     expect((await lead.c.get(`/api/projects/${id}`)).json.project.deal.stageReason).toBe("Budget freeze");
   });
 
-  it("blocks Won and Lost while any task is open, then allows it, and never archives or closes tasks", async () => {
+  it("SHO-3050: Won retains open assigned tasks; Lost still refuses them", async () => {
     const lead = await account("wonlead");
     const { r, pipes } = await deal(lead, lead);
     const id = r.json.deal.id as string;
-    const won = pipes.proactive.stages.find((s: { name: string }) => s.name === "Won").id;
-    const blocked = await lead.c.post(`/api/projects/${id}/stage`, { stageId: won });
-    expect(blocked.status).toBe(409);
-    expect(blocked.json.openTasks).toBe(1); // the first next step
-    expect(blocked.json.tasks[0].title).toBe("Call the buyer");
-    // Close the only open task, then it passes.
     const p = (await lead.c.get(`/api/projects/${id}`)).json.project;
-    expect((await lead.c.post(`/api/tasks/${blocked.json.tasks[0].id}/complete`, await withVersion(lead, blocked.json.tasks[0].id))).status).toBe(200);
-    expect((await lead.c.post(`/api/projects/${id}/stage`, { stageId: won })).status).toBe(200);
+    const step = p.deal.nextStep.id;
+    const before = (await lead.c.get(`/api/tasks/${step}`)).json.task;
+    const won = pipes.proactive.stages.find((s: { name: string }) => s.name === "Won").id;
+    const lost = pipes.proactive.stages.find((s: { name: string }) => s.name === "Lost").id;
+    const blocked = await lead.c.post(`/api/projects/${id}/stage`, { stageId: lost, reason: "Lost guard" });
+    expect(blocked.status).toBe(409);
+    expect(blocked.json.openTasks).toBe(1);
+    expect((await lead.c.post(`/api/projects/${id}/stage`, { stageId: won, expectedStageId: p.deal.stage.id })).status).toBe(200);
     const after = (await lead.c.get(`/api/projects/${id}`)).json.project;
     expect(after.deal.stage.name).toBe("Won");
     expect(after.archived).toBe(false);
-    expect(p.openTasks).toBe(1);
+    expect(after.deal.nextStep).toBeNull();
+    expect(after.deal.needsNextStep).toBe(false);
+    expect(after.deal.stalled).toBe(false);
+    expect((await lead.c.get(`/api/tasks/${step}`)).json.task).toEqual(before);
+    const follow = await task(lead, id, { title: "Contract follow-up", assigneeId: lead.id, dueDate: istDate(7) });
+    expect((await lead.c.get(`/api/projects/${id}`)).json.project.deal.stage.id).toBe(won);
+    expect((await lead.c.get(`/api/tasks/${follow}`)).json.task.assignee.id).toBe(lead.id);
+    const stale = await lead.c.post(`/api/projects/${id}/stage`, { stageId: p.deal.stage.id, expectedStageId: p.deal.stage.id, fields: { need: "Must not be written" } });
+    expect(stale.status).toBe(409);
+    expect((await lead.c.get(`/api/projects/${id}`)).json.project.deal).toMatchObject({ stage: { id: won }, details: { need: p.deal.details.need } });
+    expect((await lead.c.post(`/api/tasks/${follow}/complete`, await withVersion(lead, follow))).status).toBe(200);
+    expect((await lead.c.get(`/api/projects/${id}`)).json.project.deal.stage.id).toBe(won);
+  });
+
+  it("SHO-3050: assigned Won follow-ups preserve permissions, task views, notices and separate history", async () => {
+    const lead = await account("wonowner");
+    const editor = await account("wonworker");
+    const viewer = await account("wonviewer");
+    const outsider = await account("wonoutside");
+    const { r, pipes } = await deal(lead, lead);
+    const id = r.json.deal.id as string;
+    for (const [who, role] of [[editor, "EDITOR"], [viewer, "VIEWER"]] as const) {
+      expect((await lead.c.post(`/api/projects/${id}/members`, { userId: who.id, role })).status).toBe(201);
+    }
+    const won = pipes.proactive.stages.find((s: { name: string }) => s.name === "Won").id;
+    const leadStage = pipes.proactive.stages[0].id;
+    const original = await task(lead, id, { title: "Existing contract", assigneeId: editor.id, collaboratorIds: [lead.id], dueDate: istDate(3) });
+    const before = (await editor.c.get(`/api/tasks/${original}`)).json.task;
+    const mv = await lead.c.post(`/api/projects/${id}/stage`, { stageId: won, expectedStageId: leadStage });
+    expect(mv.status).toBe(200);
+    expect((await editor.c.get(`/api/tasks/${original}`)).json.task).toEqual(before);
+    for (const who of [editor, lead]) {
+      const mine = (await who.c.get("/api/my-tasks")).json;
+      expect(Object.values(mine).filter(Array.isArray).flat().some((t: unknown) => (t as { id: string }).id === original)).toBe(true);
+    }
+    const create = await editor.c.post(`/api/projects/${id}/tasks`, { title: "Assigned post-win follow-up", assigneeId: editor.id, collaboratorIds: [lead.id], dueDate: istDate(5) });
+    expect(create.status).toBe(201);
+    const follow = create.json.task.id;
+    const taskState = (await editor.c.get(`/api/tasks/${follow}`)).json.task;
+    expect(taskState.assignee.id).toBe(editor.id);
+    expect(taskState.collaborators.map((u: { id: string }) => u.id)).toEqual([lead.id]);
+    expect((await lead.c.get(`/api/projects/${id}`)).json.project.deal.stage.id).toBe(won);
+    const activity = (await lead.c.get(`/api/projects/${id}/activity`)).json.items as { id: string }[];
+    expect(activity.some((a) => a.id === mv.headers.get("x-undo-id"))).toBe(true);
+    expect(activity.some((a) => a.id === create.headers.get("x-undo-id"))).toBe(true);
+    expect(mv.headers.get("x-undo-id")).not.toBe(create.headers.get("x-undo-id"));
+    const notices = (await lead.c.get("/api/notifications")).json.items as { text: string }[];
+    expect(notices.some((n) => n.text.includes("Assigned post-win follow-up"))).toBe(true);
+    for (const [who, status] of [[viewer, 403], [outsider, 404]] as const) {
+      expect((await who.c.post(`/api/projects/${id}/tasks`, { title: "Forbidden" })).status).toBe(status);
+      expect((await who.c.post(`/api/projects/${id}/stage`, { stageId: leadStage })).status).toBe(status);
+    }
+    expect((await editor.c.post(`/api/projects/${id}/tasks`, { title: "Invalid assignee", assigneeId: viewer.id })).status).toBe(400);
+    expect((await lead.c.get(`/api/projects/${id}/activity`)).json.items).toHaveLength(activity.length);
+    expect((await lead.c.post(`/api/actions/${mv.headers.get("x-undo-id")}/undo`)).status).toBe(200);
+    expect((await lead.c.get(`/api/projects/${id}`)).json.project.deal.stage.id).toBe(leadStage);
+    expect((await editor.c.get(`/api/tasks/${follow}`)).json.task).toEqual(taskState);
   });
 
   it("names the deal in the audit log when it is created and when it is closed (SHO-BUG-4)", async () => {
