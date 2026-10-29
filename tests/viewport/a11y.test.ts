@@ -114,8 +114,10 @@ describe("keyboard", () => {
   it("Retry loads the screen again without a full page reload", async () => {
     const ctx = await ctxFor("root", 1280);
     const page = await ctx.newPage();
+    // `/` is Home. It loads /api/dashboard and never requests /api/my-tasks, so waiting
+    // for that response here timed out. My tasks is the screen this Retry reloads.
     const firstLoad = page.waitForResponse(r => new URL(r.url()).pathname === "/api/my-tasks" && r.ok());
-    await page.goto("/", { waitUntil: "load" });
+    await page.goto("/my-tasks", { waitUntil: "load" });
     await firstLoad;
     await page.getByText("Prepare the quarterly review pack with the finance team", { exact: true }).first().waitFor();
     await page.evaluate(() => { (window as unknown as { __kept: number }).__kept = 1; });
