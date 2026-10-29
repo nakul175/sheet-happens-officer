@@ -1,11 +1,13 @@
 "use client";
 import Link from "next/link";
+import Image from "next/image";
+import { signOut } from "@/app/actions/sign-out";
 import "./nav-header.css";
 import "./audit-ui.css";
 import "./select-controls.css";
 import { usePathname, useRouter } from "next/navigation";
 import { createContext, useContext, useEffect, useRef, useState } from "react";
-import { ago, api, initials, useGet } from "@/components/api";
+import { api, initials } from "@/components/api";
 import { ConciergeProvider, useConcierge } from "@/components/concierge/ConciergeProvider";
 import { ConciergeBar, ConciergeDock, ConciergeFab } from "@/components/concierge/Concierge";
 import { Bell } from "./Bell";
@@ -29,7 +31,7 @@ export const useMe = () => useContext(MeCtx)!;
 export const roleLabel = (r: Me["orgRole"]) => (r === "SUPER_ADMIN" ? "Super Admin" : r === "ADMIN" ? "Admin" : "Member");
 
 /** SHO-US-22.4: bottom tab bar under 600 px. The server still decides who may open Usage and Audit; this only decides what is listed. */
-function TabBar({ user, here, more }: { user: Me; here: (p: string) => boolean; more: [string, string][] }) {
+function TabBar({ here, more }: { here: (p: string) => boolean; more: [string, string][] }) {
   const path = usePathname();
   const router = useRouter();
   const [openAt, setOpenAt] = useState<string | null>(null); // the menu belongs to the page it was opened on
@@ -87,7 +89,7 @@ function TabBar({ user, here, more }: { user: Me; here: (p: string) => boolean; 
           {more.map(([h, l]) => <Link key={h} href={h} role="menuitem">{l}</Link>)}
           <button role="menuitem" onClick={() => closeMore(openConcierge)}>Concierge</button>
           <Link href="/profile" role="menuitem">Profile</Link>
-          <button role="menuitem" onClick={async () => { await api("POST", "/api/auth/signout", {}); window.location.href = "/signin"; }}>Sign out</button>
+          <SignOut menuItem />
         </div>
       )}
       <nav className="tabbar" aria-label="Main">
@@ -175,7 +177,7 @@ export function Shell({ user, children }: { user: Me; children: React.ReactNode 
         <a className="skip" href="#main" onClick={(e) => { e.preventDefault(); const m = document.getElementById("main"); m?.focus(); m?.scrollIntoView(); }}>Skip to content</a>
         {open && <div className="veil" onClick={() => closeDrawer()} />}
         <aside ref={drawer} className={`side${open ? " open" : ""}`} aria-label="Main" onClickCapture={open ? e => followOverlayLink(e, closeDrawer, href => router.push(href)) : undefined}>
-          <Link href="/" className="brand" aria-label="Sheet Happens Officer home"><img src="/logo-icon-reversed.svg" alt="" />Sheet Happens Officer</Link>
+          <Link href="/" className="brand" aria-label="Sheet Happens Officer home"><Image src="/logo-icon-reversed.svg" alt="" width={40} height={40} />Sheet Happens Officer</Link>
           <nav className="nav">
             {items.map(([href, label]) => (
               <Link key={href} href={href} aria-current={here(href) ? "page" : undefined}>{label}</Link>
@@ -190,7 +192,7 @@ export function Shell({ user, children }: { user: Me; children: React.ReactNode 
         <div className="main">
           <header className="top">
             <button className="burger" aria-label="Open menu" aria-expanded={open} onClick={() => closeTopOverlayThen(() => setMenu(path))}>☰</button>
-            <Link href="/" className="top-brand" aria-label="SHO, Sheet Happens Officer home"><img src="/logo-icon-reversed.svg" alt="" /><span className="wordmark-full" aria-hidden="true">Sheet Happens Officer</span><span className="wordmark-short" aria-hidden="true">SHO</span></Link>
+            <Link href="/" className="top-brand" aria-label="SHO, Sheet Happens Officer home"><Image src="/logo-icon-reversed.svg" alt="" width={36} height={36} /><span className="wordmark-full" aria-hidden="true">Sheet Happens Officer</span><span className="wordmark-short" aria-hidden="true">SHO</span></Link>
             <nav className="primary-nav" aria-label="Primary">{primary.map(([href, label]) => <Link key={href} href={href} aria-current={here(href) ? "page" : undefined}>{label}</Link>)}</nav>
             <span className="grow" />
             <SearchButton />
@@ -210,7 +212,7 @@ export function Shell({ user, children }: { user: Me; children: React.ReactNode 
           </header>
           {children}
         </div>
-        <TabBar user={user} here={here} more={more} />
+        <TabBar here={here} more={more} />
         <ConciergeHost />
       </div>
       </Extras>
@@ -248,8 +250,10 @@ export function Page({ title, docTitle, sub, actions, dock, bar, beforeTitle, cl
   );
 }
 
-export function SignOut() {
+export function SignOut({ menuItem = false }: { menuItem?: boolean } = {}) {
   return (
-    <button className="btn ghost" onClick={async () => { await api("POST", "/api/auth/signout", {}); window.location.href = "/signin"; }}>Sign out</button>
+    <form action={signOut} role={menuItem ? "none" : undefined}>
+      <button type="submit" role={menuItem ? "menuitem" : undefined} className={menuItem ? undefined : "btn ghost"}>Sign out</button>
+    </form>
   );
 }

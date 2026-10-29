@@ -6,6 +6,12 @@ import { readFileSync } from "node:fs";
 
 const production = "afc38bd3e2973b0c4b0974a59d3c43e443648bb2";
 const allowed = new Set([
+  // SHO-2666: feature-specific gate pins every reviewed runtime change.
+  'src/app/(app)/Bell.tsx',
+  'src/app/actions/sign-out.ts',
+  'src/lib/activity-text.ts',
+  'src/lib/records.ts',
+  'tests/e2e/local/SHO-2666.browser.test.ts',
   // SHO-3062: reviewed Holy Sheet document integration on the exact current
   // production release. The feature-specific scope gate further restricts
   // runtime changes and preserves canonical auth/release surfaces.
