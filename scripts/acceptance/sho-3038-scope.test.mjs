@@ -6,6 +6,8 @@ import { readFileSync } from "node:fs";
 
 const production = "afc38bd3e2973b0c4b0974a59d3c43e443648bb2";
 const allowed = new Set([
+  // Qualified Workload plus NJ-authorized SHO-3134 phone follow-up; protected surfaces remain pinned.
+  "src/app/(app)/deals/DealsView.tsx", "tests/deal-filter-browser.story.ts", "vitest.deal-filters.config.mts", "scripts/acceptance/sho3134-prod-scope.test.mjs",
   "tests/e2e/stories/APL-2646.spec.ts", "tests/e2e/stories/APL-2716.spec.ts", "tests/trigger-test-guard.ts", "tests/trigger-test-guard.test.ts", "tests/trigger-search-path.test.ts",
   // SHO-2589 workload-only addition authorized by Product; live surfaces stay pinned.
   "src/app/(app)/layout.tsx",
