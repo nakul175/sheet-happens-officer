@@ -4,6 +4,7 @@ import {execFileSync} from "node:child_process";
 import test from "node:test";
 const base="2cf4e6d3c4eb3b7a74554ff8bbcae5e3758177ff";
 const allowed=new Set([
+  "tests/e2e/local/SHO-2584.browser.test.ts",
   "package-lock.json",
   "package.json",
   "src/app/(app)/Bell.tsx",

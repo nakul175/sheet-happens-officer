@@ -1,6 +1,6 @@
 // Executed from the dedicated Linux staging directory; fixture output contains synthetic accounts only.
 import { expect, it } from "vitest";
-import { writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { account, istDate, task, withVersion } from "./helpers";
 
 it("SHO-3050 staging AC1–AC6: retain comments/history, assigned follow-ups, terminal signals and atomic refusals", async () => {
@@ -50,5 +50,6 @@ it("SHO-3050 staging AC1–AC6: retain comments/history, assigned follow-ups, te
   expect(report).toMatchObject({ stage: { id: won, category: "DONE" }, nextStep: null, stalled: false, needsNextStep: false });
   expect((await worker.c.post(`/api/tasks/${followId}/complete`, await withVersion(worker, followId))).status).toBe(200);
   expect((await lead.c.get(`/api/projects/${id}`)).json.project.deal.stage.id).toBe(won);
-  writeFileSync("browser-fixture.json", JSON.stringify({ projectId: id, taskId: t, lead: { email: lead.email, id: lead.id }, worker: { email: worker.email, id: worker.id }, won, active, release: process.env.RELEASE }, null, 2));
+  mkdirSync("test-results", { recursive: true });
+  writeFileSync("test-results/sho3050-browser-fixture.json", JSON.stringify({ projectId: id, taskId: t, lead: { email: lead.email, id: lead.id }, worker: { email: worker.email, id: worker.id }, won, active, release: process.env.RELEASE }, null, 2));
 });
