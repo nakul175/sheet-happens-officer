@@ -274,10 +274,10 @@ function Parties({ projectId, deal, canWrite, canManage, onChange }: { projectId
   }
   async function remove(id: string) { const r = await api("DELETE", `/api/projects/${projectId}/parties/${id}`); if (r.ok) onChange(); else setErr(r.error ?? "Could not remove."); }
   return (
-    <div style={{ marginTop: 10, fontSize: 14 }}>
-      <b>Organisations:</b>{" "}
+    <div className="deal-parties">
+      <b>Organisations:</b>
       {deal.parties.map((p) => (
-        <span key={p.id} className="chip" style={{ marginRight: 4 }}>
+        <span key={p.id} className="chip">
           {PARTY_LABEL[p.role]}: <Link href={`/accounts/${p.organisation.id}`}>{p.organisation.name}</Link>
           {canManage && p.role === "BUYER" && <button className="link" onClick={() => setChangingBuyer(p)} style={{ marginLeft: 6 }}>Change Buyer</button>}
           {canWrite && p.role !== "BUYER" && <button className="link" aria-label={`Remove ${p.organisation.name}`} onClick={() => remove(p.id)} style={{ marginLeft: 4 }}>×</button>}

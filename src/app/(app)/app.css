@@ -45,6 +45,9 @@ h1.pt { font-size: 24px; margin: 0; color: var(--ink); font-weight: 600; }
 .link { background: none; border: 0; color: var(--navy); text-decoration: underline; cursor: pointer; font: inherit; font-size: 13px; padding: 0; }
 .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 18px; }
 .chip { display: inline-block; font-size: 12px; font-weight: 500; padding: 2px 8px; border-radius: 10px; background: #eceef6; color: var(--navy); white-space: nowrap; }
+/* A Buyer chip includes the organisation name and Change Buyer. nowrap stretched Deal past 320 px. */
+.deal-parties { display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: center; max-width: 100%; min-width: 0; margin-top: 10; font-size: 14px; }
+.deal-parties .chip { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
 .chip.gold { background: #fbefd2; color: #6d4a07; }
 .chip.red { background: var(--danger-bg); color: var(--danger); }
 .chip.green { background: var(--ok-bg); color: var(--ok); }

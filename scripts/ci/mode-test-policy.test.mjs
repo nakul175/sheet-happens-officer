@@ -35,6 +35,15 @@ test("SHO-2881 keeps every per-mode test behind one automatic glob", () => {
   assert.equal(packageJson.scripts["test:stalled-modes"], undefined);
 });
 
+test("SHO-2881 readers open the renamed mode files", () => {
+  const seed = readFileSync("tests/crm-mode-seed-api.test.ts", "utf8");
+  const reminders = readFileSync("tests/reminder-cleanup-2751.test.ts", "utf8");
+  assert.match(seed, /crm-visible-modes-server\.mode\.test\.ts/);
+  assert.doesNotMatch(seed, /crm-visible-modes-server\.test\.ts/);
+  assert.match(reminders, /jobs-reminders-crm-server\.mode\.test\.ts/);
+  assert.doesNotMatch(reminders, /jobs-reminders-crm-server\.test\.ts/);
+});
+
 test("SHO-2881 automatically collects a newly added per-mode test", () => {
   const scratch = "tests/sho-2881-scratch.mode.test.ts";
   writeFileSync(scratch, "// collection-only scratch file\n", { flag: "wx" });

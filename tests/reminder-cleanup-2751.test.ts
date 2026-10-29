@@ -5,14 +5,14 @@ import { cleanupReminderResources, reminderResources } from "./reminder-cleanup-
 
 it("qa:TC missing SHO-2751: reminder suites contain no direct database writes", () => {
   const write = /\bdb\.[A-Za-z]+\.(?:create|createMany|update|updateMany|upsert|delete|deleteMany)\s*\(|\bdb\.\$executeRaw(?:Unsafe)?\s*\(/;
-  for (const name of ["jobs-reminders-crm.test.ts", "jobs-reminders-crm-server.test.ts"]) {
+  for (const name of ["jobs-reminders-crm.test.ts", "jobs-reminders-crm-server.mode.test.ts"]) {
     const source = readFileSync(fileURLToPath(new URL(name, import.meta.url)), "utf8");
     expect(source, `${name} must set up and isolate fixtures through HTTP APIs`).not.toMatch(write);
   }
 });
 it("qa:TC missing SHO-2769: reminder accounts use run-unique nakul17+ aliases", () => {
   const inProcess = readFileSync(fileURLToPath(new URL("jobs-reminders-crm.test.ts", import.meta.url)), "utf8");
-  const server = readFileSync(fileURLToPath(new URL("jobs-reminders-crm-server.test.ts", import.meta.url)), "utf8");
+  const server = readFileSync(fileURLToPath(new URL("jobs-reminders-crm-server.mode.test.ts", import.meta.url)), "utf8");
 
   expect(inProcess).toContain("`nakul17+zz-2729-${tag}-admin@aplyd.com`");
   expect(inProcess).toContain("`nakul17+zz-2729-${tag}-member@aplyd.com`");
