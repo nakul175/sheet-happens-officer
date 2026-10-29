@@ -33,8 +33,8 @@ export const crmProjectWhere = (user: Pick<Actor, "orgRole">): Prisma.ProjectWhe
  * Loads a project the person may see. Non-members get "not found", never "forbidden"
  * (SHO-US-3.2 AC4). Admins and the Super Admin act as Leader everywhere.
  */
-export async function projectAccess(user: Actor, projectId: string, opts: { write?: boolean; deleted?: boolean } = {}) {
-  const project = await db.project.findUnique({
+export async function projectAccess(user: Actor, projectId: string, opts: { write?: boolean; deleted?: boolean; tx?: Tx } = {}) {
+  const project = await (opts.tx ?? db).project.findUnique({
     where: { id: projectId },
     include: {
       members: true,
