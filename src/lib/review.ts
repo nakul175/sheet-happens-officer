@@ -13,10 +13,10 @@ export async function leadsAnyDeal(user: Actor) {
   return !!(await db.projectMember.findFirst({ where: { userId: user.id, role: "LEADER", project: { typeId: WORKSTREAM_DEAL, archivedAt: null } }, select: { projectId: true } }));
 }
 
-export async function pipelineReview(user: Actor) {
+export async function pipelineReview(user: Actor, now = Date.now()) {
   requireCrm(user);
-  const deals = (await listDeals(user)).filter((d) => !d.archived);
-  const today = startOfTodayIST();
+  const deals = (await listDeals(user, {}, now)).filter((d) => !d.archived);
+  const today = startOfTodayIST(new Date(now));
   const todayStr = formatDueDate(today)!;
   const pick = (d: (typeof deals)[number]) => ({ id: d.id, name: d.name, stage: d.stage?.name ?? null, pipeline: d.pipeline?.name ?? null, organisation: d.organisation, leader: d.leader, nextStep: d.nextStep });
   const working = deals.filter((d) => d.stage && ["NOT_STARTED", "ACTIVE"].includes(d.stage.category));
@@ -24,7 +24,7 @@ export async function pipelineReview(user: Actor) {
   const overdueNextStep = working.filter((d) => d.nextStep?.dueDate && d.nextStep.dueDate < todayStr).map(pick);
   const stalled = deals.filter((d) => d.stalled).map((d) => ({ ...pick(d), lastActivity: d.lastActivity }));
 
-  const cutoff = new Date(Date.now() - IDEA_STALE_DAYS * 86400_000);
+  const cutoff = new Date(now - IDEA_STALE_DAYS * 86400_000);
   const ideaRows = await db.task.findMany({
     where: {
       isIdea: true, completedAt: null, deletedAt: null, parentId: null, createdAt: { lt: cutoff },

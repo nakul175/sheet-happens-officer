@@ -3,11 +3,12 @@ import { currentUser } from "@/lib/auth";
 import { handle, parseBody } from "@/lib/http";
 import { getProject, updateProject } from "@/lib/projects";
 import { projectUpdate } from "@/lib/schemas";
+import { requestNow } from "@/lib/test-clock";
 
 type Ctx = { params: Promise<{ id: string }> };
 
-export const GET = handle(async (_req: Request, ctx: Ctx) =>
-  Response.json({ project: await getProject(await currentUser(), (await ctx.params).id) }),
+export const GET = handle(async (req: Request, ctx: Ctx) =>
+  Response.json({ project: await getProject(await currentUser(), (await ctx.params).id, requestNow(req)) }),
 );
 
 export const PATCH = handle(async (req: Request, ctx: Ctx) => {
