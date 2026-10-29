@@ -294,7 +294,7 @@ export async function expectTeamColumns(page: Page, row: Locator, labels: readon
   const head = mainOf(page).getByRole("row").filter({ has: page.getByRole("columnheader") });
   if (await head.isVisible()) {
     for (const label of labels) {
-      const names = label === "Role" ? /^(Role|Workspace role)$/ : /^(Name|Email)$/.test(label) ? new RegExp(`^(${label}|Person)$`) : new RegExp(`^${label}$`);
+      const names = ["Role", "Workspace role"].includes(label) ? /^(Role|Workspace role)$/ : /^(Name|Email)$/.test(label) ? new RegExp(`^(${label}|Person)$`) : new RegExp(`^${label}$`);
       await expect(head.getByRole("columnheader", { name: names })).toHaveCount(1);
     }
     return;
@@ -306,7 +306,7 @@ export async function expectTeamColumns(page: Page, row: Locator, labels: readon
     shown.push(content.replace(/^["']|["']$/g, ""));
   }
   for (const label of labels) {
-    expect(shown.filter((l) => l === label || (label === "Role" && l === "Workspace role") || (["Name", "Email"].includes(label) && l === "Person")), `visible ${label} label on the row`).toHaveLength(1);
+    expect(shown.filter((l) => l === label || (["Role", "Workspace role"].includes(label) && ["Role", "Workspace role"].includes(l)) || (["Name", "Email"].includes(label) && l === "Person")), `visible ${label} label on the row`).toHaveLength(1);
   }
 }
 
