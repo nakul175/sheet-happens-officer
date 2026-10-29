@@ -16,6 +16,7 @@ async function chunks<T>(rows: T[], write: (part: T[]) => Promise<unknown>) {
   for (let i = 0; i < rows.length; i += 1000) await write(rows.slice(i, i + 1000));
 }
 
+async function main() {
 await db.workspace.create({ data: { id: workspaceId, name: "SHO-2587 acceptance" } });
 await db.user.create({ data: { id: userId, workspaceId, email: "sho2587+admin@invalid.example", name: "SHO-2587 Admin", passwordHash: "not-a-login", orgRole: "ADMIN" } });
 await db.organisation.create({ data: { id: commonOrgId, workspaceId, name: "SHO-2587 Notes", createdById: userId } });
@@ -64,3 +65,10 @@ const receipt = { tasks: await db.task.count({ where: { workspaceId } }), notes:
 console.log(JSON.stringify(receipt));
 await db.$disconnect();
 if (failures.length || p95 >= 500) process.exitCode = 1;
+}
+
+main().catch(async (error) => {
+  console.error(error);
+  await db.$disconnect();
+  process.exitCode = 1;
+});
