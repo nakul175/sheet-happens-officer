@@ -1,11 +1,12 @@
 import { afterAll, describe, expect, it } from "vitest";
 import { db } from "../src/lib/db";
-import { account, admin, cleanupZz, istDate, superAdmin, task, type Account } from "./helpers";
+import { account, admin, istDate, superAdmin, task, type Account } from "./helpers";
 
 const run = Date.now();
 let seq = 0;
 const projects: string[] = [];
 const people: Account[] = [];
+let testAdmin: Account | null = null;
 
 async function person(label: string) {
   const who = await account(`sho3052-${label}`);
@@ -39,7 +40,32 @@ async function buyer(who: Account, projectId: string) {
   };
 }
 
-afterAll(async () => cleanupZz(projects, people));
+async function stagingSuperAdmin() {
+  if (testAdmin) return testAdmin;
+  testAdmin = process.env.SHO_3052_SUPER_EMAIL
+    ? await account("sho3052-super", process.env.SHO_3052_SUPER_EMAIL)
+    : await superAdmin();
+  return testAdmin;
+}
+
+afterAll(async () => {
+  const sa = await stagingSuperAdmin();
+  const problems: string[] = [];
+  for (const id of projects) {
+    const added = await sa.c.post(`/api/projects/${id}/members`, { userId: sa.id, role: "EDITOR" });
+    if (added.status !== 201 && !(added.status === 409 && /already a member/.test(added.json?.error ?? ""))) problems.push(`add ${id}: ${added.status}`);
+    const led = await sa.c.post(`/api/projects/${id}/leader`, { newLeaderId: sa.id, previousRole: "EDITOR" });
+    if (led.status !== 200 && !(led.status === 400 && /already the Leader/.test(led.json?.error ?? ""))) problems.push(`lead ${id}: ${led.status}`);
+    const archived = await sa.c.post(`/api/projects/${id}/archive`);
+    if (archived.status !== 200) problems.push(`archive ${id}: ${archived.status}`);
+  }
+  for (const who of people) {
+    if (who.id === sa.id) continue;
+    const off = await sa.c.post(`/api/team/${who.id}/deactivate`, { reassign: "leaders" });
+    if (off.status !== 200 && !(off.status === 409 && /already deactivated/.test(off.json?.error ?? ""))) problems.push(`deactivate ${who.email}: ${off.status}`);
+  }
+  expect(problems, problems.join("\n")).toEqual([]);
+});
 
 describe("SHO-3052 controlled Buyer replacement", () => {
   it("atomically replaces only the Buyer and updates every read model with an audit receipt", async () => {
@@ -116,7 +142,7 @@ describe("SHO-3052 controlled Buyer replacement", () => {
     expect((await buyer(leader, projectId)).organisation.id).toBe(oldBuyer.id);
     expect((await leader.c.patch(`/api/projects/${projectId}/parties/buyer`, { ...body, force: true })).status).toBe(200);
 
-    const sa = await superAdmin();
+    const sa = await stagingSuperAdmin();
     const globalAdmin = await admin(sa, `sho3052-admin-${seq++}`);
     people.push(globalAdmin);
     const adminTarget = await organisation(leader, "admin target");
