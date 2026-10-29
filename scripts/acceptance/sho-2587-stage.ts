@@ -17,11 +17,13 @@ async function chunks<T>(rows: T[], write: (part: T[]) => Promise<unknown>) {
 }
 
 async function main() {
+const expected = queries as { query: string; expected: string }[];
+const seeded = await db.workspace.count({ where: { id: workspaceId } });
+if (!seeded) {
 await db.workspace.create({ data: { id: workspaceId, name: "SHO-2587 acceptance" } });
 await db.user.create({ data: { id: userId, workspaceId, email: "sho2587+admin@invalid.example", name: "SHO-2587 Admin", passwordHash: "not-a-login", orgRole: "ADMIN" } });
 await db.organisation.create({ data: { id: commonOrgId, workspaceId, name: "SHO-2587 Notes", createdById: userId } });
 
-const expected = queries as { query: string; expected: string }[];
 const unique = (prefix: string) => [...new Set(expected.filter((x) => x.expected.startsWith(prefix)).map((x) => x.expected))].map((id) => ({ id, queries: expected.filter((x) => x.expected === id).map((x) => x.query) }));
 const taskRows = unique("task-").map((x, position) => ({
   id: x.id, workspaceId, projectId: "sho2587-project", sectionId: "sho2587-section", title: x.id === "task-revised-budget" ? "Revised budget" : x.queries[0],
@@ -50,6 +52,7 @@ await chunks(Array.from({ length: 5_000 - noteRows.length }, (_, i) => ({
   id: `sho2587-filler-note-${i}`, workspaceId, organisationId: commonOrgId, kind: "OTHER" as const, date: new Date("2026-10-29"),
   text: `Synthetic benchmark note ${i}`, authorId: userId,
 })), (data) => db.note.createMany({ data }));
+}
 
 const actor = { id: userId, email: "sho2587+admin@invalid.example", name: "SHO-2587 Admin", orgRole: "ADMIN" as const };
 const samples: number[] = [];
