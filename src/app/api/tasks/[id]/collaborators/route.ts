@@ -5,6 +5,7 @@ import { addCollaborator } from "@/lib/tasks";
 
 export const POST = handle(async (req: Request, ctx: { params: Promise<{ id: string }> }) => {
   const me = await currentUser();
-  await addCollaborator(me, (await ctx.params).id, (await parseBody(req, taskCollaborator)).userId);
+  const body = await parseBody(req, taskCollaborator);
+  await addCollaborator(me, (await ctx.params).id, body.userId, body.addMemberRole);
   return Response.json({ status: "ok" }, { status: 201 });
 });

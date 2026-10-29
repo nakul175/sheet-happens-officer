@@ -148,6 +148,35 @@ export async function addMember(user: Actor, projectId: string, userId: string, 
   });
 }
 
+/** SHO-3058: eligible workspace people for an explicit add-during-assignment flow. */
+export async function searchWorkspacePeople(user: Actor, projectId: string, text: string) {
+  const a = await projectAccess(user, projectId);
+  requireManage(a);
+  const q = text.trim();
+  if (q.length < 2) return { people: [], canAdd: true };
+  const actor = await db.user.findUniqueOrThrow({ where: { id: user.id }, select: { workspaceId: true } });
+  const people = await db.user.findMany({
+    where: {
+      workspaceId: actor.workspaceId,
+      deactivatedAt: null,
+      emailVerifiedAt: { not: null },
+      OR: [{ name: { contains: q, mode: "insensitive" } }, { email: { contains: q, mode: "insensitive" } }],
+    },
+    orderBy: [{ name: "asc" }, { email: "asc" }],
+    take: 20,
+    select: {
+      id: true,
+      name: true,
+      email: true,
+      memberships: { where: { projectId }, select: { role: true }, take: 1 },
+    },
+  });
+  return {
+    canAdd: true,
+    people: people.map(({ memberships, ...person }) => ({ ...person, memberRole: memberships[0]?.role ?? null })),
+  };
+}
+
 /**
  * A single taker for the person's open tasks, or null when there are none. The concierge card names a taker per
  * task instead (SHO-BUG-7); then no single taker is needed, and a task that appears in between goes to the Leader.
