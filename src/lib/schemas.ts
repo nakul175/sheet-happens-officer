@@ -132,6 +132,9 @@ export const dealDetails = z.object({
   value: z.number().positive().max(1e13).nullish(), currency: currencyField.nullish(),
   probability: z.number().int().min(0).max(100).nullish(),
   expectedClose: isoDay.nullish(), introducedBy: optText(200), submissionDeadline: isoDay.nullish(),
+  submissionDeadlineTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "Use a time like 17:30.").nullish(),
+  submissionDeadlineZone: z.string().min(1).max(100).nullish(),
+  submissionDeadlineChoice: z.enum(["earlier", "later"]).optional(),
 });
 export const dealCreate = dealDetails.extend({
   name: z.string().trim().min(1, "Give the deal a name.").max(200),

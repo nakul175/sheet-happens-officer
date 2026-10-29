@@ -13,6 +13,8 @@ import { purgeTrash } from "@/lib/tasks";
 import { startOfTodayIST } from "@/lib/dates";
 import { purgeChat } from "@/lib/concierge/thread";
 import { warnIfNearCeiling } from "@/lib/concierge/limits";
+import { deadlineJSON } from "@/lib/submission-deadline-data";
+import { submissionDeadlineLabel } from "@/lib/submission-deadline";
 import { crmMode, crmProjectWhere } from "@/lib/crm";
 
 type Job = { name: string; about: string; run: () => Promise<unknown> };
@@ -76,7 +78,7 @@ export async function sendReminders(now = new Date()) {
   const today = startOfTodayIST(now);
   const tasks = await db.task.findMany({
     where: reminderTaskWhere(today),
-    select: { id: true, title: true, projectId: true, assigneeId: true, dueDate: true, assignee: { select: { deactivatedAt: true } } },
+    select: { id: true, title: true, projectId: true, assigneeId: true, dueDate: true, assignee: { select: { deactivatedAt: true } }, project: { select: { deal: { select: { submissionDeadline: true, submissionDeadlineAt: true, submissionDeadlineZone: true } } } } },
   });
   // One transaction under an advisory lock: two overlapping runs cannot both find "not sent yet" (APL-2749).
   return db.$transaction(async (tx) => {
@@ -86,12 +88,12 @@ export async function sendReminders(now = new Date()) {
       select: { taskId: true, type: true },
     });
     const done = new Set(already.map((n) => `${n.taskId}|${n.type}`));
-    const rows: { recipientId: string; type: string; taskId: string; projectId: string; data: { title: string; daysOverdue?: number } }[] = [];
+    const rows: { recipientId: string; type: string; taskId: string; projectId: string; data: { title: string; daysOverdue?: number; submissionDeadlineLabel?: string } }[] = [];
     for (const t of tasks) {
       if (t.assignee.deactivatedAt || !t.dueDate) continue;
       const r = reminderFor(t.dueDate, today);
       if (!r || done.has(`${t.id}|${r.type}`)) continue;
-      rows.push({ recipientId: t.assigneeId, type: r.type, taskId: t.id, projectId: t.projectId, data: { title: t.title, ...(r.daysOverdue ? { daysOverdue: r.daysOverdue } : {}) } });
+      rows.push({ recipientId: t.assigneeId, type: r.type, taskId: t.id, projectId: t.projectId, data: { title: t.title, ...(t.project?.deal?.submissionDeadline ? { submissionDeadlineLabel: submissionDeadlineLabel(deadlineJSON(t.project.deal)) } : {}), ...(r.daysOverdue ? { daysOverdue: r.daysOverdue } : {}) } });
     }
     if (rows.length) await tx.notification.createMany({ data: rows });
     return { sent: rows.length };

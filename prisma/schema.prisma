@@ -473,6 +473,8 @@ model DealDetails {
   expectedClose      DateTime? @db.Date
   introducedBy       String?
   submissionDeadline DateTime? @db.Date
+  submissionDeadlineAt DateTime? @db.Timestamptz(3)
+  submissionDeadlineZone String?
   createdAt          DateTime  @default(now())
 
   @@index([workspaceId])

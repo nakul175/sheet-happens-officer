@@ -22,7 +22,7 @@ async function deal(creator: Account, leader: Account, o: { orgId?: string; bid?
   const body = {
     name: `Deal ${Date.now()}-${seq++}`, organisationId: orgId, pipelineId: (o.bid ? p.bid : p.proactive).id, leaderId: leader.id,
     whyPursue: "Strong fit", nextStep: { title: "Call the buyer", dueDate: istDate(3) },
-    ...(o.bid ? { submissionDeadline: istDate(20) } : {}), ...o.extra,
+    ...(o.bid ? { submissionDeadline: istDate(20), submissionDeadlineTime: "17:00", submissionDeadlineZone: "Asia/Kolkata" } : {}), ...o.extra,
   };
   const r = await creator.c.post("/api/deals", body);
   return { r, body, pipes: p, orgId };
@@ -163,7 +163,7 @@ describe("create a deal (12.1)", () => {
     expect((await m.c.post("/api/deals", { ...base, whyPursue: " " })).status).toBe(400);
     expect((await m.c.post("/api/deals", { ...base, nextStep: { title: "t" } })).status).toBe(400);
     expect((await m.c.post("/api/deals", { ...base, pipelineId: p.bid.id })).status).toBe(400); // Bid needs a deadline
-    expect((await m.c.post("/api/deals", { ...base, name: "bid-a", pipelineId: p.bid.id, submissionDeadline: istDate(9) })).status).toBe(201);
+    expect((await m.c.post("/api/deals", { ...base, name: "bid-a", pipelineId: p.bid.id, submissionDeadline: istDate(9), submissionDeadlineTime: "17:00", submissionDeadlineZone: "Asia/Kolkata" })).status).toBe(201);
     expect((await m.c.post("/api/deals", { ...base, value: 0, currency: "INR" })).status).toBe(400); // zero is not a value
     expect((await m.c.post("/api/deals", { ...base, value: 500 })).status).toBe(400); // currency needed
     expect((await m.c.post("/api/deals", { ...base, name: "usd-a", value: 500, currency: "USD" })).status).toBe(201);

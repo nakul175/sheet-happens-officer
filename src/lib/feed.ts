@@ -46,6 +46,7 @@ export function noticeText(n: N) {
   const d = (n.data ?? {}) as Record<string, unknown>;
   const t = d.title ? `"${d.title}"` : "a task";
   const p = d.project ? `"${d.project}"` : "a project";
+  const cutoff = typeof d.submissionDeadlineLabel === "string" ? ` Submission cutoff: ${d.submissionDeadlineLabel}.` : "";
   const text: Record<string, string> = {
     TASK_ASSIGNED: `${who} assigned you ${t}.`,
     COMMENT_ADDED: `${who} commented on ${t}.`,
@@ -72,9 +73,9 @@ export function noticeText(n: N) {
     PROJECT_ROLE_CHANGED: `${who} changed your role in ${p} to ${String(d.role ?? "").toLowerCase()}.${leftNote(d)}`,
     REMOVED_FROM_PROJECT: `${who} removed you from ${p}.${leftNote(d)}`,
     ORG_ROLE_CHANGED: `${who} changed your role to ${String(d.role ?? "").toLowerCase()}.`,
-    TASK_DUE_TOMORROW: `${t} is due tomorrow.`,
-    TASK_DUE_TODAY: `${t} is due today.`,
-    TASK_OVERDUE: `${t} is overdue${d.daysOverdue ? ` by ${d.daysOverdue} ${d.daysOverdue === 1 ? "day" : "days"}` : ""}.`,
+    TASK_DUE_TOMORROW: `${t} is due tomorrow.${cutoff}`,
+    TASK_DUE_TODAY: `${t} is due today.${cutoff}`,
+    TASK_OVERDUE: `${t} is overdue${d.daysOverdue ? ` by ${d.daysOverdue} ${d.daysOverdue === 1 ? "day" : "days"}` : ""}.${cutoff}`,
     DEAL_STAGE_CHANGED: `${who} moved ${p} to ${d.stage ?? "another stage"}.`,
     DEAL_NEEDS_NEXT_STEP: `${p} needs a next step.`,
     DEAL_STALLED: `${p} has had no activity for 30 days.`,
