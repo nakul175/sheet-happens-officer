@@ -10,6 +10,6 @@ export const POST = handle(withVersionErrors(async (req: Request, ctx: { params:
   await checkAssign(me, (await ctx.params).id);
   // Version before schema (APL-2670 AC1 v1.4).
   const body = await parseVersionedBody(req, taskAssign);
-  await assignTask(me, (await ctx.params).id, body.assigneeId, body.expectedUpdatedAt);
+  await assignTask(me, (await ctx.params).id, body.assigneeId, body.expectedUpdatedAt, body.addMemberRole);
   return Response.json({ status: "ok" });
 }));
