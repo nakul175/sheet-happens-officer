@@ -44,12 +44,13 @@ jobs:
       RETURN_PATH_LOG: "1"
       SERVER_LOG: ${{ github.workspace }}/validation-server.log
       PW_CHROMIUM: /usr/bin/google-chrome
-      RELEASE: ${{ github.sha }}
+      RELEASE: ${{ github.event.pull_request.head.sha || github.sha }}
       NEXT_TELEMETRY_DISABLED: "1"
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -100,7 +101,7 @@ jobs:
       - run: npx prisma migrate deploy
       - run: npm run typecheck
       - name: CRM Concierge scoped lint
-        run: npx eslint src/lib/concierge src/components/concierge tests/concierge-crm-2584.test.ts tests/crm-visible-quick-http.test.ts tests/e2e/local/SHO-2584.browser.test.ts
+        run: npx eslint src/lib/concierge/{crm-reads,engine,thread,tools,types}.ts src/lib/{orgs,records}.ts src/components/concierge/{Concierge.tsx,types.ts} tests/concierge-crm-2584.test.ts tests/crm-visible-quick-http.test.ts tests/e2e/local/SHO-2584.browser.test.ts
       - run: npm run build
       - name: Start the exact built release
         run: |
@@ -164,7 +165,7 @@ jobs:
           printf '%s\n' "$RELEASE" > sho-2584-build.commit
       - uses: actions/upload-artifact@v4
         with:
-          name: sho-2584-build-${{ github.sha }}
+          name: sho-2584-build-${{ env.RELEASE }}
           path: |
             sho-2584-build.tar.gz
             sho-2584-build.sha256
