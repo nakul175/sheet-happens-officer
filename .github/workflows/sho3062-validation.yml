@@ -1,7 +1,7 @@
 name: SHO-3062 current-release integration validation
 on:
   pull_request:
-    branches: [release/scoped4-20261025, codex/sho-2589-prod-base-f829]
+    branches: [release/scoped4-20261025, codex/sho-2589-prod-base-7b79]
   workflow_dispatch:
     inputs:
       phase:

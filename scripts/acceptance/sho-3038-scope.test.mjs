@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 import test from "node:test";
 import { readFileSync } from "node:fs";
 
-const production = "f829b2da686a3327b5452bcd042b09c5f5cacd93";
+const production = "7b79e3f3f24997257e93883db0c5fba0bab7ed7e";
 const allowed = new Set([
   "tests/e2e/stories/APL-2646.spec.ts", "tests/e2e/stories/APL-2716.spec.ts", "tests/trigger-test-guard.ts", "tests/trigger-test-guard.test.ts", "tests/trigger-search-path.test.ts",
   // SHO-2589 workload-only addition authorized by Product; live surfaces stay pinned.
