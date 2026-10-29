@@ -1,6 +1,6 @@
 // APL-2691: the Move to Lost dialog shows the open-task refusal from the list already on the page.
 import { describe, expect, it } from "vitest";
-import { closingAlert, LOAD_OPEN_TASKS, moreOpenTasks, openTaskAlertText, openTaskFeed, planClosing, stageClosesDeal } from "../src/components/DealPanel";
+import { closingAlert, LOAD_OPEN_TASKS, moreOpenTasks, openTaskAlertText, openTaskFeed, planClosing, stageBlocksOpenTasks } from "../src/components/DealPanel";
 import { openTaskBlock } from "../src/lib/deals";
 import { admin, istDate, superAdmin, task, withVersion, type Account } from "./helpers";
 
@@ -8,12 +8,12 @@ const row = (id: string, done = false) => ({ id, title: id, completedAt: done ? 
 const section = (tasks: ReturnType<typeof row>[], total = tasks.length, nextCursor: string | null = null, isDone = false) => ({ isDone, total, nextCursor, tasks });
 
 describe("qa:TC missing closing alert payload", () => {
-  it("qa:TC missing @APL-2691 TC6: names a closing stage, keeps the first 20, and says how many remain", () => {
-    expect(stageClosesDeal("DONE")).toBe(false);
-    expect(stageClosesDeal("LOST")).toBe(true);
-    expect(stageClosesDeal("ACTIVE")).toBe(false);
-    expect(stageClosesDeal("PAUSED")).toBe(false);
-    expect(stageClosesDeal("NOT_STARTED")).toBe(false);
+  it("qa:TC missing @APL-2691 TC6: names a stage that blocks open tasks, keeps the first 20, and says how many remain", () => {
+    expect(stageBlocksOpenTasks("DONE")).toBe(false);
+    expect(stageBlocksOpenTasks("LOST")).toBe(true);
+    expect(stageBlocksOpenTasks("ACTIVE")).toBe(false);
+    expect(stageBlocksOpenTasks("PAUSED")).toBe(false);
+    expect(stageBlocksOpenTasks("NOT_STARTED")).toBe(false);
 
     expect(closingAlert(null)).toBeNull();
     expect(closingAlert({ openTasks: 0, tasks: [] })).toBeNull();
@@ -64,7 +64,7 @@ async function pipelines(a: Account) {
 }
 
 describe("qa:TC missing open tasks that block Won (APL-2691)", () => {
-  it("@APL-2691 qa:TC-APL2691-6ec60bba@v1 TC3 AC3: Won returns 409 with openTasks 21 and does not move, close, or archive the deal", async () => {
+  it("@APL-2691 qa:TC-APL2691-6ec60bba@v1 TC3 AC3: Lost returns 409 with openTasks 21 and does not move, close, or archive the deal", async () => {
     const sa = await superAdmin();
     const lead = await admin(sa, "won2691");
     const pipes = await pipelines(lead);

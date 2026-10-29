@@ -22,7 +22,7 @@ const LABELS: Record<string, string> = { value: "Value", currency: "Currency", e
 export type Blocked = { openTasks: number; tasks: { id: string; title: string; assignee?: string | null }[] };
 
 /** Lost still refuses open tasks; Won retains them as operational follow-ups (SHO-3050). */
-export const stageClosesDeal = (category: string) => category === "LOST";
+export const stageBlocksOpenTasks = (category: string) => category === "LOST";
 
 /** The alert payload: a positive count, and at most the first 20 tasks the server named. */
 export function closingAlert(data: { openTasks?: number; tasks?: Blocked["tasks"] } | null | undefined): Blocked | null {
@@ -259,7 +259,7 @@ export function DealPanel({ projectId, deal, canWrite, onChange, feed }: { proje
     setArmed(null);
   }
   function choose(s: Stage) {
-    if (!stageClosesDeal(s.category)) {
+    if (!stageBlocksOpenTasks(s.category)) {
       if (pending.current) return; // the list for a Lost click is still loading
       setPick({ stage: s, blocked: null, loadError: null });
       return;
