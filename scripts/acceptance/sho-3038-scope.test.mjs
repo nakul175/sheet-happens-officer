@@ -4,8 +4,21 @@ import { createHash } from "node:crypto";
 import test from "node:test";
 import { readFileSync } from "node:fs";
 
-const production = "afc38bd3e2973b0c4b0974a59d3c43e443648bb2";
+const production = "7b79e3f3f24997257e93883db0c5fba0bab7ed7e";
 const allowed = new Set([
+  "tests/e2e/stories/APL-2646.spec.ts", "tests/e2e/stories/APL-2716.spec.ts", "tests/trigger-test-guard.ts", "tests/trigger-test-guard.test.ts", "tests/trigger-search-path.test.ts",
+  // SHO-2589 workload-only addition authorized by Product; live surfaces stay pinned.
+  "src/app/(app)/layout.tsx",
+  "src/app/(app)/workload/WorkloadView.tsx",
+  "src/app/(app)/workload/page.tsx",
+  "src/app/(app)/workload/workload.css",
+  "src/app/api/workload/route.ts",
+  "src/lib/workload.ts",
+  "tests/workload-unit.test.ts",
+  "tests/workload.test.ts",
+  "docs/runbooks/workload-release.md",
+  "scripts/acceptance/sho2589-scope.test.mjs",
+
   // SHO-3062: reviewed Holy Sheet document integration on the exact current
   // production release. The feature-specific scope gate further restricts
   // runtime changes and preserves canonical auth/release surfaces.
@@ -418,11 +431,11 @@ test("sequential release does not change the runtime entry or suite API", () => 
     assert.equal(execFileSync("git", ["diff", production, "--", path], { encoding: "utf8" }), "", path);
 });
 
-test("the package delta only adds the pinned Holy Sheet editor", () => {
+test("the package preserves the live dependency set and pinned Holy Sheet editor", () => {
   const before = JSON.parse(execFileSync("git", ["show", `${production}:package.json`], { encoding: "utf8" }));
   const current = JSON.parse(readFileSync("package.json", "utf8"));
   assert.equal(current.dependencies["@aplyd/holy-sheet-editor"], "file:vendor/aplyd-holy-sheet-editor-0.1.0-holy3.4.tgz");
-  delete current.dependencies["@aplyd/holy-sheet-editor"];
+  // Preserve the entire current production dependency set, including CRM release updates.
   assert.deepEqual(current, before);
 });
 
@@ -431,5 +444,5 @@ test("the only local-auth delta is the reviewed staging-only ZZ admin guard", ()
   // default abbreviated index width can differ.
   const diff = execFileSync("git", ["diff", "--full-index", production, "--", "src/app/api/auth"], { encoding: "utf8" });
   const digest = createHash("sha256").update(diff).digest("hex");
-  assert.equal(digest, "163a7272e390a79047e031d39a9ed02d1c23c6d729b8fda3eac2a800774a0b83");
+  assert.equal(digest, "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
 });

@@ -1,7 +1,7 @@
 name: SHO-3062 current-release integration validation
 on:
   pull_request:
-    branches: [release/scoped4-20261025]
+    branches: [release/scoped4-20261025, codex/sho-2589-prod-base-7b79]
   workflow_dispatch:
     inputs:
       phase:
@@ -53,11 +53,12 @@ jobs:
       RETURN_PATH_LOG: "1"
       SERVER_LOG: ${{ github.workspace }}/validation-server.log
       PW_CHROMIUM: /usr/bin/google-chrome
-      RELEASE: ${{ github.sha }}
+      RELEASE: ${{ github.event.pull_request.head.sha || github.sha }}
       NEXT_TELEMETRY_DISABLED: "1"
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
@@ -152,7 +153,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: sho3062-${{ github.sha }}
+          name: sho3062-${{ github.event.pull_request.head.sha || github.sha }}
           path: |
             scoped4-live-gate.json
             validation-*.log
@@ -173,6 +174,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
       - name: Refuse a different runtime candidate or missing existing gate credential
         run: |
@@ -217,7 +219,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: holy3062-live-${{ github.sha }}
+          name: holy3062-live-${{ github.event.pull_request.head.sha || github.sha }}
           path: |
             test-results/holy3062-public-summary.json
             test-results/holy3062-*.png
@@ -236,6 +238,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
       - name: Refuse a different runtime candidate or missing existing gate credential
         run: |
@@ -280,7 +283,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: holy4-matrix-${{ github.sha }}
+          name: holy4-matrix-${{ github.event.pull_request.head.sha || github.sha }}
           path: |
             test-results/holy4-matrix-public-summary.json
             test-results/holy4-matrix-*.png
