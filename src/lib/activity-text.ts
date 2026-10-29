@@ -121,6 +121,7 @@ export function sentence(a: Row, names: Names, now = new Date()): string {
     case "deal.details_updated": return "edited the deal details";
     case "deal.party_added": return `added ${String(f.organisation ?? "an organisation")} to the deal`;
     case "deal.party_removed": return `removed ${String(b.organisation ?? "an organisation")} from the deal`;
+    case "deal.buyer_replaced": return `changed the Buyer from ${String(b.organisation ?? "an organisation")} to ${String(f.organisation ?? "an organisation")}`;
     case "deal.converted": return `converted ${T} to this deal`;
     case "tasks.reassigned": return "handed a person's open tasks to someone else";
     case "tasks.collaborations_dropped": return "took a person off tasks as a collaborator";

@@ -3,7 +3,7 @@
 import type { Prisma } from "@/generated/prisma/client";
 import { db } from "@/lib/db";
 import { ApiError, notFound } from "@/lib/http";
-import { isActive, isAdmin, projectAccess, requireWrite, type Actor } from "@/lib/access";
+import { isActive, isAdmin, projectAccess, requireManage, requireWrite, type Actor } from "@/lib/access";
 import { WORKSTREAM_DEAL, crmMode, crmProjectWhere, crmVisible, requireCrm } from "@/lib/crm";
 import { formatDueDate, parseDueDate } from "@/lib/dates";
 import { auditTx, logAction, notify } from "@/lib/notify";
@@ -491,6 +491,64 @@ export async function removeParty(user: Actor, projectId: string, partyId: strin
     await tx.dealParty.delete({ where: { id: partyId } });
     await logAction(tx, { actorId: user.id, projectId, targetType: "deal", targetId: projectId, action: "deal.party_removed", before: { organisation: row.organisation.name, role: row.role } });
   });
+}
+
+export type BuyerReplacementInput = {
+  organisationId: string;
+  expectedPartyId: string;
+  expectedOrganisationId: string;
+  force?: boolean;
+};
+
+/** SHO-3052: replace a deal's sole Buyer without touching any other party or deal data. */
+export async function replaceBuyer(user: Actor, projectId: string, input: BuyerReplacementInput) {
+  requireCrm(user);
+  const access = await projectAccess(user, projectId, { write: true });
+  requireManage(access);
+  if (access.project.typeId !== WORKSTREAM_DEAL) throw new ApiError(400, "Only a deal has a Buyer.");
+  if (input.organisationId === input.expectedOrganisationId) throw new ApiError(400, "Choose a different Buyer.");
+
+  const actor = await db.user.findUniqueOrThrow({ where: { id: user.id }, select: { workspaceId: true } });
+  return db.$transaction(async (tx) => {
+    const current = await tx.dealParty.findFirst({
+      where: { projectId, role: "BUYER" },
+      include: { organisation: { select: { id: true, name: true } } },
+    });
+    if (!current) throw new ApiError(409, "This deal no longer has the Buyer you opened. Reload and try again.");
+    if (current.id !== input.expectedPartyId || current.organisationId !== input.expectedOrganisationId) {
+      throw new ApiError(409, "The Buyer changed while you were editing. Reload and try again.", { code: "version_conflict" });
+    }
+    const replacement = await tx.organisation.findFirst({
+      where: { id: input.organisationId, workspaceId: actor.workspaceId, archivedAt: null },
+      select: { id: true, name: true },
+    });
+    if (!replacement) throw new ApiError(400, "Choose an active organisation in this workspace.");
+
+    // project-lookup-ok: the duplicate warning deliberately checks every deal in this workspace for the proposed Buyer
+    const duplicate = await tx.project.findFirst({
+      where: {
+        id: { not: projectId }, workspaceId: actor.workspaceId, typeId: WORKSTREAM_DEAL,
+        name: { equals: access.project.name, mode: "insensitive" },
+        parties: { some: { organisationId: replacement.id, role: "BUYER" } },
+      },
+      select: { id: true },
+    });
+    if (duplicate && !input.force) {
+      throw new ApiError(409, `A deal called "${access.project.name}" already exists for ${replacement.name}.`, { needsConfirm: "duplicate", existingId: duplicate.id });
+    }
+
+    const changed = await tx.dealParty.updateMany({
+      where: { id: current.id, projectId, role: "BUYER", organisationId: current.organisationId },
+      data: { organisationId: replacement.id },
+    });
+    if (changed.count !== 1) throw new ApiError(409, "The Buyer changed while you were editing. Reload and try again.", { code: "version_conflict" });
+    await logAction(tx, {
+      actorId: user.id, projectId, targetType: "deal", targetId: projectId, action: "deal.buyer_replaced",
+      before: { partyId: current.id, organisationId: current.organisation.id, organisation: current.organisation.name },
+      after: { partyId: current.id, organisationId: replacement.id, organisation: replacement.name },
+    });
+    return { oldBuyer: current.organisation, newBuyer: replacement };
+  }, { isolationLevel: "Serializable" });
 }
 
 
