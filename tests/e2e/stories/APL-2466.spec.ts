@@ -1,12 +1,14 @@
 // APL-2466 · [SHO-E2] People and roles. One test per acceptance criterion.
-// qa:TC: unpublished. No test-case id of the form qa:TC-APL2466-<hash> exists in this repo or in its history, so
-// each title ends "qa:TC missing". Replace that marker with the real id when it is published; never invent one.
-// Password comes from SHO_QA_PASS. Names use ZZ-TEST. Emails are nakul17+ aliases.
-import { test, login } from "../support";
+// New people are named ZZ-TEST and deactivated afterwards.
+// Sign-up uses SHO_QA_PASS. The file fails when that is unset.
+// Sign-in checks use the Member account from the environment (its password is known here). Its role and status are put back.
+import { login } from "../support";
 import {
-  PASS, passwordOk, alias, zz, gate, signUp, signInAs, verifiedUser, personByEmail, deactivate,
-  makeProject, archiveProject, expect, type Api,
+  test, PASS, passwordOk, alias, zz, gate, signUp, signInAs, personByEmail, deactivate,
+  addPersonOnTeam, deactivateOnTeam, openTeamActions, expectChip, expectTeamColumns, teamRow, makeProject, archiveProject, expect, type Api,
 } from "./qa";
+
+type Who = { api: Api; user: { id?: string; name?: string; email?: string } };
 
 test.beforeAll(async ({ request }) => {
   if (!PASS) throw new Error("Set SHO_QA_PASS (the shared password for the nakul17+ accounts).");
@@ -16,13 +18,49 @@ test.beforeAll(async ({ request }) => {
 });
 
 async function taskFor(api: Api, projectId: string, assigneeId: string, title: string) {
-  const r = await api.post(`/api/projects/${projectId}/tasks`, { title, assigneeId, dueDate: "2099-12-31" });
+  const r = await api.post(`/api/projects/${projectId}/tasks`, { title, assigneeId, dueDate: new Date(Date.now() + 3 * 86400_000).toISOString().slice(0, 10) });
   expect(r.status, JSON.stringify(r.json)).toBe(201);
   return r.json.task.id as string;
 }
 
-test("AC1: the configured first Super Admin has the Super Admin role, and a new sign-up does not qa:TC missing", async ({ admin, anon, later }) => {
-  // A fresh database is not created here. The configured account (SHO_ADMIN_EMAIL, from SUPER_ADMIN_EMAILS) is that first Super Admin.
+/** An active ZZ-TEST person added by the Super Admin. Deactivated afterwards. No mailbox is required. */
+async function added(admin: Who, later: (fn: () => Promise<unknown>) => void, label: string, role: "MEMBER" | "ADMIN" = "MEMBER") {
+  const full = zz(label);
+  const space = full.indexOf(" ");
+  const r = await admin.api.post("/api/team", {
+    firstName: full.slice(0, space),
+    lastName: full.slice(space + 1),
+    email: alias("2466", label),
+    role,
+  });
+  expect(r.status, JSON.stringify(r.json)).toBe(201);
+  const id = r.json.person.id as string;
+  later(async () => {
+    const status = (await admin.api.get(`/api/team/${id}`)).json.person?.status;
+    if (status !== "DEACTIVATED") await deactivate(admin.api, id);
+  });
+  return { id, name: r.json.person.name as string, email: r.json.person.email as string };
+}
+
+/** Deactivate someone who may still lead a project: hand that project to the Super Admin first, and remember it. */
+async function deactivatePerson(admin: Who, personId: string, parked: string[]) {
+  let off = await admin.api.post(`/api/team/${personId}/deactivate`, { reassign: "leaders" });
+  const leads = (off.json.leads ?? []) as { id: string }[];
+  if (off.status === 409 && leads.length) {
+    for (const lead of leads) {
+      const join = await admin.api.post(`/api/projects/${lead.id}/members`, { userId: admin.user.id, role: "EDITOR" });
+      expect([201, 409], JSON.stringify(join.json)).toContain(join.status);
+      const moved = await admin.api.post(`/api/projects/${lead.id}/leader`, { newLeaderId: admin.user.id, previousRole: "EDITOR" });
+      expect(moved.status, JSON.stringify(moved.json)).toBe(200);
+      parked.push(lead.id);
+    }
+    off = await admin.api.post(`/api/team/${personId}/deactivate`, { reassign: "leaders" });
+  }
+  return off;
+}
+
+test("AC1: the configured first Super Admin has the Super Admin role, and a new sign-up does not (qa:TC missing)", async ({ admin, anon, later }) => {
+  // A fresh database is not created here. The configured account (from SUPER_ADMIN_EMAILS) is that first Super Admin.
   const me = await admin.api.get("/api/auth/me");
   expect(me.json.user.orgRole).toBe("SUPER_ADMIN");
   const row = await personByEmail(admin.api, String(admin.user.email));
@@ -36,86 +74,109 @@ test("AC1: the configured first Super Admin has the Super Admin role, and a new 
   later(() => deactivate(admin.api, person!.id));
 });
 
-test("AC2: the Super Admin can promote a Member to Admin and demote them, and the person is notified qa:TC missing", async ({ admin, browser, anon, later }) => {
-  const member = await verifiedUser(browser, anon.request, "2466", "ac2");
+test("AC2: the Super Admin can promote a Member to Admin and demote them, and the person is notified (qa:TC missing)", async ({ admin, browser, later }) => {
+  test.setTimeout(120_000);
+  const creds = login("MEMBER");
+  const member = await signInAs(browser, creds.email, creds.password);
   later(() => member.ctx.close());
-  later(() => deactivate(admin.api, member.user.id as string));
+  const id = member.user.id as string;
+  const before = (await admin.api.get(`/api/team/${id}`)).json.person.orgRole as "MEMBER" | "ADMIN";
+  later(() => admin.api.patch(`/api/team/${id}`, { orgRole: before === "ADMIN" ? "ADMIN" : "MEMBER" }));
+  if (before !== "MEMBER") expect((await admin.api.patch(`/api/team/${id}`, { orgRole: "MEMBER" })).status).toBe(200);
 
-  const up = await admin.api.patch(`/api/team/${member.user.id}`, { orgRole: "ADMIN" });
+  const promoted = `${admin.user.name} changed your role to admin.`;
+  const demoted = `${admin.user.name} changed your role to member.`;
+  const countOf = async (text: string) => {
+    const items = (await member.api.get("/api/notifications")).json.items as { text: string }[];
+    return items.filter((n) => n.text === text).length;
+  };
+  const promotedBefore = await countOf(promoted);
+  const up = await admin.api.patch(`/api/team/${id}`, { orgRole: "ADMIN" });
   expect(up.status, JSON.stringify(up.json)).toBe(200);
-  expect((await personByEmail(admin.api, member.email))?.orgRole).toBe("ADMIN");
-  const notes = (await member.api.get("/api/notifications")).json.items as { text: string }[];
-  expect(notes.some((n) => n.text === `${admin.user.name} changed your role to admin.`)).toBe(true);
+  expect((await personByEmail(admin.api, creds.email))?.orgRole).toBe("ADMIN");
+  expect(await countOf(promoted)).toBe(promotedBefore + 1);
 
-  const down = await admin.api.patch(`/api/team/${member.user.id}`, { orgRole: "MEMBER" });
+  const demotedBefore = await countOf(demoted);
+  const down = await admin.api.patch(`/api/team/${id}`, { orgRole: "MEMBER" });
   expect(down.status).toBe(200);
-  expect((await personByEmail(admin.api, member.email))?.orgRole).toBe("MEMBER");
-  const again = (await member.api.get("/api/notifications")).json.items as { text: string }[];
-  expect(again.some((n) => n.text === `${admin.user.name} changed your role to member.`)).toBe(true);
+  expect((await personByEmail(admin.api, creds.email))?.orgRole).toBe("MEMBER");
+  expect(await countOf(demoted)).toBe(demotedBefore + 1);
 });
 
-test("AC3: deactivating a person blocks sign-in and keeps the record; reactivating restores access qa:TC missing", async ({ admin, browser, anon, later }) => {
-  const member = await verifiedUser(browser, anon.request, "2466", "ac3");
+test("AC3: deactivating a person blocks sign-in and keeps the record; reactivating restores access (qa:TC missing)", async ({ admin, browser, anon, later }) => {
+  test.setTimeout(180_000);
+  const creds = login("MEMBER");
+  const member = await signInAs(browser, creds.email, creds.password);
   later(() => member.ctx.close());
-  later(() => deactivate(admin.api, member.user.id as string));
+  const id = member.user.id as string;
+  const parked: string[] = [];
+  later(async () => {
+    const status = (await admin.api.get(`/api/team/${id}`)).json.person?.status;
+    if (status === "DEACTIVATED") await admin.api.post(`/api/team/${id}/reactivate`);
+    for (const projectId of parked) {
+      await admin.api.post(`/api/projects/${projectId}/leader`, { newLeaderId: id, previousRole: "EDITOR" });
+    }
+  });
 
-  const off = await admin.api.post(`/api/team/${member.user.id}/deactivate`, { reassign: "leaders" });
+  const off = await deactivatePerson(admin, id, parked);
   expect(off.status, JSON.stringify(off.json)).toBe(200);
-  const kept = await personByEmail(admin.api, member.email);
+  const kept = await personByEmail(admin.api, creds.email);
   expect(kept?.status).toBe("DEACTIVATED");
-  expect(kept?.id).toBe(member.user.id);
-  const blocked = await anon.request.post("/api/auth/signin", { data: { email: member.email, password: PASS } });
+  expect(kept?.id).toBe(id);
+  expect((await member.api.get("/api/auth/me")).status).toBe(401);
+  const blocked = await anon.request.post("/api/auth/signin", { data: { email: creds.email, password: creds.password } });
   const body = await blocked.text();
-  const pass = PASS;
-  expect(body.includes(pass)).toBe(false);
+  expect(body.includes(creds.password)).toBe(false);
   expect(blocked.status()).toBe(403);
   expect(JSON.parse(body).error).toBe("This account is deactivated.");
 
-  expect((await admin.api.post(`/api/team/${member.user.id}/reactivate`)).status).toBe(200);
-  const back = await signInAs(browser, member.email, PASS);
+  expect((await admin.api.post(`/api/team/${id}/reactivate`)).status).toBe(200);
+  const back = await signInAs(browser, creds.email, creds.password);
   later(() => back.ctx.close());
-  expect(back.user.id).toBe(member.user.id);
+  expect(back.user.id).toBe(id);
 });
 
-test("AC4: open tasks move to a chosen receiver, and a receiver outside the project falls back to the Leader qa:TC missing", async ({ admin, browser, anon, later }) => {
-  const leaver = await verifiedUser(browser, anon.request, "2466", "ac4-leave");
-  const taker = await verifiedUser(browser, anon.request, "2466", "ac4-take");
-  const outsider = await verifiedUser(browser, anon.request, "2466", "ac4-out");
-  for (const w of [leaver, taker, outsider]) {
-    later(() => w.ctx.close());
-    later(() => deactivate(admin.api, w.user.id as string));
-  }
+test("AC4: open tasks move to a chosen receiver, and a receiver outside the project falls back to the Leader (qa:TC missing)", async ({ admin, later }) => {
+  test.setTimeout(180_000);
+  const leaver = await added(admin, later, "ac4-leave");
+  const taker = await added(admin, later, "ac4-take");
+  const outsider = await added(admin, later, "ac4-out");
   const project = await makeProject(admin.api, "ac4", admin.user.id as string);
   later(() => archiveProject(admin.api, project.id, admin.user.id as string));
-  expect((await admin.api.post(`/api/projects/${project.id}/members`, { userId: leaver.user.id, role: "EDITOR" })).status).toBe(201);
-  expect((await admin.api.post(`/api/projects/${project.id}/members`, { userId: taker.user.id, role: "EDITOR" })).status).toBe(201);
-  const title = zz("handed");
-  const taskId = await taskFor(admin.api, project.id, leaver.user.id as string, title);
+  expect((await admin.api.post(`/api/projects/${project.id}/members`, { userId: leaver.id, role: "EDITOR" })).status).toBe(201);
+  expect((await admin.api.post(`/api/projects/${project.id}/members`, { userId: taker.id, role: "EDITOR" })).status).toBe(201);
+  const taskId = await taskFor(admin.api, project.id, leaver.id, zz("handed"));
 
-  const moved = await admin.api.post(`/api/team/${leaver.user.id}/deactivate`, { reassign: taker.user.id });
+  const moved = await admin.api.post(`/api/team/${leaver.id}/deactivate`, { reassign: taker.id });
   expect(moved.status, JSON.stringify(moved.json)).toBe(200);
   expect(moved.json.fellBack).toEqual([]);
-  expect((await admin.api.get(`/api/tasks/${taskId}`)).json.task.assignee.id).toBe(taker.user.id);
+  expect((await admin.api.get(`/api/tasks/${taskId}`)).json.task.assignee.id).toBe(taker.id);
 
   const second = await makeProject(admin.api, "ac4b", admin.user.id as string);
   later(() => archiveProject(admin.api, second.id, admin.user.id as string));
-  const other = await verifiedUser(browser, anon.request, "2466", "ac4-other");
-  later(() => other.ctx.close());
-  later(() => deactivate(admin.api, other.user.id as string));
-  expect((await admin.api.post(`/api/projects/${second.id}/members`, { userId: other.user.id, role: "EDITOR" })).status).toBe(201);
-  const stayed = await taskFor(admin.api, second.id, other.user.id as string, zz("stays"));
-  const fell = await admin.api.post(`/api/team/${other.user.id}/deactivate`, { reassign: outsider.user.id });
+  const other = await added(admin, later, "ac4-other");
+  expect((await admin.api.post(`/api/projects/${second.id}/members`, { userId: other.id, role: "EDITOR" })).status).toBe(201);
+  const stayed = await taskFor(admin.api, second.id, other.id, zz("stays"));
+  const fell = await admin.api.post(`/api/team/${other.id}/deactivate`, { reassign: outsider.id });
   expect(fell.status, JSON.stringify(fell.json)).toBe(200);
   expect(fell.json.fellBack).toContain(second.name);
   expect((await personByEmail(admin.api, other.email))?.status).toBe("DEACTIVATED");
   const assigneeId = (await admin.api.get(`/api/tasks/${stayed}`)).json.task.assignee.id as string;
   expect(assigneeId, "the open task goes to the project Leader").toBe(admin.user.id);
-  expect(assigneeId).not.toBe(outsider.user.id);
+  expect(assigneeId).not.toBe(outsider.id);
   const members = (await admin.api.get(`/api/projects/${second.id}`)).json.project.members as { userId: string; role: string }[];
   expect(["LEADER", "EDITOR"]).toContain(members.find((member) => member.userId === assigneeId)?.role);
 });
 
-test("AC5: the only Super Admin cannot be demoted or deactivated qa:TC missing", async ({ admin }) => {
+const zzEmail = (label: string) => alias("2466", label);
+
+async function retire(api: Api, email: string) {
+  const person = await personByEmail(api, email);
+  if (person && person.status !== "DEACTIVATED") await deactivate(api, person.id);
+}
+
+test("AC5: the only Super Admin cannot be demoted or deactivated (qa:TC missing)", async ({ admin, later }) => {
+  test.setTimeout(240_000);
   const id = admin.user.id as string;
   const demote = await admin.api.patch(`/api/team/${id}`, { orgRole: "MEMBER" });
   expect(demote.status).toBe(403);
@@ -124,29 +185,54 @@ test("AC5: the only Super Admin cannot be demoted or deactivated qa:TC missing",
   expect(off.status).toBeGreaterThanOrEqual(400);
   expect(String(off.json.error)).toMatch(/cannot deactivate/);
   expect((await admin.api.get("/api/auth/me")).json.user.orgRole).toBe("SUPER_ADMIN");
-  await admin.page.goto("/team");
-  const mine = admin.page.locator("tr", { hasText: String(admin.user.email) }).first();
-  await expect(mine).toContainText("Super Admin");
-  await expect(mine.getByRole("button", { name: /Deactivate|Make Member/ })).toHaveCount(0);
+
+  const name = zz("ac5");
+  const email = zzEmail("ac5");
+  const space = name.indexOf(" ");
+  later(() => retire(admin.api, email));
+  await addPersonOnTeam(admin.page, name.slice(0, space), name.slice(space + 1), email);
+  const created = teamRow(admin.page, email);
+  await expect(created).toHaveCount(1, { timeout: 90_000 });
+  await openTeamActions(created, name);
+  await expect(created.getByRole("button", { name: "Deactivate" })).toBeVisible();
+  await deactivateOnTeam(admin.page, name);
+
+  const mine = teamRow(admin.page, String(admin.user.email));
+  await expect(mine).toHaveCount(1);
+  await expectChip(mine, "Super Admin");
+  await expect(mine.getByRole("button", { name: /Deactivate|Make Member|Make Admin|Reactivate/ })).toHaveCount(0);
 });
 
-test("AC6: the Team page shows people by role, and deactivated people are shown as deactivated qa:TC missing", async ({ admin, browser, anon, later }) => {
-  const member = await verifiedUser(browser, anon.request, "2466", "ac6-member");
-  const orgAdmin = await verifiedUser(browser, anon.request, "2466", "ac6-admin");
-  later(() => member.ctx.close());
-  later(() => orgAdmin.ctx.close());
-  later(() => deactivate(admin.api, member.user.id as string));
-  later(() => deactivate(admin.api, orgAdmin.user.id as string));
-  expect((await admin.api.patch(`/api/team/${orgAdmin.user.id}`, { orgRole: "ADMIN" })).status).toBe(200);
-  expect((await admin.api.post(`/api/team/${member.user.id}/deactivate`, { reassign: "leaders" })).status).toBe(200);
+test("AC6: the Team page shows people by role, and deactivated people are shown as deactivated (qa:TC missing)", async ({ admin, later }) => {
+  test.setTimeout(240_000);
+  const memberName = zz("ac6-member");
+  const adminName = zz("ac6-admin");
+  const memberEmail = zzEmail("ac6-member");
+  const adminEmail = zzEmail("ac6-admin");
+  const split = (full: string) => {
+    const space = full.indexOf(" ");
+    return [full.slice(0, space), full.slice(space + 1)] as const;
+  };
+  later(async () => {
+    await retire(admin.api, memberEmail);
+    await retire(admin.api, adminEmail);
+  });
+  const [memberFirst, memberLast] = split(memberName);
+  const [adminFirst, adminLast] = split(adminName);
+  await addPersonOnTeam(admin.page, memberFirst, memberLast, memberEmail);
+  await addPersonOnTeam(admin.page, adminFirst, adminLast, adminEmail, "ADMIN");
+  await deactivateOnTeam(admin.page, memberName);
 
-  await admin.page.goto("/team");
-  await expect(admin.page.getByRole("columnheader", { name: "Role" })).toBeVisible();
-  const memberRow = admin.page.locator("tr", { hasText: member.name });
-  const adminRow = admin.page.locator("tr", { hasText: orgAdmin.name });
-  await expect(memberRow).toContainText("Member");
-  await expect(memberRow).toContainText("Deactivated");
-  await expect(memberRow.locator(".team-status.grey", { hasText: "Deactivated" })).toBeVisible();
-  await expect(adminRow).toContainText("Admin");
-  await expect(admin.page.locator("tr", { hasText: String(admin.user.email) }).first()).toContainText("Super Admin");
+  const memberRow = teamRow(admin.page, memberEmail);
+  const adminRow = teamRow(admin.page, adminEmail);
+  await expect(memberRow).toHaveCount(1);
+  await expect(adminRow).toHaveCount(1);
+  await expectTeamColumns(admin.page, memberRow, ["Workspace role"]);
+  await expectTeamColumns(admin.page, adminRow, ["Workspace role"]);
+  await expectChip(memberRow, "Member");
+  await expectChip(memberRow, "Deactivated", "grey");
+  await expectChip(adminRow, "Admin");
+  const mine = teamRow(admin.page, String(admin.user.email));
+  await expect(mine).toHaveCount(1);
+  await expectChip(mine, "Super Admin");
 });
