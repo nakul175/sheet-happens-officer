@@ -1,6 +1,6 @@
 // SHO-2594: real DB visibility, concurrent limits and owner rules. No record data is stored in views.
 import { expect, it } from "vitest";
-import { account, cleanupZz, project, superAdmin } from "./helpers";
+import { account, cleanupZz, istDate, project, superAdmin } from "./helpers";
 import { newTurn, runTool } from "@/lib/concierge/tools";
 import { db } from "@/lib/db";
 it("SHO-2594 shares filters per viewer, enforces owner rules and atomic private limits", async () => {
@@ -81,5 +81,35 @@ it("SHO-2594 shares filters per viewer, enforces owner rules and atomic private 
   } finally {
     for (const id of ids) expect((await owner.c.del(`/api/screen-views/${id}?confirmShared=true`)).status).toBe(204);
     await cleanupZz(projects, [owner, member, outsider]);
+  }
+}, 120000);
+
+it("SHO-2594 sharing criteria never grants deal access and reopening follows live membership", async () => {
+  const owner = await account("zzviewrecordowner"), viewer = await account("zzviewrecordviewer");
+  let org = "", deal = "", view = "";
+  try {
+    const o = await owner.c.post("/api/orgs", { name: `ZZ-TEST shared-view record ${Date.now()}` });
+    expect(o.status).toBe(201); org = o.json.organisation.id;
+    const pipelines = (await owner.c.get("/api/deals/pipelines")).json.pipelines as { id: string; key: string }[];
+    const pipe = pipelines.find(p => p.key === "DEAL_PROACTIVE")!;
+    const made = await owner.c.post("/api/deals", { name: `ZZ-TEST private deal ${Date.now()}`, organisationId: org, pipelineId: pipe.id, leaderId: owner.id, whyPursue: "View privacy acceptance", nextStep: { title: "ZZ-TEST next", dueDate: istDate(3) } });
+    expect(made.status).toBe(201); deal = made.json.deal.id;
+    const saved = await owner.c.post("/api/screen-views", { screen: "DEALS", name: "Live permissions", scope: "WORKSPACE", state: { organisationId: org } });
+    expect(saved.status).toBe(201); view = saved.json.view.id;
+    const visibleDeals = async () => (await viewer.c.get("/api/deals")).json.deals.map((d: { id: string }) => d.id);
+    expect((await viewer.c.get("/api/screen-views?screen=DEALS")).json.views.some((v: { id: string }) => v.id === view)).toBe(true);
+    expect((await viewer.c.get(`/deals?view=${view}`)).status).toBe(200);
+    expect(await visibleDeals()).not.toContain(deal);
+    expect((await viewer.c.get(`/api/projects/${deal}`)).status).toBe(404);
+    expect((await owner.c.post(`/api/projects/${deal}/members`, { userId: viewer.id, role: "VIEWER" })).status).toBe(201);
+    expect(await visibleDeals()).toContain(deal);
+    expect((await owner.c.del(`/api/projects/${deal}/members/${viewer.id}`)).status).toBe(204);
+    expect((await viewer.c.get(`/deals?view=${view}`)).status).toBe(200);
+    expect(await visibleDeals()).not.toContain(deal);
+    expect((await viewer.c.get(`/api/projects/${deal}`)).status).toBe(404);
+  } finally {
+    if (view) expect((await owner.c.del(`/api/screen-views/${view}?confirmShared=true`)).status).toBe(204);
+    await cleanupZz(deal ? [deal] : [], [owner, viewer]);
+    if (org) expect((await (await superAdmin()).c.post(`/api/orgs/${org}/archive`, { archive: true })).status).toBe(200);
   }
 }, 120000);
