@@ -193,7 +193,7 @@ export async function emailLimitReached(userId: string, type: "VERIFY" | "RESET"
 export async function consumeToken(raw: string, type: "VERIFY" | "RESET") {
   const hash = sha256(raw);
   const t = await db.authToken.findUnique({ where: { tokenHash: hash } });
-  if (!t || t.type !== type || t.usedAt || t.expiresAt <= new Date()) return null;
+  if (!t || t.type !== type || t.usedAt || !t.expiresAt || t.expiresAt <= new Date()) return null;
   const claimed = await db.authToken.updateMany({ where: { id: t.id, usedAt: null }, data: { usedAt: new Date() } });
   return claimed.count === 1 ? t.userId : null;
 }
