@@ -1,5 +1,7 @@
 name: Engineer 5 approved six-story release validation
 on:
+  pull_request:
+    branches: [codex/e5-six-story-production-base]
   workflow_dispatch:
 permissions:
   contents: read
