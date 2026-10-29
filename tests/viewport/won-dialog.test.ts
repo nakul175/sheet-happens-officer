@@ -174,6 +174,8 @@ describe("qa:TC missing APL-2691 Move to Lost dialog", () => {
       await dialog.waitFor({ state: "visible", timeout: WITHIN });
       expect(await page.getByRole("dialog", { name: "Move to Lost" }).count()).toBe(1);
       expect(await dialog.getByRole("alert").innerText()).toContain("Could not load the open tasks.");
+      expect(await dialog.getByRole("button", { name: "Move deal" }).isEnabled()).toBe(false);
+      await dialog.getByLabel("Reason (required)").fill("ZZ-TEST Lost guard");
       expect(await dialog.getByRole("button", { name: "Move deal" }).isEnabled()).toBe(true);
       await dialog.getByRole("button", { name: "Cancel" }).click();
     } finally {
