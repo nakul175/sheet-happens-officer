@@ -1,8 +1,8 @@
-// APL-2691 v1: the Move to Won / Lost dialogs show the open-task alert. Vitest's expect, not Playwright's.
+// SHO-3050 supersedes the Won refusal; APL-2691 open-task alerts remain for Lost. Vitest's expect, not Playwright's.
 // Runs with the phone checks (npm run test:viewport), which has Chromium and a local server.
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { chromium, type Browser, type BrowserContext, type Page } from "playwright-core";
-import { admin, BASE, istDate, PW, superAdmin, task, withVersion, type Account } from "../helpers";
+import { admin, BASE, istDate, PW, superAdmin, task, type Account } from "../helpers";
 
 const WITHIN = 10_000;
 
@@ -79,15 +79,16 @@ async function dealState(projectId: string) {
   return { stage: project.deal.stage.name as string, archived: project.archived as boolean };
 }
 
-describe("qa:TC missing APL-2691 Move to Won dialog", () => {
-  it("@APL-2691 qa:TC-APL2691-8d4e9e0b@v1 TC1 AC1: Move to Won shows an alert with 21, the first 20 tasks, and how many remain", async () => {
-    const { dialog, alert } = await openStage(wonId, "Won");
+describe("qa:TC missing APL-2691 Move to Lost dialog", () => {
+  it("@APL-2691 qa:TC-APL2691-8d4e9e0b@v1 TC1 AC1: Move to Lost shows an alert with 21, the first 20 tasks, and how many remain", async () => {
+    const { dialog, alert } = await openStage(wonId, "Lost");
     const text = await alert.innerText();
     expect(text).toContain("21");
     expect(text).toContain("and 1 more");
     const shown = (await dialog.getByRole("link").allTextContents()).map((t) => t.trim());
     expect(shown).toHaveLength(20);
     expect(wonTitles.filter((t) => !shown.includes(t))).toHaveLength(1);
+    await dialog.getByLabel("Reason (required)").fill("ZZ-TEST Lost guard");
     await dialog.getByRole("button", { name: "Move deal" }).click();
     await alert.waitFor({ state: "visible", timeout: WITHIN });
     expect(await alert.innerText()).toContain("21");
@@ -105,6 +106,7 @@ describe("qa:TC missing APL-2691 Move to Won dialog", () => {
     expect(text).not.toMatch(/and \d+ more/);
     expect((await dialog.getByRole("link").allTextContents()).map((t) => t.trim())).toEqual([lostStep]);
     await dialog.getByLabel("Reason (required)").fill("ZZ-TEST lost");
+    await dialog.getByLabel("Reason (required)").fill("ZZ-TEST Lost guard");
     await dialog.getByRole("button", { name: "Move deal" }).click();
     await alert.waitFor({ state: "visible", timeout: WITHIN });
     expect(await alert.innerText()).toContain("1 open task");
@@ -116,7 +118,7 @@ describe("qa:TC missing APL-2691 Move to Won dialog", () => {
   it("qa:TC missing @APL-2691 phone: at 390x844 Move deal receives the click, and the tab bar does not take it", async () => {
     await page.setViewportSize({ width: 390, height: 844 });
     try {
-      const { dialog, alert } = await openStage(wonId, "Won");
+      const { dialog, alert } = await openStage(wonId, "Lost");
       const bar = page.locator(".tabbar-wrap");
       await bar.waitFor({ state: "visible", timeout: WITHIN });
       const move = dialog.getByRole("button", { name: "Move deal" });
@@ -124,6 +126,7 @@ describe("qa:TC missing APL-2691 Move to Won dialog", () => {
       const button = await move.boundingBox();
       const tab = await bar.boundingBox();
       expect(button && tab && button.y < tab.y + tab.height && button.y + button.height > tab.y).toBe(true);
+      await dialog.getByLabel("Reason (required)").fill("ZZ-TEST Lost guard");
       await move.click();
       await alert.waitFor({ state: "visible", timeout: WITHIN });
       expect(await alert.innerText()).toContain("21");
@@ -136,9 +139,9 @@ describe("qa:TC missing APL-2691 Move to Won dialog", () => {
 
   it("@APL-2691 qa:TC-APL2691-b797e18b@v1 TC4: the dialog points at the alert with aria-describedby and focus moves to it", async () => {
     await page.goto(`/projects/${wonId}`);
-    await page.getByRole("group", { name: "Stage" }).getByRole("button", { name: "Won", exact: true }).click();
+    await page.getByRole("group", { name: "Stage" }).getByRole("button", { name: "Lost", exact: true }).click();
     await page.waitForFunction(() => {
-      const dialog = document.querySelector('[role="dialog"][aria-label="Move to Won"]');
+      const dialog = document.querySelector('[role="dialog"][aria-label="Move to Lost"]');
       const id = dialog?.getAttribute("aria-describedby");
       if (!id || !dialog) return false;
       const alert = document.getElementById(id);
@@ -149,7 +152,7 @@ describe("qa:TC missing APL-2691 Move to Won dialog", () => {
         && (alert.textContent ?? "").includes("21")
         && (alert.textContent ?? "").includes("and 1 more");
     }, undefined, { timeout: WITHIN });
-    await page.getByRole("dialog", { name: "Move to Won" }).getByRole("button", { name: "Cancel" }).click();
+    await page.getByRole("dialog", { name: "Move to Lost" }).getByRole("button", { name: "Cancel" }).click();
   }, 60000);
 
   it("qa:TC missing @APL-2691 TC5: a second click while the list loads opens one dialog, and a failed load is said in it", async () => {
@@ -162,15 +165,17 @@ describe("qa:TC missing APL-2691 Move to Won dialog", () => {
     });
     try {
       await page.goto(`/projects/${wonId}`);
-      const won = page.getByRole("group", { name: "Stage" }).getByRole("button", { name: "Won", exact: true });
+      const won = page.getByRole("group", { name: "Stage" }).getByRole("button", { name: "Lost", exact: true });
       await won.waitFor({ state: "visible", timeout: WITHIN });
       await won.click();
       await won.click();
       release();
-      const dialog = page.getByRole("dialog", { name: "Move to Won" });
+      const dialog = page.getByRole("dialog", { name: "Move to Lost" });
       await dialog.waitFor({ state: "visible", timeout: WITHIN });
-      expect(await page.getByRole("dialog", { name: "Move to Won" }).count()).toBe(1);
+      expect(await page.getByRole("dialog", { name: "Move to Lost" }).count()).toBe(1);
       expect(await dialog.getByRole("alert").innerText()).toContain("Could not load the open tasks.");
+      expect(await dialog.getByRole("button", { name: "Move deal" }).isEnabled()).toBe(false);
+      await dialog.getByLabel("Reason (required)").fill("ZZ-TEST Lost guard");
       expect(await dialog.getByRole("button", { name: "Move deal" }).isEnabled()).toBe(true);
       await dialog.getByRole("button", { name: "Cancel" }).click();
     } finally {
@@ -183,13 +188,13 @@ describe("qa:TC missing APL-2691 Move to Won dialog", () => {
     const listed = await lead.c.get(`/api/projects/${subId}/tasks`);
     expect(listed.json.summary.open).toBe(1);
     expect(listed.json.summary.openTasks).toBe(2);
-    const { dialog, alert } = await openStage(subId, "Won");
+    const { dialog, alert } = await openStage(subId, "Lost");
     const text = await alert.innerText();
     expect(text).toContain("2 open tasks");
     expect(text).toContain("and 1 more");
     const project = (await lead.c.get(`/api/projects/${subId}`)).json.project;
-    const won = (project.deal.pipeline.stages as { id: string; name: string }[]).find((s) => s.name === "Won")!.id;
-    const blocked = await lead.c.post(`/api/projects/${subId}/stage`, { stageId: won });
+    const won = (project.deal.pipeline.stages as { id: string; name: string }[]).find((s) => s.name === "Lost")!.id;
+    const blocked = await lead.c.post(`/api/projects/${subId}/stage`, { stageId: won, reason: "ZZ-TEST Lost guard" });
     expect(blocked.status).toBe(409);
     expect(blocked.json.openTasks).toBe(2);
     expect(text).toContain(`${blocked.json.openTasks} open task`);
@@ -197,12 +202,8 @@ describe("qa:TC missing APL-2691 Move to Won dialog", () => {
     await dialog.getByRole("button", { name: "Cancel" }).click();
   }, 60000);
 
-  it("qa:TC missing @APL-2691 TC7: moves to Won once every task is closed, and does not archive the deal or restamp the tasks", async () => {
-    const stamps: string[] = [];
-    for (const id of wonTaskIds) {
-      expect((await lead.c.post(`/api/tasks/${id}/complete`, await withVersion(lead, id))).status).toBe(200);
-      stamps.push((await lead.c.get(`/api/tasks/${id}`)).json.task.completedAt as string);
-    }
+  it("qa:TC missing @APL-2691 TC7: SHO-3050: moves to Won with 21 open tasks and retains every task unchanged", async () => {
+    const snapshots = await Promise.all(wonTaskIds.map(async (id) => (await lead.c.get(`/api/tasks/${id}`)).json.task));
     await page.goto(`/projects/${wonId}`);
     await page.getByRole("group", { name: "Stage" }).getByRole("button", { name: "Won", exact: true }).click();
     const dialog = page.getByRole("dialog", { name: "Move to Won" });
@@ -214,6 +215,6 @@ describe("qa:TC missing APL-2691 Move to Won dialog", () => {
       return won?.getAttribute("aria-current") === "step";
     }, undefined, { timeout: WITHIN });
     expect(await dealState(wonId)).toEqual({ stage: "Won", archived: false });
-    for (let i = 0; i < wonTaskIds.length; i++) expect((await lead.c.get(`/api/tasks/${wonTaskIds[i]}`)).json.task.completedAt).toBe(stamps[i]);
+    for (let i = 0; i < wonTaskIds.length; i++) expect((await lead.c.get(`/api/tasks/${wonTaskIds[i]}`)).json.task).toEqual(snapshots[i]);
   }, 90000);
 });
