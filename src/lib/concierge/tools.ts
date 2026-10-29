@@ -46,7 +46,7 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: "find_tasks",
-    description: "Find tasks by words in the title, in projects the person can see. Always use this when the person names a task. Returns each task's id.",
+    description: "Find tasks by ranked words, stems and tolerant spelling in the title or description, in projects the person can see. Always use this when the person names a task. Returns each task's id.",
     input_schema: { type: "object", properties: { text: { type: "string" }, project_id: { type: "string" }, include_done: { type: "boolean" } }, required: ["text"] },
   },
   {

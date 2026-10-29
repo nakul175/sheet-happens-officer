@@ -8,6 +8,7 @@ import { ApiError } from "@/lib/http";
 import { addDays, formatDueDate, startOfTodayIST } from "@/lib/dates";
 import { awaiting } from "@/lib/tasks";
 import { fullDate, shortDate } from "@/lib/concierge/dates";
+import { search } from "@/lib/search";
 
 export type TaskRec = {
   id: string; title: string; project: string; projectId: string; due: string | null; dueText: string | null;
@@ -87,22 +88,16 @@ export async function myTasks(user: Actor, filter: MyFilter, o: { limit?: number
   return { tasks: recs, truncated: rows.length > limit };
 }
 
-/** Tasks whose title contains the text, in projects the person may see. Most relevant first: project, then due date. */
+/** Tasks ranked by the same Stage-A service as the Search screen. */
 export async function findTasks(user: Actor, text: string, o: { projectId?: string; includeDone?: boolean; limit?: number } = {}) {
   const q = text.trim();
   if (q.length < 2) return { tasks: [] as TaskRec[], truncated: false };
   const limit = o.limit ?? 25;
-  const rows = await db.task.findMany({
-    where: {
-      deletedAt: null, title: { contains: q, mode: "insensitive" },
-      ...(o.includeDone ? {} : { completedAt: null }),
-      project: { ...visibleProjects(user), ...(o.projectId ? { id: o.projectId } : {}) },
-    },
-    select, take: limit + 1, orderBy: [{ createdAt: "asc" }],
-  });
-  const recs = rows.slice(0, limit).map((r) => toTaskRec(r));
-  recs.sort(byProjectThenDue);
-  return { tasks: recs, truncated: rows.length > limit };
+  const found = await search(user, q, false, false, { kinds: ["TASK"], projectId: o.projectId, includeDone: o.includeDone, limit });
+  const ids = found.tasks.map((t) => t.id);
+  const rows = ids.length ? await db.task.findMany({ where: { id: { in: ids } }, select }) : [];
+  const byId = new Map(rows.map((r) => [r.id, toTaskRec(r)]));
+  return { tasks: ids.map((id) => byId.get(id)).filter((x): x is TaskRec => !!x), truncated: false };
 }
 
 export async function listProjects(user: Actor, text?: string): Promise<ProjectRec[]> {
