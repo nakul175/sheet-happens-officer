@@ -47,7 +47,7 @@ export async function search(user:Actor,q:string,includeArchived:boolean,ideasOn
     FROM "Project" p LEFT JOIN "DealDetails" d ON d."projectId"=p.id
     LEFT JOIN LATERAL (SELECT max(ts_rank(to_tsvector('english',coalesce(n.text,'')),to_tsquery('english',${ts}))) note_rank,(array_agg(n.text ORDER BY n.id))[1] note_text FROM "Note" n WHERE n."projectId"=p.id AND n."removedAt" IS NULL AND ${matches(Prisma.sql`coalesce(n.text,'')`)}) nm ON true
     WHERE p."workspaceId"=${me.workspaceId} ${visible(Prisma.sql`p`)} ${o.projectId?Prisma.sql`AND p.id=${o.projectId}`:Prisma.empty}
-      AND (${matches(Prisma.sql`concat_ws(' ',p.name,p.description,d."whyPursue",d.need,d."serviceLine")`)} OR nm.note_rank IS NOT NULL)
+      AND (${matches(Prisma.sql`concat_ws(' ',p.name,p.description,d."whyPursue",d.need,d."serviceLine")`)} OR lower(p.name)=lower(${text}) OR nm.note_rank IS NOT NULL)
     ORDER BY rank DESC,p.id LIMIT 60`));
 
   if(crm&&!ideasOnly&&!o.ideasOnly){
