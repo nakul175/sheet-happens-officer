@@ -1,8 +1,10 @@
 "use client";
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import Image from "next/image";
+import { usePathname } from "next/navigation";
 import { createContext, useContext, useEffect, useRef, useState } from "react";
-import { ago, api, initials, useGet } from "@/components/api";
+import { api, initials } from "@/components/api";
+import { signOut } from "@/app/actions/sign-out";
 import { ConciergeProvider, useConcierge } from "@/components/concierge/ConciergeProvider";
 import { ConciergeBar, ConciergeDock, ConciergeFab } from "@/components/concierge/Concierge";
 import { Bell } from "./Bell";
@@ -15,7 +17,7 @@ export const useMe = () => useContext(MeCtx)!;
 export const roleLabel = (r: Me["orgRole"]) => (r === "SUPER_ADMIN" ? "Super Admin" : r === "ADMIN" ? "Admin" : "Member");
 
 /** SHO-US-22.4: bottom tab bar under 600 px. The server still decides who may open Usage and Audit; this only decides what is listed. */
-function TabBar({ user, here, more }: { user: Me; here: (p: string) => boolean; more: [string, string][] }) {
+function TabBar({ here, more }: { here: (p: string) => boolean; more: [string, string][] }) {
   const path = usePathname();
   const [openAt, setOpenAt] = useState<string | null>(null); // the menu belongs to the page it was opened on
   const open = openAt === path;
@@ -56,8 +58,8 @@ function TabBar({ user, here, more }: { user: Me; here: (p: string) => boolean; 
   }, []);
   useEffect(() => {
     if (!open) return;
-    const esc = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
-    const away = (e: Event) => { if (!box.current?.contains(e.target as Node)) setOpen(false); };
+    const esc = (e: KeyboardEvent) => { if (e.key === "Escape") setOpenAt(null); };
+    const away = (e: Event) => { if (!box.current?.contains(e.target as Node)) setOpenAt(null); };
     document.addEventListener("keydown", esc);
     document.addEventListener("pointerdown", away);
     return () => { document.removeEventListener("keydown", esc); document.removeEventListener("pointerdown", away); };
@@ -71,7 +73,7 @@ function TabBar({ user, here, more }: { user: Me; here: (p: string) => boolean; 
           {more.map(([h, l]) => <Link key={h} href={h} role="menuitem">{l}</Link>)}
           <button role="menuitem" onClick={() => { setOpen(false); openConcierge(); }}>Concierge</button>
           <Link href="/profile" role="menuitem">Profile</Link>
-          <button role="menuitem" onClick={async () => { await api("POST", "/api/auth/signout", {}); window.location.href = "/signin"; }}>Sign out</button>
+          <SignOut menuItem />
         </div>
       )}
       <nav className="tabbar" aria-label="Main">
@@ -133,7 +135,7 @@ export function Shell({ user, children }: { user: Me; children: React.ReactNode 
         <a className="skip" href="#main" onClick={(e) => { e.preventDefault(); const m = document.getElementById("main"); m?.focus(); m?.scrollIntoView(); }}>Skip to content</a>
         {open && <div className="veil" onClick={() => setMenu(null)} />}
         <aside ref={drawer} className={`side${open ? " open" : ""}`} aria-label="Main">
-          <Link href="/" className="brand"><img src="/logo-icon.svg" alt="" />Sheet Happens Officer</Link>
+          <Link href="/" className="brand"><Image src="/logo-icon.svg" alt="" width={32} height={32} unoptimized />Sheet Happens Officer</Link>
           <nav className="nav">
             {items.map(([href, label]) => (
               <Link key={href} href={href} aria-current={here(href) ? "page" : undefined}>{label}</Link>
@@ -148,7 +150,7 @@ export function Shell({ user, children }: { user: Me; children: React.ReactNode 
         <div className="main">
           <header className="top">
             <button className="burger" aria-label="Open menu" onClick={() => setMenu(path)}>☰</button>
-            <span className="top-brand"><img src="/logo-icon.svg" alt="" />SHO</span>
+            <span className="top-brand"><Image src="/logo-icon.svg" alt="" width={24} height={24} unoptimized />SHO</span>
             <span className="grow" />
             <SearchButton />
             <NewTaskButton />
@@ -157,7 +159,7 @@ export function Shell({ user, children }: { user: Me; children: React.ReactNode 
           </header>
           {children}
         </div>
-        <TabBar user={user} here={here} more={more} />
+        <TabBar here={here} more={more} />
         <ConciergeHost />
       </div>
       </Extras>
@@ -193,8 +195,10 @@ export function Page({ title, docTitle, sub, actions, dock, bar, children }: { t
   );
 }
 
-export function SignOut() {
+export function SignOut({ menuItem = false }: { menuItem?: boolean } = {}) {
   return (
-    <button className="btn ghost" onClick={async () => { await api("POST", "/api/auth/signout", {}); window.location.href = "/signin"; }}>Sign out</button>
+    <form action={signOut} style={{ display: "contents" }}>
+      <button role={menuItem ? "menuitem" : undefined} className={menuItem ? undefined : "btn ghost"}>Sign out</button>
+    </form>
   );
 }
