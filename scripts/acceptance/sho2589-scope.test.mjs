@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import test from "node:test";
-const production = "2cf4e6d3c4eb3b7a74554ff8bbcae5e3758177ff";
+const production = "f829b2da686a3327b5452bcd042b09c5f5cacd93";
 const allowed = new Set([
   "tests/e2e/stories/APL-2646.spec.ts", "tests/e2e/stories/APL-2716.spec.ts", "tests/trigger-test-guard.ts", "tests/trigger-test-guard.test.ts", "tests/trigger-search-path.test.ts",
   "src/app/(app)/Shell.tsx", "src/app/(app)/layout.tsx", "src/app/(app)/workload/WorkloadView.tsx", "src/app/(app)/workload/page.tsx", "src/app/(app)/workload/workload.css",
