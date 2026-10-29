@@ -13,9 +13,12 @@ describe("SHO-2587 Stage A contract",()=>{
   });
   it("uses bounded indexed full-text/trigram search without embeddings",()=>{
     expect(migration).toContain("CREATE EXTENSION IF NOT EXISTS pg_trgm");
-    expect(migration.match(/USING GIN/g)?.length).toBeGreaterThanOrEqual(10);
+    expect(migration.match(/USING GIN/g)?.length).toBeGreaterThanOrEqual(12);
+    expect(migration).toContain('"DealDetails_search_fts_idx"');
     expect(service).toContain("Math.min(25");
     expect(service).toContain("to_tsvector('english'");
+    expect(service).toContain("LEFT JOIN LATERAL");
+    expect(service).toContain("nm.note_rank IS NOT NULL");
     expect(service).not.toContain("pgvector");
     expect(service).not.toContain("MODEL_API_KEY");
   });

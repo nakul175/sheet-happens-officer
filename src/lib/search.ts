@@ -38,10 +38,12 @@ export async function search(user:Actor,q:string,includeArchived:boolean,ideasOn
     ORDER BY rank DESC,t.id LIMIT 60`));
 
   if(wants(o.kinds,"PROJECT")||wants(o.kinds,"DEAL"))rows.push(...await db.$queryRaw<Raw[]>(Prisma.sql`
-    SELECT p.id,CASE WHEN p."typeId"=${WORKSTREAM_DEAL} THEN 'DEAL' ELSE 'PROJECT' END::text kind,p.name title,p.name primary_text,concat_ws(' ',p.description,d."whyPursue",d.need,d."serviceLine") secondary_text,p.id project_id,p.name project_name,NULL::text organisation_id,NULL::text organisation_name,p."archivedAt" archived_at,NULL::timestamp completed_at,NULL::boolean is_idea,NULL::text assignee,
-      (ts_rank(to_tsvector('english',concat_ws(' ',p.name,p.description,d."whyPursue",d.need,d."serviceLine")),to_tsquery('english',${ts}))+CASE WHEN lower(p.name)=lower(${text}) THEN 10 WHEN lower(p.name) LIKE lower(${`%${text}%`}) THEN 5 ELSE 0 END)::float8 rank
-    FROM "Project" p LEFT JOIN "DealDetails" d ON d."projectId"=p.id WHERE p."workspaceId"=${me.workspaceId} ${visible(Prisma.sql`p`)} ${o.projectId?Prisma.sql`AND p.id=${o.projectId}`:Prisma.empty}
-      AND (to_tsvector('english',concat_ws(' ',p.name,p.description,d."whyPursue",d.need,d."serviceLine"))@@to_tsquery('english',${ts}) ${fuzzySql(Prisma.sql`lower(concat_ws(' ',p.name,p.description,d."whyPursue",d.need,d."serviceLine"))`)})
+    SELECT p.id,CASE WHEN p."typeId"=${WORKSTREAM_DEAL} THEN 'DEAL' ELSE 'PROJECT' END::text kind,p.name title,p.name primary_text,concat_ws(' ',p.description,d."whyPursue",d.need,d."serviceLine",nm.note_text) secondary_text,p.id project_id,p.name project_name,NULL::text organisation_id,NULL::text organisation_name,p."archivedAt" archived_at,NULL::timestamp completed_at,NULL::boolean is_idea,NULL::text assignee,
+      (ts_rank(to_tsvector('english',concat_ws(' ',p.name,p.description,d."whyPursue",d.need,d."serviceLine")),to_tsquery('english',${ts}))+coalesce(nm.note_rank,0)+CASE WHEN lower(p.name)=lower(${text}) THEN 10 WHEN lower(p.name) LIKE lower(${`%${text}%`}) THEN 5 WHEN p."typeId"=${WORKSTREAM_DEAL} AND nm.note_rank IS NOT NULL THEN 2 ELSE 0 END)::float8 rank
+    FROM "Project" p LEFT JOIN "DealDetails" d ON d."projectId"=p.id
+    LEFT JOIN LATERAL (SELECT max(ts_rank(to_tsvector('english',coalesce(n.text,'')),to_tsquery('english',${ts}))) note_rank,(array_agg(n.text ORDER BY n.id))[1] note_text FROM "Note" n WHERE n."projectId"=p.id AND n."removedAt" IS NULL AND (to_tsvector('english',coalesce(n.text,''))@@to_tsquery('english',${ts}) ${fuzzySql(Prisma.sql`lower(coalesce(n.text,''))`)})) nm ON true
+    WHERE p."workspaceId"=${me.workspaceId} ${visible(Prisma.sql`p`)} ${o.projectId?Prisma.sql`AND p.id=${o.projectId}`:Prisma.empty}
+      AND ((to_tsvector('english',coalesce(p.name,'')||' '||coalesce(p.description,''))@@to_tsquery('english',${ts}) ${fuzzySql(Prisma.sql`lower(coalesce(p.name,'')||' '||coalesce(p.description,''))`)}) OR (to_tsvector('english',concat_ws(' ',d."whyPursue",d.need,d."serviceLine"))@@to_tsquery('english',${ts}) ${fuzzySql(Prisma.sql`lower(concat_ws(' ',d."whyPursue",d.need,d."serviceLine"))`)}) OR nm.note_rank IS NOT NULL)
     ORDER BY rank DESC,p.id LIMIT 60`));
 
   if(crm&&!ideasOnly&&!o.ideasOnly){

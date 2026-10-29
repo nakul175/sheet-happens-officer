@@ -4,6 +4,8 @@ CREATE INDEX "Task_search_fts_idx" ON "Task" USING GIN (to_tsvector('english', c
 CREATE INDEX "Task_search_trgm_idx" ON "Task" USING GIN (lower(coalesce("title", '') || ' ' || coalesce("description", '')) gin_trgm_ops) WHERE "deletedAt" IS NULL;
 CREATE INDEX "Project_search_fts_idx" ON "Project" USING GIN (to_tsvector('english', coalesce("name", '') || ' ' || coalesce("description", '')));
 CREATE INDEX "Project_search_trgm_idx" ON "Project" USING GIN (lower(coalesce("name", '') || ' ' || coalesce("description", '')) gin_trgm_ops);
+CREATE INDEX "DealDetails_search_fts_idx" ON "DealDetails" USING GIN (to_tsvector('english', coalesce("whyPursue", '') || ' ' || coalesce("need", '') || ' ' || coalesce("serviceLine", '')));
+CREATE INDEX "DealDetails_search_trgm_idx" ON "DealDetails" USING GIN (lower(coalesce("whyPursue", '') || ' ' || coalesce("need", '') || ' ' || coalesce("serviceLine", '')) gin_trgm_ops);
 CREATE INDEX "Organisation_search_fts_idx" ON "Organisation" USING GIN (to_tsvector('english', coalesce("name", '') || ' ' || coalesce("kind", '') || ' ' || coalesce("country", '')));
 CREATE INDEX "Organisation_search_trgm_idx" ON "Organisation" USING GIN (lower(coalesce("name", '') || ' ' || coalesce("kind", '') || ' ' || coalesce("country", '')) gin_trgm_ops);
 CREATE INDEX "Contact_search_fts_idx" ON "Contact" USING GIN (to_tsvector('english', coalesce("name", '') || ' ' || coalesce("role", '') || ' ' || coalesce("email", '') || ' ' || coalesce("phone", ''))) WHERE "removedAt" IS NULL;
