@@ -1,11 +1,24 @@
-# SHO-US-22.11: every change runs the phone-size checks on all screens and widths (tests/viewport).
+# SHO-US-22.11: phone-size checks on all screens and widths (tests/viewport).
+# Pull requests run only when the diff can change the UI or this suite. Push to main and qa/story-e2e, and manual runs, always run the same checks.
 # It fails naming the screen, width and element, and keeps a screenshot of each failing page (download "viewport-screenshots" from the run).
 # Uses its own throw-away Postgres and invented accounts; it never reaches the production database or any real data.
 name: Phone checks
 
 # Push only on main and qa/story-e2e. Other branches run through pull_request, so a push to a PR branch does not start a second run.
+# paths is an include list: a pull request that does not touch these files does not start Phone. src/ and the other UI inputs still do.
 on:
   pull_request:
+    paths:
+      - src/**
+      - public/**
+      - vendor/**
+      - package.json
+      - package-lock.json
+      - prisma/**
+      - next.config.*
+      - tests/viewport/**
+      - vitest.viewport.config.mts
+      - .github/workflows/phone-checks.yml
   push:
     branches: [main, qa/story-e2e]
   workflow_dispatch:
@@ -52,10 +65,34 @@ jobs:
         with:
           node-version: 22
           cache: npm
+      - name: Playwright core version
+        id: playwright-core-version
+        run: |
+          version="$(node -p "require('./package-lock.json').packages['node_modules/playwright-core'].version")"
+          if [ -z "$version" ] || [ "$version" = "undefined" ]; then
+            echo "playwright-core version missing from package-lock.json" >&2
+            exit 1
+          fi
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "playwright-core ${version}"
+      - name: Cache Playwright Chromium
+        id: ms-playwright-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ms-playwright-${{ runner.os }}-${{ steps.playwright-core-version.outputs.version }}
       - run: npm ci
       - run: npx prisma migrate deploy
       - run: npm run build
-      - run: npx playwright-core install --with-deps chromium
+      - name: Install Playwright Chromium
+        run: |
+          if [ "${{ steps.ms-playwright-cache.outputs.cache-hit }}" = "true" ]; then
+            echo "Chromium cache hit for playwright-core ${{ steps.playwright-core-version.outputs.version }}; installing system libraries only"
+            npx playwright-core install-deps chromium
+          else
+            echo "Chromium cache miss; downloading"
+            npx playwright-core install --with-deps chromium
+          fi
       - name: Start the app
         run: |
           (npx next start -p 3100 > server.log 2>&1 &)
