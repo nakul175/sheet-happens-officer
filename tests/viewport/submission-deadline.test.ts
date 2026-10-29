@@ -10,7 +10,7 @@ const prefix = `ZZ-TEST 3054 UI ${Date.now()}`;
 beforeAll(async () => {
   expect(["127.0.0.1", "localhost", "[::1]"].includes(new URL(BASE).hostname)).toBe(true);
   expect(["127.0.0.1", "localhost", "[::1]"].includes(new URL(process.env.DATABASE_URL!).hostname)).toBe(true);
-  expect(["/sho_test", "/sho_staging"].includes(new URL(process.env.DATABASE_URL!).pathname)).toBe(true);
+  expect(["/sho_test", "/sho_staging", "/sho_viewport"].includes(new URL(process.env.DATABASE_URL!).pathname)).toBe(true);
   owner = await account("zz3054browser");
   const o = await owner.c.post("/api/orgs", { name: `${prefix} Buyer` }); expect(o.status).toBe(201); org = o.json.organisation.id;
   const pipes = (await owner.c.get("/api/deals/pipelines")).json.pipelines as { id: string; key: string; name: string }[];
