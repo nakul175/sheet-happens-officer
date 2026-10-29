@@ -1,0 +1,32 @@
+{
+  "story": "SHO-2906",
+  "baseLiveRevision": "f829b2da686a3327b5452bcd042b09c5f5cacd93",
+  "applicationChanges": false,
+  "files": [
+    {
+      "path": "tests/e2e/stories/APL-2466.spec.ts",
+      "sha256": "87a120bd731e57b4c4e5537d8e4700ed61f84572f91208dd549b1f442b8d0b11",
+      "sourceRevision": "db7338fe773abb52dcd86d5c2bae0e1d61b99148"
+    },
+    {
+      "path": "tests/e2e/stories/APL-2480.spec.ts",
+      "sha256": "3b2f23b162c36f1431d7b20f25f28c82cd3f60c1fcc23af0eb00cc0f2edb7bfb",
+      "sourceRevision": "db7338fe773abb52dcd86d5c2bae0e1d61b99148"
+    },
+    {
+      "path": "tests/e2e/stories/APL-2482.spec.ts",
+      "sha256": "eafef64844cb123f7c3d34df9529ad12a95f1d0f017b4d6db0b2e07ba744b01d",
+      "sourceRevision": "db7338fe773abb52dcd86d5c2bae0e1d61b99148"
+    },
+    {
+      "path": "tests/e2e/stories/APL-2484.spec.ts",
+      "sha256": "0f8e43e1e04f08f37ace1c35e549196063e9905113bf2275a278aa03c5f12c67",
+      "sourceRevision": "db7338fe773abb52dcd86d5c2bae0e1d61b99148"
+    },
+    {
+      "path": "tests/e2e/stories/qa.ts",
+      "sha256": "2dd5c6cee11e664ee0c6cdeac849d06282c73708dae2f3db12d1e2d5ffe08d12",
+      "sourceRevision": "db7338fe773abb52dcd86d5c2bae0e1d61b99148"
+    }
+  ]
+}

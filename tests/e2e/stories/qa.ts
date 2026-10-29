@@ -1,21 +1,33 @@
 // Shared pieces for the epic story specs. No password is written here.
 // SHO_QA_PASS is the password for nakul17+ accounts these specs create.
-// Mail is read from EMAIL_OUTBOX_DIR, the same folder the dev server writes when Resend is off.
-// SHO-2897: no default. A shared ".outbox" is a folder two specs in one run both resolve, so one spec's mail can satisfy
-// the other's assertion. outboxDir() names the variable when it is unset instead.
+// Mail is read from EMAIL_OUTBOX_DIR (or .outbox), the same folder the dev server writes when Resend is off.
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
-import type { APIRequestContext, Browser, BrowserContext, Page } from "@playwright/test";
-import { api, expect, zz, RUN, BASE_URL, type Api, type Json } from "../support";
-import { outboxDir } from "../outbox";
+import type { APIRequestContext, Browser, BrowserContext, Locator, Page } from "@playwright/test";
+import { test as baseTest, api, expect, zz, RUN, BASE_URL, type Api, type Json, type Later } from "../support";
 
 export { zz, RUN, BASE_URL, expect };
+
+// The legacy shared fixture swallowed cleanup failures. These migrated specs must preserve every failure.
+export const test = baseTest.extend<{ later: Later }>({
+  later: async ({}, runFixture) => {
+    const callbacks: (() => Promise<unknown>)[] = [];
+    await runFixture(fn => { callbacks.push(fn); });
+    const failures: unknown[] = [];
+    for (const fn of callbacks.reverse()) {
+      try {
+        const result = await fn();
+        if (result && typeof result === "object" && "status" in result && typeof result.status === "number" && result.status >= 400)
+          throw new Error(`Cleanup API returned HTTP ${result.status}`);
+      } catch (error) { failures.push(error); }
+    }
+    if (failures.length) throw new AggregateError(failures, "SHO-2906 fixture cleanup failed");
+  },
+});
 export type { Api, Json };
 
 export const PASS = process.env.SHO_QA_PASS ?? "";
-
-/** The outbox this run was told to read, resolved at read time so an unset variable fails loudly (SHO-2897). */
-const outbox = () => outboxDir("tests/e2e/stories/qa.ts");
+const OUTBOX = process.env.EMAIL_OUTBOX_DIR ?? path.join(process.cwd(), ".outbox");
 
 export function passwordOk(pass: string) {
   return pass.length >= 8 && pass.length <= 128 && /[A-Za-z]/.test(pass) && /[0-9]/.test(pass);
@@ -38,13 +50,13 @@ type Mail = { to?: string; subject?: string; text?: string };
 
 function mailsTo(email: string): Mail[] {
   let files: string[] = [];
-  try { files = readdirSync(outbox()); } catch { return []; }
+  try { files = readdirSync(OUTBOX); } catch { return []; }
   const want = email.toLowerCase();
   const out: Mail[] = [];
   for (const file of files) {
     if (!file.endsWith(".json")) continue;
     try {
-      const mail = JSON.parse(readFileSync(path.join(outbox(), file), "utf8")) as Mail;
+      const mail = JSON.parse(readFileSync(path.join(OUTBOX, file), "utf8")) as Mail;
       if (mail.to?.toLowerCase() === want) out.push(mail);
     } catch { /* a half-written file */ }
   }
@@ -57,12 +69,12 @@ export function mailToken(email: string, subjectIncludes: string) {
 }
 
 /**
- * Token from the local outbox, or from the protected staging sink when MAIL_SINK_TOKEN is set.
+ * Token from the local outbox, or from MAIL_SINK_URL when that is set.
  * Returns null at once when neither has the message, so a staging run with no sink does not wait.
  */
 export async function sinkToken(email: string, subjectIncludes: string, waitMs = 3000): Promise<string | null> {
   const immediate = mailToken(email, subjectIncludes);
-  if (immediate || !process.env.MAIL_SINK_TOKEN) return immediate;
+  if (immediate || !process.env.MAIL_SINK_URL) return immediate;
   const deadline = Date.now() + waitMs;
   while (Date.now() < deadline) {
     const hits = (await sinkMails(email))
@@ -78,7 +90,7 @@ export async function sinkToken(email: string, subjectIncludes: string, waitMs =
 /** Plain text of the newest matching message, or null when the sink has none. */
 export async function sinkText(email: string, subjectIncludes: string, waitMs = 3000): Promise<string | null> {
   const local = latestMail(email, subjectIncludes);
-  if (local || !process.env.MAIL_SINK_TOKEN) return local;
+  if (local || !process.env.MAIL_SINK_URL) return local;
   const deadline = Date.now() + waitMs;
   while (Date.now() < deadline) {
     const hits = (await sinkMails(email)).filter((mail) => (mail.subject ?? "").includes(subjectIncludes));
@@ -104,20 +116,14 @@ function sinkRow(row: unknown): Mail | null {
   return { to, subject, text };
 }
 
-/** JSON messages from the local outbox and the protected staging-only `/api/qa/mail` endpoint. */
+/** JSON messages from the staging test mail sink: the outbox folder, and MAIL_SINK_URL when that folder is exposed over HTTP. */
 async function sinkMails(email: string): Promise<Mail[]> {
   const want = email.toLowerCase();
   const found = mailsTo(email);
-  const token = process.env.MAIL_SINK_TOKEN;
-  if (!token) return found;
+  const url = process.env.MAIL_SINK_URL;
+  if (!url) return found;
   try {
-    const url = new URL("/api/qa/mail", BASE_URL);
-    url.searchParams.set("to", email);
-    const headers: Record<string, string> = { "x-qa-token": token };
-    if (process.env.STAGING_USER) {
-      headers.authorization = `Basic ${Buffer.from(`${process.env.STAGING_USER}:${process.env.STAGING_PASS ?? ""}`, "utf8").toString("base64")}`;
-    }
-    const res = await fetch(url, { headers, signal: AbortSignal.timeout(5_000) });
+    const res = await fetch(url, { signal: AbortSignal.timeout(5_000) });
     if (!res.ok) return found;
     const json = await res.json() as unknown;
     const rows = Array.isArray(json) ? json : (json && typeof json === "object" ? ((json as { messages?: unknown; items?: unknown }).messages ?? (json as { items?: unknown }).items) : []);
@@ -215,19 +221,135 @@ export async function personByEmail(adminApi: Api, email: string) {
 export async function deactivate(adminApi: Api, id: string) {
   const cur = await adminApi.get(`/api/team/${id}`);
   if (cur.status === 404 || cur.json.person?.status === "DEACTIVATED") return;
-  await adminApi.post(`/api/team/${id}/deactivate`, { reassign: "leaders" });
+  expect(cur.status, "read person before cleanup").toBe(200);
+  const off = await adminApi.post(`/api/team/${id}/deactivate`, { reassign: "leaders" });
+  expect(off.status, JSON.stringify(off.json)).toBe(200);
+  expect((await adminApi.get(`/api/team/${id}`)).json.person.status).toBe("DEACTIVATED");
 }
 
 /** Archive a project. If a test user became Leader, hand it back first so they can be deactivated. */
 export async function archiveProject(adminApi: Api, id: string, adminId: string) {
   const loaded = await adminApi.get(`/api/projects/${id}`);
-  if (loaded.status !== 200 || loaded.json.project?.archived) return;
+  if (loaded.status === 404) return;
+  expect(loaded.status, "read project before cleanup").toBe(200);
+  if (loaded.json.project?.archived) return;
   const members = (loaded.json.project?.members ?? []) as { userId: string; role: string }[];
   const leader = members.find((m) => m.role === "LEADER");
   if (leader && leader.userId !== adminId) {
-    await adminApi.post(`/api/projects/${id}/leader`, { newLeaderId: adminId, previousRole: "EDITOR" });
+    if (!members.some(m => m.userId === adminId)) {
+      const joined = await adminApi.post(`/api/projects/${id}/members`, { userId: adminId, role: "EDITOR" });
+      expect([201, 409], JSON.stringify(joined.json)).toContain(joined.status);
+    }
+    const moved = await adminApi.post(`/api/projects/${id}/leader`, { newLeaderId: adminId, previousRole: "EDITOR" });
+    expect(moved.status, JSON.stringify(moved.json)).toBe(200);
   }
-  await adminApi.post(`/api/projects/${id}/archive`);
+  const archived = await adminApi.post(`/api/projects/${id}/archive`);
+  expect(archived.status, JSON.stringify(archived.json)).toBe(200);
+  expect((await adminApi.get(`/api/projects/${id}`)).json.project.archived).toBe(true);
+}
+
+const UI = { timeout: 90_000 };
+
+/** The page's main landmark. */
+export function mainOf(page: Page) {
+  return page.getByRole("main");
+}
+
+/** One Team table row whose text contains `text`. Callers assert a count of 1, so a shared `.first()` is not used. */
+export function teamRow(page: Page, text: string) {
+  return mainOf(page).getByRole("row").filter({ hasText: text });
+}
+
+/** Chip colours from app.css (.chip.grey, .chip.green, .chip.gold), read as computed styles instead of class names. */
+export const CHIP = {
+  grey: "rgb(236, 238, 241)",
+  green: "rgb(232, 244, 236)",
+  gold: "rgb(251, 239, 210)",
+} as const;
+
+/** The chip in `scope` whose whole text is `text`. */
+export function chip(scope: Locator, text: string) {
+  return scope.getByText(text, { exact: true });
+}
+
+/** The chip is visible and has that colour. */
+export async function expectChip(scope: Locator, text: string, colour?: keyof typeof CHIP) {
+  const c = chip(scope, text);
+  await expect(c).toBeVisible();
+  if (colour) {
+    const dot = { grey: "rgb(108, 118, 134)", green: "rgb(32, 132, 68)", gold: "rgb(172, 118, 0)" };
+    // Both approved Team renderings convey the same status: legacy filled chip or current colored dot.
+    await expect.poll(() => c.evaluate((el, expected) =>
+      getComputedStyle(el).backgroundColor === expected.chip ||
+      getComputedStyle(el, "::before").backgroundColor === expected.dot,
+      { chip: CHIP[colour], dot: dot[colour] })).toBe(true);
+  }
+}
+
+/**
+ * The columns of one Team row.
+ * At 1024px and wider the header row is visible. Below that it is hidden and each cell shows its data-label.
+ */
+export async function expectTeamColumns(page: Page, row: Locator, labels: readonly string[]) {
+  const head = mainOf(page).getByRole("row").filter({ has: page.getByRole("columnheader") });
+  if (await head.isVisible()) {
+    for (const label of labels) {
+      const names = label === "Role" ? /^(Role|Workspace role)$/ : /^(Name|Email)$/.test(label) ? new RegExp(`^(${label}|Person)$`) : new RegExp(`^${label}$`);
+      await expect(head.getByRole("columnheader", { name: names })).toHaveCount(1);
+    }
+    return;
+  }
+  const shown: string[] = [];
+  for (const cell of await row.getByRole("cell").all()) {
+    if (!(await cell.isVisible())) continue;
+    const content = await cell.evaluate((el) => getComputedStyle(el, "::before").content);
+    shown.push(content.replace(/^["']|["']$/g, ""));
+  }
+  for (const label of labels) {
+    expect(shown.filter((l) => l === label || (label === "Role" && l === "Workspace role") || (["Name", "Email"].includes(label) && l === "Person")), `visible ${label} label on the row`).toHaveLength(1);
+  }
+}
+
+/** The Member-list link whose name is exactly `name`. */
+export function memberItem(page: Page, name: string) {
+  return mainOf(page).getByRole("link", { name, exact: true });
+}
+
+export async function openTeamActions(row: Locator, name: string) {
+  if (!(await row.getByRole("button", { name: "Deactivate", exact: true }).isVisible()))
+    await row.getByLabel(`More actions for ${name}`, { exact: true }).click();
+}
+
+/** The Super Admin adds a person from the Team page. Cleanup stays with the caller. */
+export async function addPersonOnTeam(page: Page, first: string, last: string, email: string, role: "MEMBER" | "ADMIN" = "MEMBER") {
+  await page.goto("/team");
+  await mainOf(page).getByRole("button", { name: "+ Add person" }).click(UI);
+  const dialog = page.getByRole("dialog", { name: "Add person" });
+  await dialog.getByLabel("First name").fill(first);
+  await dialog.getByLabel("Last name").fill(last);
+  await dialog.getByLabel("Email").fill(email);
+  if (role === "ADMIN") await dialog.getByLabel("Role").selectOption("ADMIN");
+  await dialog.getByRole("button", { name: "Add and email" }).click();
+  await expect(page.getByRole("status").filter({ hasText: `${first} ${last} was added` })).toBeVisible({ timeout: 120_000 });
+}
+
+/**
+ * Deactivate that person from their own Team row.
+ * The grey Deactivated chip is the result of this click, not of a status painted onto the page.
+ */
+export async function deactivateOnTeam(page: Page, name: string) {
+  const row = teamRow(page, name);
+  await expect(row).toHaveCount(1, UI);
+  await openTeamActions(row, name);
+  await row.getByRole("button", { name: "Deactivate", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: `Deactivate ${name}?` });
+  await dialog.getByRole("button", { name: "Deactivate", exact: true }).click();
+  const done = page.getByRole("dialog", { name: `${name} is deactivated` });
+  await expect(done).toBeVisible({ timeout: 120_000 });
+  await done.getByRole("button", { name: "Close" }).click();
+  await expect(done).toBeHidden();
+  await expect(chip(teamRow(page, name), "Deactivated")).toBeVisible(UI);
+  await expectChip(teamRow(page, name), "Deactivated", "grey");
 }
 
 export async function makeProject(adminApi: Api, label: string, leaderId: string) {
