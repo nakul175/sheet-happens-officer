@@ -60,7 +60,7 @@ test.describe("SHO-US-2.3 / APL-2482", () => {
     if (!passwordOk(PASS)) throw new Error("SHO_QA_PASS must be at least 8 characters with a letter and a number.");
   });
 
-  test("AC1: an Admin deactivates a Member: they are kept (never deleted), cannot be given new tasks, and their open tasks are handed over (qa:TC missing)", async ({ admin, later }) => {
+  test("AC1: an Admin deactivates a Member: they are kept (never deleted), cannot be given new tasks, and their open tasks are handed over (qa:TC-2461@v1)", async ({ admin, later }) => {
     const p = await person(admin, later, "leaver");
     const proj = await project(admin, later, "2.3 ac1");
     expect((await admin.api.post(`/api/projects/${proj}/members`, { userId: p.id, role: "EDITOR" })).status).toBe(201);
@@ -83,7 +83,7 @@ test.describe("SHO-US-2.3 / APL-2482", () => {
     expect([404, 405]).toContain((await admin.api.del(`/api/team/${p.id}`)).status);
   });
 
-  test("AC1 (sessions and sign-in): their sessions end and they cannot sign in (qa:TC missing)", async ({ admin, browser, later }) => {
+  test("AC1 (sessions and sign-in): their sessions end and they cannot sign in (qa:TC-2462@v1)", async ({ admin, browser, later }) => {
     test.setTimeout(180_000);
     const email = alias("2482", "session");
     const r = await admin.api.post("/api/team", { firstName: "ZZ-TEST", lastName: `session ${RUN}`, email, role: "MEMBER" });
@@ -131,7 +131,7 @@ test.describe("SHO-US-2.3 / APL-2482", () => {
     expect(JSON.parse(body).error).toBe("This account is deactivated.");
   });
 
-  test("AC2: only the Super Admin can act on Admins; a Member cannot act on anyone; nobody can deactivate a Super Admin (qa:TC missing)", async ({ admin, member, later }) => {
+  test("AC2: only the Super Admin can act on Admins; a Member cannot act on anyone; nobody can deactivate a Super Admin (qa:TC-2463@v1)", async ({ admin, member, later }) => {
     const adminPerson = await person(admin, later, "adminrole", "ADMIN");
     const plain = await person(admin, later, "plainrole");
     // A Member may not deactivate an Admin or a Member.
@@ -148,7 +148,7 @@ test.describe("SHO-US-2.3 / APL-2482", () => {
     expect(await statusOf(admin, adminPerson.id)).toBe("DEACTIVATED");
   });
 
-  test("AC2 (Admin acting on an Admin): an Admin who is not the Super Admin is refused, for deactivating and for reactivating (qa:TC missing)", async ({ admin, member, later }) => {
+  test("AC2 (Admin acting on an Admin): an Admin who is not the Super Admin is refused, for deactivating and for reactivating (qa:TC-2464@v1)", async ({ admin, member, later }) => {
     // The plain Member is made an Admin for the length of this test only. The role is put back in the finally block and again by `later`.
     later(() => admin.api.patch(`/api/team/${member.user.id}`, { orgRole: "MEMBER" }));
     const target = await person(admin, later, "adminfoe", "ADMIN");
@@ -164,7 +164,7 @@ test.describe("SHO-US-2.3 / APL-2482", () => {
     }
   });
 
-  test("AC3: reactivating restores the person and their old project membership, but does not hand reassigned tasks back (qa:TC missing)", async ({ admin, later }) => {
+  test("AC3: reactivating restores the person and their old project membership, but does not hand reassigned tasks back (qa:TC-2465@v1)", async ({ admin, later }) => {
     const p = await person(admin, later, "returner");
     const proj = await project(admin, later, "2.3 ac3");
     await admin.api.post(`/api/projects/${proj}/members`, { userId: p.id, role: "EDITOR" });
@@ -183,7 +183,7 @@ test.describe("SHO-US-2.3 / APL-2482", () => {
     expect((await admin.api.post(`/api/team/${p.id}/reactivate`)).status).toBe(409);
   });
 
-  test("AC3 (sign-in): the reactivated person can sign in again (qa:TC missing)", async ({ admin, browser, later }) => {
+  test("AC3 (sign-in): the reactivated person can sign in again (qa:TC-2466@v1)", async ({ admin, browser, later }) => {
     test.setTimeout(180_000);
     const email = alias("2482", "back");
     const r = await admin.api.post("/api/team", { firstName: "ZZ-TEST", lastName: `back ${RUN}`, email, role: "MEMBER" });
