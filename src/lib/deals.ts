@@ -1,9 +1,10 @@
 // SHO-E10 and SHO-E12: Deals are projects of type Deal. This file holds creation, stages, details,
 // next step and stalled logic. Access is still project membership (src/lib/access.ts).
+import { createHash } from "node:crypto";
 import type { Prisma } from "@/generated/prisma/client";
 import { db } from "@/lib/db";
 import { ApiError, notFound } from "@/lib/http";
-import { isActive, isAdmin, projectAccess, requireWrite, type Actor } from "@/lib/access";
+import { isActive, isAdmin, projectAccess, requireWrite, type Actor, type Tx } from "@/lib/access";
 import { WORKSTREAM_DEAL, crmMode, crmProjectWhere, crmVisible, requireCrm } from "@/lib/crm";
 import { formatDueDate, parseDueDate } from "@/lib/dates";
 import { auditTx, logAction, notify } from "@/lib/notify";
@@ -193,11 +194,12 @@ export async function moveStage(user: Actor, projectId: string, input: { stageId
     // Claim the snapshot before changing details or emitting history/notifications. A stale
     // transition rolls the entire transaction back, including optional detail edits.
     // Delivery still requires the row to be Bid Won so a concurrent commercial move cannot bypass that gate.
+    // Non-delivery moves also pin pipeline and archive state so a conversion cannot land a Proactive stage on Bid.
     const stagePatch = { stageId: stage.id, stageReason: reason, stageChangedAt: new Date() };
     const changed = await tx.project.updateMany({
       where: stage.category === "DELIVERY"
         ? { id: projectId, pipelineId: a.project.pipelineId, stageId: "st_bid_won", updatedAt: a.project.updatedAt }
-        : { id: projectId, stageId: a.project.stageId, updatedAt: a.project.updatedAt },
+        : { id: projectId, pipelineId: a.project.pipelineId, stageId: a.project.stageId, updatedAt: a.project.updatedAt, archivedAt: null },
       data: stagePatch,
     });
     if (!changed.count) {
@@ -317,17 +319,24 @@ export async function removeStage(user: Actor, stageId: string, input: { moveTo?
 }
 
 /** Edits the facts on a deal. Editors and the Leader may; Viewers and archived deals are refused. */
-export async function updateDealDetails(user: Actor, projectId: string, input: DealDetailsInput) {
+export async function updateDealDetails(user: Actor, projectId: string, input: DealDetailsInput & { expectedPipelineId?: string }) {
   requireCrm(user);
   const a = await projectAccess(user, projectId, { write: true });
   requireWrite(a);
   if (a.project.typeId !== WORKSTREAM_DEAL) throw new ApiError(400, "Only deals have these details.");
+  if (input.expectedPipelineId !== undefined && input.expectedPipelineId !== a.project.pipelineId) throw conversionStale();
   const cur = await db.dealDetails.findUnique({ where: { projectId } });
   if (!cur) throw notFound("Deal");
   const data = detailsPatch(input, cur);
   if (!Object.keys(data).length) return;
   const before = detailsState(cur);
   await db.$transaction(async (tx) => {
+    // Touch the parent before facts: concurrent conversions either see these facts or refuse as stale.
+    const changed = await tx.project.updateMany({
+      where: { id: projectId, pipelineId: a.project.pipelineId, updatedAt: a.project.updatedAt, archivedAt: null },
+      data: { updatedAt: new Date() },
+    });
+    if (!changed.count) throw conversionStale();
     const next = await tx.dealDetails.update({ where: { projectId }, data });
     const after = detailsState(next);
     const keys = (Object.keys(after) as (keyof typeof after)[]).filter((k) => JSON.stringify(before[k]) !== JSON.stringify(after[k]));
@@ -671,4 +680,95 @@ export async function notifyStalledDeals(now = new Date()) {
     notified++;
   }
   return { stalled, notified };
+}
+
+// SHO-3053: this is deliberately a one-way operation, with no undo action or reverse endpoint.
+export const BID_CONVERSION_FIELDS = ["whyPursue", "need", "serviceLine", "value", "currency", "probability", "expectedClose", "introducedBy", "submissionDeadline"] as const;
+function conversionStale() {
+  return new ApiError(409, "This deal or its pipeline changed. Close and reopen conversion to review the latest details.", { stale: true });
+}
+
+async function bidConversionContext(tx: Tx, user: Actor, projectId: string) {
+  // Re-read the actor as well as membership inside the commit's serializable transaction.
+  const actor = await tx.user.findUnique({ where: { id: user.id } });
+  if (!actor || !isActive(actor)) throw new ApiError(401, "Sign in with an active account.");
+  requireCrm(actor);
+  const a = await projectAccess(actor, projectId, { write: true, tx });
+  requireWrite(a);
+  const source = a.project.pipelineId ? await tx.pipeline.findUnique({ where: { id: a.project.pipelineId } }) : null;
+  const sourceStage = a.project.stageId ? await tx.stage.findUnique({ where: { id: a.project.stageId } }) : null;
+  if (a.project.typeId !== WORKSTREAM_DEAL || source?.key !== "DEAL_PROACTIVE" || source.typeId !== WORKSTREAM_DEAL || !sourceStage || sourceStage.pipelineId !== source.id || !isOpenCategory(sourceStage.category)) {
+    throw new ApiError(409, "Only an open, unarchived Proactive deal can be converted to Bid.");
+  }
+  const details = await tx.dealDetails.findUnique({ where: { projectId } });
+  if (!details) throw notFound("Deal");
+  const target = await tx.pipeline.findFirst({ where: { key: "DEAL_BID", typeId: WORKSTREAM_DEAL }, include: { stages: { orderBy: [{ position: "asc" }, { id: "asc" }] } } });
+  if (!target) throw new ApiError(409, "The Bid pipeline is unavailable.");
+  const facts = detailsState(details);
+  const revision = createHash("sha256").update(JSON.stringify({
+    project: { id: projectId, name: a.project.name, updatedAt: a.project.updatedAt, reason: a.project.stageReason },
+    source, sourceStage, facts, target,
+  })).digest("hex");
+  return { actor, a, source, sourceStage, details, facts, target, revision };
+}
+
+export async function previewBidConversion(user: Actor, projectId: string) {
+  return db.$transaction(async (tx) => {
+    const c = await bidConversionContext(tx, user, projectId);
+    return {
+      revision: c.revision, source: { pipeline: c.source.name, stage: c.sourceStage.name },
+      target: { id: c.target.id, name: c.target.name, stages: c.target.stages.filter((s) => isOpenCategory(s.category)).map((s) => ({
+        id: s.id, name: s.name, needsReason: s.needsReason, requiredFields: s.requiredFields,
+        unsupportedFields: s.requiredFields.filter((k) => !(BID_CONVERSION_FIELDS as readonly string[]).includes(k)),
+      })) }, details: c.facts,
+    };
+  }, { isolationLevel: "RepeatableRead" });
+}
+
+export async function convertToBid(user: Actor, projectId: string, input: {
+  expectedRevision: string; stageId: string; submissionDeadline: string; reason?: string | null; fields?: DealDetailsInput;
+}) {
+  try {
+    return await db.$transaction(async (tx) => {
+      const c = await bidConversionContext(tx, user, projectId);
+      if (c.revision !== input.expectedRevision) throw conversionStale();
+      const stage = c.target.stages.find((s) => s.id === input.stageId && isOpenCategory(s.category));
+      if (!stage) throw new ApiError(400, "Choose an open stage from the Bid pipeline.");
+      // Follow stage administration's stage-before-project lock order. Config/deletion races roll back.
+      await tx.$queryRaw`SELECT "id" FROM "Stage" WHERE "id" IN (${c.sourceStage.id}, ${stage.id}) ORDER BY "id" FOR UPDATE`;
+      const unsupported = stage.requiredFields.filter((k) => !(BID_CONVERSION_FIELDS as readonly string[]).includes(k));
+      if (unsupported.length) throw new ApiError(409, `This Bid stage requires unsupported fields: ${unsupported.join(", ")}. Choose another stage or ask an Admin to review its requirements.`);
+      const reason = clean(input.reason);
+      if (stage.needsReason && !reason) throw new ApiError(400, `Say why this deal is moving to "${stage.name}".`, { needsReason: true });
+      const deadline = isoDate(input.submissionDeadline);
+      if (dayOnly(deadline) !== input.submissionDeadline) throw new ApiError(400, "Enter a valid submission deadline.");
+      const fields = stripUndefined(input.fields ?? {});
+      const allowed = new Set(stage.requiredFields);
+      if (allowed.has("value") || allowed.has("currency")) { allowed.add("value"); allowed.add("currency"); }
+      if (Object.keys(fields).some((k) => k === "submissionDeadline" || !allowed.has(k))) throw new ApiError(400, "Only the selected stage's required fields may be changed during conversion.");
+      for (const k of ["expectedClose"] as const) {
+        if (fields[k] && dayOnly(isoDate(fields[k])) !== fields[k]) throw new ApiError(400, "Enter a valid expected close date.");
+      }
+      const data = detailsPatch({ ...fields, submissionDeadline: input.submissionDeadline }, c.details);
+      const merged = { ...c.details, ...data };
+      const missing = missingFields(stage.requiredFields, merged);
+      if (missing.length) throw new ApiError(409, `Fill in ${missing.map((k) => FIELD_NAMES[k] ?? k).join(", ")} first.`, { needsFields: missing });
+      const changed = await tx.project.updateMany({
+        where: { id: projectId, pipelineId: c.source.id, stageId: c.sourceStage.id, updatedAt: c.a.project.updatedAt, archivedAt: null },
+        data: { pipelineId: c.target.id, stageId: stage.id, stageReason: reason, stageChangedAt: new Date() },
+      });
+      if (!changed.count) throw conversionStale();
+      await tx.dealDetails.update({ where: { projectId }, data });
+      const before = { pipelineId: c.source.id, pipeline: c.source.name, stageId: c.sourceStage.id, stage: c.sourceStage.name, reason: c.a.project.stageReason, details: c.facts };
+      const after = { pipelineId: c.target.id, pipeline: c.target.name, stageId: stage.id, stage: stage.name, reason, details: detailsState(merged as DetailsRow) };
+      await logAction(tx, { actorId: c.actor.id, projectId, targetType: "deal", targetId: projectId, action: "deal.pipeline_converted", before, after });
+      await auditTx(tx, "DEAL_PIPELINE_CONVERTED", { actorId: c.actor.id, targetId: projectId, targetType: "deal", data: { before, after } });
+      const leader = c.a.project.members.find((m) => m.role === "LEADER");
+      if (leader) await notify(tx, [leader.userId], "DEAL_STAGE_CHANGED", { actorId: c.actor.id, projectId, data: { project: c.a.project.name, stage: stage.name } });
+      return { id: projectId, pipeline: { id: c.target.id, name: c.target.name }, stage: { id: stage.id, name: stage.name } };
+    }, { isolationLevel: "Serializable" });
+  } catch (e) {
+    if ((e as { code?: string })?.code === "P2034") throw conversionStale();
+    throw e;
+  }
 }

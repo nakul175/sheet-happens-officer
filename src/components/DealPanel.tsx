@@ -1,5 +1,6 @@
 "use client";
 import Link from "next/link";
+import { ConvertToBidDialog } from "@/components/ConvertToBidDialog";
 import { ATHENA_ENTITIES, OPPORTUNITY_TYPES, type AthenaEntity, type OpportunityType } from "@/lib/deal-classification";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { api, dueLabel, isOverdue, useGet } from "@/components/api";
@@ -163,7 +164,7 @@ function DetailsDialog({ projectId, deal, onClose, onDone }: { projectId: string
     if (busy) return;
     setBusy(true); setErr(null);
     const body: Record<string, unknown> = {
-      whyPursue: v.whyPursue, need: v.need || null, serviceLine: v.serviceLine || null, introducedBy: v.introducedBy || null,
+      expectedPipelineId: deal.pipeline?.id, whyPursue: v.whyPursue, need: v.need || null, serviceLine: v.serviceLine || null, introducedBy: v.introducedBy || null,
       value: v.value === "" ? null : Number(v.value), currency: v.currency || null, probability: v.probability === "" ? null : Number(v.probability),
       expectedClose: v.expectedClose || null, submissionDeadline: v.submissionDeadline || null,
       opportunityType: v.opportunityType || null, netFeeRevenueUsd: v.netFeeRevenueUsd === "" ? null : Number(v.netFeeRevenueUsd), athenaEntity: v.athenaEntity || null,
@@ -249,6 +250,7 @@ export function DealPanel({ projectId, deal, canWrite, onChange, feed }: { proje
   const [pick, setPick] = useState<null | { stage: Stage; blocked: Blocked | null; loadError: string | null }>(null);
   const [armed, setArmed] = useState<Stage | null>(null);
   const [edit, setEdit] = useState(false);
+  const [convert, setConvert] = useState(false);
   const pending = useRef(false);
   const ticket = useRef(0); // a closed or replaced click ignores a list that arrives later
   const d = deal.details;
@@ -317,6 +319,7 @@ export function DealPanel({ projectId, deal, canWrite, onChange, feed }: { proje
         {deal.stalled && <span className="chip gold">Stalled · no activity for 30 days</span>}
         {deal.stageReason && <span>Reason: {deal.stageReason}</span>}
         {canWrite && <button className="btn ghost sm" onClick={() => setEdit(true)}>Edit details</button>}
+        {canWrite && deal.pipeline?.key === "DEAL_PROACTIVE" && deal.stage && ["NOT_STARTED", "ACTIVE", "PAUSED"].includes(deal.stage.category) && <button className="btn ghost sm" onClick={() => setConvert(true)}>Convert to Bid</button>}
       </div>
       {d?.whyPursue && <p style={{ margin: "8px 0 0", fontSize: 14 }}><b>Why:</b> {d.whyPursue}</p>}
       <p style={{ margin: "8px 0 0", fontSize: 14 }}>
@@ -327,6 +330,7 @@ export function DealPanel({ projectId, deal, canWrite, onChange, feed }: { proje
       <DealNotes projectId={projectId} orgId={deal.organisation?.id ?? null} />
       <Parties projectId={projectId} deal={deal} canWrite={canWrite} onChange={onChange} />
       {pick && deal && <StageDialog projectId={projectId} stage={pick.stage} deal={deal} initial={{ blocked: pick.blocked, loadError: pick.loadError }} onClose={close} onDone={() => { close(); onChange(); }} />}
+      {convert && <ConvertToBidDialog projectId={projectId} onClose={() => setConvert(false)} onDone={() => { setConvert(false); onChange(); }} />}
       {edit && d && <DetailsDialog projectId={projectId} deal={deal} onClose={() => setEdit(false)} onDone={() => { setEdit(false); onChange(); }} />}
     </section>
   );
