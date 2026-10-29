@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import {execFileSync} from 'node:child_process';
 import test from 'node:test';
-const base='5ba6d6ca107e1eeddbfd8a93a8c4939f2a128217';
+const base='ede5099caf6e77dc4bdb56aa83d3124e4f9c84ab';
 const allowed=new Set(["src/app/(app)/deals/DealsView.tsx", "tests/deal-filter-browser.story.ts", "vitest.deal-filters.config.mts", "scripts/acceptance/sho3134-prod-scope.test.mjs", "scripts/acceptance/sho2589-scope.test.mjs", "scripts/acceptance/sho-3038-scope.test.mjs", "scripts/acceptance/sho3062-scope.test.mjs", ".github/workflows/approved-projects-ui.yml", ".github/workflows/sho3062-validation.yml"]);
 test('SHO-3134 adds only the phone disclosure follow-up to qualified Workload',()=>{
  execFileSync('git',['merge-base','--is-ancestor',base,'HEAD']);

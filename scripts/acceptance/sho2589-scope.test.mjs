@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import test from "node:test";
-const production = "2cf4e6d3c4eb3b7a74554ff8bbcae5e3758177ff";
+const production = "7b79e3f3f24997257e93883db0c5fba0bab7ed7e";
 const allowed = new Set([
   // Qualified Workload plus NJ-authorized SHO-3134 phone follow-up; protected surfaces remain pinned.
   "src/app/(app)/deals/DealsView.tsx", "tests/deal-filter-browser.story.ts", "vitest.deal-filters.config.mts", "scripts/acceptance/sho3134-prod-scope.test.mjs",

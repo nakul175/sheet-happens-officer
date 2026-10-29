@@ -1,0 +1,200 @@
+name: SHO-2584 production-lineage validation
+on:
+  pull_request:
+    branches: [codex/sho-2584-only-production-base]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: sho-2584-${{ github.ref }}
+  cancel-in-progress: false
+defaults:
+  run:
+    shell: bash
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: sho
+          POSTGRES_PASSWORD: sho
+          POSTGRES_DB: sho_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      DATABASE_URL: postgresql://sho:sho@localhost:5432/sho_test?schema=accepted15
+      DIRECT_DATABASE_URL: postgresql://sho:sho@localhost:5432/sho_test?schema=accepted15
+      TASKBOARD_URL: http://localhost:3100
+      BASE_URL: http://localhost:3100
+      APP_URL: http://localhost:3100
+      EMAIL_OUTBOX_DIR: ${{ github.workspace }}/.outbox-ci
+      SUPER_ADMIN_EMAILS: root.test@aplyd.com
+      SHO_ADMIN_EMAIL: root.test@aplyd.com
+      SHO_ADMIN_PASS: correct-horse-9
+      JOB_SECRET: accepted15-ci-only-not-a-real-secret
+      FF_TASK_COMMENTS: "1"
+      SIGNIN_RETURN_TO: "on"
+      RETURN_PATH_LOG: "1"
+      SERVER_LOG: ${{ github.workspace }}/validation-server.log
+      PW_CHROMIUM: /usr/bin/google-chrome
+      RELEASE: ${{ github.event.pull_request.head.sha || github.sha }}
+      NEXT_TELEMETRY_DISABLED: "1"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - name: Exact live baseline and SHO-2584 scope
+        run: node --test scripts/acceptance/sho-2584-scope.test.mjs
+      - name: Approved Projects UI, Board and task-details regressions
+        run: npx vitest run -c vitest.projects-approved.config.mts
+      - name: Approved Home and single-row shell regressions
+        run: npx vitest run -c vitest.scoped4-all.config.mts tests/dashboard-ui-approved.test.tsx tests/shell-layout-approved.test.tsx
+      - name: Approved Settings, Activity and Project Trash regressions
+        run: npx vitest run -c vitest.settings-approved.config.mts
+      - name: Approved Dashboard, Review and Reporting regressions
+        run: npx vitest run -c vitest.dashboard-approved.config.mts
+      - name: Approved Accounts, Organisation overview and Contacts regressions
+        run: npx vitest run -c vitest.accounts-approved.config.mts
+      - name: Approved Sign-in and preserved central return-path regressions
+        run: npx vitest run -c vitest.signin-approved.config.mts
+      - name: Approved Signup, Forgot, Reset and verification screens
+        run: npx vitest run -c vitest.auth-pages-approved.config.mts
+      - name: Approved recovery, offline, password-wall and Add task regressions
+        run: npx vitest run -c vitest.remainder-approved.config.mts
+      - name: SHO-3038 collaborator acceptance
+        run: npx vitest run -c vitest.sho-3038.config.mts
+      - name: SHO-3044 opportunity classification acceptance
+        run: npx vitest run -c vitest.sho-3044.config.mts
+      - name: SHO-3042 opportunity reporting acceptance
+        run: npx vitest run -c vitest.sho-3042.config.mts
+      - name: SHO-3041 Bid stage lifecycle acceptance
+        run: npx vitest run -c vitest.sho-3041.config.mts
+      - name: SHO-3043 timeline filter acceptance
+        run: npx vitest run -c vitest.sho-3043.config.mts
+      - name: SHO-3047 recoverable project deletion contracts
+        run: npx vitest run -c vitest.sho-3047.config.mts
+      - name: SHO-3048 vertical boards and classification contracts
+        run: npx vitest run -c vitest.sho-3048.config.mts
+      - name: SHO-3136 approved branding contracts
+        run: npx vitest run -c vitest.sho-3136.config.mts
+      - name: Reported delete and organisation-edit contracts
+        run: npx vitest run -c vitest.reported-delete-org-edit.config.mts
+      - name: SHO-2681 staging mail-sink contracts
+        run: npx vitest run -c vitest.sho-2681.config.mts
+      - name: Review scoped authentication lint
+        run: npx eslint src/app/api/auth/aplyd/{start,callback}/route.ts src/lib/central-client.ts src/app/signin/SignInForm.tsx src/app/signin/page.tsx
+      - name: SHO-3010 echo and improve contracts
+        run: npx vitest run -c vitest.accepted15-echo.config.mts | tee validation-3010.log
+      - run: npx prisma migrate deploy
+      - run: npm run typecheck
+      - name: CRM Concierge scoped lint
+        run: npx eslint src/lib/concierge/{crm-reads,engine,thread,tools,types}.ts src/lib/{orgs,records}.ts src/components/concierge/{Concierge.tsx,types.ts} tests/concierge-crm-2584.test.ts tests/crm-visible-quick-http.test.ts tests/e2e/local/SHO-2584.browser.test.ts
+      - run: npm run build
+      - name: Start the exact built release
+        run: |
+          mkdir -p "$EMAIL_OUTBOX_DIR"
+          (NODE_ENV=production PORT=3100 node --import tsx server.js > validation-server.log 2>&1 & echo $! > .scoped4-server.pid)
+          for i in $(seq 1 40); do
+            if curl -fsS http://localhost:3100/api/health; then exit 0; fi
+            sleep 1
+          done
+          exit 1
+      - name: SHO-2682 staging Editor safety and idempotency contracts
+        run: npx vitest run -c vitest.sho-2682.config.mts
+      - name: All unit and integration tests present in this selective release
+        run: npx vitest run -c vitest.scoped4-all.config.mts | tee validation-all-release.log
+      - name: Accepted15 component, database and SQL regressions
+        run: npx vitest run -c vitest.release12.config.mts | tee validation-accepted15.log
+      - name: Deterministic2693 and2897 owned-outbox contracts
+        run: npx vitest run -c vitest.accepted-ai.config.mts | tee validation-accepted-ai.log
+      - name: Deployed18 baseline regressions
+        run: npx vitest run -c vitest.release18.config.mts | tee validation-baseline18.log
+      - name: Accepted locator browser cases
+        run: >-
+          npx playwright test tests/e2e/stories/APL-2539.spec.ts tests/e2e/stories/APL-2540.spec.ts tests/e2e/stories/SHO-3040.spec.ts
+          --grep 'APL-2539 > AC1:|APL-2540 > AC1:|APL-2540 > AC4:|SHO-3040 >'
+          | tee validation-locators.log
+      - name: Linux built-entry refusal and drain receipt
+        run: node scripts/acceptance/release12-drain-receipt.mjs release12-drain.json | tee validation-drain.log
+      - name: Seed comments fixture in isolated CI database only
+        run: |
+          export SHO_QA_PASS="$(openssl rand -hex 16)Aa9"
+          echo "::add-mask::$SHO_QA_PASS"
+          echo "SHO_QA_PASS=$SHO_QA_PASS" >> "$GITHUB_ENV"
+          SEED_TARGET=test npx tsx scripts/seed-apl2590-fixtures.ts
+          echo "SHO_MEMBER_EMAIL=nakul17+apl2590-worker@gmail.com" >> "$GITHUB_ENV"
+          echo "SHO_MEMBER_PASS=$SHO_QA_PASS" >> "$GITHUB_ENV"
+      - name: Four people-role suites and non-provider comments acceptance
+        run: >-
+          npx playwright test tests/e2e/stories/APL-2466.spec.ts tests/e2e/stories/APL-2480.spec.ts
+          tests/e2e/stories/APL-2482.spec.ts tests/e2e/stories/APL-2484.spec.ts tests/e2e/stories/APL-2590.spec.ts
+          --grep-invert " AC(14|15|16) "
+          | tee validation-scoped-stories.log
+      - name: Mobile sheet actual-pass validator regression checks
+        run: node --test scripts/ci/task-sheet-result.test.mjs
+      - name: Mobile task-sheet browser acceptance (Chromium emulation, not physical-device proof)
+        run: |
+          npx playwright test tests/e2e/stories/APL-2555.spec.ts --output=test-results/sho-mobile-sheet --reporter=json > validation-mobile-sheet.json
+          node scripts/ci/task-sheet-result.mjs validation-mobile-sheet.json | tee validation-mobile-sheet.log
+      - name: SHO-3133 distinct Proactive outcomes at desktop and phone widths
+        run: |
+          npx playwright test tests/e2e/stories/APL-2523.spec.ts --grep 'AC5: Proactive keeps' --output=test-results/sho-3133-outcomes --reporter=json > validation-3133-outcomes.json
+          node -e 'const r=require("./validation-3133-outcomes.json"),s=r.stats;if(!s||s.expected!==1||s.unexpected||s.skipped||s.flaky||(r.errors??[]).length)throw Error("Distinct outcomes browser case must pass without skips");console.log("SHO-3133: distinct outcomes passed at1280 and390")' | tee validation-3133-outcomes.log
+      - name: Existing public offline and no-private-cache browser acceptance
+        run: npx playwright test tests/e2e/stories/APL-2558.spec.ts --grep "AC4:" | tee validation-offline.log
+      - name: Record user-approved UI-only provider exclusion
+        run: |
+          node -e 'require("node:fs").writeFileSync("scoped4-live-gate.json",JSON.stringify({sha:process.env.RELEASE,deployReady:false,requiredStagingTests:[],excludedProviderTests:["SHO2590AC14","SHO2590AC15","SHO2590AC16"],approval:"User explicitly excluded only these three AI provider checks for this UI release on 2026-10-27",reason:"UI, regression, security, staging, exact-revision production verification and rollback checks remain required"}))'
+      - name: Package the exact Linux build for isolated staging
+        run: |
+          tar --exclude=.next/cache -czf sho-2584-build.tar.gz .next src/generated
+          sha256sum sho-2584-build.tar.gz > sho-2584-build.sha256
+          printf '%s\n' "$RELEASE" > sho-2584-build.commit
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sho-2584-build-${{ env.RELEASE }}
+          path: |
+            sho-2584-build.tar.gz
+            sho-2584-build.sha256
+            sho-2584-build.commit
+      - name: Validate comments and return-path flag-off rollback
+        run: |
+          kill "$(cat .scoped4-server.pid)"
+          for i in $(seq 1 30); do
+            if ! kill -0 "$(cat .scoped4-server.pid)" 2>/dev/null; then break; fi
+            sleep 1
+          done
+          (FF_TASK_COMMENTS=0 SIGNIN_RETURN_TO=off NODE_ENV=production PORT=3100 node --import tsx server.js > validation-off-server.log 2>&1 & echo $! > .scoped4-off-server.pid)
+          for i in $(seq 1 40); do
+            if curl -fsS http://localhost:3100/api/health; then break; fi
+            sleep 1
+          done
+          FF_TASK_COMMENTS=0 SIGNIN_RETURN_TO=off SERVER_LOG="$GITHUB_WORKSPACE/validation-off-server.log" npx vitest run -c vitest.scoped4-off.config.mts | tee validation-flag-off.log
+      - name: Preserve receipts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: accepted15-${{ github.sha }}
+          path: |
+            scoped4-live-gate.json
+            validation-*.log
+            validation-3133-outcomes.json
+            validation-mobile-sheet.json
+            release12-drain.json
+            test-results/e2e
+            test-results/sho-3133-outcomes/
+            test-results/sho-mobile-sheet/
+            test-results/sho-mobile-local/
