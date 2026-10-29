@@ -6,7 +6,7 @@
 import { afterAll, describe, expect, it } from "vitest";
 import { request, type APIRequestContext } from "playwright-core";
 import { assertStoryTargetAllowed } from "../base-url";
-import { BASE, PW, account, superAdmin, type Account } from "../../helpers";
+import { BASE, PW, account, istDate, superAdmin, type Account } from "../../helpers";
 
 // The target is TASKBOARD_URL (BASE); pass it so the guard checks exactly that.
 assertStoryTargetAllowed(process.env, BASE);
@@ -87,7 +87,7 @@ function setup() {
     for (const [who, role] of [[edAcc, "EDITOR"], [viewAcc, "VIEWER"]] as const) {
       expect((await leadAcc.c.post(`/api/projects/${projectId}/members`, { userId: who.id, role })).status).toBe(201);
     }
-    const t = await leadAcc.c.post(`/api/projects/${projectId}/tasks`, { title: `ZZ-TEST T1 ${RUN}` });
+    const t = await leadAcc.c.post(`/api/projects/${projectId}/tasks`, { title: `ZZ-TEST T1 ${RUN}`, dueDate: istDate(1) });
     expect(t.status, JSON.stringify(t.json)).toBe(201);
 
     return {

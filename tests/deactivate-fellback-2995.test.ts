@@ -32,7 +32,8 @@ vi.mock("@/lib/access", async (orig) => ({
   leaderId: async () => "zz-leader-2995",
   activeMember: async () => null, // the named person is on none of these projects, so every one falls back
 }));
-vi.mock("@/lib/people", () => ({ releasePerson: async () => ({ moved: 1 }) }));
+const release = vi.hoisted(() => vi.fn(async () => ({ moved: 1 })));
+vi.mock("@/lib/people", () => ({ releasePerson: release }));
 vi.mock("@/lib/notify", () => ({ auditTx: async () => {}, notify: async () => {} }));
 
 const { deactivate } = await import("../src/lib/team");
@@ -61,8 +62,10 @@ describe("qa:TC missing APL-2995 deactivate fellBack hides deals the caller cann
   });
 
   it("qa:TC missing D1: hidden deals still move their tasks to the Leader", async () => {
+    release.mockClear();
     const res = await run("off", "ADMIN");
-    expect(res.moved).toBe(2);
+    expect(release).toHaveBeenCalledTimes(2);
+    expect(res.moved).toBe(1); // The hidden deal must not leak through the returned count.
   });
 
   it("qa:TC missing D1: callers who can see the CRM are unchanged under all and admins (on is all)", async () => {

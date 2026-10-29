@@ -2,7 +2,6 @@
 import { personText } from "@/components/PeopleSelect";
 import Link from "next/link";
 import "./task-details.css";
-import { WorkspaceTaskPerson } from "@/components/WorkspaceTaskPerson";
 import { useRef, useState } from "react";
 import { PRIORITY, ROLE, api, dueLabel, useGet } from "@/components/api";
 import { BLOCKED_REASON_MAX_LENGTH, blockedReasonRef, fitBlockedReason } from "@/components/blocked-reason";
@@ -32,6 +31,8 @@ type Project = {
   members: { userId: string; name: string; email?: string; role: string; active: boolean }[];
 };
 
+type WorkspacePerson = { id: string; name: string; email: string; memberRole: string | null };
+
 export function TaskModal({ id, me, onClose, onChanged, asPage }: { id: string; me: string; onClose: () => void; onChanged?: () => void; asPage?: boolean }) {
   const t = useGet<{ task: Task }>(`/api/tasks/${id}`);
   const task = t.data?.task;
@@ -49,6 +50,10 @@ export function TaskModal({ id, me, onClose, onChanged, asPage }: { id: string; 
   const [confirmExit, setConfirmExit] = useState(false);
   const details = useRef<HTMLDivElement>(null);
   const pauseBlurSave = useRef(false);
+  const [peopleQuery, setPeopleQuery] = useState("");
+  const [people, setPeople] = useState<WorkspacePerson[]>([]);
+  const [peopleSearched, setPeopleSearched] = useState(false);
+  const [newMemberRole, setNewMemberRole] = useState<"EDITOR" | "VIEWER">("EDITOR");
   const meCtx = useMe();
 
   function hasUnsavedChanges() {
@@ -129,6 +134,24 @@ export function TaskModal({ id, me, onClose, onChanged, asPage }: { id: string; 
     if (res && !res.ok && res.status === 409 && res.data.needsConfirm === "open_subtasks") setConfirm({ kind: "move", n: res.data.openSubtasks, sectionId });
   }
 
+  async function searchPeople() {
+    const q = peopleQuery.trim();
+    if (q.length < 2 || !task) return;
+    setBusy(true);
+    const res = await api<{ people: WorkspacePerson[] }>("GET", `/api/projects/${task.projectId}/people?q=${encodeURIComponent(q)}`);
+    setBusy(false);
+    setPeopleSearched(true);
+    if (res.ok) { setPeople(res.data.people); setErr(null); }
+    else setErr(errorMessage(res.error, "Could not search workspace people."));
+  }
+
+  async function addWorkspacePerson(person: WorkspacePerson, association: "assignee" | "collaborator") {
+    const request = association === "assignee"
+      ? api("POST", `/api/tasks/${id}/assign`, { assigneeId: person.id, expectedUpdatedAt: version, addMemberRole: "EDITOR" })
+      : api("POST", `/api/tasks/${id}/collaborators`, { userId: person.id, addMemberRole: newMemberRole });
+    await run(request, () => { setPeople([]); setPeopleQuery(""); setPeopleSearched(false); pr.reload(); });
+  }
+
   return (
     <>
       {body(
@@ -196,11 +219,7 @@ export function TaskModal({ id, me, onClose, onChanged, asPage }: { id: string; 
                   {workers.map((w) => <option key={w.userId} value={w.userId}>{personText(w)}</option>)}
                 </select>
               ) : task.assignee.name}
-              {canManage && canEdit && !holding && <WorkspaceTaskPerson projectId={task.projectId} purpose="assignee" excludeIds={[task.assignee.id]} onChoose={async (person, addToProject) => {
-                const result = await run(api("POST", `/api/tasks/${id}/assign`, { assigneeId: person.id, expectedUpdatedAt: version, addToProject }));
-                if (result?.ok) pr.reload();
-                return { ok: !!result?.ok, error: result?.error };
-              }} />}
+
             </div>
             <span className="lbl">Collaborators</span>
             <div className="pills">
@@ -218,11 +237,39 @@ export function TaskModal({ id, me, onClose, onChanged, asPage }: { id: string; 
                 </select>
               )}
             </div>
-            {canManage && canEdit && !holding && <><span className="lbl">Workspace collaborators</span><div><WorkspaceTaskPerson projectId={task.projectId} purpose="collaborator" excludeIds={[task.assignee.id, ...task.collaborators.map(person => person.id)]} onChoose={async (person, addToProject) => {
-              const result = await run(api("POST", `/api/tasks/${id}/collaborators`, { userId: person.id, expectedUpdatedAt: version, addToProject }));
-              if (result?.ok) pr.reload();
-              return { ok: !!result?.ok, error: result?.error };
-            }} /></div></>}
+            <span className="lbl">Workspace people</span>
+            <div>
+              {canManage && canEdit && !holding ? (
+                <>
+                  <form className="addrow" onSubmit={(e) => { e.preventDefault(); searchPeople(); }}>
+                    <input className="in" aria-label="Search workspace people" placeholder="Search name or email" value={peopleQuery} onChange={(e) => setPeopleQuery(e.target.value)} />
+                    <button className="btn ghost" disabled={busy || peopleQuery.trim().length < 2}>Search</button>
+                  </form>
+                  {peopleSearched && !people.length && <p className="hint">No eligible active, verified workspace people found.</p>}
+                  {people.map((person) => (
+                    <div className="box" key={person.id} style={{ marginTop: 8 }}>
+                      <b>{person.name}</b><br /><span className="hint">{person.email}</span>
+                      {person.memberRole ? (
+                        <div className="hint">Already a project {person.memberRole.toLowerCase()}.</div>
+                      ) : (
+                        <div className="actions" style={{ marginTop: 8 }}>
+                          <button className="btn ghost" disabled={busy} onClick={() => addWorkspacePerson(person, "assignee")}>Add as Editor and assign</button>
+                          <select className="in" aria-label={`Project role for ${person.name}`} value={newMemberRole} onChange={(e) => setNewMemberRole(e.target.value as "EDITOR" | "VIEWER")}>
+                            <option value="EDITOR">Editor</option>
+                            <option value="VIEWER">Viewer</option>
+                          </select>
+                          <button className="btn ghost" disabled={busy || person.id === task.assignee.id || task.collaborators.some((c) => c.id === person.id)} onClick={() => addWorkspacePerson(person, "collaborator")}>Add and collaborate</button>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </>
+              ) : canEdit && !holding ? (
+                <span className="hint">Ask the project Leader to add someone who is not already a member.</span>
+              ) : (
+                <span className="hint">Only the project Leader or an Admin can add workspace people.</span>
+              )}
+            </div>
             <span className="lbl">Approver</span>
             <div>
               {(canManage || task.createdById === me) && canEdit && !task.awaitingApproval && !task.parentId && task.assignee.id !== me ? (

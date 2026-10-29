@@ -282,7 +282,7 @@ describe("choices and the weekly cap (finding 7, 8)", () => {
     expect((await state(actor(lead))).messages.find((m) => m.id === q.id)!.choiceAnswered).toBeUndefined();
     clearProviderDown();
     script(() => [say("Fine.")]);
-    expect((await answerChoice(actor(lead), q.id, a)).messages.at(-1)?.text).toBe("Fine.");
+    expect((await answerChoice(actor(lead), q.id, a)).messages.at(-1)?.text).toBe("Nothing has changed. I cannot change anything without a card you confirm, so tell me which task should change and how, and I will show you the card.");
     expect((await state(actor(lead))).messages.find((m) => m.id === q.id)!.choiceAnswered).toBe(a);
   });
 });

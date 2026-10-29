@@ -126,7 +126,7 @@ describe("Trash says how many days are left", () => {
       "ZZ-TEST twenty-nine",
     ]);
     expect(page.querySelectorAll("button")).toHaveLength(5);
-    expect([...page.querySelectorAll("th")].map((th) => th.textContent)).toEqual(["Item", "Deleted by", "Deleted", "Time left", ""]);
+    expect([...page.querySelectorAll("th")].map((th) => th.textContent)).toEqual(["Item", "Deleted by", "Deleted", "Time left", "Restore"]);
   });
 
   it.each([
@@ -144,7 +144,7 @@ describe("Trash says how many days are left", () => {
     installFetch("LEADER", false, []);
     const page = await show(<Trash params={params} />);
     expect(page.textContent).toContain("Trash is empty.");
-    expect(page.textContent).toContain("Tasks are kept for 30 days, then removed for good.");
+    expect(page.textContent).toContain("Tasks are kept for 30 days, then permanently removed.");
     expect(timeCells(page)).toHaveLength(0);
   });
 

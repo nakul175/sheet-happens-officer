@@ -327,7 +327,7 @@ export async function updateTask(
 }
 
 // ---------------------------------------------------------------- assign, collaborators, approver (4.3, 4.6)
-export async function assignTask(user: Actor, id: string, assigneeId: string, expectedUpdatedAt: unknown, addToProject = false) {
+export async function assignTask(user: Actor, id: string, assigneeId: string, expectedUpdatedAt: unknown, addToProject: boolean | "EDITOR" = false) {
   const { t, a } = await guardVersion(user, id, expectedUpdatedAt);
   // The assignee may only hand a task with an approver on to that approver; the Leader and Admins keep full authority (SHO-BUG-6).
   if (t.approverId && user.id === t.assigneeId && assigneeId !== t.approverId && a.role !== "LEADER") {
@@ -343,6 +343,7 @@ export async function assignTask(user: Actor, id: string, assigneeId: string, ex
       if (current.updatedAt.getTime() !== classifyExpectedUpdatedAt(expectedUpdatedAt)) await versionConflict(user, id, current, a.role);
     }
     await requireWorker(tx, t.projectId, assigneeId, "The assignee");
+    if (t.assigneeId === assigneeId) return t.updatedAt;
     const toApprover = t.approverId === assigneeId && t.assigneeId !== assigneeId;
     const row = await tx.task.update({ where: { id }, data: { assigneeId, ...(toApprover ? { previousAssigneeId: t.assigneeId } : {}) } });
     await notify(tx, [assigneeId], toApprover ? "SENT_FOR_APPROVAL" : "TASK_ASSIGNED", { actorId: user.id, taskId: id, projectId: t.projectId, data: { title: t.title } });
@@ -353,17 +354,18 @@ export async function assignTask(user: Actor, id: string, assigneeId: string, ex
   });
 }
 
-export async function addCollaborator(user: Actor, id: string, userId: string, options: { addToProject?: boolean; expectedUpdatedAt?: unknown } = {}) {
+export async function addCollaborator(user: Actor, id: string, userId: string, options: { addToProject?: boolean; addMemberRole?: "EDITOR" | "VIEWER"; expectedUpdatedAt?: unknown } = {}) {
   const { t, a } = await loadTask(user, id, { write: true });
-  if (options.addToProject) { requireManage(a); classifyExpectedUpdatedAt(options.expectedUpdatedAt); }
+  const grantMembership = options.addToProject || options.addMemberRole;
+  if (grantMembership) { requireManage(a); if (options.addToProject || options.expectedUpdatedAt !== undefined) classifyExpectedUpdatedAt(options.expectedUpdatedAt); }
   await db.$transaction(async (tx) => {
     let collaborators = t.collaborators;
-    if (options.addToProject) {
-      await addWorkspaceTaskMember(tx, user, t.projectId, userId);
+    if (grantMembership) {
+      await addWorkspaceTaskMember(tx, user, t.projectId, userId, options.addMemberRole);
       await tx.$queryRaw`SELECT "id" FROM "Task" WHERE "id" = ${id} FOR UPDATE`;
       const current = await tx.task.findUnique({ where: { id }, include: taskInclude });
       if (!current || current.deletedAt) throw notFound("Task");
-      if (current.updatedAt.getTime() !== classifyExpectedUpdatedAt(options.expectedUpdatedAt)) await versionConflict(user, id, current, a.role);
+      if (options.expectedUpdatedAt !== undefined && current.updatedAt.getTime() !== classifyExpectedUpdatedAt(options.expectedUpdatedAt)) await versionConflict(user, id, current, a.role);
       collaborators = current.collaborators;
     }
     await requireMember(tx, t.projectId, userId);

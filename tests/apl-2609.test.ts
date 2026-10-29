@@ -243,7 +243,8 @@ describe("qa:TC missing APL-2609 CRM_VISIBLE hides deals from My tasks, search, 
     const says = `Your deal ${w.dealName} has ${w.dealTaskTitle} due, at stage ${STAGE}.`;
     const shown = async (u: Actor) => JSON.stringify((await chatState(u)).messages);
     setMode("all");
-    script(() => [say(says)]);
+    // Seed a grounded CRM read: ungrounded model prose is intentionally suppressed.
+    script(() => [tu("find_deals", { text: w.tag })], () => [say(says)]);
     await sendMessage(w.ed, `ZZ-TEST which deals am I on ${w.tag}?`);
     expect(await shown(w.ed)).toContain(w.dealName);
     for (const mode of ["off", "admins"]) {
@@ -260,7 +261,7 @@ describe("qa:TC missing APL-2609 CRM_VISIBLE hides deals from My tasks, search, 
     for (const word of [w.dealName, w.dealTaskTitle]) expect(replayed).not.toContain(word);
     const later = await shown(w.ed);
     expect(later).toContain(`ZZ-TEST and now ${w.tag}?`);
-    expect(later).toContain("Noted.");
+    expect(later).toContain("Nothing has changed. I cannot change anything without a card you confirm");
     expect(later).not.toContain(w.dealName);
     // Nothing was deleted: with the CRM visible again the history is back.
     setMode("all");

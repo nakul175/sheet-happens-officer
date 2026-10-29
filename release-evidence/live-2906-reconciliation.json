@@ -1620,8 +1620,38 @@
     {
       "path": "src/components/TaskModal.tsx",
       "liveSHA256": "a9363d72241c44b1f51c2d76a41299592b1d88bdd7da531333429acfa5ca3d24",
-      "reconciledSHA256": "03311f5c75b3c5a39ac816c0797ec92f63f03788168a590184f7c3f3f042c5c8",
-      "reason": "Include visible Delete label in subtask delete accessible name"
+      "reconciledSHA256": "3d107e4ca52dad76f95ff9ae8bc5876dfe3b481a021a0dd6c790eeda0b1295c0",
+      "reason": "Preserve main SHO3058 explicit email-disambiguated workspace search and Editor/Viewer grant flow alongside restored task editor and accessible Delete label"
+    },
+    {
+      "path": "src/lib/tasks.ts",
+      "liveSHA256": "773227272a6d7dd045db220fc0429280c9f94bf32076d4ba4dcdf1076bf5f4a2",
+      "reconciledSHA256": "a3d2662f78c294183f919016dba1c30b4e73a873278b42786546230b6a734336",
+      "reason": "Preserve main SHO3058 addMemberRole API and assignment idempotence alongside live locked membership transactions and version checks"
+    },
+    {
+      "path": "src/lib/project-task-membership.ts",
+      "liveSHA256": "7e057e93ee3c96c56f1f55d1e012eb3cd28e9cee8f0692210d491818d21c1a70",
+      "reconciledSHA256": "5614485d7b4f71590182523bf2d2880090d151a84c95a81f345e3e6fb4e81cc2",
+      "reason": "Support main SHO3058 explicit Editor/Viewer grant while retaining live actor revalidation, workspace checks, project lock and conflict-safe membership creation"
+    },
+    {
+      "path": "src/lib/schemas.ts",
+      "liveSHA256": "add98372d8c2851d63f0ce8c5880feb94b0bc4d81cb736888dd13893e41e93f9",
+      "reconciledSHA256": "34e56a0441af7e8ac197a9588b10fe8c75c7ceeae3d42ce2c3603982183188be",
+      "reason": "Accept main SHO3058 addMemberRole contract alongside live addToProject contract"
+    },
+    {
+      "path": "src/app/api/tasks/[id]/assign/route.ts",
+      "liveSHA256": "7664daa3e0f9e574aebbfb5842f9b10c497ed7ac97bf1ce76648ca0b4c349e2e",
+      "reconciledSHA256": "084321aa559cd699a1e70a25172cd4239c768497863621c278835968822d00e8",
+      "reason": "Forward main SHO3058 explicit addMemberRole while preserving access-before-body and version validation"
+    },
+    {
+      "path": "src/app/api/tasks/[id]/collaborators/route.ts",
+      "liveSHA256": "c84e61f134de50829bf04ccb696889fc8ba0684e1d59082e64e6341f9e6a395d",
+      "reconciledSHA256": "6da2745e979ed7d3313f1cf211b1ae26529bfd141add87d8c829f30e1e17cca0",
+      "reason": "Forward main SHO3058 explicit role and preserve live addToProject/version contract"
     }
   ],
   "currentLiveRevision": "ede5099caf6e77dc4bdb56aa83d3124e4f9c84ab",
@@ -1678,5 +1708,5 @@
     "notCherryPicked": true
   },
   "scopeDecision": "Finish the existing main-based reconciliation PR, preserving suite routes and the already-live SHO2589 delta. Inherited8b005578 ancestry is documented; deployment files are unchanged.",
-  "ciCompatibilityRepairs": "Update synthetic task fixtures for required dueDate and browser selectors/expectations for restored live navigation, account menu, labels and return-to landing; retain authorization, cookie revocation and overflow assertions. No tests skipped or CI workflows relaxed."
+  "ciCompatibilityRepairs": "Preserve legacy undated synthetic fixtures through direct local test seeding after valid dated API creation; align tests to deployed bid mapping, creator rights, commercial review classification, Concierge no-data guard and privacy-redacted counts; assert hidden editor Undo UI plus forged-request denial. No workflows or skips relaxed."
 }

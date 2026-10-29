@@ -4,7 +4,7 @@ import { ApiError, notFound } from "@/lib/http";
 import { logAction, notify } from "@/lib/notify";
 
 /** Explicit task-related membership grant; callers keep this in the same transaction as the task write. */
-export async function addWorkspaceTaskMember(tx: Tx, actor: Actor, projectId: string, userId: string) {
+export async function addWorkspaceTaskMember(tx: Tx, actor: Actor, projectId: string, userId: string, role: "EDITOR" | "VIEWER" = "EDITOR") {
   const [project] = await tx.$queryRaw<{ id: string; workspaceId: string; name: string; archivedAt: Date | null }[]>`SELECT "id", "workspaceId", "name", "archivedAt" FROM "Project" WHERE "id" = ${projectId} FOR UPDATE`;
   if (!project) throw notFound("Project");
   const personActing = await tx.user.findUnique({ where: { id: actor.id }, select: { workspaceId: true, orgRole: true, deactivatedAt: true, emailVerifiedAt: true } });
@@ -15,10 +15,10 @@ export async function addWorkspaceTaskMember(tx: Tx, actor: Actor, projectId: st
   const person = await tx.user.findFirst({ where: { id: userId, workspaceId: project.workspaceId, deactivatedAt: null, emailVerifiedAt: { not: null } }, select: { id: true } });
   if (!person) throw new ApiError(400, "Choose an active person from this workspace.");
   // Concurrent requests can both select a non-member. Conflict-safe creation never changes an existing role.
-  const added = await tx.projectMember.createMany({ data: [{ projectId, userId, role: "EDITOR" }], skipDuplicates: true });
+  const added = await tx.projectMember.createMany({ data: [{ projectId, userId, role }], skipDuplicates: true });
   if (added.count) {
-    await notify(tx, [userId], "ADDED_TO_PROJECT", { actorId: actor.id, projectId, data: { project: project.name, role: "EDITOR" } });
-    await logAction(tx, { actorId: actor.id, projectId, targetType: "member", targetId: userId, action: "member.added", after: { role: "EDITOR" }, primary: false });
+    await notify(tx, [userId], "ADDED_TO_PROJECT", { actorId: actor.id, projectId, data: { project: project.name, role } });
+    await logAction(tx, { actorId: actor.id, projectId, targetType: "member", targetId: userId, action: "member.added", after: { role }, primary: false });
   }
 }
 

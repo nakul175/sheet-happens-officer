@@ -110,8 +110,8 @@ export const taskUpdate = z.object({
   blockedReason: z.string().trim().max(300).nullish(),
   expectedUpdatedAt: taskVersion,
 });
-export const taskAssign = z.object({ assigneeId: z.string().min(1), expectedUpdatedAt: taskVersion, addToProject: z.boolean().optional() });
-export const taskCollaborator = z.object({ userId: z.string().min(1), addToProject: z.boolean().optional(), expectedUpdatedAt: z.unknown().optional() });
+export const taskAssign = z.object({ assigneeId: z.string().min(1), expectedUpdatedAt: taskVersion, addToProject: z.boolean().optional(), addMemberRole: z.literal("EDITOR").optional() });
+export const taskCollaborator = z.object({ userId: z.string().min(1), addMemberRole: z.enum(["EDITOR", "VIEWER"]).optional(), addToProject: z.boolean().optional(), expectedUpdatedAt: z.unknown().optional() });
 export const taskApprover = z.object({ approverId: z.string().min(1).nullable(), expectedUpdatedAt: taskVersion });
 export const taskComplete = z.object({ completeAll: z.boolean().optional(), expectedUpdatedAt: taskVersion });
 export const taskReopen = z.object({ sectionId: z.string().min(1).optional() });

@@ -236,7 +236,7 @@ describe("propose and confirm (8.3)", () => {
       },
     );
     const r = await ask(lead, "Deactivate the editor");
-    expect(r.messages[1]).toMatchObject({ kind: "text", text: "Deactivating people is done on the Team screen." });
+    expect(r.messages[1]).toMatchObject({ kind: "text", text: "Nothing has changed. I cannot change anything without a card you confirm, so tell me which task should change and how, and I will show you the card." });
     expect(r.messages.some((m) => m.kind === "card")).toBe(false);
     expect((await db.user.findUniqueOrThrow({ where: { id: ed.id } })).deactivatedAt).toBeNull();
   });
@@ -569,7 +569,7 @@ describe("clarifying questions (8.4)", () => {
       (r) => { expect(lastResultText(r)).toMatch(/person_id is missing/); return [say("Who should I assign it to?")]; },
     );
     const r = await ask(lead, "assign it");
-    expect(r.messages[1]).toMatchObject({ kind: "answer", text: "Who should I assign it to?" });
+    expect(r.messages[1]).toMatchObject({ kind: "choices", text: "Who should I assign it to? Tell me the person's name and I will show you the card to confirm." });
     expect(r.messages.some((m) => m.kind === "card")).toBe(false);
   });
 

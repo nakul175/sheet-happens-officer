@@ -8,6 +8,6 @@ export const POST = handle(async (req: Request, ctx: { params: Promise<{ id: str
   const id = (await ctx.params).id;
   await assertCanUpdateTask(me, id);
   const body = await parseBody(req, taskCollaborator);
-  await addCollaborator(me, id, body.userId, { addToProject: body.addToProject, expectedUpdatedAt: body.expectedUpdatedAt });
+  await addCollaborator(me, id, body.userId, { addMemberRole: body.addMemberRole, addToProject: body.addToProject, expectedUpdatedAt: body.expectedUpdatedAt });
   return Response.json({ status: "ok" }, { status: 201 });
 });

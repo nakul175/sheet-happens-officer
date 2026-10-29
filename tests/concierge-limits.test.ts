@@ -41,7 +41,7 @@ describe("model wrapper (9.1)", () => {
     expect(s.status).toBe(200);
     expect(s.json.available).toBe(false);
     expect(s.json.disabled.code).toBe("NOT_ENABLED");
-    expect(s.json.quickActions.map((q: { id: string }) => q.id)).toEqual(["due-week", "overdue", "waiting-on-me", "blocked", "recently-completed"]);
+    expect(s.json.quickActions.map((q: { id: string }) => q.id)).toEqual(["due-week", "overdue", "waiting-on-me", "blocked", "recently-completed", "deals-attention"]);
     const m = await u.c.post("/api/concierge/messages", { text: "hello" });
     expect(m.status).toBe(200);
     expect(m.json.disabled.code).toBe("NOT_ENABLED");
@@ -110,7 +110,7 @@ describe("model wrapper (9.1)", () => {
     });
     const r = await sendMessage(actor(u), "hello");
     expect(r.disabled).toBeUndefined();
-    expect(r.messages.at(-1)?.text).toBe("Back again.");
+    expect(r.messages.at(-1)?.text).toBe("Nothing has changed. I cannot change anything without a card you confirm, so tell me which task should change and how, and I will show you the card.");
     expect(calls).toBe(2);
     expect(await weekMessages(u.id)).toBe(1);
     expect(await db.modelUsage.count({ where: { userId: u.id } })).toBe(1);
