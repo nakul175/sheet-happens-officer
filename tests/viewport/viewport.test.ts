@@ -7,12 +7,13 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { chromium, type Browser, type BrowserContext } from "playwright-core";
 import { account, BASE, istDate, PW, project, superAdmin, task } from "../helpers";
 import { collect, type Finding } from "./checks";
-import { PHONE_MAX, SCREENS, WIDTHS, type Ids } from "./screens";
+import { PHONE_MAX, SCREENS, WIDTHS, type Ids, type Screen } from "./screens";
 
 const SHOTS = "test-results/viewport";
 let browser: Browser;
 let ids: Ids;
 let viewerEmail = "";
+const TASK_TITLE = "Prepare the quarterly review pack with the finance team";
 
 beforeAll(async () => {
   // The suite creates accounts and data, so it only runs against a server on this machine (a test database), never a live site.
@@ -24,7 +25,7 @@ beforeAll(async () => {
   const viewer = await account("vpviewer");
   viewerEmail = viewer.email;
   const p = await project(root, root, [{ who: editor }, { who: viewer, role: "VIEWER" }]);
-  const parent = await task(root, p.id, { title: "Prepare the quarterly review pack with the finance team", dueDate: istDate(2), priority: "HIGH", collaboratorIds: [editor.id] });
+  const parent = await task(root, p.id, { title: TASK_TITLE, dueDate: istDate(2), priority: "HIGH", collaboratorIds: [editor.id] });
   await task(root, p.id, { title: "W".repeat(100), sectionId: p.doing, dueDate: istDate(-1) }); // a 100-character unbreakable title
   await root.c.post(`/api/projects/${p.id}/tasks`, { title: "Draft the summary", parentId: parent });
   const org = await root.c.post("/api/orgs", { name: `Viewport Org ${Date.now()}` });
@@ -49,14 +50,27 @@ async function signedIn(width: number, who: "root" | "viewer" | null) {
   return ctx;
 }
 
-async function check(ctx: BrowserContext, path: string, width: number, wait?: string) {
+async function check(ctx: BrowserContext, screen: Screen, width: number) {
+  const path = screen.path(ids);
   const page = await ctx.newPage();
   try {
     const response = await page.goto(path, { waitUntil: "load" });
     expect(response?.ok(), `${path} must load successfully, not a responsive error page`).toBe(true);
-    expect(new URL(page.url()).pathname, `${path} must not silently redirect to another screen`).toBe(new URL(path, BASE).pathname);
-    await page.waitForFunction(() => !document.querySelector(".skel, .skel-wrap"), undefined, { timeout: 15000 });
-    if (wait) await page.waitForSelector(wait, { timeout: 10000 });
+    // Cached inactive pages can retain hidden skeletons after a documented task redirect.
+    await page.waitForFunction(() => ![...document.querySelectorAll(".skel, .skel-wrap")].some(el => el.getClientRects().length > 0 && getComputedStyle(el).visibility !== "hidden"), undefined, { timeout: 15000 });
+    if (screen.wait) await page.waitForSelector(screen.wait, { timeout: 10000 });
+    // A renamed route must not silently count Home as My tasks, nor a bare page as a task panel.
+    if (screen.heading) await page.getByRole("heading", { name: screen.heading, exact: true }).waitFor();
+    if (screen.taskPanel || screen.taskPage) {
+      const title = (screen.taskPanel ? page.getByRole("dialog") : page).getByRole("textbox", { name: "Title", exact: true });
+      await title.waitFor();
+      expect(await title.inputValue(), "the requested task must actually be loaded").toBe(TASK_TITLE);
+    }
+    const actual = new URL(page.url()), requested = new URL(path, BASE);
+    const expected = screen.canonical && actual.pathname !== requested.pathname ? new URL(screen.canonical(ids), BASE) : requested;
+    expect(actual.origin, "stay on the isolated app origin").toBe(expected.origin);
+    expect(actual.pathname, `${path} must stay on its screen or documented task destination`).toBe(expected.pathname);
+    for (const [key, value] of expected.searchParams) expect(actual.searchParams.get(key), `preserve requested ${key}`).toBe(value);
     await page.waitForTimeout(400);
     // SHO-2559 AC2: this test-only switch deliberately breaks one real public route.
     // beforeAll refuses every remote target before any fixture is created.
@@ -93,7 +107,7 @@ for (const width of WIDTHS) {
       it(`${s.name} @ ${width} px`, async () => {
         const key = s.public ? "none" : s.as ?? "root";
         ctxs[key] ??= await signedIn(width, s.public ? null : key === "viewer" ? "viewer" : "root");
-        const { page, found } = await check(ctxs[key]!, s.path(ids), width, s.wait);
+        const { page, found } = await check(ctxs[key]!, s, width);
         if (found.length) {
           const shot = `${SHOTS}/${s.name.replace(/[^a-z0-9]+/gi, "-")}-${width}.png`;
           await page.screenshot({ path: shot, fullPage: true });
