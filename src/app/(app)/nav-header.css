@@ -80,4 +80,5 @@
 
 /* SHO-3136: the approved angular mark keeps its proportions on either header surface. */
 .shell :is(.brand,.top-brand) img { object-fit: contain; flex-shrink: 0; }
+.shell .top-brand { min-width: 44px; min-height: 44px; }
 @media (min-width: 1440px) { .shell .top-brand img { width: 40px; height: 40px; } }

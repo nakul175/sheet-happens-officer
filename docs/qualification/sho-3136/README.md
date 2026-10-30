@@ -33,3 +33,16 @@ including Home-link accessible name, hit target, focus, loaded image and overflo
 Collection does not imply execution. Isolated loaded staging, public-auth views,
 zoom/light/dark visual review and live acceptance remain required before Done.
 Pam owns acceptance coordination. BTF is the sole tracker.
+
+## Isolated acceptance update
+
+A separate `sho3136_qa` database was cloned from the idle disposable local QA
+database on port 54585. No migration command or schema change was executed.
+Synthetic admin was created/verified through the application API with mail captured
+locally. The first authenticated run found the desktop Home link was 40px high;
+its hit area is now at least 44px without increasing header height. Expanded
+acceptance passes all six tests: Home/My tasks/Projects, account menu and focus;
+signin/signup/forgot/reset/verify/offline; each at 1512/390/320px.
+Screenshots retained in story evidence. This is isolated local staging, not a
+production browser acceptance claim. Production rollout and post-cut smoke remain
+pending CI on the corrected revision.
