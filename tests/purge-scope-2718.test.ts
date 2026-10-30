@@ -133,13 +133,10 @@ async function rows(ids: string[]): Promise<Row[]> {
 }
 
 describe("purgeTrash scope (APL-2718)", () => {
-  it("AC1 @static no api or concierge file calls purgeTrash or runJob('purge-trash') (APL-2718-AC1@v1)", () => {
+  it("AC1 @static no API file calls purgeTrash or runJob('purge-trash') (APL-2718-AC1@v1)", () => {
     const api = path.join(root, "src/app/api");
-    const concierge = path.join(root, "src/lib/concierge");
     expect(readdirSync(api).length).toBeGreaterThan(0);
-    expect(readdirSync(concierge).length).toBeGreaterThan(0);
     expect(userPurgeCallers(api)).toEqual([]);
-    expect(userPurgeCallers(concierge)).toEqual([]);
     expect(userPurgeCallers(path.join(root, "src/app/(app)/projects/[id]/trash"))).toEqual([]);
   });
 

@@ -56,7 +56,7 @@ let seq = 0;
 const zz = (label: string) => `ZZ-TEST ${label} ${RUN}-${seq++}`;
 
 /** Everything the test creates, so afterAll can remove it through the API. */
-const made = { people: [] as Account[], projects: [] as string[], orgs: [] as string[], views: [] as { id: string; owner: Account }[], contacts: [] as string[], chats: [] as Account[] };
+const made = { people: [] as Account[], projects: [] as string[], orgs: [] as string[], views: [] as { id: string; owner: Account }[], contacts: [] as string[] };
 
 /** A throwaway person: ZZ-TEST display name, run-unique nakul17+ alias. */
 async function zzAccount(role: string) {
@@ -96,7 +96,6 @@ afterAll(async () => {
     if (led.status !== 200 && !(led.status === 400 && /already the Leader/.test(led.json?.error ?? ""))) problems.push(`change leader ${id}: ${led.status} ${JSON.stringify(led.json)}`);
     check(`archive project ${id}`, await sa.c.post(`/api/projects/${id}/archive`), [200, 409]);
   }
-  for (const who of made.chats) check(`clear chat ${who.email}`, await who.c.del("/api/concierge/messages"), [200]);
   for (const who of made.people) {
     const off = await sa.c.post(`/api/team/${who.id}/deactivate`, { reassign: "leaders" });
     if (off.status !== 200 && !(off.status === 409 && /already deactivated/.test(off.json?.error ?? ""))) problems.push(`deactivate ${who.email}: ${off.status} ${JSON.stringify(off.json)}`);
@@ -107,7 +106,6 @@ afterAll(async () => {
 describe("qa:TC missing auth before body (APL-2651)", () => {
   const routes = [
     ["POST", "/api/actions/bulk-undo", { ids: [] }, "{"],
-    ["POST", "/api/concierge/messages", { text: "" }, "{"],
     ["PATCH", "/api/tasks/missing-task", { title: "" }, "{"],
     ["PATCH", "/api/team/missing-person", { orgRole: "SUPER_ADMIN" }, "{"],
     ["PATCH", "/api/views/missing-view", { name: "" }, "{"],
@@ -145,7 +143,6 @@ describe("qa:TC missing auth before body (APL-2651)", () => {
     expect(contact.status).toBe(201);
     const contactId = contact.json.contact.id as string;
     made.contacts.push(contactId);
-    made.chats.push(lead);
 
     const memberPath = `/api/projects/${p.id}/members/${editor.id}`;
     const sectionPath = `/api/projects/${p.id}/sections/${p.doing}`;
@@ -217,8 +214,6 @@ describe("qa:TC missing auth before body (APL-2651)", () => {
     expectBadJson(await hit(lead, "POST", "/api/actions/bulk-undo", "{"));
     expectValidation(await hit(editor, "POST", "/api/actions/bulk-undo", { ids: [] }));
 
-    expectValidation(await hit(lead, "POST", "/api/concierge/messages", { text: "" }));
-    expectBadJson(await hit(lead, "POST", "/api/concierge/messages", "{"));
 
     // A valid body still does what it did before.
     const stillHere = zz("still here");
@@ -258,9 +253,5 @@ describe("qa:TC missing auth before body (APL-2651)", () => {
     expect(role.status).toBe(200);
     expect(role.json).toEqual({ status: "ok" });
 
-    const said = await hit(lead, "POST", "/api/concierge/messages", { text: zz("hello") });
-    expect(said.status).toBe(200);
-    expect(said.json!.error).toBeUndefined();
-    expect(said.json!.disabled).toMatchObject({ code: "NOT_ENABLED" });
   });
 });

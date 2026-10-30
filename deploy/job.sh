@@ -3,6 +3,9 @@
 # (/etc/cron.d/sho); appends one line per run to /var/log/sho/jobs.log.
 set -uo pipefail
 name="${1:?job name}"
+# Older hosts may still have these retired entries in a root-owned crontab.
+# They must be inert without contacting the application or producing failure notices.
+case "$name" in purge-chat|concierge-budget) exit 0 ;; esac
 set -a
 # shellcheck disable=SC1091
 . /etc/sho/local.env

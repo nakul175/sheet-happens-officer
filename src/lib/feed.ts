@@ -82,11 +82,10 @@ export function noticeText(n: N) {
     DEAL_STALLED: `${p} has had no activity for 30 days.`,
     JOB_FAILED: `Scheduled job "${d.job}" failed${d.error ? `: ${d.error}` : ""}.`,
     JOB_MISSED: `Scheduled job "${d.job}" did not run on its day.`,
-    CONCIERGE_BUDGET_80: `The concierge has used $${d.spend} of its $${d.ceiling} monthly budget (${d.percent} percent). At the ceiling it pauses until ${d.resumes}.`,
   };
   // A deleted task cannot be opened, so its notice links to the project Trash (SHO-US-7.3 AC1).
   const href = n.type === "TASK_DELETED" && n.projectId ? `/projects/${n.projectId}/trash`
-    : n.taskId ? `/tasks/${n.taskId}` : n.projectId ? `/projects/${n.projectId}` : n.type === "JOIN_REQUESTED" ? "/projects" : n.type.startsWith("JOB_") ? "/audit" : n.type.startsWith("CONCIERGE_") ? "/usage" : "/";
+    : n.taskId ? `/tasks/${n.taskId}` : n.projectId ? `/projects/${n.projectId}` : n.type === "JOIN_REQUESTED" ? "/projects" : n.type.startsWith("JOB_") ? "/audit" : "/";
   return { text: text[n.type] ?? `${who} made a change.`, href };
 }
 
@@ -240,7 +239,7 @@ export async function projectActivity(user: Actor, projectId: string, cursor?: s
       who: r.actor.name,
       what: sentence(r, names),
       // "How" is only worth a word when it was not the screen (SHO-US-14.14 AC4).
-      via: r.channel === "CONCIERGE" ? "concierge" : "screen",
+      via: r.channel === "SCREEN" ? "screen" : "historical",
       // Undo stays on the row (AC5); an Editor can only undo their own actions, as the server enforces.
       undo: r.undoneAt ? "undone" : !isUndoable(r.action) || (!leader && r.actorId !== user.id) ? "none"
         : isTooOldToUndo(r.createdAt) ? "too_old" : "available",
@@ -304,7 +303,7 @@ export async function auditLog(user: Actor, q: z.infer<typeof auditQuery>) {
       email: r.actor?.email ?? null,
       event: r.event,
       ip: r.ip,
-      channel: r.channel === "CONCIERGE" ? "Concierge" : "Screen",
+      channel: r.channel === "SCREEN" ? "Screen" : "Historical",
       target: r.targetType ? label.get(`${r.targetType}:${r.targetId}`) ?? `${r.targetType} (removed)` : null,
     })),
     nextCursor: rows.length > 100 ? page[page.length - 1].id : null,

@@ -177,14 +177,3 @@ export const noteCreate = z.object({
   projectId: z.string().min(1).nullish(), contactIds: z.array(z.string().min(1)).max(50).optional(),
 });
 export const taskLinkCreate = z.object({ organisationId: z.string().min(1).nullish(), contactId: z.string().min(1).nullish() });
-
-// ---- concierge ----
-export const conciergeText = z.object({ text: z.string().min(1).max(2000) });
-export const conciergePrefs = z.object({ hidden: z.boolean().optional(), voiceNoticeAcked: z.literal(true).optional() });
-export const conciergeChoice = z.object({ choiceId: z.string().min(1).max(100) });
-export const conciergeConfirm = z.object({
-  handover: z.array(z.object({ taskId: z.string().min(1), assigneeId: z.string().min(1) })).max(500).optional(),
-  // Required (true) for a card marked irreversible: the person has seen "This can't be undone".
-  acknowledge: z.boolean().optional(),
-});
-export const conciergeUndo = z.object({ anyway: z.boolean().optional() });

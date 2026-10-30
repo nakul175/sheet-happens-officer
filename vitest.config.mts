@@ -20,6 +20,7 @@ export default defineConfig({
     fileParallelism: false,
     env: { SHO_E2E_START_BASE_URL: startBaseUrl },
     exclude: [
+      "tests/e2e/stories/SHO-3137.spec.ts", // Playwright removal acceptance, run by staging-e2e
       "tests/e2e/stories/APL-2467.spec.ts",
       "tests/e2e/stories/APL-2468.spec.ts",
       "tests/e2e/stories/APL-2469.spec.ts",
@@ -91,7 +92,6 @@ export default defineConfig({
       "tests/e2e/stories/APL-2590.spec.ts", // a Playwright story (APL-2590)
       "tests/e2e/stories/APL-2609.spec.ts",
       "tests/e2e/stories/APL-2720.spec.ts",
-      "tests/e2e/stories/APL-2694.spec.ts",
       "tests/e2e/stories/APL-2471.spec.ts",
       "tests/e2e/stories/APL-2748.spec.ts",
       "tests/e2e/stories/APL-2674.spec.ts",
@@ -99,12 +99,8 @@ export default defineConfig({
       "tests/e2e/stories/APL-2624.spec.ts",
       "tests/e2e/stories/APL-2721.spec.ts",
       "tests/e2e/stories/APL-2737.spec.ts",
-      "tests/e2e/stories/APL-2646.spec.ts", // Playwright; actual staging/Pam acceptance remains required.
       "tests/e2e/stories/APL-2716.spec.ts", // Playwright; collected by staging-e2e, not Vitest.
-      "tests/e2e/stories/APL-2519.spec.ts", // APL-2519: Playwright story
-      "tests/e2e/stories/APL-2641.spec.ts", // APL-2641: Playwright story
       "tests/e2e/stories/APL-2652.spec.ts", // APL-2652: Playwright story
-      "tests/e2e/stories/APL-2693.spec.ts", // APL-2693: Playwright story
       "tests/e2e/stories/APL-2729.spec.ts", // APL-2729: Playwright story
     ],
   },

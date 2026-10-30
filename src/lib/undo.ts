@@ -444,10 +444,10 @@ async function conflictError(row: Awaited<ReturnType<typeof prepare>>["row"], p:
   });
 }
 
-/** Everything undoAction checks, with nothing written. Used to test a whole concierge card before reversing any of it. */
+/** Everything undoAction checks, with nothing written. Used to validate a group before reversing any action. */
 export async function checkUndo(user: Actor, logId: string) {
   const own = await db.actionLog.findUnique({ where: { id: logId }, select: { projectId: true } });
-  if (own && !own.projectId) return; // organisation, contact and note rows are never part of a concierge card
+  if (own && !own.projectId) return; // organisation, contact and note rows are checked by their own resource rules
   const { row, p } = await prepare(user, logId);
   if (p.conflicts.length) throw await conflictError(row, p, user.id);
 }

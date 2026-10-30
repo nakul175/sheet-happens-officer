@@ -196,38 +196,6 @@ test("APL-2505 AC6: the 30-day undo limit is in the source @static", async () =>
 });
 
 // qa:TC missing
-test("APL-2505 > AC7: a concierge change undoes through the same mechanism, limits and conflict dialog", async ({ admin, later }) => {
-  test.info().annotations.push({ type: "qa:TC", description: "qa:TC missing" });
-  // The card's Undo calls the same /api/actions undo AC1 to AC3 already run. This checks that path is live.
-  const p = await newProject(admin, later, { label: "undo card path" });
-  const title = zz("card path before");
-  const id = await newTask(admin, p.id, { title, description: zz("card path detail") });
-  const edited = await editTask(admin, id, { title: zz("card path after") });
-  expect(edited.status).toBe(200);
-  const undo = await admin.api.post(`/api/actions/${edited.headers["x-undo-id"]}/undo`, {});
-  expect(undo.status, JSON.stringify(undo.json)).toBe(200);
-  expect((await getTask(admin, id)).title).toBe(title);
-});
-
-// qa:TC missing
-test("APL-2505 AC7: undoCard uses the same undo path @static", async () => {
-  test.info().annotations.push({ type: "qa:TC", description: "qa:TC missing" });
-  const cards = sourceOf("src/lib/concierge/cards.ts", "export async function undoCard");
-  expect(cards).toContain("await checkUndo(user, r.id)");
-  expect(cards).toContain("await undoAction(user, r.id, anyway)");
-  expect(cards).toContain('throw new ApiError(409, "Too old to undo", { tooOld: true })');
-  expect(cards).toContain("isTooOldToUndo(confirmedAt)");
-});
-
-// qa:TC missing
-test("APL-2505 AC7: MessageView shows Too old to undo @static", async () => {
-  test.info().annotations.push({ type: "qa:TC", description: "qa:TC missing" });
-  const view = readFileSync("src/components/concierge/MessageView.tsx", "utf8");
-  expect(view).toContain("Too old to undo");
-  expect(view).toContain('view === "expired"');
-});
-
-// qa:TC missing
 test("APL-2505 AC7: UndoHost shows the conflict dialog @static", async () => {
   test.info().annotations.push({ type: "qa:TC", description: "qa:TC missing" });
   const dialog = readFileSync("src/components/UndoHost.tsx", "utf8");

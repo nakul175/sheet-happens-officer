@@ -122,8 +122,8 @@ describe("qa:TC missing 23.5 AC4 the server refuses app APIs in the forced state
       ["GET", `/api/team/${p.id}`], ["GET", "/api/notifications"], ["POST", "/api/notifications/read-all", {}], ["GET", "/api/search?q=x"],
       ["PATCH", "/api/profile", { name: "X" }], ["GET", "/api/profile/density"], ["PUT", "/api/profile/density", { compact: true }],
       ["GET", "/api/profile/sessions"], ["POST", "/api/profile/sessions/sign-out-others", {}], ["POST", "/api/profile/start-guide", {}],
-      ["GET", "/api/deals"], ["GET", "/api/orgs"], ["GET", "/api/leaders"], ["GET", "/api/review"], ["GET", "/api/concierge/state"],
-      ["GET", "/api/quick-add?text=x"], ["GET", "/api/usage"], ["GET", "/api/audit"], ["POST", "/api/actions/bulk-undo", { ids: ["x"] }],
+      ["GET", "/api/deals"], ["GET", "/api/orgs"], ["GET", "/api/leaders"], ["GET", "/api/review"],
+      ["GET", "/api/quick-add?text=x"], ["GET", "/api/audit"], ["POST", "/api/actions/bulk-undo", { ids: ["x"] }],
     ];
     for (const [method, url, body] of calls) {
       const r = await p.c.call(method, url, body);

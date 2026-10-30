@@ -1,6 +1,6 @@
 // SHO-US-14.5 AC3: "tomorrow", "fri", "in 3 days" or 2026-10-30 become a calendar date (India time).
 // Pure, so the quick-add box can show the date before saving and tests can run without a server.
-import { resolveDue, WEEKDAYS } from "@/lib/concierge/dates";
+import { resolveDue, WEEKDAYS } from "@/lib/relative-dates";
 import { formatDueDate } from "@/lib/dates";
 
 const SHORT: Record<string, string> = { sun: "sunday", mon: "monday", tue: "tuesday", tues: "tuesday", wed: "wednesday", thu: "thursday", thur: "thursday", thurs: "thursday", fri: "friday", sat: "saturday" };

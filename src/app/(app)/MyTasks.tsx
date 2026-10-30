@@ -140,7 +140,7 @@ function Inner() {
     </div>
   );
   return (
-    <Page className="my-tasks-view" dock title="My tasks" sub={data ? `${total} ${overdueOnly ? "overdue" : "open"} task${total === 1 ? "" : "s"} assigned to you or shared with you` : " "}
+    <Page className="my-tasks-view" title="My tasks" sub={data ? `${total} ${overdueOnly ? "overdue" : "open"} task${total === 1 ? "" : "s"} assigned to you or shared with you` : " "}
       actions={me.crm && (
         <div className="seg" role="group" aria-label="Group tasks">
           <button aria-pressed={mode === "date"} onClick={() => pick("date")}>By date</button>

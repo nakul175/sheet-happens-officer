@@ -100,7 +100,7 @@ export function Modal({ onClose, small, label, describedBy, className, children 
     };
   }, [opener]);
   // SHO-2738: on a phone the keyboard shortens the visible area, not the page, so the sheet is sized from visualViewport
-  // (--vvh/--vvt, the same pair the Concierge sheet uses) and the footer is pinned to the bottom of that area.
+  // (--vvh/--vvt) and the footer is pinned to the bottom of that area.
   // On a desktop visualViewport is the window, so the dialog there is unchanged.
   const scrim = useRef<HTMLDivElement>(null);
   // SHO-3025 keeps its own `dialog` element local to the key effect above; this ref is the sheet the viewport fit works on.

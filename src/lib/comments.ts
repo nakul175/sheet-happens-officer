@@ -11,7 +11,6 @@ import { UNDO_DAYS, isTooOldToUndo } from "@/lib/undoable";
 export const COMMENT_MAX = 5000;
 export const COMMENTS_PER_TASK = 200;
 export const MENTIONS_PER_COMMENT = 20;
-const EXCERPT = 300;
 
 const fail = (code: string, message: string) => new ApiError(400, message, { code });
 const CAP_MESSAGE = "A task can have at most 200 comments.";
@@ -30,11 +29,6 @@ type Member = { id: string; name: string; role: string };
 
 const awaiting = (t: { approverId: string | null; assigneeId: string; completedAt: Date | null }) =>
   !!t.approverId && t.assigneeId === t.approverId && !t.completedAt;
-
-/** Collapse control characters so a comment cannot pose as a new instruction block. At most 300 characters. */
-export function commentExcerpt(text: string) {
-  return text.replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]+/g, " ").replace(/\s+/g, " ").trim().slice(0, EXCERPT);
-}
 
 function requireFlag() {
   if (!commentsEnabled()) throw notFound();
@@ -128,18 +122,6 @@ export async function listComments(user: Actor, taskId: string) {
     members: members.filter((m) => m.id !== user.id).map((m) => ({ id: m.id, name: m.name })),
     canComment: canWrite,
   };
-}
-
-/** Last 10 live comments as flattened 300-character excerpts. Wrapped by the concierge as untrusted data. */
-export async function commentExcerpts(user: Actor, taskId: string) {
-  const { comments } = await listComments(user, taskId);
-  return comments.slice(-10).map((c) => ({
-    id: c.id,
-    author: c.author.name,
-    at: c.createdAt,
-    text: commentExcerpt(c.text),
-    untrusted: true as const,
-  }));
 }
 
 async function notifyComment(tx: Tx, user: Actor, t: { id: string; projectId: string; title: string; assigneeId: string; approverId: string | null; previousAssigneeId: string | null; completedAt: Date | null }, mentionIds: string[]) {

@@ -5,11 +5,8 @@ import "./audit-ui.css";
 import "./select-controls.css";
 import { usePathname, useRouter } from "next/navigation";
 import { createContext, useContext, useEffect, useRef, useState } from "react";
-import { ago, api, initials, useGet } from "@/components/api";
-import { ConciergeProvider, useConcierge } from "@/components/concierge/ConciergeProvider";
-import { ConciergeBar, ConciergeDock, ConciergeFab } from "@/components/concierge/Concierge";
+import { api, initials } from "@/components/api";
 import { Bell } from "./Bell";
-import { ConciergeHost, ConciergeNavItem, openConcierge } from "@/components/concierge/Launcher";
 import { Extras, NewTaskButton, SearchButton } from "@/components/extras/Extras";
 import { useOverlayBack } from "@/components/use-overlay-back";
 import { closeTopOverlayThen } from "@/lib/overlay-history";
@@ -28,8 +25,8 @@ const MeCtx = createContext<Me | null>(null);
 export const useMe = () => useContext(MeCtx)!;
 export const roleLabel = (r: Me["orgRole"]) => (r === "SUPER_ADMIN" ? "Super Admin" : r === "ADMIN" ? "Admin" : "Member");
 
-/** SHO-US-22.4: bottom tab bar under 600 px. The server still decides who may open Usage and Audit; this only decides what is listed. */
-function TabBar({ user, here, more }: { user: Me; here: (p: string) => boolean; more: [string, string][] }) {
+/** SHO-US-22.4: bottom tab bar under 600 px. The server still decides who may open Audit; this only decides what is listed. */
+function TabBar({ here, more }: { here: (p: string) => boolean; more: [string, string][] }) {
   const path = usePathname();
   const router = useRouter();
   const [openAt, setOpenAt] = useState<string | null>(null); // the menu belongs to the page it was opened on
@@ -85,7 +82,6 @@ function TabBar({ user, here, more }: { user: Me; here: (p: string) => boolean; 
       {open && (
         <div className="tabmore" role="menu" aria-label="More" onClickCapture={e => followOverlayLink(e, closeMore, href => router.push(href))}>
           {more.map(([h, l]) => <Link key={h} href={h} role="menuitem">{l}</Link>)}
-          <button role="menuitem" onClick={() => closeMore(openConcierge)}>Concierge</button>
           <Link href="/profile" role="menuitem">Profile</Link>
           <button role="menuitem" onClick={async () => { await api("POST", "/api/auth/signout", {}); window.location.href = "/signin"; }}>Sign out</button>
         </div>
@@ -122,7 +118,7 @@ export function Shell({ user, children }: { user: Me; children: React.ReactNode 
   const open = menu === path;
   const here = (p: string) => (p === "/" ? path === "/" : path === p || path.startsWith(p + "/"));
   const items: [string, string][] = [["/", "Home"], ["/my-tasks", "My tasks"], ["/projects", "Projects"], ...(user.crm ? [["/deals", "Deals"], ["/accounts", "Accounts"], ...(user.review ? [["/review", "Pipeline review"]] : [])] as [string, string][] : []), ...(user.workload ? [["/workload", "Workload"]] as [string, string][] : []), ["/team", "Team"], ["/search", "Search"]];
-  if (user.orgRole === "SUPER_ADMIN") items.push(["/usage", "Usage"], ["/audit", "Audit log"]);
+  if (user.orgRole === "SUPER_ADMIN") items.push(["/audit", "Audit log"]);
   const more = items.filter(([h]) => !["/", "/my-tasks", "/projects", "/search"].includes(h));
   const [utilityAt, setUtilityAt] = useState<string | null>(null);
   const utilityOpen = utilityAt === path;
@@ -135,7 +131,7 @@ export function Shell({ user, children }: { user: Me; children: React.ReactNode 
     document.addEventListener("keydown", close); document.addEventListener("pointerdown", away);
     return () => { document.removeEventListener("keydown", close); document.removeEventListener("pointerdown", away); };
   }, [utilityOpen, closeUtility]);
-  const primary = items.filter(([h]) => !["/search", "/usage", "/audit"].includes(h));
+  const primary = items.filter(([h]) => !["/search", "/audit"].includes(h));
   const drawer = useRef<HTMLElement>(null);
   const closeDrawer = useOverlayBack(open, () => setMenu(null), () => drawer.current);
   const shellElement = useRef<HTMLDivElement>(null);
@@ -169,7 +165,6 @@ export function Shell({ user, children }: { user: Me; children: React.ReactNode 
   }, [open, closeDrawer]);
   return (
     <MeCtx.Provider value={user}>
-      <ConciergeProvider>
       <Extras>
       <div ref={shellElement} className={`shell${(path === "/projects" || path === "/projects/new") ? " projects-shell" : ""}`} data-density={compact ? "compact" : undefined}>
         <a className="skip" href="#main" onClick={(e) => { e.preventDefault(); const m = document.getElementById("main"); m?.focus(); m?.scrollIntoView(); }}>Skip to content</a>
@@ -180,7 +175,6 @@ export function Shell({ user, children }: { user: Me; children: React.ReactNode 
             {items.map(([href, label]) => (
               <Link key={href} href={href} aria-current={here(href) ? "page" : undefined}>{label}</Link>
             ))}
-            <ConciergeNavItem onPick={reveal => closeDrawer(reveal)} />
           </nav>
           <Link href="/profile" className="me" aria-current={here("/profile") ? "page" : undefined}>
             <span className="av">{initials(user.name)}</span>
@@ -201,34 +195,28 @@ export function Shell({ user, children }: { user: Me; children: React.ReactNode 
               {utilityOpen && <div className="account-options" id="account-utilities" aria-label="Account and utilities" onClickCapture={e => followOverlayLink(e, closeUtility, href => router.push(href))}>
                 <strong>{user.name}</strong><small>{roleLabel(user.orgRole)}</small>
                 <Link href="/profile">Profile</Link>
-                {items.filter(([h]) => ["/usage", "/audit"].includes(h)).map(([h,l]) => <Link href={h} key={h}>{l}</Link>)}
+                {items.filter(([h]) => h === "/audit").map(([h,l]) => <Link href={h} key={h}>{l}</Link>)}
                 <DensityToggle compact={compact} onChange={chooseDensity} />
-                <ConciergeNavItem onPick={reveal => closeUtility(reveal)} />
                 <SignOut />
               </div>}
             </div>
           </header>
           {children}
         </div>
-        <TabBar user={user} here={here} more={more} />
-        <ConciergeHost />
+        <TabBar here={here} more={more} />
       </div>
       </Extras>
-      </ConciergeProvider>
     </MeCtx.Provider>
   );
 }
 
-/** Page frame. `dock` reserves the 340 px concierge column on wide screens (list screens only). */
-export function Page({ title, docTitle, sub, actions, dock, bar, beforeTitle, className = "", children }: { title?: React.ReactNode; docTitle?: string; sub?: React.ReactNode; actions?: React.ReactNode; dock?: boolean; bar?: boolean; beforeTitle?: React.ReactNode; className?: string; children: React.ReactNode }) {
-  const slot = dock || bar;
+/** Shared page frame with the full available content width. */
+export function Page({ title, docTitle, sub, actions, beforeTitle, className = "", children }: { title?: React.ReactNode; docTitle?: string; sub?: React.ReactNode; actions?: React.ReactNode; beforeTitle?: React.ReactNode; className?: string; children: React.ReactNode }) {
   const tab = docTitle ?? (typeof title === "string" ? title : undefined);
   useEffect(() => { if (tab) document.title = `${tab} · Sheet Happens Officer`; }, [tab]);
-  const concierge = useConcierge();
-  const hidden = !concierge?.loaded || concierge.hidden; // a hidden concierge gives its space back
   return (
     <>
-      <main id="main" tabIndex={-1} className={`content ${className}${dock && !hidden ? " with-dock" : ""}${bar && !hidden ? " with-bar" : ""}`}>
+      <main id="main" tabIndex={-1} className={`content ${className}`}>
         {beforeTitle}
         {(title || actions) && (
           <div className="head">
@@ -241,9 +229,6 @@ export function Page({ title, docTitle, sub, actions, dock, bar, beforeTitle, cl
         )}
         {children}
       </main>
-      {dock && !hidden && <ConciergeDock />}
-      {bar && !hidden && <ConciergeBar />}
-      {slot && <ConciergeFab kind={dock ? "dock" : "bar"} />}
     </>
   );
 }

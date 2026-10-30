@@ -105,6 +105,6 @@ export async function dashboardActivity(user: Actor, now = new Date()) {
     ]) : [[], [], []];
     const names = new Map<string, string>([...users, ...sections].map(r => [r.id, r.name]));
     for (const task of tasks) names.set(`t:${task.id}`, task.title);
-    return { asOf: now.toISOString(), items: rows.map(r => ({ id: r.id, who: r.actor.name, what: sentence(r, names), when: whenText(r.createdAt), ts: r.createdAt.toISOString(), project: r.project!, via: r.channel === "CONCIERGE" ? "concierge" : "screen" })) };
+    return { asOf: now.toISOString(), items: rows.map(r => ({ id: r.id, who: r.actor.name, what: sentence(r, names), when: whenText(r.createdAt), ts: r.createdAt.toISOString(), project: r.project!, via: r.channel === "SCREEN" ? "screen" : "historical" })) };
   }, { isolationLevel: "RepeatableRead" });
 }

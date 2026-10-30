@@ -64,7 +64,6 @@ async function cleanupSeed(): Promise<string[]> {
     }
   }
   if (superAdmin && seed.orgId) await must("archive the organisation", superAdmin, "POST", `/api/orgs/${seed.orgId}/archive`, { archive: true });
-  for (const who of [lead, editor, admin, superAdmin]) if (who) await must(`clear ${who.label}'s chat`, who, "DELETE", "/api/concierge/messages");
   if (superAdmin) {
     for (const who of [lead, editor, admin]) if (who) await must(`deactivate ${who.label}`, superAdmin, "POST", `/api/team/${who.id}/deactivate`, { reassign: "leaders" });
     await must("sign the Super Admin out", superAdmin, "POST", "/api/auth/signout");
@@ -210,8 +209,6 @@ async function surfaces(mode: Mode, who: Who) {
   const byTask = await call(s.base, who.cookie, "GET", `/api/search?q=${encodeURIComponent(DEAL_TASK)}`);
   const detail = await call(s.base, who.cookie, "GET", `/api/tasks/${seed.dealTaskId}`);
   const list = await call(s.base, who.cookie, "GET", `/api/projects/${seed.dealId}/tasks`);
-  const quick = await call(s.base, who.cookie, "POST", "/api/concierge/quick/due-week", {});
-  const scoped = await call(s.base, who.cookie, "POST", "/api/concierge/quick/due-week", { projectId: seed.dealId });
   return {
     myTasks: rows.some((t) => t.id === seed.dealTaskId),
     stage: my.text.includes(STAGE) || rows.some((t) => t.project.type === "DEAL"),
@@ -219,21 +216,12 @@ async function surfaces(mode: Mode, who: Who) {
     searchTask: byTask.text.includes(seed.dealTaskId!),
     taskRoute: detail.status,
     listRoute: list.status,
-    concierge: quick.text.includes(DEAL_TASK) || quick.text.includes(DEAL_NAME),
-    conciergeScoped: scoped.status,
     plainShown: rows.some((t) => t.id === seed.plainTaskId),
   };
 }
 
-/** The person's chat as the concierge panel loads it on one mode's server. */
-async function chat(mode: Mode, who: Who) {
-  const r = await call(server(mode).base, who.cookie, "GET", "/api/concierge/state");
-  expect(r.status, r.text).toBe(200);
-  return JSON.stringify(r.json?.messages ?? []);
-}
-
-const HIDDEN = { myTasks: false, stage: false, searchDeal: false, searchTask: false, taskRoute: 404, listRoute: 404, concierge: false, conciergeScoped: 404 };
-const SHOWN = { myTasks: true, stage: true, searchDeal: true, searchTask: true, taskRoute: 200, listRoute: 200, concierge: true, conciergeScoped: 200 };
+const HIDDEN = { myTasks: false, stage: false, searchDeal: false, searchTask: false, taskRoute: 404, listRoute: 404 };
+const SHOWN = { myTasks: true, stage: true, searchDeal: true, searchTask: true, taskRoute: 200, listRoute: 200 };
 const strip = (x: Awaited<ReturnType<typeof surfaces>>) => { const { plainShown, ...rest } = x; void plainShown; return rest; };
 
 /**
@@ -400,15 +388,6 @@ describe("qa:TC missing APL-2609 CRM_VISIBLE hides deals on a real server per mo
     for (const word of [DEAL_NAME, DEAL_TASK, STAGE]) expect(screen.text).not.toContain(word);
   });
 
-  it("qa:TC missing AC4: with CRM_VISIBLE=off, the concierge quick actions never mention the deal or its task", async () => {
-    const seen = await surfaces("off", people.editor!);
-    expect({ concierge: seen.concierge, conciergeScoped: seen.conciergeScoped }).toEqual({ concierge: false, conciergeScoped: 404 });
-    const quick = await call(server("off").base, people.editor!.cookie, "POST", "/api/concierge/quick/due-week", {});
-    expect(quick.status, quick.text).toBe(200);
-    expect(quick.text).toContain(PLAIN_TASK);
-    for (const word of [DEAL_NAME, DEAL_TASK, STAGE]) expect(quick.text).not.toContain(word);
-  });
-
   it("qa:TC missing AC5: with CRM_VISIBLE=admins, an Editor sees no deal data on any surface", async () => {
     const seen = await surfaces("admins", people.editor!);
     expect(strip(seen)).toEqual(HIDDEN);
@@ -454,43 +433,5 @@ describe("qa:TC missing APL-2609 CRM_VISIBLE hides deals on a real server per mo
     expect((await taskScreen("off", people.superAdmin!)).status).toBe(404);
     expect((await surfaces("admins", people.admin!)).taskRoute).toBe(200);
     expect((await surfaces("admins", people.superAdmin!)).taskRoute).toBe(200);
-  });
-
-  it("qa:TC missing AC4 AC8: chat from before CRM_VISIBLE hid the CRM is not shown, and comes back when it is visible", async () => {
-    // A quick action while the CRM is visible stores an answer that names the deal task.
-    for (const who of [people.editor!, people.admin!]) {
-      const asked = await call(server("all").base, who.cookie, "POST", "/api/concierge/quick/due-week", {});
-      expect(asked.status, asked.text).toBe(200);
-      expect(await chat("all", who)).toContain(DEAL_TASK);
-    }
-    // off hides it from everyone, admins from the Editor only.
-    for (const who of [people.editor!, people.admin!]) for (const word of [DEAL_TASK, DEAL_NAME]) expect(await chat("off", who)).not.toContain(word);
-    expect(await chat("admins", people.editor!)).not.toContain(DEAL_TASK);
-    expect(await chat("admins", people.admin!)).toContain(DEAL_TASK);
-    // Nothing is deleted: with the CRM visible the history is back.
-    expect(await chat("all", people.editor!)).toContain(DEAL_TASK);
-  });
-
-  it("qa:TC missing AC5 AC8: an Admin demoted to Member under admins no longer sees deal names in their earlier chat", async () => {
-    const admin = people.admin!;
-    const setRole = async (orgRole: "MEMBER" | "ADMIN") => {
-      const r = await call(server("admins").base, people.superAdmin!.cookie, "PATCH", `/api/team/${admin.id}`, { orgRole });
-      expect(r.status, r.text).toBe(200);
-    };
-    // As an Admin under admins, a quick action names the deal task, and the chat shows it.
-    const asked = await call(server("admins").base, admin.cookie, "POST", "/api/concierge/quick/due-week", {});
-    expect(asked.status, asked.text).toBe(200);
-    expect(asked.text).toContain(DEAL_TASK);
-    expect(await chat("admins", admin)).toContain(DEAL_TASK);
-    // Demoted to Member: the same session's next chat read checks the role again and hides every deal-naming message.
-    await setRole("MEMBER");
-    try {
-      const now = await chat("admins", admin);
-      for (const word of [DEAL_TASK, DEAL_NAME, STAGE]) expect(now).not.toContain(word);
-    } finally {
-      await setRole("ADMIN");
-    }
-    // Promoted back, the history is there again: nothing was deleted.
-    expect(await chat("admins", admin)).toContain(DEAL_TASK);
   });
 });

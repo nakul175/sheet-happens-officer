@@ -74,6 +74,8 @@ jobs:
       - run: npx prisma migrate deploy
       - name: Build
         run: npm run build
+      - name: Verify retired routes and preserved suite routes
+        run: node scripts/verify-concierge-removal.mjs
       # APL-2609's mode test drives these mode servers in Playwright Chromium.
       - name: Install Playwright Chromium
         run: npx playwright-core install --with-deps chromium

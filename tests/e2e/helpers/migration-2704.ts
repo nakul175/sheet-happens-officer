@@ -1,4 +1,4 @@
-import { BASE_URL, expect, zz, type Later, type Who } from "../support";
+import { expect, zz, type Later, type Who } from "../support";
 import { archiveProject } from "./migration-2731";
 
 /** Current archive payloads, with cleanup registered before the next fixture write. */
@@ -19,19 +19,4 @@ export async function newDeal(leader: Who, later: Later, label: string, members:
   later(() => archiveProject(leader.api, id, leader.user.id));
   for (const member of members) expect((await leader.api.post(`/api/projects/${id}/members`, { userId: member.user.id, role: "EDITOR" })).status).toBe(201);
   return { id, name };
-}
-
-/** Only disposable, explicitly named ZZ-TEST accounts on a loopback QA server may clear their test chat. */
-export async function cleanChat(who: Who, later: Later) {
-  expect(["127.0.0.1", "localhost"]).toContain(new URL(BASE_URL).hostname);
-  expect(who.user.name).toMatch(/^ZZ-TEST\b/);
-  const clear = async () => {
-    const result = await who.api.del("/api/concierge/messages");
-    expect(result.status, JSON.stringify(result.json)).toBe(200);
-    const thread = await who.api.get("/api/concierge/state");
-    expect(thread.status, JSON.stringify(thread.json)).toBe(200);
-    expect(thread.json.messages).toEqual([]);
-  };
-  await clear();
-  later(clear);
 }

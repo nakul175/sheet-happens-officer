@@ -8,7 +8,7 @@ import { logAction, notify } from "@/lib/notify";
  *  - tasks they were approver on go to the project Leader (the Leader also becomes the holder
  *    if the task was awaiting approval; if the Leader is already the assignee, the approver is cleared);
  *  - their other open tasks and subtasks go to `newAssigneeId`, or each to the person named for it
- *    in `handover` (the concierge card's per-task choice, SHO-BUG-7), the rest to `newAssigneeId`;
+ *    in `handover` (the explicit per-task choice, SHO-BUG-7), the rest to `newAssigneeId`;
  *  - they are dropped as collaborator unless `keepCollaborations` (a Viewer may collaborate).
  */
 export type Released = {

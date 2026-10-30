@@ -72,17 +72,6 @@ test("AC2: a Viewer sees every field read-only and no action buttons; the Leader
   await expect(l.getByRole("button", { name: "Mark complete" })).toBeVisible();
 });
 
-test("AC3: the concierge stays visible while the overlay is open", async ({ admin, later }) => {
-  const p = await proj(admin, "ov-concierge", later);
-  const t = await mk(admin, p, zz("concierge task"));
-  await admin.page.goto(`/projects/${p}?task=${t}`);
-  await expect(dialog(admin.page)).toBeVisible();
-  const c = admin.page.locator('aside[aria-label="Concierge"]');
-  await expect(c).toBeVisible();
-  const box = await c.boundingBox();
-  expect(box && box.width > 0 && box.height > 0).toBe(true);
-});
-
 test("AC4: a task link opens the task over its project; a trashed, missing or foreign task says it isn't available", async ({ admin, member, later }) => {
   const p = await proj(admin, "ov-link", later);
   const t = await mk(admin, p, zz("linked"));

@@ -9,7 +9,6 @@
     "lint": "eslint",
     "typecheck": "node scripts/typecheck.mjs",
     "test": "vitest run",
-    "eval:concierge": "tsx tests/eval/runner.ts",
     "test:viewport": "vitest run -c vitest.viewport.config.mts",
     "test:e2e": "vitest run -c vitest.e2e.config.mts",
     "test:modes": "vitest run -c vitest.modes.config.mts",

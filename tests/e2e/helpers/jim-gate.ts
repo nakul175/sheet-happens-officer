@@ -5,10 +5,9 @@
 // Each answer is worked out once per run and recorded on every test that asks, as a "deployed" annotation.
 // conciergeLive and crmModeLive answer the same way for two server settings a spec may depend on: whether the concierge is
 // switched on, and which CRM_VISIBLE mode staging was started with (the browser can read it but not change it).
-import type { Page } from "@playwright/test";
 import { test, expect, BASE_URL, zz } from "../support";
 import { getTask, newProject, newTask, type Who } from "../g2";
-import { cleanChat, deleteTask, newDeal, quickAction, raw } from "./jim-http";
+import { deleteTask, raw } from "./jim-http";
 import { bell, withUnread } from "./jim-bell";
 
 type Later = (fn: () => Promise<unknown>) => void;
@@ -18,7 +17,6 @@ export type Gate = { pr: number; deployed: boolean; how: string };
 const HEADS: Record<number, string> = {
   6: "07454a62a82d2aa91e4e6f68cdb2e44abdeddb5d",
   9: "87721120b9",
-  10: "69c36318a8d7444f874b0c935a368834690e34f3",
   12: "72d2a3d88b",
   14: "40d0793d4b6418053241e1cbdc7fec448fa5825c",
   18: "cd09cf0832",
@@ -26,12 +24,6 @@ const HEADS: Record<number, string> = {
   21: "73f27cd720e6e3494eb011b3fb61115214bd10c0",
   23: "5d29c0f0e116d5ce0bc01dc098adbd52005a2be9",
   24: "72ee2713b4b52e8a636af5696006302b5548fcc8",
-  // PR #32 (APL-2659). A later push falls through to the probe, same as the others.
-  32: "947cbc9714b23915997ff34f409611206018c7f3",
-  // PR #34 (APL-2519). A later push falls through to the probe.
-  34: "983914450254dbca35ee6c3749444e7d9a2a3234",
-  // PR #35 (APL-2641), stacked on #34. A later push falls through to the probe.
-  35: "3b132d09a05cf525e9bd7c4f52e582dd30f8e0c7",
 };
 
 let releaseOnce: Promise<string | null> | null = null;
@@ -42,19 +34,6 @@ export function stagingRelease(who: Who) {
 }
 
 const REFUSED = "Only the project Leader or an Admin can do this.";
-
-/** HTML, visible text and scripts from /usage, so a client-only heading can be recognised before the figures paint. */
-async function servedUsage(page: Page) {
-  const parts: Promise<string>[] = [];
-  page.on("response", (r) => {
-    const kind = r.request().resourceType();
-    const type = r.headers()["content-type"] ?? "";
-    if (kind === "script" || kind === "document" || type.includes("javascript") || type.includes("html")) parts.push(r.text().catch(() => ""));
-  });
-  await page.goto("/usage", { waitUntil: "load" });
-  await page.waitForTimeout(1000); // a late client chunk has arrived by now
-  return [await page.content(), await page.locator("body").innerText(), ...(await Promise.all(parts))].join("\n");
-}
 
 const PROBES: Record<number, (admin: Who, member: Who | null, later: Later) => Promise<Omit<Gate, "pr">>> = {
   // PR #18 (APL-2643): over 99 unread, the bell's name says the "99+" it paints. On main it says the raw total.
@@ -87,19 +66,6 @@ const PROBES: Record<number, (admin: Who, member: Who | null, later: Later) => P
     const p = await newProject(admin, later, { label: "gate pr14", members: [{ who: member, role: "EDITOR" }] });
     const del = await deleteTask(member, await newTask(admin, p.id));
     return { deployed: del.status === 204 && !del.undoId, how: `probe: Editor's delete answered ${del.status} ${del.undoId ? "with" : "without"} x-undo-id` };
-  },
-  // PR #10 (APL-2646): a Member's quick action scoped to a deal CRM_VISIBLE hides is the non-member 404
-  // "Project not found", and the body does not name the deal. On main the label names the deal.
-  // Under CRM_VISIBLE=all nothing is hidden, so the two builds answer alike and the probe cannot tell.
-  10: async (admin, member, later) => {
-    if (!member) return { deployed: false, how: "probe needs the Member account (SHO_MEMBER_*)" };
-    const mode = await crmModeLive(admin, member);
-    if (mode !== "admins") return { deployed: false, how: `probe needs CRM_VISIBLE=admins and staging runs ${mode}` };
-    await cleanChat(member, later);
-    const deal = await newDeal(admin, later, "gate pr10", [member]);
-    const r = await quickAction(member, "due-week", deal.id);
-    const hid = r.status === 404 && r.json.error === "Project not found" && !r.body.includes(deal.name);
-    return { deployed: hid, how: `probe: a Member's quick action on a hidden deal answered ${r.status} ${hid ? "without" : "with"} the deal's name` };
   },
   // PR #12 (APL-2647): useGet returns `failed: !loading && ...`. A client-only fix, so the probe reads the JS staging serves
   // (no screen under test is involved), and falls back to the Person page, which drops its "Loading…" text in that PR.
@@ -235,39 +201,6 @@ const PROBES: Record<number, (admin: Who, member: Who | null, later: Later) => P
       return { deployed: hit, how: `probe: served CSS/JS ${hit ? "includes" : "lacks"} ic-gap and ic-hit` };
     } finally { await page.close(); }
   },
-  // PR #34 (APL-2519): the Usage screen shows "Spend against the monthly ceiling". On main the Super Admin still
-  // sees calls, tokens and cost, and that heading is not in the page or the script it loads. Client text, so the probe
-  // reads what staging serves (no usage row is written).
-  34: async (admin) => {
-    const page = await admin.page.context().newPage();
-    try {
-      const blob = await servedUsage(page);
-      const hit = blob.includes("Spend against the monthly ceiling");
-      return { deployed: hit, how: `probe: Usage ${hit ? "includes" : "lacks"} spend against the monthly ceiling` };
-    } finally { await page.close(); }
-  },
-  // PR #35 (APL-2641): the same screen also shows "Messages this month" and "Quick actions this month".
-  // PR #34 has the ceiling block and not these two headings, so a build with only #34 stays "not live" here.
-  35: async (admin) => {
-    const page = await admin.page.context().newPage();
-    try {
-      const blob = await servedUsage(page);
-      const hit = blob.includes("Messages this month") && blob.includes("Quick actions this month");
-      return { deployed: hit, how: `probe: Usage ${hit ? "shows" : "does not show"} messages this month and quick-action counts` };
-    } finally { await page.close(); }
-  },
-  // PR #32 (APL-2659): a quick action scoped to an archived project the person belongs to is "Project not found"
-  // (myProjects leaves archived rows out) and the name is not in the answer. On main the membership lookup still
-  // finds it and the label names it. PR #10 hides deals the CRM hides; it does not hide archived projects.
-  // The chat is cleared afterwards when this probe was the one that filled it (cleanChat).
-  32: async (admin, _member, later) => {
-    await cleanChat(admin, later);
-    const p = await newProject(admin, later, { label: "gate pr32" });
-    expect((await admin.api.post(`/api/projects/${p.id}/archive`)).status, "probe archives the project").toBe(200);
-    const r = await quickAction(admin, "due-week", p.id);
-    const hid = r.status === 404 && r.json.error === "Project not found" && !r.body.includes(p.name);
-    return { deployed: hid, how: `probe: a quick action on an archived project answered ${r.status} ${hid ? "without" : "with"} its name` };
-  },
 };
 
 const gates = new Map<number, Promise<Gate>>();
@@ -293,28 +226,7 @@ export async function prLive(pr: keyof typeof HEADS, admin: Who, member: Who | n
 /** The skip reason for a gate that said no. */
 export const notLive = (g: Gate, what: string) => `PR #${g.pr} is not live on this staging build (${g.how}); ${what}`;
 
-export type Concierge = { live: boolean; how: string };
-let conciergeOnce: Promise<Concierge> | null = null;
 
-/**
- * Whether the concierge is switched on in the build under test: /api/concierge/state answers and does not say NOT_ENABLED.
- * A person's weekly cap or a provider outage still counts as on: quick actions answer without the model.
- */
-export async function conciergeLive(who: Who): Promise<Concierge> {
-  conciergeOnce ??= (async () => {
-    const s = await who.api.get("/api/concierge/state");
-    if (s.status !== 200) return { live: false, how: `GET /api/concierge/state answered ${s.status}` };
-    const code = s.json.disabled?.code as string | undefined;
-    if (code === "NOT_ENABLED") return { live: false, how: "the concierge state says NOT_ENABLED" };
-    return { live: true, how: code ? `on, paused for this account (${code}); quick actions still answer` : "on" };
-  })();
-  const c = await conciergeOnce;
-  test.info().annotations.push({ type: "concierge", description: `${c.live ? "on" : "off"} (${c.how})` });
-  return c;
-}
-
-/** The skip reason for a concierge that is off. */
-export const conciergeOff = (c: Concierge) => `The concierge is off on this staging build (${c.how}).`;
 
 /** "all or admins" when there is no Member to tell them apart: the Admin sees deals in both. */
 export type CrmLive = "all" | "admins" | "off" | "all or admins";

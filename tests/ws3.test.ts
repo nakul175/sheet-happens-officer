@@ -113,17 +113,6 @@ describe("search (3.2 AC6, 3.6 AC6)", () => {
   });
 });
 
-describe("usage (9.2 AC3)", () => {
-  it("is visible to the Super Admin only", async () => {
-    const sa = await superAdmin();
-    const m = await account("member");
-    const r = await sa.c.get("/api/usage");
-    expect(r.status).toBe(200);
-    expect(r.json.month.calls).toBeGreaterThanOrEqual(0);
-    expect((await m.c.get("/api/usage")).status).toBe(404);
-  });
-});
-
 describe("sign out everywhere (1.6 AC3)", () => {
   it("ends this session and every other one", async () => {
     const a = await account("dev");

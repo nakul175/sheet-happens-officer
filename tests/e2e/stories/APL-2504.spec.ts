@@ -6,8 +6,7 @@ import { test } from "./qa";
 // the live 14.14 behaviour (Editor: own tasks only; Viewer: refused) and say so.
 // Data: every project and task is named "ZZ-TEST ..."; projects are archived afterwards.
 import { expect, zz, type Who } from "../support";
-import { cleanChat, patchCurrent } from "../helpers/jim-http";
-import { ask, cardOf } from "../helpers/jim-concierge";
+import { patchCurrent } from "../helpers/jim-http";
 import { localSql, runLocalJob, sourceOf, sqlId } from "../helpers/local-clock";
 import { activityRow } from "../helpers/screen-row";
 
@@ -55,37 +54,6 @@ test("APL-2504 AC2: a change made on screen is not tagged via concierge", async 
   expect(screen?.via).toBe("screen");
   await admin.page.goto(`/projects/${p}/activity`);
   await expect(activityRow(admin.page, "changed priority").getByText("via concierge")).toHaveCount(0);
-});
-
-// qa:TC missing
-test("APL-2504 AC2: a change made through the concierge carries a via concierge tag @provider", async ({ admin, later }) => {
-  test.info().annotations.push({ type: "qa:TC", description: "qa:TC missing" });
-  const state = await admin.api.get("/api/concierge/state");
-  const code = (state.json.disabled as { code?: string } | undefined)?.code;
-  const modelCan = state.status === 200 && !code;
-  expect(modelCan, `Live staging Concierge configuration required${code ? ` (${code})` : ""}; disabled configuration is not a pass`).toBe(true);
-  await cleanChat(admin, later);
-  const p = await proj(admin, "log-via-live", later);
-  const title = zz("concierge priority");
-  await mk(admin, p, title);
-  const asked = await ask(admin, `Set the priority of "${title}" to Low.`);
-  expect(asked.status, JSON.stringify(asked.json)).toBe(200);
-  const card = cardOf(asked.messages);
-  expect(card?.status, "the concierge offers a confirm card before it writes").toBe("PENDING");
-  const confirmed = await admin.api.post(`/api/concierge/cards/${card!.id}/confirm`, {});
-  expect(confirmed.status, JSON.stringify(confirmed.json)).toBe(200);
-  const via = (await rows(admin, p)).find((r) => r.via === "concierge" && /priority/.test(r.what));
-  expect(via, "the concierge row is tagged").toBeTruthy();
-  await admin.page.goto(`/projects/${p}/activity`);
-  await expect(activityRow(admin.page, "priority").getByText("via concierge", { exact: true })).toBeVisible();
-});
-
-// qa:TC missing
-test("APL-2504 AC2: the via concierge label comes from the concierge channel @static", async () => {
-  test.info().annotations.push({ type: "qa:TC", description: "qa:TC missing" });
-  expect(sourceOf("src/lib/feed.ts", "via: r.channel")).toContain('r.channel === "CONCIERGE" ? "concierge" : "screen"');
-  expect(sourceOf("src/app/(app)/projects/[id]/activity/Activity.tsx", 'r.via === "concierge"')).toContain("via concierge");
-  expect(sourceOf("src/lib/concierge/cards.ts", 'channel: "CONCIERGE"')).toContain('channel: "CONCIERGE"');
 });
 
 // qa:TC missing
