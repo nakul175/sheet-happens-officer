@@ -78,6 +78,7 @@ export async function rankedSearch(user: Actor, query: string, options: {
         AND n."workspaceId"=${actor.workspaceId} AND o."workspaceId"=${actor.workspaceId} AND (${!!options.archived} OR o."archivedAt" IS NULL)`);
   }
   const termValues = Prisma.join(terms.map((term) => Prisma.sql`(${term}::text)`));
+  const phrasePattern = `%${phrase.replace(/[\\%_]/g, "\\$&")}%`;
   const textQuery = Prisma.join(terms.map((term) => Prisma.sql`plainto_tsquery('english', ${term})`), " || ");
   const typos = terms.filter((term) => term.length >= 6);
   // Direct predicates let PostgreSQL push matching into each UNION branch and use
@@ -101,8 +102,9 @@ export async function rankedSearch(user: Actor, query: string, options: {
           + ts_rank_cd(to_tsvector('english', document), plainto_tsquery('english', ${phrase})))::double precision AS score
         FROM source
         WHERE to_tsvector('english', document) @@ (${textQuery}) OR (${typoMatch})
+          OR ("matchedField" IN ('title','name') AND lower(document) LIKE lower(${phrasePattern}))
       ), coverage AS (
-        SELECT type,id,count(DISTINCT word) AS count FROM scored CROSS JOIN LATERAL unnest("matchedWords") AS matched(word) GROUP BY type,id
+        SELECT type,id,count(DISTINCT word) AS count FROM scored LEFT JOIN LATERAL unnest("matchedWords") AS matched(word) ON true GROUP BY type,id
       ), best AS (
         SELECT DISTINCT ON (type,id) * FROM scored ORDER BY type,id,score DESC,"matchedField",document
       ) SELECT best.id,best.type,best.title,best.href,best."matchedField",best.document,

@@ -38,7 +38,7 @@ retains additive indexes until separately approved cleanup.
 
 ## Validation status
 
-- 12 focused input/excerpt, query-contract, activation and existing archived-search
+- 13 focused input/excerpt, query-contract, activation and existing archived-search
   tests pass. Query tests mock Prisma: they establish bindings, predicates and
   payload behavior, **not execution correctness or query-plan/performance proof**.
 - Repository lint: zero errors (20 existing warnings).

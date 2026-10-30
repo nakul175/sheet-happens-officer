@@ -40,6 +40,14 @@ describe("SHO-2587 query security and shared result contract", () => {
     expect(sql.values).toContain("project-one");
     expect(sql.text).toContain('"completedAt" IS NULL');
   });
+  it("keeps literal title phrases eligible when English stop-word filtering removes all lexemes", async () => {
+    await rankedSearch({ id: "member", orgRole: "MEMBER" }, "to do");
+    const sql = mocks.query.mock.calls[1][0];
+    expect(sql.values).toContain("%to do%");
+    expect(sql.text).toContain("LEFT JOIN LATERAL");
+    await rankedSearch({ id: "member", orgRole: "MEMBER" }, "budget%_");
+    expect(mocks.query.mock.calls[3][0].values).toContain("%budget\\%\\_%");
+  });
   it("returns only current query rows and turns stored markup into a bounded plain-text excerpt", async () => {
     mocks.query.mockResolvedValueOnce([]).mockResolvedValueOnce([
       { id: "note-1", type: "NOTE", title: "Client", href: "/accounts/org-1", matchedField: "note", document: "<b>Revised budget</b>", score: 1000 },
