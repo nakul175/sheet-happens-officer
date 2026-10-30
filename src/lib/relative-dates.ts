@@ -1,9 +1,8 @@
-// India-time helpers for the concierge: periods, readable dates and relative-date resolution (SHO-US-8.4 AC5).
+// Shared India-time helpers for task forms and quick add.
 import { addDays, formatDueDate, parseDueDate, startOfTodayIST } from "@/lib/dates";
 
 const IST_MS = 5.5 * 3600_000;
 export const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
-const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 
 /** The IST calendar parts of an instant. */
 export function istParts(d: Date) {
@@ -11,46 +10,12 @@ export function istParts(d: Date) {
   return { y: x.getUTCFullYear(), m: x.getUTCMonth(), d: x.getUTCDate(), wd: x.getUTCDay(), h: x.getUTCHours(), min: x.getUTCMinutes() };
 }
 
-/** "Monday 19 October 2026" for an instant (its India-time date). */
-export function fullDate(d: Date) {
-  const p = istParts(d);
-  return `${WEEKDAYS[p.wd]} ${p.d} ${MONTHS[p.m]} ${p.y}`;
-}
-export function shortDate(d: Date) {
-  const p = istParts(d);
-  return `${p.d} ${MONTHS[p.m].slice(0, 3)} ${p.y}`;
-}
-export function fullDateTime(d: Date) {
-  const p = istParts(d);
-  const h12 = p.h % 12 === 0 ? 12 : p.h % 12;
-  return `${fullDate(d)}, ${h12}:${String(p.min).padStart(2, "0")} ${p.h < 12 ? "am" : "pm"} India time`;
-}
-
-/** Start of the calendar month (India time) containing `now`. */
-export function monthStartIST(now = new Date()) {
-  const p = istParts(now);
-  return new Date(Date.UTC(p.y, p.m, 1) - IST_MS);
-}
-export function nextMonthStartIST(now = new Date()) {
-  const p = istParts(now);
-  return new Date(Date.UTC(p.y, p.m + 1, 1) - IST_MS);
-}
-/** Monday 00:00 India time of the week containing `now`. */
-export function weekStartIST(now = new Date()) {
-  const today = startOfTodayIST(now);
-  return addDays(today, -((istParts(now).wd + 6) % 7));
-}
-export const nextWeekStartIST = (now = new Date()) => addDays(weekStartIST(now), 7);
-
-/** Today's date and weekday in India time, for the system prompt. */
-export const todayLine = (now = new Date()) => fullDate(now);
-
 const DAY_NAMES = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
 
 /**
- * A due date as the model wrote it: YYYY-MM-DD, or a relative phrase the server resolves.
+ * A due date from a task form: YYYY-MM-DD, or a relative phrase the server resolves.
  * Relative phrases mean the next occurrence AFTER today in India time (so "Monday" on a Monday is next Monday).
- * Returns the stored date (midnight IST) or throws a plain message the model can relay.
+ * Returns the stored date (midnight IST) or throws a validation error.
  */
 export function resolveDue(input: string, now = new Date()): Date {
   const s = input.trim().toLowerCase();

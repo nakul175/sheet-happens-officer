@@ -1,5 +1,5 @@
 // APL-2609 (SHO-BUG-2) and APL-2726 (CRM_VISIBLE enforcement): one test per acceptance criterion.
-// With CRM_VISIBLE=off no deal, deal task or stage reaches My tasks, search, the task routes or the concierge, for anyone;
+// With CRM_VISIBLE=off no deal, deal task or stage reaches My tasks, search, the task routes, for anyone;
 // with `admins` the same for everyone but Admins and the Super Admin; with `all` nothing changes.
 // The server runs with the default `all`, so these call src/lib directly (same database) and flip process.env.CRM_VISIBLE
 // in this process; `crmMode()` reads it at call time. tests/e2e/local/APL-2609.mode.test.ts drives a real server per mode.
@@ -12,15 +12,12 @@
 // only ZZ-TEST account left active.
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { account, istDate, task, type Account } from "./helpers";
-import { actor, lastData, lastResultText, say, script, tu, useFakeModel } from "./concierge-helpers";
+import { actor } from "./actor";
 import type { Actor } from "../src/lib/access";
 import { crmMode } from "../src/lib/crm";
 import { getTask, listTasks, myTasks } from "../src/lib/tasks";
 import { search } from "../src/lib/search";
-import { findTasks, listProjects, myTasks as conciergeMyTasks, projectTasks, quickAnswer } from "../src/lib/concierge/reads";
-import { answerChoice, sendMessage } from "../src/lib/concierge/engine";
 import { deactivate } from "../src/lib/team";
-import { state as chatState } from "../src/lib/concierge/thread";
 
 const STAGE = "Proposal";
 const GROUPS = ["waitingOnMe", "overdue", "next7", "later", "waitingOnOthers"] as const;
@@ -54,7 +51,6 @@ async function cleanup() {
     if (made.orgId) await must(`archive organisation ${made.orgId}`, lead.c.post(`/api/orgs/${made.orgId}/archive`, { archive: true }));
   }
   for (const who of made.people) {
-    await must(`clear chat of ${who.email}`, who.c.del("/api/concierge/messages"));
     await must(`sign out ${who.email}`, who.c.post("/api/auth/signout"));
   }
   if (sa) {
@@ -75,24 +71,12 @@ const rows = async (u: Actor) => {
   return GROUPS.flatMap((k) => g[k]);
 };
 
-/** A real concierge turn: the fake model calls one read tool, and we keep exactly what that tool handed it. */
-async function conciergeSaw(u: Actor, tool: string, input: Record<string, unknown>) {
-  let seen = "";
-  script(() => [tu(tool, input)], (r) => { seen = lastResultText(r); return [say("Here is what I found.")]; });
-  const r = await sendMessage(u, "What am I working on?");
-  return seen + JSON.stringify(r.messages);
-}
-
 /** Everything one person can learn about the deal on the four surfaces, as booleans and statuses. */
 async function surfaces(u: Actor) {
   const mine = await rows(u);
   const byTask = await search(u, w.dealTaskTitle, false);
   const byName = await search(u, w.dealName, false);
   const status = async (fn: () => Promise<unknown>) => { try { await fn(); return 200; } catch (e) { return (e as { status?: number }).status ?? 500; } };
-  const quick = await quickAnswer(u, "due-week");
-  const turn = await conciergeSaw(u, "my_tasks", { filter: "all_open" });
-  // Named, as a person asking about the deal would: list_projects returns the first 50 projects, and an Admin sees every one.
-  const listed = await conciergeSaw(u, "list_projects", { text: w.tag });
   return {
     myTasks: mine.some((t) => t.id === w.dealTask),
     stage: mine.some((t) => t.project.type === "DEAL" || t.project.stage === STAGE),
@@ -100,26 +84,17 @@ async function surfaces(u: Actor) {
     searchDeal: byName.projects.some((p) => p.id === w.dealId),
     taskRoute: await status(() => getTask(u, w.dealTask)),
     listRoute: await status(() => listTasks(u, w.dealId, {})),
-    conciergeProjectTasks: await status(() => projectTasks(u, w.dealId)),
-    conciergeFind: (await findTasks(u, w.tag)).tasks.some((t) => t.id === w.dealTask),
-    conciergeList: (await listProjects(u, w.tag)).some((p) => p.id === w.dealId),
-    conciergeMy: (await conciergeMyTasks(u, "all_open")).tasks.some((t) => t.id === w.dealTask),
-    quick: quick.text.includes(w.dealTaskTitle) || quick.text.includes(w.dealName),
-    turn: [w.dealName, w.dealTaskTitle].some((s) => turn.includes(s)) || listed.includes(w.dealName),
   };
 }
 
 const HIDDEN = {
-  myTasks: false, stage: false, searchTask: false, searchDeal: false, taskRoute: 404, listRoute: 404, conciergeProjectTasks: 404,
-  conciergeFind: false, conciergeList: false, conciergeMy: false, quick: false, turn: false,
+  myTasks: false, stage: false, searchTask: false, searchDeal: false, taskRoute: 404, listRoute: 404,
 };
 const SHOWN = {
-  myTasks: true, stage: true, searchTask: true, searchDeal: true, taskRoute: 200, listRoute: 200, conciergeProjectTasks: 200,
-  conciergeFind: true, conciergeList: true, conciergeMy: true, quick: true, turn: true,
+  myTasks: true, stage: true, searchTask: true, searchDeal: true, taskRoute: 200, listRoute: 200,
 };
 
-describe("qa:TC missing APL-2609 CRM_VISIBLE hides deals from My tasks, search, the task routes and the concierge", () => {
-  useFakeModel();
+describe("qa:TC missing APL-2609 CRM_VISIBLE hides deals from My tasks, search, the task routes", () => {
 
   beforeAll(async () => {
     const run = `${Date.now().toString(36)}${process.pid.toString(36)}`;
@@ -191,22 +166,9 @@ describe("qa:TC missing APL-2609 CRM_VISIBLE hides deals from My tasks, search, 
     expect((await getTask(w.ed, w.plainTask)).id).toBe(w.plainTask);
   });
 
-  it("qa:TC missing AC4: with CRM_VISIBLE=off, the concierge tools, a model turn and the quick actions never mention the deal", async () => {
-    setMode("off");
-    const seen = await surfaces(w.ed);
-    expect({ conciergeProjectTasks: seen.conciergeProjectTasks, conciergeFind: seen.conciergeFind, conciergeList: seen.conciergeList, conciergeMy: seen.conciergeMy, quick: seen.quick, turn: seen.turn })
-      .toEqual({ conciergeProjectTasks: 404, conciergeFind: false, conciergeList: false, conciergeMy: false, quick: false, turn: false });
-    // A quick action scoped to the hidden deal is the same 404 as a project the person is not in (APL-2723).
-    await expect(quickAnswer(w.ed, "due-week", new Date(), w.dealId)).rejects.toMatchObject({ status: 404 });
-    const turn = await conciergeSaw(w.ed, "my_tasks", { filter: "all_open" });
-    for (const word of [w.dealName, w.dealTaskTitle, STAGE]) expect(turn).not.toContain(word);
-    expect(turn).toContain(w.plainTaskTitle);
-  });
-
   it("qa:TC missing AC5: with CRM_VISIBLE=admins, an Editor sees no deal data on any surface", async () => {
     setMode("admins");
     expect(await surfaces(w.ed)).toEqual(HIDDEN);
-    await expect(quickAnswer(w.ed, "due-week", new Date(), w.dealId)).rejects.toMatchObject({ status: 404 });
   });
 
   it("qa:TC missing AC6: with CRM_VISIBLE=admins, an Admin and the Super Admin see deal tasks as normal", async () => {
@@ -215,7 +177,6 @@ describe("qa:TC missing APL-2609 CRM_VISIBLE hides deals from My tasks, search, 
     // The Super Admin holds the deal task too: it is in their own My tasks, concierge lists and quick actions, with its stage.
     expect(await surfaces(w.sa)).toEqual(SHOWN);
     expect((await rows(w.sa)).find((t) => t.id === w.dealTask)?.project).toMatchObject({ id: w.dealId, type: "DEAL", stage: STAGE });
-    expect((await quickAnswer(w.adm, "due-week", new Date(), w.dealId)).q.label).toContain(w.dealName);
   });
 
   it("qa:TC missing AC7: with CRM_VISIBLE=all, every member's behaviour is unchanged", async () => {
@@ -231,58 +192,8 @@ describe("qa:TC missing APL-2609 CRM_VISIBLE hides deals from My tasks, search, 
     setMode("off");
     expect(await surfaces(w.adm)).toEqual(HIDDEN);
     expect(await surfaces(w.sa)).toEqual(HIDDEN);
-    await expect(quickAnswer(w.adm, "due-week", new Date(), w.dealId)).rejects.toMatchObject({ status: 404 });
     setMode("admins");
     expect((await surfaces(w.adm)).taskRoute).toBe(200);
     expect((await surfaces(w.sa)).taskRoute).toBe(200);
-  });
-
-  it("qa:TC missing AC4 AC8: chat written while the CRM was visible is neither shown nor replayed once it is hidden", async () => {
-    // Chat reads the person's role from the database. The Editor is a Member there and in their Actor, so the lever alone
-    // decides here. The Admin demoted to Member is covered on real servers in tests/e2e/local/APL-2609.mode.test.ts.
-    const says = `Your deal ${w.dealName} has ${w.dealTaskTitle} due, at stage ${STAGE}.`;
-    const shown = async (u: Actor) => JSON.stringify((await chatState(u)).messages);
-    setMode("all");
-    // Seed a grounded CRM read: ungrounded model prose is intentionally suppressed.
-    script(() => [tu("find_deals", { text: w.tag })], () => [say(says)]);
-    await sendMessage(w.ed, `ZZ-TEST which deals am I on ${w.tag}?`);
-    expect(await shown(w.ed)).toContain(w.dealName);
-    for (const mode of ["off", "admins"]) {
-      setMode(mode);
-      const now = await shown(w.ed);
-      for (const word of [w.dealName, w.dealTaskTitle]) expect(now, mode).not.toContain(word);
-    }
-    // A turn while the CRM is hidden is shown, and the earlier answer is not replayed to the model.
-    setMode("off");
-    let replayed = "";
-    script((req) => { replayed = JSON.stringify(req.messages); return [say("Noted.")]; });
-    await sendMessage(w.ed, `ZZ-TEST and now ${w.tag}?`);
-    expect(replayed).toContain(`ZZ-TEST and now ${w.tag}?`);
-    for (const word of [w.dealName, w.dealTaskTitle]) expect(replayed).not.toContain(word);
-    const later = await shown(w.ed);
-    expect(later).toContain(`ZZ-TEST and now ${w.tag}?`);
-    expect(later).toContain("Nothing has changed. I cannot change anything without a card you confirm");
-    expect(later).not.toContain(w.dealName);
-    // Nothing was deleted: with the CRM visible again the history is back.
-    setMode("all");
-    expect(await shown(w.ed)).toContain(w.dealName);
-  });
-
-  it("qa:TC missing AC4 AC8: an open Narrow it down asked while the CRM was visible never reaches the model once it is hidden", async () => {
-    setMode("all");
-    for (let i = 0; i < 7; i++) await task(made.lead!, made.plainId!, { title: `ZZ-TEST review ${w.tag} ${i}`, assigneeId: w.ed.id, dueDate: istDate(10 + i) });
-    script(
-      () => [tu("find_tasks", { text: `review ${w.tag}` })],
-      (r) => [tu("ask_choice", { question: "Which review?", kind: "task", ids: lastData(r).tasks.map((t: { id: string }) => t.id) })],
-    );
-    const q = (await sendMessage(w.ed, `ZZ-TEST move the ${w.dealName} review to Friday`)).messages[1];
-    expect(q.choices?.some((c) => c.id === "narrow")).toBe(true);
-    await answerChoice(w.ed, q.id, "narrow");
-    setMode("off");
-    let prompt = "";
-    script((req) => { prompt = JSON.stringify(req.messages); return [say("Noted.")]; });
-    await sendMessage(w.ed, "ZZ-TEST the one due Friday");
-    expect(prompt).toContain("ZZ-TEST the one due Friday");
-    expect(prompt).not.toContain(w.dealName);
   });
 });

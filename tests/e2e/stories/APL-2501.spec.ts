@@ -18,7 +18,7 @@ async function proj(admin: Who, label: string, later: (f: () => Promise<unknown>
   return id;
 }
 
-test("AC1: at 1280 px the approved desktop header, content and 340 px concierge slot render on list screens", async ({ admin, later }) => {
+test("AC1: at 1280 px the approved desktop header and full content width render on list screens", async ({ admin, later }) => {
   const p = await proj(admin, "shell-wide", later);
   await admin.page.setViewportSize({ width: 1280, height: 800 });
   await admin.page.goto("/my-tasks");
@@ -28,19 +28,13 @@ test("AC1: at 1280 px the approved desktop header, content and 340 px concierge 
   await admin.page.keyboard.press("Escape");
   await expect(admin.page.locator("aside[aria-label='Main']")).toBeHidden();
   await expect(admin.page.locator("main.content, main#main").first()).toBeVisible();
-  const dock = admin.page.locator('aside[aria-label="Concierge"]');
-  await expect(dock).toBeVisible();
-  const w = (await dock.boundingBox())!.width;
-  expect(Math.round(w)).toBeGreaterThanOrEqual(336);
-  expect(Math.round(w)).toBeLessThanOrEqual(344);
-  // Project views use the approved bottom concierge bar rather than the My tasks side dock.
-  await admin.page.goto(`/projects/${p}`);
-  const bar = admin.page.locator("aside.cc-barslot");
-  await expect(bar).toBeVisible();
-  const box = (await bar.boundingBox())!;
-  expect(box.height).toBeGreaterThanOrEqual(48);
-  expect(box.x).toBeGreaterThanOrEqual(0);
-  expect(box.x + box.width).toBeLessThanOrEqual(1280);
+  for (const path of ["/my-tasks", `/projects/${p}`]) {
+    await admin.page.goto(path);
+    const content = admin.page.locator("main#main");
+    await expect(content).toBeVisible();
+    expect((await content.boundingBox())!.width).toBeGreaterThan(1000);
+    await expect(admin.page.locator(".with-dock,.with-bar,.cc-barslot,.cc-fabwrap")).toHaveCount(0);
+  }
 });
 
 test("AC2: at 390 px the sidebar collapses and no page scrolls sideways", async ({ admin, later }) => {
@@ -69,13 +63,13 @@ test("AC3: the icon-only mark shows at 24 px and the text uses Public Sans", asy
   expect(font).toMatch(/Public\s*Sans/i);
 });
 
-test("AC4: Usage and Audit log are for the Super Admin only; a Member who types the address gets the refusal", async ({ admin, member }) => {
+test("AC4: Audit log is for the Super Admin only; retired Usage is not in the navigation", async ({ admin, member }) => {
   await admin.page.setViewportSize({ width: 1280, height: 800 });
   await member.page.setViewportSize({ width: 1280, height: 800 });
   await admin.page.goto("/");
   await admin.page.getByRole("button", { name: /^Account and utilities, \S+$/ }).click();
   const adminNav = admin.page.locator("#account-utilities");
-  await expect(adminNav.getByRole("link", { name: "Usage" })).toBeVisible();
+  await expect(adminNav.getByRole("link", { name: "Usage" })).toHaveCount(0);
   await expect(adminNav.getByRole("link", { name: "Audit log" })).toBeVisible();
   await member.page.goto("/");
   await member.page.getByRole("button", { name: "Open menu", exact: true }).click();
@@ -85,7 +79,7 @@ test("AC4: Usage and Audit log are for the Super Admin only; a Member who types 
   await member.page.getByRole("button", { name: /^Account and utilities, \S+$/ }).click();
   await expect(member.page.locator("#account-utilities").getByRole("link", { name: "Usage" })).toHaveCount(0);
   await expect(member.page.locator("#account-utilities").getByRole("link", { name: "Audit log" })).toHaveCount(0);
-  for (const path of ["/usage", "/audit"]) {
+  for (const path of ["/audit"]) {
     await member.page.goto(path);
     await expect(member.page.getByText("This page isn't available").first()).toBeVisible();
   }

@@ -251,7 +251,7 @@ export async function listTasks(
 }
 
 /** APL-2669: a well-formed timestamp that is not the task's current instant.
- *  extra stays on the thrown error for bulk and the concierge. HTTP routes drop it (APL-2670). */
+ *  extra stays on the thrown error for bulk operations. HTTP routes drop it (APL-2670). */
 async function versionConflict(user: Actor, id: string, t: TaskRow, role: Role): Promise<never> {
   const last = await db.actionLog.findFirst({ where: { targetType: "task", targetId: id }, orderBy: { createdAt: "desc" }, include: { actor: { select: { name: true } } } });
   const who = last?.actor.name ?? null;
@@ -312,7 +312,7 @@ export async function updateTask(
     newlyBlocked = !t.blocked;
   }
   if (!Object.keys(data).length) return;
-  // The updatedAt this write stored. A later op in the same concierge card follows this, not a re-read.
+  // The updatedAt this write stored. A later operation in the same request follows this, not a re-read.
   return db.$transaction(async (tx) => {
     const row = await tx.task.update({ where: { id }, data });
     if (newlyBlocked) {

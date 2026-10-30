@@ -3,7 +3,7 @@
 // The live server per mode is tests/apl-2713-crm-modes.mode.test.ts (npm run test:modes).
 // Seeding goes through the app, which must be running with the CRM visible (the default).
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { actor } from "./concierge-helpers";
+import { actor } from "./actor";
 import { account, admin, istDate, project, superAdmin, task, type Account } from "./helpers";
 import type { Actor } from "../src/lib/access";
 import { db } from "../src/lib/db";

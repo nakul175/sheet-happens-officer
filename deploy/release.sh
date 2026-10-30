@@ -53,8 +53,6 @@ install_cron() {
     && log "$name cron installed for $(id -un)" || log "WARNING: could not install the $name cron"
 }
 install_cron reminders '0 8 * * *'
-install_cron purge-chat '47 3 * * *'
-install_cron concierge-budget '57 3 * * *'
 
 # Same for the stalled-deals job (SHO-US-12.7): servers built before it get it from the deploy user's crontab.
 if ! grep -qs 'job.sh stalled-deals' /etc/cron.d/sho && ! crontab -l 2>/dev/null | grep -q 'job.sh stalled-deals'; then

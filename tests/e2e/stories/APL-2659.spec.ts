@@ -7,11 +7,7 @@ import { test } from "./qa";
 // A project the person can see still answers. Projects, deals and chats are ZZ-TEST and cleaned up.
 import { existsSync } from "node:fs";
 import { pathToFileURL } from "node:url";
-import { expect, login } from "../support";
-import { newProject } from "../helpers/migration-2731";
-import { chatMessages, quickAction } from "../helpers/jim-http";
-import { cleanChat, newDeal } from "../helpers/migration-2704";
-import { crmModeLive } from "../helpers/jim-gate";
+import { expect } from "../support";
 
 const RULE = "eslint/no-unguarded-project-lookup.mjs";
 
@@ -77,53 +73,5 @@ test.describe("SHO-TECH / APL-2659", () => {
   test("AC4: the same fixture fails a raw findMany and passes that read through visibleProjects", async () => {
     expect(await lint(direct, "src/lib/example.ts")).toHaveLength(1);
     expect(await lint(throughHelper, "src/lib/example.ts")).toEqual([]);
-  });
-
-  test("a quick action on an archived project the person belongs to is Project not found, and the name is not stored", async ({ admin, later }) => {
-    await cleanChat(admin, later);
-    const p = await newProject(admin, later, { label: "lookup archived" });
-    expect((await admin.api.post(`/api/projects/${p.id}/archive`)).status).toBe(200);
-    const r = await quickAction(admin, "due-week", p.id);
-    const body = r.body;
-    const pass = login("ADMIN").password;
-    expect(r.status, body).toBe(404);
-    expect(r.json.error).toBe("Project not found");
-    expect(body.includes(p.name)).toBe(false);
-    expect(body.includes(pass)).toBe(false);
-    expect(JSON.stringify(await chatMessages(admin)).includes(p.name)).toBe(false);
-  });
-
-  test("a quick action on a deal the CRM hides from a Member is Project not found, and the name is not stored", async ({ admin, member, later }) => {
-    await cleanChat(member, later);
-    const mode = await crmModeLive(admin, member);
-    const pass = login("MEMBER").password;
-    if (mode === "off") {
-      const deals = await member.api.get("/api/deals");
-      expect(deals.status).toBe(404);
-      expect(JSON.stringify(deals.json).includes(pass)).toBe(false);
-      return;
-    }
-    // admins: the Member is on the deal and CRM still hides it. all: membership hides a deal they are not on.
-    const onDeal = mode === "admins";
-    const deal = await newDeal(admin, later, "lookup hidden", onDeal ? [member] : []);
-    const r = await quickAction(member, "due-week", deal.id);
-    const body = r.body;
-    expect(r.status, body).toBe(404);
-    expect(r.json.error).toBe("Project not found");
-    expect(body.includes(deal.name)).toBe(false);
-    expect(body.includes(pass)).toBe(false);
-    expect(JSON.stringify(await chatMessages(member)).includes(deal.name)).toBe(false);
-  });
-
-  test("AC5: a project the person can see still answers a quick action and names it", async ({ admin, later }) => {
-    // Unchanged on main and on PR #32. myProjects includes a live project the person belongs to.
-    await cleanChat(admin, later);
-    const p = await newProject(admin, later, { label: "lookup visible" });
-    const r = await quickAction(admin, "due-week", p.id);
-    const body = r.body;
-    const pass = login("ADMIN").password;
-    expect(r.status, body).toBe(200);
-    expect(r.json.messages?.[0]?.text).toBe(`Due this week in ${p.name}`);
-    expect(body.includes(pass)).toBe(false);
   });
 });

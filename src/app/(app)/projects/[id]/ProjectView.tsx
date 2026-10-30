@@ -191,7 +191,7 @@ function Inner({ id }: { id: string }) {
   const archivedBanner = p?.archived && <div className="box warn" style={{ marginBottom: 12 }}>This project is archived and read-only.</div>;
 
   return (
-    <Page bar className={view === "list" ? "project-list-view" : "project-board-view"} docTitle={p?.name}
+    <Page className={view === "list" ? "project-list-view" : "project-board-view"} docTitle={p?.name}
       beforeTitle={<nav className="project-breadcrumb" aria-label="Breadcrumb"><Link href={p?.type === "DEAL" ? "/deals" : "/projects"}>{p?.type === "DEAL" ? "Deals" : "Projects"}</Link> / {p?.name ?? "…"}</nav>}
       title={p?.name ?? "…"}
       sub={p && <>{p.isVertical && <span className="chip">Vertical task board</span>}<span className="chip">You: {ROLE[p.role]}</span>{tk.data?.summary && (

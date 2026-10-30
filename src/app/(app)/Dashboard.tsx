@@ -69,7 +69,7 @@ export default function Dashboard() {
       </section>
       <section className="dashboard-panel" aria-label="Recent activity"><header><h2>Recent activity</h2></header>
         <Status {...activity} retry={activity.reload} />
-        {activity.data && (activity.data.items.length ? activity.data.items.map(r => <Link className="dashboard-row" href={`/projects/${r.project.id}/activity`} key={r.id}><div><strong>{r.who}</strong> {r.what}<small>{r.project.name}{r.via === "concierge" ? " · via concierge" : ""}</small></div><span title={r.when}>{ago(r.ts)}</span></Link>) : <p className="hint">No recent activity you can view in your active projects.</p>)}
+        {activity.data && (activity.data.items.length ? activity.data.items.map(r => <Link className="dashboard-row" href={`/projects/${r.project.id}/activity`} key={r.id}><div><strong>{r.who}</strong> {r.what}<small>{r.project.name}</small></div><span title={r.when}>{ago(r.ts)}</span></Link>) : <p className="hint">No recent activity you can view in your active projects.</p>)}
         {activity.data?.items[0] && <Link className="dashboard-panel-link" href={`/projects/${activity.data.items[0].project.id}/activity`}>View activity in {activity.data.items[0].project.name} →</Link>}
       </section>
     </div>

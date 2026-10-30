@@ -60,7 +60,7 @@ export async function logAction(
     action: string;
     before?: unknown;
     after?: unknown;
-    channel?: "SCREEN" | "CONCIERGE";
+    channel?: "SCREEN";
     /** False for the secondary rows of a bulk action, so the Undo toast points at the main one. */
     primary?: boolean;
     /** The row's createdAt. Delete passes the same instant it writes to deletedAt, so Undo and purge age together (APL-2719). */
@@ -68,7 +68,7 @@ export async function logAction(
   },
 ) {
   const ctx = reqCtx.getStore();
-  const channel = o.channel ?? ctx?.channel ?? "SCREEN";
+  const channel = o.channel ?? "SCREEN";
   const row = await tx.actionLog.create({
     data: {
       actorId: o.actorId,
@@ -122,6 +122,6 @@ const AUDITED: Record<string, string> = {
 
 export async function auditTx(tx: Tx, event: string, o: { actorId?: string | null; targetId?: string; targetType?: string; data?: Record<string, unknown> }) {
   await tx.auditLog.create({
-    data: { event, actorId: o.actorId ?? null, targetType: o.targetId ? o.targetType ?? "user" : null, targetId: o.targetId, channel: reqCtx.getStore()?.channel ?? "SCREEN", data: o.data as Json | undefined },
+    data: { event, actorId: o.actorId ?? null, targetType: o.targetId ? o.targetType ?? "user" : null, targetId: o.targetId, channel: "SCREEN", data: o.data as Json | undefined },
   });
 }

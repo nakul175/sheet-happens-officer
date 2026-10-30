@@ -73,28 +73,6 @@ test("AC2: metadata is not link-coloured; only the title is interactive", async 
   if (linkColor) expect(info.metaColors.some((c) => c === linkColor)).toBe(false);
 });
 
-test("AC3: hiding the concierge dock frees the width and the concierge stays reachable from a labelled button", async ({ admin, later }) => {
-  const prior = await admin.api.get("/api/concierge/state");
-  expect(prior.status).toBe(200);
-  later(() => admin.api.patch("/api/concierge/preferences", { hidden: !!prior.json.hidden }));
-  expect((await admin.api.patch("/api/concierge/preferences", { hidden: false })).status).toBe(200);
-  const p = admin.page;
-  // The approved project view uses the bottom bar; My tasks retains the right-hand dock.
-  await p.goto("/my-tasks");
-  const dock = p.locator("aside.cc-slot");
-  const width = () => p.locator("main.content").first().evaluate((el) => el.getBoundingClientRect().width);
-  await expect(dock).toBeVisible();
-  const before = await width();
-  await dock.getByRole("button", { name: "Hide", exact: true }).click();
-  await expect(dock).toHaveCount(0);
-  expect(await width()).toBeGreaterThan(before);
-  await p.getByRole("button", { name: /^Account and utilities, \S+$/ }).click();
-  const show = p.getByRole("button", { name: "Show Concierge", exact: true });
-  await expect(show).toBeVisible();
-  await show.click();
-  await expect(dock).toBeVisible();
-});
-
 /** WCAG contrast of the visible text and SVG icons inside one row. Large text (24 px, or 18.66 px and bold) and icons need 3:1; other text needs 4.5:1. */
 function rowContrast(root: HTMLElement | SVGElement): string[] {
   const parse = (c: string): [number, number, number, number] | null => {

@@ -4,7 +4,6 @@ import { describe, expect, it } from "vitest";
 import { PrismaClient } from "../src/generated/prisma/client";
 import { Client, account, admin, bulkWithVersions, istDate, project, superAdmin, task, type Account, patchTask, withVersion } from "./helpers";
 import { assignTask, completeTask, moveTask, setApprover } from "../src/lib/tasks";
-import { execute } from "../src/lib/concierge/changes";
 
 const db = new PrismaClient();
 
@@ -536,7 +535,7 @@ describe("a version on assign, move, complete and approver (APL-2668)", () => {
     });
   }
 
-  it("the lib functions bulk and the concierge call refuse an empty version with 400 and change nothing", async () => {
+  it("the lib functions used by bulk operations refuse an empty version with 400 and change nothing", async () => {
     const s = await setup();
     const me = { id: s.lead.id, orgRole: "MEMBER" as const };
     const before = await shown(s);
@@ -549,21 +548,6 @@ describe("a version on assign, move, complete and approver (APL-2668)", () => {
     ]) await expect(call()).rejects.toMatchObject({ status: 400, code: "invalid_version", message: "expectedUpdatedAt must be a full ISO 8601 date-time with a time and a zone." });
     expect((await shown(s)).updatedAt).toBe(before.updatedAt);
     expect(await logs(s.t)).toBe(rows);
-  });
-
-  it("the concierge sends the version each task is at when it applies assign, move, approver and complete", async () => {
-    const s = await setup();
-    const me = { id: s.lead.id, orgRole: "MEMBER" as const };
-    await execute(me, [
-      { k: "task.assign", taskId: s.t, assigneeId: s.ed.id },
-      { k: "task.section", taskId: s.t, sectionId: s.p.doing },
-      { k: "task.approver", taskId: s.t, approverId: s.other.id },
-    ]);
-    let t = await shown(s);
-    expect([t.assignee.id, t.section.id, t.approver?.id]).toEqual([s.ed.id, s.p.doing, s.other.id]);
-    await execute({ id: s.other.id, orgRole: "MEMBER" }, [{ k: "task.complete", taskId: s.t }]); // with an approver, only the approver closes
-    t = await shown(s);
-    expect(t.completedAt).not.toBeNull();
   });
 
   for (const action of ["assign", "move", "complete"] as const) {

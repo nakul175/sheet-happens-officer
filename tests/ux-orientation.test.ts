@@ -1,6 +1,5 @@
 // SHO-US-14.4 first-run orientation: Leaders list, request to be added, Team roles, dismiss.
 import { describe, expect, it } from "vitest";
-import { trackModelUsage } from "./concierge-helpers";
 import { Client, PW, account, project } from "./helpers";
 
 describe("orientation", () => {
@@ -41,28 +40,5 @@ describe("orientation", () => {
     const other = new Client();
     expect((await other.post("/api/auth/signin", { email: a.email, password: PW })).status).toBe(200);
     expect((await other.get("/api/auth/me")).json.user.startGuide).toBe(false);
-  });
-});
-
-// SHO-US-14.15 AC2: a quick action asked from a project screen is about that project only.
-describe("concierge quick action scoped to a project", () => {
-  trackModelUsage();
-
-  it("answers for one project and refuses a project the person is not in qa:TC missing", async () => {
-    const a = await account("qa1");
-    const b = await account("qa2");
-    const p1 = await project(a, a);
-    const p2 = await project(a, a);
-    const { task, istDate } = await import("./helpers");
-    await task(a, p1.id, { title: "Late in one", dueDate: istDate(-3) });
-    await task(a, p2.id, { title: "Late in two", dueDate: istDate(-2) });
-    const all = (await a.c.post("/api/concierge/quick/overdue", {})).json.messages[1].text as string;
-    expect(all).toContain("Late in one");
-    expect(all).toContain("Late in two");
-    const one = (await a.c.post("/api/concierge/quick/overdue", { projectId: p1.id })).json.messages;
-    expect(one[0].text).toMatch(/^Overdue in /);
-    expect(one[1].text).toContain("Late in one");
-    expect(one[1].text).not.toContain("Late in two");
-    expect((await b.c.post("/api/concierge/quick/overdue", { projectId: p1.id })).status).toBe(404);
   });
 });

@@ -31,6 +31,5 @@ export const SCREENS: Screen[] = [
   { name: "Accounts", path: () => "/accounts" },
   { name: "Account", path: (i) => `/accounts/${i.org}` },
   { name: "Pipeline review", path: () => "/review" },
-  { name: "Usage", path: () => "/usage" },
   { name: "Audit log", path: () => "/audit" },
 ];

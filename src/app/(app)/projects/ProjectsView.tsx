@@ -71,7 +71,7 @@ export default function ProjectsView() {
   const active = show(live.data?.projects);
   const archived = show(old.data?.projects);
   return (
-    <Page bar title="Projects" sub="Delivery work and vertical boards"
+    <Page title="Projects" sub="Delivery work and vertical boards"
       actions={
         <>
           {admin && <button className={`btn${kind === "vertical" ? "" : " ghost"}`} onClick={() => { setVerticalName(""); setVerticalError(null); setNewVertical(true); }}>+ New vertical</button>}

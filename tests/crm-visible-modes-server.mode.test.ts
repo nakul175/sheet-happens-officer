@@ -13,7 +13,6 @@ import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { db } from "../src/lib/db";
 import { HIDDEN_DEAL_TEXT } from "../src/lib/feed";
-import { QUICK_ACTIONS } from "../src/lib/concierge/reads";
 import { istDate, PW } from "./helpers";
 import { startCrmModeSeedApi } from "./crm-mode-seed-api";
 
@@ -273,17 +272,13 @@ async function readPaths(base: string, cookie: string, dealId: string, name: str
   const my = await call(base, cookie, "GET", "/api/my-tasks");
   const search = await call(base, cookie, "GET", `/api/search?q=${encodeURIComponent(name)}`);
   const bell = await call(base, cookie, "GET", "/api/notifications");
-  const quicks = [];
-  for (const q of QUICK_ACTIONS) quicks.push(await call(base, cookie, "POST", `/api/concierge/quick/${q.id}`, {}));
   const list = await call(base, cookie, "GET", "/api/deals");
   const one = await call(base, cookie, "GET", `/api/projects/${dealId}`);
-  const quickStatus = quicks.every((q) => q.status === 200) ? 200 : quicks.find((q) => q.status !== 200)!.status;
   const dealStatus = list.status === one.status ? list.status : 0;
   return [
     { name: "My tasks", status: my.status, text: my.text, hiddenStatus: 200, mustName: true },
     { name: "search", status: search.status, text: search.text, hiddenStatus: 200, mustName: true },
     { name: "the bell", status: bell.status, text: bell.text, hiddenStatus: 200, mustName: false },
-    { name: "the concierge quick actions", status: quickStatus, text: quicks.map((q) => q.text).join("\n"), hiddenStatus: 200, mustName: true },
     { name: "the deal API", status: dealStatus, text: `${list.text}\n${one.text}`, hiddenStatus: 404, mustName: true },
   ];
 }

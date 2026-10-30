@@ -64,7 +64,7 @@ export default function AuditView() {
                   <td data-label="Who">{r.who ?? "—"}{r.email && <div className="hint">{r.email}</div>}</td>
                   <td data-label="Event"><span className="chip">{r.event}</span></td>
                   <td data-label="IP">{r.ip ?? ""}</td>
-                  <td data-label="How">{r.channel === "Concierge" ? <span className="chip gold">via concierge</span> : "on screen"}</td>
+                  <td data-label="How">{r.channel === "Screen" ? "on screen" : "historical"}</td>
                   <td data-label="Target" className="hint">{r.target ?? ""}</td>
                 </tr>
               ))}

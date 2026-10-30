@@ -23,13 +23,9 @@ const mk = async (admin: Who, p: string, title: string, extra: Record<string, un
 };
 const board = async (page: Page, id: string) => {
   await page.goto(`/projects/${id}`);
-  // An open concierge (left expanded by earlier chats) can sit over the tabs and lower cards: fold it first.
-  const fold = page.locator('aside[aria-label="Concierge"]').getByRole("button", { name: "Collapse" });
   await page.getByRole("tab", { name: "List", exact: true }).waitFor();
-  if (await fold.count()) await fold.first().click();
   await page.getByRole("tab", { name: "Board", exact: true }).click();
   await expect(page.locator(".board")).toBeVisible();
-  if (await fold.count()) await fold.first().click();
 };
 
 test("AC1: an Editor drags a card to another Section, it is saved and survives a reload", async ({ admin, later }) => {

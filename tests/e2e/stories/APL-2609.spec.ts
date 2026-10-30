@@ -102,8 +102,6 @@ async function surfaces(who: Who) {
   const byTask = await call(BASE, who.cookie, "GET", `/api/search?q=${encodeURIComponent(DEAL_TASK)}`);
   const detail = await call(BASE, who.cookie, "GET", `/api/tasks/${seed.dealTaskId}`);
   const list = await call(BASE, who.cookie, "GET", `/api/projects/${seed.dealId}/tasks`);
-  const quick = await call(BASE, who.cookie, "POST", "/api/concierge/quick/due-week", {});
-  const scoped = await call(BASE, who.cookie, "POST", "/api/concierge/quick/due-week", { projectId: seed.dealId });
   return {
     seen: {
       myTasks: rows.some((t) => t.id === seed.dealTaskId),
@@ -112,23 +110,14 @@ async function surfaces(who: Who) {
       searchTask: byTask.text.includes(seed.dealTaskId!),
       taskRoute: detail.status,
       listRoute: list.status,
-      concierge: quick.text.includes(DEAL_TASK) || quick.text.includes(DEAL_NAME),
-      conciergeScoped: scoped.status,
     },
     plainShown: rows.some((t) => t.id === seed.plainTaskId),
   };
 }
 
-const HIDDEN = { myTasks: false, stage: false, searchDeal: false, searchTask: false, taskRoute: 404, listRoute: 404, concierge: false, conciergeScoped: 404 };
-const SHOWN = { myTasks: true, stage: true, searchDeal: true, searchTask: true, taskRoute: 200, listRoute: 200, concierge: true, conciergeScoped: 200 };
+const HIDDEN = { myTasks: false, stage: false, searchDeal: false, searchTask: false, taskRoute: 404, listRoute: 404 };
+const SHOWN = { myTasks: true, stage: true, searchDeal: true, searchTask: true, taskRoute: 200, listRoute: 200 };
 const expected = (who: Who) => (visibleTo(who.role) ? SHOWN : HIDDEN);
-
-/** The person's chat as the concierge panel loads it on BASE. */
-async function chat(who: Who) {
-  const r = await call(BASE, who.cookie, "GET", "/api/concierge/state");
-  expect(r.status, r.text).toBe(200);
-  return JSON.stringify(r.json?.messages ?? []);
-}
 
 /** A signed-in page on BASE. The session cookie is the one the API sign-in returned. */
 async function pageAs(browser: Browser, who: Who): Promise<Page> {
@@ -209,7 +198,6 @@ async function cleanup(): Promise<string[]> {
     }
   }
   if (superAdmin && seed.orgId) await must("archive the organisation", superAdmin, "POST", `/api/orgs/${seed.orgId}/archive`, { archive: true });
-  for (const who of [lead, editor, admin, superAdmin]) if (who) await must(`clear ${who.label}'s chat`, who, "DELETE", "/api/concierge/messages");
   if (superAdmin) for (const who of [lead, editor, admin]) if (who) await must(`deactivate ${who.label}`, superAdmin, "POST", `/api/team/${who.id}/deactivate`, { reassign: "leaders" });
   return failed;
 }
@@ -321,40 +309,5 @@ test.describe("qa:TC missing APL-2609 CRM_VISIBLE hides deals on this server's m
       expect((await taskScreen(browser, who)).status, who.label).toBe(shown ? 200 : 404);
     }
     expect((await searchScreen(browser, people.admin!, DEAL_NAME)).links.some((l) => l.includes(DEAL_NAME))).toBe(visibleTo("admin"));
-  });
-
-  test("qa:TC missing AC4 AC8: chat written while the CRM was visible is shown on this server only to people this mode shows the CRM to", async () => {
-    // Asked on the seed server, where the CRM is visible, so the stored answer names the deal task.
-    for (const who of [people.editor!, people.admin!]) {
-      const asked = await call(SEED, who.cookie, "POST", "/api/concierge/quick/due-week", {});
-      expect(asked.status, asked.text).toBe(200);
-      expect(asked.text).toContain(DEAL_TASK);
-    }
-    for (const who of [people.editor!, people.admin!]) {
-      const now = await chat(who);
-      expect(now.includes(DEAL_TASK), who.label).toBe(visibleTo(who.role));
-      if (!visibleTo(who.role)) expect(now, who.label).not.toContain(DEAL_NAME);
-    }
-  });
-
-  test("qa:TC missing AC5 AC8: an Admin demoted to Member sees their earlier deal chat only while this mode shows the CRM to Members", async () => {
-    const admin = people.admin!;
-    const setRole = async (orgRole: "MEMBER" | "ADMIN") => {
-      const r = await call(BASE, people.superAdmin!.cookie, "PATCH", `/api/team/${admin.id}`, { orgRole });
-      expect(r.status, r.text).toBe(200);
-    };
-    const asked = await call(BASE, admin.cookie, "POST", "/api/concierge/quick/due-week", {});
-    expect(asked.status, asked.text).toBe(200);
-    expect(asked.text.includes(DEAL_TASK)).toBe(visibleTo("admin"));
-    expect((await chat(admin)).includes(DEAL_TASK)).toBe(visibleTo("admin"));
-    await setRole("MEMBER");
-    try {
-      const now = await chat(admin);
-      expect(now.includes(DEAL_TASK)).toBe(visibleTo("editor"));
-      if (!visibleTo("editor")) for (const word of [DEAL_NAME, STAGE]) expect(now).not.toContain(word);
-    } finally {
-      await setRole("ADMIN");
-    }
-    expect((await chat(admin)).includes(DEAL_TASK)).toBe(visibleTo("admin"));
   });
 });

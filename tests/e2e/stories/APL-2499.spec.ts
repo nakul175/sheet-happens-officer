@@ -4,7 +4,7 @@ import { test } from "./qa";
 // Acceptance criteria: AC1 add a Section, AC2 delete only after choosing where tasks go, AC3 authority,
 // AC4 done Section completes tasks, AC5 limit of 8, AC6 done Section protected (proposed, not confirmed by the owner).
 // Data: every project and task is named "ZZ-TEST ..."; projects are archived afterwards.
-import { expect, zz, type Who, type Page } from "../support";
+import { expect, zz, type Who } from "../support";
 
 async function proj(admin: Who, label: string, later: (f: () => Promise<unknown>) => void) {
   const r = await admin.api.post("/api/projects", { name: zz(label), leaderId: admin.user.id });
@@ -19,15 +19,10 @@ const mk = async (admin: Who, p: string, title: string, extra: Record<string, un
   expect(r.status, JSON.stringify(r.json)).toBe(201);
   return r.json.task.id as string;
 };
-const calm = async (page: Page) => { // fold an open concierge so it cannot cover the controls
-  const fold = page.locator('aside[aria-label="Concierge"]').getByRole("button", { name: "Collapse" });
-  if (await fold.count()) await fold.first().click();
-};
 
 test("AC1: a Leader or Admin adds a Section and it appears on the board and in the list", async ({ admin, later }) => {
   const p = await proj(admin, "sec-add", later);
   await admin.page.goto(`/projects/${p.id}`);
-  await calm(admin.page);
   await admin.page.getByRole("button", { name: "+ Add section" }).click();
   await admin.page.getByLabel("Section name").fill("Client review");
   await admin.page.getByRole("button", { name: "Add section", exact: true }).click();
@@ -44,7 +39,6 @@ test("AC2: deleting a Section with tasks needs a destination and never deletes t
   expect((await admin.api.get(`/api/tasks/${t}`)).status).toBe(200);
   // Through the screen: the dialog asks where the tasks go.
   await admin.page.goto(`/projects/${p.id}`);
-  await calm(admin.page);
   await admin.page.getByRole("button", { name: "Section menu for In progress" }).click();
   await admin.page.getByRole("menuitem", { name: /^Delete/ }).click();
   await expect(admin.page.getByText("This section has 1 task. Choose where they go.")).toBeVisible();
@@ -84,7 +78,6 @@ test("AC5: with 8 Sections, Add section is disabled with the limit message", asy
   expect(ninth.status).toBe(409);
   expect(ninth.json.error).toBe("A project can have up to 8 sections.");
   await admin.page.goto(`/projects/${p.id}`);
-  await calm(admin.page);
   await expect(admin.page.getByRole("button", { name: "+ Add section" })).toBeDisabled();
   await expect(admin.page.getByText("A project can have up to 8 sections.")).toBeVisible();
 });

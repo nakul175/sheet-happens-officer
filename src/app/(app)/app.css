@@ -27,9 +27,6 @@
 .panel .row small { display: block; color: var(--muted); margin-top: 2px; }
 .wrapper { position: relative; }
 .content { padding: 24px 28px 64px; max-width: 1180px; align-self: stretch; min-width: 0; }
-.with-dock { }
-.dock { display: none; position: fixed; right: 0; top: 67px; bottom: 0; width: 340px; background: var(--card); border-left: 1px solid var(--line); padding: 18px; color: var(--muted); font-size: 13px; }
-.dock strong { color: var(--navy); display: block; margin-bottom: 6px; font-size: 14px; }
 .fab { display: none; z-index: 40; position: fixed; right: max(16px, env(safe-area-inset-right, 0px)); bottom: calc(16px + env(safe-area-inset-bottom, 0px)); width: 52px; height: 52px; border-radius: 50%; background: var(--gold); border: 0; color: var(--navy-dark); font-size: 22px; box-shadow: 0 6px 16px rgba(0,0,0,.25); }
 h1.pt { font-size: 24px; margin: 0; color: var(--ink); font-weight: 600; }
 .sub { color: var(--muted); font-size: 14px; margin: 4px 0 18px; }
@@ -111,9 +108,6 @@ textarea.in.blocked-reason { display: block; margin-top: 6px; min-height: 0; lin
 .avs { display: inline-flex; align-items: center; }
 .avs .av + .av { margin-left: -6px; box-shadow: 0 0 0 2px var(--card); }
 .av.collab { background: #d7d9ef; color: var(--navy); }
-.with-bar { padding-bottom: 80px; }
-.bardock { display: none; position: fixed; left: 232px; right: 0; bottom: 0; height: 48px; align-items: center; gap: 8px; padding: 0 28px; background: var(--card); border-top: 1px solid var(--line); color: var(--muted); font-size: 13px; z-index: 15; }
-.bardock strong { color: var(--navy); font-size: 14px; }
 .fabsheet { position: fixed; right: max(16px, env(safe-area-inset-right, 0px)); bottom: calc(80px + env(safe-area-inset-bottom, 0px)); width: min(300px, calc(100vw - 32px)); background: var(--card); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 12px 32px rgba(23,27,34,.2); padding: 14px; color: var(--muted); font-size: 13px; z-index: 40; }
 .fabsheet strong { display: block; color: var(--navy); margin-bottom: 4px; font-size: 14px; }
 .fabsheet .link { display: block; margin-top: 8px; }
@@ -125,7 +119,7 @@ textarea.in.blocked-reason { display: block; margin-top: 6px; min-height: 0; lin
 .kebab { background: none; border: 0; font-size: 18px; cursor: pointer; color: var(--muted); padding: 0 6px; border-radius: 6px; }
 .addrow { display: flex; gap: 8px; margin-top: 8px; }
 .addrow input { flex: 1; }
-/* Above the phone tab bar (also 60, and later in the page), the side drawer, and the concierge sheet. A dialog button at the bottom, such as Move deal, must take the click. */
+/* Above the phone tab bar (also 60, and later in the page), and the side drawer. A dialog button at the bottom, such as Move deal, must take the click. */
 .scrim { position: fixed; inset: 0; background: rgba(23,27,34,.45); z-index: 100; display: flex; justify-content: center; align-items: flex-start; padding: 40px 16px; overflow-y: auto; overscroll-behavior: contain; }
 .modal { overflow-wrap: anywhere; background: var(--card); border-radius: 14px; width: 100%; max-width: 640px; padding: 22px; box-shadow: 0 20px 48px rgba(0,0,0,.3); }
 .modal.sm { max-width: 460px; margin-top: 8vh; }
@@ -171,8 +165,6 @@ textarea.in.blocked-reason { display: block; margin-top: 6px; min-height: 0; lin
   .tbl.stack tr { display: block; padding: 8px 0; border-bottom: 1px solid var(--line); }
   .tbl.stack td { display: block; border: 0; padding: 3px 14px; }
 }
-@media (min-width: 1024px) { .bardock { display: flex; } }
-@media (min-width: 1280px) { .with-dock { margin-right: 340px; } .dock { display: block; } }
 
 /* CRM: pipeline board (SHO-US-12.6). Columns scroll inside the board; on a phone they become a vertical list. */
 .dboard { display: grid; grid-template-columns: repeat(auto-fit,minmax(min(260px,100%),1fr)); gap: 16px; padding-bottom: 8px; align-items: start; max-width: 100%; }
@@ -258,9 +250,8 @@ textarea.in.blocked-reason { display: block; margin-top: 6px; min-height: 0; lin
   .tabmore { position: absolute; right: 8px; bottom: calc(100% + 8px); min-width: 200px; background: var(--card); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 10px 28px rgba(23,27,34,.18); padding: 4px; display: flex; flex-direction: column; }
   .tabmore a, .tabmore button { min-height: 48px; display: flex; align-items: center; padding: 0 14px; font: inherit; font-size: 15px; color: var(--ink); background: none; border: 0; text-align: left; text-decoration: none; border-radius: 8px; cursor: pointer; }
   @media (hover: hover) { .tabmore a:hover, .tabmore button:hover { background: #eef0f6; } }
-  /* nothing floats over the last row: content, concierge button and "show assistant" all clear the bar */
+  /* nothing floats over the last row: content clears the bar */
   .content { padding-bottom: calc(150px + env(safe-area-inset-bottom, 0px)); }
-  .fab, .cc-showwrap { bottom: calc(72px + env(safe-area-inset-bottom, 0px)); }
 }
 @media (max-width: 1023px), (pointer: coarse) {
   .sub-item { min-height: 44px; display: flex; align-items: center; gap: 8px; cursor: pointer; }
@@ -302,23 +293,3 @@ textarea.in.blocked-reason { display: block; margin-top: 6px; min-height: 0; lin
 .skip:focus { top: 8px; }
 main:focus { outline: none; }
 .stat { font-size: 1.17em; font-weight: 700; margin: 1em 0; }
-
-/* SHO-US-9.2 AC6 and SHO-US-9.2b: spend, messages and quick actions.
-   Sections sit side by side when the row is wide enough (1280) and stack at 320 and 390,
-   so a label always has its own line. Figure columns do the same. */
-.usage-split { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 18rem), 1fr)); gap: 14px; align-items: start; }
-.usage-split > * { min-width: 0; }
-.usage-h { margin: 0 0 12px; font-size: 15px; font-weight: 600; color: var(--navy); overflow-wrap: anywhere; }
-.usage-figs { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 9.5rem), 1fr)); gap: 12px; margin: 0; }
-.usage-figs > div { min-width: 0; }
-.usage-figs dt { font-size: 13px; color: var(--muted); overflow-wrap: anywhere; }
-.usage-figs dd { margin: 2px 0 0; font-size: 1.17em; font-weight: 700; overflow-wrap: anywhere; }
-.usage-count { margin: 0 0 8px; font-size: 1.6rem; font-weight: 700; line-height: 1.2; overflow-wrap: anywhere; }
-/* SHO-2951: the payload left the message count out, so the card says so rather than printing a false 0. */
-.usage-unknown { font-size: 1.05rem; color: var(--muted); }
-.usage-meter { height: 10px; margin-top: 14px; border-radius: 99px; background: #eceef3; overflow: hidden; }
-.usage-meter > span { display: block; height: 100%; background: var(--navy); }
-/* AC6 v1.1: spend over the ceiling. The words carry the meaning; the colour only adds to it. */
-.usage-over { display: inline-block; margin-left: 6px; padding: 1px 8px; border-radius: 99px; border: 1px solid #b42318; background: #fef3f2; color: #b42318; font-size: 13px; font-weight: 600; vertical-align: middle; }
-/* SHO-3013: the default safety cap has been reached and the concierge is paused. Text, not colour alone. */
-.usage-warn { margin: 14px 0 0; padding: 8px 10px; border: 1px solid #b42318; border-radius: 8px; background: #fef3f2; color: #b42318; font-size: 14px; font-weight: 600; }

@@ -3,8 +3,6 @@
 # Optional secret DIRECT_DATABASE_URL: direct Postgres connection for migrations when DATABASE_URL goes through PgBouncer
 # (unset means migrations use DATABASE_URL).
 # Optional variables: DROPLET_HOST (defaults to the app address), DROPLET_HOST_KEY (ssh-keyscan line).
-# Concierge (all optional; unset means the concierge stays off): secret ANTHROPIC_API_KEY; variables MODEL_DATA_APPROVED
-# (must be exactly "true" to allow requests to the provider), MODEL_NAME, MONTHLY_CEILING_USD, WEEKLY_MESSAGE_CAP.
 name: Test and deploy
 
 on:
@@ -57,6 +55,8 @@ jobs:
       - run: npm run lint
       - run: npx prisma migrate deploy
       - run: npm run build
+      - name: Verify retired routes and preserved suite routes
+        run: node scripts/verify-concierge-removal.mjs
       - name: Start the app
         run: |
           # APL-2652: the return-path test verifies encoded control characters in the real server log.
@@ -100,19 +100,10 @@ jobs:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           DIRECT_DATABASE_URL: ${{ secrets.DIRECT_DATABASE_URL }}
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          MODEL_DATA_APPROVED: ${{ vars.MODEL_DATA_APPROVED }}
-          MODEL_NAME: ${{ vars.MODEL_NAME }}
-          MONTHLY_CEILING_USD: ${{ vars.MONTHLY_CEILING_USD }}
-          WEEKLY_MESSAGE_CAP: ${{ vars.WEEKLY_MESSAGE_CAP }}
         run: |
           [ -n "$DATABASE_URL" ] || { echo "DATABASE_URL secret is missing"; exit 1; }
           [ -n "$RESEND_API_KEY" ] || { echo "RESEND_API_KEY secret is missing"; exit 1; }
           case "$DIRECT_DATABASE_URL" in *"'"*|*$'\n'*) echo "::error::DIRECT_DATABASE_URL contains a quote or line break"; exit 1;; esac
-          # A quote or line break in a concierge setting would break app.env; refuse before anything is written.
-          for v in ANTHROPIC_API_KEY MODEL_DATA_APPROVED MODEL_NAME MONTHLY_CEILING_USD WEEKLY_MESSAGE_CAP; do
-            case "${!v}" in *"'"*|*$'\n'*) echo "::error::$v contains a quote or line break"; exit 1;; esac
-          done
           {
             printf "DATABASE_URL='%s'\n" "$DATABASE_URL"
             # Written only when set; release.sh falls back to DATABASE_URL otherwise.
@@ -123,11 +114,6 @@ jobs:
             # APL-2929: the sender stays on the old domain until Resend verifies sheethappensofficer.aplyd.org.
             printf "EMAIL_FROM='Sheet Happens Officer <no-reply@sheethappensofficer.com>'\n"
             printf "TZ='Asia/Kolkata'\n"
-            # Concierge settings: written only when set (an unset one is left out and the concierge stays off).
-            for v in ANTHROPIC_API_KEY MODEL_DATA_APPROVED MODEL_NAME MONTHLY_CEILING_USD WEEKLY_MESSAGE_CAP; do
-              val="${!v}"
-              if [ -n "$val" ]; then printf "%s='%s'\n" "$v" "$val"; fi
-            done
           } | ssh "deploy@$HOST" 'umask 077 && cat > /etc/sho/app.env'
       - name: Release
         run: ssh "deploy@$HOST" "bash /opt/sho/releases/$GITHUB_SHA/deploy/release.sh $GITHUB_SHA"

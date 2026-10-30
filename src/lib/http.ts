@@ -34,7 +34,7 @@ export function parseQuery<T>(url: URL, schema: ZodType<T>): T {
 /**
  * APL-2670: version failures on edit, assign, move, complete and setApprover
  * are exactly { error: { code, message } }. Other errors keep the shared shape,
- * so a concierge call that throws the same ApiError still carries who changed the task.
+ * so a shared operation that throws the same ApiError still carries who changed the task.
  */
 export function withVersionErrors<A extends unknown[]>(fn: (...args: A) => Promise<Response>) {
   return async (...args: A): Promise<Response> => {

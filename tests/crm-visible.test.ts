@@ -3,13 +3,12 @@
 // directly (same database) and flip process.env.CRM_VISIBLE in this process; `crmMode()` reads it at call time.
 import { describe, expect, it } from "vitest";
 import { account, admin, istDate, project, superAdmin, task } from "./helpers";
-import { actor } from "./concierge-helpers";
+import { actor } from "./actor";
 import type { Actor } from "../src/lib/access";
 import { crmMode } from "../src/lib/crm";
 import { getTask, listTasks, myTasks } from "../src/lib/tasks";
 import { getProject } from "../src/lib/projects";
 import { search } from "../src/lib/search";
-import { findTasks, listProjects, myTasks as conciergeMyTasks, projectTasks } from "../src/lib/concierge/reads";
 
 const flat = (g: Awaited<ReturnType<typeof myTasks>>) => [...g.overdue, ...g.next7, ...g.later] as { id: string }[];
 
@@ -45,17 +44,14 @@ describe("CRM_VISIBLE lever (SHO-BUG-2)", () => {
         my: flat(await myTasks(u)).some((t) => t.id === dealTask),
         searchTask: found.tasks.some((t) => t.id === dealTask),
         searchProject: found.projects.some((x) => x.id === dealId),
-        conciergeMy: (await conciergeMyTasks(u, "all_open")).tasks.some((t) => t.id === dealTask),
-        conciergeFind: (await findTasks(u, tag)).tasks.some((t) => t.id === dealTask),
-        conciergeList: (await listProjects(u, tag)).some((x) => x.id === dealId),
       };
     };
-    const nothing = { my: false, searchTask: false, searchProject: false, conciergeMy: false, conciergeFind: false, conciergeList: false };
+    const nothing = { my: false, searchTask: false, searchProject: false };
     const notFound = { status: 404 };
 
     // Default: the member sees their deal work everywhere.
     expect(crmMode()).toBe("all");
-    expect(await sees(me)).toEqual({ my: true, searchTask: true, searchProject: true, conciergeMy: true, conciergeFind: true, conciergeList: true });
+    expect(await sees(me)).toEqual({ my: true, searchTask: true, searchProject: true });
 
     await withMode("off", async () => {
       expect(crmMode()).toBe("off");
@@ -63,14 +59,12 @@ describe("CRM_VISIBLE lever (SHO-BUG-2)", () => {
       await expect(getTask(me, dealTask)).rejects.toMatchObject(notFound);
       await expect(listTasks(me, dealId, {})).rejects.toMatchObject(notFound);
       await expect(getProject(me, dealId)).rejects.toMatchObject(notFound);
-      await expect(projectTasks(me, dealId)).rejects.toMatchObject(notFound);
       // Off means nobody, Admins included.
       expect(await sees(adm)).toEqual(nothing);
       await expect(getTask(adm, dealTask)).rejects.toMatchObject(notFound);
       // Plain project work is untouched.
       expect(flat(await myTasks(me)).some((t) => t.id === plainTask)).toBe(true);
       expect((await search(me, tag, false)).tasks.some((t) => t.id === plainTask)).toBe(true);
-      expect((await conciergeMyTasks(me, "all_open")).tasks.some((t) => t.id === plainTask)).toBe(true);
       expect((await getTask(me, plainTask)).id).toBe(plainTask);
     });
 
@@ -79,14 +73,14 @@ describe("CRM_VISIBLE lever (SHO-BUG-2)", () => {
       await expect(getTask(me, dealTask)).rejects.toMatchObject(notFound);
       await expect(listTasks(me, dealId, {})).rejects.toMatchObject(notFound);
       // An Admin is not a member, so My tasks has nothing of theirs; everything else shows the deal.
-      expect(await sees(adm)).toEqual({ my: false, searchTask: true, searchProject: true, conciergeMy: false, conciergeFind: true, conciergeList: true });
+      expect(await sees(adm)).toEqual({ my: false, searchTask: true, searchProject: true });
       expect((await getTask(adm, dealTask)).id).toBe(dealTask);
       expect((await listTasks(adm, dealId, {})).sections.length).toBeGreaterThan(0);
     });
 
     // Back to the default, the member sees it all again.
     expect(crmMode()).toBe("all");
-    expect(await sees(me)).toEqual({ my: true, searchTask: true, searchProject: true, conciergeMy: true, conciergeFind: true, conciergeList: true });
+    expect(await sees(me)).toEqual({ my: true, searchTask: true, searchProject: true });
     expect((await getTask(me, dealTask)).id).toBe(dealTask);
   });
 });

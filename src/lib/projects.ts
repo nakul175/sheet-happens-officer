@@ -231,7 +231,7 @@ export async function addMember(user: Actor, projectId: string, userId: string, 
 }
 
 /**
- * A single taker for the person's open tasks, or null when there are none. The concierge card names a taker per
+ * A single taker for the person's open tasks, or null when there are none. An explicit handover can name a taker per
  * task instead (SHO-BUG-7); then no single taker is needed, and a task that appears in between goes to the Leader.
  */
 async function requireHandoverIfNeeded(a: Access, userId: string, handoverTo: string | undefined | null, handover?: Handover[]) {

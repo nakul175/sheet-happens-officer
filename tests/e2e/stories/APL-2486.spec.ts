@@ -3,7 +3,6 @@ import { test } from "./qa";
 // The plain Member (SHO_MEMBER_*) is the other person. Task writes send expectedUpdatedAt, which main requires.
 import { expect, login, zz } from "../support";
 import { getTask, newProject, newTask } from "../helpers/migration-2731";
-import { quickAction } from "../helpers/jim-http";
 
 const fixtureDueDate = () => new Date(Date.now() + 3 * 86400_000).toISOString().slice(0, 10);
 
@@ -83,14 +82,4 @@ test("AC6: search shows a Member nothing from a project they are not in (archive
   expect(await titles()).toEqual([`${word} visible`]);
   expect((await titles("&archived=true")).sort()).toEqual([`${word} archived task`, `${word} visible`]);
   expect((await member.api.get("/api/search?q=z")).json.tasks).toHaveLength(0); // under 2 characters
-});
-
-test("AC6 (concierge half): the concierge reveals nothing about a project the person is not in", async ({ admin, member, later }) => {
-  const secret = await newProject(admin, later, { label: "3.2 concierge secret" });
-  const r = await quickAction(member, "due-week", secret.id);
-  const pass = login("MEMBER").password;
-  expect(r.body.includes(secret.name), "the answer does not name the project").toBe(false);
-  expect(r.body.includes(pass)).toBe(false);
-  expect(r.status, r.body).toBe(404);
-  expect(r.json.error).toBe("Project not found");
 });

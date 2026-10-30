@@ -2,7 +2,7 @@
 // each failing job must reach the Super Admin's bell, and the same job failing again within 20 hours adds nothing.
 import { describe, expect, it } from "vitest";
 import { superAdmin } from "./helpers";
-import { db } from "./concierge-helpers";
+import { db } from "./actor";
 import { JOBS, runJob } from "../src/lib/jobs";
 
 describe("job failure notices (9.3 AC6)", () => {

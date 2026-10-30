@@ -63,7 +63,6 @@ export default function Activity({ params }: { params: Promise<{ id: string }> }
                 <small title={r.when}>{ago(new Date(r.ts).toISOString())} · {r.when}</small>
               </div>
               <div className="meta">
-                {r.via === "concierge" && <span className="chip gold">via concierge</span>}
                 {showUndo(r, pr.data?.project.role) && <button className="btn ghost sm" onClick={() => requestUndo(r.id)}>Undo</button>}
                 {showTooOld(r, pr.data?.project.role) && <span className="hint" title="Undo works for 30 days">Too old to undo</span>}
                 {r.undo === "undone" && <span className="hint">Undone</span>}
