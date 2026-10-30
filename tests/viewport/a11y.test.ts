@@ -5,11 +5,13 @@
 import { mkdirSync } from "node:fs";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { chromium, type Browser } from "playwright-core";
+import type { AxeResults } from "axe-core";
 import { account, BASE, istDate, PW, project, superAdmin, task } from "../helpers";
 import { readFileSync } from "node:fs";
-import { SCREENS, type Ids } from "./screens";
+import { SCREENS, TASK_TITLE, type Ids } from "./screens";
+import { openScreen, requireLocalFixtures } from "./screen-ready";
 
-const SHOTS = "test-results/a11y";
+const SHOTS = "test-results/viewport/a11y"; // Included in both existing CI failure-artifact uploads.
 const AXE = readFileSync("node_modules/axe-core/axe.min.js", "utf8");
 let browser: Browser;
 let ids: Ids;
@@ -17,7 +19,7 @@ let viewerEmail = "";
 
 beforeAll(async () => {
   // The suite creates accounts and data, so it only runs against a server on this machine (a test database), never a live site.
-  if (!/^(localhost|127\.0\.0\.1)$/.test(new URL(BASE).hostname)) throw new Error(`Refusing to run the viewport suite against ${BASE}: use a local server with a test database.`);
+  requireLocalFixtures(BASE, process.env.DATABASE_URL);
   mkdirSync(SHOTS, { recursive: true });
   browser = await chromium.launch({ executablePath: process.env.PW_CHROMIUM || undefined });
   const root = await superAdmin();
@@ -25,7 +27,7 @@ beforeAll(async () => {
   const viewer = await account("vpviewer");
   viewerEmail = viewer.email;
   const p = await project(root, root, [{ who: editor }, { who: viewer, role: "VIEWER" }]);
-  const parent = await task(root, p.id, { title: "Prepare the quarterly review pack with the finance team", dueDate: istDate(2), priority: "HIGH", collaboratorIds: [editor.id] });
+  const parent = await task(root, p.id, { title: TASK_TITLE, dueDate: istDate(2), priority: "HIGH", collaboratorIds: [editor.id] });
   await task(root, p.id, { title: "W".repeat(100), sectionId: p.doing, dueDate: istDate(-1) }); // a 100-character unbreakable title
   await root.c.post(`/api/projects/${p.id}/tasks`, { title: "Draft the summary", parentId: parent });
   const org = await root.c.post("/api/orgs", { name: `Viewport Org ${Date.now()}` });
@@ -56,20 +58,33 @@ for (const width of [1280, 390]) {
       it(`${s.name}`, async () => {
         const ctx = await ctxFor(s.public ? null : s.as === "viewer" ? "viewer" : "root", width);
         const page = await ctx.newPage();
-        await page.goto(s.path(ids), { waitUntil: "load" });
-        await page.waitForFunction(() => !document.querySelector(".skel, .skel-wrap"), undefined, { timeout: 15000 }).catch(() => {});
-        if (s.wait) await page.waitForSelector(s.wait, { timeout: 10000 });
-        await page.waitForTimeout(400);
-        await page.evaluate(AXE);
-        const res = await page.evaluate(async () => {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const r = await (window as any).axe.run(document, { runOnly: { type: "tag", values: ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "best-practice"] }, rules: { "color-contrast": { enabled: false } } });
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          return r.violations.map((v: any) => ({ id: v.id, impact: v.impact, nodes: v.nodes.slice(0, 3).map((n: any) => n.target.join(" ") + " :: " + n.failureSummary) }));
-        });
-        if (res.length) await page.screenshot({ path: `${SHOTS}/${s.name.replace(/[^a-z0-9]+/gi, "-")}-${width}.png`, fullPage: true });
-        await ctx.close();
-        expect(res, `${s.name} at ${width}px`).toEqual([]);
+        try {
+          await openScreen(page, s, ids, BASE);
+          await page.waitForTimeout(400);
+          // An opt-in, local-only proof that this actual gate rejects contrast regressions.
+          if (process.env.SHO_A11Y_NEGATIVE_CONTROL === "1" && s.name === "Sign in" && width === 390) {
+            await page.evaluate(() => {
+              const fault = document.createElement("p");
+              fault.id = "sho-2548-contrast-negative-control";
+              fault.style.cssText = "color:#eeeeee;background:#ffffff;font-size:16px";
+              fault.textContent = "Deliberate unreadable contrast regression";
+              (document.querySelector("main") ?? document.body).prepend(fault);
+            });
+          }
+          await page.evaluate(AXE);
+          const res = await page.evaluate(async () => {
+            const axe = (window as unknown as { axe: { run(node: Document, options: unknown): Promise<AxeResults> } }).axe;
+            const r = await axe.run(document, { runOnly: { type: "tag", values: ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "best-practice"] } });
+            return r.violations.map(v => ({ id: v.id, impact: v.impact, nodes: v.nodes.slice(0, 3).map(n => n.target.join(" ") + " :: " + n.failureSummary) }));
+          });
+          expect(res, `${s.name} at ${width}px`).toEqual([]);
+        } catch (error) {
+          const shot = `${SHOTS}/${s.name.replace(/[^a-z0-9]+/gi, "-")}-${width}.png`;
+          let evidence = `screenshot: ${shot}`;
+          try { await page.screenshot({ path: shot, fullPage: true }); }
+          catch (shotError) { evidence = `screenshot unavailable: ${String(shotError)}`; }
+          throw new Error(`${s.name} at ${width}px audit failed; ${evidence}`, { cause: error });
+        } finally { await ctx.close(); }
       });
     }
   });

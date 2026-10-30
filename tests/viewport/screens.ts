@@ -1,6 +1,7 @@
 // SHO-US-22.11: the screens and widths the phone checks cover. Add a screen here when you add a page.
 export const WIDTHS = [320, 360, 390, 414, 599, 768] as const;
 export const PHONE_MAX = 600; // under this width the 44 px and 16 px rules apply
+export const TASK_TITLE = "Prepare the quarterly review pack with the finance team";
 
 export type Ids = { project: string; task: string; deal: string; org: string };
 export type Screen = { name: string; path: (ids: Ids) => string; as?: "root" | "viewer"; public?: boolean; wait?: string; heading?: string; taskPanel?: boolean; taskPage?: boolean; canonical?: (ids: Ids) => string };
