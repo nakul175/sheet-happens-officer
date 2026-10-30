@@ -7,17 +7,17 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { chromium, type Browser, type BrowserContext } from "playwright-core";
 import { account, BASE, istDate, PW, project, superAdmin, task } from "../helpers";
 import { collect, type Finding } from "./checks";
-import { PHONE_MAX, SCREENS, WIDTHS, type Ids, type Screen } from "./screens";
+import { PHONE_MAX, SCREENS, TASK_TITLE, WIDTHS, type Ids, type Screen } from "./screens";
+import { openScreen, requireLocalFixtures } from "./screen-ready";
 
 const SHOTS = "test-results/viewport";
 let browser: Browser;
 let ids: Ids;
 let viewerEmail = "";
-const TASK_TITLE = "Prepare the quarterly review pack with the finance team";
 
 beforeAll(async () => {
   // The suite creates accounts and data, so it only runs against a server on this machine (a test database), never a live site.
-  if (!/^(localhost|127\.0\.0\.1)$/.test(new URL(BASE).hostname)) throw new Error(`Refusing to run the viewport suite against ${BASE}: use a local server with a test database.`);
+  requireLocalFixtures(BASE, process.env.DATABASE_URL);
   mkdirSync(SHOTS, { recursive: true });
   browser = await chromium.launch({ executablePath: process.env.PW_CHROMIUM || undefined });
   const root = await superAdmin();
@@ -54,23 +54,7 @@ async function check(ctx: BrowserContext, screen: Screen, width: number) {
   const path = screen.path(ids);
   const page = await ctx.newPage();
   try {
-    const response = await page.goto(path, { waitUntil: "load" });
-    expect(response?.ok(), `${path} must load successfully, not a responsive error page`).toBe(true);
-    // Cached inactive pages can retain hidden skeletons after a documented task redirect.
-    await page.waitForFunction(() => ![...document.querySelectorAll(".skel, .skel-wrap")].some(el => el.getClientRects().length > 0 && getComputedStyle(el).visibility !== "hidden"), undefined, { timeout: 15000 });
-    if (screen.wait) await page.waitForSelector(screen.wait, { timeout: 10000 });
-    // A renamed route must not silently count Home as My tasks, nor a bare page as a task panel.
-    if (screen.heading) await page.getByRole("heading", { name: screen.heading, exact: true }).waitFor();
-    if (screen.taskPanel || screen.taskPage) {
-      const title = (screen.taskPanel ? page.getByRole("dialog") : page).getByRole("textbox", { name: "Title", exact: true });
-      await title.waitFor();
-      expect(await title.inputValue(), "the requested task must actually be loaded").toBe(TASK_TITLE);
-    }
-    const actual = new URL(page.url()), requested = new URL(path, BASE);
-    const expected = screen.canonical && actual.pathname !== requested.pathname ? new URL(screen.canonical(ids), BASE) : requested;
-    expect(actual.origin, "stay on the isolated app origin").toBe(expected.origin);
-    expect(actual.pathname, `${path} must stay on its screen or documented task destination`).toBe(expected.pathname);
-    for (const [key, value] of expected.searchParams) expect(actual.searchParams.get(key), `preserve requested ${key}`).toBe(value);
+    await openScreen(page, screen, ids, BASE);
     await page.waitForTimeout(400);
     // SHO-2559 AC2: this test-only switch deliberately breaks one real public route.
     // beforeAll refuses every remote target before any fixture is created.
