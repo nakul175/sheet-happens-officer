@@ -26,11 +26,10 @@ export default function PersonPage() {
   const me = useMe();
   const g = useGet<{ person: Person }>(`/api/team/${id}`);
   const [note, setNote] = useState<null | { ok: boolean; text: string }>(null);
-  // APL-2664 v1.2. Each failed read has its own plain message. A 403 is no access, except the
-  // forced-password 403 (APL-2624). The shared client is unchanged, so this matches the error text
-  // that client already returns for PASSWORD_CHANGE_REQUIRED. Mocked until PR #8 merges.
+  // SHO-2695: permission state follows the stable API code, independent of wording.
+  // A plain 403 remains no-access; only the forced-password code opens the password flow.
   const settled = !g.loading;
-  const passwordChange = settled && g.status === 403 && g.error === "Set your own password first.";
+  const passwordChange = settled && g.status === 403 && g.code === "PASSWORD_CHANGE_REQUIRED";
   const denied = settled && g.status === 403 && !passwordChange;
   // AC5: a 401 shows no message and no Retry here. The global redirect stays in api(), and the
   // visible session-expired sentence is APL-2652.

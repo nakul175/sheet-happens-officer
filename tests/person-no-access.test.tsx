@@ -289,7 +289,28 @@ describe("Person page shows a plain state for each failure", () => {
     expect(text).not.toContain(NO_ACCESS);
   });
 
-  // Mocked until PR #8 (APL-2624) merges. main does not answer 403 PASSWORD_CHANGE_REQUIRED for a signed-in person.
+  it.each(["Change your temporary password to continue.", "अपना पासवर्ड बदलें।"])("qa:TC missing SHO-2695 uses the stable code when wording changes: %s", async (message) => {
+    vi.stubGlobal("fetch", vi.fn(async () => json(403, {
+      error: message, code: "PASSWORD_CHANGE_REQUIRED",
+      person: { id: "p2", name: P2_NAME, email: P2_EMAIL, projects: [{ id: "private", name: PRIVATE_PROJECT }] },
+    })));
+    const page = await openPerson();
+    expect(page.textContent).toContain("Set your own password");
+    expect(page.querySelector("a[href='/profile']")?.textContent).toBe("Change password");
+    expect(page.textContent).not.toContain(NO_ACCESS);
+    expect(page.textContent).not.toContain(P2_EMAIL);
+    expect(page.textContent).not.toContain(PRIVATE_PROJECT);
+  });
+
+  it.each(["FORBIDDEN", undefined])("qa:TC missing SHO-2695 does not infer password state from text with code %s", async (code) => {
+    vi.stubGlobal("fetch", vi.fn(async () => json(403, { error: "Set your own password first.", ...(code ? { code } : {}) })));
+    const page = await openPerson();
+    expect(page.querySelector("[role=alert]")?.textContent).toBe(NO_ACCESS);
+    expect(page.querySelector("a[href='/profile']")).toBeNull();
+    expect(page.textContent).not.toContain("Set your own password");
+  });
+
+  // The API has a stable forced-password code; wording must not determine access state.
   it("A forced password change is not shown as no-access qa:TC-APL2664-0259816b@v2", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => json(403, {
       error: "Set your own password first.",
