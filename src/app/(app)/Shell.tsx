@@ -170,7 +170,7 @@ export function Shell({ user, children }: { user: Me; children: React.ReactNode 
         <a className="skip" href="#main" onClick={(e) => { e.preventDefault(); const m = document.getElementById("main"); m?.focus(); m?.scrollIntoView(); }}>Skip to content</a>
         {open && <div className="veil" onClick={() => closeDrawer()} />}
         <aside ref={drawer} className={`side${open ? " open" : ""}`} aria-label="Main" onClickCapture={open ? e => followOverlayLink(e, closeDrawer, href => router.push(href)) : undefined}>
-          <Link href="/" className="brand" aria-label="Sheet Happens Officer home"><img src="/logo-icon-reversed.svg" alt="" />Sheet Happens Officer</Link>
+          <Link href="/" className="brand" aria-label="Sheet Happens Officer home"><img src="/logo-icon-reversed.svg" width={40} height={40} alt="" />Sheet Happens Officer</Link>
           <nav className="nav">
             {items.map(([href, label]) => (
               <Link key={href} href={href} aria-current={here(href) ? "page" : undefined}>{label}</Link>
@@ -184,7 +184,7 @@ export function Shell({ user, children }: { user: Me; children: React.ReactNode 
         <div className="main">
           <header className="top">
             <button className="burger" aria-label="Open menu" aria-expanded={open} onClick={() => closeTopOverlayThen(() => setMenu(path))}>☰</button>
-            <Link href="/" className="top-brand" aria-label="SHO, Sheet Happens Officer home"><img src="/logo-icon-reversed.svg" alt="" /><span className="wordmark-full" aria-hidden="true">Sheet Happens Officer</span><span className="wordmark-short" aria-hidden="true">SHO</span></Link>
+            <Link href="/" className="top-brand" aria-label="SHO, Sheet Happens Officer home"><img src="/logo-icon-reversed.svg" width={40} height={40} alt="" /><span className="wordmark-full" aria-hidden="true">Sheet Happens Officer</span><span className="wordmark-short" aria-hidden="true">SHO</span></Link>
             <nav className="primary-nav" aria-label="Primary">{primary.map(([href, label]) => <Link key={href} href={href} aria-current={here(href) ? "page" : undefined}>{label}</Link>)}</nav>
             <span className="grow" />
             <SearchButton />

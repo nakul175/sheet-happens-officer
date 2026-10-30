@@ -77,3 +77,8 @@
 .shell .my-tasks-view h1.pt { font-size: clamp(30px,3vw,42px); font-weight: 700; color: #10143e; }
 .shell .my-tasks-view .head { align-items: center; margin-bottom: 16px; }
 .shell .my-tasks-view .sub { margin-bottom: 0; }
+
+/* SHO-3136: the approved angular mark keeps its proportions on either header surface. */
+.shell :is(.brand,.top-brand) img { object-fit: contain; flex-shrink: 0; }
+.shell .top-brand { min-width: 44px; min-height: 44px; }
+@media (min-width: 1440px) { .shell .top-brand img { width: 40px; height: 40px; } }

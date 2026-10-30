@@ -1,15 +1,22 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-labelledby="title desc">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 260" role="img" aria-labelledby="title desc">
   <title id="title">Sheet Happens Officer mascot</title>
-  <desc id="desc">A folded white sheet with a knowing expression and round gold spectacles.</desc>
-  <g fill="none" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M27 14h57l25 27-13 70-67 4-15-18 7-25-7-18 9-17z" fill="#fff" stroke="#2C2F71" stroke-width="8"/>
-    <path d="M84 14v27h25" fill="#D99D29" stroke="#2C2F71" stroke-width="7"/>
-    <path d="M31 55c8-8 17-9 27-2M72 52c9-5 18-3 25 5" stroke="#2C2F71" stroke-width="5"/>
-    <path d="M32 68c6-5 15-5 23 1M73 70c7-4 15-3 22 2" stroke="#2C2F71" stroke-width="4"/>
-    <circle cx="45" cy="70" r="18" stroke="#D99D29" stroke-width="7"/><circle cx="84" cy="72" r="18" stroke="#D99D29" stroke-width="7"/>
-    <path d="M63 69c3-5 6-5 9 0M25 66h3M102 69h4" stroke="#D99D29" stroke-width="6"/>
-    <path d="M37 69c5 5 11 6 17 2M76 71c5 5 11 6 17 2" stroke="#2C2F71" stroke-width="3.5"/>
-    <path d="M50 94c10 8 22 8 31-1M82 92c3 3 3 7 1 11" stroke="#2C2F71" stroke-width="4"/>
-    <path d="M28 107l15-15M96 111L83 97" stroke="#2C2F71" stroke-width="3" opacity=".55"/>
+  <desc id="desc">A white angular folded sheet with half-lidded sideways eyes, oversized gold spectacles and a knowing smirk.</desc>
+  <g stroke-linejoin="miter" stroke-linecap="round">
+    <!-- Angular sheet, with the approved lower notch and a white paper centre. -->
+    <path d="M82 30 250 10 310 94 246 232 130 248 139 228 22 244 57 195 91 52Z" fill="#fff" stroke="#2C2F71" stroke-width="12"/>
+    <path d="m250 10-24 65 79 27" fill="#fff" stroke="#2C2F71" stroke-width="10"/>
+    <path d="m253 27-17 43 59 22Z" fill="#D99D29"/>
+    <!-- Asymmetric brows, heavy lids and sideways pupils keep the older expression. -->
+    <path d="M94 80q25-42 46-8t28 29q-18-4-34-25T94 80M191 107l65-13 13 20-16-13-63 17Z" fill="#2C2F71"/>
+    <path d="M92 121q24-17 53 9ZM194 143q27-17 55 8Z" fill="#2C2F71"/>
+    <path d="m94 130 52 9q-9 26-33 14-16-8-19-23Zm101 21 52 8q-13 25-36 12-13-7-16-20Z" fill="#fff" stroke="#2C2F71" stroke-width="3"/>
+    <path d="m95 130 18 3q1 18-11 12Zm101 22 17 3q0 17-12 10Z" fill="#2C2F71"/>
+    <path d="m82 135 6 3m-7 6 7-1m163 22 7 1m-8 4 6 4" fill="none" stroke="#2C2F71" stroke-width="2.5"/>
+    <!-- Oversized gold spectacles with a raised keyhole bridge. -->
+    <g fill="none" stroke="#D99D29" stroke-width="10">
+      <circle cx="118" cy="137" r="39"/><circle cx="223" cy="159" r="39"/>
+      <path d="M156 143c-1-17 33-14 30 6m-108-25-6-2m190 37 7 1" stroke-width="11"/>
+    </g>
+    <path d="M119 188q34 20 63 5-22 27-63-5Zm61-3q20-4 10 24 3-18-10-24Z" fill="#2C2F71"/>
   </g>
 </svg>
