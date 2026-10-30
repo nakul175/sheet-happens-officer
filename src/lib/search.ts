@@ -6,10 +6,17 @@ import { db } from "@/lib/db";
 import { isAdmin, type Actor } from "@/lib/access";
 import { WORKSTREAM_DEAL, crmProjectWhere, crmVisible } from "@/lib/crm";
 import { commentsEnabled } from "@/lib/flags";
+import { rankedSearch } from "@/lib/search-query";
 
 export async function search(user: Actor, q: string, includeArchived: boolean, ideasOnly = false) {
   const text = q.trim();
   if (text.length < 2) return { projects: [], tasks: [], organisations: [], contacts: [] };
+  // Activation is part of the separately reviewed database cut. Ordinary deployments
+  // retain the existing search until pg_trgm, indexes and acceptance are approved.
+  if (process.env.SEARCH_STAGE_A_ENABLED === "true") {
+    const hits = await rankedSearch(user, text, { archived: includeArchived, ideasOnly });
+    return { hits, projects: [], tasks: [], organisations: [], contacts: [] };
+  }
   // Membership and archive are separate filters. Include archived must not put the membership
   // limit back onto an Admin or Super Admin (APL-2684).
   const visible = {
