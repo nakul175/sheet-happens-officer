@@ -1,5 +1,6 @@
 "use client";
 import Link from "next/link";
+import Image from "next/image";
 import "./nav-header.css";
 import "./audit-ui.css";
 import "./select-controls.css";
@@ -83,7 +84,7 @@ function TabBar({ here, more }: { here: (p: string) => boolean; more: [string, s
         <div className="tabmore" role="menu" aria-label="More" onClickCapture={e => followOverlayLink(e, closeMore, href => router.push(href))}>
           {more.map(([h, l]) => <Link key={h} href={h} role="menuitem">{l}</Link>)}
           <Link href="/profile" role="menuitem">Profile</Link>
-          <button role="menuitem" onClick={async () => { await api("POST", "/api/auth/signout", {}); window.location.href = "/signin"; }}>Sign out</button>
+          <button role="menuitem" onClick={async () => { await api("POST", "/api/auth/signout", {}); window.location.href = new URL("/signin", window.location.origin).href; }}>Sign out</button>
         </div>
       )}
       <nav className="tabbar" aria-label="Main">
@@ -170,7 +171,7 @@ export function Shell({ user, children }: { user: Me; children: React.ReactNode 
         <a className="skip" href="#main" onClick={(e) => { e.preventDefault(); const m = document.getElementById("main"); m?.focus(); m?.scrollIntoView(); }}>Skip to content</a>
         {open && <div className="veil" onClick={() => closeDrawer()} />}
         <aside ref={drawer} className={`side${open ? " open" : ""}`} aria-label="Main" onClickCapture={open ? e => followOverlayLink(e, closeDrawer, href => router.push(href)) : undefined}>
-          <Link href="/" className="brand" aria-label="Sheet Happens Officer home"><img src="/logo-icon-reversed.svg" width={40} height={40} alt="" />Sheet Happens Officer</Link>
+          <Link href="/" className="brand" aria-label="Sheet Happens Officer home"><Image src="/logo-icon-reversed.svg" width={40} height={40} alt="" unoptimized loading="eager" />Sheet Happens Officer</Link>
           <nav className="nav">
             {items.map(([href, label]) => (
               <Link key={href} href={href} aria-current={here(href) ? "page" : undefined}>{label}</Link>
@@ -184,7 +185,7 @@ export function Shell({ user, children }: { user: Me; children: React.ReactNode 
         <div className="main">
           <header className="top">
             <button className="burger" aria-label="Open menu" aria-expanded={open} onClick={() => closeTopOverlayThen(() => setMenu(path))}>☰</button>
-            <Link href="/" className="top-brand" aria-label="SHO, Sheet Happens Officer home"><img src="/logo-icon-reversed.svg" width={40} height={40} alt="" /><span className="wordmark-full" aria-hidden="true">Sheet Happens Officer</span><span className="wordmark-short" aria-hidden="true">SHO</span></Link>
+            <Link href="/" className="top-brand" aria-label="SHO, Sheet Happens Officer home"><Image src="/logo-icon-reversed.svg" width={40} height={40} alt="" unoptimized loading="eager" /><span className="wordmark-full" aria-hidden="true">Sheet Happens Officer</span><span className="wordmark-short" aria-hidden="true">SHO</span></Link>
             <nav className="primary-nav" aria-label="Primary">{primary.map(([href, label]) => <Link key={href} href={href} aria-current={here(href) ? "page" : undefined}>{label}</Link>)}</nav>
             <span className="grow" />
             <SearchButton />
@@ -235,6 +236,6 @@ export function Page({ title, docTitle, sub, actions, beforeTitle, className = "
 
 export function SignOut() {
   return (
-    <button className="btn ghost" onClick={async () => { await api("POST", "/api/auth/signout", {}); window.location.href = "/signin"; }}>Sign out</button>
+    <button className="btn ghost" onClick={async () => { await api("POST", "/api/auth/signout", {}); window.location.href = new URL("/signin", window.location.origin).href; }}>Sign out</button>
   );
 }
