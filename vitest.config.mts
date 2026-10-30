@@ -20,6 +20,7 @@ export default defineConfig({
     fileParallelism: false,
     env: { SHO_E2E_START_BASE_URL: startBaseUrl },
     exclude: [
+      "tests/e2e/stories/SHO-3136.spec.ts", // Playwright branding acceptance
       "tests/e2e/stories/SHO-3137.spec.ts", // Playwright removal acceptance, run by staging-e2e
       "tests/e2e/stories/APL-2467.spec.ts",
       "tests/e2e/stories/APL-2468.spec.ts",
