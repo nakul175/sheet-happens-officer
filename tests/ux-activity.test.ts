@@ -46,6 +46,7 @@ describe("activity feed", () => {
     expect(blob).not.toMatch(/deletedAt|sectionId|assigneeId|dueDate/);
     expect(all.some((r) => /changed due date from 10 Oct to 14 Oct on "Mine to do"/.test(r.what))).toBe(true);
     expect(all.some((r) => r.what === 'moved "Theirs alone" to Trash' && r.who === "Alead")).toBe(true);
+    expect((await lead.c.get(`/api/projects/${p.id}/activity`)).json.items.find((r: { what: string }) => r.what === 'moved "Theirs alone" to Trash')).toMatchObject({ kind: "task.deleted" });
     // AC3: the Editor sees only tasks they are on
     const e = (await ed.c.get(`/api/projects/${p.id}/activity`)).json.items as { what: string }[];
     expect(e.length).toBeGreaterThan(0);

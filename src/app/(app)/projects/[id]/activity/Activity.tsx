@@ -7,26 +7,26 @@ import { requestUndo } from "@/components/UndoHost";
 import { LoadFailed, Skeleton } from "@/components/ui";
 import { Page } from "../../../Shell";
 
-type Row = { id: string; ts: number; when: string; who: string; via: string; what: string; undo: "available" | "undone" | "too_old" | "none" };
+type Row = { id: string; ts: number; when: string; who: string; via: string; kind: string; what: string; undo: "available" | "undone" | "too_old" | "none" };
 
-/** A task.deleted row is the sentence `moved "…" to Trash`. A section move ends without that closing quote. */
-export function isDeletedTaskRow(what: string) {
-  return /^moved "[\s\S]*" to Trash$/.test(what);
+/** SHO-2701: wording is presentation; the stored event kind determines delete controls. */
+export function isDeletedTaskRow(kind: string) {
+  return kind === "task.deleted";
 }
 
 /**
  * Undo on a delete follows Trash restore: only a Leader or an Admin (the project API reports both as LEADER).
  * Every other row keeps the feed's own undo flag. Hide the delete button until the role is known.
  */
-export function showUndo(row: Pick<Row, "undo" | "what">, role: string | undefined) {
+export function showUndo(row: Pick<Row, "undo" | "kind">, role: string | undefined) {
   if (row.undo !== "available") return false;
-  if (isDeletedTaskRow(row.what) && role !== "LEADER") return false;
+  if (isDeletedTaskRow(row.kind) && role !== "LEADER") return false;
   return true;
 }
 
 /** AC6 v2.4: on a deleted-task row past the window, only whoever may restore (a Leader or Admin) sees "Too old to undo". */
-export function showTooOld(row: Pick<Row, "undo" | "what">, role: string | undefined) {
-  return row.undo === "too_old" && (!isDeletedTaskRow(row.what) || role === "LEADER");
+export function showTooOld(row: Pick<Row, "undo" | "kind">, role: string | undefined) {
+  return row.undo === "too_old" && (!isDeletedTaskRow(row.kind) || role === "LEADER");
 }
 
 export default function Activity({ params }: { params: Promise<{ id: string }> }) {

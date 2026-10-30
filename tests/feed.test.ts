@@ -31,7 +31,7 @@ describe("activity log", () => {
     await task(ed, p.id, { title: "Logged" });
     const r = await lead.c.get(`/api/projects/${p.id}/activity`);
     expect(r.status).toBe(200);
-    expect(r.json.items[0]).toMatchObject({ who: "Ed", via: "screen" });
+    expect(r.json.items[0]).toMatchObject({ who: "Ed", via: "screen", kind: "task.created" });
     expect(r.json.items[0].what).toMatch(/added "Logged" to To do/); // SHO-US-14.14
     expect((await ed.c.get(`/api/projects/${p.id}/activity`)).status).toBe(200);
     const out = await account("out");
