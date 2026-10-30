@@ -41,7 +41,6 @@ export function Bell() {
     keep.current = r.data.items.length;
   }, []);
   // The badge needs the count even while the panel is shut; a minute is soon enough.
-  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { load(filter, true); const t = setInterval(() => load(filter), 60_000); return () => clearInterval(t); }, [load, filter]);
   useEffect(() => {
     if (!open) return;
