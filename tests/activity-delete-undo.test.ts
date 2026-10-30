@@ -133,6 +133,47 @@ async function undoFlag(user: { id: string; orgRole: "MEMBER" | "ADMIN" | "SUPER
 }
 
 describe("APL-2674 activity delete undo", () => {
+  for (const changedCopy of ["deleted the task", "टास्क ट्रैश में भेजा"]) {
+    it(`SHO-2701 delete controls use kind after copy changes: ${changedCopy}`, async () => {
+      const leader = await account("kindleader");
+      const editor = await account("kindeditor");
+      const projectId = await alpha(leader, editor);
+      const fresh = await deletedTask(editor, projectId, "ZZ-TEST kind fresh");
+      const old = await deletedTask(editor, projectId, "ZZ-TEST kind old");
+      await setLogTime(old.logId, new Date(Date.now() - 31 * DAY));
+      const feed = await editor.c.get(`/api/projects/${projectId}/activity`);
+      for (const id of [fresh.logId, old.logId]) {
+        expect(feed.json.items.find((r: { id: string }) => r.id === id)).toMatchObject({ kind: "task.deleted" });
+      }
+      for (const [who, mayRestore] of [[editor, false], [leader, true]] as const) {
+        const ctx = await signedIn(who.email);
+        try {
+          await ctx.route(`**/api/projects/${projectId}/activity`, async (route) => {
+            const response = await route.fetch();
+            const json = await response.json();
+            for (const row of json.items) {
+              if (row.id === fresh.logId) row.what = `${changedCopy} — fresh`;
+              if (row.id === old.logId) row.what = `${changedCopy} — old`;
+            }
+            await route.fulfill({ response, json });
+          });
+          const page = await openActivity(ctx, projectId);
+          // The breadcrumb and permission role come from the same project response.
+          await page.locator(".activity-breadcrumb").getByRole("link", { name: "Alpha", exact: true }).waitFor();
+          const list = page.getByRole("list", { name: "Activity" });
+          const freshRow = list.getByRole("listitem").filter({ hasText: `${changedCopy} — fresh` });
+          const oldRow = list.getByRole("listitem").filter({ hasText: `${changedCopy} — old` });
+          await freshRow.waitFor();
+          await oldRow.waitFor();
+          expect(await freshRow.getByRole("button", { name: "Undo" }).count()).toBe(mayRestore ? 1 : 0);
+          expect(await oldRow.getByRole("button", { name: "Undo" }).count()).toBe(0);
+          expect((await oldRow.innerText()).includes("Too old to undo")).toBe(mayRestore);
+        } finally { await ctx.close(); }
+      }
+      expect((await editor.c.post(`/api/actions/${fresh.logId}/undo`)).status).toBe(403);
+    }, 90_000);
+  }
+
   it("qa:TC-APL2674-4c99513c@v1 Editor sees no Undo on their own task.deleted row", async () => {
     const leader = await account("leader");
     const editor = await account("editor");
