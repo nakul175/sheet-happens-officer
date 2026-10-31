@@ -1,4 +1,4 @@
-import { test } from "./qa";
+import { test } from "../helpers/2642-fixtures";
 // SHO-US-10.5 One view engine for lists, boards and groupings (APL-2531).
 // One test per acceptance criterion. ZZ-TEST deals, projects and organisations are archived afterwards.
 // The Super Admin is the Admin (the same rule covers an Admin and the Super Admin). The plain Member is the person
@@ -12,6 +12,8 @@ type Pipe = { id: string; key: string; name: string; stages: Stage[] };
 
 const CRM_OFF = "CRM routes answer not found on this server (CRM_VISIBLE is off).";
 const CRM_MEMBER = "CRM is hidden from this Member (CRM_VISIBLE is admins or off).";
+const board = (who: Who) => who.page.getByRole("region", { name: "Unclassified sales board", exact: true });
+const column = (who: Who, name: string) => board(who).getByRole("region", { name: `Unclassified sales board · ${name}`, exact: true });
 async function crmPipes(who: Who, hidden: string) {
   const r = await who.api.get("/api/deals/pipelines");
   if (r.status === 404) throw new Error(hidden);
@@ -61,7 +63,7 @@ test("AC1: a deal list shows a deal to its members and to an Admin, and hides it
   expect(adminOrg.some((d) => d.projectId === hidden.id)).toBe(true);
 
   await member.page.goto("/deals");
-  await expect(member.page.getByRole("region", { name: "Lead" })).toBeVisible();
+  await expect(column(member, "Lead")).toBeVisible();
   await expect(member.page.getByText(hidden.name)).toHaveCount(0);
   await admin.page.goto("/deals");
   await expect(admin.page.locator(".dcard", { hasText: hidden.name })).toBeVisible();
@@ -96,15 +98,15 @@ test("AC2: each available sales stage has its own board column, including separa
   const deal = await makeDeal(admin, later, { label: "2531 columns" });
   await admin.page.setViewportSize({ width: 1400, height: 900 });
   await admin.page.goto("/deals");
-  await expect(admin.page.locator(".dcol header b")).toHaveText(proactive);
-  await expect(admin.page.getByRole("region", { name: proactive[0], exact: true }).locator(".dcard", { hasText: deal.name })).toBeVisible();
+  await expect(board(admin).locator(".dcol header b")).toHaveText(proactive);
+  await expect(column(admin, proactive[0]).locator(".dcard", { hasText: deal.name })).toBeVisible();
   for (const stage of salesStages(pro).filter(s => ["PAUSED", "DONE", "LOST"].includes(s.category)))
-    await expect(admin.page.getByRole("region", { name: stage.name, exact: true }).locator(".dcard", { hasText: deal.name })).toHaveCount(0);
+    await expect(column(admin, stage.name).locator(".dcard", { hasText: deal.name })).toHaveCount(0);
 
   await admin.page.getByRole("tab", { name: "Bid" }).click();
-  await expect(admin.page.locator(".dcol header b")).toHaveText(bidTitles);
-  await expect(admin.page.getByRole("region", { name: "Lead", exact: true })).toHaveCount(0);
-  await expect(admin.page.getByRole("region", { name: bidTitles[0], exact: true }).locator(".dcard", { hasText: bidDeal.name })).toBeVisible();
+  await expect(board(admin).locator(".dcol header b")).toHaveText(bidTitles);
+  await expect(column(admin, "Lead")).toHaveCount(0);
+  await expect(column(admin, bidTitles[0]).locator(".dcard", { hasText: bidDeal.name })).toBeVisible();
   await expect(admin.page.getByText(deal.name)).toHaveCount(0);
 });
 
@@ -127,10 +129,10 @@ test("AC3: Home, Organisation, Deal and Pipeline screens each open their list or
   await expect(admin.page.getByText(deal.step).first()).toBeVisible();
 
   await admin.page.goto("/deals");
-  await expect(admin.page.getByRole("region", { name: "Lead" })).toBeVisible();
+  await expect(column(admin, "Lead")).toBeVisible();
   await expect(admin.page.locator(".dcard", { hasText: deal.name })).toBeVisible();
   await admin.page.getByRole("tab", { name: "Bid" }).click();
-  await expect(admin.page.getByRole("region", { name: bid.stages.find(s => !s.isRetired && s.category !== "DELIVERY")!.name, exact: true }).locator(".dcard", { hasText: bidDeal.name })).toBeVisible();
+  await expect(column(admin, bid.stages.find(s => !s.isRetired && s.category !== "DELIVERY")!.name).locator(".dcard", { hasText: bidDeal.name })).toBeVisible();
 });
 
 test("AC4: archiving leaves a deal off the live list, and Trash still only holds deleted tasks", async ({ admin, later }) => {
