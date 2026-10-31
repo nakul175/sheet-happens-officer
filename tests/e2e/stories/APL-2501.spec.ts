@@ -1,7 +1,7 @@
 import { archiveProject, removeMember } from "../helpers/migration-2731";
-import { test } from "./qa";
+import { test, PASS, passwordOk } from "./qa";
 // APL-2501 · SHO-US-5.6 Branded app shell that works on a phone
-// Acceptance criteria: AC1 1280 px layout with a 340 px concierge slot, AC2 390 px phone layout, AC3 brand mark and Public Sans,
+// Acceptance criteria: AC1 approved full-width desktop header, AC2 390 px phone layout, AC3 brand mark and Public Sans,
 // AC4 sidebar by role, AC5 notification bell.
 // Notes on AC text that later stories changed (the tests follow the live behaviour and say so):
 //  - AC4 lists only My tasks, Projects and Team; CRM stories later added Deals and Accounts, so the test checks the role-specific items only.
@@ -9,6 +9,12 @@ import { test } from "./qa";
 //    the person clicks a notice, and the panel shows up to 50. The test checks the 14.13 behaviour.
 // Data: every project and task is named "ZZ-TEST ...".
 import { expect, zz, type Who } from "../support";
+
+// SHO-2758 retains the story's explicit fixture opt-in; configured runs must execute every case.
+test.beforeAll(() => {
+  test.skip(!PASS, "Set SHO_QA_PASS for the synthetic story fixtures.");
+  if (!passwordOk(PASS)) throw new Error("SHO_QA_PASS must be at least 8 characters with a letter and a number.");
+});
 
 async function proj(admin: Who, label: string, later: (f: () => Promise<unknown>) => void) {
   const r = await admin.api.post("/api/projects", { name: zz(label), leaderId: admin.user.id });
@@ -24,16 +30,16 @@ test("AC1: at 1280 px the approved desktop header and full content width render 
   await admin.page.goto("/my-tasks");
   // The approved header switches to its drawer below1440px.
   await admin.page.getByRole("button", { name: "Open menu", exact: true }).click();
-  await expect(admin.page.locator("aside[aria-label='Main'] nav.nav")).toBeVisible();
+  await expect(admin.page.getByRole("complementary", { name: "Main", exact: true }).getByRole("navigation")).toBeVisible();
   await admin.page.keyboard.press("Escape");
-  await expect(admin.page.locator("aside[aria-label='Main']")).toBeHidden();
-  await expect(admin.page.locator("main.content, main#main").first()).toBeVisible();
+  await expect(admin.page.getByRole("complementary", { name: "Main", exact: true })).toBeHidden();
+  await expect(admin.page.getByRole("main")).toBeVisible();
   for (const path of ["/my-tasks", `/projects/${p}`]) {
     await admin.page.goto(path);
-    const content = admin.page.locator("main#main");
+    const content = admin.page.getByRole("main");
     await expect(content).toBeVisible();
     expect((await content.boundingBox())!.width).toBeGreaterThan(1000);
-    await expect(admin.page.locator(".with-dock,.with-bar,.cc-barslot,.cc-fabwrap")).toHaveCount(0);
+    await expect(admin.page.getByRole("complementary", { name: "Concierge", exact: true })).toHaveCount(0);
   }
 });
 
@@ -42,8 +48,8 @@ test("AC2: at 390 px the sidebar collapses and no page scrolls sideways", async 
   await admin.page.setViewportSize({ width: 390, height: 800 });
   for (const path of ["/", "/projects", `/projects/${p}`, "/team"]) {
     await admin.page.goto(path);
-    await expect(admin.page.locator("main").first()).toBeVisible();
-    await expect(admin.page.locator("aside.side, aside[aria-label='Main']").first()).toBeHidden();
+    await expect(admin.page.getByRole("main")).toBeVisible();
+    await expect(admin.page.getByRole("complementary", { name: "Main", exact: true })).toBeHidden();
     const fits = await admin.page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1);
     expect(fits, `${path} scrolls sideways at 390 px`).toBe(true);
   }
@@ -52,7 +58,7 @@ test("AC2: at 390 px the sidebar collapses and no page scrolls sideways", async 
 test("AC3: the icon-only mark shows at 24 px and the text uses Public Sans", async ({ admin }) => {
   await admin.page.setViewportSize({ width: 1280, height: 800 });
   await admin.page.goto("/");
-  const img = admin.page.locator(".top-brand img");
+  const img = admin.page.getByRole("link", { name: "SHO, Sheet Happens Officer home", exact: true }).getByAltText("", { exact: true });
   await expect(img).toHaveAttribute("src", "/logo-icon-reversed.svg");
   const box = (await img.boundingBox())!;
   expect(Math.round(box.width)).toBeGreaterThanOrEqual(24);
@@ -68,17 +74,17 @@ test("AC4: Audit log is for the Super Admin only; retired Usage is not in the na
   await member.page.setViewportSize({ width: 1280, height: 800 });
   await admin.page.goto("/");
   await admin.page.getByRole("button", { name: /^Account and utilities, \S+$/ }).click();
-  const adminNav = admin.page.locator("#account-utilities");
+  const adminNav = admin.page.getByLabel("Account and utilities", { exact: true });
   await expect(adminNav.getByRole("link", { name: "Usage" })).toHaveCount(0);
   await expect(adminNav.getByRole("link", { name: "Audit log" })).toBeVisible();
   await member.page.goto("/");
   await member.page.getByRole("button", { name: "Open menu", exact: true }).click();
-  const memberNav = member.page.locator("aside[aria-label='Main'] nav.nav");
+  const memberNav = member.page.getByRole("complementary", { name: "Main", exact: true }).getByRole("navigation");
   for (const l of ["My tasks", "Projects", "Team"]) await expect(memberNav.getByRole("link", { name: l, exact: true })).toBeVisible();
   await member.page.keyboard.press("Escape");
   await member.page.getByRole("button", { name: /^Account and utilities, \S+$/ }).click();
-  await expect(member.page.locator("#account-utilities").getByRole("link", { name: "Usage" })).toHaveCount(0);
-  await expect(member.page.locator("#account-utilities").getByRole("link", { name: "Audit log" })).toHaveCount(0);
+  await expect(member.page.getByLabel("Account and utilities", { exact: true }).getByRole("link", { name: "Usage" })).toHaveCount(0);
+  await expect(member.page.getByLabel("Account and utilities", { exact: true }).getByRole("link", { name: "Audit log" })).toHaveCount(0);
   for (const path of ["/audit"]) {
     await member.page.goto(path);
     await expect(member.page.getByText("This page isn't available").first()).toBeVisible();
@@ -102,7 +108,7 @@ test("AC5: the bell shows the unread count, lists notices newest first with link
   expect(count).toBeGreaterThanOrEqual(2);
   await bell.click();
   const panel = member.page.getByRole("dialog", { name: "Notifications" });
-  const rows = panel.locator(".bell-main");
+  const rows = panel.getByRole("link");
   await expect(rows.first()).toContainText(zz("second notice")); // newest first
   await expect(rows.nth(1)).toContainText(zz("first notice"));
   await expect(rows.first()).toHaveAttribute("href", new RegExp(`/tasks/${t2}`));
