@@ -2,12 +2,11 @@
 import Link from "next/link";
 import { Confirm, Skeleton } from "@/components/ui";
 import { useEffect, useId, useRef, useState } from "react";
-import { api, dueLabel, isOverdue, useGet } from "@/components/api";
+import { api, useGet } from "@/components/api";
 import { OPPORTUNITY_TYPES } from "@/lib/deal-classification";
 import { DEAL_DATE_FIELDS, matchesDealDate, type DealDateFilter } from "@/lib/deal-date-filter";
-import { money } from "@/components/DealPanel";
-import { DealBdFacts } from "@/components/DealBdFields";
-import { DealBoard, inLifecycle, opportunityFilterValue, opportunityGroups, sortDeals, totals, type BoardDeal, type BoardStage, type DealSort } from "@/components/DealBoard";
+import { DealCollection } from "@/components/DealCollection";
+import { inLifecycle, opportunityFilterValue, opportunityGroups, sortDeals, totals, type BoardDeal, type BoardStage, type DealSort } from "@/components/DealBoard";
 import { Page, useMe } from "../Shell";
 
 import "./deals-approved.css";
@@ -104,8 +103,8 @@ export default function DealsView() {
           <h2 style={{ fontSize: 18 }}>{group.label} · {group.deals.length} {lifecycle === "delivery" ? "delivery projects" : "deals"}</h2>
           <p className="hint">{t.sums.join(" · ")}{t.unknown > 0 ? `${t.sums.length ? " · " : ""}${t.unknown} without value` : ""}</p>
           {group.deals.length === 0 ? <p className="sub">No {group.label} {lifecycle === "delivery" ? "delivery projects" : "deals"}.</p>
-            : view === "board" && !old ? <DealBoard deals={group.deals} stages={cur.stages} lifecycle={lifecycle} bid={cur.key === "DEAL_BID"} sort={sort} onChange={reload} />
-            : <DealList deals={group.deals} />}
+            : view === "board" && !old ? <DealCollection view="board" label={`${group.label} ${lifecycle} board`} deals={group.deals} stages={cur.stages} lifecycle={lifecycle} bid={cur.key === "DEAL_BID"} sort={sort} onChange={reload} />
+            : <DealCollection view="list" label={`${group.label} ${lifecycle} table`} deals={group.deals} />}
         </section>;
       })}
 
@@ -143,19 +142,4 @@ function MultiFilter({ label, options, values, onChange }: { label: string; opti
       {!options.length && <p className="hint">No available options.</p>}
     </div>
   </details></div>;
-}
-
-function DealList({ deals }: { deals: D[] }) {
-  return <div className="deal-list-scroll" tabIndex={0} role="region" aria-label="Deals table"><table className="tbl">
-    <thead><tr><th>Deal</th><th>Opportunity type</th><th>Organisation</th><th>Stage</th><th>Value</th><th>Next step</th><th>Leader</th></tr></thead>
-    <tbody>{deals.map(d => <tr key={d.id}>
-      <td><Link href={`/projects/${d.id}`}>{d.name}</Link> {d.stalled && <span className="chip gold">Stalled</span>}</td>
-      <td>{OPPORTUNITY_TYPES.find(o => o.value === d.opportunityType)?.label ?? "Unclassified"}</td>
-      <td>{d.organisation ? <Link href={`/accounts/${d.organisation.id}`}>{d.organisation.name}</Link> : "—"}</td>
-      <td><span className="chip">{d.stage?.name}{d.stage?.isRetired ? " · legacy stage" : ""}</span><div style={{ fontSize: 12, color: "var(--muted)" }}>{d.pipeline?.name}</div></td>
-      <td>{money(d.value, d.currency)}<DealBdFacts values={d} label={`BD details for ${d.name}`} /></td>
-      <td>{d.nextStep ? <>{d.nextStep.title} · <span className={isOverdue(d.nextStep.dueDate) ? "over" : ""}>{dueLabel(d.nextStep.dueDate)}</span></> : d.needsNextStep ? <span className="chip red">None</span> : "—"}</td>
-      <td>{d.leader?.name ?? "—"}</td>
-    </tr>)}</tbody>
-  </table></div>;
 }

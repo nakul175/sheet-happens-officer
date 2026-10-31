@@ -1,6 +1,7 @@
 "use client";
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import Link from "next/link";
+import { DealCollection } from "@/components/DealCollection";
 import { Suspense, useEffect, useState } from "react";
 import "./approvals.css";
 import { api, dueState, rowKeys, isOverdue, todayIST, useGet } from "@/components/api";
@@ -198,12 +199,7 @@ function Inner() {
       {data && (!me.crm || mode === "date") && needs.length > 0 && (
         <section aria-label="Deals that need a next step">
           <div className="grp red">Deals that need a next step · {needs.length}</div>
-          {needs.map((n) => (
-            <div key={n.id} className="card" style={{ marginBottom: 6, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-              <Link href={`/projects/${n.id}`}><b>{n.name}</b></Link> <span className="chip grey">{n.stage}</span>
-              <AddNext projectId={n.id} meId={me.id} label="+ Add task" onDone={reload} />
-            </div>
-          ))}
+          <DealCollection view="needs-step" deals={needs} renderAction={id => <AddNext projectId={id} meId={me.id} label="+ Add task" onDone={reload} />} />
         </section>
       )}
       {open && <TaskModal id={open} me={me.id} onClose={() => router.replace(taskHref(), { scroll: false })} onChanged={reload} />}

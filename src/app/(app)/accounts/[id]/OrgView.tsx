@@ -1,5 +1,6 @@
 "use client";
 import Link from "next/link";
+import { DealCollection, type OrganisationDeal } from "@/components/DealCollection";
 import { use, useState } from "react";
 import { api, dueLabel, todayIST, useGet } from "@/components/api";
 import { Confirm, Field, Modal } from "@/components/ui";
@@ -14,7 +15,7 @@ type Note = { id: string; kind: string; date: string; text: string; author: { id
 type Tree = { id: string; name: string; children: Tree[] };
 type Org = {
   id: string; name: string; kind: string | null; country: string | null; archived: boolean; path: { id: string; name: string }[]; canEdit: boolean; createdBy: string | null;
-  deals: { projectId: string; name: string; role: string; archived: boolean; stage: { name: string } | null; pipeline: string | null; leader: { name: string } | null }[];
+  deals: OrganisationDeal[];
   contacts: Contact[]; notes: Note[]; tree: Tree | null;
   tasks: { id: string; title: string; done: boolean; dueDate: string | null; assignee: string; project: { id: string; name: string; type: string } }[];
 };
@@ -159,8 +160,7 @@ export default function OrgView({ params }: { params: Promise<{ id: string }> })
       <div className="org-overview-panel"><h2>Open deals {o && `(${o.deals.length})`}</h2>
       {o && o.deals.length === 0 && <div className="card empty">No deals you can see yet.</div>}
       {o && o.deals.length > 0 && (
-        <div className="acct-scroll" tabIndex={0} role="region" aria-label="Open deals"><table className="tbl"><thead><tr><th>Deal</th><th>Relationship</th><th>Stage</th><th>Leader</th></tr></thead>
-          <tbody>{o.deals.map((d) => <tr key={d.projectId}><td><Link href={`/projects/${d.projectId}`}>{d.name}</Link></td><td>{d.role}</td><td>{d.stage?.name ?? "—"} <span style={{ color: "var(--muted)" }}>{d.pipeline}</span></td><td>{d.leader?.name ?? "—"}</td></tr>)}</tbody></table></div>
+        <DealCollection view="organisation" deals={o.deals} />
       )}
 
       </div>

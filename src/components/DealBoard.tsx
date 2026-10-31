@@ -103,7 +103,8 @@ function Card({ d, stages, onMove, bid, canMove }: { d: BoardDeal; stages: Board
   );
 }
 
-export function DealBoard({ deals, stages, bid, lifecycle = "all", sort = "stage", canMove = true, onChange }: { deals: BoardDeal[]; stages: BoardStage[]; bid: boolean; lifecycle?: DealLifecycle; sort?: DealSort; canMove?: boolean; onChange: () => void }) {
+export function DealBoard({ deals, stages, bid, lifecycle = "all", sort = "stage", canMove = true, onChange, label = "Deal board" }: { deals: BoardDeal[]; stages: BoardStage[]; bid: boolean; lifecycle?: DealLifecycle; sort?: DealSort; canMove?: boolean; onChange: () => void; label?: string }) {
+  const regionName = (name: string) => label === "Deal board" ? name : `${label} · ${name}`;
   const legacy = deals.filter(d => !d.archived && d.stage?.isRetired && inLifecycle(d, lifecycle));
   const cols = useMemo(() => columnsFor(stages, deals, bid, lifecycle, sort), [stages, deals, bid, lifecycle, sort]);
   const unplaced = sortDeals(deals.filter(d => !d.archived && !d.stage?.isRetired && inLifecycle(d, lifecycle) && !cols.some(c => c.deals.some(item => item.id === d.id))), sort, stages);
@@ -131,17 +132,17 @@ export function DealBoard({ deals, stages, bid, lifecycle = "all", sort = "stage
   return (
     <>
       {err && <div className="err" role="alert">{err}</div>}
-      {legacy.length > 0 && <section className="card" aria-label="Legacy stage deals" style={{ marginBottom: 12 }}>
+      {legacy.length > 0 && <section className="card" aria-label={regionName("Legacy stage deals")} style={{ marginBottom: 12 }}>
         <h3>Legacy stage restored by Undo</h3>
         <p className="sub">These deals retain their historical stage. Move to an active stage to return them to the board.</p>
         {legacy.map(d => <Card key={d.id} d={d} stages={stages} onMove={move} bid={bid} canMove={canMove} />)}
       </section>}
-      {unplaced.length > 0 && <section className="card" aria-label="Unassigned stage deals" style={{ marginBottom: 12 }}><h3>Unassigned stage</h3><p className="hint">These deals have no available stage and remain accessible here.</p>{unplaced.map(d => <Card key={d.id} d={d} stages={stages} onMove={move} bid={bid} canMove={canMove} />)}</section>}
-      <div className="dboard" role="region" aria-label="Deal board" tabIndex={0}>
+      {unplaced.length > 0 && <section className="card" aria-label={regionName("Unassigned stage deals")} style={{ marginBottom: 12 }}><h3>Unassigned stage</h3><p className="hint">These deals have no available stage and remain accessible here.</p>{unplaced.map(d => <Card key={d.id} d={d} stages={stages} onMove={move} bid={bid} canMove={canMove} />)}</section>}
+      <div className="dboard" role="region" aria-label={label} tabIndex={0}>
         {cols.map((c) => {
           const t = totals(c.deals);
           return (
-            <section key={c.key} className={`dcol${over === c.key ? " over" : ""}`} aria-label={c.title}
+            <section key={c.key} className={`dcol${over === c.key ? " over" : ""}`} aria-label={regionName(c.title)}
               onDragOver={(e) => { if (canMove && c.stages.length) { e.preventDefault(); setOver(c.key); } }} onDragLeave={() => setOver(null)}
               onDrop={(e) => { e.preventDefault(); setOver(null); const id = e.dataTransfer.getData("text/deal"); if (id) drop(c, id); }}>
               <header>
