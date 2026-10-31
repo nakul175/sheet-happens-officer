@@ -108,7 +108,7 @@ jobs:
       # staging cannot run them and npm test no longer does. Each file must collect at least one test, then every test runs.
       - name: Local Playwright story specs
         run: |
-          specs=(tests/e2e/stories/APL-2624.spec.ts tests/e2e/stories/APL-2721.spec.ts tests/e2e/stories/APL-2737.spec.ts)
+          specs=(tests/e2e/stories/APL-2691.spec.ts tests/e2e/stories/APL-2624.spec.ts tests/e2e/stories/APL-2721.spec.ts tests/e2e/stories/APL-2737.spec.ts)
           for f in "${specs[@]}"; do
             total=$(npx playwright test --list "$f" | sed -n 's/^Total: \([0-9][0-9]*\) tests\{0,1\} in .*/\1/p')
             echo "$f: ${total:-0} tests"

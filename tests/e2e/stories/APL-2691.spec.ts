@@ -1,11 +1,14 @@
-// APL-2691: Move to Won / Lost shows why it is refused (APL-2529 AC6).
+// SHO-2907: migrate APL-2691 onto the live NJ-refined SHO-3050 contract.
+// Won retains operational tasks; Lost preserves its refusal and ordered task list.
+// The obsolete Won409 assertions are superseded, not skipped. No product behavior changes.
 // One test per acceptance criterion. ZZ-TEST deals and organisations are archived afterwards.
 // The Super Admin acts as Leader. workers is 1 in playwright.config.ts. Traces stay off.
 // Pam's ids sit in the title, next to the acceptance-criteria tag, the same way the other story specs do.
 // A missing SHO_QA_PASS skips the file, like every story spec in staging-e2e.yml. The `admin` fixture does not sign in
 // with SHO_QA_PASS: it uses login("ADMIN") (SHARD_* in a CI shard, otherwise SHO_ADMIN_EMAIL / SHO_ADMIN_PASS). beforeAll
 // checks that account too, so a missing one fails once with its variable names. No password is written here.
-import { test, expect, zz, login } from "../support";
+import { expect, zz, login } from "../support";
+import { test, local2691 } from "../helpers/2691-admin";
 import { getTask, newTask, ymd, type Who } from "../g2";
 
 type Later = (fn: () => Promise<unknown>) => void;
@@ -49,56 +52,48 @@ async function openTasks(admin: Who, dealId: string, step: { id: string; title: 
   const ids = [step.id];
   for (let i = 0; i < extra; i++) {
     const title = zz(`open ${i}`);
-    ids.push(await newTask(admin, dealId, { title, dueDate: ymd(6) }));
+    ids.push(await newTask(admin, dealId, { title, dueDate: ymd(6), assigneeId: admin.user.id }));
     titles.push(title);
   }
   return { titles, ids };
 }
 
+/** Snapshot actual task business state; project stage may legitimately change. */
+async function taskStates(who: Who, ids: string[]) {
+  return Promise.all(ids.map(async id => { const t = await getTask(who, id); return {
+    id: t.id, title: t.title, assignee: t.assignee, collaborators: t.collaborators,
+    dueDate: t.dueDate, completedAt: t.completedAt, deletedAt: t.deletedAt,
+    blocked: t.blocked, blockedReason: t.blockedReason, updatedAt: t.updatedAt,
+  }; }));
+}
+
 test.beforeAll(() => {
-  test.skip(!process.env.SHO_QA_PASS, "Set SHO_QA_PASS (the shared QA password; story specs skip without it).");
+  test.skip(!local2691 && !process.env.SHO_QA_PASS, "Set SHO_QA_PASS (the shared QA password; story specs skip without it).");
   // Throws "Set SHO_ADMIN_EMAIL ..." (or _PASS) when the account the admin fixture signs in with is missing.
-  login("ADMIN");
+  if (!local2691) login("ADMIN");
 });
 
 test.describe("qa:TC missing APL-2691", { tag: "@APL-2691" }, () => {
   test.describe.configure({ timeout: 180_000 });
 
   test(
-    "@APL-2691 qa:TC-APL2691-8d4e9e0b@v1 AC1: the Move to Won dialog shows an alert containing 21 within 10s, lists the first 20 open tasks, and nothing is closed or archived",
+    "@APL-2691 qa:TC missing AC1 v2 (SHO-3050): UI moves to Won with21 open tasks and preserves every task",
     { tag: ["@APL-2691", "@AC1"] },
     async ({ admin, later }: { admin: Who; later: Later }) => {
-      const step = zz("won step");
-      const deal = await makeDeal(admin, later, "2691 won", step);
+      const deal = await makeDeal(admin, later, "2691 won", zz("won step"));
       const next = (await projectOf(admin, deal.id)).deal.nextStep!;
       const made = await openTasks(admin, deal.id, next, 20);
-
+      const before = await taskStates(admin, made.ids);
       await admin.page.goto(`/projects/${deal.id}`);
-      // Read the order the person actually sees, before the dialog hides the task rows.
-      const titlePattern = new RegExp(made.titles.map(title => title.replace(/[.*+?^$(){}|[\]\\]/g, "\\$&")).join("|"));
-      const taskRows = admin.page.getByRole("link").filter({ hasText: titlePattern });
-      await expect(taskRows).toHaveCount(21);
-      const displayedTitles = (await taskRows.allTextContents()).map(text => {
-        const matches = made.titles.filter(title => text.includes(title));
-        expect(matches).toHaveLength(1);
-        return matches[0];
-      });
       await admin.page.getByRole("group", { name: "Stage" }).getByRole("button", { name: "Won", exact: true }).click();
       const dialog = admin.page.getByRole("dialog", { name: "Move to Won" });
-      const alert = dialog.getByRole("alert");
-      await expect(alert).toContainText("21 open tasks", { timeout: WITHIN });
+      await expect(dialog).toBeVisible(); await expect(dialog.getByRole("alert")).toHaveCount(0);
       await dialog.getByRole("button", { name: "Move deal" }).click();
-      await expect(alert).toContainText("21 open tasks", { timeout: WITHIN });
-      const shown = (await dialog.getByRole("link").allTextContents()).map((t: string) => t.trim());
-      expect(shown).toHaveLength(20);
-      expect(shown).toEqual(displayedTitles.slice(0, 20));
-      expect(made.titles.filter((t) => !shown.includes(t))).toEqual([displayedTitles[20]]);
-
+      await expect(dialog).toHaveCount(0);
       const after = await projectOf(admin, deal.id);
-      expect(after.deal.stage.name).toBe("Lead");
-      expect(after.archived).toBe(false);
-      for (const id of made.ids) expect((await getTask(admin, id)).completedAt).toBeNull();
-      await dialog.getByRole("button", { name: "Cancel" }).click();
+      expect(after.deal.stage.name).toBe("Won"); expect(after.archived).toBe(false);
+      expect(after.deal.nextStep).toBeNull();
+      expect(await taskStates(admin, made.ids)).toEqual(before);
     },
   );
 
@@ -129,24 +124,43 @@ test.describe("qa:TC missing APL-2691", { tag: "@APL-2691" }, () => {
   );
 
   test(
-    "@APL-2691 qa:TC-APL2691-6ec60bba@v1 AC3: POST /api/projects/{id}/stage with Won still returns 409 with openTasks 21",
+    "@APL-2691 qa:TC missing AC3 v2 (SHO-3050): API Won succeeds with21 open tasks, Lost still returns409",
     { tag: ["@APL-2691", "@AC3"] },
     async ({ admin, later }: { admin: Who; later: Later }) => {
-      const step = zz("api step");
-      const deal = await makeDeal(admin, later, "2691 api", step);
+      const deal = await makeDeal(admin, later, "2691 API", zz("API step"));
       const next = (await projectOf(admin, deal.id)).deal.nextStep!;
-      await openTasks(admin, deal.id, next, 20);
-      const won = deal.pro.stages.find((s) => s.name === "Won");
-      expect(won, "Won stage").toBeTruthy();
+      const made = await openTasks(admin, deal.id, next, 20), before = await taskStates(admin, made.ids);
+      const won = deal.pro.stages.find(s => s.name === "Won")!, lost = deal.pro.stages.find(s => s.name === "Lost")!;
+      const refused = await admin.api.post(`/api/projects/${deal.id}/stage`, { stageId: lost.id, reason: "ZZ-TEST refusal" });
+      expect(refused.status).toBe(409); expect(refused.json.openTasks).toBe(21); expect(refused.json.tasks).toHaveLength(20);
+      expect((await projectOf(admin, deal.id)).deal.stage.name).toBe("Lead");
+      expect(await taskStates(admin, made.ids)).toEqual(before);
+      const moved = await admin.api.post(`/api/projects/${deal.id}/stage`, { stageId: won.id }); expect(moved.status).toBe(200);
+      const after = await projectOf(admin, deal.id); expect(after.deal.stage.name).toBe("Won"); expect(after.archived).toBe(false); expect(after.deal.nextStep).toBeNull();
+      expect(await taskStates(admin, made.ids)).toEqual(before);
+    },
+  );
 
-      const blocked = await admin.api.post(`/api/projects/${deal.id}/stage`, { stageId: won!.id });
-      expect(blocked.status).toBe(409);
-      expect(blocked.json.openTasks).toBe(21);
-      expect(blocked.json.error).toContain("21 tasks are still open");
-      const after = await projectOf(admin, deal.id);
-      expect(after.deal.stage.name).toBe("Lead");
-      expect(after.archived).toBe(false);
-      expect((await getTask(admin, next.id)).completedAt).toBeNull();
+  test(
+    "@APL-2691 qa:TC missing AC4: Lost preserves the21-task refusal and exact first20 task-page ordering",
+    { tag: ["@APL-2691", "@AC4"] },
+    async ({ admin, later }: { admin: Who; later: Later }) => {
+      const deal = await makeDeal(admin, later, "2691 lost order", zz("lost order step"));
+      const made = await openTasks(admin, deal.id, (await projectOf(admin, deal.id)).deal.nextStep!, 20);
+      const before = await taskStates(admin, made.ids);
+      await admin.page.goto(`/projects/${deal.id}`);
+      const titlePattern = new RegExp(made.titles.map(title => title.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|"));
+      const taskRows = admin.page.getByRole("link").filter({ hasText: titlePattern }); await expect(taskRows).toHaveCount(21);
+      const displayedTitles = (await taskRows.allTextContents()).map(text => { const matches = made.titles.filter(title => text.includes(title)); expect(matches).toHaveLength(1); return matches[0]; });
+      await admin.page.getByRole("group", { name: "Stage" }).getByRole("button", { name: "Lost", exact: true }).click();
+      const dialog = admin.page.getByRole("dialog", { name: "Move to Lost" }), alert = dialog.getByRole("alert");
+      await expect(alert).toContainText("21 open tasks", { timeout: WITHIN });
+      const shown = (await dialog.getByRole("link").allTextContents()).map(t => t.trim());
+      expect(shown).toHaveLength(20); expect(shown).toEqual(displayedTitles.slice(0,20)); expect(made.titles.filter(t => !shown.includes(t))).toEqual([displayedTitles[20]]);
+      await dialog.getByLabel("Reason (required)").fill("ZZ-TEST retained safeguard"); await dialog.getByRole("button", { name: "Move deal" }).click();
+      await expect(alert).toContainText("21 open tasks", { timeout: WITHIN });
+      expect((await projectOf(admin, deal.id)).deal.stage.name).toBe("Lead"); expect(await taskStates(admin, made.ids)).toEqual(before);
+      await dialog.getByRole("button", { name: "Cancel" }).click();
     },
   );
 });
