@@ -1,0 +1,269 @@
+{
+  "story": "SHO-2638",
+  "sourceSHA": "7aeaf74cad3e060f95d729dc169ef7792ba3d9a8",
+  "buildId": "2rBn60wBoKiUQoSlZ_m4w",
+  "startedAt": "2026-10-31T07:00:05.328Z",
+  "startedAtIST": "31 Oct 2026, 12:30:05 pm IST",
+  "database": "sho_test_2638",
+  "modes": [
+    {
+      "mode": "all",
+      "base": "http://127.0.0.1:58210",
+      "health": {
+        "ok": true,
+        "release": "7aeaf74cad3e060f95d729dc169ef7792ba3d9a8"
+      },
+      "buildId": "2rBn60wBoKiUQoSlZ_m4w"
+    },
+    {
+      "mode": "off",
+      "base": "http://127.0.0.1:58208",
+      "health": {
+        "ok": true,
+        "release": "7aeaf74cad3e060f95d729dc169ef7792ba3d9a8"
+      },
+      "buildId": "2rBn60wBoKiUQoSlZ_m4w"
+    },
+    {
+      "mode": "admins",
+      "base": "http://127.0.0.1:58209",
+      "health": {
+        "ok": true,
+        "release": "7aeaf74cad3e060f95d729dc169ef7792ba3d9a8"
+      },
+      "buildId": "2rBn60wBoKiUQoSlZ_m4w"
+    }
+  ],
+  "api": [
+    {
+      "mode": "off",
+      "role": "Editor",
+      "expectedVisible": false,
+      "dealTaskPresent": false,
+      "stagePresent": false,
+      "ordinaryTaskPresent": true,
+      "dealSearchPresent": false,
+      "taskSearchPresent": false,
+      "taskStatus": 404,
+      "taskListStatus": 404
+    },
+    {
+      "mode": "off",
+      "role": "Admin",
+      "expectedVisible": false,
+      "dealTaskPresent": false,
+      "stagePresent": false,
+      "ordinaryTaskPresent": true,
+      "dealSearchPresent": false,
+      "taskSearchPresent": false,
+      "taskStatus": 404,
+      "taskListStatus": 404
+    },
+    {
+      "mode": "off",
+      "role": "Super",
+      "expectedVisible": false,
+      "dealTaskPresent": false,
+      "stagePresent": false,
+      "ordinaryTaskPresent": true,
+      "dealSearchPresent": false,
+      "taskSearchPresent": false,
+      "taskStatus": 404,
+      "taskListStatus": 404
+    },
+    {
+      "mode": "admins",
+      "role": "Editor",
+      "expectedVisible": false,
+      "dealTaskPresent": false,
+      "stagePresent": false,
+      "ordinaryTaskPresent": true,
+      "dealSearchPresent": false,
+      "taskSearchPresent": false,
+      "taskStatus": 404,
+      "taskListStatus": 404
+    },
+    {
+      "mode": "admins",
+      "role": "Admin",
+      "expectedVisible": true,
+      "dealTaskPresent": true,
+      "stagePresent": true,
+      "ordinaryTaskPresent": true,
+      "dealSearchPresent": true,
+      "taskSearchPresent": true,
+      "taskStatus": 200,
+      "taskListStatus": 200
+    },
+    {
+      "mode": "admins",
+      "role": "Super",
+      "expectedVisible": true,
+      "dealTaskPresent": true,
+      "stagePresent": true,
+      "ordinaryTaskPresent": true,
+      "dealSearchPresent": true,
+      "taskSearchPresent": true,
+      "taskStatus": 200,
+      "taskListStatus": 200
+    },
+    {
+      "mode": "all",
+      "role": "Editor",
+      "expectedVisible": true,
+      "dealTaskPresent": true,
+      "stagePresent": true,
+      "ordinaryTaskPresent": true,
+      "dealSearchPresent": true,
+      "taskSearchPresent": true,
+      "taskStatus": 200,
+      "taskListStatus": 200
+    },
+    {
+      "mode": "all",
+      "role": "Admin",
+      "expectedVisible": true,
+      "dealTaskPresent": true,
+      "stagePresent": true,
+      "ordinaryTaskPresent": true,
+      "dealSearchPresent": true,
+      "taskSearchPresent": true,
+      "taskStatus": 200,
+      "taskListStatus": 200
+    },
+    {
+      "mode": "all",
+      "role": "Super",
+      "expectedVisible": true,
+      "dealTaskPresent": true,
+      "stagePresent": true,
+      "ordinaryTaskPresent": true,
+      "dealSearchPresent": true,
+      "taskSearchPresent": true,
+      "taskStatus": 200,
+      "taskListStatus": 200
+    }
+  ],
+  "browser": [
+    {
+      "mode": "off",
+      "role": "Editor",
+      "width": 1280,
+      "expectedVisible": false,
+      "passed": true,
+      "screenshots": [
+        "off-editor-1280-my-tasks.png",
+        "off-editor-1280-search-deal.png",
+        "off-editor-1280-search-task.png",
+        "off-editor-1280-direct-task.png"
+      ]
+    },
+    {
+      "mode": "off",
+      "role": "Editor",
+      "width": 390,
+      "expectedVisible": false,
+      "passed": true,
+      "screenshots": [
+        "off-editor-390-my-tasks.png",
+        "off-editor-390-search-deal.png",
+        "off-editor-390-search-task.png",
+        "off-editor-390-direct-task.png"
+      ]
+    },
+    {
+      "mode": "admins",
+      "role": "Editor",
+      "width": 1280,
+      "expectedVisible": false,
+      "passed": true,
+      "screenshots": [
+        "admins-editor-1280-my-tasks.png",
+        "admins-editor-1280-search-deal.png",
+        "admins-editor-1280-search-task.png",
+        "admins-editor-1280-direct-task.png"
+      ]
+    },
+    {
+      "mode": "admins",
+      "role": "Editor",
+      "width": 390,
+      "expectedVisible": false,
+      "passed": true,
+      "screenshots": [
+        "admins-editor-390-my-tasks.png",
+        "admins-editor-390-search-deal.png",
+        "admins-editor-390-search-task.png",
+        "admins-editor-390-direct-task.png"
+      ]
+    },
+    {
+      "mode": "admins",
+      "role": "Admin",
+      "width": 1280,
+      "expectedVisible": true,
+      "passed": true,
+      "screenshots": [
+        "admins-admin-1280-my-tasks.png",
+        "admins-admin-1280-search-deal.png",
+        "admins-admin-1280-search-task.png",
+        "admins-admin-1280-direct-task.png"
+      ]
+    },
+    {
+      "mode": "admins",
+      "role": "Super",
+      "width": 1280,
+      "expectedVisible": true,
+      "passed": true,
+      "screenshots": [
+        "admins-super-1280-my-tasks.png",
+        "admins-super-1280-search-deal.png",
+        "admins-super-1280-search-task.png",
+        "admins-super-1280-direct-task.png"
+      ]
+    },
+    {
+      "mode": "all",
+      "role": "Editor",
+      "width": 1280,
+      "expectedVisible": true,
+      "passed": true,
+      "screenshots": [
+        "all-editor-1280-my-tasks.png",
+        "all-editor-1280-search-deal.png",
+        "all-editor-1280-search-task.png",
+        "all-editor-1280-direct-task.png"
+      ]
+    },
+    {
+      "mode": "all",
+      "role": "Editor",
+      "width": 390,
+      "expectedVisible": true,
+      "passed": true,
+      "screenshots": [
+        "all-editor-390-my-tasks.png",
+        "all-editor-390-search-deal.png",
+        "all-editor-390-search-task.png",
+        "all-editor-390-direct-task.png"
+      ]
+    }
+  ],
+  "conciergeCriterion": "Retired by NJ; Concierge remains removed",
+  "configurationFilesChanged": false,
+  "productionChanged": false,
+  "roleChecksPassed": true,
+  "fixtureCleanup": true,
+  "serversStopped": true,
+  "completedAt": "2026-10-31T07:00:27.986Z",
+  "completedAtIST": "31 Oct 2026, 12:30:27 pm IST",
+  "passed": true,
+  "sourceProof": {
+    "src/lib/crm.ts": "4f4f0c37b74e6a167fc777273eb63ca88932828b6dc639f63aa215b91d028fe3",
+    "src/lib/access.ts": "890fed31ac2735b78ddc10158a260ce4e7625c0692862ee7a1fd3a0bc7c71e33",
+    "src/lib/tasks.ts": "4b802c8025b5782c07940a95add03f4c1268cda48fcab4d42afaa33bc90f8ccb",
+    "src/lib/tasklist.ts": "075439feef30557b529982a02217c1b3f6120cc2967198a5ef9f9f6ea9416ba6",
+    "src/lib/search.ts": "e95704fc9324540ab7f82bc52cc9048f38e1409653908c4e10878f143d8fe4aa"
+  }
+}
