@@ -28,3 +28,5 @@ The direct NJ migration hold still applies. Automatic approval review rejected t
 | AC5 | Focused/full release and phone CI, suite route manifest and signed-out smoke | Scoped lint, typecheck and production compilation passed. Full CI and live acceptance are pending; not a completion claim. |
 
 The story's Bug Off case-publication line is superseded by NJ's standing BTF-only tracking rule. This plan and executed evidence are published in BTF before In Review. No Concierge, HS or unrelated schema work is included.
+
+The six cases in `tests/deal-bd-server.mode.test.ts` are prepared and typechecked but have not run: API round-trip/null/zero compatibility; invalid-input refusal without mutation; Undo/conflict protection; the role/CRM matrix; and desktop/390px create-edit-reload/disclosure flows. Their fixture setup and cleanup use the application APIs. The file joins the existing mode-test glob only after migration approval permits pushing and running CI. Prepared tests are not passing acceptance evidence.

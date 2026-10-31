@@ -93,7 +93,7 @@ function Card({ d, stages, onMove, bid, canMove }: { d: BoardDeal; stages: Board
       {d.stage?.isRetired && <div className="sub2">{d.stage.name} · legacy stage</div>}
       {d.organisation && <div className="sub2">{d.organisation.name}</div>}
       <div className="sub2">{money(d.value, d.currency)}{d.leader ? ` · ${d.leader.name}` : ""}</div>
-      <div className="sub2"><DealBdFacts values={d} /></div>
+      <div className="sub2"><DealBdFacts values={d} label={`BD details for ${d.name}`} /></div>
       {bid && d.submissionDeadline && <div className={`sub2${isOverdue(d.submissionDeadline) ? " over" : ""}`}>{isOverdue(d.submissionDeadline) ? "Deadline passed " : "Submit by "}{dueLabel(d.submissionDeadline)}</div>}
       <div className="sub2">
         {d.nextStep ? <>Next: {d.nextStep.title} · <span className={isOverdue(d.nextStep.dueDate) ? "over" : ""}>{dueLabel(d.nextStep.dueDate)}</span></> : d.needsNextStep ? <span className="chip red">Needs a next step</span> : null}

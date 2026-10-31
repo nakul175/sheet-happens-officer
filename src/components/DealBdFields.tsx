@@ -14,10 +14,10 @@ export function DealBdFields({ values, onChange }: { values: BdFormValues; onCha
   </>;
 }
 
-export function DealBdFacts({ values }: { values: BdValues }) {
+export function DealBdFacts({ values, label = "BD details" }: { values: BdValues; label?: string }) {
   if (values.partner == null && values.athenaRole == null && values.budgetUsd == null && values.pwinAdjustedNfrUsd == null) return null;
   const usd = (value: number) => `USD ${value.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-  return <details>
+  return <details aria-label={label}>
     <summary>BD details</summary>
     {values.partner && <div>Partner: {values.partner}</div>}
     {values.athenaRole && <div>Athena role: <span className="chip">{ATHENA_ROLES.find((role) => role.value === values.athenaRole)?.label ?? values.athenaRole}</span></div>}

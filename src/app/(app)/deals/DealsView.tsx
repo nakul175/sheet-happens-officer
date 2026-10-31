@@ -153,7 +153,7 @@ function DealList({ deals }: { deals: D[] }) {
       <td>{OPPORTUNITY_TYPES.find(o => o.value === d.opportunityType)?.label ?? "Unclassified"}</td>
       <td>{d.organisation ? <Link href={`/accounts/${d.organisation.id}`}>{d.organisation.name}</Link> : "—"}</td>
       <td><span className="chip">{d.stage?.name}{d.stage?.isRetired ? " · legacy stage" : ""}</span><div style={{ fontSize: 12, color: "var(--muted)" }}>{d.pipeline?.name}</div></td>
-      <td>{money(d.value, d.currency)}<DealBdFacts values={d} /></td>
+      <td>{money(d.value, d.currency)}<DealBdFacts values={d} label={`BD details for ${d.name}`} /></td>
       <td>{d.nextStep ? <>{d.nextStep.title} · <span className={isOverdue(d.nextStep.dueDate) ? "over" : ""}>{dueLabel(d.nextStep.dueDate)}</span></> : d.needsNextStep ? <span className="chip red">None</span> : "—"}</td>
       <td>{d.leader?.name ?? "—"}</td>
     </tr>)}</tbody>
