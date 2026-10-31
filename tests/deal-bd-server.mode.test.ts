@@ -185,11 +185,12 @@ describe("SHO-3139 real USD fact acceptance", () => {
       expect(created.status()).toBe(201); const id = (await created.json()).deal.id as string; projects.push(id);
       await page.waitForURL(/\/projects\/[^/?]+$/);
       await page.getByRole("button", { name: "Edit details", exact: true }).click();
-      await browserExpect(page.getByLabel("Budget (USD)", { exact: true })).toHaveValue("1234.56");
-      await page.getByLabel("Athena role", { exact: true }).selectOption("SUB");
-      await page.getByLabel("Budget (USD)", { exact: true }).fill("0");
-      await page.getByLabel("PWin-adjusted NFR (USD)", { exact: true }).fill("250.25");
-      await page.getByRole("button", { name: "Save", exact: true }).click();
+      const dialog = page.getByRole("dialog", { name: "Deal details", exact: true });
+      await browserExpect(dialog.getByLabel("Budget (USD)", { exact: true })).toHaveValue("1234.56");
+      await dialog.getByLabel("Athena role", { exact: true }).selectOption("SUB");
+      await dialog.getByLabel("Budget (USD)", { exact: true }).fill("0");
+      await dialog.getByLabel("PWin-adjusted NFR (USD)", { exact: true }).fill("250.25");
+      await dialog.getByRole("button", { name: "Save", exact: true }).click();
       await browserExpect(page.getByRole("dialog", { name: "Deal details" })).toHaveCount(0); await page.reload();
       await page.getByText("BD details", { exact: true }).click();
       await browserExpect(page.getByText("Budget: USD 0.00", { exact: true })).toBeVisible();
