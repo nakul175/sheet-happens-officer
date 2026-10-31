@@ -7,19 +7,11 @@ import { expect, zz } from "../support";
 import { archiveProject, newProject, newTask, ymd, type Who } from "../helpers/migration-2731";
 
 type Later = (fn: () => Promise<unknown>) => void;
-type Stage = { id: string; name: string; category: string };
+type Stage = { id: string; name: string; category: string; isRetired?: boolean };
 type Pipe = { id: string; key: string; name: string; stages: Stage[] };
 
 const CRM_OFF = "CRM routes answer not found on this server (CRM_VISIBLE is off).";
 const CRM_MEMBER = "CRM is hidden from this Member (CRM_VISIBLE is admins or off).";
-const isTail = (c: string) => c === "PAUSED" || c === "DONE" || c === "LOST";
-
-function boardTitles(stages: Stage[]) {
-  const main = stages.filter((s) => !isTail(s.category)).map((s) => s.name);
-  const tail = stages.filter((s) => isTail(s.category)).map((s) => s.name);
-  return tail.length ? [...main, tail.join(" / ")] : main;
-}
-
 async function crmPipes(who: Who, hidden: string) {
   const r = await who.api.get("/api/deals/pipelines");
   if (r.status === 404) throw new Error(hidden);
@@ -27,8 +19,8 @@ async function crmPipes(who: Who, hidden: string) {
   return r.json.pipelines as Pipe[];
 }
 
-async function makeDeal(who: Who, later: Later, o: { label: string; leaderId?: string }) {
-  const pro = (await crmPipes(who, CRM_OFF)).find((p) => p.key === "DEAL_PROACTIVE");
+async function makeDeal(who: Who, later: Later, o: { label: string; leaderId?: string; pipelineKey?: string; cleanup?: Who }) {
+  const pro = (await crmPipes(who, CRM_OFF)).find((p) => p.key === (o.pipelineKey ?? "DEAL_PROACTIVE"));
   if (!pro) throw new Error("Proactive pipeline is missing");
   const org = await who.api.post("/api/orgs", { name: zz(`org ${o.label}`) });
   expect(org.status, JSON.stringify(org.json)).toBe(201);
@@ -39,10 +31,12 @@ async function makeDeal(who: Who, later: Later, o: { label: string; leaderId?: s
   const d = await who.api.post("/api/deals", {
     name, organisationId: orgId, pipelineId: pro.id, leaderId: o.leaderId ?? who.user.id, whyPursue: "ZZ-TEST fit",
     nextStep: { title: step, dueDate: ymd(6) },
+    ...(pro.key === "DEAL_BID" ? { submissionDeadline: ymd(7) } : {}),
   });
   expect(d.status, JSON.stringify(d.json)).toBe(201);
   const id = d.json.deal.id as string;
-  later(() => archiveProject(who.api, id, who.user.id));
+  const cleanup = o.cleanup ?? who;
+  later(() => archiveProject(cleanup.api, id, cleanup.user.id));
   return { id, name, step, orgId, pro };
 }
 
@@ -54,7 +48,7 @@ test("AC1: a deal list shows a deal to its members and to an Admin, and hides it
   await crmPipes(admin, CRM_OFF);
   await crmPipes(member, CRM_MEMBER);
   const hidden = await makeDeal(admin, later, { label: "2531 hidden" });
-  const owned = await makeDeal(member, later, { label: "2531 owned", leaderId: member.user.id });
+  const owned = await makeDeal(member, later, { label: "2531 owned", leaderId: member.user.id, cleanup: admin });
 
   expect(await dealIds(member, hidden.pro.id), "a non-member does not see the Admin's deal").not.toContain(hidden.id);
   expect(await dealIds(admin, hidden.pro.id)).toContain(hidden.id);
@@ -87,39 +81,44 @@ test("AC1: a deal list shows a deal to its members and to an Admin, and hides it
   await expect(member.page.getByRole("link", { name: hidden.name })).toBeVisible();
 });
 
-test("AC2: a pipeline's board columns are that pipeline's stages, with On hold, Won and Lost in the last column", async ({ admin, later }) => {
+test("AC2: each available sales stage has its own board column, including separate outcome stages", async ({ admin, later }) => {
   test.setTimeout(120_000);
   const pipes = await crmPipes(admin, CRM_OFF);
   const pro = pipes.find((p) => p.key === "DEAL_PROACTIVE")!;
   const bid = pipes.find((p) => p.key === "DEAL_BID")!;
-  const proactive = ["Lead", "Conversation", "Concept note", "Proposal", "Negotiation", "On hold / Won / Lost"];
-  const bidTitles = ["Identified", "Go/No-go", "Preparing", "Submitted", "Awaiting result", "Won / Lost"];
-  expect(boardTitles(pro.stages), "active stages stay columns; On hold, Won and Lost share the last").toEqual(proactive);
-  expect(boardTitles(bid.stages), "Bid has no On hold, so Won and Lost share the last column").toEqual(bidTitles);
-
+  // SHO-3133 approved separate outcome columns; current pipeline stage names come from the server.
+  const salesStages = (p: Pipe) => p.stages.filter(s => !s.isRetired && s.category !== "DELIVERY");
+  const proactive = salesStages(pro).map(s => s.name);
+  const bidTitles = salesStages(bid).map(s => s.name);
+  expect(proactive.length).toBeGreaterThan(0);
+  expect(bidTitles.length).toBeGreaterThan(0);
+  const bidDeal = await makeDeal(admin, later, { label: "2531 bid columns", pipelineKey: "DEAL_BID" });
   const deal = await makeDeal(admin, later, { label: "2531 columns" });
   await admin.page.setViewportSize({ width: 1400, height: 900 });
   await admin.page.goto("/deals");
   await expect(admin.page.locator(".dcol header b")).toHaveText(proactive);
-  await expect(admin.page.getByRole("region", { name: "Lead" }).locator(".dcard", { hasText: deal.name })).toBeVisible();
-  await expect(admin.page.getByRole("region", { name: "On hold / Won / Lost" }).locator(".dcard", { hasText: deal.name })).toHaveCount(0);
+  await expect(admin.page.getByRole("region", { name: proactive[0], exact: true }).locator(".dcard", { hasText: deal.name })).toBeVisible();
+  for (const stage of salesStages(pro).filter(s => ["PAUSED", "DONE", "LOST"].includes(s.category)))
+    await expect(admin.page.getByRole("region", { name: stage.name, exact: true }).locator(".dcard", { hasText: deal.name })).toHaveCount(0);
 
   await admin.page.getByRole("tab", { name: "Bid" }).click();
   await expect(admin.page.locator(".dcol header b")).toHaveText(bidTitles);
-  await expect(admin.page.getByRole("region", { name: "Lead" })).toHaveCount(0);
-  await expect(admin.page.getByRole("region", { name: "Identified" })).toBeVisible();
+  await expect(admin.page.getByRole("region", { name: "Lead", exact: true })).toHaveCount(0);
+  await expect(admin.page.getByRole("region", { name: bidTitles[0], exact: true }).locator(".dcard", { hasText: bidDeal.name })).toBeVisible();
   await expect(admin.page.getByText(deal.name)).toHaveCount(0);
 });
 
 test("AC3: Home, Organisation, Deal and Pipeline screens each open their list or board", async ({ admin, later }) => {
   // NJ removed the single shared component on 18 Oct 2026 (the shared view is APL-2642). Each screen still opens.
   test.setTimeout(180_000);
-  await crmPipes(admin, CRM_OFF);
+  const pipes = await crmPipes(admin, CRM_OFF);
+  const bid = pipes.find(p => p.key === "DEAL_BID")!;
+  const bidDeal = await makeDeal(admin, later, { label: "2531 screens bid", pipelineKey: "DEAL_BID" });
   const deal = await makeDeal(admin, later, { label: "2531 screens" });
   await admin.page.setViewportSize({ width: 1400, height: 900 });
 
   await admin.page.goto("/");
-  await expect(admin.page.getByRole("heading", { name: "My tasks" })).toBeVisible();
+  await expect(admin.page.getByRole("heading", { name: "Your workspace", exact: true })).toBeVisible();
 
   await admin.page.goto(`/accounts/${deal.orgId}`);
   await expect(admin.page.getByRole("link", { name: deal.name })).toBeVisible();
@@ -131,7 +130,7 @@ test("AC3: Home, Organisation, Deal and Pipeline screens each open their list or
   await expect(admin.page.getByRole("region", { name: "Lead" })).toBeVisible();
   await expect(admin.page.locator(".dcard", { hasText: deal.name })).toBeVisible();
   await admin.page.getByRole("tab", { name: "Bid" }).click();
-  await expect(admin.page.getByRole("region", { name: "Identified" })).toBeVisible();
+  await expect(admin.page.getByRole("region", { name: bid.stages.find(s => !s.isRetired && s.category !== "DELIVERY")!.name, exact: true }).locator(".dcard", { hasText: bidDeal.name })).toBeVisible();
 });
 
 test("AC4: archiving leaves a deal off the live list, and Trash still only holds deleted tasks", async ({ admin, later }) => {

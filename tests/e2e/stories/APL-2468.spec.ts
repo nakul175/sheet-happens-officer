@@ -107,7 +107,8 @@ test("AC3: setting or clearing Blocked shows on the task in every view", async (
   await expect(member.page.locator(".item", { hasText: title }).locator(".chip.red", { hasText: "Blocked" })).toBeVisible();
   await member.page.getByRole("tab", { name: "Board", exact: true }).click();
   await expect(member.page.locator(".bcard", { hasText: title }).locator(".chip.red", { hasText: "Blocked" })).toBeVisible();
-  await member.page.goto("/");
+  // Home is the approved dashboard; the task-list assertion belongs to My tasks.
+  await member.page.goto("/my-tasks");
   await expect(member.page.locator(".item", { hasText: title }).locator(".chip.red", { hasText: "Blocked" })).toBeVisible();
 
   expect((await member.api.patch(`/api/tasks/${id}`, { blocked: false, expectedUpdatedAt: await version(member.api, id) })).status).toBe(200);
