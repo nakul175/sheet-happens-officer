@@ -404,7 +404,7 @@ export async function listDeals(user: Actor, o: { archived?: boolean; deleted?: 
     include: {
       stage: true, pipeline: true, deal: true,
       members: { where: { role: "LEADER" }, include: { user: { select: { id: true, name: true } } } },
-      parties: { where: { role: "BUYER" }, include: { organisation: { select: { id: true, name: true } } } },
+      parties: { where: { role: "BUYER" }, include: { organisation: { select: { id: true, name: true, country: true } } } },
     },
   });
   const signals = await dealSignals(projects);

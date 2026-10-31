@@ -1,0 +1,20 @@
+# SHO-3138: BD Intelligence Dashboard
+
+This qualifies onto live SHO-3139 release `397fe2de`. The route `/bd-intelligence` is available from the CRM navigation and uses the existing authorised `/api/deals` and pipeline catalogue. No new database fields, migrations, external services or Concierge are added. Suite routes are unchanged.
+
+## Reporting contract
+
+The supplied APLYD mock sets the royal-blue/gold visual design, sticky brand header, period badge, tabs, eight summary counts, financial blocks, snapshot, stage tables, role badges and PWin meters. All values come from visible live deals. Add/Update links to the existing create form and actual Deal detail/edit workflow; it does not introduce an unpersisted mock form.
+
+- This is a **current-stage snapshot**, not a reconstruction of historical stage transitions. The selected period uses an explicit existing deal-date basis (stage entered, created, submission deadline or expected close), inclusive calendar bounds in the existing business timezone, and an explicit undated policy. Default is all dates. Invalid ranges show an error, not misleading zero totals.
+- WIP contains open active/not-started/paused stages that are not in a named reporting bucket. Submitted is split into EOI/CV and other submissions. Under Eval includes Submitted, Awaiting result, Under Evaluation, Contracting, Shortlisted and HPP. Outcome categories supply Wins/Losses; Delivery is excluded from those current-stage counts.
+- HPP and Shortlisted use explicitly named stages, with no invented probability threshold or hidden configuration change. When the catalogue has no such stage, the corresponding count/financial figures are NA. Tests seed and remove synthetic stage DATA only inside a guarded loopback test database; no product stage-configuration API is claimed or production stage changed.
+- Budget/NFR values are the USD fields. PWin-adjusted Budget rounds each deal's Budget × whole-number PWin to cents. PWin-adjusted NFR is the entered USD field and is never silently recomputed. BigInt cent aggregation avoids losing cents on large totals. Partial sums disclose known/total amount coverage; no known inputs means NA, while known zero remains USD0.00.
+- Geography is the buyer's recorded country; BM is explicitly labelled Deal leader. Sector, CBD POC, KMS/CNPS and CAS have no source in the current schema and show NA. No mock numbers or invented contacts are shipped.
+- API errors hide totals and offer retry. Empty datasets use an explicit empty state. CRM-off/admins and deal membership remain governed by the existing access controls; the client does not fetch CRM endpoints when CRM is unavailable.
+
+## Qualification
+
+Seven reporting unit tests pass: stage buckets, outcomes, period/undated policy, USD/weighted math, null/zero, partial coverage and large aggregate precision. Production compilation, typecheck and scoped lint passed during development. All five actual API/browser/axe cases now pass with no skips or retries: signed-out access; role/CRM privacy; 1280px and390px selected-period math, refresh after real edits, reload, all tabs, keyboard and axe on Summary/HPP/KMS/Entry panels; and empty/invalid/API-error states. Initial fixture setup stopped on the retained Lost/open-task guard, so the runner now asserts that refusal and completes the real versioned task first. The next run exposed selector naming and route-announcer ambiguity; explicit control names and main-scoped alerts fixed these without weakening assertions. Both original reports are retained. Screenshots at both widths were reviewed against the supplied mock. Exact-head CI and live verification remain pending. The new route is registered in the common viewport/axe screen list, covering all standard phone widths in CI.
+
+The existing Bug Off identity returned HTTP422 DENIED_BY_POLICY when creating the SHO-3138 folder. Draft AC cases and refusal receipts are retained under `work/sho-3139-evidence` and BTF comment12079 for Pam/NJ publication. No publication or Done claim is made. BTF is the story tracker; independent acceptance remains Pam's decision after Eng1's live handoff.

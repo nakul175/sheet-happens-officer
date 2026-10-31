@@ -28,6 +28,7 @@ export const SCREENS: Screen[] = [
   { name: "Search", path: () => "/search" },
   { name: "Profile", path: () => "/profile" },
   { name: "Deals", path: () => "/deals" },
+  { name: "BD Intelligence", path: () => "/bd-intelligence", heading: "BD Intelligence Dashboard" },
   { name: "New deal", path: () => "/deals/new" },
   { name: "Deal", path: (i) => `/projects/${i.deal}` },
   { name: "Accounts", path: () => "/accounts" },
