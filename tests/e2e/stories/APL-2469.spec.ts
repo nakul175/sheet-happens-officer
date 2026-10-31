@@ -22,7 +22,7 @@ const calm = async (page: Page) => {
   if (await fold.count()) await fold.first().click();
 };
 
-test("AC1: opening the app lands on My tasks and shows the member's open tasks", async ({ admin, member, later }) => {
+test("AC1: My tasks shows the member's open tasks alongside the separate Home dashboard", async ({ admin, member, later }) => {
   const project = await makeProject(admin.api, "home", admin.user.id as string);
   later(() => archiveProject(admin.api, project.id, admin.user.id as string));
   expect((await admin.api.post(`/api/projects/${project.id}/members`, { userId: member.user.id, role: "EDITOR" })).status).toBe(201);
@@ -30,7 +30,10 @@ test("AC1: opening the app lands on My tasks and shows the member's open tasks",
   expect((await admin.api.post(`/api/projects/${project.id}/tasks`, { dueDate: fixtureDueDate(), title, assigneeId: member.user.id })).status).toBe(201);
 
   await member.page.goto("/");
-  await expect(member.page).toHaveURL(/\/$/);
+  await expect(member.page.getByRole("heading", { name: "Your workspace", exact: true })).toBeVisible();
+  await expect(member.page.getByRole("region", { name: "Your priorities", exact: true }).getByText(title, { exact: true })).toBeVisible();
+  await member.page.getByRole("link", { name: /^View all tasks/ }).click();
+  await expect(member.page).toHaveURL(/\/my-tasks$/);
   await expect(member.page.getByRole("heading", { name: "My tasks" })).toBeVisible();
   await expect(member.page.getByText(/open task/)).toBeVisible();
   await expect(member.page.locator(".item", { hasText: title })).toBeVisible();
@@ -125,7 +128,7 @@ test("AC4: opening a task row or card shows the detail overlay without leaving t
 test("AC5: the Team page lists people as specified in SHO-US-2.5", async ({ admin, member }) => {
   await admin.page.goto("/team");
   await expect(admin.page.getByRole("heading", { name: "Team" })).toBeVisible();
-  for (const heading of ["Name", "Email", "Role", "Status", "Actions"]) {
+  for (const heading of ["Person", "Workspace role", "Leads", "Status", "Actions"]) {
     await expect(admin.page.getByRole("columnheader", { name: heading, exact: true })).toBeVisible();
   }
   const row = admin.page.locator("tr", { hasText: String(member.user.email) });
@@ -160,13 +163,14 @@ test("AC6: the branded shell works on a desktop and a phone-width browser", asyn
     await expect(admin.page.getByRole("heading").first()).toBeVisible();
   }
   await admin.page.goto("/");
-  await expect(admin.page.locator('aside.dock[aria-label="Concierge"]')).toBeVisible();
+  // NJ removed the in-app assistant in SHO-3137.
+  await expect(admin.page.getByRole("complementary", { name: "Concierge" })).toHaveCount(0);
 
   await admin.page.setViewportSize({ width: 390, height: 844 });
   for (const path of screens) {
     await admin.page.goto(path);
     await expect(admin.page.locator(".tabbar")).toBeVisible();
-    await expect(admin.page.locator('button.fab[aria-label="Concierge"]')).toBeVisible();
+    await expect(admin.page.getByRole("button", { name: "Concierge", exact: true })).toHaveCount(0);
     const overflow = await admin.page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1);
     expect(overflow, `${path} stays within the phone width`).toBe(true);
   }
@@ -181,7 +185,7 @@ test("AC7: each screen matches the approved mockup at 1440x900 and 390x844", asy
   for (const size of [{ width: 1440, height: 900, phone: false }, { width: 390, height: 844, phone: true }] as const) {
     await admin.page.setViewportSize({ width: size.width, height: size.height });
 
-    await admin.page.goto("/");
+    await admin.page.goto("/my-tasks");
     await expect(admin.page.getByRole("heading", { name: "My tasks" })).toBeVisible();
     await expect(admin.page.getByText(/open task/)).toBeVisible();
 
@@ -204,10 +208,10 @@ test("AC7: each screen matches the approved mockup at 1440x900 and 390x844", asy
     await expect(admin.page.getByRole("heading", { name: "Team" })).toBeVisible();
     if (size.phone) {
       const self = admin.page.locator("tr", { hasText: String(admin.user.email) });
-      await expect(self.locator('td[data-label="Role"]')).toBeVisible();
-      await expect(self.locator('td[data-label="Role"]')).toHaveText("Super Admin");
+      await expect(self.getByRole("cell", { name: /Super Admin/ })).toBeVisible();
+      await expect(self.getByRole("cell", { name: /Super Admin/ })).toHaveText("Super Admin");
     } else {
-      await expect(admin.page.getByRole("columnheader", { name: "Role", exact: true })).toBeVisible();
+      await expect(admin.page.getByRole("columnheader", { name: "Workspace role", exact: true })).toBeVisible();
     }
 
     const brand = await admin.page.evaluate(() => {
@@ -224,7 +228,7 @@ test("AC7: each screen matches the approved mockup at 1440x900 and 390x844", asy
     if (size.phone) {
       await expect(admin.page.locator(".tabbar")).toBeVisible();
     } else {
-      await expect(admin.page.locator("aside.side")).toBeVisible();
+      await expect(admin.page.getByRole("navigation", { name: "Primary", exact: true })).toBeVisible();
     }
   }
 });
