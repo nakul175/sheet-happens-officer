@@ -143,4 +143,3 @@ function MultiFilter({ label, options, values, onChange }: { label: string; opti
     </div>
   </details></div>;
 }
-
