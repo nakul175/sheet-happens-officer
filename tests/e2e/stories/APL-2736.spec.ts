@@ -26,7 +26,7 @@ let dealId = "";
 let orgId = "";
 
 // This fixture has no opportunity type, so its stage columns belong to Unclassified sales.
-const column = (name: string) => page.getByRole("region", { name: "Unclassified sales", exact: true }).getByRole("region", { name, exact: true });
+const column = (name: string) => page.getByRole("region", { name: "Unclassified sales board", exact: true }).getByRole("region", { name: `Unclassified sales board · ${name}`, exact: true });
 const proposalId = () => pro.stages.find((s) => s.name === "Proposal")!.id;
 
 async function board() {
