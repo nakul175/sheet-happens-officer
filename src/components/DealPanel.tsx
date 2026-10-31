@@ -5,13 +5,14 @@ import { ATHENA_ENTITIES, OPPORTUNITY_TYPES, type AthenaEntity, type Opportunity
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { api, dueLabel, isOverdue, useGet } from "@/components/api";
 import { Field, Modal } from "@/components/ui";
+import { DealBdFields, DealBdFacts, type BdValues } from "@/components/DealBdFields";
 
 export type Stage = { id: string; name: string; category: string; needsReason: boolean; requiredFields: string[]; isRetired?: boolean };
 export type DealBlock = {
   pipeline: { id: string; key: string; name: string; stages: Stage[] } | null;
   stage: { id: string; name: string; category: string; isRetired?: boolean } | null;
   stageReason: string | null;
-  details: { whyPursue: string | null; need: string | null; serviceLine: string | null; value: number | null; currency: string | null; probability: number | null; expectedClose: string | null; introducedBy: string | null; submissionDeadline: string | null; opportunityType?: OpportunityType | null; netFeeRevenueUsd?: number | null; athenaEntity?: AthenaEntity | null } | null;
+  details: (BdValues & { whyPursue: string | null; need: string | null; serviceLine: string | null; value: number | null; currency: string | null; probability: number | null; expectedClose: string | null; introducedBy: string | null; submissionDeadline: string | null; opportunityType?: OpportunityType | null; netFeeRevenueUsd?: number | null; athenaEntity?: AthenaEntity | null }) | null;
   parties: { id: string; role: string; organisation: { id: string; name: string } }[];
   organisation: { id: string; name: string } | null;
   nextStep: { id: string; title: string; dueDate: string | null; assignee?: { id: string; name: string } | null } | null;
@@ -154,6 +155,7 @@ function DetailsDialog({ projectId, deal, onClose, onDone }: { projectId: string
   const [v, setV] = useState<Record<string, string>>({
     whyPursue: d.whyPursue ?? "", need: d.need ?? "", serviceLine: d.serviceLine ?? "", value: d.value === null ? "" : String(d.value), currency: d.currency ?? "",
     opportunityType: d.opportunityType ?? "", netFeeRevenueUsd: d.netFeeRevenueUsd == null ? "" : String(d.netFeeRevenueUsd), athenaEntity: d.athenaEntity ?? "",
+    partner: d.partner ?? "", athenaRole: d.athenaRole ?? "", budgetUsd: d.budgetUsd == null ? "" : String(d.budgetUsd), pwinAdjustedNfrUsd: d.pwinAdjustedNfrUsd == null ? "" : String(d.pwinAdjustedNfrUsd),
     probability: d.probability === null ? "" : String(d.probability), expectedClose: d.expectedClose ?? "", introducedBy: d.introducedBy ?? "", submissionDeadline: d.submissionDeadline ?? "",
   });
   const [err, setErr] = useState<string | null>(null);
@@ -168,6 +170,7 @@ function DetailsDialog({ projectId, deal, onClose, onDone }: { projectId: string
       value: v.value === "" ? null : Number(v.value), currency: v.currency || null, probability: v.probability === "" ? null : Number(v.probability),
       expectedClose: v.expectedClose || null, submissionDeadline: v.submissionDeadline || null,
       opportunityType: v.opportunityType || null, netFeeRevenueUsd: v.netFeeRevenueUsd === "" ? null : Number(v.netFeeRevenueUsd), athenaEntity: v.athenaEntity || null,
+      partner: v.partner || null, athenaRole: v.athenaRole || null, budgetUsd: v.budgetUsd === "" ? null : Number(v.budgetUsd), pwinAdjustedNfrUsd: v.pwinAdjustedNfrUsd === "" ? null : Number(v.pwinAdjustedNfrUsd),
     };
     const r = await api("PATCH", `/api/projects/${projectId}/deal`, body);
     setBusy(false);
@@ -187,6 +190,7 @@ function DetailsDialog({ projectId, deal, onClose, onDone }: { projectId: string
         <Field label="PWin (%)">{(id) => <input id={id} className="in" type="number" min="0" max="100" value={v.probability} onChange={set("probability")} />}</Field>
       </div>
       <Field label="Net Fee Revenue (USD)">{(id) => <input id={id} className="in" type="number" min="0" max="9999999999999.99" step="0.01" value={v.netFeeRevenueUsd} onChange={set("netFeeRevenueUsd")} />}</Field>
+      <DealBdFields values={{ partner: v.partner, athenaRole: v.athenaRole, budgetUsd: v.budgetUsd, pwinAdjustedNfrUsd: v.pwinAdjustedNfrUsd }} onChange={(key, value) => setV({ ...v, [key]: value })} />
       <Field label="Athena Entity">{(id) => <select id={id} className="in" value={v.athenaEntity} onChange={set("athenaEntity")}><option value="">Not specified</option>{ATHENA_ENTITIES.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}</select>}</Field>
       <Field label="Expected close">{(id) => <input id={id} className="in" type="date" value={v.expectedClose} onChange={set("expectedClose")} />}</Field>
       {deal.pipeline?.key === "DEAL_BID" && <Field label="Submission deadline">{(id) => <input id={id} className="in" type="date" value={v.submissionDeadline} onChange={set("submissionDeadline")} />}</Field>}
@@ -378,6 +382,7 @@ export function DealPanel({ projectId, deal, canWrite, canManage, onChange, feed
         <span>Opportunity type: {OPPORTUNITY_TYPES.find(o => o.value === d?.opportunityType)?.label ?? "Unclassified"}</span>
         {d?.netFeeRevenueUsd != null && <span>Net Fee Revenue: {money(d.netFeeRevenueUsd, "USD")}</span>}
         {d?.athenaEntity && <span>Athena Entity: {ATHENA_ENTITIES.find(o => o.value === d.athenaEntity)?.label ?? d.athenaEntity}</span>}
+        {d && <DealBdFacts values={d} />}
         {d?.probability !== null && d?.probability !== undefined && <span>PWin: {d.probability}%</span>}
         {d?.expectedClose && <span>Close {dueLabel(d.expectedClose)}</span>}
         {d?.submissionDeadline && <span className={isOverdue(d.submissionDeadline) ? "over" : ""}>Submit by {dueLabel(d.submissionDeadline)}</span>}

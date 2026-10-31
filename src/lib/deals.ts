@@ -30,6 +30,9 @@ function classification(input: DealClassificationInput) {
   return parsed.data;
 }
 const revenueNumber = (value: unknown): number | null => value == null ? null : Number(value);
+function bdState(d: Pick<Partial<DetailsRow>, "partner" | "athenaRole" | "budgetUsd" | "pwinAdjustedNfrUsd"> | null | undefined) {
+  return { partner: d?.partner ?? null, athenaRole: d?.athenaRole ?? null, budgetUsd: revenueNumber(d?.budgetUsd), pwinAdjustedNfrUsd: revenueNumber(d?.pwinAdjustedNfrUsd) };
+}
 
 const clean = (v: string | null | undefined) => (v?.trim() ? v.trim() : null);
 const isoDate = (s: string) => { if (!/^\d{4}-\d{2}-\d{2}$/.test(s) || Number.isNaN(Date.parse(`${s}T00:00:00Z`))) throw new ApiError(400, "Use a date like 2026-10-31."); return new Date(`${s}T00:00:00Z`); };
@@ -231,6 +234,7 @@ function detailsState(d: DetailsRow | Record<string, unknown>) {
   return {
     whyPursue: r.whyPursue, need: r.need, serviceLine: r.serviceLine, value: r.value === null || r.value === undefined ? null : Number(r.value), currency: r.currency,
     opportunityType: r.opportunityType ?? null, athenaEntity: r.athenaEntity ?? null, netFeeRevenueUsd: revenueNumber(r.netFeeRevenueUsd),
+    ...bdState(r),
     probability: r.probability, expectedClose: r.expectedClose ? dayOnly(r.expectedClose) : null, introducedBy: r.introducedBy,
     submissionDeadline: r.submissionDeadline ? dayOnly(r.submissionDeadline) : null,
   };
@@ -414,6 +418,7 @@ export async function listDeals(user: Actor, o: { archived?: boolean; deleted?: 
       organisation: p.parties[0]?.organisation ?? null, leader: p.members[0]?.user ?? null,
       value: p.deal?.value === null || p.deal?.value === undefined ? null : Number(p.deal.value), currency: p.deal?.currency ?? null,
       opportunityType: p.deal?.opportunityType ?? null, athenaEntity: p.deal?.athenaEntity ?? null, netFeeRevenueUsd: revenueNumber(p.deal?.netFeeRevenueUsd),
+      ...bdState(p.deal),
       probability: p.deal?.probability ?? null,
       submissionDeadline: dayOnly(p.deal?.submissionDeadline ?? null),
       expectedClose: dayOnly(p.deal?.expectedClose ?? null),
@@ -444,6 +449,7 @@ export async function dealBlock(projectId: string, now = Date.now()) {
     details: d ? {
       whyPursue: d.whyPursue, need: d.need, serviceLine: d.serviceLine, value: d.value === null ? null : Number(d.value), currency: d.currency,
       opportunityType: d.opportunityType ?? null, athenaEntity: d.athenaEntity ?? null, netFeeRevenueUsd: revenueNumber(d.netFeeRevenueUsd),
+      ...bdState(d),
       probability: d.probability, expectedClose: dayOnly(d.expectedClose), introducedBy: d.introducedBy, submissionDeadline: dayOnly(d.submissionDeadline),
     } : null,
     parties: p.parties.map((x) => ({ id: x.id, role: x.role, organisation: x.organisation })),

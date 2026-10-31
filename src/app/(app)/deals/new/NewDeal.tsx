@@ -6,6 +6,7 @@ import { api, todayIST, useGet } from "@/components/api";
 import { ATHENA_ENTITIES, OPPORTUNITY_TYPES } from "@/lib/deal-classification";
 import { Field } from "@/components/ui";
 import { PeopleSelect } from "@/components/PeopleSelect";
+import { DealBdFields } from "@/components/DealBdFields";
 import { Page, useMe } from "../../Shell";
 
 import "./new-deal-approved.css";
@@ -17,7 +18,7 @@ function Form() {
   const orgs = useGet<{ organisations: { id: string; name: string }[] }>("/api/orgs");
   const pipes = useGet<{ pipelines: { id: string; key: string; name: string }[] }>("/api/deals/pipelines");
   const initialOrgId = sp.get("org") ?? "";
-  const [v, setV] = useState({ name: "", organisationId: initialOrgId, buyerName: "", pipelineId: "", leaderId: me.id, whyPursue: "", step: "", due: todayIST(), submissionDeadline: "", value: "", currency: "INR", opportunityType: "", netFeeRevenueUsd: "", athenaEntity: "", probability: "" });
+  const [v, setV] = useState({ name: "", organisationId: initialOrgId, buyerName: "", pipelineId: "", leaderId: me.id, whyPursue: "", step: "", due: todayIST(), submissionDeadline: "", value: "", currency: "INR", opportunityType: "", netFeeRevenueUsd: "", athenaEntity: "", probability: "", partner: "", athenaRole: "", budgetUsd: "", pwinAdjustedNfrUsd: "" });
   const [err, setErr] = useState<string | null>(null);
   const [dup, setDup] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -65,6 +66,10 @@ function Form() {
     body.netFeeRevenueUsd = v.netFeeRevenueUsd === "" ? null : Number(v.netFeeRevenueUsd);
     body.athenaEntity = v.athenaEntity || null;
     body.probability = v.probability === "" ? null : Number(v.probability);
+    body.partner = v.partner || null;
+    body.athenaRole = v.athenaRole || null;
+    body.budgetUsd = v.budgetUsd === "" ? null : Number(v.budgetUsd);
+    body.pwinAdjustedNfrUsd = v.pwinAdjustedNfrUsd === "" ? null : Number(v.pwinAdjustedNfrUsd);
     if (v.value) { body.value = Number(v.value); body.currency = v.currency; }
     const r = await api("POST", "/api/deals", body);
     setBusy(false);
@@ -85,6 +90,7 @@ function Form() {
       <Field label="Leader">{(id) => <PeopleSelect id={id} label="Leader" value={v.leaderId} onChange={leaderId => setV({ ...v, leaderId })} people={(team.data?.people ?? []).map(p => ({ ...p, name: `${p.name}${p.id === me.id ? " (you)" : ""}` }))} />}</Field>
       </fieldset><fieldset><legend>Commercial details</legend>
       <Field label="Net Fee Revenue (USD)">{(id) => <input id={id} className="in" type="number" min="0" max="9999999999999.99" step="0.01" value={v.netFeeRevenueUsd} onChange={set("netFeeRevenueUsd")} />}</Field>
+      <DealBdFields values={v} onChange={(key, value) => setV({ ...v, [key]: value })} />
       <Field label="PWin (%)">{(id) => <input id={id} className="in" type="number" min="0" max="100" step="1" value={v.probability} onChange={set("probability")} />}</Field>
       <Field label="Athena Entity">{(id) => <select id={id} className="in" value={v.athenaEntity} onChange={set("athenaEntity")}><option value="">Not specified</option>{ATHENA_ENTITIES.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}</select>}</Field>
 
