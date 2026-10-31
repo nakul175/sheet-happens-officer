@@ -110,7 +110,8 @@ export function redactDealNotice(type: string): { text: string; href: null } | n
 }
 
 /**
- * Deal ids whose notices are replaced in the bell.
+ * Minimal project provenance for notification privacy decisions.
+ * Notification ids deliberately outlive purged projects.
  *
  * Redaction is gated on the CRM being hidden from this reader. That is
  * `crmMode() === "admins"` and they are not an Admin, or `crmMode() === "off"`.
@@ -120,18 +121,18 @@ export function redactDealNotice(type: string): { text: string; href: null } | n
  * bell matches main: a non-member still gets the stored sentence and href.
  * Membership is not a reason to redact.
  */
-async function hiddenDealIds(user: Actor, projectIds: (string | null)[]): Promise<Set<string>> {
-  const hidden = new Set<string>();
-  if (crmMode() === "all" || crmVisible(user)) return hidden;
+async function notificationProjects(user: Actor, projectIds: (string | null)[]): Promise<Map<string, string>> {
+  const projects = new Map<string, string>();
+  if (crmMode() === "all" || crmVisible(user)) return projects;
   const ids = [...new Set(projectIds.filter((id): id is string => !!id))];
-  if (!ids.length) return hidden;
-  // project-lookup-ok: ID-only lookup redacts hidden CRM notifications; never returns project details.
-  const deals = await db.project.findMany({
-    where: { id: { in: ids }, typeId: WORKSTREAM_DEAL },
-    select: { id: true },
+  if (!ids.length) return projects;
+  // project-lookup-ok: ID/type-only privacy lookup; never returns project details to the reader.
+  const rows = await db.project.findMany({
+    where: { id: { in: ids } },
+    select: { id: true, typeId: true },
   });
-  for (const deal of deals) hidden.add(deal.id);
-  return hidden;
+  for (const row of rows) projects.set(row.id, row.typeId);
+  return projects;
 }
 
 /**
@@ -166,12 +167,21 @@ export async function listNotifications(user: Actor, o: { filter?: string; befor
   });
   const unread = await db.notification.count({ where: { recipientId: user.id, readAt: null, ...hideComments } });
   const page = rows.slice(0, limit);
-  const hiddenDeals = await hiddenDealIds(user, page.map((n) => n.projectId));
+  const hideCrm = !crmVisible(user);
+  const projects = await notificationProjects(user, page.map((n) => n.projectId));
   const last = page.at(-1);
   return {
     unread,
     items: page.map((n) => {
-      const notice = noticeForReader(n, !!n.projectId && hiddenDeals.has(n.projectId));
+      // A deal-specific type remains authoritative even after its project id is
+      // lost. A purged project's generic notice has unknown provenance: fail
+      // closed, without incorrectly describing a deleted ordinary project as a deal.
+      const knownDeal = !!redactDealNotice(n.type) || (!!n.projectId && projects.get(n.projectId) === WORKSTREAM_DEAL);
+      const storedProjectName = !!n.data && typeof n.data === "object" && "project" in n.data;
+      const orphan = n.projectId ? !projects.has(n.projectId) : storedProjectName;
+      const notice = hideCrm && orphan && !knownDeal
+        ? { text: "An item you can't view was updated.", href: null }
+        : noticeForReader(n, hideCrm && knownDeal);
       return { id: n.id, text: notice.text, href: notice.href, read: !!n.readAt, createdAt: n.createdAt.toISOString() };
     }),
     next: rows.length > limit && last ? `${last.createdAt.toISOString()}|${last.id}` : null,
