@@ -1,0 +1,13 @@
+{
+  "release": "7aeaf74cad3e060f95d729dc169ef7792ba3d9a8",
+  "destination": "/opt/sho/releases/e1-2548-7aeaf74cad3e060f95d729dc169ef7792ba3d9a8",
+  "pid": "3838403",
+  "protectedRuntimeChangedPaths": [],
+  "sourceProof": {
+    "src/lib/crm.ts": "4f4f0c37b74e6a167fc777273eb63ca88932828b6dc639f63aa215b91d028fe3",
+    "src/lib/access.ts": "890fed31ac2735b78ddc10158a260ce4e7625c0692862ee7a1fd3a0bc7c71e33",
+    "src/lib/tasks.ts": "4b802c8025b5782c07940a95add03f4c1268cda48fcab4d42afaa33bc90f8ccb",
+    "src/lib/tasklist.ts": "075439feef30557b529982a02217c1b3f6120cc2967198a5ef9f9f6ea9416ba6",
+    "src/lib/search.ts": "e95704fc9324540ab7f82bc52cc9048f38e1409653908c4e10878f143d8fe4aa"
+  }
+}
