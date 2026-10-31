@@ -170,7 +170,7 @@ export default function OrgView({ params }: { params: Promise<{ id: string }> })
       <div className="org-overview-panel org-contacts-panel">
       <div className="org-preview-heading"><h2>Contacts</h2>{o && !o.archived && <button className="btn" onClick={() => setDlg({})}>+ Contact</button>}</div>
       {o && o.contacts.length === 0 && <div className="card empty">No contacts yet.</div>}
-      {o && o.contacts.length > 0 && <div className="acct-scroll" tabIndex={0} role="region" aria-label="Organisation contacts"><table className="tbl"><thead><tr><th>Contact</th><th>Contact details</th><th>Known by</th><th>Last spoke</th><th>Actions</th></tr></thead><tbody>{o.contacts.map(c => <tr key={c.id}>
+      {o && o.contacts.length > 0 && <div className="acct-scroll" tabIndex={0} role="region" aria-label="Organisation contacts"><table className="tbl" aria-label="Organisation contacts"><thead><tr><th>Contact</th><th>Contact details</th><th>Known by</th><th>Last spoke</th><th>Actions</th></tr></thead><tbody>{o.contacts.map(c => <tr key={c.id} aria-label={c.name}>
         <td><strong>{c.name}</strong>{c.role && <small className="contact-secondary">{c.role}</small>}</td>
         <td><span className="contact-secondary">{c.email ?? "No email"}</span><span className="contact-secondary">{c.phone ?? "No phone"}</span></td>
         <td>{c.knownBy.map(k => <span key={k.id} className="contact-secondary">{k.name}{!k.active && <span className="contact-inactive"> · inactive</span>}</span>)}</td>
