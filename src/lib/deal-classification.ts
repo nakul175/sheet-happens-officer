@@ -16,11 +16,20 @@ export const ATHENA_ENTITIES: readonly { value: AthenaEntity; label: string }[] 
 ];
 export const opportunityTypeField = z.enum(OPPORTUNITY_TYPE_CODES);
 export const athenaEntityField = z.enum(ATHENA_ENTITY_CODES);
+export const ATHENA_ROLE_CODES = ["PRIME", "SUB", "SOLO"] as const;
+export type AthenaRole = typeof ATHENA_ROLE_CODES[number];
+export const ATHENA_ROLES: readonly { value: AthenaRole; label: string }[] = [
+  { value: "PRIME", label: "Prime" }, { value: "SUB", label: "Sub" }, { value: "SOLO", label: "Solo" },
+];
 // Match Decimal(15,2), without rounding an entered amount or conflating unknown with zero.
 export const netFeeRevenueUsdField = z.number().min(0).max(9999999999999.99).multipleOf(0.01);
 export const dealClassificationFields = z.object({
   opportunityType: opportunityTypeField.nullish(),
   athenaEntity: athenaEntityField.nullish(),
   netFeeRevenueUsd: netFeeRevenueUsdField.nullish(),
+  partner: z.string().trim().max(200).transform((value) => value || null).nullish(),
+  athenaRole: z.enum(ATHENA_ROLE_CODES).nullish(),
+  budgetUsd: netFeeRevenueUsdField.nullish(),
+  pwinAdjustedNfrUsd: netFeeRevenueUsdField.nullish(),
 });
 export type DealClassificationInput = z.infer<typeof dealClassificationFields>;

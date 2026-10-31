@@ -259,6 +259,8 @@ async function plan(row: any, user: Actor, projectId: string): Promise<Plan> {
       const keys = Object.keys(f);
       const now: Record<string, unknown> = {
         whyPursue: d.whyPursue, need: d.need, serviceLine: d.serviceLine, value: d.value === null ? null : Number(d.value), currency: d.currency,
+        opportunityType: d.opportunityType, athenaEntity: d.athenaEntity, netFeeRevenueUsd: d.netFeeRevenueUsd == null ? null : Number(d.netFeeRevenueUsd),
+        partner: d.partner, athenaRole: d.athenaRole, budgetUsd: d.budgetUsd == null ? null : Number(d.budgetUsd), pwinAdjustedNfrUsd: d.pwinAdjustedNfrUsd == null ? null : Number(d.pwinAdjustedNfrUsd),
         probability: d.probability, expectedClose: d.expectedClose?.toISOString().slice(0, 10) ?? null, introducedBy: d.introducedBy,
         submissionDeadline: d.submissionDeadline?.toISOString().slice(0, 10) ?? null,
       };

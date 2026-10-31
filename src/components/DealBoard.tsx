@@ -7,8 +7,9 @@ import { useMemo, useState } from "react";
 import { api, dueLabel, isOverdue } from "@/components/api";
 import { Blocked, StageDialog, money, type Stage, type StageInitial } from "@/components/DealPanel";
 import { Menu, Modal } from "@/components/ui";
+import { DealBdFacts, type BdValues } from "@/components/DealBdFields";
 
-export type BoardDeal = {
+export type BoardDeal = BdValues & {
   id: string; name: string; archived: boolean; pipeline: { id: string; key: string; name: string } | null; stage: { id: string; name: string; category: string; isRetired?: boolean } | null;
   organisation: { id: string; name: string } | null; leader: { id: string; name: string } | null; value: number | null; currency: string | null;
   opportunityType?: OpportunityType | null; lifecycle?: "sales" | "delivery";
@@ -92,6 +93,7 @@ function Card({ d, stages, onMove, bid, canMove }: { d: BoardDeal; stages: Board
       {d.stage?.isRetired && <div className="sub2">{d.stage.name} · legacy stage</div>}
       {d.organisation && <div className="sub2">{d.organisation.name}</div>}
       <div className="sub2">{money(d.value, d.currency)}{d.leader ? ` · ${d.leader.name}` : ""}</div>
+      <div className="sub2"><DealBdFacts values={d} label={`BD details for ${d.name}`} /></div>
       {bid && d.submissionDeadline && <div className={`sub2${isOverdue(d.submissionDeadline) ? " over" : ""}`}>{isOverdue(d.submissionDeadline) ? "Deadline passed " : "Submit by "}{dueLabel(d.submissionDeadline)}</div>}
       <div className="sub2">
         {d.nextStep ? <>Next: {d.nextStep.title} · <span className={isOverdue(d.nextStep.dueDate) ? "over" : ""}>{dueLabel(d.nextStep.dueDate)}</span></> : d.needsNextStep ? <span className="chip red">Needs a next step</span> : null}
