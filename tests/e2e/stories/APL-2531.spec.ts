@@ -33,7 +33,7 @@ async function makeDeal(who: Who, later: Later, o: { label: string; leaderId?: s
   const d = await who.api.post("/api/deals", {
     name, organisationId: orgId, pipelineId: pro.id, leaderId: o.leaderId ?? who.user.id, whyPursue: "ZZ-TEST fit",
     nextStep: { title: step, dueDate: ymd(6) },
-    ...(pro.key === "DEAL_BID" ? { submissionDeadline: ymd(7) } : {}),
+    ...(pro.key === "DEAL_BID" ? { submissionDeadline: ymd(7), submissionDeadlineTime: "17:30", submissionDeadlineZone: "Asia/Kolkata" } : {}),
   });
   expect(d.status, JSON.stringify(d.json)).toBe(201);
   const id = d.json.deal.id as string;

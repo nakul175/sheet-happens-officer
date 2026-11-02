@@ -1,4 +1,6 @@
 "use client";
+import { SubmissionDeadlineFields } from "@/components/SubmissionDeadlineFields";
+import { DEFAULT_DEADLINE_ZONE, submissionDeadlineLabel, submissionDeadlinePassed } from "@/lib/submission-deadline";
 import Link from "next/link";
 import { ConvertToBidDialog } from "@/components/ConvertToBidDialog";
 import { ATHENA_ENTITIES, OPPORTUNITY_TYPES, type AthenaEntity, type OpportunityType } from "@/lib/deal-classification";
@@ -12,7 +14,7 @@ export type DealBlock = {
   pipeline: { id: string; key: string; name: string; stages: Stage[] } | null;
   stage: { id: string; name: string; category: string; isRetired?: boolean } | null;
   stageReason: string | null;
-  details: (BdValues & { whyPursue: string | null; need: string | null; serviceLine: string | null; value: number | null; currency: string | null; probability: number | null; expectedClose: string | null; introducedBy: string | null; submissionDeadline: string | null; opportunityType?: OpportunityType | null; netFeeRevenueUsd?: number | null; athenaEntity?: AthenaEntity | null }) | null;
+  details: (BdValues & { whyPursue: string | null; need: string | null; serviceLine: string | null; value: number | null; currency: string | null; probability: number | null; expectedClose: string | null; introducedBy: string | null; submissionDeadline: string | null; submissionDeadlineAt?: string | null; submissionDeadlineZone?: string | null; submissionDeadlineTime?: string | null; opportunityType?: OpportunityType | null; netFeeRevenueUsd?: number | null; athenaEntity?: AthenaEntity | null }) | null;
   parties: { id: string; role: string; organisation: { id: string; name: string } }[];
   organisation: { id: string; name: string } | null;
   nextStep: { id: string; title: string; dueDate: string | null; assignee?: { id: string; name: string } | null } | null;
@@ -105,6 +107,7 @@ export function StageDialog({ projectId, stage, deal, initial, onClose, onDone }
       const raw = fields[k]; if (raw === undefined || raw === "") continue;
       f[k] = k === "value" || k === "probability" ? Number(raw) : raw;
     }
+    if (ask.includes("submissionDeadline") && fields.submissionDeadline) Object.assign(f, { submissionDeadlineTime: fields.submissionDeadlineTime || null, submissionDeadlineZone: fields.submissionDeadlineZone ?? DEFAULT_DEADLINE_ZONE, submissionDeadlineChoice: fields.submissionDeadlineChoice || undefined });
     if (Object.keys(f).length) body.fields = f;
     const r = await api("POST", `/api/projects/${projectId}/stage`, body);
     setBusy(false);
@@ -121,7 +124,7 @@ export function StageDialog({ projectId, stage, deal, initial, onClose, onDone }
     <Modal onClose={onClose} label={`Move to ${stage.name}`} describedBy={blocked || problem ? alertId : undefined}>
       <h2>Move to {stage.name}</h2>
       {stage.needsReason && <Field label="Reason (required)">{(id) => <textarea id={id} className="in" value={reason} onChange={(e) => setReason(e.target.value)} />}</Field>}
-      {ask.map((k) => (
+      {ask.map((k) => k === "submissionDeadline" ? <SubmissionDeadlineFields key={k} value={{ submissionDeadline: fields.submissionDeadline ?? "", submissionDeadlineTime: fields.submissionDeadlineTime ?? "", submissionDeadlineZone: fields.submissionDeadlineZone ?? DEFAULT_DEADLINE_ZONE, submissionDeadlineChoice: fields.submissionDeadlineChoice ?? "" }} onChange={patch => setFields({ ...fields, ...patch })} /> : (
         <Field key={k} label={`${LABELS[k] ?? k} (required)`}>
           {(id) => k === "currency"
             ? <select id={id} className="in" value={fields[k] ?? ""} onChange={(e) => setFields({ ...fields, [k]: e.target.value })}><option value="">Choose</option><option>INR</option><option>USD</option><option>EUR</option></select>
@@ -152,11 +155,11 @@ export function StageDialog({ projectId, stage, deal, initial, onClose, onDone }
 function DetailsDialog({ projectId, deal, onClose, onDone }: { projectId: string; deal: DealBlock; onClose: () => void; onDone: () => void }) {
   const formId = useId();
   const d = deal.details!;
-  const [v, setV] = useState<Record<string, string>>({
+  const [v, setV] = useState({
     whyPursue: d.whyPursue ?? "", need: d.need ?? "", serviceLine: d.serviceLine ?? "", value: d.value === null ? "" : String(d.value), currency: d.currency ?? "",
     opportunityType: d.opportunityType ?? "", netFeeRevenueUsd: d.netFeeRevenueUsd == null ? "" : String(d.netFeeRevenueUsd), athenaEntity: d.athenaEntity ?? "",
     partner: d.partner ?? "", athenaRole: d.athenaRole ?? "", budgetUsd: d.budgetUsd == null ? "" : String(d.budgetUsd), pwinAdjustedNfrUsd: d.pwinAdjustedNfrUsd == null ? "" : String(d.pwinAdjustedNfrUsd),
-    probability: d.probability === null ? "" : String(d.probability), expectedClose: d.expectedClose ?? "", introducedBy: d.introducedBy ?? "", submissionDeadline: d.submissionDeadline ?? "",
+    probability: d.probability === null ? "" : String(d.probability), expectedClose: d.expectedClose ?? "", introducedBy: d.introducedBy ?? "", submissionDeadline: d.submissionDeadline ?? "", submissionDeadlineTime: d.submissionDeadlineTime ?? "", submissionDeadlineZone: d.submissionDeadlineZone ?? DEFAULT_DEADLINE_ZONE, submissionDeadlineChoice: "",
   });
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -169,6 +172,7 @@ function DetailsDialog({ projectId, deal, onClose, onDone }: { projectId: string
       expectedPipelineId: deal.pipeline?.id, whyPursue: v.whyPursue, need: v.need || null, serviceLine: v.serviceLine || null, introducedBy: v.introducedBy || null,
       value: v.value === "" ? null : Number(v.value), currency: v.currency || null, probability: v.probability === "" ? null : Number(v.probability),
       expectedClose: v.expectedClose || null, submissionDeadline: v.submissionDeadline || null,
+      submissionDeadlineTime: v.submissionDeadlineTime || null, submissionDeadlineZone: v.submissionDeadlineTime ? v.submissionDeadlineZone : null, submissionDeadlineChoice: v.submissionDeadlineChoice || undefined,
       opportunityType: v.opportunityType || null, netFeeRevenueUsd: v.netFeeRevenueUsd === "" ? null : Number(v.netFeeRevenueUsd), athenaEntity: v.athenaEntity || null,
       partner: v.partner || null, athenaRole: v.athenaRole || null, budgetUsd: v.budgetUsd === "" ? null : Number(v.budgetUsd), pwinAdjustedNfrUsd: v.pwinAdjustedNfrUsd === "" ? null : Number(v.pwinAdjustedNfrUsd),
     };
@@ -193,7 +197,7 @@ function DetailsDialog({ projectId, deal, onClose, onDone }: { projectId: string
       <DealBdFields values={{ partner: v.partner, athenaRole: v.athenaRole, budgetUsd: v.budgetUsd, pwinAdjustedNfrUsd: v.pwinAdjustedNfrUsd }} onChange={(key, value) => setV({ ...v, [key]: value })} />
       <Field label="Athena Entity">{(id) => <select id={id} className="in" value={v.athenaEntity} onChange={set("athenaEntity")}><option value="">Not specified</option>{ATHENA_ENTITIES.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}</select>}</Field>
       <Field label="Expected close">{(id) => <input id={id} className="in" type="date" value={v.expectedClose} onChange={set("expectedClose")} />}</Field>
-      {deal.pipeline?.key === "DEAL_BID" && <Field label="Submission deadline">{(id) => <input id={id} className="in" type="date" value={v.submissionDeadline} onChange={set("submissionDeadline")} />}</Field>}
+      {deal.pipeline?.key === "DEAL_BID" && <SubmissionDeadlineFields value={v} onChange={patch => setV({ ...v, ...patch })} legacyDate={!d.submissionDeadlineAt ? d.submissionDeadline ?? undefined : undefined} />}
       <Field label="Introduced by">{(id) => <input id={id} className="in" value={v.introducedBy} onChange={set("introducedBy")} />}</Field>
       {err && <div className="err" role="alert">{err}</div>}
       </form>
@@ -385,7 +389,7 @@ export function DealPanel({ projectId, deal, canWrite, canManage, onChange, feed
         {d && <DealBdFacts values={d} />}
         {d?.probability !== null && d?.probability !== undefined && <span>PWin: {d.probability}%</span>}
         {d?.expectedClose && <span>Close {dueLabel(d.expectedClose)}</span>}
-        {d?.submissionDeadline && <span className={isOverdue(d.submissionDeadline) ? "over" : ""}>Submit by {dueLabel(d.submissionDeadline)}</span>}
+        {d?.submissionDeadline && <span className={submissionDeadlinePassed(d) ? "over" : ""}>Submit by {submissionDeadlineLabel(d)}</span>}
         {deal.stalled && <span className="chip gold">Stalled · no activity for 30 days</span>}
         {deal.stageReason && <span>Reason: {deal.stageReason}</span>}
         {canWrite && <button className="btn ghost sm" onClick={() => setEdit(true)}>Edit details</button>}

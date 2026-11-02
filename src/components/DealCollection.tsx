@@ -1,6 +1,7 @@
 "use client";
 // SHO-2642: one entry point for already-authorised deal collections. It does not
 // fetch, filter, grant access, or change the caller's archive/Trash policy.
+import { submissionDeadlineLabel, submissionDeadlinePassed } from "@/lib/submission-deadline";
 import Link from "next/link";
 import type { ComponentProps, ReactNode } from "react";
 import { DealBoard, type BoardDeal } from "@/components/DealBoard";
@@ -32,7 +33,7 @@ function DealTable<T>({ deals, keyOf, columns, className, label }: {
   </table></div>;
 }
 const listColumns: Column<BoardDeal>[] = [
-  { label: "Deal", cell: d => <><DealName id={d.id} name={d.name} /> {d.stalled && <span className="chip gold">Stalled</span>}</> },
+  { label: "Deal", cell: d => <><DealName id={d.id} name={d.name} /> {d.submissionDeadline && <div className={submissionDeadlinePassed(d) ? "over" : ""}>Submit by {submissionDeadlineLabel(d)}</div>} {d.stalled && <span className="chip gold">Stalled</span>}</> },
   { label: "Opportunity type", cell: d => OPPORTUNITY_TYPES.find(o => o.value === d.opportunityType)?.label ?? "Unclassified" },
   { label: "Organisation", cell: d => d.organisation ? <Link href={`/accounts/${d.organisation.id}`}>{d.organisation.name}</Link> : "—" },
   { label: "Stage", cell: d => <><span className="chip">{d.stage?.name}{d.stage?.isRetired ? " · legacy stage" : ""}</span><div style={{ fontSize: 12, color: "var(--muted)" }}>{d.pipeline?.name}</div></> },

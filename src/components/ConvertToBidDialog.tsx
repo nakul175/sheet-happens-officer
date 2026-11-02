@@ -1,4 +1,6 @@
 "use client";
+import { SubmissionDeadlineFields, type DeadlineForm } from "@/components/SubmissionDeadlineFields";
+import { DEFAULT_DEADLINE_ZONE, submissionLocalTime } from "@/lib/submission-deadline";
 import { useState } from "react";
 import { api, useGet } from "@/components/api";
 import { Field, Modal } from "@/components/ui";
@@ -11,7 +13,7 @@ const LABELS: Record<string, string> = { whyPursue: "Why we are pursuing this", 
 export function ConvertToBidDialog({ projectId, onClose, onDone }: { projectId: string; onClose: () => void; onDone: () => void }) {
   const { data, error, loading } = useGet<Preview>(`/api/projects/${projectId}/convert-to-bid`);
   const [stageId, setStageId] = useState("");
-  const [deadline, setDeadline] = useState<string | null>(null);
+  const [deadline, setDeadline] = useState<Partial<DeadlineForm>>({});
   const [values, setValues] = useState<Record<string, string>>({});
   const [reason, setReason] = useState("");
   const [review, setReview] = useState(false);
@@ -23,13 +25,14 @@ export function ConvertToBidDialog({ projectId, onClose, onDone }: { projectId: 
   if (required.has("value") || required.has("currency")) { required.add("value"); required.add("currency"); }
   const fields = [...required];
   const value = (k: string) => values[k] ?? String(data?.details[k as keyof Preview["details"]] ?? "");
-  const date = deadline ?? data?.details.submissionDeadline ?? "";
-  const ready = !!stage && !stage.unsupportedFields.length && !!date && (!stage.needsReason || !!reason.trim()) && fields.every((k) => !!value(k).trim());
+  const cutoff: DeadlineForm = { submissionDeadline: deadline.submissionDeadline ?? data?.details.submissionDeadline ?? "", submissionDeadlineTime: deadline.submissionDeadlineTime ?? submissionLocalTime(data?.details.submissionDeadlineAt, data?.details.submissionDeadlineZone) ?? "", submissionDeadlineZone: deadline.submissionDeadlineZone ?? data?.details.submissionDeadlineZone ?? DEFAULT_DEADLINE_ZONE, submissionDeadlineChoice: deadline.submissionDeadlineChoice ?? "" };
+  const date = cutoff.submissionDeadline;
+  const ready = !!stage && !stage.unsupportedFields.length && !!date && !!cutoff.submissionDeadlineTime && !!cutoff.submissionDeadlineZone && (!stage.needsReason || !!reason.trim()) && fields.every((k) => !!value(k).trim());
   async function commit() {
     if (!data || !ready || busy || stale) return;
     setBusy(true); setErr(null);
     const facts = Object.fromEntries(fields.map((k) => [k, k === "value" || k === "probability" ? Number(value(k)) : value(k)]));
-    const r = await api("POST", `/api/projects/${projectId}/convert-to-bid`, { expectedRevision: data.revision, stageId, submissionDeadline: date, reason, fields: facts });
+    const r = await api("POST", `/api/projects/${projectId}/convert-to-bid`, { expectedRevision: data.revision, stageId, ...cutoff, submissionDeadlineChoice: cutoff.submissionDeadlineChoice || undefined, reason, fields: facts });
     setBusy(false);
     if (r.ok) { onDone(); return; }
     setStale(isVersionConflict(r.status, r.data));
@@ -44,7 +47,7 @@ export function ConvertToBidDialog({ projectId, onClose, onDone }: { projectId: 
       <p><b>From:</b> {data.source.pipeline} / {data.source.stage}</p>
       {review ? <>
         <p><b>To:</b> {data.target.name} / {stage?.name}</p>
-        <p><b>Submission deadline:</b> {date}</p>
+        <p><b>Submission deadline:</b> {date} {cutoff.submissionDeadlineTime} {cutoff.submissionDeadlineZone}{cutoff.submissionDeadlineChoice ? ` (${cutoff.submissionDeadlineChoice} occurrence)` : ""}</p>
         {fields.map((k) => <p key={k}><b>{LABELS[k] ?? k}:</b> {value(k)}</p>)}
         {reason.trim() && <p><b>Reason:</b> {reason.trim()}</p>}
         <p>The same deal, people, tasks, notes and history will be kept. This conversion cannot be undone through this flow.</p>
@@ -56,7 +59,7 @@ export function ConvertToBidDialog({ projectId, onClose, onDone }: { projectId: 
         {!data.target.stages.length && <p role="alert">No open Bid stages are available.</p>}
         {stage && <p><b>To:</b> {data.target.name} / {stage.name}</p>}
         {!!stage?.unsupportedFields.length && <p className="err" role="alert">This stage requires unsupported fields: {stage.unsupportedFields.join(", ")}. Choose another stage or ask an Admin to review its requirements.</p>}
-        <Field label="Submission deadline (required)">{(id) => <input id={id} className="in" type="date" required value={date} disabled={busy || stale} onChange={(e) => setDeadline(e.target.value)} />}</Field>
+        <fieldset disabled={busy || stale} style={{ border: 0, padding: 0, margin: 0 }}><SubmissionDeadlineFields value={cutoff} onChange={patch => setDeadline({ ...deadline, ...patch })} /></fieldset>
         {fields.filter((k) => LABELS[k]).map((k) => <Field key={k} label={`${LABELS[k]} (required)`}>{(id) => k === "currency"
           ? <select id={id} className="in" required value={value(k)} disabled={busy || stale} onChange={(e) => setValues({ ...values, [k]: e.target.value })}><option value="">Choose</option><option>INR</option><option>USD</option><option>EUR</option></select>
           : <input id={id} className="in" required type={k === "value" || k === "probability" ? "number" : k === "expectedClose" ? "date" : "text"} min={k === "value" ? "0.01" : k === "probability" ? "0" : undefined} max={k === "probability" ? "100" : undefined} step={k === "value" ? "any" : undefined} value={value(k)} disabled={busy || stale} onChange={(e) => setValues({ ...values, [k]: e.target.value })} />}</Field>)}

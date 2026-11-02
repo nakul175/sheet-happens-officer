@@ -263,9 +263,10 @@ async function plan(row: any, user: Actor, projectId: string): Promise<Plan> {
         partner: d.partner, athenaRole: d.athenaRole, budgetUsd: d.budgetUsd == null ? null : Number(d.budgetUsd), pwinAdjustedNfrUsd: d.pwinAdjustedNfrUsd == null ? null : Number(d.pwinAdjustedNfrUsd),
         probability: d.probability, expectedClose: d.expectedClose?.toISOString().slice(0, 10) ?? null, introducedBy: d.introducedBy,
         submissionDeadline: d.submissionDeadline?.toISOString().slice(0, 10) ?? null,
+        submissionDeadlineAt: d.submissionDeadlineAt?.toISOString() ?? null, submissionDeadlineZone: d.submissionDeadlineZone ?? null,
       };
       const data: Record<string, unknown> = {};
-      for (const k of keys) data[k] = (k === "expectedClose" || k === "submissionDeadline") && b[k] ? new Date(`${b[k]}T00:00:00Z`) : b[k] ?? null;
+      for (const k of keys) data[k] = (k === "expectedClose" || k === "submissionDeadline") && b[k] ? new Date(`${b[k]}T00:00:00Z`) : k === "submissionDeadlineAt" && b[k] ? new Date(b[k]) : b[k] ?? null;
       return { conflicts: fieldConflicts(keys, b, f, now), subject: "the deal", fields: keys.join(", "), apply: async (tx) => {
         const changed = await tx.project.updateMany({ where: { id: projectId, pipelineId: project.pipelineId, updatedAt: project.updatedAt }, data: { updatedAt: new Date() } });
         if (!changed.count) throw bad("This deal changed. Refresh before undoing its details.");

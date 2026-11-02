@@ -1,4 +1,6 @@
 "use client";
+import { SubmissionDeadlineFields } from "@/components/SubmissionDeadlineFields";
+import { DEFAULT_DEADLINE_ZONE } from "@/lib/submission-deadline";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useState } from "react";
@@ -18,7 +20,7 @@ function Form() {
   const orgs = useGet<{ organisations: { id: string; name: string }[] }>("/api/orgs");
   const pipes = useGet<{ pipelines: { id: string; key: string; name: string }[] }>("/api/deals/pipelines");
   const initialOrgId = sp.get("org") ?? "";
-  const [v, setV] = useState({ name: "", organisationId: initialOrgId, buyerName: "", pipelineId: "", leaderId: me.id, whyPursue: "", step: "", due: todayIST(), submissionDeadline: "", value: "", currency: "INR", opportunityType: "", netFeeRevenueUsd: "", athenaEntity: "", probability: "", partner: "", athenaRole: "", budgetUsd: "", pwinAdjustedNfrUsd: "" });
+  const [v, setV] = useState({ name: "", organisationId: initialOrgId, buyerName: "", pipelineId: "", leaderId: me.id, whyPursue: "", step: "", due: todayIST(), submissionDeadline: "", submissionDeadlineTime: "", submissionDeadlineZone: DEFAULT_DEADLINE_ZONE, submissionDeadlineChoice: "", value: "", currency: "INR", opportunityType: "", netFeeRevenueUsd: "", athenaEntity: "", probability: "", partner: "", athenaRole: "", budgetUsd: "", pwinAdjustedNfrUsd: "" });
   const [err, setErr] = useState<string | null>(null);
   const [dup, setDup] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -61,7 +63,7 @@ function Form() {
       name: v.name, organisationId, pipelineId: pipeline?.id, leaderId: v.leaderId, whyPursue: v.whyPursue,
       nextStep: { title: v.step, dueDate: v.due }, force,
     };
-    if (pipeline?.key === "DEAL_BID") body.submissionDeadline = v.submissionDeadline || null;
+    if (pipeline?.key === "DEAL_BID") Object.assign(body, { submissionDeadline: v.submissionDeadline || null, submissionDeadlineTime: v.submissionDeadlineTime || null, submissionDeadlineZone: v.submissionDeadlineZone || null, submissionDeadlineChoice: v.submissionDeadlineChoice || undefined });
     body.opportunityType = v.opportunityType || null;
     body.netFeeRevenueUsd = v.netFeeRevenueUsd === "" ? null : Number(v.netFeeRevenueUsd);
     body.athenaEntity = v.athenaEntity || null;
@@ -85,7 +87,7 @@ function Form() {
         {(id) => <><input id={id} className="in" required maxLength={200} list={`${id}-buyers`} autoComplete="off" value={v.buyerName || selectedBuyer?.name || ""} onChange={setBuyer} /><datalist id={`${id}-buyers`}>{organisations.map((o) => <option key={o.id} value={o.name} />)}</datalist></>}
       </Field>
       <Field label="Pipeline">{(id) => <select id={id} className="in" value={pipeline?.id ?? ""} onChange={set("pipelineId")}>{pipes.data?.pipelines.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select>}</Field>
-      {pipeline?.key === "DEAL_BID" && <Field label="Submission deadline">{(id) => <input id={id} className="in" type="date" required value={v.submissionDeadline} onChange={set("submissionDeadline")} />}</Field>}
+      {pipeline?.key === "DEAL_BID" && <SubmissionDeadlineFields value={v} onChange={patch => setV({ ...v, ...patch })} />}
       <Field label="Opportunity type">{(id) => <select id={id} className="in" value={v.opportunityType} onChange={set("opportunityType")}><option value="">Unclassified</option>{OPPORTUNITY_TYPES.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}</select>}</Field>
       <Field label="Leader">{(id) => <PeopleSelect id={id} label="Leader" value={v.leaderId} onChange={leaderId => setV({ ...v, leaderId })} people={(team.data?.people ?? []).map(p => ({ ...p, name: `${p.name}${p.id === me.id ? " (you)" : ""}` }))} />}</Field>
       </fieldset><fieldset><legend>Commercial details</legend>

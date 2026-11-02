@@ -137,6 +137,9 @@ export const dealDetails = dealClassificationFields.extend({
   value: z.number().positive().max(1e13).nullish(), currency: currencyField.nullish(),
   probability: z.number().int().min(0).max(100).nullish(),
   expectedClose: isoDay.nullish(), introducedBy: optText(200), submissionDeadline: isoDay.nullish(),
+  submissionDeadlineTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "Use a time like 17:30.").nullish(),
+  submissionDeadlineZone: z.string().min(1).max(100).nullish(),
+  submissionDeadlineChoice: z.enum(["earlier", "later"]).optional(),
 });
 export const dealCreate = dealDetails.extend({
   name: z.string().trim().min(1, "Give the deal a name.").max(200),
@@ -151,6 +154,7 @@ export const dealDetailsEdit = dealDetails.extend({ expectedPipelineId: z.string
 export const dealBidConversion = z.object({
   expectedRevision: z.string().regex(/^[a-f0-9]{64}$/, "Reopen conversion to load the current deal."),
   stageId: z.string().min(1, "Choose a Bid stage."), submissionDeadline: isoDay,
+  ...dealDetails.pick({ submissionDeadlineTime: true, submissionDeadlineZone: true, submissionDeadlineChoice: true }).shape,
   reason: z.string().trim().max(1000).nullish(), fields: dealDetails.strict().optional(),
 }).strict();
 export const dealStage = z.object({ stageId: z.string().min(1), expectedStageId: z.string().min(1).nullable().optional(), reason: z.string().trim().max(1000).nullish(), fields: dealDetails.optional() });

@@ -18,10 +18,16 @@ export function dealCalendarDate(value: string | null | undefined): string | nul
   return `${part("year")}-${part("month")}-${part("day")}`;
 }
 
-export function matchesDealDate(deal: Partial<Record<DealDateField, string | null>>, filter: DealDateFilter) {
+export function matchesDealDate(deal: Partial<Record<DealDateField, string | null>> & { submissionDeadlineAt?: string | null }, filter: DealDateFilter) {
   if (filter.start && filter.end && filter.start > filter.end) return false;
   const date = dealCalendarDate(deal[filter.field]);
   if (!date) return filter.undated !== "exclude";
   if (filter.undated === "only") return false;
+  if (filter.field === "submissionDeadline" && deal.submissionDeadlineAt) {
+    const instant = Date.parse(deal.submissionDeadlineAt);
+    const start = filter.start ? Date.parse(`${filter.start}T00:00:00+05:30`) : -Infinity;
+    const through = filter.end ? Date.parse(`${filter.end}T00:00:00+05:30`) + 86400000 : Infinity;
+    return Number.isFinite(instant) && instant >= start && instant < through;
+  }
   return (!filter.start || date >= filter.start) && (!filter.end || date <= filter.end);
 }

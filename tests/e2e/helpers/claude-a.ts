@@ -41,7 +41,7 @@ export function dealBody(o: { name: string; organisationId: string; pipelineId: 
   return {
     name: o.name, organisationId: o.organisationId, pipelineId: o.pipelineId, leaderId: o.leaderId, whyPursue: "ZZ-TEST fit",
     nextStep: { title: o.step ?? zz("step"), dueDate: o.due ?? ymd(4) },
-    ...(o.deadline ? { submissionDeadline: o.deadline } : {}),
+    ...(o.deadline ? { submissionDeadline: o.deadline, submissionDeadlineTime: "17:00", submissionDeadlineZone: "Asia/Kolkata" } : {}),
   };
 }
 
