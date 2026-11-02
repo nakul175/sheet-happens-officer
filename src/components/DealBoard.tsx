@@ -1,6 +1,7 @@
 "use client";
 // SHO-US-10.5 / 12.6: one shared view of deals. Every active stage has its own column.
 // SHO-3133: On hold, Won and Lost stay visually distinct in Proactive and Bid; responsive CSS wraps columns.
+import { compareSubmissionDeadlines, submissionDeadlineLabel, submissionDeadlinePassed } from "@/lib/submission-deadline";
 import Link from "next/link";
 import { OPPORTUNITY_TYPES, type OpportunityType } from "@/lib/deal-classification";
 import { useMemo, useState } from "react";
@@ -14,7 +15,7 @@ export type BoardDeal = BdValues & {
   organisation: { id: string; name: string } | null; leader: { id: string; name: string } | null; value: number | null; currency: string | null;
   opportunityType?: OpportunityType | null; lifecycle?: "sales" | "delivery";
   expectedClose?: string | null; createdAt?: string | null; stageChangedAt?: string | null;
-  submissionDeadline: string | null; nextStep: { title: string; dueDate: string | null } | null; needsNextStep: boolean; stalled: boolean;
+  submissionDeadline: string | null; submissionDeadlineAt?: string | null; submissionDeadlineZone?: string | null; submissionDeadlineTime?: string | null; nextStep: { title: string; dueDate: string | null } | null; needsNextStep: boolean; stalled: boolean;
 };
 export type BoardStage = Stage & { id: string; name: string; category: string };
 type Col = { key: string; title: string; stages: BoardStage[]; deals: BoardDeal[] };
@@ -35,7 +36,7 @@ export function sortDeals(deals: BoardDeal[], sort: DealSort, stages: BoardStage
     if (sort === "date-asc" || sort === "date-desc") {
       const ad = a.submissionDeadline;
       const bd = b.submissionDeadline;
-      if (ad && bd) result = ad.localeCompare(bd) * (sort === "date-desc" ? -1 : 1);
+      if (ad && bd) result = compareSubmissionDeadlines(a, b) * (sort === "date-desc" ? -1 : 1);
       else if (Boolean(ad) !== Boolean(bd)) result = ad ? -1 : 1;
     }
     return result || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
@@ -52,7 +53,7 @@ export function columnsFor(stages: BoardStage[], deals: BoardDeal[], bid: boolea
   }
   for (const c of cols) {
     if (sort) c.deals = sortDeals(c.deals, sort, stages);
-    else if (bid) c.deals.sort((a, b) => (a.submissionDeadline ?? "9999").localeCompare(b.submissionDeadline ?? "9999"));
+    else if (bid) c.deals.sort((a, b) => compareSubmissionDeadlines(a, b));
   }
   return cols;
 }
@@ -94,7 +95,7 @@ function Card({ d, stages, onMove, bid, canMove }: { d: BoardDeal; stages: Board
       {d.organisation && <div className="sub2">{d.organisation.name}</div>}
       <div className="sub2">{money(d.value, d.currency)}{d.leader ? ` · ${d.leader.name}` : ""}</div>
       <div className="sub2"><DealBdFacts values={d} label={`BD details for ${d.name}`} /></div>
-      {bid && d.submissionDeadline && <div className={`sub2${isOverdue(d.submissionDeadline) ? " over" : ""}`}>{isOverdue(d.submissionDeadline) ? "Deadline passed " : "Submit by "}{dueLabel(d.submissionDeadline)}</div>}
+      {bid && d.submissionDeadline && <div className={`sub2${submissionDeadlinePassed(d) ? " over" : ""}`}>{submissionDeadlinePassed(d) ? "Deadline passed " : "Submit by "}{submissionDeadlineLabel(d)}</div>}
       <div className="sub2">
         {d.nextStep ? <>Next: {d.nextStep.title} · <span className={isOverdue(d.nextStep.dueDate) ? "over" : ""}>{dueLabel(d.nextStep.dueDate)}</span></> : d.needsNextStep ? <span className="chip red">Needs a next step</span> : null}
         {d.stalled && <span className="chip gold" style={{ marginLeft: 4 }}>Stalled</span>}

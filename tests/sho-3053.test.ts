@@ -14,7 +14,7 @@ const fixtureName = (label: string) => `ZZ-TEST SHO-3053 ${label} ${Date.now()}-
 async function fixture(label: string, options: { bid?: boolean; value?: number } = {}) {
   const org = await leader.c.post("/api/orgs", { name: fixtureName(`${label} buyer`) });
   expect(org.status).toBe(201); orgs.push(org.json.organisation.id);
-  const r = await leader.c.post("/api/deals", { name: fixtureName(label), organisationId: org.json.organisation.id, pipelineId: options.bid ? bid.id : proactive.id, leaderId: leader.id, whyPursue: "Synthetic conversion acceptance", nextStep: { title: "ZZ-TEST first next step", dueDate: istDate(3) }, ...(options.bid ? { submissionDeadline: istDate(10) } : {}), ...(options.value ? { value: options.value, currency: "INR" } : {}) });
+  const r = await leader.c.post("/api/deals", { name: fixtureName(label), organisationId: org.json.organisation.id, pipelineId: options.bid ? bid.id : proactive.id, leaderId: leader.id, whyPursue: "Synthetic conversion acceptance", nextStep: { title: "ZZ-TEST first next step", dueDate: istDate(3) }, ...(options.bid ? { submissionDeadline: istDate(10), submissionDeadlineTime: "17:30", submissionDeadlineZone: "Asia/Kolkata" } : {}), ...(options.value ? { value: options.value, currency: "INR" } : {}) });
   expect(r.status, JSON.stringify(r.json)).toBe(201);
   const id = r.json.deal.id as string; projects.push(id);
   for (const [a, role] of [[editor, "EDITOR"], [viewer, "VIEWER"]] as const) expect((await leader.c.post(`/api/projects/${id}/members`, { userId: a.id, role })).status).toBe(201);
@@ -25,7 +25,7 @@ async function preview(id: string, who = leader) {
 }
 async function body(id: string, extra: Record<string, unknown> = {}) {
   const p = await preview(id);
-  return { expectedRevision: p.revision, stageId: bid.stages[0].id, submissionDeadline: istDate(20), ...extra };
+  return { expectedRevision: p.revision, stageId: bid.stages[0].id, submissionDeadline: istDate(20), submissionDeadlineTime: "17:30", submissionDeadlineZone: "Asia/Kolkata", ...extra };
 }
 async function snapshot(id: string) {
   return JSON.parse(JSON.stringify(await db.project.findUniqueOrThrow({ where: { id }, include: { deal: true, members: { orderBy: { userId: "asc" } }, parties: { orderBy: { id: "asc" } }, tasks: { orderBy: { id: "asc" }, include: { comments: true } }, sections: { orderBy: { id: "asc" } }, notes: true, actionLogs: { orderBy: { id: "asc" } } } })));
@@ -69,9 +69,11 @@ describe("SHO-3053 one-way Proactive to Bid", () => {
     const r = await editor.c.post(url(id), b); expect(r.status, JSON.stringify(r.json)).toBe(200); expect(r.json.deal.id).toBe(id); expect(r.headers.get("x-undo-id")).toBeNull();
     const after = await snapshot(id);
     for (const k of ["id", "name", "workspaceId", "members", "parties", "tasks", "sections", "notes"]) expect(after[k], k).toEqual(before[k]);
-    for (const k of Object.keys(before.deal).filter((k) => k !== "submissionDeadline")) expect(after.deal[k], k).toEqual(before.deal[k]);
+    for (const k of Object.keys(before.deal).filter((k) => !["submissionDeadline", "submissionDeadlineAt", "submissionDeadlineZone"].includes(k))) expect(after.deal[k], k).toEqual(before.deal[k]);
     expect(after.pipelineId).toBe(bid.id); expect(after.stageId).toBe(b.stageId); expect(after.stageChangedAt).not.toBe(before.stageChangedAt);
     expect(after.actionLogs.filter((x: { action: string }) => x.action !== "deal.pipeline_converted")).toEqual(before.actionLogs);
+    expect(after.deal.submissionDeadlineZone).toBe("Asia/Kolkata");
+    expect(after.deal.submissionDeadlineAt).toBe(new Date(`${istDate(20)}T17:30:00+05:30`).toISOString());
     const action = after.actionLogs.find((x: { action: string }) => x.action === "deal.pipeline_converted");
     expect(action.actorId).toBe(editor.id); expect(action.beforeState.pipelineId).toBe(proactive.id); expect(action.afterState.stageId).toBe(b.stageId);
     expect(await db.auditLog.count({ where: { targetId: id, event: "DEAL_PIPELINE_CONVERTED", actorId: editor.id } })).toBe(1);
@@ -106,13 +108,13 @@ describe("SHO-3053 one-way Proactive to Bid", () => {
       if (category === "archived") expect((await leader.c.post(`/api/projects/${id}/archive`)).status).toBe(200);
       else if (category !== "bid") await db.project.update({ where: { id }, data: { stageId: proactive.stages.find((s) => s.category === category)!.id } });
       const before = await snapshot(id);
-      expect((await leader.c.get(url(id))).status).toBe(409); expect((await leader.c.post(url(id), { expectedRevision: "0".repeat(64), stageId: bid.stages[0].id, submissionDeadline: istDate(10) })).status).toBe(409);
+      expect((await leader.c.get(url(id))).status).toBe(409); expect((await leader.c.post(url(id), { expectedRevision: "0".repeat(64), stageId: bid.stages[0].id, submissionDeadline: istDate(10), submissionDeadlineTime: "17:30", submissionDeadlineZone: "Asia/Kolkata" })).status).toBe(409);
       expect(await snapshot(id)).toEqual(before);
     }
   });
   it("rejects absent, impossible or timestamp deadlines and implicit/terminal/wrong-pipeline mappings atomically", async () => {
     const id = await fixture("validation"), b = await body(id), before = await snapshot(id);
-    const invalid = [{ submissionDeadline: undefined }, { submissionDeadline: "2026-02-31" }, { submissionDeadline: "2026-01-01T00:00:00Z" }, { stageId: undefined }, { stageId: "unknown" }, { stageId: proactive.stages[0].id }, ...bid.stages.filter((s) => ["DONE", "LOST"].includes(s.category)).map((s) => ({ stageId: s.id })), { expectedRevision: undefined }, { fields: { need: "unrelated overwrite" } }, { pipelineId: proactive.id }];
+    const invalid = [{ submissionDeadlineTime: undefined }, { submissionDeadlineZone: undefined }, { submissionDeadline: undefined }, { submissionDeadline: "2026-02-31" }, { submissionDeadline: "2026-01-01T00:00:00Z" }, { stageId: undefined }, { stageId: "unknown" }, { stageId: proactive.stages[0].id }, ...bid.stages.filter((s) => ["DONE", "LOST"].includes(s.category)).map((s) => ({ stageId: s.id })), { expectedRevision: undefined }, { fields: { need: "unrelated overwrite" } }, { pipelineId: proactive.id }];
     for (const extra of invalid) { const r = await leader.c.post(url(id), { ...b, ...extra }); expect(r.status, JSON.stringify(extra)).toBe(400); expect(await snapshot(id)).toEqual(before); }
   });
   it("collects configured requirements and reason, blocks blanks and unknown fields, and accepts zero probability", async () => {
@@ -154,14 +156,14 @@ describe("SHO-3053 one-way Proactive to Bid", () => {
   it("keeps pipeline/stage pairing valid during overlapping old-stage requests", async () => {
     for (let n = 0; n < 4; n++) {
       const id = await fixture(`race ${n}`), p = await previewBidConversion(actor(leader), id);
-      const r = await Promise.allSettled([convertToBid(actor(leader), id, { expectedRevision: p.revision, stageId: bid.stages[0].id, submissionDeadline: istDate(20) }), moveStage(actor(editor), id, { stageId: proactive.stages.find((s) => s.category === "ACTIVE" && s.id !== proactive.stages[0].id)!.id })]);
+      const r = await Promise.allSettled([convertToBid(actor(leader), id, { expectedRevision: p.revision, stageId: bid.stages[0].id, submissionDeadline: istDate(20), submissionDeadlineTime: "17:30", submissionDeadlineZone: "Asia/Kolkata" }), moveStage(actor(editor), id, { stageId: proactive.stages.find((s) => s.category === "ACTIVE" && s.id !== proactive.stages[0].id)!.id })]);
       expect(r.some((x) => x.status === "fulfilled")).toBe(true);
       const state = await db.project.findUniqueOrThrow({ where: { id }, include: { stage: true } }); expect(state.stage!.pipelineId).toBe(state.pipelineId);
       expect(r.filter((x) => x.status === "rejected").every((x) => [400, 409].includes((x as PromiseRejectedResult).reason.status))).toBe(true);
     }
   });
   it("rechecks CRM visibility and active-account status at commit", async () => {
-    const id = await fixture("hidden"), p = await previewBidConversion(actor(leader), id), b = { expectedRevision: p.revision, stageId: bid.stages[0].id, submissionDeadline: istDate(20) }, before = await snapshot(id);
+    const id = await fixture("hidden"), p = await previewBidConversion(actor(leader), id), b = { expectedRevision: p.revision, stageId: bid.stages[0].id, submissionDeadline: istDate(20), submissionDeadlineTime: "17:30", submissionDeadlineZone: "Asia/Kolkata" }, before = await snapshot(id);
     const old = process.env.CRM_VISIBLE;
     try { process.env.CRM_VISIBLE = "off"; await expect(convertToBid(actor(leader), id, b)).rejects.toMatchObject({ status: 404 }); }
     finally { if (old === undefined) delete process.env.CRM_VISIBLE; else process.env.CRM_VISIBLE = old; }

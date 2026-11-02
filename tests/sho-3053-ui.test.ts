@@ -42,7 +42,9 @@ async function pageFor(a: Account, width: number, id: string) {
 async function sameDeal(id: string) { return JSON.parse(JSON.stringify(await db.project.findUniqueOrThrow({ where: { id }, include: { deal: true, actionLogs: true } }))); }
 async function open(page: Page) { await page.getByRole("button", { name: "Convert to Bid", exact: true }).click(); await page.getByLabel("Bid stage (required)").waitFor(); }
 async function review(page: Page, stage = target) {
-  await page.getByLabel("Bid stage (required)").selectOption(stage); await page.getByLabel("Submission deadline (required)").fill(istDate(20));
+  await page.getByLabel("Bid stage (required)").selectOption(stage); await page.getByLabel("Submission deadline", { exact: true }).fill(istDate(20));
+  await page.getByLabel("Submission time", { exact: true }).fill("17:30");
+  await page.getByLabel("Submission timezone", { exact: true }).fill("Asia/Kolkata");
   if (stage === configuredStage) { await page.getByLabel("Need (required)").fill("ZZ-TEST requested scope"); await page.getByLabel("Probability % (required)").fill("0"); await page.getByLabel("Reason (required)").fill("ZZ-TEST chosen Bid stage"); }
   await page.getByRole("button", { name: "Review conversion", exact: true }).click(); await page.getByRole("heading", { name: "Review conversion", exact: true }).waitFor();
 }

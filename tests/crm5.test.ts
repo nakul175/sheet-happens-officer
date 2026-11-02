@@ -16,7 +16,7 @@ async function mkDeal(a: Account, o: { due?: string; stage?: string; bid?: boole
   const org = (await a.c.post("/api/orgs", { name: `Org5 ${Date.now()}-${seq++}` })).json.organisation.id;
   const r = await a.c.post("/api/deals", {
     name: `Deal5 ${Date.now()}-${seq++}`, organisationId: org, pipelineId: pipe.id, leaderId: a.id, whyPursue: "fit",
-    nextStep: { title: "Step", dueDate: o.due ?? istDate(5) }, ...(o.bid ? { submissionDeadline: istDate(20) } : {}), ...o.extra,
+    nextStep: { title: "Step", dueDate: o.due ?? istDate(5) }, ...(o.bid ? { submissionDeadline: istDate(20), submissionDeadlineTime: "17:00", submissionDeadlineZone: "Asia/Kolkata" } : {}), ...o.extra,
   });
   expect(r.status, JSON.stringify(r.json)).toBe(201);
   const id = r.json.deal.id as string;

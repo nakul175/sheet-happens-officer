@@ -70,7 +70,7 @@ async function account(label: string, email = `nakul17+${tag.toLowerCase()}-${la
   expect(cookie).toBeTruthy(); const person = { id: signed.json.user.id, email, cookie }; people.push(person); return person;
 }
 function payload(label: string, fields: Record<string, unknown> = values) {
-  return { name: `${tag} ${label}`, organisationId, pipelineId, leaderId: leader.id, whyPursue: "Synthetic fit", nextStep: { title: `${tag} follow up`, dueDate: due() }, submissionDeadline: "2088-02-01", ...fields };
+  return { name: `${tag} ${label}`, organisationId, pipelineId, leaderId: leader.id, whyPursue: "Synthetic fit", nextStep: { title: `${tag} follow up`, dueDate: due() }, submissionDeadline: "2088-02-01", submissionDeadlineTime: "17:30", submissionDeadlineZone: "Asia/Kolkata", ...fields };
 }
 async function fixture(label: string, fields: Record<string, unknown> = values) {
   const made = await call(all(), root, "POST", "/api/deals", payload(label, fields), 201);
