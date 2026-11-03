@@ -74,7 +74,7 @@ jobs:
         run: npx playwright-core install --with-deps chromium
       # SHO-2881. Every *.mode.test.ts file is excluded from `npm test` by one glob and run in this single loop.
       - name: Per-mode tests
-        run: npm run test:modes
+        run: npm run test:modes -- --reporter=default --reporter=json --outputFile=test-results/modes.json
       - name: Start the app
         run: |
           # APL-2652: RETURN_PATH_LOG=1 makes the proxy log the return path it forwards, for tests/return-to.test.ts.
@@ -96,7 +96,7 @@ jobs:
             exit 1
           fi
       - name: Unit tests
-        run: npm test
+        run: npm test -- --reporter=default --reporter=json --outputFile=test-results/unit.json
       # APL-2911. Story specs that drive this local server in Playwright Chromium (outbox mail, the CI Super Admin), so
       # staging cannot run them and npm test no longer does. Each file must collect at least one test, then every test runs.
       - name: Local Playwright story specs
@@ -108,6 +108,16 @@ jobs:
             if [ "${total:-0}" -eq 0 ]; then echo "::error::Playwright collected 0 tests from $f."; exit 1; fi
           done
           npx playwright test "${specs[@]}"
+      - name: Qualification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qualification-results
+          path: |
+            test-results/
+            playwright-report/
+          if-no-files-found: warn
+          retention-days: 14
       - name: Server log (on failure)
         if: failure()
         run: tail -n 200 server.log || true
