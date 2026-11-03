@@ -17,3 +17,7 @@ test('push is test-only; release requires manual opt-in and exact revision',()=>
 test('release rejects abbreviated or shell-injected revision before any work',()=>{
  assert.match(release,/\^\[0-9a-f\]\{40\}\$/);
 });
+
+test('workflow never provisions host config or database credentials during app cut',()=>{
+ assert.doesNotMatch(workflow,/cat > \/etc\/sho|secrets\.DATABASE_URL|secrets\.DIRECT_DATABASE_URL|Write settings and secrets/);
+});
