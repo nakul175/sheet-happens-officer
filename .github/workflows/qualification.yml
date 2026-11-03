@@ -69,6 +69,10 @@ jobs:
       - name: Typecheck story specs
         run: npx tsc --noEmit -p tsconfig.e2e.json
       - run: npx prisma migrate deploy
+      - name: Synthetic backup recovery rehearsal
+        env:
+          RECOVERY_POSTGRES_CONTAINER: ${{ job.services.postgres.id }}
+        run: node scripts/ci/recovery-drill.mjs
       - name: Build
         run: npm run build
       - name: Verify retired routes and preserved suite routes

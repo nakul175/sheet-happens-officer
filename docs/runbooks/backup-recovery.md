@@ -12,3 +12,11 @@ The legacy Restore check is now a **presence probe**, not recovery certification
 Current status: checker false-assurance fixed in candidate code; real restore acceptance remains BLOCKED on backup/reference access and agreed targets. Nothing in this document authorizes production changes.
 
 Proposed targets (pending owner approval): RPO at most one hour of lost changes; RTO at most four hours from incident declaration to verified service recovery. These are targets, not measured capabilities. Validate provider backup/PITR coverage and measure a real isolated restore before claiming either target is met.
+
+## Synthetic qualification drill
+
+Release qualification runs `scripts/ci/recovery-drill.mjs` against its disposable PostgreSQL 16 service. The runner rejects non-CI/shared database URLs, checks the exact service container and PostgreSQL system identifier, creates two uniquely named owned databases, and replays only the checked-in migration baseline. It never connects to production or shared staging.
+
+The private source is quiescent while its content/schema reference and custom-format dump are captured. The reference comes from the source **before** restore. Later synthetic source writes demonstrate why comparing to current live counts would be wrong. The restored database must match all public table content fingerprints and catalog fingerprints (columns, indexes, constraints, triggers, functions, enums and sequences). Checks also cover legacy dates, null deadline fields, decimal precision, a transactional write/rollback, foreign-key and single-Done-section enforcement. Deliberate same-count content corruption and a missing custom index must both be detected.
+
+Artifacts under `test-results/recovery/` record source/restored fingerprints, dump hash, tool versions, phase outcomes, elapsed dump/restore time and cleanup. Raw dumps are deleted; only databases actually created by this run can be dropped. Failure or incomplete cleanup fails qualification. The status `SYNTHETIC_REHEARSAL_PASS` proves this tooling exercise only: it does **not** certify provider backups, production recovery, application/browser recovery, access grants/ownership, large-volume performance or RPO/RTO. Those remain separate acceptance gates above. Do not reuse this CI-only runner against a real backup or shared database.
