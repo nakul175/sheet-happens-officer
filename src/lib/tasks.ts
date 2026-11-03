@@ -575,9 +575,9 @@ export async function moveTask(user: Actor, id: string, sectionId: string, expec
 }
 
 // ---------------------------------------------------------------- delete, restore, trash (6.1, 6.2)
-export async function deleteTask(user: Actor, id: string, o: { byUndo?: boolean } = {}) {
-  const { t, a } = await loadTask(user, id, { write: true });
-  return db.$transaction(async (tx) => {
+export async function deleteTask(user: Actor, id: string, o: { byUndo?: boolean; tx?: Tx } = {}) {
+  const { t, a } = await loadTask(user, id, { write: true, tx: o.tx });
+  const apply = async (tx: Tx) => {
     const now = new Date();
     await tx.task.updateMany({ where: { OR: [{ id }, { parentId: id }], deletedAt: null }, data: { deletedAt: now, deletedById: user.id } });
     // Still inside this transaction, so the updatedAt is the one this write stored, not a later save.
@@ -593,19 +593,20 @@ export async function deleteTask(user: Actor, id: string, o: { byUndo?: boolean 
     if (ctx && !canManage(a)) { ctx.undoId = undefined; ctx.undoLabel = undefined; }
     await ensureNextStep(tx, t.projectId, user.id);
     return row.updatedAt;
-  });
+  };
+  return o.tx ? apply(o.tx) : db.$transaction(apply);
 }
 
-export async function restoreTask(user: Actor, id: string, confirmParent = false, o: { skipRestoredLog?: boolean } = {}) {
-  const { t, a } = await loadTask(user, id, { write: true, deleted: true });
+export async function restoreTask(user: Actor, id: string, confirmParent = false, o: { skipRestoredLog?: boolean; tx?: Tx } = {}) {
+  const { t, a } = await loadTask(user, id, { write: true, deleted: true, tx: o.tx });
   requireManage(a); // SHO-US-3.3 AC1: only the Leader or an Admin restores from Trash
   if (!t.deletedAt) throw new ApiError(409, "This task is not in Trash.");
-  const parent = t.parentId ? await db.task.findUnique({ where: { id: t.parentId } }) : null;
+  const parent = t.parentId ? await (o.tx ?? db).task.findUnique({ where: { id: t.parentId } }) : null;
   const parentDeleted = !!parent?.deletedAt;
   if (parentDeleted && !confirmParent) {
     throw new ApiError(409, `This will also restore its parent task, "${parent!.title}".`, { needsConfirm: "parent", parentTitle: parent!.title });
   }
-  await db.$transaction(async (tx) => {
+  const apply = async (tx: Tx) => {
     const leader = await leaderId(tx, t.projectId);
     const targets = parentDeleted ? [parent!, t] : [t];
     for (const x of targets) {
@@ -632,7 +633,8 @@ export async function restoreTask(user: Actor, id: string, confirmParent = false
       }
     }
     if (!o.skipRestoredLog) await logAction(tx, { actorId: user.id, projectId: t.projectId, targetType: "task", targetId: id, action: "task.restored", before: { deletedAt: t.deletedAt!.toISOString(), title: t.title }, after: { deletedAt: null, restoredParent: parentDeleted } });
-  });
+  };
+  return o.tx ? apply(o.tx) : db.$transaction(apply);
 }
 
 export async function listTrash(user: Actor, projectId: string) {

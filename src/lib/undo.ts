@@ -11,6 +11,8 @@ import { undoRecord } from "@/lib/records";
 import { commentsEnabled, isCommentAction } from "@/lib/flags";
 import { assertCommentRoom } from "@/lib/comments";
 
+const TRANSACTIONAL_TASK_UNDO = new Set(["task.updated", "task.deleted", "task.created", "task.restored"]);
+
 type Conflict = { field: string; before: unknown; after: unknown; now: unknown };
 type Plan = { conflicts: Conflict[]; apply: (tx: Tx) => Promise<void>; subject?: string; fields?: string };
 
@@ -193,14 +195,14 @@ async function plan(row: any, user: Actor, projectId: string, tx?: Tx): Promise<
       };
     }
     case "task.deleted": {
-      const t = await taskOf(id, projectId);
+      const t = await taskOf(id, projectId, tx);
       if (!t.deletedAt) throw bad("This task is already restored.");
-      return { conflicts: [], subject: t.title, apply: async () => {} }; // restored by `undoAction` before the log is written
+      return { conflicts: [], subject: t.title, apply: async (tx) => { await restoreTask(user, id, true, { skipRestoredLog: true, tx }); } };
     }
     case "task.restored": case "task.created": {
-      const t = await taskOf(id, projectId);
+      const t = await taskOf(id, projectId, tx);
       if (t.deletedAt) throw bad("This task is already in Trash.");
-      return { conflicts: [], subject: t.title, apply: async () => {} };
+      return { conflicts: [], subject: t.title, apply: async (tx) => { await deleteTask(user, id, { byUndo: true, tx }); } };
     }
     case "deal.stage_changed": {
       // project-lookup-ok: Undo preparation already authorizes the action project through recordAccess before planning.
@@ -432,9 +434,9 @@ async function prepare(user: Actor, logId: string, tx?: Tx) {
   if (!isUndoable(row.action)) throw bad("This kind of action cannot be undone.");
   if (isTooOldToUndo(row.createdAt)) throw bad("Too old to undo", { tooOld: true });
 
-  // Only ordinary edit Undo has been moved to the locked transaction below.
-  // Other inverse actions retain their separate validation/transaction paths.
-  if (tx && row.action !== "task.updated") throw bad("This action changed. Reload before undoing it.");
+  // These task inverses use the locked transaction below. Other action kinds
+  // retain their separate validation/transaction paths.
+  if (tx && !TRANSACTIONAL_TASK_UNDO.has(row.action)) throw bad("This action changed. Reload before undoing it.");
   const p = await plan(row, user, projectId, tx);
   return { row, projectId, p };
 }
@@ -456,15 +458,15 @@ export async function checkUndo(user: Actor, logId: string) {
   const { row, p } = await prepare(user, logId);
   if (p.conflicts.length) throw await conflictError(row, p, user.id);
 }
-/** Persist the inverse and activity together; ordinary edits also claim the action atomically. */
+/** Persist the inverse and activity together; locked task inverses also claim the action atomically. */
 async function applyPreparedUndo(tx: Tx, user: Actor, prepared: Awaited<ReturnType<typeof prepare>>, anyway: boolean) {
   const { row, projectId, p } = prepared;
-  if (row.action === "task.updated") {
+  if (TRANSACTIONAL_TASK_UNDO.has(row.action)) {
     const claimed = await tx.actionLog.updateMany({ where: { id: row.id, undoneAt: null }, data: { undoneAt: new Date(), undoneById: user.id } });
     if (claimed.count !== 1) throw bad("This action was already undone.");
   }
   await p.apply(tx);
-  if (row.action !== "task.updated") await tx.actionLog.update({ where: { id: row.id }, data: { undoneAt: new Date(), undoneById: user.id } });
+  if (!TRANSACTIONAL_TASK_UNDO.has(row.action)) await tx.actionLog.update({ where: { id: row.id }, data: { undoneAt: new Date(), undoneById: user.id } });
   const commentId = (row.afterState as { commentId?: string } | null)?.commentId
     ?? (row.beforeState as { commentId?: string } | null)?.commentId;
   await logAction(tx, {
@@ -492,13 +494,20 @@ export async function undoAction(user: Actor, logId: string, anyway = false) {
   const { row, projectId, p } = await prepare(user, logId);
   if (p.conflicts.length && !anyway) throw await conflictError(row, p, user.id);
 
-  if (row.action === "task.updated") {
+  if (TRANSACTIONAL_TASK_UNDO.has(row.action)) {
     return db.$transaction(async (tx) => {
       // Same task-first ordering as ordinary edits. Shared project/membership
       // locks preserve archive/access state; NOWAIT avoids reverse-order waits
       // with management operations that already own those rows.
       await tx.$queryRaw`SELECT "id" FROM "Task" WHERE "id" = ${row.targetId} AND "projectId" = ${projectId} FOR UPDATE`;
       try {
+        if (row.action !== "task.updated") {
+          // Restore may include a deleted parent and its same-deletion cohort.
+          // Lock that family without waiting on a reverse parent/child order.
+          const target = await tx.task.findUnique({ where: { id: row.targetId }, select: { parentId: true } });
+          const root = target?.parentId ?? row.targetId;
+          await tx.$queryRaw`SELECT "id" FROM "Task" WHERE "projectId" = ${projectId} AND ("id" = ${root} OR "parentId" = ${root}) ORDER BY "id" FOR UPDATE NOWAIT`;
+        }
         await tx.$queryRaw`SELECT "id" FROM "Project" WHERE "id" = ${projectId} FOR SHARE NOWAIT`;
         await tx.$queryRaw`SELECT "userId" FROM "ProjectMember" WHERE "projectId" = ${projectId} AND "userId" = ${user.id} FOR SHARE NOWAIT`;
         await tx.$queryRaw`SELECT "id" FROM "ActionLog" WHERE "id" = ${row.id} FOR UPDATE NOWAIT`;
@@ -514,10 +523,6 @@ export async function undoAction(user: Actor, logId: string, anyway = false) {
       return applyPreparedUndo(tx, user, fresh, anyway);
     }, { isolationLevel: "ReadCommitted" });
   }
-
-  // Deleting and restoring have their own transactions.
-  if (row.action === "task.deleted") await restoreTask(user, row.targetId, true, { skipRestoredLog: true }); // Undo logs its own row
-  if (row.action === "task.restored" || row.action === "task.created") await deleteTask(user, row.targetId, { byUndo: true });
 
   return db.$transaction((tx) => applyPreparedUndo(tx, user, { row, projectId, p }, anyway));
 }
