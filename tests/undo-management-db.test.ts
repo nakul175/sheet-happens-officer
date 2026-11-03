@@ -42,7 +42,7 @@ afterAll(async () => {
       cleanup = true;
     } finally {
       mkdirSync('test-results/undo-management', { recursive: true });
-      writeFileSync('test-results/undo-trash/cleanup.json', JSON.stringify({ fixture: prefix, scope: 'management-undo-local-postgres', completed, cleanup }, null, 2));
+      writeFileSync('test-results/undo-management/cleanup.json', JSON.stringify({ fixture: prefix, scope: 'management-undo-local-postgres', completed, cleanup }, null, 2));
     }
   }
 });
