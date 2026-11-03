@@ -14,6 +14,7 @@ import { assertCommentRoom } from "@/lib/comments";
 const TRASH_TASK_UNDO = new Set(["task.deleted", "task.created", "task.restored"]);
 const FAMILY_TASK_UNDO = new Set([...TRASH_TASK_UNDO, "task.completed", "task.reopened"]);
 const COLLABORATOR_TASK_UNDO = new Set(["task.collaborator_added", "task.collaborator_removed"]);
+const COMMENT_TASK_UNDO = new Set(["comment.added", "comment.removed"]);
 const MANAGEMENT_UNDO = new Set([
   "project.updated", "project.archived", "project.unarchived", "project.leader_changed",
   "member.added", "member.removed", "member.role_changed",
@@ -21,6 +22,7 @@ const MANAGEMENT_UNDO = new Set([
 ]);
 const TRANSACTIONAL_TASK_UNDO = new Set([
   "task.updated", "task.moved", ...FAMILY_TASK_UNDO, ...COLLABORATOR_TASK_UNDO,
+  ...COMMENT_TASK_UNDO,
   "task.assigned", "task.sent_for_approval", "task.sent_back", "task.approver_changed",
 ]);
 
@@ -192,19 +194,19 @@ async function plan(row: any, user: Actor, projectId: string, tx?: Tx): Promise<
     }
     case "comment.added": {
       const commentId = String(f.commentId ?? "");
-      const c = await db.comment.findUnique({ where: { id: commentId } });
-      if (!c) throw bad("This comment no longer exists.");
+      const c = await (tx ?? db).comment.findUnique({ where: { id: commentId } });
+      if (!c || c.taskId !== id) throw bad("This comment no longer exists.");
       if (c.removedAt) throw bad("This comment is already deleted.");
-      const task = await liveTask(id, projectId);
+      const task = await liveTask(id, projectId, tx);
       return { conflicts: [], subject: task.title, apply: async (tx) => { await tx.comment.update({ where: { id: commentId }, data: { removedAt: new Date() } }); } };
     }
     case "comment.removed": {
       const commentId = String(f.commentId ?? "");
-      const c = await db.comment.findUnique({ where: { id: commentId } });
-      if (!c) throw bad("This comment no longer exists.");
+      const c = await (tx ?? db).comment.findUnique({ where: { id: commentId } });
+      if (!c || c.taskId !== id) throw bad("This comment no longer exists.");
       if (!c.removedAt) throw bad("This comment is already back.");
-      const task = await liveTask(id, projectId);
-      await roomForRestore(db, c.taskId); // APL-2840: at 200 live comments the restore is refused with the cap message (409)
+      const task = await liveTask(id, projectId, tx);
+      await roomForRestore(tx ?? db, c.taskId); // APL-2840: at 200 live comments the restore is refused with the cap message (409)
       return {
         conflicts: [], subject: task.title,
         apply: async (tx) => {
@@ -454,7 +456,7 @@ async function prepare(user: Actor, logId: string, tx?: Tx) {
   if (!isUndoable(row.action)) throw bad("This kind of action cannot be undone.");
   if (isTooOldToUndo(row.createdAt)) throw bad("Too old to undo", { tooOld: true });
 
-  // These task inverses use the locked transaction below. Other action kinds
+  // These task and comment inverses use the locked transaction below. Other action kinds
   // retain their separate validation/transaction paths.
   if (tx && !TRANSACTIONAL_UNDO.has(row.action)) throw bad("This action changed. Reload before undoing it.");
   const p = await plan(row, user, projectId, tx);
@@ -538,6 +540,10 @@ export async function undoAction(user: Actor, logId: string, anyway = false) {
         if (row.action === "task.collaborator_removed") {
           const collaboratorId = (row.beforeState as { userId?: string } | null)?.userId;
           if (collaboratorId) await tx.$queryRaw`SELECT "userId" FROM "ProjectMember" WHERE "projectId" = ${projectId} AND "userId" = ${collaboratorId} FOR SHARE NOWAIT`;
+        }
+        if (COMMENT_TASK_UNDO.has(row.action)) {
+          const commentId = (row.afterState as { commentId?: string } | null)?.commentId;
+          if (commentId) await tx.$queryRaw`SELECT "id" FROM "Comment" WHERE "id" = ${commentId} AND "taskId" = ${row.targetId} FOR UPDATE NOWAIT`;
         }
         await tx.$queryRaw`SELECT "id" FROM "ActionLog" WHERE "id" = ${row.id} FOR UPDATE NOWAIT`;
       } catch (error) {

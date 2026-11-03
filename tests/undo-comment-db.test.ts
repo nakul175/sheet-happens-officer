@@ -99,4 +99,116 @@ for (const kind of ['comment.added', 'comment.removed'] as const) {
       completed.push(kind + ':removed-after-preflight');
     } finally { pause.release(); await pending; }
   }, 20_000);
+
+  it(`${kind} Undo rechecks comment state after preflight`, async () => {
+    const f = await fixture(kind), pause = pauseBeforeTransactions(1);
+    const pending = Promise.allSettled([undoAction(editor, f.action.id)]);
+    try {
+      await pause.ready();
+      await db.comment.update({ where: { id: f.comment.id }, data: { removedAt: kind === 'comment.added' ? new Date() : null } });
+      const before = await snapshot(f.project.id, f.task.id); pause.release();
+      expect(await pending).toEqual([expect.objectContaining({ status: 'rejected', reason: expect.objectContaining({ status: 409 }) })]);
+      expect(await snapshot(f.project.id, f.task.id)).toEqual(before);
+      expect((await db.actionLog.findUniqueOrThrow({ where: { id: f.action.id } })).undoneAt).toBeNull();
+      completed.push(kind + ':state-after-preflight');
+    } finally { pause.release(); await pending; }
+  });
+
+  it(`${kind} duplicate Undo has one winner, one claim and one activity row`, async () => {
+    const f = await fixture(kind), pause = pauseBeforeTransactions(2);
+    const results = Promise.allSettled([undoAction(editor, f.action.id), undoAction(editor, f.action.id)]);
+    try {
+      await pause.ready(); pause.release(); const settled = await results;
+      expect(settled.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+      expect(settled.filter((r) => r.status === 'rejected')).toEqual([expect.objectContaining({ reason: expect.objectContaining({ status: 409 }) })]);
+      expect(await db.actionLog.count({ where: { projectId: f.project.id, action: 'undo' } })).toBe(1);
+      expect((await db.actionLog.findUniqueOrThrow({ where: { id: f.action.id } })).undoneById).toBe(editor.id);
+      expect((await db.comment.findUniqueOrThrow({ where: { id: f.comment.id } })).removedAt === null).toBe(kind === 'comment.removed');
+      completed.push(kind + ':duplicate-one-winner');
+    } finally { pause.release(); await results; }
+  });
+
+  it(`${kind} activity failure rolls back inverse and claim; retry succeeds`, async () => {
+    const f = await fixture(kind), before = await snapshot(f.project.id, f.task.id);
+    vi.spyOn(db, '$transaction').mockImplementationOnce((async (callback: (tx: Tx) => Promise<unknown>) => transact(async (tx) => {
+      const create = vi.spyOn(tx.actionLog, 'create').mockRejectedValueOnce(Error('COMMENT_UNDO_ACTIVITY_FAILURE'));
+      try { return await callback(tx); } finally { create.mockRestore(); }
+    })) as typeof db.$transaction);
+    await expect(undoAction(editor, f.action.id)).rejects.toThrow('COMMENT_UNDO_ACTIVITY_FAILURE');
+    vi.restoreAllMocks();
+    expect(await snapshot(f.project.id, f.task.id)).toEqual(before);
+    await undoAction(editor, f.action.id);
+    expect((await db.comment.findUniqueOrThrow({ where: { id: f.comment.id } })).removedAt === null).toBe(kind === 'comment.removed');
+    expect(await db.actionLog.count({ where: { projectId: f.project.id, action: 'undo' } })).toBe(1);
+    completed.push(kind + ':activity-rollback-retry');
+  });
 }
+
+it('comment restoration refuses a full 200-comment task after preflight without claiming Undo', async () => {
+  const f = await fixture('comment.removed'), pause = pauseBeforeTransactions(1);
+  await db.comment.createMany({ data: Array.from({ length: 199 }, (_, i) => ({ taskId: f.task.id, authorId: editor.id, text: 'live ' + i })) });
+  const pending = Promise.allSettled([undoAction(editor, f.action.id)]);
+  try {
+    await pause.ready();
+    await db.comment.create({ data: { taskId: f.task.id, authorId: leader.id, text: 'the 200th live comment' } });
+    const before = await snapshot(f.project.id, f.task.id); pause.release();
+    expect(await pending).toEqual([expect.objectContaining({ status: 'rejected', reason: expect.objectContaining({ status: 409, extra: expect.objectContaining({ code: 'too_many_comments' }) }) })]);
+    expect(await snapshot(f.project.id, f.task.id)).toEqual(before);
+    completed.push('restore-cap-after-preflight');
+  } finally { pause.release(); await pending; }
+});
+
+it('a comment-row lock makes Undo retryable without a partial claim', async () => {
+  const f = await fixture('comment.added'); let release!: () => void, locked = false;
+  const held = new Promise<void>((resolve) => { release = resolve; });
+  const owner = transact(async (tx) => {
+    await tx.$queryRaw`SELECT "id" FROM "Comment" WHERE "id" = ${f.comment.id} FOR UPDATE`;
+    locked = true; await held;
+  }, { timeout: 15_000 });
+  const ownerResult = Promise.allSettled([owner]);
+  try {
+    await vi.waitFor(() => expect(locked).toBe(true), { timeout: 5000 });
+    const before = await snapshot(f.project.id, f.task.id);
+    await expect(undoAction(editor, f.action.id)).rejects.toMatchObject({ status: 409 });
+    expect(await snapshot(f.project.id, f.task.id)).toEqual(before);
+    completed.push('comment-row-lock-conflict');
+  } finally { release(); expect(await ownerResult).toEqual([{ status: 'fulfilled', value: undefined }]); }
+  await undoAction(editor, f.action.id);
+  expect((await db.comment.findUniqueOrThrow({ where: { id: f.comment.id } })).removedAt).not.toBeNull();
+});
+
+it('Undo refuses an action whose comment belongs to a different task', async () => {
+  const first = await fixture('comment.added'), second = await fixture('comment.added');
+  await db.actionLog.update({ where: { id: first.action.id }, data: { afterState: { commentId: second.comment.id } } });
+  const before = await snapshot(first.project.id, first.task.id);
+  await expect(undoAction(editor, first.action.id)).rejects.toMatchObject({ status: 409 });
+  expect(await snapshot(first.project.id, first.task.id)).toEqual(before);
+  expect((await db.comment.findUniqueOrThrow({ where: { id: second.comment.id } })).removedAt).toBeNull();
+  completed.push('foreign-comment-rejected');
+});
+
+it('Undo rechecks project archive after preflight before changing a comment', async () => {
+  const f = await fixture('comment.added'), pause = pauseBeforeTransactions(1);
+  const pending = Promise.allSettled([undoAction(editor, f.action.id)]);
+  try {
+    await pause.ready();
+    await db.project.update({ where: { id: f.project.id }, data: { archivedAt: new Date() } });
+    const before = await snapshot(f.project.id, f.task.id); pause.release();
+    expect(await pending).toEqual([expect.objectContaining({ status: 'rejected', reason: expect.objectContaining({ status: 409 }) })]);
+    expect(await snapshot(f.project.id, f.task.id)).toEqual(before);
+    completed.push('archive-after-preflight');
+  } finally { pause.release(); await pending; }
+});
+
+it('Undo rechecks a Viewer downgrade after preflight before restoring a comment', async () => {
+  const f = await fixture('comment.removed'), pause = pauseBeforeTransactions(1);
+  const pending = Promise.allSettled([undoAction(editor, f.action.id)]);
+  try {
+    await pause.ready();
+    await db.projectMember.update({ where: { projectId_userId: { projectId: f.project.id, userId: editor.id } }, data: { role: 'VIEWER' } });
+    const before = await snapshot(f.project.id, f.task.id); pause.release();
+    expect(await pending).toEqual([expect.objectContaining({ status: 'rejected', reason: expect.objectContaining({ status: 403 }) })]);
+    expect(await snapshot(f.project.id, f.task.id)).toEqual(before);
+    completed.push('viewer-after-preflight');
+  } finally { pause.release(); await pending; }
+});
