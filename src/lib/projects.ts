@@ -1,7 +1,7 @@
 import { db } from "@/lib/db";
 import { ApiError, notFound } from "@/lib/http";
 import {
-  activeMember, isActive, isAdmin, projectAccess, requireManage, type Access, type Actor, type Role,
+  activeMember, isActive, isAdmin, projectAccess, requireManage, type Access, type Actor, type Role, type Tx,
 } from "@/lib/access";
 import { logAction, notify } from "@/lib/notify";
 import { openTaskCount, releasePerson, resolveHandover, type Handover, type Released } from "@/lib/people";
@@ -246,6 +246,14 @@ async function requireHandoverIfNeeded(a: Access, userId: string, handoverTo: st
   throw new ApiError(409, `Choose a Leader or Editor to take ${open} open task${open === 1 ? "" : "s"} first.`);
 }
 
+/** Serialize a departure with restoring work that still names this member. */
+async function lockDepartingMember(tx: Tx, projectId: string, userId: string) {
+  const [member] = await tx.$queryRaw<{ role: Role }[]>`SELECT "role" FROM "ProjectMember" WHERE "projectId" = ${projectId} AND "userId" = ${userId} FOR UPDATE`;
+  if (!member) throw notFound("Member");
+  if (member.role === "LEADER") throw new ApiError(409, "Use Change Leader to replace the project's Leader.");
+  return member;
+}
+
 /** SHO-US-3.4 AC3/AC4/AC5 and SHO-US-3.3 AC5. */
 export async function changeMemberRole(user: Actor, projectId: string, userId: string, role: "EDITOR" | "VIEWER", handoverTo?: string | null, handover?: Handover[]) {
   const a = await projectAccess(user, projectId, { write: true });
@@ -256,6 +264,8 @@ export async function changeMemberRole(user: Actor, projectId: string, userId: s
   if (m.role === role) return;
   const target = role === "VIEWER" ? await requireHandoverIfNeeded(a, userId, handoverTo, handover) : null;
   await db.$transaction(async (tx) => {
+    const current = await lockDepartingMember(tx, projectId, userId);
+    if (current.role === role) return;
     let rel: Released | null = null;
     if (role === "VIEWER") {
       const leader = a.project.members.find((x) => x.role === "LEADER")!.userId;
@@ -263,7 +273,7 @@ export async function changeMemberRole(user: Actor, projectId: string, userId: s
     }
     await tx.projectMember.update({ where: { projectId_userId: { projectId, userId } }, data: { role } });
     await notify(tx, [userId], "PROJECT_ROLE_CHANGED", { actorId: user.id, projectId, data: { project: a.project.name, role, ...(rel?.note ?? {}) } });
-    await logAction(tx, { actorId: user.id, projectId, targetType: "member", targetId: userId, action: "member.role_changed", before: { role: m.role }, after: { role, handedOver: rel?.moved ?? 0 } });
+    await logAction(tx, { actorId: user.id, projectId, targetType: "member", targetId: userId, action: "member.role_changed", before: { role: current.role }, after: { role, handedOver: rel?.moved ?? 0 } });
   });
 }
 
@@ -276,11 +286,12 @@ export async function removeMember(user: Actor, projectId: string, userId: strin
   if (m.role === "LEADER") throw new ApiError(409, "Use Change Leader to replace the project's Leader.");
   const target = await requireHandoverIfNeeded(a, userId, handoverTo, handover);
   await db.$transaction(async (tx) => {
+    const current = await lockDepartingMember(tx, projectId, userId);
     const leader = a.project.members.find((x) => x.role === "LEADER")!.userId;
     const rel = await releasePerson(tx, { projectId, userId, newAssigneeId: target ?? leader, actorId: user.id, handover });
     await tx.projectMember.delete({ where: { projectId_userId: { projectId, userId } } });
     await notify(tx, [userId], "REMOVED_FROM_PROJECT", { actorId: user.id, projectId, data: { project: a.project.name, ...rel.note } });
-    await logAction(tx, { actorId: user.id, projectId, targetType: "member", targetId: userId, action: "member.removed", before: { role: m.role }, after: { removed: true, handedOver: rel.moved } });
+    await logAction(tx, { actorId: user.id, projectId, targetType: "member", targetId: userId, action: "member.removed", before: { role: current.role }, after: { removed: true, handedOver: rel.moved } });
   });
 }
 

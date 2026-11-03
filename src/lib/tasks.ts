@@ -607,12 +607,40 @@ export async function restoreTask(user: Actor, id: string, confirmParent = false
     throw new ApiError(409, `This will also restore its parent task, "${parent!.title}".`, { needsConfirm: "parent", parentTitle: parent!.title });
   }
   const apply = async (tx: Tx) => {
-    const leader = await leaderId(tx, t.projectId);
     const targets = parentDeleted ? [parent!, t] : [t];
+    const initialLeader = await leaderId(tx, t.projectId);
+    const cohorts = new Map<string, { id: string; assigneeId: string; approverId: string | null }[]>();
+    const candidateIds = new Set<string>([initialLeader]);
+    for (const x of targets) {
+      candidateIds.add(x.assigneeId);
+      if (x.approverId) candidateIds.add(x.approverId);
+      const subs = await tx.task.findMany({ where: { parentId: x.id, deletedAt: x.deletedAt }, select: { id: true, assigneeId: true, approverId: true } });
+      cohorts.set(x.id, subs);
+      for (const sub of subs) {
+        candidateIds.add(sub.assigneeId);
+        if (sub.approverId) candidateIds.add(sub.approverId);
+      }
+    }
+    // Departure locks the member before scanning work. Hold every restoration
+    // candidate until commit so neither side can miss a newly live assignment.
+    // NOWAIT also avoids a reverse task/member lock wait inside Undo.
+    for (const memberId of [...candidateIds].sort()) {
+      try {
+        await tx.$queryRaw`SELECT "userId" FROM "ProjectMember" WHERE "projectId" = ${t.projectId} AND "userId" = ${memberId} FOR SHARE NOWAIT`;
+      } catch (error) {
+        const failure = error as { code?: string; meta?: { code?: string } } | null;
+        if (failure?.code === "P2010" && failure.meta?.code === "55P03") {
+          throw new ApiError(409, "Project membership is changing. Reload and try again.");
+        }
+        throw error;
+      }
+    }
+    const leader = await leaderId(tx, t.projectId);
+    if (leader !== initialLeader) throw new ApiError(409, "Project membership is changing. Reload and try again.");
     for (const x of targets) {
       const assigneeOk = await activeMember(tx, t.projectId, x.assigneeId, WORKERS);
       const approverOk = x.approverId ? await activeMember(tx, t.projectId, x.approverId, WORKERS) : null;
-      const subs = await tx.task.findMany({ where: { parentId: x.id, deletedAt: x.deletedAt }, select: { id: true, assigneeId: true } });
+      const subs = cohorts.get(x.id) ?? [];
       await tx.task.updateMany({
         where: { OR: [{ id: x.id }, { parentId: x.id, deletedAt: x.deletedAt }] },
         data: { deletedAt: null, deletedById: null },
