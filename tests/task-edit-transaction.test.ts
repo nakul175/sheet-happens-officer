@@ -52,3 +52,8 @@ it('archive committed after preflight denies the write', async () => {
   await expect(updateTask(actor, 'task', { title: 'Archived write', expectedUpdatedAt: version })).rejects.toMatchObject({ status: 409 });
   expect(m.tx.task.update).not.toHaveBeenCalled(); expect(m.log).not.toHaveBeenCalled();
 });
+it('a competing membership lock becomes a retryable conflict without writes', async () => {
+  m.tx.$queryRaw.mockResolvedValueOnce([{ id: 'task', projectId: 'project' }]).mockRejectedValueOnce({ code: 'P2010', meta: { code: '55P03' } });
+  await expect(updateTask(actor, 'task', { title: 'Blocked lock', expectedUpdatedAt: version })).rejects.toMatchObject({ status: 409 });
+  expect(m.tx.task.update).not.toHaveBeenCalled(); expect(m.log).not.toHaveBeenCalled();
+});

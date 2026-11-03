@@ -135,3 +135,18 @@ it('an edit that owns the membership lock commits before a competing removal', a
     expect(await db.actionLog.count({ where: { targetId: f.taskId, action: 'task.updated' } })).toBe(1);
   } finally { gate.release(); await edit; await removal; }
 });
+
+it('a role-change membership lock cannot deadlock an ordinary edit', async () => {
+  const f = await fixture(), gate = latch(); let locked = false;
+  const change = Promise.allSettled([transact(async (tx) => {
+    await tx.$queryRaw`SELECT "userId" FROM "ProjectMember" WHERE "projectId"=${f.projectId} AND "userId"=${editor.id} FOR UPDATE`;
+    locked = true; await gate.promise;
+  }, { timeout: 15_000 })]);
+  try {
+    await vi.waitFor(() => expect(locked).toBe(true), { timeout: 5000 });
+    // The edit must finish without requiring the membership owner to release.
+    await expect(updateTask(editor, f.taskId, { title: 'Blocked by role change', expectedUpdatedAt: f.version })).rejects.toMatchObject({ status: 409 });
+    expect((await db.task.findUniqueOrThrow({ where: { id: f.taskId } })).title).toBe('Original');
+    expect(await db.actionLog.count({ where: { targetId: f.taskId, action: 'task.updated' } })).toBe(0);
+  } finally { gate.release(); expect((await change)[0].status).toBe('fulfilled'); }
+});

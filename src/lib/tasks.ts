@@ -287,9 +287,19 @@ export async function updateTask(
     // Removal hands over tasks before deleting the membership, in this same order.
     const [locked] = await tx.$queryRaw<{ id: string; projectId: string }[]>`SELECT "id", "projectId" FROM "Task" WHERE "id" = ${id} FOR UPDATE`;
     if (!locked) throw notFound("Task");
-    await tx.$queryRaw`SELECT "userId" FROM "ProjectMember" WHERE "projectId" = ${locked.projectId} AND "userId" = ${user.id} FOR SHARE`;
-    // ReadCommitted makes a completed removal/downgrade visible after waiting for
-    // the lock. Access is checked before version metadata; a missing seat is 404.
+    try {
+      // Leader replacement can hold membership before touching tasks. Never wait
+      // on that reverse order while owning the task lock: roll back and retry.
+      await tx.$queryRaw`SELECT "userId" FROM "ProjectMember" WHERE "projectId" = ${locked.projectId} AND "userId" = ${user.id} FOR SHARE NOWAIT`;
+    } catch (error) {
+      const failure = error as { code?: string; meta?: { code?: string } } | null;
+      if (failure?.code === 'P2010' && failure.meta?.code === '55P03') {
+        throw new ApiError(409, "Project membership is changing. Reload and try again.");
+      }
+      throw error;
+    }
+    // ReadCommitted makes a completed removal/downgrade visible. Access is
+    // checked before version metadata; a missing seat is the ordinary task404.
     const { t } = await guardVersion(user, id, input.expectedUpdatedAt, { tx });
     const data: Record<string, unknown> = {};
     const before: Record<string, unknown> = {};
