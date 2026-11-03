@@ -57,7 +57,7 @@ it('session revocation invalidates userinfo and the Accounts status contract',as
  const identity=await(await userinfo(token.access_token)).json();
  const status=()=>fetch(BASE+'/api/suite/status',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({client_id:'accounts',client_secret:secret('accounts'),user_id:g.who.id,source_session_id:identity.source_session_id})});
  expect(await(await status()).json()).toMatchObject({active:true,sub:g.who.id});
- expect((await g.who.c.post('/api/auth/signout')).status).toBe(200);
+ expect((await g.who.c.post('/api/auth/signout')).status).toBe(204);
  expect((await userinfo(token.access_token)).status).toBe(401);
  expect(await(await status()).json()).toEqual({active:false});
 });
