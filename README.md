@@ -25,16 +25,23 @@ The migration command above is for that **disposable local database only**, repl
 
 Open `http://localhost:3100`, register the synthetic Super Admin address from `.env.example`, and retrieve the verification link from `.outbox-local`. Local mail is captured there; no real provider credentials or AI key are required. For interactive development, `npm run dev -- --port 3100` is available, but release qualification uses the native production entry point above.
 
-## Test the same candidate
+## Test
 
-In a second terminal, load the same synthetic `.env` and run:
+In a second terminal, load the same synthetic `.env` and run against the same server/database/outbox.
+
+| Name | Purpose |
+| --- | --- |
+| `DATABASE_URL` | Disposable loopback database shared by the server and integration tests |
+| `JOB_SECRET` | Synthetic job endpoint credential shared by server and test process |
+
+Run:
 
 ```bash
 node --test 'scripts/ci/**/*.test.mjs'
 npm run lint
 npm run typecheck
 npx tsc --noEmit -p tsconfig.e2e.json
-npm test
+DATABASE_URL="postgresql://sho:sho@127.0.0.1:5432/sho_test?schema=public" JOB_SECRET=local-test-only-not-a-real-secret-0123 npm test
 npm run test:modes
 npm run test:viewport
 ```
