@@ -1,4 +1,5 @@
 import { createHash, randomBytes, randomInt, scrypt, timingSafeEqual } from "node:crypto";
+import type { Prisma } from "@/generated/prisma/client";
 import { cookies } from "next/headers";
 import { db } from "@/lib/db";
 import { ApiError } from "@/lib/http";
@@ -201,11 +202,12 @@ export async function emailLimitReached(userId: string, type: "VERIFY" | "RESET"
 }
 
 /** Consumes a token once; returns the userId or null when unknown, used or expired. */
-export async function consumeToken(raw: string, type: "VERIFY" | "RESET") {
+export async function consumeToken(raw: string, type: "VERIFY" | "RESET", tx: Prisma.TransactionClient = db) {
   const hash = sha256(raw);
-  const t = await db.authToken.findUnique({ where: { tokenHash: hash } });
+  const t = await tx.authToken.findUnique({ where: { tokenHash: hash } });
   if (!t || t.type !== type || t.usedAt || t.expiresAt <= new Date()) return null;
-  const claimed = await db.authToken.updateMany({ where: { id: t.id, usedAt: null }, data: { usedAt: new Date() } });
+  const now = new Date();
+  const claimed = await tx.authToken.updateMany({ where: { id: t.id, type, usedAt: null, expiresAt: { gt: now } }, data: { usedAt: now } });
   return claimed.count === 1 ? t.userId : null;
 }
 

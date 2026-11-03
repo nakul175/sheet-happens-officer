@@ -1,5 +1,5 @@
 import { db } from "@/lib/db";
-import { audit, clientAgent, clientIp, consumeToken } from "@/lib/auth";
+import { clientAgent, clientIp, consumeToken } from "@/lib/auth";
 import { ApiError, handle, parseBody } from "@/lib/http";
 import { VERIFY_LINK_UNUSABLE } from "@/lib/auth-messages";
 import { tokenInput } from "@/lib/schemas";
@@ -8,10 +8,12 @@ import { tokenInput } from "@/lib/schemas";
 // APL-2742: only a click on /verify posts here (a link scanner's GET does not), and the audit row keeps the IP and user agent.
 export const POST = handle(async (req: Request) => {
   const { token } = await parseBody(req, tokenInput);
-  const userId = await consumeToken(token, "VERIFY");
-  if (!userId) throw new ApiError(400, VERIFY_LINK_UNUSABLE);
-  await db.user.update({ where: { id: userId }, data: { emailVerifiedAt: new Date() } });
   const ua = clientAgent(req);
-  await audit("EMAIL_VERIFIED", { actorId: userId, ip: clientIp(req), data: ua ? { userAgent: ua } : undefined });
+  await db.$transaction(async (tx) => {
+    const userId = await consumeToken(token, "VERIFY", tx);
+    if (!userId) throw new ApiError(400, VERIFY_LINK_UNUSABLE);
+    await tx.user.update({ where: { id: userId }, data: { emailVerifiedAt: new Date() } });
+    await tx.auditLog.create({ data: { event: "EMAIL_VERIFIED", actorId: userId, ip: clientIp(req), channel: "SCREEN", ...(ua ? { data: { userAgent: ua } } : {}) } });
+  });
   return Response.json({ status: "verified" });
 });
