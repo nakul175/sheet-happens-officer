@@ -18,7 +18,7 @@ const MANAGEMENT_UNDO = new Set([
   "section.added", "section.renamed", "section.moved", "section.done_changed",
 ]);
 const TRANSACTIONAL_TASK_UNDO = new Set([
-  "task.updated", ...TRASH_TASK_UNDO,
+  "task.updated", "task.moved", ...TRASH_TASK_UNDO,
   "task.assigned", "task.sent_for_approval", "task.sent_back", "task.approver_changed",
 ]);
 
@@ -173,12 +173,12 @@ async function plan(row: any, user: Actor, projectId: string, tx?: Tx): Promise<
       };
     }
     case "task.moved": {
-      const t = await liveTask(id, projectId);
+      const t = await liveTask(id, projectId, tx);
       return {
         conflicts: fieldConflicts(["sectionId"], b, f, { sectionId: t.sectionId }), subject: t.title, fields: "Section",
         apply: async (tx) => {
           if (!(await tx.section.findFirst({ where: { id: b.sectionId, projectId } }))) throw bad("The section it came from no longer exists.");
-          await tx.task.update({ where: { id }, data: { sectionId: b.sectionId } });
+          await tx.task.update({ where: { id }, data: { sectionId: b.sectionId, updatedAt: new Date(Math.max(Date.now(), t.updatedAt.getTime() + 1)) } });
         },
       };
     }
