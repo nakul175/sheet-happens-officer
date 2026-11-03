@@ -10,11 +10,13 @@ import { UNDO_LABELS, isTooOldToUndo, isUndoable } from "@/lib/undoable";
 import { undoRecord } from "@/lib/records";
 import { commentsEnabled, isCommentAction } from "@/lib/flags";
 import { assertCommentRoom } from "@/lib/comments";
+import { requireCrm } from "@/lib/crm";
 
 const TRASH_TASK_UNDO = new Set(["task.deleted", "task.created", "task.restored"]);
 const FAMILY_TASK_UNDO = new Set([...TRASH_TASK_UNDO, "task.completed", "task.reopened"]);
 const COLLABORATOR_TASK_UNDO = new Set(["task.collaborator_added", "task.collaborator_removed"]);
 const COMMENT_TASK_UNDO = new Set(["comment.added", "comment.removed"]);
+const TASK_LINK_UNDO = new Set(["task.link_added", "task.link_removed"]);
 const MANAGEMENT_UNDO = new Set([
   "project.updated", "project.archived", "project.unarchived", "project.leader_changed",
   "member.added", "member.removed", "member.role_changed",
@@ -23,6 +25,7 @@ const MANAGEMENT_UNDO = new Set([
 const TRANSACTIONAL_TASK_UNDO = new Set([
   "task.updated", "task.moved", ...FAMILY_TASK_UNDO, ...COLLABORATOR_TASK_UNDO,
   ...COMMENT_TASK_UNDO,
+  ...TASK_LINK_UNDO,
   "task.assigned", "task.sent_for_approval", "task.sent_back", "task.approver_changed",
 ]);
 
@@ -258,14 +261,33 @@ async function plan(row: any, user: Actor, projectId: string, tx?: Tx): Promise<
       };
     }
     case "task.link_added": {
-      const l = await db.taskLink.findUnique({ where: { id: f.linkId } });
-      if (!l) throw bad("That link is already gone.");
+      if (typeof f.linkId !== "string" || !f.linkId) throw bad("That link can no longer be undone.");
+      const l = await (tx ?? db).taskLink.findUnique({ where: { id: f.linkId } });
+      if (!l || l.taskId !== id || l.organisationId !== (f.organisationId ?? null) || l.contactId !== (f.contactId ?? null)) throw bad("That link is already gone or has changed.");
+      await liveTask(id, projectId, tx);
       return { conflicts: [], subject: "the link", apply: async (tx) => { await tx.taskLink.delete({ where: { id: f.linkId } }); } };
     }
     case "task.link_removed": {
-      const t = await liveTask(id, projectId);
-      if (await db.taskLink.findFirst({ where: { taskId: id, organisationId: b.organisationId ?? null, contactId: b.contactId ?? null } })) throw bad("That link is back already.");
-      return { conflicts: [], subject: t.title, apply: async (tx) => { await tx.taskLink.create({ data: { id: b.linkId, taskId: id, organisationId: b.organisationId ?? null, contactId: b.contactId ?? null } }); } };
+      const t = await liveTask(id, projectId, tx);
+      const orgId = b.organisationId ?? null, contactId = b.contactId ?? null;
+      if (typeof b.linkId !== "string" || !b.linkId || !!orgId === !!contactId
+        || (orgId !== null && (typeof orgId !== "string" || !orgId))
+        || (contactId !== null && (typeof contactId !== "string" || !contactId))) throw bad("That link can no longer be restored.");
+      if (await (tx ?? db).taskLink.findFirst({ where: { OR: [{ id: b.linkId }, { taskId: id, organisationId: orgId, contactId }] } })) throw bad("That link is back already.");
+      const target = orgId
+        ? await (tx ?? db).organisation.findFirst({ where: { id: orgId, workspaceId: t.workspaceId } })
+        : await (tx ?? db).contact.findFirst({ where: { id: contactId, workspaceId: t.workspaceId, removedAt: null } });
+      if (!target) throw bad("The linked record is no longer available.");
+      return {
+        conflicts: [], subject: t.title,
+        apply: async (tx) => {
+          try { await tx.taskLink.create({ data: { id: b.linkId, taskId: id, organisationId: orgId, contactId } }); }
+          catch (error) {
+            if (error && typeof error === "object" && "code" in error && (error.code === "P2002" || error.code === "P2003")) throw bad("That link is back already or its record is unavailable.");
+            throw error;
+          }
+        },
+      };
     }
     case "task.idea_changed": {
       const t = await liveTask(id, projectId);
@@ -437,6 +459,7 @@ async function present(conflicts: Conflict[], tx?: Tx) {
 async function prepare(user: Actor, logId: string, tx?: Tx) {
   const row = await (tx ?? db).actionLog.findUnique({ where: { id: logId } });
   if (!row) throw notFound("Action");
+  if (TASK_LINK_UNDO.has(row.action)) requireCrm(user);
   // APL-2590 D1: with the comments switch off, a comment row is the same 404 as an action that does not exist.
   if (isCommentAction(row.action) && !commentsEnabled()) throw notFound("Action");
   const projectId = row.projectId;
@@ -544,6 +567,17 @@ export async function undoAction(user: Actor, logId: string, anyway = false) {
         if (COMMENT_TASK_UNDO.has(row.action)) {
           const commentId = (row.afterState as { commentId?: string } | null)?.commentId;
           if (commentId) await tx.$queryRaw`SELECT "id" FROM "Comment" WHERE "id" = ${commentId} AND "taskId" = ${row.targetId} FOR UPDATE NOWAIT`;
+        }
+        if (row.action === "task.link_added") {
+          const linkId = (row.afterState as { linkId?: string } | null)?.linkId;
+          if (linkId) await tx.$queryRaw`SELECT "id" FROM "TaskLink" WHERE "id" = ${linkId} AND "taskId" = ${row.targetId} FOR UPDATE NOWAIT`;
+        }
+        if (row.action === "task.link_removed") {
+          const prior = row.beforeState as { organisationId?: string; contactId?: string } | null;
+          const contactId = prior?.contactId;
+          if (contactId) await tx.$queryRaw`SELECT "id" FROM "Contact" WHERE "id" = ${contactId} FOR SHARE NOWAIT`;
+          const organisationId = prior?.organisationId;
+          if (organisationId) await tx.$queryRaw`SELECT "id" FROM "Organisation" WHERE "id" = ${organisationId} FOR SHARE NOWAIT`;
         }
         await tx.$queryRaw`SELECT "id" FROM "ActionLog" WHERE "id" = ${row.id} FOR UPDATE NOWAIT`;
       } catch (error) {
