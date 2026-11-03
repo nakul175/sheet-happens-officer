@@ -205,11 +205,16 @@ export async function emailLimitReached(userId: string, type: "VERIFY" | "RESET"
   return n >= MAX_EMAILS_PER_HOUR;
 }
 
+/** Read-only eligibility check; mutations must still claim again inside their transaction. */
+export async function usableToken(raw: string, type: "VERIFY" | "RESET", tx: Prisma.TransactionClient = db) {
+  const t = await tx.authToken.findUnique({ where: { tokenHash: sha256(raw) } });
+  return !t || t.type !== type || t.usedAt || t.expiresAt <= new Date() ? null : t;
+}
+
 /** Consumes a token once; returns the userId or null when unknown, used or expired. */
 export async function consumeToken(raw: string, type: "VERIFY" | "RESET", tx: Prisma.TransactionClient = db) {
-  const hash = sha256(raw);
-  const t = await tx.authToken.findUnique({ where: { tokenHash: hash } });
-  if (!t || t.type !== type || t.usedAt || t.expiresAt <= new Date()) return null;
+  const t = await usableToken(raw, type, tx);
+  if (!t) return null;
   const now = new Date();
   const claimed = await tx.authToken.updateMany({ where: { id: t.id, type, usedAt: null, expiresAt: { gt: now } }, data: { usedAt: now } });
   return claimed.count === 1 ? t.userId : null;
