@@ -7,7 +7,8 @@ permissions:
 jobs:
   test:
     name: Lint, build and test
-    runs-on: ubuntu-latest
+    # Match the documented production native ABI/toolchain; latest is a moving image.
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     services:
       postgres:
