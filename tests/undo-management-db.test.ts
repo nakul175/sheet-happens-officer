@@ -47,9 +47,9 @@ afterAll(async () => {
   }
 });
 
-async function fixture(actionActor = editor, kind = 'project.archived') {
+async function fixture(actionActor = editor, kind = 'project.archived', currentActorRole: 'LEADER' | 'EDITOR' = 'LEADER') {
   const p = await db.project.create({ data: { workspaceId, name: 'Updated project', archivedAt: kind === 'project.archived' ? new Date() : null } }); projects.push(p.id);
-  await db.projectMember.createMany({ data: [{ projectId: p.id, userId: leader.id, role: actionActor.id === leader.id ? 'LEADER' : 'EDITOR' }, { projectId: p.id, userId: editor.id, role: actionActor.id === editor.id ? 'LEADER' : 'EDITOR' }] });
+  await db.projectMember.createMany({ data: [{ projectId: p.id, userId: leader.id, role: actionActor.id === leader.id || currentActorRole === 'EDITOR' ? 'LEADER' : 'EDITOR' }, { projectId: p.id, userId: editor.id, role: actionActor.id === editor.id && currentActorRole === 'LEADER' ? 'LEADER' : 'EDITOR' }] });
   const action = await db.actionLog.create({ data: { actorId: actionActor.id, projectId: p.id, targetType: 'project', targetId: p.id, channel: 'SCREEN', action: kind, beforeState: kind === 'project.updated' ? { name: 'Old project' } : { archivedAt: null }, afterState: kind === 'project.updated' ? { name: 'Updated project' } : { archivedAt: p.archivedAt?.toISOString() }, createdAt: new Date(Date.now() - 2000) } });
   return { projectId: p.id, actionId: action.id };
 }
@@ -75,7 +75,7 @@ function pauseBeforeTransactions(count: number) {
   return { async ready() { await vi.waitFor(() => expect(arrived).toBe(count), { timeout: 5000 }); spy.mockRestore(); }, release: gate.release };
 }
 it('a former Leader who is now an Editor cannot use Undo to unarchive a project', async () => {
-  const f = await fixture(editor);
+  const f = await fixture(editor, 'project.archived', 'EDITOR');
   await expect(unarchiveProject(editor, f.projectId)).rejects.toMatchObject({ status: 403 });
   const before = await snapshot(f.projectId);
   await expect(undoAction(editor, f.actionId)).rejects.toMatchObject({ status: 403 });
