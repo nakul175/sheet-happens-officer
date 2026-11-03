@@ -53,11 +53,13 @@ async function fixture(kind = 'task.assigned') {
   const p = await db.project.create({ data: { workspaceId, name: prefix } }); projects.push(p.id);
   await db.projectMember.createMany({ data: [{ projectId: p.id, userId: leader.id, role: 'LEADER' }, { projectId: p.id, userId: editor.id, role: 'EDITOR' }, { projectId: p.id, userId: previous.id, role: 'EDITOR' }] });
   const section = await db.section.create({ data: { projectId: p.id, name: 'To do', position: 0 } });
-  const task = await db.task.create({ data: { workspaceId, projectId: p.id, sectionId: section.id, title: 'Assignment control', assigneeId: leader.id, approverId: kind === 'task.approver_changed' ? leader.id : null, createdById: leader.id } });
-  const before = kind === 'task.approver_changed' ? { approverId: previous.id } : { assigneeId: previous.id, previousAssigneeId: null, ...(kind === 'task.sent_back' ? { approverId: leader.id } : {}) };
-  const after = kind === 'task.approver_changed' ? { approverId: leader.id } : { assigneeId: leader.id, ...(kind === 'task.sent_back' ? { approverId: null } : {}) };
+  const task = await db.task.create({ data: { workspaceId, projectId: p.id, sectionId: section.id, title: 'Assignment control', assigneeId: leader.id, approverId: kind === 'task.sent_for_approval' ? leader.id : null, previousAssigneeId: kind === 'task.sent_for_approval' ? previous.id : null, createdById: leader.id } });
+  // A send-back clears the approver only when it falls back to that same Leader.
+  const restoredPerson = kind === 'task.sent_back' ? leader.id : previous.id;
+  const before = kind === 'task.approver_changed' ? { approverId: previous.id } : { assigneeId: restoredPerson, previousAssigneeId: null, ...(kind === 'task.sent_back' ? { approverId: leader.id } : {}) };
+  const after = kind === 'task.approver_changed' ? { approverId: null } : { assigneeId: leader.id, ...(kind === 'task.sent_back' ? { approverId: null } : {}) };
   const action = await db.actionLog.create({ data: { actorId: editor.id, projectId: p.id, targetType: 'task', targetId: task.id, channel: 'SCREEN', action: kind, beforeState: before, afterState: after, createdAt: new Date(Date.now() - 2000) } });
-  return { projectId: p.id, taskId: task.id, actionId: action.id, version: task.updatedAt.toISOString(), kind };
+  return { projectId: p.id, taskId: task.id, actionId: action.id, version: task.updatedAt.toISOString(), kind, restoredPerson };
 }
 async function snapshot(projectId: string) {
   const [tasks, actions, notices] = await Promise.all([
@@ -94,7 +96,7 @@ for (const kind of kinds) {
       expect(await snapshot(f.projectId)).toEqual(before);
       expect(await undoAction(editor, f.actionId, true)).toMatchObject({ overrode: true });
       const task = await db.task.findUniqueOrThrow({ where: { id: f.taskId } });
-      expect(kind === 'task.approver_changed' ? task.approverId : task.assigneeId).toBe(previous.id);
+      expect(kind === 'task.approver_changed' ? task.approverId : task.assigneeId).toBe(f.restoredPerson);
       expect(task.priority).toBe('HIGH'); expect(task.updatedAt.getTime()).toBeGreaterThan(before.tasks[0].updatedAt.getTime());
       expect(await db.notification.count({ where: { projectId: f.projectId, recipientId: leader.id, type: 'CHANGE_OVERRIDDEN' } })).toBe(1);
       expect(await db.auditLog.count({ where: { targetId: f.taskId, event: 'UNDO_OVERRIDE' } })).toBe(1);
@@ -123,7 +125,7 @@ for (const kind of kinds) {
     vi.restoreAllMocks(); expect(await snapshot(f.projectId)).toEqual(before);
     await undoAction(editor, f.actionId);
     const task = await db.task.findUniqueOrThrow({ where: { id: f.taskId } });
-    expect(kind === 'task.approver_changed' ? task.approverId : task.assigneeId).toBe(previous.id);
+    expect(kind === 'task.approver_changed' ? task.approverId : task.assigneeId).toBe(f.restoredPerson);
     if (kind === 'task.sent_back') { expect(task.approverId).toBe(leader.id); expect(task.previousAssigneeId).toBeNull(); }
     expect(await db.actionLog.count({ where: { projectId: f.projectId, action: 'undo' } })).toBe(1);
     completed.push(kind + ':rollback-retry');
