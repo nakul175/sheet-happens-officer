@@ -13,13 +13,14 @@ import { assertCommentRoom } from "@/lib/comments";
 
 const TRASH_TASK_UNDO = new Set(["task.deleted", "task.created", "task.restored"]);
 const FAMILY_TASK_UNDO = new Set([...TRASH_TASK_UNDO, "task.completed", "task.reopened"]);
+const COLLABORATOR_TASK_UNDO = new Set(["task.collaborator_added", "task.collaborator_removed"]);
 const MANAGEMENT_UNDO = new Set([
   "project.updated", "project.archived", "project.unarchived", "project.leader_changed",
   "member.added", "member.removed", "member.role_changed",
   "section.added", "section.renamed", "section.moved", "section.done_changed",
 ]);
 const TRANSACTIONAL_TASK_UNDO = new Set([
-  "task.updated", "task.moved", ...FAMILY_TASK_UNDO,
+  "task.updated", "task.moved", ...FAMILY_TASK_UNDO, ...COLLABORATOR_TASK_UNDO,
   "task.assigned", "task.sent_for_approval", "task.sent_back", "task.approver_changed",
 ]);
 
@@ -122,19 +123,23 @@ async function plan(row: any, user: Actor, projectId: string, tx?: Tx): Promise<
       };
     }
     case "task.collaborator_added": {
-      const t = await liveTask(id, projectId);
-      const has = await db.taskCollaborator.findUnique({ where: { taskId_userId: { taskId: id, userId: f.userId } } });
+      const t = await liveTask(id, projectId, tx);
+      const has = await (tx ?? db).taskCollaborator.findUnique({ where: { taskId_userId: { taskId: id, userId: f.userId } } });
       if (!has) throw bad("That collaborator was already removed.");
       return { conflicts: [], subject: t.title, apply: async (tx) => { await tx.taskCollaborator.delete({ where: { taskId_userId: { taskId: id, userId: f.userId } } }); } };
     }
     case "task.collaborator_removed": {
-      const t = await liveTask(id, projectId);
-      if (await db.taskCollaborator.findUnique({ where: { taskId_userId: { taskId: id, userId: b.userId } } })) throw bad("That person is a collaborator again already.");
+      const t = await liveTask(id, projectId, tx);
+      if (await (tx ?? db).taskCollaborator.findUnique({ where: { taskId_userId: { taskId: id, userId: b.userId } } })) throw bad("That person is a collaborator again already.");
       return {
         conflicts: [], subject: t.title,
         apply: async (tx) => {
           if (!(await activeMember(tx, projectId, b.userId))) throw bad("That person is no longer an active member of the project.");
-          await tx.taskCollaborator.create({ data: { taskId: id, userId: b.userId } });
+          try { await tx.taskCollaborator.create({ data: { taskId: id, userId: b.userId } }); }
+          catch (error) {
+            if (error && typeof error === "object" && "code" in error && error.code === "P2002") throw bad("That person is a collaborator again already.");
+            throw error;
+          }
         },
       };
     }
@@ -526,6 +531,14 @@ export async function undoAction(user: Actor, logId: string, anyway = false) {
         }
         if (TRANSACTIONAL_TASK_UNDO.has(row.action)) await tx.$queryRaw`SELECT "id" FROM "Project" WHERE "id" = ${projectId} FOR SHARE NOWAIT`;
         await tx.$queryRaw`SELECT "userId" FROM "ProjectMember" WHERE "projectId" = ${projectId} AND "userId" = ${user.id} FOR SHARE NOWAIT`;
+        if (row.action === "task.collaborator_added") {
+          const collaboratorId = (row.afterState as { userId?: string } | null)?.userId;
+          if (collaboratorId) await tx.$queryRaw`SELECT "taskId" FROM "TaskCollaborator" WHERE "taskId" = ${row.targetId} AND "userId" = ${collaboratorId} FOR UPDATE NOWAIT`;
+        }
+        if (row.action === "task.collaborator_removed") {
+          const collaboratorId = (row.beforeState as { userId?: string } | null)?.userId;
+          if (collaboratorId) await tx.$queryRaw`SELECT "userId" FROM "ProjectMember" WHERE "projectId" = ${projectId} AND "userId" = ${collaboratorId} FOR SHARE NOWAIT`;
+        }
         await tx.$queryRaw`SELECT "id" FROM "ActionLog" WHERE "id" = ${row.id} FOR UPDATE NOWAIT`;
       } catch (error) {
         if ((error as { code?: string; meta?: { code?: string } }).code === "P2010" && (error as { meta?: { code?: string } }).meta?.code === "55P03") {
