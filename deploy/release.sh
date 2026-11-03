@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
+# App-only release: never applies migrations, provisions secrets or installs schedules.
 # Builds one release on the droplet and switches the app to it. If the health check fails
 # after the restart, the previous release is put back (SHO-US-9.3 AC2).
 # GitHub Actions runs it as the deploy user: bash /opt/sho/releases/<sha>/deploy/release.sh <sha>
 set -euo pipefail
 
 SHA="${1:?release sha}"
+[[ "$SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "Expected full lowercase commit SHA"; exit 1; }
 ROOT=/opt/sho
 REL="$ROOT/releases/$SHA"
 CUR="$ROOT/current"
@@ -37,28 +39,12 @@ export NODE_ENV=production NODE_OPTIONS=--max-old-space-size=3072
 
 log "installing packages"
 npm ci --include=dev --no-audit --no-fund --loglevel=error
-log "applying migrations"
-npx prisma migrate deploy
+log "checking migration prerequisites (read-only)"
+npx --no-install prisma migrate status
 log "building"
 npx next build
 printf 'RELEASE=%s\n' "$SHA" > release.env
-install -m 755 deploy/job.sh "$ROOT/bin/job.sh"
-# The droplet's /etc/cron.d/sho is root-owned and was written by cloud-init. A server built before a job existed
-# gets that job from the deploy user's own crontab, once and without root (SHO-US-7.4, 8.8, 9.2).
-install_cron() {
-  local name="$1" when="$2"
-  if grep -qs "job.sh $name" /etc/cron.d/sho; then return 0; fi
-  if crontab -l 2>/dev/null | grep -qs "job.sh $name # sho-managed"; then return 0; fi
-  { crontab -l 2>/dev/null || true; echo "$when /opt/sho/bin/job.sh $name # sho-managed"; } | crontab - \
-    && log "$name cron installed for $(id -un)" || log "WARNING: could not install the $name cron"
-}
-install_cron reminders '0 8 * * *'
-
-# Same for the stalled-deals job (SHO-US-12.7): servers built before it get it from the deploy user's crontab.
-if ! grep -qs 'job.sh stalled-deals' /etc/cron.d/sho && ! crontab -l 2>/dev/null | grep -q 'job.sh stalled-deals'; then
-  { crontab -l 2>/dev/null || true; echo '50 7 * * * /opt/sho/bin/job.sh stalled-deals # crm-stalled'; } | crontab - \
-    && log "stalled-deals cron installed for $(id -un)" || log "WARNING: could not install the stalled-deals cron"
-fi
+# Job installation and schedules belong to separately approved operations.
 
 PREV="$(readlink -f "$CUR" 2>/dev/null || true)"
 switch "$REL"

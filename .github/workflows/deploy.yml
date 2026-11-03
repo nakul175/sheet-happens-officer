@@ -1,4 +1,4 @@
-# Test every push to main, then release it to the droplet (SHO-US-9.3).
+# Test main pushes. Production release requires explicit manual dispatch and approval.
 # Secrets (repository settings): SSH_PRIVATE_KEY, DATABASE_URL, RESEND_API_KEY.
 # Optional secret DIRECT_DATABASE_URL: direct Postgres connection for migrations when DATABASE_URL goes through PgBouncer
 # (unset means migrations use DATABASE_URL).
@@ -9,6 +9,15 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      deploy:
+        description: "Request an approved app-only production release (no migrations or schedules)"
+        type: boolean
+        default: false
+      approved_sha:
+        description: "Exact full commit SHA approved for this release"
+        type: string
+        required: false
 
 permissions:
   contents: read
@@ -70,12 +79,18 @@ jobs:
   deploy:
     name: Release to the droplet
     needs: test
-    if: github.ref == 'refs/heads/main'
+    if: github.event_name == 'workflow_dispatch' && inputs.deploy == true && github.ref == 'refs/heads/main'
+    environment: production
     runs-on: ubuntu-latest
     env:
       HOST: ${{ vars.DROPLET_HOST || 'sheethappensofficer.aplyd.org' }}
       HOST_KEY: ${{ vars.DROPLET_HOST_KEY }}
     steps:
+      - name: Require exact approved revision
+        env:
+          APPROVED_SHA: ${{ inputs.approved_sha }}
+        run: |
+          [[ "$APPROVED_SHA" =~ ^[0-9a-f]{40}$ ]] && [ "$APPROVED_SHA" = "$GITHUB_SHA" ] || { echo "::error::Exact SHA approval required"; exit 1; }
       - uses: actions/checkout@v4
       - name: SSH key
         env:
