@@ -35,13 +35,13 @@ const FIELD_LABEL: Record<string, string> = {
   assigneeId: "Assignee", approverId: "Approver", sectionId: "Section", name: "Name", role: "Role", leaderId: "Leader", position: "Position",
 };
 
-async function taskOf(id: string, projectId: string) {
-  const t = await db.task.findFirst({ where: { id, projectId } });
+async function taskOf(id: string, projectId: string, tx?: Tx) {
+  const t = await (tx ?? db).task.findFirst({ where: { id, projectId } });
   if (!t) throw bad("This task no longer exists.");
   return t;
 }
-const liveTask = async (id: string, projectId: string) => {
-  const t = await taskOf(id, projectId);
+const liveTask = async (id: string, projectId: string, tx?: Tx) => {
+  const t = await taskOf(id, projectId, tx);
   if (t.deletedAt) throw bad("This task is in Trash. Restore it first.");
   return t;
 };
@@ -70,18 +70,18 @@ function refuseShortDoneLists(before: Record<string, unknown>, after: Record<str
   if (gaps.length) throw bad(`Undo was not applied. This record lists only ${gaps.join(", ")}, so nothing was changed.`);
 }
 
-async function plan(row: any, user: Actor, projectId: string): Promise<Plan> {
+async function plan(row: any, user: Actor, projectId: string, tx?: Tx): Promise<Plan> {
   const b = (row.beforeState ?? {}) as any;
   const f = (row.afterState ?? {}) as any;
   const id = row.targetId as string;
   switch (row.action as string) {
     case "task.updated": {
-      const t = await liveTask(id, projectId);
+      const t = await liveTask(id, projectId, tx);
       const now: Record<string, unknown> = { title: t.title, description: t.description, dueDate: t.dueDate, priority: t.priority, blocked: t.blocked, blockedReason: t.blockedReason };
       const keys = Object.keys(b);
       const data: Record<string, unknown> = {};
       for (const k of keys) data[k] = k === "dueDate" ? (b[k] ? new Date(b[k]) : null) : b[k];
-      return { conflicts: fieldConflicts(keys, b, f, now), subject: t.title, fields: keys.map((k) => FIELD_LABEL[k] ?? k).join(", "), apply: async (tx) => { await tx.task.update({ where: { id }, data }); } };
+      return { conflicts: fieldConflicts(keys, b, f, now), subject: t.title, fields: keys.map((k) => FIELD_LABEL[k] ?? k).join(", "), apply: async (tx) => { await tx.task.update({ where: { id }, data: { ...data, updatedAt: new Date(Math.max(Date.now(), t.updatedAt.getTime() + 1)) } }); } };
     }
     case "task.assigned": case "task.sent_for_approval": case "task.sent_back": {
       const t = await liveTask(id, projectId);
@@ -394,12 +394,12 @@ async function renumber(tx: Tx, projectId: string) {
 }
 
 /** Names for ids shown in the conflict dialog. */
-async function present(conflicts: Conflict[]) {
+async function present(conflicts: Conflict[], tx?: Tx) {
   const ids = new Set<string>();
   for (const c of conflicts) for (const v of [c.before, c.after, c.now]) if (typeof v === "string" && v.length > 20) ids.add(v);
   const [us, ss] = await Promise.all([
-    db.user.findMany({ where: { id: { in: [...ids] } }, select: { id: true, name: true } }),
-    db.section.findMany({ where: { id: { in: [...ids] } }, select: { id: true, name: true } }),
+    (tx ?? db).user.findMany({ where: { id: { in: [...ids] } }, select: { id: true, name: true } }),
+    (tx ?? db).section.findMany({ where: { id: { in: [...ids] } }, select: { id: true, name: true } }),
   ]);
   const names = new Map<string, string>([...us, ...ss].map((x) => [x.id, x.name] as [string, string]));
   const show = (field: string, v: unknown) => {
@@ -411,14 +411,14 @@ async function present(conflicts: Conflict[]) {
   return conflicts.map((c) => ({ field: FIELD_LABEL[c.field] ?? c.field, before: show(c.field, c.before), after: show(c.field, c.after), now: show(c.field, c.now) }));
 }
 
-async function prepare(user: Actor, logId: string) {
-  const row = await db.actionLog.findUnique({ where: { id: logId } });
+async function prepare(user: Actor, logId: string, tx?: Tx) {
+  const row = await (tx ?? db).actionLog.findUnique({ where: { id: logId } });
   if (!row) throw notFound("Action");
   // APL-2590 D1: with the comments switch off, a comment row is the same 404 as an action that does not exist.
   if (isCommentAction(row.action) && !commentsEnabled()) throw notFound("Action");
   const projectId = row.projectId;
   if (!projectId) throw bad("This kind of action cannot be undone.");
-  const a = await recordAccess(user, projectId, "Action");
+  const a = tx ? await recordAccess(user, projectId, "Action", { tx }) : await recordAccess(user, projectId, "Action");
   requireWrite(a);
   const archiveKind = row.action === "project.archived" || row.action === "project.unarchived";
   if (a.project.archivedAt && !archiveKind) throw new ApiError(409, "This project is archived and read-only.");
@@ -432,17 +432,20 @@ async function prepare(user: Actor, logId: string) {
   if (!isUndoable(row.action)) throw bad("This kind of action cannot be undone.");
   if (isTooOldToUndo(row.createdAt)) throw bad("Too old to undo", { tooOld: true });
 
-  const p = await plan(row, user, projectId);
+  // Only ordinary edit Undo has been moved to the locked transaction below.
+  // Other inverse actions retain their separate validation/transaction paths.
+  if (tx && row.action !== "task.updated") throw bad("This action changed. Reload before undoing it.");
+  const p = await plan(row, user, projectId, tx);
   return { row, projectId, p };
 }
 
-async function conflictError(row: Awaited<ReturnType<typeof prepare>>["row"], p: Plan, userId: string) {
-  const later = await db.actionLog.findMany({ where: { targetType: row.targetType, targetId: row.targetId, createdAt: { gt: row.createdAt }, id: { not: row.id } }, include: { actor: { select: { name: true } } } });
+async function conflictError(row: Awaited<ReturnType<typeof prepare>>["row"], p: Plan, userId: string, tx?: Tx) {
+  const later = await (tx ?? db).actionLog.findMany({ where: { targetType: row.targetType, targetId: row.targetId, createdAt: { gt: row.createdAt }, id: { not: row.id } }, include: { actor: { select: { name: true } } } });
   return bad("This changed after your action.", {
     needsConfirm: "conflict",
     label: UNDO_LABELS[row.action],
     changedBy: [...new Set(later.filter((l) => l.actorId !== userId).map((l) => l.actor.name))],
-    conflicts: await present(p.conflicts),
+    conflicts: await present(p.conflicts, tx),
   });
 }
 
@@ -452,6 +455,31 @@ export async function checkUndo(user: Actor, logId: string) {
   if (own && !own.projectId) return; // organisation, contact and note rows are checked by their own resource rules
   const { row, p } = await prepare(user, logId);
   if (p.conflicts.length) throw await conflictError(row, p, user.id);
+}
+/** Persist the inverse and activity together; ordinary edits also claim the action atomically. */
+async function applyPreparedUndo(tx: Tx, user: Actor, prepared: Awaited<ReturnType<typeof prepare>>, anyway: boolean) {
+  const { row, projectId, p } = prepared;
+  if (row.action === "task.updated") {
+    const claimed = await tx.actionLog.updateMany({ where: { id: row.id, undoneAt: null }, data: { undoneAt: new Date(), undoneById: user.id } });
+    if (claimed.count !== 1) throw bad("This action was already undone.");
+  }
+  await p.apply(tx);
+  if (row.action !== "task.updated") await tx.actionLog.update({ where: { id: row.id }, data: { undoneAt: new Date(), undoneById: user.id } });
+  const commentId = (row.afterState as { commentId?: string } | null)?.commentId
+    ?? (row.beforeState as { commentId?: string } | null)?.commentId;
+  await logAction(tx, {
+    actorId: user.id, projectId, targetType: row.targetType as "task", targetId: row.targetId, action: "undo",
+    before: { undoes: row.id, action: row.action, ...(commentId ? { commentId } : {}) },
+    after: { undoes: row.id, label: UNDO_LABELS[row.action], anyway: anyway && p.conflicts.length > 0, ...(commentId ? { commentId } : {}) },
+  });
+  if (anyway && p.conflicts.length) {
+    const later = await tx.actionLog.findMany({ where: { targetType: row.targetType, targetId: row.targetId, createdAt: { gt: row.createdAt }, id: { not: row.id }, actorId: { not: user.id } }, select: { actorId: true } });
+    await notify(tx, later.map((l) => l.actorId), "CHANGE_OVERRIDDEN", {
+      actorId: user.id, projectId, taskId: row.targetType === "task" ? row.targetId : undefined, data: { title: p.subject, fields: p.fields },
+    });
+    await auditTx(tx, "UNDO_OVERRIDE", { actorId: user.id, targetId: row.targetId, targetType: row.targetType, data: { projectId, action: row.action } });
+  }
+  return { label: UNDO_LABELS[row.action], noticesSent: NOTIFYING.has(row.action), overrode: anyway && p.conflicts.length > 0 };
 }
 
 /**
@@ -464,27 +492,32 @@ export async function undoAction(user: Actor, logId: string, anyway = false) {
   const { row, projectId, p } = await prepare(user, logId);
   if (p.conflicts.length && !anyway) throw await conflictError(row, p, user.id);
 
+  if (row.action === "task.updated") {
+    return db.$transaction(async (tx) => {
+      // Same task-first ordering as ordinary edits. Shared project/membership
+      // locks preserve archive/access state; NOWAIT avoids reverse-order waits
+      // with management operations that already own those rows.
+      await tx.$queryRaw`SELECT "id" FROM "Task" WHERE "id" = ${row.targetId} AND "projectId" = ${projectId} FOR UPDATE`;
+      try {
+        await tx.$queryRaw`SELECT "id" FROM "Project" WHERE "id" = ${projectId} FOR SHARE NOWAIT`;
+        await tx.$queryRaw`SELECT "userId" FROM "ProjectMember" WHERE "projectId" = ${projectId} AND "userId" = ${user.id} FOR SHARE NOWAIT`;
+        await tx.$queryRaw`SELECT "id" FROM "ActionLog" WHERE "id" = ${row.id} FOR UPDATE NOWAIT`;
+      } catch (error) {
+        if ((error as { code?: string; meta?: { code?: string } }).code === "P2010" && (error as { meta?: { code?: string } }).meta?.code === "55P03") {
+          throw bad("This task or its project access is changing. Reload and try again.");
+        }
+        throw error;
+      }
+      const fresh = await prepare(user, logId, tx);
+      if (fresh.row.targetId !== row.targetId || fresh.projectId !== projectId) throw bad("This action changed. Reload before undoing it.");
+      if (fresh.p.conflicts.length && !anyway) throw await conflictError(fresh.row, fresh.p, user.id, tx);
+      return applyPreparedUndo(tx, user, fresh, anyway);
+    }, { isolationLevel: "ReadCommitted" });
+  }
+
   // Deleting and restoring have their own transactions.
   if (row.action === "task.deleted") await restoreTask(user, row.targetId, true, { skipRestoredLog: true }); // Undo logs its own row
   if (row.action === "task.restored" || row.action === "task.created") await deleteTask(user, row.targetId, { byUndo: true });
 
-  await db.$transaction(async (tx) => {
-    await p.apply(tx);
-    await tx.actionLog.update({ where: { id: row.id }, data: { undoneAt: new Date(), undoneById: user.id } });
-    const commentId = (row.afterState as { commentId?: string } | null)?.commentId
-      ?? (row.beforeState as { commentId?: string } | null)?.commentId;
-    await logAction(tx, {
-      actorId: user.id, projectId, targetType: row.targetType as "task", targetId: row.targetId, action: "undo",
-      before: { undoes: row.id, action: row.action, ...(commentId ? { commentId } : {}) },
-      after: { undoes: row.id, label: UNDO_LABELS[row.action], anyway: anyway && p.conflicts.length > 0, ...(commentId ? { commentId } : {}) },
-    });
-    if (anyway && p.conflicts.length) {
-      const later = await tx.actionLog.findMany({ where: { targetType: row.targetType, targetId: row.targetId, createdAt: { gt: row.createdAt }, id: { not: row.id }, actorId: { not: user.id } }, select: { actorId: true } });
-      await notify(tx, later.map((l) => l.actorId), "CHANGE_OVERRIDDEN", {
-        actorId: user.id, projectId, taskId: row.targetType === "task" ? row.targetId : undefined, data: { title: p.subject, fields: p.fields },
-      });
-      await auditTx(tx, "UNDO_OVERRIDE", { actorId: user.id, targetId: row.targetId, targetType: row.targetType, data: { projectId, action: row.action } });
-    }
-  });
-  return { label: UNDO_LABELS[row.action], noticesSent: NOTIFYING.has(row.action), overrode: anyway && p.conflicts.length > 0 };
+  return db.$transaction((tx) => applyPreparedUndo(tx, user, { row, projectId, p }, anyway));
 }
