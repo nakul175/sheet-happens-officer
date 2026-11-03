@@ -18,6 +18,6 @@ export const POST = handle(async (req: Request) => {
     await tx.session.updateMany({ where: { userId, revokedAt: null }, data: { revokedAt: new Date() } });
     await tx.loginAttempt.deleteMany({ where: { email: user.email } });
     await tx.auditLog.create({ data: { event: "PASSWORD_RESET", actorId: userId, channel: "SCREEN" } });
-  });
+  }, { isolationLevel: "ReadCommitted" });
   return Response.json({ status: "password_changed" });
 });

@@ -1,5 +1,5 @@
 import { db } from "@/lib/db";
-import { emailLimitReached, issueTokenAndSend } from "@/lib/auth";
+import { AuthMailLimitError, emailLimitReached, issueTokenAndSend } from "@/lib/auth";
 import { resetMail, sendMail } from "@/lib/email";
 import { handle, parseBody } from "@/lib/http";
 import { resendInput } from "@/lib/schemas";
@@ -9,7 +9,8 @@ export const POST = handle(async (req: Request) => {
   const { email } = await parseBody(req, resendInput);
   const user = await db.user.findUnique({ where: { email } });
   if (user && !user.deactivatedAt && !(await emailLimitReached(user.id, "RESET"))) {
-    await issueTokenAndSend(user.id, "RESET", (token) => sendMail(resetMail(email, token)));
+    try { await issueTokenAndSend(user.id, "RESET", (token) => sendMail(resetMail(email, token))); }
+    catch (err) { if (!(err instanceof AuthMailLimitError)) throw err; }
   }
   return Response.json({
     status: "ok",

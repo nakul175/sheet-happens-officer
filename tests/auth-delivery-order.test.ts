@@ -1,6 +1,6 @@
 import { beforeEach, expect, it, vi } from 'vitest';
-const m=vi.hoisted(()=>({create:vi.fn(),updateMany:vi.fn(),delete:vi.fn()}));
-vi.mock('@/lib/db',()=>({db:{authToken:m}}));
+const m=vi.hoisted(()=>({create:vi.fn(),updateMany:vi.fn(),delete:vi.fn(),count:vi.fn(),transaction:vi.fn(),lock:vi.fn(),receiptCreate:vi.fn(),receiptUpdate:vi.fn(),receiptCount:vi.fn()}));
+vi.mock('@/lib/db',()=>({db:{authToken:m,$transaction:m.transaction}}));
 vi.mock('next/headers',()=>({cookies:vi.fn()}));
 vi.mock('next/server',()=>({connection:vi.fn()}));
 import { issueTokenAndSend, hashToken } from '@/lib/auth';
@@ -8,6 +8,8 @@ type Row={id:string;userId:string;type:string;tokenHash:string;createdAt:Date;us
 let rows:Row[];
 beforeEach(()=>{
  vi.resetAllMocks();rows=[];
+ m.count.mockResolvedValue(0);m.receiptCount.mockResolvedValue(0);m.receiptCreate.mockResolvedValue({id:'receipt'});
+ m.transaction.mockImplementation(fn=>fn({$queryRaw:m.lock,authToken:m,auditLog:{count:m.receiptCount,create:m.receiptCreate,update:m.receiptUpdate}}));
  m.create.mockImplementation(async({data})=>{const row={...data,id:`row-${rows.length}`,createdAt:new Date(0),usedAt:null};rows.push(row);return row;});
  m.delete.mockImplementation(async({where})=>{rows=rows.filter(r=>r.id!==where.id);});
  m.updateMany.mockImplementation(async({where,data})=>{let count=0;for(const r of rows){

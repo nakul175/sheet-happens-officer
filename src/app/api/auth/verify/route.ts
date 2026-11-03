@@ -14,6 +14,6 @@ export const POST = handle(async (req: Request) => {
     if (!userId) throw new ApiError(400, VERIFY_LINK_UNUSABLE);
     await tx.user.update({ where: { id: userId }, data: { emailVerifiedAt: new Date() } });
     await tx.auditLog.create({ data: { event: "EMAIL_VERIFIED", actorId: userId, ip: clientIp(req), channel: "SCREEN", ...(ua ? { data: { userAgent: ua } } : {}) } });
-  });
+  }, { isolationLevel: "ReadCommitted" });
   return Response.json({ status: "verified" });
 });
