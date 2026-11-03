@@ -55,6 +55,8 @@ jobs:
             echo "::error::Playwright collected 0 tests from tests/e2e/stories."; exit 1
           fi
           echo "Playwright story tests collected: $total"
+      - name: Data contract reference
+        run: node scripts/data-reference.mjs --check
       - name: Lint
         run: npm run lint
       - name: Typecheck
