@@ -182,7 +182,15 @@ export async function issueTokenAndSend(userId: string, type: "VERIFY" | "RESET"
     await db.authToken.delete({ where: { id: row.id } });
     throw err;
   }
-  await db.authToken.updateMany({ where: { userId, type, usedAt: null, id: { not: row.id } }, data: { usedAt: new Date() } });
+  // A late older send must never invalidate a newer delivered link. createdAt + id
+  // provides a total order, including same-millisecond requests across workers.
+  await db.authToken.updateMany({
+    where: { userId, type, usedAt: null, OR: [
+      { createdAt: { lt: row.createdAt } },
+      { createdAt: row.createdAt, id: { lt: row.id } },
+    ] },
+    data: { usedAt: new Date() },
+  });
   return token;
 }
 
