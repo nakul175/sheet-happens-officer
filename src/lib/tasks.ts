@@ -28,7 +28,7 @@ export const taskInclude = {
 } as const;
 
 type TaskRow = NonNullable<Awaited<ReturnType<typeof loadRow>>>;
-const loadRow = (id: string) => db.task.findUnique({ where: { id }, include: taskInclude });
+const loadRow = (id: string, tx?: Tx) => (tx ?? db).task.findUnique({ where: { id }, include: taskInclude });
 
 /** SHO-US-14.1: a task waits for approval only while it is open; a closed task keeps its approver but is no longer waiting. */
 export const awaiting = (t: { approverId: string | null; assigneeId: string; completedAt?: Date | null }) =>
@@ -68,10 +68,10 @@ export function present(t: TaskRow, viewer?: { id: string; role: Role }) {
 }
 
 
-async function loadTask(user: Actor, id: string, o: { write?: boolean; deleted?: boolean; holderCanDo?: boolean } = {}) {
-  const t = await loadRow(id);
+async function loadTask(user: Actor, id: string, o: { write?: boolean; deleted?: boolean; holderCanDo?: boolean; tx?: Tx } = {}) {
+  const t = await loadRow(id, o.tx);
   if (!t || (t.deletedAt && !o.deleted)) throw notFound("Task");
-  const a = await taskAccess(user, t.projectId, { write: o.write });
+  const a = await taskAccess(user, t.projectId, { write: o.write, ...(o.tx ? { tx: o.tx } : {}) });
   if (o.write) requireWrite(a);
   // The approver holding a task can only Close it or Send it back (SHO-US-4.6); the Leader and Admins keep full authority.
   if (o.write && !o.holderCanDo && awaiting(t) && user.id === t.approverId && a.role !== "LEADER") {
@@ -241,8 +241,8 @@ export async function listTasks(
 
 /** APL-2669: a well-formed timestamp that is not the task's current instant.
  *  extra stays on the thrown error for bulk operations. HTTP routes drop it (APL-2670). */
-async function versionConflict(user: Actor, id: string, t: TaskRow, role: Role): Promise<never> {
-  const last = await db.actionLog.findFirst({ where: { targetType: "task", targetId: id }, orderBy: { createdAt: "desc" }, include: { actor: { select: { name: true } } } });
+async function versionConflict(user: Actor, id: string, t: TaskRow, role: Role, tx?: Tx): Promise<never> {
+  const last = await (tx ?? db).actionLog.findFirst({ where: { targetType: "task", targetId: id }, orderBy: { createdAt: "desc" }, include: { actor: { select: { name: true } } } });
   const who = last?.actor.name ?? null;
   throw new ApiError(409, versionConflictMessage(who), {
     stale: true, changedBy: who, current: present(t, { id: user.id, role }),
@@ -252,7 +252,7 @@ async function versionConflict(user: Actor, id: string, t: TaskRow, role: Role):
 /** See the task before the timestamp is read.
  *  Every 404 is the missing-task answer, 404 { error: "Task not found" }, so an outsider
  *  cannot tell a hidden task from a missing one (F8, Dwight). */
-async function loadForEdit(user: Actor, id: string, o: { holderCanDo?: boolean } = {}) {
+async function loadForEdit(user: Actor, id: string, o: { holderCanDo?: boolean; tx?: Tx } = {}) {
   try {
     return await loadTask(user, id, { write: true, ...o });
   } catch (e) {
@@ -262,10 +262,10 @@ async function loadForEdit(user: Actor, id: string, o: { holderCanDo?: boolean }
 }
 
 /** Visibility first, then the timestamp. Instants are compared with getTime, not as strings. */
-async function guardVersion(user: Actor, id: string, expected: unknown, o: { holderCanDo?: boolean } = {}) {
+async function guardVersion(user: Actor, id: string, expected: unknown, o: { holderCanDo?: boolean; tx?: Tx } = {}) {
   const loaded = await loadForEdit(user, id, o);
   const expectedMs = classifyExpectedUpdatedAt(expected);
-  if (expectedMs !== loaded.t.updatedAt.getTime()) await versionConflict(user, id, loaded.t, loaded.a.role);
+  if (expectedMs !== loaded.t.updatedAt.getTime()) await versionConflict(user, id, loaded.t, loaded.a.role, o.tx);
   return loaded;
 }
 
@@ -281,29 +281,37 @@ export async function updateTask(
   },
 ) {
   // Visibility first: a stranger gets 404 before a bad timestamp can become 400 (APL-2669 AC4).
-  const { t } = await guardVersion(user, id, input.expectedUpdatedAt);
-  const data: Record<string, unknown> = {};
-  const before: Record<string, unknown> = {};
-  const set = (k: string, v: unknown, old: unknown) => {
-    if (JSON.stringify(v) !== JSON.stringify(old)) { data[k] = v; before[k] = old; }
-  };
-  if (input.title !== undefined) set("title", input.title, t.title);
-  if (input.description !== undefined) set("description", input.description ?? null, t.description);
-  if (input.dueDate !== undefined) set("dueDate", input.dueDate ? parseDueDate(input.dueDate) : null, t.dueDate);
-  if (input.priority !== undefined) set("priority", input.priority, t.priority);
-  let newlyBlocked = false;
-  if (input.blocked === false) {
-    set("blocked", false, t.blocked);
-    if (t.blockedReason !== null) set("blockedReason", null, t.blockedReason);
-  } else if (input.blocked === true || (t.blocked && input.blockedReason !== undefined)) {
-    set("blocked", true, t.blocked);
-    if (input.blockedReason !== undefined) set("blockedReason", input.blockedReason ?? null, t.blockedReason);
-    newlyBlocked = !t.blocked;
-  }
-  if (!Object.keys(data).length) return;
-  // The updatedAt this write stored. A later operation in the same request follows this, not a re-read.
+  await guardVersion(user, id, input.expectedUpdatedAt);
   return db.$transaction(async (tx) => {
-    const row = await tx.task.update({ where: { id }, data });
+    // Serialize edits to this task before taking its actor's membership lock.
+    // Removal hands over tasks before deleting the membership, in this same order.
+    const [locked] = await tx.$queryRaw<{ id: string; projectId: string }[]>`SELECT "id", "projectId" FROM "Task" WHERE "id" = ${id} FOR UPDATE`;
+    if (!locked) throw notFound("Task");
+    await tx.$queryRaw`SELECT "userId" FROM "ProjectMember" WHERE "projectId" = ${locked.projectId} AND "userId" = ${user.id} FOR SHARE`;
+    // ReadCommitted makes a completed removal/downgrade visible after waiting for
+    // the lock. Access is checked before version metadata; a missing seat is 404.
+    const { t } = await guardVersion(user, id, input.expectedUpdatedAt, { tx });
+    const data: Record<string, unknown> = {};
+    const before: Record<string, unknown> = {};
+    const set = (k: string, v: unknown, old: unknown) => {
+      if (JSON.stringify(v) !== JSON.stringify(old)) { data[k] = v; before[k] = old; }
+    };
+    if (input.title !== undefined) set("title", input.title, t.title);
+    if (input.description !== undefined) set("description", input.description ?? null, t.description);
+    if (input.dueDate !== undefined) set("dueDate", input.dueDate ? parseDueDate(input.dueDate) : null, t.dueDate);
+    if (input.priority !== undefined) set("priority", input.priority, t.priority);
+    let newlyBlocked = false;
+    if (input.blocked === false) {
+      set("blocked", false, t.blocked);
+      if (t.blockedReason !== null) set("blockedReason", null, t.blockedReason);
+    } else if (input.blocked === true || (t.blocked && input.blockedReason !== undefined)) {
+      set("blocked", true, t.blocked);
+      if (input.blockedReason !== undefined) set("blockedReason", input.blockedReason ?? null, t.blockedReason);
+      newlyBlocked = !t.blocked;
+    }
+    if (!Object.keys(data).length) return;
+
+    const row = await tx.task.update({ where: { id }, data: { ...data, updatedAt: new Date(Math.max(Date.now(), t.updatedAt.getTime() + 1)) } });
     if (newlyBlocked) {
       await notify(tx, [await leaderId(tx, t.projectId)], "TASK_BLOCKED", {
         actorId: user.id, taskId: id, projectId: t.projectId, data: { title: t.title, reason: input.blockedReason ?? null },
@@ -312,7 +320,7 @@ export async function updateTask(
     await logAction(tx, { actorId: user.id, projectId: t.projectId, targetType: "task", targetId: id, action: "task.updated", before, after: data });
     if ("dueDate" in data) await ensureNextStep(tx, t.projectId, user.id);
     return row.updatedAt;
-  });
+  }, { isolationLevel: "ReadCommitted" });
 }
 
 // ---------------------------------------------------------------- assign, collaborators, approver (4.3, 4.6)

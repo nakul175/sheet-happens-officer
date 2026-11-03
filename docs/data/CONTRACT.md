@@ -25,6 +25,8 @@ SHO is one organisation per deployment, per the owner decision in HR-11; see ../
 
 ## Invariants beyond Prisma
 
+Ordinary task editing (`updateTask`) performs a cheap permission/version preflight, then locks the task row and the actor's project membership before re-reading authorization and version inside a ReadCommitted transaction. A completed removal yields the same task404 as an unknown task; a completed Viewer downgrade yields403. An edit already holding the membership lock commits before a competing removal. The task write, before/after audit and related notices commit together. The stored edit version advances by at least one millisecond, so two saves of the same version cannot both succeed. Membership release hands over tasks before deleting/updating the membership; preserve that task-before-membership lock order. These guarantees are scoped to ordinary editing, not a claim that assignment/move/link/Undo concurrency has been fully reviewed.
+
 - A project's **at most one** Leader is enforced by partial unique index `ProjectMember_one_leader_per_project`; application transactions must maintain **at least one**. These are distinct guarantees.
 - `Section_one_done_per_project` allows at most one Done section. Application creation/mutation preserves a usable Done section.
 - `Section_max_8` / `enforce_max_sections` cap sections. The function was replaced by the pinned-search-path migration; inspect the latest definition, not just init SQL.

@@ -1,4 +1,4 @@
-import { projectAccess, type Actor } from "@/lib/access";
+import { projectAccess, type Actor, type Tx } from "@/lib/access";
 import { db } from "@/lib/db";
 import { ApiError, notFound } from "@/lib/http";
 
@@ -39,7 +39,7 @@ export const TASK_UNAVAILABLE_HTML = `<!DOCTYPE html>
  * The caller's access to the project a record lives in. A caller who cannot see that project (not a member, or a deal
  * hidden by CRM_VISIBLE) gets the same 404 as a missing id of that record, so no route reveals that it exists (APL-2875).
  */
-export async function recordAccess(user: Actor, projectId: string, what: string, opts: { write?: boolean } = {}) {
+export async function recordAccess(user: Actor, projectId: string, what: string, opts: { write?: boolean; tx?: Tx } = {}) {
   try {
     return await projectAccess(user, projectId, opts);
   } catch (e) {
@@ -47,5 +47,5 @@ export async function recordAccess(user: Actor, projectId: string, what: string,
     throw e;
   }
 }
-export const taskAccess = (user: Actor, projectId: string, opts: { write?: boolean } = {}) => recordAccess(user, projectId, "Task", opts);
+export const taskAccess = (user: Actor, projectId: string, opts: { write?: boolean; tx?: Tx } = {}) => recordAccess(user, projectId, "Task", opts);
 
