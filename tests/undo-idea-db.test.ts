@@ -174,3 +174,45 @@ it('Undo advances a future version while preserving unrelated fields', async () 
   expect(task.updatedAt.getTime()).toBeGreaterThan(stamp.getTime());
   completed.push('monotonic-version');
 });
+
+it('rechecks project archive after preflight before changing the idea', async () => {
+  const f = await fixture(), pause = pauseBeforeTransactions(1);
+  const pending = Promise.allSettled([undoAction(editor, f.action.id)]);
+  try {
+    await pause.ready();
+    await db.project.update({ where: { id: f.project.id }, data: { archivedAt: new Date() } });
+    const before = await snapshot(f.project.id); pause.release();
+    expect(await pending).toEqual([expect.objectContaining({ status: 'rejected', reason: expect.objectContaining({ status: 409 }) })]);
+    expect(await snapshot(f.project.id)).toEqual(before);
+    completed.push('archive-after-preflight');
+  } finally { pause.release(); await pending; }
+});
+
+it('rechecks a Viewer downgrade after preflight before changing the idea', async () => {
+  const f = await fixture(), pause = pauseBeforeTransactions(1);
+  const pending = Promise.allSettled([undoAction(editor, f.action.id)]);
+  try {
+    await pause.ready();
+    await db.projectMember.update({ where: { projectId_userId: { projectId: f.project.id, userId: editor.id } }, data: { role: 'VIEWER' } });
+    const before = await snapshot(f.project.id); pause.release();
+    expect(await pending).toEqual([expect.objectContaining({ status: 'rejected', reason: expect.objectContaining({ status: 403 }) })]);
+    expect(await snapshot(f.project.id)).toEqual(before);
+    completed.push('viewer-after-preflight');
+  } finally { pause.release(); await pending; }
+});
+
+it('a competing task-row lock is retryable without a partial claim', async () => {
+  const f = await fixture(); let release!: () => void, locked = false;
+  const held = new Promise<void>((resolve) => { release = resolve; });
+  const owner = transact(async (tx) => { await tx.$queryRaw`SELECT "id" FROM "Task" WHERE "id" = ${f.task.id} FOR UPDATE`; locked = true; await held; }, { timeout: 15_000 });
+  const ownerResult = Promise.allSettled([owner]);
+  try {
+    await vi.waitFor(() => expect(locked).toBe(true), { timeout: 5000 });
+    const before = await snapshot(f.project.id);
+    await expect(undoAction(editor, f.action.id)).rejects.toMatchObject({ status: 409 });
+    expect(await snapshot(f.project.id)).toEqual(before);
+    completed.push('task-lock-conflict');
+  } finally { release(); expect(await ownerResult).toEqual([{ status: 'fulfilled', value: undefined }]); }
+  await undoAction(editor, f.action.id);
+  expect((await db.task.findUniqueOrThrow({ where: { id: f.task.id } })).isIdea).toBe(false);
+});

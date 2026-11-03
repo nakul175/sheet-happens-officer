@@ -25,7 +25,7 @@ const MANAGEMENT_UNDO = new Set([
 const TRANSACTIONAL_TASK_UNDO = new Set([
   "task.updated", "task.moved", ...FAMILY_TASK_UNDO, ...COLLABORATOR_TASK_UNDO,
   ...COMMENT_TASK_UNDO,
-  ...TASK_LINK_UNDO,
+  ...TASK_LINK_UNDO, "task.idea_changed",
   "task.assigned", "task.sent_for_approval", "task.sent_back", "task.approver_changed",
 ]);
 
@@ -290,10 +290,11 @@ async function plan(row: any, user: Actor, projectId: string, tx?: Tx): Promise<
       };
     }
     case "task.idea_changed": {
-      const t = await liveTask(id, projectId);
+      const t = await liveTask(id, projectId, tx);
+      if (t.parentId) throw bad("Only a top-level task can be an idea.");
       return {
         conflicts: t.isIdea !== f.isIdea ? [{ field: "isIdea", before: b.isIdea, after: f.isIdea, now: t.isIdea }] : [], subject: t.title, fields: "Idea",
-        apply: async (tx) => { await tx.task.update({ where: { id }, data: { isIdea: !!b.isIdea } }); },
+        apply: async (tx) => { await tx.task.update({ where: { id }, data: { isIdea: !!b.isIdea, updatedAt: new Date(Math.max(Date.now(), t.updatedAt.getTime() + 1)) } }); },
       };
     }
     case "deal.details_updated": {
