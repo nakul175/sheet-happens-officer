@@ -34,3 +34,18 @@ export const TASK_UNAVAILABLE_HTML = `<!DOCTYPE html>
 </body>
 </html>
 `;
+
+/**
+ * The caller's access to the project a record lives in. A caller who cannot see that project (not a member, or a deal
+ * hidden by CRM_VISIBLE) gets the same 404 as a missing id of that record, so no route reveals that it exists (APL-2875).
+ */
+export async function recordAccess(user: Actor, projectId: string, what: string, opts: { write?: boolean } = {}) {
+  try {
+    return await projectAccess(user, projectId, opts);
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 404) throw notFound(what);
+    throw e;
+  }
+}
+export const taskAccess = (user: Actor, projectId: string, opts: { write?: boolean } = {}) => recordAccess(user, projectId, "Task", opts);
+

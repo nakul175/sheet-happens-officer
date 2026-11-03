@@ -8,7 +8,7 @@ import { WORKSTREAM_DEAL, requireCrm } from "@/lib/crm";
 import { formatDueDate, parseDueDate } from "@/lib/dates";
 import { logAction } from "@/lib/notify";
 import { assertNoCycle, orgOf } from "@/lib/orgs";
-import { taskAccess } from "@/lib/tasks";
+import { taskAccess } from "@/lib/task-access";
 import { UNDO_LABELS, isTooOldToUndo, isUndoable } from "@/lib/undoable";
 
 const clean = (v: string | null | undefined) => (v?.trim() ? v.trim() : null);

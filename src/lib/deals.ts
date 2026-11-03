@@ -9,7 +9,7 @@ import { WORKSTREAM_DEAL, crmMode, crmProjectWhere, crmVisible, requireCrm } fro
 import { formatDueDate, parseDueDate } from "@/lib/dates";
 import { auditTx, logAction, notify } from "@/lib/notify";
 import { orgOf } from "@/lib/orgs";
-import { taskAccess } from "@/lib/tasks";
+import { taskAccess } from "@/lib/task-access";
 
 import { dealClassificationFields, type DealClassificationInput } from "@/lib/deal-classification";
 

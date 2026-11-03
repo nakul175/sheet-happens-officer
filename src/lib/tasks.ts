@@ -1,5 +1,7 @@
 import { addWorkspaceTaskMember } from "@/lib/project-task-membership";
 import type { Prisma } from "@/generated/prisma/client";
+import { taskAccess } from "@/lib/task-access";
+export { taskAccess, recordAccess } from "@/lib/task-access";
 import { assertTaskReadable } from "@/lib/task-access";
 import { ensureNextStep } from "@/lib/deals";
 import { crmProjectWhere } from "@/lib/crm";
@@ -65,19 +67,6 @@ export function present(t: TaskRow, viewer?: { id: string; role: Role }) {
   };
 }
 
-/**
- * The caller's access to the project a record lives in. A caller who cannot see that project (not a member, or a deal
- * hidden by CRM_VISIBLE) gets the same 404 as a missing id of that record, so no route reveals that it exists (APL-2875).
- */
-export async function recordAccess(user: Actor, projectId: string, what: string, opts: { write?: boolean } = {}) {
-  try {
-    return await projectAccess(user, projectId, opts);
-  } catch (e) {
-    if (e instanceof ApiError && e.status === 404) throw notFound(what);
-    throw e;
-  }
-}
-export const taskAccess = (user: Actor, projectId: string, opts: { write?: boolean } = {}) => recordAccess(user, projectId, "Task", opts);
 
 async function loadTask(user: Actor, id: string, o: { write?: boolean; deleted?: boolean; holderCanDo?: boolean } = {}) {
   const t = await loadRow(id);
