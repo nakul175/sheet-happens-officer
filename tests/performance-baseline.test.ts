@@ -26,7 +26,7 @@ it('records local API latency for 100 projects / 10,000 tasks and cleans its exa
   await db.session.create({data:{userId:id,tokenHash:createHash('sha256').update(raw).digest('hex'),expiresAt:new Date(Date.now()+3600000)}});
   for(let n=0;n<100;n++){
    const p=await db.project.create({data:{workspaceId:workspaces[0].id,name:`${id} project ${n}`,members:{create:{userId:id,role:'LEADER'}},sections:{create:[{name:'To do',position:0},{name:'In progress',position:1},{name:'Done',position:2,isDone:true}]}},include:{sections:true}});projectIds.push(p.id);
-   await db.task.createMany({data:Array.from({length:100},(_,t)=>({workspaceId:workspaces[0].id,projectId:p.id,sectionId:p.sections[0].id,title:`${id} task ${n}-${t}`,assigneeId:id,createdById:id,dueDate:new Date()}))});
+   await db.task.createMany({data:Array.from({length:100},(_,t)=>({workspaceId:workspaces[0].id,projectId:p.id,sectionId:p.sections.find(s=>s.name==='To do')!.id,title:`${id} task ${n}-${t}`,assigneeId:id,createdById:id,dueDate:new Date()}))});
   }
   expect(await db.task.count({where:{projectId:{in:projectIds}}})).toBe(10000);
   for(const route of ['/api/projects','/api/my-tasks','/api/search?q='+id,'/api/projects/'+projectIds[0]]){
@@ -38,7 +38,7 @@ it('records local API latency for 100 projects / 10,000 tasks and cleans its exa
   report.status='MEASURED_NO_SLA_SET';
  }finally{
   try{
-   if(created){await db.project.deleteMany({where:{id:{in:projectIds}}});await db.user.delete({where:{id}});}
+   if(created){await db.task.deleteMany({where:{projectId:{in:projectIds}}});await db.project.deleteMany({where:{id:{in:projectIds}}});await db.user.delete({where:{id}});}
    expect(await db.project.count({where:{id:{in:projectIds}}})).toBe(0);
    expect(await db.task.count({where:{projectId:{in:projectIds}}})).toBe(0);
    expect(await db.project.count()).toBe(originalProjects);
