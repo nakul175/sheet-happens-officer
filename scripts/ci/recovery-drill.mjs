@@ -57,14 +57,18 @@ try {
   for (const row of history) { assert.equal(row.checksum, baseline[row.migration_name]); assert.ok(row.finished_at); assert.equal(row.rolled_back_at, null); }
   report.migrationCount = history.length;
   phase = 'seed-synthetic-records';
-  await source.query(`
+  const seed = `
     INSERT INTO "Workspace" (id,name) VALUES ('recovery-w','Synthetic recovery');
     INSERT INTO "User" (id,"workspaceId",email,name,"passwordHash") VALUES ('recovery-u','recovery-w','recovery@example.invalid','Synthetic user','not-a-login-hash');
     INSERT INTO "Project" (id,"workspaceId",name,"updatedAt") VALUES ('recovery-p','recovery-w','Synthetic project',now());
     INSERT INTO "Section" (id,"projectId",name,position,"isDone") VALUES ('recovery-s','recovery-p','Done',0,true);
     INSERT INTO "Task" (id,"workspaceId","projectId","sectionId",title,"assigneeId","createdById","updatedAt") VALUES ('recovery-t','recovery-w','recovery-p','recovery-s','Snapshot title — Unicode ✓','recovery-u','recovery-u',now());
     INSERT INTO "DealDetails" ("projectId","workspaceId","whyPursue",value,"submissionDeadline") VALUES ('recovery-p','recovery-w','Synthetic drill',12345678901234.56,'2026-10-29');
-  `);
+  `;
+  for (const [index, sql] of seed.split(';').map((sql) => sql.trim()).filter(Boolean).entries()) {
+    phase = 'seed-' + ['workspace', 'user', 'project', 'section', 'task', 'deal'][index];
+    await source.query(sql);
+  }
   phase = 'capture-independent-source-reference';
   // No writers exist in this private source. Capture BEFORE dump/restore, never
   // derive expected content from the restored target or a moving live database.
@@ -122,7 +126,7 @@ try {
   report.status = 'SYNTHETIC_REHEARSAL_PASS';
 } catch (error) {
   // Do not serialize exception messages/SQL/connection objects into artifacts.
-  report.failure = { phase, code: /^[A-Z0-9_]{2,60}$/.test(error.code ?? '') ? error.code : 'CHECK_FAILED' };
+  report.failure = { phase, constraint: /^[A-Za-z0-9_]{1,100}$/.test(error.constraint ?? '') ? error.constraint : undefined, routine: /^[A-Za-z0-9_]{1,100}$/.test(error.routine ?? '') ? error.routine : undefined, code: /^[A-Z0-9_]{2,60}$/.test(error.code ?? '') ? error.code : 'CHECK_FAILED' };
   process.exitCode = 1;
 } finally {
   try {

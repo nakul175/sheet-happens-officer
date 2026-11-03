@@ -47,6 +47,10 @@ jobs:
       - name: Node tests for scripts/ci
         run: node --test "scripts/ci/**/*.test.mjs"
       - run: npm ci
+      - name: Synthetic backup recovery rehearsal
+        env:
+          RECOVERY_POSTGRES_CONTAINER: ${{ job.services.postgres.id }}
+        run: node scripts/ci/recovery-drill.mjs
       # APL-2761. Listing loads every story spec without a browser or a server. One file that cannot load (a vitest import)
       # makes Playwright collect 0 tests, so a total of 0 fails here instead of in staging-e2e.
       - name: Playwright collects the story specs
@@ -69,10 +73,6 @@ jobs:
       - name: Typecheck story specs
         run: npx tsc --noEmit -p tsconfig.e2e.json
       - run: npx prisma migrate deploy
-      - name: Synthetic backup recovery rehearsal
-        env:
-          RECOVERY_POSTGRES_CONTAINER: ${{ job.services.postgres.id }}
-        run: node scripts/ci/recovery-drill.mjs
       - name: Build
         run: npm run build
       - name: Verify retired routes and preserved suite routes
