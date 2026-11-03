@@ -14,12 +14,13 @@ vi.mock('next/server', () => ({ connection: vi.fn() }));
 const prefix = 'restore-membership-' + randomUUID();
 const leader = { id: prefix + '-leader', orgRole: 'MEMBER' as const };
 const editor = { id: prefix + '-editor', orgRole: 'MEMBER' as const };
+const admin = { id: prefix + '-admin', orgRole: 'ADMIN' as const };
 const projects: string[] = [], users: string[] = [], completed: string[] = [];
 let safe = false, workspaceId: string, sentinelId: string;
 beforeAll(async () => {
   assertLocalFixture(process.env.DATABASE_URL); safe = true;
   workspaceId = (await getOrCreateWorkspace()).id;
-  for (const actor of [leader, editor]) {
+  for (const actor of [leader, editor, admin]) {
     await db.user.create({ data: { id: actor.id, workspaceId, name: actor.id, email: actor.id + '@example.invalid', passwordHash: 'unused', emailVerifiedAt: new Date() } });
     users.push(actor.id);
   }
@@ -162,7 +163,7 @@ it('when restoration holds the member first, removal sees the newly live task an
       removeEntered();
       return transact(callback, options);
     }) as typeof db.$transaction);
-    removal = removeMember(leader, projectId, editor.id);
+    removal = removeMember(admin, projectId, editor.id);
     await Promise.race([atRemoval, removal.then(() => { throw Error('Removal passed the expected transaction gate.'); })]);
     removeSpy.mockRestore();
     expect(safetyExpired).toBe(false);
