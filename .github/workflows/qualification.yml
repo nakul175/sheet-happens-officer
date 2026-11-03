@@ -46,6 +46,8 @@ jobs:
       # This glob is that directory on Node 22: every *.test.mjs under scripts/ci/.
       - name: Node tests for scripts/ci
         run: node --test "scripts/ci/**/*.test.mjs"
+      - name: Reproduce the pinned native shutdown binary
+        run: node scripts/ci/reproduce-native.mjs
       - run: npm ci
       - name: Synthetic backup recovery rehearsal
         env:
