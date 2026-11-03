@@ -92,13 +92,17 @@ for (const scenario of ['expired', 'revoked', 'deactivated', 'unverified'] as co
         evidence.push({ scenario, method, path, result: '401_NO_PRIVATE_DATA' });
       }
       for (const path of ['/projects', `/projects/${p.id}`, '/my-tasks', '/team', '/profile']) {
+        // Capture the document independently: a streamed Next redirect may make
+        // Chromium discard its prior response body before waitForURL resolves.
+        const document = await fetch(BASE + path, { headers: { cookie: originalCookie, accept: 'text/html' }, redirect: 'manual' });
+        expect([200, 307, 308]).toContain(document.status);
+        expect(await document.text()).not.toContain(privateMarker);
         // Reinstall the original cookie before every navigation as well.
         await context.addCookies([{ name: 'sho_session', value: token, url: BASE, httpOnly: true, sameSite: 'Lax' }]);
-        const response = await page.goto(path);
+        await page.goto(path);
         await page.waitForURL((url) => url.pathname === '/signin', { timeout: 10_000 });
         expect(await page.locator('body').innerText()).not.toContain(privateMarker);
-        if (response) expect(await response.text()).not.toContain(privateMarker);
-        evidence.push({ scenario, method: 'BROWSER', path, result: 'SIGNIN_NO_PRIVATE_DATA' });
+        evidence.push({ scenario, method: 'DOCUMENT_AND_BROWSER', path, result: 'SIGNIN_NO_PRIVATE_DATA' });
       }
       expect(await db.user.findUniqueOrThrow({ where: { id: who.id } })).toEqual(beforeUser);
       expect(await db.project.findUniqueOrThrow({ where: { id: p.id } })).toEqual(beforeProject);
