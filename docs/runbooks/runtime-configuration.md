@@ -1,0 +1,11 @@
+# Runtime/configuration ownership
+
+`deploy/runtime-manifest.json` is the sanitized profile observed on3November2026. `node deploy/render-service.mjs` renders the tracked `deploy/sho.service`; bootstrap embeds the same unit. No script here installs this candidate unit on an existing host. Existing drop-ins must be reviewed for other effective settings before any replacement is approved.
+
+Target: Node22, Linuxx86-64/glibc, PostgreSQL16, Caddy→127.0.0.1:3000, deploy user,40-second systemd stop grace. The native shutdown library is Linuxx86-64; macOS tests cannot certify its signal/socket behavior. Build generates Prisma engines for target platform. Current service uses `node --import tsx server.js`, not `next start`.
+
+Environment files load in manifest order; later definitions override earlier ones. Release.env contains release identity only. Do not overwrite the app, local, suite or central files on an app cut. Only keys and custodians belong in documentation; values remain in the secret store/root-restricted files. The last central path is an observed legacy location; migration to a canonical `/etc/sho` location requires a separate reviewed configuration change. The Accounts service must not be restarted as part of an SHO cut.
+
+Before isolated provisioning, the authorized operator supplies synthetic placeholders for required files; missing required files intentionally fail service startup. Production files and permissions are not created by copying synthetic examples. Assign named custodians for application config, shared suite config, central identity and database administration before independent handover. No obsolete chat role is a custodian.
+
+Verification: compare effective User/Group/WorkingDirectory/ExecStart/TimeoutStopUSec and EnvironmentFiles with this manifest, enumerate installed drop-ins, verify required file ownership/mode without printing values, then exercise health, suite4 and graceful shutdown on a disposable Linux host. Existing hosts retain their files/drop-ins until explicit approval. Passing the render contract is necessary but not a substitute for this host exercise. No schedules are enabled by bootstrap or app cut.

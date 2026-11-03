@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "platform": "linux-x64-glibc",
+  "nodeMajor": 22,
+  "unit": "sho.service",
+  "user": "deploy",
+  "group": "deploy",
+  "workingDirectory": "/opt/sho/current",
+  "execStart": "/usr/bin/node --import tsx server.js",
+  "restart": "always",
+  "restartSeconds": 3,
+  "stopTimeoutSeconds": 40,
+  "killSignal": "SIGTERM",
+  "environmentFiles": [
+    {"path": "/etc/sho/app.env", "optional": false, "purpose": "Application settings and runtime/admin database URLs"},
+    {"path": "/etc/sho/local.env", "optional": false, "purpose": "Host-local job authentication; does not enable jobs"},
+    {"path": "/opt/sho/current/release.env", "optional": true, "purpose": "Release identity only"},
+    {"path": "/etc/bugoff/suite.env", "optional": false, "purpose": "Existing shared suite client configuration; preserve owner"},
+    {"path": "/home/deploy/aplyd-accounts-stage/private/sho-central.env", "optional": false, "purpose": "Existing central-login configuration; legacy location, not permission to modify Accounts"}
+  ],
+  "observedDropIns": ["20-verified18.conf", "bugoff-suite.conf", "central-accounts.conf"],
+  "schedulePolicy": "disabled unless separately explicitly approved"
+}
