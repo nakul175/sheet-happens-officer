@@ -61,6 +61,8 @@ jobs:
           printf '%s\n' "$HOST_KEY" > ~/.ssh/known_hosts
           ssh-keygen -F "$HOST" -f ~/.ssh/known_hosts >/dev/null || { echo "::error::Host pin does not cover target"; exit 1; }
 
+      - name: Reserve a new release directory
+        run: ssh -o StrictHostKeyChecking=yes "deploy@$HOST" "bash -s -- $GITHUB_SHA" < deploy/reserve-release.sh
       - name: Upload the release
         run: >-
           rsync -az --delete -e "ssh -o StrictHostKeyChecking=yes"
