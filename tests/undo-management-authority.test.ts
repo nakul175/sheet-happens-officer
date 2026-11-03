@@ -57,3 +57,9 @@ it('a non-admin Leader cannot reactivate a retired vertical board through Undo',
   await expect(undoAction(actor, 'action')).rejects.toMatchObject({ status: 403 });
   expect(m.archived).toBe(true); expect(m.claimed).toBe(false); expect(m.log).not.toHaveBeenCalled();
 });
+it('an Admin can reactivate a retired vertical through Undo', async () => {
+  m.role = 'LEADER'; m.vertical = true;
+  const admin = { id: 'admin', orgRole: 'ADMIN' as const };
+  await undoAction(admin, 'action');
+  expect(m.archived).toBe(false); expect(m.claimed).toBe(true); expect(m.log).toHaveBeenCalledOnce();
+});

@@ -122,5 +122,11 @@ it('a non-admin Leader cannot reactivate a retired vertical through Undo', async
   await expect(unarchiveProject(leader, f.projectId)).rejects.toMatchObject({ status: 403 });
   const before = await snapshot(f.projectId);
   await expect(undoAction(leader, f.actionId)).rejects.toMatchObject({ status: 403 });
-  expect(await snapshot(f.projectId)).toEqual(before); completed.push('vertical-admin-only');
+  expect(await snapshot(f.projectId)).toEqual(before);
+  await db.user.update({ where: { id: leader.id }, data: { orgRole: 'ADMIN' } });
+  const admin = { ...leader, orgRole: 'ADMIN' as const };
+  await undoAction(admin, f.actionId);
+  expect((await db.project.findUniqueOrThrow({ where: { id: f.projectId } })).archivedAt).toBeNull();
+  expect(await db.actionLog.count({ where: { projectId: f.projectId, action: 'undo' } })).toBe(1);
+  completed.push('vertical-admin-only-and-admin-control');
 });
