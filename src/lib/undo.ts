@@ -441,6 +441,7 @@ async function prepare(user: Actor, logId: string, tx?: Tx) {
   if (row.action === "task.deleted" && row.undoneAt) throw bad("This was already undone.");
   // Undoing a delete is a restore from Trash, so it takes the same Leader or Admin check (SHO-US-6.2 AC4, SHO-BUG-8).
   if (row.action === "task.deleted" || MANAGEMENT_UNDO.has(row.action)) requireManage(a);
+  if (archiveKind && a.project.isVertical && !isAdmin(user)) throw new ApiError(403, "Only Admins can retire or reactivate verticals.");
   if (row.undoneAt) throw bad("This action was already undone.");
   if (!isUndoable(row.action)) throw bad("This kind of action cannot be undone.");
   if (isTooOldToUndo(row.createdAt)) throw bad("Too old to undo", { tooOld: true });

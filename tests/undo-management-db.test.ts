@@ -47,8 +47,8 @@ afterAll(async () => {
   }
 });
 
-async function fixture(actionActor = editor, kind = 'project.archived', currentActorRole: 'LEADER' | 'EDITOR' = 'LEADER') {
-  const p = await db.project.create({ data: { workspaceId, name: 'Updated project', archivedAt: kind === 'project.archived' ? new Date() : null } }); projects.push(p.id);
+async function fixture(actionActor = editor, kind = 'project.archived', currentActorRole: 'LEADER' | 'EDITOR' = 'LEADER', vertical = false) {
+  const p = await db.project.create({ data: { workspaceId, name: 'Updated project', isVertical: vertical, archivedAt: kind === 'project.archived' ? new Date() : null } }); projects.push(p.id);
   await db.projectMember.createMany({ data: [{ projectId: p.id, userId: leader.id, role: actionActor.id === leader.id || currentActorRole === 'EDITOR' ? 'LEADER' : 'EDITOR' }, { projectId: p.id, userId: editor.id, role: actionActor.id === editor.id && currentActorRole === 'LEADER' ? 'LEADER' : 'EDITOR' }] });
   const action = await db.actionLog.create({ data: { actorId: actionActor.id, projectId: p.id, targetType: 'project', targetId: p.id, channel: 'SCREEN', action: kind, beforeState: kind === 'project.updated' ? { name: 'Old project' } : { archivedAt: null }, afterState: kind === 'project.updated' ? { name: 'Updated project' } : { archivedAt: p.archivedAt?.toISOString() }, createdAt: new Date(Date.now() - 2000) } });
   return { projectId: p.id, actionId: action.id };
@@ -115,4 +115,12 @@ it('activity failure rolls back management inverse and claim, then retry succeed
   const after = await snapshot(f.projectId);
   expect(after.project.archivedAt).toBeNull(); expect(after.actions.filter(a => a.action === 'undo')).toHaveLength(1);
   completed.push('rollback-retry');
+});
+
+it('a non-admin Leader cannot reactivate a retired vertical through Undo', async () => {
+  const f = await fixture(leader, 'project.archived', 'LEADER', true);
+  await expect(unarchiveProject(leader, f.projectId)).rejects.toMatchObject({ status: 403 });
+  const before = await snapshot(f.projectId);
+  await expect(undoAction(leader, f.actionId)).rejects.toMatchObject({ status: 403 });
+  expect(await snapshot(f.projectId)).toEqual(before); completed.push('vertical-admin-only');
 });
