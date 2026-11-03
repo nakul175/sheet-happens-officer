@@ -1,7 +1,7 @@
 # Test main pushes. Production release requires explicit manual dispatch and approval.
 # Production deploy secret: SSH_PRIVATE_KEY. RESEND_API_KEY is only for failure notification.
 # Database/identity configuration stays on the host and is never written by this workflow.
-# Optional variables: DROPLET_HOST (defaults to the app address), DROPLET_HOST_KEY (ssh-keyscan line).
+# DROPLET_HOST is optional. DROPLET_HOST_KEY must contain a separately verified known_hosts entry.
 name: Test and deploy
 
 on:
@@ -57,21 +57,19 @@ jobs:
           mkdir -p ~/.ssh && chmod 700 ~/.ssh
           printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
-          if [ -n "$HOST_KEY" ]; then
-            printf '%s\n' "$HOST_KEY" > ~/.ssh/known_hosts
-          else
-            echo "::warning::DROPLET_HOST_KEY is not set; trusting the host key seen now"
-            ssh-keyscan -H "$HOST" > ~/.ssh/known_hosts 2>/dev/null
-          fi
+          [ -n "$HOST_KEY" ] || { echo "::error::Verified DROPLET_HOST_KEY is required"; exit 1; }
+          printf '%s\n' "$HOST_KEY" > ~/.ssh/known_hosts
+          ssh-keygen -F "$HOST" -f ~/.ssh/known_hosts >/dev/null || { echo "::error::Host pin does not cover target"; exit 1; }
+
       - name: Upload the release
         run: >-
-          rsync -az --delete
+          rsync -az --delete -e "ssh -o StrictHostKeyChecking=yes"
           --exclude .git --exclude node_modules --exclude .next --exclude '.env*' --exclude '.outbox*'
           ./ "deploy@$HOST:/opt/sho/releases/$GITHUB_SHA/"
       # App cuts use existing host configuration. Secret/configuration provisioning is
       # a separate approved operation; never rewrite app.env from repository secrets.
       - name: Release
-        run: ssh "deploy@$HOST" "bash /opt/sho/releases/$GITHUB_SHA/deploy/release.sh $GITHUB_SHA"
+        run: ssh -o StrictHostKeyChecking=yes "deploy@$HOST" "bash /opt/sho/releases/$GITHUB_SHA/deploy/release.sh $GITHUB_SHA"
       - name: Email the owner if the release failed
         if: failure()
         env:
