@@ -10,3 +10,5 @@ The legacy Restore check is now a **presence probe**, not recovery certification
 6. Capture redacted per-check outcomes, observed snapshot loss and elapsed restore time; explicitly pass/fail approved RPO/RTO. Stop owned resources and preserve evidence. Receiving engineer repeats using this runbook.
 
 Current status: checker false-assurance fixed in candidate code; real restore acceptance remains BLOCKED on backup/reference access and agreed targets. Nothing in this document authorizes production changes.
+
+Proposed targets (pending owner approval): RPO at most one hour of lost changes; RTO at most four hours from incident declaration to verified service recovery. These are targets, not measured capabilities. Validate provider backup/PITR coverage and measure a real isolated restore before claiming either target is met.

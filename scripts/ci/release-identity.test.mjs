@@ -15,7 +15,7 @@ async function exercise(change=''){
   const manifest=Object.fromEntries(['authorize','token','userinfo','status'].map(r=>[`/api/suite/${r}/route`,r]));if(change==='manifest')delete manifest['/api/suite/status/route'];
   await writeFile(path.join(root,'.next/server/app-paths-manifest.json'),JSON.stringify(manifest));
   for(const ext of ['js','css'])await writeFile(path.join(root,'.next/static/app.'+ext),'synthetic-'+ext);
-  globalThis.fetch=async(raw,options)=>{
+  globalThis.fetch=async(raw)=>{
    const u=new URL(raw),p=u.pathname;
    if(p==='/api/health')return Response.json({ok:true,release:change==='health'?'wrong':expected});
    if(p==='/api/suite/authorize')return new Response(null,{status:302,headers:{location:change==='redirect'?'https://evil.invalid/signin':'https://sheethappensofficer.aplyd.org/signin'}});
