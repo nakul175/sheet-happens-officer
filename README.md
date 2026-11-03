@@ -1,101 +1,59 @@
 # Sheet Happens Officer
 
-Internal work manager for the APLYD team: projects with Sections, tasks with subtasks,
-assignee, collaborators and an optional approver, Trash with 30-day restore, a notification
-bell, a per-project Activity log and an organisation audit log. Backlog and user stories live
-in Linear (project "Sheet Happens Officer").
+Internal project/task and CRM application for APLYD. Tracking is **BTF**, project SHO. Concierge is outside this application. The four `/api/suite/*` routes and Holy Sheet links are active integrations and must be preserved.
 
-Stack: Next.js 16 (App Router), TypeScript, Prisma 6, PostgreSQL 16, Zod, Vitest.
+Stack: Next.js App Router, TypeScript, React, Prisma 6, PostgreSQL 16. Use **Node 22**. Production runs Ubuntu 24.04 / Linux x86-64 with a native shutdown helper and the `server.js` entry point; macOS builds do not qualify that native behavior.
 
-## Run locally
+## Start with a disposable local database
 
-```bash
-cp .env.example .env                       # DATABASE_URL for a local Postgres
-npm install                                # also runs prisma generate
-npx prisma migrate dev
-SUPER_ADMIN_EMAILS=you@aplyd.com npm run dev
-```
-
-After any pull that changes the Prisma schema (`prisma/schema.prisma` or migrations), run:
+Use an empty PostgreSQL 16 database named `sho_test` on loopback with synthetic credentials and `schema=public` in both database URLs. Never use a shared or production URL for these commands. Docker users can start a disposable instance with:
 
 ```bash
-npx prisma generate
+docker run --name sho-audit-db --rm -d -p 127.0.0.1:5432:5432 \
+  -e POSTGRES_USER=sho -e POSTGRES_PASSWORD=sho -e POSTGRES_DB=sho_test postgres:16
+cp .env.example .env
+set -a
+. ./.env
+set +a
+npm ci
+npx prisma migrate deploy
+npm run build
+NODE_ENV=production node --import tsx server.js
 ```
 
-Without `RESEND_API_KEY`, emails are written as JSON files to `.outbox/` (or
-`EMAIL_OUTBOX_DIR`), so verification and reset links can be opened from there.
+The migration command above is for that **disposable local database only**, replaying checked-in history, not generating new migrations. Stop/remove the disposable container with `docker stop sho-audit-db` when finished. Do not run `migrate dev`, `db push`, `migrate reset` or schema repair against a shared database.
 
-Settings (environment variables):
+Open `http://localhost:3100`, register the synthetic Super Admin address from `.env.example`, and retrieve the verification link from `.outbox-local`. Local mail is captured there; no real provider credentials or AI key are required. For interactive development, `npm run dev -- --port 3100` is available, but release qualification uses the native production entry point above.
 
-| Name | Purpose |
-|---|---|
-| `DATABASE_URL` | Postgres connection string used by the app (may point at PgBouncer) |
-| `DIRECT_DATABASE_URL` | Direct Postgres connection string for migrations, bypassing PgBouncer; optional, falls back to `DATABASE_URL` when unset |
-| `APP_URL` | Public address used in email links |
-| `SUPER_ADMIN_EMAILS` | Comma-separated addresses that become Super Admin at sign-up |
-| `RESEND_API_KEY`, `EMAIL_FROM` | Email sending; without a key, mail goes to the outbox folder (never in production) |
-| `JOB_SECRET` | Bearer token for `POST /api/jobs/<name>` (at least 16 characters) |
-| `TEST_CLOCK` / `TEST_CLOCK_SECRET` | Optional local-only story-spec clock. It is honored only with `TEST_CLOCK=1`, a non-production process, a loopback `DATABASE_URL`, and a valid HMAC request signature. Remote/staging/production servers ignore it. |
+## Test the same candidate
 
-## Test
-
-Integration tests run against a live server that shares the outbox folder. The vitest
-process needs `DATABASE_URL` and `JOB_SECRET` as well: several tests open the database
-and call the job endpoint directly. Each value in the commands is a placeholder.
-
-| Name | Purpose |
-|---|---|
-| `DATABASE_URL` | Postgres connection string the test process uses, the same database as the server |
-| `JOB_SECRET` | Bearer token the test process sends when it calls the job endpoint, the same value as the server |
+In a second terminal, load the same synthetic `.env` and run:
 
 ```bash
-EMAIL_OUTBOX_DIR=/tmp/sho-outbox SUPER_ADMIN_EMAILS=root.test@aplyd.com APP_URL=http://localhost:3100 \
-  DATABASE_URL="postgresql://USER:PASSWORD@localhost:5432/taskboard?schema=public" \
-  JOB_SECRET=replace-with-a-token-of-at-least-16-chars \
-  npx next dev -p 3100 &
-EMAIL_OUTBOX_DIR=/tmp/sho-outbox TASKBOARD_URL=http://localhost:3100 \
-  DATABASE_URL="postgresql://USER:PASSWORD@localhost:5432/taskboard?schema=public" \
-  JOB_SECRET=replace-with-a-token-of-at-least-16-chars \
-  npm test
+node --test 'scripts/ci/**/*.test.mjs'
+npm run lint
+npm run typecheck
+npx tsc --noEmit -p tsconfig.e2e.json
+npm test
+npm run test:modes
+npm run test:viewport
 ```
 
-## Deploy (story 9.3)
+Install the required browser with `npx playwright-core install chromium` if it is unavailable. Mode tests start their own isolated local servers; the default suite and phone checks require the server above and share its test DB/outbox. Tests create synthetic data; use a fresh disposable database for a clean rerun. See `.github/workflows/qualification.yml` and `phone-checks.yml` for the exact Linux gates and local Playwright story list. Collection, mocked checks and integration tests are different evidence; record pass/fail/skip counts separately.
 
-One DigitalOcean droplet (Ubuntu 24.04, BLR1) runs the app behind Caddy; DigitalOcean Managed
-Postgres holds the data. Every push to `main` runs `.github/workflows/deploy.yml`: lint, build
-and tests against a throwaway Postgres, then an rsync of the source to
-`/opt/sho/releases/<sha>` and `deploy/release.sh`, which installs, migrates, builds, switches
-the `current` symlink, restarts the service and checks `/api/health`. A failed health check
-puts the previous release back and fails the run (GitHub emails the person who pushed).
+## Maintainer map
 
-One-time setup, in order:
+- [Data contract and model reference](docs/data/CONTRACT.md): ownership, custom SQL, deletion, retention and retained legacy objects.
+- [Domain boundaries](docs/runbooks/domain-boundaries.md): permissions, state changes, transactions and Undo.
+- [Environment reference](docs/runbooks/environment-reference.md): required, optional, integration and test settings.
+- [Runtime configuration](docs/runbooks/runtime-configuration.md): service manifest, environment precedence and native runtime.
+- [Application release](docs/runbooks/app-release.md): app-only release, identity verification and rollback.
+- [Schema releases](docs/runbooks/schema-releases.md): separate app/schema identities; existing nullable expansion.
+- [Regression qualification](docs/runbooks/regression-qualification.md), [backup recovery](docs/runbooks/backup-recovery.md) and [dependency provenance](docs/runbooks/dependency-provenance.md).
+- [Handover exercise](docs/runbooks/handover-exercise.md): independent onboarding acceptance, still required.
 
-1. `ssh-keygen -t ed25519 -f ~/.ssh/sho_deploy -N "" -C sho-deploy` on your machine.
-2. Create the Managed Postgres cluster (BLR1, PostgreSQL 16, smallest plan).
-3. Create the droplet (BLR1, 2 vCPU / 4 GiB, Ubuntu 24.04) with the `sho_deploy` public key
-   and `deploy/cloud-init.yaml` pasted into **User data**. It installs Node 22, Caddy, the
-   `deploy` user, the `sho` service, cron for the jobs, the firewall and automatic security
-   updates, and generates `JOB_SECRET` locally.
-4. In the database's settings, add the droplet as a trusted source; copy the **private
-   network** connection string.
-5. In GoDaddy, add an A record `app` → the droplet's IP.
-6. GitHub repository secrets: `SSH_PRIVATE_KEY` (the private half of `sho_deploy`),
-   `DATABASE_URL`, `RESEND_API_KEY` (a Resend key with sending access for
-   `sheethappensofficer.com`, the sender's domain until Resend verifies `sheethappensofficer.aplyd.org`). Optional secret: `DIRECT_DATABASE_URL`, the direct (non-PgBouncer)
-   connection string for migrations, needed once `DATABASE_URL` points at PgBouncer; unset, migrations
-   use `DATABASE_URL`. Optional variables: `DROPLET_HOST` (IP, if DNS is not live yet)
-   and `DROPLET_HOST_KEY` (one `ssh-keyscan -t ed25519 <ip>` line, which pins the host key).
-7. Run the workflow (push to `main` or "Run workflow"), then sign up with the Super Admin
-   address and confirm the verification email lands in the inbox, not junk.
-8. Point an external uptime check at `https://sheethappensofficer.aplyd.org/api/health`.
+## Operations are paused
 
-Scheduled jobs (`/etc/cron.d/sho`, IST): `purge-trash` 03:17, `purge-old` 03:37, `stalled-deals` 07:50 (deals with no
-next step or no activity for 30 days), `reminders` 08:00, `check`
-08:05. Each run is recorded; a failure or a missed day puts a notice in the Super Admin's
-bell, and the last runs are shown on the Audit log page. Rollback by hand is a redeploy of
-an earlier commit; migrations are forward-only.
+This branch is audit remediation, not deployment authorization. Main pushes test only. A production request requires explicit approved full SHA, successful shared qualification and phone checks, reviewed environment protection, and the separately approved cut. App cuts preserve existing configuration and never install schedules or apply migrations. Do not merge or deploy this branch until the owner approves.
 
-### Application scope
-
-SHO provides the task and CRM application. Suite assistance lives outside SHO;
-there is no in-app assistant, provider configuration, usage dashboard or chat job.
+No new features, production changes, schema DROP, credential rotation or scheduled work are part of this remediation. The owning engineer handles code, QA and deployment; product owner approves scope and production acceptance. Obsolete chat-role names are not operational dependencies. An incident owner must be explicitly named when an incident begins.
