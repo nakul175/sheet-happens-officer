@@ -19,9 +19,10 @@ flock -n 9 || { echo "Another app release holds the deployment lock"; exit 1; }
 
 log() { printf '[release %s] %s\n' "$(date +%H:%M:%S)" "$*"; }
 healthy() {
-  local _
+  local release_root="$1" expected="$2" _ pid
   for _ in $(seq 1 45); do
-    if curl -fsS -m 5 "http://127.0.0.1:$PORT/api/health" >/dev/null 2>&1; then return 0; fi
+    pid="$(systemctl show sho -p MainPID --value)"
+    if node "$REL/deploy/verify-release.mjs" "$release_root" "$expected" "http://127.0.0.1:$PORT" "$pid"; then return 0; fi
     sleep 2
   done
   return 1
@@ -34,7 +35,7 @@ recover() {
   set +e
   if [ "$(readlink -f "$CUR" 2>/dev/null)" = "$REL" ] && [ -n "$PREV" ] && [ -d "$PREV" ] && [ "$PREV" != "$REL" ]; then
     log "release failed; restoring previous release"
-    if switch "$PREV" && sudo -n systemctl restart sho && healthy; then
+    if switch "$PREV" && sudo -n systemctl restart sho && healthy "$PREV" "$PREV_SHA"; then
       log "rollback verified: $(basename "$PREV")"
     else
       log "RECOVERY_FAILED: operator attention required"
@@ -51,6 +52,8 @@ trap recover ERR
 PREV="$(readlink -f "$CUR" 2>/dev/null || true)"
 [ "$PREV" != "$REL" ] || { echo "Refusing to rebuild the active release"; exit 1; }
 [ -n "$PREV" ] && [ -d "$PREV" ] || { echo "Verified previous release required"; exit 1; }
+PREV_SHA="$(cat "$PREV/COMMIT")"
+[[ "$PREV_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "Previous release identity missing"; exit 1; }
 cd "$REL"
 set -a
 # shellcheck disable=SC1091
@@ -68,13 +71,14 @@ log "checking migration prerequisites (read-only)"
 npx --no-install prisma migrate status
 log "building"
 npx next build
+printf '%s\n' "$SHA" > COMMIT
 printf 'RELEASE=%s\n' "$SHA" > release.env
 # Job installation and schedules belong to separately approved operations.
 
 switch "$REL"
 log "restarting the app"
 sudo -n systemctl restart sho
-healthy || { log "health check failed"; false; }
+healthy "$REL" "$SHA" || { log "health check failed"; false; }
 log "healthy: $SHA is live"
 # Keep both the active and rollback release even if older than the retention window.
 find "$ROOT/releases" -mindepth 1 -maxdepth 1 -type d -printf '%T@ %p\n' | sort -rn | tail -n +$((KEEP + 1)) | cut -d' ' -f2- | { grep -vx "$REL" || true; } | { grep -vx "$PREV" || true; } | xargs -r rm -rf

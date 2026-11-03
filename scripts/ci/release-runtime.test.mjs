@@ -10,9 +10,10 @@ function exercise(failure='') {
  try {
   const root=path.join(dir,'sho'),bin=path.join(dir,'bin'),rel=path.join(root,'releases',sha),prev=path.join(root,'releases','b'.repeat(40));
   mkdirSync(rel,{recursive:true});mkdirSync(prev,{recursive:true});mkdirSync(bin);symlinkSync(prev,path.join(root,'current'));
+  writeFileSync(path.join(prev,'COMMIT'),'b'.repeat(40));
   writeFileSync(path.join(dir,'app.env'),'DATABASE_URL=postgresql://synthetic@127.0.0.1:1/unused\n');
-  const dispatcher=`#!${process.execPath}\nconst fs=require('fs'),path=require('path');const cmd=path.basename(process.argv[1]),args=process.argv.slice(2);fs.appendFileSync(process.env.CALL_LOG,JSON.stringify({cmd,args})+'\\n');if(cmd==='mv'){const a=args.filter(x=>x!=='-T');fs.renameSync(a[0],a[1]);}if(cmd==='npx'&&args.includes('status')&&process.env.FAILURE==='migration')process.exit(7);if(cmd==='npx'&&args.includes('build')&&process.env.FAILURE==='build')process.exit(8);if(cmd==='flock'&&process.env.FAILURE==='lock')process.exit(1);if(cmd==='sudo'&&(process.env.FAILURE==='rollback'||(process.env.FAILURE==='restart'&&fs.readFileSync(process.env.CALL_LOG,'utf8').split('\"cmd\":\"sudo\"').length===2)))process.exit(9);if(cmd==='curl')console.log(JSON.stringify({ok:true,release:'${sha}'}));`;
-  for(const cmd of ['npm','npx','sudo','curl','sleep','find','mv','crontab','install','flock']){writeFileSync(path.join(bin,cmd),dispatcher,{mode:0o755});}
+  const dispatcher=`#!${process.execPath}\nconst fs=require('fs'),path=require('path');const cmd=path.basename(process.argv[1]),args=process.argv.slice(2);fs.appendFileSync(process.env.CALL_LOG,JSON.stringify({cmd,args})+'\\n');if(cmd==='mv'){const a=args.filter(x=>x!=='-T');fs.renameSync(a[0],a[1]);}if(cmd==='npx'&&args.includes('status')&&process.env.FAILURE==='migration')process.exit(7);if(cmd==='npx'&&args.includes('build')&&process.env.FAILURE==='build')process.exit(8);if(cmd==='flock'&&process.env.FAILURE==='lock')process.exit(1);if(cmd==='sudo'&&(process.env.FAILURE==='rollback'||(process.env.FAILURE==='restart'&&fs.readFileSync(process.env.CALL_LOG,'utf8').split('\"cmd\":\"sudo\"').length===2)))process.exit(9);if(cmd==='systemctl')console.log('123');if(cmd==='node'&&process.env.FAILURE==='verify'&&args[2]==='${sha}')process.exit(10);if(cmd==='curl')console.log(JSON.stringify({ok:true,release:'${sha}'}));`;
+  for(const cmd of ['npm','npx','sudo','curl','sleep','find','mv','crontab','install','flock','node','systemctl']){writeFileSync(path.join(bin,cmd),dispatcher,{mode:0o755});}
   let source=readFileSync(new URL('../../deploy/release.sh',import.meta.url),'utf8');
   source=source.replace('ROOT=/opt/sho',`ROOT="${root}"`).replaceAll('/etc/sho/app.env',path.join(dir,'app.env')).replaceAll('/etc/sho/local.env',path.join(dir,'absent.env'));
   const script=path.join(dir,'release.sh');writeFileSync(script,source);
@@ -49,4 +50,8 @@ test('pre-switch build failure preserves baseline and does not restart',()=>{
 });
 test('busy deployment lock refuses install and switch',()=>{
  const r=exercise('lock');assert.equal(r.status,1,r.output);assert.equal(r.current,r.previous);assert.deepEqual(r.calls.map(c=>c.cmd),['flock']);
+});
+
+test('failed post-switch verification restores baseline',()=>{
+ const r=exercise('verify');assert.equal(r.status,1,r.output);assert.equal(r.current,r.previous);assert.match(r.output,/rollback verified/);
 });
