@@ -20,6 +20,6 @@
     "sourceCommit": "ed97f45bd256f171487f2fc258e6e5350fb13040",
     "toolchain": "Ubuntu24.04 / GCC13 / Linux x86-64 (as recorded in C source)",
     "build": "gcc -O2 -fPIC -shared -o src/lib/sho-accept.so src/lib/sho-accept.c",
-    "verification": "NOT REBUILT; binary/source reproducibility remains open"
+    "verification": "CI enforces two byte-identical Linux/GCC13 rebuilds and matching exported symbols; first rebuild gate PASS on b2b9c1d9 (run41637908483). Require the candidate's rebuild.json and separate native shutdown reports for release qualification."
   }
 }
