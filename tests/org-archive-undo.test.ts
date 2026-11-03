@@ -12,7 +12,7 @@ let n = 0;
 async function seed(archived: boolean) {
   n += 1;
   const stamp = `${Date.now()}-${n}`;
-  const ws = await db.workspace.create({ data: { name: `org-undo-${stamp}` } });
+  const ws = (await db.workspace.findFirst()) ?? (await db.workspace.create({ data: { name: `org-undo-${stamp}` } }));
   const user = await db.user.create({
     data: {
       workspaceId: ws.id,

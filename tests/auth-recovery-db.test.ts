@@ -7,16 +7,17 @@ import { consumeToken, hashToken, issueTokenAndSend } from '@/lib/auth';
 vi.mock('next/server',()=>({connection:vi.fn()}));
 const id='recovery-'+randomUUID();
 let safe=false;
+let workspaceId:string;
 beforeAll(async()=>{
  const u=new URL(process.env.DATABASE_URL??'');
  if(!['localhost','127.0.0.1'].includes(u.hostname)||u.pathname!='/sho_test')throw Error('LOCAL_DISPOSABLE_SHO_TEST_REQUIRED');
  safe=true;
- await db.workspace.create({data:{id,name:'Synthetic recovery test'}});
- await db.user.create({data:{id,workspaceId:id,name:'Synthetic recovery',email:id+'@example.invalid',passwordHash:'unused'}});
+ workspaceId=((await db.workspace.findFirst())??(await db.workspace.create({data:{name:'Synthetic recovery test'}}))).id;
+ await db.user.create({data:{id,workspaceId,name:'Synthetic recovery',email:id+'@example.invalid',passwordHash:'unused'}});
 });
 afterAll(async()=>{
  if(!safe)return;
- await db.user.deleteMany({where:{id}});await db.workspace.deleteMany({where:{id}});await db.$disconnect();
+ await db.user.deleteMany({where:{id}});await db.$disconnect();
 });
 for(const type of ['RESET','VERIFY'] as const){
  it(`${type}: real transaction rollback preserves link after account write fails`,async()=>{

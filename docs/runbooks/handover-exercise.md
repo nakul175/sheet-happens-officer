@@ -4,7 +4,7 @@ Status: NOT RUN by an independent new maintainer. Documentation and CI alone can
 
 Give a new maintainer repository access plus the README, not the chat history. In an isolated local environment they should:
 
-1. Explain runtime entry, domain boundaries, Suite4, schema history and unresolved workspace contract.
+1. Explain runtime entry, domain boundaries, Suite4, schema history and single-organisation workspace contract.
 2. Install with Node22 from lockfile, start disposable PostgreSQL16, replay history, build and register/verify a synthetic user without real email.
 3. Run the regression gates; identify a deliberately failing test from retained artifacts and repair a bounded fixture/code change.
 4. Explain role denials, optimistic version conflicts, transaction/Undo boundaries and custom SQL constraints.

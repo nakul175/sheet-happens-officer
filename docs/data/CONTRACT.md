@@ -21,7 +21,7 @@ erDiagram
  User ||--o{ AuthToken : recovers
 ```
 
-Workspace isolation is an unresolved product/security contract in HR-11; the diagram does not assert tenant isolation. Project membership and organisation role enforce application access. An application role with DML access is not PostgreSQL row-level security. Keep database administration credentials separate from runtime credentials.
+SHO is one organisation per deployment, per the owner decision in HR-11; see ../runbooks/workspace-contract.md. Multiple workspace rows are an invalid runtime state, not supported tenant isolation. Project membership and organisation role enforce application access. An application role with DML access is not PostgreSQL row-level security. Keep database administration credentials separate from runtime credentials.
 
 ## Invariants beyond Prisma
 

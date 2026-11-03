@@ -1,3 +1,4 @@
+import { assertWorkspaceUser } from "@/lib/workspace";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { holyQaRealm } from "@/lib/holy-qa-identity";
 import { db } from "@/lib/db";
@@ -31,6 +32,7 @@ export async function activeSuiteIdentity(userId: string, sessionId: string) {
   const user = session?.user;
   if (!session || session.userId !== userId || session.revokedAt || session.expiresAt <= new Date() ||
       !user || user.deactivatedAt || !user.emailVerifiedAt || user.tempPasswordAt) return null;
+  await assertWorkspaceUser(user.workspaceId);
   return { sub: user.id, email: user.email, email_verified: true, name: user.name };
 }
 export function oauthJson(body: unknown, status = 200) {

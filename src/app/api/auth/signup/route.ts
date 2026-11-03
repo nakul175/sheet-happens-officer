@@ -1,3 +1,4 @@
+import { getOrCreateWorkspace } from "@/lib/workspace";
 import { db } from "@/lib/db";
 import { audit, hashPassword, issueTokenAndSend, superAdminEmails } from "@/lib/auth";
 import { MailError, VERIFY_SEND_FAILED, sendMail, verifyMail } from "@/lib/email";
@@ -10,9 +11,7 @@ export const POST = handle(async (req: Request) => {
   if (await db.user.findUnique({ where: { email } })) {
     throw new ApiError(409, "An account with this email already exists.");
   }
-  const workspace =
-    (await db.workspace.findFirst({ orderBy: { createdAt: "asc" } })) ??
-    (await db.workspace.create({ data: { name: "Workspace" } }));
+  const workspace = await getOrCreateWorkspace();
   const user = await db.user.create({
     data: {
       workspaceId: workspace.id,

@@ -3,6 +3,7 @@ import type { Prisma } from "@/generated/prisma/client";
 import { cookies } from "next/headers";
 import { db } from "@/lib/db";
 import { ApiError } from "@/lib/http";
+import { assertWorkspaceUser } from "@/lib/workspace";
 import { centralSessionActive } from "@/lib/central-status";
 
 export const SESSION_COOKIE = "sho_session";
@@ -91,6 +92,8 @@ export function deviceLabel(ua?: string | null) {
 }
 
 export async function startSession(userId: string, userAgent?: string | null) {
+  const user = await db.user.findUniqueOrThrow({ where: { id: userId }, select: { workspaceId: true } });
+  await assertWorkspaceUser(user.workspaceId);
   const token = newToken();
   const expiresAt = new Date(Date.now() + SESSION_DAYS * 24 * HOUR);
   await db.session.create({ data: { userId, tokenHash: sha256(token), expiresAt, userAgent: userAgent?.slice(0, 300) ?? null } });
@@ -129,6 +132,7 @@ export async function sessionUser(token: string | undefined, opts: { allowTempPa
   if (!session || session.revokedAt || session.expiresAt <= new Date() || !u || u.deactivatedAt || !u.emailVerifiedAt) {
     throw new ApiError(401, "Not signed in");
   }
+  await assertWorkspaceUser(u.workspaceId);
   const central = await db.centralSessionLink.findUnique({ where: { sessionId: session.id } });
   if (central && !(await centralSessionActive(central.subject, central.sessionUid, u.id))) throw new ApiError(401, "Central session expired. Sign in again.");
   // Last-active time for the Profile screen; written at most every 5 minutes.

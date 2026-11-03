@@ -1,3 +1,4 @@
+import { getOrCreateWorkspace } from "@/lib/workspace";
 import { db } from "@/lib/db";
 import { ApiError, notFound } from "@/lib/http";
 import { activeMember, isActive, isAdmin, leaderId, type Actor } from "@/lib/access";
@@ -145,8 +146,7 @@ export async function addPerson(actor: Actor & { name?: string }, input: AddInpu
       existingId: existing.id,
     });
   }
-  const workspace =
-    (await db.workspace.findFirst({ orderBy: { createdAt: "asc" } })) ?? (await db.workspace.create({ data: { name: "Workspace" } }));
+  const workspace = await getOrCreateWorkspace();
   const password = generatePassword();
   const now = new Date();
   const user = await db.$transaction(async (tx) => {
