@@ -12,13 +12,14 @@ import { commentsEnabled, isCommentAction } from "@/lib/flags";
 import { assertCommentRoom } from "@/lib/comments";
 
 const TRASH_TASK_UNDO = new Set(["task.deleted", "task.created", "task.restored"]);
+const FAMILY_TASK_UNDO = new Set([...TRASH_TASK_UNDO, "task.completed", "task.reopened"]);
 const MANAGEMENT_UNDO = new Set([
   "project.updated", "project.archived", "project.unarchived", "project.leader_changed",
   "member.added", "member.removed", "member.role_changed",
   "section.added", "section.renamed", "section.moved", "section.done_changed",
 ]);
 const TRANSACTIONAL_TASK_UNDO = new Set([
-  "task.updated", "task.moved", ...TRASH_TASK_UNDO,
+  "task.updated", "task.moved", ...FAMILY_TASK_UNDO,
   "task.assigned", "task.sent_for_approval", "task.sent_back", "task.approver_changed",
 ]);
 
@@ -138,37 +139,39 @@ async function plan(row: any, user: Actor, projectId: string, tx?: Tx): Promise<
       };
     }
     case "task.completed": {
-      const t = await liveTask(id, projectId);
+      const t = await liveTask(id, projectId, tx);
       if (!t.completedAt) throw bad("This task was already reopened.");
       if (t.parentId) {
-        const parent = await db.task.findUniqueOrThrow({ where: { id: t.parentId } });
+        const parent = await (tx ?? db).task.findUniqueOrThrow({ where: { id: t.parentId } });
         if (parent.completedAt) throw bad("Reopen the parent task first.");
       }
       return {
         conflicts: [], subject: t.title,
         apply: async (tx) => {
-          if (t.parentId) { await tx.task.update({ where: { id }, data: { completedAt: null } }); return; }
+          const updatedAt = new Date(Math.max(Date.now(), t.updatedAt.getTime() + 1));
+          if (t.parentId) { await tx.task.update({ where: { id }, data: { completedAt: null, updatedAt } }); return; }
           const sec = b.sectionId ? await tx.section.findFirst({ where: { id: b.sectionId, projectId, isDone: false } }) : null;
           const dest = sec ?? (await tx.section.findFirstOrThrow({ where: { projectId, isDone: false }, orderBy: { position: "asc" } }));
-          await tx.task.update({ where: { id }, data: { completedAt: null, sectionId: dest.id, previousSectionId: b.previousSectionId ?? null } });
-          if (Array.isArray(f.subtaskIds) && f.subtaskIds.length) await tx.task.updateMany({ where: { id: { in: f.subtaskIds } }, data: { completedAt: null } });
+          await tx.task.update({ where: { id }, data: { completedAt: null, sectionId: dest.id, previousSectionId: b.previousSectionId ?? null, updatedAt } });
+          if (Array.isArray(f.subtaskIds) && f.subtaskIds.length) await tx.task.updateMany({ where: { id: { in: f.subtaskIds }, projectId, parentId: id, completedAt: f.completedAt ? new Date(f.completedAt) : { not: null } }, data: { completedAt: null } });
         },
       };
     }
     case "task.reopened": {
-      const t = await liveTask(id, projectId);
+      const t = await liveTask(id, projectId, tx);
       if (t.completedAt) throw bad("This task was already completed again.");
       return {
         conflicts: [], subject: t.title,
         apply: async (tx) => {
           const stamp = new Date(b.completedAt ?? Date.now());
-          if (t.parentId) { await tx.task.update({ where: { id }, data: { completedAt: stamp } }); return; }
+          const updatedAt = new Date(Math.max(Date.now(), t.updatedAt.getTime() + 1));
+          if (t.parentId) { await tx.task.update({ where: { id }, data: { completedAt: stamp, updatedAt } }); return; }
           const done = await tx.section.findFirstOrThrow({ where: { projectId, isDone: true } });
-          await tx.task.update({ where: { id }, data: { completedAt: stamp, sectionId: done.id, previousSectionId: t.sectionId } });
+          await tx.task.update({ where: { id }, data: { completedAt: stamp, sectionId: done.id, previousSectionId: t.sectionId, updatedAt } });
           // Subtasks that reopened with the parent close with it again, on the same completedAt (APL-2721).
           // One ticked done on its own since then keeps its own completedAt. One moved to Trash since closes too:
           // the reopen never lists a subtask that was already in Trash, so these ids are only ones it changed (APL-2870).
-          if (Array.isArray(f.subtaskIds) && f.subtaskIds.length) await tx.task.updateMany({ where: { id: { in: f.subtaskIds }, completedAt: null }, data: { completedAt: stamp } });
+          if (Array.isArray(f.subtaskIds) && f.subtaskIds.length) await tx.task.updateMany({ where: { id: { in: f.subtaskIds }, projectId, parentId: id, completedAt: null }, data: { completedAt: stamp } });
         },
       };
     }
@@ -514,8 +517,8 @@ export async function undoAction(user: Actor, logId: string, anyway = false) {
       try {
         if (TRANSACTIONAL_TASK_UNDO.has(row.action)) await tx.$queryRaw`SELECT "id" FROM "Task" WHERE "id" = ${row.targetId} AND "projectId" = ${projectId} FOR UPDATE`;
         else await tx.$queryRaw`SELECT "id" FROM "Project" WHERE "id" = ${projectId} FOR UPDATE NOWAIT`;
-        if (TRASH_TASK_UNDO.has(row.action)) {
-          // Restore may include a deleted parent and its same-deletion cohort.
+        if (FAMILY_TASK_UNDO.has(row.action)) {
+          // Trash and completion inverses can include a parent and its cohort.
           // Lock that family without waiting on a reverse parent/child order.
           const target = await tx.task.findUnique({ where: { id: row.targetId }, select: { parentId: true } });
           const root = target?.parentId ?? row.targetId;
