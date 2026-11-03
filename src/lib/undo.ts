@@ -11,7 +11,11 @@ import { undoRecord } from "@/lib/records";
 import { commentsEnabled, isCommentAction } from "@/lib/flags";
 import { assertCommentRoom } from "@/lib/comments";
 
-const TRANSACTIONAL_TASK_UNDO = new Set(["task.updated", "task.deleted", "task.created", "task.restored"]);
+const TRASH_TASK_UNDO = new Set(["task.deleted", "task.created", "task.restored"]);
+const TRANSACTIONAL_TASK_UNDO = new Set([
+  "task.updated", ...TRASH_TASK_UNDO,
+  "task.assigned", "task.sent_for_approval", "task.sent_back", "task.approver_changed",
+]);
 
 type Conflict = { field: string; before: unknown; after: unknown; now: unknown };
 type Plan = { conflicts: Conflict[]; apply: (tx: Tx) => Promise<void>; subject?: string; fields?: string };
@@ -86,7 +90,7 @@ async function plan(row: any, user: Actor, projectId: string, tx?: Tx): Promise<
       return { conflicts: fieldConflicts(keys, b, f, now), subject: t.title, fields: keys.map((k) => FIELD_LABEL[k] ?? k).join(", "), apply: async (tx) => { await tx.task.update({ where: { id }, data: { ...data, updatedAt: new Date(Math.max(Date.now(), t.updatedAt.getTime() + 1)) } }); } };
     }
     case "task.assigned": case "task.sent_for_approval": case "task.sent_back": {
-      const t = await liveTask(id, projectId);
+      const t = await liveTask(id, projectId, tx);
       // A send-back that cleared the approver (SHO-BUG-6) recorded it, so Undo puts the approver back too.
       const keys = "approverId" in f ? ["assigneeId", "approverId"] : ["assigneeId"];
       return {
@@ -94,18 +98,18 @@ async function plan(row: any, user: Actor, projectId: string, tx?: Tx): Promise<
         apply: async (tx) => {
           if (!(await activeMember(tx, projectId, b.assigneeId, WORKERS))) throw bad("The previous assignee can no longer take this task.");
           if ("approverId" in f && b.approverId && !(await activeMember(tx, projectId, b.approverId, WORKERS))) throw bad("The previous approver can no longer take that role.");
-          await tx.task.update({ where: { id }, data: { assigneeId: b.assigneeId, previousAssigneeId: b.previousAssigneeId ?? null, ...("approverId" in f ? { approverId: b.approverId ?? null } : {}) } });
+          await tx.task.update({ where: { id }, data: { assigneeId: b.assigneeId, previousAssigneeId: b.previousAssigneeId ?? null, updatedAt: new Date(Math.max(Date.now(), t.updatedAt.getTime() + 1)), ...("approverId" in f ? { approverId: b.approverId ?? null } : {}) } });
         },
       };
     }
     case "task.approver_changed": {
-      const t = await liveTask(id, projectId);
+      const t = await liveTask(id, projectId, tx);
       const keys = Object.keys(f).filter((k) => k === "approverId" || k === "assigneeId");
       return {
         conflicts: fieldConflicts(keys, b, f, { approverId: t.approverId, assigneeId: t.assigneeId }), subject: t.title, fields: "Approver",
         apply: async (tx) => {
           for (const k of keys) if (b[k] && !(await activeMember(tx, projectId, b[k], WORKERS))) throw bad("The previous person can no longer take that role.");
-          await tx.task.update({ where: { id }, data: Object.fromEntries(keys.map((k) => [k, b[k] ?? null])) });
+          await tx.task.update({ where: { id }, data: { ...Object.fromEntries(keys.map((k) => [k, b[k] ?? null])), updatedAt: new Date(Math.max(Date.now(), t.updatedAt.getTime() + 1)) } });
         },
       };
     }
@@ -501,7 +505,7 @@ export async function undoAction(user: Actor, logId: string, anyway = false) {
       // with management operations that already own those rows.
       await tx.$queryRaw`SELECT "id" FROM "Task" WHERE "id" = ${row.targetId} AND "projectId" = ${projectId} FOR UPDATE`;
       try {
-        if (row.action !== "task.updated") {
+        if (TRASH_TASK_UNDO.has(row.action)) {
           // Restore may include a deleted parent and its same-deletion cohort.
           // Lock that family without waiting on a reverse parent/child order.
           const target = await tx.task.findUnique({ where: { id: row.targetId }, select: { parentId: true } });
