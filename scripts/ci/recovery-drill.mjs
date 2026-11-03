@@ -63,7 +63,7 @@ try {
     INSERT INTO "Project" (id,"workspaceId",name,"updatedAt") VALUES ('recovery-p','recovery-w','Synthetic project',now());
     INSERT INTO "Section" (id,"projectId",name,position,"isDone") VALUES ('recovery-s','recovery-p','Done',0,true);
     INSERT INTO "Task" (id,"workspaceId","projectId","sectionId",title,"assigneeId","createdById","updatedAt") VALUES ('recovery-t','recovery-w','recovery-p','recovery-s','Snapshot title — Unicode ✓','recovery-u','recovery-u',now());
-    INSERT INTO "DealDetails" ("projectId","workspaceId","whyPursue",value,"submissionDeadline") VALUES ('recovery-p','recovery-w','Synthetic drill',12345678901234.56,'2026-10-29');
+    INSERT INTO "DealDetails" ("projectId","workspaceId","whyPursue",value,currency,"submissionDeadline") VALUES ('recovery-p','recovery-w','Synthetic drill',12345678901234.56,'USD','2026-10-29');
   `;
   for (const [index, sql] of seed.split(';').map((sql) => sql.trim()).filter(Boolean).entries()) {
     phase = 'seed-' + ['workspace', 'user', 'project', 'section', 'task', 'deal'][index];
@@ -103,6 +103,7 @@ try {
   for (const [sql, code] of [
     [`INSERT INTO "Section" (id,"projectId",name,position,"isDone") VALUES ('invalid-done','recovery-p','Second done',1,true)`, '23505'],
     [`UPDATE "Task" SET "assigneeId"='missing-user' WHERE id='recovery-t'`, '23503'],
+    [`UPDATE "DealDetails" SET currency=NULL WHERE "projectId"='recovery-p'`, '23514'],
   ]) {
     await assert.rejects(target.query(sql), (error) => error.code === code);
   }
