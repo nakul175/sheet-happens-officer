@@ -17,7 +17,7 @@ const migratedModeTests = [
 test("SHO-2881 keeps every per-mode test behind one automatic glob", () => {
   const defaultConfig = readFileSync("vitest.config.mts", "utf8");
   const modeConfig = readFileSync("vitest.modes.config.mts", "utf8");
-  const workflow = readFileSync(".github/workflows/ci.yml", "utf8");
+  const workflow = readFileSync(".github/workflows/qualification.yml", "utf8");
   const packageJson = JSON.parse(readFileSync("package.json", "utf8"));
   const committedModeTests = globSync(modeGlob).sort();
 
