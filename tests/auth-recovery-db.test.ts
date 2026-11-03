@@ -3,6 +3,7 @@
 import { afterAll, beforeAll, expect, it, vi } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import { db } from '@/lib/db';
+import { getOrCreateWorkspace } from '@/lib/workspace';
 import { consumeToken, hashToken, issueTokenAndSend } from '@/lib/auth';
 vi.mock('next/server',()=>({connection:vi.fn()}));
 const id='recovery-'+randomUUID();
@@ -45,3 +46,9 @@ for(const type of ['RESET','VERIFY'] as const){
   expect(await consumeToken(newer,type)).toBe(id);
  });
 }
+
+it('concurrent real bootstrap transactions converge on the sole workspace',async()=>{
+ const rows=await Promise.all(Array.from({length:12},()=>getOrCreateWorkspace()));
+ expect(new Set(rows.map(r=>r.id))).toEqual(new Set([workspaceId]));
+ expect(await db.workspace.count()).toBe(1);
+});

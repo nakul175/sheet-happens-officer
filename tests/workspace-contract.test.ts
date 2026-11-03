@@ -20,6 +20,7 @@ it('locks before inspecting/creating an empty workspace',async()=>{
  m.create.mockImplementation(async()=>{order.push('create');return{id:'one'};});
  m.transaction.mockImplementation(fn=>fn({$queryRaw:m.lock,workspace:{findMany:m.findMany,create:m.create}}));
  expect(await getOrCreateWorkspace()).toEqual({id:'one'});expect(order).toEqual(['lock','read','create']);
+ expect(m.transaction).toHaveBeenCalledWith(expect.any(Function),{isolationLevel:'ReadCommitted'});
 });
 it('bootstrap never selects oldest or creates a third workspace in ambiguous storage',async()=>{
  m.findMany.mockResolvedValue([{id:'one'},{id:'two'}]);m.transaction.mockImplementation(fn=>fn({$queryRaw:m.lock,workspace:{findMany:m.findMany,create:m.create}}));
