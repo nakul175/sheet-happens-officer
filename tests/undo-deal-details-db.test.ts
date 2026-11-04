@@ -174,3 +174,58 @@ it('details Undo preserves a future project version', async () => {
   expect((await db.dealDetails.findUniqueOrThrow({ where: { projectId: f.project.id } })).whyPursue).toBe('before');
   completed.push('monotonic-version');
 });
+
+it('rechecks archive after preflight before reverting deal details', async () => {
+  const f = await fixture(), pause = pauseBeforeTransactions(1);
+  const pending = Promise.allSettled([undoAction(editor, f.action.id)]);
+  try {
+    await pause.ready();
+    await db.project.update({ where: { id: f.project.id }, data: { archivedAt: new Date() } });
+    const before = await snapshot(f.project.id); pause.release();
+    expect(await pending).toEqual([expect.objectContaining({ status: 'rejected', reason: expect.objectContaining({ status: 409 }) })]);
+    expect(await snapshot(f.project.id)).toEqual(before);
+    completed.push('archive-after-preflight');
+  } finally { pause.release(); await pending; }
+});
+
+it('a competing project-row lock returns a retryable conflict without a claim', async () => {
+  const f = await fixture(); let release!: () => void, locked = false;
+  const held = new Promise<void>((resolve) => { release = resolve; });
+  const owner = transact(async (tx) => { await tx.$queryRaw`SELECT "id" FROM "Project" WHERE "id" = ${f.project.id} FOR UPDATE`; locked = true; await held; }, { timeout: 15_000 });
+  const ownerResult = Promise.allSettled([owner]);
+  try {
+    await vi.waitFor(() => expect(locked).toBe(true), { timeout: 5000 });
+    const before = await snapshot(f.project.id);
+    await expect(undoAction(editor, f.action.id)).rejects.toMatchObject({ status: 409 });
+    expect(await snapshot(f.project.id)).toEqual(before);
+    completed.push('project-lock-conflict');
+  } finally { release(); expect(await ownerResult).toEqual([{ status: 'fulfilled', value: undefined }]); }
+  await undoAction(editor, f.action.id);
+  expect((await db.dealDetails.findUniqueOrThrow({ where: { projectId: f.project.id } })).whyPursue).toBe('before');
+});
+
+it('a competing deal-details row lock returns a retryable conflict without a claim', async () => {
+  const f = await fixture(); let release!: () => void, locked = false;
+  const held = new Promise<void>((resolve) => { release = resolve; });
+  const owner = transact(async (tx) => { await tx.$queryRaw`SELECT "projectId" FROM "DealDetails" WHERE "projectId" = ${f.project.id} FOR UPDATE`; locked = true; await held; }, { timeout: 15_000 });
+  const ownerResult = Promise.allSettled([owner]);
+  try {
+    await vi.waitFor(() => expect(locked).toBe(true), { timeout: 5000 });
+    const before = await snapshot(f.project.id);
+    await expect(undoAction(editor, f.action.id)).rejects.toMatchObject({ status: 409 });
+    expect(await snapshot(f.project.id)).toEqual(before);
+    completed.push('details-row-lock-conflict');
+  } finally { release(); expect(await ownerResult).toEqual([{ status: 'fulfilled', value: undefined }]); }
+  await undoAction(editor, f.action.id);
+  expect((await db.dealDetails.findUniqueOrThrow({ where: { projectId: f.project.id } })).whyPursue).toBe('before');
+});
+
+it('rejects a details action whose target is not its authorized deal', async () => {
+  const first = await fixture(), second = await fixture();
+  await db.actionLog.update({ where: { id: first.action.id }, data: { targetId: second.project.id } });
+  const beforeFirst = await snapshot(first.project.id), beforeSecond = await snapshot(second.project.id);
+  await expect(undoAction(editor, first.action.id)).rejects.toMatchObject({ status: 409 });
+  expect(await snapshot(first.project.id)).toEqual(beforeFirst);
+  expect(await snapshot(second.project.id)).toEqual(beforeSecond);
+  completed.push('foreign-target-rejected');
+});

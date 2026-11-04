@@ -2,7 +2,7 @@
 // SHO-US-6.4: Undo from the stored before-state, with a conflict warning and "Undo anyway".
 import { db } from "@/lib/db";
 import { ApiError, notFound } from "@/lib/http";
-import { WORKERS, activeMember, isAdmin, requireManage, requireWrite, type Actor, type Tx } from "@/lib/access";
+import { WORKERS, WORKSTREAM_DEAL, activeMember, isAdmin, requireManage, requireWrite, type Actor, type Tx } from "@/lib/access";
 import { formatDueDate } from "@/lib/dates";
 import { auditTx, logAction, notify } from "@/lib/notify";
 import { deleteTask, recordAccess, restoreTask } from "@/lib/tasks";
@@ -29,7 +29,7 @@ const TRANSACTIONAL_TASK_UNDO = new Set([
   "task.assigned", "task.sent_for_approval", "task.sent_back", "task.approver_changed",
 ]);
 
-const TRANSACTIONAL_UNDO = new Set([...TRANSACTIONAL_TASK_UNDO, ...MANAGEMENT_UNDO, "deal.stage_changed"]);
+const TRANSACTIONAL_UNDO = new Set([...TRANSACTIONAL_TASK_UNDO, ...MANAGEMENT_UNDO, "deal.stage_changed", "deal.details_updated"]);
 
 type Conflict = { field: string; before: unknown; after: unknown; now: unknown };
 type Plan = { conflicts: Conflict[]; apply: (tx: Tx) => Promise<void>; subject?: string; fields?: string };
@@ -232,13 +232,13 @@ async function plan(row: any, user: Actor, projectId: string, tx?: Tx): Promise<
       if (id !== projectId) throw bad("This stage action no longer belongs to this deal.");
       // project-lookup-ok: Undo preparation authorizes this exact project through recordAccess before planning.
       const p = await (tx ?? db).project.findUniqueOrThrow({ where: { id: projectId } });
-      if (p.typeId !== "wst_deal" || !p.pipelineId) throw bad("This is no longer a deal with stages.");
+      if (p.typeId !== WORKSTREAM_DEAL || !p.pipelineId) throw bad("This is no longer a deal with stages.");
       // Retired stages remain valid historical targets. Normal moves reject them; Undo preserves the original ID.
       if (!b.stageId || !(await (tx ?? db).stage.findFirst({ where: { id: b.stageId, pipelineId: p.pipelineId } }))) throw bad("The earlier stage no longer exists.");
       return {
         conflicts: p.stageId !== f.stageId ? [{ field: "stage", before: b.stage, after: f.stage, now: p.stageId }] : [], subject: p.name, fields: "Stage",
         apply: async (tx) => {
-          const changed = await tx.project.updateMany({ where: { id: projectId, typeId: "wst_deal", pipelineId: p.pipelineId, stageId: p.stageId, updatedAt: p.updatedAt, archivedAt: null }, data: { stageId: b.stageId, stageReason: b.reason ?? null, stageChangedAt: new Date(), updatedAt: new Date(Math.max(Date.now(), p.updatedAt.getTime() + 1)) } });
+          const changed = await tx.project.updateMany({ where: { id: projectId, typeId: WORKSTREAM_DEAL, pipelineId: p.pipelineId, stageId: p.stageId, updatedAt: p.updatedAt, archivedAt: null }, data: { stageId: b.stageId, stageReason: b.reason ?? null, stageChangedAt: new Date(), updatedAt: new Date(Math.max(Date.now(), p.updatedAt.getTime() + 1)) } });
           if (!changed.count) throw bad("This deal changed. Refresh before undoing its stage.");
         },
       };
@@ -300,9 +300,11 @@ async function plan(row: any, user: Actor, projectId: string, tx?: Tx): Promise<
       };
     }
     case "deal.details_updated": {
-      // project-lookup-ok: prepare authorizes recordAccess before preparing this guarded undo
-      const project = await db.project.findUniqueOrThrow({ where: { id: projectId } });
-      const d = await db.dealDetails.findUnique({ where: { projectId } });
+      if (id !== projectId) throw bad("This details action no longer belongs to this deal.");
+      // project-lookup-ok: prepare authorizes this exact project through recordAccess before planning.
+      const project = await (tx ?? db).project.findUniqueOrThrow({ where: { id: projectId } });
+      if (project.typeId !== WORKSTREAM_DEAL) throw bad("This is no longer a deal.");
+      const d = await (tx ?? db).dealDetails.findUnique({ where: { projectId } });
       if (!d) throw bad("This deal no longer exists.");
       const keys = Object.keys(f);
       const now: Record<string, unknown> = {
@@ -315,7 +317,7 @@ async function plan(row: any, user: Actor, projectId: string, tx?: Tx): Promise<
       const data: Record<string, unknown> = {};
       for (const k of keys) data[k] = (k === "expectedClose" || k === "submissionDeadline") && b[k] ? new Date(`${b[k]}T00:00:00Z`) : b[k] ?? null;
       return { conflicts: fieldConflicts(keys, b, f, now), subject: "the deal", fields: keys.join(", "), apply: async (tx) => {
-        const changed = await tx.project.updateMany({ where: { id: projectId, pipelineId: project.pipelineId, updatedAt: project.updatedAt }, data: { updatedAt: new Date() } });
+        const changed = await tx.project.updateMany({ where: { id: projectId, typeId: WORKSTREAM_DEAL, pipelineId: project.pipelineId, updatedAt: project.updatedAt, archivedAt: null }, data: { updatedAt: new Date(Math.max(Date.now(), project.updatedAt.getTime() + 1)) } });
         if (!changed.count) throw bad("This deal changed. Refresh before undoing its details.");
         await tx.dealDetails.update({ where: { projectId }, data });
       } };
@@ -587,6 +589,7 @@ export async function undoAction(user: Actor, logId: string, anyway = false) {
           const previousStageId = (row.beforeState as { stageId?: string } | null)?.stageId;
           if (previousStageId) await tx.$queryRaw`SELECT "id" FROM "Stage" WHERE "id" = ${previousStageId} FOR SHARE NOWAIT`;
         }
+        if (row.action === "deal.details_updated") await tx.$queryRaw`SELECT "projectId" FROM "DealDetails" WHERE "projectId" = ${projectId} FOR UPDATE NOWAIT`;
         await tx.$queryRaw`SELECT "id" FROM "ActionLog" WHERE "id" = ${row.id} FOR UPDATE NOWAIT`;
       } catch (error) {
         if ((error as { code?: string; meta?: { code?: string } }).code === "P2010" && (error as { meta?: { code?: string } }).meta?.code === "55P03") {
