@@ -29,7 +29,7 @@ const TRANSACTIONAL_TASK_UNDO = new Set([
   "task.assigned", "task.sent_for_approval", "task.sent_back", "task.approver_changed",
 ]);
 
-const TRANSACTIONAL_UNDO = new Set([...TRANSACTIONAL_TASK_UNDO, ...MANAGEMENT_UNDO]);
+const TRANSACTIONAL_UNDO = new Set([...TRANSACTIONAL_TASK_UNDO, ...MANAGEMENT_UNDO, "deal.stage_changed"]);
 
 type Conflict = { field: string; before: unknown; after: unknown; now: unknown };
 type Plan = { conflicts: Conflict[]; apply: (tx: Tx) => Promise<void>; subject?: string; fields?: string };
@@ -229,14 +229,16 @@ async function plan(row: any, user: Actor, projectId: string, tx?: Tx): Promise<
       return { conflicts: [], subject: t.title, apply: async (tx) => { await deleteTask(user, id, { byUndo: true, tx }); } };
     }
     case "deal.stage_changed": {
-      // project-lookup-ok: Undo preparation already authorizes the action project through recordAccess before planning.
-      const p = await db.project.findUniqueOrThrow({ where: { id: projectId } });
+      if (id !== projectId) throw bad("This stage action no longer belongs to this deal.");
+      // project-lookup-ok: Undo preparation authorizes this exact project through recordAccess before planning.
+      const p = await (tx ?? db).project.findUniqueOrThrow({ where: { id: projectId } });
+      if (p.typeId !== "wst_deal" || !p.pipelineId) throw bad("This is no longer a deal with stages.");
       // Retired stages remain valid historical targets. Normal moves reject them; Undo preserves the original ID.
-      if (!b.stageId || !(await db.stage.findFirst({ where: { id: b.stageId, pipelineId: p.pipelineId ?? "" } }))) throw bad("The earlier stage no longer exists.");
+      if (!b.stageId || !(await (tx ?? db).stage.findFirst({ where: { id: b.stageId, pipelineId: p.pipelineId } }))) throw bad("The earlier stage no longer exists.");
       return {
         conflicts: p.stageId !== f.stageId ? [{ field: "stage", before: b.stage, after: f.stage, now: p.stageId }] : [], subject: p.name, fields: "Stage",
         apply: async (tx) => {
-          const changed = await tx.project.updateMany({ where: { id: projectId, pipelineId: p.pipelineId, stageId: p.stageId, updatedAt: p.updatedAt }, data: { stageId: b.stageId, stageReason: b.reason ?? null, stageChangedAt: new Date() } });
+          const changed = await tx.project.updateMany({ where: { id: projectId, typeId: "wst_deal", pipelineId: p.pipelineId, stageId: p.stageId, updatedAt: p.updatedAt, archivedAt: null }, data: { stageId: b.stageId, stageReason: b.reason ?? null, stageChangedAt: new Date(), updatedAt: new Date(Math.max(Date.now(), p.updatedAt.getTime() + 1)) } });
           if (!changed.count) throw bad("This deal changed. Refresh before undoing its stage.");
         },
       };
@@ -580,6 +582,10 @@ export async function undoAction(user: Actor, logId: string, anyway = false) {
           if (contactId) await tx.$queryRaw`SELECT "id" FROM "Contact" WHERE "id" = ${contactId} FOR SHARE NOWAIT`;
           const organisationId = prior?.organisationId;
           if (organisationId) await tx.$queryRaw`SELECT "id" FROM "Organisation" WHERE "id" = ${organisationId} FOR SHARE NOWAIT`;
+        }
+        if (row.action === "deal.stage_changed") {
+          const previousStageId = (row.beforeState as { stageId?: string } | null)?.stageId;
+          if (previousStageId) await tx.$queryRaw`SELECT "id" FROM "Stage" WHERE "id" = ${previousStageId} FOR SHARE NOWAIT`;
         }
         await tx.$queryRaw`SELECT "id" FROM "ActionLog" WHERE "id" = ${row.id} FOR UPDATE NOWAIT`;
       } catch (error) {
