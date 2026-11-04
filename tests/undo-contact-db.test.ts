@@ -138,3 +138,49 @@ it('allows an active author to undo a contact creation', async () => {
   expect((await db.contact.findUniqueOrThrow({ where: { id: f.contact.id } })).removedAt).not.toBeNull();
   completed.push('author-positive');
 });
+
+it('allows an active author to restore a removed contact', async () => {
+  const f = await fixture('contact.removed');
+  await undoAction(author, f.log.id);
+  expect((await db.contact.findUniqueOrThrow({ where: { id: f.contact.id } })).removedAt).toBeNull();
+  completed.push('restore-positive');
+});
+
+it('allows a current Admin to restore another person’s removed contact', async () => {
+  const f = await fixture('contact.removed');
+  await db.user.update({ where: { id: author.id }, data: { deactivatedAt: new Date() } });
+  await undoAction(admin, f.log.id);
+  expect((await db.contact.findUniqueOrThrow({ where: { id: f.contact.id } })).removedAt).toBeNull();
+  expect((await db.actionLog.findUniqueOrThrow({ where: { id: f.log.id } })).undoneById).toBe(admin.id);
+  completed.push('admin-positive');
+});
+
+it('a competing contact row lock returns a retryable conflict and leaves Undo unchanged', async () => {
+  const f = await fixture('contact.created'); let release!: () => void, locked = false;
+  const held = new Promise<void>((resolve) => { release = resolve; });
+  const owner = transact(async (tx) => { await tx.$queryRaw`SELECT "id" FROM "Contact" WHERE "id" = ${f.contact.id} FOR UPDATE`; locked = true; await held; }, { timeout: 15_000 });
+  const ownerResult = Promise.allSettled([owner]);
+  try {
+    await vi.waitFor(() => expect(locked).toBe(true), { timeout: 5000 });
+    const before = await snapshot(f.contact.id);
+    await expect(undoAction(author, f.log.id)).rejects.toMatchObject({ status: 409 });
+    expect(await snapshot(f.contact.id)).toEqual(before);
+    completed.push('contact-lock-conflict');
+  } finally { release(); expect(await ownerResult).toEqual([{ status: 'fulfilled', value: undefined }]); }
+  await undoAction(author, f.log.id);
+  expect((await db.contact.findUniqueOrThrow({ where: { id: f.contact.id } })).removedAt).not.toBeNull();
+});
+
+it('activity failure rolls the inverse and claim back; retry succeeds', async () => {
+  const f = await fixture('contact.created'), before = await snapshot(f.contact.id);
+  vi.spyOn(db, '$transaction').mockImplementationOnce((async (callback: (tx: Tx) => Promise<unknown>) => transact(async (tx) => {
+    const create = vi.spyOn(tx.actionLog, 'create').mockRejectedValueOnce(Error('CONTACT_UNDO_ACTIVITY_FAILURE'));
+    try { return await callback(tx); } finally { create.mockRestore(); }
+  })) as typeof db.$transaction);
+  await expect(undoAction(author, f.log.id)).rejects.toThrow('CONTACT_UNDO_ACTIVITY_FAILURE');
+  vi.restoreAllMocks();
+  expect(await snapshot(f.contact.id)).toEqual(before);
+  await undoAction(author, f.log.id);
+  expect((await db.contact.findUniqueOrThrow({ where: { id: f.contact.id } })).removedAt).not.toBeNull();
+  completed.push('activity-rollback-retry');
+});

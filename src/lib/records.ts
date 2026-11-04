@@ -307,7 +307,7 @@ async function planRecord(row: { action: string; targetId: string; beforeState: 
       return { conflicts: diff(keys, b, f, { name: o.name, kind: o.kind, country: o.country, level: o.level, parentId: o.parentId }), apply: async (tx) => { await tx.organisation.update({ where: { id }, data: Object.fromEntries(keys.map((k) => [k, b[k] ?? null])) }); } };
     }
     case "contact.created": case "contact.removed": {
-      const c = await db.contact.findUnique({ where: { id } });
+      const c = await (tx ?? db).contact.findUnique({ where: { id } });
       if (!c) throw bad("This contact no longer exists.");
       const remove = row.action === "contact.created";
       if (remove === !!c.removedAt) throw bad(remove ? "This contact is already removed." : "This contact is already back.");
@@ -389,6 +389,43 @@ export async function undoRecord(user: Actor, row: { id: string; action: string;
       if (claimed.count !== 1) throw new ApiError(409, "This action was already undone.");
       await plan.apply(tx);
       await logAction(tx, { actorId: user.id, projectId: null, targetType: "note", targetId: fresh.targetId, action: "undo", before: { undoes: fresh.id, action: fresh.action }, after: { undoes: fresh.id, label: UNDO_LABELS[fresh.action], anyway: false } });
+      return { label: UNDO_LABELS[fresh.action], noticesSent: false, overrode: false };
+    }, { isolationLevel: "ReadCommitted" });
+  }
+  if (row.action === "contact.created" || row.action === "contact.removed") {
+    if (row.targetType !== "contact") throw new ApiError(409, "This contact action has changed. Reload before undoing it.");
+    return db.$transaction(async (tx) => {
+      let contact;
+      let currentUser;
+      try {
+        // Lock the resource before planning, then the actor and action. This makes
+        // direct contact edits and competing Undo requests serialize with the inverse.
+        await tx.$queryRaw`SELECT "id" FROM "Contact" WHERE "id" = ${row.targetId} FOR UPDATE NOWAIT`;
+        await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${user.id} FOR SHARE NOWAIT`;
+        await tx.$queryRaw`SELECT "id" FROM "ActionLog" WHERE "id" = ${row.id} FOR UPDATE NOWAIT`;
+        contact = await tx.contact.findUnique({ where: { id: row.targetId } });
+        currentUser = await tx.user.findUnique({ where: { id: user.id }, select: { workspaceId: true, orgRole: true, deactivatedAt: true, emailVerifiedAt: true } });
+      } catch (error) {
+        if ((error as { code?: string; meta?: { code?: string } }).code === "P2010" && (error as { meta?: { code?: string } }).meta?.code === "55P03") {
+          throw new ApiError(409, "This contact or its access is changing. Reload and try again.");
+        }
+        throw error;
+      }
+      if (!contact || !currentUser || !isActive(currentUser) || currentUser.workspaceId !== contact.workspaceId) throw notFound("Contact");
+      const currentActor = { ...user, orgRole: currentUser.orgRole };
+      requireCrm(currentActor);
+      const fresh = await tx.actionLog.findUnique({ where: { id: row.id } });
+      if (!fresh || fresh.projectId || fresh.action !== row.action || fresh.targetType !== "contact" || fresh.targetId !== contact.id) {
+        throw new ApiError(409, "This contact action has changed. Reload before undoing it.");
+      }
+      if (fresh.actorId !== user.id && !isAdmin(currentActor)) throw new ApiError(403, "You can only undo your own actions.");
+      if (fresh.undoneAt) throw new ApiError(409, "This action was already undone.");
+      if (isTooOldToUndo(fresh.createdAt)) throw new ApiError(409, "Too old to undo", { tooOld: true });
+      const plan = await planRecord(fresh, currentActor, tx);
+      const claimed = await tx.actionLog.updateMany({ where: { id: fresh.id, undoneAt: null }, data: { undoneAt: new Date(), undoneById: user.id } });
+      if (claimed.count !== 1) throw new ApiError(409, "This action was already undone.");
+      await plan.apply(tx);
+      await logAction(tx, { actorId: user.id, projectId: null, targetType: "contact", targetId: fresh.targetId, action: "undo", before: { undoes: fresh.id, action: fresh.action }, after: { undoes: fresh.id, label: UNDO_LABELS[fresh.action], anyway: false } });
       return { label: UNDO_LABELS[fresh.action], noticesSent: false, overrode: false };
     }, { isolationLevel: "ReadCommitted" });
   }
