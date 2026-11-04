@@ -121,3 +121,57 @@ it('allows a current author to archive and unarchive with one action each', asyn
   expect(await db.actionLog.count({ where: { targetType: 'organisation', targetId: org.id, action: { in: ['organisation.archived', 'organisation.unarchived'] } } })).toBe(2);
   completed.push('author-archive-unarchive-positive');
 });
+
+it('refuses an unarchive if the organisation changed after preflight', async () => {
+  const org = await fixture(true), pause = pauseBeforeTransactions(1);
+  const pending = Promise.allSettled([archiveOrganisation(author, org.id, false)]);
+  try {
+    await pause.ready(); await db.organisation.update({ where: { id: org.id }, data: { archivedAt: null } });
+    const before = await snapshot(org.id); pause.release();
+    expect(await pending).toEqual([expect.objectContaining({ status: 'rejected', reason: expect.objectContaining({ status: 409 }) })]);
+    expect(await snapshot(org.id)).toEqual(before);
+    completed.push('unarchive-changed-after-preflight-denied');
+  } finally { pause.release(); await pending; }
+});
+
+it('allows a current Admin to archive another author’s organisation', async () => {
+  const org = await fixture();
+  await archiveOrganisation(admin, org.id, true);
+  expect((await db.organisation.findUniqueOrThrow({ where: { id: org.id } })).archivedAt).not.toBeNull();
+  expect(await db.actionLog.count({ where: { targetType: 'organisation', targetId: org.id, action: 'organisation.archived', actorId: admin.id } })).toBe(1);
+  completed.push('admin-positive');
+});
+
+it('a competing organisation row lock returns a retryable conflict', async () => {
+  const org = await fixture();
+  let release!: () => void, locked = false;
+  const held = new Promise<void>((resolve) => { release = resolve; });
+  const owner = transact(async (tx) => {
+    await tx.$queryRaw`SELECT "id" FROM "Organisation" WHERE "id" = ${org.id} FOR UPDATE`;
+    locked = true; await held;
+  }, { timeout: 15_000 });
+  const ownerResult = Promise.allSettled([owner]);
+  try {
+    await vi.waitFor(() => expect(locked).toBe(true), { timeout: 5000 });
+    const before = await snapshot(org.id);
+    await expect(archiveOrganisation(author, org.id, true)).rejects.toMatchObject({ status: 409 });
+    expect(await snapshot(org.id)).toEqual(before);
+    completed.push('organisation-lock-conflict');
+  } finally { release(); expect(await ownerResult).toEqual([{ status: 'fulfilled', value: undefined }]); }
+  await archiveOrganisation(author, org.id, true);
+  expect((await db.organisation.findUniqueOrThrow({ where: { id: org.id } })).archivedAt).not.toBeNull();
+});
+
+it('rolls archive and activity back together, then allows a retry', async () => {
+  const org = await fixture(), before = await snapshot(org.id);
+  vi.spyOn(db, '$transaction').mockImplementationOnce((async (callback: (tx: Tx) => Promise<unknown>) => transact(async (tx) => {
+    const create = vi.spyOn(tx.actionLog, 'create').mockRejectedValueOnce(Error('ORGANISATION_ARCHIVE_ACTIVITY_FAILURE'));
+    try { return await callback(tx); } finally { create.mockRestore(); }
+  })) as typeof db.$transaction);
+  await expect(archiveOrganisation(author, org.id, true)).rejects.toThrow('ORGANISATION_ARCHIVE_ACTIVITY_FAILURE');
+  vi.restoreAllMocks();
+  expect(await snapshot(org.id)).toEqual(before);
+  await archiveOrganisation(author, org.id, true);
+  expect((await db.organisation.findUniqueOrThrow({ where: { id: org.id } })).archivedAt).not.toBeNull();
+  completed.push('activity-rollback-retry');
+});
