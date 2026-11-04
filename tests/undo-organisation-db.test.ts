@@ -1,4 +1,4 @@
-// Real PostgreSQL interleavings for projectless organisation create/archive Undo.
+// Real PostgreSQL interleavings for projectless organisation Undo.
 import { afterAll, afterEach, beforeAll, expect, it, vi } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import { mkdirSync, writeFileSync } from 'node:fs';
@@ -51,12 +51,12 @@ afterAll(async () => {
     writeFileSync('test-results/undo-organisation/cleanup.json', JSON.stringify({ fixture: prefix, scope: 'organisation-undo-disposable-postgres', completed, cleanup }, null, 2));
   }
 });
-type Kind = 'organisation.created' | 'organisation.archived' | 'organisation.unarchived';
+type Kind = 'organisation.created' | 'organisation.archived' | 'organisation.unarchived' | 'organisation.updated';
 async function fixture(action: Kind, actionActorId = author.id) {
   const archivedAt = action === 'organisation.archived' ? new Date() : null;
-  const organisation = await db.organisation.create({ data: { workspaceId, name: prefix + '-buyer', createdById: author.id, archivedAt } });
+  const organisation = await db.organisation.create({ data: { workspaceId, name: action === 'organisation.updated' ? prefix + '-after' : prefix + '-buyer', createdById: author.id, archivedAt } });
   organisations.push(organisation.id);
-  const log = await db.actionLog.create({ data: { actorId: actionActorId, projectId: null, targetType: 'organisation', targetId: organisation.id, channel: 'SCREEN', action, beforeState: { archivedAt: action === 'organisation.unarchived' ? new Date().toISOString() : null }, afterState: { archivedAt: archivedAt?.toISOString() ?? null }, createdAt: new Date(Date.now() - 2000) } });
+  const log = await db.actionLog.create({ data: { actorId: actionActorId, projectId: null, targetType: 'organisation', targetId: organisation.id, channel: 'SCREEN', action, beforeState: action === 'organisation.updated' ? { name: prefix + '-before' } : { archivedAt: action === 'organisation.unarchived' ? new Date().toISOString() : null }, afterState: action === 'organisation.updated' ? { name: organisation.name } : { archivedAt: archivedAt?.toISOString() ?? null }, createdAt: new Date(Date.now() - 2000) } });
   return { organisation, log };
 }
 async function snapshot(id: string) {
@@ -188,4 +188,64 @@ it('activity failure rolls the inverse and action claim back; retry succeeds', a
   await undoAction(author, f.log.id);
   expect((await db.organisation.findUniqueOrThrow({ where: { id: f.organisation.id } })).archivedAt).not.toBeNull();
   completed.push('activity-rollback-retry');
+});
+
+it('refuses organisation.updated Undo after its author is deactivated during preflight', async () => {
+  const f = await fixture('organisation.updated'), pause = pauseBeforeTransactions(1);
+  const pending = Promise.allSettled([undoAction(author, f.log.id)]);
+  try {
+    await pause.ready(); await db.user.update({ where: { id: author.id }, data: { deactivatedAt: new Date() } });
+    const before = await snapshot(f.organisation.id); pause.release();
+    expect(await pending).toEqual([expect.objectContaining({ status: 'rejected', reason: expect.objectContaining({ status: 404 }) })]);
+    expect(await snapshot(f.organisation.id)).toEqual(before);
+    completed.push('update-deactivated-author-denied');
+  } finally { pause.release(); await pending; }
+});
+
+it('refuses organisation.updated Undo by a former Admin who edited another author’s organisation', async () => {
+  const f = await fixture('organisation.updated', admin.id), pause = pauseBeforeTransactions(1);
+  const pending = Promise.allSettled([undoAction(admin, f.log.id)]);
+  try {
+    await pause.ready(); await db.user.update({ where: { id: admin.id }, data: { orgRole: 'MEMBER' } });
+    const before = await snapshot(f.organisation.id); pause.release();
+    expect(await pending).toEqual([expect.objectContaining({ status: 'rejected', reason: expect.objectContaining({ status: 403 }) })]);
+    expect(await snapshot(f.organisation.id)).toEqual(before);
+    completed.push('update-former-admin-denied');
+  } finally { pause.release(); await pending; }
+});
+
+it('gives concurrent organisation.updated Undo requests one winner and one activity', async () => {
+  const f = await fixture('organisation.updated'), pause = pauseBeforeTransactions(2);
+  const pending = Promise.allSettled([undoAction(author, f.log.id), undoAction(author, f.log.id)]);
+  try {
+    await pause.ready(); pause.release(); const results = await pending;
+    expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+    expect(results.filter((r) => r.status === 'rejected')).toEqual([expect.objectContaining({ reason: expect.objectContaining({ status: 409 }) })]);
+    expect(await db.actionLog.count({ where: { targetType: 'organisation', targetId: f.organisation.id, action: 'undo' } })).toBe(1);
+    completed.push('update-duplicate-one-winner');
+  } finally { pause.release(); await pending; }
+});
+
+it('rejects a newer organisation edit after Undo preflight without overwriting it', async () => {
+  const f = await fixture('organisation.updated'), pause = pauseBeforeTransactions(1);
+  const pending = Promise.allSettled([undoAction(author, f.log.id)]);
+  try {
+    await pause.ready(); await db.organisation.update({ where: { id: f.organisation.id }, data: { name: prefix + '-latest' } });
+    const before = await snapshot(f.organisation.id); pause.release();
+    expect(await pending).toEqual([expect.objectContaining({ status: 'rejected', reason: expect.objectContaining({ status: 409, extra: expect.objectContaining({ needsConfirm: 'conflict' }) }) })]);
+    expect(await snapshot(f.organisation.id)).toEqual(before);
+    completed.push('update-newer-edit-conflict');
+  } finally { pause.release(); await pending; }
+});
+
+it('refuses organisation.updated Undo when the organisation was archived after preflight', async () => {
+  const f = await fixture('organisation.updated'), pause = pauseBeforeTransactions(1);
+  const pending = Promise.allSettled([undoAction(author, f.log.id)]);
+  try {
+    await pause.ready(); await db.organisation.update({ where: { id: f.organisation.id }, data: { archivedAt: new Date() } });
+    const before = await snapshot(f.organisation.id); pause.release();
+    expect(await pending).toEqual([expect.objectContaining({ status: 'rejected', reason: expect.objectContaining({ status: 409 }) })]);
+    expect(await snapshot(f.organisation.id)).toEqual(before);
+    completed.push('update-archived-after-preflight');
+  } finally { pause.release(); await pending; }
 });
