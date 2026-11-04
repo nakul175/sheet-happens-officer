@@ -146,3 +146,42 @@ it('allows the current author to update one contact with one action', async () =
   expect((await snapshot(row.id)).actions.filter((x) => x.action === 'contact.updated')).toHaveLength(1);
   completed.push('current-author-positive');
 });
+
+it('allows a current Known by recipient and logs the exact change', async () => {
+  const row = await fixture();
+  await updateContact(author, row.id, { knownBy: [recipient.id] });
+  const after = await snapshot(row.id);
+  expect(after.knownBy.map((item) => item.userId)).toEqual([recipient.id]);
+  expect(after.actions.filter((item) => item.action === 'contact.updated')).toHaveLength(1);
+  completed.push('current-recipient-positive');
+});
+
+it('fails closed while the contact row is being changed', async () => {
+  const row = await fixture(), before = await snapshot(row.id);
+  await db.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT "id" FROM "Contact" WHERE "id" = ${row.id} FOR UPDATE`;
+    await expect(updateContact(author, row.id, { name: prefix + '-locked-contact' })).rejects.toMatchObject({ status: 409 });
+  });
+  expect(await snapshot(row.id)).toEqual(before);
+  completed.push('contact-lock-denied');
+});
+
+it('fails closed while the author account is being changed', async () => {
+  const row = await fixture(), before = await snapshot(row.id);
+  await db.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${author.id} FOR UPDATE`;
+    await expect(updateContact(author, row.id, { name: prefix + '-locked-author' })).rejects.toMatchObject({ status: 409 });
+  });
+  expect(await snapshot(row.id)).toEqual(before);
+  completed.push('author-lock-denied');
+});
+
+it('fails closed while a proposed Known by recipient is being changed', async () => {
+  const row = await fixture(), before = await snapshot(row.id);
+  await db.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${recipient.id} FOR UPDATE`;
+    await expect(updateContact(author, row.id, { knownBy: [recipient.id] })).rejects.toMatchObject({ status: 409 });
+  });
+  expect(await snapshot(row.id)).toEqual(before);
+  completed.push('recipient-lock-denied');
+});

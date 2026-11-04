@@ -108,6 +108,38 @@ export async function updateContact(user: Actor, id: string, input: { name?: str
   }
   if (!Object.keys(after).length) return c;
   return db.$transaction(async (tx) => {
+    let fresh;
+    let account;
+    try {
+      await tx.$queryRaw`SELECT "id" FROM "Contact" WHERE "id" = ${id} FOR UPDATE NOWAIT`;
+      await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${user.id} FOR SHARE NOWAIT`;
+      for (const userId of [...(known ?? [])].sort()) await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${userId} FOR SHARE NOWAIT`;
+      fresh = await tx.contact.findUnique({ where: { id } });
+      account = await tx.user.findUnique({ where: { id: user.id }, select: { workspaceId: true, orgRole: true, deactivatedAt: true, emailVerifiedAt: true } });
+    } catch (error) {
+      if ((error as { code?: string; meta?: { code?: string } }).code === "P2010" && (error as { meta?: { code?: string } }).meta?.code === "55P03") {
+        throw new ApiError(409, "The contact or its access is changing. Reload and try again.");
+      }
+      throw error;
+    }
+    if (!fresh || !account || !isActive(account) || account.workspaceId !== c.workspaceId || fresh.workspaceId !== account.workspaceId) throw notFound("Contact");
+    const currentActor = { ...user, orgRole: account.orgRole };
+    requireCrm(currentActor);
+    requireContactEdit(currentActor, fresh);
+    if (fresh.removedAt || fresh.organisationId !== c.organisationId || fresh.createdById !== c.createdById ||
+        (["name", "role", "email", "phone"] as const).some((key) => fresh[key] !== c[key])) {
+      throw new ApiError(409, "This contact changed while you were editing. Reload and try again.");
+    }
+    if (known) {
+      const currentKnown = (await tx.contactKnownBy.findMany({ where: { contactId: id }, select: { userId: true } })).map((item) => item.userId).sort();
+      if (JSON.stringify(currentKnown) !== JSON.stringify(cur.map((item) => item.userId).sort())) {
+        throw new ApiError(409, "Known by changed while you were editing. Reload and try again.");
+      }
+      const currentRecipients = await tx.user.findMany({ where: { id: { in: known }, workspaceId: account.workspaceId }, select: { id: true, deactivatedAt: true, emailVerifiedAt: true } });
+      if (currentRecipients.length !== known.length || currentRecipients.some((recipient) => !isActive(recipient))) {
+        throw new ApiError(409, "Known by membership changed. Reload and try again.");
+      }
+    }
     const row = Object.keys(data).length ? await tx.contact.update({ where: { id }, data }) : c;
     if (known) { await tx.contactKnownBy.deleteMany({ where: { contactId: id } }); await tx.contactKnownBy.createMany({ data: known.map((userId) => ({ contactId: id, userId })) }); }
     await logAction(tx, { actorId: user.id, projectId: null, targetType: "contact", targetId: id, action: "contact.updated", before, after });
