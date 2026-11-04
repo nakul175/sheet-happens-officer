@@ -124,3 +124,117 @@ it('allows a current author to edit an active organisation with one action', asy
   expect(await db.actionLog.count({ where: { targetType: 'organisation', targetId: org.id, action: 'organisation.updated' } })).toBe(1);
   completed.push('author-positive');
 });
+
+it('refuses to overwrite a newer organisation edit made after preflight', async () => {
+  const org = await fixture(), pause = pauseBeforeTransactions(1);
+  const pending = Promise.allSettled([updateOrganisation(author, org.id, { name: prefix + '-stale' })]);
+  try {
+    await pause.ready(); await db.organisation.update({ where: { id: org.id }, data: { name: prefix + '-newer' } });
+    const before = await snapshot(org.id); pause.release();
+    expect(await pending).toEqual([expect.objectContaining({ status: 'rejected', reason: expect.objectContaining({ status: 409 }) })]);
+    expect(await snapshot(org.id)).toEqual(before);
+    completed.push('newer-edit-after-preflight-denied');
+  } finally { pause.release(); await pending; }
+});
+
+it('allows an active Admin to edit another author’s organisation', async () => {
+  const org = await fixture();
+  await updateOrganisation(admin, org.id, { kind: 'Partner' });
+  expect((await db.organisation.findUniqueOrThrow({ where: { id: org.id } })).kind).toBe('Partner');
+  expect(await db.actionLog.count({ where: { targetType: 'organisation', targetId: org.id, action: 'organisation.updated', actorId: admin.id } })).toBe(1);
+  completed.push('admin-positive');
+});
+
+it('restores a valid parent change and records its actual before and after facts', async () => {
+  const child = await fixture(), parent = await fixture(prefix + '-parent');
+  await updateOrganisation(author, child.id, { parentId: parent.id });
+  expect((await db.organisation.findUniqueOrThrow({ where: { id: child.id } })).parentId).toBe(parent.id);
+  const action = await db.actionLog.findFirstOrThrow({ where: { targetType: 'organisation', targetId: child.id, action: 'organisation.updated' } });
+  expect(action.beforeState).toMatchObject({ parentId: null });
+  expect(action.afterState).toMatchObject({ parentId: parent.id });
+  await db.organisation.update({ where: { id: child.id }, data: { parentId: null } });
+  completed.push('valid-parent-and-log-positive');
+});
+
+it('rejects a parent archived after update preflight without changing the child', async () => {
+  const child = await fixture(), parent = await fixture(prefix + '-parent');
+  const pause = pauseBeforeTransactions(1);
+  const pending = Promise.allSettled([updateOrganisation(author, child.id, { parentId: parent.id })]);
+  try {
+    await pause.ready(); await db.organisation.update({ where: { id: parent.id }, data: { archivedAt: new Date() } });
+    const before = await snapshot(child.id); pause.release();
+    expect(await pending).toEqual([expect.objectContaining({ status: 'rejected', reason: expect.objectContaining({ status: 409 }) })]);
+    expect(await snapshot(child.id)).toEqual(before);
+    completed.push('archived-parent-after-preflight-denied');
+  } finally { pause.release(); await pending; }
+});
+
+it('returns a retryable conflict when a parent row is being changed', async () => {
+  const child = await fixture(), parent = await fixture(prefix + '-parent');
+  let release!: () => void, locked = false;
+  const held = new Promise<void>((resolve) => { release = resolve; });
+  const owner = transact(async (tx) => {
+    await tx.$queryRaw`SELECT "id" FROM "Organisation" WHERE "id" = ${parent.id} FOR UPDATE`;
+    locked = true; await held;
+  }, { timeout: 15_000 });
+  const ownerResult = Promise.allSettled([owner]);
+  try {
+    await vi.waitFor(() => expect(locked).toBe(true), { timeout: 5000 });
+    const before = await snapshot(child.id);
+    await expect(updateOrganisation(author, child.id, { parentId: parent.id })).rejects.toMatchObject({ status: 409 });
+    expect(await snapshot(child.id)).toEqual(before);
+    completed.push('parent-lock-conflict');
+  } finally { release(); expect(await ownerResult).toEqual([{ status: 'fulfilled', value: undefined }]); }
+  await updateOrganisation(author, child.id, { parentId: parent.id });
+  await db.organisation.update({ where: { id: child.id }, data: { parentId: null } });
+});
+
+it('rolls the organisation edit back if activity logging fails, then retries once', async () => {
+  const org = await fixture(), before = await snapshot(org.id);
+  vi.spyOn(db, '$transaction').mockImplementationOnce((async (callback: (tx: Tx) => Promise<unknown>) => transact(async (tx) => {
+    const create = vi.spyOn(tx.actionLog, 'create').mockRejectedValueOnce(Error('ORGANISATION_UPDATE_ACTIVITY_FAILURE'));
+    try { return await callback(tx); } finally { create.mockRestore(); }
+  })) as typeof db.$transaction);
+  await expect(updateOrganisation(author, org.id, { name: prefix + '-edited' })).rejects.toThrow('ORGANISATION_UPDATE_ACTIVITY_FAILURE');
+  vi.restoreAllMocks();
+  expect(await snapshot(org.id)).toEqual(before);
+  await updateOrganisation(author, org.id, { name: prefix + '-edited' });
+  expect((await db.organisation.findUniqueOrThrow({ where: { id: org.id } })).name).toBe(prefix + '-edited');
+  completed.push('activity-rollback-retry');
+});
+
+it('gives two concurrent stale organisation edits one winner and one activity', async () => {
+  const org = await fixture(), pause = pauseBeforeTransactions(2);
+  const pending = Promise.allSettled([
+    updateOrganisation(author, org.id, { name: prefix + '-first' }),
+    updateOrganisation(author, org.id, { name: prefix + '-second' }),
+  ]);
+  try {
+    await pause.ready(); pause.release();
+    const results = await pending;
+    expect(results.filter((x) => x.status === 'fulfilled')).toHaveLength(1);
+    expect(results.filter((x) => x.status === 'rejected')).toEqual([expect.objectContaining({ reason: expect.objectContaining({ status: 409 }) })]);
+    expect(await db.actionLog.count({ where: { targetType: 'organisation', targetId: org.id, action: 'organisation.updated' } })).toBe(1);
+    completed.push('concurrent-edit-one-winner');
+  } finally { pause.release(); await pending; }
+});
+
+it('a competing account lock yields a retryable conflict before updating', async () => {
+  const org = await fixture();
+  let release!: () => void, locked = false;
+  const held = new Promise<void>((resolve) => { release = resolve; });
+  const owner = transact(async (tx) => {
+    await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${author.id} FOR UPDATE`;
+    locked = true; await held;
+  }, { timeout: 15_000 });
+  const ownerResult = Promise.allSettled([owner]);
+  try {
+    await vi.waitFor(() => expect(locked).toBe(true), { timeout: 5000 });
+    const before = await snapshot(org.id);
+    await expect(updateOrganisation(author, org.id, { name: prefix + '-edited' })).rejects.toMatchObject({ status: 409 });
+    expect(await snapshot(org.id)).toEqual(before);
+    completed.push('account-lock-conflict');
+  } finally { release(); expect(await ownerResult).toEqual([{ status: 'fulfilled', value: undefined }]); }
+  await updateOrganisation(author, org.id, { name: prefix + '-edited' });
+  expect((await db.organisation.findUniqueOrThrow({ where: { id: org.id } })).name).toBe(prefix + '-edited');
+});

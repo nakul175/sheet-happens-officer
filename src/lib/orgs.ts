@@ -2,7 +2,7 @@
 // 17 Oct 2026); only the creator and Admins edit or archive. Changes are logged with no project.
 import { db } from "@/lib/db";
 import { ApiError, notFound } from "@/lib/http";
-import { isAdmin, type Actor } from "@/lib/access";
+import { isActive, isAdmin, type Actor, type Tx } from "@/lib/access";
 import { requireCrm } from "@/lib/crm";
 import { logAction } from "@/lib/notify";
 
@@ -37,6 +37,25 @@ export async function assertNoCycle(orgId: string | null, parentId: string) {
     if (cur === orgId) throw new ApiError(400, "An organisation cannot sit under itself or under one of its own branches.");
     const row: { parentId: string | null } | null = await db.organisation.findUnique({ where: { id: cur }, select: { parentId: true } });
     cur = row?.parentId ?? null;
+  }
+}
+
+/** Hold the current ancestry steady while a parent change or its Undo commits. */
+export async function assertSafeParentTx(tx: Tx, orgId: string, parentId: string, workspaceId: string) {
+  let current: string | null = parentId;
+  for (let depth = 0; current; depth++) {
+    if (depth >= 50 || current === orgId) throw new ApiError(409, "That parent would make an organisation cycle.");
+    try {
+      await tx.$queryRaw`SELECT "id" FROM "Organisation" WHERE "id" = ${current} FOR SHARE NOWAIT`;
+    } catch (error) {
+      if ((error as { code?: string; meta?: { code?: string } }).code === "P2010" && (error as { meta?: { code?: string } }).meta?.code === "55P03") {
+        throw new ApiError(409, "The organisation tree is changing. Reload and try again.");
+      }
+      throw error;
+    }
+    const parent: { parentId: string | null; workspaceId: string; archivedAt: Date | null } | null = await tx.organisation.findUnique({ where: { id: current }, select: { parentId: true, workspaceId: true, archivedAt: true } });
+    if (!parent || parent.workspaceId !== workspaceId || (depth === 0 && parent.archivedAt)) throw new ApiError(409, "The parent organisation is no longer available.");
+    current = parent.parentId;
   }
 }
 
@@ -107,13 +126,35 @@ export async function updateOrganisation(user: Actor, id: string, input: Partial
   }
   if (!Object.keys(data).length) return org;
   return db.$transaction(async (tx) => {
+    let fresh;
+    let account;
+    try {
+      await tx.$queryRaw`SELECT "id" FROM "Organisation" WHERE "id" = ${id} FOR UPDATE NOWAIT`;
+      await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${user.id} FOR SHARE NOWAIT`;
+      fresh = await tx.organisation.findUnique({ where: { id } });
+      account = await tx.user.findUnique({ where: { id: user.id }, select: { workspaceId: true, orgRole: true, deactivatedAt: true, emailVerifiedAt: true } });
+    } catch (error) {
+      if ((error as { code?: string; meta?: { code?: string } }).code === "P2010" && (error as { meta?: { code?: string } }).meta?.code === "55P03") {
+        throw new ApiError(409, "This organisation or its access is changing. Reload and try again.");
+      }
+      throw error;
+    }
+    if (!fresh || !account || !isActive(account) || account.workspaceId !== fresh.workspaceId) throw notFound("Organisation");
+    const currentActor = { ...user, orgRole: account.orgRole };
+    requireCrm(currentActor);
+    requireOrgEdit(currentActor, fresh);
+    if (fresh.archivedAt) throw new ApiError(409, "This organisation is archived. Unarchive it first.");
+    if (["name", "kind", "country", "level", "parentId"].some((key) => fresh[key as keyof typeof fresh] !== org[key as keyof typeof org]) || !!fresh.archivedAt !== !!org.archivedAt) {
+      throw new ApiError(409, "This organisation changed while you were editing. Reload and try again.");
+    }
+    if ("parentId" in data && data.parentId) await assertSafeParentTx(tx, id, data.parentId as string, fresh.workspaceId);
     const row = await tx.organisation.update({ where: { id }, data });
     await logAction(tx, { actorId: user.id, projectId: null, targetType: "organisation", targetId: id, action: "organisation.updated", before, after });
     if ("parentId" in data) {
       await logAction(tx, { actorId: user.id, projectId: null, targetType: "organisation", targetId: id, action: "organisation.parent_changed", before: { parentId: before.parentId }, after: { parentId: after.parentId }, primary: false });
     }
     return row;
-  });
+  }, { isolationLevel: "ReadCommitted" });
 }
 
 /** AC4: an organisation is never deleted; it is archived. */

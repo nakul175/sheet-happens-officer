@@ -7,7 +7,7 @@ import { isActive, isAdmin, projectAccess, requireWrite, type Actor, type Tx } f
 import { WORKSTREAM_DEAL, requireCrm } from "@/lib/crm";
 import { formatDueDate, parseDueDate } from "@/lib/dates";
 import { logAction } from "@/lib/notify";
-import { orgOf, requireOrgEdit } from "@/lib/orgs";
+import { assertSafeParentTx, orgOf, requireOrgEdit } from "@/lib/orgs";
 import { taskAccess } from "@/lib/task-access";
 import { UNDO_LABELS, isTooOldToUndo, isUndoable } from "@/lib/undoable";
 
@@ -287,24 +287,6 @@ const norm = (v: unknown) => JSON.stringify(v === undefined ? null : v);
 const diff = (keys: string[], b: Record<string, unknown>, f: Record<string, unknown>, now: Record<string, unknown>) =>
   keys.filter((k) => norm(now[k]) !== norm(f[k])).map((k) => ({ field: k, before: b[k], after: f[k], now: now[k] }));
 
-async function requireSafeUndoParent(tx: Tx, orgId: string, parentId: string, workspaceId: string) {
-  let current: string | null = parentId;
-  for (let depth = 0; current; depth++) {
-    if (depth >= 50 || current === orgId) throw new ApiError(409, "Restoring that parent would make an organisation cycle.");
-    try {
-      await tx.$queryRaw`SELECT "id" FROM "Organisation" WHERE "id" = ${current} FOR SHARE NOWAIT`;
-    } catch (error) {
-      if ((error as { code?: string; meta?: { code?: string } }).code === "P2010" && (error as { meta?: { code?: string } }).meta?.code === "55P03") {
-        throw new ApiError(409, "The organisation tree is changing. Reload and try again.");
-      }
-      throw error;
-    }
-    const parent: { parentId: string | null; workspaceId: string; archivedAt: Date | null } | null = await tx.organisation.findUnique({ where: { id: current }, select: { parentId: true, workspaceId: true, archivedAt: true } });
-    if (!parent || parent.workspaceId !== workspaceId || (depth === 0 && parent.archivedAt)) throw new ApiError(409, "The previous parent is no longer available.");
-    current = parent.parentId;
-  }
-}
-
 async function planRecord(row: { action: string; targetId: string; beforeState: unknown; afterState: unknown }, user: Actor, tx?: Tx): Promise<RecPlan> {
   const b = (row.beforeState ?? {}) as Record<string, unknown>;
   const f = (row.afterState ?? {}) as Record<string, unknown>;
@@ -333,7 +315,7 @@ async function planRecord(row: { action: string; targetId: string; beforeState: 
             : [b[key], f[key]].every((v) => v === null || typeof v === "string");
         if (!valid) throw bad("This organisation action is incomplete.");
       }
-      if (keys.includes("parentId") && b.parentId) await requireSafeUndoParent(tx, id, b.parentId as string, o.workspaceId);
+      if (keys.includes("parentId") && b.parentId) await assertSafeParentTx(tx, id, b.parentId as string, o.workspaceId);
       return { conflicts: diff(keys, b, f, { name: o.name, kind: o.kind, country: o.country, level: o.level, parentId: o.parentId }), apply: async (tx) => { await tx.organisation.update({ where: { id }, data: Object.fromEntries(keys.map((k) => [k, b[k] ?? null])) }); } };
     }
     case "contact.created": case "contact.removed": {
