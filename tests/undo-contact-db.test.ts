@@ -52,12 +52,12 @@ afterAll(async () => {
     writeFileSync('test-results/undo-contact/cleanup.json', JSON.stringify({ fixture: prefix, scope: 'contact-undo-disposable-postgres', completed, cleanup }, null, 2));
   }
 });
-async function fixture(action: 'contact.created' | 'contact.removed') {
+async function fixture(action: 'contact.created' | 'contact.removed', actionActorId = author.id) {
   const org = await db.organisation.create({ data: { workspaceId, name: prefix + '-org', createdById: author.id } });
   organisations.push(org.id);
   const contact = await db.contact.create({ data: { workspaceId, organisationId: org.id, name: prefix + '-person', createdById: author.id, removedAt: action === 'contact.removed' ? new Date() : null } });
   contacts.push(contact.id);
-  const log = await db.actionLog.create({ data: { actorId: author.id, projectId: null, targetType: 'contact', targetId: contact.id, channel: 'SCREEN', action, beforeState: action === 'contact.removed' ? { removedAt: null } : undefined, afterState: action === 'contact.created' ? { organisationId: org.id } : { removedAt: new Date().toISOString() }, createdAt: new Date(Date.now() - 2000) } });
+  const log = await db.actionLog.create({ data: { actorId: actionActorId, projectId: null, targetType: 'contact', targetId: contact.id, channel: 'SCREEN', action, beforeState: action === 'contact.removed' ? { removedAt: null } : undefined, afterState: action === 'contact.created' ? { organisationId: org.id } : { removedAt: new Date().toISOString() }, createdAt: new Date(Date.now() - 2000) } });
   return { org, contact, log };
 }
 async function snapshot(contactId: string) {
@@ -98,6 +98,18 @@ it('refuses an Admin downgrade after preflight when undoing another person’s r
     expect(await pending).toEqual([expect.objectContaining({ status: 'rejected', reason: expect.objectContaining({ status: 403 }) })]);
     expect(await snapshot(f.contact.id)).toEqual(before);
     completed.push('admin-downgrade-after-preflight');
+  } finally { pause.release(); await pending; }
+});
+
+it('refuses a former Admin who authored the removal but no longer may edit the contact', async () => {
+  const f = await fixture('contact.removed', admin.id), pause = pauseBeforeTransactions(1);
+  const pending = Promise.allSettled([undoAction(admin, f.log.id)]);
+  try {
+    await pause.ready(); await db.user.update({ where: { id: admin.id }, data: { orgRole: 'MEMBER' } });
+    const before = await snapshot(f.contact.id); pause.release();
+    expect(await pending).toEqual([expect.objectContaining({ status: 'rejected', reason: expect.objectContaining({ status: 403 }) })]);
+    expect(await snapshot(f.contact.id)).toEqual(before);
+    completed.push('former-admin-own-action-denied');
   } finally { pause.release(); await pending; }
 });
 

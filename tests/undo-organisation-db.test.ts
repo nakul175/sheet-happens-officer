@@ -52,11 +52,11 @@ afterAll(async () => {
   }
 });
 type Kind = 'organisation.created' | 'organisation.archived' | 'organisation.unarchived';
-async function fixture(action: Kind) {
+async function fixture(action: Kind, actionActorId = author.id) {
   const archivedAt = action === 'organisation.archived' ? new Date() : null;
   const organisation = await db.organisation.create({ data: { workspaceId, name: prefix + '-buyer', createdById: author.id, archivedAt } });
   organisations.push(organisation.id);
-  const log = await db.actionLog.create({ data: { actorId: author.id, projectId: null, targetType: 'organisation', targetId: organisation.id, channel: 'SCREEN', action, beforeState: { archivedAt: action === 'organisation.unarchived' ? new Date().toISOString() : null }, afterState: { archivedAt: archivedAt?.toISOString() ?? null }, createdAt: new Date(Date.now() - 2000) } });
+  const log = await db.actionLog.create({ data: { actorId: actionActorId, projectId: null, targetType: 'organisation', targetId: organisation.id, channel: 'SCREEN', action, beforeState: { archivedAt: action === 'organisation.unarchived' ? new Date().toISOString() : null }, afterState: { archivedAt: archivedAt?.toISOString() ?? null }, createdAt: new Date(Date.now() - 2000) } });
   return { organisation, log };
 }
 async function snapshot(id: string) {
@@ -97,6 +97,18 @@ it('refuses an Admin downgrade after preflight when undoing another person’s a
     expect(await pending).toEqual([expect.objectContaining({ status: 'rejected', reason: expect.objectContaining({ status: 403 }) })]);
     expect(await snapshot(f.organisation.id)).toEqual(before);
     completed.push('admin-downgrade-after-preflight');
+  } finally { pause.release(); await pending; }
+});
+
+it('refuses a former Admin who authored the archive but no longer may edit the organisation', async () => {
+  const f = await fixture('organisation.archived', admin.id), pause = pauseBeforeTransactions(1);
+  const pending = Promise.allSettled([undoAction(admin, f.log.id)]);
+  try {
+    await pause.ready(); await db.user.update({ where: { id: admin.id }, data: { orgRole: 'MEMBER' } });
+    const before = await snapshot(f.organisation.id); pause.release();
+    expect(await pending).toEqual([expect.objectContaining({ status: 'rejected', reason: expect.objectContaining({ status: 403 }) })]);
+    expect(await snapshot(f.organisation.id)).toEqual(before);
+    completed.push('former-admin-own-action-denied');
   } finally { pause.release(); await pending; }
 });
 

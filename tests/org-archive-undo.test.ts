@@ -19,6 +19,7 @@ async function seed(archived: boolean) {
       email: `org-undo-${stamp}@aplyd.com`,
       name: "Undo",
       passwordHash: "not-used",
+      emailVerifiedAt: new Date(),
       orgRole: "MEMBER",
     },
   });
