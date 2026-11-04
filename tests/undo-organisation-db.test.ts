@@ -138,3 +138,42 @@ it.each(['organisation.created', 'organisation.archived', 'organisation.unarchiv
   expect(archived).toBe(kind !== 'organisation.archived');
   completed.push(kind + '-author-positive');
 });
+
+it('allows a current Admin to restore another person’s archived organisation', async () => {
+  const f = await fixture('organisation.archived');
+  await db.user.update({ where: { id: author.id }, data: { deactivatedAt: new Date() } });
+  await undoAction(admin, f.log.id);
+  expect((await db.organisation.findUniqueOrThrow({ where: { id: f.organisation.id } })).archivedAt).toBeNull();
+  expect((await db.actionLog.findUniqueOrThrow({ where: { id: f.log.id } })).undoneById).toBe(admin.id);
+  completed.push('admin-positive');
+});
+
+it('a competing organisation row lock returns a retryable conflict and leaves Undo unchanged', async () => {
+  const f = await fixture('organisation.created'); let release!: () => void, locked = false;
+  const held = new Promise<void>((resolve) => { release = resolve; });
+  const owner = transact(async (tx) => { await tx.$queryRaw`SELECT "id" FROM "Organisation" WHERE "id" = ${f.organisation.id} FOR UPDATE`; locked = true; await held; }, { timeout: 15_000 });
+  const ownerResult = Promise.allSettled([owner]);
+  try {
+    await vi.waitFor(() => expect(locked).toBe(true), { timeout: 5000 });
+    const before = await snapshot(f.organisation.id);
+    await expect(undoAction(author, f.log.id)).rejects.toMatchObject({ status: 409 });
+    expect(await snapshot(f.organisation.id)).toEqual(before);
+    completed.push('organisation-lock-conflict');
+  } finally { release(); expect(await ownerResult).toEqual([{ status: 'fulfilled', value: undefined }]); }
+  await undoAction(author, f.log.id);
+  expect((await db.organisation.findUniqueOrThrow({ where: { id: f.organisation.id } })).archivedAt).not.toBeNull();
+});
+
+it('activity failure rolls the inverse and action claim back; retry succeeds', async () => {
+  const f = await fixture('organisation.created'), before = await snapshot(f.organisation.id);
+  vi.spyOn(db, '$transaction').mockImplementationOnce((async (callback: (tx: Tx) => Promise<unknown>) => transact(async (tx) => {
+    const create = vi.spyOn(tx.actionLog, 'create').mockRejectedValueOnce(Error('ORGANISATION_UNDO_ACTIVITY_FAILURE'));
+    try { return await callback(tx); } finally { create.mockRestore(); }
+  })) as typeof db.$transaction);
+  await expect(undoAction(author, f.log.id)).rejects.toThrow('ORGANISATION_UNDO_ACTIVITY_FAILURE');
+  vi.restoreAllMocks();
+  expect(await snapshot(f.organisation.id)).toEqual(before);
+  await undoAction(author, f.log.id);
+  expect((await db.organisation.findUniqueOrThrow({ where: { id: f.organisation.id } })).archivedAt).not.toBeNull();
+  completed.push('activity-rollback-retry');
+});

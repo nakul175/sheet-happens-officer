@@ -292,7 +292,7 @@ async function planRecord(row: { action: string; targetId: string; beforeState: 
   const bad = (m: string) => new ApiError(409, m);
   switch (row.action) {
     case "organisation.created": case "organisation.archived": case "organisation.unarchived": {
-      const o = await db.organisation.findUnique({ where: { id } });
+      const o = await (tx ?? db).organisation.findUnique({ where: { id } });
       if (!o) throw bad("This organisation no longer exists.");
       // Undo reverses the logged action. Creating an organisation is undone by archiving it.
       const archive = row.action === "organisation.created" || row.action === "organisation.unarchived";
@@ -426,6 +426,41 @@ export async function undoRecord(user: Actor, row: { id: string; action: string;
       if (claimed.count !== 1) throw new ApiError(409, "This action was already undone.");
       await plan.apply(tx);
       await logAction(tx, { actorId: user.id, projectId: null, targetType: "contact", targetId: fresh.targetId, action: "undo", before: { undoes: fresh.id, action: fresh.action }, after: { undoes: fresh.id, label: UNDO_LABELS[fresh.action], anyway: false } });
+      return { label: UNDO_LABELS[fresh.action], noticesSent: false, overrode: false };
+    }, { isolationLevel: "ReadCommitted" });
+  }
+  if (row.action === "organisation.created" || row.action === "organisation.archived" || row.action === "organisation.unarchived") {
+    if (row.targetType !== "organisation") throw new ApiError(409, "This organisation action has changed. Reload before undoing it.");
+    return db.$transaction(async (tx) => {
+      let organisation;
+      let currentUser;
+      try {
+        await tx.$queryRaw`SELECT "id" FROM "Organisation" WHERE "id" = ${row.targetId} FOR UPDATE NOWAIT`;
+        await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${user.id} FOR SHARE NOWAIT`;
+        await tx.$queryRaw`SELECT "id" FROM "ActionLog" WHERE "id" = ${row.id} FOR UPDATE NOWAIT`;
+        organisation = await tx.organisation.findUnique({ where: { id: row.targetId } });
+        currentUser = await tx.user.findUnique({ where: { id: user.id }, select: { workspaceId: true, orgRole: true, deactivatedAt: true, emailVerifiedAt: true } });
+      } catch (error) {
+        if ((error as { code?: string; meta?: { code?: string } }).code === "P2010" && (error as { meta?: { code?: string } }).meta?.code === "55P03") {
+          throw new ApiError(409, "This organisation or its access is changing. Reload and try again.");
+        }
+        throw error;
+      }
+      if (!organisation || !currentUser || !isActive(currentUser) || currentUser.workspaceId !== organisation.workspaceId) throw notFound("Organisation");
+      const currentActor = { ...user, orgRole: currentUser.orgRole };
+      requireCrm(currentActor);
+      const fresh = await tx.actionLog.findUnique({ where: { id: row.id } });
+      if (!fresh || fresh.projectId || fresh.action !== row.action || fresh.targetType !== "organisation" || fresh.targetId !== organisation.id) {
+        throw new ApiError(409, "This organisation action has changed. Reload before undoing it.");
+      }
+      if (fresh.actorId !== user.id && !isAdmin(currentActor)) throw new ApiError(403, "You can only undo your own actions.");
+      if (fresh.undoneAt) throw new ApiError(409, "This action was already undone.");
+      if (isTooOldToUndo(fresh.createdAt)) throw new ApiError(409, "Too old to undo", { tooOld: true });
+      const plan = await planRecord(fresh, currentActor, tx);
+      const claimed = await tx.actionLog.updateMany({ where: { id: fresh.id, undoneAt: null }, data: { undoneAt: new Date(), undoneById: user.id } });
+      if (claimed.count !== 1) throw new ApiError(409, "This action was already undone.");
+      await plan.apply(tx);
+      await logAction(tx, { actorId: user.id, projectId: null, targetType: "organisation", targetId: fresh.targetId, action: "undo", before: { undoes: fresh.id, action: fresh.action }, after: { undoes: fresh.id, label: UNDO_LABELS[fresh.action], anyway: false } });
       return { label: UNDO_LABELS[fresh.action], noticesSent: false, overrode: false };
     }, { isolationLevel: "ReadCommitted" });
   }
