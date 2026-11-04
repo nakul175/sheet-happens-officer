@@ -61,7 +61,7 @@ async function fixture(action: 'contact.created' | 'contact.removed' | 'contact.
   return { org, contact, log };
 }
 async function snapshot(contactId: string) {
-  return { contact: await db.contact.findUniqueOrThrow({ where: { id: contactId } }), actions: await db.actionLog.findMany({ where: { targetType: 'contact', targetId: contactId }, orderBy: { id: 'asc' } }) };
+  return { contact: await db.contact.findUniqueOrThrow({ where: { id: contactId } }), knownBy: await db.contactKnownBy.findMany({ where: { contactId }, orderBy: { userId: 'asc' } }), actions: await db.actionLog.findMany({ where: { targetType: 'contact', targetId: contactId }, orderBy: { id: 'asc' } }) };
 }
 const transact = db.$transaction.bind(db);
 function pauseBeforeTransactions(count: number) {
@@ -243,4 +243,91 @@ it('rejects a newer contact edit after Undo preflight without overwriting it', a
     expect(await snapshot(f.contact.id)).toEqual(before);
     completed.push('update-newer-edit-conflict');
   } finally { pause.release(); await pending; }
+});
+
+it('restores a contact update for its active author', async () => {
+  const f = await fixture('contact.updated');
+  await undoAction(author, f.log.id);
+  expect((await db.contact.findUniqueOrThrow({ where: { id: f.contact.id } })).name).toBe(prefix + '-before');
+  completed.push('update-author-positive');
+});
+
+it('allows a current Admin to undo another author’s contact update', async () => {
+  const f = await fixture('contact.updated', admin.id);
+  await undoAction(admin, f.log.id);
+  expect((await db.contact.findUniqueOrThrow({ where: { id: f.contact.id } })).name).toBe(prefix + '-before');
+  completed.push('update-admin-positive');
+});
+
+it('allows explicit conflict override only for the field touched by contact.updated', async () => {
+  const f = await fixture('contact.updated');
+  await db.contact.update({ where: { id: f.contact.id }, data: { name: prefix + '-latest', role: 'External role' } });
+  await expect(undoAction(author, f.log.id)).rejects.toMatchObject({ status: 409, extra: expect.objectContaining({ needsConfirm: 'conflict' }) });
+  const result = await undoAction(author, f.log.id, true);
+  const contact = await db.contact.findUniqueOrThrow({ where: { id: f.contact.id } });
+  expect(result.overrode).toBe(true);
+  expect({ name: contact.name, role: contact.role }).toEqual({ name: prefix + '-before', role: 'External role' });
+  completed.push('update-explicit-override');
+});
+
+it('refuses a malformed contact.updated action without claiming or changing it', async () => {
+  const f = await fixture('contact.updated');
+  await db.actionLog.update({ where: { id: f.log.id }, data: { beforeState: { organisationId: f.org.id }, afterState: { organisationId: f.org.id } } });
+  const before = await snapshot(f.contact.id);
+  await expect(undoAction(author, f.log.id)).rejects.toMatchObject({ status: 409 });
+  expect(await snapshot(f.contact.id)).toEqual(before);
+  completed.push('update-malformed-action-denied');
+});
+
+it('refuses to restore an unavailable previous Known by member', async () => {
+  const f = await fixture('contact.updated', admin.id);
+  await db.actionLog.update({ where: { id: f.log.id }, data: { beforeState: { knownBy: [author.id] }, afterState: { knownBy: [admin.id] } } });
+  await db.contactKnownBy.create({ data: { contactId: f.contact.id, userId: admin.id } });
+  await db.user.update({ where: { id: author.id }, data: { deactivatedAt: new Date() } });
+  const before = await snapshot(f.contact.id);
+  await expect(undoAction(admin, f.log.id)).rejects.toMatchObject({ status: 409 });
+  expect(await snapshot(f.contact.id)).toEqual(before);
+  completed.push('update-known-by-inactive-denied');
+});
+
+it('restores an active previous Known by member', async () => {
+  const f = await fixture('contact.updated', admin.id);
+  await db.actionLog.update({ where: { id: f.log.id }, data: { beforeState: { knownBy: [author.id] }, afterState: { knownBy: [admin.id] } } });
+  await db.contactKnownBy.create({ data: { contactId: f.contact.id, userId: admin.id } });
+  await undoAction(admin, f.log.id);
+  expect((await db.contactKnownBy.findMany({ where: { contactId: f.contact.id } })).map((row) => row.userId)).toEqual([author.id]);
+  completed.push('update-known-by-active-positive');
+});
+
+it('returns a retryable conflict when a previous Known by member is being changed', async () => {
+  const f = await fixture('contact.updated', admin.id);
+  await db.actionLog.update({ where: { id: f.log.id }, data: { beforeState: { knownBy: [author.id] }, afterState: { knownBy: [admin.id] } } });
+  await db.contactKnownBy.create({ data: { contactId: f.contact.id, userId: admin.id } });
+  let release!: () => void, locked = false;
+  const held = new Promise<void>((resolve) => { release = resolve; });
+  const owner = transact(async (tx) => { await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${author.id} FOR UPDATE`; locked = true; await held; }, { timeout: 15_000 });
+  const ownerResult = Promise.allSettled([owner]);
+  try {
+    await vi.waitFor(() => expect(locked).toBe(true), { timeout: 5000 });
+    const before = await snapshot(f.contact.id);
+    await expect(undoAction(admin, f.log.id)).rejects.toMatchObject({ status: 409 });
+    expect(await snapshot(f.contact.id)).toEqual(before);
+    completed.push('update-known-by-lock-conflict');
+  } finally { release(); expect(await ownerResult).toEqual([{ status: 'fulfilled', value: undefined }]); }
+  await undoAction(admin, f.log.id);
+  expect((await db.contactKnownBy.findMany({ where: { contactId: f.contact.id } })).map((row) => row.userId)).toEqual([author.id]);
+});
+
+it('rolls a contact update inverse and claim back when activity fails, then retries', async () => {
+  const f = await fixture('contact.updated'), before = await snapshot(f.contact.id);
+  vi.spyOn(db, '$transaction').mockImplementationOnce((async (callback: (tx: Tx) => Promise<unknown>) => transact(async (tx) => {
+    const create = vi.spyOn(tx.actionLog, 'create').mockRejectedValueOnce(Error('CONTACT_UPDATE_UNDO_ACTIVITY_FAILURE'));
+    try { return await callback(tx); } finally { create.mockRestore(); }
+  })) as typeof db.$transaction);
+  await expect(undoAction(author, f.log.id)).rejects.toThrow('CONTACT_UPDATE_UNDO_ACTIVITY_FAILURE');
+  vi.restoreAllMocks();
+  expect(await snapshot(f.contact.id)).toEqual(before);
+  await undoAction(author, f.log.id);
+  expect((await db.contact.findUniqueOrThrow({ where: { id: f.contact.id } })).name).toBe(prefix + '-before');
+  completed.push('update-activity-rollback-retry');
 });

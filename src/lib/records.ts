@@ -316,16 +316,41 @@ async function planRecord(row: { action: string; targetId: string; beforeState: 
       return { conflicts: [], apply: async (tx) => { await tx.contact.update({ where: { id }, data: { removedAt: remove ? new Date() : null } }); } };
     }
     case "contact.updated": {
-      const c = await db.contact.findUnique({ where: { id }, include: { knownBy: true } });
+      const c = await (tx ?? db).contact.findUnique({ where: { id }, include: { knownBy: true } });
       if (!c || c.removedAt) throw bad("This contact no longer exists.");
       const keys = Object.keys(f);
+      if (!keys.length || keys.some((key) => !["name", "role", "email", "phone", "knownBy"].includes(key) || !(key in b))) throw bad("This contact action is incomplete.");
+      for (const key of keys) {
+        const valid = key === "knownBy"
+          ? [b[key], f[key]].every((v) => Array.isArray(v) && v.every((id) => typeof id === "string") && new Set(v).size === v.length)
+          : key === "name"
+            ? [b[key], f[key]].every((v) => typeof v === "string" && !!v.trim())
+            : [b[key], f[key]].every((v) => v === null || typeof v === "string");
+        if (!valid) throw bad("This contact action is incomplete.");
+      }
       const now: Record<string, unknown> = { name: c.name, role: c.role, email: c.email, phone: c.phone, knownBy: c.knownBy.map((k) => k.userId).sort() };
       return {
         conflicts: diff(keys, b, f, now),
         apply: async (tx) => {
           const data = Object.fromEntries(keys.filter((k) => k !== "knownBy").map((k) => [k, b[k] ?? null]));
           if (Object.keys(data).length) await tx.contact.update({ where: { id }, data });
-          if (keys.includes("knownBy")) { await tx.contactKnownBy.deleteMany({ where: { contactId: id } }); await tx.contactKnownBy.createMany({ data: (b.knownBy as string[]).map((userId) => ({ contactId: id, userId })) }); }
+          if (keys.includes("knownBy")) {
+            const prior = b.knownBy as unknown[];
+            if (prior.some((value) => typeof value !== "string") || new Set(prior).size !== prior.length) throw bad("This contact action is incomplete.");
+            // Keep prior recipients active until the relation restore commits.
+            try {
+              for (const userId of (prior as string[]).toSorted()) await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${userId} FOR SHARE NOWAIT`;
+            } catch (error) {
+              if ((error as { code?: string; meta?: { code?: string } }).code === "P2010" && (error as { meta?: { code?: string } }).meta?.code === "55P03") {
+                throw new ApiError(409, "Known by membership is changing. Reload and try again.");
+              }
+              throw error;
+            }
+            const active = await tx.user.findMany({ where: { id: { in: prior as string[] }, workspaceId: c.workspaceId, deactivatedAt: null }, select: { id: true } });
+            if (active.length !== prior.length) throw bad("The previous Known by members are no longer available.");
+            await tx.contactKnownBy.deleteMany({ where: { contactId: id } });
+            await tx.contactKnownBy.createMany({ data: (prior as string[]).map((userId) => ({ contactId: id, userId })) });
+          }
         },
       };
     }
@@ -399,7 +424,7 @@ export async function undoRecord(user: Actor, row: { id: string; action: string;
       return { label: UNDO_LABELS[fresh.action], noticesSent: false, overrode: false };
     }, { isolationLevel: "ReadCommitted" });
   }
-  if (row.action === "contact.created" || row.action === "contact.removed") {
+  if (row.action === "contact.created" || row.action === "contact.removed" || row.action === "contact.updated") {
     if (row.targetType !== "contact") throw new ApiError(409, "This contact action has changed. Reload before undoing it.");
     return db.$transaction(async (tx) => {
       let contact;
@@ -430,11 +455,15 @@ export async function undoRecord(user: Actor, row: { id: string; action: string;
       if (fresh.undoneAt) throw new ApiError(409, "This action was already undone.");
       if (isTooOldToUndo(fresh.createdAt)) throw new ApiError(409, "Too old to undo", { tooOld: true });
       const plan = await planRecord(fresh, currentActor, tx);
+      if (plan.conflicts.length && !anyway) {
+        throw new ApiError(409, "This changed after your action.", { needsConfirm: "conflict", label: UNDO_LABELS[fresh.action], changedBy: [], conflicts: plan.conflicts.map((c) => ({ field: c.field, before: String(c.before ?? "none"), after: String(c.after ?? "none"), now: String(c.now ?? "none") })) });
+      }
       const claimed = await tx.actionLog.updateMany({ where: { id: fresh.id, undoneAt: null }, data: { undoneAt: new Date(), undoneById: user.id } });
       if (claimed.count !== 1) throw new ApiError(409, "This action was already undone.");
       await plan.apply(tx);
-      await logAction(tx, { actorId: user.id, projectId: null, targetType: "contact", targetId: fresh.targetId, action: "undo", before: { undoes: fresh.id, action: fresh.action }, after: { undoes: fresh.id, label: UNDO_LABELS[fresh.action], anyway: false } });
-      return { label: UNDO_LABELS[fresh.action], noticesSent: false, overrode: false };
+      const overrode = anyway && plan.conflicts.length > 0;
+      await logAction(tx, { actorId: user.id, projectId: null, targetType: "contact", targetId: fresh.targetId, action: "undo", before: { undoes: fresh.id, action: fresh.action }, after: { undoes: fresh.id, label: UNDO_LABELS[fresh.action], anyway: overrode } });
+      return { label: UNDO_LABELS[fresh.action], noticesSent: false, overrode };
     }, { isolationLevel: "ReadCommitted" });
   }
   if (row.action === "organisation.created" || row.action === "organisation.archived" || row.action === "organisation.unarchived") {
