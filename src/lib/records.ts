@@ -7,7 +7,7 @@ import { isActive, isAdmin, projectAccess, requireWrite, type Actor, type Tx } f
 import { WORKSTREAM_DEAL, requireCrm } from "@/lib/crm";
 import { formatDueDate, parseDueDate } from "@/lib/dates";
 import { logAction } from "@/lib/notify";
-import { assertNoCycle, orgOf } from "@/lib/orgs";
+import { assertNoCycle, orgOf, requireOrgEdit } from "@/lib/orgs";
 import { taskAccess } from "@/lib/task-access";
 import { UNDO_LABELS, isTooOldToUndo, isUndoable } from "@/lib/undoable";
 
@@ -414,6 +414,7 @@ export async function undoRecord(user: Actor, row: { id: string; action: string;
       if (!contact || !currentUser || !isActive(currentUser) || currentUser.workspaceId !== contact.workspaceId) throw notFound("Contact");
       const currentActor = { ...user, orgRole: currentUser.orgRole };
       requireCrm(currentActor);
+      requireContactEdit(currentActor, contact);
       const fresh = await tx.actionLog.findUnique({ where: { id: row.id } });
       if (!fresh || fresh.projectId || fresh.action !== row.action || fresh.targetType !== "contact" || fresh.targetId !== contact.id) {
         throw new ApiError(409, "This contact action has changed. Reload before undoing it.");
@@ -449,6 +450,7 @@ export async function undoRecord(user: Actor, row: { id: string; action: string;
       if (!organisation || !currentUser || !isActive(currentUser) || currentUser.workspaceId !== organisation.workspaceId) throw notFound("Organisation");
       const currentActor = { ...user, orgRole: currentUser.orgRole };
       requireCrm(currentActor);
+      requireOrgEdit(currentActor, organisation);
       const fresh = await tx.actionLog.findUnique({ where: { id: row.id } });
       if (!fresh || fresh.projectId || fresh.action !== row.action || fresh.targetType !== "organisation" || fresh.targetId !== organisation.id) {
         throw new ApiError(409, "This organisation action has changed. Reload before undoing it.");
