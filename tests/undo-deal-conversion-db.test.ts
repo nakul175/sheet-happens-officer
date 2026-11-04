@@ -276,3 +276,42 @@ it('refuses to return a task after its source assignee was removed during prefli
     completed.push('assignee-removed-after-preflight');
   } finally { pause.release(); await pending; }
 }, 20_000);
+
+it('refuses to return a task after its source assignee was downgraded to Viewer', async () => {
+  const f = await fixture(), ids = [f.source.id, f.deal.id];
+  await db.task.update({ where: { id: f.task.id }, data: { assigneeId: sourceWorker.id } });
+  await db.projectMember.update({ where: { projectId_userId: { projectId: f.source.id, userId: sourceWorker.id } }, data: { role: 'VIEWER' } });
+  const before = await snapshot(ids);
+  await expect(undoAction(editor, f.action.id)).rejects.toMatchObject({ status: 409 });
+  expect(await snapshot(ids)).toEqual(before);
+  completed.push('assignee-viewer-source');
+});
+
+it('refuses to return a task after its source assignee was deactivated during preflight', async () => {
+  const f = await fixture(), pause = pauseBeforeTransactions(1), ids = [f.source.id, f.deal.id];
+  await db.task.update({ where: { id: f.task.id }, data: { assigneeId: sourceWorker.id } });
+  const pending = Promise.allSettled([undoAction(editor, f.action.id)]);
+  try {
+    await pause.ready(); await db.user.update({ where: { id: sourceWorker.id }, data: { deactivatedAt: new Date() } });
+    const before = await snapshot(ids); pause.release();
+    expect(await pending).toEqual([expect.objectContaining({ status: 'rejected', reason: expect.objectContaining({ status: 409 }) })]);
+    expect(await snapshot(ids)).toEqual(before);
+    completed.push('assignee-deactivated-after-preflight');
+  } finally { pause.release(); await pending; }
+}, 20_000);
+
+it('a competing assignee user-row lock returns a retryable conflict without a move', async () => {
+  const f = await fixture(); let release!: () => void, locked = false;
+  const held = new Promise<void>((resolve) => { release = resolve; });
+  const owner = transact(async (tx) => { await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${leader.id} FOR UPDATE`; locked = true; await held; }, { timeout: 15_000 });
+  const ownerResult = Promise.allSettled([owner]);
+  try {
+    await vi.waitFor(() => expect(locked).toBe(true), { timeout: 5000 });
+    const before = await snapshot([f.source.id, f.deal.id]);
+    await expect(undoAction(editor, f.action.id)).rejects.toMatchObject({ status: 409 });
+    expect(await snapshot([f.source.id, f.deal.id])).toEqual(before);
+    completed.push('person-lock-conflict');
+  } finally { release(); expect(await ownerResult).toEqual([{ status: 'fulfilled', value: undefined }]); }
+  await undoAction(editor, f.action.id);
+  expect((await db.task.findUniqueOrThrow({ where: { id: f.task.id } })).projectId).toBe(f.source.id);
+});

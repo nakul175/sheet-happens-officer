@@ -1,8 +1,9 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 // SHO-US-6.4: Undo from the stored before-state, with a conflict warning and "Undo anyway".
 import { db } from "@/lib/db";
+import { Prisma } from "@/generated/prisma/client";
 import { ApiError, notFound } from "@/lib/http";
-import { WORKERS, WORKSTREAM_DEAL, activeMember, isAdmin, requireManage, requireWrite, type Actor, type Tx } from "@/lib/access";
+import { WORKERS, WORKSTREAM_DEAL, activeMember, isActive, isAdmin, requireManage, requireWrite, type Actor, type Tx } from "@/lib/access";
 import { formatDueDate } from "@/lib/dates";
 import { auditTx, logAction, notify } from "@/lib/notify";
 import { deleteTask, recordAccess, restoreTask } from "@/lib/tasks";
@@ -263,10 +264,41 @@ async function plan(row: any, user: Actor, projectId: string, tx?: Tx): Promise<
       const src = sourceAccess.project;
       if (src.workspaceId !== task.workspaceId || src.typeId !== "wst_project" || src.deletedAt) throw bad("The original project is no longer available.");
       if (src.archivedAt) throw bad("The original project is archived. Unarchive it first.");
-      const children = await client.task.findMany({ where: { parentId: id }, select: { id: true, projectId: true, deletedAt: true } });
+      const children = await client.task.findMany({ where: { parentId: id }, select: { id: true, projectId: true, deletedAt: true, assigneeId: true, approverId: true } });
       const expected = b.subtaskIds as string[];
       if (children.length !== expected.length || children.some((child) => !expected.includes(child.id) || child.projectId !== projectId || child.deletedAt)) {
         throw bad("The converted task family has changed. Reload before undoing it.");
+      }
+      const family = [task, ...children];
+      const collaborators = await client.taskCollaborator.findMany({ where: { taskId: { in: family.map((item) => item.id) } }, select: { userId: true } });
+      const peopleSet = new Set<string>();
+      for (const item of family) {
+        peopleSet.add(item.assigneeId);
+        if (item.approverId) peopleSet.add(item.approverId);
+      }
+      for (const collaborator of collaborators) peopleSet.add(collaborator.userId);
+      const people = [...peopleSet].sort();
+      if (tx) {
+        // A source member or person removed/deactivated during Undo must serialize with the move.
+        try {
+          await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" IN (${Prisma.join(people)}) ORDER BY "id" FOR SHARE NOWAIT`;
+          await tx.$queryRaw`SELECT "userId" FROM "ProjectMember" WHERE "projectId" = ${src.id} AND "userId" IN (${Prisma.join(people)}) ORDER BY "userId" FOR SHARE NOWAIT`;
+        } catch (error) {
+          if ((error as { code?: string; meta?: { code?: string } }).code === "P2010" && (error as { meta?: { code?: string } }).meta?.code === "55P03") {
+            throw bad("A task person's access is changing. Reload and try again.");
+          }
+          throw error;
+        }
+      }
+      const sourceMembers = await client.projectMember.findMany({
+        where: { projectId: src.id, userId: { in: people } },
+        select: { userId: true, role: true, user: { select: { deactivatedAt: true, emailVerifiedAt: true } } },
+      });
+      const eligible = new Map(sourceMembers.filter((member) => isActive(member.user)).map((member) => [member.userId, member.role]));
+      const canWork = (personId: string) => eligible.get(personId) === "LEADER" || eligible.get(personId) === "EDITOR";
+      if (family.some((item) => !canWork(item.assigneeId) || (item.approverId && !canWork(item.approverId)))
+        || collaborators.some((c) => !eligible.has(c.userId))) {
+        throw bad("One of this task family's people is no longer eligible in the original project.");
       }
       const sec = (await client.section.findFirst({ where: { id: b.sectionId, projectId: src.id } }))
         ?? (await client.section.findFirst({ where: { projectId: src.id, isDone: false }, orderBy: { position: "asc" } }));
