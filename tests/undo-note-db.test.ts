@@ -26,7 +26,13 @@ beforeAll(async () => {
   sentinelId = (await db.project.create({ data: { workspaceId, name: prefix + '-sentinel' } })).id;
   projects.push(sentinelId);
 });
-afterEach(() => vi.restoreAllMocks());
+afterEach(async () => {
+  vi.restoreAllMocks();
+  if (safe) {
+    await db.user.update({ where: { id: admin.id }, data: { orgRole: 'ADMIN' } });
+    await db.user.update({ where: { id: editor.id }, data: { deactivatedAt: null } });
+  }
+});
 afterAll(async () => {
   if (!safe) return;
   let cleanup = false;
@@ -201,4 +207,42 @@ it('refuses a note Undo after its author is deactivated during preflight', async
     expect(await snapshot(f.note.id)).toEqual(before);
     completed.push('author-deactivated-after-preflight');
   } finally { pause.release(); await pending; }
+});
+
+it('refuses a former deal Leader who removed another author’s note after losing Leader rights', async () => {
+  const f = await fixture('note.removed');
+  await db.actionLog.update({ where: { id: f.log.id }, data: { actorId: leader.id } });
+  const pause = pauseBeforeTransactions(1), pending = Promise.allSettled([undoAction(leader, f.log.id)]);
+  try {
+    await pause.ready();
+    await transact(async (tx) => {
+      await tx.projectMember.update({ where: { projectId_userId: { projectId: f.deal!.id, userId: leader.id } }, data: { role: 'EDITOR' } });
+      await tx.projectMember.update({ where: { projectId_userId: { projectId: f.deal!.id, userId: editor.id } }, data: { role: 'LEADER' } });
+    });
+    const before = await snapshot(f.note.id); pause.release();
+    expect(await pending).toEqual([expect.objectContaining({ status: 'rejected', reason: expect.objectContaining({ status: 403 }) })]);
+    expect(await snapshot(f.note.id)).toEqual(before);
+    completed.push('former-leader-own-removal-denied');
+  } finally { pause.release(); await pending; }
+});
+
+it('refuses a former Admin who removed another author’s unlinked note', async () => {
+  const f = await fixture('note.removed', false);
+  await db.actionLog.update({ where: { id: f.log.id }, data: { actorId: admin.id } });
+  const pause = pauseBeforeTransactions(1), pending = Promise.allSettled([undoAction(admin, f.log.id)]);
+  try {
+    await pause.ready(); await db.user.update({ where: { id: admin.id }, data: { orgRole: 'MEMBER' } });
+    const before = await snapshot(f.note.id); pause.release();
+    expect(await pending).toEqual([expect.objectContaining({ status: 'rejected', reason: expect.objectContaining({ status: 403 }) })]);
+    expect(await snapshot(f.note.id)).toEqual(before);
+    completed.push('former-admin-own-removal-denied');
+  } finally { pause.release(); await pending; }
+});
+
+it('allows a current deal Leader to restore another author’s removed note', async () => {
+  const f = await fixture('note.removed');
+  await db.actionLog.update({ where: { id: f.log.id }, data: { actorId: leader.id } });
+  await undoAction(leader, f.log.id);
+  expect((await db.note.findUniqueOrThrow({ where: { id: f.note.id } })).removedAt).toBeNull();
+  completed.push('current-leader-positive');
 });
