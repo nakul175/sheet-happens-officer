@@ -29,7 +29,7 @@ const TRANSACTIONAL_TASK_UNDO = new Set([
   "task.assigned", "task.sent_for_approval", "task.sent_back", "task.approver_changed",
 ]);
 
-const TRANSACTIONAL_UNDO = new Set([...TRANSACTIONAL_TASK_UNDO, ...MANAGEMENT_UNDO, "deal.stage_changed", "deal.details_updated"]);
+const TRANSACTIONAL_UNDO = new Set([...TRANSACTIONAL_TASK_UNDO, ...MANAGEMENT_UNDO, "deal.stage_changed", "deal.details_updated", "deal.converted"]);
 
 type Conflict = { field: string; before: unknown; after: unknown; now: unknown };
 type Plan = { conflicts: Conflict[]; apply: (tx: Tx) => Promise<void>; subject?: string; fields?: string };
@@ -245,20 +245,43 @@ async function plan(row: any, user: Actor, projectId: string, tx?: Tx): Promise<
     }
     case "deal.converted": {
       // Undo returns the task and its subtasks to their original project and Section, and archives the new deal (12.2 AC4).
-      const task = await db.task.findUnique({ where: { id }, include: { project: true } });
-      if (!task || task.projectId !== projectId) throw bad("The task is no longer in this deal, so the conversion cannot be undone.");
+      if (f.dealId !== projectId || typeof b.sourceProjectId !== "string" || !b.sourceProjectId || b.sourceProjectId === projectId
+        || !Array.isArray(b.subtaskIds) || b.subtaskIds.some((childId: unknown) => typeof childId !== "string" || !childId)
+        || new Set(b.subtaskIds).size !== b.subtaskIds.length) throw bad("This conversion record is incomplete. Reload before undoing it.");
+      const client = tx ?? db;
+      const task = await client.task.findUnique({ where: { id } });
+      if (!task || task.projectId !== projectId || task.parentId) throw bad("The task is no longer in this deal, so the conversion cannot be undone.");
       if (task.deletedAt) throw bad("The task is in Trash. Restore it first.");
-      // project-lookup-ok: Original source ID comes from the authorized conversion before-state; task is verified against the current project.
-      const src = await db.project.findUnique({ where: { id: b.sourceProjectId } });
-      if (!src) throw bad("The original project no longer exists.");
+      // project-lookup-ok: prepare authorizes this same deal before planning, and rechecks access inside the transaction.
+      const deal = await client.project.findUnique({ where: { id: projectId } });
+      if (!deal || deal.typeId !== WORKSTREAM_DEAL || deal.workspaceId !== task.workspaceId || deal.archivedAt || deal.deletedAt) {
+        throw bad("The converted deal is no longer available.");
+      }
+      // The historic source ID is data, not authorization. Check it again inside the locked transaction.
+      const sourceAccess = await recordAccess(user, b.sourceProjectId, "Project", { ...(tx ? { tx } : {}) });
+      requireWrite(sourceAccess);
+      const src = sourceAccess.project;
+      if (src.workspaceId !== task.workspaceId || src.typeId !== "wst_project" || src.deletedAt) throw bad("The original project is no longer available.");
       if (src.archivedAt) throw bad("The original project is archived. Unarchive it first.");
+      const children = await client.task.findMany({ where: { parentId: id }, select: { id: true, projectId: true, deletedAt: true } });
+      const expected = b.subtaskIds as string[];
+      if (children.length !== expected.length || children.some((child) => !expected.includes(child.id) || child.projectId !== projectId || child.deletedAt)) {
+        throw bad("The converted task family has changed. Reload before undoing it.");
+      }
+      const sec = (await client.section.findFirst({ where: { id: b.sectionId, projectId: src.id } }))
+        ?? (await client.section.findFirst({ where: { projectId: src.id, isDone: false }, orderBy: { position: "asc" } }));
+      if (!sec) throw bad("The original project has no section for this task.");
       return {
         conflicts: [], subject: task.title,
         apply: async (tx) => {
-          const sec = (await tx.section.findFirst({ where: { id: b.sectionId, projectId: src.id } })) ?? (await tx.section.findFirstOrThrow({ where: { projectId: src.id, isDone: false }, orderBy: { position: "asc" } }));
-          await tx.task.update({ where: { id }, data: { projectId: src.id, sectionId: sec.id, previousSectionId: b.previousSectionId ?? null, isIdea: !!b.isIdea } });
-          if (Array.isArray(b.subtaskIds) && b.subtaskIds.length) await tx.task.updateMany({ where: { id: { in: b.subtaskIds } }, data: { projectId: src.id, sectionId: sec.id } });
-          await tx.project.update({ where: { id: projectId }, data: { archivedAt: new Date() } });
+          const moved = await tx.task.updateMany({ where: { id, projectId, parentId: null, deletedAt: null, updatedAt: task.updatedAt }, data: { projectId: src.id, sectionId: sec.id, previousSectionId: b.previousSectionId ?? null, isIdea: !!b.isIdea, updatedAt: new Date(Math.max(Date.now(), task.updatedAt.getTime() + 1)) } });
+          if (moved.count !== 1) throw bad("The converted task changed. Reload before undoing it.");
+          if (expected.length) {
+            const movedChildren = await tx.task.updateMany({ where: { id: { in: expected }, parentId: id, projectId, deletedAt: null }, data: { projectId: src.id, sectionId: sec.id } });
+            if (movedChildren.count !== expected.length) throw bad("The converted task family changed. Reload before undoing it.");
+          }
+          const archived = await tx.project.updateMany({ where: { id: projectId, typeId: WORKSTREAM_DEAL, workspaceId: task.workspaceId, archivedAt: null, updatedAt: deal.updatedAt }, data: { archivedAt: new Date() } });
+          if (archived.count !== 1) throw bad("The deal changed. Reload before undoing the conversion.");
         },
       };
     }
@@ -550,7 +573,8 @@ export async function undoAction(user: Actor, logId: string, anyway = false) {
       // locks preserve archive/access state; NOWAIT avoids reverse-order waits
       // with management operations that already own those rows.
       try {
-        if (row.action === "task.idea_changed") await tx.$queryRaw`SELECT "id" FROM "Task" WHERE "id" = ${row.targetId} AND "projectId" = ${projectId} FOR UPDATE NOWAIT`;
+        if (row.action === "deal.converted") await tx.$queryRaw`SELECT "id" FROM "Task" WHERE "id" = ${row.targetId} OR "parentId" = ${row.targetId} ORDER BY "id" FOR UPDATE NOWAIT`;
+        else if (row.action === "task.idea_changed") await tx.$queryRaw`SELECT "id" FROM "Task" WHERE "id" = ${row.targetId} AND "projectId" = ${projectId} FOR UPDATE NOWAIT`;
         else if (TRANSACTIONAL_TASK_UNDO.has(row.action)) await tx.$queryRaw`SELECT "id" FROM "Task" WHERE "id" = ${row.targetId} AND "projectId" = ${projectId} FOR UPDATE`;
         else await tx.$queryRaw`SELECT "id" FROM "Project" WHERE "id" = ${projectId} FOR UPDATE NOWAIT`;
         if (FAMILY_TASK_UNDO.has(row.action)) {
@@ -561,6 +585,13 @@ export async function undoAction(user: Actor, logId: string, anyway = false) {
           await tx.$queryRaw`SELECT "id" FROM "Task" WHERE "projectId" = ${projectId} AND ("id" = ${root} OR "parentId" = ${root}) ORDER BY "id" FOR UPDATE NOWAIT`;
         }
         if (TRANSACTIONAL_TASK_UNDO.has(row.action)) await tx.$queryRaw`SELECT "id" FROM "Project" WHERE "id" = ${projectId} FOR SHARE NOWAIT`;
+        if (row.action === "deal.converted") {
+          const sourceId = (row.beforeState as { sourceProjectId?: unknown } | null)?.sourceProjectId;
+          if (typeof sourceId !== "string" || !sourceId || sourceId === projectId) throw bad("This conversion record is incomplete. Reload before undoing it.");
+          await tx.$queryRaw`SELECT "id" FROM "Project" WHERE "id" = ${sourceId} FOR SHARE NOWAIT`;
+          await tx.$queryRaw`SELECT "userId" FROM "ProjectMember" WHERE "projectId" = ${sourceId} AND "userId" = ${user.id} FOR SHARE NOWAIT`;
+          await tx.$queryRaw`SELECT "id" FROM "Section" WHERE "projectId" = ${sourceId} ORDER BY "id" FOR SHARE NOWAIT`;
+        }
         await tx.$queryRaw`SELECT "userId" FROM "ProjectMember" WHERE "projectId" = ${projectId} AND "userId" = ${user.id} FOR SHARE NOWAIT`;
         if (row.action === "task.collaborator_added") {
           const collaboratorId = (row.afterState as { userId?: string } | null)?.userId;

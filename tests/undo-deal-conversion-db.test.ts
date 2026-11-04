@@ -107,6 +107,18 @@ it('requires current access to the source project before moving the family back'
   completed.push('source-access-required');
 });
 
+it('refuses a source-project member removed after preflight', async () => {
+  const f = await fixture(), pause = pauseBeforeTransactions(1), ids = [f.source.id, f.deal.id];
+  const pending = Promise.allSettled([undoAction(editor, f.action.id)]);
+  try {
+    await pause.ready(); await removeMember(leader, f.source.id, editor.id);
+    const before = await snapshot(ids); pause.release();
+    expect(await pending).toEqual([expect.objectContaining({ status: 'rejected', reason: expect.objectContaining({ status: 404 }) })]);
+    expect(await snapshot(ids)).toEqual(before);
+    completed.push('source-member-removed-after-preflight');
+  } finally { pause.release(); await pending; }
+});
+
 it('rejects Undo when a new child was added in the deal after conversion', async () => {
   const f = await fixture(), ids = [f.source.id, f.deal.id];
   await db.task.create({ data: { workspaceId, projectId: f.deal.id, sectionId: f.dealSection.id, parentId: f.task.id, title: 'Later child', assigneeId: leader.id, createdById: editor.id } });
@@ -124,6 +136,15 @@ it('rejects Undo when an original child has since moved to another project', asy
   await expect(undoAction(editor, f.action.id)).rejects.toMatchObject({ status: 409 });
   expect(await snapshot(ids)).toEqual(before);
   completed.push('moved-child-rejected');
+});
+
+it('rejects a conversion action whose recorded deal is not its authorized project', async () => {
+  const f = await fixture(), ids = [f.source.id, f.deal.id];
+  await db.actionLog.update({ where: { id: f.action.id }, data: { afterState: { dealId: f.source.id } } });
+  const before = await snapshot(ids);
+  await expect(undoAction(editor, f.action.id)).rejects.toMatchObject({ status: 409 });
+  expect(await snapshot(ids)).toEqual(before);
+  completed.push('deal-identity-rejected');
 });
 
 it('rejects Undo after the original source project is archived during preflight', async () => {
@@ -164,4 +185,36 @@ it('activity failure rolls back family move, deal archive and claim; retry succe
   expect((await db.task.findUniqueOrThrow({ where: { id: f.task.id } })).projectId).toBe(f.source.id);
   expect((await db.project.findUniqueOrThrow({ where: { id: f.deal.id } })).archivedAt).not.toBeNull();
   completed.push('activity-rollback-retry');
+});
+
+it('a competing task-family row lock returns a retryable conflict without moving anything', async () => {
+  const f = await fixture(); let release!: () => void, locked = false;
+  const held = new Promise<void>((resolve) => { release = resolve; });
+  const owner = transact(async (tx) => { await tx.$queryRaw`SELECT "id" FROM "Task" WHERE "id" = ${f.child.id} FOR UPDATE`; locked = true; await held; }, { timeout: 15_000 });
+  const ownerResult = Promise.allSettled([owner]);
+  try {
+    await vi.waitFor(() => expect(locked).toBe(true), { timeout: 5000 });
+    const before = await snapshot([f.source.id, f.deal.id]);
+    await expect(undoAction(editor, f.action.id)).rejects.toMatchObject({ status: 409 });
+    expect(await snapshot([f.source.id, f.deal.id])).toEqual(before);
+    completed.push('family-lock-conflict');
+  } finally { release(); expect(await ownerResult).toEqual([{ status: 'fulfilled', value: undefined }]); }
+  await undoAction(editor, f.action.id);
+  expect((await db.task.findUniqueOrThrow({ where: { id: f.child.id } })).projectId).toBe(f.source.id);
+});
+
+it('a competing source-project row lock returns a retryable conflict without a claim', async () => {
+  const f = await fixture(); let release!: () => void, locked = false;
+  const held = new Promise<void>((resolve) => { release = resolve; });
+  const owner = transact(async (tx) => { await tx.$queryRaw`SELECT "id" FROM "Project" WHERE "id" = ${f.source.id} FOR UPDATE`; locked = true; await held; }, { timeout: 15_000 });
+  const ownerResult = Promise.allSettled([owner]);
+  try {
+    await vi.waitFor(() => expect(locked).toBe(true), { timeout: 5000 });
+    const before = await snapshot([f.source.id, f.deal.id]);
+    await expect(undoAction(editor, f.action.id)).rejects.toMatchObject({ status: 409 });
+    expect(await snapshot([f.source.id, f.deal.id])).toEqual(before);
+    completed.push('source-project-lock-conflict');
+  } finally { release(); expect(await ownerResult).toEqual([{ status: 'fulfilled', value: undefined }]); }
+  await undoAction(editor, f.action.id);
+  expect((await db.task.findUniqueOrThrow({ where: { id: f.task.id } })).projectId).toBe(f.source.id);
 });
