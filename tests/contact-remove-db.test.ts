@@ -124,6 +124,37 @@ it('allows the current author to remove once and logs the stored timestamp', asy
   await removeContact(author, row.id);
   const after = await snapshot(row.id);
   expect(after.contact.removedAt).not.toBeNull();
-  expect(after.actions.filter((item) => item.action === 'contact.removed')).toHaveLength(1);
+  const actions = after.actions.filter((item) => item.action === 'contact.removed');
+  expect(actions).toHaveLength(1);
+  expect(actions[0].afterState).toMatchObject({ removedAt: after.contact.removedAt?.toISOString() });
   completed.push('current-author-positive');
+});
+
+it('allows a current Admin to remove another author’s contact', async () => {
+  const row = await fixture();
+  await removeContact(admin, row.id);
+  const after = await snapshot(row.id);
+  expect(after.contact.removedAt).not.toBeNull();
+  expect(after.actions.filter((item) => item.action === 'contact.removed' && item.actorId === admin.id)).toHaveLength(1);
+  completed.push('current-admin-positive');
+});
+
+it('fails closed while the contact row is being changed', async () => {
+  const row = await fixture(), before = await snapshot(row.id);
+  await db.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT "id" FROM "Contact" WHERE "id" = ${row.id} FOR UPDATE`;
+    await expect(removeContact(author, row.id)).rejects.toMatchObject({ status: 409 });
+  });
+  expect(await snapshot(row.id)).toEqual(before);
+  completed.push('contact-lock-denied');
+});
+
+it('fails closed while the author account is being changed', async () => {
+  const row = await fixture(), before = await snapshot(row.id);
+  await db.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${author.id} FOR UPDATE`;
+    await expect(removeContact(author, row.id)).rejects.toMatchObject({ status: 409 });
+  });
+  expect(await snapshot(row.id)).toEqual(before);
+  completed.push('author-lock-denied');
 });

@@ -174,9 +174,28 @@ export async function removeContact(user: Actor, id: string) {
   const c = await contactOf(user, id);
   requireContactEdit(user, c);
   await db.$transaction(async (tx) => {
-    await tx.contact.update({ where: { id }, data: { removedAt: new Date() } });
-    await logAction(tx, { actorId: user.id, projectId: null, targetType: "contact", targetId: id, action: "contact.removed", before: { removedAt: null }, after: { removedAt: new Date().toISOString() } });
-  });
+    let fresh;
+    let account;
+    try {
+      await tx.$queryRaw`SELECT "id" FROM "Contact" WHERE "id" = ${id} FOR UPDATE NOWAIT`;
+      await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${user.id} FOR SHARE NOWAIT`;
+      fresh = await tx.contact.findUnique({ where: { id } });
+      account = await tx.user.findUnique({ where: { id: user.id }, select: { workspaceId: true, orgRole: true, deactivatedAt: true, emailVerifiedAt: true } });
+    } catch (error) {
+      if ((error as { code?: string; meta?: { code?: string } }).code === "P2010" && (error as { meta?: { code?: string } }).meta?.code === "55P03") {
+        throw new ApiError(409, "The contact or its access is changing. Reload and try again.");
+      }
+      throw error;
+    }
+    if (!fresh || !account || !isActive(account) || account.workspaceId !== c.workspaceId || fresh.workspaceId !== account.workspaceId) throw notFound("Contact");
+    const currentActor = { ...user, orgRole: account.orgRole };
+    requireCrm(currentActor);
+    requireContactEdit(currentActor, fresh);
+    if (fresh.removedAt) throw new ApiError(409, "This contact is already removed.");
+    const removedAt = new Date();
+    await tx.contact.update({ where: { id }, data: { removedAt } });
+    await logAction(tx, { actorId: user.id, projectId: null, targetType: "contact", targetId: id, action: "contact.removed", before: { removedAt: null }, after: { removedAt: removedAt.toISOString() } });
+  }, { isolationLevel: "ReadCommitted" });
 }
 
 // ---------------------------------------------------------------- notes (11.3)
