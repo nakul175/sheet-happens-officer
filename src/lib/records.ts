@@ -33,6 +33,8 @@ async function contactOf(user: Actor, id: string, o: { removed?: boolean } = {})
   return c;
 }
 const canEditContact = (user: Actor, c: { createdById: string }) => isAdmin(user) || c.createdById === user.id;
+const canEditNote = (user: Actor, note: { authorId: string }, dealLeader: boolean) =>
+  isAdmin(user) || note.authorId === user.id || dealLeader;
 function requireContactEdit(user: Actor, c: { createdById: string }) {
   if (!canEditContact(user, c)) throw new ApiError(403, "Only the person who added this contact, or an Admin, can change it.");
 }
@@ -196,7 +198,7 @@ export async function removeNote(user: Actor, id: string) {
   const n = await db.note.findFirst({ where: { id, workspaceId: u.workspaceId, ...visibleNotes(user) } });
   if (!n) throw notFound("Note");
   const leads = n.projectId ? !!(await db.projectMember.findFirst({ where: { projectId: n.projectId, userId: user.id, role: "LEADER" } })) : false;
-  if (!(isAdmin(user) || n.authorId === user.id || leads)) throw new ApiError(403, "Only the author, the deal's Leader or an Admin can delete a note.");
+  if (!canEditNote(user, n, leads)) throw new ApiError(403, "Only the author, the deal's Leader or an Admin can delete a note.");
   await db.$transaction(async (tx) => {
     await tx.note.update({ where: { id }, data: { removedAt: new Date() } });
     await logAction(tx, { actorId: user.id, projectId: null, targetType: "note", targetId: id, action: "note.removed", before: { removedAt: null }, after: { removedAt: new Date().toISOString() } });
@@ -349,6 +351,7 @@ export async function undoRecord(user: Actor, row: { id: string; action: string;
     if (row.targetType !== "note") throw new ApiError(409, "This note action has changed. Reload before undoing it.");
     return db.$transaction(async (tx) => {
       let currentOrgRole = user.orgRole;
+      let hasNoteEditRights = false;
       try {
         await tx.$queryRaw`SELECT "id" FROM "Note" WHERE "id" = ${row.targetId} FOR UPDATE NOWAIT`;
         await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${user.id} FOR SHARE NOWAIT`;
@@ -359,12 +362,15 @@ export async function undoRecord(user: Actor, row: { id: string; action: string;
         currentOrgRole = currentUser.orgRole;
         const currentActor = { ...user, orgRole: currentOrgRole };
         requireCrm(currentActor);
+        hasNoteEditRights = canEditNote(currentActor, note, false);
         if (note.projectId) {
           await tx.$queryRaw`SELECT "id" FROM "Project" WHERE "id" = ${note.projectId} FOR SHARE NOWAIT`;
           await tx.$queryRaw`SELECT "userId" FROM "ProjectMember" WHERE "projectId" = ${note.projectId} AND "userId" = ${user.id} FOR SHARE NOWAIT`;
           try {
             const access = await projectAccess(currentActor, note.projectId, { tx });
             if (access.project.typeId !== WORKSTREAM_DEAL) throw notFound("Note");
+            // Match removeNote's real Leader seat, not projectAccess's creator role.
+            hasNoteEditRights ||= canEditNote(currentActor, note, access.member?.role === "LEADER");
           } catch (error) {
             if (error instanceof ApiError && error.status === 404) throw notFound("Note");
             throw error;
@@ -382,6 +388,7 @@ export async function undoRecord(user: Actor, row: { id: string; action: string;
         throw new ApiError(409, "This note action has changed. Reload before undoing it.");
       }
       if (fresh.actorId !== user.id && !isAdmin({ orgRole: currentOrgRole })) throw new ApiError(403, "You can only undo your own actions.");
+      if (!hasNoteEditRights) throw new ApiError(403, "Only the author, the deal's Leader or an Admin can undo this note action.");
       if (fresh.undoneAt) throw new ApiError(409, "This action was already undone.");
       if (isTooOldToUndo(fresh.createdAt)) throw new ApiError(409, "Too old to undo", { tooOld: true });
       const plan = await planRecord(fresh, user, tx);

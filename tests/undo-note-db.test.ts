@@ -246,3 +246,30 @@ it('allows a current deal Leader to restore another author’s removed note', as
   expect((await db.note.findUniqueOrThrow({ where: { id: f.note.id } })).removedAt).toBeNull();
   completed.push('current-leader-positive');
 });
+
+it('does not treat a deal creator with an Editor seat as the note Leader', async () => {
+  const f = await fixture('note.removed');
+  await db.actionLog.update({ where: { id: f.log.id }, data: { actorId: leader.id } });
+  await db.actionLog.create({ data: { actorId: leader.id, projectId: f.deal!.id, targetType: 'project', targetId: f.deal!.id, channel: 'SCREEN', action: 'project.created' } });
+  await db.projectMember.update({ where: { projectId_userId: { projectId: f.deal!.id, userId: leader.id } }, data: { role: 'EDITOR' } });
+  const before = await snapshot(f.note.id);
+  await expect(undoAction(leader, f.log.id)).rejects.toMatchObject({ status: 403 });
+  expect(await snapshot(f.note.id)).toEqual(before);
+  completed.push('creator-editor-not-note-leader');
+});
+
+it('still allows the author to restore their note after losing a Leader seat', async () => {
+  const f = await fixture('note.removed');
+  await db.projectMember.update({ where: { projectId_userId: { projectId: f.deal!.id, userId: editor.id } }, data: { role: 'VIEWER' } });
+  await undoAction(editor, f.log.id);
+  expect((await db.note.findUniqueOrThrow({ where: { id: f.note.id } })).removedAt).toBeNull();
+  completed.push('author-viewer-positive');
+});
+
+it('allows a current Admin to restore another author’s unlinked note', async () => {
+  const f = await fixture('note.removed', false);
+  await db.actionLog.update({ where: { id: f.log.id }, data: { actorId: admin.id } });
+  await undoAction(admin, f.log.id);
+  expect((await db.note.findUniqueOrThrow({ where: { id: f.note.id } })).removedAt).toBeNull();
+  completed.push('unlinked-admin-positive');
+});
