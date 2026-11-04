@@ -107,6 +107,25 @@ async function requireMember(tx: Tx, projectId: string, userId: string) {
   return m;
 }
 
+/** Keep project state and task participants eligible until the write commits.
+ * Membership departure may hold a member first; NOWAIT avoids waiting in the
+ * reverse order while a task writer owns another row. */
+async function lockTaskProjectAndPeople(tx: Tx, projectId: string, ids: (string | null | undefined)[]) {
+  try {
+    await tx.$queryRaw`SELECT "id" FROM "Project" WHERE "id" = ${projectId} FOR SHARE NOWAIT`;
+    for (const personId of [...new Set(ids.filter((id): id is string => !!id))].sort()) {
+      await tx.$queryRaw`SELECT "userId" FROM "ProjectMember" WHERE "projectId" = ${projectId} AND "userId" = ${personId} FOR SHARE NOWAIT`;
+      await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${personId} FOR SHARE NOWAIT`;
+    }
+  } catch (error) {
+    const failure = error as { code?: string; meta?: { code?: string } } | null;
+    if (failure?.code === 'P2010' && failure.meta?.code === '55P03') {
+      throw new ApiError(409, "Project membership is changing. Reload and try again.");
+    }
+    throw error;
+  }
+}
+
 // ---------------------------------------------------------------- create (4.1)
 export async function createTask(
   user: Actor,
@@ -152,17 +171,24 @@ export async function createTask(
       if (!input.collaboratorIds?.includes(collaborator)) throw new ApiError(400, "Confirm only selected collaborators.");
       await addWorkspaceTaskMember(tx, user, projectId, collaborator);
     }
+    const collaboratorIds = [...new Set(input.collaboratorIds ?? [])];
+    await lockTaskProjectAndPeople(tx, projectId, [user.id, assigneeId, input.approverId, ...collaboratorIds]);
+    const actor = await tx.user.findUnique({ where: { id: user.id }, select: { orgRole: true, workspaceId: true, deactivatedAt: true, emailVerifiedAt: true } });
+    if (!actor || actor.deactivatedAt || !actor.emailVerifiedAt) throw notFound("Project");
+    const fresh = await projectAccess({ ...user, orgRole: actor.orgRole }, projectId, { write: true, tx });
+    if (actor.workspaceId !== fresh.project.workspaceId) throw notFound("Project");
+    requireWrite(fresh);
+    if (input.addAssigneeToProject || input.addCollaboratorsToProject?.length) requireManage(fresh);
     await requireWorker(tx, projectId, assigneeId, "The assignee");
     if (input.approverId) {
       if (input.approverId === assigneeId) throw new ApiError(400, "The approver cannot be the assignee.");
       await requireWorker(tx, projectId, input.approverId, "The approver");
     }
-    const collaboratorIds = [...new Set(input.collaboratorIds ?? [])];
     for (const c of collaboratorIds) await requireMember(tx, projectId, c);
 
     const created = await tx.task.create({
       data: {
-        workspaceId: a.project.workspaceId,
+        workspaceId: fresh.project.workspaceId,
         projectId,
         sectionId,
         parentId: input.parentId ?? null,
@@ -350,19 +376,7 @@ export async function assignTask(user: Actor, id: string, assigneeId: string, ex
     // order can deadlock and every decision observes the current committed state.
     const [locked] = await tx.$queryRaw<{ projectId: string }[]>`SELECT "projectId" FROM "Task" WHERE "id" = ${id} FOR UPDATE`;
     if (!locked) throw notFound("Task");
-    try {
-      await tx.$queryRaw`SELECT "id" FROM "Project" WHERE "id" = ${locked.projectId} FOR SHARE NOWAIT`;
-      for (const personId of [...new Set([user.id, assigneeId])].sort()) {
-        await tx.$queryRaw`SELECT "userId" FROM "ProjectMember" WHERE "projectId" = ${locked.projectId} AND "userId" = ${personId} FOR SHARE NOWAIT`;
-        await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${personId} FOR SHARE NOWAIT`;
-      }
-    } catch (error) {
-      const failure = error as { code?: string; meta?: { code?: string } } | null;
-      if (failure?.code === 'P2010' && failure.meta?.code === '55P03') {
-        throw new ApiError(409, "Project membership is changing. Reload and try again.");
-      }
-      throw error;
-    }
+    await lockTaskProjectAndPeople(tx, locked.projectId, [user.id, assigneeId]);
     const actor = await tx.user.findUnique({ where: { id: user.id }, select: { orgRole: true, workspaceId: true, deactivatedAt: true, emailVerifiedAt: true } });
     if (!actor || actor.deactivatedAt || !actor.emailVerifiedAt) throw notFound("Task");
     const currentUser = { ...user, orgRole: actor.orgRole };
