@@ -123,3 +123,40 @@ it('allows a current author and eligible Known by recipient with one action', as
   expect(await db.actionLog.count({ where: { targetType: 'contact', targetId: row.id, action: 'contact.created' } })).toBe(1);
   completed.push('current-author-recipient-positive');
 });
+
+it('keeps the author as the default Known by person', async () => {
+  const row = await createContact(author, organisationId, { name: prefix + '-default-recipient' });
+  expect((await db.contactKnownBy.findMany({ where: { contactId: row.id } })).map((item) => item.userId)).toEqual([author.id]);
+  expect(await db.actionLog.count({ where: { targetType: 'contact', targetId: row.id, action: 'contact.created' } })).toBe(1);
+  completed.push('default-author-recipient-positive');
+});
+
+it('fails closed while the organisation is being changed', async () => {
+  const before = await snapshot();
+  await db.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT "id" FROM "Organisation" WHERE "id" = ${organisationId} FOR UPDATE`;
+    await expect(createContact(author, organisationId, { name: prefix + '-locked-org' })).rejects.toMatchObject({ status: 409 });
+  });
+  expect(await snapshot()).toEqual(before);
+  completed.push('organisation-lock-denied');
+});
+
+it('fails closed while the author account is being changed', async () => {
+  const before = await snapshot();
+  await db.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${author.id} FOR UPDATE`;
+    await expect(createContact(author, organisationId, { name: prefix + '-locked-author' })).rejects.toMatchObject({ status: 409 });
+  });
+  expect(await snapshot()).toEqual(before);
+  completed.push('author-lock-denied');
+});
+
+it('fails closed while a proposed Known by recipient is being changed', async () => {
+  const before = await snapshot();
+  await db.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${recipient.id} FOR UPDATE`;
+    await expect(createContact(author, organisationId, { name: prefix + '-locked-recipient', knownBy: [recipient.id] })).rejects.toMatchObject({ status: 409 });
+  });
+  expect(await snapshot()).toEqual(before);
+  completed.push('recipient-lock-denied');
+});

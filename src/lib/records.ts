@@ -82,7 +82,29 @@ export async function createContact(user: Actor, orgId: string, input: { name: s
   const u = await me(user);
   const known = await knownByList(input.knownBy, user, u.workspaceId);
   return db.$transaction(async (tx) => {
-    const c = await tx.contact.create({ data: { workspaceId: u.workspaceId, organisationId: orgId, name, role: clean(input.role), email: clean(input.email), phone: clean(input.phone), createdById: user.id } });
+    let currentOrg;
+    let account;
+    try {
+      await tx.$queryRaw`SELECT "id" FROM "Organisation" WHERE "id" = ${orgId} FOR SHARE NOWAIT`;
+      await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${user.id} FOR SHARE NOWAIT`;
+      for (const userId of [...known].sort()) await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${userId} FOR SHARE NOWAIT`;
+      currentOrg = await tx.organisation.findUnique({ where: { id: orgId }, select: { workspaceId: true, archivedAt: true } });
+      account = await tx.user.findUnique({ where: { id: user.id }, select: { workspaceId: true, orgRole: true, deactivatedAt: true, emailVerifiedAt: true } });
+    } catch (error) {
+      if ((error as { code?: string; meta?: { code?: string } }).code === "P2010" && (error as { meta?: { code?: string } }).meta?.code === "55P03") {
+        throw new ApiError(409, "The organisation or Known by membership is changing. Reload and try again.");
+      }
+      throw error;
+    }
+    if (!account || !isActive(account) || account.workspaceId !== u.workspaceId) throw notFound("Contact");
+    requireCrm({ ...user, orgRole: account.orgRole });
+    if (!currentOrg || currentOrg.workspaceId !== account.workspaceId) throw notFound("Organisation");
+    if (currentOrg.archivedAt) throw new ApiError(409, "This organisation is archived.");
+    const recipients = await tx.user.findMany({ where: { id: { in: known }, workspaceId: account.workspaceId }, select: { id: true, deactivatedAt: true, emailVerifiedAt: true } });
+    if (recipients.length !== known.length || recipients.some((recipient) => !isActive(recipient))) {
+      throw new ApiError(409, "Known by membership changed. Reload and try again.");
+    }
+    const c = await tx.contact.create({ data: { workspaceId: account.workspaceId, organisationId: orgId, name, role: clean(input.role), email: clean(input.email), phone: clean(input.phone), createdById: user.id } });
     await tx.contactKnownBy.createMany({ data: known.map((userId) => ({ contactId: c.id, userId })) });
     await logAction(tx, { actorId: user.id, projectId: null, targetType: "contact", targetId: c.id, action: "contact.created", after: { name, organisationId: orgId } });
     return c;
