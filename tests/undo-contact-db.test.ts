@@ -1,4 +1,4 @@
-// Real PostgreSQL interleavings for projectless contact.created/contact.removed Undo.
+// Real PostgreSQL interleavings for projectless contact Undo.
 import { afterAll, afterEach, beforeAll, expect, it, vi } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import { mkdirSync, writeFileSync } from 'node:fs';
@@ -52,12 +52,12 @@ afterAll(async () => {
     writeFileSync('test-results/undo-contact/cleanup.json', JSON.stringify({ fixture: prefix, scope: 'contact-undo-disposable-postgres', completed, cleanup }, null, 2));
   }
 });
-async function fixture(action: 'contact.created' | 'contact.removed', actionActorId = author.id) {
+async function fixture(action: 'contact.created' | 'contact.removed' | 'contact.updated', actionActorId = author.id) {
   const org = await db.organisation.create({ data: { workspaceId, name: prefix + '-org', createdById: author.id } });
   organisations.push(org.id);
-  const contact = await db.contact.create({ data: { workspaceId, organisationId: org.id, name: prefix + '-person', createdById: author.id, removedAt: action === 'contact.removed' ? new Date() : null } });
+  const contact = await db.contact.create({ data: { workspaceId, organisationId: org.id, name: action === 'contact.updated' ? prefix + '-after' : prefix + '-person', createdById: author.id, removedAt: action === 'contact.removed' ? new Date() : null } });
   contacts.push(contact.id);
-  const log = await db.actionLog.create({ data: { actorId: actionActorId, projectId: null, targetType: 'contact', targetId: contact.id, channel: 'SCREEN', action, beforeState: action === 'contact.removed' ? { removedAt: null } : undefined, afterState: action === 'contact.created' ? { organisationId: org.id } : { removedAt: new Date().toISOString() }, createdAt: new Date(Date.now() - 2000) } });
+  const log = await db.actionLog.create({ data: { actorId: actionActorId, projectId: null, targetType: 'contact', targetId: contact.id, channel: 'SCREEN', action, beforeState: action === 'contact.removed' ? { removedAt: null } : action === 'contact.updated' ? { name: prefix + '-before' } : undefined, afterState: action === 'contact.created' ? { organisationId: org.id } : action === 'contact.updated' ? { name: contact.name } : { removedAt: new Date().toISOString() }, createdAt: new Date(Date.now() - 2000) } });
   return { org, contact, log };
 }
 async function snapshot(contactId: string) {
@@ -195,4 +195,52 @@ it('activity failure rolls the inverse and claim back; retry succeeds', async ()
   await undoAction(author, f.log.id);
   expect((await db.contact.findUniqueOrThrow({ where: { id: f.contact.id } })).removedAt).not.toBeNull();
   completed.push('activity-rollback-retry');
+});
+
+it('refuses contact.updated Undo after its author is deactivated during preflight', async () => {
+  const f = await fixture('contact.updated'), pause = pauseBeforeTransactions(1);
+  const pending = Promise.allSettled([undoAction(author, f.log.id)]);
+  try {
+    await pause.ready(); await db.user.update({ where: { id: author.id }, data: { deactivatedAt: new Date() } });
+    const before = await snapshot(f.contact.id); pause.release();
+    expect(await pending).toEqual([expect.objectContaining({ status: 'rejected', reason: expect.objectContaining({ status: 404 }) })]);
+    expect(await snapshot(f.contact.id)).toEqual(before);
+    completed.push('update-deactivated-author-denied');
+  } finally { pause.release(); await pending; }
+});
+
+it('refuses contact.updated Undo by a former Admin who edited another author’s contact', async () => {
+  const f = await fixture('contact.updated', admin.id), pause = pauseBeforeTransactions(1);
+  const pending = Promise.allSettled([undoAction(admin, f.log.id)]);
+  try {
+    await pause.ready(); await db.user.update({ where: { id: admin.id }, data: { orgRole: 'MEMBER' } });
+    const before = await snapshot(f.contact.id); pause.release();
+    expect(await pending).toEqual([expect.objectContaining({ status: 'rejected', reason: expect.objectContaining({ status: 403 }) })]);
+    expect(await snapshot(f.contact.id)).toEqual(before);
+    completed.push('update-former-admin-denied');
+  } finally { pause.release(); await pending; }
+});
+
+it('gives concurrent contact.updated Undo requests one winner and one activity', async () => {
+  const f = await fixture('contact.updated'), pause = pauseBeforeTransactions(2);
+  const pending = Promise.allSettled([undoAction(author, f.log.id), undoAction(author, f.log.id)]);
+  try {
+    await pause.ready(); pause.release(); const results = await pending;
+    expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+    expect(results.filter((r) => r.status === 'rejected')).toEqual([expect.objectContaining({ reason: expect.objectContaining({ status: 409 }) })]);
+    expect(await db.actionLog.count({ where: { targetType: 'contact', targetId: f.contact.id, action: 'undo' } })).toBe(1);
+    completed.push('update-duplicate-one-winner');
+  } finally { pause.release(); await pending; }
+});
+
+it('rejects a newer contact edit after Undo preflight without overwriting it', async () => {
+  const f = await fixture('contact.updated'), pause = pauseBeforeTransactions(1);
+  const pending = Promise.allSettled([undoAction(author, f.log.id)]);
+  try {
+    await pause.ready(); await db.contact.update({ where: { id: f.contact.id }, data: { name: prefix + '-latest' } });
+    const before = await snapshot(f.contact.id); pause.release();
+    expect(await pending).toEqual([expect.objectContaining({ status: 'rejected', reason: expect.objectContaining({ status: 409, extra: expect.objectContaining({ needsConfirm: 'conflict' }) }) })]);
+    expect(await snapshot(f.contact.id)).toEqual(before);
+    completed.push('update-newer-edit-conflict');
+  } finally { pause.release(); await pending; }
 });
