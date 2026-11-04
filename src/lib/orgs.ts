@@ -115,8 +115,36 @@ export async function createOrganisation(user: Actor, input: OrgInput) {
     throw new ApiError(409, `An organisation called "${dup.name}" already exists here.`, { needsConfirm: "duplicate", existingId: dup.id });
   }
   return db.$transaction(async (tx) => {
+    let account;
+    let parent;
+    try {
+      // Serialise creates in this workspace so two case-insensitive duplicate
+      // checks cannot both pass before either row is committed.
+      await tx.$queryRaw`SELECT "id" FROM "Workspace" WHERE "id" = ${u.workspaceId} FOR UPDATE NOWAIT`;
+      await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${user.id} FOR SHARE NOWAIT`;
+      if (input.parentId) await tx.$queryRaw`SELECT "id" FROM "Organisation" WHERE "id" = ${input.parentId} FOR SHARE NOWAIT`;
+      account = await tx.user.findUnique({ where: { id: user.id }, select: { workspaceId: true, orgRole: true, deactivatedAt: true, emailVerifiedAt: true } });
+      parent = input.parentId ? await tx.organisation.findUnique({ where: { id: input.parentId }, select: { workspaceId: true, archivedAt: true } }) : null;
+    } catch (error) {
+      if ((error as { code?: string; meta?: { code?: string } }).code === "P2010" && (error as { meta?: { code?: string } }).meta?.code === "55P03") {
+        throw new ApiError(409, "The organisation or its access is changing. Reload and try again.");
+      }
+      throw error;
+    }
+    if (!account || !isActive(account) || account.workspaceId !== u.workspaceId) throw notFound("Organisation");
+    requireCrm({ ...user, orgRole: account.orgRole });
+    if (input.parentId && (!parent || parent.workspaceId !== account.workspaceId || parent.archivedAt)) {
+      throw new ApiError(409, "The parent organisation is no longer available.");
+    }
+    const currentDuplicate = await tx.organisation.findFirst({
+      where: { workspaceId: account.workspaceId, parentId: input.parentId ?? null, name: { equals: name, mode: "insensitive" } },
+      select: { id: true, name: true },
+    });
+    if (currentDuplicate && !input.force) {
+      throw new ApiError(409, `An organisation called "${currentDuplicate.name}" already exists here.`, { needsConfirm: "duplicate", existingId: currentDuplicate.id });
+    }
     const org = await tx.organisation.create({
-      data: { workspaceId: u.workspaceId, name, kind: clean(input.kind), country: clean(input.country), level: input.level ?? null, parentId: input.parentId ?? null, createdById: user.id },
+      data: { workspaceId: account.workspaceId, name, kind: clean(input.kind), country: clean(input.country), level: input.level ?? null, parentId: input.parentId ?? null, createdById: user.id },
     });
     await logAction(tx, { actorId: user.id, projectId: null, targetType: "organisation", targetId: org.id, action: "organisation.created", after: { name, parentId: org.parentId } });
     return org;

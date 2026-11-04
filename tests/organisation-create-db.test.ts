@@ -106,3 +106,42 @@ it('allows a current author to create one organisation with one action', async (
   expect(await db.actionLog.count({ where: { targetType: 'organisation', targetId: row.id, action: 'organisation.created' } })).toBe(1);
   completed.push('author-positive');
 });
+
+it('creates beneath a current parent and logs its parent ID', async () => {
+  const parent = await db.organisation.create({ data: { workspaceId, name: prefix + '-valid-parent', createdById: author.id } });
+  const child = await createOrganisation(author, { name: prefix + '-valid-child', parentId: parent.id });
+  expect(child.parentId).toBe(parent.id);
+  expect(await db.actionLog.count({ where: { targetType: 'organisation', targetId: child.id, action: 'organisation.created' } })).toBe(1);
+  completed.push('valid-parent-positive');
+});
+
+it('keeps the explicit force override for a known duplicate', async () => {
+  const name = prefix + '-intentional-duplicate';
+  const first = await createOrganisation(author, { name });
+  const second = await createOrganisation(author, { name, force: true });
+  expect(first.id).not.toBe(second.id);
+  expect(await db.organisation.count({ where: { workspaceId, name } })).toBe(2);
+  expect(await db.actionLog.count({ where: { targetType: 'organisation', targetId: { in: [first.id, second.id] }, action: 'organisation.created' } })).toBe(2);
+  completed.push('force-override-positive');
+});
+
+it('fails closed when current account row is being changed', async () => {
+  const before = await snapshot();
+  await db.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${author.id} FOR UPDATE`;
+    await expect(createOrganisation(author, { name: prefix + '-locked-account' })).rejects.toMatchObject({ status: 409 });
+  });
+  expect(await snapshot()).toEqual(before);
+  completed.push('account-lock-denied');
+});
+
+it('fails closed when current parent row is being changed', async () => {
+  const parent = await db.organisation.create({ data: { workspaceId, name: prefix + '-locked-parent', createdById: author.id } });
+  const before = await snapshot();
+  await db.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT "id" FROM "Organisation" WHERE "id" = ${parent.id} FOR UPDATE`;
+    await expect(createOrganisation(author, { name: prefix + '-locked-child', parentId: parent.id })).rejects.toMatchObject({ status: 409 });
+  });
+  expect(await snapshot()).toEqual(before);
+  completed.push('parent-lock-denied');
+});
