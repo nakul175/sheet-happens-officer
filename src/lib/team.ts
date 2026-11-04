@@ -71,33 +71,54 @@ export async function deactivate(actor: Actor, targetId: string, reassign: strin
   if (!mayAct(actor, target)) throw new ApiError(403, "You cannot deactivate this person.");
   if (target.id === actor.id) throw new ApiError(409, "You cannot deactivate yourself.");
   if (target.deactivatedAt) throw new ApiError(409, "This person is already deactivated.");
-
-  const memberships = await db.projectMember.findMany({ where: { userId: targetId }, include: { project: true } });
-  const leads = memberships.filter((m) => m.role === "LEADER");
-  if (leads.length) {
-    // A caller who can see the CRM gets every leadership, in the same order as before (APL-2735 AC2).
-    // crmProjectWhere drops deals the caller cannot see, so those names, ids and counts stay out of the 409.
-    let visible = leads;
-    if (!crmVisible(actor)) {
-      const visibleIds = new Set((await db.projectMember.findMany({
-        where: { userId: targetId, role: "LEADER", project: crmProjectWhere(actor) },
-        select: { projectId: true },
-      })).map((row) => row.projectId));
-      visible = leads.filter((m) => visibleIds.has(m.projectId));
-    }
-    if (!visible.length) throw new ApiError(409, "Name a new Leader first.");
-    throw new ApiError(409, "Name a new Leader first for: " + visible.map((m) => m.project.name).join(", "), {
-      leads: visible.map((m) => ({ id: m.projectId, name: m.project.name })),
-    });
-  }
-  if (reassign !== "leaders") {
-    const named = await db.user.findUnique({ where: { id: reassign } });
-    if (!named || !isActive(named) || named.id === targetId) throw new ApiError(400, "Choose an active person to take the tasks.");
-  }
-
   // APL-2995: fellBack names only projects the caller can see; a hidden deal still falls back to its Leader, unnamed.
-  const showDeals = crmVisible(actor);
   return db.$transaction(async (tx) => {
+    // A task writer and this deactivation must agree on the person's eligibility.
+    // Lock the account before reading memberships; an FK membership insert then
+    // cannot appear between this snapshot and the final account update.
+    try {
+      for (const personId of [actor.id, targetId].sort()) {
+        if (personId === targetId) await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${personId} FOR UPDATE NOWAIT`;
+        else await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${personId} FOR SHARE NOWAIT`;
+      }
+      await tx.$queryRaw`SELECT "projectId" FROM "ProjectMember" WHERE "userId" = ${targetId} FOR SHARE NOWAIT`;
+      if (reassign !== "leaders" && reassign !== actor.id) await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${reassign} FOR SHARE NOWAIT`;
+    } catch (error) {
+      const failure = error as { code?: string; meta?: { code?: string } } | null;
+      if (failure?.code === 'P2010' && failure.meta?.code === '55P03') {
+        throw new ApiError(409, "Account or membership is changing. Reload and try again.");
+      }
+      throw error;
+    }
+    const currentActor = await tx.user.findUnique({ where: { id: actor.id } });
+    const currentTarget = await tx.user.findUnique({ where: { id: targetId } });
+    if (!currentTarget) throw notFound("Person");
+    if (!currentActor || !isActive(currentActor) || currentActor.workspaceId !== currentTarget.workspaceId || !mayAct(currentActor, currentTarget)) {
+      throw new ApiError(403, "You cannot deactivate this person.");
+    }
+    if (currentTarget.deactivatedAt) throw new ApiError(409, "This person is already deactivated.");
+    const memberships = await tx.projectMember.findMany({ where: { userId: targetId }, include: { project: true } });
+    const leads = memberships.filter((m) => m.role === "LEADER");
+    if (leads.length) {
+      // A caller who cannot see the CRM gets no deal names, ids or counts in this 409.
+      let visible = leads;
+      if (!crmVisible(currentActor)) {
+        const visibleIds = new Set((await tx.projectMember.findMany({
+          where: { userId: targetId, role: "LEADER", project: crmProjectWhere(currentActor) },
+          select: { projectId: true },
+        })).map((row) => row.projectId));
+        visible = leads.filter((m) => visibleIds.has(m.projectId));
+      }
+      if (!visible.length) throw new ApiError(409, "Name a new Leader first.");
+      throw new ApiError(409, "Name a new Leader first for: " + visible.map((m) => m.project.name).join(", "), {
+        leads: visible.map((m) => ({ id: m.projectId, name: m.project.name })),
+      });
+    }
+    if (reassign !== "leaders") {
+      const named = await tx.user.findUnique({ where: { id: reassign } });
+      if (!named || !isActive(named) || named.workspaceId !== currentTarget.workspaceId || named.id === targetId) throw new ApiError(400, "Choose an active person to take the tasks.");
+    }
+    const showDeals = crmVisible(currentActor);
     const fellBack: string[] = [];
     let moved = 0;
     for (const m of memberships) {
@@ -116,11 +137,12 @@ export async function deactivate(actor: Actor, targetId: string, reassign: strin
       // Tasks on a hidden deal still go to its Leader; only what this caller is told is redacted.
       if (visible) moved += r.moved;
     }
-    await tx.user.update({ where: { id: targetId }, data: { deactivatedAt: new Date() } });
-    await tx.session.updateMany({ where: { userId: targetId, revokedAt: null }, data: { revokedAt: new Date() } });
+    const now = new Date();
+    await tx.user.update({ where: { id: targetId }, data: { deactivatedAt: now } });
+    await tx.session.updateMany({ where: { userId: targetId, revokedAt: null }, data: { revokedAt: now } });
     await auditTx(tx, "USER_DEACTIVATED", { actorId: actor.id, targetId });
     return { moved, fellBack };
-  });
+  }, { isolationLevel: "ReadCommitted" });
 }
 
 /** Restores sign-in only; reassigned tasks are not moved back (SHO-US-2.3 AC3). */

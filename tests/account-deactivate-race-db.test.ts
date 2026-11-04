@@ -27,7 +27,7 @@ beforeAll(async () => {
 });
 afterEach(async () => {
   vi.restoreAllMocks();
-  if (safe) await db.user.update({ where: { id: admin.id }, data: { orgRole: 'ADMIN' } });
+  if (safe) await db.user.update({ where: { id: admin.id }, data: { orgRole: 'ADMIN', deactivatedAt: null } });
 });
 afterAll(async () => {
   if (!safe) return;
@@ -86,6 +86,18 @@ it('refuses a target promoted to Admin after an ordinary Admin preflight', async
   } finally { pause.release(); await pending; }
 });
 
+it('refuses a deactivated Admin actor after preflight', async () => {
+  const id = await target(), pause = pauseBeforeTransactions(1);
+  const pending = Promise.allSettled([deactivate(admin, id, 'leaders')]);
+  try {
+    await pause.ready(); await db.user.update({ where: { id: admin.id }, data: { deactivatedAt: new Date() } });
+    pause.release();
+    expect(await pending).toEqual([expect.objectContaining({ status: 'rejected', reason: expect.objectContaining({ status: 403 }) })]);
+    expect((await db.user.findUniqueOrThrow({ where: { id } })).deactivatedAt).toBeNull();
+    expect(await auditCount(id)).toBe(0); completed.push('deactivated-actor-denied');
+  } finally { pause.release(); await pending; }
+});
+
 it('refuses a person already deactivated after preflight', async () => {
   const id = await target(), pause = pauseBeforeTransactions(1);
   const pending = Promise.allSettled([deactivate(admin, id, 'leaders')]);
@@ -132,4 +144,24 @@ it('current Admin deactivates a member once and records the audit', async () => 
   expect(await deactivate(admin, id, 'leaders')).toEqual({ moved: 0, fellBack: [] });
   expect((await db.user.findUniqueOrThrow({ where: { id } })).deactivatedAt).not.toBeNull();
   expect(await auditCount(id)).toBe(1); completed.push('current-admin-control');
+});
+
+it('refuses target-account lock contention and succeeds after a safe retry', async () => {
+  const id = await target();
+  let reached!: () => void, release!: () => void;
+  const atLock = new Promise<void>((resolve) => { reached = resolve; });
+  const held = new Promise<void>((resolve) => { release = resolve; });
+  const blocker = transact(async (tx) => {
+    await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${id} FOR UPDATE`;
+    reached(); await held;
+  });
+  try {
+    await atLock;
+    await expect(deactivate(admin, id, 'leaders')).rejects.toMatchObject({ status: 409 });
+    expect((await db.user.findUniqueOrThrow({ where: { id } })).deactivatedAt).toBeNull();
+    expect(await auditCount(id)).toBe(0);
+  } finally { release(); await blocker; }
+  await deactivate(admin, id, 'leaders');
+  expect(await auditCount(id)).toBe(1);
+  completed.push('locked-target-retry');
 });
