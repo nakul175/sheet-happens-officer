@@ -285,7 +285,7 @@ const norm = (v: unknown) => JSON.stringify(v === undefined ? null : v);
 const diff = (keys: string[], b: Record<string, unknown>, f: Record<string, unknown>, now: Record<string, unknown>) =>
   keys.filter((k) => norm(now[k]) !== norm(f[k])).map((k) => ({ field: k, before: b[k], after: f[k], now: now[k] }));
 
-async function planRecord(row: { action: string; targetId: string; beforeState: unknown; afterState: unknown }, user: Actor): Promise<RecPlan> {
+async function planRecord(row: { action: string; targetId: string; beforeState: unknown; afterState: unknown }, user: Actor, tx?: Tx): Promise<RecPlan> {
   const b = (row.beforeState ?? {}) as Record<string, unknown>;
   const f = (row.afterState ?? {}) as Record<string, unknown>;
   const id = row.targetId;
@@ -328,7 +328,7 @@ async function planRecord(row: { action: string; targetId: string; beforeState: 
       };
     }
     case "note.created": case "note.removed": {
-      const n = await db.note.findUnique({ where: { id } });
+      const n = await (tx ?? db).note.findUnique({ where: { id } });
       if (!n) throw bad("This note no longer exists.");
       const remove = row.action === "note.created";
       if (remove === !!n.removedAt) throw bad(remove ? "This note is already deleted." : "This note is already back.");
@@ -345,6 +345,53 @@ export async function undoRecord(user: Actor, row: { id: string; action: string;
   if (row.undoneAt) throw new ApiError(409, "This action was already undone.");
   if (!isUndoable(row.action)) throw new ApiError(409, "This kind of action cannot be undone.");
   if (isTooOldToUndo(row.createdAt)) throw new ApiError(409, "Too old to undo", { tooOld: true });
+  if (row.action === "note.created" || row.action === "note.removed") {
+    if (row.targetType !== "note") throw new ApiError(409, "This note action has changed. Reload before undoing it.");
+    return db.$transaction(async (tx) => {
+      let currentOrgRole = user.orgRole;
+      try {
+        await tx.$queryRaw`SELECT "id" FROM "Note" WHERE "id" = ${row.targetId} FOR UPDATE NOWAIT`;
+        await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${user.id} FOR SHARE NOWAIT`;
+        const note = await tx.note.findUnique({ where: { id: row.targetId } });
+        if (!note) throw notFound("Note");
+        const currentUser = await tx.user.findUnique({ where: { id: user.id }, select: { workspaceId: true, orgRole: true, deactivatedAt: true, emailVerifiedAt: true } });
+        if (!currentUser || !isActive(currentUser) || currentUser.workspaceId !== note.workspaceId) throw notFound("Note");
+        currentOrgRole = currentUser.orgRole;
+        const currentActor = { ...user, orgRole: currentOrgRole };
+        requireCrm(currentActor);
+        if (note.projectId) {
+          await tx.$queryRaw`SELECT "id" FROM "Project" WHERE "id" = ${note.projectId} FOR SHARE NOWAIT`;
+          await tx.$queryRaw`SELECT "userId" FROM "ProjectMember" WHERE "projectId" = ${note.projectId} AND "userId" = ${user.id} FOR SHARE NOWAIT`;
+          try {
+            const access = await projectAccess(currentActor, note.projectId, { tx });
+            if (access.project.typeId !== WORKSTREAM_DEAL) throw notFound("Note");
+          } catch (error) {
+            if (error instanceof ApiError && error.status === 404) throw notFound("Note");
+            throw error;
+          }
+        }
+        await tx.$queryRaw`SELECT "id" FROM "ActionLog" WHERE "id" = ${row.id} FOR UPDATE NOWAIT`;
+      } catch (error) {
+        if ((error as { code?: string; meta?: { code?: string } }).code === "P2010" && (error as { meta?: { code?: string } }).meta?.code === "55P03") {
+          throw new ApiError(409, "This note or its access is changing. Reload and try again.");
+        }
+        throw error;
+      }
+      const fresh = await tx.actionLog.findUnique({ where: { id: row.id } });
+      if (!fresh || fresh.projectId || fresh.action !== row.action || fresh.targetType !== "note" || fresh.targetId !== row.targetId) {
+        throw new ApiError(409, "This note action has changed. Reload before undoing it.");
+      }
+      if (fresh.actorId !== user.id && !isAdmin({ orgRole: currentOrgRole })) throw new ApiError(403, "You can only undo your own actions.");
+      if (fresh.undoneAt) throw new ApiError(409, "This action was already undone.");
+      if (isTooOldToUndo(fresh.createdAt)) throw new ApiError(409, "Too old to undo", { tooOld: true });
+      const plan = await planRecord(fresh, user, tx);
+      const claimed = await tx.actionLog.updateMany({ where: { id: fresh.id, undoneAt: null }, data: { undoneAt: new Date(), undoneById: user.id } });
+      if (claimed.count !== 1) throw new ApiError(409, "This action was already undone.");
+      await plan.apply(tx);
+      await logAction(tx, { actorId: user.id, projectId: null, targetType: "note", targetId: fresh.targetId, action: "undo", before: { undoes: fresh.id, action: fresh.action }, after: { undoes: fresh.id, label: UNDO_LABELS[fresh.action], anyway: false } });
+      return { label: UNDO_LABELS[fresh.action], noticesSent: false, overrode: false };
+    }, { isolationLevel: "ReadCommitted" });
+  }
   const p = await planRecord(row, user);
   if (p.conflicts.length && !anyway) {
     throw new ApiError(409, "This changed after your action.", { needsConfirm: "conflict", label: UNDO_LABELS[row.action], changedBy: [], conflicts: p.conflicts.map((c) => ({ field: c.field, before: String(c.before ?? "none"), after: String(c.after ?? "none"), now: String(c.now ?? "none") })) });

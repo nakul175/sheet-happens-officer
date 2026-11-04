@@ -139,3 +139,66 @@ it('an ordinary unlinked note can still be undone by its author', async () => {
   expect((await db.note.findUniqueOrThrow({ where: { id: f.note.id } })).removedAt).not.toBeNull();
   completed.push('unlinked-note-positive');
 });
+
+it('an Admin can undo a deal note after its author loses the deal seat', async () => {
+  const f = await fixture('note.created');
+  await removeMember(leader, f.deal!.id, editor.id);
+  await undoAction(admin, f.log.id);
+  expect((await db.note.findUniqueOrThrow({ where: { id: f.note.id } })).removedAt).not.toBeNull();
+  expect((await db.actionLog.findUniqueOrThrow({ where: { id: f.log.id } })).undoneById).toBe(admin.id);
+  completed.push('admin-positive');
+});
+
+it('a competing deal-membership row lock returns a retryable conflict without changing the note', async () => {
+  const f = await fixture('note.created'); let release!: () => void, locked = false;
+  const held = new Promise<void>((resolve) => { release = resolve; });
+  const owner = transact(async (tx) => { await tx.$queryRaw`SELECT "userId" FROM "ProjectMember" WHERE "projectId" = ${f.deal!.id} AND "userId" = ${editor.id} FOR UPDATE`; locked = true; await held; }, { timeout: 15_000 });
+  const ownerResult = Promise.allSettled([owner]);
+  try {
+    await vi.waitFor(() => expect(locked).toBe(true), { timeout: 5000 });
+    const before = await snapshot(f.note.id);
+    await expect(undoAction(editor, f.log.id)).rejects.toMatchObject({ status: 409 });
+    expect(await snapshot(f.note.id)).toEqual(before);
+    completed.push('membership-lock-conflict');
+  } finally { release(); expect(await ownerResult).toEqual([{ status: 'fulfilled', value: undefined }]); }
+  await undoAction(editor, f.log.id);
+  expect((await db.note.findUniqueOrThrow({ where: { id: f.note.id } })).removedAt).not.toBeNull();
+});
+
+it('activity failure rolls note inverse and claim back; retry succeeds', async () => {
+  const f = await fixture('note.created'), before = await snapshot(f.note.id);
+  vi.spyOn(db, '$transaction').mockImplementationOnce((async (callback: (tx: Tx) => Promise<unknown>) => transact(async (tx) => {
+    const create = vi.spyOn(tx.actionLog, 'create').mockRejectedValueOnce(Error('NOTE_UNDO_ACTIVITY_FAILURE'));
+    try { return await callback(tx); } finally { create.mockRestore(); }
+  })) as typeof db.$transaction);
+  await expect(undoAction(editor, f.log.id)).rejects.toThrow('NOTE_UNDO_ACTIVITY_FAILURE');
+  vi.restoreAllMocks();
+  expect(await snapshot(f.note.id)).toEqual(before);
+  await undoAction(editor, f.log.id);
+  expect((await db.note.findUniqueOrThrow({ where: { id: f.note.id } })).removedAt).not.toBeNull();
+  completed.push('activity-rollback-retry');
+});
+
+it('rechecks an Admin downgrade before Undoing another person’s deal note', async () => {
+  const f = await fixture('note.created'), pause = pauseBeforeTransactions(1);
+  const pending = Promise.allSettled([undoAction(admin, f.log.id)]);
+  try {
+    await pause.ready(); await db.user.update({ where: { id: admin.id }, data: { orgRole: 'MEMBER' } });
+    const before = await snapshot(f.note.id); pause.release();
+    expect(await pending).toEqual([expect.objectContaining({ status: 'rejected', reason: expect.objectContaining({ status: 404 }) })]);
+    expect(await snapshot(f.note.id)).toEqual(before);
+    completed.push('admin-downgrade-after-preflight');
+  } finally { pause.release(); await pending; }
+});
+
+it('refuses a note Undo after its author is deactivated during preflight', async () => {
+  const f = await fixture('note.created'), pause = pauseBeforeTransactions(1);
+  const pending = Promise.allSettled([undoAction(editor, f.log.id)]);
+  try {
+    await pause.ready(); await db.user.update({ where: { id: editor.id }, data: { deactivatedAt: new Date() } });
+    const before = await snapshot(f.note.id); pause.release();
+    expect(await pending).toEqual([expect.objectContaining({ status: 'rejected', reason: expect.objectContaining({ status: 404 }) })]);
+    expect(await snapshot(f.note.id)).toEqual(before);
+    completed.push('author-deactivated-after-preflight');
+  } finally { pause.release(); await pending; }
+});
