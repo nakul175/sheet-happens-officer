@@ -546,7 +546,8 @@ export async function undoAction(user: Actor, logId: string, anyway = false) {
       // locks preserve archive/access state; NOWAIT avoids reverse-order waits
       // with management operations that already own those rows.
       try {
-        if (TRANSACTIONAL_TASK_UNDO.has(row.action)) await tx.$queryRaw`SELECT "id" FROM "Task" WHERE "id" = ${row.targetId} AND "projectId" = ${projectId} FOR UPDATE`;
+        if (row.action === "task.idea_changed") await tx.$queryRaw`SELECT "id" FROM "Task" WHERE "id" = ${row.targetId} AND "projectId" = ${projectId} FOR UPDATE NOWAIT`;
+        else if (TRANSACTIONAL_TASK_UNDO.has(row.action)) await tx.$queryRaw`SELECT "id" FROM "Task" WHERE "id" = ${row.targetId} AND "projectId" = ${projectId} FOR UPDATE`;
         else await tx.$queryRaw`SELECT "id" FROM "Project" WHERE "id" = ${projectId} FOR UPDATE NOWAIT`;
         if (FAMILY_TASK_UNDO.has(row.action)) {
           // Trash and completion inverses can include a parent and its cohort.
