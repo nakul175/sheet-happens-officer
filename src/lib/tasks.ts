@@ -344,21 +344,44 @@ export async function assignTask(user: Actor, id: string, assigneeId: string, ex
   return db.$transaction(async (tx) => {
     if (addToProject) {
       await addWorkspaceTaskMember(tx, user, t.projectId, assigneeId);
-      await tx.$queryRaw`SELECT "id" FROM "Task" WHERE "id" = ${id} FOR UPDATE`;
-      const current = await tx.task.findUnique({ where: { id }, include: taskInclude });
-      if (!current || current.deletedAt) throw notFound("Task");
-      if (current.updatedAt.getTime() !== classifyExpectedUpdatedAt(expectedUpdatedAt)) await versionConflict(user, id, current, a.role);
     }
-    await requireWorker(tx, t.projectId, assigneeId, "The assignee");
-    if (t.assigneeId === assigneeId) return t.updatedAt;
-    const toApprover = t.approverId === assigneeId && t.assigneeId !== assigneeId;
-    const row = await tx.task.update({ where: { id }, data: { assigneeId, ...(toApprover ? { previousAssigneeId: t.assigneeId } : {}) } });
-    await notify(tx, [assigneeId], toApprover ? "SENT_FOR_APPROVAL" : "TASK_ASSIGNED", { actorId: user.id, taskId: id, projectId: t.projectId, data: { title: t.title } });
+    // Membership departure takes its member lock before touching tasks. Take
+    // the task first, then use NOWAIT on project/person/member rows so neither
+    // order can deadlock and every decision observes the current committed state.
+    const [locked] = await tx.$queryRaw<{ projectId: string }[]>`SELECT "projectId" FROM "Task" WHERE "id" = ${id} FOR UPDATE`;
+    if (!locked) throw notFound("Task");
+    try {
+      await tx.$queryRaw`SELECT "id" FROM "Project" WHERE "id" = ${locked.projectId} FOR SHARE NOWAIT`;
+      for (const personId of [...new Set([user.id, assigneeId])].sort()) {
+        await tx.$queryRaw`SELECT "userId" FROM "ProjectMember" WHERE "projectId" = ${locked.projectId} AND "userId" = ${personId} FOR SHARE NOWAIT`;
+        await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${personId} FOR SHARE NOWAIT`;
+      }
+    } catch (error) {
+      const failure = error as { code?: string; meta?: { code?: string } } | null;
+      if (failure?.code === 'P2010' && failure.meta?.code === '55P03') {
+        throw new ApiError(409, "Project membership is changing. Reload and try again.");
+      }
+      throw error;
+    }
+    const actor = await tx.user.findUnique({ where: { id: user.id }, select: { orgRole: true, workspaceId: true, deactivatedAt: true, emailVerifiedAt: true } });
+    if (!actor || actor.deactivatedAt || !actor.emailVerifiedAt) throw notFound("Task");
+    const currentUser = { ...user, orgRole: actor.orgRole };
+    const { t: current, a: access } = await guardVersion(currentUser, id, expectedUpdatedAt, { holderCanDo: true, tx });
+    if (actor.workspaceId !== access.project.workspaceId) throw notFound("Task");
+    if (current.approverId && user.id === current.assigneeId && assigneeId !== current.approverId && access.role !== "LEADER") {
+      throw new ApiError(403, "With an approver, this task can only be handed to the approver.");
+    }
+    if (addToProject) requireManage(access);
+    await requireWorker(tx, current.projectId, assigneeId, "The assignee");
+    if (current.assigneeId === assigneeId) return current.updatedAt;
+    const toApprover = current.approverId === assigneeId;
+    const row = await tx.task.update({ where: { id }, data: { assigneeId, ...(toApprover ? { previousAssigneeId: current.assigneeId } : {}), updatedAt: new Date(Math.max(Date.now(), current.updatedAt.getTime() + 1)) } });
+    await notify(tx, [assigneeId], toApprover ? "SENT_FOR_APPROVAL" : "TASK_ASSIGNED", { actorId: user.id, taskId: id, projectId: current.projectId, data: { title: current.title } });
     // SHO-US-7.2 AC3: the person who held it is told it moved on.
-    if (t.assigneeId !== assigneeId) await notify(tx, [t.assigneeId], "REMOVED_AS_ASSIGNEE", { actorId: user.id, taskId: id, projectId: t.projectId, data: { title: t.title } });
-    await logAction(tx, { actorId: user.id, projectId: t.projectId, targetType: "task", targetId: id, action: "task.assigned", before: { assigneeId: t.assigneeId, previousAssigneeId: t.previousAssigneeId }, after: { assigneeId, previousAssigneeId: toApprover ? t.assigneeId : t.previousAssigneeId } });
+    await notify(tx, [current.assigneeId], "REMOVED_AS_ASSIGNEE", { actorId: user.id, taskId: id, projectId: current.projectId, data: { title: current.title } });
+    await logAction(tx, { actorId: user.id, projectId: current.projectId, targetType: "task", targetId: id, action: "task.assigned", before: { assigneeId: current.assigneeId, previousAssigneeId: current.previousAssigneeId }, after: { assigneeId, previousAssigneeId: toApprover ? current.assigneeId : current.previousAssigneeId } });
     return row.updatedAt;
-  });
+  }, { isolationLevel: "ReadCommitted" });
 }
 
 export async function addCollaborator(user: Actor, id: string, userId: string, options: { addToProject?: boolean; addMemberRole?: "EDITOR" | "VIEWER"; expectedUpdatedAt?: unknown } = {}) {

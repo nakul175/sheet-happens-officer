@@ -27,7 +27,10 @@ beforeAll(async () => {
   sentinelId = (await db.project.create({ data: { workspaceId, name: prefix + '-sentinel' } })).id;
   projects.push(sentinelId);
 });
-afterEach(() => vi.restoreAllMocks());
+afterEach(async () => {
+  vi.restoreAllMocks();
+  if (safe) await db.user.updateMany({ where: { id: { in: [leader.id, editor.id, recipient.id] } }, data: { deactivatedAt: null } });
+});
 afterAll(async () => {
   if (!safe) return;
   let cleanup = false;
@@ -97,6 +100,17 @@ it('rejects a downgraded actor after preflight without assignment or side effect
   } finally { pause.release(); await pending; }
 });
 
+it('rejects a deactivated actor after preflight without assignment or side effects', async () => {
+  const f = await fixture(), pause = pauseBeforeTransactions(1);
+  const pending = Promise.allSettled([assignTask(editor, f.taskId, recipient.id, f.version)]);
+  try {
+    await pause.ready(); await db.user.update({ where: { id: editor.id }, data: { deactivatedAt: new Date() } });
+    const before = await snapshot(f.taskId); pause.release();
+    expect(await pending).toEqual([expect.objectContaining({ status: 'rejected', reason: expect.objectContaining({ status: 404 }) })]);
+    expect(await snapshot(f.taskId)).toEqual(before); completed.push('deactivated-actor');
+  } finally { pause.release(); await pending; }
+});
+
 it('rejects an archived project after preflight without assignment or side effects', async () => {
   const f = await fixture(), pause = pauseBeforeTransactions(1);
   const pending = Promise.allSettled([assignTask(editor, f.taskId, recipient.id, f.version)]);
@@ -123,6 +137,34 @@ it('serializes two assignments of one version with one winner', async () => {
   } finally { pause.release(); await pending; }
 });
 
+it('refuses assignment while the recipient is being removed, leaving no invalid holder', async () => {
+  const f = await fixture();
+  let reached!: () => void, release!: () => void;
+  const atDelete = new Promise<void>((resolve) => { reached = resolve; });
+  const held = new Promise<void>((resolve) => { release = resolve; });
+  const spy = vi.spyOn(db, '$transaction').mockImplementationOnce((async (callback: (tx: Tx) => Promise<unknown>, options?: Parameters<typeof db.$transaction>[1]) => transact(async (tx) => {
+    const original = tx.projectMember.delete.bind(tx.projectMember);
+    vi.spyOn(tx.projectMember, 'delete').mockImplementationOnce(((args) => {
+      reached(); return held.then(() => original(args)) as ReturnType<typeof tx.projectMember.delete>;
+    }) as typeof tx.projectMember.delete);
+    return callback(tx);
+  }, options)) as typeof db.$transaction);
+  const removal = removeMember(leader, f.projectId, recipient.id);
+  const safety = setTimeout(() => release(), 10_000);
+  try {
+    await Promise.race([atDelete, removal.then(() => { throw Error('Removal passed its expected gate.'); })]);
+    spy.mockRestore();
+    await expect(assignTask(leader, f.taskId, recipient.id, f.version)).rejects.toMatchObject({ status: 409 });
+  } finally {
+    clearTimeout(safety); release(); spy.mockRestore(); await removal;
+  }
+  const state = await snapshot(f.taskId);
+  expect(state.task.assigneeId).toBe(leader.id);
+  expect(state.actions).toHaveLength(0);
+  expect(await db.projectMember.findUnique({ where: { projectId_userId: { projectId: f.projectId, userId: recipient.id } } })).toBeNull();
+  completed.push('recipient-removal-contention');
+}, 20_000);
+
 it('commits an eligible assignment with one action and recipient notice', async () => {
   const f = await fixture();
   const version = await assignTask(editor, f.taskId, recipient.id, f.version);
@@ -132,4 +174,16 @@ it('commits an eligible assignment with one action and recipient notice', async 
   expect(after.actions).toHaveLength(1);
   expect(after.notices.some((n) => n.type === 'TASK_ASSIGNED' && n.recipientId === recipient.id)).toBe(true);
   completed.push('eligible-control');
+});
+
+it('explicitly granted project membership and assignment commit together', async () => {
+  const f = await fixture();
+  await removeMember(leader, f.projectId, recipient.id);
+  await assignTask(leader, f.taskId, recipient.id, f.version, true);
+  const state = await snapshot(f.taskId);
+  expect(state.task.assigneeId).toBe(recipient.id);
+  expect(state.actions).toHaveLength(1);
+  expect((await db.projectMember.findUnique({ where: { projectId_userId: { projectId: f.projectId, userId: recipient.id } } }))?.role).toBe('EDITOR');
+  expect(await db.actionLog.count({ where: { projectId: f.projectId, targetType: 'member', targetId: recipient.id, action: 'member.added' } })).toBe(1);
+  completed.push('explicit-membership-control');
 });
