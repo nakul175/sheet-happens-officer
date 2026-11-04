@@ -249,3 +249,119 @@ it('refuses organisation.updated Undo when the organisation was archived after p
     completed.push('update-archived-after-preflight');
   } finally { pause.release(); await pending; }
 });
+
+it('restores an organisation edit for its active author and records one activity', async () => {
+  const f = await fixture('organisation.updated');
+  const result = await undoAction(author, f.log.id);
+  expect(result.overrode).toBe(false);
+  expect((await db.organisation.findUniqueOrThrow({ where: { id: f.organisation.id } })).name).toBe(prefix + '-before');
+  expect(await db.actionLog.count({ where: { targetType: 'organisation', targetId: f.organisation.id, action: 'undo' } })).toBe(1);
+  completed.push('update-author-positive');
+});
+
+it('allows a current Admin to restore another author’s organisation edit', async () => {
+  const f = await fixture('organisation.updated');
+  await db.user.update({ where: { id: author.id }, data: { deactivatedAt: new Date() } });
+  await undoAction(admin, f.log.id);
+  expect((await db.organisation.findUniqueOrThrow({ where: { id: f.organisation.id } })).name).toBe(prefix + '-before');
+  expect((await db.actionLog.findUniqueOrThrow({ where: { id: f.log.id } })).undoneById).toBe(admin.id);
+  completed.push('update-admin-positive');
+});
+
+it('requires explicit override for a changed field and preserves other edits', async () => {
+  const f = await fixture('organisation.updated');
+  await db.organisation.update({ where: { id: f.organisation.id }, data: { name: prefix + '-newer', kind: 'Partner' } });
+  await expect(undoAction(author, f.log.id)).rejects.toMatchObject({ status: 409, extra: { needsConfirm: 'conflict' } });
+  expect((await db.actionLog.findUniqueOrThrow({ where: { id: f.log.id } })).undoneAt).toBeNull();
+  const result = await undoAction(author, f.log.id, true);
+  expect(result.overrode).toBe(true);
+  const org = await db.organisation.findUniqueOrThrow({ where: { id: f.organisation.id } });
+  expect({ name: org.name, kind: org.kind }).toEqual({ name: prefix + '-before', kind: 'Partner' });
+  completed.push('update-conflict-override-scoped');
+});
+
+it('rejects an incomplete or unexpected logged update field without changing data', async () => {
+  const f = await fixture('organisation.updated');
+  await db.actionLog.update({ where: { id: f.log.id }, data: { beforeState: { createdById: admin.id }, afterState: { createdById: author.id } } });
+  const before = await snapshot(f.organisation.id);
+  await expect(undoAction(author, f.log.id, true)).rejects.toMatchObject({ status: 409 });
+  expect(await snapshot(f.organisation.id)).toEqual(before);
+  completed.push('update-malformed-log-denied');
+});
+
+it('rolls organisation update and action claim back if activity logging fails', async () => {
+  const f = await fixture('organisation.updated'), before = await snapshot(f.organisation.id);
+  vi.spyOn(db, '$transaction').mockImplementationOnce((async (callback: (tx: Tx) => Promise<unknown>) => transact(async (tx) => {
+    const create = vi.spyOn(tx.actionLog, 'create').mockRejectedValueOnce(Error('ORGANISATION_UPDATE_UNDO_ACTIVITY_FAILURE'));
+    try { return await callback(tx); } finally { create.mockRestore(); }
+  })) as typeof db.$transaction);
+  await expect(undoAction(author, f.log.id)).rejects.toThrow('ORGANISATION_UPDATE_UNDO_ACTIVITY_FAILURE');
+  vi.restoreAllMocks();
+  expect(await snapshot(f.organisation.id)).toEqual(before);
+  await undoAction(author, f.log.id);
+  expect((await db.organisation.findUniqueOrThrow({ where: { id: f.organisation.id } })).name).toBe(prefix + '-before');
+  completed.push('update-activity-rollback-retry');
+});
+
+it('refuses to restore a previous parent that became a descendant after preflight', async () => {
+  const f = await fixture('organisation.updated');
+  const parent = await db.organisation.create({ data: { workspaceId, name: prefix + '-parent', createdById: author.id } });
+  organisations.push(parent.id);
+  await db.actionLog.update({ where: { id: f.log.id }, data: { beforeState: { parentId: parent.id }, afterState: { parentId: null } } });
+  const pause = pauseBeforeTransactions(1), pending = Promise.allSettled([undoAction(author, f.log.id)]);
+  try {
+    await pause.ready();
+    await db.organisation.update({ where: { id: parent.id }, data: { parentId: f.organisation.id } });
+    const before = await snapshot(f.organisation.id); pause.release();
+    expect(await pending).toEqual([expect.objectContaining({ status: 'rejected', reason: expect.objectContaining({ status: 409 }) })]);
+    expect(await snapshot(f.organisation.id)).toEqual(before);
+    completed.push('update-parent-cycle-after-preflight');
+  } finally {
+    pause.release(); await pending;
+    await db.organisation.update({ where: { id: parent.id }, data: { parentId: null } });
+  }
+});
+
+it('restores a valid previous parent but refuses an archived one', async () => {
+  const parent = await db.organisation.create({ data: { workspaceId, name: prefix + '-available-parent', createdById: author.id } });
+  organisations.push(parent.id);
+  const good = await fixture('organisation.updated');
+  await db.actionLog.update({ where: { id: good.log.id }, data: { beforeState: { parentId: parent.id }, afterState: { parentId: null } } });
+  await undoAction(author, good.log.id);
+  expect((await db.organisation.findUniqueOrThrow({ where: { id: good.organisation.id } })).parentId).toBe(parent.id);
+  const bad = await fixture('organisation.updated');
+  await db.actionLog.update({ where: { id: bad.log.id }, data: { beforeState: { parentId: parent.id }, afterState: { parentId: null } } });
+  await db.organisation.update({ where: { id: parent.id }, data: { archivedAt: new Date() } });
+  const before = await snapshot(bad.organisation.id);
+  await expect(undoAction(author, bad.log.id)).rejects.toMatchObject({ status: 409 });
+  expect(await snapshot(bad.organisation.id)).toEqual(before);
+  await db.organisation.update({ where: { id: good.organisation.id }, data: { parentId: null } });
+  completed.push('update-parent-valid-and-archived');
+});
+
+it('returns a retryable conflict when the previous parent is being changed', async () => {
+  const f = await fixture('organisation.updated');
+  const parent = await db.organisation.create({ data: { workspaceId, name: prefix + '-locked-parent', createdById: author.id } });
+  organisations.push(parent.id);
+  await db.actionLog.update({ where: { id: f.log.id }, data: { beforeState: { parentId: parent.id }, afterState: { parentId: null } } });
+  let release!: () => void, locked = false;
+  const held = new Promise<void>((resolve) => { release = resolve; });
+  const owner = transact(async (tx) => {
+    await tx.$queryRaw`SELECT "id" FROM "Organisation" WHERE "id" = ${parent.id} FOR UPDATE`;
+    locked = true;
+    await held;
+  }, { timeout: 15_000 });
+  const ownerResult = Promise.allSettled([owner]);
+  try {
+    await vi.waitFor(() => expect(locked).toBe(true), { timeout: 5000 });
+    const before = await snapshot(f.organisation.id);
+    await expect(undoAction(author, f.log.id)).rejects.toMatchObject({ status: 409 });
+    expect(await snapshot(f.organisation.id)).toEqual(before);
+    completed.push('update-parent-lock-conflict');
+  } finally {
+    release(); expect(await ownerResult).toEqual([{ status: 'fulfilled', value: undefined }]);
+  }
+  await undoAction(author, f.log.id);
+  expect((await db.organisation.findUniqueOrThrow({ where: { id: f.organisation.id } })).parentId).toBe(parent.id);
+  await db.organisation.update({ where: { id: f.organisation.id }, data: { parentId: null } });
+});

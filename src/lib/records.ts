@@ -7,7 +7,7 @@ import { isActive, isAdmin, projectAccess, requireWrite, type Actor, type Tx } f
 import { WORKSTREAM_DEAL, requireCrm } from "@/lib/crm";
 import { formatDueDate, parseDueDate } from "@/lib/dates";
 import { logAction } from "@/lib/notify";
-import { assertNoCycle, orgOf, requireOrgEdit } from "@/lib/orgs";
+import { orgOf, requireOrgEdit } from "@/lib/orgs";
 import { taskAccess } from "@/lib/task-access";
 import { UNDO_LABELS, isTooOldToUndo, isUndoable } from "@/lib/undoable";
 
@@ -287,6 +287,24 @@ const norm = (v: unknown) => JSON.stringify(v === undefined ? null : v);
 const diff = (keys: string[], b: Record<string, unknown>, f: Record<string, unknown>, now: Record<string, unknown>) =>
   keys.filter((k) => norm(now[k]) !== norm(f[k])).map((k) => ({ field: k, before: b[k], after: f[k], now: now[k] }));
 
+async function requireSafeUndoParent(tx: Tx, orgId: string, parentId: string, workspaceId: string) {
+  let current: string | null = parentId;
+  for (let depth = 0; current; depth++) {
+    if (depth >= 50 || current === orgId) throw new ApiError(409, "Restoring that parent would make an organisation cycle.");
+    try {
+      await tx.$queryRaw`SELECT "id" FROM "Organisation" WHERE "id" = ${current} FOR SHARE NOWAIT`;
+    } catch (error) {
+      if ((error as { code?: string; meta?: { code?: string } }).code === "P2010" && (error as { meta?: { code?: string } }).meta?.code === "55P03") {
+        throw new ApiError(409, "The organisation tree is changing. Reload and try again.");
+      }
+      throw error;
+    }
+    const parent: { parentId: string | null; workspaceId: string; archivedAt: Date | null } | null = await tx.organisation.findUnique({ where: { id: current }, select: { parentId: true, workspaceId: true, archivedAt: true } });
+    if (!parent || parent.workspaceId !== workspaceId || (depth === 0 && parent.archivedAt)) throw new ApiError(409, "The previous parent is no longer available.");
+    current = parent.parentId;
+  }
+}
+
 async function planRecord(row: { action: string; targetId: string; beforeState: unknown; afterState: unknown }, user: Actor, tx?: Tx): Promise<RecPlan> {
   const b = (row.beforeState ?? {}) as Record<string, unknown>;
   const f = (row.afterState ?? {}) as Record<string, unknown>;
@@ -302,10 +320,20 @@ async function planRecord(row: { action: string; targetId: string; beforeState: 
       return { conflicts: [], apply: async (tx) => { await tx.organisation.update({ where: { id }, data: { archivedAt: archive ? new Date() : null } }); } };
     }
     case "organisation.updated": {
-      const o = await db.organisation.findUnique({ where: { id } });
-      if (!o) throw bad("This organisation no longer exists.");
+      if (!tx) throw bad("This organisation action needs a fresh check.");
+      const o = await tx.organisation.findUnique({ where: { id } });
+      if (!o || o.archivedAt) throw bad("This organisation is no longer editable.");
       const keys = Object.keys(f);
-      if (keys.includes("parentId") && b.parentId) await assertNoCycle(id, b.parentId as string);
+      if (!keys.length || keys.some((key) => !["name", "kind", "country", "level", "parentId"].includes(key) || !(key in b))) throw bad("This organisation action is incomplete.");
+      for (const key of keys) {
+        const valid = key === "name"
+          ? [b[key], f[key]].every((v) => typeof v === "string" && !!v.trim())
+          : key === "level"
+            ? [b[key], f[key]].every((v) => v === null || ["GROUP", "LEGAL_ENTITY", "BUYING_OFFICE"].includes(v as string))
+            : [b[key], f[key]].every((v) => v === null || typeof v === "string");
+        if (!valid) throw bad("This organisation action is incomplete.");
+      }
+      if (keys.includes("parentId") && b.parentId) await requireSafeUndoParent(tx, id, b.parentId as string, o.workspaceId);
       return { conflicts: diff(keys, b, f, { name: o.name, kind: o.kind, country: o.country, level: o.level, parentId: o.parentId }), apply: async (tx) => { await tx.organisation.update({ where: { id }, data: Object.fromEntries(keys.map((k) => [k, b[k] ?? null])) }); } };
     }
     case "contact.created": case "contact.removed": {
@@ -466,7 +494,7 @@ export async function undoRecord(user: Actor, row: { id: string; action: string;
       return { label: UNDO_LABELS[fresh.action], noticesSent: false, overrode };
     }, { isolationLevel: "ReadCommitted" });
   }
-  if (row.action === "organisation.created" || row.action === "organisation.archived" || row.action === "organisation.unarchived") {
+  if (row.action === "organisation.created" || row.action === "organisation.archived" || row.action === "organisation.unarchived" || row.action === "organisation.updated") {
     if (row.targetType !== "organisation") throw new ApiError(409, "This organisation action has changed. Reload before undoing it.");
     return db.$transaction(async (tx) => {
       let organisation;
@@ -495,11 +523,15 @@ export async function undoRecord(user: Actor, row: { id: string; action: string;
       if (fresh.undoneAt) throw new ApiError(409, "This action was already undone.");
       if (isTooOldToUndo(fresh.createdAt)) throw new ApiError(409, "Too old to undo", { tooOld: true });
       const plan = await planRecord(fresh, currentActor, tx);
+      if (plan.conflicts.length && !anyway) {
+        throw new ApiError(409, "This changed after your action.", { needsConfirm: "conflict", label: UNDO_LABELS[fresh.action], changedBy: [], conflicts: plan.conflicts.map((c) => ({ field: c.field, before: String(c.before ?? "none"), after: String(c.after ?? "none"), now: String(c.now ?? "none") })) });
+      }
       const claimed = await tx.actionLog.updateMany({ where: { id: fresh.id, undoneAt: null }, data: { undoneAt: new Date(), undoneById: user.id } });
       if (claimed.count !== 1) throw new ApiError(409, "This action was already undone.");
       await plan.apply(tx);
-      await logAction(tx, { actorId: user.id, projectId: null, targetType: "organisation", targetId: fresh.targetId, action: "undo", before: { undoes: fresh.id, action: fresh.action }, after: { undoes: fresh.id, label: UNDO_LABELS[fresh.action], anyway: false } });
-      return { label: UNDO_LABELS[fresh.action], noticesSent: false, overrode: false };
+      const overrode = anyway && plan.conflicts.length > 0;
+      await logAction(tx, { actorId: user.id, projectId: null, targetType: "organisation", targetId: fresh.targetId, action: "undo", before: { undoes: fresh.id, action: fresh.action }, after: { undoes: fresh.id, label: UNDO_LABELS[fresh.action], anyway: overrode } });
+      return { label: UNDO_LABELS[fresh.action], noticesSent: false, overrode };
     }, { isolationLevel: "ReadCommitted" });
   }
   const p = await planRecord(row, user);
