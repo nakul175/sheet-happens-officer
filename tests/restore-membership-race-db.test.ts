@@ -163,7 +163,7 @@ it('when restoration holds the member first, removal sees the newly live task an
       removeEntered();
       return transact(callback, options);
     }) as typeof db.$transaction);
-    removal = removeMember(admin, projectId, editor.id);
+    removal = removeMember(admin, projectId, editor.id, leader.id);
     await Promise.race([atRemoval, removal.then(() => { throw Error('Removal passed the expected transaction gate.'); })]);
     removeSpy.mockRestore();
     expect(safetyExpired).toBe(false);
