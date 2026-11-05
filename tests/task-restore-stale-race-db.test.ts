@@ -22,7 +22,13 @@ beforeAll(async () => {
   for (const actor of people) await db.user.create({ data: { id: actor.id, workspaceId, name: actor.id, email: actor.id + '@example.invalid', passwordHash: 'unused', emailVerifiedAt: new Date(), orgRole: actor.orgRole } });
   sentinelId = (await db.project.create({ data: { workspaceId, name: prefix + '-sentinel' } })).id; projects.push(sentinelId);
 });
-afterEach(async () => { vi.restoreAllMocks(); if (safe) await db.user.update({ where: { id: admin.id }, data: { orgRole: 'ADMIN' } }); });
+afterEach(async () => {
+  vi.restoreAllMocks();
+  if (safe) {
+    await db.user.update({ where: { id: admin.id }, data: { orgRole: 'ADMIN' } });
+    await db.user.update({ where: { id: leader.id }, data: { deactivatedAt: null } });
+  }
+});
 afterAll(async () => {
   if (!safe) return;
   let cleanup = false;
@@ -97,6 +103,29 @@ it('requires confirmation when the child parent is deleted after preflight', asy
     expect(await pending).toEqual([expect.objectContaining({ status: 'rejected', reason: expect.objectContaining({ status: 409, extra: expect.objectContaining({ needsConfirm: 'parent' }) }) })]);
     expect((await db.task.findUniqueOrThrow({ where: { id: f.taskId } })).deletedAt).not.toBeNull();
     completed.push('parent-deleted');
+  } finally { pause.release(); await pending; }
+});
+
+it('rejects a Leader deactivated after preflight', async () => {
+  const f = await fixture(), pause = pauseBeforeTransaction();
+  const pending = Promise.allSettled([restoreTask(leader, f.taskId)]);
+  try {
+    await pause.ready(); await db.user.update({ where: { id: leader.id }, data: { deactivatedAt: new Date() } }); pause.release();
+    expect(await pending).toEqual([expect.objectContaining({ status: 'rejected', reason: expect.objectContaining({ status: 404 }) })]);
+    expect((await db.task.findUniqueOrThrow({ where: { id: f.taskId } })).deletedAt).not.toBeNull();
+    completed.push('deactivated-leader');
+  } finally { pause.release(); await pending; }
+});
+
+it('logs the current title when it changes after preflight', async () => {
+  const f = await fixture(), pause = pauseBeforeTransaction();
+  const pending = Promise.allSettled([restoreTask(leader, f.taskId)]);
+  try {
+    await pause.ready(); await db.task.update({ where: { id: f.taskId }, data: { title: 'Fresh title' } }); pause.release();
+    expect(await pending).toEqual([expect.objectContaining({ status: 'fulfilled' })]);
+    const log = await db.actionLog.findFirstOrThrow({ where: { projectId: f.projectId, action: 'task.restored' } });
+    expect(log.beforeState).toMatchObject({ title: 'Fresh title' });
+    completed.push('fresh-title');
   } finally { pause.release(); await pending; }
 });
 

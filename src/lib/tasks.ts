@@ -800,16 +800,35 @@ export async function restoreTask(user: Actor, id: string, confirmParent = false
   const { t, a } = await loadTask(user, id, { write: true, deleted: true, tx: o.tx });
   requireManage(a); // SHO-US-3.3 AC1: only the Leader or an Admin restores from Trash
   if (!t.deletedAt) throw new ApiError(409, "This task is not in Trash.");
-  const parent = t.parentId ? await (o.tx ?? db).task.findUnique({ where: { id: t.parentId } }) : null;
-  const parentDeleted = !!parent?.deletedAt;
-  if (parentDeleted && !confirmParent) {
-    throw new ApiError(409, `This will also restore its parent task, "${parent!.title}".`, { needsConfirm: "parent", parentTitle: parent!.title });
-  }
   const apply = async (tx: Tx) => {
-    const targets = parentDeleted ? [parent!, t] : [t];
-    const initialLeader = await leaderId(tx, t.projectId);
+    // Parent first matches the delete path's lock order. Re-read both rows
+    // after locking; preflight authority and state can change before this write.
+    const lock = async (taskId: string) => {
+      try {
+        return await tx.$queryRaw<{ id: string }[]>`SELECT "id" FROM "Task" WHERE "id" = ${taskId} FOR UPDATE NOWAIT`;
+      } catch (error) {
+        const failure = error as { code?: string; meta?: { code?: string } } | null;
+        if (failure?.code === "P2010" && failure.meta?.code === "55P03") {
+          throw new ApiError(409, "Task is changing. Reload and try again.");
+        }
+        throw error;
+      }
+    };
+    if (t.parentId && !(await lock(t.parentId)).length) throw notFound("Parent task");
+    if (!(await lock(id)).length) throw notFound("Task");
+    const current = await tx.task.findUnique({ where: { id }, include: taskInclude });
+    if (!current || current.parentId !== t.parentId || current.projectId !== t.projectId) throw notFound("Task");
+    if (!current.deletedAt) throw new ApiError(409, "This task is not in Trash.");
+    const freshParent = current.parentId ? await tx.task.findUnique({ where: { id: current.parentId }, include: taskInclude }) : null;
+    if (current.parentId && (!freshParent || freshParent.projectId !== current.projectId)) throw notFound("Parent task");
+    const restoreParent = !!freshParent?.deletedAt;
+    if (restoreParent && !confirmParent) {
+      throw new ApiError(409, `This will also restore its parent task, "${freshParent!.title}".`, { needsConfirm: "parent", parentTitle: freshParent!.title });
+    }
+    const targets = restoreParent ? [freshParent!, current] : [current];
+    const initialLeader = await leaderId(tx, current.projectId);
     const cohorts = new Map<string, { id: string; assigneeId: string; approverId: string | null }[]>();
-    const candidateIds = new Set<string>([initialLeader]);
+    const candidateIds = new Set<string>([user.id, initialLeader]);
     for (const x of targets) {
       candidateIds.add(x.assigneeId);
       if (x.approverId) candidateIds.add(x.approverId);
@@ -820,25 +839,19 @@ export async function restoreTask(user: Actor, id: string, confirmParent = false
         if (sub.approverId) candidateIds.add(sub.approverId);
       }
     }
-    // Departure locks the member before scanning work. Hold every restoration
-    // candidate until commit so neither side can miss a newly live assignment.
-    // NOWAIT also avoids a reverse task/member lock wait inside Undo.
-    for (const memberId of [...candidateIds].sort()) {
-      try {
-        await tx.$queryRaw`SELECT "userId" FROM "ProjectMember" WHERE "projectId" = ${t.projectId} AND "userId" = ${memberId} FOR SHARE NOWAIT`;
-      } catch (error) {
-        const failure = error as { code?: string; meta?: { code?: string } } | null;
-        if (failure?.code === "P2010" && failure.meta?.code === "55P03") {
-          throw new ApiError(409, "Project membership is changing. Reload and try again.");
-        }
-        throw error;
-      }
-    }
-    const leader = await leaderId(tx, t.projectId);
+    // Departure locks members first. NOWAIT prevents the reverse task/member
+    // order from deadlocking and holds project, account and members to commit.
+    await lockTaskProjectAndPeople(tx, current.projectId, [...candidateIds]);
+    const actor = await tx.user.findUnique({ where: { id: user.id }, select: { orgRole: true, workspaceId: true, deactivatedAt: true, emailVerifiedAt: true } });
+    if (!actor || actor.deactivatedAt || !actor.emailVerifiedAt) throw notFound("Task");
+    const { a: fresh } = await loadTask({ ...user, orgRole: actor.orgRole }, id, { write: true, deleted: true, tx });
+    if (actor.workspaceId !== fresh.project.workspaceId) throw notFound("Task");
+    requireManage(fresh);
+    const leader = await leaderId(tx, current.projectId);
     if (leader !== initialLeader) throw new ApiError(409, "Project membership is changing. Reload and try again.");
     for (const x of targets) {
-      const assigneeOk = await activeMember(tx, t.projectId, x.assigneeId, WORKERS);
-      const approverOk = x.approverId ? await activeMember(tx, t.projectId, x.approverId, WORKERS) : null;
+      const assigneeOk = await activeMember(tx, current.projectId, x.assigneeId, WORKERS);
+      const approverOk = x.approverId ? await activeMember(tx, current.projectId, x.approverId, WORKERS) : null;
       const subs = cohorts.get(x.id) ?? [];
       await tx.task.updateMany({
         where: { OR: [{ id: x.id }, { parentId: x.id, deletedAt: x.deletedAt }] },
@@ -846,20 +859,20 @@ export async function restoreTask(user: Actor, id: string, confirmParent = false
       });
       // A subtask whose assignee left while it sat in Trash also goes to the Leader (SHO-US-6.2 AC3).
       for (const s of subs) {
-        if (!(await activeMember(tx, t.projectId, s.assigneeId, WORKERS))) {
+        if (!(await activeMember(tx, current.projectId, s.assigneeId, WORKERS))) {
           await tx.task.update({ where: { id: s.id }, data: { assigneeId: leader } });
         }
       }
       if (!assigneeOk) {
         await tx.task.update({ where: { id: x.id }, data: { assigneeId: leader } });
-        await notify(tx, [leader], "RESTORED_TO_LEADER", { actorId: user.id, taskId: x.id, projectId: t.projectId, data: { title: x.title } });
+        await notify(tx, [leader], "RESTORED_TO_LEADER", { actorId: user.id, taskId: x.id, projectId: current.projectId, data: { title: x.title } });
       }
       if (x.approverId && !approverOk) {
         await tx.task.update({ where: { id: x.id }, data: { approverId: null } });
-        await notify(tx, [leader, assigneeOk ? x.assigneeId : null], "APPROVER_CLEARED", { actorId: user.id, taskId: x.id, projectId: t.projectId, data: { title: x.title } });
+        await notify(tx, [leader, assigneeOk ? x.assigneeId : null], "APPROVER_CLEARED", { actorId: user.id, taskId: x.id, projectId: current.projectId, data: { title: x.title } });
       }
     }
-    if (!o.skipRestoredLog) await logAction(tx, { actorId: user.id, projectId: t.projectId, targetType: "task", targetId: id, action: "task.restored", before: { deletedAt: t.deletedAt!.toISOString(), title: t.title }, after: { deletedAt: null, restoredParent: parentDeleted } });
+    if (!o.skipRestoredLog) await logAction(tx, { actorId: user.id, projectId: current.projectId, targetType: "task", targetId: id, action: "task.restored", before: { deletedAt: current.deletedAt.toISOString(), title: current.title }, after: { deletedAt: null, restoredParent: restoreParent } });
   };
   return o.tx ? apply(o.tx) : db.$transaction(apply);
 }
