@@ -270,3 +270,49 @@ it('send-back falls back to the Leader when the previous worker becomes ineligib
   expect(await db.actionLog.count({ where: { projectId: f.projectId, action: 'task.sent_back' } })).toBe(1);
   completed.push('back-fallback-leader');
 });
+
+it('send-back refuses a locked approver account, then succeeds after retry', async () => {
+  const f = await fixture(); await sendForApproval(editor, f.taskId);
+  let reached!: () => void, release!: () => void;
+  const atLock = new Promise<void>((resolve) => { reached = resolve; });
+  const held = new Promise<void>((resolve) => { release = resolve; });
+  const blocker = transact(async (tx) => {
+    await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${recipient.id} FOR UPDATE`;
+    reached(); await held;
+  });
+  try {
+    await atLock;
+    await expect(sendBack(recipient, f.taskId)).rejects.toMatchObject({ status: 409 });
+    expect((await db.task.findUniqueOrThrow({ where: { id: f.taskId } })).assigneeId).toBe(recipient.id);
+    expect(await db.actionLog.count({ where: { projectId: f.projectId, action: 'task.sent_back' } })).toBe(0);
+  } finally { release(); await blocker; }
+  await sendBack(recipient, f.taskId);
+  expect((await db.task.findUniqueOrThrow({ where: { id: f.taskId } })).assigneeId).toBe(editor.id);
+  expect(await db.actionLog.count({ where: { projectId: f.projectId, action: 'task.sent_back' } })).toBe(1);
+  completed.push('back-locked-approver-retry');
+});
+
+it('approver deactivation cannot pass an in-flight send-back', async () => {
+  const f = await fixture(); await sendForApproval(editor, f.taskId);
+  let reached!: () => void, release!: () => void;
+  const atUpdate = new Promise<void>((resolve) => { reached = resolve; });
+  const held = new Promise<void>((resolve) => { release = resolve; });
+  const spy = vi.spyOn(db, '$transaction').mockImplementationOnce((async (callback: (tx: Tx) => Promise<unknown>, options?: Parameters<typeof db.$transaction>[1]) => transact(async (tx) => {
+    const original = tx.task.update.bind(tx.task);
+    vi.spyOn(tx.task, 'update').mockImplementationOnce(((args) => {
+      reached(); return held.then(() => original(args)) as ReturnType<typeof tx.task.update>;
+    }) as typeof tx.task.update);
+    return callback(tx);
+  }, options)) as typeof db.$transaction);
+  const sending = Promise.allSettled([sendBack(recipient, f.taskId)]);
+  const safety = setTimeout(() => release(), 10_000);
+  try {
+    await Promise.race([atUpdate, sending.then(() => { throw Error('Send-back passed its expected gate.'); })]);
+    spy.mockRestore();
+    await expect(deactivate(admin, recipient.id, 'leaders')).rejects.toMatchObject({ status: 409 });
+  } finally { clearTimeout(safety); release(); spy.mockRestore(); await sending; }
+  expect((await sending)[0].status).toBe('fulfilled');
+  await deactivate(admin, recipient.id, 'leaders');
+  expect((await db.task.findUniqueOrThrow({ where: { id: f.taskId } })).assigneeId).toBe(editor.id);
+  completed.push('back-deactivation-serialization');
+}, 20_000);

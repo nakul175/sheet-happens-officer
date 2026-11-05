@@ -519,23 +519,40 @@ export async function sendBack(user: Actor, id: string) {
   if (!awaiting(t)) throw new ApiError(409, "This task is not awaiting approval.");
   if (user.id !== t.approverId && a.role !== "LEADER") throw new ApiError(403, "Only the approver, the Leader or an Admin can send this back.");
   return db.$transaction(async (tx) => {
-    const prev = t.previousAssigneeId ? await activeMember(tx, t.projectId, t.previousAssigneeId, WORKERS) : null;
-    const target = prev ? prev.userId : await leaderId(tx, t.projectId);
+    const [locked] = await tx.$queryRaw<{ id: string }[]>`SELECT "id" FROM "Task" WHERE "id" = ${id} FOR UPDATE`;
+    if (!locked) throw notFound("Task");
+    const snapshot = await tx.task.findUnique({ where: { id }, select: { projectId: true, assigneeId: true, approverId: true, previousAssigneeId: true } });
+    if (!snapshot) throw notFound("Task");
+    const fallbackLeader = await leaderId(tx, snapshot.projectId);
+    await lockTaskProjectAndPeople(tx, snapshot.projectId, [user.id, snapshot.assigneeId, snapshot.approverId, snapshot.previousAssigneeId, fallbackLeader]);
+    const actor = await tx.user.findUnique({ where: { id: user.id }, select: { orgRole: true, workspaceId: true, deactivatedAt: true, emailVerifiedAt: true } });
+    if (!actor || actor.deactivatedAt || !actor.emailVerifiedAt) throw notFound("Task");
+    const { t: current, a: fresh } = await loadTask({ ...user, orgRole: actor.orgRole }, id, { write: true, holderCanDo: true, tx });
+    if (actor.workspaceId !== fresh.project.workspaceId) throw notFound("Task");
+    if (!awaiting(current)) throw new ApiError(409, "This task is not awaiting approval.");
+    if (user.id !== current.approverId && fresh.role !== "LEADER") throw new ApiError(403, "Only the approver, the Leader or an Admin can send this back.");
+    if (current.projectId !== t.projectId || current.assigneeId !== t.assigneeId || current.approverId !== t.approverId || current.previousAssigneeId !== t.previousAssigneeId) {
+      throw new ApiError(409, "The task changed. Reload and try again.");
+    }
+    if (await leaderId(tx, current.projectId) !== fallbackLeader) throw new ApiError(409, "The project Leader changed. Reload and try again.");
+    const prev = current.previousAssigneeId ? await activeMember(tx, current.projectId, current.previousAssigneeId, WORKERS) : null;
+    const target = prev ? prev.userId : fallbackLeader;
+    if (!prev) await requireWorker(tx, current.projectId, fallbackLeader, "The Leader");
     // With nobody to send back to, the task goes to the Leader. When the Leader is the approver it would still be
     // "awaiting approval" in their own hands, and neither Reassign nor Change approver is open to them from there, so the
     // approver is cleared in the same write; Undo puts it back (SHO-BUG-6).
-    const clearApprover = target === t.approverId;
+    const clearApprover = target === current.approverId;
     const approver = clearApprover ? { approverId: null } : {};
-    const row = await tx.task.update({ where: { id }, data: { assigneeId: target, previousAssigneeId: null, ...approver } });
-    await notify(tx, [target], "SENT_BACK", { actorId: user.id, taskId: id, projectId: t.projectId, data: { title: t.title, toLeader: !prev, ...(clearApprover ? { approverCleared: true } : {}) } });
-    await notify(tx, [t.assigneeId], "REMOVED_AS_ASSIGNEE", { actorId: user.id, taskId: id, projectId: t.projectId, data: { title: t.title } });
+    const row = await tx.task.update({ where: { id }, data: { assigneeId: target, previousAssigneeId: null, ...approver, updatedAt: new Date(Math.max(Date.now(), current.updatedAt.getTime() + 1)) } });
+    await notify(tx, [target], "SENT_BACK", { actorId: user.id, taskId: id, projectId: current.projectId, data: { title: current.title, toLeader: !prev, ...(clearApprover ? { approverCleared: true } : {}) } });
+    await notify(tx, [current.assigneeId], "REMOVED_AS_ASSIGNEE", { actorId: user.id, taskId: id, projectId: current.projectId, data: { title: current.title } });
     await logAction(tx, {
-      actorId: user.id, projectId: t.projectId, targetType: "task", targetId: id, action: "task.sent_back",
-      before: { assigneeId: t.assigneeId, previousAssigneeId: t.previousAssigneeId, ...(clearApprover ? { approverId: t.approverId } : {}) },
+      actorId: user.id, projectId: current.projectId, targetType: "task", targetId: id, action: "task.sent_back",
+      before: { assigneeId: current.assigneeId, previousAssigneeId: current.previousAssigneeId, ...(clearApprover ? { approverId: current.approverId } : {}) },
       after: { assigneeId: target, previousAssigneeId: null, ...approver },
     });
     return row.updatedAt;
-  });
+  }, { isolationLevel: "ReadCommitted" });
 }
 
 // ---------------------------------------------------------------- complete, reopen, move (4.5)
