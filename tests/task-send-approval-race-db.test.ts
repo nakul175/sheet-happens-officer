@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { db } from '@/lib/db';
 import { getOrCreateWorkspace } from '@/lib/workspace';
-import { sendForApproval } from '@/lib/tasks';
+import { sendBack, sendForApproval } from '@/lib/tasks';
 import { deactivate } from '@/lib/team';
 import type { Tx } from '@/lib/access';
 import { assertLocalFixture } from './e2e/local-fixture-guard';
@@ -31,7 +31,7 @@ afterEach(async () => {
   vi.restoreAllMocks();
   if (!safe) return;
   await db.user.updateMany({ where: { id: { in: [editor.id, recipient.id] } }, data: { deactivatedAt: null } });
-  await db.projectMember.updateMany({ where: { projectId: { in: projects }, userId: editor.id }, data: { role: 'EDITOR' } });
+  await db.projectMember.updateMany({ where: { projectId: { in: projects }, userId: { in: [editor.id, recipient.id] } }, data: { role: 'EDITOR' } });
 });
 afterAll(async () => {
   if (!safe) return;
@@ -189,4 +189,84 @@ it('refuses a locked approver account then succeeds after retry', async () => {
   expect((await db.task.findUniqueOrThrow({ where: { id: f.taskId } })).assigneeId).toBe(recipient.id);
   expect(await db.actionLog.count({ where: { projectId: f.projectId, targetId: f.taskId, action: 'task.sent_for_approval' } })).toBe(1);
   completed.push('locked-approver-retry');
+});
+
+it('send-back refuses a downgraded approver after preflight', async () => {
+  const f = await fixture(); await sendForApproval(editor, f.taskId);
+  const pause = pauseBeforeTransactions();
+  const pending = Promise.allSettled([sendBack(recipient, f.taskId)]);
+  try {
+    await pause.ready();
+    await db.projectMember.update({ where: { projectId_userId: { projectId: f.projectId, userId: recipient.id } }, data: { role: 'VIEWER' } });
+    pause.release();
+    expect(await pending).toEqual([expect.objectContaining({ status: 'rejected', reason: expect.objectContaining({ status: 403 }) })]);
+    expect((await db.task.findUniqueOrThrow({ where: { id: f.taskId } })).assigneeId).toBe(recipient.id);
+    expect(await db.actionLog.count({ where: { projectId: f.projectId, action: 'task.sent_back' } })).toBe(0);
+    completed.push('back-downgraded-approver');
+  } finally { pause.release(); await pending; }
+});
+
+it('send-back refuses an archived project after preflight', async () => {
+  const f = await fixture(); await sendForApproval(editor, f.taskId);
+  const pause = pauseBeforeTransactions();
+  const pending = Promise.allSettled([sendBack(recipient, f.taskId)]);
+  try {
+    await pause.ready();
+    await db.project.update({ where: { id: f.projectId }, data: { archivedAt: new Date() } });
+    pause.release();
+    expect(await pending).toEqual([expect.objectContaining({ status: 'rejected', reason: expect.objectContaining({ status: 409 }) })]);
+    expect((await db.task.findUniqueOrThrow({ where: { id: f.taskId } })).assigneeId).toBe(recipient.id);
+    expect(await db.actionLog.count({ where: { projectId: f.projectId, action: 'task.sent_back' } })).toBe(0);
+    completed.push('back-archived-project');
+  } finally { pause.release(); await pending; }
+});
+
+it('send-back refuses a deactivated approver after preflight', async () => {
+  const f = await fixture(); await sendForApproval(editor, f.taskId);
+  const pause = pauseBeforeTransactions();
+  const pending = Promise.allSettled([sendBack(recipient, f.taskId)]);
+  try {
+    await pause.ready();
+    await db.user.update({ where: { id: recipient.id }, data: { deactivatedAt: new Date() } });
+    pause.release();
+    expect(await pending).toEqual([expect.objectContaining({ status: 'rejected', reason: expect.objectContaining({ status: 404 }) })]);
+    expect((await db.task.findUniqueOrThrow({ where: { id: f.taskId } })).assigneeId).toBe(recipient.id);
+    expect(await db.actionLog.count({ where: { projectId: f.projectId, action: 'task.sent_back' } })).toBe(0);
+    completed.push('back-deactivated-approver');
+  } finally { pause.release(); await pending; }
+});
+
+it('send-back refuses a task whose holder changed after preflight', async () => {
+  const f = await fixture(); await sendForApproval(editor, f.taskId);
+  const pause = pauseBeforeTransactions();
+  const pending = Promise.allSettled([sendBack(recipient, f.taskId)]);
+  try {
+    await pause.ready();
+    await db.task.update({ where: { id: f.taskId }, data: { assigneeId: leader.id } });
+    pause.release();
+    expect(await pending).toEqual([expect.objectContaining({ status: 'rejected', reason: expect.objectContaining({ status: 409 }) })]);
+    expect((await db.task.findUniqueOrThrow({ where: { id: f.taskId } })).assigneeId).toBe(leader.id);
+    expect(await db.actionLog.count({ where: { projectId: f.projectId, action: 'task.sent_back' } })).toBe(0);
+    completed.push('back-changed-holder');
+  } finally { pause.release(); await pending; }
+});
+
+it('send-back returns an eligible task once, then refuses a repeat', async () => {
+  const f = await fixture(); await sendForApproval(editor, f.taskId);
+  await sendBack(recipient, f.taskId);
+  const row = await db.task.findUniqueOrThrow({ where: { id: f.taskId } });
+  expect({ holder: row.assigneeId, previous: row.previousAssigneeId, approver: row.approverId }).toEqual({ holder: editor.id, previous: null, approver: recipient.id });
+  await expect(sendBack(recipient, f.taskId)).rejects.toMatchObject({ status: 409 });
+  expect(await db.actionLog.count({ where: { projectId: f.projectId, action: 'task.sent_back' } })).toBe(1);
+  completed.push('back-valid-repeat-control');
+});
+
+it('send-back falls back to the Leader when the previous worker becomes ineligible', async () => {
+  const f = await fixture(); await sendForApproval(editor, f.taskId);
+  await db.projectMember.update({ where: { projectId_userId: { projectId: f.projectId, userId: editor.id } }, data: { role: 'VIEWER' } });
+  await sendBack(recipient, f.taskId);
+  const row = await db.task.findUniqueOrThrow({ where: { id: f.taskId } });
+  expect({ holder: row.assigneeId, previous: row.previousAssigneeId, approver: row.approverId }).toEqual({ holder: leader.id, previous: null, approver: recipient.id });
+  expect(await db.actionLog.count({ where: { projectId: f.projectId, action: 'task.sent_back' } })).toBe(1);
+  completed.push('back-fallback-leader');
 });
