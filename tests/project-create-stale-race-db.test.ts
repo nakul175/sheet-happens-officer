@@ -134,7 +134,8 @@ it('returns a retryable conflict on a locked vertical, then creates once', async
     await tx.$queryRaw`SELECT "id" FROM "Project" WHERE "id" = ${verticalId} FOR UPDATE`;
     reached(); await held;
   });
-  const safety = setTimeout(() => release(), 15_000);
+  // Release promptly on the unfixed path, which waits instead of returning a NOWAIT conflict.
+  const safety = setTimeout(() => release(), 500);
   try {
     await atLock;
     await expect(createProject(admin, { name: projectName, leaderId: leader.id, verticalId })).rejects.toMatchObject({ status: 409 });
