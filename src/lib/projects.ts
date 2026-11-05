@@ -494,11 +494,10 @@ export async function removeMember(user: Actor, projectId: string, userId: strin
   await requireHandoverIfNeeded(a, userId, handoverTo, handover);
   await db.$transaction(async (tx) => {
     try {
-      const [locked] = await tx.$queryRaw<{ id: string }[]>`SELECT "id" FROM "Project" WHERE "id" = ${projectId} FOR UPDATE NOWAIT`;
+      const [locked] = await tx.$queryRaw<{ id: string }[]>`SELECT "id" FROM "Project" WHERE "id" = ${projectId} FOR SHARE NOWAIT`;
       if (!locked) throw notFound("Project");
       await tx.$queryRaw`SELECT "userId" FROM "ProjectMember" WHERE "projectId" = ${projectId} AND "userId" = ${user.id} FOR SHARE NOWAIT`;
       await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${user.id} FOR SHARE NOWAIT`;
-      await tx.$queryRaw`SELECT "userId" FROM "ProjectMember" WHERE "projectId" = ${projectId} AND "userId" = ${userId} FOR UPDATE NOWAIT`;
     } catch (error) {
       const failure = error as { code?: string; meta?: { code?: string } } | null;
       if (failure?.code === "P2010" && failure.meta?.code === "55P03") {
