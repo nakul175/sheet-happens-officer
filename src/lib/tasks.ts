@@ -906,8 +906,14 @@ export async function listTrash(user: Actor, projectId: string) {
  * The unscoped job also purges soft-deleted comments past 30×24h (APL-2590).
  */
 export async function purgeTrash(now = new Date(), only?: Prisma.TaskWhereInput) {
-  const expired: Prisma.TaskWhereInput = { deletedAt: { lt: trashPurgeBefore(now) } };
-  const where: Prisma.TaskWhereInput = only ? { AND: [expired, only] } : expired;
+  const cutoff = trashPurgeBefore(now);
+  const expired: Prisma.TaskWhereInput = { deletedAt: { lt: cutoff } };
+  // The self-relation uses ON DELETE CASCADE. Keep an expired parent until
+  // every child has had its own full Trash period, including the exact edge.
+  const childrenRetained: Prisma.TaskWhereInput = {
+    subtasks: { none: { OR: [{ deletedAt: null }, { deletedAt: { gte: cutoff } }] } },
+  };
+  const where: Prisma.TaskWhereInput = { AND: [expired, childrenRetained, ...(only ? [only] : [])] };
   const r = await db.task.deleteMany({ where });
   if (!only) await purgeExpiredComments(now); // APL-2590: soft-deleted comments past 30×24h; a scoped call never widens to them
   if (r.count) {

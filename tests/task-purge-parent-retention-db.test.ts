@@ -60,6 +60,14 @@ it('keeps the parent while a child is at the exact 30-day boundary', async () =>
   completed.push('exact-boundary-child');
 });
 
+it('does not cascade-delete a live child under an expired parent', async () => {
+  const f = await fixture(null);
+  expect(await purgeTrash(now, { id: f.parentId })).toBe(0);
+  expect(await db.task.findUnique({ where: { id: f.parentId } })).not.toBeNull();
+  expect((await db.task.findUniqueOrThrow({ where: { id: f.childId } })).deletedAt).toBeNull();
+  completed.push('live-child-protection');
+});
+
 it('purges an expired parent with only expired children', async () => {
   const f = await fixture(new Date(cutoff.getTime() - 1000));
   expect(await purgeTrash(now, { id: f.parentId })).toBe(1);
