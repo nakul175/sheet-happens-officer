@@ -50,6 +50,7 @@ test('SHO-REG-PROJECTS-01 screen: create, edit, reload and inspect details', asy
   await page.getByLabel('Project name').fill(updatedName);
   await page.getByLabel('Description').fill('Updated description');
   await page.getByRole('button', { name: 'Save changes' }).click();
+  await expect(page.getByText(updatedName, { exact: true }).first()).toBeVisible();
   await page.reload();
   await expect(page.getByText(updatedName, { exact: true }).first()).toBeVisible();
   await expect(page.getByText('Updated description', { exact: true })).toBeVisible();
