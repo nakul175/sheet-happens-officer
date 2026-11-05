@@ -102,6 +102,26 @@ it('refuses a competing section move after preflight', async () => {
     completed.push('competing-move');
   } finally { pause.release(); await pending; }
 });
+it('refuses movement after the actor is deactivated following preflight', async () => {
+  const f = await fixture(), pause = pauseBeforeTransactions();
+  const pending = Promise.allSettled([moveTask(editor, f.taskId, f.doingId, f.version)]);
+  try {
+    await pause.ready(); await db.user.update({ where: { id: editor.id }, data: { deactivatedAt: new Date() } }); pause.release();
+    expect(await pending).toEqual([expect.objectContaining({ status: 'rejected', reason: expect.objectContaining({ status: 404 }) })]);
+    expect((await db.task.findUniqueOrThrow({ where: { id: f.taskId } })).sectionId).toBe(f.todoId);
+    completed.push('deactivated-actor');
+  } finally { pause.release(); await pending; await db.user.update({ where: { id: editor.id }, data: { deactivatedAt: null } }); }
+});
+it('same-section move rechecks the version before returning no-op', async () => {
+  const f = await fixture(), pause = pauseBeforeTransactions();
+  const pending = Promise.allSettled([moveTask(editor, f.taskId, f.todoId, f.version)]);
+  try {
+    await pause.ready(); await moveTask(leader, f.taskId, f.reviewId, f.version); pause.release();
+    expect(await pending).toEqual([expect.objectContaining({ status: 'rejected', reason: expect.objectContaining({ status: 409 }) })]);
+    expect((await db.task.findUniqueOrThrow({ where: { id: f.taskId } })).sectionId).toBe(f.reviewId);
+    completed.push('same-section-race');
+  } finally { pause.release(); await pending; }
+});
 it('moves an eligible task once and records the destination', async () => {
   const f = await fixture(); await moveTask(editor, f.taskId, f.doingId, f.version);
   expect((await db.task.findUniqueOrThrow({ where: { id: f.taskId } })).sectionId).toBe(f.doingId);

@@ -718,14 +718,36 @@ export async function moveTask(user: Actor, id: string, sectionId: string, expec
   if (t.parentId) throw new ApiError(409, "Subtasks move with their parent task.");
   const dest = await db.section.findFirst({ where: { id: sectionId, projectId: t.projectId } });
   if (!dest) throw notFound("Section");
-  if (dest.id === t.sectionId) return;
+  if (dest.id === t.sectionId && t.completedAt) return;
   if (dest.isDone) return completeTask(user, id, expectedUpdatedAt, completeAll);
   if (t.completedAt) return reopenTask(user, id, dest.id, expectedUpdatedAt);
   return db.$transaction(async (tx) => {
-    const row = await tx.task.update({ where: { id }, data: { sectionId: dest.id } });
-    await logAction(tx, { actorId: user.id, projectId: t.projectId, targetType: "task", targetId: id, action: "task.moved", before: { sectionId: t.sectionId }, after: { sectionId: dest.id } });
+    const [locked] = await tx.$queryRaw<{ id: string }[]>`SELECT "id" FROM "Task" WHERE "id" = ${id} FOR UPDATE`;
+    if (!locked) throw notFound("Task");
+    const snapshot = await tx.task.findUnique({ where: { id }, select: { projectId: true, assigneeId: true, approverId: true } });
+    if (!snapshot) throw notFound("Task");
+    await lockTaskProjectAndPeople(tx, snapshot.projectId, [user.id, snapshot.assigneeId, snapshot.approverId]);
+    const actor = await tx.user.findUnique({ where: { id: user.id }, select: { orgRole: true, workspaceId: true, deactivatedAt: true, emailVerifiedAt: true } });
+    if (!actor || actor.deactivatedAt || !actor.emailVerifiedAt) throw notFound("Task");
+    const { t: current, a: fresh } = await guardVersion({ ...user, orgRole: actor.orgRole }, id, expectedUpdatedAt, { holderCanDo: true, tx });
+    if (actor.workspaceId !== fresh.project.workspaceId) throw notFound("Task");
+    if (current.parentId) throw new ApiError(409, "Subtasks move with their parent task.");
+    if (current.completedAt) throw new ApiError(409, "The task changed. Reload and try again.");
+    let destination: { id: string; projectId: string; isDone: boolean } | undefined;
+    try {
+      [destination] = await tx.$queryRaw<{ id: string; projectId: string; isDone: boolean }[]>`SELECT "id", "projectId", "isDone" FROM "Section" WHERE "id" = ${sectionId} FOR SHARE NOWAIT`;
+    } catch (error) {
+      const failure = error as { code?: string; meta?: { code?: string } } | null;
+      if (failure?.code === "P2010" && failure.meta?.code === "55P03") throw new ApiError(409, "The destination section is changing. Reload and try again.");
+      throw error;
+    }
+    if (!destination || destination.projectId !== current.projectId) throw notFound("Section");
+    if (destination.isDone) throw new ApiError(409, "The destination section changed. Reload and try again.");
+    if (destination.id === current.sectionId) return;
+    const row = await tx.task.update({ where: { id }, data: { sectionId: destination.id, updatedAt: new Date(Math.max(Date.now(), current.updatedAt.getTime() + 1)) } });
+    await logAction(tx, { actorId: user.id, projectId: current.projectId, targetType: "task", targetId: id, action: "task.moved", before: { sectionId: current.sectionId }, after: { sectionId: destination.id } });
     return row.updatedAt;
-  });
+  }, { isolationLevel: "ReadCommitted" });
 }
 
 // ---------------------------------------------------------------- delete, restore, trash (6.1, 6.2)
