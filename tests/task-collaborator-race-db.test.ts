@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { db } from '@/lib/db';
 import { getOrCreateWorkspace } from '@/lib/workspace';
-import { addCollaborator } from '@/lib/tasks';
+import { addCollaborator, removeCollaborator } from '@/lib/tasks';
 import { deactivate } from '@/lib/team';
 import type { Tx } from '@/lib/access';
 import { assertLocalFixture } from './e2e/local-fixture-guard';
@@ -157,4 +157,88 @@ it('refuses a locked recipient account then succeeds after retry', async () => {
   expect(await db.taskCollaborator.count({ where: { taskId: f.taskId, userId: recipient.id } })).toBe(1);
   expect(await db.actionLog.count({ where: { projectId: f.projectId, targetId: f.taskId, action: 'task.collaborator_added' } })).toBe(1);
   completed.push('locked-recipient-retry');
+});
+
+it('refuses collaborator removal after the actor is downgraded following preflight', async () => {
+  const f = await fixture();
+  await addCollaborator(leader, f.taskId, recipient.id);
+  const pause = pauseBeforeTransactions();
+  const pending = Promise.allSettled([removeCollaborator(editor, f.taskId, recipient.id)]);
+  try {
+    await pause.ready();
+    await db.projectMember.update({ where: { projectId_userId: { projectId: f.projectId, userId: editor.id } }, data: { role: 'VIEWER' } });
+    pause.release();
+    expect(await pending).toEqual([expect.objectContaining({ status: 'rejected', reason: expect.objectContaining({ status: 403 }) })]);
+    expect(await db.taskCollaborator.count({ where: { taskId: f.taskId, userId: recipient.id } })).toBe(1);
+    expect(await db.actionLog.count({ where: { projectId: f.projectId, action: 'task.collaborator_removed' } })).toBe(0);
+    completed.push('remove-downgraded-actor');
+  } finally { pause.release(); await pending; }
+});
+
+it('refuses collaborator removal after project archive or actor deactivation', async () => {
+  for (const change of ['archive', 'deactivate'] as const) {
+    const f = await fixture();
+    await addCollaborator(leader, f.taskId, recipient.id);
+    const pause = pauseBeforeTransactions();
+    const pending = Promise.allSettled([removeCollaborator(editor, f.taskId, recipient.id)]);
+    try {
+      await pause.ready();
+      if (change === 'archive') await db.project.update({ where: { id: f.projectId }, data: { archivedAt: new Date() } });
+      else await db.user.update({ where: { id: editor.id }, data: { deactivatedAt: new Date() } });
+      pause.release();
+      expect(await pending).toEqual([expect.objectContaining({ status: 'rejected', reason: expect.objectContaining({ status: change === 'archive' ? 409 : 404 }) })]);
+      expect(await db.taskCollaborator.count({ where: { taskId: f.taskId, userId: recipient.id } })).toBe(1);
+      expect(await db.actionLog.count({ where: { projectId: f.projectId, action: 'task.collaborator_removed' } })).toBe(0);
+      completed.push('remove-' + change);
+    } finally { pause.release(); await pending; }
+  }
+});
+
+it('removes an eligible collaborator once and records the matching activity', async () => {
+  const f = await fixture();
+  await addCollaborator(editor, f.taskId, recipient.id);
+  await removeCollaborator(editor, f.taskId, recipient.id);
+  expect(await db.taskCollaborator.count({ where: { taskId: f.taskId, userId: recipient.id } })).toBe(0);
+  expect(await db.actionLog.count({ where: { projectId: f.projectId, targetId: f.taskId, action: 'task.collaborator_removed' } })).toBe(1);
+  await expect(removeCollaborator(editor, f.taskId, recipient.id)).rejects.toMatchObject({ status: 404 });
+  expect(await db.actionLog.count({ where: { projectId: f.projectId, targetId: f.taskId, action: 'task.collaborator_removed' } })).toBe(1);
+  completed.push('remove-once-control');
+});
+
+it('allows only one of two simultaneous collaborator removals', async () => {
+  const f = await fixture();
+  await addCollaborator(editor, f.taskId, recipient.id);
+  const results = await Promise.allSettled([
+    removeCollaborator(editor, f.taskId, recipient.id),
+    removeCollaborator(leader, f.taskId, recipient.id),
+  ]);
+  expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
+  expect(results.filter((result) => result.status === 'rejected')).toEqual([
+    expect.objectContaining({ status: 'rejected', reason: expect.objectContaining({ status: 404 }) }),
+  ]);
+  expect(await db.taskCollaborator.count({ where: { taskId: f.taskId, userId: recipient.id } })).toBe(0);
+  expect(await db.actionLog.count({ where: { projectId: f.projectId, targetId: f.taskId, action: 'task.collaborator_removed' } })).toBe(1);
+  completed.push('remove-concurrent-one-winner');
+});
+
+it('rejects a locked actor account without removing the collaborator, then allows retry', async () => {
+  const f = await fixture();
+  await addCollaborator(editor, f.taskId, recipient.id);
+  let reached!: () => void, release!: () => void;
+  const atLock = new Promise<void>((resolve) => { reached = resolve; });
+  const held = new Promise<void>((resolve) => { release = resolve; });
+  const blocker = transact(async (tx) => {
+    await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${editor.id} FOR UPDATE`;
+    reached(); await held;
+  });
+  try {
+    await atLock;
+    await expect(removeCollaborator(editor, f.taskId, recipient.id)).rejects.toMatchObject({ status: 409 });
+    expect(await db.taskCollaborator.count({ where: { taskId: f.taskId, userId: recipient.id } })).toBe(1);
+    expect(await db.actionLog.count({ where: { projectId: f.projectId, action: 'task.collaborator_removed' } })).toBe(0);
+  } finally { release(); await blocker; }
+  await removeCollaborator(editor, f.taskId, recipient.id);
+  expect(await db.taskCollaborator.count({ where: { taskId: f.taskId, userId: recipient.id } })).toBe(0);
+  expect(await db.actionLog.count({ where: { projectId: f.projectId, action: 'task.collaborator_removed' } })).toBe(1);
+  completed.push('remove-locked-actor-retry');
 });

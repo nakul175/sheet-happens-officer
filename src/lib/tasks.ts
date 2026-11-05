@@ -431,10 +431,20 @@ export async function removeCollaborator(user: Actor, id: string, userId: string
   const { t } = await loadTask(user, id, { write: true });
   if (!t.collaborators.some((c) => c.user.id === userId)) throw notFound("Collaborator");
   await db.$transaction(async (tx) => {
+    const [locked] = await tx.$queryRaw<{ id: string }[]>`SELECT "id" FROM "Task" WHERE "id" = ${id} FOR UPDATE`;
+    if (!locked) throw notFound("Task");
+    const snapshot = await tx.task.findUnique({ where: { id }, select: { projectId: true } });
+    if (!snapshot) throw notFound("Task");
+    await lockTaskProjectAndPeople(tx, snapshot.projectId, [user.id, userId]);
+    const actor = await tx.user.findUnique({ where: { id: user.id }, select: { orgRole: true, workspaceId: true, deactivatedAt: true, emailVerifiedAt: true } });
+    if (!actor || actor.deactivatedAt || !actor.emailVerifiedAt) throw notFound("Task");
+    const { t: current, a: fresh } = await loadTask({ ...user, orgRole: actor.orgRole }, id, { write: true, tx });
+    if (actor.workspaceId !== fresh.project.workspaceId) throw notFound("Task");
+    if (!current.collaborators.some((c) => c.user.id === userId)) throw notFound("Collaborator");
     await tx.taskCollaborator.delete({ where: { taskId_userId: { taskId: id, userId } } });
-    await notify(tx, [userId], "COLLABORATOR_REMOVED", { actorId: user.id, taskId: id, projectId: t.projectId, data: { title: t.title } });
-    await logAction(tx, { actorId: user.id, projectId: t.projectId, targetType: "task", targetId: id, action: "task.collaborator_removed", before: { userId } });
-  });
+    await notify(tx, [userId], "COLLABORATOR_REMOVED", { actorId: user.id, taskId: id, projectId: current.projectId, data: { title: current.title } });
+    await logAction(tx, { actorId: user.id, projectId: current.projectId, targetType: "task", targetId: id, action: "task.collaborator_removed", before: { userId } });
+  }, { isolationLevel: "ReadCommitted" });
 }
 
 export async function setApprover(user: Actor, id: string, approverId: string | null, expectedUpdatedAt: unknown) {
