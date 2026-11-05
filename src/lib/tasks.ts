@@ -148,8 +148,20 @@ export async function createTask(
   return db.$transaction(async (tx) => {
     let sectionId: string;
     if (input.parentId) {
-      const parent = await tx.task.findFirst({ where: { id: input.parentId, projectId, deletedAt: null } });
-      if (!parent) throw notFound("Parent task");
+      // Hold the parent through insertion so a concurrent soft delete cannot
+      // finish before a new child exists for its child-delete sweep.
+      let parents: { projectId: string; sectionId: string; parentId: string | null; deletedAt: Date | null }[];
+      try {
+        parents = await tx.$queryRaw<typeof parents>`SELECT "projectId", "sectionId", "parentId", "deletedAt" FROM "Task" WHERE "id" = ${input.parentId} FOR SHARE NOWAIT`;
+      } catch (error) {
+        const failure = error as { code?: string; meta?: { code?: string } } | null;
+        if (failure?.code === "P2010" && failure.meta?.code === "55P03") {
+          throw new ApiError(409, "The parent task is changing. Reload and try again.");
+        }
+        throw error;
+      }
+      const parent = parents[0];
+      if (!parent || parent.projectId !== projectId || parent.deletedAt) throw notFound("Parent task");
       if (parent.parentId) throw new ApiError(400, "A subtask cannot have subtasks.");
       if (input.approverId) throw new ApiError(400, "Subtasks do not have an approver.");
       sectionId = parent.sectionId;

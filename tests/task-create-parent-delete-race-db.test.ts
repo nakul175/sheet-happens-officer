@@ -67,7 +67,14 @@ it('serializes child creation with parent deletion and leaves no live orphan', a
     await Promise.race([deleting, new Promise(resolve => setTimeout(resolve, 750))]);
     release();
     const [deletion] = await deleting; expect(deletion.status).toBe('fulfilled');
-    await creating;
+    const [creation] = await creating;
+    if (creation.status !== 'fulfilled') throw creation.reason;
+    const [parent, child] = await Promise.all([
+      db.task.findUniqueOrThrow({ where: { id: f.parentId } }),
+      db.task.findUniqueOrThrow({ where: { id: creation.value } }),
+    ]);
+    expect(parent.deletedAt).not.toBeNull();
+    expect(child.deletedAt?.getTime()).toBe(parent.deletedAt?.getTime());
     expect(await db.task.count({ where: { parentId: f.parentId, deletedAt: null } })).toBe(0);
     completed.push('delete-create-serialization');
   } finally { clearTimeout(safety); release(); spy.mockRestore(); await creating; }
@@ -79,3 +86,23 @@ it('rejects a child when the parent was already deleted', async () => {
   expect(await db.task.count({ where: { parentId: f.parentId } })).toBe(0);
   completed.push('deleted-parent-control');
 });
+
+it('reports a changing parent and permits a safe retry', async () => {
+  const f = await fixture();
+  let reached!: () => void, release!: () => void;
+  const atLock = new Promise<void>(resolve => { reached = resolve; });
+  const held = new Promise<void>(resolve => { release = resolve; });
+  const blocker = transact(async tx => {
+    await tx.$queryRaw`SELECT "id" FROM "Task" WHERE "id" = ${f.parentId} FOR UPDATE`;
+    reached(); await held;
+  });
+  const safety = setTimeout(() => release(), 15_000);
+  try {
+    await atLock;
+    await expect(createTask(editor, f.projectId, { title: 'Blocked child', parentId: f.parentId })).rejects.toMatchObject({ status: 409 });
+    expect(await db.task.count({ where: { parentId: f.parentId } })).toBe(0);
+  } finally { clearTimeout(safety); release(); await blocker; }
+  const id = await createTask(editor, f.projectId, { title: 'Safe child', parentId: f.parentId });
+  expect((await db.task.findUniqueOrThrow({ where: { id } })).deletedAt).toBeNull();
+  completed.push('locked-parent-retry');
+}, 20_000);
