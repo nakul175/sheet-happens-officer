@@ -23,6 +23,7 @@ export default defineConfig({
       "tests/e2e/stories/APL-2533.spec.ts", // Playwright contact semantic-locator qualification (SHO-2758)
       "tests/e2e/stories/SHO-3136.spec.ts", // Playwright branding acceptance
       "tests/e2e/stories/SHO-3137.spec.ts", // Playwright removal acceptance, run by staging-e2e
+      "tests/e2e/stories/SHO-REG-PROJECTS-01.spec.ts", // Playwright project create/edit/reload acceptance
       "tests/e2e/stories/APL-2467.spec.ts",
       "tests/e2e/stories/APL-2468.spec.ts",
       "tests/e2e/stories/APL-2469.spec.ts",
