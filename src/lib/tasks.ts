@@ -483,11 +483,25 @@ export async function sendForApproval(user: Actor, id: string) {
   if (awaiting(t)) throw new ApiError(409, "This task is already awaiting approval.");
   if (user.id !== t.assigneeId) throw new ApiError(403, "Only the assignee can send a task for approval.");
   return db.$transaction(async (tx) => {
-    const row = await tx.task.update({ where: { id }, data: { assigneeId: t.approverId!, previousAssigneeId: t.assigneeId } });
-    await notify(tx, [t.approverId], "SENT_FOR_APPROVAL", { actorId: user.id, taskId: id, projectId: t.projectId, data: { title: t.title } });
-    await logAction(tx, { actorId: user.id, projectId: t.projectId, targetType: "task", targetId: id, action: "task.sent_for_approval", before: { assigneeId: t.assigneeId, previousAssigneeId: t.previousAssigneeId }, after: { assigneeId: t.approverId, previousAssigneeId: t.assigneeId } });
+    const [locked] = await tx.$queryRaw<{ id: string }[]>`SELECT "id" FROM "Task" WHERE "id" = ${id} FOR UPDATE`;
+    if (!locked) throw notFound("Task");
+    const snapshot = await tx.task.findUnique({ where: { id }, select: { projectId: true, assigneeId: true, approverId: true } });
+    if (!snapshot) throw notFound("Task");
+    await lockTaskProjectAndPeople(tx, snapshot.projectId, [user.id, snapshot.assigneeId, snapshot.approverId]);
+    const actor = await tx.user.findUnique({ where: { id: user.id }, select: { orgRole: true, workspaceId: true, deactivatedAt: true, emailVerifiedAt: true } });
+    if (!actor || actor.deactivatedAt || !actor.emailVerifiedAt) throw notFound("Task");
+    const { t: current, a: fresh } = await loadTask({ ...user, orgRole: actor.orgRole }, id, { write: true, tx });
+    if (actor.workspaceId !== fresh.project.workspaceId) throw notFound("Task");
+    if (!current.approverId) throw new ApiError(409, "This task has no approver.");
+    if (awaiting(current)) throw new ApiError(409, "This task is already awaiting approval.");
+    if (user.id !== current.assigneeId) throw new ApiError(403, "Only the assignee can send a task for approval.");
+    if (current.approverId !== t.approverId) throw new ApiError(409, "The approver changed. Reload and try again.");
+    await requireWorker(tx, current.projectId, current.approverId, "The approver");
+    const row = await tx.task.update({ where: { id }, data: { assigneeId: current.approverId, previousAssigneeId: current.assigneeId, updatedAt: new Date(Math.max(Date.now(), current.updatedAt.getTime() + 1)) } });
+    await notify(tx, [current.approverId], "SENT_FOR_APPROVAL", { actorId: user.id, taskId: id, projectId: current.projectId, data: { title: current.title } });
+    await logAction(tx, { actorId: user.id, projectId: current.projectId, targetType: "task", targetId: id, action: "task.sent_for_approval", before: { assigneeId: current.assigneeId, previousAssigneeId: current.previousAssigneeId }, after: { assigneeId: current.approverId, previousAssigneeId: current.assigneeId } });
     return row.updatedAt;
-  });
+  }, { isolationLevel: "ReadCommitted" });
 }
 
 export async function sendBack(user: Actor, id: string) {

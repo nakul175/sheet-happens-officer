@@ -93,6 +93,17 @@ it('refuses an archived project after send preflight', async () => {
   } finally { pause.release(); await pending; }
 });
 
+it('refuses an actor deactivated after send preflight', async () => {
+  const f = await fixture(), pause = pauseBeforeTransactions();
+  const pending = Promise.allSettled([sendForApproval(editor, f.taskId)]);
+  try {
+    await pause.ready(); await db.user.update({ where: { id: editor.id }, data: { deactivatedAt: new Date() } }); pause.release();
+    expect(await pending).toEqual([expect.objectContaining({ status: 'rejected', reason: expect.objectContaining({ status: 404 }) })]);
+    expect((await db.task.findUniqueOrThrow({ where: { id: f.taskId } })).assigneeId).toBe(editor.id);
+    completed.push('deactivated-actor');
+  } finally { pause.release(); await pending; }
+});
+
 it('refuses a task reassigned after send preflight', async () => {
   const f = await fixture(), pause = pauseBeforeTransactions();
   const pending = Promise.allSettled([sendForApproval(editor, f.taskId)]);
@@ -101,6 +112,18 @@ it('refuses a task reassigned after send preflight', async () => {
     expect(await pending).toEqual([expect.objectContaining({ status: 'rejected', reason: expect.objectContaining({ status: 403 }) })]);
     expect((await db.task.findUniqueOrThrow({ where: { id: f.taskId } })).assigneeId).toBe(leader.id);
     completed.push('changed-assignee');
+  } finally { pause.release(); await pending; }
+});
+
+it('refuses an approver changed after send preflight', async () => {
+  const f = await fixture(), pause = pauseBeforeTransactions();
+  const pending = Promise.allSettled([sendForApproval(editor, f.taskId)]);
+  try {
+    await pause.ready(); await db.task.update({ where: { id: f.taskId }, data: { approverId: leader.id } }); pause.release();
+    expect(await pending).toEqual([expect.objectContaining({ status: 'rejected', reason: expect.objectContaining({ status: 409 }) })]);
+    const row = await db.task.findUniqueOrThrow({ where: { id: f.taskId } });
+    expect({ holder: row.assigneeId, approver: row.approverId }).toEqual({ holder: editor.id, approver: leader.id });
+    completed.push('changed-approver');
   } finally { pause.release(); await pending; }
 });
 
@@ -138,4 +161,32 @@ it('sends an eligible task once with holder and action matching', async () => {
   expect({ holder: row.assigneeId, previous: row.previousAssigneeId, approver: row.approverId }).toEqual({ holder: recipient.id, previous: editor.id, approver: recipient.id });
   expect(await db.actionLog.count({ where: { projectId: f.projectId, targetId: f.taskId, action: 'task.sent_for_approval' } })).toBe(1);
   completed.push('eligible-control');
+});
+
+it('rejects a repeated send without a duplicate action', async () => {
+  const f = await fixture();
+  await sendForApproval(editor, f.taskId);
+  await expect(sendForApproval(editor, f.taskId)).rejects.toMatchObject({ status: 409 });
+  expect(await db.actionLog.count({ where: { projectId: f.projectId, targetId: f.taskId, action: 'task.sent_for_approval' } })).toBe(1);
+  completed.push('repeated-send');
+});
+
+it('refuses a locked approver account then succeeds after retry', async () => {
+  const f = await fixture();
+  let reached!: () => void, release!: () => void;
+  const atLock = new Promise<void>((resolve) => { reached = resolve; });
+  const held = new Promise<void>((resolve) => { release = resolve; });
+  const blocker = transact(async (tx) => {
+    await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${recipient.id} FOR UPDATE`;
+    reached(); await held;
+  });
+  try {
+    await atLock;
+    await expect(sendForApproval(editor, f.taskId)).rejects.toMatchObject({ status: 409 });
+    expect((await db.task.findUniqueOrThrow({ where: { id: f.taskId } })).assigneeId).toBe(editor.id);
+  } finally { release(); await blocker; }
+  await sendForApproval(editor, f.taskId);
+  expect((await db.task.findUniqueOrThrow({ where: { id: f.taskId } })).assigneeId).toBe(recipient.id);
+  expect(await db.actionLog.count({ where: { projectId: f.projectId, targetId: f.taskId, action: 'task.sent_for_approval' } })).toBe(1);
+  completed.push('locked-approver-retry');
 });
