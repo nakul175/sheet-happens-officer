@@ -422,13 +422,13 @@ export async function addMember(user: Actor, projectId: string, userId: string, 
  * A single taker for the person's open tasks, or null when there are none. An explicit handover can name a taker per
  * task instead (SHO-BUG-7); then no single taker is needed, and a task that appears in between goes to the Leader.
  */
-async function requireHandoverIfNeeded(a: Access, userId: string, handoverTo: string | undefined | null, handover?: Handover[]) {
-  const open = await openTaskCount(db, a.project.id, userId);
+async function requireHandoverIfNeeded(a: Access, userId: string, handoverTo: string | undefined | null, handover?: Handover[], source: Tx = db) {
+  const open = await openTaskCount(source, a.project.id, userId);
   if (!open) return null;
-  const target = await resolveHandover(db, a.project.id, userId, handoverTo);
+  const target = await resolveHandover(source, a.project.id, userId, handoverTo);
   if (target) return target;
   if (handover?.length) {
-    const held = await db.task.findMany({ where: { projectId: a.project.id, assigneeId: userId, completedAt: null, deletedAt: null }, select: { id: true } });
+    const held = await source.task.findMany({ where: { projectId: a.project.id, assigneeId: userId, completedAt: null, deletedAt: null }, select: { id: true } });
     if (held.every((t) => handover.some((h) => h.taskId === t.id && h.assigneeId))) return null;
   }
   throw new ApiError(409, `Choose a Leader or Editor to take ${open} open task${open === 1 ? "" : "s"} first.`);
@@ -450,17 +450,36 @@ export async function changeMemberRole(user: Actor, projectId: string, userId: s
   if (!m) throw notFound("Member");
   if (m.role === "LEADER") throw new ApiError(409, "Use Change Leader to replace the project's Leader.");
   if (m.role === role) return;
-  const target = role === "VIEWER" ? await requireHandoverIfNeeded(a, userId, handoverTo, handover) : null;
+  if (role === "VIEWER") await requireHandoverIfNeeded(a, userId, handoverTo, handover);
   await db.$transaction(async (tx) => {
+    try {
+      const [locked] = await tx.$queryRaw<{ id: string }[]>`SELECT "id" FROM "Project" WHERE "id" = ${projectId} FOR UPDATE NOWAIT`;
+      if (!locked) throw notFound("Project");
+      await tx.$queryRaw`SELECT "userId" FROM "ProjectMember" WHERE "projectId" = ${projectId} AND "userId" = ${user.id} FOR SHARE NOWAIT`;
+      await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${user.id} FOR SHARE NOWAIT`;
+      await tx.$queryRaw`SELECT "userId" FROM "ProjectMember" WHERE "projectId" = ${projectId} AND "userId" = ${userId} FOR UPDATE NOWAIT`;
+    } catch (error) {
+      const failure = error as { code?: string; meta?: { code?: string } } | null;
+      if (failure?.code === "P2010" && failure.meta?.code === "55P03") {
+        throw new ApiError(409, "Project or membership is changing. Reload and try again.");
+      }
+      throw error;
+    }
+    const actor = await tx.user.findUnique({ where: { id: user.id }, select: { orgRole: true, workspaceId: true, deactivatedAt: true, emailVerifiedAt: true } });
+    if (!actor || actor.deactivatedAt || !actor.emailVerifiedAt) throw notFound("Project");
+    const fresh = await projectAccess({ ...user, orgRole: actor.orgRole }, projectId, { write: true, tx });
+    if (actor.workspaceId !== fresh.project.workspaceId) throw notFound("Project");
+    requireManage(fresh);
     const current = await lockDepartingMember(tx, projectId, userId);
     if (current.role === role) return;
     let rel: Released | null = null;
     if (role === "VIEWER") {
-      const leader = a.project.members.find((x) => x.role === "LEADER")!.userId;
+      const target = await requireHandoverIfNeeded(fresh, userId, handoverTo, handover, tx);
+      const leader = fresh.project.members.find((x) => x.role === "LEADER")!.userId;
       rel = await releasePerson(tx, { projectId, userId, newAssigneeId: target ?? leader, actorId: user.id, keepCollaborations: true, handover });
     }
     await tx.projectMember.update({ where: { projectId_userId: { projectId, userId } }, data: { role } });
-    await notify(tx, [userId], "PROJECT_ROLE_CHANGED", { actorId: user.id, projectId, data: { project: a.project.name, role, ...(rel?.note ?? {}) } });
+    await notify(tx, [userId], "PROJECT_ROLE_CHANGED", { actorId: user.id, projectId, data: { project: fresh.project.name, role, ...(rel?.note ?? {}) } });
     await logAction(tx, { actorId: user.id, projectId, targetType: "member", targetId: userId, action: "member.role_changed", before: { role: current.role }, after: { role, handedOver: rel?.moved ?? 0 } });
   });
 }
