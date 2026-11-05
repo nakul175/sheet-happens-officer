@@ -166,10 +166,29 @@ export async function archiveProject(user: Actor, projectId: string) {
   requireManage(a);
   if (a.project.isVertical && !isAdmin(user)) throw new ApiError(403, "Only Admins retire verticals.");
   return db.$transaction(async (tx) => {
+    try {
+      const [locked] = await tx.$queryRaw<{ id: string }[]>`SELECT "id" FROM "Project" WHERE "id" = ${projectId} FOR UPDATE NOWAIT`;
+      if (!locked) throw notFound("Project");
+      await tx.$queryRaw`SELECT "userId" FROM "ProjectMember" WHERE "projectId" = ${projectId} AND "userId" = ${user.id} FOR SHARE NOWAIT`;
+      await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${user.id} FOR SHARE NOWAIT`;
+    } catch (error) {
+      const failure = error as { code?: string; meta?: { code?: string } } | null;
+      if (failure?.code === "P2010" && failure.meta?.code === "55P03") {
+        throw new ApiError(409, "Project or membership is changing. Reload and try again.");
+      }
+      throw error;
+    }
+    const actor = await tx.user.findUnique({ where: { id: user.id }, select: { orgRole: true, workspaceId: true, deactivatedAt: true, emailVerifiedAt: true } });
+    if (!actor || actor.deactivatedAt || !actor.emailVerifiedAt) throw notFound("Project");
+    const fresh = await projectAccess({ ...user, orgRole: actor.orgRole }, projectId, { write: true, tx });
+    if (actor.workspaceId !== fresh.project.workspaceId) throw notFound("Project");
+    requireManage(fresh);
+    if (fresh.project.isVertical && !isAdmin(actor)) throw new ApiError(403, "Only Admins retire verticals.");
     const open = await tx.task.findMany({ where: { projectId, deletedAt: null, completedAt: null }, select: { assigneeId: true } });
-    await tx.project.update({ where: { id: projectId }, data: { archivedAt: new Date() } });
-    await notify(tx, open.map((t) => t.assigneeId), "PROJECT_ARCHIVED", { actorId: user.id, projectId, data: { project: a.project.name } });
-    await logAction(tx, { actorId: user.id, projectId, targetType: "project", targetId: projectId, action: "project.archived", before: { archivedAt: null }, after: { archivedAt: new Date().toISOString(), openTasks: open.length } });
+    const at = new Date();
+    await tx.project.update({ where: { id: projectId }, data: { archivedAt: at } });
+    await notify(tx, open.map((t) => t.assigneeId), "PROJECT_ARCHIVED", { actorId: user.id, projectId, data: { project: fresh.project.name } });
+    await logAction(tx, { actorId: user.id, projectId, targetType: "project", targetId: projectId, action: "project.archived", before: { archivedAt: null }, after: { archivedAt: at.toISOString(), openTasks: open.length } });
     return { openTasks: open.length };
   });
 }

@@ -111,3 +111,23 @@ it('archives an eligible project once and reports its open task', async () => {
   expect(await db.actionLog.count({ where: { projectId: id, action: 'project.archived' } })).toBe(1);
   completed.push('eligible-control');
 });
+
+it('returns a retryable conflict for a locked project, then archives once', async () => {
+  const id = await fixture();
+  let reached!: () => void, release!: () => void;
+  const atLock = new Promise<void>(resolve => { reached = resolve; });
+  const held = new Promise<void>(resolve => { release = resolve; });
+  const blocker = transact(async tx => {
+    await tx.$queryRaw`SELECT "id" FROM "Project" WHERE "id" = ${id} FOR UPDATE`;
+    reached(); await held;
+  });
+  const safety = setTimeout(() => release(), 15_000);
+  try {
+    await atLock;
+    await expect(archiveProject(admin, id)).rejects.toMatchObject({ status: 409 });
+    expect((await db.project.findUniqueOrThrow({ where: { id } })).archivedAt).toBeNull();
+  } finally { clearTimeout(safety); release(); await blocker; }
+  await archiveProject(admin, id);
+  expect(await db.actionLog.count({ where: { projectId: id, action: 'project.archived' } })).toBe(1);
+  completed.push('locked-project-retry');
+}, 20_000);
