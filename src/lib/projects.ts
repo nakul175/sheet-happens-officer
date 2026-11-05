@@ -533,32 +533,55 @@ export async function changeLeader(
   const next = await activeMember(db, projectId, input.newLeaderId);
   if (!next) throw new ApiError(400, "Choose an active member of this project.");
 
-  let target: string | null = null;
-  if (input.previousRole !== "EDITOR") {
-    const open = await openTaskCount(db, projectId, old.userId);
-    if (open) {
-      // The new Leader counts as a valid taker, so the default is simply the new Leader.
-      target = input.handoverTo === input.newLeaderId ? input.newLeaderId : (await resolveHandover(db, projectId, old.userId, input.handoverTo));
-      if (!target) throw new ApiError(409, `Choose a Leader or Editor to take ${open} open task${open === 1 ? "" : "s"} first.`);
-    }
-  }
   await db.$transaction(async (tx) => {
+    try {
+      const [locked] = await tx.$queryRaw<{ id: string }[]>`SELECT "id" FROM "Project" WHERE "id" = ${projectId} FOR UPDATE NOWAIT`;
+      if (!locked) throw notFound("Project");
+      await tx.$queryRaw`SELECT "userId" FROM "ProjectMember" WHERE "projectId" = ${projectId} AND "userId" = ${user.id} FOR SHARE NOWAIT`;
+      for (const personId of [...new Set([user.id, input.newLeaderId])].sort()) {
+        await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${personId} FOR SHARE NOWAIT`;
+      }
+    } catch (error) {
+      const failure = error as { code?: string; meta?: { code?: string } } | null;
+      if (failure?.code === "P2010" && failure.meta?.code === "55P03") {
+        throw new ApiError(409, "Project or person is changing. Reload and try again.");
+      }
+      throw error;
+    }
+    const actor = await tx.user.findUnique({ where: { id: user.id }, select: { orgRole: true, workspaceId: true, deactivatedAt: true, emailVerifiedAt: true } });
+    if (!actor || actor.deactivatedAt || !actor.emailVerifiedAt) throw notFound("Project");
+    const fresh = await projectAccess({ ...user, orgRole: actor.orgRole }, projectId, { write: true, tx });
+    if (actor.workspaceId !== fresh.project.workspaceId) throw notFound("Project");
+    requireManage(fresh);
+    const currentLeader = fresh.project.members.find((m) => m.role === "LEADER");
+    if (!currentLeader || currentLeader.userId !== old.userId) throw new ApiError(409, "The project Leader changed. Reload and try again.");
+    const currentNext = await activeMember(tx, projectId, input.newLeaderId);
+    if (!currentNext || currentNext.user.workspaceId !== fresh.project.workspaceId) throw new ApiError(400, "Choose an active member of this project.");
+    let target: string | null = null;
+    if (input.previousRole !== "EDITOR") {
+      const open = await openTaskCount(tx, projectId, currentLeader.userId);
+      if (open) {
+        // The new Leader counts as a valid taker, so the default is simply the new Leader.
+        target = input.handoverTo === input.newLeaderId ? input.newLeaderId : (await resolveHandover(tx, projectId, currentLeader.userId, input.handoverTo));
+        if (!target) throw new ApiError(409, `Choose a Leader or Editor to take ${open} open task${open === 1 ? "" : "s"} first.`);
+      }
+    }
     // Demote first so the one-Leader index is never violated, then promote.
-    await tx.projectMember.update({ where: { projectId_userId: { projectId, userId: old.userId } }, data: { role: "EDITOR" } });
+    await tx.projectMember.update({ where: { projectId_userId: { projectId, userId: currentLeader.userId } }, data: { role: "EDITOR" } });
     await tx.projectMember.update({ where: { projectId_userId: { projectId, userId: input.newLeaderId } }, data: { role: "LEADER" } });
     let rel: Released | null = null;
     if (input.previousRole === "VIEWER") {
-      rel = await releasePerson(tx, { projectId, userId: old.userId, newAssigneeId: target ?? input.newLeaderId, actorId: user.id, keepCollaborations: true });
-      await tx.projectMember.update({ where: { projectId_userId: { projectId, userId: old.userId } }, data: { role: "VIEWER" } });
+      rel = await releasePerson(tx, { projectId, userId: currentLeader.userId, newAssigneeId: target ?? input.newLeaderId, actorId: user.id, keepCollaborations: true });
+      await tx.projectMember.update({ where: { projectId_userId: { projectId, userId: currentLeader.userId } }, data: { role: "VIEWER" } });
     } else if (input.previousRole === "REMOVE") {
-      rel = await releasePerson(tx, { projectId, userId: old.userId, newAssigneeId: target ?? input.newLeaderId, actorId: user.id });
-      await tx.projectMember.delete({ where: { projectId_userId: { projectId, userId: old.userId } } });
+      rel = await releasePerson(tx, { projectId, userId: currentLeader.userId, newAssigneeId: target ?? input.newLeaderId, actorId: user.id });
+      await tx.projectMember.delete({ where: { projectId_userId: { projectId, userId: currentLeader.userId } } });
     }
-    await notify(tx, [input.newLeaderId], "MADE_LEADER", { actorId: user.id, projectId, data: { project: a.project.name } });
-    await notify(tx, [old.userId], input.previousRole === "REMOVE" ? "REMOVED_FROM_PROJECT" : "PROJECT_ROLE_CHANGED", {
-      actorId: user.id, projectId, data: { project: a.project.name, role: input.previousRole, ...(rel?.note ?? {}) },
+    await notify(tx, [input.newLeaderId], "MADE_LEADER", { actorId: user.id, projectId, data: { project: fresh.project.name } });
+    await notify(tx, [currentLeader.userId], input.previousRole === "REMOVE" ? "REMOVED_FROM_PROJECT" : "PROJECT_ROLE_CHANGED", {
+      actorId: user.id, projectId, data: { project: fresh.project.name, role: input.previousRole, ...(rel?.note ?? {}) },
     });
-    await logAction(tx, { actorId: user.id, projectId, targetType: "project", targetId: projectId, action: "project.leader_changed", before: { leaderId: old.userId }, after: { leaderId: input.newLeaderId, previousRole: input.previousRole, handedOver: rel?.moved ?? 0 } });
+    await logAction(tx, { actorId: user.id, projectId, targetType: "project", targetId: projectId, action: "project.leader_changed", before: { leaderId: currentLeader.userId }, after: { leaderId: input.newLeaderId, previousRole: input.previousRole, handedOver: rel?.moved ?? 0 } });
   });
 }
 
