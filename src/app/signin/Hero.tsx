@@ -15,6 +15,8 @@ const junk: [text: string, left: number, top: number, r: number, d: number][] = 
 export function Hero() {
   return (
     <section className={s.hero}>
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img src="/little-bot-heroes/sho-full-body.png" className={`aplyd-bot ${s.mascot}`} alt="" width={160} height={160} />
       <h1 className={s.headline}>This is where sheet happens.</h1>
       <p className={s.support}>Sign in and we will put it in order.</p>
       <div className={s.stage} aria-hidden="true">
