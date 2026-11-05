@@ -491,13 +491,32 @@ export async function removeMember(user: Actor, projectId: string, userId: strin
   const m = a.project.members.find((x) => x.userId === userId);
   if (!m) throw notFound("Member");
   if (m.role === "LEADER") throw new ApiError(409, "Use Change Leader to replace the project's Leader.");
-  const target = await requireHandoverIfNeeded(a, userId, handoverTo, handover);
+  await requireHandoverIfNeeded(a, userId, handoverTo, handover);
   await db.$transaction(async (tx) => {
+    try {
+      const [locked] = await tx.$queryRaw<{ id: string }[]>`SELECT "id" FROM "Project" WHERE "id" = ${projectId} FOR UPDATE NOWAIT`;
+      if (!locked) throw notFound("Project");
+      await tx.$queryRaw`SELECT "userId" FROM "ProjectMember" WHERE "projectId" = ${projectId} AND "userId" = ${user.id} FOR SHARE NOWAIT`;
+      await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${user.id} FOR SHARE NOWAIT`;
+      await tx.$queryRaw`SELECT "userId" FROM "ProjectMember" WHERE "projectId" = ${projectId} AND "userId" = ${userId} FOR UPDATE NOWAIT`;
+    } catch (error) {
+      const failure = error as { code?: string; meta?: { code?: string } } | null;
+      if (failure?.code === "P2010" && failure.meta?.code === "55P03") {
+        throw new ApiError(409, "Project or membership is changing. Reload and try again.");
+      }
+      throw error;
+    }
+    const actor = await tx.user.findUnique({ where: { id: user.id }, select: { orgRole: true, workspaceId: true, deactivatedAt: true, emailVerifiedAt: true } });
+    if (!actor || actor.deactivatedAt || !actor.emailVerifiedAt) throw notFound("Project");
+    const fresh = await projectAccess({ ...user, orgRole: actor.orgRole }, projectId, { write: true, tx });
+    if (actor.workspaceId !== fresh.project.workspaceId) throw notFound("Project");
+    requireManage(fresh);
     const current = await lockDepartingMember(tx, projectId, userId);
-    const leader = a.project.members.find((x) => x.role === "LEADER")!.userId;
+    const target = await requireHandoverIfNeeded(fresh, userId, handoverTo, handover, tx);
+    const leader = fresh.project.members.find((x) => x.role === "LEADER")!.userId;
     const rel = await releasePerson(tx, { projectId, userId, newAssigneeId: target ?? leader, actorId: user.id, handover });
     await tx.projectMember.delete({ where: { projectId_userId: { projectId, userId } } });
-    await notify(tx, [userId], "REMOVED_FROM_PROJECT", { actorId: user.id, projectId, data: { project: a.project.name, ...rel.note } });
+    await notify(tx, [userId], "REMOVED_FROM_PROJECT", { actorId: user.id, projectId, data: { project: fresh.project.name, ...rel.note } });
     await logAction(tx, { actorId: user.id, projectId, targetType: "member", targetId: userId, action: "member.removed", before: { role: current.role }, after: { removed: true, handedOver: rel.moved } });
   });
 }
