@@ -567,24 +567,50 @@ export async function completeTask(user: Actor, id: string, expectedUpdatedAt: u
     throw new ApiError(409, `This task has ${openSubs.length} open subtask${openSubs.length === 1 ? "" : "s"}.`, { needsConfirm: "open_subtasks", openSubtasks: openSubs.length });
   }
   return db.$transaction(async (tx) => {
+    const [locked] = await tx.$queryRaw<{ id: string }[]>`SELECT "id" FROM "Task" WHERE "id" = ${id} FOR UPDATE`;
+    if (!locked) throw notFound("Task");
+    const snapshot = await tx.task.findUnique({ where: { id }, select: { projectId: true, assigneeId: true, approverId: true } });
+    if (!snapshot) throw notFound("Task");
+    await lockTaskProjectAndPeople(tx, snapshot.projectId, [user.id, snapshot.assigneeId, snapshot.approverId]);
+    const actor = await tx.user.findUnique({ where: { id: user.id }, select: { orgRole: true, workspaceId: true, deactivatedAt: true, emailVerifiedAt: true } });
+    if (!actor || actor.deactivatedAt || !actor.emailVerifiedAt) throw notFound("Task");
+    const { t: current, a: fresh } = await guardVersion({ ...user, orgRole: actor.orgRole }, id, expectedUpdatedAt, { holderCanDo: true, tx });
+    if (actor.workspaceId !== fresh.project.workspaceId) throw notFound("Task");
+    if (!canClose(user.id, fresh.role, current)) {
+      throw new ApiError(403, current.approverId ? "Only the approver, the Leader or an Admin can close this task." : "You cannot complete this task.");
+    }
+    if (current.completedAt) throw new ApiError(409, "This task is already complete.");
+    let currentOpenSubs: { id: string }[];
+    try {
+      // The parent FOR UPDATE lock also prevents a new child's FK insertion
+      // until this decision commits; NOWAIT refuses an in-flight child edit.
+      currentOpenSubs = await tx.$queryRaw<{ id: string }[]>`SELECT "id" FROM "Task" WHERE "parentId" = ${id} AND "deletedAt" IS NULL AND "completedAt" IS NULL ORDER BY "id" FOR UPDATE NOWAIT`;
+    } catch (error) {
+      const failure = error as { code?: string; meta?: { code?: string } } | null;
+      if (failure?.code === "P2010" && failure.meta?.code === "55P03") throw new ApiError(409, "Subtasks are changing. Reload and try again.");
+      throw error;
+    }
+    if (currentOpenSubs.length && !completeAll) {
+      throw new ApiError(409, `This task has ${currentOpenSubs.length} open subtask${currentOpenSubs.length === 1 ? "" : "s"}.`, { needsConfirm: "open_subtasks", openSubtasks: currentOpenSubs.length });
+    }
     const now = new Date();
     let row: { updatedAt: Date };
-    if (t.parentId) {
-      row = await tx.task.update({ where: { id }, data: { completedAt: now } });
+    if (current.parentId) {
+      row = await tx.task.update({ where: { id }, data: { completedAt: now, updatedAt: new Date(Math.max(now.getTime(), current.updatedAt.getTime() + 1)) } });
     } else {
-      const done = await tx.section.findFirstOrThrow({ where: { projectId: t.projectId, isDone: true } });
-      row = await tx.task.update({ where: { id }, data: { completedAt: now, sectionId: done.id, previousSectionId: t.sectionId === done.id ? t.previousSectionId : t.sectionId } });
-      if (openSubs.length) {
-        await tx.task.updateMany({ where: { id: { in: openSubs.map((s) => s.id) } }, data: { completedAt: now } });
-        for (const sub of openSubs) {
-          await logAction(tx, { actorId: user.id, projectId: t.projectId, targetType: "task", targetId: sub.id, action: "task.completed", before: { completedAt: null }, after: { completedAt: now.toISOString(), withParent: id }, primary: false });
+      const done = await tx.section.findFirstOrThrow({ where: { projectId: current.projectId, isDone: true } });
+      row = await tx.task.update({ where: { id }, data: { completedAt: now, sectionId: done.id, previousSectionId: current.sectionId === done.id ? current.previousSectionId : current.sectionId, updatedAt: new Date(Math.max(now.getTime(), current.updatedAt.getTime() + 1)) } });
+      if (currentOpenSubs.length) {
+        await tx.task.updateMany({ where: { id: { in: currentOpenSubs.map((s) => s.id) } }, data: { completedAt: now } });
+        for (const sub of currentOpenSubs) {
+          await logAction(tx, { actorId: user.id, projectId: current.projectId, targetType: "task", targetId: sub.id, action: "task.completed", before: { completedAt: null }, after: { completedAt: now.toISOString(), withParent: id }, primary: false });
         }
       }
     }
-    await logAction(tx, { actorId: user.id, projectId: t.projectId, targetType: "task", targetId: id, action: "task.completed", before: { sectionId: t.sectionId, completedAt: null, previousSectionId: t.previousSectionId }, after: { completedAt: now.toISOString(), subtasksCompleted: openSubs.length, subtaskIds: openSubs.map((s) => s.id) } });
-    if (!t.parentId) await ensureNextStep(tx, t.projectId, user.id);
+    await logAction(tx, { actorId: user.id, projectId: current.projectId, targetType: "task", targetId: id, action: "task.completed", before: { sectionId: current.sectionId, completedAt: null, previousSectionId: current.previousSectionId }, after: { completedAt: now.toISOString(), subtasksCompleted: currentOpenSubs.length, subtaskIds: currentOpenSubs.map((s) => s.id) } });
+    if (!current.parentId) await ensureNextStep(tx, current.projectId, user.id);
     return row.updatedAt;
-  });
+  }, { isolationLevel: "ReadCommitted" });
 }
 
 /**

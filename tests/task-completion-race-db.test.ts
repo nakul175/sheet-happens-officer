@@ -123,6 +123,34 @@ it('refuses parent completion when a new open subtask appears after preflight', 
   } finally { pause.release(); await pending; }
 });
 
+it('refuses completion after the actor is deactivated following preflight', async () => {
+  const f = await fixture(), pause = pauseBeforeTransactions();
+  const pending = Promise.allSettled([completeTask(editor, f.taskId, f.version)]);
+  try {
+    await pause.ready();
+    await db.user.update({ where: { id: editor.id }, data: { deactivatedAt: new Date() } });
+    pause.release();
+    expect(await pending).toEqual([expect.objectContaining({ status: 'rejected', reason: expect.objectContaining({ status: 404 }) })]);
+    expect((await db.task.findUniqueOrThrow({ where: { id: f.taskId } })).completedAt).toBeNull();
+    completed.push('deactivated-actor');
+  } finally { pause.release(); await pending; }
+});
+
+it('complete-all includes a subtask created after preflight in the same action', async () => {
+  const f = await fixture(), pause = pauseBeforeTransactions();
+  const pending = Promise.allSettled([completeTask(editor, f.taskId, f.version, true)]);
+  try {
+    await pause.ready();
+    const sub = await db.task.create({ data: { workspaceId, projectId: f.projectId, sectionId: f.sectionId, parentId: f.taskId, title: 'Late subtask', assigneeId: editor.id, createdById: leader.id } });
+    pause.release();
+    expect(await pending).toEqual([expect.objectContaining({ status: 'fulfilled' })]);
+    expect((await db.task.findUniqueOrThrow({ where: { id: f.taskId } })).completedAt).not.toBeNull();
+    expect((await db.task.findUniqueOrThrow({ where: { id: sub.id } })).completedAt).not.toBeNull();
+    expect(await db.actionLog.count({ where: { projectId: f.projectId, targetId: sub.id, action: 'task.completed' } })).toBe(1);
+    completed.push('late-subtask-cascade');
+  } finally { pause.release(); await pending; }
+});
+
 it('completes an eligible task once and records the final section and action', async () => {
   const f = await fixture();
   await completeTask(editor, f.taskId, f.version);
