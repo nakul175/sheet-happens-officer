@@ -21,7 +21,7 @@ beforeAll(async () => {
   assertLocalFixture(process.env.DATABASE_URL); safe = true;
   workspaceId = (await getOrCreateWorkspace()).id;
   for (const actor of [leader, editor, admin]) {
-    await db.user.create({ data: { id: actor.id, workspaceId, name: actor.id, email: actor.id + '@example.invalid', passwordHash: 'unused', emailVerifiedAt: new Date() } });
+    await db.user.create({ data: { id: actor.id, workspaceId, name: actor.id, email: actor.id + '@example.invalid', passwordHash: 'unused', emailVerifiedAt: new Date(), orgRole: actor.orgRole } });
     users.push(actor.id);
   }
   sentinelId = (await db.project.create({ data: { workspaceId, name: prefix + '-sentinel' } })).id;
