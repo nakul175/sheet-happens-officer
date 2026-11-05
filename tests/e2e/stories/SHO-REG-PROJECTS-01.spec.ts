@@ -1,9 +1,14 @@
-import { test } from '../helpers/2642-fixtures';
+import { randomUUID } from 'node:crypto';
+import { test, local2691 } from '../helpers/2691-admin';
+import { account } from '../local-api';
 import { expect, zz, archiveProject } from './qa';
 import { newProject } from '../helpers/migration-2731';
 
-test('SHO-REG-PROJECTS-01 API: create, edit, reload, activity and validation', async ({ admin, member, later }) => {
+test('SHO-REG-PROJECTS-01 API: create, edit, reload, activity and validation', async ({ admin, later }) => {
+  if (!local2691) throw new Error('This project acceptance case uses only the guarded local test database.');
   const p = await newProject(admin, later, { label: 'project create edit reload' });
+  const outsider = await account(zz('project outsider'), `nakul17+zz-projects-01-${randomUUID()}@aplyd.com`);
+  later(() => admin.api.post(`/api/team/${outsider.id}/deactivate`, { reassign: 'leaders' }));
   const name = zz('Renamed project');
   const changed = await admin.api.patch(`/api/projects/${p.id}`, { name, description: 'A persisted project description' });
   expect(changed.status, JSON.stringify(changed.json)).toBe(200);
@@ -23,7 +28,7 @@ test('SHO-REG-PROJECTS-01 API: create, edit, reload, activity and validation', a
   for (const body of [{ name: '   ' }, { name: 'x'.repeat(201) }, { description: 'x'.repeat(5001) }]) {
     expect((await admin.api.patch(`/api/projects/${p.id}`, body)).status).toBe(400);
   }
-  expect((await member.api.patch(`/api/projects/${p.id}`, { name: 'Unauthorized' })).status).toBe(404);
+  expect((await outsider.c.patch(`/api/projects/${p.id}`, { name: 'Unauthorized' })).status).toBe(404);
   expect((await admin.api.get(`/api/projects/${p.id}`)).json.project).toMatchObject({ name, description: 'A persisted project description' });
 });
 
