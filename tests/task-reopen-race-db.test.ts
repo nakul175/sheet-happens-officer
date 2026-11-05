@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { db } from '@/lib/db';
 import { getOrCreateWorkspace } from '@/lib/workspace';
-import { reopenTask } from '@/lib/tasks';
+import { moveTask, reopenTask } from '@/lib/tasks';
 import type { Tx } from '@/lib/access';
 import { assertLocalFixture } from './e2e/local-fixture-guard';
 vi.mock('next/server', () => ({ connection: vi.fn() }));
@@ -116,6 +116,33 @@ it('refuses reopen after the actor is deactivated following preflight', async ()
     expect(await pending).toEqual([expect.objectContaining({ status: 'rejected', reason: expect.objectContaining({ status: 404 }) })]);
     expect((await db.task.findUniqueOrThrow({ where: { id: f.taskId } })).completedAt).not.toBeNull();
     completed.push('deactivated-actor');
+  } finally { pause.release(); await pending; }
+});
+
+it('refuses reopen after a newer task edit follows preflight', async () => {
+  const f = await fixture(), pause = pauseBeforeTransactions();
+  const pending = Promise.allSettled([reopenTask(editor, f.taskId)]);
+  try {
+    await pause.ready();
+    await db.task.update({ where: { id: f.taskId }, data: { title: 'Newer edit', updatedAt: new Date(Date.now() + 1000) } });
+    pause.release();
+    expect(await pending).toEqual([expect.objectContaining({ status: 'rejected', reason: expect.objectContaining({ status: 409 }) })]);
+    expect((await db.task.findUniqueOrThrow({ where: { id: f.taskId } })).completedAt).not.toBeNull();
+    completed.push('newer-task-edit');
+  } finally { pause.release(); await pending; }
+});
+
+it('a drag from Done keeps its expected version through reopen', async () => {
+  const f = await fixture(), version = (await db.task.findUniqueOrThrow({ where: { id: f.taskId } })).updatedAt.toISOString();
+  const pause = pauseBeforeTransactions();
+  const pending = Promise.allSettled([moveTask(editor, f.taskId, f.todoId, version)]);
+  try {
+    await pause.ready();
+    await db.task.update({ where: { id: f.taskId }, data: { title: 'Newer edit', updatedAt: new Date(Date.parse(version) + 1000) } });
+    pause.release();
+    expect(await pending).toEqual([expect.objectContaining({ status: 'rejected', reason: expect.objectContaining({ status: 409 }) })]);
+    expect((await db.task.findUniqueOrThrow({ where: { id: f.taskId } })).completedAt).not.toBeNull();
+    completed.push('drag-version');
   } finally { pause.release(); await pending; }
 });
 

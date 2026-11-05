@@ -646,39 +646,70 @@ export async function cascadedSubtaskIds(tx: Tx, projectId: string, parents: { i
   }).map((s) => s.id);
 }
 
-export async function reopenTask(user: Actor, id: string, sectionId?: string) {
+export async function reopenTask(user: Actor, id: string, sectionId?: string, expectedUpdatedAt?: unknown) {
   const { t } = await loadTask(user, id, { write: true });
-  if (!t.completedAt) throw new ApiError(409, "This task is not complete.");
+  const completedAt = t.completedAt;
+  if (!completedAt) throw new ApiError(409, "This task is not complete.");
   return db.$transaction(async (tx) => {
+    const [locked] = await tx.$queryRaw<{ id: string }[]>`SELECT "id" FROM "Task" WHERE "id" = ${id} FOR UPDATE`;
+    if (!locked) throw notFound("Task");
+    const snapshot = await tx.task.findUnique({ where: { id }, select: { projectId: true, assigneeId: true, approverId: true } });
+    if (!snapshot) throw notFound("Task");
+    await lockTaskProjectAndPeople(tx, snapshot.projectId, [user.id, snapshot.assigneeId, snapshot.approverId]);
+    const actor = await tx.user.findUnique({ where: { id: user.id }, select: { orgRole: true, workspaceId: true, deactivatedAt: true, emailVerifiedAt: true } });
+    if (!actor || actor.deactivatedAt || !actor.emailVerifiedAt) throw notFound("Task");
+    const { t: current, a: fresh } = await loadTask({ ...user, orgRole: actor.orgRole }, id, { write: true, tx });
+    if (actor.workspaceId !== fresh.project.workspaceId) throw notFound("Task");
+    if (!current.completedAt) throw new ApiError(409, "This task is not complete.");
+    const seenAt = expectedUpdatedAt === undefined ? t.updatedAt.getTime() : classifyExpectedUpdatedAt(expectedUpdatedAt);
+    if (current.updatedAt.getTime() !== seenAt || current.completedAt.getTime() !== completedAt.getTime()) {
+      throw new ApiError(409, "The task changed. Reload and try again.");
+    }
     let row: { updatedAt: Date };
     let cascaded: string[] = [];
-    if (t.parentId) {
-      const parent = await tx.task.findUniqueOrThrow({ where: { id: t.parentId } });
+    if (current.parentId) {
+      let parent: { completedAt: Date | null } | undefined;
+      try {
+        [parent] = await tx.$queryRaw<{ completedAt: Date | null }[]>`SELECT "completedAt" FROM "Task" WHERE "id" = ${current.parentId} FOR SHARE NOWAIT`;
+      } catch (error) {
+        const failure = error as { code?: string; meta?: { code?: string } } | null;
+        if (failure?.code === "P2010" && failure.meta?.code === "55P03") throw new ApiError(409, "The parent task is changing. Reload and try again.");
+        throw error;
+      }
+      if (!parent) throw notFound("Parent task");
       if (parent.completedAt) throw new ApiError(409, "Reopen the parent task first.");
-      row = await tx.task.update({ where: { id }, data: { completedAt: null } });
+      row = await tx.task.update({ where: { id }, data: { completedAt: null, updatedAt: new Date(Math.max(Date.now(), current.updatedAt.getTime() + 1)) } });
     } else {
       let dest: string | null = null;
       if (sectionId) {
-        const s = await tx.section.findFirst({ where: { id: sectionId, projectId: t.projectId } });
+        const s = await tx.section.findFirst({ where: { id: sectionId, projectId: current.projectId } });
         if (!s) throw notFound("Section");
         if (s.isDone) throw new ApiError(400, "Choose a section that is not the done section.");
         dest = s.id;
       } else {
-        const prev = t.previousSectionId ? await tx.section.findFirst({ where: { id: t.previousSectionId, projectId: t.projectId, isDone: false } }) : null;
-        dest = (prev ?? (await tx.section.findFirst({ where: { projectId: t.projectId, isDone: false }, orderBy: { position: "asc" } })) ?? (await tx.section.findFirstOrThrow({ where: { projectId: t.projectId }, orderBy: { position: "asc" } }))).id;
+        const prev = current.previousSectionId ? await tx.section.findFirst({ where: { id: current.previousSectionId, projectId: current.projectId, isDone: false } }) : null;
+        dest = (prev ?? (await tx.section.findFirst({ where: { projectId: current.projectId, isDone: false }, orderBy: { position: "asc" } })) ?? (await tx.section.findFirstOrThrow({ where: { projectId: current.projectId }, orderBy: { position: "asc" } }))).id;
       }
       // Subtasks closed with the parent reopen with it. One ticked on its own stays done (APL-2721).
-      cascaded = await cascadedSubtaskIds(tx, t.projectId, [{ id, completedAt: t.completedAt }]);
-      row = await tx.task.update({ where: { id }, data: { completedAt: null, sectionId: dest, previousSectionId: null } });
+      try {
+        // Freeze the child cohort before deciding which completions were cascaded.
+        await tx.$queryRaw`SELECT "id" FROM "Task" WHERE "parentId" = ${id} AND "deletedAt" IS NULL ORDER BY "id" FOR UPDATE NOWAIT`;
+      } catch (error) {
+        const failure = error as { code?: string; meta?: { code?: string } } | null;
+        if (failure?.code === "P2010" && failure.meta?.code === "55P03") throw new ApiError(409, "Subtasks are changing. Reload and try again.");
+        throw error;
+      }
+      cascaded = await cascadedSubtaskIds(tx, current.projectId, [{ id, completedAt: current.completedAt }]);
+      row = await tx.task.update({ where: { id }, data: { completedAt: null, sectionId: dest, previousSectionId: null, updatedAt: new Date(Math.max(Date.now(), current.updatedAt.getTime() + 1)) } });
       if (cascaded.length) await tx.task.updateMany({ where: { id: { in: cascaded } }, data: { completedAt: null } });
     }
     await logAction(tx, {
-      actorId: user.id, projectId: t.projectId, targetType: "task", targetId: id, action: "task.reopened",
-      before: { completedAt: t.completedAt, sectionId: t.sectionId },
+      actorId: user.id, projectId: current.projectId, targetType: "task", targetId: id, action: "task.reopened",
+      before: { completedAt: current.completedAt, sectionId: current.sectionId },
       after: { completedAt: null, ...(cascaded.length ? { subtaskIds: cascaded } : {}) },
     });
     return row.updatedAt;
-  });
+  }, { isolationLevel: "ReadCommitted" });
 }
 
 /** Dragging a card. Into the done Section completes, out of it reopens, otherwise only the Section changes. */
@@ -689,7 +720,7 @@ export async function moveTask(user: Actor, id: string, sectionId: string, expec
   if (!dest) throw notFound("Section");
   if (dest.id === t.sectionId) return;
   if (dest.isDone) return completeTask(user, id, expectedUpdatedAt, completeAll);
-  if (t.completedAt) return reopenTask(user, id, dest.id);
+  if (t.completedAt) return reopenTask(user, id, dest.id, expectedUpdatedAt);
   return db.$transaction(async (tx) => {
     const row = await tx.task.update({ where: { id }, data: { sectionId: dest.id } });
     await logAction(tx, { actorId: user.id, projectId: t.projectId, targetType: "task", targetId: id, action: "task.moved", before: { sectionId: t.sectionId }, after: { sectionId: dest.id } });
