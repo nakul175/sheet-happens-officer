@@ -40,7 +40,7 @@ afterAll(async () => {
   }
 });
 async function fixture(isVertical = true) {
-  const project = await db.project.create({ data: { workspaceId, name: prefix, isVertical } }); projects.push(project.id);
+  const project = await db.project.create({ data: { workspaceId, name: prefix + '-' + randomUUID(), isVertical } }); projects.push(project.id);
   return project.id;
 }
 function pauseBeforeTransaction() {
