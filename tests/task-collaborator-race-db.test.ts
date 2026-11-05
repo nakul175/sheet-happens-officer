@@ -30,7 +30,7 @@ beforeAll(async () => {
 afterEach(async () => {
   vi.restoreAllMocks();
   if (!safe) return;
-  await db.user.update({ where: { id: recipient.id }, data: { deactivatedAt: null } });
+  await db.user.updateMany({ where: { id: { in: [editor.id, recipient.id] } }, data: { deactivatedAt: null } });
   await db.projectMember.updateMany({ where: { projectId: { in: projects }, userId: editor.id }, data: { role: 'EDITOR' } });
 });
 afterAll(async () => {
@@ -95,6 +95,17 @@ it('rejects a project archived after collaborator preflight', async () => {
   } finally { pause.release(); await pending; }
 });
 
+it('rejects an actor deactivated after collaborator preflight', async () => {
+  const f = await fixture(), pause = pauseBeforeTransactions();
+  const pending = Promise.allSettled([addCollaborator(editor, f.taskId, recipient.id)]);
+  try {
+    await pause.ready(); await db.user.update({ where: { id: editor.id }, data: { deactivatedAt: new Date() } }); pause.release();
+    expect(await pending).toEqual([expect.objectContaining({ status: 'rejected', reason: expect.objectContaining({ status: 404 }) })]);
+    expect(await db.taskCollaborator.count({ where: { taskId: f.taskId } })).toBe(0);
+    completed.push('deactivated-editor');
+  } finally { pause.release(); await pending; }
+});
+
 it('deactivation cannot miss a collaborator inserted after eligibility check', async () => {
   const f = await fixture();
   let reached!: () => void, release!: () => void;
@@ -126,4 +137,24 @@ it('adds an eligible collaborator once with a matching action', async () => {
   expect(await db.taskCollaborator.count({ where: { taskId: f.taskId, userId: recipient.id } })).toBe(1);
   expect(await db.actionLog.count({ where: { projectId: f.projectId, targetId: f.taskId, action: 'task.collaborator_added' } })).toBe(1);
   completed.push('eligible-control');
+});
+
+it('refuses a locked recipient account then succeeds after retry', async () => {
+  const f = await fixture();
+  let reached!: () => void, release!: () => void;
+  const atLock = new Promise<void>((resolve) => { reached = resolve; });
+  const held = new Promise<void>((resolve) => { release = resolve; });
+  const blocker = transact(async (tx) => {
+    await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${recipient.id} FOR UPDATE`;
+    reached(); await held;
+  });
+  try {
+    await atLock;
+    await expect(addCollaborator(leader, f.taskId, recipient.id)).rejects.toMatchObject({ status: 409 });
+    expect(await db.taskCollaborator.count({ where: { taskId: f.taskId } })).toBe(0);
+  } finally { release(); await blocker; }
+  await addCollaborator(leader, f.taskId, recipient.id);
+  expect(await db.taskCollaborator.count({ where: { taskId: f.taskId, userId: recipient.id } })).toBe(1);
+  expect(await db.actionLog.count({ where: { projectId: f.projectId, targetId: f.taskId, action: 'task.collaborator_added' } })).toBe(1);
+  completed.push('locked-recipient-retry');
 });

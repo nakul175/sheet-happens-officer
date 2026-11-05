@@ -403,25 +403,28 @@ export async function addCollaborator(user: Actor, id: string, userId: string, o
   const grantMembership = options.addToProject || options.addMemberRole;
   if (grantMembership) { requireManage(a); if (options.addToProject || options.expectedUpdatedAt !== undefined) classifyExpectedUpdatedAt(options.expectedUpdatedAt); }
   await db.$transaction(async (tx) => {
-    let collaborators = t.collaborators;
-    if (grantMembership) {
-      await addWorkspaceTaskMember(tx, user, t.projectId, userId, options.addMemberRole);
-      await tx.$queryRaw`SELECT "id" FROM "Task" WHERE "id" = ${id} FOR UPDATE`;
-      const current = await tx.task.findUnique({ where: { id }, include: taskInclude });
-      if (!current || current.deletedAt) throw notFound("Task");
-      if (options.expectedUpdatedAt !== undefined && current.updatedAt.getTime() !== classifyExpectedUpdatedAt(options.expectedUpdatedAt)) await versionConflict(user, id, current, a.role);
-      collaborators = current.collaborators;
+    if (grantMembership) await addWorkspaceTaskMember(tx, user, t.projectId, userId, options.addMemberRole);
+    const [locked] = await tx.$queryRaw<{ id: string }[]>`SELECT "id" FROM "Task" WHERE "id" = ${id} FOR UPDATE`;
+    if (!locked) throw notFound("Task");
+    await lockTaskProjectAndPeople(tx, t.projectId, [user.id, userId]);
+    const actor = await tx.user.findUnique({ where: { id: user.id }, select: { orgRole: true, workspaceId: true, deactivatedAt: true, emailVerifiedAt: true } });
+    if (!actor || actor.deactivatedAt || !actor.emailVerifiedAt) throw notFound("Task");
+    const { t: current, a: fresh } = await loadTask({ ...user, orgRole: actor.orgRole }, id, { write: true, tx });
+    if (actor.workspaceId !== fresh.project.workspaceId) throw notFound("Task");
+    if (grantMembership) requireManage(fresh);
+    if (grantMembership && options.expectedUpdatedAt !== undefined && current.updatedAt.getTime() !== classifyExpectedUpdatedAt(options.expectedUpdatedAt)) {
+      await versionConflict(user, id, current, fresh.role, tx);
     }
     await requireMember(tx, t.projectId, userId);
-    if (collaborators.some((c) => c.user.id === userId)) throw new ApiError(409, "Already a collaborator.");
+    if (current.collaborators.some((c) => c.user.id === userId)) throw new ApiError(409, "Already a collaborator.");
     try { await tx.taskCollaborator.create({ data: { taskId: id, userId } }); }
     catch (error) {
       if (error && typeof error === "object" && "code" in error && error.code === "P2002") throw new ApiError(409, "Already a collaborator.");
       throw error;
     }
-    await notify(tx, [userId], "COLLABORATOR_ADDED", { actorId: user.id, taskId: id, projectId: t.projectId, data: { title: t.title } });
-    await logAction(tx, { actorId: user.id, projectId: t.projectId, targetType: "task", targetId: id, action: "task.collaborator_added", after: { userId } });
-  });
+    await notify(tx, [userId], "COLLABORATOR_ADDED", { actorId: user.id, taskId: id, projectId: current.projectId, data: { title: current.title } });
+    await logAction(tx, { actorId: user.id, projectId: current.projectId, targetType: "task", targetId: id, action: "task.collaborator_added", after: { userId } });
+  }, { isolationLevel: "ReadCommitted" });
 }
 
 export async function removeCollaborator(user: Actor, id: string, userId: string) {
