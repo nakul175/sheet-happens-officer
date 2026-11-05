@@ -1,10 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import { test, local2691 } from '../helpers/2691-admin';
-import { account, task } from '../local-api';
-import { expect, zz, archiveProject } from './qa';
+import { account, task, PW } from '../local-api';
+import { expect, zz, archiveProject, BASE_URL } from './qa';
 import { newProject } from '../helpers/migration-2731';
 
-test('SHO-REG-PROJECTS-02: leader transfer, denied candidates, deactivation and task fallback', async ({ admin, later }) => {
+test('SHO-REG-PROJECTS-02: leader transfer, denied candidates, deactivation and task fallback', async ({ admin, later, browser }) => {
   if (!local2691) throw new Error('This project acceptance case uses only the guarded local test database.');
   const fixture = randomUUID();
   const people = await Promise.all(['editor', 'viewer', 'inactive', 'outsider'].map(async role => {
@@ -50,6 +50,19 @@ test('SHO-REG-PROJECTS-02: leader transfer, denied candidates, deactivation and 
     expect((await person.c.post(`/api/projects/${id}/leader`, { newLeaderId: person.id, previousRole: 'EDITOR' })).status).toBe(403);
     await expectLeader(admin.user.id);
   }
+  const leadershipButtonFor = async (person: typeof editor, visible: boolean) => {
+    const context = await browser.newContext({ baseURL: BASE_URL });
+    try {
+      expect((await context.request.post('/api/auth/signin', { data: { email: person.email, password: PW } })).status()).toBe(200);
+      const rolePage = await context.newPage();
+      await rolePage.goto(`/projects/${id}/members`);
+      await expect(rolePage.locator('.settings-members')).toBeVisible();
+      if (visible) await expect(rolePage.getByRole('button', { name: 'Change leader…' })).toBeVisible();
+      else await expect(rolePage.getByRole('button', { name: 'Change leader…' })).toHaveCount(0);
+    } finally { await context.close(); }
+  };
+  await leadershipButtonFor(editor, false);
+  await leadershipButtonFor(viewer, false);
 
   const page = admin.page;
   await page.goto(`/projects/${id}/members`);
@@ -66,7 +79,8 @@ test('SHO-REG-PROJECTS-02: leader transfer, denied candidates, deactivation and 
   const roster = page.locator('.settings-members');
   await expect(roster.getByText(viewer.name, { exact: true }).locator('xpath=../..').getByText('Leader', { exact: true })).toBeVisible();
   // The Super Admin retains effective management access; the membership chip is the stored role.
-  await expect(roster.getByText(admin.user.name, { exact: true }).locator('xpath=../..').getByText('Editor', { exact: true })).toBeVisible();
+  await expect(roster.getByRole('combobox', { name: `Role of ${admin.user.name}` })).toHaveValue('EDITOR');
+  await leadershipButtonFor(viewer, true);
   await test.info().attach('leader-transfer-screen', { body: await page.screenshot({ fullPage: true }), contentType: 'image/png' });
   await expectLeader(viewer.id);
 
