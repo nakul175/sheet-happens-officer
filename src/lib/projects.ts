@@ -341,8 +341,31 @@ export async function addMember(user: Actor, projectId: string, userId: string, 
   if (!person || !isActive(person)) throw new ApiError(400, "Choose an active person.");
   if (a.project.members.some((m) => m.userId === userId)) throw new ApiError(409, "This person is already a member.");
   await db.$transaction(async (tx) => {
+    try {
+      const [locked] = await tx.$queryRaw<{ id: string }[]>`SELECT "id" FROM "Project" WHERE "id" = ${projectId} FOR UPDATE NOWAIT`;
+      if (!locked) throw notFound("Project");
+      await tx.$queryRaw`SELECT "userId" FROM "ProjectMember" WHERE "projectId" = ${projectId} AND "userId" = ${user.id} FOR SHARE NOWAIT`;
+      await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${user.id} FOR SHARE NOWAIT`;
+      await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${userId} FOR SHARE NOWAIT`;
+    } catch (error) {
+      const failure = error as { code?: string; meta?: { code?: string } } | null;
+      if (failure?.code === "P2010" && failure.meta?.code === "55P03") {
+        throw new ApiError(409, "Project or person is changing. Reload and try again.");
+      }
+      throw error;
+    }
+    const actor = await tx.user.findUnique({ where: { id: user.id }, select: { orgRole: true, workspaceId: true, deactivatedAt: true, emailVerifiedAt: true } });
+    if (!actor || actor.deactivatedAt || !actor.emailVerifiedAt) throw notFound("Project");
+    const fresh = await projectAccess({ ...user, orgRole: actor.orgRole }, projectId, { write: true, tx });
+    if (actor.workspaceId !== fresh.project.workspaceId) throw notFound("Project");
+    requireManage(fresh);
+    const currentPerson = await tx.user.findUnique({ where: { id: userId } });
+    if (!currentPerson || !isActive(currentPerson) || currentPerson.workspaceId !== fresh.project.workspaceId) {
+      throw new ApiError(400, "Choose an active person.");
+    }
+    if (fresh.project.members.some((m) => m.userId === userId)) throw new ApiError(409, "This person is already a member.");
     await tx.projectMember.create({ data: { projectId, userId, role } });
-    await notify(tx, [userId], "ADDED_TO_PROJECT", { actorId: user.id, projectId, data: { project: a.project.name, role } });
+    await notify(tx, [userId], "ADDED_TO_PROJECT", { actorId: user.id, projectId, data: { project: fresh.project.name, role } });
     await logAction(tx, { actorId: user.id, projectId, targetType: "member", targetId: userId, action: "member.added", after: { role } });
   });
 }

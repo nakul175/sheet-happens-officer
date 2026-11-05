@@ -122,3 +122,43 @@ it('adds an eligible active person once', async () => {
   expect(await db.actionLog.count({ where: { projectId: id, action: 'member.added' } })).toBe(1);
   completed.push('eligible-control');
 });
+
+it('returns a retryable conflict for a locked project, then adds once', async () => {
+  const id = await fixture();
+  let reached!: () => void, release!: () => void;
+  const atLock = new Promise<void>(resolve => { reached = resolve; });
+  const held = new Promise<void>(resolve => { release = resolve; });
+  const blocker = transact(async tx => {
+    await tx.$queryRaw`SELECT "id" FROM "Project" WHERE "id" = ${id} FOR UPDATE`;
+    reached(); await held;
+  });
+  const safety = setTimeout(() => release(), 15_000);
+  try {
+    await atLock;
+    await expect(addMember(leader, id, recipient.id, 'EDITOR')).rejects.toMatchObject({ status: 409 });
+    expect(await db.projectMember.count({ where: { projectId: id, userId: recipient.id } })).toBe(0);
+  } finally { clearTimeout(safety); release(); await blocker; }
+  await addMember(leader, id, recipient.id, 'EDITOR');
+  expect(await db.projectMember.count({ where: { projectId: id, userId: recipient.id } })).toBe(1);
+  completed.push('locked-project-retry');
+}, 20_000);
+
+it('returns a retryable conflict for a locked recipient, then adds once', async () => {
+  const id = await fixture();
+  let reached!: () => void, release!: () => void;
+  const atLock = new Promise<void>(resolve => { reached = resolve; });
+  const held = new Promise<void>(resolve => { release = resolve; });
+  const blocker = transact(async tx => {
+    await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${recipient.id} FOR UPDATE`;
+    reached(); await held;
+  });
+  const safety = setTimeout(() => release(), 15_000);
+  try {
+    await atLock;
+    await expect(addMember(leader, id, recipient.id, 'EDITOR')).rejects.toMatchObject({ status: 409 });
+    expect(await db.projectMember.count({ where: { projectId: id, userId: recipient.id } })).toBe(0);
+  } finally { clearTimeout(safety); release(); await blocker; }
+  await addMember(leader, id, recipient.id, 'EDITOR');
+  expect(await db.projectMember.count({ where: { projectId: id, userId: recipient.id } })).toBe(1);
+  completed.push('locked-recipient-retry');
+}, 20_000);
