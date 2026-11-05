@@ -1,4 +1,5 @@
-import { test, expect, zz, archiveProject } from './qa';
+import { test } from '../helpers/2642-fixtures';
+import { expect, zz, archiveProject } from './qa';
 import { newProject } from '../helpers/migration-2731';
 
 test('SHO-REG-PROJECTS-01 API: create, edit, reload, activity and validation', async ({ admin, member, later }) => {
@@ -37,6 +38,7 @@ test('SHO-REG-PROJECTS-01 screen: create, edit, reload and inspect details', asy
   await expect(page).toHaveURL(/\/projects\/[^/?]+\?new=1/);
   const id = new URL(page.url()).pathname.split('/').at(-1)!;
   later(() => archiveProject(admin.api, id, admin.user.id));
+  expect((await admin.api.get(`/api/projects/${id}`)).json.project).toMatchObject({ name: originalName, description: 'Initial description' });
 
   await page.goto(`/projects/${id}/members`);
   await page.getByRole('button', { name: 'Edit project' }).click();
@@ -48,5 +50,5 @@ test('SHO-REG-PROJECTS-01 screen: create, edit, reload and inspect details', asy
   await expect(page.getByText('Updated description', { exact: true })).toBeVisible();
   expect((await admin.api.get(`/api/projects/${id}`)).json.project).toMatchObject({ name: updatedName, description: 'Updated description' });
   await page.goto(`/projects/${id}/activity`);
-  await expect(page.getByText(/renamed|changed|updated/i).first()).toBeVisible();
+  await expect(page.getByText(/renamed the project/i).first()).toBeVisible();
 });
