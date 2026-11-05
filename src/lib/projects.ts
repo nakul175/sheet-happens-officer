@@ -73,11 +73,37 @@ export async function createProject(user: Actor, input: { name: string; descript
   for (const m of input.members ?? []) if (m.userId !== leader.id && m.userId !== user.id) wanted.set(m.userId, m.role);
   if (wanted.size) {
     const found = await db.user.findMany({ where: { id: { in: [...wanted.keys()] } } });
-    if (found.length !== wanted.size || !found.every(isActive)) throw new ApiError(400, "Choose active people to add.");
+    if (found.length !== wanted.size || !found.every(person => isActive(person) && person.workspaceId === me.workspaceId)) throw new ApiError(400, "Choose active people to add.");
   }
   return db.$transaction(async (tx) => {
+    try {
+      if (input.verticalId) await tx.$queryRaw`SELECT "id" FROM "Project" WHERE "id" = ${input.verticalId} FOR SHARE NOWAIT`;
+      const peopleIds = [...new Set([user.id, leader.id, ...wanted.keys()])].sort();
+      for (const personId of peopleIds) await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${personId} FOR SHARE NOWAIT`;
+    } catch (error) {
+      const failure = error as { code?: string; meta?: { code?: string } } | null;
+      if (failure?.code === "P2010" && failure.meta?.code === "55P03") {
+        throw new ApiError(409, "Person or vertical is changing. Reload and try again.");
+      }
+      throw error;
+    }
+    const freshPeople = await tx.user.findMany({ where: { id: { in: [...new Set([user.id, leader.id, ...wanted.keys()])] } }, select: { id: true, orgRole: true, workspaceId: true, deactivatedAt: true, emailVerifiedAt: true } });
+    const current = new Map(freshPeople.map(person => [person.id, person]));
+    const actor = current.get(user.id);
+    if (!actor || !isActive(actor) || actor.workspaceId !== me.workspaceId) throw notFound("Project");
+    if (input.isVertical && !isAdmin(actor)) throw new ApiError(403, "Only Admins manage verticals.");
+    const freshLeader = current.get(leader.id);
+    if (!freshLeader || !isActive(freshLeader) || freshLeader.workspaceId !== actor.workspaceId) throw new ApiError(400, "Choose an active person as Leader.");
+    if ([...wanted.keys()].some(id => { const person = current.get(id); return !person || !isActive(person) || person.workspaceId !== actor.workspaceId; })) {
+      throw new ApiError(400, "Choose active people to add.");
+    }
+    if (input.verticalId) {
+      // project-lookup-ok: validate classification vocabulary under a row lock in this workspace; it grants no board membership.
+      const vertical = await tx.project.findFirst({ where: { id: input.verticalId, workspaceId: actor.workspaceId, typeId: WORKSTREAM_PROJECT, isVertical: true, archivedAt: null, deletedAt: null }, select: { id: true } });
+      if (!vertical) throw new ApiError(400, "Choose an active vertical in this workspace.");
+    }
     const project = await tx.project.create({
-      data: { workspaceId: me.workspaceId, name: input.name, description: input.description ?? null, ...(input.isVertical ? { isVertical: true } : {}), ...(input.verticalId ? { verticalId: input.verticalId } : {}) },
+      data: { workspaceId: actor.workspaceId, name: input.name, description: input.description ?? null, ...(input.isVertical ? { isVertical: true } : {}), ...(input.verticalId ? { verticalId: input.verticalId } : {}) },
     });
     await tx.projectMember.create({ data: { projectId: project.id, userId: leader.id, role: "LEADER" } });
     if (leader.id !== user.id) await tx.projectMember.create({ data: { projectId: project.id, userId: user.id, role: "EDITOR" } });
