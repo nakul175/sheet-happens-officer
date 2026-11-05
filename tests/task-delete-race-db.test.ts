@@ -104,6 +104,29 @@ it('logs the title actually deleted when it changes after preflight', async () =
     expect((action.beforeState as { title: string }).title).toBe('Newer title'); completed.push('current-title');
   } finally { pause.release(); await pending; }
 });
+it('deletes a child added after preflight with the same parent timestamp', async () => {
+  const f = await fixture(), pause = pauseBeforeTransactions();
+  const pending = Promise.allSettled([deleteTask(editor, f.taskId)]);
+  try {
+    await pause.ready();
+    const child = await db.task.create({ data: { workspaceId, projectId: f.projectId, sectionId: f.sectionId, parentId: f.taskId, title: 'Late child', assigneeId: editor.id, createdById: leader.id } });
+    pause.release();
+    expect(await pending).toEqual([expect.objectContaining({ status: 'fulfilled' })]);
+    const parent = await db.task.findUniqueOrThrow({ where: { id: f.taskId } });
+    const after = await db.task.findUniqueOrThrow({ where: { id: child.id } });
+    expect(parent.deletedAt).not.toBeNull();
+    expect(after.deletedAt).toEqual(parent.deletedAt);
+    completed.push('late-child-cohort');
+  } finally { pause.release(); await pending; }
+});
+it('the Undo transaction path deletes without a second activity or notice', async () => {
+  const f = await fixture();
+  await db.$transaction(tx => deleteTask(editor, f.taskId, { byUndo: true, tx }));
+  expect((await db.task.findUniqueOrThrow({ where: { id: f.taskId } })).deletedAt).not.toBeNull();
+  expect(await db.actionLog.count({ where: { projectId: f.projectId, targetId: f.taskId, action: 'task.deleted' } })).toBe(0);
+  expect(await db.notification.count({ where: { projectId: f.projectId } })).toBe(0);
+  completed.push('undo-path-control');
+});
 it('deletes an eligible task once and records one activity', async () => {
   const f = await fixture(); await deleteTask(editor, f.taskId);
   expect((await db.task.findUniqueOrThrow({ where: { id: f.taskId } })).deletedAt).not.toBeNull();

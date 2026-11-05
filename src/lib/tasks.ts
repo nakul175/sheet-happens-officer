@@ -752,25 +752,36 @@ export async function moveTask(user: Actor, id: string, sectionId: string, expec
 
 // ---------------------------------------------------------------- delete, restore, trash (6.1, 6.2)
 export async function deleteTask(user: Actor, id: string, o: { byUndo?: boolean; tx?: Tx } = {}) {
-  const { t, a } = await loadTask(user, id, { write: true, tx: o.tx });
+  await loadTask(user, id, { write: true, tx: o.tx });
   const apply = async (tx: Tx) => {
+    const [locked] = await tx.$queryRaw<{ id: string }[]>`SELECT "id" FROM "Task" WHERE "id" = ${id} FOR UPDATE`;
+    if (!locked) throw notFound("Task");
+    const snapshot = await tx.task.findUnique({ where: { id }, include: taskInclude });
+    if (!snapshot) throw notFound("Task");
+    const initialLeader = await leaderId(tx, snapshot.projectId);
+    await lockTaskProjectAndPeople(tx, snapshot.projectId, [user.id, initialLeader, snapshot.assigneeId, snapshot.approverId, ...snapshot.collaborators.map((c) => c.user.id)]);
+    const actor = await tx.user.findUnique({ where: { id: user.id }, select: { orgRole: true, workspaceId: true, deactivatedAt: true, emailVerifiedAt: true } });
+    if (!actor || actor.deactivatedAt || !actor.emailVerifiedAt) throw notFound("Task");
+    const { t: current, a: fresh } = await loadTask({ ...user, orgRole: actor.orgRole }, id, { write: true, tx });
+    if (actor.workspaceId !== fresh.project.workspaceId) throw notFound("Task");
+    const leader = await leaderId(tx, current.projectId);
+    if (leader !== initialLeader) throw new ApiError(409, "Project membership is changing. Reload and try again.");
     const now = new Date();
-    await tx.task.updateMany({ where: { OR: [{ id }, { parentId: id }], deletedAt: null }, data: { deletedAt: now, deletedById: user.id } });
+    const row = await tx.task.update({ where: { id }, data: { deletedAt: now, deletedById: user.id, updatedAt: new Date(Math.max(now.getTime(), current.updatedAt.getTime() + 1)) } });
+    await tx.task.updateMany({ where: { parentId: id, deletedAt: null }, data: { deletedAt: now, deletedById: user.id } });
     // Still inside this transaction, so the updatedAt is the one this write stored, not a later save.
-    const row = await tx.task.findUniqueOrThrow({ where: { id }, select: { updatedAt: true } });
     if (o.byUndo) return row.updatedAt; // Undo logs its own row and sends no notice
-    const leader = await leaderId(tx, t.projectId);
-    await notify(tx, [leader, t.assigneeId, t.approverId, ...t.collaborators.map((c) => c.user.id)], "TASK_DELETED", {
-      actorId: user.id, taskId: id, projectId: t.projectId, data: { title: t.title },
+    await notify(tx, [leader, current.assigneeId, current.approverId, ...current.collaborators.map((c) => c.user.id)], "TASK_DELETED", {
+      actorId: user.id, taskId: id, projectId: current.projectId, data: { title: current.title },
     });
-    await logAction(tx, { actorId: user.id, projectId: t.projectId, targetType: "task", targetId: id, action: "task.deleted", before: { title: t.title, sectionId: t.sectionId, deletedAt: null }, after: { deletedAt: now.toISOString() }, at: now });
+    await logAction(tx, { actorId: user.id, projectId: current.projectId, targetType: "task", targetId: id, action: "task.deleted", before: { title: current.title, sectionId: current.sectionId, deletedAt: null }, after: { deletedAt: now.toISOString() }, at: now });
     // Undoing a delete is a restore from Trash, so only those who may restore get the Undo toast (APL-2649).
     const ctx = reqCtx.getStore();
-    if (ctx && !canManage(a)) { ctx.undoId = undefined; ctx.undoLabel = undefined; }
-    await ensureNextStep(tx, t.projectId, user.id);
+    if (ctx && !canManage(fresh)) { ctx.undoId = undefined; ctx.undoLabel = undefined; }
+    await ensureNextStep(tx, current.projectId, user.id);
     return row.updatedAt;
   };
-  return o.tx ? apply(o.tx) : db.$transaction(apply);
+  return o.tx ? apply(o.tx) : db.$transaction(apply, { isolationLevel: "ReadCommitted" });
 }
 
 export async function restoreTask(user: Actor, id: string, confirmParent = false, o: { skipRestoredLog?: boolean; tx?: Tx } = {}) {
