@@ -1,4 +1,5 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { test, local2691 } from '../helpers/2691-admin';
 import { account, task, PW } from '../local-api';
 import { expect, zz, archiveProject, BASE_URL } from './qa';
@@ -7,8 +8,29 @@ import { newProject } from '../helpers/migration-2731';
 test('SHO-REG-PROJECTS-02: leader transfer, denied candidates, deactivation and task fallback', async ({ admin, later, browser }) => {
   if (!local2691) throw new Error('This project acceptance case uses only the guarded local test database.');
   const fixture = randomUUID();
+  const evidenceDir = 'test-results/project-leader-transfer';
+  const ownedPeople: string[] = [];
+  const ownedProjects: string[] = [];
+  // Registered first, so the strict LIFO fixture checks after all owned cleanup callbacks.
+  later(async () => {
+    const people = await Promise.all(ownedPeople.map(async id => {
+      const result = await admin.api.get(`/api/team/${id}`);
+      expect(result.status).toBe(200);
+      expect(result.json.person.status).toBe('DEACTIVATED');
+      return id;
+    }));
+    const projects = await Promise.all(ownedProjects.map(async id => {
+      const result = await admin.api.get(`/api/projects/${id}`);
+      expect(result.status).toBe(200);
+      expect(result.json.project.archived).toBe(true);
+      return id;
+    }));
+    mkdirSync(evidenceDir, { recursive: true });
+    writeFileSync(`${evidenceDir}/cleanup.json`, JSON.stringify({ fixture, people, projects, cleanup: true }, null, 2));
+  });
   const people = await Promise.all(['editor', 'viewer', 'inactive', 'outsider'].map(async role => {
     const person = await account(zz(`leader ${role}`), `nakul17+zz-projects-02-${fixture}-${role}@aplyd.com`);
+    ownedPeople.push(person.id);
     later(async () => {
       const result = await admin.api.post(`/api/team/${person.id}/deactivate`, { reassign: 'leaders' });
       if (result.status === 409) expect(result.json.error).toMatch(/already deactivated/i);
@@ -18,7 +40,9 @@ test('SHO-REG-PROJECTS-02: leader transfer, denied candidates, deactivation and 
   }));
   const [editor, viewer, inactive, outsider] = people;
   const sentinel = await newProject(admin, later, { label: 'leader transfer sentinel' });
+  ownedProjects.push(sentinel.id);
   const sentinelBefore = (await admin.api.get(`/api/projects/${sentinel.id}`)).json.project;
+  const sentinelFingerprint = createHash('sha256').update(JSON.stringify(sentinelBefore)).digest('hex');
   const created = await admin.api.post('/api/projects', {
     name: zz('leader transfer journey'), leaderId: admin.user.id,
     members: [
@@ -29,6 +53,7 @@ test('SHO-REG-PROJECTS-02: leader transfer, denied candidates, deactivation and 
   });
   expect(created.status, JSON.stringify(created.json)).toBe(201);
   const id = created.json.project.id as string;
+  ownedProjects.push(id);
   later(() => archiveProject(admin.api, id, admin.user.id));
   const detail = async () => {
     const response = await admin.api.get(`/api/projects/${id}`);
@@ -81,7 +106,8 @@ test('SHO-REG-PROJECTS-02: leader transfer, denied candidates, deactivation and 
   // The Super Admin retains effective management access; the membership chip is the stored role.
   await expect(roster.getByRole('combobox', { name: `Role of ${admin.user.name}` })).toHaveValue('EDITOR');
   await leadershipButtonFor(viewer, true);
-  await test.info().attach('leader-transfer-screen', { body: await page.screenshot({ fullPage: true }), contentType: 'image/png' });
+  mkdirSync(evidenceDir, { recursive: true });
+  await page.screenshot({ path: `${evidenceDir}/roster.png`, fullPage: true });
   await expectLeader(viewer.id);
 
   const work = await task(viewer, id, { title: zz('leader fallback work'), assigneeId: viewer.id });
@@ -104,8 +130,6 @@ test('SHO-REG-PROJECTS-02: leader transfer, denied candidates, deactivation and 
   const sentinelAfter = (await admin.api.get(`/api/projects/${sentinel.id}`)).json.project;
   expect(sentinelAfter).toMatchObject({ id: sentinelBefore.id, name: sentinelBefore.name });
   expect(sentinelAfter.members).toEqual(sentinelBefore.members);
-  await test.info().attach('leader-transfer-journey', {
-    body: Buffer.from(JSON.stringify({ fixture, projectId: id, sentinelId: sentinel.id, deniedCandidates: 2, deniedActors: 2, deactivationRequiresTransfer: true, fallbackMoved: fallenBack.json.moved, sentinelPreserved: true }, null, 2)),
-    contentType: 'application/json',
-  });
+  expect(createHash('sha256').update(JSON.stringify(sentinelAfter)).digest('hex')).toBe(sentinelFingerprint);
+  writeFileSync(`${evidenceDir}/verification.json`, JSON.stringify({ fixture, projectId: id, sentinelId: sentinel.id, deniedCandidates: 2, deniedActors: 2, deniedActorScreens: 2, promotedViewerScreen: true, deactivationRequiresTransfer: true, fallbackMoved: fallenBack.json.moved, sentinelFingerprint, sentinelPreserved: true }, null, 2));
 });
