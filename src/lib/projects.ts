@@ -155,8 +155,40 @@ export async function updateProject(user: Actor, projectId: string, input: { nam
     if (input.verticalId) await validateVertical(input.verticalId, a.project.workspaceId);
   }
   await db.$transaction(async (tx) => {
+    try {
+      const [locked] = await tx.$queryRaw<{ id: string }[]>`SELECT "id" FROM "Project" WHERE "id" = ${projectId} FOR UPDATE NOWAIT`;
+      if (!locked) throw notFound("Project");
+      await tx.$queryRaw`SELECT "userId" FROM "ProjectMember" WHERE "projectId" = ${projectId} AND "userId" = ${user.id} FOR SHARE NOWAIT`;
+      await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${user.id} FOR SHARE NOWAIT`;
+      if (input.verticalId) await tx.$queryRaw`SELECT "id" FROM "Project" WHERE "id" = ${input.verticalId} FOR SHARE NOWAIT`;
+    } catch (error) {
+      const failure = error as { code?: string; meta?: { code?: string } } | null;
+      if (failure?.code === "P2010" && failure.meta?.code === "55P03") {
+        throw new ApiError(409, "Project, membership or vertical is changing. Reload and try again.");
+      }
+      throw error;
+    }
+    const actor = await tx.user.findUnique({ where: { id: user.id }, select: { orgRole: true, workspaceId: true, deactivatedAt: true, emailVerifiedAt: true } });
+    if (!actor || actor.deactivatedAt || !actor.emailVerifiedAt) throw notFound("Project");
+    const fresh = await projectAccess({ ...user, orgRole: actor.orgRole }, projectId, { write: true, tx });
+    if (actor.workspaceId !== fresh.project.workspaceId) throw notFound("Project");
+    requireManage(fresh);
+    if (fresh.project.isVertical && input.name !== undefined && !isAdmin(actor)) throw new ApiError(403, "Only Admins rename verticals.");
+    if (fresh.project.updatedAt.getTime() !== a.project.updatedAt.getTime()
+      || fresh.project.name !== a.project.name || fresh.project.description !== a.project.description
+      || fresh.project.verticalId !== a.project.verticalId || fresh.project.isVertical !== a.project.isVertical) {
+      throw new ApiError(409, "This project changed; reload before saving.");
+    }
+    if (input.verticalId !== undefined) {
+      if (fresh.project.isVertical || fresh.project.typeId !== WORKSTREAM_PROJECT) throw new ApiError(400, "Only delivery projects can have a vertical.");
+      if (input.verticalId) {
+        // project-lookup-ok: classification vocabulary is checked under a row lock in the actor's workspace; it grants no board access.
+        const vertical = await tx.project.findFirst({ where: { id: input.verticalId, workspaceId: fresh.project.workspaceId, typeId: WORKSTREAM_PROJECT, isVertical: true, archivedAt: null, deletedAt: null }, select: { id: true } });
+        if (!vertical) throw new ApiError(400, "Choose an active vertical in this workspace.");
+      }
+    }
     await tx.project.update({ where: { id: projectId }, data: input });
-    await logAction(tx, { actorId: user.id, projectId, targetType: "project", targetId: projectId, action: "project.updated", before: { name: a.project.name, description: a.project.description, verticalId: a.project.verticalId }, after: input });
+    await logAction(tx, { actorId: user.id, projectId, targetType: "project", targetId: projectId, action: "project.updated", before: { name: fresh.project.name, description: fresh.project.description, verticalId: fresh.project.verticalId }, after: input });
   });
 }
 

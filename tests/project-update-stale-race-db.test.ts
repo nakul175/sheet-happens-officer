@@ -122,3 +122,44 @@ it('updates an eligible project once with an accurate before image', async () =>
   expect(action.beforeState).toMatchObject({ name: prefix });
   completed.push('eligible-control');
 });
+
+it('returns a retryable conflict for a locked project, then updates once', async () => {
+  const id = await fixture();
+  let reached!: () => void, release!: () => void;
+  const atLock = new Promise<void>(resolve => { reached = resolve; });
+  const held = new Promise<void>(resolve => { release = resolve; });
+  const blocker = transact(async tx => {
+    await tx.$queryRaw`SELECT "id" FROM "Project" WHERE "id" = ${id} FOR UPDATE`;
+    reached(); await held;
+  });
+  const safety = setTimeout(() => release(), 15_000);
+  try {
+    await atLock;
+    await expect(updateProject(admin, id, { name: 'Updated project' })).rejects.toMatchObject({ status: 409 });
+    expect((await db.project.findUniqueOrThrow({ where: { id } })).name).toBe(prefix);
+  } finally { clearTimeout(safety); release(); await blocker; }
+  await updateProject(admin, id, { name: 'Updated project' });
+  expect(await db.actionLog.count({ where: { projectId: id, action: 'project.updated' } })).toBe(1);
+  completed.push('locked-project-retry');
+}, 20_000);
+
+it('returns a retryable conflict for a changing vertical, then links it once', async () => {
+  const id = await fixture();
+  const vertical = await db.project.create({ data: { workspaceId, name: prefix + '-vertical-lock', isVertical: true } }); projects.push(vertical.id);
+  let reached!: () => void, release!: () => void;
+  const atLock = new Promise<void>(resolve => { reached = resolve; });
+  const held = new Promise<void>(resolve => { release = resolve; });
+  const blocker = transact(async tx => {
+    await tx.$queryRaw`SELECT "id" FROM "Project" WHERE "id" = ${vertical.id} FOR UPDATE`;
+    reached(); await held;
+  });
+  const safety = setTimeout(() => release(), 15_000);
+  try {
+    await atLock;
+    await expect(updateProject(leader, id, { verticalId: vertical.id })).rejects.toMatchObject({ status: 409 });
+    expect((await db.project.findUniqueOrThrow({ where: { id } })).verticalId).toBeNull();
+  } finally { clearTimeout(safety); release(); await blocker; }
+  await updateProject(leader, id, { verticalId: vertical.id });
+  expect((await db.project.findUniqueOrThrow({ where: { id } })).verticalId).toBe(vertical.id);
+  completed.push('locked-vertical-retry');
+}, 20_000);
