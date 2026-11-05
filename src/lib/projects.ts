@@ -33,8 +33,30 @@ export async function classifyProject(user: Actor, projectId: string, isVertical
   // project-lookup-ok: count references to the already-authorized workspace board to prevent dangling classifications.
   if (!isVertical && await db.project.count({ where: { verticalId: projectId } })) throw new ApiError(409, "Reclassify linked delivery projects before changing this vertical board.");
   await db.$transaction(async tx => {
+    try {
+      const [locked] = await tx.$queryRaw<{ id: string }[]>`SELECT "id" FROM "Project" WHERE "id" = ${projectId} FOR UPDATE NOWAIT`;
+      if (!locked) throw notFound("Project");
+      await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${user.id} FOR SHARE NOWAIT`;
+    } catch (error) {
+      const failure = error as { code?: string; meta?: { code?: string } } | null;
+      if (failure?.code === "P2010" && failure.meta?.code === "55P03") {
+        throw new ApiError(409, "Project or account is changing. Reload and try again.");
+      }
+      throw error;
+    }
+    const actor = await tx.user.findUnique({ where: { id: user.id }, select: { orgRole: true, workspaceId: true, deactivatedAt: true, emailVerifiedAt: true } });
+    if (!actor || actor.deactivatedAt || !actor.emailVerifiedAt) throw notFound("Project");
+    const fresh = await projectAccess({ ...user, orgRole: actor.orgRole }, projectId, { write: true, tx });
+    if (actor.workspaceId !== fresh.project.workspaceId) throw notFound("Project");
+    if (!isAdmin(actor)) throw new ApiError(403, "Only Admins classify vertical boards.");
+    if (fresh.project.typeId !== WORKSTREAM_PROJECT) throw new ApiError(400, "Deals cannot become vertical boards.");
+    if (fresh.project.isVertical !== a.project.isVertical) throw new ApiError(409, "Project classification changed. Reload and try again.");
+    // project-lookup-ok: count references to the locked workspace board before removing its vertical classification.
+    if (!isVertical && await tx.project.count({ where: { verticalId: projectId } })) {
+      throw new ApiError(409, "Reclassify linked delivery projects before changing this vertical board.");
+    }
     await tx.project.update({ where: { id: projectId }, data: { isVertical, ...(isVertical ? { verticalId: null } : {}) } });
-    await logAction(tx, { actorId: user.id, projectId, targetType: "project", targetId: projectId, action: "project.classified", before: { isVertical: a.project.isVertical, verticalId: a.project.verticalId }, after: { isVertical, ...(isVertical ? { verticalId: null } : {}) } });
+    await logAction(tx, { actorId: user.id, projectId, targetType: "project", targetId: projectId, action: "project.classified", before: { isVertical: fresh.project.isVertical, verticalId: fresh.project.verticalId }, after: { isVertical, ...(isVertical ? { verticalId: null } : {}) } });
   });
 }
 

@@ -106,3 +106,23 @@ it('classifies an eligible project and records the prior state', async () => {
   expect(action.beforeState).toMatchObject({ isVertical: false });
   completed.push('eligible-control');
 });
+
+it('returns a retryable conflict for a locked board, then classifies once', async () => {
+  const id = await fixture(false);
+  let reached!: () => void, release!: () => void;
+  const atLock = new Promise<void>(resolve => { reached = resolve; });
+  const held = new Promise<void>(resolve => { release = resolve; });
+  const blocker = transact(async tx => {
+    await tx.$queryRaw`SELECT "id" FROM "Project" WHERE "id" = ${id} FOR UPDATE`;
+    reached(); await held;
+  });
+  const safety = setTimeout(() => release(), 15_000);
+  try {
+    await atLock;
+    await expect(classifyProject(admin, id, true)).rejects.toMatchObject({ status: 409 });
+    expect((await db.project.findUniqueOrThrow({ where: { id } })).isVertical).toBe(false);
+  } finally { clearTimeout(safety); release(); await blocker; }
+  await classifyProject(admin, id, true);
+  expect(await db.actionLog.count({ where: { projectId: id, action: 'project.classified' } })).toBe(1);
+  completed.push('locked-board-retry');
+}, 20_000);
