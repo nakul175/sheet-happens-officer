@@ -13,7 +13,8 @@ const prefix = 'project-leader-change-stale-' + randomUUID();
 const admin = { id: prefix + '-admin', orgRole: 'ADMIN' as const };
 const leader = { id: prefix + '-leader', orgRole: 'MEMBER' as const };
 const candidate = { id: prefix + '-candidate', orgRole: 'MEMBER' as const };
-const people = [admin, leader, candidate], projects: string[] = [], completed: string[] = [];
+const taker = { id: prefix + '-taker', orgRole: 'MEMBER' as const };
+const people = [admin, leader, candidate, taker], projects: string[] = [], completed: string[] = [];
 const transact = db.$transaction.bind(db);
 let workspaceId: string, sentinelId: string, safe = false;
 
@@ -50,8 +51,12 @@ afterAll(async () => {
 });
 async function fixture() {
   const project = await db.project.create({ data: { workspaceId, name: prefix + '-' + randomUUID() } }); projects.push(project.id);
-  await db.projectMember.createMany({ data: [{ projectId: project.id, userId: leader.id, role: 'LEADER' }, { projectId: project.id, userId: candidate.id, role: 'EDITOR' }] });
+  await db.projectMember.createMany({ data: [{ projectId: project.id, userId: leader.id, role: 'LEADER' }, { projectId: project.id, userId: candidate.id, role: 'EDITOR' }, { projectId: project.id, userId: taker.id, role: 'EDITOR' }] });
   return project.id;
+}
+async function assignedTask(projectId: string) {
+  const section = await db.section.create({ data: { projectId, name: 'To do', position: 0 } });
+  return db.task.create({ data: { workspaceId, projectId, sectionId: section.id, title: 'Leader work', assigneeId: leader.id, createdById: leader.id } });
 }
 function pauseBeforeTransaction() {
   let release!: () => void, arrived = false;
@@ -137,3 +142,42 @@ it('returns a retryable conflict on a locked project, then changes the Leader on
   expect(await db.actionLog.count({ where: { projectId: id, action: 'project.leader_changed' } })).toBe(1);
   completed.push('locked-project-retry');
 }, 20_000);
+
+it('requires a handover choice when a task appears after removal preflight', async () => {
+  const id = await fixture(), pause = pauseBeforeTransaction();
+  const pending = Promise.allSettled([changeLeader(admin, id, { newLeaderId: candidate.id, previousRole: 'REMOVE' })]);
+  try {
+    await pause.ready(); const task = await assignedTask(id); pause.release();
+    expect(await pending).toEqual([expect.objectContaining({ status: 'rejected', reason: expect.objectContaining({ status: 409 }) })]);
+    expect(await roles(id)).toMatchObject({ [leader.id]: 'LEADER', [candidate.id]: 'EDITOR' });
+    expect((await db.task.findUniqueOrThrow({ where: { id: task.id } })).assigneeId).toBe(leader.id);
+    completed.push('new-task-requires-choice');
+  } finally { pause.release(); await pending; }
+});
+it('honours the selected handover taker for a task appearing after preflight', async () => {
+  const id = await fixture(), pause = pauseBeforeTransaction();
+  const pending = Promise.allSettled([changeLeader(admin, id, { newLeaderId: candidate.id, previousRole: 'REMOVE', handoverTo: taker.id })]);
+  try {
+    await pause.ready(); const task = await assignedTask(id); pause.release();
+    expect(await pending).toEqual([expect.objectContaining({ status: 'fulfilled' })]);
+    expect(await roles(id)).toMatchObject({ [candidate.id]: 'LEADER', [taker.id]: 'EDITOR' });
+    expect((await db.task.findUniqueOrThrow({ where: { id: task.id } })).assigneeId).toBe(taker.id);
+    completed.push('new-task-selected-taker');
+  } finally { pause.release(); await pending; }
+});
+it('hands work to the successor when the previous Leader becomes Viewer', async () => {
+  const id = await fixture(), task = await assignedTask(id);
+  await changeLeader(admin, id, { newLeaderId: candidate.id, previousRole: 'VIEWER', handoverTo: candidate.id });
+  expect(await roles(id)).toMatchObject({ [leader.id]: 'VIEWER', [candidate.id]: 'LEADER' });
+  expect((await db.task.findUniqueOrThrow({ where: { id: task.id } })).assigneeId).toBe(candidate.id);
+  completed.push('viewer-handover');
+});
+it('removes the previous Leader and hands work to a chosen Editor', async () => {
+  const id = await fixture(), task = await assignedTask(id);
+  await changeLeader(admin, id, { newLeaderId: candidate.id, previousRole: 'REMOVE', handoverTo: taker.id });
+  const seats = await roles(id);
+  expect(seats[leader.id]).toBeUndefined();
+  expect(seats).toMatchObject({ [candidate.id]: 'LEADER', [taker.id]: 'EDITOR' });
+  expect((await db.task.findUniqueOrThrow({ where: { id: task.id } })).assigneeId).toBe(taker.id);
+  completed.push('remove-handover');
+});
