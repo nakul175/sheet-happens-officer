@@ -198,9 +198,32 @@ export async function unarchiveProject(user: Actor, projectId: string) {
   requireManage(a);
   if (a.project.isVertical && !isAdmin(user)) throw new ApiError(403, "Only Admins reactivate verticals.");
   if (!a.project.archivedAt) throw new ApiError(409, "This project is not archived.");
+  const expectedArchivedAt = a.project.archivedAt;
   await db.$transaction(async (tx) => {
+    try {
+      const [locked] = await tx.$queryRaw<{ id: string }[]>`SELECT "id" FROM "Project" WHERE "id" = ${projectId} FOR UPDATE NOWAIT`;
+      if (!locked) throw notFound("Project");
+      await tx.$queryRaw`SELECT "userId" FROM "ProjectMember" WHERE "projectId" = ${projectId} AND "userId" = ${user.id} FOR SHARE NOWAIT`;
+      await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${user.id} FOR SHARE NOWAIT`;
+    } catch (error) {
+      const failure = error as { code?: string; meta?: { code?: string } } | null;
+      if (failure?.code === "P2010" && failure.meta?.code === "55P03") {
+        throw new ApiError(409, "Project or membership is changing. Reload and try again.");
+      }
+      throw error;
+    }
+    const actor = await tx.user.findUnique({ where: { id: user.id }, select: { orgRole: true, workspaceId: true, deactivatedAt: true, emailVerifiedAt: true } });
+    if (!actor || actor.deactivatedAt || !actor.emailVerifiedAt) throw notFound("Project");
+    const fresh = await projectAccess({ ...user, orgRole: actor.orgRole }, projectId, { tx });
+    if (actor.workspaceId !== fresh.project.workspaceId) throw notFound("Project");
+    requireManage(fresh);
+    if (fresh.project.isVertical && !isAdmin(actor)) throw new ApiError(403, "Only Admins reactivate verticals.");
+    if (!fresh.project.archivedAt) throw new ApiError(409, "This project is not archived.");
+    if (fresh.project.archivedAt.getTime() !== expectedArchivedAt.getTime()) {
+      throw new ApiError(409, "This project changed; reload before reactivating.");
+    }
     await tx.project.update({ where: { id: projectId }, data: { archivedAt: null } });
-    await logAction(tx, { actorId: user.id, projectId, targetType: "project", targetId: projectId, action: "project.unarchived", before: { archivedAt: a.project.archivedAt!.toISOString() }, after: { archivedAt: null } });
+    await logAction(tx, { actorId: user.id, projectId, targetType: "project", targetId: projectId, action: "project.unarchived", before: { archivedAt: fresh.project.archivedAt.toISOString() }, after: { archivedAt: null } });
   });
 }
 

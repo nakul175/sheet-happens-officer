@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { db } from '@/lib/db';
 import { getOrCreateWorkspace } from '@/lib/workspace';
-import { unarchiveProject } from '@/lib/projects';
+import { archiveProject, unarchiveProject } from '@/lib/projects';
 import type { Tx } from '@/lib/access';
 import { assertLocalFixture } from './e2e/local-fixture-guard';
 vi.mock('next/server', () => ({ connection: vi.fn() }));
@@ -43,7 +43,7 @@ afterAll(async () => {
   }
 });
 async function fixture() {
-  const project = await db.project.create({ data: { workspaceId, name: prefix, archivedAt: new Date() } }); projects.push(project.id);
+  const project = await db.project.create({ data: { workspaceId, name: prefix, archivedAt: new Date('2025-01-01T00:00:00Z') } }); projects.push(project.id);
   await db.projectMember.create({ data: { projectId: project.id, userId: leader.id, role: 'LEADER' } });
   return project.id;
 }
@@ -109,3 +109,39 @@ it('unarchives an eligible project once and logs the actual prior archive time',
   expect(action.beforeState).toMatchObject({ archivedAt: before.archivedAt!.toISOString() });
   completed.push('eligible-control');
 });
+
+it('rejects a stale request after a new archive event', async () => {
+  const id = await fixture(), pause = pauseBeforeTransaction();
+  const pending = Promise.allSettled([unarchiveProject(leader, id)]);
+  try {
+    await pause.ready();
+    await unarchiveProject(leader, id);
+    await archiveProject(leader, id);
+    const current = (await db.project.findUniqueOrThrow({ where: { id } })).archivedAt;
+    pause.release();
+    expect(await pending).toEqual([expect.objectContaining({ status: 'rejected', reason: expect.objectContaining({ status: 409 }) })]);
+    expect((await db.project.findUniqueOrThrow({ where: { id } })).archivedAt).toEqual(current);
+    expect(await db.actionLog.count({ where: { projectId: id, action: 'project.unarchived' } })).toBe(1);
+    completed.push('new-archive-event');
+  } finally { pause.release(); await pending; }
+});
+
+it('returns a retryable conflict for a locked project, then unarchives once', async () => {
+  const id = await fixture();
+  let reached!: () => void, release!: () => void;
+  const atLock = new Promise<void>(resolve => { reached = resolve; });
+  const held = new Promise<void>(resolve => { release = resolve; });
+  const blocker = transact(async tx => {
+    await tx.$queryRaw`SELECT "id" FROM "Project" WHERE "id" = ${id} FOR UPDATE`;
+    reached(); await held;
+  });
+  const safety = setTimeout(() => release(), 15_000);
+  try {
+    await atLock;
+    await expect(unarchiveProject(admin, id)).rejects.toMatchObject({ status: 409 });
+    expect((await db.project.findUniqueOrThrow({ where: { id } })).archivedAt).not.toBeNull();
+  } finally { clearTimeout(safety); release(); await blocker; }
+  await unarchiveProject(admin, id);
+  expect(await db.actionLog.count({ where: { projectId: id, action: 'project.unarchived' } })).toBe(1);
+  completed.push('locked-project-retry');
+}, 20_000);
