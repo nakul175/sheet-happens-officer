@@ -63,8 +63,10 @@ test('SHO-REG-PROJECTS-02: leader transfer, denied candidates, deactivation and 
   await dialog.getByRole('button', { name: 'Change leader' }).click();
   await expect.poll(async () => (await detail()).members.find(m => m.role === 'LEADER')?.userId).toBe(viewer.id);
   await page.reload();
-  await expect(page.getByText('You: Editor')).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Change leader…' })).toHaveCount(0);
+  const roster = page.locator('.settings-members');
+  await expect(roster.getByText(viewer.name, { exact: true }).locator('xpath=../..').getByText('Leader', { exact: true })).toBeVisible();
+  // The Super Admin retains effective management access; the membership chip is the stored role.
+  await expect(roster.getByText(admin.user.name, { exact: true }).locator('xpath=../..').getByText('Editor', { exact: true })).toBeVisible();
   await test.info().attach('leader-transfer-screen', { body: await page.screenshot({ fullPage: true }), contentType: 'image/png' });
   await expectLeader(viewer.id);
 
