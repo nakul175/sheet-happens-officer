@@ -28,7 +28,7 @@
 @media (max-width:900px){
 .wrap{display:block}
 .brandtop{display:flex;align-items:center;gap:10px;font-size:18px;font-weight:600;padding:20px 16px 0}
-.brandtop img{width:30px;height:30px}
+.brandtop img{width:48px;height:48px;flex:none}
 .brand{display:none!important}
 .hero{padding:28px 16px 8px;max-width:none;gap:12px}
 .headline{font-size:34px}
@@ -41,3 +41,6 @@
 .tick{display:none}
 .lh{font-size:11px}
 }
+
+.mascot{width:160px;height:160px;object-fit:contain}
+@media (max-width:900px){.mascot{width:96px;height:96px}}

@@ -135,7 +135,7 @@ export function Shell({ user, children }: { user: Me; children: React.ReactNode 
         <a className="skip" href="#main" onClick={(e) => { e.preventDefault(); const m = document.getElementById("main"); m?.focus(); m?.scrollIntoView(); }}>Skip to content</a>
         {open && <div className="veil" onClick={() => setMenu(null)} />}
         <aside ref={drawer} className={`side${open ? " open" : ""}`} aria-label="Main">
-          <Link href="/" className="brand"><Image src="/logo-icon.svg" alt="" width={32} height={32} unoptimized />Sheet Happens Officer</Link>
+          <Link href="/" className="brand"><Image src="/little-bot-heroes/sho-head.png" className="aplyd-bot aplyd-bot--on-blue" alt="" width={48} height={48} unoptimized />Sheet Happens Officer</Link>
           <nav className="nav">
             {items.map(([href, label]) => (
               <Link key={href} href={href} aria-current={here(href) ? "page" : undefined}>{label}</Link>
@@ -150,7 +150,7 @@ export function Shell({ user, children }: { user: Me; children: React.ReactNode 
         <div className="main">
           <header className="top">
             <button className="burger" aria-label="Open menu" onClick={() => setMenu(path)}>☰</button>
-            <span className="top-brand"><Image src="/logo-icon.svg" alt="" width={24} height={24} unoptimized />SHO</span>
+            <span className="top-brand"><Image src="/little-bot-heroes/sho-head.png" className="aplyd-bot" alt="" width={48} height={48} unoptimized />SHO</span>
             <span className="grow" />
             <SearchButton />
             <NewTaskButton />
