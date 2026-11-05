@@ -447,18 +447,34 @@ export async function setApprover(user: Actor, id: string, approverId: string | 
     throw new ApiError(403, "Only the Leader, an Admin or the task's creator can set the approver.");
   }
   return db.$transaction(async (tx) => {
-    if (approverId) {
-      if (approverId === t.assigneeId && !isAwaiting) throw new ApiError(400, "The approver cannot be the assignee.");
-      if (approverId === t.approverId) throw new ApiError(409, "That person is already the approver.");
-      await requireWorker(tx, t.projectId, approverId, "The approver");
+    const [locked] = await tx.$queryRaw<{ id: string }[]>`SELECT "id" FROM "Task" WHERE "id" = ${id} FOR UPDATE`;
+    if (!locked) throw notFound("Task");
+    const snapshot = await tx.task.findUnique({ where: { id }, select: { projectId: true, assigneeId: true, approverId: true } });
+    if (!snapshot) throw notFound("Task");
+    await lockTaskProjectAndPeople(tx, snapshot.projectId, [user.id, approverId, snapshot.assigneeId, snapshot.approverId]);
+    const actor = await tx.user.findUnique({ where: { id: user.id }, select: { orgRole: true, workspaceId: true, deactivatedAt: true, emailVerifiedAt: true } });
+    if (!actor || actor.deactivatedAt || !actor.emailVerifiedAt) throw notFound("Task");
+    const { t: current, a: fresh } = await guardVersion({ ...user, orgRole: actor.orgRole }, id, expectedUpdatedAt, { tx });
+    if (actor.workspaceId !== fresh.project.workspaceId) throw notFound("Task");
+    if (current.parentId) throw new ApiError(400, "Subtasks do not have an approver.");
+    if (user.id === current.assigneeId) throw new ApiError(403, "The assignee cannot change their own task's approver.");
+    const currentlyAwaiting = awaiting(current);
+    if (currentlyAwaiting && fresh.role !== "LEADER") throw new ApiError(403, "Only the Leader or an Admin can change the approver while a task awaits approval.");
+    if (!currentlyAwaiting && fresh.role !== "LEADER" && current.createdById !== user.id) {
+      throw new ApiError(403, "Only the Leader, an Admin or the task's creator can set the approver.");
     }
-    const data = isAwaiting && approverId ? { approverId, assigneeId: approverId } : { approverId };
-    const row = await tx.task.update({ where: { id }, data });
-    await notify(tx, [approverId], isAwaiting ? "SENT_FOR_APPROVAL" : "APPROVER_NAMED", { actorId: user.id, taskId: id, projectId: t.projectId, data: { title: t.title } });
-    if (isAwaiting && approverId) await notify(tx, [t.assigneeId], "REMOVED_AS_ASSIGNEE", { actorId: user.id, taskId: id, projectId: t.projectId, data: { title: t.title } });
-    await logAction(tx, { actorId: user.id, projectId: t.projectId, targetType: "task", targetId: id, action: "task.approver_changed", before: { approverId: t.approverId, assigneeId: t.assigneeId }, after: data });
+    if (approverId) {
+      if (approverId === current.assigneeId && !currentlyAwaiting) throw new ApiError(400, "The approver cannot be the assignee.");
+      if (approverId === current.approverId) throw new ApiError(409, "That person is already the approver.");
+      await requireWorker(tx, current.projectId, approverId, "The approver");
+    }
+    const data = currentlyAwaiting && approverId ? { approverId, assigneeId: approverId } : { approverId };
+    const row = await tx.task.update({ where: { id }, data: { ...data, updatedAt: new Date(Math.max(Date.now(), current.updatedAt.getTime() + 1)) } });
+    await notify(tx, [approverId], currentlyAwaiting ? "SENT_FOR_APPROVAL" : "APPROVER_NAMED", { actorId: user.id, taskId: id, projectId: current.projectId, data: { title: current.title } });
+    if (currentlyAwaiting && approverId) await notify(tx, [current.assigneeId], "REMOVED_AS_ASSIGNEE", { actorId: user.id, taskId: id, projectId: current.projectId, data: { title: current.title } });
+    await logAction(tx, { actorId: user.id, projectId: current.projectId, targetType: "task", targetId: id, action: "task.approver_changed", before: { approverId: current.approverId, assigneeId: current.assigneeId }, after: data });
     return row.updatedAt;
-  });
+  }, { isolationLevel: "ReadCommitted" });
 }
 
 export async function sendForApproval(user: Actor, id: string) {

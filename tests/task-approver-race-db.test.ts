@@ -30,7 +30,7 @@ beforeAll(async () => {
 afterEach(async () => {
   vi.restoreAllMocks();
   if (safe) await Promise.all([
-    db.user.update({ where: { id: admin.id }, data: { orgRole: 'ADMIN' } }),
+    db.user.update({ where: { id: admin.id }, data: { orgRole: 'ADMIN', deactivatedAt: null } }),
     db.user.update({ where: { id: recipient.id }, data: { deactivatedAt: null } }),
   ]);
 });
@@ -94,11 +94,22 @@ it('rejects a project archived after approver preflight', async () => {
   } finally { pause.release(); await pending; }
 });
 
+it('rejects an actor deactivated after approver preflight', async () => {
+  const f = await fixture(), pause = pauseBeforeTransactions();
+  const pending = Promise.allSettled([setApprover(admin, f.taskId, recipient.id, f.version)]);
+  try {
+    await pause.ready(); await db.user.update({ where: { id: admin.id }, data: { deactivatedAt: new Date() } }); pause.release();
+    expect(await pending).toEqual([expect.objectContaining({ status: 'rejected', reason: expect.objectContaining({ status: 404 }) })]);
+    expect((await db.task.findUniqueOrThrow({ where: { id: f.taskId } })).approverId).toBeNull();
+    completed.push('deactivated-actor');
+  } finally { pause.release(); await pending; }
+});
+
 it('rejects an outdated task version after approver preflight', async () => {
   const f = await fixture(), pause = pauseBeforeTransactions();
   const pending = Promise.allSettled([setApprover(leader, f.taskId, recipient.id, f.version)]);
   try {
-    await pause.ready(); await db.task.update({ where: { id: f.taskId }, data: { priority: 'HIGH' } }); pause.release();
+    await pause.ready(); await db.task.update({ where: { id: f.taskId }, data: { priority: 'HIGH', updatedAt: new Date(new Date(f.version).getTime() + 1) } }); pause.release();
     expect(await pending).toEqual([expect.objectContaining({ status: 'rejected', reason: expect.objectContaining({ status: 409 }) })]);
     const row = await db.task.findUniqueOrThrow({ where: { id: f.taskId } });
     expect({ approver: row.approverId, priority: row.priority }).toEqual({ approver: null, priority: 'HIGH' });
@@ -137,4 +148,35 @@ it('sets an eligible approver once with a matching action', async () => {
   expect((await db.task.findUniqueOrThrow({ where: { id: f.taskId } })).approverId).toBe(recipient.id);
   expect(await db.actionLog.count({ where: { projectId: f.projectId, targetId: f.taskId, action: 'task.approver_changed' } })).toBe(1);
   completed.push('eligible-control');
+});
+
+it('replaces an awaiting approver and holder together', async () => {
+  const f = await fixture();
+  await db.task.update({ where: { id: f.taskId }, data: { approverId: recipient.id, assigneeId: recipient.id } });
+  const version = (await db.task.findUniqueOrThrow({ where: { id: f.taskId } })).updatedAt.toISOString();
+  await setApprover(leader, f.taskId, editor.id, version);
+  const row = await db.task.findUniqueOrThrow({ where: { id: f.taskId } });
+  expect({ approver: row.approverId, holder: row.assigneeId }).toEqual({ approver: editor.id, holder: editor.id });
+  expect(await db.actionLog.count({ where: { projectId: f.projectId, targetId: f.taskId, action: 'task.approver_changed' } })).toBe(1);
+  completed.push('awaiting-holder-control');
+});
+
+it('refuses a locked approver account then succeeds after retry', async () => {
+  const f = await fixture();
+  let reached!: () => void, release!: () => void;
+  const atLock = new Promise<void>((resolve) => { reached = resolve; });
+  const held = new Promise<void>((resolve) => { release = resolve; });
+  const blocker = transact(async (tx) => {
+    await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${recipient.id} FOR UPDATE`;
+    reached(); await held;
+  });
+  try {
+    await atLock;
+    await expect(setApprover(leader, f.taskId, recipient.id, f.version)).rejects.toMatchObject({ status: 409 });
+    expect((await db.task.findUniqueOrThrow({ where: { id: f.taskId } })).approverId).toBeNull();
+  } finally { release(); await blocker; }
+  await setApprover(leader, f.taskId, recipient.id, f.version);
+  expect((await db.task.findUniqueOrThrow({ where: { id: f.taskId } })).approverId).toBe(recipient.id);
+  expect(await db.actionLog.count({ where: { projectId: f.projectId, targetId: f.taskId, action: 'task.approver_changed' } })).toBe(1);
+  completed.push('locked-approver-retry');
 });
