@@ -298,3 +298,57 @@ it('still creates a deal note for its current Editor with one activity event', a
   expect(await db.actionLog.count({ where: { targetType: 'note', targetId: created.id, action: 'note.created' } })).toBe(1);
   completed.push('create-editor-positive');
 });
+
+it('refuses note creation if the linked deal was archived during preflight', async () => {
+  const { project, note } = await seed();
+  const organisationId = note.organisationId;
+  const pause = pauseBeforeWrite(1);
+  const pending = Promise.allSettled([createNote(author, organisationId, noteInput(project.id))]);
+  try {
+    await pause.ready();
+    await db.project.update({ where: { id: project.id }, data: { archivedAt: new Date() } });
+    const before = await db.note.count({ where: { organisationId } });
+    pause.release();
+    expect(await pending).toEqual([expect.objectContaining({ status: 'rejected', reason: expect.objectContaining({ status: 409 }) })]);
+    expect(await db.note.count({ where: { organisationId } })).toBe(before);
+    completed.push('create-archived-deal-after-preflight');
+  } finally { pause.release(); await pending; }
+}, 20_000);
+
+it('returns a retryable conflict if the organisation changes, then creates once', async () => {
+  const { project, note } = await seed();
+  let release!: () => void, locked = false;
+  const held = new Promise<void>((resolve) => { release = resolve; });
+  const owner = transact(async (tx) => {
+    await tx.$queryRaw`SELECT "id" FROM "Organisation" WHERE "id" = ${note.organisationId} FOR UPDATE`;
+    locked = true;
+    await held;
+  }, { timeout: 15_000 });
+  const ownerResult = Promise.allSettled([owner]);
+  try {
+    await vi.waitFor(() => expect(locked).toBe(true), { timeout: 5000 });
+    const before = await db.note.count({ where: { organisationId: note.organisationId } });
+    await expect(createNote(author, note.organisationId, noteInput(project.id))).rejects.toMatchObject({ status: 409 });
+    expect(await db.note.count({ where: { organisationId: note.organisationId } })).toBe(before);
+    completed.push('create-org-lock-conflict');
+  } finally { release(); expect(await ownerResult).toEqual([{ status: 'fulfilled', value: undefined }]); }
+  const created = await createNote(author, note.organisationId, noteInput(project.id));
+  noteIds.push(created.id);
+  expect((await db.note.findUniqueOrThrow({ where: { id: created.id } })).removedAt).toBeNull();
+});
+
+it('rolls note creation back if its activity write fails, then retries', async () => {
+  const { project, note } = await seed();
+  const before = await db.note.count({ where: { organisationId: note.organisationId } });
+  vi.spyOn(db, '$transaction').mockImplementationOnce((async (callback: (tx: Tx) => Promise<unknown>) => transact(async (tx) => {
+    const create = vi.spyOn(tx.actionLog, 'create').mockRejectedValueOnce(Error('NOTE_CREATION_ACTIVITY_FAILURE'));
+    try { return await callback(tx); } finally { create.mockRestore(); }
+  })) as typeof db.$transaction);
+  await expect(createNote(author, note.organisationId, noteInput(project.id))).rejects.toThrow('NOTE_CREATION_ACTIVITY_FAILURE');
+  vi.restoreAllMocks();
+  expect(await db.note.count({ where: { organisationId: note.organisationId } })).toBe(before);
+  const created = await createNote(author, note.organisationId, noteInput(project.id));
+  noteIds.push(created.id);
+  expect(await db.actionLog.count({ where: { targetType: 'note', targetId: created.id, action: 'note.created' } })).toBe(1);
+  completed.push('create-activity-rollback-retry');
+});

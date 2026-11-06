@@ -208,7 +208,6 @@ export async function createNote(user: Actor, orgId: string, input: NoteInput) {
   const text = input.text.trim();
   if (!text) throw new ApiError(400, "Write what happened.");
   if (!/^\d{4}-\d{2}-\d{2}$/.test(input.date) || Number.isNaN(Date.parse(`${input.date}T00:00:00Z`))) throw new ApiError(400, "Use a date like 2026-10-31.");
-  const u = await me(user);
   if (input.projectId) {
     const a = await projectAccess(user, input.projectId); // non-members get "not found"
     if (a.project.typeId !== WORKSTREAM_DEAL) throw new ApiError(400, "Notes can only be linked to a deal.");
@@ -221,13 +220,48 @@ export async function createNote(user: Actor, orgId: string, input: NoteInput) {
     if (ok !== contactIds.length) throw new ApiError(400, "Choose contacts of this organisation.");
   }
   return db.$transaction(async (tx) => {
+    let currentOrg;
+    let account;
+    try {
+      await tx.$queryRaw`SELECT "id" FROM "Organisation" WHERE "id" = ${orgId} FOR SHARE NOWAIT`;
+      await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${user.id} FOR SHARE NOWAIT`;
+      currentOrg = await tx.organisation.findUnique({ where: { id: orgId } });
+      account = await tx.user.findUnique({ where: { id: user.id }, select: { workspaceId: true, orgRole: true, deactivatedAt: true, emailVerifiedAt: true } });
+      if (!currentOrg || !account || !isActive(account) || currentOrg.workspaceId !== account.workspaceId) throw notFound("Organisation");
+      const currentActor = { ...user, orgRole: account.orgRole };
+      requireCrm(currentActor);
+      if (currentOrg.archivedAt) throw new ApiError(409, "This organisation is archived.");
+      if (input.projectId) {
+        await tx.$queryRaw`SELECT "id" FROM "Project" WHERE "id" = ${input.projectId} FOR SHARE NOWAIT`;
+        await tx.$queryRaw`SELECT "userId" FROM "ProjectMember" WHERE "projectId" = ${input.projectId} AND "userId" = ${user.id} FOR SHARE NOWAIT`;
+        const access = await projectAccess(currentActor, input.projectId, { tx, write: true });
+        if (access.project.workspaceId !== account.workspaceId || access.project.typeId !== WORKSTREAM_DEAL) throw notFound("Project");
+        await tx.$queryRaw`SELECT "id" FROM "DealParty" WHERE "projectId" = ${input.projectId} AND "organisationId" = ${orgId} FOR SHARE NOWAIT`;
+        if (!await tx.dealParty.findFirst({ where: { projectId: input.projectId, organisationId: orgId } })) {
+          throw new ApiError(400, "That deal does not involve this organisation.");
+        }
+      }
+      for (const contactId of [...contactIds].sort()) {
+        await tx.$queryRaw`SELECT "id" FROM "Contact" WHERE "id" = ${contactId} FOR SHARE NOWAIT`;
+      }
+      if (contactIds.length) {
+        const currentContacts = await tx.contact.count({ where: { id: { in: contactIds }, organisationId: orgId, removedAt: null } });
+        if (currentContacts !== contactIds.length) throw new ApiError(400, "Choose contacts of this organisation.");
+      }
+    } catch (error) {
+      if ((error as { code?: string; meta?: { code?: string } }).code === "P2010" && (error as { meta?: { code?: string } }).meta?.code === "55P03") {
+        throw new ApiError(409, "The note or its access is changing. Reload and try again.");
+      }
+      throw error;
+    }
+    if (!account || !currentOrg) throw notFound("Organisation");
     const n = await tx.note.create({
-      data: { workspaceId: u.workspaceId, organisationId: orgId, projectId: input.projectId ?? null, kind: input.kind, date: new Date(`${input.date}T00:00:00Z`), text, authorId: user.id },
+      data: { workspaceId: account.workspaceId, organisationId: orgId, projectId: input.projectId ?? null, kind: input.kind, date: new Date(`${input.date}T00:00:00Z`), text, authorId: user.id },
     });
     if (contactIds.length) await tx.noteContact.createMany({ data: contactIds.map((contactId) => ({ noteId: n.id, contactId })) });
     await logAction(tx, { actorId: user.id, projectId: null, targetType: "note", targetId: n.id, action: "note.created", after: { kind: input.kind, organisationId: orgId, dealId: input.projectId ?? null } });
     return n;
-  });
+  }, { isolationLevel: "ReadCommitted" });
 }
 
 function presentNotes(rows: Awaited<ReturnType<typeof loadNotes>>, user: Actor, leaderOf: Set<string>) {
