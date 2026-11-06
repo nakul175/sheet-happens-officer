@@ -52,6 +52,8 @@ jobs:
       - name: Node tests for scripts/ci
         run: node --test "scripts/ci/**/*.test.mjs"
       - run: npm ci
+      - name: Native suite logout guard tests
+        run: node --test scripts/native-logout/*.test.mjs
       # APL-2761. Listing loads every story spec without a browser or a server. One file that cannot load (a vitest import)
       # makes Playwright collect 0 tests, so a total of 0 fails here instead of in staging-e2e.
       - name: Playwright collects the story specs
@@ -115,6 +117,19 @@ jobs:
             if [ "${total:-0}" -eq 0 ]; then echo "::error::Playwright collected 0 tests from $f."; exit 1; fi
           done
           npx playwright test "${specs[@]}"
+      - name: Archive reviewed native logout candidate
+        if: success()
+        run: |
+          tar --exclude='.next/cache' -czf sho-native-logout-candidate.tar.gz .next src public vendor package.json package-lock.json next.config.ts tsconfig.json
+          sha256sum sho-native-logout-candidate.tar.gz > sho-native-logout-candidate.sha256
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: sho-native-logout-linux
+          path: |
+            sho-native-logout-candidate.tar.gz
+            sho-native-logout-candidate.sha256
+          retention-days: 7
       - name: Server log (on failure)
         if: failure()
         run: tail -n 200 server.log || true
