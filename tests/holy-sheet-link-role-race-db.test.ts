@@ -40,7 +40,7 @@ beforeAll(async () => {
 
 afterEach(async () => {
   vi.restoreAllMocks();
-  if (safe) await db.user.update({ where: { id: admin.id }, data: { orgRole: "ADMIN" } });
+  if (safe) await db.user.update({ where: { id: admin.id }, data: { orgRole: "ADMIN", deactivatedAt: null } });
 });
 
 afterAll(async () => {
@@ -80,6 +80,39 @@ it("denies a former Admin without a project seat after role demotion during pick
     expect(await db.holySheetLink.count({ where: { projectId, pageId } })).toBe(0);
     completed.push("demoted-admin-denied");
   } finally { pause.release(); await pending; }
+}, 20_000);
+
+it("denies an Admin deactivated after the picker preflight", async () => {
+  const deactivatedPage = randomUUID(), pause = pauseBeforeWrite();
+  const pending = Promise.allSettled([changeDocument(admin, { kind: "projects", id: projectId }, { pageId: deactivatedPage, subject })]);
+  try {
+    await pause.ready();
+    await db.user.update({ where: { id: admin.id }, data: { deactivatedAt: new Date() } });
+    pause.release();
+    expect(await pending).toEqual([expect.objectContaining({ status: "rejected", reason: expect.objectContaining({ status: 404 }) })]);
+    expect(await db.holySheetLink.count({ where: { projectId, pageId: deactivatedPage } })).toBe(0);
+    completed.push("deactivated-admin-denied");
+  } finally { pause.release(); await pending; }
+}, 20_000);
+
+it("returns a retryable conflict while the Admin account role is locked", async () => {
+  const lockedPage = randomUUID();
+  let release!: () => void, reached!: () => void;
+  const held = new Promise<void>((resolve) => { release = resolve; });
+  const atLock = new Promise<void>((resolve) => { reached = resolve; });
+  const blocker = transact(async (tx) => {
+    await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${admin.id} FOR UPDATE`;
+    reached(); await held;
+  });
+  const safety = setTimeout(() => release(), 15_000);
+  try {
+    await atLock;
+    await expect(changeDocument(admin, { kind: "projects", id: projectId }, { pageId: lockedPage, subject })).rejects.toMatchObject({ status: 409 });
+    expect(await db.holySheetLink.count({ where: { projectId, pageId: lockedPage } })).toBe(0);
+  } finally { clearTimeout(safety); release(); await blocker; }
+  await changeDocument(admin, { kind: "projects", id: projectId }, { pageId: lockedPage, subject });
+  expect(await db.holySheetLink.count({ where: { projectId, pageId: lockedPage } })).toBe(1);
+  completed.push("account-lock-retry");
 }, 20_000);
 
 it("allows an active Admin to save the same reference once", async () => {
