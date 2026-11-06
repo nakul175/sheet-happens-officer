@@ -77,9 +77,11 @@ test('SHO-REG-HOME-01 partial: Home cards and My tasks reconcile for owned work'
     await page.screenshot({ path: `${evidenceDir}/home-owned.png`, fullPage: true });
     await summary.getByRole('link', { name: /Open tasks/ }).click();
     await expect(page).toHaveURL(/\/my-tasks$/);
+    const myTasksView = page.locator('.my-tasks-view');
+    await expect(myTasksView.getByRole('heading', { name: 'My tasks' })).toBeVisible();
     for (const label of ['overdue', 'today', 'later'])
-      await expect(page.getByText(`ZZ-TEST ${label} ${fixture}`, { exact: true })).toBeVisible();
-    await expect(page.getByText(`ZZ-TEST completed ${fixture}`, { exact: true })).toHaveCount(0);
+      await expect(myTasksView.getByText(`ZZ-TEST ${label} ${fixture}`, { exact: true })).toBeVisible();
+    await expect(myTasksView.getByText(`ZZ-TEST completed ${fixture}`, { exact: true })).toHaveCount(0);
     writeFileSync(`${evidenceDir}/verification.json`, JSON.stringify({ fixture, actorId, ownedProject, ownedTasks, open: 3, overdue: 1, awaiting: 0, projects: 1, topLevel: 4, completed: 1, myTaskIds: myIds, homeAndMyTasksAgree: true }, null, 2));
   } finally { await context.close(); }
 });
