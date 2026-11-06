@@ -71,14 +71,14 @@ async function person(label: string, email = `nakul17+zz-2875-${label}-${RUN}@ap
   return { id: (signed.json!.user as { id: string }).id, cookie: signed.cookie };
 }
 
-const seed: { sa?: Who; admin?: Who; people: Who[]; dealId?: string } = { people: [] };
+const seed: { sa?: Who; admin?: Who; people: Who[]; dealId?: string; taskId?: string; commentId?: string; commentQuery?: string } = { people: [] };
 
 beforeAll(async () => {
   if (!existsSync(path.join(root, ".next", "BUILD_ID"))) throw new Error("CRM_VISIBLE=admins cannot start: the production build is missing (.next/BUILD_ID)");
   const port = await freePort();
   server.outbox = mkdtempSync(path.join(tmpdir(), "sho-apl2875-admins-"));
   const env: NodeJS.ProcessEnv = {
-    ...process.env, NODE_ENV: "production", CRM_VISIBLE: "admins", SEARCH_STAGE_A_ENABLED: "false", EMAIL_OUTBOX_DIR: server.outbox,
+    ...process.env, NODE_ENV: "production", CRM_VISIBLE: "admins", SEARCH_STAGE_A_ENABLED: "false", FF_TASK_COMMENTS: "1", EMAIL_OUTBOX_DIR: server.outbox,
     APP_URL: `http://127.0.0.1:${port}`, PORT: String(port), SUPER_ADMIN_EMAILS: ROOT_EMAIL,
     JOB_SECRET: process.env.JOB_SECRET || "replace-with-a-token-of-at-least-16-chars",
   };
@@ -100,6 +100,13 @@ beforeAll(async () => {
 afterAll(async () => {
   let verified = false;
   try {
+    if (seed.admin && seed.commentId && seed.commentQuery && seed.taskId) {
+      const removed = await send(seed.admin.cookie, "DELETE", `/api/tasks/${seed.taskId}/comments/${seed.commentId}`);
+      expect([200, 204], removed.body).toContain(removed.status);
+      const after = await send(seed.admin.cookie, "GET", `/api/search?q=${encodeURIComponent(seed.commentQuery)}`);
+      expect(after.status, after.body).toBe(200);
+      expect((after.json!.tasks as { id: string }[]).map((row) => row.id)).not.toContain(seed.taskId);
+    }
     if (seed.sa && seed.admin && seed.dealId) {
       // A deactivated person cannot remain Leader, even on an archived deal.
       // Hand this run-owned deal to the synthetic root before archiving it.
@@ -125,7 +132,7 @@ afterAll(async () => {
       expect(stored.status, stored.body).toBe(200);
       expect((stored.json!.person as { status: string }).status).toBe("DEACTIVATED");
     }
-    verified = !!seed.dealId && seed.people.length === 3;
+    verified = !!seed.dealId && !!seed.commentId && seed.people.length === 3;
   } finally {
     killGroup(server.pid);
     if (server.outbox) rmSync(server.outbox, { recursive: true, force: true });
@@ -133,7 +140,7 @@ afterAll(async () => {
   if (verified) {
     const dir = path.join(root, "test-results/search-crm-admins");
     mkdirSync(dir, { recursive: true });
-    writeFileSync(path.join(dir, "cleanup.json"), JSON.stringify({ dealArchived: true, peopleDeactivated: seed.people.length, ownedServerKillInvoked: true, outboxRemoved: true, disposableCiDatabase: true }, null, 2));
+    writeFileSync(path.join(dir, "cleanup.json"), JSON.stringify({ commentRemoved: true, dealArchived: true, peopleDeactivated: seed.people.length, ownedServerKillInvoked: true, outboxRemoved: true, disposableCiDatabase: true }, null, 2));
   }
 });
 
@@ -183,7 +190,7 @@ describe("qa:TC missing APL-2875 T3: a task in a hidden deal answers like a miss
     const made = await send(seed.admin.cookie, "POST", `/api/projects/${seed.dealId}/tasks`, JSON.stringify({ title: `ZZ-TEST deal task ${RUN}`, assigneeId: seed.admin.id, dueDate: istDate(1) }));
     expect(made.status, made.body).toBe(201);
     const t3 = (made.json!.task as { id: string }).id;
-    const before = (await send(seed.admin.cookie, "GET", `/api/tasks/${t3}`)).body;
+    seed.taskId = t3;
 
     // Search must apply the same CRM mode to a deal and its task, even when the
     // non-admin person is a project member. Keep the checks in this real
@@ -204,6 +211,25 @@ describe("qa:TC missing APL-2875 T3: a task in a hidden deal answers like a miss
         expect(hidden.body).not.toContain(t3);
       }
     }
+
+    const commentQuery = `ZZ-TEST private comment ${RUN}`;
+    const posted = await send(seed.admin.cookie, "POST", `/api/tasks/${t3}/comments`, JSON.stringify({ text: commentQuery }));
+    expect(posted.status, posted.body).toBe(201);
+    seed.commentId = (posted.json!.comment as { id: string }).id;
+    seed.commentQuery = commentQuery;
+    const commentPath = `/api/search?q=${encodeURIComponent(commentQuery)}`;
+    const commentHit = await send(seed.admin.cookie, "GET", commentPath);
+    expect(commentHit.status, commentHit.body).toBe(200);
+    expect((commentHit.json!.tasks as { id: string }[]).map(row => row.id)).toContain(t3);
+    expect(commentHit.body).not.toContain(commentQuery);
+    for (const who of [editor, outsider]) {
+      const hidden = await send(who.cookie, "GET", commentPath);
+      expect(hidden.status, hidden.body).toBe(200);
+      expect((hidden.json!.tasks as { id: string }[]).map(row => row.id)).not.toContain(t3);
+      expect(hidden.body).not.toContain(commentQuery);
+      expect(hidden.body).not.toContain(t3);
+    }
+    const before = (await send(seed.admin.cookie, "GET", `/api/tasks/${t3}`)).body;
 
     for (const [label, who] of [["deal member", editor], ["outsider", outsider]] as const) {
       for (const r of routes(seed.admin.id)) {
