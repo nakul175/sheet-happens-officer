@@ -81,13 +81,15 @@ test('SHO-REG-AUTH-01: a Member session uses a Secure cookie over real loopback 
     expect(cookie!.httpOnly).toBe(true);
     expect(cookie!.sameSite).toBe('Lax');
     const page = await context.newPage();
-    await page.goto('/projects');
+    const protectedResponse = await page.goto('/projects');
+    expect(protectedResponse?.status()).toBe(200);
     await expect(page).not.toHaveURL(/\/signin(?:\?|$)/);
     expect(await page.evaluate(() => document.cookie.includes('sho_session='))).toBe(false);
     const before = await context.request.get('/api/auth/me');
     expect(before.status()).toBe(200);
     expect((await before.json()).user.id).toBe(member.id);
-    await page.reload();
+    const reloaded = await page.reload();
+    expect(reloaded?.status()).toBe(200);
     const after = await context.request.get('/api/auth/me');
     expect(after.status()).toBe(200);
     expect((await after.json()).user.id).toBe(member.id);
