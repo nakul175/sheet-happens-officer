@@ -26,7 +26,7 @@ Never copy live values into chat, test fixtures, evidence or repository files. R
 | RETURN_PATH_LOG | Diagnostic test logging | Set only for relevant qualification; logs can contain request paths |
 | TEST_CLOCK / TEST_CLOCK_SECRET | Test-only time control / secret | Requires loopback DB, nonproduction process and valid signed request; unset outside tests |
 | SHUTDOWN_TEST_SLOW_MS | Shutdown test injection | Never set in production |
-| MAIL_SINK / MAIL_SINK_TOKEN | Isolated staging-only mail capture flag / secret | Complete staging configuration required; invalid armed setup refuses sends |
+| MAIL_SINK / MAIL_SINK_TOKEN | Isolated staging-only mail capture flag / secret | Complete staging configuration and runtime `DATABASE_URL` database exactly `sho_staging` required; invalid armed setup refuses sends and QA routes return 404 |
 | SHO_DEPLOY_STAGE / SHO_SLOT | Staging containment markers | Used together with exact local slot origin for mail sink; do not spoof in production |
 | SHO_HOLY_QA / SHO_HOLY_QA_CLIENT_SECRET / SHO_HOLY_QA_SUBJECTS | Isolated Holy QA identity / secret / explicit allowlist | Exact QA origin and <=4 unique UUID subjects; not general production identities |
 | SHO_HOLY_QA_REALM / SHO_HOLY_QA_DATABASE_SCHEMA | Disposable QA realm | Guarded named schema in sho_staging; cannot authorize schema creation |
