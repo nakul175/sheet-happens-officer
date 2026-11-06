@@ -1,4 +1,4 @@
-// A saved-view cap must hold when two requests both see the ninth view.
+// A saved-view cap must hold when two requests compete for the tenth slot.
 import { randomUUID } from 'node:crypto';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { afterAll, beforeAll, expect, it, vi } from 'vitest';
@@ -43,27 +43,15 @@ afterAll(async () => {
   }
 });
 
-it('keeps at most ten views when two creates read a nine-view snapshot', async () => {
-  const original = db.savedView.findMany.bind(db.savedView);
-  let release!: () => void, arrived = 0;
-  const held = new Promise<void>((resolve) => { release = resolve; });
-  const spy = vi.spyOn(db.savedView, 'findMany').mockImplementation((async (args) => {
-    const rows = await original(args);
-    if (++arrived <= 2) await held;
-    return rows;
-  }) as typeof db.savedView.findMany);
-  const pending = Promise.allSettled([
+it('keeps at most ten views when two creates compete for the tenth slot', async () => {
+  const results = await Promise.allSettled([
     createView(actor, projectId, { name: 'A', state }),
     createView(actor, projectId, { name: 'B', state }),
   ]);
-  try {
-    await vi.waitFor(() => expect(arrived).toBe(2), { timeout: 5000 });
-    spy.mockRestore();
-    release();
-    const results = await pending;
-    expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
-    expect(results.filter((r) => r.status === 'rejected')).toHaveLength(1);
-    expect(await db.savedView.count({ where: { userId: actor.id, projectId } })).toBe(10);
-    completed.push('concurrent-cap-one-winner');
-  } finally { release(); spy.mockRestore(); await pending; }
+  expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+  expect(results.filter((r) => r.status === 'rejected')).toEqual([
+    expect.objectContaining({ reason: expect.objectContaining({ status: 409 }) }),
+  ]);
+  expect(await db.savedView.count({ where: { userId: actor.id, projectId } })).toBe(10);
+  completed.push('concurrent-cap-one-winner');
 }, 20_000);

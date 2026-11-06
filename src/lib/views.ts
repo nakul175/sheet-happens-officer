@@ -25,12 +25,21 @@ export async function listViews(user: Actor, projectId: string) {
 }
 
 export async function createView(user: Actor, projectId: string, input: z.infer<typeof viewCreate>) {
-  await projectAccess(user, projectId);
-  const mine = await db.savedView.findMany({ where: { userId: user.id, projectId }, select: { name: true, position: true } });
-  if (mine.length >= MAX_VIEWS) throw new ApiError(409, `You can keep up to ${MAX_VIEWS} saved views in a project. Delete one to save another.`);
-  if (mine.some((v) => v.name.toLowerCase() === input.name.toLowerCase())) throw new ApiError(409, "You already have a view with that name.");
-  const row = await db.savedView.create({ data: { userId: user.id, projectId, name: input.name, state: input.state, position: Math.max(-1, ...mine.map((v) => v.position)) + 1 } });
-  return present(row);
+  return db.$transaction(async (tx) => {
+    // A person's view slots are shared by concurrent requests. Lock that person's row
+    // before checking the cap so two creates cannot both reserve the tenth slot.
+    const [current] = await tx.$queryRaw<{ orgRole: Actor["orgRole"]; deactivatedAt: Date | null; emailVerifiedAt: Date | null; tempPasswordAt: Date | null }[]>`
+      SELECT "orgRole", "deactivatedAt", "emailVerifiedAt", "tempPasswordAt"
+      FROM "User" WHERE "id" = ${user.id} FOR UPDATE
+    `;
+    if (!current || current.deactivatedAt || !current.emailVerifiedAt || current.tempPasswordAt) throw notFound("Project");
+    await projectAccess({ ...user, orgRole: current.orgRole }, projectId, { tx });
+    const mine = await tx.savedView.findMany({ where: { userId: user.id, projectId }, select: { name: true, position: true } });
+    if (mine.length >= MAX_VIEWS) throw new ApiError(409, `You can keep up to ${MAX_VIEWS} saved views in a project. Delete one to save another.`);
+    if (mine.some((v) => v.name.toLowerCase() === input.name.toLowerCase())) throw new ApiError(409, "You already have a view with that name.");
+    const row = await tx.savedView.create({ data: { userId: user.id, projectId, name: input.name, state: input.state, position: Math.max(-1, ...mine.map((v) => v.position)) + 1 } });
+    return present(row);
+  }, { timeout: 10000 });
 }
 
 /** Someone else's view is reported as missing, never as forbidden. */
