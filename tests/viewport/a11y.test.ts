@@ -2,11 +2,11 @@
 //   locally set PW_CHROMIUM to a chrome binary; in CI run `npx playwright-core install --with-deps chromium` first.
 // It signs in as throw-away accounts it creates itself with invented names, and never touches any other database.
 // Fails with: screen, width, element, and a screenshot saved under test-results/viewport/.
-import { mkdirSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { chromium, type Browser } from "playwright-core";
 import type { AxeResults } from "axe-core";
-import { account, BASE, istDate, PW, project, superAdmin, task } from "../helpers";
+import { account, BASE, cleanupZz, istDate, PW, project, superAdmin, task, type Account } from "../helpers";
 import { readFileSync } from "node:fs";
 import { SCREENS, TASK_TITLE, type Ids } from "./screens";
 import { openScreen, requireLocalFixtures } from "./screen-ready";
@@ -16,6 +16,8 @@ const AXE = readFileSync("node_modules/axe-core/axe.min.js", "utf8");
 let browser: Browser;
 let ids: Ids;
 let viewerEmail = "";
+const ownedProjects: string[] = [], ownedPeople: Account[] = [];
+let ownedOrganisation = "";
 
 beforeAll(async () => {
   // The suite creates accounts and data, so it only runs against a server on this machine (a test database), never a live site.
@@ -24,23 +26,42 @@ beforeAll(async () => {
   browser = await chromium.launch({ executablePath: process.env.PW_CHROMIUM || undefined });
   const root = await superAdmin();
   const editor = await account("vpeditor");
+  ownedPeople.push(editor);
   const viewer = await account("vpviewer");
+  ownedPeople.push(viewer);
   viewerEmail = viewer.email;
   const p = await project(root, root, [{ who: editor }, { who: viewer, role: "VIEWER" }]);
+  ownedProjects.push(p.id);
   const parent = await task(root, p.id, { title: TASK_TITLE, dueDate: istDate(2), priority: "HIGH", collaboratorIds: [editor.id] });
   await task(root, p.id, { title: "W".repeat(100), sectionId: p.doing, dueDate: istDate(-1) }); // a 100-character unbreakable title
   await root.c.post(`/api/projects/${p.id}/tasks`, { title: "Draft the summary", parentId: parent });
   const org = await root.c.post("/api/orgs", { name: `Viewport Org ${Date.now()}` });
   const orgId = org.json.organisation.id as string;
+  ownedOrganisation = orgId;
   const pipes = (await root.c.get("/api/deals/pipelines")).json.pipelines as { id: string; key: string }[];
   const d = await root.c.post("/api/deals", {
     name: `Viewport Deal ${Date.now()}`, organisationId: orgId, pipelineId: pipes.find((x) => x.key === "DEAL_PROACTIVE")!.id, leaderId: root.id,
     whyPursue: "Test deal", nextStep: { title: "Call the buyer", dueDate: istDate(3) },
   });
   expect(d.status, JSON.stringify(d.json)).toBe(201);
+  ownedProjects.push((d.json.deal?.id ?? d.json.project?.id) as string);
   ids = { project: p.id, task: parent, deal: (d.json.deal?.id ?? d.json.project?.id) as string, org: orgId };
 }, 60000);
-afterAll(async () => { await browser?.close(); });
+afterAll(async () => {
+  await browser?.close();
+  let cleanup = false;
+  try {
+    if (ownedProjects.length || ownedPeople.length) await cleanupZz(ownedProjects, ownedPeople);
+    if (ownedOrganisation) {
+      const root = await superAdmin();
+      expect((await root.c.post(`/api/orgs/${ownedOrganisation}/archive`, { archive: true })).status).toBe(200);
+    }
+    cleanup = true;
+  } finally {
+    mkdirSync(SHOTS, { recursive: true });
+    writeFileSync(`${SHOTS}/cleanup.json`, JSON.stringify({ projects: ownedProjects.length, people: ownedPeople.length, organisation: Boolean(ownedOrganisation), cleanup }, null, 2));
+  }
+});
 
 
 async function ctxFor(who: "root" | "viewer" | null, width: number) {
