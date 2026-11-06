@@ -22,7 +22,7 @@ beforeAll(async () => {
   const workspaceId = (await getOrCreateWorkspace()).id;
   for (const role of roles) {
     const id = prefix + role, token = randomBytes(32).toString('hex');
-    const user = await db.user.create({ data: { id, workspaceId, name: role, email: id + '@aplyd.com', passwordHash: 'unused-synthetic-fixture', emailVerifiedAt: new Date(), orgRole: role === 'admin' ? 'ADMIN' : 'MEMBER' } });
+    const user = await db.user.create({ data: { id, workspaceId, name: role === 'spare' ? id : role, email: id + '@aplyd.com', passwordHash: 'unused-synthetic-fixture', emailVerifiedAt: new Date(), orgRole: role === 'admin' ? 'ADMIN' : 'MEMBER' } });
     userIds.push(id);
     await db.session.create({ data: { userId: id, tokenHash: createHash('sha256').update(token).digest('hex'), expiresAt: new Date(Date.now() + 3600_000) } });
     const c = new Client(); c.cookie = 'sho_session=' + token;
@@ -111,6 +111,34 @@ it('task creation validates actor, assignee and title without side effects, then
   expect(after.tasks.filter(task => task.id === id)).toHaveLength(1);
   expect(after.tasks).toHaveLength(before.tasks.length + 1);
   expect(after.actions.filter(action => action.targetId === id && action.action === 'task.created')).toHaveLength(1);
+});
+
+it('workspace assignee search and explicit membership grant survive removal and retry', async () => {
+  const f = await fixture(), path = `/api/projects/${f.id}`;
+  const search = () => people.leader.c.get(`${path}/assignment-people?purpose=assignee&q=${prefix}`);
+  expect((await search()).json.people).toEqual([{ id: people.spare.id, name: people.spare.name, isMember: false }]);
+  expect((await people.editor.c.get(`${path}/assignment-people?purpose=assignee&q=${prefix}`)).status).toBe(403);
+  expect((await people.viewer.c.get(`${path}/assignment-people?purpose=assignee&q=${prefix}`)).status).toBe(403);
+  expect((await people.leader.c.get(`${path}/assignment-people?purpose=assignee&q=vie`)).json.people.some((person: { id: string }) => person.id === people.viewer.id)).toBe(false);
+  const created = await people.leader.c.post(`${path}/tasks`, { title: 'ZZ-TEST workspace assignment', sectionId: f.first, dueDate: '2027-01-20', assigneeId: people.spare.id, addAssigneeToProject: true });
+  expect(created.status).toBe(201);
+  const taskId = created.json.task.id as string;
+  expect(await db.projectMember.findUnique({ where: { projectId_userId: { projectId: f.id, userId: people.spare.id } } })).toMatchObject({ role: 'EDITOR' });
+  expect((await search()).json.people).toEqual([{ id: people.spare.id, name: people.spare.name, isMember: true }]);
+  expect(await db.actionLog.count({ where: { projectId: f.id, targetId: people.spare.id, action: 'member.added' } })).toBe(1);
+  expect(await db.notification.count({ where: { projectId: f.id, recipientId: people.spare.id, type: 'ADDED_TO_PROJECT' } })).toBe(1);
+  expect((await people.leader.c.del(`${path}/members/${people.spare.id}?handoverTo=${people.leader.id}`)).status).toBe(204);
+  expect(await db.projectMember.findUnique({ where: { projectId_userId: { projectId: f.id, userId: people.spare.id } } })).toBeNull();
+  expect((await search()).json.people).toEqual([{ id: people.spare.id, name: people.spare.name, isMember: false }]);
+  const task = (await people.leader.c.get(`/api/tasks/${taskId}`)).json.task;
+  expect(task.assignee.id).toBe(people.leader.id);
+  const beforeRetry = await snapshot(f.id);
+  const body = { assigneeId: people.spare.id, expectedUpdatedAt: task.updatedAt };
+  expect((await people.leader.c.post(`/api/tasks/${taskId}/assign`, body)).status).toBe(400);
+  expect(await snapshot(f.id)).toEqual(beforeRetry);
+  expect((await people.leader.c.post(`/api/tasks/${taskId}/assign`, { ...body, addToProject: true })).status).toBe(200);
+  expect((await people.leader.c.get(`/api/tasks/${taskId}`)).json.task.assignee.id).toBe(people.spare.id);
+  expect(await db.projectMember.findUnique({ where: { projectId_userId: { projectId: f.id, userId: people.spare.id } } })).toMatchObject({ role: 'EDITOR' });
 });
 
 for (const scenario of ['editor', 'viewer', 'outsider', 'removed-creator'] as const) {
