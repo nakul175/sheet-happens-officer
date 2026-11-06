@@ -179,3 +179,47 @@ for (const scenario of ['leader', 'creator', 'admin'] as const) {
     completed.push(scenario);
   }, 30_000);
 }
+
+it('archived work is readable but ordinary writes leave records, versions, activity and notices unchanged', async () => {
+  const f = await fixture(), path = `/api/projects/${f.id}`, taskPath = `/api/tasks/${f.task.id}`;
+  expect((await people.leader.c.post(path + '/archive')).status).toBe(200);
+  const before = await snapshot(f.id);
+  expect(before.project.archivedAt).not.toBeNull();
+  for (const who of [people.leader, people.editor, people.viewer]) {
+    expect((await who.c.get(path)).status).toBe(200);
+    expect((await who.c.get(taskPath)).status).toBe(200);
+    expect((await who.c.get(path + '/tasks')).status).toBe(200);
+  }
+  expect((await people.outsider.c.get(path)).status).toBe(404);
+  expect(await snapshot(f.id)).toEqual(before);
+
+  const version = f.task.updatedAt.toISOString();
+  const calls: [string, string, unknown?][] = [
+    ['PATCH', path, { name: 'Denied archived rename' }],
+    ['POST', path + '/members', { userId: people.spare.id, role: 'EDITOR' }],
+    ['PATCH', path + '/members/' + people.target.id, { role: 'VIEWER' }],
+    ['DELETE', path + '/members/' + people.target.id],
+    ['POST', path + '/leader', { newLeaderId: people.target.id }],
+    ['POST', path + '/sections', { name: 'Denied archived section' }],
+    ['PATCH', path + '/sections/' + f.first, { name: 'Denied archived section rename' }],
+    ['DELETE', path + '/sections/' + f.first + '?moveTo=' + f.second],
+    ['POST', path + '/tasks', { title: 'Denied archived task', dueDate: new Date(Date.now() + 30 * 86_400_000).toISOString().slice(0, 10) }],
+    ['PATCH', taskPath, { title: 'Denied archived task edit', expectedUpdatedAt: version }],
+    ['DELETE', taskPath],
+    ['POST', taskPath + '/assign', { assigneeId: people.editor.id, expectedUpdatedAt: version }],
+    ['POST', taskPath + '/move', { sectionId: f.second, expectedUpdatedAt: version }],
+    ['POST', taskPath + '/complete', { expectedUpdatedAt: version }],
+  ];
+  for (const [method, url, body] of calls) {
+    const r = await people.leader.c.call(method, url, body);
+    expect(r.status, method + ' ' + url).toBe(409);
+    expect(await snapshot(f.id), method + ' ' + url).toEqual(before);
+    probes.push({ scenario: 'archived-leader', operation: method + ' ' + url, status: r.status, state: 'UNCHANGED' });
+  }
+  expect((await people.viewer.c.post(path + '/unarchive')).status).toBe(403);
+  expect(await snapshot(f.id)).toEqual(before);
+  expect((await people.leader.c.post(path + '/unarchive')).status).toBe(200);
+  expect((await people.leader.c.patch(taskPath, { title: 'Allowed after unarchive', expectedUpdatedAt: version })).status).toBe(200);
+  expect((await db.task.findUniqueOrThrow({ where: { id: f.task.id } })).title).toBe('Allowed after unarchive');
+  completed.push('archived-read-only');
+}, 30_000);
