@@ -116,3 +116,45 @@ test('SHO-REG-SEARCH-01 partial: Member search excludes foreign and trashed task
   mkdirSync(evidenceDir, { recursive: true });
   writeFileSync(`${evidenceDir}/verification.json`, JSON.stringify({ fixture, memberId, ownedProject: owned.id, foreignProject: foreign.id, ownTask, foreignTask, trashedTask, apiVisibleOwnOnly: true, browserVisibleOwnOnly: true }, null, 2));
 });
+
+test('SHO-REG-SEARCH-01 partial: Ideas only matches API and browser task results', async ({ admin, later }) => {
+  if (!local2691) throw new Error('This search audit case uses only the guarded local test database.');
+  const fixture = randomUUID();
+  const evidenceDir = 'test-results/search-ideas-only';
+  let projectId = '';
+  later(async () => {
+    const stored = await admin.api.get(`/api/projects/${projectId}`);
+    expect(stored.status).toBe(200);
+    expect(stored.json.project.archived).toBe(true);
+    mkdirSync(evidenceDir, { recursive: true });
+    writeFileSync(`${evidenceDir}/cleanup.json`, JSON.stringify({ fixture, projectId, projectArchived: true }, null, 2));
+  });
+  const project = await newProject(admin, later, { label: 'Search ideas filter' });
+  projectId = project.id;
+  const query = zz(`search ideas ${fixture.slice(0, 8)}`);
+  const idea = await newTask(admin, project.id, { title: `${query} idea` });
+  const ordinary = await newTask(admin, project.id, { title: `${query} ordinary` });
+  const marked = await admin.api.post(`/api/tasks/${idea}/idea`, { isIdea: true });
+  expect(marked.status, JSON.stringify(marked.json)).toBe(200);
+
+  const ids = async (ideasOnly: boolean) => {
+    const response = await admin.api.get(`/api/search?q=${encodeURIComponent(query)}${ideasOnly ? '&idea=true' : ''}`);
+    expect(response.status, JSON.stringify(response.json)).toBe(200);
+    return (response.json.tasks as { id: string }[]).map(row => row.id);
+  };
+  expect((await ids(false)).sort()).toEqual([idea, ordinary].sort());
+  expect(await ids(true)).toEqual([idea]);
+
+  const page = admin.page;
+  await page.goto('/search');
+  await page.getByRole('searchbox', { name: 'Search' }).fill(query);
+  const ideaLink = page.locator(`a.item[href="/projects/${project.id}?task=${idea}"]`);
+  const ordinaryLink = page.locator(`a.item[href="/projects/${project.id}?task=${ordinary}"]`);
+  await expect(ideaLink).toBeVisible();
+  await expect(ordinaryLink).toBeVisible();
+  await page.getByRole('checkbox', { name: 'Ideas only' }).check();
+  await expect(ideaLink).toBeVisible();
+  await expect(ordinaryLink).toHaveCount(0);
+  mkdirSync(evidenceDir, { recursive: true });
+  writeFileSync(`${evidenceDir}/verification.json`, JSON.stringify({ fixture, projectId: project.id, idea, ordinary, apiMatchesBrowser: true }, null, 2));
+});
