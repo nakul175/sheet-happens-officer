@@ -35,6 +35,14 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllEnvs());
 
 describe("Include archived search (APL-2684)", () => {
+  it("bounds direct legacy queries before every database search", async () => {
+    const long = "b".repeat(400);
+    await search(admin, long, false);
+    for (const fn of [db.organisation.findMany, db.contact.findMany, db.project.findMany]) {
+      expect((argWhere(fn).name as { contains: string }).contains).toHaveLength(200);
+    }
+    expect(((argWhere(db.task.findMany).title as { contains: string }).contains)).toHaveLength(200);
+  });
   it("hides contacts of archived organisations until Include archived is selected", async () => {
     await search(admin, "vault", false);
     expect(argWhere(db.organisation.findMany).archivedAt).toBeNull();

@@ -7,9 +7,10 @@ import { isAdmin, type Actor } from "@/lib/access";
 import { WORKSTREAM_DEAL, crmProjectWhere, crmVisible } from "@/lib/crm";
 import { commentsEnabled } from "@/lib/flags";
 import { rankedSearch } from "@/lib/search-query";
+import { SEARCH_MAX_QUERY } from "@/lib/search-ranking";
 
 export async function search(user: Actor, q: string, includeArchived: boolean, ideasOnly = false) {
-  const text = q.trim();
+  const text = q.trim().slice(0, SEARCH_MAX_QUERY);
   if (text.length < 2) return { projects: [], tasks: [], organisations: [], contacts: [] };
   // Activation is part of the separately reviewed database cut. Ordinary deployments
   // retain the existing search until pg_trgm, indexes and acceptance are approved.
