@@ -29,7 +29,7 @@ export async function search(user: Actor, q: string, includeArchived: boolean, i
   const me = await db.user.findUniqueOrThrow({ where: { id: user.id }, select: { workspaceId: true } });
   const [organisations, contacts] = crm && !ideasOnly ? await Promise.all([
     db.organisation.findMany({ where: { workspaceId: me.workspaceId, archivedAt: includeArchived ? undefined : null, name: { contains: text, mode: "insensitive" } }, orderBy: { name: "asc" }, take: 20, select: { id: true, name: true, kind: true } }),
-    db.contact.findMany({ where: { workspaceId: me.workspaceId, removedAt: null, name: { contains: text, mode: "insensitive" } }, orderBy: { name: "asc" }, take: 20, select: { id: true, name: true, organisation: { select: { id: true, name: true } } } }),
+    db.contact.findMany({ where: { workspaceId: me.workspaceId, removedAt: null, ...(includeArchived ? {} : { organisation: { archivedAt: null } }), name: { contains: text, mode: "insensitive" } }, orderBy: { name: "asc" }, take: 20, select: { id: true, name: true, organisation: { select: { id: true, name: true } } } }),
   ]) : [[], []];
   // Comment text is searchable only while ff_task_comments is on, and only inside projects the person can see.
   // The hit is the task. The comment body is not copied into the result.

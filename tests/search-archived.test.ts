@@ -1,6 +1,6 @@
 // APL-2684: Include archived search. Membership and the archive flag are separate, so an
 // Admin or Super Admin sees archived projects they are not a member of, and a Member does not.
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Actor } from "@/lib/access";
 
 const db = vi.hoisted(() => ({
@@ -25,14 +25,25 @@ const other: Actor = { id: "member-2", orgRole: "MEMBER" };
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.stubEnv("SEARCH_STAGE_A_ENABLED", "false");
   db.user.findUniqueOrThrow.mockResolvedValue({ workspaceId: "ws-1" });
   db.organisation.findMany.mockResolvedValue([]);
   db.contact.findMany.mockResolvedValue([]);
   db.project.findMany.mockResolvedValue([]);
   db.task.findMany.mockResolvedValue([]);
 });
+afterEach(() => vi.unstubAllEnvs());
 
 describe("Include archived search (APL-2684)", () => {
+  it("hides contacts of archived organisations until Include archived is selected", async () => {
+    await search(admin, "vault", false);
+    expect(argWhere(db.organisation.findMany).archivedAt).toBeNull();
+    expect(argWhere(db.contact.findMany).organisation).toEqual({ archivedAt: null });
+
+    await search(admin, "vault", true);
+    expect(argWhere(db.organisation.findMany).archivedAt).toBeUndefined();
+    expect(argWhere(db.contact.findMany)).not.toHaveProperty("organisation");
+  });
   it("shows Admins and Super Admins archived projects they are not members of", async () => {
     for (const user of [admin, superAdmin]) {
       await search(user, "vault", true);
