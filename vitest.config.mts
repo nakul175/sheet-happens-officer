@@ -26,6 +26,7 @@ export default defineConfig({
       "tests/e2e/stories/SHO-REG-PROJECTS-01.spec.ts", // Playwright project create/edit/reload acceptance
       "tests/e2e/stories/SHO-REG-PROJECTS-02.spec.ts", // Playwright project leader transfer acceptance
       "tests/e2e/stories/SHO-REG-PROJECTS-03.spec.ts", // Playwright project sections acceptance
+      "tests/e2e/stories/SHO-REG-PROJECTS-04.spec.ts", // Playwright task Trash route and controls acceptance
       "tests/e2e/stories/SHO-REG-PROJECTS-05.spec.ts", // Playwright project notes and activity acceptance
       "tests/e2e/stories/APL-2467.spec.ts",
       "tests/e2e/stories/APL-2468.spec.ts",
