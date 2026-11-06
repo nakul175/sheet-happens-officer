@@ -285,9 +285,13 @@ test.describe("APL-2590 comments with @mentions", () => {
 
     const kept = await postComment("writer", taskId, { text: "ZZ-TEST kept" });
     const keptId = (kept.json as { comment: { id: string } }).comment.id;
+    const beforeViewerWrites = (await comments("viewer", taskId)).list?.comments;
+    expect((await postComment("viewer", taskId, { text: "ZZ-TEST denied viewer post" })).status).toBe(403);
+    expect((await read(await person("viewer").ctx.patch(`/api/tasks/${taskId}/comments/${keptId}`, { data: { text: "ZZ-TEST denied viewer edit" } }))).status).toBe(403);
     for (const role of ["worker", "viewer"] as const) {
       expect((await person(role).ctx.delete(`/api/tasks/${taskId}/comments/${keptId}`)).status()).toBe(403);
     }
+    expect((await comments("viewer", taskId)).list?.comments).toEqual(beforeViewerWrites);
     expect((await comments("writer", taskId)).list?.comments.find((c) => c.id === keptId)?.text).toBe("ZZ-TEST kept");
   });
 
