@@ -104,7 +104,12 @@ test('SHO-REG-PROJECTS-06: saved-view persistence, personal scope and membership
   await expect(page.getByText(zz('late saved-view task')).first()).toBeVisible();
   await page.getByRole('button', { name: 'Rename view' }).click();
   await page.getByLabel('View name').fill(renamedName);
-  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  const [renamed] = await Promise.all([
+    page.waitForResponse(response => response.url().includes(`/api/views/${adminViewId}`) && response.request().method() === 'PATCH'),
+    page.getByRole('button', { name: 'Save', exact: true }).click(),
+  ]);
+  expect(renamed.status()).toBe(200);
+  await expect(page.getByRole('group', { name: 'Saved views' }).getByRole('button', { name: renamedName })).toBeVisible();
   await page.reload();
   await expect(page.getByRole('group', { name: 'Saved views' }).getByRole('button', { name: renamedName })).toBeVisible();
   await expect(page.getByLabel('Sort')).toHaveValue('priority');
