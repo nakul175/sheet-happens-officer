@@ -83,6 +83,7 @@ test('SHO-REG-PROJECTS-06: saved-view persistence, personal scope and membership
   const originalName = zz('Owner overdue');
   const renamedName = zz('Owner urgent');
   await page.goto(`/projects/${projectId}?f=overdue`);
+  await page.getByLabel('Sort').selectOption('priority');
   await page.getByRole('button', { name: 'Save view' }).click();
   await page.getByLabel('View name').fill(originalName);
   await page.getByRole('button', { name: 'Save view' }).last().click();
@@ -92,18 +93,21 @@ test('SHO-REG-PROJECTS-06: saved-view persistence, personal scope and membership
   expect(adminList.json.views).toHaveLength(1);
   adminViewId = adminList.json.views[0].id as string;
   expect(adminList.json.views[0].state.flags).toEqual(['overdue']);
+  expect(adminList.json.views[0].state.sort).toBe('priority');
   mkdirSync(evidenceDir, { recursive: true });
   await page.screenshot({ path: `${evidenceDir}/saved.png`, fullPage: true });
 
   await page.goto(`/projects/${projectId}`);
   await page.getByRole('group', { name: 'Saved views' }).getByRole('button', { name: originalName }).click();
   await expect(page.getByRole('group', { name: 'Saved views' }).getByRole('button', { name: originalName })).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByLabel('Sort')).toHaveValue('priority');
   await expect(page.getByText(zz('late saved-view task')).first()).toBeVisible();
   await page.getByRole('button', { name: 'Rename view' }).click();
   await page.getByLabel('View name').fill(renamedName);
   await page.getByRole('button', { name: 'Save', exact: true }).click();
   await page.reload();
   await expect(page.getByRole('group', { name: 'Saved views' }).getByRole('button', { name: renamedName })).toBeVisible();
+  await expect(page.getByLabel('Sort')).toHaveValue('priority');
   await expect(page.getByRole('group', { name: 'Saved views' }).getByRole('button', { name: originalName })).toHaveCount(0);
   await page.screenshot({ path: `${evidenceDir}/renamed-after-reload.png`, fullPage: true });
 
@@ -150,5 +154,5 @@ test('SHO-REG-PROJECTS-06: saved-view persistence, personal scope and membership
   expect((await editor.c.get(`/api/projects/${projectId}/views`)).json.views.map((v: { id: string }) => v.id)).toEqual([editorViewId]);
   const sentinelAfter = (await admin.api.get(`/api/projects/${sentinel.id}`)).json.project;
   expect(createHash('sha256').update(JSON.stringify(sentinelAfter)).digest('hex')).toBe(sentinelFingerprint);
-  writeFileSync(`${evidenceDir}/verification.json`, JSON.stringify({ fixture, projectId, adminViewId, editorViewId, viewerViewId, savedAndReloaded: true, renamedAndReloaded: true, deletedAndReloaded: true, rolePersonalScope: true, foreignMutationsDenied: true, removedMemberDenied: true, viewerAllowed: true, sentinelFingerprint, sentinelPreserved: true }, null, 2));
+  writeFileSync(`${evidenceDir}/verification.json`, JSON.stringify({ fixture, projectId, adminViewId, editorViewId, viewerViewId, savedFilterAndSortAfterReload: true, renamedAndReloaded: true, deletedAndReloaded: true, rolePersonalScope: true, foreignMutationsDenied: true, removedMemberDenied: true, viewerAllowed: true, sentinelFingerprint, sentinelPreserved: true }, null, 2));
 });
