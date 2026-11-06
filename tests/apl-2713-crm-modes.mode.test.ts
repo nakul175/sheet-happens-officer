@@ -4,7 +4,7 @@
 // Fails when a hidden deal, its stage, its task or type DEAL shows up on GET /api/my-tasks.
 import "dotenv/config";
 import { spawn, type ChildProcess } from "node:child_process";
-import { closeSync, existsSync, mkdtempSync, openSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import net from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -211,9 +211,26 @@ describe("qa:TC missing CRM_VISIBLE modes hide handed-off deal tasks on a real s
   }, 180_000);
 
   afterAll(async () => {
-    try { await cleanupSeed(); } finally {
+    let cleaned = false;
+    try {
+      await cleanupSeed();
+      const [users, projects, organisation] = await Promise.all([
+        db.user.count({ where: { id: { in: seed.userIds } } }),
+        db.project.count({ where: { id: { in: seed.projectIds } } }),
+        seed.orgId ? db.organisation.count({ where: { id: seed.orgId } }) : Promise.resolve(0),
+      ]);
+      expect({ users, projects, organisation }).toEqual({ users: 0, projects: 0, organisation: 0 });
+      cleaned = seed.userIds.length === 3 && seed.projectIds.length === 2 && !!seed.orgId;
+    } finally {
       for (const server of running.values()) killGroup(server.pid);
       for (const dir of outboxes) rmSync(dir, { recursive: true, force: true, maxRetries: 3 });
+    }
+    if (cleaned) {
+      expect(running.size).toBe(3);
+      expect([...outboxes].every((box) => !existsSync(box))).toBe(true);
+      const dir = path.join(root, "test-results/search-crm-modes");
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(path.join(dir, "cleanup.json"), JSON.stringify({ usersRemoved: 3, projectsRemoved: 2, organisationRemoved: true, ownedServerKillInvoked: running.size === 3, outboxesRemoved: [...outboxes].every((box) => !existsSync(box)), disposableCiDatabase: true }, null, 2));
     }
   });
 
