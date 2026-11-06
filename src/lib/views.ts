@@ -52,10 +52,21 @@ async function own(user: Actor, id: string) {
 export const assertOwnView = (user: Actor, id: string) => own(user, id);
 
 export async function renameView(user: Actor, id: string, name: string) {
-  const v = await own(user, id);
-  const clash = await db.savedView.findFirst({ where: { userId: user.id, projectId: v.projectId, name: { equals: name, mode: "insensitive" }, id: { not: id } } });
-  if (clash) throw new ApiError(409, "You already have a view with that name.");
-  return present(await db.savedView.update({ where: { id }, data: { name } }));
+  return db.$transaction(async (tx) => {
+    // The case-insensitive name rule is not a database constraint. Serialize
+    // renames with creates by locking the same owner's row first.
+    const [current] = await tx.$queryRaw<{ orgRole: Actor["orgRole"]; deactivatedAt: Date | null; emailVerifiedAt: Date | null; tempPasswordAt: Date | null }[]>`
+      SELECT "orgRole", "deactivatedAt", "emailVerifiedAt", "tempPasswordAt"
+      FROM "User" WHERE "id" = ${user.id} FOR UPDATE
+    `;
+    if (!current || current.deactivatedAt || !current.emailVerifiedAt || current.tempPasswordAt) throw notFound("View");
+    const v = await tx.savedView.findFirst({ where: { id, userId: user.id } });
+    if (!v) throw notFound("View");
+    await projectAccess({ ...user, orgRole: current.orgRole }, v.projectId, { tx });
+    const clash = await tx.savedView.findFirst({ where: { userId: user.id, projectId: v.projectId, name: { equals: name, mode: "insensitive" }, id: { not: id } } });
+    if (clash) throw new ApiError(409, "You already have a view with that name.");
+    return present(await tx.savedView.update({ where: { id }, data: { name } }));
+  }, { timeout: 10000 });
 }
 
 export async function deleteView(user: Actor, id: string) {
