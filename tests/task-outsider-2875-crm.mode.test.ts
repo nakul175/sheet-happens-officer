@@ -100,10 +100,21 @@ beforeAll(async () => {
 afterAll(async () => {
   let verified = false;
   try {
-    if (seed.admin && seed.dealId) {
-      const archived = await send(seed.admin.cookie, "POST", `/api/projects/${seed.dealId}/archive`, "{}");
+    if (seed.sa && seed.admin && seed.dealId) {
+      // A deactivated person cannot remain Leader, even on an archived deal.
+      // Hand this run-owned deal to the synthetic root before archiving it.
+      const current = await send(seed.admin.cookie, "GET", `/api/projects/${seed.dealId}`);
+      expect(current.status, current.body).toBe(200);
+      const members = (current.json!.project as { members: { userId: string }[] }).members;
+      if (!members.some((m) => m.userId === seed.sa!.id)) {
+        const joined = await send(seed.admin.cookie, "POST", `/api/projects/${seed.dealId}/members`, JSON.stringify({ userId: seed.sa.id, role: "EDITOR" }));
+        expect(joined.status, joined.body).toBe(201);
+      }
+      const handed = await send(seed.admin.cookie, "POST", `/api/projects/${seed.dealId}/leader`, JSON.stringify({ newLeaderId: seed.sa.id, previousRole: "EDITOR" }));
+      expect(handed.status, handed.body).toBe(200);
+      const archived = await send(seed.sa.cookie, "POST", `/api/projects/${seed.dealId}/archive`, "{}");
       expect(archived.status, archived.body).toBe(200);
-      const stored = await send(seed.admin.cookie, "GET", `/api/projects/${seed.dealId}`);
+      const stored = await send(seed.sa.cookie, "GET", `/api/projects/${seed.dealId}`);
       expect(stored.status, stored.body).toBe(200);
       expect((stored.json!.project as { archived: boolean }).archived).toBe(true);
     }
