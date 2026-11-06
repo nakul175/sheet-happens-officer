@@ -85,6 +85,33 @@ async function snapshot(id: string) {
   return { project, members, sections, tasks, actions, notifications, audit };
 }
 
+it('task creation validates actor, assignee and title without side effects, then persists one eligible assignment', async () => {
+  const f = await fixture(), path = `/api/projects/${f.id}/tasks`;
+  const before = await snapshot(f.id);
+  const denied: [Account, unknown, number][] = [
+    [people.viewer, { title: 'Denied Viewer create', sectionId: f.first }, 403],
+    [people.editor, { title: 'Denied Viewer assignee', sectionId: f.first, assigneeId: people.viewer.id }, 400],
+    [people.editor, { title: 'Denied outsider assignee', sectionId: f.first, assigneeId: people.outsider.id }, 400],
+    [people.editor, { title: '   ', sectionId: f.first }, 400],
+    [people.editor, { title: 'x'.repeat(501), sectionId: f.first }, 400],
+  ];
+  for (const [who, body, status] of denied) {
+    expect((await who.c.post(path, body)).status).toBe(status);
+    expect(await snapshot(f.id)).toEqual(before);
+  }
+  const created = await people.editor.c.post(path, { title: 'ZZ-TEST eligible assignment', sectionId: f.first, assigneeId: people.target.id });
+  expect(created.status).toBe(201);
+  const id = created.json.task.id as string;
+  const reloaded = await people.editor.c.get(`/api/tasks/${id}`);
+  expect(reloaded.status).toBe(200);
+  expect(reloaded.json.task).toMatchObject({ id, title: 'ZZ-TEST eligible assignment', assignee: { id: people.target.id } });
+  const after = await snapshot(f.id);
+  expect(after.members).toEqual(before.members);
+  expect(after.tasks.filter(task => task.id === id)).toHaveLength(1);
+  expect(after.tasks).toHaveLength(before.tasks.length + 1);
+  expect(after.actions.filter(action => action.targetId === id && action.action === 'task.created')).toHaveLength(1);
+});
+
 for (const scenario of ['editor', 'viewer', 'outsider', 'removed-creator'] as const) {
   it(`${scenario}: management requests fail without changing records, versions, activity or notifications`, async () => {
     const f = await fixture(), path = `/api/projects/${f.id}`;
