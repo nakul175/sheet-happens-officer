@@ -1,11 +1,37 @@
 // Scheduled-job notices (SHO-US-9.3 AC6, SHO-BUG-1). Runs the job runner in this one process, as the server does:
 // each failing job must reach the Super Admin's bell, and the same job failing again within 20 hours adds nothing.
 import { describe, expect, it } from "vitest";
-import { superAdmin } from "./helpers";
+import { account, BASE, superAdmin } from "./helpers";
 import { db } from "./actor";
 import { JOBS, runJob } from "../src/lib/jobs";
 
 describe("job failure notices (9.3 AC6)", () => {
+  it("requires the job token on every job route and keeps status private while health stays read-only", async () => {
+    const member = await account("job-status-member");
+    const sa = await superAdmin();
+    for (const job of JOBS) {
+      const url = `${BASE}/api/jobs/${job.name}`;
+      for (const [kind, headers] of [
+        ["anonymous", {}],
+        ["signed-in member", { cookie: member.c.cookie }],
+        ["invalid token", { authorization: "Bearer invalid-job-token" }],
+        ["signed-in admin with invalid token", { cookie: sa.c.cookie, authorization: "Bearer invalid-job-token" }],
+      ] as const) {
+        const response = await fetch(url, { method: "POST", headers });
+        expect(response.status, `${job.name} ${kind}`).toBe(401);
+        expect(await response.json()).toEqual({ error: "Not allowed" });
+      }
+    }
+    const anonymousStatus = await fetch(`${BASE}/api/jobs`);
+    expect(anonymousStatus.status).toBe(401);
+    expect((await member.c.get("/api/jobs")).status).toBe(404);
+    expect((await sa.c.get("/api/jobs")).status).toBe(200);
+    const health = await fetch(`${BASE}/api/health`);
+    expect(health.status).toBe(200);
+    expect(health.headers.get("cache-control")).toBe("no-store");
+    expect((await health.json()).ok).toBe(true);
+  });
+
   it("tells the Super Admin about every failing job, once per job per day, within one process", async () => {
     const sa = await superAdmin();
     const stamp = Date.now();
