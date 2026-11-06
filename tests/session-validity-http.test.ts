@@ -5,7 +5,7 @@ import { mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'nod
 import { resolve, sep } from 'node:path';
 import { chromium, type Browser } from 'playwright-core';
 import { db } from '@/lib/db';
-import { account, BASE, OUTBOX, project, type Account } from './helpers';
+import { account, BASE, Client, OUTBOX, project, PW, type Account } from './helpers';
 import { assertLocalFixture } from './e2e/local-fixture-guard';
 
 const prefix = 'zzsession' + randomUUID().replaceAll('-', '');
@@ -72,6 +72,13 @@ for (const scenario of ['expired', 'revoked', 'deactivated', 'unverified'] as co
       if (scenario === 'revoked') await db.session.update({ where: { id: session.id }, data: { revokedAt: new Date() } });
       if (scenario === 'deactivated') await db.user.update({ where: { id: who.id }, data: { deactivatedAt: new Date() } });
       if (scenario === 'unverified') await db.user.update({ where: { id: who.id }, data: { emailVerifiedAt: null } });
+      if (scenario === 'deactivated' || scenario === 'unverified') {
+        const signIn = await new Client().post('/api/auth/signin', { email: who.email, password: PW });
+        expect(signIn.status).toBe(403);
+        expect(signIn.setCookie).toBeNull();
+        if (scenario === 'unverified') expect(signIn.json.code).toBe('EMAIL_NOT_VERIFIED');
+        evidence.push({ scenario, method: 'POST', path: '/api/auth/signin', result: '403_NO_NEW_SESSION' });
+      }
       const beforeUser = await db.user.findUniqueOrThrow({ where: { id: who.id } });
       const beforeProject = await db.project.findUniqueOrThrow({ where: { id: p.id } });
       const beforeActions = await db.actionLog.count({ where: { actorId: who.id } });
