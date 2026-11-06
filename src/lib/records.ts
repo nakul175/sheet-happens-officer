@@ -273,9 +273,39 @@ export async function removeNote(user: Actor, id: string) {
   const leads = n.projectId ? !!(await db.projectMember.findFirst({ where: { projectId: n.projectId, userId: user.id, role: "LEADER" } })) : false;
   if (!canEditNote(user, n, leads)) throw new ApiError(403, "Only the author, the deal's Leader or an Admin can delete a note.");
   await db.$transaction(async (tx) => {
-    await tx.note.update({ where: { id }, data: { removedAt: new Date() } });
-    await logAction(tx, { actorId: user.id, projectId: null, targetType: "note", targetId: id, action: "note.removed", before: { removedAt: null }, after: { removedAt: new Date().toISOString() } });
-  });
+    let fresh;
+    let account;
+    let currentActor;
+    let currentLead = false;
+    try {
+      await tx.$queryRaw`SELECT "id" FROM "Note" WHERE "id" = ${id} FOR UPDATE NOWAIT`;
+      await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${user.id} FOR SHARE NOWAIT`;
+      fresh = await tx.note.findUnique({ where: { id } });
+      account = await tx.user.findUnique({ where: { id: user.id }, select: { workspaceId: true, orgRole: true, deactivatedAt: true, emailVerifiedAt: true } });
+      if (!fresh || !account || !isActive(account) || fresh.workspaceId !== account.workspaceId) throw notFound("Note");
+      currentActor = { ...user, orgRole: account.orgRole };
+      requireCrm(currentActor);
+      if (fresh.projectId) {
+        await tx.$queryRaw`SELECT "id" FROM "Project" WHERE "id" = ${fresh.projectId} FOR SHARE NOWAIT`;
+        await tx.$queryRaw`SELECT "userId" FROM "ProjectMember" WHERE "projectId" = ${fresh.projectId} AND "userId" = ${user.id} FOR SHARE NOWAIT`;
+        const access = await projectAccess(currentActor, fresh.projectId, { tx });
+        if (access.project.typeId !== WORKSTREAM_DEAL) throw notFound("Note");
+        currentLead = access.member?.role === "LEADER";
+      }
+    } catch (error) {
+      if ((error as { code?: string; meta?: { code?: string } }).code === "P2010" && (error as { meta?: { code?: string } }).meta?.code === "55P03") {
+        throw new ApiError(409, "This note or its access is changing. Reload and try again.");
+      }
+      throw error;
+    }
+    if (!fresh || !currentActor) throw notFound("Note");
+    if (!canEditNote(currentActor, fresh, currentLead)) throw new ApiError(403, "Only the author, the deal's Leader or an Admin can delete a note.");
+    if (fresh.removedAt) throw new ApiError(409, "This note is already removed.");
+    const removedAt = new Date();
+    const changed = await tx.note.updateMany({ where: { id, removedAt: null }, data: { removedAt } });
+    if (changed.count !== 1) throw new ApiError(409, "This note is already removed.");
+    await logAction(tx, { actorId: user.id, projectId: null, targetType: "note", targetId: id, action: "note.removed", before: { removedAt: null }, after: { removedAt: removedAt.toISOString() } });
+  }, { isolationLevel: "ReadCommitted" });
 }
 
 // ---------------------------------------------------------------- task links (11.4)

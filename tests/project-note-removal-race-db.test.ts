@@ -164,3 +164,57 @@ it('allows the current Leader to remove another author’s note', async () => {
   expect(after.events.filter((e) => e.action === 'note.removed')).toHaveLength(1);
   completed.push('leader-positive');
 });
+
+it('rejects a former Leader who loses the Leader seat after preflight', async () => {
+  const { project, note } = await seed();
+  const pause = pauseBeforeWrite(1);
+  const pending = Promise.allSettled([removeNote(leader, note.id)]);
+  try {
+    await pause.ready();
+    await transact(async (tx) => {
+      await tx.projectMember.update({ where: { projectId_userId: { projectId: project.id, userId: leader.id } }, data: { role: 'EDITOR' } });
+      await tx.projectMember.update({ where: { projectId_userId: { projectId: project.id, userId: author.id } }, data: { role: 'LEADER' } });
+    });
+    const before = await snapshot(note.id);
+    pause.release();
+    expect(await pending).toEqual([expect.objectContaining({ status: 'rejected', reason: expect.objectContaining({ status: 403 }) })]);
+    expect(await snapshot(note.id)).toEqual(before);
+    completed.push('former-leader-after-preflight');
+  } finally { pause.release(); await pending; }
+}, 20_000);
+
+it('returns a retryable conflict when the note row is changing, then succeeds', async () => {
+  const { note } = await seed();
+  let release!: () => void, locked = false;
+  const held = new Promise<void>((resolve) => { release = resolve; });
+  const owner = transact(async (tx) => {
+    await tx.$queryRaw`SELECT "id" FROM "Note" WHERE "id" = ${note.id} FOR UPDATE`;
+    locked = true;
+    await held;
+  }, { timeout: 15_000 });
+  const ownerResult = Promise.allSettled([owner]);
+  try {
+    await vi.waitFor(() => expect(locked).toBe(true), { timeout: 5000 });
+    const before = await snapshot(note.id);
+    await expect(removeNote(author, note.id)).rejects.toMatchObject({ status: 409 });
+    expect(await snapshot(note.id)).toEqual(before);
+    completed.push('note-lock-conflict');
+  } finally { release(); expect(await ownerResult).toEqual([{ status: 'fulfilled', value: undefined }]); }
+  await removeNote(author, note.id);
+  expect((await snapshot(note.id)).note.removedAt).not.toBeNull();
+});
+
+it('rolls back the note removal when its activity write fails, then retries', async () => {
+  const { note } = await seed();
+  const before = await snapshot(note.id);
+  vi.spyOn(db, '$transaction').mockImplementationOnce((async (callback: (tx: Tx) => Promise<unknown>) => transact(async (tx) => {
+    const create = vi.spyOn(tx.actionLog, 'create').mockRejectedValueOnce(Error('NOTE_REMOVAL_ACTIVITY_FAILURE'));
+    try { return await callback(tx); } finally { create.mockRestore(); }
+  })) as typeof db.$transaction);
+  await expect(removeNote(author, note.id)).rejects.toThrow('NOTE_REMOVAL_ACTIVITY_FAILURE');
+  vi.restoreAllMocks();
+  expect(await snapshot(note.id)).toEqual(before);
+  await removeNote(author, note.id);
+  expect((await snapshot(note.id)).note.removedAt).not.toBeNull();
+  completed.push('activity-rollback-retry');
+});
