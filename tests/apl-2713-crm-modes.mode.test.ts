@@ -316,6 +316,37 @@ describe("qa:TC missing CRM_VISIBLE modes hide handed-off deal tasks on a real s
     }
   }, 120_000);
 
+  it("audit Search-01: search applies all three CRM modes to deals, tasks and organisations", async () => {
+    expect(seed.dealId && seed.kickoffId && seed.orgId && signed.editor && signed.admin).toBeTruthy();
+    const checks = [
+      { mode: "on", cookie: signed.editor!, deal: true, org: true },
+      { mode: "admins", cookie: signed.editor!, deal: false, org: false },
+      { mode: "admins", cookie: signed.admin!, deal: true, org: true },
+      { mode: "off", cookie: signed.editor!, deal: false, org: false },
+      { mode: "off", cookie: signed.admin!, deal: false, org: false },
+    ] as const;
+    for (const { mode, cookie, deal, org } of checks) {
+      const server = running.get(mode)!;
+      for (const [query, key, id, visible] of [
+        [DEAL_NAME, "projects", seed.dealId, deal],
+        [KICKOFF, "tasks", seed.kickoffId, deal],
+        [`Buyer ${tag}`, "organisations", seed.orgId, org],
+      ] as const) {
+        const result = await call(server.base, cookie, "GET", `/api/search?q=${encodeURIComponent(query)}`);
+        expect(result.status, `${mode} ${query}: ${result.text}`).toBe(200);
+        const ids = ((result.json?.[key] ?? []) as { id: string }[]).map((row) => row.id);
+        if (visible) expect(ids, `${mode} ${key} visible`).toContain(id);
+        else {
+          expect(ids, `${mode} ${key} hidden`).not.toContain(id);
+          expect(result.text, `${mode} ${key} response`).not.toContain(id);
+        }
+      }
+      const control = await call(server.base, cookie, "GET", `/api/search?q=${encodeURIComponent(PLAIN)}`);
+      expect(control.status, control.text).toBe(200);
+      expect(((control.json?.tasks ?? []) as { id: string }[]).map((row) => row.id)).toContain(seed.plainId);
+    }
+  }, 120_000);
+
   // The handed-off query is on the My tasks read path. 40 concurrent GETs in each hidden case.
   it("qa:TC missing load: 40 concurrent GET /api/my-tasks in each hidden mode", async () => {
     expect(signed.editor && signed.admin, "AC4 signed in editor and admin").toBeTruthy();
