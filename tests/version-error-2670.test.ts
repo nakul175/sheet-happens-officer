@@ -155,4 +155,45 @@ describe("one error shape for a task version (APL-2670)", () => {
     expect(await outsiderMove.text()).toBe(JSON.stringify({ error: "Task not found" }));
     expect(await shown(fx.worker, fx.id)).toEqual({ title: "Original", updatedAt: fx.t0 });
   });
+
+  it("keeps session, access and version ahead of invalid schemas on every task mutation", async () => {
+    const fx = await fixture();
+    const routes = [
+      ["PATCH", "", { title: "" }],
+      ["POST", "/assign", { assigneeId: "" }],
+      ["POST", "/move", { sectionId: "" }],
+      ["POST", "/complete", { completeAll: "invalid" }],
+      ["PUT", "/approver", { approverId: "" }],
+    ] as const;
+    const raw = async (method: string, id: string, suffix: string, body: unknown, cookie = "") => {
+      const response = await fetch(`${BASE}/api/tasks/${id}${suffix}`, {
+        method,
+        headers: { "content-type": "application/json", ...(cookie ? { cookie } : {}) },
+        body: JSON.stringify(body),
+      });
+      return { status: response.status, text: await response.text() };
+    };
+    for (const [method, suffix, invalidSchema] of routes) {
+      const path = `${method} ${suffix || "/"}`;
+      const anonymous = await raw(method, fx.id, suffix, invalidSchema);
+      expect(anonymous, path).toEqual({ status: 401, text: JSON.stringify({ error: "Not signed in" }) });
+
+      const hidden = await raw(method, fx.id, suffix, invalidSchema, fx.outsider.c.cookie);
+      const absent = await raw(method, "does-not-exist", suffix, invalidSchema, fx.outsider.c.cookie);
+      expect(hidden, path).toEqual({ status: 404, text: JSON.stringify({ error: "Task not found" }) });
+      expect(hidden, path).toEqual(absent);
+
+      for (const [version, expectedStatus, expectedBody] of [
+        [undefined, 400, REQUIRED],
+        [null, 400, REQUIRED],
+        ["abc", 400, INVALID],
+        [new Date(Date.parse(fx.t0) - 1000).toISOString(), 409, CONFLICT],
+      ] as const) {
+        const body = { ...invalidSchema, ...(version === undefined ? {} : { expectedUpdatedAt: version }) };
+        const result = await raw(method, fx.id, suffix, body, fx.worker.c.cookie);
+        expect(result, `${path} ${String(version)}`).toEqual({ status: expectedStatus, text: JSON.stringify(expectedBody) });
+      }
+    }
+    expect(await shown(fx.worker, fx.id)).toEqual({ title: "Original", updatedAt: fx.t0 });
+  });
 });
