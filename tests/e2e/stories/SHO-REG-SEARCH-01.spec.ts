@@ -1,7 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { test, local2691 } from '../helpers/2691-admin';
-import { expect, zz } from './qa';
+import { account, PW } from '../local-api';
+import { newProject, newTask } from '../helpers/migration-2731';
+import { expect, signInAs, zz } from './qa';
 
 test('SHO-REG-SEARCH-01 partial: archived organisation contacts follow Include archived', async ({ admin, later }) => {
   if (!local2691) throw new Error('This search audit case uses only the guarded local test database.');
@@ -61,4 +63,56 @@ test('SHO-REG-SEARCH-01 partial: archived organisation contacts follow Include a
   await expect(page.locator(`a.item[href="/accounts/${archivedOrg}"]`)).toBeVisible();
   await page.screenshot({ path: `${evidenceDir}/archived-on.png`, fullPage: true });
   writeFileSync(`${evidenceDir}/verification.json`, JSON.stringify({ fixture, activeOrg, archivedOrg, activeContact, archivedContact, defaultActiveOnly: true, archivedIncludedOnlyWhenSelected: true, uiMatchesApi: true }, null, 2));
+});
+
+test('SHO-REG-SEARCH-01 partial: Member search excludes foreign and trashed tasks', async ({ admin, later, browser }) => {
+  if (!local2691) throw new Error('This search permission audit uses only the guarded local test database.');
+  const fixture = randomUUID();
+  const evidenceDir = 'test-results/search-permission-boundary';
+  const projects: string[] = [];
+  let memberId = '';
+  later(async () => {
+    for (const id of projects) {
+      const result = await admin.api.get(`/api/projects/${id}`);
+      expect(result.status).toBe(200);
+      expect(result.json.project.archived).toBe(true);
+    }
+    const person = await admin.api.get(`/api/team/${memberId}`);
+    expect(person.status).toBe(200);
+    expect(person.json.person.status).toBe('DEACTIVATED');
+    mkdirSync(evidenceDir, { recursive: true });
+    writeFileSync(`${evidenceDir}/cleanup.json`, JSON.stringify({ fixture, projects, memberId, cleanup: true }, null, 2));
+  });
+
+  const identity = await account(zz('Search member'), `nakul17+zz-search-boundary-${fixture}@aplyd.com`);
+  memberId = identity.id;
+  later(async () => {
+    expect((await admin.api.post(`/api/team/${memberId}/deactivate`, { reassign: 'leaders' })).status).toBe(200);
+    expect((await identity.c.post('/api/auth/signout')).status).toBe(204);
+  });
+  const member = await signInAs(browser, identity.email, PW);
+  later(() => member.ctx.close());
+
+  const owned = await newProject(admin, later, { label: 'Search owned', members: [{ who: member, role: 'VIEWER' }] }); projects.push(owned.id);
+  const foreign = await newProject(admin, later, { label: 'Search foreign' }); projects.push(foreign.id);
+  const query = zz(`search boundary ${fixture.slice(0, 8)}`);
+  const ownTask = await newTask(admin, owned.id, { title: `${query} own` });
+  const foreignTask = await newTask(admin, foreign.id, { title: `${query} foreign` });
+  const trashedTask = await newTask(admin, owned.id, { title: `${query} trash` });
+  expect((await admin.api.del(`/api/tasks/${trashedTask}`)).status).toBe(204);
+
+  const response = await member.api.get(`/api/search?q=${encodeURIComponent(query)}`);
+  expect(response.status, JSON.stringify(response.json)).toBe(200);
+  const visible = (response.json.tasks as { id: string }[]).map(row => row.id);
+  expect(visible).toContain(ownTask);
+  expect(visible).not.toContain(foreignTask);
+  expect(visible).not.toContain(trashedTask);
+
+  await member.page.goto('/search');
+  await member.page.getByRole('searchbox', { name: 'Search' }).fill(query);
+  await expect(member.page.locator(`a.item[href="/projects/${owned.id}?task=${ownTask}"]`)).toBeVisible();
+  await expect(member.page.locator(`a.item[href="/projects/${foreign.id}?task=${foreignTask}"]`)).toHaveCount(0);
+  await expect(member.page.locator(`a.item[href="/projects/${owned.id}?task=${trashedTask}"]`)).toHaveCount(0);
+  mkdirSync(evidenceDir, { recursive: true });
+  writeFileSync(`${evidenceDir}/verification.json`, JSON.stringify({ fixture, memberId, ownedProject: owned.id, foreignProject: foreign.id, ownTask, foreignTask, trashedTask, apiVisibleOwnOnly: true, browserVisibleOwnOnly: true }, null, 2));
 });
