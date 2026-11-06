@@ -5,7 +5,7 @@ import { ApiError } from "@/lib/http";
 import { visibleTask } from "@/lib/tasks";
 import TaskPage from "./TaskPage";
 
-export const metadata = { title: "Task · Sheet Happens Officer" };
+export const metadata = { title: "Task · Tasks by aplyd" };
 
 export default async function Page({ params }: PageProps<"/tasks/[id]">) {
   const { id } = await params;

@@ -14,7 +14,7 @@
 # verify them from the server's local mail outbox. On staging that would make real accounts and send real mail, then fail.
 # They still run against a local server.
 #
-# Target: the repository variable STAGING_BASE_URL (not a secret), else https://staging.sheethappensofficer.com. Only staging
+# Target: the repository variable STAGING_BASE_URL (not a secret), else https://staging.tasks.aplyd.org. Only staging
 # or a pr1-pr4 preview is accepted; production is refused.
 # Secrets (repository settings that staging-e2e.yml already uses; this workflow adds none):
 #   STAGING_USER, STAGING_PASS   the basic-auth gate in front of staging
@@ -46,9 +46,9 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  BASE_URL: ${{ vars.STAGING_BASE_URL || 'https://staging.sheethappensofficer.com' }}
+  BASE_URL: ${{ vars.STAGING_BASE_URL || 'https://staging.tasks.aplyd.org' }}
   # The only hosts a run may target: staging, or the preview slots pr1-pr4. Matched against the whole host.
-  TARGET_ALLOWLIST: '^(staging\.sheethappensofficer\.com|pr[1-4]\.staging\.sheethappensofficer\.com)$'
+  TARGET_ALLOWLIST: '^(staging\.tasks\.aplyd\.org|pr[1-4]\.staging\.sheethappensofficer\.com)$'
   # Only for `prisma generate` during npm ci; nothing connects to it.
   DATABASE_URL: postgresql://unused:unused@127.0.0.1:1/unused
   DIRECT_DATABASE_URL: postgresql://unused:unused@127.0.0.1:1/unused
@@ -73,11 +73,11 @@ jobs:
             echo "::error::STAGING_BASE_URL must be https://<host> with no path."; exit 1
           fi
           host="${BASH_REMATCH[1]}"
-          if [[ "${host,,}" =~ ^(www\.|app\.)?sheethappensofficer\.com\.?$ ]]; then
+          if [[ "${host,,}" =~ ^((www\.|app\.)?sheethappensofficer\.com|sheethappensofficer\.aplyd\.org|tasks\.aplyd\.org)\.?$ ]]; then
             echo "::error::Refusing to run against production ($host)."; exit 1
           fi
           if ! [[ "$host" =~ $TARGET_ALLOWLIST ]]; then
-            echo "::error::Target '$host' is not allowed. Use staging.sheethappensofficer.com or pr1-pr4.staging.sheethappensofficer.com."; exit 1
+            echo "::error::Target '$host' is not allowed. Use staging.tasks.aplyd.org or pr1-pr4.staging.sheethappensofficer.com."; exit 1
           fi
           echo "Target: https://$host"
 

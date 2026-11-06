@@ -1,9 +1,9 @@
-# Sheet Happens Officer
+# Tasks by aplyd
 
 Internal work manager for the APLYD team: projects with Sections, tasks with subtasks,
 assignee, collaborators and an optional approver, Trash with 30-day restore, a notification
 bell, a per-project Activity log and an organisation audit log. Backlog and user stories live
-in Linear (project "Sheet Happens Officer").
+in Backlog to the Future (project display name "Tasks by aplyd", stable key `SHO`).
 
 Stack: Next.js 16 (App Router), TypeScript, Prisma 6, PostgreSQL 16, Zod, Vitest.
 
@@ -78,16 +78,16 @@ One-time setup, in order:
    updates, and generates `JOB_SECRET` locally.
 4. In the database's settings, add the droplet as a trusted source; copy the **private
    network** connection string.
-5. In GoDaddy, add an A record `app` → the droplet's IP.
+5. At the authoritative DNS provider for `aplyd.org`, add A records for `tasks` and `staging.tasks` after verifying the droplet target and staging routing. Preserve the old domains until redirects pass.
 6. GitHub repository secrets: `SSH_PRIVATE_KEY` (the private half of `sho_deploy`),
    `DATABASE_URL`, `RESEND_API_KEY` (a Resend key with sending access for
-   `sheethappensofficer.com`, the sender's domain until Resend verifies `sheethappensofficer.aplyd.org`). Optional secret: `DIRECT_DATABASE_URL`, the direct (non-PgBouncer)
+   `sheethappensofficer.com`, the existing verified sender domain until the new Tasks domain passes mail-provider checks). Optional secret: `DIRECT_DATABASE_URL`, the direct (non-PgBouncer)
    connection string for migrations, needed once `DATABASE_URL` points at PgBouncer; unset, migrations
    use `DATABASE_URL`. Optional variables: `DROPLET_HOST` (IP, if DNS is not live yet)
    and `DROPLET_HOST_KEY` (one `ssh-keyscan -t ed25519 <ip>` line, which pins the host key).
 7. Run the workflow (push to `main` or "Run workflow"), then sign up with the Super Admin
    address and confirm the verification email lands in the inbox, not junk.
-8. Point an external uptime check at `https://sheethappensofficer.aplyd.org/api/health`.
+8. Point an external uptime check at `https://tasks.aplyd.org/api/health`.
 
 Scheduled jobs (`/etc/cron.d/sho`, IST): `purge-trash` 03:17, `purge-old` 03:37, `stalled-deals` 07:50 (deals with no
 next step or no activity for 30 days), `reminders` 08:00, `check`
@@ -97,5 +97,5 @@ an earlier commit; migrations are forward-only.
 
 ### Application scope
 
-SHO provides the task and CRM application. Suite assistance lives outside SHO;
+Tasks by aplyd provides the task and CRM application. Suite assistance lives outside this app;
 there is no in-app assistant, provider configuration, usage dashboard or chat job.

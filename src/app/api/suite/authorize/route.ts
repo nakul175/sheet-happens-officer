@@ -14,7 +14,7 @@ export async function GET(req: Request) {
     try { user = await currentUser(); }
     catch (err) {
       if (!(err instanceof ApiError) || ![401,403].includes(err.status)) throw err;
-      if (err.status === 403) return oauthJson({ error: "access_denied", message: "Set your own password in Sheet Happens Officer before continuing." }, 403);
+      if (err.status === 403) return oauthJson({ error: "access_denied", message: "Set your own password in Tasks by aplyd before continuing." }, 403);
       const signin = new URL("/signin", cfg.origin);
       signin.searchParams.set("returnTo", `/api/suite/authorize?${url.searchParams.toString()}`);
       return new Response(null, { status: 302, headers: { Location: signin.toString(), "Cache-Control": "no-store", "Referrer-Policy": "no-referrer" } });

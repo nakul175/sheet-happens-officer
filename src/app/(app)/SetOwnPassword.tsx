@@ -12,7 +12,7 @@ export function SetOwnPassword({ email }: { email: string }) {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  useEffect(() => { document.title = "Set your own password · Sheet Happens Officer"; }, []);
+  useEffect(() => { document.title = "Set your own password · Tasks by aplyd"; }, []);
 
   async function submit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();

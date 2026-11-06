@@ -31,7 +31,7 @@ for (const base of [OK, FAILING]) {
 }
 
 const SHOTS = "test-results/apl-2742";
-const VERIFY_SUBJECT = "Verify your email for Sheet Happens Officer";
+const VERIFY_SUBJECT = "Verify your email for Tasks by aplyd";
 const run = Date.now();
 const ROOT_EMAIL = `nakul17+zztest-apl2742-root-${run}@aplyd.com`; // Super Admin on the spec's servers, used for clean-up only
 const E2E_PREFIX = "nakul17+zztest-apl2742-e2e-";

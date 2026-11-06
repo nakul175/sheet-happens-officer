@@ -24,9 +24,11 @@ html, body { margin: 0; padding: 0; }
 body {
   background: var(--bg);
   color: var(--ink);
-  font-family: var(--font-public-sans), system-ui, sans-serif;
+  font-family: var(--font-lato), Lato, sans-serif;
   -webkit-font-smoothing: antialiased;
 }
+
+:is(button, input, select, textarea) { font-family: inherit; }
 
 a { color: var(--navy); }
 @media (hover: hover) { a:hover { color: var(--navy-dark); } }

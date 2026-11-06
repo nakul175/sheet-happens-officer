@@ -13,7 +13,7 @@ afterEach(()=>{act(()=>root?.unmount());root=undefined;vi.restoreAllMocks();});
 async function mount(){await act(async()=>{root=createRoot(document.getElementById('root')!);root.render(<StartGuide onDismiss={()=>undefined}/>);});}
 async function click(text:string){await act(async()=>[...document.querySelectorAll<HTMLButtonElement>('button')].find(b=>b.textContent===text)!.click());}
 it('adds only the two install lines to the existing invitation text',()=>{
- const base=`Hi Fixture,\n\nTest Leader added you to Sheet Happens Officer. Sign in here:\n\n${appUrl()}/signin\n\nUsername: fixture@example.test\nPassword: fixture-only-password\n\nThis password is temporary. When you sign in, you will be asked to set your own password before you can do anything else. After that, this one stops working.\n\nIf you did not expect this email, ignore it and tell Test Leader. Do not forward this email, because it contains your password.`;
+ const base=`Hi Fixture,\n\nTest Leader added you to Tasks by aplyd. Sign in here:\n\n${appUrl()}/signin\n\nUsername: fixture@example.test\nPassword: fixture-only-password\n\nThis password is temporary. When you sign in, you will be asked to set your own password before you can do anything else. After that, this one stops working.\n\nIf you did not expect this email, ignore it and tell Test Leader. Do not forward this email, because it contains your password.`;
  const mail=signInDetailsMail('fixture@example.test','Fixture','Test Leader','fixture-only-password');
  expect(mail.text.replace(`\n\n${INSTALL_GUIDANCE}`, '')).toBe(base);
  expect(mail.text.match(/iPhone: Share, then Add to Home Screen/g)).toHaveLength(1);

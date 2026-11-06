@@ -21,7 +21,7 @@ const origin = () => new URL(BASE).origin;
 
 function signInMailPassword(email: string) {
   const files = readdirSync(OUTBOX).sort();
-  const mails = files.map((f) => JSON.parse(readFileSync(path.join(OUTBOX, f), "utf8"))).filter((m) => m.to === email && /Your Sheet Happens Officer account/.test(m.subject));
+  const mails = files.map((f) => JSON.parse(readFileSync(path.join(OUTBOX, f), "utf8"))).filter((m) => m.to === email && /Your Tasks by aplyd account/.test(m.subject));
   return ((mails.at(-1)?.text ?? "") as string).match(/Password: (\S+)/)?.[1] ?? "";
 }
 

@@ -18,7 +18,7 @@ export function centralIdentitySecret(env: Record<string, string | undefined> = 
 
 /** Fixed public origin; never trust the reverse proxy's internal request URL or caller forwarding headers. */
 export function holySheetHostOrigin(env: Record<string, string | undefined> = process.env) {
- return holyQaIdentity(env)?.origin ?? 'https://sheethappensofficer.aplyd.org';
+ return holyQaIdentity(env)?.origin ?? 'https://tasks.aplyd.org';
 }
 
 /** Disposable four-user acceptance realm; never uses the shared staging schema. */

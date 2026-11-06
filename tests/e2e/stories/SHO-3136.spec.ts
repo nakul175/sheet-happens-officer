@@ -6,7 +6,7 @@ for (const width of [1512, 390, 320]) {
     for (const route of ["/", "/my-tasks", "/projects"]) {
       await admin.page.goto(route);
       const brand = admin.page.locator(".top-brand");
-      await expect(brand).toHaveAccessibleName("SHO, Sheet Happens Officer home");
+      await expect(brand).toHaveAccessibleName("Tasks by aplyd home");
       await expect(brand).toHaveAttribute("href", "/");
       const image = brand.locator("img");
       await expect(image).toHaveAttribute("alt", "");

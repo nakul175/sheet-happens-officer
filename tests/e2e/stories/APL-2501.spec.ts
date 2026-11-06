@@ -58,7 +58,7 @@ test("AC2: at 390 px the sidebar collapses and no page scrolls sideways", async 
 test("AC3: the icon-only mark shows at 24 px and the text uses Public Sans", async ({ admin }) => {
   await admin.page.setViewportSize({ width: 1280, height: 800 });
   await admin.page.goto("/");
-  const img = admin.page.getByRole("link", { name: "SHO, Sheet Happens Officer home", exact: true }).getByAltText("", { exact: true });
+  const img = admin.page.getByRole("link", { name: "Tasks by aplyd home", exact: true }).getByAltText("", { exact: true });
   await expect(img).toHaveAttribute("src", "/logo-icon-reversed.svg");
   const box = (await img.boundingBox())!;
   expect(Math.round(box.width)).toBeGreaterThanOrEqual(24);

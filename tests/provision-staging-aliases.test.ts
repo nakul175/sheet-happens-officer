@@ -83,25 +83,25 @@ describe("qa:TC missing APL-2748 create mode: idempotent, counts only", () => {
 });
 
 describe("qa:TC missing APL-2748 create mode guard: staging only, never production", () => {
-  it("qa:TC missing guard: only https://staging.sheethappensofficer.com is accepted", () => {
-    expect(stagingOnlyTarget("https://staging.sheethappensofficer.com").href).toBe("https://staging.sheethappensofficer.com/");
-    expect(stagingOnlyTarget("https://STAGING.sheethappensofficer.com/x").href).toBe("https://staging.sheethappensofficer.com/");
+  it("qa:TC missing guard: only https://staging.tasks.aplyd.org is accepted", () => {
+    expect(stagingOnlyTarget("https://staging.tasks.aplyd.org").href).toBe("https://staging.tasks.aplyd.org/");
+    expect(stagingOnlyTarget("https://STAGING.tasks.aplyd.org/x").href).toBe("https://staging.tasks.aplyd.org/");
     for (const bad of [undefined, "", "not a url", "https://sheethappensofficer.com", "https://www.sheethappensofficer.com",
-      "https://app.sheethappensofficer.com", "https://sheethappensofficer.aplyd.org", "https://168.144.144.69", "http://staging.sheethappensofficer.com",
-      "https://pr1.staging.sheethappensofficer.com", "http://localhost:3100", "https://staging.sheethappensofficer.com.evil.example"]) {
+      "https://app.sheethappensofficer.com", "https://sheethappensofficer.aplyd.org", "https://tasks.aplyd.org", "https://168.144.144.69", "http://staging.tasks.aplyd.org",
+      "https://pr1.staging.sheethappensofficer.com", "http://localhost:3100", "https://staging.tasks.aplyd.org.evil.example"]) {
       expect(() => stagingOnlyTarget(bad), String(bad)).toThrow();
     }
   });
 
   it("qa:TC missing guard: the new production host is refused as production", () => {
-    expect(() => provisionTarget("https://sheethappensofficer.aplyd.org")).toThrow("Refusing to provision aliases on production (sheethappensofficer.aplyd.org).");
+    expect(() => provisionTarget("https://tasks.aplyd.org")).toThrow("Refusing to provision aliases on production (tasks.aplyd.org).");
   });
 
   it("qa:TC missing guard: the script's --create refuses a non-staging BASE_URL before it reads a password or sends anything", () => {
     const cases: [string, string[], RegExp][] = [
-      ["https://sheethappensofficer.aplyd.org", [], /production/],
-      ["https://pr2.staging.sheethappensofficer.com", [], /create mode runs against staging\.sheethappensofficer\.com only/],
-      ["https://staging.sheethappensofficer.com", ["--check"], /cannot be combined/],
+      ["https://tasks.aplyd.org", [], /production/],
+      ["https://pr2.staging.sheethappensofficer.com", [], /create mode runs against staging\.tasks\.aplyd\.org only/],
+      ["https://staging.tasks.aplyd.org", ["--check"], /cannot be combined/],
     ];
     for (const [base, extra, msg] of cases) {
       const r = spawnSync("npx", ["tsx", "tests/e2e/tools/provision-aliases.ts", "--create", ...extra], {
@@ -140,22 +140,22 @@ describe("qa:TC missing APL-2748 workflow: dispatch only, pinned to staging, sec
   });
 
   it("qa:TC missing workflow: the target is the fixed staging URL, not a variable", () => {
-    expect(wf).toContain("  BASE_URL: https://staging.sheethappensofficer.com\n");
+    expect(wf).toContain("  BASE_URL: https://staging.tasks.aplyd.org\n");
     expect(wf).not.toContain("vars.");
   });
 
   it("qa:TC missing workflow: the guard passes staging and refuses production, previews and a wrong environment", () => {
-    const ok = guard({ TARGET_ENV: "staging", BASE_URL: "https://staging.sheethappensofficer.com" });
+    const ok = guard({ TARGET_ENV: "staging", BASE_URL: "https://staging.tasks.aplyd.org" });
     expect(ok.status, ok.stdout + ok.stderr).toBe(0);
-    for (const prod of ["https://sheethappensofficer.com", "https://app.sheethappensofficer.com", "https://sheethappensofficer.aplyd.org", "https://168.144.144.69"]) {
+    for (const prod of ["https://sheethappensofficer.com", "https://app.sheethappensofficer.com", "https://sheethappensofficer.aplyd.org", "https://tasks.aplyd.org", "https://168.144.144.69"]) {
       const r = guard({ TARGET_ENV: "staging", BASE_URL: prod });
       expect(r.status, prod).toBe(1);
       expect(r.stdout, prod).toContain("Refusing to run against production");
     }
-    for (const other of ["https://pr1.staging.sheethappensofficer.com", "http://staging.sheethappensofficer.com", "https://staging.sheethappensofficer.com/x"]) {
+    for (const other of ["https://pr1.staging.sheethappensofficer.com", "http://staging.tasks.aplyd.org", "https://staging.tasks.aplyd.org/x"]) {
       expect(guard({ TARGET_ENV: "staging", BASE_URL: other }).status, other).toBe(1);
     }
-    const env = guard({ TARGET_ENV: "production", BASE_URL: "https://staging.sheethappensofficer.com" });
+    const env = guard({ TARGET_ENV: "production", BASE_URL: "https://staging.tasks.aplyd.org" });
     expect(env.status).toBe(1);
     expect(env.stdout).toContain("Refusing environment 'production'");
   });

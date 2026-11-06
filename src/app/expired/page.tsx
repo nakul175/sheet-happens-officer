@@ -3,7 +3,7 @@ import { AuthShell } from "@/components/AuthShell";
 import styles from "@/components/auth.module.css";
 import approvedStyles from "@/app/signin/signin.module.css";
 import { ResendLink } from "./ResendLink";
-export const metadata = { title: "Link can't be used · Sheet Happens Officer" };
+export const metadata = { title: "Link can't be used · Tasks by aplyd" };
 export default function Page() {
   return (
     <AuthShell approved>

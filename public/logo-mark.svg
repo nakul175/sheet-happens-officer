@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1040 260" role="img" aria-labelledby="title desc">
-<title id="title">Sheet Happens Officer</title>
+<title id="title">Tasks by aplyd</title>
 <desc id="desc">The gold-glasses white-sheet mascot beside the product name.</desc>
   <g stroke-linejoin="miter" stroke-linecap="round">
     <!-- Angular sheet, with the approved lower notch and a white paper centre. -->
@@ -19,5 +19,5 @@
     </g>
     <path d="M119 188q34 20 63 5-22 27-63-5Zm61-3q20-4 10 24 3-18-10-24Z" fill="#2C2F71"/>
   </g>
-<text x="348" y="148" fill="#2C2F71" font-family="Arial, sans-serif" font-size="57" font-weight="700">Sheet Happens Officer</text>
+<text x="348" y="148" fill="#2C2F71" font-family="Lato, sans-serif" font-size="57" font-weight="700">Tasks by aplyd</text>
 </svg>
