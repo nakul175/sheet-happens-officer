@@ -1,3 +1,4 @@
+import { nativeSessionActive } from "@/lib/native-session-status";
 import { createHash, randomBytes, randomInt, scrypt, timingSafeEqual } from "node:crypto";
 import { cookies } from "next/headers";
 import { db } from "@/lib/db";
@@ -130,6 +131,7 @@ export async function sessionUser(token: string | undefined, opts: { allowTempPa
   }
   const central = await db.centralSessionLink.findUnique({ where: { sessionId: session.id } });
   if (central && !(await centralSessionActive(central.subject, central.sessionUid, u.id))) throw new ApiError(401, "Central session expired. Sign in again.");
+  if (!central && !await nativeSessionActive(u.id, session.createdAt)) throw new ApiError(401, "Suite session ended. Sign in again.");
   // Last-active time for the Profile screen; written at most every 5 minutes.
   if (Date.now() - session.lastSeenAt.getTime() > 5 * 60_000) {
     await db.session.update({ where: { id: session.id }, data: { lastSeenAt: new Date() } });
