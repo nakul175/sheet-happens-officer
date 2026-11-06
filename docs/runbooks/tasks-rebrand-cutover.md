@@ -7,7 +7,7 @@ Status: prepared, **not deployed**. The application branch is based on the obser
 - Display name: **Tasks by aplyd**. The app, PWA, page titles, mail display copy and navigation use Lato. The short PWA and narrow-navigation label is **Tasks**.
 - Canonical production origin: `https://tasks.aplyd.org`; canonical staging origin: `https://staging.tasks.aplyd.org`.
 - Existing BTF `SHO` issue keys and Bug Sheet issue references remain stable. Rename their **project display names** to `Tasks by aplyd` after live verification. Do not rekey historical issues.
-- Rename GitHub repository `nakul175/sheet-happens-officer` to `nakul175/tasks` after the new origins pass. Update local remotes, release references, repository variables and any external webhooks; verify GitHub's old URL redirect. The checked-in package name becomes `tasks-by-aplyd`.
+- Rename GitHub repository `nakul175/sheet-happens-officer` to `nakul175/tasks-by-aplyd` after the new origins pass. Update local remotes, release references, repository variables and any external webhooks; verify GitHub's old URL redirect. The checked-in package name becomes `tasks-by-aplyd`.
 - Keep `sho` systemd unit, `/opt/sho` paths, database names, environment keys, suite client IDs and event names during this cut. They are compatibility identifiers, not product copy. Renaming any of them requires a separate migration with dependent-service proof.
 - Keep the currently verified sender mailbox domain until `tasks.aplyd.org` is verified with the mail provider. The visible sender name and email copy become `Tasks by aplyd`; swapping the sender address is a separate delivery check.
 
