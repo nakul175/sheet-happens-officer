@@ -159,11 +159,11 @@ describe("one error shape for a task version (APL-2670)", () => {
   it("keeps session, access and version ahead of invalid schemas on every task mutation", async () => {
     const fx = await fixture();
     const routes = [
-      ["PATCH", "", { title: "" }],
-      ["POST", "/assign", { assigneeId: "" }],
-      ["POST", "/move", { sectionId: "" }],
-      ["POST", "/complete", { completeAll: "invalid" }],
-      ["PUT", "/approver", { approverId: "" }],
+      ["PATCH", "", { title: "" }, { title: "New" }],
+      ["POST", "/assign", { assigneeId: "" }, { assigneeId: fx.worker.id }],
+      ["POST", "/move", { sectionId: "" }, { sectionId: fx.sectionId }],
+      ["POST", "/complete", { completeAll: "invalid" }, {}],
+      ["PUT", "/approver", { approverId: "" }, { approverId: fx.worker.id }],
     ] as const;
     const raw = async (method: string, id: string, suffix: string, body: unknown, cookie = "") => {
       const response = await fetch(`${BASE}/api/tasks/${id}${suffix}`, {
@@ -173,7 +173,7 @@ describe("one error shape for a task version (APL-2670)", () => {
       });
       return { status: response.status, text: await response.text() };
     };
-    for (const [method, suffix, invalidSchema] of routes) {
+    for (const [method, suffix, invalidSchema, validSchema] of routes) {
       const path = `${method} ${suffix || "/"}`;
       const anonymous = await raw(method, fx.id, suffix, invalidSchema);
       expect(anonymous, path).toEqual({ status: 401, text: JSON.stringify({ error: "Not signed in" }) });
@@ -187,12 +187,15 @@ describe("one error shape for a task version (APL-2670)", () => {
         [undefined, 400, REQUIRED],
         [null, 400, REQUIRED],
         ["abc", 400, INVALID],
-        [new Date(Date.parse(fx.t0) - 1000).toISOString(), 409, CONFLICT],
       ] as const) {
         const body = { ...invalidSchema, ...(version === undefined ? {} : { expectedUpdatedAt: version }) };
         const result = await raw(method, fx.id, suffix, body, fx.worker.c.cookie);
         expect(result, `${path} ${String(version)}`).toEqual({ status: expectedStatus, text: JSON.stringify(expectedBody) });
       }
+      // A stale instant is compared by the service after schema validation.
+      const stale = new Date(Date.parse(fx.t0) - 1000).toISOString();
+      const result = await raw(method, fx.id, suffix, { ...validSchema, expectedUpdatedAt: stale }, fx.lead.c.cookie);
+      expect(result, `${path} stale valid body`).toEqual({ status: 409, text: JSON.stringify(CONFLICT) });
     }
     expect(await shown(fx.worker, fx.id)).toEqual({ title: "Original", updatedAt: fx.t0 });
   });
