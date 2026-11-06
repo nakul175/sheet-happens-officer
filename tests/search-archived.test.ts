@@ -9,6 +9,7 @@ const db = vi.hoisted(() => ({
   contact: { findMany: vi.fn() },
   project: { findMany: vi.fn() },
   task: { findMany: vi.fn() },
+  comment: { findMany: vi.fn() },
 }));
 
 vi.mock("@/lib/db", () => ({ db }));
@@ -31,10 +32,35 @@ beforeEach(() => {
   db.contact.findMany.mockResolvedValue([]);
   db.project.findMany.mockResolvedValue([]);
   db.task.findMany.mockResolvedValue([]);
+  db.comment.findMany.mockResolvedValue([]);
 });
 afterEach(() => vi.unstubAllEnvs());
 
 describe("Include archived search (APL-2684)", () => {
+  it("keeps idea-only and comment hits inside the same live visible task boundary", async () => {
+    vi.stubEnv("FF_TASK_COMMENTS", "true");
+    db.comment.findMany.mockResolvedValue([{ taskId: "task-1" }]);
+    db.task.findMany.mockResolvedValue([{
+      id: "task-1", title: "Review", completedAt: null, isIdea: true,
+      assignee: { name: "Lee" }, project: { id: "project-1", name: "Private", archivedAt: null },
+    }]);
+    const found = await search(member, "secret phrase", false, true);
+    const commentWhere = argWhere(db.comment.findMany);
+    expect(commentWhere.removedAt).toBeNull();
+    expect((commentWhere.task as Where).deletedAt).toBeNull();
+    expect((commentWhere.task as Where).isIdea).toBe(true);
+    expect(((commentWhere.task as Where).project as Where).members).toEqual({ some: { userId: member.id } });
+    expect(((commentWhere.task as Where).project as Where).deletedAt).toBeNull();
+    const taskWhere = argWhere(db.task.findMany);
+    expect(taskWhere.deletedAt).toBeNull();
+    expect(taskWhere.isIdea).toBe(true);
+    expect((taskWhere.project as Where).members).toEqual({ some: { userId: member.id } });
+    expect(found.tasks.map((t) => t.id)).toEqual(["task-1"]);
+    expect(JSON.stringify(found)).not.toContain("secret phrase");
+    expect(db.organisation.findMany).not.toHaveBeenCalled();
+    expect(db.contact.findMany).not.toHaveBeenCalled();
+  });
+
   it("bounds direct legacy queries before every database search", async () => {
     const long = "b".repeat(400);
     await search(admin, long, false);
