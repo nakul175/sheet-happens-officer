@@ -57,6 +57,8 @@ it('returns the same generic 401 and records both failures without leaking the p
   const known = await account(`${prefix}known`); owned.push(known);
   const sentinel = await account(`${prefix}sentinel`); owned.push(sentinel);
   expect((await db.user.findUniqueOrThrow({ where: { id: known.id } })).orgRole).toBe('MEMBER');
+  const sessionToken = known.c.cookie.split('=')[1];
+  expect(sessionToken.length).toBeGreaterThan(20);
   const sentinelBefore = await db.user.findUniqueOrThrow({ where: { id: sentinel.id } });
   const started = new Date(Date.now() - 1000);
   const body = { password: wrongPassword };
@@ -70,6 +72,7 @@ it('returns the same generic 401 and records both failures without leaking the p
   expect(knownReply.setCookie).toBeNull();
   expect(unknownReply.setCookie).toBeNull();
   expect(JSON.stringify([knownReply.json, unknownReply.json])).not.toContain(wrongPassword);
+  expect(JSON.stringify([knownReply.json, unknownReply.json])).not.toContain(sessionToken);
 
   const attempts = await db.loginAttempt.findMany({ where: { email: { in: [known.email, unknownEmail] } } });
   expect(attempts).toHaveLength(2);
@@ -81,9 +84,12 @@ it('returns the same generic 401 and records both failures without leaking the p
   expect(auditRows.map((row) => [String((row.data as { email: string }).email), row.actorId]).sort())
     .toEqual([[known.email, known.id], [unknownEmail, null]].sort());
   expect(JSON.stringify(auditRows)).not.toContain(wrongPassword);
-  expect(readFileSync('server.log', 'utf8')).not.toContain(wrongPassword);
+  expect(JSON.stringify(auditRows)).not.toContain(sessionToken);
+  const serverLog = readFileSync('server.log', 'utf8');
+  expect(serverLog).not.toContain(wrongPassword);
+  expect(serverLog).not.toContain(sessionToken);
   expect(await db.user.findUniqueOrThrow({ where: { id: sentinel.id } })).toEqual(sentinelBefore);
 
   verified = true;
-  writeFileSync(`${evidenceDir}/verification.json`, JSON.stringify({ knownAndUnknown: 'same generic 401', noCookieIssued: true, failureAttempts: 2, failedAuditRows: 2, secretAbsentFromResponsesAuditAndServerLog: true, unrelatedSentinelPreserved: true }, null, 2));
+  writeFileSync(`${evidenceDir}/verification.json`, JSON.stringify({ knownAndUnknown: 'same generic 401', noCookieIssued: true, failureAttempts: 2, failedAuditRows: 2, passwordAndTokenAbsentFromResponsesAuditAndServerLog: true, unrelatedSentinelPreserved: true }, null, 2));
 });
