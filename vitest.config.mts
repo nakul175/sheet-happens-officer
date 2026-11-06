@@ -28,6 +28,7 @@ export default defineConfig({
       "tests/e2e/stories/SHO-REG-PROJECTS-03.spec.ts", // Playwright project sections acceptance
       "tests/e2e/stories/SHO-REG-PROJECTS-04.spec.ts", // Playwright task Trash route and controls acceptance
       "tests/e2e/stories/SHO-REG-PROJECTS-05.spec.ts", // Playwright project notes and activity acceptance
+      "tests/e2e/stories/SHO-REG-PROJECTS-06.spec.ts", // Playwright saved-view ownership journey
       "tests/e2e/stories/SHO-REG-SEARCH-01.spec.ts", // Playwright search archived-contact acceptance
       "tests/e2e/stories/SHO-REG-SEARCH-02.spec.ts", // Playwright search input-bound acceptance
       "tests/e2e/stories/SHO-REG-HOME-01.spec.ts", // Playwright Home reconciliation acceptance
