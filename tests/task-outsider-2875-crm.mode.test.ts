@@ -4,7 +4,7 @@
 // Test data: ZZ-TEST names and nakul17+ aliases, set up and cleaned up through the API only.
 import "dotenv/config";
 import { spawn } from "node:child_process";
-import { closeSync, existsSync, mkdtempSync, openSync, readdirSync, readFileSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import net from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -98,11 +98,31 @@ beforeAll(async () => {
 }, 120_000);
 
 afterAll(async () => {
+  let verified = false;
   try {
-    if (seed.admin && seed.dealId) await send(seed.admin.cookie, "POST", `/api/projects/${seed.dealId}/archive`, "{}");
-    if (seed.sa) for (const p of seed.people) await send(seed.sa.cookie, "POST", `/api/team/${p.id}/deactivate`, JSON.stringify({ reassign: "leaders" }));
+    if (seed.admin && seed.dealId) {
+      const archived = await send(seed.admin.cookie, "POST", `/api/projects/${seed.dealId}/archive`, "{}");
+      expect(archived.status, archived.body).toBe(200);
+      const stored = await send(seed.admin.cookie, "GET", `/api/projects/${seed.dealId}`);
+      expect(stored.status, stored.body).toBe(200);
+      expect((stored.json!.project as { archived: boolean }).archived).toBe(true);
+    }
+    if (seed.sa) for (const p of seed.people) {
+      const deactivated = await send(seed.sa.cookie, "POST", `/api/team/${p.id}/deactivate`, JSON.stringify({ reassign: "leaders" }));
+      expect(deactivated.status, deactivated.body).toBe(200);
+      const stored = await send(seed.sa.cookie, "GET", `/api/team/${p.id}`);
+      expect(stored.status, stored.body).toBe(200);
+      expect((stored.json!.person as { status: string }).status).toBe("DEACTIVATED");
+    }
+    verified = !!seed.dealId && seed.people.length === 3;
   } finally {
     killGroup(server.pid);
+    if (server.outbox) rmSync(server.outbox, { recursive: true, force: true });
+  }
+  if (verified) {
+    const dir = path.join(root, "test-results/search-crm-admins");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(path.join(dir, "cleanup.json"), JSON.stringify({ dealArchived: true, peopleDeactivated: seed.people.length, ownedServerKillInvoked: true, outboxRemoved: true, disposableCiDatabase: true }, null, 2));
   }
 });
 
