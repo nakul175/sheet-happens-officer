@@ -1,6 +1,6 @@
 # Performance and operational acceptance
 
-Status: NOT MEASURED. Health200 is availability evidence, not proof of latency, scale, recovery or data integrity. Proposed recovery targets: one hour maximum data loss (RPO), four hours restore time (RTO), pending owner approval.
+Status: NOT MEASURED. Health200 is availability evidence, not proof of latency, scale, recovery or data integrity. Owner-approved recovery targets (7 November 2026): one hour maximum data loss (RPO), four hours to verified service recovery (RTO). Neither target has been demonstrated by a real restore.
 
 Use a disposable database and synthetic fixtures, never load-test production under this audit. Pin the candidate and hardware. Representative fixture proposal: 100 users, 100 projects, 10,000 tasks, 1,000 deals and corresponding activity history; product owner must confirm whether it reflects expected use. Capture data shape, browser/network conditions, concurrency and warm/cold cache state.
 

@@ -47,4 +47,21 @@ describe("QA mail sink database containment", () => {
     expect(accounts.status).toBe(404);
     expect(db.$transaction).not.toHaveBeenCalled();
   });
+
+  it("denies absent and incorrect QA tokens on both routes without database work", async () => {
+    for (const [key, value] of Object.entries(staging)) vi.stubEnv(key, value);
+    for (const token of [undefined, "incorrect-synthetic-token"]) {
+      const headers: Record<string, string> = token ? { "x-qa-token": token } : {};
+      const mail = await qaMailResponse(new Request("https://staging.sheethappensofficer.com/api/qa/mail?to=zz-test@example.com", { headers }));
+      const accounts = await qaAccounts(new Request("https://staging.sheethappensofficer.com/api/qa/accounts", {
+        method: "POST", headers: { ...headers, "content-type": "application/json" },
+        body: JSON.stringify({ accounts: [{ email: "zz-test@example.com", password: "Synthetic123", role: "ADMIN" }] }),
+      }));
+      expect(mail.status).toBe(401);
+      expect(accounts.status).toBe(401);
+      expect(mail.headers.get("cache-control")).toBe("no-store");
+      expect(accounts.headers.get("cache-control")).toBe("no-store");
+    }
+    expect(db.$transaction).not.toHaveBeenCalled();
+  });
 });
