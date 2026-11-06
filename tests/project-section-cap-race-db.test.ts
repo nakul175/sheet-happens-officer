@@ -71,7 +71,9 @@ it('accepts one overlapping eighth section and rejects the ninth without changin
     await vi.waitFor(() => expect(arrived).toBe(2), { timeout: 5000 });
     const outcomes = await pending;
     expect(outcomes.filter(result => result.status === 'fulfilled')).toHaveLength(1);
-    expect(outcomes.filter(result => result.status === 'rejected')).toEqual([expect.objectContaining({ reason: expect.objectContaining({ status: 409 }) })]);
+    const rejected = outcomes.filter(result => result.status === 'rejected');
+    expect(rejected).toHaveLength(1);
+    expect(String(rejected[0].reason?.message)).toContain('A project has at most 8 sections');
     const sections = await db.section.findMany({ where: { projectId }, orderBy: { position: 'asc' } });
     expect(sections).toHaveLength(8);
     expect(sections.map(section => section.position)).toEqual([0, 1, 2, 3, 4, 5, 6, 7]);
