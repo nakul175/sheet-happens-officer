@@ -9,7 +9,7 @@ The legacy Restore check is now a **presence probe**, not recovery certification
 5. Start the corresponding app revision with synthetic/isolated external dependencies; exercise sign-in, project/task/deal read/write/Undo and suite fail-closed boundaries. No mail/consent/schedules against real recipients.
 6. Capture redacted per-check outcomes, observed snapshot loss and elapsed restore time; explicitly pass/fail approved RPO/RTO. Stop owned resources and preserve evidence. Receiving engineer repeats using this runbook.
 
-Current status: checker false-assurance fixed in candidate code; real restore acceptance remains BLOCKED on backup/reference access and agreed targets. Nothing in this document authorizes production changes.
+Current status: checker false-assurance fixed in candidate code; the owner approved the targets on 7 November 2026. Real restore acceptance remains open pending an authorized, isolated provider-backup restore with trusted source containment, independent reference evidence, and measured data loss/service recovery. Nothing in this document authorizes production changes or a billed restored cluster.
 
 Owner-approved targets (7 November 2026): RPO at most one hour of lost changes; RTO at most four hours from incident declaration to verified service recovery. These are not measured capabilities. Validate provider backup/PITR coverage and measure a real isolated restore before claiming either target is met.
 
