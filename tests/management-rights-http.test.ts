@@ -87,19 +87,20 @@ async function snapshot(id: string) {
 
 it('task creation validates actor, assignee and title without side effects, then persists one eligible assignment', async () => {
   const f = await fixture(), path = `/api/projects/${f.id}/tasks`;
+  const dueDate = '2027-01-20';
   const before = await snapshot(f.id);
   const denied: [Account, unknown, number][] = [
-    [people.viewer, { title: 'Denied Viewer create', sectionId: f.first }, 403],
-    [people.editor, { title: 'Denied Viewer assignee', sectionId: f.first, assigneeId: people.viewer.id }, 400],
-    [people.editor, { title: 'Denied outsider assignee', sectionId: f.first, assigneeId: people.outsider.id }, 400],
-    [people.editor, { title: '   ', sectionId: f.first }, 400],
-    [people.editor, { title: 'x'.repeat(501), sectionId: f.first }, 400],
+    [people.viewer, { title: 'Denied Viewer create', sectionId: f.first, dueDate }, 403],
+    [people.editor, { title: 'Denied Viewer assignee', sectionId: f.first, assigneeId: people.viewer.id, dueDate }, 400],
+    [people.editor, { title: 'Denied outsider assignee', sectionId: f.first, assigneeId: people.outsider.id, dueDate }, 400],
+    [people.editor, { title: '   ', sectionId: f.first, dueDate }, 400],
+    [people.editor, { title: 'x'.repeat(501), sectionId: f.first, dueDate }, 400],
   ];
   for (const [who, body, status] of denied) {
     expect((await who.c.post(path, body)).status).toBe(status);
     expect(await snapshot(f.id)).toEqual(before);
   }
-  const created = await people.editor.c.post(path, { title: 'ZZ-TEST eligible assignment', sectionId: f.first, assigneeId: people.target.id });
+  const created = await people.editor.c.post(path, { title: 'ZZ-TEST eligible assignment', sectionId: f.first, assigneeId: people.target.id, dueDate });
   expect(created.status).toBe(201);
   const id = created.json.task.id as string;
   const reloaded = await people.editor.c.get(`/api/tasks/${id}`);
