@@ -78,7 +78,7 @@ beforeAll(async () => {
   const port = await freePort();
   server.outbox = mkdtempSync(path.join(tmpdir(), "sho-apl2875-admins-"));
   const env: NodeJS.ProcessEnv = {
-    ...process.env, NODE_ENV: "production", CRM_VISIBLE: "admins", EMAIL_OUTBOX_DIR: server.outbox,
+    ...process.env, NODE_ENV: "production", CRM_VISIBLE: "admins", SEARCH_STAGE_A_ENABLED: "false", EMAIL_OUTBOX_DIR: server.outbox,
     APP_URL: `http://127.0.0.1:${port}`, PORT: String(port), SUPER_ADMIN_EMAILS: ROOT_EMAIL,
     JOB_SECRET: process.env.JOB_SECRET || "replace-with-a-token-of-at-least-16-chars",
   };
@@ -153,6 +153,26 @@ describe("qa:TC missing APL-2875 T3: a task in a hidden deal answers like a miss
     expect(made.status, made.body).toBe(201);
     const t3 = (made.json!.task as { id: string }).id;
     const before = (await send(seed.admin.cookie, "GET", `/api/tasks/${t3}`)).body;
+
+    // Search must apply the same CRM mode to a deal and its task, even when the
+    // non-admin person is a project member. Keep the checks in this real
+    // CRM_VISIBLE=admins server rather than mutating a running process's env.
+    for (const [query, key, id] of [
+      [`ZZ-TEST APL-2875 deal ${RUN}`, "projects", seed.dealId],
+      [`ZZ-TEST deal task ${RUN}`, "tasks", t3],
+    ] as const) {
+      const path = `/api/search?q=${encodeURIComponent(query)}`;
+      const allowed = await send(seed.admin.cookie, "GET", path);
+      expect(allowed.status, allowed.body).toBe(200);
+      expect((allowed.json![key] as { id: string }[]).map(row => row.id)).toContain(id);
+      for (const who of [editor, outsider]) {
+        const hidden = await send(who.cookie, "GET", path);
+        expect(hidden.status, hidden.body).toBe(200);
+        expect((hidden.json![key] as { id: string }[]).map(row => row.id)).not.toContain(id);
+        expect(hidden.body).not.toContain(seed.dealId);
+        expect(hidden.body).not.toContain(t3);
+      }
+    }
 
     for (const [label, who] of [["deal member", editor], ["outsider", outsider]] as const) {
       for (const r of routes(seed.admin.id)) {
