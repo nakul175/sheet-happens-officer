@@ -106,6 +106,16 @@ for (const scenario of ['editor', 'viewer', 'outsider', 'removed-creator'] as co
       ['POST', path + '/leader', { newLeaderId: people.target.id }], ['POST', path + '/sections', { name: 'Denied section' }],
       ['PATCH', path + '/sections/' + f.first, { name: 'Denied section rename' }], ['DELETE', path + '/sections/' + f.first + '?moveTo=' + f.second],
     ];
+    if (scenario === 'viewer') {
+      const taskPath = `/api/tasks/${f.task.id}`;
+      expect((await who.c.get(taskPath)).status).toBe(200);
+      expect((await who.c.get(path + '/tasks')).status).toBe(200);
+      calls.push(
+        ['POST', path + '/tasks', { title: 'Denied task', dueDate: '2026-11-30' }],
+        ['PATCH', taskPath, { title: 'Denied task edit', expectedUpdatedAt: f.task.updatedAt.toISOString() }],
+        ['DELETE', taskPath],
+      );
+    }
     for (const [method, url, body] of calls) {
       const r = await who.c.call(method, url, body);
       expect(r.status, method + ' ' + url).toBe(expected);

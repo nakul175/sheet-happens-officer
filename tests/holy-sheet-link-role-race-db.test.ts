@@ -17,22 +17,26 @@ vi.mock("@/lib/central-status", () => ({ centralSessionActive: authority.active 
 const prefix = `holy-link-role-${randomUUID()}`;
 const admin = { id: `${prefix}-admin`, orgRole: "ADMIN" as const };
 const leader = { id: `${prefix}-leader`, orgRole: "MEMBER" as const };
+const viewer = { id: `${prefix}-viewer`, orgRole: "MEMBER" as const };
 const subject = "12345678-1234-4234-8234-123456789abc";
 const pageId = randomUUID();
 const completed: string[] = [];
 const transact = db.$transaction.bind(db);
-let workspaceId: string, projectId: string, sessionId: string, safe = false;
+let workspaceId: string, projectId: string, taskId: string, sessionId: string, safe = false;
 
 beforeAll(async () => {
   assertLocalFixture(process.env.DATABASE_URL); safe = true;
   vi.stubEnv("FF_HOLY_SHEET", "1");
   vi.stubEnv("HOLY_SHEET_ORIGIN", "https://holysheet.aplyd.org");
   workspaceId = (await getOrCreateWorkspace()).id;
-  for (const actor of [admin, leader]) {
+  for (const actor of [admin, leader, viewer]) {
     await db.user.create({ data: { id: actor.id, workspaceId, name: actor.id, email: `${actor.id}@example.invalid`, passwordHash: "unused", emailVerifiedAt: new Date(), orgRole: actor.orgRole } });
   }
   projectId = (await db.project.create({ data: { workspaceId, name: prefix } })).id;
   await db.projectMember.create({ data: { projectId, userId: leader.id, role: "LEADER" } });
+  await db.projectMember.create({ data: { projectId, userId: viewer.id, role: "VIEWER" } });
+  const section = await db.section.create({ data: { projectId, name: `${prefix}-section`, position: 0 } });
+  taskId = (await db.task.create({ data: { workspaceId, projectId, sectionId: section.id, title: `${prefix}-task`, assigneeId: leader.id, createdById: leader.id } })).id;
   sessionId = (await db.session.create({ data: { userId: admin.id, tokenHash: prefix, expiresAt: new Date(Date.now() + 3_600_000), centralLink: { create: { subject, sessionUid: prefix } } } })).id;
   authority.sessionId.mockResolvedValue(sessionId);
   authority.active.mockResolvedValue(true);
@@ -49,9 +53,9 @@ afterAll(async () => {
   try {
     await db.session.deleteMany({ where: { id: sessionId } });
     await db.project.deleteMany({ where: { id: projectId } });
-    await db.user.deleteMany({ where: { id: { in: [admin.id, leader.id] } } });
+    await db.user.deleteMany({ where: { id: { in: [admin.id, leader.id, viewer.id] } } });
     expect(await db.holySheetLink.count({ where: { projectId } })).toBe(0);
-    expect(await db.user.count({ where: { id: { in: [admin.id, leader.id] } } })).toBe(0);
+    expect(await db.user.count({ where: { id: { in: [admin.id, leader.id, viewer.id] } } })).toBe(0);
     cleanup = true;
   } finally {
     vi.unstubAllEnvs();
@@ -68,6 +72,32 @@ function pauseBeforeWrite() {
   }) as typeof db.$transaction);
   return { ready: async () => { await vi.waitFor(() => expect(arrived).toBe(true), { timeout: 5000 }); spy.mockRestore(); }, release };
 }
+
+it("Viewer cannot add or remove project or task document links, with stored state unchanged", async () => {
+  const before = await Promise.all([
+    db.project.findUniqueOrThrow({ where: { id: projectId } }),
+    db.task.findUniqueOrThrow({ where: { id: taskId } }),
+    db.holySheetLink.findMany({ where: { projectId } }),
+    db.holySheetDefault.findUnique({ where: { projectId } }),
+    db.actionLog.findMany({ where: { projectId } }),
+    db.auditLog.findMany({ where: { actorId: viewer.id } }),
+  ]);
+  for (const origin of [{ kind: "projects", id: projectId }, { kind: "tasks", id: taskId }] as const) {
+    for (const remove of [false, true]) {
+      await expect(changeDocument(viewer, origin, { pageId, subject, remove }))
+        .rejects.toMatchObject({ status: 403 });
+      expect(await Promise.all([
+        db.project.findUniqueOrThrow({ where: { id: projectId } }),
+        db.task.findUniqueOrThrow({ where: { id: taskId } }),
+        db.holySheetLink.findMany({ where: { projectId } }),
+        db.holySheetDefault.findUnique({ where: { projectId } }),
+        db.actionLog.findMany({ where: { projectId } }),
+        db.auditLog.findMany({ where: { actorId: viewer.id } }),
+      ])).toEqual(before);
+    }
+  }
+  completed.push("viewer-document-links-denied");
+});
 
 it("denies a former Admin without a project seat after role demotion during picker save", async () => {
   const pause = pauseBeforeWrite();
