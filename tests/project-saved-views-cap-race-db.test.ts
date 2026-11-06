@@ -4,7 +4,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { afterAll, beforeAll, expect, it, vi } from 'vitest';
 import { db } from '@/lib/db';
 import { getOrCreateWorkspace } from '@/lib/workspace';
-import { createView } from '@/lib/views';
+import { createView, renameView } from '@/lib/views';
 import { assertLocalFixture } from './e2e/local-fixture-guard';
 
 vi.mock('next/server', () => ({ connection: vi.fn() }));
@@ -54,4 +54,34 @@ it('keeps at most ten views when two creates compete for the tenth slot', async 
   ]);
   expect(await db.savedView.count({ where: { userId: actor.id, projectId } })).toBe(10);
   completed.push('concurrent-cap-one-winner');
+}, 20_000);
+
+it('keeps names unique ignoring case when two views are renamed together', async () => {
+  const rows = await db.savedView.findMany({ where: { userId: actor.id, projectId }, orderBy: { position: 'asc' }, take: 2 });
+  expect(rows).toHaveLength(2);
+  const original = db.savedView.findFirst.bind(db.savedView);
+  let release!: () => void, arrived = 0;
+  const held = new Promise<void>((resolve) => { release = resolve; });
+  const spy = vi.spyOn(db.savedView, 'findFirst').mockImplementation((async (args) => {
+    const result = await original(args);
+    if (args?.where?.name && ++arrived <= 2) await held;
+    return result;
+  }) as typeof db.savedView.findFirst);
+  const pending = Promise.allSettled([
+    renameView(actor, rows[0].id, 'Same'),
+    renameView(actor, rows[1].id, 'same'),
+  ]);
+  try {
+    await vi.waitFor(() => expect(arrived).toBe(2), { timeout: 5000 });
+    spy.mockRestore();
+    release();
+    const results = await pending;
+    expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+    expect(results.filter((r) => r.status === 'rejected')).toEqual([
+      expect.objectContaining({ reason: expect.objectContaining({ status: 409 }) }),
+    ]);
+    const named = await db.savedView.findMany({ where: { userId: actor.id, projectId } });
+    expect(named.filter((v) => v.name.toLowerCase() === 'same')).toHaveLength(1);
+    completed.push('concurrent-rename-case-fold-one-winner');
+  } finally { release(); spy.mockRestore(); await pending; }
 }, 20_000);
