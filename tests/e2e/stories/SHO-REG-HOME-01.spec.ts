@@ -8,6 +8,10 @@ const day = (offset: number) => new Date(Date.now() + 5.5 * 3600_000 + offset * 
 
 test('SHO-REG-HOME-01 partial: Home cards and My tasks reconcile for owned work', async ({ browser, later }) => {
   if (!local2691) throw new Error('This Home audit case uses only the guarded local test database.');
+  const database = new URL(process.env.DATABASE_URL ?? '');
+  if (!['localhost', '127.0.0.1', '[::1]'].includes(database.hostname) ||
+      !/^\/sho_test(?:_[\w-]+)?$/.test(database.pathname) || process.env.TASKBOARD_URL !== BASE)
+    throw new Error('Use one loopback app and synthetic sho_test database for Home audit fixtures.');
   const fixture = randomUUID();
   const evidenceDir = 'test-results/home-reconciliation';
   const data = zzTestData(`home-${fixture}`);
