@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { afterAll, afterEach, beforeAll, expect, it, vi } from 'vitest';
 import { db } from '@/lib/db';
-import { removeNote } from '@/lib/records';
+import { createNote, removeNote } from '@/lib/records';
 import { getOrCreateWorkspace } from '@/lib/workspace';
 import type { Tx } from '@/lib/access';
 import { assertLocalFixture } from './e2e/local-fixture-guard';
@@ -32,7 +32,10 @@ beforeAll(async () => {
 
 afterEach(async () => {
   vi.restoreAllMocks();
-  if (safe) await db.user.update({ where: { id: admin.id }, data: { orgRole: 'ADMIN' } });
+  if (safe) {
+    await db.user.update({ where: { id: admin.id }, data: { orgRole: 'ADMIN' } });
+    await db.user.update({ where: { id: author.id }, data: { deactivatedAt: null } });
+  }
 });
 
 afterAll(async () => {
@@ -40,6 +43,8 @@ afterAll(async () => {
   let cleanup = false;
   try {
     expect((await db.project.findUniqueOrThrow({ where: { id: sentinelId } })).name).toBe(`${fixtureId}-sentinel`);
+    const discovered = await db.note.findMany({ where: { organisationId: { in: organisationIds } }, select: { id: true } });
+    for (const row of discovered) if (!noteIds.includes(row.id)) noteIds.push(row.id);
     await db.notification.deleteMany({ where: { projectId: { in: projectIds } } });
     await db.actionLog.deleteMany({ where: { OR: [{ projectId: { in: projectIds } }, { targetType: 'note', targetId: { in: noteIds } }] } });
     await db.auditLog.deleteMany({ where: { actorId: { in: userIds } } });
@@ -217,4 +222,79 @@ it('rolls back the note removal when its activity write fails, then retries', as
   await removeNote(author, note.id);
   expect((await snapshot(note.id)).note.removedAt).not.toBeNull();
   completed.push('activity-rollback-retry');
+});
+
+const noteInput = (projectId: string) => ({ kind: 'MEETING' as const, date: '2026-11-06', text: `${fixtureId} new note`, projectId });
+
+it('refuses a note creation after its author loses the deal seat during preflight', async () => {
+  const { project, note } = await seed();
+  const organisationId = note.organisationId;
+  const pause = pauseBeforeWrite(1);
+  const pending = Promise.allSettled([createNote(author, organisationId, noteInput(project.id))]);
+  try {
+    await pause.ready();
+    await db.projectMember.delete({ where: { projectId_userId: { projectId: project.id, userId: author.id } } });
+    const before = await db.note.count({ where: { organisationId } });
+    pause.release();
+    expect(await pending).toEqual([expect.objectContaining({ status: 'rejected', reason: expect.objectContaining({ status: 404 }) })]);
+    expect(await db.note.count({ where: { organisationId } })).toBe(before);
+    completed.push('create-removed-member-after-preflight');
+  } finally { pause.release(); await pending; }
+}, 20_000);
+
+it('refuses note creation after the organisation is archived during preflight', async () => {
+  const { project, note } = await seed();
+  const organisationId = note.organisationId;
+  const pause = pauseBeforeWrite(1);
+  const pending = Promise.allSettled([createNote(author, organisationId, noteInput(project.id))]);
+  try {
+    await pause.ready();
+    await db.organisation.update({ where: { id: organisationId }, data: { archivedAt: new Date() } });
+    const before = await db.note.count({ where: { organisationId } });
+    pause.release();
+    expect(await pending).toEqual([expect.objectContaining({ status: 'rejected', reason: expect.objectContaining({ status: 409 }) })]);
+    expect(await db.note.count({ where: { organisationId } })).toBe(before);
+    completed.push('create-archived-org-after-preflight');
+  } finally { pause.release(); await pending; }
+}, 20_000);
+
+it('refuses note creation after its author is deactivated during preflight', async () => {
+  const { project, note } = await seed();
+  const organisationId = note.organisationId;
+  const pause = pauseBeforeWrite(1);
+  const pending = Promise.allSettled([createNote(author, organisationId, noteInput(project.id))]);
+  try {
+    await pause.ready();
+    await db.user.update({ where: { id: author.id }, data: { deactivatedAt: new Date() } });
+    const before = await db.note.count({ where: { organisationId } });
+    pause.release();
+    expect(await pending).toEqual([expect.objectContaining({ status: 'rejected', reason: expect.objectContaining({ status: 404 }) })]);
+    expect(await db.note.count({ where: { organisationId } })).toBe(before);
+    completed.push('create-deactivated-author-after-preflight');
+  } finally { pause.release(); await pending; }
+}, 20_000);
+
+it('refuses a deal note when the organisation leaves that deal during preflight', async () => {
+  const { project, note } = await seed();
+  const organisationId = note.organisationId;
+  const pause = pauseBeforeWrite(1);
+  const pending = Promise.allSettled([createNote(author, organisationId, noteInput(project.id))]);
+  try {
+    await pause.ready();
+    await db.dealParty.deleteMany({ where: { projectId: project.id, organisationId } });
+    const before = await db.note.count({ where: { organisationId } });
+    pause.release();
+    expect(await pending).toEqual([expect.objectContaining({ status: 'rejected', reason: expect.objectContaining({ status: 400 }) })]);
+    expect(await db.note.count({ where: { organisationId } })).toBe(before);
+    completed.push('create-deal-party-removed-after-preflight');
+  } finally { pause.release(); await pending; }
+}, 20_000);
+
+it('still creates a deal note for its current Editor with one activity event', async () => {
+  const { project, note } = await seed();
+  const created = await createNote(author, note.organisationId, noteInput(project.id));
+  noteIds.push(created.id);
+  expect((await db.note.findUniqueOrThrow({ where: { id: created.id } })).projectId).toBe(project.id);
+  expect(await db.actionLog.count({ where: { targetType: 'note', targetId: created.id, action: 'note.created' } })).toBe(1);
+  completed.push('create-editor-positive');
 });
