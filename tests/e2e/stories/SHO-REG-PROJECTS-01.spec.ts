@@ -1,4 +1,5 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { test, local2691 } from '../helpers/2691-admin';
 import { account } from '../local-api';
 import { expect, zz, archiveProject } from './qa';
@@ -6,8 +7,31 @@ import { newProject } from '../helpers/migration-2731';
 
 test('SHO-REG-PROJECTS-01 API: create, edit, reload, activity and validation', async ({ admin, later }) => {
   if (!local2691) throw new Error('This project acceptance case uses only the guarded local test database.');
+  const fixture = randomUUID();
+  const evidenceDir = 'test-results/project-create-edit-journey';
+  const ownedProjects: string[] = [];
+  let outsiderId = '';
+  later(async () => {
+    for (const id of ownedProjects) {
+      const result = await admin.api.get(`/api/projects/${id}`);
+      expect(result.status).toBe(200);
+      expect(result.json.project.archived).toBe(true);
+    }
+    if (outsiderId) {
+      const result = await admin.api.get(`/api/team/${outsiderId}`);
+      expect(result.status).toBe(200);
+      expect(result.json.person.status).toBe('DEACTIVATED');
+    }
+    mkdirSync(evidenceDir, { recursive: true });
+    writeFileSync(`${evidenceDir}/cleanup.json`, JSON.stringify({ fixture, ownedProjects, outsiderId, cleanup: true }, null, 2));
+  });
+  const sentinel = await newProject(admin, later, { label: 'project create edit sentinel' }); ownedProjects.push(sentinel.id);
+  const sentinelBefore = (await admin.api.get(`/api/projects/${sentinel.id}`)).json.project;
+  const sentinelFingerprint = createHash('sha256').update(JSON.stringify(sentinelBefore)).digest('hex');
   const p = await newProject(admin, later, { label: 'project create edit reload' });
+  ownedProjects.push(p.id);
   const outsider = await account(zz('project outsider'), `nakul17+zz-projects-01-${randomUUID()}@aplyd.com`);
+  outsiderId = outsider.id;
   later(() => admin.api.post(`/api/team/${outsider.id}/deactivate`, { reassign: 'leaders' }));
   const name = zz('Renamed project');
   const changed = await admin.api.patch(`/api/projects/${p.id}`, { name, description: 'A persisted project description' });
@@ -30,6 +54,10 @@ test('SHO-REG-PROJECTS-01 API: create, edit, reload, activity and validation', a
   }
   expect((await outsider.c.patch(`/api/projects/${p.id}`, { name: 'Unauthorized' })).status).toBe(404);
   expect((await admin.api.get(`/api/projects/${p.id}`)).json.project).toMatchObject({ name, description: 'A persisted project description' });
+  const sentinelAfter = (await admin.api.get(`/api/projects/${sentinel.id}`)).json.project;
+  expect(createHash('sha256').update(JSON.stringify(sentinelAfter)).digest('hex')).toBe(sentinelFingerprint);
+  mkdirSync(evidenceDir, { recursive: true });
+  writeFileSync(`${evidenceDir}/verification.json`, JSON.stringify({ fixture, projectId: p.id, sentinelId: sentinel.id, sentinelFingerprint, sentinelPreserved: true, validationRejected: 3, outsiderDenied: true }, null, 2));
 });
 
 test('SHO-REG-PROJECTS-01 screen: create, edit, reload and inspect details', async ({ admin, later }) => {
@@ -55,6 +83,8 @@ test('SHO-REG-PROJECTS-01 screen: create, edit, reload and inspect details', asy
   await expect(page.getByText(updatedName, { exact: true }).first()).toBeVisible();
   await expect(page.getByText('Updated description', { exact: true })).toBeVisible();
   expect((await admin.api.get(`/api/projects/${id}`)).json.project).toMatchObject({ name: updatedName, description: 'Updated description' });
+  mkdirSync('test-results/project-create-edit-journey', { recursive: true });
+  await page.screenshot({ path: 'test-results/project-create-edit-journey/edited-settings.png', fullPage: true });
   await page.goto(`/projects/${id}/activity`);
   await expect(page.getByText(/renamed the project/i).first()).toBeVisible();
 });
