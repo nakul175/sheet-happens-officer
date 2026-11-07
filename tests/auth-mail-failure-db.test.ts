@@ -17,7 +17,7 @@ import { POST as forgotPassword } from "@/app/api/auth/forgot-password/route";
 const fixture = randomUUID();
 const userId = `recovery-delivery-${fixture}`;
 const sentinelId = `recovery-sentinel-${fixture}`;
-const email = `${userId}@example.invalid`;
+const email = `nakul17+zz-${userId}@aplyd.com`;
 let safe = false;
 
 beforeAll(async () => {
