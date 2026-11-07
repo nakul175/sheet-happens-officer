@@ -141,12 +141,24 @@ test('SHO-REG-SEARCH-01 partial: Member search excludes foreign and trashed task
   expect(sentinelBefore.status).toBe(200);
   expect((await admin.api.del(`/api/tasks/${trashedTask}`)).status).toBe(204);
 
-  const response = await member.api.get(`/api/search?q=${encodeURIComponent(query)}`);
-  expect(response.status, JSON.stringify(response.json)).toBe(200);
-  const visible = (response.json.tasks as { id: string }[]).map(row => row.id);
-  expect(visible).toContain(ownTask);
-  expect(visible).not.toContain(foreignTask);
-  expect(visible).not.toContain(trashedTask);
+  // Archive and idea toggles must not widen a Member's task boundary or leak a trashed hit.
+  for (const archived of [false, true]) {
+    for (const ideasOnly of [false, true]) {
+      const flags = `${archived ? '&archived=true' : ''}${ideasOnly ? '&idea=true' : ''}`;
+      const response = await member.api.get(`/api/search?q=${encodeURIComponent(query)}${flags}`);
+      expect(response.status, JSON.stringify(response.json)).toBe(200);
+      const visible = (response.json.tasks as { id: string }[]).map(row => row.id);
+      if (ideasOnly) expect(visible).not.toContain(ownTask);
+      else expect(visible).toContain(ownTask);
+      expect(visible).not.toContain(foreignTask);
+      expect(visible).not.toContain(trashedTask);
+      const payload = JSON.stringify(response.json);
+      expect(payload).not.toContain(foreignTask);
+      expect(payload).not.toContain(trashedTask);
+      expect(payload).not.toContain(`${query} foreign`);
+      expect(payload).not.toContain(`${query} trash`);
+    }
+  }
 
   await member.page.goto('/search');
   await member.page.getByRole('searchbox', { name: 'Search' }).fill(query);
