@@ -181,6 +181,27 @@ it("denies a task link after the task moves projects during picker save", async 
   }
 }, 20_000);
 
+it("denies a document link when its SHO session is revoked after picker preflight", async () => {
+  const revokedPage = randomUUID();
+  const beforeDefault = await db.holySheetDefault.findUnique({ where: { projectId } });
+  const pause = pauseBeforeWrite();
+  const pending = Promise.allSettled([changeDocument(admin, { kind: "projects", id: projectId }, {
+    pageId: revokedPage, subject, spaceId: `${prefix}-revoked-space`, setDefault: true,
+  })]);
+  try {
+    await pause.ready();
+    await db.session.update({ where: { id: sessionId }, data: { revokedAt: new Date() } });
+    pause.release();
+    expect(await pending).toEqual([expect.objectContaining({ status: "rejected", reason: expect.objectContaining({ status: 401 }) })]);
+    expect(await db.holySheetLink.count({ where: { projectId, pageId: revokedPage } })).toBe(0);
+    expect(await db.holySheetDefault.findUnique({ where: { projectId } })).toEqual(beforeDefault);
+    completed.push("revoked-session-no-link");
+  } finally {
+    pause.release(); await pending;
+    await db.session.update({ where: { id: sessionId }, data: { revokedAt: null } });
+  }
+}, 20_000);
+
 it("returns a retryable conflict while the Admin account role is locked", async () => {
   const lockedPage = randomUUID();
   let release!: () => void, reached!: () => void;
