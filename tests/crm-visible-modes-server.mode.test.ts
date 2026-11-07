@@ -5,12 +5,13 @@
 // A missing build, or a mode that never answers /api/health, fails this file.
 import "dotenv/config";
 import { spawn, type ChildProcess } from "node:child_process";
-import { closeSync, existsSync, mkdtempSync, openSync, readdirSync, readFileSync, readlinkSync, rmSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, readlinkSync, rmSync, writeFileSync } from "node:fs";
 import net from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { chromium, expect as browserExpect } from "@playwright/test";
 import { db } from "../src/lib/db";
 import { HIDDEN_DEAL_TEXT } from "../src/lib/feed";
 import { istDate, PW } from "./helpers";
@@ -1029,6 +1030,61 @@ describe("CRM_VISIBLE modes are tested against a real server per mode", () => {
         expect(person.text, `${label} visible person`).toContain(deal);
         expect(direct.text, `${label} visible deal`).toContain(deal);
       }
+    }
+
+    const browser = await chromium.launch({ headless: true, ...(process.env.SHO_BROWSER_EXECUTABLE ? { executablePath: process.env.SHO_BROWSER_EXECUTABLE } : {}) });
+    try {
+      const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
+      await context.addCookies([{ name: "sho_session", value: admin.cookie.slice("sho_session=".length), domain: new URL(off.base).hostname, path: "/", httpOnly: true, sameSite: "Lax" }]);
+      const page = await context.newPage();
+      const evidence = path.join(root, "test-results", "deal-post-deactivation");
+      mkdirSync(evidence, { recursive: true });
+
+      await page.goto(`${off.base}/my-tasks`);
+      await page.getByRole("button", { name: /^Notifications/ }).click();
+      const dialog = page.getByRole("dialog", { name: "Notifications" });
+      await browserExpect(dialog.getByText(HIDDEN_DEAL_TEXT, { exact: true }).first()).toBeVisible();
+      expect(await dialog.innerText()).not.toContain(deal);
+      expect(await dialog.locator(`a[href="/projects/${dealId}"]`).count()).toBe(0);
+      await browserExpect(dialog.locator(`a[href="/projects/${ordinaryId}"]`)).toBeVisible();
+      await page.screenshot({ path: path.join(evidence, "hidden-bell-390.png"), fullPage: true });
+
+      await page.goto(`${off.base}/team/${admin.id}`);
+      await browserExpect(page.getByText("A deal you can't view.", { exact: true })).toBeVisible();
+      expect(await page.locator(`a[href="/projects/${dealId}"]`).count()).toBe(0);
+      const ordinaryLink = page.locator(`a[href="/projects/${ordinaryId}"]`);
+      await browserExpect(ordinaryLink).toBeVisible();
+      expect(await page.locator("main").innerText()).not.toContain(deal);
+      await page.screenshot({ path: path.join(evidence, "hidden-person-390.png"), fullPage: true });
+      await ordinaryLink.click();
+      await browserExpect(page).toHaveURL(new RegExp(`/projects/${ordinaryId}$`));
+      await page.goBack();
+      await browserExpect(page.getByText("A deal you can't view.", { exact: true })).toBeVisible();
+
+      await page.goto(`${off.base}/search`);
+      await page.getByRole("searchbox", { name: "Search" }).fill(deal);
+      await browserExpect(page.getByRole("status")).toContainText("Nothing matches");
+      expect(await page.locator("main").innerText()).not.toContain(dealTask);
+      await page.screenshot({ path: path.join(evidence, "hidden-search-390.png"), fullPage: true });
+
+      await page.goto(`${off.base}/projects/${dealId}`);
+      await browserExpect(page.getByRole("heading", { name: "This project isn't available" })).toBeVisible();
+      expect(await page.locator("main").innerText()).not.toContain(deal);
+      await page.screenshot({ path: path.join(evidence, "hidden-direct-390.png"), fullPage: true });
+
+      await page.goto(`${off.base}/projects/${dealId}/activity`);
+      await browserExpect(page.getByText("This project isn't available.", { exact: false })).toBeVisible();
+      expect(await page.locator("main").innerText()).not.toContain(deal);
+      await page.screenshot({ path: path.join(evidence, "hidden-activity-390.png"), fullPage: true });
+
+      writeFileSync(path.join(evidence, "verification.json"), JSON.stringify({
+        fixture: { dealId, ordinaryId, deactivatedUserId: target.id },
+        viewport: { width: 390, height: 844 },
+        checks: ["hidden bell has no deal link", "person has one neutral deal sentence and visible ordinary link", "ordinary project navigation and Back", "search has no hidden deal result", "direct deal and Activity routes show safe unavailable text"],
+        screenshots: ["hidden-bell-390.png", "hidden-person-390.png", "hidden-search-390.png", "hidden-direct-390.png", "hidden-activity-390.png"],
+      }, null, 2) + "\n");
+    } finally {
+      await browser.close();
     }
   }, 120_000);
 });
