@@ -50,4 +50,3 @@ export async function recordAccess(user: Actor, projectId: string, what: string,
   }
 }
 export const taskAccess = (user: Actor, projectId: string, opts: { write?: boolean; tx?: Tx } = {}) => recordAccess(user, projectId, "Task", opts);
-

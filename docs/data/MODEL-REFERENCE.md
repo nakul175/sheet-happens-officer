@@ -649,4 +649,3 @@ CREATE UNIQUE INDEX "Project_live_vertical_name_idx" ON "Project"("workspaceId",
 CREATE FUNCTION holy_sheet_task_move() RETURNS trigger LANGUAGE plpgsql AS $$
 CREATE TRIGGER holy_sheet_task_move AFTER UPDATE OF "projectId" ON "Task"
 ```
-
