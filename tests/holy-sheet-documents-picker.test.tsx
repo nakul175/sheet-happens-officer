@@ -39,3 +39,28 @@ it("keeps a checked read-only source from opening a mutation picker", async () =
   expect(names).not.toContain("Link existing page");
   expect(host.querySelector('iframe[title="Choose Holy Sheet page"]')).toBeNull();
 });
+it("rejects picker messages with the wrong origin, frame, channel, or subject", async () => {
+  const fetchMock = vi.fn(async (...args: Parameters<typeof fetch>) => {
+    void args;
+    return new Response(JSON.stringify(context), { status: 200 });
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  await renderDocuments();
+  const button = [...host.querySelectorAll("button")].find(b => b.textContent === "Link existing page")!;
+  await act(async () => { button.click(); });
+  const frame = host.querySelector<HTMLIFrameElement>('iframe[title="Choose Holy Sheet page"]')!;
+  const channel = new URLSearchParams(new URL(frame.src).hash.slice(1)).get("hs-channel");
+  const selected = { type: "hs-document-selected", channel, subject: context.subject, pageId: "11111111-1111-4111-8111-111111111111", spaceId: "test-space", created: false };
+  const send = async (origin: string, source: MessageEventSource | null, data: object) => {
+    await act(async () => { window.dispatchEvent(new MessageEvent("message", { origin, source, data })); });
+  };
+  await send("https://attacker.example", frame.contentWindow, selected);
+  await send(context.origin, window, selected);
+  await send(context.origin, frame.contentWindow, { ...selected, channel: crypto.randomUUID() });
+  await send(context.origin, frame.contentWindow, { ...selected, subject: "other-subject" });
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+  expect(host.textContent).not.toContain("waiting to be linked");
+  await send(context.origin, frame.contentWindow, selected);
+  expect(fetchMock).toHaveBeenCalledTimes(2);
+  expect(fetchMock.mock.calls[1]?.[1]).toMatchObject({ method: "POST" });
+});
