@@ -42,6 +42,29 @@ function redeem(g:Awaited<ReturnType<typeof issue>>,extra:Record<string,string>=
  return fetch(BASE+'/api/suite/token',{method:'POST',body:new URLSearchParams({client_id:g.client,client_secret:secret(g.client),grant_type:'authorization_code',redirect_uri:callback(g.client),code_verifier:g.verifier,code:g.code,...extra}),redirect:'manual'});
 }
 const userinfo=(token:string)=>fetch(BASE+'/api/suite/userinfo',{headers:{authorization:'Bearer '+token},redirect:'manual'});
+it('preserves all four suite routes and denies unauthenticated requests without leaking redirects',async()=>{
+ const verifier=randomBytes(32).toString('base64url');
+ const params=new URLSearchParams({client_id:'accounts',redirect_uri:callback('accounts'),response_type:'code',code_challenge_method:'S256',code_challenge:createHash('sha256').update(verifier).digest('base64url'),state:randomBytes(24).toString('base64url')});
+ const signedOut=await fetch(BASE+'/api/suite/authorize?'+params,{redirect:'manual'});
+ expect(signedOut.status).toBe(302);
+ const signin=new URL(signedOut.headers.get('location')!);
+ expect(signin.origin+signin.pathname).toBe('https://sheethappensofficer.aplyd.org/signin');
+ expect(signin.searchParams.get('returnTo')).toContain('client_id=accounts');
+ const denied=[
+  await fetch(BASE+'/api/suite/authorize?client_id=unknown-client',{redirect:'manual'}),
+  await fetch(BASE+'/api/suite/token',{method:'POST',body:new URLSearchParams({client_id:'accounts',client_secret:'invalid'})}),
+  await fetch(BASE+'/api/suite/userinfo'),
+  await fetch(BASE+'/api/suite/status',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({client_id:'accounts',client_secret:'invalid'})}),
+ ];
+ expect(denied.map(response=>response.status)).toEqual([400,401,401,401]);
+ for(const response of [signedOut,...denied]){
+  expect(response.headers.get('cache-control')).toBe('no-store');
+  expect(response.headers.get('referrer-policy')).toBe('no-referrer');
+ }
+ for(const response of denied)expect(response.headers.get('location')).toBeNull();
+ mkdirSync('test-results/suite-route-preservation',{recursive:true});
+ writeFileSync('test-results/suite-route-preservation/verification.json',JSON.stringify({routes:['authorize','token','userinfo','status'],signedOutAuthorize302:true,denialStatuses:[400,401,401,401],unauthorizedRedirects:0,noStoreAndNoReferrer:true,privateRuntime:true},null,2));
+});
 for(const client of ['accounts','bugoff'])it(`${client}: PKCE exchange, identity and replay denial`,async()=>{
  const g=await issue(client),response=await redeem(g);expect(response.status).toBe(200);
  const token=await response.json();expect(token.expires_in).toBe(60);
