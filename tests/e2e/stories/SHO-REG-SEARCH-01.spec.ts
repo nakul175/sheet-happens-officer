@@ -172,6 +172,97 @@ test('SHO-REG-SEARCH-01 partial: Member search excludes foreign and trashed task
   writeFileSync(`${evidenceDir}/verification.json`, JSON.stringify({ fixture, memberId, ownedProject: owned.id, foreignProject: foreign.id, sentinelProject: sentinel.id, ownTask, foreignTask, trashedTask, sentinelTask, unrelatedSentinelUnchanged: true, apiVisibleOwnOnly: true, browserVisibleOwnOnly: true }, null, 2));
 });
 
+test('SHO-REG-SEARCH-01 partial: record types and archive filters agree for Admin and Member', async ({ admin, later, browser }) => {
+  if (!local2691) throw new Error('This search audit case uses only the guarded local test database.');
+  const fixture = randomUUID();
+  const evidenceDir = 'test-results/search-record-types';
+  const query = zz(`search record types ${fixture.slice(0, 8)}`);
+  let projectId = '';
+  let orgId = '';
+  later(async () => {
+    if (!projectId || !orgId) return;
+    const [project, organisation, person] = await Promise.all([
+      admin.api.get(`/api/projects/${projectId}`),
+      admin.api.get(`/api/orgs/${orgId}`),
+      admin.api.get(`/api/team/${identity.id}`),
+    ]);
+    expect(project.status).toBe(200);
+    expect(project.json.project.archived).toBe(true);
+    expect(organisation.status).toBe(200);
+    expect(organisation.json.organisation.archived).toBe(true);
+    expect(person.status).toBe(200);
+    expect(person.json.person.status).toBe('DEACTIVATED');
+    mkdirSync(evidenceDir, { recursive: true });
+    writeFileSync(`${evidenceDir}/cleanup.json`, JSON.stringify({ fixture, projectId, orgId, memberId: identity.id, projectArchived: true, organisationArchived: true, memberDeactivated: true }, null, 2));
+  });
+  const identity = await account(zz('Search record member'), `nakul17+zz-search-records-${fixture}@aplyd.com`);
+  later(async () => {
+    expect((await admin.api.post(`/api/team/${identity.id}/deactivate`, { reassign: 'leaders' })).status).toBe(200);
+    expect((await identity.c.post('/api/auth/signout')).status).toBe(204);
+  });
+  const member = await signInAs(browser, identity.email, PW);
+  later(() => member.ctx.close());
+
+  const project = await newProject(admin, later, { label: `${query} project`, members: [{ who: member, role: 'VIEWER' }] });
+  projectId = project.id;
+  const taskId = await newTask(admin, project.id, { title: `${query} task` });
+  const organisation = await admin.api.post('/api/orgs', { name: `${query} organisation` });
+  expect(organisation.status, JSON.stringify(organisation.json)).toBe(201);
+  orgId = organisation.json.organisation.id as string;
+  later(async () => {
+    const stored = await admin.api.get(`/api/orgs/${orgId}`);
+    if (stored.status === 200 && !stored.json.organisation.archived) {
+      expect((await admin.api.post(`/api/orgs/${orgId}/archive`, { archive: true })).status).toBe(200);
+    }
+  });
+  const contact = await admin.api.post(`/api/orgs/${orgId}/contacts`, { name: `${query} contact` });
+  expect(contact.status, JSON.stringify(contact.json)).toBe(201);
+  const contactId = contact.json.contact.id as string;
+
+  const search = async (who: typeof admin, archived = false, ideasOnly = false) => {
+    const flags = `${archived ? '&archived=true' : ''}${ideasOnly ? '&idea=true' : ''}`;
+    const response = await who.api.get(`/api/search?q=${encodeURIComponent(query)}${flags}`);
+    expect(response.status, JSON.stringify(response.json)).toBe(200);
+    return response.json as { projects: { id: string }[]; tasks: { id: string }[]; organisations: { id: string }[]; contacts: { id: string }[] };
+  };
+  for (const who of [admin, member]) {
+    const active = await search(who);
+    expect(active.projects.map(row => row.id)).toContain(project.id);
+    expect(active.tasks.map(row => row.id)).toContain(taskId);
+    expect(active.organisations.map(row => row.id)).toContain(orgId);
+    expect(active.contacts.map(row => row.id)).toContain(contactId);
+    const ideas = await search(who, false, true);
+    expect(ideas.tasks).toEqual([]);
+    expect(ideas.organisations).toEqual([]);
+    expect(ideas.contacts).toEqual([]);
+  }
+
+  await member.page.goto('/search');
+  await member.page.getByRole('searchbox', { name: 'Search' }).fill(query);
+  await expect(member.page.locator(`a.item[href="/projects/${project.id}"]`)).toBeVisible();
+  await expect(member.page.locator(`a.item[href="/projects/${project.id}?task=${taskId}"]`)).toBeVisible();
+  await expect(member.page.locator(`a.item[href="/accounts/${orgId}"]`).first()).toBeVisible();
+
+  expect((await admin.api.post(`/api/projects/${project.id}/archive`)).status).toBe(200);
+  expect((await admin.api.post(`/api/orgs/${orgId}/archive`, { archive: true })).status).toBe(200);
+  for (const who of [admin, member]) {
+    const ordinary = await search(who);
+    expect(ordinary.projects).toEqual([]);
+    expect(ordinary.tasks).toEqual([]);
+    expect(ordinary.organisations).toEqual([]);
+    expect(ordinary.contacts).toEqual([]);
+    const archived = await search(who, true);
+    expect(archived.projects.map(row => row.id)).toContain(project.id);
+    expect(archived.tasks.map(row => row.id)).toContain(taskId);
+    expect(archived.organisations.map(row => row.id)).toContain(orgId);
+    expect(archived.contacts.map(row => row.id)).toContain(contactId);
+  }
+  await member.page.getByRole('checkbox', { name: 'Include archived' }).check();
+  await expect(member.page.locator(`a.item[href="/projects/${project.id}?task=${taskId}"]`)).toBeVisible();
+  mkdirSync(evidenceDir, { recursive: true });
+  writeFileSync(`${evidenceDir}/verification.json`, JSON.stringify({ fixture, projectId: project.id, taskId, orgId, contactId, adminMemberMatrix: true, archivedMatrix: true, ideasOnlyExcludesCrm: true, browserMatchesApi: true }, null, 2));
+});
+
 test('SHO-REG-SEARCH-01 partial: Ideas only matches API and browser task results', async ({ admin, later }) => {
   if (!local2691) throw new Error('This search audit case uses only the guarded local test database.');
   const fixture = randomUUID();
