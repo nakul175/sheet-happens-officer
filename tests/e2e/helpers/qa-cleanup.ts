@@ -11,7 +11,10 @@ type PoolApi = {
 
 export async function restorePoolPerson(api: PoolApi, id: string) {
   const seen = await api.get(`/api/team/${id}`);
-  if (seen.status !== 200) { reportRestoreFailure(seen.status); return; }
+  if (seen.status !== 200) {
+    reportRestoreFailure(seen.status);
+    throw new Error("Pool person restoration could not verify the person");
+  }
   if (seen.json.person?.status === "DEACTIVATED") {
     const back = await api.post(`/api/team/${id}/reactivate`);
     if (back.status !== 200) throw new Error("Pool person reactivation failed");
@@ -24,8 +27,13 @@ export async function restorePoolPerson(api: PoolApi, id: string) {
 
 /** Best effort means continue every cleanup; a failure must still be visible without printing secrets. */
 export async function runCleanup(callbacks: (() => Promise<unknown>)[]) {
+  let failures = 0;
   for (const fn of [...callbacks].reverse()) {
     try { await fn(); }
-    catch { console.warn("[story-cleanup] Cleanup failed; continuing remaining cleanup (details omitted to protect credentials)"); }
+    catch {
+      failures += 1;
+      console.warn("[story-cleanup] Cleanup failed; continuing remaining cleanup (details omitted to protect credentials)");
+    }
   }
+  if (failures) throw new Error(`[story-cleanup] ${failures} cleanup callback${failures === 1 ? "" : "s"} failed (details omitted to protect credentials)`);
 }
