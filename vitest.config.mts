@@ -35,6 +35,7 @@ export default defineConfig({
       "tests/e2e/stories/SHO-REG-AUTH-05.spec.ts", // Playwright verification scanner and replay journey
       "tests/e2e/stories/SHO-REG-SEARCH-01.spec.ts", // Playwright search archived-contact acceptance
       "tests/e2e/stories/SHO-REG-SEARCH-02.spec.ts", // Playwright search input-bound acceptance
+      "tests/e2e/stories/SHO-REG-SEARCH-04.spec.ts", // Playwright Search page and palette parity
       "tests/e2e/stories/SHO-REG-HOME-01.spec.ts", // Playwright Home reconciliation acceptance
       "tests/e2e/stories/SHO-REG-UI-05.spec.ts", // Playwright deep-link and history acceptance
       "tests/e2e/stories/APL-2467.spec.ts",
