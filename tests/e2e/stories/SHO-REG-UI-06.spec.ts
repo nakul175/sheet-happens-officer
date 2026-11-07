@@ -26,7 +26,7 @@ test("SHO-REG-UI-06: phone density survives navigation and reload without clippi
   const project = await newProject(admin, later, { label: "density phone" });
   projectId = project.id;
   const title = zz("density phone task");
-  const created = await admin.api.post(`/api/projects/${project.id}/tasks`, { title, assigneeId: admin.user.id });
+  const created = await admin.api.post(`/api/projects/${project.id}/tasks`, { title, assigneeId: admin.user.id, dueDate: "2030-01-15" });
   expect(created.status, JSON.stringify(created.json)).toBe(201);
 
   const page = admin.page;
