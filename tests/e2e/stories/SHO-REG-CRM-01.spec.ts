@@ -1,8 +1,8 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdirSync, writeFileSync } from 'node:fs';
-import { local2691 } from '../helpers/2691-admin';
+import { local2691, test } from '../helpers/2691-admin';
 import { raw } from '../helpers/jim-http';
-import { test, expect, zz } from './qa';
+import { expect, zz } from './qa';
 
 test('SHO-REG-CRM-01 scoped: organisation create, edit, duplicate, archive Undo and unrelated control', async ({ admin, later }) => {
   if (!local2691) throw new Error('This organisation audit fixture requires the guarded local test database.');
