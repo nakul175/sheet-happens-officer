@@ -10,7 +10,16 @@ for(const [,name,body] of models){
 text+='## Custom SQL inventory\n\nRead definitions in migration order; later ALTER/replacements take precedence. This inventory includes checks, partial indexes, triggers and functions.\n\n';
 for(const dir of fs.readdirSync('prisma/migrations',{withFileTypes:true}).filter(x=>x.isDirectory()).sort((a,b)=>a.name.localeCompare(b.name))){
  const sql=fs.readFileSync(`prisma/migrations/${dir.name}/migration.sql`,'utf8');
- const statements=sql.split('\n').filter(x=>/CREATE (OR REPLACE )?(FUNCTION|TRIGGER|CONSTRAINT TRIGGER)|CREATE UNIQUE INDEX.*WHERE|CHECK\s*\(/i.test(x));
+ const entries=[];let offset=0;
+ for(const line of sql.split('\n')){
+  if(/CREATE (OR REPLACE )?(FUNCTION|TRIGGER|CONSTRAINT TRIGGER)|CHECK\s*\(/i.test(line))entries.push({offset,text:line});
+  offset+=line.length+1;
+ }
+ // Partial indexes may put WHERE on a later line. Keep the complete definition.
+ for(const match of sql.matchAll(/CREATE UNIQUE INDEX[\s\S]*?;/gi)){
+  if(/\bWHERE\b/i.test(match[0]))entries.push({offset:match.index,text:match[0]});
+ }
+ const statements=entries.sort((a,b)=>a.offset-b.offset).map(entry=>entry.text);
  if(statements.length)text+=`### ${dir.name}\n\n\`\`\`sql\n${statements.join('\n')}\n\`\`\`\n\n`;
 }
 const file='docs/data/MODEL-REFERENCE.md';

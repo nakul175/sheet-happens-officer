@@ -600,6 +600,10 @@ Read definitions in migration order; later ALTER/replacements take precedence. T
 ### 20261017000000_init
 
 ```sql
+CREATE UNIQUE INDEX "ProjectMember_one_leader_per_project"
+  ON "ProjectMember" ("projectId") WHERE "role" = 'LEADER';
+CREATE UNIQUE INDEX "Section_one_done_per_project"
+  ON "Section" ("projectId") WHERE "isDone" = true;
 CREATE FUNCTION "enforce_max_sections"() RETURNS trigger AS $$
 CREATE TRIGGER "Section_max_8"
 CREATE FUNCTION "enforce_task_section_in_project"() RETURNS trigger AS $$

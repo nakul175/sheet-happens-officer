@@ -15,3 +15,8 @@ test('3054 reconciliation keeps the approved nullable expansion unchanged',()=>{
  assert.match(schema,/submissionDeadlineAt\s+DateTime\? @db.Timestamptz\(3\)/);
  assert.match(schema,/submissionDeadlineZone\s+String\?/);
 });
+test('maintainer data reference retains multiline project and section partial indexes',()=>{
+ const reference=readFileSync('docs/data/MODEL-REFERENCE.md','utf8');
+ assert.match(reference,/CREATE UNIQUE INDEX "ProjectMember_one_leader_per_project"\s+ON "ProjectMember" \("projectId"\) WHERE "role" = 'LEADER';/);
+ assert.match(reference,/CREATE UNIQUE INDEX "Section_one_done_per_project"\s+ON "Section" \("projectId"\) WHERE "isDone" = true;/);
+});
