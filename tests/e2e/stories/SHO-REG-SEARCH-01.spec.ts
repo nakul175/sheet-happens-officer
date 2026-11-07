@@ -5,6 +5,36 @@ import { account, PW } from '../local-api';
 import { newProject, newTask } from '../helpers/migration-2731';
 import { expect, signInAs, zz } from './qa';
 
+test('SHO-REG-SEARCH-03: default search works without pg_trgm or ranked payload', async ({ admin, later }) => {
+  if (!local2691) throw new Error('This activation audit uses only the guarded local test database.');
+  const evidenceDir = 'test-results/search-stage-a-off';
+  let projectId = '';
+  later(async () => {
+    if (!projectId) return;
+    const stored = await admin.api.get(`/api/projects/${projectId}`);
+    expect(stored.status).toBe(200);
+    expect(stored.json.project.archived).toBe(true);
+    mkdirSync(evidenceDir, { recursive: true });
+    writeFileSync(`${evidenceDir}/cleanup.json`, JSON.stringify({ projectId, projectArchived: true }, null, 2));
+  });
+  const { db } = await import('../../../src/lib/db');
+  const extensions = await db.$queryRaw<{ count: bigint }[]>`SELECT count(*)::bigint AS count FROM pg_extension WHERE extname = 'pg_trgm'`;
+  expect(Number(extensions[0]?.count)).toBe(0);
+  const project = await newProject(admin, later, { label: 'Search Stage A disabled' });
+  projectId = project.id;
+  const query = zz(`stage a off ${randomUUID().slice(0, 8)}`);
+  const taskId = await newTask(admin, project.id, { title: query });
+  const response = await admin.api.get(`/api/search?q=${encodeURIComponent(query)}`);
+  expect(response.status, JSON.stringify(response.json)).toBe(200);
+  expect((response.json.tasks as { id: string }[]).map((task) => task.id)).toContain(taskId);
+  expect(response.json).not.toHaveProperty('hits');
+  await admin.page.goto('/search');
+  await admin.page.getByRole('searchbox', { name: 'Search' }).fill(query);
+  await expect(admin.page.locator(`a.item[href="/projects/${project.id}?task=${taskId}"]`)).toBeVisible();
+  mkdirSync(evidenceDir, { recursive: true });
+  writeFileSync(`${evidenceDir}/verification.json`, JSON.stringify({ projectId: project.id, taskId, pgTrgmInstalled: false, legacyApiPayload: true, browserResult: true }, null, 2));
+});
+
 test('SHO-REG-SEARCH-01 partial: archived organisation contacts follow Include archived', async ({ admin, later }) => {
   if (!local2691) throw new Error('This search audit case uses only the guarded local test database.');
   const fixture = randomUUID();
