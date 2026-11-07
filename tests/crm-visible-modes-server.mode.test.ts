@@ -922,4 +922,113 @@ describe("CRM_VISIBLE modes are tested against a real server per mode", () => {
       if (allServer) killGroup(allServer.pid);
     }
   }, 120_000);
+
+  it("audit: a successful deactivation keeps one fixture's hidden deal out of later reads", async () => {
+    const open = running.get("on")!;
+    const off = running.get("off")!;
+    const admins = running.get("admins")!;
+    const suffix = `deactivated-${tag}`;
+    const deal = `ZZ-TEST Private deal ${suffix}`;
+    const ordinary = `ZZ-TEST Ordinary project ${suffix}`;
+    const dealTask = `ZZ-TEST Private task ${suffix}`;
+    const ordinaryTask = `ZZ-TEST Ordinary task ${suffix}`;
+    const adminEmail = `nakul17+zz-${runId}-removed-admin@aplyd.com`;
+    const targetEmail = `nakul17+zz-${runId}-removed-editor@aplyd.com`;
+    const observerEmail = `nakul17+zz-${runId}-removed-observer@aplyd.com`;
+    seed.emails.push(adminEmail, targetEmail, observerEmail);
+    const admin = await signIn(open, `ZZ-TEST admin ${suffix}`, adminEmail);
+    const target = await signIn(open, `ZZ-TEST editor ${suffix}`, targetEmail);
+    const observer = await signIn(open, `ZZ-TEST observer ${suffix}`, observerEmail);
+    seed.userIds.push(admin.id, target.id, observer.id);
+    await promoteToAdmin(open, admin.id);
+
+    const pipes = await call(open.base, admin.cookie, "GET", "/api/deals/pipelines");
+    expect(pipes.status, pipes.text).toBe(200);
+    const pipe = (pipes.json?.pipelines as { id: string; key: string }[]).find((p) => p.key === "DEAL_PROACTIVE");
+    expect(pipe?.id).toBeTruthy();
+    const org = await call(open.base, admin.cookie, "POST", "/api/orgs", { name: `ZZ-TEST Buyer ${suffix}` });
+    expect(org.status, org.text).toBe(201);
+    const organisationId = (org.json?.organisation as { id: string }).id;
+    seed.orgIds.push(organisationId);
+    const createdDeal = await call(open.base, admin.cookie, "POST", "/api/deals", {
+      name: deal, organisationId, pipelineId: pipe!.id, leaderId: admin.id, whyPursue: tag,
+      nextStep: { title: `ZZ-TEST initial step ${suffix}`, dueDate: istDate(4) },
+    });
+    expect(createdDeal.status, createdDeal.text).toBe(201);
+    const dealId = (createdDeal.json?.deal as { id: string }).id;
+    seed.projectIds.push(dealId);
+    const createdOrdinary = await call(open.base, admin.cookie, "POST", "/api/projects", { name: ordinary, leaderId: admin.id });
+    expect(createdOrdinary.status, createdOrdinary.text).toBe(201);
+    const ordinaryId = (createdOrdinary.json?.project as { id: string }).id;
+    seed.projectIds.push(ordinaryId);
+    for (const projectId of [dealId, ordinaryId]) {
+      for (const userId of [target.id, observer.id]) {
+        const joined = await call(open.base, admin.cookie, "POST", `/api/projects/${projectId}/members`, { userId, role: "EDITOR" });
+        expect(joined.status, joined.text).toBe(201);
+      }
+    }
+    for (const [projectId, title] of [[dealId, dealTask], [ordinaryId, ordinaryTask]]) {
+      const task = await call(open.base, admin.cookie, "POST", `/api/projects/${projectId}/tasks`, {
+        title, assigneeId: target.id, dueDate: istDate(2),
+      });
+      expect(task.status, task.text).toBe(201);
+    }
+
+    // The historical deal notice exists before the person is removed. The helper
+    // verifies that every seeded person and project belongs to this local ZZ-TEST run.
+    const fixtureApi = await startCrmModeSeedApi();
+    try {
+      await fixtureApi.replaceNotifications({
+        people: [
+          { ...admin, email: adminEmail }, { ...observer, email: observerEmail },
+        ],
+        projects: [{ id: dealId, name: deal }, { id: ordinaryId, name: ordinary }],
+        notices: [admin.id, observer.id].flatMap((recipientId) => [
+          { recipientId, type: "DEAL_STAGE_CHANGED", projectId: dealId, data: { project: deal, stage: "Proposal" } },
+          { recipientId, type: "ADDED_TO_PROJECT", projectId: ordinaryId, data: { project: ordinary, role: "EDITOR" } },
+        ]),
+      });
+    } finally {
+      await fixtureApi.close();
+    }
+
+    const removed = await call(off.base, admin.cookie, "POST", `/api/team/${target.id}/deactivate`, { reassign: "leaders" });
+    expect(removed.status, removed.text).toBe(200);
+    expect(removed.json).toEqual({ moved: 1, fellBack: [] });
+    expect((await db.user.findUnique({ where: { id: target.id }, select: { deactivatedAt: true } }))?.deactivatedAt).not.toBeNull();
+    expect((await call(open.base, target.cookie, "GET", "/api/my-tasks")).status).toBe(401);
+
+    const readers = [
+      { mode: "on", server: open, who: admin, hidden: false },
+      { mode: "admins", server: admins, who: observer, hidden: true },
+      { mode: "off", server: off, who: admin, hidden: true },
+    ];
+    for (const row of readers) {
+      const label = `post-deactivation CRM_VISIBLE=${row.mode}`;
+      const bell = await call(row.server.base, row.who.cookie, "GET", "/api/notifications");
+      const person = await call(row.server.base, row.who.cookie, "GET", `/api/team/${admin.id}`);
+      const search = await call(row.server.base, row.who.cookie, "GET", `/api/search?q=${encodeURIComponent(deal)}`);
+      const activity = await call(row.server.base, row.who.cookie, "GET", `/api/projects/${dealId}/activity`);
+      const direct = await call(row.server.base, row.who.cookie, "GET", `/api/projects/${dealId}`);
+      const plain = await call(row.server.base, row.who.cookie, "GET", `/api/projects/${ordinaryId}`);
+      expect([bell.status, person.status, search.status, plain.status], label).toEqual([200, 200, 200, 200]);
+      expect(plain.text, `${label} ordinary control`).toContain(ordinary);
+      expect([activity.status, direct.status], label).toEqual(row.hidden ? [404, 404] : [200, 200]);
+      if (row.hidden) {
+        for (const [surface, body] of [["bell", bell.text], ["person", person.text], ["search", search.text], ["activity", activity.text], ["direct", direct.text]]) {
+          expect(body, `${label} ${surface} deal name`).not.toContain(deal);
+          expect(body, `${label} ${surface} deal id`).not.toContain(dealId);
+          expect(body, `${label} ${surface} task title`).not.toContain(dealTask);
+        }
+        expect(person.text, `${label} neutral person notice`).toContain("A deal you can't view.");
+        expect(person.text, `${label} ordinary person project`).toContain(ordinary);
+        expect(bell.text, `${label} safe bell link`).not.toContain(`/projects/${dealId}`);
+        if (row.mode === "off") expect((person.json?.person as { openTasks?: number }).openTasks).toBe(1);
+      } else {
+        expect(bell.text, `${label} visible bell`).toContain(deal);
+        expect(person.text, `${label} visible person`).toContain(deal);
+        expect(direct.text, `${label} visible deal`).toContain(deal);
+      }
+    }
+  }, 120_000);
 });
