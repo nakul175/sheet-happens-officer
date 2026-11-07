@@ -30,6 +30,7 @@ export default defineConfig({
       "tests/e2e/stories/SHO-REG-PROJECTS-05.spec.ts", // Playwright project notes and activity acceptance
       "tests/e2e/stories/SHO-REG-PROJECTS-06.spec.ts", // Playwright saved-view ownership journey
       "tests/e2e/stories/SHO-REG-AUTH-01.spec.ts", // Playwright production-mode cookie journey
+      "tests/e2e/stories/SHO-REG-AUTH-05.spec.ts", // Playwright verification scanner and replay journey
       "tests/e2e/stories/SHO-REG-SEARCH-01.spec.ts", // Playwright search archived-contact acceptance
       "tests/e2e/stories/SHO-REG-SEARCH-02.spec.ts", // Playwright search input-bound acceptance
       "tests/e2e/stories/SHO-REG-HOME-01.spec.ts", // Playwright Home reconciliation acceptance
