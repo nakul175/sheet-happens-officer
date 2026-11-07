@@ -1,7 +1,7 @@
 // Real local HTTP/DB suite flow; redirects are inspected, never followed off-host.
 import { afterAll,beforeAll,expect,it } from 'vitest';
 import { createHash,randomBytes } from 'node:crypto';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { db } from '@/lib/db';
 import { account,BASE,type Account } from './helpers';
 const accounts:Account[]=[];
@@ -66,11 +66,39 @@ it('preserves all four suite routes and denies unauthenticated requests without 
  writeFileSync('test-results/suite-route-preservation/verification.json',JSON.stringify({routes:['authorize','token','userinfo','status'],signedOutAuthorize302:true,denialStatuses:[400,401,401,401],unauthorizedRedirects:0,noStoreAndNoReferrer:true,privateRuntime:true},null,2));
 });
 for(const client of ['accounts','bugoff'])it(`${client}: PKCE exchange, identity and replay denial`,async()=>{
- const g=await issue(client),response=await redeem(g);expect(response.status).toBe(200);
+ const g=await issue(client);
+ const codeHash=createHash('sha256').update(g.code).digest('hex');
+ const pending=await db.suiteGrant.findUniqueOrThrow({where:{codeHash}});
+ expect(pending.clientId).toBe(client);
+ expect(pending.expiresAt.getTime()-pending.createdAt.getTime()).toBeGreaterThan(55_000);
+ expect(pending.expiresAt.getTime()-pending.createdAt.getTime()).toBeLessThan(65_000);
+ const response=await redeem(g);expect(response.status).toBe(200);
  const token=await response.json();expect(token.expires_in).toBe(60);
+ const redeemed=await db.suiteGrant.findUniqueOrThrow({where:{codeHash}});
+ expect(redeemed.accessTokenHash).toBe(createHash('sha256').update(token.access_token).digest('hex'));
+ expect(redeemed.accessExpiresAt!.getTime()-redeemed.redeemedAt!.getTime()).toBe(60_000);
  const info=await userinfo(token.access_token);expect(info.status).toBe(200);const body=await info.json();expect(body.sub).toBe(g.who.id);expect(body.email).toBe(g.who.email);
  if(client==='accounts')expect(body.source_session_id).toBeTypeOf('string');else expect(body.source_session_id).toBeUndefined();
  expect((await redeem(g)).status).toBe(400);
+ const serverLog=readFileSync('server.log','utf8');
+ expect(serverLog).not.toContain(g.code);
+ expect(serverLog).not.toContain(token.access_token);
+ mkdirSync('test-results/suite-valid-flow',{recursive:true});
+ writeFileSync(`test-results/suite-valid-flow/${client}.json`,JSON.stringify({client,codeLifetimeSeconds:60,tokenLifetimeSeconds:60,
+  hashedCredentialsStored:true,identityMatched:true,replayDenied:true,rawCredentialsAbsentFromLocalServerLog:true},null,2));
+});
+it('an expired authorization code cannot be exchanged by its original client',async()=>{
+ const g=await issue('accounts');
+ const codeHash=createHash('sha256').update(g.code).digest('hex');
+ await db.suiteGrant.update({where:{codeHash},data:{expiresAt:new Date(0)}});
+ const response=await redeem(g);
+ expect(response.status).toBe(400);
+ expect(await response.json()).toEqual({error:'invalid_grant'});
+ const stored=await db.suiteGrant.findUniqueOrThrow({where:{codeHash}});
+ expect(stored.redeemedAt).toBeNull();
+ expect(stored.accessTokenHash).toBeNull();
+ mkdirSync('test-results/suite-valid-flow',{recursive:true});
+ writeFileSync('test-results/suite-valid-flow/expired-code.json',JSON.stringify({client:'accounts',expiredCodeDenied:true,storedGrantUnspent:true},null,2));
 });
 it('wrong verifier, callback and client secret do not spend a valid code',async()=>{
  const g=await issue('accounts');
