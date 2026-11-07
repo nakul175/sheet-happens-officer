@@ -56,7 +56,10 @@ test("SHO-REG-TASKS-06 approver deactivation gives the Leader a visible recovery
   const waiting = admin.page.getByRole("region", { name: "Waiting on me" });
   await expect(waiting.getByText(title)).toBeVisible();
   await admin.page.getByRole("button", { name: /^Notifications/ }).click();
-  await expect(admin.page.getByRole("dialog", { name: "Notifications" }).getByText(/you now approve 1 task/)).toBeVisible();
+  const handoffNotice = admin.page.getByRole("dialog", { name: "Notifications" })
+    .locator(`a[href="/projects/${project.id}"]`).filter({ hasText: "you now approve 1 task" });
+  await expect(handoffNotice).toHaveCount(1);
+  await expect(handoffNotice).toBeVisible();
   await admin.page.getByRole("button", { name: /^Notifications/ }).click();
   await waiting.getByRole("button", { name: `Close "${title}"` }).click();
   await expect(waiting.getByText(title)).toHaveCount(0);
