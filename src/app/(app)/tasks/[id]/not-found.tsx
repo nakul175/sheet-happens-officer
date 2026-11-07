@@ -1,4 +1,6 @@
 import Link from "next/link";
+import "../../../globals.css";
+import "../../app.css";
 
 /**
  * APL-2652 AC3. A missing task and a task the caller cannot see render this same page.

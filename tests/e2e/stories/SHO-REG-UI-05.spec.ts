@@ -53,6 +53,9 @@ test('SHO-REG-UI-05: task deep link survives refresh and history, then becomes u
       stylesheetLinks: [...document.querySelectorAll<HTMLLinkElement>('link[rel="stylesheet"]')].map(link => new URL(link.href).pathname),
       loadedStylesheets: document.styleSheets.length,
     }));
+    expect(unavailableStyle.loadedStylesheets).toBeGreaterThan(0);
+    expect(unavailableStyle.bodyMargin).toBe('0px');
+    expect(unavailableStyle.bodyFont).not.toBe('"Times New Roman"');
     mkdirSync(evidenceDir, { recursive: true });
     await tab.screenshot({ path: `${evidenceDir}/deleted-task-unavailable.png`, fullPage: true });
     writeFileSync(`${evidenceDir}/verification.json`, JSON.stringify({ fixture, taskId, projectId: project.id, newTab: true, refresh: true, back: true, forward: true, deletedDocumentStatus: 404, titleHiddenAfterDelete: true, unavailableStyle, cssResponses, sentinelFingerprint, sentinelPreserved: true, privateRuntime: true }, null, 2));
