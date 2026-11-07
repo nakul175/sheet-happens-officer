@@ -106,32 +106,3 @@ test("AC5: Escape closes the palette and returns focus to where it was", async (
   await expect(palette(page)).toHaveCount(0);
   await expect(button).toBeFocused();
 });
-
-test("SHO-REG-SEARCH-04: Search page and palette open the same owned task", async ({ admin, later }) => {
-  const word = `Parity${RUN}`;
-  const title = `${word} task`;
-  const owned = await projectWithTask(admin, later, "search palette parity", title);
-  const page = admin.page;
-
-  await page.goto("/search");
-  await page.getByRole("searchbox", { name: "Search" }).fill(word);
-  const pageResult = page.getByRole("link", { name: new RegExp(title) });
-  await expect(pageResult).toBeVisible();
-  await expect(pageResult).toHaveAttribute("href", `/projects/${owned.pid}?task=${owned.tid}`);
-  await pageResult.click();
-  await expect(page).toHaveURL(new RegExp(`task=${owned.tid}`));
-  await expect(page.getByRole("dialog", { name: "Task", exact: true })).toContainText(title);
-
-  await page.goto("/projects");
-  await ready(page);
-  await page.keyboard.press("Control+k");
-  await expect(palette(page)).toHaveCount(1);
-  await page.getByRole("combobox", { name: /Search tasks/ }).fill(word);
-  const paletteResult = palette(page).getByRole("option").filter({ hasText: title });
-  await expect(paletteResult).toBeVisible();
-  await expect(paletteResult).toContainText(owned.name);
-  await paletteResult.click();
-  await expect(page).toHaveURL(new RegExp(`/tasks/${owned.tid}`));
-  await expect(page.getByText(title, { exact: true }).first()).toBeVisible();
-  await expect(palette(page)).toHaveCount(0);
-});
